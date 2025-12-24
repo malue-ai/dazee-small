@@ -1,0 +1,141 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SlideSpeak API Configuration Schema",
+  "description": "Official SlideSpeak slide-by-slide API specification",
+  "reference": "https://docs.slidespeak.co/basics/api-references/slide-by-slide/",
+  
+  "type": "object",
+  "required": ["template", "slides"],
+  
+  "properties": {
+    "template": {
+      "type": "string",
+      "description": "The name of the template or the ID of a branded template"
+    },
+    "language": {
+      "type": "string",
+      "description": "The language to use in the presentation",
+      "default": "ORIGINAL"
+    },
+    "fetch_images": {
+      "type": "boolean",
+      "description": "Whether to include stock images",
+      "default": true
+    },
+    "verbosity": {
+      "type": "string",
+      "enum": ["concise", "standard", "text-heavy"],
+      "description": "How verbose, or long, the text should be",
+      "default": "standard"
+    },
+    "include_cover": {
+      "type": "boolean",
+      "description": "Whether to include the 'cover' slide (auto-generated)",
+      "default": true
+    },
+    "include_table_of_contents": {
+      "type": "boolean",
+      "description": "Whether to include the 'table of contents' slides",
+      "default": true
+    },
+    "add_speaker_notes": {
+      "type": "boolean",
+      "description": "Whether to add speaker notes to the slides",
+      "default": false
+    },
+    "slides": {
+      "type": "array",
+      "description": "A list of slides, each defined as a dictionary",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/definitions/slide"
+      }
+    }
+  },
+  
+  "definitions": {
+    "slide": {
+      "type": "object",
+      "required": ["title", "item_amount", "content"],
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "The title of the slide"
+        },
+        "layout": {
+          "type": "string",
+          "description": "The layout type for the slide. Must specify either 'layout' or 'layout_name' (mutually exclusive)"
+        },
+        "layout_name": {
+          "type": "string",
+          "description": "Template-specific layout identifier. Can only be used with Branded Templates"
+        },
+        "item_amount": {
+          "type": "integer",
+          "description": "Number of items for the slide (must match the layout constraints)"
+        },
+        "content": {
+          "type": "string",
+          "description": "The content that will be used for the slide"
+        },
+        "images": {
+          "type": "array",
+          "description": "Array of image specifications for the slide. Currently only supports layouts with a single image",
+          "items": {
+            "$ref": "#/definitions/imageRequest"
+          }
+        },
+        "chart": {
+          "type": "object",
+          "description": "Chart configuration object for slides with CHART layout"
+        },
+        "table": {
+          "type": "array",
+          "description": "Tabular data for slides with TABLE layout. Provide an array of rows where the first row becomes the header, and keep item_amount set to 0",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "imageRequest": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["url", "stock", "ai"],
+          "description": "Type of image request"
+        },
+        "data": {
+          "type": "string",
+          "description": "URL for 'url', search keywords for 'stock' or generation prompt for 'ai'"
+        }
+      }
+    }
+  },
+  
+  "api_constraints": {
+    "note": "The item_amount parameter must respect the item range constraints for each layout type",
+    "layout_requirements": {
+      "comparison": {
+        "item_amount": 2,
+        "note": "comparison layout requires exactly 2 items"
+      },
+      "swot": {
+        "item_amount": 4,
+        "note": "swot layout requires exactly 4 items"
+      },
+      "pestel": {
+        "item_amount": 6,
+        "note": "pestel layout requires exactly 6 items"
+      },
+      "thanks": {
+        "item_amount": 0,
+        "note": "thanks layout requires 0 items"
+      }
+    }
+  }
+}

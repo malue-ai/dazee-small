@@ -1,0 +1,273 @@
+# ============================================================
+# Agent V3 路由规则配置
+# ============================================================
+#
+# 此文件定义了当多个能力都能完成同一任务时的选择规则
+# 包括全局规则、任务特定规则、评分权重等
+#
+# 参考文档: docs/v3/02-CAPABILITY-ROUTING.md
+# ============================================================
+
+# ==================== 全局路由规则 ====================
+
+routing_rules:
+  # 默认类型优先级顺序
+  # 数字越小优先级越高
+  default_type_priority:
+    - SKILL:CUSTOM      # 第1优先级: 用户定制Skills
+    - MCP               # 第2优先级: MCP服务
+    - SKILL:PREBUILT    # 第3优先级: 官方Skills
+    - TOOL              # 第4优先级: Tool函数
+    - CODE              # 第5优先级: 代码生成
+  
+  # 评分权重配置
+  weights:
+    explicit_mention: 1000   # 用户明确指定特定工具/Skill
+    keyword_match: 100       # 关键词匹配度 (0-1 × 100)
+    quality_match: 20        # 质量要求匹配
+    type_priority: 5         # 类型优先级加成
+    context_continuity: 15   # 上下文连续性（继续使用同一能力）
+    cost_penalty_time: 10    # 时间成本惩罚
+    cost_penalty_money: 5    # 金钱成本惩罚
+  
+  # 质量匹配规则
+  quality_rules:
+    - condition:
+        keywords: [high quality, professional, business, client-facing, 专业, 业务, 客户]
+      action:
+        filter: "min_quality >= high"
+        boost: 20
+        reason: "High quality requirement detected"
+    
+    - condition:
+        keywords: [quick, draft, simple, fast, 快速, 草稿, 简单]
+      action:
+        filter: "cost.time == fast"
+        boost: 30
+        reason: "Speed over quality"
+    
+    - condition:
+        keywords: [cheap, free, low-cost, 免费, 便宜]
+      action:
+        filter: "cost.money IN [free, low]"
+        boost: 15
+        reason: "Cost-conscious"
+  
+  # 成本优化规则
+  cost_optimization:
+    enabled: true
+    prefer_free: true      # 优先选择免费能力
+    prefer_fast: true      # 优先选择快速能力
+    weight: 10
+
+# ==================== 任务特定路由规则 ====================
+
+task_specific_rules:
+  # PPT生成任务
+  ppt_generation:
+    default_capability: slidespeak-generator
+    description: "PowerPoint presentation generation"
+    
+    routing_logic:
+      - condition:
+          keywords: [professional, business, client, product, 专业, 产品, 客户, 业务, 演示]
+        action:
+          prefer: slidespeak-generator
+          reason: "Professional presentation requires advanced features"
+          boost: 50
+      
+      - condition:
+          keywords: [quick, draft, simple, test, 快速, 草稿, 简单, 测试]
+        action:
+          prefer: pptx
+          reason: "Quick draft needs speed over features"
+          boost: 50
+      
+      - condition:
+          keywords: [Office, 365, Teams, SharePoint, OneDrive]
+        action:
+          prefer: office365:create_presentation
+          reason: "Office ecosystem integration required"
+          boost: 100
+          requires_mcp: office365
+      
+      - condition:
+          keywords: [SlideSpeak, slidespeak]
+        action:
+          prefer: slidespeak-generator
+          reason: "Explicit SlideSpeak mention"
+          boost: 1000
+    
+    fallback: pptx
+    fallback_reason: "Use pre-built pptx as safe fallback"
+  
+  # 数据分析任务
+  data_analysis:
+    default_capability: xlsx
+    description: "Data analysis and spreadsheet operations"
+    
+    routing_logic:
+      - condition:
+          keywords: [complex, custom, advanced, machine learning, 复杂, 自定义, 高级]
+        action:
+          prefer: data_analysis_skill
+          reason: "Complex analysis needs custom logic"
+          boost: 50
+      
+      - condition:
+          keywords: [big data, query, SQL, database, 大数据, 查询]
+        action:
+          prefer: bigquery
+          reason: "Large-scale data query"
+          boost: 50
+      
+      - condition:
+          keywords: [Excel, spreadsheet, chart, 表格, 图表]
+        action:
+          prefer: xlsx
+          reason: "Standard Excel operations"
+          boost: 30
+    
+    fallback: xlsx
+  
+  # 文档生成任务
+  document_creation:
+    default_capability: docx
+    description: "Document creation and editing"
+    
+    routing_logic:
+      - condition:
+          keywords: [technical, code, markdown, API, 技术, 代码]
+        action:
+          prefer: markdown_generator
+          reason: "Technical documentation"
+          boost: 50
+      
+      - condition:
+          keywords: [final, print, deliverable, PDF, 最终, 打印, 交付]
+        action:
+          prefer: pdf
+          reason: "Final deliverable format"
+          boost: 50
+      
+      - condition:
+          keywords: [draft, edit, Word, 草稿, 编辑]
+        action:
+          prefer: docx
+          reason: "Editable document format"
+          boost: 30
+    
+    fallback: docx
+  
+  # 任务规划
+  task_planning:
+    default_capability: planning-task
+    description: "Task planning and project management"
+    
+    routing_logic:
+      - condition:
+          keywords: [plan, task, project, breakdown, 规划, 任务, 项目, 拆解]
+        action:
+          prefer: planning-task
+          reason: "Planning task identified"
+          boost: 100
+    
+    fallback: planning-task
+  
+  # API探索
+  api_exploration:
+    default_capability: code_execution
+    description: "API exploration and investigation"
+    
+    routing_logic:
+      - condition:
+          keywords: [explore, investigate, test, try, new API, 探索, 调查, 测试, 新API]
+        action:
+          prefer: code_execution
+          reason: "Exploration requires flexibility"
+          boost: 100
+    
+    fallback: code_execution
+
+# ==================== 上下文规则 ====================
+
+context_rules:
+  # 连续性规则
+  continuity:
+    enabled: true
+    weight: 15
+    description: "Continue using same capability for iterations/refinements"
+    
+    conditions:
+      - iteration_keywords: [refine, improve, modify, adjust, 优化, 改进, 修改, 调整]
+      - refinement_keywords: [better, more, less, change, 更好, 更多, 更少, 改变]
+  
+  # 能力切换规则
+  switching:
+    allowed: true
+    conditions:
+      - explicit_mention  # 用户明确要求切换
+      - quality_mismatch  # 当前能力质量不满足要求
+      - failure           # 当前能力执行失败
+
+# ==================== 过滤规则 ====================
+
+filtering_rules:
+  # API可用性检查
+  api_availability:
+    enabled: true
+    check_at_runtime: true
+    fallback_on_unavailable: true
+  
+  # 认证检查
+  authentication:
+    enabled: true
+    skip_if_no_auth: true
+  
+  # 约束条件检查
+  constraints:
+    enabled: true
+    strict_mode: false  # false: 软约束，true: 硬约束
+
+# ==================== 调试和监控 ====================
+
+debug:
+  log_routing_decision: true    # 记录路由决策
+  log_score_calculation: true   # 记录评分计算过程
+  log_candidate_list: true      # 记录候选能力列表
+  
+monitoring:
+  track_capability_usage: true  # 跟踪能力使用频率
+  track_success_rate: true      # 跟踪成功率
+  track_execution_time: true    # 跟踪执行时间
+
+# ============================================================
+# 配置说明
+# ============================================================
+#
+# 路由决策流程:
+#   1. 分析用户请求 → 提取关键词和需求
+#   2. 查找候选能力 → 根据capabilities标签匹配
+#   3. 应用过滤规则 → 检查约束条件
+#   4. 计算评分:
+#      Score = base_priority
+#            + explicit_mention × 1000
+#            + keyword_match × 100
+#            + quality_match × 20
+#            + type_priority × 5
+#            + context_continuity × 15
+#            - cost_penalty
+#   5. 选择最高分 → 返回最佳能力
+#
+# 任务特定规则优先级:
+#   - 用户显式指定 (boost: 1000) > 最高
+#   - 任务特定规则 (boost: 50-100) > 高
+#   - 质量匹配规则 (boost: 20-30) > 中
+#   - 类型优先级 (boost: 5) > 低
+#
+# 添加新规则:
+#   1. 在task_specific_rules下添加新任务类型
+#   2. 定义routing_logic和条件
+#   3. 设置合理的boost值
+#   4. 指定fallback能力
+

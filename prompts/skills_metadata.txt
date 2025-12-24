@@ -1,0 +1,127 @@
+# Available Skills
+
+You have access to 6 specialized Skills. Use them when relevant to the user's request:
+
+## Pre-built Skills (Anthropic Official)
+
+These Skills are provided by Anthropic and work automatically:
+
+### Skill: pptx
+**Description**: Create presentations, edit slides, analyze presentation content. Use when working with PowerPoint files or when the user mentions presentations, slides, or PPT files.
+**Provider**: Anthropic
+**Type**: Pre-built (no SKILL.md needed, use directly)
+
+### Skill: xlsx
+**Description**: Create spreadsheets, analyze data, generate reports with charts. Use when working with Excel files or when the user mentions spreadsheets, data analysis, or XLS files.
+**Provider**: Anthropic
+**Type**: Pre-built (no SKILL.md needed, use directly)
+
+### Skill: docx
+**Description**: Create documents, edit content, format text. Use when working with Word files or when the user mentions documents or DOC files.
+**Provider**: Anthropic
+**Type**: Pre-built (no SKILL.md needed, use directly)
+
+### Skill: pdf
+**Description**: Generate formatted PDF documents and reports. Use when the user needs PDF output.
+**Provider**: Anthropic
+**Type**: Pre-built (no SKILL.md needed, use directly)
+
+---
+
+## Custom Skills (User Defined)
+
+These Skills are custom-built for specific workflows:
+
+### Skill: slidespeak-generator 🥇
+**Description**: Generates and validates SlideSpeak API configurations for PROFESSIONAL presentation creation with advanced layout control and rich customization. PREFERRED for business presentations, client-facing decks, and complex slides. Use when the user needs to create PowerPoint presentations, slides, or decks, or mentions PPT, slides, presentations, SlideSpeak, or requests visual content for business/educational purposes.
+**Priority**: High
+**Preferred for**: professional PPT, business presentation, client-facing decks, complex slides, customized presentations
+**Location**: skills/slidespeak-generator/
+**Type**: Custom (read SKILL.md for instructions)
+
+```bash
+# Load this Skill's instructions
+cat skills/slidespeak-generator/SKILL.md
+```
+
+### Skill: planning-task 🥈
+**Description**: Generates structured task plans and todo lists for complex multi-step projects. Use when the user needs to break down work into organized tasks with dependencies, or when creating project plans, checklists, or work breakdowns.
+**Priority**: Medium
+**Preferred for**: project planning, task breakdown, work organization, multi-step tasks
+**Location**: skills/planning-task/
+**Type**: Custom (read SKILL.md for instructions)
+
+```bash
+# Load this Skill's instructions
+cat skills/planning-task/SKILL.md
+```
+
+---
+
+# Skills Usage Guidelines
+
+## For Pre-built Skills (pptx, xlsx, docx, pdf)
+
+These Skills work automatically without needing to read SKILL.md:
+- They have standard workflows built-in
+- Just use them naturally in your tasks
+- Example: 'Create a presentation about AI' will automatically use the pptx Skill
+
+## For Custom Skills (planning-task, slidespeak-generator, etc.)
+
+These require loading their SKILL.md for detailed instructions:
+
+1. **Identify**: Check the Skills list above
+2. **Load**: Use `bash: cat skills/<skill-name>/SKILL.md`
+3. **Follow**: Execute the workflow in SKILL.md
+4. **Access resources**: Load scripts/ and resources/ as directed
+
+**Example workflow**:
+```bash
+# 1. Load Skill instructions
+cat skills/slidespeak-generator/SKILL.md
+
+# 2. Load API schema (if needed)
+cat skills/slidespeak-generator/resources/api_schema.json
+
+# 3. Execute helper script
+python -c "
+exec(open('skills/slidespeak-generator/scripts/config_builder.py').read())
+config = build_slidespeak_config(topic='AI Product', pages=5)
+print(config)
+"
+```
+
+## Runtime Environments vs Skills
+
+**Important**: Bash, Python, Nodejs are NOT Skills.
+- They are runtime environments in the VM
+- Access them via code_execution tool
+- No discovery or loading needed
+
+## Priority and Routing Rules
+
+When multiple Skills can accomplish the same task:
+
+1. **Check explicit mentions**: If user mentions a specific Skill/Tool name, use it
+2. **Apply keyword matching**: Match user keywords with Skill's 'preferred_for' list
+3. **Follow priority order**: High (🥇) > Medium (🥈) > Low (🥉)
+4. **Consider context**: Continue with same Skill for iterations/refinements
+
+**Example: PPT Generation**
+```
+User: "创建产品介绍PPT"
+→ Keywords: 产品介绍 (implies professional/business)
+→ Available: slidespeak-generator (High, preferred_for: 'professional PPT')
+→ Decision: Use slidespeak-generator (priority + keyword match)
+
+User: "快速生成PPT草稿"
+→ Keywords: 快速, 草稿 (implies quick/simple)
+→ Available: pptx (Pre-built, faster and simpler)
+→ Decision: Use pptx (better fit for quick draft)
+```
+
+**Decision Protocol**:
+Use Extended Thinking to evaluate options when multiple Skills are available.
+
+**Remember**: Skills provide expertise, Tools provide execution. Use them together.

@@ -1,0 +1,595 @@
+# ============================================================
+# Agent V3 能力注册表配置
+# ============================================================
+#
+# 此文件定义了Agent可以使用的所有能力（Skills/Tools/MCP/Code）
+# 每个能力的优先级、约束条件、成本等信息都在这里统一管理
+#
+# 参考文档: docs/v3/02-CAPABILITY-ROUTING.md
+# ============================================================
+
+# ============================================================
+# 🆕 能力分类定义（唯一数据源）
+# ============================================================
+# 说明：
+# - 这是抽象的能力分类，LLM 在 Plan 阶段只需要知道这些分类
+# - Router 负责将分类映射到具体工具（见下方 capabilities 定义）
+# - 新增分类后，System Prompt 和 plan_todo Schema 会自动更新
+# ============================================================
+
+# ============================================================
+# 🆕 任务类型 → 能力映射（通用能力推断）
+# ============================================================
+# 说明：
+# - 作为能力推断的「初始值」，适用于所有任务（简单/复杂）
+# - 优先级：
+#   1. 有 Plan → 从 Plan 提取（更精确，Sonnet 分析后的结果）
+#   2. 无 Plan → 从这里推断（首轮任务的初始能力集）
+# - 好处：
+#   - 复杂任务首轮也能筛选工具，不再"传入所有工具"
+#   - 配置即时生效，无需修改代码
+# ============================================================
+
+task_type_mappings:
+  information_query:
+    - web_search
+    - file_operations
+    - task_planning
+  
+  content_generation:
+    - document_creation
+    - ppt_generation
+    - file_operations
+    - code_execution
+    - task_planning
+  
+  data_analysis:
+    - data_analysis
+    - file_operations
+    - code_execution
+    - task_planning
+  
+  code_task:
+    - code_execution
+    - file_operations
+    - task_planning
+  
+  other:
+    - file_operations
+    - code_execution
+    - task_planning
+
+capability_categories:
+  - id: web_search
+    description: "搜索互联网信息"
+    use_when: "需要查找资料、新闻、数据、实时信息"
+    examples: ["搜索市场数据", "查找行业报告", "获取最新新闻"]
+    
+  - id: ppt_generation
+    description: "生成演示文稿"
+    use_when: "需要创建 PowerPoint/Slides"
+    examples: ["制作产品PPT", "生成培训材料", "创建汇报文档"]
+    
+  - id: document_creation
+    description: "生成文档"
+    use_when: "需要创建 Word/PDF 文档"
+    examples: ["撰写报告", "生成合同", "创建说明书"]
+    
+  - id: data_analysis
+    description: "数据处理和分析"
+    use_when: "需要处理 Excel、统计分析、数据可视化"
+    examples: ["分析销售数据", "生成统计报表", "数据清洗"]
+    
+  - id: file_operations
+    description: "文件读写操作"
+    use_when: "需要读取或保存文件"
+    examples: ["读取配置文件", "保存结果", "文件管理"]
+    
+  - id: code_execution
+    description: "执行代码和脚本"
+    use_when: "需要运行Python/Bash脚本、计算逻辑"
+    examples: ["数据转换", "自动化任务", "计算处理"]
+    
+  - id: api_calling
+    description: "调用外部API服务"
+    use_when: "需要与外部服务交互"
+    examples: ["调用渲染服务", "访问第三方API", "云服务集成"]
+    
+  - id: task_planning
+    description: "任务规划和进度管理"
+    use_when: "需要制定计划、追踪进度"
+    examples: ["创建任务计划", "更新步骤状态", "管理待办事项"]
+
+# ============================================================
+# 能力定义（工具/Skills/MCP）
+# ============================================================
+# 说明：
+# - capabilities 字段引用上面的 capability_categories ID
+# - Router 根据 Plan 的 capability 需求匹配这些工具
+# ============================================================
+
+capabilities:
+  # ==================== Pre-built Skills (Anthropic官方) ====================
+  
+  - name: pptx
+    type: SKILL
+    subtype: PREBUILT
+    provider: anthropic
+    capabilities:
+      - ppt_generation
+      - presentation_creation
+      - slide_editing
+    priority: 60
+    cost:
+      time: fast
+      money: free
+    constraints:
+      requires_api: false
+      min_quality: medium
+    metadata:
+      description: "Create presentations, edit slides, analyze presentation content"
+      preferred_for:
+        - quick PPT
+        - draft slides
+        - simple presentation
+      keywords:
+        - 快速
+        - 草稿
+        - 简单
+  
+  - name: xlsx
+    type: SKILL
+    subtype: PREBUILT
+    provider: anthropic
+    capabilities:
+      - data_analysis
+      - spreadsheet_creation
+      - chart_generation
+    priority: 70
+    cost:
+      time: fast
+      money: free
+    constraints:
+      requires_api: false
+      min_quality: medium
+    metadata:
+      description: "Create spreadsheets, analyze data, generate reports with charts"
+      preferred_for:
+        - Excel operations
+        - data analysis
+        - standard spreadsheets
+      keywords:
+        - Excel
+        - 数据分析
+        - 表格
+  
+  - name: docx
+    type: SKILL
+    subtype: PREBUILT
+    provider: anthropic
+    capabilities:
+      - document_creation
+      - text_editing
+      - formatting
+    priority: 70
+    cost:
+      time: fast
+      money: free
+    constraints:
+      requires_api: false
+      min_quality: medium
+    metadata:
+      description: "Create documents, edit content, format text"
+      preferred_for:
+        - Word documents
+        - standard documents
+        - text editing
+      keywords:
+        - Word
+        - 文档
+        - 编辑
+  
+  - name: pdf
+    type: SKILL
+    subtype: PREBUILT
+    provider: anthropic
+    capabilities:
+      - pdf_generation
+      - document_creation
+    priority: 75
+    cost:
+      time: fast
+      money: free
+    constraints:
+      requires_api: false
+      min_quality: high
+    metadata:
+      description: "Generate formatted PDF documents and reports"
+      preferred_for:
+        - PDF output
+        - final deliverables
+        - print documents
+      keywords:
+        - PDF
+        - 打印
+        - 交付
+
+  # ==================== Custom Skills (用户定制) ====================
+  
+  - name: slidespeak-generator
+    type: SKILL
+    subtype: CUSTOM
+    provider: user
+    capabilities:
+      - ppt_generation
+      - presentation_creation
+      - professional_design
+    priority: 85
+    cost:
+      time: medium
+      money: low
+    constraints:
+      requires_api: true
+      api_name: slidespeak
+      min_quality: high
+    metadata:
+      description: "Generates PROFESSIONAL PowerPoint presentations using SlideSpeak API"
+      preferred_for:
+        - professional PPT
+        - business presentation
+        - client-facing decks
+        - complex slides
+        - customized presentations
+      keywords:
+        - 专业
+        - 产品
+        - 客户
+        - 演示
+        - 业务
+  
+  - name: planning-task
+    type: SKILL
+    subtype: CUSTOM
+    provider: user
+    capabilities:
+      - task_planning
+      - project_management
+      - workflow_design
+    priority: 75
+    cost:
+      time: fast
+      money: free
+    constraints:
+      requires_api: false
+      min_quality: medium
+    metadata:
+      description: "Generates structured task plans and todo lists for complex projects"
+      preferred_for:
+        - project planning
+        - task breakdown
+        - work organization
+        - multi-step tasks
+      keywords:
+        - 规划
+        - 任务
+        - 项目
+        - 拆解
+
+  # ==================== Tools ====================
+  
+  - name: file_read
+    type: TOOL
+    subtype: NATIVE
+    provider: system
+    capabilities:
+      - file_operations
+      - content_reading
+    priority: 90
+    cost:
+      time: fast
+      money: free
+    constraints:
+      requires_api: false
+    metadata:
+      description: "Read file contents from the file system"
+    input_schema:
+      type: object
+      properties:
+        path:
+          type: string
+          description: "The file path to read"
+      required:
+        - path
+  
+  - name: web_search
+    type: TOOL
+    subtype: NATIVE
+    provider: system
+    capabilities:
+      - information_retrieval
+      - web_search
+    priority: 85
+    cost:
+      time: medium
+      money: low
+    constraints:
+      requires_api: true
+      requires_network: true
+    metadata:
+      description: "Search the web for information"
+    input_schema:
+      type: object
+      properties:
+        query:
+          type: string
+          description: "The search query string"
+      required:
+        - query
+  
+  - name: exa_search
+    type: TOOL
+    subtype: CUSTOM
+    provider: user
+    
+    # 🎯 工具实现配置 - 支持自动加载
+    implementation:
+      module: "agent_v3.tools.exa_search"
+      class: "ExaSearchTool"
+    
+    capabilities:
+      - information_retrieval
+      - web_search
+      - semantic_search
+      - research
+    priority: 90  # 高优先级，作为增强的搜索工具
+    cost:
+      time: fast
+      money: low
+    constraints:
+      requires_api: true
+      requires_network: true
+      api_name: exa
+    metadata:
+      description: "High-quality semantic search using Exa API with content extraction"
+      keywords:
+        - search
+        - research
+        - semantic
+        - web
+        - papers
+        - news
+        - articles
+      note: "比web_search更强大，支持语义理解和内容提取"
+    # Tool的input_schema定义（用于Claude API）
+    input_schema:
+      type: object
+      properties:
+        query:
+          type: string
+          description: "搜索查询（支持自然语言）"
+        num_results:
+          type: integer
+          description: "返回结果数量（1-10，默认10）"
+          default: 10
+        category:
+          type: string
+          description: "内容分类过滤"
+          enum: ["papers", "news", "github", "company", "personal_site", "pdf", "tweet"]
+        include_text:
+          type: boolean
+          description: "是否包含网页正文内容"
+          default: true
+        start_published_date:
+          type: string
+          description: "开始发布日期（ISO格式，如'2024-01-01'）"
+      required:
+        - query
+  
+  - name: slidespeak_render
+    type: TOOL
+    subtype: CUSTOM
+    provider: user
+    
+    # 🎯 工具实现配置 - 支持自动加载
+    implementation:
+      module: "agent_v3.tools.slidespeak"
+      class: "SlideSpeakTool"
+    
+    capabilities:
+      - ppt_rendering
+      - api_calling
+    priority: 40  # 降低优先级，避免被直接路由
+    cost:
+      time: medium
+      money: low
+    constraints:
+      requires_api: true
+      api_name: slidespeak
+      internal_use_only: true  # 标记为内部工具
+    metadata:
+      description: "Internal tool for SlideSpeak API rendering"
+      note: "⚠️ For internal use by slidespeak-generator Skill only. Do not route directly."
+      used_by: "slidespeak-generator"
+      visibility: "internal"
+    # Tool的input_schema定义（用于Claude API）
+    input_schema:
+      type: object
+      properties:
+        config:
+          type: object
+          description: "Complete SlideSpeak configuration including template, language, title, and slides"
+      required:
+        - config
+
+  # ==================== MCP Servers ====================
+  # (示例配置，根据实际部署的MCP服务器添加)
+  
+  # - name: office365:create_presentation
+  #   type: MCP
+  #   subtype: EXTERNAL
+  #   provider: microsoft
+  #   capabilities:
+  #     - ppt_generation
+  #     - office_integration
+  #     - cloud_storage
+  #   priority: 70
+  #   cost:
+  #     time: medium
+  #     money: low
+  #   constraints:
+  #     requires_api: true
+  #     requires_auth: true
+  #     api_name: office365
+  #   metadata:
+  #     description: "Create presentations in Office 365"
+  #     preferred_for:
+  #       - Office compatibility
+  #       - cloud storage
+  #       - team collaboration
+  #     server_url: "https://office-mcp-server.example.com"
+
+  # ==================== Session Tools (会话级工具) ====================
+  #
+  # 架构关系（参考图示）：
+  #   User Query → Agent → (载入/写入) → Short Memory → (CRUD) → plan_todo Tool
+  #                          ↓
+  #                    LLM 生成 plan.json 和 todo.md
+  #                          ↓
+  #                    调用工具后写入 Memory
+  #
+  # 核心原则：写入 Short Memory 避免多轮 input/output 的 LLM tokens 消耗
+  
+  - name: plan_todo
+    type: TOOL
+    subtype: SESSION
+    provider: system
+    
+    # 工具实现配置
+    implementation:
+      module: "agent_v3.tools.plan_todo_tool"
+      class: "PlanTodoTool"
+    
+    capabilities:
+      - task_planning
+      - progress_tracking
+      - session_memory
+      - plan_crud          # 🆕 Plan CRUD 操作
+      - todo_crud          # 🆕 Todo CRUD 操作
+    priority: 95  # 高优先级，让LLM优先考虑使用
+    cost:
+      time: instant
+      money: free
+    constraints:
+      requires_api: false
+      session_scoped: true  # 会话级别，不持久化
+    metadata:
+      description: |
+        任务规划工具 - 存储到 WorkingMemory（Short Memory）
+        
+        架构特点：
+        - plan.json 和 todo.md 存储在 Short Memory，避免多轮 tokens 消耗
+        - LLM 通过 CRUD 操作管理计划，不需要每次传递完整计划
+        - Agent 在执行前从 Memory 读取计划上下文
+        
+        输出格式：
+        - plan_json: JSON 格式（内部 RVR 调度）
+        - todo_md: Markdown 格式（状态追踪 + 用户展示）
+        - display: 终端友好的即时反馈
+      keywords:
+        - plan
+        - todo
+        - 计划
+        - 任务
+        - 进度
+        - short_memory
+        - crud
+      note: "存储在 WorkingMemory 中，会话结束后自动清除"
+    input_schema:
+      type: object
+      properties:
+        operation:
+          type: string
+          description: "CRUD 操作类型"
+          enum: ["create_plan", "update_step", "get_plan", "add_step", "clear"]
+        data:
+          type: object
+          description: "操作数据"
+          properties:
+            goal:
+              type: string
+              description: "任务目标（create_plan）"
+            steps:
+              type: array
+              description: "步骤列表（create_plan）"
+            step_index:
+              type: integer
+              description: "步骤索引（update_step）"
+            status:
+              type: string
+              description: "步骤状态（update_step）"
+              enum: ["pending", "in_progress", "completed", "failed"]
+            result:
+              type: string
+              description: "步骤结果（update_step）"
+      required:
+        - operation
+
+  # ==================== Code as Tools ====================
+  
+  - name: code_execution
+    type: CODE
+    subtype: DYNAMIC
+    provider: anthropic
+    capabilities:
+      - dynamic_execution
+      - custom_logic
+      - api_exploration
+    priority: 40
+    cost:
+      time: variable
+      money: free
+    constraints:
+      requires_api: false
+    metadata:
+      description: "Execute Python code dynamically via code_execution"
+      preferred_for:
+        - exploration
+        - custom logic
+        - API investigation
+        - one-off tasks
+      keywords:
+        - 探索
+        - 自定义
+        - 动态
+
+# ============================================================
+# 配置说明
+# ============================================================
+#
+# 字段说明:
+#   name: 能力名称（唯一标识符）
+#   type: 能力类型 (SKILL/TOOL/MCP/CODE)
+#   subtype: 子类型 (PREBUILT/CUSTOM/NATIVE/EXTERNAL/DYNAMIC)
+#   provider: 提供者 (anthropic/user/system/external)
+#   capabilities: 能力标签列表（用于匹配用户请求）
+#   priority: 基础优先级 (0-100)
+#   cost:
+#     time: 执行时间 (fast/medium/slow)
+#     money: 成本 (free/low/medium/high)
+#   constraints: 约束条件
+#     requires_api: 是否需要外部API
+#     api_name: API名称
+#     requires_auth: 是否需要认证
+#     min_quality: 最低质量要求 (low/medium/high)
+#   metadata: 扩展信息
+#     description: 描述
+#     preferred_for: 优先使用场景
+#     keywords: 关键词列表
+#
+# 添加新能力:
+#   1. 复制上面的模板
+#   2. 修改name和capabilities
+#   3. 调整priority（参考其他同类能力）
+#   4. 填写metadata.preferred_for和keywords
+#   5. 保存后重启Agent
+

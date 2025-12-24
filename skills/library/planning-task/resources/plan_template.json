@@ -1,0 +1,28 @@
+{
+  "plan_id": "plan_XXXXXXXX",
+  "user_intent": "用户意图描述",
+  "tasks": {
+    "task_001": {
+      "id": "task_001",
+      "description": "任务描述（使用动词开头）",
+      "status": "pending",
+      "dependencies": [],
+      "result": null,
+      "created_at": "2025-01-20T10:00:00",
+      "updated_at": "2025-01-20T10:00:00",
+      "metadata": {}
+    }
+  },
+  "task_order": ["task_001"],
+  "metadata": {
+    "total_tasks": 1,
+    "completed": 0,
+    "in_progress": 0,
+    "failed": 0,
+    "progress": 0.0,
+    "created_at": "2025-01-20T10:00:00"
+  },
+  "created_at": "2025-01-20T10:00:00"
+}
+
+
