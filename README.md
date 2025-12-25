@@ -1,10 +1,10 @@
 # Zenflux Agent - Claude-Powered Intelligent Agent Framework
 
-> 基于 Claude 原生能力的智能体框架，支持 RVR（Read-Validate-Reflect）机制和流式输出
+> 基于 Claude 原生能力的智能体框架，支持 loop RVR（React-Validatation-Reflection）机制和流式输出
 
 ## 🎯 项目概述
 
-Zenflux Agent 是一个基于 Claude Sonnet 4.5 构建的智能体框架，充分利用 Claude 的原生能力：
+Zenflux Agent 是一个基于 Claude Sonnet/Haiku 4.5 构建的智能体框架，充分利用 Claude 的原生能力：
 
 - **Extended Thinking**: 深度推理能力
 - **Tool Use**: 5种工具调用方式（Direct, Code Execution, Programmatic, Streaming, Tool Search）
@@ -183,8 +183,11 @@ MIT License
 
 ## 👥 作者
 
-- **刘毅** (ironliuyi)
+- **刘屹** (ironliuyi)
 - Email: liuyi@zenflux.cn
+- 
+- **汪康成** 
+- Email: wangkangcheng@zenflux.cn
 
 ---
 
