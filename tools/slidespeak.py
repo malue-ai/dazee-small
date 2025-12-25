@@ -10,7 +10,7 @@ import aiohttp
 import asyncio
 from typing import Dict, Any, Optional
 from pathlib import Path
-# from agent_v3.tools.base import BaseTool
+# from tools.base import BaseTool
 
 
 class SlideSpeakTool:
@@ -53,33 +53,102 @@ class SlideSpeakTool:
     
     @property
     def parameters(self) -> Dict[str, Any]:
+        """
+        工具参数定义（符合 SlideSpeak API 官方规范）
+        参考：https://docs.slidespeak.co/basics/api-references/slide-by-slide/
+        """
         return {
             "type": "object",
             "properties": {
                 "config": {
                     "type": "object",
-                    "description": "完整的SlideSpeak配置，包含template、language、slides等字段",
+                    "description": "完整的SlideSpeak配置。参考：https://docs.slidespeak.co/basics/api-references/slide-by-slide/",
                     "properties": {
-                        "template": {"type": "string", "description": "模板名称，如'DEFAULT'"},
-                        "language": {"type": "string", "description": "语言，如'CHINESE'或'ENGLISH'"},
+                        "template": {
+                            "type": "string",
+                            "description": "模板名称，如'DEFAULT'"
+                        },
+                        "language": {
+                            "type": "string",
+                            "description": "语言代码，如'CHINESE'或'ENGLISH'。默认：'ORIGINAL'"
+                        },
+                        "fetch_images": {
+                            "type": "boolean",
+                            "description": "是否包含库存图片。默认：true"
+                        },
+                        "verbosity": {
+                            "type": "string",
+                            "enum": ["concise", "standard", "text-heavy"],
+                            "description": "文本详细程度。默认：'standard'"
+                        },
+                        "include_cover": {
+                            "type": "boolean",
+                            "description": "是否包含封面。默认：true"
+                        },
+                        "include_table_of_contents": {
+                            "type": "boolean",
+                            "description": "是否包含目录。默认：true"
+                        },
                         "slides": {
                             "type": "array",
-                            "description": "幻灯片配置数组",
+                            "description": "幻灯片配置数组，每个slide必须包含layout、title、item_amount和content",
                             "items": {
                                 "type": "object",
                                 "properties": {
-                                    "title": {"type": "string"},
-                                    "layout": {"type": "string"},
-                                    "item_amount": {"type": "integer"},
-                                    "content": {"type": "string"},
-                                    "images": {"type": "array", "description": "可选，图片配置"},
-                                    "chart": {"type": "object", "description": "可选，图表配置"},
-                                    "table": {"type": "array", "description": "可选，表格数据"}
-                                }
+                                    "title": {
+                                        "type": "string",
+                                        "description": "幻灯片标题（简洁，8-15字）"
+                                    },
+                                    "layout": {
+                                        "type": "string",
+                                        "enum": ["ITEMS", "BIG_NUMBER", "COMPARISON", "TIMELINE", "TABLE", "CHART", "SWOT", "PESTEL", "THANKS"],
+                                        "description": "布局类型：ITEMS(列表3-6项)|BIG_NUMBER(指标1-4项)|COMPARISON(对比2项)|TIMELINE(时间线3-6项)|TABLE(表格0项)|CHART(图表)|SWOT(4项)|PESTEL(6项)|THANKS(0项)"
+                                    },
+                                    "item_amount": {
+                                        "type": "integer",
+                                        "description": "项目数量。严格遵守：ITEMS(3-6)|BIG_NUMBER(1-4)|COMPARISON(2)|TIMELINE(3-6)|SWOT(4)|PESTEL(6)|TABLE/THANKS(0)"
+                                    },
+                                    "content": {
+                                        "type": "string",
+                                        "description": "幻灯片内容。格式：每个要点用句号分隔，每项1-2句话，保持简洁"
+                                    },
+                                    "images": {
+                                        "type": "array",
+                                        "description": "可选：图片配置（目前仅支持单图）",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "type": {
+                                                    "type": "string",
+                                                    "enum": ["stock", "url", "ai"],
+                                                    "description": "图片来源"
+                                                },
+                                                "data": {
+                                                    "type": "string",
+                                                    "description": "stock=英文关键词|url=链接|ai=提示"
+                                                }
+                                            },
+                                            "required": ["type", "data"]
+                                        }
+                                    },
+                                    "chart": {
+                                        "type": "object",
+                                        "description": "可选：图表配置（仅CHART布局）"
+                                    },
+                                    "table": {
+                                        "type": "array",
+                                        "description": "可选：表格数据（仅TABLE布局，二维数组，第一行为表头）",
+                                        "items": {
+                                            "type": "array",
+                                            "items": {"type": "string"}
+                                        }
+                                    }
+                                },
+                                "required": ["title", "layout", "item_amount", "content"]
                             }
                         }
                     },
-                    "required": ["template", "language", "slides"]
+                    "required": ["template", "slides"]
                 },
                 "save_dir": {
                     "type": "string",

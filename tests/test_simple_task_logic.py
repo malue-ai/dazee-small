@@ -7,7 +7,7 @@ import os
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from agent_v3.core.capability_registry import create_capability_registry
+from core.capability_registry import create_capability_registry
 
 
 def test_capability_inference_logic():

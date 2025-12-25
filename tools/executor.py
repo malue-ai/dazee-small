@@ -12,7 +12,7 @@
 1. 在capabilities.yaml中添加工具配置：
    - name: my_tool
      implementation:
-       module: "agent_v3.tools.my_tool"
+       module: "tools.my_tool"
        class: "MyTool"
 2. 实现工具类继承BaseTool
 3. 无需修改此文件 - 工具会自动加载！
@@ -27,7 +27,7 @@ from typing import Dict, Any, Optional, List, Callable
 from importlib import import_module
 import asyncio
 
-from agent_v3.core.capability_registry import (
+from core.capability_registry import (
     CapabilityRegistry,
     CapabilityType,
     Capability,
@@ -46,7 +46,7 @@ class ToolExecutor:
     # ⚠️ 已废弃 - 仅用于向后兼容
     # 推荐：在capabilities.yaml中使用implementation字段配置
     TOOL_CLASS_MAPPING = {
-        "slidespeak_render": ("agent_v3.tools.slidespeak", "SlideSpeakTool"),
+        "slidespeak_render": ("tools.slidespeak", "SlideSpeakTool"),
         # 添加更多工具映射...（不推荐）
     }
     

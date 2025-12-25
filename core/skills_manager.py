@@ -49,25 +49,34 @@ class SkillsManager:
     管理Skills的发现、加载和元数据
     """
     
-    def __init__(self, skills_dir: str = None):
+    def __init__(self, skills_dir: str = None, verbose: bool = False):
         """
         初始化Skills管理器
         
         Args:
             skills_dir: Skills目录路径
+            verbose: 是否输出详细日志
         """
+        self.verbose = verbose
         self.skills_dir = Path(skills_dir) if skills_dir else self._default_skills_dir()
         self.skills: Dict[str, SkillInfo] = {}
         self._scan_skills()
     
     def _default_skills_dir(self) -> Path:
-        """获取默认Skills目录"""
-        return Path(__file__).parent.parent / "skills" / "library"
+        """获取默认Skills目录（使用绝对路径确保可靠性）"""
+        # 获取项目根目录（main.py 所在目录）
+        project_root = Path(__file__).parent.parent
+        skills_dir = project_root / "skills" / "library"
+        
+        if self.verbose:
+            print(f"📂 Scanning Custom Skills directory: {skills_dir.absolute()}")
+        
+        return skills_dir
     
     def _scan_skills(self):
         """扫描Skills目录，加载Level 1 metadata"""
         if not self.skills_dir.exists():
-            print(f"⚠️ Warning: Skills directory not found: {self.skills_dir}")
+            print(f"⚠️ Skills加载失败: Skills directory not found: {self.skills_dir.absolute()}")
             return
         
         for skill_dir in self.skills_dir.iterdir():

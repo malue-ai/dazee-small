@@ -16,7 +16,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from agent_v3 import create_simple_agent
+from  import create_simple_agent
 
 
 async def test_multi_turn_basic():

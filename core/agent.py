@@ -11,7 +11,7 @@ SimpleAgent - V3.6 核心Agent
 
 架构文档：
 - docs/v3/00-ARCHITECTURE-OVERVIEW.md
-- agent_v3/prompts/MEMORY_PROTOCOL.md
+- /prompts/MEMORY_PROTOCOL.md
 """
 
 import os
@@ -21,7 +21,7 @@ from datetime import datetime
 from pathlib import Path
 
 # LLM Service
-from agent_v3.core.llm_service import (
+from core.llm_service import (
     create_claude_service,
     Message,
     ToolType,
@@ -29,36 +29,36 @@ from agent_v3.core.llm_service import (
 )
 
 # 能力路由
-from agent_v3.core.capability_registry import (
+from core.capability_registry import (
     CapabilityRegistry,
     create_capability_registry
 )
-from agent_v3.core.capability_router import (
+from core.capability_router import (
     CapabilityRouter,
     create_capability_router,
     extract_keywords
 )
 
 # 记忆管理
-from agent_v3.core.memory import (
+from core.memory import (
     MemoryManager,
     create_memory_manager
 )
 
 # Skills管理
-from agent_v3.core.skills_manager import (
+from core.skills_manager import (
     SkillsManager,
     create_skills_manager
 )
 
 # 工具执行
-from agent_v3.tools.executor import (
+from tools.executor import (
     ToolExecutor,
     create_tool_executor
 )
 
 # 系统提示词
-from agent_v3.prompts.universal_agent_prompt import get_universal_agent_prompt
+from prompts.universal_agent_prompt import get_universal_agent_prompt
 
 
 class SimpleAgent:
@@ -181,7 +181,7 @@ class SimpleAgent:
         # 6. Plan/Todo 工具（会话级短期记忆）
         # 🆕 关键：将 WorkingMemory 和 Registry 传给工具，实现动态 Schema
         # User Query → Agent → 载入/写入 → Short Memory → CRUD → plan_todo Tool
-        from agent_v3.tools.plan_todo_tool import create_plan_todo_tool
+        from tools.plan_todo_tool import create_plan_todo_tool
         self.plan_todo_tool = create_plan_todo_tool(
             memory=self.memory.working,
             registry=self.capability_registry  # 🆕 传入 Registry
@@ -190,7 +190,7 @@ class SimpleAgent:
             print(f"✅ PlanTodoTool initialized (integrated with WorkingMemory + dynamic schema)")
         
         # 🆕 7. InvocationSelector - 调用方式选择器
-        from agent_v3.core.invocation_selector import create_invocation_selector
+        from core.invocation_selector import create_invocation_selector
         total_tools = len(self.capability_registry.capabilities)
         self.invocation_selector = create_invocation_selector(
             enable_tool_search=(total_tools > 30),  # 工具数量>30时启用
@@ -750,7 +750,7 @@ class SimpleAgent:
         # ===== 2. 意图识别（Haiku - 快速分类）=====
         yield self._create_event("status", {"message": "🎯 分析任务意图..."})
         
-        from agent_v3.prompts.intent_recognition_prompt import get_intent_recognition_prompt
+        from prompts.intent_recognition_prompt import get_intent_recognition_prompt
         
         intent_response: LLMResponse = self.intent_llm.create_message(
             messages=[Message(role="user", content=user_input)],
@@ -789,11 +789,15 @@ class SimpleAgent:
             )
         
         # Router 筛选工具
-        from agent_v3.core.capability_router import select_tools_for_capabilities
+        from core.capability_router import select_tools_for_capabilities
         selected_tools = select_tools_for_capabilities(
             self.capability_router,
             required_capabilities=required_capabilities,
-            context={"plan": plan, "task_type": intent_analysis['task_type']}
+            context={
+                "plan": plan, 
+                "task_type": intent_analysis['task_type'],
+                "available_apis": ["slidespeak"]  # 🆕 声明可用的API
+            }
         )
         
         # InvocationSelector 选择调用方式
@@ -822,18 +826,54 @@ class SimpleAgent:
                 "max_turns": self.max_turns
             })
             
-            # 准备工具配置
-            tools_for_llm = [t.name for t in selected_tools]
-            for native_tool in self._tools:
-                if native_tool not in tools_for_llm:
-                    tools_for_llm.append(native_tool)
+            # 🆕 准备工具列表（与 run() 方法保持一致）
+            # 第一步：收集工具名
+            tool_names = [t.name for t in selected_tools]
             
+            # 第二步：确保包含原生工具（bash, text_editor, web_search）
+            for native_tool in self._tools:
+                # ToolType 枚举需要转换为字符串
+                native_tool_name = native_tool.value if isinstance(native_tool, ToolType) else native_tool
+                if native_tool_name not in tool_names:
+                    tool_names.append(native_tool_name)
+            
+            # 第三步：构建完整工具 schema（用于传给 LLM）
+            tools_for_llm = []
+            for tool_name in tool_names:
+                # 检查是否是 Claude 原生工具
+                if tool_name in ["bash", "text_editor", "web_search", "computer", "memory"]:
+                    # 原生工具：直接使用字符串，llm_service 会处理
+                    tools_for_llm.append(tool_name)
+                else:
+                    # 自定义工具：需要从 capability_registry 获取完整 schema
+                    capability = self.capability_registry.get(tool_name)
+                    if capability:
+                        # ⚠️ 只有 TOOL 类型的能力才能作为 Claude API 工具
+                        if capability.type.value != "TOOL":
+                            continue
+                        
+                        # 检查是否有有效的 input_schema
+                        if not capability.input_schema:
+                            continue
+                        
+                        # Capability 对象转换为字典格式
+                        capability_dict = {
+                            "name": capability.name,
+                            "type": capability.type.value,
+                            "provider": capability.provider,
+                            "metadata": capability.metadata,
+                            "input_schema": capability.input_schema
+                        }
+                        # 使用 llm.convert_to_claude_tool() 转换为 Claude API 格式
+                        tool_schema = self.llm.convert_to_claude_tool(capability_dict)
+                        tools_for_llm.append(tool_schema)
+            
+            # 准备工具配置
             tools_config = self.invocation_selector.get_tools_config(
-                all_tools=[{"name": t} for t in tools_for_llm],
+                all_tools=[{"name": t if isinstance(t, str) else t.get("name", "")} for t in tools_for_llm],
                 strategy=invocation_strategy
             )
             llm_kwargs = tools_config.get('extra', {})
-            tools_for_llm = tools_config.get('tools', tools_for_llm)
             
             # 🔑 关键：使用 LLM Service 的流式接口
             stream_generator = self.llm.create_message_stream(
@@ -1093,7 +1133,7 @@ class SimpleAgent:
         # ===== 3. 意图识别（Haiku 4.5 - 快速分类）→ 选择提示词 =====
         # 🎯 双LLM架构优势：节省input token、用户延迟等待和成本
         # 📝 提示词分层：根据任务复杂度选择合适提示词，但Plan/Todo由Claude自主决定
-        from agent_v3.prompts.intent_recognition_prompt import get_intent_recognition_prompt
+        from prompts.intent_recognition_prompt import get_intent_recognition_prompt
         
         if self.verbose:
             print(f"\n🎯 Stage 1: Intent Recognition (Haiku 4.5)...")
@@ -1167,11 +1207,15 @@ class SimpleAgent:
                 print(f"\n💡 {task_desc} task - inferred capabilities: {required_capabilities}")
         
         # 🆕 统一使用 Router 筛选工具（所有任务都走这条路径）
-        from agent_v3.core.capability_router import select_tools_for_capabilities
+        from core.capability_router import select_tools_for_capabilities
         selected_tools = select_tools_for_capabilities(
             self.capability_router,
             required_capabilities=required_capabilities,
-            context={"plan": plan, "task_type": intent_analysis['task_type']}
+            context={
+                "plan": plan, 
+                "task_type": intent_analysis['task_type'],
+                "available_apis": ["slidespeak"]  # 🆕 声明可用的API
+            }
         )
         
         # 🆕 使用 InvocationSelector 选择调用方式
@@ -1207,25 +1251,68 @@ class SimpleAgent:
                 print(f"{'─'*40}")
             
             # 🆕 4.1 准备工具列表（始终使用动态筛选后的工具）
-            tools_for_llm = [t.name for t in selected_tools]
-            # 确保包含原生工具（bash, text_editor, web_search）
+            # 第一步：收集工具名
+            tool_names = [t.name for t in selected_tools]
+            
+            # 第二步：确保包含原生工具（bash, text_editor, web_search）
             for native_tool in self._tools:
-                if native_tool not in tools_for_llm:
-                    tools_for_llm.append(native_tool)
+                # ToolType 枚举需要转换为字符串
+                native_tool_name = native_tool.value if isinstance(native_tool, ToolType) else native_tool
+                if native_tool_name not in tool_names:
+                    tool_names.append(native_tool_name)
+            
+            # 第三步：构建完整工具 schema（用于传给 LLM）
+            tools_for_llm = []
+            for tool_name in tool_names:
+                # 检查是否是 Claude 原生工具
+                if tool_name in ["bash", "text_editor", "web_search", "computer", "memory"]:
+                    # 原生工具：直接使用字符串，llm_service 会处理
+                    tools_for_llm.append(tool_name)
+                else:
+                    # 自定义工具：需要从 capability_registry 获取完整 schema
+                    capability = self.capability_registry.get(tool_name)
+                    if capability:
+                        # ⚠️ 只有 TOOL 类型的能力才能作为 Claude API 工具
+                        # SKILL 类型需要通过其他方式执行（如 bash + scripts）
+                        if capability.type.value != "TOOL":
+                            if self.verbose:
+                                print(f"⚠️ '{tool_name}' 是 {capability.type.value} 类型，不是 TOOL，跳过")
+                            continue
+                        
+                        # 检查是否有有效的 input_schema
+                        if not capability.input_schema:
+                            if self.verbose:
+                                print(f"⚠️ 工具 '{tool_name}' 缺少 input_schema，跳过")
+                            continue
+                        
+                        # Capability 对象转换为字典格式
+                        capability_dict = {
+                            "name": capability.name,
+                            "type": capability.type.value,
+                            "provider": capability.provider,
+                            "metadata": capability.metadata,
+                            "input_schema": capability.input_schema
+                        }
+                        # 使用 llm.convert_to_claude_tool() 转换为 Claude API 格式
+                        tool_schema = self.llm.convert_to_claude_tool(capability_dict)
+                        tools_for_llm.append(tool_schema)
+                    else:
+                        if self.verbose:
+                            print(f"⚠️ 工具 '{tool_name}' 未找到，跳过")
             
             # 🆕 4.2 准备工具配置（根据 invocation_strategy）
+            # invocation_selector 需要工具名列表来决定策略配置
             tools_config = self.invocation_selector.get_tools_config(
-                all_tools=[{"name": t} for t in tools_for_llm],
+                all_tools=[{"name": t if isinstance(t, str) else t.get("name", "")} for t in tools_for_llm],
                 strategy=invocation_strategy
             )
             llm_kwargs = tools_config.get('extra', {})
-            tools_for_llm = tools_config.get('tools', tools_for_llm)
             
-            # 4.3 调用 LLM
+            # 4.3 调用 LLM（传入混合列表：字符串 + 完整 schema）
             response: LLMResponse = self.llm.create_message(
                 messages=messages,
                 system=self.system_prompt,
-                tools=tools_for_llm,
+                tools=tools_for_llm,  # 混合列表：["bash", {...schema...}, "web_search"]
                 **llm_kwargs
             )
             
@@ -1578,8 +1665,8 @@ class SimpleAgent:
                 "enable_thinking": bool
             }
         """
-        from agent_v3.prompts.simple_prompt import get_simple_prompt
-        from agent_v3.prompts.standard_prompt import get_standard_prompt
+        from prompts.simple_prompt import get_simple_prompt
+        from prompts.standard_prompt import get_standard_prompt
         
         if prompt_level == "simple":
             return {

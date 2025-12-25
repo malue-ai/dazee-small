@@ -46,7 +46,7 @@ from datetime import datetime
 
 # 避免循环导入
 if TYPE_CHECKING:
-    from agent_v3.core.memory import WorkingMemory
+    from core.memory import WorkingMemory
 
 
 class PlanTodoTool:

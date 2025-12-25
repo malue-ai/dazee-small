@@ -1147,7 +1147,7 @@ User Query
 ## 📁 文件结构
 
 ```
-agent_v3/
+/
 ├── core/                          # 核心组件
 │   ├── agent.py                   # SimpleAgent（框架管理）
 │   ├── memory.py                  # MemoryManager（含 WorkingMemory）
@@ -1210,7 +1210,7 @@ agent_v3/
 │      capabilities: [web_search, semantic_search]  # 🆕 映射到分类            │
 │      priority: 90                                                            │
 │      implementation:                                                         │
-│        module: "agent_v3.tools.exa_search"                                   │
+│        module: "tools.exa_search"                                   │
 │                                                                              │
 │  作用：                                                                       │
 │  ✅ Router 根据 capabilities 字段匹配工具                                    │
@@ -1513,5 +1513,5 @@ schema_enum = registry.get_category_ids()
 | [02-CAPABILITY-ROUTING.md](./02-CAPABILITY-ROUTING.md) | 🆕 能力路由算法（V3.7 更新） | ✅ 已实现 |
 | [03-SKILLS-DISCOVERY.md](./03-SKILLS-DISCOVERY.md) | Skills 发现机制 | ✅ 已实现 |
 | [04-TOOL-CALLING-STRATEGIES.md](./04-TOOL-CALLING-STRATEGIES.md) | 🆕 工具调用策略（V3.7 更新） | ✅ 已实现 |
-| [STREAMING_ARCHITECTURE.md](../agent_v3/docs/STREAMING_ARCHITECTURE.md) | 🆕 流式输出架构设计 | 🔧 设计完成，待重构 |
+| [STREAMING_ARCHITECTURE.md](..//docs/STREAMING_ARCHITECTURE.md) | 🆕 流式输出架构设计 | 🔧 设计完成，待重构 |
 | [HITL-USAGE-GUIDE.md](./HITL-USAGE-GUIDE.md) | Human-in-the-Loop | ✅ 已实现 |

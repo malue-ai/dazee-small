@@ -13,6 +13,8 @@
 """
 
 import os
+import json
+import logging
 from typing import Dict, Any, Optional, List, Union, AsyncIterator, Callable
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -549,11 +551,13 @@ class ClaudeLLMService(BaseLLMService):
             统一的LLMResponse
         """
         # 构建请求参数
+        formatted_messages = self._format_messages(messages)
         request_params = {
             "model": self.config.model,
             "max_tokens": self.config.max_tokens,
-            "messages": self._format_messages(messages)
+            "messages": formatted_messages
         }
+
         
         # System prompt
         if system:
@@ -581,14 +585,34 @@ class ClaudeLLMService(BaseLLMService):
         
         # Tools
         if tools:
-            formatted_tools = self._format_tools(tools)
-            
-            # 根据调用方式配置工具
-            if invocation_type == "tool_search" and self._tool_search_mode:
-                # Tool Search 模式：添加延迟加载
-                formatted_tools = self.configure_deferred_tools(formatted_tools)
-            
-            request_params["tools"] = formatted_tools
+            try:
+                formatted_tools = self._format_tools(tools)
+                
+                # 🔍 调试日志：打印工具信息
+                print("--- Tools List ---")
+                for i, tool in enumerate(formatted_tools):
+                    tool_name = tool.get('name', 'unknown')
+                    tool_type = tool.get('type', 'function')
+                    print(f"  [{i}] {tool_name} (type: {tool_type})")
+                    # 打印 input_schema 的属性
+                    if 'input_schema' in tool:
+                        schema = tool['input_schema']
+                        props = schema.get('properties', {})
+                        required = schema.get('required', [])
+                        print(f"      - properties: {list(props.keys())}")
+                        print(f"      - required: {required}")
+                print("="*80 + "\n")
+                
+                # 根据调用方式配置工具
+                if invocation_type == "tool_search" and self._tool_search_mode:
+                    # Tool Search 模式：添加延迟加载
+                    formatted_tools = self.configure_deferred_tools(formatted_tools)
+                
+                request_params["tools"] = formatted_tools
+                    
+            except Exception as e:
+                logging.error(f"❌ Tools 处理失败: {e}")
+                raise
         
         # 🆕 Context Editing
         if self._context_editing_enabled:
@@ -597,13 +621,30 @@ class ClaudeLLMService(BaseLLMService):
         # 选择 API 调用方式
         if self._betas:
             # 使用 Beta API
-            response = self.beta_client.beta.messages.create(
-                betas=self._betas,
-                **request_params
-            )
+            try:
+                response = self.beta_client.beta.messages.create(
+                    betas=self._betas,
+                    **request_params
+                )
+            except Exception as e:
+                logging.error(f"❌ Beta API 调用失败: {e}")
+                if "tools" in request_params:
+                    logging.error(f"   Tools count: {len(request_params['tools'])}")
+                    for i, tool in enumerate(request_params['tools']):
+                        logging.error(f"     Tool #{i}: {tool.get('name', 'unknown')} - type: {tool.get('type', 'N/A')}")
+                raise
         else:
             # 标准 API
-            response = self.client.messages.create(**request_params)
+            try:
+                response = self.client.messages.create(**request_params)
+            except Exception as e:
+                logging.error(f"❌ 标准 API 调用失败: {e}")
+                logging.error(f"   错误类型: {type(e).__name__}")
+                if "tools" in request_params:
+                    logging.error(f"   Tools count: {len(request_params['tools'])}")
+                    for i, tool in enumerate(request_params['tools']):
+                        logging.error(f"     Tool #{i}: {tool}")
+                raise
         
         # 解析响应
         return self._parse_response(response, invocation_type=invocation_type)
@@ -645,11 +686,13 @@ class ClaudeLLMService(BaseLLMService):
             LLMResponse片段
         """
         # 构建请求参数（与同步版本相同）
+        formatted_messages = self._format_messages(messages)
         request_params = {
             "model": self.config.model,
             "max_tokens": self.config.max_tokens,
-            "messages": self._format_messages(messages)
+            "messages": formatted_messages
         }
+        
         
         if system:
             request_params["system"] = system
@@ -662,7 +705,8 @@ class ClaudeLLMService(BaseLLMService):
             request_params["temperature"] = 1.0
         
         if tools:
-            request_params["tools"] = self._format_tools(tools)
+            formatted_tools = self._format_tools(tools)
+            request_params["tools"] = formatted_tools
         
         # 流式调用
         accumulated_thinking = ""
@@ -751,6 +795,33 @@ class ClaudeLLMService(BaseLLMService):
                             # 如果无法获取最终消息，使用已收集的信息
                             pass
         
+        # 🆕 构建 raw_content（用于消息续传）
+        # 需要从 final_message 提取完整的 content 块
+        raw_content = None
+        try:
+            final_message = stream.get_final_message()
+            raw_content = self._build_raw_content(final_message)
+        except:
+            # 如果无法获取 final_message，手动构建
+            raw_content = []
+            if accumulated_thinking:
+                raw_content.append({
+                    "type": "thinking",
+                    "thinking": accumulated_thinking
+                })
+            if accumulated_content:
+                raw_content.append({
+                    "type": "text",
+                    "text": accumulated_content
+                })
+            for tool_call in tool_calls:
+                raw_content.append({
+                    "type": "tool_use",
+                    "id": tool_call["id"],
+                    "name": tool_call["name"],
+                    "input": tool_call["input"]
+                })
+        
         # 🆕 返回最终响应（包含完整内容和工具调用）
         if accumulated_content or accumulated_thinking or tool_calls:
             yield LLMResponse(
@@ -758,6 +829,7 @@ class ClaudeLLMService(BaseLLMService):
                 thinking=accumulated_thinking,
                 tool_calls=tool_calls if tool_calls else None,
                 stop_reason=stop_reason or "end_turn",
+                raw_content=raw_content,  # 🆕 添加 raw_content
                 is_stream=False  # 这是最终响应
             )
     
@@ -801,20 +873,51 @@ class ClaudeLLMService(BaseLLMService):
         """
         formatted = []
         
-        for tool in tools:
-            if isinstance(tool, ToolType):
-                # 枚举类型
-                formatted.append(self.get_tool_schema(tool))
-            elif isinstance(tool, str):
-                # 字符串类型
-                formatted.append(self.get_tool_schema(tool))
-            elif isinstance(tool, dict):
-                # 完整schema
-                formatted.append(tool)
-            else:
-                raise ValueError(f"Invalid tool format: {tool}")
+        for idx, tool in enumerate(tools):
+            try:
+                if isinstance(tool, ToolType):
+                    # 枚举类型
+                    schema = self.get_tool_schema(tool)
+                    formatted.append(schema)
+                elif isinstance(tool, str):
+                    # 字符串类型
+                    schema = self.get_tool_schema(tool)
+                    formatted.append(schema)
+                elif isinstance(tool, dict):
+                    # 完整schema - 需要验证是否可序列化
+                    self._validate_tool_dict(tool, idx)
+                    formatted.append(tool)
+                else:
+                    raise ValueError(f"Invalid tool format: {tool} (type: {type(tool)})")
+                
+                # 验证每个工具是否可以被 JSON 序列化
+                try:
+                    json.dumps(formatted[-1])
+                except TypeError as e:
+                    logging.error(f"❌ 工具 #{idx} JSON 序列化失败: {e}")
+                    logging.error(f"   问题工具内容: {formatted[-1]}")
+                    raise ValueError(f"Tool #{idx} contains non-serializable objects: {e}")
+                    
+            except Exception as e:
+                logging.error(f"❌ 处理工具 #{idx} 时出错: {e}")
+                logging.error(f"   工具详情: type={type(tool)}, value={tool}")
+                raise
         
         return formatted
+    
+    def _validate_tool_dict(self, tool_dict: Dict[str, Any], index: int):
+        """验证工具字典是否包含不可序列化的对象"""
+        for key, value in tool_dict.items():
+            if isinstance(value, ToolType):
+                raise ValueError(f"Tool #{index} contains ToolType enum in key '{key}': {value}. Should be converted to string.")
+            elif isinstance(value, dict):
+                self._validate_tool_dict(value, index)
+            elif isinstance(value, list):
+                for i, item in enumerate(value):
+                    if isinstance(item, dict):
+                        self._validate_tool_dict(item, index)
+                    elif isinstance(item, ToolType):
+                        raise ValueError(f"Tool #{index} contains ToolType enum in list at key '{key}[{i}]': {item}")
     
     def _build_raw_content(self, response: anthropic.types.Message) -> List[Dict[str, Any]]:
         """
@@ -832,7 +935,6 @@ class ClaudeLLMService(BaseLLMService):
         Returns:
             可序列化的content块列表
         """
-        import logging
         raw_content = []
         
         for block in response.content:

@@ -52,7 +52,7 @@ docs/v3/
 ### 2. 基本使用
 
 ```python
-from agent_v3 import SimpleAgent, create_simple_agent
+from  import SimpleAgent, create_simple_agent
 
 # 创建 Agent
 agent = create_simple_agent(verbose=True)
@@ -116,13 +116,13 @@ print(result["final_result"])
 
 | 组件 | 文件 | 说明 |
 |------|------|------|
-| **SimpleAgent** | `agent_v3/core/agent.py` | 核心 Agent |
-| **WorkingMemory** | `agent_v3/core/memory.py` | Short Memory |
-| **PlanTodoTool** | `agent_v3/tools/plan_todo_tool.py` | Plan/Todo CRUD |
-| **CapabilityRouter** | `agent_v3/core/capability_router.py` | 能力路由 |
-| **SkillsManager** | `agent_v3/core/skills_manager.py` | Skills 管理 |
-| **LLMService** | `agent_v3/core/llm_service.py` | LLM 封装 |
-| **System Prompt** | `agent_v3/prompts/universal_prompt.py` | 系统提示词 |
+| **SimpleAgent** | `/core/agent.py` | 核心 Agent |
+| **WorkingMemory** | `/core/memory.py` | Short Memory |
+| **PlanTodoTool** | `/tools/plan_todo_tool.py` | Plan/Todo CRUD |
+| **CapabilityRouter** | `/core/capability_router.py` | 能力路由 |
+| **SkillsManager** | `/core/skills_manager.py` | Skills 管理 |
+| **LLMService** | `/core/llm_service.py` | LLM 封装 |
+| **System Prompt** | `/prompts/universal_prompt.py` | 系统提示词 |
 
 ---
 

@@ -1,0 +1,15 @@
+# FastAPI 核心依赖
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+pydantic==2.5.3
+
+# Claude API
+anthropic>=0.21.0
+
+# 配置管理
+pyyaml>=6.0
+python-dotenv>=1.0.0
+
+# 其他工具
+python-multipart==0.0.6
+

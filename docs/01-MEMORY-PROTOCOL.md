@@ -296,9 +296,9 @@ Turn 2:
 
 | 组件 | 文件 |
 |------|------|
-| WorkingMemory | `agent_v3/core/memory.py` |
-| PlanTodoTool | `agent_v3/tools/plan_todo_tool.py` |
-| capabilities.yaml | `agent_v3/config/capabilities.yaml` (plan_todo 定义) |
-| System Prompt | `agent_v3/prompts/universal_prompt.py` (Planning Protocol) |
-| Memory Protocol 详细说明 | `agent_v3/prompts/MEMORY_PROTOCOL.md` |
+| WorkingMemory | `/core/memory.py` |
+| PlanTodoTool | `/tools/plan_todo_tool.py` |
+| capabilities.yaml | `/config/capabilities.yaml` (plan_todo 定义) |
+| System Prompt | `/prompts/universal_prompt.py` (Planning Protocol) |
+| Memory Protocol 详细说明 | `/prompts/MEMORY_PROTOCOL.md` |
 

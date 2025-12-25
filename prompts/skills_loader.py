@@ -106,7 +106,7 @@ def scan_skills_directory(skills_dir: str, verbose: bool = True) -> List[Dict[st
     扫描skills目录，收集所有Skills的metadata
     
     Args:
-        skills_dir: skills目录路径（如 "agent_v3/skills/library"）
+        skills_dir: skills目录路径（如 "/skills/library"）
         verbose: 是否打印详细信息
         
     Returns:
@@ -148,7 +148,7 @@ def scan_skills_directory(skills_dir: str, verbose: bool = True) -> List[Dict[st
             skills_metadata.append({
                 "name": metadata["name"],
                 "description": metadata["description"],
-                "location": f"agent_v3/skills/library/{skill_dir.name}/",
+                "location": f"/skills/library/{skill_dir.name}/",
                 "priority": metadata.get("priority", "medium"),
                 "preferred_for": metadata.get("preferred_for", [])
             })
@@ -274,20 +274,20 @@ def generate_skills_section(
         lines.append("These require loading their SKILL.md for detailed instructions:")
         lines.append("")
         lines.append("1. **Identify**: Check the Skills list above")
-        lines.append("2. **Load**: Use `bash: cat agent_v3/skills/library/<skill-name>/SKILL.md`")
+        lines.append("2. **Load**: Use `bash: cat /skills/library/<skill-name>/SKILL.md`")
         lines.append("3. **Follow**: Execute the workflow in SKILL.md")
         lines.append("4. **Access resources**: Load scripts/ and resources/ as directed")
         lines.append("")
         lines.append("**Example workflow**:")
         lines.append("```bash")
         lines.append("# 1. Load Skill instructions")
-        lines.append("cat agent_v3/skills/library/slidespeak-generator/SKILL.md")
+        lines.append("cat /skills/library/slidespeak-generator/SKILL.md")
         lines.append("")
         lines.append("# 2. Load API schema (if needed)")
-        lines.append("cat agent_v3/skills/library/slidespeak-generator/resources/api_schema.json")
+        lines.append("cat /skills/library/slidespeak-generator/resources/api_schema.json")
         lines.append("")
         lines.append("# 3. Execute helper script")
-        lines.append("cd agent_v3/skills/library/slidespeak-generator && python -c \"")
+        lines.append("cd /skills/library/slidespeak-generator && python -c \"")
         lines.append("exec(open('scripts/config_builder.py').read())")
         lines.append("config = build_slidespeak_config(topic='AI Product', pages=5)")
         lines.append("print(config)")
@@ -352,7 +352,7 @@ def load_skills_for_system_prompt(
         完整的Skills部分，可直接注入系统提示词
         
     Example:
-        >>> skills_section = load_skills_for_system_prompt("agent_v3/skills/library")
+        >>> skills_section = load_skills_for_system_prompt("/skills/library")
         >>> full_system_prompt = BASE_PROMPT + "\n\n" + skills_section
     """
     global _SKILLS_CACHE, _SCAN_VERBOSE
@@ -401,8 +401,8 @@ if __name__ == "__main__":
     import sys
     
     # 获取项目根目录
-    project_root = Path(__file__).parent.parent.parent
-    skills_dir = project_root / "agent_v3" / "skills" / "library"
+    project_root = Path(__file__).parent.parent
+    skills_dir = project_root / "skills" / "library"
     
     print("=" * 60)
     print("Skills Metadata Loader")
@@ -420,7 +420,7 @@ if __name__ == "__main__":
         print(skills_section[:1000] + "...")
         
         # 保存到文件（可选）
-        output_file = project_root / "agent_v3" / "prompts" / "skills_metadata.txt"
+        output_file = project_root / "" / "prompts" / "skills_metadata.txt"
         with open(output_file, 'w', encoding='utf-8') as f:
             f.write(skills_section)
         

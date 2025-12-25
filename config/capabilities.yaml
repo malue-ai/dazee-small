@@ -333,7 +333,7 @@ capabilities:
     
     # 🎯 工具实现配置 - 支持自动加载
     implementation:
-      module: "agent_v3.tools.exa_search"
+      module: "tools.exa_search"
       class: "ExaSearchTool"
     
     capabilities:
@@ -392,32 +392,160 @@ capabilities:
     
     # 🎯 工具实现配置 - 支持自动加载
     implementation:
-      module: "agent_v3.tools.slidespeak"
+      module: "tools.slidespeak"
       class: "SlideSpeakTool"
     
     capabilities:
       - ppt_rendering
+      - ppt_generation
       - api_calling
-    priority: 40  # 降低优先级，避免被直接路由
+    priority: 40
     cost:
       time: medium
       money: low
     constraints:
       requires_api: true
       api_name: slidespeak
-      internal_use_only: true  # 标记为内部工具
     metadata:
-      description: "Internal tool for SlideSpeak API rendering"
-      note: "⚠️ For internal use by slidespeak-generator Skill only. Do not route directly."
+      description: "SlideSpeak API rendering tool for professional PPT generation"
+      note: "🎨 Generates high-quality presentations with professional layouts and designs"
       used_by: "slidespeak-generator"
-      visibility: "internal"
-    # Tool的input_schema定义（用于Claude API）
+      keywords:
+        - ppt
+        - presentation
+        - slidespeak
+        - professional
+        - 专业
+    # 🆕 完整的 input_schema（根据 SlideSpeak API 官方文档）
+    # 参考：https://docs.slidespeak.co/basics/api-references/slide-by-slide/
     input_schema:
       type: object
       properties:
         config:
           type: object
-          description: "Complete SlideSpeak configuration including template, language, title, and slides"
+          description: "完整的SlideSpeak配置。参考：https://docs.slidespeak.co/basics/api-references/slide-by-slide/"
+          properties:
+            template:
+              type: string
+              description: "模板名称，如'DEFAULT'。查看可用模板：GET /api/v1/templates"
+            language:
+              type: string
+              description: "语言代码，如'CHINESE'、'ENGLISH'。默认：'ORIGINAL'（从内容推断）"
+            fetch_images:
+              type: boolean
+              description: "是否包含库存图片。默认：true"
+            verbosity:
+              type: string
+              enum: ["concise", "standard", "text-heavy"]
+              description: "文本详细程度。默认：'standard'"
+            include_cover:
+              type: boolean
+              description: "是否包含封面。默认：true"
+            include_table_of_contents:
+              type: boolean
+              description: "是否包含目录。默认：true"
+            add_speaker_notes:
+              type: boolean
+              description: "是否添加演讲者备注。默认：false"
+            slides:
+              type: array
+              description: "幻灯片配置数组，每个slide必须包含layout、title、item_amount和content"
+              items:
+                type: object
+                properties:
+                  title:
+                    type: string
+                    description: "幻灯片标题（简洁，8-15字）"
+                  layout:
+                    type: string
+                    enum: ["ITEMS", "BIG_NUMBER", "COMPARISON", "TIMELINE", "TABLE", "CHART", "SWOT", "PESTEL", "THANKS"]
+                    description: |
+                      布局类型（必选）。根据内容类型选择最合适的布局：
+                      
+                      【常用布局】
+                      - ITEMS: 列表项（3-6项）- 适合特性、优势、步骤等
+                      - BIG_NUMBER: 关键指标（1-4项）- 适合数据、增长率、性能指标
+                      - COMPARISON: 对比（固定2项）- 适合before/after、传统vs创新
+                      - TIMELINE: 时间线（3-6项）- 适合历程、路线图、项目计划
+                      
+                      【数据可视化】
+                      - TABLE: 表格（item_amount=0）- 适合对比数据、规格表
+                      - CHART: 图表 - 适合趋势、占比（需提供chart配置）
+                      
+                      【分析框架】
+                      - SWOT: SWOT分析（固定4项）
+                      - PESTEL: PESTEL分析（固定6项）
+                      
+                      【结束页】
+                      - THANKS: 感谢页（item_amount=0）
+                  item_amount:
+                    type: integer
+                    description: |
+                      项目数量（必须严格遵守布局约束）：
+                      - ITEMS: 3-6项
+                      - BIG_NUMBER: 1-4项
+                      - COMPARISON: 固定2项
+                      - TIMELINE: 3-6项
+                      - SWOT: 固定4项
+                      - PESTEL: 固定6项
+                      - TABLE/THANKS: 固定0项
+                  content:
+                    type: string
+                    description: |
+                      幻灯片内容（重要！格式直接影响生成质量）
+                      
+                      【内容格式规范】
+                      - 每个要点用句号分隔
+                      - 每项简短有力（1-2句话）
+                      - 避免长段落，保持简洁
+                      
+                      【示例】
+                      ITEMS布局：
+                      "智能路由 自动选择最优能力执行任务. 记忆管理 保持长期上下文理解. 高性能 平均响应时间<100ms. 易扩展 插件化架构支持自定义能力"
+                      
+                      BIG_NUMBER布局：
+                      "99.9% 系统可用性保证. 100万+ 日活跃用户. 50% 性能提升. <100ms 平均响应时间"
+                      
+                      COMPARISON布局（左右对比）：
+                      "传统方案: 固定规则. 人工配置维护. 难以扩展. AI方案: 智能路由. 自动优化选择. 持续学习改进"
+                      
+                      TIMELINE布局：
+                      "2023年Q1 项目启动和需求分析. 2023年Q2 核心架构设计完成. 2023年Q3 Beta版本发布测试. 2023年Q4 正式上线运营"
+                  images:
+                    type: array
+                    description: "可选：图片配置（目前仅支持单图布局，只使用第一张图片）"
+                    items:
+                      type: object
+                      properties:
+                        type:
+                          type: string
+                          enum: ["stock", "url", "ai"]
+                          description: "图片来源：stock=库存搜索（推荐）, url=直接链接, ai=AI生成"
+                        data:
+                          type: string
+                          description: "stock=英文搜索关键词 | url=图片URL | ai=生成提示"
+                      required: ["type", "data"]
+                  chart:
+                    type: object
+                    description: "可选：图表配置（仅CHART布局需要）。参考：https://docs.slidespeak.co/basics/layouts/charts/"
+                  table:
+                    type: array
+                    description: "可选：表格数据（仅TABLE布局需要）。二维字符串数组，第一行为表头"
+                    items:
+                      type: array
+                      items:
+                        type: string
+                required:
+                  - title
+                  - layout
+                  - item_amount
+                  - content
+          required:
+            - template
+            - slides
+        save_dir:
+          type: string
+          description: "保存PPT文件的目录路径（可选，默认./outputs/ppt）"
       required:
         - config
 
@@ -466,7 +594,7 @@ capabilities:
     
     # 工具实现配置
     implementation:
-      module: "agent_v3.tools.plan_todo_tool"
+      module: "tools.plan_todo_tool"
       class: "PlanTodoTool"
     
     capabilities:

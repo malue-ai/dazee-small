@@ -1202,7 +1202,7 @@ def get_universal_system_prompt(skills_dir: Optional[str] = None) -> str:
     此函数负责Level 1的预加载。
     
     Args:
-        skills_dir: Skills目录路径，默认为agent_v3/skills/library
+        skills_dir: Skills目录路径，默认为/skills/library
         
     Returns:
         完整的系统提示词，包含所有Skills的name和description
@@ -1215,12 +1215,12 @@ def get_universal_system_prompt(skills_dir: Optional[str] = None) -> str:
     # 默认skills目录
     if skills_dir is None:
         current_file = Path(__file__)
-        project_root = current_file.parent.parent.parent
-        skills_dir = str(project_root / "agent_v3" / "skills" / "library")
+        project_root = current_file.parent.parent
+        skills_dir = str(project_root / "skills" / "library")
     
     try:
         # 动态加载Skills metadata（Level 1）
-        from agent_v3.prompts.skills_loader import load_skills_for_system_prompt
+        from prompts.skills_loader import load_skills_for_system_prompt
         
         skills_section = load_skills_for_system_prompt(skills_dir)
         
@@ -1236,7 +1236,7 @@ def get_universal_system_prompt(skills_dir: Optional[str] = None) -> str:
 
 # Available Skills
 
-No Skills currently loaded. Skills can be added to the agent_v3/skills/library directory.
+No Skills currently loaded. Skills can be added to the /skills/library directory.
 
 To create a new Skill:
 1. Create a directory in skills/library/
@@ -1338,9 +1338,9 @@ def get_loaded_skills() -> list:
     ]
     """
     try:
-        from agent_v3.prompts.skills_loader import scan_skills_directory
+        from prompts.skills_loader import scan_skills_directory
         
-        skills_dir = Path(__file__).parent.parent.parent / "agent_v3" / "skills" / "library"
+        skills_dir = Path(__file__).parent.parent / "skills" / "library"
         return scan_skills_directory(str(skills_dir))
     except Exception as e:
         print(f"Error loading skills list: {e}")

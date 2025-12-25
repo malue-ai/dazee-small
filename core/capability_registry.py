@@ -166,7 +166,7 @@ class CapabilityRegistry:
         初始化能力注册表
         
         Args:
-            config_path: 配置文件路径，默认为agent_v3/config/capabilities.yaml
+            config_path: 配置文件路径，默认为/config/capabilities.yaml
         """
         self.capabilities: Dict[str, Capability] = {}
         self.categories: List[Dict[str, Any]] = []  # 🆕 能力分类定义

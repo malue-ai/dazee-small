@@ -19,15 +19,15 @@ Agent V3.6 - Prompt-Driven + Memory-First 架构
 
 __version__ = "3.6.0"
 
-from agent_v3.core.agent import SimpleAgent, create_simple_agent
-from agent_v3.core.memory import (
+from core.agent import SimpleAgent, create_simple_agent
+from core.memory import (
     MemoryManager,
     WorkingMemory,
     EpisodicMemory,
     SkillMemory,
     create_memory_manager
 )
-from agent_v3.tools.plan_todo_tool import (
+from tools.plan_todo_tool import (
     PlanTodoTool,
     create_plan_todo_tool,
     PLAN_TODO_TOOL_SCHEMA

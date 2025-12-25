@@ -88,7 +88,7 @@ You are an advanced AI agent with extended thinking, code execution, and tool us
 // Good: Real tool call
 <function_calls>
 <invoke name="bash">
-<parameter name="command">cat agent_v3/skills/library/slidespeak-generator/SKILL.md</parameter>
+<parameter name="command">cat /skills/library/slidespeak-generator/SKILL.md</parameter>
 </invoke>
 </function_calls>
 // Then in next turn, describe the actual result you received
@@ -908,7 +908,7 @@ Steps:
 ```xml
 <function_calls>
 <invoke name="bash">
-<parameter name="command">cat agent_v3/skills/library/{skill-name}/SKILL.md</parameter>
+<parameter name="command">cat /skills/library/{skill-name}/SKILL.md</parameter>
 </invoke>
 </function_calls>
 ```
@@ -917,7 +917,7 @@ Steps:
 ```xml
 <function_calls>
 <invoke name="bash">
-<parameter name="command">cat agent_v3/skills/library/{skill-name}/resources/api_schema.json</parameter>
+<parameter name="command">cat /skills/library/{skill-name}/resources/api_schema.json</parameter>
 </invoke>
 </function_calls>
 ```
@@ -926,7 +926,7 @@ Steps:
 ```xml
 <function_calls>
 <invoke name="bash">
-<parameter name="command">cd agent_v3/skills/library/{skill-name} && python -c "
+<parameter name="command">cd /skills/library/{skill-name} && python -c "
 exec(open('scripts/config_builder.py').read())
 config = build_config(...)
 import json
@@ -940,7 +940,7 @@ print(json.dumps(config, ensure_ascii=False, indent=2))
 ```xml
 <function_calls>
 <invoke name="bash">
-<parameter name="command">cd agent_v3/skills/library/{skill-name} && python -c "
+<parameter name="command">cd /skills/library/{skill-name} && python -c "
 import json
 exec(open('scripts/validator.py').read())
 config = {...}  # from Step 3
@@ -1358,11 +1358,11 @@ def load_skills_metadata(skills_dir: Optional[str] = None) -> str:
     """加载Skills metadata（可选，用于增强能力）"""
     if skills_dir is None:
         current_file = Path(__file__)
-        project_root = current_file.parent.parent.parent
-        skills_dir = str(project_root / "agent_v3" / "skills" / "library")
+        project_root = current_file.parent.parent
+        skills_dir = str(project_root / "skills" / "library")
     
     try:
-        from agent_v3.prompts.skills_loader import load_skills_for_system_prompt
+        from prompts.skills_loader import load_skills_for_system_prompt
         return load_skills_for_system_prompt(skills_dir)
     except Exception as e:
         print(f"⚠️ Skills加载失败: {e}")
