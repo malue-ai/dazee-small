@@ -183,8 +183,11 @@ MIT License
 
 ## 👥 作者
 
-- **刘毅** (ironliuyi)
+- **刘屹** (ironliuyi)
 - Email: liuyi@zenflux.cn
+- 
+- **汪康成** 
+- Email: wangkangcheng@zenflux.cn
 
 ---
 
