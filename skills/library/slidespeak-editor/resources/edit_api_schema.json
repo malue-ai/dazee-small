@@ -1,0 +1,49 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SlideSpeak Edit Presentation API Schema",
+  "description": "Schema for editing existing PowerPoint presentations",
+  "type": "object",
+  "properties": {
+    "replacements": {
+      "type": "array",
+      "description": "List of shape replacements to perform",
+      "items": {
+        "type": "object",
+        "properties": {
+          "shape_name": {
+            "type": "string",
+            "description": "The name of the shape to replace (as defined in PowerPoint's Selection Pane)"
+          },
+          "content": {
+            "type": "string",
+            "description": "The new content for the shape"
+          }
+        },
+        "required": ["shape_name", "content"],
+        "additionalProperties": false
+      },
+      "minItems": 1
+    }
+  },
+  "required": ["replacements"],
+  "additionalProperties": false,
+  "examples": [
+    {
+      "replacements": [
+        {
+          "shape_name": "TARGET_TITLE",
+          "content": "Your new title"
+        },
+        {
+          "shape_name": "TARGET_SUBTITLE",
+          "content": "A new fancy subtitle"
+        },
+        {
+          "shape_name": "TARGET_CONTENT",
+          "content": "Some new content"
+        }
+      ]
+    }
+  ]
+}
+

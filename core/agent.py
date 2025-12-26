@@ -583,9 +583,18 @@ class SimpleAgent:
         # 从 WorkingMemory 获取历史消息
         history = self.memory.working.get_messages()
         
+        # 🔍 输出历史消息统计
+        if self.verbose or len(history) > 0:
+            print(f"\n{'='*60}")
+            print(f"🧠 构建对话上下文:")
+            print(f"   📊 历史消息总数: {len(history)}")
+            print(f"   📝 当前输入: {current_input[:80]}{'...' if len(current_input) > 80 else ''}")
+        
         # ===== 策略 1: 添加 Plan 精简状态（如果存在）=====
         plan_context = self.memory.working.get_plan_context_for_llm()
         if plan_context:
+            if self.verbose:
+                print(f"   📋 包含任务计划上下文")
             # 作为系统上下文的一部分，添加到第一条消息前
             messages.append(Message(
                 role="user", 
@@ -599,6 +608,9 @@ class SimpleAgent:
         # ===== 策略 2: 智能压缩历史消息 =====
         if len(history) <= self.max_full_messages:
             # 消息数量少，传入完整历史
+            if self.verbose or len(history) > 0:
+                print(f"   ✅ 使用完整历史 (≤{self.max_full_messages}条)")
+            
             for msg in history:
                 role = msg.get("role", "user")
                 content = msg.get("content", "")
@@ -608,6 +620,10 @@ class SimpleAgent:
             # 消息数量多，压缩早期消息
             early_messages = history[:-self.recent_keep]
             recent_messages = history[-self.recent_keep:]
+            
+            if self.verbose:
+                print(f"   📦 压缩早期消息: {len(early_messages)}条 → 摘要")
+                print(f"   📌 保留最近消息: {len(recent_messages)}条完整内容")
             
             # 生成早期消息摘要
             summary = self._summarize_messages(early_messages)
@@ -626,15 +642,13 @@ class SimpleAgent:
                 content = msg.get("content", "")
                 if role in ["user", "assistant"]:
                     messages.append(Message(role=role, content=content))
-            
-            if self.verbose:
-                print(f"   📦 Compressed {len(early_messages)} early messages → summary")
         
         # 添加当前用户输入
         messages.append(Message(role="user", content=current_input))
         
-        if self.verbose and len(history) > 0:
-            print(f"   📜 Context: {len(messages)} messages (from {len(history)} history)")
+        if self.verbose or len(history) > 0:
+            print(f"   📤 最终构建: {len(messages)}条消息发送给LLM")
+            print(f"{'='*60}\n")
         
         return messages
     
@@ -796,7 +810,7 @@ class SimpleAgent:
             context={
                 "plan": plan, 
                 "task_type": intent_analysis['task_type'],
-                "available_apis": ["slidespeak"]  # 🆕 声明可用的API
+                "available_apis": ["slidespeak", "ragie", "exa"]  # 🆕 声明可用的API
             }
         )
         
@@ -1036,7 +1050,14 @@ class SimpleAgent:
                     result = self.plan_todo_tool.execute(operation, data)
                     result['invocation_method'] = invocation_method
                 else:
-                    result = await self.tool_executor.execute(tool_name, tool_input)
+                    # 🆕 注入 WorkingMemory 的上下文信息（user_id, conversation_id 等）
+                    enriched_input = tool_input.copy()
+                    if hasattr(self.memory.working, 'user_id') and self.memory.working.user_id:
+                        enriched_input['user_id'] = self.memory.working.user_id
+                    if hasattr(self.memory.working, 'conversation_id') and self.memory.working.conversation_id:
+                        enriched_input['conversation_id'] = self.memory.working.conversation_id
+                    
+                    result = await self.tool_executor.execute(tool_name, enriched_input)
                     result['invocation_method'] = invocation_method
                 
                 # 更新Memory
@@ -1727,7 +1748,14 @@ class SimpleAgent:
                         print(f"\n{result['display']}\n")
                 else:
                     # 其他自定义工具
-                    result = await self.tool_executor.execute(tool_name, tool_input)
+                    # 🆕 注入 user_id 和 conversation_id 到工具参数（从 WorkingMemory）
+                    enriched_input = {**tool_input}
+                    if hasattr(self.memory.working, 'user_id') and self.memory.working.user_id:
+                        enriched_input['user_id'] = self.memory.working.user_id
+                    if hasattr(self.memory.working, 'conversation_id') and self.memory.working.conversation_id:
+                        enriched_input['conversation_id'] = self.memory.working.conversation_id
+                    
+                    result = await self.tool_executor.execute(tool_name, enriched_input)
                     result['invocation_method'] = invocation_method
                 
                 # 更新Memory

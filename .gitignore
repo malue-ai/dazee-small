@@ -69,3 +69,4 @@ skill_outputs/
 
 # Outputs
 outputs/
+.cursor/

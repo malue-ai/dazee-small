@@ -3,7 +3,7 @@ Chat 相关的路由
 包含同步聊天、流式聊天、会话管理、结果改进等功能
 """
 
-import logging
+from logger import get_logger
 import json
 from enum import Enum
 from fastapi import APIRouter, HTTPException, BackgroundTasks
@@ -22,11 +22,7 @@ from models.chat import (
 from core.agent import SimpleAgent
 
 # 配置日志
-logger = logging.getLogger(__name__)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logger = get_logger("chat")
 
 # 创建路由器
 router = APIRouter(
@@ -138,14 +134,41 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
         logger.info(f"📨 收到{'流式' if use_stream else '同步'}聊天请求: session_id={request.session_id}, message={request.message[:50]}...")
         
         # 从 main.py 获取或创建 Agent
-        from main import get_or_create_agent
-        agent = get_or_create_agent(request.session_id, verbose=False)
+        from main import get_or_create_agent_for_conversation, agent_pool
         
-        # 如果没有提供 session_id，使用 Agent 的 session_id
-        if not request.session_id:
-            request.session_id = agent._session_id
+        # 使用 conversation_id 获取 Agent（自动管理 session_id 映射）
+        conversation_id, session_id, agent = get_or_create_agent_for_conversation(
+            conversation_id=request.conversation_id,
+            verbose=False
+        )
         
-        logger.info(f"🤖 开始执行对话: session_id={agent._session_id}, mode={'stream' if use_stream else 'sync'}")
+        # 🆕 将 user_id 和 conversation_id 存入 Agent 的 WorkingMemory
+        if request.user_id:
+            agent.memory.working.user_id = request.user_id
+            logger.info(f"👤 设置 user_id: {request.user_id}")
+        
+        if request.conversation_id:
+            agent.memory.working.conversation_id = request.conversation_id
+            logger.info(f"💬 设置 conversation_id: {request.conversation_id}")
+        
+        # 🔍 输出会话状态信息
+        session_info = agent.get_session_info()
+        conversation_history = agent.get_conversation_history()
+        logger.info(f"📊 会话状态: session_id={session_id}, conversation_id={request.conversation_id}, "
+                   f"活跃={session_info['active']}, 轮次={session_info['turns']}, 历史消息数={len(conversation_history)}")
+        
+        # 🔍 如果有历史消息，输出最近的对话摘要
+        if len(conversation_history) > 0:
+            logger.info(f"💬 最近的对话历史:")
+            # 显示最近3条消息
+            for msg in conversation_history[-3:]:
+                role = msg.get('role', 'unknown')
+                content_preview = str(msg.get('content', ''))[:80] + '...' if len(str(msg.get('content', ''))) > 80 else str(msg.get('content', ''))
+                logger.info(f"   - {role}: {content_preview}")
+        else:
+            logger.info(f"💬 这是本会话的第一条消息")
+        
+        logger.info(f"🤖 开始执行对话: session_id={session_id}, mode={'stream' if use_stream else 'sync'}")
         
         # ===== 流式模式 =====
         if use_stream:
@@ -166,7 +189,12 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
                         # SSE 格式：data: {json}\n\n
                         yield f"data: {event_data.model_dump_json()}\n\n"
                     
-                    logger.info(f"✅ 流式对话完成: session_id={agent._session_id}")
+                    # 🔍 输出执行完成后的状态
+                    final_session_info = agent.get_session_info()
+                    final_history_count = len(agent.get_conversation_history())
+                    logger.info(f"✅ 流式对话完成: session_id={agent._session_id}, "
+                               f"总轮次={final_session_info['turns']}, "
+                               f"历史消息数={final_history_count}")
                     
                     # 发送完成事件
                     yield "data: {\"type\": \"done\", \"data\": {}, \"timestamp\": \"" + datetime.now().isoformat() + "\"}\n\n"
@@ -195,7 +223,10 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
             # 执行对话
             result = await agent.chat(request.message)
             
-            logger.info(f"✅ 对话执行完成: status={result.get('status')}, turns={result.get('turns')}")
+            # 🔍 输出执行结果统计
+            final_history_count = len(agent.get_conversation_history())
+            logger.info(f"✅ 对话执行完成: status={result.get('status')}, turns={result.get('turns')}, "
+                       f"历史消息数={final_history_count}")
             
             # 🆕 验证最终结果中提到的文件是否真实存在
             final_result_content = result.get("final_result", "")
@@ -240,7 +271,8 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
             
             # 构建响应
             response = ChatResponse(
-                session_id=agent._session_id,
+                session_id=session_id,
+                conversation_id=request.conversation_id,
                 content=result.get("final_result", ""),
                 status=result.get("status", "unknown"),
                 turns=result.get("turns", 0),
@@ -256,11 +288,11 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
             # 后台清理任务
             background_tasks.add_task(cleanup_inactive_sessions)
             
-        logger.info(f"✅ 响应已构建: session_id={agent._session_id}")
+        logger.info(f"✅ 响应已构建: session_id={session_id}")
         
         # 🔍 简化日志：只打印关键信息
         if logger.level <= logging.DEBUG:
-            print(f"\n📤 响应: session={response.session_id}, status={response.status}, turns={response.turns}")
+            print(f"\n📤 响应: session={response.session_id}, conversation={response.conversation_id}, status={response.status}, turns={response.turns}")
         
         return APIResponse(
                 code=200,

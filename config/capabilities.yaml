@@ -33,6 +33,7 @@
 task_type_mappings:
   information_query:
     - web_search
+    - knowledge_base
     - file_operations
     - task_planning
   
@@ -60,6 +61,11 @@ task_type_mappings:
     - task_planning
 
 capability_categories:
+  - id: knowledge_base
+    description: "个人知识库检索"
+    use_when: "需要查找用户之前上传的文档、笔记、资料"
+    examples: ["查找我的文档", "检索个人笔记", "搜索上传的资料"]
+  
   - id: web_search
     description: "搜索互联网信息"
     use_when: "需要查找资料、新闻、数据、实时信息"
@@ -224,6 +230,7 @@ capabilities:
       - ppt_generation
       - presentation_creation
       - professional_design
+      - api_calling  # 🧪 添加 api_calling 能力
     priority: 85
     cost:
       time: medium
@@ -246,6 +253,70 @@ capabilities:
         - 客户
         - 演示
         - 业务
+  
+  - name: slidespeak-editor
+    type: SKILL
+    subtype: CUSTOM
+    provider: user
+    capabilities:
+      - ppt_editing
+      - ppt_generation
+      - document_editing
+      - api_calling  # 🧪 添加 api_calling 能力
+    priority: 80
+    cost:
+      time: fast
+      money: low
+    constraints:
+      requires_api: true
+      api_name: slidespeak
+    metadata:
+      description: "Edit existing PowerPoint files by replacing content in specified shapes"
+      preferred_for:
+        - batch personalization
+        - template-based generation
+        - content updates
+        - multi-language versions
+        - data-driven reports
+      keywords:
+        - 编辑
+        - 模板
+        - 批量
+        - 个性化
+        - 更新
+  
+  - name: slidespeak-slide-editor
+    type: SKILL
+    subtype: CUSTOM
+    provider: user
+    capabilities:
+      - ppt_editing
+      - ppt_generation
+      - content_modification
+      - api_calling  # 🧪 添加 api_calling 能力
+    priority: 82
+    cost:
+      time: medium
+      money: low
+    constraints:
+      requires_api: true
+      api_name: slidespeak
+    metadata:
+      description: "Edit slides in existing SlideSpeak presentations - insert, regenerate, or remove slides using AI"
+      preferred_for:
+        - iterative refinement
+        - adding slides
+        - regenerating content
+        - removing slides
+        - continuous editing
+      keywords:
+        - 添加
+        - 插入
+        - 重新生成
+        - 删除
+        - 修改
+        - 优化
+        - 完善
   
   - name: planning-task
     type: SKILL
@@ -276,6 +347,178 @@ capabilities:
         - 拆解
 
   # ==================== Tools ====================
+  
+  # 🔍 知识库检索工具
+  - name: knowledge_search
+    type: TOOL
+    subtype: CUSTOM
+    provider: user
+    
+    # 工具实现配置
+    implementation:
+      module: "tools.knowledge_search"
+      class: "KnowledgeSearchTool"
+    
+    # 🔑 工具输入定义（必须！）
+    input_schema:
+      type: object
+      properties:
+        query:
+          type: string
+          description: "检索查询文本，描述你想要找到的信息"
+        top_k:
+          type: integer
+          description: "返回的结果数量，默认 5"
+          default: 5
+        metadata_filter:
+          type: object
+          description: "元数据过滤条件（可选），如 {\"tags\": [\"important\"], \"source\": \"upload\"}"
+      required:
+        - query
+    
+    capabilities:
+      - knowledge_base
+      - semantic_search
+      - personal_documents
+      - information_retrieval
+    priority: 95  # 高优先级 - 优先使用个人知识库
+    cost:
+      time: fast
+      money: low
+    constraints:
+      requires_api: true
+      requires_network: true
+      api_name: ragie
+      user_isolation: true  # 用户隔离
+    metadata:
+      description: "从用户的个人知识库中检索相关信息（基于 Ragie）"
+      preferred_for:
+        - 查找用户上传的文档
+        - 检索个人笔记和资料
+        - 搜索历史上传的内容
+        - 个人知识回忆
+      keywords:
+        - 知识库
+        - 个人文档
+        - 检索
+        - 搜索
+        - 我的文档
+        - 上传的资料
+      note: |
+        特性：
+        - 每个用户有独立的知识空间（Partition）
+        - 自动从 WorkingMemory 获取 user_id
+        - 支持语义搜索和元数据过滤
+        - 返回格式化的摘要供 LLM 使用
+        
+        使用场景：
+        - "帮我找一下之前上传的产品文档"
+        - "我记得有份关于XX的资料"
+        - "查一下我的笔记里有没有XX"
+    input_schema:
+      type: object
+      properties:
+        query:
+          type: string
+          description: "检索查询文本，描述想要找到的信息"
+        top_k:
+          type: integer
+          description: "返回结果数量（1-20，默认5）"
+          default: 5
+          minimum: 1
+          maximum: 20
+        metadata_filter:
+          type: object
+          description: "元数据过滤条件（可选），如 {\"tags\": [\"important\"]}"
+          additionalProperties: true
+      required:
+        - query
+  
+  # 🆕 通用 API 调用工具
+  - name: api_calling
+    type: TOOL
+    subtype: CUSTOM
+    provider: user
+    
+    # 工具实现配置
+    implementation:
+      module: "tools.api_calling"
+      class: "APICallingTool"
+    
+    capabilities:
+      - api_calling
+      - http_request
+      - async_polling
+      - file_download
+    priority: 75
+    cost:
+      time: variable
+      money: variable
+    constraints:
+      requires_api: false  # 本身不需要 API,但用于调用其他 API
+      requires_network: true
+    metadata:
+      description: "通用 HTTP API 调用工具,配合 Skills 文档使用,无需为每个 API 编写专门工具"
+      preferred_for:
+        - 调用外部 REST API
+        - 异步任务处理
+        - 文件上传下载
+        - 动态 API 调用
+      keywords:
+        - api
+        - http
+        - rest
+        - 调用
+        - 通用
+      note: |
+        使用方式:
+        1. LLM 从 Skill 文档中了解 API 使用方法
+        2. 使用本工具发起实际的 HTTP 请求
+        3. 无需为每个 API 单独编写工具
+        
+        示例场景:
+        - slidespeak-generator skill 提供 SlideSpeak API 文档
+        - LLM 使用 api_calling 调用 SlideSpeak API
+        - 不需要 slidespeak_render 工具
+    input_schema:
+      type: object
+      properties:
+        url:
+          type: string
+          description: "API 端点 URL (完整的 HTTP(S) 地址)"
+        method:
+          type: string
+          enum: ["GET", "POST", "PUT", "DELETE", "PATCH"]
+          description: "HTTP 方法 (默认 POST)"
+        headers:
+          type: object
+          description: "请求头字典"
+        body:
+          type: object
+          description: "请求体 (将自动转为 JSON)"
+        auth:
+          type: object
+          description: "认证配置"
+          properties:
+            type:
+              type: string
+              enum: ["api_key", "bearer", "basic"]
+            credentials:
+              type: object
+        poll_for_result:
+          type: boolean
+          description: "是否轮询异步任务结果"
+        poll_config:
+          type: object
+          description: "轮询配置"
+        download_url_field:
+          type: string
+          description: "响应中下载链接的字段名"
+        save_dir:
+          type: string
+          description: "文件保存目录"
+      required:
+        - url
   
   - name: file_read
     type: TOOL
@@ -385,6 +628,7 @@ capabilities:
       required:
         - query
   
+  # 🧪 实验：禁用具体的 SlideSpeak 工具，改用动态 api_calling + Skills
   - name: slidespeak_render
     type: TOOL
     subtype: CUSTOM
@@ -459,58 +703,13 @@ capabilities:
                   layout:
                     type: string
                     enum: ["ITEMS", "BIG_NUMBER", "COMPARISON", "TIMELINE", "TABLE", "CHART", "SWOT", "PESTEL", "THANKS"]
-                    description: |
-                      布局类型（必选）。根据内容类型选择最合适的布局：
-                      
-                      【常用布局】
-                      - ITEMS: 列表项（3-6项）- 适合特性、优势、步骤等
-                      - BIG_NUMBER: 关键指标（1-4项）- 适合数据、增长率、性能指标
-                      - COMPARISON: 对比（固定2项）- 适合before/after、传统vs创新
-                      - TIMELINE: 时间线（3-6项）- 适合历程、路线图、项目计划
-                      
-                      【数据可视化】
-                      - TABLE: 表格（item_amount=0）- 适合对比数据、规格表
-                      - CHART: 图表 - 适合趋势、占比（需提供chart配置）
-                      
-                      【分析框架】
-                      - SWOT: SWOT分析（固定4项）
-                      - PESTEL: PESTEL分析（固定6项）
-                      
-                      【结束页】
-                      - THANKS: 感谢页（item_amount=0）
+                    description: "布局类型（必选）。根据内容类型选择最合适的布局"
                   item_amount:
                     type: integer
-                    description: |
-                      项目数量（必须严格遵守布局约束）：
-                      - ITEMS: 3-6项
-                      - BIG_NUMBER: 1-4项
-                      - COMPARISON: 固定2项
-                      - TIMELINE: 3-6项
-                      - SWOT: 固定4项
-                      - PESTEL: 固定6项
-                      - TABLE/THANKS: 固定0项
+                    description: "项目数量"
                   content:
                     type: string
-                    description: |
-                      幻灯片内容（重要！格式直接影响生成质量）
-                      
-                      【内容格式规范】
-                      - 每个要点用句号分隔
-                      - 每项简短有力（1-2句话）
-                      - 避免长段落，保持简洁
-                      
-                      【示例】
-                      ITEMS布局：
-                      "智能路由 自动选择最优能力执行任务. 记忆管理 保持长期上下文理解. 高性能 平均响应时间<100ms. 易扩展 插件化架构支持自定义能力"
-                      
-                      BIG_NUMBER布局：
-                      "99.9% 系统可用性保证. 100万+ 日活跃用户. 50% 性能提升. <100ms 平均响应时间"
-                      
-                      COMPARISON布局（左右对比）：
-                      "传统方案: 固定规则. 人工配置维护. 难以扩展. AI方案: 智能路由. 自动优化选择. 持续学习改进"
-                      
-                      TIMELINE布局：
-                      "2023年Q1 项目启动和需求分析. 2023年Q2 核心架构设计完成. 2023年Q3 Beta版本发布测试. 2023年Q4 正式上线运营"
+                    description: "幻灯片内容"
                   images:
                     type: array
                     description: "可选：图片配置（目前仅支持单图布局，只使用第一张图片）"
@@ -545,9 +744,10 @@ capabilities:
             - slides
         save_dir:
           type: string
-          description: "保存PPT文件的目录路径（可选，默认./outputs/ppt）"
+          description: "保存PPT文件的目录路径（可选，默认./workspace/outputs/ppt）"
       required:
         - config
+
 
   # ==================== MCP Servers ====================
   # (示例配置，根据实际部署的MCP服务器添加)

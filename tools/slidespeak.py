@@ -152,7 +152,7 @@ class SlideSpeakTool:
                 },
                 "save_dir": {
                     "type": "string",
-                    "description": "保存PPT文件的目录路径（可选，默认./outputs/ppt）"
+                    "description": "保存PPT文件的目录路径（可选，默认./workspace/outputs/ppt）"
                 }
             },
             "required": ["config"]
@@ -198,7 +198,7 @@ class SlideSpeakTool:
             
             local_path = await self._download_file(
                 download_url,
-                save_dir or "./outputs/ppt"
+                save_dir or "./workspace/outputs/ppt"
             )
             
             return {

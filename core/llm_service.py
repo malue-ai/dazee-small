@@ -14,12 +14,14 @@
 
 import os
 import json
-import logging
+from logger import get_logger
 from typing import Dict, Any, Optional, List, Union, AsyncIterator, Callable
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
 import anthropic
+
+logger = get_logger("llm_service")
 
 
 # ============================================================
@@ -611,12 +613,21 @@ class ClaudeLLMService(BaseLLMService):
                 request_params["tools"] = formatted_tools
                     
             except Exception as e:
-                logging.error(f"❌ Tools 处理失败: {e}")
+                logger.error(f"❌ Tools 处理失败: {e}")
                 raise
         
         # 🆕 Context Editing
         if self._context_editing_enabled:
             request_params["context_management"] = self._context_editing_config
+        
+        
+        # 将 request_params 转为 JSON（处理不可序列化的对象）
+        try:
+            request_json = json.dumps(request_params, ensure_ascii=False, indent=2, default=str)
+            logger.info(request_json)
+        except Exception as e:
+            logger.error(f"无法序列化请求参数: {e}")
+            logger.info(str(request_params))
         
         # 选择 API 调用方式
         if self._betas:
@@ -627,24 +638,68 @@ class ClaudeLLMService(BaseLLMService):
                     **request_params
                 )
             except Exception as e:
-                logging.error(f"❌ Beta API 调用失败: {e}")
+                logger.error(f"❌ Beta API 调用失败: {e}")
                 if "tools" in request_params:
-                    logging.error(f"   Tools count: {len(request_params['tools'])}")
+                    logger.error(f"   Tools count: {len(request_params['tools'])}")
                     for i, tool in enumerate(request_params['tools']):
-                        logging.error(f"     Tool #{i}: {tool.get('name', 'unknown')} - type: {tool.get('type', 'N/A')}")
+                        logger.error(f"     Tool #{i}: {tool.get('name', 'unknown')} - type: {tool.get('type', 'N/A')}")
                 raise
         else:
             # 标准 API
             try:
                 response = self.client.messages.create(**request_params)
             except Exception as e:
-                logging.error(f"❌ 标准 API 调用失败: {e}")
-                logging.error(f"   错误类型: {type(e).__name__}")
+                logger.error(f"❌ 标准 API 调用失败: {e}")
+                logger.error(f"   错误类型: {type(e).__name__}")
                 if "tools" in request_params:
-                    logging.error(f"   Tools count: {len(request_params['tools'])}")
+                    logger.error(f"   Tools count: {len(request_params['tools'])}")
                     for i, tool in enumerate(request_params['tools']):
-                        logging.error(f"     Tool #{i}: {tool}")
+                        logger.error(f"     Tool #{i}: {tool}")
                 raise
+        
+        # 🔍 打印完整的原始响应数据
+        logger.info(f"\n{'='*80}")
+        logger.info(f"📥 完整 API 响应 (从 Claude 返回)")
+        logger.info(f"{'='*80}")
+        
+        # 将 response 转为可读的字典格式
+        try:
+            response_dict = {
+                "id": response.id,
+                "type": response.type,
+                "role": response.role,
+                "model": response.model,
+                "stop_reason": response.stop_reason,
+                "stop_sequence": getattr(response, 'stop_sequence', None),
+                "usage": {
+                    "input_tokens": response.usage.input_tokens,
+                    "output_tokens": response.usage.output_tokens,
+                    "cache_creation_input_tokens": getattr(response.usage, 'cache_creation_input_tokens', 0),
+                    "cache_read_input_tokens": getattr(response.usage, 'cache_read_input_tokens', 0),
+                } if hasattr(response, 'usage') else {},
+                "content": []
+            }
+            
+            # 转换 content blocks
+            for block in response.content:
+                block_dict = {"type": block.type}
+                if block.type == "text":
+                    block_dict["text"] = block.text
+                elif block.type == "thinking":
+                    block_dict["thinking"] = block.thinking
+                elif block.type == "tool_use":
+                    block_dict["id"] = block.id
+                    block_dict["name"] = block.name
+                    block_dict["input"] = block.input
+                response_dict["content"].append(block_dict)
+            
+            response_json = json.dumps(response_dict, ensure_ascii=False, indent=2)
+            logger.info(response_json)
+        except Exception as e:
+            logger.error(f"无法序列化响应: {e}")
+            logger.info(str(response))
+        
+        logger.info(f"{'='*80}\n")
         
         # 解析响应
         return self._parse_response(response, invocation_type=invocation_type)
@@ -707,6 +762,20 @@ class ClaudeLLMService(BaseLLMService):
         if tools:
             formatted_tools = self._format_tools(tools)
             request_params["tools"] = formatted_tools
+        
+        # 🔍 打印完整的流式请求数据
+        logger.info(f"\n{'='*80}")
+        logger.info(f"📤 完整流式 API 请求 (发送给 Claude)")
+        logger.info(f"{'='*80}")
+        
+        try:
+            request_json = json.dumps(request_params, ensure_ascii=False, indent=2, default=str)
+            logger.info(request_json)
+        except Exception as e:
+            logger.error(f"无法序列化请求参数: {e}")
+            logger.info(str(request_params))
+        
+        logger.info(f"{'='*80}\n")
         
         # 流式调用
         accumulated_thinking = ""
@@ -822,6 +891,61 @@ class ClaudeLLMService(BaseLLMService):
                     "input": tool_call["input"]
                 })
         
+        # 🔍 打印完整的流式响应数据
+        logger.info(f"\n{'='*80}")
+        logger.info(f"📥 完整流式 API 响应 (从 Claude 返回)")
+        logger.info(f"{'='*80}")
+        
+        # 构建完整的响应对象
+        try:
+            final_message = stream.get_final_message()
+            response_dict = {
+                "id": getattr(final_message, 'id', ''),
+                "type": getattr(final_message, 'type', ''),
+                "role": getattr(final_message, 'role', ''),
+                "model": getattr(final_message, 'model', ''),
+                "stop_reason": stop_reason or getattr(final_message, 'stop_reason', 'end_turn'),
+                "usage": {
+                    "input_tokens": getattr(final_message.usage, 'input_tokens', 0),
+                    "output_tokens": getattr(final_message.usage, 'output_tokens', 0),
+                    "cache_creation_input_tokens": getattr(final_message.usage, 'cache_creation_input_tokens', 0),
+                    "cache_read_input_tokens": getattr(final_message.usage, 'cache_read_input_tokens', 0),
+                } if hasattr(final_message, 'usage') else {},
+                "content": []
+            }
+            
+            # 从 raw_content 构建 content
+            if raw_content:
+                response_dict["content"] = raw_content
+            else:
+                # 手动构建
+                if accumulated_thinking:
+                    response_dict["content"].append({"type": "thinking", "thinking": accumulated_thinking})
+                if accumulated_content:
+                    response_dict["content"].append({"type": "text", "text": accumulated_content})
+                for tc in tool_calls:
+                    response_dict["content"].append({
+                        "type": "tool_use",
+                        "id": tc["id"],
+                        "name": tc["name"],
+                        "input": tc["input"]
+                    })
+            
+            response_json = json.dumps(response_dict, ensure_ascii=False, indent=2)
+            logger.info(response_json)
+        except Exception as e:
+            logger.error(f"无法构建完整响应: {e}")
+            # 降级输出
+            simple_response = {
+                "stop_reason": stop_reason or "end_turn",
+                "thinking": accumulated_thinking if accumulated_thinking else None,
+                "content": accumulated_content if accumulated_content else None,
+                "tool_calls": tool_calls if tool_calls else None
+            }
+            logger.info(json.dumps(simple_response, ensure_ascii=False, indent=2))
+        
+        logger.info(f"{'='*80}\n")
+        
         # 🆕 返回最终响应（包含完整内容和工具调用）
         if accumulated_content or accumulated_thinking or tool_calls:
             yield LLMResponse(
@@ -894,13 +1018,13 @@ class ClaudeLLMService(BaseLLMService):
                 try:
                     json.dumps(formatted[-1])
                 except TypeError as e:
-                    logging.error(f"❌ 工具 #{idx} JSON 序列化失败: {e}")
-                    logging.error(f"   问题工具内容: {formatted[-1]}")
+                    logger.error(f"❌ 工具 #{idx} JSON 序列化失败: {e}")
+                    logger.error(f"   问题工具内容: {formatted[-1]}")
                     raise ValueError(f"Tool #{idx} contains non-serializable objects: {e}")
                     
             except Exception as e:
-                logging.error(f"❌ 处理工具 #{idx} 时出错: {e}")
-                logging.error(f"   工具详情: type={type(tool)}, value={tool}")
+                logger.error(f"❌ 处理工具 #{idx} 时出错: {e}")
+                logger.error(f"   工具详情: type={type(tool)}, value={tool}")
                 raise
         
         return formatted
@@ -955,7 +1079,7 @@ class ClaudeLLMService(BaseLLMService):
                     })
                 elif thinking_text:
                     # 如果没有signature，记录警告但不添加（避免API错误）
-                    logging.warning(f"Thinking block without valid signature, skipping. Length: {len(thinking_text)}")
+                    logger.warning(f"Thinking block without valid signature, skipping. Length: {len(thinking_text)}")
                     
             elif block.type == "text":
                 text_content = getattr(block, 'text', '')
@@ -979,10 +1103,10 @@ class ClaudeLLMService(BaseLLMService):
                         "input": tool_input
                     })
                 else:
-                    logging.warning(f"Invalid tool_use block: id={tool_id}, name={tool_name}")
+                    logger.warning(f"Invalid tool_use block: id={tool_id}, name={tool_name}")
             else:
                 # 记录未知类型的块（用于调试）
-                logging.debug(f"Unknown content block type: {block.type}")
+                logger.debug(f"Unknown content block type: {block.type}")
         
         return raw_content
     

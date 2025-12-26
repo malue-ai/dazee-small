@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from typing import Dict, Optional
 from datetime import datetime
+from uuid import uuid4
 
 # 🆕 自动加载 .env 文件
 from dotenv import load_dotenv
@@ -19,7 +20,7 @@ env_path = Path(__file__).parent / ".env"
 load_dotenv(dotenv_path=env_path, override=True)
 
 from core.agent import create_simple_agent, SimpleAgent
-from routers import chat_router
+from routers import chat_router, knowledge_router
 
 # ============================================================
 # 全局变量
@@ -27,6 +28,11 @@ from routers import chat_router
 
 # Agent 实例池（支持多会话）
 agent_pool: Dict[str, SimpleAgent] = {}
+
+# 对话线程ID -> 运行会话ID 映射（试验阶段：内存版）
+# - conversation_id：客户端/产品层面的“对话线程”
+# - session_id：服务端运行时的“Agent实例/运行会话”
+conversation_session_map: Dict[str, str] = {}
 
 # 默认 Agent 配置
 DEFAULT_MODEL = "claude-sonnet-4-5-20250929"
@@ -78,6 +84,7 @@ app.add_middleware(
 
 # 注册路由
 app.include_router(chat_router)
+app.include_router(knowledge_router)
 
 
 # ============================================================
@@ -95,10 +102,18 @@ def get_or_create_agent(session_id: Optional[str] = None, verbose: bool = True) 
     Returns:
         Agent 实例
     """
+    from logger import get_logger
+    logger = get_logger("main")
+    
+    # 🔍 输出当前 agent_pool 状态（改为 INFO 级别）
+    logger.info(f"🗃️ Agent池状态: 当前有 {len(agent_pool)} 个活跃会话")
+    
     if session_id and session_id in agent_pool:
+        logger.info(f"✅ 从池中获取已有Agent: session_id={session_id}")
         return agent_pool[session_id]
     
     # 创建新 Agent
+    logger.info(f"🔨 创建新的Agent实例: session_id={session_id or '(待分配)'}")
     agent = create_simple_agent(
         model=DEFAULT_MODEL,
         workspace_dir=DEFAULT_WORKSPACE,
@@ -108,8 +123,46 @@ def get_or_create_agent(session_id: Optional[str] = None, verbose: bool = True) 
     if session_id:
         agent.start_session(session_id)
         agent_pool[session_id] = agent
+        logger.info(f"📥 Agent已加入池: session_id={session_id}, 池大小={len(agent_pool)}")
     
     return agent
+
+
+def _new_session_id() -> str:
+    """生成运行会话ID（服务端内部ID）。"""
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"run_{ts}_{uuid4().hex[:8]}"
+
+
+def _new_conversation_id() -> str:
+    """生成对话线程ID（客户端会话ID）。"""
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"conv_{ts}_{uuid4().hex[:8]}"
+
+
+def get_or_create_agent_for_conversation(
+    conversation_id: Optional[str],
+    verbose: bool = True
+) -> tuple[str, str, SimpleAgent]:
+    """
+    以 conversation_id 为主键获取/创建 Agent。
+
+    规则：
+    - 客户端可以不传 conversation_id：服务端会生成并返回
+    - session_id 由服务端生成并维护（客户端无需传）
+    """
+    if not conversation_id:
+        conversation_id = _new_conversation_id()
+
+    session_id = conversation_session_map.get(conversation_id)
+    if session_id and session_id in agent_pool:
+        return conversation_id, session_id, agent_pool[session_id]
+
+    # 映射不存在或 agent 已被清理：生成新的运行会话ID，并创建新 agent
+    session_id = _new_session_id()
+    conversation_session_map[conversation_id] = session_id
+    agent = get_or_create_agent(session_id, verbose=verbose)
+    return conversation_id, session_id, agent
 
 
 # ============================================================

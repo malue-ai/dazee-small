@@ -1,0 +1,103 @@
+{
+  "endpoint": "https://api.slidespeak.co/api/v1/presentation/edit/slide",
+  "method": "POST",
+  "description": "Edit slides in an existing SlideSpeak presentation",
+  "auth": {
+    "type": "header",
+    "key": "X-API-Key",
+    "value": "$SLIDESPEAK_API_KEY"
+  },
+  "request": {
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "presentation_id": {
+        "type": "string",
+        "required": true,
+        "description": "The ID of the presentation to edit"
+      },
+      "edit_type": {
+        "type": "enum",
+        "required": true,
+        "values": ["INSERT", "REGENERATE", "REMOVE"],
+        "description": "Type of edit operation"
+      },
+      "position": {
+        "type": "integer",
+        "required": true,
+        "description": "Slide position (0-based index)"
+      },
+      "prompt": {
+        "type": "string",
+        "required": "conditional",
+        "description": "Required for INSERT and REGENERATE, not for REMOVE"
+      },
+      "fetch_images": {
+        "type": "boolean",
+        "required": false,
+        "description": "Whether to include images"
+      },
+      "verbosity": {
+        "type": "enum",
+        "required": false,
+        "values": ["concise", "standard", "text-heavy"],
+        "description": "Amount of text"
+      },
+      "tone": {
+        "type": "enum",
+        "required": false,
+        "values": ["default", "casual", "professional", "funny", "educational", "sales_pitch"],
+        "description": "Tone style"
+      },
+      "add_speaker_notes": {
+        "type": "boolean",
+        "required": false,
+        "description": "Whether to add speaker notes"
+      }
+    }
+  },
+  "response": {
+    "success": {
+      "task_id": {
+        "type": "string",
+        "description": "ID for polling task status"
+      }
+    },
+    "async_flow": {
+      "step1": "POST /presentation/edit/slide → task_id",
+      "step2": "GET /task_status/{task_id} → task_status",
+      "step3": "When task_status = SUCCESS → download URL available"
+    }
+  },
+  "examples": {
+    "insert": {
+      "presentation_id": "cmgt32cut0000h3ovex8dbzmn",
+      "edit_type": "INSERT",
+      "position": 3,
+      "prompt": "Add a pricing slide with 3 tiers",
+      "fetch_images": true,
+      "tone": "professional"
+    },
+    "regenerate": {
+      "presentation_id": "cmgt32cut0000h3ovex8dbzmn",
+      "edit_type": "REGENERATE",
+      "position": 5,
+      "prompt": "Regenerate with more detailed data and charts",
+      "verbosity": "text-heavy"
+    },
+    "remove": {
+      "presentation_id": "cmgt32cut0000h3ovex8dbzmn",
+      "edit_type": "REMOVE",
+      "position": 7
+    }
+  },
+  "notes": [
+    "INSERT and REGENERATE cost 1 API credit each",
+    "REMOVE costs 0 credits",
+    "Position is 0-based (cover=0, TOC=1, first content=2)",
+    "Cannot edit cover or table of contents",
+    "Async processing - requires polling task status"
+  ]
+}
+

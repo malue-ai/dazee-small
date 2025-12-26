@@ -6,7 +6,19 @@ from datetime import datetime
 class ChatRequest(BaseModel):
     """聊天请求"""
     message: str = Field(..., description="用户消息", min_length=1)
-    session_id: Optional[str] = Field(None, description="会话ID（可选）")
+    user_id: Optional[str] = Field(None, description="用户ID（可选，用于多租户隔离/知识库分区映射）")
+    conversation_id: Optional[str] = Field(
+        None,
+        description="对话线程ID（客户端会话ID，可选）：用于区分同一用户的多个对话，并在多次请求间延续上下文"
+    )
+    session_id: Optional[str] = Field(
+        None,
+        description="运行会话ID（服务端内部ID，可选）：用于标识一次后端运行/Agent实例；不要与 WebSocket 连接ID混用"
+    )
+    use_knowledge_base: bool = Field(
+        False,
+        description="是否使用知识库检索（试验期明确传递模式）：为 true 时会先检索用户知识库，并将相关内容注入到 LLM 上下文"
+    )
     stream: bool = Field(True, description="是否使用流式输出（默认为True）")
     
     model_config = {
@@ -14,7 +26,8 @@ class ChatRequest(BaseModel):
             "examples": [
                 {
                     "message": "帮我生成一个关于AI的PPT",
-                    "session_id": "20231224_120000",
+                    "user_id": "user_001",
+                    "conversation_id": "conv_20231224_120000",
                     "stream": True
                 }
             ]
@@ -24,7 +37,8 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     """聊天响应"""
-    session_id: str = Field(..., description="会话ID")
+    conversation_id: str = Field(..., description="对话线程ID（客户端会话ID）")
+    session_id: str = Field(..., description="运行会话ID（服务端内部ID）")
     content: str = Field(..., description="回复内容")
     status: str = Field(..., description="任务状态：success/failed/incomplete")
     turns: int = Field(..., description="执行轮次")
@@ -41,6 +55,7 @@ class ChatResponse(BaseModel):
         "json_schema_extra": {
             "examples": [
                 {
+                    "conversation_id": "conv_20231224_120000",
                     "session_id": "20231224_120000",
                     "content": "已经为您生成了PPT...",
                     "status": "success",
@@ -73,6 +88,8 @@ class ChatResponse(BaseModel):
 
 class StreamEvent(BaseModel):
     """流式输出事件"""
+    conversation_id: Optional[str] = Field(None, description="对话线程ID（客户端会话ID）")
+    session_id: Optional[str] = Field(None, description="运行会话ID（服务端内部ID）")
     type: str = Field(..., description="事件类型")
     data: Dict[str, Any] = Field(..., description="事件数据")
     timestamp: str = Field(..., description="时间戳")

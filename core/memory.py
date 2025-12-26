@@ -16,7 +16,9 @@ import json
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from pathlib import Path
+from logger import get_logger
 
+logger = get_logger("memory")
 
 class WorkingMemory:
     """
@@ -50,6 +52,10 @@ class WorkingMemory:
             "content": content,
             "timestamp": datetime.now().isoformat()
         })
+        
+        # 🔍 输出消息添加日志
+        content_preview = str(content)[:80] + '...' if len(str(content)) > 80 else str(content)
+        logger.debug(f"💾 添加消息到WorkingMemory: role={role}, 当前消息总数={len(self.messages)}, 内容={content_preview}")
     
     def add_tool_call(self, tool_name: str, tool_input: Dict[str, Any], result: Any = None):
         """记录工具调用"""

@@ -460,9 +460,10 @@ def select_tools_for_capabilities(
         Output: [exa_search, web_search, slidespeak-generator, plan_todo, bash]
                 (只有 5 个工具，而不是全部 50 个)
     """
-    from .capability_registry import Capability
+    from .capability_registry import Capability, CapabilityType
     
     selected = []
+    selected_skills_capabilities = set()  # 🆕 记录已选中 Skills 的能力需求
     context = context or {}
     
     # 1. 始终包含基础工具（任务管理和基础操作）
@@ -492,8 +493,26 @@ def select_tools_for_capabilities(
             
             if tool not in selected:
                 selected.append(tool)
+                
+                # 🆕 如果是 Skill,收集它的能力需求
+                if tool.type == CapabilityType.SKILL:
+                    selected_skills_capabilities.update(tool.capabilities)
     
-    # 3. 按优先级最终排序
+    # 🆕 3. 自动包含 Skills 所需的底层工具 (例如 api_calling)
+    # 这样,当选中 slidespeak-generator skill 时,会自动包含 api_calling 工具
+    for skill_capability in selected_skills_capabilities:
+        # 查找提供这个能力的 TOOL (不是 SKILL)
+        tools_for_capability = [
+            c for c in router.registry.find_by_capability_tag(skill_capability)
+            if c.type == CapabilityType.TOOL  # 只要工具,不要 Skills
+        ]
+        
+        for tool in tools_for_capability:
+            if tool not in selected and tool.meets_constraints(context):
+                selected.append(tool)
+                print(f"✅ 自动包含工具 {tool.name} (Skills 依赖)")
+    
+    # 4. 按优先级最终排序
     selected.sort(key=lambda c: c.priority, reverse=True)
     
     return selected
