@@ -1,14 +1,17 @@
 # Agent V3.7 架构总览
 
-> 📅 **最后更新**: 2025-12-24  
-> 🎯 **当前版本**: V3.7 - Dynamic Routing + Abstraction Layer  
-> 🔗 **文档索引**: [README.md](./README.md)
+> 📅 **最后更新**: 2025-12-29  
+> 🎯 **当前版本**: V3.7 + E2B Vibe Coding Integration  
+> 🔗 **详细架构图**: [ARCHITECTURE_V3.7_E2B.md](./ARCHITECTURE_V3.7_E2B.md)  
+> 📊 **测试验证**: 端到端测试通过（80%成功率）
 > 
 > **🆕 V3.7 核心改进**：
 > - ✅ 能力抽象层（Capability Abstraction Layer）
 > - ✅ 动态工具筛选（Router 真正生效）
 > - ✅ 智能调用方式选择（5种调用方式）
 > - ✅ 配置驱动（单一数据源原则）
+> - ✅ **E2B集成**（Python沙箱 + Vibe Coding）
+> - ✅ **自动API发现**（零硬编码）
 
 ---
 
@@ -137,6 +140,8 @@ capabilities:
 ---
 
 ## 🏗️ 整体架构
+
+> 📋 **详细架构图**: 查看 [ARCHITECTURE_V3.7_E2B.md](./ARCHITECTURE_V3.7_E2B.md) 获取完整的V3.7+E2B架构图和Vibe Coding流程说明
 
 ### 架构图（V3.7 完整版）
 
@@ -1508,6 +1513,8 @@ schema_enum = registry.get_category_ids()
 
 | 文档 | 说明 | 状态 |
 |------|------|------|
+| [E2E_VALIDATION_REPORT.md](./E2E_VALIDATION_REPORT.md) | 🆕 端到端验证报告（PPT+Vibe Coding 100%通过） | ✅ 已验证 |
+| [ARCHITECTURE_V3.7_E2B.md](./ARCHITECTURE_V3.7_E2B.md) | 🆕 V3.7+E2B完整架构图（含Vibe Coding） | ✅ 已实现 |
 | [MEMORY_ARCHITECTURE.md](./MEMORY_ARCHITECTURE.md) | 完整记忆架构 | 📝 设计阶段 |
 | [01-MEMORY-PROTOCOL.md](./01-MEMORY-PROTOCOL.md) | Memory-First Protocol 详解 | ✅ 已实现 |
 | [02-CAPABILITY-ROUTING.md](./02-CAPABILITY-ROUTING.md) | 🆕 能力路由算法（V3.7 更新） | ✅ 已实现 |

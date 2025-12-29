@@ -1,0 +1,192 @@
+# ============================================================
+# E2B 沙箱模板配置
+# ============================================================
+# 参考文档: https://e2b.dev/docs/template/defining-template
+# ============================================================
+
+templates:
+  # ==================== 基础模板 ====================
+  base:
+    name: "Base Python"
+    build_method: "use_builtin"
+    template_id: "base"
+    default_packages: []
+    description: "纯净 Python 环境，适合简单任务和快速启动"
+    startup_time: "< 200ms"
+    use_cases:
+      - 简单计算
+      - 配置生成
+      - 快速脚本执行
+  
+  # ==================== 数据分析模板 ====================
+  data-analysis:
+    name: "Data Analysis"
+    build_method: "custom_build"
+    base_template: "base"
+    pre_install_packages:
+      - pandas>=2.0.0
+      - numpy>=1.24.0
+      - matplotlib>=3.7.0
+      - seaborn>=0.12.0
+      - plotly>=5.14.0
+      - scipy>=1.10.0
+      - scikit-learn>=1.2.0
+      - openpyxl>=3.1.0  # Excel 支持
+    description: "数据分析专用环境，预装常用数据科学包"
+    startup_time: "< 200ms (预构建)"
+    use_cases:
+      - CSV/Excel 数据分析
+      - 统计分析
+      - 数据可视化
+      - 机器学习任务
+    
+  # ==================== 网络爬虫模板 ====================
+  web-scraping:
+    name: "Web Scraping"
+    build_method: "custom_build"
+    base_template: "base"
+    pre_install_packages:
+      - requests>=2.31.0
+      - beautifulsoup4>=4.12.0
+      - lxml>=4.9.0
+      - selenium>=4.10.0
+      - httpx>=0.24.0
+    description: "网页抓取专用环境，预装爬虫工具"
+    startup_time: "< 200ms (预构建)"
+    use_cases:
+      - 网页数据爬取
+      - API 调用
+      - 动态网页处理
+      - 批量数据采集
+
+# ============================================================
+# 路由规则：Agent 根据任务类型自动选择模板
+# ============================================================
+routing_rules:
+  - task_type: "data_analysis"
+    preferred_template: "data-analysis"
+    reason: "预装数据分析包，启动快，无需运行时安装"
+    conditions:
+      - "需要 pandas/numpy/matplotlib"
+      - "处理 CSV/Excel 文件"
+      - "生成图表和可视化"
+  
+  - task_type: "web_scraping"
+    preferred_template: "web-scraping"
+    reason: "预装爬虫工具，避免安装延迟"
+    conditions:
+      - "需要爬取网页数据"
+      - "调用 REST API"
+      - "使用 requests/beautifulsoup4"
+  
+  - task_type: "code_execution"
+    preferred_template: "base"
+    reason: "通用任务，按需安装包，灵活性高"
+    conditions:
+      - "不确定需要哪些包"
+      - "简单脚本执行"
+      - "快速测试"
+
+# ============================================================
+# 构建配置（自定义模板构建参数）
+# ============================================================
+build_config:
+  # 默认构建参数
+  default:
+    cpu_count: 2
+    memory_mb: 2048
+    timeout_seconds: 300
+  
+  # 按模板覆盖
+  overrides:
+    data-analysis:
+      cpu_count: 4  # 数据分析需要更多 CPU
+      memory_mb: 4096  # 更多内存
+
+# ============================================================
+# 包管理策略
+# ============================================================
+package_management:
+  # 自动检测策略
+  auto_detect:
+    enabled: true
+    description: "从代码中自动检测 import 语句并安装缺失的包"
+    
+  # 包安装超时
+  install_timeout: 120
+  
+  # 包版本管理
+  pin_versions: false  # 是否固定包版本（false=使用最新）
+  
+  # 常见包映射（import 名 → pip 包名）
+  package_mapping:
+    cv2: opencv-python
+    PIL: Pillow
+    sklearn: scikit-learn
+    bs4: beautifulsoup4
+
+# ============================================================
+# 文件系统配置
+# ============================================================
+filesystem:
+  # 沙箱目录结构
+  sandbox_dirs:
+    input: "/home/user/input_data"
+    output: "/home/user/output_data"
+    scripts: "/home/user/scripts"
+    temp: "/home/user/temp"
+  
+  # 本地工作区目录
+  workspace_dirs:
+    input: "workspace/inputs"
+    output: "workspace/outputs"
+    temp: "workspace/temp"
+  
+  # 自动同步配置
+  auto_sync:
+    enabled: true
+    sync_on_startup: true  # 沙箱启动时同步
+    sync_on_completion: true  # 执行完成时同步
+    
+  # 文件大小限制
+  max_file_size_mb: 100
+  max_total_size_mb: 500
+
+# ============================================================
+# 性能优化配置
+# ============================================================
+performance:
+  # 沙箱池配置
+  sandbox_pool:
+    enabled: true
+    max_size: 5  # 最多缓存 5 个沙箱
+    idle_timeout_minutes: 30  # 闲置 30 分钟后回收
+  
+  # 模板缓存
+  template_cache:
+    enabled: true
+    ttl_hours: 24  # 缓存 24 小时
+  
+  # 预热配置
+  warmup:
+    enabled: false  # 是否在启动时预创建沙箱
+    templates: ["base"]  # 预热的模板列表
+
+# ============================================================
+# 监控和日志
+# ============================================================
+monitoring:
+  # 性能指标
+  metrics:
+    track_execution_time: true
+    track_resource_usage: true
+    track_api_calls: true
+  
+  # 日志级别
+  log_level: "INFO"  # DEBUG/INFO/WARNING/ERROR
+  
+  # 保存执行历史
+  save_history:
+    enabled: true
+    max_entries: 100
+

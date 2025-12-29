@@ -21,3 +21,7 @@ redis>=5.0.0
 
 # Token 计数
 tiktoken>=0.5.0
+
+# E2B Sandbox
+e2b>=1.0.0
+e2b-code-interpreter>=1.0.0
