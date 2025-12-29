@@ -47,12 +47,21 @@ task_type_mappings:
   data_analysis:
     - data_analysis
     - file_operations
+    - code_sandbox      # 🆕 优先使用沙箱（支持第三方包）
     - code_execution
     - task_planning
   
   code_task:
     - code_execution
+    - code_sandbox
+    - app_generation
     - file_operations
+    - task_planning
+  
+  app_creation:
+    - app_generation
+    - code_sandbox
+    - data_visualization
     - task_planning
   
   other:
@@ -95,6 +104,16 @@ capability_categories:
     description: "执行代码和脚本"
     use_when: "需要运行Python/Bash脚本、计算逻辑"
     examples: ["数据转换", "自动化任务", "计算处理"]
+  
+  - id: code_sandbox
+    description: "在安全沙箱中执行Python代码（支持网络、第三方包、文件持久化）"
+    use_when: "需要网络访问、第三方Python包、文件持久化"
+    examples: ["爬取网页数据", "使用pandas分析CSV", "调用REST API"]
+  
+  - id: app_generation
+    description: "生成完整的Web应用（Streamlit/Gradio/Next.js）并返回预览URL"
+    use_when: "需要创建完整的交互式应用，用户可通过浏览器访问"
+    examples: ["创建数据可视化应用", "生成ML模型界面", "创建Web应用"]
     
   - id: api_calling
     description: "调用外部API服务"
@@ -975,6 +994,212 @@ capabilities:
         - 探索
         - 自定义
         - 动态
+  
+  # ==================== E2B Sandbox & Vibe Coding ====================
+  
+  - name: e2b_vibe_coding
+    type: TOOL
+    subtype: CUSTOM
+    provider: user
+    
+    implementation:
+      module: "tools.e2b_vibe_coding"
+      class: "E2BVibeCoding"
+    
+    capabilities:
+      - app_generation
+      - code_execution
+      - data_visualization
+    
+    priority: 95
+    
+    cost:
+      time: fast
+      money: low
+    
+    constraints:
+      requires_api: true
+      requires_network: true
+      api_name: e2b
+      session_scoped: true
+      supports_preview: true
+    
+    metadata:
+      description: |
+        生成完整的 Web 应用（Streamlit/Gradio）并返回实时预览 URL。
+        
+        支持的技术栈：
+        • Streamlit - 数据可视化应用
+        • Gradio - ML 模型界面
+        • Next.js - 全栈 Web 应用
+        • Vue.js - 前端应用
+      
+      preferred_for:
+        - 数据可视化应用
+        - 交互式数据分析工具
+        - ML 模型演示界面
+        - 需要实时预览的应用
+      
+      keywords:
+        - vibe coding
+        - streamlit
+        - gradio
+        - 应用生成
+        - 预览
+        - app
+    
+    input_schema:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: ["create", "update", "get_logs", "terminate", "list"]
+          description: "操作类型"
+        stack:
+          type: string
+          enum: ["streamlit", "gradio", "nextjs", "vue"]
+          description: "技术栈（create时必填）"
+        description:
+          type: string
+          description: "应用描述（create时必填）"
+        code:
+          type: string
+          description: "应用代码（create/update时必填）"
+        app_id:
+          type: string
+          description: "应用ID（update/get_logs/terminate时必填）"
+      required:
+        - action
+  
+  - name: e2b_python_sandbox
+    type: TOOL
+    subtype: CUSTOM
+    provider: user
+    
+    implementation:
+      module: "tools.e2b_sandbox"
+      class: "E2BPythonSandbox"
+    
+    capabilities:
+      - code_sandbox
+      - code_execution
+      - data_analysis
+      - web_scraping
+      - api_calling
+      - file_operations
+    
+    priority: 85
+    
+    cost:
+      time: fast
+      money: low
+    
+    constraints:
+      requires_api: true
+      requires_network: true
+      api_name: e2b
+      session_scoped: true
+      supports_persistence: true
+    
+    metadata:
+      description: |
+        在安全的E2B沙箱中执行Python代码。
+        
+        核心特性：
+        • ✅ 完整网络访问（requests, httpx等）
+        • ✅ 任意第三方包（pip install或自动检测）
+        • ✅ 文件系统持久化（跨调用保持）
+        • ✅ 长时间运行（最长24小时）
+        • ✅ 多轮交互（会话级沙箱复用）
+        • ✅ 流式输出（实时显示stdout/stderr）
+        • ✅ 后台任务（支持长时运行任务）
+      
+      preferred_for:
+        - 网络请求和API调用
+        - 数据爬取和网页抓取
+        - 使用第三方Python包（pandas, numpy, requests等）
+        - 需要文件持久化的任务
+        - 长时间运行的任务
+        - 多步骤代码执行（需要保持状态）
+        - 数据可视化（生成图表）
+      
+      keywords:
+        - sandbox
+        - python
+        - network
+        - pip
+        - requests
+        - pandas
+        - 沙箱
+        - 网络
+        - 爬虫
+        - 数据分析
+      
+      note: |
+        文件系统规范：
+        - 读取文件：/home/user/input_data/文件名
+        - 保存文件：/home/user/output_data/文件名（会自动下载）
+        - workspace/inputs/ 会自动同步到沙箱
+        - 沙箱中的 output_data/ 会自动下载到 workspace/outputs/
+    
+    input_schema:
+      type: object
+      properties:
+        code:
+          type: string
+          description: |
+            要执行的Python代码。
+            
+            提示：
+            • 可以使用任意Python包（会自动检测并安装）
+            • 支持网络访问
+            • 读取文件：/home/user/input_data/文件名
+            • 保存文件：/home/user/output_data/文件名（会自动下载）
+            • 使用 print() 输出结果
+        
+        template:
+          type: string
+          enum: ["base", "data-analysis", "web-scraping"]
+          description: |
+            沙箱模板（可选，默认根据任务类型自动选择）。
+            • base: 纯净环境，按需安装
+            • data-analysis: 预装 pandas/numpy/matplotlib
+            • web-scraping: 预装 requests/beautifulsoup4
+        
+        enable_stream:
+          type: boolean
+          description: "是否启用流式输出（默认true）"
+          default: true
+        
+        auto_install:
+          type: boolean
+          description: "是否自动检测并安装缺失的包（默认true）"
+          default: true
+        
+        timeout:
+          type: integer
+          description: "代码执行超时时间（秒），默认300秒（5分钟）"
+          default: 300
+          minimum: 10
+          maximum: 3600
+        
+        background:
+          type: boolean
+          description: "是否在后台运行（适合长时任务）"
+          default: false
+        
+        return_files:
+          type: array
+          items:
+            type: string
+          description: |
+            需要返回的文件路径列表（可选）。
+            文件会自动下载到 workspace/outputs/
+            
+            示例: ["/home/user/output_data/result.csv", "/home/user/output_data/chart.png"]
+      
+      required:
+        - code
 
 # ============================================================
 # 配置说明

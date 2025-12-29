@@ -1373,7 +1373,8 @@ def load_skills_metadata(skills_dir: Optional[str] = None) -> str:
 
 def get_universal_agent_prompt(
     include_skills: bool = True,
-    skills_dir: Optional[str] = None
+    skills_dir: Optional[str] = None,
+    include_e2b: bool = True
 ) -> str:
     """
     获取通用智能体框架系统提示词
@@ -1381,12 +1382,24 @@ def get_universal_agent_prompt(
     Args:
         include_skills: 是否包含Skills metadata
         skills_dir: Skills目录路径
+        include_e2b: 是否包含E2B协议（默认True）
         
     Returns:
         完整的系统提示词
     """
     prompt = UNIVERSAL_AGENT_PROMPT
     
+    # 🆕 添加 E2B 协议
+    if include_e2b:
+        try:
+            from prompts.e2b_sandbox_protocol import get_e2b_sandbox_protocol
+            e2b_protocol = get_e2b_sandbox_protocol()
+            prompt += "\n\n---\n\n" + e2b_protocol
+        except Exception as e:
+            # 如果加载失败，不影响主流程
+            pass
+    
+    # 添加 Skills
     if include_skills:
         skills_section = load_skills_metadata(skills_dir)
         if skills_section:

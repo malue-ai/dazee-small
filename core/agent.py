@@ -151,8 +151,16 @@ class SimpleAgent:
         self.skills_manager = create_skills_manager()
         logger.debug(f"SkillsManager loaded: {len(self.skills_manager.skills)} skills")
         
-        # 4. 工具执行器
-        self.tool_executor = create_tool_executor(self.capability_registry)
+        # 4. 工具执行器（传入架构级依赖）
+        from core.memory import WorkingMemory
+        self.working_memory = WorkingMemory()
+        
+        tool_context = {
+            "memory": self.working_memory,
+            "event_manager": self.event_manager,
+            "workspace_dir": workspace_dir
+        }
+        self.tool_executor = create_tool_executor(self.capability_registry, tool_context=tool_context)
         logger.debug("ToolExecutor initialized")
         
         # 5. Plan/Todo 状态管理（仅保留任务状态，不管理对话历史）
@@ -172,6 +180,15 @@ class SimpleAgent:
             registry=self.capability_registry  # 传入 Registry 用于动态 Schema
         )
         logger.debug("PlanTodoTool initialized (using internal state + dynamic schema)")
+        
+        # 🆕 6.5. E2B Template Manager - 模板管理器
+        try:
+            from tools.e2b_template_manager import create_e2b_template_manager
+            self.e2b_template_manager = create_e2b_template_manager()
+            logger.debug("E2B Template Manager initialized")
+        except Exception as e:
+            self.e2b_template_manager = None
+            logger.warning(f"E2B Template Manager initialization skipped: {e}")
         
         # 🆕 7. InvocationSelector - 调用方式选择器
         from core.invocation_selector import create_invocation_selector
@@ -286,6 +303,42 @@ class SimpleAgent:
         
         # 组合：基础提示词 + 能力分类 + Skills
         return f"{base_prompt}\n\n{capability_categories}\n\n{skills_metadata}"
+    
+    def _get_available_apis(self) -> List[str]:
+        """
+        🆕 自动发现可用的API（完全从配置和运行时状态推断）
+        
+        架构原则（V3.7）：
+        - 零硬编码：不在代码中维护任何工具/API列表
+        - 配置驱动：所有信息来自 capabilities.yaml
+        - 运行时发现：工具加载成功 = API可用
+        
+        发现逻辑：
+        1. 遍历 ToolExecutor 已成功加载的工具
+        2. 从 capabilities.yaml 读取工具的 api_name
+        3. 工具加载成功 → 其 api_name 可用
+        
+        Returns:
+            可用API名称列表
+        """
+        available_apis = set()
+        
+        # 从ToolExecutor获取已加载的工具
+        loaded_tools = self.tool_executor._tool_instances
+        
+        for tool_name, tool_instance in loaded_tools.items():
+            if tool_instance is None:
+                continue  # 未成功加载的工具跳过
+            
+            # 从Registry获取工具的约束配置
+            capability = self.capability_registry.get(tool_name)
+            if capability and capability.constraints:
+                api_name = capability.constraints.get('api_name')
+                if api_name:
+                    available_apis.add(api_name)
+        
+        logger.debug(f"🔍 自动发现可用API: {list(available_apis)}")
+        return list(available_apis)
     
     def _infer_capabilities_from_task_type(self, task_type: str) -> List[str]:
         """
@@ -452,15 +505,24 @@ class SimpleAgent:
         
         # Router 筛选工具
         from core.capability_router import select_tools_for_capabilities
+        
+        # 🆕 自动发现可用API（从已加载的工具推断）
+        available_apis = self._get_available_apis()
+        
         selected_tools = select_tools_for_capabilities(
             self.capability_router,
             required_capabilities=required_capabilities,
             context={
                 "plan": plan, 
                 "task_type": intent_analysis['task_type'],
-                "available_apis": ["slidespeak", "ragie", "exa"]  # 🆕 声明可用的API
+                "available_apis": available_apis  # 🆕 自动发现，不硬编码
             }
         )
+        
+        # 🔍 调试：打印Router结果
+        logger.debug(f"🔍 Router返回工具数量: {len(selected_tools)}")
+        for t in selected_tools:
+            logger.debug(f"  - {t.name} (capabilities={t.capabilities})")
         
         # InvocationSelector 选择调用方式
         invocation_strategy = self.invocation_selector.select_strategy(
@@ -714,7 +776,7 @@ class SimpleAgent:
                     invocation_method = tool_call.get('invocation_method', 'direct')
                     self.invocation_stats[invocation_method] += 1
                 
-                # 🆕 执行工具（简化版，不使用复杂的进度回调）
+                # 执行工具
                 tool_results = await self._execute_tools(response.tool_calls)
                 
                 # 通知工具完成
@@ -723,7 +785,18 @@ class SimpleAgent:
                     yield await self._emit_agent_event(session_id, "tool_call_complete", {
                         "tool_name": tool_call.get("name", ""),
                         "success": result_content.get("success", True),
-                        "result": result_content.get("result")
+                        "result": result_content  
+                    })
+                
+                # 🆕 更新 Plan 进度
+                # 注：Plan进度由 plan_todo 工具管理，Agent 不直接更新
+                
+                # 🆕 通知 Plan 进度更新
+                updated_plan = self.plan_state.get("plan")
+                if updated_plan:
+                    yield await self._emit_agent_event(session_id, "plan_update", {
+                        "plan": updated_plan,
+                        "progress": self._format_progress_display(updated_plan)
                     })
                 
                 # 更新 messages（官方模式：assistant 消息 + tool_result）
@@ -769,50 +842,6 @@ class SimpleAgent:
             event_data=data
         )
     
-    async def _execute_tools(self, tool_calls: List[Dict]) -> List[Dict]:
-        """
-        🆕 工具执行后更新 Plan 进度（用户可见的实时进度）
-        
-        逻辑：
-        1. 检查 WorkingMemory 中是否有 Plan
-        2. 根据工具调用更新对应步骤的状态
-        3. 显示更新后的进度
-        """
-        # 检查是否有 Plan
-        if self.plan_state.get("plan") is None:
-            return
-        
-        plan = self.plan_state.get("plan")
-        if not plan or 'steps' not in plan:
-            return
-        
-        steps = plan.get('steps', [])
-        if not steps:
-            return
-        
-        # 更新步骤状态：匹配工具名和步骤
-        for tool_call in tool_calls:
-            tool_name = tool_call.get('name', '')
-            
-            for step in steps:
-                # 如果步骤还是 pending 且包含这个工具名
-                if step.get('status') == 'pending':
-                    action = step.get('action', '').lower()
-                    if tool_name.lower() in action or action in tool_name.lower():
-                        step['status'] = 'completed'
-                        break
-        
-        # 计算进度
-        total = len(steps)
-        completed = sum(1 for s in steps if s.get('status') == 'completed')
-        progress = completed / total if total > 0 else 0
-        
-        # 更新 plan_state
-        self.plan_state["plan"] = plan
-        
-        # 显示进度更新（用户可见）
-        self._display_plan_progress_update(plan, completed, total, progress)
-
     def _display_plan_progress_update(self, plan: Dict, completed: int, total: int, progress: float):
         """
         🆕 显示 Todo 进度更新（用户可见）
@@ -1011,6 +1040,14 @@ class SimpleAgent:
                 elif tool_name == "request_human_confirmation":
                     # 🆕 HITL 工具：注入 emit_event 回调和 session_id
                     result = await self._execute_hitl_tool(tool_input)
+                    result['invocation_method'] = invocation_method
+                elif tool_name == "e2b_python_sandbox":
+                    # 🆕 E2B Python Sandbox：注入 session_id 用于流式输出
+                    enriched_input = {
+                        **tool_input,
+                        "session_id": self._current_session_id  # 注入 session_id
+                    }
+                    result = await self.tool_executor.execute(tool_name, enriched_input)
                     result['invocation_method'] = invocation_method
                 else:
                     # 其他自定义工具

@@ -1,12 +1,13 @@
 """
-工具执行器 - V3.5版本
-配置驱动，自动注册
+工具执行器 - V3.7版本
+配置驱动，自动注册，依赖注入
 
 设计原则：
 1. 配置驱动：从CapabilityRegistry加载工具
 2. 自动注册：从capabilities.yaml自动加载工具实现
-3. 动态加载：支持运行时加载新工具
-4. 统一接口：所有工具通过相同方式执行
+3. 依赖注入：通过 tool_context 注入 memory、event_manager 等
+4. 动态加载：支持运行时加载新工具
+5. 统一接口：所有工具通过相同方式执行
 
 使用方式：
 1. 在capabilities.yaml中添加工具配置：
@@ -14,6 +15,7 @@
      implementation:
        module: "tools.my_tool"
        class: "MyTool"
+       requires_context: true  # 🆕 需要依赖注入
 2. 实现工具类继承BaseTool
 3. 无需修改此文件 - 工具会自动加载！
 
@@ -26,6 +28,8 @@
 from typing import Dict, Any, Optional, List, Callable
 from importlib import import_module
 import asyncio
+import inspect
+import os
 
 from core.capability_registry import (
     CapabilityRegistry,
@@ -50,14 +54,24 @@ class ToolExecutor:
         # 添加更多工具映射...（不推荐）
     }
     
-    def __init__(self, registry: Optional[CapabilityRegistry] = None):
+    def __init__(
+        self, 
+        registry: Optional[CapabilityRegistry] = None,
+        tool_context: Optional[Dict[str, Any]] = None
+    ):
         """
         初始化工具执行器
         
         Args:
             registry: 能力注册表（如果为None则自动创建）
+            tool_context: 🆕 工具上下文（用于依赖注入）
+                - memory: WorkingMemory 实例
+                - event_manager: EventManager 实例
+                - workspace_dir: 工作目录路径
+                - api_key: E2B API Key
         """
         self.registry = registry or create_capability_registry()
+        self.tool_context = tool_context or {}
         self._tool_instances: Dict[str, Any] = {}
         self._tool_handlers: Dict[str, Callable] = {}
         self._load_tools()
@@ -79,11 +93,15 @@ class ToolExecutor:
     
     def _load_custom_tool(self, cap: Capability):
         """
-        动态加载自定义工具
+        动态加载自定义工具（支持依赖注入）
         
         优先级：
         1. capabilities.yaml 中的 implementation 配置（推荐）
         2. TOOL_CLASS_MAPPING 硬编码映射（向后兼容）
+        
+        依赖注入：
+        - 检查工具构造函数参数
+        - 自动从 tool_context 注入匹配的依赖
         """
         tool_name = cap.name
         
@@ -107,11 +125,21 @@ class ToolExecutor:
                     self._tool_instances[tool_name] = None
                     return
                 
-                # 动态导入并实例化
+                # 动态导入
                 module = import_module(module_path)
                 tool_class = getattr(module, class_name)
-                self._tool_instances[tool_name] = tool_class()
-                print(f"✅ Auto-loaded tool: {tool_name} from {module_path}.{class_name}")
+                
+                # 🆕 依赖注入：检查构造函数参数
+                init_params = self._get_init_params(tool_class)
+                kwargs = self._resolve_dependencies(init_params, tool_name)
+                
+                # 实例化（带依赖注入）
+                if kwargs:
+                    self._tool_instances[tool_name] = tool_class(**kwargs)
+                    print(f"✅ Auto-loaded tool: {tool_name} with context: {list(kwargs.keys())}")
+                else:
+                    self._tool_instances[tool_name] = tool_class()
+                    print(f"✅ Auto-loaded tool: {tool_name} from {module_path}.{class_name}")
                 return
             
             except Exception as e:
@@ -133,6 +161,39 @@ class ToolExecutor:
         # 未找到任何加载方式
         print(f"⚠️ Warning: Tool {tool_name} has no implementation config or mapping, skipped")
         self._tool_instances[tool_name] = None
+    
+    def _get_init_params(self, tool_class) -> List[str]:
+        """获取工具类构造函数的参数名"""
+        try:
+            sig = inspect.signature(tool_class.__init__)
+            return [p for p in sig.parameters.keys() if p != 'self']
+        except Exception:
+            return []
+    
+    def _resolve_dependencies(self, params: List[str], tool_name: str) -> Dict[str, Any]:
+        """
+        根据参数名从 tool_context 解析依赖
+        
+        注意：
+        - 只注入架构级依赖（memory, event_manager, workspace_dir）
+        - 不注入工具特定的配置（如 api_key）- 工具应自己从环境变量获取
+        """
+        kwargs = {}
+        
+        # 参数名到 context key 的映射（仅架构级依赖）
+        param_mapping = {
+            "memory": "memory",
+            "event_manager": "event_manager",
+            "workspace_dir": "workspace_dir",
+        }
+        
+        for param in params:
+            if param in param_mapping:
+                context_key = param_mapping[param]
+                if context_key in self.tool_context and self.tool_context[context_key]:
+                    kwargs[param] = self.tool_context[context_key]
+        
+        return kwargs
     
     def register_handler(self, tool_name: str, handler: Callable):
         """
@@ -344,14 +405,18 @@ class ToolExecutor:
 
 # ==================== 便捷函数 ====================
 
-def create_tool_executor(registry: CapabilityRegistry = None) -> ToolExecutor:
+def create_tool_executor(
+    registry: CapabilityRegistry = None,
+    tool_context: Dict[str, Any] = None
+) -> ToolExecutor:
     """
     创建工具执行器
     
     Args:
         registry: 能力注册表
+        tool_context: 🆕 工具上下文（用于依赖注入）
         
     Returns:
         配置好的ToolExecutor实例
     """
-    return ToolExecutor(registry=registry)
+    return ToolExecutor(registry=registry, tool_context=tool_context)

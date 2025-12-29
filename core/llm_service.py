@@ -175,9 +175,20 @@ class ClaudeLLMService(BaseLLMService):
         self.config = config
         
         # 🆕 异步客户端（用于真正的异步调用）
+        # 增加timeout和重试配置以提高稳定性
+        # 参考：https://docs.anthropic.com/en/api/client-sdks
         self.async_client = anthropic.AsyncAnthropic(
             api_key=config.api_key,
-            timeout=1800.0  # 30分钟超时，足够处理复杂任务
+            timeout=600.0,    # 10分钟超时（单次请求）
+            max_retries=3     # 🆕 自动重试3次（处理网络抖动）
+        )
+        
+        # Beta client (用于 Tool Search, Code Execution 等)
+        # 🆕 使用异步客户端
+        self.beta_client = anthropic.AsyncAnthropic(
+            api_key=config.api_key,
+            timeout=600.0,
+            max_retries=3
         )
         
         # 工具注册表

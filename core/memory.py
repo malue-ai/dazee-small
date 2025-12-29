@@ -45,6 +45,10 @@ class WorkingMemory:
         self.plan_json: Optional[Dict[str, Any]] = None  # 内部 RVR 调度
         self.todo_md: Optional[str] = None  # 用户进度展示
         
+        # 🆕 E2B 沙箱会话管理
+        self.e2b_session: Optional["E2BSandboxSession"] = None
+        self.e2b_execution_history: List[Dict[str, Any]] = []
+        
     def add_message(self, role: str, content: Any):
         """添加消息"""
         self.messages.append({
@@ -480,6 +484,188 @@ class MemoryManager:
                 context["relevant_episodes"] = similar_episodes
         
         return context
+
+
+# ==================== E2B 沙箱会话管理 ====================
+
+class E2BSandboxSession:
+    """
+    E2B沙箱会话信息（存储在WorkingMemory）
+    
+    设计原则（Memory-First）：
+    1. 沙箱信息持久化在Memory,而不是工具内部变量
+    2. 支持多轮对话（用户可以说"继续处理数据"）
+    3. session结束时自动清理资源
+    """
+    
+    def __init__(
+        self,
+        sandbox_id: str,
+        created_at: datetime,
+        template: str = "base",
+        status: str = "active"
+    ):
+        self.sandbox_id = sandbox_id
+        self.template = template
+        self.created_at = created_at
+        self.last_used = created_at
+        self.status = status  # "active" / "idle" / "terminated"
+        self.execution_count = 0
+        self.files: Dict[str, Any] = {}  # 文件记录
+        self.installed_packages: List[str] = []
+        self.env_vars: Dict[str, str] = {}
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """序列化为字典（存储到Memory）"""
+        return {
+            "sandbox_id": self.sandbox_id,
+            "template": self.template,
+            "created_at": self.created_at.isoformat(),
+            "last_used": self.last_used.isoformat(),
+            "status": self.status,
+            "execution_count": self.execution_count,
+            "files": self.files,
+            "installed_packages": self.installed_packages,
+            "env_vars": self.env_vars
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "E2BSandboxSession":
+        """从字典反序列化"""
+        session = cls(
+            sandbox_id=data["sandbox_id"],
+            created_at=datetime.fromisoformat(data["created_at"]),
+            template=data.get("template", "base"),
+            status=data.get("status", "active")
+        )
+        session.last_used = datetime.fromisoformat(data["last_used"])
+        session.execution_count = data.get("execution_count", 0)
+        session.files = data.get("files", {})
+        session.installed_packages = data.get("installed_packages", [])
+        session.env_vars = data.get("env_vars", {})
+        return session
+
+
+# WorkingMemory 扩展 E2B 方法
+def _extend_working_memory_with_e2b():
+    """扩展 WorkingMemory 类，添加 E2B 相关方法"""
+    
+    def set_e2b_session(self: WorkingMemory, session: E2BSandboxSession):
+        """设置E2B沙箱会话"""
+        self.e2b_session = session
+        logger.debug(f"[Memory] E2B会话已创建: {session.sandbox_id}")
+    
+    def get_e2b_session(self: WorkingMemory) -> Optional[E2BSandboxSession]:
+        """获取当前E2B会话"""
+        return self.e2b_session
+    
+    def has_e2b_session(self: WorkingMemory) -> bool:
+        """检查是否有活跃的E2B会话"""
+        return (
+            self.e2b_session is not None 
+            and self.e2b_session.status == "active"
+        )
+    
+    def update_e2b_session(self: WorkingMemory, **kwargs):
+        """更新E2B会话信息"""
+        if self.e2b_session:
+            for key, value in kwargs.items():
+                if hasattr(self.e2b_session, key):
+                    setattr(self.e2b_session, key, value)
+            self.e2b_session.last_used = datetime.now()
+    
+    def clear_e2b_session(self: WorkingMemory):
+        """清除E2B会话（终止沙箱）"""
+        if self.e2b_session:
+            logger.info(f"[Memory] E2B会话已清除: {self.e2b_session.sandbox_id}")
+            self.e2b_session.status = "terminated"
+            self.e2b_session = None
+    
+    def add_e2b_execution(
+        self: WorkingMemory,
+        code: str,
+        result: Dict[str, Any],
+        execution_time: float
+    ):
+        """
+        记录E2B代码执行历史
+        
+        用途：
+        1. 提供给LLM作为上下文（多轮对话）
+        2. 调试和分析
+        """
+        execution_record = {
+            "timestamp": datetime.now().isoformat(),
+            "code": code,
+            "result": result,
+            "execution_time": execution_time,
+            "success": result.get("success", False)
+        }
+        self.e2b_execution_history.append(execution_record)
+        
+        # 限制历史记录数量（避免Memory过大）
+        if len(self.e2b_execution_history) > 10:
+            self.e2b_execution_history.pop(0)
+        
+        # 更新会话执行计数
+        if self.e2b_session:
+            self.e2b_session.execution_count += 1
+    
+    def get_e2b_context_for_llm(self: WorkingMemory, max_history: int = 3) -> str:
+        """
+        获取E2B上下文（给LLM）
+        
+        精简版本，只包含关键信息：
+        - 当前沙箱状态
+        - 最近N次执行历史（摘要）
+        - 已安装的包
+        - 存在的文件
+        """
+        if not self.e2b_session:
+            return ""
+        
+        context_parts = [
+            "## 📦 E2B沙箱状态",
+            f"- Sandbox ID: {self.e2b_session.sandbox_id}",
+            f"- 执行次数: {self.e2b_session.execution_count}",
+        ]
+        
+        if self.e2b_session.installed_packages:
+            context_parts.append(
+                f"- 已安装包: {', '.join(self.e2b_session.installed_packages)}"
+            )
+        
+        if self.e2b_session.files:
+            context_parts.append(
+                f"- 文件: {', '.join(self.e2b_session.files.keys())}"
+            )
+        
+        # 最近的执行历史（摘要）
+        recent = self.e2b_execution_history[-max_history:]
+        if recent:
+            context_parts.append("\n## 📝 最近执行历史")
+            for i, exec_record in enumerate(recent, 1):
+                status = "✅" if exec_record["success"] else "❌"
+                context_parts.append(
+                    f"{i}. {status} {exec_record['timestamp'][:19]}"
+                )
+                # 只显示代码的第一行（摘要）
+                first_line = exec_record['code'].split('\n')[0][:50]
+                context_parts.append(f"   代码: {first_line}...")
+        
+        return "\n".join(context_parts)
+    
+    # 动态添加方法到 WorkingMemory 类
+    WorkingMemory.set_e2b_session = set_e2b_session
+    WorkingMemory.get_e2b_session = get_e2b_session
+    WorkingMemory.has_e2b_session = has_e2b_session
+    WorkingMemory.update_e2b_session = update_e2b_session
+    WorkingMemory.clear_e2b_session = clear_e2b_session
+    WorkingMemory.add_e2b_execution = add_e2b_execution
+    WorkingMemory.get_e2b_context_for_llm = get_e2b_context_for_llm
+
+# 执行扩展
+_extend_working_memory_with_e2b()
 
 
 # 便捷函数
