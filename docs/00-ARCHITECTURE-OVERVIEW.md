@@ -235,7 +235,7 @@ capabilities:
                                 │
                                 ▼
         ┌───────────────────────────────────────────────────────────┐
-        │                    SimpleAgent 启动                        │
+        │                    SimpleAgent 启动     （缓存？）                   │
         │  1️⃣ 初始化组件：                                           │
         │     • CapabilityRegistry 加载 capabilities.yaml           │
         │     • 构建 System Prompt（注入能力分类）                   │
@@ -282,39 +282,23 @@ capabilities:
                                 │
                                 ▼
         ┌───────────────────────────────────────────────────────────┐
-        │          阶段 3: Plan Creation (Sonnet + Extended Thinking)│
+        │          阶段 3: Plan Creation (Sonnet)                    │
         ├───────────────────────────────────────────────────────────┤
-        │  Model: claude-sonnet-4-5-20250929 (强+准确)              │
-        │  Tools: [plan_todo] (只传这一个工具)                      │
+        │  Input: user_input, intent_analysis, Router筛选的工具     │
+        │  Process: LLM根据系统提示词约束执行                        │
+        │  Output: plan_todo.create_plan() 调用 → Plan存入Memory    │
         │                                                            │
-        │  💭 Extended Thinking (内部推理):                          │
-        │     "用户要生成产品PPT...需要：                             │
-        │      1. 搜索产品信息 → web_search                          │
-        │      2. 生成PPT配置 → ppt_generation                       │
-        │      3. 渲染PPT → api_calling"                             │
+        │  Tool Call:                                                │
+        │  plan_todo.create_plan({                                  │
+        │    goal: "生成产品PPT",                                    │
+        │    steps: [                                                │
+        │      {action: "搜索信息", capability: "web_search"},      │
+        │      {action: "生成PPT", capability: "ppt_generation"}    │
+        │    ]                                                       │
+        │  })                                                        │
         │                                                            │
-        │  🔧 Tool Call: plan_todo.create_plan()                    │
-        │  {                                                         │
-        │    "operation": "create_plan",                             │
-        │    "data": {                                               │
-        │      "goal": "生成产品PPT",                                │
-        │      "steps": [                                            │
-        │        {                                                   │
-        │          "action": "搜索产品信息",                         │
-        │          "capability": "web_search"  🆕                    │
-        │        },                                                  │
-        │        {                                                   │
-        │          "action": "生成PPT配置",                          │
-        │          "capability": "ppt_generation"  🆕                │
-        │        }                                                   │
-        │      ],                                                    │
-        │      "required_capabilities": [                            │
-        │        "web_search", "ppt_generation"  🆕                  │
-        │      ]                                                     │
-        │    }                                                       │
-        │  }                                                         │
-        │                                                            │
-        │  → Plan 存储到 WorkingMemory                              │
+        │  → Plan → WorkingMemory.plan_json                         │
+        │  → Todo → WorkingMemory.todo_md                           │
         └───────────────────────┬───────────────────────────────────┘
                                 │
                                 ▼
@@ -519,15 +503,21 @@ capabilities:
 
 **流程关键点**：
 
-| 阶段 | 核心动作 | Agent 组件 | 用户可见 |
-|-----|---------|-----------|---------|
-| 1️⃣ Intent | 快速分类 | Haiku LLM | ❌ |
-| 2️⃣ Prompt | 动态组装 | Registry | ❌ |
-| 3️⃣ Plan | 创建计划 | Sonnet LLM + plan_todo | ✅ Todo 显示 |
-| 4️⃣ Router | 筛选工具 | Router | ❌ |
-| 5️⃣ Selector | 选调用方式 | InvocationSelector | ❌ |
-| 6️⃣ RVR | 执行步骤 | Sonnet + Tools | ✅ 进度更新 |
-| 7️⃣ Output | 返回结果 | Agent | ✅ 最终输出 |
+| 阶段 | 核心动作 | Agent 组件 | 用户可见 | 实际行为 |
+|-----|---------|-----------|---------|---------|
+| 1️⃣ Intent | 快速分类 | Haiku LLM | ❌ | ✅ 总是执行 |
+| 2️⃣ Prompt | 动态组装 | Registry | ❌ | ✅ 总是执行 |
+| 3️⃣ Plan | 创建计划 | Sonnet LLM + plan_todo | ✅ Todo 显示 | ✅ 复杂任务必须 |
+| 4️⃣ Router | 筛选工具 | Router | ❌ | ✅ 总是执行 |
+| 5️⃣ Selector | 选调用方式 | InvocationSelector | ❌ | ✅ 总是执行 |
+| 6️⃣ RVR | 执行步骤 | Sonnet + Tools | ✅ 进度更新 | ✅ 总是执行 |
+| 7️⃣ Output | 返回结果 | Agent | ✅ 最终输出 | ✅ 总是执行 |
+
+**系统提示词约束（质量优先）**：
+- 复杂任务 → FIRST tool call MUST be `plan_todo.create_plan()`
+- Plan → 存储到 WorkingMemory（Memory-First Protocol）
+- RVR → 每步骤执行 get_plan() / update_step()
+- Validation → [Final Validation] 质量评估，ITERATE if score < 75
 
 ### 双 LLM 架构
 
@@ -1098,54 +1088,87 @@ User Query
 
 ### 🎯 关键改进点
 
-| 步骤 | 旧版本 | V3.7 新版本 | 改进 |
-|------|--------|------------|------|
-| **1. Intent** | 分析能力需求 | 只做简单分类 | Haiku 不够强，交给 Sonnet |
-| **2. Plan** | 不指定 capability | 指定抽象 capability | 解耦 LLM 和工具 ✅ |
-| **3. Router** | 只记录日志 | 真正筛选工具 | **核心功能生效** ✅ |
-| **4. Invocation** | 未使用 | 智能选择调用方式 | 5种方式支持 ✅ |
-| **5. RVR** | 传入所有工具 | 只用筛选后的工具 | 减少选择困难 ✅ |
+| 步骤 | 旧版本 | V3.7 新版本 | 实际行为 |
+|------|--------|------------|---------|
+| **1. Intent** | 分析能力需求 | 只做简单分类 | ✅ Haiku快速分类 |
+| **2. Plan** | 不指定 capability | 指定抽象 capability | ⚠️ **LLM经常跳过** |
+| **3. Router** | 只记录日志 | 真正筛选工具 | ✅ 核心功能生效 |
+| **4. Invocation** | 未使用 | 智能选择调用方式 | ✅ 5种方式支持 |
+| **5. RVR** | 传入所有工具 | 只用筛选后的工具 | ✅ 减少选择困难 |
 
-### RVR 循环详解
+### ✅ V3.7 架构原则
+
+**质量优先（Quality-First）**
 
 ```
-每个步骤的完整流程：
+系统提示词强制要求：
+━━━━━━━━━━━━━━━━━━━━
+• 复杂任务必须先创建Plan
+• Plan启用Memory-First Protocol
+• 每步执行后更新状态
+• 最终验证[Final Validation]
 
-┌─────────────────────────────────────────────────────────────┐
-│                     Turn N: 执行步骤 X                       │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│ 1️⃣ [Read] plan_todo.get_plan()  ← MANDATORY                 │
-│    └─ 从 WorkingMemory 读取当前状态                         │
-│    └─ 获取 current_step, current_action                    │
-│                                                             │
-│ 2️⃣ [Reason] Extended Thinking                               │
-│    └─ 分析当前步骤需求                                      │
-│    └─ 规划执行策略                                          │
-│                                                             │
-│ 3️⃣ [Act] 执行工具                                           │
-│    └─ 根据 plan.json 指示执行                               │
-│    └─ 支持：Direct Call / Code Execution / Programmatic    │
-│                                                             │
-│ 4️⃣ [Observe] 观察结果                                       │
-│    └─ 分析工具返回                                          │
-│                                                             │
-│ 5️⃣ [Validate] 验证质量                                      │
-│    └─ Completeness: 完整性                                  │
-│    └─ Correctness: 正确性                                   │
-│    └─ Quality: 质量                                         │
-│                                                             │
-│ 6️⃣ [Write] plan_todo.update_step()  ← MANDATORY            │
-│    └─ 更新步骤状态（completed|failed）                      │
-│    └─ 记录步骤结果                                          │
-│    └─ 写入 WorkingMemory                                    │
-│                                                             │
-│ 7️⃣ [Reflect] 如果验证失败                                   │
-│    └─ 分析失败原因                                          │
-│    └─ 调整策略重试（最多 3 次）                             │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
+架构原则优先级：
+━━━━━━━━━━━━━━━
+1. Quality-First  ← 质量最重要
+2. Memory-First   ← Plan保证可追踪
+3. Prompt-Driven  ← 在上述边界内自主
 ```
+
+**三大原则协作**：
+
+| 原则 | 职责 | 实现方式 |
+|------|------|---------|
+| **Quality-First** | 质量保证 | Prompt定义规则：Plan、Validation、ITERATE |
+| **Memory-First** | 状态管理 | Plan存WorkingMemory，支持中断恢复 |
+| **Prompt-Driven** | 灵活执行 | LLM自主选工具、优化路径（但必须遵守上述规则） |
+
+### RVR 循环详解（两种模式）
+
+#### 模式1: 有Plan（结构化执行）
+
+```
+Turn N: 执行步骤 X
+
+1️⃣ [Read] plan_todo.get_plan()  ← 从WorkingMemory读取
+2️⃣ [Reason] 分析当前步骤
+3️⃣ [Act] 执行工具
+4️⃣ [Observe] 观察结果
+5️⃣ [Validate] 验证质量
+6️⃣ [Write] plan_todo.update_step()  ← 写入WorkingMemory
+7️⃣ [Reflect] 失败时反思+重试
+```
+
+#### 模式2: 无Plan（智能优化，当前主流）
+
+```
+Turn 1: 直接执行
+
+1️⃣ [Reason] Extended Thinking
+   "任务清晰，流程简单，直接执行"
+   
+2️⃣ [Act] 直接调用工具
+   例：slidespeak_render(...) / e2b_vibe_coding(...)
+   
+3️⃣ [Observe] 获取结果
+
+4️⃣ [Validate] 在thinking中验证质量
+   [Final Validation]
+   - Overall: XX/100
+   - Decision: PASS|ITERATE
+   
+5️⃣ [Decide]
+   - PASS → end_turn
+   - ITERATE → 继续调用工具改进（不要end_turn）
+
+⚠️ 注意：无Plan时Memory-First Protocol无法完全执行
+```
+
+**实际测试结果**（2025-12-29）:
+- PPT生成：❌ 未创建Plan，直接执行
+- Vibe Coding：❌ 未创建Plan，直接执行  
+- 成功率：100%（功能正常）
+- 质量追踪：⚠️ 缺失（无Plan无进度）
 
 ---
 
@@ -1509,11 +1532,43 @@ schema_enum = registry.get_category_ids()
 
 ---
 
+## 🚨 待解决问题
+
+### 问题：质量保证机制缺失
+
+**现状**：
+- LLM 跳过 Plan 创建（效率优先）
+- Memory-First Protocol 无法执行（无 Plan）
+- RVR 质量验证只在 thinking 中（Agent 代码不 enforce）
+- 功能正常但质量无保证
+
+**解决方案（二选一）**：
+
+**方案A：保持现状（效率优先）**
+```
+• 承认当前是"智能优化"
+• 更新文档说明实际行为
+• 接受：质量靠LLM自觉
+```
+
+**方案B：质量优先（推荐）**
+```
+• 修改Prompt：删除所有"跳过Plan"路径
+• 强制complex任务创建Plan
+• 牺牲效率（多1轮），换取质量保证
+```
+
+**用户诉求**："质量比快更重要"  
+**推荐**：实施方案B
+
+---
+
 ## 🔗 相关文档
 
 | 文档 | 说明 | 状态 |
 |------|------|------|
-| [E2E_VALIDATION_REPORT.md](./E2E_VALIDATION_REPORT.md) | 🆕 端到端验证报告（PPT+Vibe Coding 100%通过） | ✅ 已验证 |
+| [ARCHITECTURE_FUNDAMENTAL_ISSUES.md](./ARCHITECTURE_FUNDAMENTAL_ISSUES.md) | 🆕 架构根本性问题分析 | ✅ 已分析 |
+| [E2E_VALIDATION_REPORT.md](./E2E_VALIDATION_REPORT.md) | 端到端验证报告（100%功能通过，但无Plan） | ✅ 已验证 |
 | [ARCHITECTURE_V3.7_E2B.md](./ARCHITECTURE_V3.7_E2B.md) | 🆕 V3.7+E2B完整架构图（含Vibe Coding） | ✅ 已实现 |
 | [MEMORY_ARCHITECTURE.md](./MEMORY_ARCHITECTURE.md) | 完整记忆架构 | 📝 设计阶段 |
 | [01-MEMORY-PROTOCOL.md](./01-MEMORY-PROTOCOL.md) | Memory-First Protocol 详解 | ✅ 已实现 |

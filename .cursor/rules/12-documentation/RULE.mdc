@@ -4,7 +4,7 @@ globs:
   - "docs/**/*.md"
   - "README.md"
   - "*.md"
-alwaysApply: false
+alwaysApply: True
 ---
 
 # 文档编写规范

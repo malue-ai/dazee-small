@@ -28,6 +28,8 @@ Analyze the user query and classify it into one of these categories:
 }
 ```
 
+**ALL THREE FIELDS ARE REQUIRED** — 不要省略任何字段。即使不确定也要给出最接近的分类。
+
 ## Classification Rules
 
 ### Task Type

@@ -40,6 +40,7 @@ logs/
 *.out
 
 # Environment variables
+.env
 .env.local
 .env.*.local
 
@@ -65,3 +66,7 @@ coverage.xml
 workspace_*/
 skill_outputs/
 *.code-workspace
+
+# Outputs
+outputs/
+.cursor/
