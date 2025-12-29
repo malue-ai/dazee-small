@@ -154,10 +154,12 @@ class SimpleAgent:
         from core.memory import WorkingMemory
         self.working_memory = WorkingMemory()
         
+        # 🆕 统一的 tool_context（所有工具都可能用到）
         tool_context = {
             "memory": self.working_memory,
             "event_manager": self.event_manager,
-            "workspace_dir": workspace_dir
+            "workspace_dir": workspace_dir,
+            "registry": self.capability_registry  # 🆕 用于 plan_todo 动态 schema
         }
         self.tool_executor = create_tool_executor(self.capability_registry, tool_context=tool_context)
         logger.debug("ToolExecutor initialized")
@@ -170,15 +172,7 @@ class SimpleAgent:
         }
         logger.debug("Plan state initialized")
         
-        # 6. Plan/Todo 工具（会话级短期记忆）
-        # 注意：plan_todo_tool 接受 memory 参数（WorkingMemory），但我们当前使用简单的 plan_state dict
-        # 这里传入 None，工具会使用内部状态管理
-        from tools.plan_todo_tool import create_plan_todo_tool
-        self.plan_todo_tool = create_plan_todo_tool(
-            memory=None,  # 传入 None，工具使用内部状态
-            registry=self.capability_registry  # 传入 Registry 用于动态 Schema
-        )
-        logger.debug("PlanTodoTool initialized (using internal state + dynamic schema)")
+        # 🆕 plan_todo 工具现在统一通过 ToolExecutor 加载，不再手动创建
         
         # 🆕 6.5. E2B Template Manager - 模板管理器
         try:
@@ -278,9 +272,11 @@ class SimpleAgent:
         """
         tool_schemas = self.capability_registry.get_tool_schemas()
         for schema in tool_schemas:
-            # 🆕 plan_todo 使用动态生成的 Schema
+            # 🆕 plan_todo 使用动态生成的 Schema（从 ToolExecutor 获取实例）
             if schema['name'] == 'plan_todo':
-                schema['input_schema'] = self.plan_todo_tool.get_input_schema()
+                plan_todo_instance = self.tool_executor._tool_instances.get('plan_todo')
+                if plan_todo_instance and hasattr(plan_todo_instance, 'get_input_schema'):
+                    schema['input_schema'] = plan_todo_instance.get_input_schema()
             
             self.llm.add_custom_tool(
                 name=schema['name'],
@@ -476,7 +472,8 @@ class SimpleAgent:
         # 选择系统提示词
         execution_config = self._get_execution_config(
             intent_analysis['prompt_level'], 
-            intent_analysis['complexity']
+            intent_analysis['complexity'],
+            intent_analysis.get('needs_plan', False)
         )
         self.system_prompt = execution_config['system_prompt']
         
@@ -720,6 +717,8 @@ class SimpleAgent:
             stop_reason = response.stop_reason
             
             if stop_reason == "end_turn":
+                # 框架职责：LLM选择end_turn，任务完成
+                # 注意：质量控制由System Prompt定义，LLM自主决策
                 final_result = response.content
                 yield await self._emit_agent_event(session_id, "status", {"message": "✅ 任务完成"})
                 break
@@ -795,7 +794,7 @@ class SimpleAgent:
             event_type=event_type,
             event_data=data
         )
-    
+
     def _display_plan_progress_update(self, plan: Dict, completed: int, total: int, progress: float):
         """
         🆕 显示 Todo 进度更新（用户可见）
@@ -907,54 +906,53 @@ class SimpleAgent:
         return result
     
     
-    def _get_execution_config(self, prompt_level: str, complexity: str) -> Dict[str, Any]:
+    def _get_execution_config(
+        self,
+        prompt_level: str,
+        complexity: str,
+        needs_plan: bool = False
+    ) -> Dict[str, Any]:
         """
-        根据意图分析结果返回执行配置
-        
-        Args:
-            prompt_level: simple|standard|full
-            complexity: simple|medium|complex
-            
-        Returns:
-            {
-                "system_prompt": str,
-                "prompt_name": str,
-                "tools": List[ToolType],
-                "enable_thinking": bool
-            }
+        根据意图分析返回执行配置。
+
+        规则放在 prompts.prompt_selector 中，Agent 只负责调用。
         """
-        from prompts.simple_prompt import get_simple_prompt
-        from prompts.standard_prompt import get_standard_prompt
-        
-        if prompt_level == "simple":
+        from prompts.prompt_selector import select_prompt
+
+        prompt_info = select_prompt(
+            prompt_level=prompt_level,
+            complexity=complexity,
+            needs_plan=needs_plan,
+            build_full_prompt=self._build_system_prompt,
+        )
+
+        level = prompt_info["level"]
+        system_prompt = prompt_info["system_prompt"]
+        prompt_name = prompt_info["prompt_name"]
+        enable_thinking = prompt_info["enable_thinking"]
+
+        # 工具列表保持与层级一致（仅 Agent 侧的框架配置，不含业务规则）
+        if level == "simple":
+            tools = [ToolType.WEB_SEARCH, ToolType.BASH]
+        elif level == "full":
+            tools = self._tools + self._custom_tool_names
+        else:
+            tools = self._tools
+
             return {
-                "system_prompt": get_simple_prompt(),
-                "prompt_name": "simple_prompt",
-                "tools": [ToolType.WEB_SEARCH, ToolType.BASH],
-                "enable_thinking": False  # 简单任务不需要 Extended Thinking
-            }
-        elif prompt_level == "standard":
-            return {
-                "system_prompt": get_standard_prompt(),
-                "prompt_name": "standard_prompt",
-                "tools": self._tools,  # 使用基础工具集
-                "enable_thinking": True
-            }
-        else:  # full
-            # 使用完整的系统提示词（包含 Skills）
-            return {
-                "system_prompt": self._build_system_prompt(),
-                "prompt_name": "full_prompt",
-                "tools": self._tools + self._custom_tool_names,  # 所有工具
-                "enable_thinking": True
+            "system_prompt": system_prompt,
+            "prompt_name": prompt_name,
+            "tools": tools,
+            "enable_thinking": enable_thinking,
             }
     async def _execute_tools(self, tool_calls: List[Dict]) -> List[Dict]:
         """
-        执行工具调用
+        执行工具调用（通用框架版本）
         
-        🆕 HITL 支持：
-        - 为 request_human_confirmation 工具注入 emit_event 回调
-        - 回调会将事件放入 _event_queue，由 stream() 方法消费
+        架构原则：
+        - Agent 不知道任何具体工具名称
+        - 所有工具统一通过 ToolExecutor 执行
+        - 工具所需的上下文在初始化时通过 tool_context 注入
         """
         results = []
         
@@ -962,10 +960,10 @@ class SimpleAgent:
             tool_name = tool_call['name']
             tool_input = tool_call['input']
             tool_id = tool_call['id']
-            invocation_method = tool_call.get('invocation_method', 'direct')
             
             logger.debug(f"Executing tool: {tool_name}")
-            # 记录工具调用（用于 Plan 进度跟踪）
+            
+            # 记录工具调用（用于进度跟踪）
             self.plan_state.setdefault("tool_calls", []).append({
                 "tool": tool_name,
                 "input": tool_input,
@@ -973,46 +971,20 @@ class SimpleAgent:
             })
             
             try:
-                # 执行工具
-                if tool_name in ["bash", "str_replace_based_edit_tool", "web_search"]:
-                    # Claude 原生工具
-                    result = {
-                        "success": True,
-                        "note": f"Native tool {tool_name} executed by Claude API",
-                        "invocation_method": invocation_method
+                # 🆕 统一执行：所有工具通过 ToolExecutor
+                # 注入通用运行时上下文（工具可选择使用）
+                enriched_input = {
+                    **tool_input,
+                    "_runtime_context": {
+                        "session_id": self._current_session_id,
+                        "event_queue": self._event_queue
                     }
-                elif tool_name == "plan_todo":
-                    # 会话级 Plan/Todo 工具（短期记忆）
-                    operation = tool_input.get('operation', 'get_plan')
-                    data = tool_input.get('data', {})
-                    result = self.plan_todo_tool.execute(operation, data)
-                    result['invocation_method'] = invocation_method
-                    
-                    # 如果创建或更新了Plan，显示进度
-                    if result.get('display'):
-                        logger.debug(f"\n{result['display']}\n")
-                elif tool_name == "request_human_confirmation":
-                    # 🆕 HITL 工具：注入 emit_event 回调和 session_id
-                    result = await self._execute_hitl_tool(tool_input)
-                    result['invocation_method'] = invocation_method
-                elif tool_name == "e2b_python_sandbox":
-                    # 🆕 E2B Python Sandbox：注入 session_id 用于流式输出
-                    enriched_input = {
-                        **tool_input,
-                        "session_id": self._current_session_id  # 注入 session_id
-                    }
-                    result = await self.tool_executor.execute(tool_name, enriched_input)
-                    result['invocation_method'] = invocation_method
-                else:
-                    # 其他自定义工具
-                    # 注意：user_id/conversation_id 应该由 Service 层设置
-                    enriched_input = {**tool_input}
+                }
                     
                     result = await self.tool_executor.execute(tool_name, enriched_input)
-                    result['invocation_method'] = invocation_method
                 
-                # 更新 tool_calls 记录（用于 Plan 进度跟踪）
-                if "tool_calls" in self.plan_state and self.plan_state["tool_calls"]:
+                # 记录结果
+                if self.plan_state.get("tool_calls"):
                     self.plan_state["tool_calls"][-1]['result'] = result
                 
                 results.append({
@@ -1023,6 +995,7 @@ class SimpleAgent:
                 
                 status = "✅" if result.get("success") else "❌"
                 logger.debug(f"   {status} Result: {str(result)[:100]}...")
+                
             except Exception as e:
                 results.append({
                     "type": "tool_result",
@@ -1030,8 +1003,8 @@ class SimpleAgent:
                     "content": json.dumps({"success": False, "error": str(e)}),
                     "is_error": True
                 })
-                
                 logger.error(f"   ❌ Error: {e}")
+        
         return results
     
     async def _execute_hitl_tool(self, tool_input: Dict[str, Any]) -> Dict[str, Any]:
@@ -1196,11 +1169,12 @@ class SimpleAgent:
             self.tool_executor.summary()
         ]
         
-        # 从 Short Memory 获取计划状态
-        if self.plan_todo_tool.has_plan():
+        # 从 Short Memory 获取计划状态（通过 ToolExecutor 获取 plan_todo 实例）
+        plan_todo_instance = self.tool_executor._tool_instances.get('plan_todo')
+        if plan_todo_instance and hasattr(plan_todo_instance, 'has_plan') and plan_todo_instance.has_plan():
             lines.append("")
             lines.append("Current Plan (Short Memory):")
-            lines.append(self.plan_todo_tool.get_full_display())
+            lines.append(plan_todo_instance.get_full_display())
         
         return "\n".join(lines)
 

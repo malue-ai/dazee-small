@@ -895,12 +895,13 @@ capabilities:
   - name: plan_todo
     type: TOOL
     subtype: SESSION
-    provider: system
+    provider: user  # 🆕 改为user，让ToolExecutor加载
     
     # 工具实现配置
     implementation:
       module: "tools.plan_todo_tool"
       class: "PlanTodoTool"
+      requires_context: true  # 需要注入 memory, registry
     
     capabilities:
       - task_planning
