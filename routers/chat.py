@@ -1,14 +1,24 @@
 """
-Chat 相关的路由
-包含同步聊天、流式聊天、会话管理、结果改进等功能
+Chat 路由层 - 仅处理 HTTP 请求/响应
+
+职责：
+- HTTP 请求解析和参数验证
+- 调用 Service 层处理业务逻辑
+- 流式响应封装（SSE）
+- 异常转换为 HTTP 异常
+
+提供功能：
+- 同步聊天、流式聊天
+- 会话管理
+- 结果改进（HITL）
 """
 
 from logger import get_logger
 import json
 from enum import Enum
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, status, Query
 from fastapi.responses import StreamingResponse
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from datetime import datetime
 
 from models.api import APIResponse
@@ -19,10 +29,15 @@ from models.chat import (
     SessionInfo,
     RefineRequest
 )
-from core.agent import SimpleAgent
+from services import (
+    get_chat_service,
+    get_session_service,
+    SessionNotFoundError,
+    AgentExecutionError,
+)
 
 # 配置日志
-logger = get_logger("chat")
+logger = get_logger("chat_router")
 
 # 创建路由器
 router = APIRouter(
@@ -31,6 +46,12 @@ router = APIRouter(
     responses={404: {"description": "Not found"}},
 )
 
+# 获取服务实例
+chat_service = get_chat_service()
+session_service = get_session_service()
+
+
+# ==================== 辅助函数 ====================
 
 def sanitize_for_json(obj: Any) -> Any:
     """
@@ -55,158 +76,174 @@ def sanitize_for_json(obj: Any) -> Any:
             return None
 
 
-def cleanup_inactive_sessions():
-    """清理不活跃的会话"""
-    # 从 main 模块导入 agent_pool
-    from main import agent_pool
-    
-    inactive_sessions = [
-        sid for sid, agent in agent_pool.items()
-        if not agent._session_active
-    ]
-    for sid in inactive_sessions:
-        del agent_pool[sid]
-
+# ==================== 聊天接口 ====================
 
 @router.post("/chat")
 async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
     """
-    统一聊天接口（支持同步和流式）
+    统一聊天接口（支持流式和同步两种模式）
     
-    根据 `stream` 参数自动选择返回模式（默认为流式）
+    根据 `stream` 参数自动选择返回模式：
+    - `stream=true`: 流式模式（SSE），实时推送事件
+    - `stream=false`: 同步模式，立即返回 task_id，客户端轮询查询结果
     
     ## 参数
     - **message**: 用户消息（必填）
-    - **session_id**: 会话ID（可选，不提供则自动创建新会话）
+    - **user_id**: 用户ID（必填，用于 Session 管理）
+    - **message_id**: 消息ID（可选，用于追踪）
+    - **conversation_id**: 对话ID（可选，用于关联数据库对话）
     - **stream**: 是否使用流式输出（默认为 true）
+    - **file**: 附件文件路径或URL（可选）
+    - **variables**: 前端上下文变量（可选），如位置、时区等
     
-    ## 返回
-    - `stream=true`: Server-Sent Events (SSE) 事件流，实时返回思考过程和工具执行进度
-    - `stream=false`: 完整的 JSON 响应，等待任务完成后一次性返回
+    ---
     
-    ## 流式事件类型
-    - `session_start` / `turn_start`: 会话/轮次开始
-    - `status`: 状态消息
-    - `intent_analysis`: 意图识别结果
-    - `tool_selection`: 工具筛选结果
-    - `thinking`: LLM 思考过程（增量）
-    - `content`: LLM 回复内容（增量）
-    - `tool_call_start`: 工具调用开始
-    - `tool_call_complete`: 工具执行完成
-    - `plan_update`: Plan 进度更新
-    - `complete`: 任务完成
-    - `error`: 错误信息
-    - `done`: 流结束
+    ## 模式1：流式模式 (`stream=true`)
     
-    ## 示例 - 流式模式（推荐）
-    ```python
-    import requests
+    **返回**: SSE 事件流
     
-    response = requests.post(
-        "http://localhost:8000/api/v1/chat",
-        json={"message": "生成一个PPT", "stream": True},
-        stream=True
-    )
+    **使用场景**: 需要实时看到 Agent 的思考过程和执行步骤
     
-    for line in response.iter_lines():
-        if line:
-            line = line.decode('utf-8')
-            if line.startswith('data: '):
-                event = json.loads(line[6:])
-                print(event['type'], event['data'])
+    **特点**:
+    - Agent 在后台运行，事件写入 Redis
+    - SSE 从 Redis 实时读取事件并推送
+    - 支持断线重连（从 Redis 补偿丢失的事件）
+    - Agent 执行不受 SSE 连接影响
+    
+    **SSE 事件格式**:
+    ```
+    id: 1
+    event: session_start
+    data: {"id":1,"session_id":"sess_xxx","type":"session_start","data":{...},"timestamp":"..."}
+    
+    id: 2
+    event: message_start
+    data: {"id":2,"session_id":"sess_xxx","type":"message_start","data":{...},"timestamp":"..."}
+    
+    ...
+    
+    event: done
+    data: {}
     ```
     
-    ## 示例 - 同步模式
-    ```python
-    import requests
+    详细协议见：`docs/03-SSE-EVENT-PROTOCOL.md`
     
-    response = requests.post(
-        "http://localhost:8000/api/v1/chat",
-        json={"message": "生成一个PPT", "stream": False}
-    )
-    print(response.json())
+    ---
+    
+    ## 模式2：同步模式 (`stream=false`)
+    
+    **返回**: 
+    ```json
+    {
+      "code": 200,
+      "message": "任务已启动，请轮询 /api/v1/session/{task_id} 查看结果",
+      "data": {
+        "task_id": "sess_abc123",
+        "conversation_id": "conv_xyz",
+        "status": "running"
+      }
+    }
     ```
+    
+    **使用场景**: 不需要实时反馈，只关心最终结果
+    
+    **特点**:
+    - 立即返回 `task_id`（就是 `session_id`）
+    - Agent 在后台运行，事件写入 Redis，结果写入数据库
+    - 客户端通过轮询 `/api/v1/session/{task_id}/status` 查询状态
+    - 最终从数据库读取结果（Message 表）
+    - 不使用 SSE，更简单可靠
+    
+    **客户端轮询流程**:
+    ```
+    1. POST /api/v1/chat (stream=false) → 返回 task_id
+    2. 轮询 GET /api/v1/session/{task_id}/status → 查看进度
+    3. 状态变为 "completed" 后，从数据库读取结果
+    ```
+    
+    ---
+    
+    ## 选择建议
+    
+    - **Web 界面**: 推荐流式模式（实时体验更好）
+    - **API 集成**: 推荐同步模式（简单直接）
+    - **移动端/不稳定网络**: 推荐同步模式（轮询更可靠）
     """
     try:
-        # stream 默认为 True
-        use_stream = request.stream
+        # 验证 user_id（必填）
+        if not request.user_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="user_id 是必填参数"
+            )
         
-        logger.info(f"📨 收到{'流式' if use_stream else '同步'}聊天请求: session_id={request.session_id}, message={request.message[:50]}...")
-        
-        # 从 main.py 获取或创建 Agent
-        from main import get_or_create_agent_for_conversation, agent_pool
-        
-        # 使用 conversation_id 获取 Agent（自动管理 session_id 映射）
-        conversation_id, session_id, agent = get_or_create_agent_for_conversation(
-            conversation_id=request.conversation_id,
-            verbose=False
+        # 记录请求信息
+        logger.info(
+            f"📨 收到{'流式' if request.stream else '同步'}聊天请求: "
+            f"user_id={request.user_id}, "
+            f"message_id={request.message_id}, "
+            f"conversation_id={request.conversation_id}, "
+            f"message={request.message[:50]}..."
         )
         
-        # 🆕 将 user_id 和 conversation_id 存入 Agent 的 WorkingMemory
-        if request.user_id:
-            agent.memory.working.user_id = request.user_id
-            logger.info(f"👤 设置 user_id: {request.user_id}")
+        # 记录额外的上下文信息
+        if request.variables:
+            logger.debug(f"📍 前端变量: {request.variables}")
+        if request.file:
+            logger.info(f"📎 附件: {request.file}")
+        if request.background_task:
+            logger.info(f"⏱️ 后台任务模式")
         
-        if request.conversation_id:
-            agent.memory.working.conversation_id = request.conversation_id
-            logger.info(f"💬 设置 conversation_id: {request.conversation_id}")
-        
-        # 🔍 输出会话状态信息
-        session_info = agent.get_session_info()
-        conversation_history = agent.get_conversation_history()
-        logger.info(f"📊 会话状态: session_id={session_id}, conversation_id={request.conversation_id}, "
-                   f"活跃={session_info['active']}, 轮次={session_info['turns']}, 历史消息数={len(conversation_history)}")
-        
-        # 🔍 如果有历史消息，输出最近的对话摘要
-        if len(conversation_history) > 0:
-            logger.info(f"💬 最近的对话历史:")
-            # 显示最近3条消息
-            for msg in conversation_history[-3:]:
-                role = msg.get('role', 'unknown')
-                content_preview = str(msg.get('content', ''))[:80] + '...' if len(str(msg.get('content', ''))) > 80 else str(msg.get('content', ''))
-                logger.info(f"   - {role}: {content_preview}")
-        else:
-            logger.info(f"💬 这是本会话的第一条消息")
-        
-        logger.info(f"🤖 开始执行对话: session_id={session_id}, mode={'stream' if use_stream else 'sync'}")
-        
-        # ===== 流式模式 =====
-        if use_stream:
+        # ===== 流式模式（默认） =====
+        if request.stream:
+            # 直接返回 SSE 流
             async def event_generator():
-                """生成 SSE 事件流"""
+                """
+                生成 SSE 事件流（符合 SSE 协议标准）
+                
+                SSE 格式：
+                id: 1
+                event: message_start
+                data: {"id":1,"session_id":"sess_xxx","data":{...},"timestamp":"..."}
+                
+                """
+                session_id = None
                 try:
-                    async for event in agent.stream(request.message):
-                        # 清理事件数据以确保可以JSON序列化
-                        sanitized_event = {
-                            "type": event["type"],
-                            "data": sanitize_for_json(event["data"]),
-                            "timestamp": event["timestamp"]
-                        }
+                    # 调用 Service 层流式对话
+                    async for event in chat_service.chat_stream(
+                        message=request.message,
+                        user_id=request.user_id,
+                        conversation_id=request.conversation_id,
+                        message_id=request.message_id
+                    ):
+                        # 提取事件类型（用于 SSE event: 字段）
+                        event_type = event.get("type", "message")
+                        event_seq = event.get("seq", 0)  # 使用 seq 作为 SSE id
                         
-                        # 转换为 SSE 格式
-                        event_data = StreamEvent(**sanitized_event)
+                        # 记录 session_id（从第一个事件获取）
+                        if not session_id:
+                            session_id = event.get("session_id")
                         
-                        # SSE 格式：data: {json}\n\n
-                        yield f"data: {event_data.model_dump_json()}\n\n"
-                    
-                    # 🔍 输出执行完成后的状态
-                    final_session_info = agent.get_session_info()
-                    final_history_count = len(agent.get_conversation_history())
-                    logger.info(f"✅ 流式对话完成: session_id={agent._session_id}, "
-                               f"总轮次={final_session_info['turns']}, "
-                               f"历史消息数={final_history_count}")
+                        # 🎯 SSE 协议格式输出
+                        # id: 使用 seq（session 内序号，从 1 开始）
+                        yield f"id: {event_seq}\n"
+                        # event: 事件类型（前端可以 addEventListener(type, ...)）
+                        yield f"event: {event_type}\n"
+                        # data: JSON 数据（包含 event_uuid, seq, 和所有上下文字段）
+                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
                     
                     # 发送完成事件
-                    yield "data: {\"type\": \"done\", \"data\": {}, \"timestamp\": \"" + datetime.now().isoformat() + "\"}\n\n"
+                    yield f"event: done\n"
+                    yield f"data: {{}}\n\n"
                 
+                except AgentExecutionError as e:
+                    logger.error(f"❌ 流式对话错误: {str(e)}")
+                    yield f"event: error\n"
+                    yield f"data: {json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n"
                 except Exception as e:
                     logger.error(f"❌ 流式对话错误: {str(e)}", exc_info=True)
-                    error_event = StreamEvent(
-                        type="error",
-                        data={"message": str(e)},
-                        timestamp=datetime.now().isoformat()
-                    )
-                    yield f"data: {error_event.model_dump_json()}\n\n"
+                    yield f"event: error\n"
+                    yield f"data: {json.dumps({'message': f'内部错误: {str(e)}'}, ensure_ascii=False)}\n\n"
             
             return StreamingResponse(
                 event_generator(),
@@ -218,92 +255,247 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
                 }
             )
         
-        # ===== 同步模式 =====
+        # ===== 同步模式（立即返回 task_id） =====
         else:
-            # 执行对话
-            result = await agent.chat(request.message)
-            
-            # 🔍 输出执行结果统计
-            final_history_count = len(agent.get_conversation_history())
-            logger.info(f"✅ 对话执行完成: status={result.get('status')}, turns={result.get('turns')}, "
-                       f"历史消息数={final_history_count}")
-            
-            # 🆕 验证最终结果中提到的文件是否真实存在
-            final_result_content = result.get("final_result", "")
-            if "/tmp/" in final_result_content or "outputs/" in final_result_content:
-                import re
-                # 提取可能的文件路径
-                file_paths = re.findall(r'[`"]?(/tmp/[^`"\s]+\.pptx|outputs/[^`"\s]+\.pptx)[`"]?', final_result_content)
-                if file_paths:
-                    from pathlib import Path
-                    for file_path in file_paths:
-                        if not Path(file_path).exists():
-                            logger.warning(f"⚠️ AI 声称生成了文件，但文件不存在: {file_path}")
-                            # 在响应中添加警告
-                            final_result_content += f"\n\n⚠️ **警告**: 文件 {file_path} 未找到。PPT 可能未成功生成，请检查日志。"
-                            result["final_result"] = final_result_content
-            
-            # 清理数据以确保可以JSON序列化
-            plan = sanitize_for_json(agent.get_plan())
-            progress = sanitize_for_json(agent.get_progress())
-            invocation_stats = sanitize_for_json(result.get("invocation_stats"))
-            
-            # 🆕 获取详细的执行信息
-            routing_decisions = sanitize_for_json(result.get("routing_decisions", []))
-            session_log = result.get("session_log", {})
-            
-            # 🆕 提取工具调用详情
-            tool_calls_detail = []
-            for interaction in session_log.get("interactions", []):
-                if interaction.get("event_type") == "llm_response":
-                    tool_count = interaction.get("data", {}).get("tool_calls_count", 0)
-                    if tool_count > 0:
-                        tool_calls_detail.append({
-                            "turn": interaction.get("turn"),
-                            "tool_calls_count": tool_count
-                        })
-            
-            # 🆕 提取意图分析结果
-            intent_analysis = sanitize_for_json(session_log.get("intent_recognition"))
-            
-            logger.debug(f"📊 统计信息: {invocation_stats}")
-            logger.debug(f"🎯 路由决策: {routing_decisions}")
-            
-            # 构建响应
-            response = ChatResponse(
-                session_id=session_id,
+            # 调用 Service 层同步对话（启动后台任务）
+            result = await chat_service.chat_sync(
+                message=request.message,
+                user_id=request.user_id,
                 conversation_id=request.conversation_id,
-                content=result.get("final_result", ""),
-                status=result.get("status", "unknown"),
-                turns=result.get("turns", 0),
-                plan=plan,
-                progress=progress,
-                invocation_stats=invocation_stats,
-                # 🆕 新增详细信息
-                routing_decisions=routing_decisions,
-                tool_calls=tool_calls_detail if tool_calls_detail else None,
-                intent_analysis=intent_analysis
+                message_id=request.message_id,
+                verbose=False
             )
             
             # 后台清理任务
-            background_tasks.add_task(cleanup_inactive_sessions)
+            background_tasks.add_task(session_service.cleanup_inactive_sessions)
             
-        logger.info(f"✅ 响应已构建: session_id={session_id}")
-        
-        # 🔍 简化日志：只打印关键信息
-        if logger.level <= logging.DEBUG:
-            print(f"\n📤 响应: session={response.session_id}, conversation={response.conversation_id}, status={response.status}, turns={response.turns}")
-        
-        return APIResponse(
+            logger.info(f"✅ 任务已启动: task_id={result['task_id']}")
+            
+            # 立即返回 task_id
+            return APIResponse(
                 code=200,
-                message="success",
-                data=response
+                message=result.get("message", "任务已启动"),
+                data=result
             )
     
+    except HTTPException:
+        raise
+    except AgentExecutionError as e:
+        logger.error(f"❌ 对话执行失败: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
     except Exception as e:
         logger.error(f"❌ 聊天接口错误: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"内部错误: {str(e)}")
 
+
+
+# ==================== Session 状态查询接口 ====================
+
+@router.get("/session/{session_id}/status", response_model=APIResponse[Dict])
+async def get_session_status(session_id: str):
+    """
+    查询 Session 状态（用于断线重连判断）
+    
+    ## 使用场景
+    用户刷新页面后，前端需要判断：
+    1. Session 是否还在运行？
+    2. 当前进度如何？
+    3. 最后一个事件ID是多少？
+    
+    ## 参数
+    - **session_id**: Session ID
+    
+    ## 返回
+    ```json
+    {
+      "session_id": "sess_abc123",
+      "user_id": "user_001",
+      "conversation_id": "conv_abc",
+      "message_id": "msg_xyz",
+      "status": "running",          # running/completed/failed/timeout
+      "last_event_id": 250,
+      "start_time": "2023-12-24T12:00:00Z",
+      "last_heartbeat": "2023-12-24T12:05:30Z",
+      "progress": 0.6,
+      "total_turns": 5,
+      "message_preview": "帮我生成PPT..."
+    }
+    ```
+    
+    ## 状态说明
+    - **running**: 正在运行，可以重连
+    - **completed**: 已完成，可以获取完整结果
+    - **failed**: 执行失败
+    - **timeout**: 超时（超过60秒无心跳）
+    """
+    try:
+        logger.info(f"📨 查询 Session 状态: session_id={session_id}")
+        
+        # 调用 Service 层
+        status_data = session_service.get_session_status(session_id)
+        
+        logger.info(f"✅ Session 状态: {status_data.get('status')}")
+        
+        return APIResponse(
+            code=200,
+            message="success",
+            data=status_data
+        )
+    
+    except SessionNotFoundError as e:
+        logger.warning(f"⚠️ Session 不存在: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ 查询 Session 状态错误: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/session/{session_id}/events", response_model=APIResponse[Dict])
+async def get_session_events(
+    session_id: str,
+    after_id: Optional[int] = Query(None, description="从哪个事件ID之后开始"),
+    limit: int = Query(100, description="最多返回多少个事件", ge=1, le=1000)
+):
+    """
+    获取 Session 的事件列表（用于断线补偿）
+    
+    ## 使用场景
+    用户断线期间，Agent 继续产生事件。重连前需要先获取丢失的事件。
+    
+    ## 参数
+    - **session_id**: Session ID
+    - **after_id**: 从哪个事件ID之后开始（可选）
+    - **limit**: 最多返回多少个事件（默认100，最大1000）
+    
+    ## 返回
+    ```json
+    {
+      "session_id": "sess_abc123",
+      "events": [
+        {"id": 101, "type": "thinking", "data": {...}, "timestamp": "..."},
+        {"id": 102, "type": "tool_call", "data": {...}, "timestamp": "..."},
+        ...
+      ],
+      "total": 50,
+      "has_more": false,
+      "last_event_id": 150
+    }
+    ```
+    
+    ## 示例流程
+    ```
+    1. 用户上次收到事件 id=100
+    2. 断线期间，Agent 产生了事件 101-150
+    3. 用户重连前调用：GET /session/{id}/events?after_id=100
+    4. 获取事件 101-150，渲染到界面
+    5. 然后重新连接 SSE：GET /chat/stream?after_id=150
+    ```
+    """
+    try:
+        logger.info(
+            f"📨 获取 Session 事件: session_id={session_id}, "
+            f"after_id={after_id}, limit={limit}"
+        )
+        
+        # 调用 Service 层
+        events = session_service.get_session_events(
+            session_id=session_id,
+            after_id=after_id,
+            limit=limit
+        )
+        
+        # 构建响应
+        last_event_id = events[-1]["id"] if events else (after_id or 0)
+        
+        response_data = {
+            "session_id": session_id,
+            "events": events,
+            "total": len(events),
+            "has_more": len(events) >= limit,  # 如果返回数量达到 limit，可能还有更多
+            "last_event_id": last_event_id
+        }
+        
+        logger.info(f"✅ 返回 {len(events)} 个事件")
+        
+        return APIResponse(
+            code=200,
+            message="success",
+            data=response_data
+        )
+    
+    except SessionNotFoundError as e:
+        logger.warning(f"⚠️ Session 不存在: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ 获取 Session 事件错误: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/user/{user_id}/sessions", response_model=APIResponse[Dict])
+async def get_user_sessions(user_id: str):
+    """
+    获取用户的所有活跃 Session
+    
+    ## 使用场景
+    用户刷新页面后，如果没有保存 session_id，可以通过此接口找回所有运行中的任务。
+    
+    ## 参数
+    - **user_id**: 用户ID
+    
+    ## 返回
+    ```json
+    {
+      "user_id": "user_001",
+      "sessions": [
+        {
+          "session_id": "sess_abc123",
+          "conversation_id": "conv_001",
+          "message_id": "msg_001",
+          "status": "running",
+          "progress": 0.6,
+          "start_time": "2023-12-24T12:00:00Z",
+          "message_preview": "帮我生成PPT..."
+        },
+        {
+          "session_id": "sess_def456",
+          "conversation_id": "conv_002",
+          "message_id": "msg_002",
+          "status": "running",
+          "progress": 0.3,
+          "start_time": "2023-12-24T12:10:00Z",
+          "message_preview": "分析数据..."
+        }
+      ],
+      "total": 2
+    }
+    ```
+    """
+    try:
+        logger.info(f"📨 获取用户的活跃 Session: user_id={user_id}")
+        
+        # 调用 Service 层
+        sessions = session_service.get_user_sessions(user_id)
+        
+        response_data = {
+            "user_id": user_id,
+            "sessions": sessions,
+            "total": len(sessions)
+        }
+        
+        logger.info(f"✅ 返回 {len(sessions)} 个活跃 Session")
+        
+        return APIResponse(
+            code=200,
+            message="success",
+            data=response_data
+        )
+    
+    except Exception as e:
+        logger.error(f"❌ 获取用户 Session 错误: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+# ==================== Session 管理接口（已有，保持不变） ====================
 
 @router.get("/session/{session_id}", response_model=APIResponse[SessionInfo])
 async def get_session(session_id: str):
@@ -321,17 +513,8 @@ async def get_session(session_id: str):
     try:
         logger.info(f"📨 获取会话信息: session_id={session_id}")
         
-        from main import agent_pool
-        
-        if session_id not in agent_pool:
-            logger.warning(f"⚠️ 会话不存在: session_id={session_id}")
-            raise HTTPException(status_code=404, detail="会话不存在")
-        
-        agent = agent_pool[session_id]
-        session_info = agent.get_session_info()
-        
-        # 添加开始时间
-        start_time = agent.memory.working.metadata.get("start_time")
+        # 调用 Service 层
+        session_info = session_service.get_session_info(session_id)
         
         response = SessionInfo(
             session_id=session_info["session_id"],
@@ -339,7 +522,7 @@ async def get_session(session_id: str):
             turns=session_info["turns"],
             message_count=session_info["message_count"],
             has_plan=session_info["has_plan"],
-            start_time=start_time
+            start_time=session_info.get("start_time")
         )
         
         logger.info(f"✅ 会话信息已返回: session_id={session_id}")
@@ -350,11 +533,12 @@ async def get_session(session_id: str):
             data=response
         )
     
-    except HTTPException:
-        raise
+    except SessionNotFoundError as e:
+        logger.warning(f"⚠️ 会话不存在: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
         logger.error(f"❌ 获取会话信息错误: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @router.delete("/session/{session_id}", response_model=APIResponse[Dict])
@@ -373,20 +557,11 @@ async def end_session(session_id: str):
     try:
         logger.info(f"📨 结束会话请求: session_id={session_id}")
         
-        from main import agent_pool
-        
-        if session_id not in agent_pool:
-            logger.warning(f"⚠️ 会话不存在: session_id={session_id}")
-            raise HTTPException(status_code=404, detail="会话不存在")
-        
-        agent = agent_pool[session_id]
-        summary = agent.end_session()
+        # 调用 Service 层
+        summary = session_service.end_session(session_id)
         
         # 清理摘要数据
         summary = sanitize_for_json(summary)
-        
-        # 从池中移除
-        del agent_pool[session_id]
         
         logger.info(f"✅ 会话已结束: session_id={session_id}")
         
@@ -396,110 +571,12 @@ async def end_session(session_id: str):
             data=summary
         )
     
-    except HTTPException:
-        raise
+    except SessionNotFoundError as e:
+        logger.warning(f"⚠️ 会话不存在: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
         logger.error(f"❌ 结束会话错误: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/refine", response_model=APIResponse[ChatResponse])
-async def refine(request: RefineRequest):
-    """
-    改进结果接口
-    
-    基于用户反馈改进之前的输出（HITL - Human-in-the-Loop）
-    
-    ## 参数
-    - **session_id**: 会话ID
-    - **original_query**: 原始查询
-    - **previous_result**: 之前的结果
-    - **user_feedback**: 用户反馈
-    
-    ## 返回
-    改进后的结果
-    
-    ## 使用场景
-    用户对 Agent 的输出不满意时，可以提供反馈让 Agent 改进
-    
-    ## 示例
-    ```python
-    response = requests.post(
-        "http://localhost:8000/api/v1/refine",
-        json={
-            "session_id": "20231224_120000",
-            "original_query": "生成一个PPT",
-            "previous_result": "已生成PPT...",
-            "user_feedback": "标题字体太小了"
-        }
-    )
-    ```
-    """
-    try:
-        logger.info(f"📨 收到改进请求: session_id={request.session_id}")
-        
-        from main import agent_pool
-        
-        if request.session_id not in agent_pool:
-            raise HTTPException(status_code=404, detail="会话不存在")
-        
-        agent = agent_pool[request.session_id]
-        
-        logger.info(f"🔧 开始改进结果: session_id={request.session_id}")
-        
-        # 执行改进
-        result = await agent.refine(
-            original_query=request.original_query,
-            previous_result=request.previous_result,
-            user_feedback=request.user_feedback
-        )
-        
-        logger.info(f"✅ 改进完成: status={result.get('status')}")
-        
-        # 清理数据以确保可以JSON序列化
-        plan = sanitize_for_json(agent.get_plan())
-        progress = sanitize_for_json(agent.get_progress())
-        invocation_stats = sanitize_for_json(result.get("invocation_stats"))
-        
-        # 🆕 获取详细的执行信息
-        routing_decisions = sanitize_for_json(result.get("routing_decisions", []))
-        session_log = result.get("session_log", {})
-        tool_calls_detail = []
-        for interaction in session_log.get("interactions", []):
-            if interaction.get("event_type") == "llm_response":
-                tool_count = interaction.get("data", {}).get("tool_calls_count", 0)
-                if tool_count > 0:
-                    tool_calls_detail.append({
-                        "turn": interaction.get("turn"),
-                        "tool_calls_count": tool_count
-                    })
-        intent_analysis = sanitize_for_json(session_log.get("intent_recognition"))
-        
-        # 构建响应
-        response = ChatResponse(
-            session_id=agent._session_id,
-            content=result.get("final_result", ""),
-            status=result.get("status", "unknown"),
-            turns=result.get("turns", 0),
-            plan=plan,
-            progress=progress,
-            invocation_stats=invocation_stats,
-            routing_decisions=routing_decisions,
-            tool_calls=tool_calls_detail if tool_calls_detail else None,
-            intent_analysis=intent_analysis
-        )
-        
-        return APIResponse(
-            code=200,
-            message="success",
-            data=response
-        )
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ 改进接口错误: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @router.get("/sessions", response_model=APIResponse[Dict])
@@ -515,21 +592,8 @@ async def list_sessions():
     try:
         logger.info("📨 列出所有会话")
         
-        from main import agent_pool
-        
-        sessions = []
-        for session_id, agent in agent_pool.items():
-            try:
-                info = agent.get_session_info()
-                sessions.append({
-                    "session_id": session_id,
-                    "active": info["active"],
-                    "turns": info["turns"],
-                    "message_count": info["message_count"],
-                    "has_plan": info.get("has_plan", False)
-                })
-            except Exception as e:
-                logger.warning(f"⚠️ 获取会话信息失败: session_id={session_id}, error={str(e)}")
+        # 调用 Service 层
+        sessions = session_service.list_sessions()
         
         logger.info(f"✅ 返回 {len(sessions)} 个会话")
         
@@ -544,5 +608,5 @@ async def list_sessions():
     
     except Exception as e:
         logger.error(f"❌ 列出会话错误: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 

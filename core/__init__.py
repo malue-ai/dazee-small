@@ -1,5 +1,5 @@
 """
-Agent V3.4 Core Module
+Agent V3.6 Core Module
 
 核心组件：
 - SimpleAgent: 主Agent类
@@ -9,6 +9,8 @@ Agent V3.4 Core Module
 - MemoryManager: 记忆管理
 - PlanningManager: 规划管理
 - LLM Service: LLM统一封装
+- EventManager: 事件管理（SSE/WebSocket 通用协议）
+- Context: 上下文管理
 """
 
 # Agent
@@ -65,6 +67,24 @@ from .llm_service import (
     create_claude_service
 )
 
+# 事件管理（SSE/WebSocket 通用协议）
+from .events import (
+    EventManager,
+    create_event_manager,
+    SessionEventManager,
+    UserEventManager,
+    ConversationEventManager,
+    MessageEventManager,
+    ContentEventManager,
+    SystemEventManager,
+)
+
+# 上下文管理
+from .context import (
+    Context,
+    create_context
+)
+
 
 __all__ = [
     # Agent
@@ -109,5 +129,19 @@ __all__ = [
     "LLMProvider",
     "create_llm_service",
     "create_claude_service",
+    
+    # 事件管理（SSE/WebSocket 通用协议）
+    "EventManager",
+    "create_event_manager",
+    "SessionEventManager",
+    "UserEventManager",
+    "ConversationEventManager",
+    "MessageEventManager",
+    "ContentEventManager",
+    "SystemEventManager",
+    
+    # 上下文管理
+    "Context",
+    "create_context",
 ]
 

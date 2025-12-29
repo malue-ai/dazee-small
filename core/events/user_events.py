@@ -1,0 +1,74 @@
+"""
+User 级事件管理
+
+职责：管理 User（用户）级别的事件
+"""
+
+from typing import Dict, Any, Optional
+from core.events.base import BaseEventManager
+
+
+class UserEventManager(BaseEventManager):
+    """
+    User 级事件管理器
+    
+    负责用户相关的事件
+    """
+    
+    async def emit_user_action(
+        self,
+        session_id: str,
+        user_id: str,
+        action: str,
+        action_data: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        发送用户行为事件
+        
+        Args:
+            session_id: Session ID
+            user_id: 用户ID
+            action: 行为类型（如 login, logout, send_message）
+            action_data: 行为数据
+            
+        Returns:
+            事件对象
+        """
+        event = self._create_event(
+            event_type="user_action",
+            data={
+                "user_id": user_id,
+                "action": action,
+                "action_data": action_data or {}
+            }
+        )
+        
+        return await self._send_event(session_id, event)
+    
+    async def emit_user_preference_update(
+        self,
+        session_id: str,
+        user_id: str,
+        preferences: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        发送用户偏好更新事件
+        
+        Args:
+            session_id: Session ID
+            user_id: 用户ID
+            preferences: 用户偏好设置
+            
+        Returns:
+            事件对象
+        """
+        event = self._create_event(
+            event_type="user_preference_update",
+            data={
+                "user_id": user_id,
+                "preferences": preferences
+            }
+        )
+        
+        return await self._send_event(session_id, event)
+

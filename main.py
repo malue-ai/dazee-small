@@ -21,6 +21,8 @@ load_dotenv(dotenv_path=env_path, override=True)
 
 from core.agent import create_simple_agent, SimpleAgent
 from routers import chat_router, knowledge_router
+from routers.human_confirmation import router as human_confirmation_router
+from routers.conversation import router as conversation_router
 
 # ============================================================
 # 全局变量
@@ -50,6 +52,13 @@ async def lifespan(app: FastAPI):
     print("🚀 Zenflux Agent API 启动中...")
     print(f"📦 默认模型: {DEFAULT_MODEL}")
     print(f"📁 工作目录: {DEFAULT_WORKSPACE}")
+    
+    # 初始化数据库
+    print("💾 初始化数据库...")
+    from utils.database import init_db
+    await init_db()
+    print("✅ 数据库初始化完成")
+    
     yield
     # 关闭时
     print("🛑 清理 Agent 实例...")
@@ -85,6 +94,8 @@ app.add_middleware(
 # 注册路由
 app.include_router(chat_router)
 app.include_router(knowledge_router)
+app.include_router(human_confirmation_router)  # 🆕 HITL 确认接口
+app.include_router(conversation_router)  # 🆕 对话管理接口
 
 
 # ============================================================
@@ -189,7 +200,7 @@ async def root():
             "stream": "/api/v1/chat/stream",
             "session": "/api/v1/session/{session_id}",
             "sessions": "/api/v1/sessions",
-            "refine": "/api/v1/refine"
+            "human_confirmation": "/api/v1/human-confirmation/{request_id}"  # 🆕 HITL
         },
         "github": "https://github.com/your-repo/zenflux-agent"
     }

@@ -6,29 +6,47 @@ from datetime import datetime
 class ChatRequest(BaseModel):
     """聊天请求"""
     message: str = Field(..., description="用户消息", min_length=1)
-    user_id: Optional[str] = Field(None, description="用户ID（可选，用于多租户隔离/知识库分区映射）")
+    message_id: Optional[str] = Field(None, alias="messageId", description="消息ID（可选，用于追踪单条消息）")
+    user_id: Optional[str] = Field(None, alias="userId", description="用户ID（可选，用于多租户隔离/知识库分区映射）")
     conversation_id: Optional[str] = Field(
         None,
+        alias="conversationId",
         description="对话线程ID（客户端会话ID，可选）：用于区分同一用户的多个对话，并在多次请求间延续上下文"
     )
     session_id: Optional[str] = Field(
         None,
+        alias="sessionId",
         description="运行会话ID（服务端内部ID，可选）：用于标识一次后端运行/Agent实例；不要与 WebSocket 连接ID混用"
     )
-    use_knowledge_base: bool = Field(
-        False,
-        description="是否使用知识库检索（试验期明确传递模式）：为 true 时会先检索用户知识库，并将相关内容注入到 LLM 上下文"
-    )
     stream: bool = Field(True, description="是否使用流式输出（默认为True）")
+    background_task: Optional[bool] = Field(None, alias="backgroundTask", description="是否作为后台任务执行（可选）")
+    file: Optional[str] = Field(None, description="附件文件路径或URL（可选）")
+    variables: Optional[Dict[str, Any]] = Field(
+        None,
+        description="前端上下文变量（可选），如用户位置、时区、设备信息等，用于个性化响应"
+    )
     
     model_config = {
+        "populate_by_name": True,  # 支持驼峰和下划线命名
         "json_schema_extra": {
             "examples": [
                 {
                     "message": "帮我生成一个关于AI的PPT",
-                    "user_id": "user_001",
-                    "conversation_id": "conv_20231224_120000",
-                    "stream": True
+                    "messageId": "msg_001",
+                    "userId": "user_001",
+                    "conversationId": "conv_20231224_120000",
+                    "stream": True,
+                    "backgroundTask": False,
+                    "file": "https://example.com/document.pdf",
+                    "knowledge": ["kb_001", "kb_002"],
+                    "variables": {
+                        "location": "北京市朝阳区",
+                        "timezone": "Asia/Shanghai",
+                        "locale": "zh-CN",
+                        "device": "mobile",
+                        "userAgent": "Mozilla/5.0...",
+                        "currentTime": "2023-12-24T12:00:00+08:00"
+                    }
                 }
             ]
         }

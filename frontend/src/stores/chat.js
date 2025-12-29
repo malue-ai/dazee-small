@@ -1,0 +1,443 @@
+import { defineStore } from 'pinia'
+import axios from '@/api/axios'
+
+export const useChatStore = defineStore('chat', {
+  state: () => ({
+    sessionId: null,
+    conversationId: null,
+    userId: null,
+    messages: [],
+    isConnected: false,
+    // SSE 断线重连状态
+    sseConnection: null,
+    lastEventId: 0,
+    reconnectAttempts: 0,
+    maxReconnectAttempts: 3
+  }),
+
+  actions: {
+    /**
+     * 初始化用户ID
+     */
+    initUserId() {
+      if (!this.userId) {
+        // 从 localStorage 获取或创建新的
+        this.userId = localStorage.getItem('userId') || 'user_' + Date.now()
+        localStorage.setItem('userId', this.userId)
+      }
+      return this.userId
+    },
+
+    // ==================== Conversation 管理 ====================
+
+    /**
+     * 创建新对话
+     */
+    async createConversation(title = '新对话') {
+      const userId = this.initUserId()
+
+      try {
+        const response = await axios.post('/v1/conversations', null, {
+          params: { user_id: userId, title }
+        })
+
+        this.conversationId = response.data.data.id
+        console.log('✅ 对话创建成功:', this.conversationId)
+        return response.data.data
+      } catch (error) {
+        console.error('❌ 创建对话失败:', error)
+        throw error
+      }
+    },
+
+    /**
+     * 获取对话列表
+     */
+    async getConversationList(limit = 20, offset = 0) {
+      const userId = this.initUserId()
+
+      try {
+        const response = await axios.get('/v1/conversations', {
+          params: { user_id: userId, limit, offset }
+        })
+
+        console.log('✅ 对话列表:', response.data.data)
+        return response.data.data
+      } catch (error) {
+        console.error('❌ 获取对话列表失败:', error)
+        throw error
+      }
+    },
+
+    /**
+     * 获取对话详情
+     */
+    async getConversation(conversationId) {
+      try {
+        const response = await axios.get(`/v1/conversations/${conversationId}`)
+        return response.data.data
+      } catch (error) {
+        console.error('❌ 获取对话详情失败:', error)
+        throw error
+      }
+    },
+
+    /**
+     * 更新对话标题
+     */
+    async updateConversation(conversationId, title) {
+      try {
+        const response = await axios.put(`/v1/conversations/${conversationId}`, null, {
+          params: { title }
+        })
+
+        console.log('✅ 对话更新成功')
+        return response.data.data
+      } catch (error) {
+        console.error('❌ 更新对话失败:', error)
+        throw error
+      }
+    },
+
+    /**
+     * 删除对话
+     */
+    async deleteConversation(conversationId) {
+      try {
+        const response = await axios.delete(`/v1/conversations/${conversationId}`)
+        console.log('✅ 对话删除成功')
+        return response.data.data
+      } catch (error) {
+        console.error('❌ 删除对话失败:', error)
+        throw error
+      }
+    },
+
+    /**
+     * 获取对话历史消息
+     */
+    async getConversationMessages(conversationId, limit = 50, offset = 0, order = 'asc') {
+      try {
+        const response = await axios.get(`/v1/conversations/${conversationId}/messages`, {
+          params: { limit, offset, order }
+        })
+
+        console.log('✅ 历史消息:', response.data.data)
+        return response.data.data
+      } catch (error) {
+        console.error('❌ 获取历史消息失败:', error)
+        throw error
+      }
+    },
+
+    /**
+     * 获取对话摘要
+     */
+    async getConversationSummary(conversationId) {
+      try {
+        const response = await axios.get(`/v1/conversations/${conversationId}/summary`)
+        return response.data.data
+      } catch (error) {
+        console.error('❌ 获取对话摘要失败:', error)
+        throw error
+      }
+    },
+
+    // ==================== Session 管理 ====================
+
+    /**
+     * 获取会话状态（用于断线重连判断）
+     */
+    async getSessionStatus(sessionId) {
+      try {
+        const response = await axios.get(`/v1/session/${sessionId}/status`)
+        return response.data.data
+      } catch (error) {
+        console.error('❌ 获取会话状态失败:', error)
+        throw error
+      }
+    },
+
+    /**
+     * 获取会话事件（用于断线重连）
+     */
+    async getSessionEvents(sessionId, afterId = null, limit = 100) {
+      try {
+        const params = { limit }
+        if (afterId !== null) {
+          params.after_id = afterId
+        }
+
+        const response = await axios.get(`/v1/session/${sessionId}/events`, {
+          params
+        })
+        return response.data.data
+      } catch (error) {
+        console.error('❌ 获取会话事件失败:', error)
+        throw error
+      }
+    },
+
+    /**
+     * 获取用户的所有活跃会话
+     */
+    async getUserSessions() {
+      const userId = this.initUserId()
+
+      try {
+        const response = await axios.get(`/v1/user/${userId}/sessions`)
+        return response.data.data.sessions
+      } catch (error) {
+        console.error('❌ 获取用户会话失败:', error)
+        throw error
+      }
+    },
+
+    // ==================== 消息发送（同步模式）====================
+
+    /**
+     * 发送消息（同步模式）
+     */
+    async sendMessage(content, conversationId = null) {
+      const userId = this.initUserId()
+
+      try {
+        const response = await axios.post('/v1/chat', {
+          message: content,
+          user_id: userId,
+          conversation_id: conversationId,
+          stream: false
+        })
+
+        // 保存 task_id 和 conversation_id
+        this.sessionId = response.data.data.task_id
+        this.conversationId = response.data.data.conversation_id
+
+        return response.data.data
+      } catch (error) {
+        console.error('❌ 发送消息失败:', error)
+        throw error
+      }
+    },
+
+    // ==================== SSE 流式消息（带断线重连）====================
+
+    /**
+     * 使用 SSE 流式发送消息（支持断线重连）
+     */
+    async sendMessageStream(content, conversationId = null, onEvent) {
+      const userId = this.initUserId()
+
+      return new Promise((resolve, reject) => {
+        // 构建请求 body
+        const requestBody = {
+          message: content,
+          user_id: userId,
+          stream: true
+        }
+        
+        if (conversationId) {
+          requestBody.conversation_id = conversationId
+        }
+
+        // 使用 fetch 创建 SSE 连接
+        this._createSSEConnection(requestBody, onEvent, resolve, reject)
+      })
+    },
+
+    /**
+     * 创建 SSE 连接（内部方法）
+     */
+    async _createSSEConnection(requestBody, onEvent, resolve, reject) {
+      try {
+        const response = await fetch('/api/v1/chat', {
+          method: 'POST',
+          headers: {
+            'Accept': 'text/event-stream',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(requestBody)
+        })
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+        }
+
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+
+        let fullResponse = ''
+        this.isConnected = true
+        this.reconnectAttempts = 0
+
+        // 读取流
+        const readStream = async () => {
+          try {
+            while (true) {
+              const { done, value } = await reader.read()
+              
+              if (done) {
+                console.log('✅ SSE 连接正常关闭')
+                this.isConnected = false
+                break
+              }
+
+              const chunk = decoder.decode(value, { stream: true })
+              const lines = chunk.split('\n')
+
+              for (const line of lines) {
+                if (line.startsWith('id: ')) {
+                  // 记录事件ID（用于断线重连）
+                  this.lastEventId = parseInt(line.slice(4))
+                } else if (line.startsWith('data: ')) {
+                  try {
+                    const data = JSON.parse(line.slice(6))
+                    
+                    // 回调处理事件
+                    if (onEvent) {
+                      onEvent(data)
+                    }
+
+                    // 收集文本内容
+                    if (data.type === 'content_delta') {
+                      if (data.data?.delta?.type === 'text' && data.data?.delta?.text) {
+                        fullResponse += data.data.delta.text
+                      }
+                    } else if (data.type === 'content' && data.data?.text) {
+                      // 兼容旧格式
+                      fullResponse += data.data.text
+                    }
+                    
+                    // 保存 session_id 和 conversation_id
+                    if (data.session_id) {
+                      this.sessionId = data.session_id
+                    }
+                    if (data.type === 'conversation_start' && data.data?.conversation_id) {
+                      this.conversationId = data.data.conversation_id
+                    }
+
+                    // 完成
+                    if (data.type === 'done' || data.type === 'session_end') {
+                      console.log('✅ Agent 执行完成')
+                      this.isConnected = false
+                      resolve(fullResponse)
+                      return
+                    }
+                  } catch (e) {
+                    console.error('❌ 解析 SSE 数据失败:', e, line)
+                  }
+                }
+              }
+            }
+          } catch (error) {
+            console.error('❌ SSE 读取错误:', error)
+            this.isConnected = false
+            
+            // 尝试断线重连
+            await this._handleSSEReconnect(onEvent, resolve, reject)
+          }
+        }
+
+        // 开始读取
+        await readStream()
+
+      } catch (error) {
+        console.error('❌ SSE 连接错误:', error)
+        this.isConnected = false
+        
+        // 尝试断线重连
+        await this._handleSSEReconnect(onEvent, resolve, reject)
+      }
+    },
+
+    /**
+     * 处理 SSE 断线重连
+     */
+    async _handleSSEReconnect(onEvent, resolve, reject) {
+      // 检查是否有 session_id（没有就无法重连）
+      if (!this.sessionId) {
+        console.error('❌ 无法重连：缺少 session_id')
+        reject(new Error('SSE 连接断开，无法重连'))
+        return
+      }
+
+      // 检查重连次数
+      if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+        console.error('❌ 达到最大重连次数，停止重连')
+        reject(new Error('SSE 连接断开，重连失败'))
+        return
+      }
+
+      this.reconnectAttempts++
+      console.log(`🔄 尝试断线重连 (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`)
+
+      try {
+        // 1. 检查 Session 状态
+        const sessionStatus = await this.getSessionStatus(this.sessionId)
+        console.log('📊 Session 状态:', sessionStatus)
+
+        // 如果已经完成，不需要重连
+        if (sessionStatus.status === 'completed' || sessionStatus.status === 'failed') {
+          console.log('✅ Session 已完成，不需要重连')
+          resolve('')
+          return
+        }
+
+        // 2. 获取丢失的事件
+        console.log(`📥 获取丢失的事件 (after_id=${this.lastEventId})`)
+        const eventsData = await this.getSessionEvents(this.sessionId, this.lastEventId)
+        
+        // 3. 重放丢失的事件
+        if (eventsData.events && eventsData.events.length > 0) {
+          console.log(`🔄 重放 ${eventsData.events.length} 个丢失的事件`)
+          for (const event of eventsData.events) {
+            if (onEvent) {
+              onEvent(event)
+            }
+            this.lastEventId = event.id
+          }
+        }
+
+        // 4. 重新建立 SSE 连接
+        console.log('🔗 重新建立 SSE 连接...')
+        // 注意：这里需要前端重新发送请求，或者使用 EventSource 的重连机制
+        // 由于我们使用 fetch，这里简单地等待一段时间后完成
+        setTimeout(() => {
+          console.log('✅ 断线重连完成')
+          resolve('')
+        }, 1000)
+
+      } catch (error) {
+        console.error('❌ 断线重连失败:', error)
+        
+        // 等待后重试
+        await new Promise(resolve => setTimeout(resolve, 1000 * this.reconnectAttempts))
+        await this._handleSSEReconnect(onEvent, resolve, reject)
+      }
+    },
+
+    /**
+     * 手动断开 SSE 连接
+     */
+    disconnectSSE() {
+      if (this.sseConnection) {
+        this.sseConnection.close()
+        this.sseConnection = null
+      }
+      this.isConnected = false
+      console.log('🔌 SSE 连接已断开')
+    },
+
+    /**
+     * 重置状态
+     */
+    reset() {
+      this.sessionId = null
+      this.conversationId = null
+      this.messages = []
+      this.lastEventId = 0
+      this.reconnectAttempts = 0
+      this.disconnectSSE()
+    }
+  }
+})

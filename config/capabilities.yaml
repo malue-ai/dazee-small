@@ -776,6 +776,92 @@ capabilities:
   #       - team collaboration
   #     server_url: "https://office-mcp-server.example.com"
 
+  # ==================== HITL Tools (Human-in-the-Loop) ====================
+  
+  - name: request_human_confirmation
+    type: TOOL
+    subtype: CUSTOM
+    provider: user
+    
+    # 工具实现配置
+    implementation:
+      module: "tools.request_human_confirmation"
+      class: "RequestHumanConfirmationTool"
+    
+    capabilities:
+      - human_interaction
+      - confirmation
+      - hitl
+      - user_approval
+    priority: 100  # 最高优先级
+    cost:
+      time: variable  # 取决于用户响应速度
+      money: free
+    constraints:
+      requires_api: false
+      requires_user_interaction: true
+    metadata:
+      description: |
+        请求用户确认操作。适用于以下场景：
+        - 删除文件或数据等危险操作
+        - 修改重要配置
+        - 执行不可逆操作
+        - 需要用户选择方案或参数
+        - 任何需要人工干预的决策
+        
+        调用此工具后，会暂停执行并等待用户响应。
+        用户可以确认、取消或选择其他选项。
+      preferred_for:
+        - 危险操作确认
+        - 重要决策审批
+        - 方案选择
+        - 参数确认
+      keywords:
+        - 确认
+        - 授权
+        - 人工干预
+        - HITL
+        - 审批
+        - 选择
+      note: |
+        使用场景：
+        - 删除文件/数据
+        - 修改重要配置
+        - 执行不可逆操作
+        - 选择方案/参数
+        
+        工作机制：
+        1. LLM 调用此工具 → 发送 SSE 事件到前端
+        2. 前端显示确认对话框
+        3. 用户通过 HTTP POST 提交响应
+        4. 工具获取响应后返回给 LLM
+    input_schema:
+      type: object
+      properties:
+        question:
+          type: string
+          description: "要询问用户的问题，应该清晰描述操作内容和影响"
+        options:
+          type: array
+          items:
+            type: string
+          description: "可选项列表，默认 ['confirm', 'cancel']。可以自定义选项如 ['商务风格', '学术风格', '创意风格']"
+          default: ["confirm", "cancel"]
+        timeout:
+          type: integer
+          description: "超时时间（秒），默认 60 秒"
+          default: 60
+        confirmation_type:
+          type: string
+          enum: ["yes_no", "single_choice", "multiple_choice", "text_input"]
+          description: "确认类型，默认 yes_no"
+          default: "yes_no"
+        metadata:
+          type: object
+          description: "额外信息，用于前端展示（如操作详情、影响范围等）"
+      required:
+        - question
+
   # ==================== Session Tools (会话级工具) ====================
   #
   # 架构关系（参考图示）：

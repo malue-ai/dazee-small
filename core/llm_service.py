@@ -591,19 +591,19 @@ class ClaudeLLMService(BaseLLMService):
                 formatted_tools = self._format_tools(tools)
                 
                 # 🔍 调试日志：打印工具信息
-                print("--- Tools List ---")
+                logger.debug("--- Tools List ---")
                 for i, tool in enumerate(formatted_tools):
                     tool_name = tool.get('name', 'unknown')
                     tool_type = tool.get('type', 'function')
-                    print(f"  [{i}] {tool_name} (type: {tool_type})")
+                    logger.debug(f"  [{i}] {tool_name} (type: {tool_type})")
                     # 打印 input_schema 的属性
                     if 'input_schema' in tool:
                         schema = tool['input_schema']
                         props = schema.get('properties', {})
                         required = schema.get('required', [])
-                        print(f"      - properties: {list(props.keys())}")
-                        print(f"      - required: {required}")
-                print("="*80 + "\n")
+                        logger.debug(f"      - properties: {list(props.keys())}")
+                        logger.debug(f"      - required: {required}")
+                logger.debug("="*80 + "\n")
                 
                 # 根据调用方式配置工具
                 if invocation_type == "tool_search" and self._tool_search_mode:
@@ -624,10 +624,10 @@ class ClaudeLLMService(BaseLLMService):
         # 将 request_params 转为 JSON（处理不可序列化的对象）
         try:
             request_json = json.dumps(request_params, ensure_ascii=False, indent=2, default=str)
-            logger.info(request_json)
+            logger.debug(f"📤 LLM 请求参数:\n{request_json}")
         except Exception as e:
             logger.error(f"无法序列化请求参数: {e}")
-            logger.info(str(request_params))
+            logger.debug(str(request_params))
         
         # 选择 API 调用方式
         if self._betas:
@@ -658,9 +658,7 @@ class ClaudeLLMService(BaseLLMService):
                 raise
         
         # 🔍 打印完整的原始响应数据
-        logger.info(f"\n{'='*80}")
-        logger.info(f"📥 完整 API 响应 (从 Claude 返回)")
-        logger.info(f"{'='*80}")
+        logger.debug(f"📥 完整 API 响应 (从 Claude 返回)")
         
         # 将 response 转为可读的字典格式
         try:
@@ -694,12 +692,12 @@ class ClaudeLLMService(BaseLLMService):
                 response_dict["content"].append(block_dict)
             
             response_json = json.dumps(response_dict, ensure_ascii=False, indent=2)
-            logger.info(response_json)
+            logger.debug(response_json)
         except Exception as e:
             logger.error(f"无法序列化响应: {e}")
-            logger.info(str(response))
+            logger.debug(str(response))
         
-        logger.info(f"{'='*80}\n")
+        logger.debug(f"{'='*80}\n")
         
         # 解析响应
         return self._parse_response(response, invocation_type=invocation_type)
@@ -764,18 +762,15 @@ class ClaudeLLMService(BaseLLMService):
             request_params["tools"] = formatted_tools
         
         # 🔍 打印完整的流式请求数据
-        logger.info(f"\n{'='*80}")
-        logger.info(f"📤 完整流式 API 请求 (发送给 Claude)")
-        logger.info(f"{'='*80}")
+        logger.debug(f"📤 完整流式 API 请求 (发送给 Claude)")
         
         try:
             request_json = json.dumps(request_params, ensure_ascii=False, indent=2, default=str)
-            logger.info(request_json)
+            logger.debug(request_json)
         except Exception as e:
             logger.error(f"无法序列化请求参数: {e}")
-            logger.info(str(request_params))
+            logger.debug(str(request_params))
         
-        logger.info(f"{'='*80}\n")
         
         # 流式调用
         accumulated_thinking = ""
@@ -892,9 +887,7 @@ class ClaudeLLMService(BaseLLMService):
                 })
         
         # 🔍 打印完整的流式响应数据
-        logger.info(f"\n{'='*80}")
-        logger.info(f"📥 完整流式 API 响应 (从 Claude 返回)")
-        logger.info(f"{'='*80}")
+        logger.debug(f"📥 完整流式 API 响应 (从 Claude 返回)")
         
         # 构建完整的响应对象
         try:
@@ -932,7 +925,7 @@ class ClaudeLLMService(BaseLLMService):
                     })
             
             response_json = json.dumps(response_dict, ensure_ascii=False, indent=2)
-            logger.info(response_json)
+            logger.debug(response_json)
         except Exception as e:
             logger.error(f"无法构建完整响应: {e}")
             # 降级输出
@@ -942,9 +935,9 @@ class ClaudeLLMService(BaseLLMService):
                 "content": accumulated_content if accumulated_content else None,
                 "tool_calls": tool_calls if tool_calls else None
             }
-            logger.info(json.dumps(simple_response, ensure_ascii=False, indent=2))
+            logger.debug(json.dumps(simple_response, ensure_ascii=False, indent=2))
         
-        logger.info(f"{'='*80}\n")
+        logger.debug(f"{'='*80}\n")
         
         # 🆕 返回最终响应（包含完整内容和工具调用）
         if accumulated_content or accumulated_thinking or tool_calls:

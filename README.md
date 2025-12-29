@@ -45,12 +45,15 @@ CoT_agent/mvp/
 ### 安装依赖
 
 ```bash
-pip install anthropic pyyaml
+pip install -r requirements.txt
 ```
 
 ### 基本使用
 
 ```python
+# 启动命令
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
 from core.agent import create_simple_agent
 
 # 创建 Agent

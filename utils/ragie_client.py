@@ -189,6 +189,22 @@ class RagieClient:
                     error_text = await response.text()
                     raise Exception(f"Ragie API 错误 (HTTP {response.status}): {error_text}")
     
+    # 别名方法（兼容性）
+    async def create_document_from_raw(
+        self,
+        text: str,
+        name: str,
+        partition: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """create_document_raw 的别名（参数名不同）"""
+        return await self.create_document_raw(
+            content=text,
+            name=name,
+            partition=partition,
+            metadata=metadata
+        )
+    
     async def get_document(self, document_id: str) -> Dict[str, Any]:
         """
         获取文档状态
@@ -310,6 +326,35 @@ class RagieClient:
             async with session.delete(url, headers=self.headers) as response:
                 if response.status in [200, 204]:
                     return {"success": True, "document_id": document_id}
+                else:
+                    error_text = await response.text()
+                    raise Exception(f"Ragie API 错误 (HTTP {response.status}): {error_text}")
+    
+    async def patch_document_metadata(
+        self,
+        document_id: str,
+        metadata: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        更新文档元数据（部分更新）
+        
+        Args:
+            document_id: 文档 ID
+            metadata: 新的元数据（会合并到现有元数据）
+            
+        Returns:
+            更新后的文档信息
+            
+        Ref: https://docs.ragie.ai/reference/patchdocumentmetadata
+        """
+        url = f"{self.base_url}/documents/{document_id}/metadata"
+        
+        payload = {"metadata": metadata}
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.patch(url, json=payload, headers=self.headers) as response:
+                if response.status == 200:
+                    return await response.json()
                 else:
                     error_text = await response.text()
                     raise Exception(f"Ragie API 错误 (HTTP {response.status}): {error_text}")

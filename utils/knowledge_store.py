@@ -185,6 +185,26 @@ class KnowledgeStore:
         
         self.store.update(_mutate)
     
+    def update_document_metadata(self, user_id: str, document_id: str, metadata: Dict[str, Any]) -> None:
+        """更新文档元数据"""
+        def _mutate(data: Dict[str, Any]):
+            users = data.setdefault("users", {})
+            user = users.get(user_id)
+            if not user:
+                return
+            
+            documents = user.get("documents", [])
+            for doc in documents:
+                if doc.get("document_id") == document_id:
+                    # 合并元数据
+                    current_metadata = doc.get("metadata", {})
+                    current_metadata.update(metadata)
+                    doc["metadata"] = current_metadata
+                    doc["updated_at"] = _now_iso()
+                    break
+        
+        self.store.update(_mutate)
+    
     def delete_document(self, user_id: str, document_id: str) -> None:
         """删除文档记录"""
         def _mutate(data: Dict[str, Any]):

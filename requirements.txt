@@ -13,3 +13,11 @@ python-dotenv>=1.0.0
 # 其他工具
 python-multipart==0.0.6
 
+# 数据库
+aiosqlite>=0.19.0
+
+# Redis（Session 管理和 SSE 重连）
+redis>=5.0.0
+
+# Token 计数
+tiktoken>=0.5.0

@@ -1,0 +1,95 @@
+"""
+Session 级事件管理
+
+职责：管理 Session（运行会话）级别的事件
+"""
+
+from typing import Dict, Any
+from datetime import datetime
+from core.events.base import BaseEventManager
+
+
+class SessionEventManager(BaseEventManager):
+    """
+    Session 级事件管理器
+    
+    负责 Session 生命周期相关的事件
+    """
+    
+    async def emit_session_start(
+        self,
+        session_id: str,
+        user_id: str,
+        conversation_id: str
+    ) -> Dict[str, Any]:
+        """
+        发送 session_start 事件
+        
+        Args:
+            session_id: Session ID
+            user_id: 用户ID
+            conversation_id: 对话ID
+            
+        Returns:
+            事件对象
+        """
+        event = self._create_event(
+            event_type="session_start",
+            data={
+                "session_id": session_id,
+                "user_id": user_id,
+                "conversation_id": conversation_id,
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+        
+        return await self._send_event(session_id, event)
+    
+    async def emit_session_end(
+        self,
+        session_id: str,
+        status: str,
+        duration_ms: int
+    ) -> Dict[str, Any]:
+        """
+        发送 session_end 事件
+        
+        Args:
+            session_id: Session ID
+            status: 会话状态（completed/failed/cancelled）
+            duration_ms: 会话持续时间（毫秒）
+            
+        Returns:
+            事件对象
+        """
+        event = self._create_event(
+            event_type="session_end",
+            data={
+                "session_id": session_id,
+                "status": status,
+                "duration_ms": duration_ms
+            }
+        )
+        
+        return await self._send_event(session_id, event)
+    
+    async def emit_heartbeat(
+        self,
+        session_id: str
+    ) -> Dict[str, Any]:
+        """
+        发送心跳事件
+        
+        Args:
+            session_id: Session ID
+            
+        Returns:
+            事件对象
+        """
+        event = self._create_event(
+            event_type="ping",
+            data={"type": "ping"}
+        )
+        
+        return await self._send_event(session_id, event)
+
