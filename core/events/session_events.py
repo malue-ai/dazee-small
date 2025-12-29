@@ -45,6 +45,32 @@ class SessionEventManager(BaseEventManager):
         
         return await self._send_event(session_id, event)
     
+    async def emit_session_stopped(
+        self,
+        session_id: str,
+        reason: str = "user_requested"
+    ) -> Dict[str, Any]:
+        """
+        发送 session_stopped 事件（用户主动停止）
+        
+        Args:
+            session_id: Session ID
+            reason: 停止原因（user_requested/timeout/error）
+            
+        Returns:
+            事件对象
+        """
+        event = self._create_event(
+            event_type="session_stopped",
+            data={
+                "session_id": session_id,
+                "reason": reason,
+                "stopped_at": datetime.now().isoformat()
+            }
+        )
+        
+        return await self._send_event(session_id, event)
+    
     async def emit_session_end(
         self,
         session_id: str,

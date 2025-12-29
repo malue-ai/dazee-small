@@ -76,7 +76,7 @@ class RedisSessionManager:
             "conversation_id": conversation_id or "",
             "message_id": message_id or "",
             "status": "running",
-            "last_event_id": "0",
+            "last_event_seq": "0",  # 使用 seq（session 内序号）而不是全局 ID
             "start_time": datetime.now().isoformat(),
             "last_heartbeat": datetime.now().isoformat(),
             "progress": "0.0",
@@ -115,13 +115,50 @@ class RedisSessionManager:
         if not status:
             return None
         
-        # 转换数字类型
-        if "last_event_id" in status:
-            status["last_event_id"] = int(status["last_event_id"])
+        # 转换数字类型（安全转换，处理 None 和无效值）
+        # 支持 last_event_id（旧字段）和 last_event_seq（新字段）
+        if "last_event_seq" in status:
+            try:
+                val = status["last_event_seq"]
+                if val and val != 'None':
+                    status["last_event_seq"] = int(val)
+                else:
+                    status["last_event_seq"] = 0
+            except (ValueError, TypeError):
+                status["last_event_seq"] = 0
+        elif "last_event_id" in status:
+            # 向后兼容：如果有 last_event_id，转换并复制到 last_event_seq
+            try:
+                val = status["last_event_id"]
+                if val and val != 'None':
+                    status["last_event_seq"] = int(val)
+                    status["last_event_id"] = int(val)
+                else:
+                    status["last_event_seq"] = 0
+                    status["last_event_id"] = 0
+            except (ValueError, TypeError):
+                status["last_event_seq"] = 0
+                status["last_event_id"] = 0
+        
         if "progress" in status:
-            status["progress"] = float(status["progress"])
+            try:
+                val = status["progress"]
+                if val and val != 'None':
+                    status["progress"] = float(val)
+                else:
+                    status["progress"] = 0.0
+            except (ValueError, TypeError):
+                status["progress"] = 0.0
+        
         if "total_turns" in status:
-            status["total_turns"] = int(status["total_turns"])
+            try:
+                val = status["total_turns"]
+                if val and val != 'None':
+                    status["total_turns"] = int(val)
+                else:
+                    status["total_turns"] = 0
+            except (ValueError, TypeError):
+                status["total_turns"] = 0
         
         return status
     
@@ -140,8 +177,21 @@ class RedisSessionManager:
         if not fields:
             return
         
-        # 转换为字符串
-        str_fields = {k: str(v) for k, v in fields.items()}
+        # 转换为字符串，但排除 None 值（避免存储字符串 'None'）
+        str_fields = {}
+        for k, v in fields.items():
+            if v is not None:
+                str_fields[k] = str(v)
+            else:
+                # None 值使用默认值
+                if k in ["last_event_id", "last_event_seq"]:
+                    str_fields[k] = "0"
+                elif k == "progress":
+                    str_fields[k] = "0.0"
+                elif k == "total_turns":
+                    str_fields[k] = "0"
+                else:
+                    str_fields[k] = ""
         
         self.client.hset(
             f"session:{session_id}:status",
@@ -224,7 +274,6 @@ class RedisSessionManager:
         Returns:
             {
                 "conversation_id": str,
-                "request_id": str,
                 "user_id": str,
                 ...
             }
@@ -235,7 +284,6 @@ class RedisSessionManager:
         
         return {
             "conversation_id": status_data.get("conversation_id"),
-            "request_id": status_data.get("request_id", session_id),  # 默认使用 session_id
             "user_id": status_data.get("user_id")
         }
     
@@ -251,7 +299,7 @@ class RedisSessionManager:
         缓冲事件到 Redis
         
         支持两种调用方式：
-        1. 传入完整的 event_data 字典（包含 id, type, data, timestamp）
+        1. 传入完整的 event_data 字典（包含 event_uuid, seq, type, data, timestamp）
         2. 分别传入各个字段（向后兼容）
         
         Args:
@@ -262,7 +310,7 @@ class RedisSessionManager:
             timestamp: 时间戳（可选，向后兼容）
         """
         # 方式1：传入完整事件字典
-        if event_data is not None and "id" in event_data:
+        if event_data is not None and ("event_uuid" in event_data or "id" in event_data):
             event = event_data
         # 方式2：分别传入字段（向后兼容）
         else:
@@ -286,8 +334,13 @@ class RedisSessionManager:
             999
         )
         
-        # 更新 last_event_id
-        self.update_session_status(session_id, last_event_id=event["id"])
+        # 更新 last_event_seq（使用 seq 字段，如果有的话）
+        # seq 是 session 内的递增序号，适合用于断线重连
+        if "seq" in event:
+            self.update_session_status(session_id, last_event_seq=event["seq"])
+        elif "id" in event and event["id"] is not None:
+            # 向后兼容：如果 id 存在且不是 None
+            self.update_session_status(session_id, last_event_seq=event["id"])
     
     def get_events(
         self,
@@ -325,9 +378,13 @@ class RedisSessionManager:
             except json.JSONDecodeError:
                 logger.warning(f"⚠️ 无法解析事件: {event_json}")
         
-        # 过滤 after_id
+        # 过滤 after_id（使用 seq 字段）
         if after_id is not None:
-            events = [e for e in events if e.get("id", 0) > after_id]
+            # 优先使用 seq 字段（新），fallback 到 id 字段（旧，如果是数字的话）
+            events = [
+                e for e in events 
+                if e.get("seq", e.get("id", 0) if isinstance(e.get("id"), int) else 0) > after_id
+            ]
         
         # 限制数量
         if limit and len(events) > limit:
@@ -380,7 +437,9 @@ class RedisSessionManager:
             # 发送新事件
             for event in events:
                 yield event
-                last_id = max(last_id, event.get("id", 0))
+                # 使用 seq 字段更新 last_id
+                event_seq = event.get("seq", event.get("id", 0) if isinstance(event.get("id"), int) else 0)
+                last_id = max(last_id, event_seq)
             
             # 检查 session 是否结束
             session_data = self.get_session_status(session_id)
@@ -429,6 +488,45 @@ class RedisSessionManager:
                 sessions_detail.append(status)
         
         return sessions_detail
+    
+    # ==================== 停止控制 ====================
+    
+    def set_stop_flag(self, session_id: str) -> None:
+        """
+        设置停止标志（用户主动中断）
+        
+        Args:
+            session_id: Session ID
+        """
+        # 设置停止标志（60秒 TTL，防止泄漏）
+        self.client.set(
+            f"session:{session_id}:stop_flag",
+            "1",
+            ex=60
+        )
+        logger.info(f"🛑 已设置停止标志: session_id={session_id}")
+    
+    def is_stopped(self, session_id: str) -> bool:
+        """
+        检查 Session 是否被停止
+        
+        Args:
+            session_id: Session ID
+            
+        Returns:
+            是否已停止
+        """
+        flag = self.client.get(f"session:{session_id}:stop_flag")
+        return flag == "1"
+    
+    def clear_stop_flag(self, session_id: str) -> None:
+        """
+        清除停止标志
+        
+        Args:
+            session_id: Session ID
+        """
+        self.client.delete(f"session:{session_id}:stop_flag")
     
     # ==================== 清理和维护 ====================
     

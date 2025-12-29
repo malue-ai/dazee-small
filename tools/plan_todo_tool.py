@@ -292,9 +292,9 @@ class PlanTodoTool:
         
         return "\n".join(lines)
     
-    def execute(self, operation: str, data: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def execute(self, operation: str, data: Dict[str, Any] = None) -> Dict[str, Any]:
         """
-        执行工具操作（CRUD）
+        执行工具操作（CRUD）- 异步版本
         
         数据写入 WorkingMemory（Short Memory），避免多轮 tokens 消耗
         

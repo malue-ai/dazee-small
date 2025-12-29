@@ -1,0 +1,76 @@
+---
+description: "通用开发规范：中文注释、命名规范、代码风格"
+alwaysApply: true
+---
+
+# 通用开发规范
+
+## 语言规范
+- 所有代码注释使用**中文**
+- 所有文档使用**中文**编写
+- Git commit 信息使用中文
+
+## 命名规范
+- 变量名、函数名：`snake_case`
+- 类名：`PascalCase`
+- 常量：`UPPER_CASE`
+- 文件名：`snake_case.py`
+
+## 代码风格
+- 使用 4 个空格缩进
+- 每行最大长度 100 字符
+- 函数之间空 2 行
+- 类方法之间空 1 行
+- 运算符两侧加空格
+
+## 导入顺序
+```python
+# 1. 标准库
+import os
+import sys
+from typing import List, Dict
+
+# 2. 第三方库
+from fastapi import APIRouter
+from pydantic import BaseModel
+
+# 3. 本地模块
+from core.agent import Agent
+from models.chat import ChatMessage
+```
+
+## 类型注解
+所有函数必须包含类型注解：
+
+```python
+from typing import List, Dict, Optional, Union
+
+def process_data(
+    items: List[str],
+    config: Optional[Dict[str, Any]] = None
+) -> Dict[str, Union[str, int]]:
+    """使用类型注解提高代码可读性"""
+    pass
+```
+
+## 文档字符串
+使用 Google 风格的 docstring：
+
+```python
+def function(arg1: str, arg2: int) -> bool:
+    """
+    函数简短描述
+    
+    Args:
+        arg1: 参数1的说明
+        arg2: 参数2的说明
+        
+    Returns:
+        返回值说明
+        
+    Raises:
+        ValueError: 什么情况下抛出
+    """
+    pass
+```
+

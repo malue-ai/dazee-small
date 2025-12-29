@@ -193,6 +193,21 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
+    /**
+     * 停止正在运行的会话（用户主动中断）
+     */
+    async stopSession(sessionId) {
+      try {
+        console.log('🛑 停止会话:', sessionId)
+        const response = await axios.post(`/v1/session/${sessionId}/stop`)
+        console.log('✅ 会话已停止:', response.data)
+        return response.data.data
+      } catch (error) {
+        console.error('❌ 停止会话失败:', error)
+        throw error
+      }
+    },
+
     // ==================== 消息发送（同步模式）====================
 
     /**
@@ -250,6 +265,8 @@ export const useChatStore = defineStore('chat', {
      */
     async _createSSEConnection(requestBody, onEvent, resolve, reject) {
       try {
+        console.log('🔌 创建 SSE 连接...', requestBody)
+        
         const response = await fetch('/api/v1/chat', {
           method: 'POST',
           headers: {
@@ -258,6 +275,9 @@ export const useChatStore = defineStore('chat', {
           },
           body: JSON.stringify(requestBody)
         })
+
+        console.log('📡 SSE 响应状态:', response.status, response.statusText)
+        console.log('📡 响应头:', Object.fromEntries(response.headers.entries()))
 
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`)
@@ -273,6 +293,13 @@ export const useChatStore = defineStore('chat', {
         // 读取流
         const readStream = async () => {
           try {
+            let buffer = '' // 缓冲区，用于处理不完整的 SSE 消息
+            let currentEvent = {
+              id: null,
+              event: null,
+              data: null
+            }
+
             while (true) {
               const { done, value } = await reader.read()
               
@@ -282,49 +309,106 @@ export const useChatStore = defineStore('chat', {
                 break
               }
 
-              const chunk = decoder.decode(value, { stream: true })
-              const lines = chunk.split('\n')
+              // 将新数据添加到缓冲区
+              buffer += decoder.decode(value, { stream: true })
+              
+              console.log('📥 收到数据块:', buffer.length, '字节')
+              
+              // 按行分割（保留完整的消息）
+              const lines = buffer.split('\n')
+              
+              // 如果最后一行不完整（没有换行符结尾），保留到下次处理
+              if (!buffer.endsWith('\n')) {
+                buffer = lines.pop() || ''
+              } else {
+                buffer = ''
+              }
 
               for (const line of lines) {
-                if (line.startsWith('id: ')) {
-                  // 记录事件ID（用于断线重连）
-                  this.lastEventId = parseInt(line.slice(4))
-                } else if (line.startsWith('data: ')) {
-                  try {
-                    const data = JSON.parse(line.slice(6))
-                    
-                    // 回调处理事件
-                    if (onEvent) {
-                      onEvent(data)
-                    }
-
-                    // 收集文本内容
-                    if (data.type === 'content_delta') {
-                      if (data.data?.delta?.type === 'text' && data.data?.delta?.text) {
-                        fullResponse += data.data.delta.text
+                // 空行表示一个完整的 SSE 消息结束
+                if (line === '') {
+                  if (currentEvent.data) {
+                    try {
+                      const data = JSON.parse(currentEvent.data)
+                      
+                      // 获取事件类型（优先使用 data.type，否则使用 SSE event 字段）
+                      const eventType = data.type || currentEvent.event
+                      
+                      // 确保 data 包含 type 字段
+                      if (!data.type && eventType) {
+                        data.type = eventType
                       }
-                    } else if (data.type === 'content' && data.data?.text) {
-                      // 兼容旧格式
-                      fullResponse += data.data.text
-                    }
-                    
-                    // 保存 session_id 和 conversation_id
-                    if (data.session_id) {
-                      this.sessionId = data.session_id
-                    }
-                    if (data.type === 'conversation_start' && data.data?.conversation_id) {
-                      this.conversationId = data.data.conversation_id
-                    }
+                      
+                      console.log('✉️ SSE 事件:', {
+                        id: currentEvent.id,
+                        event: currentEvent.event,
+                        type: eventType,
+                        data: data
+                      })
+                      
+                      // 记录事件ID（用于断线重连）
+                      if (currentEvent.id) {
+                        this.lastEventId = currentEvent.id
+                      }
+                      
+                      // 回调处理事件（传递包含 type 的完整数据）
+                      if (onEvent) {
+                        onEvent(data)
+                      }
 
-                    // 完成
-                    if (data.type === 'done' || data.type === 'session_end') {
-                      console.log('✅ Agent 执行完成')
-                      this.isConnected = false
-                      resolve(fullResponse)
-                      return
+                      // 收集文本内容
+                      if (eventType === 'content_delta') {
+                        if (data.data?.delta?.type === 'text' && data.data?.delta?.text) {
+                          fullResponse += data.data.delta.text
+                        }
+                      } else if (eventType === 'content' && data.data?.text) {
+                        // 兼容旧格式
+                        fullResponse += data.data.text
+                      }
+                      
+                      // 保存 session_id 和 conversation_id
+                      if (data.session_id) {
+                        this.sessionId = data.session_id
+                      }
+                      if (eventType === 'conversation_start' && data.data?.conversation_id) {
+                        this.conversationId = data.data.conversation_id
+                      }
+
+                      // 处理 complete 事件 (只收集数据，不终止流)
+                      if (eventType === 'complete') {
+                        console.log('✅ Agent 执行完成 (complete 事件)')
+                        // 如果 complete 事件包含 final_result，使用它
+                        if (data.data?.final_result && !fullResponse) {
+                          fullResponse = data.data.final_result
+                        }
+                        // 注意：不要在这里 return，还需要等待 done 事件
+                      }
+
+                      // 流结束：只在 done 或 session_end 时终止
+                      if (eventType === 'done' || eventType === 'session_end') {
+                        console.log('✅ 流结束:', eventType)
+                        this.isConnected = false
+                        resolve(fullResponse)
+                        return
+                      }
+                    } catch (e) {
+                      console.error('❌ 解析 SSE 数据失败:', e, currentEvent.data)
                     }
-                  } catch (e) {
-                    console.error('❌ 解析 SSE 数据失败:', e, line)
+                  }
+                  
+                  // 重置当前事件
+                  currentEvent = { id: null, event: null, data: null }
+                  
+                } else if (line.startsWith('id: ')) {
+                  currentEvent.id = line.slice(4).trim()
+                } else if (line.startsWith('event: ')) {
+                  currentEvent.event = line.slice(7).trim()
+                } else if (line.startsWith('data: ')) {
+                  // data 可能跨多行，需要累积
+                  if (currentEvent.data) {
+                    currentEvent.data += '\n' + line.slice(6)
+                  } else {
+                    currentEvent.data = line.slice(6)
                   }
                 }
               }

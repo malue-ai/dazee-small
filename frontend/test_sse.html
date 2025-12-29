@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SSE 测试页面</title>
+  <style>
+    body {
+      font-family: monospace;
+      padding: 20px;
+      background: #1e1e1e;
+      color: #d4d4d4;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    h1 {
+      color: #4ec9b0;
+    }
+    .control-panel {
+      margin: 20px 0;
+      padding: 15px;
+      background: #252526;
+      border-radius: 5px;
+    }
+    input, button {
+      padding: 8px 12px;
+      margin: 5px;
+      font-size: 14px;
+      font-family: monospace;
+    }
+    button {
+      background: #0e639c;
+      color: white;
+      border: none;
+      cursor: pointer;
+      border-radius: 3px;
+    }
+    button:hover {
+      background: #1177bb;
+    }
+    .output {
+      background: #252526;
+      padding: 15px;
+      border-radius: 5px;
+      min-height: 400px;
+      max-height: 600px;
+      overflow-y: auto;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .event {
+      margin: 10px 0;
+      padding: 10px;
+      background: #2d2d30;
+      border-left: 3px solid #4ec9b0;
+      border-radius: 3px;
+    }
+    .event-type {
+      color: #dcdcaa;
+      font-weight: bold;
+    }
+    .event-data {
+      color: #ce9178;
+      margin-top: 5px;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .error {
+      border-left-color: #f48771;
+    }
+    .stats {
+      margin-top: 10px;
+      padding: 10px;
+      background: #2d2d30;
+      border-radius: 3px;
+      color: #608b4e;
+    }
+    .content-preview {
+      margin-top: 10px;
+      padding: 15px;
+      background: #1e1e1e;
+      border: 1px solid #3c3c3c;
+      border-radius: 5px;
+    }
+    .content-preview h3 {
+      margin: 0 0 10px 0;
+      color: #569cd6;
+    }
+    .thinking {
+      color: #9cdcfe;
+      font-style: italic;
+      margin-bottom: 10px;
+    }
+    .text {
+      color: #d4d4d4;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔬 SSE 事件流测试</h1>
+    
+    <div class="control-panel">
+      <div>
+        <label>消息: </label>
+        <input type="text" id="message" value="你好，请介绍一下你自己" style="width: 300px;">
+      </div>
+      <div>
+        <label>User ID: </label>
+        <input type="text" id="userId" value="test_user_001">
+      </div>
+      <button onclick="sendMessage()">📤 发送消息（SSE 流式）</button>
+      <button onclick="clearOutput()">🗑️ 清空日志</button>
+    </div>
+
+    <div class="content-preview">
+      <h3>💬 实时内容预览</h3>
+      <div class="thinking">
+        <strong>思考过程:</strong>
+        <div id="thinkingContent"></div>
+      </div>
+      <div class="text">
+        <strong>回复内容:</strong>
+        <div id="textContent"></div>
+      </div>
+    </div>
+
+    <div class="stats" id="stats">
+      总事件: 0 | content_delta: 0 | 其他事件: 0
+    </div>
+
+    <div class="output" id="output">
+      <div style="color: #608b4e;">等待发送消息...</div>
+    </div>
+  </div>
+
+  <script>
+    let eventCount = 0;
+    let contentDeltaCount = 0;
+    let otherEventCount = 0;
+    let thinkingText = '';
+    let contentText = '';
+
+    function updateStats() {
+      const stats = document.getElementById('stats');
+      stats.textContent = `总事件: ${eventCount} | content_delta: ${contentDeltaCount} | 其他事件: ${otherEventCount}`;
+    }
+
+    function updateContent() {
+      document.getElementById('thinkingContent').textContent = thinkingText || '(无)';
+      document.getElementById('textContent').textContent = contentText || '(无)';
+    }
+
+    function addEvent(type, data, isError = false) {
+      const output = document.getElementById('output');
+      const eventDiv = document.createElement('div');
+      eventDiv.className = 'event' + (isError ? ' error' : '');
+      
+      const typeSpan = document.createElement('div');
+      typeSpan.className = 'event-type';
+      typeSpan.textContent = `📨 ${type}`;
+      
+      const dataDiv = document.createElement('div');
+      dataDiv.className = 'event-data';
+      dataDiv.textContent = JSON.stringify(data, null, 2);
+      
+      eventDiv.appendChild(typeSpan);
+      eventDiv.appendChild(dataDiv);
+      output.appendChild(eventDiv);
+      
+      // 自动滚动到底部
+      output.scrollTop = output.scrollHeight;
+      
+      // 更新统计
+      eventCount++;
+      if (type === 'content_delta') {
+        contentDeltaCount++;
+      } else {
+        otherEventCount++;
+      }
+      updateStats();
+    }
+
+    function clearOutput() {
+      document.getElementById('output').innerHTML = '<div style="color: #608b4e;">日志已清空</div>';
+      eventCount = 0;
+      contentDeltaCount = 0;
+      otherEventCount = 0;
+      thinkingText = '';
+      contentText = '';
+      updateStats();
+      updateContent();
+    }
+
+    async function sendMessage() {
+      const message = document.getElementById('message').value;
+      const userId = document.getElementById('userId').value;
+      
+      clearOutput();
+      addEvent('系统', { message: '开始发送请求...' });
+
+      try {
+        const response = await fetch('/api/v1/chat', {
+          method: 'POST',
+          headers: {
+            'Accept': 'text/event-stream',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            message: message,
+            user_id: userId,
+            stream: true
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        addEvent('系统', { message: '✅ SSE 连接已建立' });
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        
+        let buffer = '';
+        let currentEvent = { id: null, event: null, data: null };
+
+        while (true) {
+          const { done, value } = await reader.read();
+          
+          if (done) {
+            addEvent('系统', { message: '✅ SSE 连接正常关闭' });
+            break;
+          }
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          
+          if (!buffer.endsWith('\n')) {
+            buffer = lines.pop() || '';
+          } else {
+            buffer = '';
+          }
+
+          for (const line of lines) {
+            if (line === '') {
+              // 完整事件
+              if (currentEvent.data) {
+                try {
+                  const data = JSON.parse(currentEvent.data);
+                  addEvent(data.type || currentEvent.event || 'unknown', data);
+                  
+                  // 更新内容预览
+                  if (data.type === 'content_delta') {
+                    const deltaType = data.data?.delta?.type;
+                    const deltaText = data.data?.delta?.text;
+                    
+                    if (deltaType === 'thinking' && deltaText) {
+                      thinkingText += deltaText;
+                      updateContent();
+                    } else if (deltaType === 'text' && deltaText) {
+                      contentText += deltaText;
+                      updateContent();
+                    }
+                  }
+                  
+                  if (data.type === 'done' || data.type === 'session_end') {
+                    addEvent('系统', { message: '✅ Agent 执行完成' });
+                  }
+                } catch (e) {
+                  addEvent('错误', { message: '解析失败', error: e.message, raw: currentEvent.data }, true);
+                }
+              }
+              currentEvent = { id: null, event: null, data: null };
+            } else if (line.startsWith('id: ')) {
+              currentEvent.id = line.slice(4).trim();
+            } else if (line.startsWith('event: ')) {
+              currentEvent.event = line.slice(7).trim();
+            } else if (line.startsWith('data: ')) {
+              if (currentEvent.data) {
+                currentEvent.data += '\n' + line.slice(6);
+              } else {
+                currentEvent.data = line.slice(6);
+              }
+            }
+          }
+        }
+      } catch (error) {
+        addEvent('错误', { message: error.message }, true);
+      }
+    }
+
+    // 初始化统计
+    updateStats();
+    updateContent();
+  </script>
+</body>
+</html>
+

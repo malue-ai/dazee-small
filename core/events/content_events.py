@@ -36,7 +36,7 @@ class ContentEventManager(BaseEventManager):
             event_type="content_start",
             data={
                 "index": index,
-                "block_type": block_type
+                "type": block_type
             }
         )
         
@@ -56,7 +56,7 @@ class ContentEventManager(BaseEventManager):
             session_id: Session ID
             index: 内容块索引
             delta_type: Delta 类型（thinking/text/tool_input）
-            delta_data: Delta 数据
+            delta_data: Delta 数据（包含 text 或其他字段）
             
         Returns:
             事件对象

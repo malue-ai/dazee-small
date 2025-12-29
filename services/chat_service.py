@@ -22,7 +22,7 @@ from uuid import uuid4
 from logger import get_logger
 from core.agent import SimpleAgent
 from services.session_service import SessionService, get_session_service, SessionNotFoundError
-from utils.db_service import MessageService, ConversationService
+from services.conversation_service import get_conversation_service, ConversationNotFoundError
 
 logger = get_logger("chat_service")
 
@@ -63,12 +63,13 @@ class ChatService:
         """
         self.session_service = session_service or get_session_service()
         self.default_model = default_model
+        self.conversation_service = get_conversation_service()
     
     # ==================== 对话执行 ====================
     
     async def chat_sync(
         self,
-        message: str,
+        message: List[Dict[str, str]],
         user_id: str,
         conversation_id: Optional[str] = None,
         message_id: Optional[str] = None
@@ -83,7 +84,7 @@ class ChatService:
         - 客户端通过 /session/{id}/events 获取最终结果
         
         Args:
-            message: 用户消息
+            message: 用户消息（Claude API 格式 [{"type": "text", "text": "..."}]）
             user_id: 用户 ID（必填）
             conversation_id: 对话 ID（可选）
             message_id: 消息 ID（可选）
@@ -101,7 +102,7 @@ class ChatService:
             AgentExecutionError: Agent 启动失败
         """
         try:
-            logger.info(f"📨 同步对话请求: user_id={user_id}, message={message[:50]}...")
+            logger.info(f"📨 同步对话请求: user_id={user_id}")
             
             # 🎯 确保 Conversation 存在
             if not conversation_id:
@@ -147,7 +148,7 @@ class ChatService:
     
     async def chat_stream(
         self,
-        message: str,
+        message: List[Dict[str, str]],
         user_id: str,
         conversation_id: Optional[str] = None,
         message_id: Optional[str] = None
@@ -163,7 +164,7 @@ class ChatService:
         - SSE 断开不影响 Agent 执行
         
         Args:
-            message: 用户消息
+            message: 用户消息（Claude API 格式 [{"type": "text", "text": "..."}]）
             user_id: 用户 ID（必填）
             conversation_id: 对话 ID（可选，如果不提供则自动创建）
             message_id: 消息 ID（可选）
@@ -184,18 +185,21 @@ class ChatService:
         try:
             logger.info(f"📨 流式对话请求: user_id={user_id}, message={message[:50]}...")
             
-            # 🎯 第1步：确保 Conversation 存在（如果没有提供则创建）
+            # 🎯 第1步：确保 Conversation 存在
+            is_new_conversation = False
             if not conversation_id:
-                # 自动生成 conversation_id
-                conversation_id = f"conv_{uuid4().hex[:24]}"
-                logger.info(f"📝 未提供 conversation_id，自动创建: {conversation_id}")
-            
-            # 获取或创建 Conversation
-            conversation_data = await self._get_or_create_conversation(
-                conversation_id=conversation_id,
-                user_id=user_id
-            )
-            logger.info(f"✅ Conversation 已就绪: id={conversation_data['id']}")
+                # 🆕 创建新对话（让 Service 自己生成 ID）
+                conv = await self.conversation_service.create_conversation(
+                    user_id=user_id,
+                    title="新对话",
+                    metadata={}
+                )
+                conversation_id = conv.id
+                is_new_conversation = True
+                logger.info(f"✅ 新对话已创建: id={conversation_id}")
+            else:
+                # 📖 使用已有对话
+                logger.debug(f"📖 使用已有对话: {conversation_id}")
             
             # 🎯 第2步：创建 Session
             session_id, agent = await self.session_service.create_session(
@@ -222,12 +226,20 @@ class ChatService:
             )
             logger.info(f"📤 已发送 session_start 事件")
             
-            # 发送 conversation_start 事件
-            await events.conversation.emit_conversation_start(
-                session_id=session_id,
-                conversation=conversation_data
-            )
-            logger.info(f"📤 已发送 conversation_start 事件")
+            # 只在新创建对话时发送 conversation_start 事件
+            if is_new_conversation:
+                await events.conversation.emit_conversation_start(
+                    session_id=session_id,
+                    conversation={
+                        "id": conversation_id,
+                        "title": "新对话",
+                        "created_at": datetime.now().isoformat(),
+                        "metadata": {}
+                    }
+                )
+                logger.info(f"📤 已发送 conversation_start 事件（新对话）")
+            else:
+                logger.info(f"🔄 继续现有对话，跳过 conversation_start 事件")
             
             # 🎯 第4步：启动后台任务执行 Agent（现在才开始）
             agent_task = asyncio.create_task(
@@ -255,7 +267,8 @@ class ChatService:
                 # 推送事件
                 for event in events_list:
                     yield event
-                    last_event_id = event["id"]
+                    # 使用 seq 字段更新 last_event_id
+                    last_event_id = event.get("seq", event.get("id", last_event_id))
                 
                 # 检查 Agent 是否完成
                 session_status = redis.get_session_status(session_id)
@@ -333,38 +346,67 @@ class ChatService:
         try:
             logger.info(f"🚀 Agent 后台任务启动: session_id={session_id}")
             
+            # 记录开始时间（用于计算 duration）
+            import time
+            start_time = time.time()
+            
             redis = self.session_service.redis
             events = self.session_service.events
             
-            # 🎯 获取或创建 Conversation
-            conversation_data = await self._get_or_create_conversation(
-                conversation_id=conversation_id,
-                user_id=user_id
-            )
-            logger.info(f"✅ Conversation 已就绪: id={conversation_data['id']}")
+            # 🎯 生成独立的 message_id（UUID 格式）
+            from uuid import uuid4
+            assistant_message_id = f"msg_{uuid4().hex[:24]}"
+            logger.info(f"📝 生成 Assistant Message ID: {assistant_message_id}")
             
             # 🎯 第1个事件（后台）：message_start（符合 Claude API 标准）
             await events.message.emit_message_start(
                 session_id=session_id,
-                message_id=f"msg_{session_id}",
+                message_id=assistant_message_id,
                 model=self.default_model
             )
             logger.debug(f"📤 已发送 message_start 事件")
             
             # 🎯 保存用户消息到数据库
             await self._save_user_message(
-                        conversation_id=conversation_id,
+                conversation_id=conversation_id,
                 message=message,
                 session_id=session_id,
                 user_id=user_id
             )
+            
+            # 🆕 立即在数据库中创建 Assistant 消息占位记录（status: generating）
+            import json
+            initial_status = json.dumps({
+                "index": 0,
+                "action": "generating",
+                "description": "正在生成回复..."
+            }, ensure_ascii=False)
+            
+            await self.conversation_service.add_message(
+                conversation_id=conversation_id,
+                role="assistant",
+                content="[]",  # 空的 content blocks 数组
+                status=initial_status,
+                score=None,
+                metadata={
+                    "session_id": session_id,
+                    "model": self.default_model,
+                    "created_at": datetime.now().isoformat()
+                },
+                message_id=assistant_message_id
+            )
+            logger.info(f"✅ 已创建 Assistant 消息占位记录: id={assistant_message_id}")
             
             # 🆕 加载历史消息（Service 层负责数据库操作）
             history_messages = await self._load_history_messages(conversation_id)
             logger.info(f"📚 历史消息已加载: {len(history_messages)} 条")
             
             # 🎯 第2+个事件：来自 Agent 的事件（已写入 Redis）
-            assistant_content = ""  # 累积 Assistant 的回复内容
+            content_blocks = []     # 🆕 累积所有 content blocks（text, tool_use, tool_result）
+            thinking_content = ""   # 累积 thinking 内容
+            current_text = ""       # 当前累积的文本（会在适当时机加入 content_blocks）
+            message_created = True  # 🆕 标记消息是否已创建（占位记录）
+            message_updated = False # 🆕 标记消息是否已更新为最终内容
             
             # 🔑 关键：调用 agent.chat()（统一入口）
             # enable_stream=True 表示 Agent 内部使用流式LLM调用
@@ -375,39 +417,173 @@ class ChatService:
                 session_id=session_id,
                 enable_stream=True  # Agent 内部使用流式 LLM 调用
             ):
+                # 🛑 检查停止标志（每个事件都检查）
+                if redis.is_stopped(session_id):
+                    logger.warning(f"🛑 检测到停止标志，中断 Agent 执行: session_id={session_id}")
+                    
+                    # 把剩余的文本加入 content_blocks
+                    if current_text:
+                        content_blocks.append({"type": "text", "text": current_text})
+                    
+                    # 更新 Assistant 消息（如果有内容）
+                    if content_blocks:
+                        await self._update_assistant_message_final(
+                            message_id=assistant_message_id,
+                            conversation_id=conversation_id,
+                            content_blocks=content_blocks,
+                            thinking=thinking_content if thinking_content else None,
+                            agent=agent
+                        )
+                        logger.info(f"💾 已保存部分回复内容: {len(content_blocks)} 个 blocks")
+                    
+                    # 结束 Session（标记为 stopped）
+                    self.session_service.end_session(session_id, status="stopped")
+                    
+                    # 跳出循环
+                    break
+                
+                event_type = event.get("type")
+                
                 # ✅ 事件已经由 EventManager 写入 Redis
                 # 不需要 yield，因为 SSE 会从 Redis 读取
                 
-                # 累积 Assistant 的回复内容（用于保存到数据库）
-                if event["type"] == "content_delta":
-                    # 处理新的 content_delta 格式
-                    delta_data = event["data"].get("delta", {})
-                    if delta_data.get("type") == "text":
-                        assistant_content += delta_data.get("text", "")
+                # 🔑 累积 Assistant 的回复内容（统一到 content_blocks）
+                if event_type == "content_delta":
+                    # 处理 content_delta 格式
+                    delta_data = event.get("data", {}).get("delta", {})
+                    delta_type = delta_data.get("type")
+                    delta_text = delta_data.get("text", "")
+                    
+                    if delta_type == "text":
+                        # 累积文本内容
+                        current_text += delta_text
+                    elif delta_type == "thinking":
+                        # 累积思考过程
+                        thinking_content += delta_text
+                
+                # 🆕 累积 tool_call_start 事件（tool_use block）
+                if event_type == "tool_call_start":
+                    # 先把之前累积的文本加入 content_blocks
+                    if current_text:
+                        content_blocks.append({"type": "text", "text": current_text})
+                        current_text = ""
+                    
+                    event_data = event.get("data", {})
+                    tool_use_block = {
+                        "type": "tool_use",
+                        "id": event_data.get("tool_call_id", ""),
+                        "name": event_data.get("tool_name", ""),
+                        "input": event_data.get("input", {})
+                    }
+                    content_blocks.append(tool_use_block)
+                    logger.debug(f"📝 累积 tool_use: {tool_use_block['name']}")
+                
+                # 🆕 累积 tool_call_complete 事件（tool_result block）
+                if event_type == "tool_call_complete":
+                    event_data = event.get("data", {})
+                    tool_result_block = {
+                        "type": "tool_result",
+                        "tool_use_id": event_data.get("tool_call_id", ""),
+                        "content": event_data.get("result", {})
+                    }
+                    content_blocks.append(tool_result_block)
+                    logger.debug(f"📝 累积 tool_result: tool_use_id={tool_result_block['tool_use_id']}")
+                
+                # 🎯 关键事件：触发数据库更新
+                # 在 message_stop 事件时更新消息为最终状态
+                if event_type in ["message_stop", "session_end"] and not message_updated:
+                    logger.info(f"📝 触发数据库更新事件: {event_type}")
+                    
+                    # 把剩余的文本加入 content_blocks
+                    if current_text:
+                        content_blocks.append({"type": "text", "text": current_text})
+                    
+                    # 更新 Assistant 消息到最终状态
+                    if content_blocks:
+                        await self._update_assistant_message_final(
+                            message_id=assistant_message_id,
+                            conversation_id=conversation_id,
+                            content_blocks=content_blocks,
+                            thinking=thinking_content if thinking_content else None,
+                            agent=agent
+                        )
+                        message_updated = True
+                        logger.info(f"✅ Assistant 消息已更新为最终状态（触发事件：{event_type}）")
+                    else:
+                        logger.warning(f"⚠️ Assistant 内容为空，跳过更新")
                 
                 # 更新 Session 状态（进度）
-                if event["type"] == "turn_complete" or event["type"] == "complete":
-                    turn_count = event["data"].get("turn", event["data"].get("turns", 0))
-                    redis.update_session_status(
-                        session_id=session_id,
-                        updates={"total_turns": turn_count}
-                    )
+                # 注意：complete 事件已删除，使用 message_stop 代替
+                if event_type in ["turn_complete", "message_stop"]:
+                    turn_count = event.get("data", {}).get("turn", event.get("data", {}).get("turns", 0))
+                    if turn_count > 0:
+                        redis.update_session_status(
+                            session_id=session_id,
+                            total_turns=str(turn_count)
+                        )
             
-            # 🎯 保存 Assistant 消息到数据库
-            await self._save_assistant_message_content(
-                        conversation_id=conversation_id,
-                        content=assistant_content,
-                session_id=session_id,
-                agent=agent
-            )
+            # 🔒 安全检查：如果循环结束但消息还没更新（异常情况）
+            # 把剩余的文本加入 content_blocks
+            if current_text:
+                content_blocks.append({"type": "text", "text": current_text})
             
-            # 执行完成，结束 Session
-            self.session_service.end_session(session_id, status="completed")
+            if not message_updated and content_blocks:
+                logger.warning(f"⚠️ 循环结束但消息未更新，执行补偿更新")
+                await self._update_assistant_message_final(
+                    message_id=assistant_message_id,
+                    conversation_id=conversation_id,
+                    content_blocks=content_blocks,
+                    thinking=thinking_content if thinking_content else None,
+                    agent=agent
+                )
             
-            logger.info(f"✅ Agent 后台任务完成: session_id={session_id}, conversation_id={conversation_id}")
+            # 🎯 检查最终状态（可能是 stopped 或 completed）
+            final_status_data = redis.get_session_status(session_id)
+            final_status = final_status_data.get("status") if final_status_data else "completed"
+            
+            # 计算执行时间
+            duration_ms = int((time.time() - start_time) * 1000)
+            
+            # 如果已经是 stopped，不覆盖状态
+            if final_status != "stopped":
+                # 🆕 发送 session_end 事件（整个会话结束）
+                await events.session.emit_session_end(
+                    session_id=session_id,
+                    status="completed",
+                    duration_ms=duration_ms
+                )
+                logger.info(f"📤 已发送 session_end 事件: status=completed, duration={duration_ms}ms")
+                
+                # 执行完成，结束 Session
+                self.session_service.end_session(session_id, status="completed")
+                logger.info(f"✅ Agent 后台任务完成: session_id={session_id}, conversation_id={conversation_id}")
+            else:
+                # 🆕 停止状态也发送 session_end
+                await events.session.emit_session_end(
+                    session_id=session_id,
+                    status="stopped",
+                    duration_ms=duration_ms
+                )
+                logger.info(f"📤 已发送 session_end 事件: status=stopped, duration={duration_ms}ms")
+                logger.info(f"🛑 Agent 后台任务已停止: session_id={session_id}, conversation_id={conversation_id}")
         
         except Exception as e:
             logger.error(f"❌ Agent 后台任务失败: session_id={session_id}, error={str(e)}", exc_info=True)
+            
+            # 计算执行时间（如果 start_time 已定义）
+            duration_ms = int((time.time() - start_time) * 1000) if 'start_time' in dir() else 0
+            
+            # 🆕 发送 session_end 事件（失败状态）
+            try:
+                events = self.session_service.events
+                await events.session.emit_session_end(
+                    session_id=session_id,
+                    status="failed",
+                    duration_ms=duration_ms
+                )
+                logger.info(f"📤 已发送 session_end 事件: status=failed, duration={duration_ms}ms")
+            except:
+                pass
             
             # 结束 Session（失败）
             try:
@@ -496,16 +672,25 @@ class ChatService:
         """
         try:
             # 1. 检查是否有压缩信息
-            conversation = await ConversationService.get_conversation(conversation_id)
-            compression_info = None
-            
-            if conversation and conversation.metadata:
-                import json
-                metadata = json.loads(conversation.metadata) if isinstance(conversation.metadata, str) else conversation.metadata
-                compression_info = metadata.get("compression")
+            try:
+                conversation = await self.conversation_service.get_conversation(conversation_id)
+                compression_info = None
+                
+                if conversation and conversation.metadata:
+                    metadata = conversation.metadata if isinstance(conversation.metadata, dict) else {}
+                    compression_info = metadata.get("compression")
+            except ConversationNotFoundError:
+                # 新对话，没有历史消息
+                logger.debug(f"新对话，无历史消息: conversation_id={conversation_id}")
+                return []
             
             # 2. 加载所有消息
-            db_messages = await MessageService.get_conversation_messages(conversation_id)
+            result = await self.conversation_service.get_conversation_messages(
+                conversation_id=conversation_id,
+                limit=1000,  # 加载所有历史消息
+                order="asc"  # 从旧到新排序
+            )
+            db_messages = result.get("messages", [])
             
             if not db_messages:
                 logger.debug(f"没有找到历史消息: conversation_id={conversation_id}")
@@ -520,7 +705,9 @@ class ChatService:
                     # 找到压缩点
                     compress_index = -1
                     for i, msg in enumerate(db_messages):
-                        if msg.id == from_message_id:
+                        # 兼容处理：msg 可能是对象或字典
+                        msg_id = msg.get("id") if isinstance(msg, dict) else msg.id
+                        if msg_id == from_message_id:
                             compress_index = i
                             break
                     
@@ -532,23 +719,37 @@ class ChatService:
                         
                         # 添加压缩点之后的消息
                         for msg in db_messages[compress_index + 1:]:
-                            content = msg.content
-                            # 处理 JSON 格式的 content
+                            # 兼容处理：msg 可能是对象或字典
+                            if isinstance(msg, dict):
+                                content = msg.get("content", "")
+                                role = msg.get("role", "user")
+                            else:
+                                content = msg.content
+                                role = msg.role
+                            
+                            # 处理 content 格式：统一提取 text 块
+                            # content 格式: [{type:..., text:...}, {type:..., text:...}]
                             if isinstance(content, str):
+                                # 如果是字符串，尝试解析为 JSON
                                 try:
                                     import json
-                                    content_array = json.loads(content)
-                                    if isinstance(content_array, list):
-                                        text_parts = [
-                                            block.get("text", "")
-                                            for block in content_array
-                                            if block.get("type") == "text"
-                                        ]
-                                        content = "\n".join(text_parts)
+                                    content = json.loads(content)
                                 except json.JSONDecodeError:
+                                    # 如果解析失败，保持原字符串
                                     pass
                             
-                            history.append({"role": msg.role, "content": content})
+                            # 如果是列表格式（Claude API 标准格式），提取 type="text" 的块
+                            if isinstance(content, list):
+                                text_parts = [
+                                    block.get("text", "")
+                                    for block in content
+                                    if isinstance(block, dict) and block.get("type") == "text"
+                                ]
+                                content = "\n".join(text_parts) if text_parts else ""
+                            
+                            # 只添加有内容的消息
+                            if content:
+                                history.append({"role": role, "content": content})
                         
                         logger.info(
                             f"📦 应用压缩: {len(db_messages)} 条消息 → "
@@ -559,23 +760,37 @@ class ChatService:
             # 4. 无压缩：返回所有消息
             history = []
             for msg in db_messages:
-                content = msg.content
-                # 处理 JSON 格式的 content
+                # 兼容处理：msg 可能是对象或字典
+                if isinstance(msg, dict):
+                    content = msg.get("content", "")
+                    role = msg.get("role", "user")
+                else:
+                    content = msg.content
+                    role = msg.role
+                
+                # 处理 content 格式：统一提取 text 块
+                # content 格式: [{type:..., text:...}, {type:..., text:...}]
                 if isinstance(content, str):
+                    # 如果是字符串，尝试解析为 JSON
                     try:
                         import json
-                        content_array = json.loads(content)
-                        if isinstance(content_array, list):
-                            text_parts = [
-                                block.get("text", "")
-                                for block in content_array
-                                if block.get("type") == "text"
-                            ]
-                            content = "\n".join(text_parts)
+                        content = json.loads(content)
                     except json.JSONDecodeError:
+                        # 如果解析失败，保持原字符串
                         pass
                 
-                history.append({"role": msg.role, "content": content})
+                # 如果是列表格式（Claude API 标准格式），提取 type="text" 的块
+                if isinstance(content, list):
+                    text_parts = [
+                        block.get("text", "")
+                        for block in content
+                        if isinstance(block, dict) and block.get("type") == "text"
+                    ]
+                    content = "\n".join(text_parts) if text_parts else ""
+                
+                # 只添加有内容的消息
+                if content:
+                    history.append({"role": role, "content": content})
             
             logger.info(f"📚 加载历史消息: {len(history)} 条")
             return history
@@ -584,59 +799,10 @@ class ChatService:
             logger.error(f"❌ 加载历史消息失败: {str(e)}", exc_info=True)
             return []
     
-    async def _get_or_create_conversation(
-        self,
-        conversation_id: str,
-        user_id: str
-    ) -> Dict[str, Any]:
-        """
-        获取或创建 Conversation
-        
-        Args:
-            conversation_id: Conversation ID
-            user_id: 用户ID
-            
-        Returns:
-            Conversation 数据
-        """
-        conversation_data = {"id": conversation_id}
-        
-        try:
-            # 查询数据库中的 Conversation
-            conv = await ConversationService.get_conversation(conversation_id)
-            
-            if not conv:
-                # 如果不存在，自动创建（使用前端提供的 conversation_id）
-                logger.info(f"📝 Conversation 不存在，自动创建: {conversation_id}")
-                
-                conv = await ConversationService.create_conversation(
-                    user_id=user_id,
-                    id=conversation_id,  # 使用前端提供的 ID
-                    title="新对话",
-                    metadata={}
-                )
-                logger.info(f"✅ Conversation 创建成功: id={conv.id}")
-            
-            # 构建完整的 conversation 数据
-            conversation_data = {
-                "id": conv.id,
-                "user_id": conv.user_id,
-                "title": conv.title,
-                "created_at": conv.created_at.isoformat() if conv.created_at else None,
-                "updated_at": conv.updated_at.isoformat() if conv.updated_at else None,
-                "metadata": conv.metadata or {}
-            }
-        except Exception as e:
-            logger.warning(f"⚠️ 处理 Conversation 失败: {str(e)}", exc_info=True)
-            # 失败时只返回基本信息
-            conversation_data = {"id": conversation_id}
-        
-        return conversation_data
-    
     async def _save_user_message(
         self,
         conversation_id: str,
-        message: str,
+        message: List[Dict[str, str]],
         session_id: str,
         user_id: str
     ) -> None:
@@ -645,15 +811,20 @@ class ChatService:
         
         Args:
             conversation_id: Conversation ID（必填）
-            message: 用户消息
+            message: 用户消息（Claude API 格式 [{"type": "text", "text": "..."}]）
             session_id: Session ID
             user_id: 用户ID
         """
         try:
-            await MessageService.create_message(
+            import json
+            
+            # 将 message 转换为 JSON 字符串
+            content_json = json.dumps(message, ensure_ascii=False)
+            
+            await self.conversation_service.add_message(
                 conversation_id=conversation_id,
                 role="user",
-                content=message,
+                content=content_json,
                 metadata={
                     "session_id": session_id,
                     "message_type": "message",
@@ -682,6 +853,9 @@ class ChatService:
             return
         
         try:
+            from services.conversation_service import get_conversation_service
+            conversation_service = get_conversation_service()
+            
             # 提取 token 使用统计
             usage_stats = {}
             if result.get("invocation_stats"):
@@ -691,7 +865,7 @@ class ChatService:
                     "output_tokens": stats.get("total_output_tokens", 0)
                 }
             
-            await MessageService.create_message(
+            await conversation_service.add_message(
                 conversation_id=conversation_id,
                 role="assistant",
                 content=result["final_result"],
@@ -711,7 +885,8 @@ class ChatService:
         conversation_id: str,
         content: str,
         session_id: str,
-        agent: SimpleAgent
+        agent: SimpleAgent,
+        thinking: str = None
     ) -> None:
         """
         保存 Assistant 消息到数据库（从累积内容）
@@ -721,36 +896,151 @@ class ChatService:
             content: Assistant 回复内容
             session_id: Session ID
             agent: Agent 实例
+            thinking: 思考过程内容（可选）
         """
         if not content:
             logger.warning(f"⚠️ Assistant 回复内容为空，跳过保存")
             return
         
         try:
+            from services.conversation_service import get_conversation_service
+            conversation_service = get_conversation_service()
+            
             # 统计 token 使用（如果 Agent 提供）
             usage_stats = {}
-            if hasattr(agent.memory.working, 'invocation_stats'):
-                stats = agent.memory.working.invocation_stats
+            # SimpleAgent 的统计信息直接在 agent.invocation_stats
+            if hasattr(agent, 'invocation_stats'):
+                stats = agent.invocation_stats
                 if stats:
                     usage_stats = {
-                        "input_tokens": stats.get("total_input_tokens", 0),
-                        "output_tokens": stats.get("total_output_tokens", 0)
+                        "invocation_stats": stats  # 保存调用统计
                     }
             
-            await MessageService.create_message(
+            # 如果有 LLM 使用统计
+            if hasattr(agent, 'llm') and hasattr(agent.llm, 'usage_stats'):
+                llm_stats = agent.llm.usage_stats
+                if llm_stats:
+                    usage_stats.update({
+                        "input_tokens": llm_stats.get("total_input_tokens", 0),
+                        "output_tokens": llm_stats.get("total_output_tokens", 0)
+                    })
+            
+            # 构建 metadata
+            metadata = {
+                "session_id": session_id,
+                "message_type": "message",
+                "model": self.default_model,
+                "usage": usage_stats
+            }
+            
+            # 如果有 thinking 内容，保存到 metadata
+            if thinking:
+                metadata["thinking"] = thinking
+            
+            await conversation_service.add_message(
                 conversation_id=conversation_id,
                 role="assistant",
                 content=content,
-                metadata={
-                    "session_id": session_id,
-                    "message_type": "message",
-                    "model": self.default_model,
-                    "usage": usage_stats
-                }
+                metadata=metadata
             )
-            logger.debug(f"💾 Assistant 消息已保存到数据库: conversation_id={conversation_id}")
+            logger.info(
+                f"💾 Assistant 消息已保存到数据库: "
+                f"conversation_id={conversation_id}, "
+                f"content_length={len(content)}, "
+                f"has_thinking={bool(thinking)}"
+            )
         except Exception as e:
-            logger.warning(f"⚠️ 保存 Assistant 消息失败: {str(e)}")
+            logger.error(f"❌ 保存 Assistant 消息失败: {str(e)}", exc_info=True)
+    
+    async def _update_assistant_message_final(
+        self,
+        message_id: str,
+        conversation_id: str,
+        content_blocks: List[Dict[str, Any]],
+        thinking: str = None,
+        agent: SimpleAgent = None
+    ) -> None:
+        """
+        更新 Assistant 消息到最终状态（从占位记录更新）
+        
+        Args:
+            message_id: 消息ID（之前创建的占位记录）
+            conversation_id: Conversation ID
+            content_blocks: Claude API 格式的 content blocks 列表
+                包含 text, tool_use, tool_result 等类型
+            thinking: 思考过程内容（可选）
+            agent: Agent 实例（用于获取 usage 统计）
+        """
+        if not content_blocks:
+            logger.warning(f"⚠️ Assistant 回复内容为空，跳过更新")
+            return
+        
+        try:
+            import json
+            from services.conversation_service import get_conversation_service
+            conversation_service = get_conversation_service()
+            
+            # 🎯 content_blocks 已经是 Claude API 格式，直接序列化
+            content_json = json.dumps(content_blocks, ensure_ascii=False)
+            
+            # 统计各类型 block 数量
+            text_count = sum(1 for b in content_blocks if b.get("type") == "text")
+            tool_use_count = sum(1 for b in content_blocks if b.get("type") == "tool_use")
+            tool_result_count = sum(1 for b in content_blocks if b.get("type") == "tool_result")
+            logger.info(f"📝 消息内容: {text_count} text, {tool_use_count} tool_use, {tool_result_count} tool_result")
+            
+            # 🎯 构建最终 status（completed）
+            final_status = json.dumps({
+                "index": 0,
+                "action": "completed",
+                "description": "回复完成"
+            }, ensure_ascii=False)
+            
+            # 🎯 统计 token 使用（如果 Agent 提供）
+            usage_stats = {}
+            if agent:
+                # SimpleAgent 的统计信息
+                if hasattr(agent, 'invocation_stats'):
+                    stats = agent.invocation_stats
+                    if stats:
+                        usage_stats["invocation_stats"] = stats
+                
+                # LLM 使用统计
+                if hasattr(agent, 'llm') and hasattr(agent.llm, 'usage_stats'):
+                    llm_stats = agent.llm.usage_stats
+                    if llm_stats:
+                        usage_stats.update({
+                            "input_tokens": llm_stats.get("total_input_tokens", 0),
+                            "output_tokens": llm_stats.get("total_output_tokens", 0)
+                        })
+            
+            # 🎯 构建要合并的 metadata
+            metadata_update = {
+                "completed_at": datetime.now().isoformat(),
+                "usage": usage_stats
+            }
+            
+            # 如果有 thinking 内容，添加到 metadata
+            if thinking:
+                metadata_update["thinking"] = thinking
+            
+            # 🎯 更新数据库记录
+            await conversation_service.update_message(
+                message_id=message_id,
+                content=content_json,
+                status=final_status,
+                metadata=metadata_update
+            )
+            
+            logger.info(
+                f"💾 Assistant 消息已更新到最终状态: "
+                f"message_id={message_id}, "
+                f"conversation_id={conversation_id}, "
+                f"blocks_count={len(content_blocks)}, "
+                f"has_thinking={bool(thinking)}"
+            )
+        except Exception as e:
+            logger.error(f"❌ 更新 Assistant 消息失败: {str(e)}", exc_info=True)
     
     def _extract_tool_calls(self, session_log: Dict[str, Any]) -> List[Dict[str, Any]]:
         """从会话日志中提取工具调用详情"""
