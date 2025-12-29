@@ -939,12 +939,12 @@ class SimpleAgent:
         else:
             tools = self._tools
 
-            return {
+        return {
             "system_prompt": system_prompt,
             "prompt_name": prompt_name,
             "tools": tools,
             "enable_thinking": enable_thinking,
-            }
+        }
     async def _execute_tools(self, tool_calls: List[Dict]) -> List[Dict]:
         """
         执行工具调用（通用框架版本）
@@ -977,11 +977,11 @@ class SimpleAgent:
                     **tool_input,
                     "_runtime_context": {
                         "session_id": self._current_session_id,
-                        "event_queue": self._event_queue
-                    }
+                        "event_queue": self._event_queue,
+                    },
                 }
-                    
-                    result = await self.tool_executor.execute(tool_name, enriched_input)
+
+                result = await self.tool_executor.execute(tool_name, enriched_input)
                 
                 # 记录结果
                 if self.plan_state.get("tool_calls"):
