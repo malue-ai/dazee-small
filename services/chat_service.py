@@ -402,8 +402,9 @@ class ChatService:
             logger.info(f"📚 历史消息已加载: {len(history_messages)} 条")
             
             # 🎯 第2+个事件：来自 Agent 的事件（已写入 Redis）
-            assistant_content = ""  # 累积 Assistant 的回复内容
+            content_blocks = []     # 🆕 累积所有 content blocks（text, tool_use, tool_result）
             thinking_content = ""   # 累积 thinking 内容
+            current_text = ""       # 当前累积的文本（会在适当时机加入 content_blocks）
             message_created = True  # 🆕 标记消息是否已创建（占位记录）
             message_updated = False # 🆕 标记消息是否已更新为最终内容
             
@@ -420,16 +421,20 @@ class ChatService:
                 if redis.is_stopped(session_id):
                     logger.warning(f"🛑 检测到停止标志，中断 Agent 执行: session_id={session_id}")
                     
+                    # 把剩余的文本加入 content_blocks
+                    if current_text:
+                        content_blocks.append({"type": "text", "text": current_text})
+                    
                     # 更新 Assistant 消息（如果有内容）
-                    if assistant_content:
+                    if content_blocks:
                         await self._update_assistant_message_final(
                             message_id=assistant_message_id,
                             conversation_id=conversation_id,
-                            content=assistant_content,
+                            content_blocks=content_blocks,
                             thinking=thinking_content if thinking_content else None,
                             agent=agent
                         )
-                        logger.info(f"💾 已保存部分回复内容: {len(assistant_content)} 字符")
+                        logger.info(f"💾 已保存部分回复内容: {len(content_blocks)} 个 blocks")
                     
                     # 结束 Session（标记为 stopped）
                     self.session_service.end_session(session_id, status="stopped")
@@ -442,7 +447,7 @@ class ChatService:
                 # ✅ 事件已经由 EventManager 写入 Redis
                 # 不需要 yield，因为 SSE 会从 Redis 读取
                 
-                # 🔑 累积 Assistant 的回复内容
+                # 🔑 累积 Assistant 的回复内容（统一到 content_blocks）
                 if event_type == "content_delta":
                     # 处理 content_delta 格式
                     delta_data = event.get("data", {}).get("delta", {})
@@ -451,22 +456,54 @@ class ChatService:
                     
                     if delta_type == "text":
                         # 累积文本内容
-                        assistant_content += delta_text
+                        current_text += delta_text
                     elif delta_type == "thinking":
                         # 累积思考过程
                         thinking_content += delta_text
+                
+                # 🆕 累积 tool_call_start 事件（tool_use block）
+                if event_type == "tool_call_start":
+                    # 先把之前累积的文本加入 content_blocks
+                    if current_text:
+                        content_blocks.append({"type": "text", "text": current_text})
+                        current_text = ""
+                    
+                    event_data = event.get("data", {})
+                    tool_use_block = {
+                        "type": "tool_use",
+                        "id": event_data.get("tool_call_id", ""),
+                        "name": event_data.get("tool_name", ""),
+                        "input": event_data.get("input", {})
+                    }
+                    content_blocks.append(tool_use_block)
+                    logger.debug(f"📝 累积 tool_use: {tool_use_block['name']}")
+                
+                # 🆕 累积 tool_call_complete 事件（tool_result block）
+                if event_type == "tool_call_complete":
+                    event_data = event.get("data", {})
+                    tool_result_block = {
+                        "type": "tool_result",
+                        "tool_use_id": event_data.get("tool_call_id", ""),
+                        "content": event_data.get("result", {})
+                    }
+                    content_blocks.append(tool_result_block)
+                    logger.debug(f"📝 累积 tool_result: tool_use_id={tool_result_block['tool_use_id']}")
                 
                 # 🎯 关键事件：触发数据库更新
                 # 在 message_stop 事件时更新消息为最终状态
                 if event_type in ["message_stop", "session_end"] and not message_updated:
                     logger.info(f"📝 触发数据库更新事件: {event_type}")
                     
+                    # 把剩余的文本加入 content_blocks
+                    if current_text:
+                        content_blocks.append({"type": "text", "text": current_text})
+                    
                     # 更新 Assistant 消息到最终状态
-                    if assistant_content:
+                    if content_blocks:
                         await self._update_assistant_message_final(
                             message_id=assistant_message_id,
                             conversation_id=conversation_id,
-                            content=assistant_content,
+                            content_blocks=content_blocks,
                             thinking=thinking_content if thinking_content else None,
                             agent=agent
                         )
@@ -486,12 +523,16 @@ class ChatService:
                         )
             
             # 🔒 安全检查：如果循环结束但消息还没更新（异常情况）
-            if not message_updated and assistant_content:
+            # 把剩余的文本加入 content_blocks
+            if current_text:
+                content_blocks.append({"type": "text", "text": current_text})
+            
+            if not message_updated and content_blocks:
                 logger.warning(f"⚠️ 循环结束但消息未更新，执行补偿更新")
                 await self._update_assistant_message_final(
                     message_id=assistant_message_id,
                     conversation_id=conversation_id,
-                    content=assistant_content,
+                    content_blocks=content_blocks,
                     thinking=thinking_content if thinking_content else None,
                     agent=agent
                 )
@@ -915,7 +956,7 @@ class ChatService:
         self,
         message_id: str,
         conversation_id: str,
-        content: str,
+        content_blocks: List[Dict[str, Any]],
         thinking: str = None,
         agent: SimpleAgent = None
     ) -> None:
@@ -925,11 +966,12 @@ class ChatService:
         Args:
             message_id: 消息ID（之前创建的占位记录）
             conversation_id: Conversation ID
-            content: Assistant 回复内容（累积的文本）
+            content_blocks: Claude API 格式的 content blocks 列表
+                包含 text, tool_use, tool_result 等类型
             thinking: 思考过程内容（可选）
             agent: Agent 实例（用于获取 usage 统计）
         """
-        if not content:
+        if not content_blocks:
             logger.warning(f"⚠️ Assistant 回复内容为空，跳过更新")
             return
         
@@ -938,14 +980,14 @@ class ChatService:
             from services.conversation_service import get_conversation_service
             conversation_service = get_conversation_service()
             
-            # 🎯 将文本内容转换为 Claude API content blocks 格式
-            content_blocks = [
-                {
-                    "type": "text",
-                    "text": content
-                }
-            ]
+            # 🎯 content_blocks 已经是 Claude API 格式，直接序列化
             content_json = json.dumps(content_blocks, ensure_ascii=False)
+            
+            # 统计各类型 block 数量
+            text_count = sum(1 for b in content_blocks if b.get("type") == "text")
+            tool_use_count = sum(1 for b in content_blocks if b.get("type") == "tool_use")
+            tool_result_count = sum(1 for b in content_blocks if b.get("type") == "tool_result")
+            logger.info(f"📝 消息内容: {text_count} text, {tool_use_count} tool_use, {tool_result_count} tool_result")
             
             # 🎯 构建最终 status（completed）
             final_status = json.dumps({
@@ -994,7 +1036,7 @@ class ChatService:
                 f"💾 Assistant 消息已更新到最终状态: "
                 f"message_id={message_id}, "
                 f"conversation_id={conversation_id}, "
-                f"content_length={len(content)}, "
+                f"blocks_count={len(content_blocks)}, "
                 f"has_thinking={bool(thinking)}"
             )
         except Exception as e:

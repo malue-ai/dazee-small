@@ -55,14 +55,16 @@ from .planning import (
     create_planning_manager
 )
 
-# LLM Service
-from .llm_service import (
+# LLM Service（从 llm 模块导入）
+from .llm import (
     BaseLLMService,
     ClaudeLLMService,
     LLMResponse,
     Message,
     ToolType,
     LLMProvider,
+    InvocationType,
+    LLMConfig,
     create_llm_service,
     create_claude_service
 )
@@ -127,6 +129,8 @@ __all__ = [
     "Message",
     "ToolType",
     "LLMProvider",
+    "InvocationType",
+    "LLMConfig",
     "create_llm_service",
     "create_claude_service",
     

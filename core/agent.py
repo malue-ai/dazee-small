@@ -25,7 +25,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 # LLM Service
-from core.llm_service import (
+from core.llm import (
     create_claude_service,
     Message,
     ToolType,
@@ -136,6 +136,9 @@ class SimpleAgent:
         import asyncio
         self._event_queue: asyncio.Queue = asyncio.Queue()
         self._current_session_id: str = ""  # 当前会话ID
+        
+        # 🆕 步骤索引（用于 status 事件）
+        self._step_index: int = 0
         
         # ===== 核心组件初始化 =====
         
@@ -455,6 +458,9 @@ class SimpleAgent:
         history_messages = history_messages or []
         logger.debug(f"接收到 {len(history_messages)} 条历史消息")
         
+        # 🆕 重置步骤索引（每次 chat 开始时）
+        self._step_index = 0
+        
         # session_id 由 Service 层传入（用于事件路由）
         if not session_id:
             # 降级：如果没有提供 session_id，生成一个临时的
@@ -656,6 +662,15 @@ class SimpleAgent:
                             current_block_index = block_index
                             block_index += 1
                             
+                            # 📤 发送 status 更新事件（thinking 阶段）
+                            yield await self._emit_status_event(
+                                session_id=session_id,
+                                index=self._step_index,
+                                action="think",
+                                description="正在思考分析..."
+                            )
+                            self._step_index += 1
+                            
                             start_event = await self.event_manager.content.emit_content_start(
                                 session_id=session_id,
                                 index=current_block_index,
@@ -691,6 +706,15 @@ class SimpleAgent:
                             current_block_type = "text"
                             current_block_index = block_index
                             block_index += 1
+                            
+                            # 📤 发送 status 更新事件（respond 阶段）
+                            yield await self._emit_status_event(
+                                session_id=session_id,
+                                index=self._step_index,
+                                action="respond",
+                                description="正在生成回复..."
+                            )
+                            self._step_index += 1
                             
                             start_event = await self.event_manager.content.emit_content_start(
                                 session_id=session_id,
@@ -764,29 +788,55 @@ class SimpleAgent:
             # 参考: https://docs.anthropic.com/en/docs/build-with-claude/tool-use
             
             if stop_reason == "tool_use" and response.tool_calls:
-                # 🆕 工具调用开始通知
-                for tool_call in response.tool_calls:
-                    yield await self._emit_agent_event(session_id, "tool_call_start", {
-                        "tool_name": tool_call.get("name", ""),
-                        "tool_id": tool_call.get("id", ""),
-                        "input": tool_call.get("input", {})
-                    })
+                # 🆕 工具调用开始通知（使用专用事件方法）
+                for i, tool_call in enumerate(response.tool_calls):
+                    tool_name = tool_call.get("name", "")
+                    tool_id = tool_call.get("id", "")
+                    tool_input = tool_call.get("input", {})
+                    
+                    # 📤 发送 status 更新事件（符合文档格式）
+                    yield await self._emit_status_event(
+                        session_id=session_id,
+                        index=self._step_index,
+                        action="tool",
+                        description=f"正在执行 {tool_name}"
+                    )
+                    self._step_index += 1
+                    
+                    # 📤 发送 tool_call_start 事件（使用专用方法）
+                    yield await self.event_manager.message.emit_tool_call_start(
+                        session_id=session_id,
+                        tool_call_id=tool_id,
+                        tool_name=tool_name,
+                        tool_input=tool_input
+                    )
                     
                     # 记录调用统计
                     invocation_method = tool_call.get('invocation_method', 'direct')
                     self.invocation_stats[invocation_method] += 1
                 
                 # 执行工具
+                import time
+                tool_start_time = time.time()
                 tool_results = await self._execute_tools(response.tool_calls)
                 
-                # 通知工具完成
+                # 通知工具完成（使用专用方法）
                 for tool_call, tool_result in zip(response.tool_calls, tool_results):
+                    tool_name = tool_call.get("name", "")
+                    tool_id = tool_call.get("id", "")
                     result_content = json.loads(tool_result.get("content", "{}"))
-                    yield await self._emit_agent_event(session_id, "tool_call_complete", {
-                        "tool_name": tool_call.get("name", ""),
-                        "success": result_content.get("success", True),
-                        "result": result_content  
-                    })
+                    success = result_content.get("success", True)
+                    duration_ms = int((time.time() - tool_start_time) * 1000)
+                    
+                    # 📤 发送 tool_call_complete 事件（使用专用方法）
+                    yield await self.event_manager.message.emit_tool_call_complete(
+                        session_id=session_id,
+                        tool_call_id=tool_id,
+                        tool_name=tool_name,
+                        status="success" if success else "error",
+                        result=result_content,
+                        duration_ms=duration_ms
+                    )
                 
                 # 🆕 更新 Plan 进度
                 # 注：Plan进度由 plan_todo 工具管理，Agent 不直接更新
@@ -840,6 +890,44 @@ class SimpleAgent:
             session_id=session_id,
             event_type=event_type,
             event_data=data
+        )
+    
+    async def _emit_status_event(
+        self,
+        session_id: str,
+        index: int,
+        action: str,
+        description: str
+    ) -> Dict[str, Any]:
+        """
+        发送 status 更新事件（用于实时状态显示）
+        
+        符合文档格式：
+        {
+            "index": 0,              // 步骤索引 (用于排序)
+            "action": "tool",        // 动作类型
+            "description": "正在执行 xxx" // 步骤描述
+        }
+        
+        Args:
+            session_id: Session ID
+            index: 步骤索引
+            action: 动作类型 (think/tool/plan/validate/reflect/respond)
+            description: 步骤描述
+            
+        Returns:
+            事件字典
+        """
+        status_data = {
+            "index": index,
+            "action": action,
+            "description": description
+        }
+        
+        return await self.event_manager.system.emit_custom(
+            session_id=session_id,
+            event_type="status_update",
+            event_data=status_data
         )
     
     def _display_plan_progress_update(self, plan: Dict, completed: int, total: int, progress: float):
