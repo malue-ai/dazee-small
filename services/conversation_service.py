@@ -13,6 +13,7 @@ Conversation 服务层 - 对话管理业务逻辑
 - 返回 Pydantic 模型
 """
 
+import json
 from logger import get_logger
 from typing import List, Dict, Any, Optional
 from datetime import datetime
@@ -359,7 +360,7 @@ class ConversationService:
             # 获取消息列表
             cursor = await db.execute(
                 f"""
-                SELECT id, conversation_id, role, content, created_at, metadata
+                SELECT id, conversation_id, role, content, status, score, created_at, metadata
                 FROM messages
                 WHERE conversation_id = ?
                 ORDER BY created_at {order_sql}
@@ -371,13 +372,31 @@ class ConversationService:
         
         messages = []
         for row in rows:
+            # 解析 content 和 status（从 JSON 字符串转为对象）
+            content = row[3]
+            status = row[4]
+            
+            # content: JSON 数组字符串 -> 数组
+            try:
+                content = json.loads(content) if content else []
+            except json.JSONDecodeError:
+                logger.warning(f"⚠️ 消息 {row[0]} 的 content 格式错误，保持原样")
+            
+            # status: JSON 对象字符串 -> 字典
+            try:
+                status = json.loads(status) if status else None
+            except json.JSONDecodeError:
+                logger.warning(f"⚠️ 消息 {row[0]} 的 status 格式错误，保持原样")
+            
             messages.append({
                 "id": row[0],
                 "conversation_id": row[1],
                 "role": row[2],
-                "content": row[3],
-                "created_at": row[4],
-                "metadata": deserialize_metadata(row[5])
+                "content": content,  # 🆕 已解析为数组
+                "status": status,     # 🆕 已解析为字典
+                "score": row[5],
+                "created_at": row[6],
+                "metadata": deserialize_metadata(row[7])
             })
         
         has_more = (offset + len(messages)) < total
@@ -401,7 +420,10 @@ class ConversationService:
         conversation_id: str,
         role: str,
         content: str,
-        metadata: Optional[Dict[str, Any]] = None
+        status: Optional[str] = None,
+        score: Optional[float] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        message_id: Optional[str] = None
     ) -> Message:
         """
         添加消息到对话
@@ -409,29 +431,39 @@ class ConversationService:
         Args:
             conversation_id: 对话ID
             role: 角色（user/assistant/system）
-            content: 消息内容
+            content: 消息内容（JSON 数组格式，兼容 Claude API content blocks）
+            status: 消息状态（JSON 对象字符串）
+                格式: '{"index": 0, "action": "think", "description": "分析任务"}'
+            score: 评分/质量分数
             metadata: 消息元数据
+            message_id: 消息ID（可选，不提供则自动生成 UUID）
             
         Returns:
             创建的消息对象
         """
+        from uuid import uuid4
+        
         now = datetime.now()
+        msg_id = message_id or f"msg_{uuid4().hex[:24]}"
         
         async with self.db.get_connection() as db:
-            cursor = await db.execute(
+            await db.execute(
                 """
-                INSERT INTO messages (conversation_id, role, content, created_at, metadata)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO messages 
+                (id, conversation_id, role, content, status, score, created_at, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
+                    msg_id,
                     conversation_id,
                     role,
                     content,
+                    status,
+                    score,
                     now.isoformat(),
                     serialize_metadata(metadata)
                 )
             )
-            message_id = cursor.lastrowid
             
             # 更新对话的 updated_at
             await db.execute(
@@ -441,15 +473,136 @@ class ConversationService:
             
             await db.commit()
         
-        logger.info(f"✅ 消息添加成功: id={message_id}, conversation_id={conversation_id}")
+        # 解析 status 以便日志输出
+        status_info = ""
+        if status:
+            try:
+                import json
+                status_obj = json.loads(status)
+                status_info = f", status={status_obj.get('action')}, index={status_obj.get('index')}"
+            except:
+                status_info = f", status={status}"
+        
+        logger.info(
+            f"✅ 消息添加成功: id={msg_id}, conversation_id={conversation_id}, "
+            f"role={role}{status_info}"
+        )
         
         return Message(
-            id=message_id,
+            id=msg_id,
             conversation_id=conversation_id,
             role=role,
             content=content,
+            status=status,
+            score=score,
             created_at=now,
             metadata=metadata or {}
+        )
+    
+    async def update_message(
+        self,
+        message_id: str,
+        content: Optional[str] = None,
+        status: Optional[str] = None,
+        score: Optional[float] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Message:
+        """
+        更新消息内容
+        
+        Args:
+            message_id: 消息ID
+            content: 消息内容（JSON 数组格式）
+            status: 消息状态（JSON 对象字符串）
+            score: 评分/质量分数
+            metadata: 消息元数据（会合并到现有 metadata）
+            
+        Returns:
+            更新后的消息对象
+        """
+        # 先读取现有消息
+        async with self.db.get_connection() as db:
+            cursor = await db.execute(
+                "SELECT * FROM messages WHERE id = ?",
+                (message_id,)
+            )
+            row = await cursor.fetchone()
+            
+            if not row:
+                raise ValueError(f"消息不存在: id={message_id}")
+            
+            # 解析现有数据
+            existing_metadata = deserialize_metadata(row[7]) if row[7] else {}
+            
+            # 合并 metadata
+            if metadata:
+                existing_metadata.update(metadata)
+            
+            # 构建更新语句（只更新非 None 的字段）
+            update_fields = []
+            params = []
+            
+            if content is not None:
+                update_fields.append("content = ?")
+                params.append(content)
+            
+            if status is not None:
+                update_fields.append("status = ?")
+                params.append(status)
+            
+            if score is not None:
+                update_fields.append("score = ?")
+                params.append(score)
+            
+            # metadata 总是更新（因为可能合并了新字段）
+            update_fields.append("metadata = ?")
+            params.append(serialize_metadata(existing_metadata))
+            
+            if not update_fields:
+                logger.warning(f"⚠️ 没有字段需要更新: message_id={message_id}")
+                # 返回现有消息
+                return Message(
+                    id=row[0],
+                    conversation_id=row[1],
+                    role=row[2],
+                    content=row[3],
+                    status=row[4],
+                    score=row[5],
+                    created_at=datetime.fromisoformat(row[6]) if row[6] else None,
+                    metadata=existing_metadata
+                )
+            
+            params.append(message_id)
+            
+            await db.execute(
+                f"UPDATE messages SET {', '.join(update_fields)} WHERE id = ?",
+                tuple(params)
+            )
+            await db.commit()
+        
+        # 解析 status 以便日志输出
+        status_info = ""
+        if status:
+            try:
+                import json
+                status_obj = json.loads(status)
+                status_info = f", status={status_obj.get('action')}, index={status_obj.get('index')}"
+            except:
+                status_info = f", status={status}"
+        
+        logger.info(
+            f"✅ 消息更新成功: id={message_id}{status_info}"
+        )
+        
+        return Message(
+            id=row[0],
+            conversation_id=row[1],
+            role=row[2],
+            content=content if content is not None else row[3],
+            status=status if status is not None else row[4],
+            score=score if score is not None else row[5],
+            created_at=datetime.fromisoformat(row[6]) if row[6] else None,
+            metadata=existing_metadata
         )
     
     async def get_conversation_summary(self, conversation_id: str) -> Dict[str, Any]:

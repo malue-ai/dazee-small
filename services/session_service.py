@@ -26,6 +26,24 @@ from services.redis_manager import get_redis_manager
 logger = get_logger("session_service")
 
 
+def extract_message_text(message: List[Dict[str, str]]) -> str:
+    """
+    从消息中提取文本内容（用于日志和预览）
+    
+    Args:
+        message: 消息（Claude API 格式 [{"type": "text", "text": "..."}]）
+        
+    Returns:
+        提取的文本内容
+    """
+    text_parts = [
+        block.get("text", "")
+        for block in message
+        if isinstance(block, dict) and block.get("type") == "text"
+    ]
+    return " ".join(text_parts) if text_parts else ""
+
+
 class SessionServiceError(Exception):
     """Session 服务异常基类"""
     pass
@@ -78,7 +96,7 @@ class SessionService:
     async def create_session(
         self,
         user_id: str,
-        message: str,
+        message: List[Dict[str, str]],
         conversation_id: Optional[str] = None,
         message_id: Optional[str] = None
     ) -> tuple[str, SimpleAgent]:
@@ -87,7 +105,7 @@ class SessionService:
         
         Args:
             user_id: 用户 ID
-            message: 用户消息
+            message: 用户消息（Claude API 格式 [{"type": "text", "text": "..."}]）
             conversation_id: 对话 ID（可选，如果提供则加载历史消息）
             message_id: 消息 ID（可选）
             
@@ -99,13 +117,16 @@ class SessionService:
         
         logger.info(f"🔨 创建新的 Session: session_id={session_id}")
         
-        # 2. 创建 Redis Session 状态
+        # 2. 提取消息文本用于预览
+        message_text = extract_message_text(message)
+        
+        # 3. 创建 Redis Session 状态
         self.redis.create_session(
             session_id=session_id,
             user_id=user_id,
             conversation_id=conversation_id,
             message_id=message_id,
-            message_preview=message[:100]
+            message_preview=message_text[:100]
         )
         
         # 3. 创建 Agent 实例
@@ -172,6 +193,48 @@ class SessionService:
             "session_id": session_id,
             "status": status,
             "end_time": datetime.now().isoformat()
+        }
+    
+    async def stop_session(self, session_id: str) -> Dict[str, Any]:
+        """
+        停止正在运行的 Session（用户主动中断）
+        
+        Args:
+            session_id: Session ID
+            
+        Returns:
+            停止结果
+            
+        Raises:
+            SessionNotFoundError: Session 不存在
+        """
+        # 检查 Session 是否存在
+        status = self.redis.get_session_status(session_id)
+        if not status:
+            raise SessionNotFoundError(f"Session 不存在或已过期: session_id={session_id}")
+        
+        # 设置停止标志（Agent 会检测并停止执行）
+        self.redis.set_stop_flag(session_id)
+        
+        # 更新 Session 状态为 stopped
+        self.redis.update_session_status(
+            session_id,
+            status="stopped",
+            last_heartbeat=datetime.now().isoformat()
+        )
+        
+        # 发送停止事件（通知前端）
+        await self.events.session.emit_session_stopped(
+            session_id=session_id,
+            reason="user_requested"
+        )
+        
+        logger.info(f"🛑 Session 已停止: session_id={session_id}")
+        
+        return {
+            "session_id": session_id,
+            "status": "stopped",
+            "stopped_at": datetime.now().isoformat()
         }
     
     def cleanup_inactive_sessions(self) -> int:

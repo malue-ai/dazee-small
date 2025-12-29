@@ -137,14 +137,26 @@
               class="chat-input"
               rows="1"
               ref="inputTextarea"
+              :disabled="isLoading"
             ></textarea>
+            <!-- 🆕 停止按钮（AI 正在回复时显示） -->
             <button
+              v-if="isLoading"
+              @click="stopGeneration"
+              :disabled="isStopping"
+              class="stop-button"
+            >
+              <span v-if="!isStopping">⏸️ 停止</span>
+              <span v-else>停止中...</span>
+            </button>
+            <!-- 发送按钮（正常状态显示） -->
+            <button
+              v-else
               @click="sendMessage"
-              :disabled="!inputMessage.trim() || isLoading"
+              :disabled="!inputMessage.trim()"
               class="send-button"
             >
-              <span v-if="!isLoading">发送 📤</span>
-              <span v-else>发送中...</span>
+              发送 📤
             </button>
           </div>
         </div>
@@ -155,11 +167,14 @@
 
 <script setup>
 import { ref, nextTick, onMounted, watch } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
 import Card from '@/components/Card.vue'
 import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
 import KnowledgeUpload from '@/components/KnowledgeUpload.vue'
 
+const router = useRouter()
+const route = useRoute()
 const chatStore = useChatStore()
 const messages = ref([])
 const inputMessage = ref('')
@@ -174,12 +189,48 @@ const userId = ref('')
 const conversations = ref([])
 const loadingConversations = ref(false)
 
+// 🆕 停止控制相关状态
+const currentSessionId = ref(null)
+const isStopping = ref(false)
+
+// 🔧 辅助函数：从 Claude API 格式提取文本
+function extractTextFromContent(content) {
+  // 如果已经是字符串，直接返回
+  if (typeof content === 'string') {
+    return content
+  }
+  
+  // 如果是数组（Claude API 格式）
+  if (Array.isArray(content)) {
+    const textBlocks = content.filter(block => block.type === 'text')
+    return textBlocks.map(block => block.text).join('\n')
+  }
+  
+  // 其他情况
+  return String(content)
+}
+
 onMounted(async () => {
   // 初始化用户ID
   userId.value = chatStore.initUserId()
   
   // 🆕 加载对话列表
   await loadConversationList()
+  
+  // 🆕 检查路由参数，如果有 conversationId 则自动加载
+  const conversationId = route.params.conversationId
+  if (conversationId) {
+    console.log('📂 从路由加载对话:', conversationId)
+    await loadConversation(conversationId)
+  }
+})
+
+// 🆕 监听路由变化
+watch(() => route.params.conversationId, async (newId) => {
+  if (newId) {
+    console.log('📂 路由变化，加载对话:', newId)
+    await loadConversation(newId)
+  }
 })
 
 // 自动调整输入框高度
@@ -217,14 +268,19 @@ async function loadConversation(conversationId) {
     // 设置当前对话ID
     chatStore.conversationId = conversationId
     
+    // 🆕 更新 URL（如果当前 URL 不匹配）
+    if (route.params.conversationId !== conversationId) {
+      router.push({ name: 'conversation', params: { conversationId } })
+    }
+    
     // 获取历史消息
     const result = await chatStore.getConversationMessages(conversationId, 100, 0, 'asc')
     
-    // 转换为消息格式
+    // 转换为消息格式（提取文本内容）
     messages.value = result.messages.map(msg => ({
       id: msg.id,
       role: msg.role,
-      content: msg.content,
+      content: extractTextFromContent(msg.content),  // 🔧 提取文本
       timestamp: new Date(msg.created_at),
       thinking: msg.metadata?.thinking || ''
     }))
@@ -249,6 +305,9 @@ async function createNewConversation() {
     
     // 重置对话ID（发送第一条消息时会自动创建）
     chatStore.conversationId = null
+    
+    // 🆕 跳转到首页
+    router.push({ name: 'chat' })
     
     // 刷新对话列表
     await loadConversationList()
@@ -282,36 +341,109 @@ async function sendMessage() {
 
   // 发送到后端（流式）
   isLoading.value = true
+  currentSessionId.value = null  // 重置 session_id
   
   try {
-    let assistantMessage = {
+    // 🔧 创建助手消息并添加到数组
+    messages.value.push({
       id: Date.now() + 1,
       role: 'assistant',
       content: '',
       thinking: '',
       timestamp: new Date()
-    }
-    messages.value.push(assistantMessage)
+    })
+    
+    // 🔧 获取助手消息在数组中的索引（用于响应式更新）
+    const assistantMsgIndex = messages.value.length - 1
 
     // 使用流式发送
     await chatStore.sendMessageStream(
       content,
       chatStore.conversationId,
       (event) => {
-        // 处理流式事件
-        console.log('收到事件:', event.type)
+        // 🔧 通过索引获取响应式消息对象
+        const assistantMessage = messages.value[assistantMsgIndex]
         
-        if (event.type === 'conversation_start' && event.data?.conversation_id) {
-          chatStore.conversationId = event.data.conversation_id
-          // 🆕 刷新对话列表
+        // 处理流式事件
+        console.log('📨 收到事件:', event.type, event)
+        
+        // 会话开始
+        if (event.type === 'session_start') {
+          console.log('🔌 会话开始:', event.data)
+          // 🆕 记录 session_id（用于停止）
+          if (event.data?.session_id) {
+            currentSessionId.value = event.data.session_id
+            console.log('✅ 记录 session_id:', currentSessionId.value)
+          }
+        }
+        // 🆕 处理停止事件
+        else if (event.type === 'session_stopped') {
+          console.log('🛑 会话已停止:', event.data)
+          // 添加停止提示
+          if (assistantMessage.content) {
+            assistantMessage.content += '\n\n_[用户已停止生成]_'
+          } else {
+            assistantMessage.content = '_[用户已停止生成，未生成内容]_'
+          }
+          // 重置状态
+          isLoading.value = false
+          isStopping.value = false
+          currentSessionId.value = null
+        }
+        // 对话开始
+        else if (event.type === 'conversation_start' && event.data?.conversation_id) {
+          console.log('🆕 对话开始:', event.data.conversation_id)
+          const newConversationId = event.data.conversation_id
+          chatStore.conversationId = newConversationId
+          
+          // 🆕 更新 URL
+          if (route.params.conversationId !== newConversationId) {
+            router.push({ name: 'conversation', params: { conversationId: newConversationId } })
+          }
+          
+          // 刷新对话列表
           loadConversationList()
-        } else if (event.type === 'content_delta') {
-          if (event.data?.delta?.type === 'text' && event.data?.delta?.text) {
-            assistantMessage.content += event.data.delta.text
+        }
+        // 消息开始
+        else if (event.type === 'message_start') {
+          console.log('💬 消息开始')
+        }
+        // 内容块开始
+        else if (event.type === 'content_start') {
+          console.log('📝 内容块开始:', event.data?.type)
+        }
+        // 内容增量更新
+        else if (event.type === 'content_delta') {
+          const deltaType = event.data?.delta?.type
+          const deltaText = event.data?.delta?.text
+          
+          console.log(`💬 content_delta: type=${deltaType}, text="${deltaText}"`)
+          
+          if (deltaType === 'text' && deltaText) {
+            assistantMessage.content += deltaText
             scrollToBottom()
-          } else if (event.data?.delta?.type === 'thinking' && event.data?.delta?.text) {
-            assistantMessage.thinking += event.data.delta.text
+          } else if (deltaType === 'thinking' && deltaText) {
+            assistantMessage.thinking += deltaText
             scrollToBottom()
+          }
+        }
+        // 内容块停止
+        else if (event.type === 'content_stop') {
+          console.log('✅ 内容块停止')
+        }
+        // 状态更新
+        else if (event.type === 'status') {
+          const statusMsg = event.data?.message
+          console.log('📊 状态更新:', statusMsg)
+          // 可以在这里显示状态提示
+        }
+        // 完成
+        else if (event.type === 'complete') {
+          console.log('✅ 执行完成:', event.data)
+          const finalResult = event.data?.final_result
+          if (finalResult && !assistantMessage.content) {
+            // 如果还没有内容，使用 final_result
+            assistantMessage.content = finalResult
           }
         }
       }
@@ -331,8 +463,41 @@ async function sendMessage() {
     })
   } finally {
     isLoading.value = false
+    currentSessionId.value = null
     await nextTick()
     scrollToBottom()
+  }
+}
+
+// 🆕 停止生成
+async function stopGeneration() {
+  if (!currentSessionId.value) {
+    console.warn('⚠️ 没有正在运行的 session')
+    return
+  }
+
+  try {
+    isStopping.value = true
+    console.log('🛑 请求停止 session:', currentSessionId.value)
+    
+    // 调用停止接口
+    await chatStore.stopSession(currentSessionId.value)
+    
+    console.log('✅ 停止请求已发送，等待确认...')
+    // 注意：实际停止会通过 SSE 的 session_stopped 事件通知
+  } catch (error) {
+    console.error('❌ 停止失败:', error)
+    
+    // 失败时手动重置状态
+    isLoading.value = false
+    isStopping.value = false
+    currentSessionId.value = null
+    
+    // 显示错误提示
+    const lastMessage = messages.value[messages.value.length - 1]
+    if (lastMessage && lastMessage.role === 'assistant') {
+      lastMessage.content += '\n\n_[停止失败: ' + error.message + ']_'
+    }
   }
 }
 
@@ -825,6 +990,41 @@ function formatShortTime(dateStr) {
 
 .send-button:disabled {
   opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 🆕 停止按钮样式 */
+.stop-button {
+  padding: 12px 24px;
+  background: linear-gradient(135deg, #e53e3e 0%, #c53030 100%);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.2s, opacity 0.2s;
+  white-space: nowrap;
+  height: fit-content;
+}
+
+.stop-button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(229, 62, 62, 0.4);
+}
+
+.stop-button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.stop-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.chat-input:disabled {
+  opacity: 0.7;
+  background-color: #f7fafc;
   cursor: not-allowed;
 }
 </style>

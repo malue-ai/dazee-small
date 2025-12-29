@@ -6,6 +6,11 @@ const routes = [
     path: '/',
     name: 'chat',
     component: ChatView
+  },
+  {
+    path: '/c/:conversationId',
+    name: 'conversation',
+    component: ChatView
   }
 ]
 

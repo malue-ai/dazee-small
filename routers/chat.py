@@ -32,6 +32,7 @@ from models.chat import (
 from services import (
     get_chat_service,
     get_session_service,
+    get_conversation_service,
     SessionNotFoundError,
     AgentExecutionError,
 )
@@ -49,6 +50,60 @@ router = APIRouter(
 # 获取服务实例
 chat_service = get_chat_service()
 session_service = get_session_service()
+conversation_service = get_conversation_service()
+
+
+# ==================== 后台任务 ====================
+
+async def generate_conversation_title(conversation_id: str, first_message: str):
+    """
+    后台任务：根据第一条消息自动生成对话标题
+    
+    使用简单的 LLM 调用（Haiku）生成一个简短的标题
+    
+    Args:
+        conversation_id: 对话ID
+        first_message: 第一条用户消息
+    """
+    try:
+        import anthropic
+        import os
+        
+        logger.info(f"🏷️ 开始生成对话标题: conversation_id={conversation_id}")
+        
+        # 使用 Haiku（快速、便宜）
+        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        
+        # 截取消息前 200 字符
+        message_preview = first_message[:200] if len(first_message) > 200 else first_message
+        
+        response = client.messages.create(
+            model="claude-haiku-4-5-20250929",
+            max_tokens=50,
+            messages=[{
+                "role": "user",
+                "content": f"请为以下对话内容生成一个简短的中文标题（不超过15个字，不要加引号）：\n\n{message_preview}"
+            }]
+        )
+        
+        # 提取标题
+        title = response.content[0].text.strip()
+        
+        # 清理标题（去除引号、冒号等）
+        title = title.strip('"\'「」『』【】')
+        if len(title) > 20:
+            title = title[:17] + "..."
+        
+        # 更新数据库
+        await conversation_service.update_conversation(
+            conversation_id=conversation_id,
+            title=title
+        )
+        
+        logger.info(f"✅ 对话标题已生成: {title}")
+        
+    except Exception as e:
+        logger.warning(f"⚠️ 生成对话标题失败: {str(e)}，保持默认标题")
 
 
 # ==================== 辅助函数 ====================
@@ -74,6 +129,35 @@ def sanitize_for_json(obj: Any) -> Any:
             return str(obj)
         except Exception:
             return None
+
+
+def normalize_message_format(message: Any) -> list:
+    """
+    标准化消息格式为 Claude API 格式
+    
+    将各种格式的消息统一转换为：[{"type": "text", "text": "..."}]
+    
+    Args:
+        message: 消息内容（str 或 list）
+        
+    Returns:
+        标准化后的消息列表
+    """
+    # 格式1：已经是标准格式
+    if isinstance(message, list):
+        # 验证格式是否正确
+        if all(isinstance(block, dict) and "type" in block for block in message):
+            return message
+        # 如果不是标准格式，尝试转换
+        logger.warning(f"消息列表格式不标准，尝试转换: {message}")
+    
+    # 格式2：字符串 -> 转换为标准格式
+    if isinstance(message, str):
+        return [{"type": "text", "text": message}]
+    
+    # 其他格式：先转字符串，再包装
+    logger.warning(f"未知消息格式，转换为字符串: {type(message)}")
+    return [{"type": "text", "text": str(message)}]
 
 
 # ==================== 聊天接口 ====================
@@ -177,13 +261,16 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
                 detail="user_id 是必填参数"
             )
         
+        # 🔄 统一消息格式：将 str 转换为 Claude API 标准格式
+        normalized_message = normalize_message_format(request.message)
+        
         # 记录请求信息
         logger.info(
             f"📨 收到{'流式' if request.stream else '同步'}聊天请求: "
             f"user_id={request.user_id}, "
             f"message_id={request.message_id}, "
             f"conversation_id={request.conversation_id}, "
-            f"message={request.message[:50]}..."
+            f"message={str(request.message)[:50]}..."
         )
         
         # 记录额外的上下文信息
@@ -207,30 +294,59 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
                 data: {"id":1,"session_id":"sess_xxx","data":{...},"timestamp":"..."}
                 
                 """
+                import asyncio
+                
                 session_id = None
+                new_conversation_id = None  # 用于标题生成
+                is_new_conversation = not request.conversation_id  # 没有传 conversation_id 说明是新对话
+                
                 try:
-                    # 调用 Service 层流式对话
+                    # 调用 Service 层流式对话（使用标准化后的消息格式）
                     async for event in chat_service.chat_stream(
-                        message=request.message,
+                        message=normalized_message,
                         user_id=request.user_id,
                         conversation_id=request.conversation_id,
                         message_id=request.message_id
                     ):
-                        # 提取事件类型（用于 SSE event: 字段）
+                        # 提取事件字段
                         event_type = event.get("type", "message")
-                        event_seq = event.get("seq", 0)  # 使用 seq 作为 SSE id
+                        event_uuid = event.get("event_uuid", "")  # UUID 作为 SSE id
                         
                         # 记录 session_id（从第一个事件获取）
                         if not session_id:
                             session_id = event.get("session_id")
                         
+                        # 🆕 检测新对话创建，记录 conversation_id（用于后续标题生成）
+                        if event_type == "conversation_start" and is_new_conversation:
+                            new_conversation_id = event.get("data", {}).get("conversation_id")
+                            logger.info(f"🆕 检测到新对话创建: {new_conversation_id}")
+                        
                         # 🎯 SSE 协议格式输出
-                        # id: 使用 seq（session 内序号，从 1 开始）
-                        yield f"id: {event_seq}\n"
+                        # id: 使用 event_uuid（全局唯一标识符）
+                        yield f"id: {event_uuid}\n"
                         # event: 事件类型（前端可以 addEventListener(type, ...)）
                         yield f"event: {event_type}\n"
-                        # data: JSON 数据（包含 event_uuid, seq, 和所有上下文字段）
+                        # data: JSON 数据（包含 event_uuid, seq, conversation_id 等所有字段）
                         yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    
+                    # 🆕 流结束后，如果是新对话，启动标题生成后台任务
+                    if new_conversation_id and is_new_conversation:
+                        # 提取第一条消息的文本内容
+                        first_message_text = ""
+                        if isinstance(request.message, str):
+                            first_message_text = request.message
+                        elif isinstance(request.message, list):
+                            # 从 content blocks 中提取文本
+                            for block in request.message:
+                                if isinstance(block, dict) and block.get("type") == "text":
+                                    first_message_text = block.get("text", "")
+                                    break
+                        
+                        if first_message_text:
+                            logger.info(f"🏷️ 启动标题生成后台任务: conversation_id={new_conversation_id}")
+                            asyncio.create_task(
+                                generate_conversation_title(new_conversation_id, first_message_text)
+                            )
                     
                     # 发送完成事件
                     yield f"event: done\n"
@@ -257,9 +373,9 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
         
         # ===== 同步模式（立即返回 task_id） =====
         else:
-            # 调用 Service 层同步对话（启动后台任务）
+            # 调用 Service 层同步对话（启动后台任务，使用标准化后的消息格式）
             result = await chat_service.chat_sync(
-                message=request.message,
+                message=normalized_message,
                 user_id=request.user_id,
                 conversation_id=request.conversation_id,
                 message_id=request.message_id,
@@ -492,6 +608,67 @@ async def get_user_sessions(user_id: str):
     
     except Exception as e:
         logger.error(f"❌ 获取用户 Session 错误: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+# ==================== Session 控制接口 ====================
+
+@router.post("/session/{session_id}/stop", response_model=APIResponse[Dict])
+async def stop_session(session_id: str):
+    """
+    停止正在运行的 Session（用户主动中断）
+    
+    ## 使用场景
+    用户觉得 AI 回答不满意，想要立即停止当前输出
+    
+    ## 参数
+    - **session_id**: Session ID
+    
+    ## 返回
+    ```json
+    {
+      "code": 200,
+      "message": "Session 已停止",
+      "data": {
+        "session_id": "sess_abc123",
+        "status": "stopped",
+        "stopped_at": "2023-12-24T12:00:00Z"
+      }
+    }
+    ```
+    
+    ## 行为
+    - 在 Redis 中设置停止标志
+    - Agent 执行循环会检测到标志并停止
+    - 发送 `session_stopped` 事件（流式模式会收到）
+    - 更新数据库状态为 "stopped"
+    - 保存已生成的部分内容（不丢失）
+    
+    ## 注意事项
+    - 停止是异步的，Agent 会在下一个检查点停止（通常在几百毫秒内）
+    - 已生成的内容会被保存到数据库
+    - SSE 流会收到 `session_stopped` 事件
+    - 停止后可以查看部分结果
+    """
+    try:
+        logger.info(f"📨 停止 Session 请求: session_id={session_id}")
+        
+        # 调用 Service 层停止 Session
+        result = await session_service.stop_session(session_id)
+        
+        logger.info(f"✅ Session 已停止: session_id={session_id}")
+        
+        return APIResponse(
+            code=200,
+            message="Session 已停止",
+            data=result
+        )
+    
+    except SessionNotFoundError as e:
+        logger.warning(f"⚠️ Session 不存在: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ 停止 Session 错误: {str(e)}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 

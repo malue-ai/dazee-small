@@ -1,0 +1,224 @@
+---
+description: "Core 核心模块开发规范：Agent、Service 层的架构和最佳实践"
+globs:
+  - "core/**/*.py"
+alwaysApply: false
+---
+
+# Core 核心模块开发规范
+
+## Agent 开发规范
+
+所有 Agent 类必须遵循以下模式：
+
+```python
+import logging
+from typing import Dict, Any, Optional
+
+class Agent:
+    """
+    Agent 基类
+    
+    负责协调各个组件完成特定任务
+    """
+    
+    def __init__(
+        self, 
+        llm_service: LLMService, 
+        memory: Memory,
+        tools: Optional[List[BaseTool]] = None
+    ):
+        """
+        初始化 Agent
+        
+        Args:
+            llm_service: LLM 服务实例
+            memory: 内存管理实例
+            tools: 可用工具列表
+        """
+        self.llm_service = llm_service
+        self.memory = memory
+        self.tools = tools or []
+        self.logger = logging.getLogger(__name__)
+    
+    async def process(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        处理用户输入
+        
+        Args:
+            input_data: 输入数据字典
+            
+        Returns:
+            处理结果字典
+            
+        Raises:
+            ValueError: 当输入数据无效时
+        """
+        try:
+            # 1. 验证输入
+            self._validate_input(input_data)
+            
+            # 2. 执行核心逻辑
+            result = await self._execute(input_data)
+            
+            # 3. 记录结果
+            await self._log_result(result)
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"处理失败: {str(e)}", exc_info=True)
+            raise
+    
+    def _validate_input(self, input_data: Dict[str, Any]) -> None:
+        """验证输入数据"""
+        pass
+    
+    async def _execute(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """执行核心逻辑"""
+        raise NotImplementedError
+    
+    async def _log_result(self, result: Dict[str, Any]) -> None:
+        """记录执行结果"""
+        pass
+```
+
+## Service 层规范
+
+Service 层封装可复用的业务逻辑：
+
+```python
+class LLMService:
+    """
+    LLM 服务类
+    
+    封装与大语言模型交互的逻辑
+    """
+    
+    def __init__(self, api_key: str, model: str = "gpt-4"):
+        """初始化 LLM 服务"""
+        self.api_key = api_key
+        self.model = model
+        self.logger = logging.getLogger(__name__)
+    
+    async def generate(
+        self, 
+        prompt: str, 
+        temperature: float = 0.7,
+        max_tokens: int = 1000
+    ) -> str:
+        """
+        生成文本
+        
+        Args:
+            prompt: 输入提示词
+            temperature: 温度参数
+            max_tokens: 最大 token 数
+            
+        Returns:
+            生成的文本
+        """
+        try:
+            self.logger.info(f"生成文本，提示词长度: {len(prompt)}")
+            # 实现逻辑
+            return result
+        except Exception as e:
+            self.logger.error(f"生成失败: {str(e)}")
+            raise
+```
+
+## 错误处理
+
+### 自定义异常
+```python
+class AgentError(Exception):
+    """Agent 基础异常"""
+    def __init__(self, message: str, code: str = None):
+        self.message = message
+        self.code = code
+        super().__init__(self.message)
+
+class InvalidInputError(AgentError):
+    """无效输入异常"""
+    def __init__(self, message: str):
+        super().__init__(message, code="INVALID_INPUT")
+
+class ProcessingError(AgentError):
+    """处理异常"""
+    def __init__(self, message: str):
+        super().__init__(message, code="PROCESSING_ERROR")
+```
+
+### 异常处理模式
+```python
+async def operation():
+    """操作函数"""
+    try:
+        # 尝试执行
+        result = await risky_operation()
+        return result
+    except ValueError as e:
+        # 捕获特定异常
+        logger.error(f"值错误: {str(e)}")
+        raise InvalidInputError(f"参数无效: {str(e)}") from e
+    except Exception as e:
+        # 捕获通用异常
+        logger.error(f"未知错误: {str(e)}", exc_info=True)
+        raise ProcessingError("操作失败") from e
+```
+
+## 日志规范
+
+```python
+import logging
+
+logger = logging.getLogger(__name__)
+
+# 记录关键操作
+logger.info(f"开始处理用户请求 session_id={session_id}")
+
+# 记录调试信息
+logger.debug(f"中间结果: {intermediate_result}")
+
+# 记录警告
+logger.warning(f"性能警告: 处理耗时 {elapsed}s")
+
+# 记录错误（包含堆栈）
+logger.error(f"处理失败: {error_msg}", exc_info=True)
+```
+
+## 依赖注入原则
+
+```python
+# ✅ 正确：通过构造函数注入依赖
+class MyAgent:
+    def __init__(self, llm_service: LLMService):
+        self.llm_service = llm_service
+
+# ❌ 错误：硬编码依赖
+class MyAgent:
+    def __init__(self):
+        self.llm_service = OpenAIService()  # 硬编码
+```
+
+## 异步编程规范
+
+```python
+import asyncio
+
+# ✅ 并发执行多个任务
+async def process_batch(items: List[str]) -> List[dict]:
+    """批量并发处理"""
+    tasks = [process_item(item) for item in items]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    return results
+
+# ❌ 串行执行（性能差）
+async def process_batch(items: List[str]) -> List[dict]:
+    results = []
+    for item in items:
+        result = await process_item(item)  # 逐个等待
+        results.append(result)
+    return results
+```
+

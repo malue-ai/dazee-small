@@ -56,10 +56,12 @@ class DatabaseManager:
             # 创建消息表
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS messages (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id TEXT PRIMARY KEY,
                     conversation_id TEXT NOT NULL,
                     role TEXT NOT NULL,
                     content TEXT NOT NULL,
+                    status TEXT,
+                    score REAL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     metadata TEXT DEFAULT '{}',
                     FOREIGN KEY (conversation_id) REFERENCES conversations(id)

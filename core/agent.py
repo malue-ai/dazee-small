@@ -17,6 +17,7 @@ SimpleAgent - V3.6 核心Agent
 import os
 import json
 import logging
+import asyncio  # 用于 asyncio.sleep(0) 让出控制权
 from typing import Dict, Any, List, Optional, Callable
 from datetime import datetime
 from pathlib import Path
@@ -339,7 +340,7 @@ class SimpleAgent:
     
     async def chat(
         self, 
-        user_input: str, 
+        user_input: List[Dict[str, str]], 
         history_messages: List[Dict[str, str]] = None, 
         session_id: str = None,
         enable_stream: bool = True
@@ -353,13 +354,13 @@ class SimpleAgent:
         - Service 层：负责数据库操作和历史消息加载
         
         Args:
-            user_input: 用户输入
+            user_input: 用户输入（Claude API 格式 [{"type": "text", "text": "..."}]）
             history_messages: 历史消息列表（Service 层从数据库加载）
                 格式: [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}, ...]
             session_id: 通信会话ID（由 SessionService 传入，用于事件路由）
             enable_stream: 是否启用流式输出（默认 True）
                 - True: 使用 llm.create_message_stream()，实时输出事件
-                - False: 使用 llm.create_message()，一次性返回完整结果
+                - False: 使用 llm.create_message_async()，异步返回完整结果
             
         Yields:
             事件字典，格式：
@@ -408,17 +409,18 @@ class SimpleAgent:
             logger.warning(f"未提供 session_id，生成临时 ID: {session_id}")
         
         # ===== 1. 意图识别（Haiku - 快速分类）=====
-        yield await self._emit_agent_event(session_id, "status", {"message": "🎯 分析任务意图..."})
+        # yield await self._emit_agent_event(session_id, "status", {"message": "🎯 分析任务意图..."})
         
         from prompts.intent_recognition_prompt import get_intent_recognition_prompt
         
-        intent_response: LLMResponse = self.intent_llm.create_message(
+        # 🆕 使用真正的异步 LLM 调用
+        intent_response: LLMResponse = await self.intent_llm.create_message_async(
             messages=[Message(role="user", content=user_input)],
             system=get_intent_recognition_prompt()
         )
         
         intent_analysis = self._parse_intent_analysis(intent_response.content)
-        yield await self._emit_agent_event(session_id, "intent_analysis", intent_analysis)
+        # yield await self._emit_agent_event(session_id, "intent_analysis", intent_analysis)
         
         # 选择系统提示词
         execution_config = self._get_execution_config(
@@ -428,7 +430,7 @@ class SimpleAgent:
         self.system_prompt = execution_config['system_prompt']
         
         # ===== 2. 动态工具筛选 + 调用方式选择 =====
-        yield await self._emit_agent_event(session_id, "status", {"message": "🔧 准备工具..."})
+        # yield await self._emit_agent_event(session_id, "status", {"message": "🔧 准备工具..."})
         
         plan = self.plan_state.get("plan")
         required_capabilities = []
@@ -467,12 +469,12 @@ class SimpleAgent:
             estimated_input_size=len(str(plan)) if plan else 0
         )
         
-        yield await self._emit_agent_event(session_id, "tool_selection", {
-            "required_capabilities": required_capabilities,
-            "selected_tools": [t.name for t in selected_tools],
-            "invocation_strategy": invocation_strategy.type.value,
-            "reason": invocation_strategy.reason
-        })
+        # yield await self._emit_agent_event(session_id, "tool_selection", {
+        #     "required_capabilities": required_capabilities,
+        #     "selected_tools": [t.name for t in selected_tools],
+        #     "invocation_strategy": invocation_strategy.type.value,
+        #     "reason": invocation_strategy.reason
+        # })
         
         # ===== 3. RVR 循环（流式版本）=====
         # 🆕 构建消息列表：历史 + 当前用户输入
@@ -492,11 +494,20 @@ class SimpleAgent:
         
         final_result = None
         
+        # 🆕 全局 block 管理（跨 turn 保持）
+        block_index = 0                    # 全局递增的 block 索引
+        current_block_type = None          # 当前 block 类型 ("thinking" | "text")
+        current_block_index = None         # 当前正在处理的 block 索引
+        
         for turn in range(self.max_turns):
-            yield await self._emit_agent_event(session_id, "turn_progress", {
-                "turn": turn + 1,
-                "max_turns": self.max_turns
-            })
+            logger.info(f"{'='*60}")
+            logger.info(f"🔄 Turn {turn + 1}/{self.max_turns}")
+            logger.info(f"{'='*60}")
+            
+            # yield await self._emit_agent_event(session_id, "turn_progress", {
+            #     "turn": turn + 1,
+            #     "max_turns": self.max_turns
+            # })
             
             # 🆕 准备工具列表（与 run() 方法保持一致）
             # 第一步：收集工具名
@@ -549,7 +560,7 @@ class SimpleAgent:
             
             # 🔑 关键：根据 enable_stream 选择 LLM 调用方式
             if enable_stream:
-                # 流式模式：使用 create_message_stream()
+                # 流式模式：使用 create_message_stream()（现在是异步生成器）
                 stream_generator = self.llm.create_message_stream(
                     messages=messages,
                     system=self.system_prompt,
@@ -557,59 +568,98 @@ class SimpleAgent:
                     **llm_kwargs
                 )
                 
-                # 🔑 简洁清晰：直接遍历流
+                # 🔑 流式响应处理
                 accumulated_thinking = ""
                 accumulated_content = ""
                 final_response = None
                 
-                for llm_response in stream_generator:
-                    # 🆕 实时输出 thinking（增量）
+                # 注意：block_index, current_block_type, current_block_index 在循环外部定义（全局）
+                
+                async for llm_response in stream_generator:
+                    # 🆕 处理 thinking（增量）
                     if llm_response.thinking and llm_response.is_stream:
-                        if not hasattr(self, '_thinking_started'):
-                            # 发送 content_start
-                            thinking_start_event = await self.event_manager.content.emit_content_start(
+                        # 如果之前不是 thinking 块，开始新的 thinking 块
+                        if current_block_type != "thinking":
+                            # 如果之前有其他块，先结束它
+                            if current_block_type is not None:
+                                stop_event = await self.event_manager.content.emit_content_stop(
+                                    session_id=session_id,
+                                    index=current_block_index
+                                )
+                                yield stop_event
+                                logger.debug(f"✅ content_stop: index={current_block_index}, type={current_block_type}")
+                            
+                            # 开始新的 thinking 块
+                            current_block_type = "thinking"
+                            current_block_index = block_index
+                            block_index += 1
+                            
+                            start_event = await self.event_manager.content.emit_content_start(
                                 session_id=session_id,
-                                index=0,
+                                index=current_block_index,
                                 block_type="thinking"
                             )
-                            yield thinking_start_event
-                            self._thinking_started = True
+                            yield start_event
+                            logger.debug(f"📤 content_start: index={current_block_index}, type=thinking")
                         
-                        # 发送 content_delta
-                        thinking_delta_event = await self.event_manager.content.emit_content_delta(
+                        # 发送 thinking delta
+                        delta_event = await self.event_manager.content.emit_content_delta(
                             session_id=session_id,
-                            index=0,
+                            index=current_block_index,
                             delta_type="thinking",
                             delta_data={"text": llm_response.thinking}
                         )
-                        yield thinking_delta_event
+                        yield delta_event
                         accumulated_thinking += llm_response.thinking
                     
-                    # 🆕 实时输出 content（增量）
+                    # 🆕 处理 text content（增量）
                     if llm_response.content and llm_response.is_stream:
-                        if not hasattr(self, '_content_started'):
-                            # 发送 content_start
-                            content_start_event = await self.event_manager.content.emit_content_start(
+                        # 如果之前不是 text 块，开始新的 text 块
+                        if current_block_type != "text":
+                            # 如果之前有其他块，先结束它
+                            if current_block_type is not None:
+                                stop_event = await self.event_manager.content.emit_content_stop(
+                                    session_id=session_id,
+                                    index=current_block_index
+                                )
+                                yield stop_event
+                                logger.debug(f"✅ content_stop: index={current_block_index}, type={current_block_type}")
+                            
+                            # 开始新的 text 块
+                            current_block_type = "text"
+                            current_block_index = block_index
+                            block_index += 1
+                            
+                            start_event = await self.event_manager.content.emit_content_start(
                                 session_id=session_id,
-                                index=1,
+                                index=current_block_index,
                                 block_type="text"
                             )
-                            yield content_start_event
-                            self._content_started = True
+                            yield start_event
+                            logger.debug(f"📤 content_start: index={current_block_index}, type=text")
                         
-                        # 发送 content_delta
-                        content_delta_event = await self.event_manager.content.emit_content_delta(
+                        # 发送 text delta
+                        delta_event = await self.event_manager.content.emit_content_delta(
                             session_id=session_id,
-                            index=1,
+                            index=current_block_index,
                             delta_type="text",
                             delta_data={"text": llm_response.content}
                         )
-                        yield content_delta_event
+                        yield delta_event
                         accumulated_content += llm_response.content
                     
                     # 保存最终响应（包含 tool_calls 和 stop_reason）
                     if not llm_response.is_stream:
                         final_response = llm_response
+                
+                # 🆕 循环结束后，关闭最后一个 block
+                if current_block_type is not None:
+                    stop_event = await self.event_manager.content.emit_content_stop(
+                        session_id=session_id,
+                        index=current_block_index
+                    )
+                    yield stop_event
+                    logger.debug(f"✅ content_stop (最后): index={current_block_index}, type={current_block_type}")
                 
                 # 使用最终响应（如果没有收到，构建一个）
                 response = final_response or LLMResponse(
@@ -617,26 +667,9 @@ class SimpleAgent:
                     thinking=accumulated_thinking,
                     stop_reason="end_turn"
                 )
-                
-                # 🆕 发送 content_stop 事件（每个 turn 结束后）
-                if hasattr(self, '_thinking_started'):
-                    thinking_stop_event = await self.event_manager.content.emit_content_stop(
-                        session_id=session_id,
-                        index=0
-                    )
-                    yield thinking_stop_event
-                    delattr(self, '_thinking_started')
-                    
-                if hasattr(self, '_content_started'):
-                    content_stop_event = await self.event_manager.content.emit_content_stop(
-                        session_id=session_id,
-                        index=1
-                    )
-                    yield content_stop_event
-                    delattr(self, '_content_started')
             else:
-                # 非流式模式：使用 create_message()，一次性返回
-                response = self.llm.create_message(
+                # 非流式模式：使用 create_message_async()，异步返回
+                response = await self.llm.create_message_async(
                     messages=messages,
                     system=self.system_prompt,
                     tools=tools_for_llm,
@@ -656,13 +689,19 @@ class SimpleAgent:
             
             # 处理 stop_reason
             stop_reason = response.stop_reason
+            logger.info(f"📥 LLM 响应:")
+            logger.info(f"   stop_reason: {stop_reason}")
+            logger.info(f"   thinking: {len(response.thinking) if response.thinking else 0} 字符")
+            logger.info(f"   content: {len(response.content) if response.content else 0} 字符")
+            logger.info(f"   tool_calls: {len(response.tool_calls) if response.tool_calls else 0} 个")
+            if response.tool_calls:
+                for tc in response.tool_calls:
+                    logger.info(f"      🔧 {tc['name']}({list(tc['input'].keys())})")
             
-            if stop_reason == "end_turn":
-                final_result = response.content
-                yield await self._emit_agent_event(session_id, "status", {"message": "✅ 任务完成"})
-                break
+            # 🔑 官方循环模式：有 tool_use 就继续，没有就结束
+            # 参考: https://docs.anthropic.com/en/docs/build-with-claude/tool-use
             
-            elif stop_reason == "tool_use" and response.tool_calls:
+            if stop_reason == "tool_use" and response.tool_calls:
                 # 🆕 工具调用开始通知
                 for tool_call in response.tool_calls:
                     yield await self._emit_agent_event(session_id, "tool_call_start", {
@@ -687,34 +726,30 @@ class SimpleAgent:
                         "result": result_content.get("result")
                     })
                 
-                # 🆕 更新 Plan 进度
-                self._update_plan_progress_after_tools(response.tool_calls, tool_results)
-                
-                # 🆕 通知 Plan 进度更新
-                updated_plan = self.plan_state.get("plan")
-                if updated_plan:
-                    yield await self._emit_agent_event(session_id, "plan_update", {
-                        "plan": updated_plan,
-                        "progress": self._format_progress_display(updated_plan)
-                    })
-                
-                # 更新 messages
+                # 更新 messages（官方模式：assistant 消息 + tool_result）
                 messages.append(Message(role="assistant", content=response.raw_content))
                 messages.append(Message(role="user", content=tool_results))
+                
+                # 🔑 继续循环（隐式 continue）
             
             else:
-                yield await self._emit_agent_event(session_id, "error", {
-                    "message": f"未知的 stop_reason: {stop_reason}",
-                    "turn": turn + 1
-                })
+                # 🔑 没有 tool_use → 任务完成，退出循环
+                # 这包括 end_turn、max_tokens 等情况
+                final_result = response.content
+                logger.info(f"✅ 任务完成: stop_reason={stop_reason}, turns={turn + 1}")
                 break
         
-        # ===== 4. 返回最终结果 =====
-        yield await self._emit_agent_event(session_id, "complete", {
-            "status": "success" if final_result else "incomplete",
-            "final_result": final_result,
-            "turns": turn + 1
-        })
+        # ===== 4. 发送 message_stop（整个响应结束） =====
+        # 注意：message_start 在 chat_service.py 发送，message_stop 在这里发送
+        # 一个用户请求 → 一个 message_start + 一个 message_stop（无论多少 turn）
+        message_stop_event = await self.event_manager.message.emit_message_stop(
+            session_id=session_id
+        )
+        yield message_stop_event
+        logger.info(f"📤 message_stop: session={session_id}, turns={turn + 1}, result={'有' if final_result else '无'}")
+        
+        # 🆕 注意：session_end 事件在 chat_service.py 发送（Agent 完全结束后）
+        # 这里不再发送 complete 事件，避免重复
     
     async def _emit_agent_event(self, session_id: str, event_type: str, data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -964,10 +999,10 @@ class SimpleAgent:
                         "invocation_method": invocation_method
                     }
                 elif tool_name == "plan_todo":
-                    # 会话级 Plan/Todo 工具（短期记忆）
+                    # 会话级 Plan/Todo 工具（短期记忆）- 异步调用
                     operation = tool_input.get('operation', 'get_plan')
                     data = tool_input.get('data', {})
-                    result = self.plan_todo_tool.execute(operation, data)
+                    result = await self.plan_todo_tool.execute(operation, data)
                     result['invocation_method'] = invocation_method
                     
                     # 如果创建或更新了Plan，显示进度

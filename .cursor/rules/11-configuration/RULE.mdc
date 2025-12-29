@@ -1,0 +1,77 @@
+---
+description: "配置文件规范：YAML 结构、环境变量、敏感信息（精简版）"
+globs:
+  - "config/**/*.yaml"
+  - "config/**/*.yml"
+alwaysApply: false
+---
+
+# 配置文件规范
+
+## 核心原则
+- **可读、可审查**：层级清晰、键名可理解、必要处有中文注释
+- **不放敏感信息**：密钥/密码只允许来自环境变量
+- **可验证**：启动时对关键配置做校验，失败要报中文错误
+
+## YAML 编写规范
+- 使用 2 空格缩进（与现有 YAML 保持一致）
+- 相关配置分组（server / llm / logging / capabilities）
+- 键名使用 `snake_case`
+- 不要做过深层级（建议 <= 4 层）
+
+### 推荐结构（示例）
+
+```yaml
+service_name: "ZenFlux Agent"
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+
+llm:
+  provider: "openai"
+  model: "gpt-4"
+  temperature: 0.7
+  api_key: ${OPENAI_API_KEY}  # 从环境变量读取
+
+logging:
+  level: "INFO"
+  file: "logs/app.log"
+```
+
+## 环境变量
+- 所有密钥使用 `${ENV_VAR}` 或在代码中 `os.getenv()` 读取
+- `.env` 仅用于本地开发，不要把真实密钥写入仓库
+
+### `.env`（示例）
+
+```bash
+OPENAI_API_KEY=sk-...
+LOG_LEVEL=INFO
+APP_ENV=development
+```
+
+## 配置校验（建议在启动时做）
+- 必填项：LLM provider/model/api_key、server 端口
+- 数值范围：temperature、port
+- 缺失时错误信息必须是中文，且指出字段名
+
+```python
+def validate_config(cfg: dict) -> None:
+    """启动前配置校验（示例）"""
+    llm = cfg.get("llm") or {}
+    if not llm.get("provider"):
+        raise ValueError("缺少配置: llm.provider")
+    if not llm.get("model"):
+        raise ValueError("缺少配置: llm.model")
+
+    server = cfg.get("server") or {}
+    port = server.get("port")
+    if not isinstance(port, int) or not (1 <= port <= 65535):
+        raise ValueError("配置错误: server.port 必须是 1-65535 的整数")
+```
+
+## 禁止事项
+- 不允许在 YAML 中硬编码：API key、token、密码
+- 不允许把生产配置和开发配置混在一起（至少通过环境变量区分）
+- 不允许使用含糊键名（如 `x1`, `cfg2`）

@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SSE 事件测试</title>
+  <style>
+    body {
+      font-family: monospace;
+      padding: 20px;
+      background: #1e1e1e;
+      color: #d4d4d4;
+    }
+    h1 {
+      color: #4ec9b0;
+    }
+    .controls {
+      margin: 20px 0;
+    }
+    button {
+      padding: 10px 20px;
+      margin-right: 10px;
+      background: #0e639c;
+      color: white;
+      border: none;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+    button:hover {
+      background: #1177bb;
+    }
+    #output {
+      background: #252526;
+      padding: 20px;
+      border: 1px solid #3c3c3c;
+      border-radius: 4px;
+      max-height: 600px;
+      overflow-y: auto;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .event {
+      padding: 8px;
+      margin: 4px 0;
+      border-left: 3px solid #007acc;
+      background: #2d2d30;
+    }
+    .event-type {
+      color: #4ec9b0;
+      font-weight: bold;
+    }
+    .event-data {
+      color: #ce9178;
+      margin-left: 20px;
+    }
+    .success {
+      border-left-color: #4ec9b0;
+    }
+    .error {
+      border-left-color: #f48771;
+    }
+    .done {
+      border-left-color: #b5cea8;
+    }
+  </style>
+</head>
+<body>
+  <h1>🔍 SSE 事件流测试</h1>
+  
+  <div class="controls">
+    <button onclick="testSSE()">📤 发送测试消息</button>
+    <button onclick="clearOutput()">🗑️ 清空输出</button>
+  </div>
+  
+  <div id="output"></div>
+
+  <script>
+    const output = document.getElementById('output');
+    
+    function log(message, className = '') {
+      const div = document.createElement('div');
+      div.className = `event ${className}`;
+      div.innerHTML = message;
+      output.appendChild(div);
+      output.scrollTop = output.scrollHeight;
+    }
+
+    function clearOutput() {
+      output.innerHTML = '';
+    }
+
+    async function testSSE() {
+      log('🚀 开始测试 SSE 连接...', 'success');
+      
+      const requestBody = {
+        message: '你好',
+        user_id: 'test_user_' + Date.now(),
+        stream: true
+      };
+
+      try {
+        const response = await fetch('/api/v1/chat', {
+          method: 'POST',
+          headers: {
+            'Accept': 'text/event-stream',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(requestBody)
+        });
+
+        log(`📡 连接状态: ${response.status} ${response.statusText}`, 'success');
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let currentEvent = { id: null, event: null, data: null };
+        let eventCount = 0;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          
+          if (done) {
+            log('✅ SSE 连接正常关闭', 'done');
+            break;
+          }
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          
+          if (!buffer.endsWith('\n')) {
+            buffer = lines.pop() || '';
+          } else {
+            buffer = '';
+          }
+
+          for (const line of lines) {
+            if (line === '') {
+              if (currentEvent.data) {
+                try {
+                  const data = JSON.parse(currentEvent.data);
+                  const eventType = data.type || currentEvent.event;
+                  eventCount++;
+                  
+                  log(
+                    `<span class="event-type">#${eventCount} ${eventType}</span><br>` +
+                    `<span class="event-data">id: ${currentEvent.id}</span><br>` +
+                    `<span class="event-data">event: ${currentEvent.event}</span><br>` +
+                    `<span class="event-data">data.type: ${data.type || '(empty)'}</span>`,
+                    eventType === 'done' ? 'done' : eventType === 'error' ? 'error' : ''
+                  );
+
+                  // 特殊标记 complete 和 done 事件
+                  if (eventType === 'complete') {
+                    log('⚠️  收到 complete 事件，但继续等待 done 事件...', 'success');
+                  }
+                  if (eventType === 'done') {
+                    log('🎉 收到 done 事件，流应该结束', 'done');
+                  }
+                } catch (e) {
+                  log(`❌ 解析错误: ${e.message}<br>原始数据: ${currentEvent.data}`, 'error');
+                }
+              }
+              currentEvent = { id: null, event: null, data: null };
+            } else if (line.startsWith('id: ')) {
+              currentEvent.id = line.slice(4).trim();
+            } else if (line.startsWith('event: ')) {
+              currentEvent.event = line.slice(7).trim();
+            } else if (line.startsWith('data: ')) {
+              if (currentEvent.data) {
+                currentEvent.data += '\n' + line.slice(6);
+              } else {
+                currentEvent.data = line.slice(6);
+              }
+            }
+          }
+        }
+
+        log(`📊 总共接收到 ${eventCount} 个事件`, 'success');
+
+      } catch (error) {
+        log(`❌ 测试失败: ${error.message}`, 'error');
+        console.error('详细错误:', error);
+      }
+    }
+
+    // 页面加载时显示说明
+    log('📝 测试说明：', 'success');
+    log('1. 点击"发送测试消息"按钮开始测试');
+    log('2. 观察 SSE 事件流是否正确接收');
+    log('3. 重点检查 complete 和 done 事件的处理');
+    log('4. 确认流在 done 事件后正常关闭\n');
+  </script>
+</body>
+</html>
+

@@ -1,0 +1,116 @@
+---
+description: "错误处理和异常规范：聚焦可操作（异常类、异常链、外部调用重试）"
+alwaysApply: true
+---
+
+# 错误处理和异常规范
+
+## 目标
+- 让调用方拿到**稳定、可预期**的错误结构
+- 让日志足够定位问题，但**不泄露敏感信息**
+- 外部依赖失败时有**可控的重试/降级**策略
+
+## 统一原则（必须遵守）
+- **只捕获你能处理的异常**；不要吞异常
+- **抛出有意义的异常类型**（业务错误 vs 系统错误）
+- **保留异常链**：使用 `raise ... from e`
+- **日志**：错误必须 `exc_info=True`，同时避免记录 token/密码
+
+## 异常分类（推荐）
+- **ValidationError**：输入参数不合法（可提示用户修正）
+- **NotFoundError**：资源不存在
+- **ExternalServiceError**：外部服务失败（可重试/降级）
+- **InternalError**：未知/不可恢复错误（需要排查）
+
+## 异常类模板（示例）
+
+```python
+class ZenFluxError(Exception):
+    """项目基础异常：所有业务异常建议继承此类"""
+
+    def __init__(self, message: str, code: str = "UNKNOWN", details: dict | None = None):
+        self.message = message
+        self.code = code
+        self.details = details or {}
+        super().__init__(message)
+
+
+class ValidationError(ZenFluxError):
+    """参数/输入验证失败"""
+
+    def __init__(self, message: str, field: str | None = None):
+        super().__init__(message, code="VALIDATION", details={"field": field} if field else {})
+
+
+class ExternalServiceError(ZenFluxError):
+    """外部服务调用失败"""
+
+    def __init__(self, service: str, message: str = "外部服务调用失败"):
+        super().__init__(message, code="EXTERNAL", details={"service": service})
+```
+
+## 异常处理模板（在业务层使用）
+
+```python
+import logging
+
+logger = logging.getLogger(__name__)
+
+async def do_business(params: dict) -> dict:
+    """业务入口：把底层异常转换为上层可理解的异常"""
+    try:
+        if not params.get("session_id"):
+            raise ValidationError("缺少 session_id", field="session_id")
+
+        result = await core_logic(params)
+        return result
+
+    except ZenFluxError:
+        # 业务异常：直接向上抛出，路由层统一转换为 HTTP 响应
+        raise
+
+    except Exception as e:
+        # 系统异常：记录堆栈并包装
+        logger.error("业务处理失败", exc_info=True)
+        raise ZenFluxError("系统内部错误", code="INTERNAL") from e
+```
+
+## 外部调用：重试（建议用于可重试错误）
+
+```python
+import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
+
+async def retry(
+    fn,
+    *,
+    max_retries: int = 2,
+    base_delay_s: float = 0.5,
+    retry_on: tuple[type[Exception], ...] = (ExternalServiceError, asyncio.TimeoutError),
+):
+    """简单重试：失败会指数退避；重试次数不要太大"""
+    last = None
+    for i in range(max_retries + 1):
+        try:
+            return await fn()
+        except retry_on as e:
+            last = e
+            if i == max_retries:
+                break
+            delay = base_delay_s * (2 ** i)
+            logger.warning(f"外部调用失败，将在 {delay:.2f}s 后重试：{e}")
+            await asyncio.sleep(delay)
+    raise last
+```
+
+## 路由层（FastAPI）建议
+- 业务层抛 `ZenFluxError`（或其子类）
+- 路由层统一把 `ZenFluxError` 映射为 `HTTPException`，错误信息使用**中文**
+- 对于 `INTERNAL` 类错误，给用户返回通用提示，详细信息只写日志
+
+## 禁止事项
+- 不允许：`except Exception: pass`
+- 不允许：把敏感信息写进日志（token、密码、API key、完整请求体）
+- 不允许：在循环里对同一错误刷屏式 `logger.error`

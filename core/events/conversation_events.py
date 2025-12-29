@@ -37,7 +37,7 @@ class ConversationEventManager(BaseEventManager):
                 "title": conversation.get("title", "新对话"),
                 "created_at": conversation.get("created_at"),
                 "metadata": conversation.get("metadata", {})
-            }
+        }
         )
         
         return await self._send_event(session_id, event)

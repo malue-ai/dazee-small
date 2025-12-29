@@ -20,7 +20,7 @@ class EventStorage(Protocol):
         ...
     
     def get_session_context(self, session_id: str) -> Dict[str, Any]:
-        """获取 session 上下文（conversation_id, request_id 等）"""
+        """获取 session 上下文（conversation_id 等）"""
         ...
     
     def buffer_event(self, session_id: str, event_data: Dict[str, Any]) -> None:
@@ -56,8 +56,7 @@ class BaseEventManager:
         self,
         session_id: str,
         event: Dict[str, Any],
-        conversation_id: str = None,
-        request_id: str = None
+        conversation_id: str = None
     ) -> Dict[str, Any]:
         """
         发送事件（内部方法）
@@ -68,7 +67,7 @@ class BaseEventManager:
         - 添加通用上下文字段
         - 委托给 storage 处理存储和心跳
         
-        统一事件结构（改进版）：
+        统一事件结构：
         {
           // 事件标识
           "event_uuid": str,             // 全局唯一 UUID（例如：550e8400-e29b-41d4-a716-446655440000）
@@ -78,7 +77,6 @@ class BaseEventManager:
           // 通用上下文字段（所有事件都有）
           "session_id": str,             // Session ID
           "conversation_id": str,        // Conversation ID
-          "request_id": str,             // 请求 ID
           "timestamp": str,              // ISO 时间戳
           
           // 事件特定数据
@@ -89,7 +87,6 @@ class BaseEventManager:
             session_id: Session ID
             event: 事件对象（必须包含 type 和 data）
             conversation_id: Conversation ID（可选，会从 Redis 获取）
-            request_id: 请求 ID（可选，会从 Redis 获取）
             
         Returns:
             完整的事件对象
@@ -101,12 +98,11 @@ class BaseEventManager:
         seq = self.storage.generate_session_seq(session_id)
         
         # 3. 获取上下文信息（如果没有提供）
-        if not conversation_id or not request_id:
+        if not conversation_id:
             session_context = self.storage.get_session_context(session_id)
             conversation_id = conversation_id or session_context.get("conversation_id")
-            request_id = request_id or session_context.get("request_id")
         
-        # 4. 构建统一格式的事件（改进版）
+        # 4. 构建统一格式的事件
         complete_event = {
             # 事件标识
             "event_uuid": event_uuid,
@@ -116,7 +112,6 @@ class BaseEventManager:
             # 通用上下文字段
             "session_id": session_id,
             "conversation_id": conversation_id,
-            "request_id": request_id,
             "timestamp": event.get("timestamp", datetime.now().isoformat()),
             
             # 事件特定数据
