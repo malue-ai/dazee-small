@@ -826,3 +826,4 @@ def _rule_based_validation(self, response, user_input) -> Dict:
 **结论**: 当前架构需要立即实施Quality Gate机制，将Prompt层的质量验证"硬化"到代码层。这不是可选的改进，而是架构完整性的必需修复。✅
 
 
+
