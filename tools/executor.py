@@ -185,7 +185,6 @@ class ToolExecutor:
             "memory": "memory",
             "event_manager": "event_manager",
             "workspace_dir": "workspace_dir",
-            "registry": "registry",  # 🆕 支持 registry 注入
         }
         
         for param in params:
@@ -193,10 +192,6 @@ class ToolExecutor:
                 context_key = param_mapping[param]
                 if context_key in self.tool_context and self.tool_context[context_key]:
                     kwargs[param] = self.tool_context[context_key]
-        
-        # 🆕 registry 可以从 self.registry 获取
-        if "registry" in params and "registry" not in kwargs:
-            kwargs["registry"] = self.registry
         
         return kwargs
     

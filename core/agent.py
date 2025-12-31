@@ -1,17 +1,21 @@
 """
-SimpleAgent - V3.6 核心Agent
-完整集成版本：LLM Service + Capability Router + Memory + Plan/Todo Tool
+SimpleAgent - V3.7 核心Agent
+完整集成版本：能力抽象层 + 动态路由 + 智能调用 + E2B沙箱
 
-核心改进（V3.6版本）：
-1. ✅ Plan/Todo 作为工具能力 - 存储到 Short Memory（WorkingMemory）
-2. ✅ Memory Protocol - 每步骤开始读取 plan，结束写回更新
-3. ✅ 简化架构 - 移除 PlanningManager，统一使用 plan_todo_tool
-4. ✅ 实时进度展示 - 用户友好的进度显示
-5. ✅ 完整的 React+Validation+Reflection 循环
+核心改进（V3.7版本）：
+1. ✅ 能力抽象层 - 解耦 LLM 和工具实现，8个抽象分类
+2. ✅ 动态工具筛选 - Router 真正生效，从12个筛选到5个相关工具
+3. ✅ 智能调用选择 - 5种调用方式自动选择（Direct/Code/Programmatic/Streaming/Search）
+4. ✅ 配置驱动 - 单一数据源原则（capabilities.yaml唯一配置）
+5. ✅ E2B集成 - Python沙箱 + Vibe Coding（Streamlit/Gradio/Next.js）
+6. ✅ 自动API发现 - 零硬编码，工具自动注册
+7. ✅ task_type_mappings - 任务类型 → 能力自动推断
 
 架构文档：
-- docs/v3/00-ARCHITECTURE-OVERVIEW.md
-- /prompts/MEMORY_PROTOCOL.md
+- docs/00-ARCHITECTURE-OVERVIEW.md (V3.7架构总览)
+- docs/ARCHITECTURE_V3.7_E2B.md (详细架构图)
+- docs/01-MEMORY-PROTOCOL.md (Memory-First协议)
+- docs/02-CAPABILITY-ROUTING.md (能力路由算法)
 """
 
 import os
@@ -927,7 +931,6 @@ class SimpleAgent:
             event_data=status_data
         )
     
->>>>>>> 80ab2c62f5a783530b0a61a613d70450af473bba
     def _display_plan_progress_update(self, plan: Dict, completed: int, total: int, progress: float):
         """
         🆕 显示 Todo 进度更新（用户可见）
