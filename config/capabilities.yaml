@@ -240,130 +240,17 @@ capabilities:
         - 交付
 
   # ==================== Custom Skills (用户定制) ====================
-  
-  - name: slidespeak-generator
-    type: SKILL
-    subtype: CUSTOM
-    provider: user
-    capabilities:
-      - ppt_generation
-      - presentation_creation
-      - professional_design
-      - api_calling  # 🧪 添加 api_calling 能力
-    priority: 85
-    cost:
-      time: medium
-      money: low
-    constraints:
-      requires_api: true
-      api_name: slidespeak
-      min_quality: high
-    metadata:
-      description: "Generates PROFESSIONAL PowerPoint presentations using SlideSpeak API"
-      preferred_for:
-        - professional PPT
-        - business presentation
-        - client-facing decks
-        - complex slides
-        - customized presentations
-      keywords:
-        - 专业
-        - 产品
-        - 客户
-        - 演示
-        - 业务
-  
-  - name: slidespeak-editor
-    type: SKILL
-    subtype: CUSTOM
-    provider: user
-    capabilities:
-      - ppt_editing
-      - ppt_generation
-      - document_editing
-      - api_calling  # 🧪 添加 api_calling 能力
-    priority: 80
-    cost:
-      time: fast
-      money: low
-    constraints:
-      requires_api: true
-      api_name: slidespeak
-    metadata:
-      description: "Edit existing PowerPoint files by replacing content in specified shapes"
-      preferred_for:
-        - batch personalization
-        - template-based generation
-        - content updates
-        - multi-language versions
-        - data-driven reports
-      keywords:
-        - 编辑
-        - 模板
-        - 批量
-        - 个性化
-        - 更新
-  
-  - name: slidespeak-slide-editor
-    type: SKILL
-    subtype: CUSTOM
-    provider: user
-    capabilities:
-      - ppt_editing
-      - ppt_generation
-      - content_modification
-      - api_calling  # 🧪 添加 api_calling 能力
-    priority: 82
-    cost:
-      time: medium
-      money: low
-    constraints:
-      requires_api: true
-      api_name: slidespeak
-    metadata:
-      description: "Edit slides in existing SlideSpeak presentations - insert, regenerate, or remove slides using AI"
-      preferred_for:
-        - iterative refinement
-        - adding slides
-        - regenerating content
-        - removing slides
-        - continuous editing
-      keywords:
-        - 添加
-        - 插入
-        - 重新生成
-        - 删除
-        - 修改
-        - 优化
-        - 完善
-  
-  - name: planning-task
-    type: SKILL
-    subtype: CUSTOM
-    provider: user
-    capabilities:
-      - task_planning
-      - project_management
-      - workflow_design
-    priority: 75
-    cost:
-      time: fast
-      money: free
-    constraints:
-      requires_api: false
-      min_quality: medium
-    metadata:
-      description: "Generates structured task plans and todo lists for complex projects"
-      preferred_for:
-        - project planning
-        - task breakdown
-        - work organization
-        - multi-step tasks
-      keywords:
-        - 规划
-        - 任务
-        - 项目
-        - 拆解
+  # 
+  # 说明：Custom Skills 现在只在 skills/library/ 目录中管理
+  # - Skills 是指导性文档（SKILL.md），通过 bash cat 读取
+  # - 不再在 capabilities.yaml 中定义为工具
+  # - Skills 通过 SkillsManager 自动发现和注入到 System Prompt
+  # 
+  # 示例 Skills：
+  # - skills/library/slidespeak-generator/SKILL.md (引用 slidespeak_render 工具)
+  # - skills/library/planning-task/SKILL.md (提供任务规划指导)
+  # 
+  # ⚠️ 注意：如果需要调用工具，在 SKILL.md 中通过 references_tools 字段引用
 
   # ==================== Tools ====================
   

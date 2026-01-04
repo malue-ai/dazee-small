@@ -1,7 +1,22 @@
 ---
 name: slidespeak-generator
-description: Generate professional presentations using SlideSpeak API with rich layouts and automatic content formatting
+description: |
+  Guides the creation of professional business presentations with proper structure, 
+  visual design, and content organization. This Skill provides best practices for:
+  
+  - Executive presentations and board decks (高管演示、董事会汇报)
+  - Product demonstrations and launches (产品演示、发布会)
+  - Business reviews and quarterly reports (业务回顾、季度报告)
+  - Client-facing proposals and pitches (客户提案、商务演讲)
+  - Internal training and onboarding materials (内部培训、入职材料)
+  
+  The Skill covers slide structure, content hierarchy, visual consistency, 
+  data visualization principles, and storytelling techniques for impactful presentations.
+  
 priority: high
+references_tools:
+  - slidespeak_render  # 实际执行PPT生成的工具
+  - web_search  # 用于收集内容素材
 ---
 
 # SlideSpeak Presentation Generator

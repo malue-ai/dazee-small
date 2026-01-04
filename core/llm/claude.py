@@ -112,6 +112,9 @@ class ClaudeLLMService(BaseLLMService):
         # Context Editing 配置
         self._context_editing_enabled = False
         self._context_editing_config: Dict[str, Any] = {}
+        
+        # 工具注册表（用于自定义工具）
+        self._tool_registry: Dict[str, Dict[str, Any]] = {}
     
         # 自定义工具存储
         self._custom_tools: List[Dict[str, Any]] = []
@@ -313,6 +316,38 @@ class ClaudeLLMService(BaseLLMService):
         
         return None
     
+    def get_claude_native_tool(self, tool_name: str) -> Optional[Dict[str, Any]]:
+        """
+        获取 Claude 原生工具的 API 格式（别名方法，兼容 llm_service.py）
+        
+        Args:
+            tool_name: 工具名称
+            
+        Returns:
+            工具 schema，如果不是原生工具则返回 None
+        """
+        return self.get_native_tool(tool_name)
+    
+    def add_custom_tool(
+        self,
+        name: str,
+        description: str,
+        input_schema: Dict[str, Any]
+    ):
+        """
+        添加自定义工具到注册表
+        
+        Args:
+            name: 工具名称
+            description: 工具描述
+            input_schema: 输入schema（JSON Schema格式）
+        """
+        self._tool_registry[name] = {
+            "name": name,
+            "description": description,
+            "input_schema": input_schema
+        }
+    
     def convert_to_tool_schema(self, capability: Dict[str, Any]) -> Dict[str, Any]:
         """
         将能力定义转换为 Claude API 格式
@@ -348,6 +383,18 @@ class ClaudeLLMService(BaseLLMService):
             tool_def["cache_control"] = {"type": "ephemeral"}
         
         return tool_def
+    
+    def convert_to_claude_tool(self, capability: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        将 capabilities.yaml 中的工具定义转换为 Claude API 格式（兼容方法）
+        
+        Args:
+            capability: capabilities.yaml 中的能力定义
+            
+        Returns:
+            Claude API 格式的工具定义
+        """
+        return self.convert_to_tool_schema(capability)
     
     def configure_deferred_tools(
         self,
