@@ -7,7 +7,9 @@
 from .chat import ChatRequest, ChatResponse, StreamEvent, SessionInfo, RefineRequest
 from .api import APIResponse
 from .database import User, Conversation, Message
-from .knowledge import (
+
+# Ragie 文档模型（用于文档上传和检索）
+from .ragie import (
     # 请求模型
     DocumentUploadRequest,
     DocumentUrlUploadRequest,
@@ -29,6 +31,37 @@ from .knowledge import (
     DocumentMode
 )
 
+# 知识库系统模型（用于知识库管理）
+from .knowledge import (
+    # 枚举
+    KBVisibility,
+    KBPermission,
+    MemberRole,
+    ShareType,
+    # 知识库模型
+    KnowledgeBase,
+    KnowledgeBaseCreate,
+    KnowledgeBaseUpdate,
+    # 文件夹模型
+    KnowledgeFolder,
+    KnowledgeFolderCreate,
+    KnowledgeFolderUpdate,
+    # 文档模型
+    KnowledgeDocument,
+    KnowledgeDocumentCreate,
+    KnowledgeDocumentUpdate,
+    # 分享模型
+    KnowledgeShare,
+    KnowledgeShareCreate,
+    # 成员模型
+    KnowledgeMember,
+    KnowledgeMemberInvite,
+    # 响应模型
+    KnowledgeBaseListResponse,
+    KnowledgeFolderTreeNode,
+    KnowledgeBaseDetailResponse,
+)
+
 __all__ = [
     # Chat 模型
     "ChatRequest",
@@ -42,14 +75,14 @@ __all__ = [
     "User",
     "Conversation",
     "Message",
-    # Knowledge 请求模型
+    # Ragie 文档模型 - 请求
     "DocumentUploadRequest",
     "DocumentUrlUploadRequest",
     "DocumentRawUploadRequest",
     "DocumentBatchUploadRequest",
     "RetrievalRequest",
     "DocumentUpdateMetadataRequest",
-    # Knowledge 响应模型
+    # Ragie 文档模型 - 响应
     "DocumentUploadResponse",
     "DocumentBatchUploadResponse",
     "DocumentListResponse",
@@ -58,7 +91,34 @@ __all__ = [
     "DocumentInfo",
     "ChunkInfo",
     "UserKnowledgeStats",
-    # Knowledge 枚举
+    # Ragie 文档模型 - 枚举
     "DocumentStatus",
     "DocumentMode",
+    # 知识库系统模型 - 枚举
+    "KBVisibility",
+    "KBPermission",
+    "MemberRole",
+    "ShareType",
+    # 知识库系统模型 - 知识库
+    "KnowledgeBase",
+    "KnowledgeBaseCreate",
+    "KnowledgeBaseUpdate",
+    "KnowledgeBaseListResponse",
+    # 知识库系统模型 - 文件夹
+    "KnowledgeFolder",
+    "KnowledgeFolderCreate",
+    "KnowledgeFolderUpdate",
+    "KnowledgeFolderTreeNode",
+    # 知识库系统模型 - 文档
+    "KnowledgeDocument",
+    "KnowledgeDocumentCreate",
+    "KnowledgeDocumentUpdate",
+    # 知识库系统模型 - 分享
+    "KnowledgeShare",
+    "KnowledgeShareCreate",
+    # 知识库系统模型 - 成员
+    "KnowledgeMember",
+    "KnowledgeMemberInvite",
+    # 知识库系统模型 - 详情
+    "KnowledgeBaseDetailResponse",
 ]

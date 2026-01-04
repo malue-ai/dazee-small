@@ -24,15 +24,23 @@ from .chat_service import (
     ChatService,
     get_chat_service,
     ChatServiceError,
-    ConversationNotFoundError,
     AgentExecutionError,
 )
+
+from .chat_event_handler import ChatEventHandler
 
 from .conversation_service import (
     ConversationService,
     get_conversation_service,
     ConversationServiceError,
     ConversationNotFoundError as ConvNotFoundError,
+)
+
+from .file_service import (
+    FileService,
+    get_file_service,
+    FileServiceError,
+    FileNotFoundError as FileNotFoundErr,
 )
 
 __all__ = [
@@ -52,12 +60,17 @@ __all__ = [
     "ChatService",
     "get_chat_service",
     "ChatServiceError",
-    "ConversationNotFoundError",
     "AgentExecutionError",
+    "ChatEventHandler",
     # Conversation Service
     "ConversationService",
     "get_conversation_service",
     "ConversationServiceError",
     "ConvNotFoundError",
+    # File Service
+    "FileService",
+    "get_file_service",
+    "FileServiceError",
+    "FileNotFoundErr",
 ]
 

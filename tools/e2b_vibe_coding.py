@@ -25,6 +25,14 @@ from logger import get_logger
 
 logger = get_logger("e2b_vibe_coding")
 
+# 说明：E2B SDK 的 list/query 依赖这些类型
+try:
+    from e2b.sandbox.sandbox_api import SandboxQuery
+    from e2b.api.client.models.sandbox_state import SandboxState
+except Exception:
+    SandboxQuery = None
+    SandboxState = None
+
 # E2B SDK
 try:
     from e2b_code_interpreter import Sandbox as CodeInterpreter
@@ -62,7 +70,8 @@ class E2BVibeCoding:
             "port": 7860,
             "start_cmd": "python app.py",
             "packages": ["gradio", "numpy", "pandas"],
-            "description": "机器学习模型界面"
+            "description": "机器学习模型界面",
+            "startup_check": "gradio"  # 需要特殊的启动检查
         },
         "nextjs": {
             "name": "Next.js App",
@@ -82,24 +91,29 @@ class E2BVibeCoding:
         }
     }
     
-    def __init__(self, memory, api_key: str = None, sandbox_timeout_hours: float = 1.0):
+    def __init__(
+        self,
+        api_key: str | None = None,
+        sandbox_timeout_hours: float = 1.0,
+        **_kwargs: Any,
+    ):
         """初始化 Vibe Coding
         
         Args:
-            memory: WorkingMemory 实例
             api_key: E2B API Key
             sandbox_timeout_hours: 沙箱生命周期（小时）。免费版最长1小时，专业版最长24小时
         """
         if not E2B_AVAILABLE:
             raise RuntimeError("E2B SDK 未安装")
         
-        self.memory = memory
         self.api_key = api_key or os.getenv("E2B_API_KEY")
         self.sandbox_timeout_seconds = int(sandbox_timeout_hours * 3600)
         
         if not self.api_key:
             raise ValueError("E2B_API_KEY 未设置")
         
+        # 内部状态管理（替代 memory）
+        self._apps_data: Dict[str, Dict[str, Any]] = {}  # app_id -> app_info
         self._app_sandboxes: Dict[str, Any] = {}  # app_id -> sandbox
         self._heartbeat_tasks: Dict[str, Any] = {}  # app_id -> task（心跳任务）
         
@@ -119,13 +133,18 @@ class E2BVibeCoding:
         Args:
             action: 操作类型
             **params: 操作参数
+            
+        Note:
+            create 操作支持 requirements 参数，用于安装额外的依赖包：
+            - requirements: List[str] - 额外需要安装的包列表，如 ["audio_recorder_streamlit", "openai"]
         """
         if action == "create":
             return await self.create_app(
                 stack=params.get("stack"),
                 description=params.get("description", ""),
                 code=params.get("code"),
-                **{k: v for k, v in params.items() if k not in ["stack", "description", "code"]}
+                requirements=params.get("requirements", []),  # 新增：额外依赖
+                **{k: v for k, v in params.items() if k not in ["stack", "description", "code", "requirements"]}
             )
         elif action == "update":
             return await self.update_app(
@@ -149,6 +168,7 @@ class E2BVibeCoding:
         stack: str,
         description: str,
         code: str,
+        requirements: List[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -158,6 +178,8 @@ class E2BVibeCoding:
             stack: 技术栈（streamlit/gradio/nextjs/vue）
             description: 应用描述
             code: AI 生成的应用代码
+            requirements: 额外的依赖包列表（除了模板预置的包之外）
+                         例如: ["audio_recorder_streamlit", "openai", "langchain"]
         
         Returns:
             {
@@ -175,9 +197,29 @@ class E2BVibeCoding:
             }
         
         template_config = self.TEMPLATES[stack]
+        session_id = kwargs.get("session_id")
+        user_id = kwargs.get("user_id")
+        conversation_id = kwargs.get("conversation_id")
         
         try:
             logger.info(f"🎨 创建 {template_config['name']} 应用...")
+            
+            # 0. 生成 app_id（用于 metadata 与后续找回）
+            app_id = f"app_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            
+            # 0.1 构造 metadata（E2B 要求 Dict[str, str]）
+            metadata: Dict[str, str] = {
+                "zenflux_tool": "e2b_vibe_coding",
+                "app_id": app_id,
+                "stack": stack,
+                "port": str(template_config["port"]),
+            }
+            if session_id:
+                metadata["session_id"] = str(session_id)
+            if user_id:
+                metadata["user_id"] = str(user_id)
+            if conversation_id:
+                metadata["conversation_id"] = str(conversation_id)
             
             # 1. 创建沙箱（指定生命周期）
             if self.api_key != os.getenv("E2B_API_KEY"):
@@ -185,16 +227,25 @@ class E2BVibeCoding:
             
             sandbox = await asyncio.to_thread(
                 CodeInterpreter.create,
-                timeout=self.sandbox_timeout_seconds  # 沙箱生命周期（秒）
+                timeout=self.sandbox_timeout_seconds,  # 沙箱生命周期（秒）
+                metadata=metadata,
             )
             
             await asyncio.sleep(5)  # 等待沙箱就绪
             
             logger.info(f"✅ 沙箱已创建: {sandbox.sandbox_id} (生命周期: {self.sandbox_timeout_seconds}秒)")
             
-            # 2. 安装依赖包
-            if template_config['packages']:
-                await self._install_packages(sandbox, template_config['packages'])
+            # 2. 安装依赖包（模板预置 + AI 指定的额外依赖）
+            all_packages = list(template_config['packages'])  # 模板预置包
+            if requirements:
+                # 合并 AI 指定的额外依赖（去重）
+                for pkg in requirements:
+                    if pkg and pkg not in all_packages:
+                        all_packages.append(pkg)
+                logger.info(f"📦 AI 指定的额外依赖: {requirements}")
+            
+            if all_packages:
+                await self._install_packages(sandbox, all_packages)
             
             # 3. 写入应用代码
             file_path = f"/home/user/{template_config['file']}"
@@ -217,6 +268,7 @@ class E2BVibeCoding:
             
             # 4. 启动应用（后台运行）
             start_cmd = template_config['start_cmd']
+            port = template_config['port']
             
             # 使用 nohup 后台运行
             bg_cmd = f"nohup {start_cmd} > /tmp/app.log 2>&1 &"
@@ -226,19 +278,44 @@ class E2BVibeCoding:
                 timeout=10
             )
             
-            # 等待应用启动
-            await asyncio.sleep(3)
+            # 等待应用启动（简单等待，不检查端口）
+            # 原因：E2B 沙箱中没有 netstat/lsof，且命令失败会抛异常
+            logger.info(f"⏳ 等待应用在端口 {port} 上启动...")
             
-            logger.info(f"✅ 应用已启动")
+            # 根据不同技术栈设置不同的等待时间
+            wait_times = {
+                "streamlit": 8,   # Streamlit 启动较快
+                "gradio": 10,     # Gradio 启动中等
+                "nextjs": 15,     # Next.js 需要编译
+                "vue": 12         # Vue 需要编译
+            }
+            wait_seconds = wait_times.get(stack, 10)
+            
+            logger.info(f"⏳ 等待 {wait_seconds} 秒让 {stack} 应用启动...")
+            await asyncio.sleep(wait_seconds)
+            
+            # 尝试获取日志（不抛异常）
+            try:
+                log_result = await asyncio.to_thread(
+                    sandbox.commands.run,
+                    "tail -20 /tmp/app.log 2>/dev/null || echo 'App started'",
+                    timeout=5
+                )
+                logger.info(f"📋 应用日志: {log_result.stdout[:200] if log_result.stdout else 'No output'}")
+            except Exception as e:
+                logger.debug(f"获取日志失败（正常）: {e}")
+            
+            logger.info(f"✅ 应用启动流程完成")
             
             # 5. 获取预览 URL（关键！）
             port = template_config['port']
-            preview_url = f"https://{port}-{sandbox.sandbox_id}.e2b.app"
+            # 使用 SDK 获取 host，避免手工拼接导致域名/格式不一致
+            host = sandbox.get_host(port)
+            preview_url = f"https://{host}"
             
             logger.info(f"🔗 预览 URL: {preview_url}")
             
-            # 6. 保存应用信息到 Memory
-            app_id = f"app_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            # 6. 保存应用信息到内部状态
             app_info = {
                 "app_id": app_id,
                 "sandbox_id": sandbox.sandbox_id,
@@ -258,10 +335,8 @@ class E2BVibeCoding:
                 "created_at": datetime.now()
             }
             
-            # 保存到 WorkingMemory
-            if not hasattr(self.memory, 'vibe_coding_apps'):
-                self.memory.vibe_coding_apps = {}
-            self.memory.vibe_coding_apps[app_id] = app_info
+            # 保存到内部状态
+            self._apps_data[app_id] = app_info
             
             # 启动心跳保活任务
             await self._start_heartbeat(app_id, sandbox)
@@ -388,11 +463,66 @@ class E2BVibeCoding:
         return {"success": False, "error": "应用不存在"}
     
     async def list_apps(self) -> List[Dict[str, Any]]:
-        """列出所有应用"""
-        apps = []
-        for app_id, app_data in self._app_sandboxes.items():
+        """
+        列出所有应用
+
+        说明：
+        - 优先返回当前进程内缓存的应用
+        - 若缓存为空（例如服务重启），尝试通过 metadata 查询仍存活的沙箱并恢复信息
+        """
+        apps: List[Dict[str, Any]] = []
+        for _app_id, app_data in self._app_sandboxes.items():
             apps.append(app_data["info"])
-        return apps
+        if apps:
+            return apps
+
+        # 缓存为空：尝试从 E2B 找回（需要 SDK 支持 list/query）
+        if not SandboxQuery or not SandboxState:
+            return []
+
+        try:
+            query = SandboxQuery(
+                metadata={"zenflux_tool": "e2b_vibe_coding"},
+                state=[SandboxState.RUNNING, SandboxState.PAUSED]
+            )
+            paginator = CodeInterpreter.list(query=query, limit=20)
+            items = paginator.next_items() or []
+
+            for item in items:
+                sandbox_id = getattr(item, "sandbox_id", None)
+                if not sandbox_id:
+                    continue
+
+                # 连接后才能正确 get_host
+                sandbox = await asyncio.to_thread(getattr(CodeInterpreter, "_cls_connect"), sandbox_id)
+                info = sandbox.get_info()
+                md = getattr(info, "metadata", None) or {}
+
+                stack = md.get("stack")
+                port_str = md.get("port")
+                app_id = md.get("app_id") or f"app_{sandbox_id[:8]}"
+                try:
+                    port = int(port_str) if port_str else self.TEMPLATES.get(stack, {}).get("port", 7860)
+                except Exception:
+                    port = 7860
+
+                preview_url = f"https://{sandbox.get_host(port)}"
+                apps.append({
+                    "app_id": app_id,
+                    "sandbox_id": sandbox_id,
+                    "stack": stack,
+                    "preview_url": preview_url,
+                    "port": port,
+                    "status": "running",
+                    "created_at": getattr(info, "started_at", None) or "",
+                    "metadata": md,
+                })
+
+            return apps
+
+        except Exception as e:
+            logger.warning(f"⚠️ 从 E2B 找回应用失败: {e}")
+            return []
     
     async def _install_packages(self, sandbox, packages: List[str]):
         """安装 Python 包"""
@@ -504,7 +634,17 @@ class E2BVibeCoding:
             }
 
 
-def create_e2b_vibe_coding(memory, api_key: str = None):
-    """创建 Vibe Coding 实例"""
-    return E2BVibeCoding(memory=memory, api_key=api_key)
+def create_e2b_vibe_coding(
+    memory: Any = None,
+    api_key: str | None = None,
+    sandbox_timeout_hours: float = 1.0,
+):
+    """
+    创建 Vibe Coding 实例（供 Agent 加载）
+
+    注意：
+    - 保留 memory 参数仅用于兼容旧调用方，但工具内部不再依赖 memory。
+    """
+    _ = memory
+    return E2BVibeCoding(api_key=api_key, sandbox_timeout_hours=sandbox_timeout_hours)
 

@@ -2,25 +2,24 @@
 Conversation 服务层 - 对话管理业务逻辑
 
 职责：
-1. 对话 CRUD 业务逻辑
-2. 历史消息查询和管理
-3. 对话统计和摘要
-4. 数据库操作封装
+1. 业务逻辑编排
+2. 异常处理和日志
+3. 返回 Pydantic 模型
 
 设计原则：
-- 单一职责：只管理 Conversation 和 Message
-- 数据持久化到 SQLite
-- 返回 Pydantic 模型
+- Service 层只调用 crud.xxx() 函数
+- 不直接写 SQLAlchemy 查询
+- 不直接导入数据库模型
 """
 
 import json
 from logger import get_logger
-from typing import List, Dict, Any, Optional
+from typing import Dict, Any, Optional
 from datetime import datetime
 from uuid import uuid4
 
 from models.database import Conversation, Message
-from utils.database import db_manager, serialize_metadata, deserialize_metadata
+from infra.database import AsyncSessionLocal, crud
 
 logger = get_logger("conversation_service")
 
@@ -40,11 +39,13 @@ class ConversationService:
     对话服务
     
     提供对话和消息的完整生命周期管理
+    
+    注意：所有数据库操作都通过 crud 层完成
     """
     
     def __init__(self):
         """初始化对话服务"""
-        self.db = db_manager
+        pass
     
     # ==================== 对话 CRUD ====================
     
@@ -63,38 +64,27 @@ class ConversationService:
             metadata: 对话元数据
             
         Returns:
-            创建的对话对象
+            创建的对话对象（Pydantic 模型）
         """
-        conversation_id = f"conv_{uuid4().hex[:24]}"
-        now = datetime.now()
-        
-        async with self.db.get_connection() as db:
-            await db.execute(
-                """
-                INSERT INTO conversations (id, user_id, title, created_at, updated_at, metadata)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    conversation_id,
-                    user_id,
-                    title,
-                    now.isoformat(),
-                    now.isoformat(),
-                    serialize_metadata(metadata)
-                )
+        async with AsyncSessionLocal() as session:
+            db_conv = await crud.create_conversation(
+                session=session,
+                user_id=user_id,
+                title=title,
+                metadata=metadata
             )
-            await db.commit()
-        
-        logger.info(f"✅ 对话创建成功: id={conversation_id}, user_id={user_id}")
-        
-        return Conversation(
-            id=conversation_id,
-            user_id=user_id,
-            title=title,
-            created_at=now,
-            updated_at=now,
-            metadata=metadata or {}
-        )
+            
+            logger.info(f"✅ 对话创建成功: id={db_conv.id}, user_id={user_id}")
+            
+            # 转换为 Pydantic 模型
+            return Conversation(
+                id=db_conv.id,
+                user_id=db_conv.user_id,
+                title=db_conv.title,
+                created_at=db_conv.created_at,
+                updated_at=db_conv.updated_at,
+                metadata=db_conv.extra_data
+            )
     
     async def get_conversation(self, conversation_id: str) -> Conversation:
         """
@@ -109,27 +99,19 @@ class ConversationService:
         Raises:
             ConversationNotFoundError: 对话不存在
         """
-        async with self.db.get_connection() as db:
-            cursor = await db.execute(
-                """
-                SELECT id, user_id, title, created_at, updated_at, metadata
-                FROM conversations
-                WHERE id = ?
-                """,
-                (conversation_id,)
-            )
-            row = await cursor.fetchone()
+        async with AsyncSessionLocal() as session:
+            db_conv = await crud.get_conversation(session, conversation_id)
         
-        if not row:
+        if not db_conv:
             raise ConversationNotFoundError(f"对话不存在: {conversation_id}")
         
         return Conversation(
-            id=row[0],
-            user_id=row[1],
-            title=row[2],
-            created_at=datetime.fromisoformat(row[3]) if row[3] else None,
-            updated_at=datetime.fromisoformat(row[4]) if row[4] else None,
-            metadata=deserialize_metadata(row[5])
+            id=db_conv.id,
+            user_id=db_conv.user_id,
+            title=db_conv.title,
+            created_at=db_conv.created_at,
+            updated_at=db_conv.updated_at,
+            metadata=db_conv.extra_data
         )
     
     async def list_conversations(
@@ -147,59 +129,19 @@ class ConversationService:
             offset: 偏移量
             
         Returns:
-            {
-                "conversations": [对话列表],
-                "total": 总数,
-                "limit": 每页数量,
-                "offset": 偏移量
-            }
+            {"conversations": [...], "total": int, "limit": int, "offset": int}
         """
-        async with self.db.get_connection() as db:
+        async with AsyncSessionLocal() as session:
             # 获取总数
-            cursor = await db.execute(
-                "SELECT COUNT(*) FROM conversations WHERE user_id = ?",
-                (user_id,)
-            )
-            total = (await cursor.fetchone())[0]
+            total = await crud.count_conversations(session, user_id)
             
-            # 获取对话列表（带消息统计）
-            cursor = await db.execute(
-                """
-                SELECT 
-                    c.id,
-                    c.user_id,
-                    c.title,
-                    c.created_at,
-                    c.updated_at,
-                    c.metadata,
-                    COUNT(m.id) as message_count,
-                    MAX(m.created_at) as last_message_at,
-                    (SELECT content FROM messages WHERE conversation_id = c.id 
-                     ORDER BY created_at DESC LIMIT 1) as last_message
-                FROM conversations c
-                LEFT JOIN messages m ON c.id = m.conversation_id
-                WHERE c.user_id = ?
-                GROUP BY c.id
-                ORDER BY c.updated_at DESC
-                LIMIT ? OFFSET ?
-                """,
-                (user_id, limit, offset)
+            # 获取对话列表（带统计）
+            conversations = await crud.list_conversations_with_stats(
+                session=session,
+                user_id=user_id,
+                limit=limit,
+                offset=offset
             )
-            rows = await cursor.fetchall()
-        
-        conversations = []
-        for row in rows:
-            conversations.append({
-                "id": row[0],
-                "user_id": row[1],
-                "title": row[2],
-                "created_at": row[3],
-                "updated_at": row[4],
-                "metadata": deserialize_metadata(row[5]),
-                "message_count": row[6] or 0,
-                "last_message_at": row[7],
-                "last_message": row[8]
-            })
         
         logger.info(f"✅ 获取对话列表: user_id={user_id}, total={total}, returned={len(conversations)}")
         
@@ -230,38 +172,27 @@ class ConversationService:
         Raises:
             ConversationNotFoundError: 对话不存在
         """
-        # 先检查对话是否存在
-        await self.get_conversation(conversation_id)
-        
-        now = datetime.now()
-        update_fields = ["updated_at = ?"]
-        params = [now.isoformat()]
-        
-        if title is not None:
-            update_fields.append("title = ?")
-            params.append(title)
-        
-        if metadata is not None:
-            update_fields.append("metadata = ?")
-            params.append(serialize_metadata(metadata))
-        
-        params.append(conversation_id)
-        
-        async with self.db.get_connection() as db:
-            await db.execute(
-                f"""
-                UPDATE conversations
-                SET {', '.join(update_fields)}
-                WHERE id = ?
-                """,
-                params
+        async with AsyncSessionLocal() as session:
+            db_conv = await crud.update_conversation(
+                session=session,
+                conversation_id=conversation_id,
+                title=title,
+                metadata=metadata
             )
-            await db.commit()
-        
-        logger.info(f"✅ 对话更新成功: id={conversation_id}")
-        
-        # 返回更新后的对话
-        return await self.get_conversation(conversation_id)
+            
+            if not db_conv:
+                raise ConversationNotFoundError(f"对话不存在: {conversation_id}")
+            
+            logger.info(f"✅ 对话更新成功: id={conversation_id}")
+            
+            return Conversation(
+                id=db_conv.id,
+                user_id=db_conv.user_id,
+                title=db_conv.title,
+                created_at=db_conv.created_at,
+                updated_at=db_conv.updated_at,
+                metadata=db_conv.extra_data
+            )
     
     async def delete_conversation(self, conversation_id: str) -> Dict[str, Any]:
         """
@@ -271,11 +202,7 @@ class ConversationService:
             conversation_id: 对话ID
             
         Returns:
-            {
-                "conversation_id": str,
-                "deleted": bool,
-                "deleted_messages": int
-            }
+            {"conversation_id": str, "deleted": bool, "deleted_messages": int}
             
         Raises:
             ConversationNotFoundError: 对话不存在
@@ -283,33 +210,18 @@ class ConversationService:
         # 先检查对话是否存在
         await self.get_conversation(conversation_id)
         
-        async with self.db.get_connection() as db:
+        async with AsyncSessionLocal() as session:
             # 统计消息数量
-            cursor = await db.execute(
-                "SELECT COUNT(*) FROM messages WHERE conversation_id = ?",
-                (conversation_id,)
-            )
-            message_count = (await cursor.fetchone())[0]
+            message_count = await crud.count_messages_in_conversation(session, conversation_id)
             
-            # 删除所有消息
-            await db.execute(
-                "DELETE FROM messages WHERE conversation_id = ?",
-                (conversation_id,)
-            )
-            
-            # 删除对话
-            await db.execute(
-                "DELETE FROM conversations WHERE id = ?",
-                (conversation_id,)
-            )
-            
-            await db.commit()
+            # 删除对话（消息会被级联删除）
+            success = await crud.delete_conversation(session, conversation_id)
         
         logger.info(f"✅ 对话删除成功: id={conversation_id}, deleted_messages={message_count}")
         
         return {
             "conversation_id": conversation_id,
-            "deleted": True,
+            "deleted": success,
             "deleted_messages": message_count
         }
     
@@ -332,14 +244,7 @@ class ConversationService:
             order: 排序方式（asc/desc）
             
         Returns:
-            {
-                "conversation_id": str,
-                "messages": [消息列表],
-                "total": 总数,
-                "limit": 每页数量,
-                "offset": 偏移量,
-                "has_more": 是否有更多
-            }
+            {"conversation_id": str, "messages": [...], "total": int, ...}
             
         Raises:
             ConversationNotFoundError: 对话不存在
@@ -347,57 +252,45 @@ class ConversationService:
         # 先检查对话是否存在
         await self.get_conversation(conversation_id)
         
-        order_sql = "ASC" if order == "asc" else "DESC"
-        
-        async with self.db.get_connection() as db:
+        async with AsyncSessionLocal() as session:
             # 获取总数
-            cursor = await db.execute(
-                "SELECT COUNT(*) FROM messages WHERE conversation_id = ?",
-                (conversation_id,)
-            )
-            total = (await cursor.fetchone())[0]
+            total = await crud.count_messages_in_conversation(session, conversation_id)
             
             # 获取消息列表
-            cursor = await db.execute(
-                f"""
-                SELECT id, conversation_id, role, content, status, score, created_at, metadata
-                FROM messages
-                WHERE conversation_id = ?
-                ORDER BY created_at {order_sql}
-                LIMIT ? OFFSET ?
-                """,
-                (conversation_id, limit, offset)
+            db_messages = await crud.list_messages(
+                session=session,
+                conversation_id=conversation_id,
+                limit=limit,
+                order=order
             )
-            rows = await cursor.fetchall()
-        
-        messages = []
-        for row in rows:
-            # 解析 content 和 status（从 JSON 字符串转为对象）
-            content = row[3]
-            status = row[4]
             
-            # content: JSON 数组字符串 -> 数组
-            try:
-                content = json.loads(content) if content else []
-            except json.JSONDecodeError:
-                logger.warning(f"⚠️ 消息 {row[0]} 的 content 格式错误，保持原样")
-            
-            # status: JSON 对象字符串 -> 字典
-            try:
-                status = json.loads(status) if status else None
-            except json.JSONDecodeError:
-                logger.warning(f"⚠️ 消息 {row[0]} 的 status 格式错误，保持原样")
-            
-            messages.append({
-                "id": row[0],
-                "conversation_id": row[1],
-                "role": row[2],
-                "content": content,  # 🆕 已解析为数组
-                "status": status,     # 🆕 已解析为字典
-                "score": row[5],
-                "created_at": row[6],
-                "metadata": deserialize_metadata(row[7])
-            })
+            # 转换为字典列表
+            messages = []
+            for db_msg in db_messages:
+                # 解析 content (JSON 数组)
+                content = db_msg.content
+                try:
+                    content = json.loads(content) if content else []
+                except json.JSONDecodeError:
+                    pass
+                
+                # 解析 status (JSON 对象)
+                status = db_msg.status
+                try:
+                    status = json.loads(status) if status else None
+                except json.JSONDecodeError:
+                    pass
+                
+                messages.append({
+                    "id": db_msg.id,
+                    "conversation_id": db_msg.conversation_id,
+                    "role": db_msg.role,
+                    "content": content,
+                    "status": status,
+                    "score": db_msg.score,
+                    "created_at": db_msg.created_at.isoformat() if db_msg.created_at else None,
+                    "metadata": db_msg.extra_data
+                })
         
         has_more = (offset + len(messages)) < total
         
@@ -431,53 +324,39 @@ class ConversationService:
         Args:
             conversation_id: 对话ID
             role: 角色（user/assistant/system）
-            content: 消息内容（JSON 数组格式，兼容 Claude API content blocks）
+            content: 消息内容（JSON 数组格式）
             status: 消息状态（JSON 对象字符串）
-                格式: '{"index": 0, "action": "think", "description": "分析任务"}'
             score: 评分/质量分数
             metadata: 消息元数据
-            message_id: 消息ID（可选，不提供则自动生成 UUID）
+            message_id: 消息ID（可选）
             
         Returns:
             创建的消息对象
         """
-        from uuid import uuid4
-        
-        now = datetime.now()
         msg_id = message_id or f"msg_{uuid4().hex[:24]}"
+        now = datetime.now()
         
-        async with self.db.get_connection() as db:
-            await db.execute(
-                """
-                INSERT INTO messages 
-                (id, conversation_id, role, content, status, score, created_at, metadata)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    msg_id,
-                    conversation_id,
-                    role,
-                    content,
-                    status,
-                    score,
-                    now.isoformat(),
-                    serialize_metadata(metadata)
-                )
+        async with AsyncSessionLocal() as session:
+            await crud.create_message(
+                session=session,
+                conversation_id=conversation_id,
+                role=role,
+                content=content,
+                message_id=msg_id,
+                status=status,
+                metadata=metadata
             )
             
             # 更新对话的 updated_at
-            await db.execute(
-                "UPDATE conversations SET updated_at = ? WHERE id = ?",
-                (now.isoformat(), conversation_id)
+            await crud.update_conversation(
+                session=session,
+                conversation_id=conversation_id
             )
-            
-            await db.commit()
         
-        # 解析 status 以便日志输出
+        # 日志
         status_info = ""
         if status:
             try:
-                import json
                 status_obj = json.loads(status)
                 status_info = f", status={status_obj.get('action')}, index={status_obj.get('index')}"
             except:
@@ -512,96 +391,54 @@ class ConversationService:
         
         Args:
             message_id: 消息ID
-            content: 消息内容（JSON 数组格式）
-            status: 消息状态（JSON 对象字符串）
-            score: 评分/质量分数
-            metadata: 消息元数据（会合并到现有 metadata）
+            content: 消息内容
+            status: 消息状态
+            score: 评分
+            metadata: 元数据（合并更新）
             
         Returns:
             更新后的消息对象
         """
-        # 先读取现有消息
-        async with self.db.get_connection() as db:
-            cursor = await db.execute(
-                "SELECT * FROM messages WHERE id = ?",
-                (message_id,)
-            )
-            row = await cursor.fetchone()
+        async with AsyncSessionLocal() as session:
+            # 先获取现有消息
+            db_msg = await crud.get_message(session, message_id)
             
-            if not row:
+            if not db_msg:
                 raise ValueError(f"消息不存在: id={message_id}")
             
-            # 解析现有数据
-            existing_metadata = deserialize_metadata(row[7]) if row[7] else {}
-            
             # 合并 metadata
+            existing_metadata = db_msg.extra_data or {}
             if metadata:
                 existing_metadata.update(metadata)
             
-            # 构建更新语句（只更新非 None 的字段）
-            update_fields = []
-            params = []
-            
-            if content is not None:
-                update_fields.append("content = ?")
-                params.append(content)
-            
-            if status is not None:
-                update_fields.append("status = ?")
-                params.append(status)
-            
-            if score is not None:
-                update_fields.append("score = ?")
-                params.append(score)
-            
-            # metadata 总是更新（因为可能合并了新字段）
-            update_fields.append("metadata = ?")
-            params.append(serialize_metadata(existing_metadata))
-            
-            if not update_fields:
-                logger.warning(f"⚠️ 没有字段需要更新: message_id={message_id}")
-                # 返回现有消息
-                return Message(
-                    id=row[0],
-                    conversation_id=row[1],
-                    role=row[2],
-                    content=row[3],
-                    status=row[4],
-                    score=row[5],
-                    created_at=datetime.fromisoformat(row[6]) if row[6] else None,
-                    metadata=existing_metadata
-                )
-            
-            params.append(message_id)
-            
-            await db.execute(
-                f"UPDATE messages SET {', '.join(update_fields)} WHERE id = ?",
-                tuple(params)
+            # 更新消息
+            updated_msg = await crud.update_message(
+                session=session,
+                message_id=message_id,
+                content=content,
+                status=status,
+                metadata=existing_metadata
             )
-            await db.commit()
         
-        # 解析 status 以便日志输出
+        # 日志
         status_info = ""
         if status:
             try:
-                import json
                 status_obj = json.loads(status)
                 status_info = f", status={status_obj.get('action')}, index={status_obj.get('index')}"
             except:
                 status_info = f", status={status}"
         
-        logger.info(
-            f"✅ 消息更新成功: id={message_id}{status_info}"
-        )
+        logger.info(f"✅ 消息更新成功: id={message_id}{status_info}")
         
         return Message(
-            id=row[0],
-            conversation_id=row[1],
-            role=row[2],
-            content=content if content is not None else row[3],
-            status=status if status is not None else row[4],
-            score=score if score is not None else row[5],
-            created_at=datetime.fromisoformat(row[6]) if row[6] else None,
+            id=updated_msg.id,
+            conversation_id=updated_msg.conversation_id,
+            role=updated_msg.role,
+            content=content if content is not None else updated_msg.content,
+            status=status if status is not None else updated_msg.status,
+            score=score if score is not None else updated_msg.score,
+            created_at=updated_msg.created_at,
             metadata=existing_metadata
         )
     
@@ -618,55 +455,11 @@ class ConversationService:
         Raises:
             ConversationNotFoundError: 对话不存在
         """
-        # 获取对话基本信息
-        conversation = await self.get_conversation(conversation_id)
+        async with AsyncSessionLocal() as session:
+            summary = await crud.get_conversation_summary(session, conversation_id)
         
-        async with self.db.get_connection() as db:
-            # 获取消息统计
-            cursor = await db.execute(
-                """
-                SELECT 
-                    COUNT(*) as total,
-                    SUM(CASE WHEN role = 'user' THEN 1 ELSE 0 END) as user_count,
-                    SUM(CASE WHEN role = 'assistant' THEN 1 ELSE 0 END) as assistant_count
-                FROM messages
-                WHERE conversation_id = ?
-                """,
-                (conversation_id,)
-            )
-            stats = await cursor.fetchone()
-            
-            # 获取最后一条消息
-            cursor = await db.execute(
-                """
-                SELECT role, content, created_at
-                FROM messages
-                WHERE conversation_id = ?
-                ORDER BY created_at DESC
-                LIMIT 1
-                """,
-                (conversation_id,)
-            )
-            last_message_row = await cursor.fetchone()
-        
-        last_message = None
-        if last_message_row:
-            last_message = {
-                "role": last_message_row[0],
-                "content": last_message_row[1],
-                "created_at": last_message_row[2]
-            }
-        
-        summary = {
-            "conversation_id": conversation_id,
-            "title": conversation.title,
-            "message_count": stats[0] or 0,
-            "user_message_count": stats[1] or 0,
-            "assistant_message_count": stats[2] or 0,
-            "created_at": conversation.created_at.isoformat() if conversation.created_at else None,
-            "updated_at": conversation.updated_at.isoformat() if conversation.updated_at else None,
-            "last_message": last_message
-        }
+        if not summary:
+            raise ConversationNotFoundError(f"对话不存在: {conversation_id}")
         
         logger.info(f"✅ 对话摘要: conversation_id={conversation_id}, message_count={summary['message_count']}")
         
@@ -689,4 +482,3 @@ def get_conversation_service() -> ConversationService:
     if _default_conversation_service is None:
         _default_conversation_service = ConversationService()
     return _default_conversation_service
-

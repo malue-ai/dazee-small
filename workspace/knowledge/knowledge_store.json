@@ -6,136 +6,63 @@
       "partition_id": "partition_test001",
       "created_at": "2025-12-26T14:03:12.390631",
       "last_seen_at": "2025-12-26T14:03:12.390640",
+      "documents": []
+    },
+    "user_1766974073604": {
+      "user_id": "user_1766974073604",
+      "partition_id": "partition_user_1766974073604",
+      "created_at": "2025-12-30T20:59:07.435155",
+      "last_seen_at": "2025-12-30T20:59:07.435160",
       "documents": [
         {
-          "document_id": "1599bd54-085d-4c82-98ee-935bbd0887d6",
-          "filename": "API_CALLING_EXPERIMENT.md",
-          "status": "partitioning",
+          "document_id": "410c6611-97e3-4fc4-aebe-364b2fb8bc54",
+          "filename": "PROJECT_ISSUES_ANALYSIS.md",
+          "status": "ready",
           "metadata": {
-            "user_id": "test001",
-            "filename": "API_CALLING_EXPERIMENT.md",
-            "source": "test_upload",
-            "category": "root"
+            "storage": "local",
+            "user_id": "user_1766974073604",
+            "filename": "PROJECT_ISSUES_ANALYSIS.md",
+            "uploaded_at": "2026-01-04T14:21:14.295378"
           },
-          "created_at": "2025-12-26T14:05:08.487314",
-          "updated_at": "2025-12-26T14:05:08.487332"
+          "created_at": "2026-01-04T14:21:15.677940",
+          "updated_at": "2026-01-04T14:30:21.009883"
         },
         {
-          "document_id": "b73b71eb-5202-4246-b007-0c3d751fec9b",
-          "filename": "API_CALLING_IMPLEMENTATION_SUMMARY.md",
-          "status": "partitioning",
+          "document_id": "90452752-7f4e-4a70-b68c-780a68aca1c6",
+          "filename": "MULTI_AGENT_ROADMAP.md",
+          "status": "ready",
           "metadata": {
-            "user_id": "test001",
-            "filename": "API_CALLING_IMPLEMENTATION_SUMMARY.md",
-            "source": "test_upload",
-            "category": "root"
+            "storage": "local",
+            "user_id": "user_1766974073604",
+            "filename": "MULTI_AGENT_ROADMAP.md",
+            "uploaded_at": "2026-01-04T14:21:14.321423"
           },
-          "created_at": "2025-12-26T14:05:09.373261",
-          "updated_at": "2025-12-26T14:05:09.373278"
-        },
+          "created_at": "2026-01-04T14:21:15.681699",
+          "updated_at": "2026-01-04T14:30:21.577924"
+        }
+      ]
+    },
+    "user_1767151769078": {
+      "user_id": "user_1767151769078",
+      "partition_id": "partition_user_1767151769078",
+      "created_at": "2025-12-31T17:27:50.085834",
+      "last_seen_at": "2025-12-31T17:27:50.085844",
+      "documents": [
         {
-          "document_id": "ae19e08b-16e0-42f1-b58b-cd2822eaeb6f",
-          "filename": "docs/00-ARCHITECTURE-OVERVIEW.md",
-          "status": "partitioning",
+          "document_id": "494272fe-27a1-41d8-a975-abaf49db9656",
+          "filename": "MULTI_AGENT_ROADMAP.md",
+          "status": "partitioned",
           "metadata": {
-            "user_id": "test001",
-            "filename": "docs/00-ARCHITECTURE-OVERVIEW.md",
-            "source": "test_upload",
-            "category": "docs"
+            "s3_key": "knowledge/user_1767151769078/20251231_172749/MULTI_AGENT_ROADMAP_f6fd023f.md",
+            "s3_url": "s3://dify-storage-zenflux/knowledge/user_1767151769078/20251231_172749/MULTI_AGENT_ROADMAP_f6fd023f.md",
+            "file_size": 11361,
+            "storage": "s3",
+            "user_id": "user_1767151769078",
+            "filename": "MULTI_AGENT_ROADMAP.md",
+            "uploaded_at": "2025-12-31T17:27:50.093983"
           },
-          "created_at": "2025-12-26T14:05:10.313119",
-          "updated_at": "2025-12-26T14:05:10.313141"
-        },
-        {
-          "document_id": "bcb97d36-0fb3-4d97-8923-10aa13420690",
-          "filename": "docs/HITL-SSE-CONFIRMATION-DESIGN.md",
-          "status": "partitioning",
-          "metadata": {
-            "user_id": "test001",
-            "filename": "docs/HITL-SSE-CONFIRMATION-DESIGN.md",
-            "source": "test_upload",
-            "category": "docs"
-          },
-          "created_at": "2025-12-26T14:05:11.149727",
-          "updated_at": "2025-12-26T14:05:11.149741"
-        },
-        {
-          "document_id": "7d83344b-8b6a-4106-8937-01aa9f370772",
-          "filename": "README.md",
-          "status": "partitioning",
-          "metadata": {
-            "user_id": "test001",
-            "filename": "README.md",
-            "source": "test_upload",
-            "category": "root"
-          },
-          "created_at": "2025-12-26T14:05:12.018183",
-          "updated_at": "2025-12-26T14:05:12.018197"
-        },
-        {
-          "document_id": "0cf8b2cf-a342-4481-b98d-2b6793d66baa",
-          "filename": "API_CALLING_EXPERIMENT.md",
-          "status": "partitioning",
-          "metadata": {
-            "user_id": "test001",
-            "filename": "API_CALLING_EXPERIMENT.md",
-            "source": "test_upload",
-            "category": "root"
-          },
-          "created_at": "2025-12-26T14:05:27.380123",
-          "updated_at": "2025-12-26T14:05:27.380159"
-        },
-        {
-          "document_id": "0525b95a-da7c-489b-91f1-c43daf05eee6",
-          "filename": "API_CALLING_IMPLEMENTATION_SUMMARY.md",
-          "status": "partitioning",
-          "metadata": {
-            "user_id": "test001",
-            "filename": "API_CALLING_IMPLEMENTATION_SUMMARY.md",
-            "source": "test_upload",
-            "category": "root"
-          },
-          "created_at": "2025-12-26T14:05:28.173413",
-          "updated_at": "2025-12-26T14:05:28.173772"
-        },
-        {
-          "document_id": "a47bb753-113d-47ed-bedd-425b4c2b23da",
-          "filename": "docs/00-ARCHITECTURE-OVERVIEW.md",
-          "status": "partitioning",
-          "metadata": {
-            "user_id": "test001",
-            "filename": "docs/00-ARCHITECTURE-OVERVIEW.md",
-            "source": "test_upload",
-            "category": "docs"
-          },
-          "created_at": "2025-12-26T14:05:29.024263",
-          "updated_at": "2025-12-26T14:05:29.024289"
-        },
-        {
-          "document_id": "2ca5d9fd-c945-4931-8ba5-368f31cc509d",
-          "filename": "docs/HITL-SSE-CONFIRMATION-DESIGN.md",
-          "status": "partitioning",
-          "metadata": {
-            "user_id": "test001",
-            "filename": "docs/HITL-SSE-CONFIRMATION-DESIGN.md",
-            "source": "test_upload",
-            "category": "docs"
-          },
-          "created_at": "2025-12-26T14:05:29.898024",
-          "updated_at": "2025-12-26T14:05:29.898150"
-        },
-        {
-          "document_id": "05f29e4e-63e3-4ca0-80b2-9babb0d03811",
-          "filename": "README.md",
-          "status": "partitioning",
-          "metadata": {
-            "user_id": "test001",
-            "filename": "README.md",
-            "source": "test_upload",
-            "category": "root"
-          },
-          "created_at": "2025-12-26T14:05:30.733542",
-          "updated_at": "2025-12-26T14:05:30.733584"
+          "created_at": "2025-12-31T17:27:51.028261",
+          "updated_at": "2025-12-31T17:27:51.696830"
         }
       ]
     }

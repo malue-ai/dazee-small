@@ -53,57 +53,62 @@ session_service = get_session_service()
 conversation_service = get_conversation_service()
 
 
-# ==================== 后台任务 ====================
+# ==================== 错误码定义 ====================
 
-async def generate_conversation_title(conversation_id: str, first_message: str):
+class ErrorCode:
+    """统一错误码定义"""
+    VALIDATION_ERROR = "VALIDATION_ERROR"       # 参数验证失败
+    SESSION_NOT_FOUND = "SESSION_NOT_FOUND"     # Session 不存在
+    AGENT_ERROR = "AGENT_ERROR"                 # Agent 执行错误
+    EXTERNAL_SERVICE_ERROR = "EXTERNAL_SERVICE"  # 外部服务错误（LLM、Redis 等）
+    INTERNAL_ERROR = "INTERNAL_ERROR"           # 内部错误
+
+
+def create_error_response(code: str, message: str, detail: str = None) -> Dict[str, Any]:
     """
-    后台任务：根据第一条消息自动生成对话标题
-    
-    使用简单的 LLM 调用（Haiku）生成一个简短的标题
+    创建统一的错误响应格式
     
     Args:
-        conversation_id: 对话ID
-        first_message: 第一条用户消息
+        code: 错误码
+        message: 用户可见的错误信息
+        detail: 详细错误信息（仅用于日志，不返回给用户）
     """
-    try:
-        import anthropic
-        import os
+    return {
+        "code": code,
+        "message": message,
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+def sanitize_error_message(error: Exception) -> str:
+    """
+    清理错误信息，隐藏敏感内容
+    
+    Args:
+        error: 异常对象
         
-        logger.info(f"🏷️ 开始生成对话标题: conversation_id={conversation_id}")
-        
-        # 使用 Haiku（快速、便宜）
-        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-        
-        # 截取消息前 200 字符
-        message_preview = first_message[:200] if len(first_message) > 200 else first_message
-        
-        response = client.messages.create(
-            model="claude-haiku-4-5-20250929",
-            max_tokens=50,
-            messages=[{
-                "role": "user",
-                "content": f"请为以下对话内容生成一个简短的中文标题（不超过15个字，不要加引号）：\n\n{message_preview}"
-            }]
-        )
-        
-        # 提取标题
-        title = response.content[0].text.strip()
-        
-        # 清理标题（去除引号、冒号等）
-        title = title.strip('"\'「」『』【】')
-        if len(title) > 20:
-            title = title[:17] + "..."
-        
-        # 更新数据库
-        await conversation_service.update_conversation(
-            conversation_id=conversation_id,
-            title=title
-        )
-        
-        logger.info(f"✅ 对话标题已生成: {title}")
-        
-    except Exception as e:
-        logger.warning(f"⚠️ 生成对话标题失败: {str(e)}，保持默认标题")
+    Returns:
+        安全的错误信息
+    """
+    error_str = str(error)
+    
+    # 定义敏感关键词列表
+    sensitive_keywords = [
+        "api_key", "token", "password", "secret", "credential",
+        "authorization", "bearer", "sk-", "pk-"
+    ]
+    
+    # 检查是否包含敏感信息
+    error_lower = error_str.lower()
+    for keyword in sensitive_keywords:
+        if keyword in error_lower:
+            return "系统内部错误，请稍后重试"
+    
+    # 如果错误信息过长，截断
+    if len(error_str) > 200:
+        return error_str[:200] + "..."
+    
+    return error_str
 
 
 # ==================== 辅助函数 ====================
@@ -131,35 +136,6 @@ def sanitize_for_json(obj: Any) -> Any:
             return None
 
 
-def normalize_message_format(message: Any) -> list:
-    """
-    标准化消息格式为 Claude API 格式
-    
-    将各种格式的消息统一转换为：[{"type": "text", "text": "..."}]
-    
-    Args:
-        message: 消息内容（str 或 list）
-        
-    Returns:
-        标准化后的消息列表
-    """
-    # 格式1：已经是标准格式
-    if isinstance(message, list):
-        # 验证格式是否正确
-        if all(isinstance(block, dict) and "type" in block for block in message):
-            return message
-        # 如果不是标准格式，尝试转换
-        logger.warning(f"消息列表格式不标准，尝试转换: {message}")
-    
-    # 格式2：字符串 -> 转换为标准格式
-    if isinstance(message, str):
-        return [{"type": "text", "text": message}]
-    
-    # 其他格式：先转字符串，再包装
-    logger.warning(f"未知消息格式，转换为字符串: {type(message)}")
-    return [{"type": "text", "text": str(message)}]
-
-
 # ==================== 聊天接口 ====================
 
 @router.post("/chat")
@@ -177,6 +153,7 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
     - **message_id**: 消息ID（可选，用于追踪）
     - **conversation_id**: 对话ID（可选，用于关联数据库对话）
     - **stream**: 是否使用流式输出（默认为 true）
+    - **background_tasks**: 后台任务列表（可选），如 `["title_generation"]`
     - **file**: 附件文件路径或URL（可选）
     - **variables**: 前端上下文变量（可选），如位置、时区等
     
@@ -210,7 +187,7 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
     data: {}
     ```
     
-    详细协议见：`docs/03-SSE-EVENT-PROTOCOL.md`
+    详细协议见：`docs/03-EVENT-PROTOCOL.md`
     
     ---
     
@@ -258,11 +235,11 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
         if not request.user_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="user_id 是必填参数"
+                detail=create_error_response(
+                    ErrorCode.VALIDATION_ERROR,
+                    "user_id 是必填参数"
+                )
             )
-        
-        # 🔄 统一消息格式：将 str 转换为 Claude API 标准格式
-        normalized_message = normalize_message_format(request.message)
         
         # 记录请求信息
         logger.info(
@@ -278,88 +255,61 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
             logger.debug(f"📍 前端变量: {request.variables}")
         if request.file:
             logger.info(f"📎 附件: {request.file}")
-        if request.background_task:
-            logger.info(f"⏱️ 后台任务模式")
+        if request.background_tasks:
+            logger.info(f"⏱️ 后台任务: {request.background_tasks}")
         
         # ===== 流式模式（默认） =====
         if request.stream:
-            # 直接返回 SSE 流
             async def event_generator():
-                """
-                生成 SSE 事件流（符合 SSE 协议标准）
-                
-                SSE 格式：
-                id: 1
-                event: message_start
-                data: {"id":1,"session_id":"sess_xxx","data":{...},"timestamp":"..."}
-                
-                """
-                import asyncio
-                
-                session_id = None
-                new_conversation_id = None  # 用于标题生成
-                is_new_conversation = not request.conversation_id  # 没有传 conversation_id 说明是新对话
-                
+                """生成 SSE 事件流"""
                 try:
-                    # 调用 Service 层流式对话（使用标准化后的消息格式）
-                    async for event in chat_service.chat_stream(
-                        message=normalized_message,
+                    # 🎯 使用统一的 chat() 入口
+                    async for event in await chat_service.chat(
+                        message=request.message,
                         user_id=request.user_id,
                         conversation_id=request.conversation_id,
-                        message_id=request.message_id
+                        message_id=request.message_id,
+                        stream=True,
+                        background_tasks=request.background_tasks
                     ):
-                        # 提取事件字段
                         event_type = event.get("type", "message")
-                        event_uuid = event.get("event_uuid", "")  # UUID 作为 SSE id
+                        event_uuid = event.get("event_uuid", "")
                         
-                        # 记录 session_id（从第一个事件获取）
-                        if not session_id:
-                            session_id = event.get("session_id")
-                        
-                        # 🆕 检测新对话创建，记录 conversation_id（用于后续标题生成）
-                        if event_type == "conversation_start" and is_new_conversation:
-                            new_conversation_id = event.get("data", {}).get("conversation_id")
-                            logger.info(f"🆕 检测到新对话创建: {new_conversation_id}")
-                        
-                        # 🎯 SSE 协议格式输出
-                        # id: 使用 event_uuid（全局唯一标识符）
                         yield f"id: {event_uuid}\n"
-                        # event: 事件类型（前端可以 addEventListener(type, ...)）
                         yield f"event: {event_type}\n"
-                        # data: JSON 数据（包含 event_uuid, seq, conversation_id 等所有字段）
                         yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
                     
-                    # 🆕 流结束后，如果是新对话，启动标题生成后台任务
-                    if new_conversation_id and is_new_conversation:
-                        # 提取第一条消息的文本内容
-                        first_message_text = ""
-                        if isinstance(request.message, str):
-                            first_message_text = request.message
-                        elif isinstance(request.message, list):
-                            # 从 content blocks 中提取文本
-                            for block in request.message:
-                                if isinstance(block, dict) and block.get("type") == "text":
-                                    first_message_text = block.get("text", "")
-                                    break
-                        
-                        if first_message_text:
-                            logger.info(f"🏷️ 启动标题生成后台任务: conversation_id={new_conversation_id}")
-                            asyncio.create_task(
-                                generate_conversation_title(new_conversation_id, first_message_text)
-                            )
-                    
-                    # 发送完成事件
                     yield f"event: done\n"
                     yield f"data: {{}}\n\n"
                 
                 except AgentExecutionError as e:
                     logger.error(f"❌ 流式对话错误: {str(e)}")
+                    error_response = create_error_response(
+                        ErrorCode.AGENT_ERROR,
+                        "对话处理失败，请稍后重试"
+                    )
                     yield f"event: error\n"
-                    yield f"data: {json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps(error_response, ensure_ascii=False)}\n\n"
+                    
+                except ConnectionError as e:
+                    logger.error(f"❌ 连接错误: {str(e)}", exc_info=True)
+                    error_response = create_error_response(
+                        ErrorCode.EXTERNAL_SERVICE_ERROR,
+                        "服务连接失败，请稍后重试"
+                    )
+                    yield f"event: error\n"
+                    yield f"data: {json.dumps(error_response, ensure_ascii=False)}\n\n"
+                    
                 except Exception as e:
                     logger.error(f"❌ 流式对话错误: {str(e)}", exc_info=True)
+                    # 清理敏感信息
+                    safe_message = sanitize_error_message(e)
+                    error_response = create_error_response(
+                        ErrorCode.INTERNAL_ERROR,
+                        safe_message
+                    )
                     yield f"event: error\n"
-                    yield f"data: {json.dumps({'message': f'内部错误: {str(e)}'}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps(error_response, ensure_ascii=False)}\n\n"
             
             return StreamingResponse(
                 event_generator(),
@@ -367,22 +317,23 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
                 headers={
                     "Cache-Control": "no-cache",
                     "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no",  # 禁用 Nginx 缓冲
+                    "X-Accel-Buffering": "no",
                 }
             )
         
         # ===== 同步模式（立即返回 task_id） =====
         else:
-            # 调用 Service 层同步对话（启动后台任务，使用标准化后的消息格式）
-            result = await chat_service.chat_sync(
-                message=normalized_message,
+            # 🎯 使用统一的 chat() 入口
+            result = await chat_service.chat(
+                message=request.message,
                 user_id=request.user_id,
                 conversation_id=request.conversation_id,
                 message_id=request.message_id,
-                verbose=False
+                stream=False,
+                background_tasks=request.background_tasks
             )
             
-            # 后台清理任务
+            # 后台清理任务（使用带锁的异步清理）
             background_tasks.add_task(session_service.cleanup_inactive_sessions)
             
             logger.info(f"✅ 任务已启动: task_id={result['task_id']}")
@@ -398,10 +349,32 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
         raise
     except AgentExecutionError as e:
         logger.error(f"❌ 对话执行失败: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=create_error_response(
+                ErrorCode.AGENT_ERROR,
+                "对话处理失败，请稍后重试"
+            )
+        )
+    except ConnectionError as e:
+        logger.error(f"❌ 连接错误: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=create_error_response(
+                ErrorCode.EXTERNAL_SERVICE_ERROR,
+                "服务暂时不可用，请稍后重试"
+            )
+        )
     except Exception as e:
         logger.error(f"❌ 聊天接口错误: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"内部错误: {str(e)}")
+        safe_message = sanitize_error_message(e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=create_error_response(
+                ErrorCode.INTERNAL_ERROR,
+                safe_message
+            )
+        )
 
 
 
@@ -447,8 +420,8 @@ async def get_session_status(session_id: str):
     try:
         logger.info(f"📨 查询 Session 状态: session_id={session_id}")
         
-        # 调用 Service 层
-        status_data = session_service.get_session_status(session_id)
+        # 调用 Service 层（异步）
+        status_data = await session_service.get_session_status(session_id)
         
         logger.info(f"✅ Session 状态: {status_data.get('status')}")
         
@@ -460,10 +433,23 @@ async def get_session_status(session_id: str):
     
     except SessionNotFoundError as e:
         logger.warning(f"⚠️ Session 不存在: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=create_error_response(
+                ErrorCode.SESSION_NOT_FOUND,
+                "Session 不存在或已过期"
+            )
+        )
     except Exception as e:
         logger.error(f"❌ 查询 Session 状态错误: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        safe_message = sanitize_error_message(e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=create_error_response(
+                ErrorCode.INTERNAL_ERROR,
+                safe_message
+            )
+        )
 
 
 @router.get("/session/{session_id}/events", response_model=APIResponse[Dict])
@@ -513,8 +499,8 @@ async def get_session_events(
             f"after_id={after_id}, limit={limit}"
         )
         
-        # 调用 Service 层
-        events = session_service.get_session_events(
+        # 调用 Service 层（异步）
+        events = await session_service.get_session_events(
             session_id=session_id,
             after_id=after_id,
             limit=limit
@@ -541,10 +527,23 @@ async def get_session_events(
     
     except SessionNotFoundError as e:
         logger.warning(f"⚠️ Session 不存在: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=create_error_response(
+                ErrorCode.SESSION_NOT_FOUND,
+                "Session 不存在或已过期"
+            )
+        )
     except Exception as e:
         logger.error(f"❌ 获取 Session 事件错误: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        safe_message = sanitize_error_message(e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=create_error_response(
+                ErrorCode.INTERNAL_ERROR,
+                safe_message
+            )
+        )
 
 
 @router.get("/user/{user_id}/sessions", response_model=APIResponse[Dict])
@@ -589,8 +588,8 @@ async def get_user_sessions(user_id: str):
     try:
         logger.info(f"📨 获取用户的活跃 Session: user_id={user_id}")
         
-        # 调用 Service 层
-        sessions = session_service.get_user_sessions(user_id)
+        # 调用 Service 层（异步）
+        sessions = await session_service.get_user_sessions(user_id)
         
         response_data = {
             "user_id": user_id,
@@ -608,7 +607,14 @@ async def get_user_sessions(user_id: str):
     
     except Exception as e:
         logger.error(f"❌ 获取用户 Session 错误: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        safe_message = sanitize_error_message(e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=create_error_response(
+                ErrorCode.INTERNAL_ERROR,
+                safe_message
+            )
+        )
 
 
 # ==================== Session 控制接口 ====================
@@ -666,10 +672,23 @@ async def stop_session(session_id: str):
     
     except SessionNotFoundError as e:
         logger.warning(f"⚠️ Session 不存在: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=create_error_response(
+                ErrorCode.SESSION_NOT_FOUND,
+                "Session 不存在或已过期"
+            )
+        )
     except Exception as e:
         logger.error(f"❌ 停止 Session 错误: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        safe_message = sanitize_error_message(e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=create_error_response(
+                ErrorCode.INTERNAL_ERROR,
+                safe_message
+            )
+        )
 
 
 # ==================== Session 管理接口（已有，保持不变） ====================
@@ -690,15 +709,15 @@ async def get_session(session_id: str):
     try:
         logger.info(f"📨 获取会话信息: session_id={session_id}")
         
-        # 调用 Service 层
-        session_info = session_service.get_session_info(session_id)
+        # 调用 Service 层（异步）
+        session_info = await session_service.get_session_info(session_id)
         
         response = SessionInfo(
             session_id=session_info["session_id"],
-            active=session_info["active"],
-            turns=session_info["turns"],
-            message_count=session_info["message_count"],
-            has_plan=session_info["has_plan"],
+            active=session_info.get("status") == "running",
+            turns=session_info.get("total_turns", 0),
+            message_count=0,  # 从 Redis 状态中无法获取，设为 0
+            has_plan=False,   # 从 Redis 状态中无法获取，设为 False
             start_time=session_info.get("start_time")
         )
         
@@ -712,10 +731,23 @@ async def get_session(session_id: str):
     
     except SessionNotFoundError as e:
         logger.warning(f"⚠️ 会话不存在: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=create_error_response(
+                ErrorCode.SESSION_NOT_FOUND,
+                "会话不存在或已过期"
+            )
+        )
     except Exception as e:
         logger.error(f"❌ 获取会话信息错误: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        safe_message = sanitize_error_message(e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=create_error_response(
+                ErrorCode.INTERNAL_ERROR,
+                safe_message
+            )
+        )
 
 
 @router.delete("/session/{session_id}", response_model=APIResponse[Dict])
@@ -734,8 +766,8 @@ async def end_session(session_id: str):
     try:
         logger.info(f"📨 结束会话请求: session_id={session_id}")
         
-        # 调用 Service 层
-        summary = session_service.end_session(session_id)
+        # 调用 Service 层（异步）
+        summary = await session_service.end_session(session_id)
         
         # 清理摘要数据
         summary = sanitize_for_json(summary)
@@ -750,10 +782,23 @@ async def end_session(session_id: str):
     
     except SessionNotFoundError as e:
         logger.warning(f"⚠️ 会话不存在: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=create_error_response(
+                ErrorCode.SESSION_NOT_FOUND,
+                "会话不存在或已过期"
+            )
+        )
     except Exception as e:
         logger.error(f"❌ 结束会话错误: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        safe_message = sanitize_error_message(e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=create_error_response(
+                ErrorCode.INTERNAL_ERROR,
+                safe_message
+            )
+        )
 
 
 @router.get("/sessions", response_model=APIResponse[Dict])
@@ -769,8 +814,8 @@ async def list_sessions():
     try:
         logger.info("📨 列出所有会话")
         
-        # 调用 Service 层
-        sessions = session_service.list_sessions()
+        # 调用 Service 层（异步）
+        sessions = await session_service.list_sessions()
         
         logger.info(f"✅ 返回 {len(sessions)} 个会话")
         
@@ -785,5 +830,11 @@ async def list_sessions():
     
     except Exception as e:
         logger.error(f"❌ 列出会话错误: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
-
+        safe_message = sanitize_error_message(e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=create_error_response(
+                ErrorCode.INTERNAL_ERROR,
+                safe_message
+            )
+        )

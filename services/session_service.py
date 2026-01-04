@@ -1,5 +1,5 @@
 """
-Session 服务层 - Session Management Service
+Session 服务层 - Session Management Service（异步版本）
 
 职责：
 1. Session 生命周期管理（创建、获取、结束、清理）
@@ -11,6 +11,7 @@ Session 服务层 - Session Management Service
 - 单一职责：只管理 Session 和 Agent 池
 - Session 状态存储在 Redis
 - 支持多用户并发 Session
+- 所有方法都是异步的，避免阻塞事件循环
 """
 
 from typing import Dict, Any, Optional, List
@@ -21,6 +22,7 @@ from logger import get_logger
 from core.agent import SimpleAgent, create_simple_agent
 from core.context import create_context
 from core.events import create_event_manager
+from core.workspace_manager import WorkspaceManager
 from services.redis_manager import get_redis_manager
 
 logger = get_logger("session_service")
@@ -56,7 +58,7 @@ class SessionNotFoundError(SessionServiceError):
 
 class SessionService:
     """
-    Session 服务
+    Session 服务（异步版本）
     
     提供 Session 和 Agent 的生命周期管理
     """
@@ -75,6 +77,7 @@ class SessionService:
         """
         self.default_model = default_model
         self.default_workspace = default_workspace
+        self.workspace_manager = WorkspaceManager(base_dir=default_workspace)
         
         # Agent 实例池（支持多会话）
         # key: session_id, value: SimpleAgent
@@ -97,7 +100,7 @@ class SessionService:
         self,
         user_id: str,
         message: List[Dict[str, str]],
-        conversation_id: Optional[str] = None,
+        conversation_id: str,
         message_id: Optional[str] = None
     ) -> tuple[str, SimpleAgent]:
         """
@@ -106,7 +109,7 @@ class SessionService:
         Args:
             user_id: 用户 ID
             message: 用户消息（Claude API 格式 [{"type": "text", "text": "..."}]）
-            conversation_id: 对话 ID（可选，如果提供则加载历史消息）
+            conversation_id: 对话 ID（必填，ChatService 会确保在调用前已创建）
             message_id: 消息 ID（可选）
             
         Returns:
@@ -115,13 +118,13 @@ class SessionService:
         # 1. 生成 session_id
         session_id = self._generate_session_id()
         
-        logger.info(f"🔨 创建新的 Session: session_id={session_id}")
+        logger.info(f"🔨 创建新的 Session: session_id={session_id}, conversation_id={conversation_id}")
         
         # 2. 提取消息文本用于预览
         message_text = extract_message_text(message)
         
-        # 3. 创建 Redis Session 状态
-        self.redis.create_session(
+        # 3. 创建 Redis Session 状态（异步）
+        await self.redis.create_session(
             session_id=session_id,
             user_id=user_id,
             conversation_id=conversation_id,
@@ -129,14 +132,17 @@ class SessionService:
             message_preview=message_text[:100]
         )
         
-        # 3. 创建 Agent 实例
+        # 4. 创建 Agent 实例
+        # 按 conversation_id 隔离工作区，保证每个 Agent 只能在该对话目录下工作
+        workspace_dir = str(self.workspace_manager.get_workspace_root(conversation_id))
+
         agent = create_simple_agent(
             model=self.default_model,
-            workspace_dir=self.default_workspace,
-            event_manager=self.events  # ✅ 传递 EventManager (self.events)
+            workspace_dir=workspace_dir,
+            event_manager=self.events
         )
         
-        # 4. 加入 Agent 池
+        # 5. 加入 Agent 池
         self.agent_pool[session_id] = agent
         
         logger.info(
@@ -164,7 +170,7 @@ class SessionService:
         
         return self.agent_pool[session_id]
     
-    def end_session(self, session_id: str, status: str = "completed") -> Dict[str, Any]:
+    async def end_session(self, session_id: str, status: str = "completed") -> Dict[str, Any]:
         """
         结束 Session
         
@@ -182,7 +188,7 @@ class SessionService:
             raise SessionNotFoundError(f"Session 不存在: session_id={session_id}")
         
         # 更新 Redis Session 状态为完成
-        self.redis.complete_session(session_id, status=status)
+        await self.redis.complete_session(session_id, status=status)
         
         # 从池中移除
         del self.agent_pool[session_id]
@@ -209,15 +215,15 @@ class SessionService:
             SessionNotFoundError: Session 不存在
         """
         # 检查 Session 是否存在
-        status = self.redis.get_session_status(session_id)
+        status = await self.redis.get_session_status(session_id)
         if not status:
             raise SessionNotFoundError(f"Session 不存在或已过期: session_id={session_id}")
         
         # 设置停止标志（Agent 会检测并停止执行）
-        self.redis.set_stop_flag(session_id)
+        await self.redis.set_stop_flag(session_id)
         
         # 更新 Session 状态为 stopped
-        self.redis.update_session_status(
+        await self.redis.update_session_status(
             session_id,
             status="stopped",
             last_heartbeat=datetime.now().isoformat()
@@ -237,24 +243,26 @@ class SessionService:
             "stopped_at": datetime.now().isoformat()
         }
     
-    def cleanup_inactive_sessions(self) -> int:
+    async def cleanup_inactive_sessions(self) -> int:
         """
-        清理不活跃的 Session
+        清理不活跃的 Session（带分布式锁，防重入）
         
         Returns:
-            清理的 Session 数量
+            清理的 Session 数量，-1 表示未获取到锁
         """
-        # 清理 Redis 中超时的 Session
-        timeout_cleaned = self.redis.cleanup_timeout_sessions()
+        # 使用带锁的清理方法
+        result = await self.redis.cleanup_with_lock()
         
-        if timeout_cleaned:
-            logger.info(f"🧹 清理了 {timeout_cleaned} 个超时的 Session")
+        if result > 0:
+            logger.info(f"🧹 清理了 {result} 个超时的 Session")
+        elif result == -1:
+            logger.debug("⏭️ 清理任务已在运行中，跳过")
         
-        return timeout_cleaned
+        return result
     
     # ==================== Session 状态查询 ====================
     
-    def get_session_status(self, session_id: str) -> Dict[str, Any]:
+    async def get_session_status(self, session_id: str) -> Dict[str, Any]:
         """
         获取 Session 状态（from Redis）
         
@@ -267,14 +275,14 @@ class SessionService:
         Raises:
             SessionNotFoundError: Session 不存在或已过期
         """
-        status = self.redis.get_session_status(session_id)
+        status = await self.redis.get_session_status(session_id)
         
         if not status:
             raise SessionNotFoundError(f"Session 不存在或已过期: session_id={session_id}")
         
         return status
     
-    def get_session_info(self, session_id: str) -> Dict[str, Any]:
+    async def get_session_info(self, session_id: str) -> Dict[str, Any]:
         """
         获取 Session 信息（从 Redis）
         
@@ -287,10 +295,9 @@ class SessionService:
         Raises:
             SessionNotFoundError: Session 不存在
         """
-        # 直接从 Redis 获取
-        return self.get_session_status(session_id)
+        return await self.get_session_status(session_id)
     
-    def list_sessions(self) -> List[Dict[str, Any]]:
+    async def list_sessions(self) -> List[Dict[str, Any]]:
         """
         列出所有活跃 Session（从内存池）
         
@@ -300,7 +307,7 @@ class SessionService:
         sessions = []
         for session_id in self.agent_pool.keys():
             try:
-                status = self.redis.get_session_status(session_id)
+                status = await self.redis.get_session_status(session_id)
                 if status:
                     sessions.append({
                         "session_id": session_id,
@@ -313,7 +320,7 @@ class SessionService:
     
     # ==================== Session 事件管理 ====================
     
-    def get_session_events(
+    async def get_session_events(
         self,
         session_id: str,
         after_id: Optional[int] = None,
@@ -334,11 +341,11 @@ class SessionService:
             SessionNotFoundError: Session 不存在
         """
         # 检查 Session 是否存在
-        if not self.redis.get_session_status(session_id):
+        if not await self.redis.get_session_status(session_id):
             raise SessionNotFoundError(f"Session 不存在: session_id={session_id}")
         
         # 获取事件
-        events = self.redis.get_events(
+        events = await self.redis.get_events(
             session_id=session_id,
             after_id=after_id,
             limit=limit
@@ -346,7 +353,7 @@ class SessionService:
         
         return events
     
-    def get_user_sessions(self, user_id: str) -> List[Dict[str, Any]]:
+    async def get_user_sessions(self, user_id: str) -> List[Dict[str, Any]]:
         """
         获取用户的所有活跃 Session
         
@@ -356,11 +363,11 @@ class SessionService:
         Returns:
             Session 列表（包含详细信息）
         """
-        return self.redis.get_user_sessions_detail(user_id)
+        return await self.redis.get_user_sessions_detail(user_id)
     
     # ==================== 辅助方法 ====================
     
-    def log_session_status(self, session_id: str, conversation_id: Optional[str] = None) -> None:
+    async def log_session_status(self, session_id: str, conversation_id: Optional[str] = None) -> None:
         """
         输出 Session 状态信息
         
@@ -369,7 +376,7 @@ class SessionService:
             conversation_id: Conversation ID（可选）
         """
         try:
-            status = self.redis.get_session_status(session_id)
+            status = await self.redis.get_session_status(session_id)
             
             if status:
                 logger.info(
@@ -399,4 +406,3 @@ def get_session_service(
             default_workspace=default_workspace
         )
     return _default_service
-

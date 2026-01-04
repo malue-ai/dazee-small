@@ -476,15 +476,18 @@ Plan不是固定的，而是根据**任务类型**动态生成。
 **复杂任务的第一个工具调用必须是 plan_todo.create_plan()**
 
 1. **创建Plan**
-   ```
+   ```json
    plan_todo.create_plan({
      "goal": "任务目标",
      "steps": [
-       {"action": "步骤描述", "capability": "能力标签"},
-       ...
+       {"action": "步骤1的具体描述", "capability": "web_search"},
+       {"action": "步骤2的具体描述", "capability": "ppt_generation"}
      ]
    })
    ```
+   ⚠️ **steps 必须是对象数组**，每个对象包含 `action`（必需）和 `capability`（可选）。
+   ❌ 错误: `steps: ["步骤1", "步骤2"]`（字符串数组）
+   ✅ 正确: `steps: [{"action": "步骤1"}, {"action": "步骤2"}]`（对象数组）
 
 2. **执行过程中**
    - 每步开始前: `plan_todo.get_plan()` 读取状态

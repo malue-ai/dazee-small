@@ -20,7 +20,7 @@ from pathlib import Path
 from logger import get_logger
 from utils.ragie_client import get_ragie_client, RagieClient
 from utils.knowledge_store import get_knowledge_store, KnowledgeStore
-from models.knowledge import (
+from models.ragie import (
     DocumentInfo,
     ChunkInfo,
     UserKnowledgeStats,
@@ -108,30 +108,32 @@ class KnowledgeService:
         try:
             logger.info(f"📤 上传文档: user_id={user_id}, filename={filename}")
             
-            # 1. 获取或创建用户的 Partition
+            # 1. 确保用户记录存在（用于本地存储）
             user = self.knowledge_store.get_or_create_user(user_id)
-            partition_id = user["partition_id"]
             
-            # 2. 准备元数据
+            # 2. 准备元数据（用 metadata.user_id 区分用户，不使用 partition）
+            # 注意：由于 Ragie 账户限制，我们不使用自定义 Partition，
+            # 而是通过 metadata.user_id 来区分不同用户的文档
             doc_metadata = metadata or {}
             doc_metadata.update({
-                "user_id": user_id,
+                "user_id": user_id,  # 关键：用 metadata 区分用户
                 "filename": filename,
                 "uploaded_at": datetime.now().isoformat()
             })
             
-            # 3. 调用 Ragie API 创建文档
+            # 3. 调用 Ragie API 创建文档（不指定 partition，使用 default）
             ragie_response = await self.ragie_client.create_document_from_file(
                 file_path=file_path,
-                partition=partition_id,
+                partition=None,  # 使用 default partition
                 metadata=doc_metadata,
                 mode=mode
             )
             
             document_id = ragie_response.get("id")
             status = ragie_response.get("status", "pending")
+            partition_id = ragie_response.get("partition", "default")
             
-            logger.info(f"✅ 文档已创建: document_id={document_id}, status={status}")
+            logger.info(f"✅ 文档已创建: document_id={document_id}, status={status}, partition={partition_id}")
             
             # 4. 存储到本地 knowledge_store
             self.knowledge_store.add_document(
@@ -147,7 +149,7 @@ class KnowledgeService:
                 "status": status,
                 "filename": filename,
                 "user_id": user_id,
-                "partition_id": partition_id
+                "partition_id": partition_id  # 返回实际使用的 partition
             }
         
         except Exception as e:
@@ -181,23 +183,22 @@ class KnowledgeService:
         try:
             logger.info(f"📤 从 URL 上传文档: user_id={user_id}, url={url}")
             
-            # 1. 获取或创建用户的 Partition
+            # 1. 确保用户记录存在
             user = self.knowledge_store.get_or_create_user(user_id)
-            partition_id = user["partition_id"]
             
-            # 2. 准备元数据
+            # 2. 准备元数据（用 metadata.user_id 区分用户）
             doc_metadata = metadata or {}
             doc_metadata.update({
-                "user_id": user_id,
+                "user_id": user_id,  # 关键：用 metadata 区分用户
                 "source_url": url,
                 "uploaded_at": datetime.now().isoformat()
             })
             
-            # 3. 调用 Ragie API
+            # 3. 调用 Ragie API（不指定 partition，使用 default）
             ragie_response = await self.ragie_client.create_document_from_url(
                 url=url,
                 name=name,
-                partition=partition_id,
+                partition=None,  # 使用 default partition
                 metadata=doc_metadata,
                 mode=mode
             )
@@ -205,6 +206,7 @@ class KnowledgeService:
             document_id = ragie_response.get("id")
             status = ragie_response.get("status", "pending")
             filename = name or ragie_response.get("name", url.split("/")[-1])
+            partition_id = ragie_response.get("partition", "default")
             
             logger.info(f"✅ 文档已创建: document_id={document_id}, status={status}")
             
@@ -222,7 +224,7 @@ class KnowledgeService:
                 "status": status,
                 "filename": filename,
                 "user_id": user_id,
-                "partition_id": partition_id
+                "partition_id": partition_id  # 从响应中获取
             }
         
         except Exception as e:
@@ -254,29 +256,29 @@ class KnowledgeService:
         try:
             logger.info(f"📤 从文本创建文档: user_id={user_id}, name={name}")
             
-            # 1. 获取或创建用户的 Partition
+            # 1. 确保用户记录存在
             user = self.knowledge_store.get_or_create_user(user_id)
-            partition_id = user["partition_id"]
             
-            # 2. 准备元数据
+            # 2. 准备元数据（用 metadata.user_id 区分用户）
             doc_metadata = metadata or {}
             doc_metadata.update({
-                "user_id": user_id,
+                "user_id": user_id,  # 关键：用 metadata 区分用户
                 "source": "text",
                 "uploaded_at": datetime.now().isoformat(),
                 "content_length": len(text)
             })
             
-            # 3. 调用 Ragie API
+            # 3. 调用 Ragie API（不指定 partition，使用 default）
             ragie_response = await self.ragie_client.create_document_from_raw(
                 text=text,
                 name=name,
-                partition=partition_id,
+                partition=None,  # 使用 default partition
                 metadata=doc_metadata
             )
             
             document_id = ragie_response.get("id")
             status = ragie_response.get("status", "pending")
+            partition_id = ragie_response.get("partition", "default")
             
             logger.info(f"✅ 文档已创建: document_id={document_id}, status={status}")
             
@@ -294,7 +296,7 @@ class KnowledgeService:
                 "status": status,
                 "filename": name,
                 "user_id": user_id,
-                "partition_id": partition_id
+                "partition_id": partition_id  # 从响应中获取
             }
         
         except Exception as e:
@@ -329,9 +331,8 @@ class KnowledgeService:
         """
         logger.info(f"📤 批量上传文档: user_id={user_id}, count={len(urls)}")
         
-        # 1. 获取或创建用户的 Partition
+        # 1. 确保用户记录存在
         user = self.knowledge_store.get_or_create_user(user_id)
-        partition_id = user["partition_id"]
         
         # 2. 批量上传（限制并发数）
         semaphore = asyncio.Semaphore(max_concurrent)
@@ -341,7 +342,7 @@ class KnowledgeService:
                 try:
                     doc_metadata = metadata.copy() if metadata else {}
                     doc_metadata.update({
-                        "user_id": user_id,
+                        "user_id": user_id,  # 关键：用 metadata 区分用户
                         "source_url": url,
                         "uploaded_at": datetime.now().isoformat(),
                         "batch": True
@@ -349,7 +350,7 @@ class KnowledgeService:
                     
                     ragie_response = await self.ragie_client.create_document_from_url(
                         url=url,
-                        partition=partition_id,
+                        partition=None,  # 使用 default partition
                         metadata=doc_metadata,
                         mode=mode
                     )
@@ -406,7 +407,8 @@ class KnowledgeService:
         user_id: str,
         status_filter: Optional[str] = None,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
+        refresh: bool = False
     ) -> Dict[str, Any]:
         """
         列出用户的所有文档
@@ -416,17 +418,59 @@ class KnowledgeService:
             status_filter: 状态过滤（可选）
             limit: 每页数量
             offset: 偏移量
+            refresh: 是否从 Ragie API 刷新处理中的文档状态
             
         Returns:
             {
                 "user_id": str,
                 "total": int,
-                "documents": List[DocumentInfo]
+                "documents": List[DocumentInfo],
+                "has_processing": bool  # 是否有处理中的文档
             }
         """
-        logger.info(f"📋 查询用户文档: user_id={user_id}, status={status_filter}, limit={limit}, offset={offset}")
+        logger.info(f"📋 查询用户文档: user_id={user_id}, status={status_filter}, limit={limit}, offset={offset}, refresh={refresh}")
         
         all_documents = self.knowledge_store.get_user_documents(user_id)
+        
+        # 定义处理中的状态
+        PROCESSING_STATUSES = {"pending", "partitioning", "partitioned", "refined", "chunked", "indexed", "summary_indexed", "keyword_indexed"}
+        
+        # 如果 refresh=True，从 Ragie 刷新所有处理中文档的状态
+        docs_to_remove = []  # 需要删除的无效文档
+        
+        if refresh:
+            processing_docs = [doc for doc in all_documents if doc.get("status") in PROCESSING_STATUSES]
+            
+            if processing_docs:
+                logger.info(f"🔄 刷新 {len(processing_docs)} 个处理中文档的状态...")
+                
+                for doc in processing_docs:
+                    try:
+                        doc_id = doc.get("document_id")
+                        ragie_doc = await self.ragie_client.get_document(doc_id)
+                        new_status = ragie_doc.get("status")
+                        
+                        # 更新本地缓存
+                        self.knowledge_store.update_document_status(user_id, doc_id, new_status)
+                        doc["status"] = new_status  # 同时更新内存中的状态
+                        
+                        logger.debug(f"  ✅ {doc_id}: {doc.get('status')} → {new_status}")
+                    except Exception as e:
+                        error_msg = str(e)
+                        # 如果 Ragie 返回 404，说明文档已不存在，标记删除
+                        if "404" in error_msg or "not found" in error_msg.lower():
+                            logger.warning(f"  🗑️ 文档 {doc.get('document_id')} 在 Ragie 中不存在，将从本地删除")
+                            docs_to_remove.append(doc.get("document_id"))
+                        else:
+                            logger.warning(f"  ⚠️ 刷新文档 {doc.get('document_id')} 状态失败: {error_msg}")
+        
+        # 删除在 Ragie 中不存在的文档
+        for doc_id in docs_to_remove:
+            self.knowledge_store.delete_document(user_id, doc_id)
+            all_documents = [doc for doc in all_documents if doc.get("document_id") != doc_id]
+        
+        if docs_to_remove:
+            logger.info(f"🗑️ 已清理 {len(docs_to_remove)} 个无效文档")
         
         # 状态过滤
         if status_filter:
@@ -436,27 +480,49 @@ class KnowledgeService:
         total = len(all_documents)
         documents = all_documents[offset:offset + limit]
         
-        # 转换为 DocumentInfo 模型
-        document_infos = [
-            DocumentInfo(
-                document_id=doc.get("document_id", ""),
-                name=doc.get("filename", ""),
-                status=DocumentStatus(doc.get("status", "pending")),
-                user_id=user_id,
-                partition_id=doc.get("partition_id", ""),
-                metadata=doc.get("metadata"),
-                created_at=doc.get("created_at", ""),
-                updated_at=doc.get("updated_at"),
-                file_size=doc.get("file_size"),
-                chunk_count=doc.get("chunk_count")
+        # 检查是否有处理中的文档
+        has_processing = any(doc.get("status") in PROCESSING_STATUSES for doc in all_documents)
+        
+        # 转换为 DocumentInfo 模型，并为有 S3 文件的文档生成预签名 URL
+        from utils import get_s3_uploader
+        s3_uploader = get_s3_uploader()
+        
+        document_infos = []
+        for doc in documents:
+            metadata = doc.get("metadata") or {}
+            
+            # 如果有 s3_key，生成预签名 URL（同步调用，无需 await）
+            if "s3_key" in metadata:
+                try:
+                    # 从数据库的永久 s3_key 生成临时预签名 URL
+                    presigned_url = s3_uploader.get_presigned_url(
+                        metadata["s3_key"],
+                        expires_in=3600  # 1小时有效期
+                    )
+                    # 将预签名 URL 添加到 metadata，前端可直接使用
+                    metadata["s3_presigned_url"] = presigned_url
+                    logger.debug(f"✅ 已生成 S3 预签名 URL: {doc.get('document_id')}")
+                except Exception as e:
+                    logger.warning(f"⚠️ 生成 S3 预签名 URL 失败: {str(e)}")
+            
+            document_infos.append(
+                DocumentInfo(
+                    document_id=doc.get("document_id", ""),
+                    filename=doc.get("name", doc.get("filename", "未知文件")),  # Ragie 返回 name 字段
+                    status=DocumentStatus(doc.get("status", "pending")),
+                    user_id=user_id,
+                    partition_id=doc.get("partition_id"),
+                    metadata=metadata,
+                    created_at=doc.get("created_at"),
+                    updated_at=doc.get("updated_at")
+                )
             )
-            for doc in documents
-        ]
         
         return {
             "user_id": user_id,
             "total": total,
-            "documents": document_infos
+            "documents": document_infos,
+            "has_processing": has_processing
         }
     
     async def get_document_status(
@@ -493,15 +559,13 @@ class KnowledgeService:
             
             return DocumentInfo(
                 document_id=document_id,
-                name=ragie_doc.get("name", ""),
+                filename=ragie_doc.get("name", "未知文件"),  # 修正：使用 filename
                 status=DocumentStatus(new_status),
                 user_id=user_id,
-                partition_id=ragie_doc.get("partition", ""),
+                partition_id=ragie_doc.get("partition"),
                 metadata=ragie_doc.get("metadata"),
-                created_at=ragie_doc.get("created_at", ""),
-                updated_at=ragie_doc.get("updated_at"),
-                file_size=ragie_doc.get("file_size"),
-                chunk_count=ragie_doc.get("chunk_count")
+                created_at=ragie_doc.get("created_at"),
+                updated_at=ragie_doc.get("updated_at")
             )
         else:
             # 从本地缓存读取
@@ -574,7 +638,7 @@ class KnowledgeService:
         document_id: str
     ) -> None:
         """
-        删除文档
+        删除文档（从 Ragie、S3 和本地缓存）
         
         Args:
             user_id: 用户ID
@@ -583,20 +647,203 @@ class KnowledgeService:
         Raises:
             DocumentProcessingError: 删除失败
         """
+        from utils import get_s3_uploader
+        
         try:
             logger.info(f"🗑️ 删除文档: user_id={user_id}, document_id={document_id}")
             
-            # 从 Ragie 删除
-            await self.ragie_client.delete_document(document_id)
+            # 1. 获取文档信息（用于获取 S3 key）
+            try:
+                doc_info = await self.get_document_status(user_id, document_id, refresh=False)
+                s3_key = doc_info.metadata.get("s3_key") if doc_info.metadata else None
+            except Exception as e:
+                logger.warning(f"⚠️ 获取文档信息失败，将跳过: {str(e)}")
+                s3_key = None
             
-            # 从本地缓存删除
+            # 2. 从 Ragie 删除（允许失败，因为可能已经不存在）
+            try:
+                await self.ragie_client.delete_document(document_id)
+                logger.info(f"✅ 已从 Ragie 删除: document_id={document_id}")
+            except Exception as e:
+                error_msg = str(e)
+                if "404" in error_msg or "not found" in error_msg.lower():
+                    logger.warning(f"⚠️ 文档在 Ragie 中不存在，跳过: document_id={document_id}")
+                else:
+                    logger.error(f"❌ 从 Ragie 删除失败: {str(e)}")
+                    # 不抛出异常，继续删除 S3 和本地缓存
+            
+            # 3. 从 S3 删除（如果有）
+            if s3_key:
+                try:
+                    s3_uploader = get_s3_uploader()
+                    await s3_uploader.delete_file(s3_key)
+                    logger.info(f"✅ 已从 S3 删除: s3_key={s3_key}")
+                except Exception as e:
+                    logger.warning(f"⚠️ 从 S3 删除失败: {str(e)}")
+            
+            # 4. 从本地缓存删除
             self.knowledge_store.delete_document(user_id, document_id)
+            logger.info(f"✅ 已从本地缓存删除: document_id={document_id}")
             
-            logger.info(f"✅ 文档已删除: document_id={document_id}")
+            logger.info(f"✅ 文档删除完成: document_id={document_id}")
         
         except Exception as e:
             logger.error(f"❌ 删除文档失败: {str(e)}", exc_info=True)
             raise DocumentProcessingError(f"删除文档失败: {str(e)}") from e
+    
+    async def get_document_content(
+        self,
+        user_id: str,
+        document_id: str
+    ) -> str:
+        """
+        获取文档的原始内容
+        
+        Args:
+            user_id: 用户ID
+            document_id: 文档ID
+            
+        Returns:
+            文档的原始文本内容
+            
+        Raises:
+            DocumentNotFoundError: 文档不存在
+        """
+        try:
+            logger.info(f"📄 获取文档内容: user_id={user_id}, document_id={document_id}")
+            
+            result = await self.ragie_client.get_document_content(document_id)
+            content = result.get("content", "")
+            
+            logger.info(f"✅ 已获取文档内容: document_id={document_id}, length={len(content)}")
+            return content
+        
+        except Exception as e:
+            logger.error(f"❌ 获取文档内容失败: {str(e)}", exc_info=True)
+            raise DocumentNotFoundError(f"获取文档内容失败: {str(e)}") from e
+    
+    async def get_document_chunks(
+        self,
+        user_id: str,
+        document_id: str,
+        limit: int = 100
+    ) -> Dict[str, Any]:
+        """
+        获取文档的所有分块
+        
+        Args:
+            user_id: 用户ID
+            document_id: 文档ID
+            limit: 每页数量
+            
+        Returns:
+            {
+                "total": int,
+                "chunks": List[Dict]  # 包含 id, text, metadata 等
+            }
+            
+        Raises:
+            DocumentNotFoundError: 文档不存在
+        """
+        try:
+            logger.info(f"🧩 获取文档分块: user_id={user_id}, document_id={document_id}")
+            
+            result = await self.ragie_client.get_document_chunks(document_id, limit=limit)
+            chunks = result.get("chunks", [])
+            total = result.get("pagination", {}).get("total_count", len(chunks))
+            
+            logger.info(f"✅ 已获取文档分块: document_id={document_id}, count={len(chunks)}")
+            
+            return {
+                "total": total,
+                "chunks": chunks
+            }
+        
+        except Exception as e:
+            logger.error(f"❌ 获取文档分块失败: {str(e)}", exc_info=True)
+            raise DocumentNotFoundError(f"获取文档分块失败: {str(e)}") from e
+    
+    async def download_document_source(
+        self,
+        user_id: str,
+        document_id: str
+    ) -> bytes:
+        """
+        下载文档的原始文件
+        
+        Args:
+            user_id: 用户ID
+            document_id: 文档ID
+            
+        Returns:
+            文件的二进制内容
+            
+        Raises:
+            DocumentNotFoundError: 文档不存在
+        """
+        try:
+            logger.info(f"⬇️ 下载文档源文件: user_id={user_id}, document_id={document_id}")
+            
+            file_bytes = await self.ragie_client.get_document_source(document_id)
+            
+            logger.info(f"✅ 已下载文档: document_id={document_id}, size={len(file_bytes)} bytes")
+            return file_bytes
+        
+        except Exception as e:
+            logger.error(f"❌ 下载文档失败: {str(e)}", exc_info=True)
+            raise DocumentNotFoundError(f"下载文档失败: {str(e)}") from e
+    
+    async def get_s3_download_url(
+        self,
+        user_id: str,
+        document_id: str,
+        expiration: int = 3600
+    ) -> Optional[str]:
+        """
+        获取文档的 S3 预签名下载链接
+        
+        设计说明：
+        - 数据库存储永久的 s3_key
+        - 调用 S3Uploader.get_presigned_url() 动态生成临时下载链接
+        - 返回的 URL 可以直接在浏览器中访问/下载
+        
+        Args:
+            user_id: 用户ID
+            document_id: 文档ID
+            expiration: 链接有效期（秒），默认 3600 秒（1小时）
+            
+        Returns:
+            预签名 URL（可直接访问的 HTTPS 链接），如果文档不在 S3 则返回 None
+            
+        Raises:
+            DocumentNotFoundError: 文档不存在
+        """
+        from utils import get_s3_uploader
+        
+        try:
+            logger.info(f"🔗 生成 S3 下载链接: user_id={user_id}, document_id={document_id}")
+            
+            # 获取文档信息
+            doc_info = await self.get_document_status(user_id, document_id, refresh=False)
+            
+            # 检查 metadata 中是否有 s3_key
+            if not doc_info.metadata or "s3_key" not in doc_info.metadata:
+                logger.warning(f"⚠️ 文档不在 S3: document_id={document_id}")
+                return None
+            
+            s3_key = doc_info.metadata["s3_key"]  # 从数据库获取永久的 s3_key
+            
+            # 生成预签名 URL（同步调用，无需 await）
+            s3_uploader = get_s3_uploader()
+            presigned_url = s3_uploader.get_presigned_url(s3_key, expires_in=expiration)
+            
+            logger.info(f"✅ S3 链接已生成: document_id={document_id}, expires_in={expiration}s")
+            logger.debug(f"   URL 预览: {presigned_url[:100]}...")
+            return presigned_url
+        
+        except Exception as e:
+            logger.error(f"❌ 生成 S3 链接失败: {str(e)}", exc_info=True)
+            raise DocumentNotFoundError(f"生成 S3 链接失败: {str(e)}") from e
     
     # ==================== 知识库检索 ====================
     
@@ -630,19 +877,22 @@ class KnowledgeService:
         """
         logger.info(f"🔍 知识库检索: user_id={user_id}, query={query[:50]}..., top_k={top_k}")
         
-        # 1. 获取用户的 Partition
+        # 1. 确保用户存在
         user = self.knowledge_store.get_user(user_id)
         if not user:
             raise UserNotFoundError(f"用户不存在: user_id={user_id}")
         
-        partition_id = user["partition_id"]
+        # 2. 使用 metadata 过滤用户的文档（而不是 partition）
+        # 合并用户提供的 filters 和 user_id 过滤
+        combined_filters = filters.copy() if filters else {}
+        combined_filters["user_id"] = {"$eq": user_id}  # Ragie metadata 过滤语法
         
-        # 2. 调用 Ragie Retrieval API
+        # 3. 调用 Ragie Retrieval API
         retrieval_result = await self.ragie_client.retrieve(
             query=query,
-            partition=partition_id,
+            partition=None,  # 使用 default partition
             top_k=top_k,
-            filters=filters
+            filters=combined_filters
         )
         
         scored_chunks = retrieval_result.get("scored_chunks", [])
@@ -664,7 +914,7 @@ class KnowledgeService:
         return {
             "query": query,
             "user_id": user_id,
-            "partition_id": partition_id,
+            "partition_id": "default",  # 使用 default partition
             "total": len(chunks),
             "chunks": chunks
         }
@@ -712,13 +962,11 @@ class KnowledgeService:
         
         return UserKnowledgeStats(
             user_id=user_id,
-            partition_id=user["partition_id"],
             total_documents=total_documents,
             ready_documents=ready_documents,
-            pending_documents=pending_documents,
+            processing_documents=pending_documents,  # 修正字段名
             failed_documents=failed_documents,
-            total_chunks=total_chunks,
-            storage_size=storage_size if storage_size > 0 else None
+            total_size=storage_size if storage_size > 0 else 0  # 修正字段名，不能为 None
         )
 
 

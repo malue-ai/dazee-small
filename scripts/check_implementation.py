@@ -174,7 +174,7 @@ def check_documentation():
     docs_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "docs")
     
     required_docs = [
-        "04-SESSION-RECONNECT-DESIGN.md",
+        "04-SSE-CONNECTION-MANAGEMENT.md",
         "CHATSERVICE_REFACTOR.md",
         "ROUTER_REFACTOR.md",
         "QUICK_START.md",

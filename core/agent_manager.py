@@ -18,8 +18,7 @@ from enum import Enum
 
 # 导入现有组件
 from .agent import SimpleAgent
-from .capability_registry import CapabilityRegistry
-from .capability_router import CapabilityRouter
+from .tool.capability import CapabilityRegistry, CapabilityRouter
 from .memory import MemoryManager
 
 

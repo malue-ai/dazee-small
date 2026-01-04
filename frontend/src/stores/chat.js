@@ -239,8 +239,14 @@ export const useChatStore = defineStore('chat', {
 
     /**
      * 使用 SSE 流式发送消息（支持断线重连）
+     * 
+     * @param {string} content - 消息内容
+     * @param {string|null} conversationId - 对话ID
+     * @param {Function} onEvent - 事件回调
+     * @param {Object} options - 可选配置
+     * @param {string[]} options.backgroundTasks - 后台任务列表，如 ['title_generation']
      */
-    async sendMessageStream(content, conversationId = null, onEvent) {
+    async sendMessageStream(content, conversationId = null, onEvent, options = {}) {
       const userId = this.initUserId()
 
       return new Promise((resolve, reject) => {
@@ -253,6 +259,11 @@ export const useChatStore = defineStore('chat', {
         
         if (conversationId) {
           requestBody.conversation_id = conversationId
+        }
+        
+        // 🆕 添加后台任务参数
+        if (options.backgroundTasks && options.backgroundTasks.length > 0) {
+          requestBody.background_tasks = options.backgroundTasks
         }
 
         // 使用 fetch 创建 SSE 连接

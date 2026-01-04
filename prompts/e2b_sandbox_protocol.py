@@ -89,6 +89,70 @@ response = requests.get('https://api.github.com/users/octocat')
 data = response.json()
 print(data['name'], data['public_repos'])
 ```
+
+---
+
+## E2B Vibe Coding（前端应用生成）
+
+### ⚠️ 重要：必须声明依赖！
+
+当使用 `e2b_vibe_coding` 创建应用时，**必须在 requirements 参数中声明所有非标准依赖**。
+
+### 预装包（无需声明）
+
+| 技术栈 | 预装包 |
+|-------|--------|
+| streamlit | streamlit, pandas, numpy, matplotlib, plotly |
+| gradio | gradio, numpy, pandas |
+| nextjs | （npm 依赖） |
+| vue | （npm 依赖） |
+
+### ⚠️ 额外依赖必须声明！
+
+如果你的代码使用了预装包之外的库（如 `audio_recorder_streamlit`、`openai`、`langchain` 等），
+**必须在 requirements 参数中声明**，否则会报 `ModuleNotFoundError`！
+
+### 正确的调用格式
+
+```json
+e2b_vibe_coding({
+  "action": "create",
+  "stack": "streamlit",
+  "description": "ASR语音识别应用",
+  "code": "import streamlit as st\\nfrom audio_recorder_streamlit import audio_recorder\\n...",
+  "requirements": ["audio_recorder_streamlit", "openai-whisper", "soundfile"]
+})
+```
+
+### ❌ 错误示例（会导致 ModuleNotFoundError）
+
+```json
+e2b_vibe_coding({
+  "action": "create",
+  "stack": "streamlit",
+  "code": "from audio_recorder_streamlit import audio_recorder\\n..."
+  // ❌ 缺少 requirements 参数！
+})
+```
+
+### ✅ 正确示例
+
+```json
+e2b_vibe_coding({
+  "action": "create",
+  "stack": "streamlit",
+  "code": "from audio_recorder_streamlit import audio_recorder\\n...",
+  "requirements": ["audio_recorder_streamlit"]  // ✅ 声明额外依赖
+})
+```
+
+### 如何判断需要哪些依赖？
+
+检查代码中的 `import` 语句：
+1. 标准库（os, json, datetime 等）→ 无需声明
+2. 预装包（streamlit, pandas, numpy 等）→ 无需声明
+3. 其他第三方包 → **必须在 requirements 中声明**
+
 """
 
 

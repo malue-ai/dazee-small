@@ -5,54 +5,59 @@ Agent V3.6 Core Module
 - SimpleAgent: 主Agent类
 - CapabilityRegistry: 能力注册表
 - CapabilityRouter: 能力路由器
-- SkillsManager: Skills管理器
+- SkillLoader: Skills 内容加载器
 - MemoryManager: 记忆管理
-- PlanningManager: 规划管理
 - LLM Service: LLM统一封装
 - EventManager: 事件管理（SSE/WebSocket 通用协议）
 - Context: 上下文管理
 """
 
-# Agent
+# Agent（新架构）
 from .agent import SimpleAgent, create_simple_agent
 
-# 能力路由
-from .capability_registry import (
+# 能力路由（从新路径导入）
+from .tool.capability import (
     CapabilityRegistry,
     Capability,
     CapabilityType,
-    create_capability_registry
-)
-from .capability_router import (
+    create_capability_registry,
     CapabilityRouter,
     RoutingResult,
     create_capability_router,
-    extract_keywords
-)
-
-# Skills管理
-from .skills_manager import (
-    SkillsManager,
+    extract_keywords,
+    # Skills 加载器
+    SkillLoader,
     SkillInfo,
-    create_skills_manager
+    create_skill_loader
 )
 
-# 记忆管理
+# 记忆管理（新架构 - 文件夹模块）
 from .memory import (
-    MemoryManager,
+    # 基础类型
+    MemoryScope,
+    StorageBackend,
+    MemoryConfig,
+    # 会话级记忆
     WorkingMemory,
+    create_working_memory,
+    # E2B 记忆
+    E2BSandboxSession,
+    E2BMemory,
+    create_e2b_memory,
+    # 用户级记忆
     EpisodicMemory,
+    create_episodic_memory,
+    PreferenceMemory,
+    create_preference_memory,
+    # 系统级记忆
     SkillMemory,
-    create_memory_manager
-)
-
-# 规划管理
-from .planning import (
-    PlanningManager,
-    TaskPlan,
-    Task,
-    TaskStatus,
-    create_planning_manager
+    create_skill_memory,
+    CacheMemory,
+    create_cache_memory,
+    # 统一管理器
+    MemoryManager,
+    create_memory_manager,
+    create_user_memory_manager,
 )
 
 # LLM Service（从 llm 模块导入）
@@ -81,10 +86,12 @@ from .events import (
     SystemEventManager,
 )
 
-# 上下文管理
+# 上下文管理（新架构）
 from .context import (
     Context,
-    create_context
+    create_context,
+    RuntimeContext,
+    create_runtime_context
 )
 
 
@@ -103,24 +110,31 @@ __all__ = [
     "create_capability_router",
     "extract_keywords",
     
-    # Skills管理
-    "SkillsManager",
+    # Skills 加载器
+    "SkillLoader",
     "SkillInfo",
-    "create_skills_manager",
+    "create_skill_loader",
     
     # 记忆管理
-    "MemoryManager",
+    "MemoryScope",
+    "StorageBackend",
+    "MemoryConfig",
     "WorkingMemory",
+    "create_working_memory",
+    "E2BSandboxSession",
+    "E2BMemory",
+    "create_e2b_memory",
     "EpisodicMemory",
+    "create_episodic_memory",
+    "PreferenceMemory",
+    "create_preference_memory",
     "SkillMemory",
+    "create_skill_memory",
+    "CacheMemory",
+    "create_cache_memory",
+    "MemoryManager",
     "create_memory_manager",
-    
-    # 规划管理
-    "PlanningManager",
-    "TaskPlan",
-    "Task",
-    "TaskStatus",
-    "create_planning_manager",
+    "create_user_memory_manager",
     
     # LLM Service
     "BaseLLMService",
@@ -147,5 +161,7 @@ __all__ = [
     # 上下文管理
     "Context",
     "create_context",
+    "RuntimeContext",
+    "create_runtime_context",
 ]
 

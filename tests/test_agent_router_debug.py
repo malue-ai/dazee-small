@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 os.environ['E2B_API_KEY'] = 'e2b_83eb67de2fb85d4a8a87ddfe6fca5a89e9f7cc95'
 
 from core import create_simple_agent, create_event_manager
-from core.capability_router import select_tools_for_capabilities
+from core.tool.selector import ToolSelector
 
 # 简单EventStorage
 class SimpleEventStorage:
@@ -53,17 +53,15 @@ context = {
 }
 
 print(f"\n需要能力: {required_capabilities}")
-print(f"调用 select_tools_for_capabilities...")
+print(f"调用 ToolSelector.select()...")
 
-selected_tools = select_tools_for_capabilities(
-    agent.capability_router,
-    required_capabilities=required_capabilities,
-    context=context
-)
+# 使用 ToolSelector 替代已废弃的 select_tools_for_capabilities
+selector = ToolSelector(agent.capability_registry)
+result = selector.select(required_capabilities, context=context)
 
-print(f"\nRouter返回工具数量: {len(selected_tools)}")
-for t in selected_tools:
+print(f"\nToolSelector 返回工具数量: {len(result.tools)}")
+for t in result.tools:
     print(f"  - {t.name} (type={t.type.value}, capabilities={t.capabilities})")
 
-print("\n✅ E2B工具在列表中:", any('e2b' in t.name for t in selected_tools))
+print("\n✅ E2B工具在列表中:", any('e2b' in name for name in result.tool_names))
 

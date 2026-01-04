@@ -1,36 +1,41 @@
-# Conversation History 历史对话管理
+# Conversation History 对话历史管理
 
 ## 概述
 
-本文档说明如何使用 `conversation_id` 来实现**多轮对话上下文延续**，包括历史消息的加载、保存和管理。
+本文档说明 Zenflux Agent 如何管理**多轮对话上下文**，包括历史消息的加载、保存和切换。
 
-## 核心概念
-
-### ID 体系
+## ID 体系
 
 ```
 User (用户)
-└── Conversation (对话线程)
-    ├── conversation_id: "conv_20231227_001"  # 数据库对话ID
-    └── Messages (消息列表)
-        ├── Message 1: {role: "user", content: "你好"}
-        ├── Message 2: {role: "assistant", content: "你好！有什么可以帮助你的吗？"}
-        ├── Message 3: {role: "user", content: "帮我生成PPT"}
-        └── Message 4: {role: "assistant", content: "好的，我来帮你..."}
+└── user_id: "user_1766974073604"
 
-Session (运行会话)
-└── session_id: "sess_20231227_120000_abc123"  # 临时运行ID
-    ├── 关联 conversation_id
-    └── 加载历史消息 (Message 1-3)
-    └── 执行新消息 (Message 4)
+Conversation (对话 - 持久化)
+└── conversation_id: "conv_20250104_abc123"
+    ├── 存储位置: SQLite 数据库
+    ├── 生命周期: 永久
+    └── Messages (消息列表)
+        ├── {role: "user", content: [...]}
+        ├── {role: "assistant", content: [...]}
+        └── ...
+
+Session (会话 - 临时)
+└── session_id: "sess_20250104_150000_abc123"
+    ├── 存储位置: Redis
+    ├── 生命周期: 1小时
+    ├── 关联: conversation_id
+    └── 用途: SSE 事件推送、Agent 运行状态
 ```
 
-### 区别
+### ID 对比
 
-| 名称 | 作用域 | 生命周期 | 存储位置 |
-|------|--------|----------|----------|
-| `conversation_id` | 对话线程 | 持久化（数据库） | PostgreSQL/SQLite |
-| `session_id` | 运行会话 | 临时（1小时） | Redis + 内存 |
+| 属性 | `conversation_id` | `session_id` |
+|------|-------------------|--------------|
+| **作用域** | 对话线程 | 单次执行 |
+| **生命周期** | 持久化 | 临时（1小时） |
+| **存储位置** | SQLite | Redis |
+| **用途** | 历史消息、上下文 | SSE 事件、状态追踪 |
+| **生成时机** | 首次发消息 | 每次请求 |
 
 ## 数据库设计
 
@@ -39,447 +44,286 @@ Session (运行会话)
 ```sql
 -- 对话表
 CREATE TABLE conversations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    conversation_id TEXT UNIQUE NOT NULL,  -- 对话唯一标识
+    id TEXT PRIMARY KEY,           -- UUID 格式
+    user_id TEXT NOT NULL,
     title TEXT DEFAULT '新对话',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    metadata TEXT,  -- JSON 格式元数据
-    FOREIGN KEY (user_id) REFERENCES users(id)
+    extra_data TEXT                -- JSON: {compression: {...}, ...}
 );
 
 -- 消息表
 CREATE TABLE messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    conversation_id TEXT NOT NULL,  -- 外键：关联对话
-    role TEXT NOT NULL,             -- user/assistant/system
-    content TEXT NOT NULL,          -- 消息内容
+    id TEXT PRIMARY KEY,           -- msg_xxxxxxxx 格式
+    conversation_id TEXT NOT NULL,
+    role TEXT NOT NULL,            -- user/assistant/system
+    content TEXT NOT NULL,         -- JSON 数组格式
+    status TEXT,                   -- JSON: {action, has_thinking, ...}
+    score REAL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    metadata TEXT,                  -- JSON 格式元数据
-    FOREIGN KEY (conversation_id) REFERENCES conversations(conversation_id)
+    extra_data TEXT,               -- JSON 元数据
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id)
 );
 
--- 索引（优化查询性能）
+-- 索引
 CREATE INDEX idx_messages_conversation ON messages(conversation_id);
-CREATE INDEX idx_messages_created_at ON messages(created_at);
 CREATE INDEX idx_conversations_user ON conversations(user_id);
 ```
 
-## 完整流程
+### Content 存储格式
 
-### 场景 1: 新建对话（首次）
+消息 `content` 字段使用 JSON 数组，完整保存所有内容块：
 
-```
-前端                    后端                       数据库
- │                       │                          │
- │ POST /chat            │                          │
- │ {                     │                          │
- │   message: "你好",     │                          │
- │   userId: "user_001", │                          │
- │   conversationId: null  # ← 没有 conversationId  │
- │ }                     │                          │
- │──────────────────────>│                          │
- │                       │                          │
- │                       │ create_session()         │
- │                       │ ├─ conversation_id = null│
- │                       │ └─ 不加载历史消息         │
- │                       │                          │
- │                       │ Agent.stream(message)    │
- │                       │ └─ 执行对话              │
- │                       │                          │
- │                       │ ❌ conversation_id 为空  │
- │                       │    不保存到数据库         │
- │                       │                          │
- │<──────────────────────│                          │
- │  SSE 事件流            │                          │
- │  (session_id 返回)    │                          │
+```json
+[
+  {"type": "thinking", "thinking": "让我思考一下...", "signature": "xxx"},
+  {"type": "text", "text": "这是回复内容"},
+  {"type": "tool_use", "id": "toolu_xxx", "name": "web_search", "input": {...}},
+  {"type": "tool_result", "tool_use_id": "toolu_xxx", "content": "搜索结果..."}
+]
 ```
 
-**结果**：
-- ✅ Agent 执行成功
-- ❌ 消息不保存到数据库
-- ⚠️ 下次请求无法续接上下文
+## 核心流程
 
-### 场景 2: 新建对话（提供 conversation_id）
+### 1. 完整请求流程
 
 ```
-前端                    后端                       数据库
- │                       │                          │
- │ POST /chat            │                          │
- │ {                     │                          │
- │   message: "你好",     │                          │
- │   userId: "user_001", │                          │
- │   conversationId: "conv_001"  # ← 前端生成        │
- │ }                     │                          │
- │──────────────────────>│                          │
- │                       │                          │
- │                       │ create_session()         │
- │                       │ └─ _load_conversation_history()
- │                       │    └─ MessageService.get_conversation_messages()
- │                       │       └─────────────────>│
- │                       │          SELECT * FROM messages
- │                       │          WHERE conversation_id = 'conv_001'
- │                       │       <──────────────────│
- │                       │          (空列表)         │
- │                       │                          │
- │                       │ Agent.stream(message)    │
- │                       │                          │
- │                       │ _run_agent_background()  │
- │                       │ ├─ 保存 user 消息        │
- │                       │ │  └─────────────────>  │
- │                       │ │     INSERT INTO messages
- │                       │ │     (conversation_id, role, content)
- │                       │ │     VALUES ('conv_001', 'user', '你好')
- │                       │ │                         │
- │                       │ └─ 保存 assistant 消息   │
- │                       │    └─────────────────>   │
- │                       │       INSERT INTO messages
- │                       │       ('conv_001', 'assistant', '你好！...')
- │                       │                          │
- │<──────────────────────│                          │
- │  SSE 事件流            │                          │
+前端                     ChatService              SessionService           Agent
+ │                           │                          │                    │
+ │ POST /chat               │                          │                    │
+ │ {message, userId,        │                          │                    │
+ │  conversationId}         │                          │                    │
+ │─────────────────────────>│                          │                    │
+ │                          │                          │                    │
+ │                          │ 1. 确保 Conversation 存在 │                    │
+ │                          │    (无则创建)             │                    │
+ │                          │                          │                    │
+ │                          │ 2. create_session()     │                    │
+ │                          │─────────────────────────>│                    │
+ │                          │                          │ 创建 Redis Session │
+ │                          │                          │ 创建 Agent 实例    │
+ │                          │<─────────────────────────│                    │
+ │                          │   (session_id, agent)   │                    │
+ │                          │                          │                    │
+ │                          │ 3. 保存用户消息到数据库   │                    │
+ │                          │                          │                    │
+ │                          │ 4. Context.load_messages()                   │
+ │                          │    (从数据库加载历史)     │                    │
+ │                          │                          │                    │
+ │                          │ 5. agent.chat()         │                    │
+ │                          │───────────────────────────────────────────────>│
+ │                          │                          │                    │
+ │<─ SSE 事件流 ─────────────│<──────────────────────────────────────────────│
+ │                          │                          │                    │
+ │                          │ 6. ChatEventHandler.finalize()               │
+ │                          │    (保存 assistant 消息)  │                    │
 ```
 
-**结果**：
-- ✅ Agent 执行成功
-- ✅ 消息保存到数据库
-- ✅ 下次请求可以续接上下文
-
-### 场景 3: 续接对话（多轮）
-
-```
-前端                    后端                       数据库
- │                       │                          │
- │ POST /chat            │                          │
- │ {                     │                          │
- │   message: "帮我生成PPT", │                       │
- │   userId: "user_001", │                          │
- │   conversationId: "conv_001"  # ← 相同的 ID     │
- │ }                     │                          │
- │──────────────────────>│                          │
- │                       │                          │
- │                       │ create_session()         │
- │                       │ └─ _load_conversation_history()
- │                       │    └─ MessageService.get_conversation_messages()
- │                       │       └─────────────────>│
- │                       │          SELECT * FROM messages
- │                       │          WHERE conversation_id = 'conv_001'
- │                       │          ORDER BY created_at ASC
- │                       │       <──────────────────│
- │                       │          [                │
- │                       │            {role: "user", content: "你好"},
- │                       │            {role: "assistant", content: "你好！..."}
- │                       │          ]                │
- │                       │                          │
- │                       │ 🎯 Agent.memory.messages = [历史消息]
- │                       │    ├─ Message 1: user "你好"
- │                       │    ├─ Message 2: assistant "你好！..."
- │                       │    └─ Agent 可以理解之前的上下文！
- │                       │                          │
- │                       │ Agent.stream("帮我生成PPT")
- │                       │ └─ LLM 可以看到完整历史    │
- │                       │                          │
- │                       │ 保存新消息               │
- │                       │ ├─────────────────────>  │
- │                       │ │  INSERT (user, "帮我生成PPT")
- │                       │ └─────────────────────>  │
- │                       │    INSERT (assistant, "好的，我来...")
- │                       │                          │
- │<──────────────────────│                          │
- │  SSE 事件流            │                          │
-```
-
-**结果**：
-- ✅ 历史消息加载成功（2条）
-- ✅ Agent 理解上下文
-- ✅ 新消息追加到数据库
-- ✅ 对话延续顺畅
-
-## 代码实现
-
-### 1. ChatService.create_session()
+### 2. 关键代码路径
 
 ```python
-def create_session(
-    self,
-    user_id: str,
-    message: str,
-    conversation_id: Optional[str] = None,
-    ...
-) -> tuple[str, SimpleAgent]:
-    """创建 Session 并加载历史"""
-    
-    # 1. 生成 session_id
-    session_id = self._generate_session_id()
-    
-    # 2. 创建 Agent
-    agent = create_simple_agent(...)
-    agent.start_session(session_id)
-    
-    # 3. 设置元数据
-    agent.memory.working.conversation_id = conversation_id
-    
-    # 4. 🎯 加载历史消息
-    if conversation_id:
-        self._load_conversation_history(agent, conversation_id)
-    
-    return session_id, agent
+# ChatService._chat_stream()
+
+# 1. 确保 Conversation 存在
+if not conversation_id:
+    conv = await crud.create_conversation(session, user_id, "新对话")
+    conversation_id = conv.id
+
+# 2. 创建 Session
+session_id, agent = await self.session_service.create_session(
+    user_id=user_id,
+    message=normalized_message,
+    conversation_id=conversation_id
+)
+
+# 3. 保存用户消息
+await crud.create_message(
+    session, conversation_id, role="user", content=content_json
+)
+
+# 4. 加载历史消息（核心！）
+context = Context(
+    conversation_id=conversation_id,
+    conversation_service=self.conversation_service
+)
+history_messages = await context.load_messages()
+
+# 5. 调用 Agent
+async for event in agent.chat(
+    messages=history_messages,  # ← 传入历史
+    user_message=message
+):
+    await handler.handle(event)
+
+# 6. 保存 assistant 消息
+await handler.finalize(agent)
 ```
 
-### 2. _load_conversation_history()
+## Context 模块
+
+`Context` 是上下文管理的核心模块，负责：
+
+1. **加载历史消息** - 从数据库读取并转换格式
+2. **清理无效内容** - 移除 thinking、修复 tool_use/tool_result 配对
+3. **Token 计数** - 使用 tiktoken 精确计算
+4. **双阈值压缩** - 80% 预检查 / 92% 运行中压缩
+
+### 消息格式转换
 
 ```python
-def _load_conversation_history(
-    self,
-    agent: SimpleAgent,
-    conversation_id: str
-) -> None:
-    """从数据库加载历史消息到 Agent"""
-    
-    # 🎯 从数据库查询
-    messages = asyncio.run(
-        MessageService.get_conversation_messages(conversation_id)
-    )
-    
-    if not messages:
-        logger.info(f"没有历史消息")
-        return
-    
-    logger.info(f"加载 {len(messages)} 条历史消息")
-    
-    # 转换为 Agent 格式
-    history_messages = []
-    for msg in messages:
-        history_messages.append({
-            "role": msg.role,        # user/assistant/system
-            "content": msg.content
+# 数据库格式 → Agent 格式
+def _convert_to_agent_format(self, db_messages):
+    for msg in db_messages:
+        content = json.loads(msg.content)  # JSON 数组
+        
+        # 清理 content 块
+        content = self._clean_content_blocks(content, msg.role)
+        
+        agent_messages.append({
+            "role": msg.role,
+            "content": content
         })
     
-    # 🎯 设置到 Agent memory
-    if hasattr(agent.memory, 'load_conversation_history'):
-        agent.memory.load_conversation_history(history_messages)
-    else:
-        # 直接追加到 messages
-        for msg in history_messages:
-            agent.memory.working.messages.append(msg)
+    # 确保 tool_use/tool_result 配对
+    return self._ensure_tool_pairs(agent_messages)
 ```
 
-### 3. _run_agent_background() - 保存消息
+### 内容清理规则
 
-```python
-async def _run_agent_background(
-    self,
-    session_id: str,
-    agent: SimpleAgent,
-    message: str
-):
-    """后台执行 Agent 并保存消息"""
-    
-    conversation_id = agent.memory.working.conversation_id
-    
-    # 🎯 保存用户消息
-    if conversation_id:
-        await MessageService.create_message(
-            conversation_id=conversation_id,
-            role="user",
-            content=message,
-            metadata={"session_id": session_id}
-        )
-    
-    # 执行 Agent
-    assistant_content = ""
-    async for event in agent.stream(message):
-        # ... 处理事件 ...
-        
-        # 累积 Assistant 回复
-        if event["type"] == "content_block_delta":
-            delta = event["data"].get("delta", {})
-            if delta.get("type") == "text_delta":
-                assistant_content += delta.get("text", "")
-    
-    # 🎯 保存 Assistant 消息
-    if conversation_id and assistant_content:
-        await MessageService.create_message(
-            conversation_id=conversation_id,
-            role="assistant",
-            content=assistant_content,
-            metadata={"session_id": session_id}
-        )
-```
+| 块类型 | 处理 |
+|--------|------|
+| `thinking` | **全部移除**（历史消息不需要，避免 signature 问题） |
+| `tool_use` | 只保留有配对 `tool_result` 的 |
+| `tool_result` | 只保留有配对 `tool_use` 的 |
+| `text` | 保留 |
 
-### 4. MessageService.get_conversation_messages()
+## 前端实现
 
-```python
-@staticmethod
-async def get_conversation_messages(
-    conversation_id: str,
-    limit: Optional[int] = None
-) -> List[Message]:
-    """获取对话的所有消息"""
-    
-    async with await db_manager.get_connection() as db:
-        query = """
-            SELECT * FROM messages 
-            WHERE conversation_id = ? 
-            ORDER BY created_at ASC
-        """
-        
-        async with db.execute(query, (conversation_id,)) as cursor:
-            rows = await cursor.fetchall()
-            return [
-                Message(
-                    id=row[0],
-                    conversation_id=row[1],
-                    role=row[2],
-                    content=row[3],
-                    created_at=datetime.fromisoformat(row[4]),
-                    metadata=deserialize_metadata(row[5])
-                )
-                for row in rows
-            ]
-```
+### Pinia Store 状态
 
-## 前端实现示例
-
-### React 示例
-
-```typescript
-import { useState } from 'react';
-
-export function ChatComponent() {
-  const [conversationId, setConversationId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
-
-  const sendMessage = async (text: string) => {
-    // 1. 🎯 首次对话：生成 conversation_id
-    if (!conversationId) {
-      const newConvId = `conv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      setConversationId(newConvId);
-    }
-
-    // 2. 发送请求
-    const response = await fetch('/api/v1/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: text,
-        userId: 'user_001',
-        conversationId: conversationId,  // ← 续接对话
+```javascript
+// stores/chat.js
+export const useChatStore = defineStore('chat', {
+  state: () => ({
+    userId: null,
+    conversationId: null,    // 当前对话 ID
+    sessionId: null,         // 当前会话 ID（临时）
+    messages: [],
+    isConnected: false,
+    sseConnection: null
+  }),
+  
+  actions: {
+    // 发送消息（流式）
+    async sendMessageStream(content, conversationId, onEvent) {
+      const requestBody = {
+        message: content,
+        user_id: this.userId,
         stream: true
-      })
-    });
-
-    // 3. 处理 SSE 流
-    // ...
-  };
-
-  return (
-    <div>
-      {/* 显示消息列表 */}
-      {messages.map(msg => (
-        <div key={msg.id}>
-          <strong>{msg.role}:</strong> {msg.content}
-        </div>
-      ))}
+      }
       
-      {/* 输入框 */}
-      <input 
-        onSubmit={(text) => sendMessage(text)} 
-        placeholder="输入消息..."
-      />
-    </div>
-  );
+      if (conversationId) {
+        requestBody.conversation_id = conversationId
+      }
+      
+      // ... SSE 处理
+    }
+  }
+})
+```
+
+### 会话切换
+
+```javascript
+// views/ChatView.vue
+async function loadConversation(conversationId) {
+  // 1. 断开当前 SSE（避免事件错乱）
+  if (chatStore.isConnected) {
+    chatStore.disconnectSSE()
+  }
+  
+  // 2. 重置状态
+  isLoading.value = false
+  currentSessionId.value = null
+  messages.value = []
+  
+  // 3. 设置新的 conversationId
+  chatStore.conversationId = conversationId
+  
+  // 4. 加载历史消息
+  const result = await chatStore.getConversationMessages(conversationId)
+  messages.value = result.messages.map(msg => ({
+    id: msg.id,
+    role: msg.role,
+    content: extractTextFromContent(msg.content),
+    thinking: extractThinkingFromContent(msg.content),
+    contentBlocks: parseContentBlocks(msg.content)
+  }))
 }
 ```
 
-### 存储 conversation_id
+## 事件与消息关系
 
-```typescript
-// 方案 1: 存储在 localStorage（持久化）
-localStorage.setItem('currentConversationId', conversationId);
+### SSE 事件流
 
-// 方案 2: 存储在 sessionStorage（仅当前标签页）
-sessionStorage.setItem('currentConversationId', conversationId);
-
-// 方案 3: 存储在 URL（支持分享）
-// /chat/conv_20231227_001
 ```
+session_start          → 会话开始
+conversation_start     → 对话创建（新对话时）
+message_start          → 消息开始
+content_start          → 内容块开始（thinking/text/tool_use）
+content_delta          → 内容增量
+content_stop           → 内容块结束
+tool_result            → 工具结果
+message_stop           → 消息结束 → 触发数据库保存
+session_end            → 会话结束
+```
+
+### 消息保存时机
+
+| 角色 | 保存时机 |
+|------|---------|
+| `user` | Agent 执行前立即保存 |
+| `assistant` | `message_stop` 事件时保存（ChatEventHandler.finalize） |
 
 ## 最佳实践
 
-### 1. conversation_id 生成规则
+### 1. conversation_id 管理
 
-```typescript
-// ✅ 推荐：时间戳 + 随机字符
-const conversationId = `conv_${Date.now()}_${randomString(8)}`;
-// 示例: conv_1703664000000_a3b4c5d6
+```javascript
+// ✅ 前端不生成 ID，由后端创建
+// 首次发消息时不传 conversationId，后端自动创建
+const result = await chatStore.sendMessageStream(content, null, onEvent)
 
-// ✅ 推荐：UUID
-const conversationId = `conv_${uuidv4()}`;
-// 示例: conv_550e8400-e29b-41d4-a716-446655440000
-
-// ❌ 不推荐：纯随机（可能冲突）
-const conversationId = Math.random().toString();
+// 收到 conversation_start 事件后保存
+if (event.type === 'conversation_start') {
+  chatStore.conversationId = event.data.conversation_id
+  router.push({ name: 'conversation', params: { conversationId } })
+}
 ```
 
-### 2. 首条消息创建对话
+### 2. 会话切换安全
 
-```python
-# 前端发送首条消息时，同时创建对话
-POST /api/v1/chat
-{
-  "message": "你好",
-  "userId": "user_001",
-  "conversationId": "conv_001"  # ← 首次提供
+```javascript
+// ✅ 切换前断开 SSE
+async function loadConversation(newConversationId) {
+  // 必须先断开，避免事件错乱
+  chatStore.disconnectSSE()
+  
+  // 然后切换
+  chatStore.conversationId = newConversationId
+  await loadHistory()
 }
-
-# 后端：如果数据库中不存在该 conversation_id，自动创建
-if conversation_id:
-    conv = await ConversationService.get_conversation(conversation_id)
-    if not conv:
-        await ConversationService.create_conversation(
-            user_id=user_id,
-            conversation_id=conversation_id,
-            title="新对话"
-        )
 ```
 
 ### 3. 历史消息分页
 
-对于长对话（100+ 条消息），建议分页加载：
-
 ```python
-# 方案 1: 只加载最近 N 条消息
-messages = await MessageService.get_recent_messages(
-    conversation_id=conversation_id,
-    limit=20  # 最近 20 条
-)
+# 长对话场景（100+ 条消息）
+messages = await context.load_messages(limit=50)  # 只加载最近 50 条
 
-# 方案 2: Token 压缩（避免超出上下文限制）
-if len(messages) > 50:
-    # 压缩旧消息
-    compressed = compress_old_messages(messages[:-20])
-    # 保留最近 20 条完整消息
-    messages = compressed + messages[-20:]
-```
-
-### 4. 对话标题自动生成
-
-```python
-# 在首轮对话完成后，自动生成标题
-async def _run_agent_background(...):
-    # ... 执行 Agent ...
-    
-    # 首轮对话完成后
-    if conversation_id:
-        conv = await ConversationService.get_conversation(conversation_id)
-        if conv.title == "新对话":
-            # 使用 LLM 生成标题
-            title = await generate_title_from_message(message)
-            await ConversationService.update_conversation_title(
-                conversation_id, title
-            )
+# 或使用 Token 压缩
+if context.check_threshold(0.80):
+    await context.compress_if_needed()
 ```
 
 ## 错误处理
@@ -487,125 +331,62 @@ async def _run_agent_background(...):
 ### 1. conversation_id 不存在
 
 ```python
-# 场景：前端传了一个不存在的 conversation_id
-conversation_id = "conv_nonexistent"
-
-# 方案 1: 自动创建（推荐）
-if conversation_id:
-    conv = await ConversationService.get_conversation(conversation_id)
-    if not conv:
-        logger.warning(f"对话不存在，自动创建: {conversation_id}")
-        await ConversationService.create_conversation(
-            user_id=user_id,
-            conversation_id=conversation_id
-        )
-
-# 方案 2: 返回错误
-if conversation_id:
-    conv = await ConversationService.get_conversation(conversation_id)
-    if not conv:
-        raise HTTPException(
-            status_code=404,
-            detail=f"对话不存在: {conversation_id}"
-        )
+# ChatService 自动创建
+if not conversation_id:
+    conv = await crud.create_conversation(session, user_id, "新对话")
+    conversation_id = conv.id
 ```
 
-### 2. 历史消息加载失败
+### 2. 历史加载失败
 
 ```python
-def _load_conversation_history(...):
-    try:
-        messages = await MessageService.get_conversation_messages(conversation_id)
-        # ... 加载消息 ...
-    except Exception as e:
-        # ⚠️ 加载失败不应该阻塞会话创建
-        logger.error(f"加载历史失败: {str(e)}")
-        # 继续执行，只是没有历史上下文
+# Context.load_messages() 失败不阻塞执行
+try:
+    messages = await context.load_messages()
+except Exception as e:
+    logger.warning(f"⚠️ 加载历史失败: {e}")
+    messages = []  # 继续执行，只是没有历史
 ```
 
-### 3. 数据库保存失败
+### 3. 消息保存失败
 
 ```python
-async def _run_agent_background(...):
-    # 保存用户消息
-    try:
-        await MessageService.create_message(...)
-    except Exception as e:
-        # ⚠️ 保存失败不应该影响 Agent 执行
-        logger.warning(f"保存消息失败: {str(e)}")
-    
-    # Agent 继续执行
-    async for event in agent.stream(message):
-        # ...
+# 保存失败不影响 Agent 执行
+try:
+    await crud.create_message(...)
+except Exception as e:
+    logger.warning(f"⚠️ 保存消息失败: {e}")
+# 继续执行 Agent
 ```
 
-## 监控和日志
-
-### 1. 日志记录
+## 监控日志
 
 ```python
-# 加载历史
-logger.info(
-    f"📚 加载历史消息: conversation_id={conversation_id}, "
-    f"消息数={len(messages)}"
-)
+# 关键日志点
+logger.info(f"✅ 新对话已创建: id={conversation_id}")
+logger.info(f"📚 历史消息已加载: {len(messages)} 条")
+logger.info(f"💾 用户消息已保存")
+logger.info(f"✅ Assistant 消息已保存: id={message_id}")
 
-# 保存消息
-logger.debug(
-    f"💾 用户消息已保存: conversation_id={conversation_id}, "
-    f"session_id={session_id}"
-)
-
-# 历史加载失败
-logger.error(
-    f"⚠️ 加载历史失败: conversation_id={conversation_id}, "
-    f"error={str(e)}"
-)
-```
-
-### 2. 性能监控
-
-```python
-import time
-
-# 监控历史加载耗时
-start = time.time()
-messages = await MessageService.get_conversation_messages(conversation_id)
-elapsed = time.time() - start
-
-logger.info(f"⏱️ 历史加载耗时: {elapsed:.2f}s, 消息数={len(messages)}")
-
-# 如果耗时过长，考虑优化
-if elapsed > 1.0 and len(messages) > 100:
-    logger.warning(
-        f"⚠️ 历史加载耗时过长: {elapsed:.2f}s, "
-        f"建议添加分页或压缩"
-    )
+# 警告日志
+logger.warning(f"⚠️ 发现未配对的 tool_use，将移除")
+logger.warning(f"⚠️ Token 使用率超过 80%，建议压缩")
 ```
 
 ## 总结
 
-### conversation_id 的作用
+### 核心设计
 
-1. **持久化对话**：保存到数据库，支持长期存储
-2. **多轮上下文**：加载历史消息，让 Agent 理解之前的对话
-3. **对话管理**：用户可以查看、切换、删除对话
-4. **分享链接**：通过 URL 分享对话 (`/chat/conv_xxx`)
+1. **ID 分离**：`conversation_id`（持久）+ `session_id`（临时）
+2. **消息完整保存**：JSON 数组格式，包含 thinking/text/tool_use/tool_result
+3. **历史加载清理**：移除 thinking，修复 tool 配对
+4. **切换安全**：切换对话前断开 SSE
 
-### 关键流程
+### 数据流
 
 ```
-创建 Session → 加载历史消息 → Agent 执行 → 保存新消息
-     ↓              ↓                ↓           ↓
-  session_id   conversation_id   Redis 缓冲   数据库持久化
+用户发消息 → 创建 Session → 保存 user 消息 → 加载历史 → Agent 执行 → 保存 assistant 消息
+                                    ↓
+                              Context 模块
+                              (清理 + 转换)
 ```
-
-### 设计原则
-
-1. **解耦**：`session_id` (临时) 和 `conversation_id` (持久) 分离
-2. **容错**：历史加载失败不影响会话创建
-3. **性能**：长对话考虑分页/压缩
-4. **可观测**：完整的日志记录
-
-这样就实现了一个**生产级的多轮对话系统**！🎉
-

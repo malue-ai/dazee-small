@@ -68,44 +68,61 @@ class RagieClient:
             
         Ref: https://docs.ragie.ai/reference/createdocument
         """
+        import json
+        
         url = f"{self.base_url}/documents"
+        
+        # 添加文件
+        file_path_obj = Path(file_path)
+        if not file_path_obj.exists():
+            raise FileNotFoundError(f"文件不存在: {file_path}")
+        
+        # 先读取文件内容到内存（避免文件在发送前关闭）
+        with open(file_path, 'rb') as f:
+            file_content = f.read()
         
         async with aiohttp.ClientSession() as session:
             # 构建 multipart form data
             data = aiohttp.FormData()
             
-            # 添加文件
-            file_path_obj = Path(file_path)
-            if not file_path_obj.exists():
-                raise FileNotFoundError(f"文件不存在: {file_path}")
+            # 添加文件（使用已读取的字节内容）
+            data.add_field(
+                'file',
+            file_content,
+                filename=file_path_obj.name,
+                content_type='application/octet-stream'
+            )
             
-            with open(file_path, 'rb') as f:
-                data.add_field(
-                    'file',
-                    f,
-                    filename=file_path_obj.name,
-                    content_type='application/octet-stream'
-                )
+            # 添加可选参数
+            if partition:
+                data.add_field('partition', partition)
+            if metadata:
+                data.add_field('metadata', json.dumps(metadata))
+            data.add_field('mode', mode)
+            
+            # 发送请求
+            import logging
+            logger = logging.getLogger("zenflux.ragie_client")
+            
+            logger.info(f"📤 调用 Ragie API: POST {url}")
+            logger.debug(f"   partition={partition}, mode={mode}, file_size={len(file_content)} bytes")
+            
+            async with session.post(
+                url,
+                data=data,
+                headers={"Authorization": f"Bearer {self.api_key}"}
+            ) as response:
+                response_text = await response.text()
+                logger.info(f"📥 Ragie 响应: HTTP {response.status}")
+                logger.debug(f"   响应内容: {response_text[:500]}")
                 
-                # 添加可选参数
-                if partition:
-                    data.add_field('partition', partition)
-                if metadata:
-                    import json
-                    data.add_field('metadata', json.dumps(metadata))
-                data.add_field('mode', mode)
-                
-                # 发送请求
-                async with session.post(
-                    url,
-                    data=data,
-                    headers={"Authorization": f"Bearer {self.api_key}"}
-                ) as response:
-                    if response.status in [200, 201]:
-                        return await response.json()
-                    else:
-                        error_text = await response.text()
-                        raise Exception(f"Ragie API 错误 (HTTP {response.status}): {error_text}")
+                if response.status in [200, 201]:
+                    import json as json_lib
+                    result = json_lib.loads(response_text)
+                    logger.info(f"✅ Ragie 创建文档成功: id={result.get('id')}, status={result.get('status')}")
+                    return result
+                else:
+                    raise Exception(f"Ragie API 错误 (HTTP {response.status}): {response_text}")
     
     async def create_document_from_url(
         self,
@@ -169,10 +186,14 @@ class RagieClient:
             
         Ref: https://docs.ragie.ai/reference/createdocumentraw
         """
+        import logging
+        logger = logging.getLogger("zenflux.ragie_client")
+        
         api_url = f"{self.base_url}/documents/raw"
         
+        # 根据 Ragie API 文档，格式应该是 {"data": 内容, "name": 名称}
         payload = {
-            "content": content,
+            "data": content,  # 注意：字段名是 data 不是 content
             "name": name
         }
         
@@ -181,13 +202,21 @@ class RagieClient:
         if metadata:
             payload["metadata"] = metadata
         
+        logger.info(f"📤 调用 Ragie API: POST {api_url}")
+        logger.debug(f"   name={name}, partition={partition}, content_length={len(content)}")
+        
         async with aiohttp.ClientSession() as session:
             async with session.post(api_url, json=payload, headers=self.headers) as response:
+                response_text = await response.text()
+                logger.info(f"📥 Ragie 响应: HTTP {response.status}")
+                
                 if response.status in [200, 201]:
-                    return await response.json()
+                    import json
+                    result = json.loads(response_text)
+                    logger.info(f"✅ Ragie 创建文档成功: id={result.get('id')}, status={result.get('status')}")
+                    return result
                 else:
-                    error_text = await response.text()
-                    raise Exception(f"Ragie API 错误 (HTTP {response.status}): {error_text}")
+                    raise Exception(f"Ragie API 错误 (HTTP {response.status}): {response_text}")
     
     # 别名方法（兼容性）
     async def create_document_from_raw(
@@ -217,15 +246,25 @@ class RagieClient:
             
         Ref: https://docs.ragie.ai/reference/getdocument
         """
+        import logging
+        logger = logging.getLogger("zenflux.ragie_client")
+        
         url = f"{self.base_url}/documents/{document_id}"
+        logger.info(f"🔍 调用 Ragie API: GET {url}")
         
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=self.headers) as response:
+                response_text = await response.text()
+                logger.info(f"📥 Ragie 响应: HTTP {response.status}")
+                logger.debug(f"   响应内容: {response_text[:500]}")
+                
                 if response.status == 200:
-                    return await response.json()
+                    import json
+                    result = json.loads(response_text)
+                    logger.info(f"✅ Ragie 获取文档成功: id={result.get('id')}, status={result.get('status')}")
+                    return result
                 else:
-                    error_text = await response.text()
-                    raise Exception(f"Ragie API 错误 (HTTP {response.status}): {error_text}")
+                    raise Exception(f"Ragie API 错误 (HTTP {response.status}): {response_text}")
     
     async def retrieve(
         self,
@@ -281,32 +320,55 @@ class RagieClient:
     async def list_documents(
         self,
         partition: Optional[str] = None,
-        limit: int = 100
+        limit: int = 100,
+        cursor: Optional[str] = None,
+        filter: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         列出文档
         
         Args:
-            partition: Partition ID (过滤特定用户空间)
-            limit: 返回数量限制
+            partition: Partition ID (过滤特定用户空间，可选)
+            limit: 返回数量限制（最大 100）
+            cursor: 分页游标（用于获取下一页）
+            filter: Metadata 过滤条件，格式如 {"user_id": {"$eq": "xxx"}}
             
         Returns:
-            文档列表
+            {
+                "pagination": {"next_cursor": str, "total_count": int},
+                "documents": [...]
+            }
             
         Ref: https://docs.ragie.ai/reference/listdocuments
         """
+        import logging
+        import json
+        logger = logging.getLogger("zenflux.ragie_client")
+        
         url = f"{self.base_url}/documents"
-        params = {"limit": limit}
+        params = {"limit": min(limit, 100)}  # Ragie 最大限制 100
+        
         if partition:
             params["partition"] = partition
+        if cursor:
+            params["cursor"] = cursor
+        if filter:
+            # Ragie 的 filter 参数需要 JSON 字符串格式
+            params["filter"] = json.dumps(filter)
+        
+        logger.debug(f"📋 调用 Ragie API: GET {url}, params={params}")
         
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=self.headers, params=params) as response:
+                response_text = await response.text()
+                
                 if response.status == 200:
-                    return await response.json()
+                    result = json.loads(response_text)
+                    doc_count = len(result.get("documents", []))
+                    logger.debug(f"📥 Ragie 返回 {doc_count} 个文档")
+                    return result
                 else:
-                    error_text = await response.text()
-                    raise Exception(f"Ragie API 错误 (HTTP {response.status}): {error_text}")
+                    raise Exception(f"Ragie API 错误 (HTTP {response.status}): {response_text}")
     
     async def delete_document(self, document_id: str) -> Dict[str, Any]:
         """
@@ -404,6 +466,85 @@ class RagieClient:
             async with session.get(url, headers=self.headers) as response:
                 if response.status == 200:
                     return await response.json()
+                else:
+                    error_text = await response.text()
+                    raise Exception(f"Ragie API 错误 (HTTP {response.status}): {error_text}")
+    
+    async def get_document_content(self, document_id: str) -> Dict[str, Any]:
+        """
+        获取文档的原始内容
+        
+        Args:
+            document_id: 文档 ID
+            
+        Returns:
+            {"content": str}  # 文档的原始文本内容
+            
+        Ref: https://docs.ragie.ai/reference/getdocumentcontent
+        """
+        url = f"{self.base_url}/documents/{document_id}/content"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=self.headers) as response:
+                if response.status == 200:
+                    return await response.json()
+                else:
+                    error_text = await response.text()
+                    raise Exception(f"Ragie API 错误 (HTTP {response.status}): {error_text}")
+    
+    async def get_document_chunks(
+        self,
+        document_id: str,
+        limit: int = 100,
+        cursor: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        获取文档的所有分块
+        
+        Args:
+            document_id: 文档 ID
+            limit: 每页数量（最大 100）
+            cursor: 分页游标
+            
+        Returns:
+            {
+                "pagination": {"next_cursor": str, "total_count": int},
+                "chunks": [{"id": str, "text": str, ...}, ...]
+            }
+            
+        Ref: https://docs.ragie.ai/reference/getdocumentchunks
+        """
+        url = f"{self.base_url}/documents/{document_id}/chunks"
+        params = {"limit": min(limit, 100)}
+        if cursor:
+            params["cursor"] = cursor
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=self.headers, params=params) as response:
+                if response.status == 200:
+                    return await response.json()
+                else:
+                    error_text = await response.text()
+                    raise Exception(f"Ragie API 错误 (HTTP {response.status}): {error_text}")
+    
+    async def get_document_source(self, document_id: str) -> bytes:
+        """
+        获取文档的原始文件（二进制）
+        
+        Args:
+            document_id: 文档 ID
+            
+        Returns:
+            bytes: 原始文件的二进制内容
+            
+        Ref: https://docs.ragie.ai/reference/getdocumentsource
+        """
+        url = f"{self.base_url}/documents/{document_id}/source"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=self.headers) as response:
+                if response.status == 200:
+                    return await response.read()
                 else:
                     error_text = await response.text()
                     raise Exception(f"Ragie API 错误 (HTTP {response.status}): {error_text}")

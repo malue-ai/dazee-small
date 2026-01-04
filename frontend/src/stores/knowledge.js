@@ -19,7 +19,7 @@ export const useKnowledgeStore = defineStore('knowledge', {
       formData.append('mode', 'hi_res')
 
       try {
-        const response = await axios.post('/knowledge/upload', formData, {
+        const response = await axios.post('/v1/knowledge/upload', formData, {
           headers: {
             'Content-Type': 'multipart/form-data'
           }
@@ -37,7 +37,7 @@ export const useKnowledgeStore = defineStore('knowledge', {
      */
     async uploadDocumentFromUrl(userId, url, name, metadata = {}) {
       try {
-        const response = await axios.post('/knowledge/upload-url', {
+        const response = await axios.post('/v1/knowledge/upload-url', {
           user_id: userId,
           url: url,
           name: name,
@@ -57,7 +57,7 @@ export const useKnowledgeStore = defineStore('knowledge', {
      */
     async uploadDocumentFromText(userId, text, name, metadata = {}) {
       try {
-        const response = await axios.post('/knowledge/upload-text', {
+        const response = await axios.post('/v1/knowledge/upload-text', {
           user_id: userId,
           text: text,
           name: name,
@@ -82,7 +82,7 @@ export const useKnowledgeStore = defineStore('knowledge', {
           offset
         }
 
-        const response = await axios.get(`/knowledge/documents/${userId}`, {
+        const response = await axios.get(`/v1/knowledge/documents/${userId}`, {
           params
         })
 
@@ -100,7 +100,7 @@ export const useKnowledgeStore = defineStore('knowledge', {
     async getDocumentStatus(userId, documentId, refresh = false) {
       try {
         const response = await axios.get(
-          `/knowledge/documents/${userId}/${documentId}`,
+          `/v1/knowledge/documents/${userId}/${documentId}`,
           {
             params: { refresh }
           }
@@ -119,7 +119,7 @@ export const useKnowledgeStore = defineStore('knowledge', {
     async deleteDocument(userId, documentId) {
       try {
         const response = await axios.delete(
-          `/knowledge/documents/${userId}/${documentId}`
+          `/v1/knowledge/documents/${userId}/${documentId}`
         )
 
         // 从本地列表中移除
@@ -139,7 +139,7 @@ export const useKnowledgeStore = defineStore('knowledge', {
      */
     async retrieve(userId, query, topK = 5, filters = null) {
       try {
-        const response = await axios.post('/knowledge/retrieve', {
+        const response = await axios.post('/v1/knowledge/retrieve', {
           user_id: userId,
           query: query,
           top_k: topK,
@@ -159,7 +159,7 @@ export const useKnowledgeStore = defineStore('knowledge', {
      */
     async getStats(userId) {
       try {
-        const response = await axios.get(`/knowledge/stats/${userId}`)
+        const response = await axios.get(`/v1/knowledge/stats/${userId}`)
         this.stats = response.data.data
         return this.stats
       } catch (error) {

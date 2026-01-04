@@ -49,10 +49,39 @@ export const KNOWLEDGE_API = {
   DELETE: (knowledgeId) => `${API_BASE_PATH}/knowledge/${knowledgeId}`,
 }
 
+// Files API
+export const FILES_API = {
+  // 文件列表
+  LIST: `${API_BASE_PATH}/files`,
+  
+  // 获取统计
+  STATS: (userId) => `${API_BASE_PATH}/files/stats/${userId}`,
+  
+  // 下载文件
+  DOWNLOAD: (fileId) => `${API_BASE_PATH}/files/${fileId}/download`,
+  
+  // 删除文件
+  DELETE: (fileId) => `${API_BASE_PATH}/files/${fileId}`,
+}
+
+// Workspace API（注意：axios baseURL 已经是 /api，所以这里只需要 /v1）
+export const WORKSPACE_API = {
+  // 获取文件列表
+  FILES: (conversationId) => `/v1/workspace/${conversationId}/files`,
+  
+  // 获取/下载单个文件
+  FILE: (conversationId, path) => `/v1/workspace/${conversationId}/files/${path}`,
+  
+  // 获取项目列表
+  PROJECTS: (conversationId) => `/v1/workspace/${conversationId}/projects`,
+}
+
 export default {
   CHAT_API,
   SESSION_API,
   USER_API,
   KNOWLEDGE_API,
+  FILES_API,
+  WORKSPACE_API,
 }
 

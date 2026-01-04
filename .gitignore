@@ -39,11 +39,6 @@ liuy/
 logs/
 *.out
 
-# Environment variables
-.env
-.env.local
-.env.*.local
-
 # Jupyter Notebook
 .ipynb_checkpoints
 
@@ -62,11 +57,11 @@ coverage.xml
 *.bak
 .~*
 
+# Environment variables (敏感信息)
+.env
+.env.local
+
 # Project specific
 workspace_*/
 skill_outputs/
 *.code-workspace
-
-# Outputs
-outputs/
-.cursor/

@@ -1,14 +1,19 @@
 """
-Redis 会话管理器
+Redis 会话管理器（异步版本）
 
 负责 Session 的 Redis 存储和管理：
 - Session 状态（status, progress, heartbeat）
 - 事件缓冲（events buffer）
 - 用户活跃 Sessions 列表
+
+设计说明：
+- 使用 redis.asyncio 实现真正的异步操作
+- 所有方法都是异步的，避免阻塞事件循环
 """
 
 import json
-import redis
+import asyncio
+import redis.asyncio as redis
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from logger import get_logger
@@ -17,7 +22,7 @@ logger = get_logger("redis_manager")
 
 
 class RedisSessionManager:
-    """Redis Session 管理器"""
+    """Redis Session 管理器（异步版本）"""
     
     def __init__(
         self,
@@ -35,24 +40,63 @@ class RedisSessionManager:
             redis_db: Redis 数据库编号
             redis_password: Redis 密码（可选）
         """
-        self.client = redis.Redis(
-            host=redis_host,
-            port=redis_port,
-            db=redis_db,
-            password=redis_password,
+        self.redis_host = redis_host
+        self.redis_port = redis_port
+        self.redis_db = redis_db
+        self.redis_password = redis_password
+        self._client: Optional[redis.Redis] = None
+    
+    async def _get_client(self) -> redis.Redis:
+        """
+        获取或创建 Redis 客户端（懒加载）
+        """
+        if self._client is None:
+            self._client = redis.Redis(
+                host=self.redis_host,
+                port=self.redis_port,
+                db=self.redis_db,
+                password=self.redis_password,
             decode_responses=True  # 自动解码为字符串
         )
-        
         try:
-            self.client.ping()
-            logger.info(f"✅ Redis 连接成功: {redis_host}:{redis_port}")
+            await self._client.ping()
         except Exception as e:
             logger.error(f"❌ Redis 连接失败: {str(e)}")
+            self._client = None
             raise
+        return self._client
+    
+    @property
+    def client(self) -> redis.Redis:
+        """
+        获取客户端（同步访问，用于兼容旧代码的过渡期）
+        注意：这会阻塞，请尽快迁移到异步方法
+        """
+        if self._client is None:
+            # 同步创建连接（仅用于兼容）
+            import redis as sync_redis
+            sync_client = sync_redis.Redis(
+                host=self.redis_host,
+                port=self.redis_port,
+                db=self.redis_db,
+                password=self.redis_password,
+                decode_responses=True
+            )
+            sync_client.ping()
+            logger.warning("⚠️ 使用同步 Redis 客户端，建议迁移到异步方法")
+            # 创建异步客户端以供后续使用
+            self._client = redis.Redis(
+                host=self.redis_host,
+                port=self.redis_port,
+                db=self.redis_db,
+                password=self.redis_password,
+                decode_responses=True
+            )
+        return self._client
     
     # ==================== Session 状态管理 ====================
     
-    def create_session(
+    async def create_session(
         self,
         session_id: str,
         user_id: str,
@@ -70,13 +114,15 @@ class RedisSessionManager:
             message_id: 消息 ID（可选）
             message_preview: 消息预览
         """
+        client = await self._get_client()
+        
         session_status = {
             "session_id": session_id,
             "user_id": user_id,
             "conversation_id": conversation_id or "",
             "message_id": message_id or "",
             "status": "running",
-            "last_event_seq": "0",  # 使用 seq（session 内序号）而不是全局 ID
+            "last_event_seq": "0",
             "start_time": datetime.now().isoformat(),
             "last_heartbeat": datetime.now().isoformat(),
             "progress": "0.0",
@@ -85,22 +131,21 @@ class RedisSessionManager:
         }
         
         # 保存 Session 状态
-        self.client.hset(
+        await client.hset(
             f"session:{session_id}:status",
             mapping=session_status
         )
-        # 运行中不设置 TTL
         
         # 添加到用户的活跃 sessions
-        self.client.sadd(f"user:{user_id}:sessions", session_id)
-        self.client.expire(f"user:{user_id}:sessions", 3600)
+        await client.sadd(f"user:{user_id}:sessions", session_id)
+        await client.expire(f"user:{user_id}:sessions", 3600)
         
         # 初始化心跳
-        self.update_heartbeat(session_id)
+        await self.update_heartbeat(session_id)
         
         logger.info(f"✅ Session 已创建: {session_id}")
     
-    def get_session_status(self, session_id: str) -> Optional[Dict[str, Any]]:
+    async def get_session_status(self, session_id: str) -> Optional[Dict[str, Any]]:
         """
         获取 Session 状态
         
@@ -110,13 +155,13 @@ class RedisSessionManager:
         Returns:
             Session 状态字典，不存在则返回 None
         """
-        status = self.client.hgetall(f"session:{session_id}:status")
+        client = await self._get_client()
+        status = await client.hgetall(f"session:{session_id}:status")
         
         if not status:
             return None
         
-        # 转换数字类型（安全转换，处理 None 和无效值）
-        # 支持 last_event_id（旧字段）和 last_event_seq（新字段）
+        # 转换数字类型
         if "last_event_seq" in status:
             try:
                 val = status["last_event_seq"]
@@ -127,7 +172,6 @@ class RedisSessionManager:
             except (ValueError, TypeError):
                 status["last_event_seq"] = 0
         elif "last_event_id" in status:
-            # 向后兼容：如果有 last_event_id，转换并复制到 last_event_seq
             try:
                 val = status["last_event_id"]
                 if val and val != 'None':
@@ -162,7 +206,7 @@ class RedisSessionManager:
         
         return status
     
-    def update_session_status(
+    async def update_session_status(
         self,
         session_id: str,
         **fields
@@ -177,13 +221,14 @@ class RedisSessionManager:
         if not fields:
             return
         
-        # 转换为字符串，但排除 None 值（避免存储字符串 'None'）
+        client = await self._get_client()
+        
+        # 转换为字符串，排除 None 值
         str_fields = {}
         for k, v in fields.items():
             if v is not None:
                 str_fields[k] = str(v)
             else:
-                # None 值使用默认值
                 if k in ["last_event_id", "last_event_seq"]:
                     str_fields[k] = "0"
                 elif k == "progress":
@@ -193,12 +238,12 @@ class RedisSessionManager:
                 else:
                     str_fields[k] = ""
         
-        self.client.hset(
+        await client.hset(
             f"session:{session_id}:status",
             mapping=str_fields
         )
     
-    def complete_session(
+    async def complete_session(
         self,
         session_id: str,
         status: str = "completed"
@@ -210,49 +255,52 @@ class RedisSessionManager:
             session_id: Session ID
             status: 最终状态（completed/failed/timeout）
         """
+        client = await self._get_client()
+        
         # 更新状态
-        self.update_session_status(
+        await self.update_session_status(
             session_id,
             status=status,
             last_heartbeat=datetime.now().isoformat()
         )
         
         # 设置 TTL = 60 秒
-        self.client.expire(f"session:{session_id}:status", 60)
-        self.client.expire(f"session:{session_id}:events", 60)
-        self.client.expire(f"session:{session_id}:heartbeat", 60)
+        await client.expire(f"session:{session_id}:status", 60)
+        await client.expire(f"session:{session_id}:events", 60)
+        await client.expire(f"session:{session_id}:heartbeat", 60)
         
         # 从用户活跃列表移除
-        status_data = self.get_session_status(session_id)
+        status_data = await self.get_session_status(session_id)
         if status_data:
             user_id = status_data.get("user_id")
             if user_id:
-                self.client.srem(f"user:{user_id}:sessions", session_id)
+                await client.srem(f"user:{user_id}:sessions", session_id)
         
         logger.info(f"✅ Session 已完成: {session_id}, status={status}")
     
-    def update_heartbeat(self, session_id: str) -> None:
+    async def update_heartbeat(self, session_id: str) -> None:
         """
         更新心跳
         
         Args:
             session_id: Session ID
         """
+        client = await self._get_client()
         now = datetime.now().isoformat()
         
         # 更新心跳时间戳（60秒 TTL）
-        self.client.set(
+        await client.set(
             f"session:{session_id}:heartbeat",
             now,
             ex=60
         )
         
         # 同步更新 status 中的 last_heartbeat
-        self.update_session_status(session_id, last_heartbeat=now)
+        await self.update_session_status(session_id, last_heartbeat=now)
     
     # ==================== 事件缓冲管理 ====================
     
-    def generate_session_seq(self, session_id: str) -> int:
+    async def generate_session_seq(self, session_id: str) -> int:
         """
         生成 session 内的事件序号（从 1 开始递增）
         
@@ -262,23 +310,14 @@ class RedisSessionManager:
         Returns:
             Session 内的事件序号（1, 2, 3...）
         """
-        return self.client.incr(f"session:{session_id}:seq_counter")
+        client = await self._get_client()
+        return await client.incr(f"session:{session_id}:seq_counter")
     
-    def get_session_context(self, session_id: str) -> Dict[str, Any]:
+    async def get_session_context(self, session_id: str) -> Dict[str, Any]:
         """
         获取 session 上下文信息
-        
-        Args:
-            session_id: Session ID
-            
-        Returns:
-            {
-                "conversation_id": str,
-                "user_id": str,
-                ...
-            }
         """
-        status_data = self.get_session_status(session_id)
+        status_data = await self.get_session_status(session_id)
         if not status_data:
             return {}
         
@@ -287,7 +326,7 @@ class RedisSessionManager:
             "user_id": status_data.get("user_id")
         }
     
-    def buffer_event(
+    async def buffer_event(
         self,
         session_id: str,
         event_data: Dict[str, Any] = None,
@@ -296,19 +335,17 @@ class RedisSessionManager:
         timestamp: str = None
     ) -> None:
         """
-        缓冲事件到 Redis
-        
-        支持两种调用方式：
-        1. 传入完整的 event_data 字典（包含 event_uuid, seq, type, data, timestamp）
-        2. 分别传入各个字段（向后兼容）
+        缓冲事件到 Redis 并通过 Pub/Sub 发布
         
         Args:
             session_id: Session ID
             event_data: 完整的事件字典（推荐）
             event_id: 事件 ID（可选，向后兼容）
-            event_type: 事件类型（可选，向后兼容）
-            timestamp: 时间戳（可选，向后兼容）
+            event_type: 事件类型（可选）
+            timestamp: 时间戳（可选）
         """
+        client = await self._get_client()
+        
         # 方式1：传入完整事件字典
         if event_data is not None and ("event_uuid" in event_data or "id" in event_data):
             event = event_data
@@ -321,28 +358,32 @@ class RedisSessionManager:
                 "timestamp": timestamp
             }
         
+        event_json = json.dumps(event, ensure_ascii=False)
+        
         # 左进（LPUSH），保持最新的在前面
-        self.client.lpush(
+        await client.lpush(
             f"session:{session_id}:events",
-            json.dumps(event, ensure_ascii=False)
+            event_json
         )
         
         # 只保留最近 1000 个事件
-        self.client.ltrim(
+        await client.ltrim(
             f"session:{session_id}:events",
             0,
             999
         )
         
-        # 更新 last_event_seq（使用 seq 字段，如果有的话）
-        # seq 是 session 内的递增序号，适合用于断线重连
+        # 🎯 通过 Pub/Sub 发布事件（实时推送）
+        channel = f"session:{session_id}:stream"
+        await client.publish(channel, event_json)
+        
+        # 更新 last_event_seq
         if "seq" in event:
-            self.update_session_status(session_id, last_event_seq=event["seq"])
+            await self.update_session_status(session_id, last_event_seq=event["seq"])
         elif "id" in event and event["id"] is not None:
-            # 向后兼容：如果 id 存在且不是 None
-            self.update_session_status(session_id, last_event_seq=event["id"])
+            await self.update_session_status(session_id, last_event_seq=event["id"])
     
-    def get_events(
+    async def get_events(
         self,
         session_id: str,
         after_id: Optional[int] = None,
@@ -359,8 +400,10 @@ class RedisSessionManager:
         Returns:
             事件列表
         """
+        client = await self._get_client()
+        
         # 读取所有缓冲的事件
-        events_json = self.client.lrange(
+        events_json = await client.lrange(
             f"session:{session_id}:events",
             0,
             -1
@@ -378,9 +421,8 @@ class RedisSessionManager:
             except json.JSONDecodeError:
                 logger.warning(f"⚠️ 无法解析事件: {event_json}")
         
-        # 过滤 after_id（使用 seq 字段）
+        # 过滤 after_id
         if after_id is not None:
-            # 优先使用 seq 字段（新），fallback 到 id 字段（旧，如果是数字的话）
             events = [
                 e for e in events 
                 if e.get("seq", e.get("id", 0) if isinstance(e.get("id"), int) else 0) > after_id
@@ -399,13 +441,7 @@ class RedisSessionManager:
         timeout: int = 60
     ):
         """
-        实时流式读取事件（用于 SSE）
-        
-        特点：
-        - 实时读取新事件
-        - 使用轮询（Redis 不支持真正的 pub/sub stream）
-        - 当没有新事件时等待
-        - 检测 session 结束
+        实时流式读取事件（用于 SSE）- 使用轮询作为备选
         
         Args:
             session_id: Session ID
@@ -415,8 +451,6 @@ class RedisSessionManager:
         Yields:
             事件字典
         """
-        import asyncio
-        
         last_id = after_id or 0
         start_time = datetime.now()
         
@@ -428,35 +462,131 @@ class RedisSessionManager:
                 break
             
             # 读取新事件
-            events = self.get_events(
+            events = await self.get_events(
                 session_id=session_id,
                 after_id=last_id,
-                limit=10  # 每次最多10个
+                limit=10
             )
             
             # 发送新事件
             for event in events:
                 yield event
-                # 使用 seq 字段更新 last_id
                 event_seq = event.get("seq", event.get("id", 0) if isinstance(event.get("id"), int) else 0)
                 last_id = max(last_id, event_seq)
             
             # 检查 session 是否结束
-            session_data = self.get_session_status(session_id)
-            if session_data and session_data.get("status") in ["completed", "failed"]:
+            session_data = await self.get_session_status(session_id)
+            if session_data and session_data.get("status") in ["completed", "failed", "stopped"]:
                 logger.debug(f"✅ Session 已结束: session_id={session_id}")
                 break
             
             # 没有新事件，等待一小段时间
             if not events:
-                await asyncio.sleep(0.1)  # 100ms
+                await asyncio.sleep(0.1)
             else:
-                # 有事件，立即检查下一批
-                await asyncio.sleep(0.01)  # 10ms
+                await asyncio.sleep(0.01)
+    
+    async def subscribe_events(
+        self,
+        session_id: str,
+        after_id: Optional[int] = None,
+        timeout: int = 300
+    ):
+        """
+        使用 Pub/Sub 订阅实时事件流（推荐）
+        
+        相比轮询的优势：
+        - 延迟更低（毫秒级 vs 100ms）
+        - 资源消耗更少（无空轮询）
+        
+        Args:
+            session_id: Session ID
+            after_id: 从哪个 event_id 之后开始（可选，用于补偿丢失的事件）
+            timeout: 超时时间（秒）
+            
+        Yields:
+            事件字典
+        """
+        client = await self._get_client()
+        channel = f"session:{session_id}:stream"
+        last_id = after_id or 0
+        
+        # 1. 先读取积压的事件（断线补偿）
+        if after_id is not None:
+            backlog_events = await self.get_events(
+                session_id=session_id,
+                after_id=after_id,
+                limit=1000
+            )
+            for event in backlog_events:
+                yield event
+                event_seq = event.get("seq", event.get("id", 0) if isinstance(event.get("id"), int) else 0)
+                last_id = max(last_id, event_seq)
+        
+        # 2. 订阅 Pub/Sub 频道
+        pubsub = client.pubsub()
+        await pubsub.subscribe(channel)
+        
+        try:
+            start_time = datetime.now()
+            
+            while True:
+                # 检查超时
+                elapsed = (datetime.now() - start_time).total_seconds()
+                if elapsed > timeout:
+                    logger.debug(f"⏱️ Pub/Sub 超时: session_id={session_id}")
+                    break
+                
+                # 读取 Pub/Sub 消息（非阻塞，带超时）
+                try:
+                    message = await asyncio.wait_for(
+                        pubsub.get_message(ignore_subscribe_messages=True),
+                        timeout=1.0  # 1秒超时，允许检查 session 状态
+                    )
+                except asyncio.TimeoutError:
+                    message = None
+                
+                if message and message["type"] == "message":
+                    try:
+                        event = json.loads(message["data"])
+                        event_seq = event.get("seq", event.get("id", 0) if isinstance(event.get("id"), int) else 0)
+                        
+                        # 过滤已处理的事件
+                        if event_seq > last_id:
+                            yield event
+                            last_id = event_seq
+                    except json.JSONDecodeError:
+                        logger.warning(f"⚠️ 无法解析 Pub/Sub 消息: {message['data']}")
+                
+                # 检查 session 是否结束
+                session_data = await self.get_session_status(session_id)
+                if session_data and session_data.get("status") in ["completed", "failed", "stopped"]:
+                    # 读取最后可能遗漏的事件
+                    final_events = await self.get_events(
+                        session_id=session_id,
+                        after_id=last_id,
+                        limit=100
+                    )
+                    for event in final_events:
+                        yield event
+                    
+                    logger.debug(f"✅ Session 已结束: session_id={session_id}")
+                    break
+        
+        finally:
+            # 清理订阅（在 CancelledError 时也要尽量清理）
+            try:
+                await pubsub.unsubscribe(channel)
+                await pubsub.close()
+            except asyncio.CancelledError:
+                # 连接已取消，忽略清理错误
+                logger.debug(f"🔌 Pub/Sub 清理被取消: session_id={session_id}")
+            except Exception as e:
+                logger.warning(f"⚠️ Pub/Sub 清理失败: {e}")
     
     # ==================== 用户 Session 列表 ====================
     
-    def get_user_sessions(self, user_id: str) -> List[str]:
+    async def get_user_sessions(self, user_id: str) -> List[str]:
         """
         获取用户的所有活跃 Session
         
@@ -466,10 +596,11 @@ class RedisSessionManager:
         Returns:
             Session ID 列表
         """
-        sessions = self.client.smembers(f"user:{user_id}:sessions")
+        client = await self._get_client()
+        sessions = await client.smembers(f"user:{user_id}:sessions")
         return list(sessions) if sessions else []
     
-    def get_user_sessions_detail(self, user_id: str) -> List[Dict[str, Any]]:
+    async def get_user_sessions_detail(self, user_id: str) -> List[Dict[str, Any]]:
         """
         获取用户的所有活跃 Session（包含详细信息）
         
@@ -479,11 +610,11 @@ class RedisSessionManager:
         Returns:
             Session 详情列表
         """
-        session_ids = self.get_user_sessions(user_id)
+        session_ids = await self.get_user_sessions(user_id)
         
         sessions_detail = []
         for session_id in session_ids:
-            status = self.get_session_status(session_id)
+            status = await self.get_session_status(session_id)
             if status:
                 sessions_detail.append(status)
         
@@ -491,22 +622,24 @@ class RedisSessionManager:
     
     # ==================== 停止控制 ====================
     
-    def set_stop_flag(self, session_id: str) -> None:
+    async def set_stop_flag(self, session_id: str) -> None:
         """
         设置停止标志（用户主动中断）
         
         Args:
             session_id: Session ID
         """
+        client = await self._get_client()
+        
         # 设置停止标志（60秒 TTL，防止泄漏）
-        self.client.set(
+        await client.set(
             f"session:{session_id}:stop_flag",
             "1",
             ex=60
         )
         logger.info(f"🛑 已设置停止标志: session_id={session_id}")
     
-    def is_stopped(self, session_id: str) -> bool:
+    async def is_stopped(self, session_id: str) -> bool:
         """
         检查 Session 是否被停止
         
@@ -516,51 +649,112 @@ class RedisSessionManager:
         Returns:
             是否已停止
         """
-        flag = self.client.get(f"session:{session_id}:stop_flag")
+        client = await self._get_client()
+        flag = await client.get(f"session:{session_id}:stop_flag")
         return flag == "1"
     
-    def clear_stop_flag(self, session_id: str) -> None:
+    async def clear_stop_flag(self, session_id: str) -> None:
         """
         清除停止标志
         
         Args:
             session_id: Session ID
         """
-        self.client.delete(f"session:{session_id}:stop_flag")
+        client = await self._get_client()
+        await client.delete(f"session:{session_id}:stop_flag")
     
     # ==================== 清理和维护 ====================
     
-    def cleanup_timeout_sessions(self) -> int:
+    async def cleanup_timeout_sessions(self) -> int:
         """
         清理超时的 Session
         
         Returns:
             清理的数量
         """
+        client = await self._get_client()
         cleaned = 0
         
         # 获取所有用户的 sessions keys
-        user_keys = self.client.keys("user:*:sessions")
+        user_keys = []
+        async for key in client.scan_iter("user:*:sessions"):
+            user_keys.append(key)
         
         for user_key in user_keys:
-            session_ids = self.client.smembers(user_key)
+            session_ids = await client.smembers(user_key)
             
             for session_id in session_ids:
                 # 检查心跳是否存在
-                heartbeat = self.client.get(f"session:{session_id}:heartbeat")
+                heartbeat = await client.get(f"session:{session_id}:heartbeat")
                 
                 if not heartbeat:
                     # 心跳已过期（超过 60 秒）
                     logger.warning(f"⚠️ Session 超时: {session_id}")
                     
                     # 标记为 timeout
-                    self.complete_session(session_id, status="timeout")
+                    await self.complete_session(session_id, status="timeout")
                     cleaned += 1
         
         if cleaned > 0:
             logger.info(f"🧹 清理了 {cleaned} 个超时的 Session")
         
         return cleaned
+    
+    # ==================== 分布式锁（用于清理任务防重入） ====================
+    
+    async def acquire_cleanup_lock(self, lock_timeout: int = 300) -> bool:
+        """
+        获取清理任务的分布式锁
+        
+        Args:
+            lock_timeout: 锁超时时间（秒），默认 5 分钟
+            
+        Returns:
+            是否成功获取锁
+        """
+        client = await self._get_client()
+        lock_key = "lock:cleanup_sessions"
+        # NX: 只在 key 不存在时设置
+        # EX: 设置过期时间，防止死锁
+        acquired = await client.set(lock_key, "1", nx=True, ex=lock_timeout)
+        if acquired:
+            logger.debug("🔒 获取清理任务锁成功")
+        return bool(acquired)
+    
+    async def release_cleanup_lock(self) -> None:
+        """
+        释放清理任务的分布式锁
+        """
+        client = await self._get_client()
+        lock_key = "lock:cleanup_sessions"
+        await client.delete(lock_key)
+        logger.debug("🔓 释放清理任务锁")
+    
+    async def cleanup_with_lock(self) -> int:
+        """
+        带分布式锁的清理（防止多实例并发清理）
+        
+        Returns:
+            清理的数量，-1 表示未获取到锁
+        """
+        # 尝试获取锁
+        if not await self.acquire_cleanup_lock():
+            logger.debug("⏭️ 清理任务已在运行中，跳过")
+            return -1
+        
+        try:
+            return await self.cleanup_timeout_sessions()
+        finally:
+            await self.release_cleanup_lock()
+    
+    async def close(self) -> None:
+        """
+        关闭 Redis 连接
+        """
+        if self._client:
+            await self._client.close()
+            self._client = None
+            logger.info("🔌 Redis 连接已关闭")
 
 
 # ==================== 便捷函数 ====================
@@ -584,4 +778,3 @@ def get_redis_manager(
             redis_password=redis_password
         )
     return _default_redis_manager
-

@@ -1,0 +1,65 @@
+# AWS S3 存储配置
+# 用于知识库文件上传、用户数据存储等
+
+aws:
+  # AWS 访问密钥（从环境变量读取）
+  # 设置方式: export AWS_ACCESS_KEY_ID=your_key_id
+  #          export AWS_SECRET_ACCESS_KEY=your_secret_key
+  access_key_id: ${AWS_ACCESS_KEY_ID}
+  secret_access_key: ${AWS_SECRET_ACCESS_KEY}
+  
+  # AWS 区域
+  region: "ap-southeast-1"
+  
+  # S3 配置
+  s3:
+    bucket_name: "dify-storage-zenflux"
+    endpoint_url: null  # 留空使用标准 AWS S3 端点
+    
+    # 上传配置
+    upload:
+      # 文件大小限制（MB）
+      max_file_size: 100
+      
+      # 允许的文件类型
+      allowed_extensions:
+        - pdf
+        - docx
+        - pptx
+        - xlsx
+        - txt
+        - md
+        - json
+        - csv
+        - png
+        - jpg
+        - jpeg
+        - gif
+        - mp3
+        - mp4
+        - wav
+      
+      # 自动生成的文件路径前缀
+      path_prefix:
+        knowledge: "knowledge/{user_id}/{timestamp}/"  # 知识库文件
+        avatar: "avatars/{user_id}/"  # 用户头像
+        attachment: "attachments/{user_id}/{conversation_id}/"  # 聊天附件
+        temp: "temp/{user_id}/"  # 临时文件
+    
+    # 访问控制
+    acl:
+      knowledge: "private"  # 知识库文件私有
+      avatar: "public-read"  # 头像公开可读
+      attachment: "private"  # 附件私有
+      temp: "private"  # 临时文件私有
+    
+    # 生命周期策略
+    lifecycle:
+      temp_expiration_days: 7  # 临时文件 7 天后自动删除
+
+# 本地存储配置（备用）
+local:
+  enabled: false
+  base_path: "workspace/uploads"
+  max_file_size: 100
+

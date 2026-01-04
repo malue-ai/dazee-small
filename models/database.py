@@ -46,18 +46,25 @@ class Message(BaseModel):
     - role: 角色 (user/assistant/system)
     - content: 消息内容（JSON 数组格式，兼容 Claude API）
         格式: [
+            {"type": "thinking", "thinking": "...", "signature": "..."},  # thinking 完整保存
             {"type": "text", "text": "..."},
             {"type": "tool_use", "id": "...", "name": "...", "input": {...}},
             {"type": "tool_result", "tool_use_id": "...", "content": "..."}
         ]
-    - status: 消息状态（JSON 对象）
+        说明：thinking block 完整保存在 content 数组最前面（含 signature），确保 RVR 循环正常工作
+    - status: 消息状态（JSON 对象，纯状态信息，不含内容）
         格式: {
-            "index": 0,           # 步骤索引
-            "action": "think",    # 动作类型: think/action/plan/validate/reflect
-            "description": "..."  # 步骤描述
+            "action": "completed",     # 动作状态: completed/stopped/failed
+            "has_thinking": true,      # 是否包含 thinking
+            "blocks_count": 5          # 内容块数量
         }
     - score: 评分/质量分数
     - metadata: 其他元数据（如 session_id, model, usage 等）
+            
+    存储策略说明：
+    - content: 完整存储所有内容块（thinking + text + tool_use + tool_result）
+    - status: 纯状态字段，不再混入 thinking 内容
+    - 前端: 从 content 中提取 thinking block 来展示思考过程
     """
     
     id: str = Field(..., description="消息唯一标识（UUID）")

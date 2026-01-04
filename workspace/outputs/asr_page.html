@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ASR 语音识别系统</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 900px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+
+        h1 {
+            text-align: center;
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+        }
+
+        .control-panel {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 15px;
+            margin-bottom: 25px;
+        }
+
+        .language-selector {
+            margin-bottom: 20px;
+        }
+
+        .language-selector label {
+            display: block;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 8px;
+        }
+
+        .language-selector select {
+            width: 100%;
+            padding: 12px;
+            font-size: 16px;
+            border: 2px solid #667eea;
+            border-radius: 8px;
+            background: white;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .language-selector select:focus {
+            outline: none;
+            border-color: #764ba2;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .status-bar {
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-weight: bold;
+            text-align: center;
+            transition: all 0.3s;
+        }
+
+        .status-bar.ready {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .status-bar.listening {
+            background: #fef3c7;
+            color: #92400e;
+            animation: pulse 1.5s infinite;
+        }
+
+        .status-bar.error {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .button-group {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin-bottom: 25px;
+        }
+
+        .btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 15px 35px;
+            font-size: 16px;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn:hover {
+            background: #764ba2;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-stop {
+            background: #ef4444;
+        }
+
+        .btn-stop:hover {
+            background: #dc2626;
+        }
+
+        .btn-clear {
+            background: #6b7280;
+        }
+
+        .btn-clear:hover {
+            background: #4b5563;
+        }
+
+        .result-box {
+            background: #f8f9fa;
+            border: 2px solid #e5e7eb;
+            border-radius: 15px;
+            padding: 25px;
+            min-height: 200px;
+            margin-bottom: 25px;
+        }
+
+        .result-box h3 {
+            color: #333;
+            margin-bottom: 15px;
+        }
+
+        .transcript {
+            font-size: 18px;
+            line-height: 1.8;
+            color: #1f2937;
+            min-height: 150px;
+        }
+
+        .transcript .interim {
+            color: #9ca3af;
+            font-style: italic;
+        }
+
+        .placeholder {
+            color: #9ca3af;
+            font-style: italic;
+        }
+
+        .info-section {
+            background: #eff6ff;
+            border-left: 4px solid #667eea;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 25px;
+        }
+
+        .info-section h3 {
+            color: #667eea;
+            margin-bottom: 12px;
+        }
+
+        .info-section ul {
+            list-style-position: inside;
+            color: #4b5563;
+            line-height: 1.8;
+        }
+
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .feature-card {
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .feature-card .icon {
+            font-size: 2em;
+            margin-bottom: 8px;
+        }
+
+        .feature-card .title {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .feature-card .desc {
+            font-size: 14px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎤 ASR 语音识别系统</h1>
+        <p class="subtitle">基于 Web Speech API 的实时语音转文字</p>
+
+        <div class="control-panel">
+            <div class="language-selector">
+                <label for="language">🌍 选择识别语言：</label>
+                <select id="language">
+                    <option value="zh-CN">🇨🇳 中文（普通话）</option>
+                    <option value="en-US">🇺🇸 English (US)</option>
+                    <option value="en-GB">🇬🇧 English (UK)</option>
+                    <option value="ja-JP">🇯🇵 日本語</option>
+                    <option value="ko-KR">🇰🇷 한국어</option>
+                    <option value="yue-Hant-HK">🇭🇰 粤语</option>
+                    <option value="cmn-Hans-CN">🇨🇳 中文（中国大陆）</option>
+                </select>
+            </div>
+
+            <div id="status" class="status-bar ready">
+                ✅ 准备就绪 - 点击开始录音按钮
+            </div>
+
+            <div class="button-group">
+                <button id="startBtn" class="btn">
+                    <span>🎙️</span>
+                    <span>开始录音</span>
+                </button>
+                <button id="stopBtn" class="btn btn-stop" style="display: none;">
+                    <span>⏹️</span>
+                    <span>停止录音</span>
+                </button>
+                <button id="clearBtn" class="btn btn-clear">
+                    <span>🗑️</span>
+                    <span>清除文本</span>
+                </button>
+            </div>
+        </div>
+
+        <div class="result-box">
+            <h3>📝 识别结果</h3>
+            <div id="transcript" class="transcript">
+                <div class="placeholder">识别的文字将显示在这里，请点击"开始录音"按钮开始...</div>
+            </div>
+        </div>
+
+        <div class="features">
+            <div class="feature-card">
+                <div class="icon">🎙️</div>
+                <div class="title">实时识别</div>
+                <div class="desc">边说边显示</div>
+            </div>
+            <div class="feature-card">
+                <div class="icon">🌍</div>
+                <div class="title">多语言</div>
+                <div class="desc">支持7+种语言</div>
+            </div>
+            <div class="feature-card">
+                <div class="icon">⚡</div>
+                <div class="title">快速响应</div>
+                <div class="desc">毫秒级延迟</div>
+            </div>
+            <div class="feature-card">
+                <div class="icon">🆓</div>
+                <div class="title">完全免费</div>
+                <div class="desc">无需API密钥</div>
+            </div>
+        </div>
+
+        <div class="info-section">
+            <h3>📖 使用说明</h3>
+            <ul>
+                <li>1️⃣ 选择您要识别的语言</li>
+                <li>2️⃣ 点击"开始录音"按钮</li>
+                <li>3️⃣ 允许浏览器访问麦克风（首次使用）</li>
+                <li>4️⃣ 对着麦克风清晰地说话</li>
+                <li>5️⃣ 文字会实时显示在结果框中</li>
+                <li>6️⃣ 点击"停止录音"结束识别</li>
+            </ul>
+        </div>
+
+        <div class="info-section" style="background: #fef3c7; border-color: #f59e0b; margin-top: 15px;">
+            <h3 style="color: #d97706;">💡 提示</h3>
+            <ul style="color: #92400e;">
+                <li>🎤 请确保麦克风权限已开启</li>
+                <li>🌐 推荐使用 Chrome、Edge 或 Safari 浏览器</li>
+                <li>🔊 清晰的发音和安静的环境能提高识别准确率</li>
+                <li>📱 移动设备也可以使用此功能</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const transcriptDiv = document.getElementById('transcript');
+        const statusDiv = document.getElementById('status');
+        const languageSelect = document.getElementById('language');
+
+        let recognition;
+        let finalTranscript = '';
+        let isRecognizing = false;
+
+        // 检查浏览器支持
+        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRecognition();
+
+            // 配置识别参数
+            recognition.continuous = true;  // 持续识别
+            recognition.interimResults = true;  // 显示中间结果
+            recognition.lang = languageSelect.value;
+            recognition.maxAlternatives = 1;
+
+            // 语言变更事件
+            languageSelect.addEventListener('change', () => {
+                recognition.lang = languageSelect.value;
+                console.log('语言切换到:', languageSelect.value);
+            });
+
+            // 识别开始
+            recognition.onstart = () => {
+                isRecognizing = true;
+                statusDiv.className = 'status-bar listening';
+                statusDiv.textContent = '🎙️ 正在监听... 请开始说话';
+                startBtn.style.display = 'none';
+                stopBtn.style.display = 'flex';
+                console.log('识别开始');
+            };
+
+            // 识别结果
+            recognition.onresult = (event) => {
+                let interimTranscript = '';
+
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const transcript = event.results[i][0].transcript;
+
+                    if (event.results[i].isFinal) {
+                        finalTranscript += transcript + ' ';
+                    } else {
+                        interimTranscript += transcript;
+                    }
+                }
+
+                // 更新显示
+                transcriptDiv.innerHTML = 
+                    (finalTranscript || '') + 
+                    '<span class="interim">' + interimTranscript + '</span>';
+
+                // 自动滚动到底部
+                transcriptDiv.scrollTop = transcriptDiv.scrollHeight;
+            };
+
+            // 识别错误
+            recognition.onerror = (event) => {
+                console.error('识别错误:', event.error);
+                let errorMsg = '❌ 错误: ';
+
+                switch(event.error) {
+                    case 'no-speech':
+                        errorMsg += '没有检测到语音，请重试';
+                        break;
+                    case 'audio-capture':
+                        errorMsg += '无法访问麦克风';
+                        break;
+                    case 'not-allowed':
+                        errorMsg += '麦克风权限被拒绝';
+                        break;
+                    case 'network':
+                        errorMsg += '网络错误';
+                        break;
+                    default:
+                        errorMsg += event.error;
+                }
+
+                statusDiv.className = 'status-bar error';
+                statusDiv.textContent = errorMsg;
+
+                stopBtn.style.display = 'none';
+                startBtn.style.display = 'flex';
+                isRecognizing = false;
+            };
+
+            // 识别结束
+            recognition.onend = () => {
+                isRecognizing = false;
+                statusDiv.className = 'status-bar ready';
+                statusDiv.textContent = '✅ 准备就绪 - 点击开始录音按钮';
+                stopBtn.style.display = 'none';
+                startBtn.style.display = 'flex';
+                console.log('识别结束');
+            };
+
+            // 开始按钮
+            startBtn.onclick = () => {
+                try {
+                    recognition.lang = languageSelect.value;
+                    recognition.start();
+                } catch (error) {
+                    console.error('启动失败:', error);
+                }
+            };
+
+            // 停止按钮
+            stopBtn.onclick = () => {
+                recognition.stop();
+            };
+
+            // 清除按钮
+            clearBtn.onclick = () => {
+                finalTranscript = '';
+                transcriptDiv.innerHTML = '<div class="placeholder">识别的文字将显示在这里，请点击"开始录音"按钮开始...</div>';
+                statusDiv.className = 'status-bar ready';
+                statusDiv.textContent = '✅ 准备就绪 - 点击开始录音按钮';
+            };
+
+        } else {
+            // 浏览器不支持
+            statusDiv.className = 'status-bar error';
+            statusDiv.textContent = '❌ 您的浏览器不支持语音识别功能';
+            startBtn.disabled = true;
+            languageSelect.disabled = true;
+            transcriptDiv.innerHTML = `
+                <div style="color: #ef4444; text-align: center; padding: 20px;">
+                    <p style="font-size: 20px; margin-bottom: 10px;">😢 抱歉，您的浏览器不支持 Web Speech API</p>
+                    <p>请使用以下浏览器：</p>
+                    <ul style="list-style: none; margin-top: 15px;">
+                        <li>✅ Google Chrome</li>
+                        <li>✅ Microsoft Edge</li>
+                        <li>✅ Safari (macOS/iOS)</li>
+                    </ul>
+                </div>
+            `;
+        }
+    </script>
+</body>
+</html>

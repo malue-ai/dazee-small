@@ -13,21 +13,25 @@ logger = get_logger("events.base")
 
 
 class EventStorage(Protocol):
-    """事件存储协议（抽象接口）"""
+    """
+    事件存储协议（抽象接口）
     
-    def generate_session_seq(self, session_id: str) -> int:
+    所有方法都是异步的，支持异步 Redis 客户端
+    """
+    
+    async def generate_session_seq(self, session_id: str) -> int:
         """生成 session 内的事件序号（从 1 开始）"""
         ...
     
-    def get_session_context(self, session_id: str) -> Dict[str, Any]:
+    async def get_session_context(self, session_id: str) -> Dict[str, Any]:
         """获取 session 上下文（conversation_id 等）"""
         ...
     
-    def buffer_event(self, session_id: str, event_data: Dict[str, Any]) -> None:
+    async def buffer_event(self, session_id: str, event_data: Dict[str, Any]) -> None:
         """缓冲事件"""
         ...
     
-    def update_heartbeat(self, session_id: str) -> None:
+    async def update_heartbeat(self, session_id: str) -> None:
         """更新心跳"""
         ...
 
@@ -94,12 +98,12 @@ class BaseEventManager:
         # 1. 生成全局唯一 UUID
         event_uuid = str(uuid4())
         
-        # 2. 生成 session 内序号（从 1 开始）
-        seq = self.storage.generate_session_seq(session_id)
+        # 2. 生成 session 内序号（从 1 开始）- 异步
+        seq = await self.storage.generate_session_seq(session_id)
         
-        # 3. 获取上下文信息（如果没有提供）
+        # 3. 获取上下文信息（如果没有提供）- 异步
         if not conversation_id:
-            session_context = self.storage.get_session_context(session_id)
+            session_context = await self.storage.get_session_context(session_id)
             conversation_id = conversation_id or session_context.get("conversation_id")
         
         # 4. 构建统一格式的事件
@@ -118,20 +122,18 @@ class BaseEventManager:
             "data": event.get("data", {})
         }
         
-        # 5. 委托给 storage 处理存储
-        self.storage.buffer_event(
+        # 5. 委托给 storage 处理存储 - 异步
+        await self.storage.buffer_event(
             session_id=session_id,
             event_data=complete_event
         )
         
-        # 6. 委托给 storage 更新心跳
-        self.storage.update_heartbeat(session_id)
-        
-        return complete_event
+        # 6. 委托给 storage 更新心跳 - 异步
+        await self.storage.update_heartbeat(session_id)
         
         logger.debug(
             f"📤 已发送事件: type={complete_event['type']}, "
-            f"id={event_id}, session_id={session_id}"
+            f"seq={seq}, session_id={session_id}"
         )
         
         return complete_event
@@ -156,4 +158,3 @@ class BaseEventManager:
             "data": data,
             "timestamp": datetime.now().isoformat()
         }
-

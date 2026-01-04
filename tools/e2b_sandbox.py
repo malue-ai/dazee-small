@@ -1,18 +1,18 @@
 """
-E2B Python Sandbox Tool - V1.0
+E2B Python Sandbox Tool - V2.0
 
 职责：
 1. 创建和管理E2B沙箱
 2. 执行Python代码（支持流式输出）
 3. 自动安装第三方包
 4. 文件系统同步（workspace <-> sandbox）
-5. 与WorkingMemory集成（会话管理）
+5. 产物自动保存到 conversation workspace
 
-设计原则（V3.7架构）：
-✅ 状态存储在Memory,而不是工具内部
-✅ 支持沙箱复用（同一session多次调用）
-✅ 自动清理资源（session结束时）
-✅ 独立可测试（不依赖Agent）
+设计原则：
+✅ 基于 conversation_id 隔离 workspace
+✅ 产物自动下载到 workspace/{conv_id}/workspace/
+✅ Agent 使用相对路径，不感知真实路径
+✅ 支持沙箱复用（同一 conversation 多次调用）
 ✅ 流式输出（集成EventManager）
 
 参考文档：
@@ -32,6 +32,14 @@ from pathlib import Path
 from logger import get_logger
 
 logger = get_logger("e2b_sandbox")
+
+# 说明：E2B SDK 的 list/query 依赖这些类型
+try:
+    from e2b.sandbox.sandbox_api import SandboxQuery
+    from e2b.api.client.models.sandbox_state import SandboxState
+except Exception:
+    SandboxQuery = None
+    SandboxState = None
 
 # E2B SDK
 try:
@@ -58,49 +66,69 @@ class E2BPythonSandbox:
     - execute_code(): 执行Python代码（支持流式输出）
     - install_packages(): 安装第三方包
     - upload_file(): 上传文件到沙箱
-    - download_file(): 从沙箱下载文件
+    - download_file(): 从沙箱下载文件到 workspace
     - terminate(): 终止沙箱
+    
+    重要变更（V2.0）：
+    - 使用 WorkspaceManager 管理文件
+    - 产物保存到 workspace/conversations/{conv_id}/workspace/
+    - Agent 使用相对路径
     """
     
     def __init__(
         self, 
-        memory: "WorkingMemory",
         api_key: str = None,
         event_manager = None,
-        workspace_dir: str = None
+        workspace_base_dir: str = "./workspace"
     ):
         """
         初始化E2B沙箱工具
         
         Args:
-            memory: WorkingMemory实例（用于会话管理）
             api_key: E2B API密钥（默认从环境变量读取）
             event_manager: EventManager实例（用于流式输出）
-            workspace_dir: 工作目录（用于文件同步）
+            workspace_base_dir: workspace 根目录
         """
         if not E2B_AVAILABLE:
             raise RuntimeError("E2B SDK 未安装")
         
-        self.memory = memory
         self.api_key = api_key or os.getenv("E2B_API_KEY")
         self.event_manager = event_manager
-        self.workspace_dir = Path(workspace_dir) if workspace_dir else Path.cwd() / "workspace"
+        self.workspace_base_dir = Path(workspace_base_dir)
         
         if not self.api_key:
             raise ValueError("E2B_API_KEY 未设置")
         
-        # 创建workspace目录结构
-        (self.workspace_dir / "inputs").mkdir(parents=True, exist_ok=True)
-        (self.workspace_dir / "outputs").mkdir(parents=True, exist_ok=True)
-        (self.workspace_dir / "temp").mkdir(parents=True, exist_ok=True)
+        # 导入 WorkspaceManager
+        from core.workspace_manager import get_workspace_manager
+        self.workspace_manager = get_workspace_manager(str(self.workspace_base_dir))
         
-        # 沙箱对象缓存（用于复用）
-        self._sandbox_cache: Dict[str, Any] = {}
+        # 内部状态管理（按 conversation_id 隔离）
+        self._conversation_data: Dict[str, Dict[str, Any]] = {}  # conv_id -> session_data
+        self._execution_history: Dict[str, List[Dict[str, Any]]] = {}  # conv_id -> history
         
-        # 模板ID缓存
-        self._current_template: str = "base"
+        # 沙箱对象缓存（按 conversation_id）
+        self._sandbox_cache: Dict[str, Any] = {}  # conv_id -> sandbox
         
-        logger.info("✅ E2BPythonSandbox 已初始化")
+        logger.info("✅ E2BPythonSandbox 已初始化（V2.0，支持 conversation 隔离）")
+    
+    def _get_session_data(self, conversation_id: str) -> Dict[str, Any]:
+        """获取 conversation 的会话数据"""
+        if conversation_id not in self._conversation_data:
+            self._conversation_data[conversation_id] = {
+                "sandbox_id": None,
+                "template": None,
+                "installed_packages": [],
+                "status": "inactive",
+                "created_at": None
+            }
+        return self._conversation_data[conversation_id]
+    
+    def _get_execution_history(self, conversation_id: str) -> List[Dict[str, Any]]:
+        """获取 conversation 的执行历史"""
+        if conversation_id not in self._execution_history:
+            self._execution_history[conversation_id] = []
+        return self._execution_history[conversation_id]
     
     async def execute(self, session_id: str = None, **params) -> Dict[str, Any]:
         """
@@ -108,20 +136,23 @@ class E2BPythonSandbox:
         
         参数（来自input_schema）：
             code: Python代码
+            conversation_id: 对话ID（必须）
             template: 沙箱模板（可选）
             enable_stream: 是否启用流式输出
             auto_install: 是否自动安装包
             timeout: 超时时间
-            background: 是否后台运行
-            return_files: 要返回的文件列表
+            return_files: 要返回的文件列表（沙箱中的绝对路径）
+            save_to: 产物保存的相对路径（相对于 workspace，默认直接保存到根目录）
         """
         code = params.get("code")
         template = params.get("template", "base")
+        user_id = params.get("user_id")
+        conversation_id = params.get("conversation_id")
         enable_stream = params.get("enable_stream", True)
         auto_install = params.get("auto_install", True)
         timeout = params.get("timeout", 300)
-        background = params.get("background", False)
         return_files = params.get("return_files", [])
+        save_to = params.get("save_to", "")  # 相对于 workspace 的保存路径
         
         if not code:
             return {
@@ -129,15 +160,27 @@ class E2BPythonSandbox:
                 "error": "代码不能为空"
             }
         
+        if not conversation_id:
+            return {
+                "success": False,
+                "error": "conversation_id 不能为空"
+            }
+        
         start_time = time.time()
+        session_data = self._get_session_data(conversation_id)
         
         try:
             # 1. 获取或创建沙箱
-            sandbox = await self._get_or_create_sandbox(template)
+            sandbox = await self._get_or_create_sandbox(
+                template=template,
+                session_id=session_id,
+                user_id=user_id,
+                conversation_id=conversation_id,
+            )
             
             # 2. 自动安装依赖包（如果启用）
             if auto_install:
-                await self._auto_install_packages(sandbox, code)
+                await self._auto_install_packages(sandbox, code, conversation_id)
             
             # 3. 执行代码
             if enable_stream and self.event_manager and session_id:
@@ -156,12 +199,17 @@ class E2BPythonSandbox:
                     timeout=timeout
                 )
             
-            # 4. 下载返回文件（如果指定）
+            # 4. 下载返回文件到 workspace（如果指定）
             files_data = {}
             if return_files:
-                files_data = await self._download_files(sandbox, return_files)
+                files_data = await self._download_files_to_workspace(
+                    sandbox=sandbox,
+                    conversation_id=conversation_id,
+                    remote_paths=return_files,
+                    save_to=save_to
+                )
             
-            # 5. 更新Memory
+            # 5. 记录执行历史
             execution_time = time.time() - start_time
             execution_result = {
                 "success": result.get("success", False),
@@ -172,11 +220,13 @@ class E2BPythonSandbox:
                 "execution_time": execution_time
             }
             
-            self.memory.add_e2b_execution(
-                code=code,
-                result=execution_result,
-                execution_time=execution_time
-            )
+            # 添加到执行历史（按 conversation 隔离）
+            history = self._get_execution_history(conversation_id)
+            history.append({
+                "code": code,
+                "result": execution_result,
+                "timestamp": time.time()
+            })
             
             return execution_result
             
@@ -190,70 +240,148 @@ class E2BPythonSandbox:
                 "execution_time": time.time() - start_time
             }
             
-            self.memory.add_e2b_execution(
-                code=code,
-                result=error_result,
-                execution_time=error_result["execution_time"]
-            )
+            # 添加到执行历史
+            history = self._get_execution_history(conversation_id)
+            history.append({
+                "code": code,
+                "result": error_result,
+                "timestamp": time.time()
+            })
             
             return error_result
     
-    async def _get_or_create_sandbox(self, template: str = "base"):
+    async def _get_or_create_sandbox(
+        self,
+        template: str = "base",
+        session_id: str | None = None,
+        user_id: str | None = None,
+        conversation_id: str | None = None,
+    ):
         """
-        获取或创建沙箱（核心：Memory-First）
+        获取或创建沙箱（基于 conversation_id 隔离）
+
+        说明：
+        - 每个 conversation 有独立的 sandbox
+        - 可以通过 metadata 找回仍存活的沙盒
+
+        Args:
+            template: 沙箱模板
+            session_id: 会话 ID
+            user_id: 用户 ID
+            conversation_id: 对话 ID（必须）
+
+        Returns:
+            E2B Sandbox 实例
+        """
+        if not conversation_id:
+            raise ValueError("conversation_id 不能为空")
         
-        逻辑：
-        1. 检查Memory中是否有活跃会话
-        2. 如果有，尝试复用（连接到现有沙箱）
-        3. 如果没有或连接失败，创建新沙箱
-        4. 更新Memory
-        """
-        # 1. 检查Memory中的会话
-        if self.memory.has_e2b_session():
-            session = self.memory.get_e2b_session()
-            sandbox_id = session.sandbox_id
-            
-            # 尝试从缓存获取
-            if sandbox_id in self._sandbox_cache:
-                logger.info(f"♻️ 复用缓存沙箱: {sandbox_id}")
-                return self._sandbox_cache[sandbox_id]
-            
-            # 尝试连接到现有沙箱
+        session_data = self._get_session_data(conversation_id)
+
+        # 构造 metadata（E2B 要求 Dict[str, str]）
+        metadata: Dict[str, str] = {"zenflux_tool": "e2b_python_sandbox"}
+        if session_id:
+            metadata["session_id"] = str(session_id)
+        if user_id:
+            metadata["user_id"] = str(user_id)
+        metadata["conversation_id"] = str(conversation_id)
+
+        # 1. 检查缓存中是否有该 conversation 的沙箱
+        if conversation_id in self._sandbox_cache:
+            sandbox = self._sandbox_cache[conversation_id]
+            try:
+                # 验证沙箱是否还活着
+                test_result = await asyncio.to_thread(
+                    sandbox.commands.run,
+                    "echo 'ping'",
+                    timeout=10
+                )
+                if test_result.exit_code == 0:
+                    logger.info(f"♻️ 复用缓存沙箱: {sandbox.sandbox_id} (conversation: {conversation_id})")
+                    return sandbox
+                else:
+                    raise Exception("沙箱无响应")
+            except Exception as e:
+                logger.warning(f"⚠️ 缓存沙箱已失效: {e}")
+                del self._sandbox_cache[conversation_id]
+                session_data["sandbox_id"] = None
+                session_data["status"] = "inactive"
+        
+        # 2. 检查内部状态中是否有 sandbox_id（可能缓存丢失但沙箱仍存活）
+        if session_data.get("sandbox_id") and session_data.get("status") == "active":
+            sandbox_id = session_data["sandbox_id"]
             try:
                 if self.api_key and self.api_key != os.getenv("E2B_API_KEY"):
                     os.environ["E2B_API_KEY"] = self.api_key
                 
                 sandbox = await asyncio.to_thread(
-                    CodeInterpreter.connect,
+                    getattr(CodeInterpreter, "_cls_connect"),
                     sandbox_id
                 )
-                self._sandbox_cache[sandbox_id] = sandbox
-                logger.info(f"🔗 重新连接沙箱: {sandbox_id}")
-                return sandbox
+                
+                # 验证连接
+                test_result = await asyncio.to_thread(
+                    sandbox.commands.run,
+                    "echo 'connected'",
+                    timeout=10
+                )
+                if test_result.exit_code == 0:
+                    self._sandbox_cache[conversation_id] = sandbox
+                    logger.info(f"🔗 重新连接沙箱: {sandbox_id}")
+                    return sandbox
             except Exception as e:
-                logger.warning(f"⚠️ 沙箱连接失败，创建新沙箱: {e}")
-                self.memory.clear_e2b_session()
+                logger.warning(f"⚠️ 沙箱连接失败: {e}")
+                session_data["sandbox_id"] = None
+                session_data["status"] = "inactive"
+                session_data["installed_packages"] = []
         
-        # 2. 创建新沙箱
-        logger.info(f"🆕 创建新沙箱 (template={template})...")
+        # 3. 尝试通过 metadata 找回仍存活的沙箱
+        if SandboxQuery and SandboxState:
+            try:
+                query = SandboxQuery(
+                    metadata={"conversation_id": conversation_id}, 
+                    state=[SandboxState.RUNNING, SandboxState.PAUSED]
+                )
+                paginator = CodeInterpreter.list(query=query, limit=1)
+                items = paginator.next_items()
+                if items:
+                    found = items[0]
+                    found_id = getattr(found, "sandbox_id", None) or getattr(found, "id", None)
+                    if found_id:
+                        logger.info(f"🔎 通过 metadata 找到沙箱: {found_id}")
+                        sandbox = await asyncio.to_thread(
+                            getattr(CodeInterpreter, "_cls_connect"),
+                            found_id
+                        )
+                        session_data.update({
+                            "sandbox_id": sandbox.sandbox_id,
+                            "template": template,
+                            "status": "active",
+                            "created_at": datetime.now().isoformat()
+                        })
+                        self._sandbox_cache[conversation_id] = sandbox
+                        return sandbox
+            except Exception as e:
+                logger.warning(f"⚠️ metadata 找回沙箱失败: {e}")
+        
+        # 4. 创建新沙箱
+        logger.info(f"🆕 创建新沙箱 (conversation: {conversation_id}, template={template})...")
         
         try:
-            # 使用环境变量或参数传递API key
             if self.api_key and self.api_key != os.getenv("E2B_API_KEY"):
                 os.environ["E2B_API_KEY"] = self.api_key
             
             sandbox = await asyncio.to_thread(
                 CodeInterpreter.create,
-                timeout=120  # 设置120秒超时
+                timeout=120,
+                metadata=metadata,
             )
             
-            # 等待沙箱就绪
             logger.info("⏳ 等待沙箱就绪...")
-            await asyncio.sleep(5)  # 等待5秒让沙箱完全启动
+            await asyncio.sleep(5)
             
             # 验证沙箱状态
             try:
-                # 运行简单测试验证沙箱可用
                 test_result = await asyncio.to_thread(
                     sandbox.run_code,
                     "print('sandbox ready')",
@@ -267,20 +395,17 @@ class E2BPythonSandbox:
             logger.error(f"❌ 沙箱创建失败: {e}")
             raise RuntimeError(f"E2B沙箱创建失败: {e}")
         
-        # 3. 保存到Memory
-        from core.memory import E2BSandboxSession
-        session = E2BSandboxSession(
-            sandbox_id=sandbox.sandbox_id,
-            created_at=datetime.now(),
-            template=template,
-            status="active"
-        )
-        self.memory.set_e2b_session(session)
-        self._sandbox_cache[sandbox.sandbox_id] = sandbox
-        self._current_template = template
+        # 5. 保存状态
+        session_data.update({
+            "sandbox_id": sandbox.sandbox_id,
+            "template": template,
+            "status": "active",
+            "created_at": datetime.now().isoformat()
+        })
+        self._sandbox_cache[conversation_id] = sandbox
         
-        # 4. 自动同步workspace文件
-        await self._auto_sync_workspace(sandbox)
+        # 6. 自动同步 workspace 文件到沙箱
+        await self._auto_sync_workspace(sandbox, conversation_id)
         
         logger.info(f"✅ 新沙箱已创建: {sandbox.sandbox_id}")
         return sandbox
@@ -430,6 +555,25 @@ class E2BPythonSandbox:
         """
         imports = set()
         
+        # Python 内置模块（不需要安装）
+        builtin_modules = {
+            "os", "sys", "re", "json", "time", "datetime", "math", "random",
+            "collections", "itertools", "functools", "typing", "pathlib",
+            "io", "pickle", "copy", "shutil", "tempfile", "glob", "fnmatch",
+            "subprocess", "threading", "multiprocessing", "asyncio", "concurrent",
+            "socket", "ssl", "http", "urllib", "email", "html", "xml",
+            "logging", "warnings", "traceback", "inspect", "dis", "gc",
+            "abc", "contextlib", "dataclasses", "enum", "types",
+            "hashlib", "hmac", "secrets", "base64", "binascii",
+            "struct", "codecs", "unicodedata", "string", "textwrap",
+            "difflib", "csv", "configparser", "argparse", "getopt",
+            "unittest", "doctest", "pdb", "profile", "timeit",
+            "platform", "ctypes", "uuid", "weakref", "operator",
+            "heapq", "bisect", "array", "queue", "decimal", "fractions",
+            "statistics", "cmath", "numbers", "builtins", "__future__",
+            "zipfile", "tarfile", "gzip", "bz2", "lzma", "zlib"
+        }
+        
         # 包名映射（import名 → pip包名）
         package_mapping = {
             "cv2": "opencv-python",
@@ -449,6 +593,9 @@ class E2BPythonSandbox:
             match1 = re.match(pattern1, line)
             if match1:
                 pkg = match1.group(1).split('.')[0]
+                # 跳过内置模块
+                if pkg in builtin_modules:
+                    continue
                 # 应用映射
                 pkg = package_mapping.get(pkg, pkg)
                 imports.add(pkg)
@@ -456,12 +603,15 @@ class E2BPythonSandbox:
             match2 = re.match(pattern2, line)
             if match2:
                 pkg = match2.group(1).split('.')[0]
+                # 跳过内置模块
+                if pkg in builtin_modules:
+                    continue
                 pkg = package_mapping.get(pkg, pkg)
                 imports.add(pkg)
         
         return list(imports)
     
-    async def _auto_install_packages(self, sandbox, code: str):
+    async def _auto_install_packages(self, sandbox, code: str, conversation_id: str):
         """
         自动检测并安装缺失的包
         
@@ -476,9 +626,9 @@ class E2BPythonSandbox:
         if not imports:
             return
         
-        # 检查已安装的包
-        session = self.memory.get_e2b_session()
-        installed = set(session.installed_packages) if session else set()
+        # 检查已安装的包（从 conversation 状态）
+        session_data = self._get_session_data(conversation_id)
+        installed = set(session_data.get("installed_packages", []))
         
         # 需要安装的包
         to_install = [pkg for pkg in imports if pkg not in installed]
@@ -498,12 +648,10 @@ class E2BPythonSandbox:
             )
             
             if result.exit_code == 0:
-                # 更新 Memory
-                if session:
-                    session.installed_packages.extend(to_install)
-                    self.memory.update_e2b_session(
-                        installed_packages=session.installed_packages
-                    )
+                # 更新状态
+                current_packages = session_data.get("installed_packages", [])
+                current_packages.extend(to_install)
+                session_data["installed_packages"] = current_packages
                 logger.info(f"✅ 包安装成功: {', '.join(to_install)}")
             else:
                 logger.warning(f"⚠️ 包安装失败: {result.stderr}")
@@ -511,29 +659,41 @@ class E2BPythonSandbox:
         except Exception as e:
             logger.error(f"❌ 包安装异常: {e}")
     
-    async def _auto_sync_workspace(self, sandbox):
+    async def _auto_sync_workspace(self, sandbox, conversation_id: str):
         """
-        自动同步 workspace/inputs/ 到沙箱
+        自动同步 workspace 文件到沙箱
         
         使用场景：
         - 沙箱启动时
-        - 用户上传新文件时
-        """
-        inputs_dir = self.workspace_dir / "inputs"
+        - 把 conversation 的 workspace 文件同步到沙箱
         
-        if not inputs_dir.exists():
+        Args:
+            sandbox: E2B Sandbox 实例
+            conversation_id: 对话 ID
+        """
+        workspace_root = self.workspace_manager.get_workspace_root(conversation_id)
+        
+        if not workspace_root.exists():
             return
         
         synced_files = []
-        for file_path in inputs_dir.glob("**/*"):
+        for file_path in workspace_root.rglob("*"):
             if file_path.is_file():
-                relative_path = file_path.relative_to(inputs_dir)
-                remote_path = f"/home/user/input_data/{relative_path}"
+                relative_path = file_path.relative_to(workspace_root)
+                remote_path = f"/home/user/workspace/{relative_path}"
                 
                 try:
                     # 读取文件内容
-                    with open(file_path, 'rb') as f:
-                        content = f.read()
+                    content = file_path.read_bytes()
+                    
+                    # 确保远程目录存在
+                    remote_dir = str(Path(remote_path).parent)
+                    if remote_dir != "/home/user/workspace":
+                        await asyncio.to_thread(
+                            sandbox.commands.run,
+                            f"mkdir -p {remote_dir}",
+                            timeout=10
+                        )
                     
                     # 上传到沙箱
                     await asyncio.to_thread(
@@ -549,30 +709,35 @@ class E2BPythonSandbox:
                     logger.warning(f"⚠️ 文件上传失败 {file_path}: {e}")
         
         if synced_files:
-            logger.info(f"📁 同步完成: {len(synced_files)} 个文件")
+            logger.info(f"📁 Workspace 同步完成: {len(synced_files)} 个文件")
     
-    async def _download_files(
+    async def _download_files_to_workspace(
         self,
         sandbox,
-        file_paths: List[str]
+        conversation_id: str,
+        remote_paths: List[str],
+        save_to: str = ""
     ) -> Dict[str, Any]:
         """
-        从沙箱下载文件
+        从沙箱下载文件到 workspace
+        
+        Args:
+            sandbox: E2B Sandbox 实例
+            conversation_id: 对话 ID
+            remote_paths: 沙箱中的文件路径列表
+            save_to: 保存到 workspace 的相对路径（默认为根目录）
         
         返回格式：
         {
-            "/home/user/output_data/result.csv": {
-                "local_path": "workspace/outputs/result.csv",
-                "size": 1024,
-                "content_type": "text/csv"
+            "/home/user/sales.xlsx": {
+                "local_path": "sales.xlsx",  # 相对于 workspace 的路径
+                "size": 1024
             }
         }
         """
         files_data = {}
-        outputs_dir = self.workspace_dir / "outputs"
-        outputs_dir.mkdir(parents=True, exist_ok=True)
         
-        for remote_path in file_paths:
+        for remote_path in remote_paths:
             try:
                 # 从沙箱读取
                 content = await asyncio.to_thread(
@@ -580,25 +745,27 @@ class E2BPythonSandbox:
                     remote_path
                 )
                 
-                # 确定本地路径
+                # 确定本地路径（相对于 workspace）
                 filename = Path(remote_path).name
-                local_path = outputs_dir / filename
-                
-                # 保存到本地
-                if isinstance(content, bytes):
-                    with open(local_path, 'wb') as f:
-                        f.write(content)
+                if save_to:
+                    local_relative_path = f"{save_to}/{filename}"
                 else:
-                    with open(local_path, 'w', encoding='utf-8') as f:
-                        f.write(content)
+                    local_relative_path = filename
+                
+                # 使用 WorkspaceManager 写入文件
+                result = self.workspace_manager.write_file(
+                    conversation_id, 
+                    local_relative_path, 
+                    content
+                )
                 
                 files_data[remote_path] = {
-                    "local_path": str(local_path.relative_to(self.workspace_dir)),
-                    "size": len(content) if isinstance(content, bytes) else len(content.encode()),
+                    "local_path": local_relative_path,
+                    "size": result["size"],
                     "downloaded_at": datetime.now().isoformat()
                 }
                 
-                logger.info(f"📥 文件已下载: {remote_path} → {local_path}")
+                logger.info(f"📥 文件已下载到 workspace: {remote_path} → {local_relative_path}")
             
             except Exception as e:
                 logger.error(f"❌ 文件下载失败 {remote_path}: {e}")
@@ -608,69 +775,87 @@ class E2BPythonSandbox:
         
         return files_data
     
-    async def terminate_sandbox(self):
+    async def terminate_sandbox(self, conversation_id: str = None):
         """
         终止沙箱（清理资源）
         
+        Args:
+            conversation_id: 对话 ID（如果不指定，清理所有沙箱）
+        
         调用时机：
         - 用户主动要求
-        - session结束
+        - conversation 结束
         - 沙箱闲置超时
         """
-        if not self.memory.has_e2b_session():
-            return {"success": True, "message": "没有活跃的沙箱"}
-        
-        session = self.memory.get_e2b_session()
-        sandbox_id = session.sandbox_id
-        
-        # 终止沙箱
-        if sandbox_id in self._sandbox_cache:
-            sandbox = self._sandbox_cache[sandbox_id]
-            try:
-                await asyncio.to_thread(sandbox.close)
-            except Exception as e:
-                logger.warning(f"⚠️ 沙箱关闭警告: {e}")
-            del self._sandbox_cache[sandbox_id]
-        
-        # 清除Memory
-        self.memory.clear_e2b_session()
-        
-        logger.info(f"🗑️ 沙箱已终止: {sandbox_id}")
-        return {
-            "success": True,
-            "message": f"沙箱 {sandbox_id} 已终止"
-        }
-    
-    def set_template(self, template_id: str):
-        """设置当前使用的模板"""
-        self._current_template = template_id
-        logger.debug(f"📋 模板已设置: {template_id}")
+        if conversation_id:
+            # 终止特定 conversation 的沙箱
+            session_data = self._get_session_data(conversation_id)
+            
+            if not session_data.get("sandbox_id") or session_data.get("status") != "active":
+                return {"success": True, "message": "没有活跃的沙箱"}
+            
+            sandbox_id = session_data["sandbox_id"]
+            
+            if conversation_id in self._sandbox_cache:
+                sandbox = self._sandbox_cache[conversation_id]
+                try:
+                    await asyncio.to_thread(sandbox.close)
+                except Exception as e:
+                    logger.warning(f"⚠️ 沙箱关闭警告: {e}")
+                del self._sandbox_cache[conversation_id]
+            
+            session_data.update({
+                "sandbox_id": None,
+                "template": None,
+                "status": "inactive"
+            })
+            
+            logger.info(f"🗑️ 沙箱已终止: {sandbox_id} (conversation: {conversation_id})")
+            return {
+                "success": True,
+                "message": f"沙箱 {sandbox_id} 已终止"
+            }
+        else:
+            # 终止所有沙箱
+            terminated = []
+            for conv_id, sandbox in list(self._sandbox_cache.items()):
+                try:
+                    await asyncio.to_thread(sandbox.close)
+                    terminated.append(conv_id)
+                except Exception as e:
+                    logger.warning(f"⚠️ 沙箱关闭警告: {e}")
+            
+            self._sandbox_cache.clear()
+            self._conversation_data.clear()
+            
+            logger.info(f"🗑️ 已终止所有沙箱: {terminated}")
+            return {
+                "success": True,
+                "message": f"已终止 {len(terminated)} 个沙箱"
+            }
 
 
 # ==================== 工具注册辅助函数 ====================
 
 def create_e2b_sandbox_tool(
-    memory: "WorkingMemory",
     api_key: str = None,
     event_manager = None,
-    workspace_dir: str = None
+    workspace_base_dir: str = "./workspace"
 ):
     """
     创建E2B沙箱工具实例（供Agent使用）
     
     Args:
-        memory: WorkingMemory实例
         api_key: E2B API密钥
         event_manager: EventManager实例
-        workspace_dir: 工作目录
+        workspace_base_dir: workspace 根目录
     
     Returns:
         E2BPythonSandbox实例
     """
     return E2BPythonSandbox(
-        memory=memory,
         api_key=api_key,
         event_manager=event_manager,
-        workspace_dir=workspace_dir
+        workspace_base_dir=workspace_base_dir
     )
 

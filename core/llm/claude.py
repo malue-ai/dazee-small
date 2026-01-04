@@ -113,6 +113,9 @@ class ClaudeLLMService(BaseLLMService):
         self._context_editing_enabled = False
         self._context_editing_config: Dict[str, Any] = {}
     
+        # 自定义工具存储
+        self._custom_tools: List[Dict[str, Any]] = []
+    
     # ============================================================
     # Beta Headers 管理
     # ============================================================
@@ -209,6 +212,75 @@ class ClaudeLLMService(BaseLLMService):
     def disable_code_execution(self):
         """禁用 Code Execution 模式"""
         self._code_execution_mode = False
+    
+    # ============================================================
+    # 自定义工具管理
+    # ============================================================
+    
+    def add_custom_tool(
+        self,
+        name: str,
+        description: str,
+        input_schema: Dict[str, Any]
+    ) -> None:
+        """
+        添加自定义工具
+        
+        Args:
+            name: 工具名称
+            description: 工具描述
+            input_schema: 输入参数 schema（JSON Schema 格式）
+        """
+        # 检查是否已存在同名工具
+        for i, tool in enumerate(self._custom_tools):
+            if tool["name"] == name:
+                # 更新现有工具
+                self._custom_tools[i] = {
+                    "name": name,
+                    "description": description,
+                    "input_schema": input_schema
+                }
+                logger.debug(f"更新自定义工具: {name}")
+                return
+        
+        # 添加新工具
+        self._custom_tools.append({
+            "name": name,
+            "description": description,
+            "input_schema": input_schema
+        })
+        logger.debug(f"注册自定义工具: {name}")
+    
+    def remove_custom_tool(self, name: str) -> bool:
+        """
+        移除自定义工具
+        
+        Args:
+            name: 工具名称
+            
+        Returns:
+            是否成功移除
+        """
+        for i, tool in enumerate(self._custom_tools):
+            if tool["name"] == name:
+                self._custom_tools.pop(i)
+                logger.debug(f"移除自定义工具: {name}")
+                return True
+        return False
+    
+    def get_custom_tools(self) -> List[Dict[str, Any]]:
+        """
+        获取所有自定义工具
+        
+        Returns:
+            自定义工具列表
+        """
+        return self._custom_tools.copy()
+    
+    def clear_custom_tools(self) -> None:
+        """清空所有自定义工具"""
+        self._custom_tools.clear()
+        logger.debug("清空所有自定义工具")
     
     # ============================================================
     # 工具处理
@@ -435,17 +507,36 @@ class ClaudeLLMService(BaseLLMService):
             request_params["temperature"] = self.config.temperature
         
         # Tools
+        all_tools = []
+        tool_names_seen = set()
+        
+        # 添加用户指定的工具
         if tools:
-            formatted_tools = self._format_tools(tools)
-            
+            for tool in self._format_tools(tools):
+                tool_name = tool.get("name", "")
+                if tool_name and tool_name not in tool_names_seen:
+                    all_tools.append(tool)
+                    tool_names_seen.add(tool_name)
+        
+        # 添加自定义工具（避免重复）
+        for custom_tool in self._custom_tools:
+            tool_name = custom_tool.get("name", "")
+            if tool_name and tool_name not in tool_names_seen:
+                tool_def = custom_tool.copy()
+                if self.config.enable_caching:
+                    tool_def["cache_control"] = {"type": "ephemeral"}
+                all_tools.append(tool_def)
+                tool_names_seen.add(tool_name)
+        
+        if all_tools:
             # Tool Search 模式
             if invocation_type == "tool_search" and self._tool_search_mode:
-                formatted_tools = self.configure_deferred_tools(formatted_tools)
+                all_tools = self.configure_deferred_tools(all_tools)
             
-            request_params["tools"] = formatted_tools
+            request_params["tools"] = all_tools
             
             # 调试日志
-            logger.debug(f"Tools: {[t.get('name', 'unknown') for t in formatted_tools]}")
+            logger.debug(f"Tools: {[t.get('name', 'unknown') for t in all_tools]}")
         
         # Context Editing
         if self._context_editing_enabled:
@@ -515,10 +606,43 @@ class ClaudeLLMService(BaseLLMService):
             }
             request_params["temperature"] = 1.0
         
-        if tools:
-            request_params["tools"] = self._format_tools(tools)
+        # Tools
+        all_tools = []
+        tool_names_seen = set()
         
-        logger.debug(f"📤 流式请求: model={self.config.model}")
+        # 添加用户指定的工具
+        if tools:
+            for tool in self._format_tools(tools):
+                tool_name = tool.get("name", "")
+                if tool_name and tool_name not in tool_names_seen:
+                    all_tools.append(tool)
+                    tool_names_seen.add(tool_name)
+        
+        # 添加自定义工具（避免重复）
+        for custom_tool in self._custom_tools:
+            tool_name = custom_tool.get("name", "")
+            if tool_name and tool_name not in tool_names_seen:
+                tool_def = custom_tool.copy()
+                if self.config.enable_caching:
+                    tool_def["cache_control"] = {"type": "ephemeral"}
+                all_tools.append(tool_def)
+                tool_names_seen.add(tool_name)
+        
+        if all_tools:
+            request_params["tools"] = all_tools
+        
+        # 调试日志：打印原始请求
+        logger.debug(f"📤 流式请求: model={self.config.model}, tools={len(all_tools)}, tool_names={list(tool_names_seen)}")
+        logger.debug(f"📤 Messages 数量: {len(request_params.get('messages', []))}")
+        for i, msg in enumerate(request_params.get('messages', [])):
+            role = msg.get('role', 'unknown')
+            content = msg.get('content', '')
+            if isinstance(content, list):
+                types = [b.get('type', 'unknown') for b in content if isinstance(b, dict)]
+                logger.debug(f"   [{i}] {role}: blocks={types}")
+            else:
+                preview = str(content)[:100] + "..." if len(str(content)) > 100 else str(content)
+                logger.debug(f"   [{i}] {role}: {preview}")
         
         # 累积变量
         accumulated_thinking = ""
@@ -535,16 +659,32 @@ class ClaudeLLMService(BaseLLMService):
                     if hasattr(event, 'content_block'):
                         block = event.content_block
                         if hasattr(block, 'type'):
-                            if block.type == "thinking" and on_thinking:
+                            block_type = block.type
+                            
+                            if block_type == "thinking" and on_thinking:
                                 on_thinking("")
-                            elif block.type == "text" and on_content:
+                            elif block_type == "text" and on_content:
                                 on_content("")
-                            elif block.type == "tool_use" and on_tool_call:
+                            # 客户端工具调用
+                            elif block_type == "tool_use" and on_tool_call:
                                 on_tool_call({
                                     "id": getattr(block, 'id', ''),
                                     "name": getattr(block, 'name', ''),
-                                    "input": getattr(block, 'input', {})
+                                    "input": getattr(block, 'input', {}),
+                                    "type": "tool_use"
                                 })
+                            # 服务端工具调用（如 web_search）
+                            elif block_type == "server_tool_use" and on_tool_call:
+                                on_tool_call({
+                                    "id": getattr(block, 'id', ''),
+                                    "name": getattr(block, 'name', ''),
+                                    "input": getattr(block, 'input', {}),
+                                    "type": "server_tool_use"
+                                })
+                            # 工具结果（如 web_search_tool_result）
+                            elif block_type.endswith("_tool_result"):
+                                # 工具结果通过 final_message 获取完整内容
+                                logger.debug(f"📥 工具结果开始: {block_type}")
                 
                 elif event.type == "content_block_delta":
                     if hasattr(event, 'delta'):
@@ -573,27 +713,52 @@ class ClaudeLLMService(BaseLLMService):
                                     })
                 
                 elif event.type == "message_stop":
+                    final_message = None
                     try:
                         final_message = await stream.get_final_message()
                         stop_reason = getattr(final_message, 'stop_reason', None)
                         
                         if hasattr(final_message, 'content'):
                             for block in final_message.content:
-                                if hasattr(block, 'type') and block.type == "tool_use":
+                                if not hasattr(block, 'type'):
+                                    continue
+                                block_type = block.type
+                                
+                                # 客户端工具调用
+                                if block_type == "tool_use":
                                     tool_calls.append({
                                         "id": getattr(block, 'id', ''),
                                         "name": getattr(block, 'name', ''),
-                                        "input": getattr(block, 'input', {})
+                                        "input": getattr(block, 'input', {}),
+                                        "type": "tool_use"
+                                    })
+                                # 服务端工具调用
+                                elif block_type == "server_tool_use":
+                                    tool_calls.append({
+                                        "id": getattr(block, 'id', ''),
+                                        "name": getattr(block, 'name', ''),
+                                        "input": getattr(block, 'input', {}),
+                                        "type": "server_tool_use"
                                     })
                     except Exception as e:
                         logger.warning(f"获取最终消息失败: {e}")
         
         # 构建 raw_content
-        raw_content = self._build_raw_content_from_parts(
-            accumulated_thinking, accumulated_content, tool_calls
-        )
+        # 优先使用 final_message（包含 thinking signature）
+        if final_message and hasattr(final_message, 'content'):
+            raw_content = self._build_raw_content(final_message)
+        else:
+            # 降级：使用累积的内容（没有 signature）
+            raw_content = self._build_raw_content_from_parts(
+                accumulated_thinking, accumulated_content, tool_calls
+            )
         
+        # 调试日志：打印原始响应
         logger.debug(f"📥 流式响应完成: stop_reason={stop_reason or 'end_turn'}")
+        raw_types = [b.get('type', 'unknown') for b in raw_content]
+        logger.debug(f"📥 raw_content blocks: {raw_types}")
+        if accumulated_thinking:
+            logger.debug(f"📥 thinking 长度: {len(accumulated_thinking)}")
         
         # 返回最终响应
         if accumulated_content or accumulated_thinking or tool_calls:
@@ -702,10 +867,18 @@ class ClaudeLLMService(BaseLLMService):
         """
         构建原始 content 块列表（用于消息续传）
         
+        Claude 原生协议支持的 content block 类型：
+        - thinking: 思考过程（带 signature）
+        - text: 文本内容
+        - tool_use: 客户端工具调用
+        - server_tool_use: 服务端工具调用（如 web_search）
+        - *_tool_result: 工具结果（如 web_search_tool_result）
+        
         规则：
         1. thinking 块必须有有效的 signature 字段
-        2. tool_use 块必须有 id 和 name
+        2. tool_use/server_tool_use 块必须有 id 和 name
         3. 跳过空文本块
+        4. tool_result 需要保留完整内容
         """
         raw_content = []
         
@@ -713,7 +886,9 @@ class ClaudeLLMService(BaseLLMService):
             if not hasattr(block, 'type'):
                 continue
             
-            if block.type == "thinking":
+            block_type = block.type
+            
+            if block_type == "thinking":
                 thinking_text = getattr(block, 'thinking', '')
                 signature = getattr(block, 'signature', '')
                 
@@ -726,15 +901,16 @@ class ClaudeLLMService(BaseLLMService):
                 elif thinking_text:
                     logger.warning(f"Thinking block without signature, skipping")
                     
-            elif block.type == "text":
+            elif block_type == "text":
                 text_content = getattr(block, 'text', '')
                 if text_content:
                     raw_content.append({
                         "type": "text",
                         "text": text_content
                     })
-                    
-            elif block.type == "tool_use":
+            
+            # 客户端工具调用
+            elif block_type == "tool_use":
                 tool_id = getattr(block, 'id', '')
                 tool_name = getattr(block, 'name', '')
                 tool_input = getattr(block, 'input', {})
@@ -748,6 +924,47 @@ class ClaudeLLMService(BaseLLMService):
                     })
                 else:
                     logger.warning(f"Invalid tool_use block: id={tool_id}, name={tool_name}")
+            
+            # 服务端工具调用（如 web_search, code_execution）
+            elif block_type == "server_tool_use":
+                tool_id = getattr(block, 'id', '')
+                tool_name = getattr(block, 'name', '')
+                tool_input = getattr(block, 'input', {})
+                
+                if tool_id and tool_name:
+                    raw_content.append({
+                        "type": "server_tool_use",
+                        "id": tool_id,
+                        "name": tool_name,
+                        "input": tool_input
+                    })
+                else:
+                    logger.warning(f"Invalid server_tool_use block: id={tool_id}, name={tool_name}")
+            
+            # 工具结果（如 web_search_tool_result, code_execution_tool_result）
+            elif block_type.endswith("_tool_result"):
+                tool_use_id = getattr(block, 'tool_use_id', '')
+                content = getattr(block, 'content', [])
+                
+                raw_content.append({
+                    "type": block_type,  # 保留原始类型（如 web_search_tool_result）
+                    "tool_use_id": tool_use_id,
+                    "content": content
+                })
+                logger.debug(f"📥 服务端工具结果: {block_type}, tool_use_id={tool_use_id}")
+            
+            else:
+                # 未知类型，记录警告但不跳过（可能是新的 block 类型）
+                logger.warning(f"Unknown content block type: {block_type}")
+                # 尝试转换为字典
+                try:
+                    block_dict = {"type": block_type}
+                    for attr in ['id', 'name', 'input', 'content', 'tool_use_id']:
+                        if hasattr(block, attr):
+                            block_dict[attr] = getattr(block, attr)
+                    raw_content.append(block_dict)
+                except Exception as e:
+                    logger.error(f"Failed to convert unknown block: {e}")
         
         return raw_content
     
@@ -757,14 +974,19 @@ class ClaudeLLMService(BaseLLMService):
         content: str,
         tool_calls: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
-        """从流式累积的部分构建 raw_content"""
+        """
+        从流式累积的部分构建 raw_content（降级方案）
+        
+        注意：这是降级方案，仅在无法获取 final_message 时使用。
+        不包含 thinking 块（因为没有 signature），会导致后续轮次
+        Extended Thinking 失败。
+        
+        优先使用 _build_raw_content(final_message) 来获取完整的
+        thinking 块（包括 signature）。
+        """
         raw_content = []
         
-        if thinking:
-            raw_content.append({
-                "type": "thinking",
-                "thinking": thinking
-            })
+        # 不包含 thinking 块（没有 signature 会导致后续 Extended Thinking 失败）
         
         if content:
             raw_content.append({

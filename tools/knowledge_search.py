@@ -131,13 +131,7 @@ class KnowledgeSearchTool(BaseTool):
             
             logger.info(f"🔍 知识库检索: user_id={user_id}, query={query[:50]}...")
             
-            # 2. 获取或创建用户的 Partition（知识空间）
-            user = self.knowledge_store.get_or_create_user(user_id)
-            partition_id = user["partition_id"]
-            
-            logger.info(f"📦 用户知识空间: partition_id={partition_id}")
-            
-            # 3. 检查用户是否有文档
+            # 2. 检查用户是否有文档
             documents = self.knowledge_store.get_user_documents(user_id)
             if not documents:
                 return {
@@ -147,20 +141,35 @@ class KnowledgeSearchTool(BaseTool):
                     "total": 0
                 }
             
-            # 4. 调用 Ragie 检索 API
+            logger.info(f"📦 用户有 {len(documents)} 个文档")
+            
+            # 打印文档列表（调试用）
+            for doc in documents:
+                logger.debug(f"   📄 {doc.get('filename')} (status={doc.get('status')}, id={doc.get('document_id')})")
+            
+            # 3. 调用 Ragie 检索 API
+            # 🛡️ 使用 metadata.user_id 过滤（不使用 partition，与 knowledge_service 一致）
+            combined_filters = metadata_filter.copy() if metadata_filter else {}
+            combined_filters["user_id"] = {"$eq": user_id}  # Ragie metadata 过滤语法
+            
+            logger.info(f"🔍 Ragie 检索参数: query={query[:30]}..., top_k={top_k}, filters={combined_filters}")
+            
             retrieval_result = await self.ragie_client.retrieve(
                 query=query,
-                partition=partition_id,
+                partition=None,  # 使用 default partition
                 top_k=top_k,
-                filters=metadata_filter
+                filters=combined_filters
             )
+            
+            logger.debug(f"🔍 Ragie 原始响应: {retrieval_result}")
             
             scored_chunks = retrieval_result.get("scored_chunks", [])
             
             logger.info(f"✅ 检索完成: 找到 {len(scored_chunks)} 个相关片段")
             
             # 5. 质量控制：过滤低相关性结果
-            min_score = 0.3  # 最低相关性阈值
+            # 注意：Ragie 的 score 范围通常在 0.1-0.3 之间，不是 0-1
+            min_score = 0.1  # 最低相关性阈值（降低以适应 Ragie 的评分范围）
             filtered_chunks = [
                 chunk for chunk in scored_chunks 
                 if chunk.get("score", 0) >= min_score

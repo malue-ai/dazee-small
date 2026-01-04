@@ -19,7 +19,11 @@ class ChatRequest(BaseModel):
         description="运行会话ID（服务端内部ID，可选）：用于标识一次后端运行/Agent实例；不要与 WebSocket 连接ID混用"
     )
     stream: bool = Field(True, description="是否使用流式输出（默认为True）")
-    background_task: Optional[bool] = Field(None, alias="backgroundTask", description="是否作为后台任务执行（可选）")
+    background_tasks: Optional[List[str]] = Field(
+        None, 
+        alias="backgroundTasks", 
+        description="需要启用的后台任务列表（可选），如 ['title_generation']"
+    )
     file: Optional[str] = Field(None, description="附件文件路径或URL（可选）")
     variables: Optional[Dict[str, Any]] = Field(
         None,
@@ -36,7 +40,7 @@ class ChatRequest(BaseModel):
                     "userId": "user_001",
                     "conversationId": "conv_20231224_120000",
                     "stream": True,
-                    "backgroundTask": False,
+                    "backgroundTasks": ["title_generation"],
                     "file": "https://example.com/document.pdf",
                     "knowledge": ["kb_001", "kb_002"],
                     "variables": {

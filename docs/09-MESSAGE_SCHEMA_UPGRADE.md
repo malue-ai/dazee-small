@@ -41,6 +41,11 @@ CREATE TABLE messages (
 ```json
 [
     {
+        "type": "thinking",
+        "thinking": "让我分析一下这个需求...\n1. 用户想要...",
+        "signature": "EqQBCgIYAhIM1gbcDa9GJwZA..."
+    },
+    {
         "type": "text",
         "text": "用户的问题或 AI 的回复"
     },
@@ -59,6 +64,8 @@ CREATE TABLE messages (
     }
 ]
 ```
+
+**⚠️ 重要**: `thinking` 块必须包含 `signature` 字段，这是 Claude Extended Thinking 功能在多轮对话中的必要条件。
 
 ### 为什么使用 JSON 数组格式？
 

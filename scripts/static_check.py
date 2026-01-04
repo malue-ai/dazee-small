@@ -49,7 +49,7 @@ def main():
         ("services/chat_service.py", "Chat Service"),
         ("routers/chat.py", "Chat Router"),
         ("requirements.txt", "依赖配置"),
-        ("docs/04-SESSION-RECONNECT-DESIGN.md", "设计文档"),
+        ("docs/04-SSE-CONNECTION-MANAGEMENT.md", "设计文档"),
         ("docs/CHATSERVICE_REFACTOR.md", "Service 重构文档"),
         ("docs/ROUTER_REFACTOR.md", "Router 重构文档"),
         ("docs/QUICK_START.md", "快速开始"),
@@ -210,7 +210,7 @@ def main():
     print("=" * 70)
     
     doc_files = [
-        "docs/04-SESSION-RECONNECT-DESIGN.md",
+        "docs/04-SSE-CONNECTION-MANAGEMENT.md",
         "docs/CHATSERVICE_REFACTOR.md",
         "docs/ROUTER_REFACTOR.md",
         "docs/QUICK_START.md",

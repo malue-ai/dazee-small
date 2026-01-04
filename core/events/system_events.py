@@ -19,7 +19,8 @@ class SystemEventManager(BaseEventManager):
         self,
         session_id: str,
         error_type: str,
-        error_message: str
+        error_message: str,
+        details: Dict[str, Any] = None
     ) -> Dict[str, Any]:
         """
         发送 error 事件
@@ -28,18 +29,23 @@ class SystemEventManager(BaseEventManager):
             session_id: Session ID
             error_type: 错误类型
             error_message: 错误消息
+            details: 额外的错误详情（可选）
             
         Returns:
             事件对象
         """
+        error_data = {
+            "type": error_type,
+            "message": error_message
+        }
+        
+        # 添加额外的详情
+        if details:
+            error_data.update(details)
+        
         event = self._create_event(
             event_type="error",
-            data={
-                "error": {
-                    "type": error_type,
-                    "message": error_message
-                }
-            }
+            data={"error": error_data}
         )
         
         return await self._send_event(session_id, event)
@@ -60,33 +66,6 @@ class SystemEventManager(BaseEventManager):
         event = self._create_event(
             event_type="done",
             data={"type": "done"}
-        )
-        
-        return await self._send_event(session_id, event)
-    
-    async def emit_agent_status(
-        self,
-        session_id: str,
-        status: str,
-        message: str
-    ) -> Dict[str, Any]:
-        """
-        发送 agent_status 事件
-        
-        Args:
-            session_id: Session ID
-            status: Agent 状态
-            message: 状态描述
-            
-        Returns:
-            事件对象
-        """
-        event = self._create_event(
-            event_type="agent_status",
-            data={
-                "status": status,
-                "message": message
-            }
         )
         
         return await self._send_event(session_id, event)

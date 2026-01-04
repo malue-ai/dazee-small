@@ -37,6 +37,7 @@ class ConfirmationType(Enum):
     SINGLE_CHOICE = "single_choice"   # 单选题
     MULTIPLE_CHOICE = "multiple_choice"  # 多选题
     TEXT_INPUT = "text_input"      # 文本输入
+    FORM = "form"              # 复杂表单（多个问题，支持单选/多选混合）
 
 
 @dataclass

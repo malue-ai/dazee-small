@@ -8,8 +8,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # 设置环境变量
 os.environ['E2B_API_KEY'] = 'e2b_83eb67de2fb85d4a8a87ddfe6fca5a89e9f7cc95'
 
-from core.capability_registry import create_capability_registry
-from core.capability_router import create_capability_router, select_tools_for_capabilities
+from core.tool.capability import create_capability_registry, create_capability_router
+from core.tool.selector import ToolSelector
 
 def test_router_e2b():
     print("="*70)
@@ -17,19 +17,20 @@ def test_router_e2b():
     print("="*70)
     
     registry = create_capability_registry()
-    router = create_capability_router(registry)
+    # 使用 ToolSelector 替代已废弃的 select_tools_for_capabilities
+    selector = ToolSelector(registry)
     
     # 场景1：Vibe Coding
     print("\n场景1：Vibe Coding (app_generation)")
     print("-"*70)
     required_capabilities = ['app_generation', 'code_sandbox']
-    selected = select_tools_for_capabilities(router, required_capabilities)
+    result = selector.select(required_capabilities)
     
     print(f"需要能力: {required_capabilities}")
-    print(f"选择工具: {[t.name for t in selected]}")
+    print(f"选择工具: {result.tool_names}")
     
     # 验证
-    tool_names = [t.name for t in selected]
+    tool_names = result.tool_names
     if 'e2b_vibe_coding' in tool_names:
         print("✅ e2b_vibe_coding 已选中")
     else:
@@ -44,12 +45,12 @@ def test_router_e2b():
     print("\n场景2：纯代码执行 (code_sandbox)")
     print("-"*70)
     required_capabilities = ['code_sandbox']
-    selected = select_tools_for_capabilities(router, required_capabilities)
+    result = selector.select(required_capabilities)
     
     print(f"需要能力: {required_capabilities}")
-    print(f"选择工具: {[t.name for t in selected]}")
+    print(f"选择工具: {result.tool_names}")
     
-    tool_names = [t.name for t in selected]
+    tool_names = result.tool_names
     if 'e2b_python_sandbox' in tool_names:
         print("✅ e2b_python_sandbox 已选中")
     else:

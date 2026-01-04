@@ -3,42 +3,23 @@ Zenflux Agent - FastAPI 服务
 基于 Claude 的智能体 Web API
 """
 
-import os
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from typing import Dict, Optional
 from datetime import datetime
-from uuid import uuid4
 
-# 🆕 自动加载 .env 文件
+# 自动加载 .env 文件
 from dotenv import load_dotenv
 
 # 加载项目根目录的 .env 文件
 env_path = Path(__file__).parent / ".env"
 load_dotenv(dotenv_path=env_path, override=True)
 
-from core.agent import create_simple_agent, SimpleAgent
-from routers import chat_router, knowledge_router
+from routers import chat_router, knowledge_router, files_router
 from routers.human_confirmation import router as human_confirmation_router
 from routers.conversation import router as conversation_router
-
-# ============================================================
-# 全局变量
-# ============================================================
-
-# Agent 实例池（支持多会话）
-agent_pool: Dict[str, SimpleAgent] = {}
-
-# 对话线程ID -> 运行会话ID 映射（试验阶段：内存版）
-# - conversation_id：客户端/产品层面的“对话线程”
-# - session_id：服务端运行时的“Agent实例/运行会话”
-conversation_session_map: Dict[str, str] = {}
-
-# 默认 Agent 配置
-DEFAULT_MODEL = "claude-sonnet-4-5-20250929"
-DEFAULT_WORKSPACE = "./workspace"
+from routers.workspace import router as workspace_router
 
 
 # ============================================================
@@ -50,22 +31,51 @@ async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # 启动时
     print("🚀 Zenflux Agent API 启动中...")
-    print(f"📦 默认模型: {DEFAULT_MODEL}")
-    print(f"📁 工作目录: {DEFAULT_WORKSPACE}")
     
     # 初始化数据库
     print("💾 初始化数据库...")
-    from utils.database import init_db
-    await init_db()
+    from infra.database import init_database, engine
+    await init_database()
     print("✅ 数据库初始化完成")
     
     yield
-    # 关闭时
-    print("🛑 清理 Agent 实例...")
-    for agent in agent_pool.values():
-        if agent._session_active:
-            agent.end_session()
-    agent_pool.clear()
+    
+    # 关闭时 - 清理所有资源
+    print("🛑 正在关闭服务...")
+    
+    # 1. 关闭 Redis 连接
+    try:
+        from services.redis_manager import get_redis_manager
+        redis_manager = get_redis_manager()
+        await redis_manager.close()
+        print("✅ Redis 连接已关闭")
+    except Exception as e:
+        print(f"⚠️ 关闭 Redis 连接失败: {e}")
+    
+    # 2. 清理 Agent Pool（取消所有运行中的任务）
+    try:
+        from services import get_session_service
+        session_service = get_session_service()
+        
+        # 取消所有 Agent 任务
+        for session_id, agent in list(session_service.agent_pool.items()):
+            try:
+                if hasattr(agent, 'cancel'):
+                    agent.cancel()
+            except Exception:
+                pass
+        session_service.agent_pool.clear()
+        print("✅ Agent Pool 已清理")
+    except Exception as e:
+        print(f"⚠️ 清理 Agent Pool 失败: {e}")
+    
+    # 3. 关闭数据库连接池
+    try:
+        await engine.dispose()
+        print("✅ 数据库连接已关闭")
+    except Exception as e:
+        print(f"⚠️ 关闭数据库连接失败: {e}")
+    
     print("👋 Zenflux Agent API 已关闭")
 
 
@@ -94,86 +104,10 @@ app.add_middleware(
 # 注册路由
 app.include_router(chat_router)
 app.include_router(knowledge_router)
-app.include_router(human_confirmation_router)  # 🆕 HITL 确认接口
-app.include_router(conversation_router)  # 🆕 对话管理接口
-
-
-# ============================================================
-# 辅助函数（供 routers 使用）
-# ============================================================
-
-def get_or_create_agent(session_id: Optional[str] = None, verbose: bool = True) -> SimpleAgent:
-    """
-    获取或创建 Agent 实例
-    
-    Args:
-        session_id: 会话ID（可选）
-        verbose: 是否输出详细日志
-        
-    Returns:
-        Agent 实例
-    """
-    from logger import get_logger
-    logger = get_logger("main")
-    
-    # 🔍 输出当前 agent_pool 状态（改为 INFO 级别）
-    logger.info(f"🗃️ Agent池状态: 当前有 {len(agent_pool)} 个活跃会话")
-    
-    if session_id and session_id in agent_pool:
-        logger.info(f"✅ 从池中获取已有Agent: session_id={session_id}")
-        return agent_pool[session_id]
-    
-    # 创建新 Agent
-    logger.info(f"🔨 创建新的Agent实例: session_id={session_id or '(待分配)'}")
-    agent = create_simple_agent(
-        model=DEFAULT_MODEL,
-        workspace_dir=DEFAULT_WORKSPACE,
-        verbose=verbose
-    )
-    
-    if session_id:
-        agent.start_session(session_id)
-        agent_pool[session_id] = agent
-        logger.info(f"📥 Agent已加入池: session_id={session_id}, 池大小={len(agent_pool)}")
-    
-    return agent
-
-
-def _new_session_id() -> str:
-    """生成运行会话ID（服务端内部ID）。"""
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return f"run_{ts}_{uuid4().hex[:8]}"
-
-
-def _new_conversation_id() -> str:
-    """生成对话线程ID（客户端会话ID）。"""
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return f"conv_{ts}_{uuid4().hex[:8]}"
-
-
-def get_or_create_agent_for_conversation(
-    conversation_id: Optional[str],
-    verbose: bool = True
-) -> tuple[str, str, SimpleAgent]:
-    """
-    以 conversation_id 为主键获取/创建 Agent。
-
-    规则：
-    - 客户端可以不传 conversation_id：服务端会生成并返回
-    - session_id 由服务端生成并维护（客户端无需传）
-    """
-    if not conversation_id:
-        conversation_id = _new_conversation_id()
-
-    session_id = conversation_session_map.get(conversation_id)
-    if session_id and session_id in agent_pool:
-        return conversation_id, session_id, agent_pool[session_id]
-
-    # 映射不存在或 agent 已被清理：生成新的运行会话ID，并创建新 agent
-    session_id = _new_session_id()
-    conversation_session_map[conversation_id] = session_id
-    agent = get_or_create_agent(session_id, verbose=verbose)
-    return conversation_id, session_id, agent
+app.include_router(human_confirmation_router)
+app.include_router(conversation_router)
+app.include_router(files_router)
+app.include_router(workspace_router)
 
 
 # ============================================================
@@ -211,14 +145,15 @@ async def health():
     """
     健康检查
     
-    返回服务健康状态和活跃会话数
+    返回服务健康状态
     """
-    active_count = len([a for a in agent_pool.values() if a._session_active])
+    from services import get_session_service
+    session_service = get_session_service()
+    
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
-        "active_sessions": active_count,
-        "total_agents": len(agent_pool)
+        "active_sessions": len(session_service.agent_pool)
     }
 
 

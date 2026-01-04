@@ -55,6 +55,9 @@ class EventManager:
         Args:
             storage: 事件存储实现（传递给子管理器）
         """
+        # 保留 storage 引用（供 Agent 等模块获取 session context 使用）
+        self.storage = storage
+        
         # 初始化各层级事件管理器（storage 传递给它们）
         self.session = SessionEventManager(storage)
         self.user = UserEventManager(storage)
