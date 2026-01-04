@@ -1216,6 +1216,117 @@ React+Validation+Reflection循环是核心，Plan根据任务动态生成。
 """
 
 
+# ==================== Skills vs Tools 决策规则 ====================
+
+SKILLS_TOOLS_PRIORITY_RULES = """
+# 📚 Skills vs Tools 决策指南
+
+## 核心理念
+
+**Skills** = 专业领域知识和最佳实践指导（文档）
+**Tools** = 可执行的功能（代码/API）
+
+## 🎯 决策原则（Sonnet 自主判断）
+
+### 何时使用 Skill（加载指导）
+
+✅ **优先使用 Skill 的场景**：
+1. **需要专业领域知识**
+   - 示例：生成"专业的产品PPT" → 加载 `slidespeak-generator` Skill
+   - 原因：需要了解PPT设计最佳实践、内容扩展策略、布局选择逻辑
+
+2. **任务有多个步骤和决策点**
+   - 示例：创建营销报告 → 需要知道如何组织结构、选择论据、设计视觉
+   - 原因：Skill 提供完整的工作流指导
+
+3. **需要质量标准和验证规则**
+   - 示例：数据分析 → Skill 定义了什么是"高质量"的分析
+   - 原因：Skill 包含自检清单和质量门槛
+
+**使用方式**：
+```bash
+# 第一步：读取 Skill 指导
+bash cat /skills/library/{skill-name}/SKILL.md
+
+# 第二步：根据指导执行
+# - 可能调用 Skill 中 references_tools 引用的工具
+# - 可能使用 code_execution 处理数据
+# - 可能搜索补充信息
+```
+
+### 何时直接使用 Tool
+
+✅ **直接使用 Tool 的场景**：
+1. **简单、明确的操作**
+   - 示例："搜索最新AI新闻" → 直接 `web_search`
+   - 原因：无需额外指导，工具功能明确
+
+2. **已经有了完整的输入**
+   - 示例：用户提供了完整的PPT配置 → 直接 `slidespeak_render`
+   - 原因：不需要设计和规划，直接执行
+
+3. **纯技术操作**
+   - 示例：读取文件、执行计算、调用API
+   - 原因：这些是机械操作，不涉及专业判断
+
+## 🔄 组合使用（最常见）
+
+**标准流程**：
+```
+1. Skill 提供指导 → 了解任务的"应该怎么做"
+2. Tool 执行操作 → 实际完成"做什么"
+```
+
+**示例：生成专业PPT**
+```
+1. bash cat /skills/library/slidespeak-generator/SKILL.md
+   ↓ 学到：内容扩展策略、布局选择逻辑、质量标准
+   
+2. web_search (收集素材)
+   ↓ 获取：产品信息、市场数据、案例
+   
+3. 基于 Skill 指导 + 搜索结果，设计PPT结构
+   ↓ 决策：使用哪些布局、如何组织内容
+   
+4. slidespeak_render (执行生成)
+   ↓ 输出：专业的PPT文件
+```
+
+## ⚖️ 优先级决策（你自己判断）
+
+**判断流程**：
+```
+收到任务 → 分析需求
+    │
+    ▼
+是否需要专业知识/最佳实践？
+    │
+    ├─ YES → 查看 System Prompt 中的 Available Skills
+    │         找到匹配的 Skill → 先加载 Skill
+    │         
+    └─ NO → 直接选择合适的 Tool 执行
+```
+
+**⚠️ 关键原则**：
+- 决策权在你（Sonnet），不是框架
+- System Prompt 只是告诉你"有哪些 Skills 可用"
+- 你根据任务需求自主判断是否需要加载 Skill
+- 不要教条式地"总是先查 Skill"或"总是直接用 Tool"
+
+## 📋 Available Skills（动态注入）
+
+下方会自动注入当前可用的 Skills 列表：
+- 每个 Skill 的 **name, description**（语义丰富的说明）
+- **references_tools**（该 Skill 引用的工具）
+
+**如何判断是否需要 Skill**：
+- 依赖你的语义理解能力，而非关键词匹配
+- 根据用户任务的复杂度、专业性、质量要求判断
+- 例如："帮我做个PPT" vs "帮我做个专业的产品发布会演示"
+  - 前者可能直接用工具
+  - 后者建议加载 Skill 获取最佳实践指导
+"""
+
 # ==================== Skills Metadata加载 ====================
 
 def load_skills_metadata(skills_dir: Optional[str] = None) -> str:
@@ -1263,11 +1374,15 @@ def get_universal_agent_prompt(
             # 如果加载失败，不影响主流程
             pass
     
-    # 添加 Skills
+    # 添加 Skills vs Tools 决策规则 + Skills Metadata
     if include_skills:
+        # 1. 添加决策规则
+        prompt += "\n\n---\n\n" + SKILLS_TOOLS_PRIORITY_RULES
+        
+        # 2. 添加 Skills Metadata
         skills_section = load_skills_metadata(skills_dir)
         if skills_section:
-            prompt += "\n\n---\n\n# Available Skills\n\n" + skills_section
+            prompt += "\n\n" + skills_section
     
     return prompt
 
