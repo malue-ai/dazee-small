@@ -131,6 +131,42 @@ capability_categories:
 # 说明：
 # - capabilities 字段引用上面的 capability_categories ID
 # - Router 根据 Plan 的 capability 需求匹配这些工具
+#
+# 🆕 工具分层（Manus Context Engineering）：
+# - level: 1 = 核心工具（始终可用，高频）
+# - level: 2 = 按需工具（根据任务动态加载）
+# - level: 3 = 高级工具（复杂场景）
+# - cache_stable: true = 不会导致 LLM cache 失效
+#
+# 🆕 结果精简（Result Compaction）：
+# - compaction: 配置工具返回结果的精简策略
+#   字段说明：
+#   - strategy: 精简策略（必填）
+#     * none: 不精简（默认）
+#     * reference: 只返回引用（URL/文件路径）+ 提示
+#     * truncate: 截断到指定大小
+#     * summarize: 总结关键信息（未实现）
+#     * structured: 结构化摘要（提取关键字段）
+#     * custom: 自定义精简（如搜索结果特殊处理）
+#   - result_type: 结果类型（可选，默认 "mixed"）
+#     * file: 文件内容
+#     * url: 网页内容
+#     * text: 纯文本
+#     * json: JSON 数据
+#     * dataframe: 表格数据
+#     * search_results: 搜索结果
+#     * mixed: 混合类型
+#   - max_size: 精简后最大大小（字符数，默认 10000）
+#   - summary_chars: 摘要保留字符数（默认 200）
+#   - max_items: 列表最多保留条目数（默认 10）
+#
+# 示例：
+#   compaction:
+#     strategy: custom
+#     result_type: search_results
+#     max_size: 3000
+#     summary_chars: 200
+#     max_items: 5
 # ============================================================
 
 capabilities:
@@ -454,6 +490,17 @@ capabilities:
     type: TOOL
     subtype: NATIVE
     provider: system
+    level: 2              # 🆕 按需加载
+    cache_stable: true    # 🆕 不会导致 cache 失效
+    
+    # 🆕 结果精简配置（Manus 原则）
+    compaction:
+      strategy: custom           # 搜索结果使用自定义精简
+      result_type: search_results
+      max_size: 3000            # 精简后最大 3KB
+      summary_chars: 200        # 每个结果保留 200 字符摘要
+      max_items: 10             # 最多 10 个结果
+    
     capabilities:
       - information_retrieval
       - web_search
@@ -479,6 +526,14 @@ capabilities:
     type: TOOL
     subtype: CUSTOM
     provider: user
+    level: 2              # 🆕 按需加载
+    cache_stable: true    # 🆕 不会导致 cache 失效
+    
+    # 🆕 结果精简配置
+    compaction:
+      strategy: custom    # 使用自定义精简（URL + 摘要）
+      max_size: 3000      # 精简后最大 3KB
+      summary_chars: 200  # 每个结果保留 200 字符摘要
     
     # 🎯 工具实现配置 - 支持自动加载
     implementation:
@@ -783,6 +838,8 @@ capabilities:
     type: TOOL
     subtype: SESSION
     provider: system
+    level: 1              # 🆕 核心工具（始终可用）
+    cache_stable: true    # 🆕 不会导致 cache 失效
     
     # 工具实现配置
     implementation:
@@ -962,6 +1019,14 @@ capabilities:
     type: TOOL
     subtype: CUSTOM
     provider: user
+    level: 2              # 🆕 按需加载
+    cache_stable: true    # 🆕 不会导致 cache 失效
+    
+    # 🆕 结果精简配置
+    compaction:
+      strategy: truncate        # 截断长输出
+      result_type: mixed
+      max_size: 10000           # stdout/stderr 截断到 10KB
     
     implementation:
       module: "tools.e2b_sandbox"

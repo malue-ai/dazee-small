@@ -804,6 +804,16 @@ class ClaudeLLMService(BaseLLMService):
                                 usage["cache_read_tokens"] = final_message.usage.cache_read_input_tokens
                             if hasattr(final_message.usage, 'cache_creation_input_tokens'):
                                 usage["cache_creation_tokens"] = final_message.usage.cache_creation_input_tokens
+                            
+                            # 🆕 Cache 效果日志（Context Engineering 监控）
+                            cache_read = usage.get("cache_read_tokens", 0)
+                            cache_create = usage.get("cache_creation_tokens", 0)
+                            if cache_read > 0:
+                                # cache 命中，节省成本（90% 折扣）
+                                saved = cache_read * 0.003 * 0.9 / 1000  # $3/M * 90% off
+                                logger.info(f"✅ Cache HIT: {cache_read:,} tokens (saved ~${saved:.4f})")
+                            elif cache_create > 0:
+                                logger.debug(f"📦 Cache CREATED: {cache_create:,} tokens")
                         
                         if hasattr(final_message, 'content'):
                             for block in final_message.content:
@@ -988,6 +998,15 @@ class ClaudeLLMService(BaseLLMService):
                 usage["cache_read_tokens"] = response.usage.cache_read_input_tokens
             if hasattr(response.usage, 'cache_creation_input_tokens'):
                 usage["cache_creation_tokens"] = response.usage.cache_creation_input_tokens
+            
+            # 🆕 Cache 效果日志（Context Engineering 监控）
+            cache_read = usage.get("cache_read_tokens", 0)
+            cache_create = usage.get("cache_creation_tokens", 0)
+            if cache_read > 0:
+                saved = cache_read * 0.003 * 0.9 / 1000
+                logger.info(f"✅ Cache HIT: {cache_read:,} tokens (saved ~${saved:.4f})")
+            elif cache_create > 0:
+                logger.debug(f"📦 Cache CREATED: {cache_create:,} tokens")
         
         # 构建 raw_content
         raw_content = self._build_raw_content(response)

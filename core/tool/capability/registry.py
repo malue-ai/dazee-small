@@ -43,6 +43,7 @@ class CapabilityRegistry:
         self.capabilities: Dict[str, Capability] = {}
         self.categories: List[Dict[str, Any]] = []
         self.task_type_mappings: Dict[str, List[str]] = {}
+        self._raw_capabilities: List[Dict[str, Any]] = []  # 🆕 保存原始配置数据
         
         self._config_path = config_path or self._default_config_path()
         self._skills_dir = skills_dir or self._default_skills_dir()
@@ -92,6 +93,7 @@ class CapabilityRegistry:
             try:
                 capability = self._parse_capability(cap_data)
                 self.capabilities[capability.name] = capability
+                self._raw_capabilities.append(cap_data)  # 🆕 保存原始配置
             except Exception as e:
                 print(f"⚠️ Warning: Failed to parse capability {cap_data.get('name', 'unknown')}: {e}")
     
@@ -430,6 +432,19 @@ class CapabilityRegistry:
             任务类型列表
         """
         return list(self.task_type_mappings.keys())
+    
+    def get_all_capabilities(self) -> List[Dict[str, Any]]:
+        """
+        获取所有原始能力配置数据
+        
+        用于：
+        - ResultCompactor 加载 compaction 配置
+        - 其他需要完整配置数据的组件
+        
+        Returns:
+            原始配置数据列表（包含 compaction 等配置）
+        """
+        return self._raw_capabilities
     
     # ==================== 信息接口 ====================
     

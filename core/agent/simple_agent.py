@@ -51,7 +51,16 @@ class SimpleAgent:
     
     只负责协调各模块，不包含具体业务逻辑
     
+    设计哲学：System Prompt → Schema → Agent
+    - System Prompt 定义 Agent 的行为规范和能力边界
+    - Schema 配置组件的启用状态和参数
+    - Agent 根据 Schema 动态初始化组件
+    
     使用方式：
+        # 方式 1: 从 AgentFactory 创建（推荐）
+        agent = await AgentFactory.from_prompt(system_prompt, event_manager)
+        
+        # 方式 2: 直接创建（使用默认配置）
         agent = SimpleAgent(event_manager=event_manager)
         async for event in agent.chat(user_input, session_id=session_id):
             yield event
@@ -63,7 +72,9 @@ class SimpleAgent:
         max_turns: int = 20,
         event_manager=None,
         workspace_dir: str = None,
-        conversation_service=None
+        conversation_service=None,
+        schema=None,  # 🆕 AgentSchema 配置
+        system_prompt: str = None  # 🆕 System Prompt（作为运行时指令）
     ):
         """
         初始化 Agent
@@ -74,52 +85,88 @@ class SimpleAgent:
             event_manager: EventManager 实例（必需）
             workspace_dir: 工作目录
             conversation_service: ConversationService 实例（用于消息持久化）
+            schema: AgentSchema 配置（定义组件启用状态和参数）
+            system_prompt: System Prompt（运行时传给 LLM 的系统指令）
         """
         if event_manager is None:
             raise ValueError("event_manager 是必需参数")
         
+        # ===== 核心配置 =====
         self.model = model
         self.max_turns = max_turns
         self.event_manager = event_manager  # 保留引用（兼容）
         self.workspace_dir = workspace_dir
         
+        # 🆕 Schema 驱动：存储 Schema 配置
+        from core.schemas import DEFAULT_AGENT_SCHEMA
+        self.schema = schema if schema is not None else DEFAULT_AGENT_SCHEMA
+        
+        # 🆕 System Prompt：存储系统指令（如果未提供，使用默认）
+        self.system_prompt = system_prompt
+        
+        # 从 Schema 读取运行时参数（覆盖传入的参数）
+        if schema is not None:
+            self.model = schema.model
+            self.max_turns = schema.max_turns
+        
         # 🆕 使用 EventBroadcaster 作为事件发送的统一入口
         # 传入 conversation_service 用于自动持久化
         self.broadcaster = EventBroadcaster(event_manager, conversation_service)
         
-        # ===== 初始化各模块 =====
+        # ===== 根据 Schema 动态初始化各模块 =====
         self._init_modules()
         
-        # ===== 状态 =====
-        self.plan_state = {"plan": None, "todo": None, "tool_calls": []}
+        # ===== 状态（Manus Context Isolation 原则） =====
+        # ⚠️ 这是工具返回值的缓存，不是隐式状态
+        # 所有更新都通过 plan_todo 工具显式执行，此处仅缓存以避免重复调用
+        # 参考: docs/12-CONTEXT_ENGINEERING_OPTIMIZATION.md
+        self._plan_cache = {"plan": None, "todo": None, "tool_calls": []}
         self.invocation_stats = {"direct": 0, "code_execution": 0, "programmatic": 0, "streaming": 0}
         
         # ===== Usage 统计（使用 UsageTracker） =====
         self.usage_tracker = create_usage_tracker()
         
-        logger.info(f"✅ SimpleAgent 初始化完成 (model={model})")
+        logger.info(f"✅ SimpleAgent 初始化完成 (model={self.model}, schema={self.schema.name})")
     
     def _init_modules(self):
-        """初始化各独立模块"""
-        # 1. 能力注册表
+        """
+        根据 Schema 动态初始化各独立模块
+        
+        设计哲学：Schema 驱动组件初始化
+        - 如果 Schema 中组件 enabled=False，则不创建该组件
+        - 组件配置参数从 Schema 中读取
+        """
+        # 1. 能力注册表（总是需要）
         self.capability_registry = create_capability_registry()
         
-        # 2. 意图分析器（使用 Haiku）
-        self.intent_llm = create_claude_service(
-            model="claude-haiku-4-5-20251001",  # Haiku 4.5
-            enable_thinking=False,
-            enable_caching=False,
-            tools=[]
-        )
-        self.intent_analyzer = create_intent_analyzer(
-            llm_service=self.intent_llm,
-            enable_llm=True
-        )
+        # 2. 意图分析器（根据 Schema 决定是否创建）
+        if self.schema.intent_analyzer.enabled:
+            intent_config = self.schema.intent_analyzer
+            self.intent_llm = create_claude_service(
+                model=intent_config.llm_model,  # 从 Schema 读取
+                enable_thinking=False,
+                enable_caching=False,
+                tools=[]
+            )
+            self.intent_analyzer = create_intent_analyzer(
+                llm_service=self.intent_llm,
+                enable_llm=intent_config.use_llm  # 从 Schema 读取
+            )
+            logger.debug(f"✓ IntentAnalyzer 已启用 (model={intent_config.llm_model})")
+        else:
+            self.intent_llm = None
+            self.intent_analyzer = None
+            logger.debug("○ IntentAnalyzer 未启用")
         
-        # 3. 工具选择器
-        self.tool_selector = create_tool_selector(registry=self.capability_registry)
+        # 3. 工具选择器（根据 Schema 决定是否创建）
+        if self.schema.tool_selector.enabled:
+            self.tool_selector = create_tool_selector(registry=self.capability_registry)
+            logger.debug(f"✓ ToolSelector 已启用 (strategy={self.schema.tool_selector.selection_strategy})")
+        else:
+            self.tool_selector = None
+            logger.debug("○ ToolSelector 未启用")
         
-        # 4. 工具执行器        
+        # 4. 工具执行器（总是需要）        
         tool_context = {
             "event_manager": self.event_manager,
             "workspace_dir": self.workspace_dir
@@ -129,19 +176,25 @@ class SimpleAgent:
             tool_context=tool_context
         )
         
-        # 5. Plan/Todo 工具（纯计算，不持有状态）
-        self.plan_todo_tool = create_plan_todo_tool(registry=self.capability_registry)
+        # 5. Plan/Todo 工具（根据 Schema 决定是否创建）
+        if self.schema.plan_manager.enabled:
+            self.plan_todo_tool = create_plan_todo_tool(registry=self.capability_registry)
+            logger.debug(f"✓ PlanManager 已启用 (max_steps={self.schema.plan_manager.max_steps})")
+        else:
+            self.plan_todo_tool = None
+            logger.debug("○ PlanManager 未启用")
         
         # 6. 执行 LLM（Sonnet）
         self.llm = create_claude_service(
-            model=self.model,
+            model=self.model,  # 使用 Schema 中的 model
             enable_thinking=True,
             enable_caching=False,
             tools=[ToolType.BASH, ToolType.TEXT_EDITOR, ToolType.WEB_SEARCH]
         )
         
-        # 注册自定义工具到 LLM（必须在 plan_todo_tool 初始化之后）
-        self._register_tools_to_llm()
+        # 注册自定义工具到 LLM（如果有 plan_todo_tool）
+        if self.plan_todo_tool:
+            self._register_tools_to_llm()
     
     def _register_tools_to_llm(self):
         """注册工具到 LLM Service"""
@@ -189,29 +242,54 @@ class SimpleAgent:
             session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
             logger.warning(f"未提供 session_id，生成临时 ID: {session_id}")
         
-        # ===== 1. 意图分析（使用完整上下文） =====
-        logger.info("🎯 开始意图分析...")
-        intent = await self.intent_analyzer.analyze(messages)
+        # ===== 1. 意图分析（根据 Schema 决定是否执行） =====
+        if self.schema.intent_analyzer.enabled and self.intent_analyzer:
+            logger.info("🎯 开始意图分析...")
+            intent = await self.intent_analyzer.analyze(messages)
+            
+            # 发送意图识别结果给前端
+            intent_delta = {
+                "type": "intent",
+                "content": json.dumps({
+                    "task_type": intent.task_type.value,
+                    "complexity": intent.complexity.value,
+                    "needs_plan": intent.needs_plan,
+                    "confidence": intent.confidence
+                }, ensure_ascii=False)
+            }
+            yield await self.broadcaster.emit_message_delta(
+                session_id=session_id,
+                delta=intent_delta
+            )
+            logger.info(f"🎯 意图识别完成: {intent.task_type.value}, complexity={intent.complexity.value}")
+        else:
+            # 不执行意图分析，使用默认配置
+            logger.info("○ 跳过意图分析（Schema 未启用）")
+            from core.agent.types import IntentResult, TaskType, Complexity
+            intent = IntentResult(
+                task_type=TaskType.GENERAL,
+                complexity=Complexity.MEDIUM,
+                needs_plan=self.schema.plan_manager.enabled,
+                confidence=1.0
+            )
         
-        # 发送意图识别结果给前端
-        intent_delta = {
-            "type": "intent",
-            "content": json.dumps({
-                "task_type": intent.task_type.value,
-                "complexity": intent.complexity.value,
-                "needs_plan": intent.needs_plan,
-                "confidence": intent.confidence
-            }, ensure_ascii=False)
-        }
-        yield await self.broadcaster.emit_message_delta(
-            session_id=session_id,
-            delta=intent_delta
-        )
-        logger.info(f"🎯 意图识别完成: {intent.task_type.value}")
+        # 🆕 System Prompt 选择（设计哲学：极简原则）
+        # 
+        # 设计理念：
+        # - 用户只定义一套 System Prompt（从 AgentFactory 传入）
+        # - 如果有自定义 System Prompt，直接使用
+        # - 如果没有，使用默认 UNIVERSAL_AGENT_PROMPT
+        # - 不做复杂的分层，保持简单
         
-        # 获取执行配置
-        exec_config = self.intent_analyzer.get_execution_config(intent)
-        system_prompt = exec_config.system_prompt
+        if self.system_prompt:
+            # 使用用户定义的 System Prompt（唯一真相来源）
+            system_prompt = self.system_prompt
+            logger.info("✅ 使用用户定义的 System Prompt")
+        else:
+            # 使用框架默认 Prompt
+            from prompts.universal_agent_prompt import UNIVERSAL_AGENT_PROMPT
+            system_prompt = UNIVERSAL_AGENT_PROMPT
+            logger.info("✅ 使用框架默认 System Prompt")
         
         # 🆕 追加 Workspace 路径信息（让 Claude 的 text_editor 使用正确路径）
         session_context = await self.event_manager.storage.get_session_context(session_id)
@@ -233,17 +311,26 @@ class SimpleAgent:
 """
         system_prompt = system_prompt + workspace_instruction
         
-        # ===== 2. 工具选择 =====
+        # ===== 2. 工具选择（Schema 驱动优先） =====
         logger.info("🔧 开始工具选择...")
         
-        # 确定所需能力
-        plan = self.plan_state.get("plan")
-        if plan and plan.get('required_capabilities'):
+        # 确定所需能力（优先级：Schema > Plan > Intent 推断）
+        plan = self._plan_cache.get("plan")
+        
+        if self.schema.tools:
+            # 优先使用 Schema 配置（Prompt 驱动设计哲学）
+            required_capabilities = self.schema.tools
+            logger.debug(f"✓ 使用 Schema 配置的工具: {self.schema.tools}")
+        elif plan and plan.get('required_capabilities'):
+            # 其次使用 Plan 指定的能力
             required_capabilities = plan['required_capabilities']
+            logger.debug("✓ 使用 Plan 指定的能力")
         else:
+            # 最后通过意图推断（兜底）
             required_capabilities = self.capability_registry.get_capabilities_for_task_type(
                 intent.task_type.value
             )
+            logger.debug(f"✓ 通过意图推断能力: {intent.task_type.value}")
         
         # 获取可用 API
         available_apis = self.tool_selector.get_available_apis(self.tool_executor)
@@ -527,7 +614,7 @@ class SimpleAgent:
                 if tool_name == "plan_todo":
                     operation = tool_input.get('operation', 'create_plan')
                     data = tool_input.get('data', {})
-                    current_plan = self.plan_state.get("plan")
+                    current_plan = self._plan_cache.get("plan")
                     result = await self.plan_todo_tool.execute(
                         operation=operation,
                         data=data,
@@ -537,7 +624,7 @@ class SimpleAgent:
                     # 更新 plan_state（仅内存缓存，plan 数据已在 tool_result 中）
                     if result.get("status") == "success" and "plan" in result:
                         new_plan = result.get("plan")
-                        self.plan_state["plan"] = new_plan
+                        self._plan_cache["plan"] = new_plan
                         if operation == "create_plan":
                             logger.info(f"📋 Plan 已创建: {new_plan.get('goal', '')}")
                         else:
@@ -666,7 +753,7 @@ class SimpleAgent:
                     operation = tool_input.get('operation', 'create_plan')
                     data = tool_input.get('data', {})
                     # 传入当前 plan（从 plan_state 获取）
-                    current_plan = self.plan_state.get("plan")
+                    current_plan = self._plan_cache.get("plan")
                     result = await self.plan_todo_tool.execute(
                         operation=operation,
                         data=data,
@@ -676,7 +763,7 @@ class SimpleAgent:
                     # 更新 plan_state（仅内存缓存，plan 数据已在 tool_result 中）
                     if result.get("status") == "success" and "plan" in result:
                         new_plan = result.get("plan")
-                        self.plan_state["plan"] = new_plan
+                        self._plan_cache["plan"] = new_plan
                         if operation == "create_plan":
                             logger.info(f"📋 Plan 已创建: {new_plan.get('goal', '')}")
                         else:
@@ -758,11 +845,11 @@ class SimpleAgent:
     
     def get_plan(self) -> Optional[Dict]:
         """获取当前计划"""
-        return self.plan_state.get("plan")
+        return self._plan_cache.get("plan")
     
     def get_progress(self) -> Dict[str, Any]:
         """获取当前进度"""
-        plan = self.plan_state.get("plan")
+        plan = self._plan_cache.get("plan")
         if not plan:
             return {"total": 0, "completed": 0, "progress": 0.0}
         

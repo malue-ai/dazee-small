@@ -1,9 +1,9 @@
 # ZenFlux Agent V4 架构总览
 
 > 📅 **最后更新**: 2026-01-05  
-> 🎯 **当前版本**: V4.0 - 模块化重构版（已完成）  
+> 🎯 **当前版本**: V4.2 - Schema 驱动优化  
 > 🔗 **前版本**: [V3.7 架构](./ARCHITECTURE_V3.7_E2B.md)
-> ✅ **重构状态**: core/tool/capability/ 模块化完成
+> ✅ **优化状态**: Schema 驱动 + Context Reduction + 工具分层
 
 ---
 
@@ -20,6 +20,23 @@
 
 ## 🚀 版本演进
 
+### V4.1 → V4.2 核心变化
+
+| 维度 | V4.1 | V4.2 | 改进 |
+|------|------|------|------|
+| **工具选择** | Intent 推断 | Schema 驱动优先 | ✅ 优先使用 Schema 配置 |
+| **选择优先级** | Plan > Intent | Schema > Plan > Intent | ✅ 符合 Prompt 驱动设计 |
+
+### V4.0 → V4.1 核心变化
+
+| 维度 | V4.0 | V4.1 | 改进 |
+|------|------|------|------|
+| **Result Compaction** | 无 | `ResultCompactor` | ✅ 搜索结果减少 76.6% |
+| **状态管理** | `plan_state` | `_plan_cache` | ✅ 明确是缓存非隐式状态 |
+| **工具分层** | 无 | `level` + `cache_stable` | ✅ 支持工具分层加载 |
+| **Cache 监控** | 无 | 实时日志 | ✅ 显示 Cache HIT/节省 |
+| **配置驱动** | 部分 | 完全 YAML | ✅ 精简规则自动加载 |
+
 ### V3.7 → V4.0 核心变化
 
 | 维度 | V3.7 | V4.0 | 改进 |
@@ -31,12 +48,29 @@
 | **LLM** | `llm_service.py` | `core/llm/` 多提供商 | ✅ Claude/OpenAI/Gemini |
 | **Events** | 分散的事件发射 | `core/events/` 统一管理 | ✅ 6 类事件统一接口 |
 
+### 🎯 V4.2 优化重点
+
+1. **Schema 驱动** - 工具选择优先使用 Schema 配置
+2. **Context Reduction** - 工具结果精简，减少 70%+ Context
+3. **配置驱动** - 精简规则在 YAML 中配置，自动生效
+4. **Cache 友好** - 工具分层 + 稳定性标记
+
 ### 🎯 V4.0 设计目标
 
 1. **模块化** - 每个模块单一职责，可独立测试
 2. **层级化** - 清晰的依赖方向，避免循环依赖
 3. **可扩展** - 新功能通过配置添加，不修改核心代码
 4. **可观测** - 统一事件系统，完整的执行追踪
+
+### ✨ V4.2 核心成就
+
+| 改进项 | 实现状态 | 具体成果 |
+|-------|---------|---------|
+| **Schema 驱动工具选择** | ✅ 完成 | 优先级：Schema > Plan > Intent |
+| **ResultCompactor** | ✅ 完成 | 搜索结果 Context 减少 76.6% |
+| **配置驱动精简** | ✅ 完成 | 精简规则在 YAML 中配置 |
+| **工具分层** | ✅ 完成 | Level 1/2/3 + cache_stable |
+| **状态缓存标记** | ✅ 完成 | `_plan_cache` 明确语义 |
 
 ### ✨ V4.0 核心成就
 
@@ -55,6 +89,7 @@
 - 🎯 **依赖注入**：所有依赖通过构造函数注入，易于测试
 - 🎯 **配置驱动**：能力定义在 YAML，代码只负责执行
 - 🎯 **类型安全**：完整的类型定义和接口规范
+- 🎯 **Context Engineering**：基于 Manus 原则优化上下文管理
 
 ---
 
@@ -207,6 +242,7 @@
 │  │  │   • 动态加载工具实例                                                  │  ││
 │  │  │   • 依赖注入                                                          │  ││
 │  │  │   • 执行结果格式化                                                    │  ││
+│  │  │   • 🆕 ResultCompactor 自动精简结果                                   │  ││
 │  │  └──────────────────────────────────────────────────────────────────────┘  ││
 │  │  ┌──────────────────────────────────────────────────────────────────────┐  ││
 │  │  │              ✅ core/tool/capability/ (能力管理子包)                  │  ││
@@ -343,6 +379,7 @@ core/tool/
 ├── __init__.py          # 导出 ToolSelector, ToolExecutor
 ├── selector.py          # 工具选择器
 ├── executor.py          # 工具执行器
+├── result_compactor.py  # 🆕 结果精简器
 └── capability/          # ✅ 能力管理子包（已完成重构）
     ├── __init__.py      # 统一导出
     ├── registry.py      # 能力注册表
@@ -914,4 +951,6 @@ from core.tool.capability import (
 | [02-CAPABILITY-ROUTING.md](./02-CAPABILITY-ROUTING.md) | 能力路由 | 🔄 待更新（V4） |
 | [03-EVENT-PROTOCOL.md](./03-EVENT-PROTOCOL.md) | 统一事件协议（SSE/WebSocket） | ✅ 有效 |
 | [08-DATA_STORAGE_ARCHITECTURE.md](./08-DATA_STORAGE_ARCHITECTURE.md) | 数据存储 | ✅ 有效 |
+| [12-CONTEXT_ENGINEERING_OPTIMIZATION.md](./12-CONTEXT_ENGINEERING_OPTIMIZATION.md) | Context Engineering 优化 | ✅ V4.1 |
+| [RESULT_COMPACTOR_IMPLEMENTATION.md](./RESULT_COMPACTOR_IMPLEMENTATION.md) | ResultCompactor 实施 | ✅ V4.1 |
 

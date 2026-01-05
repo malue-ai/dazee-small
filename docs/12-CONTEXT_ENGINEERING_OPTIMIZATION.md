@@ -171,6 +171,19 @@ class ResultCompactor:
                 strategy=CompactionStrategy.STRUCTURED,
                 max_size=3000
             ),
+            # 搜索工具（使用 REFERENCE 策略，见下方专项优化章节）
+            "exa_search": CompactionRule(
+                tool_name="exa_search",
+                result_type="search_results",
+                strategy=CompactionStrategy.REFERENCE,
+                custom_compactor=lambda tool, result: self._compact_search_results(tool, result)
+            ),
+            "tavily_search": CompactionRule(
+                tool_name="tavily_search",
+                result_type="search_results",
+                strategy=CompactionStrategy.REFERENCE,
+                custom_compactor=lambda tool, result: self._compact_search_results(tool, result)
+            ),
             "browser_navigate": CompactionRule(
                 tool_name="browser_navigate",
                 result_type="url",
@@ -443,6 +456,214 @@ Turn 2:
   User: "生成可视化图表"
   # Context 清爽，LLM 专注于当前任务
   # 需要完整数据时会主动调用 file_read
+```
+
+### 搜索工具专项优化：Exa/Tavily
+
+**问题分析**：
+
+当前搜索工具（exa_search、tavily_search）返回的网页内容即使有截断（2000字符/结果），多个结果累积后仍会占用大量 context：
+
+```python
+# ❌ 当前问题：即使截断，10个结果仍然很大
+Turn 1:
+  User: "搜索AI最新进展"
+  Tool: exa_search(query="AI latest", num_results=10)
+  Result: {
+    "results": [
+      {"title": "...", "url": "...", "text": "2000 chars..."},  # 10个结果
+      {"title": "...", "url": "...", "text": "2000 chars..."},
+      ...
+    ]
+  }  # 总计 ~25KB+（10个结果 × 2500字符/结果）
+
+# 问题：
+# 1. 即使单个结果截断到2000字符，10个结果仍然很大
+# 2. LLM 通常只需要查看前3-5个结果
+# 3. 如果需要完整内容，可以通过 URL 重新获取
+```
+
+**优化方案：REFERENCE 策略（Manus 推荐）**
+
+```python
+# core/tool/result_compactor.py（增强版）
+
+def _init_rules(self) -> Dict[str, CompactionRule]:
+    """初始化精简规则"""
+    return {
+        # ... 其他规则 ...
+        
+        # ============================================================
+        # 🔍 搜索工具：使用 REFERENCE 策略（推荐）
+        # ============================================================
+        "exa_search": CompactionRule(
+            tool_name="exa_search",
+            result_type="search_results",
+            strategy=CompactionStrategy.REFERENCE,  # 🆕 引用策略
+            custom_compactor=self._compact_search_results  # 自定义精简函数
+        ),
+        
+        "tavily_search": CompactionRule(
+            tool_name="tavily_search",
+            result_type="search_results",
+            strategy=CompactionStrategy.REFERENCE,
+            custom_compactor=self._compact_search_results
+        ),
+        
+        "exa_web_search": CompactionRule(
+            tool_name="exa_web_search",
+            result_type="search_results",
+            strategy=CompactionStrategy.REFERENCE,
+            custom_compactor=self._compact_search_results
+        ),
+        
+        # ... 其他规则 ...
+    }
+    
+def _compact_search_results(
+    self,
+    tool_name: str,
+    result: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    搜索结果的精简策略（Manus 原则）
+    
+    核心思想：
+    - 只返回 URL + 简短摘要（前 200 字符）
+    - 不返回完整网页内容
+    - LLM 需要时通过 exa_crawl 或浏览器工具显式读取
+    
+    精简效果：
+    - 原始：10个结果 × 2000字符 = ~25KB
+    - 精简后：10个结果 × 300字符 = ~3KB
+    - 减少：88%
+    """
+    if not result.get("success") or result.get("status") != "success":
+        return result  # 错误结果不精简
+    
+    original_results = result.get("results", [])
+    if not original_results:
+        return result
+    
+    # 精简结果列表
+    compacted_results = []
+    for item in original_results[:10]:  # 最多保留10个结果
+        compacted_item = {
+            "title": item.get("title", ""),
+            "url": item.get("url", ""),
+            "score": item.get("score", 0),
+        }
+        
+        # 只保留前 200 字符的摘要（而不是完整内容）
+        if "text" in item:
+            text = item.get("text", "").strip()
+            if len(text) > 200:
+                compacted_item["summary"] = text[:200] + "..."
+                compacted_item["has_more_content"] = True
+            else:
+                compacted_item["summary"] = text
+                compacted_item["has_more_content"] = False
+        
+        # 保留元数据（发布时间、作者等）
+        if "published_date" in item:
+            compacted_item["published_date"] = item["published_date"]
+        if "author" in item:
+            compacted_item["author"] = item["author"]
+        
+        compacted_results.append(compacted_item)
+    
+    # 构建精简后的结果
+    compacted = {
+        "success": True,
+        "status": "success",
+        "query": result.get("query", ""),
+        "num_results": len(compacted_results),
+        "results": compacted_results,
+        # 🆕 添加访问提示
+        "access_hint": (
+            "如需查看完整网页内容，请使用以下工具：\n"
+            "- exa_crawl(url) - 使用 Exa 获取完整内容\n"
+            "- browser_navigate(url) - 使用浏览器访问\n"
+            "当前仅返回 URL 和摘要，以减少 context 占用"
+        ),
+        # 🆕 保留原始结果数量（如果被截断）
+        "metadata": {
+            **result.get("metadata", {}),
+            "compacted": True,
+            "original_result_count": len(original_results),
+        }
+    }
+    
+    return compacted
+```
+
+**优化效果对比**：
+
+```python
+# ❌ 优化前（当前实现）
+{
+  "results": [
+    {
+      "title": "AI最新进展",
+      "url": "https://example.com/article1",
+      "text": "这里是2000字符的完整内容..."  # 2000字符
+    },
+    # ... 9个更多结果
+  ]
+}
+# 总大小：~25KB
+
+# ✅ 优化后（REFERENCE 策略）
+{
+  "results": [
+    {
+      "title": "AI最新进展",
+      "url": "https://example.com/article1",
+      "summary": "这里是200字符的摘要...",  # 仅200字符
+      "has_more_content": true
+    },
+    # ... 最多10个结果
+  ],
+  "access_hint": "如需完整内容，使用 exa_crawl(url)"
+}
+# 总大小：~3KB（减少 88%）
+```
+
+**文件存储方案评估**：
+
+❌ **不推荐文件存储方案**，原因：
+
+1. **违反 Manus 原则**：
+   - 文件存储仍然是"引用"，但没有 URL 引用直接
+   - 增加了额外的 I/O 开销（写入文件 + 读取文件）
+   - 文件管理复杂（需要清理、路径管理）
+
+2. **URL 引用更优**：
+   - URL 是原始来源，更权威
+   - 不需要额外的存储空间
+   - LLM 可以直接通过 URL 访问（exa_crawl、浏览器工具）
+
+3. **只有在以下情况才考虑文件存储**：
+   - 搜索结果需要持久化（跨会话使用）
+   - 需要离线访问（URL 可能失效）
+   - 需要自定义处理（筛选、合并多个搜索结果）
+
+**实施建议**：
+
+```python
+# ✅ 推荐：REFERENCE 策略（URL + 摘要）
+# 优点：
+# - Context 占用减少 80-90%
+# - LLM 需要时可通过工具显式读取
+# - 符合 Manus "指针而非内容" 原则
+# - 实现简单，无额外开销
+
+# ❌ 不推荐：文件存储方案
+# 缺点：
+# - 需要文件 I/O 开销
+# - 需要路径管理和清理
+# - 违反 Manus 原则（URL 引用更直接）
+# - 只有特殊场景才需要（持久化、离线访问）
 ```
 
 ---
