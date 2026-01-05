@@ -124,9 +124,6 @@ class EventBroadcaster:
         # 🆕 session_id -> message_id 映射（用于持久化）
         self._session_message_ids: Dict[str, str] = {}
         
-        # 🆕 session_id -> usage 统计
-        self._session_usage: Dict[str, Dict[str, int]] = {}
-        
         # 需要广播的事件类型（可配置）
         self._broadcast_types: Set[str] = {
             # Content 级（核心 3 个，包括 tool_use/tool_result）
@@ -273,39 +270,35 @@ class EventBroadcaster:
         """
         self._accumulators[session_id] = ContentAccumulator()
         self._session_message_ids[session_id] = message_id
-        self._session_usage[session_id] = {
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "cache_read_tokens": 0,
-            "cache_creation_tokens": 0
-        }
         logger.debug(f"📝 开始消息累积: session={session_id}, message_id={message_id}")
     
-    def accumulate_usage(
+    async def accumulate_usage(
         self,
         session_id: str,
         usage: Dict[str, int]
     ) -> None:
         """
-        累积 token 使用量
+        保存 token 使用量到数据库（增量合并）
         
         Args:
             session_id: Session ID
             usage: 使用量字典
         """
-        if session_id not in self._session_usage:
-            self._session_usage[session_id] = {
-                "input_tokens": 0,
-                "output_tokens": 0,
-                "cache_read_tokens": 0,
-                "cache_creation_tokens": 0
-            }
+        if not self.conversation_service:
+            return
         
-        current = self._session_usage[session_id]
-        current["input_tokens"] += usage.get("input_tokens", 0)
-        current["output_tokens"] += usage.get("output_tokens", 0)
-        current["cache_read_tokens"] += usage.get("cache_read_tokens", 0)
-        current["cache_creation_tokens"] += usage.get("cache_creation_tokens", 0)
+        message_id = self._session_message_ids.get(session_id)
+        if not message_id:
+            return
+        
+        try:
+            await self.conversation_service.update_message(
+                message_id=message_id,
+                metadata={"usage": usage}
+            )
+            logger.debug(f"📊 保存 usage: message_id={message_id}, tokens={usage}")
+        except Exception as e:
+            logger.warning(f"⚠️ 保存 usage 失败: {str(e)}")
     
     def get_accumulator(self, session_id: str) -> Optional[ContentAccumulator]:
         """获取 session 的累积器（供外部查询）"""
@@ -494,6 +487,11 @@ class EventBroadcaster:
         
         if delta_type and not is_error:
             logger.debug(f"🔧 发送特殊工具 delta: type={delta_type}, tool={tool_name}")
+            
+            # 🆕 直接保存到数据库 metadata（增量合并）
+            await self._save_delta_to_metadata(session_id, delta_type, result_content)
+            
+            # 发送 SSE 事件给前端
             await self.events.message.emit_message_delta(
                 session_id=session_id,
                 delta={
@@ -504,6 +502,45 @@ class EventBroadcaster:
         
         # 清理缓存
         self._tool_id_to_name.pop(tool_use_id, None)
+    
+    async def _save_delta_to_metadata(
+        self,
+        session_id: str,
+        delta_type: str,
+        content: Any
+    ) -> None:
+        """
+        直接保存 delta 到数据库 metadata（增量合并）
+        
+        Args:
+            session_id: Session ID
+            delta_type: delta 类型（plan/search/knowledge/ppt 等）
+            content: delta 内容
+        """
+        if not self.conversation_service:
+            return
+        
+        message_id = self._session_message_ids.get(session_id)
+        if not message_id:
+            return
+        
+        # 解析 content（可能是 JSON 字符串）
+        parsed_content = content
+        if isinstance(content, str):
+            try:
+                parsed_content = json.loads(content)
+            except json.JSONDecodeError:
+                pass
+        
+        try:
+            # 直接更新数据库（update_message 会增量合并 metadata）
+            await self.conversation_service.update_message(
+                message_id=message_id,
+                metadata={delta_type: parsed_content}
+            )
+            logger.debug(f"📦 保存 metadata: message_id={message_id}, type={delta_type}")
+        except Exception as e:
+            logger.warning(f"⚠️ 保存 metadata 失败: {str(e)}")
     
     # ==================== 消息持久化（内部方法）====================
     
@@ -540,50 +577,32 @@ class EventBroadcaster:
     
     async def _finalize_message(self, session_id: str) -> None:
         """
-        最终保存消息到数据库
+        最终完成消息
         
-        在 message_stop 时调用，状态设为 "completed"，包含 usage 统计
+        在 message_stop 时调用：只更新状态为 "completed"
+        
+        注意：content 已在 checkpoint 保存，plan/usage 等已在 message_delta 时保存
         """
         if not self.conversation_service:
             return
         
-        accumulator = self._accumulators.get(session_id)
         message_id = self._session_message_ids.get(session_id)
-        usage = self._session_usage.get(session_id, {})
-        
-        if not accumulator or not message_id:
+        if not message_id:
             return
         
         try:
-            content_blocks = accumulator.build_for_db()
-            content_json = json.dumps(content_blocks, ensure_ascii=False)
-            
-            # 构建 metadata
-            metadata = {
-                "usage": usage,
-                "block_count": len(content_blocks)
-            }
-            
             await self.conversation_service.update_message(
                 message_id=message_id,
-                content=content_json,
-                status="completed",
-                metadata=metadata
+                status="completed"
             )
-            logger.info(
-                f"✅ 消息保存完成: message_id={message_id}, "
-                f"blocks={len(content_blocks)}, "
-                f"input_tokens={usage.get('input_tokens', 0)}, "
-                f"output_tokens={usage.get('output_tokens', 0)}"
-            )
+            logger.info(f"✅ 消息完成: message_id={message_id}")
         except Exception as e:
-            logger.error(f"❌ 消息保存失败: {str(e)}", exc_info=True)
+            logger.error(f"❌ 消息完成失败: {str(e)}", exc_info=True)
     
     def _cleanup_session(self, session_id: str) -> None:
         """清理 session 状态"""
         self._accumulators.pop(session_id, None)
         self._session_message_ids.pop(session_id, None)
-        self._session_usage.pop(session_id, None)
         logger.debug(f"🧹 清理 session 状态: {session_id}")
     
     # ==================== 配置管理 ====================

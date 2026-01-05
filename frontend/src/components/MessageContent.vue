@@ -21,30 +21,28 @@
         <MarkdownRenderer :content="block.text" />
       </div>
 
-      <!-- 工具调用 -->
-      <div v-else-if="block.type === 'tool_use'" class="content-block tool-use-block">
-        <div class="block-header">
-          <span class="block-icon">🔧</span>
-          <span class="block-title">{{ formatToolName(block.name) }}</span>
-          <span class="tool-status" :class="getToolStatus(block.id)">
-            {{ getToolStatusText(block.id) }}
-          </span>
-        </div>
-        <div class="block-content tool-input">
-          <pre>{{ formatToolInput(block.input) }}</pre>
-        </div>
-      </div>
+      <!-- 工具调用 (合并 Tool Use 和 Tool Result) -->
+      <template v-else-if="block.type === 'tool_use'">
+        <ToolMessage 
+          :name="block.name"
+          :input="block.input"
+          :result="getToolResultContent(block.id)"
+          :status="getToolStatus(block.id)"
+        />
+      </template>
 
-      <!-- 工具结果 -->
-      <div v-else-if="block.type === 'tool_result'" class="content-block tool-result-block" :class="{ 'is-error': block.is_error }">
-        <div class="block-header">
-          <span class="block-icon">{{ block.is_error ? '❌' : '✅' }}</span>
-          <span class="block-title">{{ block.is_error ? '执行失败' : '执行结果' }}</span>
+      <!-- 单独的工具结果 (如果未被合并，例如历史记录中没有配对的 use) -->
+      <template v-else-if="block.type === 'tool_result' && !hasPairedToolUse(block.tool_use_id)">
+         <div class="content-block tool-result-block" :class="{ 'is-error': block.is_error }">
+          <div class="block-header">
+            <span class="block-icon">{{ block.is_error ? '❌' : '✅' }}</span>
+            <span class="block-title">{{ block.is_error ? '执行失败' : '执行结果' }}</span>
+          </div>
+          <div class="block-content tool-output">
+            <pre>{{ formatToolResult(block.content) }}</pre>
+          </div>
         </div>
-        <div class="block-content tool-output">
-          <pre>{{ formatToolResult(block.content) }}</pre>
-        </div>
-      </div>
+      </template>
 
       <!-- 图片 -->
       <div v-else-if="block.type === 'image'" class="content-block image-block">
@@ -64,7 +62,7 @@
       </div>
 
       <!-- 未知类型 -->
-      <div v-else class="content-block unknown-block">
+      <div v-else-if="!['tool_result'].includes(block.type)" class="content-block unknown-block">
         <div class="block-header">
           <span class="block-icon">📦</span>
           <span class="block-title">{{ block.type || '未知内容' }}</span>
@@ -85,6 +83,7 @@
 <script setup>
 import { ref, computed, reactive } from 'vue'
 import MarkdownRenderer from './MarkdownRenderer.vue'
+import ToolMessage from './ToolMessage.vue'
 
 const props = defineProps({
   // 原始内容（可能是字符串或数组）
@@ -136,31 +135,6 @@ function toggleBlock(index) {
   expandedBlocks[index] = !expandedBlocks[index]
 }
 
-// 格式化工具名称
-function formatToolName(name) {
-  if (!name) return '工具调用'
-  
-  // 将下划线转为空格，首字母大写
-  return name
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, c => c.toUpperCase())
-}
-
-// 格式化工具输入
-function formatToolInput(input) {
-  if (!input) return '{}'
-  
-  if (typeof input === 'string') {
-    try {
-      return JSON.stringify(JSON.parse(input), null, 2)
-    } catch {
-      return input
-    }
-  }
-  
-  return JSON.stringify(input, null, 2)
-}
-
 // 格式化工具结果
 function formatToolResult(content) {
   if (!content) return ''
@@ -185,11 +159,17 @@ function getToolStatus(toolId) {
   return status.success ? 'success' : 'error'
 }
 
-// 获取工具状态文本
-function getToolStatusText(toolId) {
+// 获取工具结果内容
+function getToolResultContent(toolId) {
   const status = props.toolStatuses[toolId]
-  if (!status) return '执行中...'
-  return status.success ? '成功' : '失败'
+  if (!status || !status.result) return null
+  return status.result
+}
+
+// 检查是否有配对的 Tool Use
+function hasPairedToolUse(toolUseId) {
+  if (!toolUseId) return false
+  return contentBlocks.value.some(b => b.type === 'tool_use' && b.id === toolUseId)
 }
 
 // 获取图片 src
@@ -244,31 +224,7 @@ function formatFileSize(bytes) {
   /* 文本块无额外样式，由 MarkdownRenderer 处理 */
 }
 
-/* 工具调用 */
-.tool-use-block {
-  background: #f7fafc;
-  border: 1px solid #e2e8f0;
-  padding: 12px;
-}
-
-.tool-input {
-  background: #1a202c;
-  color: #e2e8f0;
-  border-radius: 6px;
-  padding: 12px;
-  margin-top: 8px;
-  overflow-x: auto;
-}
-
-.tool-input pre {
-  margin: 0;
-  font-size: 12px;
-  font-family: 'Consolas', 'Monaco', monospace;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
-/* 工具结果 */
+/* 工具结果（未合并） */
 .tool-result-block {
   background: #f0fff4;
   border: 1px solid #9ae6b4;
@@ -399,29 +355,4 @@ function formatFileSize(bytes) {
 .toggle-btn:hover {
   background: #edf2f7;
 }
-
-/* 工具状态 */
-.tool-status {
-  margin-left: auto;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 500;
-}
-
-.tool-status.pending {
-  background: #fef3c7;
-  color: #92400e;
-}
-
-.tool-status.success {
-  background: #d1fae5;
-  color: #065f46;
-}
-
-.tool-status.error {
-  background: #fee2e2;
-  color: #991b1b;
-}
 </style>
-

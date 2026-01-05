@@ -366,12 +366,13 @@ class RedisSessionManager:
             event_json
         )
         
-        # 只保留最近 1000 个事件
-        await client.ltrim(
-            f"session:{session_id}:events",
-            0,
-            999
-        )
+        # 🔧 Agent 运行期间保留所有事件（不做 LTRIM）
+        # 只在 Session 完成后由 complete_session() 设置 TTL 自动过期
+        # 如果事件数量超过安全阈值（10000），才进行截断防止内存爆炸
+        events_count = await client.llen(f"session:{session_id}:events")
+        if events_count > 10000:
+            logger.warning(f"⚠️ 事件数量超过阈值: session_id={session_id}, count={events_count}")
+            await client.ltrim(f"session:{session_id}:events", 0, 9999)
         
         # 🎯 通过 Pub/Sub 发布事件（实时推送）
         channel = f"session:{session_id}:stream"

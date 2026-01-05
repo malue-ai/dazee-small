@@ -15,6 +15,7 @@ Chat 路由层 - 仅处理 HTTP 请求/响应
 
 from logger import get_logger
 import json
+import asyncio
 from enum import Enum
 from fastapi import APIRouter, HTTPException, BackgroundTasks, status, Query
 from fastapi.responses import StreamingResponse
@@ -378,6 +379,191 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
 
 
 
+# ==================== SSE 重连接口 ====================
+
+@router.get("/chat/{session_id}")
+async def reconnect_chat_stream(
+    session_id: str,
+    after_seq: Optional[int] = Query(None, description="从哪个序号之后开始（断点续传）")
+):
+    """
+    重连到已存在的 Session SSE 流（断线重连）
+    
+    ## 使用场景
+    用户刷新页面或断线后，重新连接到正在运行的 Agent Session
+    
+    ## 参数
+    - **session_id**: Session ID
+    - **after_seq**: 从哪个序号之后开始（可选，用于断点续传）
+    
+    ## 返回
+    SSE 事件流，首先发送一个 `reconnect_info` 事件包含上下文信息：
+    ```
+    event: reconnect_info
+    data: {
+      "session_id": "sess_xxx",
+      "conversation_id": "conv_xxx",
+      "message_id": "msg_xxx",
+      "status": "running",
+      "last_event_seq": 150,
+      "total_buffered_events": 150
+    }
+    ```
+    
+    然后推送 seq > after_seq 的所有事件
+    
+    ## 流程
+    1. 先发送 `reconnect_info` 事件（包含上下文）
+    2. 发送所有丢失的历史事件（从 Redis 缓冲区）
+    3. 订阅 Pub/Sub 实时推送新事件
+    4. Session 完成时发送 `done` 事件
+    """
+    try:
+        logger.info(f"📨 SSE 重连请求: session_id={session_id}, after_seq={after_seq}")
+        
+        # 1. 检查 Session 是否存在
+        status_data = await session_service.get_session_status(session_id)
+        
+        if not status_data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=create_error_response(
+                    ErrorCode.SESSION_NOT_FOUND,
+                    "Session 不存在或已过期"
+                )
+            )
+        
+        session_status = status_data.get("status")
+        
+        # 如果 Session 已完成，返回错误
+        if session_status in ["completed", "failed", "timeout", "stopped"]:
+            logger.info(f"ℹ️ Session 已结束: status={session_status}")
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE,
+                detail=create_error_response(
+                    ErrorCode.SESSION_NOT_FOUND,
+                    f"Session 已结束 (status={session_status})，请从数据库读取历史记录"
+                )
+            )
+        
+        async def reconnect_event_generator():
+            """重连事件生成器"""
+            try:
+                # 🎯 第1步：发送重连信息（包含上下文）
+                reconnect_info = {
+                    "type": "reconnect_info",
+                    "data": {
+                        "session_id": session_id,
+                        "conversation_id": status_data.get("conversation_id"),
+                        "message_id": status_data.get("message_id"),
+                        "user_id": status_data.get("user_id"),
+                        "status": session_status,
+                        "last_event_seq": status_data.get("last_event_seq", 0),
+                        "start_time": status_data.get("start_time"),
+                        "message_preview": status_data.get("message_preview", "")
+                    },
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+                yield f"event: reconnect_info\n"
+                yield f"data: {json.dumps(reconnect_info, ensure_ascii=False)}\n\n"
+                
+                logger.info(f"📤 已发送 reconnect_info: conversation_id={status_data.get('conversation_id')}")
+                
+                # 🎯 第2步：获取并推送历史事件（断点补偿）
+                history_events = await session_service.get_session_events(
+                    session_id=session_id,
+                    after_id=after_seq or 0,
+                    limit=10000  # 获取所有历史事件
+                )
+                
+                if history_events:
+                    logger.info(f"📤 推送 {len(history_events)} 个历史事件")
+                    for event in history_events:
+                        event_type = event.get("type", "message")
+                        event_uuid = event.get("event_uuid", "")
+                        
+                        yield f"id: {event_uuid}\n"
+                        yield f"event: {event_type}\n"
+                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                
+                # 🎯 第3步：订阅 Pub/Sub 实时推送新事件
+                redis = session_service.redis
+                last_seq = after_seq or 0
+                if history_events:
+                    # 更新 last_seq 为历史事件中的最大序号
+                    last_seq = max(
+                        e.get("seq", 0) for e in history_events
+                    ) if history_events else last_seq
+                
+                logger.info(f"📡 开始订阅实时事件流: session_id={session_id}, after_seq={last_seq}")
+                
+                async for event in redis.subscribe_events(
+                    session_id=session_id,
+                    after_id=last_seq,
+                    timeout=300  # 5 分钟超时
+                ):
+                    event_type = event.get("type", "message")
+                    event_uuid = event.get("event_uuid", "")
+                    
+                    yield f"id: {event_uuid}\n"
+                    yield f"event: {event_type}\n"
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    
+                    # 检查是否结束
+                    if event_type in ["session_end", "message_complete"]:
+                        break
+                
+                # 发送完成事件
+                yield f"event: done\n"
+                yield f"data: {{}}\n\n"
+                logger.info(f"✅ SSE 重连流结束: session_id={session_id}")
+                
+            except asyncio.CancelledError:
+                logger.warning(f"⚠️ SSE 重连流被取消: session_id={session_id}")
+                raise
+            except Exception as e:
+                logger.error(f"❌ SSE 重连流错误: {str(e)}", exc_info=True)
+                error_response = create_error_response(
+                    ErrorCode.INTERNAL_ERROR,
+                    sanitize_error_message(e)
+                )
+                yield f"event: error\n"
+                yield f"data: {json.dumps(error_response, ensure_ascii=False)}\n\n"
+        
+        return StreamingResponse(
+            reconnect_event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            }
+        )
+    
+    except HTTPException:
+        raise
+    except SessionNotFoundError as e:
+        logger.warning(f"⚠️ Session 不存在: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=create_error_response(
+                ErrorCode.SESSION_NOT_FOUND,
+                "Session 不存在或已过期"
+            )
+        )
+    except Exception as e:
+        logger.error(f"❌ SSE 重连错误: {str(e)}", exc_info=True)
+        safe_message = sanitize_error_message(e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=create_error_response(
+                ErrorCode.INTERNAL_ERROR,
+                safe_message
+            )
+        )
+
+
 # ==================== Session 状态查询接口 ====================
 
 @router.get("/session/{session_id}/status", response_model=APIResponse[Dict])
@@ -507,7 +693,13 @@ async def get_session_events(
         )
         
         # 构建响应
-        last_event_id = events[-1]["id"] if events else (after_id or 0)
+        # 🔧 事件使用 seq 字段（新格式）或 id（旧格式兼容）
+        last_event_id = 0
+        if events:
+            last_event = events[-1]
+            last_event_id = last_event.get("seq", last_event.get("id", 0))
+        else:
+            last_event_id = after_id or 0
         
         response_data = {
             "session_id": session_id,

@@ -287,7 +287,7 @@ async def _execute_tools_stream(
             session_id=session_id,
             index=tool_result_index,
             content_block=tool_result_block
-        )
+            )
         yield await self.broadcaster.emit_content_stop(...)
 ```
 

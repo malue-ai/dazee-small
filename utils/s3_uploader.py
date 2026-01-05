@@ -232,6 +232,82 @@ class S3Uploader:
             logger.error(f"❌ 上传失败: {str(e)}", exc_info=True)
             raise S3UploadError(f"上传失败: {str(e)}") from e
     
+    async def upload_bytes(
+        self,
+        file_content: bytes,
+        object_name: str,
+        content_type: str = "application/octet-stream",
+        metadata: Optional[Dict[str, str]] = None,
+        acl: str = "private"
+    ) -> Dict[str, str]:
+        """
+        直接上传字节内容到 S3
+        
+        Args:
+            file_content: 文件字节内容
+            object_name: S3 对象名称（完整路径）
+            content_type: MIME 类型
+            metadata: 自定义元数据（可选）
+            acl: 访问控制（private/public-read）
+            
+        Returns:
+            {
+                "key": str,       # S3 对象键
+                "url": str,       # S3 URL（s3://bucket/key）
+                "size": int       # 文件大小
+            }
+            
+        Raises:
+            S3UploadError: 上传失败
+        """
+        try:
+            # 检查文件大小
+            file_size = len(file_content)
+            max_size = self.config["aws"]["s3"]["upload"]["max_file_size"] * 1024 * 1024
+            
+            if file_size > max_size:
+                raise S3UploadError(f"文件过大: {file_size} bytes > {max_size} bytes")
+            
+            # 准备元数据
+            file_metadata = metadata or {}
+            file_metadata.update({
+                "uploaded_at": datetime.now().isoformat(),
+            })
+            
+            # 上传到 S3
+            logger.info(f"📤 上传字节内容: {object_name} ({file_size} bytes)")
+            
+            from io import BytesIO
+            self.s3_client.upload_fileobj(
+                BytesIO(file_content),
+                self.bucket_name,
+                object_name,
+                ExtraArgs={
+                    'ContentType': content_type,
+                    'Metadata': file_metadata,
+                    'ACL': acl
+                }
+            )
+            
+            logger.info(f"✅ 上传成功: {object_name}")
+            
+            # 生成 URL
+            s3_url = f"s3://{self.bucket_name}/{object_name}"
+            
+            return {
+                "key": object_name,
+                "url": s3_url,
+                "size": file_size
+            }
+        
+        except ClientError as e:
+            logger.error(f"❌ S3 上传失败: {str(e)}")
+            raise S3UploadError(f"S3 上传失败: {str(e)}") from e
+        
+        except Exception as e:
+            logger.error(f"❌ 上传失败: {str(e)}", exc_info=True)
+            raise S3UploadError(f"上传失败: {str(e)}") from e
+    
     def _generate_s3_key(
         self,
         category: str,

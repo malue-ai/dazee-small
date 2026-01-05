@@ -16,11 +16,27 @@ File 服务层 - 文件管理业务逻辑
 from logger import get_logger
 from typing import Dict, Any, Optional, List
 from datetime import datetime
-
+import magic  # type: ignore
 from infra.database import AsyncSessionLocal, crud
 from utils import get_s3_uploader
 
 logger = get_logger("file_service")
+
+
+def detect_mime_type(file_content: bytes, filename: str) -> str:
+    """
+    检测文件的真实 MIME 类型（基于文件头）
+    
+    Args:
+        file_content: 文件内容（字节）
+        filename: 文件名
+        
+    Returns:
+        MIME 类型
+    """
+    mime = magic.from_buffer(file_content, mime=True)
+    logger.debug(f"检测 MIME: {filename} -> {mime}")
+    return mime
 
 
 class FileServiceError(Exception):
@@ -49,216 +65,166 @@ class FileService:
     async def list_files(
         self,
         user_id: str,
-        category: Optional[str] = None,
-        status: Optional[str] = None,
         limit: int = 20,
         offset: int = 0
     ) -> Dict[str, Any]:
-        """
-        获取用户文件列表
-        
-        Args:
-            user_id: 用户ID
-            category: 分类过滤（可选）
-            status: 状态过滤（可选）
-            limit: 每页数量
-            offset: 偏移量
-            
-        Returns:
-            {"user_id": str, "total": int, "files": [...], "has_more": bool}
-        """
+        """获取用户文件列表"""
         async with AsyncSessionLocal() as session:
-            # 转换状态
-            db_status = crud.convert_api_status_to_db(status)
-            
-            # 查询文件列表
             files = await crud.list_files_by_user(
                 session=session,
                 user_id=user_id,
-                category=category,
-                status=db_status,
                 limit=limit,
                 offset=offset,
                 order_by="created_at",
                 order_desc=True
             )
             
-            # 查询总数
-            total = await crud.count_files_by_user(
-                session=session,
-                user_id=user_id,
-                category=category,
-                status=db_status
-            )
-        
-        has_more = (offset + len(files)) < total
-        
-        logger.info(f"✅ 获取文件列表: user_id={user_id}, total={total}, returned={len(files)}")
+            total = await crud.count_files_by_user(session=session, user_id=user_id)
         
         return {
             "user_id": user_id,
             "total": total,
             "files": files,
-            "has_more": has_more
+            "has_more": (offset + len(files)) < total
         }
     
     async def get_file(self, file_id: str) -> Dict[str, Any]:
-        """
-        获取文件详情
-        
-        Args:
-            file_id: 文件ID
-            
-        Returns:
-            文件信息字典
-            
-        Raises:
-            FileNotFoundError: 文件不存在
-        """
+        """获取文件详情"""
         async with AsyncSessionLocal() as session:
             file_record = await crud.get_file(session, file_id)
         
         if not file_record:
             raise FileNotFoundError(f"文件不存在: {file_id}")
         
-        # 转换为字典
         return {
-            "id": file_record.id,
-            "user_id": file_record.user_id,
+            "file_id": file_record.id,
             "filename": file_record.filename,
             "file_size": file_record.file_size,
-            "content_type": file_record.content_type,
-            "storage_type": file_record.storage_type.value if file_record.storage_type else None,
-            "storage_path": file_record.storage_path,
-            "storage_url": file_record.storage_url,
-            "status": file_record.status.value if file_record.status else None,
+            "mime_type": file_record.mime_type,
             "created_at": file_record.created_at.isoformat() if file_record.created_at else None,
-            "updated_at": file_record.updated_at.isoformat() if file_record.updated_at else None,
-        }
-    
-    async def get_user_stats(self, user_id: str) -> Dict[str, Any]:
-        """
-        获取用户文件统计
-        
-        Args:
-            user_id: 用户ID
-            
-        Returns:
-            统计信息
-        """
-        async with AsyncSessionLocal() as session:
-            # 获取统计信息
-            stats = await crud.get_user_file_stats(session, user_id)
-            
-            # 获取最近上传的文件
-            recent_files = await crud.list_files_by_user(
-                session=session,
-                user_id=user_id,
-                limit=5,
-                offset=0,
-                order_by="created_at",
-                order_desc=True
-            )
-        
-        logger.info(f"✅ 获取用户统计: user_id={user_id}, total={stats.get('total_count', 0)}")
-        
-        return {
-            **stats,
-            "recent_uploads": recent_files
         }
     
     # ==================== 文件操作 ====================
     
     async def get_download_url(self, file_id: str) -> Dict[str, Any]:
-        """
-        获取文件下载 URL（预签名 URL）
-        
-        Args:
-            file_id: 文件ID
-            
-        Returns:
-            {"file_id": str, "filename": str, "url": str, "expires_at": str}
-            
-        Raises:
-            FileNotFoundError: 文件不存在
-        """
+        """获取下载 URL（预签名，24小时有效）"""
         async with AsyncSessionLocal() as session:
             file_record = await crud.get_file(session, file_id)
             
             if not file_record:
                 raise FileNotFoundError(f"文件不存在: {file_id}")
             
-            # 生成预签名 URL（24小时有效）
-            presigned_url = await self.s3_uploader.get_presigned_url(
-                object_name=file_record.storage_path,
-                expiration=86400
+            url = self.s3_uploader.get_presigned_url(
+                s3_key=file_record.storage_path,
+                expires_in=86400
             )
-            
-            # TODO: 更新下载计数
-            
-            logger.info(f"✅ 生成下载链接: file_id={file_id}")
             
             return {
                 "file_id": file_id,
                 "filename": file_record.filename,
-                "url": presigned_url,
-                "expires_at": datetime.now().isoformat()
+                "url": url
             }
     
     async def delete_file(self, file_id: str) -> Dict[str, Any]:
-        """
-        删除文件
-        
-        Args:
-            file_id: 文件ID
-            
-        Returns:
-            {"file_id": str, "filename": str, "deleted": bool}
-            
-        Raises:
-            FileNotFoundError: 文件不存在
-        """
+        """删除文件"""
         async with AsyncSessionLocal() as session:
-            # 获取文件记录
             file_record = await crud.get_file(session, file_id)
             
             if not file_record:
                 raise FileNotFoundError(f"文件不存在: {file_id}")
             
-            filename = file_record.filename
-            storage_path = file_record.storage_path
-            
-            # 从 S3 删除文件
+            # 删除 S3 文件
             try:
-                await self.s3_uploader.delete_file(storage_path)
-                logger.info(f"✅ S3 文件已删除: {storage_path}")
-            except Exception as s3_error:
-                logger.warning(f"⚠️ S3 删除失败（继续删除数据库记录）: {str(s3_error)}")
+                await self.s3_uploader.delete_file(file_record.storage_path)
+            except Exception as e:
+                logger.warning(f"⚠️ S3 删除失败: {str(e)}")
             
-            # 软删除数据库记录
-            success = await crud.soft_delete_file(session, file_id)
+            # 删除数据库记录
+            await crud.delete_file(session, file_id)
         
-        logger.info(f"✅ 文件删除成功: file_id={file_id}, filename={filename}")
-        
-        return {
-            "file_id": file_id,
-            "filename": filename,
-            "deleted": success
-        }
+        return {"file_id": file_id}
     
-    async def increment_view_count(self, file_id: str) -> bool:
+    # ==================== 文件上传 ====================
+    
+    async def upload_file(
+        self,
+        file_content: bytes,
+        filename: str,
+        mime_type: str,
+        user_id: str
+    ) -> Dict[str, Any]:
         """
-        增加文件查看次数
+        上传文件到 S3 并保存记录到数据库
         
         Args:
-            file_id: 文件ID
+            file_content: 文件内容（字节）
+            filename: 文件名
+            mime_type: 前端传来的 MIME 类型（会被后端验证）
+            user_id: 用户 ID
             
         Returns:
-            是否成功
+            { "file_id", "filename", "file_size", "mime_type", "created_at" }
         """
-        # TODO: 实现计数功能（需要在 File 模型中添加 view_count 字段）
-        logger.debug(f"📊 查看计数: file_id={file_id}")
-        return True
+        import uuid
+        from datetime import datetime
+        
+        file_size = len(file_content)
+        
+        # 后端检测真实的 MIME 类型
+        detected_mime = detect_mime_type(file_content, filename)
+        logger.info(f"MIME 验证: 前端={mime_type}, 后端={detected_mime}")
+        
+        # 构建存储路径
+        date_str = datetime.now().strftime("%Y%m%d")
+        unique_id = uuid.uuid4().hex[:12]
+        safe_filename = "".join(c for c in filename if c.isalnum() or c in "._-")
+        storage_path = f"{user_id}/{date_str}/{unique_id}_{safe_filename}"
+        
+        try:
+            # 上传到 S3（使用检测到的 MIME 类型）
+            await self.s3_uploader.upload_bytes(
+                file_content=file_content,
+                object_name=storage_path,
+                content_type=detected_mime
+            )
+            
+            # 保存到数据库
+            async with AsyncSessionLocal() as session:
+                file_record = await crud.create_file(
+                    session=session,
+                    user_id=user_id,
+                    filename=filename,
+                    file_size=file_size,
+                    mime_type=detected_mime,
+                    storage_path=storage_path
+                )
+            
+            logger.info(f"✅ 上传: {file_record.id}, {filename}, {file_size}B, {detected_mime}")
+            
+            return {
+                "file_id": file_record.id,
+                "filename": filename,
+                "file_size": file_size,
+                "mime_type": detected_mime,
+                "created_at": datetime.now().isoformat()
+            }
+        
+        except Exception as e:
+            logger.error(f"❌ 上传失败: {str(e)}", exc_info=True)
+            raise FileServiceError(f"上传失败: {str(e)}")
+    
+    async def get_file_url(self, file_id: str, expiration: int = 3600) -> str:
+        """获取文件访问 URL"""
+        async with AsyncSessionLocal() as session:
+            file_record = await crud.get_file(session, file_id)
+            
+            if not file_record:
+                raise FileNotFoundError(f"文件不存在: {file_id}")
+            
+            return self.s3_uploader.get_presigned_url(
+                s3_key=file_record.storage_path,
+                expires_in=expiration
+            )
 
 
 # ==================== 便捷函数 ====================

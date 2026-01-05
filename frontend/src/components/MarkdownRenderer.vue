@@ -14,15 +14,12 @@ const props = defineProps({
   }
 })
 
-// 配置 marked
 marked.setOptions({
   highlight: function(code, lang) {
     if (lang && hljs.getLanguage(lang)) {
       try {
         return hljs.highlight(code, { language: lang }).value
-      } catch (err) {
-        console.error('代码高亮失败:', err)
-      }
+      } catch (err) {}
     }
     return hljs.highlightAuto(code).value
   },
@@ -32,21 +29,21 @@ marked.setOptions({
 
 const renderedHtml = computed(() => {
   try {
-    return marked(props.content)
+    return marked(props.content || '')
   } catch (error) {
-    console.error('Markdown 渲染失败:', error)
     return props.content
   }
 })
 </script>
 
 <style>
-/* 导入 highlight.js 主题 */
+/* 导入 highlight.js 浅色主题 */
 @import 'highlight.js/styles/github.css';
 
 .markdown-body {
   line-height: 1.6;
-  color: #2c3e50;
+  color: #374151; /* Gray 700 */
+  font-size: 15px;
 }
 
 .markdown-body h1,
@@ -59,26 +56,22 @@ const renderedHtml = computed(() => {
   margin-bottom: 16px;
   font-weight: 600;
   line-height: 1.25;
+  color: #111827; /* Gray 900 */
 }
 
 .markdown-body h1 {
-  font-size: 2em;
+  font-size: 1.8em;
   border-bottom: 1px solid #e5e7eb;
   padding-bottom: 0.3em;
 }
 
 .markdown-body h2 {
-  font-size: 1.5em;
+  font-size: 1.4em;
   border-bottom: 1px solid #e5e7eb;
   padding-bottom: 0.3em;
 }
 
-.markdown-body h3 {
-  font-size: 1.25em;
-}
-
 .markdown-body p {
-  margin-top: 0;
   margin-bottom: 16px;
 }
 
@@ -86,9 +79,10 @@ const renderedHtml = computed(() => {
   padding: 0.2em 0.4em;
   margin: 0;
   font-size: 85%;
-  background-color: rgba(175, 184, 193, 0.2);
-  border-radius: 6px;
-  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  background-color: #f3f4f6;
+  border-radius: 4px;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  color: #1f2937;
 }
 
 .markdown-body pre {
@@ -96,18 +90,19 @@ const renderedHtml = computed(() => {
   overflow: auto;
   font-size: 85%;
   line-height: 1.45;
-  background-color: #f6f8fa;
-  border-radius: 6px;
+  background-color: #f9fafb;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
   margin-bottom: 16px;
 }
 
 .markdown-body pre code {
   display: inline;
-  max-width: auto;
   padding: 0;
   margin: 0;
   overflow: visible;
   line-height: inherit;
+  word-wrap: normal;
   background-color: transparent;
   border: 0;
 }
@@ -124,8 +119,8 @@ const renderedHtml = computed(() => {
 
 .markdown-body blockquote {
   padding: 0 1em;
-  color: #6a737d;
-  border-left: 0.25em solid #dfe2e5;
+  color: #6b7280;
+  border-left: 0.25em solid #e5e7eb;
   margin: 0 0 16px 0;
 }
 
@@ -139,20 +134,20 @@ const renderedHtml = computed(() => {
 .markdown-body table th,
 .markdown-body table td {
   padding: 6px 13px;
-  border: 1px solid #dfe2e5;
+  border: 1px solid #e5e7eb;
 }
 
 .markdown-body table tr {
   background-color: #fff;
-  border-top: 1px solid #c6cbd1;
+  border-top: 1px solid #e5e7eb;
 }
 
 .markdown-body table tr:nth-child(2n) {
-  background-color: #f6f8fa;
+  background-color: #f9fafb;
 }
 
 .markdown-body a {
-  color: #667eea;
+  color: #2563eb;
   text-decoration: none;
 }
 
@@ -166,4 +161,3 @@ const renderedHtml = computed(() => {
   border-radius: 6px;
 }
 </style>
-

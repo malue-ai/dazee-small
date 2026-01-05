@@ -450,9 +450,9 @@ class ChatService:
                     accumulator = agent.broadcaster.get_accumulator(session_id)
                     assistant_text = ""
                     if accumulator:
-                        assistant_text = self._extract_text_from_content_blocks(
-                            accumulator.build_for_db()
-                        )
+                        assistant_text = extract_text_from_message(
+                        accumulator.build_for_db()
+                    )
                     if user_text and assistant_text:
                         asyncio.create_task(
                             self.background_tasks.generate_recommended_questions(

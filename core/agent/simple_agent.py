@@ -287,27 +287,41 @@ class SimpleAgent:
                     llm_messages, system_prompt, tools_for_llm, ctx, session_id
                 ):
                     yield event
-                
+                    
                 # 流结束后，从 ctx 获取 LLM 响应
                 response = ctx.last_llm_response
                 if response:
                     # 处理工具调用
                     if response.stop_reason == "tool_use" and response.tool_calls:
-                        # 执行工具（yield 出所有 tool_use/tool_result 事件）
+                        # 🆕 区分客户端工具和服务端工具
+                        # - 客户端工具（tool_use）：需要我们执行并返回 tool_result
+                        # - 服务端工具（server_tool_use）：Anthropic 服务器已执行，结果在 raw_content 中
+                        client_tools = [tc for tc in response.tool_calls if tc.get("type") == "tool_use"]
+                        server_tools = [tc for tc in response.tool_calls if tc.get("type") == "server_tool_use"]
+                        
+                        if server_tools:
+                            logger.info(f"🌐 服务端工具已执行: {[t.get('name') for t in server_tools]}")
+                        
                         tool_results = []
-                        async for tool_event in self._execute_tools_stream(
-                            response.tool_calls, session_id, ctx
-                        ):
-                            yield tool_event
-                            # 从 content_start 事件中收集 tool_result
-                            if tool_event.get("type") == "content_start":
-                                content_block = tool_event.get("data", {}).get("content_block", {})
-                                if content_block.get("type") == "tool_result":
-                                    tool_results.append(content_block)
+                        if client_tools:
+                            # 只执行客户端工具
+                            async for tool_event in self._execute_tools_stream(
+                                client_tools, session_id, ctx
+                            ):
+                                yield tool_event
+                                # 从 content_start 事件中收集 tool_result
+                                if tool_event.get("type") == "content_start":
+                                    content_block = tool_event.get("data", {}).get("content_block", {})
+                                    if content_block.get("type") == "tool_result":
+                                        tool_results.append(content_block)
                         
                         # 更新消息（用于下一轮 LLM 调用）
                         llm_messages.append(Message(role="assistant", content=response.raw_content))
-                        llm_messages.append(Message(role="user", content=tool_results))
+                        
+                        # 🆕 只有当有客户端工具结果时才添加 user message
+                        if tool_results:
+                            llm_messages.append(Message(role="user", content=tool_results))
+                        # 如果只有服务端工具，不需要添加 user message，直接进入下一轮
                     else:
                         # 没有工具调用，任务完成
                         ctx.set_completed(response.content, response.stop_reason)
@@ -330,19 +344,27 @@ class SimpleAgent:
                     ctx.set_completed(response.content, response.stop_reason)
                     break
                 
-                # 执行工具（非流式模式）
-                tool_results = await self._execute_tools(response.tool_calls, session_id, ctx)
+                # 🆕 区分客户端工具和服务端工具（非流式模式）
+                client_tools = [tc for tc in response.tool_calls if tc.get("type") == "tool_use"]
+                server_tools = [tc for tc in response.tool_calls if tc.get("type") == "server_tool_use"]
+                
+                if server_tools:
+                    logger.info(f"🌐 服务端工具已执行: {[t.get('name') for t in server_tools]}")
+                
                 llm_messages.append(Message(role="assistant", content=response.raw_content))
-                llm_messages.append(Message(role="user", content=tool_results))
+                
+                if client_tools:
+                    # 只执行客户端工具
+                    tool_results = await self._execute_tools(client_tools, session_id, ctx)
+                    llm_messages.append(Message(role="user", content=tool_results))
             
             if ctx.is_completed():
                 break
         
         # ===== 5. 发送完成事件 =====
-        # 🆕 传递 usage 统计给 broadcaster（用于持久化）
-        # 转换字段名以匹配 broadcaster 期望的格式
+        # 🆕 保存 usage 统计到数据库
         stats = self.usage_stats
-        self.broadcaster.accumulate_usage(session_id, {
+        await self.broadcaster.accumulate_usage(session_id, {
             "input_tokens": stats.get("total_input_tokens", 0),
             "output_tokens": stats.get("total_output_tokens", 0),
             "cache_read_tokens": stats.get("total_cache_read_tokens", 0),

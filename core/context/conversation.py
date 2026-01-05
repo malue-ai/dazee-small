@@ -192,7 +192,7 @@ class Context:
         db_messages: List[Any]
     ) -> List[Dict[str, Any]]:
         """
-        将数据库消息转换为 Agent 格式
+        将数据库消息转换为 Agent 格式（符合 Claude API 规范）
         
         Args:
             db_messages: 数据库消息列表（可能是对象或字典）
@@ -201,10 +201,10 @@ class Context:
             Agent 格式的消息列表
             
         说明：
-        - content 中包含所有 blocks：thinking/text/tool_use/tool_result
-        - thinking block 完整保存（包含 thinking 文本和 signature）
-        - RVR 循环中直接使用 content 中的 thinking + signature，无需额外处理
-        - ⚠️ 过滤掉没有 signature 的 thinking 块（Claude API 要求）
+        - 数据库存储时，所有 content blocks 都在一条 assistant 消息中
+        - Claude API 要求：tool_result 必须在 user 消息中
+        - 此方法会智能重构：将 assistant 消息中的 tool_result 抽取为独立的 user 消息
+        - ⚠️ 过滤掉 thinking 块（Claude API 要求有 signature，但历史消息不需要）
         """
         agent_messages = []
         
@@ -229,21 +229,104 @@ class Context:
                     # 纯文本（旧格式）
                     pass
             
-            # 🛡️ 清理 content 块（移除 thinking，确保 tool_use/tool_result 在正确角色中）
-            if isinstance(content, list):
-                content = self._clean_content_blocks(content, role)
-            
-            # 只添加有内容的消息
-            if content:
-                agent_messages.append({
-                    "role": role,
-                    "content": content
-                })
+            # 🆕 智能重构：将 assistant 消息中的 tool_result 抽取为独立消息
+            if isinstance(content, list) and role == "assistant":
+                reconstructed = self._reconstruct_assistant_message(content)
+                agent_messages.extend(reconstructed)
+            elif isinstance(content, list):
+                # user/system 消息：直接清理
+                cleaned = self._clean_content_blocks(content, role)
+                if cleaned:
+                    agent_messages.append({
+                        "role": role,
+                        "content": cleaned
+                    })
+            else:
+                # 纯文本消息
+                if content:
+                    agent_messages.append({
+                        "role": role,
+                        "content": content
+                    })
         
         # 🛡️ 确保 tool_use 和 tool_result 配对
         agent_messages = self._ensure_tool_pairs(agent_messages)
         
         return agent_messages
+    
+    def _reconstruct_assistant_message(
+        self,
+        content_blocks: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        重构 assistant 消息：将 tool_result 抽取为独立的 user 消息
+        
+        数据库存储格式：
+            assistant: [thinking, text, tool_use, tool_result, text, tool_use, tool_result, ...]
+        
+        Claude API 正确格式：
+            assistant: [text, tool_use]
+            user: [tool_result]
+            assistant: [text, tool_use]
+            user: [tool_result]
+            ...
+        
+        Args:
+            content_blocks: assistant 消息的内容块列表
+            
+        Returns:
+            重构后的消息列表（可能包含多条消息）
+        """
+        # 按 index 排序
+        sorted_blocks = sorted(
+            content_blocks,
+            key=lambda b: b.get("index", 999) if isinstance(b, dict) else 999
+        )
+        
+        result_messages = []
+        current_assistant_blocks = []
+        
+        for block in sorted_blocks:
+            if not isinstance(block, dict):
+                continue
+            
+            block_type = block.get("type")
+            
+            # 移除 index 字段（Claude API 不接受）
+            clean_block = {k: v for k, v in block.items() if k != "index"}
+            
+            # 跳过 thinking 块
+            if block_type == "thinking":
+                logger.debug(f"🧹 移除 thinking 块（历史消息不需要）")
+                continue
+            
+            # tool_result 需要作为独立的 user 消息
+            if block_type == "tool_result":
+                # 先保存之前累积的 assistant 内容
+                if current_assistant_blocks:
+                    result_messages.append({
+                        "role": "assistant",
+                        "content": current_assistant_blocks
+                    })
+                    current_assistant_blocks = []
+                
+                # tool_result 作为 user 消息
+                result_messages.append({
+                    "role": "user",
+                    "content": [clean_block]
+                })
+            else:
+                # text, tool_use 等保持在 assistant 消息中
+                current_assistant_blocks.append(clean_block)
+        
+        # 保存最后累积的 assistant 内容
+        if current_assistant_blocks:
+            result_messages.append({
+                "role": "assistant",
+                "content": current_assistant_blocks
+            })
+        
+        return result_messages
     
     def _ensure_tool_pairs(
         self,

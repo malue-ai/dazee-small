@@ -696,10 +696,11 @@ class ClaudeLLMService(BaseLLMService):
             if "system" in verbose_params:
                 system_preview = str(verbose_params["system"])[:500]
                 logger.info(f"   system: {system_preview}{'...' if len(str(verbose_params['system'])) > 500 else ''}")
-            # 打印完整 messages
+            # 打印完整 messages（安全序列化）
             logger.info(f"   messages ({len(verbose_params.get('messages', []))}):")
             for i, msg in enumerate(verbose_params.get('messages', [])):
-                logger.info(f"   [{i}] {json.dumps(msg, ensure_ascii=False, indent=2)}")
+                msg_preview = self._safe_json_dumps(msg, indent=2)
+                logger.info(f"   [{i}] {msg_preview}")
             # 打印 tools
             if "tools" in verbose_params:
                 logger.info(f"   tools ({len(verbose_params['tools'])}):")
@@ -708,15 +709,15 @@ class ClaudeLLMService(BaseLLMService):
             logger.info("=" * 60)
         else:
             logger.debug(f"📤 Messages 数量: {len(request_params.get('messages', []))}")
-            for i, msg in enumerate(request_params.get('messages', [])):
-                role = msg.get('role', 'unknown')
-                content = msg.get('content', '')
-                if isinstance(content, list):
-                    types = [b.get('type', 'unknown') for b in content if isinstance(b, dict)]
-                    logger.debug(f"   [{i}] {role}: blocks={types}")
-                else:
-                    preview = str(content)[:100] + "..." if len(str(content)) > 100 else str(content)
-                    logger.debug(f"   [{i}] {role}: {preview}")
+        for i, msg in enumerate(request_params.get('messages', [])):
+            role = msg.get('role', 'unknown')
+            content = msg.get('content', '')
+            if isinstance(content, list):
+                types = [b.get('type', 'unknown') for b in content if isinstance(b, dict)]
+                logger.debug(f"   [{i}] {role}: blocks={types}")
+            else:
+                preview = str(content)[:100] + "..." if len(str(content)) > 100 else str(content)
+                logger.debug(f"   [{i}] {role}: {preview}")
         
         # 累积变量
         accumulated_thinking = ""
@@ -858,10 +859,10 @@ class ClaudeLLMService(BaseLLMService):
             if tool_calls:
                 logger.info(f"   tool_calls ({len(tool_calls)}):")
                 for tc in tool_calls:
-                    logger.info(f"      {json.dumps(tc, ensure_ascii=False, indent=2)}")
+                    logger.info(f"      {self._safe_json_dumps(tc, indent=2)}")
             logger.info(f"   raw_content ({len(raw_content)} blocks):")
             for i, block in enumerate(raw_content):
-                block_preview = json.dumps(block, ensure_ascii=False)
+                block_preview = self._safe_json_dumps(block)
                 if len(block_preview) > 500:
                     block_preview = block_preview[:500] + "..."
                 logger.info(f"      [{i}] {block_preview}")
@@ -878,6 +879,37 @@ class ClaudeLLMService(BaseLLMService):
                 raw_content=raw_content,
                 is_stream=False
             )
+    
+    def _safe_json_dumps(self, obj: Any, indent: int = None) -> str:
+        """
+        安全的 JSON 序列化，处理特殊对象（如 WebSearchResultBlock）
+        
+        Args:
+            obj: 要序列化的对象
+            indent: 缩进级别
+            
+        Returns:
+            JSON 字符串
+        """
+        def default_handler(o):
+            """自定义序列化处理器"""
+            if hasattr(o, 'model_dump'):
+                # Pydantic v2 对象
+                return o.model_dump()
+            elif hasattr(o, 'dict'):
+                # Pydantic v1 对象
+                return o.dict()
+            elif hasattr(o, '__dict__'):
+                # 普通对象
+                return o.__dict__
+            else:
+                # Fallback
+                return str(o)
+        
+        try:
+            return json.dumps(obj, ensure_ascii=False, indent=indent, default=default_handler)
+        except Exception:
+            return str(obj)
     
     def count_tokens(self, text: str) -> int:
         """

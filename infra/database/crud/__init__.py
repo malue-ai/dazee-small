@@ -41,12 +41,9 @@ from infra.database.crud.file import (
     create_file,
     get_file,
     update_file,
-    list_files,
     list_files_by_user,
     count_files_by_user,
-    get_user_file_stats,
-    soft_delete_file,
-    convert_api_status_to_db,
+    delete_file,
 )
 from infra.database.crud.knowledge import (
     generate_knowledge_id,
@@ -96,12 +93,9 @@ __all__ = [
     "create_file",
     "get_file",
     "update_file",
-    "list_files",
     "list_files_by_user",
     "count_files_by_user",
-    "get_user_file_stats",
-    "soft_delete_file",
-    "convert_api_status_to_db",
+    "delete_file",
     
     # Knowledge
     "generate_knowledge_id",
