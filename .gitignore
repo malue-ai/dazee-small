@@ -65,3 +65,6 @@ coverage.xml
 workspace_*/
 skill_outputs/
 *.code-workspace
+
+# 生成的输出文件
+workspace/outputs/ppt/*.pptx
