@@ -48,6 +48,18 @@ from infra.database.crud.file import (
     soft_delete_file,
     convert_api_status_to_db,
 )
+from infra.database.crud.knowledge import (
+    generate_knowledge_id,
+    create_knowledge,
+    get_knowledge,
+    update_knowledge,
+    delete_knowledge,
+    list_knowledge_by_user,
+    count_knowledge_by_user,
+    search_knowledge,
+    get_knowledge_by_file,
+    bulk_update_status,
+)
 
 __all__ = [
     # 通用
@@ -90,5 +102,17 @@ __all__ = [
     "get_user_file_stats",
     "soft_delete_file",
     "convert_api_status_to_db",
+    
+    # Knowledge
+    "generate_knowledge_id",
+    "create_knowledge",
+    "get_knowledge",
+    "update_knowledge",
+    "delete_knowledge",
+    "list_knowledge_by_user",
+    "count_knowledge_by_user",
+    "search_knowledge",
+    "get_knowledge_by_file",
+    "bulk_update_status",
 ]
 

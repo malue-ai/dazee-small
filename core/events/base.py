@@ -1,7 +1,22 @@
 """
 事件管理基类
 
-提供所有事件管理器的共享逻辑
+职责：
+1. 定义 EventStorage Protocol（存储接口）
+2. 提供 BaseEventManager（所有事件管理器的基类）
+3. 统一事件结构和发送逻辑
+
+事件结构：
+{
+    "event_uuid": str,        # 全局唯一 UUID
+    "seq": int,               # Session 内序号（1, 2, 3...）
+    "type": str,              # 事件类型
+    "session_id": str,        # Session ID
+    "conversation_id": str,   # Conversation ID
+    "message_id": str,        # Message ID（可选）
+    "timestamp": str,         # ISO 时间戳
+    "data": dict              # 事件数据
+}
 """
 
 from typing import Dict, Any, Protocol
@@ -60,7 +75,8 @@ class BaseEventManager:
         self,
         session_id: str,
         event: Dict[str, Any],
-        conversation_id: str = None
+        conversation_id: str = None,
+        message_id: str = None
     ) -> Dict[str, Any]:
         """
         发送事件（内部方法）
@@ -71,26 +87,11 @@ class BaseEventManager:
         - 添加通用上下文字段
         - 委托给 storage 处理存储和心跳
         
-        统一事件结构：
-        {
-          // 事件标识
-          "event_uuid": str,             // 全局唯一 UUID（例如：550e8400-e29b-41d4-a716-446655440000）
-          "seq": int,                    // Session 内序号（1, 2, 3...）
-          "type": str,                   // 事件类型
-          
-          // 通用上下文字段（所有事件都有）
-          "session_id": str,             // Session ID
-          "conversation_id": str,        // Conversation ID
-          "timestamp": str,              // ISO 时间戳
-          
-          // 事件特定数据
-          "data": dict                   // 事件数据
-        }
-        
         Args:
             session_id: Session ID
             event: 事件对象（必须包含 type 和 data）
-            conversation_id: Conversation ID（可选，会从 Redis 获取）
+            conversation_id: Conversation ID（可选，会从 storage 获取）
+            message_id: Message ID（可选）
             
         Returns:
             完整的事件对象
@@ -121,6 +122,10 @@ class BaseEventManager:
             # 事件特定数据
             "data": event.get("data", {})
         }
+        
+        # 添加 message_id（如果提供）
+        if message_id:
+            complete_event["message_id"] = message_id
         
         # 5. 委托给 storage 处理存储 - 异步
         await self.storage.buffer_event(

@@ -34,6 +34,9 @@ from .base import (
 
 logger = get_logger("llm.claude")
 
+# 详细日志开关：设置 LLM_DEBUG_VERBOSE=1 可打印完整请求/响应
+LLM_DEBUG_VERBOSE = os.getenv("LLM_DEBUG_VERBOSE", "").lower() in ("1", "true", "yes")
+
 
 class ClaudeLLMService(BaseLLMService):
     """
@@ -90,6 +93,7 @@ class ClaudeLLMService(BaseLLMService):
         self.config = config
         
         # 异步客户端（增加 timeout 和重试配置）
+        # 注意：对于流式响应，timeout 是首个响应的超时，不是整体超时
         self.async_client = anthropic.AsyncAnthropic(
             api_key=config.api_key,
             timeout=600.0,    # 10 分钟超时
@@ -519,16 +523,16 @@ class ClaudeLLMService(BaseLLMService):
             system: 系统提示词
             tools: 工具列表
             invocation_type: 调用方式
-            **kwargs: 其他参数
+            **kwargs: 其他参数（支持 max_tokens, temperature 覆盖）
             
         Returns:
             LLMResponse 响应对象
         """
-        # 构建请求参数
+        # 构建请求参数（支持 kwargs 覆盖）
         formatted_messages = self._format_messages(messages)
         request_params = {
             "model": self.config.model,
-            "max_tokens": self.config.max_tokens,
+            "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
             "messages": formatted_messages
         }
         
@@ -551,7 +555,8 @@ class ClaudeLLMService(BaseLLMService):
             }
             request_params["temperature"] = 1.0  # Required for thinking
         else:
-            request_params["temperature"] = self.config.temperature
+            # 支持 kwargs 覆盖 temperature
+            request_params["temperature"] = kwargs.get("temperature", self.config.temperature)
         
         # Tools
         all_tools = []
@@ -630,16 +635,16 @@ class ClaudeLLMService(BaseLLMService):
             on_thinking: thinking 回调
             on_content: content 回调
             on_tool_call: tool_call 回调
-            **kwargs: 其他参数
+            **kwargs: 其他参数（支持 max_tokens 覆盖）
             
         Yields:
             LLMResponse 片段
         """
-        # 构建请求参数
+        # 构建请求参数（支持 kwargs 覆盖）
         formatted_messages = self._format_messages(messages)
         request_params = {
             "model": self.config.model,
-            "max_tokens": self.config.max_tokens,
+            "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
             "messages": formatted_messages
         }
         
@@ -678,24 +683,47 @@ class ClaudeLLMService(BaseLLMService):
         if all_tools:
             request_params["tools"] = all_tools
         
-        # 调试日志：打印原始请求
-        logger.debug(f"📤 流式请求: model={self.config.model}, tools={len(all_tools)}, tool_names={list(tool_names_seen)}")
-        logger.debug(f"📤 Messages 数量: {len(request_params.get('messages', []))}")
-        for i, msg in enumerate(request_params.get('messages', [])):
-            role = msg.get('role', 'unknown')
-            content = msg.get('content', '')
-            if isinstance(content, list):
-                types = [b.get('type', 'unknown') for b in content if isinstance(b, dict)]
-                logger.debug(f"   [{i}] {role}: blocks={types}")
-            else:
-                preview = str(content)[:100] + "..." if len(str(content)) > 100 else str(content)
-                logger.debug(f"   [{i}] {role}: {preview}")
+        # 请求日志（INFO 级别）
+        logger.info(f"📤 Claude 请求: model={self.config.model}, tools={len(all_tools)}, messages={len(formatted_messages)}")
+        
+        # 详细日志：完整请求参数
+        if LLM_DEBUG_VERBOSE:
+            logger.info("=" * 60)
+            logger.info("📤 [VERBOSE] 完整请求参数:")
+            # 复制一份，避免修改原始数据
+            verbose_params = request_params.copy()
+            # 打印 system prompt（可能很长，截断）
+            if "system" in verbose_params:
+                system_preview = str(verbose_params["system"])[:500]
+                logger.info(f"   system: {system_preview}{'...' if len(str(verbose_params['system'])) > 500 else ''}")
+            # 打印完整 messages
+            logger.info(f"   messages ({len(verbose_params.get('messages', []))}):")
+            for i, msg in enumerate(verbose_params.get('messages', [])):
+                logger.info(f"   [{i}] {json.dumps(msg, ensure_ascii=False, indent=2)}")
+            # 打印 tools
+            if "tools" in verbose_params:
+                logger.info(f"   tools ({len(verbose_params['tools'])}):")
+                for tool in verbose_params['tools']:
+                    logger.info(f"      - {tool.get('name', 'unknown')}")
+            logger.info("=" * 60)
+        else:
+            logger.debug(f"📤 Messages 数量: {len(request_params.get('messages', []))}")
+            for i, msg in enumerate(request_params.get('messages', [])):
+                role = msg.get('role', 'unknown')
+                content = msg.get('content', '')
+                if isinstance(content, list):
+                    types = [b.get('type', 'unknown') for b in content if isinstance(b, dict)]
+                    logger.debug(f"   [{i}] {role}: blocks={types}")
+                else:
+                    preview = str(content)[:100] + "..." if len(str(content)) > 100 else str(content)
+                    logger.debug(f"   [{i}] {role}: {preview}")
         
         # 累积变量
         accumulated_thinking = ""
         accumulated_content = ""
         tool_calls = []
         stop_reason = None
+        usage = {}  # 🔢 流式模式下从 final_message 获取
         
         async with self.async_client.messages.stream(**request_params) as stream:
             async for event in stream:
@@ -765,6 +793,17 @@ class ClaudeLLMService(BaseLLMService):
                         final_message = await stream.get_final_message()
                         stop_reason = getattr(final_message, 'stop_reason', None)
                         
+                        # 🔢 提取 usage 信息
+                        if hasattr(final_message, 'usage') and final_message.usage:
+                            usage = {
+                                "input_tokens": final_message.usage.input_tokens,
+                                "output_tokens": final_message.usage.output_tokens
+                            }
+                            if hasattr(final_message.usage, 'cache_read_input_tokens'):
+                                usage["cache_read_tokens"] = final_message.usage.cache_read_input_tokens
+                            if hasattr(final_message.usage, 'cache_creation_input_tokens'):
+                                usage["cache_creation_tokens"] = final_message.usage.cache_creation_input_tokens
+                        
                         if hasattr(final_message, 'content'):
                             for block in final_message.content:
                                 if not hasattr(block, 'type'):
@@ -800,12 +839,33 @@ class ClaudeLLMService(BaseLLMService):
                 accumulated_thinking, accumulated_content, tool_calls
             )
         
-        # 调试日志：打印原始响应
-        logger.debug(f"📥 流式响应完成: stop_reason={stop_reason or 'end_turn'}")
+        # 响应日志（INFO 级别）
         raw_types = [b.get('type', 'unknown') for b in raw_content]
-        logger.debug(f"📥 raw_content blocks: {raw_types}")
-        if accumulated_thinking:
-            logger.debug(f"📥 thinking 长度: {len(accumulated_thinking)}")
+        tool_names = [tc.get('name', '') for tc in tool_calls] if tool_calls else []
+        logger.info(f"📥 Claude 响应: stop_reason={stop_reason or 'end_turn'}, blocks={raw_types}, tools={tool_names}")
+        
+        # 详细日志：完整响应内容
+        if LLM_DEBUG_VERBOSE:
+            logger.info("=" * 60)
+            logger.info("📥 [VERBOSE] 完整响应内容:")
+            logger.info(f"   stop_reason: {stop_reason}")
+            if accumulated_thinking:
+                thinking_preview = accumulated_thinking[:1000]
+                logger.info(f"   thinking ({len(accumulated_thinking)} chars): {thinking_preview}{'...' if len(accumulated_thinking) > 1000 else ''}")
+            if accumulated_content:
+                content_preview = accumulated_content[:2000]
+                logger.info(f"   content ({len(accumulated_content)} chars): {content_preview}{'...' if len(accumulated_content) > 2000 else ''}")
+            if tool_calls:
+                logger.info(f"   tool_calls ({len(tool_calls)}):")
+                for tc in tool_calls:
+                    logger.info(f"      {json.dumps(tc, ensure_ascii=False, indent=2)}")
+            logger.info(f"   raw_content ({len(raw_content)} blocks):")
+            for i, block in enumerate(raw_content):
+                block_preview = json.dumps(block, ensure_ascii=False)
+                if len(block_preview) > 500:
+                    block_preview = block_preview[:500] + "..."
+                logger.info(f"      [{i}] {block_preview}")
+            logger.info("=" * 60)
         
         # 返回最终响应
         if accumulated_content or accumulated_thinking or tool_calls:
@@ -814,6 +874,7 @@ class ClaudeLLMService(BaseLLMService):
                 thinking=accumulated_thinking if accumulated_thinking else None,
                 tool_calls=tool_calls if tool_calls else None,
                 stop_reason=stop_reason or "end_turn",
+                usage=usage if usage else None,  # 🔢 流式模式也返回 usage
                 raw_content=raw_content,
                 is_stream=False
             )

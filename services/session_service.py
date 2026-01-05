@@ -101,7 +101,8 @@ class SessionService:
         user_id: str,
         message: List[Dict[str, str]],
         conversation_id: str,
-        message_id: Optional[str] = None
+        message_id: Optional[str] = None,
+        conversation_service=None
     ) -> tuple[str, SimpleAgent]:
         """
         创建新的 Session 和 Agent
@@ -111,6 +112,7 @@ class SessionService:
             message: 用户消息（Claude API 格式 [{"type": "text", "text": "..."}]）
             conversation_id: 对话 ID（必填，ChatService 会确保在调用前已创建）
             message_id: 消息 ID（可选）
+            conversation_service: ConversationService 实例（用于消息持久化）
             
         Returns:
             (session_id, agent)
@@ -139,7 +141,8 @@ class SessionService:
         agent = create_simple_agent(
             model=self.default_model,
             workspace_dir=workspace_dir,
-            event_manager=self.events
+            event_manager=self.events,
+            conversation_service=conversation_service
         )
         
         # 5. 加入 Agent 池

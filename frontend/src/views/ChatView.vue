@@ -141,6 +141,102 @@
                   <!-- 显示文本内容 -->
                   <MarkdownRenderer :content="message.content" />
                 </template>
+                
+                <!-- 🆕 Plan 结果 UI -->
+                <div v-if="message.planResult" class="special-result plan-result">
+                  <div class="result-header">
+                    <span class="result-icon">📋</span>
+                    <span class="result-title">任务计划</span>
+                  </div>
+                  <div class="plan-content">
+                    <div v-if="message.planResult.goal" class="plan-goal">
+                      <strong>目标：</strong>{{ message.planResult.goal }}
+                    </div>
+                    <div v-if="message.planResult.steps" class="plan-steps">
+                      <div 
+                        v-for="(step, idx) in message.planResult.steps" 
+                        :key="idx"
+                        class="plan-step"
+                        :class="{ 
+                          'completed': step.status === 'completed',
+                          'in-progress': step.status === 'in_progress' 
+                        }"
+                      >
+                        <span class="step-number">{{ idx + 1 }}</span>
+                        <span class="step-action">{{ step.action || step }}</span>
+                        <span v-if="step.status" class="step-status">
+                          {{ step.status === 'completed' ? '✅' : step.status === 'in_progress' ? '⏳' : '⬜' }}
+                        </span>
+                      </div>
+                    </div>
+                    <!-- 原始内容回退 -->
+                    <pre v-if="message.planResult.raw" class="raw-content">{{ message.planResult.raw }}</pre>
+                  </div>
+                </div>
+                
+                <!-- 🆕 搜索结果 UI -->
+                <div v-if="message.searchResults" class="special-result search-result">
+                  <div class="result-header">
+                    <span class="result-icon">🔍</span>
+                    <span class="result-title">网页搜索结果</span>
+                  </div>
+                  <div class="search-content">
+                    <div v-if="Array.isArray(message.searchResults)" class="search-items">
+                      <a 
+                        v-for="(item, idx) in message.searchResults.slice(0, 5)" 
+                        :key="idx"
+                        :href="item.url || item.link"
+                        target="_blank"
+                        class="search-item"
+                      >
+                        <span class="item-title">{{ item.title || item.name }}</span>
+                        <span class="item-snippet">{{ item.snippet || item.description }}</span>
+                      </a>
+                    </div>
+                    <!-- 原始内容回退 -->
+                    <pre v-else class="raw-content">{{ JSON.stringify(message.searchResults, null, 2) }}</pre>
+                  </div>
+                </div>
+                
+                <!-- 🆕 知识库结果 UI -->
+                <div v-if="message.knowledgeResults" class="special-result knowledge-result">
+                  <div class="result-header">
+                    <span class="result-icon">📚</span>
+                    <span class="result-title">知识库检索结果</span>
+                  </div>
+                  <div class="knowledge-content">
+                    <div v-if="Array.isArray(message.knowledgeResults)" class="knowledge-items">
+                      <div 
+                        v-for="(item, idx) in message.knowledgeResults.slice(0, 5)" 
+                        :key="idx"
+                        class="knowledge-item"
+                      >
+                        <div class="item-source">
+                          📄 {{ item.source || item.filename || '文档' }}
+                          <span v-if="item.score" class="item-score">相关度: {{ (item.score * 100).toFixed(0) }}%</span>
+                        </div>
+                        <div class="item-content">{{ item.content || item.text }}</div>
+                      </div>
+                    </div>
+                    <!-- 原始内容回退 -->
+                    <pre v-else class="raw-content">{{ JSON.stringify(message.knowledgeResults, null, 2) }}</pre>
+                  </div>
+                </div>
+                
+                <!-- 🆕 推荐问题 UI -->
+                <div v-if="message.recommendedQuestions && message.recommendedQuestions.length > 0" class="recommended-questions">
+                  <div class="recommended-header">💡 您可能还想问：</div>
+                  <div class="recommended-list">
+                    <button 
+                      v-for="(question, idx) in message.recommendedQuestions" 
+                      :key="idx"
+                      class="recommended-btn"
+                      @click="askRecommendedQuestion(question)"
+                    >
+                      {{ question }}
+                    </button>
+                  </div>
+                </div>
               </template>
               
               <div class="message-time">{{ formatTime(message.timestamp) }}</div>
@@ -164,7 +260,9 @@
           <div class="chat-input-wrapper">
             <textarea
               v-model="inputMessage"
-              @keydown.enter.exact.prevent="sendMessage"
+              @keydown.enter.exact="handleEnter"
+              @compositionstart="isComposing = true"
+              @compositionend="isComposing = false"
               placeholder="输入消息... (Enter 发送, Shift+Enter 换行)"
               class="chat-input"
               rows="1"
@@ -236,6 +334,7 @@ const chatStore = useChatStore()
 const messages = ref([])
 const inputMessage = ref('')
 const isLoading = ref(false)
+const isComposing = ref(false)  // 中文输入法状态
 const messagesContainer = ref(null)
 const inputTextarea = ref(null)
 const sidebarCollapsed = ref(false)
@@ -462,6 +561,23 @@ async function deleteConversation(conversationId) {
   }
 }
 
+// 🆕 点击推荐问题
+function askRecommendedQuestion(question) {
+  inputMessage.value = question
+  sendMessage()
+}
+
+// 处理回车键（区分中文输入法）
+function handleEnter(event) {
+  // 中文输入法正在输入时，不发送（让用户确认拼音）
+  if (isComposing.value) {
+    return
+  }
+  // 阻止默认换行，发送消息
+  event.preventDefault()
+  sendMessage()
+}
+
 async function sendMessage() {
   const content = inputMessage.value.trim()
   if (!content || isLoading.value) return
@@ -498,6 +614,11 @@ async function sendMessage() {
       thinking: '',
       contentBlocks: [],  // 原始内容块数组
       toolStatuses: {},   // 工具调用状态
+      // 🆕 特殊工具结果
+      recommendedQuestions: [],  // 推荐问题
+      planResult: null,          // Plan 结果
+      searchResults: null,       // Web 搜索结果
+      knowledgeResults: null,    // 知识库搜索结果
       timestamp: new Date()
     })
     
@@ -566,21 +687,7 @@ async function sendMessage() {
           loadConversationList()
         }
         }
-        // 🆕 对话标题更新（后台任务生成的标题）
-        else if (event.type === 'conversation_title_update') {
-          console.log('🏷️ 对话标题更新:', event.data)
-          const { conversation_id, title } = event.data || {}
-          
-          if (conversation_id && title) {
-            // 更新对话列表中的标题
-            const conv = conversations.value.find(c => c.id === conversation_id)
-            if (conv) {
-              conv.title = title
-              console.log('✅ 对话列表标题已更新:', title)
-            }
-          }
-        }
-        // 对话增量更新（通用，包括标题更新等）
+        // 对话增量更新（统一处理：标题、plan、compression 等）
         else if (event.type === 'conversation_delta') {
           console.log('📝 对话增量更新:', event.data)
           const { conversation_id, delta } = event.data || {}
@@ -588,10 +695,28 @@ async function sendMessage() {
           if (conversation_id && delta) {
             const conv = conversations.value.find(c => c.id === conversation_id)
             if (conv) {
-              // 应用增量更新
+              // 直接合并 delta 到 conversation
+              Object.assign(conv, delta)
+              
+              // 处理 metadata（深度合并）
+              if (delta.metadata) {
+                conv.metadata = { ...(conv.metadata || {}), ...delta.metadata }
+                
+                // 🆕 处理 plan 更新
+                if (delta.metadata.plan) {
+                  console.log('📋 Plan 更新:', delta.metadata.plan)
+                  // 可以在这里触发 Plan UI 更新
+                }
+                
+                // 🆕 处理 compression 更新
+                if (delta.metadata.compression) {
+                  console.log('🗜️ 上下文已压缩:', delta.metadata.compression)
+                }
+              }
+              
+              // 处理顶层字段
               if (delta.title) {
-                conv.title = delta.title
-                console.log('✅ 对话标题已更新 (via delta):', delta.title)
+                console.log('✅ 对话标题已更新:', delta.title)
               }
             }
           }
@@ -603,6 +728,97 @@ async function sendMessage() {
         else if (event.type === 'message_start') {
           console.log('💬 消息开始:', event.data)
         }
+        // 🆕 消息增量更新（通用：stop_reason、recommended、plan、search 等）
+        else if (event.type === 'message_delta') {
+          console.log('💬 消息增量:', event.data)
+          const { delta, usage } = event.data || {}
+          const deltaType = delta?.type
+          
+          // 根据 delta.type 分发处理
+          if (deltaType === 'plan') {
+            // 📋 Plan 更新
+            console.log('📋 收到 Plan:', delta.content)
+            try {
+              const planData = typeof delta.content === 'string' 
+                ? JSON.parse(delta.content) 
+                : delta.content
+              assistantMessage.planResult = planData
+            } catch (e) {
+              console.warn('解析 Plan 失败:', e)
+              assistantMessage.planResult = { raw: delta.content }
+            }
+          }
+          else if (deltaType === 'search') {
+            // 🔍 Web 搜索结果
+            console.log('🔍 收到搜索结果:', delta.content)
+            try {
+              const searchData = typeof delta.content === 'string' 
+                ? JSON.parse(delta.content) 
+                : delta.content
+              // 提取 results 数组（后端可能返回 { success, results: [...] } 或直接数组）
+              assistantMessage.searchResults = searchData.results || searchData
+              console.log('🔍 搜索结果列表:', assistantMessage.searchResults)
+            } catch (e) {
+              console.warn('解析搜索结果失败:', e)
+              assistantMessage.searchResults = { raw: delta.content }
+            }
+          }
+          else if (deltaType === 'knowledge') {
+            // 📚 知识库搜索结果
+            console.log('📚 收到知识库结果:', delta.content)
+            try {
+              const knowledgeData = typeof delta.content === 'string' 
+                ? JSON.parse(delta.content) 
+                : delta.content
+              // 提取 chunks 数组（后端返回 { success, message, chunks: [...] }）
+              assistantMessage.knowledgeResults = knowledgeData.chunks || knowledgeData
+              console.log('📚 知识库结果列表:', assistantMessage.knowledgeResults)
+            } catch (e) {
+              console.warn('解析知识库结果失败:', e)
+              assistantMessage.knowledgeResults = { raw: delta.content }
+            }
+          }
+          else if (deltaType === 'ppt') {
+            // 📊 PPT 生成结果（暂不处理，使用 tool_result 展示）
+            console.log('📊 收到 PPT 结果:', delta.content)
+          }
+          else if (deltaType === 'recommended') {
+            // 💡 推荐问题
+            console.log('💡 收到推荐问题:', delta.content)
+            try {
+              const recommended = typeof delta.content === 'string'
+                ? JSON.parse(delta.content)
+                : delta.content
+              assistantMessage.recommendedQuestions = recommended.questions || []
+              console.log('💡 推荐问题列表:', assistantMessage.recommendedQuestions)
+            } catch (e) {
+              console.warn('解析推荐问题失败:', e)
+            }
+          }
+          else if (deltaType === 'intent') {
+            // 🎯 意图识别结果
+            console.log('🎯 收到意图识别:', delta.content)
+            try {
+              const intentData = typeof delta.content === 'string'
+                ? JSON.parse(delta.content)
+                : delta.content
+              assistantMessage.intentResult = intentData
+              console.log('🎯 意图识别结果:', intentData)
+            } catch (e) {
+              console.warn('解析意图识别失败:', e)
+            }
+          }
+          
+          // 处理 usage 统计
+          if (usage) {
+            console.log('📊 Token 使用:', usage)
+          }
+          
+          // 处理 stop_reason
+          if (delta?.stop_reason) {
+            console.log('🛑 停止原因:', delta.stop_reason)
+          }
+        }
         // 消息停止
         else if (event.type === 'message_stop') {
           console.log('💬 消息停止:', event.data)
@@ -610,7 +826,7 @@ async function sendMessage() {
         
         // ==================== Content 事件 ====================
         
-        // 内容块开始
+        // 内容块开始（text/thinking/tool_use/tool_result）
         else if (event.type === 'content_start') {
           const contentBlock = event.data?.content_block
           const blockType = contentBlock?.type
@@ -628,6 +844,12 @@ async function sendMessage() {
             assistantMessage.contentBlocks[blockIndex] = { ...contentBlock }
           }
           
+          // 🔧 如果是新的 thinking 块开始，重置 thinking（不累加多轮）
+          if (blockType === 'thinking') {
+            assistantMessage.thinking = ''
+            console.log('💭 新的 thinking 块开始，已重置')
+          }
+          
           // 如果是 tool_use 开始，记录状态
           if (blockType === 'tool_use') {
             const toolId = contentBlock?.id
@@ -637,11 +859,29 @@ async function sendMessage() {
               assistantMessage.toolStatuses[toolId] = { pending: true }
             }
           }
+          
+          // 🆕 如果是 tool_result，更新工具状态
+          if (blockType === 'tool_result') {
+            const toolUseId = contentBlock?.tool_use_id
+            const isError = contentBlock?.is_error
+            const resultContent = contentBlock?.content
+            
+            console.log('🔧 工具结果:', toolUseId, isError ? '❌' : '✅', resultContent)
+            
+            if (toolUseId) {
+              assistantMessage.toolStatuses[toolUseId] = {
+                pending: false,
+                success: !isError,
+                result: resultContent
+              }
+            }
+          }
         }
         // 内容增量更新
         else if (event.type === 'content_delta') {
           const deltaType = event.data?.delta?.type
           const deltaText = event.data?.delta?.text
+          const deltaThinking = event.data?.delta?.thinking  // 🔧 thinking_delta 用这个字段
           const blockIndex = event.data?.index
           
           if (deltaType === 'text_delta' && deltaText) {
@@ -653,13 +893,13 @@ async function sendMessage() {
               block.text = (block.text || '') + deltaText
             }
             scrollToBottom()
-          } else if (deltaType === 'thinking_delta' && deltaText) {
-            // 更新 thinking 内容
-            assistantMessage.thinking += deltaText
+          } else if (deltaType === 'thinking_delta' && deltaThinking) {
+            // 🔧 更新 thinking 内容（注意：用 delta.thinking 不是 delta.text）
+            assistantMessage.thinking += deltaThinking
             // 更新对应的 content block
             if (blockIndex !== undefined && assistantMessage.contentBlocks[blockIndex]) {
               const block = assistantMessage.contentBlocks[blockIndex]
-              block.thinking = (block.thinking || '') + deltaText
+              block.thinking = (block.thinking || '') + deltaThinking
             }
             scrollToBottom()
           } else if (deltaType === 'input_json_delta') {
@@ -691,13 +931,13 @@ async function sendMessage() {
             }
           }
         }
-        // 🆕 工具结果事件
+        // 🆕 工具结果事件（兼容旧格式，新版本通过 content_start + type=tool_result 发送）
         else if (event.type === 'tool_result') {
           const toolUseId = event.data?.tool_use_id
           const result = event.data?.result
           const isError = event.data?.is_error
           
-          console.log('🔧 工具结果:', toolUseId, isError ? '❌' : '✅', result)
+          console.log('🔧 工具结果（旧格式）:', toolUseId, isError ? '❌' : '✅', result)
           
           // 更新工具状态
           if (toolUseId) {
@@ -707,14 +947,6 @@ async function sendMessage() {
               result: result
             }
           }
-          
-          // 添加 tool_result 内容块
-          assistantMessage.contentBlocks.push({
-            type: 'tool_result',
-            tool_use_id: toolUseId,
-            content: typeof result === 'string' ? result : JSON.stringify(result),
-            is_error: isError
-          })
         }
         
         // ==================== Plan 事件 ====================
@@ -1482,5 +1714,256 @@ function handleRunProject(project) {
   opacity: 0.7;
   background-color: #f7fafc;
   cursor: not-allowed;
+}
+
+/* ==================== 特殊工具结果 UI ==================== */
+
+.special-result {
+  margin-top: 16px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+}
+
+.result-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-weight: 600;
+  color: #2d3748;
+}
+
+.result-icon {
+  font-size: 18px;
+}
+
+.result-title {
+  font-size: 14px;
+}
+
+/* Plan 结果 */
+.plan-result {
+  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+  border-color: #7dd3fc;
+}
+
+.plan-goal {
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 8px;
+  margin-bottom: 12px;
+  font-size: 14px;
+  color: #0369a1;
+}
+
+.plan-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.plan-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: 8px;
+  font-size: 13px;
+  transition: all 0.2s;
+}
+
+.plan-step.completed {
+  background: rgba(16, 185, 129, 0.1);
+  border-left: 3px solid #10b981;
+}
+
+.plan-step.in-progress {
+  background: rgba(245, 158, 11, 0.1);
+  border-left: 3px solid #f59e0b;
+}
+
+.step-number {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0284c7;
+  color: white;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.plan-step.completed .step-number {
+  background: #10b981;
+}
+
+.plan-step.in-progress .step-number {
+  background: #f59e0b;
+}
+
+.step-action {
+  flex: 1;
+  color: #334155;
+}
+
+.step-status {
+  font-size: 16px;
+}
+
+/* 搜索结果 */
+.search-result {
+  background: linear-gradient(135deg, #fefce8 0%, #fef9c3 100%);
+  border-color: #fde047;
+}
+
+.search-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.search-item {
+  display: block;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: 8px;
+  text-decoration: none;
+  transition: all 0.2s;
+}
+
+.search-item:hover {
+  background: rgba(255, 255, 255, 1);
+  transform: translateX(4px);
+}
+
+.search-item .item-title {
+  display: block;
+  font-weight: 600;
+  color: #1e40af;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+.search-item .item-snippet {
+  display: block;
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* 知识库结果 */
+.knowledge-result {
+  background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+  border-color: #86efac;
+}
+
+.knowledge-items {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.knowledge-item {
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: 8px;
+}
+
+.knowledge-item .item-source {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #16a34a;
+  margin-bottom: 8px;
+}
+
+.knowledge-item .item-score {
+  padding: 2px 6px;
+  background: rgba(22, 163, 74, 0.1);
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.knowledge-item .item-content {
+  font-size: 13px;
+  color: #334155;
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+/* 原始内容回退 */
+.raw-content {
+  margin: 0;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: 8px;
+  font-size: 12px;
+  font-family: 'Consolas', 'Monaco', monospace;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #475569;
+}
+
+/* ==================== 推荐问题 ==================== */
+
+.recommended-questions {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.recommended-header {
+  font-size: 13px;
+  color: #64748b;
+  margin-bottom: 10px;
+  font-weight: 500;
+}
+
+.recommended-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.recommended-btn {
+  padding: 8px 14px;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border: 1px solid #e2e8f0;
+  border-radius: 20px;
+  font-size: 13px;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.recommended-btn:hover {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-color: #667eea;
+  color: white;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.recommended-btn:active {
+  transform: translateY(0);
 }
 </style>

@@ -429,8 +429,7 @@ async def _run_agent_background(
         # 🔑 关键：调用 agent.chat()
         # 所有事件都会通过 EventManager 写入 Redis
         async for event in agent.chat(
-            user_input=message,
-            history_messages=history_messages,
+            messages=history_messages,  # 完整消息列表
             session_id=session_id,
             enable_stream=True
         ):

@@ -1,7 +1,27 @@
 """
-Message 级事件管理
+Message 级事件管理 - MessageEventManager
 
-职责：管理 Message（消息/Turn）级别的事件
+事件类型（只有 3 个）：
+- message_start : 消息开始
+- message_delta : 消息增量（统一结构）
+- message_stop  : 消息结束
+
+message_delta 统一结构：
+{
+    "type": "xxx",         # 类型标识
+    "content": {...}/str   # 内容（对象或字符串）
+}
+
+支持的 type：
+- usage       : 使用统计 {"type": "usage", "content": {"stop_reason": "end_turn"}}
+- recommended : 推荐问题 {"type": "recommended", "content": "[...]"}
+- plan        : 计划更新 {"type": "plan", "content": {...}}
+- search      : 搜索结果 {"type": "search", "content": "..."}
+- knowledge   : 知识检索 {"type": "knowledge", "content": "..."}
+- ppt         : PPT 生成 {"type": "ppt", "content": "..."}
+- intent      : 意图分析 {"type": "intent", "content": {...}}
+
+注意：Tool 事件通过 Content 级事件发送（tool_use/tool_result）
 """
 
 from typing import Dict, Any, Optional
@@ -12,7 +32,12 @@ class MessageEventManager(BaseEventManager):
     """
     Message 级事件管理器
     
-    负责消息轮次相关的事件
+    负责消息轮次相关的事件：
+    - message_start: 消息开始
+    - message_delta: 消息增量（通用，支持多种 delta 类型）
+    - message_stop: 消息结束
+    
+    注意：Tool 事件通过 Content 级事件发送
     """
     
     async def emit_message_start(
@@ -22,7 +47,7 @@ class MessageEventManager(BaseEventManager):
         model: str
     ) -> Dict[str, Any]:
         """
-        发送 message_start 事件（符合 Claude API 标准）
+        发送 message_start 事件
         
         Args:
             session_id: Session ID
@@ -55,47 +80,52 @@ class MessageEventManager(BaseEventManager):
     async def emit_message_delta(
         self,
         session_id: str,
-        stop_reason: Optional[str] = None,
-        output_tokens: Optional[int] = None
+        delta: Dict[str, Any],
+        message_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         发送 message_delta 事件
         
         Args:
             session_id: Session ID
-            stop_reason: 停止原因
-            output_tokens: 输出 token 数（累积值）
+            delta: Delta 内容，统一结构 {"type": "xxx", "content": ...}
+            message_id: 消息 ID（可选）
             
         Returns:
             事件对象
+            
+        事件结构（简化后）：
+            {
+                "type": "message_delta",
+                "data": {
+                    "type": "intent",        # delta 类型
+                    "content": {...}         # delta 内容
+                }
+            }
+            
+        Examples:
+            delta = {"type": "intent", "content": {...}}
+            delta = {"type": "recommended", "content": "[...]"}
         """
-        delta = {}
-        if stop_reason:
-            delta["stop_reason"] = stop_reason
-        
-        usage = {}
-        if output_tokens is not None:
-            usage["output_tokens"] = output_tokens
-        
+        # delta 直接作为 data（不再包裹）
         event = self._create_event(
             event_type="message_delta",
-            data={
-                "delta": delta,
-                "usage": usage
-            }
+            data=delta
         )
         
-        return await self._send_event(session_id, event)
+        return await self._send_event(session_id, event, message_id=message_id)
     
     async def emit_message_stop(
         self,
-        session_id: str
+        session_id: str,
+        message_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         发送 message_stop 事件
         
         Args:
             session_id: Session ID
+            message_id: Message ID（可选）
             
         Returns:
             事件对象
@@ -105,112 +135,7 @@ class MessageEventManager(BaseEventManager):
             data={}
         )
         
-        return await self._send_event(session_id, event)
-    
-    async def emit_tool_call_start(
-        self,
-        session_id: str,
-        tool_call_id: str,
-        tool_name: str,
-        tool_input: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """
-        发送 tool_call_start 事件
-        
-        Args:
-            session_id: Session ID
-            tool_call_id: 工具调用ID
-            tool_name: 工具名称
-            tool_input: 工具输入参数
-            
-        Returns:
-            事件对象
-        """
-        event = self._create_event(
-            event_type="tool_call_start",
-            data={
-                "tool_call_id": tool_call_id,
-                "tool_name": tool_name,
-                "input": tool_input
-            }
-        )
-        
-        return await self._send_event(session_id, event)
-    
-    async def emit_tool_call_complete(
-        self,
-        session_id: str,
-        tool_call_id: str,
-        tool_name: str,
-        status: str,
-        result: Any,
-        duration_ms: Optional[int] = None
-    ) -> Dict[str, Any]:
-        """
-        发送 tool_call_complete 事件
-        
-        Args:
-            session_id: Session ID
-            tool_call_id: 工具调用ID
-            tool_name: 工具名称
-            status: 状态（success/error）
-            result: 执行结果
-            duration_ms: 执行耗时（毫秒）
-            
-        Returns:
-            事件对象
-        """
-        event_data = {
-            "tool_call_id": tool_call_id,
-            "tool_name": tool_name,
-            "status": status,
-            "result": result
-        }
-        
-        if duration_ms is not None:
-            event_data["duration_ms"] = duration_ms
-        
-        event = self._create_event(
-            event_type="tool_call_complete",
-            data=event_data
-        )
-        
-        return await self._send_event(session_id, event)
-    
-    async def emit_tool_call_error(
-        self,
-        session_id: str,
-        tool_call_id: str,
-        tool_name: str,
-        error_type: str,
-        error_message: str
-    ) -> Dict[str, Any]:
-        """
-        发送 tool_call_error 事件
-        
-        Args:
-            session_id: Session ID
-            tool_call_id: 工具调用ID
-            tool_name: 工具名称
-            error_type: 错误类型
-            error_message: 错误消息
-            
-        Returns:
-            事件对象
-        """
-        event = self._create_event(
-            event_type="tool_call_error",
-            data={
-                "tool_call_id": tool_call_id,
-                "tool_name": tool_name,
-                "error": {
-                    "type": error_type,
-                    "message": error_message
-                }
-            }
-        )
-        
-        return await self._send_event(session_id, event)
+        return await self._send_event(session_id, event, message_id=message_id)
     
     def _get_timestamp(self) -> str:
         """获取当前时间戳（ISO格式）"""

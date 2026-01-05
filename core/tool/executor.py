@@ -47,15 +47,19 @@ class ToolExecutor:
         "slidespeak_render": ("tools.slidespeak", "SlideSpeakTool"),
     }
     
-    # Claude 原生工具（由 Claude 自己处理）
-    CLAUDE_NATIVE_TOOLS = {
+    # Claude Server-side 工具（由 Anthropic 服务器处理，不需要本地执行）
+    CLAUDE_SERVER_TOOLS = {
+        "web_search",      # 搜索由 Anthropic 服务器执行
+        "code_execution",  # 代码执行在 Anthropic 沙箱中
+        "memory",          # 记忆由 Anthropic 管理
+    }
+    
+    # Claude Client-side 工具（需要本地执行！）
+    # bash, text_editor 需要我们执行并返回结果给 Claude
+    CLAUDE_CLIENT_TOOLS = {
         "bash",
         "str_replace_based_edit_tool",
-        "web_search",
-        "memory",
         "text_editor",
-        "pptx",
-        "code_execution"
     }
     
     def __init__(
@@ -209,13 +213,17 @@ class ToolExecutor:
         Returns:
             执行结果字典
         """
-        # 0. Claude 原生工具
-        if tool_name in self.CLAUDE_NATIVE_TOOLS:
+        # 0. Claude Server-side 工具（由 Anthropic 处理）
+        if tool_name in self.CLAUDE_SERVER_TOOLS:
             return {
                 "success": True,
-                "message": f"System tool {tool_name} is handled by Claude natively",
-                "handled_by": "claude"
+                "message": f"Server tool {tool_name} is handled by Anthropic",
+                "handled_by": "anthropic_server"
             }
+        
+        # 0.1 Claude Client-side 工具（需要本地执行！）
+        if tool_name in self.CLAUDE_CLIENT_TOOLS:
+            return await self._execute_client_tool(tool_name, tool_input)
         
         # 1. 自定义处理器
         if tool_name in self._tool_handlers:
@@ -280,6 +288,159 @@ class ToolExecutor:
             return tool_instance(**tool_input)
         
         return {"success": False, "error": f"Tool {tool_name} has no execute method"}
+    
+    async def _execute_client_tool(
+        self,
+        tool_name: str,
+        tool_input: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        执行 Claude Client-side 工具（bash, text_editor）
+        
+        这些工具需要本地执行，然后把结果返回给 Claude
+        """
+        import subprocess
+        import os
+        
+        if tool_name == "bash":
+            # 执行 bash 命令
+            command = tool_input.get("command", "")
+            restart = tool_input.get("restart", False)
+            
+            if not command:
+                return {"success": False, "error": "命令不能为空"}
+            
+            try:
+                # 获取 workspace 路径作为工作目录
+                workspace_dir = self.tool_context.get("workspace_dir", "./workspace")
+                
+                # 执行命令
+                result = subprocess.run(
+                    command,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                    cwd=workspace_dir
+                )
+                
+                output = result.stdout
+                if result.stderr:
+                    output += f"\n[stderr]\n{result.stderr}"
+                
+                return {
+                    "success": result.returncode == 0,
+                    "output": output,
+                    "exit_code": result.returncode
+                }
+            except subprocess.TimeoutExpired:
+                return {"success": False, "error": "命令执行超时（60秒）"}
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+        
+        elif tool_name in ("str_replace_based_edit_tool", "text_editor"):
+            # 文件编辑工具
+            command_type = tool_input.get("command")
+            path = tool_input.get("path", "")
+            
+            # 获取 workspace 路径
+            workspace_dir = self.tool_context.get("workspace_dir", "./workspace")
+            
+            # 安全检查：确保路径在 workspace 内
+            full_path = os.path.abspath(os.path.join(workspace_dir, path)) if not os.path.isabs(path) else path
+            
+            if command_type == "view":
+                # 查看文件
+                try:
+                    view_range = tool_input.get("view_range", [])
+                    with open(full_path, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()
+                    
+                    if view_range and len(view_range) == 2:
+                        start, end = view_range
+                        lines = lines[start-1:end]
+                    
+                    return {
+                        "success": True,
+                        "content": "".join(lines),
+                        "total_lines": len(lines)
+                    }
+                except FileNotFoundError:
+                    return {"success": False, "error": f"文件不存在: {path}"}
+                except Exception as e:
+                    return {"success": False, "error": str(e)}
+            
+            elif command_type == "create":
+                # 创建文件
+                file_text = tool_input.get("file_text", "")
+                try:
+                    os.makedirs(os.path.dirname(full_path), exist_ok=True)
+                    with open(full_path, 'w', encoding='utf-8') as f:
+                        f.write(file_text)
+                    return {
+                        "success": True,
+                        "message": f"文件已创建: {path}",
+                        "path": full_path
+                    }
+                except Exception as e:
+                    return {"success": False, "error": str(e)}
+            
+            elif command_type == "str_replace":
+                # 替换字符串
+                old_str = tool_input.get("old_str", "")
+                new_str = tool_input.get("new_str", "")
+                try:
+                    with open(full_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    
+                    if old_str not in content:
+                        return {"success": False, "error": f"未找到要替换的内容: {old_str[:50]}..."}
+                    
+                    content = content.replace(old_str, new_str, 1)
+                    with open(full_path, 'w', encoding='utf-8') as f:
+                        f.write(content)
+                    
+                    return {
+                        "success": True,
+                        "message": "替换成功",
+                        "path": full_path
+                    }
+                except FileNotFoundError:
+                    return {"success": False, "error": f"文件不存在: {path}"}
+                except Exception as e:
+                    return {"success": False, "error": str(e)}
+            
+            elif command_type == "insert":
+                # 插入内容
+                insert_line = tool_input.get("insert_line", 0)
+                new_str = tool_input.get("new_str", "")
+                try:
+                    with open(full_path, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()
+                    
+                    lines.insert(insert_line, new_str + "\n")
+                    
+                    with open(full_path, 'w', encoding='utf-8') as f:
+                        f.writelines(lines)
+                    
+                    return {
+                        "success": True,
+                        "message": f"内容已插入到第 {insert_line} 行",
+                        "path": full_path
+                    }
+                except FileNotFoundError:
+                    return {"success": False, "error": f"文件不存在: {path}"}
+                except Exception as e:
+                    return {"success": False, "error": str(e)}
+            
+            elif command_type == "undo_edit":
+                # 撤销编辑（简化实现：返回不支持）
+                return {"success": False, "error": "撤销功能暂不支持"}
+            
+            else:
+                return {"success": False, "error": f"未知的编辑命令: {command_type}"}
+        
+        return {"success": False, "error": f"未知的 client 工具: {tool_name}"}
     
     def get_available_tools(self) -> Dict[str, Dict]:
         """获取所有可用工具及其信息"""

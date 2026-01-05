@@ -197,7 +197,6 @@ response = await self.llm.create_message_async(
     messages=messages,
     system=self.system_prompt,
     tools=tools_for_llm,
-    max_tokens=4096,  # ✅ 当前
     # 🆕 添加 tool choice 强制调用工具（对于复杂任务）
     tool_choice={"type": "any"} if needs_plan else {"type": "auto"}
 )

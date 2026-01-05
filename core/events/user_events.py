@@ -1,7 +1,11 @@
 """
-User 级事件管理
+User 级事件管理 - UserEventManager
 
-职责：管理 User（用户）级别的事件
+事件类型：
+- user_action            : 用户行为（login, logout, send_message）
+- user_preference_update : 用户偏好更新
+
+注意：当前使用较少，保留以备后续扩展（如用户行为分析、个性化推荐）
 """
 
 from typing import Dict, Any, Optional

@@ -52,12 +52,8 @@ class Message(BaseModel):
             {"type": "tool_result", "tool_use_id": "...", "content": "..."}
         ]
         说明：thinking block 完整保存在 content 数组最前面（含 signature），确保 RVR 循环正常工作
-    - status: 消息状态（JSON 对象，纯状态信息，不含内容）
-        格式: {
-            "action": "completed",     # 动作状态: completed/stopped/failed
-            "has_thinking": true,      # 是否包含 thinking
-            "blocks_count": 5          # 内容块数量
-        }
+    - status: 消息状态（字符串）
+        取值: processing/completed/stopped/failed
     - score: 评分/质量分数
     - metadata: 其他元数据（如 session_id, model, usage 等）
             

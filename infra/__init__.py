@@ -15,10 +15,20 @@ from infra.database import (
     AsyncSessionLocal,
 )
 
+from infra.cache import (
+    RedisClient,
+    create_redis_client,
+    get_redis_client,
+)
+
 __all__ = [
     # Database
     "get_async_session",
     "init_database",
     "AsyncSessionLocal",
+    # Cache
+    "RedisClient",
+    "create_redis_client",
+    "get_redis_client",
 ]
 

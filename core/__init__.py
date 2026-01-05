@@ -84,6 +84,13 @@ from .events import (
     MessageEventManager,
     ContentEventManager,
     SystemEventManager,
+    EventBroadcaster,
+    create_broadcaster,
+    # 事件存储（Redis / 内存）
+    RedisEventStorage,
+    InMemoryEventStorage,
+    create_event_storage,
+    get_memory_storage,
 )
 
 # 上下文管理（新架构）
@@ -157,6 +164,13 @@ __all__ = [
     "MessageEventManager",
     "ContentEventManager",
     "SystemEventManager",
+    "EventBroadcaster",
+    "create_broadcaster",
+    # 事件存储
+    "RedisEventStorage",
+    "InMemoryEventStorage",
+    "create_event_storage",
+    "get_memory_storage",
     
     # 上下文管理
     "Context",

@@ -1,17 +1,24 @@
 """
-Content 级事件管理
+Content 级事件管理 - ContentEventManager
 
-职责：发送 Content Block（内容块）级别的事件
+事件类型（只有 3 个）：
+- content_start : 开始内容块
+- content_delta : 内容增量
+- content_stop  : 结束内容块
 
-设计原则：
-- 只有 3 个核心方法：emit_content_start, emit_content_delta, emit_content_stop
-- 这是纯粹的事件发送层，不关心具体的 content_block 和 delta 结构
-- 结构由上层（Agent）决定，便于后续接入不同 LLM Provider
+content_block 类型：
+- text        : 文本内容
+- thinking    : 思考过程（Extended Thinking）
+- tool_use    : 工具调用
+- tool_result : 工具执行结果
 
-事件格式（我们的统一协议）：
-- content_start: {"type":"content_start","data":{"index":0,"content_block":{...}}}
-- content_delta: {"type":"content_delta","data":{"index":0,"delta":{...}}}
-- content_stop:  {"type":"content_stop","data":{"index":0}}
+delta 类型：
+- text_delta       : {"type": "text_delta", "text": "..."}
+- thinking_delta   : {"type": "thinking_delta", "thinking": "..."}
+- input_json_delta : {"type": "input_json_delta", "partial_json": "..."}
+- signature_delta  : {"type": "signature_delta", "signature": "..."}
+
+设计原则：纯粹的事件发送层，不关心具体结构，由上层决定
 """
 
 from typing import Dict, Any

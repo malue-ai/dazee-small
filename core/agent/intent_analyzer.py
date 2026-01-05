@@ -14,14 +14,11 @@ IntentAnalyzer - 意图分析器
 """
 
 # 1. 标准库
-import json
 import logging
-import re
 from typing import Dict, Any, Optional, List
 
-# 2. 第三方库（无）
-
 # 3. 本地模块
+from utils.json_utils import extract_json
 from core.agent.types import (
     IntentResult,
     TaskType,
@@ -94,28 +91,24 @@ class IntentAnalyzer:
     
     async def analyze(
         self,
-        user_input: str,
-        context: Optional[Dict[str, Any]] = None
+        messages: List[Dict[str, Any]]
     ) -> IntentResult:
         """
         分析用户意图
         
         Args:
-            user_input: 用户输入
-            context: 上下文信息（可选）
+            messages: 完整的消息列表（包含上下文）
             
         Returns:
             IntentResult 意图分析结果
         """
-        # 提取用户输入文本
-        input_text = self._extract_text(user_input)
-        
         if self.enable_llm:
-            # 使用 LLM 进行分析
-            result = await self._analyze_with_llm(input_text, context)
+            # 使用 LLM 进行分析（传入完整上下文）
+            result = await self._analyze_with_llm(messages)
         else:
-            # 使用规则进行分析
-            result = self._analyze_with_rules(input_text)
+            # 使用规则进行分析（只取最后一条 user 消息）
+            last_user_text = self._extract_last_user_text(messages)
+            result = self._analyze_with_rules(last_user_text)
         
         logger.info(
             f"🎯 意图分析结果: "
@@ -125,6 +118,13 @@ class IntentAnalyzer:
         )
         
         return result
+    
+    def _extract_last_user_text(self, messages: List[Dict[str, Any]]) -> str:
+        """从消息列表中提取最后一条 user 消息的文本"""
+        for msg in reversed(messages):
+            if msg.get("role") == "user":
+                return self._extract_text(msg.get("content", ""))
+        return ""
     
     def _extract_text(self, user_input) -> str:
         """
@@ -151,15 +151,13 @@ class IntentAnalyzer:
     
     async def _analyze_with_llm(
         self,
-        input_text: str,
-        context: Optional[Dict[str, Any]] = None
+        messages: List[Dict[str, Any]]
     ) -> IntentResult:
         """
-        使用 LLM 分析意图
+        使用 LLM 分析意图（传入完整上下文）
         
         Args:
-            input_text: 用户输入文本
-            context: 上下文
+            messages: 完整的消息列表
             
         Returns:
             IntentResult
@@ -168,18 +166,26 @@ class IntentAnalyzer:
         from core.llm import Message
         
         try:
-            # 调用 LLM
+            # 转换消息格式
+            llm_messages = [
+                Message(role=msg["role"], content=msg["content"])
+                for msg in messages
+            ]
+            
+            # 调用 LLM（传入完整对话历史）
             response = await self.llm.create_message_async(
-                messages=[Message(role="user", content=input_text)],
+                messages=llm_messages,
                 system=get_intent_recognition_prompt()
             )
             
             # 解析响应
-            return self._parse_llm_response(response.content, input_text)
+            last_user_text = self._extract_last_user_text(messages)
+            return self._parse_llm_response(response.content, last_user_text)
             
         except Exception as e:
             logger.warning(f"LLM 意图分析失败: {e}，降级到规则分析")
-            return self._analyze_with_rules(input_text)
+            last_user_text = self._extract_last_user_text(messages)
+            return self._analyze_with_rules(last_user_text)
     
     def _parse_llm_response(
         self,
@@ -201,31 +207,28 @@ class IntentAnalyzer:
         complexity = Complexity.MEDIUM
         needs_plan = True
         
-        try:
-            # 尝试提取 JSON
-            json_match = re.search(r'\{[^}]+\}', content, re.DOTALL)
-            if json_match:
-                parsed = json.loads(json_match.group())
-                
-                # 解析 task_type
-                task_type_str = parsed.get("task_type", "other")
-                try:
-                    task_type = TaskType(task_type_str)
-                except ValueError:
-                    task_type = TaskType.OTHER
-                
-                # 解析 complexity
-                complexity_str = parsed.get("complexity", "medium")
-                try:
-                    complexity = Complexity(complexity_str)
-                except ValueError:
-                    complexity = Complexity.MEDIUM
-                
-                # 解析 needs_plan
-                needs_plan = parsed.get("needs_plan", True)
+        # 使用 JSON 提取器解析 LLM 响应
+        parsed = extract_json(content)
         
-        except Exception as e:
-            logger.warning(f"解析 LLM 响应失败: {e}")
+        if parsed and isinstance(parsed, dict):
+            # 解析 task_type
+            task_type_str = parsed.get("task_type", "other")
+            try:
+                task_type = TaskType(task_type_str)
+            except ValueError:
+                task_type = TaskType.OTHER
+            
+            # 解析 complexity
+            complexity_str = parsed.get("complexity", "medium")
+            try:
+                complexity = Complexity(complexity_str)
+            except ValueError:
+                complexity = Complexity.MEDIUM
+            
+            # 解析 needs_plan
+            needs_plan = parsed.get("needs_plan", True)
+        else:
+            logger.warning(f"无法从 LLM 响应中提取 JSON: {content[:100]}...")
         
         # 根据复杂度推导 prompt_level
         prompt_level = self._complexity_to_prompt_level(complexity)

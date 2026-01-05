@@ -156,7 +156,9 @@ class APICallingTool:
         poll_for_result: bool = False,
         poll_config: Optional[Dict[str, Any]] = None,
         download_url_field: Optional[str] = None,
-        save_dir: str = "./workspace/outputs"
+        save_dir: Optional[str] = None,
+        conversation_id: Optional[str] = None,
+        **kwargs  # 接收其他注入的上下文
     ) -> Dict[str, Any]:
         """
         执行 API 调用
@@ -170,11 +172,20 @@ class APICallingTool:
             poll_for_result: 是否轮询结果
             poll_config: 轮询配置
             download_url_field: 下载链接字段名
-            save_dir: 保存目录
+            save_dir: 保存目录（可选）
+            conversation_id: 对话ID（用于计算 workspace 路径）
             
         Returns:
             API 响应结果
         """
+        # 计算正确的保存路径
+        if not save_dir and conversation_id:
+            from core.workspace_manager import get_workspace_manager
+            workspace_manager = get_workspace_manager()
+            workspace_root = workspace_manager.get_workspace_root(conversation_id)
+            save_dir = str(workspace_root / "outputs")
+        elif not save_dir:
+            save_dir = "./workspace/outputs"
         try:
             # 1. 准备请求头
             request_headers = headers or {}

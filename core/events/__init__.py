@@ -1,53 +1,66 @@
 """
 SSE 事件管理模块
 
-职责：
-1. 统一管理所有 SSE 事件的创建
-2. 提供标准化的事件格式
-3. 自动处理事件ID生成和 Redis 缓冲
-4. 遵循统一事件协议（docs/03-EVENT-PROTOCOL.md）
+详细文档：docs/03-EVENT-PROTOCOL.md
 
-架构层级：
-    Session（运行会话）
-        └── User（用户）
-            └── Conversation（对话会话）- plan, title, context
-                └── Message（消息/Turn）
-                    └── Content（内容块）- thinking, text, tool_use, tool_result
+架构概览：
+====================
 
-事件协议说明：
-    我们使用自定义的统一协议（非 Claude 原生协议），便于后续接入 OpenAI/Gemini。
-    Content 级别只有 3 个核心事件：
-    - content_start: 开始一个内容块
-    - content_delta: 内容增量
-    - content_stop: 结束一个内容块
+    SimpleAgent
+         │
+         ▼
+    EventBroadcaster  ← Agent 统一入口，包含增强逻辑
+         │
+         ▼
+    EventManager      ← 聚合所有层级管理器
+         │
+         ├── SessionEventManager
+         ├── UserEventManager
+         ├── ConversationEventManager
+         ├── MessageEventManager
+         ├── ContentEventManager
+         └── SystemEventManager
+                │
+                ▼
+         EventStorage (Redis/Memory)
+
+事件层级：
+====================
+
+    Session（运行会话）    session_start, session_end, ping
+        │
+        └── User（用户）   user_action, user_preference_update
+            │
+            └── Conversation  conversation_start, conversation_delta, conversation_stop
+                │
+                └── Message   message_start, message_delta, message_stop
+                    │
+                    └── Content  content_start, content_delta, content_stop
+
+设计原则：
+====================
+
+1. 每层只有 start/delta/stop 三个核心事件
+2. 所有扩展数据通过 delta 发送
+3. Agent 使用 EventBroadcaster，不直接使用 EventManager
+4. EventBroadcaster 负责增强逻辑（如特殊工具的 message_delta）
 
 使用示例：
-    from core.events import create_event_manager
+====================
+
+    # Agent 中使用 Broadcaster
+    from core.events import create_broadcaster, create_event_manager
     
-    events = create_event_manager(redis)
+    events = create_event_manager(storage)
+    broadcaster = create_broadcaster(events)
     
-    # Session 级事件
+    await broadcaster.emit_content_start(session_id, index, content_block)
+    await broadcaster.emit_content_delta(session_id, index, delta)
+    await broadcaster.emit_content_stop(session_id, index)
+    
+    # Service 中直接使用 EventManager
     await events.session.emit_session_start(...)
-    
-    # User 级事件
-    await events.user.emit_user_action(...)
-    
-    # Conversation 级事件
-    await events.conversation.emit_conversation_start(...)
     await events.conversation.emit_conversation_delta(...)
-    
-    # Message 级事件
-    await events.message.emit_message_start(...)
-    await events.message.emit_message_delta(...)
-    await events.message.emit_message_stop(...)
-    
-    # Content 级事件（核心 3 个）
-    await events.content.emit_content_start(session_id, index, content_block)
-    await events.content.emit_content_delta(session_id, index, delta)
-    await events.content.emit_content_stop(session_id, index)
-    
-    # System 级事件
-    await events.system.emit_error(...)
 """
 
 from core.events.manager import EventManager, create_event_manager
@@ -57,6 +70,13 @@ from core.events.conversation_events import ConversationEventManager
 from core.events.message_events import MessageEventManager
 from core.events.content_events import ContentEventManager
 from core.events.system_events import SystemEventManager
+from core.events.broadcaster import EventBroadcaster, create_broadcaster
+from core.events.storage import (
+    RedisEventStorage,
+    InMemoryEventStorage,
+    create_event_storage,
+    get_memory_storage,
+)
 
 __all__ = [
     "EventManager",
@@ -67,5 +87,13 @@ __all__ = [
     "MessageEventManager",
     "ContentEventManager",
     "SystemEventManager",
+    # Broadcaster
+    "EventBroadcaster",
+    "create_broadcaster",
+    # Storage
+    "RedisEventStorage",
+    "InMemoryEventStorage",
+    "create_event_storage",
+    "get_memory_storage",
 ]
 

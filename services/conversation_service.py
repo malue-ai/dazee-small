@@ -354,13 +354,7 @@ class ConversationService:
             )
         
         # 日志
-        status_info = ""
-        if status:
-            try:
-                status_obj = json.loads(status)
-                status_info = f", status={status_obj.get('action')}, index={status_obj.get('index')}"
-            except:
-                status_info = f", status={status}"
+        status_info = f", status={status}" if status else ""
         
         logger.info(
             f"✅ 消息添加成功: id={msg_id}, conversation_id={conversation_id}, "
@@ -421,13 +415,7 @@ class ConversationService:
             )
         
         # 日志
-        status_info = ""
-        if status:
-            try:
-                status_obj = json.loads(status)
-                status_info = f", status={status_obj.get('action')}, index={status_obj.get('index')}"
-            except:
-                status_info = f", status={status}"
+        status_info = f", status={status}" if status else ""
         
         logger.info(f"✅ 消息更新成功: id={message_id}{status_info}")
         

@@ -64,15 +64,21 @@ class Context:
         self.context_window = context_window
         self.messages: List[Dict[str, Any]] = []
         
-        # 初始化 tokenizer（Claude 使用 cl100k_base）
-        try:
-            self.tokenizer = tiktoken.get_encoding("cl100k_base")
-        except Exception as e:
-            logger.warning(f"无法加载 tokenizer: {e}，将使用字符数估算")
-            self.tokenizer = None
+        # tokenizer 延迟初始化（避免阻塞）
+        self._tokenizer = None
         
         # 压缩信息（从数据库加载）
         self.compression_info: Optional[Dict[str, Any]] = None
+    
+    @property
+    def tokenizer(self):
+        """延迟加载 tokenizer（避免初始化时阻塞）"""
+        if self._tokenizer is None:
+            try:
+                self._tokenizer = tiktoken.get_encoding("cl100k_base")
+            except Exception as e:
+                logger.warning(f"无法加载 tokenizer: {e}，将使用字符数估算")
+        return self._tokenizer
     
     async def load_messages(self) -> List[Dict[str, Any]]:
         """
@@ -351,9 +357,15 @@ class Context:
         Returns:
             清理后的内容块列表
         """
+        # 🆕 按 index 排序（确保顺序正确，即使存储时乱序）
+        sorted_blocks = sorted(
+            content_blocks,
+            key=lambda b: b.get("index", 999) if isinstance(b, dict) else 999
+        )
+        
         filtered = []
         
-        for block in content_blocks:
+        for block in sorted_blocks:
             if not isinstance(block, dict):
                 continue
                 
@@ -374,8 +386,9 @@ class Context:
                 logger.warning(f"⚠️ 移除错误位置的 tool_use 块（应在 assistant 消息中）")
                 continue
             
-            # 其他类型直接保留
-            filtered.append(block)
+            # 🆕 移除 index 字段（Claude API 不接受）
+            clean_block = {k: v for k, v in block.items() if k != "index"}
+            filtered.append(clean_block)
         
         return filtered
     

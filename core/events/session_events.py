@@ -1,7 +1,11 @@
 """
-Session 级事件管理
+Session 级事件管理 - SessionEventManager
 
-职责：管理 Session（运行会话）级别的事件
+事件类型：
+- session_start   : 会话开始（首个事件）
+- session_stopped : 用户主动停止
+- session_end     : 会话结束（正常/失败/取消）
+- ping            : 心跳保活
 """
 
 from typing import Dict, Any

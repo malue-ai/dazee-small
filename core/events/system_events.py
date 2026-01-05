@@ -1,7 +1,17 @@
 """
-系统级事件管理
+System 级事件管理 - SystemEventManager
 
-职责：管理系统级别的事件（错误、心跳、完成）
+事件类型：
+- error       : 错误事件
+- done        : 流结束标记（最后一个事件）
+- emit_custom : 自定义事件（用于扩展）
+
+错误类型枚举：
+- network_error    : 网络错误
+- timeout_error    : 超时错误
+- overloaded_error : 服务过载
+- internal_error   : 内部错误
+- validation_error : 参数验证错误
 """
 
 from typing import Dict, Any

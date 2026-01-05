@@ -158,13 +158,20 @@ class SlideSpeakTool:
             "required": ["config"]
         }
     
-    async def execute(self, config: Dict[str, Any], save_dir: Optional[str] = None) -> Dict[str, Any]:
+    async def execute(
+        self, 
+        config: Dict[str, Any], 
+        save_dir: Optional[str] = None,
+        conversation_id: Optional[str] = None,
+        **kwargs  # 接收其他注入的上下文
+    ) -> Dict[str, Any]:
         """
         执行PPT渲染
         
         Args:
             config: SlideSpeak配置
-            save_dir: 保存目录
+            save_dir: 保存目录（可选）
+            conversation_id: 对话ID（用于计算 workspace 路径）
             
         Returns:
             {
@@ -176,6 +183,13 @@ class SlideSpeakTool:
             }
         """
         try:
+            # 计算正确的保存路径
+            if not save_dir and conversation_id:
+                from core.workspace_manager import get_workspace_manager
+                workspace_manager = get_workspace_manager()
+                workspace_root = workspace_manager.get_workspace_root(conversation_id)
+                save_dir = str(workspace_root / "outputs" / "ppt")
+            
             # 1. 创建PPT生成任务
             task_id = await self._create_presentation(config)
             

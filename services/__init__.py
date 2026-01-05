@@ -27,8 +27,6 @@ from .chat_service import (
     AgentExecutionError,
 )
 
-from .chat_event_handler import ChatEventHandler
-
 from .conversation_service import (
     ConversationService,
     get_conversation_service,
@@ -61,7 +59,6 @@ __all__ = [
     "get_chat_service",
     "ChatServiceError",
     "AgentExecutionError",
-    "ChatEventHandler",
     # Conversation Service
     "ConversationService",
     "get_conversation_service",

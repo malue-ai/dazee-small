@@ -1,6 +1,6 @@
 # ZenFlux Agent V4 架构总览
 
-> 📅 **最后更新**: 2025-12-30  
+> 📅 **最后更新**: 2026-01-05  
 > 🎯 **当前版本**: V4.0 - 模块化重构版（已完成）  
 > 🔗 **前版本**: [V3.7 架构](./ARCHITECTURE_V3.7_E2B.md)
 > ✅ **重构状态**: core/tool/capability/ 模块化完成
@@ -563,7 +563,7 @@ core/llm/
 │      ▼                                                                           │
 │  ┌──────────────────────────────────────────────────────────────────────────┐   │
 │  │ 1. Intent Analysis                                                        │   │
-│  │    IntentAnalyzer.analyze(user_input)                                     │   │
+│  │    IntentAnalyzer.analyze(messages)  # 使用完整消息列表理解上下文         │   │
 │  │    → IntentResult { task_type, complexity, needs_plan }                   │   │
 │  └───────────────────────────────────┬──────────────────────────────────────┘   │
 │                                      │                                           │

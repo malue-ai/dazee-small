@@ -149,9 +149,10 @@ context = Context(
 history_messages = await context.load_messages()
 
 # 5. 调用 Agent
+# messages 已包含当前用户消息（ChatService 先保存再加载）
 async for event in agent.chat(
-    messages=history_messages,  # ← 传入历史
-    user_message=message
+    messages=history_messages,
+    session_id=session_id
 ):
     await handler.handle(event)
 

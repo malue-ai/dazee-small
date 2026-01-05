@@ -53,7 +53,7 @@ class Message(Base):
     status: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True
-    )  # JSON 格式: {"index": 0, "action": "generating", ...}
+    )  # 字符串: processing/completed/stopped/failed
     
     # 评分（用于用户反馈）
     score: Mapped[Optional[float]] = mapped_column(

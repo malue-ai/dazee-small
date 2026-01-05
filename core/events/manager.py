@@ -1,7 +1,12 @@
 """
-统一事件管理器
+统一事件管理器 - EventManager
 
-整合所有层级的事件管理器，提供统一接口
+职责：聚合所有层级的事件管理器，提供统一接口
+
+注意：
+- Agent 应使用 EventBroadcaster，不直接使用 EventManager
+- Service 层可以直接使用 EventManager
+- EventManager 是纯粹的事件发送层，无增强逻辑
 """
 
 from typing import Dict, Any
@@ -87,10 +92,11 @@ class EventManager:
     
     async def emit_message_stop(
         self,
-        session_id: str
+        session_id: str,
+        message_id: str = None
     ) -> Dict[str, Any]:
         """便捷方法：发送 message_stop 事件"""
-        return await self.message.emit_message_stop(session_id)
+        return await self.message.emit_message_stop(session_id, message_id)
     
     async def emit_error(
         self,

@@ -10,6 +10,11 @@ from utils.message_utils import (
     extract_text_from_message,
 )
 from utils.s3_uploader import S3Uploader, get_s3_uploader
+from utils.json_utils import (
+    JSONExtractor,
+    extract_json,
+    extract_json_list,
+)
 
 __all__ = [
     # 后台任务
@@ -23,5 +28,10 @@ __all__ = [
     # S3 上传
     "S3Uploader",
     "get_s3_uploader",
+    
+    # JSON 工具
+    "JSONExtractor",
+    "extract_json",
+    "extract_json_list",
 ]
 

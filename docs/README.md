@@ -1,6 +1,6 @@
 # ZenFlux Agent 文档
 
-> 📅 **最后更新**: 2025-12-30  
+> 📅 **最后更新**: 2026-01-05  
 > 🎯 **当前版本**: V4.0 - 模块化重构版
 
 ---
@@ -14,38 +14,37 @@ docs/
 ├── 【核心架构】
 │   ├── 00-ARCHITECTURE-V4.md        # ⭐⭐⭐ V4 架构总览（必读）
 │   ├── 00-ARCHITECTURE-OVERVIEW.md  # V3.7 架构（归档）
-│   └── ARCHITECTURE_V3.7_E2B.md     # V3.7 + E2B 详细架构
+│   └── AGENT_ARCHITECTURE_VISUAL.md # 架构可视化图
 │
 ├── 【协议与规范】
 │   ├── 01-MEMORY-PROTOCOL.md        # Memory-First 协议
 │   ├── 02-CAPABILITY-ROUTING.md     # 能力路由算法
-│   ├── 03-EVENT-PROTOCOL.md         # 统一事件协议（SSE/WebSocket）
-│   └── 10-EVENT_DRIVEN_BEST_PRACTICES.md  # 事件驱动最佳实践
+│   ├── 03-EVENT-PROTOCOL.md         # 统一事件协议
+│   ├── 10-EVENT_DRIVEN_BEST_PRACTICES.md  # 事件驱动最佳实践
+│   └── 14-TOOL_STREAMING_ARCHITECTURE.md  # 工具流式调用架构
 │
 ├── 【模块文档】
+│   ├── 04-SSE-CONNECTION-MANAGEMENT.md  # SSE 连接管理
+│   ├── 05-MULTI-AGENT-ORCHESTRATION.md  # 多 Agent 编排
+│   ├── 06-CONVERSATION-HISTORY.md   # 对话历史管理
+│   ├── 07-WORKSPACE-ARCHITECTURE.md # Workspace 架构
 │   ├── 08-DATA_STORAGE_ARCHITECTURE.md  # 数据存储架构
 │   ├── 09-MESSAGE_SCHEMA_UPGRADE.md # 消息 Schema
-│   └── 06-CONVERSATION-HISTORY.md   # 对话历史管理
+│   ├── 13-THINKING_STORAGE_STRATEGY.md  # Thinking 存储策略
+│   ├── 15-MESSAGE_STATUS_AND_METADATA.md # 消息状态与元数据
+│   └── 16-USAGE_TRACKING.md         # 用量追踪
 │
-├── 【会话管理】
-│   └── 04-SSE-CONNECTION-MANAGEMENT.md  # SSE 连接管理与断线重连
+├── 【数据与存储】
+│   ├── DATABASE.md                  # 数据库设计
+│   ├── FILE_STORAGE_SYSTEM.md       # 文件存储系统
+│   ├── RVR_LOOP_LOGIC.md            # RVR 循环逻辑
+│   └── CONVERSATION_DELTA_PATTERN.md # 对话增量模式
 │
-├── 【E2B 集成】
-│   ├── E2B_INTEGRATION.md           # E2B 集成指南
-│   ├── E2B_QUICKSTART.md            # E2B 快速开始
-│   ├── E2B_SANDBOX_LIFECYCLE_GUIDE.md   # 沙箱生命周期
-│   └── E2B_ARCHITECTURE_VALIDATION.md   # E2B 架构验证
-│
-├── 【问题分析与修复】（按需阅读）
-│   ├── ARCHITECTURE_FUNDAMENTAL_ISSUES.md  # 架构根本性问题
-│   ├── ARCHITECTURE_REVIEW.md       # 架构审查
-│   ├── ARCHITECTURE_ANALYSIS_REPORT.md   # 架构分析报告
-│   └── DEBUG_COMPLEX_TASK.md        # 复杂任务调试
-│
-└── 【历史记录】（归档）
-    ├── ASYNC_*.md                   # 异步重构记录
-    ├── SYNC_*.md                    # 同步问题分析
-    └── E2E_VALIDATION_REPORT.md     # 端到端验证报告
+└── 【E2B 集成】
+    ├── E2B_INTEGRATION.md           # E2B 集成指南
+    ├── E2B_QUICKSTART.md            # E2B 快速开始
+    ├── E2B_SANDBOX_LIFECYCLE_GUIDE.md   # 沙箱生命周期
+    └── E2B_ARCHITECTURE_VALIDATION.md   # E2B 架构验证
 ```
 
 ---
@@ -94,8 +93,9 @@ agent = create_simple_agent(
 )
 
 # 运行任务（流式输出）
+# messages 应由 ChatService 准备好，包含完整历史 + 当前用户消息
 async for event in agent.chat(
-    user_input="创建一个AI产品介绍PPT",
+    messages=messages,  # List[Message]，包含用户输入
     session_id="session_001"
 ):
     print(event)

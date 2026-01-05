@@ -114,14 +114,18 @@ interface Event {
 
 ### 3.1 事件分类总览
 
-| 层级 | 事件类型 | 说明 |
-|------|----------|------|
-| **Session** | `session_start`, `session_stopped`, `session_end`, `ping` | 运行会话生命周期 |
-| **User** | `user_action`, `user_preference_update` | 用户行为追踪 |
-| **Conversation** | `conversation_start`, `conversation_delta`, `conversation_plan_*`, `conversation_context_compressed`, `conversation_stop` | 对话会话管理 |
-| **Message** | `message_start`, `message_delta`, `message_stop`, `tool_call_*`, `plan_step_*` | 消息轮次管理 |
+| 层级 | 核心事件（只有 3 个！） | 说明 |
+|------|------------------------|------|
+| **Session** | `session_start`, `session_stop`, `ping` | 运行会话生命周期 |
+| **Conversation** | `conversation_start`, `conversation_delta`, `conversation_stop` | 对话会话管理 |
+| **Message** | `message_start`, `message_delta`, `message_stop` | 消息轮次管理 |
 | **Content** | `content_start`, `content_delta`, `content_stop` | 内容块流式传输 |
-| **System** | `error`, `done`, `agent_status`, `plan_update` | 系统级事件 |
+| **System** | `error`, `done` | 系统级事件 |
+
+> **设计原则**: 每层只有 **start/delta/stop** 三个核心事件，所有扩展数据通过 **delta** 发送。
+> 
+> - 有数据库字段的 → 放 delta 顶层
+> - 没有数据库字段的 → 放 `metadata` 里
 
 ---
 
@@ -238,84 +242,74 @@ Session 正常结束。
 }
 ```
 
-#### `conversation_plan_created`
+**Plan 相关更新（通过 conversation_delta）**
 
-执行计划创建（首次创建 plan 时触发）。
+> **注意**: Plan 的创建和更新**不是独立事件**，而是通过 `conversation_delta` 发送。
 
+**示例: 首次创建 plan**
 ```json
 {
-  "type": "conversation_plan_created",
+  "type": "conversation_delta",
   "data": {
     "conversation_id": "conv_789",
-    "plan": {
-      "goal": "生成一个关于AI技术的专业PPT",
-      "required_capabilities": ["ppt_generation"],
-      "steps": [
-        {
-          "index": 0,
-          "action": "分析用户需求",
-          "capability": "task_planning",
-          "status": "pending",
-          "result": null
-        },
-        {
-          "index": 1,
-          "action": "调用 SlideSpeak API",
-          "capability": "api_calling",
-          "status": "pending",
-          "result": null
-        }
-      ],
-      "current_step": 0,
-      "progress": 0.0
-    }
-  }
-}
-```
-
-#### `conversation_plan_updated`
-
-执行计划更新（步骤完成/失败时触发）。
-
-```json
-{
-  "type": "conversation_plan_updated",
-  "data": {
-    "conversation_id": "conv_789",
-    "plan_delta": {
-      "steps": {
-        "0": {
-          "status": "completed",
-          "result": "已确定PPT主题和结构"
-        },
-        "1": {
-          "status": "in_progress"
-        }
+    "delta": {
+      "plan": {
+        "goal": "生成一个关于AI技术的专业PPT",
+        "steps": [
+          {"index": 0, "action": "分析用户需求", "status": "pending"},
+          {"index": 1, "action": "调用 SlideSpeak API", "status": "pending"}
+        ],
+        "current_step": 0,
+        "progress": 0.0
       },
-      "current_step": 1,
-      "progress": 0.33
+      "updated_at": "2024-01-01T12:00:00Z"
     }
   }
 }
 ```
 
-#### `conversation_context_compressed`
+**示例: 更新 plan 进度**
+```json
+{
+  "type": "conversation_delta",
+  "data": {
+    "conversation_id": "conv_789",
+    "delta": {
+      "plan": {
+        "goal": "生成一个关于AI技术的专业PPT",
+        "steps": [
+          {"index": 0, "action": "分析用户需求", "status": "completed", "result": "已确定主题"},
+          {"index": 1, "action": "调用 SlideSpeak API", "status": "in_progress"}
+        ],
+        "current_step": 1,
+        "progress": 0.5
+      },
+      "updated_at": "2024-01-01T12:01:00Z"
+    }
+  }
+}
+```
 
-上下文压缩完成（tokens 过多时自动触发）。
+**上下文压缩（通过 conversation_delta）**
+
+上下文压缩完成时，通过 `conversation_delta` 发送，压缩信息放在 `metadata.compression` 中。
 
 ```json
 {
-  "type": "conversation_context_compressed",
+  "type": "conversation_delta",
   "data": {
     "conversation_id": "conv_789",
-    "context": {
-      "compressed_text": "之前讨论了AI技术PPT生成...",
-      "compressed_message_ids": ["msg_001", "msg_002", "msg_003"],
-      "compression_ratio": 0.25,
-      "original_tokens": 2500,
-      "compressed_tokens": 625
-    },
-    "retained_messages": ["msg_004", "msg_005"]
+    "delta": {
+      "metadata": {
+        "compression": {
+          "compressed_at": "2024-01-01T12:00:00Z",
+          "from_message_id": "msg_003",
+          "summary": "之前讨论了AI技术PPT生成...",
+          "original_count": 50,
+          "retained_count": 10
+        }
+      }
+    }
   }
 }
 ```
@@ -369,8 +363,17 @@ Session 正常结束。
 
 #### `message_delta`
 
-消息级增量更新。
+消息级增量更新（通用）。`delta` 内容由业务场景决定。
 
+**支持的 delta 类型：**
+
+| delta.type | 说明 | 示例 |
+|------------|------|------|
+| 无 type | Usage 统计 | `{"stop_reason": "end_turn"}` |
+| `recommended` | 推荐问题 | `{"type": "recommended", "content": "{\"questions\":[...]}"}` |
+| 其他 | 自定义扩展 | ... |
+
+**示例 1: Usage 统计**
 ```json
 {
   "type": "message_delta",
@@ -380,6 +383,20 @@ Session 正常结束。
     },
     "usage": {
       "output_tokens": 250
+    }
+  }
+}
+```
+
+**示例 2: 推荐问题**
+```json
+{
+  "type": "message_delta",
+  "data": {
+    "message_id": "msg_123",
+    "delta": {
+      "type": "recommended",
+      "content": "{\"questions\":[\"如何优化性能？\",\"如何添加新功能？\"]}"
     }
   }
 }
@@ -398,96 +415,76 @@ Session 正常结束。
 }
 ```
 
-#### `tool_call_start`
+---
 
-工具调用开始。
+### 3.6 Content 级事件（核心）
 
+> **重要**: Tool 事件（tool_use/tool_result）统一通过 Content 级事件发送，不再有独立的 `tool_call_*` 事件。
+
+#### `content_start`
+
+开始一个内容块。`content_block.type` 决定内容类型。
+
+**支持的 content_block 类型：**
+
+| type | 说明 |
+|------|------|
+| `text` | 文本内容 |
+| `thinking` | 思考过程（Extended Thinking） |
+| `tool_use` | 工具调用 |
+| `tool_result` | 工具执行结果 |
+
+**示例: tool_use**
 ```json
 {
-  "type": "tool_call_start",
+  "type": "content_start",
   "data": {
-    "tool_call_id": "toolu_123",
-    "tool_name": "web_search",
-    "input": {
-      "query": "AI最新发展趋势"
+    "index": 1,
+    "content_block": {
+      "type": "tool_use",
+      "id": "toolu_123",
+      "name": "web_search",
+      "input": {"query": "AI最新发展"}
     }
   }
 }
 ```
 
-#### `tool_call_complete`
-
-工具调用完成。
-
+**示例: tool_result**
 ```json
 {
-  "type": "tool_call_complete",
+  "type": "content_start",
   "data": {
-    "tool_call_id": "toolu_123",
-    "tool_name": "web_search",
-    "status": "success",
-    "result": {
-      "results_count": 5,
-      "preview": "找到5条相关结果..."
-    },
-    "duration_ms": 1250
-  }
-}
-```
-
-#### `tool_call_error`
-
-工具调用失败。
-
-```json
-{
-  "type": "tool_call_error",
-  "data": {
-    "tool_call_id": "toolu_123",
-    "tool_name": "web_search",
-    "error": {
-      "type": "network_error",
-      "message": "网络请求超时"
+    "index": 2,
+    "content_block": {
+      "type": "tool_result",
+      "tool_use_id": "toolu_123",
+      "content": "找到5条相关结果...",
+      "is_error": false
     }
   }
 }
 ```
 
-#### `plan_step_start`
-
-计划步骤开始执行。
-
+**示例: tool_result (error)**
 ```json
 {
-  "type": "plan_step_start",
+  "type": "content_start",
   "data": {
-    "step_index": 1,
-    "action": "调用 SlideSpeak API",
-    "capability": "api_calling",
-    "message_id": "msg_005"
-  }
-}
-```
-
-#### `plan_step_complete`
-
-计划步骤执行完成。
-
-```json
-{
-  "type": "plan_step_complete",
-  "data": {
-    "step_index": 1,
-    "status": "completed",
-    "result": "成功生成PPT",
-    "message_id": "msg_005"
+    "index": 2,
+    "content_block": {
+      "type": "tool_result",
+      "tool_use_id": "toolu_123",
+      "content": "网络请求超时",
+      "is_error": true
+    }
   }
 }
 ```
 
 ---
 
-### 3.5 Content 级事件
+### 3.8 Content 级事件
 
 Content 级事件用于**流式传输**内容块，与 Claude Streaming API 完全兼容。
 
@@ -729,11 +726,19 @@ data: {"data":{"index":1,"delta":{"type":"input_json_delta","partial_json":"{\"q
 event: content_stop
 data: {"data":{"index":1}}
 
-event: tool_call_start
-data: {"data":{"tool_call_id":"toolu_123","tool_name":"web_search","input":{"query":"AI技术"}}}
+// Tool 事件通过 Content 级事件发送
+event: content_start
+data: {"data":{"index":2,"content_block":{"type":"tool_use","id":"toolu_123","name":"web_search","input":{"query":"AI技术"}}}}
 
-event: tool_call_complete
-data: {"data":{"tool_call_id":"toolu_123","tool_name":"web_search","status":"success","result":{...},"duration_ms":1200}}
+event: content_stop
+data: {"data":{"index":2}}
+
+// Tool 结果
+event: content_start
+data: {"data":{"index":3,"content_block":{"type":"tool_result","tool_use_id":"toolu_123","content":"找到5条相关结果...","is_error":false}}}
+
+event: content_stop
+data: {"data":{"index":3}}
 
 event: content_start
 data: {"data":{"index":2,"content_block":{"type":"tool_result","tool_use_id":"toolu_123"}}}
@@ -769,8 +774,9 @@ data: {"data":{"index":0,"delta":{"type":"input_json_delta","partial_json":"{\"o
 event: content_stop
 data: {...}
 
-event: conversation_plan_created
-data: {"data":{"conversation_id":"conv_789","plan":{"goal":"生成PPT","steps":[...],"progress":0}}}
+// plan 通过 conversation_delta 发送
+event: conversation_delta
+data: {"data":{"conversation_id":"conv_789","delta":{"plan":{"goal":"生成PPT","steps":[...],"progress":0}}}}
 
 event: message_stop
 data: {...}
@@ -779,9 +785,6 @@ data: {...}
 
 event: message_start
 data: {...}
-
-event: plan_step_start
-data: {"data":{"step_index":0,"action":"分析需求",...}}
 
 event: content_start
 data: {"data":{"index":0,"type":"text"}}
@@ -792,11 +795,9 @@ data: {"data":{"index":0,"delta":{"type":"text","text":"我已分析完需求...
 event: content_stop
 data: {...}
 
-event: plan_step_complete
-data: {"data":{"step_index":0,"status":"completed","result":"需求分析完成"}}
-
-event: conversation_plan_updated
-data: {"data":{"plan_delta":{"current_step":1,"progress":0.5,"steps":{"0":{"status":"completed"}}}}}
+// plan 进度更新也通过 conversation_delta
+event: conversation_delta
+data: {"data":{"conversation_id":"conv_789","delta":{"plan":{"current_step":1,"progress":0.5,"steps":[{"status":"completed"}]}}}}
 
 event: message_stop
 data: {...}
@@ -815,7 +816,7 @@ data: {...}
 
 #### Conversation 层面
 1. ✅ `conversation_start` 必须在 `message_start` **之前**
-2. ✅ `conversation_plan_created` **只能发送一次**（首轮创建 plan 时）
+2. ✅ `conversation_delta`（含 plan）可以在任何时候发送
 3. ✅ `conversation_stop` 必须在所有 `message_stop` **之后**
 
 #### Message 层面
@@ -835,26 +836,25 @@ session_start
   │
   └── conversation_start
       │
-      ├── [conversation_plan_created] (可选，首轮)
-      ├── [conversation_delta] (可选)
+      ├── [conversation_delta] (可选，含 plan/title 等)
       │
       └── message_start (第1轮)
           ├── [agent_status] (可选)
           ├── content_start (index=0)
           │   └── content_delta (多次)
           │   └── content_stop
-          ├── content_start (index=1)
-          │   └── ...
-          ├── [tool_call_start] (可选)
-          ├── [tool_call_complete] (可选)
-          ├── [conversation_plan_updated] (可选)
+          ├── content_start (index=1, type=tool_use) (可选)
+          │   └── content_stop
+          ├── content_start (index=2, type=tool_result) (可选)
+          │   └── content_stop
+          ├── [conversation_delta] (可选，含 plan 更新)
           ├── message_delta
           └── message_stop
       │
       └── message_start (第2轮)
           └── ...
       │
-      ├── [conversation_context_compressed] (可选)
+      ├── [conversation_delta] (可选，含 compression 等)
       │
       └── conversation_stop
   │
@@ -1068,8 +1068,8 @@ async def process_message(session_id: str, conversation_id: str):
     # Message 结束
     await events.message.emit_message_delta(
         session_id=session_id,
-        stop_reason="end_turn",
-        output_tokens=15
+        delta={"stop_reason": "end_turn"},
+        usage={"output_tokens": 15}
     )
     
     await events.message.emit_message_stop(session_id=session_id)
@@ -1212,10 +1212,7 @@ await events.content.emit_text_delta(session_id, index, text)  # ✅
 | `session_start/stop/end` | Session | ✅ |
 | `conversation_*` | Conversation | ✅ |
 | `user_*` | User | ✅ |
-| `tool_call_*` | Message | ✅ |
-| `plan_step_*` | Message | ✅ |
-| `agent_status` | System | ✅ |
-| `plan_update` | System | ✅ |
+| `custom_*` | System | ✅ |
 
 ---
 
