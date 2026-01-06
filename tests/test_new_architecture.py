@@ -30,9 +30,7 @@ def test_imports():
         from core.agent import (
             TaskType,
             Complexity,
-            PromptLevel,
             IntentResult,
-            ExecutionConfig,
             IntentAnalyzer,
             create_intent_analyzer,
             SimpleAgent,
@@ -103,9 +101,7 @@ def test_types():
     from core.agent.types import (
         TaskType,
         Complexity,
-        PromptLevel,
         IntentResult,
-        ExecutionConfig,
     )
     
     # 测试枚举
@@ -123,7 +119,6 @@ def test_types():
         task_type=TaskType.CODE_DEVELOPMENT,
         complexity=Complexity.MEDIUM,
         needs_plan=True,
-        prompt_level=PromptLevel.STANDARD,
         keywords=["代码", "开发"],
         confidence=0.9
     )
@@ -263,7 +258,7 @@ async def test_intent_analyzer():
         print(f"     类型: {result.task_type.value}")
         print(f"     复杂度: {result.complexity.value}")
         print(f"     需要规划: {result.needs_plan}")
-        print(f"     提示词级别: {result.prompt_level.value}")
+        print(f"     关键词: {result.keywords}")
     
     print("\n  ✅ IntentAnalyzer 测试通过")
 

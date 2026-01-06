@@ -18,9 +18,7 @@ Agent 模块
 from core.agent.types import (
     TaskType,
     Complexity,
-    PromptLevel,
     IntentResult,
-    ExecutionConfig
 )
 from core.agent.intent_analyzer import (
     IntentAnalyzer,
@@ -54,10 +52,8 @@ from core.schemas import (
 __all__ = [
     # 类型
     "TaskType",
-    "Complexity", 
-    "PromptLevel",
+    "Complexity",
     "IntentResult",
-    "ExecutionConfig",
     # Agent
     "SimpleAgent",
     "create_simple_agent",

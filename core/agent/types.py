@@ -32,24 +32,19 @@ class Complexity(Enum):
     COMPLEX = "complex"    # 复杂：需要规划和多步骤执行
 
 
-class PromptLevel(Enum):
-    """提示词级别"""
-    SIMPLE = "simple"      # 简洁版：日常对话
-    STANDARD = "standard"  # 标准版：一般任务
-    FULL = "full"          # 完整版：复杂任务
-
-
 @dataclass
 class IntentResult:
     """
     意图分析结果
     
     包含任务类型、复杂度、是否需要规划等信息
+    
+    注意：Prompt 选择由 AgentFactory 在创建 Agent 时确定，
+    不再通过 IntentAnalyzer 动态切换。
     """
     task_type: TaskType                          # 任务类型
     complexity: Complexity                       # 复杂度
     needs_plan: bool                             # 是否需要规划
-    prompt_level: PromptLevel                    # 推荐的提示词级别
     keywords: List[str] = field(default_factory=list)  # 提取的关键词
     confidence: float = 1.0                      # 置信度
     raw_response: Optional[str] = None           # LLM 原始响应（用于调试）
@@ -60,29 +55,7 @@ class IntentResult:
             "task_type": self.task_type.value,
             "complexity": self.complexity.value,
             "needs_plan": self.needs_plan,
-            "prompt_level": self.prompt_level.value,
             "keywords": self.keywords,
             "confidence": self.confidence
-        }
-
-
-@dataclass
-class ExecutionConfig:
-    """
-    执行配置
-    
-    根据意图分析结果生成的执行配置
-    """
-    system_prompt: str                           # 系统提示词
-    prompt_name: str                             # 提示词名称
-    enable_thinking: bool = True                 # 是否启用 Extended Thinking
-    enable_streaming: bool = True                # 是否启用流式输出
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """转换为字典"""
-        return {
-            "prompt_name": self.prompt_name,
-            "enable_thinking": self.enable_thinking,
-            "enable_streaming": self.enable_streaming
         }
 

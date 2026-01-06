@@ -23,8 +23,6 @@ from core.agent.types import (
     IntentResult,
     TaskType,
     Complexity,
-    PromptLevel,
-    ExecutionConfig
 )
 
 logger = logging.getLogger(__name__)
@@ -246,9 +244,6 @@ class IntentAnalyzer:
         else:
             logger.warning(f"无法从 LLM 响应中提取 JSON: {content[:100]}...")
         
-        # 根据复杂度推导 prompt_level
-        prompt_level = self._complexity_to_prompt_level(complexity)
-        
         # 提取关键词
         keywords = self._extract_keywords(input_text)
         
@@ -256,7 +251,6 @@ class IntentAnalyzer:
             task_type=task_type,
             complexity=complexity,
             needs_plan=needs_plan,
-            prompt_level=prompt_level,
             keywords=keywords,
             raw_response=content
         )
@@ -289,9 +283,6 @@ class IntentAnalyzer:
         # 判断是否需要规划
         needs_plan = complexity != Complexity.SIMPLE
         
-        # 推导 prompt_level
-        prompt_level = self._complexity_to_prompt_level(complexity)
-        
         # 提取关键词
         keywords = self._extract_keywords(input_text)
         
@@ -299,7 +290,6 @@ class IntentAnalyzer:
             task_type=task_type,
             complexity=complexity,
             needs_plan=needs_plan,
-            prompt_level=prompt_level,
             keywords=keywords,
             confidence=0.7  # 规则分析置信度较低
         )
@@ -332,23 +322,6 @@ class IntentAnalyzer:
         else:
             return Complexity.MEDIUM
     
-    def _complexity_to_prompt_level(self, complexity: Complexity) -> PromptLevel:
-        """
-        复杂度转换为提示词级别
-        
-        Args:
-            complexity: 复杂度
-            
-        Returns:
-            PromptLevel
-        """
-        mapping = {
-            Complexity.SIMPLE: PromptLevel.SIMPLE,
-            Complexity.MEDIUM: PromptLevel.STANDARD,
-            Complexity.COMPLEX: PromptLevel.FULL
-        }
-        return mapping.get(complexity, PromptLevel.STANDARD)
-    
     def _extract_keywords(self, input_text: str) -> List[str]:
         """
         从输入中提取关键词
@@ -372,42 +345,6 @@ class IntentAnalyzer:
                 keywords.append(kw)
         
         return list(set(keywords))  # 去重
-    
-    def get_execution_config(
-        self,
-        intent: IntentResult
-    ) -> ExecutionConfig:
-        """
-        根据意图生成执行配置
-        
-        Args:
-            intent: 意图分析结果
-            
-        Returns:
-            ExecutionConfig
-        """
-        from prompts.simple_prompt import get_simple_prompt
-        from prompts.standard_prompt import get_standard_prompt
-        from prompts.universal_agent_prompt import get_universal_agent_prompt
-        
-        if intent.prompt_level == PromptLevel.SIMPLE:
-            return ExecutionConfig(
-                system_prompt=get_simple_prompt(),
-                prompt_name="simple_prompt",
-                enable_thinking=False
-            )
-        elif intent.prompt_level == PromptLevel.STANDARD:
-            return ExecutionConfig(
-                system_prompt=get_standard_prompt(),
-                prompt_name="standard_prompt",
-                enable_thinking=True
-            )
-        else:  # FULL
-            return ExecutionConfig(
-                system_prompt=get_universal_agent_prompt(),
-                prompt_name="full_prompt",
-                enable_thinking=True
-            )
 
 
 def create_intent_analyzer(
