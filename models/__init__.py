@@ -4,7 +4,22 @@
 导出所有 Pydantic 模型
 """
 
-from .chat import ChatRequest, ChatResponse, StreamEvent, SessionInfo, RefineRequest
+from .chat import (
+    # Content Block 模型
+    TextBlock,
+    ThinkingBlock,
+    ToolUseBlock,
+    ToolResultBlock,
+    ImageBlock,
+    ContentBlock,
+    MessageContent,
+    # Chat 模型
+    ChatRequest,
+    ChatResponse,
+    StreamEvent,
+    SessionInfo,
+    RefineRequest,
+)
 from .api import APIResponse
 from .database import User, Conversation, Message
 
@@ -63,6 +78,14 @@ from .knowledge import (
 )
 
 __all__ = [
+    # Content Block 模型
+    "TextBlock",
+    "ThinkingBlock",
+    "ToolUseBlock",
+    "ToolResultBlock",
+    "ImageBlock",
+    "ContentBlock",
+    "MessageContent",
     # Chat 模型
     "ChatRequest",
     "ChatResponse",

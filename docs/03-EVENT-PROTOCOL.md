@@ -26,7 +26,7 @@
 ```
 Session（运行会话）
 ├── User（用户）
-│   └── Conversation（对话会话）- plan, title, context
+│   └── Conversation（对话会话）- plan, title, image.png
 │       └── Message（消息/Turn）
 │           └── Content（内容块）- thinking, text, tool_use
 └── System（系统）- error, ping, done
@@ -89,6 +89,7 @@ interface Event {
   // === 通用上下文 ===
   session_id: string;        // Session ID（必选）
   conversation_id?: string;  // Conversation ID（可选）
+  message_id?:string;        // Message ID(可选)
   timestamp: string;         // ISO 8601 时间戳
   
   // === 事件数据 ===

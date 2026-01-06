@@ -301,6 +301,11 @@ class SimpleAgent:
                         
                         if server_tools:
                             logger.info(f"🌐 服务端工具已执行: {[t.get('name') for t in server_tools]}")
+                            # 🆕 发送服务端工具的事件到前端
+                            async for server_event in self._emit_server_tool_blocks_stream(
+                                response.raw_content, session_id, ctx
+                            ):
+                                yield server_event
                         
                         tool_results = []
                         if client_tools:
@@ -350,6 +355,11 @@ class SimpleAgent:
                 
                 if server_tools:
                     logger.info(f"🌐 服务端工具已执行: {[t.get('name') for t in server_tools]}")
+                    # 🆕 发送服务端工具的事件（非流式模式也需要）
+                    async for server_event in self._emit_server_tool_blocks_stream(
+                        response.raw_content, session_id, ctx
+                    ):
+                        yield server_event
                 
                 llm_messages.append(Message(role="assistant", content=response.raw_content))
                 
@@ -602,6 +612,105 @@ class SimpleAgent:
                     index=tool_result_index
                 )
                 ctx.block.close_current_block()
+    
+    async def _emit_server_tool_blocks_stream(
+        self,
+        raw_content: List[Dict],
+        session_id: str,
+        ctx  # RuntimeContext
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        发送服务端工具（如 web_search）的事件到前端
+        
+        服务端工具的特点：
+        - 由 Anthropic 服务器执行，不需要我们执行
+        - 调用和结果已经包含在 raw_content 中
+        - 类型为 server_tool_use 和 *_tool_result（如 web_search_tool_result）
+        
+        🔑 设计原则：
+        - 前端不需要知道什么是 server_tool_use
+        - 统一使用 tool_use / tool_result，保持接口一致
+        - 方便兼容 OpenAI 等其他 LLM
+        
+        Args:
+            raw_content: LLM 响应的原始内容块列表
+            session_id: 会话ID
+            ctx: RuntimeContext
+            
+        Yields:
+            content_start, content_stop 等事件（统一使用 tool_use/tool_result）
+        """
+        for block in raw_content:
+            block_type = block.get("type", "")
+            
+            # 处理 server_tool_use → 转换为 tool_use
+            if block_type == "server_tool_use":
+                # 关闭之前的 block
+                if ctx.block.is_block_open():
+                    yield await self.broadcaster.emit_content_stop(
+                        session_id=session_id,
+                        index=ctx.block.current_index
+                    )
+                
+                # 发送标准 tool_use 事件（前端不需要知道是服务端工具）
+                block_idx = ctx.block.start_new_block("tool_use")
+                yield await self.broadcaster.emit_content_start(
+                    session_id=session_id,
+                    index=block_idx,
+                    content_block={
+                        "type": "tool_use",  # 统一为 tool_use
+                        "id": block.get("id", ""),
+                        "name": block.get("name", ""),
+                        "input": block.get("input", {})
+                    }
+                )
+                yield await self.broadcaster.emit_content_stop(
+                    session_id=session_id,
+                    index=block_idx
+                )
+                ctx.block.close_current_block()
+                logger.debug(f"🌐 发送服务端工具调用事件（统一为 tool_use）: {block.get('name')}")
+            
+            # 处理 *_tool_result → 转换为 tool_result
+            elif block_type.endswith("_tool_result") and block_type != "tool_result":
+                # 关闭之前的 block
+                if ctx.block.is_block_open():
+                    yield await self.broadcaster.emit_content_stop(
+                        session_id=session_id,
+                        index=ctx.block.current_index
+                    )
+                
+                # 发送标准 tool_result 事件
+                block_idx = ctx.block.start_new_block("tool_result")
+                
+                # 处理 content 字段（可能是列表或字符串）
+                content = block.get("content", [])
+                if isinstance(content, list):
+                    # 提取文本内容
+                    text_parts = []
+                    for item in content:
+                        if isinstance(item, dict) and item.get("type") == "text":
+                            text_parts.append(item.get("text", ""))
+                    content_str = "\n".join(text_parts) if text_parts else json.dumps(content, ensure_ascii=False)
+                else:
+                    content_str = str(content)
+                
+                yield await self.broadcaster.emit_content_start(
+                    session_id=session_id,
+                    index=block_idx,
+                    content_block={
+                        "type": "tool_result",  # 统一为 tool_result
+                        "tool_use_id": block.get("tool_use_id", ""),
+                        "content": content_str,
+                        "is_error": False
+                    }
+                )
+                yield await self.broadcaster.emit_content_stop(
+                    session_id=session_id,
+                    index=block_idx
+                )
+                ctx.block.close_current_block()
+                logger.debug(f"🌐 发送服务端工具结果事件（统一为 tool_result）: {block_type}")
     
     async def _execute_tools(
         self,

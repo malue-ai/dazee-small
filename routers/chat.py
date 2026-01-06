@@ -254,10 +254,15 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
         # 记录额外的上下文信息
         if request.variables:
             logger.debug(f"📍 前端变量: {request.variables}")
-        if request.file:
-            logger.info(f"📎 附件: {request.file}")
+        if request.files:
+            logger.info(f"📎 文件: {len(request.files)} 个")
         if request.background_tasks:
             logger.info(f"⏱️ 后台任务: {request.background_tasks}")
+        
+        # 转换 files 为字典列表
+        files_data = None
+        if request.files:
+            files_data = [f.model_dump() for f in request.files]
         
         # ===== 流式模式（默认） =====
         if request.stream:
@@ -271,7 +276,8 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
                         conversation_id=request.conversation_id,
                         message_id=request.message_id,
                         stream=True,
-                        background_tasks=request.background_tasks
+                        background_tasks=request.background_tasks,
+                        files=files_data
                     ):
                         event_type = event.get("type", "message")
                         event_uuid = event.get("event_uuid", "")
@@ -331,7 +337,8 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
                 conversation_id=request.conversation_id,
                 message_id=request.message_id,
                 stream=False,
-                background_tasks=request.background_tasks
+                background_tasks=request.background_tasks,
+                files=files_data
             )
             
             # 后台清理任务（使用带锁的异步清理）

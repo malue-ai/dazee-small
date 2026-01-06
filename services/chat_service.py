@@ -30,6 +30,7 @@ from utils.message_utils import (
     normalize_message_format,
     extract_text_from_message,
 )
+from utils.file_processor import get_file_processor, FileCategory
 
 logger = get_logger("chat_service")
 
@@ -80,7 +81,8 @@ class ChatService:
         conversation_id: Optional[str] = None,
         message_id: Optional[str] = None,
         stream: bool = True,
-        background_tasks: Optional[List[str]] = None
+        background_tasks: Optional[List[str]] = None,
+        files: Optional[List[Dict[str, Any]]] = None
     ):
         """
         统一的对话入口 ⭐
@@ -96,15 +98,16 @@ class ChatService:
             message_id: 消息 ID（可选）
             stream: 是否流式返回
             background_tasks: 需要启用的后台任务列表，如 ["title_generation"]
+            files: 文件引用列表（可选），每个元素包含 file_id 或 file_url
             
         Returns:
             stream=True  → AsyncGenerator[Dict, None]
             stream=False → Dict
         """
         if stream:
-            return self._chat_stream(message, user_id, conversation_id, message_id, background_tasks)
+            return self._chat_stream(message, user_id, conversation_id, message_id, background_tasks, files)
         else:
-            return await self._chat_sync(message, user_id, conversation_id, message_id, background_tasks)
+            return await self._chat_sync(message, user_id, conversation_id, message_id, background_tasks, files)
     
     # ==================== 内部实现 ====================
     
@@ -114,7 +117,8 @@ class ChatService:
         user_id: str,
         conversation_id: Optional[str] = None,
         message_id: Optional[str] = None,
-        background_tasks: Optional[List[str]] = None
+        background_tasks: Optional[List[str]] = None,
+        files: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
         """
         同步模式：立即返回 task_id，Agent 在后台运行
@@ -122,7 +126,9 @@ class ChatService:
         适用场景：API 集成、不需要实时反馈
         """
         try:
-            normalized_message = normalize_message_format(message)
+            # 处理文件（如果有）
+            processed_message = await self._process_message_with_files(message, files)
+            normalized_message = normalize_message_format(processed_message)
             logger.info(f"📨 同步对话请求: user_id={user_id}")
             
             # 确保 Conversation 存在
@@ -179,7 +185,8 @@ class ChatService:
         user_id: str,
         conversation_id: Optional[str] = None,
         message_id: Optional[str] = None,
-        background_tasks: Optional[List[str]] = None
+        background_tasks: Optional[List[str]] = None,
+        files: Optional[List[Dict[str, Any]]] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         流式模式：实时返回事件流
@@ -188,7 +195,9 @@ class ChatService:
         """
         session_id = None
         try:
-            normalized_message = normalize_message_format(message)
+            # 处理文件（如果有）
+            processed_message = await self._process_message_with_files(message, files)
+            normalized_message = normalize_message_format(processed_message)
             message_preview = str(message)[:50] if message else ""
             logger.info(f"📨 流式对话请求: user_id={user_id}, message={message_preview}...")
             
@@ -584,6 +593,60 @@ class ChatService:
                 if text:
                     texts.append(text)
         return "\n".join(texts)
+    
+    async def _process_message_with_files(
+        self,
+        message: Any,
+        files: Optional[List[Dict[str, Any]]]
+    ) -> Any:
+        """
+        处理文件并合并到消息中
+        
+        文件处理策略：
+        - 图片 (image/*) → 作为 ImageBlock 传给 LLM
+        - 纯文本 (text/*) → 读取内容拼进消息
+        - 复杂文档 (PDF等) → 生成 URL，让 Agent 决定如何处理
+        
+        Args:
+            message: 原始用户消息
+            files: 文件引用列表
+            
+        Returns:
+            处理后的消息（可能是字符串或 content blocks 列表）
+        """
+        if not files:
+            return message
+        
+        try:
+            processor = get_file_processor()
+            processed_files = await processor.process_files(files)
+            
+            if not processed_files:
+                return message
+            
+            logger.info(f"📎 处理了 {len(processed_files)} 个文件")
+            
+            # 获取原始消息文本
+            if isinstance(message, str):
+                original_text = message
+            elif isinstance(message, list):
+                # 已经是 content blocks 格式
+                original_text = ""
+                for block in message:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        original_text += block.get("text", "")
+            else:
+                original_text = str(message)
+            
+            # 使用 FileProcessor 构建 content blocks
+            content_blocks = processor.build_message_content(processed_files, original_text)
+            
+            return content_blocks
+            
+        except Exception as e:
+            logger.error(f"❌ 处理文件失败: {str(e)}", exc_info=True)
+            # 文件处理失败，返回原始消息，不影响对话
+            return message
 
 
 # ==================== 便捷函数 ====================

@@ -15,6 +15,12 @@ from utils.json_utils import (
     extract_json,
     extract_json_list,
 )
+from utils.file_processor import (
+    FileProcessor,
+    FileCategory,
+    ProcessedFile,
+    get_file_processor,
+)
 
 __all__ = [
     # 后台任务
@@ -33,5 +39,11 @@ __all__ = [
     "JSONExtractor",
     "extract_json",
     "extract_json_list",
+    
+    # 文件处理
+    "FileProcessor",
+    "FileCategory",
+    "ProcessedFile",
+    "get_file_processor",
 ]
 
