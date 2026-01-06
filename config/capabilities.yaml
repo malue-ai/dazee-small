@@ -850,8 +850,10 @@ capabilities:
       - task_planning
       - progress_tracking
       - session_memory
-      - plan_crud          # 🆕 Plan CRUD 操作
-      - todo_crud          # 🆕 Todo CRUD 操作
+      - plan_crud          # Plan CRUD 操作
+      - todo_crud          # Todo CRUD 操作
+      - replan             # 🆕 V4.2.1 重新规划能力
+      - adaptive_planning  # 🆕 自适应规划
     priority: 95  # 高优先级，让LLM优先考虑使用
     cost:
       time: instant
@@ -861,53 +863,76 @@ capabilities:
       session_scoped: true  # 会话级别，不持久化
     metadata:
       description: |
-        任务规划工具 - 存储到 WorkingMemory（Short Memory）
+        任务规划工具（智能版本）- 内部调用 Claude + Extended Thinking
         
-        架构特点：
-        - plan.json 和 todo.md 存储在 Short Memory，避免多轮 tokens 消耗
-        - LLM 通过 CRUD 操作管理计划，不需要每次传递完整计划
-        - Agent 在执行前从 Memory 读取计划上下文
+        核心能力：
+        - create_plan: 智能生成任务计划（调用 Claude + Extended Thinking）
+        - update_step: 更新步骤状态
+        - add_step: 动态添加步骤
+        - replan: 🆕 重新生成计划（保留已完成步骤或全量重规划）
+        - get_plan: 获取当前计划状态
         
-        输出格式：
-        - plan_json: JSON 格式（内部 RVR 调度）
-        - todo_md: Markdown 格式（状态追踪 + 用户展示）
-        - display: 终端友好的即时反馈
+        重新规划（replan）触发场景：
+        - 多个步骤连续失败
+        - 发现原计划遗漏关键信息
+        - 用户需求发生变化
+        - 执行过程中发现更优方案
+        
+        策略选项：
+        - incremental: 保留已完成步骤，只重新生成剩余步骤（默认）
+        - full: 全量重新生成计划
       keywords:
         - plan
         - todo
         - 计划
         - 任务
         - 进度
-        - short_memory
-        - crud
-      note: "存储在 WorkingMemory 中，会话结束后自动清除"
+        - replan
+        - 重新规划
+        - 自适应
+      note: |
+        V4.2.1 新增 replan 能力：
+        - Claude 可在 RVR 循环中自主决定是否调用 replan
+        - 支持 incremental（增量）和 full（全量）两种重规划策略
+        - 最大重规划次数限制：3 次
     input_schema:
       type: object
       properties:
         operation:
           type: string
-          description: "CRUD 操作类型"
-          enum: ["create_plan", "update_step", "get_plan", "add_step", "clear"]
+          description: "操作类型"
+          enum: ["create_plan", "update_step", "get_plan", "add_step", "replan", "clear"]
         data:
           type: object
           description: "操作数据"
           properties:
+            user_query:
+              type: string
+              description: "用户原始需求（create_plan 时必需）"
             goal:
               type: string
-              description: "任务目标（create_plan）"
+              description: "任务目标（create_plan 可选，会自动生成）"
             steps:
               type: array
-              description: "步骤列表（create_plan）"
+              description: "步骤列表（create_plan 可选，会自动生成）"
             step_index:
               type: integer
-              description: "步骤索引（update_step）"
+              description: "步骤索引（update_step 时必需）"
             status:
               type: string
-              description: "步骤状态（update_step）"
+              description: "步骤状态（update_step 时必需）"
               enum: ["pending", "in_progress", "completed", "failed"]
             result:
               type: string
-              description: "步骤结果（update_step）"
+              description: "步骤结果（update_step 时可选）"
+            reason:
+              type: string
+              description: "重新规划原因（replan 时必需）"
+            strategy:
+              type: string
+              description: "重规划策略（replan 时可选）"
+              enum: ["full", "incremental"]
+              default: "incremental"
       required:
         - operation
 

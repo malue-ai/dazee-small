@@ -86,6 +86,10 @@ SCHEMA_GENERATOR_PROMPT = """
 - max_steps: int (1-50)
 - granularity: str (fine/medium/coarse)
 - allow_dynamic_adjustment: bool
+- replan_enabled: bool (是否允许重新规划，默认 true)
+- max_replan_attempts: int (最大重规划次数，0-5，默认 2)
+- replan_strategy: str (full: 全量重规划 / incremental: 保留已完成步骤)
+- failure_threshold: float (失败率阈值，超过时建议重规划，0-1，默认 0.3)
 
 ### tool_selector
 - enabled: bool

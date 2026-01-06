@@ -21,6 +21,7 @@ import json
 from typing import Dict, Any, Optional, List, Union, AsyncIterator, Callable
 
 import anthropic
+import httpx
 
 from logger import get_logger
 from .base import (
@@ -547,7 +548,7 @@ class ClaudeLLMService(BaseLLMService):
             else:
                 request_params["system"] = system
         
-        # Extended Thinking
+        # Extended Thinking（由 LLM Service 配置控制）
         if self.config.enable_thinking:
             request_params["thinking"] = {
                 "type": "enabled",
@@ -555,8 +556,7 @@ class ClaudeLLMService(BaseLLMService):
             }
             request_params["temperature"] = 1.0  # Required for thinking
         else:
-            # 支持 kwargs 覆盖 temperature
-            request_params["temperature"] = kwargs.get("temperature", self.config.temperature)
+            request_params["temperature"] = self.config.temperature
         
         # Tools
         all_tools = []
@@ -651,6 +651,7 @@ class ClaudeLLMService(BaseLLMService):
         if system:
             request_params["system"] = system
         
+        # Extended Thinking（由 LLM Service 配置控制）
         if self.config.enable_thinking:
             request_params["thinking"] = {
                 "type": "enabled",
@@ -726,119 +727,149 @@ class ClaudeLLMService(BaseLLMService):
         stop_reason = None
         usage = {}  # 🔢 流式模式下从 final_message 获取
         
-        async with self.async_client.messages.stream(**request_params) as stream:
-            async for event in stream:
-                if not hasattr(event, 'type'):
-                    continue
-                
-                if event.type == "content_block_start":
-                    if hasattr(event, 'content_block'):
-                        block = event.content_block
-                        if hasattr(block, 'type'):
-                            block_type = block.type
-                            
-                            if block_type == "thinking" and on_thinking:
-                                on_thinking("")
-                            elif block_type == "text" and on_content:
-                                on_content("")
-                            # 客户端工具调用
-                            elif block_type == "tool_use" and on_tool_call:
-                                on_tool_call({
-                                    "id": getattr(block, 'id', ''),
-                                    "name": getattr(block, 'name', ''),
-                                    "input": getattr(block, 'input', {}),
-                                    "type": "tool_use"
-                                })
-                            # 服务端工具调用（如 web_search）
-                            elif block_type == "server_tool_use" and on_tool_call:
-                                on_tool_call({
-                                    "id": getattr(block, 'id', ''),
-                                    "name": getattr(block, 'name', ''),
-                                    "input": getattr(block, 'input', {}),
-                                    "type": "server_tool_use"
-                                })
-                            # 工具结果（如 web_search_tool_result）
-                            elif block_type.endswith("_tool_result"):
-                                # 工具结果通过 final_message 获取完整内容
-                                logger.debug(f"📥 工具结果开始: {block_type}")
-                
-                elif event.type == "content_block_delta":
-                    if hasattr(event, 'delta'):
-                        delta = event.delta
-                        if hasattr(delta, 'type'):
-                            if delta.type == "thinking_delta":
-                                text = getattr(delta, 'thinking', '')
-                                accumulated_thinking += text
-                                if on_thinking:
-                                    on_thinking(text)
-                                yield LLMResponse(content="", thinking=text, is_stream=True)
-                                
-                            elif delta.type == "text_delta":
-                                text = getattr(delta, 'text', '')
-                                accumulated_content += text
-                                if on_content:
-                                    on_content(text)
-                                yield LLMResponse(content=text, is_stream=True)
-                                
-                            elif delta.type == "input_json_delta":
-                                partial_json = getattr(delta, 'partial_json', '')
-                                if on_tool_call:
-                                    on_tool_call({
-                                        "partial_input": partial_json,
-                                        "type": "input_delta"
-                                    })
-                
-                elif event.type == "message_stop":
-                    final_message = None
-                    try:
-                        final_message = await stream.get_final_message()
-                        stop_reason = getattr(final_message, 'stop_reason', None)
-                        
-                        # 🔢 提取 usage 信息
-                        if hasattr(final_message, 'usage') and final_message.usage:
-                            usage = {
-                                "input_tokens": final_message.usage.input_tokens,
-                                "output_tokens": final_message.usage.output_tokens
-                            }
-                            if hasattr(final_message.usage, 'cache_read_input_tokens'):
-                                usage["cache_read_tokens"] = final_message.usage.cache_read_input_tokens
-                            if hasattr(final_message.usage, 'cache_creation_input_tokens'):
-                                usage["cache_creation_tokens"] = final_message.usage.cache_creation_input_tokens
-                            
-                            # 🆕 Cache 效果日志（Context Engineering 监控）
-                            cache_read = usage.get("cache_read_tokens", 0)
-                            cache_create = usage.get("cache_creation_tokens", 0)
-                            if cache_read > 0:
-                                # cache 命中，节省成本（90% 折扣）
-                                saved = cache_read * 0.003 * 0.9 / 1000  # $3/M * 90% off
-                                logger.info(f"✅ Cache HIT: {cache_read:,} tokens (saved ~${saved:.4f})")
-                            elif cache_create > 0:
-                                logger.debug(f"📦 Cache CREATED: {cache_create:,} tokens")
-                        
-                        if hasattr(final_message, 'content'):
-                            for block in final_message.content:
-                                if not hasattr(block, 'type'):
-                                    continue
+        event_count = 0  # 🚨 在 try 外初始化，确保 except 中可用
+        try:
+            async with self.async_client.messages.stream(**request_params) as stream:
+                async for event in stream:
+                    event_count += 1
+                    if not hasattr(event, 'type'):
+                        continue
+                    
+                    if event.type == "content_block_start":
+                        if hasattr(event, 'content_block'):
+                            block = event.content_block
+                            if hasattr(block, 'type'):
                                 block_type = block.type
                                 
+                                if block_type == "thinking" and on_thinking:
+                                    on_thinking("")
+                                elif block_type == "text" and on_content:
+                                    on_content("")
                                 # 客户端工具调用
-                                if block_type == "tool_use":
-                                    tool_calls.append({
+                                elif block_type == "tool_use" and on_tool_call:
+                                    on_tool_call({
                                         "id": getattr(block, 'id', ''),
                                         "name": getattr(block, 'name', ''),
                                         "input": getattr(block, 'input', {}),
                                         "type": "tool_use"
                                     })
-                                # 服务端工具调用
-                                elif block_type == "server_tool_use":
-                                    tool_calls.append({
+                                # 服务端工具调用（如 web_search）
+                                elif block_type == "server_tool_use" and on_tool_call:
+                                    on_tool_call({
                                         "id": getattr(block, 'id', ''),
                                         "name": getattr(block, 'name', ''),
                                         "input": getattr(block, 'input', {}),
                                         "type": "server_tool_use"
                                     })
-                    except Exception as e:
-                        logger.warning(f"获取最终消息失败: {e}")
+                                # 工具结果（如 web_search_tool_result）
+                                elif block_type.endswith("_tool_result"):
+                                    # 工具结果通过 final_message 获取完整内容
+                                    logger.debug(f"📥 工具结果开始: {block_type}")
+                    
+                    elif event.type == "content_block_delta":
+                        if hasattr(event, 'delta'):
+                            delta = event.delta
+                            if hasattr(delta, 'type'):
+                                if delta.type == "thinking_delta":
+                                    text = getattr(delta, 'thinking', '')
+                                    accumulated_thinking += text
+                                    if on_thinking:
+                                        on_thinking(text)
+                                    yield LLMResponse(content="", thinking=text, is_stream=True)
+                                    
+                                elif delta.type == "text_delta":
+                                    text = getattr(delta, 'text', '')
+                                    accumulated_content += text
+                                    if on_content:
+                                        on_content(text)
+                                    yield LLMResponse(content=text, is_stream=True)
+                                    
+                                elif delta.type == "input_json_delta":
+                                    partial_json = getattr(delta, 'partial_json', '')
+                                    if on_tool_call:
+                                        on_tool_call({
+                                            "partial_input": partial_json,
+                                            "type": "input_delta"
+                                        })
+                    
+                    elif event.type == "message_stop":
+                        final_message = None
+                        try:
+                            final_message = await stream.get_final_message()
+                            stop_reason = getattr(final_message, 'stop_reason', None)
+                            
+                            # 🔢 提取 usage 信息
+                            if hasattr(final_message, 'usage') and final_message.usage:
+                                usage = {
+                                    "input_tokens": final_message.usage.input_tokens,
+                                    "output_tokens": final_message.usage.output_tokens
+                                }
+                                if hasattr(final_message.usage, 'cache_read_input_tokens'):
+                                    usage["cache_read_tokens"] = final_message.usage.cache_read_input_tokens
+                                if hasattr(final_message.usage, 'cache_creation_input_tokens'):
+                                    usage["cache_creation_tokens"] = final_message.usage.cache_creation_input_tokens
+                                
+                                # 🆕 Cache 效果日志（Context Engineering 监控）
+                                cache_read = usage.get("cache_read_tokens", 0)
+                                cache_create = usage.get("cache_creation_tokens", 0)
+                                if cache_read > 0:
+                                    # cache 命中，节省成本（90% 折扣）
+                                    saved = cache_read * 0.003 * 0.9 / 1000  # $3/M * 90% off
+                                    logger.info(f"✅ Cache HIT: {cache_read:,} tokens (saved ~${saved:.4f})")
+                                elif cache_create > 0:
+                                    logger.debug(f"📦 Cache CREATED: {cache_create:,} tokens")
+                            
+                            if hasattr(final_message, 'content'):
+                                for block in final_message.content:
+                                    if not hasattr(block, 'type'):
+                                        continue
+                                    block_type = block.type
+                                    
+                                    # 客户端工具调用
+                                    if block_type == "tool_use":
+                                        tool_calls.append({
+                                            "id": getattr(block, 'id', ''),
+                                            "name": getattr(block, 'name', ''),
+                                            "input": getattr(block, 'input', {}),
+                                            "type": "tool_use"
+                                        })
+                                    # 服务端工具调用
+                                    elif block_type == "server_tool_use":
+                                        tool_calls.append({
+                                            "id": getattr(block, 'id', ''),
+                                            "name": getattr(block, 'name', ''),
+                                            "input": getattr(block, 'input', {}),
+                                            "type": "server_tool_use"
+                                        })
+                        except Exception as e:
+                            logger.warning(f"获取最终消息失败: {e}")
+        except (httpx.RemoteProtocolError, Exception) as stream_error:
+            # 🚨 流式传输中断：记录已接收的事件数和已累积的内容
+            error_msg = str(stream_error)
+            logger.error(f"❌ 流式传输中断: {error_msg}")
+            logger.error(f"   已接收事件数: {event_count}")
+            logger.error(f"   已累积 thinking: {len(accumulated_thinking)} chars")
+            logger.error(f"   已累积 content: {len(accumulated_content)} chars")
+            logger.error(f"   已解析 tool_calls: {len(tool_calls)}")
+            
+            # 如果有部分内容，尝试返回（降级处理）
+            if accumulated_content or accumulated_thinking or tool_calls:
+                logger.warning("⚠️ 尝试返回部分响应...")
+                raw_content = self._build_raw_content_from_parts(
+                    accumulated_thinking, accumulated_content, tool_calls
+                )
+                yield LLMResponse(
+                    content=accumulated_content,
+                    thinking=accumulated_thinking if accumulated_thinking else None,
+                    tool_calls=tool_calls if tool_calls else None,
+                    stop_reason="stream_error",
+                    raw_content=raw_content,
+                    is_stream=False
+                )
+                return
+            
+            # 没有任何内容，抛出原始错误
+            raise
         
         # 构建 raw_content
         # 优先使用 final_message（包含 thinking signature）
@@ -1162,6 +1193,53 @@ class ClaudeLLMService(BaseLLMService):
             })
         
         return raw_content
+    
+    def _remove_thinking_blocks(self, messages: List[Dict]) -> List[Dict]:
+        """
+        从消息中移除 thinking blocks
+        
+        当禁用 Extended Thinking 时，必须从历史消息中移除 thinking blocks，
+        否则 Claude API 会报错：
+        "When thinking is disabled, assistant message cannot contain thinking blocks"
+        
+        参考官方文档：
+        "You may omit thinking blocks from previous assistant turns"
+        
+        Args:
+            messages: 格式化后的消息列表
+            
+        Returns:
+            移除 thinking blocks 后的消息列表
+        """
+        cleaned_messages = []
+        
+        for msg in messages:
+            if not isinstance(msg, dict):
+                cleaned_messages.append(msg)
+                continue
+            
+            role = msg.get("role")
+            content = msg.get("content")
+            
+            # 只处理 assistant 消息
+            if role == "assistant" and isinstance(content, list):
+                # 过滤掉 thinking 和 redacted_thinking blocks
+                filtered_content = [
+                    block for block in content
+                    if isinstance(block, dict) and 
+                    block.get("type") not in ("thinking", "redacted_thinking")
+                ]
+                
+                if filtered_content:
+                    cleaned_messages.append({
+                        "role": "assistant",
+                        "content": filtered_content
+                    })
+                # 如果过滤后为空，跳过该消息
+            else:
+                cleaned_messages.append(msg)
+        
+        return cleaned_messages
 
 
 # ============================================================

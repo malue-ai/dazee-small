@@ -37,6 +37,7 @@ from core.events.broadcaster import EventBroadcaster
 from core.llm import Message, LLMResponse, ToolType, create_claude_service
 from core.tool import create_tool_executor, create_tool_selector
 from core.tool.capability import create_capability_registry
+from core.orchestration import create_pipeline_tracer, E2EPipelineTracer
 from logger import get_logger
 from tools.plan_todo_tool import create_plan_todo_tool
 from utils.usage_tracker import create_usage_tracker
@@ -125,6 +126,11 @@ class SimpleAgent:
         
         # ===== Usage 统计（使用 UsageTracker） =====
         self.usage_tracker = create_usage_tracker()
+        
+        # ===== 🆕 E2E Pipeline Tracer（V4.2 Code-First 优化） =====
+        # 追踪器按 session 创建，在 chat() 中初始化
+        self._tracer: Optional[E2EPipelineTracer] = None
+        self.enable_tracing = True  # 默认启用追踪
         
         logger.info(f"✅ SimpleAgent 初始化完成 (model={self.model}, schema={self.schema.name})")
     
@@ -242,8 +248,29 @@ class SimpleAgent:
             session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
             logger.warning(f"未提供 session_id，生成临时 ID: {session_id}")
         
+        # ===== 🆕 初始化 E2E Pipeline Tracer（V4.2 Code-First 优化） =====
+        session_context = await self.event_manager.storage.get_session_context(session_id)
+        conversation_id = session_context.get("conversation_id", "default")
+        # 存储为实例变量，供工具执行时使用
+        self._current_conversation_id = conversation_id
+        
+        if self.enable_tracing:
+            self._tracer = create_pipeline_tracer(
+                session_id=session_id,
+                conversation_id=conversation_id
+            )
+            # 设置用户 Query
+            user_query = messages[-1]["content"] if messages else ""
+            self._tracer.set_user_query(user_query[:200])
+        
         # ===== 1. 意图分析（根据 Schema 决定是否执行） =====
         if self.schema.intent_analyzer.enabled and self.intent_analyzer:
+            # 🆕 追踪意图分析阶段
+            if self._tracer:
+                stage = self._tracer.create_stage("intent_analysis")
+                stage.start()
+                stage.set_input({"message_count": len(messages)})
+            
             logger.info("🎯 开始意图分析...")
             intent = await self.intent_analyzer.analyze(messages)
             
@@ -262,6 +289,14 @@ class SimpleAgent:
                 delta=intent_delta
             )
             logger.info(f"🎯 意图识别完成: {intent.task_type.value}, complexity={intent.complexity.value}")
+            
+            # 🆕 完成追踪
+            if self._tracer:
+                stage.complete({
+                    "task_type": intent.task_type.value,
+                    "complexity": intent.complexity.value,
+                    "needs_plan": intent.needs_plan
+                })
         else:
             # 不执行意图分析，使用默认配置
             logger.info("○ 跳过意图分析（Schema 未启用）")
@@ -272,6 +307,11 @@ class SimpleAgent:
                 needs_plan=self.schema.plan_manager.enabled,
                 confidence=1.0
             )
+            
+            # 🆕 记录跳过
+            if self._tracer:
+                stage = self._tracer.create_stage("intent_analysis")
+                stage.skip("Schema 未启用")
         
         # 🆕 System Prompt 选择（设计哲学：极简原则）
         # 
@@ -292,8 +332,7 @@ class SimpleAgent:
             logger.info("✅ 使用框架默认 System Prompt")
         
         # 🆕 追加 Workspace 路径信息（让 Claude 的 text_editor 使用正确路径）
-        session_context = await self.event_manager.storage.get_session_context(session_id)
-        conversation_id = session_context.get("conversation_id", "default")
+        # 注意：session_context 和 conversation_id 已在 tracer 初始化时获取
         
         # 获取 workspace 绝对路径并确保目录存在
         from core.workspace_manager import get_workspace_manager
@@ -312,18 +351,26 @@ class SimpleAgent:
         system_prompt = system_prompt + workspace_instruction
         
         # ===== 2. 工具选择（Schema 驱动优先） =====
+        # 🆕 追踪工具选择阶段
+        if self._tracer:
+            tool_stage = self._tracer.create_stage("tool_selection")
+            tool_stage.start()
+        
         logger.info("🔧 开始工具选择...")
         
         # 确定所需能力（优先级：Schema > Plan > Intent 推断）
         plan = self._plan_cache.get("plan")
+        selection_source = "intent"  # 记录选择来源
         
         if self.schema.tools:
             # 优先使用 Schema 配置（Prompt 驱动设计哲学）
             required_capabilities = self.schema.tools
+            selection_source = "schema"
             logger.debug(f"✓ 使用 Schema 配置的工具: {self.schema.tools}")
         elif plan and plan.get('required_capabilities'):
             # 其次使用 Plan 指定的能力
             required_capabilities = plan['required_capabilities']
+            selection_source = "plan"
             logger.debug("✓ 使用 Plan 指定的能力")
         else:
             # 最后通过意图推断（兜底）
@@ -350,6 +397,17 @@ class SimpleAgent:
         
         logger.info(f"📋 选择工具: {selection.tool_names}")
         
+        # 🆕 完成追踪
+        if self._tracer:
+            tool_stage.set_input({
+                "required_capabilities": required_capabilities[:5] if required_capabilities else [],
+                "selection_source": selection_source
+            })
+            tool_stage.complete({
+                "tool_count": len(selection.tool_names),
+                "tools": selection.tool_names[:5]
+            })
+        
         # ===== 3. 构建消息 =====
         # 直接使用传入的 messages（调用方已准备好完整列表）
         # 转换为 Message 对象（后续 RVR 循环会 append 新消息）
@@ -367,7 +425,7 @@ class SimpleAgent:
             logger.info(f"🔄 Turn {turn + 1}/{self.max_turns}")
             logger.info(f"{'='*60}")
             
-            # 调用 LLM
+            # 调用 LLM（Extended Thinking 由 System Prompt 和 Claude 自主决定）
             if enable_stream:
                 # 流式处理 LLM 响应
                 async for event in self._process_stream(
@@ -448,8 +506,18 @@ class SimpleAgent:
             if ctx.is_completed():
                 break
         
-        # ===== 5. 发送完成事件 =====
-        # 🆕 保存 usage 统计到数据库
+        # ===== 5. 完成追踪 =====
+        # 🆕 记录最终响应并完成追踪
+        if self._tracer:
+            final_response = ctx.stream.content if hasattr(ctx, 'stream') else ""
+            self._tracer.set_final_response(final_response[:500] if final_response else "")
+            # 🐛 修复：不再覆盖 tool_calls，使用 log_tool_call 记录的值
+            # self._tracer.stats["tool_calls"] = len(self._plan_cache.get("tool_calls", []))
+            self._tracer.finish()
+        
+        # ===== 6. 发送完成事件 =====
+        # 🆕 传递 usage 统计给 broadcaster（用于持久化）
+        # 转换字段名以匹配 broadcaster 期望的格式
         stats = self.usage_stats
         await self.broadcaster.accumulate_usage(session_id, {
             "input_tokens": stats.get("total_input_tokens", 0),
@@ -476,6 +544,7 @@ class SimpleAgent:
         处理流式 LLM 响应
         
         委托给 EventManager 处理事件发射
+        Extended Thinking 由 LLM Service 配置和 System Prompt 控制
         """
         stream_generator = self.llm.create_message_stream(
             messages=messages,
@@ -577,6 +646,10 @@ class SimpleAgent:
             
             logger.debug(f"🔧 执行工具: {tool_name}")
             
+            # 🆕 追踪工具执行（V4.2 Code-First）
+            if self._tracer:
+                self._tracer.log_tool_call(tool_name)
+            
             # ===== 发送 tool_use content block =====
             # 关闭之前的 block
             if ctx.block.is_block_open():
@@ -610,33 +683,29 @@ class SimpleAgent:
             
             # ===== 执行工具 =====
             try:
-                # 特殊处理：plan_todo 工具
+                # plan_todo 工具需要 current_plan 参数
                 if tool_name == "plan_todo":
                     operation = tool_input.get('operation', 'create_plan')
                     data = tool_input.get('data', {})
-                    current_plan = self._plan_cache.get("plan")
                     result = await self.plan_todo_tool.execute(
                         operation=operation,
                         data=data,
-                        current_plan=current_plan
+                        current_plan=self._plan_cache.get("plan")
                     )
                     
-                    # 更新 plan_state（仅内存缓存，plan 数据已在 tool_result 中）
+                    # 更新 plan 缓存
                     if result.get("status") == "success" and "plan" in result:
-                        new_plan = result.get("plan")
-                        self._plan_cache["plan"] = new_plan
-                        if operation == "create_plan":
-                            logger.info(f"📋 Plan 已创建: {new_plan.get('goal', '')}")
-                        else:
-                            logger.info(f"📋 Plan 已更新: operation={operation}")
+                        self._plan_cache["plan"] = result.get("plan")
+                        logger.info(f"📋 Plan 操作完成: {operation}")
                 else:
                     # 🛡️ 为所有工具注入上下文（user_id, session_id, conversation_id）
                     session_context = await self.event_manager.storage.get_session_context(session_id)
                     tool_input.setdefault("session_id", session_id)
                     if session_context.get("user_id"):
                         tool_input.setdefault("user_id", session_context.get("user_id"))
-                    if session_context.get("conversation_id"):
-                        tool_input.setdefault("conversation_id", session_context.get("conversation_id"))
+                    # 确保 conversation_id 始终有值（使用 session_id 作为默认值）
+                    conv_id = session_context.get("conversation_id") or getattr(self, '_current_conversation_id', None) or session_id
+                    tool_input.setdefault("conversation_id", conv_id)
                     
                     # 执行工具
                     result = await self.tool_executor.execute(tool_name, tool_input)
@@ -718,6 +787,10 @@ class SimpleAgent:
             
             logger.debug(f"🔧 执行工具: {tool_name}")
             
+            # 🆕 追踪工具执行（V4.2 Code-First）
+            if self._tracer:
+                self._tracer.log_tool_call(tool_name)
+            
             # ===== 发送 tool_use content block =====
             # 关闭之前的 block
             if ctx.block.is_block_open():
@@ -748,34 +821,28 @@ class SimpleAgent:
             
             # ===== 执行工具 =====
             try:
-                # 特殊处理：plan_todo 工具
+                # plan_todo 工具需要 current_plan 参数
                 if tool_name == "plan_todo":
                     operation = tool_input.get('operation', 'create_plan')
                     data = tool_input.get('data', {})
-                    # 传入当前 plan（从 plan_state 获取）
-                    current_plan = self._plan_cache.get("plan")
                     result = await self.plan_todo_tool.execute(
                         operation=operation,
                         data=data,
-                        current_plan=current_plan
+                        current_plan=self._plan_cache.get("plan")
                     )
                     
-                    # 更新 plan_state（仅内存缓存，plan 数据已在 tool_result 中）
+                    # 更新 plan 缓存
                     if result.get("status") == "success" and "plan" in result:
-                        new_plan = result.get("plan")
-                        self._plan_cache["plan"] = new_plan
-                        if operation == "create_plan":
-                            logger.info(f"📋 Plan 已创建: {new_plan.get('goal', '')}")
-                        else:
-                            logger.info(f"📋 Plan 已更新: operation={operation}")
+                        self._plan_cache["plan"] = result.get("plan")
+                        logger.info(f"📋 Plan 操作完成: {operation}")
                 else:
-                    # 🛡️ 为所有工具注入上下文（user_id, session_id, conversation_id）
+                    # 为所有工具注入上下文（user_id, session_id, conversation_id）
                     session_context = await self.event_manager.storage.get_session_context(session_id)
                     tool_input.setdefault("session_id", session_id)
                     if session_context.get("user_id"):
                         tool_input.setdefault("user_id", session_context.get("user_id"))
-                    if session_context.get("conversation_id"):
-                        tool_input.setdefault("conversation_id", session_context.get("conversation_id"))
+                    conv_id = session_context.get("conversation_id") or getattr(self, '_current_conversation_id', None) or session_id
+                    tool_input.setdefault("conversation_id", conv_id)
 
                     # 通用工具执行
                     result = await self.tool_executor.execute(tool_name, tool_input)
@@ -860,6 +927,34 @@ class SimpleAgent:
             "completed": completed,
             "progress": completed / total if total > 0 else 0.0
         }
+    
+    # ===== 🆕 V4.2 Code-First 追踪方法 =====
+    
+    def get_trace_report(self) -> Optional[Dict[str, Any]]:
+        """
+        获取最近一次执行的追踪报告
+        
+        Returns:
+            追踪报告字典，包含：
+            - session_id: 会话ID
+            - stages: 各阶段执行详情
+            - stats: 统计信息
+            - user_query: 用户查询
+            - final_response: 最终响应
+        """
+        if self._tracer:
+            return self._tracer.to_dict()
+        return None
+    
+    def set_tracing_enabled(self, enabled: bool):
+        """
+        启用或禁用追踪
+        
+        Args:
+            enabled: 是否启用追踪
+        """
+        self.enable_tracing = enabled
+        logger.info(f"{'✅ 启用' if enabled else '❌ 禁用'} E2E Pipeline 追踪")
 
 
 def create_simple_agent(

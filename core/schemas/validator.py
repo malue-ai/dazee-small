@@ -153,11 +153,48 @@ class PlanManagerConfig(ComponentConfig):
         description="计划验证间隔"
     )
     
+    # ===== 🆕 Re-Plan 配置（V4.2.1） =====
+    
+    # 是否允许重新生成计划
+    replan_enabled: bool = Field(
+        default=True,
+        description="是否允许在执行过程中重新生成计划"
+    )
+    
+    # 最大重新规划次数
+    max_replan_attempts: int = Field(
+        default=2,
+        ge=0,
+        le=5,
+        description="最大重新规划次数（0 表示不限制）"
+    )
+    
+    # 重新规划策略
+    replan_strategy: str = Field(
+        default="incremental",
+        description="重新规划策略 (full: 全量重新规划 / incremental: 保留已完成步骤)"
+    )
+    
+    # 失败率阈值（超过此值触发重规划建议）
+    failure_threshold: float = Field(
+        default=0.3,
+        ge=0.0,
+        le=1.0,
+        description="步骤失败率阈值，超过时 Claude 应考虑 replan"
+    )
+    
     @validator("granularity")
     def validate_granularity(cls, v):
         valid = ["fine", "medium", "coarse"]
         if v not in valid:
             raise ValueError(f"granularity 必须是 {valid} 之一")
+        return v
+    
+    @validator("replan_strategy")
+    def validate_replan_strategy(cls, v):
+        valid = ["full", "incremental"]
+        if v not in valid:
+            raise ValueError(f"replan_strategy 必须是 {valid} 之一")
         return v
 
 

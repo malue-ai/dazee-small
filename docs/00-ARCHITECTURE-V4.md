@@ -1,9 +1,9 @@
 # ZenFlux Agent V4 架构总览
 
-> 📅 **最后更新**: 2026-01-05  
-> 🎯 **当前版本**: V4.2 - Schema 驱动优化  
+> 📅 **最后更新**: 2026-01-06  
+> 🎯 **当前版本**: V4.2.1 - Code-First + E2E Pipeline  
 > 🔗 **前版本**: [V3.7 架构](./ARCHITECTURE_V3.7_E2B.md)
-> ✅ **优化状态**: Schema 驱动 + Context Reduction + 工具分层
+> ✅ **优化状态**: Schema 驱动 + Context Reduction + 工具分层 + **Code-First 编排** + **E2E 追踪**
 
 ---
 
@@ -19,6 +19,15 @@
 ---
 
 ## 🚀 版本演进
+
+### V4.2 → V4.2.1 核心变化（Code-First + E2E Pipeline）
+
+| 维度 | V4.2 | V4.2.1 | 改进 |
+|------|------|------|------|
+| **代码编排** | LLM 自由生成 | Code-First 编排器 | ✅ 结构化代码生成与验证 |
+| **代码验证** | 无 | `CodeValidator` | ✅ 语法/依赖/安全自动验证 |
+| **执行追踪** | 分散日志 | `E2EPipelineTracer` | ✅ 全链路可观测 |
+| **E2B 集成** | 工具调用 | CodeOrchestrator | ✅ 代码生成-验证-执行闭环 |
 
 ### V4.1 → V4.2 核心变化
 
@@ -48,6 +57,13 @@
 | **LLM** | `llm_service.py` | `core/llm/` 多提供商 | ✅ Claude/OpenAI/Gemini |
 | **Events** | 分散的事件发射 | `core/events/` 统一管理 | ✅ 6 类事件统一接口 |
 
+### 🎯 V4.2.1 优化重点（Code-First + E2E Pipeline）
+
+1. **Code-First 编排** - 参考 Manus/Claude Code，代码先行策略
+2. **E2E Pipeline 追踪** - 全链路可观测，每阶段输入-处理-输出
+3. **代码验证闭环** - 语法检查→依赖检查→安全检查→执行
+4. **CodeOrchestrator** - 统一代码生成-验证-执行流程
+
 ### 🎯 V4.2 优化重点
 
 1. **Schema 驱动** - 工具选择优先使用 Schema 配置
@@ -61,6 +77,16 @@
 2. **层级化** - 清晰的依赖方向，避免循环依赖
 3. **可扩展** - 新功能通过配置添加，不修改核心代码
 4. **可观测** - 统一事件系统，完整的执行追踪
+
+### ✨ V4.2.1 核心成就（Code-First + E2E Pipeline）
+
+| 改进项 | 实现状态 | 具体成果 |
+|-------|---------|---------|
+| **E2EPipelineTracer** | ✅ 完成 | 全链路追踪，输入-处理-输出可视化 |
+| **CodeValidator** | ✅ 完成 | 语法/依赖/安全多级验证 |
+| **CodeOrchestrator** | ✅ 完成 | 代码生成-验证-执行编排器 |
+| **SimpleAgent 集成** | ✅ 完成 | chat() 自动追踪各阶段 |
+| **E2E 验证脚本** | ✅ 完成 | `scripts/e2e_code_first_verify.py` |
 
 ### ✨ V4.2 核心成就
 
@@ -372,7 +398,79 @@ class IntentAnalyzer:
     """
 ```
 
-### 2. core/tool/ - 工具层
+### 2. core/orchestration/ - 编排层（🆕 V4.2.1）
+
+```
+core/orchestration/
+├── __init__.py           # 统一导出
+├── pipeline_tracer.py    # 🆕 E2E Pipeline 追踪器
+├── code_validator.py     # 🆕 代码验证器
+└── code_orchestrator.py  # 🆕 代码执行编排器
+```
+
+**E2EPipelineTracer 职责**：
+```python
+class E2EPipelineTracer:
+    """
+    端到端管道追踪器 - 全链路可观测
+    
+    职责：
+    - 追踪 Agent 执行各阶段（意图分析/工具选择/代码执行等）
+    - 记录每阶段输入-处理-输出
+    - 生成执行报告（耗时/状态/错误）
+    - 支持调试和问题定位
+    
+    使用方式：
+        tracer = create_pipeline_tracer(session_id)
+        stage = tracer.create_stage("intent_analysis")
+        stage.start()
+        stage.set_input({"messages": messages})
+        # ... 执行处理 ...
+        stage.complete({"task_type": "code_generation"})
+        tracer.finish()
+        print(tracer.to_dict())  # 获取完整报告
+    """
+```
+
+**CodeValidator 职责**：
+```python
+class CodeValidator:
+    """
+    代码验证器 - 多级验证保障
+    
+    验证流程：
+    1. 语法检查 - AST 解析验证
+    2. 依赖检查 - import 模块可用性
+    3. 安全检查 - 危险操作检测（可选）
+    
+    返回：ValidationResult
+    - is_valid: 是否通过验证
+    - errors: 错误列表
+    - suggestions: 修复建议
+    """
+```
+
+**CodeOrchestrator 职责**：
+```python
+class CodeOrchestrator:
+    """
+    代码执行编排器 - 代码先行策略
+    
+    编排流程：
+    1. 代码生成（LLM）
+    2. 代码验证（CodeValidator）
+    3. 代码执行（E2B Sandbox）
+    4. 结果验证
+    5. 错误修复（自动重试）
+    
+    设计原则：
+    - 参考 Manus/Claude Code 的 Code-First 策略
+    - 结构化的代码生成与验证
+    - 自动错误修复和重试
+    """
+```
+
+### 3. core/tool/ - 工具层
 
 ```
 core/tool/

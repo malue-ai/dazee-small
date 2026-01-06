@@ -1,5 +1,5 @@
 """
-Agent V3.6 Core Module
+ZenFlux Agent V4.2 Core Module
 
 核心组件：
 - SimpleAgent: 主Agent类
@@ -10,6 +10,7 @@ Agent V3.6 Core Module
 - LLM Service: LLM统一封装
 - EventManager: 事件管理（SSE/WebSocket 通用协议）
 - Context: 上下文管理
+- Orchestration: Code-First + VM Scaffolding 编排模块（V4.2 新增）
 """
 
 # Agent（新架构）
@@ -101,6 +102,21 @@ from .context import (
     create_runtime_context
 )
 
+# Code-First + VM Scaffolding 编排模块（V4.2 新增）
+from .orchestration import (
+    # 管道追踪器
+    E2EPipelineTracer,
+    PipelineStage,
+    create_pipeline_tracer,
+    # 代码验证器
+    CodeValidator,
+    ValidationResult,
+    create_code_validator,
+    # 代码编排器
+    CodeOrchestrator,
+    create_code_orchestrator,
+)
+
 
 __all__ = [
     # Agent
@@ -177,5 +193,15 @@ __all__ = [
     "create_context",
     "RuntimeContext",
     "create_runtime_context",
+    
+    # Code-First + VM Scaffolding 编排模块（V4.2 新增）
+    "E2EPipelineTracer",
+    "PipelineStage",
+    "create_pipeline_tracer",
+    "CodeValidator",
+    "ValidationResult",
+    "create_code_validator",
+    "CodeOrchestrator",
+    "create_code_orchestrator",
 ]
 
