@@ -32,6 +32,9 @@ from core.tool.capability import (
     create_capability_registry
 )
 
+# 🆕 结果精简器
+from core.tool.result_compactor import ResultCompactor, create_result_compactor
+
 logger = logging.getLogger(__name__)
 
 
@@ -65,7 +68,8 @@ class ToolExecutor:
     def __init__(
         self, 
         registry: Optional[CapabilityRegistry] = None,
-        tool_context: Optional[Dict[str, Any]] = None
+        tool_context: Optional[Dict[str, Any]] = None,
+        enable_compaction: bool = True
     ):
         """
         初始化工具执行器
@@ -76,11 +80,20 @@ class ToolExecutor:
                 - memory: WorkingMemory 实例
                 - event_manager: EventManager 实例
                 - workspace_dir: 工作目录路径
+            enable_compaction: 是否启用结果精简（默认 True）
         """
         self.registry = registry or create_capability_registry()
         self.tool_context = tool_context or {}
         self._tool_instances: Dict[str, Any] = {}
         self._tool_handlers: Dict[str, Callable] = {}
+        
+        # 🆕 结果精简器（Manus Context Engineering 优化）
+        # 从 capabilities.yaml 自动加载精简规则
+        self.enable_compaction = enable_compaction
+        self.result_compactor = create_result_compactor(
+            capability_registry=self.registry
+        ) if enable_compaction else None
+        
         self._load_tools()
     
     def _load_tools(self):
@@ -201,7 +214,8 @@ class ToolExecutor:
     async def execute(
         self,
         tool_name: str,
-        tool_input: Dict[str, Any]
+        tool_input: Dict[str, Any],
+        skip_compaction: bool = False
     ) -> Dict[str, Any]:
         """
         执行工具
@@ -209,9 +223,10 @@ class ToolExecutor:
         Args:
             tool_name: 工具名称
             tool_input: 工具输入参数
+            skip_compaction: 是否跳过结果精简（默认 False）
             
         Returns:
-            执行结果字典
+            执行结果字典（可能经过精简）
         """
         # 0. Claude Server-side 工具（由 Anthropic 处理）
         if tool_name in self.CLAUDE_SERVER_TOOLS:
@@ -223,16 +238,18 @@ class ToolExecutor:
         
         # 0.1 Claude Client-side 工具（需要本地执行！）
         if tool_name in self.CLAUDE_CLIENT_TOOLS:
-            return await self._execute_client_tool(tool_name, tool_input)
+            result = await self._execute_client_tool(tool_name, tool_input)
+            return self._maybe_compact(tool_name, result, skip_compaction)
         
         # 1. 自定义处理器
         if tool_name in self._tool_handlers:
             try:
                 handler = self._tool_handlers[tool_name]
                 if asyncio.iscoroutinefunction(handler):
-                    return await handler(tool_input)
+                    result = await handler(tool_input)
                 else:
-                    return handler(tool_input)
+                    result = handler(tool_input)
+                return self._maybe_compact(tool_name, result, skip_compaction)
             except Exception as e:
                 return {"success": False, "error": f"Handler error: {str(e)}"}
         
@@ -255,9 +272,39 @@ class ToolExecutor:
             return {"success": False, "error": f"Tool {tool_name} not loaded"}
         
         try:
-            return await self._execute_tool_instance(tool_name, tool_instance, tool_input)
+            result = await self._execute_tool_instance(tool_name, tool_instance, tool_input)
+            # 🆕 应用结果精简
+            return self._maybe_compact(tool_name, result, skip_compaction)
         except Exception as e:
             return {"success": False, "error": str(e)}
+    
+    def _maybe_compact(
+        self,
+        tool_name: str,
+        result: Dict[str, Any],
+        skip_compaction: bool = False
+    ) -> Dict[str, Any]:
+        """
+        根据配置决定是否精简结果
+        
+        Args:
+            tool_name: 工具名称
+            result: 原始结果
+            skip_compaction: 是否跳过精简
+            
+        Returns:
+            可能经过精简的结果
+        """
+        # 如果禁用精简或跳过精简，直接返回原始结果
+        if not self.enable_compaction or skip_compaction or not self.result_compactor:
+            return result
+        
+        # 错误结果不精简
+        if not result.get("success", True) and "error" in result:
+            return result
+        
+        # 应用精简
+        return self.result_compactor.compact(tool_name, result)
     
     async def _execute_tool_instance(
         self,
@@ -485,17 +532,44 @@ class ToolExecutor:
         loaded_count = sum(1 for t in tools.values() if t.get('loaded'))
         lines.append(f"  Loaded: {loaded_count}")
         
+        # 🆕 精简器状态
+        if self.result_compactor:
+            stats = self.result_compactor.get_stats()
+            lines.append(f"  Compaction: enabled ({stats['rules_count']} rules)")
+            if stats['total_compacted'] > 0:
+                lines.append(f"    - Compacted: {stats['total_compacted']} results")
+                lines.append(f"    - Bytes saved: {stats['total_bytes_saved']:,}")
+        else:
+            lines.append("  Compaction: disabled")
+        
         lines.append("  Tools:")
         for name, info in tools.items():
             status = "✅" if info.get('loaded') else "⚠️"
             lines.append(f"    {status} {name} ({info['provider']})")
         
         return "\n".join(lines)
+    
+    def get_compaction_stats(self) -> Optional[Dict[str, Any]]:
+        """
+        获取结果精简统计信息
+        
+        Returns:
+            精简统计字典，如果禁用则返回 None
+        """
+        if self.result_compactor:
+            return self.result_compactor.get_stats()
+        return None
+    
+    def reset_compaction_stats(self):
+        """重置结果精简统计"""
+        if self.result_compactor:
+            self.result_compactor.reset_stats()
 
 
 def create_tool_executor(
     registry: CapabilityRegistry = None,
-    tool_context: Dict[str, Any] = None
+    tool_context: Dict[str, Any] = None,
+    enable_compaction: bool = True
 ) -> ToolExecutor:
     """
     创建工具执行器
@@ -503,9 +577,14 @@ def create_tool_executor(
     Args:
         registry: 能力注册表
         tool_context: 工具上下文（用于依赖注入）
+        enable_compaction: 是否启用结果精简（默认 True，Manus 推荐）
         
     Returns:
         ToolExecutor 实例
     """
-    return ToolExecutor(registry=registry, tool_context=tool_context)
+    return ToolExecutor(
+        registry=registry, 
+        tool_context=tool_context,
+        enable_compaction=enable_compaction
+    )
 
