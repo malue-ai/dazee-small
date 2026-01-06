@@ -278,7 +278,7 @@
 │  │  │ IntentAnalyzer   │  │     types.py     │  │   factory.py     │         ││
 │  │  │  • 意图识别      │  │  • TaskType      │  │  • Schema 驱动   │         ││
 │  │  │  • 复杂度判断    │  │  • Complexity    │  │  • 动态初始化    │         ││
-│  │  │  • Prompt 选择   │  │  • IntentResult  │  │  • Re-Plan 配置  │         ││
+│  │  │  • needs_plan    │  │  • IntentResult  │  │  • Prompt→Schema │         ││
 │  │  └──────────────────┘  └──────────────────┘  └──────────────────┘         ││
 │  └────────────────────────────────────────────────────────────────────────────┘│
 │                                                                                  │
@@ -429,13 +429,17 @@ class IntentAnalyzer:
     """
     意图分析器
     
-    输入: 用户消息
+    输入: 用户消息列表（包含上下文）
     输出: IntentResult {
         task_type: TaskType,      # 任务类型
         complexity: Complexity,    # 复杂度
-        prompt_level: PromptLevel, # 推荐 Prompt 级别
-        needs_plan: bool          # 是否需要 Plan
+        needs_plan: bool,         # 是否需要 Plan
+        keywords: List[str]       # 提取的关键词
     }
+    
+    注意：
+    - 不负责 Prompt 选择（由 AgentFactory 在创建时确定）
+    - 使用 Haiku 快速分析，支持规则降级
     """
 ```
 
