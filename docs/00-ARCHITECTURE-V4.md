@@ -1,9 +1,9 @@
 # ZenFlux Agent V4 架构总览
 
 > 📅 **最后更新**: 2026-01-06  
-> 🎯 **当前版本**: V4.2.1 - Code-First + E2E Pipeline  
+> 🎯 **当前版本**: V4.2.2 - Re-Plan（自适应重规划）  
 > 🔗 **前版本**: [V3.7 架构](./ARCHITECTURE_V3.7_E2B.md)
-> ✅ **优化状态**: Schema 驱动 + Context Reduction + 工具分层 + **Code-First 编排** + **E2E 追踪**
+> ✅ **优化状态**: Schema 驱动 + Context Reduction + 工具分层 + Code-First 编排 + E2E 追踪 + **Re-Plan**
 
 ---
 
@@ -19,6 +19,15 @@
 ---
 
 ## 🚀 版本演进
+
+### V4.2.1 → V4.2.2 核心变化（Re-Plan 自适应重规划）
+
+| 维度 | V4.2.1 | V4.2.2 | 改进 |
+|------|--------|--------|------|
+| **计划执行** | 固定计划 | 自适应重规划 | ✅ Claude 自主决定是否 replan |
+| **失败处理** | 手动重试 | 智能重规划 | ✅ 保留已完成步骤，重新生成剩余 |
+| **工具封装** | Agent 管理 | 工具内部闭环 | ✅ plan_todo 内置 Claude + Extended Thinking |
+| **Schema 配置** | 基础配置 | Re-Plan 配置 | ✅ replan_enabled/max_attempts/strategy |
 
 ### V4.2 → V4.2.1 核心变化（Code-First + E2E Pipeline）
 
@@ -57,6 +66,13 @@
 | **LLM** | `llm_service.py` | `core/llm/` 多提供商 | ✅ Claude/OpenAI/Gemini |
 | **Events** | 分散的事件发射 | `core/events/` 统一管理 | ✅ 6 类事件统一接口 |
 
+### 🎯 V4.2.2 优化重点（Re-Plan 自适应重规划）
+
+1. **Re-Plan 机制** - Claude 自主决定是否调用 replan，无需 Agent 硬规则
+2. **工具封装闭环** - plan_todo 内部调用 Claude + Extended Thinking 生成计划
+3. **增量/全量策略** - incremental 保留已完成步骤，full 全量重新生成
+4. **失败阈值控制** - failure_threshold 配置触发重规划的失败率阈值
+
 ### 🎯 V4.2.1 优化重点（Code-First + E2E Pipeline）
 
 1. **Code-First 编排** - 参考 Manus/Claude Code，代码先行策略
@@ -77,6 +93,16 @@
 2. **层级化** - 清晰的依赖方向，避免循环依赖
 3. **可扩展** - 新功能通过配置添加，不修改核心代码
 4. **可观测** - 统一事件系统，完整的执行追踪
+
+### ✨ V4.2.2 核心成就（Re-Plan 自适应重规划）
+
+| 改进项 | 实现状态 | 具体成果 |
+|-------|---------|---------|
+| **PlanManagerConfig 扩展** | ✅ 完成 | replan_enabled/max_replan_attempts/replan_strategy/failure_threshold |
+| **plan_todo.replan 操作** | ✅ 完成 | 增量(incremental)/全量(full)两种重规划策略 |
+| **工具封装闭环** | ✅ 完成 | plan_todo 内部调用 Claude + Extended Thinking |
+| **capabilities.yaml 更新** | ✅ 完成 | plan_todo 新增 replan/adaptive_planning 能力 |
+| **Re-Plan 测试脚本** | ✅ 完成 | `scripts/test_replan.py` |
 
 ### ✨ V4.2.1 核心成就（Code-First + E2E Pipeline）
 
@@ -470,6 +496,106 @@ class CodeOrchestrator:
     """
 ```
 
+### 2.5 Re-Plan 机制（🆕 V4.2.2）
+
+**设计理念**：
+- Claude 在 RVR 循环中**自主决定**是否调用 replan
+- Agent 层**无硬规则**，保持简洁的编排职责
+- **工具封装闭环**：plan_todo 内部调用 Claude + Extended Thinking
+
+**架构流程**：
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                            Re-Plan 决策流程                                      │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  RVR 循环执行中                                                                  │
+│      │                                                                           │
+│      ▼                                                                           │
+│  ┌──────────────────────────────────────────────────────────────────────────┐   │
+│  │ 步骤执行 → 更新状态                                                       │   │
+│  │   • plan_todo.update_step({step_index, status: "completed|failed"})      │   │
+│  └───────────────────────────────────┬──────────────────────────────────────┘   │
+│                                      │                                           │
+│                                      ▼                                           │
+│  ┌──────────────────────────────────────────────────────────────────────────┐   │
+│  │ Claude 自主评估（基于 System Prompt 指导）                                │   │
+│  │   触发条件：                                                               │   │
+│  │   • 多个步骤连续失败                                                       │   │
+│  │   • 发现原计划遗漏关键信息                                                 │   │
+│  │   • 用户需求发生变化                                                       │   │
+│  │   • 执行过程中发现更优方案                                                 │   │
+│  └───────────────────────────────────┬──────────────────────────────────────┘   │
+│                                      │                                           │
+│              ┌───────────────────────┴───────────────────────┐                  │
+│              │                                               │                  │
+│              ▼                                               ▼                  │
+│  ┌──────────────────────────┐               ┌──────────────────────────┐       │
+│  │ 继续执行当前计划          │               │ 调用 plan_todo.replan    │       │
+│  │ • update_step            │               │ • reason: "失败原因"     │       │
+│  │ • 下一步骤               │               │ • strategy: incremental  │       │
+│  └──────────────────────────┘               └────────────┬─────────────┘       │
+│                                                          │                      │
+│                                                          ▼                      │
+│                                              ┌──────────────────────────┐       │
+│                                              │ plan_todo 内部处理        │       │
+│                                              │ • 调用 Claude + Thinking  │       │
+│                                              │ • 保留已完成步骤          │       │
+│                                              │ • 生成新的剩余步骤        │       │
+│                                              │ • 返回新计划              │       │
+│                                              └────────────┬─────────────┘       │
+│                                                          │                      │
+│                                                          ▼                      │
+│                                              ┌──────────────────────────┐       │
+│                                              │ Agent 更新 plan 缓存     │       │
+│                                              │ 继续 RVR 循环            │       │
+│                                              └──────────────────────────┘       │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**PlanManagerConfig 配置**（core/schemas/validator.py）：
+```python
+class PlanManagerConfig(ComponentConfig):
+    """计划管理器配置"""
+    
+    # 基础配置
+    enabled: bool = True
+    max_steps: int = 10
+    granularity: str = "medium"  # fine/medium/coarse
+    
+    # 🆕 Re-Plan 配置（V4.2.2）
+    replan_enabled: bool = True           # 是否允许重新规划
+    max_replan_attempts: int = 2          # 最大重规划次数（0-5）
+    replan_strategy: str = "incremental"  # full: 全量 / incremental: 保留已完成
+    failure_threshold: float = 0.3        # 失败率阈值（超过时建议重规划）
+```
+
+**plan_todo 工具操作**（tools/plan_todo_tool.py）：
+```python
+# 操作类型
+operations = [
+    "create_plan",   # 创建计划（调用 Claude + Extended Thinking）
+    "update_step",   # 更新步骤状态
+    "add_step",      # 动态添加步骤
+    "replan",        # 🆕 重新规划（V4.2.2）
+    "get_plan",      # 获取当前计划
+]
+
+# replan 参数
+{
+    "operation": "replan",
+    "data": {
+        "reason": "步骤2失败，CSS框架无法加载",  # 必需
+        "strategy": "incremental"                # 可选，默认 incremental
+    }
+}
+
+# replan 策略
+- incremental: 保留已完成步骤，只重新生成剩余步骤
+- full: 全量重新生成计划（保存历史记录）
+```
+
 ### 3. core/tool/ - 工具层
 
 ```
@@ -850,6 +976,16 @@ zenflux_agent/
 │   │   ├── openai.py
 │   │   └── gemini.py
 │   │
+│   ├── orchestration/              # 🆕 V4.2.1 编排模块
+│   │   ├── __init__.py
+│   │   ├── pipeline_tracer.py      # E2E Pipeline 追踪器
+│   │   ├── code_validator.py       # 代码验证器
+│   │   └── code_orchestrator.py    # 代码执行编排器
+│   │
+│   ├── schemas/                    # Schema 定义
+│   │   ├── __init__.py
+│   │   └── validator.py            # 🆕 V4.2.2 含 Re-Plan 配置
+│   │
 │   ├── capability_registry.py      # ⚠️ 已废弃 → 使用 core.tool.capability
 │   ├── capability_router.py        # ⚠️ 已废弃 → 使用 core.tool.capability
 │   ├── invocation_selector.py      # ⚠️ 已废弃 → 使用 core.tool.capability
@@ -857,7 +993,7 @@ zenflux_agent/
 │
 ├── tools/                          # 工具实现
 │   ├── __init__.py
-│   ├── plan_todo_tool.py           # Plan/Todo 工具
+│   ├── plan_todo_tool.py           # 🆕 V4.2.2 含 replan 操作
 │   ├── exa_search.py               # Exa 搜索
 │   ├── e2b_sandbox.py              # E2B 沙箱
 │   ├── e2b_vibe_coding.py          # Vibe Coding
@@ -894,6 +1030,13 @@ zenflux_agent/
 │   └── library/
 │       ├── slidespeak-generator/
 │       └── ...
+│
+├── scripts/                        # 🆕 测试脚本
+│   ├── e2e_code_first_verify.py    # V4.2.1 Code-First 验证
+│   ├── e2e_real_query_test.py      # 真实 Query E2E 测试
+│   ├── e2e_real_world_test.py      # 真实场景测试
+│   ├── e2e_verify_tool_execution.py # 工具执行验证
+│   └── test_replan.py              # 🆕 V4.2.2 Re-Plan 测试
 │
 └── docs/                           # 文档
     ├── 00-ARCHITECTURE-V4.md       # 🆕 本文档
