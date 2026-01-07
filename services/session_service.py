@@ -105,7 +105,21 @@ class SessionService:
         conversation_service=None
     ) -> tuple[str, SimpleAgent]:
         """
-        创建新的 Session 和 Agent
+        =====================================================================
+        阶段 1: Session/Agent 初始化
+        =====================================================================
+        （参考 docs/00-ARCHITECTURE-V4.md L1701-1722）
+        
+        1️⃣ 检查 Agent 池是否已有该 session 的 Agent
+        2️⃣ 如果没有，调用 AgentFactory 创建 AgentSchema
+        3️⃣ 初始化核心组件：
+           • CapabilityRegistry.load("capabilities.yaml")
+           • IntentAnalyzer(llm_model="claude-haiku-4-5-20251001")
+           • ToolSelector(registry, schema.tools)
+           • ToolExecutor(tools_dir="tools/")
+           • EventBroadcaster(event_manager)
+           • E2EPipelineTracer(session_id, conversation_id)
+        4️⃣ 启用已注册的 Claude Skills
         
         Args:
             user_id: 用户 ID
@@ -117,15 +131,15 @@ class SessionService:
         Returns:
             (session_id, agent)
         """
-        # 1. 生成 session_id
+        # 1️⃣ 生成 session_id
         session_id = self._generate_session_id()
         
         logger.info(f"🔨 创建新的 Session: session_id={session_id}, conversation_id={conversation_id}")
         
-        # 2. 提取消息文本用于预览
+        # 1.1 提取消息文本用于预览
         message_text = extract_message_text(message)
         
-        # 3. 创建 Redis Session 状态（异步）
+        # 1.2 创建 Redis Session 状态（异步）
         await self.redis.create_session(
             session_id=session_id,
             user_id=user_id,
@@ -134,10 +148,17 @@ class SessionService:
             message_preview=message_text[:100]
         )
         
-        # 4. 创建 Agent 实例
+        # 2️⃣ 创建 Agent 实例（完成所有核心组件初始化）
         # 按 conversation_id 隔离工作区，保证每个 Agent 只能在该对话目录下工作
         workspace_dir = str(self.workspace_manager.get_workspace_root(conversation_id))
 
+        # create_simple_agent 内部会初始化：
+        # • CapabilityRegistry（加载 capabilities.yaml）
+        # • IntentAnalyzer（使用 Haiku 4.5）
+        # • ToolSelector, ToolExecutor
+        # • EventBroadcaster, E2EPipelineTracer
+        # • Context Engineering Manager
+        # • 启用已注册的 Claude Skills
         agent = create_simple_agent(
             model=self.default_model,
             workspace_dir=workspace_dir,
@@ -145,11 +166,11 @@ class SessionService:
             conversation_service=conversation_service
         )
         
-        # 5. 加入 Agent 池
+        # 3️⃣ 加入 Agent 池（支持 Session 复用）
         self.agent_pool[session_id] = agent
         
         logger.info(
-            f"✅ Session 已创建: session_id={session_id}, "
+            f"✅ 阶段 1 完成: session_id={session_id}, "
             f"conversation_id={conversation_id}, user_id={user_id}"
         )
         

@@ -31,8 +31,13 @@ class SandboxListDir(BaseTool):
     用于查看沙盒文件系统中指定目录的文件和子目录列表。
     """
     
-    name: str = "sandbox_list_dir"
-    description: str = """列出沙盒目录内容。
+    @property
+    def name(self) -> str:
+        return "sandbox_list_dir"
+    
+    @property
+    def description(self) -> str:
+        return """列出沙盒目录内容。
 
 用途：查看沙盒中指定目录下的文件和文件夹。
 
@@ -52,9 +57,27 @@ class SandboxListDir(BaseTool):
 ```
 """
     
-    async def _execute(
+    @property
+    def parameters(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "conversation_id": {
+                    "type": "string",
+                    "description": "对话 ID"
+                },
+                "path": {
+                    "type": "string",
+                    "description": "目录路径（默认 /home/user）",
+                    "default": "/home/user"
+                }
+            },
+            "required": ["conversation_id"]
+        }
+    
+    async def execute(
         self,
-        conversation_id: str,
+        conversation_id: str = None,
         path: str = "/home/user",
         **kwargs
     ) -> Dict[str, Any]:
@@ -111,8 +134,13 @@ class SandboxReadFile(BaseTool):
     用于读取沙盒中文件的内容。
     """
     
-    name: str = "sandbox_read_file"
-    description: str = """读取沙盒文件内容。
+    @property
+    def name(self) -> str:
+        return "sandbox_read_file"
+    
+    @property
+    def description(self) -> str:
+        return """读取沙盒文件内容。
 
 用途：读取沙盒中指定文件的内容。
 
@@ -136,10 +164,27 @@ class SandboxReadFile(BaseTool):
 - 大文件可能会被截断
 """
     
-    async def _execute(
+    @property
+    def parameters(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "conversation_id": {
+                    "type": "string",
+                    "description": "对话 ID"
+                },
+                "path": {
+                    "type": "string",
+                    "description": "文件路径（完整路径）"
+                }
+            },
+            "required": ["conversation_id", "path"]
+        }
+    
+    async def execute(
         self,
-        conversation_id: str,
-        path: str,
+        conversation_id: str = None,
+        path: str = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -193,8 +238,13 @@ class SandboxWriteFile(BaseTool):
     用于在沙盒中创建或更新文件。
     """
     
-    name: str = "sandbox_write_file"
-    description: str = """写入沙盒文件。
+    @property
+    def name(self) -> str:
+        return "sandbox_write_file"
+    
+    @property
+    def description(self) -> str:
+        return """写入沙盒文件。
 
 用途：在沙盒中创建或更新文件内容。
 
@@ -222,11 +272,32 @@ class SandboxWriteFile(BaseTool):
 - 如果文件已存在会被覆盖
 """
     
-    async def _execute(
+    @property
+    def parameters(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "conversation_id": {
+                    "type": "string",
+                    "description": "对话 ID"
+                },
+                "path": {
+                    "type": "string",
+                    "description": "文件路径（完整路径）"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "文件内容"
+                }
+            },
+            "required": ["conversation_id", "path", "content"]
+        }
+    
+    async def execute(
         self,
-        conversation_id: str,
-        path: str,
-        content: str,
+        conversation_id: str = None,
+        path: str = None,
+        content: str = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -277,8 +348,13 @@ class SandboxDeleteFile(BaseTool):
     用于删除沙盒中的文件或目录。
     """
     
-    name: str = "sandbox_delete_file"
-    description: str = """删除沙盒文件或目录。
+    @property
+    def name(self) -> str:
+        return "sandbox_delete_file"
+    
+    @property
+    def description(self) -> str:
+        return """删除沙盒文件或目录。
 
 用途：删除沙盒中指定的文件或目录。
 
@@ -302,10 +378,27 @@ class SandboxDeleteFile(BaseTool):
 - 操作不可恢复
 """
     
-    async def _execute(
+    @property
+    def parameters(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "conversation_id": {
+                    "type": "string",
+                    "description": "对话 ID"
+                },
+                "path": {
+                    "type": "string",
+                    "description": "文件或目录路径"
+                }
+            },
+            "required": ["conversation_id", "path"]
+        }
+    
+    async def execute(
         self,
-        conversation_id: str,
-        path: str,
+        conversation_id: str = None,
+        path: str = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -355,8 +448,13 @@ class SandboxRunCommand(BaseTool):
     用于在沙盒中执行 shell 命令。
     """
     
-    name: str = "sandbox_run_command"
-    description: str = """在沙盒中执行命令。
+    @property
+    def name(self) -> str:
+        return "sandbox_run_command"
+    
+    @property
+    def description(self) -> str:
+        return """在沙盒中执行命令。
 
 用途：在沙盒中执行 shell 命令，如安装依赖、运行脚本等。
 
@@ -389,10 +487,32 @@ class SandboxRunCommand(BaseTool):
 - `cat file.txt` - 查看文件
 """
     
-    async def _execute(
+    @property
+    def parameters(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "conversation_id": {
+                    "type": "string",
+                    "description": "对话 ID"
+                },
+                "command": {
+                    "type": "string",
+                    "description": "要执行的命令"
+                },
+                "timeout": {
+                    "type": "integer",
+                    "description": "超时时间（秒，默认 60）",
+                    "default": 60
+                }
+            },
+            "required": ["conversation_id", "command"]
+        }
+    
+    async def execute(
         self,
-        conversation_id: str,
-        command: str,
+        conversation_id: str = None,
+        command: str = None,
         timeout: int = 60,
         **kwargs
     ) -> Dict[str, Any]:
@@ -440,8 +560,13 @@ class SandboxFileExists(BaseTool):
     用于检查沙盒中指定路径的文件或目录是否存在。
     """
     
-    name: str = "sandbox_file_exists"
-    description: str = """检查沙盒文件是否存在。
+    @property
+    def name(self) -> str:
+        return "sandbox_file_exists"
+    
+    @property
+    def description(self) -> str:
+        return """检查沙盒文件是否存在。
 
 用途：检查沙盒中指定路径是否存在文件或目录。
 
@@ -461,10 +586,27 @@ class SandboxFileExists(BaseTool):
 ```
 """
     
-    async def _execute(
+    @property
+    def parameters(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "conversation_id": {
+                    "type": "string",
+                    "description": "对话 ID"
+                },
+                "path": {
+                    "type": "string",
+                    "description": "文件或目录路径"
+                }
+            },
+            "required": ["conversation_id", "path"]
+        }
+    
+    async def execute(
         self,
-        conversation_id: str,
-        path: str,
+        conversation_id: str = None,
+        path: str = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -511,38 +653,6 @@ class SandboxCreateProject(BaseTool):
     
     快速创建指定类型的项目框架。
     """
-    
-    name: str = "sandbox_create_project"
-    description: str = """在沙盒中创建项目。
-
-用途：快速创建指定类型的项目框架，包含基础文件结构。
-
-参数：
-- conversation_id: 对话 ID
-- project_name: 项目名称
-- stack: 技术栈类型（streamlit/gradio/flask/fastapi/python）
-
-返回：
-- success: 是否成功
-- project_path: 项目路径
-- files_created: 创建的文件列表
-
-示例：
-```json
-{
-    "conversation_id": "conv_123",
-    "project_name": "my_app",
-    "stack": "streamlit"
-}
-```
-
-支持的技术栈：
-- streamlit: Streamlit Web 应用
-- gradio: Gradio ML 界面
-- flask: Flask Web 服务
-- fastapi: FastAPI REST API
-- python: 普通 Python 项目
-"""
     
     # 项目模板
     TEMPLATES = {
@@ -678,10 +788,70 @@ if __name__ == "__main__":
         }
     }
     
-    async def _execute(
+    @property
+    def name(self) -> str:
+        return "sandbox_create_project"
+    
+    @property
+    def description(self) -> str:
+        return """在沙盒中创建项目。
+
+用途：快速创建指定类型的项目框架，包含基础文件结构。
+
+参数：
+- conversation_id: 对话 ID
+- project_name: 项目名称
+- stack: 技术栈类型（streamlit/gradio/flask/fastapi/python）
+
+返回：
+- success: 是否成功
+- project_path: 项目路径
+- files_created: 创建的文件列表
+
+示例：
+```json
+{
+    "conversation_id": "conv_123",
+    "project_name": "my_app",
+    "stack": "streamlit"
+}
+```
+
+支持的技术栈：
+- streamlit: Streamlit Web 应用
+- gradio: Gradio ML 界面
+- flask: Flask Web 服务
+- fastapi: FastAPI REST API
+- python: 普通 Python 项目
+"""
+    
+    @property
+    def parameters(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "conversation_id": {
+                    "type": "string",
+                    "description": "对话 ID"
+                },
+                "project_name": {
+                    "type": "string",
+                    "description": "项目名称"
+                },
+                "stack": {
+                    "type": "string",
+                    "enum": ["streamlit", "gradio", "flask", "fastapi", "python"],
+                    "description": "技术栈类型",
+                    "default": "python"
+                }
+            },
+            "required": ["conversation_id", "project_name"]
+        }
+    
+    async def execute(
         self,
-        conversation_id: str,
-        project_name: str,
+        conversation_id: str = None,
+        project_name: str = None,
         stack: str = "python",
         **kwargs
     ) -> Dict[str, Any]:
@@ -774,8 +944,13 @@ class SandboxRunProject(BaseTool):
     启动项目并返回预览 URL。
     """
     
-    name: str = "sandbox_run_project"
-    description: str = """运行沙盒中的项目。
+    @property
+    def name(self) -> str:
+        return "sandbox_run_project"
+    
+    @property
+    def description(self) -> str:
+        return """运行沙盒中的项目。
 
 用途：启动沙盒中的项目，获取预览 URL。
 
@@ -799,11 +974,33 @@ class SandboxRunProject(BaseTool):
 ```
 """
     
-    async def _execute(
+    @property
+    def parameters(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "conversation_id": {
+                    "type": "string",
+                    "description": "对话 ID"
+                },
+                "project_path": {
+                    "type": "string",
+                    "description": "项目路径（相对于 /home/user）"
+                },
+                "stack": {
+                    "type": "string",
+                    "enum": ["streamlit", "gradio", "flask", "fastapi", "python"],
+                    "description": "技术栈类型"
+                }
+            },
+            "required": ["conversation_id", "project_path", "stack"]
+        }
+    
+    async def execute(
         self,
-        conversation_id: str,
-        project_path: str,
-        stack: str,
+        conversation_id: str = None,
+        project_path: str = None,
+        stack: str = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -872,4 +1069,3 @@ def get_sandbox_file_tools() -> List[BaseTool]:
         工具实例列表
     """
     return [tool() for tool in SANDBOX_FILE_TOOLS]
-

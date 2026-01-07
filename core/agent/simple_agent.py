@@ -262,13 +262,18 @@ class SimpleAgent:
         enable_stream: bool = True
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
-        Agent 统一执行入口
+        Agent 统一执行入口 - 7 阶段完整流程
         
-        编排流程：
-        1. 意图分析 → IntentAnalyzer
-        2. 工具选择 → ToolSelector
-        3. RVR 循环 → LLM + ToolExecutor
-        4. 事件发射 → EventManager
+        完整流程（参考 docs/00-ARCHITECTURE-V4.md L1693-1979）：
+        阶段 1: Session/Agent 初始化 (在 SessionService.create_session 中完成)
+        阶段 2: Intent Analysis (Haiku 快速分析)
+        阶段 3: Tool Selection (Schema 驱动优先)
+        阶段 4: System Prompt 组装 + LLM 调用准备
+        阶段 5: Plan Creation (System Prompt 约束 + Claude 自主触发，在 RVR Turn 1 内部)
+        阶段 6: RVR Loop (核心执行)
+        阶段 7: Final Output & Tracing Report
+        
+        本方法从阶段 2 开始（阶段 1 在 SessionService 中完成）
         
         Args:
             messages: 完整的消息列表
@@ -287,7 +292,15 @@ class SimpleAgent:
             session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
             logger.warning(f"未提供 session_id，生成临时 ID: {session_id}")
         
-        # ===== 🆕 初始化 E2E Pipeline Tracer（V4.2 Code-First 优化） =====
+        # =====================================================================
+        # 阶段 1: Session/Agent 初始化
+        # =====================================================================
+        # 说明: 此阶段在 SessionService.create_session() 中完成
+        # 包括: CapabilityRegistry, IntentAnalyzer, ToolSelector, ToolExecutor,
+        #       EventBroadcaster, E2EPipelineTracer, Claude Skills 启用
+        # 本方法从阶段 2 开始执行
+        
+        # ===== 初始化 E2E Pipeline Tracer =====
         session_context = await self.event_manager.storage.get_session_context(session_id)
         conversation_id = session_context.get("conversation_id", "default")
         # 存储为实例变量，供工具执行时使用
@@ -302,7 +315,9 @@ class SimpleAgent:
             user_query = messages[-1]["content"] if messages else ""
             self._tracer.set_user_query(user_query[:200])
         
-        # ===== 1. 意图分析（根据 Schema 决定是否执行） =====
+        # =====================================================================
+        # 阶段 2: Intent Analysis (Haiku 快速分析)
+        # =====================================================================
         if self.schema.intent_analyzer.enabled and self.intent_analyzer:
             # 🆕 追踪意图分析阶段
             if self._tracer:
@@ -352,44 +367,12 @@ class SimpleAgent:
                 stage = self._tracer.create_stage("intent_analysis")
                 stage.skip("Schema 未启用")
         
-        # 🆕 System Prompt 选择（设计哲学：极简原则）
-        # 
-        # 设计理念：
-        # - 用户只定义一套 System Prompt（从 AgentFactory 传入）
-        # - 如果有自定义 System Prompt，直接使用
-        # - 如果没有，使用默认 UNIVERSAL_AGENT_PROMPT
-        # - 不做复杂的分层，保持简单
+        # =====================================================================
+        # 阶段 3: Tool Selection (Schema 驱动优先)
+        # =====================================================================
+        # 选择优先级: Schema > Plan > Intent
+        # V4.4 双路径分流: Skill 路径 vs Tool 路径
         
-        if self.system_prompt:
-            # 使用用户定义的 System Prompt（唯一真相来源）
-            system_prompt = self.system_prompt
-            logger.info("✅ 使用用户定义的 System Prompt")
-        else:
-            # 使用框架默认 Prompt
-            from prompts.universal_agent_prompt import UNIVERSAL_AGENT_PROMPT
-            system_prompt = UNIVERSAL_AGENT_PROMPT
-            logger.info("✅ 使用框架默认 System Prompt")
-        
-        # 🆕 追加 Workspace 路径信息（让 Claude 的 text_editor 使用正确路径）
-        # 注意：session_context 和 conversation_id 已在 tracer 初始化时获取
-        
-        # 获取 workspace 绝对路径并确保目录存在
-        from core.workspace_manager import get_workspace_manager
-        workspace_manager = get_workspace_manager(self.workspace_dir or "./workspace")
-        workspace_path = workspace_manager.get_workspace_root(conversation_id)
-        workspace_path.mkdir(parents=True, exist_ok=True)  # 确保目录存在
-        
-        workspace_instruction = f"""
-
-# 工作目录（CRITICAL）
-所有文件操作必须在工作目录下进行：
-- 工作目录: {workspace_path}
-- 创建文件示例: {workspace_path}/index.html
-- ❌ 禁止使用 /tmp 或其他系统目录
-"""
-        system_prompt = system_prompt + workspace_instruction
-        
-        # ===== 2. 工具选择（V4.4 双路径分流） =====
         # 🆕 追踪工具选择阶段
         if self._tracer:
             tool_stage = self._tracer.create_stage("tool_selection")
@@ -488,15 +471,48 @@ class SimpleAgent:
                 "invocation_type": invocation_strategy.type.value if invocation_strategy else "skill"  # 🆕 记录调用类型
             })
         
-        # ===== 3. 构建消息 =====
-        # 直接使用传入的 messages（调用方已准备好完整列表）
-        # 转换为 Message 对象（后续 RVR 循环会 append 新消息）
+        # =====================================================================
+        # 阶段 4: System Prompt 组装 + LLM 调用准备
+        # =====================================================================
+        # 4.1 选择 System Prompt (用户自定义 vs 框架默认)
+        # 4.2 注入 Workspace 路径信息
+        # 4.3 构建 LLM Messages
+        # 4.4 Todo 重写 (Context Engineering - 对抗 Lost-in-the-Middle)
+        
+        # 4.1 选择 System Prompt
+        if self.system_prompt:
+            # 使用用户定义的 System Prompt（唯一真相来源）
+            system_prompt = self.system_prompt
+            logger.info("✅ 使用用户定义的 System Prompt")
+        else:
+            # 使用框架默认 Prompt
+            from prompts.universal_agent_prompt import UNIVERSAL_AGENT_PROMPT
+            system_prompt = UNIVERSAL_AGENT_PROMPT
+            logger.info("✅ 使用框架默认 System Prompt")
+        
+        # 4.2 注入 Workspace 路径信息
+        from core.workspace_manager import get_workspace_manager
+        workspace_manager = get_workspace_manager(self.workspace_dir or "./workspace")
+        workspace_path = workspace_manager.get_workspace_root(conversation_id)
+        workspace_path.mkdir(parents=True, exist_ok=True)  # 确保目录存在
+        
+        workspace_instruction = f"""
+
+# 工作目录（CRITICAL）
+所有文件操作必须在工作目录下进行：
+- 工作目录: {workspace_path}
+- 创建文件示例: {workspace_path}/index.html
+- ❌ 禁止使用 /tmp 或其他系统目录
+"""
+        system_prompt = system_prompt + workspace_instruction
+        
+        # 4.3 构建 LLM Messages
         llm_messages = [
             Message(role=msg["role"], content=msg["content"])
             for msg in messages
         ]
         
-        # 🆕 Todo 重写：将 Plan 状态注入到用户消息末尾
+        # 4.4 Todo 重写 (Context Engineering)
         # 对抗 "Lost-in-the-Middle" 现象，让任务目标始终在注意力高区
         if self.context_engineering and self._plan_cache.get("plan"):
             prepared_messages = self.context_engineering.prepare_messages_for_llm(
@@ -510,9 +526,33 @@ class SimpleAgent:
                 Message(role=msg["role"], content=msg["content"])
                 for msg in prepared_messages
             ]
-            logger.debug("✅ Todo 重写: Plan 状态已注入消息末尾")
+            logger.debug("✅ Context Engineering: Todo 重写完成，Plan 状态已注入消息末尾")
         
-        # ===== 4. RVR 循环 =====
+        # =====================================================================
+        # 阶段 5: Plan Creation (System Prompt 约束 + Claude 自主触发)
+        # =====================================================================
+        # 说明: Plan 创建不是框架强制触发，而是由 System Prompt 约束 + Claude 自主决定
+        # 
+        # 触发机制:
+        # - UNIVERSAL_AGENT_PROMPT 强制规则: "复杂任务的第一个工具调用必须是 plan_todo.create_plan()"
+        # - Claude 在 RVR Turn 1 根据任务复杂度（complexity=complex）自主判断
+        # - IntentAnalyzer 提供 needs_plan 提示作为参考
+        # 
+        # 执行位置: 阶段 6 (RVR 循环) Turn 1 内部
+        # 
+        # 验证: 通过 E2EPipelineTracer 检查复杂任务的第一个 tool_call 是否是 plan_todo
+        
+        # =====================================================================
+        # 阶段 6: RVR Loop (核心执行)
+        # =====================================================================
+        # Read-Reason-Act-Observe-Validate-Write-Repeat 循环
+        # [Read] Plan 状态（由 Claude 在 thinking 中读取）
+        # [Reason] LLM Extended Thinking
+        # [Act] Tool Calls 执行
+        # [Observe] 工具结果 + ResultCompactor 精简
+        # [Validate] 在 Extended Thinking 中验证
+        # [Write] plan_todo.update_step()
+        # [Repeat] if stop_reason == "tool_use"
         ctx = create_runtime_context(session_id=session_id, max_turns=self.max_turns)
         
         for turn in range(self.max_turns):
@@ -520,6 +560,15 @@ class SimpleAgent:
             logger.info(f"{'='*60}")
             logger.info(f"🔄 Turn {turn + 1}/{self.max_turns}")
             logger.info(f"{'='*60}")
+            
+            # --------- RVR 子步骤 ---------
+            # [Read] Plan 状态（由 Claude 在 Extended Thinking 中读取 plan_todo.get_plan()）
+            # [Reason] LLM Extended Thinking（深度推理，选择工具和参数）
+            # [Act] Tool Calls（执行选定的工具）
+            # [Observe] 工具结果（ResultCompactor 自动精简）
+            # [Validate] 在下一轮 thinking 中验证结果质量
+            # [Write] 更新状态（plan_todo.update_step()）
+            # [Repeat] 如果 stop_reason == "tool_use" 则继续循环
             
             # 调用 LLM（Extended Thinking 由 System Prompt 和 Claude 自主决定）
             if enable_stream:
@@ -532,6 +581,20 @@ class SimpleAgent:
                 # 流结束后，从 ctx 获取 LLM 响应
                 response = ctx.last_llm_response
                 if response:
+                    # 🆕 阶段 5 验证: 检查复杂任务是否在第一轮创建 Plan
+                    if turn == 0 and intent.needs_plan and response.tool_calls:
+                        first_tool_name = response.tool_calls[0].get('name', '')
+                        if first_tool_name == 'plan_todo':
+                            first_operation = response.tool_calls[0].get('input', {}).get('operation', '')
+                            if first_operation == 'create_plan':
+                                logger.info("✅ 阶段 5 验证通过: 复杂任务第一个工具调用是 plan_todo.create_plan()")
+                            else:
+                                logger.warning(f"⚠️ 阶段 5 异常: plan_todo 操作不是 create_plan，实际: {first_operation}")
+                        else:
+                            logger.warning(f"⚠️ 阶段 5 异常: 复杂任务未创建 Plan！第一个工具: {first_tool_name}")
+                            if self._tracer:
+                                self._tracer.add_warning(f"Plan Creation 跳过: 第一个工具是 {first_tool_name}")
+                    
                     # 处理工具调用
                     if response.stop_reason == "tool_use" and response.tool_calls:
                         # 🆕 区分客户端工具和服务端工具
@@ -612,18 +675,21 @@ class SimpleAgent:
             if ctx.is_completed():
                 break
         
-        # ===== 5. 完成追踪 =====
-        # 🆕 记录最终响应并完成追踪
+        # =====================================================================
+        # 阶段 7: Final Output & Tracing Report
+        # =====================================================================
+        # 7.1 生成最终响应 (在 RVR 循环中已完成)
+        # 7.2 发送完成事件
+        # 7.3 E2E Pipeline Report
+        
+        # 7.3 完成追踪并生成报告
         if self._tracer:
             final_response = ctx.stream.content if hasattr(ctx, 'stream') else ""
             self._tracer.set_final_response(final_response[:500] if final_response else "")
-            # 🐛 修复：不再覆盖 tool_calls，使用 log_tool_call 记录的值
-            # self._tracer.stats["tool_calls"] = len(self._plan_cache.get("tool_calls", []))
             self._tracer.finish()
+            logger.debug("✅ E2E Pipeline Report 已生成")
         
-        # ===== 6. 发送完成事件 =====
-        # 🆕 传递 usage 统计给 broadcaster（用于持久化）
-        # 转换字段名以匹配 broadcaster 期望的格式
+        # 7.2 发送完成事件并累积 usage 统计
         stats = self.usage_stats
         await self.broadcaster.accumulate_usage(session_id, {
             "input_tokens": stats.get("total_input_tokens", 0),

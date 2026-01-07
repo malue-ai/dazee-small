@@ -1,9 +1,8 @@
 task_type_mappings:
+  # 🆕 V4.4 优化：简单问答只需要搜索，不需要 task_planning
   information_query:
-  - web_search
-  - knowledge_base
-  - file_operations
-  - task_planning
+  - web_search              # 核心：搜索互联网
+  # 注：knowledge_base/file_operations/task_planning 对于简单问答是不必要的
   content_generation:
   - document_creation
   - ppt_generation
@@ -536,10 +535,8 @@ capabilities:
     module: tools.ppt_generator
     class: PPTGeneratorTool
   capabilities:
-  - ppt_generation
-  - content_generation
-  - web_search
-  - data_analysis
+  - ppt_generation       # 🆕 V4.4 修正：只声明能提供的能力
+  - content_generation   # web_search 是内部依赖，不是对外能力
   priority: 95
   cost:
     time: medium

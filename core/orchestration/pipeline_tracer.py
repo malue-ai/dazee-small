@@ -234,6 +234,9 @@ class E2EPipelineTracer:
             "tool_calls": 0
         }
         
+        # 🆕 警告列表（用于记录流程异常但不影响执行的问题）
+        self.warnings: List[str] = []
+        
         logger.info(f"\n{'='*70}")
         logger.info(f"🚀 E2E Pipeline Tracer 启动")
         logger.info(f"   Session: {session_id}")
@@ -331,6 +334,21 @@ class E2EPipelineTracer:
         self.stats["tool_calls"] += 1
         logger.debug(f"📊 [Tracer] 工具调用 #{self.stats['tool_calls']}: {tool_name}")
     
+    def add_warning(self, warning: str):
+        """
+        添加警告信息
+        
+        用于记录流程异常但不影响执行的问题，如:
+        - Plan Creation 被跳过
+        - 工具选择异常
+        - 超时但继续执行
+        
+        Args:
+            warning: 警告信息
+        """
+        self.warnings.append(warning)
+        logger.warning(f"⚠️ [Tracer] {warning}")
+    
     def set_final_response(self, response: str):
         """设置最终响应"""
         self.final_response = response
@@ -372,6 +390,12 @@ class E2EPipelineTracer:
         logger.info(f"   - 工具调用次数: {self.stats['tool_calls']}")
         logger.info(f"   - 总耗时: {self.stats['total_duration_ms']:.1f}ms")
         
+        # 🆕 显示警告信息
+        if self.warnings:
+            logger.warning(f"\n⚠️ 警告信息 ({len(self.warnings)} 条):")
+            for i, warning in enumerate(self.warnings, 1):
+                logger.warning(f"   {i}. {warning}")
+        
         if self.final_response:
             response_preview = self.final_response[:300] + "..." if len(self.final_response) > 300 else self.final_response
             logger.info(f"\n📄 最终响应预览:")
@@ -389,6 +413,7 @@ class E2EPipelineTracer:
             "stages": {name: stage.to_dict() for name, stage in self.stages.items()},
             "stage_order": self.stage_order,
             "stats": self.stats,
+            "warnings": self.warnings,  # 🆕 包含警告信息
             "start_time": datetime.fromtimestamp(self.start_time).isoformat() if self.start_time else None,
             "end_time": datetime.fromtimestamp(self.end_time).isoformat() if self.end_time else None
         }
