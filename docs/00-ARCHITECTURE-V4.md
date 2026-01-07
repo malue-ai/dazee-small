@@ -990,18 +990,26 @@ class ToolSelector:
 capabilities:
   # Level 1: 核心工具 - 始终加载
   - name: plan_todo
-    level: 1              # 核心工具
+    level: 1              # 核心工具（需显式配置）
     cache_stable: true    # 结果稳定，可缓存
     
-  # Level 2: 动态工具 - 按需加载
+  # Level 2: 动态工具 - 按需加载（默认）
   - name: exa_search
-    level: 2              # 动态工具
+    level: 2              # 动态工具（不配置时默认为 2）
     cache_stable: true    # 搜索结果相对稳定
     
-  - name: ppt_generator
-    level: 2
-    cache_stable: false   # 生成结果每次不同
+  # 新注册工具示例 - 不指定 level 时默认为 2
+  - name: my_new_tool
+    type: TOOL
+    # level: 不配置时自动为 2（动态工具）
+    # cache_stable: 不配置时自动为 false
 ```
+
+**字段默认值**：
+| 字段 | 默认值 | 说明 |
+|------|--------|------|
+| `level` | `2` | 动态工具，按需加载。核心工具需显式设置 `level: 1` |
+| `cache_stable` | `false` | 默认不缓存。稳定输出的工具可设置为 `true` |
 
 **分层选择流程**：
 ```
