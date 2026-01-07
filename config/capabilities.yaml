@@ -1,1211 +1,1253 @@
-# ============================================================
-# Agent V3 能力注册表配置
-# ============================================================
-#
-# 此文件定义了Agent可以使用的所有能力（Skills/Tools/MCP/Code）
-# 每个能力的优先级、约束条件、成本等信息都在这里统一管理
-#
-# 参考文档: docs/v3/02-CAPABILITY-ROUTING.md
-# ============================================================
-
-# ============================================================
-# 🆕 能力分类定义（唯一数据源）
-# ============================================================
-# 说明：
-# - 这是抽象的能力分类，LLM 在 Plan 阶段只需要知道这些分类
-# - Router 负责将分类映射到具体工具（见下方 capabilities 定义）
-# - 新增分类后，System Prompt 和 plan_todo Schema 会自动更新
-# ============================================================
-
-# ============================================================
-# 🆕 任务类型 → 能力映射（通用能力推断）
-# ============================================================
-# 说明：
-# - 作为能力推断的「初始值」，适用于所有任务（简单/复杂）
-# - 优先级：
-#   1. 有 Plan → 从 Plan 提取（更精确，Sonnet 分析后的结果）
-#   2. 无 Plan → 从这里推断（首轮任务的初始能力集）
-# - 好处：
-#   - 复杂任务首轮也能筛选工具，不再"传入所有工具"
-#   - 配置即时生效，无需修改代码
-# ============================================================
-
 task_type_mappings:
   information_query:
-    - web_search
-    - knowledge_base
-    - file_operations
-    - task_planning
-  
+  - web_search
+  - knowledge_base
+  - file_operations
+  - task_planning
   content_generation:
-    - document_creation
-    - ppt_generation
-    - file_operations
-    - code_execution
-    - task_planning
-  
+  - document_creation
+  - ppt_generation
+  - file_operations
+  - code_execution
+  - task_planning
   data_analysis:
-    - data_analysis
-    - file_operations
-    - code_sandbox      # 🆕 优先使用沙箱（支持第三方包）
-    - code_execution
-    - task_planning
-  
+  - data_analysis
+  - file_operations
+  - code_sandbox
+  - code_execution
+  - task_planning
   code_task:
-    - code_execution
-    - code_sandbox
-    - app_generation
-    - file_operations
-    - task_planning
-  
+  - code_execution
+  - code_sandbox
+  - app_generation
+  - file_operations
+  - task_planning
   app_creation:
-    - app_generation
-    - code_sandbox
-    - data_visualization
-    - task_planning
-  
+  - app_generation
+  - code_sandbox
+  - data_visualization
+  - task_planning
   other:
-    - file_operations
-    - code_execution
-    - task_planning
-
+  - file_operations
+  - code_execution
+  - task_planning
 capability_categories:
-  - id: knowledge_base
-    description: "个人知识库检索"
-    use_when: "需要查找用户之前上传的文档、笔记、资料"
-    examples: ["查找我的文档", "检索个人笔记", "搜索上传的资料"]
-  
-  - id: web_search
-    description: "搜索互联网信息"
-    use_when: "需要查找资料、新闻、数据、实时信息"
-    examples: ["搜索市场数据", "查找行业报告", "获取最新新闻"]
-    
-  - id: ppt_generation
-    description: "生成演示文稿"
-    use_when: "需要创建 PowerPoint/Slides"
-    examples: ["制作产品PPT", "生成培训材料", "创建汇报文档"]
-    
-  - id: document_creation
-    description: "生成文档"
-    use_when: "需要创建 Word/PDF 文档"
-    examples: ["撰写报告", "生成合同", "创建说明书"]
-    
-  - id: data_analysis
-    description: "数据处理和分析"
-    use_when: "需要处理 Excel、统计分析、数据可视化"
-    examples: ["分析销售数据", "生成统计报表", "数据清洗"]
-    
-  - id: file_operations
-    description: "文件读写操作"
-    use_when: "需要读取或保存文件"
-    examples: ["读取配置文件", "保存结果", "文件管理"]
-    
-  - id: code_execution
-    description: "执行代码和脚本"
-    use_when: "需要运行Python/Bash脚本、计算逻辑"
-    examples: ["数据转换", "自动化任务", "计算处理"]
-  
-  - id: code_sandbox
-    description: "在安全沙箱中执行Python代码（支持网络、第三方包、文件持久化）"
-    use_when: "需要网络访问、第三方Python包、文件持久化"
-    examples: ["爬取网页数据", "使用pandas分析CSV", "调用REST API"]
-  
-  - id: app_generation
-    description: "生成完整的Web应用（Streamlit/Gradio/Next.js）并返回预览URL"
-    use_when: "需要创建完整的交互式应用，用户可通过浏览器访问"
-    examples: ["创建数据可视化应用", "生成ML模型界面", "创建Web应用"]
-    
-  - id: api_calling
-    description: "调用外部API服务"
-    use_when: "需要与外部服务交互"
-    examples: ["调用渲染服务", "访问第三方API", "云服务集成"]
-    
-  - id: task_planning
-    description: "任务规划和进度管理"
-    use_when: "需要制定计划、追踪进度"
-    examples: ["创建任务计划", "更新步骤状态", "管理待办事项"]
-
-# ============================================================
-# 能力定义（工具/Skills/MCP）
-# ============================================================
-# 说明：
-# - capabilities 字段引用上面的 capability_categories ID
-# - Router 根据 Plan 的 capability 需求匹配这些工具
-#
-# 🆕 工具分层（Manus Context Engineering）：
-# - level: 1 = 核心工具（始终可用，高频）
-# - level: 2 = 按需工具（根据任务动态加载）
-# - level: 3 = 高级工具（复杂场景）
-# - cache_stable: true = 不会导致 LLM cache 失效
-#
-# 🆕 结果精简（Result Compaction）：
-# - compaction: 配置工具返回结果的精简策略
-#   字段说明：
-#   - strategy: 精简策略（必填）
-#     * none: 不精简（默认）
-#     * reference: 只返回引用（URL/文件路径）+ 提示
-#     * truncate: 截断到指定大小
-#     * summarize: 总结关键信息（未实现）
-#     * structured: 结构化摘要（提取关键字段）
-#     * custom: 自定义精简（如搜索结果特殊处理）
-#   - result_type: 结果类型（可选，默认 "mixed"）
-#     * file: 文件内容
-#     * url: 网页内容
-#     * text: 纯文本
-#     * json: JSON 数据
-#     * dataframe: 表格数据
-#     * search_results: 搜索结果
-#     * mixed: 混合类型
-#   - max_size: 精简后最大大小（字符数，默认 10000）
-#   - summary_chars: 摘要保留字符数（默认 200）
-#   - max_items: 列表最多保留条目数（默认 10）
-#
-# 示例：
-#   compaction:
-#     strategy: custom
-#     result_type: search_results
-#     max_size: 3000
-#     summary_chars: 200
-#     max_items: 5
-# ============================================================
-
+- id: knowledge_base
+  description: 个人知识库检索
+  use_when: 需要查找用户之前上传的文档、笔记、资料
+  examples:
+  - 查找我的文档
+  - 检索个人笔记
+  - 搜索上传的资料
+- id: web_search
+  description: 搜索互联网信息
+  use_when: 需要查找资料、新闻、数据、实时信息
+  examples:
+  - 搜索市场数据
+  - 查找行业报告
+  - 获取最新新闻
+- id: ppt_generation
+  description: 生成演示文稿
+  use_when: 需要创建 PowerPoint/Slides
+  examples:
+  - 制作产品PPT
+  - 生成培训材料
+  - 创建汇报文档
+- id: document_creation
+  description: 生成文档
+  use_when: 需要创建 Word/PDF 文档
+  examples:
+  - 撰写报告
+  - 生成合同
+  - 创建说明书
+- id: data_analysis
+  description: 数据处理和分析
+  use_when: 需要处理 Excel、统计分析、数据可视化
+  examples:
+  - 分析销售数据
+  - 生成统计报表
+  - 数据清洗
+- id: file_operations
+  description: 文件读写操作
+  use_when: 需要读取或保存文件
+  examples:
+  - 读取配置文件
+  - 保存结果
+  - 文件管理
+- id: code_execution
+  description: 执行代码和脚本
+  use_when: 需要运行Python/Bash脚本、计算逻辑
+  examples:
+  - 数据转换
+  - 自动化任务
+  - 计算处理
+- id: code_sandbox
+  description: 在安全沙箱中执行Python代码（支持网络、第三方包、文件持久化）
+  use_when: 需要网络访问、第三方Python包、文件持久化
+  examples:
+  - 爬取网页数据
+  - 使用pandas分析CSV
+  - 调用REST API
+- id: app_generation
+  description: 生成完整的Web应用（Streamlit/Gradio/Next.js）并返回预览URL
+  use_when: 需要创建完整的交互式应用，用户可通过浏览器访问
+  examples:
+  - 创建数据可视化应用
+  - 生成ML模型界面
+  - 创建Web应用
+- id: api_calling
+  description: 调用外部API服务
+  use_when: 需要与外部服务交互
+  examples:
+  - 调用渲染服务
+  - 访问第三方API
+  - 云服务集成
+- id: task_planning
+  description: 任务规划和进度管理
+  use_when: 需要制定计划、追踪进度
+  examples:
+  - 创建任务计划
+  - 更新步骤状态
+  - 管理待办事项
 capabilities:
-  # ==================== Pre-built Skills (Anthropic官方) ====================
-  
-  - name: pptx
-    type: SKILL
-    subtype: PREBUILT
-    provider: anthropic
-    capabilities:
-      - ppt_generation
-      - presentation_creation
-      - slide_editing
-    priority: 60
-    cost:
-      time: fast
-      money: free
-    constraints:
-      requires_api: false
-      min_quality: medium
-    metadata:
-      description: "Create presentations, edit slides, analyze presentation content"
-      preferred_for:
-        - quick PPT
-        - draft slides
-        - simple presentation
-      keywords:
-        - 快速
-        - 草稿
-        - 简单
-  
-  - name: xlsx
-    type: SKILL
-    subtype: PREBUILT
-    provider: anthropic
-    capabilities:
-      - data_analysis
-      - spreadsheet_creation
-      - chart_generation
-    priority: 70
-    cost:
-      time: fast
-      money: free
-    constraints:
-      requires_api: false
-      min_quality: medium
-    metadata:
-      description: "Create spreadsheets, analyze data, generate reports with charts"
-      preferred_for:
-        - Excel operations
-        - data analysis
-        - standard spreadsheets
-      keywords:
-        - Excel
-        - 数据分析
-        - 表格
-  
-  - name: docx
-    type: SKILL
-    subtype: PREBUILT
-    provider: anthropic
-    capabilities:
-      - document_creation
-      - text_editing
-      - formatting
-    priority: 70
-    cost:
-      time: fast
-      money: free
-    constraints:
-      requires_api: false
-      min_quality: medium
-    metadata:
-      description: "Create documents, edit content, format text"
-      preferred_for:
-        - Word documents
-        - standard documents
-        - text editing
-      keywords:
-        - Word
-        - 文档
-        - 编辑
-  
-  - name: pdf
-    type: SKILL
-    subtype: PREBUILT
-    provider: anthropic
-    capabilities:
-      - pdf_generation
-      - document_creation
-    priority: 75
-    cost:
-      time: fast
-      money: free
-    constraints:
-      requires_api: false
-      min_quality: high
-    metadata:
-      description: "Generate formatted PDF documents and reports"
-      preferred_for:
-        - PDF output
-        - final deliverables
-        - print documents
-      keywords:
-        - PDF
-        - 打印
-        - 交付
+- name: pptx
+  type: SKILL
+  subtype: PREBUILT
+  provider: anthropic
+  fallback_tool: slidespeak_render
+  capabilities:
+  - ppt_generation
+  - presentation_creation
+  - slide_editing
+  priority: 60
+  cost:
+    time: fast
+    money: free
+  constraints:
+    requires_api: false
+    min_quality: medium
+    requires_claude_code_execution: true
+  metadata:
+    description: Create presentations, edit slides, analyze presentation content
+    preferred_for:
+    - quick PPT
+    - draft slides
+    - simple presentation
+    keywords:
+    - 快速
+    - 草稿
+    - 简单
+- name: xlsx
+  type: SKILL
+  subtype: PREBUILT
+  provider: anthropic
+  fallback_tool: e2b_python_sandbox
+  capabilities:
+  - data_analysis
+  - spreadsheet_creation
+  - chart_generation
+  priority: 70
+  cost:
+    time: fast
+    money: free
+  constraints:
+    requires_api: false
+    min_quality: medium
+    requires_claude_code_execution: true
+  metadata:
+    description: Create spreadsheets, analyze data, generate reports with charts
+    preferred_for:
+    - Excel operations
+    - data analysis
+    - standard spreadsheets
+    keywords:
+    - Excel
+    - 数据分析
+    - 表格
+    fallback_note: 使用 E2B Sandbox + pandas/openpyxl 实现 Excel 操作
+- name: docx
+  type: SKILL
+  subtype: PREBUILT
+  provider: anthropic
+  fallback_tool: e2b_python_sandbox
+  capabilities:
+  - document_creation
+  - text_editing
+  - formatting
+  priority: 70
+  cost:
+    time: fast
+    money: free
+  constraints:
+    requires_api: false
+    min_quality: medium
+    requires_claude_code_execution: true
+  metadata:
+    description: Create documents, edit content, format text
+    preferred_for:
+    - Word documents
+    - standard documents
+    - text editing
+    keywords:
+    - Word
+    - 文档
+    - 编辑
+    fallback_note: 使用 E2B Sandbox + python-docx 实现 Word 文档操作
+- name: pdf
+  type: SKILL
+  subtype: PREBUILT
+  provider: anthropic
+  fallback_tool: e2b_python_sandbox
+  capabilities:
+  - pdf_generation
+  - document_creation
+  priority: 75
+  cost:
+    time: fast
+    money: free
+  constraints:
+    requires_api: false
+    min_quality: high
+    requires_claude_code_execution: true
+  metadata:
+    description: Generate formatted PDF documents and reports
+    preferred_for:
+    - PDF output
+    - final deliverables
+    - print documents
+    keywords:
+    - PDF
+    - 打印
+    - 交付
+    fallback_note: 使用 E2B Sandbox + reportlab/fpdf 实现 PDF 生成
+- name: knowledge_search
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  implementation:
+    module: tools.knowledge_search
+    class: KnowledgeSearchTool
+  input_schema:
+    type: object
+    properties:
+      query:
+        type: string
+        description: 检索查询文本，描述想要找到的信息
+      top_k:
+        type: integer
+        description: 返回结果数量（1-20，默认5）
+        default: 5
+        minimum: 1
+        maximum: 20
+      metadata_filter:
+        type: object
+        description: '元数据过滤条件（可选），如 {"tags": ["important"]}'
+        additionalProperties: true
+    required:
+    - query
+  capabilities:
+  - knowledge_base
+  - semantic_search
+  - personal_documents
+  - information_retrieval
+  priority: 95
+  cost:
+    time: fast
+    money: low
+  constraints:
+    requires_api: true
+    requires_network: true
+    api_name: ragie
+    user_isolation: true
+  metadata:
+    description: 从用户的个人知识库中检索相关信息（基于 Ragie）
+    preferred_for:
+    - 查找用户上传的文档
+    - 检索个人笔记和资料
+    - 搜索历史上传的内容
+    - 个人知识回忆
+    keywords:
+    - 知识库
+    - 个人文档
+    - 检索
+    - 搜索
+    - 我的文档
+    - 上传的资料
+    note: '特性：
 
-  # ==================== Custom Skills (用户定制) ====================
-  # 
-  # 说明：Custom Skills 现在只在 skills/library/ 目录中管理
-  # - Skills 是指导性文档（SKILL.md），通过 bash cat 读取
-  # - 不再在 capabilities.yaml 中定义为工具
-  # - Skills 通过 SkillsManager 自动发现和注入到 System Prompt
-  # 
-  # 示例 Skills：
-  # - skills/library/slidespeak-generator/SKILL.md (引用 slidespeak_render 工具)
-  # - skills/library/planning-task/SKILL.md (提供任务规划指导)
-  # 
-  # ⚠️ 注意：如果需要调用工具，在 SKILL.md 中通过 references_tools 字段引用
+      - 每个用户有独立的知识空间（Partition）
 
-  # ==================== Tools ====================
-  
-  # 🔍 知识库检索工具
-  - name: knowledge_search
-    type: TOOL
-    subtype: CUSTOM
-    provider: user
-    
-    # 工具实现配置
-    implementation:
-      module: "tools.knowledge_search"
-      class: "KnowledgeSearchTool"
-    
-    # 🔑 工具输入定义（必须！）
-    input_schema:
-      type: object
-      properties:
-        query:
-          type: string
-          description: "检索查询文本，描述你想要找到的信息"
-        top_k:
-          type: integer
-          description: "返回的结果数量，默认 5"
-          default: 5
-        metadata_filter:
-          type: object
-          description: "元数据过滤条件（可选），如 {\"tags\": [\"important\"], \"source\": \"upload\"}"
-      required:
-        - query
-    
-    capabilities:
-      - knowledge_base
-      - semantic_search
-      - personal_documents
-      - information_retrieval
-    priority: 95  # 高优先级 - 优先使用个人知识库
-    cost:
-      time: fast
-      money: low
-    constraints:
-      requires_api: true
-      requires_network: true
-      api_name: ragie
-      user_isolation: true  # 用户隔离
-    metadata:
-      description: "从用户的个人知识库中检索相关信息（基于 Ragie）"
-      preferred_for:
-        - 查找用户上传的文档
-        - 检索个人笔记和资料
-        - 搜索历史上传的内容
-        - 个人知识回忆
-      keywords:
-        - 知识库
-        - 个人文档
-        - 检索
-        - 搜索
-        - 我的文档
-        - 上传的资料
-      note: |
-        特性：
-        - 每个用户有独立的知识空间（Partition）
-        - 自动从 WorkingMemory 获取 user_id
-        - 支持语义搜索和元数据过滤
-        - 返回格式化的摘要供 LLM 使用
-        
-        使用场景：
-        - "帮我找一下之前上传的产品文档"
-        - "我记得有份关于XX的资料"
-        - "查一下我的笔记里有没有XX"
-    input_schema:
-      type: object
-      properties:
-        query:
-          type: string
-          description: "检索查询文本，描述想要找到的信息"
-        top_k:
-          type: integer
-          description: "返回结果数量（1-20，默认5）"
-          default: 5
-          minimum: 1
-          maximum: 20
-        metadata_filter:
-          type: object
-          description: "元数据过滤条件（可选），如 {\"tags\": [\"important\"]}"
-          additionalProperties: true
-      required:
-        - query
-  
-  # 🆕 通用 API 调用工具
-  - name: api_calling
-    type: TOOL
-    subtype: CUSTOM
-    provider: user
-    
-    # 工具实现配置
-    implementation:
-      module: "tools.api_calling"
-      class: "APICallingTool"
-    
-    capabilities:
-      - api_calling
-      - http_request
-      - async_polling
-      - file_download
-    priority: 75
-    cost:
-      time: variable
-      money: variable
-    constraints:
-      requires_api: false  # 本身不需要 API,但用于调用其他 API
-      requires_network: true
-    metadata:
-      description: "通用 HTTP API 调用工具,配合 Skills 文档使用,无需为每个 API 编写专门工具"
-      preferred_for:
-        - 调用外部 REST API
-        - 异步任务处理
-        - 文件上传下载
-        - 动态 API 调用
-      keywords:
-        - api
-        - http
-        - rest
-        - 调用
-        - 通用
-      note: |
-        使用方式:
-        1. LLM 从 Skill 文档中了解 API 使用方法
-        2. 使用本工具发起实际的 HTTP 请求
-        3. 无需为每个 API 单独编写工具
-        
-        示例场景:
-        - slidespeak-generator skill 提供 SlideSpeak API 文档
-        - LLM 使用 api_calling 调用 SlideSpeak API
-        - 不需要 slidespeak_render 工具
-    input_schema:
-      type: object
-      properties:
-        url:
-          type: string
-          description: "API 端点 URL (完整的 HTTP(S) 地址)"
-        method:
-          type: string
-          enum: ["GET", "POST", "PUT", "DELETE", "PATCH"]
-          description: "HTTP 方法 (默认 POST)"
-        headers:
-          type: object
-          description: "请求头字典"
-        body:
-          type: object
-          description: "请求体 (将自动转为 JSON)"
-        auth:
-          type: object
-          description: "认证配置"
-          properties:
-            type:
-              type: string
-              enum: ["api_key", "bearer", "basic"]
-            credentials:
-              type: object
-        poll_for_result:
-          type: boolean
-          description: "是否轮询异步任务结果"
-        poll_config:
-          type: object
-          description: "轮询配置"
-        download_url_field:
-          type: string
-          description: "响应中下载链接的字段名"
-        save_dir:
-          type: string
-          description: "文件保存目录"
-      required:
-        - url
-  
-  - name: file_read
-    type: TOOL
-    subtype: NATIVE
-    provider: system
-    capabilities:
-      - file_operations
-      - content_reading
-    priority: 90
-    cost:
-      time: fast
-      money: free
-    constraints:
-      requires_api: false
-    metadata:
-      description: "Read file contents from the file system"
-    input_schema:
-      type: object
-      properties:
-        path:
-          type: string
-          description: "The file path to read"
-      required:
-        - path
-  
-  - name: web_search
-    type: TOOL
-    subtype: NATIVE
-    provider: system
-    level: 2              # 🆕 按需加载
-    cache_stable: true    # 🆕 不会导致 cache 失效
-    
-    # 🆕 结果精简配置（Manus 原则）
-    compaction:
-      strategy: custom           # 搜索结果使用自定义精简
-      result_type: search_results
-      max_size: 3000            # 精简后最大 3KB
-      summary_chars: 200        # 每个结果保留 200 字符摘要
-      max_items: 10             # 最多 10 个结果
-    
-    capabilities:
-      - information_retrieval
-      - web_search
-    priority: 85
-    cost:
-      time: medium
-      money: low
-    constraints:
-      requires_api: true
-      requires_network: true
-    metadata:
-      description: "Search the web for information"
-    input_schema:
-      type: object
-      properties:
-        query:
-          type: string
-          description: "The search query string"
-      required:
-        - query
-  
-  - name: exa_search
-    type: TOOL
-    subtype: CUSTOM
-    provider: user
-    level: 2              # 🆕 按需加载
-    cache_stable: true    # 🆕 不会导致 cache 失效
-    
-    # 🆕 结果精简配置
-    compaction:
-      strategy: custom    # 使用自定义精简（URL + 摘要）
-      max_size: 3000      # 精简后最大 3KB
-      summary_chars: 200  # 每个结果保留 200 字符摘要
-    
-    # 🎯 工具实现配置 - 支持自动加载
-    implementation:
-      module: "tools.exa_search"
-      class: "ExaSearchTool"
-    
-    capabilities:
-      - information_retrieval
-      - web_search
-      - semantic_search
-      - research
-    priority: 90  # 高优先级，作为增强的搜索工具
-    cost:
-      time: fast
-      money: low
-    constraints:
-      requires_api: true
-      requires_network: true
-      api_name: exa
-    metadata:
-      description: "High-quality semantic search using Exa API with content extraction"
-      keywords:
-        - search
-        - research
-        - semantic
-        - web
+      - 自动从 WorkingMemory 获取 user_id
+
+      - 支持语义搜索和元数据过滤
+
+      - 返回格式化的摘要供 LLM 使用
+
+
+      使用场景：
+
+      - "帮我找一下之前上传的产品文档"
+
+      - "我记得有份关于XX的资料"
+
+      - "查一下我的笔记里有没有XX"
+
+      '
+- name: api_calling
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  implementation:
+    module: tools.api_calling
+    class: APICallingTool
+  capabilities:
+  - api_calling
+  - http_request
+  - async_polling
+  - file_download
+  priority: 75
+  cost:
+    time: variable
+    money: variable
+  constraints:
+    requires_api: false
+    requires_network: true
+  metadata:
+    description: 通用 HTTP API 调用工具,配合 Skills 文档使用,无需为每个 API 编写专门工具
+    preferred_for:
+    - 调用外部 REST API
+    - 异步任务处理
+    - 文件上传下载
+    - 动态 API 调用
+    keywords:
+    - api
+    - http
+    - rest
+    - 调用
+    - 通用
+    note: '使用方式:
+
+      1. LLM 从 Skill 文档中了解 API 使用方法
+
+      2. 使用本工具发起实际的 HTTP 请求
+
+      3. 无需为每个 API 单独编写工具
+
+
+      示例场景:
+
+      - slidespeak-generator skill 提供 SlideSpeak API 文档
+
+      - LLM 使用 api_calling 调用 SlideSpeak API
+
+      - 不需要 slidespeak_render 工具
+
+      '
+  input_schema:
+    type: object
+    properties:
+      url:
+        type: string
+        description: API 端点 URL (完整的 HTTP(S) 地址)
+      method:
+        type: string
+        enum:
+        - GET
+        - POST
+        - PUT
+        - DELETE
+        - PATCH
+        description: HTTP 方法 (默认 POST)
+      headers:
+        type: object
+        description: 请求头字典
+      body:
+        type: object
+        description: 请求体 (将自动转为 JSON)
+      auth:
+        type: object
+        description: 认证配置
+        properties:
+          type:
+            type: string
+            enum:
+            - api_key
+            - bearer
+            - basic
+          credentials:
+            type: object
+      poll_for_result:
+        type: boolean
+        description: 是否轮询异步任务结果
+      poll_config:
+        type: object
+        description: 轮询配置
+      download_url_field:
+        type: string
+        description: 响应中下载链接的字段名
+      save_dir:
+        type: string
+        description: 文件保存目录
+    required:
+    - url
+- name: file_read
+  type: TOOL
+  subtype: NATIVE
+  provider: system
+  capabilities:
+  - file_operations
+  - content_reading
+  priority: 90
+  cost:
+    time: fast
+    money: free
+  constraints:
+    requires_api: false
+  metadata:
+    description: Read file contents from the file system
+  input_schema:
+    type: object
+    properties:
+      path:
+        type: string
+        description: The file path to read
+    required:
+    - path
+- name: web_search
+  type: TOOL
+  subtype: NATIVE
+  provider: system
+  level: 2
+  cache_stable: true
+  compaction:
+    strategy: custom
+    result_type: search_results
+    max_size: 3000
+    summary_chars: 200
+    max_items: 10
+  capabilities:
+  - information_retrieval
+  - web_search
+  priority: 85
+  cost:
+    time: medium
+    money: low
+  constraints:
+    requires_api: true
+    requires_network: true
+  metadata:
+    description: Search the web for information
+  input_schema:
+    type: object
+    properties:
+      query:
+        type: string
+        description: The search query string
+    required:
+    - query
+- name: exa_search
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  level: 2
+  cache_stable: true
+  compaction:
+    strategy: custom
+    max_size: 3000
+    summary_chars: 200
+  implementation:
+    module: tools.exa_search
+    class: ExaSearchTool
+  capabilities:
+  - information_retrieval
+  - web_search
+  - semantic_search
+  - research
+  priority: 90
+  cost:
+    time: fast
+    money: low
+  constraints:
+    requires_api: true
+    requires_network: true
+    api_name: exa
+  metadata:
+    description: High-quality semantic search using Exa API with content extraction
+    keywords:
+    - search
+    - research
+    - semantic
+    - web
+    - papers
+    - news
+    - articles
+    note: 比web_search更强大，支持语义理解和内容提取
+  input_schema:
+    type: object
+    properties:
+      query:
+        type: string
+        description: 搜索查询（支持自然语言）
+      num_results:
+        type: integer
+        description: 返回结果数量（1-10，默认10）
+        default: 10
+      category:
+        type: string
+        description: 内容分类过滤
+        enum:
         - papers
         - news
-        - articles
-      note: "比web_search更强大，支持语义理解和内容提取"
-    # Tool的input_schema定义（用于Claude API）
-    input_schema:
-      type: object
-      properties:
-        query:
+        - github
+        - company
+        - personal_site
+        - pdf
+        - tweet
+      include_text:
+        type: boolean
+        description: 是否包含网页正文内容
+        default: true
+      start_published_date:
+        type: string
+        description: 开始发布日期（ISO格式，如'2024-01-01'）
+    required:
+    - query
+- name: ppt_generator
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  level: 2
+  cache_stable: false
+  implementation:
+    module: tools.ppt_generator
+    class: PPTGeneratorTool
+  capabilities:
+  - ppt_generation
+  - content_generation
+  - web_search
+  - data_analysis
+  priority: 95
+  cost:
+    time: medium
+    money: low
+  constraints:
+    requires_api: true
+    requires_network: true
+    api_name: slidespeak
+  metadata:
+    description: '高质量闭环PPT生成工具 - 整合素材搜索、内容规划、PPT渲染的完整流程。
+
+      🎯 核心能力：
+      - 自动搜索相关素材（可选）
+      - 智能内容规划
+      - 专业PPT渲染（SlideSpeak API）
+      - 多重质量检查
+
+      📋 使用场景：
+      - 基于主题快速生成专业PPT
+      - 需要搜索最新资料的报告
+      - 高质量演示文稿
+
+      ⚡ 完整流程：
+      1. 需求分析 → 2. 素材搜集 → 3. 内容规划 → 4. PPT渲染 → 5. 质量检查 → 6. 交付
+      '
+    preferred_for:
+    - 高质量PPT生成
+    - 需要搜索素材的报告
+    - 专业演示文稿
+    - 闭环PPT任务
+    keywords:
+    - ppt
+    - 演示
+    - 高质量
+    - 闭环
+    - 报告
+    - presentation
+  input_schema:
+    type: object
+    properties:
+      topic:
+        type: string
+        description: PPT主题/标题（必需）
+      description:
+        type: string
+        description: 详细需求描述，包括受众、目的、重点内容等
+      search_queries:
+        type: array
+        items:
           type: string
-          description: "搜索查询（支持自然语言）"
-        num_results:
-          type: integer
-          description: "返回结果数量（1-10，默认10）"
-          default: 10
-        category:
-          type: string
-          description: "内容分类过滤"
-          enum: ["papers", "news", "github", "company", "personal_site", "pdf", "tweet"]
-        include_text:
-          type: boolean
-          description: "是否包含网页正文内容"
-          default: true
-        start_published_date:
-          type: string
-          description: "开始发布日期（ISO格式，如'2024-01-01'）"
-      required:
-        - query
-  
-  # 🧪 实验：禁用具体的 SlideSpeak 工具，改用动态 api_calling + Skills
-  - name: slidespeak_render
-    type: TOOL
-    subtype: CUSTOM
-    provider: user
-    
-    # 🎯 工具实现配置 - 支持自动加载
-    implementation:
-      module: "tools.slidespeak"
-      class: "SlideSpeakTool"
-    
-    capabilities:
-      - ppt_rendering
-      - ppt_generation
-      - api_calling
-    priority: 40
-    cost:
-      time: medium
-      money: low
-    constraints:
-      requires_api: true
-      api_name: slidespeak
-    metadata:
-      description: "SlideSpeak API rendering tool for professional PPT generation"
-      note: "🎨 Generates high-quality presentations with professional layouts and designs"
-      used_by: "slidespeak-generator"
-      keywords:
-        - ppt
-        - presentation
-        - slidespeak
+        description: 搜索查询列表（可选）。提供后会自动搜索素材
+      style:
+        type: string
+        enum:
         - professional
-        - 专业
-    # 🆕 完整的 input_schema（根据 SlideSpeak API 官方文档）
-    # 参考：https://docs.slidespeak.co/basics/api-references/slide-by-slide/
-    input_schema:
-      type: object
-      properties:
-        config:
+        - academic
+        - creative
+        - minimal
+        - corporate
+        description: PPT风格。默认：professional
+        default: professional
+      slide_count:
+        type: integer
+        description: 期望的幻灯片数量（不含封面和结尾）。默认：8-12
+        minimum: 5
+        maximum: 30
+      language:
+        type: string
+        enum:
+        - CHINESE
+        - ENGLISH
+        - ORIGINAL
+        description: PPT语言。默认：根据内容自动判断
+        default: ORIGINAL
+      time_context:
+        type: string
+        description: 时间上下文，如'2024年'、'最近一年'。影响搜索时效性
+      audience:
+        type: string
+        description: 目标受众，如'技术团队'、'管理层'、'投资人'
+      custom_outline:
+        type: array
+        items:
+          type: string
+        description: 自定义大纲（可选）。提供后将按此结构生成
+      include_charts:
+        type: boolean
+        description: 是否包含图表。默认：true
+        default: true
+      include_images:
+        type: boolean
+        description: 是否包含图片。默认：true
+        default: true
+      materials:
+        type: array
+        description: 预提供的素材（可选）。如已有搜索结果，可直接传入
+        items:
           type: object
-          description: "完整的SlideSpeak配置。参考：https://docs.slidespeak.co/basics/api-references/slide-by-slide/"
           properties:
-            template:
+            title:
               type: string
-              description: "模板名称，如'DEFAULT'。查看可用模板：GET /api/v1/templates"
-            language:
+            content:
               type: string
-              description: "语言代码，如'CHINESE'、'ENGLISH'。默认：'ORIGINAL'（从内容推断）"
-            fetch_images:
-              type: boolean
-              description: "是否包含库存图片。默认：true"
-            verbosity:
+            source:
               type: string
-              enum: ["concise", "standard", "text-heavy"]
-              description: "文本详细程度。默认：'standard'"
-            include_cover:
-              type: boolean
-              description: "是否包含封面。默认：true"
-            include_table_of_contents:
-              type: boolean
-              description: "是否包含目录。默认：true"
-            add_speaker_notes:
-              type: boolean
-              description: "是否添加演讲者备注。默认：false"
-            slides:
-              type: array
-              description: "幻灯片配置数组，每个slide必须包含layout、title、item_amount和content"
-              items:
-                type: object
-                properties:
-                  title:
-                    type: string
-                    description: "幻灯片标题（简洁，8-15字）"
-                  layout:
-                    type: string
-                    enum: ["ITEMS", "BIG_NUMBER", "COMPARISON", "TIMELINE", "TABLE", "CHART", "SWOT", "PESTEL", "THANKS"]
-                    description: "布局类型（必选）。根据内容类型选择最合适的布局"
-                  item_amount:
-                    type: integer
-                    description: "项目数量"
-                  content:
-                    type: string
-                    description: "幻灯片内容"
-                  images:
-                    type: array
-                    description: "可选：图片配置（目前仅支持单图布局，只使用第一张图片）"
-                    items:
-                      type: object
-                      properties:
-                        type:
-                          type: string
-                          enum: ["stock", "url", "ai"]
-                          description: "图片来源：stock=库存搜索（推荐）, url=直接链接, ai=AI生成"
-                        data:
-                          type: string
-                          description: "stock=英文搜索关键词 | url=图片URL | ai=生成提示"
-                      required: ["type", "data"]
-                  chart:
-                    type: object
-                    description: "可选：图表配置（仅CHART布局需要）。参考：https://docs.slidespeak.co/basics/layouts/charts/"
-                  table:
-                    type: array
-                    description: "可选：表格数据（仅TABLE布局需要）。二维字符串数组，第一行为表头"
-                    items:
-                      type: array
-                      items:
-                        type: string
-                required:
-                  - title
-                  - layout
-                  - item_amount
-                  - content
-          required:
-            - template
-            - slides
-        save_dir:
-          type: string
-          description: "保存PPT文件的目录路径（可选，默认./workspace/outputs/ppt）"
-      required:
-        - config
-
-
-  # ==================== MCP Servers ====================
-  # (示例配置，根据实际部署的MCP服务器添加)
-  
-  # - name: office365:create_presentation
-  #   type: MCP
-  #   subtype: EXTERNAL
-  #   provider: microsoft
-  #   capabilities:
-  #     - ppt_generation
-  #     - office_integration
-  #     - cloud_storage
-  #   priority: 70
-  #   cost:
-  #     time: medium
-  #     money: low
-  #   constraints:
-  #     requires_api: true
-  #     requires_auth: true
-  #     api_name: office365
-  #   metadata:
-  #     description: "Create presentations in Office 365"
-  #     preferred_for:
-  #       - Office compatibility
-  #       - cloud storage
-  #       - team collaboration
-  #     server_url: "https://office-mcp-server.example.com"
-
-  # ==================== HITL Tools (Human-in-the-Loop) ====================
-  
-  - name: request_human_confirmation
-    type: TOOL
-    subtype: CUSTOM
-    provider: user
-    
-    # 工具实现配置
-    implementation:
-      module: "tools.request_human_confirmation"
-      class: "RequestHumanConfirmationTool"
-    
-    capabilities:
-      - human_interaction
-      - confirmation
-      - hitl
-      - user_approval
-    priority: 100  # 最高优先级
-    cost:
-      time: variable  # 取决于用户响应速度
-      money: free
-    constraints:
-      requires_api: false
-      requires_user_interaction: true
-    metadata:
-      description: |
-        请求用户确认操作。适用于以下场景：
-        - 删除文件或数据等危险操作
-        - 修改重要配置
-        - 执行不可逆操作
-        - 需要用户选择方案或参数
-        - 任何需要人工干预的决策
-        
-        调用此工具后，会暂停执行并等待用户响应。
-        用户可以确认、取消或选择其他选项。
-      preferred_for:
-        - 危险操作确认
-        - 重要决策审批
-        - 方案选择
-        - 参数确认
-      keywords:
-        - 确认
-        - 授权
-        - 人工干预
-        - HITL
-        - 审批
-        - 选择
-      note: |
-        使用场景：
-        - 删除文件/数据
-        - 修改重要配置
-        - 执行不可逆操作
-        - 选择方案/参数
-        
-        工作机制：
-        1. LLM 调用此工具 → 发送 SSE 事件到前端
-        2. 前端显示确认对话框
-        3. 用户通过 HTTP POST 提交响应
-        4. 工具获取响应后返回给 LLM
-    input_schema:
-      type: object
-      properties:
-        question:
-          type: string
-          description: "要询问用户的问题，应该清晰描述操作内容和影响"
-        options:
-          type: array
-          items:
+            date:
+              type: string
+    required:
+    - topic
+- name: slidespeak_render
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  implementation:
+    module: tools.slidespeak
+    class: SlideSpeakTool
+  capabilities:
+  - ppt_rendering
+  - ppt_generation
+  - api_calling
+  priority: 40
+  cost:
+    time: medium
+    money: low
+  constraints:
+    requires_api: true
+    api_name: slidespeak
+  metadata:
+    description: SlideSpeak API rendering tool for professional PPT generation
+    note: 🎨 Generates high-quality presentations with professional layouts and designs
+    used_by: slidespeak-generator
+    keywords:
+    - ppt
+    - presentation
+    - slidespeak
+    - professional
+    - 专业
+  input_schema:
+    type: object
+    properties:
+      config:
+        type: object
+        description: 完整的SlideSpeak配置。参考：https://docs.slidespeak.co/basics/api-references/slide-by-slide/
+        properties:
+          template:
             type: string
-          description: "可选项列表，默认 ['confirm', 'cancel']。可以自定义选项如 ['商务风格', '学术风格', '创意风格']"
-          default: ["confirm", "cancel"]
-        timeout:
-          type: integer
-          description: "超时时间（秒），默认 60 秒"
-          default: 60
-        confirmation_type:
-          type: string
-          enum: ["yes_no", "single_choice", "multiple_choice", "text_input"]
-          description: "确认类型，默认 yes_no"
-          default: "yes_no"
-        metadata:
-          type: object
-          description: "额外信息，用于前端展示（如操作详情、影响范围等）"
-      required:
-        - question
+            description: 模板名称，如'DEFAULT'。查看可用模板：GET /api/v1/templates
+          language:
+            type: string
+            description: 语言代码，如'CHINESE'、'ENGLISH'。默认：'ORIGINAL'（从内容推断）
+          fetch_images:
+            type: boolean
+            description: 是否包含库存图片。默认：true
+          verbosity:
+            type: string
+            enum:
+            - concise
+            - standard
+            - text-heavy
+            description: 文本详细程度。默认：'standard'
+          include_cover:
+            type: boolean
+            description: 是否包含封面。默认：true
+          include_table_of_contents:
+            type: boolean
+            description: 是否包含目录。默认：true
+          add_speaker_notes:
+            type: boolean
+            description: 是否添加演讲者备注。默认：false
+          slides:
+            type: array
+            description: 幻灯片配置数组，每个slide必须包含layout、title、item_amount和content
+            items:
+              type: object
+              properties:
+                title:
+                  type: string
+                  description: 幻灯片标题（简洁，8-15字）
+                layout:
+                  type: string
+                  enum:
+                  - ITEMS
+                  - BIG_NUMBER
+                  - COMPARISON
+                  - TIMELINE
+                  - TABLE
+                  - CHART
+                  - SWOT
+                  - PESTEL
+                  - THANKS
+                  description: 布局类型（必选）。根据内容类型选择最合适的布局
+                item_amount:
+                  type: integer
+                  description: 项目数量
+                content:
+                  type: string
+                  description: 幻灯片内容
+                images:
+                  type: array
+                  description: 可选：图片配置（目前仅支持单图布局，只使用第一张图片）
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                        enum:
+                        - stock
+                        - url
+                        - ai
+                        description: 图片来源：stock=库存搜索（推荐）, url=直接链接, ai=AI生成
+                      data:
+                        type: string
+                        description: stock=英文搜索关键词 | url=图片URL | ai=生成提示
+                    required:
+                    - type
+                    - data
+                chart:
+                  type: object
+                  description: 可选：图表配置（仅CHART布局需要）。参考：https://docs.slidespeak.co/basics/layouts/charts/
+                table:
+                  type: array
+                  description: 可选：表格数据（仅TABLE布局需要）。二维字符串数组，第一行为表头
+                  items:
+                    type: array
+                    items:
+                      type: string
+              required:
+              - title
+              - layout
+              - item_amount
+              - content
+        required:
+        - template
+        - slides
+      save_dir:
+        type: string
+        description: 保存PPT文件的目录路径（可选，默认./workspace/outputs/ppt）
+    required:
+    - config
+- name: request_human_confirmation
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  implementation:
+    module: tools.request_human_confirmation
+    class: RequestHumanConfirmationTool
+  capabilities:
+  - human_interaction
+  - confirmation
+  - hitl
+  - user_approval
+  priority: 100
+  cost:
+    time: variable
+    money: free
+  constraints:
+    requires_api: false
+    requires_user_interaction: true
+  metadata:
+    description: '请求用户确认操作。适用于以下场景：
 
-  # ==================== Session Tools (会话级工具) ====================
-  #
-  # 架构关系（参考图示）：
-  #   User Query → Agent → (载入/写入) → Short Memory → (CRUD) → plan_todo Tool
-  #                          ↓
-  #                    LLM 生成 plan.json 和 todo.md
-  #                          ↓
-  #                    调用工具后写入 Memory
-  #
-  # 核心原则：写入 Short Memory 避免多轮 input/output 的 LLM tokens 消耗
-  
-  - name: plan_todo
-    type: TOOL
-    subtype: SESSION
-    provider: system
-    level: 1              # 🆕 核心工具（始终可用）
-    cache_stable: true    # 🆕 不会导致 cache 失效
-    
-    # 工具实现配置
-    implementation:
-      module: "tools.plan_todo_tool"
-      class: "PlanTodoTool"
-    
-    capabilities:
-      - task_planning
-      - progress_tracking
-      - session_memory
-      - plan_crud          # Plan CRUD 操作
-      - todo_crud          # Todo CRUD 操作
-      - replan             # 🆕 V4.2.1 重新规划能力
-      - adaptive_planning  # 🆕 自适应规划
-    priority: 95  # 高优先级，让LLM优先考虑使用
-    cost:
-      time: instant
-      money: free
-    constraints:
-      requires_api: false
-      session_scoped: true  # 会话级别，不持久化
-    metadata:
-      description: |
-        任务规划工具（智能版本）- 内部调用 Claude + Extended Thinking
-        
-        核心能力：
-        - create_plan: 智能生成任务计划（调用 Claude + Extended Thinking）
-        - update_step: 更新步骤状态
-        - add_step: 动态添加步骤
-        - replan: 🆕 重新生成计划（保留已完成步骤或全量重规划）
-        - get_plan: 获取当前计划状态
-        
-        重新规划（replan）触发场景：
-        - 多个步骤连续失败
-        - 发现原计划遗漏关键信息
-        - 用户需求发生变化
-        - 执行过程中发现更优方案
-        
-        策略选项：
-        - incremental: 保留已完成步骤，只重新生成剩余步骤（默认）
-        - full: 全量重新生成计划
-      keywords:
-        - plan
-        - todo
-        - 计划
-        - 任务
-        - 进度
+      - 删除文件或数据等危险操作
+
+      - 修改重要配置
+
+      - 执行不可逆操作
+
+      - 需要用户选择方案或参数
+
+      - 任何需要人工干预的决策
+
+
+      调用此工具后，会暂停执行并等待用户响应。
+
+      用户可以确认、取消或选择其他选项。
+
+      '
+    preferred_for:
+    - 危险操作确认
+    - 重要决策审批
+    - 方案选择
+    - 参数确认
+    keywords:
+    - 确认
+    - 授权
+    - 人工干预
+    - HITL
+    - 审批
+    - 选择
+    note: '使用场景：
+
+      - 删除文件/数据
+
+      - 修改重要配置
+
+      - 执行不可逆操作
+
+      - 选择方案/参数
+
+
+      工作机制：
+
+      1. LLM 调用此工具 → 发送 SSE 事件到前端
+
+      2. 前端显示确认对话框
+
+      3. 用户通过 HTTP POST 提交响应
+
+      4. 工具获取响应后返回给 LLM
+
+      '
+  input_schema:
+    type: object
+    properties:
+      question:
+        type: string
+        description: 要询问用户的问题，应该清晰描述操作内容和影响
+      options:
+        type: array
+        items:
+          type: string
+        description: 可选项列表，默认 ['confirm', 'cancel']。可以自定义选项如 ['商务风格', '学术风格', '创意风格']
+        default:
+        - confirm
+        - cancel
+      timeout:
+        type: integer
+        description: 超时时间（秒），默认 60 秒
+        default: 60
+      confirmation_type:
+        type: string
+        enum:
+        - yes_no
+        - single_choice
+        - multiple_choice
+        - text_input
+        description: 确认类型，默认 yes_no
+        default: yes_no
+      metadata:
+        type: object
+        description: 额外信息，用于前端展示（如操作详情、影响范围等）
+    required:
+    - question
+- name: plan_todo
+  type: TOOL
+  subtype: SESSION
+  provider: system
+  level: 1
+  cache_stable: true
+  implementation:
+    module: tools.plan_todo_tool
+    class: PlanTodoTool
+  capabilities:
+  - task_planning
+  - progress_tracking
+  - session_memory
+  - plan_crud
+  - todo_crud
+  - replan
+  - adaptive_planning
+  priority: 95
+  cost:
+    time: instant
+    money: free
+  constraints:
+    requires_api: false
+    session_scoped: true
+  metadata:
+    description: '任务规划工具（智能版本）- 内部调用 Claude + Extended Thinking
+
+
+      核心能力：
+
+      - create_plan: 智能生成任务计划（调用 Claude + Extended Thinking）
+
+      - update_step: 更新步骤状态
+
+      - add_step: 动态添加步骤
+
+      - replan: 🆕 重新生成计划（保留已完成步骤或全量重规划）
+
+      - get_plan: 获取当前计划状态
+
+
+      重新规划（replan）触发场景：
+
+      - 多个步骤连续失败
+
+      - 发现原计划遗漏关键信息
+
+      - 用户需求发生变化
+
+      - 执行过程中发现更优方案
+
+
+      策略选项：
+
+      - incremental: 保留已完成步骤，只重新生成剩余步骤（默认）
+
+      - full: 全量重新生成计划
+
+      '
+    keywords:
+    - plan
+    - todo
+    - 计划
+    - 任务
+    - 进度
+    - replan
+    - 重新规划
+    - 自适应
+    note: 'V4.2.1 新增 replan 能力：
+
+      - Claude 可在 RVR 循环中自主决定是否调用 replan
+
+      - 支持 incremental（增量）和 full（全量）两种重规划策略
+
+      - 最大重规划次数限制：3 次
+
+      '
+  input_schema:
+    type: object
+    properties:
+      operation:
+        type: string
+        description: 操作类型
+        enum:
+        - create_plan
+        - update_step
+        - get_plan
+        - add_step
         - replan
-        - 重新规划
-        - 自适应
-      note: |
-        V4.2.1 新增 replan 能力：
-        - Claude 可在 RVR 循环中自主决定是否调用 replan
-        - 支持 incremental（增量）和 full（全量）两种重规划策略
-        - 最大重规划次数限制：3 次
-    input_schema:
-      type: object
-      properties:
-        operation:
-          type: string
-          description: "操作类型"
-          enum: ["create_plan", "update_step", "get_plan", "add_step", "replan", "clear"]
-        data:
-          type: object
-          description: "操作数据"
-          properties:
-            user_query:
-              type: string
-              description: "用户原始需求（create_plan 时必需）"
-            goal:
-              type: string
-              description: "任务目标（create_plan 可选，会自动生成）"
-            steps:
-              type: array
-              description: "步骤列表（create_plan 可选，会自动生成）"
-            step_index:
-              type: integer
-              description: "步骤索引（update_step 时必需）"
-            status:
-              type: string
-              description: "步骤状态（update_step 时必需）"
-              enum: ["pending", "in_progress", "completed", "failed"]
-            result:
-              type: string
-              description: "步骤结果（update_step 时可选）"
-            reason:
-              type: string
-              description: "重新规划原因（replan 时必需）"
-            strategy:
-              type: string
-              description: "重规划策略（replan 时可选）"
-              enum: ["full", "incremental"]
-              default: "incremental"
-      required:
-        - operation
+        - clear
+      data:
+        type: object
+        description: 操作数据
+        properties:
+          user_query:
+            type: string
+            description: 用户原始需求（create_plan 时必需）
+          goal:
+            type: string
+            description: 任务目标（create_plan 可选，会自动生成）
+          steps:
+            type: array
+            description: 步骤列表（create_plan 可选，会自动生成）
+          step_index:
+            type: integer
+            description: 步骤索引（update_step 时必需）
+          status:
+            type: string
+            description: 步骤状态（update_step 时必需）
+            enum:
+            - pending
+            - in_progress
+            - completed
+            - failed
+          result:
+            type: string
+            description: 步骤结果（update_step 时可选）
+          reason:
+            type: string
+            description: 重新规划原因（replan 时必需）
+          strategy:
+            type: string
+            description: 重规划策略（replan 时可选）
+            enum:
+            - full
+            - incremental
+            default: incremental
+    required:
+    - operation
+- name: code_execution
+  type: CODE
+  subtype: DYNAMIC
+  provider: anthropic
+  capabilities:
+  - dynamic_execution
+  - custom_logic
+  - api_exploration
+  priority: 40
+  cost:
+    time: variable
+    money: free
+  constraints:
+    requires_api: false
+  metadata:
+    description: Execute Python code dynamically via code_execution
+    preferred_for:
+    - exploration
+    - custom logic
+    - API investigation
+    - one-off tasks
+    keywords:
+    - 探索
+    - 自定义
+    - 动态
+- name: e2b_vibe_coding
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  implementation:
+    module: tools.e2b_vibe_coding
+    class: E2BVibeCoding
+  capabilities:
+  - app_generation
+  - code_execution
+  - data_visualization
+  priority: 95
+  cost:
+    time: fast
+    money: low
+  constraints:
+    requires_api: true
+    requires_network: true
+    api_name: e2b
+    session_scoped: true
+    supports_preview: true
+  metadata:
+    description: '生成完整的 Web 应用（Streamlit/Gradio）并返回实时预览 URL。
 
-  # ==================== Code as Tools ====================
-  
-  - name: code_execution
-    type: CODE
-    subtype: DYNAMIC
-    provider: anthropic
-    capabilities:
-      - dynamic_execution
-      - custom_logic
-      - api_exploration
-    priority: 40
-    cost:
-      time: variable
-      money: free
-    constraints:
-      requires_api: false
-    metadata:
-      description: "Execute Python code dynamically via code_execution"
-      preferred_for:
-        - exploration
-        - custom logic
-        - API investigation
-        - one-off tasks
-      keywords:
-        - 探索
-        - 自定义
-        - 动态
-  
-  # ==================== E2B Sandbox & Vibe Coding ====================
-  
-  - name: e2b_vibe_coding
-    type: TOOL
-    subtype: CUSTOM
-    provider: user
-    
-    implementation:
-      module: "tools.e2b_vibe_coding"
-      class: "E2BVibeCoding"
-    
-    capabilities:
-      - app_generation
-      - code_execution
-      - data_visualization
-    
-    priority: 95
-    
-    cost:
-      time: fast
-      money: low
-    
-    constraints:
-      requires_api: true
-      requires_network: true
-      api_name: e2b
-      session_scoped: true
-      supports_preview: true
-    
-    metadata:
-      description: |
-        生成完整的 Web 应用（Streamlit/Gradio）并返回实时预览 URL。
-        
-        支持的技术栈：
-        • Streamlit - 数据可视化应用
-        • Gradio - ML 模型界面
-        • Next.js - 全栈 Web 应用
-        • Vue.js - 前端应用
-      
-      preferred_for:
-        - 数据可视化应用
-        - 交互式数据分析工具
-        - ML 模型演示界面
-        - 需要实时预览的应用
-      
-      keywords:
-        - vibe coding
+
+      支持的技术栈：
+
+      • Streamlit - 数据可视化应用
+
+      • Gradio - ML 模型界面
+
+      • Next.js - 全栈 Web 应用
+
+      • Vue.js - 前端应用
+
+      '
+    preferred_for:
+    - 数据可视化应用
+    - 交互式数据分析工具
+    - ML 模型演示界面
+    - 需要实时预览的应用
+    keywords:
+    - vibe coding
+    - streamlit
+    - gradio
+    - 应用生成
+    - 预览
+    - app
+  input_schema:
+    type: object
+    properties:
+      action:
+        type: string
+        enum:
+        - create
+        - update
+        - get_logs
+        - terminate
+        - list
+        description: 操作类型
+      stack:
+        type: string
+        enum:
         - streamlit
         - gradio
-        - 应用生成
-        - 预览
-        - app
-    
-    input_schema:
-      type: object
-      properties:
-        action:
-          type: string
-          enum: ["create", "update", "get_logs", "terminate", "list"]
-          description: "操作类型"
-        stack:
-          type: string
-          enum: ["streamlit", "gradio", "nextjs", "vue"]
-          description: "技术栈（create时必填）"
-        description:
-          type: string
-          description: "应用描述（create时必填）"
-        code:
-          type: string
-          description: "应用代码（create/update时必填）"
-        app_id:
-          type: string
-          description: "应用ID（update/get_logs/terminate时必填）"
-      required:
-        - action
-  
-  - name: e2b_python_sandbox
-    type: TOOL
-    subtype: CUSTOM
-    provider: user
-    level: 2              # 🆕 按需加载
-    cache_stable: true    # 🆕 不会导致 cache 失效
-    
-    # 🆕 结果精简配置
-    compaction:
-      strategy: truncate        # 截断长输出
-      result_type: mixed
-      max_size: 10000           # stdout/stderr 截断到 10KB
-    
-    implementation:
-      module: "tools.e2b_sandbox"
-      class: "E2BPythonSandbox"
-    
-    capabilities:
-      - code_sandbox
-      - code_execution
-      - data_analysis
-      - web_scraping
-      - api_calling
-      - file_operations
-    
-    priority: 85
-    
-    cost:
-      time: fast
-      money: low
-    
-    constraints:
-      requires_api: true
-      requires_network: true
-      api_name: e2b
-      session_scoped: true
-      supports_persistence: true
-    
-    metadata:
-      description: |
-        在安全的E2B沙箱中执行Python代码。
-        
-        核心特性：
-        • ✅ 完整网络访问（requests, httpx等）
-        • ✅ 任意第三方包（pip install或自动检测）
-        • ✅ 文件系统持久化（跨调用保持）
-        • ✅ 长时间运行（最长24小时）
-        • ✅ 多轮交互（会话级沙箱复用）
-        • ✅ 流式输出（实时显示stdout/stderr）
-        • ✅ 后台任务（支持长时运行任务）
-      
-      preferred_for:
-        - 网络请求和API调用
-        - 数据爬取和网页抓取
-        - 使用第三方Python包（pandas, numpy, requests等）
-        - 需要文件持久化的任务
-        - 长时间运行的任务
-        - 多步骤代码执行（需要保持状态）
-        - 数据可视化（生成图表）
-      
-      keywords:
-        - sandbox
-        - python
-        - network
-        - pip
-        - requests
-        - pandas
-        - 沙箱
-        - 网络
-        - 爬虫
-        - 数据分析
-      
-      note: |
-        文件系统规范：
-        - 读取文件：/home/user/input_data/文件名
-        - 保存文件：/home/user/output_data/文件名（会自动下载）
-        - workspace/inputs/ 会自动同步到沙箱
-        - 沙箱中的 output_data/ 会自动下载到 workspace/outputs/
-    
-    input_schema:
-      type: object
-      properties:
-        code:
-          type: string
-          description: |
-            要执行的Python代码。
-            
-            提示：
-            • 可以使用任意Python包（会自动检测并安装）
-            • 支持网络访问
-            • 读取文件：/home/user/input_data/文件名
-            • 保存文件：/home/user/output_data/文件名（会自动下载）
-            • 使用 print() 输出结果
-        
-        template:
-          type: string
-          enum: ["base", "data-analysis", "web-scraping"]
-          description: |
-            沙箱模板（可选，默认根据任务类型自动选择）。
-            • base: 纯净环境，按需安装
-            • data-analysis: 预装 pandas/numpy/matplotlib
-            • web-scraping: 预装 requests/beautifulsoup4
-        
-        enable_stream:
-          type: boolean
-          description: "是否启用流式输出（默认true）"
-          default: true
-        
-        auto_install:
-          type: boolean
-          description: "是否自动检测并安装缺失的包（默认true）"
-          default: true
-        
-        timeout:
-          type: integer
-          description: "代码执行超时时间（秒），默认300秒（5分钟）"
-          default: 300
-          minimum: 10
-          maximum: 3600
-        
-        background:
-          type: boolean
-          description: "是否在后台运行（适合长时任务）"
-          default: false
-        
-        return_files:
-          type: array
-          items:
-            type: string
-          description: |
-            需要返回的文件路径列表（可选）。
-            文件会自动下载到 workspace/outputs/
-            
-            示例: ["/home/user/output_data/result.csv", "/home/user/output_data/chart.png"]
-      
-      required:
-        - code
+        - nextjs
+        - vue
+        description: 技术栈（create时必填）
+      description:
+        type: string
+        description: 应用描述（create时必填）
+      code:
+        type: string
+        description: 应用代码（create/update时必填）
+      app_id:
+        type: string
+        description: 应用ID（update/get_logs/terminate时必填）
+    required:
+    - action
+- name: e2b_python_sandbox
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  level: 2
+  cache_stable: true
+  compaction:
+    strategy: truncate
+    result_type: mixed
+    max_size: 10000
+  implementation:
+    module: tools.e2b_sandbox
+    class: E2BPythonSandbox
+  capabilities:
+  - code_sandbox
+  - code_execution
+  - data_analysis
+  - web_scraping
+  - api_calling
+  - file_operations
+  priority: 85
+  cost:
+    time: fast
+    money: low
+  constraints:
+    requires_api: true
+    requires_network: true
+    api_name: e2b
+    session_scoped: true
+    supports_persistence: true
+  metadata:
+    description: '在安全的E2B沙箱中执行Python代码。
 
-# ============================================================
-# 配置说明
-# ============================================================
-#
-# 字段说明:
-#   name: 能力名称（唯一标识符）
-#   type: 能力类型 (SKILL/TOOL/MCP/CODE)
-#   subtype: 子类型 (PREBUILT/CUSTOM/NATIVE/EXTERNAL/DYNAMIC)
-#   provider: 提供者 (anthropic/user/system/external)
-#   capabilities: 能力标签列表（用于匹配用户请求）
-#   priority: 基础优先级 (0-100)
-#   cost:
-#     time: 执行时间 (fast/medium/slow)
-#     money: 成本 (free/low/medium/high)
-#   constraints: 约束条件
-#     requires_api: 是否需要外部API
-#     api_name: API名称
-#     requires_auth: 是否需要认证
-#     min_quality: 最低质量要求 (low/medium/high)
-#   metadata: 扩展信息
-#     description: 描述
-#     preferred_for: 优先使用场景
-#     keywords: 关键词列表
-#
-# 添加新能力:
-#   1. 复制上面的模板
-#   2. 修改name和capabilities
-#   3. 调整priority（参考其他同类能力）
-#   4. 填写metadata.preferred_for和keywords
-#   5. 保存后重启Agent
 
+      核心特性：
+
+      • ✅ 完整网络访问（requests, httpx等）
+
+      • ✅ 任意第三方包（pip install或自动检测）
+
+      • ✅ 文件系统持久化（跨调用保持）
+
+      • ✅ 长时间运行（最长24小时）
+
+      • ✅ 多轮交互（会话级沙箱复用）
+
+      • ✅ 流式输出（实时显示stdout/stderr）
+
+      • ✅ 后台任务（支持长时运行任务）
+
+      '
+    preferred_for:
+    - 网络请求和API调用
+    - 数据爬取和网页抓取
+    - 使用第三方Python包（pandas, numpy, requests等）
+    - 需要文件持久化的任务
+    - 长时间运行的任务
+    - 多步骤代码执行（需要保持状态）
+    - 数据可视化（生成图表）
+    keywords:
+    - sandbox
+    - python
+    - network
+    - pip
+    - requests
+    - pandas
+    - 沙箱
+    - 网络
+    - 爬虫
+    - 数据分析
+    note: '文件系统规范：
+
+      - 读取文件：/home/user/input_data/文件名
+
+      - 保存文件：/home/user/output_data/文件名（会自动下载）
+
+      - workspace/inputs/ 会自动同步到沙箱
+
+      - 沙箱中的 output_data/ 会自动下载到 workspace/outputs/
+
+      '
+  input_schema:
+    type: object
+    properties:
+      code:
+        type: string
+        description: '要执行的Python代码。
+
+
+          提示：
+
+          • 可以使用任意Python包（会自动检测并安装）
+
+          • 支持网络访问
+
+          • 读取文件：/home/user/input_data/文件名
+
+          • 保存文件：/home/user/output_data/文件名（会自动下载）
+
+          • 使用 print() 输出结果
+
+          '
+      template:
+        type: string
+        enum:
+        - base
+        - data-analysis
+        - web-scraping
+        description: '沙箱模板（可选，默认根据任务类型自动选择）。
+
+          • base: 纯净环境，按需安装
+
+          • data-analysis: 预装 pandas/numpy/matplotlib
+
+          • web-scraping: 预装 requests/beautifulsoup4
+
+          '
+      enable_stream:
+        type: boolean
+        description: 是否启用流式输出（默认true）
+        default: true
+      auto_install:
+        type: boolean
+        description: 是否自动检测并安装缺失的包（默认true）
+        default: true
+      timeout:
+        type: integer
+        description: 代码执行超时时间（秒），默认300秒（5分钟）
+        default: 300
+        minimum: 10
+        maximum: 3600
+      background:
+        type: boolean
+        description: 是否在后台运行（适合长时任务）
+        default: false
+      return_files:
+        type: array
+        items:
+          type: string
+        description: '需要返回的文件路径列表（可选）。
+
+          文件会自动下载到 workspace/outputs/
+
+
+          示例: ["/home/user/output_data/result.csv", "/home/user/output_data/chart.png"]
+
+          '
+    required:
+    - code

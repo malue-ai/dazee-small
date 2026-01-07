@@ -103,6 +103,10 @@ class CapabilityRegistry:
         if 'implementation' in data:
             metadata['implementation'] = data['implementation']
         
+        # 保存 compaction 配置到 metadata（供 ResultCompactor 使用）
+        if 'compaction' in data:
+            metadata['compaction'] = data['compaction']
+        
         return Capability(
             name=data['name'],
             type=CapabilityType(data['type']),
@@ -113,7 +117,12 @@ class CapabilityRegistry:
             cost=data.get('cost', {'time': 'medium', 'money': 'free'}),
             constraints=data.get('constraints', {}),
             metadata=metadata,
-            input_schema=data.get('input_schema')
+            input_schema=data.get('input_schema'),
+            fallback_tool=data.get('fallback_tool'),
+            skill_id=data.get('skill_id'),       # Claude 返回的 Skill ID
+            skill_path=data.get('skill_path'),   # Skill 本地路径
+            level=data.get('level', 2),          # 🆕 工具层级：1=核心，2=动态（默认2）
+            cache_stable=data.get('cache_stable', False)  # 🆕 结果是否稳定可缓存
         )
     
     def _scan_skills(self):
@@ -230,6 +239,61 @@ class CapabilityRegistry:
             if tag in c.capabilities
         ]
     
+    def find_by_level(self, level: int) -> List[Capability]:
+        """
+        按工具层级查找
+        
+        Args:
+            level: 工具层级（1=核心，2=动态）
+            
+        Returns:
+            匹配的能力列表
+        """
+        return [c for c in self.capabilities.values() if c.level == level]
+    
+    def get_core_tools(self) -> List[Capability]:
+        """
+        获取核心工具（Level 1）
+        
+        核心工具始终加载，不受动态选择影响：
+        - plan_todo（任务规划）
+        - bash（基础命令）
+        
+        Returns:
+            Level 1 核心工具列表
+        """
+        return self.find_by_level(1)
+    
+    def get_dynamic_tools(self) -> List[Capability]:
+        """
+        获取动态工具（Level 2）
+        
+        动态工具按需加载，根据意图/Schema 选择：
+        - exa_search（搜索）
+        - e2b_python_sandbox（代码执行）
+        - ppt_generator（PPT 生成）
+        - ...
+        
+        Returns:
+            Level 2 动态工具列表
+        """
+        return self.find_by_level(2)
+    
+    def get_cacheable_tools(self) -> List[str]:
+        """
+        获取可缓存工具名称列表
+        
+        cache_stable=true 的工具，同输入产生同输出，
+        可安全使用 prompt cache。
+        
+        Returns:
+            可缓存工具名称列表
+        """
+        return [
+            c.name for c in self.capabilities.values()
+            if c.cache_stable
+        ]
+    
     def find_candidates(
         self,
         keywords: List[str],
@@ -329,6 +393,29 @@ class CapabilityRegistry:
             })
         
         return skills
+    
+    def get_registered_skills(self) -> List[Dict[str, Any]]:
+        """
+        获取所有已注册到 Claude 的 Skills（有 skill_id 的）
+        
+        用于 Agent 初始化时启用 Skills Container
+        
+        Returns:
+            已注册的 Skills 列表，格式符合 Claude API 要求：
+            [{"type": "custom", "skill_id": "skill_xxx", "version": "latest"}, ...]
+        """
+        registered = []
+        
+        for cap in self.find_by_type(CapabilityType.SKILL):
+            if cap.skill_id:  # 只返回已注册的（有 skill_id）
+                skill_config = {
+                    "type": "custom",
+                    "skill_id": cap.skill_id,
+                    "version": "latest"
+                }
+                registered.append(skill_config)
+                
+        return registered
     
     # ==================== 能力分类接口 ====================
     

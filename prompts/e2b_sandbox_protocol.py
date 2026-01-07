@@ -8,15 +8,17 @@ E2B_SANDBOX_PROTOCOL = """
 
 ### 能力对比
 
-| 工具 | 网络访问 | 第三方包 | 文件持久化 | 适用场景 |
-|-----|---------|---------|-----------|---------|
-| e2b_python_sandbox | ✅ | ✅ | ✅ session级 | API调用、爬虫、数据分析 |
-| code_execution | ❌ | 内置包only | ❌ | 配置生成、简单计算 |
+| 工具 | 网络访问 | 第三方包 | 文件持久化 | 执行时间 | 适用场景 |
+|-----|---------|---------|-----------|---------|---------|
+| e2b_python_sandbox | ✅ | ✅ pip install | ✅ session级 | 30min | API调用、爬虫、数据分析、多工具编排 |
+| code_execution | ❌ | 内置包only | ❌ | <10s | 配置生成、简单计算、JSON处理 |
+| e2b_vibe_coding | ✅ | ✅ 完整支持 | ✅ | 30min | 完整 Web 应用生成（Streamlit/Gradio） |
 
 ### 选择逻辑
 
 ```
-需要网络/第三方包/文件持久化 → e2b_python_sandbox
+需要网络/第三方包/文件持久化/多工具编排 → e2b_python_sandbox
+需要 Web UI 预览 → e2b_vibe_coding  
 简单计算/配置生成 → code_execution
 ```
 

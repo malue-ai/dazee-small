@@ -580,7 +580,7 @@ class AgentFactory:
         
         if llm_service is None:
             # 使用默认 LLM Service（通常是 Haiku，快速且便宜）
-            llm_service = create_llm_service("claude-3-5-haiku-20241022")
+            llm_service = create_llm_service("claude-haiku-4-5-20251001")
         
         # 调用 LLM 生成 Schema
         response = await llm_service.create_message(

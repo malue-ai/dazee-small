@@ -685,12 +685,90 @@ Steps:
 | **内容生成** | 创建文档、PPT等 | Skills (pptx, docx, xlsx) |
 | **自定义工具** | 特定API调用 | slidespeak_render等 |
 
-## 工具选择原则
+## 🎯 工具调用选择策略
 
-1. **信息获取** → 优先 web_search
-2. **数据处理** → 优先 code_execution
-3. **内容生成** → 根据类型选择Skill
-4. **复杂任务** → 多工具组合
+### Skills + Tools 架构理解
+
+根据 [Anthropic 官方文档](https://claude.com/blog/extending-claude-capabilities-with-skills-mcp-servers)：
+
+> **Tools 提供连接**（access to external systems）
+> **Skills 提供专业知识**（workflow logic + domain expertise）
+> **一个 Skill 可以编排多个工具**
+
+**工具来源（不仅限于 MCP）：**
+
+```
+┌─────────────────────────────────────────────────────┐
+│                    Claude + Skill                    │
+│              （工作流逻辑 + 领域专业知识）            │
+└─────────────────────────┬───────────────────────────┘
+                          │ 编排
+    ┌─────────────────────┼─────────────────────┐
+    │           │           │           │       │
+    ▼           ▼           ▼           ▼       ▼
+┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐
+│  MCP   │ │REST API│ │ 插件   │ │本地工具│ │ E2B    │
+│Servers │ │        │ │Plugins │ │Custom  │ │Sandbox │
+└────────┘ └────────┘ └────────┘ └────────┘ └────────┘
+```
+
+### 决策树
+
+```
+内置 Skill 能满足？ ──Yes──→ Claude Skill（优先：快速、便宜）
+      │
+      No（需要复杂工作流、搜索、质量检查）
+      ↓
+需要网络/复杂编排？ ──Yes──→ E2B + 自定义工具（如 ppt_generator）
+      │
+      No
+      ↓
+简单计算/配置？ ──Yes──→ code_execution（内置沙箱）
+      │
+      No
+      ↓
+Direct Tool Call（MCP/REST API/自定义工具）
+```
+
+### 选择矩阵
+
+| 场景 | 需求分析 | 推荐方式 |
+|-----|---------|---------|
+| **PPT - 简单草稿** | 快速生成，不需要搜索 | **Claude Skill (pptx)** ✅ |
+| **PPT - 高质量** | 需要搜索素材、专业渲染、质量检查 | **ppt_generator** (E2B + SlideSpeak) ✅ |
+| Excel简单转换 | 内置能力可满足 | **Claude Skill (xlsx)** |
+| Word文档格式化 | 内置能力可满足 | **Claude Skill (docx)** |
+| 数据分析（复杂） | 需要 pandas/numpy | **E2B Sandbox** |
+| 调用外部API | 直接调用 | **REST API 工具** |
+| 复杂爬虫 | 需要特殊环境/自定义包 | **E2B Sandbox** |
+| 完整Web应用 | 需要完整运行时 | **E2B Vibe Coding** |
+| 简单计算 | 无需外部依赖 | **code_execution** |
+
+### PPT 生成决策流程 ⭐
+
+```
+用户需求: "生成 PPT"
+    │
+    ▼
+分析需求：
+    │
+    ├─ 快速草稿？简单内容？ ──Yes──→ Claude Skill (pptx)
+    │                                  • 速度快（<10s）
+    │                                  • 成本低
+    │                                  • 适合草稿/简单场景
+    │
+    └─ 高质量？需要搜索？ ──Yes──→ ppt_generator
+                                    • 自动搜索素材（exa_search）
+                                    • 智能内容规划
+                                    • 专业渲染（SlideSpeak）
+                                    • 质量检查（多重验证）
+```
+
+**核心原则**：
+- **Skill 优先** — 内置能力可满足时，优先使用（快速、便宜）
+- **E2B + 自定义工具** — 需要复杂工作流、网络访问、质量控制时使用
+- **工具多样性** — MCP、REST API、插件、自定义工具都是重要来源
+- **场景驱动** — 根据用户需求选择最合适的方案，而非固定优先级
 
 ## 工具调用决策框架
 

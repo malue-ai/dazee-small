@@ -128,7 +128,7 @@ async def example_2_from_explicit_schema():
         intent_analyzer=IntentAnalyzerConfig(
             enabled=True,
             use_llm=True,
-            llm_model="claude-3-5-haiku-20241022"
+            llm_model="claude-haiku-4-5-20251001"
         ),
         
         # 启用 Plan Manager（复杂任务需要）

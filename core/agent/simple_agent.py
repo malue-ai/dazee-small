@@ -203,6 +203,9 @@ class SimpleAgent:
         # 注册自定义工具到 LLM（如果有 plan_todo_tool）
         if self.plan_todo_tool:
             self._register_tools_to_llm()
+        
+        # 🆕 启用已注册的 Claude Skills
+        self._enable_registered_skills()
     
     def _register_tools_to_llm(self):
         """注册工具到 LLM Service"""
@@ -216,6 +219,22 @@ class SimpleAgent:
                 description=schema['description'],
                 input_schema=schema['input_schema']
             )
+    
+    def _enable_registered_skills(self):
+        """
+        🆕 启用已注册到 Claude 的 Skills
+        
+        从 capabilities.yaml 读取已注册的 skill_id，
+        调用 LLM service 的 enable_skills 方法激活 Skills Container
+        """
+        registered_skills = self.capability_registry.get_registered_skills()
+        
+        if registered_skills:
+            self.llm.enable_skills(registered_skills)
+            skill_names = [s.get('skill_id', 'unknown')[:20] + '...' for s in registered_skills]
+            logger.info(f"🎯 已启用 {len(registered_skills)} 个 Claude Skills: {skill_names}")
+        else:
+            logger.debug("○ 没有已注册的 Claude Skills")
     
     async def chat(
         self,
@@ -966,14 +985,41 @@ class SimpleAgent:
                 block_idx = ctx.block.start_new_block("tool_result")
                 
                 # 处理 content 字段（可能是列表或字符串）
+                # 注意：Anthropic SDK 返回的对象（如 WebSearchResultBlock）不能直接 JSON 序列化
                 content = block.get("content", [])
                 if isinstance(content, list):
                     # 提取文本内容
                     text_parts = []
                     for item in content:
-                        if isinstance(item, dict) and item.get("type") == "text":
-                            text_parts.append(item.get("text", ""))
-                    content_str = "\n".join(text_parts) if text_parts else json.dumps(content, ensure_ascii=False)
+                        # 处理字典类型
+                        if isinstance(item, dict):
+                            if item.get("type") == "text":
+                                text_parts.append(item.get("text", ""))
+                            elif item.get("type") == "web_search_result":
+                                # 格式化搜索结果
+                                title = item.get("title", "")
+                                url = item.get("url", "")
+                                text_parts.append(f"[{title}]({url})")
+                        # 处理 Anthropic SDK 对象
+                        elif hasattr(item, 'model_dump'):
+                            # Pydantic v2 对象
+                            dumped = item.model_dump()
+                            if dumped.get("type") == "text":
+                                text_parts.append(dumped.get("text", ""))
+                            elif dumped.get("type") == "web_search_result":
+                                title = dumped.get("title", "")
+                                url = dumped.get("url", "")
+                                text_parts.append(f"[{title}]({url})")
+                            else:
+                                text_parts.append(str(dumped))
+                        elif hasattr(item, 'to_dict'):
+                            # 旧版 Pydantic 对象
+                            dumped = item.to_dict()
+                            text_parts.append(str(dumped))
+                        else:
+                            # 其他类型，尝试字符串化
+                            text_parts.append(str(item))
+                    content_str = "\n".join(text_parts) if text_parts else "[服务端工具结果]"
                 else:
                     content_str = str(content)
                 

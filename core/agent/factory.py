@@ -222,8 +222,8 @@ class AgentFactory:
         """调用 LLM 生成 Schema"""
         if llm_service is None:
             from core.llm import create_claude_service
-            # 使用 Haiku（快速且便宜）
-            llm_service = create_claude_service(model="claude-3-5-haiku-20241022")
+            # 使用 Haiku 4.5（快速且便宜，支持 64K output tokens）
+            llm_service = create_claude_service(model="claude-haiku-4-5-20251001")
         
         response = await llm_service.create_message(
             system=SCHEMA_GENERATOR_PROMPT,

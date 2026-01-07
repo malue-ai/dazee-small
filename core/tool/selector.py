@@ -61,6 +61,10 @@ class ToolSelector:
     
     根据任务需求智能选择合适的工具
     
+    🆕 V4.2.4 工具分层设计：
+    - Level 1（核心工具）：始终加载，如 plan_todo
+    - Level 2（动态工具）：按需加载，如 exa_search, e2b_python_sandbox
+    
     使用方式：
         selector = ToolSelector(registry)
         result = selector.select(
@@ -70,9 +74,9 @@ class ToolSelector:
         print(result.tool_names)  # ["plan_todo", "bash", "web_search", "slidespeak_render"]
     """
     
-    # 基础工具（始终包含）
-    # 🆕 添加 request_human_confirmation：HITL 是通用能力，任何任务都可能需要人工确认
-    BASE_TOOLS = ["plan_todo", "bash", "request_human_confirmation"]
+    # 默认核心工具（作为 Level 1 的备用，实际从 capabilities.yaml 读取）
+    # 🆕 包含 request_human_confirmation：HITL 是通用能力，任何任务都可能需要人工确认
+    DEFAULT_CORE_TOOLS = ["plan_todo", "bash", "request_human_confirmation"]
     
     # Claude 原生工具（直接使用字符串）
     # 注意：computer 和 memory 工具需要特殊 beta header，暂不包含在默认列表中
@@ -94,6 +98,48 @@ class ToolSelector:
         # 如果没有提供，创建默认实例
         if self.registry is None:
             self.registry = create_capability_registry()
+        
+        # 🆕 缓存核心工具列表（Level 1）
+        self._core_tools_cache: Optional[List[str]] = None
+    
+    def get_core_tools(self) -> List[str]:
+        """
+        获取核心工具名称列表（Level 1）
+        
+        核心工具始终加载，不受动态选择影响。
+        优先从 capabilities.yaml 读取 level=1 的工具，
+        如果没有则使用默认列表。
+        
+        Returns:
+            核心工具名称列表
+        """
+        if self._core_tools_cache is not None:
+            return self._core_tools_cache
+        
+        # 从 Registry 获取 Level 1 工具
+        core_caps = self.registry.get_core_tools()
+        
+        if core_caps:
+            self._core_tools_cache = [c.name for c in core_caps]
+            logger.debug(f"📌 核心工具 (Level 1): {self._core_tools_cache}")
+        else:
+            # 备用：使用默认核心工具
+            self._core_tools_cache = self.DEFAULT_CORE_TOOLS.copy()
+            logger.debug(f"📌 使用默认核心工具: {self._core_tools_cache}")
+        
+        return self._core_tools_cache
+    
+    def get_cacheable_tools(self) -> List[str]:
+        """
+        获取可缓存工具名称列表
+        
+        cache_stable=true 的工具，同输入产生同输出，
+        可安全使用 prompt cache。
+        
+        Returns:
+            可缓存工具名称列表
+        """
+        return self.registry.get_cacheable_tools()
     
     def select(
         self,
@@ -103,6 +149,10 @@ class ToolSelector:
     ) -> ToolSelectionResult:
         """
         选择工具
+        
+        🆕 V4.2.4 分层选择逻辑：
+        1. 始终加载 Level 1 核心工具（plan_todo 等）
+        2. 根据能力需求从 Level 2 动态工具中选择
         
         Args:
             required_capabilities: 所需能力列表（如 ["web_search", "ppt_generation"]）
@@ -116,9 +166,10 @@ class ToolSelector:
         selected = []
         selected_skills_capabilities = set()
         
-        # 1. 添加基础工具
+        # 1. 🆕 添加核心工具（Level 1）- 始终加载
         base_tools = []
-        for name in self.BASE_TOOLS:
+        core_tool_names = self.get_core_tools()
+        for name in core_tool_names:
             cap = self.registry.get(name)
             if cap and cap not in selected:
                 selected.append(cap)
@@ -126,6 +177,8 @@ class ToolSelector:
         
         # 2. 根据能力标签选择工具
         dynamic_tools = []
+        fallback_tools_to_add = []  # 🆕 收集需要添加的 fallback 工具
+        
         for capability_tag in required_capabilities:
             matched = self.registry.find_by_capability_tag(capability_tag)
             
@@ -148,8 +201,22 @@ class ToolSelector:
                     # 如果是 Skill，收集其能力需求
                     if tool.type == CapabilityType.SKILL:
                         selected_skills_capabilities.update(tool.capabilities)
+                        
+                        # 🆕 如果 SKILL 有 fallback_tool，添加到待处理列表
+                        if tool.fallback_tool:
+                            fallback_tools_to_add.append(tool.fallback_tool)
+                            logger.debug(f"📌 SKILL '{tool.name}' 指定 fallback_tool: {tool.fallback_tool}")
         
-        # 3. 自动包含 Skills 依赖的底层工具
+        # 🆕 3. 优先添加 fallback 工具（确保 SKILL 的替代实现可用）
+        for fallback_name in fallback_tools_to_add:
+            fallback_cap = self.registry.get(fallback_name)
+            if fallback_cap and fallback_cap not in selected:
+                if fallback_cap.meets_constraints(context):
+                    selected.append(fallback_cap)
+                    dynamic_tools.append(fallback_name)
+                    logger.info(f"✅ 添加 fallback 工具: {fallback_name}")
+        
+        # 4. 自动包含 Skills 依赖的底层工具（非 fallback 的情况）
         for skill_capability in selected_skills_capabilities:
             tools_for_capability = [
                 c for c in self.registry.find_by_capability_tag(skill_capability)
@@ -162,13 +229,13 @@ class ToolSelector:
                     dynamic_tools.append(tool.name)
                     logger.debug(f"✅ 自动包含工具 {tool.name} (Skills 依赖)")
         
-        # 4. 按优先级排序
+        # 5. 按优先级排序
         selected.sort(key=lambda c: c.priority, reverse=True)
         
-        # 5. 提取工具名称
+        # 6. 提取工具名称
         tool_names = [t.name for t in selected]
         
-        # 6. 添加原生工具（如果需要）
+        # 7. 添加原生工具（如果需要）
         if include_native:
             for native_tool in self.NATIVE_TOOLS:
                 if native_tool not in tool_names:

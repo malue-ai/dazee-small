@@ -10,15 +10,23 @@ Claude LLM 服务实现
 - Streaming
 - Tool Search
 - Code Execution
+- Skills API (Custom Skills)
+- Files API (文件上传/下载)
+- Citations (引用)
 
 参考：
 - https://platform.claude.com/docs/en/build-with-claude/overview
 - https://platform.claude.com/docs/en/api/overview
+- https://docs.claude.com/en/docs/build-with-claude/skills
+- https://docs.claude.com/en/docs/build-with-claude/citations
 """
 
 import os
 import json
+import re
 from typing import Dict, Any, Optional, List, Union, AsyncIterator, Callable
+from pathlib import Path
+from dataclasses import dataclass, field
 
 import anthropic
 import httpx
@@ -32,6 +40,30 @@ from .base import (
     ToolType,
     LLMProvider
 )
+
+
+# ============================================================
+# Skills API 数据结构
+# ============================================================
+
+@dataclass
+class SkillInfo:
+    """Skill 信息"""
+    id: str
+    display_title: str
+    latest_version: str
+    created_at: str
+    source: str  # "custom" or "anthropic"
+    
+@dataclass
+class FileInfo:
+    """文件信息"""
+    file_id: str
+    filename: str
+    size_bytes: int
+    mime_type: str
+    created_at: str
+    downloadable: bool = True
 
 logger = get_logger("llm.claude")
 
@@ -101,6 +133,13 @@ class ClaudeLLMService(BaseLLMService):
             max_retries=3     # 自动重试 3 次
         )
         
+        # 同步客户端（用于 Skills/Files API）
+        self.sync_client = anthropic.Anthropic(
+            api_key=config.api_key,
+            timeout=600.0,
+            max_retries=3
+        )
+        
         # Beta 功能配置
         self._betas: List[str] = []
         
@@ -123,6 +162,13 @@ class ClaudeLLMService(BaseLLMService):
     
         # 自定义工具存储
         self._custom_tools: List[Dict[str, Any]] = []
+        
+        # Skills 配置
+        self._skills_enabled = False
+        self._skills_container: Dict[str, Any] = {}
+        
+        # Citations 配置
+        self._citations_enabled = False
     
     # ============================================================
     # Beta Headers 管理
@@ -684,6 +730,20 @@ class ClaudeLLMService(BaseLLMService):
         if all_tools:
             request_params["tools"] = all_tools
         
+        # 🆕 Skills Container（如果启用）
+        # 根据 Claude Skills 官方标准：Skills 模式下 tools 只能是 code_execution
+        if self._skills_enabled and self._skills_container:
+            request_params["betas"] = list(self._betas)
+            request_params["container"] = self._skills_container
+            
+            # Skills 模式：tools 只能包含 code_execution（官方标准）
+            request_params["tools"] = [
+                {"type": "code_execution_20250825", "name": "code_execution"}
+            ]
+            
+            logger.info(f"🎯 Skills 模式激活: {len(self._skills_container.get('skills', []))} 个技能")
+            logger.info("   tools 已替换为 [code_execution]（Skills 标准要求）")
+        
         # 请求日志（INFO 级别）
         logger.info(f"📤 Claude 请求: model={self.config.model}, tools={len(all_tools)}, messages={len(formatted_messages)}")
         
@@ -729,7 +789,15 @@ class ClaudeLLMService(BaseLLMService):
         
         event_count = 0  # 🚨 在 try 外初始化，确保 except 中可用
         try:
-            async with self.async_client.messages.stream(**request_params) as stream:
+            # 🆕 根据是否启用 Skills 选择 API
+            if self._skills_enabled and "betas" in request_params:
+                # 使用 beta API（支持 Skills Container）
+                stream_ctx = self.async_client.beta.messages.stream(**request_params)
+            else:
+                # 使用标准 API
+                stream_ctx = self.async_client.messages.stream(**request_params)
+            
+            async with stream_ctx as stream:
                 async for event in stream:
                     event_count += 1
                     if not hasattr(event, 'type'):
@@ -1258,6 +1326,475 @@ class ClaudeLLMService(BaseLLMService):
                 cleaned_messages.append(msg)
         
         return cleaned_messages
+
+    # ============================================================
+    # Skills API
+    # ============================================================
+    
+    def enable_skills(self, skills: List[Dict[str, Any]]):
+        """
+        启用 Skills 功能
+        
+        Args:
+            skills: Skills 配置列表，每个 skill 包含：
+                - type: "custom" 或 "anthropic"
+                - skill_id: Skill ID
+                - version: 版本号（可选，默认 "latest"）
+                
+        示例：
+            llm.enable_skills([
+                {"type": "custom", "skill_id": "skill_abc123", "version": "latest"},
+                {"type": "anthropic", "skill_id": "pptx", "version": "latest"}
+            ])
+        """
+        self._skills_enabled = True
+        self._skills_container = {"skills": skills}
+        
+        # 添加必要的 beta headers
+        self._add_beta("code-execution-2025-08-25")
+        self._add_beta("skills-2025-10-02")
+        self._add_beta("files-api-2025-04-14")
+        
+        logger.info(f"✅ Skills 已启用: {len(skills)} 个技能")
+    
+    def disable_skills(self):
+        """禁用 Skills 功能"""
+        self._skills_enabled = False
+        self._skills_container = {}
+        self._remove_beta("skills-2025-10-02")
+        # 保留 code-execution 和 files-api，因为可能被其他功能使用
+    
+    def create_skill(
+        self,
+        display_title: str,
+        skill_path: str
+    ) -> Optional[SkillInfo]:
+        """
+        创建 Custom Skill
+        
+        Args:
+            display_title: Skill 显示名称
+            skill_path: Skill 目录路径（包含 SKILL.md）
+            
+        Returns:
+            SkillInfo 或 None（如果失败）
+            
+        示例：
+            skill = llm.create_skill(
+                display_title="PPT Generator",
+                skill_path="./skills/library/ppt-generator"
+            )
+            print(f"Skill ID: {skill.id}")
+        """
+        try:
+            from anthropic.lib import files_from_dir
+            
+            skill = self.sync_client.beta.skills.create(
+                display_title=display_title,
+                files=files_from_dir(skill_path)
+            )
+            
+            logger.info(f"✅ Skill 创建成功: {skill.id}")
+            
+            return SkillInfo(
+                id=skill.id,
+                display_title=skill.display_title,
+                latest_version=skill.latest_version,
+                created_at=skill.created_at,
+                source=skill.source
+            )
+            
+        except Exception as e:
+            logger.error(f"❌ Skill 创建失败: {e}")
+            return None
+    
+    def list_skills(self) -> List[SkillInfo]:
+        """
+        列出所有 Custom Skills
+        
+        Returns:
+            SkillInfo 列表
+        """
+        try:
+            skills = self.sync_client.beta.skills.list()
+            return [
+                SkillInfo(
+                    id=s.id,
+                    display_title=s.display_title,
+                    latest_version=s.latest_version,
+                    created_at=s.created_at,
+                    source=s.source
+                )
+                for s in skills.data
+            ]
+        except Exception as e:
+            logger.error(f"❌ 获取 Skills 列表失败: {e}")
+            return []
+    
+    def get_skill(self, skill_id: str) -> Optional[SkillInfo]:
+        """
+        获取 Skill 详情
+        
+        Args:
+            skill_id: Skill ID
+            
+        Returns:
+            SkillInfo 或 None
+        """
+        try:
+            skill = self.sync_client.beta.skills.retrieve(skill_id)
+            return SkillInfo(
+                id=skill.id,
+                display_title=skill.display_title,
+                latest_version=skill.latest_version,
+                created_at=skill.created_at,
+                source=skill.source
+            )
+        except Exception as e:
+            logger.error(f"❌ 获取 Skill 失败: {e}")
+            return None
+    
+    def delete_skill(self, skill_id: str) -> bool:
+        """
+        删除 Skill
+        
+        Args:
+            skill_id: Skill ID
+            
+        Returns:
+            是否成功
+        """
+        try:
+            # 先删除所有版本
+            versions = self.sync_client.beta.skills.versions.list(skill_id=skill_id)
+            for version in versions.data:
+                self.sync_client.beta.skills.versions.delete(
+                    skill_id=skill_id,
+                    version=version.version
+                )
+            
+            # 再删除 Skill
+            self.sync_client.beta.skills.delete(skill_id)
+            logger.info(f"✅ Skill 已删除: {skill_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ 删除 Skill 失败: {e}")
+            return False
+    
+    async def create_message_with_skills(
+        self,
+        messages: List[Message],
+        skills: List[Dict[str, Any]],
+        system: Optional[str] = None,
+        **kwargs
+    ) -> LLMResponse:
+        """
+        使用 Skills 创建消息
+        
+        Args:
+            messages: 消息列表
+            skills: Skills 配置
+            system: 系统提示词
+            **kwargs: 其他参数
+            
+        Returns:
+            LLMResponse
+            
+        示例：
+            response = await llm.create_message_with_skills(
+                messages=[Message(role="user", content="创建一个 PPT")],
+                skills=[
+                    {"type": "custom", "skill_id": "skill_abc123", "version": "latest"}
+                ]
+            )
+        """
+        formatted_messages = self._format_messages(messages)
+        
+        request_params = {
+            "model": self.config.model,
+            "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
+            "messages": formatted_messages,
+            "betas": ["code-execution-2025-08-25", "skills-2025-10-02", "files-api-2025-04-14"],
+            "container": {"skills": skills},
+            "tools": [{"type": "code_execution_20250825", "name": "code_execution"}]
+        }
+        
+        if system:
+            request_params["system"] = system
+        
+        try:
+            response = await self.async_client.beta.messages.create(**request_params)
+            return self._parse_response(response)
+        except Exception as e:
+            logger.error(f"❌ Skills 调用失败: {e}")
+            raise
+    
+    # ============================================================
+    # Files API
+    # ============================================================
+    
+    def download_file(
+        self,
+        file_id: str,
+        output_path: str,
+        overwrite: bool = True
+    ) -> Optional[FileInfo]:
+        """
+        下载文件
+        
+        Args:
+            file_id: 文件 ID
+            output_path: 输出路径
+            overwrite: 是否覆盖已有文件
+            
+        Returns:
+            FileInfo 或 None
+        """
+        try:
+            # 检查文件是否存在
+            if os.path.exists(output_path) and not overwrite:
+                logger.warning(f"文件已存在: {output_path}")
+                return None
+            
+            # 创建目录
+            output_dir = os.path.dirname(output_path)
+            if output_dir:
+                Path(output_dir).mkdir(parents=True, exist_ok=True)
+            
+            # 获取元数据
+            metadata = self.sync_client.beta.files.retrieve_metadata(file_id=file_id)
+            
+            # 下载文件
+            file_content = self.sync_client.beta.files.download(file_id=file_id)
+            
+            with open(output_path, 'wb') as f:
+                f.write(file_content.read())
+            
+            logger.info(f"✅ 文件已下载: {output_path} ({metadata.size_bytes} bytes)")
+            
+            return FileInfo(
+                file_id=metadata.id,
+                filename=metadata.filename,
+                size_bytes=metadata.size_bytes,
+                mime_type=metadata.mime_type,
+                created_at=metadata.created_at,
+                downloadable=metadata.downloadable
+            )
+            
+        except Exception as e:
+            logger.error(f"❌ 下载文件失败: {e}")
+            return None
+    
+    def get_file_info(self, file_id: str) -> Optional[FileInfo]:
+        """
+        获取文件元数据
+        
+        Args:
+            file_id: 文件 ID
+            
+        Returns:
+            FileInfo 或 None
+        """
+        try:
+            metadata = self.sync_client.beta.files.retrieve_metadata(file_id=file_id)
+            return FileInfo(
+                file_id=metadata.id,
+                filename=metadata.filename,
+                size_bytes=metadata.size_bytes,
+                mime_type=metadata.mime_type,
+                created_at=metadata.created_at,
+                downloadable=metadata.downloadable
+            )
+        except Exception as e:
+            logger.error(f"❌ 获取文件信息失败: {e}")
+            return None
+    
+    def list_files(self) -> List[FileInfo]:
+        """
+        列出所有文件
+        
+        Returns:
+            FileInfo 列表
+        """
+        try:
+            files = self.sync_client.beta.files.list()
+            return [
+                FileInfo(
+                    file_id=f.id,
+                    filename=f.filename,
+                    size_bytes=f.size_bytes,
+                    mime_type=f.mime_type,
+                    created_at=f.created_at,
+                    downloadable=f.downloadable
+                )
+                for f in files.data
+            ]
+        except Exception as e:
+            logger.error(f"❌ 获取文件列表失败: {e}")
+            return []
+    
+    def extract_file_ids_from_response(self, response) -> List[str]:
+        """
+        从响应中提取 file_id
+        
+        Args:
+            response: Claude API 响应
+            
+        Returns:
+            file_id 列表
+        """
+        file_ids = []
+        
+        def find_file_ids(obj, depth=0):
+            """递归查找 file_id"""
+            if depth > 10:
+                return
+            
+            if hasattr(obj, 'file_id') and obj.file_id:
+                file_ids.append(obj.file_id)
+            
+            if hasattr(obj, 'content'):
+                content = obj.content
+                if isinstance(content, (list, tuple)):
+                    for item in content:
+                        find_file_ids(item, depth + 1)
+                elif hasattr(content, '__dict__'):
+                    find_file_ids(content, depth + 1)
+            
+            if hasattr(obj, '__dict__'):
+                for key, value in obj.__dict__.items():
+                    if key == 'file_id' and value:
+                        if value not in file_ids:
+                            file_ids.append(value)
+                    elif hasattr(value, '__dict__') or isinstance(value, (list, tuple)):
+                        find_file_ids(value, depth + 1)
+        
+        if hasattr(response, 'content'):
+            for block in response.content:
+                find_file_ids(block)
+        
+        return list(set(file_ids))
+    
+    # ============================================================
+    # Citations (引用)
+    # ============================================================
+    
+    def enable_citations(self):
+        """启用 Citations 功能"""
+        self._citations_enabled = True
+        logger.info("✅ Citations 已启用")
+    
+    def disable_citations(self):
+        """禁用 Citations 功能"""
+        self._citations_enabled = False
+    
+    def create_document_content(
+        self,
+        documents: List[Dict[str, Any]],
+        enable_citations: bool = True
+    ) -> List[Dict[str, Any]]:
+        """
+        创建带引用的文档内容
+        
+        Args:
+            documents: 文档列表，每个文档包含：
+                - type: "text" 或 "pdf"
+                - data: 文档内容（text/base64）
+                - title: 文档标题（可选）
+            enable_citations: 是否启用引用
+            
+        Returns:
+            格式化的文档内容列表
+            
+        示例：
+            docs = llm.create_document_content([
+                {"type": "text", "data": "这是文档内容...", "title": "文档1"}
+            ])
+        """
+        formatted = []
+        
+        for doc in documents:
+            doc_type = doc.get("type", "text")
+            data = doc.get("data", "")
+            title = doc.get("title", "")
+            
+            if doc_type == "text":
+                formatted.append({
+                    "type": "document",
+                    "source": {
+                        "type": "text",
+                        "media_type": "text/plain",
+                        "data": data
+                    },
+                    "title": title,
+                    "citations": {"enabled": enable_citations}
+                })
+            elif doc_type == "pdf":
+                formatted.append({
+                    "type": "document",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "application/pdf",
+                        "data": data
+                    },
+                    "title": title,
+                    "citations": {"enabled": enable_citations}
+                })
+        
+        return formatted
+    
+    async def create_message_with_citations(
+        self,
+        query: str,
+        documents: List[Dict[str, Any]],
+        system: Optional[str] = None,
+        **kwargs
+    ) -> LLMResponse:
+        """
+        使用引用功能创建消息
+        
+        Args:
+            query: 用户查询
+            documents: 文档列表
+            system: 系统提示词
+            **kwargs: 其他参数
+            
+        Returns:
+            LLMResponse（包含引用信息）
+            
+        示例：
+            response = await llm.create_message_with_citations(
+                query="文档中提到了什么?",
+                documents=[
+                    {"type": "text", "data": "这是文档内容...", "title": "文档1"}
+                ]
+            )
+        """
+        # 构建带引用的内容
+        content = self.create_document_content(documents, enable_citations=True)
+        content.append({
+            "type": "text",
+            "text": query
+        })
+        
+        messages = [{"role": "user", "content": content}]
+        
+        request_params = {
+            "model": self.config.model,
+            "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
+            "messages": messages
+        }
+        
+        if system:
+            request_params["system"] = system
+        
+        try:
+            response = await self.async_client.messages.create(**request_params)
+            return self._parse_response(response)
+        except Exception as e:
+            logger.error(f"❌ Citations 调用失败: {e}")
+            raise
 
 
 # ============================================================

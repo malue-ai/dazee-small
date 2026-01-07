@@ -1,0 +1,497 @@
+#!/usr/bin/env python3
+"""
+Skill 管理 CLI 工具
+
+功能：
+- register: 注册 Skill 到 Claude 服务器，自动回写 skill_id 到 capabilities.yaml
+- unregister: 注销 Skill，自动从 capabilities.yaml 移除 skill_id
+- list: 列出所有已注册的 Skills
+- update: 更新 Skill 版本
+- sync: 同步 capabilities.yaml 与 Claude 服务器
+
+使用示例：
+    # 注册新 Skill
+    python scripts/skill_cli.py register --skill professional-ppt-generator
+    
+    # 列出所有已注册的 Skills
+    python scripts/skill_cli.py list
+    
+    # 注销 Skill
+    python scripts/skill_cli.py unregister --skill professional-ppt-generator
+    
+    # 同步状态
+    python scripts/skill_cli.py sync
+
+设计原则：
+- 开发人员一次性操作，运行时不需要注册
+- skill_id 自动回写到 capabilities.yaml
+- capabilities.yaml 是唯一真相来源
+"""
+
+import argparse
+import os
+import sys
+from pathlib import Path
+from datetime import datetime
+from typing import Dict, Any, Optional, List
+
+# 添加项目根目录到 Python 路径
+PROJECT_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+import yaml
+from dotenv import load_dotenv
+from anthropic import Anthropic
+from anthropic.lib import files_from_dir
+
+# 加载环境变量
+load_dotenv(PROJECT_ROOT / ".env")
+
+# 配置文件路径
+CAPABILITIES_FILE = PROJECT_ROOT / "config" / "capabilities.yaml"
+SKILLS_LIBRARY_PATH = PROJECT_ROOT / "skills" / "library"
+
+
+class SkillCLI:
+    """
+    Skill 管理 CLI
+    
+    职责：
+    - 注册/注销 Skills 到 Claude 服务器
+    - 自动回写 skill_id 到 capabilities.yaml
+    - 维护 capabilities.yaml 与 Claude 服务器的一致性
+    """
+    
+    def __init__(self):
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise ValueError("❌ ANTHROPIC_API_KEY 未配置")
+        
+        # 创建带 Skills beta 的客户端
+        self.client = Anthropic(
+            api_key=api_key,
+            default_headers={"anthropic-beta": "skills-2025-10-02"}
+        )
+        
+        # 加载 capabilities.yaml
+        self.capabilities = self._load_capabilities()
+    
+    def _load_capabilities(self) -> Dict[str, Any]:
+        """加载 capabilities.yaml"""
+        if not CAPABILITIES_FILE.exists():
+            print(f"⚠️ 配置文件不存在: {CAPABILITIES_FILE}")
+            return {"capabilities": []}
+        
+        with open(CAPABILITIES_FILE, 'r', encoding='utf-8') as f:
+            return yaml.safe_load(f) or {"capabilities": []}
+    
+    def _save_capabilities(self):
+        """保存 capabilities.yaml"""
+        with open(CAPABILITIES_FILE, 'w', encoding='utf-8') as f:
+            yaml.dump(
+                self.capabilities, 
+                f, 
+                default_flow_style=False, 
+                allow_unicode=True,
+                sort_keys=False
+            )
+        print(f"✅ 配置已保存: {CAPABILITIES_FILE}")
+    
+    def _find_capability(self, skill_name: str) -> Optional[Dict[str, Any]]:
+        """在 capabilities.yaml 中查找指定的能力"""
+        for cap in self.capabilities.get("capabilities", []):
+            if cap.get("name") == skill_name:
+                return cap
+        return None
+    
+    def _add_or_update_capability(self, skill_name: str, skill_id: str, skill_path: str):
+        """添加或更新 capability 条目"""
+        existing = self._find_capability(skill_name)
+        
+        if existing:
+            # 更新已有条目
+            existing["skill_id"] = skill_id
+            existing["registered_at"] = datetime.now().isoformat()
+            print(f"📝 更新 capability: {skill_name}")
+        else:
+            # 添加新条目
+            new_cap = {
+                "name": skill_name,
+                "type": "SKILL",
+                "subtype": "CUSTOM",
+                "provider": "user",
+                "skill_id": skill_id,
+                "skill_path": str(skill_path),
+                "registered_at": datetime.now().isoformat(),
+                "capabilities": self._infer_capabilities(skill_name),
+                "priority": 80,
+                "cost": {"time": "medium", "money": "low"},
+                "constraints": {
+                    "requires_api": True,
+                    "requires_claude_code_execution": True
+                },
+                "metadata": {
+                    "description": f"Custom Skill: {skill_name}",
+                    "note": "由 skill_cli.py 自动注册"
+                }
+            }
+            self.capabilities.setdefault("capabilities", []).append(new_cap)
+            print(f"➕ 添加 capability: {skill_name}")
+    
+    def _infer_capabilities(self, skill_name: str) -> List[str]:
+        """根据 skill 名称推断能力标签"""
+        name_lower = skill_name.lower()
+        caps = []
+        
+        if "ppt" in name_lower or "presentation" in name_lower:
+            caps.extend(["ppt_generation", "presentation_creation"])
+        if "excel" in name_lower or "xlsx" in name_lower:
+            caps.extend(["data_analysis", "spreadsheet_creation"])
+        if "doc" in name_lower or "word" in name_lower:
+            caps.extend(["document_creation", "text_editing"])
+        if "pdf" in name_lower:
+            caps.extend(["pdf_generation", "document_creation"])
+        if "analysis" in name_lower or "data" in name_lower:
+            caps.extend(["data_analysis"])
+        
+        # 默认能力
+        if not caps:
+            caps = ["custom_skill"]
+        
+        return caps
+    
+    def _remove_skill_id(self, skill_name: str):
+        """从 capability 中移除 skill_id"""
+        cap = self._find_capability(skill_name)
+        if cap and "skill_id" in cap:
+            del cap["skill_id"]
+            if "registered_at" in cap:
+                del cap["registered_at"]
+            print(f"🗑️ 移除 skill_id: {skill_name}")
+    
+    # ==================== CLI 命令 ====================
+    
+    def register(self, skill_name: str) -> bool:
+        """
+        注册 Skill 到 Claude 服务器
+        
+        Args:
+            skill_name: Skill 目录名称（在 skills/library/ 下）
+            
+        Returns:
+            是否成功
+        """
+        print(f"\n📦 注册 Skill: {skill_name}")
+        print("=" * 50)
+        
+        # 1. 验证 Skill 目录
+        skill_path = SKILLS_LIBRARY_PATH / skill_name
+        if not skill_path.exists():
+            print(f"❌ Skill 目录不存在: {skill_path}")
+            return False
+        
+        skill_md = skill_path / "SKILL.md"
+        if not skill_md.exists():
+            print(f"❌ SKILL.md 不存在: {skill_md}")
+            return False
+        
+        print(f"✅ Skill 目录验证通过: {skill_path}")
+        
+        # 2. 检查是否已注册
+        existing = self._find_capability(skill_name)
+        if existing and existing.get("skill_id"):
+            print(f"⚠️ Skill 已注册: {existing['skill_id']}")
+            confirm = input("是否重新注册? (y/N): ")
+            if confirm.lower() != 'y':
+                return False
+            # 先注销旧的
+            self.unregister(skill_name, skip_save=True)
+        
+        # 3. 注册到 Claude 服务器
+        print(f"📤 正在注册到 Claude 服务器...")
+        try:
+            skill = self.client.beta.skills.create(
+                display_title=skill_name,
+                files=files_from_dir(str(skill_path))
+            )
+            skill_id = skill.id
+            print(f"✅ 注册成功!")
+            print(f"   Skill ID: {skill_id}")
+            print(f"   Version: {skill.latest_version}")
+        except Exception as e:
+            print(f"❌ 注册失败: {e}")
+            return False
+        
+        # 4. 回写到 capabilities.yaml
+        self._add_or_update_capability(skill_name, skill_id, skill_path)
+        self._save_capabilities()
+        
+        print(f"\n✨ Skill 注册完成!")
+        print(f"   - skill_id 已自动写入 capabilities.yaml")
+        print(f"   - 运行时将自动使用此 Skill")
+        
+        return True
+    
+    def unregister(self, skill_name: str, skip_save: bool = False) -> bool:
+        """
+        注销 Skill
+        
+        Args:
+            skill_name: Skill 名称
+            skip_save: 是否跳过保存（内部使用）
+            
+        Returns:
+            是否成功
+        """
+        print(f"\n🗑️ 注销 Skill: {skill_name}")
+        print("=" * 50)
+        
+        # 1. 获取 skill_id
+        cap = self._find_capability(skill_name)
+        skill_id = cap.get("skill_id") if cap else None
+        
+        if not skill_id:
+            print(f"⚠️ Skill 未注册或无 skill_id: {skill_name}")
+            return False
+        
+        # 2. 从 Claude 服务器删除
+        print(f"📤 正在从 Claude 服务器删除...")
+        try:
+            # 先删除所有版本
+            versions = self.client.beta.skills.versions.list(skill_id=skill_id)
+            for version in versions.data:
+                self.client.beta.skills.versions.delete(
+                    skill_id=skill_id, 
+                    version=version.version
+                )
+                print(f"   删除版本: {version.version}")
+            
+            # 再删除 Skill
+            self.client.beta.skills.delete(skill_id)
+            print(f"✅ 从服务器删除成功")
+        except Exception as e:
+            print(f"⚠️ 服务器删除失败（可能已不存在）: {e}")
+        
+        # 3. 从 capabilities.yaml 移除 skill_id
+        self._remove_skill_id(skill_name)
+        if not skip_save:
+            self._save_capabilities()
+        
+        print(f"\n✨ Skill 注销完成!")
+        return True
+    
+    def list_skills(self):
+        """列出所有 Skills 状态"""
+        print(f"\n📋 Skills 状态")
+        print("=" * 70)
+        
+        # 1. 从 capabilities.yaml 读取
+        local_skills = {}
+        for cap in self.capabilities.get("capabilities", []):
+            if cap.get("type") == "SKILL" and cap.get("subtype") == "CUSTOM":
+                local_skills[cap["name"]] = {
+                    "skill_id": cap.get("skill_id"),
+                    "registered_at": cap.get("registered_at"),
+                    "skill_path": cap.get("skill_path")
+                }
+        
+        # 2. 从 Claude 服务器获取
+        print("📡 正在从 Claude 服务器获取...")
+        try:
+            server_skills = self.client.beta.skills.list(source="custom")
+            server_skill_ids = {s.id: s.display_title for s in server_skills.data}
+        except Exception as e:
+            print(f"⚠️ 无法连接服务器: {e}")
+            server_skill_ids = {}
+        
+        # 3. 显示状态
+        print(f"\n{'Skill 名称':<30} {'状态':<15} {'Skill ID':<25}")
+        print("-" * 70)
+        
+        all_names = set(local_skills.keys())
+        for name in sorted(all_names):
+            info = local_skills.get(name, {})
+            skill_id = info.get("skill_id")
+            
+            if skill_id:
+                if skill_id in server_skill_ids:
+                    status = "✅ 已注册"
+                else:
+                    status = "⚠️ 服务器不存在"
+            else:
+                status = "❌ 未注册"
+            
+            skill_id_display = skill_id[:20] + "..." if skill_id and len(skill_id) > 20 else (skill_id or "-")
+            print(f"{name:<30} {status:<15} {skill_id_display:<25}")
+        
+        # 4. 显示本地 skills/library/ 中未配置的 Skill
+        print(f"\n📁 本地 Skill 目录 ({SKILLS_LIBRARY_PATH}):")
+        if SKILLS_LIBRARY_PATH.exists():
+            for skill_dir in SKILLS_LIBRARY_PATH.iterdir():
+                if skill_dir.is_dir() and not skill_dir.name.startswith('_'):
+                    skill_md = skill_dir / "SKILL.md"
+                    if skill_md.exists():
+                        name = skill_dir.name
+                        if name in local_skills:
+                            if local_skills[name].get("skill_id"):
+                                print(f"   ✅ {name} (已注册)")
+                            else:
+                                print(f"   ⚠️ {name} (未注册)")
+                        else:
+                            print(f"   ➕ {name} (可注册)")
+    
+    def sync(self):
+        """同步 capabilities.yaml 与 Claude 服务器"""
+        print(f"\n🔄 同步 capabilities.yaml")
+        print("=" * 50)
+        
+        # 获取服务器状态
+        try:
+            server_skills = self.client.beta.skills.list(source="custom")
+            server_map = {s.display_title: s.id for s in server_skills.data}
+            print(f"📡 服务器上有 {len(server_map)} 个 Custom Skills")
+        except Exception as e:
+            print(f"❌ 无法连接服务器: {e}")
+            return
+        
+        # 检查本地配置
+        updated = False
+        for cap in self.capabilities.get("capabilities", []):
+            if cap.get("type") != "SKILL" or cap.get("subtype") != "CUSTOM":
+                continue
+            
+            name = cap.get("name")
+            local_skill_id = cap.get("skill_id")
+            server_skill_id = server_map.get(name)
+            
+            if server_skill_id and not local_skill_id:
+                # 服务器有但本地没有 → 同步到本地
+                cap["skill_id"] = server_skill_id
+                cap["registered_at"] = datetime.now().isoformat()
+                print(f"   ➕ 同步 skill_id: {name} → {server_skill_id}")
+                updated = True
+            elif local_skill_id and local_skill_id not in [s.id for s in server_skills.data]:
+                # 本地有但服务器没有 → 标记为失效
+                print(f"   ⚠️ skill_id 已失效: {name} ({local_skill_id})")
+        
+        if updated:
+            self._save_capabilities()
+            print(f"\n✅ 同步完成")
+        else:
+            print(f"\n✅ 无需同步")
+    
+    def update(self, skill_name: str) -> bool:
+        """
+        更新 Skill 版本
+        
+        Args:
+            skill_name: Skill 名称
+            
+        Returns:
+            是否成功
+        """
+        print(f"\n🔄 更新 Skill: {skill_name}")
+        print("=" * 50)
+        
+        # 1. 获取 skill_id
+        cap = self._find_capability(skill_name)
+        skill_id = cap.get("skill_id") if cap else None
+        
+        if not skill_id:
+            print(f"❌ Skill 未注册: {skill_name}")
+            print(f"   请先运行: python scripts/skill_cli.py register --skill {skill_name}")
+            return False
+        
+        # 2. 验证本地目录
+        skill_path = SKILLS_LIBRARY_PATH / skill_name
+        if not skill_path.exists():
+            print(f"❌ Skill 目录不存在: {skill_path}")
+            return False
+        
+        # 3. 创建新版本
+        print(f"📤 正在创建新版本...")
+        try:
+            version = self.client.beta.skills.versions.create(
+                skill_id=skill_id,
+                files=files_from_dir(str(skill_path))
+            )
+            print(f"✅ 更新成功!")
+            print(f"   新版本: {version.version}")
+        except Exception as e:
+            print(f"❌ 更新失败: {e}")
+            return False
+        
+        return True
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Skill 管理 CLI - 统一管理 Custom Skills 的注册/注销",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+示例:
+  # 注册 Skill（自动回写 skill_id 到 capabilities.yaml）
+  python scripts/skill_cli.py register --skill professional-ppt-generator
+
+  # 列出所有 Skills 状态
+  python scripts/skill_cli.py list
+
+  # 注销 Skill
+  python scripts/skill_cli.py unregister --skill professional-ppt-generator
+
+  # 更新 Skill 版本
+  python scripts/skill_cli.py update --skill professional-ppt-generator
+
+  # 同步本地配置与服务器
+  python scripts/skill_cli.py sync
+        """
+    )
+    
+    subparsers = parser.add_subparsers(dest="command", help="命令")
+    
+    # register 命令
+    register_parser = subparsers.add_parser("register", help="注册 Skill 到 Claude 服务器")
+    register_parser.add_argument("--skill", "-s", required=True, help="Skill 目录名称")
+    
+    # unregister 命令
+    unregister_parser = subparsers.add_parser("unregister", help="注销 Skill")
+    unregister_parser.add_argument("--skill", "-s", required=True, help="Skill 名称")
+    
+    # list 命令
+    subparsers.add_parser("list", help="列出所有 Skills 状态")
+    
+    # update 命令
+    update_parser = subparsers.add_parser("update", help="更新 Skill 版本")
+    update_parser.add_argument("--skill", "-s", required=True, help="Skill 名称")
+    
+    # sync 命令
+    subparsers.add_parser("sync", help="同步 capabilities.yaml 与 Claude 服务器")
+    
+    args = parser.parse_args()
+    
+    if not args.command:
+        parser.print_help()
+        return
+    
+    try:
+        cli = SkillCLI()
+        
+        if args.command == "register":
+            cli.register(args.skill)
+        elif args.command == "unregister":
+            cli.unregister(args.skill)
+        elif args.command == "list":
+            cli.list_skills()
+        elif args.command == "update":
+            cli.update(args.skill)
+        elif args.command == "sync":
+            cli.sync()
+            
+    except Exception as e:
+        print(f"❌ 错误: {e}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
+

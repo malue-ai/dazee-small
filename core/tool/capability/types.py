@@ -48,6 +48,13 @@ class Capability:
     constraints: Dict[str, Any]  # 约束条件
     metadata: Dict[str, Any]     # 扩展信息（description, keywords, preferred_for 等）
     input_schema: Optional[Dict] = None  # 工具输入 Schema（用于 Claude API）
+    fallback_tool: Optional[str] = None  # 替代工具（SKILL 无法执行时使用的 TOOL）
+    skill_id: Optional[str] = None       # 🆕 Claude Skill ID（注册后由 Claude 返回）
+    skill_path: Optional[str] = None     # 🆕 Skill 本地路径（用于注册）
+    
+    # 🆕 工具分层配置（V4.2.4）
+    level: int = 2                       # 工具层级：1=核心（始终加载）, 2=动态（按需加载）
+    cache_stable: bool = False           # 结果是否稳定可缓存（同输入同输出）
     
     def matches_keywords(self, keywords: List[str]) -> int:
         """

@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2024年中国AI市场分析</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        
+        .slide {
+            padding: 60px 80px;
+            min-height: 600px;
+            page-break-after: always;
+            display: none;
+        }
+        
+        .slide.active {
+            display: block;
+        }
+        
+        .cover {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+        }
+        
+        .cover h1 {
+            font-size: 56px;
+            margin-bottom: 20px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .cover .subtitle {
+            font-size: 28px;
+            opacity: 0.9;
+            margin-bottom: 40px;
+        }
+        
+        .cover .date {
+            font-size: 20px;
+            opacity: 0.8;
+        }
+        
+        h2 {
+            color: #667eea;
+            font-size: 42px;
+            margin-bottom: 40px;
+            border-bottom: 4px solid #667eea;
+            padding-bottom: 15px;
+        }
+        
+        h3 {
+            color: #764ba2;
+            font-size: 28px;
+            margin: 30px 0 20px;
+        }
+        
+        .content {
+            font-size: 20px;
+            line-height: 1.8;
+            color: #333;
+        }
+        
+        .highlight-box {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            padding: 30px;
+            border-radius: 15px;
+            margin: 20px 0;
+            border-left: 5px solid #667eea;
+        }
+        
+        .stat {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 10px 25px;
+            border-radius: 25px;
+            font-size: 24px;
+            font-weight: bold;
+            margin: 10px;
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin: 30px 0;
+        }
+        
+        .card {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 12px;
+            border: 2px solid #e9ecef;
+            transition: transform 0.3s;
+        }
+        
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+        
+        .card h4 {
+            color: #667eea;
+            font-size: 22px;
+            margin-bottom: 15px;
+        }
+        
+        ul {
+            margin-left: 30px;
+        }
+        
+        li {
+            margin: 12px 0;
+            font-size: 20px;
+        }
+        
+        .source {
+            font-size: 14px;
+            color: #666;
+            font-style: italic;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #ddd;
+        }
+        
+        .navigation {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            z-index: 1000;
+        }
+        
+        .nav-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            margin: 0 5px;
+            border-radius: 30px;
+            cursor: pointer;
+            font-size: 18px;
+            transition: all 0.3s;
+        }
+        
+        .nav-btn:hover {
+            background: #764ba2;
+            transform: scale(1.05);
+        }
+        
+        .page-indicator {
+            position: fixed;
+            top: 30px;
+            right: 30px;
+            background: rgba(102, 126, 234, 0.9);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 16px;
+        }
+        
+        @media print {
+            body {
+                background: white;
+            }
+            .slide {
+                display: block !important;
+                page-break-after: always;
+            }
+            .navigation, .page-indicator {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="page-indicator" id="pageIndicator">1 / 8</div>
+    
+    <div class="container">
+        <!-- 封面 -->
+        <div class="slide active cover">
+            <h1>📊 2024年中国AI市场分析</h1>
+            <div class="subtitle">市场规模 · 竞争格局 · 技术趋势 · 投资机会</div>
+            <div class="date">2024年度深度研究报告</div>
+        </div>
+        
+        <!-- 目录 -->
+        <div class="slide">
+            <h2>📋 目录</h2>
+            <div class="content">
+                <div class="card" style="margin: 20px 0;">
+                    <h4>01 市场规模和增长趋势</h4>
+                    <p>整体市场规模、细分领域、增长动力</p>
+                </div>
+                <div class="card" style="margin: 20px 0;">
+                    <h4>02 主要玩家和竞争格局</h4>
+                    <p>头部企业、市场份额、竞争态势</p>
+                </div>
+                <div class="card" style="margin: 20px 0;">
+                    <h4>03 关键技术趋势</h4>
+                    <p>大模型、AIGC、AI Agent、多模态</p>
+                </div>
+                <div class="card" style="margin: 20px 0;">
+                    <h4>04 投资机会</h4>
+                    <p>融资数据、热门赛道、投资建议</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 市场规模 -->
+        <div class="slide">
+            <h2>💰 市场规模和增长趋势</h2>
+            <div class="content">
+                <div class="highlight-box">
+                    <h3>🚀 整体市场规模</h3>
+                    <p><span class="stat">7,470亿元</span> 2024年中国AI行业市场规模</p>
+                    <p><span class="stat">41%</span> 同比增长率</p>
+                    <p><span class="stat">195.9亿元</span> AI公有云服务市场规模</p>
+                    <p><span class="stat">55.3%</span> 云服务同比增长</p>
+                </div>
+                
+                <div class="grid">
+                    <div class="card">
+                        <h4>📈 细分市场</h4>
+                        <ul>
+                            <li>AI大模型：294.16亿元</li>
+                            <li>AI芯片：1,447亿元</li>
+                            <li>计算机视觉：81亿元（+33.7%）</li>
+                            <li>自然语言处理：22.2亿元（+51.1%）</li>
+                        </ul>
+                    </div>
+                    <div class="card">
+                        <h4>🎯 增长预测</h4>
+                        <ul>
+                            <li>2026年大模型市场将突破700亿元</li>
+                            <li>2035年生成式AI将超30万亿元</li>
+                            <li>AI芯片年复合增长率79.9%</li>
+                            <li>云服务持续高速增长</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="source">
+                    数据来源：艾媒咨询《2024-2025年中国人工智能行业发展趋势研究报告》、IDC、前瞻产业研究院
+                </div>
+            </div>
+        </div>
+        
+        <!-- 市场驱动力 -->
+        <div class="slide">
+            <h2>⚡ 市场增长驱动力</h2>
+            <div class="content">
+                <div class="grid">
+                    <div class="card">
+                        <h4>🏛️ 政策支持</h4>
+                        <ul>
+                            <li>"人工智能+"行动全面实施</li>
+                            <li>"十四五"规划重点布局</li>
+                            <li>各地出台AI产业扶持政策</li>
+                            <li>"东数西算"工程推进算力建设</li>
+                        </ul>
+                    </div>
+                    <div class="card">
+                        <h4>💻 算力基础</h4>
+                        <ul>
+                            <li>全国30+城市建设智算中心</li>
+                            <li>云计算市场达3097.3亿元</li>
+                            <li>GPU等AI芯片快速发展</li>
+                            <li>算力规模持续扩大</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="grid">
+                    <div class="card">
+                        <h4>🔬 技术突破</h4>
+                        <ul>
+                            <li>大模型技术快速迭代</li>
+                            <li>多模态AI能力提升</li>
+                            <li>AI Agent自主性增强</li>
+                            <li>AIGC应用场景拓展</li>
+                        </ul>
+                    </div>
+                    <div class="card">
+                        <h4>📱 应用普及</h4>
+<li>金融、医疗等行业渗透率超50%</li>
+                            <li>企业数字化转型需求旺盛</li>
+                            <li>AI手机市场快速增长</li>
+                            <li>垂直行业应用深化</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="source">
+                    数据来源：中国信通院《人工智能发展报告(2024年)》、工信部
+                </div>
+            </div>
+        </div>
+        
+        <!-- 竞争格局 -->
+        <div class="slide">
+            <h2>🏆 主要玩家和竞争格局</h2>
+            <div class="content">
+                <h3>头部企业布局</h3>
+                <div class="grid">
+                    <div class="card">
+                        <h4>🔵 百度</h4>
+                        <p><strong>文心大模型系列</strong></p>
+                        <ul>
+                            <li>文心一言用户超1亿</li>
+                            <li>搜索+AI深度融合</li>
+                            <li>NLP、CV、跨模态全覆盖</li>
+                        </ul>
+                    </div>
+                    <div class="card">
+                        <h4>🟠 阿里巴巴</h4>
+                        <p><strong>通义千问系列</strong></p>
+                        <ul>
+                            <li>电商+AI场景优势</li>
+                            <li>云服务生态整合</li>
+                            <li>多模态大模型布局</li>
+                        </ul>
+                    </div>
+                    <div class="card">
+                        <h4>🟢 腾讯</h4>
+                        <p><strong>混元大模型</strong></p>
+                        <ul>
+                            <li>社交+内容AI赋能</li>
+                            <li>游戏AI技术领先</li>
+                            <li>计算机视觉市场第一</li>
+                        </ul>
+                    </div>
+                    <div class="card">
+                        <h4>🔴 华为</h4>
+                        <p><strong>盘古大模型</strong></p>
+                        <ul>
+                            <li>To B行业大模型专家</li>
+                            <li>算力+芯片全栈布局</li>
+                            <li>政企市场优势明显</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="highlight-box">
+                    <h4>🌟 新兴力量</h4>
+                    <p>字节跳动（豆包）、科大讯飞（星火）、商汤科技、旷视科技、月之暗面（Kimi）、百川智能、智谱AI等</p>
+                </div>
+                
+                <div class="source">
+                    数据来源：艾瑞咨询《2024年中国人工智能产业研究报告》、各企业公开信息
+                </div>
+            </div>
+        </div>
+        
+        <!-- 技术趋势 -->
+        <div class="slide">
+            <h2>🚀 关键技术趋势</h2>
+            <div class="content">
+                <div class="grid">
+                    <div class="card">
+                        <h4>🤖 大模型（LLM）</h4>
+                        <ul>
+                            <li><strong>参数规模持续扩大</strong>：千亿级成主流</li>
+                            <li><strong>多模态融合</strong>：文本、图像、音频统一</li>
+                            <li><strong>垂直领域模型</strong>：金融、医疗专用大模型</li>
+                            <li><strong>端侧大模型</strong>：手机、PC本地化运行</li>
+                        </ul>
+                    </div>
+                    <div class="card">
+                        <h4>🎨 生成式AI（AIGC）</h4>
+                        <ul>
+                            <li><strong>内容创作</strong>：文案、设计、视频生成</li>
+                            <li><strong>代码生成</strong>：提升开发效率</li>
+                            <li><strong>数据增强</strong>：合成训练数据</li>
+                            <li><strong>2024市场规模14.4万亿元</strong></li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="grid">
+                    <div class="card">
+                        <h4>🦾 AI Agent（智能体）</h4>
+                        <ul>
+                            <li><strong>自主决策能力</strong>：无需人工干预</li>
+                            <li><strong>任务分解执行</strong>：复杂任务自动完成</li>
+                            <li><strong>多Agent协同</strong>：团队化工作模式</li>
+                            <li><strong>2025进入Agent时代</strong></li>
+                        </ul>
+                    </div>
+                    <div class="card">
+                        <h4>💡 其他关键趋势</h4>
+                        <ul>
+                            <li><strong>AI+安全</strong>：防护新需求</li>
+                            <li><strong>边缘AI</strong>：降低延迟</li>
+                            <li><strong>可解释AI</strong>：提升透明度</li>
+                            <li><strong>联邦学习</strong>：隐私保护</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="source">
+                    数据来源：中国软件评测中心《2024人工智能大语言模型技术发展研究报告》、腾讯研究院
+                </div>
+            </div>
+        </div>
+        
+        <!-- 投资机会 -->
+        <div class="slide">
+            <h2>💎 投资机会</h2>
+            <div class="content">
+                <div class="highlight-box">
+                    <h3>📊 投融资数据</h3>
+                    <p><span class="stat">1,000亿元+</span> 2024年AI行业融资总额</p>
+                    <p><span class="stat">50%</span> AI公司成立3年内获投</p>
+                    <p><span class="stat">850亿元</span> 头部项目融资规模</p>
+                </div>
+                
+                <div class="grid">
+                    <div class="card">
+                        <h4>🔥 热门投资赛道</h4>
+                        <ul>
+                            <li><strong>大模型基础设施</strong>：算力、芯片、训练平台</li>
+                            <li><strong>垂直行业应用</strong>：金融、医疗、教育</li>
+                            <li><strong>AIGC工具</strong>：内容生成、设计工具</li>
+                            <li><strong>AI Agent平台</strong>：智能体开发与运营</li>
+                        </ul>
+                    </div>
+                    <div class="card">
+                        <h4>🎯 高渗透率行业</h4>
+                        <ul>
+                            <li><strong>金融</strong>：渗透率>50%，风控+投顾</li>
+                            <li><strong>政府</strong>：渗透率>50%，智慧城市</li>
+                            <li><strong>教育</strong>：渗透率>50%，个性化学习</li>
+                            <li><strong>医疗</strong>：影像诊断+新药研发</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="grid">
+                    <div class="card">
+                        <h4>💰 投资建议</h4>
+                        <ul>
+                            <li>关注技术护城河企业</li>
+                            <li>优选有数据积累的垂直场景</li>
+                            <li>重视应用层商业化能力</li>
+                            <li>关注政策扶持领域</li>
+                        </ul>
+                    </div>
+                    <div class="card">
+                        <h4>⚠️ 风险提示</h4>
+                        <ul>
+                            <li>技术迭代快，落后风险高</li>
+                            <li>算力成本居高不下</li>
+                            <li>数据安全与合规挑战</li>
+                            <li>市场竞争激烈</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="source">
+                    数据来源：清科研究中心《中国AI产业投资蓝皮书》、IT桔子、投中网
+                </div>
+            </div>
+        </div>
+        
+        <!-- 总结 -->
+        <div class="slide">
+            <h2>📝 核心结论</h2>
+            <div class="content">
+                <div class="highlight-box">
+                    <h3>🌟 市场展望</h3>
+                    <ul style="font-size: 22px; line-height: 2;">
+                        <li><strong>爆发式增长</strong>：2024年市场规模7,470亿元，未来3年CAGR超40%</li>
+                        <li><strong>政策红利</strong>："人工智能+"行动持续推进，算力基础设施加速建设</li>
+                        <li><strong>技术成熟</strong>：大模型进入应用落地期，2025年开启AI Agent时代</li>
+                        <li><strong>竞争激烈</strong>：BAT+华为领跑，新兴企业快速崛起</li>
+                        <li><strong>投资活跃</strong>：年度融资超千亿，垂直应用成投资热点</li>
+                    </ul>
+                </div>
+                
+                <div class="grid" style="margin-top: 40px;">
+                    <div class="card">
+                        <h4>✅ 机遇</h4>
+                        <ul>
+                            <li>万亿级市场空间</li>
+                            <li>产业数字化转型需求</li>
+                            <li>技术持续突破</li>
+                            <li>资本持续涌入</li>
+                        </ul>
+                    </div>
+                    <div class="card">
+                        <h4>⚡ 挑战</h4>
+                        <ul>
+                            <li>技术门槛高</li>
+                            <li>算力资源稀缺</li>
+                            <li>商业化路径待验证</li>
+                            <li>数据安全与合规</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 50px; text-align: center; font-size: 24px; color: #667eea; font-weight: bold;">
+                    🚀 2024-2026是中国AI产业的黄金发展期
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="navigation">
+        <button class="nav-btn" onclick="prevSlide()">◀ 上一页</button>
+        <button class="nav-btn" onclick="nextSlide()">下一页 ▶</button>
+    </div>
+    
+    <script>
+        let currentSlide = 0;
+        const slides = document.querySelectorAll('.slide');
+        const totalSlides = slides.length;
+        
+        function showSlide(n) {
+            slides[currentSlide].classList.remove('active');
+            currentSlide = (n + totalSlides) % totalSlides;
+            slides[currentSlide].classList.add('active');
+            document.getElementById('pageIndicator').textContent = `${currentSlide + 1} / ${totalSlides}`;
+        }
+        
+        function nextSlide() {
+            showSlide(currentSlide + 1);
+        }
+        
+        function prevSlide() {
+            showSlide(currentSlide - 1);
+        }
+        
+        // 键盘导航
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'ArrowRight' || e.key === ' ') {
+                nextSlide();
+            } else if (e.key === 'ArrowLeft') {
+                prevSlide();
+            }
+        });
+        
+        // 触摸滑动支持
+        let touchStartX = 0;
+        let touchEndX = 0;
+        
+        document.addEventListener('touchstart', e => {
+            touchStartX = e.changedTouches[0].screenX;
+        });
+        
+        document.addEventListener('touchend', e => {
+            touchEndX = e.changedTouches[0].screenX;
+            if (touchStartX - touchEndX > 50) {
+                nextSlide();
+            } else if (touchEndX - touchStartX > 50) {
+                prevSlide();
+            }
+        });
+    </script>
+</body>
+</html>

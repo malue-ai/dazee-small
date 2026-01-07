@@ -109,8 +109,8 @@ class IntentAnalyzerConfig(ComponentConfig):
     
     # LLM 模型（用于意图分析的轻量模型）
     llm_model: str = Field(
-        default="claude-3-5-haiku-20241022",
-        description="意图分析使用的 LLM 模型"
+        default="claude-haiku-4-5-20251001",
+        description="意图分析使用的 LLM 模型（Haiku 4.5 支持 64K output tokens）"
     )
 
 
