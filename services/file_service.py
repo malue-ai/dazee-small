@@ -16,7 +16,7 @@ File 服务层 - 文件管理业务逻辑
 from logger import get_logger
 from typing import Dict, Any, Optional, List
 from datetime import datetime
-import magic  # type: ignore
+import filetype  # 纯 Python 文件类型检测，无需系统依赖
 from infra.database import AsyncSessionLocal, crud
 from utils import get_s3_uploader
 
@@ -34,9 +34,44 @@ def detect_mime_type(file_content: bytes, filename: str) -> str:
     Returns:
         MIME 类型
     """
-    mime = magic.from_buffer(file_content, mime=True)
-    logger.debug(f"检测 MIME: {filename} -> {mime}")
-    return mime
+    # 使用 filetype 检测
+    kind = filetype.guess(file_content)
+    
+    if kind is not None:
+        mime = kind.mime
+        logger.debug(f"检测 MIME: {filename} -> {mime}")
+        return mime
+    
+    # 如果无法检测，使用简单的后缀名映射
+    fallback_mime = _get_mime_from_extension(filename)
+    logger.debug(f"检测 MIME（后备）: {filename} -> {fallback_mime}")
+    return fallback_mime
+
+
+def _get_mime_from_extension(filename: str) -> str:
+    """根据文件扩展名返回 MIME 类型（后备方案）"""
+    ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+    
+    mime_map = {
+        'txt': 'text/plain',
+        'pdf': 'application/pdf',
+        'json': 'application/json',
+        'xml': 'application/xml',
+        'html': 'text/html',
+        'css': 'text/css',
+        'js': 'application/javascript',
+        'png': 'image/png',
+        'jpg': 'image/jpeg',
+        'jpeg': 'image/jpeg',
+        'gif': 'image/gif',
+        'svg': 'image/svg+xml',
+        'mp4': 'video/mp4',
+        'mp3': 'audio/mpeg',
+        'zip': 'application/zip',
+        'gz': 'application/gzip',
+    }
+    
+    return mime_map.get(ext, 'application/octet-stream')
 
 
 class FileServiceError(Exception):

@@ -81,23 +81,28 @@ subscriptions:
   #     session: "{{ session_id }}"
   #     timestamp: "{{ timestamp }}"
 
-  # ==================== 示例 5: ZenO 系统 ====================
+  # ==================== ZenO 系统集成（已启用）====================
   # 将 Zenflux 事件转换为 ZenO SSE 规范 v2.0.1 格式
-  # - name: "zeno_integration"
-  #   adapter: "zeno"
-  #   endpoint: "https://zeno.example.com/api/sse/events"
-  #   enabled: false
-  #   events:
-  #     - "message_start"
-  #     - "message_stop"
-  #     - "content_delta"
-  #     - "message_delta"
-  #     - "message_delta:plan"
-  #     - "message_delta:recommended"
-  #     - "message_delta:confirmation_request"
-  #     - "error"
-  #   timeout: 5.0
-  #   retry_count: 2
+  - name: "zeno_integration"
+    adapter: "zeno"
+    endpoint: "http://localhost:8080/api/sse/events"  # 测试用本地端点
+    enabled: true
+    conversation_id: "test_conv_001"  # 可选，会话ID
+    events:
+      - "message_start"
+      - "message_stop"
+      - "content_delta"
+      - "message_delta"
+      - "message_delta:plan"
+      - "message_delta:recommended"
+      - "message_delta:confirmation_request"
+      - "error"
+      - "session_end"
+    timeout: 5.0
+    retry_count: 2
+    headers:
+      X-Source: "zenflux-agent"
+      X-Version: "v2.0.1"
 
   # ==================== 示例 6: 订阅所有事件（调试用） ====================
   # - name: "debug_webhook"

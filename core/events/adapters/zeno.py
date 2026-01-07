@@ -98,9 +98,6 @@ class ZenOAdapter(EventAdapter):
         if event_type == "error":
             return self._transform_error(event, message_id, timestamp)
         
-        if event_type == "session_end":
-            return self._transform_session_end(event, message_id, timestamp)
-        
         # 其他事件暂不转换
         return None
     

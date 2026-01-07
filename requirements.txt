@@ -14,13 +14,11 @@ python-dotenv>=1.0.0
 python-multipart==0.0.6
 aiofiles>=23.0.0          # 异步文件操作
 aiohttp>=3.9.0            # 异步 HTTP 客户端
-python-magic>=0.4.27      # 文件类型检测
+filetype>=1.2.0           # 文件类型检测（纯 Python，无需系统依赖）
 
 # 数据库
 aiosqlite>=0.19.0
 sqlalchemy[asyncio]>=2.0.0
-asyncpg>=0.29.0           # PostgreSQL 异步驱动
-aiomysql>=0.2.0           # MySQL 异步驱动（可选）
 alembic>=1.13.0           # 数据库迁移
 
 # Redis（Session 管理和 SSE 重连）

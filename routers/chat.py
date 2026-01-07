@@ -16,6 +16,7 @@ Chat 路由层 - 仅处理 HTTP 请求/响应
 from logger import get_logger
 import json
 import asyncio
+import time
 from enum import Enum
 from fastapi import APIRouter, HTTPException, BackgroundTasks, status, Query
 from fastapi.responses import StreamingResponse
@@ -140,7 +141,11 @@ def sanitize_for_json(obj: Any) -> Any:
 # ==================== 聊天接口 ====================
 
 @router.post("/chat")
-async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
+async def chat(
+    request: ChatRequest, 
+    background_tasks: BackgroundTasks,
+    format: str = Query("zeno", description="事件格式：zeno（ZenO SSE 规范 v2.0.1，默认）或 zenflux（原始格式）")
+):
     """
     统一聊天接口（支持流式和同步两种模式）
     
@@ -266,6 +271,13 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
         
         # ===== 流式模式（默认） =====
         if request.stream:
+            # 初始化格式适配器
+            adapter = None
+            if format == "zeno":
+                from core.events.adapters.zeno import ZenOAdapter
+                adapter = ZenOAdapter(conversation_id=request.conversation_id)
+                logger.info("📋 使用 ZenO 格式适配器")
+            
             async def event_generator():
                 """生成 SSE 事件流"""
                 try:
@@ -279,44 +291,62 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
                         background_tasks=request.background_tasks,
                         files=files_data
                     ):
-                        event_type = event.get("type", "message")
-                        event_uuid = event.get("event_uuid", "")
+                        # 格式转换
+                        if adapter:
+                            transformed_event = adapter.transform(event)
+                            if transformed_event is None:
+                                # 适配器过滤了此事件，跳过
+                                continue
+                            event = transformed_event
                         
-                        yield f"id: {event_uuid}\n"
-                        yield f"event: {event_type}\n"
+                        # ZenO 格式只输出 data 行
                         yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-                    
-                    yield f"event: done\n"
-                    yield f"data: {{}}\n\n"
                 
                 except AgentExecutionError as e:
                     logger.error(f"❌ 流式对话错误: {str(e)}")
-                    error_response = create_error_response(
-                        ErrorCode.AGENT_ERROR,
-                        "对话处理失败，请稍后重试"
-                    )
-                    yield f"event: error\n"
-                    yield f"data: {json.dumps(error_response, ensure_ascii=False)}\n\n"
+                    error_event = {
+                        "type": "message.assistant.error",
+                        "message_id": request.message_id or "",
+                        "timestamp": int(time.time() * 1000),
+                        "error": {
+                            "type": "business",
+                            "code": "AGENT_ERROR",
+                            "message": "对话处理失败，请稍后重试",
+                            "retryable": True
+                        }
+                    }
+                    yield f"data: {json.dumps(error_event, ensure_ascii=False)}\n\n"
                     
                 except ConnectionError as e:
                     logger.error(f"❌ 连接错误: {str(e)}", exc_info=True)
-                    error_response = create_error_response(
-                        ErrorCode.EXTERNAL_SERVICE_ERROR,
-                        "服务连接失败，请稍后重试"
-                    )
-                    yield f"event: error\n"
-                    yield f"data: {json.dumps(error_response, ensure_ascii=False)}\n\n"
+                    error_event = {
+                        "type": "message.assistant.error",
+                        "message_id": request.message_id or "",
+                        "timestamp": int(time.time() * 1000),
+                        "error": {
+                            "type": "network",
+                            "code": "CONNECTION_ERROR",
+                            "message": "服务连接失败，请稍后重试",
+                            "retryable": True
+                        }
+                    }
+                    yield f"data: {json.dumps(error_event, ensure_ascii=False)}\n\n"
                     
                 except Exception as e:
                     logger.error(f"❌ 流式对话错误: {str(e)}", exc_info=True)
-                    # 清理敏感信息
                     safe_message = sanitize_error_message(e)
-                    error_response = create_error_response(
-                        ErrorCode.INTERNAL_ERROR,
-                        safe_message
-                    )
-                    yield f"event: error\n"
-                    yield f"data: {json.dumps(error_response, ensure_ascii=False)}\n\n"
+                    error_event = {
+                        "type": "message.assistant.error",
+                        "message_id": request.message_id or "",
+                        "timestamp": int(time.time() * 1000),
+                        "error": {
+                            "type": "unknown",
+                            "code": "INTERNAL_ERROR",
+                            "message": safe_message,
+                            "retryable": False
+                        }
+                    }
+                    yield f"data: {json.dumps(error_event, ensure_ascii=False)}\n\n"
             
             return StreamingResponse(
                 event_generator(),
@@ -391,7 +421,8 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
 @router.get("/chat/{session_id}")
 async def reconnect_chat_stream(
     session_id: str,
-    after_seq: Optional[int] = Query(None, description="从哪个序号之后开始（断点续传）")
+    after_seq: Optional[int] = Query(None, description="从哪个序号之后开始（断点续传）"),
+    format: str = Query("zeno", description="事件格式：zeno（ZenO SSE 规范 v2.0.1，默认）或 zenflux（原始格式）")
 ):
     """
     重连到已存在的 Session SSE 流（断线重连）
@@ -453,6 +484,13 @@ async def reconnect_chat_stream(
                 )
             )
         
+        # 初始化格式适配器
+        adapter = None
+        if format == "zeno":
+            from core.events.adapters.zeno import ZenOAdapter
+            adapter = ZenOAdapter(conversation_id=status_data.get("conversation_id"))
+            logger.info("📋 重连使用 ZenO 格式适配器")
+        
         async def reconnect_event_generator():
             """重连事件生成器"""
             try:
@@ -487,11 +525,16 @@ async def reconnect_chat_stream(
                 if history_events:
                     logger.info(f"📤 推送 {len(history_events)} 个历史事件")
                     for event in history_events:
-                        event_type = event.get("type", "message")
-                        event_uuid = event.get("event_uuid", "")
+                        # 格式转换
+                        if adapter:
+                            transformed_event = adapter.transform(event)
+                            if transformed_event is None:
+                                continue
+                            event = transformed_event
                         
-                        yield f"id: {event_uuid}\n"
-                        yield f"event: {event_type}\n"
+                        event_type = event.get("type", "message")
+                        event_uuid = event.get("event_uuid", "") or event.get("timestamp", "")
+                        
                         yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
                 
                 # 🎯 第3步：订阅 Pub/Sub 实时推送新事件
@@ -510,15 +553,22 @@ async def reconnect_chat_stream(
                     after_id=last_seq,
                     timeout=300  # 5 分钟超时
                 ):
+                    # 格式转换
+                    if adapter:
+                        transformed_event = adapter.transform(event)
+                        if transformed_event is None:
+                            continue
+                        event = transformed_event
+                    
                     event_type = event.get("type", "message")
-                    event_uuid = event.get("event_uuid", "")
+                    event_uuid = event.get("event_uuid", "") or event.get("timestamp", "")
                     
                     yield f"id: {event_uuid}\n"
                     yield f"event: {event_type}\n"
                     yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
                     
                     # 检查是否结束
-                    if event_type in ["session_end", "message_complete"]:
+                    if event_type in ["session_end", "message_complete", "message.assistant.done"]:
                         break
                 
                 # 发送完成事件

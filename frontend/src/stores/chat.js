@@ -12,7 +12,7 @@ export const useChatStore = defineStore('chat', {
     sseConnection: null,
     lastEventId: 0,
     reconnectAttempts: 0,
-    maxReconnectAttempts: 3
+    maxReconnectAttempts: 3,
   }),
 
   actions: {
