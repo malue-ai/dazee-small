@@ -286,26 +286,27 @@
     <!-- 工作区面板 -->
     <div v-if="showWorkspacePanel && chatStore.conversationId" class="workspace-drawer">
        <div class="drawer-header">
-         <h3>项目文件</h3>
-         <button @click="showWorkspacePanel = false" class="icon-btn">✕</button>
+         <h3>📁 项目文件</h3>
+         <button @click="showWorkspacePanel = false" class="drawer-close-btn">✕</button>
        </div>
        <div class="drawer-body">
           <div class="workspace-explorer">
              <FileExplorer 
                 :conversation-id="chatStore.conversationId"
                 @file-select="handleFilePreviewSelect"
+                @run-project="handleRunProjectFromExplorer"
              />
           </div>
           <div v-if="previewFile" class="workspace-preview-pane">
-             <div class="preview-header">
-               <span>{{ previewFile.name }}</span>
-               <button @click="previewFile = null">✕</button>
-             </div>
              <FilePreview
                 :conversation-id="chatStore.conversationId"
                 :file-path="previewFile.path"
                 @close="previewFile = null"
              />
+          </div>
+          <div v-else class="workspace-empty-preview">
+             <div class="empty-preview-icon">📄</div>
+             <p>选择文件查看内容</p>
           </div>
        </div>
     </div>
@@ -424,6 +425,7 @@
 import { ref, computed, nextTick, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
+import { useWorkspaceStore } from '@/stores/workspace'
 import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
 import MessageContent from '@/components/MessageContent.vue'
 import PlanWidget from '@/components/PlanWidget.vue'
@@ -435,6 +437,7 @@ import MermaidPanel from '@/components/MermaidPanel.vue'
 const router = useRouter()
 const route = useRoute()
 const chatStore = useChatStore()
+const workspaceStore = useWorkspaceStore()
 const messagesContainer = ref(null)
 const inputTextarea = ref(null)
 
@@ -1105,6 +1108,31 @@ function askRecommendedQuestion(q) {
 function toggleRightSidebar() { showRightSidebar.value = !showRightSidebar.value }
 function toggleWorkspace() { showWorkspacePanel.value = !showWorkspacePanel.value }
 function handleFilePreviewSelect(file) { previewFile.value = file }
+
+// 处理从文件浏览器运行项目
+async function handleRunProjectFromExplorer(project) {
+  console.log('🚀 开始运行项目:', project)
+  
+  try {
+    const result = await workspaceStore.runProject(
+      chatStore.conversationId,
+      project.name,
+      project.type
+    )
+    
+    console.log('📦 运行结果:', result)
+    
+    if (result.success && result.preview_url) {
+      console.log('✅ 打开预览:', result.preview_url)
+      window.open(result.preview_url, '_blank')
+    } else if (!result.success) {
+      alert('启动项目失败: ' + (result.error || result.message))
+    }
+  } catch (error) {
+    console.error('❌ 运行项目失败:', error)
+    alert('运行项目失败: ' + (error.response?.data?.detail || error.message))
+  }
+}
 
 // 处理 Mermaid 图表检测
 function handleMermaidDetected(charts) {
@@ -1944,30 +1972,58 @@ textarea::placeholder {
   background: #f9fafb;
 }
 
-/* --- 悬浮面板 --- */
+/* --- 工作区悬浮面板（暗色主题） --- */
 .workspace-drawer {
   position: absolute;
   top: 0;
   bottom: 0;
   right: 0;
-  width: 600px;
-  background: #ffffff;
-  border-left: 1px solid #e5e7eb;
+  width: 700px;
+  background: #0f0f1a;
+  border-left: 1px solid #2d2d44;
   z-index: 20;
   display: flex;
   flex-direction: column;
-  box-shadow: -4px 0 24px rgba(0,0,0,0.1);
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.4);
 }
 
 .drawer-header {
-  height: 50px;
+  height: 56px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
-  border-bottom: 1px solid #f3f4f6;
-  font-weight: 500;
-  color: #111827;
+  padding: 0 20px;
+  background: linear-gradient(135deg, #1a1a2e 0%, #13131f 100%);
+  border-bottom: 1px solid #2d2d44;
+}
+
+.drawer-header h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #e5e5e5;
+  letter-spacing: 0.3px;
+}
+
+.drawer-close-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  color: #a0a0b0;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.drawer-close-btn:hover {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #ef4444;
 }
 
 .drawer-body {
@@ -1977,27 +2033,42 @@ textarea::placeholder {
 }
 
 .workspace-explorer {
-  width: 240px;
-  border-right: 1px solid #f3f4f6;
-  overflow-y: auto;
-  background: #fafafa;
+  width: 280px;
+  min-width: 280px;
+  border-right: 1px solid #2d2d44;
+  overflow: hidden;
+  background: #13131f;
 }
 
 .workspace-preview-pane {
   flex: 1;
   display: flex;
   flex-direction: column;
-  background: white;
+  background: #0f0f1a;
+  overflow: hidden;
 }
 
-.preview-header {
-  height: 40px;
+.workspace-empty-preview {
+  flex: 1;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  padding: 0 12px;
-  border-bottom: 1px solid #f3f4f6;
-  background: #fff;
+  justify-content: center;
+  color: #666;
+  text-align: center;
+  background: #0f0f1a;
+}
+
+.empty-preview-icon {
+  font-size: 48px;
+  margin-bottom: 12px;
+  opacity: 0.5;
+}
+
+.workspace-empty-preview p {
+  margin: 0;
+  font-size: 14px;
+  color: #666;
 }
 
 /* 推荐问题 */

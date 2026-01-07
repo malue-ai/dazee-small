@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI学习平台 - 开启你的AI之旅</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <i class="fas fa-brain"></i>
+                <span>AI学习平台</span>
+            </div>
+            <ul class="nav-menu">
+                <li><a href="#home" class="nav-link active">首页</a></li>
+                <li><a href="#courses" class="nav-link">课程</a></li>
+                <li><a href="#practice" class="nav-link">实践</a></li>
+                <li><a href="#progress" class="nav-link">进度</a></li>
+            </ul>
+            <div class="nav-actions">
+                <button class="theme-toggle" id="themeToggle">
+                    <i class="fas fa-moon"></i>
+                </button>
+                <button class="btn-primary" id="loginBtn">登录</button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 主页 Hero Section -->
+    <section id="home" class="hero-section">
+        <div class="container">
+            <div class="hero-content">
+                <h1 class="hero-title">开启你的 AI 学习之旅</h1>
+                <p class="hero-subtitle">从零基础到 AI 专家，打造个性化学习路径，掌握前沿技术</p>
+                <div class="hero-stats">
+                    <div class="stat-item">
+                        <div class="stat-number">100+</div>
+                        <div class="stat-label">精品课程</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number">50+</div>
+                        <div class="stat-label">实战项目</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number">10K+</div>
+                        <div class="stat-label">学习者</div>
+                    </div>
+                </div>
+                <button class="btn-hero" id="startLearning">开始学习</button>
+            </div>
+            <div class="hero-image">
+                <div class="floating-card card-1">
+                    <i class="fas fa-robot"></i>
+                    <span>机器学习</span>
+                </div>
+                <div class="floating-card card-2">
+                    <i class="fas fa-brain"></i>
+                    <span>深度学习</span>
+                </div>
+                <div class="floating-card card-3">
+                    <i class="fas fa-comments"></i>
+                    <span>NLP</span>
+                </div>
+                <div class="floating-card card-4">
+                    <i class="fas fa-eye"></i>
+                    <span>计算机视觉</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 学习路径 -->
+    <section id="learning-path" class="learning-path">
+        <div class="container">
+            <h2 class="section-title">学习路径</h2>
+            <p class="section-subtitle">选择适合你的 AI 学习方向</p>
+            <div class="path-grid">
+                <div class="path-card" data-path="beginner">
+                    <div class="path-icon">
+                        <i class="fas fa-seedling"></i>
+                    </div>
+                    <h3>AI入门</h3>
+                    <p>适合零基础学习者，了解AI基础概念</p>
+                    <ul class="path-topics">
+                        <li><i class="fas fa-check"></i> Python基础</li>
+                        <li><i class="fas fa-check"></i> 数学基础</li>
+                        <li><i class="fas fa-check"></i> AI概念入门</li>
+                    </ul>
+                    <button class="btn-path">开始学习</button>
+                </div>
+                <div class="path-card" data-path="intermediate">
+                    <div class="path-icon">
+                        <i class="fas fa-chart-line"></i>
+                    </div>
+                    <h3>机器学习</h3>
+                    <p>掌握核心算法，构建预测模型</p>
+                    <ul class="path-topics">
+                        <li><i class="fas fa-check"></i> 监督学习</li>
+                        <li><i class="fas fa-check"></i> 无监督学习</li>
+                        <li><i class="fas fa-check"></i> 特征工程</li>
+                    </ul>
+                    <button class="btn-path">开始学习</button>
+                </div>
+                <div class="path-card" data-path="advanced">
+                    <div class="path-icon">
+                        <i class="fas fa-brain"></i>
+                    </div>
+                    <h3>深度学习</h3>
+                    <p>掌握神经网络，探索前沿技术</p>
+                    <ul class="path-topics">
+                        <li><i class="fas fa-check"></i> CNN/RNN</li>
+                        <li><i class="fas fa-check"></i> Transformer</li>
+                        <li><i class="fas fa-check"></i> 大模型应用</li>
+                    </ul>
+                    <button class="btn-path">开始学习</button>
+                </div>
+                <div class="path-card" data-path="specialized">
+                    <div class="path-icon">
+                        <i class="fas fa-rocket"></i>
+                    </div>
+                    <h3>专项应用</h3>
+                    <p>聚焦特定领域的AI应用</p>
+                    <ul class="path-topics">
+                        <li><i class="fas fa-check"></i> NLP/对话系统</li>
+                        <li><i class="fas fa-check"></i> 计算机视觉</li>
+                        <li><i class="fas fa-check"></i> AI Agent</li>
+                    </ul>
+                    <button class="btn-path">开始学习</button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 课程列表 -->
+    <section id="courses" class="courses-section">
+        <div class="container">
+            <h2 class="section-title">热门课程</h2>
+            <div class="filter-tabs">
+                <button class="filter-btn active" data-filter="all">全部</button>
+                <button class="filter-btn" data-filter="beginner">入门</button>
+                <button class="filter-btn" data-filter="intermediate">进阶</button>
+                <button class="filter-btn" data-filter="advanced">高级</button>
+            </div>
+            <div class="courses-grid" id="coursesGrid">
+                <!-- 课程卡片将通过 JavaScript 动态生成 -->
+            </div>
+        </div>
+    </section>
+
+    <!-- 实践项目 -->
+    <section id="practice" class="practice-section">
+        <div class="container">
+            <h2 class="section-title">实战项目</h2>
+            <p class="section-subtitle">通过真实项目巩固所学知识</p>
+            <div class="practice-grid">
+                <div class="practice-card">
+                    <div class="practice-header">
+                        <span class="practice-level level-easy">入门</span>
+                        <span class="practice-time"><i class="far fa-clock"></i> 2小时</span>
+                    </div>
+                    <h3>手写数字识别</h3>
+                    <p>使用 MNIST 数据集构建简单的神经网络</p>
+                    <div class="practice-tags">
+                        <span class="tag">Python</span>
+                        <span class="tag">TensorFlow</span>
+                        <span class="tag">CNN</span>
+                    </div>
+                    <div class="practice-footer">
+                        <div class="practice-stats">
+                            <span><i class="fas fa-user-graduate"></i> 1.2K 完成</span>
+                            <span><i class="fas fa-star"></i> 4.8</span>
+                        </div>
+                        <button class="btn-practice">开始实践</button>
+                    </div>
+                </div>
+
+                <div class="practice-card">
+                    <div class="practice-header">
+                        <span class="practice-level level-medium">进阶</span>
+                        <span class="practice-time"><i class="far fa-clock"></i> 4小时</span>
+                    </div>
+                    <h3>情感分析系统</h3>
+                    <p>构建文本情感分类器，分析评论情绪</p>
+                    <div class="practice-tags">
+                        <span class="tag">NLP</span>
+                        <span class="tag">BERT</span>
+                        <span class="tag">PyTorch</span>
+                    </div>
+                    <div class="practice-footer">
+                        <div class="practice-stats">
+                            <span><i class="fas fa-user-graduate"></i> 856 完成</span>
+                            <span><i class="fas fa-star"></i> 4.9</span>
+                        </div>
+                        <button class="btn-practice">开始实践</button>
+                    </div>
+                </div>
+
+                <div class="practice-card">
+                    <div class="practice-header">
+                        <span class="practice-level level-hard">高级</span>
+                        <span class="practice-time"><i class="far fa-clock"></i> 8小时</span>
+                    </div>
+                    <h3>智能对话机器人</h3>
+                    <p>基于大模型构建智能客服系统</p>
+                    <div class="practice-tags">
+                        <span class="tag">LLM</span>
+                        <span class="tag">RAG</span>
+                        <span class="tag">LangChain</span>
+                    </div>
+                    <div class="practice-footer">
+                        <div class="practice-stats">
+                            <span><i class="fas fa-user-graduate"></i> 432 完成</span>
+                            <span><i class="fas fa-star"></i> 5.0</span>
+                        </div>
+                        <button class="btn-practice">开始实践</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 学习进度 -->
+    <section id="progress" class="progress-section">
+        <div class="container">
+            <h2 class="section-title">我的学习进度</h2>
+            <div class="progress-dashboard">
+                <div class="progress-card">
+                    <div class="progress-icon">
+                        <i class="fas fa-book-open"></i>
+                    </div>
+                    <div class="progress-info">
+                        <h4>学习天数</h4>
+                        <p class="progress-value">45 天</p>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: 75%"></div>
+                        </div>
+                        <small>连续学习 15 天</small>
+                    </div>
+                </div>
+
+                <div class="progress-card">
+                    <div class="progress-icon">
+                        <i class="fas fa-graduation-cap"></i>
+                    </div>
+                    <div class="progress-info">
+                        <h4>完成课程</h4>
+                        <p class="progress-value">12 / 20</p>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: 60%"></div>
+                        </div>
+                        <small>已获得 3 个证书</small>
+                    </div>
+                </div>
+
+                <div class="progress-card">
+                    <div class="progress-icon">
+                        <i class="fas fa-code"></i>
+                    </div>
+                    <div class="progress-info">
+                        <h4>实战项目</h4>
+                        <p class="progress-value">8 / 15</p>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: 53%"></div>
+                        </div>
+                        <small>代码提交 126 次</small>
+                    </div>
+                </div>
+
+                <div class="progress-card">
+                    <div class="progress-icon">
+                        <i class="fas fa-trophy"></i>
+                    </div>
+                    <div class="progress-info">
+                        <h4>学习积分</h4>
+                        <p class="progress-value">2,580</p>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: 86%"></div>
+                        </div>
+                        <small>排名前 15%</small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 最近学习 -->
+            <div class="recent-learning">
+                <h3>最近学习</h3>
+                <div class="learning-timeline">
+                    <div class="timeline-item">
+                        <div class="timeline-dot"></div>
+                        <div class="timeline-content">
+                            <div class="timeline-header">
+                                <h4>深度学习基础</h4>
+                                <span class="timeline-time">2小时前</span>
+                            </div>
+                            <p>完成了"神经网络架构"章节学习</p>
+                            <div class="timeline-progress">
+                                <div class="timeline-progress-bar" style="width: 75%"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="timeline-item">
+                        <div class="timeline-dot"></div>
+                        <div class="timeline-content">
+                            <div class="timeline-header">
+                                <h4>图像分类项目</h4>
+                                <span class="timeline-time">昨天</span>
+                            </div>
+                            <p>提交了 CIFAR-10 图像分类实战项目</p>
+                            <div class="timeline-badge badge-success">
+                                <i class="fas fa-check"></i> 已完成
+                            </div>
+                        </div>
+                    </div>
+                    <div class="timeline-item">
+                        <div class="timeline-dot"></div>
+                        <div class="timeline-content">
+                            <div class="timeline-header">
+                                <h4>Python 编程进阶</h4>
+                                <span class="timeline-time">3天前</span>
+                            </div>
+                            <p>获得课程完成证书</p>
+                            <div class="timeline-badge badge-certificate">
+                                <i class="fas fa-certificate"></i> 证书
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- AI助手聊天窗口 -->
+    <div class="ai-assistant" id="aiAssistant">
+        <button class="assistant-toggle" id="assistantToggle">
+            <i class="fas fa-robot"></i>
+        </button>
+        <div class="assistant-window" id="assistantWindow">
+            <div class="assistant-header">
+                <div class="assistant-avatar">
+                    <i class="fas fa-robot"></i>
+                </div>
+                <div class="assistant-info">
+                    <h4>AI学习助手</h4>
+                    <span class="assistant-status">在线</span>
+                </div>
+                <button class="assistant-close" id="assistantClose">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="assistant-messages" id="assistantMessages">
+                <div class="message bot-message">
+                    <div class="message-avatar">
+                        <i class="fas fa-robot"></i>
+                    </div>
+                    <div class="message-content">
+                        <p>你好！我是你的AI学习助手。有什么我可以帮助你的吗？</p>
+                        <div class="message-suggestions">
+                            <button class="suggestion-btn">推荐课程</button>
+                            <button class="suggestion-btn">解答疑问</button>
+                            <button class="suggestion-btn">学习建议</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="assistant-input">
+                <input type="text" id="assistantInput" placeholder="输入你的问题...">
+                <button class="send-btn" id="sendMessage">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 页脚 -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h4>关于我们</h4>
+                    <p>AI学习平台致力于提供最优质的人工智能教育资源</p>
+                    <div class="social-links">
+                        <a href="#"><i class="fab fa-github"></i></a>
+                        <a href="#"><i class="fab fa-twitter"></i></a>
+                        <a href="#"><i class="fab fa-linkedin"></i></a>
+                    </div>
+                </div>
+                <div class="footer-section">
+                    <h4>快速链接</h4>
+                    <ul>
+                        <li><a href="#courses">课程中心</a></li>
+                        <li><a href="#practice">实践项目</a></li>
+                        <li><a href="#community">社区论坛</a></li>
+                        <li><a href="#blog">技术博客</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>学习资源</h4>
+                    <ul>
+                        <li><a href="#docs">文档中心</a></li>
+                        <li><a href="#tutorials">视频教程</a></li>
+                        <li><a href="#code">代码示例</a></li>
+                        <li><a href="#faq">常见问题</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>联系我们</h4>
+                    <ul>
+                        <li><i class="fas fa-envelope"></i> support@ailearn.com</li>
+                        <li><i class="fas fa-phone"></i> 400-123-4567</li>
+                        <li><i class="fas fa-map-marker-alt"></i> 北京市海淀区</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2024 AI学习平台. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>

@@ -213,8 +213,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: #1a1a2e;
-  border-radius: 12px;
+  background: transparent;
   overflow: hidden;
 }
 
@@ -224,25 +223,27 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 12px 16px;
-  background: linear-gradient(135deg, #2d2d44 0%, #1e1e2e 100%);
-  border-bottom: 1px solid #3d3d5c;
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid #2d2d44;
 }
 
 .file-info {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  flex: 1;
 }
 
 .file-icon {
-  font-size: 18px;
+  font-size: 16px;
+  flex-shrink: 0;
 }
 
 .file-name {
-  font-size: 14px;
-  font-weight: 500;
+  font-size: 13px;
+  font-weight: 600;
   color: #e5e5e5;
-  max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -250,38 +251,46 @@ onMounted(() => {
 
 .preview-actions {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .action-btn {
-  padding: 6px 12px;
-  background: rgba(255, 255, 255, 0.1);
-  border: none;
+  padding: 5px 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 6px;
-  color: #e5e5e5;
-  font-size: 12px;
+  color: #a0a0b0;
+  font-size: 11px;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .action-btn:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: #e5e5e5;
 }
 
 .close-btn {
-  padding: 6px 10px;
-  background: rgba(255, 100, 100, 0.2);
-  border: none;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.15);
   border-radius: 6px;
-  color: #ff6b6b;
-  font-size: 14px;
+  color: #ef4444;
+  font-size: 12px;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .close-btn:hover {
-  background: rgba(255, 100, 100, 0.4);
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.3);
 }
 
 /* 预览区域 */
@@ -289,6 +298,7 @@ onMounted(() => {
   flex: 1;
   overflow: hidden;
   position: relative;
+  background: #0a0a12;
 }
 
 /* 加载状态 */
@@ -298,14 +308,14 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: #a0a0b0;
-  gap: 12px;
+  color: #666;
+  gap: 10px;
 }
 
 .loading-spinner {
-  width: 32px;
-  height: 32px;
-  border: 3px solid rgba(102, 126, 234, 0.3);
+  width: 24px;
+  height: 24px;
+  border: 2px solid rgba(102, 126, 234, 0.2);
   border-top-color: #667eea;
   border-radius: 50%;
   animation: spin 1s linear infinite;
@@ -327,15 +337,15 @@ onMounted(() => {
 .code-preview {
   height: 100%;
   overflow: auto;
-  padding: 16px;
-  background: #0d1117;
+  padding: 14px 16px;
+  background: #0a0a12;
 }
 
 .code-preview pre {
   margin: 0;
-  font-family: 'SF Mono', 'Fira Code', 'Monaco', monospace;
-  font-size: 13px;
-  line-height: 1.6;
+  font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Monaco', monospace;
+  font-size: 12px;
+  line-height: 1.7;
 }
 
 .code-preview code {
@@ -351,15 +361,15 @@ onMounted(() => {
   justify-content: center;
   height: 100%;
   padding: 20px;
-  background: #0d0d15;
+  background: #0a0a12;
 }
 
 .image-preview img {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
-  border-radius: 8px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
 }
 
 /* 不支持预览 */
@@ -369,48 +379,49 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: #a0a0b0;
+  color: #666;
   text-align: center;
-  padding: 40px;
+  padding: 32px;
 }
 
 .unsupported-icon {
-  font-size: 64px;
-  margin-bottom: 16px;
-  opacity: 0.5;
+  font-size: 48px;
+  margin-bottom: 12px;
+  opacity: 0.4;
 }
 
 .unsupported-preview p {
-  margin: 8px 0;
+  margin: 6px 0;
+  font-size: 13px;
 }
 
 .file-type {
-  font-size: 12px;
-  opacity: 0.6;
-  margin-bottom: 20px !important;
+  font-size: 11px;
+  opacity: 0.5;
+  margin-bottom: 16px !important;
 }
 
 .download-btn {
-  padding: 12px 24px;
+  padding: 10px 20px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   border: none;
-  border-radius: 8px;
+  border-radius: 6px;
   color: white;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .download-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.35);
 }
 
 /* 滚动条样式 */
 .code-preview::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 .code-preview::-webkit-scrollbar-track {
@@ -418,12 +429,12 @@ onMounted(() => {
 }
 
 .code-preview::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
 }
 
 .code-preview::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.2);
 }
 </style>
 

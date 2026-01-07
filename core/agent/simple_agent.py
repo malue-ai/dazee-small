@@ -506,6 +506,27 @@ class SimpleAgent:
 """
         system_prompt = system_prompt + workspace_instruction
         
+        # 🆕 追加沙盒上下文（注入 conversation_id，用于 sandbox_* 工具）
+        sandbox_context = f"""
+
+# 📌 当前会话上下文
+
+- **conversation_id**: `{conversation_id}`
+
+当你使用 sandbox_* 工具时，必须使用上面的 conversation_id。
+
+## 沙盒工具使用示例
+
+```json
+{{
+    "conversation_id": "{conversation_id}",
+    "path": "/home/user/app.py",
+    "content": "print('Hello')"
+}}
+```
+"""
+        system_prompt = system_prompt + sandbox_context
+        
         # 4.3 构建 LLM Messages
         llm_messages = [
             Message(role=msg["role"], content=msg["content"])

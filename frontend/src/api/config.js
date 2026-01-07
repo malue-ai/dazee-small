@@ -74,6 +74,35 @@ export const WORKSPACE_API = {
   
   // 获取项目列表
   PROJECTS: (conversationId) => `/v1/workspace/${conversationId}/projects`,
+  
+  // 运行项目
+  RUN_PROJECT: (conversationId, projectName) => `/v1/workspace/${conversationId}/projects/${projectName}/run`,
+  
+  // 停止项目
+  STOP_PROJECT: (conversationId, projectName) => `/v1/workspace/${conversationId}/projects/${projectName}/stop`,
+  
+  // 获取项目日志
+  PROJECT_LOGS: (conversationId, projectName) => `/v1/workspace/${conversationId}/projects/${projectName}/logs`,
+  
+  // === 沙盒管理 ===
+  
+  // 获取沙盒状态
+  SANDBOX_STATUS: (conversationId) => `/v1/workspace/${conversationId}/sandbox/status`,
+  
+  // 初始化沙盒
+  SANDBOX_INIT: (conversationId) => `/v1/workspace/${conversationId}/sandbox/init`,
+  
+  // 暂停沙盒
+  SANDBOX_PAUSE: (conversationId) => `/v1/workspace/${conversationId}/sandbox/pause`,
+  
+  // 恢复沙盒
+  SANDBOX_RESUME: (conversationId) => `/v1/workspace/${conversationId}/sandbox/resume`,
+  
+  // 终止沙盒
+  SANDBOX_KILL: (conversationId) => `/v1/workspace/${conversationId}/sandbox/kill`,
+  
+  // 执行命令
+  SANDBOX_COMMAND: (conversationId) => `/v1/workspace/${conversationId}/sandbox/command`,
 }
 
 export default {
