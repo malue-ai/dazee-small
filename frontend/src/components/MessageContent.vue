@@ -18,7 +18,7 @@
 
       <!-- 文本内容 -->
       <div v-else-if="block.type === 'text'" class="content-block text-block">
-        <MarkdownRenderer :content="block.text" />
+        <MarkdownRenderer :content="block.text" @mermaid-detected="handleMermaidDetected" />
       </div>
 
       <!-- 工具调用 (合并 Tool Use 和 Tool Result) -->
@@ -75,7 +75,7 @@
 
     <!-- 如果没有内容块，显示纯文本 -->
     <div v-if="contentBlocks.length === 0 && content" class="content-block text-block">
-      <MarkdownRenderer :content="content" />
+      <MarkdownRenderer :content="content" @mermaid-detected="handleMermaidDetected" />
     </div>
   </div>
 </template>
@@ -97,6 +97,14 @@ const props = defineProps({
     default: () => ({})
   }
 })
+
+// 事件冒泡
+const emit = defineEmits(['mermaid-detected'])
+
+// 处理 mermaid 检测事件，冒泡给父组件
+function handleMermaidDetected(charts) {
+  emit('mermaid-detected', charts)
+}
 
 // 展开/收起状态
 const expandedBlocks = reactive({})

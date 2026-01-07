@@ -21,6 +21,15 @@ from utils.file_processor import (
     ProcessedFile,
     get_file_processor,
 )
+from utils.context_manager import (
+    ContextManager,
+    TruncationStrategy,
+    TokenStats,
+    get_context_manager,
+    truncate_messages,
+    count_tokens,
+    count_messages_tokens,
+)
 
 __all__ = [
     # 后台任务
@@ -45,5 +54,14 @@ __all__ = [
     "FileCategory",
     "ProcessedFile",
     "get_file_processor",
+    
+    # 上下文管理
+    "ContextManager",
+    "TruncationStrategy",
+    "TokenStats",
+    "get_context_manager",
+    "truncate_messages",
+    "count_tokens",
+    "count_messages_tokens",
 ]
 

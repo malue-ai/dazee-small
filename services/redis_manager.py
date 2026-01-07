@@ -561,7 +561,28 @@ class RedisSessionManager:
                 
                 # 检查 session 是否结束
                 session_data = await self.get_session_status(session_id)
-                if session_data and session_data.get("status") in ["completed", "failed", "stopped"]:
+                
+                # 🔧 修复1：Session 状态不存在（已过期）也认为是已结束
+                if session_data is None:
+                    logger.info(f"⚠️ Session 状态已过期，视为已结束: session_id={session_id}")
+                    break
+                
+                # 🔧 修复2：检查心跳超时（超过 2 分钟没有心跳，认为 Agent 已死）
+                last_heartbeat = session_data.get("last_heartbeat")
+                if last_heartbeat:
+                    try:
+                        heartbeat_time = datetime.fromisoformat(last_heartbeat)
+                        heartbeat_age = (datetime.now() - heartbeat_time).total_seconds()
+                        if heartbeat_age > 120:  # 2 分钟超时
+                            logger.warning(
+                                f"⚠️ Session 心跳超时 ({heartbeat_age:.0f}s)，视为已结束: "
+                                f"session_id={session_id}"
+                            )
+                            break
+                    except (ValueError, TypeError):
+                        pass  # 忽略解析错误
+                
+                if session_data.get("status") in ["completed", "failed", "stopped"]:
                     # 读取最后可能遗漏的事件
                     final_events = await self.get_events(
                         session_id=session_id,

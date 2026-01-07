@@ -809,6 +809,15 @@ class ClaudeLLMService(BaseLLMService):
                                 if hasattr(final_message.usage, 'cache_creation_input_tokens'):
                                     usage["cache_creation_tokens"] = final_message.usage.cache_creation_input_tokens
                                 
+                                # 📊 Token 使用量日志
+                                input_tokens = usage.get("input_tokens", 0)
+                                output_tokens = usage.get("output_tokens", 0)
+                                total_tokens = input_tokens + output_tokens
+                                logger.info(
+                                    f"📊 Token 使用: input={input_tokens:,}, output={output_tokens:,}, "
+                                    f"total={total_tokens:,} (model={self.config.model})"
+                                )
+                                
                                 # 🆕 Cache 效果日志（Context Engineering 监控）
                                 cache_read = usage.get("cache_read_tokens", 0)
                                 cache_create = usage.get("cache_creation_tokens", 0)
@@ -1029,6 +1038,15 @@ class ClaudeLLMService(BaseLLMService):
                 usage["cache_read_tokens"] = response.usage.cache_read_input_tokens
             if hasattr(response.usage, 'cache_creation_input_tokens'):
                 usage["cache_creation_tokens"] = response.usage.cache_creation_input_tokens
+            
+            # 📊 Token 使用量日志
+            input_tokens = usage.get("input_tokens", 0)
+            output_tokens = usage.get("output_tokens", 0)
+            total_tokens = input_tokens + output_tokens
+            logger.info(
+                f"📊 Token 使用: input={input_tokens:,}, output={output_tokens:,}, "
+                f"total={total_tokens:,} (model={self.config.model})"
+            )
             
             # 🆕 Cache 效果日志（Context Engineering 监控）
             cache_read = usage.get("cache_read_tokens", 0)

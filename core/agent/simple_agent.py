@@ -38,6 +38,7 @@ from core.llm import Message, LLMResponse, ToolType, create_claude_service
 from core.tool import create_tool_executor, create_tool_selector
 from core.tool.capability import create_capability_registry
 from core.orchestration import create_pipeline_tracer, E2EPipelineTracer
+from core.confirmation_manager import get_confirmation_manager, ConfirmationType
 from logger import get_logger
 from tools.plan_todo_tool import create_plan_todo_tool
 from utils.usage_tracker import create_usage_tracker
@@ -152,7 +153,8 @@ class SimpleAgent:
                 model=intent_config.llm_model,  # 从 Schema 读取
                 enable_thinking=False,
                 enable_caching=False,
-                tools=[]
+                tools=[],
+                max_tokens=8192  # Claude 3.5 Haiku 最大支持 8192
             )
             self.intent_analyzer = create_intent_analyzer(
                 llm_service=self.intent_llm,
@@ -707,6 +709,14 @@ class SimpleAgent:
                     if result.get("status") == "success" and "plan" in result:
                         self._plan_cache["plan"] = result.get("plan")
                         logger.info(f"📋 Plan 操作完成: {operation}")
+                
+                # 🆕 HITL 工具：Agent 负责发送 SSE 事件并等待用户响应
+                elif tool_name == "request_human_confirmation":
+                    result = await self._handle_human_confirmation(
+                        tool_input=tool_input,
+                        session_id=session_id,
+                        tool_id=tool_id
+                    )
                 else:
                     # 🛡️ 为所有工具注入上下文（user_id, session_id, conversation_id）
                     session_context = await self.event_manager.storage.get_session_context(session_id)
@@ -768,6 +778,122 @@ class SimpleAgent:
                     index=tool_result_index
                 )
                 ctx.block.close_current_block()
+    
+    async def _handle_human_confirmation(
+        self,
+        tool_input: Dict[str, Any],
+        session_id: str,
+        tool_id: str
+    ) -> Dict[str, Any]:
+        """
+        处理 HITL（Human-in-the-Loop）确认请求
+        
+        流程：
+        1. 解析工具输入，创建 ConfirmationRequest
+        2. 通过 EventBroadcaster 发送 SSE 事件到前端
+        3. 等待用户通过 HTTP POST 响应
+        4. 返回结果给 Agent
+        
+        Args:
+            tool_input: 工具输入参数
+            session_id: 会话ID
+            tool_id: 工具调用ID
+            
+        Returns:
+            确认结果
+        """
+        # 1. 解析参数
+        question = tool_input.get("question", "")
+        confirmation_type_str = tool_input.get("confirmation_type", "yes_no")
+        options = tool_input.get("options")
+        default_value = tool_input.get("default_value")
+        questions = tool_input.get("questions")  # form 类型
+        description = tool_input.get("description", "")
+        timeout = tool_input.get("timeout", 60)
+        
+        # 解析确认类型
+        try:
+            conf_type = ConfirmationType(confirmation_type_str)
+        except ValueError:
+            conf_type = ConfirmationType.YES_NO
+        
+        # yes_no 类型使用默认选项
+        if conf_type == ConfirmationType.YES_NO and not options:
+            options = ["confirm", "cancel"]
+        
+        # form 类型给更多时间
+        if conf_type == ConfirmationType.FORM and timeout == 60:
+            timeout = 120
+        
+        logger.info(f"🤝 HITL 请求: type={confirmation_type_str}, question={question[:50]}...")
+        
+        # 2. 创建确认请求
+        manager = get_confirmation_manager()
+        
+        metadata = {}
+        if description:
+            metadata["description"] = description
+        if default_value is not None:
+            metadata["default_value"] = default_value
+        if conf_type == ConfirmationType.FORM:
+            metadata["form_type"] = "form"
+            metadata["questions"] = questions or []
+        
+        request = manager.create_request(
+            question=question,
+            options=options,
+            timeout=timeout,
+            confirmation_type=conf_type,
+            session_id=session_id,
+            metadata=metadata
+        )
+        
+        logger.info(f"✅ 确认请求已创建: request_id={request.request_id}")
+        
+        # 3. 通过 EventBroadcaster 发送 SSE 事件到前端（使用 message_delta 格式）
+        await self.broadcaster.emit_confirmation_request(
+            session_id=session_id,
+            request_id=request.request_id,
+            question=question,
+            options=options,
+            confirmation_type=confirmation_type_str,
+            timeout=timeout,
+            description=description,
+            questions=questions if conf_type == ConfirmationType.FORM else None,
+            metadata=metadata
+        )
+        
+        # 4. 等待用户响应
+        result = await manager.wait_for_response(request.request_id, timeout)
+        
+        # 5. 处理结果
+        if result.get("timed_out"):
+            logger.warning(f"⏰ 用户响应超时 ({timeout}s)")
+            return {
+                "success": False,
+                "timed_out": True,
+                "response": "timeout",
+                "message": f"用户未在 {timeout} 秒内响应"
+            }
+        
+        response = result.get("response")
+        
+        # form 类型：尝试解析 JSON
+        if conf_type == ConfirmationType.FORM and isinstance(response, str):
+            try:
+                import json as json_module
+                response = json_module.loads(response)
+            except json.JSONDecodeError:
+                logger.warning(f"无法解析 form 响应为 JSON: {response[:100] if response else ''}")
+        
+        logger.info(f"✅ 用户已响应: {type(response).__name__}")
+        
+        return {
+            "success": True,
+            "timed_out": False,
+            "response": response,
+            "metadata": result.get("metadata", {})
+        }
     
     async def _emit_server_tool_blocks_stream(
         self,

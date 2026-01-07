@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI学习路径 - 从零到精通</title>
+    <title>AI学习路径</title>
     <style>
         * {
             margin: 0;
@@ -12,637 +12,381 @@
         }
 
         :root {
-            --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            --secondary-gradient: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-            --blue-gradient: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-            --green-gradient: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
-            --orange-gradient: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
-            --card-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-            --hover-shadow: 0 15px 40px rgba(0, 0, 0, 0.2);
+            --primary-color: #000;
+            --secondary-color: #666;
+            --accent-color: #0066ff;
+            --bg-color: #fff;
+            --border-color: #e5e5e5;
         }
 
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            background: #f8f9fa;
-            overflow-x: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.8;
+            color: var(--primary-color);
+            background: var(--bg-color);
+            font-size: 16px;
         }
 
         /* 导航栏 */
         nav {
+            position: fixed;
+            top: 0;
+            width: 100%;
             background: rgba(255, 255, 255, 0.95);
             backdrop-filter: blur(10px);
-            padding: 1rem 0;
-            position: fixed;
-            width: 100%;
-            top: 0;
+            border-bottom: 1px solid var(--border-color);
             z-index: 1000;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
         }
 
         nav .container {
-            max-width: 1200px;
+            max-width: 1000px;
             margin: 0 auto;
-            padding: 0 2rem;
+            padding: 1.5rem 2rem;
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
 
         nav .logo {
-            font-size: 1.5rem;
-            font-weight: bold;
-            background: var(--primary-gradient);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
+            font-size: 1.2rem;
+            font-weight: 600;
+            letter-spacing: -0.5px;
         }
 
         nav .nav-links {
             display: flex;
-            gap: 2rem;
+            gap: 2.5rem;
             list-style: none;
         }
 
         nav a {
             text-decoration: none;
-            color: #333;
-            font-weight: 500;
-            transition: all 0.3s ease;
+            color: var(--secondary-color);
+            font-size: 0.95rem;
+            transition: color 0.2s;
         }
 
         nav a:hover {
-            background: var(--primary-gradient);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
+            color: var(--primary-color);
         }
 
-        /* 首屏大图 */
+        /* Hero区域 */
         .hero {
-            background: var(--primary-gradient);
-            color: white;
-            padding: 150px 2rem 100px;
+            padding: 180px 2rem 120px;
             text-align: center;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .hero::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 600"><circle cx="100" cy="100" r="50" fill="rgba(255,255,255,0.1)"/><circle cx="900" cy="400" r="80" fill="rgba(255,255,255,0.05)"/><circle cx="600" cy="200" r="60" fill="rgba(255,255,255,0.08)"/></svg>');
-            opacity: 0.5;
-        }
-
-        .hero-content {
-            position: relative;
-            z-index: 1;
-            max-width: 800px;
-            margin: 0 auto;
         }
 
         .hero h1 {
             font-size: 3.5rem;
-            margin-bottom: 1rem;
-            animation: fadeInUp 1s ease;
+            font-weight: 700;
+            margin-bottom: 1.5rem;
+            letter-spacing: -2px;
+            line-height: 1.1;
         }
 
         .hero p {
-            font-size: 1.3rem;
-            margin-bottom: 2rem;
-            opacity: 0.95;
-            animation: fadeInUp 1s ease 0.2s both;
+            font-size: 1.2rem;
+            color: var(--secondary-color);
+            max-width: 600px;
+            margin: 0 auto 3rem;
         }
 
-        .cta-button {
+        .hero-link {
             display: inline-block;
-            padding: 1rem 2.5rem;
-            background: white;
-            color: #667eea;
+            padding: 1rem 2rem;
+            background: var(--primary-color);
+            color: white;
             text-decoration: none;
-            border-radius: 50px;
-            font-weight: bold;
-            font-size: 1.1rem;
-            transition: all 0.3s ease;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
-            animation: fadeInUp 1s ease 0.4s both;
+            border-radius: 6px;
+            font-size: 0.95rem;
+            transition: transform 0.2s, opacity 0.2s;
         }
 
-        .cta-button:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+        .hero-link:hover {
+            transform: translateY(-2px);
+            opacity: 0.9;
         }
 
         /* 容器 */
         .container {
-            max-width: 1200px;
+            max-width: 1000px;
             margin: 0 auto;
             padding: 0 2rem;
         }
 
         section {
-            padding: 80px 0;
+            padding: 100px 0;
+            border-top: 1px solid var(--border-color);
         }
 
         .section-title {
-            text-align: center;
             font-size: 2.5rem;
-            margin-bottom: 3rem;
-            position: relative;
-            padding-bottom: 1rem;
+            font-weight: 700;
+            margin-bottom: 4rem;
+            letter-spacing: -1px;
         }
 
-        .section-title::after {
-            content: '';
-            position: absolute;
-            bottom: 0;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 80px;
-            height: 4px;
-            background: var(--primary-gradient);
-            border-radius: 2px;
-        }
-
-        /* 学习路径时间线 */
-        .timeline {
-            position: relative;
-            padding: 2rem 0;
-        }
-
-        .timeline::before {
-            content: '';
-            position: absolute;
-            left: 50%;
-            top: 0;
-            bottom: 0;
-            width: 4px;
-            background: var(--primary-gradient);
-            transform: translateX(-50%);
-        }
-
-        .timeline-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 3rem;
-            position: relative;
-        }
-
-        .timeline-item:nth-child(even) {
-            flex-direction: row-reverse;
-        }
-
-        .timeline-content {
-            width: 45%;
-            background: white;
-            padding: 2rem;
-            border-radius: 15px;
-            box-shadow: var(--card-shadow);
-            transition: all 0.3s ease;
-            animation: fadeIn 0.8s ease;
-        }
-
-        .timeline-content:hover {
-            transform: translateY(-5px);
-            box-shadow: var(--hover-shadow);
-        }
-
-        .timeline-icon {
-            position: absolute;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 60px;
-            height: 60px;
-            background: white;
-            border: 4px solid #667eea;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.5rem;
-            z-index: 1;
-        }
-
-        .timeline-content h3 {
-            color: #667eea;
-            margin-bottom: 0.5rem;
-            font-size: 1.5rem;
-        }
-
-        .timeline-content .stage {
-            display: inline-block;
-            padding: 0.3rem 1rem;
-            background: var(--primary-gradient);
-            color: white;
-            border-radius: 20px;
-            font-size: 0.9rem;
-            margin-bottom: 1rem;
-        }
-
-        /* 技能卡片 */
-        .skills-grid {
+        /* 学习路径 */
+        .roadmap-item {
+            margin-bottom: 5rem;
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 2rem;
+            grid-template-columns: 120px 1fr;
+            gap: 3rem;
         }
 
-        .skill-card {
-            background: white;
-            padding: 2rem;
-            border-radius: 15px;
-            box-shadow: var(--card-shadow);
-            transition: all 0.3s ease;
-            position: relative;
-            overflow: hidden;
+        .roadmap-number {
+            font-size: 1rem;
+            color: var(--secondary-color);
+            font-weight: 500;
         }
 
-        .skill-card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 4px;
-            background: var(--primary-gradient);
+        .roadmap-content h3 {
+            font-size: 1.8rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            letter-spacing: -0.5px;
         }
 
-        .skill-card:hover {
-            transform: translateY(-10px);
-            box-shadow: var(--hover-shadow);
+        .roadmap-content .meta {
+            color: var(--secondary-color);
+            font-size: 0.95rem;
+            margin-bottom: 1.5rem;
         }
 
-        .skill-card.basic::before {
-            background: var(--blue-gradient);
-        }
-
-        .skill-card.advanced::before {
-            background: var(--orange-gradient);
-        }
-
-        .skill-icon {
-            width: 60px;
-            height: 60px;
-            background: var(--primary-gradient);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 2rem;
+        .roadmap-content p {
+            color: var(--secondary-color);
+            line-height: 1.8;
             margin-bottom: 1rem;
-            color: white;
         }
 
-        .skill-card h3 {
-            font-size: 1.5rem;
-            margin-bottom: 1rem;
-            color: #333;
-        }
-
-        .skill-card ul {
+        .roadmap-content ul {
             list-style: none;
             padding: 0;
         }
 
-        .skill-card li {
+        .roadmap-content li {
+            color: var(--secondary-color);
             padding: 0.5rem 0;
             padding-left: 1.5rem;
             position: relative;
         }
 
-        .skill-card li::before {
-            content: '✓';
+        .roadmap-content li::before {
+            content: '—';
             position: absolute;
             left: 0;
-            color: #667eea;
-            font-weight: bold;
+            color: var(--primary-color);
         }
 
-        /* 资源平台 */
-        .resources-grid {
+        /* 技能网格 */
+        .skills-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 3rem;
+        }
+
+        .skill-item h3 {
+            font-size: 1.3rem;
+            font-weight: 600;
+            margin-bottom: 1.5rem;
+            letter-spacing: -0.5px;
+        }
+
+        .skill-item ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .skill-item li {
+            color: var(--secondary-color);
+            padding: 0.6rem 0;
+            font-size: 0.95rem;
+        }
+
+        /* 资源列表 */
+        .resources-list {
+            display: grid;
+            gap: 2rem;
+        }
+
+        .resource-item {
+            display: grid;
+            grid-template-columns: 200px 1fr;
+            gap: 2rem;
+            padding-bottom: 2rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .resource-item:last-child {
+            border-bottom: none;
+        }
+
+        .resource-item h3 {
+            font-size: 1.2rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .resource-item .subtitle {
+            color: var(--secondary-color);
+            font-size: 0.9rem;
+            margin-bottom: 1rem;
+        }
+
+        .resource-item p {
+            color: var(--secondary-color);
+            font-size: 0.95rem;
+            line-height: 1.7;
+        }
+
+        .resource-item a {
+            color: var(--accent-color);
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: opacity 0.2s;
+        }
+
+        .resource-item a:hover {
+            opacity: 0.7;
+        }
+
+        /* 项目列表 */
+        .projects-section {
+            margin-bottom: 4rem;
+        }
+
+        .projects-section h3 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 2rem;
+            letter-spacing: -0.5px;
+        }
+
+        .project-list {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
             gap: 2rem;
         }
 
-        .resource-card {
-            background: white;
-            border-radius: 15px;
-            overflow: hidden;
-            box-shadow: var(--card-shadow);
-            transition: all 0.3s ease;
-            text-decoration: none;
-            color: inherit;
-            display: block;
-        }
-
-        .resource-card:hover {
-            transform: translateY(-10px);
-            box-shadow: var(--hover-shadow);
-        }
-
-        .resource-header {
+        .project-card {
             padding: 2rem;
-            background: var(--primary-gradient);
-            color: white;
-            text-align: center;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            transition: border-color 0.2s;
         }
 
-        .resource-header.coursera {
-            background: var(--blue-gradient);
+        .project-card:hover {
+            border-color: var(--primary-color);
         }
 
-        .resource-header.github {
-            background: linear-gradient(135deg, #24292e 0%, #2f363d 100%);
+        .project-card h4 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 0.8rem;
         }
 
-        .resource-header.kaggle {
-            background: linear-gradient(135deg, #20beff 0%, #1769ff 100%);
-        }
-
-        .resource-header h3 {
-            font-size: 1.5rem;
-            margin-bottom: 0.5rem;
-        }
-
-        .resource-body {
-            padding: 1.5rem;
-        }
-
-        .resource-body p {
-            color: #666;
-            margin-bottom: 1rem;
-        }
-
-        .resource-tag {
-            display: inline-block;
-            padding: 0.3rem 0.8rem;
-            background: #f0f0f0;
-            border-radius: 15px;
-            font-size: 0.85rem;
-            margin: 0.2rem;
-            color: #667eea;
-        }
-
-        /* 实战项目 */
-        .projects-container {
-            display: flex;
-            flex-direction: column;
-            gap: 3rem;
-        }
-
-        .project-level {
-            background: white;
-            padding: 2rem;
-            border-radius: 15px;
-            box-shadow: var(--card-shadow);
-        }
-
-        .project-level h3 {
-            font-size: 1.8rem;
-            margin-bottom: 1.5rem;
-            padding-left: 1rem;
-            border-left: 4px solid #667eea;
-        }
-
-        .project-level.intermediate h3 {
-            border-left-color: #f5576c;
-        }
-
-        .project-level.advanced h3 {
-            border-left-color: #43e97b;
-        }
-
-        .project-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 1.5rem;
-        }
-
-        .project-item {
-            padding: 1.5rem;
-            background: linear-gradient(135deg, #f8f9fa 0%, #fff 100%);
-            border-radius: 10px;
-            border: 2px solid transparent;
-            transition: all 0.3s ease;
-        }
-
-        .project-item:hover {
-            border-color: #667eea;
-            transform: translateX(5px);
-        }
-
-        .project-item h4 {
-            color: #667eea;
-            margin-bottom: 0.5rem;
-            font-size: 1.2rem;
-        }
-
-        .project-item p {
-            color: #666;
-            font-size: 0.95rem;
+        .project-card p {
+            color: var(--secondary-color);
+            font-size: 0.9rem;
+            line-height: 1.6;
         }
 
         /* 学习建议 */
-        .tips-grid {
+        .tips-list {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 3rem;
+        }
+
+        .tip-item {
+            display: grid;
+            grid-template-columns: 80px 1fr;
             gap: 2rem;
         }
 
-        .tip-card {
-            background: white;
-            padding: 2rem;
-            border-radius: 15px;
-            box-shadow: var(--card-shadow);
-            transition: all 0.3s ease;
-            border-top: 4px solid transparent;
-        }
-
-        .tip-card:nth-child(1) {
-            border-top-color: #667eea;
-        }
-
-        .tip-card:nth-child(2) {
-            border-top-color: #f5576c;
-        }
-
-        .tip-card:nth-child(3) {
-            border-top-color: #43e97b;
-        }
-
-        .tip-card:nth-child(4) {
-            border-top-color: #feca57;
-        }
-
-        .tip-card:hover {
-            transform: translateY(-5px);
-            box-shadow: var(--hover-shadow);
-        }
-
         .tip-number {
-            width: 50px;
-            height: 50px;
-            background: var(--primary-gradient);
-            color: white;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.5rem;
-            font-weight: bold;
-            margin-bottom: 1rem;
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--primary-color);
         }
 
-        .tip-card h3 {
+        .tip-content h3 {
             font-size: 1.3rem;
+            font-weight: 600;
             margin-bottom: 1rem;
-            color: #333;
+            letter-spacing: -0.5px;
         }
 
-        .tip-card p {
-            color: #666;
+        .tip-content p {
+            color: var(--secondary-color);
             line-height: 1.8;
         }
 
         /* 页脚 */
         footer {
-            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
-            color: white;
-            padding: 3rem 0 1rem;
+            border-top: 1px solid var(--border-color);
+            padding: 4rem 0;
             text-align: center;
         }
 
-        .footer-content {
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 0 2rem;
-        }
-
-        .footer-content h2 {
-            font-size: 2rem;
-            margin-bottom: 1rem;
-        }
-
-        .footer-content p {
-            font-size: 1.1rem;
-            margin-bottom: 2rem;
-            opacity: 0.9;
-        }
-
-        .social-links {
-            display: flex;
-            justify-content: center;
-            gap: 1.5rem;
-            margin-bottom: 2rem;
-        }
-
-        .social-link {
-            width: 50px;
-            height: 50px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            text-decoration: none;
-            color: white;
-            font-size: 1.5rem;
-            transition: all 0.3s ease;
-        }
-
-        .social-link:hover {
-            background: rgba(255, 255, 255, 0.2);
-            transform: translateY(-3px);
-        }
-
-        .copyright {
-            padding-top: 2rem;
-            border-top: 1px solid rgba(255, 255, 255, 0.1);
-            opacity: 0.7;
+        footer p {
+            color: var(--secondary-color);
             font-size: 0.9rem;
         }
 
-        /* 动画 */
-        @keyframes fadeInUp {
-            from {
-                opacity: 0;
-                transform: translateY(30px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        @keyframes fadeIn {
-            from {
-                opacity: 0;
-            }
-            to {
-                opacity: 1;
-            }
-        }
-
-        /* 响应式设计 */
+        /* 响应式 */
         @media (max-width: 768px) {
             .hero h1 {
                 font-size: 2.5rem;
             }
 
-            .hero p {
-                font-size: 1.1rem;
-            }
-
-            .timeline::before {
-                left: 30px;
-            }
-
-            .timeline-item {
-                flex-direction: column !important;
-                padding-left: 60px;
-            }
-
-            .timeline-content {
-                width: 100%;
-            }
-
-            .timeline-icon {
-                left: 30px;
+            .roadmap-item,
+            .resource-item,
+            .tip-item {
+                grid-template-columns: 1fr;
+                gap: 1rem;
             }
 
             nav .nav-links {
-                flex-direction: column;
-                gap: 1rem;
+                display: none;
             }
 
             .section-title {
                 font-size: 2rem;
             }
 
-            .skills-grid,
-            .resources-grid,
-            .tips-grid {
-                grid-template-columns: 1fr;
+            section {
+                padding: 60px 0;
             }
         }
 
-        /* 滚动动画 */
-        .fade-in {
-            opacity: 0;
-            transform: translateY(30px);
-            transition: all 0.8s ease;
+        /* 平滑滚动 */
+        html {
+            scroll-behavior: smooth;
         }
 
-        .fade-in.visible {
-            opacity: 1;
-            transform: translateY(0);
+        /* 简约分隔符 */
+        .divider {
+            height: 1px;
+            background: var(--border-color);
+            margin: 4rem 0;
+        }
+
+        /* 强调文本 */
+        strong {
+            font-weight: 600;
+            color: var(--primary-color);
+        }
+
+        /* 链接样式 */
+        a.external-link {
+            color: var(--accent-color);
+            text-decoration: none;
+            border-bottom: 1px solid transparent;
+            transition: border-color 0.2s;
+        }
+
+        a.external-link:hover {
+            border-bottom-color: var(--accent-color);
         }
     </style>
 </head>
@@ -650,132 +394,122 @@
     <!-- 导航栏 -->
     <nav>
         <div class="container">
-            <div class="logo">🤖 AI Learning Path</div>
+            <div class="logo">AI Learning</div>
             <ul class="nav-links">
-                <li><a href="#roadmap">学习路径</a></li>
-                <li><a href="#skills">技能体系</a></li>
-                <li><a href="#resources">学习资源</a></li>
-                <li><a href="#projects">实战项目</a></li>
-                <li><a href="#tips">学习建议</a></li>
+                <li><a href="#roadmap">路径</a></li>
+                <li><a href="#skills">技能</a></li>
+                <li><a href="#resources">资源</a></li>
+                <li><a href="#projects">项目</a></li>
+                <li><a href="#tips">建议</a></li>
             </ul>
         </div>
     </nav>
 
-    <!-- 首屏大图 -->
+    <!-- Hero区域 -->
     <section class="hero">
-        <div class="hero-content">
-            <h1>🚀 AI学习路径指南</h1>
-            <p>从零基础到AI专家，系统化学习人工智能的完整路线图</p>
-            <a href="#roadmap" class="cta-button">开始学习之旅</a>
-        </div>
+        <h1>AI学习路径</h1>
+        <p>系统化学习人工智能的完整指南，从基础到进阶</p>
+        <a href="#roadmap" class="hero-link">开始学习</a>
     </section>
 
-    <!-- 学习路径时间线 -->
+    <!-- 学习路径 -->
     <section id="roadmap">
         <div class="container">
-            <h2 class="section-title">📚 学习路径时间线</h2>
-            <div class="timeline">
-                <div class="timeline-item fade-in">
-                    <div class="timeline-content">
-                        <span class="stage">阶段一 · 基础准备</span>
-                        <h3>打好编程和数学基础</h3>
-                        <p><strong>时间：</strong>1-2个月</p>
-                        <p><strong>学习内容：</strong></p>
-                        <ul>
-                            <li>Python编程基础（语法、数据结构、面向对象）</li>
-                            <li>数学基础（线性代数、微积分、概率统计）</li>
-                            <li>NumPy、Pandas数据处理库</li>
-                        </ul>
-                    </div>
-                    <div class="timeline-icon">📖</div>
+            <h2 class="section-title">学习路径</h2>
+            
+            <div class="roadmap-item">
+                <div class="roadmap-number">阶段 01</div>
+                <div class="roadmap-content">
+                    <h3>基础准备</h3>
+                    <p class="meta">时间：1-2个月</p>
+                    <p>打好编程和数学基础，为后续学习做准备。</p>
+                    <ul>
+                        <li>Python编程（语法、数据结构、面向对象）</li>
+                        <li>数学基础（线性代数、微积分、概率统计）</li>
+                        <li>NumPy、Pandas数据处理</li>
+                    </ul>
                 </div>
+            </div>
 
-                <div class="timeline-item fade-in">
-                    <div class="timeline-content">
-                        <span class="stage">阶段二 · 机器学习入门</span>
-                        <h3>掌握传统机器学习算法</h3>
-                        <p><strong>时间：</strong>2-3个月</p>
-                        <p><strong>学习内容：</strong></p>
-                        <ul>
-                            <li>监督学习（回归、分类算法）</li>
-                            <li>无监督学习（聚类、降维）</li>
-                            <li>模型评估与优化</li>
-                            <li>Scikit-learn实战</li>
-                        </ul>
-                    </div>
-                    <div class="timeline-icon">🧠</div>
+            <div class="roadmap-item">
+                <div class="roadmap-number">阶段 02</div>
+                <div class="roadmap-content">
+                    <h3>机器学习入门</h3>
+                    <p class="meta">时间：2-3个月</p>
+                    <p>掌握传统机器学习算法和应用。</p>
+                    <ul>
+                        <li>监督学习（回归、分类算法）</li>
+                        <li>无监督学习（聚类、降维）</li>
+                        <li>模型评估与优化</li>
+                        <li>Scikit-learn实战</li>
+                    </ul>
                 </div>
+            </div>
 
-                <div class="timeline-item fade-in">
-                    <div class="timeline-content">
-                        <span class="stage">阶段三 · 深度学习进阶</span>
-                        <h3>深入神经网络与深度学习</h3>
-                        <p><strong>时间：</strong>3-4个月</p>
-                        <p><strong>学习内容：</strong></p>
-                        <ul>
-                            <li>神经网络基础（BP、CNN、RNN）</li>
-                            <li>PyTorch/TensorFlow框架</li>
-                            <li>计算机视觉（目标检测、图像分割）</li>
-                            <li>自然语言处理（NLP基础）</li>
-                        </ul>
-                    </div>
-                    <div class="timeline-icon">⚡</div>
+            <div class="roadmap-item">
+                <div class="roadmap-number">阶段 03</div>
+                <div class="roadmap-content">
+                    <h3>深度学习进阶</h3>
+                    <p class="meta">时间：3-4个月</p>
+                    <p>深入神经网络与深度学习框架。</p>
+                    <ul>
+                        <li>神经网络基础（BP、CNN、RNN）</li>
+                        <li>PyTorch/TensorFlow框架</li>
+                        <li>计算机视觉（目标检测、图像分割）</li>
+                        <li>自然语言处理（NLP基础）</li>
+                    </ul>
                 </div>
+            </div>
 
-                <div class="timeline-item fade-in">
-                    <div class="timeline-content">
-                        <span class="stage">阶段四 · 大模型时代</span>
-                        <h3>Transformer与大语言模型</h3>
-                        <p><strong>时间：</strong>2-3个月</p>
-                        <p><strong>学习内容：</strong></p>
-                        <ul>
-                            <li>Transformer架构原理</li>
-                            <li>BERT、GPT系列模型</li>
-                            <li>Prompt Engineering（提示工程）</li>
-                            <li>RAG与模型微调</li>
-                        </ul>
-                    </div>
-                    <div class="timeline-icon">🤖</div>
+            <div class="roadmap-item">
+                <div class="roadmap-number">阶段 04</div>
+                <div class="roadmap-content">
+                    <h3>大模型时代</h3>
+                    <p class="meta">时间：2-3个月</p>
+                    <p>学习Transformer架构与大语言模型。</p>
+                    <ul>
+                        <li>Transformer架构原理</li>
+                        <li>BERT、GPT系列模型</li>
+                        <li>Prompt Engineering</li>
+                        <li>RAG与模型微调</li>
+                    </ul>
                 </div>
+            </div>
 
-                <div class="timeline-item fade-in">
-                    <div class="timeline-content">
-                        <span class="stage">阶段五 · 多模态与前沿</span>
-                        <h3>多模态AI与前沿技术</h3>
-                        <p><strong>时间：</strong>持续学习</p>
-                        <p><strong>学习内容：</strong></p>
-                        <ul>
-                            <li>多模态大模型（图文融合）</li>
-                            <li>强化学习（RL）</li>
-                            <li>AI Agent智能体</li>
-                            <li>跟踪最新论文和技术</li>
-                        </ul>
-                    </div>
-                    <div class="timeline-icon">🌟</div>
+            <div class="roadmap-item">
+                <div class="roadmap-number">阶段 05</div>
+                <div class="roadmap-content">
+                    <h3>多模态与前沿</h3>
+                    <p class="meta">时间：持续学习</p>
+                    <p>探索多模态AI与前沿技术。</p>
+                    <ul>
+                        <li>多模态大模型（图文融合）</li>
+                        <li>强化学习</li>
+                        <li>AI Agent智能体</li>
+                        <li>跟踪最新论文和技术</li>
+                    </ul>
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- 基础技能 -->
-    <section id="skills" style="background: #f8f9fa;">
+    <!-- 核心技能 -->
+    <section id="skills">
         <div class="container">
-            <h2 class="section-title">💡 核心技能体系</h2>
+            <h2 class="section-title">核心技能</h2>
             <div class="skills-grid">
-                <div class="skill-card basic fade-in">
-                    <div class="skill-icon" style="background: var(--blue-gradient);">🐍</div>
+                <div class="skill-item">
                     <h3>Python编程</h3>
                     <ul>
                         <li>基础语法与数据结构</li>
-                        <li>面向对象编程（OOP）</li>
+                        <li>面向对象编程</li>
                         <li>NumPy数值计算</li>
                         <li>Pandas数据分析</li>
                         <li>Matplotlib可视化</li>
                     </ul>
                 </div>
 
-                <div class="skill-card basic fade-in">
-                    <div class="skill-icon" style="background: var(--blue-gradient);">📐</div>
+                <div class="skill-item">
                     <h3>数学基础</h3>
                     <ul>
                         <li>线性代数（矩阵运算）</li>
@@ -786,8 +520,7 @@
                     </ul>
                 </div>
 
-                <div class="skill-card advanced fade-in">
-                    <div class="skill-icon" style="background: var(--orange-gradient);">🎯</div>
+                <div class="skill-item">
                     <h3>机器学习</h3>
                     <ul>
                         <li>监督学习算法</li>
@@ -798,8 +531,7 @@
                     </ul>
                 </div>
 
-                <div class="skill-card advanced fade-in">
-                    <div class="skill-icon" style="background: var(--orange-gradient);">🔥</div>
+                <div class="skill-item">
                     <h3>深度学习</h3>
                     <ul>
                         <li>神经网络基础</li>
@@ -810,24 +542,22 @@
                     </ul>
                 </div>
 
-                <div class="skill-card advanced fade-in">
-                    <div class="skill-icon" style="background: var(--green-gradient);">👁️</div>
+                <div class="skill-item">
                     <h3>计算机视觉</h3>
                     <ul>
                         <li>图像分类与识别</li>
-                        <li>目标检测（YOLO、Faster R-CNN）</li>
+                        <li>目标检测</li>
                         <li>图像分割技术</li>
                         <li>人脸识别应用</li>
                         <li>OCR文字识别</li>
                     </ul>
                 </div>
 
-                <div class="skill-card advanced fade-in">
-                    <div class="skill-icon" style="background: var(--green-gradient);">💬</div>
+                <div class="skill-item">
                     <h3>自然语言处理</h3>
                     <ul>
                         <li>文本预处理与分词</li>
-                        <li>词向量（Word2Vec、BERT）</li>
+                        <li>词向量表示</li>
                         <li>文本分类与情感分析</li>
                         <li>机器翻译</li>
                         <li>大语言模型应用</li>
@@ -840,292 +570,168 @@
     <!-- 学习资源 -->
     <section id="resources">
         <div class="container">
-            <h2 class="section-title">🎓 优质学习资源平台</h2>
-            <div class="resources-grid">
-                <a href="https://www.coursera.org" target="_blank" class="resource-card fade-in">
-                    <div class="resource-header coursera">
+            <h2 class="section-title">学习资源</h2>
+            <div class="resources-list">
+                <div class="resource-item">
+                    <div>
                         <h3>Coursera</h3>
-                        <p>全球顶尖大学课程</p>
+                        <p class="subtitle">全球顶尖大学课程</p>
+                        <a href="https://www.coursera.org" target="_blank" class="external-link">访问 →</a>
                     </div>
-                    <div class="resource-body">
-                        <p><strong>推荐课程：</strong></p>
-                        <ul style="list-style: none; padding: 0;">
-                            <li>✨ 吴恩达《Machine Learning》</li>
-                            <li>✨ 《Deep Learning专项》</li>
-                            <li>✨ 《PyTorch深度学习》</li>
-                        </ul>
-                        <div style="margin-top: 1rem;">
-                            <span class="resource-tag">中文字幕</span>
-                            <span class="resource-tag">证书认证</span>
-                        </div>
+                    <div>
+                        <p>吴恩达《Machine Learning》、《Deep Learning专项》课程，适合系统学习机器学习和深度学习基础。中文字幕，证书认证。</p>
                     </div>
-                </a>
+                </div>
 
-                <a href="https://www.fast.ai" target="_blank" class="resource-card fade-in">
-                    <div class="resource-header" style="background: var(--green-gradient);">
+                <div class="resource-item">
+                    <div>
                         <h3>Fast.ai</h3>
-                        <p>实战导向深度学习</p>
+                        <p class="subtitle">实战导向深度学习</p>
+                        <a href="https://www.fast.ai" target="_blank" class="external-link">访问 →</a>
                     </div>
-                    <div class="resource-body">
-                        <p><strong>特色：</strong></p>
-                        <ul style="list-style: none; padding: 0;">
-                            <li>✨ 代码优先学习方法</li>
-                            <li>✨ 快速上手项目</li>
-                            <li>✨ 完全免费开源</li>
-                        </ul>
-                        <div style="margin-top: 1rem;">
-                            <span class="resource-tag">免费</span>
-                            <span class="resource-tag">实战项目</span>
-                        </div>
+                    <div>
+                        <p>代码优先的学习方法，快速上手深度学习项目。完全免费开源，适合实战学习。</p>
                     </div>
-                </a>
+                </div>
 
-                <a href="https://www.kaggle.com" target="_blank" class="resource-card fade-in">
-                    <div class="resource-header kaggle">
+                <div class="resource-item">
+                    <div>
                         <h3>Kaggle</h3>
-                        <p>数据科学竞赛平台</p>
+                        <p class="subtitle">数据科学竞赛平台</p>
+                        <a href="https://www.kaggle.com" target="_blank" class="external-link">访问 →</a>
                     </div>
-                    <div class="resource-body">
-                        <p><strong>核心功能：</strong></p>
-                        <ul style="list-style: none; padding: 0;">
-                            <li>✨ 数据集与竞赛</li>
-                            <li>✨ Notebook代码学习</li>
-                            <li>✨ 社区交流</li>
-                        </ul>
-                        <div style="margin-top: 1rem;">
-                            <span class="resource-tag">竞赛</span>
-                            <span class="resource-tag">实战</span>
-                        </div>
+                    <div>
+                        <p>丰富的数据集与竞赛，Notebook代码学习，活跃的社区交流。通过实战项目提升能力。</p>
                     </div>
-                </a>
+                </div>
 
-                <a href="https://huggingface.co" target="_blank" class="resource-card fade-in">
-                    <div class="resource-header" style="background: var(--orange-gradient);">
+                <div class="resource-item">
+                    <div>
                         <h3>Hugging Face</h3>
-                        <p>NLP与大模型社区</p>
+                        <p class="subtitle">NLP与大模型社区</p>
+                        <a href="https://huggingface.co" target="_blank" class="external-link">访问 →</a>
                     </div>
-                    <div class="resource-body">
-                        <p><strong>资源：</strong></p>
-                        <ul style="list-style: none; padding: 0;">
-                            <li>✨ 预训练模型库</li>
-                            <li>✨ Transformers库</li>
-                            <li>✨ 数据集资源</li>
-                        </ul>
-                        <div style="margin-top: 1rem;">
-                            <span class="resource-tag">大模型</span>
-                            <span class="resource-tag">开源</span>
-                        </div>
+                    <div>
+                        <p>预训练模型库、Transformers库、数据集资源。学习和应用大语言模型的首选平台。</p>
                     </div>
-                </a>
+                </div>
 
-                <a href="https://www.tensorflow.org" target="_blank" class="resource-card fade-in">
-                    <div class="resource-header" style="background: linear-gradient(135deg, #ff6f00 0%, #ff8f00 100%);">
-                        <h3>TensorFlow</h3>
-                        <p>Google深度学习框架</p>
-                    </div>
-                    <div class="resource-body">
-                        <p><strong>学习资源：</strong></p>
-                        <ul style="list-style: none; padding: 0;">
-                            <li>✨ 官方教程文档</li>
-                            <li>✨ 模型库与案例</li>
-                            <li>✨ TensorFlow.js</li>
-                        </ul>
-                        <div style="margin-top: 1rem;">
-                            <span class="resource-tag">官方文档</span>
-                            <span class="resource-tag">生产级</span>
-                        </div>
-                    </div>
-                </a>
-
-                <a href="https://pytorch.org" target="_blank" class="resource-card fade-in">
-                    <div class="resource-header" style="background: linear-gradient(135deg, #ee4c2c 0%, #ff6b45 100%);">
+                <div class="resource-item">
+                    <div>
                         <h3>PyTorch</h3>
-                        <p>研究者首选框架</p>
+                        <p class="subtitle">研究者首选框架</p>
+                        <a href="https://pytorch.org" target="_blank" class="external-link">访问 →</a>
                     </div>
-                    <div class="resource-body">
-                        <p><strong>优势：</strong></p>
-                        <ul style="list-style: none; padding: 0;">
-                            <li>✨ 动态计算图</li>
-                            <li>✨ 易于调试</li>
-                            <li>✨ 丰富教程</li>
-                        </ul>
-                        <div style="margin-top: 1rem;">
-                            <span class="resource-tag">易学</span>
-                            <span class="resource-tag">灵活</span>
-                        </div>
+                    <div>
+                        <p>动态计算图，易于调试，丰富的官方教程和文档。学术界和工业界广泛使用。</p>
                     </div>
-                </a>
+                </div>
 
-                <a href="https://developer.aliyun.com/learning/roadmap/ai" target="_blank" class="resource-card fade-in">
-                    <div class="resource-header" style="background: linear-gradient(135deg, #ff6a00 0%, #ee0979 100%);">
-                        <h3>阿里云天池</h3>
-                        <p>中文AI学习平台</p>
+                <div class="resource-item">
+                    <div>
+                        <h3>TensorFlow</h3>
+                        <p class="subtitle">Google深度学习框架</p>
+                        <a href="https://www.tensorflow.org" target="_blank" class="external-link">访问 →</a>
                     </div>
-                    <div class="resource-body">
-                        <p><strong>特色：</strong></p>
-                        <ul style="list-style: none; padding: 0;">
-                            <li>✨ 中文课程体系</li>
-                            <li>✨ 在线实验环境</li>
-                            <li>✨ 企业级案例</li>
-                        </ul>
-                        <div style="margin-top: 1rem;">
-                            <span class="resource-tag">中文</span>
-                            <span class="resource-tag">免费</span>
-                        </div>
+                    <div>
+                        <p>生产级深度学习框架，完整的生态系统。官方教程文档，模型库与案例丰富。</p>
                     </div>
-                </a>
-
-                <a href="https://github.com" target="_blank" class="resource-card fade-in">
-                    <div class="resource-header github">
-                        <h3>GitHub</h3>
-                        <p>开源项目宝库</p>
-                    </div>
-                    <div class="resource-body">
-                        <p><strong>学习方式：</strong></p>
-                        <ul style="list-style: none; padding: 0;">
-                            <li>✨ 优质项目学习</li>
-                            <li>✨ 代码实践</li>
-                            <li>✨ 开源贡献</li>
-                        </ul>
-                        <div style="margin-top: 1rem;">
-                            <span class="resource-tag">开源</span>
-                            <span class="resource-tag">社区</span>
-                        </div>
-                    </div>
-                </a>
-
-                <a href="https://www.nvidia.cn/training/" target="_blank" class="resource-card fade-in">
-                    <div class="resource-header" style="background: linear-gradient(135deg, #76b900 0%, #5a9c00 100%);">
-                        <h3>NVIDIA DLI</h3>
-                        <p>深度学习培训中心</p>
-                    </div>
-                    <div class="resource-body">
-                        <p><strong>课程：</strong></p>
-                        <ul style="list-style: none; padding: 0;">
-                            <li>✨ 生成式AI课程</li>
-                            <li>✨ GPU加速计算</li>
-                            <li>✨ 培训认证</li>
-                        </ul>
-                        <div style="margin-top: 1rem;">
-                            <span class="resource-tag">专业认证</span>
-                            <span class="resource-tag">GPU</span>
-                        </div>
-                    </div>
-                </a>
+                </div>
             </div>
         </div>
     </section>
 
     <!-- 实战项目 -->
-    <section id="projects" style="background: #f8f9fa;">
+    <section id="projects">
         <div class="container">
-            <h2 class="section-title">🔨 实战项目推荐</h2>
-            <div class="projects-container">
-                <div class="project-level fade-in">
-                    <h3>🌱 初级项目（入门实践）</h3>
-                    <div class="project-grid">
-                        <div class="project-item">
-                            <h4>MNIST手写数字识别</h4>
-                            <p>经典入门项目，使用CNN识别0-9手写数字，掌握图像分类基础。</p>
-                        </div>
-                        <div class="project-item">
-                            <h4>鸢尾花分类</h4>
-                            <p>机器学习Hello World，通过花瓣和萼片尺寸分类鸢尾花种类。</p>
-                        </div>
-                        <div class="project-item">
-                            <h4>房价预测</h4>
-                            <p>使用线性回归预测波士顿地区房价，学习回归模型。</p>
-                        </div>
-                        <div class="project-item">
-                            <h4>葡萄酒质量预测</h4>
-                            <p>基于化学成分预测葡萄酒质量，练习数据可视化和回归分析。</p>
-                        </div>
-                        <div class="project-item">
-                            <h4>泰坦尼克号生存预测</h4>
-                            <p>Kaggle经典项目，预测乘客生存率，学习特征工程。</p>
-                        </div>
-                        <div class="project-item">
-                            <h4>垃圾邮件分类</h4>
-                            <p>使用朴素贝叶斯或SVM分类邮件，入门NLP项目。</p>
-                        </div>
+            <h2 class="section-title">实战项目</h2>
+            
+            <div class="projects-section">
+                <h3>初级项目</h3>
+                <div class="project-list">
+                    <div class="project-card">
+                        <h4>MNIST手写数字识别</h4>
+                        <p>经典入门项目，使用CNN识别0-9手写数字。</p>
+                    </div>
+                    <div class="project-card">
+                        <h4>鸢尾花分类</h4>
+                        <p>机器学习Hello World，通过特征分类花朵种类。</p>
+                    </div>
+                    <div class="project-card">
+                        <h4>房价预测</h4>
+                        <p>使用线性回归预测房价，学习回归模型。</p>
+                    </div>
+                    <div class="project-card">
+                        <h4>泰坦尼克号生存预测</h4>
+                        <p>Kaggle经典项目，预测乘客生存率。</p>
+                    </div>
+                    <div class="project-card">
+                        <h4>垃圾邮件分类</h4>
+                        <p>使用朴素贝叶斯或SVM分类邮件。</p>
+                    </div>
+                    <div class="project-card">
+                        <h4>葡萄酒质量预测</h4>
+                        <p>基于化学成分预测葡萄酒质量。</p>
                     </div>
                 </div>
+            </div>
 
-                <div class="project-level intermediate fade-in">
-                    <h3>🚀 中级项目（进阶挑战）</h3>
-                    <div class="project-grid">
-                        <div class="project-item">
-                            <h4>情感分析系统</h4>
-                            <p>分析电影评论或社交媒体情感倾向，使用BERT或LSTM模型。</p>
-                        </div>
-                        <div class="project-item">
-                            <h4>图像分类器（CIFAR-10）</h4>
-                            <p>识别10类物体（飞机、汽车等），使用ResNet或VGG网络。</p>
-                        </div>
-                        <div class="project-item">
-                            <h4>电影推荐系统</h4>
-                            <p>基于协同过滤或深度学习构建推荐引擎，应用于实际场景。</p>
-                        </div>
-                        <div class="project-item">
-                            <h4>人脸识别系统</h4>
-                            <p>使用OpenCV和深度学习检测和识别人脸，应用于考勤系统。</p>
-                        </div>
-                        <div class="project-item">
-                            <h4>假新闻检测</h4>
-                            <p>使用NLP技术识别虚假新闻，练习文本分类和特征提取。</p>
-                        </div>
-                        <div class="project-item">
-                            <h4>股票价格预测</h4>
-                            <p>使用LSTM或时间序列模型预测股票走势，学习金融数据分析。</p>
-                        </div>
+            <div class="projects-section">
+                <h3>中级项目</h3>
+                <div class="project-list">
+                    <div class="project-card">
+                        <h4>情感分析系统</h4>
+                        <p>分析文本情感倾向，使用BERT或LSTM。</p>
+                    </div>
+                    <div class="project-card">
+                        <h4>图像分类器</h4>
+                        <p>识别10类物体，使用ResNet或VGG网络。</p>
+                    </div>
+                    <div class="project-card">
+                        <h4>推荐系统</h4>
+                        <p>基于协同过滤或深度学习构建推荐引擎。</p>
+                    </div>
+                    <div class="project-card">
+                        <h4>人脸识别系统</h4>
+                        <p>使用OpenCV和深度学习检测识别人脸。</p>
+                    </div>
+                    <div class="project-card">
+                        <h4>假新闻检测</h4>
+                        <p>使用NLP技术识别虚假新闻。</p>
+                    </div>
+                    <div class="project-card">
+                        <h4>股票价格预测</h4>
+                        <p>使用LSTM预测股票走势。</p>
                     </div>
                 </div>
+            </div>
 
-                <div class="project-level advanced fade-in">
-                    <h3>⚡ 高级项目（专业级）</h3>
-                    <div class="project-grid">
-                        <div class="project-item">
-                            <h4>目标检测系统（YOLO）</h4>
-                            <p>实时检测视频中的多个物体，应用于自动驾驶或监控。</p>
-                        </div>
-                        <div class="project-item">
-                            <h4>智能问答系统（RAG）</h4>
-                            <p>基于大语言模型和向量数据库构建企业知识库问答系统。</p>
-                        </div>
-                        <div class="project-item">
-                            <h4>图像语义分割</h4>
-                            <p>像素级分类，应用于医学影像或自动驾驶场景分割。</p>
-                        </div>
-                        <div class="project-item">
-                            <h4>机器翻译系统</h4>
-                            <p>使用Transformer构建英中翻译模型，学习Seq2Seq架构。</p>
-                        </div>
-                        <div class="project-item">
-                            <h4>知识图谱构建</h4>
-                            <p>从非结构化文本中抽取实体和关系，构建领域知识图谱。</p>
-                        </div>
-                        <div class="project-item">
-                            <h4>多模态大模型应用</h4>
-                            <p>结合图像和文本的AI应用，如看图说话或图文检索。</p>
-                        </div>
+            <div class="projects-section">
+                <h3>高级项目</h3>
+                <div class="project-list">
+                    <div class="project-card">
+                        <h4>目标检测系统</h4>
+                        <p>使用YOLO实时检测视频中的多个物体。</p>
                     </div>
-                </div>
-
-                <div class="project-level fade-in" style="background: linear-gradient(135deg, #ffeaa7 0%, #fdcb6e 100%); color: #2d3436;">
-                    <h3>🏆 竞赛平台实战</h3>
-                    <div class="project-grid">
-                        <div class="project-item" style="background: white;">
-                            <h4>Kaggle竞赛</h4>
-                            <p>全球最大数据科学竞赛平台，参与真实商业问题挑战。</p>
-                        </div>
-                        <div class="project-item" style="background: white;">
-                            <h4>阿里云天池</h4>
-                            <p>中文竞赛平台，涵盖CV、NLP、推荐系统等多个领域。</p>
-                        </div>
-                        <div class="project-item" style="background: white;">
-                            <h4>DataFountain</h4>
-                            <p>DF竞赛平台，提供工业界实际问题数据集和高额奖金。</p>
-                        </div>
+                    <div class="project-card">
+                        <h4>智能问答系统</h4>
+                        <p>基于RAG构建企业知识库问答系统。</p>
+                    </div>
+                    <div class="project-card">
+                        <h4>图像语义分割</h4>
+                        <p>像素级分类，应用于医学影像。</p>
+                    </div>
+                    <div class="project-card">
+                        <h4>机器翻译系统</h4>
+                        <p>使用Transformer构建翻译模型。</p>
+                    </div>
+                    <div class="project-card">
+                        <h4>知识图谱构建</h4>
+                        <p>从文本中抽取实体和关系。</p>
+                    </div>
+                    <div class="project-card">
+                        <h4>多模态大模型应用</h4>
+                        <p>结合图像和文本的AI应用。</p>
                     </div>
                 </div>
             </div>
@@ -1135,95 +741,59 @@
     <!-- 学习建议 -->
     <section id="tips">
         <div class="container">
-            <h2 class="section-title">💡 学习建议与方法</h2>
-            <div class="tips-grid">
-                <div class="tip-card fade-in">
-                    <div class="tip-number">1</div>
-                    <h3>选择明确的方向</h3>
-                    <p>AI领域广阔，根据职业目标选择重点方向。如果对应用感兴趣，侧重工程实践；如果想做研究，加强数学理论。不要试图一次学完所有内容，专注于一个方向深耕。</p>
+            <h2 class="section-title">学习建议</h2>
+            <div class="tips-list">
+                <div class="tip-item">
+                    <div class="tip-number">01</div>
+                    <div class="tip-content">
+                        <h3>选择明确的方向</h3>
+                        <p>AI领域广阔，根据职业目标选择重点方向。如果对应用感兴趣，侧重工程实践；如果想做研究，加强数学理论。不要试图一次学完所有内容，专注于一个方向深耕。</p>
+                    </div>
                 </div>
 
-                <div class="tip-card fade-in">
-                    <div class="tip-number" style="background: var(--secondary-gradient);">2</div>
-                    <h3>边学边练，项目驱动</h3>
-                    <p>没有比实践更好的学习方式。每学完一个概念，立即动手做项目。从简单的MNIST开始，逐步挑战复杂项目。把项目发布到GitHub，构建个人作品集。</p>
+                <div class="tip-item">
+                    <div class="tip-number">02</div>
+                    <div class="tip-content">
+                        <h3>边学边练，项目驱动</h3>
+                        <p>没有比实践更好的学习方式。每学完一个概念，立即动手做项目。从简单的MNIST开始，逐步挑战复杂项目。把项目发布到GitHub，构建个人作品集。</p>
+                    </div>
                 </div>
 
-                <div class="tip-card fade-in">
-                    <div class="tip-number" style="background: var(--green-gradient);">3</div>
-                    <h3>加入社区，公开学习</h3>
-                    <p>参加Stack Overflow、GitHub、知乎等社区讨论。关注AI大牛博客和论文。参加线下Meetup和技术分享会。在公开场合学习能获得反馈，建立人脉，发现机会。</p>
+                <div class="tip-item">
+                    <div class="tip-number">03</div>
+                    <div class="tip-content">
+                        <h3>加入社区，公开学习</h3>
+                        <p>参加Stack Overflow、GitHub、知乎等社区讨论。关注AI大牛博客和论文。参加线下Meetup和技术分享会。在公开场合学习能获得反馈，建立人脉，发现机会。</p>
+                    </div>
                 </div>
 
-                <div class="tip-card fade-in">
-                    <div class="tip-number" style="background: linear-gradient(135deg, #feca57 0%, #ff9ff3 100%);">4</div>
-                    <h3>持续迭代，保持好奇</h3>
-                    <p>AI是快速发展的领域，每周都有新论文和技术发布。关注arXiv论文，阅读技术博客，参加在线课程。保持学习热情，不断迭代知识体系，从新手成长为专家。</p>
+                <div class="tip-item">
+                    <div class="tip-number">04</div>
+                    <div class="tip-content">
+                        <h3>持续迭代，保持好奇</h3>
+                        <p>AI是快速发展的领域，每周都有新论文和技术发布。关注arXiv论文，阅读技术博客，参加在线课程。保持学习热情，不断迭代知识体系，从新手成长为专家。</p>
+                    </div>
                 </div>
             </div>
 
-            <div style="margin-top: 4rem; text-align: center; background: white; padding: 3rem; border-radius: 15px; box-shadow: var(--card-shadow);" class="fade-in">
-                <h3 style="font-size: 1.8rem; margin-bottom: 1rem; color: #667eea;">⏰ 学习时间规划参考</h3>
-                <p style="font-size: 1.1rem; color: #666; margin-bottom: 2rem;">全职学习约 6-12个月可达到初级AI工程师水平<br>业余学习建议每天投入 2-3小时，约 12-18个月</p>
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.5rem; margin-top: 2rem;">
-                    <div style="padding: 1.5rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 10px;">
-                        <div style="font-size: 2rem; font-weight: bold;">1-2月</div>
-                        <div>基础准备</div>
-                    </div>
-                    <div style="padding: 1.5rem; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border-radius: 10px;">
-                        <div style="font-size: 2rem; font-weight: bold;">2-3月</div>
-                        <div>机器学习</div>
-                    </div>
-                    <div style="padding: 1.5rem; background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; border-radius: 10px;">
-                        <div style="font-size: 2rem; font-weight: bold;">3-4月</div>
-                        <div>深度学习</div>
-                    </div>
-                    <div style="padding: 1.5rem; background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); color: white; border-radius: 10px;">
-                        <div style="font-size: 2rem; font-weight: bold;">2-3月</div>
-                        <div>大模型</div>
-                    </div>
-                </div>
+            <div class="divider"></div>
+
+            <div style="text-align: center; margin-top: 4rem;">
+                <p style="font-size: 1.1rem; margin-bottom: 2rem;"><strong>学习时间参考</strong></p>
+                <p style="color: var(--secondary-color);">全职学习约 6-12个月可达到初级AI工程师水平</p>
+                <p style="color: var(--secondary-color);">业余学习建议每天投入 2-3小时，约 12-18个月</p>
             </div>
         </div>
     </section>
 
     <!-- 页脚 -->
     <footer>
-        <div class="footer-content">
-            <h2>🚀 开始你的AI学习之旅</h2>
-            <p>记住：掌握AI不是短跑，而是马拉松。保持热情，持续学习，你一定能成为AI专家！</p>
-            <div class="social-links">
-                <a href="https://github.com" target="_blank" class="social-link" title="GitHub">💻</a>
-                <a href="https://www.kaggle.com" target="_blank" class="social-link" title="Kaggle">📊</a>
-                <a href="https://huggingface.co" target="_blank" class="social-link" title="Hugging Face">🤗</a>
-                <a href="https://twitter.com" target="_blank" class="social-link" title="Twitter">🐦</a>
-            </div>
-            <div class="copyright">
-                <p>© 2026 AI Learning Path. 持续更新中 | 数据来源于公开资料整理</p>
-            </div>
+        <div class="container">
+            <p>© 2026 AI Learning Path</p>
         </div>
     </footer>
 
-    <!-- 滚动动画脚本 -->
     <script>
-        // 滚动动画
-        const observerOptions = {
-            threshold: 0.1,
-            rootMargin: '0px 0px -50px 0px'
-        };
-
-        const observer = new IntersectionObserver((entries) => {
-            entries.forEach(entry => {
-                if (entry.isIntersecting) {
-                    entry.target.classList.add('visible');
-                }
-            });
-        }, observerOptions);
-
-        document.querySelectorAll('.fade-in').forEach(el => {
-            observer.observe(el);
-        });
-
         // 平滑滚动
         document.querySelectorAll('a[href^="#"]').forEach(anchor => {
             anchor.addEventListener('click', function (e) {
@@ -1236,16 +806,6 @@
                     });
                 }
             });
-        });
-
-        // 导航栏背景变化
-        window.addEventListener('scroll', () => {
-            const nav = document.querySelector('nav');
-            if (window.scrollY > 100) {
-                nav.style.boxShadow = '0 2px 20px rgba(0,0,0,0.15)';
-            } else {
-                nav.style.boxShadow = '0 2px 10px rgba(0,0,0,0.1)';
-            }
         });
     </script>
 </body>

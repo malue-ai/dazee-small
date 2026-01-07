@@ -20,7 +20,7 @@
 """
 
 import logging
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -39,9 +39,9 @@ router = APIRouter(prefix="/api/v1/human-confirmation", tags=["HITL"])
 
 class ConfirmationResponseBody(BaseModel):
     """确认响应请求体"""
-    response: str = Field(
+    response: Union[str, List[str], Dict[str, Any]] = Field(
         ...,
-        description="用户响应，如 'confirm', 'cancel', 或自定义选项"
+        description="用户响应：字符串（yes_no/single_choice/text_input）、数组（multiple_choice）、或对象（form）"
     )
     metadata: Optional[Dict[str, Any]] = Field(
         default=None,

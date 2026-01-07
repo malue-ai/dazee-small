@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 env_path = Path(__file__).parent / ".env"
 load_dotenv(dotenv_path=env_path, override=True)
 
-from routers import chat_router, knowledge_router, files_router
+from routers import chat_router, knowledge_router, files_router, tools_router
 from routers.human_confirmation import router as human_confirmation_router
 from routers.conversation import router as conversation_router
 from routers.workspace import router as workspace_router
@@ -108,6 +108,7 @@ app.include_router(human_confirmation_router)
 app.include_router(conversation_router)
 app.include_router(files_router)
 app.include_router(workspace_router)
+app.include_router(tools_router)
 
 
 # ============================================================

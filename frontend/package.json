@@ -15,7 +15,8 @@
     "pinia": "^2.1.0",
     "axios": "^1.6.0",
     "marked": "^11.0.0",
-    "highlight.js": "^11.9.0"
+    "highlight.js": "^11.9.0",
+    "mermaid": "^10.6.0"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.0.0",

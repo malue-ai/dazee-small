@@ -1,11 +1,12 @@
 <template>
-  <div class="markdown-body" v-html="renderedHtml"></div>
+  <div class="markdown-body" ref="markdownRef" v-html="renderedHtml"></div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch, nextTick, onMounted } from 'vue'
 import { marked } from 'marked'
 import hljs from 'highlight.js'
+import mermaid from 'mermaid'
 
 const props = defineProps({
   content: {
@@ -14,15 +15,39 @@ const props = defineProps({
   }
 })
 
+const emit = defineEmits(['mermaid-detected'])
+
+const markdownRef = ref(null)
+
+// 初始化 Mermaid
+mermaid.initialize({
+  startOnLoad: false,
+  theme: 'default',
+  securityLevel: 'loose',
+  fontFamily: 'system-ui, -apple-system, sans-serif'
+})
+
+// 自定义 marked renderer 处理 mermaid 代码块
+const renderer = new marked.Renderer()
+
+renderer.code = function(code, language) {
+  if (language === 'mermaid') {
+    // 返回一个带有特殊类的 div，稍后会被 mermaid 渲染
+    const id = 'mermaid-' + Math.random().toString(36).substr(2, 9)
+    return `<div class="mermaid-container"><pre class="mermaid" id="${id}">${code}</pre></div>`
+  }
+  
+  // 普通代码高亮
+  if (language && hljs.getLanguage(language)) {
+    try {
+      return `<pre><code class="hljs language-${language}">${hljs.highlight(code, { language }).value}</code></pre>`
+    } catch (err) {}
+  }
+  return `<pre><code class="hljs">${hljs.highlightAuto(code).value}</code></pre>`
+}
+
 marked.setOptions({
-  highlight: function(code, lang) {
-    if (lang && hljs.getLanguage(lang)) {
-      try {
-        return hljs.highlight(code, { language: lang }).value
-      } catch (err) {}
-    }
-    return hljs.highlightAuto(code).value
-  },
+  renderer,
   breaks: true,
   gfm: true
 })
@@ -34,6 +59,66 @@ const renderedHtml = computed(() => {
     return props.content
   }
 })
+
+// 提取 mermaid 代码（使用更健壮的正则）
+function extractMermaidCode(content) {
+  if (!content) return []
+  
+  // 匹配 ```mermaid 代码块，支持 \n 或 \r\n
+  const regex = /```mermaid\s*[\r\n]+([\s\S]*?)```/gi
+  const matches = []
+  let match
+  
+  while ((match = regex.exec(content)) !== null) {
+    const code = match[1].trim()
+    if (code) {
+      matches.push(code)
+    }
+  }
+  
+  return matches
+}
+
+// 渲染 Mermaid 图表
+async function renderMermaid() {
+  await nextTick()
+  if (!markdownRef.value) return
+  
+  const mermaidElements = markdownRef.value.querySelectorAll('.mermaid')
+  if (mermaidElements.length === 0) return
+  
+  try {
+    await mermaid.run({
+      nodes: mermaidElements
+    })
+  } catch (error) {
+    console.warn('Mermaid 渲染失败:', error)
+  }
+}
+
+// 检测并通知 mermaid 图表
+function detectAndEmitMermaid() {
+  const charts = extractMermaidCode(props.content)
+  if (charts.length > 0) {
+    emit('mermaid-detected', charts)
+  }
+}
+
+// 监听内容变化，重新渲染 mermaid
+watch(() => props.content, async (newContent, oldContent) => {
+  // 只有当内容实际变化且有值时才处理
+  if (!newContent) return
+  
+  await renderMermaid()
+  detectAndEmitMermaid()
+}, { immediate: true })
+
+onMounted(async () => {
+  if (props.content) {
+    await renderMermaid()
+    detectAndEmitMermaid()
+  }
+})
 </script>
 
 <style>
@@ -42,7 +127,7 @@ const renderedHtml = computed(() => {
 
 .markdown-body {
   line-height: 1.6;
-  color: #374151; /* Gray 700 */
+  color: #374151;
   font-size: 15px;
 }
 
@@ -56,7 +141,7 @@ const renderedHtml = computed(() => {
   margin-bottom: 16px;
   font-weight: 600;
   line-height: 1.25;
-  color: #111827; /* Gray 900 */
+  color: #111827;
 }
 
 .markdown-body h1 {
@@ -159,5 +244,25 @@ const renderedHtml = computed(() => {
   max-width: 100%;
   box-sizing: content-box;
   border-radius: 6px;
+}
+
+/* Mermaid 容器样式 */
+.mermaid-container {
+  margin: 16px 0;
+  padding: 16px;
+  background: #f9fafb;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  overflow-x: auto;
+}
+
+.mermaid-container .mermaid {
+  display: flex;
+  justify-content: center;
+}
+
+.mermaid-container svg {
+  max-width: 100%;
+  height: auto;
 }
 </style>

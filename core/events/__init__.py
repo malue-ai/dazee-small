@@ -71,6 +71,7 @@ from core.events.message_events import MessageEventManager
 from core.events.content_events import ContentEventManager
 from core.events.system_events import SystemEventManager
 from core.events.broadcaster import EventBroadcaster, create_broadcaster
+from core.events.dispatcher import EventDispatcher, create_event_dispatcher
 from core.events.storage import (
     RedisEventStorage,
     InMemoryEventStorage,
@@ -90,6 +91,9 @@ __all__ = [
     # Broadcaster
     "EventBroadcaster",
     "create_broadcaster",
+    # Dispatcher（外部适配器）
+    "EventDispatcher",
+    "create_event_dispatcher",
     # Storage
     "RedisEventStorage",
     "InMemoryEventStorage",

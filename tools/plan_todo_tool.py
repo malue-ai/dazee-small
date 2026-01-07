@@ -113,14 +113,13 @@ class PlanTodoTool:
     3. 用户需求发生变化
     4. 执行过程中发现更优方案
 
-- get_plan: 获取当前计划状态（无需 data）
-
 返回格式:
 - status: success/error
 - plan: 更新后的计划 JSON（由调用方存储）
 - replan_count: 重新规划次数（replan 时返回）
 
 注意：此工具不持有状态，plan 由调用方管理。
+外部可通过静态方法 get_progress() / get_current_step() / get_context_for_llm() 查询计划状态。
 """
     
     def __init__(self, registry=None):
@@ -909,15 +908,16 @@ PLAN_TODO_TOOL_SCHEMA = {
 - create_plan: 智能创建计划 {"user_query": "用户需求"}（自动调用 Claude + Extended Thinking）
 - update_step: 更新步骤 {"step_index": 0, "status": "completed|failed|in_progress", "result": "..."}
 - add_step: 添加步骤 {"action": "...", "purpose": "..."}
+- replan: 重新规划 {"reason": "原因", "strategy": "full|incremental"}
 
-返回新的 plan JSON，由调用方决定如何存储。""",
+返回新的 plan JSON，存储在消息列表的 tool_result 中。""",
     "input_schema": {
         "type": "object",
         "properties": {
             "operation": {
                 "type": "string",
                 "description": "操作类型",
-                "enum": ["create_plan", "update_step", "add_step"]
+                "enum": ["create_plan", "update_step", "add_step", "replan"]
             },
             "data": {
                 "type": "object",

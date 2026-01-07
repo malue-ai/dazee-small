@@ -332,18 +332,27 @@ class RequestHumanConfirmationTool(BaseTool):
         questions: Optional[List[Dict[str, Any]]],
         conf_type: ConfirmationType
     ) -> None:
-        """发送 SSE 事件到前端"""
+        """发送 SSE 事件到前端（使用 message_delta 格式）"""
         if not emit_event:
             logger.warning("emit_event 回调未注入，无法发送 SSE 事件到前端")
             return
         
         try:
+            # 构建 HITL 请求内容
+            hitl_content = {
+                **request.to_dict(),
+                "description": description,
+                "questions": questions if conf_type == ConfirmationType.FORM else None
+            }
+            
+            # 使用 message_delta 格式，符合事件协议规范
             event_data = {
-                "type": "human_confirmation_request",
+                "type": "message_delta",
                 "data": {
-                    **request.to_dict(),
-                    "description": description,
-                    "questions": questions if conf_type == ConfirmationType.FORM else None
+                    "delta": {
+                        "type": "confirmation_request",
+                        "content": json.dumps(hitl_content, ensure_ascii=False)
+                    }
                 }
             }
             await emit_event(event_data)

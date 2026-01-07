@@ -225,6 +225,36 @@ class FileService:
                 s3_key=file_record.storage_path,
                 expires_in=expiration
             )
+    
+    async def get_file_content(self, file_id: str) -> tuple[bytes, str, str]:
+        """
+        获取文件内容（用于代理预览）
+        
+        Args:
+            file_id: 文件 ID
+            
+        Returns:
+            (文件内容, MIME 类型, 文件名)
+        """
+        async with AsyncSessionLocal() as session:
+            file_record = await crud.get_file(session, file_id)
+            
+            if not file_record:
+                raise FileNotFoundError(f"文件不存在: {file_id}")
+            
+            # 从 S3 下载文件内容
+            s3_client = self.s3_uploader.s3_client
+            bucket_name = self.s3_uploader.bucket_name
+            
+            response = s3_client.get_object(
+                Bucket=bucket_name,
+                Key=file_record.storage_path
+            )
+            content = response['Body'].read()
+            
+            logger.info(f"📥 获取文件内容: {file_record.filename}, {len(content)} bytes")
+            
+            return content, file_record.mime_type, file_record.filename
 
 
 # ==================== 便捷函数 ====================

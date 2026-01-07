@@ -23,6 +23,34 @@ from .chat import (
 from .api import APIResponse
 from .database import User, Conversation, Message
 
+# 工具模型
+from .tool import (
+    # 枚举
+    ToolType,
+    ReturnMode,
+    InteractionMode,
+    ToolStatus,
+    ExecutionStatus,
+    # 工具定义
+    ToolParameter,
+    ToolInputSchema,
+    MCPConfig,
+    ToolDefinition,
+    # 工具执行
+    ToolInvocation,
+    ToolResultChunk,
+    ToolResult,
+    # 工具注册
+    ToolRegistration,
+    MCPServerRegistration,
+    ToolRegistrationResponse,
+    MCPServerRegistrationResponse,
+    # 工具查询
+    ToolListQuery,
+    ToolListResponse,
+    ToolDetailResponse,
+)
+
 # Ragie 文档模型（用于文档上传和检索）
 from .ragie import (
     # 请求模型
@@ -98,6 +126,30 @@ __all__ = [
     "User",
     "Conversation",
     "Message",
+    # Tool 模型 - 枚举
+    "ToolType",
+    "ReturnMode",
+    "InteractionMode",
+    "ToolStatus",
+    "ExecutionStatus",
+    # Tool 模型 - 工具定义
+    "ToolParameter",
+    "ToolInputSchema",
+    "MCPConfig",
+    "ToolDefinition",
+    # Tool 模型 - 工具执行
+    "ToolInvocation",
+    "ToolResultChunk",
+    "ToolResult",
+    # Tool 模型 - 工具注册
+    "ToolRegistration",
+    "MCPServerRegistration",
+    "ToolRegistrationResponse",
+    "MCPServerRegistrationResponse",
+    # Tool 模型 - 工具查询
+    "ToolListQuery",
+    "ToolListResponse",
+    "ToolDetailResponse",
     # Ragie 文档模型 - 请求
     "DocumentUploadRequest",
     "DocumentUrlUploadRequest",

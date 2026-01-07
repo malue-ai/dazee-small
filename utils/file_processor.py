@@ -43,6 +43,7 @@ class ProcessedFile:
     text_content: Optional[str] = None              # category=TEXT 时使用
     file_url: Optional[str] = None                  # category=DOCUMENT 时使用
     file_size: Optional[int] = None                 # 文件大小（字节）
+    file_id: Optional[str] = None                   # 文件 ID（如果是从数据库获取的）
 
 
 class FileProcessorError(Exception):
@@ -149,20 +150,28 @@ class FileProcessor:
         category = self._categorize_mime_type(mime_type)
         
         if category == FileCategory.IMAGE:
-            # 图片：下载 → base64
-            if file_size > self.MAX_IMAGE_SIZE:
-                logger.warning(f"图片过大，降级为文档处理: {file_size} bytes")
-                category = FileCategory.DOCUMENT
-            else:
-                content = await self._download_from_s3(storage_path)
-                content_block = self._build_image_block(content, mime_type)
-                return ProcessedFile(
-                    category=category,
-                    filename=filename,
-                    mime_type=mime_type,
-                    content_block=content_block,
-                    file_size=file_size
-                )
+            # 图片：直接使用预签名 URL（Claude 支持 URL 方式）
+            presigned_url = self.s3_uploader.get_presigned_url(
+                s3_key=storage_path,
+                expires_in=3600  # 1小时有效
+            )
+            content_block = {
+                "type": "image",
+                "source": {
+                    "type": "url",
+                    "url": presigned_url
+                }
+            }
+            logger.info(f"🖼️ 图片使用 URL 方式: {filename}")
+            return ProcessedFile(
+                category=category,
+                filename=filename,
+                mime_type=mime_type,
+                content_block=content_block,
+                file_size=file_size,
+                file_id=file_id,
+                file_url=presigned_url
+            )
         
         if category == FileCategory.TEXT:
             # 纯文本：下载 → 读取内容
@@ -177,7 +186,8 @@ class FileProcessor:
                     filename=filename,
                     mime_type=mime_type,
                     text_content=text_content,
-                    file_size=file_size
+                    file_size=file_size,
+                    file_id=file_id
                 )
         
         # 复杂文档：生成预签名 URL
@@ -190,7 +200,8 @@ class FileProcessor:
             filename=filename,
             mime_type=mime_type,
             file_url=presigned_url,
-            file_size=file_size
+            file_size=file_size,
+            file_id=file_id
         )
     
     async def _process_by_url(self, url: str) -> Optional[ProcessedFile]:
@@ -210,29 +221,22 @@ class FileProcessor:
         category = self._categorize_mime_type(mime_type)
         
         if category == FileCategory.IMAGE:
-            # 图片：可以直接用 URL（Claude 支持）
-            # 但为了兼容性，我们也下载转 base64
-            if file_size and file_size > self.MAX_IMAGE_SIZE:
-                logger.warning(f"图片过大，使用 URL 引用: {file_size} bytes")
-                # 对于大图片，直接用 URL（Claude 支持 URL 方式）
-                content_block = {
-                    "type": "image",
-                    "source": {
-                        "type": "url",
-                        "url": url
-                    }
+            # 图片：直接使用 URL（Claude 支持 URL 方式，无需下载转 base64）
+            content_block = {
+                "type": "image",
+                "source": {
+                    "type": "url",
+                    "url": url
                 }
-            else:
-                # 下载并转 base64
-                content = await self._download_from_url(url)
-                content_block = self._build_image_block(content, mime_type)
-            
+            }
+            logger.info(f"🖼️ 图片使用 URL 方式: {filename}")
             return ProcessedFile(
                 category=category,
                 filename=filename,
                 mime_type=mime_type,
                 content_block=content_block,
-                file_size=file_size
+                file_size=file_size,
+                file_url=url
             )
         
         if category == FileCategory.TEXT:

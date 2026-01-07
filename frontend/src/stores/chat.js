@@ -245,6 +245,7 @@ export const useChatStore = defineStore('chat', {
      * @param {Function} onEvent - 事件回调
      * @param {Object} options - 可选配置
      * @param {string[]} options.backgroundTasks - 后台任务列表，如 ['title_generation']
+     * @param {Array} options.files - 文件引用列表，如 [{file_id: "xxx"}]
      */
     async sendMessageStream(content, conversationId = null, onEvent, options = {}) {
       const userId = this.initUserId()
@@ -264,6 +265,12 @@ export const useChatStore = defineStore('chat', {
         // 🆕 添加后台任务参数
         if (options.backgroundTasks && options.backgroundTasks.length > 0) {
           requestBody.background_tasks = options.backgroundTasks
+        }
+        
+        // 🆕 添加文件参数
+        if (options.files && options.files.length > 0) {
+          requestBody.files = options.files
+          console.log('📎 发送文件:', options.files)
         }
 
         // 使用 fetch 创建 SSE 连接

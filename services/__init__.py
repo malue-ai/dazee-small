@@ -41,6 +41,22 @@ from .file_service import (
     FileNotFoundError as FileNotFoundErr,
 )
 
+from .tool_service import (
+    ToolService,
+    get_tool_service,
+    ToolServiceError,
+    ToolNotFoundError,
+    ToolAlreadyExistsError,
+    ToolExecutionError,
+    MCPConnectionError,
+    ToolRegistrationError,
+    # 工具处理器
+    ToolHandler,
+    MCPClient,
+    # 装饰器
+    tool,
+)
+
 __all__ = [
     # Knowledge Service
     "KnowledgeService",
@@ -69,5 +85,17 @@ __all__ = [
     "get_file_service",
     "FileServiceError",
     "FileNotFoundErr",
+    # Tool Service
+    "ToolService",
+    "get_tool_service",
+    "ToolServiceError",
+    "ToolNotFoundError",
+    "ToolAlreadyExistsError",
+    "ToolExecutionError",
+    "MCPConnectionError",
+    "ToolRegistrationError",
+    "ToolHandler",
+    "MCPClient",
+    "tool",
 ]
 

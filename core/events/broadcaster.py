@@ -103,7 +103,8 @@ class EventBroadcaster:
     def __init__(
         self,
         event_manager,
-        conversation_service: "ConversationService" = None
+        conversation_service: "ConversationService" = None,
+        event_dispatcher=None
     ):
         """
         初始化广播器
@@ -111,9 +112,11 @@ class EventBroadcaster:
         Args:
             event_manager: EventManager 实例
             conversation_service: ConversationService 实例（用于持久化）
+            event_dispatcher: EventDispatcher 实例（用于外部适配器，可选）
         """
         self.events = event_manager
         self.conversation_service = conversation_service
+        self.dispatcher = event_dispatcher  # 🆕 外部事件分发器
         
         # tool_id -> tool_name 缓存（用于 tool_result 时查找工具名）
         self._tool_id_to_name: Dict[str, str] = {}
@@ -159,7 +162,18 @@ class EventBroadcaster:
         """
         # 路由到对应的 emit 方法
         try:
-            return await self._route_event(session_id, event)
+            result = await self._route_event(session_id, event)
+            
+            # 🆕 分发到外部适配器（异步，不阻塞）
+            if result and self.dispatcher:
+                await self.dispatcher.dispatch(
+                    session_id,
+                    result,
+                    to_internal=False,  # 内部广播已由 _route_event 完成
+                    to_external=True
+                )
+            
+            return result
         except Exception as e:
             logger.error(f"❌ 广播事件失败: {event.get('type', 'unknown')}, error={str(e)}")
             return None
@@ -605,6 +619,65 @@ class EventBroadcaster:
         self._session_message_ids.pop(session_id, None)
         logger.debug(f"🧹 清理 session 状态: {session_id}")
     
+    # ==================== HITL 事件 ====================
+    
+    async def emit_confirmation_request(
+        self,
+        session_id: str,
+        request_id: str,
+        question: str,
+        options: list = None,
+        confirmation_type: str = "yes_no",
+        timeout: int = 60,
+        description: str = "",
+        questions: list = None,
+        metadata: dict = None
+    ) -> Dict[str, Any]:
+        """
+        发送人类确认请求事件（HITL）
+        
+        通过 message_delta 发送，delta.type = "confirmation_request"
+        前端收到此事件后应显示确认对话框，用户响应后通过 HTTP POST 提交。
+        
+        Args:
+            session_id: 会话ID
+            request_id: 确认请求ID（用于匹配响应）
+            question: 问题内容
+            options: 选项列表
+            confirmation_type: 确认类型（yes_no, single_choice, multiple_choice, text_input, form）
+            timeout: 超时时间（秒）
+            description: 补充描述
+            questions: 问题列表（form 类型）
+            metadata: 额外元数据
+            
+        Returns:
+            发送的事件
+        """
+        import json
+        
+        # 构建 HITL 请求内容
+        hitl_content = {
+            "request_id": request_id,
+            "question": question,
+            "options": options or ["confirm", "cancel"],
+            "confirmation_type": confirmation_type,
+            "timeout": timeout,
+            "description": description,
+            "questions": questions,
+            "metadata": metadata or {}
+        }
+        
+        # 通过 message_delta 发送，符合事件协议规范
+        delta = {
+            "type": "confirmation_request",
+            "content": json.dumps(hitl_content, ensure_ascii=False)
+        }
+        
+        event = await self.emit_message_delta(session_id, delta)
+        logger.info(f"🤝 发送 HITL 请求: request_id={request_id}, type={confirmation_type}")
+        
+        return event
+    
     # ==================== 配置管理 ====================
     
     @staticmethod
@@ -622,7 +695,8 @@ class EventBroadcaster:
 
 def create_broadcaster(
     event_manager,
-    conversation_service: "ConversationService" = None
+    conversation_service: "ConversationService" = None,
+    event_dispatcher=None
 ) -> EventBroadcaster:
     """
     创建事件广播器
@@ -630,9 +704,10 @@ def create_broadcaster(
     Args:
         event_manager: EventManager 实例
         conversation_service: ConversationService 实例（用于持久化）
+        event_dispatcher: EventDispatcher 实例（用于外部适配器，可选）
         
     Returns:
         EventBroadcaster 实例
     """
-    return EventBroadcaster(event_manager, conversation_service)
+    return EventBroadcaster(event_manager, conversation_service, event_dispatcher)
 

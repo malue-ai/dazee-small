@@ -94,6 +94,33 @@ async def get_download_url(file_id: str):
         raise HTTPException(status_code=500, detail="生成失败")
 
 
+@router.get("/{file_id}/preview")
+async def preview_file(file_id: str):
+    """
+    代理预览文件（绕过 CORS）
+    
+    直接从 S3 获取文件内容并返回，适用于图片预览
+    """
+    from fastapi.responses import Response
+    
+    try:
+        content, mime_type, filename = await get_file_service().get_file_content(file_id)
+        
+        return Response(
+            content=content,
+            media_type=mime_type,
+            headers={
+                "Content-Disposition": f'inline; filename="{filename}"',
+                "Cache-Control": "max-age=3600"  # 缓存 1 小时
+            }
+        )
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="文件不存在")
+    except Exception as e:
+        logger.error(f"❌ 预览文件失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="预览失败")
+
+
 @router.delete("/{file_id}")
 async def delete_file(file_id: str):
     """删除文件"""

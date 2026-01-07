@@ -127,9 +127,9 @@ class ChatService:
         """
         try:
             # 处理文件（如果有）
-            processed_message = await self._process_message_with_files(message, files)
+            processed_message, files_metadata = await self._process_message_with_files(message, files)
             normalized_message = normalize_message_format(processed_message)
-            logger.info(f"📨 同步对话请求: user_id={user_id}")
+            logger.info(f"📨 同步对话请求: user_id={user_id}, files={len(files_metadata) if files_metadata else 0}")
             
             # 确保 Conversation 存在
             is_new_conversation = False
@@ -162,7 +162,8 @@ class ChatService:
                     user_id=user_id,
                     conversation_id=conversation_id,
                     is_new_conversation=is_new_conversation,
-                    background_tasks=background_tasks
+                    background_tasks=background_tasks,
+                    files_metadata=files_metadata
                 )
             )
             
@@ -196,10 +197,10 @@ class ChatService:
         session_id = None
         try:
             # 处理文件（如果有）
-            processed_message = await self._process_message_with_files(message, files)
+            processed_message, files_metadata = await self._process_message_with_files(message, files)
             normalized_message = normalize_message_format(processed_message)
             message_preview = str(message)[:50] if message else ""
-            logger.info(f"📨 流式对话请求: user_id={user_id}, message={message_preview}...")
+            logger.info(f"📨 流式对话请求: user_id={user_id}, message={message_preview}..., files={len(files_metadata) if files_metadata else 0}")
             
             # 确保 Conversation 存在
             is_new_conversation = False
@@ -255,7 +256,8 @@ class ChatService:
                     user_id=user_id,
                     conversation_id=conversation_id,
                     is_new_conversation=is_new_conversation,
-                    background_tasks=background_tasks
+                    background_tasks=background_tasks,
+                    files_metadata=files_metadata
                 )
             )
             
@@ -321,7 +323,8 @@ class ChatService:
         user_id: str,
         conversation_id: str,
         is_new_conversation: bool = False,
-        background_tasks: Optional[List[str]] = None
+        background_tasks: Optional[List[str]] = None,
+        files_metadata: Optional[List[Dict[str, Any]]] = None
     ):
         """
         执行 Agent（核心逻辑，同步和流式共用）
@@ -337,6 +340,7 @@ class ChatService:
         
         Args:
             background_tasks: 需要启用的后台任务列表，如 ["title_generation"]
+            files_metadata: 文件元数据列表，用于保存到用户消息的 metadata 中
         """
         start_time = time.time()
         background_tasks = background_tasks or []
@@ -354,15 +358,23 @@ class ChatService:
             content_json = json.dumps(message, ensure_ascii=False)
             
             async with AsyncSessionLocal() as session:
-                # 保存用户消息
+                # 保存用户消息（包含文件元数据）
+                user_metadata = {
+                    "session_id": session_id,
+                    "model": self.default_model
+                }
+                # 如果有文件，将文件信息添加到 metadata
+                if files_metadata:
+                    user_metadata["files"] = files_metadata
+                
                 await crud.create_message(
                     session=session,
                     conversation_id=conversation_id,
                     role="user",
                     content=content_json,
-                    metadata={"session_id": session_id, "model": self.default_model}
+                    metadata=user_metadata
                 )
-                logger.debug(f"💾 用户消息已保存")
+                logger.debug(f"💾 用户消息已保存，files={len(files_metadata) if files_metadata else 0}")
                 
                 # 创建 Assistant 消息占位（status 使用简单字符串）
                 await crud.create_message(
@@ -598,7 +610,7 @@ class ChatService:
         self,
         message: Any,
         files: Optional[List[Dict[str, Any]]]
-    ) -> Any:
+    ) -> tuple[Any, Optional[List[Dict[str, Any]]]]:
         """
         处理文件并合并到消息中
         
@@ -612,19 +624,32 @@ class ChatService:
             files: 文件引用列表
             
         Returns:
-            处理后的消息（可能是字符串或 content blocks 列表）
+            tuple: (处理后的消息, 文件元数据列表)
+            - 处理后的消息（可能是字符串或 content blocks 列表）
+            - 文件元数据列表（用于保存到数据库，供历史记录展示）
         """
         if not files:
-            return message
+            return message, None
         
         try:
             processor = get_file_processor()
             processed_files = await processor.process_files(files)
             
             if not processed_files:
-                return message
+                return message, None
             
             logger.info(f"📎 处理了 {len(processed_files)} 个文件")
+            
+            # 提取文件元数据（用于保存到数据库）
+            files_metadata = []
+            for pf in processed_files:
+                files_metadata.append({
+                    "file_id": pf.file_id,
+                    "filename": pf.filename,
+                    "mime_type": pf.mime_type,
+                    "file_size": pf.file_size,
+                    "category": pf.category.value if pf.category else None
+                })
             
             # 获取原始消息文本
             if isinstance(message, str):
@@ -641,12 +666,12 @@ class ChatService:
             # 使用 FileProcessor 构建 content blocks
             content_blocks = processor.build_message_content(processed_files, original_text)
             
-            return content_blocks
+            return content_blocks, files_metadata
             
         except Exception as e:
             logger.error(f"❌ 处理文件失败: {str(e)}", exc_info=True)
             # 文件处理失败，返回原始消息，不影响对话
-            return message
+            return message, None
 
 
 # ==================== 便捷函数 ====================
