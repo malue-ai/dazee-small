@@ -952,7 +952,7 @@ async function reconnectToSession(session) {
     
     // 3. 使用 SSE 重连端点（GET /api/v1/chat/{session_id}）
     const afterSeq = 0  // 从头开始获取所有事件
-    const url = `/api/v1/chat/${session.session_id}?after_seq=${afterSeq}`
+    const url = `/api/v1/chat/${session.session_id}?after_seq=${afterSeq}&format=zenflux`
     
     console.log(`📡 建立 SSE 重连: ${url}`)
     

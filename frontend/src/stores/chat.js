@@ -285,7 +285,7 @@ export const useChatStore = defineStore('chat', {
       try {
         console.log('🔌 创建 SSE 连接...', requestBody)
         
-        const response = await fetch('/api/v1/chat', {
+        const response = await fetch('/api/v1/chat?format=zenflux', {
           method: 'POST',
           headers: {
             'Accept': 'text/event-stream',
