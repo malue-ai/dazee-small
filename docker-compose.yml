@@ -1,13 +1,16 @@
 # ============================================================
-# Zenflux Agent - 国内镜像版
-# 使用阿里云镜像，解决拉取超时问题
+# Zenflux Agent - Docker Compose 配置
+# 兼容 docker-compose V1
 # ============================================================
+
+version: '3.8'
 
 services:
   # ============================================================
   # 后端服务 - FastAPI（使用 SQLite）
   # ============================================================
   backend:
+    image: zenflux-backend:latest
     build:
       context: .
       dockerfile: Dockerfile
