@@ -1251,3 +1251,313 @@ capabilities:
           '
     required:
     - code
+- name: sandbox_list_dir
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  implementation:
+    module: tools.sandbox_file_tools
+    class: SandboxListDir
+  capabilities:
+  - sandbox_file_operations
+  - file_operations
+  priority: 85
+  cost:
+    time: fast
+    money: free
+  constraints:
+    requires_api: true
+    api_name: e2b
+    session_scoped: true
+  metadata:
+    description: 列出沙盒目录内容
+    keywords:
+    - sandbox
+    - 沙盒
+    - 目录
+    - 文件列表
+  input_schema:
+    type: object
+    properties:
+      conversation_id:
+        type: string
+        description: 对话 ID
+      path:
+        type: string
+        description: 目录路径（默认 /home/user）
+        default: /home/user
+    required:
+    - conversation_id
+- name: sandbox_read_file
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  implementation:
+    module: tools.sandbox_file_tools
+    class: SandboxReadFile
+  capabilities:
+  - sandbox_file_operations
+  - file_operations
+  - content_reading
+  priority: 85
+  cost:
+    time: fast
+    money: free
+  constraints:
+    requires_api: true
+    api_name: e2b
+    session_scoped: true
+  metadata:
+    description: 读取沙盒文件内容
+    keywords:
+    - sandbox
+    - 沙盒
+    - 读取
+    - 文件
+  input_schema:
+    type: object
+    properties:
+      conversation_id:
+        type: string
+        description: 对话 ID
+      path:
+        type: string
+        description: 文件路径（完整路径）
+    required:
+    - conversation_id
+    - path
+- name: sandbox_write_file
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  implementation:
+    module: tools.sandbox_file_tools
+    class: SandboxWriteFile
+  capabilities:
+  - sandbox_file_operations
+  - file_operations
+  - content_writing
+  priority: 85
+  cost:
+    time: fast
+    money: free
+  constraints:
+    requires_api: true
+    api_name: e2b
+    session_scoped: true
+  metadata:
+    description: 写入沙盒文件
+    keywords:
+    - sandbox
+    - 沙盒
+    - 写入
+    - 文件
+    - 保存
+  input_schema:
+    type: object
+    properties:
+      conversation_id:
+        type: string
+        description: 对话 ID
+      path:
+        type: string
+        description: 文件路径（完整路径）
+      content:
+        type: string
+        description: 文件内容
+    required:
+    - conversation_id
+    - path
+    - content
+- name: sandbox_delete_file
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  implementation:
+    module: tools.sandbox_file_tools
+    class: SandboxDeleteFile
+  capabilities:
+  - sandbox_file_operations
+  - file_operations
+  priority: 85
+  cost:
+    time: fast
+    money: free
+  constraints:
+    requires_api: true
+    api_name: e2b
+    session_scoped: true
+  metadata:
+    description: 删除沙盒文件或目录
+    keywords:
+    - sandbox
+    - 沙盒
+    - 删除
+    - 文件
+  input_schema:
+    type: object
+    properties:
+      conversation_id:
+        type: string
+        description: 对话 ID
+      path:
+        type: string
+        description: 文件或目录路径
+    required:
+    - conversation_id
+    - path
+- name: sandbox_run_command
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  implementation:
+    module: tools.sandbox_file_tools
+    class: SandboxRunCommand
+  capabilities:
+  - sandbox_file_operations
+  - code_execution
+  - command_execution
+  priority: 85
+  cost:
+    time: fast
+    money: low
+  constraints:
+    requires_api: true
+    api_name: e2b
+    session_scoped: true
+  metadata:
+    description: 在沙盒中执行命令
+    keywords:
+    - sandbox
+    - 沙盒
+    - 命令
+    - shell
+    - 执行
+  input_schema:
+    type: object
+    properties:
+      conversation_id:
+        type: string
+        description: 对话 ID
+      command:
+        type: string
+        description: 要执行的命令
+      timeout:
+        type: integer
+        description: 超时时间（秒，默认 60）
+        default: 60
+    required:
+    - conversation_id
+    - command
+- name: sandbox_create_project
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  implementation:
+    module: tools.sandbox_file_tools
+    class: SandboxCreateProject
+  capabilities:
+  - sandbox_file_operations
+  - app_generation
+  - project_creation
+  priority: 90
+  cost:
+    time: fast
+    money: free
+  constraints:
+    requires_api: true
+    api_name: e2b
+    session_scoped: true
+  metadata:
+    description: 在沙盒中创建项目框架
+    preferred_for:
+    - 快速创建项目
+    - 初始化应用
+    - 项目模板
+    keywords:
+    - sandbox
+    - 沙盒
+    - 项目
+    - 创建
+    - 模板
+    - streamlit
+    - gradio
+    - flask
+    - fastapi
+  input_schema:
+    type: object
+    properties:
+      conversation_id:
+        type: string
+        description: 对话 ID
+      project_name:
+        type: string
+        description: 项目名称
+      stack:
+        type: string
+        description: 技术栈类型
+        enum:
+        - streamlit
+        - gradio
+        - flask
+        - fastapi
+        - python
+        default: python
+    required:
+    - conversation_id
+    - project_name
+- name: sandbox_run_project
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  implementation:
+    module: tools.sandbox_file_tools
+    class: SandboxRunProject
+  capabilities:
+  - sandbox_file_operations
+  - app_generation
+  - project_execution
+  priority: 90
+  cost:
+    time: medium
+    money: low
+  constraints:
+    requires_api: true
+    api_name: e2b
+    session_scoped: true
+    supports_preview: true
+  metadata:
+    description: 运行沙盒中的项目并获取预览 URL
+    preferred_for:
+    - 运行应用
+    - 预览项目
+    - 启动服务
+    keywords:
+    - sandbox
+    - 沙盒
+    - 运行
+    - 启动
+    - 预览
+    - url
+  input_schema:
+    type: object
+    properties:
+      conversation_id:
+        type: string
+        description: 对话 ID
+      project_path:
+        type: string
+        description: 项目路径（相对于 /home/user）
+      stack:
+        type: string
+        description: 技术栈类型
+        enum:
+        - streamlit
+        - gradio
+        - flask
+        - fastapi
+        - python
+    required:
+    - conversation_id
+    - project_path
+    - stack

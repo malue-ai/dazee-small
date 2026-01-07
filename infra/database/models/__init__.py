@@ -9,6 +9,7 @@ from infra.database.models.conversation import Conversation
 from infra.database.models.message import Message
 from infra.database.models.file import File
 from infra.database.models.knowledge import Knowledge
+from infra.database.models.sandbox import Sandbox
 
 __all__ = [
     "User",
@@ -16,5 +17,6 @@ __all__ = [
     "Message",
     "File",
     "Knowledge",
+    "Sandbox",
 ]
 

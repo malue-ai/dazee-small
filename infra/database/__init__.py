@@ -24,6 +24,7 @@ from infra.database.models import (
     Message,
     File,
     Knowledge,
+    Sandbox,
 )
 
 # 导入 CRUD 操作
@@ -43,6 +44,7 @@ __all__ = [
     "Message",
     "File",
     "Knowledge",
+    "Sandbox",
     
     # CRUD
     "crud",

@@ -57,6 +57,21 @@ from infra.database.crud.knowledge import (
     get_knowledge_by_file,
     bulk_update_status,
 )
+from infra.database.crud.sandbox import (
+    generate_sandbox_id,
+    create_sandbox,
+    get_sandbox,
+    get_sandbox_by_conversation,
+    get_sandbox_by_e2b_id,
+    update_sandbox,
+    update_sandbox_status,
+    update_sandbox_e2b_id,
+    update_sandbox_activity,
+    list_sandboxes_by_user,
+    list_sandboxes_by_status,
+    delete_sandbox,
+    delete_sandbox_by_conversation,
+)
 
 __all__ = [
     # 通用
@@ -108,5 +123,20 @@ __all__ = [
     "search_knowledge",
     "get_knowledge_by_file",
     "bulk_update_status",
+    
+    # Sandbox
+    "generate_sandbox_id",
+    "create_sandbox",
+    "get_sandbox",
+    "get_sandbox_by_conversation",
+    "get_sandbox_by_e2b_id",
+    "update_sandbox",
+    "update_sandbox_status",
+    "update_sandbox_e2b_id",
+    "update_sandbox_activity",
+    "list_sandboxes_by_user",
+    "list_sandboxes_by_status",
+    "delete_sandbox",
+    "delete_sandbox_by_conversation",
 ]
 
