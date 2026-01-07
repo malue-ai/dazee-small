@@ -1,9 +1,9 @@
 # ZenFlux Agent V4 架构总览
 
 > 📅 **最后更新**: 2026-01-07  
-> 🎯 **当前版本**: V4.2.4 - 工具分层选择（Level 1/2 + cache_stable）  
+> 🎯 **当前版本**: V4.4 - Skills + Tools 整合 + InvocationSelector 激活  
 > 🔗 **前版本**: [V3.7 架构](./ARCHITECTURE_V3.7_E2B.md)
-> ✅ **优化状态**: Schema 驱动 + Context Reduction + **工具分层** + Code-First 编排 + E2E 追踪 + Re-Plan + 统一能力注册
+> ✅ **优化状态**: Schema 驱动 + Context Reduction + **工具分层** + Code-First 编排 + E2E 追踪 + Re-Plan + 统一能力注册 + **长时运行支持** + **Skills/Tools 分层调用**
 > 📊 **文档特点**: 参考 V3.7 风格的详细架构图 + 完整 7 阶段用户流程管道图
 
 ---
@@ -14,12 +14,39 @@
 - [核心理念](#核心理念)
 - [整体架构](#整体架构)
 - [模块详解](#模块详解)
+  - [PlanMemory 详解（V4.3）](#41-planmemory-详解v43)
 - [数据流](#数据流)
 - [文件结构](#文件结构)
 
 ---
 
 ## 🚀 版本演进
+
+### V4.3 → V4.4 核心变化（Skills + Tools 整合）
+
+| 维度 | V4.3 | V4.4 | 改进 |
+|------|------|------|------|
+| **能力分层** | Skills/Tools 混合 | ✅ 明确分层 | Claude Skills (container.skills) vs Tools (DIRECT) |
+| **E2B 定位** | 未明确 | ✅ 作为 Tool | E2B 是 DIRECT tool_use，Claude 自主推理调用 |
+| **InvocationSelector** | 预留未集成 | ✅ 条件激活 | 无匹配 Skill 时启用，选择调用模式 |
+| **调用路径** | 单一路径 | ✅ 双路径分流 | Skill 路径 vs Tool 路径 |
+
+**参考来源**：
+- [Anthropic Blog: Advanced Tool Use](https://www.anthropic.com/engineering/advanced-tool-use)
+- [Claude Skills and MCP](https://claude.com/blog/extending-claude-capabilities-with-skills-mcp-servers)
+
+### V4.2.4 → V4.3 核心变化（Plan 持久化 + Session 恢复）
+
+| 维度 | V4.2.4 | V4.3 | 改进 |
+|------|--------|------|------|
+| **Plan 持久化** | 会话级丢失 | ✅ 跨 Session 持久化 | PlanMemory 支持任务恢复 |
+| **Session 恢复** | 无 | ✅ 自动恢复协议 | 动态注入恢复 Prompt |
+| **复杂度检测** | 无 | ✅ 自动检测 | IntentAnalyzer 判断 needs_persistence |
+| **用户透明** | 手动区分 Prompt | 框架自动处理 | 运营人员无需感知 Session 类型 |
+
+**参考来源**：
+- [Anthropic Blog: Effective harnesses for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)
+- Claude 官方 `autonomous-coding` 示例的 Two-Agent Pattern
 
 ### V4.2.3 → V4.2.4 核心变化（工具分层选择）
 
@@ -76,6 +103,20 @@
 | **LLM** | `llm_service.py` | `core/llm/` 多提供商 | ✅ Claude/OpenAI/Gemini |
 | **Events** | 分散的事件发射 | `core/events/` 统一管理 | ✅ 6 类事件统一接口 |
 
+### 🎯 V4.4 优化重点（Skills + Tools 整合）
+
+1. **能力分层清晰化** - Claude Skills (SKILL.md + container.skills) vs Tools (DIRECT tool_use)
+2. **E2B 明确定位** - E2B 是 Tool，通过 DIRECT tool_use 调用，Claude 自主推理选择
+3. **InvocationSelector 条件激活** - 仅在无匹配 Skill 时启用，选择 DIRECT/PROGRAMMATIC/TOOL_SEARCH
+4. **双路径分流** - SimpleAgent 实现 Skill 路径 vs Tool 路径分流逻辑
+
+### 🎯 V4.3 优化重点（Plan 持久化 + Session 恢复）
+
+1. **PlanMemory** - 新增用户级记忆，跨 Session 持久化任务计划
+2. **自动复杂度检测** - IntentAnalyzer 自动判断 `needs_persistence`
+3. **动态 Prompt 注入** - 框架自动注入恢复协议，用户无需编写特殊 Prompt
+4. **借鉴 autonomous-coding** - 参考 Claude 官方示例的 Two-Agent Pattern
+
 ### 🎯 V4.2.2 优化重点（Re-Plan 自适应重规划）
 
 1. **Re-Plan 机制** - Claude 自主决定是否调用 replan，无需 Agent 硬规则
@@ -103,6 +144,28 @@
 2. **层级化** - 清晰的依赖方向，避免循环依赖
 3. **可扩展** - 新功能通过配置添加，不修改核心代码
 4. **可观测** - 统一事件系统，完整的执行追踪
+
+### ✨ V4.4 核心成就（Skills + Tools 整合）
+
+| 改进项 | 实现状态 | 具体成果 |
+|-------|---------|---------|
+| **架构文档 V4.4 章节** | ✅ 完成 | Claude Skills vs Tools 关系图 + E2B 定位说明 |
+| **E2B 明确定位** | ✅ 完成 | 文档明确 E2B 通过 DIRECT tool_use 调用 |
+| **InvocationSelector 激活** | ✅ 完成 | 添加 Skill 跳过逻辑，无 Skill 时生效 |
+| **SimpleAgent 分流** | ✅ 完成 | Skill 路径 vs Tool 路径分流逻辑 |
+| **capabilities.yaml 标注** | ✅ 完成 | 添加 invocation_hint 字段 |
+| **术语修正** | ✅ 完成 | 修正"7级优先级表"为"决策树+选择矩阵" |
+
+### ✨ V4.3 核心成就（Plan 持久化 + Session 恢复）
+
+| 改进项 | 实现状态 | 具体成果 |
+|-------|---------|---------|
+| **PlanMemory 类** | ✅ 完成 | core/memory/user/plan.py - 跨 Session 任务持久化 |
+| **MemoryManager 集成** | ✅ 完成 | 懒加载 plan 属性，统一入口访问 |
+| **plan_todo 自动持久化** | ✅ 完成 | create_plan/update_step 自动调用 PlanMemory |
+| **IntentAnalyzer.needs_persistence** | ✅ 完成 | 自动检测任务复杂度决定是否持久化 |
+| **动态恢复协议注入** | ✅ 完成 | universal_agent_prompt.py 自动注入进度摘要 |
+| **用户完全透明** | ✅ 完成 | 运营人员无需编写特殊 Session 类型 Prompt |
 
 ### ✨ V4.2.4 核心成就（工具分层选择）
 
@@ -1220,6 +1283,7 @@ core/memory/
 ├── user/                # 用户级记忆
 │   ├── episodic.py      # 情景记忆（历史总结）
 │   ├── e2b.py           # E2B 沙箱记忆
+│   ├── plan.py          # 🆕 任务计划持久化（V4.3）
 │   └── preference.py    # 用户偏好（预留）
 └── system/              # 系统级记忆
     ├── skill.py         # Skill 记忆
@@ -1251,6 +1315,12 @@ core/memory/
 │  • 持久沙箱（命名）                                                  │
 │  • 执行历史                                                          │
 │                                                                      │
+│  🆕 PlanMemory (V4.3)                                                │
+│  • 跨 Session 任务计划持久化                                         │
+│  • 步骤完成状态                                                      │
+│  • 进度摘要生成                                                      │
+│  • 存储路径: storage/users/{user_id}/plans/                         │
+│                                                                      │
 │  System Level (系统级)                                               │
 │  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │
 │  SkillMemory                                                         │
@@ -1259,6 +1329,116 @@ core/memory/
 │                                                                      │
 └─────────────────────────────────────────────────────────────────────┘
 ```
+
+### 4.1 PlanMemory 详解（🆕 V4.3）
+
+**设计原则**（借鉴 [autonomous-coding](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)）：
+- 步骤只能标记 `passes: true`，永不删除（保证进度单调递增）
+- 自动生成进度摘要用于 Prompt 注入
+- 对用户透明，框架自动处理
+
+**存储结构**：
+```json
+{
+  "task_id": "task_xxx",
+  "goal": "生成产品PPT",
+  "user_query": "帮我生成一个关于AI产品的PPT",
+  "created_at": "2026-01-07T10:00:00",
+  "updated_at": "2026-01-07T10:30:00",
+  "status": "in_progress",
+  "steps": [
+    {"action": "搜索AI产品资料", "status": "completed", "result": "..."},
+    {"action": "生成PPT内容", "status": "in_progress"},
+    {"action": "渲染PPT文件", "status": "pending"}
+  ],
+  "completion_rate": 0.33,
+  "session_count": 2
+}
+```
+
+**架构流程**：
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                       Plan 持久化 + Session 恢复流程                             │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  Session 1: 用户发起复杂任务                                                     │
+│      │                                                                           │
+│      ▼                                                                           │
+│  ┌──────────────────────────────────────────────────────────────────────────┐   │
+│  │ IntentAnalyzer.analyze()                                                 │   │
+│  │   → needs_persistence = True（复杂度 complex + 多步骤）                  │   │
+│  └───────────────────────────────────┬──────────────────────────────────────┘   │
+│                                      │                                           │
+│                                      ▼                                           │
+│  ┌──────────────────────────────────────────────────────────────────────────┐   │
+│  │ plan_todo.create_plan()                                                  │   │
+│  │   → 自动调用 PlanMemory.save_plan()                                      │   │
+│  │   → 存储到 storage/users/{user_id}/plans/{task_id}.json                 │   │
+│  └───────────────────────────────────┬──────────────────────────────────────┘   │
+│                                      │                                           │
+│                                      ▼                                           │
+│  执行部分步骤... → plan_todo.update_step() → PlanMemory.update_step()           │
+│      │                                                                           │
+│      ▼                                                                           │
+│  ⚠️ Context Window 耗尽 / 用户中断                                              │
+│                                                                                  │
+│  ═══════════════════════════════════════════════════════════════════════════════│
+│                                                                                  │
+│  Session 2: 用户继续任务（新的 Context Window）                                  │
+│      │                                                                           │
+│      ▼                                                                           │
+│  ┌──────────────────────────────────────────────────────────────────────────┐   │
+│  │ get_universal_agent_prompt(memory_manager=...)                           │   │
+│  │   → 检测到 PlanMemory 有未完成任务                                       │   │
+│  │   → 自动注入恢复协议到 System Prompt                                     │   │
+│  └───────────────────────────────────┬──────────────────────────────────────┘   │
+│                                      │                                           │
+│                                      ▼                                           │
+│  System Prompt 动态注入:                                                         │
+│  ┌──────────────────────────────────────────────────────────────────────────┐   │
+│  │ ## 📋 Session 恢复协议                                                   │   │
+│  │                                                                          │   │
+│  │ 检测到未完成的任务，请优先恢复执行：                                      │   │
+│  │                                                                          │   │
+│  │ **任务**: 生成产品PPT                                                    │   │
+│  │ **进度**: 1/3 完成 (33%)                                                 │   │
+│  │ **已完成**: 搜索AI产品资料 ✓                                             │   │
+│  │ **待执行**: 生成PPT内容, 渲染PPT文件                                     │   │
+│  │                                                                          │   │
+│  │ 请从"生成PPT内容"步骤继续执行。                                          │   │
+│  └──────────────────────────────────────────────────────────────────────────┘   │
+│                                      │                                           │
+│                                      ▼                                           │
+│  Claude 自动从中断点继续执行                                                     │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**关键 API**：
+```python
+# PlanMemory 核心方法
+class PlanMemory(BaseScopedMemory):
+    def save_plan(self, plan: Dict) -> str           # 保存计划，返回 task_id
+    def load_plan(self, task_id: str) -> Dict        # 加载计划
+    def update_step(self, task_id, step_index, status, result)  # 更新步骤
+    def get_active_plans(self) -> List[Dict]         # 获取所有未完成计划
+    def generate_progress_summary(self, task_id) -> str  # 生成进度摘要
+    def mark_completed(self, task_id: str)           # 标记任务完成
+
+# MemoryManager 统一访问
+memory.plan.save_plan(plan_data)
+memory.plan.get_active_plans()
+memory.plan.generate_progress_summary(task_id)
+```
+
+**用户透明设计**：
+| 传统方式 | V4.3 方式 |
+|----------|-----------|
+| 用户编写 initializer_prompt.md | 框架自动检测 |
+| 用户编写 coding_prompt.md | 框架自动注入恢复协议 |
+| 手动区分 Session 类型 | IntentAnalyzer 自动判断 |
+| 运营人员需要理解 Two-Agent Pattern | 完全透明，无感知 |
 
 ### 5. core/context/ - 上下文层
 
@@ -1804,6 +1984,7 @@ zenflux_agent/
 │   │   ├── user/                   # 用户级
 │   │   │   ├── episodic.py
 │   │   │   ├── e2b.py
+│   │   │   ├── plan.py             # 🆕 任务计划持久化（V4.3）
 │   │   │   └── preference.py
 │   │   └── system/                 # 系统级
 │   │       ├── skill.py
@@ -1943,6 +2124,28 @@ zenflux_agent/
 
 ## 🔮 下一步计划
 
+### ✅ 已完成：V4.3 Plan 持久化 + Session 恢复
+
+```
+✅ 已完成（2026-01-07）
+
+新增模块：
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+core/memory/user/plan.py       ← 🆕 PlanMemory 类
+core/memory/user/__init__.py   ← 添加导出
+core/memory/manager.py         ← 集成 plan 属性（懒加载）
+core/agent/types.py            ← 添加 needs_persistence 字段
+core/agent/intent_analyzer.py  ← 自动检测是否需要持久化
+tools/plan_todo_tool.py        ← 自动调用 PlanMemory 持久化
+prompts/universal_agent_prompt.py ← 动态注入恢复协议
+
+收益：
+✅ 跨 Session 任务恢复（借鉴 autonomous-coding）
+✅ 用户完全透明（运营人员无需感知 Session 类型）
+✅ 框架自动处理（复杂度检测 + Prompt 注入）
+✅ 利用现有 Memory 架构（无需引入新存储后端）
+```
+
 ### ✅ 已完成：core/tool/capability/ 重构
 
 ```
@@ -1983,6 +2186,11 @@ skills_manager.py         ─┘       ├── router.py      ✅
 4. **代码整理（可选）**
    - 考虑将 `core/agent_manager.py` 移入 `core/agent/`
    - 考虑将 `core/workspace_manager.py` 移入 `services/`
+
+5. **长时运行增强**（V4.3+）
+   - E2B 沙箱验证集成
+   - Git 提交进度保存
+   - 多用户并发任务隔离
 
 ---
 
@@ -2040,6 +2248,224 @@ skills_manager.py         ─┘       ├── router.py      ✅
 
 ---
 
+## 🔀 V4.4 Skills + Tools 整合（🆕）
+
+### 5.1 Claude Skills vs Tools 关系
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                         能力调用分层架构                                         │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  用户 Query                                                                      │
+│      │                                                                           │
+│      ▼                                                                           │
+│  ┌──────────────────────────────────────────────────────────────────────────┐   │
+│  │ Plan 阶段：匹配能力                                                       │   │
+│  │   plan_todo.create_plan() → 分析用户需求，推荐能力                        │   │
+│  └───────────────────────────────────┬──────────────────────────────────────┘   │
+│                                      │                                           │
+│          ┌───────────────────────────┴───────────────────────┐                  │
+│          │                                                   │                  │
+│          ▼                                                   ▼                  │
+│  ┌───────────────────────────────┐       ┌───────────────────────────────┐     │
+│  │    Skill 路径                  │       │    Tool 路径                  │     │
+│  │    (Plan 匹配到 Skill)         │       │    (无匹配 Skill)             │     │
+│  ├───────────────────────────────┤       ├───────────────────────────────┤     │
+│  │                               │       │                               │     │
+│  │  • 配置: container.skills     │       │  • InvocationSelector 选择    │     │
+│  │  • 工作流: SKILL.md 定义      │       │  • 调用: DIRECT tool_use      │     │
+│  │  • 执行: Anthropic code_exec  │       │  • Claude 自主推理选择        │     │
+│  │                               │       │                               │     │
+│  │  示例:                        │       │  示例:                        │     │
+│  │  - pptx (快速PPT)            │       │  - e2b_python_sandbox         │     │
+│  │  - xlsx (Excel处理)          │       │  - exa_search                 │     │
+│  │  - docx (Word文档)           │       │  - ppt_generator              │     │
+│  │  - pdf (PDF生成)             │       │  - api_calling                │     │
+│  │                               │       │                               │     │
+│  └───────────────────────────────┘       └───────────────────────────────┘     │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 5.2 E2B Sandbox 定位（明确为 Tool）
+
+**核心定位**：E2B 是一个 **Tool**，通过 **DIRECT tool_use** 方式调用，由 **Claude 自主推理** 决定是否使用。
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                        E2B Sandbox vs Claude Skills 对比                         │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  ┌────────────────────────────────┐     ┌────────────────────────────────┐     │
+│  │      Claude Skills             │     │      E2B Sandbox               │     │
+│  │      (container.skills)        │     │      (DIRECT tool_use)         │     │
+│  ├────────────────────────────────┤     ├────────────────────────────────┤     │
+│  │                                │     │                                │     │
+│  │  调用方式:                     │     │  调用方式:                     │     │
+│  │  container = {                 │     │  tool_use: e2b_python_sandbox  │     │
+│  │    "skills": [                 │     │  input: {code: "..."}          │     │
+│  │      {"type": "anthropic",     │     │                                │     │
+│  │       "skill_id": "pptx"}      │     │                                │     │
+│  │    ]                           │     │                                │     │
+│  │  }                             │     │                                │     │
+│  │                                │     │                                │     │
+│  │  执行环境:                     │     │  执行环境:                     │     │
+│  │  Anthropic 托管                │     │  E2B 云沙箱                    │     │
+│  │                                │     │                                │     │
+│  │  能力限制:                     │     │  能力优势:                     │     │
+│  │  • 网络受限                    │     │  • ✅ 完整网络访问             │     │
+│  │  • 包受限                      │     │  • ✅ 任意第三方包             │     │
+│  │  • 内置能力固定                │     │  • ✅ 文件持久化               │     │
+│  │                                │     │  • ✅ 长时运行 (24h)           │     │
+│  │                                │     │                                │     │
+│  │  决策者: Plan 阶段匹配         │     │  决策者: Claude 自主推理       │     │
+│  │                                │     │                                │     │
+│  └────────────────────────────────┘     └────────────────────────────────┘     │
+│                                                                                  │
+│  ⚠️ 关键点：                                                                    │
+│  • E2B 属于 InvocationType.DIRECT，不是 CODE_EXECUTION                         │
+│  • CODE_EXECUTION 指 Anthropic 的 code_execution，不是 E2B                      │
+│  • Claude 根据任务需求（网络/包/持久化）自主决定是否调用 E2B                    │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Claude 何时选择 E2B**：
+
+根据 System Prompt 中的决策树指导，Claude 自主判断：
+- 需要 **网络访问**（requests, httpx, 爬虫）→ E2B
+- 需要 **第三方包**（pandas, numpy, beautifulsoup）→ E2B
+- 需要 **文件持久化**（跨调用保持状态）→ E2B
+- 需要 **长时间运行**（超过 code_execution 限制）→ E2B
+
+### 5.3 InvocationSelector 激活条件
+
+**设计原则**：InvocationSelector 仅在 **无匹配 Skill** 时生效。
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                       InvocationSelector 激活流程                                │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  Plan 阶段结果                                                                   │
+│      │                                                                           │
+│      ▼                                                                           │
+│  ┌──────────────────────────────────────────────────────────────────────────┐   │
+│  │ 检查: plan_result.recommended_skill 是否存在？                            │   │
+│  └───────────────────────────────────┬──────────────────────────────────────┘   │
+│                                      │                                           │
+│          ┌───────────────────────────┴───────────────────────┐                  │
+│          │ YES                                               │ NO               │
+│          ▼                                                   ▼                  │
+│  ┌───────────────────────────────┐       ┌───────────────────────────────┐     │
+│  │ 跳过 InvocationSelector       │       │ 启用 InvocationSelector       │     │
+│  │ → 使用 Skill 路径             │       │ → 选择调用模式                │     │
+│  │ → container.skills 配置       │       │                               │     │
+│  │                               │       │   工具数量 > 30?              │     │
+│  │                               │       │   → TOOL_SEARCH               │     │
+│  │                               │       │                               │     │
+│  │                               │       │   多工具编排 (>2)?            │     │
+│  │                               │       │   → PROGRAMMATIC              │     │
+│  │                               │       │                               │     │
+│  │                               │       │   其他                        │     │
+│  │                               │       │   → DIRECT                    │     │
+│  └───────────────────────────────┘       └───────────────────────────────┘     │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**InvocationType 定义**（保持不变）：
+
+```python
+class InvocationType(Enum):
+    DIRECT = "direct"                   # 标准 tool_use（包括 E2B）
+    CODE_EXECUTION = "code_execution"   # Anthropic code_execution
+    PROGRAMMATIC = "programmatic"       # 程序化多工具调用
+    STREAMING = "streaming"             # 大参数流式
+    TOOL_SEARCH = "tool_search"         # 工具发现
+```
+
+### 5.4 SimpleAgent 双路径分流
+
+```python
+# SimpleAgent._prepare_execution() 伪代码
+
+if plan and plan.get("recommended_skill"):
+    # ========== Skill 路径 ==========
+    # 1. 配置 container.skills
+    skills_container = self._build_skills_container(plan)
+    
+    # 2. 跳过 InvocationSelector
+    invocation_strategy = None
+    
+    # 3. LLM 调用使用 Skills Container
+    response = await llm.create_message_with_skills(
+        messages=messages,
+        skills=skills_container
+    )
+    
+else:
+    # ========== Tool 路径 ==========
+    # 1. 启用 InvocationSelector
+    strategy = invocation_selector.select_strategy(
+        task_type=intent.task_type,
+        selected_tools=selected_tools,
+        total_available_tools=len(registry.get_all())
+    )
+    
+    # 2. 根据策略配置工具
+    tools_config = invocation_selector.get_tools_config(tools, strategy)
+    
+    # 3. Claude 自主选择工具（包括 E2B）
+    response = await llm.create_message_async(
+        messages=messages,
+        tools=tools_config["tools"]
+    )
+```
+
+### 5.5 术语规范
+
+| 术语 | 含义 | ZenFlux 对应 |
+|------|------|-------------|
+| **Claude Skills** | Anthropic 官方 Skills API 机制 | `skills/custom_claude_skills/` + `container.skills` |
+| **本地工具指南包** | 框架内工作流指南文档 | `skills/library/` |
+| **Tools** | 标准 tool_use 调用的工具 | `tools/` 目录下的工具实现 |
+| **连接层** | 任意外部能力接入（不仅是 MCP） | Tools + REST API + E2B + MCP + ... |
+| **DIRECT** | 标准 tool_use 调用方式 | 包括 E2B、exa_search 等所有 Tool |
+| **CODE_EXECUTION** | Anthropic code_execution | 仅指 Anthropic 托管的代码执行环境 |
+
+### 5.6 System Prompt 决策机制（修正说明）
+
+**说明**：架构文档之前提到的"7级优先级表"实际上是 **决策树 + 选择矩阵** 模式。
+
+Claude 根据 System Prompt (`universal_agent_prompt.py`) 中的决策树自主选择：
+
+```
+决策树结构：
+
+内置 Skill 能满足？ ──Yes──→ Claude Skill（优先：快速、便宜）
+      │
+      No（需要复杂工作流、搜索、质量检查）
+      ↓
+需要网络/复杂编排？ ──Yes──→ E2B + 自定义工具（如 ppt_generator）
+      │
+      No
+      ↓
+简单计算/配置？ ──Yes──→ code_execution（内置沙箱）
+      │
+      No
+      ↓
+→ 直接调用标准工具
+```
+
+**核心原则**：
+- **Skill 优先** — 内置能力可满足时，优先使用（快速、便宜）
+- **E2B + 自定义工具** — 需要复杂工作流、网络访问、质量控制时使用
+- **场景驱动** — 根据用户需求选择最合适的方案，而非固定优先级
+
+---
+
 ## 🧹 清理状态
 
 ### ✅ 已完成的清理（V4.2.3）
@@ -2051,28 +2477,28 @@ skills_manager.py         ─┘       ├── router.py      ✅
 - `core/skills_manager.py` → 已迁移到 `core/tool/capability/skill_loader.py`
 - `core/agent_old.py` → 已删除
 
-### ⚠️ 未集成组件说明（V4.2.3）
+### ⚠️ 组件集成状态说明（V4.4 更新）
 
-以下组件代码完整但未被 `SimpleAgent` 主流程调用：
+| 组件 | 位置 | 状态 | 设计用途 | 说明 |
+|------|------|------|----------|------|
+| `CapabilityRouter` | `core/tool/capability/router.py` | ⚠️ 预留 | 评分算法智能路由 | Schema 驱动 + capability_tag 匹配 |
+| `InvocationSelector` | `core/tool/capability/invocation.py` | ✅ 条件激活 | 5种调用方式选择 | 🆕 V4.4: 无匹配 Skill 时启用 |
+| `CodeOrchestrator` | `core/orchestration/code_orchestrator.py` | ⚠️ 预留 | 代码生成-验证闭环 | 工具内部自行处理（如 ppt_generator） |
+| `CodeValidator` | `core/orchestration/code_validator.py` | ⚠️ 预留 | 语法/依赖/安全验证 | 工具内部自行处理 |
 
-| 组件 | 位置 | 状态 | 设计用途 | V4 替代方案 |
-|------|------|------|----------|------------|
-| `CapabilityRouter` | `core/tool/capability/router.py` | 预留 | 评分算法智能路由 | Schema 驱动 + capability_tag 匹配 |
-| `InvocationSelector` | `core/tool/capability/invocation.py` | 预留 | 5种调用方式选择 | System Prompt 指导 Claude 自主选择 |
-| `CodeOrchestrator` | `core/orchestration/code_orchestrator.py` | 预留 | 代码生成-验证闭环 | 工具内部自行处理（如 ppt_generator） |
-| `CodeValidator` | `core/orchestration/code_validator.py` | 预留 | 语法/依赖/安全验证 | 工具内部自行处理 |
+**V4.4 设计决策说明**：
 
-**设计决策说明**：
-
-V4 采用了更简化的工具选择策略：
 1. **Schema 驱动优先**：AgentFactory 根据 System Prompt 生成 AgentSchema，直接指定工具列表
-2. **Claude 自主决策**：调用方式选择（Direct/Code Execution/Programmatic）由 System Prompt 7 级优先级表指导
-3. **工具内部闭环**：复杂逻辑（如代码验证、质量检查）封装在工具内部，不由 Agent 统一编排
+2. **Claude 自主决策**：工具选择由 System Prompt 决策树（非"7级优先级表"）指导
+3. **双路径分流**：
+   - **Skill 路径**：Plan 匹配到 Skill → container.skills 配置 → 跳过 InvocationSelector
+   - **Tool 路径**：无匹配 Skill → InvocationSelector 选择调用模式 → Claude 自主选择工具
+4. **E2B 明确定位**：E2B 是 Tool，通过 DIRECT tool_use 调用，Claude 自主推理决定是否使用
 
-**未来集成场景**：
-- 多工具竞争评分 → 启用 `CapabilityRouter`
-- 框架级强制调用方式 → 启用 `InvocationSelector`
-- 统一代码验证 → 启用 `CodeValidator`
+**组件启用场景**：
+- `InvocationSelector` → 🆕 V4.4 已条件激活（无 Skill 时生效）
+- `CapabilityRouter` → 多工具竞争评分场景启用
+- `CodeValidator` → 统一代码验证场景启用
 
 ### 导入路径参考
 
@@ -2100,4 +2526,13 @@ from core.tool.capability import (
 | [08-DATA_STORAGE_ARCHITECTURE.md](./08-DATA_STORAGE_ARCHITECTURE.md) | 数据存储 | ✅ 有效 |
 | [12-CONTEXT_ENGINEERING_OPTIMIZATION.md](./12-CONTEXT_ENGINEERING_OPTIMIZATION.md) | Context Engineering 优化 | ✅ V4.1 |
 | [RESULT_COMPACTOR_IMPLEMENTATION.md](./RESULT_COMPACTOR_IMPLEMENTATION.md) | ResultCompactor 实施 | ✅ V4.1 |
+
+## 🔗 外部参考
+
+| 参考来源 | 说明 |
+|----------|------|
+| [Anthropic Blog: Advanced Tool Use](https://www.anthropic.com/engineering/advanced-tool-use) | 🆕 V4.4 设计参考 |
+| [Claude Skills and MCP](https://claude.com/blog/extending-claude-capabilities-with-skills-mcp-servers) | 🆕 V4.4 Skills 机制参考 |
+| [Anthropic Blog: Effective harnesses for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) | V4.3 设计参考 |
+| [Claude autonomous-coding 示例](https://github.com/anthropics/anthropic-cookbook/tree/main/claude-quickstarts/autonomous-coding) | Two-Agent Pattern 原型 |
 

@@ -1430,7 +1430,8 @@ def load_skills_metadata(skills_dir: Optional[str] = None) -> str:
 def get_universal_agent_prompt(
     include_skills: bool = True,
     skills_dir: Optional[str] = None,
-    include_e2b: bool = True
+    include_e2b: bool = True,
+    session_summary: Optional[str] = None  # 🆕 V4.3: 动态注入进度恢复协议
 ) -> str:
     """
     获取通用智能体框架系统提示词
@@ -1439,13 +1440,31 @@ def get_universal_agent_prompt(
         include_skills: 是否包含Skills metadata
         skills_dir: Skills目录路径
         include_e2b: 是否包含E2B协议（默认True）
+        session_summary: 🆕 Session 进度恢复摘要（框架自动注入，用户透明）
         
     Returns:
         完整的系统提示词
+        
+    🆕 V4.3 新增：
+    - session_summary: 从 PlanMemory 获取的进度恢复协议
+    - 用于跨 Session 恢复任务进度
+    - 对用户完全透明，框架自动处理
+    
+    示例：
+        # 首次 Session（无进度）
+        prompt = get_universal_agent_prompt()
+        
+        # 后续 Session（自动恢复进度）
+        summary = plan_memory.get_session_summary(task_id)
+        prompt = get_universal_agent_prompt(session_summary=summary)
     """
     prompt = UNIVERSAL_AGENT_PROMPT
     
-    # 🆕 添加 E2B 协议
+    # 🆕 V4.3: 注入 Session 进度恢复协议（用户透明）
+    if session_summary:
+        prompt += "\n\n" + session_summary
+    
+    # 添加 E2B 协议
     if include_e2b:
         try:
             from prompts.e2b_sandbox_protocol import get_e2b_sandbox_protocol
@@ -1466,6 +1485,45 @@ def get_universal_agent_prompt(
             prompt += "\n\n" + skills_section
     
     return prompt
+
+
+# ==================== 便捷函数：带进度恢复的 Prompt ====================
+
+def get_prompt_with_recovery(
+    plan_memory,
+    task_id: Optional[str] = None,
+    **kwargs
+) -> str:
+    """
+    获取带进度恢复的系统提示词
+    
+    🆕 V4.3 新增：便捷函数，自动处理进度恢复
+    
+    Args:
+        plan_memory: PlanMemory 实例
+        task_id: 任务 ID（可选，不提供则不注入恢复协议）
+        **kwargs: 其他参数传递给 get_universal_agent_prompt()
+        
+    Returns:
+        系统提示词（可能包含进度恢复协议）
+        
+    示例：
+        from core.memory.user import create_plan_memory
+        
+        plan_memory = create_plan_memory(user_id="user_123", storage_dir="./storage")
+        prompt = get_prompt_with_recovery(plan_memory, task_id="task_xxx")
+    """
+    session_summary = None
+    
+    if plan_memory and task_id:
+        # 检查是否有持久化的计划
+        if plan_memory.has_persistent_plan(task_id):
+            session_summary = plan_memory.get_session_summary(task_id)
+    
+    return get_universal_agent_prompt(
+        session_summary=session_summary,
+        **kwargs
+    )
 
 
 # ==================== 向后兼容 ====================

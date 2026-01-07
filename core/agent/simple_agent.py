@@ -36,7 +36,7 @@ from core.context.runtime import create_runtime_context
 from core.events.broadcaster import EventBroadcaster
 from core.llm import Message, LLMResponse, ToolType, create_claude_service
 from core.tool import create_tool_executor, create_tool_selector
-from core.tool.capability import create_capability_registry
+from core.tool.capability import create_capability_registry, create_invocation_selector
 from core.orchestration import create_pipeline_tracer, E2EPipelineTracer
 from core.confirmation_manager import get_confirmation_manager, ConfirmationType
 from logger import get_logger
@@ -192,7 +192,16 @@ class SimpleAgent:
             self.plan_todo_tool = None
             logger.debug("○ PlanManager 未启用")
         
-        # 6. 执行 LLM（Sonnet）
+        # 6. 🆕 InvocationSelector（V4.4 条件激活）
+        # 仅在无匹配 Skill 时生效，选择调用模式（DIRECT/PROGRAMMATIC/TOOL_SEARCH）
+        self.invocation_selector = create_invocation_selector(
+            enable_tool_search=True,  # 启用 Tool Search（工具数量 > 30 时使用）
+            enable_code_execution=True,
+            enable_programmatic=True
+        )
+        logger.debug("✓ InvocationSelector 已初始化（V4.4 条件激活）")
+        
+        # 7. 执行 LLM（Sonnet）
         self.llm = create_claude_service(
             model=self.model,  # 使用 Schema 中的 model
             enable_thinking=True,
@@ -371,7 +380,7 @@ class SimpleAgent:
 """
         system_prompt = system_prompt + workspace_instruction
         
-        # ===== 2. 工具选择（Schema 驱动优先） =====
+        # ===== 2. 工具选择（V4.4 双路径分流） =====
         # 🆕 追踪工具选择阶段
         if self._tracer:
             tool_stage = self._tracer.create_stage("tool_selection")
@@ -383,15 +392,39 @@ class SimpleAgent:
         plan = self._plan_cache.get("plan")
         selection_source = "intent"  # 记录选择来源
         
+        # 🆕 V4.4: 检查是否使用 Skill 路径
+        use_skill_path = False
+        invocation_strategy = None
+        
+        if plan and plan.get('recommended_skill'):
+            # ========== Skill 路径 ==========
+            # Plan 匹配到 Skill → 跳过 InvocationSelector → 使用 container.skills
+            use_skill_path = True
+            selection_source = "skill"
+            skill_info = plan.get('recommended_skill')
+            skill_name = skill_info.get('name', 'unknown') if isinstance(skill_info, dict) else skill_info
+            logger.info(f"🎯 V4.4 Skill 路径: 使用 Claude Skill '{skill_name}'")
+            
+            # 检查 InvocationSelector 确认跳过
+            invocation_strategy = self.invocation_selector.select_strategy(
+                task_type=intent.task_type.value,
+                selected_tools=[],
+                plan_result=plan  # 传入 plan_result 触发跳过逻辑
+            )
+            if invocation_strategy is None:
+                logger.debug("✓ InvocationSelector 已跳过（Skill 路径）")
+        
         if self.schema.tools:
             # 优先使用 Schema 配置（Prompt 驱动设计哲学）
             required_capabilities = self.schema.tools
-            selection_source = "schema"
+            if not use_skill_path:
+                selection_source = "schema"
             logger.debug(f"✓ 使用 Schema 配置的工具: {self.schema.tools}")
         elif plan and plan.get('required_capabilities'):
             # 其次使用 Plan 指定的能力
             required_capabilities = plan['required_capabilities']
-            selection_source = "plan"
+            if not use_skill_path:
+                selection_source = "plan"
             logger.debug("✓ 使用 Plan 指定的能力")
         else:
             # 最后通过意图推断（兜底）
@@ -413,6 +446,21 @@ class SimpleAgent:
             }
         )
         
+        # 🆕 V4.4: Tool 路径 - 启用 InvocationSelector
+        if not use_skill_path and len(selection.tool_names) > 0:
+            # ========== Tool 路径 ==========
+            # 无匹配 Skill → 启用 InvocationSelector → 选择调用模式
+            total_tools = len(self.capability_registry.get_all_capabilities())
+            invocation_strategy = self.invocation_selector.select_strategy(
+                task_type=intent.task_type.value,
+                selected_tools=selection.tool_names,
+                total_available_tools=total_tools,
+                plan_result=plan
+            )
+            if invocation_strategy:
+                logger.info(f"🔧 V4.4 Tool 路径: 调用模式={invocation_strategy.type.value}, 原因={invocation_strategy.reason[:50]}...")
+                selection_source = f"tool:{invocation_strategy.type.value}"
+        
         # 转换为 LLM 格式
         tools_for_llm = self.tool_selector.get_tools_for_llm(selection, self.llm)
         
@@ -422,11 +470,13 @@ class SimpleAgent:
         if self._tracer:
             tool_stage.set_input({
                 "required_capabilities": required_capabilities[:5] if required_capabilities else [],
-                "selection_source": selection_source
+                "selection_source": selection_source,
+                "use_skill_path": use_skill_path  # 🆕 记录路径类型
             })
             tool_stage.complete({
                 "tool_count": len(selection.tool_names),
-                "tools": selection.tool_names[:5]
+                "tools": selection.tool_names[:5],
+                "invocation_type": invocation_strategy.type.value if invocation_strategy else "skill"  # 🆕 记录调用类型
             })
         
         # ===== 3. 构建消息 =====

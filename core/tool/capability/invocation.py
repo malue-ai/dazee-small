@@ -8,9 +8,14 @@
 4. Fine-grained Streaming - 大参数(>10KB)
 5. Tool Search - 工具数量>30时动态发现
 
+🆕 V4.4 更新：
+- 添加 Skill 跳过逻辑：如果 Plan 阶段匹配到 Skill，则跳过 InvocationSelector
+- 仅在无匹配 Skill 时激活，选择 DIRECT/PROGRAMMATIC/TOOL_SEARCH
+
 参考：
 - https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview
 - https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool
+- https://www.anthropic.com/engineering/advanced-tool-use
 """
 
 from typing import Dict, Any, List, Optional
@@ -129,10 +134,15 @@ class InvocationSelector:
         selected_tools: List[str],
         estimated_input_size: int = 0,
         total_available_tools: int = 0,
-        context: Optional[Dict[str, Any]] = None
-    ) -> InvocationStrategy:
+        context: Optional[Dict[str, Any]] = None,
+        plan_result: Optional[Dict[str, Any]] = None
+    ) -> Optional[InvocationStrategy]:
         """
         选择最合适的调用策略
+        
+        🆕 V4.4 更新：
+        - 如果 Plan 匹配到 Skill，返回 None（跳过 InvocationSelector）
+        - 由 Skill 路径处理（container.skills）
         
         Args:
             task_type: 任务类型 (simple, config_generation, multi_tool, batch_processing)
@@ -140,11 +150,18 @@ class InvocationSelector:
             estimated_input_size: 预估输入参数大小（bytes）
             total_available_tools: 总可用工具数
             context: 额外上下文
+            plan_result: 🆕 Plan 阶段结果（用于检查是否匹配 Skill）
             
         Returns:
             InvocationStrategy: 推荐的调用策略
+            None: 🆕 如果匹配到 Skill，返回 None 表示跳过
         """
         context = context or {}
+        
+        # ============ 🆕 V4.4: Skill 跳过逻辑 ============
+        # 如果 Plan 匹配到 Skill，使用 Skill 路径，跳过 InvocationSelector
+        if plan_result and plan_result.get("recommended_skill"):
+            return None  # 由 Skill 机制处理（container.skills）
         
         # ============ 规则1: Tool Search ============
         # 如果工具数量超过阈值，先使用 Tool Search 发现工具
@@ -327,12 +344,32 @@ def create_invocation_selector(
     """
     创建调用方式选择器
     
+    🆕 V4.4 更新：
+    - InvocationSelector 仅在无匹配 Skill 时生效
+    - 如果 Plan 阶段匹配到 Skill，select_strategy 返回 None
+    - 调用方应检查返回值，None 表示使用 Skill 路径
+    
     Args:
         enable_tool_search: 是否启用 Tool Search
         **kwargs: 其他参数
         
     Returns:
         InvocationSelector 实例
+        
+    使用示例:
+        selector = create_invocation_selector()
+        strategy = selector.select_strategy(
+            task_type="multi_tool",
+            selected_tools=["exa_search", "ppt_generator"],
+            plan_result=plan  # 🆕 传入 Plan 结果
+        )
+        
+        if strategy is None:
+            # Skill 路径：使用 container.skills
+            pass
+        else:
+            # Tool 路径：使用 InvocationStrategy
+            tools_config = selector.get_tools_config(tools, strategy)
     """
     return InvocationSelector(
         enable_tool_search=enable_tool_search,

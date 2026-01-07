@@ -41,10 +41,13 @@ class IntentResult:
     
     注意：Prompt 选择由 AgentFactory 在创建 Agent 时确定，
     不再通过 IntentAnalyzer 动态切换。
+    
+    🆕 V4.3: 新增 needs_persistence 字段，用于判断是否需要跨 Session 持久化
     """
     task_type: TaskType                          # 任务类型
     complexity: Complexity                       # 复杂度
     needs_plan: bool                             # 是否需要规划
+    needs_persistence: bool = False              # 🆕 是否需要跨 Session 持久化
     keywords: List[str] = field(default_factory=list)  # 提取的关键词
     confidence: float = 1.0                      # 置信度
     raw_response: Optional[str] = None           # LLM 原始响应（用于调试）
@@ -55,6 +58,7 @@ class IntentResult:
             "task_type": self.task_type.value,
             "complexity": self.complexity.value,
             "needs_plan": self.needs_plan,
+            "needs_persistence": self.needs_persistence,
             "keywords": self.keywords,
             "confidence": self.confidence
         }

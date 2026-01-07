@@ -108,14 +108,54 @@ class IntentAnalyzer:
             last_user_text = self._extract_last_user_text(messages)
             result = self._analyze_with_rules(last_user_text)
         
+        # 🆕 自动计算是否需要持久化（框架自动处理，用户透明）
+        result.needs_persistence = self._should_persist(result)
+        
         logger.info(
             f"🎯 意图分析结果: "
             f"type={result.task_type.value}, "
             f"complexity={result.complexity.value}, "
-            f"needs_plan={result.needs_plan}"
+            f"needs_plan={result.needs_plan}, "
+            f"needs_persistence={result.needs_persistence}"
         )
         
         return result
+    
+    def _should_persist(self, result: IntentResult) -> bool:
+        """
+        判断是否需要跨 Session 持久化
+        
+        🆕 V4.3 新增：自动检测任务复杂度，决定是否启用持久化
+        
+        触发条件（满足任一）：
+        1. 复杂度为 COMPLEX
+        2. 需要规划（needs_plan=True）
+        3. 关键词数量 > 3（表示多步骤任务）
+        4. 任务类型为 CONTENT_GENERATION 或 CODE_DEVELOPMENT
+        
+        Args:
+            result: 意图分析结果
+            
+        Returns:
+            是否需要持久化
+        """
+        # 条件 1: 复杂任务
+        if result.complexity == Complexity.COMPLEX:
+            return True
+        
+        # 条件 2: 需要规划的任务
+        if result.needs_plan:
+            return True
+        
+        # 条件 3: 多步骤任务（关键词多）
+        if len(result.keywords) > 3:
+            return True
+        
+        # 条件 4: 内容生成或代码开发任务（通常较长）
+        if result.task_type in [TaskType.CONTENT_GENERATION, TaskType.CODE_DEVELOPMENT]:
+            return True
+        
+        return False
     
     def _extract_last_user_text(self, messages: List[Dict[str, Any]]) -> str:
         """从消息列表中提取最后一条 user 消息的文本"""

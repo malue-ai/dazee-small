@@ -1,13 +1,13 @@
 """
-Plan/Todo Tool - 任务规划工具（智能版本）
+Plan/Todo Tool - 任务规划工具（智能版本 + 持久化支持）
 
 设计原则：
 1. 工具封装闭环：内部调用 Claude + Extended Thinking 生成智能计划
 2. Agent 无需特殊逻辑，只负责编排
-3. Tool 不持有状态，Plan 数据由上层管理
+3. 🆕 自动持久化：通过 PlanMemory 支持跨 Session 恢复
 4. 返回纯 JSON，前端自己渲染 UI
 
-架构关系：
+架构关系（V4.3 更新）：
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Frontend                                                    │
@@ -24,10 +24,24 @@ Plan/Todo Tool - 任务规划工具（智能版本）
 ┌─────────────────────────────────────────────────────────────┐
 │  plan_todo_tool (智能工具)                                   │
 │  ├── create_plan: 调用 Claude + Extended Thinking 生成计划   │
-│  ├── update_step: 纯计算更新                                 │
-│  └── add_step: 纯计算添加                                    │
+│  │               → 自动调用 PlanMemory.save_plan()          │
+│  ├── update_step: 更新步骤状态                               │
+│  │               → 自动调用 PlanMemory.update_step_status() │
+│  ├── add_step: 动态添加步骤                                  │
+│  └── replan: 重新规划                                        │
+└─────────────────────────────────────────────────────────────┘
+                              ↓ 自动持久化
+┌─────────────────────────────────────────────────────────────┐
+│  PlanMemory (core/memory/user/plan.py)                       │
+│  ├── 存储位置: storage/users/{user_id}/plans/{task_id}.json │
+│  ├── 核心规则: 步骤只能标记 passes: true，永不删除           │
+│  └── 生成进度摘要: 用于自动注入 Prompt                       │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+参考：
+- Anthropic Blog: https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents
+- autonomous-coding 示例: feature_list.json + claude-progress.txt
 """
 
 from typing import Dict, Any, List, Optional
@@ -340,17 +354,22 @@ SKILL_ITEM_TEMPLATE = """### {name}
 
 class PlanTodoTool:
     """
-    Plan/Todo 工具 - 智能版本
+    Plan/Todo 工具 - 智能版本 + 持久化支持
     
     关键设计：
     1. create_plan 调用 Claude + Extended Thinking 生成智能计划
     2. update_step/add_step 保持纯计算
-    3. 不持有状态：所有操作都是纯函数
+    3. 🆕 自动持久化：通过 PlanMemory 支持跨 Session 恢复
     4. 接收 current_plan 作为参数
+    
+    持久化规则（借鉴 autonomous-coding）：
+    - 步骤只能标记 passes: true，永不删除
+    - 自动生成进度摘要用于 Prompt 注入
+    - 对用户透明，框架自动处理
     """
     
     name = "plan_todo"
-    description = """任务规划工具 - 智能版本。
+    description = """任务规划工具 - 智能版本（支持跨 Session 持久化）。
 
 操作类型:
 - create_plan: 创建智能任务计划（内部调用 Claude + Extended Thinking）
@@ -358,14 +377,16 @@ class PlanTodoTool:
     "user_query": "用户的原始需求（必需）"
   }
   ⚠️ 工具会自动调用 Claude 生成最优计划！
+  🆕 自动持久化到 PlanMemory，支持跨 Session 恢复
 
 - update_step: 更新步骤状态
   data 格式: {"step_index": 0, "status": "completed|failed|in_progress", "result": "结果"}
+  🆕 自动同步到 PlanMemory
 
 - add_step: 动态添加步骤
   data 格式: {"action": "动作", "purpose": "目的"}
 
-- replan: 重新生成计划（保留已完成步骤）🆕
+- replan: 重新生成计划（保留已完成步骤）
   data 格式: {
     "reason": "重新规划的原因（必需）",
     "strategy": "full（全量重规划）| incremental（保留已完成步骤，默认）"
@@ -385,22 +406,26 @@ class PlanTodoTool:
 外部可通过静态方法 get_progress() / get_current_step() / get_context_for_llm() 查询计划状态。
 """
     
-    def __init__(self, registry=None):
+    def __init__(self, registry=None, memory_manager=None):
         """
         初始化工具
         
         Args:
             registry: CapabilityRegistry 实例（用于动态生成 Schema）
+            memory_manager: MemoryManager 实例（用于 Plan 持久化）🆕
         """
         self._registry = registry
+        self._memory_manager = memory_manager  # 🆕 PlanMemory 通过 MemoryManager 访问
         
-        # 🆕 创建专用 LLM Service（启用 Extended Thinking）
+        # 创建专用 LLM Service（启用 Extended Thinking）
         self._llm = create_claude_service(
             model="claude-sonnet-4-5-20250929",
             enable_thinking=True,
             enable_caching=False
         )
-        logger.info("✅ PlanTodoTool 初始化完成（智能版本，启用 Extended Thinking）")
+        
+        persistence_status = "启用" if memory_manager else "禁用"
+        logger.info(f"✅ PlanTodoTool 初始化完成（智能版本，Extended Thinking，持久化: {persistence_status}）")
     
     def get_input_schema(self) -> Dict:
         """
@@ -518,15 +543,51 @@ class PlanTodoTool:
         
         try:
             if operation == "create_plan":
-                # 🆕 智能计划生成（调用 Claude + Extended Thinking）
-                return await self._create_plan_smart(data)
+                # 智能计划生成（调用 Claude + Extended Thinking）
+                result = await self._create_plan_smart(data)
+                
+                # 🆕 自动持久化到 PlanMemory
+                if result.get("status") == "success" and self._memory_manager:
+                    plan = result.get("plan", {})
+                    self._persist_plan(plan)
+                
+                return result
+                
             elif operation == "update_step":
-                return self._update_step(data, current_plan)
+                result = self._update_step(data, current_plan)
+                
+                # 🆕 同步步骤状态到 PlanMemory
+                if result.get("status") == "success" and self._memory_manager:
+                    plan = result.get("plan", {})
+                    task_id = plan.get("task_id")
+                    step_index = data.get("step_index")
+                    status = data.get("status")
+                    step_result = data.get("result", "")
+                    
+                    if task_id is not None and step_index is not None:
+                        passes = (status == "completed")
+                        self._memory_manager.plan.update_step_status(
+                            task_id=task_id,
+                            step_index=step_index,
+                            passes=passes,
+                            result=step_result
+                        )
+                
+                return result
+                
             elif operation == "add_step":
                 return self._add_step(data, current_plan)
+                
             elif operation == "replan":
-                # 🆕 重新规划（保留已完成步骤或全量重规划）
-                return await self._replan(data, current_plan)
+                # 重新规划（保留已完成步骤或全量重规划）
+                result = await self._replan(data, current_plan)
+                
+                # 🆕 更新持久化的计划
+                if result.get("status") == "success" and self._memory_manager:
+                    plan = result.get("plan", {})
+                    self._persist_plan(plan)
+                
+                return result
             else:
                 return {
                     "status": "error",
@@ -536,6 +597,94 @@ class PlanTodoTool:
         except Exception as e:
             logger.error(f"❌ PlanTodoTool 执行失败: {e}", exc_info=True)
             return {"status": "error", "message": str(e)}
+    
+    def _persist_plan(self, plan: Dict) -> None:
+        """
+        持久化计划到 PlanMemory
+        
+        Args:
+            plan: 计划数据
+        """
+        if not self._memory_manager:
+            return
+        
+        try:
+            task_id = plan.get("task_id")
+            goal = plan.get("goal", "")
+            steps = plan.get("steps", [])
+            user_query = plan.get("user_query", "")
+            
+            # 提取元数据
+            metadata = {
+                "recommended_skill": plan.get("recommended_skill"),
+                "matched_skills": plan.get("matched_skills"),
+                "information_gaps": plan.get("information_gaps", []),
+                "replan_count": plan.get("replan_count", 0)
+            }
+            
+            self._memory_manager.plan.save_plan(
+                task_id=task_id,
+                goal=goal,
+                steps=steps,
+                user_query=user_query,
+                metadata=metadata
+            )
+            
+            logger.info(f"[PlanTodoTool] 计划已持久化: task_id={task_id}")
+            
+        except Exception as e:
+            logger.warning(f"[PlanTodoTool] 持久化失败（不影响主流程）: {e}")
+    
+    def get_or_load_plan(self, task_id: str, current_plan: Optional[Dict] = None) -> Optional[Dict]:
+        """
+        获取或从持久化加载计划
+        
+        优先使用 current_plan，如果没有则从 PlanMemory 加载
+        
+        Args:
+            task_id: 任务 ID
+            current_plan: 当前内存中的计划
+            
+        Returns:
+            计划数据，不存在则返回 None
+        """
+        if current_plan:
+            return current_plan
+        
+        if self._memory_manager and task_id:
+            return self._memory_manager.plan.load_plan(task_id)
+        
+        return None
+    
+    def get_session_summary(self, task_id: str) -> str:
+        """
+        获取 Session 进度摘要（用于注入 Prompt）
+        
+        Args:
+            task_id: 任务 ID
+            
+        Returns:
+            格式化的进度摘要
+        """
+        if not self._memory_manager:
+            return ""
+        
+        return self._memory_manager.plan.get_session_summary(task_id)
+    
+    def has_persistent_plan(self, task_id: str) -> bool:
+        """
+        检查是否有持久化的计划
+        
+        Args:
+            task_id: 任务 ID
+            
+        Returns:
+            是否存在持久化计划
+        """
+        if not self._memory_manager:
+            return False
+        
+        return self._memory_manager.plan.has_persistent_plan(task_id)
     
     async def _create_plan_smart(self, data: Dict) -> Dict:
         """
@@ -1234,14 +1383,15 @@ PLAN_TODO_TOOL_SCHEMA = {
 }
 
 
-def create_plan_todo_tool(registry=None) -> PlanTodoTool:
+def create_plan_todo_tool(registry=None, memory_manager=None) -> PlanTodoTool:
     """
     创建 Plan/Todo 工具实例
     
     Args:
         registry: CapabilityRegistry 实例（用于动态生成 Schema）
+        memory_manager: MemoryManager 实例（用于 Plan 持久化）🆕
     
     Returns:
         PlanTodoTool 实例
     """
-    return PlanTodoTool(registry=registry)
+    return PlanTodoTool(registry=registry, memory_manager=memory_manager)

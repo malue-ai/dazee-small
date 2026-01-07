@@ -709,3 +709,4 @@ def create_ppt_generator() -> PPTGeneratorTool:
     """创建PPT生成器实例"""
     return PPTGeneratorTool()
 
+

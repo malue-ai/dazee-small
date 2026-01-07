@@ -21,7 +21,8 @@ from .working import WorkingMemory, create_working_memory
 from .user import (
     EpisodicMemory, create_episodic_memory,
     PreferenceMemory, create_preference_memory,
-    E2BMemory, create_e2b_memory  # E2B 现在是用户级记忆
+    E2BMemory, create_e2b_memory,  # E2B 现在是用户级记忆
+    PlanMemory, create_plan_memory  # 🆕 任务计划持久化
 )
 from .system import SkillMemory, create_skill_memory, CacheMemory, create_cache_memory
 
@@ -60,6 +61,7 @@ class MemoryManager:
         # 用户经验和偏好（按需创建）
         self._episodic: Optional[EpisodicMemory] = None
         self._preference: Optional[PreferenceMemory] = None
+        self._plan: Optional[PlanMemory] = None  # 🆕 任务计划持久化
         
         # === 系统级记忆（单例）===
         self._skill: Optional[SkillMemory] = None
@@ -86,6 +88,25 @@ class MemoryManager:
                 storage_dir=self.storage_dir
             )
         return self._preference
+    
+    @property
+    def plan(self) -> PlanMemory:
+        """
+        获取任务计划记忆（懒加载）
+        
+        🆕 V4.3 新增：支持跨 Session 任务计划持久化
+        
+        用途：
+        - 保存任务计划（首次 Session）
+        - 恢复任务进度（后续 Session）
+        - 生成进度摘要（自动注入 Prompt）
+        """
+        if self._plan is None:
+            self._plan = create_plan_memory(
+                user_id=self.user_id,
+                storage_dir=self.storage_dir
+            )
+        return self._plan
     
     # ==================== 系统级记忆（懒加载）====================
     
@@ -158,6 +179,8 @@ class MemoryManager:
             self._episodic.clear()
         if self._preference:
             self._preference.clear()
+        if self._plan:
+            self._plan.clear()  # 🆕 清除任务计划
         if self._skill:
             self._skill.clear()
         if self._cache:
@@ -221,6 +244,7 @@ class MemoryManager:
             f"working={self.working.summary()}, "
             f"e2b={'active' if self.e2b.has_active_session() else 'none'}, "
             f"episodic={'loaded' if self._episodic else 'not_loaded'}, "
+            f"plan={'loaded' if self._plan else 'not_loaded'}, "
             f"skill={'loaded' if self._skill else 'not_loaded'})"
         )
     
@@ -233,6 +257,7 @@ class MemoryManager:
             "e2b": self.e2b.to_dict(),
             "episodic_loaded": self._episodic is not None,
             "preference_loaded": self._preference is not None,
+            "plan_loaded": self._plan is not None,  # 🆕
             "skill_loaded": self._skill is not None,
             "cache_loaded": self._cache is not None
         }
