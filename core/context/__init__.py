@@ -1,18 +1,64 @@
 """
-Context 模块
+Context Engineering 模块
 
-提供上下文管理功能：
-- Context: 对话上下文管理（消息加载、token 计算、压缩）
-- RuntimeContext: Agent 运行时状态管理
+先进上下文管理策略实现
 """
 
-from core.context.conversation import Context, create_context
-from core.context.runtime import RuntimeContext, create_runtime_context
+# 运行时上下文
+from .runtime import RuntimeContext, create_runtime_context
+
+# 会话上下文
+from .conversation import Context, create_context
+
+# 上下文工程优化
+from .context_engineering import (
+    # KV-Cache 优化
+    CacheOptimizer,
+    
+    # Todo 重写
+    TodoRewriter,
+    
+    # 工具遮蔽
+    AgentState,
+    ToolMaskConfig,
+    ToolMasker,
+    
+    # 可恢复压缩
+    CompressedReference,
+    RecoverableCompressor,
+    
+    # 结构化变异
+    StructuralVariation,
+    
+    # 错误保留
+    ErrorRecord,
+    ErrorRetention,
+    
+    # 整合管理器
+    ContextEngineeringManager,
+    create_context_engineering_manager,
+)
 
 __all__ = [
+    # 运行时上下文
+    "RuntimeContext",
+    "create_runtime_context",
+    
+    # 会话上下文
     "Context",
     "create_context",
-    "RuntimeContext", 
-    "create_runtime_context",
+    
+    # 上下文工程优化
+    "CacheOptimizer",
+    "TodoRewriter",
+    "AgentState",
+    "ToolMaskConfig",
+    "ToolMasker",
+    "CompressedReference",
+    "RecoverableCompressor",
+    "StructuralVariation",
+    "ErrorRecord",
+    "ErrorRetention",
+    "ContextEngineeringManager",
+    "create_context_engineering_manager",
 ]
-

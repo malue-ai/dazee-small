@@ -33,6 +33,11 @@ from typing import Dict, Any, List, Optional, AsyncGenerator
 # 3. 本地模块
 from core.agent.intent_analyzer import create_intent_analyzer
 from core.context.runtime import create_runtime_context
+from core.context.context_engineering import (
+    ContextEngineeringManager, 
+    AgentState, 
+    create_context_engineering_manager
+)
 from core.events.broadcaster import EventBroadcaster
 from core.llm import Message, LLMResponse, ToolType, create_claude_service
 from core.tool import create_tool_executor, create_tool_selector
@@ -118,12 +123,16 @@ class SimpleAgent:
         # ===== 根据 Schema 动态初始化各模块 =====
         self._init_modules()
         
-        # ===== 状态（Manus Context Isolation 原则） =====
+        # ===== 状态（Context Isolation 原则） =====
         # ⚠️ 这是工具返回值的缓存，不是隐式状态
         # 所有更新都通过 plan_todo 工具显式执行，此处仅缓存以避免重复调用
         # 参考: docs/12-CONTEXT_ENGINEERING_OPTIMIZATION.md
         self._plan_cache = {"plan": None, "todo": None, "tool_calls": []}
         self.invocation_stats = {"direct": 0, "code_execution": 0, "programmatic": 0, "streaming": 0}
+        
+        # ===== 🆕 上下文工程管理器 =====
+        # 整合 KV-Cache 优化、Todo 重写、工具遮蔽、可恢复压缩、结构化变异、错误保留
+        self.context_engineering = create_context_engineering_manager()
         
         # ===== Usage 统计（使用 UsageTracker） =====
         self.usage_tracker = create_usage_tracker()
@@ -487,6 +496,22 @@ class SimpleAgent:
             for msg in messages
         ]
         
+        # 🆕 Todo 重写：将 Plan 状态注入到用户消息末尾
+        # 对抗 "Lost-in-the-Middle" 现象，让任务目标始终在注意力高区
+        if self.context_engineering and self._plan_cache.get("plan"):
+            prepared_messages = self.context_engineering.prepare_messages_for_llm(
+                messages=[{"role": m.role, "content": m.content} for m in llm_messages],
+                plan=self._plan_cache.get("plan"),
+                inject_plan=True,
+                inject_errors=True
+            )
+            # 转换回 Message 对象
+            llm_messages = [
+                Message(role=msg["role"], content=msg["content"])
+                for msg in prepared_messages
+            ]
+            logger.debug("✅ Todo 重写: Plan 状态已注入消息末尾")
+        
         # ===== 4. RVR 循环 =====
         ctx = create_runtime_context(session_id=session_id, max_turns=self.max_turns)
         
@@ -827,6 +852,16 @@ class SimpleAgent:
             except Exception as e:
                 error_msg = f"工具执行失败: {str(e)}"
                 logger.error(f"❌ {error_msg}")
+                
+                # 🆕 错误保留：记录错误作为学习素材
+                # 下次 LLM 调用时会注入错误上下文，避免重复踩坑
+                if self.context_engineering:
+                    self.context_engineering.record_error(
+                        tool_name=tool_name,
+                        error=e,
+                        input_params=tool_input
+                    )
+                    logger.debug(f"📝 错误保留: {tool_name} 错误已记录")
                 
                 tool_result_index = ctx.block.start_new_block("tool_result")
                 error_result_block = {

@@ -11,7 +11,7 @@ Tool 核心模块
 - capability/: 能力管理子包
 - selector.py: 工具选择逻辑
 - executor.py: 工具执行逻辑
-- result_compactor.py: 结果精简（Manus 原则）
+- result_compactor.py: 结果精简（上下文工程原则）
 
 注意：具体工具实现在 tools/ 目录下
 """
@@ -27,7 +27,7 @@ from core.tool.executor import (
     create_tool_executor
 )
 
-# 🆕 结果精简器（Manus Context Engineering 优化）
+# 🆕 结果精简器（Context Engineering 优化）
 from core.tool.result_compactor import (
     ResultCompactor,
     CompactionStrategy,
@@ -68,7 +68,7 @@ __all__ = [
     # 执行器
     "ToolExecutor",
     "create_tool_executor",
-    # 🆕 结果精简器（Manus Context Engineering）
+    # 🆕 结果精简器（Context Engineering）
     "ResultCompactor",
     "CompactionStrategy",
     "CompactionRule",

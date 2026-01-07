@@ -2,7 +2,7 @@
 
 > 📅 **实施日期**: 2026-01-05  
 > 📅 **更新日期**: 2026-01-05（完成框架集成）  
-> 🎯 **目标**: 基于 Manus Context Engineering 原则优化搜索工具返回结果  
+> 🎯 **目标**: 基于 Context Engineering 原则优化搜索工具返回结果  
 > ✅ **状态**: 已完成框架集成
 
 ---
@@ -16,7 +16,7 @@
 ```python
 class ResultCompactor:
     """
-    工具结果精简器 - Manus 原则实现
+    工具结果精简器 - 上下文工程原则实现
     
     核心思想：
     - 工具结果应该是"指针"而非"内容"
@@ -94,7 +94,7 @@ $ python test_compactor_minimal.py
 精简后:     4,289 bytes (  4.19 KB)
 减少:       9,643 bytes ( 69.2%)
 
-【测试 2】真实搜索结果精简（Manus 文章）
+【测试 2】真实搜索结果精简（技术文章）
 原始大小:  16,323 bytes ( 15.94 KB)
 精简后:     1,506 bytes (  1.47 KB)
 减少:      14,817 bytes ( 90.8%)
@@ -104,7 +104,7 @@ $ python test_compactor_minimal.py
 2. 每个结果从 ~2000 字符减少到 ~200 字符
 3. 保留关键信息: URL、标题、摘要、评分、元数据
 4. 添加访问提示: 指导 LLM 使用 exa_crawl 获取完整内容
-5. 符合 Manus 原则: 工具结果是'指针'而非'内容'
+5. 符合上下文工程原则: 工具结果是'指针'而非'内容'
 ```
 
 ### 测试 2: 端到端管道测试
@@ -141,7 +141,7 @@ $ python test_e2e_tool_pipeline.py
 |------|--------|--------|----------|
 | **单次搜索（5结果）** | 7.95 KB | 2.47 KB | **68.9%** |
 | **单次搜索（10结果）** | 13.61 KB | 4.19 KB | **69.2%** |
-| **真实 Manus 文章** | 15.94 KB | 1.47 KB | **90.8%** |
+| **真实技术文章** | 15.94 KB | 1.47 KB | **90.8%** |
 
 ### 预期生产效果
 
@@ -154,7 +154,7 @@ $ python test_e2e_tool_pipeline.py
 
 ---
 
-## 🎯 核心原则（Manus）
+## 🎯 核心原则
 
 ### 1. 精简优于扩展
 > **"More context ≠ more intelligence"**
@@ -281,7 +281,7 @@ result = await executor.execute(
 ## 🔗 相关文档
 
 1. **设计文档**: `docs/12-CONTEXT_ENGINEERING_OPTIMIZATION.md`
-   - Manus 原则详解
+   - 上下文工程原则详解
    - 优化方案设计
    - 实施路线图
 
@@ -297,7 +297,7 @@ result = await executor.execute(
 
 ## 🎓 学习资源
 
-- [Context Engineering for AI Agents - Manus](https://manus.im/blog/Context-Engineering-for-AI-Agents-Lessons-from-Building-Manus)
+- [Effective harnesses for long-running agents - Anthropic](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)
 - [Claude Prompt Caching](https://docs.anthropic.com/claude/docs/prompt-caching)
 
 ---
@@ -318,6 +318,6 @@ result = await executor.execute(
 - ✅ 保留所有关键信息
 - ✅ 添加访问提示
 - ✅ 端到端测试通过
-- ✅ 符合 Manus 原则
+- ✅ 符合上下文工程原则
 - ✅ 代码可维护、可扩展
 

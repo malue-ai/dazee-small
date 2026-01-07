@@ -87,7 +87,7 @@ class ToolExecutor:
         self._tool_instances: Dict[str, Any] = {}
         self._tool_handlers: Dict[str, Callable] = {}
         
-        # 🆕 结果精简器（Manus Context Engineering 优化）
+        # 🆕 结果精简器（Context Engineering 优化）
         # 从 capabilities.yaml 自动加载精简规则
         self.enable_compaction = enable_compaction
         self.result_compactor = create_result_compactor(
@@ -577,7 +577,7 @@ def create_tool_executor(
     Args:
         registry: 能力注册表
         tool_context: 工具上下文（用于依赖注入）
-        enable_compaction: 是否启用结果精简（默认 True，Manus 推荐）
+        enable_compaction: 是否启用结果精简（默认 True，推荐）
         
     Returns:
         ToolExecutor 实例

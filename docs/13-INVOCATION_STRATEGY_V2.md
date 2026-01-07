@@ -1,8 +1,8 @@
 # Invocation Strategy Selection V2 - 增强优化方案
 
 > 📅 **版本**: V2.0  
-> 🎯 **目标**: 结合 Manus 三层抽象思想优化工具调用策略  
-> 🔗 **基于**: V3.7 InvocationSelector + Manus Context Engineering
+> 🎯 **目标**: 结合三层抽象思想优化工具调用策略  
+> 🔗 **基于**: V3.7 InvocationSelector + Context Engineering
 
 ---
 
@@ -62,7 +62,7 @@ class InvocationSelector:
 
 | 问题 | 描述 | 影响 |
 |------|------|------|
-| **缺少层级感知** | 未结合 Manus 三层抽象 | 无法智能选择执行环境 |
+| **缺少层级感知** | 未结合三层抽象架构 | 无法智能选择执行环境 |
 | **静态规则** | 硬编码的阈值（>2, >30） | 不适应不同场景 |
 | **无降级策略** | E2B 失败时无备选 | 鲁棒性差 |
 | **忽略成本** | 未考虑 Claude vs E2B 成本差异 | 资源浪费 |
@@ -76,10 +76,10 @@ class InvocationSelector:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│              Manus 三层抽象 + Claude 五种调用方式 = 智能映射                  │
+│              三层抽象架构 + Claude 五种调用方式 = 智能映射                    │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
-│  Manus Level        Execution Environment        Claude Invocation         │
+│  抽象层级            执行环境                      Claude 调用方式           │
 │  ━━━━━━━━━━━━       ━━━━━━━━━━━━━━━━━━━━━       ━━━━━━━━━━━━━━━━━         │
 │                                                                              │
 │  Level 1            Native Claude                Direct Tool Call           │
@@ -166,7 +166,7 @@ class ContextAwareSelector:
     """
     Context 感知的调用策略选择器
     
-    核心思想（Manus）：
+    核心思想：
     - More context ≠ more intelligence
     - 当 context 接近上限时，优先精简策略
     """
@@ -537,7 +537,7 @@ class InvocationSelectorV2:
     调用策略选择器 V2
     
     核心改进：
-    1. 层级感知（Manus 三层抽象）
+    1. 层级感知（三层抽象架构）
     2. Context 感知（动态调整）
     3. 成本感知（平衡质量和成本）
     4. 智能降级（故障自动恢复）
@@ -574,7 +574,7 @@ class InvocationSelectorV2:
         决策顺序：
         1. 检查可用性（降级处理）
         2. Context 危险区检查（强制精简）
-        3. 层级优先选择（Manus 启发）
+        3. 层级优先选择
         4. 任务类型匹配
         5. 成本模式调整
         6. 最终验证和降级
@@ -600,7 +600,7 @@ class InvocationSelectorV2:
             return self._handle_context_critical(ctx)
         
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        # 3️⃣ 层级优先选择（Manus 启发）
+        # 3️⃣ 层级优先选择
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         
         max_level = ctx.max_tool_level
@@ -1981,5 +1981,5 @@ class SimpleAgent:
 - [00-ARCHITECTURE-V4.md](./00-ARCHITECTURE-V4.md)
 - [12-CONTEXT_ENGINEERING_OPTIMIZATION.md](./12-CONTEXT_ENGINEERING_OPTIMIZATION.md)
 - [14-CLAUDE_SKILLS_DEEP_DIVE.md](./14-CLAUDE_SKILLS_DEEP_DIVE.md)
-- [Manus Context Engineering](https://manus.im/blog/Context-Engineering-for-AI-Agents-Lessons-from-Building-Manus)
+- [Effective harnesses for long-running agents - Anthropic](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)
 

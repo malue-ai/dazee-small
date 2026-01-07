@@ -6,12 +6,12 @@ ResultCompactor - 工具结果精简器
 2. 将大结果转换为引用或摘要
 3. 保留原始结果的访问路径
 
-核心思想（Manus）：
+核心思想：
 - 工具结果应该是"指针"而非"内容"
 - LLM 需要时通过工具显式读取
 - 避免 context 被冗余信息占据
 
-参考：https://manus.im/blog/Context-Engineering-for-AI-Agents-Lessons-from-Building-Manus
+参考：Anthropic Blog - Effective harnesses for long-running agents
 """
 
 import json
@@ -53,7 +53,7 @@ class ResultCompactor:
     2. 将大结果转换为引用或摘要
     3. 保留原始结果的访问路径
     
-    核心思想（Manus）：
+    核心思想：
     - 工具结果应该是"指针"而非"内容"
     - LLM 需要时通过工具显式读取
     - 避免 context 被冗余信息占据
@@ -217,7 +217,7 @@ class ResultCompactor:
         rule: CompactionRule
     ) -> Dict[str, Any]:
         """
-        搜索结果的精简策略（Manus 原则）
+        搜索结果的精简策略
         
         核心思想：
         - 只返回 URL + 简短摘要（前 200 字符）
@@ -340,7 +340,7 @@ class ResultCompactor:
         result: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        引用式精简（Manus 推荐）
+        引用式精简（推荐方案）
         
         示例：
             原始: {"success": True, "content": "100KB of text..."}

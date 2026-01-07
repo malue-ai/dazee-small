@@ -7,7 +7,7 @@ CodeOrchestrator - 代码生成、验证、执行编排器
 - 状态追踪：记录每次执行的详细信息
 - E2B 集成：与 E2B 沙箱深度集成
 
-设计原则（参考 Manus + Claude Code）：
+设计原则（参考先进 Agent 架构 + Claude Code）：
 - Code-First: 将代码生成和执行作为核心能力
 - VM Scaffolding: E2B 沙箱作为安全的执行环境
 - 验证闭环: 执行前验证 + 执行后验证

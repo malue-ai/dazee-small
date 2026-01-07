@@ -1,8 +1,8 @@
 # Context Engineering 优化方案
 
 > 📅 **版本**: V1.0  
-> 🎯 **目标**: 基于 Manus AI 实践优化 ZenFlux Agent 上下文管理  
-> 📚 **参考**: [Context Engineering for AI Agents - Manus](https://manus.im/blog/Context-Engineering-for-AI-Agents-Lessons-from-Building-Manus)
+> 🎯 **目标**: 基于先进 AI Agent 实践优化 ZenFlux Agent 上下文管理  
+> 📚 **参考**: Anthropic Blog - Effective harnesses for long-running agents
 
 ---
 
@@ -19,7 +19,7 @@
 
 ## 🎯 核心原则
 
-### Manus 的智慧
+### 核心智慧
 
 > **"More context ≠ more intelligence"**  
 > **"Simplification beats expansion"**  
@@ -133,7 +133,7 @@ class ResultCompactor:
     2. 将大结果转换为引用或摘要
     3. 保留原始结果的访问路径
     
-    核心思想（Manus）：
+    核心思想：
     - 工具结果应该是"指针"而非"内容"
     - LLM 需要时通过工具显式读取
     - 避免 context 被冗余信息占据
@@ -255,7 +255,7 @@ class ResultCompactor:
         result: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        引用式精简（Manus 推荐）
+        引用式精简（推荐方案）
         
         示例：
             原始: {"success": True, "content": "100KB of text..."}
@@ -483,7 +483,7 @@ Turn 1:
 # 3. 如果需要完整内容，可以通过 URL 重新获取
 ```
 
-**优化方案：REFERENCE 策略（Manus 推荐）**
+**优化方案：REFERENCE 策略（推荐）**
 
 ```python
 # core/tool/result_compactor.py（增强版）
@@ -526,7 +526,7 @@ def _compact_search_results(
     result: Dict[str, Any]
 ) -> Dict[str, Any]:
     """
-    搜索结果的精简策略（Manus 原则）
+    搜索结果的精简策略
     
     核心思想：
     - 只返回 URL + 简短摘要（前 200 字符）
@@ -633,7 +633,7 @@ def _compact_search_results(
 
 ❌ **不推荐文件存储方案**，原因：
 
-1. **违反 Manus 原则**：
+1. **违反上下文工程原则**：
    - 文件存储仍然是"引用"，但没有 URL 引用直接
    - 增加了额外的 I/O 开销（写入文件 + 读取文件）
    - 文件管理复杂（需要清理、路径管理）
@@ -655,14 +655,14 @@ def _compact_search_results(
 # 优点：
 # - Context 占用减少 80-90%
 # - LLM 需要时可通过工具显式读取
-# - 符合 Manus "指针而非内容" 原则
+# - 符合 "指针而非内容" 原则
 # - 实现简单，无额外开销
 
 # ❌ 不推荐：文件存储方案
 # 缺点：
 # - 需要文件 I/O 开销
 # - 需要路径管理和清理
-# - 违反 Manus 原则（URL 引用更直接）
+# - 违反上下文工程原则（URL 引用更直接）
 # - 只有特殊场景才需要（持久化、离线访问）
 ```
 
@@ -670,7 +670,7 @@ def _compact_search_results(
 
 ## 🔒 Context Isolation - 上下文隔离
 
-### Manus 的原则
+### 核心原则
 
 > **"Do not communicate by sharing memory; instead, share memory by communicating."**  
 > — Go 语言设计哲学
@@ -772,7 +772,7 @@ class MultiAgentCoordinator:
     """
     多 Agent 协调器
     
-    原则（Manus）：
+    原则：
     - ❌ 不通过共享 context 通信
     - ✅ 通过显式消息传递通信
     - ✅ 每个 Agent 有独立的 context
@@ -828,7 +828,7 @@ class MultiAgentCoordinator:
 
 ## 📦 Context Offloading - 上下文卸载
 
-### Manus 的三层抽象
+### 三层抽象架构
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -862,7 +862,7 @@ class MultiAgentCoordinator:
 
 ### ZenFlux 当前架构映射
 
-| Manus Level | ZenFlux 对应 | 当前实现 | 优化空间 |
+| 抽象层级 | ZenFlux 对应 | 当前实现 | 优化空间 |
 |------------|-------------|---------|---------|
 | **Level 1** | `tools/*.py` (Function Calling) | ✅ 已实现 | ⚠️ 工具太多（12+） |
 | **Level 2** | `e2b_sandbox` (Shell utilities) | ✅ 已实现 | ⚠️ 未充分利用 |
@@ -957,7 +957,7 @@ def get_tool_usage_guidance(
     selected_tools: List[str]
 ) -> str:
     """
-    动态生成工具使用指导（Manus 启发）
+    动态生成工具使用指导
     
     根据任务类型，推荐合适的工具层级
     """
@@ -1011,7 +1011,7 @@ You have access to tools at different abstraction levels. Choose wisely:
 
 ## 🚀 Cache Optimization - 缓存优化
 
-### Manus 的策略
+### 缓存优化策略
 
 > **"All layers still use standard function calls as proxy.  
 > Clean interface, cache-friendly, orthogonal design."**
@@ -1028,7 +1028,7 @@ def build_cache_optimized_system_prompt(
     """
     构建 Cache 友好的 System Prompt
     
-    策略（Manus 启发）：
+    策略：
     1. 稳定内容放在前面（高 cache hit）
     2. 动态内容放在后面（低 cache hit 影响小）
     3. 按优先级分组工具定义
@@ -1280,7 +1280,7 @@ Token Efficiency: {self.stats.cache_efficiency:.1%}
 
 ## 🔗 参考资料
 
-1. [Context Engineering for AI Agents - Manus](https://manus.im/blog/Context-Engineering-for-AI-Agents-Lessons-from-Building-Manus)
+1. [Effective harnesses for long-running agents - Anthropic](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)
 2. [Claude Prompt Caching - Anthropic](https://docs.anthropic.com/claude/docs/prompt-caching)
 3. [Go Concurrency Patterns](https://go.dev/blog/codelab-share)
 4. [LangChain Context Engineering](https://twitter.com/rlancemartin/status/context-engineering)
