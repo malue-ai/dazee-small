@@ -1038,242 +1038,16 @@ capabilities:
     - 探索
     - 自定义
     - 动态
-- name: e2b_vibe_coding
-  type: TOOL
-  subtype: CUSTOM
-  provider: user
-  invocation_hint: DIRECT  # 🆕 V4.4: 标准 tool_use，Claude 自主推理选择
-  implementation:
-    module: tools.e2b_vibe_coding
-    class: E2BVibeCoding
-  capabilities:
-  - app_generation
-  - code_execution
-  - data_visualization
-  priority: 95
-  cost:
-    time: fast
-    money: low
-  constraints:
-    requires_api: true
-    requires_network: true
-    api_name: e2b
-    session_scoped: true
-    supports_preview: true
-  metadata:
-    description: '生成完整的 Web 应用（Streamlit/Gradio）并返回实时预览 URL。
-
-
-      支持的技术栈：
-
-      • Streamlit - 数据可视化应用
-
-      • Gradio - ML 模型界面
-
-      • Next.js - 全栈 Web 应用
-
-      • Vue.js - 前端应用
-
-      '
-    preferred_for:
-    - 数据可视化应用
-    - 交互式数据分析工具
-    - ML 模型演示界面
-    - 需要实时预览的应用
-    keywords:
-    - vibe coding
-    - streamlit
-    - gradio
-    - 应用生成
-    - 预览
-    - app
-  input_schema:
-    type: object
-    properties:
-      action:
-        type: string
-        enum:
-        - create
-        - update
-        - get_logs
-        - terminate
-        - list
-        description: 操作类型
-      stack:
-        type: string
-        enum:
-        - streamlit
-        - gradio
-        - nextjs
-        - vue
-        description: 技术栈（create时必填）
-      description:
-        type: string
-        description: 应用描述（create时必填）
-      code:
-        type: string
-        description: 应用代码（create/update时必填）
-      app_id:
-        type: string
-        description: 应用ID（update/get_logs/terminate时必填）
-    required:
-    - action
-- name: e2b_python_sandbox
-  type: TOOL
-  subtype: CUSTOM
-  provider: user
-  invocation_hint: DIRECT  # 🆕 V4.4: 标准 tool_use，Claude 自主推理选择
-  level: 2
-  cache_stable: true
-  compaction:
-    strategy: truncate
-    result_type: mixed
-    max_size: 10000
-  implementation:
-    module: tools.e2b_sandbox
-    class: E2BPythonSandbox
-  capabilities:
-  - code_sandbox
-  - code_execution
-  - data_analysis
-  - web_scraping
-  - api_calling
-  - file_operations
-  priority: 85
-  cost:
-    time: fast
-    money: low
-  constraints:
-    requires_api: true
-    requires_network: true
-    api_name: e2b
-    session_scoped: true
-    supports_persistence: true
-  metadata:
-    description: '在安全的E2B沙箱中执行Python代码。
-
-
-      核心特性：
-
-      • ✅ 完整网络访问（requests, httpx等）
-
-      • ✅ 任意第三方包（pip install或自动检测）
-
-      • ✅ 文件系统持久化（跨调用保持）
-
-      • ✅ 长时间运行（最长24小时）
-
-      • ✅ 多轮交互（会话级沙箱复用）
-
-      • ✅ 流式输出（实时显示stdout/stderr）
-
-      • ✅ 后台任务（支持长时运行任务）
-
-      '
-    preferred_for:
-    - 网络请求和API调用
-    - 数据爬取和网页抓取
-    - 使用第三方Python包（pandas, numpy, requests等）
-    - 需要文件持久化的任务
-    - 长时间运行的任务
-    - 多步骤代码执行（需要保持状态）
-    - 数据可视化（生成图表）
-    keywords:
-    - sandbox
-    - python
-    - network
-    - pip
-    - requests
-    - pandas
-    - 沙箱
-    - 网络
-    - 爬虫
-    - 数据分析
-    note: '文件系统规范：
-
-      - 读取文件：/home/user/input_data/文件名
-
-      - 保存文件：/home/user/output_data/文件名（会自动下载）
-
-      - workspace/inputs/ 会自动同步到沙箱
-
-      - 沙箱中的 output_data/ 会自动下载到 workspace/outputs/
-
-      '
-  input_schema:
-    type: object
-    properties:
-      code:
-        type: string
-        description: '要执行的Python代码。
-
-
-          提示：
-
-          • 可以使用任意Python包（会自动检测并安装）
-
-          • 支持网络访问
-
-          • 读取文件：/home/user/input_data/文件名
-
-          • 保存文件：/home/user/output_data/文件名（会自动下载）
-
-          • 使用 print() 输出结果
-
-          '
-      template:
-        type: string
-        enum:
-        - base
-        - data-analysis
-        - web-scraping
-        description: '沙箱模板（可选，默认根据任务类型自动选择）。
-
-          • base: 纯净环境，按需安装
-
-          • data-analysis: 预装 pandas/numpy/matplotlib
-
-          • web-scraping: 预装 requests/beautifulsoup4
-
-          '
-      enable_stream:
-        type: boolean
-        description: 是否启用流式输出（默认true）
-        default: true
-      auto_install:
-        type: boolean
-        description: 是否自动检测并安装缺失的包（默认true）
-        default: true
-      timeout:
-        type: integer
-        description: 代码执行超时时间（秒），默认300秒（5分钟）
-        default: 300
-        minimum: 10
-        maximum: 3600
-      background:
-        type: boolean
-        description: 是否在后台运行（适合长时任务）
-        default: false
-      return_files:
-        type: array
-        items:
-          type: string
-        description: '需要返回的文件路径列表（可选）。
-
-          文件会自动下载到 workspace/outputs/
-
-
-          示例: ["/home/user/output_data/result.csv", "/home/user/output_data/chart.png"]
-
-          '
-    required:
-    - code
+# ==================== 沙盒统一工具（已合并旧工具） ====================
+# 注意：以下旧工具已删除，功能合并到 sandbox_* 系列工具：
+# - e2b_vibe_coding → sandbox_create_project + sandbox_run_project
+# - e2b_python_sandbox → sandbox_run_code
 - name: sandbox_list_dir
   type: TOOL
   subtype: CUSTOM
   provider: user
   implementation:
-    module: tools.sandbox_file_tools
+    module: tools.sandbox_tools
     class: SandboxListDir
   capabilities:
   - sandbox_file_operations
@@ -1310,7 +1084,7 @@ capabilities:
   subtype: CUSTOM
   provider: user
   implementation:
-    module: tools.sandbox_file_tools
+    module: tools.sandbox_tools
     class: SandboxReadFile
   capabilities:
   - sandbox_file_operations
@@ -1348,7 +1122,7 @@ capabilities:
   subtype: CUSTOM
   provider: user
   implementation:
-    module: tools.sandbox_file_tools
+    module: tools.sandbox_tools
     class: SandboxWriteFile
   capabilities:
   - sandbox_file_operations
@@ -1391,7 +1165,7 @@ capabilities:
   subtype: CUSTOM
   provider: user
   implementation:
-    module: tools.sandbox_file_tools
+    module: tools.sandbox_tools
     class: SandboxDeleteFile
   capabilities:
   - sandbox_file_operations
@@ -1428,7 +1202,7 @@ capabilities:
   subtype: CUSTOM
   provider: user
   implementation:
-    module: tools.sandbox_file_tools
+    module: tools.sandbox_tools
     class: SandboxRunCommand
   capabilities:
   - sandbox_file_operations
@@ -1443,7 +1217,7 @@ capabilities:
     api_name: e2b
     session_scoped: true
   metadata:
-    description: 在沙盒中执行命令
+    description: 在沙盒中执行 shell 命令
     keywords:
     - sandbox
     - 沙盒
@@ -1466,12 +1240,140 @@ capabilities:
     required:
     - conversation_id
     - command
+- name: sandbox_run_code
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  level: 2
+  cache_stable: true
+  compaction:
+    strategy: truncate
+    result_type: mixed
+    max_size: 10000
+  implementation:
+    module: tools.sandbox_tools
+    class: SandboxRunCode
+  capabilities:
+  - code_sandbox
+  - code_execution
+  - data_analysis
+  - web_scraping
+  - api_calling
+  priority: 90
+  cost:
+    time: fast
+    money: low
+  constraints:
+    requires_api: true
+    requires_network: true
+    api_name: e2b
+    session_scoped: true
+    supports_persistence: true
+  metadata:
+    description: '在沙盒中执行 Python 代码（Code Interpreter）
+
+
+      核心特性：
+
+      • ✅ 完整网络访问（requests, httpx等）
+
+      • ✅ 任意第三方包（自动检测并安装）
+
+      • ✅ 文件系统持久化（跨调用保持）
+
+      • ✅ 流式输出（实时显示stdout/stderr）
+
+      • ✅ 图表生成（matplotlib, plotly）
+
+      '
+    preferred_for:
+    - 数据分析和处理
+    - 网络请求和API调用
+    - 数据可视化
+    - 使用第三方Python包
+    - 多步骤代码执行
+    keywords:
+    - sandbox
+    - python
+    - code
+    - 沙盒
+    - 代码执行
+    - 数据分析
+    - pandas
+    - numpy
+    note: '替代了原有的 e2b_python_sandbox 工具。
+
+      所有代码在同一个沙盒中执行，文件系统状态持久化。
+
+      '
+  input_schema:
+    type: object
+    properties:
+      conversation_id:
+        type: string
+        description: 对话 ID
+      code:
+        type: string
+        description: '要执行的 Python 代码。
+
+          可以使用任意 Python 包（会自动安装）。
+
+          使用 print() 输出结果。
+
+          '
+      timeout:
+        type: integer
+        description: 超时时间（秒，默认 300）
+        default: 300
+        minimum: 10
+        maximum: 3600
+    required:
+    - conversation_id
+    - code
+- name: sandbox_file_exists
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  implementation:
+    module: tools.sandbox_tools
+    class: SandboxFileExists
+  capabilities:
+  - sandbox_file_operations
+  - file_operations
+  priority: 85
+  cost:
+    time: fast
+    money: free
+  constraints:
+    requires_api: true
+    api_name: e2b
+    session_scoped: true
+  metadata:
+    description: 检查沙盒文件或目录是否存在
+    keywords:
+    - sandbox
+    - 沙盒
+    - 文件
+    - 存在
+    - 检查
+  input_schema:
+    type: object
+    properties:
+      conversation_id:
+        type: string
+        description: 对话 ID
+      path:
+        type: string
+        description: 文件或目录路径
+    required:
+    - conversation_id
+    - path
 - name: sandbox_create_project
   type: TOOL
   subtype: CUSTOM
   provider: user
   implementation:
-    module: tools.sandbox_file_tools
+    module: tools.sandbox_tools
     class: SandboxCreateProject
   capabilities:
   - sandbox_file_operations
@@ -1528,7 +1430,7 @@ capabilities:
   subtype: CUSTOM
   provider: user
   implementation:
-    module: tools.sandbox_file_tools
+    module: tools.sandbox_tools
     class: SandboxRunProject
   capabilities:
   - sandbox_file_operations

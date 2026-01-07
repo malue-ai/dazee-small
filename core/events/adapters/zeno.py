@@ -47,9 +47,6 @@ class ZenOAdapter(EventAdapter):
         "content_delta",
         "content_stop",
         "message_delta",
-        "message_delta:plan",
-        "message_delta:recommended",
-        "message_delta:confirmation_request",
         "error",
         "session_end",
     ]

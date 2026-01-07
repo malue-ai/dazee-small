@@ -362,23 +362,40 @@ async def list_files(
         if use_sandbox:
             # 使用沙盒
             service = get_sandbox_service()
-            sandbox_files = await service.list_files(conversation_id, path)
             
-            files = [
-                FileItemResponse(
+            # 转换沙盒文件信息为响应格式
+            def convert_sandbox_file(f) -> FileItemResponse:
+                return FileItemResponse(
                     path=f.path,
                     name=f.name,
                     type=f.type,
-                    size=f.size
+                    size=f.size,
+                    modified_at=f.modified_at,
+                    children=[convert_sandbox_file(c) for c in f.children] if f.children else None
                 )
-                for f in sandbox_files
-            ]
             
-            return FileListResponse(
-                conversation_id=conversation_id,
-                files=files,
-                source="sandbox"
-            )
+            try:
+                # 根据 tree 参数选择不同的方法
+                if tree:
+                    sandbox_files = await service.list_files_tree(conversation_id, path)
+                else:
+                    sandbox_files = await service.list_files(conversation_id, path)
+                
+                files = [convert_sandbox_file(f) for f in sandbox_files]
+                
+                return FileListResponse(
+                    conversation_id=conversation_id,
+                    files=files,
+                    source="sandbox"
+                )
+            except SandboxNotFoundError:
+                # 沙盒不存在时返回空列表（而不是 404）
+                logger.info(f"沙盒不存在，返回空列表: {conversation_id}")
+                return FileListResponse(
+                    conversation_id=conversation_id,
+                    files=[],
+                    source="sandbox"
+                )
         else:
             # 使用本地文件系统
             manager = get_workspace_manager()
@@ -408,10 +425,13 @@ async def list_files(
                 source="local"
             )
     
-    except SandboxNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
     except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        # 本地文件系统目录不存在时返回空列表
+        return FileListResponse(
+            conversation_id=conversation_id,
+            files=[],
+            source="local"
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except SandboxServiceError as e:
@@ -711,20 +731,29 @@ async def list_projects(
         if use_sandbox:
             # 使用沙盒 - 列出 /home/user 目录
             service = get_sandbox_service()
-            files = await service.list_files(conversation_id, "/home/user")
             
-            projects = []
-            for f in files:
-                if f.type == "directory":
-                    # 检查目录内容
-                    project_info = await _detect_sandbox_project(service, conversation_id, f.path, f.name)
-                    if project_info:
-                        projects.append(project_info)
-            
-            return ProjectListResponse(
-                conversation_id=conversation_id,
-                projects=projects
-            )
+            try:
+                files = await service.list_files(conversation_id, "/home/user")
+                
+                projects = []
+                for f in files:
+                    if f.type == "directory":
+                        # 检查目录内容
+                        project_info = await _detect_sandbox_project(service, conversation_id, f.path, f.name)
+                        if project_info:
+                            projects.append(project_info)
+                
+                return ProjectListResponse(
+                    conversation_id=conversation_id,
+                    projects=projects
+                )
+            except SandboxNotFoundError:
+                # 沙盒不存在时返回空列表
+                logger.info(f"沙盒不存在，返回空项目列表: {conversation_id}")
+                return ProjectListResponse(
+                    conversation_id=conversation_id,
+                    projects=[]
+                )
         else:
             # 使用本地文件系统
             manager = get_workspace_manager()
@@ -744,8 +773,6 @@ async def list_projects(
                 projects=projects
             )
     
-    except SandboxNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
     except SandboxServiceError as e:
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:

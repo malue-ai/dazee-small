@@ -370,24 +370,26 @@ class SimpleAgent:
             system_prompt = UNIVERSAL_AGENT_PROMPT
             logger.info("✅ 使用框架默认 System Prompt")
         
-        # 🆕 追加 Workspace 路径信息（让 Claude 的 text_editor 使用正确路径）
-        # 注意：session_context 和 conversation_id 已在 tracer 初始化时获取
-        
-        # 获取 workspace 绝对路径并确保目录存在
-        from core.workspace_manager import get_workspace_manager
-        workspace_manager = get_workspace_manager(self.workspace_dir or "./workspace")
-        workspace_path = workspace_manager.get_workspace_root(conversation_id)
-        workspace_path.mkdir(parents=True, exist_ok=True)  # 确保目录存在
-        
-        workspace_instruction = f"""
+        # 🆕 追加沙盒上下文（注入 conversation_id，用于 sandbox_* 工具）
+        sandbox_context = f"""
 
-# 工作目录（CRITICAL）
-所有文件操作必须在工作目录下进行：
-- 工作目录: {workspace_path}
-- 创建文件示例: {workspace_path}/index.html
-- ❌ 禁止使用 /tmp 或其他系统目录
+# 📌 当前会话上下文
+
+- **conversation_id**: `{conversation_id}`
+
+当你使用 sandbox_* 工具时，必须使用上面的 conversation_id。
+
+## 沙盒工具使用示例
+
+```json
+{{
+    "conversation_id": "{conversation_id}",
+    "path": "/home/user/app.py",
+    "content": "print('Hello')"
+}}
+```
 """
-        system_prompt = system_prompt + workspace_instruction
+        system_prompt = system_prompt + sandbox_context
         
         # ===== 2. 工具选择（V4.4 双路径分流） =====
         # 🆕 追踪工具选择阶段
