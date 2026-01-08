@@ -68,3 +68,5 @@ skill_outputs/
 
 # 生成的输出文件
 workspace/outputs/ppt/*.pptx
+*.db
+test_mem0_e2e_report_*.json

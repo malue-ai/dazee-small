@@ -337,7 +337,8 @@ class SimpleAgent:
                     "task_type": intent.task_type.value,
                     "complexity": intent.complexity.value,
                     "needs_plan": intent.needs_plan,
-                    "confidence": intent.confidence
+                    "confidence": intent.confidence,
+                    "skip_memory_retrieval": intent.skip_memory_retrieval  # 🆕 V4.6
                 }, ensure_ascii=False)
             }
             yield await self.broadcaster.emit_message_delta(
@@ -480,6 +481,10 @@ class SimpleAgent:
         # 4.2 构建 LLM Messages
         # 4.3 Todo 重写（Context Engineering - 对抗 Lost-in-the-Middle）
         
+        # 🆕 V4.6: 获取用户当前 query 和 Mem0 检索决策
+        user_query = messages[-1]["content"] if messages else ""
+        skip_memory = getattr(intent, 'skip_memory_retrieval', False)
+        
         # 4.1 选择 System Prompt
         if self.system_prompt:
             # 使用用户定义的 System Prompt（唯一真相来源）
@@ -492,13 +497,18 @@ class SimpleAgent:
             system_prompt = self.system_prompt + sandbox_context
             logger.info("✅ 使用用户定义的 System Prompt + 沙盒上下文")
         else:
-            # 使用框架默认 Prompt（含所有动态注入）
+            # 使用框架默认 Prompt（根据意图识别结果决定是否检索 Mem0）
             from prompts.universal_agent_prompt import get_universal_agent_prompt
             system_prompt = get_universal_agent_prompt(
                 conversation_id=conversation_id,
-                user_id=user_id
+                user_id=user_id,
+                user_query=user_query,
+                skip_memory_retrieval=skip_memory  # 🆕 V4.6: 传递意图识别结果
             )
-            logger.info("✅ 使用框架默认 System Prompt")
+            if skip_memory:
+                logger.info("✅ 使用框架默认 System Prompt（跳过 Mem0 检索）")
+            else:
+                logger.info("✅ 使用框架默认 System Prompt（已检索 Mem0 画像）")
         
         # 4.2 构建 LLM Messages
         llm_messages = [

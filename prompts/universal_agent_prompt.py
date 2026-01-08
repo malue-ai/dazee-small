@@ -1425,6 +1425,69 @@ def load_skills_metadata(skills_dir: Optional[str] = None) -> str:
         return ""
 
 
+# ==================== Mem0 用户画像检索 ====================
+
+def _fetch_user_profile(user_id: str, user_query: str, max_memories: int = 5) -> str:
+    """
+    从 Mem0 检索用户相关记忆，格式化为 System Prompt 注入段
+    
+    Args:
+        user_id: 用户 ID
+        user_query: 用户当前查询（用于语义搜索）
+        max_memories: 最大返回记忆数量
+        
+    Returns:
+        格式化的用户画像字符串，如果检索失败则返回空字符串
+    """
+    if not user_id:
+        return ""
+    
+    try:
+        from core.memory.mem0.pool import get_mem0_pool
+        
+        pool = get_mem0_pool()
+        memories = pool.search(
+            user_id=user_id,
+            query=user_query,
+            limit=max_memories
+        )
+        
+        if not memories:
+            return ""
+        
+        # 格式化记忆为 System Prompt 段落
+        memory_lines = []
+        for mem in memories:
+            content = mem.get("memory", "")
+            if content:
+                memory_lines.append(f"- {content}")
+        
+        if not memory_lines:
+            return ""
+        
+        profile_section = f"""
+---
+
+## 🧠 用户画像（基于历史交互）
+
+以下是该用户的相关偏好和历史信息，请在回复时参考：
+
+{chr(10).join(memory_lines)}
+
+**注意**：上述信息来自历史交互记录，请自然地融入回复中，不要明确提及"根据您的历史记录"。
+"""
+        return profile_section
+        
+    except ImportError:
+        # Mem0 模块未安装，静默跳过
+        return ""
+    except Exception as e:
+        # 检索失败不影响主流程，静默跳过
+        import logging
+        logging.getLogger("memory.mem0").warning(f"[Mem0] 用户画像检索失败: {e}")
+        return ""
+
+
 # ==================== 获取完整系统提示词 ====================
 
 def get_universal_agent_prompt(
@@ -1433,7 +1496,9 @@ def get_universal_agent_prompt(
     include_e2b: bool = True,
     session_summary: Optional[str] = None,  # 🆕 V4.3: 动态注入进度恢复协议
     conversation_id: Optional[str] = None,  # 🆕 动态注入会话上下文
-    user_id: Optional[str] = None           # 🆕 动态注入用户 ID
+    user_id: Optional[str] = None,          # 🆕 动态注入用户 ID
+    user_query: Optional[str] = None,       # 🆕 V4.6: 用户查询（用于 Mem0 搜索）
+    skip_memory_retrieval: bool = False     # 🆕 V4.6: 是否跳过 Mem0 记忆检索
 ) -> str:
     """
     获取通用智能体框架系统提示词
@@ -1445,6 +1510,8 @@ def get_universal_agent_prompt(
         session_summary: 🆕 Session 进度恢复摘要（框架自动注入，用户透明）
         conversation_id: 🆕 会话 ID（用于沙盒工具调用）
         user_id: 🆕 用户 ID（可选）
+        user_query: 🆕 V4.6 用户查询（用于 Mem0 语义搜索）
+        skip_memory_retrieval: 🆕 V4.6 是否跳过 Mem0 记忆检索
         
     Returns:
         完整的系统提示词
@@ -1458,6 +1525,10 @@ def get_universal_agent_prompt(
     - conversation_id: 动态注入会话上下文，让 Agent 正确调用 sandbox_* 工具
     - user_id: 用户标识
     
+    🆕 V4.6 新增：
+    - user_query: 用户当前查询，用于 Mem0 语义搜索相关记忆
+    - skip_memory_retrieval: 由意图分析决定，跳过无需个性化的查询
+    
     示例：
         # 首次 Session（无进度）
         prompt = get_universal_agent_prompt()
@@ -1466,13 +1537,21 @@ def get_universal_agent_prompt(
         summary = plan_memory.get_session_summary(task_id)
         prompt = get_universal_agent_prompt(session_summary=summary)
         
-        # 带会话上下文
+        # 带会话上下文和 Mem0 记忆检索
         prompt = get_universal_agent_prompt(
             conversation_id="conv_xxx",
-            user_id="user_001"
+            user_id="user_001",
+            user_query="帮我生成一个PPT",
+            skip_memory_retrieval=False  # 检索用户偏好
         )
     """
     prompt = UNIVERSAL_AGENT_PROMPT
+    
+    # 🆕 V4.6: 根据意图分析结果，决定是否检索 Mem0 用户画像
+    if user_id and user_query and not skip_memory_retrieval:
+        user_profile = _fetch_user_profile(user_id, user_query)
+        if user_profile:
+            prompt += user_profile
     
     # 🆕 V4.3: 注入 Session 进度恢复协议（用户透明）
     if session_summary:
