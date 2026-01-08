@@ -44,6 +44,7 @@ from core.tool.capability import (
     # Registry
     CapabilityRegistry,
     create_capability_registry,
+    get_capability_registry,  # 🆕 单例访问（推荐）
     # Router
     CapabilityRouter,
     RoutingResult,
@@ -58,6 +59,14 @@ from core.tool.capability import (
     SkillLoader,
     SkillInfo,
     create_skill_loader,
+)
+
+# 🆕 实例级工具注册表
+from core.tool.instance_registry import (
+    InstanceToolRegistry,
+    InstanceTool,
+    InstanceToolType,
+    create_instance_registry,
 )
 
 __all__ = [
@@ -79,6 +88,7 @@ __all__ = [
     "CapabilitySubtype",
     "CapabilityRegistry",
     "create_capability_registry",
+    "get_capability_registry",  # 🆕 单例访问
     "CapabilityRouter",
     "RoutingResult",
     "create_capability_router",
@@ -90,5 +100,10 @@ __all__ = [
     "SkillLoader",
     "SkillInfo",
     "create_skill_loader",
+    # 🆕 实例级工具注册表
+    "InstanceToolRegistry",
+    "InstanceTool",
+    "InstanceToolType",
+    "create_instance_registry",
 ]
 

@@ -1,0 +1,162 @@
+# ============================================================
+# 智能体实例配置
+# ============================================================
+# 
+# 📌 配置优先级：
+#   config.yaml 显式配置 > LLM 从 prompt.md 推断 > 框架默认值
+#
+# 💡 设计原则：
+#   大部分配置由 LLM 从 prompt.md 自动推断
+#   本文件仅用于：
+#   1. 声明 MCP 工具（框架无法从提示词推断）
+#   2. 覆盖推断结果（特殊需求）
+#   3. 环境变量映射
+#
+# ============================================================
+
+# ==================== 基础信息 ====================
+
+instance:
+  # 实例名称（与文件夹名保持一致）
+  name: "_template"
+  # 实例描述
+  description: "智能体实例模板"
+  # 版本号（可选）
+  version: "1.0.0"
+
+
+# ==================== Agent 配置覆盖（可选）====================
+# 
+# 不填则使用 LLM 从 prompt.md 推断的值
+# 取消注释可强制覆盖
+#
+agent:
+  # LLM 模型（默认由框架决定）
+  # model: "claude-sonnet-4-5-20250929"
+  
+  # 最大对话轮数（默认 15）
+  # max_turns: 20
+  
+  # 是否启用计划管理器（默认由任务复杂度决定）
+  # plan_manager_enabled: true
+  
+  # 是否允许并行工具调用（默认 false）
+  # allow_parallel_tools: false
+  
+  # ==================== LLM 超参数 ====================
+  #
+  # 📌 调整 LLM 行为的参数
+  #
+  llm:
+    # 温度：控制输出随机性（0-1）
+    # - 0: 确定性输出，适合精确任务
+    # - 0.7: 平衡创意和准确性
+    # - 1.0: 最大随机性（Extended Thinking 必须为 1）
+    # temperature: 0.7
+    
+    # 最大输出 token 数（默认 64000，Claude 4.5 最大支持）
+    # max_tokens: 8192
+    
+    # Extended Thinking（深度思考，Claude 特有）
+    # - 启用后 temperature 强制为 1.0
+    # - 适合复杂推理任务
+    # enable_thinking: true
+    
+    # Thinking token 预算（enable_thinking 为 true 时有效）
+    # thinking_budget: 10000
+    
+    # Prompt Caching（减少重复内容的 API 调用成本）
+    # enable_caching: false
+    
+    # Top-P 核采样（可选，与 temperature 配合使用）
+    # top_p: 0.9
+
+
+# ==================== MCP 工具声明 ====================
+#
+# 📌 只需配置 3 个必填项，框架自动处理其他一切：
+#   - name: 工具名称
+#   - server_url: MCP 服务器地址
+#   - description: 工具描述（用于自动推断能力类别）
+#
+# 🤖 自动化：
+#   框架根据 description 自动推断工具能力，无需手动配置 capability
+#   例如：description 包含 "flowchart" → 自动识别为图表生成能力
+#
+mcp_tools: []
+  # 示例：Dify 工作流
+  # - name: dify_flowchart
+  #   server_url: "https://api.dify.ai/mcp/server/xxx/mcp"
+  #   server_name: "dify"                    # 可选，默认用 name
+  #   auth_type: "bearer"                    # 可选，默认 none
+  #   auth_env: "DIFY_API_KEY"               # 认证环境变量
+  #   description: "生成 flowchart 流程图"   # ⚠️ 重要：框架据此推断能力
+  #
+  #   # capability: "chart_generation"       # 可选：覆盖自动推断结果
+  
+  # 示例：自定义搜索服务
+  # - name: custom_search
+  #   server_url: "http://localhost:8080/mcp"
+  #   server_name: "custom"
+  #   auth_type: "none"
+  #   capability: "web_search"  # 🆕 指定能力类别
+  #   description: "自定义搜索服务"
+
+
+# ==================== REST APIs 配置 ====================
+#
+# 📌 用途：配置外部 REST API，让 Agent 通过 api_calling 工具调用
+#
+# 💡 设计原则：
+#   - 运营只需配置 base_url + 认证
+#   - API 具体用法写在 api_desc/{doc}.md 中（自然语言）
+#   - LLM 读取文档后自动理解如何调用
+#
+# 📁 目录结构：
+#   instances/xxx/
+#   ├── config.yaml      <- 配置 APIs
+#   └── api_desc/        <- API 描述文档
+#       └── weather.md   <- doc: weather 指向此文件
+#
+# 📚 capability 字段说明（🆕）：
+#   指定该 API 满足的用户意图，用于 Plan 阶段工具匹配。
+#   可选值与 MCP 工具相同。
+#
+apis: []
+  # 示例：天气 API
+  # - name: weather_api
+  #   base_url: "https://api.weather.com/v1"
+  #   auth:
+  #     type: api_key       # none / bearer / api_key / basic
+  #     header: X-API-Key   # 认证头名称
+  #     env: WEATHER_API_KEY  # 环境变量名
+  #   doc: weather          # 指向 api_desc/weather.md
+  #   capability: "web_search"  # 🆕 该 API 用于信息查询
+  #   description: "天气查询服务"
+
+
+# ==================== 记忆配置（V4.6）====================
+
+memory:
+  # 是否启用 Mem0 用户记忆
+  mem0_enabled: true
+  
+  # 是否启用智能记忆检索（根据意图分析决定是否检索）
+  smart_retrieval: true
+  
+  # 记忆保留策略：session（仅当前会话）/ user（用户级别）/ persistent（持久化）
+  # retention_policy: "user"
+
+
+# ==================== 高级配置（通常无需修改）====================
+
+advanced:
+  # 意图分析器配置
+  intent_analyzer:
+    enabled: true
+    use_llm: true
+  
+  # 输出格式配置
+  output_formatter:
+    default_format: "markdown"
+    code_highlighting: true

@@ -459,6 +459,30 @@ class SimpleAgent:
         # 转换为 LLM 格式
         tools_for_llm = self.tool_selector.get_tools_for_llm(selection, self.llm)
         
+        # 🆕 V4.4 优化：从 InstanceToolRegistry 获取实例级工具
+        # 统一添加实例级工具（MCP、REST API），确保 Plan 阶段和执行阶段使用相同工具列表
+        if hasattr(self, '_instance_registry') and self._instance_registry:
+            instance_tools = self._instance_registry.get_tools_for_claude()
+            for tool_def in instance_tools:
+                tools_for_llm.append(tool_def)
+                if tool_def["name"] not in selection.tool_names:
+                    selection.tool_names.append(tool_def["name"])
+        # 兼容旧逻辑：直接添加 _mcp_tools
+        elif hasattr(self, '_mcp_tools') and self._mcp_tools:
+            for mcp_tool in self._mcp_tools:
+                mcp_tool_def = {
+                    "name": mcp_tool["name"],
+                    "description": mcp_tool.get("description", ""),
+                    "input_schema": mcp_tool.get("input_schema", {
+                        "type": "object",
+                        "properties": {"query": {"type": "string"}},
+                        "required": ["query"]
+                    })
+                }
+                tools_for_llm.append(mcp_tool_def)
+                if mcp_tool["name"] not in selection.tool_names:
+                    selection.tool_names.append(mcp_tool["name"])
+        
         logger.info(f"📋 选择工具: {selection.tool_names}")
         
         # 🆕 完成追踪
@@ -863,6 +887,11 @@ class SimpleAgent:
                 if tool_name == "plan_todo":
                     operation = tool_input.get('operation', 'create_plan')
                     data = tool_input.get('data', {})
+                    
+                    # 🆕 V4.4 修正: Plan 阶段只使用能力类别（capability_categories）
+                    # 不传递具体工具列表，避免上下文过长
+                    # 具体工具在执行阶段根据 Plan 步骤的 capability 动态选择
+                    
                     result = await self.plan_todo_tool.execute(
                         operation=operation,
                         data=data,
@@ -1261,6 +1290,10 @@ class SimpleAgent:
                 if tool_name == "plan_todo":
                     operation = tool_input.get('operation', 'create_plan')
                     data = tool_input.get('data', {})
+                    
+                    # 🆕 V4.4 修正: Plan 阶段只使用能力类别
+                    # 不注入具体工具列表，避免上下文过长
+                    
                     result = await self.plan_todo_tool.execute(
                         operation=operation,
                         data=data,

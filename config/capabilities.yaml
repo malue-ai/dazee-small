@@ -1,113 +1,242 @@
+# ==================== 任务类型 → 能力映射 ====================
+#
+# 📌 设计原则：
+#   1. task_type 是用户意图的粗分类（由意图分析器识别）
+#   2. 每个 task_type 映射到一组 capability_categories 的 ID
+#   3. 所有 ID 必须在 capability_categories 中有定义
+#
+# 🔗 与 capability_categories 的关系：
+#   task_type_mappings[xxx] → [能力ID列表] → 在 capability_categories 中查找定义
+#
 task_type_mappings:
-  # 🆕 V4.4 优化：简单问答只需要搜索，不需要 task_planning
+
+  # 信息查询类任务
   information_query:
-  - web_search              # 核心：搜索互联网
-  # 注：knowledge_base/file_operations/task_planning 对于简单问答是不必要的
+    - web_search           # 互联网搜索
+    - news_search          # 新闻搜索
+    - academic_search      # 学术搜索
+    - market_data          # 市场数据
+
+  # 内容生成类任务
   content_generation:
-  - document_creation
-  - ppt_generation
-  - file_operations
-  - code_execution
-  - task_planning
+    - document_creation    # 文档生成
+    - ppt_generation       # PPT 生成
+    - chart_generation     # 图表生成
+    - image_generation     # 图片生成
+
+  # 数据处理类任务
   data_analysis:
-  - data_analysis
-  - file_operations
-  - code_sandbox
-  - code_execution
-  - task_planning
-  code_task:
-  - code_execution
-  - code_sandbox
-  - app_generation
-  - file_operations
-  - task_planning
+    - data_analysis        # 数据分析
+    - data_visualization   # 数据可视化
+    - file_conversion      # 文件转换
+
+  # 应用开发类任务
   app_creation:
-  - app_generation
-  - code_sandbox
-  - data_visualization
-  - task_planning
+    - app_generation       # 应用生成（internal，框架内置）
+
+  # 业务集成类任务
+  business_integration:
+    - crm_integration      # CRM 集成
+    - erp_integration      # ERP 集成
+    - notification         # 消息通知
+
+  # 通用/其他
   other:
-  - file_operations
-  - code_execution
-  - task_planning
+    - web_search           # 默认可搜索
+# ==================== 能力类别定义 ====================
+#
+# 🆕 V4.6 分类体系：
+#
+# 📌 设计原则：
+#   1. 业务能力类别（business）：面向 FDE/运营配置外部工具，描述"能解决什么业务问题"
+#   2. 框架内部类别（internal）：框架内部使用，FDE 无需关心
+#
+# ⚠️ FDE 配置 MCP/API 工具时，只需使用 business 类别
+#
 capability_categories:
-- id: knowledge_base
-  description: 个人知识库检索
-  use_when: 需要查找用户之前上传的文档、笔记、资料
-  examples:
-  - 查找我的文档
-  - 检索个人笔记
-  - 搜索上传的资料
-- id: web_search
-  description: 搜索互联网信息
-  use_when: 需要查找资料、新闻、数据、实时信息
-  examples:
-  - 搜索市场数据
-  - 查找行业报告
-  - 获取最新新闻
+
+# ========== 业务能力类别（FDE/运营配置使用）==========
+# 这些类别用于 instances/xxx/config.yaml 中的 capability 字段
+
+# --- 内容生成类 ---
 - id: ppt_generation
-  description: 生成演示文稿
-  use_when: 需要创建 PowerPoint/Slides
+  category_type: business
+  description: PPT/演示文稿生成
+  use_when: 需要创建 PowerPoint、Slides、Keynote
   examples:
   - 制作产品PPT
   - 生成培训材料
   - 创建汇报文档
+
 - id: document_creation
-  description: 生成文档
-  use_when: 需要创建 Word/PDF 文档
+  category_type: business
+  description: 文档生成（Word/PDF/报告）
+  use_when: 需要创建文字文档、报告、合同
   examples:
   - 撰写报告
   - 生成合同
   - 创建说明书
+
+- id: chart_generation
+  category_type: business
+  description: 图表生成（flowchart/架构图/思维导图）
+  use_when: 需要创建流程图、架构图、关系图
+  examples:
+  - 生成 flowchart
+  - 绘制系统架构图
+  - 创建思维导图
+
+- id: image_generation
+  category_type: business
+  description: 图片生成
+  use_when: 需要 AI 生成图片、插图
+  examples:
+  - 生成产品图
+  - 创建配图
+  - 设计 logo
+
+- id: video_generation
+  category_type: business
+  description: 视频生成
+  use_when: 需要生成视频内容
+  examples:
+  - 生成宣传视频
+  - 创建教程视频
+
+# --- 信息获取类 ---
+- id: web_search
+  category_type: business
+  description: 互联网搜索
+  use_when: 需要搜索网页、获取公开信息
+  examples:
+  - 搜索公司信息
+  - 查找技术文档
+  - 获取产品资料
+
+- id: news_search
+  category_type: business
+  description: 新闻资讯搜索
+  use_when: 需要获取最新新闻、行业动态
+  examples:
+  - 获取行业新闻
+  - 搜索公司动态
+  - 追踪热点事件
+
+- id: academic_search
+  category_type: business
+  description: 学术论文搜索
+  use_when: 需要查找学术论文、研究报告
+  examples:
+  - 搜索论文
+  - 查找研究数据
+
+- id: market_data
+  category_type: business
+  description: 市场数据获取
+  use_when: 需要获取市场、金融、统计数据
+  examples:
+  - 获取股票数据
+  - 查询市场报告
+
+# --- 数据处理类 ---
 - id: data_analysis
-  description: 数据处理和分析
-  use_when: 需要处理 Excel、统计分析、数据可视化
+  category_type: business
+  description: 数据分析/统计
+  use_when: 需要处理 Excel、进行统计分析
   examples:
   - 分析销售数据
   - 生成统计报表
-  - 数据清洗
+
+- id: data_visualization
+  category_type: business
+  description: 数据可视化
+  use_when: 需要生成图表、仪表盘
+  examples:
+  - 创建图表
+  - 生成报表
+
+- id: file_conversion
+  category_type: business
+  description: 文件格式转换
+  use_when: 需要转换文件格式
+  examples:
+  - PDF 转 Word
+  - 图片格式转换
+
+# --- 业务集成类 ---
+- id: crm_integration
+  category_type: business
+  description: CRM 系统集成
+  use_when: 需要与 CRM 系统交互
+  examples:
+  - 查询客户信息
+  - 更新销售线索
+
+- id: erp_integration
+  category_type: business
+  description: ERP 系统集成
+  use_when: 需要与 ERP 系统交互
+  examples:
+  - 查询库存
+  - 获取订单信息
+
+- id: notification
+  category_type: business
+  description: 消息通知
+  use_when: 需要发送通知（邮件/短信/钉钉）
+  examples:
+  - 发送邮件
+  - 推送消息
+
+# ========== 框架内部类别（FDE 无需关心）==========
+# 这些类别由框架内部使用，不暴露给配置人员
+
+- id: knowledge_base
+  category_type: internal
+  description: 个人知识库检索（框架内置）
+  use_when: 需要查找用户上传的文档
+  examples:
+  - 查找我的文档
+  - 检索个人笔记
+
+- id: app_generation
+  category_type: internal
+  description: Web 应用生成（框架内置）
+  use_when: 需要创建交互式应用
+  examples:
+  - 创建数据应用
+  - 生成 Web 界面
+
+- id: task_planning
+  category_type: internal
+  description: 任务规划（框架内部）
+  internal: true
+  use_when: 框架内部任务编排
+
 - id: file_operations
-  description: 文件读写操作
-  use_when: 需要读取或保存文件
+  category_type: internal
+  description: 文件读写操作（框架内部）
+  internal: true
+  use_when: 需要读取或保存文件（作为其他意图的支撑）
   examples:
   - 读取配置文件
   - 保存结果
   - 文件管理
+
 - id: code_execution
-  description: 执行代码和脚本
-  use_when: 需要运行Python/Bash脚本、计算逻辑
-  examples:
-  - 数据转换
-  - 自动化任务
-  - 计算处理
+  category_type: internal
+  description: 执行代码和脚本（框架内部）
+  internal: true
+
 - id: code_sandbox
-  description: 在安全沙箱中执行Python代码（支持网络、第三方包、文件持久化）
-  use_when: 需要网络访问、第三方Python包、文件持久化
-  examples:
-  - 爬取网页数据
-  - 使用pandas分析CSV
-  - 调用REST API
-- id: app_generation
-  description: 生成完整的Web应用（Streamlit/Gradio/Next.js）并返回预览URL
-  use_when: 需要创建完整的交互式应用，用户可通过浏览器访问
-  examples:
-  - 创建数据可视化应用
-  - 生成ML模型界面
-  - 创建Web应用
+  category_type: internal
+  description: 代码沙箱执行（框架内部）
+  internal: true
+
 - id: api_calling
-  description: 调用外部API服务
-  use_when: 需要与外部服务交互
-  examples:
-  - 调用渲染服务
-  - 访问第三方API
-  - 云服务集成
-- id: task_planning
-  description: 任务规划和进度管理
-  use_when: 需要制定计划、追踪进度
-  examples:
-  - 创建任务计划
-  - 更新步骤状态
-  - 管理待办事项
+  category_type: internal
+  description: API 调用（框架内部通用实现）
+  internal: true
 # ==================== V4.4 能力分层说明 ====================
 # invocation_hint 字段说明（🆕 V4.4）：
 # - SKILL_CONTAINER: Claude Skills 机制，通过 container.skills 配置

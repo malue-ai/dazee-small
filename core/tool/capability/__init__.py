@@ -34,7 +34,8 @@ from .types import (
 # Registry
 from .registry import (
     CapabilityRegistry,
-    create_capability_registry
+    create_capability_registry,
+    get_capability_registry  # 🆕 单例访问（推荐）
 )
 
 # Router
@@ -70,6 +71,7 @@ __all__ = [
     # Registry
     "CapabilityRegistry",
     "create_capability_registry",
+    "get_capability_registry",  # 🆕 单例访问
     
     # Router
     "CapabilityRouter",

@@ -286,6 +286,124 @@ def match_skills_for_query(query: str, skills: List[Dict]) -> List[Dict]:
     return matched[:3]  # 返回 top 3
 
 
+def discover_all_tools(instance_tools: List[Dict] = None) -> List[Dict[str, Any]]:
+    """
+    🆕 V4.4 统一工具发现
+    
+    发现所有可用工具，包括：
+    - 全局 Skills（从 capabilities.yaml）
+    - 实例级 MCP 工具
+    - 实例级 REST APIs
+    
+    Args:
+        instance_tools: 实例级工具列表（从 InstanceToolRegistry.get_all_tools_unified()）
+        
+    Returns:
+        统一格式的工具列表，用于 Plan 阶段工具推荐
+    """
+    all_tools = []
+    
+    # 1. 获取全局 Skills
+    skills = discover_skills()
+    for skill in skills:
+        all_tools.append({
+            "name": skill["name"],
+            "type": "SKILL" if skill.get("skill_id") else "TOOL",
+            "source": "global",
+            "description": skill.get("description", ""),
+            "tags": skill.get("tags", []),
+            "skill_id": skill.get("skill_id")
+        })
+    
+    # 2. 添加实例级工具
+    if instance_tools:
+        for tool in instance_tools:
+            # 避免重复
+            if not any(t["name"] == tool["name"] for t in all_tools):
+                all_tools.append({
+                    "name": tool["name"],
+                    "type": tool.get("type", "TOOL"),
+                    "source": tool.get("source", "instance"),
+                    "description": tool.get("description", ""),
+                    "tags": tool.get("capabilities", []),
+                    "priority": tool.get("priority", 80)
+                })
+    
+    logger.info(f"📚 统一工具发现: {len(all_tools)} 个工具（{len(skills)} 全局 + {len(instance_tools or [])} 实例）")
+    return all_tools
+
+
+def match_tools_for_query(query: str, tools: List[Dict]) -> List[Dict]:
+    """
+    🆕 V4.4 统一工具匹配
+    
+    根据用户查询匹配最相关的工具（Skills + MCP + APIs）
+    
+    Args:
+        query: 用户原始查询
+        tools: 所有可用工具（从 discover_all_tools()）
+        
+    Returns:
+        匹配的工具（按相关性排序）
+    """
+    if not tools:
+        return []
+    
+    # 扩展的关键词匹配规则
+    keyword_patterns = {
+        "ppt": ["ppt", "演示", "presentation", "幻灯片", "slides"],
+        "excel": ["excel", "表格", "xlsx", "数据分析", "spreadsheet"],
+        "word": ["word", "文档", "document", "doc", "报告"],
+        "planning": ["计划", "规划", "plan", "任务", "todo"],
+        # 🆕 新增实例工具常见关键词
+        "flowchart": ["flowchart", "流程图", "图表", "chart", "关系图", "实体"],
+        "workflow": ["workflow", "工作流", "dify", "自动化"],
+        "api": ["api", "接口", "调用", "服务"]
+    }
+    
+    query_lower = query.lower()
+    matched = []
+    
+    for tool in tools:
+        score = 0
+        tool_tags = [t.lower() for t in tool.get("tags", [])]
+        tool_name = tool.get("name", "").lower()
+        tool_desc = tool.get("description", "").lower()
+        
+        # 1. 直接标签匹配
+        for tag in tool_tags:
+            if tag in query_lower:
+                score += 10
+        
+        # 2. 关键词模式匹配
+        for pattern_name, keywords in keyword_patterns.items():
+            if any(kw in query_lower for kw in keywords):
+                if any(kw in tool_name or kw in ' '.join(tool_tags) or kw in tool_desc for kw in keywords):
+                    score += 5
+        
+        # 3. 名称/描述相关性
+        for word in query_lower.split():
+            if len(word) > 2:  # 跳过短词
+                if word in tool_desc or word in tool_name:
+                    score += 2
+        
+        # 4. 🆕 实例工具优先（MCP 工具通常更针对性）
+        if tool.get("source") == "instance":
+            score += 3
+        
+        if score > 0:
+            matched.append({**tool, "_match_score": score})
+    
+    # 按匹配度排序
+    matched.sort(key=lambda x: x.get("_match_score", 0), reverse=True)
+    
+    # 清理临时字段
+    for m in matched:
+        m.pop("_match_score", None)
+    
+    return matched[:5]  # 返回 top 5
+
+
 # ===== 计划生成 Prompt =====
 PLAN_GENERATION_PROMPT = """你是一个专业的任务规划专家。请根据用户的需求，生成一个详细且可执行的任务计划。
 
@@ -717,7 +835,9 @@ class PlanTodoTool:
                 "code_sandbox", "app_generation", "api_calling", "task_planning"
             ]
         
-        # 🆕 Skill 发现：扫描 skills/library/ 目录
+        # 🆕 V4.4 修正: Plan 阶段只发现 Skills（用于 skill_id 匹配）
+        # 不获取所有具体工具，避免上下文过长
+        # 具体工具在执行阶段根据 Plan 步骤的 capability 动态选择
         all_skills = discover_skills()
         matched_skills = match_skills_for_query(user_query, all_skills)
         

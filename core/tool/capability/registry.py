@@ -303,15 +303,27 @@ class CapabilityRegistry:
         """
         根据关键词和任务类型查找候选能力
         
+        🆕 V4.6 自动化匹配：
+        1. 如果传入 task_type，自动通过 task_type_mappings 展开为能力列表
+        2. 遍历所有 Capability，检查是否匹配展开后的能力 ID
+        3. 同时支持关键词匹配作为补充
+        
         Args:
             keywords: 关键词列表
-            task_type: 任务类型（如 ppt_generation）
+            task_type: 任务类型（如 information_query, content_generation）
             context: 上下文（用于约束检查）
             
         Returns:
             候选能力列表（未排序）
         """
         candidates = []
+        
+        # 🆕 V4.6: 自动展开 task_type → 能力列表
+        required_capabilities = set()
+        if task_type:
+            # 通过 task_type_mappings 获取需要的能力类别
+            mapped_caps = self.get_capabilities_for_task_type(task_type)
+            required_capabilities.update(mapped_caps)
         
         for cap in self.capabilities.values():
             # 过滤内部工具（除非上下文明确允许）
@@ -328,9 +340,13 @@ class CapabilityRegistry:
                 candidates.append(cap)
                 continue
             
-            # 检查任务类型匹配
-            if task_type and task_type in cap.capabilities:
-                candidates.append(cap)
+            # 🆕 V4.6: 检查能力类别匹配（自动化）
+            # cap.capabilities 是该工具声明的能力列表（如 ["data_analysis", "data_visualization"]）
+            # required_capabilities 是 task_type 展开后需要的能力
+            if required_capabilities and cap.capabilities:
+                # 如果工具的任一能力在需求列表中，则匹配
+                if any(c in required_capabilities for c in cap.capabilities):
+                    candidates.append(cap)
         
         return candidates
     
@@ -558,21 +574,57 @@ class CapabilityRegistry:
         return "\n".join(lines)
 
 
-# ==================== 便捷函数 ====================
+# ==================== 单例管理 ====================
+
+# 全局单例实例
+_registry_instance: Optional[CapabilityRegistry] = None
+
+
+def get_capability_registry(
+    config_path: str = None,
+    skills_dir: str = None,
+    force_reload: bool = False
+) -> CapabilityRegistry:
+    """
+    获取能力注册表单例（推荐使用）
+    
+    capabilities.yaml 只在首次调用或 force_reload=True 时加载。
+    后续调用直接返回缓存的实例。
+    
+    Args:
+        config_path: 配置文件路径（仅首次加载时生效）
+        skills_dir: Skills 目录路径（仅首次加载时生效）
+        force_reload: 是否强制重新加载
+        
+    Returns:
+        CapabilityRegistry 单例实例
+    """
+    global _registry_instance
+    
+    if _registry_instance is None or force_reload:
+        _registry_instance = CapabilityRegistry(
+            config_path=config_path,
+            skills_dir=skills_dir
+        )
+    
+    return _registry_instance
+
 
 def create_capability_registry(
     config_path: str = None,
     skills_dir: str = None
 ) -> CapabilityRegistry:
     """
-    创建能力注册表
+    创建能力注册表（向后兼容，实际返回单例）
+    
+    ⚠️ 建议使用 get_capability_registry() 明确获取单例
     
     Args:
         config_path: 配置文件路径
         skills_dir: Skills 目录路径
         
     Returns:
-        配置好的 CapabilityRegistry 实例
+        CapabilityRegistry 单例实例
     """
-    return CapabilityRegistry(config_path=config_path, skills_dir=skills_dir)
+    return get_capability_registry(config_path=config_path, skills_dir=skills_dir)
 

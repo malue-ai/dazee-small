@@ -1,0 +1,111 @@
+# ============================================================
+# test_agent 实例配置
+# ============================================================
+# 
+# 这是一个完整的测试实例，演示如何配置：
+# - MCP 工具（Dify 工作流）
+# - 记忆功能
+# - Agent 参数覆盖
+#
+# ============================================================
+
+# ==================== 基础信息 ====================
+
+instance:
+  name: "test_agent"
+  description: "测试智能体 - 支持搜索、数据分析和 Dify 工作流"
+  version: "1.0.0"
+
+
+# ==================== Agent 配置覆盖 ====================
+
+agent:
+  # 使用 Claude Sonnet 模型（平衡能力和成本）
+  model: "claude-sonnet-4-5-20250929"
+  
+  # 最大对话轮数
+  max_turns: 20
+  
+  # 启用计划管理器（处理复杂任务）
+  plan_manager_enabled: true
+  
+  # 允许并行工具调用（提高效率）
+  allow_parallel_tools: false
+  
+  # LLM 超参数
+  llm:
+    # 启用深度思考（复杂推理任务）
+    enable_thinking: true
+    thinking_budget: 10000
+    
+    # 最大输出 token 数
+    max_tokens: 16384
+    
+    # 启用缓存（节省 API 成本）
+    enable_caching: false
+
+
+# ==================== MCP 工具声明 ====================
+#
+# 📚 capability 说明：指定工具满足的用户意图类别
+#   - document_creation: 文档/图表创建（flowchart 属于此类）
+#   - web_search: 信息搜索
+#   - data_analysis: 数据分析
+#   - ppt_generation: 演示文稿生成
+#   - 更多选项见 _template/config.yaml
+#
+mcp_tools:
+  # Dify 工作流（通过 MCP 协议）
+  - name: text2flowchart
+    server_url: "https://api.dify.ai/mcp/server/APXev1xgCP4n5XMn/mcp"
+    server_name: "dify"
+    auth_type: "bearer"
+    auth_env: "DIFY_API_KEY"  # 环境变量名，实际密钥写在 .env 文件
+    capability: "document_creation"  # 🆕 指定能力类别：生成 flowchart 属于文档创建
+    description: "根据用户输入，分析实体，包含的属性，实体之间的关系，生成flowchart格式的富文本"
+
+
+# ==================== REST APIs 配置 ====================
+#
+# 📌 运营配置：只需填写 base_url + 认证
+# 📄 API 用法：写在 api_desc/{doc}.md 中
+# 📚 capability：指定 API 满足的用户意图类别
+#
+apis:
+  # Dify API（通过 REST API 调用，作为 MCP 的补充）
+  - name: dify_api
+    base_url: "https://api.dify.ai/v1"
+    auth:
+      type: bearer
+      header: Authorization
+      env: DIFY_API_KEY
+    doc: dify-api
+    capability: "document_creation"  # 🆕 指定能力类别
+    description: "Dify API - 工作流执行和对话"
+
+
+# ==================== 记忆配置（V4.6）====================
+
+memory:
+  # 启用 Mem0 用户记忆
+  mem0_enabled: true
+  
+  # 启用智能记忆检索（根据意图分析决定）
+  smart_retrieval: true
+  
+  # 记忆保留策略
+  retention_policy: "user"
+
+
+# ==================== 高级配置 ====================
+
+advanced:
+  # 意图分析器
+  intent_analyzer:
+    enabled: true
+    use_llm: true
+  
+  # 输出格式
+  output_formatter:
+    default_format: "markdown"
+    code_highlighting: true
