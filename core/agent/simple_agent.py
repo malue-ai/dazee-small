@@ -300,11 +300,13 @@ class SimpleAgent:
         #       EventBroadcaster, E2EPipelineTracer, Claude Skills 启用
         # 本方法从阶段 2 开始执行
         
-        # ===== 初始化 E2E Pipeline Tracer =====
+        # ===== 初始化会话上下文 =====
         session_context = await self.event_manager.storage.get_session_context(session_id)
         conversation_id = session_context.get("conversation_id", "default")
+        user_id = session_context.get("user_id")  # 用于 System Prompt 注入
         # 存储为实例变量，供工具执行时使用
         self._current_conversation_id = conversation_id
+        self._current_user_id = user_id
         
         if self.enable_tracing:
             self._tracer = create_pipeline_tracer(
@@ -474,66 +476,37 @@ class SimpleAgent:
         # =====================================================================
         # 阶段 4: System Prompt 组装 + LLM 调用准备
         # =====================================================================
-        # 4.1 选择 System Prompt (用户自定义 vs 框架默认)
-        # 4.2 注入 Workspace 路径信息
-        # 4.3 构建 LLM Messages
-        # 4.4 Todo 重写 (Context Engineering - 对抗 Lost-in-the-Middle)
+        # 4.1 选择 System Prompt（用户自定义 vs 框架默认，含沙盒上下文注入）
+        # 4.2 构建 LLM Messages
+        # 4.3 Todo 重写（Context Engineering - 对抗 Lost-in-the-Middle）
         
         # 4.1 选择 System Prompt
         if self.system_prompt:
             # 使用用户定义的 System Prompt（唯一真相来源）
-            system_prompt = self.system_prompt
-            logger.info("✅ 使用用户定义的 System Prompt")
+            # 仍需注入沙盒上下文
+            from prompts.sandbox_file_protocol import build_sandbox_context
+            sandbox_context = build_sandbox_context(
+                conversation_id=conversation_id,
+                user_id=user_id
+            )
+            system_prompt = self.system_prompt + sandbox_context
+            logger.info("✅ 使用用户定义的 System Prompt + 沙盒上下文")
         else:
-            # 使用框架默认 Prompt
-            from prompts.universal_agent_prompt import UNIVERSAL_AGENT_PROMPT
-            system_prompt = UNIVERSAL_AGENT_PROMPT
+            # 使用框架默认 Prompt（含所有动态注入）
+            from prompts.universal_agent_prompt import get_universal_agent_prompt
+            system_prompt = get_universal_agent_prompt(
+                conversation_id=conversation_id,
+                user_id=user_id
+            )
             logger.info("✅ 使用框架默认 System Prompt")
         
-        # 4.2 注入 Workspace 路径信息
-        from core.workspace_manager import get_workspace_manager
-        workspace_manager = get_workspace_manager(self.workspace_dir or "./workspace")
-        workspace_path = workspace_manager.get_workspace_root(conversation_id)
-        workspace_path.mkdir(parents=True, exist_ok=True)  # 确保目录存在
-        
-        workspace_instruction = f"""
-
-# 工作目录（CRITICAL）
-所有文件操作必须在工作目录下进行：
-- 工作目录: {workspace_path}
-- 创建文件示例: {workspace_path}/index.html
-- ❌ 禁止使用 /tmp 或其他系统目录
-"""
-        system_prompt = system_prompt + workspace_instruction
-        
-        # 🆕 追加沙盒上下文（注入 conversation_id，用于 sandbox_* 工具）
-        sandbox_context = f"""
-
-# 📌 当前会话上下文
-
-- **conversation_id**: `{conversation_id}`
-
-当你使用 sandbox_* 工具时，必须使用上面的 conversation_id。
-
-## 沙盒工具使用示例
-
-```json
-{{
-    "conversation_id": "{conversation_id}",
-    "path": "/home/user/app.py",
-    "content": "print('Hello')"
-}}
-```
-"""
-        system_prompt = system_prompt + sandbox_context
-        
-        # 4.3 构建 LLM Messages
+        # 4.2 构建 LLM Messages
         llm_messages = [
             Message(role=msg["role"], content=msg["content"])
             for msg in messages
         ]
         
-        # 4.4 Todo 重写 (Context Engineering)
+        # 4.3 Todo 重写（Context Engineering）
         # 对抗 "Lost-in-the-Middle" 现象，让任务目标始终在注意力高区
         if self.context_engineering and self._plan_cache.get("plan"):
             prepared_messages = self.context_engineering.prepare_messages_for_llm(
@@ -587,7 +560,7 @@ class SimpleAgent:
             # [Reason] LLM Extended Thinking（深度推理，选择工具和参数）
             # [Act] Tool Calls（执行选定的工具）
             # [Observe] 工具结果（ResultCompactor 自动精简）
-            # [Validate] 在下一轮 thinking 中验证结果质量
+            # [Validate] 在下一轮 thinking 中验证结果质量 
             # [Write] 更新状态（plan_todo.update_step()）
             # [Repeat] 如果 stop_reason == "tool_use" 则继续循环
             

@@ -237,16 +237,6 @@ async def chat(
     - **移动端/不稳定网络**: 推荐同步模式（轮询更可靠）
     """
     try:
-        # 验证 user_id（必填）
-        if not request.user_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=create_error_response(
-                    ErrorCode.VALIDATION_ERROR,
-                    "user_id 是必填参数"
-                )
-            )
-        
         # 记录请求信息
         logger.info(
             f"📨 收到{'流式' if request.stream else '同步'}聊天请求: "

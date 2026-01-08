@@ -142,16 +142,11 @@ class ChatRequest(BaseModel):
     """聊天请求"""
     message: str = Field(..., description="用户消息", min_length=1)
     message_id: Optional[str] = Field(None, alias="messageId", description="消息ID（可选，用于追踪单条消息）")
-    user_id: Optional[str] = Field(None, alias="userId", description="用户ID（可选，用于多租户隔离/知识库分区映射）")
+    user_id: str = Field(..., alias="userId", description="用户ID（必填，用于多租户隔离/知识库分区映射）")
     conversation_id: Optional[str] = Field(
         None,
         alias="conversationId",
         description="对话线程ID（客户端会话ID，可选）：用于区分同一用户的多个对话，并在多次请求间延续上下文"
-    )
-    session_id: Optional[str] = Field(
-        None,
-        alias="sessionId",
-        description="运行会话ID（服务端内部ID，可选）：用于标识一次后端运行/Agent实例；不要与 WebSocket 连接ID混用"
     )
     stream: bool = Field(True, description="是否使用流式输出（默认为True）")
     background_tasks: Optional[List[str]] = Field(

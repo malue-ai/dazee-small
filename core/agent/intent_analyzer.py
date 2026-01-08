@@ -202,22 +202,16 @@ class IntentAnalyzer:
         """
         from prompts.intent_recognition_prompt import get_intent_recognition_prompt
         from core.llm import Message
-        from utils.context_manager import ContextManager, TruncationStrategy
         
         try:
-            # 截断消息，保留最近的（Haiku context window: 200K，但意图分析不需要太长）
-            cm = ContextManager(model="claude-3-5-haiku-20241022")
-            truncated_messages, tokens = cm.truncate_messages(
-                messages,
-                max_tokens=50000,  # 意图分析只需要最近的上下文
-                strategy=TruncationStrategy.KEEP_RECENT,
-                min_messages=2
-            )
+            # 截断消息，保留最近的（意图分析只需要最近的上下文）
+            # 简单策略：保留最近 30 条消息或全部（如果不足 30 条）
+            max_messages_for_intent = 30
+            truncated_messages = messages[-max_messages_for_intent:] if len(messages) > max_messages_for_intent else messages
             
             if len(truncated_messages) < len(messages):
                 logger.info(
-                    f"📝 意图分析: 截断消息 {len(messages)} → {len(truncated_messages)} 条, "
-                    f"保留 {tokens:,} tokens"
+                    f"📝 意图分析: 截断消息 {len(messages)} → {len(truncated_messages)} 条"
                 )
             
             # 转换消息格式

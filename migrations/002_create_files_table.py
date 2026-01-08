@@ -24,7 +24,7 @@ from logger import get_logger
 
 logger = get_logger("migration_002")
 
-# 文件表 SQL（从 utils/database.py 复制）
+# 文件表 SQL（历史迁移脚本，表结构现由 infra/database/models/file.py 管理）
 FILES_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS files (
     id TEXT PRIMARY KEY,

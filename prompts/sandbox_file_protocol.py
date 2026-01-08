@@ -131,3 +131,55 @@ def get_sandbox_file_protocol_brief() -> str:
     """
     return SANDBOX_FILE_PROTOCOL_BRIEF
 
+
+def build_sandbox_context(conversation_id: str, user_id: str = None) -> str:
+    """
+    构建沙盒运行时上下文
+    
+    为 System Prompt 动态注入当前会话信息，让 Agent 能正确调用 sandbox_* 工具。
+    
+    Args:
+        conversation_id: 对话 ID（必填，sandbox 工具需要）
+        user_id: 用户 ID（可选）
+        
+    Returns:
+        格式化的上下文字符串
+    """
+    context = f"""
+
+# 📌 当前会话上下文（CRITICAL）
+
+**必须使用以下参数调用 sandbox_* 工具：**
+
+- **conversation_id**: `{conversation_id}`
+"""
+    
+    if user_id:
+        context += f"- **user_id**: `{user_id}`\n"
+    
+    context += """
+## 沙盒环境说明
+
+- 所有代码执行和文件操作都在 E2B 云沙盒中进行
+- 工作目录: `/home/user`
+- 项目目录: `/home/user/<project_name>/`
+- 沙盒会自动保持与当前对话关联
+
+## 调用示例
+
+```json
+{
+    "conversation_id": \"""" + conversation_id + """\",
+    "path": "/home/user/app.py",
+    "content": "print('Hello World')"
+}
+```
+
+## ⚠️ 重要提醒
+
+1. **必须使用上面的 conversation_id**，否则沙盒工具无法工作
+2. 不要使用 /tmp 或其他系统目录
+3. 所有文件路径从 `/home/user` 开始
+"""
+    return context
+

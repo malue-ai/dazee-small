@@ -17,7 +17,7 @@ services:
     container_name: zenflux-backend
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8080:8000"  # 本地 8080 映射到容器内部 8000（由 Nginx 代理）
+      - "127.0.0.1:8010:8000"  # 本地 8010，由 Nginx 代理
     environment:
       # 从 .env 文件加载环境变量
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}

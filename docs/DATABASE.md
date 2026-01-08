@@ -1,399 +1,565 @@
 # 数据库使用文档
 
+> ⚠️ **版本说明**: 本文档已更新为新架构（基于 SQLAlchemy ORM）  
+> 旧版本使用 `utils/database.py` (已废弃) → 新版本使用 `infra/database/`
+
+---
+
 ## 概述
 
-项目使用 **SQLite** 作为数据库，通过 `aiosqlite` 提供异步支持。
+项目使用 **SQLAlchemy ORM** 作为数据库层，支持多种数据库：
+- **SQLite**: 开发环境默认
+- **PostgreSQL**: 生产环境推荐
+- **MySQL**: 生产环境可选
 
-数据库包含 3 个核心表：
-- **users**: 用户表
-- **conversations**: 对话表
-- **messages**: 消息表
+### 核心特性
+✅ 异步数据库操作（`asyncio` + `SQLAlchemy 2.0`）  
+✅ 自动表结构管理（ORM Models）  
+✅ CRUD 操作封装（Repository 模式）  
+✅ 支持数据库迁移  
+
+---
 
 ## 数据库结构
 
-### 1. users 表
+### 核心表
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | INTEGER | 主键，自增 |
-| username | TEXT | 用户名（唯一） |
-| email | TEXT | 邮箱（可选） |
-| created_at | TIMESTAMP | 创建时间 |
-| metadata | TEXT | 元数据（JSON 字符串） |
+#### 1. **users** - 用户表
+```python
+# infra/database/models/user.py
+class User(Base):
+    id: str                    # 用户ID (主键)
+    username: str              # 用户名
+    email: str                 # 邮箱
+    avatar_url: str            # 头像URL
+    created_at: datetime       # 创建时间
+    updated_at: datetime       # 更新时间
+    metadata: dict             # 元数据 (JSON)
+```
 
-### 2. conversations 表
+#### 2. **conversations** - 对话表
+```python
+# infra/database/models/conversation.py
+class Conversation(Base):
+    id: str                    # 对话ID (主键)
+    user_id: str               # 用户ID (外键)
+    title: str                 # 对话标题
+    created_at: datetime       # 创建时间
+    updated_at: datetime       # 更新时间
+    metadata: dict             # 元数据 (JSON)
+```
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | INTEGER | 主键，自增 |
-| user_id | INTEGER | 用户ID（外键） |
-| conversation_id | TEXT | 对话唯一标识（唯一） |
-| title | TEXT | 对话标题 |
-| created_at | TIMESTAMP | 创建时间 |
-| updated_at | TIMESTAMP | 更新时间 |
-| metadata | TEXT | 元数据（JSON 字符串） |
+#### 3. **messages** - 消息表
+```python
+# infra/database/models/message.py
+class Message(Base):
+    id: str                    # 消息ID (主键)
+    conversation_id: str       # 对话ID (外键)
+    role: str                  # 角色: user/assistant/system
+    content: str               # 消息内容
+    status: str                # 状态: pending/completed/failed
+    score: float               # 评分
+    created_at: datetime       # 创建时间
+    metadata: dict             # 元数据 (JSON)
+```
 
-### 3. messages 表
+#### 4. **files** - 文件表
+```python
+# infra/database/models/file.py
+class File(Base):
+    id: str                    # 文件ID (主键)
+    user_id: str               # 用户ID (外键)
+    filename: str              # 文件名
+    file_size: int             # 文件大小
+    content_type: str          # MIME类型
+    category: str              # 分类: knowledge/avatar/attachment/temp
+    status: str                # 状态: uploading/uploaded/ready
+    storage_type: str          # 存储类型: s3/local
+    storage_path: str          # 存储路径
+    storage_url: str           # 访问URL
+    created_at: datetime       # 创建时间
+    metadata: dict             # 元数据
+```
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | INTEGER | 主键，自增 |
-| conversation_id | TEXT | 所属对话ID（外键） |
-| role | TEXT | 角色: user/assistant/system |
-| content | TEXT | 消息内容 |
-| created_at | TIMESTAMP | 创建时间 |
-| metadata | TEXT | 元数据（JSON 字符串） |
+#### 5. **knowledge_bases** - 知识库表
+```python
+# infra/database/models/knowledge.py
+class KnowledgeBase(Base):
+    id: str                    # 知识库ID (主键)
+    name: str                  # 知识库名称
+    description: str           # 描述
+    owner_id: str              # 所有者ID
+    visibility: str            # 可见性: private/public/unlisted
+    document_count: int        # 文档数量
+    ragie_partition_id: str    # Ragie分区ID (用于RAG)
+    created_at: datetime       # 创建时间
+```
+
+#### 6. **sandboxes** - 沙箱表
+```python
+# infra/database/models/sandbox.py
+class Sandbox(Base):
+    id: str                    # 沙箱ID (主键)
+    e2b_sandbox_id: str        # E2B沙箱ID
+    session_id: str            # 会话ID
+    user_id: str               # 用户ID
+    status: str                # 状态: creating/ready/running/stopped
+    created_at: datetime       # 创建时间
+    metadata: dict             # 元数据
+```
+
+---
 
 ## 快速开始
 
-### 1. 安装依赖
+### 1. 环境配置
 
 ```bash
-pip install -r requirements.txt
+# .env 文件
+DATABASE_URL=sqlite+aiosqlite:///./workspace/database/zenflux.db
+
+# PostgreSQL (生产环境)
+# DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/zenflux
+
+# MySQL (生产环境)
+# DATABASE_URL=mysql+aiomysql://user:pass@localhost:3306/zenflux
 ```
 
 ### 2. 初始化数据库
 
-数据库会在应用启动时自动初始化（见 `main.py` 的 `lifespan` 函数）。
-
-数据库文件位置：`workspace/database/zenflux.db`
-
-### 3. 使用示例
-
-运行示例代码：
-
-```bash
-python examples/database_example.py
-```
-
-## API 使用
-
-### UserService
+数据库会在应用启动时自动初始化：
 
 ```python
-from utils.db_service import UserService
+# main.py
+from infra.database import init_database
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 启动时初始化数据库
+    await init_database()
+    yield
+```
+
+### 3. 数据库文件位置
+
+```
+workspace/
+└── database/
+    └── zenflux.db       # SQLite 数据库文件
+```
+
+---
+
+## 使用示例
+
+### 方式 1: 使用 CRUD 服务（推荐）
+
+```python
+from infra.database import get_async_session
+from infra.database.crud import UserCRUD, ConversationCRUD, MessageCRUD
+
+async def example():
+    async with get_async_session() as session:
+        # 创建用户
+        user = await UserCRUD.create(
+            session,
+            id="user_123",
+            username="alice",
+            email="alice@example.com"
+        )
+        
+        # 创建对话
+        conversation = await ConversationCRUD.create(
+            session,
+            id="conv_456",
+            user_id=user.id,
+            title="关于AI的讨论"
+        )
+        
+        # 创建消息
+        message = await MessageCRUD.create(
+            session,
+            id="msg_789",
+            conversation_id=conversation.id,
+            role="user",
+            content="你好！"
+        )
+        
+        # 查询对话历史
+        messages = await MessageCRUD.get_conversation_messages(
+            session,
+            conversation_id=conversation.id
+        )
+        
+        # 更新对话标题
+        await ConversationCRUD.update_title(
+            session,
+            conversation_id=conversation.id,
+            title="新标题"
+        )
+```
+
+### 方式 2: FastAPI 依赖注入
+
+```python
+from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+from infra.database import get_async_session
+from infra.database.crud import UserCRUD
+
+router = APIRouter()
+
+@router.get("/users/{user_id}")
+async def get_user(
+    user_id: str,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """获取用户信息"""
+    user = await UserCRUD.get_by_id(session, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    return user
+
+@router.post("/users")
+async def create_user(
+    username: str,
+    email: str,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """创建用户"""
+    user = await UserCRUD.create(
+        session,
+        id=f"user_{uuid4()}",
+        username=username,
+        email=email
+    )
+    return user
+```
+
+---
+
+## CRUD 操作详解
+
+### UserCRUD
+
+```python
+from infra.database.crud import UserCRUD
 
 # 创建用户
-user = await UserService.create_user(
-    username="alice",
-    email="alice@example.com",
-    metadata={"plan": "pro", "source": "web"}
-)
+user = await UserCRUD.create(session, id="user_123", username="alice")
 
-# 根据ID获取用户
-user = await UserService.get_user_by_id(1)
+# 根据ID获取
+user = await UserCRUD.get_by_id(session, "user_123")
 
-# 根据用户名获取用户
-user = await UserService.get_user_by_username("alice")
+# 根据用户名获取
+user = await UserCRUD.get_by_username(session, "alice")
+
+# 更新用户
+await UserCRUD.update(session, "user_123", email="new@example.com")
+
+# 删除用户
+await UserCRUD.delete(session, "user_123")
 ```
 
-### ConversationService
+### ConversationCRUD
 
 ```python
-from utils.db_service import ConversationService
+from infra.database.crud import ConversationCRUD
 
 # 创建对话
-conversation = await ConversationService.create_conversation(
-    user_id=1,
-    conversation_id="conv_20241226_abc123",
-    title="关于AI的讨论",
-    metadata={"topic": "AI", "language": "zh"}
+conv = await ConversationCRUD.create(
+    session,
+    id="conv_123",
+    user_id="user_123",
+    title="新对话"
 )
 
-# 获取对话
-conversation = await ConversationService.get_conversation("conv_20241226_abc123")
-
 # 获取用户的所有对话
-conversations = await ConversationService.get_user_conversations(
-    user_id=1,
-    limit=50
+conversations = await ConversationCRUD.get_user_conversations(
+    session,
+    user_id="user_123"
 )
 
 # 更新对话标题
-await ConversationService.update_conversation_title(
-    conversation_id="conv_20241226_abc123",
-    title="深入探讨人工智能"
+await ConversationCRUD.update_title(
+    session,
+    conversation_id="conv_123",
+    title="更新后的标题"
 )
 
-# 更新对话时间戳（有新消息时）
-await ConversationService.update_conversation_timestamp("conv_20241226_abc123")
+# 删除对话
+await ConversationCRUD.delete(session, "conv_123")
 ```
 
-### MessageService
+### MessageCRUD
 
 ```python
-from utils.db_service import MessageService
+from infra.database.crud import MessageCRUD
 
 # 创建消息
-message = await MessageService.create_message(
-    conversation_id="conv_20241226_abc123",
+message = await MessageCRUD.create(
+    session,
+    id="msg_123",
+    conversation_id="conv_123",
     role="user",
-    content="什么是人工智能？",
-    metadata={"ip": "127.0.0.1", "device": "web"}
+    content="你好！"
 )
 
 # 获取对话的所有消息
-messages = await MessageService.get_conversation_messages(
-    conversation_id="conv_20241226_abc123"
+messages = await MessageCRUD.get_conversation_messages(
+    session,
+    conversation_id="conv_123"
 )
 
-# 获取最近的N条消息
-recent_messages = await MessageService.get_recent_messages(
-    conversation_id="conv_20241226_abc123",
-    limit=10
+# 更新消息状态
+await MessageCRUD.update_status(
+    session,
+    message_id="msg_123",
+    status="completed"
 )
+
+# 删除消息
+await MessageCRUD.delete(session, "msg_123")
 ```
 
-## 数据模型
-
-### User 模型
+### FileCRUD
 
 ```python
-from models.database import User
+from infra.database.crud import FileCRUD
 
-user = User(
-    id=1,
-    username="alice",
-    email="alice@example.com",
-    created_at=datetime.now(),
-    metadata={"plan": "pro"}
+# 创建文件记录
+file = await FileCRUD.create(
+    session,
+    id="file_123",
+    user_id="user_123",
+    filename="document.pdf",
+    file_size=1024000,
+    content_type="application/pdf",
+    storage_path="s3://bucket/file_123.pdf"
+)
+
+# 获取用户的所有文件
+files = await FileCRUD.get_user_files(
+    session,
+    user_id="user_123",
+    category="knowledge"
+)
+
+# 更新文件状态
+await FileCRUD.update_status(
+    session,
+    file_id="file_123",
+    status="ready"
 )
 ```
 
-### Conversation 模型
+### KnowledgeCRUD
 
 ```python
-from models.database import Conversation
+from infra.database.crud import KnowledgeCRUD
 
-conversation = Conversation(
-    id=1,
-    user_id=1,
-    conversation_id="conv_20241226_abc123",
-    title="关于AI的讨论",
-    created_at=datetime.now(),
-    updated_at=datetime.now(),
-    metadata={"topic": "AI"}
+# 创建知识库
+kb = await KnowledgeCRUD.create_knowledge_base(
+    session,
+    id="kb_123",
+    name="技术文档",
+    owner_id="user_123",
+    description="技术相关的文档集合"
+)
+
+# 添加文档到知识库
+doc = await KnowledgeCRUD.create_document(
+    session,
+    id="doc_123",
+    kb_id="kb_123",
+    file_id="file_123",
+    name="API文档",
+    original_filename="api.pdf"
+)
+
+# 获取知识库的所有文档
+documents = await KnowledgeCRUD.get_kb_documents(
+    session,
+    kb_id="kb_123"
 )
 ```
 
-### Message 模型
+---
 
-```python
-from models.database import Message
+## 架构说明
 
-message = Message(
-    id=1,
-    conversation_id="conv_20241226_abc123",
-    role="user",
-    content="什么是人工智能？",
-    created_at=datetime.now(),
-    metadata={"ip": "127.0.0.1"}
-)
+### 目录结构
+
 ```
+infra/database/
+├── __init__.py              # 导出接口
+├── base.py                  # ORM Base类
+├── engine.py                # 数据库引擎和会话管理
+├── models/                  # ORM Models
+│   ├── user.py
+│   ├── conversation.py
+│   ├── message.py
+│   ├── file.py
+│   ├── knowledge.py
+│   └── sandbox.py
+└── crud/                    # CRUD 操作
+    ├── base.py              # Base CRUD
+    ├── user.py
+    ├── conversation.py
+    ├── message.py
+    ├── file.py
+    ├── knowledge.py
+    └── sandbox.py
+```
+
+### 设计模式
+
+1. **Repository 模式**: CRUD 层封装所有数据库操作
+2. **依赖注入**: FastAPI 路由使用 `Depends(get_async_session)`
+3. **异步优先**: 所有操作都是异步的
+4. **类型安全**: 使用 Pydantic 和 SQLAlchemy 类型提示
+
+---
+
+## 数据库迁移
+
+迁移脚本位于 `migrations/` 目录：
+
+```bash
+migrations/
+├── 001_update_messages_schema.py
+├── 002_create_files_table.py
+├── 003_create_knowledge_tables.py
+├── 004_add_missing_file_columns.py
+├── 005_add_mime_type_column.py
+└── 006_create_sandboxes_table.py
+```
+
+运行迁移：
+
+```bash
+python migrations/001_update_messages_schema.py
+```
+
+---
 
 ## 最佳实践
 
-### 1. 元数据使用
-
-元数据字段可以存储任意 JSON 数据：
+### ✅ 应该做的
 
 ```python
-# 用户元数据
-user_metadata = {
-    "plan": "pro",
-    "source": "web",
-    "preferences": {
-        "language": "zh",
-        "theme": "dark"
-    }
-}
+# 1. 使用异步上下文管理器
+async with get_async_session() as session:
+    user = await UserCRUD.get_by_id(session, user_id)
 
-# 对话元数据
-conversation_metadata = {
-    "topic": "AI",
-    "tags": ["技术", "讨论"],
-    "language": "zh"
-}
+# 2. 使用 CRUD 层（不直接操作 ORM）
+user = await UserCRUD.create(session, ...)  # ✅
+user = User(...)  # ❌ 不推荐
 
-# 消息元数据
-message_metadata = {
-    "ip": "127.0.0.1",
-    "device": "web",
-    "model": "claude-sonnet-4",
-    "tokens": 150
-}
+# 3. 使用事务
+async with session.begin():
+    await UserCRUD.create(...)
+    await ConversationCRUD.create(...)
+
+# 4. 添加索引优化查询
+# models 中已经定义了常用索引
 ```
 
-### 2. 错误处理
+### ❌ 不应该做的
 
 ```python
-from utils.db_service import UserService
+# 1. 不要在循环中执行单条查询
+for user_id in user_ids:
+    user = await UserCRUD.get_by_id(session, user_id)  # ❌ N+1 问题
 
-try:
-    user = await UserService.create_user(
-        username="alice",
-        email="alice@example.com"
-    )
-except Exception as e:
-    logger.error(f"创建用户失败: {str(e)}", exc_info=True)
+# 2. 不要忘记关闭 session
+session = AsyncSessionLocal()
+# ... 操作 ...
+# ❌ 忘记 await session.close()
+
+# 3. 不要在同步代码中调用异步方法
+user = UserCRUD.get_by_id(session, user_id)  # ❌ 缺少 await
+
+# 4. 不要硬编码 SQL
+await session.execute("SELECT * FROM users")  # ❌ 使用 ORM
 ```
 
-### 3. 事务处理
-
-对于需要原子性的操作，使用数据库连接的事务：
-
-```python
-from utils.database import db_manager
-
-async with await db_manager.get_connection() as db:
-    try:
-        # 开始事务
-        await db.execute("BEGIN")
-        
-        # 执行多个操作
-        await db.execute("INSERT INTO users ...")
-        await db.execute("INSERT INTO conversations ...")
-        
-        # 提交事务
-        await db.commit()
-    except Exception as e:
-        # 回滚事务
-        await db.rollback()
-        raise
-```
-
-### 4. 批量操作
-
-```python
-# 批量插入消息
-async def batch_insert_messages(messages: List[dict]):
-    async with await db_manager.get_connection() as db:
-        await db.executemany(
-            """
-            INSERT INTO messages (conversation_id, role, content, metadata)
-            VALUES (?, ?, ?, ?)
-            """,
-            [
-                (msg["conversation_id"], msg["role"], msg["content"], 
-                 serialize_metadata(msg.get("metadata")))
-                for msg in messages
-            ]
-        )
-        await db.commit()
-```
-
-## 数据库维护
-
-### 查看数据库
-
-使用 SQLite 命令行工具：
-
-```bash
-sqlite3 workspace/database/zenflux.db
-
-# 查看所有表
-.tables
-
-# 查看表结构
-.schema users
-
-# 查询数据
-SELECT * FROM users;
-SELECT * FROM conversations WHERE user_id = 1;
-SELECT * FROM messages WHERE conversation_id = 'conv_123' ORDER BY created_at;
-```
-
-### 备份数据库
-
-```bash
-# 备份
-cp workspace/database/zenflux.db workspace/database/zenflux_backup.db
-
-# 或使用 SQLite 命令
-sqlite3 workspace/database/zenflux.db ".backup workspace/database/backup.db"
-```
-
-### 清理数据
-
-```python
-# 删除旧对话（保留最近30天）
-async def cleanup_old_conversations(days: int = 30):
-    async with await db_manager.get_connection() as db:
-        await db.execute(
-            """
-            DELETE FROM messages 
-            WHERE conversation_id IN (
-                SELECT conversation_id FROM conversations 
-                WHERE updated_at < datetime('now', '-' || ? || ' days')
-            )
-            """,
-            (days,)
-        )
-        await db.execute(
-            """
-            DELETE FROM conversations 
-            WHERE updated_at < datetime('now', '-' || ? || ' days')
-            """,
-            (days,)
-        )
-        await db.commit()
-```
+---
 
 ## 性能优化
 
-### 索引
-
-数据库已创建以下索引：
-
-- `idx_conversations_user_id`: 加速按用户查询对话
-- `idx_messages_conversation_id`: 加速按对话查询消息
-- `idx_messages_created_at`: 加速按时间排序
-
-### 查询优化
+### 1. 批量操作
 
 ```python
-# ✅ 好的做法：限制返回数量
-messages = await MessageService.get_recent_messages(
-    conversation_id="conv_123",
-    limit=50
-)
-
-# ❌ 避免：查询所有消息（对话可能很长）
-all_messages = await MessageService.get_conversation_messages("conv_123")
+# 批量插入
+users = [
+    User(id=f"user_{i}", username=f"user{i}")
+    for i in range(100)
+]
+session.add_all(users)
+await session.commit()
 ```
 
-## 迁移到生产环境
+### 2. 预加载关联数据
 
-对于生产环境，建议：
+```python
+from sqlalchemy.orm import selectinload
 
-1. **使用 PostgreSQL/MySQL**: SQLite 适合开发和小规模部署
-2. **添加连接池**: 使用 `asyncpg` (PostgreSQL) 或 `aiomysql` (MySQL)
-3. **使用迁移工具**: 如 Alembic 管理数据库版本
-4. **添加更多索引**: 根据查询模式优化
-5. **定期备份**: 设置自动备份策略
+# 一次查询加载对话和消息
+stmt = select(Conversation).options(
+    selectinload(Conversation.messages)
+).where(Conversation.user_id == user_id)
+
+result = await session.execute(stmt)
+conversations = result.scalars().all()
+```
+
+### 3. 分页查询
+
+```python
+# 获取第2页，每页20条
+messages = await MessageCRUD.get_conversation_messages(
+    session,
+    conversation_id=conv_id,
+    limit=20,
+    offset=20
+)
+```
+
+---
 
 ## 故障排查
 
-### 数据库锁定
-
-如果遇到 "database is locked" 错误：
+### 问题 1: 数据库锁定
 
 ```python
-# 增加超时时间
-async with aiosqlite.connect(db_path, timeout=30.0) as db:
-    ...
+# SQLite 并发写入可能导致锁定
+# 解决方案：使用 PostgreSQL（生产环境）
+DATABASE_URL=postgresql+asyncpg://...
 ```
 
-### 查看日志
+### 问题 2: 连接池耗尽
 
 ```python
-import logging
-logging.getLogger("aiosqlite").setLevel(logging.DEBUG)
+# 检查是否正确关闭 session
+async with get_async_session() as session:
+    # 操作完成后自动关闭
+    pass
 ```
 
-## 参考资料
+### 问题 3: 迁移冲突
 
-- [aiosqlite 文档](https://aiosqlite.omnilib.dev/)
-- [SQLite 文档](https://www.sqlite.org/docs.html)
-- [Pydantic 文档](https://docs.pydantic.dev/)
+```bash
+# 删除旧数据库重新初始化（开发环境）
+rm workspace/database/zenflux.db
+python main.py  # 自动创建表
+```
 
+---
+
+## 相关文档
+
+- 📖 [数据存储架构](./08-DATA_STORAGE_ARCHITECTURE.md)
+- 📖 [SQLAlchemy 官方文档](https://docs.sqlalchemy.org/)
+- 📖 [aiosqlite 文档](https://aiosqlite.omnilib.dev/)
+- 📖 [asyncpg 文档](https://magicstack.github.io/asyncpg/)

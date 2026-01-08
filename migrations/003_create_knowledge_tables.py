@@ -26,7 +26,7 @@ from logger import get_logger
 
 logger = get_logger("migration_003")
 
-# 知识库相关表 SQL（从 utils/database.py 复制）
+# 知识库相关表 SQL（历史迁移脚本，表结构现由 infra/database/models/knowledge.py 管理）
 KNOWLEDGE_TABLES_SQL = """
 -- 知识库表
 CREATE TABLE IF NOT EXISTS knowledge_bases (

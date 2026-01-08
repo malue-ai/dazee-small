@@ -1431,7 +1431,9 @@ def get_universal_agent_prompt(
     include_skills: bool = True,
     skills_dir: Optional[str] = None,
     include_e2b: bool = True,
-    session_summary: Optional[str] = None  # 🆕 V4.3: 动态注入进度恢复协议
+    session_summary: Optional[str] = None,  # 🆕 V4.3: 动态注入进度恢复协议
+    conversation_id: Optional[str] = None,  # 🆕 动态注入会话上下文
+    user_id: Optional[str] = None           # 🆕 动态注入用户 ID
 ) -> str:
     """
     获取通用智能体框架系统提示词
@@ -1441,6 +1443,8 @@ def get_universal_agent_prompt(
         skills_dir: Skills目录路径
         include_e2b: 是否包含E2B协议（默认True）
         session_summary: 🆕 Session 进度恢复摘要（框架自动注入，用户透明）
+        conversation_id: 🆕 会话 ID（用于沙盒工具调用）
+        user_id: 🆕 用户 ID（可选）
         
     Returns:
         完整的系统提示词
@@ -1450,6 +1454,10 @@ def get_universal_agent_prompt(
     - 用于跨 Session 恢复任务进度
     - 对用户完全透明，框架自动处理
     
+    🆕 V4.4 新增：
+    - conversation_id: 动态注入会话上下文，让 Agent 正确调用 sandbox_* 工具
+    - user_id: 用户标识
+    
     示例：
         # 首次 Session（无进度）
         prompt = get_universal_agent_prompt()
@@ -1457,6 +1465,12 @@ def get_universal_agent_prompt(
         # 后续 Session（自动恢复进度）
         summary = plan_memory.get_session_summary(task_id)
         prompt = get_universal_agent_prompt(session_summary=summary)
+        
+        # 带会话上下文
+        prompt = get_universal_agent_prompt(
+            conversation_id="conv_xxx",
+            user_id="user_001"
+        )
     """
     prompt = UNIVERSAL_AGENT_PROMPT
     
@@ -1473,6 +1487,15 @@ def get_universal_agent_prompt(
         except Exception as e:
             # 如果加载失败，不影响主流程
             pass
+    
+    # 🆕 V4.4: 注入沙盒运行时上下文（conversation_id 等）
+    if conversation_id:
+        from prompts.sandbox_file_protocol import build_sandbox_context
+        sandbox_context = build_sandbox_context(
+            conversation_id=conversation_id,
+            user_id=user_id
+        )
+        prompt += sandbox_context
     
     # 添加 Skills vs Tools 决策规则 + Skills Metadata
     if include_skills:

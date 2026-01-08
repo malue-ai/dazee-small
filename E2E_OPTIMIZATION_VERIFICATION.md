@@ -468,7 +468,6 @@ if self.warnings:
 
 | 测试 | 通过 | 备注 |
 |------|------|------|
-| test_database.py | ✅ | 数据库 CRUD |
 | test_knowledge_service.py | ✅ | 知识库服务 |
 | test_message_utils.py | ✅ | 消息工具 |
 
