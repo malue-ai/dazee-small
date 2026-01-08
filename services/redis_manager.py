@@ -785,18 +785,32 @@ _default_redis_manager: Optional[RedisSessionManager] = None
 
 
 def get_redis_manager(
-    redis_host: str = "localhost",
-    redis_port: int = 6379,
+    redis_host: Optional[str] = None,
+    redis_port: Optional[int] = None,
     redis_db: int = 0,
     redis_password: Optional[str] = None
 ) -> RedisSessionManager:
-    """获取默认 Redis 管理器单例"""
+    """
+    获取默认 Redis 管理器单例
+    
+    优先从环境变量读取配置：
+    - REDIS_HOST: Redis 主机地址
+    - REDIS_PORT: Redis 端口
+    - REDIS_PASSWORD: Redis 密码（可选）
+    """
+    import os
+    
     global _default_redis_manager
     if _default_redis_manager is None:
+        # 从环境变量读取配置，参数覆盖环境变量
+        host = redis_host or os.getenv("REDIS_HOST", "localhost")
+        port = redis_port or int(os.getenv("REDIS_PORT", "6379"))
+        password = redis_password or os.getenv("REDIS_PASSWORD")
+        
         _default_redis_manager = RedisSessionManager(
-            redis_host=redis_host,
-            redis_port=redis_port,
+            redis_host=host,
+            redis_port=port,
             redis_db=redis_db,
-            redis_password=redis_password
+            redis_password=password
         )
     return _default_redis_manager
