@@ -116,7 +116,8 @@ class IntentAnalyzer:
             f"type={result.task_type.value}, "
             f"complexity={result.complexity.value}, "
             f"needs_plan={result.needs_plan}, "
-            f"needs_persistence={result.needs_persistence}"
+            f"needs_persistence={result.needs_persistence}, "
+            f"skip_memory={result.skip_memory_retrieval}"  # 🆕 V4.6
         )
         
         return result
@@ -254,6 +255,7 @@ class IntentAnalyzer:
         task_type = TaskType.OTHER
         complexity = Complexity.MEDIUM
         needs_plan = True
+        skip_memory_retrieval = False  # 🆕 V4.6: 默认不跳过记忆检索
         
         # 使用 JSON 提取器解析 LLM 响应
         parsed = extract_json(content)
@@ -275,6 +277,9 @@ class IntentAnalyzer:
             
             # 解析 needs_plan
             needs_plan = parsed.get("needs_plan", True)
+            
+            # 🆕 V4.6: 解析 skip_memory_retrieval
+            skip_memory_retrieval = parsed.get("skip_memory_retrieval", False)
         else:
             logger.warning(f"无法从 LLM 响应中提取 JSON: {content[:100]}...")
         
@@ -285,6 +290,7 @@ class IntentAnalyzer:
             task_type=task_type,
             complexity=complexity,
             needs_plan=needs_plan,
+            skip_memory_retrieval=skip_memory_retrieval,  # 🆕 V4.6
             keywords=keywords,
             raw_response=content
         )

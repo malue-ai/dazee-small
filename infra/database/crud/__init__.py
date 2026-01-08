@@ -28,6 +28,7 @@ from infra.database.crud.conversation import (
     get_conversation_summary,
     delete_conversation,
     count_messages_in_conversation,
+    get_conversations_since,  # 🆕 Mem0 增量更新
 )
 from infra.database.crud.message import (
     generate_message_id,
@@ -35,6 +36,7 @@ from infra.database.crud.message import (
     get_message,
     update_message,
     list_messages,
+    get_messages_by_conversation,  # 🆕 Mem0 增量更新
 )
 from infra.database.crud.file import (
     generate_file_id,
@@ -95,6 +97,7 @@ __all__ = [
     "get_conversation_summary",
     "delete_conversation",
     "count_messages_in_conversation",
+    "get_conversations_since",  # 🆕 Mem0 增量更新
     
     # Message
     "generate_message_id",
@@ -102,6 +105,7 @@ __all__ = [
     "get_message",
     "update_message",
     "list_messages",
+    "get_messages_by_conversation",  # 🆕 Mem0 增量更新
     
     # File
     "generate_file_id",

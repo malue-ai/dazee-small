@@ -99,3 +99,7 @@ async def list_messages(
     result = await session.execute(query)
     return list(result.scalars().all())
 
+
+# 别名：用于 Mem0 更新服务
+get_messages_by_conversation = list_messages
+

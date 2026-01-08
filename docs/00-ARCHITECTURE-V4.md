@@ -1,9 +1,9 @@
 # ZenFlux Agent V4 架构总览
 
-> 📅 **最后更新**: 2026-01-07  
-> 🎯 **当前版本**: V4.4 - Skills + Tools 整合 + InvocationSelector 激活  
+> 📅 **最后更新**: 2026-01-08  
+> 🎯 **当前版本**: V4.6 - 智能记忆检索决策（Intent-Driven Memory Retrieval）  
 > 🔗 **前版本**: [V3.7 架构](./ARCHITECTURE_V3.7_E2B.md)
-> ✅ **优化状态**: Schema 驱动 + Context Reduction + **工具分层** + Code-First 编排 + E2E 追踪 + Re-Plan + 统一能力注册 + **长时运行支持** + **Skills/Tools 分层调用**
+> ✅ **优化状态**: Schema 驱动 + Context Reduction + **工具分层** + Code-First 编排 + E2E 追踪 + Re-Plan + 统一能力注册 + **长时运行支持** + **Skills/Tools 分层调用** + **Mem0用户画像** + **🆕 智能记忆检索**
 > 📊 **文档特点**: 参考 V3.7 风格的详细架构图 + 完整 7 阶段用户流程管道图
 
 ---
@@ -15,12 +15,109 @@
 - [整体架构](#整体架构)
 - [模块详解](#模块详解)
   - [PlanMemory 详解（V4.3）](#41-planmemory-详解v43)
+  - [Mem0 用户画像详解（V4.5）](#42-mem0-用户画像详解v45)
+  - [🆕 智能记忆检索决策（V4.6）](#43-智能记忆检索决策v46)
 - [数据流](#数据流)
 - [文件结构](#文件结构)
 
 ---
 
 ## 🚀 版本演进
+
+### V4.5 → V4.6 核心变化（🆕 智能记忆检索决策）
+
+| 维度 | V4.5 | V4.6 | 改进 |
+|------|------|------|------|
+| **记忆检索** | 每次请求都检索 | ✅ 按需检索 | 基于意图分析决定是否检索Mem0 |
+| **决策方式** | 硬编码规则 | ✅ Few-shot推理 | LLM自主推理，可扩展无需改代码 |
+| **性能优化** | 无 | ✅ 跳过冗余检索 | 通用查询（天气/百科）不检索，节省~200ms |
+| **Token成本** | 固定开销 | ✅ 动态优化 | 非个性化场景减少Embedding调用 |
+
+**核心理念**（参考 [Mem0 论文](https://arxiv.org/abs/2504.19413) 的 Selective Memory）：
+- **按需检索**：不是每次请求都需要用户记忆。"今天天气怎么样？"这类通用查询不需要个性化
+- **LLM自主推理**：通过 Few-shot 示例引导 Haiku 在意图识别阶段判断 `skip_memory_retrieval`
+- **可扩展性**：新增场景只需添加 Few-shot 示例，无需修改代码逻辑
+- **默认安全**：不确定时默认检索（`skip_memory_retrieval=false`），宁可多检索也不漏掉个性化
+
+**实现细节**：
+```
+Phase 2: Intent Analysis (Haiku)
+├── task_type, complexity, needs_plan  # 原有字段
+└── skip_memory_retrieval              # 🆕 V4.6 新增
+    ├── true: 跳过Mem0检索（天气/百科/汇率等通用查询）
+    └── false: 执行Mem0检索（PPT生成/代码编写/推荐等个性化场景）
+
+Phase 4: System Prompt Assembly
+├── if skip_memory_retrieval == true:
+│   └── 直接使用基础Prompt，不调用Mem0
+└── else:
+    └── _fetch_user_profile() → 注入用户画像
+```
+
+**Few-shot 示例**（位于 `prompts/intent_recognition_prompt.py`）：
+
+| 查询 | skip_memory_retrieval | 理由 |
+|------|----------------------|------|
+| "今天上海天气怎么样？" | true | 实时信息查询，与用户历史无关 |
+| "帮我生成一个产品介绍PPT" | false | 用户可能有PPT风格偏好 |
+| "Python的列表推导式怎么用？" | true | 通用技术问题，无需个性化 |
+| "帮我推荐一家餐厅" | false | 需要了解用户口味偏好 |
+| "把这段话翻译成英文" | true | 简单翻译任务，无需个性化 |
+| "帮我写一段Python代码" | false | 用户可能有编码风格偏好 |
+
+**🆕 Mem0 增量更新整合**（位于 `utils/background_tasks.py`）：
+
+V4.6 将 Mem0 异步更新功能整合到 `BackgroundTaskService`，遵循"不重复造轮子"原则：
+
+| 维度 | Before (V4.5) | After (V4.6) |
+|------|---------------|--------------|
+| **服务架构** | 独立 `mem0_update_service.py` | 整合到 `BackgroundTaskService` |
+| **懒加载** | 独立实现 | 复用 `_get_mem0_pool()` |
+| **静默失败** | 独立实现 | 复用统一机制 |
+| **单例模式** | 独立 `get_mem0_update_service()` | 复用 `get_background_task_service()` |
+| **SSE推送** | 独立实现 | 复用 `EventManager` |
+| **并发控制** | 独立实现 | 统一 `asyncio.Semaphore` |
+
+```python
+# 新增数据类
+@dataclass
+class Mem0UpdateResult:
+    user_id: str
+    success: bool
+    memories_added: int = 0
+    conversations_processed: int = 0
+
+@dataclass
+class Mem0BatchUpdateResult:
+    total_users: int
+    successful: int
+    failed: int
+    total_memories_added: int = 0
+    results: List[Mem0UpdateResult]
+```
+
+### V4.4 → V4.5 核心变化（Mem0 用户画像层）
+
+| 维度 | V4.4 | V4.5 | 改进 |
+|------|------|------|------|
+| **用户记忆** | PlanMemory（任务级） | ✅ Mem0（用户级） | 跨Session用户画像与偏好记忆 |
+| **个性化** | 无 | ✅ 自动个性化 | 基于历史交互提供个性化响应 |
+| **向量数据库** | 无 | ✅ 多数据库支持 | Qdrant、腾讯云VectorDB |
+| **LLM支持** | Claude | ✅ 多LLM支持 | OpenAI、Anthropic、Ollama |
+| **Agent透明** | - | ✅ 完全透明 | Prompt模块封装，Agent无需感知 |
+| **API层** | 无 | ✅ 异步批量更新 | REST API支持批量记忆更新 |
+| **后台任务** | 独立服务 | ✅ 复用统一机制 | 🆕 整合到BackgroundTaskService（V4.6）|
+
+**设计理念**：
+- **用户画像自动注入**：框架在Phase 4自动从Mem0获取用户画像并注入System Prompt
+- **Agent完全透明**：`simple_agent.py`只传递`user_id`和`user_query`，无需关心Mem0逻辑
+- **多向量数据库**：支持Qdrant、腾讯云VectorDB，易于扩展其他向量数据库
+- **异步批量更新**：🆕 复用 `BackgroundTaskService` 统一后台任务机制，支持凌晨批量更新
+
+**参考来源**：
+- [Mem0 官方文档](https://docs.mem0.ai/)
+- [Mem0 GitHub](https://github.com/mem0ai/mem0)
+- [Mem0 论文: Building Production-Ready AI Agents with Scalable Long-Term Memory](https://arxiv.org/abs/2504.19413)
 
 ### V4.3 → V4.4 核心变化（Skills + Tools 整合）
 
@@ -103,6 +200,14 @@
 | **LLM** | `llm_service.py` | `core/llm/` 多提供商 | ✅ Claude/OpenAI/Gemini |
 | **Events** | 分散的事件发射 | `core/events/` 统一管理 | ✅ 6 类事件统一接口 |
 
+### 🎯 V4.5 优化重点（🆕 Mem0 用户画像层）
+
+1. **Mem0 集成** - 基于Mem0框架的用户记忆层，支持跨Session用户画像
+2. **多向量数据库** - 支持Qdrant、腾讯云VectorDB，统一VectorStoreBase接口
+3. **腾讯云VectorDB适配器** - 完整适配腾讯云SDK，支持CRUD和语义搜索
+4. **Agent透明设计** - Prompt模块封装Mem0逻辑，Agent无需修改代码
+5. **异步批量更新API** - REST API支持后台批量更新用户记忆
+
 ### 🎯 V4.4 优化重点（Skills + Tools 整合）
 
 1. **能力分层清晰化** - Claude Skills (SKILL.md + container.skills) vs Tools (DIRECT tool_use)
@@ -144,6 +249,19 @@
 2. **层级化** - 清晰的依赖方向，避免循环依赖
 3. **可扩展** - 新功能通过配置添加，不修改核心代码
 4. **可观测** - 统一事件系统，完整的执行追踪
+
+### ✨ V4.5 核心成就（🆕 Mem0 用户画像层）
+
+|| 改进项 | 实现状态 | 具体成果 |
+||-------|---------|---------|
+|| **Mem0 核心模块** | ✅ 完成 | `core/memory/mem0/` - config/pool/formatter/tencent_vectordb |
+|| **向量数据库支持** | ✅ 完成 | Qdrant + 腾讯云VectorDB，统一VectorStoreBase接口 |
+|| **腾讯云适配器** | ✅ 完成 | `tencent_vectordb.py` - 完整CRUD + 语义搜索 |
+|| **Prompt自动注入** | ✅ 完成 | `universal_agent_prompt.py` - 自动获取并注入用户画像 |
+|| **Agent透明集成** | ✅ 完成 | `simple_agent.py` Phase 4 - 只传user_id/query |
+|| **异步更新服务** | ✅ 完成 | `utils/background_tasks.py`（🆕 V4.6整合）+ `mem0_router.py` - 批量更新API |
+|| **配置管理** | ✅ 完成 | `env.template` - 多LLM/Embedding/VectorDB配置 |
+|| **文档完善** | ✅ 完成 | 设置指南 + Embedding选择指南 + E2E测试脚本 |
 
 ### ✨ V4.4 核心成就（Skills + Tools 整合）
 
@@ -1288,6 +1406,12 @@ core/memory/
 │   ├── e2b.py           # E2B 沙箱记忆
 │   ├── plan.py          # 🆕 任务计划持久化（V4.3）
 │   └── preference.py    # 用户偏好（预留）
+├── mem0/                # 🆕 Mem0 用户画像层（V4.5）
+│   ├── __init__.py      # 统一导出
+│   ├── config.py        # 配置管理（多VectorDB/LLM/Embedding）
+│   ├── pool.py          # Memory实例池（单例模式）
+│   ├── formatter.py     # 记忆格式化为Prompt片段
+│   └── tencent_vectordb.py  # 腾讯云VectorDB适配器
 └── system/              # 系统级记忆
     ├── skill.py         # Skill 记忆
     └── cache.py         # 系统缓存（预留）
@@ -1323,6 +1447,14 @@ core/memory/
 │  • 步骤完成状态                                                      │
 │  • 进度摘要生成                                                      │
 │  • 存储路径: storage/users/{user_id}/plans/                         │
+│                                                                      │
+│  🆕 Mem0Memory (V4.5) - 用户画像层                                   │
+│  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │
+│  • 跨 Session 用户画像与偏好记忆                                     │
+│  • 基于向量数据库的语义搜索                                          │
+│  • LLM 自动提取事实（fact extraction）                               │
+│  • 存储后端: Qdrant / 腾讯云VectorDB                                 │
+│  • 特点: 自动个性化，Agent 完全透明                                  │
 │                                                                      │
 │  System Level (系统级)                                               │
 │  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │
@@ -1442,6 +1574,282 @@ memory.plan.generate_progress_summary(task_id)
 | 用户编写 coding_prompt.md | 框架自动注入恢复协议 |
 | 手动区分 Session 类型 | IntentAnalyzer 自动判断 |
 | 运营人员需要理解 Two-Agent Pattern | 完全透明，无感知 |
+
+### 4.2 Mem0 用户画像详解（🆕 V4.5）
+
+**设计理念**：
+- **跨Session用户记忆**：基于Mem0框架实现用户画像与偏好的长期存储
+- **语义搜索**：基于向量数据库的相关性检索，提供个性化上下文
+- **Agent透明**：Prompt模块封装所有Mem0逻辑，Agent无需感知
+- **多数据库支持**：支持Qdrant、腾讯云VectorDB等多种向量数据库
+
+**架构流程**：
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                       Mem0 用户画像注入流程                                      │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  用户 Query                                                                      │
+│      │                                                                           │
+│      ▼                                                                           │
+│  ┌──────────────────────────────────────────────────────────────────────────┐   │
+│  │ Phase 4: System Prompt 组装（simple_agent.py）                           │   │
+│  │   get_universal_agent_prompt(user_id=xxx, user_query="...")             │   │
+│  └───────────────────────────────────┬──────────────────────────────────────┘   │
+│                                      │                                           │
+│                                      ▼                                           │
+│  ┌──────────────────────────────────────────────────────────────────────────┐   │
+│  │ _fetch_user_profile() 内部函数（universal_agent_prompt.py）              │   │
+│  │   1. 调用 get_mem0_pool().search(user_id, query, limit=10)              │   │
+│  │   2. 获取相关用户记忆（MemoryItem 列表）                                 │   │
+│  │   3. 调用 format_memories_for_prompt(memories)                          │   │
+│  │   4. 返回格式化后的用户画像字符串                                        │   │
+│  └───────────────────────────────────┬──────────────────────────────────────┘   │
+│                                      │                                           │
+│                                      ▼                                           │
+│  ┌──────────────────────────────────────────────────────────────────────────┐   │
+│  │ 自动注入到 System Prompt                                                 │   │
+│  │                                                                          │   │
+│  │   prompt = UNIVERSAL_AGENT_PROMPT                                        │   │
+│  │   if user_profile:                                                       │   │
+│  │       prompt += "\n\n---\n\n" + user_profile                            │   │
+│  │                                                                          │   │
+│  │   注入内容示例：                                                          │   │
+│  │   ### 用户画像与偏好 (Mem0)                                              │   │
+│  │   - 用户是Python开发者，主要使用FastAPI框架                              │   │
+│  │   - 用户喜欢测试驱动开发(TDD)方法                                        │   │
+│  │   - 用户偏好简洁的代码风格                                               │   │
+│  └───────────────────────────────────┬──────────────────────────────────────┘   │
+│                                      │                                           │
+│                                      ▼                                           │
+│  Claude 根据用户画像提供个性化响应                                              │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**核心模块**：
+
+```python
+# core/memory/mem0/config.py - 配置管理
+@dataclass
+class Mem0Config:
+    """Mem0 配置"""
+    version: str = "v1.1"
+    
+    # 向量数据库配置
+    vector_store_provider: str = "qdrant"  # qdrant | tencent
+    qdrant: QdrantConfig = field(default_factory=QdrantConfig)
+    tencent_vectordb: TencentVectorDBConfig = field(default_factory=TencentVectorDBConfig)
+    
+    # Embedding 配置
+    embedder: EmbedderConfig = field(default_factory=EmbedderConfig)
+    
+    # LLM 配置（用于 fact extraction）
+    llm: LLMConfig = field(default_factory=LLMConfig)
+
+# core/memory/mem0/pool.py - Memory 实例池（单例模式）
+class Mem0MemoryPool:
+    """Mem0 Memory 实例池"""
+    
+    def search(self, user_id: str, query: str, limit: int = 10) -> List[Dict]
+    def add(self, user_id: str, messages: List[Dict]) -> List[Dict]
+    def get_all(self, user_id: str) -> List[Dict]
+    def update(self, memory_id: str, data: str, user_id: str) -> Dict
+    def delete(self, memory_id: str, user_id: str) -> Dict
+
+# core/memory/mem0/formatter.py - 格式化记忆
+def format_memories_for_prompt(memories: List[MemoryItem]) -> str:
+    """将 Mem0 记忆列表格式化为 System Prompt 片段"""
+    ...
+
+# core/memory/mem0/tencent_vectordb.py - 腾讯云 VectorDB 适配器
+class TencentVectorDB(VectorStoreBase):
+    """腾讯云向量数据库适配器"""
+    
+    def insert(self, vectors, payloads, ids) -> None
+    def search(self, query, vectors, limit, filters) -> List[OutputData]
+    def delete(self, vector_id) -> None
+    def update(self, vector_id, vector, payload) -> None
+    def get(self, vector_id) -> OutputData
+    def list(self, filters, limit) -> List[OutputData]
+```
+
+**环境配置**（env.template）：
+```bash
+# ==================== Mem0 + 向量数据库配置 ====================
+VECTOR_STORE_PROVIDER=tencent  # qdrant | tencent
+
+# Qdrant 配置（如果使用 Qdrant）
+QDRANT_URL=http://localhost:6333
+QDRANT_API_KEY=
+
+# 腾讯云 VectorDB 配置（如果使用腾讯云）
+TENCENT_VDB_URL=http://your-instance.sql.tencentcdb.com:6333
+TENCENT_VDB_USERNAME=root
+TENCENT_VDB_API_KEY=your-api-key
+TENCENT_VDB_DATABASE=mem0_db
+
+# 集合名称
+MEM0_COLLECTION_NAME=mem0_user_memories
+
+# ==================== Embedding 配置 ====================
+EMBEDDING_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+EMBEDDING_MODEL=text-embedding-3-small
+
+# ==================== Mem0 内部 LLM 配置 ====================
+MEM0_LLM_PROVIDER=openai  # openai | anthropic
+MEM0_LLM_MODEL=gpt-4o-mini
+```
+
+**Agent透明设计**：
+| 传统方式 | V4.5 方式（Mem0） |
+|----------|-------------------|
+| Agent 直接调用 Mem0 API | Prompt 模块封装 Mem0 逻辑 |
+| 需要手动管理用户画像 | 自动获取并注入 |
+| Agent 需要理解 Mem0 结构 | Agent 只传 user_id + query |
+| 复杂的异步更新逻辑 | 框架提供批量更新 API |
+
+**API 层支持**（🆕 V4.6 整合到 BackgroundTaskService）：
+```python
+# utils/background_tasks.py - 统一后台任务服务（🆕 V4.6 整合 Mem0）
+class BackgroundTaskService:
+    # 原有任务
+    async def generate_conversation_title(...)  # 对话标题生成
+    async def generate_recommended_questions(...) # 推荐问题生成
+    
+    # 🆕 V4.6 新增：Mem0 记忆增量更新
+    async def update_user_memories(
+        self,
+        user_id: str,
+        since_hours: int = 24,
+        session_id: Optional[str] = None,
+        event_manager: Optional[EventManager] = None
+    ) -> Mem0UpdateResult
+    
+    async def batch_update_all_memories(
+        self,
+        since_hours: int = 24,
+        max_concurrent: int = 5
+    ) -> Mem0BatchUpdateResult
+
+# routers/mem0_router.py - REST API（复用 BackgroundTaskService）
+@router.post("/batch-update")
+async def batch_update_memories(request: BatchUpdateRequest)
+
+@router.post("/user/{user_id}/update")
+async def update_user_memories(user_id: str, since_hours: int = 24)
+```
+
+### 4.3 智能记忆检索决策（🆕 V4.6）
+
+**核心理念**：基于 Mem0 论文的 Selective Memory 思想，不是每次请求都需要检索用户记忆。通过在意图识别阶段让 LLM 自主推理决定是否需要个性化。
+
+**设计原则**：
+- **按需检索**：通用知识查询（天气/百科/汇率）不需要个性化，跳过 Mem0 检索
+- **Few-shot 引导**：使用示例引导 Haiku 进行推理，而非硬编码规则
+- **可扩展性**：新增场景只需添加 Few-shot 示例，无需修改代码
+- **默认安全**：不确定时默认检索（`skip_memory_retrieval=false`）
+
+**架构流程**：
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                       智能记忆检索决策流程（V4.6）                                │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  用户 Query: "今天上海天气怎么样？"                                               │
+│      │                                                                           │
+│      ▼                                                                           │
+│  ┌──────────────────────────────────────────────────────────────────────────┐   │
+│  │ Phase 2: Intent Analysis (Haiku)                                         │   │
+│  │   - 分析 task_type, complexity, needs_plan（原有）                        │   │
+│  │   - 🆕 分析 skip_memory_retrieval（V4.6 新增）                           │   │
+│  │                                                                          │   │
+│  │   Few-shot 推理:                                                         │   │
+│  │   "天气查询是实时信息，与用户历史无关" → skip_memory_retrieval: true      │   │
+│  └───────────────────────────────────┬──────────────────────────────────────┘   │
+│                                      │                                           │
+│                                      ▼                                           │
+│  ┌──────────────────────────────────────────────────────────────────────────┐   │
+│  │ Phase 4: System Prompt Assembly                                          │   │
+│  │                                                                          │   │
+│  │   if intent.skip_memory_retrieval == true:                               │   │
+│  │       # 跳过 Mem0 检索，节省 ~200ms + Embedding 成本                     │   │
+│  │       system_prompt = UNIVERSAL_AGENT_PROMPT                             │   │
+│  │   else:                                                                  │   │
+│  │       # 执行 Mem0 检索，注入用户画像                                      │   │
+│  │       user_profile = _fetch_user_profile(user_id, user_query)            │   │
+│  │       system_prompt = UNIVERSAL_AGENT_PROMPT + user_profile              │   │
+│  └───────────────────────────────────┬──────────────────────────────────────┘   │
+│                                      │                                           │
+│                                      ▼                                           │
+│  Claude 执行响应（根据是否有用户画像提供不同级别的个性化）                         │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Few-shot 示例表**（位于 `prompts/intent_recognition_prompt.py`）：
+
+| 查询 | skip_memory_retrieval | 推理理由 |
+|------|----------------------|----------|
+| "今天上海天气怎么样？" | `true` | 实时信息查询，与用户历史无关 |
+| "帮我生成一个产品介绍PPT" | `false` | 用户可能有PPT风格偏好、常用配色 |
+| "Python的列表推导式怎么用？" | `true` | 通用技术问题，无需个性化 |
+| "帮我推荐一家餐厅" | `false` | 需要了解用户口味偏好、饮食限制 |
+| "把这段话翻译成英文" | `true` | 简单翻译任务，无需个性化 |
+| "帮我写一段Python代码" | `false` | 用户可能有编码风格偏好、常用框架 |
+| "1美元等于多少人民币？" | `true` | 汇率查询是客观事实，无需个性化 |
+| "按照我之前说的风格写邮件" | `false` | 明确引用了历史偏好 |
+| "帮我做一个数据分析报告" | `false` | 用户可能有报告格式、图表风格偏好 |
+| "什么是机器学习？" | `true` | 百科知识问答，无需个性化 |
+
+**关键代码变更**：
+
+```python
+# core/agent/types.py - 新增字段
+@dataclass
+class IntentResult:
+    task_type: TaskType
+    complexity: Complexity
+    needs_plan: bool
+    needs_persistence: bool = False
+    skip_memory_retrieval: bool = False  # 🆕 V4.6
+
+# prompts/intent_recognition_prompt.py - 新增输出字段
+{
+  "task_type": "...",
+  "complexity": "...",
+  "needs_plan": true|false,
+  "skip_memory_retrieval": true|false  # 🆕 V4.6
+}
+
+# prompts/universal_agent_prompt.py - 条件检索
+def get_universal_agent_prompt(
+    ...,
+    skip_memory_retrieval: bool = False  # 🆕 V4.6
+) -> str:
+    prompt = UNIVERSAL_AGENT_PROMPT
+    if not skip_memory_retrieval:  # 只有不跳过时才检索
+        user_profile = _fetch_user_profile(user_id, user_query)
+        if user_profile:
+            prompt += "\n\n---\n\n" + user_profile
+    ...
+
+# core/agent/simple_agent.py - 传递意图结果
+skip_memory = getattr(intent, 'skip_memory_retrieval', False)
+system_prompt = get_universal_agent_prompt(
+    user_id=user_id,
+    user_query=user_query,
+    skip_memory_retrieval=skip_memory  # 🆕 V4.6
+)
+```
+
+**性能优化收益**：
+| 指标 | V4.5 | V4.6 | 改进 |
+|------|------|------|------|
+| 通用查询延迟 | +200ms (Mem0 检索) | 0ms (跳过) | **~200ms↓** |
+| Embedding API 调用 | 每次请求 | 按需调用 | **成本节省** |
+| Token 消耗 | 固定开销 | 动态优化 | **按需消耗** |
 
 ### 5. core/context/ - 上下文层
 
@@ -2010,7 +2418,7 @@ core/llm/
 
 ## 📁 文件结构
 
-### V4.4 目录结构（已同步校验）
+### V4.5 目录结构（已同步校验）
 
 ```
 zenflux_agent/
@@ -2030,8 +2438,8 @@ zenflux_agent/
 │   │   ├── selector.py             # 工具选择器
 │   │   ├── executor.py             # 工具执行器
 │   │   ├── result_compactor.py     # 结果精简器
-│   │   ├── validator.py            # 🆕 工具验证器（V4.4）
-│   │   ├── README.md               # 🆕 工具模块说明
+│   │   ├── validator.py            # 工具验证器（V4.4）
+│   │   ├── README.md               # 工具模块说明
 │   │   └── capability/             # 能力管理子包
 │   │       ├── __init__.py
 │   │       ├── registry.py         # 能力注册表
@@ -2048,8 +2456,14 @@ zenflux_agent/
 │   │   ├── user/                   # 用户级
 │   │   │   ├── episodic.py
 │   │   │   ├── e2b.py
-│   │   │   ├── plan.py             # 🆕 任务计划持久化（V4.3）
+│   │   │   ├── plan.py             # 任务计划持久化（V4.3）
 │   │   │   └── preference.py
+│   │   ├── mem0/                   # 🆕 Mem0 用户画像层（V4.5）
+│   │   │   ├── __init__.py         # 统一导出
+│   │   │   ├── config.py           # 配置管理（多VectorDB/LLM）
+│   │   │   ├── pool.py             # Memory实例池（单例）
+│   │   │   ├── formatter.py        # 记忆格式化
+│   │   │   └── tencent_vectordb.py # 🆕 腾讯云VectorDB适配器
 │   │   └── system/                 # 系统级
 │   │       ├── skill.py
 │   │       └── cache.py
@@ -2131,8 +2545,8 @@ zenflux_agent/
 │   ├── conversation_service.py     # 对话服务
 │   ├── file_service.py             # 文件服务
 │   ├── knowledge_service.py        # 知识库服务
-│   ├── sandbox_service.py          # 🆕 沙箱服务（V4.4）
-│   ├── tool_service.py             # 🆕 工具服务（V4.4）
+│   ├── sandbox_service.py          # 沙箱服务（V4.4）
+│   ├── tool_service.py             # 工具服务（V4.4）
 │   └── redis_manager.py            # Redis 管理
 │
 ├── routers/                        # API 路由
@@ -2142,7 +2556,8 @@ zenflux_agent/
 │   ├── files.py                    # 文件路由
 │   ├── knowledge.py                # 知识库路由
 │   ├── human_confirmation.py       # HITL 确认路由
-│   ├── tools.py                    # 🆕 工具路由（V4.4）
+│   ├── tools.py                    # 工具路由（V4.4）
+│   ├── mem0_router.py              # 🆕 Mem0 记忆管理路由（V4.5）
 │   └── workspace.py                # 工作空间路由
 │   # 注：health 路由在 main.py 中定义
 │
@@ -2195,6 +2610,14 @@ zenflux_agent/
 │   ├── test_*.py                   # 单元测试脚本
 │   └── ...
 │
+├── utils/                          # 🆕 工具模块（V4.6 重构）
+│   ├── __init__.py
+│   ├── background_tasks.py         # 🆕 统一后台任务服务（整合 Mem0 更新）
+│   │                               #    - 对话标题生成
+│   │                               #    - 推荐问题生成
+│   │                               #    - Mem0 记忆增量更新（V4.6）
+│   └── json_utils.py               # JSON 工具函数
+│
 ├── infra/                          # 基础设施（🆕 V4.4 重构）
 │   ├── __init__.py
 │   ├── cache/                      # 缓存子目录
@@ -2229,14 +2652,47 @@ zenflux_agent/
 │
 ├── main.py                         # FastAPI 入口（含 /health 路由）
 │
+├── env.template                    # 🆕 环境变量模板（V4.5）
+│
 └── docs/                           # 文档
     ├── 00-ARCHITECTURE-V4.md       # 本文档
+    ├── MEM0_SETUP_GUIDE.md         # 🆕 Mem0 设置指南（V4.5）
+    ├── MEM0_EMBEDDING_GUIDE.md     # 🆕 Mem0 Embedding 选择指南（V4.5）
     └── ...
 ```
 
 ---
 
 ## 🔮 下一步计划
+
+### ✅ 已完成：V4.5 Mem0 用户画像层
+
+```
+✅ 已完成（2026-01-08）
+
+新增模块：
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+core/memory/mem0/__init__.py       ← 统一导出
+core/memory/mem0/config.py         ← 配置管理（多VectorDB/LLM/Embedding）
+core/memory/mem0/pool.py           ← Memory实例池（单例模式）
+core/memory/mem0/formatter.py      ← 记忆格式化为Prompt片段
+core/memory/mem0/tencent_vectordb.py ← 🆕 腾讯云VectorDB适配器
+utils/background_tasks.py          ← 🆕 V4.6 整合 Mem0 异步批量更新
+routers/mem0_router.py             ← REST API 端点（复用 BackgroundTaskService）
+prompts/universal_agent_prompt.py  ← 添加 _fetch_user_profile() + 自动注入
+core/agent/simple_agent.py         ← Phase 4 用户画像注入（Agent透明）
+env.template                       ← 环境变量模板
+test_mem0_e2e.py                   ← 端对端测试脚本
+docs/MEM0_SETUP_GUIDE.md           ← 设置指南
+docs/MEM0_EMBEDDING_GUIDE.md       ← Embedding 选择指南
+
+收益：
+✅ 跨 Session 用户画像与偏好记忆
+✅ 多向量数据库支持（Qdrant、腾讯云VectorDB）
+✅ Agent 完全透明（Prompt 模块封装）
+✅ 异步批量更新 API
+✅ 完整的配置管理和测试支持
+```
 
 ### ✅ 已完成：V4.3 Plan 持久化 + Session 恢复
 
@@ -2640,13 +3096,18 @@ from core.tool.capability import (
 | [08-DATA_STORAGE_ARCHITECTURE.md](./08-DATA_STORAGE_ARCHITECTURE.md) | 数据存储 | ✅ 有效 |
 | [12-CONTEXT_ENGINEERING_OPTIMIZATION.md](./12-CONTEXT_ENGINEERING_OPTIMIZATION.md) | Context Engineering 优化 | ✅ V4.4 |
 | [RESULT_COMPACTOR_IMPLEMENTATION.md](./RESULT_COMPACTOR_IMPLEMENTATION.md) | ResultCompactor 实施 | ✅ V4.1 |
+| [MEM0_SETUP_GUIDE.md](./MEM0_SETUP_GUIDE.md) | 🆕 Mem0 设置指南 | ✅ V4.5 |
+| [MEM0_EMBEDDING_GUIDE.md](./MEM0_EMBEDDING_GUIDE.md) | 🆕 Mem0 Embedding 选择指南 | ✅ V4.5 |
 
 ## 🔗 外部参考
 
 | 参考来源 | 说明 |
 |----------|------|
-| [Anthropic Blog: Advanced Tool Use](https://www.anthropic.com/engineering/advanced-tool-use) | 🆕 V4.4 设计参考 |
-| [Claude Skills and MCP](https://claude.com/blog/extending-claude-capabilities-with-skills-mcp-servers) | 🆕 V4.4 Skills 机制参考 |
+| [Mem0 官方文档](https://docs.mem0.ai/) | 🆕 V4.5 Mem0 框架参考 |
+| [Mem0 GitHub](https://github.com/mem0ai/mem0) | 🆕 V4.5 Mem0 开源实现 |
+| [腾讯云向量数据库](https://cloud.tencent.com/document/product/1709) | 🆕 V4.5 腾讯云VectorDB文档 |
+| [Anthropic Blog: Advanced Tool Use](https://www.anthropic.com/engineering/advanced-tool-use) | V4.4 设计参考 |
+| [Claude Skills and MCP](https://claude.com/blog/extending-claude-capabilities-with-skills-mcp-servers) | V4.4 Skills 机制参考 |
 | [Anthropic Blog: Effective harnesses for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) | V4.3 设计参考 |
 | [Claude autonomous-coding 示例](https://github.com/anthropics/anthropic-cookbook/tree/main/claude-quickstarts/autonomous-coding) | Two-Agent Pattern 原型 |
 

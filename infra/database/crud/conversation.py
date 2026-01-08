@@ -224,6 +224,35 @@ async def delete_conversation(
     return await delete_by_id(session, Conversation, conversation_id)
 
 
+async def get_conversations_since(
+    session: AsyncSession,
+    since: datetime,
+    user_id: Optional[str] = None,
+    limit: int = 1000
+) -> List[Conversation]:
+    """
+    获取指定时间之后的会话列表（用于 Mem0 增量更新）
+    
+    Args:
+        session: 数据库会话
+        since: 开始时间
+        user_id: 用户 ID（可选，不指定则获取所有用户）
+        limit: 最大返回数量
+        
+    Returns:
+        会话列表
+    """
+    query = select(Conversation).where(Conversation.created_at >= since)
+    
+    if user_id:
+        query = query.where(Conversation.user_id == user_id)
+    
+    query = query.order_by(Conversation.created_at.asc()).limit(limit)
+    
+    result = await session.execute(query)
+    return list(result.scalars().all())
+
+
 async def count_messages_in_conversation(
     session: AsyncSession,
     conversation_id: str
