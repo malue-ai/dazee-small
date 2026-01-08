@@ -12,67 +12,56 @@ venv/
 env/
 ENV/
 
-# 开发工具
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# 测试和覆盖率
-.pytest_cache/
-.coverage
-htmlcov/
-*.cover
-
-# 环境变量（敏感信息）
-.env
-.env.local
-.env.*.local
-
-# 日志文件
-*.log
-logs/
-*.log.*
-
-# 临时文件
-*.tmp
-*.temp
-.DS_Store
-Thumbs.db
+# 测试和文档
+tests/
+docs/
+examples/
+*.md
+!README.md
 
 # Git
 .git/
 .gitignore
 .gitattributes
 
-# Docker
-Dockerfile
-docker-compose.yml
-.dockerignore
-
-# 文档
-*.md
-docs/
-
-# 数据库和工作空间（运行时生成）
-workspace/database/*.db
-workspace/database/*.db-*
-workspace/outputs/*
-workspace/inputs/*
-workspace/memory/*
-
-# Node.js（如果有前端构建）
-node_modules/
-npm-debug.log
-yarn-error.log
-
 # IDE
-*.sublime-*
-.vscode/settings.json
+.vscode/
+.idea/
+*.swp
+*.swo
 
-# 示例和测试
-examples/
-tests/
-*.example
+# 日志和数据
+logs/
+*.log
+dump.rdb
+*.db
+*.sqlite
+workspace/
 
+# 前端开发文件（会单独复制）
+frontend/node_modules/
+frontend/.vite/
+frontend/dist/
+
+# 部署文件
+deploy/aws/
+scripts/
+docker-compose.yml
+Dockerfile
+!Dockerfile.production
+!deploy/nginx/
+
+# 环境变量
+.env
+.env.*
+!env.template
+
+# 临时文件
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db
+.staging-state
+
+# Copilot
+.copilot-ignore

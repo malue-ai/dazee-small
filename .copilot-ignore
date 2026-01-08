@@ -1,0 +1,96 @@
+# ============================================================
+# Copilot Ignore - 排除不需要上传到 ECR 的文件
+# ============================================================
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# 虚拟环境
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 测试
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# 文档
+docs/_build/
+*.md
+!README.md
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# 日志和数据库
+logs/
+*.log
+dump.rdb
+*.db
+*.sqlite
+*.sqlite3
+
+# Workspace 数据（使用 EFS）
+workspace/
+
+# 前端开发文件
+frontend/node_modules/
+frontend/src/
+frontend/*.json
+frontend/*.js
+frontend/*.html
+frontend/README.md
+
+# 部署脚本
+deploy/
+scripts/
+
+# 示例和测试
+examples/
+tests/
+
+# 临时文件
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db
+
+# 环境变量（敏感信息）
+.env
+.env.*
+!.env.template
+env.template
+
+# Docker
+docker-compose.yml
+Dockerfile
+!Dockerfile.production
+
+# Nginx 配置（开发环境）
+nginx/
+!deploy/nginx/
+
+# 其他
+*.pem
+*.key
+*.crt
+.staging-state
