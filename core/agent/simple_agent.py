@@ -81,7 +81,9 @@ class SimpleAgent:
         workspace_dir: str = None,
         conversation_service=None,
         schema=None,  # 🆕 AgentSchema 配置
-        system_prompt: str = None  # 🆕 System Prompt（作为运行时指令）
+        system_prompt: str = None,  # 🆕 System Prompt（作为运行时指令）
+        prompt_schema=None,  # 🆕 V4.6: PromptSchema（提示词分层）
+        prompt_cache=None,   # 🆕 V4.6.2: InstancePromptCache（提示词缓存）
     ):
         """
         初始化 Agent
@@ -94,6 +96,8 @@ class SimpleAgent:
             conversation_service: ConversationService 实例（用于消息持久化）
             schema: AgentSchema 配置（定义组件启用状态和参数）
             system_prompt: System Prompt（运行时传给 LLM 的系统指令）
+            prompt_schema: 🆕 V4.6 PromptSchema（用于根据复杂度动态生成提示词）
+            prompt_cache: 🆕 V4.6.2 InstancePromptCache（预生成的提示词版本缓存）
         """
         if event_manager is None:
             raise ValueError("event_manager 是必需参数")
@@ -110,6 +114,15 @@ class SimpleAgent:
         
         # 🆕 System Prompt：存储系统指令（如果未提供，使用默认）
         self.system_prompt = system_prompt
+        
+        # 🆕 V4.6: PromptSchema（提示词分层）
+        # 如果提供了 PromptSchema，可以根据用户查询复杂度动态生成提示词
+        self.prompt_schema = prompt_schema
+        
+        # 🆕 V4.6.2: InstancePromptCache（提示词缓存）
+        # 启动时预生成的三个版本提示词 + 意图识别提示词
+        # 运行时直接从缓存获取，无需动态生成
+        self._prompt_cache = prompt_cache
         
         # 从 Schema 读取运行时参数（覆盖传入的参数）
         if schema is not None:
@@ -165,11 +178,15 @@ class SimpleAgent:
                 tools=[],
                 max_tokens=8192  # Claude 3.5 Haiku 最大支持 8192
             )
+            # 🆕 V4.6.2: 传递 prompt_cache 给 IntentAnalyzer
             self.intent_analyzer = create_intent_analyzer(
                 llm_service=self.intent_llm,
-                enable_llm=intent_config.use_llm  # 从 Schema 读取
+                enable_llm=intent_config.use_llm,  # 从 Schema 读取
+                prompt_cache=self._prompt_cache  # 🆕 V4.6.2: 使用缓存的意图识别提示词
             )
             logger.debug(f"✓ IntentAnalyzer 已启用 (model={intent_config.llm_model})")
+            if self._prompt_cache and self._prompt_cache.is_loaded:
+                logger.debug(f"  └─ 使用缓存的意图识别提示词 ({len(self._prompt_cache.get_intent_prompt())} 字符)")
         else:
             self.intent_llm = None
             self.intent_analyzer = None
@@ -502,6 +519,7 @@ class SimpleAgent:
         # 阶段 4: System Prompt 组装 + LLM 调用准备
         # =====================================================================
         # 4.1 选择 System Prompt（用户自定义 vs 框架默认，含沙盒上下文注入）
+        #     🆕 V4.6: 支持提示词分层（根据复杂度动态裁剪）
         # 4.2 构建 LLM Messages
         # 4.3 Todo 重写（Context Engineering - 对抗 Lost-in-the-Middle）
         
@@ -510,7 +528,50 @@ class SimpleAgent:
         skip_memory = getattr(intent, 'skip_memory_retrieval', False)
         
         # 4.1 选择 System Prompt
-        if self.system_prompt:
+        # 🆕 V5.0: 优先使用 InstancePromptCache（启动时预生成，运行时零开销）
+        if self._prompt_cache and self._prompt_cache.is_loaded:
+            # ========== V5.0: 直接从缓存取系统提示词 ==========
+            from core.prompt import detect_complexity
+            
+            # 检测任务复杂度（使用缓存的 prompt_schema）
+            complexity = detect_complexity(user_query, self._prompt_cache.prompt_schema)
+            
+            # 直接从缓存获取对应版本的提示词（启动时已预生成）
+            base_prompt = self._prompt_cache.get_system_prompt(complexity)
+            
+            # 注入沙盒上下文
+            from prompts.sandbox_file_protocol import build_sandbox_context
+            sandbox_context = build_sandbox_context(
+                conversation_id=conversation_id,
+                user_id=user_id
+            )
+            system_prompt = base_prompt + sandbox_context
+            logger.info(f"✅ V5.0 使用缓存提示词: {complexity.value} ({len(system_prompt)} 字符)")
+            
+        elif self.prompt_schema:
+            # ========== Fallback: 动态生成（V4.6 兼容模式）==========
+            from core.prompt import detect_complexity, generate_prompt
+            
+            # 检测任务复杂度
+            complexity = detect_complexity(user_query, self.prompt_schema)
+            
+            # 动态生成对应版本的提示词
+            base_prompt = generate_prompt(
+                self.prompt_schema, 
+                complexity,
+                agent_schema=self.schema,
+            )
+            
+            # 注入沙盒上下文
+            from prompts.sandbox_file_protocol import build_sandbox_context
+            sandbox_context = build_sandbox_context(
+                conversation_id=conversation_id,
+                user_id=user_id
+            )
+            system_prompt = base_prompt + sandbox_context
+            logger.info(f"⚠️ Fallback 动态生成提示词: {complexity.value} ({len(system_prompt)} 字符)")
+            
+        elif self.system_prompt:
             # 使用用户定义的 System Prompt（唯一真相来源）
             # 仍需注入沙盒上下文
             from prompts.sandbox_file_protocol import build_sandbox_context

@@ -433,19 +433,22 @@ async def create_agent_from_instance(
     workspace_dir: str = None,
     conversation_service = None,
     skip_mcp_registration: bool = False,
-    skip_skills_registration: bool = False
+    skip_skills_registration: bool = False,
+    force_refresh: bool = False
 ):
     """
     从实例配置创建 Agent（核心方法）
     
-    流程：
+    🆕 V4.6.2 流程：
     1. 加载环境变量
     2. 加载实例配置
     3. 加载实例提示词
-    4. 合并框架通用提示词
-    5. 调用 AgentFactory.from_prompt() 创建 Agent
-    6. 注册 MCP 工具（如果配置了）
-    7. 注册 Claude Skills（如果配置了）
+    4. 🆕 V4.6.2 一次性加载 InstancePromptCache（包含所有提示词版本）
+    5. 合并框架通用提示词
+    6. 调用 AgentFactory.from_schema() 创建 Agent（使用缓存的 AgentSchema）
+    7. 注册 MCP 工具（利用推断缓存，只推断新工具）
+    8. 注册 Claude Skills（如果配置了）
+    9. 保存工具推断缓存
     
     Args:
         instance_name: 实例名称
@@ -454,14 +457,23 @@ async def create_agent_from_instance(
         conversation_service: 会话服务
         skip_mcp_registration: 是否跳过 MCP 工具注册
         skip_skills_registration: 是否跳过 Skills 注册
+        force_refresh: 强制刷新缓存，重新生成 Schema 和推断工具
         
     Returns:
         配置好的 Agent 实例
     """
     from core.agent import AgentFactory
     from prompts.universal_agent_prompt import get_universal_agent_prompt
+    from pathlib import Path
     
     logger.info(f"🚀 开始加载实例: {instance_name}")
+    
+    # 准备缓存目录
+    instance_path = get_instances_dir() / instance_name
+    cache_dir = instance_path / ".cache"
+    
+    if force_refresh:
+        logger.info("🔄 强制刷新缓存模式")
     
     # 1. 加载环境变量
     load_instance_env(instance_name)
@@ -476,6 +488,44 @@ async def create_agent_from_instance(
     # 3. 加载实例提示词
     instance_prompt = load_instance_prompt(instance_name)
     logger.info(f"   提示词长度: {len(instance_prompt)} 字符")
+    
+    # 🆕 V5.0: 一次性加载 InstancePromptCache（核心改动）
+    # 这会在启动时：
+    # 1. 🆕 优先从磁盘缓存加载（< 100ms）
+    # 2. 缓存无效时执行 LLM 分析（2-3秒）
+    # 生成内容：
+    # - PromptSchema（提示词结构）
+    # - AgentSchema（Agent 配置）
+    # - 三个版本的系统提示词（Simple/Medium/Complex）
+    # - 意图识别提示词
+    from core.prompt import InstancePromptCache, load_instance_cache
+    
+    prompt_cache = await load_instance_cache(
+        instance_name=instance_name,
+        raw_prompt=instance_prompt,
+        config=config.raw_config,
+        cache_dir=str(cache_dir),  # 🆕 V5.0: 启用磁盘持久化
+        force_refresh=force_refresh
+    )
+    
+    # 打印缓存状态
+    cache_status = prompt_cache.get_status()
+    persistence_info = cache_status.get("persistence", {})
+    metrics = cache_status.get("metrics", {})
+    
+    logger.info(f"✅ InstancePromptCache 加载完成")
+    logger.info(f"   Agent: {prompt_cache.agent_schema.name if prompt_cache.agent_schema else 'Default'}")
+    logger.info(f"   提示词版本: Simple={len(prompt_cache.system_prompt_simple or '')}字符, "
+                f"Medium={len(prompt_cache.system_prompt_medium or '')}字符, "
+                f"Complex={len(prompt_cache.system_prompt_complex or '')}字符")
+    
+    # 🆕 V5.0: 显示持久化状态
+    if persistence_info.get("enabled"):
+        if metrics.get("disk_hits", 0) > 0:
+            logger.info(f"   💾 从磁盘缓存加载（{metrics.get('disk_load_time_ms', 0):.0f}ms）")
+        else:
+            logger.info(f"   🔄 LLM 分析生成（{metrics.get('llm_analysis_time_ms', 0):.0f}ms）")
+            logger.info(f"   💾 已保存到磁盘缓存: {cache_dir}")
     
     # 4. 准备 APIs 运行时参数
     if config.apis:
@@ -510,14 +560,33 @@ async def create_agent_from_instance(
         storage = get_memory_storage()
         event_manager = create_event_manager(storage)
     
-    # 7. 调用 AgentFactory 创建 Agent
-    agent = await AgentFactory.from_prompt(
-        system_prompt=full_prompt,
-        event_manager=event_manager,
-        workspace_dir=workspace_dir,
-        conversation_service=conversation_service,
-        use_default_if_failed=True
-    )
+    # 🆕 V4.6.2: 使用缓存的 AgentSchema 创建 Agent
+    # 不再调用 from_prompt（会触发 LLM Schema 生成）
+    # 而是直接使用已经在 InstancePromptCache 中生成好的 Schema
+    if prompt_cache.is_loaded and prompt_cache.agent_schema:
+        agent = AgentFactory.from_schema(
+            schema=prompt_cache.agent_schema,
+            system_prompt=full_prompt,
+            event_manager=event_manager,
+            workspace_dir=workspace_dir,
+            conversation_service=conversation_service,
+            prompt_cache=prompt_cache,  # 🆕 V4.6.2: 传递缓存
+        )
+        logger.info("✅ Agent 创建成功（使用缓存的 AgentSchema）")
+    else:
+        # Fallback: 如果缓存加载失败，使用旧方式
+        logger.warning("⚠️ InstancePromptCache 加载失败，使用 AgentFactory.from_prompt")
+        agent = await AgentFactory.from_prompt(
+            system_prompt=full_prompt,
+            event_manager=event_manager,
+            workspace_dir=workspace_dir,
+            conversation_service=conversation_service,
+            use_default_if_failed=True,
+            cache_dir=str(cache_dir),
+            instance_path=str(instance_path),
+            force_refresh=force_refresh,
+            prompt_schema=prompt_cache.prompt_schema,
+        )
     
     logger.info(f"✅ Agent 创建成功")
     
@@ -537,7 +606,13 @@ async def create_agent_from_instance(
     instance_registry = InstanceToolRegistry(global_registry=global_registry)
     agent._instance_registry = instance_registry  # 注入到 Agent
     
-    # 10. 注册 MCP 工具（使用 InstanceToolRegistry）
+    # 🆕 V4.6: 加载工具推断缓存（用于增量推断）
+    tools_cache_file = cache_dir / "tools_inference.json"
+    if tools_cache_file.exists() and not force_refresh:
+        instance_registry.load_inference_cache(tools_cache_file)
+        logger.info("✅ 已加载工具推断缓存")
+    
+    # 10. 注册 MCP 工具（使用 InstanceToolRegistry，利用缓存）
     if not skip_mcp_registration and config.mcp_tools:
         await _register_mcp_tools(agent, config.mcp_tools, instance_registry)
     
@@ -546,6 +621,11 @@ async def create_agent_from_instance(
         enabled_skills = [s for s in config.skills if s.enabled]
         if enabled_skills:
             await _register_skills(instance_name, enabled_skills)
+    
+    # 🆕 V4.6: 保存工具推断缓存（包含新推断的工具）
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    instance_registry.save_inference_cache(tools_cache_file)
+    logger.info("✅ 已保存工具推断缓存")
     
     # 12. 🆕 V4.6 统一工具统计（仅用于调试日志）
     # 注意：Plan 阶段只使用 capability_categories，不使用具体工具列表

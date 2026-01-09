@@ -170,15 +170,21 @@ class AgentFactory:
         workspace_dir: str = None,
         conversation_service = None,
         llm_service = None,
-        use_default_if_failed: bool = True
+        use_default_if_failed: bool = True,
+        cache_dir: str = None,
+        instance_path: str = None,
+        force_refresh: bool = False,
+        prompt_schema = None,  # 🆕 V4.6: PromptSchema（提示词分层）
     ):
         """
         从 System Prompt 创建 Agent（核心方法）
         
         流程：
-        1. 调用 LLM 根据 Prompt 生成 Schema
-        2. 验证 Schema（使用强类型 Pydantic 模型）
-        3. 根据 Schema 初始化 Agent
+        1. 检查缓存（如果提供 cache_dir）
+        2. 调用 LLM 根据 Prompt 生成 Schema（缓存未命中或 force_refresh）
+        3. 验证 Schema（使用强类型 Pydantic 模型）
+        4. 保存缓存（如果提供 cache_dir）
+        5. 根据 Schema 初始化 Agent
         
         Args:
             system_prompt: 系统提示词
@@ -187,30 +193,61 @@ class AgentFactory:
             conversation_service: 会话服务
             llm_service: LLM 服务（用于生成 Schema，默认用 Haiku）
             use_default_if_failed: 生成失败时使用默认 Schema
+            cache_dir: 缓存目录（如 instances/test_agent/.cache）
+            instance_path: 实例目录（用于缓存失效检测）
+            force_refresh: 强制刷新缓存，重新生成 Schema
+            prompt_schema: 🆕 V4.6 PromptSchema（用于根据复杂度动态生成提示词）
         
         Returns:
             配置好的 Agent 实例
         """
-        # 1. 生成 Schema
-        try:
-            schema = await cls._generate_schema(system_prompt, llm_service)
-            logger.info(f"✅ Schema 生成成功: {schema.name}")
-            logger.debug(f"   Reasoning: {schema.reasoning}")
-        except Exception as e:
-            logger.warning(f"⚠️ Schema 生成失败: {e}")
-            if use_default_if_failed:
-                logger.info("使用默认 Schema（基于关键词推断）")
-                schema = cls._infer_schema_from_prompt(system_prompt)
-            else:
-                raise
+        from pathlib import Path
         
-        # 2. 根据 Schema 创建 Agent
+        schema = None
+        schema_data = None
+        
+        # 1. 尝试从缓存加载
+        if cache_dir and instance_path and not force_refresh:
+            cache_path = Path(cache_dir)
+            instance_dir = Path(instance_path)
+            
+            if cls._should_use_cache(cache_path, instance_dir):
+                schema_data = cls._load_schema_from_cache(cache_path)
+                if schema_data:
+                    try:
+                        schema = AgentSchema.from_dict(schema_data)
+                        logger.info(f"✅ 从缓存加载 Schema: {schema.name}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ 缓存 Schema 解析失败: {e}，将重新生成")
+                        schema = None
+        
+        # 2. 生成新 Schema（缓存未命中或失效）
+        if schema is None:
+            try:
+                schema = await cls._generate_schema(system_prompt, llm_service)
+                logger.info(f"✅ Schema 生成成功: {schema.name}")
+                logger.debug(f"   Reasoning: {schema.reasoning}")
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ Schema 生成失败: {e}")
+                if use_default_if_failed:
+                    logger.info("使用默认 Schema（基于关键词推断）")
+                    schema = cls._infer_schema_from_prompt(system_prompt)
+                else:
+                    raise
+            
+            # 保存到缓存（无论是 LLM 生成还是关键词推断）
+            if cache_dir and instance_path and schema:
+                cls._save_schema_to_cache(Path(cache_dir), Path(instance_path), schema)
+        
+        # 3. 根据 Schema 创建 Agent
         return cls.from_schema(
             schema=schema,
             system_prompt=system_prompt,
             event_manager=event_manager,
             workspace_dir=workspace_dir,
-            conversation_service=conversation_service
+            conversation_service=conversation_service,
+            prompt_schema=prompt_schema,  # 🆕 V4.6: 传递 PromptSchema
         )
     
     @classmethod
@@ -299,7 +336,9 @@ class AgentFactory:
         system_prompt: str,
         event_manager,
         workspace_dir: str = None,
-        conversation_service = None
+        conversation_service = None,
+        prompt_schema = None,  # 🆕 V4.6: PromptSchema（提示词分层）
+        prompt_cache = None,   # 🆕 V4.6.2: InstancePromptCache（提示词缓存）
     ):
         """
         根据 Schema 创建 Agent（设计哲学：Schema 驱动）
@@ -310,6 +349,8 @@ class AgentFactory:
         1. Schema 定义组件启用状态和配置参数
         2. System Prompt 作为运行时指令传递给 Agent
         3. Agent 根据 Schema 动态初始化组件
+        4. 🆕 V4.6: PromptSchema 支持根据复杂度动态裁剪提示词
+        5. 🆕 V4.6.2: InstancePromptCache 提供预生成的提示词版本
         """
         from core.agent.simple_agent import SimpleAgent
         
@@ -322,6 +363,13 @@ class AgentFactory:
         logger.debug(f"   Plan Manager: {'启用' if schema.plan_manager.enabled else '禁用'}")
         logger.debug(f"   Tool Selector: {'启用' if schema.tool_selector.enabled else '禁用'}")
         logger.debug(f"   Output Formatter: {schema.output_formatter.default_format}")
+        if prompt_schema:
+            logger.debug(f"   PromptSchema: {prompt_schema.agent_name} ({len(prompt_schema.modules)} 模块)")
+        if prompt_cache:
+            logger.debug(f"   PromptCache: {prompt_cache.instance_name} (loaded={prompt_cache.is_loaded})")
+        
+        # 🆕 V4.6.2: 优先使用 prompt_cache 中的 prompt_schema
+        effective_prompt_schema = prompt_schema or (prompt_cache.prompt_schema if prompt_cache else None)
         
         # 🆕 核心改动：直接传递 schema 和 system_prompt 给 SimpleAgent
         # SimpleAgent 会根据 Schema 动态初始化组件
@@ -332,7 +380,9 @@ class AgentFactory:
             workspace_dir=workspace_dir,
             conversation_service=conversation_service,
             schema=schema,  # 🆕 传递 Schema（驱动组件初始化）
-            system_prompt=system_prompt  # 🆕 传递 System Prompt（运行时指令）
+            system_prompt=system_prompt,  # 🆕 传递 System Prompt（运行时指令）
+            prompt_schema=effective_prompt_schema,  # 🆕 V4.6: 传递 PromptSchema（提示词分层）
+            prompt_cache=prompt_cache,  # 🆕 V4.6.2: 传递 InstancePromptCache
         )
         
         logger.info(f"✅ Agent 初始化完成: {schema.name}")
@@ -373,6 +423,74 @@ class AgentFactory:
             return json.loads(brace_match.group(0))
         
         raise ValueError("无法从响应中提取 JSON")
+    
+    @classmethod
+    def _should_use_cache(cls, cache_dir, instance_dir) -> bool:
+        """
+        检查是否应该使用缓存
+        
+        Args:
+            cache_dir: 缓存目录 Path 对象
+            instance_dir: 实例目录 Path 对象
+            
+        Returns:
+            True 表示可以使用缓存
+        """
+        try:
+            from utils.cache_utils import is_cache_valid
+            return is_cache_valid(cache_dir, instance_dir)
+        except Exception as e:
+            logger.warning(f"缓存有效性检查失败: {e}")
+            return False
+    
+    @classmethod
+    def _load_schema_from_cache(cls, cache_dir) -> Optional[Dict[str, Any]]:
+        """
+        从缓存加载 Schema
+        
+        Args:
+            cache_dir: 缓存目录 Path 对象
+            
+        Returns:
+            Schema 字典，失败返回 None
+        """
+        try:
+            from utils.cache_utils import load_schema_cache
+            return load_schema_cache(cache_dir)
+        except Exception as e:
+            logger.error(f"加载 Schema 缓存失败: {e}")
+            return None
+    
+    @classmethod
+    def _save_schema_to_cache(cls, cache_dir, instance_dir, schema: AgentSchema) -> bool:
+        """
+        保存 Schema 到缓存
+        
+        Args:
+            cache_dir: 缓存目录 Path 对象
+            instance_dir: 实例目录 Path 对象
+            schema: AgentSchema 对象
+            
+        Returns:
+            成功返回 True
+        """
+        try:
+            from utils.cache_utils import save_schema_cache, save_cache_metadata
+            
+            # 转换为字典
+            schema_data = schema.to_dict() if hasattr(schema, 'to_dict') else schema.dict()
+            
+            # 保存 Schema
+            save_schema_cache(cache_dir, schema_data)
+            
+            # 保存元数据
+            save_cache_metadata(cache_dir, instance_dir)
+            
+            logger.info(f"✅ Schema 已保存到缓存: {cache_dir}")
+            return True
+        except Exception as e:
+            logger.error(f"保存 Schema 缓存失败: {e}")
+            return False
 
 
 # ============================================================

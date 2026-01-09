@@ -110,12 +110,12 @@ class InstanceTool:
     
     def _infer_capabilities(self) -> List[str]:
         """
-        🆕 V4.6 自动推断能力类别
+        🆕 V4.6 LLM 驱动的能力类别推断
         
         设计原则：
-        - FDE 无需手动配置 capability，框架自动推断
+        - 利用 LLM 的语义理解和推理能力，而非简单关键词匹配
         - 如果显式配置了 capability，则使用配置值（覆盖推断）
-        - 基于工具名称和描述进行关键词匹配
+        - 首次推断后缓存结果，避免重复调用 LLM
         
         Returns:
             推断出的能力类别列表（与 capability_categories 中的 ID 对应）
@@ -124,110 +124,128 @@ class InstanceTool:
         if self.capability:
             return [self.capability]
         
-        # 2. 自动推断：基于名称和描述的关键词匹配
-        name_lower = self.name.lower()
-        desc_lower = self.description.lower()
-        text = f"{name_lower} {desc_lower}"
+        # 2. LLM 驱动的语义推断（如果有全局 registry）
+        if hasattr(self, '_cached_capabilities'):
+            return self._cached_capabilities
         
+        # 尝试使用 LLM 推断（需要全局 registry）
+        try:
+            from core.tool.capability import get_capability_registry
+            registry = get_capability_registry()
+            
+            # 获取所有业务能力类别定义
+            business_capabilities = {}
+            for cat in registry.capability_categories:
+                if cat.get('category_type') == 'business':
+                    cap_id = cat['id']
+                    business_capabilities[cap_id] = cat.get('description', '')
+            
+            if business_capabilities:
+                # 使用 LLM 进行语义匹配
+                inferred = self._llm_based_inference(business_capabilities)
+                if inferred:
+                    self._cached_capabilities = inferred
+                    return inferred
+        except Exception as e:
+            # LLM 推断失败，回退到关键词匹配
+            logger.debug(f"LLM 推断失败，回退到关键词匹配: {str(e)}")
+        
+        # 3. 回退方案：简化的关键词匹配（仅核心关键词）
+        capabilities = self._keyword_based_fallback()
+        self._cached_capabilities = capabilities
+        return capabilities
+    
+    def _llm_based_inference(self, business_capabilities: Dict[str, str]) -> List[str]:
+        """
+        使用 LLM 进行语义推断
+        
+        Args:
+            business_capabilities: 业务能力字典 {能力ID: 描述}
+            
+        Returns:
+            推断出的能力列表
+        """
+        try:
+            from core.llm import create_llm_service
+            
+            # 构造推断 prompt
+            capabilities_desc = "\n".join([
+                f"- {cap_id}: {desc}" 
+                for cap_id, desc in business_capabilities.items()
+            ])
+            
+            prompt = f"""你是能力分类专家。根据工具的名称和描述，推断它属于哪些业务能力类别。
+
+工具信息：
+- 名称：{self.name}
+- 描述：{self.description}
+
+可选能力类别：
+{capabilities_desc}
+
+要求：
+1. 根据工具的功能和用途，选择最匹配的 1-3 个能力类别
+2. 只返回能力 ID，用逗号分隔
+3. 如果不确定，返回最相关的 1 个
+4. 只输出能力 ID，不要额外解释
+
+输出格式示例：chart_generation,data_visualization"""
+
+            # 调用 LLM
+            llm_service = create_llm_service()
+            response = llm_service.create_message(
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=100,
+                temperature=0.3  # 低温度，保证稳定性
+            )
+            
+            # 解析响应
+            if hasattr(response, 'content') and response.content:
+                content = response.content[0].text if isinstance(response.content, list) else response.content
+                # 提取能力 ID
+                capability_ids = [
+                    cap.strip() 
+                    for cap in content.strip().split(',')
+                    if cap.strip() in business_capabilities
+                ]
+                
+                if capability_ids:
+                    logger.info(f"🤖 LLM 推断工具 {self.name} 的能力: {capability_ids}")
+                    return capability_ids
+        
+        except Exception as e:
+            logger.debug(f"LLM 推断失败: {str(e)}")
+        
+        return []
+    
+    def _keyword_based_fallback(self) -> List[str]:
+        """
+        关键词匹配回退方案（简化版，仅核心关键词）
+        
+        Returns:
+            推断出的能力列表
+        """
+        text = f"{self.name.lower()} {self.description.lower()}"
         capabilities = []
         
-        # ===== 内容生成类 =====
-        # 图表生成（flowchart, 架构图, 思维导图）
-        if any(kw in text for kw in [
-            "flowchart", "chart", "diagram", "graph", "架构图", "流程图", 
-            "思维导图", "mindmap", "关系图", "uml", "er图"
-        ]):
-            capabilities.append("chart_generation")
+        # 核心关键词映射（简化版）
+        keyword_map = {
+            "chart_generation": ["flowchart", "diagram", "架构图", "流程图"],
+            "ppt_generation": ["ppt", "slides", "presentation", "演示"],
+            "document_creation": ["document", "word", "pdf", "文档", "报告"],
+            "image_generation": ["image", "picture", "图片", "dalle"],
+            "web_search": ["search", "搜索", "google"],
+            "news_search": ["news", "新闻"],
+            "data_analysis": ["analysis", "分析", "excel"],
+            "data_visualization": ["visualization", "可视化", "图表"],
+            "crm_integration": ["crm", "客户", "salesforce"],
+            "notification": ["email", "sms", "邮件", "短信"]
+        }
         
-        # PPT 生成
-        if any(kw in text for kw in [
-            "ppt", "powerpoint", "slides", "presentation", "演示", "幻灯片"
-        ]):
-            capabilities.append("ppt_generation")
+        for cap_id, keywords in keyword_map.items():
+            if any(kw in text for kw in keywords):
+                capabilities.append(cap_id)
         
-        # 文档生成（Word/PDF/报告）
-        if any(kw in text for kw in [
-            "document", "word", "pdf", "report", "文档", "报告", "合同", "说明书"
-        ]):
-            capabilities.append("document_creation")
-        
-        # 图片生成
-        if any(kw in text for kw in [
-            "image", "picture", "photo", "图片", "生成图", "ai绘画", "dalle", "midjourney"
-        ]):
-            capabilities.append("image_generation")
-        
-        # 视频生成
-        if any(kw in text for kw in [
-            "video", "视频", "动画", "animation"
-        ]):
-            capabilities.append("video_generation")
-        
-        # ===== 信息获取类 =====
-        # 互联网搜索
-        if any(kw in text for kw in [
-            "search", "搜索", "查询", "检索", "google", "bing"
-        ]):
-            capabilities.append("web_search")
-        
-        # 新闻搜索
-        if any(kw in text for kw in [
-            "news", "新闻", "资讯", "热点", "动态"
-        ]):
-            capabilities.append("news_search")
-        
-        # 学术搜索
-        if any(kw in text for kw in [
-            "paper", "academic", "论文", "学术", "研究", "arxiv", "scholar"
-        ]):
-            capabilities.append("academic_search")
-        
-        # 市场数据
-        if any(kw in text for kw in [
-            "market", "stock", "finance", "市场", "股票", "金融", "财务"
-        ]):
-            capabilities.append("market_data")
-        
-        # ===== 数据处理类 =====
-        # 数据分析
-        if any(kw in text for kw in [
-            "analysis", "analyze", "分析", "统计", "excel", "数据处理"
-        ]):
-            capabilities.append("data_analysis")
-        
-        # 数据可视化
-        if any(kw in text for kw in [
-            "visualization", "可视化", "图表", "dashboard", "报表"
-        ]):
-            capabilities.append("data_visualization")
-        
-        # 文件转换
-        if any(kw in text for kw in [
-            "convert", "转换", "格式转换", "pdf转", "转pdf"
-        ]):
-            capabilities.append("file_conversion")
-        
-        # ===== 业务集成类 =====
-        # CRM
-        if any(kw in text for kw in [
-            "crm", "客户", "销售", "salesforce", "hubspot"
-        ]):
-            capabilities.append("crm_integration")
-        
-        # ERP
-        if any(kw in text for kw in [
-            "erp", "库存", "订单", "sap", "oracle"
-        ]):
-            capabilities.append("erp_integration")
-        
-        # 消息通知
-        if any(kw in text for kw in [
-            "email", "sms", "notification", "邮件", "短信", "钉钉", "飞书", "微信"
-        ]):
-            capabilities.append("notification")
-        
-        # 3. 如果没有匹配到任何能力，返回空列表（让框架使用默认行为）
-        # 不再默认返回 api_calling，因为那是内部实现手段
         return capabilities
 
 
@@ -237,6 +255,8 @@ class InstanceToolRegistry:
     
     管理一个 Agent 实例的所有动态工具（MCP、REST API）
     与全局 CapabilityRegistry 协同工作
+    
+    🆕 V4.6: 支持 LLM 驱动的批量能力推断 + 缓存机制
     """
     
     def __init__(self, global_registry=None):
@@ -249,6 +269,7 @@ class InstanceToolRegistry:
         self._tools: Dict[str, InstanceTool] = {}
         self._mcp_clients: Dict[str, Any] = {}  # 缓存 MCP 客户端
         self._global_registry = global_registry
+        self._inference_cache: Dict[str, List[str]] = {}  # 工具能力推断缓存 {tool_hash: capabilities}
     
     # ==================== 注册接口 ====================
     
@@ -262,7 +283,7 @@ class InstanceToolRegistry:
         self._tools[tool.name] = tool
         logger.info(f"📦 注册实例工具: {tool.name} ({tool.type.value})")
     
-    async def register_mcp_tool(
+    async     def register_mcp_tool(
         self,
         name: str,
         server_url: str,
@@ -284,6 +305,14 @@ class InstanceToolRegistry:
             handler: 工具调用处理器
             capability: 🆕 能力类别（用户意图分类，如 document_creation）
         """
+        # 🆕 V4.6: 如果没有显式指定 capability，从缓存中查找
+        if not capability:
+            tool_hash = self._compute_tool_hash(name, tool_info.get("description", ""))
+            cached_capabilities = self._inference_cache.get(tool_hash, [])
+            if cached_capabilities:
+                capability = cached_capabilities[0]  # 使用缓存的第一个能力
+                logger.debug(f"   从缓存获取能力: {capability}")
+        
         tool = InstanceTool(
             name=name,
             type=InstanceToolType.MCP,
@@ -301,6 +330,15 @@ class InstanceToolRegistry:
         # 如果有 capability，记录日志
         if capability:
             logger.info(f"   📌 能力类别: {capability}")
+        
+        # 🆕 V4.6: 将推断结果存入缓存（用于后续保存）
+        if not capability:
+            # 触发推断（InstanceTool 的 _infer_capabilities 会被调用）
+            inferred = tool._infer_capabilities()
+            if inferred:
+                tool_hash = self._compute_tool_hash(name, tool.description)
+                self._inference_cache[tool_hash] = inferred
+                logger.debug(f"   推断并缓存能力: {inferred}")
         
         # 缓存 MCP 客户端
         self._mcp_clients[server_url] = mcp_client
@@ -323,8 +361,18 @@ class InstanceToolRegistry:
             api_doc: API 文档内容
             capability: 🆕 能力类别（用户意图分类）
         """
+        tool_name = f"api_{name}"
+        
+        # 🆕 V4.6: 如果没有显式指定 capability，从缓存中查找
+        if not capability:
+            tool_hash = self._compute_tool_hash(tool_name, description)
+            cached_capabilities = self._inference_cache.get(tool_hash, [])
+            if cached_capabilities:
+                capability = cached_capabilities[0]  # 使用缓存的第一个能力
+                logger.debug(f"   从缓存获取能力: {capability}")
+        
         tool = InstanceTool(
-            name=f"api_{name}",
+            name=tool_name,
             type=InstanceToolType.REST_API,
             description=description,
             capability=capability,  # 🆕 传递 capability
@@ -345,6 +393,15 @@ class InstanceToolRegistry:
         # 如果有 capability，记录日志
         if capability:
             logger.info(f"   📌 能力类别: {capability}")
+        
+        # 🆕 V4.6: 将推断结果存入缓存（用于后续保存）
+        if not capability:
+            # 触发推断
+            inferred = tool._infer_capabilities()
+            if inferred:
+                tool_hash = self._compute_tool_hash(tool_name, description)
+                self._inference_cache[tool_hash] = inferred
+                logger.debug(f"   推断并缓存能力: {inferred}")
     
     # ==================== 查询接口 ====================
     
@@ -476,6 +533,76 @@ class InstanceToolRegistry:
     def list_tool_names(self) -> List[str]:
         """列出所有工具名称"""
         return list(self._tools.keys())
+    
+    # ==================== 缓存管理（🆕 V4.6）====================
+    
+    def load_inference_cache(self, cache_path) -> bool:
+        """
+        加载工具推断缓存
+        
+        Args:
+            cache_path: 缓存文件路径（Path 对象或字符串）
+            
+        Returns:
+            成功返回 True
+        """
+        from pathlib import Path
+        
+        cache_file = Path(cache_path)
+        if not cache_file.exists():
+            logger.debug(f"工具推断缓存文件不存在: {cache_file}")
+            return False
+        
+        try:
+            import json
+            with open(cache_file, 'r', encoding='utf-8') as f:
+                self._inference_cache = json.load(f)
+            logger.info(f"✅ 加载工具推断缓存: {len(self._inference_cache)} 个工具")
+            return True
+        except Exception as e:
+            logger.error(f"加载工具推断缓存失败: {str(e)}")
+            return False
+    
+    def save_inference_cache(self, cache_path) -> bool:
+        """
+        保存工具推断缓存
+        
+        Args:
+            cache_path: 缓存文件路径（Path 对象或字符串）
+            
+        Returns:
+            成功返回 True
+        """
+        from pathlib import Path
+        import json
+        
+        cache_file = Path(cache_path)
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        try:
+            with open(cache_file, 'w', encoding='utf-8') as f:
+                json.dump(self._inference_cache, f, indent=2, ensure_ascii=False)
+            logger.info(f"✅ 保存工具推断缓存: {len(self._inference_cache)} 个工具")
+            return True
+        except Exception as e:
+            logger.error(f"保存工具推断缓存失败: {str(e)}")
+            return False
+    
+    def _compute_tool_hash(self, tool_name: str, tool_description: str) -> str:
+        """
+        计算工具的 hash（用于缓存 key）
+        
+        Args:
+            tool_name: 工具名称
+            tool_description: 工具描述
+            
+        Returns:
+            hash 字符串
+        """
+        import hashlib
+        content = f"{tool_name}|{tool_description}"
+        hasher = hashlib.sha256(content.encode('utf-8'))
+        return f"sha256:{hasher.hexdigest()}"
 
 
 # ==================== 便捷函数 ====================

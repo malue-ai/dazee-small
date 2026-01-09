@@ -18,17 +18,19 @@ from logger import get_logger
 logger = get_logger("run_agent")
 
 
-async def run_agent(instance_name: str, query: str = None):
+async def run_agent(instance_name: str, query: str = None, force_refresh: bool = False):
     """运行 Agent"""
     from scripts.instance_loader import create_agent_from_instance
     from services.mcp_client import clear_mcp_client_cache
     
     print(f"\n🚀 启动实例: {instance_name}")
+    if force_refresh:
+        print("   模式: 强制刷新缓存")
     print("=" * 60)
     
     try:
-        # 创建 Agent
-        agent = await create_agent_from_instance(instance_name)
+        # 创建 Agent（🆕 V4.6: 支持缓存）
+        agent = await create_agent_from_instance(instance_name, force_refresh=force_refresh)
         
         print(f"✅ Agent 就绪")
         print(f"   模型: {agent.model}")
@@ -124,10 +126,42 @@ async def interactive_mode(agent):
 if __name__ == "__main__":
     import argparse
     
-    parser = argparse.ArgumentParser(description="运行 Agent 实例")
+    parser = argparse.ArgumentParser(
+        description="运行 Agent 实例",
+        epilog="""示例:
+  # 正常启动（使用缓存）
+  python scripts/run_agent.py --instance test_agent
+  
+  # 强制刷新缓存
+  python scripts/run_agent.py --instance test_agent --force-refresh
+  
+  # 清除缓存
+  python scripts/run_agent.py --instance test_agent --clear-cache
+        """,
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--instance", "-i", default="test_agent", help="实例名称")
     parser.add_argument("--query", "-q", type=str, help="用户查询（不提供则进入交互模式）")
+    parser.add_argument("--force-refresh", action="store_true", 
+                       help="强制刷新缓存，重新生成 Schema 和推断工具能力")
+    parser.add_argument("--clear-cache", action="store_true",
+                       help="清除实例缓存后退出")
     
     args = parser.parse_args()
     
-    asyncio.run(run_agent(args.instance, args.query))
+    # 🆕 V4.6: 清除缓存命令
+    if args.clear_cache:
+        from pathlib import Path
+        from utils.cache_utils import clear_cache
+        
+        instances_dir = Path(__file__).parent.parent / "instances"
+        cache_dir = instances_dir / args.instance / ".cache"
+        
+        if cache_dir.exists():
+            clear_cache(cache_dir)
+            print(f"✅ 已清除实例 {args.instance} 的缓存: {cache_dir}")
+        else:
+            print(f"⚠️ 缓存目录不存在: {cache_dir}")
+        return
+    
+    asyncio.run(run_agent(args.instance, args.query, args.force_refresh))

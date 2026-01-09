@@ -1,10 +1,10 @@
-# ZenFlux Agent V4 架构总览
+# ZenFlux Agent V5 架构总览
 
-> 📅 **最后更新**: 2026-01-08  
-> 🎯 **当前版本**: V4.6 - 智能记忆检索决策（Intent-Driven Memory Retrieval）  
-> 🔗 **前版本**: [V3.7 架构](./ARCHITECTURE_V3.7_E2B.md)
-> ✅ **优化状态**: Schema 驱动 + Context Reduction + **工具分层** + Code-First 编排 + E2E 追踪 + Re-Plan + 统一能力注册 + **长时运行支持** + **Skills/Tools 分层调用** + **Mem0用户画像** + **🆕 智能记忆检索**
-> 📊 **文档特点**: 参考 V3.7 风格的详细架构图 + 完整 7 阶段用户流程管道图
+> 📅 **最后更新**: 2026-01-09  
+> 🎯 **当前版本**: V5.0 - 实例级提示词缓存 + LLM 语义驱动 Schema（Instance-level Prompt Caching）  
+> 🔗 **前版本**: [V4.6 架构](./00-ARCHITECTURE-V4.md)
+> ✅ **优化状态**: **🆕 实例级缓存** + **LLM 语义分析** + Schema 驱动 + Context Reduction + 工具分层 + Code-First 编排 + E2E 追踪 + Re-Plan + 统一能力注册 + 长时运行支持 + Skills/Tools 分层调用 + Mem0用户画像 + 智能记忆检索
+> 📊 **文档特点**: 参考 V3.7 风格的详细架构图 + 完整启动/运行时流程分离 + **Prompt-First 设计原则**
 
 ---
 
@@ -24,7 +24,74 @@
 
 ## 🚀 版本演进
 
-### V4.5 → V4.6 核心变化（🆕 智能记忆检索决策）
+### V4.6 → V5.0 核心变化（🔥 实例级提示词缓存 + LLM 语义驱动 Schema）
+
+这是一次**重大架构升级**，从根本上改变了提示词管理和 Schema 生成机制。
+
+| 维度 | V4.6 | V5.0 | 改进 |
+|------|------|------|------|
+| **提示词生成** | 每次请求动态裁剪 | ✅ 启动时一次性生成3版本 | 运行时零开销，毫秒级响应 |
+| **Schema 生成** | 硬编码关键词规则 | ✅ LLM 语义分析 | 泛化能力强，理解业务意图 |
+| **意图识别提示词** | 硬编码模板 | ✅ 动态生成（基于运营配置） | 用户配置优先，高质量默认兜底 |
+| **缓存管理** | 无统一缓存 | ✅ InstancePromptCache 单例 | 启动时加载，全局复用 |
+| **维护成本** | 高（改规则需改代码） | ✅ 低（改 Few-shot 示例即可） | Prompt-First，规则在提示词里 |
+
+**核心理念**（"Prompt-First" 设计原则）：
+- **规则写在 Prompt 里，不写在代码里**：用高质量 Prompt + Few-shot 激发 LLM 泛化能力
+- **启动时充分利用 LLM**：一次性语义分析（2-3秒），换取运行时毫秒级性能
+- **用空间换时间**：缓存多个版本的提示词，运行时直接取用
+- **用户配置优先**：运营写的规则 > 高质量默认
+
+**实现细节**：
+```
+启动阶段（一次性，~2-3秒）:
+├── load instances/xxx/prompt.md
+├── LLM 语义分析 → PromptSchema（解析模块结构）
+├── LLM 语义分析 → AgentSchema（推断组件配置，无硬编码规则）
+│   └─ 基于 Few-shot 示例推理，而非关键词匹配
+├── 生成 3 个版本系统提示词并缓存:
+│   ├─ system_prompt_simple（Simple 任务）
+│   ├─ system_prompt_medium（Medium 任务）
+│   └─ system_prompt_complex（Complex 任务）
+├── IntentPromptGenerator.generate() → intent_prompt（基于运营配置动态生成）
+└── 全部缓存到 InstancePromptCache（单例模式）
+
+运行阶段（每次请求，毫秒级）:
+├── IntentAnalyzer.analyze() → 使用缓存的 intent_prompt
+├── 意图识别 → 复杂度（Simple/Medium/Complex）
+├── cache.get_system_prompt(complexity) → 直接取对应版本
+└── LLM 执行任务（无提示词分析开销）
+```
+
+**Schema 生成方式对比**：
+
+| 方式 | V4.6 | V5.0 |
+|------|------|------|
+| 代码规则 | `if "excel" in prompt: skills.append("xlsx")` | ❌ **删除** |
+| LLM 分析 | 无 | ✅ **Few-shot 引导语义推理** |
+| 泛化能力 | 极差（只识别关键词） | 强（理解业务意图，如"准备演示材料"→pptx） |
+| 维护方式 | 修改代码 | 修改 Few-shot 示例 |
+
+**Few-shot 示例价值**（核心哲学）：
+```python
+# ❌ V4.6: 硬编码规则（泛化差）
+if any(kw in prompt_lower for kw in ["excel", "表格", "xlsx"]):
+    skills.append(SkillConfig(skill_id="xlsx"))
+
+# ✅ V5.0: Few-shot 引导 LLM 推理
+<example>
+<prompt>帮我分析销售数据，生成周报</prompt>
+<reasoning>业务场景：数据分析 + 表格生成（虽无"excel"关键词，但需要xlsx）</reasoning>
+<schema>{"tools": ["e2b_sandbox"], "skills": [{"skill_id": "xlsx"}]}</schema>
+</example>
+```
+
+LLM 通过 Few-shot 学习**推理模式**，可以泛化到未见过的场景：
+- "整理成报告" → 推断需要 docx
+- "准备演示材料" → 推断需要 pptx（虽未提及"PPT"）
+- "分析竞品" → 推断需要 web_search + docx
+
+### V4.5 → V4.6 核心变化（智能记忆检索决策）
 
 | 维度 | V4.5 | V4.6 | 改进 |
 |------|------|------|------|
@@ -200,7 +267,15 @@ class Mem0BatchUpdateResult:
 | **LLM** | `llm_service.py` | `core/llm/` 多提供商 | ✅ Claude/OpenAI/Gemini |
 | **Events** | 分散的事件发射 | `core/events/` 统一管理 | ✅ 6 类事件统一接口 |
 
-### 🎯 V4.5 优化重点（🆕 Mem0 用户画像层）
+### 🎯 V5.0 优化重点（🔥 实例级提示词缓存 + LLM 语义驱动）
+
+1. **InstancePromptCache 单例模式** - 实例启动时一次性加载，全局缓存复用
+2. **LLM 语义分析 Schema** - 删除硬编码规则，改用 Few-shot 引导语义推理
+3. **动态意图提示词生成** - 基于运营配置动态组装，用户配置优先
+4. **3 版本系统提示词预生成** - Simple/Medium/Complex 启动时生成并缓存
+5. **Prompt-First 设计原则** - 规则写在高质量 Prompt 里，不写在代码里
+
+### 🎯 V4.5 优化重点（Mem0 用户画像层）
 
 1. **Mem0 集成** - 基于Mem0框架的用户记忆层，支持跨Session用户画像
 2. **多向量数据库** - 支持Qdrant、腾讯云VectorDB，统一VectorStoreBase接口
@@ -250,7 +325,21 @@ class Mem0BatchUpdateResult:
 3. **可扩展** - 新功能通过配置添加，不修改核心代码
 4. **可观测** - 统一事件系统，完整的执行追踪
 
-### ✨ V4.5 核心成就（🆕 Mem0 用户画像层）
+### ✨ V5.0 核心成就（🔥 实例级提示词缓存 + LLM 语义驱动）
+
+|| 改进项 | 实现状态 | 具体成果 |
+||-------|---------|---------|
+|| **InstancePromptCache** | ✅ 完成 | `core/prompt/instance_cache.py` - 单例模式实例级缓存 |
+|| **IntentPromptGenerator** | ✅ 完成 | `core/prompt/intent_prompt_generator.py` - 动态意图提示词生成 |
+|| **LLM 语义分析 Schema** | ✅ 完成 | `factory.py._generate_schema_with_llm()` - Few-shot 引导推理 |
+|| **删除硬编码规则** | ✅ 完成 | 删除 `_infer_schema_from_prompt()` 中的关键词匹配 |
+|| **意图提示词模块化** | ✅ 完成 | `intent_recognition_prompt.py` - 支持动态组装 |
+|| **Simple_agent 缓存集成** | ✅ 完成 | 运行时直接从缓存取提示词，零分析开销 |
+|| **IntentAnalyzer 缓存集成** | ✅ 完成 | 使用缓存的 intent_prompt，用户配置优先 |
+|| **instance_loader 启动流程** | ✅ 完成 | 一次性加载所有提示词版本到缓存 |
+|| **文档完善** | ✅ 完成 | 架构文档 V5.0 + Prompt-First 设计原则 |
+
+### ✨ V4.5 核心成就（Mem0 用户画像层）
 
 || 改进项 | 实现状态 | 具体成果 |
 ||-------|---------|---------|
@@ -358,6 +447,65 @@ class Mem0BatchUpdateResult:
 ---
 
 ## 🎯 核心理念
+
+### 0. Prompt-First 设计原则（🆕 V5.0）
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                                                                 │
+│   核心哲学：规则写在 Prompt 里，不写在代码里                     │
+│   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │
+│                                                                 │
+│   ❌ 代码层硬编码规则（V4.6 及之前）：                          │
+│   • 泛化能力：极差                                              │
+│   • 维护成本：高（改规则需改代码）                              │
+│   • 可扩展性：差（新场景需增加 if-else）                        │
+│                                                                 │
+│   if "excel" in prompt_lower:                                   │
+│       skills.append("xlsx")  # ❌ 硬编码规则                     │
+│                                                                 │
+│   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │
+│                                                                 │
+│   ✅ Prompt 层 Few-shot 引导（V5.0）：                          │
+│   • 泛化能力：强（LLM 理解业务意图）                            │
+│   • 维护成本：低（改 Prompt 示例即可）                          │
+│   • 可扩展性：强（LLM 可泛化到未见场景）                        │
+│                                                                 │
+│   <example>                                                     │
+│   <prompt>帮我分析销售数据，生成周报</prompt>                   │
+│   <reasoning>                                                   │
+│   业务场景：数据分析 + 表格生成                                 │
+│   虽无"excel"关键词，但需要 xlsx                                │
+│   </reasoning>                                                  │
+│   <schema>{"skills": [{"skill_id": "xlsx"}]}</schema>          │
+│   </example>                                                    │
+│                                                                 │
+│   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │
+│                                                                 │
+│   核心收益：                                                     │
+│   • LLM 学会推理模式：业务意图 → 配置需求                       │
+│   • 泛化到新场景："准备演示材料" → pptx（虽未提及"PPT"）       │
+│   • 维护简单：增加 Few-shot 示例，无需改代码                    │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**三大原则**：
+
+1. **启动时充分利用 LLM**  
+   - 一次性语义分析（2-3秒）
+   - 生成所有提示词版本并缓存
+   - 换取运行时毫秒级性能
+
+2. **用空间换时间**  
+   - 缓存 3 版本系统提示词（Simple/Medium/Complex）
+   - 缓存动态生成的意图识别提示词
+   - 缓存 LLM 分析的 AgentSchema
+
+3. **用户配置优先**  
+   - 运营写的意图规则 > 默认规则
+   - 运营写的复杂度规则 > 启发式规则
+   - 缺失配置时使用高质量默认兜底
 
 ### 1. 编排模式（Orchestrator Pattern）
 
@@ -820,6 +968,236 @@ class CodeOrchestrator:
     - 结构化的代码生成与验证
     - 自动错误修复和重试
     """
+```
+
+### 2.4 实例级提示词缓存机制（🆕 V5.0）
+
+**设计理念**：
+- **启动时一次性生成**：3 版本系统提示词 + 意图识别提示词 + AgentSchema
+- **运行时零开销**：直接从缓存取用，无 LLM 分析
+- **单例模式**：每个实例一个缓存，全局复用
+
+**架构流程**：
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                       实例级提示词缓存架构（V5.0）                                │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓   │
+│  ┃ 启动阶段（一次性，~2-3秒）                                                 ┃   │
+│  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛   │
+│                                                                                  │
+│  instances/xxx/prompt.md                                                         │
+│      │                                                                           │
+│      ▼                                                                           │
+│  ┌──────────────────────────────────────────────────────────────────────────┐   │
+│  │ InstancePromptCache.load_once(raw_prompt)                                │   │
+│  │                                                                           │   │
+│  │   Step 1: LLM 语义分析 → PromptSchema                                    │   │
+│  │   ────────────────────────────────────────────────────────               │   │
+│  │   LLMPromptAnalyzer.analyze(raw_prompt)                                  │   │
+│  │   → 提取模块结构、工具列表、意图规则、复杂度关键词                        │   │
+│  │                                                                           │   │
+│  │   Step 2: LLM 语义分析 → AgentSchema（🔥 删除硬编码规则）               │   │
+│  │   ────────────────────────────────────────────────────────               │   │
+│  │   AgentFactory._generate_schema_with_llm(raw_prompt)                     │   │
+│  │   • 使用 Few-shot 示例引导 LLM 推理                                      │   │
+│  │   • 理解业务意图 → 推断组件配置                                          │   │
+│  │   • 无关键词匹配，纯语义理解                                             │   │
+│  │   → AgentSchema {intent_analyzer, plan_manager, tools, skills, ...}     │   │
+│  │                                                                           │   │
+│  │   Step 3: 生成 3 版本系统提示词                                          │   │
+│  │   ────────────────────────────────────────────────────────               │   │
+│  │   PromptGenerator.generate_prompt(schema, complexity, agent_schema)     │   │
+│  │   • Simple:  裁剪后的简化版（快速任务）                                  │   │
+│  │   • Medium:  中等详细程度（常规任务）                                    │   │
+│  │   • Complex: 完整版本（复杂任务）                                        │   │
+│  │   → 三个版本全部缓存到内存                                               │   │
+│  │                                                                           │   │
+│  │   Step 4: 动态生成意图识别提示词                                         │   │
+│  │   ────────────────────────────────────────────────────────               │   │
+│  │   IntentPromptGenerator.generate(prompt_schema)                          │   │
+│  │   • 提取运营定义的意图分类规则                                           │   │
+│  │   • 提取复杂度判断规则                                                   │   │
+│  │   • 用户配置优先，缺失则用高质量默认                                      │   │
+│  │   → 缓存到 cache.intent_prompt                                           │   │
+│  └───────────────────────────────────┬──────────────────────────────────────┘   │
+│                                      │                                           │
+│                                      ▼                                           │
+│  ┌──────────────────────────────────────────────────────────────────────────┐   │
+│  │ 缓存内容（全局单例）                                                      │   │
+│  │                                                                           │   │
+│  │  • prompt_schema: PromptSchema（模块结构）                               │   │
+│  │  • agent_schema: AgentSchema（组件配置）                                 │   │
+│  │  • system_prompt_simple: str（Simple 版）                                │   │
+│  │  • system_prompt_medium: str（Medium 版）                                │   │
+│  │  • system_prompt_complex: str（Complex 版）                              │   │
+│  │  • intent_prompt: str（意图识别提示词）                                  │   │
+│  │  • is_loaded: bool = True（加载完成标记）                                │   │
+│  └──────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                  │
+│  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓   │
+│  ┃ 运行阶段（每次请求，毫秒级）                                               ┃   │
+│  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛   │
+│                                                                                  │
+│  用户 Query                                                                      │
+│      │                                                                           │
+│      ▼                                                                           │
+│  ┌──────────────────────────────────────────────────────────────────────────┐   │
+│  │ IntentAnalyzer.analyze(messages)                                          │   │
+│  │   └─ cache.get_intent_prompt()  # 直接从缓存取，无 LLM 分析               │   │
+│  └───────────────────────────────────┬──────────────────────────────────────┘   │
+│                                      │                                           │
+│                                      ▼                                           │
+│  ┌──────────────────────────────────────────────────────────────────────────┐   │
+│  │ 意图识别结果                                                              │   │
+│  │   • task_type: TaskType                                                   │   │
+│  │   • complexity: TaskComplexity（Simple/Medium/Complex）                  │   │
+│  │   • needs_plan: bool                                                      │   │
+│  │   • skip_memory_retrieval: bool                                           │   │
+│  └───────────────────────────────────┬──────────────────────────────────────┘   │
+│                                      │                                           │
+│                                      ▼                                           │
+│  ┌──────────────────────────────────────────────────────────────────────────┐   │
+│  │ SimpleAgent.chat()                                                        │   │
+│  │   cache.get_system_prompt(complexity)  # 直接取对应版本，无裁剪计算       │   │
+│  │   → system_prompt_simple / medium / complex                               │   │
+│  └──────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                  │
+│  💡 性能优势：                                                                   │
+│  • 启动时：2-3 秒（一次性投入）                                                 │
+│  • 运行时：毫秒级（直接缓存取用）                                               │
+│  • 零分析开销：无 LLM 调用，无提示词裁剪计算                                    │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**核心类**：
+
+```python
+# core/prompt/instance_cache.py
+class InstancePromptCache:
+    """
+    实例级提示词缓存管理器（单例模式）
+    
+    设计原则：
+    - 实例启动时一次性加载，全局缓存
+    - 用空间换时间，避免重复分析
+    - 所有提示词版本启动时生成，运行时直接取缓存
+    """
+    _instances: Dict[str, "InstancePromptCache"] = {}
+    
+    def __init__(self, instance_name: str):
+        self.instance_name = instance_name
+        self.prompt_schema: PromptSchema = None
+        self.agent_schema: AgentSchema = None
+        
+        # 3 版本系统提示词（启动时生成）
+        self.system_prompt_simple: str = None
+        self.system_prompt_medium: str = None
+        self.system_prompt_complex: str = None
+        
+        # 意图识别提示词（启动时生成）
+        self.intent_prompt: str = None
+        
+        self.is_loaded: bool = False
+    
+    @classmethod
+    def get_instance(cls, instance_name: str) -> "InstancePromptCache":
+        """获取实例缓存（单例）"""
+        if instance_name not in cls._instances:
+            cls._instances[instance_name] = cls(instance_name)
+        return cls._instances[instance_name]
+    
+    async def load_once(self, raw_prompt: str, agent_schema=None, force_refresh: bool = False):
+        """一次性加载（幂等）"""
+        if self.is_loaded and not force_refresh:
+            return
+        
+        async with self._lock:
+            if self.is_loaded and not force_refresh:
+                return
+            
+            # Step 1: LLM 分析 → PromptSchema
+            from core.prompt.llm_analyzer import LLMPromptAnalyzer
+            analyzer = LLMPromptAnalyzer()
+            self.prompt_schema = await analyzer.analyze(raw_prompt)
+            
+            # Step 2: LLM 分析 → AgentSchema
+            from core.agent.factory import AgentFactory
+            self.agent_schema = await AgentFactory._generate_schema_with_llm(raw_prompt)
+            
+            # Step 3: 生成 3 版本系统提示词
+            from core.prompt.prompt_layer import PromptGenerator
+            self.system_prompt_simple = PromptGenerator.generate_prompt(
+                self.prompt_schema, TaskComplexity.SIMPLE, self.agent_schema
+            )
+            self.system_prompt_medium = PromptGenerator.generate_prompt(
+                self.prompt_schema, TaskComplexity.MEDIUM, self.agent_schema
+            )
+            self.system_prompt_complex = PromptGenerator.generate_prompt(
+                self.prompt_schema, TaskComplexity.COMPLEX, self.agent_schema
+            )
+            
+            # Step 4: 动态生成意图识别提示词
+            from core.prompt.intent_prompt_generator import IntentPromptGenerator
+            self.intent_prompt = IntentPromptGenerator.generate(self.prompt_schema)
+            
+            self.is_loaded = True
+    
+    def get_system_prompt(self, complexity: TaskComplexity) -> str:
+        """获取对应复杂度的系统提示词（直接从缓存取）"""
+        if complexity == TaskComplexity.SIMPLE:
+            return self.system_prompt_simple
+        elif complexity == TaskComplexity.MEDIUM:
+            return self.system_prompt_medium
+        else:
+            return self.system_prompt_complex
+    
+    def get_intent_prompt(self) -> str:
+        """获取意图识别提示词"""
+        return self.intent_prompt
+```
+
+```python
+# core/prompt/intent_prompt_generator.py
+class IntentPromptGenerator:
+    """
+    从 PromptSchema 动态生成意图识别提示词
+    
+    原则：用户配置优先，缺失用高质量默认
+    """
+    
+    @classmethod
+    def generate(cls, schema: PromptSchema) -> str:
+        """
+        根据 PromptSchema 生成意图识别提示词
+        
+        提取内容：
+        1. 意图分类规则（如果运营定义了）
+        2. 复杂度判断规则（如果运营定义了）
+        3. 特殊关键词映射
+        """
+        # 提取运营定义的意图规则
+        custom_intent_types = cls._extract_intent_rules(schema)
+        custom_complexity_rules = cls._extract_complexity_rules(schema)
+        
+        # 如果有用户配置，动态组装
+        if custom_intent_types or custom_complexity_rules:
+            from prompts.intent_recognition_prompt import get_intent_recognition_prompt
+            return get_intent_recognition_prompt(
+                custom_task_types=custom_intent_types,
+                custom_complexity_rules=custom_complexity_rules
+            )
+        else:
+            # 使用高质量默认
+            return cls.get_default()
+    
+    @classmethod
+    def get_default(cls) -> str:
+        """获取高质量默认提示词"""
+        from prompts.intent_recognition_prompt import get_intent_recognition_prompt
+        return get_intent_recognition_prompt()
 ```
 
 ### 2.5 统一能力注册与发现机制（V4.2.3+）
@@ -1771,15 +2149,21 @@ async def update_user_memories(user_id: str, since_hours: int = 24)
 │                                      │                                           │
 │                                      ▼                                           │
 │  ┌──────────────────────────────────────────────────────────────────────────┐   │
-│  │ Phase 4: System Prompt Assembly                                          │   │
+│  │ Phase 4: System Prompt Assembly（🔥 V5.0: 从缓存获取）                  │   │
 │  │                                                                          │   │
+│  │   # 🔥 Step 1: 根据复杂度从缓存获取对应版本的系统提示词                  │   │
+│  │   base_prompt = cache.get_system_prompt(intent.complexity)               │   │
+│  │   # 直接取用，无裁剪计算：                                               │   │
+│  │   # - Simple  → system_prompt_simple                                     │   │
+│  │   # - Medium  → system_prompt_medium                                     │   │
+│  │   # - Complex → system_prompt_complex                                    │   │
+│  │                                                                          │   │
+│  │   # Step 2: Mem0 用户画像注入（按需）                                    │   │
 │  │   if intent.skip_memory_retrieval == true:                               │   │
-│  │       # 跳过 Mem0 检索，节省 ~200ms + Embedding 成本                     │   │
-│  │       system_prompt = UNIVERSAL_AGENT_PROMPT                             │   │
+│  │       system_prompt = base_prompt  # 跳过 Mem0，节省 ~200ms             │   │
 │  │   else:                                                                  │   │
-│  │       # 执行 Mem0 检索，注入用户画像                                      │   │
 │  │       user_profile = _fetch_user_profile(user_id, user_query)            │   │
-│  │       system_prompt = UNIVERSAL_AGENT_PROMPT + user_profile              │   │
+│  │       system_prompt = base_prompt + user_profile                         │   │
 │  └───────────────────────────────────┬──────────────────────────────────────┘   │
 │                                      │                                           │
 │                                      ▼                                           │
@@ -1983,20 +2367,43 @@ core/llm/
 
 ## 🔄 数据流
 
-### RVR 循环数据流（V4.6 更新）
+### RVR 循环数据流（V5.0 更新）
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│                              RVR Loop 数据流（V4.6）                             │
+│                        RVR Loop 数据流（V5.0 - 实例级缓存）                      │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  🔥 V5.0 核心变化：启动时生成并缓存，运行时直接取用                              │
+│  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │
+│                                                                                  │
+│  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓   │
+│  ┃ 启动阶段（一次性，~2-3秒）                                                 ┃   │
+│  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛   │
+│                                                                                  │
+│  instances/xxx/prompt.md → InstancePromptCache.load_once()                       │
+│  ├─ LLM 语义分析 → PromptSchema（模块结构）                                     │
+│  ├─ LLM 语义分析 → AgentSchema（组件配置，Few-shot 引导，无硬编码规则）         │
+│  ├─ 生成 3 版本系统提示词并缓存:                                                │
+│  │   • system_prompt_simple   ← Simple 任务专用                                 │
+│  │   • system_prompt_medium   ← Medium 任务专用                                 │
+│  │   • system_prompt_complex  ← Complex 任务专用                                │
+│  └─ 动态生成意图识别提示词并缓存:                                               │
+│      • intent_prompt（基于运营配置，用户配置优先）                              │
+│                                                                                  │
+│  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓   │
+│  ┃ 运行阶段（每次请求，毫秒级）                                               ┃   │
+│  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛   │
 ├─────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                  │
 │  User Input                                                                      │
 │      │                                                                           │
 │      ▼                                                                           │
 │  ┌──────────────────────────────────────────────────────────────────────────┐   │
-│  │ 1. Intent Analysis                                                        │   │
-│  │    IntentAnalyzer.analyze(messages)  # 使用完整消息列表理解上下文         │   │
-│  │    → IntentResult { task_type, complexity, needs_plan }                   │   │
+│  │ 1. Intent Analysis（🔥 V5.0: 使用缓存的 intent_prompt）                  │   │
+│  │    IntentAnalyzer.analyze(messages)                                       │   │
+│  │    └─ cache.get_intent_prompt()  # 🔥 直接从缓存取，无 LLM 分析           │   │
+│  │    → IntentResult { task_type, complexity, needs_plan, skip_memory }      │   │
 │  └───────────────────────────────────┬──────────────────────────────────────┘   │
 │                                      │                                           │
 │                                      ▼                                           │
@@ -2423,7 +2830,7 @@ core/llm/
 
 ## 📁 文件结构
 
-### V4.5 目录结构（已同步校验）
+### V5.0 目录结构（已同步校验）
 
 ```
 zenflux_agent/
@@ -2477,7 +2884,15 @@ zenflux_agent/
 │   │   ├── __init__.py
 │   │   ├── runtime.py              # 运行时上下文
 │   │   ├── conversation.py         # 会话上下文
-│   │   └── context_engineering.py  # 🆕 上下文工程优化（V4.4）
+│   │   └── context_engineering.py  # 上下文工程优化（V4.4）
+│   │
+│   ├── prompt/                     # 🆕 提示词模块（V5.0）
+│   │   ├── __init__.py             # 统一导出
+│   │   ├── instance_cache.py       # 🔥 实例级缓存管理器（单例模式）
+│   │   ├── intent_prompt_generator.py  # 🔥 动态意图提示词生成
+│   │   ├── prompt_layer.py         # 提示词分层管理（V4.6）
+│   │   ├── complexity_detector.py  # 复杂度检测器（V4.6）
+│   │   └── llm_analyzer.py         # LLM 提示词语义分析器（V4.6）
 │   │
 │   ├── events/                     # 事件模块
 │   │   ├── __init__.py
@@ -2580,15 +2995,15 @@ zenflux_agent/
 │   ├── __init__.py
 │   ├── universal_agent_prompt.py   # 主要 Agent 提示词
 │   ├── e2b_sandbox_protocol.py     # E2B 沙箱协议
-│   ├── sandbox_file_protocol.py    # 🆕 沙箱文件协议（V4.4）
+│   ├── sandbox_file_protocol.py    # 沙箱文件协议（V4.4）
 │   ├── simple_prompt.py            # 简化提示词
 │   ├── standard_prompt.py          # 标准提示词
-│   ├── intent_recognition_prompt.py # 意图识别提示词
+│   ├── intent_recognition_prompt.py # 🔄 意图识别提示词（V5.0 重构为模块化，支持动态组装）
 │   ├── prompt_selector.py          # 提示词选择器
 │   ├── skills_loader.py            # Skills 加载器
-│   ├── skills_metadata.txt         # 🆕 Skills 元数据
-│   ├── MEMORY_PROTOCOL.md          # 🆕 Memory 协议文档
-│   └── templates/                  # 🆕 提示词模板子目录
+│   ├── skills_metadata.txt         # Skills 元数据
+│   ├── MEMORY_PROTOCOL.md          # Memory 协议文档
+│   └── templates/                  # 提示词模板子目录
 │       └── prompt_example.md
 │
 ├── config/                         # 配置
@@ -2669,6 +3084,42 @@ zenflux_agent/
 ---
 
 ## 🔮 下一步计划
+
+### ✅ 已完成：V5.0 实例级提示词缓存 + LLM 语义驱动（🔥 重大更新）
+
+```
+✅ 已完成（2026-01-09）
+
+核心变革：
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+设计原则转变：从硬编码规则 → LLM 语义分析 + Few-shot 引导
+提示词管理：从运行时动态生成 → 启动时一次性缓存
+维护方式：从改代码 → 改 Prompt/Few-shot 示例
+
+新增模块：
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+core/prompt/instance_cache.py           ← 🔥 实例级缓存管理器（单例模式）
+core/prompt/intent_prompt_generator.py  ← 🔥 动态意图提示词生成器
+core/prompt/__init__.py                 ← 导出 InstancePromptCache + IntentPromptGenerator
+
+重构模块：
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+core/agent/factory.py                   ← 🔥 删除 _infer_schema_from_prompt 硬编码规则
+                                           新增 _generate_schema_with_llm（Few-shot 引导）
+prompts/intent_recognition_prompt.py    ← 🔄 重构为模块化结构（支持动态组装）
+core/agent/simple_agent.py              ← 🔄 从缓存获取系统提示词（运行时零开销）
+core/agent/intent_analyzer.py           ← 🔄 使用缓存的 intent_prompt
+scripts/instance_loader.py              ← 🔄 启动时调用 cache.load_once()
+
+核心收益：
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ 启动性能：一次性投入 2-3 秒（LLM 语义分析）
+✅ 运行性能：毫秒级响应（直接缓存取用，无 LLM 分析开销）
+✅ 泛化能力：从极差（关键词匹配）→ 强（理解业务意图）
+   示例：能推理"准备演示材料"需要 pptx（虽未提及"PPT"）
+✅ 维护成本：从高（改代码）→ 低（改 Few-shot 示例）
+✅ 用户配置优先：运营写的意图规则 > 高质量默认
+```
 
 ### ✅ 已完成：V4.5 Mem0 用户画像层
 

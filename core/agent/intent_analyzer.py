@@ -34,16 +34,22 @@ class IntentAnalyzer:
     
     使用轻量级 LLM 快速分析用户意图
     
+    🆕 V4.6.2: 支持从 InstancePromptCache 获取意图识别提示词
+    
     使用方式：
         analyzer = IntentAnalyzer(llm_service)
         result = await analyzer.analyze("帮我写一个 Python 脚本")
         print(result.task_type)  # TaskType.CODE_DEVELOPMENT
+        
+        # 🆕 V4.6.2: 使用缓存的意图提示词
+        analyzer = IntentAnalyzer(llm_service, prompt_cache=cache)
     """
     
     def __init__(
         self,
         llm_service=None,
-        enable_llm: bool = True
+        enable_llm: bool = True,
+        prompt_cache=None  # 🆕 V4.6.2: InstancePromptCache
     ):
         """
         初始化意图分析器
@@ -51,9 +57,13 @@ class IntentAnalyzer:
         Args:
             llm_service: LLM 服务（用于复杂意图分析）
             enable_llm: 是否启用 LLM 分析（False 则使用规则）
+            prompt_cache: 🆕 V4.6.2 InstancePromptCache（获取缓存的意图识别提示词）
         """
         self.llm = llm_service
         self.enable_llm = enable_llm and llm_service is not None
+        
+        # 🆕 V4.6.2: 实例级提示词缓存
+        self._prompt_cache = prompt_cache
         
         # 关键词映射规则（用于快速匹配）
         self._keyword_rules = self._init_keyword_rules()
@@ -188,6 +198,26 @@ class IntentAnalyzer:
         
         return str(user_input)
     
+    def _get_intent_prompt(self) -> str:
+        """
+        获取意图识别提示词
+        
+        🆕 V4.6.2: 优先从 InstancePromptCache 获取（用户配置优先）
+        
+        Returns:
+            意图识别提示词
+        """
+        # 优先使用缓存的提示词（启动时已生成）
+        if self._prompt_cache and self._prompt_cache.is_loaded:
+            cached = self._prompt_cache.get_intent_prompt()
+            if cached:
+                logger.debug("📝 使用缓存的意图识别提示词")
+                return cached
+        
+        # Fallback: 使用默认提示词
+        from prompts.intent_recognition_prompt import get_intent_recognition_prompt
+        return get_intent_recognition_prompt()
+    
     async def _analyze_with_llm(
         self,
         messages: List[Dict[str, Any]]
@@ -195,13 +225,14 @@ class IntentAnalyzer:
         """
         使用 LLM 分析意图（传入完整上下文）
         
+        🆕 V4.6.2: 优先使用缓存的意图识别提示词
+        
         Args:
             messages: 完整的消息列表
             
         Returns:
             IntentResult
         """
-        from prompts.intent_recognition_prompt import get_intent_recognition_prompt
         from core.llm import Message
         
         try:
@@ -221,10 +252,13 @@ class IntentAnalyzer:
                 for msg in truncated_messages
             ]
             
+            # 🆕 V4.6.2: 使用缓存的意图识别提示词
+            intent_prompt = self._get_intent_prompt()
+            
             # 调用 LLM（传入截断后的对话历史）
             response = await self.llm.create_message_async(
                 messages=llm_messages,
-                system=get_intent_recognition_prompt()
+                system=intent_prompt
             )
             
             # 解析响应
@@ -389,20 +423,25 @@ class IntentAnalyzer:
 
 def create_intent_analyzer(
     llm_service=None,
-    enable_llm: bool = True
+    enable_llm: bool = True,
+    prompt_cache=None  # 🆕 V4.6.2: InstancePromptCache
 ) -> IntentAnalyzer:
     """
     创建意图分析器
     
+    🆕 V4.6.2: 支持 InstancePromptCache
+    
     Args:
         llm_service: LLM 服务
         enable_llm: 是否启用 LLM 分析
+        prompt_cache: 🆕 V4.6.2 InstancePromptCache（获取缓存的意图识别提示词）
         
     Returns:
         IntentAnalyzer 实例
     """
     return IntentAnalyzer(
         llm_service=llm_service,
-        enable_llm=enable_llm
+        enable_llm=enable_llm,
+        prompt_cache=prompt_cache
     )
 
