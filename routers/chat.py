@@ -279,7 +279,8 @@ async def chat(
                         message_id=request.message_id,
                         stream=True,
                         background_tasks=request.background_tasks,
-                        files=files_data
+                        files=files_data,
+                        variables=request.variables  # 🆕 传递前端变量
                     ):
                         # 格式转换
                         if adapter:
@@ -358,7 +359,8 @@ async def chat(
                 message_id=request.message_id,
                 stream=False,
                 background_tasks=request.background_tasks,
-                files=files_data
+                files=files_data,
+                variables=request.variables  # 🆕 传递前端变量
             )
             
             # 后台清理任务（使用带锁的异步清理）

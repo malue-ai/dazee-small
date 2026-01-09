@@ -82,7 +82,8 @@ class ChatService:
         message_id: Optional[str] = None,
         stream: bool = True,
         background_tasks: Optional[List[str]] = None,
-        files: Optional[List[Dict[str, Any]]] = None
+        files: Optional[List[Dict[str, Any]]] = None,
+        variables: Optional[Dict[str, Any]] = None
     ):
         """
         统一的对话入口 ⭐
@@ -99,15 +100,16 @@ class ChatService:
             stream: 是否流式返回
             background_tasks: 需要启用的后台任务列表，如 ["title_generation"]
             files: 文件引用列表（可选），每个元素包含 file_id 或 file_url
+            variables: 前端上下文变量（可选），如位置、时区等
             
         Returns:
             stream=True  → AsyncGenerator[Dict, None]
             stream=False → Dict
         """
         if stream:
-            return self._chat_stream(message, user_id, conversation_id, message_id, background_tasks, files)
+            return self._chat_stream(message, user_id, conversation_id, message_id, background_tasks, files, variables)
         else:
-            return await self._chat_sync(message, user_id, conversation_id, message_id, background_tasks, files)
+            return await self._chat_sync(message, user_id, conversation_id, message_id, background_tasks, files, variables)
     
     # ==================== 内部实现 ====================
     
@@ -118,7 +120,8 @@ class ChatService:
         conversation_id: Optional[str] = None,
         message_id: Optional[str] = None,
         background_tasks: Optional[List[str]] = None,
-        files: Optional[List[Dict[str, Any]]] = None
+        files: Optional[List[Dict[str, Any]]] = None,
+        variables: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         同步模式：立即返回 task_id，Agent 在后台运行
@@ -153,6 +156,11 @@ class ChatService:
                 conversation_service=self.conversation_service
             )
             
+            # 📍 前端变量处理：直接注入到 Agent 执行的 prompt 中，不需要存储到 Redis
+            # variables 会在 _run_agent() 中传递给 Agent，Agent 会将其注入到 system prompt
+            if variables:
+                logger.info(f"📍 前端变量将注入到 prompt: {list(variables.keys())}")
+            
             # 启动后台任务
             asyncio.create_task(
                 self._run_agent(
@@ -163,7 +171,8 @@ class ChatService:
                     conversation_id=conversation_id,
                     is_new_conversation=is_new_conversation,
                     background_tasks=background_tasks,
-                    files_metadata=files_metadata
+                    files_metadata=files_metadata,
+                    variables=variables  # 🆕 传递前端变量
                 )
             )
             
@@ -187,7 +196,8 @@ class ChatService:
         conversation_id: Optional[str] = None,
         message_id: Optional[str] = None,
         background_tasks: Optional[List[str]] = None,
-        files: Optional[List[Dict[str, Any]]] = None
+        files: Optional[List[Dict[str, Any]]] = None,
+        variables: Optional[Dict[str, Any]] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         流式模式：实时返回事件流
@@ -224,6 +234,11 @@ class ChatService:
                 conversation_service=self.conversation_service
             )
             
+            # 📍 前端变量处理：直接注入到 Agent 执行的 prompt 中，不需要存储到 Redis
+            # variables 会在 _run_agent() 中传递给 Agent，Agent 会将其注入到 system prompt
+            if variables:
+                logger.info(f"📍 前端变量将注入到 prompt: {list(variables.keys())}")
+            
             logger.info(f"🤖 Session 已创建: session_id={session_id}")
             
             # 发送初始事件
@@ -257,7 +272,8 @@ class ChatService:
                     conversation_id=conversation_id,
                     is_new_conversation=is_new_conversation,
                     background_tasks=background_tasks,
-                    files_metadata=files_metadata
+                    files_metadata=files_metadata,
+                    variables=variables  # 🆕 传递前端变量
                 )
             )
             
@@ -324,7 +340,8 @@ class ChatService:
         conversation_id: str,
         is_new_conversation: bool = False,
         background_tasks: Optional[List[str]] = None,
-        files_metadata: Optional[List[Dict[str, Any]]] = None
+        files_metadata: Optional[List[Dict[str, Any]]] = None,
+        variables: Optional[Dict[str, Any]] = None
     ):
         """
         执行 Agent（核心逻辑，同步和流式共用）
@@ -341,6 +358,7 @@ class ChatService:
         Args:
             background_tasks: 需要启用的后台任务列表，如 ["title_generation"]
             files_metadata: 文件元数据列表，用于保存到用户消息的 metadata 中
+            variables: 前端上下文变量（如位置、时区），直接注入到 System Prompt
         """
         start_time = time.time()
         background_tasks = background_tasks or []
@@ -413,11 +431,13 @@ class ChatService:
             # - 内容累积：broadcaster 自动处理 content_start/delta/stop
             # - Checkpoint：broadcaster 在每个 content_stop 后自动保存
             # - 最终保存：broadcaster 在 message_stop 时自动完成
+            # - 🆕 variables：直接注入到 System Prompt（前端上下文）
             async for event in agent.chat(
                 messages=history_messages,
                 session_id=session_id,
                 message_id=assistant_message_id,
-                enable_stream=True
+                enable_stream=True,
+                variables=variables
             ):
                 # 检查停止标志（异步）
                 if await redis.is_stopped(session_id):

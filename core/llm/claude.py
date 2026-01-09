@@ -813,22 +813,40 @@ class ClaudeLLMService(BaseLLMService):
                                     on_thinking("")
                                 elif block_type == "text" and on_content:
                                     on_content("")
-                                # 客户端工具调用
-                                elif block_type == "tool_use" and on_tool_call:
-                                    on_tool_call({
-                                        "id": getattr(block, 'id', ''),
-                                        "name": getattr(block, 'name', ''),
-                                        "input": getattr(block, 'input', {}),
-                                        "type": "tool_use"
-                                    })
+                                # 🆕 客户端工具调用 - 立即 yield tool_use_start
+                                elif block_type == "tool_use":
+                                    tool_id = getattr(block, 'id', '')
+                                    tool_name = getattr(block, 'name', '')
+                                    if on_tool_call:
+                                        on_tool_call({
+                                            "id": tool_id,
+                                            "name": tool_name,
+                                            "input": {},  # input 后续流式发送
+                                            "type": "tool_use"
+                                        })
+                                    # 🆕 yield tool_use_start 事件
+                                    yield LLMResponse(
+                                        content="",
+                                        is_stream=True,
+                                        tool_use_start={"id": tool_id, "name": tool_name, "type": "tool_use"}
+                                    )
                                 # 服务端工具调用（如 web_search）
-                                elif block_type == "server_tool_use" and on_tool_call:
-                                    on_tool_call({
-                                        "id": getattr(block, 'id', ''),
-                                        "name": getattr(block, 'name', ''),
-                                        "input": getattr(block, 'input', {}),
-                                        "type": "server_tool_use"
-                                    })
+                                elif block_type == "server_tool_use":
+                                    tool_id = getattr(block, 'id', '')
+                                    tool_name = getattr(block, 'name', '')
+                                    if on_tool_call:
+                                        on_tool_call({
+                                            "id": tool_id,
+                                            "name": tool_name,
+                                            "input": {},
+                                            "type": "server_tool_use"
+                                        })
+                                    # 🆕 yield tool_use_start 事件
+                                    yield LLMResponse(
+                                        content="",
+                                        is_stream=True,
+                                        tool_use_start={"id": tool_id, "name": tool_name, "type": "server_tool_use"}
+                                    )
                                 # 工具结果（如 web_search_tool_result）
                                 elif block_type.endswith("_tool_result"):
                                     # 工具结果通过 final_message 获取完整内容
@@ -859,6 +877,12 @@ class ClaudeLLMService(BaseLLMService):
                                             "partial_input": partial_json,
                                             "type": "input_delta"
                                         })
+                                    # 🆕 yield input_delta 事件
+                                    yield LLMResponse(
+                                        content="",
+                                        is_stream=True,
+                                        input_delta=partial_json
+                                    )
                     
                     elif event.type == "message_stop":
                         final_message = None

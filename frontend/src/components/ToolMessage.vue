@@ -18,7 +18,7 @@
       <!-- 输入参数 -->
       <div class="section input-section">
         <div class="section-label">Input</div>
-        <pre class="code-block">{{ formatJson(input) }}</pre>
+        <pre class="code-block" :class="{ 'streaming': isStreaming }">{{ formatJson(displayInput) }}</pre>
       </div>
       
       <!-- 执行结果 -->
@@ -36,6 +36,7 @@ import { ref, computed } from 'vue'
 const props = defineProps({
   name: String,
   input: [Object, String],
+  partialInput: String, // 流式传输中的参数
   result: [Object, String],
   status: {
     type: String, // 'pending', 'success', 'error'
@@ -43,10 +44,24 @@ const props = defineProps({
   }
 })
 
+// 显示的输入：优先显示解析后的 input，否则显示流式的 partialInput
+const displayInput = computed(() => {
+  // 如果有完整的 input 且不为空对象，优先使用
+  if (props.input && Object.keys(props.input).length > 0) {
+    return props.input
+  }
+  // 否则显示流式的 partialInput
+  if (props.partialInput) {
+    return props.partialInput
+  }
+  return props.input || {}
+})
+
 const isExpanded = ref(false)
 
 const isLoading = computed(() => props.status === 'pending')
 const isError = computed(() => props.status === 'error')
+const isStreaming = computed(() => props.partialInput && !props.input)
 
 function toggle() {
   isExpanded.value = !isExpanded.value
@@ -189,5 +204,16 @@ function formatResult(data) {
   color: #ef4444;
   background: #fef2f2;
   border-color: #fee2e2;
+}
+
+.streaming {
+  background: linear-gradient(90deg, #f9fafb 0%, #f0fdf4 50%, #f9fafb 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 </style>

@@ -70,3 +70,4 @@ skill_outputs/
 workspace/outputs/ppt/*.pptx
 *.db
 test_mem0_e2e_report_*.json
+dump.rdb

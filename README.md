@@ -1,43 +1,50 @@
-# Zenflux Agent - Claude-Powered Intelligent Agent Framework
+# ZenFlux Agent
 
-> 基于 Claude 原生能力的智能体框架，支持 loop RVR（React-Validatation-Reflection）机制和流式输出
+> 基于 Claude 原生能力的智能体框架，支持 RVR 循环、流式输出、E2B 沙箱集成
 
 ## 🎯 项目概述
 
-Zenflux Agent 是一个基于 Claude Sonnet/Haiku 4.5 构建的智能体框架，充分利用 Claude 的原生能力：
+ZenFlux Agent 是一个基于 Claude Sonnet/Haiku 4.5 构建的智能体框架，充分利用 Claude 的原生能力：
 
 - **Extended Thinking**: 深度推理能力
-- **Tool Use**: 5种工具调用方式（Direct, Code Execution, Programmatic, Streaming, Tool Search）
-- **Prompt Caching**: 降低成本和延迟
+- **Tool Use**: 5 种工具调用方式
+- **E2B 沙箱**: 安全的代码执行环境
 - **Memory Protocol**: 跨会话记忆管理
 
 ## 📁 项目结构
 
 ```
-CoT_agent/mvp/
-├── /                 # V3 架构（推荐使用）
-│   ├── core/                 # 核心组件
-│   │   ├── agent.py          # SimpleAgent（流式+RVR）
-│   │   ├── llm_service.py    # LLM 服务封装
-│   │   ├── memory.py         # 记忆管理
-│   │   ├── capability_registry.py    # 能力注册表
-│   │   ├── capability_router.py      # 能力路由
-│   │   └── invocation_selector.py    # 调用方式选择器
-│   ├── config/               # 配置文件
-│   │   └── capabilities.yaml # 能力配置（统一数据源）
-│   ├── prompts/              # 提示词
-│   ├── tools/                # 工具层
-│   ├── skills/               # Skills 库
-│   ├── docs/                 # 文档
-│   └── examples/             # 示例代码
-├── docs/v3/                  # V3 架构文档
-│   ├── 00-ARCHITECTURE-OVERVIEW.md
-│   ├── 01-MEMORY-PROTOCOL.md
-│   ├── 02-CAPABILITY-ROUTING.md
-│   ├── 03-SKILLS-DISCOVERY.md
-│   └── 04-TOOL-CALLING-STRATEGIES.md
-└── tests_v3/                 # 测试用例
-
+zenflux_agent/
+├── main.py                  # FastAPI 入口
+├── core/                    # 🧠 核心组件
+│   ├── agent/               # Agent 编排
+│   ├── llm/                 # LLM 服务封装
+│   ├── memory/              # 记忆管理
+│   ├── tool/                # 工具选择与执行
+│   ├── events/              # 事件管理
+│   └── context/             # 运行上下文
+├── routers/                 # 🌐 API 路由
+├── services/                # 💼 业务服务
+├── tools/                   # 🔧 工具实现
+├── skills/                  # 📚 Skills 库
+├── prompts/                 # 📝 提示词模板
+├── config/                  # ⚙️ 配置文件
+├── infra/                   # 🏗️ 基础设施
+│   ├── database/            # 数据库
+│   ├── cache/               # 缓存
+│   └── storage/             # 存储
+├── models/                  # 📊 数据模型
+├── tests/                   # 🧪 测试
+│   ├── e2e/                 # 端到端测试
+│   ├── integration/         # 集成测试
+│   └── unit/                # 单元测试
+├── scripts/                 # 🛠️ 工具脚本
+├── docs/                    # 📖 文档
+│   ├── architecture/        # 架构文档
+│   ├── guides/              # 使用指南
+│   ├── specs/               # 规范文档
+│   └── deployment/          # 部署文档
+└── frontend/                # 🖥️ 前端界面
 ```
 
 ## 🚀 快速开始
@@ -48,41 +55,48 @@ CoT_agent/mvp/
 pip install -r requirements.txt
 ```
 
+### 配置环境变量
+
+```bash
+cp env.template .env
+# 编辑 .env 设置 ANTHROPIC_API_KEY 等
+```
+
+### 启动服务
+
+```bash
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+
 ### 基本使用
 
 ```python
-# 启动命令
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-
 from core.agent import create_simple_agent
+from core.events import EventManager
 
 # 创建 Agent
-agent = create_simple_agent()
+event_manager = EventManager()
+agent = create_simple_agent(
+    model="claude-sonnet-4-5-20250929",
+    event_manager=event_manager
+)
 
-# 同步执行
-result = await agent.run("帮我生成一个产品PPT")
-
-# 流式执行（推荐）
-async for event in agent.stream("帮我生成一个产品PPT"):
-    if event["type"] == "thinking":
-        print(f"💭 {event['data']['text']}", end="", flush=True)
-    elif event["type"] == "content":
-        print(event['data']['text'], end="", flush=True)
-    elif event["type"] == "tool_call_start":
-        print(f"\n🔧 {event['data']['tool_name']}")
-    elif event["type"] == "plan_update":
-        print(f"\n📋 {event['data']['progress']}")
+# 流式执行
+async for event in agent.chat(messages, session_id="session_001"):
+    print(event)
 ```
 
 ## 🏗️ 核心特性
 
-### 1. 流式输出架构
+### 1. V4 模块化架构
 
-- **实时反馈**: thinking、content、工具进度实时输出
-- **分层设计**: LLM Service 封装能力，Agent 集成 RVR
-- **统一事件**: 标准化事件格式，易于前端消费
-
-参考文档：`/docs/STREAMING_ARCHITECTURE.md`
+| 模块 | 位置 | 说明 |
+|------|------|------|
+| Agent 编排 | `core/agent/` | SimpleAgent 核心编排 |
+| 工具选择 | `core/tool/selector.py` | 动态工具筛选 |
+| 工具执行 | `core/tool/executor.py` | 统一工具执行 |
+| 记忆管理 | `core/memory/` | user/ + system/ 层级 |
+| 事件管理 | `core/events/` | 6 类统一事件 |
 
 ### 2. RVR 循环机制
 
@@ -92,62 +106,51 @@ async for event in agent.stream("帮我生成一个产品PPT"):
   └─────────────────── Repeat ──────────────────────────┘
 ```
 
-- **Read**: 从 Memory 读取 Plan 状态
-- **Reason**: Extended Thinking 深度推理
-- **Act**: 执行工具调用
-- **Validate**: 验证结果质量
-- **Reflect**: 失败时反思调整
-- **Write**: 更新 Plan 进度
-
 ### 3. 动态工具筛选
 
-- **能力抽象层**: 8个抽象能力分类
-- **Router 筛选**: 从 12 个工具筛选到 5 个相关工具
-- **智能选择**: Sonnet 根据场景自主选择最优工具
+- **能力抽象层**: 11 个抽象能力分类
+- **Router 筛选**: 根据任务动态筛选相关工具
+- **智能选择**: LLM 根据场景自主选择最优工具
 
-### 4. 5种工具调用方式
+### 4. 5 种工具调用方式
 
-| 调用方式 | 使用场景 | 示例 |
-|---------|---------|------|
-| Direct Tool Call | 单工具+简单参数 | `web_search("天气")` |
-| Code Execution | 配置生成、计算 | 生成 PPT JSON 配置 |
-| Programmatic | 多工具编排(>2) | 批量搜索+聚合 |
-| Streaming | 大参数(>10KB) | 流式传输 PPT 配置 |
-| Tool Search | 工具数量>30 | 动态发现工具 |
+| 调用方式 | 使用场景 |
+|---------|---------|
+| Direct Tool Call | 单工具 + 简单参数 |
+| Code Execution | 配置生成、计算 |
+| E2B 沙箱 | 第三方包、长时运行 |
+| Programmatic | 多工具编排 |
+| Tool Search | 工具数量 > 30 |
 
 ## 📚 文档
 
-### 核心文档
-- [架构总览](docs/v3/00-ARCHITECTURE-OVERVIEW.md) - 完整架构设计
-- [流式输出架构](/docs/STREAMING_ARCHITECTURE.md) - 流式输出设计
-- [Memory Protocol](docs/v3/01-MEMORY-PROTOCOL.md) - 记忆管理协议
-- [Capability Routing](docs/v3/02-CAPABILITY-ROUTING.md) - 能力路由算法
-- [Tool Calling Strategies](docs/v3/04-TOOL-CALLING-STRATEGIES.md) - 工具调用策略
+详细文档请查看 [docs/README.md](docs/README.md)
 
-### 示例代码
-- [streaming_example.py](/examples/streaming_example.py) - 流式输出示例
+### 核心文档
+
+- [V4 架构总览](docs/architecture/00-ARCHITECTURE-V4.md) ⭐
+- [Memory Protocol](docs/architecture/01-MEMORY-PROTOCOL.md)
+- [事件协议](docs/architecture/03-EVENT-PROTOCOL.md)
+- [E2B 集成](docs/guides/E2B_INTEGRATION.md)
 
 ## 🧪 测试
 
 ```bash
-# 运行测试
-cd tests_v3
-pytest test_simple_task_logic.py
-pytest test_invocation_selector.py
-pytest test_multi_turn_chat.py
+# 单元测试
+pytest tests/unit/
+
+# 集成测试
+pytest tests/integration/
+
+# E2E 测试
+pytest tests/e2e/
 ```
 
 ## 📝 配置
 
-### 环境变量
-
-```bash
-export ANTHROPIC_API_KEY="your-api-key"
-```
-
 ### 能力配置
 
-编辑 `/config/capabilities.yaml` 添加新工具或Skills：
+编辑 `config/capabilities.yaml` 添加新工具：
 
 ```yaml
 capabilities:
@@ -155,30 +158,33 @@ capabilities:
     type: TOOL
     capabilities: [web_search]
     priority: 85
-    provider: CUSTOM
     implementation:
-      module: "my_module.my_tool"
-      function: "execute"
+      module: "tools.my_tool"
 ```
 
 ## 🔧 开发
 
 ### 添加新工具
 
-1. 在 `/tools/` 创建工具文件
-2. 在 `capabilities.yaml` 注册
+1. 在 `tools/` 创建工具文件
+2. 在 `config/capabilities.yaml` 注册
 3. Router 自动发现并使用
 
 ### 添加新 Skill
 
-1. 在 `/skills/library/` 创建 Skill 目录
+1. 在 `skills/library/` 创建 Skill 目录
 2. 创建 `SKILL.md` 描述文件
-3. 创建 `scripts/` 目录放置脚本
-4. SkillsManager 自动发现
+3. SkillsManager 自动发现
 
-## 🤝 贡献
+## 🚀 部署
 
-欢迎提交 Issue 和 Pull Request！
+```bash
+# Docker 部署
+docker-compose up -d
+
+# 详细部署文档
+cat docs/deployment/DOCKER_DEPLOYMENT.md
+```
 
 ## 📄 许可证
 
@@ -186,11 +192,8 @@ MIT License
 
 ## 👥 作者
 
-- **刘屹** (ironliuyi)
-- Email: liuyi@zenflux.cn
-- 
-- **汪康成** 
-- Email: wangkangcheng@zenflux.cn
+- **刘屹** (ironliuyi) - liuyi@zenflux.cn
+- **汪康成** - wangkangcheng@zenflux.cn
 
 ---
 

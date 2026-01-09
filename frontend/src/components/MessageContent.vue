@@ -26,6 +26,7 @@
         <ToolMessage 
           :name="block.name"
           :input="block.input"
+          :partial-input="block.partialInput"
           :result="getToolResultContent(block.id)"
           :status="getToolStatus(block.id)"
         />

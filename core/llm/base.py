@@ -162,6 +162,10 @@ class LLMResponse:
         is_stream: 是否为流式响应
         cache_read_tokens: 缓存读取 tokens（Claude 特有）
         cache_creation_tokens: 缓存创建 tokens（Claude 特有）
+        
+    🆕 流式工具调用：
+        tool_use_start: 工具调用开始 {id, name}
+        input_delta: 工具参数增量（JSON 片段）
     """
     content: str
     thinking: Optional[str] = None
@@ -174,6 +178,10 @@ class LLMResponse:
     
     # 流式相关
     is_stream: bool = False
+    
+    # 🆕 流式工具调用
+    tool_use_start: Optional[Dict[str, str]] = None  # {id, name}
+    input_delta: Optional[str] = None  # JSON 片段
     
     # Claude 特有
     cache_read_tokens: int = 0

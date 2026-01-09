@@ -39,6 +39,15 @@ from .context_engineering import (
     create_context_engineering_manager,
 )
 
+from .prompt_manager import (
+    PromptManager,
+    PromptAppendRule,
+    PromptState,
+    AppendedFragment,
+    create_prompt_manager,
+    get_prompt_manager,
+)
+
 __all__ = [
     # 运行时上下文
     "RuntimeContext",
@@ -61,4 +70,12 @@ __all__ = [
     "ErrorRetention",
     "ContextEngineeringManager",
     "create_context_engineering_manager",
+    
+    # Prompt 管理（与 RuntimeContext 集成）
+    "PromptManager",
+    "PromptAppendRule",
+    "PromptState",
+    "AppendedFragment",
+    "create_prompt_manager",
+    "get_prompt_manager",
 ]

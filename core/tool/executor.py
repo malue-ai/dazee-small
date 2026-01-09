@@ -344,46 +344,53 @@ class ToolExecutor:
         """
         执行 Claude Client-side 工具（bash, text_editor）
         
-        这些工具需要本地执行，然后把结果返回给 Claude
+        bash 工具路由到 E2B 沙盒执行（安全隔离）
+        text_editor 在本地 workspace 执行
         """
         import subprocess
         import os
         
         if tool_name == "bash":
-            # 执行 bash 命令
+            # 🆕 bash 命令路由到 E2B 沙盒执行（多用户安全）
+            # 参考：https://platform.claude.com/docs/en/agents-and-tools/tool-use/bash-tool
+            # 官方建议：Running in isolated environments (Docker/VM)
+            
             command = tool_input.get("command", "")
             restart = tool_input.get("restart", False)
+            
+            if restart:
+                # restart 暂不支持，返回提示
+                return {"success": True, "output": "Bash session restarted (sandbox mode)"}
             
             if not command:
                 return {"success": False, "error": "命令不能为空"}
             
+            # 获取上下文信息（由 simple_agent 注入，必然存在）
+            conversation_id = tool_input.get("conversation_id")
+            user_id = tool_input.get("user_id", "default_user")
+            
             try:
-                # 获取 workspace 路径作为工作目录
-                workspace_dir = self.tool_context.get("workspace_dir", "./workspace")
+                # 使用 E2B 沙盒执行
+                from services.sandbox_service import get_sandbox_service
                 
-                # 执行命令
-                result = subprocess.run(
-                    command,
-                    shell=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=60,
-                    cwd=workspace_dir
+                service = get_sandbox_service()
+                
+                # 确保沙盒存在
+                await service.get_or_create_sandbox(conversation_id, user_id)
+                
+                # 在沙盒中执行命令
+                result = await service.run_command(
+                    conversation_id=conversation_id,
+                    command=command,
+                    timeout=60
                 )
                 
-                output = result.stdout
-                if result.stderr:
-                    output += f"\n[stderr]\n{result.stderr}"
+                logger.info(f"🐚 bash 在沙盒执行: {command[:50]}...")
+                return result
                 
-                return {
-                    "success": result.returncode == 0,
-                    "output": output,
-                    "exit_code": result.returncode
-                }
-            except subprocess.TimeoutExpired:
-                return {"success": False, "error": "命令执行超时（60秒）"}
             except Exception as e:
-                return {"success": False, "error": str(e)}
+                logger.error(f"❌ 沙盒执行失败: {e}", exc_info=True)
+                return {"success": False, "error": f"沙盒执行失败: {str(e)}"}
         
         elif tool_name in ("str_replace_based_edit_tool", "text_editor"):
             # 文件编辑工具

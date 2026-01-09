@@ -63,6 +63,8 @@ class ZenOAdapter(EventAdapter):
         self._current_message_id: Optional[str] = None
         # 缓存累积的内容
         self._accumulated_content: str = ""
+        # 🆕 缓存当前 content block 类型（用于简化 delta 格式适配）
+        self._current_block_type: Optional[str] = None
     
     def transform(self, event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
@@ -85,6 +87,12 @@ class ZenOAdapter(EventAdapter):
         # 根据事件类型转换
         if event_type == "message_start":
             return self._transform_message_start(message_id, conversation_id, timestamp)
+        
+        # 🆕 处理 content_start：记录当前 block 类型
+        if event_type == "content_start":
+            content_block = data.get("content_block", {})
+            self._current_block_type = content_block.get("type")
+            return None  # content_start 不需要转换为 ZenO 事件
         
         if event_type == "content_delta":
             return self._transform_content_delta(event, message_id, timestamp)
@@ -112,8 +120,9 @@ class ZenOAdapter(EventAdapter):
         
         注意：ZenO 有 created 和 start 两个事件，这里合并为 start
         """
-        # 重置累积内容
+        # 重置状态
         self._accumulated_content = ""
+        self._current_block_type = None
         
         return {
             "type": "message.assistant.start",
@@ -131,30 +140,43 @@ class ZenOAdapter(EventAdapter):
         """
         转换 content_delta → message.assistant.delta
         
-        根据 delta.type 映射：
-        - thinking_delta → delta.type: "thinking"
-        - text_delta → delta.type: "response"
+        🆕 简化格式适配：
+        - delta 直接是字符串，类型由 content_start 的 content_block.type 决定
+        - 使用 _current_block_type 来判断 delta 类型
+        
+        映射规则：
+        - thinking → delta.type: "thinking"
+        - text → delta.type: "response"
+        - tool_use → 忽略（工具参数不需要转换）
         """
         data = event.get("data", {})
-        delta = data.get("delta", {})
-        delta_type = delta.get("type", "")
+        delta = data.get("delta", "")
         
-        # 获取文本内容
-        text = delta.get("text") or delta.get("thinking") or ""
+        # 🆕 简化格式：delta 直接是字符串
+        if isinstance(delta, str):
+            text = delta
+        else:
+            # 兼容旧格式（字典形式）
+            text = delta.get("text") or delta.get("thinking") or ""
         
         if not text:
             return None
         
-        # 映射 delta 类型
+        # 🆕 使用 _current_block_type 判断 delta 类型
         zeno_delta_type = None
-        if delta_type in ["thinking_delta", "thinking"]:
+        block_type = self._current_block_type or ""
+        
+        if block_type == "thinking":
             zeno_delta_type = "thinking"
-        elif delta_type in ["text_delta", "text"]:
+        elif block_type == "text":
             zeno_delta_type = "response"
             # 累积内容（用于 done 事件）
             self._accumulated_content += text
-        
-        if not zeno_delta_type:
+        elif block_type in ("tool_use", "server_tool_use"):
+            # 工具参数增量不需要转换为 ZenO 事件
+            return None
+        else:
+            # 未知类型，跳过
             return None
         
         return {

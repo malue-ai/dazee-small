@@ -16,17 +16,11 @@ import yaml
 from typing import Dict, Any, List
 from pathlib import Path
 
+from e2b import Template, defaultBuildLogger
+
 from logger import get_logger
 
 logger = get_logger("e2b_template")
-
-# E2B SDK
-try:
-    from e2b import Template, defaultBuildLogger
-    E2B_TEMPLATE_AVAILABLE = True
-except ImportError:
-    logger.warning("⚠️ E2B SDK 未安装")
-    E2B_TEMPLATE_AVAILABLE = False
 
 
 class E2BTemplateManager:
@@ -46,10 +40,6 @@ class E2BTemplateManager:
         Args:
             config_path: 配置文件路径（默认 config/e2b_templates.yaml）
         """
-        if not E2B_TEMPLATE_AVAILABLE:
-            logger.warning("⚠️ E2B Template SDK 不可用")
-            self.templates_config = {}
-            return
         
         if config_path is None:
             config_path = Path(__file__).parent.parent / "config" / "e2b_templates.yaml"
@@ -131,10 +121,6 @@ class E2BTemplateManager:
         
         参考 E2B 文档：https://e2b.dev/docs/template/defining-template
         """
-        if not E2B_TEMPLATE_AVAILABLE:
-            logger.error("❌ E2B Template SDK 不可用，无法构建模板")
-            return "base"
-        
         try:
             # 创建模板定义
             base_template = config.get("base_template", "base")

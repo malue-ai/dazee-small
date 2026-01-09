@@ -24,6 +24,7 @@ SimpleAgent - 精简版核心 Agent
 """
 
 # 1. 标准库
+import asyncio
 import json
 from datetime import datetime
 from typing import Dict, Any, List, Optional, AsyncGenerator
@@ -38,6 +39,7 @@ from core.context.context_engineering import (
     AgentState, 
     create_context_engineering_manager
 )
+from core.context.prompt_manager import get_prompt_manager, PromptManager
 from core.events.broadcaster import EventBroadcaster
 from core.llm import Message, LLMResponse, ToolType, create_claude_service
 from core.tool import create_tool_executor, create_tool_selector
@@ -81,9 +83,7 @@ class SimpleAgent:
         workspace_dir: str = None,
         conversation_service=None,
         schema=None,  # 🆕 AgentSchema 配置
-        system_prompt: str = None,  # 🆕 System Prompt（作为运行时指令）
-        prompt_schema=None,  # 🆕 V4.6: PromptSchema（提示词分层）
-        prompt_cache=None,   # 🆕 V4.6.2: InstancePromptCache（提示词缓存）
+        system_prompt: str = None  # 🆕 System Prompt（作为运行时指令）
     ):
         """
         初始化 Agent
@@ -96,8 +96,6 @@ class SimpleAgent:
             conversation_service: ConversationService 实例（用于消息持久化）
             schema: AgentSchema 配置（定义组件启用状态和参数）
             system_prompt: System Prompt（运行时传给 LLM 的系统指令）
-            prompt_schema: 🆕 V4.6 PromptSchema（用于根据复杂度动态生成提示词）
-            prompt_cache: 🆕 V4.6.2 InstancePromptCache（预生成的提示词版本缓存）
         """
         if event_manager is None:
             raise ValueError("event_manager 是必需参数")
@@ -114,15 +112,6 @@ class SimpleAgent:
         
         # 🆕 System Prompt：存储系统指令（如果未提供，使用默认）
         self.system_prompt = system_prompt
-        
-        # 🆕 V4.6: PromptSchema（提示词分层）
-        # 如果提供了 PromptSchema，可以根据用户查询复杂度动态生成提示词
-        self.prompt_schema = prompt_schema
-        
-        # 🆕 V4.6.2: InstancePromptCache（提示词缓存）
-        # 启动时预生成的三个版本提示词 + 意图识别提示词
-        # 运行时直接从缓存获取，无需动态生成
-        self._prompt_cache = prompt_cache
         
         # 从 Schema 读取运行时参数（覆盖传入的参数）
         if schema is not None:
@@ -178,15 +167,11 @@ class SimpleAgent:
                 tools=[],
                 max_tokens=8192  # Claude 3.5 Haiku 最大支持 8192
             )
-            # 🆕 V4.6.2: 传递 prompt_cache 给 IntentAnalyzer
             self.intent_analyzer = create_intent_analyzer(
                 llm_service=self.intent_llm,
-                enable_llm=intent_config.use_llm,  # 从 Schema 读取
-                prompt_cache=self._prompt_cache  # 🆕 V4.6.2: 使用缓存的意图识别提示词
+                enable_llm=intent_config.use_llm  # 从 Schema 读取
             )
             logger.debug(f"✓ IntentAnalyzer 已启用 (model={intent_config.llm_model})")
-            if self._prompt_cache and self._prompt_cache.is_loaded:
-                logger.debug(f"  └─ 使用缓存的意图识别提示词 ({len(self._prompt_cache.get_intent_prompt())} 字符)")
         else:
             self.intent_llm = None
             self.intent_analyzer = None
@@ -241,6 +226,13 @@ class SimpleAgent:
         
         # 🆕 启用已注册的 Claude Skills
         self._enable_registered_skills()
+        
+        # 8. 🆕 并行工具执行配置
+        self.allow_parallel_tools = self.schema.allow_parallel_tools
+        self.max_parallel_tools = self.schema.tool_selector.max_parallel_tools
+        # 必须串行执行的特殊工具
+        self._serial_only_tools = {"plan_todo", "request_human_confirmation"}
+        logger.debug(f"✓ 并行工具配置: allow={self.allow_parallel_tools}, max={self.max_parallel_tools}")
     
     def _register_tools_to_llm(self):
         """注册工具到 LLM Service"""
@@ -276,7 +268,8 @@ class SimpleAgent:
         messages: List[Dict[str, str]] = None,
         session_id: str = None,
         message_id: str = None,
-        enable_stream: bool = True
+        enable_stream: bool = True,
+        variables: Dict[str, Any] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Agent 统一执行入口 - 7 阶段完整流程
@@ -297,6 +290,7 @@ class SimpleAgent:
             session_id: 会话ID
             message_id: 消息ID（用于事件关联）
             enable_stream: 是否流式输出
+            variables: 前端上下文变量（如位置、时区等），直接注入到 Prompt
             
         Yields:
             事件字典
@@ -321,9 +315,22 @@ class SimpleAgent:
         session_context = await self.event_manager.storage.get_session_context(session_id)
         conversation_id = session_context.get("conversation_id", "default")
         user_id = session_context.get("user_id")  # 用于 System Prompt 注入
-        # 存储为实例变量，供工具执行时使用
+        # 🆕 前端变量直接从参数传入（不再从 Redis 读取），用于注入 System Prompt
+        # 存储为实例变量，供后续使用
         self._current_conversation_id = conversation_id
         self._current_user_id = user_id
+        
+        # ===== 🆕 初始化 PromptManager（事件驱动 Prompt 追加） =====
+        ctx = create_runtime_context(session_id=session_id, max_turns=self.max_turns)
+        prompt_manager = get_prompt_manager()
+        
+        # 会话开始 → 追加 sandbox_context
+        prompt_manager.on_session_start(ctx, conversation_id=conversation_id, user_id=user_id)
+        
+        # 如果有前端变量 → 追加 user_context
+        if variables:
+            prompt_manager.on_context_injected(ctx, variables=variables)
+            logger.info(f"✅ 前端变量已注入 Prompt: {list(variables.keys())}")
         
         if self.enable_tracing:
             self._tracer = create_pipeline_tracer(
@@ -519,81 +526,37 @@ class SimpleAgent:
         # 阶段 4: System Prompt 组装 + LLM 调用准备
         # =====================================================================
         # 4.1 选择 System Prompt（用户自定义 vs 框架默认，含沙盒上下文注入）
-        #     🆕 V4.6: 支持提示词分层（根据复杂度动态裁剪）
         # 4.2 构建 LLM Messages
         # 4.3 Todo 重写（Context Engineering - 对抗 Lost-in-the-Middle）
         
-        # 🆕 V4.6: 获取用户当前 query 和 Mem0 检索决策
+# 🆕 V4.6: 获取用户当前 query 和 Mem0 检索决策
         user_query = messages[-1]["content"] if messages else ""
         skip_memory = getattr(intent, 'skip_memory_retrieval', False)
         
-        # 4.1 选择 System Prompt
-        # 🆕 V5.0: 优先使用 InstancePromptCache（启动时预生成，运行时零开销）
-        if self._prompt_cache and self._prompt_cache.is_loaded:
-            # ========== V5.0: 直接从缓存取系统提示词 ==========
-            from core.prompt import detect_complexity
-            
-            # 检测任务复杂度（使用缓存的 prompt_schema）
-            complexity = detect_complexity(user_query, self._prompt_cache.prompt_schema)
-            
-            # 直接从缓存获取对应版本的提示词（启动时已预生成）
-            base_prompt = self._prompt_cache.get_system_prompt(complexity)
-            
-            # 注入沙盒上下文
-            from prompts.sandbox_file_protocol import build_sandbox_context
-            sandbox_context = build_sandbox_context(
-                conversation_id=conversation_id,
-                user_id=user_id
-            )
-            system_prompt = base_prompt + sandbox_context
-            logger.info(f"✅ V5.0 使用缓存提示词: {complexity.value} ({len(system_prompt)} 字符)")
-            
-        elif self.prompt_schema:
-            # ========== Fallback: 动态生成（V4.6 兼容模式）==========
-            from core.prompt import detect_complexity, generate_prompt
-            
-            # 检测任务复杂度
-            complexity = detect_complexity(user_query, self.prompt_schema)
-            
-            # 动态生成对应版本的提示词
-            base_prompt = generate_prompt(
-                self.prompt_schema, 
-                complexity,
-                agent_schema=self.schema,
-            )
-            
-            # 注入沙盒上下文
-            from prompts.sandbox_file_protocol import build_sandbox_context
-            sandbox_context = build_sandbox_context(
-                conversation_id=conversation_id,
-                user_id=user_id
-            )
-            system_prompt = base_prompt + sandbox_context
-            logger.info(f"⚠️ Fallback 动态生成提示词: {complexity.value} ({len(system_prompt)} 字符)")
-            
-        elif self.system_prompt:
-            # 使用用户定义的 System Prompt（唯一真相来源）
-            # 仍需注入沙盒上下文
-            from prompts.sandbox_file_protocol import build_sandbox_context
-            sandbox_context = build_sandbox_context(
-                conversation_id=conversation_id,
-                user_id=user_id
-            )
-            system_prompt = self.system_prompt + sandbox_context
-            logger.info("✅ 使用用户定义的 System Prompt + 沙盒上下文")
+        # 4.1 选择 System Prompt（使用 PromptManager 构建 + Mem0 检索决策）
+        if self.system_prompt:
+            # 使用用户定义的 System Prompt + PromptManager 追加内容
+            system_prompt = prompt_manager.build_system_prompt(ctx, base_prompt=self.system_prompt)
+            logger.info("✅ 使用用户定义的 System Prompt + PromptManager 追加")
         else:
-            # 使用框架默认 Prompt（根据意图识别结果决定是否检索 Mem0）
+            # 使用框架默认 Prompt（根据意图识别结果决定是否检索 Mem0）+ PromptManager 追加
             from prompts.universal_agent_prompt import get_universal_agent_prompt
-            system_prompt = get_universal_agent_prompt(
+            base_prompt = get_universal_agent_prompt(
                 conversation_id=conversation_id,
                 user_id=user_id,
                 user_query=user_query,
                 skip_memory_retrieval=skip_memory  # 🆕 V4.6: 传递意图识别结果
             )
+            system_prompt = prompt_manager.build_system_prompt(ctx, base_prompt=base_prompt)
             if skip_memory:
-                logger.info("✅ 使用框架默认 System Prompt（跳过 Mem0 检索）")
+                logger.info("✅ 使用框架默认 System Prompt + PromptManager（跳过 Mem0 检索）")
             else:
-                logger.info("✅ 使用框架默认 System Prompt（已检索 Mem0 画像）")
+                logger.info("✅ 使用框架默认 System Prompt + PromptManager（已检索 Mem0 画像）")
+        
+        # 记录已追加的片段
+        appended = prompt_manager.get_appended_fragments(ctx)
+        if appended:
+            logger.debug(f"📝 已追加的 Prompt 片段: {appended}")
         
         # 4.2 构建 LLM Messages
         llm_messages = [
@@ -642,7 +605,7 @@ class SimpleAgent:
         # [Validate] 在 Extended Thinking 中验证
         # [Write] plan_todo.update_step()
         # [Repeat] if stop_reason == "tool_use"
-        ctx = create_runtime_context(session_id=session_id, max_turns=self.max_turns)
+        # 注：RuntimeContext ctx 已在阶段 1 初始化（与 PromptManager 一起）
         
         for turn in range(self.max_turns):
             ctx.next_turn()
@@ -686,6 +649,31 @@ class SimpleAgent:
                     
                     # 处理工具调用
                     if response.stop_reason == "tool_use" and response.tool_calls:
+                        # 🆕 最后一轮检查：如果是最后一轮且有工具调用，强制生成文本回复
+                        is_last_turn = (turn == self.max_turns - 1)
+                        if is_last_turn:
+                            logger.warning(f"⚠️ 最后一轮（Turn {turn + 1}）收到工具调用，强制生成文本回复...")
+                            # 添加当前响应作为 assistant 消息
+                            llm_messages.append(Message(role="assistant", content=response.raw_content))
+                            # 添加系统提示，告诉 LLM 不能再调用工具了
+                            llm_messages.append(Message(
+                                role="user", 
+                                content=[{
+                                    "type": "text",
+                                    "text": "⚠️ 系统提示：已达到最大执行轮次，无法继续执行工具。请直接给用户一个文字回复，总结当前进度和已完成的工作。"
+                                }]
+                            ))
+                            # 再调用一次 LLM，不传递 tools 参数，强制生成文本
+                            async for event in self._process_stream(
+                                llm_messages, system_prompt, [], ctx, session_id  # 空 tools 列表
+                            ):
+                                yield event
+                            # 标记完成
+                            final_response = ctx.last_llm_response
+                            if final_response:
+                                ctx.set_completed(final_response.content, "max_turns_reached")
+                            break
+                        
                         # 🆕 区分客户端工具和服务端工具
                         # - 客户端工具（tool_use）：需要我们执行并返回 tool_result
                         # - 服务端工具（server_tool_use）：Anthropic 服务器已执行，结果在 raw_content 中
@@ -740,6 +728,30 @@ class SimpleAgent:
                 
                 if response.stop_reason != "tool_use":
                     ctx.set_completed(response.content, response.stop_reason)
+                    break
+                
+                # 🆕 最后一轮检查：如果是最后一轮且有工具调用，强制生成文本回复
+                is_last_turn = (turn == self.max_turns - 1)
+                if is_last_turn:
+                    logger.warning(f"⚠️ 最后一轮（Turn {turn + 1}）收到工具调用，强制生成文本回复...")
+                    llm_messages.append(Message(role="assistant", content=response.raw_content))
+                    llm_messages.append(Message(
+                        role="user", 
+                        content=[{
+                            "type": "text",
+                            "text": "⚠️ 系统提示：已达到最大执行轮次，无法继续执行工具。请直接给用户一个文字回复，总结当前进度和已完成的工作。"
+                        }]
+                    ))
+                    # 再调用一次 LLM，不传递 tools 参数
+                    final_response = await self.llm.create_message_async(
+                        messages=llm_messages,
+                        system=system_prompt,
+                        tools=[]  # 空 tools 列表，强制文本回复
+                    )
+                    self.usage_tracker.accumulate(final_response)
+                    if final_response.content:
+                        yield {"type": "content", "data": {"text": final_response.content}}
+                    ctx.set_completed(final_response.content, "max_turns_reached")
                     break
                 
                 # 🆕 区分客户端工具和服务端工具（非流式模式）
@@ -832,10 +844,11 @@ class SimpleAgent:
                         content_block={"type": "thinking", "thinking": ""}
                     )
                 
+                # 🆕 简化格式：delta 直接是字符串
                 yield await self.broadcaster.emit_content_delta(
                     session_id=session_id,
                     index=ctx.block.current_index,
-                    delta={"type": "thinking_delta", "thinking": llm_response.thinking}
+                    delta=llm_response.thinking
                 )
                 ctx.stream.append_thinking(llm_response.thinking)
             
@@ -855,12 +868,47 @@ class SimpleAgent:
                         content_block={"type": "text", "text": ""}
                     )
                 
+                # 🆕 简化格式：delta 直接是字符串
                 yield await self.broadcaster.emit_content_delta(
                     session_id=session_id,
                     index=ctx.block.current_index,
-                    delta={"type": "text_delta", "text": llm_response.content}
+                    delta=llm_response.content
                 )
                 ctx.stream.append_content(llm_response.content)
+            
+            # 🆕 处理流式工具调用 - tool_use 开始
+            if llm_response.tool_use_start and llm_response.is_stream:
+                tool_info = llm_response.tool_use_start
+                tool_type = tool_info.get("type", "tool_use")
+                
+                # 切换到 tool_use block
+                if ctx.block.needs_transition(tool_type):
+                    if ctx.block.is_block_open():
+                        yield await self.broadcaster.emit_content_stop(
+                            session_id=session_id,
+                            index=ctx.block.current_index
+                        )
+                    
+                    block_idx = ctx.block.start_new_block(tool_type)
+                    yield await self.broadcaster.emit_content_start(
+                        session_id=session_id,
+                        index=block_idx,
+                        content_block={
+                            "type": tool_type,
+                            "id": tool_info.get("id", ""),
+                            "name": tool_info.get("name", ""),
+                            "input": {}  # input 后续流式发送
+                        }
+                    )
+            
+            # 🆕 处理流式工具调用 - 参数增量
+            if llm_response.input_delta and llm_response.is_stream:
+                # 简化格式：delta 直接是 JSON 片段字符串
+                yield await self.broadcaster.emit_content_delta(
+                    session_id=session_id,
+                    index=ctx.block.current_index,
+                    delta=llm_response.input_delta
+                )
             
             # 保存最终响应
             if not llm_response.is_stream:
@@ -880,6 +928,68 @@ class SimpleAgent:
             # 存到 ctx，不再通过事件传递
             ctx.last_llm_response = final_response
     
+    async def _execute_single_tool(
+        self,
+        tool_call: Dict,
+        session_id: str
+    ) -> Dict[str, Any]:
+        """
+        执行单个工具（无 SSE 事件发送，用于并行执行）
+        
+        Args:
+            tool_call: 工具调用信息 {id, name, input}
+            session_id: 会话ID
+            
+        Returns:
+            执行结果字典: {
+                tool_id: str,
+                tool_name: str,
+                tool_input: dict,
+                result: Any,
+                is_error: bool,
+                error_msg: Optional[str]
+            }
+        """
+        tool_name = tool_call['name']
+        tool_input = tool_call['input'] or {}
+        tool_id = tool_call['id']
+        
+        logger.debug(f"🔧 并行执行工具: {tool_name}")
+        
+        try:
+            # 🛡️ 为工具注入上下文（user_id, session_id, conversation_id）
+            session_context = await self.event_manager.storage.get_session_context(session_id)
+            tool_input.setdefault("session_id", session_id)
+            if session_context.get("user_id"):
+                tool_input.setdefault("user_id", session_context.get("user_id"))
+            conv_id = session_context.get("conversation_id") or getattr(self, '_current_conversation_id', None) or session_id
+            tool_input.setdefault("conversation_id", conv_id)
+            
+            # 执行工具
+            result = await self.tool_executor.execute(tool_name, tool_input)
+            
+            return {
+                "tool_id": tool_id,
+                "tool_name": tool_name,
+                "tool_input": tool_input,
+                "result": result,
+                "is_error": False,
+                "error_msg": None
+            }
+            
+        except Exception as e:
+            error_msg = f"工具执行失败: {str(e)}"
+            logger.error(f"❌ {error_msg}")
+            
+            return {
+                "tool_id": tool_id,
+                "tool_name": tool_name,
+                "tool_input": tool_input,
+                "result": {"error": str(e)},
+                "is_error": True,
+                "error_msg": error_msg
+            }
+    
     async def _execute_tools_stream(
         self,
         tool_calls: List[Dict],
@@ -889,8 +999,10 @@ class SimpleAgent:
         """
         执行工具调用（流式版本，yield 出所有事件）
         
-        这个方法会 yield 出 content_start/content_delta/content_stop 事件，
-        让 ChatEventHandler 能收集 tool_use 和 tool_result 信息。
+        🆕 支持并行执行：
+        - 如果 allow_parallel_tools=True，可并行的工具会使用 asyncio.gather 同时执行
+        - 特殊工具（plan_todo, request_human_confirmation）始终串行执行
+        - 并行执行后，按原始顺序发送 SSE 事件
         
         Args:
             tool_calls: 工具调用列表
@@ -900,26 +1012,153 @@ class SimpleAgent:
         Yields:
             content_start, content_delta, content_stop 等事件
         """
+        # 分离可并行工具和必须串行的特殊工具
+        parallel_tools = []
+        serial_tools = []
+        
+        for tc in tool_calls:
+            tool_name = tc.get('name', '')
+            if tool_name in self._serial_only_tools:
+                serial_tools.append(tc)
+            else:
+                parallel_tools.append(tc)
+        
+        # 存储并行执行的结果，按原始顺序
+        parallel_results = {}
+        
+        # ===== 并行执行可并行的工具 =====
+        if parallel_tools and self.allow_parallel_tools and len(parallel_tools) > 1:
+            logger.info(f"⚡ 并行执行 {len(parallel_tools)} 个工具: {[t['name'] for t in parallel_tools]}")
+            
+            # 限制并行数量
+            tools_to_execute = parallel_tools[:self.max_parallel_tools]
+            if len(parallel_tools) > self.max_parallel_tools:
+                # 超出限制的工具放回串行队列
+                serial_tools = parallel_tools[self.max_parallel_tools:] + serial_tools
+                logger.warning(f"⚠️ 超出最大并行数 {self.max_parallel_tools}，部分工具将串行执行")
+            
+            # 追踪工具调用
+            for tc in tools_to_execute:
+                if self._tracer:
+                    self._tracer.log_tool_call(tc['name'])
+            
+            # 并行执行
+            results = await asyncio.gather(
+                *[self._execute_single_tool(tc, session_id) for tc in tools_to_execute],
+                return_exceptions=True
+            )
+            
+            # 处理结果
+            for tc, result in zip(tools_to_execute, results):
+                tool_id = tc['id']
+                if isinstance(result, Exception):
+                    # asyncio.gather 返回的异常
+                    parallel_results[tool_id] = {
+                        "tool_id": tool_id,
+                        "tool_name": tc['name'],
+                        "tool_input": tc.get('input', {}),
+                        "result": {"error": str(result)},
+                        "is_error": True,
+                        "error_msg": f"工具执行失败: {str(result)}"
+                    }
+                else:
+                    parallel_results[tool_id] = result
+                    
+                    # 🆕 工具执行后 → 触发 PromptManager 追加（如 RAG 上下文）
+                    if not result.get("is_error"):
+                        get_prompt_manager().on_tool_result(ctx, tool_name=tc['name'], result=result.get("result"))
+        else:
+            # 不启用并行或只有一个工具，全部串行执行
+            serial_tools = parallel_tools + serial_tools
+            parallel_tools = []
+        
+        # ===== 按原始顺序发送事件（包括并行执行的结果） =====
         for tool_call in tool_calls:
             tool_name = tool_call['name']
             tool_input = tool_call['input'] or {}
             tool_id = tool_call['id']
             
+            # 检查是否是已并行执行的工具
+            if tool_id in parallel_results:
+                # 从并行结果中获取
+                result_info = parallel_results[tool_id]
+                
+                # ===== 发送 tool_use content block =====
+                if ctx.block.is_block_open():
+                    yield await self.broadcaster.emit_content_stop(
+                        session_id=session_id,
+                        index=ctx.block.current_index
+                    )
+                
+                tool_use_index = ctx.block.start_new_block("tool_use")
+                tool_use_block = {
+                    "type": "tool_use",
+                    "id": tool_id,
+                    "name": tool_name,
+                    "input": tool_input
+                }
+                
+                yield await self.broadcaster.emit_content_start(
+                    session_id=session_id,
+                    index=tool_use_index,
+                    content_block=tool_use_block
+                )
+                
+                yield await self.broadcaster.emit_content_stop(
+                    session_id=session_id,
+                    index=tool_use_index
+                )
+                ctx.block.close_current_block()
+                
+                # ===== 发送 tool_result content block =====
+                tool_result_index = ctx.block.start_new_block("tool_result")
+                result = result_info.get("result", {})
+                result_content = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
+                
+                tool_result_block = {
+                    "type": "tool_result",
+                    "tool_use_id": tool_id,
+                    "content": result_content,
+                    "is_error": result_info.get("is_error", False)
+                }
+                
+                yield await self.broadcaster.emit_content_start(
+                    session_id=session_id,
+                    index=tool_result_index,
+                    content_block=tool_result_block
+                )
+                
+                yield await self.broadcaster.emit_content_stop(
+                    session_id=session_id,
+                    index=tool_result_index
+                )
+                ctx.block.close_current_block()
+                
+                # 错误保留
+                if result_info.get("is_error") and self.context_engineering:
+                    self.context_engineering.record_error(
+                        tool_name=tool_name,
+                        error=Exception(result_info.get("error_msg", "Unknown error")),
+                        input_params=tool_input
+                    )
+                    logger.debug(f"📝 错误保留: {tool_name} 错误已记录")
+                
+                continue
+            
+            # ===== 串行执行特殊工具 =====
             logger.debug(f"🔧 执行工具: {tool_name}")
             
-            # 🆕 追踪工具执行（V4.2 Code-First）
+            # 追踪工具执行
             if self._tracer:
                 self._tracer.log_tool_call(tool_name)
             
-            # ===== 发送 tool_use content block =====
-            # 关闭之前的 block
+            # 发送 tool_use content block
             if ctx.block.is_block_open():
                 yield await self.broadcaster.emit_content_stop(
                     session_id=session_id,
                     index=ctx.block.current_index
                 )
             
-            # 发送 tool_use start 事件
             tool_use_index = ctx.block.start_new_block("tool_use")
             tool_use_block = {
                 "type": "tool_use",
@@ -928,30 +1167,24 @@ class SimpleAgent:
                 "input": tool_input
             }
             
-            # 发送到 SSE（给前端）并 yield 给 handler（用于持久化）
             yield await self.broadcaster.emit_content_start(
                 session_id=session_id,
                 index=tool_use_index,
                 content_block=tool_use_block
             )
             
-            # 关闭 tool_use block
             yield await self.broadcaster.emit_content_stop(
                 session_id=session_id,
                 index=tool_use_index
             )
             ctx.block.close_current_block()
             
-            # ===== 执行工具 =====
+            # 执行工具
             try:
                 # plan_todo 工具需要 current_plan 参数
                 if tool_name == "plan_todo":
                     operation = tool_input.get('operation', 'create_plan')
                     data = tool_input.get('data', {})
-                    
-                    # 🆕 V4.4 修正: Plan 阶段只使用能力类别（capability_categories）
-                    # 不传递具体工具列表，避免上下文过长
-                    # 具体工具在执行阶段根据 Plan 步骤的 capability 动态选择
                     
                     result = await self.plan_todo_tool.execute(
                         operation=operation,
@@ -964,7 +1197,7 @@ class SimpleAgent:
                         self._plan_cache["plan"] = result.get("plan")
                         logger.info(f"📋 Plan 操作完成: {operation}")
                 
-                # 🆕 HITL 工具：Agent 负责发送 SSE 事件并等待用户响应
+                # HITL 工具：Agent 负责发送 SSE 事件并等待用户响应
                 elif tool_name == "request_human_confirmation":
                     result = await self._handle_human_confirmation(
                         tool_input=tool_input,
@@ -972,19 +1205,20 @@ class SimpleAgent:
                         tool_id=tool_id
                     )
                 else:
-                    # 🛡️ 为所有工具注入上下文（user_id, session_id, conversation_id）
+                    # 普通工具（串行模式下执行）
                     session_context = await self.event_manager.storage.get_session_context(session_id)
                     tool_input.setdefault("session_id", session_id)
                     if session_context.get("user_id"):
                         tool_input.setdefault("user_id", session_context.get("user_id"))
-                    # 确保 conversation_id 始终有值（使用 session_id 作为默认值）
                     conv_id = session_context.get("conversation_id") or getattr(self, '_current_conversation_id', None) or session_id
                     tool_input.setdefault("conversation_id", conv_id)
                     
-                    # 执行工具
                     result = await self.tool_executor.execute(tool_name, tool_input)
+                    
+                    # 工具执行后触发 PromptManager 追加
+                    get_prompt_manager().on_tool_result(ctx, tool_name=tool_name, result=result)
                 
-                # ===== 发送 tool_result content block =====
+                # 发送 tool_result content block
                 tool_result_index = ctx.block.start_new_block("tool_result")
                 result_content = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
                 
@@ -995,7 +1229,6 @@ class SimpleAgent:
                     "is_error": False
                 }
                 
-                # 发送到 SSE 并 yield 给 handler
                 yield await self.broadcaster.emit_content_start(
                     session_id=session_id,
                     index=tool_result_index,
@@ -1007,14 +1240,12 @@ class SimpleAgent:
                     index=tool_result_index
                 )
                 ctx.block.close_current_block()
-                # 注意：特殊工具的 message_delta 由 broadcaster.emit_content_start 自动发送
                 
             except Exception as e:
                 error_msg = f"工具执行失败: {str(e)}"
                 logger.error(f"❌ {error_msg}")
                 
-                # 🆕 错误保留：记录错误作为学习素材
-                # 下次 LLM 调用时会注入错误上下文，避免重复踩坑
+                # 错误保留
                 if self.context_engineering:
                     self.context_engineering.record_error(
                         tool_name=tool_name,

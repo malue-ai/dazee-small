@@ -363,11 +363,12 @@ class EventBroadcaster:
         self,
         session_id: str,
         index: int,
-        delta: Dict[str, Any]
+        delta: str
     ) -> Dict[str, Any]:
         """
         发送 content_delta 事件
         
+        🆕 简化格式：delta 直接是字符串，类型由 content_start 的 content_block.type 决定
         🆕 自动累积到 ContentAccumulator
         """
         # 🆕 累积内容

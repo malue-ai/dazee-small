@@ -366,10 +366,28 @@ async function handleRunProject(project) {
     )
     
     console.log('✅ runProject 结果:', result)
+    console.log('📍 preview_url:', result.preview_url)
+    console.log('📍 success:', result.success)
     
     if (result.success && result.preview_url) {
-      // 成功后直接在新窗口打开
-      window.open(result.preview_url, '_blank')
+      console.log('🌐 准备打开新窗口:', result.preview_url)
+      
+      // 尝试打开新窗口
+      const newWindow = window.open(result.preview_url, '_blank')
+      
+      // 检测是否被浏览器拦截
+      if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
+        console.warn('⚠️ 弹窗被浏览器拦截，显示提示')
+        // 如果被拦截，显示可点击的链接
+        const shouldOpen = confirm(
+          `项目已启动！\n\n预览地址：${result.preview_url}\n\n点击"确定"在新窗口打开预览`
+        )
+        if (shouldOpen) {
+          window.open(result.preview_url, '_blank')
+        }
+      } else {
+        console.log('✅ 新窗口已打开')
+      }
     } else if (!result.success) {
       alert('启动项目失败: ' + (result.error || result.message))
     }

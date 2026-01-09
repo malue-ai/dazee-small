@@ -190,29 +190,26 @@ class ContentAccumulator:
                 "content": content_block.get("content", [])
             })
     
-    def on_content_delta(self, delta: Dict[str, Any]) -> None:
+    def on_content_delta(self, delta: str) -> None:
         """
         处理 content_delta 事件
         
         累积流式内容到当前 block
         
+        简化格式：delta 直接是字符串，类型由 _current_block_type 决定
+        - text block: delta = "我"
+        - thinking block: delta = "Let me think..."
+        - tool_use block: delta = '{"code": "print('
+        
         Args:
-            delta: {"type": "text_delta|thinking_delta|input_json_delta", ...}
+            delta: 字符串（增量内容）
         """
-        delta_type = delta.get("type")
-        
-        if delta_type in ("text_delta", "text"):
-            # 累积 text
-            self._current_text += delta.get("text", "")
-        
-        elif delta_type in ("thinking_delta", "thinking"):
-            # 累积 thinking
-            thinking_text = delta.get("thinking", delta.get("text", ""))
-            self._current_thinking += thinking_text
-        
-        elif delta_type == "input_json_delta":
-            # 累积工具输入 JSON
-            self._tool_input_buffer += delta.get("partial_json", "")
+        if self._current_block_type == "text":
+            self._current_text += delta
+        elif self._current_block_type == "thinking":
+            self._current_thinking += delta
+        elif self._current_block_type in ("tool_use", "server_tool_use"):
+            self._tool_input_buffer += delta
             self._try_parse_tool_input()
     
     def on_content_stop(self, signature: Optional[str] = None) -> None:

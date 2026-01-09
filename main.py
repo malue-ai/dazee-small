@@ -29,6 +29,9 @@ from routers.workspace import router as workspace_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
+    import os
+    import asyncio
+    
     # 启动时
     print("🚀 Zenflux Agent API 启动中...")
     
@@ -38,10 +41,46 @@ async def lifespan(app: FastAPI):
     await init_database()
     print("✅ 数据库初始化完成")
     
+    # 启动 gRPC 服务器（如果启用）
+    grpc_server = None
+    enable_grpc = os.getenv("ENABLE_GRPC", "false").lower() == "true"
+    
+    if enable_grpc:
+        try:
+            print("📡 启动 gRPC 服务器...")
+            from services.grpc.server import GRPCServer
+            
+            grpc_host = os.getenv("GRPC_HOST", "0.0.0.0")
+            grpc_port = int(os.getenv("GRPC_PORT", "50051"))
+            grpc_workers = int(os.getenv("GRPC_MAX_WORKERS", "10"))
+            
+            grpc_server = GRPCServer(grpc_host, grpc_port, grpc_workers)
+            
+            # 在后台启动 gRPC 服务器
+            asyncio.create_task(grpc_server.start())
+            
+            print(f"✅ gRPC 服务器已启动: {grpc_host}:{grpc_port}")
+            print(f"📡 内部服务可通过 gRPC 调用: ChatService, SessionService")
+        
+        except ImportError:
+            print("⚠️ gRPC 依赖未安装或代码未生成，跳过 gRPC 服务器启动")
+            print("   安装: pip install grpcio grpcio-tools")
+            print("   生成代码: bash scripts/generate_grpc.sh")
+        except Exception as e:
+            print(f"⚠️ gRPC 服务器启动失败: {e}")
+    
     yield
     
     # 关闭时 - 清理所有资源
     print("🛑 正在关闭服务...")
+    
+    # 0. 关闭 gRPC 服务器
+    if grpc_server:
+        try:
+            await grpc_server.stop(grace_period=5)
+            print("✅ gRPC 服务器已关闭")
+        except Exception as e:
+            print(f"⚠️ 关闭 gRPC 服务器失败: {e}")
     
     # 1. 关闭 Redis 连接
     try:
@@ -123,23 +162,44 @@ async def root():
     
     返回 API 基本信息和可用端点
     """
-    return {
+    import os
+    
+    enable_grpc = os.getenv("ENABLE_GRPC", "false").lower() == "true"
+    grpc_port = os.getenv("GRPC_PORT", "50051")
+    
+    response = {
         "name": "Zenflux Agent API",
         "version": "3.6.0",
         "status": "running",
         "description": "基于 Claude Sonnet 4.5 的智能体框架",
+        "protocols": {
+            "http": {
+                "enabled": True,
+                "docs": "/docs",
+                "redoc": "/redoc"
+            }
+        },
         "endpoints": {
-            "docs": "/docs",
-            "redoc": "/redoc",
             "health": "/health",
             "chat": "/api/v1/chat",
             "stream": "/api/v1/chat/stream",
             "session": "/api/v1/session/{session_id}",
             "sessions": "/api/v1/sessions",
-            "human_confirmation": "/api/v1/human-confirmation/{request_id}"  # 🆕 HITL
+            "human_confirmation": "/api/v1/human-confirmation/{request_id}"
         },
         "github": "https://github.com/your-repo/zenflux-agent"
     }
+    
+    # 如果 gRPC 启用，添加 gRPC 信息
+    if enable_grpc:
+        response["protocols"]["grpc"] = {
+            "enabled": True,
+            "port": int(grpc_port),
+            "services": ["ChatService", "SessionService", "ToolService", "AgentService"],
+            "client_example": f"from services.grpc.client import ZenfluxGRPCClient\nclient = ZenfluxGRPCClient('localhost:{grpc_port}')"
+        }
+    
+    return response
 
 
 @app.get("/health")

@@ -6,17 +6,17 @@ Content 级事件管理 - ContentEventManager
 - content_delta : 内容增量
 - content_stop  : 结束内容块
 
-content_block 类型：
+content_block 类型（在 content_start 中定义）：
 - text        : 文本内容
 - thinking    : 思考过程（Extended Thinking）
 - tool_use    : 工具调用
 - tool_result : 工具执行结果
 
-delta 类型：
-- text_delta       : {"type": "text_delta", "text": "..."}
-- thinking_delta   : {"type": "thinking_delta", "thinking": "..."}
-- input_json_delta : {"type": "input_json_delta", "partial_json": "..."}
-- signature_delta  : {"type": "signature_delta", "signature": "..."}
+delta 格式（简化版）：
+- delta 直接是字符串，类型由 content_start 的 content_block.type 决定
+- text: delta = "我"
+- thinking: delta = "Let me think..."
+- tool_use: delta = '{"code": "print('
 
 设计原则：纯粹的事件发送层，不关心具体结构，由上层决定
 """
@@ -74,7 +74,7 @@ class ContentEventManager(BaseEventManager):
         self,
         session_id: str,
         index: int,
-        delta: Dict[str, Any]
+        delta: str
     ) -> Dict[str, Any]:
         """
         发送 content_delta 事件
@@ -82,15 +82,16 @@ class ContentEventManager(BaseEventManager):
         Args:
             session_id: Session ID
             index: 内容块索引
-            delta: Delta 对象（由上层构造）
+            delta: 增量内容（字符串）
             
         Returns:
             发送的事件对象
             
-        示例 delta 结构：
-        - text_delta:      {"type": "text_delta", "text": "..."}
-        - thinking_delta:  {"type": "thinking_delta", "thinking": "..."}
-        - input_json_delta:{"type": "input_json_delta", "partial_json": "..."}
+        简化格式：
+        delta 直接是字符串，类型由 content_start 的 content_block.type 决定
+        - text: delta = "我"
+        - thinking: delta = "Let me think..."
+        - tool_use: delta = '{"code": "print('
         """
         event = self._create_event(
             event_type="content_delta",

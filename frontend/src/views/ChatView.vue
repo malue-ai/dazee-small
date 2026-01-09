@@ -689,7 +689,13 @@ async function sendMessage() {
       (event) => handleStreamEvent(event, reactiveMsg),
       { 
         files: filesParam,
-        backgroundTasks: ['title_generation', 'recommended_questions']
+        backgroundTasks: ['title_generation', 'recommended_questions'],
+        // 🆕 前端上下文变量，直接注入到 Agent 的 System Prompt
+        variables: {
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          locale: navigator.language,
+          timestamp: new Date().toISOString()
+        }
       }
     )
     await loadConversationList()
@@ -758,7 +764,8 @@ function handleStreamEvent(event, msg) {
   if (type === 'content_start') {
     const { index, content_block } = data
     while (msg.contentBlocks.length <= index) msg.contentBlocks.push(null)
-    msg.contentBlocks[index] = { ...content_block }
+    // 🆕 记录 block 类型到 contentBlocks，用于 content_delta 时判断
+    msg.contentBlocks[index] = { ...content_block, _blockType: content_block.type }
     if (content_block.type === 'thinking') msg.thinking = ''
     if (content_block.type === 'tool_use') msg.toolStatuses[content_block.id] = { pending: true }
     if (content_block.type === 'tool_result') {
@@ -792,18 +799,22 @@ function handleStreamEvent(event, msg) {
   if (type === 'content_delta') {
     const { index, delta } = data
     const block = msg.contentBlocks[index]
-    if (delta.type === 'text_delta') {
-      msg.content += delta.text || ''
-      if (block) block.text = (block.text || '') + (delta.text || '')
+    
+    // 🆕 简化格式：delta 直接是字符串，类型由 content_block._blockType 决定
+    const blockType = block?._blockType || ''
+    const deltaText = typeof delta === 'string' ? delta : (delta.text || delta.thinking || delta.partial_json || '')
+    
+    if (blockType === 'text') {
+      msg.content += deltaText
+      if (block) block.text = (block.text || '') + deltaText
       scrollToBottom()
-    }
-    if (delta.type === 'thinking_delta') {
-      msg.thinking += delta.thinking || ''
-      if (block) block.thinking = (block.thinking || '') + (delta.thinking || '')
+    } else if (blockType === 'thinking') {
+      msg.thinking += deltaText
+      if (block) block.thinking = (block.thinking || '') + deltaText
       scrollToBottom()
-    }
-    if (delta.type === 'input_json_delta' && block) {
-      block.partialInput = (block.partialInput || '') + (delta.partial_json || '')
+    } else if ((blockType === 'tool_use' || blockType === 'server_tool_use') && block) {
+      // 工具参数增量（JSON 片段）
+      block.partialInput = (block.partialInput || '') + deltaText
     }
   }
   
@@ -1121,10 +1132,28 @@ async function handleRunProjectFromExplorer(project) {
     )
     
     console.log('📦 运行结果:', result)
+    console.log('📍 preview_url:', result.preview_url)
+    console.log('📍 success:', result.success)
     
     if (result.success && result.preview_url) {
       console.log('✅ 打开预览:', result.preview_url)
-      window.open(result.preview_url, '_blank')
+      
+      // 尝试打开新窗口
+      const newWindow = window.open(result.preview_url, '_blank')
+      
+      // 检测是否被浏览器拦截
+      if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
+        console.warn('⚠️ 弹窗被浏览器拦截，显示提示')
+        // 如果被拦截，显示可点击的链接
+        const shouldOpen = confirm(
+          `项目已启动！\n\n预览地址：${result.preview_url}\n\n点击"确定"在新窗口打开预览`
+        )
+        if (shouldOpen) {
+          window.open(result.preview_url, '_blank')
+        }
+      } else {
+        console.log('✅ 新窗口已打开')
+      }
     } else if (!result.success) {
       alert('启动项目失败: ' + (result.error || result.message))
     }

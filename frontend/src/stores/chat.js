@@ -13,6 +13,8 @@ export const useChatStore = defineStore('chat', {
     lastEventId: 0,
     reconnectAttempts: 0,
     maxReconnectAttempts: 3,
+    // 🆕 当前内容块类型（用于简化 delta 格式）
+    _currentBlockType: null,
   }),
 
   actions: {
@@ -272,6 +274,12 @@ export const useChatStore = defineStore('chat', {
           requestBody.files = options.files
           console.log('📎 发送文件:', options.files)
         }
+        
+        // 🆕 添加前端上下文变量（位置、时区等）
+        if (options.variables && Object.keys(options.variables).length > 0) {
+          requestBody.variables = options.variables
+          console.log('📍 发送上下文变量:', options.variables)
+        }
 
         // 使用 fetch 创建 SSE 连接
         this._createSSEConnection(requestBody, onEvent, resolve, reject)
@@ -374,13 +382,21 @@ export const useChatStore = defineStore('chat', {
                         onEvent(data)
                       }
 
-                      // 收集文本内容
+                      // 🆕 简化格式：delta 直接是字符串
+                      // 需要跟踪当前 block 类型来判断是否是文本内容
+                      if (eventType === 'content_start') {
+                        const blockType = data.data?.content_block?.type
+                        this._currentBlockType = blockType
+                      }
+                      
                       if (eventType === 'content_delta') {
-                        if (data.data?.delta?.type === 'text' && data.data?.delta?.text) {
-                          fullResponse += data.data.delta.text
+                        const delta = data.data?.delta
+                        // 简化格式：delta 是字符串，类型由 _currentBlockType 决定
+                        if (this._currentBlockType === 'text') {
+                          const deltaText = typeof delta === 'string' ? delta : (delta?.text || '')
+                          fullResponse += deltaText
                         }
                       } else if (eventType === 'content' && data.data?.text) {
-                        // 兼容旧格式
                         fullResponse += data.data.text
                       }
                       
