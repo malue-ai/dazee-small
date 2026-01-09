@@ -257,22 +257,25 @@ class AgentFactory:
         llm_service = None
     ) -> AgentSchema:
         """调用 LLM 生成 Schema"""
+        from core.llm import Message
+        
         if llm_service is None:
             from core.llm import create_claude_service
-            # 使用 Haiku 4.5（快速且便宜，支持 64K output tokens）
-            llm_service = create_claude_service(model="claude-haiku-4-5-20251001")
+            # 🆕 使用配置化的 LLM Profile
+            from config.llm_config import get_llm_profile
+            profile = get_llm_profile("schema_generator")
+            llm_service = create_claude_service(**profile)
         
-        response = await llm_service.create_message(
-            system=SCHEMA_GENERATOR_PROMPT,
-            messages=[{
-                "role": "user",
-                "content": f"分析以下 System Prompt 并生成 Agent Schema:\n\n{system_prompt}"
-            }],
-            max_tokens=2048
+        response = await llm_service.create_message_async(
+            messages=[Message(
+                role="user",
+                content=f"分析以下 System Prompt 并生成 Agent Schema:\n\n{system_prompt}"
+            )],
+            system=SCHEMA_GENERATOR_PROMPT
         )
         
-        # 提取 JSON
-        content = response.content[0].text if response.content else ""
+        # 提取 JSON（LLMResponse.content 是 str 类型）
+        content = response.content if response.content else ""
         schema_json = cls._extract_json(content)
         
         # 使用强类型 Schema 验证和解析
@@ -281,52 +284,29 @@ class AgentFactory:
     @classmethod
     def _infer_schema_from_prompt(cls, system_prompt: str) -> AgentSchema:
         """
-        从 Prompt 推断 Schema（不调用 LLM，快速启动）
+        V5.0: 获取保守默认 Schema（不做关键词猜测）
         
         用于：
         - LLM 调用失败时的 fallback
         - 快速启动场景
+        
+        V5.0 策略：
+        - 不使用关键词匹配
+        - 返回通用配置，让 Agent 自适应
+        - 工具/Skills 由 instance 的 config.yaml 配置
         """
-        prompt_lower = system_prompt.lower()
+        logger.info("⚠️ 使用保守默认 Schema（LLM 推断失败）")
         
-        # 推断 Skills
-        skills = []
-        if any(kw in prompt_lower for kw in ["excel", "表格", "xlsx", "报表"]):
-            skills.append(SkillConfig(skill_id="xlsx", type="custom"))
-        if any(kw in prompt_lower for kw in ["ppt", "演示", "幻灯片", "pptx"]):
-            skills.append(SkillConfig(skill_id="pptx", type="custom"))
-        if any(kw in prompt_lower for kw in ["pdf", "文档"]):
-            skills.append(SkillConfig(skill_id="pdf", type="custom"))
-        
-        # 推断 Tools
-        tools = []
-        if any(kw in prompt_lower for kw in ["数据分析", "pandas", "numpy", "分析数据"]):
-            tools.append("e2b_sandbox")
-        if any(kw in prompt_lower for kw in ["搜索", "查找", "检索", "search"]):
-            tools.extend(["web_search", "exa_search"])
-        
-        # 推断复杂度
-        is_complex = any(kw in prompt_lower for kw in [
-            "计划", "规划", "多步骤", "分析", "报告", "报表"
-        ])
-        
-        # 推断名称
-        name = "GeneralAgent"
-        if "数据分析" in prompt_lower:
-            name = "DataAnalysisAgent"
-        elif "搜索" in prompt_lower or "研究" in prompt_lower:
-            name = "ResearchAgent"
-        elif "报告" in prompt_lower or "报表" in prompt_lower:
-            name = "ReportAgent"
-        
+        # V5.0: 保守默认值，不做关键词猜测
+        # 工具/Skills 应由 instance 的 config.yaml 配置
         return AgentSchema(
-            name=name,
-            description=f"根据 Prompt 推断的 {name}",
-            plan_manager=PlanManagerConfig(enabled=is_complex),
-            skills=skills,
-            tools=tools,
-            max_turns=15 if is_complex else 8,
-            reasoning=f"从 Prompt 关键词推断: skills={[s.skill_id for s in skills]}, tools={tools}, complex={is_complex}"
+            name="GeneralAgent",
+            description="通用智能体（保守默认配置）",
+            plan_manager=PlanManagerConfig(enabled=True),  # 启用规划，适应复杂任务
+            skills=[],  # 由 instance 配置
+            tools=[],   # 由 instance 配置
+            max_turns=15,  # 默认中等复杂度
+            reasoning="V5.0 保守默认配置：LLM 推断失败，使用通用配置"
         )
     
     @classmethod

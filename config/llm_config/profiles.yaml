@@ -1,0 +1,135 @@
+# ============================================================
+# LLM 调用配置文件
+# ============================================================
+#
+# 集中管理项目中所有 LLM 调用点的超参数配置
+# 开发人员可在此调整各模块的 LLM 行为，无需修改代码
+#
+# ============================================================
+
+profiles:
+  # ==================== 主 Agent 对话 ====================
+  main_agent:
+    description: "主 Agent 对话处理，需要最强推理能力和大输出窗口"
+    model: "claude-sonnet-4-5-20250929"
+    max_tokens: 64000
+    temperature: 1.0
+    enable_thinking: true
+    thinking_budget: 10000
+    enable_caching: false
+    timeout: 120.0
+    max_retries: 3
+
+  # ==================== 意图分析 ====================
+  intent_analyzer:
+    description: "分析用户意图，需要快速响应，使用轻量模型"
+    model: "claude-haiku-4-5-20251001"
+    max_tokens: 2048
+    temperature: 0
+    enable_thinking: false
+    enable_caching: false
+    timeout: 60.0
+    max_retries: 2
+
+  # ==================== 语义推理 ====================
+  semantic_inference:
+    description: "工具调用时机判断，需要确定性输出"
+    model: "claude-haiku-4-5-20251001"
+    max_tokens: 500
+    temperature: 0
+    enable_thinking: false
+    enable_caching: false
+    timeout: 30.0
+    max_retries: 2
+
+  # ==================== 提示词分析 ====================
+  llm_analyzer:
+    description: "分析运营写的原始提示词，生成结构化 Schema"
+    model: "claude-haiku-4-5-20251001"
+    max_tokens: 4000
+    temperature: 0
+    enable_thinking: false
+    enable_caching: false
+    timeout: 60.0
+    max_retries: 2
+
+  # ==================== Schema 生成 ====================
+  schema_generator:
+    description: "根据 Prompt 动态生成 Agent Schema"
+    model: "claude-haiku-4-5-20251001"
+    max_tokens: 2048
+    temperature: 0
+    enable_thinking: false
+    enable_caching: false
+    timeout: 60.0
+    max_retries: 2
+
+  # ==================== 工具能力推断 ====================
+  tool_capability_inference:
+    description: "推断工具的业务能力分类，用于智能工具选择"
+    model: "claude-haiku-4-5-20251001"
+    max_tokens: 100
+    temperature: 0.3
+    enable_thinking: false
+    enable_caching: false
+    timeout: 30.0
+    max_retries: 2
+
+  # ==================== 后台任务 ====================
+  background_task:
+    description: "后台任务（如对话标题生成），使用轻量模型"
+    model: "claude-haiku-4-5-20251001"
+    max_tokens: 100
+    temperature: 0.7
+    enable_thinking: false
+    enable_caching: false
+    timeout: 30.0
+    max_retries: 1
+
+  # ==================== 计划管理 ====================
+  plan_manager:
+    description: "智能任务规划和管理，需要深度推理能力"
+    model: "claude-sonnet-4-5-20250929"
+    max_tokens: 8192
+    temperature: 1.0
+    enable_thinking: true
+    thinking_budget: 5000
+    enable_caching: false
+    timeout: 120.0
+    max_retries: 2
+
+# ============================================================
+# 配置说明
+# ============================================================
+#
+# 参数说明：
+# - model: 模型名称
+#   - claude-sonnet-4-5-20250929: 最强推理能力，适合复杂任务
+#   - claude-haiku-4-5-20251001: 轻量快速，适合简单任务
+#
+# - max_tokens: 最大输出 token 数
+#   - 根据任务复杂度调整：简单任务 100-500，复杂任务 2048-64000
+#
+# - temperature: 温度参数（0-1）
+#   - 0: 确定性输出，适合结构化任务
+#   - 0.7-1.0: 创意输出，适合对话和内容生成
+#
+# - enable_thinking: 是否启用 Extended Thinking
+#   - true: 启用深度推理（仅 Sonnet 支持）
+#   - false: 禁用（Haiku 不支持）
+#
+# - thinking_budget: Thinking token 预算
+#   - 仅当 enable_thinking=true 时有效
+#   - 推荐值：5000-10000
+#
+# - enable_caching: 是否启用 Prompt Caching
+#   - true: 启用缓存（节省成本）
+#   - false: 禁用缓存
+#
+# - timeout: 请求超时时间（秒）
+#   - 根据任务复杂度调整：简单任务 30s，复杂任务 120s
+#
+# - max_retries: 最大重试次数
+#   - 推荐值：1-3
+#
+# ============================================================

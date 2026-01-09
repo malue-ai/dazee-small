@@ -192,11 +192,12 @@ class InstanceTool:
 输出格式示例：chart_generation,data_visualization"""
 
             # 调用 LLM
-            llm_service = create_llm_service()
+            # 🆕 使用配置化的 LLM Profile
+            from config.llm_config import get_llm_profile
+            profile = get_llm_profile("tool_capability_inference")
+            llm_service = create_llm_service(**profile)
             response = llm_service.create_message(
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=100,
-                temperature=0.3  # 低温度，保证稳定性
+                messages=[{"role": "user", "content": prompt}]
             )
             
             # 解析响应
@@ -220,33 +221,18 @@ class InstanceTool:
     
     def _keyword_based_fallback(self) -> List[str]:
         """
-        关键词匹配回退方案（简化版，仅核心关键词）
+        V5.0: 保守默认值（不做关键词猜测）
+        
+        V5.0 策略：
+        - 不使用关键词映射
+        - 返回空列表，让系统使用通用路由
+        - 能力应由 instance 的 config.yaml 显式配置
         
         Returns:
-            推断出的能力列表
+            空列表（保守默认值）
         """
-        text = f"{self.name.lower()} {self.description.lower()}"
-        capabilities = []
-        
-        # 核心关键词映射（简化版）
-        keyword_map = {
-            "chart_generation": ["flowchart", "diagram", "架构图", "流程图"],
-            "ppt_generation": ["ppt", "slides", "presentation", "演示"],
-            "document_creation": ["document", "word", "pdf", "文档", "报告"],
-            "image_generation": ["image", "picture", "图片", "dalle"],
-            "web_search": ["search", "搜索", "google"],
-            "news_search": ["news", "新闻"],
-            "data_analysis": ["analysis", "分析", "excel"],
-            "data_visualization": ["visualization", "可视化", "图表"],
-            "crm_integration": ["crm", "客户", "salesforce"],
-            "notification": ["email", "sms", "邮件", "短信"]
-        }
-        
-        for cap_id, keywords in keyword_map.items():
-            if any(kw in text for kw in keywords):
-                capabilities.append(cap_id)
-        
-        return capabilities
+        logger.info(f"⚠️ 工具 {self.name} 使用保守默认值（LLM 推断失败）")
+        return []  # V5.0: 不做关键词猜测
 
 
 class InstanceToolRegistry:

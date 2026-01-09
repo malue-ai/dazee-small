@@ -536,11 +536,10 @@ class PlanTodoTool:
         self._memory_manager = memory_manager  # 🆕 PlanMemory 通过 MemoryManager 访问
         
         # 创建专用 LLM Service（启用 Extended Thinking）
-        self._llm = create_claude_service(
-            model="claude-sonnet-4-5-20250929",
-            enable_thinking=True,
-            enable_caching=False
-        )
+        # 🆕 使用配置化的 LLM Profile
+        from config.llm_config import get_llm_profile
+        profile = get_llm_profile("plan_manager")
+        self._llm = create_claude_service(**profile)
         
         persistence_status = "启用" if memory_manager else "禁用"
         logger.info(f"✅ PlanTodoTool 初始化完成（智能版本，Extended Thinking，持久化: {persistence_status}）")

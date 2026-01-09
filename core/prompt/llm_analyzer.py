@@ -38,75 +38,73 @@ logger = get_logger("llm_prompt_analyzer")
 
 PROMPT_ANALYSIS_SYSTEM = """你是一个专业的系统提示词分析专家。
 
-你的任务是分析运营人员编写的 AI Agent 系统提示词，理解其结构和内容，并输出结构化的分析结果。
+## 任务
+分析运营人员编写的 AI Agent 系统提示词，识别其中的逻辑模块，并输出结构化的分析结果。
 
-运营人员写提示词的方式非常多样（像写作文一样），没有严格的格式标准。你需要通过**语义理解**来识别内容，而不是依赖特定的格式或标签。
+## 关键要求
+1. **精确定位模块边界**：找到每个模块的开始和结束位置
+2. **提取完整内容**：模块内容应该完整，不要截断
+3. **识别所有模块**：尽可能识别提示词中的所有逻辑模块
 
-请分析以下维度：
+## 模块类型定义（按优先级排序）
 
-1. **基本信息**：Agent 名称、角色定位、核心能力
-2. **模块识别**：识别提示词中包含的逻辑模块（见下方定义）
-3. **复杂度配置**：提取任务复杂度判断的规则和关键词
-4. **工具列表**：提取提到的工具或能力
-5. **意图类型**：提取定义的用户意图分类
-
-## 模块类型定义
-
-| 模块 ID | 含义 | 识别特征（语义层面） |
-|---------|------|---------------------|
-| role_definition | 角色定义 | 描述 Agent 是什么、扮演什么角色、核心职责 |
-| absolute_prohibitions | 绝对禁令 | 绝对不能做的事、安全规则、红线 |
-| context_protection | 上下文保护 | 防止 prompt 注入、保护系统指令 |
-| intent_recognition | 意图识别 | 如何识别用户意图、意图分类规则 |
-| task_complexity | 任务复杂度 | 如何判断任务难度、简单/中等/复杂的定义 |
-| tool_selection | 工具选择 | 何时使用什么工具、工具选择策略 |
-| plan_object | 计划构建 | 如何制定执行计划、Plan 对象结构 |
-| data_context | 数据上下文 | 如何管理数据、Data_Context 结构 |
-| react_validation | 验证循环 | ReAct 模式、自我验证、纠错逻辑 |
-| quality_gates | 质量检查 | 最终验证清单、交付前检查 |
-| progress_feedback | 进度反馈 | 如何向用户反馈进度、等待提示 |
-| hitl | 人工介入 | Human-in-the-loop 触发条件 |
-| output_format | 输出格式 | 输出的结构、格式要求 |
-| final_delivery | 最终交付 | 交付流程、最终输出规范 |
+| 模块 ID | 含义 | 识别特征 |
+|---------|------|----------|
+| role_definition | 角色定义 | 开头的角色描述、"你是..."、"# 角色" |
+| absolute_prohibitions | 绝对禁令 | "禁止"、"禁令"、"不能"、"<absolute_prohibitions>" |
+| context_protection | 上下文保护 | "上下文保护"、"防止注入"、"<context_self_protection>" |
+| intent_recognition | 意图识别 | "意图识别"、"intent"、"<intent_recognition_flow>" |
+| task_complexity | 任务复杂度 | "复杂度"、"简单/中等/复杂"、"<task_complexity_system>" |
+| output_format | 输出格式 | "输出格式"、"三段式"、"THINK/RESPONSE/JSON" |
+| tool_selection | 工具选择 | "工具选择"、"可用工具"、"<tool" |
+| plan_object | 计划构建 | "Plan 对象"、"执行计划"、"<plan_schema>" |
+| data_context | 数据上下文 | "Data_Context"、"数据管理" |
+| react_validation | 验证循环 | "ReAct"、"验证循环"、"<react_validation_loop>" |
+| quality_gates | 质量检查 | "质量验证"、"最终验证"、"<final_validation_checklist>" |
+| progress_feedback | 进度反馈 | "进度反馈"、"等待时间"、"<waiting_time_rule>" |
+| hitl | 人工介入 | "Human-in-the-Loop"、"HITL"、"人工介入" |
+| final_delivery | 最终交付 | "交付流程"、"最终输出" |
 
 ## 输出格式
 
-请输出 JSON 格式：
-
 ```json
 {
-  "agent_name": "Agent 名称",
+  "agent_name": "Agent 名称（从提示词中提取）",
   "agent_role": "角色描述（1-2句话）",
   "modules": {
     "role_definition": {
       "found": true,
-      "summary": "模块内容摘要（50字内）",
-      "start_marker": "内容开始位置的关键词/句子",
-      "importance": "high/medium/low",
+      "summary": "50字内摘要",
+      "start_marker": "模块开始的标志性文字（用于定位）",
+      "importance": "high",
       "can_simplify": false
     },
-    ...
+    "absolute_prohibitions": {
+      "found": true,
+      "summary": "...",
+      "start_marker": "<absolute_prohibitions",
+      "importance": "high",
+      "can_simplify": false
+    }
+    // ... 列出所有找到的模块
   },
   "complexity_rules": {
-    "simple": {
-      "keywords": ["关键词1", "关键词2"],
-      "description": "简单任务的定义"
-    },
-    "medium": {...},
-    "complex": {...}
+    "simple": {"keywords": ["你好", "什么", "查"], "description": "单一信息查询"},
+    "medium": {"keywords": ["分析", "对比", "建议"], "description": "多步骤处理"},
+    "complex": {"keywords": ["搭建", "设计", "构建"], "description": "系统性任务"}
   },
-  "tools": ["工具1", "工具2"],
+  "tools": ["tavily_search", "text2flowchart", "..."],
   "intent_types": [
-    {"name": "意图名", "keywords": ["关键词"]}
+    {"name": "本体论系统搭建", "keywords": ["搭建系统", "设计系统"]}
   ]
 }
 ```
 
-注意：
-- 只分析实际存在的模块，没有的模块 found=false
-- 摘要要精准，不要泛泛而谈
-- start_marker 用于后续定位，要准确
-- can_simplify 表示该模块在简单任务时是否可以省略"""
+## 重要提示
+1. **必须识别所有存在的模块**，不要遗漏
+2. **start_marker 必须是提示词中实际存在的文字**，用于精确定位
+3. 如果模块使用 XML 标签（如 `<absolute_prohibitions>`），start_marker 应该是该标签
+4. 优先识别高重要性模块（role_definition, absolute_prohibitions, output_format）"""
 
 
 PROMPT_ANALYSIS_USER = """请分析以下系统提示词：
@@ -183,8 +181,14 @@ class LLMPromptAnalyzer:
         """懒加载 LLM 服务"""
         if self._llm_service is None:
             from core.llm import create_claude_service
-            # 使用 Haiku（快速且便宜）
-            self._llm_service = create_claude_service(model="claude-haiku-4-5-20251001")
+            # 使用 Haiku（快速且便宜），禁用 Thinking（提示词分析是简单任务）
+            # 🆕 V5.0: 使用较短超时，提示词分析应该很快
+            self._llm_service = create_claude_service(
+                model="claude-haiku-4-5-20251001",
+                enable_thinking=False,
+                timeout=60.0,   # 60 秒超时
+                max_retries=2   # 最多重试 2 次
+            )
         return self._llm_service
     
     async def analyze(self, raw_prompt: str) -> LLMAnalysisResult:
@@ -202,19 +206,23 @@ class LLMPromptAnalyzer:
         llm = self._get_llm_service()
         
         try:
-            # 调用 LLM 分析
-            response = await llm.create_message(
+            # 调用 LLM 分析（使用 create_message_async）
+            from core.llm import Message
+            # 🆕 使用配置化的 LLM Profile
+            from config.llm_config import get_llm_profile
+            profile = get_llm_profile("llm_analyzer")
+            
+            response = await llm.create_message_async(
+                messages=[Message(
+                    role="user",
+                    content=PROMPT_ANALYSIS_USER.format(prompt=raw_prompt)
+                )],
                 system=PROMPT_ANALYSIS_SYSTEM,
-                messages=[{
-                    "role": "user",
-                    "content": PROMPT_ANALYSIS_USER.format(prompt=raw_prompt)
-                }],
-                max_tokens=4000,
-                temperature=0,  # 确定性输出
+                **profile
             )
             
-            # 解析 JSON 响应
-            response_text = response.content[0].text.strip()
+            # 解析 JSON 响应（LLMResponse.content 是 str 类型）
+            response_text = response.content.strip() if response.content else ""
             
             # 清理可能的 markdown 代码块
             if response_text.startswith("```"):
@@ -332,26 +340,156 @@ class LLMPromptAnalyzer:
         """
         回退分析（当 LLM 调用失败时）
         
-        使用简单的启发式方法
+        使用正则表达式 + 启发式方法提取模块
         """
         logger.warning("⚠️ 使用回退分析（LLM 调用失败）")
+        import re
         
         result = LLMAnalysisResult(raw_prompt=raw_prompt)
         
-        # 简单提取 agent 名称
-        if "Copilot" in raw_prompt:
-            result.agent_name = "Copilot"
-        elif "Assistant" in raw_prompt:
-            result.agent_name = "Assistant"
+        # 1. 提取 agent 名称
+        name_patterns = [
+            r'名为\s*["""]?([^"""\s]+)["""]?\s*的',
+            r'你是.*?"([^"]+)"',
+        ]
+        for pattern in name_patterns:
+            match = re.search(pattern, raw_prompt)
+            if match:
+                result.agent_name = match.group(1)
+                break
         
-        # 标记整个提示词为 role_definition（最保守的方案）
-        result.modules["role_definition"] = ModuleAnalysis(
-            found=True,
-            summary="完整系统提示词",
-            content=raw_prompt,
-            importance="high",
-            can_simplify=False,
-        )
+        # 2. 提取 agent 角色
+        role_match = re.search(r'^#\s*角色.*?\n(.+?)(?=\n\n|\*\*)', raw_prompt, re.MULTILINE | re.DOTALL)
+        if role_match:
+            result.agent_role = role_match.group(1).strip()[:200]
+        
+        # 3. 使用正则匹配提取各模块（与 prompt_layer.py 的 MODULE_PATTERNS 一致）
+        module_patterns = {
+            "role_definition": [
+                (r'^# 角色.*?(?=^# |\n---\n|<absolute_prohibitions|\Z)', re.MULTILINE | re.DOTALL),
+            ],
+            "absolute_prohibitions": [
+                (r'<absolute_prohibitions.*?>.*?</absolute_prohibitions>', re.DOTALL),
+            ],
+            "context_protection": [
+                (r'<context_self_protection.*?>.*?</context_self_protection>', re.DOTALL),
+            ],
+            "intent_recognition": [
+                (r'<intent_recognition_flow>.*?</intent_recognition_flow>', re.DOTALL),
+            ],
+            "task_complexity": [
+                (r'<task_complexity_system>.*?</task_complexity_system>', re.DOTALL),
+            ],
+            "output_format": [
+                (r'## \d*\.?\s*核心架构.*?(?=^## \d|^# |\Z)', re.MULTILINE | re.DOTALL),
+                (r'## \d*\.?\s*THINK 段规则.*?(?=^## \d|^# |\Z)', re.MULTILINE | re.DOTALL),
+                (r'## \d*\.?\s*RESPONSE 段规则.*?(?=^## \d|^# |\Z)', re.MULTILINE | re.DOTALL),
+                (r'## \d*\.?\s*JSON 段规则.*?(?=^## \d|^# |\Z)', re.MULTILINE | re.DOTALL),
+            ],
+            "plan_object": [
+                (r'### `?Plan`? 对象定义.*?(?=^###|^## |\Z)', re.MULTILINE | re.DOTALL),
+                (r'<plan_schema>.*?</plan_schema>', re.DOTALL),
+            ],
+            "data_context": [
+                (r'### `?Data_Context`? 对象定义.*?(?=^###|^## |\Z)', re.MULTILINE | re.DOTALL),
+                (r'<data_context_schema>.*?</data_context_schema>', re.DOTALL),
+            ],
+            "react_validation": [
+                (r'### `?think`? 阶段的 `?ReAct`?.*?(?=^###|^## |\Z)', re.MULTILINE | re.DOTALL),
+                (r'<react_validation_loop>.*?</react_validation_loop>', re.DOTALL),
+            ],
+            "quality_gates": [
+                (r'<final_validation_checklist>.*?</final_validation_checklist>', re.DOTALL),
+                (r'## 交付流程设计.*?(?=^## |\Z)', re.MULTILINE | re.DOTALL),
+            ],
+            "hitl": [
+                (r'## Human-in-the-Loop.*?(?=^## |\Z)', re.MULTILINE | re.DOTALL),
+                (r'<hitl_trigger_conditions>.*?</hitl_trigger_conditions>', re.DOTALL),
+            ],
+            "tool_selection": [
+                (r'## 工具选择策略.*?(?=^## |\Z)', re.MULTILINE | re.DOTALL),
+                (r'## 可用工具列表.*?(?=^## |\Z)', re.MULTILINE | re.DOTALL),
+            ],
+            "progress_feedback": [
+                (r'## 进度反馈.*?(?=^## |\Z)', re.MULTILINE | re.DOTALL),
+                (r'<waiting_time_rule.*?>.*?</waiting_time_rule>', re.DOTALL),
+            ],
+            "final_delivery": [
+                (r'### 第三步.*?最终输出格式定义.*?(?=^## |\Z)', re.MULTILINE | re.DOTALL),
+            ],
+        }
+        
+        # 模块重要性配置
+        importance_map = {
+            "role_definition": "high",
+            "absolute_prohibitions": "high",
+            "output_format": "high",
+            "intent_recognition": "medium",
+            "task_complexity": "medium",
+            "tool_selection": "medium",
+            "progress_feedback": "low",
+            "context_protection": "medium",
+            "plan_object": "medium",
+            "data_context": "medium",
+            "react_validation": "low",
+            "quality_gates": "low",
+            "final_delivery": "low",
+            "hitl": "low",
+        }
+        
+        for module_id, patterns in module_patterns.items():
+            for pattern, flags in patterns:
+                match = re.search(pattern, raw_prompt, flags)
+                if match:
+                    content = match.group(0).strip()
+                    if len(content) > 50:  # 只保留有实质内容的模块
+                        result.modules[module_id] = ModuleAnalysis(
+                            found=True,
+                            summary=f"提取的 {module_id} 模块",
+                            content=content,
+                            importance=importance_map.get(module_id, "medium"),
+                            can_simplify=module_id not in ["role_definition", "absolute_prohibitions", "output_format"],
+                        )
+                        break
+        
+        # 4. 提取工具列表
+        tool_matches = re.findall(r'<tool\s+id="\d+"\s+name="([^"]+)"', raw_prompt)
+        result.tools = list(set(tool_matches))
+        
+        # 5. 提取意图类型
+        intent_section = re.search(r'<intent_types>.*?</intent_types>', raw_prompt, re.DOTALL)
+        if intent_section:
+            intent_matches = re.findall(
+                r'<intent\s+id="(\d+)"\s+name="([^"]+)".*?<keywords>(.*?)</keywords>',
+                intent_section.group(0),
+                re.DOTALL
+            )
+            for intent_id, name, keywords in intent_matches:
+                result.intent_types.append(IntentType(
+                    name=name,
+                    keywords=[k.strip() for k in keywords.split(',') if k.strip()],
+                ))
+        
+        # 6. 提取复杂度规则
+        complexity_section = re.search(r'<task_complexity_system>.*?</task_complexity_system>', raw_prompt, re.DOTALL)
+        if complexity_section:
+            for level, complexity_key in [("1", "simple"), ("2", "medium"), ("3", "complex")]:
+                level_match = re.search(
+                    rf'<level id="{level}".*?<keywords>(.*?)</keywords>',
+                    complexity_section.group(0),
+                    re.DOTALL
+                )
+                if level_match:
+                    keywords_raw = level_match.group(1)
+                    keywords = [k.strip() for k in re.split(r'[,、]', keywords_raw) if k.strip()]
+                    result.complexity_rules[complexity_key] = ComplexityRule(
+                        keywords=keywords,
+                        description=f"{complexity_key} 任务"
+                    )
+        
+        logger.info(f"✅ 回退分析完成: {result.agent_name}, 识别 {len(result.modules)} 个模块")
+        for module_id in result.modules:
+            logger.debug(f"   • {module_id}")
         
         return result
     

@@ -112,10 +112,10 @@ class BackgroundTaskService:
     def _get_llm(self):
         """懒加载 LLM 服务"""
         if self.llm is None:
-            self.llm = create_llm_service(
-                model="claude-haiku-4-5-20251001",
-                enable_thinking=False,
-            )
+            # 🆕 使用配置化的 LLM Profile
+            from config.llm_config import get_llm_profile
+            profile = get_llm_profile("background_task")
+            self.llm = create_llm_service(**profile)
         return self.llm
     
     async def generate_conversation_title(
