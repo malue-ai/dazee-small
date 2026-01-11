@@ -1,0 +1,40 @@
+# 定时任务配置文件
+# 
+# 配置说明：
+# - task_name: 任务名称（必须是已注册的后台任务）
+# - enabled: 是否启用
+# - trigger_type: 触发类型 (cron / interval)
+# - cron: cron 表达式（trigger_type=cron 时必填）
+# - interval_seconds: 间隔秒数（trigger_type=interval 时必填）
+# - params: 任务参数
+# - description: 任务描述
+#
+# Cron 表达式格式：分 时 日 月 周
+# 示例：
+#   "0 2 * * *"     每天凌晨 2 点
+#   "*/30 * * * *"  每 30 分钟
+#   "0 0 * * 0"     每周日凌晨
+#   "0 0 1 * *"     每月 1 号凌晨
+
+scheduled_tasks:
+  # Mem0 用户记忆批量更新
+  # 每天凌晨 2 点批量同步所有用户的会话记忆到 Mem0
+  - task_name: mem0_update
+    enabled: false  # 默认关闭，需要时手动开启
+    trigger_type: cron
+    cron: "0 2 * * *"
+    description: "每日凌晨批量更新用户记忆"
+    params:
+      batch: true           # 批量模式
+      since_hours: 24       # 处理过去 24 小时的会话
+      max_concurrent: 5     # 最大并发数
+
+  # 示例：每小时执行的任务（interval 模式）
+  # - task_name: example_task
+  #   enabled: false
+  #   trigger_type: interval
+  #   interval_seconds: 3600  # 每小时
+  #   description: "示例：每小时执行一次"
+  #   params:
+  #     key: value
+

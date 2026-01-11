@@ -286,6 +286,10 @@ class Context:
         result_messages = []
         current_assistant_blocks = []
         
+        # 🆕 用于去重：记录已添加的 tool_use id 和 tool_result tool_use_id
+        seen_tool_use_ids = set()
+        seen_tool_result_ids = set()
+        
         for block in sorted_blocks:
             if not isinstance(block, dict):
                 continue
@@ -300,8 +304,23 @@ class Context:
                 logger.debug(f"🧹 移除 thinking 块（历史消息不需要）")
                 continue
             
+            # 🆕 tool_use 去重检查
+            if block_type == "tool_use":
+                tool_id = block.get("id")
+                if tool_id in seen_tool_use_ids:
+                    logger.debug(f"🧹 移除重复的 tool_use: {tool_id}")
+                    continue
+                seen_tool_use_ids.add(tool_id)
+            
             # tool_result 需要作为独立的 user 消息
             if block_type == "tool_result":
+                # 🆕 tool_result 去重检查
+                tool_use_id = block.get("tool_use_id")
+                if tool_use_id in seen_tool_result_ids:
+                    logger.debug(f"🧹 移除重复的 tool_result: {tool_use_id}")
+                    continue
+                seen_tool_result_ids.add(tool_use_id)
+                
                 # 先保存之前累积的 assistant 内容
                 if current_assistant_blocks:
                     result_messages.append({

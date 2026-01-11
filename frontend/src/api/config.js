@@ -70,7 +70,8 @@ export const WORKSPACE_API = {
   FILES: (conversationId) => `/v1/workspace/${conversationId}/files`,
   
   // 获取/下载单个文件
-  FILE: (conversationId, path) => `/v1/workspace/${conversationId}/files/${path}`,
+  // 去掉 path 开头的 /，避免 URL 出现双斜杠
+  FILE: (conversationId, path) => `/v1/workspace/${conversationId}/files/${path.replace(/^\//, '')}`,
   
   // 获取项目列表
   PROJECTS: (conversationId) => `/v1/workspace/${conversationId}/projects`,

@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 env_path = Path(__file__).parent / ".env"
 load_dotenv(dotenv_path=env_path, override=True)
 
-from routers import chat_router, knowledge_router, files_router, tools_router, mem0_router
+from routers import chat_router, knowledge_router, files_router, tools_router, mem0_router, tasks_router
 from routers.human_confirmation import router as human_confirmation_router
 from routers.conversation import router as conversation_router
 from routers.workspace import router as workspace_router
@@ -73,12 +73,40 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(f"⚠️ gRPC 服务器启动失败: {e}")
     
+    # 启动定时任务调度器（如果配置了定时任务）
+    task_scheduler = None
+    enable_scheduler = os.getenv("ENABLE_SCHEDULER", "true").lower() == "true"
+    
+    if enable_scheduler:
+        try:
+            print("📅 启动定时任务调度器...")
+            from utils.background_tasks import get_scheduler
+            
+            task_scheduler = get_scheduler()
+            await task_scheduler.start()
+            
+            if task_scheduler.is_running():
+                jobs = task_scheduler.get_jobs()
+                print(f"✅ 定时任务调度器已启动，共 {len(jobs)} 个任务")
+            else:
+                print("○ 没有配置定时任务，调度器未启动")
+        except Exception as e:
+            print(f"⚠️ 定时任务调度器启动失败: {e}")
+    
     yield
     
     # 关闭时 - 清理所有资源
     print("🛑 正在关闭服务...")
     
-    # 0. 关闭 gRPC 服务器
+    # 0. 关闭定时任务调度器
+    if task_scheduler and task_scheduler.is_running():
+        try:
+            await task_scheduler.shutdown()
+            print("✅ 定时任务调度器已关闭")
+        except Exception as e:
+            print(f"⚠️ 关闭定时任务调度器失败: {e}")
+    
+    # 1. 关闭 gRPC 服务器
     if grpc_server:
         try:
             await grpc_server.stop(grace_period=5)
@@ -161,6 +189,7 @@ app.include_router(files_router)
 app.include_router(workspace_router)
 app.include_router(tools_router)
 app.include_router(mem0_router)  # 🆕 V4.4: Mem0 用户画像 API
+app.include_router(tasks_router)  # 🆕 后台任务管理 API
 
 
 # ============================================================

@@ -506,10 +506,14 @@ onMounted(async () => {
   await loadConversationList()
   
   // 🆕 检查是否有活跃的 Session（用于页面刷新重连）
-  await checkActiveSessions()
+  // 如果重连成功，会在内部调用 loadConversation，无需重复调用
+  const sessionReconnected = await checkActiveSessions()
   
+  // 只有没有重连 Session 时才根据路由参数加载对话
   const conversationId = route.params.conversationId
-  if (conversationId) await loadConversation(conversationId)
+  if (conversationId && !sessionReconnected) {
+    await loadConversation(conversationId)
+  }
 })
 
 watch(() => route.params.conversationId, async (newId) => {
@@ -920,10 +924,13 @@ async function checkActiveSessions() {
       console.log(`🔄 发现 ${sessions.length} 个活跃 Session，自动重连...`)
       // 自动重连第一个（最新的）活跃 Session
       await reconnectToSession(sessions[0])
+      return true  // 表示已处理对话加载
     }
+    return false
   } catch (error) {
     // 静默失败，不影响正常使用
     console.log('ℹ️ 无活跃 Session 或检查失败')
+    return false
   }
 }
 

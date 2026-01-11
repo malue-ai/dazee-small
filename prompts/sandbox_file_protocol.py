@@ -147,9 +147,11 @@ def build_sandbox_context(conversation_id: str, user_id: str = None) -> str:
     """
     context = f"""
 
-# 📌 当前会话上下文（CRITICAL）
+---
 
-**必须使用以下参数调用 sandbox_* 工具：**
+# 🔒 沙盒运行环境（CRITICAL - 必读）
+
+## 当前会话
 
 - **conversation_id**: `{conversation_id}`
 """
@@ -157,29 +159,124 @@ def build_sandbox_context(conversation_id: str, user_id: str = None) -> str:
     if user_id:
         context += f"- **user_id**: `{user_id}`\n"
     
-    context += """
-## 沙盒环境说明
+    context += f"""
+## ⚠️ 核心规则：所有操作都在云沙盒中执行
 
-- 所有代码执行和文件操作都在 E2B 云沙盒中进行
-- 工作目录: `/home/user`
-- 项目目录: `/home/user/<project_name>/`
-- 沙盒会自动保持与当前对话关联
+**你运行在一个隔离的 E2B 云沙盒环境中，不是本地机器！**
 
-## 调用示例
+- ✅ 工作目录: `/home/user`
+- ✅ 项目目录: `/home/user/<project_name>/`
+- ❌ **禁止使用**: `/tmp`、`/var`、`./` 等本地路径
 
-```json
-{
-    "conversation_id": \"""" + conversation_id + """\",
-    "path": "/home/user/app.py",
-    "content": "print('Hello World')"
-}
+## 🛠️ 工具说明
+
+### Claude 原生工具（自动路由到沙盒）
+
+| 工具 | 说明 |
+|------|------|
+| `bash` | 在沙盒中执行 shell 命令 |
+| `str_replace_based_edit_tool` | 在沙盒中创建/编辑文件 |
+
+### 沙盒专用工具
+
+| 工具 | 说明 |
+|------|------|
+| `sandbox_write_file` | 创建/更新沙盒文件 |
+| `sandbox_read_file` | 读取沙盒文件 |
+| `sandbox_run_command` | 执行命令 |
+| `sandbox_run_project` | 启动项目，获取预览 URL |
+
+## 📁 路径规范
+
+```
+/home/user/                     ← 工作根目录
+├── my_app/                     ← 项目目录
+│   ├── app.py
+│   ├── requirements.txt
+│   └── templates/
+├── input_data/                 ← 输入文件
+└── output_data/                ← 输出文件
 ```
 
-## ⚠️ 重要提醒
+## 正确示例
 
-1. **必须使用上面的 conversation_id**，否则沙盒工具无法工作
-2. 不要使用 /tmp 或其他系统目录
-3. 所有文件路径从 `/home/user` 开始
+### 使用 bash 工具
+
+```json
+{{
+    "command": "cd /home/user/my_app && pip install -r requirements.txt"
+}}
+```
+
+### 使用 text_editor (str_replace_based_edit_tool)
+
+```json
+{{
+    "command": "create",
+    "path": "/home/user/my_app/app.py",
+    "file_text": "print('Hello from sandbox!')"
+}}
+```
+
+### 使用 sandbox_write_file
+
+```json
+{{
+    "conversation_id": "{conversation_id}",
+    "path": "/home/user/my_app/app.py",
+    "content": "print('Hello from sandbox!')"
+}}
+```
+
+## ❌ 错误示例（禁止）
+
+```json
+// ❌ 不要使用 /tmp
+{{"path": "/tmp/my_app/app.py"}}
+
+// ❌ 不要使用相对路径
+{{"path": "./app.py"}}
+
+// ❌ 不要使用本地目录
+{{"command": "cd /Users/xxx/projects && ls"}}
+```
+
+## 💡 最佳实践
+
+1. **文件路径**: 始终使用 `/home/user/` 开头的绝对路径
+2. **项目结构**: 将项目放在 `/home/user/<project_name>/` 下
+3. **依赖安装**: 使用 `pip install -r requirements.txt`
+4. **运行项目**: 使用 `sandbox_run_project` 获取预览 URL
+
+## 🔴 关键规则：预览 URL 展示（必须遵守）
+
+当你使用 `sandbox_run_project` 启动项目后：
+
+1. **必须从返回结果中提取 `preview_url` 字段**
+2. **必须将完整的 URL 展示给用户**，格式如 `https://8501-xxxxx.e2b.app`
+3. **禁止只说"端口 XXX 运行"**，这对用户无意义！
+
+### ❌ 错误响应示例
+```
+应用正在 8501 端口运行  ← 错误！没有给出可访问的 URL
+```
+
+### ✅ 正确响应示例
+```
+🎉 应用已启动！
+访问地址：https://8501-abc123xyz.e2b.app  ← 正确！给出完整 URL
+```
+
+### 工具返回格式
+```json
+{{
+    "success": true,
+    "preview_url": "https://8501-abc123xyz.e2b.app",  // ← 提取这个！
+    "message": "项目已启动"
+}}
+```
+
+**如果 preview_url 为空或 null，告诉用户启动失败并检查日志！**
 """
     return context
 

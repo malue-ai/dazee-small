@@ -533,9 +533,9 @@ async def reconnect_chat_stream(
                 redis = session_service.redis
                 last_seq = after_seq or 0
                 if history_events:
-                    # 更新 last_seq 为历史事件中的最大序号
+                    # 更新 last_seq 为历史事件中的最大序号（兼容 seq 和 id 字段）
                     last_seq = max(
-                        e.get("seq", 0) for e in history_events
+                        e.get("seq", e.get("id", 0)) for e in history_events
                     ) if history_events else last_seq
                 
                 logger.info(f"📡 开始订阅实时事件流: session_id={session_id}, after_seq={last_seq}")

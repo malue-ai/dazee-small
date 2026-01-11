@@ -448,6 +448,39 @@ class SandboxService:
     
     # ==================== 文件操作 ====================
     
+    # E2B 沙盒的工作目录
+    SANDBOX_HOME = "/home/user"
+    
+    def _normalize_path(self, path: str) -> str:
+        """
+        标准化路径，确保是绝对路径
+        
+        支持的输入格式：
+        - /home/user/xxx -> /home/user/xxx（已经是绝对路径）
+        - home/user/xxx -> /home/user/xxx（URL 传输时去掉了开头的 /）
+        - xxx -> /home/user/xxx（相对路径）
+        - . 或空 -> /home/user
+        
+        Args:
+            path: 输入路径
+            
+        Returns:
+            标准化后的绝对路径
+        """
+        if not path or path == ".":
+            return self.SANDBOX_HOME
+        
+        # 已经是绝对路径
+        if path.startswith("/"):
+            return path
+        
+        # 处理 URL 传输时去掉开头 / 的情况（如 home/user/xxx）
+        if path.startswith("home/user"):
+            return f"/{path}"
+        
+        # 相对路径，添加前缀
+        return f"{self.SANDBOX_HOME}/{path}".replace("//", "/")
+    
     async def list_files(
         self,
         conversation_id: str,
@@ -465,11 +498,14 @@ class SandboxService:
         """
         sandbox = await self._get_sandbox(conversation_id)
         
+        # 标准化路径
+        abs_path = self._normalize_path(path)
+        
         try:
-            # 使用 ls 命令获取文件列表
+            # 使用 ls 命令获取文件列表（稳定可靠）
             result = await asyncio.to_thread(
                 sandbox.commands.run,
-                f"ls -la {path} 2>/dev/null || echo 'DIR_NOT_FOUND'",
+                f"ls -la {abs_path} 2>/dev/null || echo 'DIR_NOT_FOUND'",
                 timeout=30
             )
             
@@ -495,7 +531,7 @@ class SandboxService:
                     continue
                 
                 file_type = "directory" if permissions.startswith('d') else "file"
-                file_path = f"{path}/{name}".replace("//", "/")
+                file_path = f"{abs_path}/{name}".replace("//", "/")
                 
                 files.append(FileInfo(
                     name=name,
@@ -507,7 +543,7 @@ class SandboxService:
             return files
             
         except Exception as e:
-            logger.error(f"❌ 列出目录失败: {e}", exc_info=True)
+            logger.error(f"❌ 列出目录失败: {abs_path} - {e}", exc_info=True)
             raise SandboxServiceError(f"列出目录失败: {e}")
     
     async def list_files_tree(
@@ -521,16 +557,19 @@ class SandboxService:
         
         Args:
             conversation_id: 对话 ID
-            path: 目录路径
+            path: 目录路径（支持绝对路径或相对路径）
             max_depth: 最大递归深度（防止无限递归）
             
         Returns:
             文件列表（包含 children）
         """
-        if max_depth <= 0:
-            return await self.list_files(conversation_id, path)
+        # 标准化路径
+        abs_path = self._normalize_path(path)
         
-        files = await self.list_files(conversation_id, path)
+        if max_depth <= 0:
+            return await self.list_files(conversation_id, abs_path)
+        
+        files = await self.list_files(conversation_id, abs_path)
         
         # 递归获取子目录内容
         for file_info in files:
@@ -538,7 +577,7 @@ class SandboxService:
                 try:
                     children = await self.list_files_tree(
                         conversation_id,
-                        file_info.path,
+                        file_info.path,  # 已经是绝对路径
                         max_depth - 1
                     )
                     file_info.children = children
@@ -558,17 +597,20 @@ class SandboxService:
         
         Args:
             conversation_id: 对话 ID
-            path: 文件路径
+            path: 文件路径（支持绝对路径或相对路径）
             
         Returns:
             文件内容
         """
         sandbox = await self._get_sandbox(conversation_id)
         
+        # 标准化路径
+        abs_path = self._normalize_path(path)
+        
         try:
             content = await asyncio.to_thread(
                 sandbox.files.read,
-                path
+                abs_path
             )
             
             # 如果是 bytes，尝试解码
@@ -578,7 +620,7 @@ class SandboxService:
             return content
             
         except Exception as e:
-            logger.error(f"❌ 读取文件失败: {path} - {e}", exc_info=True)
+            logger.error(f"❌ 读取文件失败: {abs_path} - {e}", exc_info=True)
             raise SandboxServiceError(f"读取文件失败: {e}")
     
     async def read_file_bytes(
@@ -591,17 +633,20 @@ class SandboxService:
         
         Args:
             conversation_id: 对话 ID
-            path: 文件路径
+            path: 文件路径（支持绝对路径或相对路径）
             
         Returns:
             文件内容（bytes）
         """
         sandbox = await self._get_sandbox(conversation_id)
         
+        # 标准化路径
+        abs_path = self._normalize_path(path)
+        
         try:
             content = await asyncio.to_thread(
                 sandbox.files.read,
-                path
+                abs_path
             )
             
             if isinstance(content, str):
@@ -610,7 +655,7 @@ class SandboxService:
             return content
             
         except Exception as e:
-            logger.error(f"❌ 读取文件失败: {path} - {e}", exc_info=True)
+            logger.error(f"❌ 读取文件失败: {abs_path} - {e}", exc_info=True)
             raise SandboxServiceError(f"读取文件失败: {e}")
     
     async def write_file(
@@ -624,7 +669,7 @@ class SandboxService:
         
         Args:
             conversation_id: 对话 ID
-            path: 文件路径
+            path: 文件路径（支持绝对路径或相对路径）
             content: 文件内容
             
         Returns:
@@ -632,9 +677,12 @@ class SandboxService:
         """
         sandbox = await self._get_sandbox(conversation_id)
         
+        # 标准化路径
+        abs_path = self._normalize_path(path)
+        
         try:
             # 确保目录存在
-            dir_path = os.path.dirname(path)
+            dir_path = os.path.dirname(abs_path)
             if dir_path and dir_path != "/":
                 await asyncio.to_thread(
                     sandbox.commands.run,
@@ -645,20 +693,20 @@ class SandboxService:
             # 写入文件
             await asyncio.to_thread(
                 sandbox.files.write,
-                path,
+                abs_path,
                 content
             )
             
-            logger.info(f"✅ 文件已写入: {path}")
+            logger.info(f"✅ 文件已写入: {abs_path}")
             
             return {
                 "success": True,
-                "path": path,
+                "path": abs_path,
                 "size": len(content) if content else 0
             }
             
         except Exception as e:
-            logger.error(f"❌ 写入文件失败: {path} - {e}", exc_info=True)
+            logger.error(f"❌ 写入文件失败: {abs_path} - {e}", exc_info=True)
             raise SandboxServiceError(f"写入文件失败: {e}")
     
     async def delete_file(
@@ -671,25 +719,28 @@ class SandboxService:
         
         Args:
             conversation_id: 对话 ID
-            path: 文件路径
+            path: 文件路径（支持绝对路径或相对路径）
             
         Returns:
             是否成功
         """
         sandbox = await self._get_sandbox(conversation_id)
         
+        # 标准化路径
+        abs_path = self._normalize_path(path)
+        
         try:
             result = await asyncio.to_thread(
                 sandbox.commands.run,
-                f"rm -rf {path}",
+                f"rm -rf {abs_path}",
                 timeout=30
             )
             
-            logger.info(f"🗑️ 文件已删除: {path}")
+            logger.info(f"🗑️ 文件已删除: {abs_path}")
             return result.exit_code == 0
             
         except Exception as e:
-            logger.error(f"❌ 删除文件失败: {path} - {e}", exc_info=True)
+            logger.error(f"❌ 删除文件失败: {abs_path} - {e}", exc_info=True)
             raise SandboxServiceError(f"删除文件失败: {e}")
     
     async def file_exists(
@@ -702,24 +753,27 @@ class SandboxService:
         
         Args:
             conversation_id: 对话 ID
-            path: 文件路径
+            path: 文件路径（支持绝对路径或相对路径）
             
         Returns:
             是否存在
         """
         sandbox = await self._get_sandbox(conversation_id)
         
+        # 标准化路径
+        abs_path = self._normalize_path(path)
+        
         try:
             result = await asyncio.to_thread(
                 sandbox.commands.run,
-                f"test -e {path} && echo 'yes' || echo 'no'",
+                f"test -e {abs_path} && echo 'yes' || echo 'no'",
                 timeout=10
             )
             
             return result.stdout.strip() == "yes"
             
         except Exception as e:
-            logger.error(f"❌ 检查文件失败: {path} - {e}", exc_info=True)
+            logger.error(f"❌ 检查文件失败: {abs_path} - {e}", exc_info=True)
             return False
     
     # ==================== 项目运行 ====================

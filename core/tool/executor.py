@@ -344,155 +344,169 @@ class ToolExecutor:
         """
         执行 Claude Client-side 工具（bash, text_editor）
         
-        bash 工具路由到 E2B 沙盒执行（安全隔离）
-        text_editor 在本地 workspace 执行
-        """
-        import subprocess
-        import os
+        🔒 安全设计：所有 Client-side 工具都路由到沙盒执行
+        - bash: 在沙盒中执行命令
+        - text_editor: 在沙盒中读写文件
         
-        if tool_name == "bash":
-            # 🆕 bash 命令路由到 E2B 沙盒执行（多用户安全）
-            # 参考：https://platform.claude.com/docs/en/agents-and-tools/tool-use/bash-tool
-            # 官方建议：Running in isolated environments (Docker/VM)
+        这样确保多用户场景下的安全隔离，不会影响宿主机
+        """
+        # 获取上下文信息（由 simple_agent 注入）
+        conversation_id = tool_input.get("conversation_id")
+        user_id = tool_input.get("user_id", "default_user")
+        
+        if not conversation_id:
+            return {"success": False, "error": "缺少 conversation_id，无法确定沙盒"}
+        
+        # 使用统一的沙盒抽象层
+        from infra.sandbox import (
+            get_sandbox_provider,
+            SandboxNotAvailableError,
+        )
+        
+        try:
+            sandbox = get_sandbox_provider()
             
+            if not sandbox.is_available:
+                return {
+                    "success": False,
+                    "error": "沙盒服务不可用，请检查 E2B_API_KEY 配置"
+                }
+            
+            # 确保沙盒存在
+            await sandbox.ensure_sandbox(conversation_id, user_id)
+            
+        except SandboxNotAvailableError as e:
+            return {"success": False, "error": str(e)}
+        except Exception as e:
+            logger.error(f"❌ 沙盒初始化失败: {e}", exc_info=True)
+            return {"success": False, "error": f"沙盒初始化失败: {str(e)}"}
+        
+        # ==================== bash 工具 ====================
+        if tool_name == "bash":
             command = tool_input.get("command", "")
             restart = tool_input.get("restart", False)
             
             if restart:
-                # restart 暂不支持，返回提示
                 return {"success": True, "output": "Bash session restarted (sandbox mode)"}
             
             if not command:
                 return {"success": False, "error": "命令不能为空"}
             
-            # 获取上下文信息（由 simple_agent 注入，必然存在）
-            conversation_id = tool_input.get("conversation_id")
-            user_id = tool_input.get("user_id", "default_user")
-            
             try:
-                # 使用 E2B 沙盒执行
-                from services.sandbox_service import get_sandbox_service
-                
-                service = get_sandbox_service()
-                
-                # 确保沙盒存在
-                await service.get_or_create_sandbox(conversation_id, user_id)
-                
-                # 在沙盒中执行命令
-                result = await service.run_command(
+                result = await sandbox.run_command(
                     conversation_id=conversation_id,
                     command=command,
                     timeout=60
                 )
                 
                 logger.info(f"🐚 bash 在沙盒执行: {command[:50]}...")
-                return result
+                
+                # 转换返回格式
+                return {
+                    "success": result.success,
+                    "output": result.output,
+                    "error": result.error,
+                    "exit_code": result.exit_code
+                }
                 
             except Exception as e:
                 logger.error(f"❌ 沙盒执行失败: {e}", exc_info=True)
                 return {"success": False, "error": f"沙盒执行失败: {str(e)}"}
         
+        # ==================== text_editor 工具 ====================
         elif tool_name in ("str_replace_based_edit_tool", "text_editor"):
-            # 文件编辑工具
             command_type = tool_input.get("command")
             path = tool_input.get("path", "")
             
-            # 获取 workspace 路径
-            workspace_dir = self.tool_context.get("workspace_dir", "./workspace")
+            if not path:
+                return {"success": False, "error": "缺少文件路径"}
             
-            # 安全检查：确保路径在 workspace 内
-            full_path = os.path.abspath(os.path.join(workspace_dir, path)) if not os.path.isabs(path) else path
-            
-            if command_type == "view":
-                # 查看文件
-                try:
+            try:
+                if command_type == "view":
+                    # 查看文件
                     view_range = tool_input.get("view_range", [])
-                    with open(full_path, 'r', encoding='utf-8') as f:
-                        lines = f.readlines()
+                    content = await sandbox.read_file(conversation_id, path)
                     
+                    lines = content.split("\n")
                     if view_range and len(view_range) == 2:
                         start, end = view_range
                         lines = lines[start-1:end]
                     
                     return {
                         "success": True,
-                        "content": "".join(lines),
+                        "content": "\n".join(lines),
                         "total_lines": len(lines)
                     }
-                except FileNotFoundError:
-                    return {"success": False, "error": f"文件不存在: {path}"}
-                except Exception as e:
-                    return {"success": False, "error": str(e)}
-            
-            elif command_type == "create":
-                # 创建文件
-                file_text = tool_input.get("file_text", "")
-                try:
-                    os.makedirs(os.path.dirname(full_path), exist_ok=True)
-                    with open(full_path, 'w', encoding='utf-8') as f:
-                        f.write(file_text)
+                
+                elif command_type == "create":
+                    # 创建文件
+                    file_text = tool_input.get("file_text", "")
+                    await sandbox.write_file(conversation_id, path, file_text)
+                    
+                    logger.info(f"📄 沙盒文件已创建: {path}")
                     return {
                         "success": True,
                         "message": f"文件已创建: {path}",
-                        "path": full_path
+                        "path": path
                     }
-                except Exception as e:
-                    return {"success": False, "error": str(e)}
-            
-            elif command_type == "str_replace":
-                # 替换字符串
-                old_str = tool_input.get("old_str", "")
-                new_str = tool_input.get("new_str", "")
-                try:
-                    with open(full_path, 'r', encoding='utf-8') as f:
-                        content = f.read()
+                
+                elif command_type == "str_replace":
+                    # 替换字符串
+                    old_str = tool_input.get("old_str", "")
+                    new_str = tool_input.get("new_str", "")
+                    
+                    # 读取文件
+                    content = await sandbox.read_file(conversation_id, path)
                     
                     if old_str not in content:
-                        return {"success": False, "error": f"未找到要替换的内容: {old_str[:50]}..."}
+                        return {
+                            "success": False,
+                            "error": f"未找到要替换的内容: {old_str[:50]}..."
+                        }
                     
+                    # 替换并写回
                     content = content.replace(old_str, new_str, 1)
-                    with open(full_path, 'w', encoding='utf-8') as f:
-                        f.write(content)
+                    await sandbox.write_file(conversation_id, path, content)
                     
+                    logger.info(f"📝 沙盒文件已修改: {path}")
                     return {
                         "success": True,
                         "message": "替换成功",
-                        "path": full_path
+                        "path": path
                     }
-                except FileNotFoundError:
-                    return {"success": False, "error": f"文件不存在: {path}"}
-                except Exception as e:
-                    return {"success": False, "error": str(e)}
-            
-            elif command_type == "insert":
-                # 插入内容
-                insert_line = tool_input.get("insert_line", 0)
-                new_str = tool_input.get("new_str", "")
-                try:
-                    with open(full_path, 'r', encoding='utf-8') as f:
-                        lines = f.readlines()
+                
+                elif command_type == "insert":
+                    # 插入内容
+                    insert_line = tool_input.get("insert_line", 0)
+                    new_str = tool_input.get("new_str", "")
                     
-                    lines.insert(insert_line, new_str + "\n")
+                    # 读取文件
+                    content = await sandbox.read_file(conversation_id, path)
+                    lines = content.split("\n")
                     
-                    with open(full_path, 'w', encoding='utf-8') as f:
-                        f.writelines(lines)
+                    # 插入
+                    lines.insert(insert_line, new_str)
+                    
+                    # 写回
+                    await sandbox.write_file(conversation_id, path, "\n".join(lines))
                     
                     return {
                         "success": True,
                         "message": f"内容已插入到第 {insert_line} 行",
-                        "path": full_path
+                        "path": path
                     }
-                except FileNotFoundError:
-                    return {"success": False, "error": f"文件不存在: {path}"}
-                except Exception as e:
-                    return {"success": False, "error": str(e)}
-            
-            elif command_type == "undo_edit":
-                # 撤销编辑（简化实现：返回不支持）
-                return {"success": False, "error": "撤销功能暂不支持"}
-            
-            else:
-                return {"success": False, "error": f"未知的编辑命令: {command_type}"}
+                
+                elif command_type == "undo_edit":
+                    return {"success": False, "error": "撤销功能暂不支持"}
+                
+                else:
+                    return {"success": False, "error": f"未知的编辑命令: {command_type}"}
+                
+            except FileNotFoundError:
+                return {"success": False, "error": f"文件不存在: {path}"}
+            except Exception as e:
+                logger.error(f"❌ 沙盒文件操作失败: {e}", exc_info=True)
+                return {"success": False, "error": f"文件操作失败: {str(e)}"}
         
         return {"success": False, "error": f"未知的 client 工具: {tool_name}"}
     

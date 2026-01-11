@@ -1,12 +1,14 @@
 """
-缓存模块 - 基础设施层
+缓存模块
 
-提供缓存和 Pub/Sub 功能：
-- Redis 客户端
-- Redis Pub/Sub（用于 SSE 事件广播）
+提供 Redis 缓存服务，用于：
+- Session 状态缓存
+- 分布式锁
+- Pub/Sub 消息
+- 计数器/限流
 """
 
-from .redis import (
+from infra.cache.redis import (
     RedisClient,
     create_redis_client,
     get_redis_client,

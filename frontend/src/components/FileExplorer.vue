@@ -73,7 +73,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useWorkspaceStore } from '@/stores/workspace'
 import FileTreeNode from './FileTreeNode.vue'
 
@@ -183,6 +183,7 @@ function getProjectIcon(type) {
 }
 
 // 监听 conversationId 变化
+// 使用 immediate: true 即可在组件创建时立即执行，无需 onMounted
 watch(() => props.conversationId, (newId) => {
   if (newId) {
     loadFiles()
@@ -190,13 +191,6 @@ watch(() => props.conversationId, (newId) => {
     workspaceStore.reset()
   }
 }, { immediate: true })
-
-// 初始化
-onMounted(() => {
-  if (props.conversationId) {
-    loadFiles()
-  }
-})
 </script>
 
 <style scoped>

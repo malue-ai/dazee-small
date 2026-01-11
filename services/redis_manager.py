@@ -346,8 +346,8 @@ class RedisSessionManager:
         """
         client = await self._get_client()
         
-        # 方式1：传入完整事件字典
-        if event_data is not None and ("event_uuid" in event_data or "id" in event_data):
+        # 方式1：传入完整事件字典（包含 event_uuid、id 或 seq）
+        if event_data is not None and ("event_uuid" in event_data or "id" in event_data or "seq" in event_data):
             event = event_data
         # 方式2：分别传入字段（向后兼容）
         else:

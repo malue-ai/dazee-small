@@ -474,20 +474,17 @@ async def get_file(
         is_text = suffix in text_extensions or Path(path).name in text_extensions
         
         if use_sandbox:
-            # 使用沙盒
+            # 使用沙盒（service 层会自动处理路径标准化）
             service = get_sandbox_service()
             
-            # 构造完整路径
-            full_path = path if path.startswith("/") else f"/home/user/{path}"
-            
             if is_text and not download:
-                content = await service.read_file(conversation_id, full_path)
+                content = await service.read_file(conversation_id, path)
                 return Response(
                     content=content,
                     media_type="text/plain; charset=utf-8"
                 )
             else:
-                content = await service.read_file_bytes(conversation_id, full_path)
+                content = await service.read_file_bytes(conversation_id, path)
                 filename = os.path.basename(path)
                 return Response(
                     content=content,
@@ -614,14 +611,12 @@ async def write_file(
             # 使用沙盒
             service = get_sandbox_service()
             
-            # 构造完整路径
-            full_path = path if path.startswith("/") else f"/home/user/{path}"
-            
-            result = await service.write_file(conversation_id, full_path, content)
+            # service 层会自动处理路径标准化
+            result = await service.write_file(conversation_id, path, content)
             
             return UploadResponse(
                 success=True,
-                path=full_path,
+                path=result["path"],  # 使用 service 返回的标准化路径
                 size=result["size"]
             )
         else:
@@ -665,19 +660,17 @@ async def delete_file(
             # 使用沙盒
             service = get_sandbox_service()
             
-            # 构造完整路径
-            full_path = path if path.startswith("/") else f"/home/user/{path}"
-            
-            success = await service.delete_file(conversation_id, full_path)
+            # service 层会自动处理路径标准化
+            success = await service.delete_file(conversation_id, path)
             
             if not success:
                 raise HTTPException(status_code=500, detail="删除失败")
             
-            logger.info(f"🗑️ 沙盒文件删除: {full_path}")
+            logger.info(f"🗑️ 沙盒文件删除: {path}")
             
             return DeleteResponse(
                 success=True,
-                path=full_path,
+                path=path,
                 message="删除成功"
             )
         else:

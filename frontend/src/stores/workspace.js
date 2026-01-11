@@ -60,7 +60,8 @@ export const useWorkspaceStore = defineStore('workspace', {
      * @param {boolean} options.tree - 是否返回树形结构
      */
     async fetchFiles(conversationId, options = {}) {
-      const { path = '.', tree = true } = options
+      // 沙盒模式默认使用 /home/user 路径
+      const { path = '/home/user', tree = true } = options
       
       this.conversationId = conversationId
       this.isLoadingFiles = true

@@ -80,13 +80,16 @@ class ZenOAdapter(EventAdapter):
         message_id = data.get("message_id") or self._current_message_id or f"msg_{session_id}"
         timestamp = int(time.time() * 1000)  # 毫秒时间戳
         
+        # 🆕 保留 seq 用于重连（从原始事件获取）
+        seq = event.get("seq", event.get("id", 0))
+        
         # 更新 message_id 缓存
         if data.get("message_id"):
             self._current_message_id = data.get("message_id")
         
-        # 根据事件类型转换
+        # 根据事件类型转换（传入 seq 和 session_id 用于重连）
         if event_type == "message_start":
-            return self._transform_message_start(message_id, conversation_id, timestamp)
+            return self._transform_message_start(message_id, conversation_id, timestamp, seq, session_id)
         
         # 🆕 处理 content_start：记录当前 block 类型
         if event_type == "content_start":
@@ -95,16 +98,16 @@ class ZenOAdapter(EventAdapter):
             return None  # content_start 不需要转换为 ZenO 事件
         
         if event_type == "content_delta":
-            return self._transform_content_delta(event, message_id, timestamp)
+            return self._transform_content_delta(event, message_id, timestamp, seq, session_id)
         
         if event_type == "message_delta":
-            return self._transform_message_delta(event, message_id, timestamp)
+            return self._transform_message_delta(event, message_id, timestamp, seq, session_id)
         
         if event_type == "message_stop":
-            return self._transform_message_stop(message_id, timestamp)
+            return self._transform_message_stop(message_id, timestamp, seq, session_id)
         
         if event_type == "error":
-            return self._transform_error(event, message_id, timestamp)
+            return self._transform_error(event, message_id, timestamp, seq, session_id)
         
         # 其他事件暂不转换
         return None
@@ -113,7 +116,9 @@ class ZenOAdapter(EventAdapter):
         self,
         message_id: str,
         conversation_id: str,
-        timestamp: int
+        timestamp: int,
+        seq: int = 0,
+        session_id: str = ""
     ) -> Dict[str, Any]:
         """
         转换 message_start → message.assistant.start
@@ -128,6 +133,8 @@ class ZenOAdapter(EventAdapter):
             "type": "message.assistant.start",
             "message_id": message_id,
             "conversation_id": conversation_id,
+            "session_id": session_id,  # 🆕 用于重连
+            "seq": seq,                 # 🆕 用于断点续传
             "timestamp": timestamp
         }
     
@@ -135,7 +142,9 @@ class ZenOAdapter(EventAdapter):
         self,
         event: Dict[str, Any],
         message_id: str,
-        timestamp: int
+        timestamp: int,
+        seq: int = 0,
+        session_id: str = ""
     ) -> Optional[Dict[str, Any]]:
         """
         转换 content_delta → message.assistant.delta
@@ -182,6 +191,8 @@ class ZenOAdapter(EventAdapter):
         return {
             "type": "message.assistant.delta",
             "message_id": message_id,
+            "session_id": session_id,  # 🆕 用于重连
+            "seq": seq,                 # 🆕 用于断点续传
             "timestamp": timestamp,
             "delta": {
                 "type": zeno_delta_type,
@@ -193,7 +204,9 @@ class ZenOAdapter(EventAdapter):
         self,
         event: Dict[str, Any],
         message_id: str,
-        timestamp: int
+        timestamp: int,
+        seq: int = 0,
+        session_id: str = ""
     ) -> Optional[Dict[str, Any]]:
         """
         转换 message_delta → message.assistant.delta
@@ -232,6 +245,8 @@ class ZenOAdapter(EventAdapter):
         return {
             "type": "message.assistant.delta",
             "message_id": message_id,
+            "session_id": session_id,  # 🆕 用于重连
+            "seq": seq,                 # 🆕 用于断点续传
             "timestamp": timestamp,
             "delta": {
                 "type": zeno_delta_type,
@@ -242,7 +257,9 @@ class ZenOAdapter(EventAdapter):
     def _transform_message_stop(
         self,
         message_id: str,
-        timestamp: int
+        timestamp: int,
+        seq: int = 0,
+        session_id: str = ""
     ) -> Dict[str, Any]:
         """
         转换 message_stop → message.assistant.done
@@ -250,6 +267,8 @@ class ZenOAdapter(EventAdapter):
         return {
             "type": "message.assistant.done",
             "message_id": message_id,
+            "session_id": session_id,  # 🆕 用于重连
+            "seq": seq,                 # 🆕 用于断点续传
             "timestamp": timestamp,
             "data": {
                 "content": self._accumulated_content
@@ -260,7 +279,9 @@ class ZenOAdapter(EventAdapter):
         self,
         event: Dict[str, Any],
         message_id: str,
-        timestamp: int
+        timestamp: int,
+        seq: int = 0,
+        session_id: str = ""
     ) -> Dict[str, Any]:
         """
         转换 error → message.assistant.error
@@ -291,6 +312,8 @@ class ZenOAdapter(EventAdapter):
         return {
             "type": "message.assistant.error",
             "message_id": message_id,
+            "session_id": session_id,  # 🆕 用于重连
+            "seq": seq,                 # 🆕 用于断点续传
             "timestamp": timestamp,
             "error": {
                 "type": zeno_error_type,

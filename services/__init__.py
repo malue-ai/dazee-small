@@ -57,6 +57,15 @@ from .tool_service import (
     tool,
 )
 
+from .task_service import (
+    TaskService,
+    get_task_service,
+    TaskInfo,
+    TaskRunResult,
+    TaskStatus,
+    TriggerType,
+)
+
 __all__ = [
     # Knowledge Service
     "KnowledgeService",
@@ -97,5 +106,12 @@ __all__ = [
     "ToolHandler",
     "MCPClient",
     "tool",
+    # Task Service
+    "TaskService",
+    "get_task_service",
+    "TaskInfo",
+    "TaskRunResult",
+    "TaskStatus",
+    "TriggerType",
 ]
 

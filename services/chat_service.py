@@ -25,7 +25,7 @@ from core.context import Context
 from services.session_service import SessionService, get_session_service, SessionNotFoundError
 from services.conversation_service import get_conversation_service, ConversationNotFoundError
 from infra.database import AsyncSessionLocal, crud
-from utils.background_tasks import get_background_task_service
+from utils.background_tasks import TaskContext, get_background_task_service
 from utils.message_utils import (
     normalize_message_format,
     extract_text_from_message,
@@ -469,42 +469,37 @@ class ChatService:
                 )
                 await self.session_service.end_session(session_id, status="completed")
                 
-                # 🎯 后台任务：根据 background_tasks 参数决定是否启动
-                if is_new_conversation and "title_generation" in background_tasks:
-                    first_message_text = extract_text_from_message(message)
-                    if first_message_text:
-                        asyncio.create_task(
-                            self.background_tasks.generate_conversation_title(
-                                conversation_id=conversation_id,
-                                first_message=first_message_text,
-                                session_id=session_id,
-                                event_manager=events,
-                                conversation_service=self.conversation_service
-                            )
-                        )
-                        logger.info(f"🏷️ 标题生成任务已启动: conversation_id={conversation_id}")
-                
-                # 🆕 推荐问题生成
-                if "recommended_questions" in background_tasks:
+                # 🎯 统一后台任务调度（新增任务只需在 BackgroundTaskService 中注册）
+                if background_tasks:
+                    # 提取用户消息文本
                     user_text = extract_text_from_message(message)
+                    
                     # 从 broadcaster 的 accumulator 获取 assistant 文本
-                    accumulator = agent.broadcaster.get_accumulator(session_id)
                     assistant_text = ""
+                    accumulator = agent.broadcaster.get_accumulator(session_id)
                     if accumulator:
                         assistant_text = extract_text_from_message(
-                        accumulator.build_for_db()
-                    )
-                    if user_text and assistant_text:
-                        asyncio.create_task(
-                            self.background_tasks.generate_recommended_questions(
-                                session_id=session_id,
-                                message_id=assistant_message_id,
-                                user_message=user_text,
-                                assistant_response=assistant_text,
-                                event_manager=events
-                            )
+                            accumulator.build_for_db()
                         )
-                        logger.info(f"💡 推荐问题生成任务已启动: session_id={session_id}")
+                    
+                    # 构建任务上下文
+                    task_context = TaskContext(
+                        session_id=session_id,
+                        conversation_id=conversation_id,
+                        user_id=user_id,
+                        message_id=assistant_message_id,
+                        user_message=user_text,
+                        assistant_response=assistant_text,
+                        is_new_conversation=is_new_conversation,
+                        event_manager=events,
+                        conversation_service=self.conversation_service
+                    )
+                    
+                    # 统一调度后台任务
+                    await self.background_tasks.dispatch_tasks(
+                        task_names=background_tasks,
+                        context=task_context
+                    )
             
             logger.info(f"✅ Agent 执行完成: session_id={session_id}, duration={duration_ms}ms")
         

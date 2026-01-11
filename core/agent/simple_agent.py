@@ -531,6 +531,29 @@ class SimpleAgent:
             })
         
         # =====================================================================
+        # 阶段 3.5: 沙盒环境预创建（确保后续工具调用有沙盒可用）
+        # =====================================================================
+        # 检查是否需要沙盒（选择了 bash/text_editor/sandbox_* 等工具）
+        sandbox_tools = {"bash", "str_replace_based_edit_tool", "text_editor"}
+        sandbox_tools.update(t for t in selection.tool_names if t.startswith("sandbox_"))
+        needs_sandbox = bool(sandbox_tools & set(selection.tool_names))
+        
+        if needs_sandbox:
+            try:
+                from infra.sandbox import get_sandbox_provider
+                sandbox = get_sandbox_provider()
+                
+                if sandbox.is_available:
+                    # 预创建沙盒（后台执行，不阻塞主流程）
+                    await sandbox.ensure_sandbox(conversation_id, user_id)
+                    logger.info(f"🏖️ 沙盒环境已就绪: conversation_id={conversation_id}")
+                else:
+                    logger.warning("⚠️ 沙盒服务不可用，跳过预创建")
+            except Exception as e:
+                # 沙盒预创建失败不阻塞主流程，后续工具调用时会再次尝试
+                logger.warning(f"⚠️ 沙盒预创建失败: {e}")
+        
+        # =====================================================================
         # 阶段 4: System Prompt 组装 + LLM 调用准备
         # =====================================================================
         # 4.1 选择 System Prompt（用户自定义 vs 框架默认，含沙盒上下文注入）
@@ -712,8 +735,23 @@ class SimpleAgent:
                         # 更新消息（用于下一轮 LLM 调用）
                         llm_messages.append(Message(role="assistant", content=response.raw_content))
                         
-                        # 🆕 只有当有客户端工具结果时才添加 user message
-                        if tool_results:
+                        # 🔒 兜底逻辑：确保每个 tool_use 都有对应的 tool_result
+                        # 如果工具执行失败或事件收集失败，生成错误 tool_result
+                        if client_tools:
+                            collected_ids = {tr.get("tool_use_id") for tr in tool_results}
+                            for tc in client_tools:
+                                tool_id = tc.get("id")
+                                if tool_id and tool_id not in collected_ids:
+                                    logger.warning(f"⚠️ 工具 {tc.get('name')} (id={tool_id}) 缺少 tool_result，添加兜底结果")
+                                    tool_results.append({
+                                        "type": "tool_result",
+                                        "tool_use_id": tool_id,
+                                        "content": json.dumps({"error": "工具执行结果未收集到，请重试"}),
+                                        "is_error": True
+                                    })
+                        
+                        # 只有当有客户端工具时才添加 user message（现在 tool_results 一定不为空）
+                        if client_tools and tool_results:
                             llm_messages.append(Message(role="user", content=tool_results))
                         # 如果只有服务端工具，不需要添加 user message，直接进入下一轮
                     else:
