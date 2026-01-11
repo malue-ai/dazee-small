@@ -36,8 +36,45 @@ APP_NAME="zen0-backend"          # 复用现有应用
 ENV_NAME="staging"               # 复用现有环境
 SERVICE_NAME="agent"             # 新服务名（区别于 backend）
 
-# AWS Copilot CLI 路径（避免与 GitHub Copilot CLI 冲突）
-COPILOT="/usr/local/bin/copilot"
+# AWS Copilot CLI 路径（自动检测，支持 Mac/Linux/Windows）
+# 优先使用 PATH 中的 copilot，否则尝试常见安装路径
+detect_copilot() {
+    # 1. 优先使用 PATH 中的 copilot
+    if command -v copilot &> /dev/null; then
+        command -v copilot
+        return 0
+    fi
+    
+    # 2. Mac: Homebrew (Apple Silicon)
+    if [ -x "/opt/homebrew/bin/copilot" ]; then
+        echo "/opt/homebrew/bin/copilot"
+        return 0
+    fi
+    
+    # 3. Mac: Homebrew (Intel) / Linux
+    if [ -x "/usr/local/bin/copilot" ]; then
+        echo "/usr/local/bin/copilot"
+        return 0
+    fi
+    
+    # 4. Windows: 常见安装路径 (Git Bash / WSL)
+    if [ -x "$HOME/bin/copilot" ]; then
+        echo "$HOME/bin/copilot"
+        return 0
+    fi
+    
+    # 5. Windows: AppData 路径
+    if [ -n "${LOCALAPPDATA:-}" ] && [ -x "${LOCALAPPDATA}/Programs/copilot/copilot.exe" ]; then
+        echo "${LOCALAPPDATA}/Programs/copilot/copilot.exe"
+        return 0
+    fi
+    
+    # 未找到
+    echo ""
+    return 1
+}
+
+COPILOT="$(detect_copilot)"
 
 # 域名配置（可选，留空则使用 ALB 默认域名）
 # 如需 HTTPS，请填写域名并申请证书
@@ -195,12 +232,46 @@ check_dependencies() {
     fi
     
     # 检查 AWS Copilot CLI
-    if [ ! -x "$COPILOT" ]; then
-        log_error "AWS Copilot CLI 未安装在 $COPILOT"
+    if [ -z "$COPILOT" ] || [ ! -x "$COPILOT" ]; then
+        log_error "AWS Copilot CLI 未安装"
         echo ""
         echo "安装说明:"
-        echo "  sudo curl -Lo /usr/local/bin/copilot https://github.com/aws/copilot-cli/releases/latest/download/copilot-darwin-arm64"
-        echo "  sudo chmod +x /usr/local/bin/copilot"
+        echo ""
+        # 检测操作系统
+        case "$(uname -s)" in
+            Darwin)
+                echo "  macOS (Homebrew):"
+                echo "    brew install aws/tap/copilot-cli"
+                echo ""
+                echo "  macOS (手动安装 - Apple Silicon):"
+                echo "    sudo curl -Lo /usr/local/bin/copilot https://github.com/aws/copilot-cli/releases/latest/download/copilot-darwin-arm64"
+                echo "    sudo chmod +x /usr/local/bin/copilot"
+                echo ""
+                echo "  macOS (手动安装 - Intel):"
+                echo "    sudo curl -Lo /usr/local/bin/copilot https://github.com/aws/copilot-cli/releases/latest/download/copilot-darwin"
+                echo "    sudo chmod +x /usr/local/bin/copilot"
+                ;;
+            Linux)
+                echo "  Linux:"
+                echo "    sudo curl -Lo /usr/local/bin/copilot https://github.com/aws/copilot-cli/releases/latest/download/copilot-linux"
+                echo "    sudo chmod +x /usr/local/bin/copilot"
+                ;;
+            MINGW*|MSYS*|CYGWIN*)
+                echo "  Windows (PowerShell 管理员模式):"
+                echo "    Invoke-WebRequest -OutFile copilot.exe https://github.com/aws/copilot-cli/releases/latest/download/copilot-windows.exe"
+                echo "    Move-Item copilot.exe \$env:LOCALAPPDATA\\Programs\\copilot\\"
+                echo "    # 添加到 PATH 环境变量"
+                echo ""
+                echo "  Windows (Scoop):"
+                echo "    scoop install aws-copilot"
+                echo ""
+                echo "  Windows (Chocolatey):"
+                echo "    choco install copilot"
+                ;;
+            *)
+                echo "  请访问: https://aws.github.io/copilot-cli/docs/getting-started/install/"
+                ;;
+        esac
         exit 1
     fi
     log_success "AWS Copilot CLI: $($COPILOT --version)"

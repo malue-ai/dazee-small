@@ -136,9 +136,17 @@ app = FastAPI(
 )
 
 # CORS 中间件
+# 从环境变量读取允许的域名，支持逗号分隔的多个域名
+import os
+_allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "*")
+_allowed_origins = (
+    ["*"] if _allowed_origins_env == "*" 
+    else [origin.strip() for origin in _allowed_origins_env.split(",") if origin.strip()]
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 生产环境应该限制具体域名
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

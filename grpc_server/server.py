@@ -19,6 +19,7 @@ except ImportError:
 # 导入服务实现
 from grpc_server.chat_servicer import ChatServicer
 from grpc_server.session_servicer import SessionServicer
+from grpc_server.health_servicer import HealthServicer
 
 logger = get_logger("grpc_server")
 
@@ -66,6 +67,12 @@ class GRPCServer:
             )
             
             # 注册所有服务
+            logger.info("📋 注册 Health 服务...")
+            self.health_servicer = HealthServicer()
+            tool_service_pb2_grpc.add_HealthServicer_to_server(
+                self.health_servicer, self.server
+            )
+            
             logger.info("📋 注册 Chat 服务...")
             tool_service_pb2_grpc.add_ChatServiceServicer_to_server(
                 ChatServicer(), self.server
@@ -83,7 +90,7 @@ class GRPCServer:
             # 启动服务器
             await self.server.start()
             logger.info(f"✅ gRPC 服务器已启动: {address}")
-            logger.info("📡 可用服务: ChatService, SessionService")
+            logger.info("📡 可用服务: Health, ChatService, SessionService")
             
         except Exception as e:
             logger.error(f"❌ gRPC 服务器启动失败: {str(e)}", exc_info=True)
@@ -142,7 +149,7 @@ if __name__ == "__main__":
     print("="*60)
     print(f"📍 监听地址: {host}:{port}")
     print(f"⚙️  最大并发: {workers_display}")
-    print(f"📡 可用服务: ChatService, SessionService")
+    print(f"📡 可用服务: Health, ChatService, SessionService")
     print("="*60 + "\n")
     
     try:

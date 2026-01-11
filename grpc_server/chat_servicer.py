@@ -16,9 +16,20 @@ from logger import get_logger
 try:
     from grpc_server.generated import tool_service_pb2
     from grpc_server.generated import tool_service_pb2_grpc
-except ImportError:
+    _GRPC_AVAILABLE = True
+except ImportError as e:
     tool_service_pb2 = None
     tool_service_pb2_grpc = None
+    _GRPC_AVAILABLE = False
+    import logging
+    logging.getLogger(__name__).warning(f"gRPC protobuf 代码未生成: {e}")
+
+# 创建基类（如果 gRPC 不可用，使用 object 作为基类）
+_ChatServicerBase = (
+    tool_service_pb2_grpc.ChatServiceServicer 
+    if _GRPC_AVAILABLE and tool_service_pb2_grpc 
+    else object
+)
 
 # 导入业务服务（复用 services 层）
 from services import get_chat_service, get_session_service
@@ -62,7 +73,7 @@ def safe_int(value: Any, default: int = 0) -> int:
         return default
 
 
-class ChatServicer(tool_service_pb2_grpc.ChatServiceServicer):
+class ChatServicer(_ChatServicerBase):
     """
     Chat 服务 gRPC 实现
     

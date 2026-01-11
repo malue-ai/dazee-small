@@ -74,6 +74,8 @@ RUN mkdir -p \
     /var/log/supervisor
 
 # 创建 Supervisor 配置
+# 注意：gRPC 服务器在 FastAPI 应用启动时自动启动（通过 main.py lifespan）
+# 只需要设置 ENABLE_GRPC=true 环境变量
 RUN cat > /etc/supervisor/conf.d/zenflux.conf << 'EOF'
 [supervisord]
 nodaemon=true
@@ -84,28 +86,21 @@ pidfile=/var/run/supervisord.pid
 command=/usr/sbin/nginx -g "daemon off;"
 autostart=true
 autorestart=true
-stdout_logfile=/var/log/supervisor/nginx.log
-stderr_logfile=/var/log/supervisor/nginx_error.log
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
 
 [program:backend]
-command=uvicorn main:app --host 127.0.0.1 --port 8000 --workers 2
+command=uvicorn main:app --host 127.0.0.1 --port 8000 --workers 1
 directory=/app
 autostart=true
 autorestart=true
-stdout_logfile=/var/log/supervisor/backend.log
-stderr_logfile=/var/log/supervisor/backend_error.log
-environment=PYTHONUNBUFFERED="1",ENABLE_GRPC="true",GRPC_HOST="0.0.0.0",GRPC_PORT="50051"
-stopwaitsecs=30
-stopsignal=TERM
-
-[program:grpc]
-command=python -m grpc_server.server
-directory=/app
-autostart=true
-autorestart=true
-stdout_logfile=/var/log/supervisor/grpc.log
-stderr_logfile=/var/log/supervisor/grpc_error.log
-environment=PYTHONUNBUFFERED="1",GRPC_PORT="50051",GRPC_HOST="0.0.0.0"
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
+environment=PYTHONUNBUFFERED="1"
 stopwaitsecs=30
 stopsignal=TERM
 EOF
