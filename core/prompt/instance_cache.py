@@ -613,22 +613,35 @@ class InstancePromptCache:
         """
         使用高质量 Prompt + few-shot 生成 AgentSchema
         
+        🆕 V5.0: 应用级重试逻辑
+        
         核心哲学：规则写在高质量 Prompt 里，不写在代码里
         """
         from core.agent.factory import AgentFactory
         from core.schemas import DEFAULT_AGENT_SCHEMA
         
-        try:
-            # 调用 LLM 生成 Schema（使用高质量 Prompt + few-shot）
-            self.agent_schema = await AgentFactory._generate_schema(raw_prompt)
-            
-            # 合并实例配置（config.yaml 中的覆盖）
-            if config:
-                self._merge_config_overrides(config)
+        # 🆕 V5.0: 应用级重试配置
+        max_retries = 2
+        retry_delay = 1.0  # 秒
+        
+        for attempt in range(max_retries + 1):
+            try:
+                # 调用 LLM 生成 Schema（使用高质量 Prompt + few-shot）
+                self.agent_schema = await AgentFactory._generate_schema(raw_prompt)
                 
-        except Exception as e:
-            logger.warning(f"⚠️ AgentSchema 生成失败: {e}，使用默认配置")
-            self.agent_schema = DEFAULT_AGENT_SCHEMA
+                # 合并实例配置（config.yaml 中的覆盖）
+                if config:
+                    self._merge_config_overrides(config)
+                
+                return  # 成功，退出重试循环
+                    
+            except Exception as e:
+                if attempt < max_retries:
+                    logger.warning(f"⚠️ AgentSchema 生成失败 (尝试 {attempt + 1}/{max_retries + 1}): {e}")
+                    await asyncio.sleep(retry_delay * (attempt + 1))  # 递增延迟
+                else:
+                    logger.warning(f"⚠️ AgentSchema 生成失败: {e}，使用默认配置")
+                    self.agent_schema = DEFAULT_AGENT_SCHEMA
     
     def _merge_config_overrides(self, config: Dict[str, Any]):
         """合并 config.yaml 中的覆盖配置"""

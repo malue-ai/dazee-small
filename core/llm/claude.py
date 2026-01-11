@@ -125,19 +125,23 @@ class ClaudeLLMService(BaseLLMService):
         """
         self.config = config
         
+        # 🆕 V5.0: 使用配置中的超时和重试设置
+        timeout = getattr(config, 'timeout', 120.0)
+        max_retries = getattr(config, 'max_retries', 3)
+        
         # 异步客户端（增加 timeout 和重试配置）
         # 注意：对于流式响应，timeout 是首个响应的超时，不是整体超时
         self.async_client = anthropic.AsyncAnthropic(
             api_key=config.api_key,
-            timeout=600.0,    # 10 分钟超时
-            max_retries=3     # 自动重试 3 次
+            timeout=timeout,
+            max_retries=max_retries
         )
         
         # 同步客户端（用于 Skills/Files API）
         self.sync_client = anthropic.Anthropic(
             api_key=config.api_key,
-            timeout=600.0,
-            max_retries=3
+            timeout=timeout,
+            max_retries=max_retries
         )
         
         # Beta 功能配置

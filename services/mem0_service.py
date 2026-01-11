@@ -135,6 +135,82 @@ class Mem0Service:
             logger.error(f"记忆搜索失败: {e}")
             raise Mem0ServiceError(f"记忆搜索失败: {e}") from e
     
+    async def search_with_rerank(
+        self,
+        user_id: str,
+        query: str,
+        limit: int = 5,
+        candidate_limit: int = 30
+    ) -> List[MemoryItem]:
+        """
+        搜索并重排序用户记忆（提升召回精度）
+        
+        流程:
+        1. 向量检索召回更多候选（默认 30 条）
+        2. LLM 重排序，选出最相关的 Top-K（默认 5 条）
+        
+        Args:
+            user_id: 用户 ID
+            query: 搜索查询
+            limit: 最终返回数量（默认 5）
+            candidate_limit: 候选召回数量（默认 30）
+            
+        Returns:
+            重排序后的记忆列表
+            
+        Raises:
+            Mem0NotInstalledError: mem0 模块未安装
+            Mem0ServiceError: 其他错误
+        """
+        try:
+            # 1. 召回更多候选
+            pool = self._get_pool()
+            candidates = pool.search(
+                user_id=user_id,
+                query=query,
+                limit=candidate_limit
+            )
+            
+            if not candidates:
+                return []
+            
+            # 2. LLM 重排序
+            from core.memory.mem0.reranker import get_reranker
+            reranker = get_reranker()
+            reranked = await reranker.rerank(
+                query=query,
+                memories=candidates,
+                top_k=limit
+            )
+            
+            # 3. 转换为 MemoryItem
+            items = [
+                MemoryItem(
+                    id=m.get("id", ""),
+                    memory=m.get("memory", ""),
+                    score=m.get("rerank_score", m.get("score")),
+                    user_id=m.get("user_id"),
+                    created_at=m.get("created_at"),
+                    metadata={
+                        **(m.get("metadata") or {}),
+                        "rerank_reason": m.get("rerank_reason", "")
+                    }
+                )
+                for m in reranked
+            ]
+            
+            logger.info(
+                f"🔍 记忆搜索(重排序): user_id={user_id}, "
+                f"候选={len(candidates)}, 结果={len(items)}"
+            )
+            return items
+            
+        except Mem0NotInstalledError:
+            raise
+        except Exception as e:
+            logger.error(f"记忆搜索(重排序)失败: {e}")
+            raise Mem0ServiceError(f"记忆搜索(重排序)失败: {e}") from e
+    
     async def get_all(
         self,
         user_id: str,

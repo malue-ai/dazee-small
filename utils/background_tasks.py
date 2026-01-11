@@ -620,6 +620,12 @@ class BackgroundTaskService:
                 f"耗时={batch_result.duration_seconds:.2f}s"
             )
             
+            # 🆕 情绪聚合：为成功更新的用户生成周汇总
+            await self._aggregate_weekly_summaries(
+                user_ids=[r.user_id for r in batch_result.results if r.success],
+                pool=pool
+            )
+            
             return batch_result
             
         except Exception as e:
@@ -781,6 +787,104 @@ class BackgroundTaskService:
     def _calc_duration_ms(self, start_time: datetime) -> int:
         """计算耗时（毫秒）"""
         return int((datetime.now() - start_time).total_seconds() * 1000)
+    
+    async def _aggregate_weekly_summaries(
+        self,
+        user_ids: List[str],
+        pool
+    ) -> None:
+        """
+        为用户生成周汇总（情绪 + 工作重点）
+        
+        在批量更新后调用，将聚合结果存入 Mem0
+        
+        Args:
+            user_ids: 需要聚合的用户 ID 列表
+            pool: Mem0 Pool 实例
+        """
+        if not user_ids:
+            return
+        
+        try:
+            from core.memory.mem0.aggregator import (
+                aggregate_user_emotion,
+                aggregate_work_summary,
+                format_time_window
+            )
+            
+            # 计算本周时间窗口
+            today = datetime.now()
+            start_of_week = today - timedelta(days=today.weekday())
+            start_of_week = start_of_week.replace(hour=0, minute=0, second=0, microsecond=0)
+            
+            logger.info(f"📊 开始情绪聚合: {len(user_ids)} 个用户")
+            
+            for user_id in user_ids:
+                try:
+                    # 检索用户记忆
+                    memories = pool.get_all(user_id=user_id, limit=100)
+                    
+                    if not memories:
+                        continue
+                    
+                    # 聚合情绪
+                    emotion_result = await aggregate_user_emotion(
+                        user_id=user_id,
+                        start_date=start_of_week,
+                        end_date=today,
+                        memories=memories
+                    )
+                    
+                    # 聚合工作重点
+                    work_result = await aggregate_work_summary(
+                        user_id=user_id,
+                        start_date=start_of_week,
+                        end_date=today,
+                        memories=memories
+                    )
+                    
+                    # 存储情绪摘要
+                    if emotion_result.get("summary") and emotion_result.get("dominant") != "neutral":
+                        pool.add(
+                            user_id=user_id,
+                            messages=[{
+                                "role": "user",
+                                "content": f"[情绪摘要] {emotion_result['summary']}"
+                            }],
+                            metadata={
+                                "type": "emotion_weekly",
+                                "time_window": emotion_result.get("time_window"),
+                                "dominant": emotion_result.get("dominant")
+                            }
+                        )
+                    
+                    # 存储工作摘要
+                    if work_result.get("summary") and work_result.get("highlights"):
+                        pool.add(
+                            user_id=user_id,
+                            messages=[{
+                                "role": "user",
+                                "content": f"[工作摘要] {work_result['summary']}"
+                            }],
+                            metadata={
+                                "type": "work_weekly",
+                                "time_window": work_result.get("time_window"),
+                                "next_steps": work_result.get("next_steps", [])
+                            }
+                        )
+                    
+                    logger.debug(f"  ✓ 用户 {user_id} 聚合完成")
+                    
+                except Exception as e:
+                    logger.warning(f"  ⚠️ 用户 {user_id} 聚合失败: {e}")
+                    continue
+            
+            logger.info(f"✅ 情绪聚合完成")
+            
+        except ImportError:
+            logger.debug("情绪聚合模块未加载，跳过")
+        except Exception as e:
+            logger.warning(f"⚠️ 情绪聚合失败: {e}")
 
 
 # ==================== 便捷函数 ====================

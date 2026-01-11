@@ -92,6 +92,9 @@ class InstanceConfig:
     # APIs 配置（REST API 描述）
     apis: List[ApiConfig] = field(default_factory=list)
     
+    # 🆕 通用工具启用配置（从 capabilities.yaml 选择）
+    enabled_capabilities: Dict[str, bool] = field(default_factory=dict)
+    
     # 记忆配置
     mem0_enabled: bool = True
     smart_retrieval: bool = True
@@ -237,6 +240,19 @@ def load_instance_config(instance_name: str) -> InstanceConfig:
     # 加载 APIs 配置（REST API 描述）
     apis = _load_apis_config(instance_name, raw_config.get("apis", []))
     
+    # 🆕 解析通用工具启用配置
+    enabled_capabilities_raw = raw_config.get("enabled_capabilities", {})
+    enabled_capabilities = {}
+    if isinstance(enabled_capabilities_raw, dict):
+        # 将配置值转换为布尔值（1/True -> True, 0/False -> False）
+        for tool_name, enabled in enabled_capabilities_raw.items():
+            if isinstance(enabled, bool):
+                enabled_capabilities[tool_name] = enabled
+            elif isinstance(enabled, int):
+                enabled_capabilities[tool_name] = bool(enabled)
+            else:
+                logger.warning(f"⚠️ 工具 {tool_name} 的启用配置值无效: {enabled}，将被忽略")
+    
     return InstanceConfig(
         name=instance_info.get("name", instance_name),
         description=instance_info.get("description", ""),
@@ -249,6 +265,7 @@ def load_instance_config(instance_name: str) -> InstanceConfig:
         mcp_tools=mcp_tools if isinstance(mcp_tools, list) else [],
         skills=skills,
         apis=apis,
+        enabled_capabilities=enabled_capabilities,
         mem0_enabled=memory_config.get("mem0_enabled", True),
         smart_retrieval=memory_config.get("smart_retrieval", True),
         retention_policy=memory_config.get("retention_policy", "user"),
@@ -600,10 +617,25 @@ async def create_agent_from_instance(
         logger.info(f"   覆盖 max_turns: {config.max_turns}")
     
     # 9. 🆕 创建实例级工具注册表
-    from core.tool import InstanceToolRegistry, get_capability_registry
+    from core.tool import InstanceToolRegistry, get_capability_registry, create_tool_loader
     
     global_registry = get_capability_registry()
-    instance_registry = InstanceToolRegistry(global_registry=global_registry)
+    
+    # 🆕 V5.1: 使用 ToolLoader 统一加载工具
+    tool_loader = create_tool_loader(global_registry)
+    
+    # 加载所有工具（通用工具、MCP 工具、Claude Skills）
+    load_result = tool_loader.load_tools(
+        enabled_capabilities=config.enabled_capabilities,
+        mcp_tools=config.mcp_tools,
+        skills=config.skills,
+    )
+    
+    # 创建过滤后的注册表
+    filtered_registry = tool_loader.create_filtered_registry(config.enabled_capabilities)
+    
+    # 使用过滤后的 registry 创建实例级注册表
+    instance_registry = InstanceToolRegistry(global_registry=filtered_registry)
     agent._instance_registry = instance_registry  # 注入到 Agent
     
     # 🆕 V4.6: 加载工具推断缓存（用于增量推断）

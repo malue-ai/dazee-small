@@ -69,6 +69,15 @@ from core.tool.instance_registry import (
     create_instance_registry,
 )
 
+# 🆕 工具加载器（统一管理三类工具）
+from core.tool.loader import (
+    ToolLoader,
+    ToolLoadResult,
+    create_tool_loader,
+    TOOL_CATEGORIES,   # 🆕 工具类别定义
+    CORE_TOOLS,        # 🆕 核心工具列表
+)
+
 __all__ = [
     # 选择器
     "ToolSelector",
@@ -105,5 +114,11 @@ __all__ = [
     "InstanceTool",
     "InstanceToolType",
     "create_instance_registry",
+    # 🆕 工具加载器
+    "ToolLoader",
+    "ToolLoadResult",
+    "create_tool_loader",
+    "TOOL_CATEGORIES",
+    "CORE_TOOLS",
 ]
 

@@ -86,6 +86,28 @@ profiles:
     timeout: 30.0
     max_retries: 1
 
+  # ==================== Dazee 碎片记忆提取 ====================
+  fragment_extractor:
+    description: "从对话中提取隐性信息（任务、情绪、待办等），使用轻量模型快速推理"
+    model: "claude-haiku-4-5-20251001"
+    max_tokens: 1024
+    temperature: 0
+    enable_thinking: false
+    enable_caching: false
+    timeout: 30.0
+    max_retries: 2
+
+  # ==================== Dazee 行为分析 ====================
+  behavior_analyzer:
+    description: "分析用户工作规律和 5W1H 行为模式，需要深度推理"
+    model: "claude-haiku-4-5-20251001"
+    max_tokens: 2048
+    temperature: 0.3
+    enable_thinking: false
+    enable_caching: false
+    timeout: 60.0
+    max_retries: 2
+
   # ==================== 计划管理 ====================
   plan_manager:
     description: "智能任务规划和管理，需要深度推理能力"

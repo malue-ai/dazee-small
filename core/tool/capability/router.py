@@ -351,10 +351,9 @@ class CapabilityRouter:
         if needs_validation:
             suggestions.append("Agent Skills (需要验证规范)")
         
-        # 检查是否是复杂工作流
-        complex_keywords = ['ppt', 'presentation', 'report', 'excel', '专业', '复杂']
-        if any(kw in task_description.lower() for kw in complex_keywords):
-            suggestions.insert(0, "Agent Skills (复杂工作流)")
+        # V5.0: 不使用关键词匹配判断复杂度
+        # 复杂度应由 LLM 语义推理或明确配置决定
+        # 删除: complex_keywords 硬编码规则
         
         if not suggestions:
             suggestions.append("Direct Function Call (默认)")
@@ -387,42 +386,20 @@ def create_capability_router(
 
 def extract_keywords(text: str) -> List[str]:
     """
-    从文本中提取关键词
+    V5.0: 从文本中提取关键词（已弃用）
+    
+    V5.0 策略：
+    - 不使用硬编码关键词模式
+    - 返回空列表，让调用者使用 LLM 语义推理
+    - 保留函数签名以保持 API 兼容
     
     Args:
         text: 输入文本
         
     Returns:
-        关键词列表
+        空列表（V5.0: 不做关键词提取）
     """
-    keywords = []
-    text_lower = text.lower()
-    
-    # 常见关键词模式
-    keyword_patterns = [
-        # PPT 相关
-        "ppt", "presentation", "slides", "演示", "幻灯片", "slidespeak",
-        # Excel 相关
-        "excel", "spreadsheet", "数据分析", "表格", "xlsx",
-        # 文档相关
-        "document", "word", "文档", "docx",
-        # PDF 相关
-        "pdf", "报告",
-        # 搜索相关
-        "search", "搜索", "查询", "查找",
-        # 代码相关
-        "code", "代码", "程序", "脚本",
-        # 规划相关
-        "plan", "规划", "计划", "任务",
-        # 质量相关
-        "专业", "高质量", "professional", "business",
-        # 产品相关
-        "产品", "product", "介绍", "客户"
-    ]
-    
-    for kw in keyword_patterns:
-        if kw in text_lower:
-            keywords.append(kw)
-    
-    return keywords
+    # V5.0: 不使用硬编码关键词模式
+    # 关键词提取应由 LLM 语义分析完成
+    return []
 

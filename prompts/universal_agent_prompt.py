@@ -1383,17 +1383,21 @@ def load_skills_metadata(skills_dir: Optional[str] = None) -> str:
 
 # ==================== Mem0 用户画像检索 ====================
 
-def _fetch_user_profile(user_id: str, user_query: str, max_memories: int = 5) -> str:
+def _fetch_user_profile(user_id: str, user_query: str, max_memories: int = 10) -> str:
     """
     从 Mem0 检索用户相关记忆，格式化为 System Prompt 注入段
     
     Args:
         user_id: 用户 ID
         user_query: 用户当前查询（用于语义搜索）
-        max_memories: 最大返回记忆数量
+        max_memories: 最大返回记忆数量（增加到 10 条以提升召回覆盖）
         
     Returns:
         格式化的用户画像字符串，如果检索失败则返回空字符串
+        
+    优化点：
+    - 增强 Prompt 注入格式，明确要求 Agent 引用具体信息
+    - 要求使用记忆中的人名、数字、时间，禁止模糊化
     """
     if not user_id:
         return ""
@@ -1421,16 +1425,25 @@ def _fetch_user_profile(user_id: str, user_query: str, max_memories: int = 5) ->
         if not memory_lines:
             return ""
         
+        # 增强的 Prompt 注入格式，明确要求引用具体信息
         profile_section = f"""
 ---
 
-## 🧠 用户画像（基于历史交互）
+## 用户画像（重要！必须参考）
 
-以下是该用户的相关偏好和历史信息，请在回复时参考：
+以下是与用户当前问题相关的历史信息，回答时**必须**引用具体细节：
 
+### 关键信息
 {chr(10).join(memory_lines)}
 
-**注意**：上述信息来自历史交互记录，请自然地融入回复中，不要明确提及"根据您的历史记录"。
+### 使用要求（强制执行）
+1. **人名**：直接使用记忆中的名字（如"老张"而非"那位负责人"、"某人"）
+2. **数字**：引用具体数值（如"150万"而非"一笔金额"、"较大金额"）
+3. **时间**：使用具体时间（如"周三"、"下午两点"而非"某天"、"某个时间"）
+4. **事件**：引用具体事件（如"永辉合同签约"而非"那件事"）
+5. **优先级**：如果记忆中有答案，**优先使用记忆内容**，不要猜测或编造
+
+⚠️ 禁止使用模糊词：某人、某天、那时候、一笔钱、那件事 等
 """
         return profile_section
         

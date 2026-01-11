@@ -45,6 +45,31 @@ agent:
     enable_caching: false
 
 
+# ==================== 工具能力配置 ====================
+#
+# 📌 配置原则：
+#   - 按功能类别启用/禁用工具（1=启用，0=禁用）
+#   - 核心工具（plan_todo, api_calling 等）自动启用，无需配置
+#
+enabled_capabilities:
+  # --- 信息获取类 ---
+  web_search: 1              # 互联网搜索
+  exa_search: 0              # Exa 语义搜索（暂不启用）
+  knowledge_search: 1        # 个人知识库检索
+  
+  # --- 文档生成类（Claude Skills）---
+  document_skills: 0         # 包含：pptx, xlsx, docx, pdf
+  
+  # --- PPT 生成类 ---
+  ppt_generator: 0           # 闭环 PPT 生成工具
+  
+  # --- 代码沙盒类 ---
+  sandbox_tools: 0           # 包含全部沙盒工具
+  
+  # --- 动态代码执行 ---
+  code_execution: 0
+
+
 # ==================== MCP 工具声明 ====================
 #
 # 📚 capability 说明：指定工具满足的用户意图类别

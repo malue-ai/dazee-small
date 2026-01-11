@@ -164,10 +164,16 @@ class Mem0MemoryPool:
                 # 2. 保留MemoryConfig结构（供内部方法使用，如_build_filters_and_metadata）
                 # 3. 实际使用我们创建的TencentVectorDB实例
                 #
+                # 导入自定义 Prompt（强调数字/金额/时间细节）
+                from core.memory.mem0.prompts import (
+                    CUSTOM_FACT_EXTRACTION_PROMPT,
+                    CUSTOM_UPDATE_MEMORY_PROMPT
+                )
+                
                 memory = Memory.__new__(Memory)
                 memory.config = minimal_config  # 保留配置结构（供内部方法使用）
-                memory.custom_fact_extraction_prompt = None
-                memory.custom_update_memory_prompt = None
+                memory.custom_fact_extraction_prompt = CUSTOM_FACT_EXTRACTION_PROMPT
+                memory.custom_update_memory_prompt = CUSTOM_UPDATE_MEMORY_PROMPT
                 memory.embedding_model = embedding_model  # ✅ 实际使用
                 memory.vector_store = vector_store  # ✅ 关键：使用腾讯云VectorDB实例
                 memory.llm = llm  # ✅ 实际使用
@@ -182,8 +188,18 @@ class Mem0MemoryPool:
                 return memory
             else:
                 # 使用标准配置（Qdrant等）
+                # 导入自定义 Prompt（强调数字/金额/时间细节）
+                from core.memory.mem0.prompts import (
+                    CUSTOM_FACT_EXTRACTION_PROMPT,
+                    CUSTOM_UPDATE_MEMORY_PROMPT
+                )
+                
                 mem0_config = self.config.to_mem0_config()
                 memory = Memory.from_config(config_dict=mem0_config)
+                
+                # 设置自定义 Prompt
+                memory.custom_fact_extraction_prompt = CUSTOM_FACT_EXTRACTION_PROMPT
+                memory.custom_update_memory_prompt = CUSTOM_UPDATE_MEMORY_PROMPT
                 
                 logger.info(f"[Mem0Pool] Memory实例创建成功（{self.config.vector_store_provider}）")
                 return memory

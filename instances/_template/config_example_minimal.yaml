@@ -1,0 +1,56 @@
+# ==================== 最小化配置示例 ====================
+#
+# 这是一个最小化的实例配置示例
+# 仅启用核心工具，适合轻量级任务
+#
+# 使用场景：
+# - 简单的信息查询任务
+# - 不需要复杂工具的场景
+# - 快速原型验证
+
+# ==================== 实例基本信息 ====================
+instance:
+  name: minimal-agent
+  description: "最小化配置的智能体，仅包含核心工具"
+  version: 1.0.0
+
+# ==================== Agent 配置 ====================
+agent:
+  model: claude-sonnet-4-20250514
+  max_turns: 10
+
+# ==================== 通用工具能力配置 ====================
+enabled_capabilities:
+  # 核心工具（必需）
+  plan_todo: 1
+  request_human_confirmation: 1
+  file_read: 1
+  
+  # 信息获取（可选）
+  web_search: 1
+  knowledge_search: 1
+  
+  # 其他工具全部禁用
+  pptx: 0
+  xlsx: 0
+  docx: 0
+  pdf: 0
+  exa_search: 0
+  ppt_generator: 0
+  slidespeak_render: 0
+  code_execution: 0
+  sandbox_run_code: 0
+  sandbox_create_project: 0
+  sandbox_run_project: 0
+
+# ==================== MCP 工具配置 ====================
+mcp_tools: []
+
+# ==================== REST APIs 配置 ====================
+apis: []
+
+# ==================== 记忆配置 ====================
+memory:
+  mem0_enabled: true
+  smart_retrieval: true
+  retention_policy: user

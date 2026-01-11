@@ -148,6 +148,34 @@ memory:
   # retention_policy: "user"
 
 
+# ==================== 工具能力配置 ====================
+#
+# 📌 配置原则：
+#   - 按功能类别启用/禁用工具（1=启用，0=禁用）
+#   - 核心工具（plan_todo, api_calling 等）自动启用，无需配置
+#   - 类别内的工具作为整体启用，避免关联配置失效
+#
+# 🔧 自动生成于：capabilities.yaml（共 23 个工具）
+#
+enabled_capabilities:
+  # --- 信息获取类 ---
+  web_search: 1              # 互联网搜索（Tavily）
+  exa_search: 0              # Exa 语义搜索（需 API Key）
+  knowledge_search: 1        # 个人知识库检索
+
+  # --- 文档生成类（Claude Skills，整体启用） ---
+  document_skills: 0         # 包含：pptx, xlsx, docx, pdf
+
+  # --- PPT 生成类 ---
+  ppt_generator: 0           # 闭环 PPT 生成（SlideSpeak）
+
+  # --- 代码沙盒类（整体启用） ---
+  sandbox_tools: 0           # 包含：文件操作、代码执行、项目运行等全部沙盒工具
+
+  # --- 动态代码执行 ---
+  code_execution: 0          # 本地代码执行（谨慎启用）
+
+
 # ==================== 高级配置（通常无需修改）====================
 
 advanced:

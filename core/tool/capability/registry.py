@@ -294,6 +294,53 @@ class CapabilityRegistry:
             if c.cache_stable
         ]
     
+    def filter_by_enabled(
+        self, 
+        enabled_map: Dict[str, bool]
+    ) -> "CapabilityRegistry":
+        """
+        根据启用配置过滤能力
+        
+        用于实例级工具过滤：只保留在 enabled_map 中明确标记为启用的工具。
+        
+        Args:
+            enabled_map: 工具名 -> 是否启用的映射
+                        例如: {"web_search": True, "ppt_generator": False}
+            
+        Returns:
+            过滤后的新 CapabilityRegistry 实例
+            
+        示例:
+            >>> registry = CapabilityRegistry()
+            >>> enabled = {"web_search": True, "plan_todo": True}
+            >>> filtered = registry.filter_by_enabled(enabled)
+            >>> len(filtered.capabilities)  # 只包含 2 个工具
+            2
+        """
+        # 创建新的 registry 实例（不加载配置，手动填充）
+        filtered = CapabilityRegistry.__new__(CapabilityRegistry)
+        filtered.capabilities = {}
+        filtered._raw_capabilities = []
+        
+        # 保留原有的分类和映射
+        filtered.task_type_mappings = self.task_type_mappings.copy()
+        filtered.categories = self.categories.copy()
+        filtered._config_path = self._config_path
+        filtered._skills_dir = self._skills_dir
+        
+        # 过滤能力：只保留明确启用的工具
+        for name, cap in self.capabilities.items():
+            if enabled_map.get(name, False):  # 只有显式为 True 才启用
+                filtered.capabilities[name] = cap
+        
+        # 同步原始配置
+        for cap_data in self._raw_capabilities:
+            cap_name = cap_data.get('name')
+            if cap_name and enabled_map.get(cap_name, False):
+                filtered._raw_capabilities.append(cap_data)
+        
+        return filtered
+    
     def find_candidates(
         self,
         keywords: List[str],

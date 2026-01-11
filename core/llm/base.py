@@ -101,6 +101,8 @@ class LLMConfig:
         temperature: 温度参数
         max_tokens: 最大输出 token 数
         tools: 工具列表
+        timeout: 请求超时时间（秒）
+        max_retries: 最大重试次数
     """
     provider: LLMProvider
     model: str
@@ -123,8 +125,8 @@ class LLMConfig:
     enable_context_editing: bool = False
     enable_structured_output: bool = False
     
-    # 请求配置
-    timeout: float = 120.0  # 请求超时时间（秒）
+    # 网络配置
+    timeout: float = 120.0  # 请求超时（秒），默认 2 分钟
     max_retries: int = 3    # 最大重试次数
 
 

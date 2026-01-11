@@ -174,12 +174,26 @@ class LLMConfig:
                 self.base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     
     def to_dict(self) -> Dict[str, Any]:
-        """转换为字典格式"""
-        config = {"model": self.model}
+        """
+        转换为字典格式
+        
+        注意：Anthropic 不允许同时设置 temperature 和 top_p
+        这里只设置 temperature，让 Mem0 不传 top_p
+        """
+        config = {
+            "model": self.model,
+            "temperature": 0,  # 只设置 temperature，不设置 top_p
+        }
         if self.api_key:
             config["api_key"] = self.api_key
         if self.base_url:
             config["base_url"] = self.base_url
+        
+        # 关键：Anthropic 不允许 temperature + top_p 同时设置
+        # 只设置 temperature=0，Mem0 就不会加 top_p
+        if self.provider == "anthropic":
+            config["temperature"] = 0.0
+        
         return config
 
 
