@@ -138,8 +138,8 @@ class SessionService:
         
         # 1.1 提取消息文本用于预览
         message_text = extract_message_text(message)
-        
         # 1.2 创建 Redis Session 状态（异步）
+        logger.info(f"📡 [1/3] 创建 Redis Session...")
         await self.redis.create_session(
             session_id=session_id,
             user_id=user_id,
@@ -159,12 +159,14 @@ class SessionService:
         # • EventBroadcaster, E2EPipelineTracer
         # • Context Engineering Manager
         # • 启用已注册的 Claude Skills
+        logger.info(f"🤖 [2/3] 创建 SimpleAgent...")
         agent = create_simple_agent(
             model=self.default_model,
             workspace_dir=workspace_dir,
             event_manager=self.events,
             conversation_service=conversation_service
         )
+        logger.info(f"🤖 [3/3] SimpleAgent 创建完成")
         
         # 3️⃣ 加入 Agent 池（支持 Session 复用）
         self.agent_pool[session_id] = agent

@@ -122,6 +122,10 @@ class LLMConfig:
     # 高级功能
     enable_context_editing: bool = False
     enable_structured_output: bool = False
+    
+    # 请求配置
+    timeout: float = 120.0  # 请求超时时间（秒）
+    max_retries: int = 3    # 最大重试次数
 
 
 @dataclass

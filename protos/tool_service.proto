@@ -2,6 +2,9 @@ syntax = "proto3";
 
 package zenflux;
 
+// Go 包路径配置（用于生成 Go 客户端）
+option go_package = "github.com/zenflux/agent-client-go/zenflux";
+
 // ==================== Chat 服务（对应 routers/chat.py） ====================
 service ChatService {
   // 聊天接口（同步模式）
