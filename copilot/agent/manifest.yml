@@ -15,7 +15,7 @@ image:
   port: 80  # Nginx 监听端口
 
 # ============================================================
-# HTTP/HTTPS 配置
+# HTTP/HTTPS 配置（ALB - 用于 REST API 和前端）
 # ============================================================
 http:
   path: '/'
@@ -28,6 +28,18 @@ http:
     timeout: 10s
     grace_period: 120s  # 启动宽限期（2分钟）
   deregistration_delay: 30s
+
+# ============================================================
+# NLB 配置（用于 gRPC 服务）
+# ============================================================
+nlb:
+  port: 50051/tcp
+  target_port: 50051
+  healthcheck:
+    port: 50051
+    healthy_threshold: 2
+    unhealthy_threshold: 2
+    interval: 10s
 
 # ============================================================
 # 资源配置（默认/Staging）
@@ -114,6 +126,9 @@ environments:
       LOG_LEVEL: DEBUG
       REDIS_HOST: zen0-backend-staging-redis.w9tdej.0001.apse1.cache.amazonaws.com
       REDIS_PORT: "6379"
+      GRPC_HOST: "0.0.0.0"
+      GRPC_PORT: "50051"
+      ENABLE_GRPC: "true"
     
     # 从 SSM Parameter Store 获取敏感配置
     secrets:

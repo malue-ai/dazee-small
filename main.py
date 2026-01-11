@@ -48,11 +48,15 @@ async def lifespan(app: FastAPI):
     if enable_grpc:
         try:
             print("📡 启动 gRPC 服务器...")
-            from services.grpc.server import GRPCServer
+            from grpc_server.server import GRPCServer
             
             grpc_host = os.getenv("GRPC_HOST", "0.0.0.0")
             grpc_port = int(os.getenv("GRPC_PORT", "50051"))
-            grpc_workers = int(os.getenv("GRPC_MAX_WORKERS", "10"))
+            # 0 或空值表示自动（CPU 核心数 * 5）
+            grpc_workers_env = os.getenv("GRPC_MAX_WORKERS", "0")
+            grpc_workers = int(grpc_workers_env) if grpc_workers_env else None
+            if grpc_workers == 0:
+                grpc_workers = None  # None 表示自动
             
             grpc_server = GRPCServer(grpc_host, grpc_port, grpc_workers)
             

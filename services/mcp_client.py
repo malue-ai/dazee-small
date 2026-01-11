@@ -25,7 +25,8 @@ class MCPClientWrapper:
         self,
         server_url: str,
         server_name: str,
-        auth_token: Optional[str] = None
+        auth_token: Optional[str] = None,
+        tool_timeout: float = 300.0  # 🆕 工具调用超时时间（默认 5 分钟）
     ):
         """
         初始化 MCP 客户端
@@ -34,10 +35,12 @@ class MCPClientWrapper:
             server_url: MCP 服务器 URL
             server_name: 服务器名称（用于工具命名空间）
             auth_token: 认证令牌
+            tool_timeout: 工具调用超时时间（秒），默认 300 秒（5 分钟）
         """
         self.server_url = server_url
         self.server_name = server_name
         self.auth_token = auth_token
+        self.tool_timeout = tool_timeout  # 🆕 保存超时配置
         self._session = None
         self._tools: Dict[str, Dict] = {}
         self._connected = False
@@ -193,9 +196,20 @@ class MCPClientWrapper:
             
             logger.info(f"🔧 调用 MCP 工具: {original_name}")
             logger.debug(f"   参数: {arguments}")
+            logger.info(f"   ⏱️ 超时设置: {self.tool_timeout}s")
             
-            # 调用工具
-            result = await self._session.call_tool(original_name, arguments)
+            # 🆕 调用工具（带超时）
+            try:
+                result = await asyncio.wait_for(
+                    self._session.call_tool(original_name, arguments),
+                    timeout=self.tool_timeout
+                )
+            except asyncio.TimeoutError:
+                logger.error(f"❌ MCP 工具执行超时（{self.tool_timeout}s）: {original_name}")
+                return {
+                    "success": False,
+                    "error": f"工具执行超时（{self.tool_timeout}秒），请稍后重试"
+                }
             
             # 解析结果
             content_parts = []
@@ -389,7 +403,8 @@ async def get_mcp_client(
     server_url: str,
     server_name: str,
     auth_token: Optional[str] = None,
-    force_reconnect: bool = False
+    force_reconnect: bool = False,
+    tool_timeout: float = 300.0  # 🆕 工具调用超时时间（默认 5 分钟）
 ) -> MCPClientWrapper:
     """
     获取 MCP 客户端（带缓存）
@@ -402,6 +417,7 @@ async def get_mcp_client(
         server_name: 服务器名称
         auth_token: 认证令牌
         force_reconnect: 是否强制重新连接
+        tool_timeout: 工具调用超时时间（秒），默认 300 秒（5 分钟）
         
     Returns:
         已连接的 MCPClientWrapper 实例
@@ -420,7 +436,8 @@ async def get_mcp_client(
     client = MCPClientWrapper(
         server_url=server_url,
         server_name=server_name,
-        auth_token=auth_token
+        auth_token=auth_token,
+        tool_timeout=tool_timeout  # 🆕 传递超时配置
     )
     
     # 连接

@@ -5,6 +5,7 @@ pydantic==2.5.3
 
 # Claude API
 anthropic>=0.21.0
+mcp>=0.1.0
 
 # 配置管理
 pyyaml>=6.0

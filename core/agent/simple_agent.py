@@ -83,7 +83,9 @@ class SimpleAgent:
         workspace_dir: str = None,
         conversation_service=None,
         schema=None,  # 🆕 AgentSchema 配置
-        system_prompt: str = None  # 🆕 System Prompt（作为运行时指令）
+        system_prompt: str = None,  # 🆕 System Prompt（作为运行时指令）
+        prompt_schema=None,  # 🆕 V4.6: PromptSchema（提示词分层）
+        prompt_cache=None  # 🆕 V4.6.2: InstancePromptCache（实例缓存）
     ):
         """
         初始化 Agent
@@ -96,6 +98,8 @@ class SimpleAgent:
             conversation_service: ConversationService 实例（用于消息持久化）
             schema: AgentSchema 配置（定义组件启用状态和参数）
             system_prompt: System Prompt（运行时传给 LLM 的系统指令）
+            prompt_schema: PromptSchema（提示词分层配置）
+            prompt_cache: InstancePromptCache（实例提示词缓存）
         """
         if event_manager is None:
             raise ValueError("event_manager 是必需参数")
@@ -112,6 +116,10 @@ class SimpleAgent:
         
         # 🆕 System Prompt：存储系统指令（如果未提供，使用默认）
         self.system_prompt = system_prompt
+        
+        # 🆕 V4.6: 存储提示词分层配置
+        self.prompt_schema = prompt_schema
+        self.prompt_cache = prompt_cache
         
         # 从 Schema 读取运行时参数（覆盖传入的参数）
         if schema is not None:

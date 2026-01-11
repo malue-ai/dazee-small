@@ -6,7 +6,7 @@
 set -euo pipefail
 
 REGION="${AWS_REGION:-ap-southeast-1}"
-DOMAIN_NAME="${CUSTOM_DOMAIN:-}"  # 可选，通过环境变量设置
+DOMAIN_NAME="${CUSTOM_DOMAIN:-agent.malue.ai}"  # 默认域名
 
 # 颜色输出
 RED='\033[0;31m'

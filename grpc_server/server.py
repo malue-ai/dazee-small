@@ -1,9 +1,10 @@
 """
 gRPC 服务器统一启动器
 
-同时提供 Chat、Session、Tool、Agent 四个服务
+同时提供 Chat、Session 等服务
 """
 
+import os
 import grpc
 import asyncio
 from concurrent import futures
@@ -11,13 +12,13 @@ from logger import get_logger
 
 # 导入生成的 protobuf 代码
 try:
-    from services.grpc.generated import tool_service_pb2_grpc
+    from grpc_server.generated import tool_service_pb2_grpc
 except ImportError:
     tool_service_pb2_grpc = None
 
 # 导入服务实现
-from services.grpc.chat_server import ChatServicer
-from services.grpc.session_server import SessionServicer
+from grpc_server.chat_servicer import ChatServicer
+from grpc_server.session_servicer import SessionServicer
 
 logger = get_logger("grpc_server")
 
@@ -29,20 +30,23 @@ class GRPCServer:
     负责启动和管理所有 gRPC 服务
     """
     
-    def __init__(self, host: str = "0.0.0.0", port: int = 50051, max_workers: int = 10):
+    def __init__(self, host: str = "0.0.0.0", port: int = 50051, max_workers: int = None):
         """
         初始化 gRPC 服务器
         
         Args:
             host: 监听地址
             port: 监听端口
-            max_workers: 最大工作线程数
+            max_workers: 最大工作线程数，None 表示不限制（使用 1000）
         """
         self.host = host
         self.port = port
-        self.max_workers = max_workers
+        if max_workers is None or max_workers <= 0:
+            self.max_workers = 1000  # 无限制模式
+        else:
+            self.max_workers = max_workers
         self.server = None
-        logger.info(f"🔧 gRPC 服务器配置: {host}:{port}, 最大并发={max_workers}")
+        logger.info(f"🔧 gRPC 服务器配置: {host}:{port}, 最大并发={self.max_workers}")
     
     async def start(self):
         """启动 gRPC 服务器"""
@@ -71,14 +75,6 @@ class GRPCServer:
             tool_service_pb2_grpc.add_SessionServiceServicer_to_server(
                 SessionServicer(), self.server
             )
-            
-            # TODO: 注册 Tool 服务和 Agent 服务
-            # tool_service_pb2_grpc.add_ToolServiceServicer_to_server(
-            #     ToolServicer(), self.server
-            # )
-            # tool_service_pb2_grpc.add_AgentServiceServicer_to_server(
-            #     AgentServicer(), self.server
-            # )
             
             # 绑定端口
             address = f"{self.host}:{self.port}"
@@ -111,7 +107,7 @@ class GRPCServer:
             await self.server.wait_for_termination()
 
 
-async def serve_grpc(host: str = "0.0.0.0", port: int = 50051, max_workers: int = 10):
+async def serve_grpc(host: str = "0.0.0.0", port: int = 50051, max_workers: int = None):
     """
     启动 gRPC 服务器的便捷函数
     
@@ -130,21 +126,27 @@ if __name__ == "__main__":
     import sys
     
     # 从环境变量读取配置
-    import os
     host = os.getenv("GRPC_HOST", "0.0.0.0")
     port = int(os.getenv("GRPC_PORT", "50051"))
-    max_workers = int(os.getenv("GRPC_MAX_WORKERS", "10"))
+    max_workers_env = os.getenv("GRPC_MAX_WORKERS", "0")
+    max_workers = int(max_workers_env) if max_workers_env else 0
+    
+    # 计算实际值用于显示
+    if max_workers <= 0:
+        workers_display = "1000 (无限制)"
+    else:
+        workers_display = str(max_workers)
     
     print("\n" + "="*60)
     print("🚀 启动 Zenflux Agent gRPC 服务器")
     print("="*60)
     print(f"📍 监听地址: {host}:{port}")
-    print(f"⚙️  最大并发: {max_workers}")
+    print(f"⚙️  最大并发: {workers_display}")
     print(f"📡 可用服务: ChatService, SessionService")
     print("="*60 + "\n")
     
     try:
-        asyncio.run(serve_grpc(host, port, max_workers))
+        asyncio.run(serve_grpc(host, port, max_workers if max_workers > 0 else None))
     except KeyboardInterrupt:
         print("\n👋 gRPC 服务器已关闭")
         sys.exit(0)

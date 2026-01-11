@@ -5,7 +5,7 @@ gRPC 客户端使用示例
 """
 
 import asyncio
-from services.grpc.client import ZenfluxGRPCClient
+from grpc_server.client import ZenfluxGRPCClient
 
 
 async def example_sync_chat():

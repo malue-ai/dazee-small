@@ -36,6 +36,9 @@ APP_NAME="zen0-backend"          # 复用现有应用
 ENV_NAME="staging"               # 复用现有环境
 SERVICE_NAME="agent"             # 新服务名（区别于 backend）
 
+# AWS Copilot CLI 路径（避免与 GitHub Copilot CLI 冲突）
+COPILOT="/usr/local/bin/copilot"
+
 # 域名配置（可选，留空则使用 ALB 默认域名）
 # 如需 HTTPS，请填写域名并申请证书
 DOMAIN_NAME="${CUSTOM_DOMAIN:-}"  # 留空 = HTTP only, 填写 = HTTPS
@@ -177,7 +180,7 @@ check_dependencies() {
     
     local missing_deps=()
     
-    for cmd in aws copilot docker jq; do
+    for cmd in aws docker jq; do
         if ! command -v $cmd &> /dev/null; then
             missing_deps+=("$cmd")
         fi
@@ -187,9 +190,20 @@ check_dependencies() {
         log_error "缺少必需工具: ${missing_deps[*]}"
         echo ""
         echo "安装说明:"
-        echo "  brew install awscli copilot-cli jq docker"
+        echo "  brew install awscli jq docker"
         exit 1
     fi
+    
+    # 检查 AWS Copilot CLI
+    if [ ! -x "$COPILOT" ]; then
+        log_error "AWS Copilot CLI 未安装在 $COPILOT"
+        echo ""
+        echo "安装说明:"
+        echo "  sudo curl -Lo /usr/local/bin/copilot https://github.com/aws/copilot-cli/releases/latest/download/copilot-darwin-arm64"
+        echo "  sudo chmod +x /usr/local/bin/copilot"
+        exit 1
+    fi
+    log_success "AWS Copilot CLI: $($COPILOT --version)"
     
     # 检查 AWS 凭证
     if ! aws sts get-caller-identity --region "$REGION" &> /dev/null; then
@@ -428,42 +442,61 @@ check_certificate_status() {
 # ============================================================
 
 init_copilot_app() {
-    log_step "检查 Copilot 应用"
+    log_step "检查/创建 Copilot 应用"
     
-    # 检查应用是否已存在（应该已存在，因为复用 zen0-backend）
-    if copilot app show --name "$APP_NAME" &> /dev/null; then
-        log_success "应用 $APP_NAME 已存在，将复用现有环境"
+    # 检查应用是否已存在
+    if $COPILOT app show --name "$APP_NAME" &> /dev/null; then
+        log_success "应用 $APP_NAME 已存在"
         return 0
     fi
     
-    # 如果应用不存在，提示用户
-    log_error "应用 $APP_NAME 不存在"
-    log_info "本脚本设计为复用现有的 zen0-backend 应用和 staging 环境"
-    log_info "如需创建新应用，请修改脚本中的 APP_NAME 变量"
+    # 应用不存在，创建新应用
+    log_info "应用 $APP_NAME 不存在，正在创建..."
+    
+    if $COPILOT app init "$APP_NAME"; then
+        log_success "应用 $APP_NAME 创建成功"
+    else
+        log_error "应用创建失败"
     exit 1
+    fi
 }
 
 deploy_environment() {
-    log_step "检查 Staging 环境"
+    log_step "检查/创建 Staging 环境"
     
     log_info "环境配置: ${ENV_NAME} (${REGION})"
     log_info "应用: ${APP_NAME}"
     echo ""
     
-    # 检查环境是否存在（应该已存在，因为复用 zen0-backend-staging）
-    if copilot env show --name "$ENV_NAME" &> /dev/null; then
-        log_success "环境 $ENV_NAME 已存在，将复用现有基础设施"
-        log_info "  - VPC: 复用现有"
-        log_info "  - ALB: 复用现有"
-        log_info "  - 安全组: 复用现有"
+    # 检查环境是否存在
+    if $COPILOT env show --name "$ENV_NAME" &> /dev/null; then
+        log_success "环境 $ENV_NAME 已存在"
         return 0
     fi
     
-    # 如果环境不存在，提示用户
-    log_error "环境 $ENV_NAME 不存在"
-    log_info "本脚本设计为复用现有的 zen0-backend staging 环境"
-    log_info "请确保 zen0-backend 应用的 staging 环境已部署"
+    # 环境不存在，创建新环境
+    log_info "环境 $ENV_NAME 不存在，正在创建..."
+    log_warning "预计时间: 10-15 分钟"
+    echo ""
+    
+    if $COPILOT env init \
+        --name "$ENV_NAME" \
+        --profile default \
+        --region "$REGION" \
+        --default-config; then
+        log_success "环境初始化成功"
+    else
+        log_error "环境初始化失败"
     exit 1
+    fi
+    
+    log_info "部署环境..."
+    if $COPILOT env deploy --name "$ENV_NAME"; then
+        log_success "环境 $ENV_NAME 部署成功"
+    else
+        log_error "环境部署失败"
+        exit 1
+    fi
 }
 
 deploy_service() {
@@ -481,12 +514,12 @@ deploy_service() {
     setup_env_variables
     
     # 检查服务是否已存在
-    if copilot svc show --name "$SERVICE_NAME" &> /dev/null; then
+    if $COPILOT svc show --name "$SERVICE_NAME" &> /dev/null; then
         log_info "服务已存在，执行更新部署..."
     else
         log_info "服务不存在，执行初始化..."
         # 初始化服务（使用现有的 manifest）
-        if ! copilot svc init \
+        if ! $COPILOT svc init \
             --name "$SERVICE_NAME" \
             --svc-type "Load Balanced Web Service" \
             --dockerfile "Dockerfile.production"; then
@@ -498,7 +531,7 @@ deploy_service() {
     
     START_TIME=$(date +%s)
     
-    if copilot svc deploy --name "$SERVICE_NAME" --env "$ENV_NAME"; then
+    if $COPILOT svc deploy --name "$SERVICE_NAME" --env "$ENV_NAME"; then
         END_TIME=$(date +%s)
         DURATION=$((END_TIME - START_TIME))
         log_success "服务部署成功（用时: $((DURATION/60))分$((DURATION%60))秒）"
@@ -526,7 +559,7 @@ run_database_migration() {
     # 执行迁移（通过 copilot svc exec）
     log_info "执行迁移命令..."
     
-    if copilot svc exec \
+    if $COPILOT svc exec \
         --name "$SERVICE_NAME" \
         --env "$ENV_NAME" \
         --command "python -c 'from infra.database import init_database; import asyncio; asyncio.run(init_database())'"; then
@@ -539,7 +572,7 @@ run_database_migration() {
 perform_health_check() {
     log_step "执行健康检查"
     
-    local service_url=$(copilot svc show --name "$SERVICE_NAME" --env "$ENV_NAME" --json 2>/dev/null | \
+    local service_url=$($COPILOT svc show --name "$SERVICE_NAME" --env "$ENV_NAME" --json 2>/dev/null | \
         jq -r '.routes[0].url // empty')
     
     if [ -z "$service_url" ] || [ "$service_url" = "null" ]; then
@@ -686,12 +719,12 @@ stop_environment() {
     else
         # 完全停止
         log_info "删除服务..."
-        copilot svc delete --name "$SERVICE_NAME" --env "$ENV_NAME" --yes 2>/dev/null || true
+        $COPILOT svc delete --name "$SERVICE_NAME" --env "$ENV_NAME" --yes 2>/dev/null || true
         
         sleep 10
         
         log_info "删除环境..."
-        copilot env delete --name "$ENV_NAME" --yes 2>/dev/null || true
+        $COPILOT env delete --name "$ENV_NAME" --yes 2>/dev/null || true
         
         save_state "deleted"
         log_to_file "Environment deleted"
@@ -719,7 +752,7 @@ show_status() {
     
     # 检查环境
     echo "环境状态:"
-    if copilot env show --name "$ENV_NAME" &> /dev/null; then
+    if $COPILOT env show --name "$ENV_NAME" &> /dev/null; then
         log_success "环境已创建"
     else
         log_warning "环境未创建"
@@ -728,7 +761,7 @@ show_status() {
     # 检查服务
     echo ""
     echo "服务状态:"
-    copilot svc status --name "$SERVICE_NAME" --env "$ENV_NAME" 2>/dev/null || \
+    $COPILOT svc status --name "$SERVICE_NAME" --env "$ENV_NAME" 2>/dev/null || \
         log_warning "服务未部署"
     
     # 检查 ECS
@@ -773,9 +806,9 @@ show_logs() {
     local since=${2:-10m}
     
     if [ "$follow" = "true" ]; then
-        copilot svc logs --name "$SERVICE_NAME" --env "$ENV_NAME" --follow
+        $COPILOT svc logs --name "$SERVICE_NAME" --env "$ENV_NAME" --follow
     else
-        copilot svc logs --name "$SERVICE_NAME" --env "$ENV_NAME" --since "$since"
+        $COPILOT svc logs --name "$SERVICE_NAME" --env "$ENV_NAME" --since "$since"
     fi
 }
 

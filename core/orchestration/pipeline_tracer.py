@@ -397,11 +397,10 @@ class E2EPipelineTracer:
                 logger.warning(f"   {i}. {warning}")
         
         if self.final_response:
-            response_preview = self.final_response[:300] + "..." if len(self.final_response) > 300 else self.final_response
+            # 响应预览增加到 1000 字符，避免截断过多
+            response_preview = self.final_response[:1000] + "..." if len(self.final_response) > 1000 else self.final_response
             logger.info(f"\n📄 最终响应预览:")
             logger.info(f"   {response_preview}")
-        
-        logger.info(f"\n{'='*70}")
     
     def to_dict(self) -> Dict[str, Any]:
         """导出为字典格式"""

@@ -2,27 +2,34 @@
 Mem0 路由层 - 用户记忆管理接口
 
 职责：
-- 用户记忆搜索
-- 批量更新触发
-- 健康检查
+- HTTP 协议处理
+- 请求/响应转换
+- 错误码映射
 
 设计原则：
-- 只处理 HTTP 协议
-- 🆕 复用 BackgroundTaskService（不重复造轮子）
-- 支持定时任务调用
+- 只处理 HTTP 协议，业务逻辑委托给 Service
+- 统一的错误处理
 """
 
-from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
-from pydantic import BaseModel, Field
-from fastapi import APIRouter, HTTPException, status, Query, BackgroundTasks
-from logger import get_logger
+from typing import List, Dict, Any
+from fastapi import APIRouter, HTTPException, status, Query
 
+from logger import get_logger
 from models.api import APIResponse
-from utils.background_tasks import (
-    get_background_task_service,
-    Mem0UpdateResult,
-    Mem0BatchUpdateResult
+from models.mem0 import (
+    MemorySearchRequest,
+    MemoryAddRequest,
+    BatchUpdateRequest,
+    MemoryItem,
+    UpdateResult,
+    BatchUpdateResult,
+    HealthCheckResult,
+    MemoryAddResult,
+)
+from services.mem0_service import (
+    get_mem0_service,
+    Mem0ServiceError,
+    Mem0NotInstalledError,
 )
 
 logger = get_logger("mem0_router")
@@ -35,62 +42,26 @@ router = APIRouter(
 )
 
 
-# ==================== 请求/响应模型 ====================
+# ==================== 错误处理 ====================
 
-class MemorySearchRequest(BaseModel):
-    """记忆搜索请求"""
-    user_id: str = Field(..., description="用户 ID")
-    query: str = Field(..., description="搜索查询")
-    limit: int = Field(10, ge=1, le=50, description="返回数量限制")
-
-
-class MemoryAddRequest(BaseModel):
-    """添加记忆请求"""
-    user_id: str = Field(..., description="用户 ID")
-    messages: List[Dict[str, str]] = Field(..., description="消息列表")
-    metadata: Optional[Dict[str, Any]] = Field(None, description="元数据")
-
-
-class BatchUpdateRequest(BaseModel):
-    """批量更新请求"""
-    since_hours: int = Field(24, ge=1, le=168, description="处理过去多少小时的会话")
-    max_concurrent: int = Field(5, ge=1, le=20, description="最大并发数")
-
-
-class MemoryItem(BaseModel):
-    """记忆项"""
-    id: str
-    memory: str
-    score: Optional[float] = None
-    user_id: Optional[str] = None
-    created_at: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
-
-
-class UpdateResultResponse(BaseModel):
-    """更新结果响应"""
-    user_id: str
-    success: bool
-    memories_added: int = 0
-    error: Optional[str] = None
-    duration_ms: int = 0
-
-
-class BatchUpdateResultResponse(BaseModel):
-    """批量更新结果响应"""
-    total_users: int
-    successful: int
-    failed: int
-    duration_seconds: float
-    results: List[UpdateResultResponse] = []
-
-
-class HealthCheckResponse(BaseModel):
-    """健康检查响应"""
-    service: str
-    status: str
-    pool: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
+def handle_mem0_error(e: Exception):
+    """统一的 Mem0 错误处理"""
+    if isinstance(e, Mem0NotInstalledError):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="mem0 模块未安装"
+        )
+    elif isinstance(e, Mem0ServiceError):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+    else:
+        logger.error(f"未知错误: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
 
 
 # ==================== 记忆搜索 ====================
@@ -123,29 +94,12 @@ async def search_memories(request: MemorySearchRequest):
     ```
     """
     try:
-        from core.memory.mem0 import get_mem0_pool
-        
-        pool = get_mem0_pool()
-        memories = pool.search(
+        service = get_mem0_service()
+        items = await service.search(
             user_id=request.user_id,
             query=request.query,
             limit=request.limit
         )
-        
-        # 转换为响应模型
-        items = [
-            MemoryItem(
-                id=m.get("id", ""),
-                memory=m.get("memory", ""),
-                score=m.get("score"),
-                user_id=m.get("user_id"),
-                created_at=m.get("created_at"),
-                metadata=m.get("metadata")
-            )
-            for m in memories
-        ]
-        
-        logger.info(f"🔍 记忆搜索: user_id={request.user_id}, 结果数={len(items)}")
         
         return APIResponse(
             code=200,
@@ -153,17 +107,8 @@ async def search_memories(request: MemorySearchRequest):
             data=items
         )
         
-    except ImportError:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="mem0 模块未安装"
-        )
     except Exception as e:
-        logger.error(f"记忆搜索失败: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        handle_mem0_error(e)
 
 
 @router.get("/user/{user_id}", response_model=APIResponse[List[MemoryItem]])
@@ -182,24 +127,8 @@ async def get_user_memories(
     用户的所有记忆列表
     """
     try:
-        from core.memory.mem0 import get_mem0_pool
-        
-        pool = get_mem0_pool()
-        memories = pool.get_all(user_id=user_id, limit=limit)
-        
-        items = [
-            MemoryItem(
-                id=m.get("id", ""),
-                memory=m.get("memory", ""),
-                score=m.get("score"),
-                user_id=m.get("user_id"),
-                created_at=m.get("created_at"),
-                metadata=m.get("metadata")
-            )
-            for m in memories
-        ]
-        
-        logger.info(f"📋 获取用户记忆: user_id={user_id}, 数量={len(items)}")
+        service = get_mem0_service()
+        items = await service.get_all(user_id=user_id, limit=limit)
         
         return APIResponse(
             code=200,
@@ -207,22 +136,13 @@ async def get_user_memories(
             data=items
         )
         
-    except ImportError:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="mem0 模块未安装"
-        )
     except Exception as e:
-        logger.error(f"获取用户记忆失败: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        handle_mem0_error(e)
 
 
 # ==================== 添加记忆 ====================
 
-@router.post("/add", response_model=APIResponse[Dict[str, Any]])
+@router.post("/add", response_model=APIResponse[MemoryAddResult])
 async def add_memories(request: MemoryAddRequest):
     """
     添加用户记忆
@@ -246,47 +166,27 @@ async def add_memories(request: MemoryAddRequest):
     添加结果，包含新增记忆数量
     """
     try:
-        from core.memory.mem0 import get_mem0_pool
-        
-        pool = get_mem0_pool()
-        result = pool.add(
+        service = get_mem0_service()
+        result = await service.add(
             user_id=request.user_id,
             messages=request.messages,
             metadata=request.metadata
         )
         
-        memories_added = len(result.get("results", []))
-        logger.info(f"➕ 添加记忆: user_id={request.user_id}, 新增={memories_added}")
-        
         return APIResponse(
             code=200,
             message="success",
-            data={
-                "memories_added": memories_added,
-                "results": result.get("results", [])
-            }
+            data=result
         )
         
-    except ImportError:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="mem0 模块未安装"
-        )
     except Exception as e:
-        logger.error(f"添加记忆失败: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        handle_mem0_error(e)
 
 
 # ==================== 批量更新 ====================
 
-@router.post("/batch-update", response_model=APIResponse[BatchUpdateResultResponse])
-async def batch_update_memories(
-    request: BatchUpdateRequest,
-    background_tasks: BackgroundTasks
-):
+@router.post("/batch-update", response_model=APIResponse[BatchUpdateResult])
+async def batch_update_memories(request: BatchUpdateRequest):
     """
     触发批量更新用户记忆
     
@@ -296,58 +196,30 @@ async def batch_update_memories(
     
     ## 说明
     - 此接口会从数据库获取指定时间范围内的所有用户会话
-    - 通过 BackgroundTaskService 执行（复用统一的后台任务机制）
+    - 通过 BackgroundTaskService 执行
     - 适合定时任务调用（如凌晨批量更新）
     
     ## 返回
     批量更新结果统计
     """
     try:
-        service = get_background_task_service()
-        
-        logger.info(
-            f"🚀 触发批量更新: since={request.since_hours}h, max_concurrent={request.max_concurrent}"
-        )
-        
-        # 🆕 复用 BackgroundTaskService
-        result = await service.batch_update_all_memories(
+        service = get_mem0_service()
+        result = await service.batch_update(
             since_hours=request.since_hours,
             max_concurrent=request.max_concurrent
-        )
-        
-        # 转换为响应模型
-        response = BatchUpdateResultResponse(
-            total_users=result.total_users,
-            successful=result.successful,
-            failed=result.failed,
-            duration_seconds=result.duration_seconds,
-            results=[
-                UpdateResultResponse(
-                    user_id=r.user_id,
-                    success=r.success,
-                    memories_added=r.memories_added,
-                    error=r.error,
-                    duration_ms=r.duration_ms
-                )
-                for r in result.results
-            ]
         )
         
         return APIResponse(
             code=200,
             message="success",
-            data=response
+            data=result
         )
         
     except Exception as e:
-        logger.error(f"批量更新失败: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        handle_mem0_error(e)
 
 
-@router.post("/user/{user_id}/update", response_model=APIResponse[UpdateResultResponse])
+@router.post("/user/{user_id}/update", response_model=APIResponse[UpdateResult])
 async def update_user_memories(
     user_id: str,
     since_hours: int = Query(24, ge=1, le=168, description="处理过去多少小时的会话")
@@ -363,10 +235,8 @@ async def update_user_memories(
     从数据库获取该用户在指定时间范围内的会话，提取记忆并更新
     """
     try:
-        service = get_background_task_service()
-        
-        # 🆕 复用 BackgroundTaskService
-        result = await service.update_user_memories(
+        service = get_mem0_service()
+        result = await service.update_user(
             user_id=user_id,
             since_hours=since_hours
         )
@@ -374,21 +244,11 @@ async def update_user_memories(
         return APIResponse(
             code=200,
             message="success" if result.success else "failed",
-            data=UpdateResultResponse(
-                user_id=result.user_id,
-                success=result.success,
-                memories_added=result.memories_added,
-                error=result.error,
-                duration_ms=result.duration_ms
-            )
+            data=result
         )
         
     except Exception as e:
-        logger.error(f"更新用户记忆失败: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        handle_mem0_error(e)
 
 
 # ==================== 删除记忆 ====================
@@ -402,12 +262,8 @@ async def delete_memory(memory_id: str):
     - **memory_id**: 记忆 ID（路径参数）
     """
     try:
-        from core.memory.mem0 import get_mem0_pool
-        
-        pool = get_mem0_pool()
-        success = pool.delete(memory_id=memory_id)
-        
-        logger.info(f"🗑️ 删除记忆: memory_id={memory_id}, success={success}")
+        service = get_mem0_service()
+        success = await service.delete(memory_id=memory_id)
         
         return APIResponse(
             code=200,
@@ -415,17 +271,8 @@ async def delete_memory(memory_id: str):
             data={"deleted": success}
         )
         
-    except ImportError:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="mem0 模块未安装"
-        )
     except Exception as e:
-        logger.error(f"删除记忆失败: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        handle_mem0_error(e)
 
 
 @router.delete("/user/{user_id}", response_model=APIResponse[Dict[str, bool]])
@@ -440,12 +287,8 @@ async def reset_user_memories(user_id: str):
     此操作不可逆，将删除用户的所有记忆
     """
     try:
-        from core.memory.mem0 import get_mem0_pool
-        
-        pool = get_mem0_pool()
-        success = pool.reset_user(user_id=user_id)
-        
-        logger.warning(f"🗑️ 重置用户记忆: user_id={user_id}, success={success}")
+        service = get_mem0_service()
+        success = await service.reset_user(user_id=user_id)
         
         return APIResponse(
             code=200,
@@ -453,22 +296,13 @@ async def reset_user_memories(user_id: str):
             data={"reset": success}
         )
         
-    except ImportError:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="mem0 模块未安装"
-        )
     except Exception as e:
-        logger.error(f"重置用户记忆失败: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        handle_mem0_error(e)
 
 
 # ==================== 健康检查 ====================
 
-@router.get("/health", response_model=APIResponse[HealthCheckResponse])
+@router.get("/health", response_model=APIResponse[HealthCheckResult])
 async def health_check():
     """
     Mem0 服务健康检查
@@ -480,23 +314,22 @@ async def health_check():
     - 向量存储连接状态
     """
     try:
-        service = get_mem0_update_service()
+        service = get_mem0_service()
         result = await service.health_check()
         
         return APIResponse(
-            code=200,
-            message="success",
-            data=HealthCheckResponse(**result)
+            code=200 if result.status == "healthy" else 503,
+            message="success" if result.status == "healthy" else "unhealthy",
+            data=result
         )
         
     except Exception as e:
         return APIResponse(
             code=503,
             message="unhealthy",
-            data=HealthCheckResponse(
+            data=HealthCheckResult(
                 service="mem0",
                 status="unhealthy",
                 error=str(e)
             )
         )
-

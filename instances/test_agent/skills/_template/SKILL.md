@@ -1,74 +1,68 @@
 ---
-name: skill-template
-description: 这是一个 Skill 模板，请替换为实际描述（简短说明技能的核心功能）
+name: your-skill-name
+description: 简短描述该 Skill 的功能
 ---
 
 # Skill 名称
 
-<!-- 
-📌 模板说明：
-本文件是 Claude Skill 的入口文件，遵循 Anthropic 官方规范。
+简要说明这个 Skill 帮助用户完成什么任务。
 
-🔧 YAML frontmatter 必填字段（不超过 1024 字符）：
-- name: Skill 唯一标识（与目录名一致）
-- description: 简短功能描述
+## 核心能力
 
-使用步骤：
-1. 修改上方 YAML 中的 name 和 description
-2. 替换下方 Markdown 内容为实际技能说明
-3. 在 skill_registry.yaml 中声明并启用
--->
+- **能力1**：描述
+- **能力2**：描述
+- **能力3**：描述
 
-简短描述此技能的核心功能（1-2 句话）。
+## 使用场景
 
-## Capabilities
+- 场景1
+- 场景2
+- 场景3
 
-此技能可以：
-- 能力1：具体描述
-- 能力2：具体描述
-- 能力3：具体描述
+## 输入参数
 
-## How to Use
+| 参数 | 类型 | 必需 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| param1 | string | 是 | - | 参数说明 |
+| param2 | int | 否 | 10 | 参数说明 |
 
-1. **输入数据**：描述用户需要提供什么
-2. **选择操作**：描述可选的操作类型
-3. **获取结果**：描述输出内容
+## 输出格式
 
-## Input Format
+```json
+{
+  "success": true,
+  "result": "...",
+  "message": "操作完成"
+}
+```
 
-支持的输入格式：
-- CSV 文件
-- JSON 数据
-- 文本描述
-- Excel 文件
+## 使用示例
 
-## Output Format
+```python
+# 示例代码
+result = await your_skill_function(
+    param1="value1",
+    param2=20
+)
 
-输出结果包含：
-- 计算结果
-- 可视化图表（如适用）
-- 格式化报告
+if result["success"]:
+    print(result["result"])
+```
 
-## Example Usage
+## ⚠️ 注意事项
 
-"请帮我执行 XXX 操作"
+- 注意事项1
+- 注意事项2
 
-"基于提供的数据，分析 XXX"
+## 环境变量配置
 
-## Scripts
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
+| `YOUR_API_KEY` | API 密钥 | - |
 
-如果此 Skill 包含 Python 脚本：
+## 用户交互指引
 
-- `main.py`: 主执行脚本
-- `utils.py`: 辅助函数
-
-## Best Practices
-
-1. 最佳实践1
-2. 最佳实践2
-3. 最佳实践3
-
-## Limitations
-
-- 限制1：描述此技能的局限性
-- 限制2：描述不适用的场景
+| 时机 | 话术 |
+|------|------|
+| 开始前 | "好的，我来帮您..." |
+| 完成后 | "已完成！" |

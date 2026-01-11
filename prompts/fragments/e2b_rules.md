@@ -2,15 +2,19 @@
 
 当使用 E2B 沙盒执行代码时：
 
+## 当前会话
+- **conversation_id**: `{{conversation_id}}`
+- **user_id**: `{{user_id}}`
+
 ## 基本原则
-- 每次操作使用正确的 conversation_id
-- 文件操作在 /home/user 目录下
+- **每次操作必须使用正确的 conversation_id**
+- 文件操作在 `/home/user` 目录下
 - 安装依赖前检查是否已存在
 
 ## 文件操作
-- 使用 sandbox_write_file 写入文件
-- 使用 sandbox_read_file 读取文件
-- 使用 sandbox_execute 执行命令
+- 使用 `sandbox_write_file` 写入文件
+- 使用 `sandbox_read_file` 读取文件
+- 使用 `sandbox_execute` 执行命令
 
 ## 常见命令
 ```bash

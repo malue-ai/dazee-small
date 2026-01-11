@@ -21,6 +21,7 @@ import asyncio
 from typing import Optional, Dict, Any, List, Callable
 from datetime import datetime
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from logger import get_logger
 
@@ -121,7 +122,7 @@ class SandboxService:
     _sandbox_pool: Dict[str, Any] = {}
     
     # 默认配置
-    DEFAULT_TIMEOUT_MS = 10 * 60 * 1000  # 10 分钟无活动后自动暂停
+    DEFAULT_TIMEOUT_MS = 60 * 60 * 1000  # 1 小时无活动后自动暂停
     
     def __init__(self, api_key: Optional[str] = None):
         """

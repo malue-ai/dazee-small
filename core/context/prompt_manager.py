@@ -292,18 +292,28 @@ class PromptManager:
         self,
         ctx: "RuntimeContext",
         task_type: str,
-        confidence: float = 1.0
+        confidence: float = 1.0,
+        variables: Optional[Dict[str, Any]] = None
     ) -> bool:
         """
-        任务类型识别后调用 → 追加任务规范
+        任务类型识别后调用 → 追加任务规范（支持变量注入）
         
         Args:
             ctx: RuntimeContext 实例
             task_type: 任务类型 (ppt_generation, excel_generation, code_task)
             confidence: 置信度
+            variables: 自定义变量，用于替换片段中的 {{variable}} 占位符
             
         Returns:
             是否成功追加
+            
+        示例:
+            # 生成 PPT 时注入自定义变量
+            prompt_mgr.on_task_detected(
+                ctx, 
+                "ppt_generation",
+                variables={"theme": "商务蓝", "page_count": 10}
+            )
         """
         state = self._get_or_create_state(ctx)
         
@@ -322,7 +332,8 @@ class PromptManager:
             state,
             fragment_id,
             priority=70,
-            event_type="task_detected"
+            event_type="task_detected",
+            variables=variables
         )
     
     def on_context_injected(
@@ -411,6 +422,88 @@ class PromptManager:
             allow_update=allow_update
         )
     
+    def append_fragment(
+        self,
+        ctx: "RuntimeContext",
+        fragment_id: str,
+        priority: int = 50,
+        variables: Optional[Dict[str, Any]] = None,
+        allow_update: bool = False
+    ) -> bool:
+        """
+        追加缓存中的片段（支持变量注入）
+        
+        这是外部调用的主要方法，用于从缓存加载片段并注入变量。
+        
+        Args:
+            ctx: RuntimeContext 实例
+            fragment_id: 片段 ID（对应 prompts/fragments/ 下的文件名，不含 .md）
+            priority: 优先级（越高越靠前）
+            variables: 变量字典，用于替换 {{variable}} 占位符
+            allow_update: 是否允许更新已存在的片段
+            
+        Returns:
+            是否成功追加
+            
+        示例:
+            # 加载 e2b_rules.md 并注入变量
+            prompt_mgr.append_fragment(
+                ctx,
+                "e2b_rules",
+                priority=60,
+                variables={"sandbox_timeout": 300, "max_file_size": "10MB"}
+            )
+            
+        片段变量格式:
+            在 .md 文件中使用 {{variable_name}} 格式：
+            - 会话 ID: {{conversation_id}}
+            - 超时时间: {{sandbox_timeout}} 秒
+        """
+        state = self._get_or_create_state(ctx)
+        
+        content = self._fragment_cache.get(fragment_id, "")
+        if not content:
+            logger.warning(f"片段不存在: {fragment_id}")
+            return False
+        
+        # 变量注入
+        if variables:
+            content = self._render_template(content, variables)
+        
+        # 注入 state 中的默认变量
+        default_vars = {
+            "conversation_id": state.conversation_id or "",
+            "user_id": state.user_id or "",
+        }
+        content = self._render_template(content, default_vars)
+        
+        return state.append(
+            fragment_id=fragment_id,
+            content=content,
+            priority=priority,
+            event_type="fragment",
+            allow_update=allow_update
+        )
+    
+    def get_available_fragments(self) -> List[str]:
+        """
+        获取所有可用的片段 ID
+        
+        Returns:
+            片段 ID 列表
+        """
+        return list(self._fragment_cache.keys())
+    
+    def reload_fragments(self):
+        """
+        重新加载所有片段（热更新）
+        
+        适用于修改了 prompts/fragments/ 下的文件后，不重启服务即可生效
+        """
+        self._fragment_cache.clear()
+        self._load_fragments()
+        logger.info(f"🔄 重新加载片段，共 {len(self._fragment_cache)} 个")
+    
     # ===== 内部追加方法 =====
     
     def _append_rag_context(self, state: PromptState, result: Any) -> bool:
@@ -461,13 +554,41 @@ class PromptManager:
         state: PromptState,
         fragment_id: str,
         priority: int,
-        event_type: str
+        event_type: str,
+        variables: Optional[Dict[str, Any]] = None
     ) -> bool:
-        """从缓存追加片段"""
+        """
+        从缓存追加片段（支持变量注入）
+        
+        Args:
+            state: PromptState 实例
+            fragment_id: 片段 ID
+            priority: 优先级
+            event_type: 事件类型
+            variables: 变量字典，用于替换 {{variable}} 占位符
+            
+        Returns:
+            是否成功追加
+            
+        变量格式：
+            片段中使用 {{variable_name}} 格式的占位符
+            例如：{{conversation_id}}, {{user_id}}, {{file_name}}
+        """
         content = self._fragment_cache.get(fragment_id, "")
         if not content:
             logger.warning(f"片段不存在: {fragment_id}")
             return False
+        
+        # 变量注入
+        if variables:
+            content = self._render_template(content, variables)
+        
+        # 也注入 state 中的默认变量
+        default_vars = {
+            "conversation_id": state.conversation_id or "",
+            "user_id": state.user_id or "",
+        }
+        content = self._render_template(content, default_vars)
         
         return state.append(
             fragment_id=fragment_id,
@@ -475,6 +596,30 @@ class PromptManager:
             priority=priority,
             event_type=event_type
         )
+    
+    def _render_template(self, template: str, variables: Dict[str, Any]) -> str:
+        """
+        渲染模板，替换 {{variable}} 占位符
+        
+        Args:
+            template: 模板字符串
+            variables: 变量字典
+            
+        Returns:
+            渲染后的字符串
+        """
+        import re
+        
+        def replace_var(match):
+            var_name = match.group(1).strip()
+            value = variables.get(var_name)
+            if value is not None:
+                return str(value)
+            # 未找到变量，保留原样
+            return match.group(0)
+        
+        # 匹配 {{variable}} 格式
+        return re.sub(r'\{\{(\w+)\}\}', replace_var, template)
     
     # ===== 动态内容生成 =====
     

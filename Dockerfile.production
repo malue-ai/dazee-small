@@ -97,10 +97,21 @@ stderr_logfile=/var/log/supervisor/backend_error.log
 environment=PYTHONUNBUFFERED="1"
 stopwaitsecs=30
 stopsignal=TERM
+
+[program:grpc]
+command=python -m grpc_server.server
+directory=/app
+autostart=true
+autorestart=true
+stdout_logfile=/var/log/supervisor/grpc.log
+stderr_logfile=/var/log/supervisor/grpc_error.log
+environment=PYTHONUNBUFFERED="1",GRPC_PORT="50051",GRPC_HOST="0.0.0.0"
+stopwaitsecs=30
+stopsignal=TERM
 EOF
 
-# 暴露端口
-EXPOSE 80
+# 暴露端口（HTTP + gRPC）
+EXPOSE 80 50051
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \

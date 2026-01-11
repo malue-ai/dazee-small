@@ -11,8 +11,8 @@ from logger import get_logger
 
 # 导入生成的 protobuf 代码
 try:
-    from services.grpc.generated import tool_service_pb2
-    from services.grpc.generated import tool_service_pb2_grpc
+    from grpc_server.generated import tool_service_pb2
+    from grpc_server.generated import tool_service_pb2_grpc
 except ImportError:
     tool_service_pb2 = None
     tool_service_pb2_grpc = None
@@ -24,27 +24,22 @@ class ZenfluxGRPCClient:
     """
     Zenflux Agent gRPC 客户端
     
-    提供与 HTTP API 相同的功能，但使用 gRPC 协议
-    性能更高，适合内部微服务间通信
+    提供与 HTTP API 相同的功能，使用 gRPC 协议
     
     使用示例：
-        client = ZenfluxGRPCClient("localhost:50051")
-        await client.connect()
-        
-        # 同步聊天
-        response = await client.chat(
-            message="帮我生成PPT",
-            user_id="user_001"
-        )
-        
-        # 流式聊天
-        async for event in client.chat_stream(
-            message="帮我生成PPT",
-            user_id="user_001"
-        ):
-            print(event)
-        
-        await client.close()
+        async with ZenfluxGRPCClient("localhost:50051") as client:
+            # 同步聊天
+            response = await client.chat(
+                message="帮我生成PPT",
+                user_id="user_001"
+            )
+            
+            # 流式聊天
+            async for event in client.chat_stream(
+                message="帮我生成PPT",
+                user_id="user_001"
+            ):
+                print(event)
     """
     
     def __init__(self, server_address: str = "localhost:50051", timeout: int = 300):
@@ -72,10 +67,7 @@ class ZenfluxGRPCClient:
         try:
             logger.info(f"📡 连接到 gRPC 服务器: {self.server_address}")
             
-            # 创建 channel
             self.channel = grpc.aio.insecure_channel(self.server_address)
-            
-            # 创建 stub
             self.chat_stub = tool_service_pb2_grpc.ChatServiceStub(self.channel)
             self.session_stub = tool_service_pb2_grpc.SessionServiceStub(self.channel)
             
@@ -106,24 +98,11 @@ class ZenfluxGRPCClient:
     ) -> Dict[str, Any]:
         """
         聊天接口（同步模式）
-        
-        Args:
-            message: 用户消息
-            user_id: 用户 ID
-            conversation_id: 对话 ID（可选）
-            message_id: 消息 ID（可选）
-            background_tasks: 后台任务列表
-            files: 文件引用列表
-            variables: 前端上下文变量
-            
-        Returns:
-            响应数据（包含 task_id）
         """
         if not self.chat_stub:
             raise RuntimeError("gRPC 客户端未连接，请先调用 connect()")
         
         try:
-            # 构建请求
             file_refs = []
             if files:
                 for f in files:
@@ -146,10 +125,8 @@ class ZenfluxGRPCClient:
                 variables=variables or {}
             )
             
-            # 发送请求
             response = await self.chat_stub.Chat(request, timeout=self.timeout)
             
-            # 转换响应
             return {
                 "code": response.code,
                 "message": response.message,
@@ -175,24 +152,11 @@ class ZenfluxGRPCClient:
     ) -> AsyncIterator[Dict[str, Any]]:
         """
         聊天接口（流式模式）
-        
-        Args:
-            message: 用户消息
-            user_id: 用户 ID
-            conversation_id: 对话 ID（可选）
-            message_id: 消息 ID（可选）
-            background_tasks: 后台任务列表
-            files: 文件引用列表
-            variables: 前端上下文变量
-            
-        Yields:
-            事件流
         """
         if not self.chat_stub:
             raise RuntimeError("gRPC 客户端未连接，请先调用 connect()")
         
         try:
-            # 构建请求
             file_refs = []
             if files:
                 for f in files:
@@ -215,12 +179,9 @@ class ZenfluxGRPCClient:
                 variables=variables or {}
             )
             
-            # 发送请求并接收流
             async for event in self.chat_stub.ChatStream(request, timeout=self.timeout):
-                # ZenO 格式：data 字段包含完整的 ZenO 事件，直接解析返回
                 zeno_event = json.loads(event.data) if event.data else {}
                 
-                # 补充 seq 和 event_uuid（如果 ZenO 事件中没有）
                 if event.seq and "seq" not in zeno_event:
                     zeno_event["seq"] = event.seq
                 if event.event_uuid and "event_uuid" not in zeno_event:
@@ -237,16 +198,7 @@ class ZenfluxGRPCClient:
         session_id: str,
         after_seq: Optional[int] = None
     ) -> AsyncIterator[Dict[str, Any]]:
-        """
-        重连到已存在的会话
-        
-        Args:
-            session_id: Session ID
-            after_seq: 从哪个序号之后开始
-            
-        Yields:
-            事件流
-        """
+        """重连到已存在的会话"""
         if not self.chat_stub:
             raise RuntimeError("gRPC 客户端未连接，请先调用 connect()")
         
@@ -257,10 +209,8 @@ class ZenfluxGRPCClient:
             )
             
             async for event in self.chat_stub.ReconnectStream(request, timeout=self.timeout):
-                # ZenO 格式：data 字段包含完整的 ZenO 事件，直接解析返回
                 zeno_event = json.loads(event.data) if event.data else {}
                 
-                # 补充 seq 和 event_uuid（如果 ZenO 事件中没有）
                 if event.seq and "seq" not in zeno_event:
                     zeno_event["seq"] = event.seq
                 if event.event_uuid and "event_uuid" not in zeno_event:
@@ -365,7 +315,7 @@ class ZenfluxGRPCClient:
             logger.error(f"❌ gRPC 列出会话失败: {e.code()}: {e.details()}")
             raise
     
-    # ==================== 上下文管理器支持 ====================
+    # ==================== 上下文管理器 ====================
     
     async def __aenter__(self):
         """进入上下文时自动连接"""

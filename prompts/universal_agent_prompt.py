@@ -807,75 +807,37 @@ Direct Tool Call（MCP/REST API/自定义工具）
 ### ⚠️ Code-First 强制规则（仅适用于特定场景）
 
 <code_first_mandatory_scenarios>
-**以下场景必须使用Code-First + Skills：**
+**以下场景优先使用 Skills：**
 
 1. **结构化内容生成（文档、报告、演示等）**
 2. **需要API schema验证的配置生成**
 3. **复杂的多步工作流任务**
 4. **需要专业领域知识的任务**
 
-**工作流（必须遵守）：**
+**工作流（Skills 已自动加载）：**
 
-**Step 1: Load Skill Instructions**
+Skills 已通过 Claude Skills API 预加载，你可以直接：
+1. 分析用户需求，Skill 指导会自动融入你的思考
+2. 使用 `code_execution` 工具执行复杂数据处理
+3. 调用相关工具完成任务（如 `slidespeak_render`）
+
+**示例：生成 PPT**
 ```xml
 <function_calls>
-<invoke name="bash">
-<parameter name="command">cat /skills/library/{skill-name}/SKILL.md</parameter>
-</invoke>
-</function_calls>
+<invoke name="code_execution">
+<parameter name="code">
+# Skill 已提供最佳实践指导
+# 直接构建配置并调用工具
+config = {
+    "topic": "AI 产品发布会",
+    "pages": 8,
+    "style": "professional"
 ```
 
-**Step 2: Load API Schema/Resources**
-```xml
-<function_calls>
-<invoke name="bash">
-<parameter name="command">cat /skills/library/{skill-name}/resources/api_schema.json</parameter>
-</invoke>
-</function_calls>
-```
-
-**Step 3: Generate Config via Script**
-```xml
-<function_calls>
-<invoke name="bash">
-<parameter name="command">cd /skills/library/{skill-name} && python -c "
-exec(open('scripts/config_builder.py').read())
-config = build_config(...)
-import json
-print(json.dumps(config, ensure_ascii=False, indent=2))
-"</parameter>
-</invoke>
-</function_calls>
-```
-
-**Step 4: Validate Config**
-```xml
-<function_calls>
-<invoke name="bash">
-<parameter name="command">cd /skills/library/{skill-name} && python -c "
-import json
-exec(open('scripts/validator.py').read())
-config = {...}  # from Step 3
-result = validate_config(config)
-print(json.dumps(result, ensure_ascii=False))
-"</parameter>
-</invoke>
-</function_calls>
-```
-
-**Step 5: Call Target Tool**
-```xml
-<function_calls>
-<invoke name="target_tool">
-<parameter name="config">{...validated config...}</parameter>
-</invoke>
-</function_calls>
-```
-
-**⚠️ 这些场景禁止：**
-- ❌ 在tool_use中直接硬编码JSON配置
-- ❌ 跳过Skill的helper scripts
-- ❌ 声称"我使用了bash"但实际没有调用
+**⚠️ 注意事项：**
+- Skills 会自动提供最佳实践，无需手动加载文件
+- 复杂任务优先使用 `code_execution` 处理数据
+- 调用相关工具完成最终输出
 </code_first_mandatory_scenarios>
 
 ### ✅ Code-First 不强制的场景
@@ -1325,15 +1287,10 @@ SKILLS_TOOLS_PRIORITY_RULES = """
    - 原因：Skill 包含自检清单和质量门槛
 
 **使用方式**：
-```bash
-# 第一步：读取 Skill 指导
-bash cat /skills/library/{skill-name}/SKILL.md
-
-# 第二步：根据指导执行
-# - 可能调用 Skill 中 references_tools 引用的工具
-# - 可能使用 code_execution 处理数据
-# - 可能搜索补充信息
-```
+Skills 已通过 Claude Skills API 预加载，会自动提供指导。你可以：
+- 直接开始任务，Skill 的最佳实践会自动融入你的思考
+- 使用 `code_execution` 工具执行复杂数据处理
+- 调用 Skill 引用的相关工具完成任务
 
 ### 何时直接使用 Tool
 
@@ -1360,8 +1317,7 @@ bash cat /skills/library/{skill-name}/SKILL.md
 
 **示例：生成专业PPT**
 ```
-1. bash cat /skills/library/slidespeak-generator/SKILL.md
-   ↓ 学到：内容扩展策略、布局选择逻辑、质量标准
+1. 分析用户需求，Skill 会自动提供最佳实践指导
    
 2. web_search (收集素材)
    ↓ 获取：产品信息、市场数据、案例

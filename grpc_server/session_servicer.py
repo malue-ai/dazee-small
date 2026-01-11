@@ -2,6 +2,7 @@
 gRPC Session 服务端实现
 
 对应 routers/chat.py 中的 Session 管理接口
+业务逻辑复用 services/session_service.py
 """
 
 import grpc
@@ -12,42 +13,31 @@ from logger import get_logger
 
 # 导入生成的 protobuf 代码
 try:
-    from services.grpc.generated import tool_service_pb2
-    from services.grpc.generated import tool_service_pb2_grpc
+    from grpc_server.generated import tool_service_pb2
+    from grpc_server.generated import tool_service_pb2_grpc
 except ImportError:
     tool_service_pb2 = None
     tool_service_pb2_grpc = None
 
-# 导入业务服务
+# 导入业务服务（复用 services 层）
 from services import get_session_service, SessionNotFoundError
 
-logger = get_logger("grpc_session_server")
+logger = get_logger("grpc_session_servicer")
 
 
 def safe_int(value: Any, default: int = 0) -> int:
-    """
-    安全地将值转换为整数
-    
-    Args:
-        value: 要转换的值（可能是 int、str、float 或其他）
-        default: 转换失败时的默认值
-        
-    Returns:
-        整数值
-    """
+    """安全地将值转换为整数"""
     if value is None:
         return default
     if isinstance(value, int):
         return value
     if isinstance(value, str):
-        # 处理 ISO 格式时间戳
         if 'T' in value or '-' in value:
             try:
                 dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
                 return int(dt.timestamp() * 1000)
             except (ValueError, TypeError):
                 pass
-        # 尝试直接转换为整数
         try:
             return int(value)
         except (ValueError, TypeError):
@@ -62,10 +52,11 @@ class SessionServicer(tool_service_pb2_grpc.SessionServiceServicer):
     """
     Session 服务 gRPC 实现
     
-    提供会话管理功能
+    提供会话管理功能，业务逻辑复用 services/session_service.py
     """
     
     def __init__(self):
+        # 复用业务服务层
         self.session_service = get_session_service()
         logger.info("🔧 Session gRPC Servicer 已初始化")
     
@@ -124,7 +115,6 @@ class SessionServicer(tool_service_pb2_grpc.SessionServiceServicer):
                 limit=request.limit or 100
             )
             
-            # 转换为 protobuf 格式（使用 safe_int 处理类型转换）
             grpc_events = []
             for event in events:
                 grpc_event = tool_service_pb2.ChatEvent(
@@ -172,7 +162,6 @@ class SessionServicer(tool_service_pb2_grpc.SessionServiceServicer):
             
             sessions = await self.session_service.get_user_sessions(request.user_id)
             
-            # 转换为 protobuf 格式
             grpc_sessions = []
             for session in sessions:
                 grpc_session = tool_service_pb2.SessionInfo(
@@ -266,7 +255,6 @@ class SessionServicer(tool_service_pb2_grpc.SessionServiceServicer):
             
             sessions = await self.session_service.list_sessions()
             
-            # 转换为 protobuf 格式
             grpc_sessions = []
             for session in sessions:
                 grpc_session = tool_service_pb2.SessionInfo(

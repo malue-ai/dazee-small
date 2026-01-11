@@ -36,9 +36,9 @@ bash scripts/generate_grpc.sh
 ```
 
 这会生成：
-- `services/grpc/generated/tool_service_pb2.py` - 消息定义
-- `services/grpc/generated/tool_service_pb2_grpc.py` - 服务定义
-- `services/grpc/generated/tool_service_pb2.pyi` - 类型提示
+- `grpc/generated/tool_service_pb2.py` - 消息定义
+- `grpc/generated/tool_service_pb2_grpc.py` - 服务定义
+- `grpc/generated/tool_service_pb2.pyi` - 类型提示
 
 ### 3. 启动服务
 
@@ -61,7 +61,7 @@ python main.py
 
 ```bash
 # 只运行 gRPC 服务器（不启动 HTTP）
-python services/grpc/server.py
+python -m grpc.server
 ```
 
 ---
@@ -149,7 +149,7 @@ service SessionService {
 ### Python 客户端
 
 ```python
-from services.grpc.client import ZenfluxGRPCClient
+from grpc.client import ZenfluxGRPCClient
 
 async def example():
     # 使用上下文管理器自动连接/关闭
@@ -253,10 +253,10 @@ bash scripts/generate_grpc.sh
 
 #### 3. 实现服务端
 
-创建 `services/grpc/your_server.py`：
+创建 `grpc/your_servicer.py`：
 
 ```python
-from services.grpc.generated import tool_service_pb2_grpc
+from grpc.generated import tool_service_pb2_grpc
 
 class YourServicer(tool_service_pb2_grpc.YourServiceServicer):
     async def YourMethod(self, request, context):
@@ -269,7 +269,7 @@ class YourServicer(tool_service_pb2_grpc.YourServiceServicer):
 
 #### 4. 注册服务
 
-在 `services/grpc/server.py` 中注册：
+在 `grpc/server.py` 中注册：
 
 ```python
 tool_service_pb2_grpc.add_YourServiceServicer_to_server(
@@ -370,8 +370,8 @@ pip install grpcio-tools
 # 手动生成
 python -m grpc_tools.protoc \
     -I./protos \
-    --python_out=./services/grpc/generated \
-    --grpc_python_out=./services/grpc/generated \
+    --python_out=./grpc/generated \
+    --grpc_python_out=./grpc/generated \
     ./protos/tool_service.proto
 ```
 

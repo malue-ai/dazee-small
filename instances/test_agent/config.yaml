@@ -55,16 +55,42 @@ agent:
 #   - 更多选项见 _template/config.yaml
 #
 mcp_tools:
-  # Dify 工作流（通过 MCP 协议）
+  # ==================== Ontology Builder 三阶段工作流 ====================
+  # 
+  # 📌 系统配置构建 Skill（三阶段原子操作）
+  # 完整流程：text2flowchart → part1 → part2
+  # 预计耗时：约 3-5 分钟
+  #
+  
+  # 阶段 1：自然语言 → Mermaid 流程图
   - name: text2flowchart
     server_url: "https://api.dify.ai/mcp/server/APXev1xgCP4n5XMn/mcp"
     server_name: "dify"
     auth_type: "bearer"
-    auth_env: "DIFY_API_KEY"  # 环境变量名，实际密钥写在 .env 文件
-    capability: "document_creation"  # 🆕 指定能力类别：生成 flowchart 属于文档创建
-    description: "根据用户输入，分析实体，包含的属性，实体之间的关系，生成flowchart格式的富文本"
-
-
+    auth_env: "DIFY_API_KEY"
+    capability: "document_creation"
+    description: "第一阶段：从自然语言描述生成 Mermaid 流程图，识别核心实体、属性及关系"
+    # App ID: a83e8b00-a94e-4cdf-b5f7-ef721e7238c1
+    
+  # 阶段 2：预处理 Mermaid 图表
+  - name: build_ontology_part1
+    server_url: "https://api.dify.ai/mcp/server/KLRL4vux6cSYA48J/mcp"
+    server_name: "dify_part1"
+    auth_type: "bearer"
+    auth_env: "DIFY_API_KEY"
+    capability: "document_creation"
+    description: "第二阶段：预处理图表生成中间配置（输入: chart_url, query, language → 输出: ontology_json_url）"
+    # App ID: 8b372c40-0b3f-4108-b7a8-3a5ef29af729
+    
+  # 阶段 3：生成最终配置文件
+  - name: build_ontology_part2
+    server_url: "https://api.dify.ai/mcp/server/L6YRO83T8iR99uwo/mcp"
+    server_name: "dify_part2"
+    auth_type: "bearer"
+    auth_env: "DIFY_API_KEY"
+    capability: "document_creation"
+    description: "第三阶段：生成最终配置 JSON（输入: ontology_url, query, language → 输出: ontology_json_url）"
+    # App ID: c3046a09-1833-4914-ace3-7548844d1c35
 # ==================== REST APIs 配置 ====================
 #
 # 📌 运营配置：只需填写 base_url + 认证
