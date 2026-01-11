@@ -36,9 +36,9 @@ ENV PYTHONUNBUFFERED=1 \
 # 安装 Nginx 和必要的系统工具
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        nginx \
-        curl \
-        supervisor && \
+    nginx \
+    curl \
+    supervisor && \
     rm -rf /var/lib/apt/lists/*
 
 # 设置工作目录
@@ -94,7 +94,7 @@ autostart=true
 autorestart=true
 stdout_logfile=/var/log/supervisor/backend.log
 stderr_logfile=/var/log/supervisor/backend_error.log
-environment=PYTHONUNBUFFERED="1"
+environment=PYTHONUNBUFFERED="1",ENABLE_GRPC="true",GRPC_HOST="0.0.0.0",GRPC_PORT="50051"
 stopwaitsecs=30
 stopsignal=TERM
 
@@ -110,7 +110,9 @@ stopwaitsecs=30
 stopsignal=TERM
 EOF
 
-# 暴露端口（HTTP + gRPC）
+# 暴露端口
+# 80: Nginx (HTTP)
+# 50051: gRPC
 EXPOSE 80 50051
 
 # 健康检查

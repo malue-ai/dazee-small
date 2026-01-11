@@ -1,7 +1,7 @@
 # ============================================================
 # Zenflux Agent Service - Copilot Manifest
 # 部署到 zen0-backend 应用的 staging 环境
-# 单容器部署：Nginx + FastAPI + Vue Frontend
+# 单容器部署：Nginx + FastAPI + Vue Frontend + gRPC
 # ============================================================
 
 name: agent
@@ -15,7 +15,7 @@ image:
   port: 80  # Nginx 监听端口
 
 # ============================================================
-# HTTP/HTTPS 配置（ALB - 用于 REST API 和前端）
+# HTTP/HTTPS 配置 (ALB)
 # ============================================================
 http:
   path: '/'
@@ -30,13 +30,18 @@ http:
   deregistration_delay: 30s
 
 # ============================================================
-# NLB 配置（用于 gRPC 服务）
+# gRPC 配置 (NLB with TLS)
+# 通过 Network Load Balancer 暴露 gRPC 端口，使用 TLS 加密
+# NLB 在 50051 端口终止 TLS，转发明文到容器 50051 端口
+# 客户端连接: grpcs://agent.malue.ai:50051
 # ============================================================
 nlb:
-  port: 50051/tcp
+  port: 50051/tls
   target_port: 50051
+  alias: agent.malue.ai
+  ssl_policy: ELBSecurityPolicy-TLS13-1-2-2021-06
   healthcheck:
-    port: 50051
+    port: 80
     healthy_threshold: 2
     unhealthy_threshold: 2
     interval: 10s
@@ -94,6 +99,11 @@ variables:
   AWS_DEFAULT_REGION: ap-southeast-1
   AWS_S3_BUCKET: dify-storage-zenflux
   ALLOWED_ORIGINS: "*"
+  # gRPC 配置
+  ENABLE_GRPC: "true"
+  GRPC_HOST: "0.0.0.0"
+  GRPC_PORT: "50051"
+  GRPC_MAX_WORKERS: "10"
 
 # ============================================================
 # 环境特定覆盖
