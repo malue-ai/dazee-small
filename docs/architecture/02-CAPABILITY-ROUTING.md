@@ -1,12 +1,69 @@
 # 通用能力路由框架
 
-> 📅 **最后更新**: 2025-12-30  
-> 🎯 **适用版本**: V4.0  
-> ✅ **实现状态**: 已完成（core/tool/capability/）
+> 📅 **最后更新**: 2026-01-12  
+> 🎯 **当前版本**: V5.1（LLM 语义工具选择）  
+> ⚠️ **V4.0 评分算法**: 已废弃（保留代码仅供参考）  
+> ✅ **实现状态**: 生产就绪
+
+---
+
+## 🚨 重要架构变更（V5.1）
+
+### V4.0 → V5.1 设计演进
+
+**V4.0 问题（硬编码评分策略）**：
+- ❌ 违反 **Prompt-First** 原则（规则硬编码在代码中）
+- ❌ 对运营不友好（需要配置复杂的权重和评分规则）
+- ❌ 缺乏大模型的泛化能力（无法理解新场景）
+
+**V5.1 解决方案（LLM 语义工具选择）**：
+- ✅ 一切以系统提示词和大模型为中心
+- ✅ 客观呈现所有工具信息（description、preferred_for、priority）
+- ✅ 不在代码中定义"priority 是次要参考"（这本身是硬规则）
+- ✅ LLM 自主理解和权衡所有因素
+- ✅ 系统提示词有明确指令时，LLM 会优先遵守
+
+### 决策层次
+
+```
+🔴 第一层：系统提示词中的明确指令（如果有）
+       ↓
+🟡 第二层：LLM 根据所有工具信息自主决策
+           （综合考虑：description、preferred_for、priority、capability 等）
+```
+
+**核心原则**：
+- 不应该在代码/文档中定义"priority 是次要参考"
+- 应该把所有工具信息（包括 priority）客观注入 Prompt
+- 让 LLM 自己理解和权衡所有因素
+
+**示例**：
+```markdown
+<!-- 系统提示词（instances/test_agent/prompt.md）-->
+在处理 PPT 生成任务时，优先使用 slidespeak-generator。
+
+# LLM 会优先遵守这个明确指令
+```
+
+```yaml
+# 配置文件（config/capabilities.yaml）
+capabilities:
+  - name: slidespeak_render
+    priority: 85
+    description: "专业 PPT 渲染"
+  - name: pptx
+    priority: 60
+    description: "本地 PPT 生成"
+
+# 如果系统提示词没有明确指令，
+# LLM 会综合考虑 priority、description 等所有信息自主决策
+```
+
+---
 
 ## 🎯 核心问题
 
-**当多个执行方式（Skills/Tools/MCP/Code）都能完成同一任务时，如何统一管理优先级？**
+**当多个执行方式（Skills/Tools/MCP/Code）都能完成同一任务时，如何选择最合适的？**
 
 这不是某个具体场景的问题，而是一个**通用的架构问题**。
 
@@ -32,9 +89,137 @@ core/tool/capability/
 
 ---
 
-## 🚀 V4.0 快速开始
+## 🚀 V5.1 实现（LLM 语义工具选择）
 
-### 基础使用
+### 核心流程
+
+```
+用户 Query
+    ↓
+┌─────────────────────────────────────────────────┐
+│ 1. IntentAnalyzer（LLM 语义分析）                │
+│    输出: task_type（如 content_generation）       │
+└─────────────────────────────────────────────────┘
+    ↓
+┌─────────────────────────────────────────────────┐
+│ 2. filter_tools_by_task_type()                   │
+│    - Level 1 核心工具（始终包含）                 │
+│    - Level 2 动态工具（基于 task_type 过滤）      │
+└─────────────────────────────────────────────────┘
+    ↓
+┌─────────────────────────────────────────────────┐
+│ 3. build_tools_reference_for_prompt()            │
+│    构建工具参考信息（description + preferred_for  │
+│    + priority），注入 Prompt                      │
+└─────────────────────────────────────────────────┘
+    ↓
+┌─────────────────────────────────────────────────┐
+│ 4. LLM 语义自主选择                               │
+│    - 优先遵守系统提示词中的工具优先级指令          │
+│    - 根据工具功能和适用场景语义匹配                │
+│    - priority 仅作为次要参考                      │
+└─────────────────────────────────────────────────┘
+```
+
+### 代码示例
+
+```python
+from core.agent.intent_analyzer import IntentAnalyzer
+from tools.plan_todo_tool import (
+    filter_tools_by_task_type, 
+    build_tools_reference_for_prompt,
+    discover_all_tools
+)
+
+# 1. 意图识别
+intent_analyzer = IntentAnalyzer()
+intent_result = await intent_analyzer.analyze("帮我生成一个产品介绍PPT")
+# 输出: task_type=TaskType.CONTENT_GENERATION
+
+# 2. 获取所有工具并过滤
+all_tools = discover_all_tools()
+filtered_tools = filter_tools_by_task_type(
+    task_type=intent_result.task_type,
+    all_tools=all_tools,
+    task_type_mappings=load_task_type_mappings()
+)
+# Level 1: plan_todo, api_calling, file_read, ...
+# Level 2: ppt_generator, slidespeak_render, docx, ...
+
+# 3. 构建工具参考信息
+tools_reference = build_tools_reference_for_prompt(filtered_tools)
+
+# 4. 注入 Prompt 让 LLM 选择
+prompt = f"""
+用户需求: {user_query}
+
+可用工具:
+{tools_reference}
+
+请根据工具的「功能」和「适用场景」选择最合适的工具。
+"""
+```
+
+### 配置示例
+
+```yaml
+# config/capabilities.yaml（V5.1 配置）
+capabilities:
+  - name: slidespeak_render
+    capability: ppt_generation
+    level: 2
+    priority: 85
+    description: "基于 SlidesSpeak 的专业 PPT 渲染服务"
+    preferred_for: "企业级演示文稿、专业模板、品牌一致性"
+  
+  - name: pptx
+    capability: ppt_generation
+    level: 2
+    priority: 60
+    description: "本地 PPT 生成（python-pptx）"
+    preferred_for: "快速原型、简单演示、离线环境"
+
+# task_type_mappings（用于第一层过滤）
+task_type_mappings:
+  content_generation:
+    - ppt_generation
+    - document_creation
+  information_query:
+    - web_search
+    - news_search
+```
+
+**运营配置要点**：
+- ✅ 清晰编写 `description`（工具能做什么）
+- ✅ 清晰编写 `preferred_for`（工具最适合的场景）
+- ✅ 设置合理的 `priority`（推荐程度，数值越高越推荐）
+- ✅ 所有信息都会注入 Prompt，由 LLM 综合判断
+- ✅ 如需特定场景的明确指令，在系统提示词中指定
+
+### 系统提示词明确指令（优先）
+
+```markdown
+<!-- instances/test_agent/prompt.md -->
+
+# 产品助手
+
+## 工具使用规则
+
+在处理 PPT 生成任务时：
+1. 优先使用 `slidespeak_render`（企业级需求）
+2. 其次考虑 `pptx` skill（快速原型）
+
+*LLM 会优先遵守这个明确指令*
+```
+
+---
+
+## 🗂️ V4.0 快速开始（已废弃，仅供参考）
+
+⚠️ **以下内容为 V4.0 硬编码评分算法，已在 V5.1 中废弃。**  
+保留此部分仅供了解历史设计思路。
+
+### 基础使用（V4.0）
 
 ```python
 from core.tool.capability import CapabilityRegistry, CapabilityRouter

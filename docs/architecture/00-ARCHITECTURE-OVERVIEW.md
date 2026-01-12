@@ -1,7 +1,7 @@
-# ZenFlux Agent V5.1 架构文档
+# ZenFlux Agent V6.0 架构文档
 
-> 📅 **最后更新**: 2026-01-11  
-> 🎯 **当前版本**: V5.1 - Mem0 用户画像增强 + 工具分层加载 + 语义推理模块  
+> 📅 **最后更新**: 2026-01-12  
+> 🎯 **当前版本**: V6.0 - Multi-Agent 编排 + Prompt-First 触发 + 状态机 FSM  
 > 🔗 **历史版本**: 已归档至 [`archived/`](./archived/) 目录  
 > ✅ **架构状态**: 生产就绪，端到端验证通过
 
@@ -32,16 +32,23 @@
 
 ## 版本概述
 
-### V5.1 核心特性
+### V6.0 核心特性
 
-V5.1 是 V5.0 基础上的**功能增强版本**，核心变化：
+V6.0 是 ZenFlux Agent 的**多智能体编排版本**，核心变化：
 
-1. **Mem0 用户画像增强**：新增 `core/memory/mem0/schemas/` 多层用户画像结构（UserPersona、PlanSummary、行为/情感分析）
-2. **工具分层加载**：新增 `core/tool/loader.py` 统一管理三类工具（通用工具、MCP 工具、Claude Skills）
-3. **语义推理模块**：新增 `core/inference/` 模块，所有推理通过 LLM 语义完成
-4. **后台任务增强**：`utils/background_tasks.py` 新增 Mem0 增量更新、批量处理等功能
-5. **HITL 确认管理**：`core/confirmation_manager.py` 完善人机协作确认流程
-6. **工作区管理**：`core/workspace_manager.py` 管理 conversation 级别的文件工作区
+1. **🆕 Multi-Agent 编排**：新增 `core/multi_agent/` 模块，支持任务分解、并行执行、结果聚合
+2. **🆕 Prompt-First 触发**：Multi-Agent 触发由 LLM 意图分析决定（`needs_multi_agent`），而非硬编码关键词
+3. **🆕 FSM 状态机**：任务执行建模为有限状态机（Pending → Decomposing → Executing → Aggregating → Completed）
+4. **🆕 多类型 Worker**：支持 AgentWorker、MCPWorker、WorkflowWorker、SkillWorker 等多种执行后端
+5. **🆕 Service 层路由**：Multi-Agent vs SimpleAgent 路由决策在 `ChatService` 层，保持 Agent 层纯粹
+
+### V5.1 继承特性
+
+1. **Mem0 用户画像增强**：`core/memory/mem0/schemas/` 多层用户画像结构
+2. **工具分层加载**：`core/tool/loader.py` 统一管理三类工具
+3. **语义推理模块**：`core/inference/` 模块
+4. **HITL 确认管理**：`core/confirmation_manager.py`
+5. **工作区管理**：`core/workspace_manager.py`
 
 ### V5.0 核心特性（继承）
 
@@ -142,7 +149,7 @@ E2B 沙箱集成       → Skills/Tools 分层   → Prompt-First        → 工
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│                         ZenFlux Agent V5.0                            │
+│                         ZenFlux Agent V6.0                            │
 ├──────────────────────────────────────────────────────────────────────┤
 │                                                                       │
 │  ┌────────────────────────────────────────────────────────────────┐ │
@@ -155,29 +162,39 @@ E2B 沙箱集成       → Skills/Tools 分层   → Prompt-First        → 工
 │  │         └─────────────┬───────────────┘                         │ │
 │  │                       ▼                                         │ │
 │  │  ┌─────────────────────────────────────────────────────────┐   │ │
-│  │  │              services/ 业务逻辑层                        │   │
-│  │  │  • chat_service.py                                      │   │
-│  │  │  • conversation_service.py                              │   │
-│  │  │  • mem0_service.py                                      │   │
-│  │  │  （只写一次，被 HTTP 和 gRPC 复用）                     │   │
-│  │  └──────────────────────────┬──────────────────────────────┘   │ │
+│  │  │              services/ 业务逻辑层                        │   │ │
+│  │  │  • chat_service.py  ← 🆕 Multi-Agent 路由决策在此！      │   │ │
+│  │  │  • conversation_service.py                              │   │ │
+│  │  │  • mem0_service.py                                      │   │ │
+│  │  │  （路由决策：SimpleAgent vs MultiAgentOrchestrator）     │   │ │
+│  │  └────────────────────┬────────────────────────────────────┘   │ │
 │  └────────────────────────────────────────────────────────────────┘ │
 │                                │                                     │
-│                                ▼                                     │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │                    SimpleAgent（编排层）                      │  │
-│  │  ┌──────────────────────────────────────────────────────────┐│  │
-│  │  │ InstancePromptCache（启动时加载，运行时复用）             ││  │
-│  │  │  • system_prompt_simple/medium/complex                   ││  │
-│  │  │  • intent_prompt                                         ││  │
-│  │  │  • prompt_schema + agent_schema                          ││  │
-│  │  └──────────────────────────────────────────────────────────┘│  │
-│  │                                                              │  │
-│  │  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌──────────┐│  │
-│  │  │IntentAnalyzer│ContextMgr │ ToolSelector│ │EventMgr  ││  │
-│  │  └────────────┘ └────────────┘ └────────────┘ └──────────┘│  │
-│  └──────────────────────────────────────────────────────────────┘  │
-│                                │                                     │
+│              ┌─────────────────┴─────────────────┐                  │
+│              ▼                                   ▼                  │
+│  ┌─────────────────────────┐    ┌────────────────────────────────┐ │
+│  │  SimpleAgent（单智能体） │    │ MultiAgentOrchestrator（多智能体）│ │
+│  │  ┌─────────────────────┐│    │  ┌──────────────────────────┐  │ │
+│  │  │InstancePromptCache  ││    │  │ FSM（状态机编排）        │  │ │
+│  │  │ • system_prompt     ││    │  │ • Pending → Decomposing  │  │ │
+│  │  │ • intent_prompt     ││    │  │ • Thinking → Acting     │  │ │
+│  │  └─────────────────────┘│    │  │ • Observing → Finished  │  │ │
+│  │  ┌─────────────────────┐│    │  └──────────────────────────┘  │ │
+│  │  │IntentAnalyzer       ││    │  ┌──────────────────────────┐  │ │
+│  │  │ToolSelector         ││    │  │ TaskDecomposer（LLM分解）│  │ │
+│  │  │ContextManager       ││    │  │ WorkerScheduler（调度器）│  │ │
+│  │  │EventManager         ││    │  │ ResultAggregator（聚合器）│  │ │
+│  │  └─────────────────────┘│    │  └──────────────────────────┘  │ │
+│  │                         │    │  ┌──────────────────────────┐  │ │
+│  │  职责：单任务 RVR 循环  │    │  │ Workers（多类型支持）    │  │ │
+│  │                         │    │  │ • AgentWorker（子Agent）│  │ │
+│  └─────────────────────────┘    │  │ • MCPWorker（外部MCP）  │  │ │
+│                                  │  │ • WorkflowWorker（Dify）│  │ │
+│                                  │  │ • SkillWorker（Skills） │  │ │
+│                                  │  └──────────────────────────┘  │ │
+│                                  └────────────────────────────────┘ │
+│              │                                   │                  │
+│              └─────────────────┬─────────────────┘                  │
 │                                ▼                                     │
 │  ┌──────────────────────────────────────────────────────────────┐  │
 │  │                      Memory 三层系统                          │  │
@@ -186,9 +203,6 @@ E2B 沙箱集成       → Skills/Tools 分层   → Prompt-First        → 工
 │  │  └──────────────────────────────────────────────────────────┘│  │
 │  │  ┌──────────────────────────────────────────────────────────┐│  │
 │  │  │ 用户级：Episodic/Preference/Plan/E2B/Mem0               ││  │
-│  │  │   • Episodic（历史经验）• Preference（偏好）            ││  │
-│  │  │   • PlanMemory（跨Session）• E2BMemory（沙箱）          ││  │
-│  │  │   • Mem0（用户画像，可选）                               ││  │
 │  │  └──────────────────────────────────────────────────────────┘│  │
 │  │  ┌──────────────────────────────────────────────────────────┐│  │
 │  │  │ 系统级：Skill（注册表）• Cache（系统缓存）               ││  │
@@ -206,6 +220,52 @@ E2B 沙箱集成       → Skills/Tools 分层   → Prompt-First        → 工
 │                                                                      │
 └──────────────────────────────────────────────────────────────────────┘
 ```
+
+### 🆕 V6.0 Multi-Agent 路由架构
+
+**关键设计原则**：Multi-Agent 路由决策在 `services/` 层，不在 Agent 层！
+
+```
+用户请求
+    │
+    ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                   ChatService._run_agent()                       │
+│                                                                  │
+│  1. 意图分析 (IntentAnalyzer.analyze)                           │
+│     → 返回 IntentResult.needs_multi_agent (LLM Prompt-First)    │
+│                                                                  │
+│  2. Multi-Agent 路由决策                                         │
+│     ┌─────────────────────────────────────────────────────────┐ │
+│     │ if mode == DISABLED:                                     │ │
+│     │     should_use_ma = False                                │ │
+│     │ elif mode == ENABLED:                                    │ │
+│     │     should_use_ma = True                                 │ │
+│     │ else:  # AUTO                                            │ │
+│     │     should_use_ma = intent_result.needs_multi_agent      │ │
+│     └─────────────────────────────────────────────────────────┘ │
+│                                                                  │
+│  3. 执行路径选择                                                 │
+│     ┌──────────────────┐  ┌─────────────────────────────────┐  │
+│     │ should_use_ma=F  │  │ should_use_ma=T                  │  │
+│     │       ↓          │  │       ↓                          │  │
+│     │ SimpleAgent      │  │ _execute_multi_agent()           │  │
+│     │   .chat()        │  │   → MultiAgentOrchestrator       │  │
+│     │   （单任务RVR）  │  │   → 任务分解 → Worker调度 → 聚合 │  │
+│     └──────────────────┘  └─────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**为什么路由在 Service 层而非 Agent 层？**
+
+| 层次 | 职责 | 为什么不在这里做路由？ |
+|------|------|----------------------|
+| **routers/** | HTTP/gRPC 协议处理 | ❌ 不应包含业务逻辑 |
+| **services/** | **业务逻辑** | ✅ **路由决策是业务逻辑，应在此层！** |
+| **SimpleAgent** | 单任务编排 | ❌ 只做单任务 RVR 循环，不应知道 Multi-Agent 存在 |
+| **MultiAgentOrchestrator** | 多任务编排 | ❌ 不应知道何时被调用 |
+
+**代码入口**：`services/chat_service.py` → `_run_agent()`
 
 ### 启动阶段
 
@@ -1523,6 +1583,97 @@ memory:
 - **capabilities.yaml**：能力配置（工具注册、分类定义）
 - **llm_config/**：LLM 配置（多提供商支持）
 - **storage.yaml**：存储配置（数据库、向量数据库）
+
+### LLM 超参数配置（`config/llm_config/`）
+
+项目中所有 LLM 调用点的超参数已统一配置化，开发人员可在 `profiles.yaml` 中集中管理，无需修改代码。
+
+**目录结构**：
+
+```
+config/llm_config/
+├── profiles.yaml           # LLM 配置文件（主文件）
+├── profiles.example.yaml   # 配置示例
+├── loader.py               # 配置加载器
+├── __init__.py             # 模块导出接口
+└── README.md               # 详细使用说明
+```
+
+**配置文件结构**（`profiles.yaml`）：
+
+```yaml
+profiles:
+  profile_name:
+    description: "Profile 用途说明"
+    model: "claude-sonnet-4-5-20250929"
+    max_tokens: 64000
+    temperature: 1.0
+    enable_thinking: true
+    thinking_budget: 10000
+    enable_caching: false
+    timeout: 120.0
+    max_retries: 3
+```
+
+**已配置的 LLM 调用点**：
+
+| Profile 名称 | 调用位置 | 用途 | 模型 |
+|-------------|---------|------|------|
+| `main_agent` | `core/agent/simple_agent.py` | 主 Agent 对话 | Sonnet |
+| `intent_analyzer` | `core/agent/intent_analyzer.py` | 意图分析 | Haiku |
+| `semantic_inference` | `core/inference/semantic_inference.py` | 语义推理 | Haiku |
+| `llm_analyzer` | `core/prompt/llm_analyzer.py` | 提示词分析 | Haiku |
+| `schema_generator` | `core/agent/factory.py` | Schema 生成 | Haiku |
+| `tool_capability_inference` | `core/tool/instance_registry.py` | 工具能力推断 | Haiku |
+| `background_task` | `utils/background_tasks.py` | 后台任务 | Haiku |
+| `fragment_extractor` | `core/memory/mem0/extractor.py` | Dazee 碎片记忆提取 | Haiku |
+| `behavior_analyzer` | `core/memory/mem0/analyzer.py` | Dazee 行为分析 | Haiku |
+| `plan_manager` | `tools/plan_todo_tool.py` | 计划管理 | Sonnet |
+
+**参数说明**：
+
+| 参数 | 类型 | 说明 | 推荐值 |
+|------|------|------|--------|
+| `model` | string | 模型名称 | Sonnet（复杂任务）/ Haiku（简单任务） |
+| `max_tokens` | int | 最大输出 token 数 | 100-500（简单）/ 2048-64000（复杂） |
+| `temperature` | float | 温度参数（0-1） | 0（结构化输出）/ 0.7-1.0（创意） |
+| `enable_thinking` | bool | 是否启用 Extended Thinking | 仅 Sonnet 支持 |
+| `thinking_budget` | int | Thinking token 预算 | 5000-10000 |
+| `timeout` | float | 请求超时时间（秒） | 30-120 |
+| `max_retries` | int | 最大重试次数 | 1-3 |
+
+**使用方法**：
+
+```python
+from config.llm_config import get_llm_profile
+from core.llm import create_llm_service
+
+# 获取配置
+profile = get_llm_profile("semantic_inference")
+
+# 创建 LLM 服务
+llm = create_llm_service(**profile)
+
+# 覆盖部分参数
+profile = get_llm_profile("semantic_inference", max_tokens=1000)
+```
+
+**环境变量覆盖**（优先级高于 YAML）：
+
+```bash
+# 格式：LLM_<PROFILE_NAME>_<PARAMETER>=<VALUE>
+export LLM_SEMANTIC_INFERENCE_MAX_TOKENS=1000
+export LLM_SEMANTIC_INFERENCE_TEMPERATURE=0.3
+```
+
+**热更新**（修改 YAML 后无需重启）：
+
+```python
+from config.llm_config import reload_config
+reload_config()  # 刷新配置缓存
+```
+
+**详细文档**：[`config/llm_config/README.md`](../../config/llm_config/README.md)
 
 ---
 

@@ -91,7 +91,8 @@ class IntentAnalyzer:
             f"complexity={result.complexity.value}, "
             f"needs_plan={result.needs_plan}, "
             f"needs_persistence={result.needs_persistence}, "
-            f"skip_memory={result.skip_memory_retrieval}"
+            f"skip_memory={result.skip_memory_retrieval}, "
+            f"needs_multi_agent={result.needs_multi_agent}"
         )
         
         return result
@@ -215,9 +216,20 @@ class IntentAnalyzer:
                 system=intent_prompt
             )
             
-            # 解析响应
+            # 解析响应内容（处理 Claude API 的 content blocks 格式）
+            response_text = response.content
+            if isinstance(response_text, list):
+                # Claude API 格式: [{"type": "text", "text": "..."}]
+                text_parts = []
+                for block in response_text:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        text_parts.append(block.get("text", ""))
+                    elif hasattr(block, "text"):
+                        text_parts.append(block.text)
+                response_text = "".join(text_parts)
+            
             last_user_text = self._extract_last_user_text(messages)
-            return self._parse_llm_response(response.content, last_user_text)
+            return self._parse_llm_response(response_text, last_user_text)
             
         except Exception as e:
             logger.warning(f"LLM 意图分析失败: {e}，使用保守默认值")
@@ -243,6 +255,7 @@ class IntentAnalyzer:
         complexity = Complexity.MEDIUM
         needs_plan = True
         skip_memory_retrieval = False
+        needs_multi_agent = False  # 🆕 V6.0: 默认不需要 Multi-Agent
         
         # 使用 JSON 提取器解析 LLM 响应
         parsed = extract_json(content)
@@ -267,6 +280,9 @@ class IntentAnalyzer:
             
             # 解析 skip_memory_retrieval
             skip_memory_retrieval = parsed.get("skip_memory_retrieval", False)
+            
+            # 🆕 V6.0: 解析 needs_multi_agent
+            needs_multi_agent = parsed.get("needs_multi_agent", False)
         else:
             logger.warning(f"无法从 LLM 响应中提取 JSON: {content[:100]}...")
         
@@ -275,6 +291,7 @@ class IntentAnalyzer:
             complexity=complexity,
             needs_plan=needs_plan,
             skip_memory_retrieval=skip_memory_retrieval,
+            needs_multi_agent=needs_multi_agent,
             keywords=[],  # V5.0: 不再提取关键词
             raw_response=content
         )
@@ -284,6 +301,7 @@ class IntentAnalyzer:
         获取保守默认值
         
         V5.0 策略：不做关键词猜测，使用安全默认值
+        🆕 V6.0: 默认不需要 Multi-Agent
         
         Returns:
             IntentResult（保守默认值）
@@ -294,6 +312,7 @@ class IntentAnalyzer:
             complexity=Complexity.MEDIUM,
             needs_plan=True,
             skip_memory_retrieval=False,
+            needs_multi_agent=False,  # 🆕 V6.0: 默认不需要
             keywords=[],
             confidence=0.3  # 低置信度，标记这是默认值
         )

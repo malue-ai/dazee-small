@@ -61,6 +61,9 @@ logger = logging.getLogger(__name__)
 SKILLS_LIBRARY_PATH = Path(__file__).parent.parent / "skills" / "library"
 CAPABILITIES_FILE = Path(__file__).parent.parent / "config" / "capabilities.yaml"
 
+# Level 1 核心工具（始终注入，不受过滤影响）
+CORE_TOOLS = ["plan_todo", "api_calling", "request_human_confirmation", "file_read"]
+
 
 def get_registered_skills_from_config() -> List[Dict[str, Any]]:
     """
@@ -229,7 +232,14 @@ def _parse_skill_md(skill_md_path: Path) -> Optional[Dict[str, Any]]:
 
 def match_skills_for_query(query: str, skills: List[Dict]) -> List[Dict]:
     """
-    根据用户查询匹配最相关的 Skills
+    ⚠️ 废弃警告（V5.1）：硬编码关键词匹配已移除
+    
+    根据用户查询匹配最相关的 Skills（简化版）
+    
+    V5.1 设计原则：
+    - ❌ 不再使用硬编码关键词规则（违背 Prompt-First 原则）
+    - ✅ 仅保留简单的标签和名称匹配
+    - ✅ 最终选择由 LLM 语义理解决定
     
     Args:
         query: 用户原始查询
@@ -241,14 +251,6 @@ def match_skills_for_query(query: str, skills: List[Dict]) -> List[Dict]:
     if not skills:
         return []
     
-    # 关键词匹配规则
-    keyword_patterns = {
-        "ppt": ["ppt", "演示", "presentation", "幻灯片", "slides"],
-        "excel": ["excel", "表格", "xlsx", "数据分析", "spreadsheet"],
-        "word": ["word", "文档", "document", "doc", "报告"],
-        "planning": ["计划", "规划", "plan", "任务", "todo"]
-    }
-    
     query_lower = query.lower()
     matched = []
     
@@ -258,19 +260,18 @@ def match_skills_for_query(query: str, skills: List[Dict]) -> List[Dict]:
         skill_name = skill.get("name", "").lower()
         skill_desc = skill.get("description", "").lower()
         
+        # 简单匹配：标签和名称
         # 1. 直接标签匹配
         for tag in skill_tags:
             if tag in query_lower:
                 score += 10
         
-        # 2. 关键词模式匹配
-        for pattern_name, keywords in keyword_patterns.items():
-            if any(kw in query_lower for kw in keywords):
-                if any(kw in skill_name or kw in ' '.join(skill_tags) for kw in keywords):
-                    score += 5
+        # 2. 名称匹配
+        if any(word in skill_name for word in query_lower.split()):
+            score += 5
         
-        # 3. 名称/描述相关性
-        if any(word in skill_desc for word in query_lower.split()):
+        # 3. 描述相关性（保守）
+        if any(word in skill_desc for word in query_lower.split() if len(word) > 2):
             score += 2
         
         if score > 0:
@@ -404,13 +405,171 @@ def match_tools_for_query(query: str, tools: List[Dict]) -> List[Dict]:
     return matched[:5]  # 返回 top 5
 
 
-# ===== 计划生成 Prompt =====
+def filter_tools_by_task_type(
+    task_type,  # TaskType enum
+    all_tools: List[Dict],
+    task_type_mappings: Dict[str, List[str]]
+) -> List[Dict]:
+    """
+    基于意图识别的 task_type 过滤相关工具（V5.1 上下文工程）
+    
+    重要：Level 1 核心工具始终包含，不受过滤影响
+    
+    设计原则：
+    - 第一层：Level 1 核心工具（plan_todo 等）始终注入
+    - 第二层：基于 task_type 过滤 Level 2 动态工具
+    - 避免无关工具污染上下文
+    - 所有工具信息（包括 priority）客观注入，由 LLM 自主判断
+    
+    Args:
+        task_type: IntentAnalyzer 输出的任务类型（TaskType enum）
+        all_tools: 所有可用工具（从 discover_all_tools()）
+        task_type_mappings: capabilities.yaml 中的 task_type_mappings
+        
+    Returns:
+        工具列表 = Level 1 核心工具 + 与 task_type 相关的 Level 2 工具
+        
+    Example:
+        >>> from core.agent.types import TaskType
+        >>> filtered = filter_tools_by_task_type(
+        ...     task_type=TaskType.CONTENT_GENERATION,
+        ...     all_tools=all_tools,
+        ...     task_type_mappings=mappings
+        ... )
+        >>> # 结果包含：plan_todo, api_calling, ... (Level 1) + ppt_generator, docx, ... (Level 2)
+    """
+    result = []
+    
+    # 1. 🔹 始终添加 Level 1 核心工具（不受 task_type 影响）
+    for tool in all_tools:
+        tool_name = tool.get("name", "")
+        tool_level = tool.get("level", 2)
+        
+        if tool_name in CORE_TOOLS or tool_level == 1:
+            result.append(tool)
+            logger.debug(f"  ✅ Level 1 核心工具: {tool_name}")
+    
+    # 2. 🔹 基于 task_type 过滤 Level 2 动态工具
+    if task_type:
+        # 获取 task_type 对应的能力类别
+        task_type_value = task_type.value if hasattr(task_type, 'value') else str(task_type)
+        capability_ids = task_type_mappings.get(task_type_value, [])
+        
+        logger.info(f"🎯 task_type={task_type_value}, 对应能力: {capability_ids}")
+        
+        for tool in all_tools:
+            tool_level = tool.get("level", 2)
+            tool_capability = tool.get("capability", "")
+            tool_name = tool.get("name", "")
+            
+            # 只过滤 Level 2 工具
+            if tool_level == 2 and tool_capability in capability_ids:
+                if tool not in result:
+                    result.append(tool)
+                    logger.debug(f"  ✅ Level 2 匹配工具: {tool_name} (capability={tool_capability})")
+    
+    # 3. Fallback：如果没有匹配到 Level 2 工具，添加通用搜索
+    level2_count = sum(1 for t in result if t.get("level", 2) == 2)
+    if level2_count == 0:
+        logger.warning("⚠️ 未匹配到 Level 2 工具，添加通用搜索作为 fallback")
+        for tool in all_tools:
+            if tool.get("capability") == "web_search":
+                if tool not in result:
+                    result.append(tool)
+                    logger.debug(f"  ✅ Fallback 工具: {tool.get('name')}")
+    
+    logger.info(f"✅ 过滤后工具数: {len(result)} (Level 1: {len(result) - level2_count}, Level 2: {level2_count})")
+    
+    return result
+
+
+def build_tools_reference_for_prompt(tools: List[Dict]) -> str:
+    """
+    构建工具参考信息（用于 Prompt 注入）（V5.1 LLM 语义工具选择）
+    
+    设计原则：
+    - 一切以系统提示词和大模型为中心
+    - 客观呈现所有工具信息（description、preferred_for、priority 等）
+    - 不在代码中定义"priority 是次要参考"（这本身是硬规则）
+    - LLM 自主理解和权衡所有因素
+    - 系统提示词有明确指令时，LLM 会优先遵守
+    
+    Args:
+        tools: 过滤后的工具列表（包含 Level 1 + Level 2）
+        
+    Returns:
+        格式化的工具参考信息（Markdown 格式）
+        
+    Example:
+        >>> tools_ref = build_tools_reference_for_prompt(filtered_tools)
+        >>> # 输出格式：
+        >>> # ### plan_todo
+        >>> # - 功能: 任务规划工具
+        >>> # - 适用场景: 复杂任务分解、步骤管理
+        >>> # - 优先级: 100
+    """
+    if not tools:
+        return "（无可用工具）"
+    
+    lines = []
+    
+    # 分组：Level 1 核心工具 和 Level 2 动态工具
+    level1_tools = [t for t in tools if t.get("level", 2) == 1 or t.get("name") in CORE_TOOLS]
+    level2_tools = [t for t in tools if t.get("level", 2) == 2 and t.get("name") not in CORE_TOOLS]
+    
+    # Level 1 核心工具
+    if level1_tools:
+        lines.append("### 🔹 Level 1 核心工具（始终可用）\n")
+        for tool in level1_tools:
+            tool_name = tool.get("name", "unknown")
+            tool_desc = tool.get("description", "")
+            tool_preferred = tool.get("preferred_for", "通用")
+            tool_priority = tool.get("priority", 50)
+            
+            lines.append(f"**{tool_name}**")
+            lines.append(f"- 功能: {tool_desc}")
+            lines.append(f"- 适用场景: {tool_preferred}")
+            lines.append(f"- 优先级: {tool_priority}\n")
+    
+    # Level 2 动态工具（按 priority 排序展示）
+    if level2_tools:
+        lines.append("### 🔹 Level 2 动态工具（根据任务过滤）\n")
+        # 按 priority 排序（方便 LLM 阅读）
+        sorted_tools = sorted(level2_tools, key=lambda t: t.get("priority", 50), reverse=True)
+        
+        for tool in sorted_tools:
+            tool_name = tool.get("name", "unknown")
+            tool_desc = tool.get("description", "")
+            tool_preferred = tool.get("preferred_for", "通用")
+            tool_priority = tool.get("priority", 50)
+            
+            lines.append(f"**{tool_name}**")
+            lines.append(f"- 功能: {tool_desc}")
+            lines.append(f"- 适用场景: {tool_preferred}")
+            lines.append(f"- 优先级: {tool_priority}\n")
+    
+    return "\n".join(lines)
+
+
+# ===== 计划生成 Prompt（V5.1 LLM 语义工具选择）=====
 PLAN_GENERATION_PROMPT = """你是一个专业的任务规划专家。请根据用户的需求，生成一个详细且可执行的任务计划。
 
-## 输入信息
-- 用户需求: {user_query}
-- 可用能力: {capabilities}
-{skills_section}
+## 用户需求
+{user_query}
+
+## 可用工具
+以下是与当前任务相关的工具，每个工具包含：功能描述、适用场景、优先级等信息。
+
+{tools_reference}
+
+## 工具选择原则
+
+请根据以下信息综合判断并选择最合适的工具：
+- **功能描述**：工具能做什么
+- **适用场景**：工具最适合用于哪些场景
+- **优先级**：工具的推荐程度（数值越高表示越推荐）
+
+**如果系统提示词中有明确的工具使用指令，请优先遵守系统提示词。**
 
 ## 输出格式要求
 请以 JSON 格式输出计划，严格遵循以下结构：
@@ -418,18 +577,16 @@ PLAN_GENERATION_PROMPT = """你是一个专业的任务规划专家。请根据�
 ```json
 {{
     "goal": "任务目标的简洁描述",
-    "recommended_skill": {{
-        "name": "匹配的 Skill 名称（如果有）",
-        "skill_id": "Skill 的注册 ID（如果已注册）",
-        "reason": "为什么推荐使用这个 Skill"
+    "recommended_tool": {{
+        "name": "匹配的工具名称（如果有）",
+        "reason": "为什么推荐使用这个工具（说明匹配的理由）"
     }},
     "information_gaps": ["缺失的信息1", "缺失的信息2"],
     "steps": [
         {{
             "action": "具体要执行的动作描述",
             "capability": "所需的能力分类",
-            "skill_hint": "如果这一步应使用 Skill，填写 Skill 名称",
-            "skill_id": "对应的 skill_id（如果有）",
+            "tool_hint": "如果这一步应使用特定工具，填写工具名称",
             "purpose": "这一步的目的",
             "expected_output": "预期产出"
         }}
@@ -438,16 +595,11 @@ PLAN_GENERATION_PROMPT = """你是一个专业的任务规划专家。请根据�
 ```
 
 ## 规划原则
-1. **Skill 优先**：如果有匹配的专业 Skill，优先使用 Skill 而非通用工具
-2. 步骤要具体、可执行
-3. 每个步骤只做一件事
-4. 步骤之间要有逻辑顺序
-5. 如果信息不足，在 information_gaps 中列出
-
-## Skill 使用指引
-- 如果匹配到 Skill，在 `recommended_skill` 中指定
-- 在相关步骤的 `skill_hint` 中标注应使用的 Skill
-- Skill 会在执行阶段被自动激活
+1. 步骤要具体、可执行
+2. 每个步骤只做一件事
+3. 步骤之间要有逻辑顺序
+4. 如果信息不足，在 information_gaps 中列出
+5. 综合考虑工具的功能、适用场景和优先级，选择最合适的工具
 
 请直接输出 JSON，不要添加其他说明。"""
 
@@ -715,6 +867,37 @@ class PlanTodoTool:
             logger.error(f"❌ PlanTodoTool 执行失败: {e}", exc_info=True)
             return {"status": "error", "message": str(e)}
     
+    def _load_task_type_mappings(self) -> Dict[str, List[str]]:
+        """
+        从 capabilities.yaml 加载 task_type_mappings
+        
+        🆕 V5.1: LLM 语义工具选择
+        
+        Returns:
+            task_type_mappings 字典
+            {
+                "content_generation": ["ppt_generation", "document_creation", ...],
+                "information_query": ["web_search", "news_search", ...],
+                ...
+            }
+        """
+        try:
+            import yaml
+            if CAPABILITIES_FILE.exists():
+                with open(CAPABILITIES_FILE, 'r', encoding='utf-8') as f:
+                    config = yaml.safe_load(f)
+                    return config.get('task_type_mappings', {})
+        except Exception as e:
+            logger.warning(f"⚠️ 加载 task_type_mappings 失败: {e}")
+        
+        # Fallback: 返回默认映射
+        return {
+            "information_query": ["web_search", "news_search"],
+            "content_generation": ["ppt_generation", "document_creation"],
+            "data_analysis": ["data_analysis", "data_visualization"],
+            "other": ["web_search"]
+        }
+    
     def _persist_plan(self, plan: Dict) -> None:
         """
         持久化计划到 PlanMemory
@@ -803,12 +986,19 @@ class PlanTodoTool:
         
         return self._memory_manager.plan.has_persistent_plan(task_id)
     
-    async def _create_plan_smart(self, data: Dict) -> Dict:
+    async def _create_plan_smart(self, data: Dict, intent_result=None) -> Dict:
         """
         智能创建任务计划（调用 Claude + Extended Thinking）
         
+        🆕 V5.1: LLM 语义工具选择
+        - 接收 intent_result 参数，基于 task_type 过滤工具
+        - 客观呈现所有工具信息（description、preferred_for、priority）
+        - 让 LLM 自主理解和权衡所有因素
+        - 系统提示词有明确指令时，LLM 会优先遵守
+        
         Args:
             data: {user_query, goal?, steps?}
+            intent_result: Optional[IntentResult] - 意图识别结果（用于工具过滤）
             
         Returns:
             {status, plan, message}
@@ -823,53 +1013,39 @@ class PlanTodoTool:
         if not user_query:
             return {"status": "error", "message": "user_query is required for smart plan generation"}
         
-        # 获取可用能力列表
-        capabilities = []
-        if self._registry and hasattr(self._registry, 'get_category_ids'):
-            capabilities = self._registry.get_category_ids()
-        if not capabilities:
-            capabilities = [
-                "web_search", "ppt_generation", "document_creation",
-                "data_analysis", "file_operations", "code_execution",
-                "code_sandbox", "app_generation", "api_calling", "task_planning"
-            ]
+        # 🆕 V5.1: 获取所有可用工具
+        all_tools = discover_all_tools()
         
-        # 🆕 V4.4 修正: Plan 阶段只发现 Skills（用于 skill_id 匹配）
-        # 不获取所有具体工具，避免上下文过长
-        # 具体工具在执行阶段根据 Plan 步骤的 capability 动态选择
-        all_skills = discover_skills()
-        matched_skills = match_skills_for_query(user_query, all_skills)
-        
-        # 构建 Skills 信息段落
-        skills_section = ""
-        if matched_skills:
-            skills_list = "\n".join([
-                SKILL_ITEM_TEMPLATE.format(
-                    name=s["name"],
-                    skill_id=s.get("skill_id") or "未注册（请运行 skill_cli.py register）",
-                    description=s.get("description", ""),
-                    tags=", ".join(s.get("tags", [])),
-                    summary=s.get("summary", "")[:200]
+        # 🆕 V5.1: 基于 task_type 过滤工具（避免上下文污染）
+        filtered_tools = all_tools
+        if intent_result and hasattr(intent_result, 'task_type') and intent_result.task_type:
+            try:
+                task_type_mappings = self._load_task_type_mappings()
+                filtered_tools = filter_tools_by_task_type(
+                    task_type=intent_result.task_type,
+                    all_tools=all_tools,
+                    task_type_mappings=task_type_mappings
                 )
-                for s in matched_skills
-            ])
-            skills_section = SKILLS_SECTION_TEMPLATE.format(skills_list=skills_list)
-            registered_count = sum(1 for s in matched_skills if s.get("skill_id"))
-            logger.info(f"🎯 匹配到 {len(matched_skills)} 个 Skills（{registered_count} 个已注册）: {[s['name'] for s in matched_skills]}")
+                logger.info(f"🎯 task_type={intent_result.task_type.value}, "
+                            f"过滤后工具数: {len(filtered_tools)}/{len(all_tools)}")
+            except Exception as e:
+                logger.warning(f"⚠️ 工具过滤失败，使用全部工具: {e}")
+                filtered_tools = all_tools
         else:
-            logger.info("ℹ️ 未匹配到专业 Skill，将使用通用工具")
+            logger.info("ℹ️ 未提供 intent_result，使用全部工具")
         
-        # 构建 Prompt（包含 Skill 信息）
+        # 🆕 V5.1: 构建工具参考信息（注入 Prompt）
+        tools_reference = build_tools_reference_for_prompt(filtered_tools)
+        
+        # 构建 Prompt
         prompt = PLAN_GENERATION_PROMPT.format(
             user_query=user_query,
-            capabilities=", ".join(capabilities),
-            skills_section=skills_section
+            tools_reference=tools_reference
         )
         
         logger.info(f"🧠 调用 Claude + Extended Thinking 生成计划...")
         logger.info(f"   用户需求: {user_query[:100]}...")
-        if matched_skills:
-            logger.info(f"   推荐 Skills: {[s['name'] for s in matched_skills]}")
+        logger.info(f"   注入工具数: {len(filtered_tools)} (Level 1 + Level 2)")
         
         try:
             # 调用 Claude（启用 Extended Thinking）
@@ -894,10 +1070,10 @@ class PlanTodoTool:
             
             logger.info(f"✅ Claude 生成计划成功: {plan_data.get('goal', '')[:50]}...")
             
-            # 提取推荐的 Skill
-            recommended_skill = plan_data.get("recommended_skill")
-            if recommended_skill:
-                logger.info(f"🎯 推荐使用 Skill: {recommended_skill.get('name')} - {recommended_skill.get('reason', '')[:50]}")
+            # 提取推荐的工具
+            recommended_tool = plan_data.get("recommended_tool")
+            if recommended_tool:
+                logger.info(f"🎯 推荐使用工具: {recommended_tool.get('name')} - {recommended_tool.get('reason', '')[:50]}")
             
             # 使用生成的数据创建计划
             return self._create_plan_from_data({
@@ -905,8 +1081,8 @@ class PlanTodoTool:
                 "steps": plan_data.get("steps", []),
                 "information_gaps": plan_data.get("information_gaps", []),
                 "user_query": user_query,
-                "recommended_skill": recommended_skill,
-                "matched_skills": matched_skills  # 传递匹配的 Skills
+                "recommended_tool": recommended_tool,
+                "filtered_tools": filtered_tools  # 传递过滤后的工具
             })
             
         except json.JSONDecodeError as e:

@@ -31,6 +31,44 @@ logger = get_logger("instance_loader")
 
 
 @dataclass
+class WorkerConfig:
+    """
+    🆕 V6.0 Worker 配置数据类（Multi-Agent Worker）
+    
+    支持多种 Worker 类型：
+    - agent: 内置 SimpleAgent（默认）
+    - mcp: MCP Server 远程服务
+    - workflow: Coze/Dify 等平台的 Workflow
+    """
+    name: str  # Worker 名称（目录名）
+    specialization: str  # 专业领域：refactor, css, test, general 等
+    worker_type: str = "agent"  # 🆕 Worker 类型：agent / mcp / workflow
+    enabled: bool = True
+    description: str = ""
+    
+    # Agent 类型配置
+    system_prompt: str = ""  # 运行时加载的系统提示词
+    model: Optional[str] = None  # 可覆盖默认模型
+    max_turns: Optional[int] = None  # 可覆盖默认轮次
+    capabilities: List[str] = field(default_factory=list)  # 启用的能力
+    
+    # 🆕 MCP 类型配置
+    server_url: Optional[str] = None  # MCP Server URL
+    server_name: Optional[str] = None
+    auth_type: str = "bearer"  # none / bearer / api_key
+    auth_env: Optional[str] = None  # 认证环境变量
+    
+    # 🆕 Workflow 类型配置
+    platform: Optional[str] = None  # coze / dify / langflow / custom
+    workflow_id: Optional[str] = None  # Workflow ID
+    workflow_url: Optional[str] = None  # Workflow URL
+    base_url: Optional[str] = None  # API 基础 URL
+    timeout: int = 120  # 超时时间（秒）
+    
+    worker_path: Optional[Path] = None  # Worker 目录路径
+
+
+@dataclass
 class SkillConfig:
     """Skill 配置数据类（Claude Skills 官方 API）"""
     name: str
@@ -94,6 +132,13 @@ class InstanceConfig:
     
     # 🆕 通用工具启用配置（从 capabilities.yaml 选择）
     enabled_capabilities: Dict[str, bool] = field(default_factory=dict)
+    
+    # 🆕 V6.0 Workers 配置（Multi-Agent Worker）
+    workers: List[WorkerConfig] = field(default_factory=list)
+    
+    # 🆕 V6.0 Multi-Agent 配置
+    multi_agent_enabled: bool = False  # 是否启用多智能体模式
+    max_concurrent_workers: int = 5  # 最大并发 Worker 数
     
     # 记忆配置
     mem0_enabled: bool = True
@@ -188,6 +233,152 @@ def load_skill_registry(instance_name: str) -> List[SkillConfig]:
     return result
 
 
+def load_workers_config(instance_name: str) -> List[WorkerConfig]:
+    """
+    🆕 V6.0 加载实例的 Workers 配置
+    
+    目录结构：
+    instances/{instance_name}/workers/
+    ├── worker_registry.yaml    # Workers 注册表
+    ├── refactor/               # 重构专家
+    │   ├── prompt.md           # 系统提示词
+    │   └── config.yaml         # Worker 配置（可选）
+    ├── css/                    # CSS 专家
+    │   └── prompt.md
+    └── test/                   # 测试专家
+        └── prompt.md
+    
+    Args:
+        instance_name: 实例名称
+        
+    Returns:
+        WorkerConfig 列表
+    """
+    import yaml
+    
+    workers_dir = get_instances_dir() / instance_name / "workers"
+    
+    if not workers_dir.exists():
+        return []
+    
+    # 方式 1：从 worker_registry.yaml 加载（推荐）
+    registry_path = workers_dir / "worker_registry.yaml"
+    if registry_path.exists():
+        return _load_workers_from_registry(workers_dir, registry_path)
+    
+    # 方式 2：自动发现子目录（兼容模式）
+    return _discover_workers_from_dirs(workers_dir)
+
+
+def _load_workers_from_registry(workers_dir: Path, registry_path: Path) -> List[WorkerConfig]:
+    """从 worker_registry.yaml 加载 Workers（支持多种 Worker 类型）"""
+    import yaml
+    
+    with open(registry_path, "r", encoding="utf-8") as f:
+        registry = yaml.safe_load(f) or {}
+    
+    workers_list = registry.get("workers", [])
+    if not isinstance(workers_list, list):
+        return []
+    
+    result = []
+    for worker_data in workers_list:
+        if not isinstance(worker_data, dict):
+            continue
+        
+        name = worker_data.get("name")
+        if not name:
+            continue
+        
+        # 🆕 获取 Worker 类型
+        worker_type = worker_data.get("type", "agent").lower()
+        
+        # Agent 类型需要加载 prompt.md
+        system_prompt = ""
+        worker_path = workers_dir / name
+        worker_config = {}
+        
+        if worker_type == "agent":
+            # 检查 Worker 目录是否存在
+            if not worker_path.exists():
+                logger.warning(f"⚠️ Agent Worker 目录不存在: {worker_path}")
+                continue
+            
+            # 加载 prompt.md
+            prompt_file = worker_path / "prompt.md"
+            if prompt_file.exists():
+                system_prompt = prompt_file.read_text(encoding="utf-8")
+            else:
+                logger.warning(f"⚠️ Agent Worker 提示词不存在: {prompt_file}")
+            
+            # 加载 Worker 配置（可选）
+            worker_config_path = worker_path / "config.yaml"
+            if worker_config_path.exists():
+                with open(worker_config_path, "r", encoding="utf-8") as f:
+                    worker_config = yaml.safe_load(f) or {}
+        
+        result.append(WorkerConfig(
+            name=name,
+            specialization=worker_data.get("specialization", name),
+            worker_type=worker_type,  # 🆕
+            enabled=worker_data.get("enabled", True),
+            description=worker_data.get("description", ""),
+            # Agent 配置
+            system_prompt=system_prompt,
+            model=worker_config.get("model") or worker_data.get("model"),
+            max_turns=worker_config.get("max_turns") or worker_data.get("max_turns"),
+            capabilities=worker_data.get("capabilities", []),
+            # 🆕 MCP 配置
+            server_url=worker_data.get("server_url"),
+            server_name=worker_data.get("server_name"),
+            auth_type=worker_data.get("auth_type", "bearer"),
+            auth_env=worker_data.get("auth_env"),
+            # 🆕 Workflow 配置
+            platform=worker_data.get("platform"),
+            workflow_id=worker_data.get("workflow_id"),
+            workflow_url=worker_data.get("workflow_url"),
+            base_url=worker_data.get("base_url"),
+            timeout=worker_data.get("timeout", 120),
+            # 路径
+            worker_path=worker_path if worker_type == "agent" else None
+        ))
+    
+    return result
+
+
+def _discover_workers_from_dirs(workers_dir: Path) -> List[WorkerConfig]:
+    """自动发现 Workers 目录（兼容模式）"""
+    result = []
+    
+    for item in workers_dir.iterdir():
+        if not item.is_dir() or item.name.startswith("_"):
+            continue
+        
+        # 检查 prompt.md 是否存在
+        prompt_file = item / "prompt.md"
+        if not prompt_file.exists():
+            continue
+        
+        system_prompt = prompt_file.read_text(encoding="utf-8")
+        
+        # 从目录名推断 specialization
+        name = item.name
+        specialization = name  # 默认使用目录名作为专业领域
+        
+        result.append(WorkerConfig(
+            name=name,
+            specialization=specialization,
+            enabled=True,
+            description=f"自动发现的 {name} Worker",
+            system_prompt=system_prompt,
+            worker_path=item
+        ))
+        
+        logger.info(f"   🔍 自动发现 Worker: {name}")
+    
+    return result
+
+
 def load_instance_config(instance_name: str) -> InstanceConfig:
     """
     加载实例配置
@@ -253,6 +444,18 @@ def load_instance_config(instance_name: str) -> InstanceConfig:
             else:
                 logger.warning(f"⚠️ 工具 {tool_name} 的启用配置值无效: {enabled}，将被忽略")
     
+    # 🆕 V6.0 加载 Workers 配置（Multi-Agent）
+    workers = load_workers_config(instance_name)
+    
+    # 🆕 V6.0 解析 Multi-Agent 配置
+    multi_agent_config = raw_config.get("multi_agent", {})
+    
+    # 判断是否启用 Multi-Agent（根据 mode 字段）
+    mode = multi_agent_config.get("mode", "disabled")
+    multi_agent_enabled = mode in ("auto", "enabled")  # auto 和 enabled 都视为启用
+    
+    max_concurrent_workers = multi_agent_config.get("max_parallel_workers", 5)
+    
     return InstanceConfig(
         name=instance_info.get("name", instance_name),
         description=instance_info.get("description", ""),
@@ -266,6 +469,9 @@ def load_instance_config(instance_name: str) -> InstanceConfig:
         skills=skills,
         apis=apis,
         enabled_capabilities=enabled_capabilities,
+        workers=workers,  # 🆕 V6.0
+        multi_agent_enabled=multi_agent_enabled,  # 🆕 V6.0
+        max_concurrent_workers=max_concurrent_workers,  # 🆕 V6.0
         mem0_enabled=memory_config.get("mem0_enabled", True),
         smart_retrieval=memory_config.get("smart_retrieval", True),
         retention_policy=memory_config.get("retention_policy", "user"),
@@ -502,6 +708,15 @@ async def create_agent_from_instance(
     logger.info(f"   Skills: {len(config.skills)} 个")
     logger.info(f"   APIs: {len(config.apis)} 个")
     
+    # 🆕 V6.0 显示 Workers 和 Multi-Agent 配置
+    enabled_workers = [w for w in config.workers if w.enabled]
+    if config.workers:
+        logger.info(f"   Workers: {len(config.workers)} 个 ({len(enabled_workers)} 启用)")
+        for worker in enabled_workers:
+            logger.info(f"      • {worker.name} ({worker.specialization})")
+    if config.multi_agent_enabled:
+        logger.info(f"   Multi-Agent: 已启用 (最大并发: {config.max_concurrent_workers})")
+    
     # 3. 加载实例提示词
     instance_prompt = load_instance_prompt(instance_name)
     logger.info(f"   提示词长度: {len(instance_prompt)} 字符")
@@ -581,6 +796,15 @@ async def create_agent_from_instance(
     # 不再调用 from_prompt（会触发 LLM Schema 生成）
     # 而是直接使用已经在 InstancePromptCache 中生成好的 Schema
     if prompt_cache.is_loaded and prompt_cache.agent_schema:
+        # 🆕 V6.0: 注入 multi_agent 配置到 AgentSchema
+        if config.multi_agent_enabled:
+            from core.multi_agent.config import MultiAgentConfig
+            
+            multi_agent_config = MultiAgentConfig.from_dict(config.raw_config.get("multi_agent", {}))
+            prompt_cache.agent_schema.multi_agent = multi_agent_config
+            
+            logger.info(f"✅ 注入 multi_agent 配置到 AgentSchema: mode={multi_agent_config.mode.value}")
+        
         agent = AgentFactory.from_schema(
             schema=prompt_cache.agent_schema,
             system_prompt=full_prompt,
@@ -615,6 +839,12 @@ async def create_agent_from_instance(
     if config.max_turns:
         agent.max_turns = config.max_turns
         logger.info(f"   覆盖 max_turns: {config.max_turns}")
+    
+    # 🆕 V6.0: 注入 Workers 配置（供 Multi-Agent 使用）
+    agent.workers_config = config.workers
+    if config.workers:
+        enabled_workers = [w for w in config.workers if w.enabled]
+        logger.info(f"   注入 Workers 配置: {len(enabled_workers)} 个启用")
     
     # 9. 🆕 创建实例级工具注册表
     from core.tool import InstanceToolRegistry, get_capability_registry, create_tool_loader
@@ -1137,6 +1367,29 @@ if __name__ == "__main__":
             for api in config.apis:
                 doc_status = f"文档: {api.doc}" if api.doc else "无文档"
                 print(f"      • {api.name}: {api.base_url} ({doc_status})")
+            
+            # 🆕 V6.0 Workers 信息（Multi-Agent）
+            enabled_workers = [w for w in config.workers if w.enabled]
+            print(f"   Workers: {len(config.workers)} 个 ({len(enabled_workers)} 启用)")
+            for worker in config.workers:
+                status = "✅" if worker.enabled else "⬜"
+                # 根据类型显示不同信息
+                if worker.worker_type == "agent":
+                    prompt_len = len(worker.system_prompt) if worker.system_prompt else 0
+                    info = f"{prompt_len} 字符"
+                elif worker.worker_type == "mcp":
+                    info = f"MCP → {worker.server_url or '未配置'}"
+                elif worker.worker_type == "workflow":
+                    info = f"{worker.platform or 'custom'} → {worker.workflow_id or worker.workflow_url or '未配置'}"
+                else:
+                    info = worker.worker_type
+                print(f"      {status} {worker.name} [{worker.worker_type}] ({worker.specialization}): {info}")
+            
+            # 🆕 V6.0 Multi-Agent 配置
+            ma_status = "启用" if config.multi_agent_enabled else "禁用"
+            print(f"   Multi-Agent: {ma_status}")
+            if config.multi_agent_enabled:
+                print(f"      最大并发 Workers: {config.max_concurrent_workers}")
         except Exception as e:
             print(f"❌ 加载失败: {str(e)}")
     else:

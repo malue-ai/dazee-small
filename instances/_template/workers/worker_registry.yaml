@@ -1,0 +1,185 @@
+# ============================================================
+# Worker 注册表 - Multi-Agent Workers 配置
+# ============================================================
+#
+# 支持 7 种 Worker 类型：
+# 1. agent    - 内置 SimpleAgent（默认）
+# 2. skill    - Claude Skills 专业能力
+# 3. mcp      - MCP Server 远程服务
+# 4. workflow - Coze/Dify 等平台 Workflow
+# 5. sandbox  - E2B/代码执行沙箱
+# 6. subagent - Claude 原生子智能体
+# 7. human    - Human-In-The-Loop 人工介入
+#
+# ============================================================
+
+workers:
+  # ============================================================
+  # 类型 1：Agent Worker（内置 SimpleAgent）
+  # ============================================================
+  #
+  # 使用 ZenFlux 的 SimpleAgent 作为 Worker
+  # prompt.md 定义其专业能力
+  #
+  - name: refactor
+    type: agent            # 默认类型，可省略
+    specialization: refactor
+    enabled: true
+    description: "代码重构专家，专注于改善代码结构和质量"
+    # system_prompt 从 workers/refactor/prompt.md 自动加载
+    capabilities:
+      - file_operations
+      - code_execution
+
+  - name: css
+    type: agent
+    specialization: css
+    enabled: true
+    description: "CSS 样式专家"
+
+  - name: test
+    type: agent
+    specialization: test
+    enabled: true
+    description: "单元测试专家"
+
+  # ============================================================
+  # 类型 2：Skill Worker（Claude Skills）
+  # ============================================================
+  #
+  # 使用预定义的 Claude Skills 作为专业 Worker
+  # Skills 包含优化过的 prompt + few-shot + output schema
+  #
+  # - name: pptx-generator
+  #   type: skill
+  #   specialization: document_creation
+  #   enabled: false
+  #   description: "PPT 生成专家（基于 Claude Skill）"
+  #   skill_id: pptx-generator          # Skill ID（对应 skills/library/pptx-generator）
+  #   # skill_path: "skills/library/pptx-generator"  # 或直接指定路径
+  #   model: claude-sonnet-4-5-20250929
+
+  # - name: xlsx-analyzer
+  #   type: skill
+  #   specialization: data_analysis
+  #   enabled: false
+  #   description: "Excel 数据分析专家（基于 Claude Skill）"
+  #   skill_id: xlsx-analyzer
+
+  # ============================================================
+  # 类型 3：MCP Worker（远程 MCP Server）
+  # ============================================================
+  #
+  # 通过 MCP 协议调用远程服务
+  # 适用于：Dify MCP Server、自建 MCP 服务
+  #
+  # - name: dify-mcp-analyst
+  #   type: mcp
+  #   specialization: data_analysis
+  #   enabled: false
+  #   description: "Dify 数据分析 Workflow（MCP 模式）"
+  #   server_url: "https://api.dify.ai/mcp/server/xxx/mcp"
+  #   server_name: "dify"
+  #   auth_type: bearer
+  #   auth_env: DIFY_API_KEY         # 从环境变量读取
+  #   timeout: 60
+
+  # ============================================================
+  # 类型 4：Workflow Worker（Coze/Dify 平台）
+  # ============================================================
+  #
+  # 调用外部 Workflow 平台的 HTTP API
+  # 适用于：Coze、Dify、Langflow 等
+  #
+
+  # --- Coze Workflow 示例 ---
+  # - name: coze-research
+  #   type: workflow
+  #   platform: coze              # coze / dify / langflow / custom
+  #   specialization: research
+  #   enabled: false
+  #   description: "Coze 研究助手 Workflow"
+  #   workflow_id: "7xxxxxxxxx"   # Coze Workflow ID
+  #   auth_env: COZE_API_KEY      # 从环境变量读取 API Key
+  #   timeout: 120
+
+  # --- Dify Workflow 示例 ---
+  # - name: dify-report
+  #   type: workflow
+  #   platform: dify
+  #   specialization: report_generation
+  #   enabled: false
+  #   description: "Dify 报告生成 Workflow"
+  #   base_url: "https://api.dify.ai"  # Dify API 地址
+  #   auth_env: DIFY_API_KEY
+  #   timeout: 180
+
+  # ============================================================
+  # 类型 5：Sandbox Worker（代码执行沙箱）
+  # ============================================================
+  #
+  # 使用 E2B/Aliyun FC 等执行代码
+  # 适用于：数据分析、文件处理、代码验证
+  #
+  # - name: data-analyst
+  #   type: sandbox
+  #   specialization: data_analysis
+  #   enabled: false
+  #   description: "数据分析专家（E2B 沙箱执行）"
+  #   backend: e2b                 # e2b / aliyun_fc / local
+  #   template: data-science       # E2B 预置模板
+  #   timeout: 300
+  #   model: claude-sonnet-4-5-20250929
+
+  # ============================================================
+  # 类型 6：Subagent Worker（Claude 原生子智能体）
+  # ============================================================
+  #
+  # 利用 Claude 4.5 的原生子智能体编排能力
+  # 适用于：需要隔离上下文、工具密集型任务
+  #
+  # - name: research-subagent
+  #   type: subagent
+  #   specialization: research
+  #   enabled: false
+  #   description: "研究子智能体（独立上下文）"
+  #   delegated_tools:             # 委托给子智能体的工具
+  #     - web_search
+  #     - document_reader
+  #   max_iterations: 5            # 最大工具调用次数
+  #   subagent_prompt: |           # 自定义子智能体提示词（可选）
+  #     你是一个专注于深度研究的子智能体...
+
+  # ============================================================
+  # 类型 7：Human Worker（人工介入）
+  # ============================================================
+  #
+  # 将任务发送给人类专家处理
+  # 适用于：审核、决策、敏感内容处理
+  #
+  # - name: content-reviewer
+  #   type: human
+  #   specialization: content_review
+  #   enabled: false
+  #   description: "内容审核专家（人工）"
+  #   task_type: review            # review / decision / annotation / correction / creative
+  #   notification_webhook: "${SLACK_WEBHOOK}"  # 通知渠道
+  #   timeout: 3600                # 等待超时（秒）
+  #   fallback_action: pending     # 超时动作：pending / reject / approve
+
+
+# ============================================================
+# Worker 类型对比
+# ============================================================
+#
+# | 类型     | 执行主体        | 适用场景                      | 成本   | 延迟   |
+# |----------|-----------------|-------------------------------|--------|--------|
+# | agent    | 内置 Agent      | 通用任务、需要深度推理        | 低     | 低     |
+# | skill    | Claude + Skill  | 专业任务、高质量输出          | 低     | 低     |
+# | mcp      | 远程 MCP Server | 已有 MCP 服务                 | 中     | 中     |
+# | workflow | Coze/Dify       | 复杂流程、可视化配置          | 中     | 中     |
+# | sandbox  | E2B/沙箱        | 代码执行、数据分析            | 中     | 中     |
+# | subagent | Claude 子智能体 | 上下文隔离、工具密集          | 低     | 低     |
+# | human    | 人类专家        | 审核、决策、敏感处理          | 高     | 高     |
+#
+# ============================================================
