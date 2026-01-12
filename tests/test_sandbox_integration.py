@@ -179,8 +179,6 @@ class TestSandboxTools:
             'file_exists',
             'run_command',
             'run_code',
-            'run_code_stream',
-            'run_project',
             'stop_project',
             'get_logs',
         ]

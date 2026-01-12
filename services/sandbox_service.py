@@ -1,66 +1,49 @@
 """
-Sandbox 服务层 - E2B 沙盒管理（统一入口）
+Sandbox 服务层 - 沙盒业务封装
 
 职责：
-1. 沙盒生命周期管理（create/pause/resume/kill）
-2. 沙盒文件操作（代理到 E2B）
-3. 代码执行（Code Interpreter，支持流式输出）
-4. 项目运行管理
-5. 沙盒连接池管理
+1. 路径标准化（相对路径 -> 绝对路径）
+2. 项目运行管理（检测、启动、停止）
+3. 流式代码执行输出
 
 设计原则：
-- 每个 conversation 最多一个活跃沙盒
-- 优先复用已存在的沙盒（通过 connect）
-- 使用 auto_pause 实现自动暂停
-- 所有文件操作通过 E2B SDK
-- 统一的沙盒管理，替代之前分散的工具
+- 直接使用 infra/sandbox 层的类型定义（避免重复）
+- 只保留业务特有功能
+- 连接池由 infra 层统一管理
 """
 
-import os
 import asyncio
 from typing import Optional, Dict, Any, List, Callable
-from datetime import datetime
-from dataclasses import dataclass, field
-from pathlib import Path
+from dataclasses import dataclass
 
 from logger import get_logger
 
 logger = get_logger("sandbox_service")
 
-# E2B SDK 导入
-try:
-    from e2b_code_interpreter import Sandbox as CodeInterpreter
-    E2B_AVAILABLE = True
-except ImportError:
-    logger.warning("⚠️ E2B SDK 未安装，请运行: pip install e2b-code-interpreter")
-    E2B_AVAILABLE = False
-    CodeInterpreter = None
-
-# 数据库导入（延迟导入避免循环依赖）
-try:
-    from infra.database import AsyncSessionLocal, crud
-    DB_AVAILABLE = True
-except ImportError:
-    logger.warning("⚠️ 数据库模块未初始化")
-    DB_AVAILABLE = False
-    AsyncSessionLocal = None
-    crud = None
+# ==================== 直接使用 infra 层类型 ====================
+from infra.sandbox import (
+    get_sandbox_provider,
+    SandboxProvider,
+    SandboxInfo as InfraSandboxInfo,
+    FileInfo,  # 直接使用，不再重复定义
+    CommandResult,  # 直接使用
+    CodeResult,  # 直接使用
+    SandboxError,
+    SandboxNotFoundError as InfraSandboxNotFoundError,
+    SandboxConnectionError as InfraSandboxConnectionError,
+    SandboxNotAvailableError,
+)
 
 
-@dataclass
-class FileInfo:
-    """文件信息"""
-    name: str
-    path: str
-    type: str  # "file" or "directory"
-    size: Optional[int] = None
-    modified_at: Optional[str] = None
-    children: Optional[List["FileInfo"]] = None  # 子目录内容（树形结构时使用）
-
+# ==================== 服务层特有类型 ====================
 
 @dataclass
 class SandboxInfo:
-    """沙盒信息"""
+    """
+    沙盒信息（服务层视图）
+    
+    与 infra 层的区别：使用 e2b_sandbox_id 而非 provider_sandbox_id
+    """
     id: str
     conversation_id: str
     user_id: str
@@ -74,24 +57,14 @@ class SandboxInfo:
 
 @dataclass
 class RunResult:
-    """运行结果"""
+    """项目运行结果"""
     success: bool
     preview_url: Optional[str] = None
     message: Optional[str] = None
     error: Optional[str] = None
 
 
-@dataclass
-class CodeResult:
-    """代码执行结果"""
-    success: bool
-    stdout: str = ""
-    stderr: str = ""
-    error: Optional[str] = None
-    execution_time: float = 0.0
-    # 产物（如图表）
-    artifacts: List[Dict[str, Any]] = field(default_factory=list)
-
+# ==================== 异常类 ====================
 
 class SandboxServiceError(Exception):
     """沙盒服务异常基类"""
@@ -108,35 +81,54 @@ class SandboxConnectionError(SandboxServiceError):
     pass
 
 
+# ==================== 类型转换 ====================
+
+def _convert_sandbox_info(info: InfraSandboxInfo) -> SandboxInfo:
+    """将 infra 层 SandboxInfo 转换为服务层视图"""
+    return SandboxInfo(
+        id=info.id,
+        conversation_id=info.conversation_id,
+        user_id=info.user_id,
+        e2b_sandbox_id=info.provider_sandbox_id,
+        status=info.status.value if hasattr(info.status, 'value') else str(info.status),
+        stack=info.stack,
+        preview_url=info.preview_url,
+        created_at=info.created_at,
+        last_active_at=info.last_active_at
+    )
+
+
+# ==================== SandboxService ====================
+
 class SandboxService:
     """
-    E2B 沙盒服务
+    沙盒服务（业务层封装）
     
-    核心功能：
-    - 管理沙盒生命周期（create/pause/resume/kill）
-    - 代理文件操作到 E2B
-    - 维护沙盒连接池
+    职责：
+    1. 路径标准化：相对路径 -> 绝对路径
+    2. 异常转换：infra 层异常 -> 服务层异常
+    3. 业务功能：递归目录列表、项目管理、日志获取
+    
+    注意：
+    - 数据类型直接使用 infra/sandbox 层定义（FileInfo, CommandResult, CodeResult）
+    - 连接池由 infra 层统一管理，确保 bash 工具和 sandbox_* 工具共享连接
+    - 性能优化在 infra 层实现（skip_validation、_with_retry）
     """
     
-    # 沙盒连接池：conversation_id -> sandbox 对象
-    _sandbox_pool: Dict[str, Any] = {}
+    # E2B 沙盒的工作目录
+    SANDBOX_HOME = "/home/user"
     
-    # 默认配置
-    DEFAULT_TIMEOUT_MS = 60 * 60 * 1000  # 1 小时无活动后自动暂停
+    def __init__(self):
+        """初始化沙盒服务"""
+        self._provider: Optional[SandboxProvider] = None
+        logger.info("✅ SandboxService 初始化完成（使用 infra/sandbox 层）")
     
-    def __init__(self, api_key: Optional[str] = None):
-        """
-        初始化沙盒服务
-        
-        Args:
-            api_key: E2B API Key（默认从环境变量读取）
-        """
-        self.api_key = api_key or os.getenv("E2B_API_KEY")
-        
-        if not self.api_key:
-            logger.warning("⚠️ E2B_API_KEY 未设置，沙盒功能不可用")
-        else:
-            logger.info("✅ SandboxService 初始化完成")
+    @property
+    def provider(self) -> SandboxProvider:
+        """获取 infra 层的沙盒提供者"""
+        if self._provider is None:
+            self._provider = get_sandbox_provider()
+        return self._provider
     
     # ==================== 生命周期管理 ====================
     
@@ -149,12 +141,6 @@ class SandboxService:
         """
         获取或创建沙盒
         
-        逻辑：
-        1. 检查连接池中是否有活跃连接
-        2. 检查数据库中是否有记录
-        3. 如果有 e2b_sandbox_id，尝试 connect
-        4. 如果连接失败或不存在，创建新沙盒
-        
         Args:
             conversation_id: 对话 ID
             user_id: 用户 ID
@@ -163,293 +149,54 @@ class SandboxService:
         Returns:
             沙盒信息
         """
-        if not E2B_AVAILABLE or not self.api_key:
-            raise SandboxServiceError("E2B 沙盒服务不可用")
-        
-        # 1. 检查连接池
-        if conversation_id in self._sandbox_pool:
-            sandbox = self._sandbox_pool[conversation_id]
-            try:
-                # 验证连接是否有效
-                await asyncio.to_thread(
-                    sandbox.commands.run,
-                    "echo 'ping'",
-                    timeout=10
-                )
-                logger.debug(f"♻️ 复用连接池中的沙盒: {conversation_id}")
-                
-                # 更新活跃时间
-                await self._update_activity(conversation_id)
-                
-                return await self._get_sandbox_info(conversation_id)
-            except Exception as e:
-                logger.warning(f"⚠️ 连接池中的沙盒已失效: {e}")
-                del self._sandbox_pool[conversation_id]
-        
-        # 2. 查询数据库
-        async with AsyncSessionLocal() as session:
-            db_sandbox = await crud.get_sandbox_by_conversation(session, conversation_id)
-        
-        if db_sandbox and db_sandbox.e2b_sandbox_id:
-            # 3. 尝试连接已有沙盒
-            try:
-                sandbox = await self._connect_sandbox(db_sandbox.e2b_sandbox_id)
-                self._sandbox_pool[conversation_id] = sandbox
-                
-                # 更新状态为 running
-                async with AsyncSessionLocal() as session:
-                    # 重新获取 preview_url
-                    preview_url = None
-                    if db_sandbox.stack:
-                        port = self._get_stack_port(db_sandbox.stack)
-                        if port:
-                            host = sandbox.get_host(port)
-                            preview_url = f"https://{host}"
-                    
-                    await crud.update_sandbox_status(
-                        session, conversation_id, "running", preview_url
-                    )
-                
-                logger.info(f"🔗 重新连接沙盒成功: {db_sandbox.e2b_sandbox_id}")
-                
-                return await self._get_sandbox_info(conversation_id)
-                
-            except Exception as e:
-                logger.warning(f"⚠️ 连接已有沙盒失败: {e}，将创建新沙盒")
-        
-        # 4. 创建新沙盒
-        return await self._create_new_sandbox(conversation_id, user_id, stack)
-    
-    async def _create_new_sandbox(
-        self,
-        conversation_id: str,
-        user_id: str,
-        stack: Optional[str] = None
-    ) -> SandboxInfo:
-        """创建新沙盒"""
-        # 确保数据库中有记录
-        async with AsyncSessionLocal() as session:
-            db_sandbox = await crud.get_sandbox_by_conversation(session, conversation_id)
-            
-            if not db_sandbox:
-                db_sandbox = await crud.create_sandbox(
-                    session=session,
-                    conversation_id=conversation_id,
-                    user_id=user_id,
-                    status="creating",
-                    stack=stack
-                )
-        
         try:
-            # 设置 API Key
-            if self.api_key != os.getenv("E2B_API_KEY"):
-                os.environ["E2B_API_KEY"] = self.api_key
-            
-            # 创建沙盒（启用 auto_pause，超时后自动暂停而不是被 kill）
-            logger.info(f"🆕 创建新沙盒 (auto_pause=True): conversation={conversation_id}")
-            
-            sandbox = await asyncio.to_thread(
-                CodeInterpreter.beta_create,
-                auto_pause=True,  # 超时后自动暂停，保留状态
-                timeout=self.DEFAULT_TIMEOUT_MS // 1000,  # 转换为秒
-                metadata={
-                    "conversation_id": conversation_id,
-                    "user_id": user_id,
-                    "stack": stack or "python"
-                }
-            )
-            
-            # 等待沙盒就绪
-            await asyncio.sleep(3)
-            
-            # 保存到连接池
-            self._sandbox_pool[conversation_id] = sandbox
-            
-            # 更新数据库
-            async with AsyncSessionLocal() as session:
-                await crud.update_sandbox_e2b_id(
-                    session=session,
-                    conversation_id=conversation_id,
-                    e2b_sandbox_id=sandbox.sandbox_id,
-                    status="running"
-                )
-                
-                if stack:
-                    await crud.update_sandbox(
-                        session=session,
-                        sandbox_id=db_sandbox.id,
-                        stack=stack
-                    )
-            
-            logger.info(f"✅ 沙盒创建成功: {sandbox.sandbox_id}")
-            
-            return await self._get_sandbox_info(conversation_id)
-            
+            info = await self.provider.ensure_sandbox(conversation_id, user_id, stack)
+            return _convert_sandbox_info(info)
+        except SandboxNotAvailableError as e:
+            raise SandboxServiceError(f"E2B 沙盒服务不可用: {e}")
         except Exception as e:
-            logger.error(f"❌ 沙盒创建失败: {e}", exc_info=True)
-            
-            # 更新状态为失败
-            async with AsyncSessionLocal() as session:
-                await crud.update_sandbox_status(session, conversation_id, "failed")
-            
-            raise SandboxServiceError(f"沙盒创建失败: {e}")
-    
-    async def _connect_sandbox(self, e2b_sandbox_id: str) -> Any:
-        """连接已有沙盒"""
-        if self.api_key != os.getenv("E2B_API_KEY"):
-            os.environ["E2B_API_KEY"] = self.api_key
-        
-        sandbox = await asyncio.to_thread(
-            CodeInterpreter.connect,
-            e2b_sandbox_id
-        )
-        
-        # 验证连接
-        result = await asyncio.to_thread(
-            sandbox.commands.run,
-            "echo 'connected'",
-            timeout=10
-        )
-        
-        if result.exit_code != 0:
-            raise SandboxConnectionError("沙盒连接验证失败")
-        
-        return sandbox
+            logger.error(f"❌ 获取或创建沙盒失败: {e}", exc_info=True)
+            raise SandboxServiceError(f"沙盒操作失败: {e}")
     
     async def pause_sandbox(self, conversation_id: str) -> bool:
-        """
-        暂停沙盒
-        
-        Args:
-            conversation_id: 对话 ID
-            
-        Returns:
-            是否成功
-        """
-        # 获取沙盒
-        sandbox = self._sandbox_pool.get(conversation_id)
-        
-        if not sandbox:
-            # 尝试从数据库获取并连接
-            async with AsyncSessionLocal() as session:
-                db_sandbox = await crud.get_sandbox_by_conversation(session, conversation_id)
-            
-            if not db_sandbox or not db_sandbox.e2b_sandbox_id:
-                logger.warning(f"⚠️ 沙盒不存在: {conversation_id}")
-                return False
-            
-            try:
-                sandbox = await self._connect_sandbox(db_sandbox.e2b_sandbox_id)
-            except Exception as e:
-                logger.warning(f"⚠️ 连接沙盒失败: {e}")
-                return False
-        
+        """暂停沙盒"""
         try:
-            # 暂停沙盒
-            await asyncio.to_thread(sandbox.pause)
-            
-            # 从连接池移除
-            if conversation_id in self._sandbox_pool:
-                del self._sandbox_pool[conversation_id]
-            
-            # 更新数据库状态
-            async with AsyncSessionLocal() as session:
-                await crud.update_sandbox_status(session, conversation_id, "paused")
-            
-            logger.info(f"⏸️ 沙盒已暂停: {conversation_id}")
-            return True
-            
+            return await self.provider.pause_sandbox(conversation_id)
         except Exception as e:
             logger.error(f"❌ 暂停沙盒失败: {e}", exc_info=True)
             return False
     
     async def resume_sandbox(self, conversation_id: str) -> SandboxInfo:
-        """
-        恢复沙盒
-        
-        Args:
-            conversation_id: 对话 ID
-            
-        Returns:
-            沙盒信息
-        """
-        async with AsyncSessionLocal() as session:
-            db_sandbox = await crud.get_sandbox_by_conversation(session, conversation_id)
-        
-        if not db_sandbox or not db_sandbox.e2b_sandbox_id:
-            raise SandboxNotFoundError(f"沙盒不存在: {conversation_id}")
-        
+        """恢复沙盒"""
         try:
-            # 连接会自动恢复暂停的沙盒
-            sandbox = await self._connect_sandbox(db_sandbox.e2b_sandbox_id)
-            self._sandbox_pool[conversation_id] = sandbox
-            
-            # 重新获取 preview_url
-            preview_url = None
-            if db_sandbox.stack:
-                port = self._get_stack_port(db_sandbox.stack)
-                if port:
-                    host = sandbox.get_host(port)
-                    preview_url = f"https://{host}"
-            
-            # 更新数据库状态
-            async with AsyncSessionLocal() as session:
-                await crud.update_sandbox_status(
-                    session, conversation_id, "running", preview_url
-                )
-            
-            logger.info(f"▶️ 沙盒已恢复: {conversation_id}")
-            
-            return await self._get_sandbox_info(conversation_id)
-            
+            info = await self.provider.resume_sandbox(conversation_id)
+            return _convert_sandbox_info(info)
+        except InfraSandboxNotFoundError as e:
+            raise SandboxNotFoundError(str(e))
         except Exception as e:
             logger.error(f"❌ 恢复沙盒失败: {e}", exc_info=True)
             raise SandboxServiceError(f"恢复沙盒失败: {e}")
     
     async def kill_sandbox(self, conversation_id: str) -> bool:
-        """
-        终止沙盒
-        
-        Args:
-            conversation_id: 对话 ID
-            
-        Returns:
-            是否成功
-        """
-        # 从连接池获取
-        sandbox = self._sandbox_pool.get(conversation_id)
-        
-        if sandbox:
-            try:
-                await asyncio.to_thread(sandbox.kill)
-            except Exception as e:
-                logger.warning(f"⚠️ 终止沙盒时出错: {e}")
-            
-            del self._sandbox_pool[conversation_id]
-        
-        # 更新数据库状态
-        async with AsyncSessionLocal() as session:
-            await crud.update_sandbox_status(session, conversation_id, "killed")
-        
-        logger.info(f"🗑️ 沙盒已终止: {conversation_id}")
-        return True
+        """终止沙盒"""
+        try:
+            return await self.provider.destroy_sandbox(conversation_id)
+        except Exception as e:
+            logger.error(f"❌ 终止沙盒失败: {e}", exc_info=True)
+            return False
     
     async def get_sandbox_status(self, conversation_id: str) -> Optional[SandboxInfo]:
-        """
-        获取沙盒状态
-        
-        Args:
-            conversation_id: 对话 ID
-            
-        Returns:
-            沙盒信息，不存在返回 None
-        """
-        return await self._get_sandbox_info(conversation_id)
+        """获取沙盒状态"""
+        try:
+            info = await self.provider.get_sandbox(conversation_id)
+            if info is None:
+                return None
+            return _convert_sandbox_info(info)
+        except Exception as e:
+            logger.error(f"❌ 获取沙盒状态失败: {e}", exc_info=True)
+            return None
     
-    # ==================== 文件操作 ====================
-    
-    # E2B 沙盒的工作目录
-    SANDBOX_HOME = "/home/user"
+    # ==================== 路径处理 ====================
     
     def _normalize_path(self, path: str) -> str:
         """
@@ -460,88 +207,33 @@ class SandboxService:
         - home/user/xxx -> /home/user/xxx（URL 传输时去掉了开头的 /）
         - xxx -> /home/user/xxx（相对路径）
         - . 或空 -> /home/user
-        
-        Args:
-            path: 输入路径
-            
-        Returns:
-            标准化后的绝对路径
         """
         if not path or path == ".":
             return self.SANDBOX_HOME
         
-        # 已经是绝对路径
         if path.startswith("/"):
             return path
         
-        # 处理 URL 传输时去掉开头 / 的情况（如 home/user/xxx）
         if path.startswith("home/user"):
             return f"/{path}"
         
-        # 相对路径，添加前缀
         return f"{self.SANDBOX_HOME}/{path}".replace("//", "/")
+    
+    # ==================== 文件操作 ====================
     
     async def list_files(
         self,
         conversation_id: str,
         path: str = "/home/user"
     ) -> List[FileInfo]:
-        """
-        列出沙盒目录内容
-        
-        Args:
-            conversation_id: 对话 ID
-            path: 目录路径
-            
-        Returns:
-            文件列表
-        """
-        sandbox = await self._get_sandbox(conversation_id)
-        
-        # 标准化路径
+        """列出沙盒目录内容"""
         abs_path = self._normalize_path(path)
         
         try:
-            # 使用 ls 命令获取文件列表（稳定可靠）
-            result = await asyncio.to_thread(
-                sandbox.commands.run,
-                f"ls -la {abs_path} 2>/dev/null || echo 'DIR_NOT_FOUND'",
-                timeout=30
-            )
-            
-            if "DIR_NOT_FOUND" in result.stdout:
-                return []
-            
-            files = []
-            lines = result.stdout.strip().split('\n')
-            
-            for line in lines[1:]:  # 跳过 total 行
-                if not line.strip():
-                    continue
-                
-                parts = line.split()
-                if len(parts) < 9:
-                    continue
-                
-                permissions = parts[0]
-                size = int(parts[4]) if parts[4].isdigit() else 0
-                name = ' '.join(parts[8:])
-                
-                if name in ['.', '..']:
-                    continue
-                
-                file_type = "directory" if permissions.startswith('d') else "file"
-                file_path = f"{abs_path}/{name}".replace("//", "/")
-                
-                files.append(FileInfo(
-                    name=name,
-                    path=file_path,
-                    type=file_type,
-                    size=size if file_type == "file" else None
-                ))
-            
-            return files
-            
+            # FileInfo 直接使用 infra 层类型，无需转换
+            return await self.provider.list_dir(conversation_id, abs_path)
+        except InfraSandboxNotFoundError as e:
+            raise SandboxNotFoundError(str(e))
         except Exception as e:
             logger.error(f"❌ 列出目录失败: {abs_path} - {e}", exc_info=True)
             raise SandboxServiceError(f"列出目录失败: {e}")
@@ -555,35 +247,56 @@ class SandboxService:
         """
         递归列出沙盒目录内容（树形结构）
         
-        Args:
-            conversation_id: 对话 ID
-            path: 目录路径（支持绝对路径或相对路径）
-            max_depth: 最大递归深度（防止无限递归）
-            
-        Returns:
-            文件列表（包含 children）
+        性能优化：使用单次 shell 命令获取整个目录树，
+        从 N 次 API 调用优化为 1 次（N = 目录数量）
         """
-        # 标准化路径
         abs_path = self._normalize_path(path)
         
+        try:
+            # 使用快速方法（单次 shell 命令）
+            return await self.provider.list_dir_tree_fast(
+                conversation_id, abs_path, max_depth
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ 快速目录树获取失败，降级到普通方法: {e}")
+            # 降级到普通方法
+            return await self._list_files_tree_fallback(
+                conversation_id, abs_path, max_depth
+            )
+    
+    async def _list_files_tree_fallback(
+        self,
+        conversation_id: str,
+        path: str,
+        max_depth: int
+    ) -> List[FileInfo]:
+        """目录树获取的降级方法（并行递归）"""
         if max_depth <= 0:
-            return await self.list_files(conversation_id, abs_path)
+            return await self.list_files(conversation_id, path)
         
-        files = await self.list_files(conversation_id, abs_path)
+        files = await self.list_files(conversation_id, path)
+        directories = [f for f in files if f.type == "directory"]
         
-        # 递归获取子目录内容
-        for file_info in files:
-            if file_info.type == "directory":
-                try:
-                    children = await self.list_files_tree(
-                        conversation_id,
-                        file_info.path,  # 已经是绝对路径
-                        max_depth - 1
-                    )
-                    file_info.children = children
-                except Exception as e:
-                    logger.warning(f"⚠️ 获取子目录失败: {file_info.path}, {e}")
-                    file_info.children = []
+        if not directories:
+            return files
+        
+        # 并行获取所有子目录内容
+        async def get_children(dir_info: FileInfo) -> tuple[FileInfo, List[FileInfo]]:
+            try:
+                children = await self._list_files_tree_fallback(
+                    conversation_id,
+                    dir_info.path,
+                    max_depth - 1
+                )
+                return (dir_info, children)
+            except Exception as e:
+                logger.warning(f"⚠️ 获取子目录失败: {dir_info.path}, {e}")
+                return (dir_info, [])
+        
+        results = await asyncio.gather(*[get_children(d) for d in directories])
+        
+        for dir_info, children in results:
+            dir_info.children = children
         
         return files
     
@@ -592,33 +305,15 @@ class SandboxService:
         conversation_id: str,
         path: str
     ) -> str:
-        """
-        读取沙盒文件内容
-        
-        Args:
-            conversation_id: 对话 ID
-            path: 文件路径（支持绝对路径或相对路径）
-            
-        Returns:
-            文件内容
-        """
-        sandbox = await self._get_sandbox(conversation_id)
-        
-        # 标准化路径
+        """读取沙盒文件内容"""
         abs_path = self._normalize_path(path)
         
         try:
-            content = await asyncio.to_thread(
-                sandbox.files.read,
-                abs_path
-            )
-            
-            # 如果是 bytes，尝试解码
-            if isinstance(content, bytes):
-                content = content.decode('utf-8')
-            
-            return content
-            
+            return await self.provider.read_file(conversation_id, abs_path)
+        except InfraSandboxNotFoundError as e:
+            raise SandboxNotFoundError(str(e))
+        except FileNotFoundError:
+            raise
         except Exception as e:
             logger.error(f"❌ 读取文件失败: {abs_path} - {e}", exc_info=True)
             raise SandboxServiceError(f"读取文件失败: {e}")
@@ -628,35 +323,11 @@ class SandboxService:
         conversation_id: str,
         path: str
     ) -> bytes:
-        """
-        读取沙盒文件内容（二进制）
-        
-        Args:
-            conversation_id: 对话 ID
-            path: 文件路径（支持绝对路径或相对路径）
-            
-        Returns:
-            文件内容（bytes）
-        """
-        sandbox = await self._get_sandbox(conversation_id)
-        
-        # 标准化路径
-        abs_path = self._normalize_path(path)
-        
-        try:
-            content = await asyncio.to_thread(
-                sandbox.files.read,
-                abs_path
-            )
-            
-            if isinstance(content, str):
-                content = content.encode('utf-8')
-            
+        """读取沙盒文件内容（二进制）"""
+        content = await self.read_file(conversation_id, path)
+        if isinstance(content, bytes):
             return content
-            
-        except Exception as e:
-            logger.error(f"❌ 读取文件失败: {abs_path} - {e}", exc_info=True)
-            raise SandboxServiceError(f"读取文件失败: {e}")
+        return content.encode('utf-8')
     
     async def write_file(
         self,
@@ -664,47 +335,26 @@ class SandboxService:
         path: str,
         content: str | bytes
     ) -> Dict[str, Any]:
-        """
-        写入沙盒文件
-        
-        Args:
-            conversation_id: 对话 ID
-            path: 文件路径（支持绝对路径或相对路径）
-            content: 文件内容
-            
-        Returns:
-            写入结果
-        """
-        sandbox = await self._get_sandbox(conversation_id)
-        
-        # 标准化路径
+        """写入沙盒文件"""
         abs_path = self._normalize_path(path)
         
+        # 如果是 bytes，转换为 str
+        if isinstance(content, bytes):
+            content = content.decode('utf-8')
+        
         try:
-            # 确保目录存在
-            dir_path = os.path.dirname(abs_path)
-            if dir_path and dir_path != "/":
-                await asyncio.to_thread(
-                    sandbox.commands.run,
-                    f"mkdir -p {dir_path}",
-                    timeout=10
-                )
+            success = await self.provider.write_file(conversation_id, abs_path, content)
             
-            # 写入文件
-            await asyncio.to_thread(
-                sandbox.files.write,
-                abs_path,
-                content
-            )
-            
-            logger.info(f"✅ 文件已写入: {abs_path}")
+            if success:
+                logger.info(f"✅ 文件已写入: {abs_path}")
             
             return {
-                "success": True,
+                "success": success,
                 "path": abs_path,
                 "size": len(content) if content else 0
             }
-            
+        except InfraSandboxNotFoundError as e:
+            raise SandboxNotFoundError(str(e))
         except Exception as e:
             logger.error(f"❌ 写入文件失败: {abs_path} - {e}", exc_info=True)
             raise SandboxServiceError(f"写入文件失败: {e}")
@@ -714,31 +364,16 @@ class SandboxService:
         conversation_id: str,
         path: str
     ) -> bool:
-        """
-        删除沙盒文件
-        
-        Args:
-            conversation_id: 对话 ID
-            path: 文件路径（支持绝对路径或相对路径）
-            
-        Returns:
-            是否成功
-        """
-        sandbox = await self._get_sandbox(conversation_id)
-        
-        # 标准化路径
+        """删除沙盒文件"""
         abs_path = self._normalize_path(path)
         
         try:
-            result = await asyncio.to_thread(
-                sandbox.commands.run,
-                f"rm -rf {abs_path}",
-                timeout=30
-            )
-            
-            logger.info(f"🗑️ 文件已删除: {abs_path}")
-            return result.exit_code == 0
-            
+            success = await self.provider.delete_file(conversation_id, abs_path)
+            if success:
+                logger.info(f"🗑️ 文件已删除: {abs_path}")
+            return success
+        except InfraSandboxNotFoundError as e:
+            raise SandboxNotFoundError(str(e))
         except Exception as e:
             logger.error(f"❌ 删除文件失败: {abs_path} - {e}", exc_info=True)
             raise SandboxServiceError(f"删除文件失败: {e}")
@@ -748,30 +383,11 @@ class SandboxService:
         conversation_id: str,
         path: str
     ) -> bool:
-        """
-        检查文件是否存在
-        
-        Args:
-            conversation_id: 对话 ID
-            path: 文件路径（支持绝对路径或相对路径）
-            
-        Returns:
-            是否存在
-        """
-        sandbox = await self._get_sandbox(conversation_id)
-        
-        # 标准化路径
+        """检查文件是否存在"""
         abs_path = self._normalize_path(path)
         
         try:
-            result = await asyncio.to_thread(
-                sandbox.commands.run,
-                f"test -e {abs_path} && echo 'yes' || echo 'no'",
-                timeout=10
-            )
-            
-            return result.stdout.strip() == "yes"
-            
+            return await self.provider.file_exists(conversation_id, abs_path)
         except Exception as e:
             logger.error(f"❌ 检查文件失败: {abs_path} - {e}", exc_info=True)
             return False
@@ -784,99 +400,26 @@ class SandboxService:
         project_path: str,
         stack: str
     ) -> RunResult:
-        """
-        运行项目
-        
-        Args:
-            conversation_id: 对话 ID
-            project_path: 项目路径（相对于 /home/user）
-            stack: 技术栈 (streamlit/gradio/python)
-            
-        Returns:
-            运行结果
-        """
-        sandbox = await self._get_sandbox(conversation_id)
-        
-        # 获取栈配置
-        stack_config = self._get_stack_config(stack)
-        if not stack_config:
-            return RunResult(
-                success=False,
-                error=f"不支持的技术栈: {stack}"
-            )
-        
-        full_path = f"/home/user/{project_path}".replace("//", "/")
-        
+        """运行项目"""
         try:
-            # 检查是否需要安装依赖（使用标记文件避免重复安装）
-            req_file = f"{full_path}/requirements.txt"
-            install_marker = f"{full_path}/.deps_installed"
-            
-            if await self.file_exists(conversation_id, req_file):
-                # 检查是否已安装过
-                marker_exists = await self.file_exists(conversation_id, install_marker)
-                
-                if not marker_exists:
-                    logger.info(f"📦 首次安装依赖: {req_file}")
-                    install_result = await asyncio.to_thread(
-                        sandbox.commands.run,
-                        f"cd {full_path} && pip install -q -r requirements.txt 2>&1",
-                        timeout=300  # 5 分钟
-                    )
-                    if install_result.exit_code != 0:
-                        logger.warning(f"⚠️ 依赖安装可能有问题: {install_result.stderr}")
-                    else:
-                        # 创建标记文件
-                        await asyncio.to_thread(
-                            sandbox.commands.run,
-                            f"touch {install_marker}",
-                            timeout=10
-                        )
-                        logger.info(f"✅ 依赖安装完成，已创建标记文件")
-                else:
-                    logger.info(f"⏭️ 依赖已安装，跳过安装步骤")
-            
-            # 启动服务
-            start_cmd = stack_config["start_cmd"]
-            entry_file = f"{full_path}/{stack_config['entry_file']}"
-            
-            # 替换入口文件路径
-            start_cmd = start_cmd.replace("{entry}", entry_file)
-            
-            logger.info(f"🚀 启动项目: {start_cmd}")
-            
-            # 后台运行（使用 screen 或 nohup）
-            await asyncio.to_thread(
-                sandbox.commands.run,
-                f"cd {full_path} && nohup {start_cmd} > /tmp/app.log 2>&1 &",
-                timeout=60  # 增加到 60 秒
+            preview_url = await self.provider.run_project(
+                conversation_id, project_path, stack
             )
             
-            # 等待启动
-            await asyncio.sleep(stack_config.get("startup_wait", 5))
-            
-            # 获取预览 URL
-            port = stack_config["port"]
-            host = sandbox.get_host(port)
-            preview_url = f"https://{host}"
-            
-            # 更新数据库
-            async with AsyncSessionLocal() as session:
-                await crud.update_sandbox(
-                    session=session,
-                    sandbox_id=(await self._get_sandbox_record(conversation_id)).id,
-                    stack=stack,
-                    preview_url=preview_url
+            if preview_url:
+                logger.info(f"✅ 项目启动成功: {preview_url}")
+                return RunResult(
+                    success=True,
+                    preview_url=preview_url,
+                    message=f"项目已启动，访问: {preview_url}"
                 )
-            
-            logger.info(f"✅ 项目启动成功: {preview_url}")
-            
-            return RunResult(
-                success=True,
-                preview_url=preview_url,
-                message=f"项目已启动，访问: {preview_url}"
-            )
-            
+            else:
+                return RunResult(
+                    success=False,
+                    error="项目启动失败"
+                )
+        except InfraSandboxNotFoundError as e:
+            raise SandboxNotFoundError(str(e))
         except Exception as e:
             logger.error(f"❌ 运行项目失败: {e}", exc_info=True)
             return RunResult(
@@ -885,28 +428,16 @@ class SandboxService:
             )
     
     async def stop_project(self, conversation_id: str) -> bool:
-        """
-        停止项目
-        
-        Args:
-            conversation_id: 对话 ID
-            
-        Returns:
-            是否成功
-        """
-        sandbox = await self._get_sandbox(conversation_id)
-        
+        """停止项目"""
         try:
-            # 杀死常见的服务进程
-            await asyncio.to_thread(
-                sandbox.commands.run,
+            # 通过 run_command 杀死进程
+            result = await self.run_command(
+                conversation_id,
                 "pkill -f streamlit || pkill -f gradio || pkill -f 'python app.py' || true",
                 timeout=30
             )
-            
             logger.info(f"⏹️ 项目已停止: {conversation_id}")
             return True
-            
         except Exception as e:
             logger.error(f"❌ 停止项目失败: {e}", exc_info=True)
             return False
@@ -916,30 +447,19 @@ class SandboxService:
         conversation_id: str,
         lines: int = 100
     ) -> str:
-        """
-        获取项目日志
-        
-        Args:
-            conversation_id: 对话 ID
-            lines: 行数
-            
-        Returns:
-            日志内容
-        """
-        sandbox = await self._get_sandbox(conversation_id)
-        
+        """获取项目日志"""
         try:
-            result = await asyncio.to_thread(
-                sandbox.commands.run,
+            result = await self.run_command(
+                conversation_id,
                 f"tail -n {lines} /tmp/app.log 2>/dev/null || echo 'No logs found'",
                 timeout=30
             )
-            
-            return result.stdout
-            
+            return result.get("stdout", "")
         except Exception as e:
             logger.error(f"❌ 获取日志失败: {e}", exc_info=True)
             return f"获取日志失败: {e}"
+    
+    # ==================== 命令执行 ====================
     
     async def run_command(
         self,
@@ -947,33 +467,20 @@ class SandboxService:
         command: str,
         timeout: int = 60
     ) -> Dict[str, Any]:
-        """
-        在沙盒中执行命令
-        
-        Args:
-            conversation_id: 对话 ID
-            command: 命令
-            timeout: 超时时间（秒）
-            
-        Returns:
-            执行结果
-        """
-        sandbox = await self._get_sandbox(conversation_id)
-        
+        """在沙盒中执行命令"""
         try:
-            result = await asyncio.to_thread(
-                sandbox.commands.run,
-                command,
-                timeout=timeout
+            result = await self.provider.run_command(
+                conversation_id, command, timeout
             )
             
             return {
-                "success": result.exit_code == 0,
+                "success": result.success,
                 "exit_code": result.exit_code,
-                "stdout": result.stdout,
-                "stderr": result.stderr
+                "stdout": result.output,
+                "stderr": result.error or ""
             }
-            
+        except InfraSandboxNotFoundError as e:
+            raise SandboxNotFoundError(str(e))
         except Exception as e:
             logger.error(f"❌ 执行命令失败: {e}", exc_info=True)
             return {
@@ -994,324 +501,33 @@ class SandboxService:
         """
         执行 Python 代码（Code Interpreter）
         
-        支持流式输出：通过 on_stdout/on_stderr 回调实时返回输出
-        
-        Args:
-            conversation_id: 对话 ID
-            code: Python 代码
-            timeout: 超时时间（秒）
-            on_stdout: stdout 回调（流式输出）
-            on_stderr: stderr 回调（流式输出）
-            
-        Returns:
-            CodeResult 执行结果
+        注意：流式回调在 infra 层不直接支持，此处简化处理
         """
-        import time
-        start_time = time.time()
-        
-        sandbox = await self._get_sandbox(conversation_id)
-        
-        stdout_lines = []
-        stderr_lines = []
-        
-        # 定义流式回调
-        def handle_stdout(data):
-            line = data.line if hasattr(data, 'line') else str(data)
-            stdout_lines.append(line)
-            if on_stdout:
-                on_stdout(line)
-        
-        def handle_stderr(data):
-            line = data.line if hasattr(data, 'line') else str(data)
-            stderr_lines.append(line)
-            if on_stderr:
-                on_stderr(line)
-        
         try:
-            # 使用 Code Interpreter 的 run_code 方法（支持流式）
-            execution = await asyncio.to_thread(
-                sandbox.run_code,
-                code,
-                on_stdout=handle_stdout if on_stdout else None,
-                on_stderr=handle_stderr if on_stderr else None,
-                timeout=timeout
+            result = await self.provider.run_code(
+                conversation_id, code, "python", timeout
             )
             
-            # 处理非流式输出（如果没有提供回调）
-            if not on_stdout and hasattr(execution, 'logs') and execution.logs:
-                if hasattr(execution.logs, 'stdout'):
-                    for log in execution.logs.stdout:
-                        line = log.line if hasattr(log, 'line') else str(log)
-                        stdout_lines.append(line)
-                if hasattr(execution.logs, 'stderr'):
-                    for log in execution.logs.stderr:
-                        line = log.line if hasattr(log, 'line') else str(log)
-                        stderr_lines.append(line)
+            # 如果有回调，在返回前调用
+            if on_stdout and result.stdout:
+                for line in result.stdout.split('\n'):
+                    on_stdout(line)
+            if on_stderr and result.stderr:
+                for line in result.stderr.split('\n'):
+                    on_stderr(line)
             
-            # 处理产物（如图表）
-            artifacts = []
-            if hasattr(execution, 'results') and execution.results:
-                for result in execution.results:
-                    artifact = {"type": "unknown"}
-                    
-                    # 检查是否有图片
-                    if hasattr(result, 'png') and result.png:
-                        artifact = {
-                            "type": "image",
-                            "format": "png",
-                            "data": result.png
-                        }
-                    elif hasattr(result, 'svg') and result.svg:
-                        artifact = {
-                            "type": "image",
-                            "format": "svg",
-                            "data": result.svg
-                        }
-                    elif hasattr(result, 'html') and result.html:
-                        artifact = {
-                            "type": "html",
-                            "data": result.html
-                        }
-                    elif hasattr(result, 'text') and result.text:
-                        artifact = {
-                            "type": "text",
-                            "data": result.text
-                        }
-                    
-                    artifacts.append(artifact)
+            # CodeResult 直接使用 infra 层类型，无需转换
+            return result
             
-            execution_time = time.time() - start_time
-            
-            # 判断是否成功
-            has_error = execution.error is not None if hasattr(execution, 'error') else False
-            error_msg = execution.error.value if has_error and hasattr(execution.error, 'value') else None
-            
-            logger.info(f"✅ 代码执行完成: {len(code)} 字符, 耗时 {execution_time:.2f}s")
-            
-            return CodeResult(
-                success=not has_error,
-                stdout="\n".join(stdout_lines),
-                stderr="\n".join(stderr_lines),
-                error=error_msg,
-                execution_time=execution_time,
-                artifacts=artifacts
-            )
-            
+        except InfraSandboxNotFoundError as e:
+            raise SandboxNotFoundError(str(e))
         except Exception as e:
-            execution_time = time.time() - start_time
             logger.error(f"❌ 代码执行失败: {e}", exc_info=True)
-            
             return CodeResult(
                 success=False,
-                stdout="\n".join(stdout_lines),
-                stderr="\n".join(stderr_lines),
-                error=str(e),
-                execution_time=execution_time
+                error=str(e)
             )
     
-    async def run_code_stream(
-        self,
-        conversation_id: str,
-        code: str,
-        session_id: str,
-        event_manager=None,
-        timeout: int = 300
-    ) -> CodeResult:
-        """
-        执行代码并通过 SSE 流式输出
-        
-        集成 EventManager，实现前端实时显示
-        
-        Args:
-            conversation_id: 对话 ID
-            code: Python 代码
-            session_id: 会话 ID（用于 SSE）
-            event_manager: EventManager 实例
-            timeout: 超时时间
-            
-        Returns:
-            CodeResult 执行结果
-        """
-        async def emit_stdout(line: str):
-            if event_manager:
-                await event_manager.system.emit_custom(
-                    session_id=session_id,
-                    event_type="code_output",
-                    event_data={
-                        "stream": "stdout",
-                        "text": line,
-                        "timestamp": datetime.now().isoformat()
-                    }
-                )
-        
-        async def emit_stderr(line: str):
-            if event_manager:
-                await event_manager.system.emit_custom(
-                    session_id=session_id,
-                    event_type="code_output",
-                    event_data={
-                        "stream": "stderr",
-                        "text": line,
-                        "error": True,
-                        "timestamp": datetime.now().isoformat()
-                    }
-                )
-        
-        # 同步回调包装为异步
-        def on_stdout(line: str):
-            asyncio.create_task(emit_stdout(line))
-        
-        def on_stderr(line: str):
-            asyncio.create_task(emit_stderr(line))
-        
-        return await self.run_code(
-            conversation_id=conversation_id,
-            code=code,
-            timeout=timeout,
-            on_stdout=on_stdout if event_manager else None,
-            on_stderr=on_stderr if event_manager else None
-        )
-    
-    # ==================== 辅助方法 ====================
-    
-    async def _get_sandbox(self, conversation_id: str) -> Any:
-        """
-        获取沙盒连接
-        
-        使用 auto_pause 后，沙盒超时会自动暂停而不是被 kill。
-        connect 会自动恢复暂停的沙盒。
-        
-        Args:
-            conversation_id: 对话 ID
-            
-        Returns:
-            沙盒对象
-            
-        Raises:
-            SandboxNotFoundError: 沙盒不存在
-            SandboxConnectionError: 连接失败（沙盒可能已被删除）
-        """
-        # 1. 检查连接池
-        if conversation_id in self._sandbox_pool:
-            sandbox = self._sandbox_pool[conversation_id]
-            
-            # 验证连接是否有效
-            try:
-                await asyncio.to_thread(
-                    sandbox.commands.run,
-                    "echo 'ping'",
-                    timeout=5
-                )
-                return sandbox
-            except Exception as e:
-                logger.warning(f"⚠️ 沙盒连接失效，尝试重新连接: {e}")
-                del self._sandbox_pool[conversation_id]
-        
-        # 2. 尝试从数据库获取并连接
-        async with AsyncSessionLocal() as session:
-            db_sandbox = await crud.get_sandbox_by_conversation(session, conversation_id)
-        
-        if not db_sandbox:
-            raise SandboxNotFoundError(f"沙盒不存在: {conversation_id}")
-        
-        if db_sandbox.e2b_sandbox_id:
-            try:
-                # connect 会自动恢复暂停的沙盒
-                sandbox = await self._connect_sandbox(db_sandbox.e2b_sandbox_id)
-                self._sandbox_pool[conversation_id] = sandbox
-                
-                # 更新状态为 running
-                async with AsyncSessionLocal() as session:
-                    await crud.update_sandbox_status(session, conversation_id, "running")
-                
-                logger.info(f"🔗 连接/恢复沙盒成功: {db_sandbox.e2b_sandbox_id}")
-                return sandbox
-                
-            except Exception as e:
-                # 连接失败，可能是沙盒已被 E2B 删除（超过 30 天限制）
-                logger.error(f"❌ 连接沙盒失败: {e}")
-                
-                # 更新数据库状态
-                async with AsyncSessionLocal() as session:
-                    await crud.update_sandbox_status(session, conversation_id, "deleted")
-                
-                raise SandboxConnectionError(
-                    f"沙盒连接失败，可能已被删除。请创建新对话或重新初始化沙盒。"
-                    f"原因: {e}"
-                )
-        else:
-            raise SandboxNotFoundError(f"沙盒未初始化: {conversation_id}")
-    
-    async def _get_sandbox_info(self, conversation_id: str) -> Optional[SandboxInfo]:
-        """获取沙盒信息"""
-        async with AsyncSessionLocal() as session:
-            db_sandbox = await crud.get_sandbox_by_conversation(session, conversation_id)
-        
-        if not db_sandbox:
-            return None
-        
-        return SandboxInfo(
-            id=db_sandbox.id,
-            conversation_id=db_sandbox.conversation_id,
-            user_id=db_sandbox.user_id,
-            e2b_sandbox_id=db_sandbox.e2b_sandbox_id,
-            status=db_sandbox.status,
-            stack=db_sandbox.stack,
-            preview_url=db_sandbox.preview_url,
-            created_at=db_sandbox.created_at.isoformat() if db_sandbox.created_at else None,
-            last_active_at=db_sandbox.last_active_at.isoformat() if db_sandbox.last_active_at else None
-        )
-    
-    async def _get_sandbox_record(self, conversation_id: str):
-        """获取数据库记录"""
-        async with AsyncSessionLocal() as session:
-            return await crud.get_sandbox_by_conversation(session, conversation_id)
-    
-    async def _update_activity(self, conversation_id: str):
-        """更新活跃时间"""
-        async with AsyncSessionLocal() as session:
-            await crud.update_sandbox_activity(session, conversation_id)
-    
-    def _get_stack_config(self, stack: str) -> Optional[Dict[str, Any]]:
-        """获取技术栈配置"""
-        configs = {
-            "streamlit": {
-                "entry_file": "app.py",
-                "port": 8501,
-                "start_cmd": "streamlit run {entry} --server.port=8501 --server.address=0.0.0.0",
-                "startup_wait": 8
-            },
-            "gradio": {
-                "entry_file": "app.py",
-                "port": 7860,
-                "start_cmd": "python {entry}",
-                "startup_wait": 10
-            },
-            "python": {
-                "entry_file": "main.py",
-                "port": 8000,
-                "start_cmd": "python {entry}",
-                "startup_wait": 5
-            },
-            "flask": {
-                "entry_file": "app.py",
-                "port": 5000,
-                "start_cmd": "python {entry}",
-                "startup_wait": 5
-            },
-            "fastapi": {
-                "entry_file": "main.py",
-                "port": 8000,
-                "start_cmd": "uvicorn main:app --host 0.0.0.0 --port 8000",
-                "startup_wait": 5
-            }
-        }
-        return configs.get(stack)
-    
-    def _get_stack_port(self, stack: str) -> Optional[int]:
-        """获取技术栈端口"""
-        config = self._get_stack_config(stack)
-        return config["port"] if config else None
 
 
 # ==================== 便捷函数 ====================
@@ -1330,4 +546,3 @@ def get_sandbox_service() -> SandboxService:
     if _default_sandbox_service is None:
         _default_sandbox_service = SandboxService()
     return _default_sandbox_service
-

@@ -1,5 +1,14 @@
 import { defineStore } from 'pinia'
 import axios from '@/api/axios'
+import { useWorkspaceStore } from './workspace'
+
+// 文件写入工具列表（用于实时预览）
+const FILE_WRITE_TOOLS = [
+  'write_file',
+  'sandbox_write_file', 
+  'str_replace_editor',
+  'create_file'
+]
 
 export const useChatStore = defineStore('chat', {
   state: () => ({
@@ -15,6 +24,8 @@ export const useChatStore = defineStore('chat', {
     maxReconnectAttempts: 3,
     // 🆕 当前内容块类型（用于简化 delta 格式）
     _currentBlockType: null,
+    // 🆕 待处理的工具调用（用于终端日志关联）
+    _pendingToolCalls: {},
   }),
 
   actions: {
@@ -387,6 +398,72 @@ export const useChatStore = defineStore('chat', {
                       if (eventType === 'content_start') {
                         const blockType = data.data?.content_block?.type
                         this._currentBlockType = blockType
+                        
+                        // 🎬 检测工具调用
+                        if (blockType === 'tool_use') {
+                          const toolName = data.data?.content_block?.name
+                          const toolId = data.data?.content_block?.id
+                          
+                          // 初始化 pending tool call
+                          this._pendingToolCalls[toolId] = {
+                            name: toolName,
+                            input: '',
+                            id: toolId
+                          }
+                          
+                          // 文件写入工具 -> 启动实时预览
+                          if (FILE_WRITE_TOOLS.includes(toolName)) {
+                            const workspaceStore = useWorkspaceStore()
+                            // 尝试从 input 中提取文件路径 (如果是非流式直接有 input)
+                            const inputObj = data.data?.content_block?.input
+                            const initialPath = inputObj?.path || inputObj?.file_path || null
+                            workspaceStore.startLivePreview(toolName, toolId, initialPath)
+                          }
+                          
+                          // 终端命令工具 -> 标记终端运行中
+                          if (['sandbox_run_command', 'run_project', 'sandbox_run_project'].includes(toolName)) {
+                            const workspaceStore = useWorkspaceStore()
+                            workspaceStore.setTerminalRunning(true)
+                          }
+                        }
+                        
+                        // 🎬 检测工具结果 -> 终端输出
+                        if (blockType === 'tool_result') {
+                          const toolUseId = data.data?.content_block?.tool_use_id
+                          const content = data.data?.content_block?.content
+                          const isError = data.data?.content_block?.is_error
+                          
+                          // 查找对应的工具调用
+                          const toolCall = this._pendingToolCalls[toolUseId]
+                          if (toolCall && ['sandbox_run_command', 'run_project', 'sandbox_run_project'].includes(toolCall.name)) {
+                            const workspaceStore = useWorkspaceStore()
+                            
+                            // 尝试解析 JSON 结果
+                            let outputText = content
+                            try {
+                              const jsonContent = JSON.parse(content)
+                              if (jsonContent.stdout !== undefined) {
+                                outputText = jsonContent.stdout
+                                if (jsonContent.stderr) {
+                                  outputText += '\n[STDERR]\n' + jsonContent.stderr
+                                }
+                              } else if (jsonContent.message) {
+                                outputText = jsonContent.message
+                              }
+                            } catch (e) {
+                              // 不是 JSON，直接显示文本
+                            }
+                            
+                            workspaceStore.addTerminalLog(
+                              isError ? 'error' : 'output',
+                              outputText
+                            )
+                            workspaceStore.setTerminalRunning(false)
+                            
+                            // 清理
+                            delete this._pendingToolCalls[toolUseId]
+                          }
+                        }
                       }
                       
                       if (eventType === 'content_delta') {
@@ -396,8 +473,62 @@ export const useChatStore = defineStore('chat', {
                           const deltaText = typeof delta === 'string' ? delta : (delta?.text || '')
                           fullResponse += deltaText
                         }
+                        
+                        // 🎬 更新工具输入（流式参数）
+                        if (this._currentBlockType === 'tool_use') {
+                          const workspaceStore = useWorkspaceStore()
+                          const deltaText = typeof delta === 'string' ? delta : (delta?.partial_json || '')
+                          
+                          // 更新 pending tool input
+                          // 注意：这里我们只知道当前 block，不知道 id，但通常只有一个 active block
+                          // 我们遍历找到最后一个 pending 的 tool call（简化处理）
+                          const toolIds = Object.keys(this._pendingToolCalls)
+                          if (toolIds.length > 0) {
+                            const lastId = toolIds[toolIds.length - 1]
+                            this._pendingToolCalls[lastId].input += deltaText
+                          }
+                          
+                          if (workspaceStore.isLivePreviewing) {
+                            if (deltaText) {
+                              workspaceStore.updateLivePreview(deltaText)
+                            }
+                          }
+                        }
                       } else if (eventType === 'content' && data.data?.text) {
                         fullResponse += data.data.text
+                      }
+                      
+                      // 🎬 工具执行完成
+                      if (eventType === 'content_stop') {
+                        if (this._currentBlockType === 'tool_use') {
+                          const workspaceStore = useWorkspaceStore()
+                          
+                          // 结束实时预览
+                          if (workspaceStore.isLivePreviewing) {
+                            workspaceStore.finishLivePreview()
+                          }
+                          
+                          // 处理终端命令输入完成
+                          const toolIds = Object.keys(this._pendingToolCalls)
+                          if (toolIds.length > 0) {
+                            const lastId = toolIds[toolIds.length - 1]
+                            const toolCall = this._pendingToolCalls[lastId]
+                            
+                            if (['sandbox_run_command', 'run_project', 'sandbox_run_project'].includes(toolCall.name)) {
+                              // 尝试解析完整的 input JSON
+                              try {
+                                const inputObj = JSON.parse(toolCall.input)
+                                const command = inputObj.command || inputObj.project_path // run_project use project_path
+                                
+                                if (command) {
+                                  workspaceStore.addTerminalLog('command', command)
+                                }
+                              } catch (e) {
+                                // JSON 可能不完整，忽略
+                              }
+                            }
+                          }
+                        }
                       }
                       
                       // 保存 session_id 和 conversation_id

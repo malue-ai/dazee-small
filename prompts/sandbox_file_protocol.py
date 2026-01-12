@@ -41,11 +41,15 @@ SANDBOX_FILE_PROTOCOL = """
    - 用途：快速创建指定类型的项目框架
    - 参数：conversation_id, project_name, stack
    - 支持的技术栈：streamlit, gradio, flask, fastapi, python
-   
+
 7. **sandbox_run_project** - 运行项目
-   - 用途：启动项目并获取预览 URL
+   - 用途：启动沙盒中的项目，获取预览 URL
    - 参数：conversation_id, project_path, stack
-   - 返回：preview_url
+   - 返回：preview_url（E2B 公网可访问地址）
+   - 代码结构要求：
+     * streamlit/gradio/flask: 入口文件为 `app.py`
+     * fastapi: 入口文件为 `main.py`（需要 `main:app`）
+     * nodejs/react/vue: 需要 `package.json`
 
 ### 路径规范
 
@@ -61,9 +65,9 @@ SANDBOX_FILE_PROTOCOL = """
 ```
 1. 调用 sandbox_create_project 创建项目框架
 2. 调用 sandbox_write_file 修改代码
-3. 调用 sandbox_run_command 安装依赖
-4. 调用 sandbox_run_project 启动项目
-5. 返回 preview_url 给用户
+3. 调用 sandbox_run_command 安装依赖（如需额外依赖）
+4. 调用 sandbox_run_project 启动项目，获取预览 URL
+5. 将预览 URL 告诉用户
 ```
 
 #### 修改现有文件
@@ -72,8 +76,16 @@ SANDBOX_FILE_PROTOCOL = """
 1. 调用 sandbox_read_file 读取当前内容
 2. 修改内容
 3. 调用 sandbox_write_file 保存修改
-4. 如果是应用，调用 sandbox_run_project 重启（热重载）
+4. 如果项目已运行，Streamlit/Gradio 会自动热重载
+5. 如果需要重启，再次调用 sandbox_run_project
 ```
+
+#### 💡 启动项目最佳实践
+
+**使用 sandbox_run_project 工具启动项目：**
+- 会自动安装 requirements.txt 中的依赖
+- 返回 E2B 公网可访问的 preview_url
+- 不要使用 localhost 或 127.0.0.1 地址
 
 ### 注意事项
 
@@ -116,9 +128,11 @@ You have access to sandbox file tools for managing files in E2B sandbox:
 | sandbox_delete_file | Delete files/directories |
 | sandbox_run_command | Execute shell commands |
 | sandbox_create_project | Create project from template |
-| sandbox_run_project | Start project and get preview URL |
+| sandbox_run_project | Run project and get preview URL |
 
 All paths start from `/home/user`. Use full paths like `/home/user/my_project/app.py`.
+
+💡 **Project Launch**: Use `sandbox_run_project` to start projects. It returns a public preview URL (https://xxx.e2b.dev), not localhost!
 """
 
 
@@ -183,8 +197,8 @@ def build_sandbox_context(conversation_id: str, user_id: str = None) -> str:
 |------|------|
 | `sandbox_write_file` | 创建/更新沙盒文件 |
 | `sandbox_read_file` | 读取沙盒文件 |
-| `sandbox_run_command` | 执行命令 |
-| `sandbox_run_project` | 启动项目，获取预览 URL |
+| `sandbox_run_command` | 执行命令（安装依赖等） |
+| `sandbox_run_project` | 🚀 启动项目，返回 preview_url |
 
 ## 📁 路径规范
 
@@ -246,37 +260,103 @@ def build_sandbox_context(conversation_id: str, user_id: str = None) -> str:
 1. **文件路径**: 始终使用 `/home/user/` 开头的绝对路径
 2. **项目结构**: 将项目放在 `/home/user/<project_name>/` 下
 3. **依赖安装**: 使用 `pip install -r requirements.txt`
-4. **运行项目**: 使用 `sandbox_run_project` 获取预览 URL
 
-## 🔴 关键规则：预览 URL 展示（必须遵守）
+## 🖥️ 实时终端与验证
 
-当你使用 `sandbox_run_project` 启动项目后：
+**你的 shell 命令和输出会在前端终端实时显示给用户！**
 
-1. **必须从返回结果中提取 `preview_url` 字段**
-2. **必须将完整的 URL 展示给用户**，格式如 `https://8501-xxxxx.e2b.app`
-3. **禁止只说"端口 XXX 运行"**，这对用户无意义！
+### ✅ 必须进行验证
+用户希望看到你验证你的工作。修改代码或启动服务后，请使用 `sandbox_run_command` 执行验证命令：
 
-### ❌ 错误响应示例
-```
-应用正在 8501 端口运行  ← 错误！没有给出可访问的 URL
-```
+1. **验证服务状态**：
+   ```json
+   {{
+       "command": "curl -I http://localhost:8000"
+   }}
+   ```
 
-### ✅ 正确响应示例
-```
-🎉 应用已启动！
-访问地址：https://8501-abc123xyz.e2b.app  ← 正确！给出完整 URL
-```
+2. **验证页面内容**：
+   ```json
+   {{
+       "command": "curl -s http://localhost:3000 | grep -o '<title>.*</title>'"
+   }}
+   ```
 
-### 工具返回格式
+3. **验证文件内容**：
+   ```json
+   {{
+       "command": "grep 'DEBUG' /home/user/my_app/config.py"
+   }}
+   ```
+
+**展示给用户的效果**：
+用户会看到一个真实的终端窗口，显示你执行的每一条命令及其输出。这能增加用户对你工作的信任感。
+
+## 📦 依赖管理
+
+**沙盒环境已预装数据分析包**（pandas, numpy, matplotlib）。
+
+**Web 框架需要安装**（streamlit, flask, fastapi 等）。
+
+### ✅ 正确做法
+
+1. **创建代码文件**
+2. **调用 `sandbox_run_project`** - 它会自动检查并安装依赖
+3. **不要手动执行 `pip install`** - 让 `sandbox_run_project` 处理
+
+## 🚀 启动项目规则
+
+### ✅ 使用 sandbox_run_project 工具
+
+当项目代码创建/修改完成后，**直接**调用 `sandbox_run_project` 启动项目（无需安装依赖）：
+
 ```json
 {{
-    "success": true,
-    "preview_url": "https://8501-abc123xyz.e2b.app",  // ← 提取这个！
-    "message": "项目已启动"
+    "conversation_id": "{conversation_id}",
+    "project_path": "/home/user/my_app",
+    "stack": "streamlit"
 }}
 ```
 
-**如果 preview_url 为空或 null，告诉用户启动失败并检查日志！**
+返回结果：
+```json
+{{
+    "success": true,
+    "preview_url": "https://xxx-8501.e2b.dev"
+}}
+```
+
+### ⚠️ 不要使用 bash 启动
+
+**禁止使用以下方式启动项目：**
+- `python app.py` / `streamlit run app.py`
+- `npm start` / `npm run dev`
+- `nohup ... &`
+
+原因：bash 启动无法获取正确的 preview_url，且不可靠。
+
+### 响应示例
+
+```
+✅ 项目创建完成并已启动！
+
+📁 项目结构：
+- /home/user/my_app/app.py
+- /home/user/my_app/requirements.txt
+
+🌐 预览地址：https://xxx-8501.e2b.dev
+
+点击链接即可查看应用效果。
+```
+
+### 代码结构要求
+
+| 技术栈 | 入口文件 | 端口 |
+|--------|----------|------|
+| streamlit | app.py | 8501 |
+| gradio | app.py | 7860 |
+| flask | app.py | 5000 |
+| fastapi | main.py | 8000 |
 """
     return context
 

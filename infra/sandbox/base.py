@@ -407,4 +407,53 @@ class SandboxProvider(ABC):
             预览 URL
         """
         pass
+    
+    # ==================== 可选方法（有默认实现） ====================
+    
+    def get_pool_status(self) -> Dict[str, Any]:
+        """
+        获取连接池状态（用于诊断）
+        
+        Returns:
+            连接池状态信息
+        """
+        return {"provider": self.provider_name, "available": self.is_available}
+    
+    async def cleanup_pool(self) -> int:
+        """
+        清理失效的连接池条目
+        
+        Returns:
+            清理的条目数量
+        """
+        return 0
+    
+    async def get_sandbox_metrics(self, conversation_id: str) -> Optional[Dict[str, Any]]:
+        """
+        获取沙盒运行指标
+        
+        Args:
+            conversation_id: 对话 ID
+            
+        Returns:
+            指标信息
+        """
+        return None
+    
+    async def get_project_logs(
+        self,
+        conversation_id: str,
+        lines: int = 100
+    ) -> str:
+        """
+        获取项目运行日志
+        
+        Args:
+            conversation_id: 对话 ID
+            lines: 行数
+            
+        Returns:
+            日志内容
+        """
+        return "Not implemented"
 

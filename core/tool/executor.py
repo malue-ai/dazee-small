@@ -361,6 +361,8 @@ class ToolExecutor:
         from infra.sandbox import (
             get_sandbox_provider,
             SandboxNotAvailableError,
+            SandboxNotFoundError,
+            SandboxConnectionError,
         )
         
         try:
@@ -373,10 +375,18 @@ class ToolExecutor:
                 }
             
             # 确保沙盒存在
+            logger.info(f"🔄 确保沙盒存在: conversation_id={conversation_id}")
             await sandbox.ensure_sandbox(conversation_id, user_id)
+            logger.info(f"✅ 沙盒就绪: conversation_id={conversation_id}")
             
         except SandboxNotAvailableError as e:
             return {"success": False, "error": str(e)}
+        except SandboxConnectionError as e:
+            logger.error(f"❌ 沙盒连接失败: {e}", exc_info=True)
+            return {"success": False, "error": f"沙盒连接失败: {str(e)}"}
+        except SandboxNotFoundError as e:
+            logger.error(f"❌ 沙盒不存在: {e}", exc_info=True)
+            return {"success": False, "error": f"沙盒不存在: {str(e)}"}
         except Exception as e:
             logger.error(f"❌ 沙盒初始化失败: {e}", exc_info=True)
             return {"success": False, "error": f"沙盒初始化失败: {str(e)}"}
@@ -401,7 +411,7 @@ class ToolExecutor:
                 
                 logger.info(f"🐚 bash 在沙盒执行: {command[:50]}...")
                 
-                # 转换返回格式
+                # result 是 CommandResult dataclass，有 success/output/error/exit_code 属性
                 return {
                     "success": result.success,
                     "output": result.output,

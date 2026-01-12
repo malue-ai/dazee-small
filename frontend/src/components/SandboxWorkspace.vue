@@ -56,6 +56,16 @@
           🔄
         </button>
         
+        <!-- 终端按钮 -->
+        <button 
+          @click="showTerminal = !showTerminal" 
+          class="action-btn"
+          :class="{ active: showTerminal }"
+          title="切换终端"
+        >
+          <span class="icon">💻</span>
+        </button>
+        
         <!-- 预览切换 -->
         <button 
           v-if="hasPreviewUrl" 
@@ -147,19 +157,50 @@
       <!-- 中间编辑区 -->
       <div class="editor-panel" :class="{ expanded: !showPreview }">
         <div class="panel-header">
-          <span v-if="selectedFile">📝 {{ selectedFile.name }}</span>
-          <span v-else>📝 编辑器</span>
-          
-          <div v-if="selectedFile" class="editor-actions">
-            <button @click="handleSaveFile" class="save-btn" title="保存 (Ctrl+S)">
-              💾 保存
-            </button>
-          </div>
+          <!-- 实时预览模式 -->
+          <template v-if="isLivePreviewing">
+            <span class="live-preview-title">
+              <span class="live-indicator"></span>
+              ✨ {{ livePreviewPath || '正在编辑...' }}
+            </span>
+            <span class="live-badge">LIVE</span>
+          </template>
+          <!-- 普通编辑模式 -->
+          <template v-else>
+            <span v-if="selectedFile">📝 {{ selectedFile.name }}</span>
+            <span v-else>📝 编辑器</span>
+            
+            <div v-if="selectedFile" class="editor-actions">
+              <button @click="handleSaveFile" class="save-btn" title="保存 (Ctrl+S)">
+                💾 保存
+              </button>
+            </div>
+          </template>
         </div>
         
         <div class="panel-content">
+          <!-- 实时预览面板 -->
+          <div v-if="isLivePreviewing" class="live-preview-container">
+            <div class="live-preview-header">
+              <span class="tool-name">{{ livePreview.toolName }}</span>
+              <span class="file-language" v-if="livePreviewLanguage !== 'text'">
+                {{ livePreviewLanguage.toUpperCase() }}
+              </span>
+            </div>
+            <pre class="live-preview-content" :class="'language-' + livePreviewLanguage">{{ livePreviewContent || '// AI 正在编写代码...' }}</pre>
+            <div class="live-preview-footer">
+              <span class="typing-indicator">
+                <span class="dot"></span>
+                <span class="dot"></span>
+                <span class="dot"></span>
+              </span>
+              <span>AI 正在编写中...</span>
+            </div>
+          </div>
+          
+          <!-- 普通编辑器 -->
           <textarea
-            v-if="selectedFile"
+            v-else-if="selectedFile"
             v-model="fileContent"
             class="code-editor"
             :placeholder="'编辑 ' + selectedFile.name"
@@ -193,13 +234,14 @@
       </div>
     </div>
     
-    <!-- 底部日志区 -->
-    <div v-if="showLogs" class="logs-panel">
-      <div class="panel-header">
-        <span>📋 日志</span>
-        <button @click="showLogs = false" class="close-btn">✕</button>
-      </div>
-      <pre class="logs-content">{{ projectLogs || '暂无日志' }}</pre>
+    <!-- 底部终端区 -->
+    <div v-if="showTerminal" class="terminal-container">
+      <TerminalPanel 
+        :logs="terminalLogs" 
+        :is-running="isTerminalRunning"
+        @close="showTerminal = false"
+        @clear="clearTerminal"
+      />
     </div>
   </div>
 </template>
@@ -208,6 +250,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useWorkspaceStore } from '@/stores/workspace'
 import FileTreeNode from './FileTreeNode.vue'
+import TerminalPanel from './TerminalPanel.vue'
 
 // Props
 const props = defineProps({
@@ -226,7 +269,7 @@ const workspaceStore = useWorkspaceStore()
 
 // 本地状态
 const showFilePanel = ref(true)
-const showLogs = ref(false)
+const showTerminal = ref(false)
 const runningProject = ref(null) // 正在运行的项目名称
 
 // 计算属性
@@ -247,12 +290,20 @@ const showPreview = computed({
   set: (val) => workspaceStore.showPreview = val
 })
 const previewUrl = computed(() => workspaceStore.sandbox.previewUrl)
-const projectLogs = computed(() => workspaceStore.projectLogs)
+const terminalLogs = computed(() => workspaceStore.terminalLogs)
+const isTerminalRunning = computed(() => workspaceStore.isTerminalRunning)
 const isSandboxRunning = computed(() => workspaceStore.isSandboxRunning)
 const isSandboxAvailable = computed(() => workspaceStore.isSandboxAvailable)
 const hasPreviewUrl = computed(() => workspaceStore.hasPreviewUrl)
 const sandboxStatusText = computed(() => workspaceStore.sandboxStatusText)
 const sandboxStatusColor = computed(() => workspaceStore.sandboxStatusColor)
+
+// 实时预览相关
+const livePreview = computed(() => workspaceStore.livePreview)
+const isLivePreviewing = computed(() => workspaceStore.isLivePreviewing)
+const livePreviewContent = computed(() => workspaceStore.livePreviewContent)
+const livePreviewPath = computed(() => workspaceStore.livePreviewPath)
+const livePreviewLanguage = computed(() => workspaceStore.livePreviewLanguage)
 
 // 初始化沙盒
 async function handleInitSandbox() {
@@ -308,6 +359,11 @@ async function refreshFiles() {
   } catch (error) {
     console.error('刷新文件失败:', error)
   }
+}
+
+// 清空终端日志
+function clearTerminal() {
+  workspaceStore.clearTerminalLogs()
 }
 
 // 切换预览
@@ -415,6 +471,13 @@ function getProjectIcon(type) {
   }
   return icons[type] || '📦'
 }
+
+// 监听终端运行状态，自动打开终端
+watch(isTerminalRunning, (isRunning) => {
+  if (isRunning && !showTerminal.value) {
+    showTerminal.value = true
+  }
+})
 
 // 监听 conversationId 变化
 watch(() => props.conversationId, async (newId) => {
@@ -850,35 +913,168 @@ onMounted(async () => {
   font-size: 14px;
 }
 
-/* 日志面板 */
-.logs-panel {
-  height: 200px;
+/* 终端面板 */
+.terminal-container {
+  height: 250px;
   border-top: 1px solid #2d2d44;
-  background: #0a0a12;
+  background: #0d1117;
+  flex-shrink: 0;
 }
 
-.logs-content {
-  margin: 0;
-  padding: 12px;
-  height: calc(100% - 40px);
-  overflow: auto;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
-  color: #a0a0b0;
-  white-space: pre-wrap;
+/* 实时预览样式 */
+.live-preview-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #10b981;
+  font-weight: 500;
 }
 
-.close-btn {
+.live-indicator {
+  width: 8px;
+  height: 8px;
+  background: #10b981;
+  border-radius: 50%;
+  animation: livePulse 1.5s ease-in-out infinite;
+}
+
+@keyframes livePulse {
+  0%, 100% { 
+    opacity: 1; 
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.5);
+  }
+  50% { 
+    opacity: 0.8; 
+    transform: scale(1.1);
+    box-shadow: 0 0 0 6px rgba(16, 185, 129, 0);
+  }
+}
+
+.live-badge {
   padding: 2px 8px;
-  background: transparent;
-  border: none;
-  color: #666;
-  cursor: pointer;
-  font-size: 14px;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  border-radius: 4px;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  animation: badgeGlow 2s ease-in-out infinite;
 }
 
-.close-btn:hover {
-  color: #ef4444;
+@keyframes badgeGlow {
+  0%, 100% { box-shadow: 0 0 8px rgba(16, 185, 129, 0.4); }
+  50% { box-shadow: 0 0 16px rgba(16, 185, 129, 0.6); }
+}
+
+.live-preview-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: linear-gradient(180deg, #0d1117 0%, #0a0e14 100%);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  border-radius: 8px;
+  margin: 8px;
+  overflow: hidden;
+}
+
+.live-preview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  background: rgba(16, 185, 129, 0.08);
+  border-bottom: 1px solid rgba(16, 185, 129, 0.15);
+}
+
+.tool-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: #10b981;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.file-language {
+  padding: 2px 6px;
+  background: rgba(102, 126, 234, 0.15);
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #667eea;
+}
+
+.live-preview-content {
+  flex: 1;
+  margin: 0;
+  padding: 16px;
+  overflow: auto;
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #e6edf3;
+  white-space: pre-wrap;
+  word-break: break-word;
+  /* 添加打字机效果的光标 */
+  border-right: 2px solid transparent;
+  animation: typewriterCursor 1s steps(1) infinite;
+}
+
+@keyframes typewriterCursor {
+  0%, 50% { border-right-color: #10b981; }
+  50.1%, 100% { border-right-color: transparent; }
+}
+
+/* 语言特定样式 */
+.live-preview-content.language-python {
+  color: #a5d6ff;
+}
+
+.live-preview-content.language-javascript,
+.live-preview-content.language-typescript {
+  color: #ffa657;
+}
+
+.live-preview-content.language-markdown {
+  color: #c9d1d9;
+}
+
+.live-preview-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: rgba(16, 185, 129, 0.05);
+  border-top: 1px solid rgba(16, 185, 129, 0.1);
+  color: #8b949e;
+  font-size: 12px;
+}
+
+.typing-indicator {
+  display: flex;
+  gap: 3px;
+}
+
+.typing-indicator .dot {
+  width: 6px;
+  height: 6px;
+  background: #10b981;
+  border-radius: 50%;
+  animation: typingBounce 1.4s ease-in-out infinite;
+}
+
+.typing-indicator .dot:nth-child(1) { animation-delay: 0s; }
+.typing-indicator .dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-indicator .dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes typingBounce {
+  0%, 60%, 100% { 
+    transform: translateY(0);
+    opacity: 0.5;
+  }
+  30% { 
+    transform: translateY(-4px);
+    opacity: 1;
+  }
 }
 
 /* 滚动条 */

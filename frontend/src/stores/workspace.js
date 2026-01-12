@@ -47,7 +47,22 @@ export const useWorkspaceStore = defineStore('workspace', {
     showPreview: false,
     
     // 项目日志
-    projectLogs: ''
+    projectLogs: '',
+    
+    // === 终端状态 ===
+    terminalLogs: [],
+    isTerminalRunning: false,
+    
+    // === 实时编辑预览 ===
+    livePreview: {
+      isActive: false,           // 是否正在实时预览
+      toolName: null,            // 当前工具名称
+      toolId: null,              // 当前工具 ID
+      filePath: null,            // 正在编辑的文件路径
+      content: '',               // 实时内容
+      accumulatedInput: '',      // 累积的 JSON 输入
+      language: 'text'           // 代码语言（用于语法高亮）
+    }
   }),
 
   actions: {
@@ -446,6 +461,37 @@ export const useWorkspaceStore = defineStore('workspace', {
       }
     },
     
+    // === 终端管理 ===
+    
+    /**
+     * 添加终端日志
+     * @param {string} type - 'command', 'output', 'error', 'info'
+     * @param {string} content - 内容
+     * @param {string} cwd - 当前工作目录 (可选)
+     */
+    addTerminalLog(type, content, cwd = null) {
+      this.terminalLogs.push({
+        type,
+        content,
+        cwd,
+        timestamp: Date.now()
+      })
+    },
+    
+    /**
+     * 清空终端日志
+     */
+    clearTerminalLogs() {
+      this.terminalLogs = []
+    },
+    
+    /**
+     * 设置终端运行状态
+     */
+    setTerminalRunning(isRunning) {
+      this.isTerminalRunning = isRunning
+    },
+
     // === 文件编辑 ===
     
     /**
@@ -488,6 +534,164 @@ export const useWorkspaceStore = defineStore('workspace', {
      */
     togglePreview() {
       this.showPreview = !this.showPreview
+    },
+    
+    // === 实时编辑预览方法 ===
+    
+    /**
+     * 开始实时预览
+     * 当检测到文件写入工具开始执行时调用
+     */
+    startLivePreview(toolName, toolId, filePath = null) {
+      this.livePreview = {
+        isActive: true,
+        toolName,
+        toolId,
+        filePath,
+        content: '',
+        accumulatedInput: '',
+        language: this._detectLanguage(filePath)
+      }
+      console.log('🎬 开始实时预览:', toolName, filePath)
+    },
+    
+    /**
+     * 更新实时预览内容
+     * 当收到 content_delta 事件时调用
+     */
+    updateLivePreview(delta) {
+      if (!this.livePreview.isActive) return
+      
+      // 累积 JSON 输入
+      this.livePreview.accumulatedInput += delta
+      
+      // 尝试提取文件内容和路径
+      const extracted = this._extractFileInfo(this.livePreview.accumulatedInput)
+      
+      if (extracted.content !== null) {
+        this.livePreview.content = extracted.content
+      }
+      
+      if (extracted.path && !this.livePreview.filePath) {
+        this.livePreview.filePath = extracted.path
+        this.livePreview.language = this._detectLanguage(extracted.path)
+      }
+    },
+    
+    /**
+     * 结束实时预览
+     * 当工具执行完成时调用
+     */
+    finishLivePreview() {
+      if (!this.livePreview.isActive) return
+      
+      console.log('🏁 实时预览结束:', this.livePreview.filePath)
+      
+      // 保留最终内容用于短暂显示
+      const finalContent = this.livePreview.content
+      const finalPath = this.livePreview.filePath
+      
+      // 重置状态
+      this.livePreview = {
+        isActive: false,
+        toolName: null,
+        toolId: null,
+        filePath: null,
+        content: '',
+        accumulatedInput: '',
+        language: 'text'
+      }
+      
+      // 如果有文件路径，刷新文件树
+      if (finalPath && this.conversationId) {
+        // 延迟刷新，让后端有时间完成写入
+        setTimeout(() => {
+          this.fetchFiles(this.conversationId, { tree: true })
+        }, 500)
+      }
+    },
+    
+    /**
+     * 从部分 JSON 中提取文件信息
+     * @private
+     */
+    _extractFileInfo(partialJson) {
+      const result = { content: null, path: null }
+      
+      // 提取文件路径（多种可能的字段名）
+      const pathPatterns = [
+        /"(?:path|file_path|filename)"\s*:\s*"((?:[^"\\]|\\.)*)"/,
+      ]
+      
+      for (const pattern of pathPatterns) {
+        const match = partialJson.match(pattern)
+        if (match) {
+          try {
+            result.path = JSON.parse('"' + match[1] + '"')
+          } catch (e) {
+            result.path = match[1]
+          }
+          break
+        }
+      }
+      
+      // 提取文件内容（多种可能的字段名）
+      const contentPatterns = [
+        /"(?:content|file_text|new_str|text)"\s*:\s*"((?:[^"\\]|\\.)*)"/,
+      ]
+      
+      for (const pattern of contentPatterns) {
+        const match = partialJson.match(pattern)
+        if (match) {
+          try {
+            result.content = JSON.parse('"' + match[1] + '"')
+          } catch (e) {
+            // 如果 JSON 解析失败，直接使用匹配的字符串
+            result.content = match[1].replace(/\\n/g, '\n').replace(/\\"/g, '"')
+          }
+          break
+        }
+      }
+      
+      return result
+    },
+    
+    /**
+     * 根据文件路径检测代码语言
+     * @private
+     */
+    _detectLanguage(filePath) {
+      if (!filePath) return 'text'
+      
+      const ext = filePath.split('.').pop()?.toLowerCase()
+      const languageMap = {
+        'py': 'python',
+        'js': 'javascript',
+        'ts': 'typescript',
+        'jsx': 'javascript',
+        'tsx': 'typescript',
+        'vue': 'vue',
+        'html': 'html',
+        'css': 'css',
+        'scss': 'scss',
+        'json': 'json',
+        'md': 'markdown',
+        'yaml': 'yaml',
+        'yml': 'yaml',
+        'sh': 'bash',
+        'bash': 'bash',
+        'sql': 'sql',
+        'xml': 'xml',
+        'java': 'java',
+        'go': 'go',
+        'rs': 'rust',
+        'c': 'c',
+        'cpp': 'cpp',
+        'h': 'c',
+        'hpp': 'cpp'
+      }
+      
+      return languageMap[ext] || 'text'
     }
   },
   
@@ -567,6 +771,34 @@ export const useWorkspaceStore = defineStore('workspace', {
         'killed': '#ef4444'
       }
       return colorMap[this.sandbox.status] || '#6b7280'
+    },
+    
+    /**
+     * 是否正在实时预览
+     */
+    isLivePreviewing() {
+      return this.livePreview.isActive
+    },
+    
+    /**
+     * 实时预览内容
+     */
+    livePreviewContent() {
+      return this.livePreview.content
+    },
+    
+    /**
+     * 实时预览文件路径
+     */
+    livePreviewPath() {
+      return this.livePreview.filePath
+    },
+    
+    /**
+     * 实时预览代码语言
+     */
+    livePreviewLanguage() {
+      return this.livePreview.language
     }
   }
 })
