@@ -148,36 +148,6 @@ memory:
   # retention_policy: "user"
 
 
-# ==================== Multi-Agent 配置（V6.0）====================
-#
-# 📌 用途：启用多智能体协作模式
-#
-# 💡 适用场景：
-#   - 可并行化的复杂任务（重构 + CSS 优化 + 测试）
-#   - 多实体研究任务（分析 10 家公司）
-#   - 多维度分析任务
-#
-# 📁 Workers 配置目录：
-#   instances/{instance}/workers/
-#   ├── worker_registry.yaml  # Workers 注册表
-#   ├── refactor/prompt.md    # 重构专家提示词
-#   ├── css/prompt.md         # CSS 专家提示词
-#   └── test/prompt.md        # 测试专家提示词
-#
-multi_agent:
-  # 是否启用 Multi-Agent 模式（默认关闭）
-  enabled: false
-  
-  # 最大并发 Worker 数量（控制资源使用）
-  max_concurrent_workers: 5
-  
-  # 任务分解策略
-  # - auto: 自动选择（根据任务依赖关系）
-  # - parallel: 强制并行（适合无依赖任务）
-  # - sequential: 强制串行（适合有依赖任务）
-  # decomposition_strategy: "auto"
-
-
 # ==================== 工具能力配置 ====================
 #
 # 📌 配置原则：

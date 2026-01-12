@@ -41,12 +41,11 @@ Analyze the user query and classify it into one of these categories:
   "task_type": "information_query|content_generation|data_analysis|code_task|other",
   "complexity": "simple|medium|complex",
   "needs_plan": true|false,
-  "skip_memory_retrieval": true|false,
-  "needs_multi_agent": true|false
+  "skip_memory_retrieval": true|false
 }
 ```
 
-**ALL FIVE FIELDS ARE REQUIRED** — 不要省略任何字段。即使不确定也要给出最接近的分类。
+**ALL FOUR FIELDS ARE REQUIRED** — 不要省略任何字段。即使不确定也要给出最接近的分类。
 """
 
 INTENT_PROMPT_TASK_TYPES = """
@@ -156,87 +155,12 @@ INTENT_PROMPT_MEMORY = """
 **原则**: 不确定时选择 false，宁可多检索也不漏掉个性化
 """
 
-INTENT_PROMPT_MULTI_AGENT = """
-### Needs Multi-Agent (🆕 V6.0)
-
-判断任务是否需要多智能体协作。根据以下示例的思路自行推理：
-
-<examples>
-<example>
-<query>研究 Top 5 云计算公司的 AI 战略，生成分析报告</query>
-<reasoning>需要对多个独立实体进行并行研究，每个公司的研究互不依赖，适合多智能体并行处理</reasoning>
-<needs_multi_agent>true</needs_multi_agent>
-</example>
-
-<example>
-<query>今天上海天气怎么样？</query>
-<reasoning>简单查询，单一智能体即可完成</reasoning>
-<needs_multi_agent>false</needs_multi_agent>
-</example>
-
-<example>
-<query>对比 AWS、Azure、GCP 三家云服务商的定价策略</query>
-<reasoning>需要同时收集三家公司的信息并对比，可并行处理多个独立子任务</reasoning>
-<needs_multi_agent>true</needs_multi_agent>
-</example>
-
-<example>
-<query>帮我写一个 Python 排序算法</query>
-<reasoning>单一代码任务，不需要多智能体</reasoning>
-<needs_multi_agent>false</needs_multi_agent>
-</example>
-
-<example>
-<query>分析全球 Top 10 科技公司的财报数据，找出增长趋势</query>
-<reasoning>需要收集和分析 10 家公司的财报，每个公司的分析可以并行执行</reasoning>
-<needs_multi_agent>true</needs_multi_agent>
-</example>
-
-<example>
-<query>帮我生成一个产品介绍 PPT</query>
-<reasoning>单一文档生成任务，单个智能体按步骤完成即可</reasoning>
-<needs_multi_agent>false</needs_multi_agent>
-</example>
-
-<example>
-<query>调研国内外主流 AI 框架（TensorFlow、PyTorch、Jax、PaddlePaddle）的性能对比</query>
-<reasoning>需要对多个框架进行独立调研和性能测试，适合并行处理</reasoning>
-<needs_multi_agent>true</needs_multi_agent>
-</example>
-
-<example>
-<query>重构这段代码并补充单元测试</query>
-<reasoning>虽然有多个子任务（重构+测试），但需要串行执行且相互依赖，单智能体即可</reasoning>
-<needs_multi_agent>false</needs_multi_agent>
-</example>
-
-<example>
-<query>分析竞品 A、B、C 的功能特点和用户评价</query>
-<reasoning>对多个竞品进行独立分析，可以并行收集和整理信息</reasoning>
-<needs_multi_agent>true</needs_multi_agent>
-</example>
-
-<example>
-<query>翻译这篇英文文章</query>
-<reasoning>单一翻译任务，不需要多智能体</reasoning>
-<needs_multi_agent>false</needs_multi_agent>
-</example>
-</examples>
-
-**核心判断标准**：
-- ✅ 需要 Multi-Agent：任务可分解为多个**独立且可并行**的子任务（如研究多个实体、对比多个对象）
-- ❌ 不需要 Multi-Agent：单一任务、串行依赖任务、或虽有多步骤但需协同完成的任务
-
-**默认值**: false（不需要，即默认使用单智能体）
-**原则**: 不确定时选择 false，避免过度使用多智能体增加复杂度
-"""
-
 INTENT_PROMPT_FOOTER = """
 ## Important
 
 - DO NOT analyze what tools/capabilities are needed (that's Sonnet's job)
 - DO NOT create a plan (that's Sonnet's job)
-- ONLY classify: task_type, complexity, needs_plan, skip_memory_retrieval, needs_multi_agent
+- ONLY classify: task_type, complexity, needs_plan, skip_memory_retrieval
 
 ## Example
 
@@ -248,8 +172,7 @@ Output:
   "task_type": "content_generation",
   "complexity": "complex",
   "needs_plan": true,
-  "skip_memory_retrieval": false,
-  "needs_multi_agent": false
+  "skip_memory_retrieval": false
 }
 ```
 
@@ -265,7 +188,6 @@ INTENT_RECOGNITION_PROMPT = (
     INTENT_PROMPT_TASK_TYPES +
     INTENT_PROMPT_COMPLEXITY +
     INTENT_PROMPT_MEMORY +
-    INTENT_PROMPT_MULTI_AGENT +
     INTENT_PROMPT_FOOTER
 )
 
@@ -278,19 +200,16 @@ def get_intent_recognition_prompt(
     custom_task_types: Optional[str] = None,
     custom_complexity_rules: Optional[str] = None,
     custom_memory_rules: Optional[str] = None,
-    custom_multi_agent_rules: Optional[str] = None,
 ) -> str:
     """
     获取意图识别提示词（支持自定义覆盖）
     
     🆕 V4.6.2: 模块化组装
-    🆕 V6.0: 新增 Multi-Agent 判断规则
     
     Args:
         custom_task_types: 自定义任务类型定义（覆盖默认）
         custom_complexity_rules: 自定义复杂度规则（覆盖默认）
         custom_memory_rules: 自定义记忆检索规则（覆盖默认）
-        custom_multi_agent_rules: 自定义 Multi-Agent 判断规则（覆盖默认）
         
     Returns:
         组装后的意图识别提示词
@@ -300,7 +219,6 @@ def get_intent_recognition_prompt(
         custom_task_types or INTENT_PROMPT_TASK_TYPES,
         custom_complexity_rules or INTENT_PROMPT_COMPLEXITY,
         custom_memory_rules or INTENT_PROMPT_MEMORY,
-        custom_multi_agent_rules or INTENT_PROMPT_MULTI_AGENT,
         INTENT_PROMPT_FOOTER,
     ]
     
@@ -319,7 +237,6 @@ __all__ = [
     "INTENT_PROMPT_TASK_TYPES",
     "INTENT_PROMPT_COMPLEXITY",
     "INTENT_PROMPT_MEMORY",
-    "INTENT_PROMPT_MULTI_AGENT",
     "INTENT_PROMPT_FOOTER",
     "get_intent_recognition_prompt",
     "get_default_intent_prompt",

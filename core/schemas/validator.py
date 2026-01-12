@@ -9,15 +9,11 @@ Schema 验证器 - 定义 Agent 配置的强类型规范
 参考：docs/15-FRAMEWORK_PROMPT_CONTRACT.md
 """
 
-from typing import Dict, Any, List, Optional, Literal, TYPE_CHECKING
+from typing import Dict, Any, List, Optional, Literal
 from pydantic import BaseModel, Field, validator, root_validator
 from enum import Enum
 
 from logger import get_logger
-
-# 🆕 V6.0: Multi-Agent 配置导入（避免循环导入）
-if TYPE_CHECKING:
-    from core.multi_agent.config import MultiAgentConfig
 
 logger = get_logger(__name__)
 
@@ -499,15 +495,6 @@ class AgentSchema(BaseModel):
     )
     
     # ============================================================
-    # 🆕 V6.0 Multi-Agent 配置
-    # ============================================================
-    
-    multi_agent: Optional["MultiAgentConfig"] = Field(
-        default=None,
-        description="Multi-Agent 编排配置（V6.0）"
-    )
-    
-    # ============================================================
     # 上下文限制
     # ============================================================
     
@@ -622,17 +609,6 @@ class AgentSchema(BaseModel):
         # 验证赋值
         validate_assignment = True
 
-
-# ============================================================
-# 🆕 V6.0: 延迟导入并重建 Pydantic 模型（避免循环导入）
-# ============================================================
-
-try:
-    from core.multi_agent.config import MultiAgentConfig
-    AgentSchema.model_rebuild()
-except ImportError:
-    # 如果 MultiAgentConfig 不可用，跳过
-    pass
 
 # ============================================================
 # 默认 Schema

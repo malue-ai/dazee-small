@@ -271,7 +271,6 @@ class SimpleAgent:
         else:
             logger.debug("○ 没有已注册的 Claude Skills")
     
-    
     async def chat(
         self,
         messages: List[Dict[str, str]] = None,
@@ -402,7 +401,6 @@ class SimpleAgent:
             if self._tracer:
                 stage = self._tracer.create_stage("intent_analysis")
                 stage.skip("Schema 未启用")
-        
         
         # =====================================================================
         # 阶段 3: Tool Selection (Schema 驱动优先)
