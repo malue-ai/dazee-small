@@ -1,10 +1,13 @@
 """
 AgentFactory - Prompt 驱动的 Agent 动态初始化
 
+🆕 V6.1: Schema 生成 Few-shot 化（替代硬编码映射）
+
 核心理念：
 - Prompt → LLM 生成 Schema → 动态初始化 Agent
 - 修改 Prompt 即可改变 Agent 行为
 - Prompt 是唯一的真相来源
+- 🆕 通过 Few-shot 示例引导 LLM 推断，而非关键词匹配
 
 参考：docs/15-FRAMEWORK_PROMPT_CONTRACT.md
 """
@@ -52,24 +55,109 @@ SCHEMA_GENERATOR_PROMPT = """
 
 分析用户提供的 System Prompt，生成最合适的 Agent Schema 配置。
 
-## 分析维度
+## 分析原则
 
-1. **任务复杂度**：
-   - 简单问答 → max_turns=8, plan_manager.enabled=false
-   - 复杂任务 → max_turns=15, plan_manager.enabled=true
+通过语义理解推断配置，而非关键词匹配。
 
-2. **工具需求**：
-   - 提到"数据分析"、"pandas" → tools=["e2b_sandbox"]
-   - 提到"搜索"、"查找" → tools=["web_search", "exa_search"]
-   - 提到"Excel"、"表格" → skills=[{"skill_id": "xlsx", "type": "custom"}]
-   - 提到"PPT"、"演示" → skills=[{"skill_id": "pptx", "type": "custom"}]
+1. **任务复杂度**：分析 Prompt 描述的任务性质
+2. **工具需求**：根据任务需求推断工具/技能
+3. **组件配置**：根据场景启用/配置组件
 
-3. **组件配置**：
-   - intent_analyzer: 默认启用，可配置 task_types, output_formats
-   - plan_manager: 复杂任务启用，配置 max_steps, granularity
-   - tool_selector: 默认启用，配置 selection_strategy, allow_parallel
-   - memory_manager: 默认启用，配置 retention_policy, working_memory_limit
-   - output_formatter: 默认启用，配置 default_format
+## Few-shot 示例（学习推断模式）
+
+<example>
+<prompt>
+你是一个专业的数据分析师，帮助用户分析销售数据、生成报表、可视化趋势。你擅长使用 pandas 处理数据，能够生成专业的 Excel 报告。
+</prompt>
+<schema>
+{
+  "name": "DataAnalyst",
+  "description": "专业数据分析助手",
+  "tools": ["e2b_sandbox"],
+  "skills": [{"skill_id": "xlsx", "type": "custom"}],
+  "plan_manager": {"enabled": true, "max_steps": 15},
+  "max_turns": 15,
+  "reasoning": "涉及数据处理、代码执行和报表生成，需要沙箱环境和 Excel 能力"
+}
+</schema>
+</example>
+
+<example>
+<prompt>
+你是一个简单的问答助手，回答用户的日常问题，如天气、时间、基础知识等。保持回复简洁明了。
+</prompt>
+<schema>
+{
+  "name": "QAAssistant",
+  "description": "简单问答助手",
+  "tools": [],
+  "skills": [],
+  "plan_manager": {"enabled": false},
+  "max_turns": 8,
+  "reasoning": "简单问答场景，无需工具和规划，快速响应"
+}
+</schema>
+</example>
+
+<example>
+<prompt>
+你是一个深度研究助手，帮助用户搜索信息、分析多个来源、整合观点并生成研究报告。需要从网络获取最新信息。
+</prompt>
+<schema>
+{
+  "name": "ResearchAgent",
+  "description": "深度研究助手",
+  "tools": ["web_search", "exa_search"],
+  "skills": [],
+  "plan_manager": {"enabled": true, "max_steps": 15, "granularity": "fine"},
+  "memory_manager": {"retention_policy": "session", "working_memory_limit": 30},
+  "max_turns": 20,
+  "reasoning": "研究任务需要多轮搜索和信息整合，启用细粒度规划"
+}
+</schema>
+</example>
+
+<example>
+<prompt>
+你是一个报告生成专家，能够根据用户需求生成 PPT 演示文稿、Excel 数据报表和 PDF 文档。支持多种输出格式。
+</prompt>
+<schema>
+{
+  "name": "ReportGenerator",
+  "description": "多格式报告生成专家",
+  "tools": ["e2b_sandbox"],
+  "skills": [
+    {"skill_id": "xlsx", "type": "custom"},
+    {"skill_id": "pptx", "type": "custom"},
+    {"skill_id": "pdf", "type": "custom"}
+  ],
+  "plan_manager": {"enabled": true, "max_steps": 12},
+  "output_formatter": {"default_format": "markdown", "include_metadata": true},
+  "max_turns": 15,
+  "reasoning": "报告生成需要多种文档技能和代码执行能力"
+}
+</schema>
+</example>
+
+<example>
+<prompt>
+你是一个编程助手，帮助用户编写代码、调试问题、解释代码逻辑。支持多种编程语言。
+</prompt>
+<schema>
+{
+  "name": "CodeAssistant",
+  "description": "编程助手",
+  "tools": ["e2b_sandbox"],
+  "skills": [],
+  "plan_manager": {"enabled": true, "max_steps": 10},
+  "output_formatter": {"default_format": "markdown", "code_highlighting": true},
+  "max_turns": 15,
+  "reasoning": "编程任务需要代码执行环境验证代码正确性"
+}
+</schema>
+</example>
+
+## 组件配置字段说明
 
 ## 组件配置字段说明
 

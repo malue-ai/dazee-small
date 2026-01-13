@@ -91,6 +91,21 @@ memory:
   smart_retrieval: true
   retention_policy: user
 
+# ==================== Multi-Agent 配置（V6.0）====================
+multi_agent:
+  # mode 选项：disabled / auto / enabled
+  mode: "auto"
+  max_parallel_workers: 5
+  execution_strategy: "auto"
+  
+  # 自动触发配置（mode=auto 时生效）
+  auto_trigger_keywords:
+    - "研究"
+    - "分析"
+    - "对比"
+    - "调研"
+  auto_trigger_min_complexity: "complex"
+
 # ==================== 高级配置 ====================
 advanced:
   intent_analyzer:

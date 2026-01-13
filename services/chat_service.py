@@ -22,6 +22,8 @@ from uuid import uuid4
 from logger import get_logger
 from core.agent import SimpleAgent
 from core.context import Context
+# 【待扩展】Multi-Agent 模块（已注释）
+# from core.multi_agent import MultiAgentOrchestrator, MultiAgentConfig
 from services.session_service import SessionService, get_session_service, SessionNotFoundError
 from services.conversation_service import get_conversation_service, ConversationNotFoundError
 from infra.database import AsyncSessionLocal, crud
@@ -64,9 +66,14 @@ class ChatService:
         self,
         session_service: Optional[SessionService] = None,
         default_model: str = "claude-sonnet-4-5-20250929"
+        # 【待扩展】Multi-Agent 配置（已注释）
+        # multi_agent_config: Optional[MultiAgentConfig] = None
     ):
         self.session_service = session_service or get_session_service()
         self.default_model = default_model
+        
+        # 【待扩展】Multi-Agent 配置（已注释）
+        # self.multi_agent_config = multi_agent_config or MultiAgentConfig()
         
         # 其他服务
         self.conversation_service = get_conversation_service()  # 用于 Context 加载消息
@@ -424,14 +431,24 @@ class ChatService:
             history_messages = await context.load_messages()
             logger.info(f"📚 历史消息已加载: {len(history_messages)} 条")
             
-            # 🆕 初始化 broadcaster 的消息累积（内容累积和持久化由 broadcaster 自动处理）
+            # =====================================================================
+            # 🎯 直接调用 SimpleAgent（意图分析在 Agent 内部完成）
+            # =====================================================================
+            # 
+            # 【待扩展】Multi-Agent 路由逻辑已注释，保留作为未来扩展：
+            # - 如需启用 Multi-Agent，取消注释下方代码块
+            # - 参考 core/multi_agent/ 模块
+            # =====================================================================
+            
+            # 初始化 broadcaster 的消息累积
             agent.broadcaster.start_message(session_id, assistant_message_id)
             
             # 🎯 调用 Agent.chat()
+            # - 意图分析：在 SimpleAgent 内部完成
             # - 内容累积：broadcaster 自动处理 content_start/delta/stop
             # - Checkpoint：broadcaster 在每个 content_stop 后自动保存
             # - 最终保存：broadcaster 在 message_stop 时自动完成
-            # - 🆕 variables：直接注入到 System Prompt（前端上下文）
+            # - variables：直接注入到 System Prompt（前端上下文）
             async for event in agent.chat(
                 messages=history_messages,
                 session_id=session_id,
@@ -453,6 +470,36 @@ class ChatService:
                 if event_type == "conversation_delta":
                     # conversation 更新同步到数据库
                     await self._handle_conversation_delta(event, conversation_id)
+            
+            # =====================================================================
+            # 【待扩展】Multi-Agent 路由逻辑（已注释）
+            # =====================================================================
+            # 
+            # from core.multi_agent.config import MultiAgentMode
+            # 
+            # # 1. 提取用户 query
+            # user_text = extract_text_from_message(message)
+            # 
+            # # 2. 意图分析（获取 needs_multi_agent）
+            # intent_result = None
+            # if hasattr(agent, 'intent_analyzer') and agent.intent_analyzer:
+            #     intent_result = await agent.intent_analyzer.analyze(user_text)
+            # 
+            # # 3. 判断是否使用 Multi-Agent
+            # if self.multi_agent_config.mode == MultiAgentMode.DISABLED:
+            #     should_use_ma = False
+            # elif self.multi_agent_config.mode == MultiAgentMode.ENABLED:
+            #     should_use_ma = True
+            # else:  # AUTO
+            #     should_use_ma = intent_result.needs_multi_agent if intent_result else False
+            # 
+            # # 4. 根据决策选择执行路径
+            # if should_use_ma:
+            #     await self._execute_multi_agent(...)
+            # else:
+            #     # SimpleAgent 逻辑（当前使用）
+            #     pass
+            # =====================================================================
             
             # 计算执行时间
             duration_ms = int((time.time() - start_time) * 1000)
@@ -561,6 +608,50 @@ class ChatService:
             
             # ⚠️ 不要 raise，避免 "Task exception was never retrieved"
             # 异常已经通过事件和日志记录，不需要传播
+    
+    # =========================================================================
+    # 【待扩展】Multi-Agent 执行方法（已注释）
+    # 
+    # 如需启用 Multi-Agent 功能，取消注释以下方法，并：
+    # 1. 取消注释顶部的 from core.multi_agent import ... 
+    # 2. 取消注释 __init__ 中的 multi_agent_config 参数
+    # 3. 取消注释 _run_agent 中的 Multi-Agent 路由逻辑
+    # =========================================================================
+    #
+    # async def _execute_multi_agent(
+    #     self,
+    #     user_query: str,
+    #     session_id: str,
+    #     assistant_message_id: str,
+    #     agent: SimpleAgent,
+    #     context: Dict[str, Any] = None
+    # ):
+    #     """
+    #     使用 MultiAgentOrchestrator 执行任务
+    #     
+    #     流程：
+    #     1. 创建 MultiAgentOrchestrator
+    #     2. 调用 orchestrator.execute()
+    #     3. 转换事件并通过 EventBroadcaster 发送
+    #     4. 将最终结果保存到数据库
+    #     """
+    #     orchestrator = MultiAgentOrchestrator(
+    #         event_manager=agent.event_manager,
+    #         memory_manager=agent.memory,
+    #         llm_service=agent.llm,
+    #         config=None,
+    #         prompt_cache=agent.prompt_cache,
+    #         workers_config=getattr(agent, 'workers_config', [])
+    #     )
+    #     
+    #     async for ma_event in orchestrator.execute(
+    #         user_query=user_query,
+    #         session_id=session_id,
+    #         context=context
+    #     ):
+    #         # 转换 Multi-Agent 事件为标准事件格式
+    #         pass
+    # =========================================================================
     
     async def _handle_conversation_delta(
         self,

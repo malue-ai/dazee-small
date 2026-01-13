@@ -356,7 +356,7 @@ class PromptParser:
     @classmethod
     def parse(cls, raw_prompt: str, use_llm: bool = True) -> PromptSchema:
         """
-        解析完整的系统提示词
+        解析完整的系统提示词（同步版本）
         
         🆕 V4.6.1: 支持 LLM 语义分析模式
         
@@ -373,107 +373,148 @@ class PromptParser:
             return cls._parse_with_regex(raw_prompt)
     
     @classmethod
+    async def parse_async(cls, raw_prompt: str, use_llm: bool = True) -> PromptSchema:
+        """
+        🆕 V5.2: 异步版本的解析方法
+        
+        在 async 上下文中调用时推荐使用此方法，
+        确保 LLM 分析能正确执行（不会因 event loop 问题跳过）
+        
+        Args:
+            raw_prompt: 运营写的完整提示词（任意格式）
+            use_llm: 是否使用 LLM 语义分析（默认 True，推荐）
+            
+        Returns:
+            PromptSchema 对象
+        """
+        if use_llm:
+            return await cls._parse_with_llm_async(raw_prompt)
+        else:
+            return cls._parse_with_regex(raw_prompt)
+    
+    @classmethod
+    async def _parse_with_llm_async(cls, raw_prompt: str) -> PromptSchema:
+        """
+        🆕 V5.2: 异步版本的 LLM 分析
+        
+        确保在 async 上下文中正确调用 LLM
+        """
+        try:
+            from core.prompt.llm_analyzer import analyze_prompt_with_llm
+            
+            # 使用 async 版本调用 LLM 分析
+            analysis = await analyze_prompt_with_llm(raw_prompt)
+            
+            # 转换为 PromptSchema（与同步版本逻辑相同）
+            return cls._convert_analysis_to_schema(analysis, raw_prompt)
+            
+        except Exception as e:
+            logger.warning(f"⚠️ LLM 分析失败，使用默认 Schema: {e}")
+            # 🆕 V5.2: 失败时返回默认 Schema，不做正则回退
+            return cls._create_default_schema(raw_prompt)
+    
+    @classmethod
+    def _convert_analysis_to_schema(cls, analysis, raw_prompt: str) -> PromptSchema:
+        """
+        将 LLM 分析结果转换为 PromptSchema
+        
+        公共方法，供同步和异步版本共用
+        """
+        schema = PromptSchema(
+            agent_name=analysis.agent_name,
+            agent_role=analysis.agent_role,
+            raw_prompt=raw_prompt,
+            tools=analysis.tools,
+        )
+        
+        # 转换模块
+        for module_id, module_analysis in analysis.modules.items():
+            if not module_analysis.found:
+                continue
+            
+            try:
+                module = PromptModule(module_id)
+                schema.modules[module] = PromptModuleContent(
+                    module=module,
+                    content=module_analysis.content or module_analysis.summary,
+                    priority=cls.MODULE_PRIORITY.get(module, 50),
+                )
+            except ValueError:
+                # 未知的模块 ID，跳过
+                logger.debug(f"   跳过未知模块: {module_id}")
+        
+        # 转换复杂度关键词
+        for level, rule in analysis.complexity_rules.items():
+            try:
+                complexity = TaskComplexity(level)
+                schema.complexity_keywords[complexity] = rule.keywords
+            except ValueError:
+                pass
+        
+        # 转换意图类型
+        schema.intent_types = [
+            {"name": intent.name, "keywords": intent.keywords}
+            for intent in analysis.intent_types
+        ]
+        
+        logger.info(f"✅ LLM 解析提示词完成: {len(schema.modules)} 个模块")
+        
+        return schema
+    
+    @classmethod
+    def _create_default_schema(cls, raw_prompt: str) -> PromptSchema:
+        """
+        🆕 V5.2: 创建默认 Schema（当 LLM 失败时）
+        
+        不做任何假设，保留完整原始 prompt
+        """
+        logger.info("📜 使用默认 Schema（保留完整原始 prompt）")
+        return PromptSchema(
+            agent_name="GeneralAgent",
+            agent_role="通用智能助手",
+            raw_prompt=raw_prompt,
+            modules={},  # 空 = 不做模块假设
+            tools=[],
+        )
+    
+    @classmethod
     def _parse_with_llm(cls, raw_prompt: str) -> PromptSchema:
         """
-        🆕 V4.6.1: 使用 LLM 语义分析解析提示词
+        🆕 V4.6.1: 使用 LLM 语义分析解析提示词（同步版本）
         
         核心优势：
         - 不依赖特定格式，理解语义
         - 运营可以用任何方式写提示词
         - 更智能的模块识别
+        
+        🆕 V5.2: 失败时使用默认配置，不做正则回退
         """
         try:
             from core.prompt.llm_analyzer import analyze_prompt_with_llm_sync
             
-            # 调用 LLM 分析
+            # 调用 LLM 分析（同步版本）
             analysis = analyze_prompt_with_llm_sync(raw_prompt)
             
-            # 转换为 PromptSchema
-            schema = PromptSchema(
-                agent_name=analysis.agent_name,
-                agent_role=analysis.agent_role,
-                raw_prompt=raw_prompt,
-                tools=analysis.tools,
-            )
-            
-            # 转换模块
-            for module_id, module_analysis in analysis.modules.items():
-                if not module_analysis.found:
-                    continue
-                
-                try:
-                    module = PromptModule(module_id)
-                    schema.modules[module] = PromptModuleContent(
-                        module=module,
-                        content=module_analysis.content or module_analysis.summary,
-                        priority=cls.MODULE_PRIORITY.get(module, 50),
-                    )
-                except ValueError:
-                    # 未知的模块 ID，跳过
-                    logger.debug(f"   跳过未知模块: {module_id}")
-            
-            # 转换复杂度关键词
-            for level, rule in analysis.complexity_rules.items():
-                try:
-                    complexity = TaskComplexity(level)
-                    schema.complexity_keywords[complexity] = rule.keywords
-                except ValueError:
-                    pass
-            
-            # 转换意图类型
-            schema.intent_types = [
-                {"name": intent.name, "keywords": intent.keywords}
-                for intent in analysis.intent_types
-            ]
-            
-            logger.info(f"✅ LLM 解析提示词完成: {len(schema.modules)} 个模块")
-            
-            return schema
+            # 使用公共方法转换
+            return cls._convert_analysis_to_schema(analysis, raw_prompt)
             
         except Exception as e:
-            logger.warning(f"⚠️ LLM 分析失败，回退到正则匹配: {e}")
-            return cls._parse_with_regex(raw_prompt)
+            logger.warning(f"⚠️ LLM 分析失败，使用默认 Schema: {e}")
+            # 🆕 V5.2: 失败时返回默认 Schema，不做正则回退
+            return cls._create_default_schema(raw_prompt)
     
     @classmethod
     def _parse_with_regex(cls, raw_prompt: str) -> PromptSchema:
         """
-        回退方案：使用正则表达式解析（当 LLM 不可用时）
+        🆕 V5.3: 已废弃的正则解析方法
         
-        ⚠️ 注意：这种方式依赖特定格式，不推荐使用
+        按照新架构（15-FRAMEWORK_PROMPT_CONTRACT.md）：
+        - 不再使用正则匹配，因为运营可以用任何方式编写提示词
+        - 直接返回默认 Schema，保留原始提示词
+        - LLM 语义分析是唯一推荐的解析方式
         """
-        logger.info("📜 使用正则匹配模式解析提示词")
-        
-        schema = PromptSchema(raw_prompt=raw_prompt)
-        
-        # 1. 提取基本信息
-        schema.agent_name = cls._extract_agent_name(raw_prompt)
-        schema.agent_role = cls._extract_agent_role(raw_prompt)
-        
-        # 2. 解析各模块
-        for module, patterns in cls.MODULE_PATTERNS.items():
-            content = cls._extract_module(raw_prompt, patterns)
-            if content:
-                schema.modules[module] = PromptModuleContent(
-                    module=module,
-                    content=content,
-                    priority=cls._get_module_priority(module)
-                )
-        
-        # 3. 提取复杂度配置
-        schema.complexity_keywords = cls._extract_complexity_keywords(raw_prompt)
-        schema.complexity_thresholds = cls._extract_complexity_thresholds(raw_prompt)
-        
-        # 4. 提取工具列表
-        schema.tools = cls._extract_tools(raw_prompt)
-        
-        # 5. 提取意图类型
-        schema.intent_types = cls._extract_intent_types(raw_prompt)
-        
-        logger.info(f"✅ 正则解析提示词完成: {len(schema.modules)} 个模块")
-        for module in schema.modules:
-            logger.debug(f"   • {module.value}")
-        
-        return schema
+        logger.warning("⚠️ _parse_with_regex 已废弃，返回默认 Schema")
+        return cls._create_default_schema(raw_prompt)
     
     @staticmethod
     def _extract_agent_name(raw_prompt: str) -> str:
@@ -644,12 +685,42 @@ class PromptGenerator:
     提示词生成器
     
     🆕 V4.6: 智能按需组装（不是简单的分层裁剪）
+    🆕 V5.1: 增加模块内容大小限制，确保 Simple 版本足够精简
     
     核心原则：
     1. 框架组件已处理的模块 → 自动排除（避免重复）
     2. 根据任务实际需要按需组装（不是复杂=全量）
     3. 最小化系统提示词长度 → 节省 token
+    4. 🆕 V5.1: Simple 版本严格控制在 15k 字符以内
     """
+    
+    # 🆕 V5.1: 各复杂度的模块内容大小限制（字符数）
+    MODULE_SIZE_LIMITS = {
+        TaskComplexity.SIMPLE: {
+            PromptModule.ROLE_DEFINITION: 2000,       # 角色定义，保留核心描述
+            PromptModule.ABSOLUTE_PROHIBITIONS: 3000,  # 禁令，完整保留
+            PromptModule.OUTPUT_FORMAT: 5000,          # 输出格式，保留关键规则
+        },
+        TaskComplexity.MEDIUM: {
+            PromptModule.ROLE_DEFINITION: 5000,
+            PromptModule.ABSOLUTE_PROHIBITIONS: 5000,
+            PromptModule.OUTPUT_FORMAT: 10000,
+            PromptModule.INTENT_RECOGNITION: 3000,
+            PromptModule.TASK_COMPLEXITY: 2000,
+            PromptModule.TOOL_SELECTION: 5000,
+            PromptModule.PROGRESS_FEEDBACK: 2000,
+        },
+        TaskComplexity.COMPLEX: {
+            # Complex 不限制大小，但仍会排除冗余模块
+        },
+    }
+    
+    # 🆕 V5.1: 总提示词大小限制（字符数）
+    TOTAL_SIZE_LIMITS = {
+        TaskComplexity.SIMPLE: 15000,   # ~4k tokens
+        TaskComplexity.MEDIUM: 40000,   # ~10k tokens
+        TaskComplexity.COMPLEX: 80000,  # ~20k tokens
+    }
     
     @classmethod
     def generate(
@@ -662,8 +733,8 @@ class PromptGenerator:
         根据复杂度生成对应版本的提示词
         
         🆕 V4.6: 智能按需组装
-        - 排除框架组件已处理的模块
-        - 避免无谓的长提示词
+        🆕 V5.1: 增加大小限制，确保各版本在合理范围内
+        🆕 V5.2: 当模块为空时，使用原始提示词内容作为回退
         
         Args:
             schema: 提示词 Schema
@@ -688,6 +759,11 @@ class PromptGenerator:
         ]
         modules_to_include.sort(key=lambda m: m.priority)
         
+        # 🆕 V5.2: 当模块为空但有原始提示词时，使用原始内容作为回退
+        if not modules_to_include and schema.raw_prompt:
+            logger.warning(f"⚠️ 模块解析为空，使用原始提示词作为回退")
+            return cls._generate_from_raw_prompt(schema, complexity)
+        
         # 3. 组装提示词
         parts = []
         
@@ -698,19 +774,36 @@ class PromptGenerator:
         # 添加复杂度说明
         parts.append(cls._generate_complexity_header(complexity, schema))
         
-        # 添加各模块内容
+        # 🆕 V5.1: 获取模块大小限制
+        size_limits = cls.MODULE_SIZE_LIMITS.get(complexity, {})
+        
+        # 添加各模块内容（🆕 V5.1: 应用大小限制）
         for module_content in modules_to_include:
             # Simple 任务使用简化版内容（如果有）
             if complexity == TaskComplexity.SIMPLE and module_content.simplified_content:
-                parts.append(module_content.simplified_content)
+                content = module_content.simplified_content
             else:
-                parts.append(module_content.content)
+                content = module_content.content
+            
+            # 🆕 V5.1: 应用模块大小限制
+            max_size = size_limits.get(module_content.module)
+            if max_size and len(content) > max_size:
+                content = cls._truncate_content(content, max_size, module_content.module)
+                logger.debug(f"   模块 {module_content.module.value} 已截断: {len(module_content.content)} -> {len(content)} 字符")
+            
+            parts.append(content)
         
         # 4. 添加工具列表（根据复杂度裁剪）
         if complexity in {TaskComplexity.MEDIUM, TaskComplexity.COMPLEX}:
             parts.append(cls._generate_tools_section(schema.tools, complexity))
         
         result = "\n\n---\n\n".join(parts)
+        
+        # 🆕 V5.1: 应用总大小限制
+        total_limit = cls.TOTAL_SIZE_LIMITS.get(complexity)
+        if total_limit and len(result) > total_limit:
+            logger.warning(f"⚠️ {complexity.value} 版提示词超出限制: {len(result)} > {total_limit}，进行截断")
+            result = cls._truncate_total(result, total_limit)
         
         # 🆕 V4.6: 增强日志
         excluded_count = len(schema.excluded_modules)
@@ -720,6 +813,183 @@ class PromptGenerator:
             logger.debug(f"   排除模块: {[m.value for m in schema.excluded_modules]}")
         
         return result
+    
+    @classmethod
+    def _generate_from_raw_prompt(
+        cls,
+        schema: PromptSchema,
+        complexity: TaskComplexity,
+    ) -> str:
+        """
+        🆕 V5.2: 当模块解析失败时，从原始提示词生成对应复杂度的版本
+        
+        策略：
+        - Simple: 提取核心部分（角色定义 + 禁令 + 基本格式）
+        - Medium: 核心 + 工具 + 部分流程
+        - Complex: 完整内容（按大小限制截断）
+        """
+        raw_prompt = schema.raw_prompt
+        total_limit = cls.TOTAL_SIZE_LIMITS.get(complexity, 80000)
+        
+        # 根据复杂度提取不同部分
+        if complexity == TaskComplexity.SIMPLE:
+            # Simple: 仅保留核心规则（角色定义 + 禁令）
+            result = cls._extract_core_for_simple(raw_prompt, total_limit)
+        elif complexity == TaskComplexity.MEDIUM:
+            # Medium: 核心 + 工具 + 基本流程
+            result = cls._extract_core_for_medium(raw_prompt, total_limit)
+        else:
+            # Complex: 尽可能完整，按大小限制截断
+            if len(raw_prompt) > total_limit:
+                result = cls._truncate_total(raw_prompt, total_limit)
+            else:
+                result = raw_prompt
+        
+        logger.info(f"✅ 从原始提示词生成 {complexity.value} 版: {len(result)} 字符 (原始: {len(raw_prompt)} 字符)")
+        return result
+    
+    @classmethod
+    def _extract_core_for_simple(cls, raw_prompt: str, max_size: int) -> str:
+        """
+        🆕 V5.2: 为 Simple 任务提取核心内容
+        
+        提取内容：
+        1. 角色定义（开头到第一个分隔符）
+        2. 绝对禁令（<absolute_prohibitions> 标签）
+        3. 输出格式基础（output_format 相关）
+        """
+        import re
+        
+        parts = []
+        
+        # 1. 提取角色定义（开头部分）
+        role_match = re.search(
+            r'^(#\s*角色.*?)(?=<absolute_prohibitions|## 绝对禁令|---\n\n#|\Z)', 
+            raw_prompt, 
+            re.MULTILINE | re.DOTALL
+        )
+        if role_match:
+            role_content = role_match.group(1).strip()
+            if len(role_content) > 3000:
+                role_content = role_content[:3000] + "\n\n<!-- 角色定义已精简 -->"
+            parts.append(role_content)
+        else:
+            # 没有匹配到，取开头 3000 字符
+            parts.append(raw_prompt[:3000] + "\n\n<!-- 开头部分 -->")
+        
+        # 2. 提取绝对禁令
+        prohibitions_match = re.search(
+            r'<absolute_prohibitions.*?>.*?</absolute_prohibitions>', 
+            raw_prompt, 
+            re.DOTALL
+        )
+        if prohibitions_match:
+            prohibitions = prohibitions_match.group(0)
+            if len(prohibitions) > 5000:
+                prohibitions = prohibitions[:5000] + "\n</absolute_prohibitions>"
+            parts.append(prohibitions)
+        
+        # 3. 提取输出格式基础
+        output_match = re.search(
+            r'(## 核心交互模型.*?)(?=## 工具|## THINK|## 可用工具|---\n\n##|\Z)',
+            raw_prompt,
+            re.MULTILINE | re.DOTALL
+        )
+        if output_match:
+            output_content = output_match.group(1).strip()
+            if len(output_content) > 4000:
+                output_content = output_content[:4000] + "\n\n<!-- 格式规则已精简 -->"
+            parts.append(output_content)
+        
+        result = "\n\n---\n\n".join(parts)
+        
+        # 确保不超过限制
+        if len(result) > max_size:
+            result = cls._truncate_total(result, max_size)
+        
+        return result
+    
+    @classmethod
+    def _extract_core_for_medium(cls, raw_prompt: str, max_size: int) -> str:
+        """
+        🆕 V5.2: 为 Medium 任务提取核心+扩展内容
+        """
+        import re
+        
+        # Medium 任务保留更多内容
+        # 找到工具列表之后的部分可以截断
+        tool_section_start = raw_prompt.find("## 可用工具列表")
+        if tool_section_start == -1:
+            tool_section_start = raw_prompt.find("<tool id=")
+        
+        if tool_section_start > 0:
+            # 保留工具列表之前的全部内容 + 工具列表的一部分
+            core_part = raw_prompt[:tool_section_start]
+            
+            # 提取工具列表（限制大小）
+            tool_section = raw_prompt[tool_section_start:]
+            if len(tool_section) > 15000:
+                tool_section = tool_section[:15000] + "\n\n<!-- 工具列表已精简 -->"
+            
+            result = core_part + tool_section
+        else:
+            result = raw_prompt
+        
+        # 确保不超过限制
+        if len(result) > max_size:
+            result = cls._truncate_total(result, max_size)
+        
+        return result
+    
+    @staticmethod
+    def _truncate_content(content: str, max_size: int, module: PromptModule) -> str:
+        """
+        🆕 V5.1: 智能截断模块内容
+        
+        截断策略：
+        - 保留开头的核心规则
+        - 在合适的分隔符处截断
+        - 添加省略标记
+        """
+        if len(content) <= max_size:
+            return content
+        
+        # 寻找合适的截断点（段落、列表项、标题等）
+        truncate_at = max_size
+        separators = ["\n\n", "\n- ", "\n## ", "\n### ", "\n"]
+        
+        for sep in separators:
+            last_sep = content.rfind(sep, 0, max_size)
+            if last_sep > max_size * 0.6:  # 至少保留 60% 的内容
+                truncate_at = last_sep
+                break
+        
+        truncated = content[:truncate_at].rstrip()
+        
+        # 添加省略标记
+        truncated += f"\n\n<!-- {module.value}: 内容已精简，完整规则参见 Complex 版本 -->"
+        
+        return truncated
+    
+    @staticmethod
+    def _truncate_total(content: str, max_size: int) -> str:
+        """
+        🆕 V5.1: 截断总提示词
+        """
+        if len(content) <= max_size:
+            return content
+        
+        # 在分隔符处截断
+        truncate_at = max_size
+        separators = ["\n\n---\n\n", "\n\n", "\n"]
+        
+        for sep in separators:
+            last_sep = content.rfind(sep, 0, max_size)
+            if last_sep > max_size * 0.8:
+                truncate_at = last_sep
+                break
+        
+        return content[:truncate_at].rstrip() + "\n\n<!-- 提示词已精简 -->"
     
     @staticmethod
     def _get_required_modules(

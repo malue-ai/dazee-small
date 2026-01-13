@@ -44,24 +44,46 @@ profiles:
 
   # ==================== 提示词分析 ====================
   llm_analyzer:
-    description: "分析运营写的原始提示词，生成结构化 Schema"
-    model: "claude-haiku-4-5-20251001"
-    max_tokens: 4000
+    description: "分析运营写的原始提示词，生成结构化 Schema（支持超长 prompt）"
+    model: "claude-sonnet-4-5-20250929"
+    max_tokens: 64000
     temperature: 0
     enable_thinking: false
     enable_caching: false
-    timeout: 60.0
-    max_retries: 2
+    timeout: 600.0  # 10 分钟，支持超长 prompt 分析
+    max_retries: 3
 
   # ==================== Schema 生成 ====================
   schema_generator:
     description: "根据 Prompt 动态生成 Agent Schema"
-    model: "claude-haiku-4-5-20251001"
-    max_tokens: 2048
+    model: "claude-sonnet-4-5-20250929"
+    max_tokens: 4096
     temperature: 0
     enable_thinking: false
     enable_caching: false
-    timeout: 60.0
+    timeout: 90.0
+    max_retries: 2
+
+  # ==================== 提示词智能合并 ====================
+  prompt_merger:
+    description: "智能合并框架规则与运营 prompt（支持超长 prompt）"
+    model: "claude-sonnet-4-5-20250929"
+    max_tokens: 64000
+    temperature: 0
+    enable_thinking: false
+    enable_caching: false
+    timeout: 600.0  # 10 分钟，支持超长 prompt 合并
+    max_retries: 3
+
+  # ==================== 🆕 V5.5 场景化提示词分解 ====================
+  prompt_decomposer:
+    description: "将运营 prompt 分解为场景化提示词（意图/简单/中等/复杂）"
+    model: "claude-sonnet-4-5-20250929"
+    max_tokens: 60000  # Claude Sonnet 4.5 max output = 64000
+    temperature: 0
+    enable_thinking: false
+    enable_caching: false
+    timeout: 300.0  # 5 分钟，单个分解任务
     max_retries: 2
 
   # ==================== 工具能力推断 ====================

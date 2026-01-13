@@ -178,16 +178,20 @@ class LLMPromptAnalyzer:
         self._llm_service = llm_service
     
     def _get_llm_service(self):
-        """懒加载 LLM 服务"""
+        """懒加载 LLM 服务（使用配置文件中的 llm_analyzer profile）"""
         if self._llm_service is None:
             from core.llm import create_claude_service
-            # 使用 Haiku（快速且便宜），禁用 Thinking（提示词分析是简单任务）
-            # 🆕 V5.0: 使用较短超时，提示词分析应该很快
+            from config.llm_config import get_llm_profile
+            
+            # 🆕 V5.3: 从配置文件获取 LLM Profile（优先使用 Claude Sonnet 4.5）
+            profile = get_llm_profile("llm_analyzer")
+            logger.info(f"📦 使用 LLM Profile: llm_analyzer, model={profile.get('model')}")
+            
             self._llm_service = create_claude_service(
-                model="claude-haiku-4-5-20251001",
-                enable_thinking=False,
-                timeout=60.0,   # 60 秒超时
-                max_retries=2   # 最多重试 2 次
+                model=profile.get("model"),
+                enable_thinking=profile.get("enable_thinking", False),
+                timeout=profile.get("timeout", 30.0),
+                max_retries=profile.get("max_retries", 2)
             )
         return self._llm_service
     
@@ -246,10 +250,10 @@ class LLMPromptAnalyzer:
             
         except json.JSONDecodeError as e:
             logger.error(f"❌ LLM 返回的 JSON 解析失败: {e}")
-            return self._fallback_analysis(raw_prompt)
+            return self._default_fallback(raw_prompt)
         except Exception as e:
             logger.error(f"❌ LLM 分析失败: {e}")
-            return self._fallback_analysis(raw_prompt)
+            return self._default_fallback(raw_prompt)
     
     def _parse_analysis_result(
         self, 
@@ -336,170 +340,64 @@ class LLMPromptAnalyzer:
         
         return result
     
-    def _fallback_analysis(self, raw_prompt: str) -> LLMAnalysisResult:
+    def _default_fallback(self, raw_prompt: str) -> LLMAnalysisResult:
         """
-        回退分析（当 LLM 调用失败时）
+        默认回退（当 LLM 调用失败时）
         
-        使用正则表达式 + 启发式方法提取模块
+        🆕 V5.2 架构修复：
+        - 不使用正则匹配（运营 prompt 格式任意，正则不可靠）
+        - 返回默认配置 + 原始 prompt（保留完整内容）
+        - 让 Agent 使用完整的原始 prompt 运行
+        
+        参考：15-FRAMEWORK_PROMPT_CONTRACT.md
         """
-        logger.warning("⚠️ 使用回退分析（LLM 调用失败）")
-        import re
+        logger.warning("⚠️ LLM 分析失败，使用默认配置（保留原始 prompt）")
         
-        result = LLMAnalysisResult(raw_prompt=raw_prompt)
+        # 返回最小化的默认配置
+        # modules 为空 = 不做任何假设，不做任何裁剪
+        # raw_prompt 保留完整 = Agent 使用原始的运营 prompt
+        result = LLMAnalysisResult(
+            agent_name="GeneralAgent",
+            agent_role="通用智能助手",
+            modules={},  # 空 = 不做模块假设
+            complexity_rules={},  # 空 = 使用默认复杂度规则
+            tools=[],  # 空 = 由 config.yaml 配置
+            intent_types=[],  # 空 = 使用默认意图识别
+            raw_prompt=raw_prompt,  # 保留完整原始 prompt
+        )
         
-        # 1. 提取 agent 名称
-        name_patterns = [
-            r'名为\s*["""]?([^"""\s]+)["""]?\s*的',
-            r'你是.*?"([^"]+)"',
-        ]
-        for pattern in name_patterns:
-            match = re.search(pattern, raw_prompt)
-            if match:
-                result.agent_name = match.group(1)
-                break
-        
-        # 2. 提取 agent 角色
-        role_match = re.search(r'^#\s*角色.*?\n(.+?)(?=\n\n|\*\*)', raw_prompt, re.MULTILINE | re.DOTALL)
-        if role_match:
-            result.agent_role = role_match.group(1).strip()[:200]
-        
-        # 3. 使用正则匹配提取各模块（与 prompt_layer.py 的 MODULE_PATTERNS 一致）
-        module_patterns = {
-            "role_definition": [
-                (r'^# 角色.*?(?=^# |\n---\n|<absolute_prohibitions|\Z)', re.MULTILINE | re.DOTALL),
-            ],
-            "absolute_prohibitions": [
-                (r'<absolute_prohibitions.*?>.*?</absolute_prohibitions>', re.DOTALL),
-            ],
-            "context_protection": [
-                (r'<context_self_protection.*?>.*?</context_self_protection>', re.DOTALL),
-            ],
-            "intent_recognition": [
-                (r'<intent_recognition_flow>.*?</intent_recognition_flow>', re.DOTALL),
-            ],
-            "task_complexity": [
-                (r'<task_complexity_system>.*?</task_complexity_system>', re.DOTALL),
-            ],
-            "output_format": [
-                (r'## \d*\.?\s*核心架构.*?(?=^## \d|^# |\Z)', re.MULTILINE | re.DOTALL),
-                (r'## \d*\.?\s*THINK 段规则.*?(?=^## \d|^# |\Z)', re.MULTILINE | re.DOTALL),
-                (r'## \d*\.?\s*RESPONSE 段规则.*?(?=^## \d|^# |\Z)', re.MULTILINE | re.DOTALL),
-                (r'## \d*\.?\s*JSON 段规则.*?(?=^## \d|^# |\Z)', re.MULTILINE | re.DOTALL),
-            ],
-            "plan_object": [
-                (r'### `?Plan`? 对象定义.*?(?=^###|^## |\Z)', re.MULTILINE | re.DOTALL),
-                (r'<plan_schema>.*?</plan_schema>', re.DOTALL),
-            ],
-            "data_context": [
-                (r'### `?Data_Context`? 对象定义.*?(?=^###|^## |\Z)', re.MULTILINE | re.DOTALL),
-                (r'<data_context_schema>.*?</data_context_schema>', re.DOTALL),
-            ],
-            "react_validation": [
-                (r'### `?think`? 阶段的 `?ReAct`?.*?(?=^###|^## |\Z)', re.MULTILINE | re.DOTALL),
-                (r'<react_validation_loop>.*?</react_validation_loop>', re.DOTALL),
-            ],
-            "quality_gates": [
-                (r'<final_validation_checklist>.*?</final_validation_checklist>', re.DOTALL),
-                (r'## 交付流程设计.*?(?=^## |\Z)', re.MULTILINE | re.DOTALL),
-            ],
-            "hitl": [
-                (r'## Human-in-the-Loop.*?(?=^## |\Z)', re.MULTILINE | re.DOTALL),
-                (r'<hitl_trigger_conditions>.*?</hitl_trigger_conditions>', re.DOTALL),
-            ],
-            "tool_selection": [
-                (r'## 工具选择策略.*?(?=^## |\Z)', re.MULTILINE | re.DOTALL),
-                (r'## 可用工具列表.*?(?=^## |\Z)', re.MULTILINE | re.DOTALL),
-            ],
-            "progress_feedback": [
-                (r'## 进度反馈.*?(?=^## |\Z)', re.MULTILINE | re.DOTALL),
-                (r'<waiting_time_rule.*?>.*?</waiting_time_rule>', re.DOTALL),
-            ],
-            "final_delivery": [
-                (r'### 第三步.*?最终输出格式定义.*?(?=^## |\Z)', re.MULTILINE | re.DOTALL),
-            ],
-        }
-        
-        # 模块重要性配置
-        importance_map = {
-            "role_definition": "high",
-            "absolute_prohibitions": "high",
-            "output_format": "high",
-            "intent_recognition": "medium",
-            "task_complexity": "medium",
-            "tool_selection": "medium",
-            "progress_feedback": "low",
-            "context_protection": "medium",
-            "plan_object": "medium",
-            "data_context": "medium",
-            "react_validation": "low",
-            "quality_gates": "low",
-            "final_delivery": "low",
-            "hitl": "low",
-        }
-        
-        for module_id, patterns in module_patterns.items():
-            for pattern, flags in patterns:
-                match = re.search(pattern, raw_prompt, flags)
-                if match:
-                    content = match.group(0).strip()
-                    if len(content) > 50:  # 只保留有实质内容的模块
-                        result.modules[module_id] = ModuleAnalysis(
-                            found=True,
-                            summary=f"提取的 {module_id} 模块",
-                            content=content,
-                            importance=importance_map.get(module_id, "medium"),
-                            can_simplify=module_id not in ["role_definition", "absolute_prohibitions", "output_format"],
-                        )
-                        break
-        
-        # 4. 提取工具列表
-        tool_matches = re.findall(r'<tool\s+id="\d+"\s+name="([^"]+)"', raw_prompt)
-        result.tools = list(set(tool_matches))
-        
-        # 5. 提取意图类型
-        intent_section = re.search(r'<intent_types>.*?</intent_types>', raw_prompt, re.DOTALL)
-        if intent_section:
-            intent_matches = re.findall(
-                r'<intent\s+id="(\d+)"\s+name="([^"]+)".*?<keywords>(.*?)</keywords>',
-                intent_section.group(0),
-                re.DOTALL
-            )
-            for intent_id, name, keywords in intent_matches:
-                result.intent_types.append(IntentType(
-                    name=name,
-                    keywords=[k.strip() for k in keywords.split(',') if k.strip()],
-                ))
-        
-        # 6. 提取复杂度规则
-        complexity_section = re.search(r'<task_complexity_system>.*?</task_complexity_system>', raw_prompt, re.DOTALL)
-        if complexity_section:
-            for level, complexity_key in [("1", "simple"), ("2", "medium"), ("3", "complex")]:
-                level_match = re.search(
-                    rf'<level id="{level}".*?<keywords>(.*?)</keywords>',
-                    complexity_section.group(0),
-                    re.DOTALL
-                )
-                if level_match:
-                    keywords_raw = level_match.group(1)
-                    keywords = [k.strip() for k in re.split(r'[,、]', keywords_raw) if k.strip()]
-                    result.complexity_rules[complexity_key] = ComplexityRule(
-                        keywords=keywords,
-                        description=f"{complexity_key} 任务"
-                    )
-        
-        logger.info(f"✅ 回退分析完成: {result.agent_name}, 识别 {len(result.modules)} 个模块")
-        for module_id in result.modules:
-            logger.debug(f"   • {module_id}")
+        logger.info("✅ 默认配置：空模块 + 完整原始 prompt")
         
         return result
     
+    async def analyze_in_running_loop(self, raw_prompt: str) -> LLMAnalysisResult:
+        """
+        在已运行的事件循环中执行分析
+        
+        🆕 V5.2: 解决 async 上下文中调用的问题
+        """
+        return await self.analyze(raw_prompt)
+    
     def analyze_sync(self, raw_prompt: str) -> LLMAnalysisResult:
-        """同步版本的分析方法"""
+        """
+        同步版本的分析方法
+        
+        🆕 V5.2 架构修复：
+        - 如果在 async 上下文中，使用 nest_asyncio 或返回默认配置
+        - 不再使用正则回退
+        """
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                # 如果已有事件循环，使用回退方案
-                return self._fallback_analysis(raw_prompt)
+                # 🆕 V5.2: 尝试使用 nest_asyncio
+                try:
+                    import nest_asyncio
+                    nest_asyncio.apply()
+                    return loop.run_until_complete(self.analyze(raw_prompt))
+                except ImportError:
+                    # nest_asyncio 不可用，返回默认配置
+                    logger.warning("⚠️ 在 async 上下文中调用 analyze_sync，且 nest_asyncio 不可用")
+                    return self._default_fallback(raw_prompt)
             return loop.run_until_complete(self.analyze(raw_prompt))
         except RuntimeError:
             return asyncio.run(self.analyze(raw_prompt))
@@ -527,3 +425,92 @@ def analyze_prompt_with_llm_sync(raw_prompt: str) -> LLMAnalysisResult:
     """同步版本"""
     analyzer = LLMPromptAnalyzer()
     return analyzer.analyze_sync(raw_prompt)
+
+
+# ============================================================
+# 🆕 V5.3: LLM 智能合并 - 框架规则 + 运营 prompt
+# ============================================================
+
+async def merge_with_framework_rules(user_prompt: str) -> str:
+    """
+    🆕 V5.3: 使用 LLM 智能合并框架规则和运营 prompt
+    
+    设计哲学（基于 15-FRAMEWORK_PROMPT_CONTRACT.md）：
+    - 框架规则是泛化的通用能力，不包含特定场景
+    - 运营配置是具体的业务规则，完整保留
+    - LLM 进行语义级融合，不是简单拼接
+    
+    Args:
+        user_prompt: 运营配置的系统提示词（任意格式、任何场景）
+        
+    Returns:
+        合并后的最终系统提示词
+    """
+    from core.prompt.framework_rules import get_merge_prompts
+    from core.llm import create_claude_service
+    from config.llm_config import get_llm_profile
+    
+    # 🆕 V5.3: 从配置文件获取 LLM Profile（优先使用 Claude Sonnet 4.5）
+    profile = get_llm_profile("prompt_merger")
+    logger.info(f"📦 使用 LLM Profile: prompt_merger, model={profile.get('model')}")
+    
+    # 获取合并提示词
+    system_prompt, user_message = get_merge_prompts(user_prompt)
+
+    try:
+        # 使用 create_claude_service（正确传递模型名和参数）
+        llm_service = create_claude_service(
+            model=profile.get("model"),
+            enable_thinking=profile.get("enable_thinking", False),
+            timeout=profile.get("timeout", 120.0),
+            max_retries=profile.get("max_retries", 2)
+        )
+        
+        from core.llm import Message
+        response = await llm_service.create_message_async(
+            system=system_prompt,
+            messages=[Message(role="user", content=user_message)],
+            max_tokens=profile.get("max_tokens", 32000)
+        )
+        
+        # LLMResponse.content 是字符串，不是列表
+        merged_prompt = response.content.strip()
+        
+        # 计算压缩比
+        original_len = len(user_prompt)
+        merged_len = len(merged_prompt)
+        ratio = merged_len / original_len if original_len > 0 else 1.0
+        
+        logger.info(f"✅ LLM 智能合并完成: {original_len} → {merged_len} 字符 (ratio={ratio:.2f})")
+        
+        return merged_prompt
+        
+    except Exception as e:
+        logger.warning(f"⚠️ LLM 合并失败: {e}，直接使用运营配置")
+        # 回退：直接使用运营配置（框架能力在默认 Schema 中体现）
+        # 不做拼接，避免格式混乱
+        return user_prompt
+
+
+def merge_with_framework_rules_sync(user_prompt: str) -> str:
+    """同步版本的 LLM 智能合并（使用配置文件中的 prompt_merger profile）"""
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            try:
+                import nest_asyncio
+                nest_asyncio.apply()
+                return loop.run_until_complete(
+                    merge_with_framework_rules(user_prompt)
+                )
+            except ImportError:
+                # nest_asyncio 不可用，直接返回运营配置
+                logger.warning("⚠️ 在 async 上下文中调用且 nest_asyncio 不可用，直接使用运营配置")
+                return user_prompt
+        return loop.run_until_complete(
+            merge_with_framework_rules(user_prompt)
+        )
+    except RuntimeError:
+        return asyncio.run(
+            merge_with_framework_rules(user_prompt)
+        )

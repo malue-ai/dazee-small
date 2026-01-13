@@ -140,6 +140,10 @@ class SimpleAgent:
         self._plan_cache = {"plan": None, "todo": None, "tool_calls": []}
         self.invocation_stats = {"direct": 0, "code_execution": 0, "programmatic": 0, "streaming": 0}
         
+        # 🆕 V6.1: 上轮意图分析结果（用于追问场景优化）
+        # 存储 session 级别的意图结果，追问时复用 task_type
+        self._last_intent_result: Optional["IntentResult"] = None
+        
         # ===== 🆕 上下文工程管理器 =====
         # 整合 KV-Cache 优化、Todo 重写、工具遮蔽、可恢复压缩、结构化变异、错误保留
         self.context_engineering = create_context_engineering_manager()
@@ -360,7 +364,13 @@ class SimpleAgent:
                 stage.set_input({"message_count": len(messages)})
             
             logger.info("🎯 开始意图分析...")
-            intent = await self.intent_analyzer.analyze(messages)
+            # 🆕 V6.1: 使用 analyze_with_context，追问场景复用上轮 task_type
+            intent = await self.intent_analyzer.analyze_with_context(
+                messages, 
+                previous_result=self._last_intent_result
+            )
+            # 保存本轮结果供下次追问使用
+            self._last_intent_result = intent
             
             # 发送意图识别结果给前端
             intent_delta = {
@@ -564,11 +574,27 @@ class SimpleAgent:
         user_query = messages[-1]["content"] if messages else ""
         skip_memory = getattr(intent, 'skip_memory_retrieval', False)
         
-        # 4.1 选择 System Prompt（使用 PromptManager 构建 + Mem0 检索决策）
-        if self.system_prompt:
+        # 4.1 选择 System Prompt（🆕 V5.1: 优先使用动态路由）
+        # 优先级：prompt_cache 动态路由 > 用户自定义 > 框架默认
+        
+        # 🆕 V5.1: 获取任务复杂度用于动态路由
+        from core.prompt import TaskComplexity
+        task_complexity = self._get_task_complexity(intent)
+        
+        if self.prompt_cache and self.prompt_cache.is_loaded and self.prompt_cache.system_prompt_simple:
+            # 🆕 V5.1: 使用动态提示词路由（根据任务复杂度获取缓存版本）
+            base_prompt = self.prompt_cache.get_full_system_prompt(task_complexity)
+            system_prompt = prompt_manager.build_system_prompt(ctx, base_prompt=base_prompt)
+            
+            # 记录使用的版本和大小
+            cached_size = len(self.prompt_cache.get_system_prompt(task_complexity))
+            full_size = len(base_prompt)
+            logger.info(f"✅ 动态提示词路由: complexity={task_complexity.value}, "
+                       f"缓存={cached_size}字符 + 运行时={full_size - cached_size}字符 = {full_size}字符")
+        elif self.system_prompt:
             # 使用用户定义的 System Prompt + PromptManager 追加内容
             system_prompt = prompt_manager.build_system_prompt(ctx, base_prompt=self.system_prompt)
-            logger.info("✅ 使用用户定义的 System Prompt + PromptManager 追加")
+            logger.info(f"✅ 使用用户定义的 System Prompt + PromptManager 追加 ({len(self.system_prompt)}字符)")
         else:
             # 使用框架默认 Prompt（根据意图识别结果决定是否检索 Mem0）+ PromptManager 追加
             from prompts.universal_agent_prompt import get_universal_agent_prompt
@@ -850,6 +876,37 @@ class SimpleAgent:
             message_id=self._current_message_id
         )
         logger.info(f"✅ Agent 执行完成: turns={ctx.current_turn}")
+    
+    def _get_task_complexity(self, intent):
+        """
+        🆕 V5.1: 从意图识别结果获取任务复杂度
+        
+        Args:
+            intent: IntentResult 对象
+            
+        Returns:
+            TaskComplexity 枚举值
+        """
+        from core.prompt import TaskComplexity
+        
+        if intent is None:
+            return TaskComplexity.MEDIUM  # 默认中等复杂度
+        
+        # 从 intent 获取复杂度字符串
+        complexity_str = getattr(intent, 'complexity', 'medium')
+        if complexity_str is None:
+            complexity_str = 'medium'
+        
+        # 映射到 TaskComplexity 枚举
+        complexity_map = {
+            'simple': TaskComplexity.SIMPLE,
+            'low': TaskComplexity.SIMPLE,
+            'medium': TaskComplexity.MEDIUM,
+            'high': TaskComplexity.COMPLEX,
+            'complex': TaskComplexity.COMPLEX,
+        }
+        
+        return complexity_map.get(complexity_str.lower(), TaskComplexity.MEDIUM)
     
     async def _process_stream(
         self,
