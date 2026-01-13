@@ -14,11 +14,32 @@ Agent 注册服务 - Agent Registry Service
 """
 
 import asyncio
+import os
+import re
+import shutil
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
+
+import yaml
 
 from logger import get_logger
+from core.agent import AgentFactory
+from core.events import create_event_manager, get_memory_storage
+from core.prompt import load_instance_cache
+from core.tool import InstanceToolRegistry, get_capability_registry, create_tool_loader
+from prompts.universal_agent_prompt import get_universal_agent_prompt
+from scripts.instance_loader import (
+    list_instances,
+    load_instance_config,
+    load_instance_prompt,
+    load_instance_env,
+    _prepare_apis,
+    _build_apis_prompt_section,
+    get_instances_dir,
+)
+from services.mcp_client import get_mcp_client, create_mcp_tool_definition
 
 logger = get_logger("agent_registry")
 
@@ -97,18 +118,6 @@ class AgentRegistry:
             start_time = datetime.now()
             
             try:
-                from scripts.instance_loader import (
-                    list_instances,
-                    load_instance_config,
-                    load_instance_prompt,
-                    load_instance_env,
-                    _prepare_apis,
-                    _build_apis_prompt_section,
-                )
-                from prompts.universal_agent_prompt import get_universal_agent_prompt
-                from core.prompt import load_instance_cache
-                from pathlib import Path
-                
                 instances = list_instances()
                 logger.info(f"🔍 发现 {len(instances)} 个 Agent 实例")
                 
@@ -129,7 +138,6 @@ class AgentRegistry:
                         instance_prompt = load_instance_prompt(instance_name)
                         
                         # 4. 加载 InstancePromptCache（核心：包含 AgentSchema、系统提示词等）
-                        from scripts.instance_loader import get_instances_dir
                         instance_path = get_instances_dir() / instance_name
                         cache_dir = instance_path / ".cache"
                         
@@ -233,10 +241,6 @@ class AgentRegistry:
         
         config = self._configs[agent_id]
         
-        # 使用缓存的配置创建新的 Agent 实例
-        from core.agent import AgentFactory
-        from core.events import create_event_manager, get_memory_storage
-        
         # 如果未提供 event_manager，创建一个
         if event_manager is None:
             storage = get_memory_storage()
@@ -290,8 +294,6 @@ class AgentRegistry:
         if not instance_config:
             return
         
-        from core.tool import InstanceToolRegistry, get_capability_registry, create_tool_loader
-        
         global_registry = get_capability_registry()
         
         # 使用 ToolLoader 统一加载工具
@@ -331,9 +333,6 @@ class AgentRegistry:
             mcp_tools: MCP 工具配置列表
             instance_registry: 实例级工具注册表
         """
-        import os
-        from services.mcp_client import get_mcp_client, create_mcp_tool_definition
-        
         mcp_tool_definitions = []
         
         for tool_config in mcp_tools:
@@ -498,11 +497,6 @@ class AgentRegistry:
         Raises:
             ValueError: agent_id 已存在或格式不合法
         """
-        import re
-        import yaml
-        from pathlib import Path
-        from scripts.instance_loader import get_instances_dir
-        
         # 验证 agent_id 格式
         if not re.match(r'^[a-zA-Z][a-zA-Z0-9_-]*$', agent_id):
             raise ValueError(f"agent_id 格式不合法: {agent_id}，必须以字母开头，只能包含字母、数字、下划线、连字符")
@@ -628,9 +622,6 @@ class AgentRegistry:
         Returns:
             更新结果
         """
-        import yaml
-        from scripts.instance_loader import get_instances_dir
-        
         if agent_id not in self._configs:
             raise AgentNotFoundError(f"Agent '{agent_id}' 不存在")
         
@@ -716,9 +707,6 @@ class AgentRegistry:
         Returns:
             删除结果
         """
-        import shutil
-        from scripts.instance_loader import get_instances_dir
-        
         if agent_id not in self._configs:
             raise AgentNotFoundError(f"Agent '{agent_id}' 不存在")
         
@@ -792,17 +780,6 @@ class AgentRegistry:
             agent_id: Agent ID
             force_refresh: 是否强制刷新缓存
         """
-        from scripts.instance_loader import (
-            load_instance_config,
-            load_instance_prompt,
-            load_instance_env,
-            _prepare_apis,
-            _build_apis_prompt_section,
-            get_instances_dir,
-        )
-        from prompts.universal_agent_prompt import get_universal_agent_prompt
-        from core.prompt import load_instance_cache
-        
         instance_start = datetime.now()
         
         # 1. 加载环境变量

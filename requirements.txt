@@ -15,6 +15,7 @@ python-dotenv>=1.0.0
 python-multipart==0.0.6
 aiofiles>=23.0.0          # 异步文件操作
 aiohttp>=3.9.0            # 异步 HTTP 客户端
+httpx>=0.27.0             # HTTP 客户端（用于 MCP、测试）
 filetype>=1.2.0           # 文件类型检测（纯 Python，无需系统依赖）
 
 # 数据库
@@ -51,6 +52,11 @@ tcvectordb>=1.0.0           # 腾讯向量数据库
 Pillow>=10.0.0              # 图片压缩
 PyPDF2>=3.0.0               # PDF 文本提取
 python-pptx>=0.6.21         # PPT 生成
+unstructured-client>=0.30.6 # 非结构化数据处理客户端
 
 # 定时任务
 apscheduler>=3.10.0
+
+# 测试工具
+pytest>=8.0.0             # 测试框架
+pytest-asyncio>=0.23.0    # 异步测试支持

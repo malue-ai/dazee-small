@@ -12,11 +12,12 @@ File 服务层 - 文件管理业务逻辑
 - 不直接写 SQLAlchemy 查询
 - 不直接导入数据库模型
 """
+import uuid
+import filetype
+from typing import Dict, Any, Optional
+from datetime import datetime
 
 from logger import get_logger
-from typing import Dict, Any, Optional, List
-from datetime import datetime
-import filetype  # 纯 Python 文件类型检测，无需系统依赖
 from infra.database import AsyncSessionLocal, crud
 from utils import get_s3_uploader
 
@@ -199,10 +200,7 @@ class FileService:
             
         Returns:
             { "file_id", "file_name", "file_size", "file_type", "file_url", "created_at" }
-        """
-        import uuid
-        from datetime import datetime
-        
+        """        
         file_size = len(file_content)
         
         # 后端检测真实的 MIME 类型

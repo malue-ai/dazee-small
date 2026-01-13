@@ -19,6 +19,7 @@ from pathlib import Path
 
 from logger import get_logger
 from utils.ragie_client import get_ragie_client, RagieClient
+from utils.s3_uploader import get_s3_uploader
 from utils.knowledge_store import get_knowledge_store, KnowledgeStore
 from models.ragie import (
     DocumentInfo,
@@ -484,7 +485,6 @@ class KnowledgeService:
         has_processing = any(doc.get("status") in PROCESSING_STATUSES for doc in all_documents)
         
         # 转换为 DocumentInfo 模型，并为有 S3 文件的文档生成预签名 URL
-        from utils import get_s3_uploader
         s3_uploader = get_s3_uploader()
         
         document_infos = []
@@ -646,9 +646,7 @@ class KnowledgeService:
             
         Raises:
             DocumentProcessingError: 删除失败
-        """
-        from utils import get_s3_uploader
-        
+        """        
         try:
             logger.info(f"🗑️ 删除文档: user_id={user_id}, document_id={document_id}")
             

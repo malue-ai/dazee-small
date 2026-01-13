@@ -7,11 +7,40 @@ MCP 客户端 - 使用官方 MCP SDK 实现
 import asyncio
 import os
 from typing import Dict, Any, List, Optional
+
 from contextlib import asynccontextmanager
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
 
 from logger import get_logger
+import re
 
 logger = get_logger("mcp_client")
+
+
+def sanitize_tool_name(name: str) -> str:
+    """
+    清理工具名称，使其符合 Anthropic API 的要求
+    
+    Anthropic API 要求工具名称匹配正则表达式: ^[a-zA-Z0-9_-]{1,128}$
+    即只允许字母、数字、下划线和连字符，长度 1-128
+    
+    Args:
+        name: 原始工具名称
+        
+    Returns:
+        清理后的工具名称
+    """
+    # 将空格替换为下划线
+    sanitized = name.replace(" ", "_")
+    # 移除所有不合法的字符（只保留字母、数字、下划线、连字符）
+    sanitized = re.sub(r'[^a-zA-Z0-9_-]', '', sanitized)
+    # 确保长度不超过 128
+    sanitized = sanitized[:128]
+    # 确保名称不为空
+    if not sanitized:
+        sanitized = "unnamed_tool"
+    return sanitized
 
 
 class MCPClientWrapper:
@@ -53,9 +82,6 @@ class MCPClientWrapper:
             是否连接成功
         """
         try:
-            from mcp import ClientSession
-            from mcp.client.streamable_http import streamablehttp_client
-            
             logger.info(f"🔌 连接 MCP 服务器: {self.server_url}")
             
             # 准备 headers
@@ -143,8 +169,10 @@ class MCPClientWrapper:
             
             tools = []
             for tool in result.tools:
+                # 清理工具名称，确保符合 Anthropic API 要求
+                sanitized_name = sanitize_tool_name(f"{self.server_name}_{tool.name}")
                 tool_info = {
-                    "name": f"{self.server_name}_{tool.name}",  # 添加命名空间
+                    "name": sanitized_name,  # 添加命名空间并清理
                     "original_name": tool.name,
                     "description": tool.description or "",
                     "input_schema": tool.inputSchema if hasattr(tool, 'inputSchema') else {},
