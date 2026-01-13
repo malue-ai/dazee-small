@@ -1,15 +1,19 @@
 """
 V5.0 IntentAnalyzer - 意图分析器
 
+🆕 V6.1: 新增上下文感知（追问识别）
+
 核心理念：
 - 意图分析通过 LLM 语义理解完成
 - 不使用关键词匹配规则
 - 保守的 fallback（OTHER），不做关键词猜测
+- 识别追问/新话题，避免上下文脱节
 
 设计原则：
 - 运营无需配置任何关键词规则
 - LLM 学习 Few-Shot 示例进行语义泛化推理
 - 代码只做调用和解析，不做规则判断
+- 运营配置提示词 + 高质量默认模板 → 场景化意图识别
 """
 
 # 1. 标准库
@@ -92,8 +96,53 @@ class IntentAnalyzer:
             f"needs_plan={result.needs_plan}, "
             f"needs_persistence={result.needs_persistence}, "
             f"skip_memory={result.skip_memory_retrieval}, "
-            f"needs_multi_agent={result.needs_multi_agent}"
+            f"needs_multi_agent={result.needs_multi_agent}, "
+            f"is_follow_up={result.is_follow_up}"
         )
+        
+        return result
+    
+    async def analyze_with_context(
+        self,
+        messages: List[Dict[str, Any]],
+        previous_result: Optional[IntentResult] = None
+    ) -> IntentResult:
+        """
+        🆕 V6.1 带上下文的意图分析（追问场景优化）
+        
+        如果检测到追问（is_follow_up=True）且有上轮结果，复用上轮的 task_type，
+        避免重复完整分析，提升性能。
+        
+        Args:
+            messages: 完整的消息列表（包含上下文）
+            previous_result: 上一轮的意图分析结果（用于追问场景复用）
+            
+        Returns:
+            IntentResult 意图分析结果
+            
+        使用示例：
+            # 存储上轮意图结果（session 级别）
+            if hasattr(agent, '_last_intent_result'):
+                previous = agent._last_intent_result
+            else:
+                previous = None
+            
+            intent_result = await analyzer.analyze_with_context(messages, previous)
+            agent._last_intent_result = intent_result
+        """
+        # 1. 执行正常分析
+        result = await self.analyze(messages)
+        
+        # 2. 如果是追问且有上轮结果，继承 task_type
+        if result.is_follow_up and previous_result:
+            inherited_task_type = previous_result.task_type
+            logger.info(
+                f"🔄 追问场景优化: 继承上轮 task_type={inherited_task_type.value} "
+                f"(当前分析: {result.task_type.value})"
+            )
+            result.task_type = inherited_task_type
+            # complexity 可能变化（追问可能变简单），保留新分析结果
+            # needs_plan 也可能变化，保留新分析结果
         
         return result
     
@@ -256,6 +305,7 @@ class IntentAnalyzer:
         needs_plan = True
         skip_memory_retrieval = False
         needs_multi_agent = False  # 🆕 V6.0: 默认不需要 Multi-Agent
+        is_follow_up = False       # 🆕 V6.1: 默认不是追问（视为新话题）
         
         # 使用 JSON 提取器解析 LLM 响应
         parsed = extract_json(content)
@@ -283,6 +333,9 @@ class IntentAnalyzer:
             
             # 🆕 V6.0: 解析 needs_multi_agent
             needs_multi_agent = parsed.get("needs_multi_agent", False)
+            
+            # 🆕 V6.1: 解析 is_follow_up（上下文追问识别）
+            is_follow_up = parsed.get("is_follow_up", False)
         else:
             logger.warning(f"无法从 LLM 响应中提取 JSON: {content[:100]}...")
         
@@ -292,6 +345,7 @@ class IntentAnalyzer:
             needs_plan=needs_plan,
             skip_memory_retrieval=skip_memory_retrieval,
             needs_multi_agent=needs_multi_agent,
+            is_follow_up=is_follow_up,  # 🆕 V6.1
             keywords=[],  # V5.0: 不再提取关键词
             raw_response=content
         )
@@ -302,6 +356,7 @@ class IntentAnalyzer:
         
         V5.0 策略：不做关键词猜测，使用安全默认值
         🆕 V6.0: 默认不需要 Multi-Agent
+        🆕 V6.1: 默认不是追问（视为新话题）
         
         Returns:
             IntentResult（保守默认值）
@@ -313,6 +368,7 @@ class IntentAnalyzer:
             needs_plan=True,
             skip_memory_retrieval=False,
             needs_multi_agent=False,  # 🆕 V6.0: 默认不需要
+            is_follow_up=False,       # 🆕 V6.1: 默认不是追问
             keywords=[],
             confidence=0.3  # 低置信度，标记这是默认值
         )

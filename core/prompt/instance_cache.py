@@ -1,20 +1,22 @@
 """
 实例级提示词缓存管理器 - InstancePromptCache
 
-🆕 V5.0: 支持本地文件持久化，启动时优先加载磁盘缓存
+🆕 V5.5: 场景化提示词分解 + prompt_results 可视化输出
 
 设计原则：
 1. 实例启动时一次性加载，全局缓存
 2. 用空间换时间，避免重复分析
 3. 所有提示词版本启动时生成，运行时直接取缓存
 4. 🆕 V5.0: 支持持久化到本地文件，避免重复 LLM 分析
+5. 🆕 V5.5: 输出到 prompt_results/ 目录供运营查看和编辑
 
 数据流：
 ┌─────────────────────────────────────────────────────────────┐
-│ 启动阶段（优先加载磁盘缓存）                                    │
-│ 1. 检查 .cache/ 目录是否有有效缓存                             │
-│ 2. 有效缓存 → 直接加载（< 100ms）                              │
-│ 3. 无效/无缓存 → LLM 分析（2-3秒）→ 写入磁盘缓存               │
+│ 启动阶段（优先加载 prompt_results/）                            │
+│ 1. 检查 prompt_results/ 是否存在且有效                         │
+│ 2. 检测源文件变化（prompt.md / config.yaml）                   │
+│ 3. 检测运营手动编辑（保护手动修改的文件）                        │
+│ 4. 需要重新生成时：LLM 分解任务 → 写入 prompt_results/          │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -24,10 +26,20 @@
 │ 3. 直接从内存缓存获取对应版本 system_prompt                     │
 └─────────────────────────────────────────────────────────────┘
 
-缓存文件结构（.cache/）：
-├── prompt_cache.json       # 提示词缓存
-├── agent_schema.json       # AgentSchema 缓存
-└── cache_meta.json         # 缓存元数据（哈希、时间戳）
+文件结构：
+├── .cache/                 # 二进制缓存（JSON）
+│   ├── prompt_cache.json
+│   ├── agent_schema.json
+│   └── cache_meta.json
+│
+└── prompt_results/         # 🆕 运营可见可编辑
+    ├── README.md           # 使用说明
+    ├── agent_schema.yaml   # AgentSchema
+    ├── intent_prompt.md    # 意图识别提示词
+    ├── simple_prompt.md    # 简单任务提示词
+    ├── medium_prompt.md    # 中等任务提示词
+    ├── complex_prompt.md   # 复杂任务提示词
+    └── _metadata.json      # 元数据
 """
 
 import asyncio
@@ -249,6 +261,14 @@ class InstancePromptCache:
         self._storage_backend: Optional[CacheStorageBackend] = None
         self._cache_dir: Optional[Path] = None
         
+        # 🆕 V5.5: 实例路径（用于 prompt_results 输出）
+        self._instance_path: Optional[Path] = None
+        self._prompt_results_writer: Optional[Any] = None  # PromptResultsWriter
+        
+        # 🆕 V5.1: 运行时上下文（APIs + framework_prompt）
+        # 由 instance_loader 设置，Agent 运行时追加到缓存版本
+        self.runtime_context: Dict[str, str] = {}
+        
         # 性能指标
         self.metrics = CacheMetrics()
         
@@ -259,13 +279,22 @@ class InstancePromptCache:
         设置缓存目录（启用持久化）
         
         🆕 V5.0: 设置后将使用 LocalFileBackend 进行持久化
+        🆕 V5.5: 同时初始化 PromptResultsWriter
         
         Args:
             cache_dir: 缓存目录路径（如 instances/test_agent/.cache）
         """
         self._cache_dir = Path(cache_dir)
         self._storage_backend = LocalFileBackend(self._cache_dir)
+        
+        # 🆕 V5.5: 从 .cache 目录推断实例路径并初始化 PromptResultsWriter
+        self._instance_path = self._cache_dir.parent
+        
+        from core.prompt.prompt_results_writer import PromptResultsWriter
+        self._prompt_results_writer = PromptResultsWriter(self._instance_path)
+        
         logger.debug(f"📁 设置缓存目录: {cache_dir}")
+        logger.debug(f"📁 实例路径: {self._instance_path}")
     
     @classmethod
     def get_instance(cls, instance_name: str) -> "InstancePromptCache":
@@ -297,10 +326,12 @@ class InstancePromptCache:
         """
         一次性加载所有提示词版本（幂等）
         
-        🆕 V5.0 加载流程：
+        🆕 V5.5 加载流程：
         1. 检查是否已加载（幂等）
-        2. 🆕 尝试从磁盘加载缓存（优先）
-        3. 缓存无效时：LLM 分析 → 生成提示词 → 写入磁盘
+        2. 🆕 尝试从 prompt_results/ 加载（运营可编辑版本）
+        3. 检测源文件变化，决定是否需要重新生成
+        4. 🆕 分解 LLM 任务生成场景化提示词
+        5. 写入 prompt_results/ 供运营查看
         
         Args:
             raw_prompt: 运营写的原始系统提示词
@@ -327,18 +358,34 @@ class InstancePromptCache:
                 else:
                     logger.info(f"⚠️ 配置已变化，重新加载: {self.instance_name}")
             
-            # 🆕 V5.0: 尝试从磁盘加载缓存
+            # 保存原始提示词和哈希
+            self._raw_prompt = raw_prompt
+            self._raw_prompt_hash = prompt_hash
+            self._config_hash = config_hash
+            
+            # 🆕 V5.5: 优先从 prompt_results/ 加载（运营可编辑版本）
+            if not force_refresh and self._prompt_results_writer:
+                disk_start = time.time()
+                if self._try_load_from_prompt_results():
+                    self.metrics.disk_hits += 1
+                    self.metrics.disk_load_time_ms = (time.time() - disk_start) * 1000
+                    self.metrics.load_time_ms = (time.time() - start_time) * 1000
+                    self.is_loaded = True
+                    
+                    logger.info(f"✅ 从 prompt_results/ 加载: {self.instance_name}")
+                    logger.info(f"   加载耗时: {self.metrics.disk_load_time_ms:.0f}ms")
+                    return True
+                else:
+                    self.metrics.disk_misses += 1
+                    logger.debug(f"📁 prompt_results/ 未命中或需要更新")
+            
+            # 🆕 V5.0: 尝试从 .cache/ 磁盘加载缓存（fallback）
             if not force_refresh and self._storage_backend:
                 disk_start = time.time()
                 if self._try_load_from_disk(combined_hash):
                     self.metrics.disk_hits += 1
                     self.metrics.disk_load_time_ms = (time.time() - disk_start) * 1000
                     self.metrics.load_time_ms = (time.time() - start_time) * 1000
-                    
-                    # 保存哈希用于后续比对
-                    self._raw_prompt = raw_prompt
-                    self._raw_prompt_hash = prompt_hash
-                    self._config_hash = config_hash
                     self.is_loaded = True
                     
                     logger.info(f"✅ 从磁盘缓存加载: {self.instance_name}")
@@ -348,39 +395,29 @@ class InstancePromptCache:
                     self.metrics.disk_misses += 1
                     logger.debug(f"📁 磁盘缓存未命中或已失效")
             
-            # 缓存未命中，执行 LLM 分析
+            # 缓存未命中，执行 LLM 分解任务
             self.metrics.cache_misses += 1
-            logger.info(f"🔄 开始 LLM 分析: {self.instance_name}")
+            logger.info(f"🔄 开始 LLM 场景化分解: {self.instance_name}")
             
             try:
-                # 保存原始提示词和哈希
-                self._raw_prompt = raw_prompt
-                self._raw_prompt_hash = prompt_hash
-                self._config_hash = config_hash
-                
-                # 1. LLM 语义分析 → PromptSchema + AgentSchema
+                # 🆕 V5.5: 分解 LLM 任务生成场景化提示词
                 llm_start = time.time()
-                await self._analyze_with_llm(raw_prompt, config)
+                await self._generate_decomposed_prompts(raw_prompt, config)
                 self.metrics.llm_analysis_time_ms = (time.time() - llm_start) * 1000
-                
-                # 2. 生成三个版本的系统提示词
-                gen_start = time.time()
-                await self._generate_all_prompts()
-                self.metrics.prompt_generation_time_ms = (time.time() - gen_start) * 1000
-                
-                # 3. 生成意图识别提示词
-                await self._generate_intent_prompt()
                 
                 self.is_loaded = True
                 self.metrics.load_time_ms = (time.time() - start_time) * 1000
                 
-                # 🆕 V5.0: 写入磁盘缓存
+                # 🆕 V5.5: 写入 prompt_results/ 供运营查看
+                if self._prompt_results_writer:
+                    self._save_to_prompt_results()
+                
+                # 🆕 V5.0: 同时写入 .cache/ 磁盘缓存
                 if self._storage_backend:
                     self._save_to_disk(combined_hash)
                 
                 logger.info(f"✅ InstancePromptCache 加载完成: {self.instance_name}")
-                logger.info(f"   LLM 分析: {self.metrics.llm_analysis_time_ms:.0f}ms")
-                logger.info(f"   提示词生成: {self.metrics.prompt_generation_time_ms:.0f}ms")
+                logger.info(f"   LLM 分解生成: {self.metrics.llm_analysis_time_ms:.0f}ms")
                 logger.info(f"   总耗时: {self.metrics.load_time_ms:.0f}ms")
                 
                 return True
@@ -390,6 +427,402 @@ class InstancePromptCache:
                 # 使用 fallback
                 await self._load_fallback(raw_prompt)
                 return False
+    
+    # ============================================================
+    # 🆕 V5.5: prompt_results/ 目录加载和保存
+    # ============================================================
+    
+    def _try_load_from_prompt_results(self) -> bool:
+        """
+        🆕 V5.5: 尝试从 prompt_results/ 加载
+        
+        优先使用运营手动编辑的版本
+        
+        Returns:
+            是否成功加载
+        """
+        if not self._prompt_results_writer:
+            return False
+        
+        try:
+            # 检查是否需要重新生成
+            regen_flags = self._prompt_results_writer.should_regenerate()
+            
+            # 如果所有文件都不需要重新生成，直接加载
+            if not any(regen_flags.values()):
+                existing = self._prompt_results_writer.load_existing()
+                if existing:
+                    self._load_from_prompt_results(existing)
+                    logger.debug(f"📂 从 prompt_results/ 加载完成（无需更新）")
+                    return True
+            
+            # 如果部分文件需要重新生成，先加载现有的（保护手动编辑的）
+            if self._prompt_results_writer.is_valid():
+                existing = self._prompt_results_writer.load_existing()
+                if existing:
+                    # 只加载不需要重新生成的部分
+                    self._load_partial_from_prompt_results(existing, regen_flags)
+                    logger.debug(f"📂 从 prompt_results/ 部分加载（需要更新部分文件）")
+                    # 返回 False 触发重新生成缺失的部分
+                    return False
+            
+            return False
+            
+        except Exception as e:
+            logger.warning(f"⚠️ 从 prompt_results/ 加载失败: {e}")
+            return False
+    
+    def _load_from_prompt_results(self, results) -> None:
+        """从 PromptResults 加载到内存"""
+        from core.prompt.prompt_results_writer import PromptResults
+        
+        # 加载 AgentSchema
+        if results.agent_schema:
+            from core.schemas import AgentSchema
+            try:
+                self.agent_schema = AgentSchema(**results.agent_schema)
+            except Exception as e:
+                logger.warning(f"⚠️ AgentSchema 加载失败: {e}，使用默认")
+                from core.schemas import DEFAULT_AGENT_SCHEMA
+                self.agent_schema = DEFAULT_AGENT_SCHEMA
+        
+        # 加载场景化提示词
+        self.intent_prompt = results.intent_prompt
+        self.system_prompt_simple = results.simple_prompt
+        self.system_prompt_medium = results.medium_prompt
+        self.system_prompt_complex = results.complex_prompt
+        
+        # 创建简单的 PromptSchema
+        from core.prompt import PromptSchema
+        self.prompt_schema = PromptSchema(raw_prompt=self._raw_prompt)
+    
+    def _load_partial_from_prompt_results(self, results, regen_flags: Dict[str, bool]) -> None:
+        """部分加载（保护手动编辑的文件）"""
+        from core.prompt.prompt_results_writer import PromptResults
+        
+        # 加载 AgentSchema（如果不需要重新生成）
+        if not regen_flags.get("agent_schema", True) and results.agent_schema:
+            from core.schemas import AgentSchema
+            try:
+                self.agent_schema = AgentSchema(**results.agent_schema)
+            except Exception:
+                pass
+        
+        # 加载不需要重新生成的提示词
+        if not regen_flags.get("intent_prompt", True):
+            self.intent_prompt = results.intent_prompt
+        if not regen_flags.get("simple_prompt", True):
+            self.system_prompt_simple = results.simple_prompt
+        if not regen_flags.get("medium_prompt", True):
+            self.system_prompt_medium = results.medium_prompt
+        if not regen_flags.get("complex_prompt", True):
+            self.system_prompt_complex = results.complex_prompt
+    
+    def _save_to_prompt_results(self) -> bool:
+        """
+        🆕 V5.5: 保存到 prompt_results/ 目录
+        
+        Returns:
+            是否成功保存
+        """
+        if not self._prompt_results_writer:
+            return False
+        
+        try:
+            from core.prompt.prompt_results_writer import PromptResults
+            
+            # 构建结果
+            results = PromptResults(
+                agent_schema=self._agent_schema_to_dict(self.agent_schema) if self.agent_schema else {},
+                intent_prompt=self.intent_prompt or "",
+                simple_prompt=self.system_prompt_simple or "",
+                medium_prompt=self.system_prompt_medium or "",
+                complex_prompt=self.system_prompt_complex or "",
+            )
+            
+            # 写入
+            success = self._prompt_results_writer.write_all(results)
+            
+            if success:
+                logger.info(f"📂 已写入 prompt_results/ 目录")
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"❌ 保存到 prompt_results/ 失败: {e}")
+            return False
+    
+    # ============================================================
+    # 🆕 V5.5: 分解 LLM 任务生成场景化提示词
+    # ============================================================
+    
+    async def _generate_decomposed_prompts(
+        self,
+        raw_prompt: str,
+        config: Optional[Dict[str, Any]] = None
+    ):
+        """
+        🆕 V5.5: 分解 LLM 任务生成场景化提示词
+        
+        将单次超长任务分解为 5 个独立任务：
+        1. 生成 AgentSchema
+        2. 生成意图识别提示词
+        3. 生成简单任务提示词
+        4. 生成中等任务提示词
+        5. 生成复杂任务提示词
+        
+        每个任务独立执行，避免单次任务过重导致超时
+        """
+        from core.prompt.framework_rules import (
+            get_intent_prompt_template,
+            get_simple_prompt_template,
+            get_medium_prompt_template,
+            get_complex_prompt_template,
+        )
+        
+        logger.info("   📋 开始分解 LLM 任务...")
+        
+        # 检查哪些需要重新生成
+        regen_flags = {"agent_schema": True, "intent_prompt": True, 
+                       "simple_prompt": True, "medium_prompt": True, "complex_prompt": True}
+        
+        if self._prompt_results_writer:
+            regen_flags = self._prompt_results_writer.should_regenerate()
+        
+        # Task 1: 生成 AgentSchema
+        if regen_flags.get("agent_schema", True) or not self.agent_schema:
+            logger.info("   Task 1/5: 生成 AgentSchema...")
+            await self._generate_agent_schema(raw_prompt, config)
+            logger.info(f"   ✅ AgentSchema: {self.agent_schema.name if self.agent_schema else 'Default'}")
+        else:
+            logger.info("   Task 1/5: AgentSchema（已存在，跳过）")
+        
+        # Task 2: 生成意图识别提示词
+        if regen_flags.get("intent_prompt", True) or not self.intent_prompt:
+            logger.info("   Task 2/5: 生成意图识别提示词...")
+            await self._generate_intent_prompt_decomposed(raw_prompt)
+            logger.info(f"   ✅ 意图识别提示词: {len(self.intent_prompt or '')} 字符")
+        else:
+            logger.info("   Task 2/5: 意图识别提示词（已存在，跳过）")
+        
+        # Task 3: 生成简单任务提示词
+        if regen_flags.get("simple_prompt", True) or not self.system_prompt_simple:
+            logger.info("   Task 3/5: 生成简单任务提示词...")
+            await self._generate_simple_prompt_decomposed(raw_prompt)
+            logger.info(f"   ✅ 简单任务提示词: {len(self.system_prompt_simple or '')} 字符")
+        else:
+            logger.info("   Task 3/5: 简单任务提示词（已存在，跳过）")
+        
+        # Task 4: 生成中等任务提示词
+        if regen_flags.get("medium_prompt", True) or not self.system_prompt_medium:
+            logger.info("   Task 4/5: 生成中等任务提示词...")
+            await self._generate_medium_prompt_decomposed(raw_prompt)
+            logger.info(f"   ✅ 中等任务提示词: {len(self.system_prompt_medium or '')} 字符")
+        else:
+            logger.info("   Task 4/5: 中等任务提示词（已存在，跳过）")
+        
+        # Task 5: 生成复杂任务提示词
+        if regen_flags.get("complex_prompt", True) or not self.system_prompt_complex:
+            logger.info("   Task 5/5: 生成复杂任务提示词...")
+            await self._generate_complex_prompt_decomposed(raw_prompt)
+            logger.info(f"   ✅ 复杂任务提示词: {len(self.system_prompt_complex or '')} 字符")
+        else:
+            logger.info("   Task 5/5: 复杂任务提示词（已存在，跳过）")
+        
+        # 创建 PromptSchema
+        from core.prompt import PromptSchema
+        self.prompt_schema = PromptSchema(raw_prompt=raw_prompt)
+        
+        logger.info("   ✅ 所有分解任务完成")
+    
+    async def _generate_intent_prompt_decomposed(self, raw_prompt: str):
+        """
+        生成意图识别提示词（分解任务）
+        
+        🆕 V6.1: 如果 AgentSchema 已生成，注入能力摘要确保意图分类与 Agent 能力一致
+        """
+        from core.prompt.framework_rules import get_intent_prompt_template
+        from core.llm import create_llm_service
+        from core.llm.base import Message
+        from config.llm_config import get_llm_profile
+        
+        try:
+            # 获取 LLM Profile
+            try:
+                profile = get_llm_profile("prompt_decomposer")
+            except KeyError:
+                profile = get_llm_profile("llm_analyzer")
+            
+            llm_service = create_llm_service(**profile)
+            
+            # 🆕 V6.1: 获取 AgentSchema 能力摘要（如果已生成）
+            schema_summary = self._build_schema_summary()
+            
+            # 构建提示词（传入完整 prompt 用于提取意图定义，模板内部会限制长度）
+            prompt_template = get_intent_prompt_template(raw_prompt, schema_summary)
+            
+            # 调用 LLM（使用 Message 对象而非字典）
+            response = await llm_service.create_message_async(
+                messages=[Message(role="user", content=prompt_template)],
+                max_tokens=8000,
+            )
+            
+            self.intent_prompt = response.content.strip()
+            
+        except Exception as e:
+            logger.warning(f"⚠️ 意图识别提示词生成失败: {e}，使用默认")
+            from core.prompt.intent_prompt_generator import IntentPromptGenerator
+            self.intent_prompt = IntentPromptGenerator.get_default()
+    
+    def _build_schema_summary(self) -> str:
+        """
+        🆕 V6.1 构建 AgentSchema 能力摘要
+        
+        用于注入意图识别提示词，确保 task_type 分类与 Agent 实际能力一致。
+        
+        Returns:
+            Schema 能力摘要文本（Markdown 格式），如果 Schema 未生成则返回空字符串
+        """
+        if not self.agent_schema:
+            return ""
+        
+        try:
+            schema = self.agent_schema
+            
+            # 提取已启用的工具
+            tools = schema.tools if schema.tools else []
+            tools_str = ", ".join(tools) if tools else "无"
+            
+            # 提取已启用的技能
+            skills = []
+            if schema.skills:
+                for s in schema.skills:
+                    if hasattr(s, 'skill_id'):
+                        skills.append(s.skill_id)
+                    elif isinstance(s, dict):
+                        skills.append(s.get('skill_id', str(s)))
+                    else:
+                        skills.append(str(s))
+            skills_str = ", ".join(skills) if skills else "无"
+            
+            # 规划能力
+            plan_enabled = schema.plan_manager.enabled if schema.plan_manager else False
+            plan_str = "启用" if plan_enabled else "禁用"
+            
+            return f"""
+---
+
+## Agent 能力参考
+
+意图分类时确保与 Agent 实际能力匹配：
+
+- **已启用工具**: {tools_str}
+- **已启用技能**: {skills_str}
+- **规划能力**: {plan_str}
+
+如果用户请求涉及上述未启用的能力，应将 complexity 标记为较高。
+"""
+        except Exception as e:
+            logger.warning(f"⚠️ 构建 Schema 摘要失败: {e}")
+            return ""
+    
+    async def _generate_simple_prompt_decomposed(self, raw_prompt: str):
+        """生成简单任务提示词（分解任务）"""
+        from core.prompt.framework_rules import get_simple_prompt_template
+        from core.llm import create_llm_service
+        from core.llm.base import Message
+        from config.llm_config import get_llm_profile
+        
+        try:
+            try:
+                profile = get_llm_profile("prompt_decomposer")
+            except KeyError:
+                profile = get_llm_profile("llm_analyzer")
+            
+            llm_service = create_llm_service(**profile)
+            
+            # 构建提示词（传入完整的 raw_prompt）
+            prompt_template = get_simple_prompt_template(raw_prompt)
+            
+            response = await llm_service.create_message_async(
+                messages=[Message(role="user", content=prompt_template)],
+                max_tokens=20000,
+            )
+            
+            self.system_prompt_simple = response.content.strip()
+            
+        except Exception as e:
+            logger.warning(f"⚠️ 简单任务提示词生成失败: {e}，使用 fallback")
+            # Fallback: 提取核心部分
+            self.system_prompt_simple = self._build_fallback_prompt(
+                self._extract_core_sections(raw_prompt),
+                "简单查询",
+                max_size=15000
+            )
+    
+    async def _generate_medium_prompt_decomposed(self, raw_prompt: str):
+        """生成中等任务提示词（分解任务）"""
+        from core.prompt.framework_rules import get_medium_prompt_template
+        from core.llm import create_llm_service
+        from core.llm.base import Message
+        from config.llm_config import get_llm_profile
+        
+        try:
+            try:
+                profile = get_llm_profile("prompt_decomposer")
+            except KeyError:
+                profile = get_llm_profile("llm_analyzer")
+            
+            llm_service = create_llm_service(**profile)
+            
+            prompt_template = get_medium_prompt_template(raw_prompt)
+            
+            response = await llm_service.create_message_async(
+                messages=[Message(role="user", content=prompt_template)],
+                max_tokens=50000,
+            )
+            
+            self.system_prompt_medium = response.content.strip()
+            
+        except Exception as e:
+            logger.warning(f"⚠️ 中等任务提示词生成失败: {e}，使用 fallback")
+            self.system_prompt_medium = self._build_fallback_prompt(
+                raw_prompt[:40000] if len(raw_prompt) > 40000 else raw_prompt,
+                "中等任务",
+                max_size=40000
+            )
+    
+    async def _generate_complex_prompt_decomposed(self, raw_prompt: str):
+        """生成复杂任务提示词（分解任务）"""
+        from core.prompt.framework_rules import get_complex_prompt_template
+        from core.llm import create_llm_service
+        from core.llm.base import Message
+        from config.llm_config import get_llm_profile
+        
+        try:
+            try:
+                profile = get_llm_profile("prompt_decomposer")
+            except KeyError:
+                profile = get_llm_profile("llm_analyzer")
+            
+            llm_service = create_llm_service(**profile)
+            
+            prompt_template = get_complex_prompt_template(raw_prompt)
+            
+            response = await llm_service.create_message_async(
+                messages=[Message(role="user", content=prompt_template)],
+                max_tokens=64000,  # Claude Sonnet 4.5 max output limit
+            )
+            
+            self.system_prompt_complex = response.content.strip()
+            
+        except Exception as e:
+            logger.warning(f"⚠️ 复杂任务提示词生成失败: {e}，使用 fallback")
+            self.system_prompt_complex = self._build_fallback_prompt(
+                raw_prompt[:80000] if len(raw_prompt) > 80000 else raw_prompt,
+                "复杂任务",
+                max_size=80000
+            )
     
     # ============================================================
     # 🆕 V5.0: 磁盘持久化方法
@@ -590,15 +1023,45 @@ class InstancePromptCache:
         config: Optional[Dict[str, Any]] = None
     ):
         """
-        使用 LLM 语义分析提示词
+        🆕 V5.2: 使用 LLM 语义分析并智能合并框架规则
         
-        生成：
-        - PromptSchema: 提示词结构
-        - AgentSchema: Agent 配置（使用高质量 Prompt + few-shot）
+        流程：
+        1. 框架规则 + 运营 prompt → LLM 智能合并 → 最终系统提示词
+        2. 分析最终提示词 → PromptSchema
+        3. 生成 Agent 配置 → AgentSchema
+        
+        架构参考：docs/15-FRAMEWORK_PROMPT_CONTRACT.md
         """
-        # 1. 解析 PromptSchema
-        from core.prompt import parse_prompt
-        self.prompt_schema = parse_prompt(raw_prompt, use_llm=True)
+        # 🆕 V5.4: 跳过 LLM 合并步骤（架构修正）
+        # 
+        # 原因分析（基于实际日志）：
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        # 1. Input: 82k 字符 prompt.md + 5k 框架规则 ≈ 27k tokens
+        # 2. Task: LLM 需要"智能合并"（语义融合，非拼接）
+        # 3. Output: 生成新的完整系统提示词 ≈ 25k tokens
+        # 4. 结果: 每次请求都超时（600秒），重试 3 次，共 2.5 小时失败
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        # 
+        # 架构问题（违反 15-FRAMEWORK_PROMPT_CONTRACT.md）：
+        # - prompt.md 已经是运营精心编写的完整系统提示词
+        # - 让 LLM "智能合并" = 让 LLM 重写整个系统提示词
+        # - 任务过于复杂，Sonnet 无法在合理时间内完成
+        # 
+        # 正确架构：
+        # - 框架规则通过 Schema 和组件体现（已实现）
+        # - 运行时动态追加（已实现：prompt_cache.runtime_context）
+        # - 不应该在启动时合并
+        
+        logger.info("   Step 1: 使用运营提示词（跳过 LLM 合并，直接分析）...")
+        merged_prompt = raw_prompt
+        self._raw_user_prompt = raw_prompt
+        self._merged_prompt = raw_prompt
+        logger.info(f"   ✅ 提示词长度: {len(merged_prompt):,} 字符")
+        
+        # Step 2: 解析 PromptSchema（使用合并后的提示词）
+        from core.prompt.prompt_layer import PromptParser
+        logger.info("   Step 2: 解析 PromptSchema...")
+        self.prompt_schema = await PromptParser.parse_async(merged_prompt, use_llm=True)
         logger.info(f"   PromptSchema: {self.prompt_schema.agent_name} ({len(self.prompt_schema.modules)} 模块)")
         
         # 2. 生成 AgentSchema（使用高质量 Prompt + few-shot）
@@ -666,17 +1129,26 @@ class InstancePromptCache:
                     setattr(self.agent_schema.llm_config, key, value)
     
     async def _generate_all_prompts(self):
-        """生成三个版本的系统提示词"""
+        """
+        🆕 V5.2: 生成三个版本的系统提示词
+        
+        基于 LLM 智能合并后的提示词，按复杂度裁剪生成三个版本
+        """
         from core.prompt import generate_prompt, TaskComplexity
         
         if not self.prompt_schema:
             logger.warning("⚠️ PromptSchema 未加载，跳过提示词生成")
             return
         
+        # 🆕 V5.2: 确保 PromptSchema 包含合并后的提示词
+        if hasattr(self, '_merged_prompt') and self._merged_prompt:
+            self.prompt_schema.raw_prompt = self._merged_prompt
+            logger.info(f"   使用 LLM 合并后的提示词作为基础: {len(self._merged_prompt)} 字符")
+        
         # 更新排除模块（根据 AgentSchema）
         self.prompt_schema.update_exclusions(self.agent_schema)
         
-        # 生成三个版本
+        # 生成三个版本（基于合并后的提示词按复杂度裁剪）
         self.system_prompt_simple = generate_prompt(
             self.prompt_schema, 
             TaskComplexity.SIMPLE,
@@ -714,7 +1186,11 @@ class InstancePromptCache:
             logger.info(f"   意图识别提示词: {len(self.intent_prompt)} 字符 (默认)")
     
     async def _load_fallback(self, raw_prompt: str):
-        """加载失败时的 fallback"""
+        """
+        加载失败时的 fallback
+        
+        🆕 V5.1: 即使 fallback 也要生成合理大小的提示词版本
+        """
         from core.prompt import PromptSchema
         from core.schemas import DEFAULT_AGENT_SCHEMA
         from prompts.intent_recognition_prompt import get_intent_recognition_prompt
@@ -725,15 +1201,107 @@ class InstancePromptCache:
         self.prompt_schema = PromptSchema(raw_prompt=raw_prompt)
         self.agent_schema = DEFAULT_AGENT_SCHEMA
         
-        # 使用原始提示词作为所有版本
-        self.system_prompt_simple = raw_prompt
-        self.system_prompt_medium = raw_prompt
-        self.system_prompt_complex = raw_prompt
+        # 🆕 V5.1: 即使 fallback 也要生成精简版本
+        # 提取核心内容（角色定义 + 禁令）
+        core_sections = self._extract_core_sections(raw_prompt)
+        
+        # Simple: 仅核心规则（限制 15k 字符）
+        self.system_prompt_simple = self._build_fallback_prompt(
+            core_sections, 
+            "简单查询", 
+            max_size=15000
+        )
+        
+        # Medium: 核心 + 部分扩展（限制 40k 字符）
+        self.system_prompt_medium = self._build_fallback_prompt(
+            raw_prompt[:40000] if len(raw_prompt) > 40000 else raw_prompt,
+            "中等任务",
+            max_size=40000
+        )
+        
+        # Complex: 完整版本（限制 80k 字符）
+        self.system_prompt_complex = self._build_fallback_prompt(
+            raw_prompt[:80000] if len(raw_prompt) > 80000 else raw_prompt,
+            "复杂任务",
+            max_size=80000
+        )
+        
+        logger.info(f"   Fallback 版本: Simple={len(self.system_prompt_simple)}, "
+                   f"Medium={len(self.system_prompt_medium)}, "
+                   f"Complex={len(self.system_prompt_complex)} 字符")
         
         # 使用默认意图识别提示词
         self.intent_prompt = get_intent_recognition_prompt()
         
         self.is_loaded = True
+    
+    def _extract_core_sections(self, raw_prompt: str) -> str:
+        """
+        🆕 V5.1: 从原始提示词中提取核心部分
+        
+        提取内容：
+        - 角色定义（开头到第一个主要分隔符）
+        - 绝对禁令（<absolute_prohibitions> 标签内容）
+        - 输出格式基础规则
+        """
+        import re
+        
+        parts = []
+        
+        # 1. 提取角色定义（开头部分）
+        # 找到第一个主要分隔符的位置
+        separators = ["<absolute_prohibitions", "## 绝对禁令", "---\n\n#", "==="]
+        end_pos = len(raw_prompt)
+        for sep in separators:
+            pos = raw_prompt.find(sep)
+            if pos > 0 and pos < end_pos:
+                end_pos = pos
+        
+        role_section = raw_prompt[:min(end_pos, 3000)].strip()
+        if role_section:
+            parts.append(role_section)
+        
+        # 2. 提取绝对禁令
+        prohibitions_match = re.search(
+            r'<absolute_prohibitions.*?>.*?</absolute_prohibitions>',
+            raw_prompt,
+            re.DOTALL
+        )
+        if prohibitions_match:
+            parts.append(prohibitions_match.group(0)[:3000])  # 限制大小
+        
+        # 3. 提取输出格式核心规则
+        output_patterns = [
+            r'## \d*\.?\s*核心架构.*?(?=^## \d|^# |\Z)',
+            r'三段式.*?输出格式.*?(?=\n\n\n|\Z)',
+        ]
+        for pattern in output_patterns:
+            match = re.search(pattern, raw_prompt, re.MULTILINE | re.DOTALL)
+            if match:
+                parts.append(match.group(0)[:5000])
+                break
+        
+        return "\n\n---\n\n".join(parts)
+    
+    def _build_fallback_prompt(self, content: str, mode: str, max_size: int) -> str:
+        """
+        🆕 V5.1: 构建 fallback 版本的提示词
+        """
+        header = f"""# GeneralAgent
+
+---
+
+## 当前任务模式：{mode}
+
+"""
+        
+        # 确保不超过大小限制
+        available_size = max_size - len(header) - 100  # 预留缓冲
+        if len(content) > available_size:
+            content = content[:available_size].rsplit('\n', 1)[0]
+            content += "\n\n<!-- 内容已精简 -->"
+        
+        return header + content
     
     def get_system_prompt(self, complexity) -> str:
         """
@@ -757,6 +1325,50 @@ class InstancePromptCache:
             return self.system_prompt_medium or ""
         else:
             return self.system_prompt_complex or ""
+    
+    def get_full_system_prompt(self, complexity) -> str:
+        """
+        🆕 V5.1: 获取完整的系统提示词（缓存版本 + 运行时上下文）
+        
+        运行时动态组装：
+        1. 从缓存获取对应复杂度的精简版本
+        2. 追加运行时上下文（APIs 描述 + 框架协议）
+        
+        Args:
+            complexity: TaskComplexity 枚举
+            
+        Returns:
+            完整的系统提示词（缓存版本 + 运行时上下文）
+        """
+        # 1. 获取缓存的精简版本
+        base_prompt = self.get_system_prompt(complexity)
+        
+        if not base_prompt:
+            logger.warning(f"⚠️ 缓存版本为空: complexity={complexity}")
+            return ""
+        
+        # 2. 如果没有运行时上下文，直接返回缓存版本
+        if not self.runtime_context:
+            return base_prompt
+        
+        # 3. 追加运行时上下文
+        apis_prompt = self.runtime_context.get("apis_prompt", "")
+        framework_prompt = self.runtime_context.get("framework_prompt", "")
+        
+        # 组装完整提示词
+        parts = [base_prompt]
+        
+        if apis_prompt:
+            parts.append(f"\n\n---\n\n{apis_prompt}")
+        
+        if framework_prompt:
+            parts.append(f"\n\n---\n\n# 框架能力协议\n\n{framework_prompt}")
+        
+        full_prompt = "".join(parts)
+        
+        logger.debug(f"✅ 组装完整系统提示词: 缓存={len(base_prompt)} + 运行时={len(apis_prompt) + len(framework_prompt)} = {len(full_prompt)} 字符")
+        
+        return full_prompt
     
     def get_intent_prompt(self) -> str:
         """

@@ -12,6 +12,10 @@
 #   2. 覆盖推断结果（特殊需求）
 #   3. 环境变量映射
 #
+# 🆕 V6.1 新增：
+#   - prompt_results/ 目录自动生成
+#   - multi_agent.mode 配置（替代 enabled）
+#
 # ============================================================
 
 # ==================== 基础信息 ====================
@@ -118,7 +122,7 @@ mcp_tools: []
 #   └── api_desc/        <- API 描述文档
 #       └── weather.md   <- doc: weather 指向此文件
 #
-# 📚 capability 字段说明（🆕）：
+# 📚 capability 字段说明：
 #   指定该 API 满足的用户意图，用于 Plan 阶段工具匹配。
 #   可选值与 MCP 工具相同。
 #
@@ -131,7 +135,7 @@ apis: []
   #     header: X-API-Key   # 认证头名称
   #     env: WEATHER_API_KEY  # 环境变量名
   #   doc: weather          # 指向 api_desc/weather.md
-  #   capability: "web_search"  # 🆕 该 API 用于信息查询
+  #   capability: "web_search"  # 该 API 用于信息查询
   #   description: "天气查询服务"
 
 
@@ -165,17 +169,37 @@ memory:
 #   └── test/prompt.md        # 测试专家提示词
 #
 multi_agent:
-  # 是否启用 Multi-Agent 模式（默认关闭）
-  enabled: false
+  # 🆕 V6.0 mode 选项（替代旧的 enabled 字段）：
+  #   - disabled: 禁用 Multi-Agent，始终使用 SimpleAgent（默认）
+  #   - auto: 自动判断（基于任务复杂度和关键词）
+  #   - enabled: 始终使用 Multi-Agent
+  mode: "disabled"
   
   # 最大并发 Worker 数量（控制资源使用）
-  max_concurrent_workers: 5
+  max_parallel_workers: 5
   
-  # 任务分解策略
-  # - auto: 自动选择（根据任务依赖关系）
-  # - parallel: 强制并行（适合无依赖任务）
-  # - sequential: 强制串行（适合有依赖任务）
-  # decomposition_strategy: "auto"
+  # 执行策略
+  #   - auto: 自动选择（根据任务依赖关系）
+  #   - parallel: 强制并行（适合无依赖任务）
+  #   - sequential: 强制串行（适合有依赖任务）
+  # execution_strategy: "auto"
+  
+  # 容错配置
+  # enable_checkpointing: true
+  # max_retries: 3
+  
+  # 超时配置
+  # task_timeout_seconds: 3600       # 总任务超时（秒）
+  # worker_timeout_seconds: 600      # 单 Worker 超时（秒）
+  
+  # 自动触发配置（mode=auto 时生效）
+  # auto_trigger_keywords:
+  #   - "研究"
+  #   - "分析"
+  #   - "对比"
+  #   - "调研"
+  #   - "报告"
+  # auto_trigger_min_complexity: "complex"
 
 
 # ==================== 工具能力配置 ====================

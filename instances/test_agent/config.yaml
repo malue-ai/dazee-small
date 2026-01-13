@@ -157,7 +157,7 @@ multi_agent:
   #   - disabled: 禁用 Multi-Agent，始终使用 SimpleAgent
   #   - auto: 自动判断（基于任务复杂度和关键词）
   #   - enabled: 始终使用 Multi-Agent
-  mode: "auto"
+  mode: "disabled"  # 🆕 暂时禁用，待充分验证后再启用
   
   # 最大并行 Worker 数
   max_parallel_workers: 5

@@ -166,11 +166,13 @@ class ResultAggregator:
         )
         
         # 调用 LLM
+        from core.llm.base import Message
+        
         response = await self.llm_service.create_message_async(
             model=self.model,
-            max_tokens=4096,
+            max_tokens=16000,  # 增加以满足 extended thinking 要求
             messages=[
-                {"role": "user", "content": prompt}
+                Message(role="user", content=prompt)
             ]
         )
         

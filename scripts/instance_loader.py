@@ -708,14 +708,17 @@ async def create_agent_from_instance(
     logger.info(f"   Skills: {len(config.skills)} 个")
     logger.info(f"   APIs: {len(config.apis)} 个")
     
-    # 🆕 V6.0 显示 Workers 和 Multi-Agent 配置
-    enabled_workers = [w for w in config.workers if w.enabled]
-    if config.workers:
-        logger.info(f"   Workers: {len(config.workers)} 个 ({len(enabled_workers)} 启用)")
-        for worker in enabled_workers:
-            logger.info(f"      • {worker.name} ({worker.specialization})")
+    # 🆕 V6.0 显示 Multi-Agent 配置
+    # 注意：只有当 multi_agent_enabled=True 时才显示 Workers 信息
     if config.multi_agent_enabled:
+        enabled_workers = [w for w in config.workers if w.enabled]
         logger.info(f"   Multi-Agent: 已启用 (最大并发: {config.max_concurrent_workers})")
+        if config.workers:
+            logger.info(f"   Workers: {len(config.workers)} 个 ({len(enabled_workers)} 启用)")
+            for worker in enabled_workers:
+                logger.info(f"      • {worker.name} ({worker.specialization})")
+    else:
+        logger.info(f"   Multi-Agent: 已禁用（使用 SimpleAgent）")
     
     # 3. 加载实例提示词
     instance_prompt = load_instance_prompt(instance_name)
@@ -763,12 +766,21 @@ async def create_agent_from_instance(
     if config.apis:
         config.apis = _prepare_apis(config.apis)
     
-    # 5. 合并框架通用提示词
-    # 实例提示词在前，APIs 描述，框架提示词在后
-    framework_prompt = get_universal_agent_prompt()
+    # 🆕 V5.1: 准备运行时上下文（APIs + 框架协议）
+    # 不再将完整 prompt.md 与框架提示词合并
+    # 而是让 SimpleAgent 运行时根据任务复杂度动态获取缓存版本
     apis_prompt = _build_apis_prompt_section(config.apis)
+    framework_prompt = get_universal_agent_prompt()
     
-    full_prompt = f"""# 实例配置
+    # 存储运行时上下文到 prompt_cache（供 Agent 动态追加）
+    prompt_cache.runtime_context = {
+        "apis_prompt": apis_prompt,
+        "framework_prompt": framework_prompt,
+    }
+    
+    # 🆕 V5.1: 仅在 fallback 时使用完整拼接版本
+    # 正常流程使用缓存的精简版本 + 运行时追加
+    fallback_prompt = f"""# 实例配置
 
 {instance_prompt}
 
@@ -783,7 +795,10 @@ async def create_agent_from_instance(
 {framework_prompt}
 """
     
-    logger.info(f"   合并后提示词长度: {len(full_prompt)} 字符")
+    logger.info(f"   运行时上下文: APIs={len(apis_prompt)} 字符, Framework={len(framework_prompt)} 字符")
+    logger.info(f"   缓存版本: Simple={len(prompt_cache.system_prompt_simple or '')} 字符, "
+                f"Medium={len(prompt_cache.system_prompt_medium or '')} 字符, "
+                f"Complex={len(prompt_cache.system_prompt_complex or '')} 字符")
     
     # 6. 创建事件管理器（如果未提供）
     if event_manager is None:
@@ -792,9 +807,8 @@ async def create_agent_from_instance(
         storage = get_memory_storage()
         event_manager = create_event_manager(storage)
     
-    # 🆕 V4.6.2: 使用缓存的 AgentSchema 创建 Agent
-    # 不再调用 from_prompt（会触发 LLM Schema 生成）
-    # 而是直接使用已经在 InstancePromptCache 中生成好的 Schema
+    # 🆕 V5.1: 使用缓存的 AgentSchema 创建 Agent
+    # 系统提示词不再启动时合并，而是运行时根据任务复杂度动态获取
     if prompt_cache.is_loaded and prompt_cache.agent_schema:
         # 🆕 V6.0: 注入 multi_agent 配置到 AgentSchema
         if config.multi_agent_enabled:
@@ -805,20 +819,24 @@ async def create_agent_from_instance(
             
             logger.info(f"✅ 注入 multi_agent 配置到 AgentSchema: mode={multi_agent_config.mode.value}")
         
+        # 🆕 V5.1: 不传递 system_prompt，让 Agent 运行时从 prompt_cache 动态获取
+        # prompt_cache 包含：
+        # - system_prompt_simple/medium/complex（缓存版本）
+        # - runtime_context（APIs + framework 运行时追加）
         agent = AgentFactory.from_schema(
             schema=prompt_cache.agent_schema,
-            system_prompt=full_prompt,
+            system_prompt=None,  # 🆕 不再传递完整 prompt，运行时动态获取
             event_manager=event_manager,
             workspace_dir=workspace_dir,
             conversation_service=conversation_service,
-            prompt_cache=prompt_cache,  # 🆕 V4.6.2: 传递缓存
+            prompt_cache=prompt_cache,  # 🆕 传递缓存，包含缓存版本和运行时上下文
         )
-        logger.info("✅ Agent 创建成功（使用缓存的 AgentSchema）")
+        logger.info("✅ Agent 创建成功（使用动态提示词路由）")
     else:
-        # Fallback: 如果缓存加载失败，使用旧方式
-        logger.warning("⚠️ InstancePromptCache 加载失败，使用 AgentFactory.from_prompt")
+        # Fallback: 如果缓存加载失败，使用完整拼接版本
+        logger.warning("⚠️ InstancePromptCache 加载失败，使用 fallback 完整提示词")
         agent = await AgentFactory.from_prompt(
-            system_prompt=full_prompt,
+            system_prompt=fallback_prompt,  # 使用 fallback 完整版本
             event_manager=event_manager,
             workspace_dir=workspace_dir,
             conversation_service=conversation_service,
@@ -840,11 +858,14 @@ async def create_agent_from_instance(
         agent.max_turns = config.max_turns
         logger.info(f"   覆盖 max_turns: {config.max_turns}")
     
-    # 🆕 V6.0: 注入 Workers 配置（供 Multi-Agent 使用）
-    agent.workers_config = config.workers
-    if config.workers:
-        enabled_workers = [w for w in config.workers if w.enabled]
-        logger.info(f"   注入 Workers 配置: {len(enabled_workers)} 个启用")
+    # 🆕 V6.0: 注入 Workers 配置（仅当 Multi-Agent 启用时）
+    if config.multi_agent_enabled:
+        agent.workers_config = config.workers
+        if config.workers:
+            enabled_workers = [w for w in config.workers if w.enabled]
+            logger.info(f"   注入 Workers 配置: {len(enabled_workers)} 个启用")
+    else:
+        agent.workers_config = []  # 禁用时清空 Workers 配置
     
     # 9. 🆕 创建实例级工具注册表
     from core.tool import InstanceToolRegistry, get_capability_registry, create_tool_loader
@@ -1368,28 +1389,28 @@ if __name__ == "__main__":
                 doc_status = f"文档: {api.doc}" if api.doc else "无文档"
                 print(f"      • {api.name}: {api.base_url} ({doc_status})")
             
-            # 🆕 V6.0 Workers 信息（Multi-Agent）
-            enabled_workers = [w for w in config.workers if w.enabled]
-            print(f"   Workers: {len(config.workers)} 个 ({len(enabled_workers)} 启用)")
-            for worker in config.workers:
-                status = "✅" if worker.enabled else "⬜"
-                # 根据类型显示不同信息
-                if worker.worker_type == "agent":
-                    prompt_len = len(worker.system_prompt) if worker.system_prompt else 0
-                    info = f"{prompt_len} 字符"
-                elif worker.worker_type == "mcp":
-                    info = f"MCP → {worker.server_url or '未配置'}"
-                elif worker.worker_type == "workflow":
-                    info = f"{worker.platform or 'custom'} → {worker.workflow_id or worker.workflow_url or '未配置'}"
-                else:
-                    info = worker.worker_type
-                print(f"      {status} {worker.name} [{worker.worker_type}] ({worker.specialization}): {info}")
-            
             # 🆕 V6.0 Multi-Agent 配置
             ma_status = "启用" if config.multi_agent_enabled else "禁用"
             print(f"   Multi-Agent: {ma_status}")
+            
+            # 只有当 Multi-Agent 启用时才显示 Workers 信息
             if config.multi_agent_enabled:
                 print(f"      最大并发 Workers: {config.max_concurrent_workers}")
+                enabled_workers = [w for w in config.workers if w.enabled]
+                print(f"      Workers: {len(config.workers)} 个 ({len(enabled_workers)} 启用)")
+                for worker in config.workers:
+                    status = "✅" if worker.enabled else "⬜"
+                    # 根据类型显示不同信息
+                    if worker.worker_type == "agent":
+                        prompt_len = len(worker.system_prompt) if worker.system_prompt else 0
+                        info = f"{prompt_len} 字符"
+                    elif worker.worker_type == "mcp":
+                        info = f"MCP → {worker.server_url or '未配置'}"
+                    elif worker.worker_type == "workflow":
+                        info = f"{worker.platform or 'custom'} → {worker.workflow_id or worker.workflow_url or '未配置'}"
+                    else:
+                        info = worker.worker_type
+                    print(f"         {status} {worker.name} [{worker.worker_type}] ({worker.specialization}): {info}")
         except Exception as e:
             print(f"❌ 加载失败: {str(e)}")
     else:

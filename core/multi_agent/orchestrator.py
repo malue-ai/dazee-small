@@ -433,12 +433,14 @@ class MultiAgentOrchestrator:
     
     async def _call_worker_llm(self, worker, sub_task):
         """调用 Worker LLM"""
+        from core.llm.base import Message
+        
         response = await self.llm_service.create_message_async(
             model="claude-sonnet-4-5-20250929",
-            max_tokens=4096,
+            max_tokens=16000,  # 增加以满足 extended thinking 要求
             system=worker.system_prompt,
             messages=[
-                {"role": "user", "content": sub_task.action}
+                Message(role="user", content=sub_task.action)
             ]
         )
         

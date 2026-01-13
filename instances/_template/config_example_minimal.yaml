@@ -54,3 +54,8 @@ memory:
   mem0_enabled: true
   smart_retrieval: true
   retention_policy: user
+
+# ==================== Multi-Agent 配置（V6.0）====================
+multi_agent:
+  # disabled: 禁用 Multi-Agent，始终使用 SimpleAgent
+  mode: "disabled"

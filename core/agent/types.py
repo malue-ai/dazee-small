@@ -45,6 +45,7 @@ class IntentResult:
     🆕 V4.3: 新增 needs_persistence 字段，用于判断是否需要跨 Session 持久化
     🆕 V4.6: 新增 skip_memory_retrieval 字段，用于智能决定是否需要 Mem0 记忆检索
     🆕 V6.0: 新增 needs_multi_agent 字段，用于智能决定是否需要 Multi-Agent 协作（Prompt-First）
+    🆕 V6.1: 新增 is_follow_up 字段，用于识别追问/上下文延续（避免误判为新话题）
     """
     task_type: TaskType                          # 任务类型
     complexity: Complexity                       # 复杂度
@@ -52,6 +53,7 @@ class IntentResult:
     needs_persistence: bool = False              # 🆕 V4.3: 是否需要跨 Session 持久化
     skip_memory_retrieval: bool = False          # 🆕 V4.6: 是否跳过 Mem0 记忆检索（默认不跳过）
     needs_multi_agent: bool = False              # 🆕 V6.0: 是否需要 Multi-Agent 协作（默认不需要）
+    is_follow_up: bool = False                   # 🆕 V6.1: 是否为追问/上下文延续（默认否，视为新话题）
     keywords: List[str] = field(default_factory=list)  # 提取的关键词
     confidence: float = 1.0                      # 置信度
     raw_response: Optional[str] = None           # LLM 原始响应（用于调试）
@@ -65,6 +67,7 @@ class IntentResult:
             "needs_persistence": self.needs_persistence,
             "skip_memory_retrieval": self.skip_memory_retrieval,
             "needs_multi_agent": self.needs_multi_agent,
+            "is_follow_up": self.is_follow_up,
             "keywords": self.keywords,
             "confidence": self.confidence
         }

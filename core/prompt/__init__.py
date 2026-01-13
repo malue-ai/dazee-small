@@ -71,6 +71,14 @@ from .intent_prompt_generator import (
     get_default_intent_prompt,
 )
 
+# 🆕 V5.5: 提示词结果输出管理器（面向运营）
+from .prompt_results_writer import (
+    PromptResultsWriter,
+    PromptResultsMetadata,
+    PromptResults,
+    create_prompt_results_writer,
+)
+
 __all__ = [
     # 核心类型
     "TaskComplexity",
@@ -100,6 +108,12 @@ __all__ = [
     "IntentPromptGenerator",
     "generate_intent_prompt",
     "get_default_intent_prompt",
+    
+    # 🆕 V5.5: 提示词结果输出管理器
+    "PromptResultsWriter",
+    "PromptResultsMetadata",
+    "PromptResults",
+    "create_prompt_results_writer",
     
     # 便捷函数
     "parse_prompt",

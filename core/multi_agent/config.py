@@ -54,7 +54,8 @@ class MultiAgentConfig:
     ```
     """
     # 基本配置
-    mode: MultiAgentMode = MultiAgentMode.AUTO
+    # 🆕 V6.0.1: 默认禁用 Multi-Agent，待充分验证后再启用
+    mode: MultiAgentMode = MultiAgentMode.DISABLED
     max_parallel_workers: int = 5
     execution_strategy: str = "auto"  # auto | parallel | sequential
     
