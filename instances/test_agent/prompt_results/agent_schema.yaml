@@ -1,26 +1,29 @@
-name: Dazee
-description: 温暖专业的高级工作助理，擅长复杂业务分析、系统设计和深度研究
+name: GeneralAgent
+description: 通用智能助手（高质量默认配置）
 intent_analyzer:
   enabled: true
   complexity_levels:
-  - simple
+  - low
   - medium
-  - complex
+  - high
   task_types:
-  - system_design
+  - question_answering
   - data_analysis
-  - research
-  - consultation
+  - content_generation
+  - code_execution
+  - web_search
+  - file_operation
   output_formats:
-  - markdown
+  - text
   - json
+  - markdown
   use_llm: true
   llm_model: claude-haiku-4-5-20251001
 plan_manager:
   enabled: true
-  trigger_condition: task_complexity in ['medium', 'complex']
+  trigger_condition: complexity == 'high' or step_count > 3
   max_steps: 15
-  granularity: fine
+  granularity: medium
   allow_dynamic_adjustment: true
   validation_interval: 3
   replan_enabled: true
@@ -32,18 +35,15 @@ tool_selector:
   available_tools: []
   selection_strategy: capability_based
   allow_parallel: false
-  max_parallel_tools: 1
+  max_parallel_tools: 3
   base_tools:
-  - tavily_search
-  - exa_search
-  - current_time
-  - timezone_conversion
+  - plan_todo
   tool_timeout: 300
 memory_manager:
   enabled: true
   retention_policy: session
-  episodic_memory: true
-  working_memory_limit: 30
+  episodic_memory: false
+  working_memory_limit: 20
   auto_compress: true
   compress_threshold: 15
 output_formatter:
@@ -55,72 +55,15 @@ output_formatter:
   - json
   - html
   code_highlighting: true
-  max_output_length: 5000
-  include_metadata: true
-skills:
-- type: custom
-  skill_id: xlsx
-  version: latest
-  required: false
-- type: custom
-  skill_id: pptx
-  version: latest
-  required: false
-- type: custom
-  skill_id: pdf
-  version: latest
-  required: false
-tools:
-- tavily_search
-- exa_search
-- exa_contents
-- current_time
-- timezone_conversion
-- e2b_sandbox
-- web_search
-- Perplexity
+  max_output_length: 50000
+  include_metadata: false
+skills: []
+tools: []
 model: claude-sonnet-4-5-20250929
-max_turns: 20
+max_turns: 15
 allow_parallel_tools: false
 context_limits:
   max_context_tokens: 200000
   warning_threshold: 0.8
   truncate_threshold: 0.9
-reasoning: '这是一个高度复杂的业务顾问 Agent，具有以下特点：
-
-
-  1. **多意图识别**：支持系统搭建、BI问数、综合咨询、追问等4种意图，需要精准的意图分析能力
-
-
-  2. **复杂规划能力**：涉及6-15步的详细任务规划，需要细粒度的 Plan Manager，支持动态调整和重规划
-
-
-  3. **丰富的工具生态**：需要搜索（tavily/exa）、时间处理、代码执行、深度研究（Perplexity）等多种工具，采用基于能力的选择策略
-
-
-  4. **严格的质量控制**：包含 ReAct 验证循环、最终验证清单、诚信原则等多层质量保障机制
-
-
-  5. **五段式输出**：THINK/PREFACE/TOOL/RESPONSE/JSON 的结构化输出，需要强大的输出格式化能力
-
-
-  6. **上下文管理**：支持多轮对话、追问场景、文件处理，需要会话级记忆和自动压缩
-
-
-  7. **文档生成能力**：支持 Excel、PPT、PDF 等多种文档格式，需要对应的 skills
-
-
-  8. **HITL 机制**：在关键决策点主动暂停等待用户输入，需要较高的 max_turns 支持长对话
-
-
-  关键配置决策：
-
-  - plan_manager.granularity=fine：支持详细的步骤规划和进度追踪
-
-  - replan_enabled=true：允许根据执行情况动态调整计划
-
-  - allow_parallel_tools=false：严格的单工具顺序执行，确保 ReAct 验证
-
-  - working_memory_limit=30：支持复杂任务的上下文管理
-
-  - max_turns=20：支持长对话和多轮交互'
+reasoning: 高质量默认配置：适应大多数场景，平衡能力和稳定性。作为 config.yaml 配置缺失时的兜底。

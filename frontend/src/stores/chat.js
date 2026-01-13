@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import axios from '@/api/axios'
+import axios from '@/api/index'
 import { useWorkspaceStore } from './workspace'
 
 // 文件写入工具列表（用于实时预览）

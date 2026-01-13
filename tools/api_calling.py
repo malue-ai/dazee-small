@@ -470,13 +470,13 @@ class APICallingTool:
             if body and "Content-Type" not in headers:
                 headers["Content-Type"] = "application/json"
             
-            # 发送请求（超时 180 秒，支持文件解析等耗时操作）
+            # 发送请求（使用实例的 timeout 配置，默认 600 秒）
             async with session.request(
                 method=method,
                 url=url,
                 headers=headers,
                 json=body if body else None,
-                timeout=aiohttp.ClientTimeout(total=180)
+                timeout=aiohttp.ClientTimeout(total=self.timeout)
             ) as response:
                 http_status = response.status
                 
@@ -495,7 +495,7 @@ class APICallingTool:
                     return {"_error": True, "_status": response.status, "_message": error_text}, http_status
         
         except asyncio.TimeoutError:
-            logger.error(f"❌ 请求超时 (180秒)")
+            logger.error(f"❌ 请求超时 ({self.timeout}秒)")
             return {"_error": True, "_status": 0, "_message": "请求超时"}, 0
         except Exception as e:
             logger.error(f"❌ 请求失败: {e}")

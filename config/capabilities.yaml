@@ -437,6 +437,7 @@ capabilities:
   type: TOOL
   subtype: CUSTOM
   provider: user
+  level: 1  # 核心工具，始终启用
   implementation:
     module: tools.api_calling
     class: APICallingTool

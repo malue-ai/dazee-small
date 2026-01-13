@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import axios from '@/api/axios'
+import axios from '@/api/index'
 import { WORKSPACE_API } from '@/api/config'
 
 export const useWorkspaceStore = defineStore('workspace', {

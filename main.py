@@ -22,6 +22,7 @@ from routers.conversation import router as conversation_router
 from routers.workspace import router as workspace_router
 from routers.agents import router as agents_router
 from routers.skills import router as skills_router
+from routers.auth import router as auth_router
 
 
 # ============================================================
@@ -207,6 +208,7 @@ app.add_middleware(
 )
 
 # 注册路由
+app.include_router(auth_router)  # 认证 API
 app.include_router(chat_router)
 app.include_router(knowledge_router)
 app.include_router(human_confirmation_router)

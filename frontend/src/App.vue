@@ -1,19 +1,23 @@
 <template>
-  <div id="app">
+  <component :is="layout">
     <router-view />
-  </div>
+  </component>
 </template>
 
-<script setup>
-// 主应用入口组件
+<script setup lang="ts">
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
+import DefaultLayout from '@/layouts/DefaultLayout.vue'
+import AuthLayout from '@/layouts/AuthLayout.vue'
+
+const route = useRoute()
+
+// 根据路由 meta.layout 选择布局组件
+const layout = computed(() => {
+  const layoutName = route.meta.layout as string | undefined
+  if (layoutName === 'auth') {
+    return AuthLayout
+  }
+  return DefaultLayout
+})
 </script>
-
-<style scoped>
-#app {
-  width: 100%;
-  height: 100vh;
-  margin: 0;
-  padding: 0;
-}
-</style>
-

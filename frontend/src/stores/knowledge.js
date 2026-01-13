@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import axios from '@/api/axios'
+import axios from '@/api/index'
 
 export const useKnowledgeStore = defineStore('knowledge', {
   state: () => ({
