@@ -611,22 +611,81 @@ class AgentSchema(BaseModel):
 
 
 # ============================================================
-# 默认 Schema
+# 默认 Schema（高质量兜底配置）
 # ============================================================
+#
+# 设计理念：
+# - 这是框架的"安全网"，即使运营配置不全/错误，Agent 也能高质量运行
+# - 配置优先级：config.yaml 显式配置 > LLM 推断 > DEFAULT_AGENT_SCHEMA
+# - 默认值应该是"最佳实践"而非"最小化配置"
+#
 
 DEFAULT_AGENT_SCHEMA = AgentSchema(
     name="GeneralAgent",
-    description="通用智能助手",
-    intent_analyzer=IntentAnalyzerConfig(enabled=True),
-    plan_manager=PlanManagerConfig(enabled=True),
-    tool_selector=ToolSelectorConfig(enabled=True),
-    memory_manager=MemoryManagerConfig(enabled=True),
-    output_formatter=OutputFormatterConfig(enabled=True),
-    skills=[],
-    tools=[],
-    max_turns=15,
-    allow_parallel_tools=False,
-    reasoning="默认配置，适用于一般场景"
+    description="通用智能助手（高质量默认配置）",
+    
+    # 意图分析器：启用 LLM 分析，覆盖常见任务类型
+    intent_analyzer=IntentAnalyzerConfig(
+        enabled=True,
+        use_llm=True,
+        task_types=[
+            "question_answering",
+            "data_analysis",
+            "content_generation",
+            "code_execution",
+            "web_search",
+            "file_operation",
+        ],
+        complexity_levels=["low", "medium", "high"],
+    ),
+    
+    # 计划管理器：适中规模，适应大多数任务
+    plan_manager=PlanManagerConfig(
+        enabled=True,
+        max_steps=15,                    # 适中的步骤数
+        granularity="medium",            # 中等粒度
+        allow_dynamic_adjustment=True,   # 允许动态调整
+        replan_enabled=True,             # 允许重规划
+        max_replan_attempts=2,           # 最多重规划 2 次
+        replan_strategy="incremental",   # 增量重规划（保留已完成步骤）
+        failure_threshold=0.3,           # 30% 失败率触发重规划建议
+    ),
+    
+    # 工具选择器：基于能力的选择策略
+    tool_selector=ToolSelectorConfig(
+        enabled=True,
+        selection_strategy="capability_based",
+        allow_parallel=False,            # 默认串行（更稳定）
+        max_parallel_tools=3,
+        base_tools=["plan_todo"],        # 始终包含计划工具
+        tool_timeout=300,                # 5 分钟超时
+    ),
+    
+    # 记忆管理器：session 级别，适度的工作记忆
+    memory_manager=MemoryManagerConfig(
+        enabled=True,
+        retention_policy="session",
+        working_memory_limit=20,         # 适中的记忆容量
+        auto_compress=True,              # 自动压缩长对话
+        compress_threshold=15,           # 15 条消息触发压缩
+    ),
+    
+    # 输出格式化器：Markdown 格式，支持代码高亮
+    output_formatter=OutputFormatterConfig(
+        enabled=True,
+        default_format="markdown",
+        code_highlighting=True,
+        max_output_length=50000,
+    ),
+    
+    # 运行时参数
+    model="claude-sonnet-4-5-20250929",  # 平衡能力和成本
+    max_turns=15,                        # 适中的对话长度
+    allow_parallel_tools=False,          # 默认串行（更稳定）
+    skills=[],                           # 由 config.yaml 配置
+    tools=[],                            # 由 config.yaml 配置
+    
+    reasoning="高质量默认配置：适应大多数场景，平衡能力和稳定性。作为 config.yaml 配置缺失时的兜底。",
 )
 
 

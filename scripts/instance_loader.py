@@ -69,12 +69,19 @@ class LLMParams:
 
 @dataclass
 class InstanceConfig:
-    """实例配置数据类"""
+    """
+    实例配置数据类
+    
+    配置优先级（从高到低）：
+    1. config.yaml 显式配置 - 运营人员的场景化定制
+    2. LLM 推断的 Schema - 基于 prompt.md 的智能推断
+    3. DEFAULT_AGENT_SCHEMA - 高质量的框架默认值（兜底）
+    """
     name: str
     description: str = ""
     version: str = "1.0.0"
     
-    # Agent 配置
+    # Agent 基础配置
     model: Optional[str] = None
     max_turns: Optional[int] = None
     plan_manager_enabled: Optional[bool] = None
@@ -92,13 +99,33 @@ class InstanceConfig:
     # APIs 配置（REST API 描述）
     apis: List[ApiConfig] = field(default_factory=list)
     
-    # 🆕 通用工具启用配置（从 capabilities.yaml 选择）
+    # 通用工具启用配置（从 capabilities.yaml 选择）
     enabled_capabilities: Dict[str, bool] = field(default_factory=dict)
+    
+    # ===== 高级配置（从 config.yaml 的 advanced 部分读取）=====
+    # 这些配置可选，未配置时使用 DEFAULT_AGENT_SCHEMA 的高质量默认值
+    
+    # 意图分析器配置
+    intent_analyzer_enabled: Optional[bool] = None
+    intent_analyzer_use_llm: Optional[bool] = None
+    
+    # 计划管理器配置
+    plan_manager_max_steps: Optional[int] = None
+    plan_manager_granularity: Optional[str] = None
+    
+    # 输出格式配置
+    output_format: Optional[str] = None
+    output_code_highlighting: Optional[bool] = None
     
     # 记忆配置
     mem0_enabled: bool = True
     smart_retrieval: bool = True
     retention_policy: str = "user"
+    
+    # Multi-Agent 配置（暂时禁用，作为待扩展功能）
+    multi_agent_enabled: bool = False
+    max_concurrent_workers: int = 5
+    workers: List[Any] = field(default_factory=list)
     
     # 原始配置
     raw_config: Dict[str, Any] = field(default_factory=dict)
@@ -240,7 +267,7 @@ def load_instance_config(instance_name: str) -> InstanceConfig:
     # 加载 APIs 配置（REST API 描述）
     apis = _load_apis_config(instance_name, raw_config.get("apis", []))
     
-    # 🆕 解析通用工具启用配置
+    # 解析通用工具启用配置
     enabled_capabilities_raw = raw_config.get("enabled_capabilities", {})
     enabled_capabilities = {}
     if isinstance(enabled_capabilities_raw, dict):
@@ -252,6 +279,13 @@ def load_instance_config(instance_name: str) -> InstanceConfig:
                 enabled_capabilities[tool_name] = bool(enabled)
             else:
                 logger.warning(f"⚠️ 工具 {tool_name} 的启用配置值无效: {enabled}，将被忽略")
+    
+    # 解析 advanced 配置（高级配置，可选）
+    # 未配置时使用 DEFAULT_AGENT_SCHEMA 的高质量默认值兜底
+    advanced_config = raw_config.get("advanced", {})
+    intent_config = advanced_config.get("intent_analyzer", {})
+    plan_config = advanced_config.get("plan_manager", {})
+    output_config = advanced_config.get("output_formatter", {})
     
     return InstanceConfig(
         name=instance_info.get("name", instance_name),
@@ -266,9 +300,21 @@ def load_instance_config(instance_name: str) -> InstanceConfig:
         skills=skills,
         apis=apis,
         enabled_capabilities=enabled_capabilities,
+        # 高级配置（从 advanced 部分读取）
+        intent_analyzer_enabled=intent_config.get("enabled"),
+        intent_analyzer_use_llm=intent_config.get("use_llm"),
+        plan_manager_max_steps=plan_config.get("max_steps"),
+        plan_manager_granularity=plan_config.get("granularity"),
+        output_format=output_config.get("default_format"),
+        output_code_highlighting=output_config.get("code_highlighting"),
+        # 记忆配置
         mem0_enabled=memory_config.get("mem0_enabled", True),
         smart_retrieval=memory_config.get("smart_retrieval", True),
         retention_policy=memory_config.get("retention_policy", "user"),
+        # Multi-Agent 配置（暂时禁用）
+        multi_agent_enabled=raw_config.get("multi_agent", {}).get("mode", "disabled") != "disabled",
+        max_concurrent_workers=raw_config.get("multi_agent", {}).get("max_parallel_workers", 5),
+        workers=[],  # Workers 暂不解析，待扩展
         raw_config=raw_config
     )
 
@@ -444,6 +490,76 @@ def load_instance_env(instance_name: str) -> None:
         logger.warning(f"⚠️ .env 文件不存在: {env_path}")
 
 
+def _merge_config_to_schema(base_schema, config: InstanceConfig):
+    """
+    将 config.yaml 配置合并到 AgentSchema
+    
+    合并策略：
+    - config.yaml 有显式配置 → 覆盖 Schema 默认值
+    - config.yaml 未配置（None）→ 保留 Schema 的高质量默认值
+    
+    这样即使运营配置不全或配置错误，也能依赖 DEFAULT_AGENT_SCHEMA 兜底。
+    
+    Args:
+        base_schema: 基础 Schema（来自 LLM 推断或 DEFAULT_AGENT_SCHEMA）
+        config: InstanceConfig（从 config.yaml 读取）
+        
+    Returns:
+        合并后的 AgentSchema
+    """
+    # 深拷贝 Schema，避免修改原始默认值
+    merged = base_schema.copy(deep=True)
+    
+    # === 基础配置覆盖 ===
+    if config.model:
+        merged.model = config.model
+    if config.max_turns:
+        merged.max_turns = config.max_turns
+    if config.allow_parallel_tools is not None:
+        merged.allow_parallel_tools = config.allow_parallel_tools
+    
+    # === 计划管理器配置覆盖 ===
+    if config.plan_manager_enabled is not None:
+        merged.plan_manager.enabled = config.plan_manager_enabled
+    if config.plan_manager_max_steps is not None:
+        merged.plan_manager.max_steps = config.plan_manager_max_steps
+    if config.plan_manager_granularity is not None:
+        merged.plan_manager.granularity = config.plan_manager_granularity
+    
+    # === 意图分析器配置覆盖 ===
+    if config.intent_analyzer_enabled is not None:
+        merged.intent_analyzer.enabled = config.intent_analyzer_enabled
+    if config.intent_analyzer_use_llm is not None:
+        merged.intent_analyzer.use_llm = config.intent_analyzer_use_llm
+    
+    # === 输出格式配置覆盖 ===
+    if config.output_format:
+        merged.output_formatter.default_format = config.output_format
+    if config.output_code_highlighting is not None:
+        merged.output_formatter.code_highlighting = config.output_code_highlighting
+    
+    # === 记录合并结果 ===
+    override_count = sum([
+        config.model is not None,
+        config.max_turns is not None,
+        config.allow_parallel_tools is not None,
+        config.plan_manager_enabled is not None,
+        config.plan_manager_max_steps is not None,
+        config.plan_manager_granularity is not None,
+        config.intent_analyzer_enabled is not None,
+        config.intent_analyzer_use_llm is not None,
+        config.output_format is not None,
+        config.output_code_highlighting is not None,
+    ])
+    
+    if override_count > 0:
+        logger.info(f"✅ config.yaml 覆盖了 {override_count} 项 Schema 配置")
+    else:
+        logger.info("✅ config.yaml 无显式配置，使用 Schema 默认值")
+    
+    return merged
+
+
 async def create_agent_from_instance(
     instance_name: str,
     event_manager = None,
@@ -456,15 +572,27 @@ async def create_agent_from_instance(
     """
     从实例配置创建 Agent（核心方法）
     
-    🆕 V4.6.2 流程：
+    配置优先级（从高到低）：
+    ┌────────────────────────────────────────────────────────────┐
+    │ 1. config.yaml 显式配置  - 运营人员的场景化定制            │
+    │ 2. LLM 推断的 Schema     - 基于 prompt.md 的智能推断       │
+    │ 3. DEFAULT_AGENT_SCHEMA  - 高质量的框架默认值（兜底）      │
+    └────────────────────────────────────────────────────────────┘
+    
+    设计理念：
+    - config.yaml 有配置 → 使用 config.yaml 的值
+    - config.yaml 未配置 → 使用 LLM 推断或框架默认值兜底
+    - 即使运营配置不全/错误，Agent 也能以高质量默认行为运行
+    
+    流程：
     1. 加载环境变量
-    2. 加载实例配置
-    3. 加载实例提示词
-    4. 🆕 V4.6.2 一次性加载 InstancePromptCache（包含所有提示词版本）
-    5. 合并框架通用提示词
-    6. 调用 AgentFactory.from_schema() 创建 Agent（使用缓存的 AgentSchema）
-    7. 注册 MCP 工具（利用推断缓存，只推断新工具）
-    8. 注册 Claude Skills（如果配置了）
+    2. 加载实例配置（config.yaml）
+    3. 加载实例提示词（prompt.md）
+    4. 加载 InstancePromptCache（包含 LLM 推断的 Schema 和提示词版本）
+    5. 合并配置：config.yaml 覆盖 Schema 默认值
+    6. 调用 AgentFactory.from_schema() 创建 Agent
+    7. 注册 MCP 工具
+    8. 注册 Claude Skills
     9. 保存工具推断缓存
     
     Args:
@@ -601,36 +729,51 @@ async def create_agent_from_instance(
         storage = get_memory_storage()
         event_manager = create_event_manager(storage)
     
-    # 🆕 V5.1: 使用缓存的 AgentSchema 创建 Agent
-    # 系统提示词不再启动时合并，而是运行时根据任务复杂度动态获取
+    # 使用缓存的 AgentSchema 创建 Agent
+    # 系统提示词运行时根据任务复杂度动态获取
     if prompt_cache.is_loaded and prompt_cache.agent_schema:
-        # 🆕 V6.0: 注入 multi_agent 配置到 AgentSchema
+        # 获取基础 Schema（来自 LLM 推断）
+        base_schema = prompt_cache.agent_schema
+        
+        # 合并 config.yaml 配置到 Schema
+        # 策略：config.yaml 显式配置覆盖 Schema，未配置则使用 Schema 默认值
+        merged_schema = _merge_config_to_schema(base_schema, config)
+        
+        # 注入 multi_agent 配置到合并后的 Schema
         if config.multi_agent_enabled:
             from core.multi_agent.config import MultiAgentConfig
             
             multi_agent_config = MultiAgentConfig.from_dict(config.raw_config.get("multi_agent", {}))
-            prompt_cache.agent_schema.multi_agent = multi_agent_config
+            merged_schema.multi_agent = multi_agent_config
             
             logger.info(f"✅ 注入 multi_agent 配置到 AgentSchema: mode={multi_agent_config.mode.value}")
         
-        # 🆕 V5.1: 不传递 system_prompt，让 Agent 运行时从 prompt_cache 动态获取
+        # 更新 prompt_cache 中的 agent_schema（供后续使用）
+        prompt_cache.agent_schema = merged_schema
+        
+        # 创建 Agent，使用合并后的 Schema
         # prompt_cache 包含：
         # - system_prompt_simple/medium/complex（缓存版本）
         # - runtime_context（APIs + framework 运行时追加）
         agent = AgentFactory.from_schema(
-            schema=prompt_cache.agent_schema,
-            system_prompt=None,  # 🆕 不再传递完整 prompt，运行时动态获取
+            schema=merged_schema,
+            system_prompt=None,  # 运行时从 prompt_cache 动态获取
             event_manager=event_manager,
             workspace_dir=workspace_dir,
             conversation_service=conversation_service,
-            prompt_cache=prompt_cache,  # 🆕 传递缓存，包含缓存版本和运行时上下文
+            prompt_cache=prompt_cache,
         )
         logger.info("✅ Agent 创建成功（使用动态提示词路由）")
     else:
         # Fallback: 如果缓存加载失败，使用完整拼接版本
+        # 此时使用 DEFAULT_AGENT_SCHEMA 作为兜底
         logger.warning("⚠️ InstancePromptCache 加载失败，使用 fallback 完整提示词")
+        
+        from core.schemas import DEFAULT_AGENT_SCHEMA
+        fallback_schema = _merge_config_to_schema(DEFAULT_AGENT_SCHEMA, config)
+        
         agent = await AgentFactory.from_prompt(
-            system_prompt=fallback_prompt,  # 使用 fallback 完整版本
+            system_prompt=fallback_prompt,
             event_manager=event_manager,
             workspace_dir=workspace_dir,
             conversation_service=conversation_service,
@@ -642,15 +785,6 @@ async def create_agent_from_instance(
         )
     
     logger.info(f"✅ Agent 创建成功")
-    
-    # 8. 应用配置覆盖
-    if config.model:
-        agent.model = config.model
-        logger.info(f"   覆盖 model: {config.model}")
-    
-    if config.max_turns:
-        agent.max_turns = config.max_turns
-        logger.info(f"   覆盖 max_turns: {config.max_turns}")
     
     # 🆕 V6.0: 注入 Workers 配置（仅当 Multi-Agent 启用时）
     if config.multi_agent_enabled:
