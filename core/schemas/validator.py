@@ -304,11 +304,16 @@ class OutputFormatterConfig(ComponentConfig):
     输出格式化器配置
     
     用途：格式化 Agent 的最终输出
+    
+    V6.3 改进：
+    - 默认使用 text 格式（最简单、最兼容）
+    - JSON 校验使用 Pydantic 模型（替代 jsonschema）
+    - 支持动态 Pydantic 模型定义
     """
     # 默认输出格式
     default_format: str = Field(
-        default="markdown",
-        description="默认输出格式"
+        default="text",
+        description="默认输出格式（text/markdown/json）"
     )
     
     # 支持的格式列表
@@ -328,6 +333,34 @@ class OutputFormatterConfig(ComponentConfig):
         default=50000,
         ge=1000,
         description="最大输出长度"
+    )
+    
+    # JSON 输出配置（使用 Pydantic 模型校验）
+    json_model_name: Optional[str] = Field(
+        default=None,
+        description="Pydantic 模型名称（用于校验，从 output_models 目录加载）"
+    )
+    
+    json_schema: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="动态 JSON Schema 定义（仅当 json_model_name 未指定时使用）"
+    )
+    
+    strict_json_validation: bool = Field(
+        default=False,
+        description="是否启用严格 JSON 校验（不通过则抛出错误）"
+    )
+    
+    json_ensure_ascii: bool = Field(
+        default=False,
+        description="JSON 序列化时是否确保 ASCII（False 支持中文）"
+    )
+    
+    json_indent: Optional[int] = Field(
+        default=2,
+        ge=0,
+        le=8,
+        description="JSON 缩进空格数（None 为紧凑格式）"
     )
     
     # 是否包含元数据
@@ -673,7 +706,7 @@ DEFAULT_AGENT_SCHEMA = AgentSchema(
     # 输出格式化器：Markdown 格式，支持代码高亮
     output_formatter=OutputFormatterConfig(
         enabled=True,
-        default_format="markdown",
+        default_format="text",
         code_highlighting=True,
         max_output_length=50000,
     ),

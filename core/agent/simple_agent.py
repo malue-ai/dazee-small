@@ -46,6 +46,7 @@ from core.tool import create_tool_executor, create_tool_selector
 from core.tool.capability import create_capability_registry, create_invocation_selector
 from core.orchestration import create_pipeline_tracer, E2EPipelineTracer
 from core.confirmation_manager import get_confirmation_manager, ConfirmationType
+from core.agent.types import IntentResult
 from logger import get_logger
 from tools.plan_todo_tool import create_plan_todo_tool
 from utils.usage_tracker import create_usage_tracker
@@ -245,6 +246,8 @@ class SimpleAgent:
         # 必须串行执行的特殊工具
         self._serial_only_tools = {"plan_todo", "request_human_confirmation"}
         logger.debug(f"✓ 并行工具配置: allow={self.allow_parallel_tools}, max={self.max_parallel_tools}")
+        
+ 
     
     def _register_tools_to_llm(self):
         """注册工具到 LLM Service"""
@@ -893,7 +896,7 @@ class SimpleAgent:
             self._tracer.finish()
             logger.debug("✅ E2E Pipeline Report 已生成")
         
-        # 7.2 发送完成事件并累积 usage 统计
+        # 7.4 发送完成事件并累积 usage 统计
         stats = self.usage_stats
         await self.broadcaster.accumulate_usage(session_id, {
             "input_tokens": stats.get("total_input_tokens", 0),

@@ -113,9 +113,14 @@ class InstanceConfig:
     plan_manager_max_steps: Optional[int] = None
     plan_manager_granularity: Optional[str] = None
     
-    # 输出格式配置
+    # 输出格式配置（V6.3 使用 Pydantic）
     output_format: Optional[str] = None
     output_code_highlighting: Optional[bool] = None
+    output_json_model_name: Optional[str] = None
+    output_json_schema: Optional[Dict[str, Any]] = None
+    output_strict_json_validation: Optional[bool] = None
+    output_json_ensure_ascii: Optional[bool] = None
+    output_json_indent: Optional[int] = None
     
     # 记忆配置
     mem0_enabled: bool = True
@@ -307,6 +312,11 @@ def load_instance_config(instance_name: str) -> InstanceConfig:
         plan_manager_granularity=plan_config.get("granularity"),
         output_format=output_config.get("default_format"),
         output_code_highlighting=output_config.get("code_highlighting"),
+        output_json_model_name=output_config.get("json_model_name"),
+        output_json_schema=output_config.get("json_schema"),
+        output_strict_json_validation=output_config.get("strict_json_validation"),
+        output_json_ensure_ascii=output_config.get("json_ensure_ascii"),
+        output_json_indent=output_config.get("json_indent"),
         # 记忆配置
         mem0_enabled=memory_config.get("mem0_enabled", True),
         smart_retrieval=memory_config.get("smart_retrieval", True),
@@ -532,11 +542,21 @@ def _merge_config_to_schema(base_schema, config: InstanceConfig):
     if config.intent_analyzer_use_llm is not None:
         merged.intent_analyzer.use_llm = config.intent_analyzer_use_llm
     
-    # === 输出格式配置覆盖 ===
+    # === 输出格式配置覆盖（V6.3 Pydantic 支持）===
     if config.output_format:
         merged.output_formatter.default_format = config.output_format
     if config.output_code_highlighting is not None:
         merged.output_formatter.code_highlighting = config.output_code_highlighting
+    if config.output_json_model_name:
+        merged.output_formatter.json_model_name = config.output_json_model_name
+    if config.output_json_schema:
+        merged.output_formatter.json_schema = config.output_json_schema
+    if config.output_strict_json_validation is not None:
+        merged.output_formatter.strict_json_validation = config.output_strict_json_validation
+    if config.output_json_ensure_ascii is not None:
+        merged.output_formatter.json_ensure_ascii = config.output_json_ensure_ascii
+    if config.output_json_indent is not None:
+        merged.output_formatter.json_indent = config.output_json_indent
     
     # === 记录合并结果 ===
     override_count = sum([
@@ -550,6 +570,11 @@ def _merge_config_to_schema(base_schema, config: InstanceConfig):
         config.intent_analyzer_use_llm is not None,
         config.output_format is not None,
         config.output_code_highlighting is not None,
+        config.output_json_model_name is not None,
+        config.output_json_schema is not None,
+        config.output_strict_json_validation is not None,
+        config.output_json_ensure_ascii is not None,
+        config.output_json_indent is not None,
     ])
     
     if override_count > 0:
