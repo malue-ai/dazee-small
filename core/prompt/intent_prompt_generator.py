@@ -86,7 +86,7 @@ DEFAULT_COMPLEXITY_RULES = """
 
 # 默认的记忆检索规则（few-shot 示例驱动）
 DEFAULT_MEMORY_RULES = """
-### Skip Memory Retrieval (🆕 V4.6)
+### Skip Memory Retrieval
 
 判断是否跳过用户记忆检索。根据以下示例的思路自行推理：
 

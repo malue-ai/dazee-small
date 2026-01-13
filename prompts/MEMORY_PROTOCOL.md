@@ -70,7 +70,7 @@ NEVER trust your thinking memory - ALWAYS read from plan_todo.get_plan()
 
 ```
 [Reason] 准备执行第一步
-[Act] 调用 plan_todo.get_plan()  ← 🆕 强制读取
+[Act] 调用 plan_todo.get_plan()  ← 强制读取
 [Observe] 返回:
   {
     "context": "[Plan Context]\nGoal: 生成AI市场分析报告\nStatus: executing | Step: 1/4\nCurrent: web_search → 收集市场信息"
@@ -86,7 +86,7 @@ NEVER trust your thinking memory - ALWAYS read from plan_todo.get_plan()
   - 质量评分: 8/10
   → Decision: PASS
 
-[Act] 调用 plan_todo.update_step({  ← 🆕 强制写回
+[Act] 调用 plan_todo.update_step({  ← 强制写回
   "step_index": 0,
   "status": "completed",
   "result": "找到5篇行业报告，包含市场规模、增长率数据"
@@ -98,7 +98,7 @@ NEVER trust your thinking memory - ALWAYS read from plan_todo.get_plan()
 
 ```
 [Reason] 继续执行
-[Act] 调用 plan_todo.get_plan()  ← 🆕 每次都要读取！
+[Act] 调用 plan_todo.get_plan()  ← 每次都要读取！
 [Observe] 返回:
   {
     "context": "[Plan Context]\nGoal: 生成AI市场分析报告\nStatus: executing | Step: 2/4\nCurrent: web_search → 收集技术趋势"
@@ -108,7 +108,7 @@ NEVER trust your thinking memory - ALWAYS read from plan_todo.get_plan()
 [Act] 调用 web_search("AI 技术趋势 2024")
 [Observe] ...
 [Validate] ...
-[Act] 调用 plan_todo.update_step(...)  ← 🆕 写回
+[Act] 调用 plan_todo.update_step(...)  ← 写回
 ```
 
 ## 为什么必须这样做？
