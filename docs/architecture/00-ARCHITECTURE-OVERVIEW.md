@@ -1,7 +1,7 @@
-# ZenFlux Agent V5.1 架构文档
+# ZenFlux Agent V6.1 架构文档
 
 > 📅 **最后更新**: 2026-01-13  
-> 🎯 **当前版本**: V5.1 - SimpleAgent 单智能体 + Prompt-First + 实例级缓存  
+> 🎯 **当前版本**: V6.1 - Prompt-Driven Agent Instantiation + 场景化提示词分解  
 > 🔗 **历史版本**: 已归档至 [`archived/`](./archived/) 目录  
 > ✅ **架构状态**: 生产就绪，端到端验证通过  
 > 📝 **待扩展**: Multi-Agent 编排（代码已预留，暂未启用）
@@ -18,6 +18,7 @@
 - [核心组件](#核心组件)
   - [SimpleAgent（编排层）](#simpleagent编排层)
   - [InstancePromptCache（提示词缓存）](#instancepromptcache提示词缓存)
+  - [PromptResultsWriter（提示词输出管理）](#promptresultswriter提示词输出管理)
   - [IntentAnalyzer（意图识别）](#intentanalyzer意图识别)
   - [Memory 系统](#memory-系统)
   - [Events 系统](#events-系统)
@@ -33,15 +34,72 @@
 
 ## 版本概述
 
-### V5.1 核心特性
+### V6.1 核心特性
 
-V5.1 是 ZenFlux Agent 的**单智能体稳定版本**，核心架构：
+V6.1 是 ZenFlux Agent 的**Prompt-Driven Agent Instantiation** 版本，核心架构：
 
-1. **SimpleAgent 单智能体**：用户请求 → Service 层 → SimpleAgent，简洁高效
-2. **Prompt-First 原则**：规则写在 Prompt 里，不写在代码里
-3. **实例级提示词缓存**：启动时一次性生成所有提示词版本，运行时直接取用
-4. **LLM 语义驱动 Schema**：用 Few-shot 引导 LLM 推理配置
-5. **三层 API 架构**：routers（HTTP）+ grpc_server（gRPC）+ services（业务逻辑）
+1. **🆕 场景化提示词分解**：运营 `prompt.md` → LLM 分解为 4 个专用提示词
+2. **🆕 prompt_results/ 目录**：自动生成，支持运营二次编辑，动态更新检测
+3. **🆕 框架规则引导**：`framework_rules.py` 引导 LLM 生成高质量提示词和 Schema
+4. **SimpleAgent 单智能体**：用户请求 → Service 层 → SimpleAgent，简洁高效
+5. **Prompt-First 原则**：规则写在 Prompt 里，不写在代码里
+6. **实例级提示词缓存**：启动时一次性生成所有提示词版本，运行时直接取用
+
+### V6.1 新增功能
+
+#### 1. 场景化提示词分解
+
+```
+运营配置的 prompt.md
+        │
+        ▼ LLM 语义分析 + 分解
+        │
+        ├─→ intent_prompt.md    （意图识别专用）
+        ├─→ simple_prompt.md    （简单任务专用）
+        ├─→ medium_prompt.md    （中等任务专用）
+        ├─→ complex_prompt.md   （复杂任务专用）
+        └─→ agent_schema.yaml   （Agent 配置）
+```
+
+**分解原则**：
+- **意图识别提示词**：从原始 prompt 提取意图定义、关键词、处理逻辑
+- **简单/中等提示词**：精简版本，移除意图相关内容，聚焦任务执行
+- **复杂提示词**：优化版本，保留核心规则，去除冗余
+
+#### 2. prompt_results/ 目录
+
+```
+instances/my_agent/
+├── prompt.md              # 运营编写的原始提示词
+├── config.yaml            # 配置文件
+└── prompt_results/        # 🆕 框架自动生成
+    ├── README.md          # 使用说明
+    ├── _metadata.json     # 元数据（哈希、时间戳）
+    ├── agent_schema.yaml  # Agent 配置
+    ├── intent_prompt.md   # 意图识别提示词
+    ├── simple_prompt.md   # 简单任务提示词
+    ├── medium_prompt.md   # 中等任务提示词
+    └── complex_prompt.md  # 复杂任务提示词
+```
+
+**运营可见可编辑**：
+- ✅ 所有生成文件均可手动编辑
+- ✅ 系统检测手动修改，不会覆盖
+- ✅ 删除 `_metadata.json` 可强制重新生成
+
+#### 3. Multi-Agent Mode 配置
+
+```yaml
+multi_agent:
+  # mode 选项：disabled / auto / enabled
+  mode: "disabled"  # 当前版本默认禁用
+```
+
+| Mode | 行为 |
+|------|------|
+| `disabled` | 始终使用 SimpleAgent（推荐） |
+| `auto` | LLM 判断是否需要多智能体协作 |
+| `enabled` | 始终使用 Multi-Agent 编排 |
 
 ### 【待扩展】Multi-Agent 编排
 
@@ -53,46 +111,71 @@ V5.1 是 ZenFlux Agent 的**单智能体稳定版本**，核心架构：
 > - 多类型 Worker（AgentWorker、MCPWorker、WorkflowWorker）
 > - Service 层路由决策
 
-### V5.1 继承特性
-
-1. **Mem0 用户画像增强**：`core/memory/mem0/schemas/` 多层用户画像结构
-2. **工具分层加载**：`core/tool/loader.py` 统一管理三类工具
-3. **语义推理模块**：`core/inference/` 模块
-4. **HITL 确认管理**：`core/confirmation_manager.py`
-5. **工作区管理**：`core/workspace_manager.py`
-
-### V5.0 核心特性（继承）
-
-1. **实例级提示词缓存**：启动时一次性生成所有提示词版本，运行时直接取用
-2. **LLM 语义驱动 Schema**：用 Few-shot 引导 LLM 推理配置，而非硬编码关键词规则
-3. **Prompt-First 设计原则**：规则写在 Prompt 里，不写在代码里
-4. **本地文件持久化**：缓存数据持久化到 `.cache/` 目录，避免每次重启都 LLM 分析
-5. **三层 API 架构**：routers（HTTP）+ grpc_server（gRPC）+ services（业务逻辑）
-
 ### 版本演进路线
 
 ```
-V3.7 (2025-12)        V4.x (2026-01)        V5.0 (2026-01)        V5.1 (2026-01)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-基础架构           → Mem0 用户画像        → 实例级缓存          → Mem0 画像增强
-能力抽象层         → 智能记忆检索        → LLM 语义驱动        → 语义推理模块
-E2B 沙箱集成       → Skills/Tools 分层   → Prompt-First        → 工具分层加载
-                   → Plan 持久化         → 本地持久化          → HITL 完善
+V3.7 (2025-12)    V5.0 (2026-01)    V5.1 (2026-01)    V6.1 (2026-01)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+基础架构         → 实例级缓存       → Mem0 画像增强   → 🔥 场景化提示词分解
+能力抽象层       → LLM 语义驱动     → 语义推理模块   → 🔥 prompt_results 输出
+E2B 沙箱集成     → Prompt-First    → 工具分层加载   → 🔥 动态更新检测
+               → 本地持久化       → HITL 完善      → 🔥 框架规则引导
 ```
 
-| 维度 | V3.7 | V4.6 | V5.0 | V5.1 |
-|------|------|------|------|------|
-| **提示词管理** | 单一 Prompt | 动态裁剪 | 启动时预生成 3 版本 | ✅ 继承 + 复杂度检测器增强 |
-| **Schema 生成** | 配置驱动 | 硬编码规则 | LLM 语义分析 | ✅ 继承 + 统一推理模块 |
-| **记忆检索** | 无 | 每次都检索 | 智能按需检索 | ✅ Mem0 多层画像 + 异步更新 |
-| **工具管理** | 单一列表 | 分类配置 | 能力注册 | ✅ 三类统一加载器 |
-| **API 架构** | 单层 | 单层 | 三层架构 | ✅ gRPC + 工具服务 |
+| 维度 | V5.0 | V5.1 | V6.1 |
+|------|------|------|------|
+| **提示词管理** | 启动时预生成 3 版本 | 复杂度检测器增强 | 🆕 场景化分解 + 运营可编辑 |
+| **Schema 生成** | LLM 语义分析 | 统一推理模块 | 🆕 框架规则引导生成 |
+| **提示词输出** | 缓存到 `.cache/` | 同上 | 🆕 输出到 `prompt_results/` |
+| **动态更新** | 无 | 无 | 🆕 检测源文件变更 + 保护手动编辑 |
+| **Multi-Agent** | 代码预留 | 代码预留 | 🆕 mode 配置（disabled/auto/enabled） |
 
 ---
 
 ## 核心设计原则
 
-### 1. Prompt-First 原则
+### 1. Prompt-Driven Agent Instantiation（V6.1 核心）
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                                                                          │
+│   核心哲学：运营 prompt.md → LLM 语义分析 → 场景化提示词 + AgentSchema   │
+│                                                                          │
+│   ┌─────────────────────────────────────────────────────────────────┐   │
+│   │                    运营配置 (prompt.md)                          │   │
+│   │  • 角色定义：你是 XX 领域专家                                    │   │
+│   │  • 意图定义：意图1-4，关键词，处理逻辑                           │   │
+│   │  • 工作规则：回复格式，卡片要求                                  │   │
+│   │  • 边界限制：不应该做什么                                        │   │
+│   └──────────────────────────┬──────────────────────────────────────┘   │
+│                              │                                          │
+│                              ▼ LLM 语义分析 + 分解                      │
+│                              │                                          │
+│   ┌──────────────────────────┼──────────────────────────────────────┐   │
+│   │                  prompt_results/ 目录                            │   │
+│   │                                                                  │   │
+│   │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌────────────┐│   │
+│   │  │intent_prompt│ │simple_prompt│ │medium_prompt│ │complex_    ││   │
+│   │  │.md          │ │.md          │ │.md          │ │prompt.md   ││   │
+│   │  │             │ │             │ │             │ │            ││   │
+│   │  │意图识别专用 │ │简单任务     │ │中等任务     │ │复杂任务    ││   │
+│   │  │提取意图定义 │ │精简版本     │ │标准版本     │ │优化完整版  ││   │
+│   │  └─────────────┘ └─────────────┘ └─────────────┘ └────────────┘│   │
+│   │                                                                  │   │
+│   │  ┌─────────────────────────────────────────────────────────────┐│   │
+│   │  │ agent_schema.yaml                                           ││   │
+│   │  │ • 组件启用：intent_analyzer, plan_manager, memory_manager  ││   │
+│   │  │ • 工具配置：enabled_capabilities, mcp_tools                ││   │
+│   │  │ • 运行参数：max_turns, model, temperature                  ││   │
+│   │  └─────────────────────────────────────────────────────────────┘│   │
+│   └─────────────────────────────────────────────────────────────────┘   │
+│                                                                          │
+│   运营可见可编辑：直接修改 prompt_results/ 中的文件，下次启动生效        │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### 2. Prompt-First 原则
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -107,33 +190,31 @@ E2B 沙箱集成       → Skills/Tools 分层   → Prompt-First        → 工
 │   │     skills.append("pptx")  # 无法理解业务意图            │   │
 │   └─────────────────────────────────────────────────────────┘   │
 │                                                                 │
-│   ✅ V5.0 Few-shot 引导 LLM 推理（强泛化能力）：                │
+│   ✅ V6.1 LLM 语义分解（强泛化能力）：                          │
 │   ┌─────────────────────────────────────────────────────────┐   │
-│   │ <example>                                               │   │
-│   │   <prompt>帮我分析销售数据，生成周报</prompt>            │   │
-│   │   <reasoning>数据分析+表格生成</reasoning>              │   │
-│   │   <schema>{"skills": [{"skill_id": "xlsx"}]}</schema>   │   │
-│   │ </example>                                              │   │
+│   │ 运营 prompt.md 定义意图：                                │   │
+│   │ "意图1: 简单问候 - keywords: 你好,hi - 直接回复"         │   │
 │   │                                                         │   │
-│   │ LLM 通过 Few-shot 学习推理模式，可泛化到：              │   │
-│   │ - "整理成报告" → docx                                   │   │
-│   │ - "准备演示材料" → pptx（虽未提及"PPT"）                │   │
-│   │ - "分析竞品" → web_search + docx                        │   │
+│   │ LLM 分解后的 intent_prompt.md：                         │   │
+│   │ • 提取所有意图定义                                       │   │
+│   │ • 生成结构化分类逻辑                                     │   │
+│   │ • 保留关键词和处理规则                                   │   │
 │   └─────────────────────────────────────────────────────────┘   │
 │                                                                 │
-│   维护方式：修改 Few-shot 示例即可扩展能力，无需改代码           │
+│   维护方式：修改 prompt.md 即可，框架自动重新分解               │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 2. 用空间换时间原则
+### 3. 用空间换时间原则
 
 | 阶段 | 开销 | 频率 | 优化收益 |
 |------|------|------|---------|
-| 启动时 LLM 分析 | ~2-3秒 | 一次 | 换取运行时零开销 |
+| 启动时 LLM 分解 | ~3-5分钟（首次）| 一次 | 换取运行时零开销 |
+| 启动时加载缓存 | <100ms | 每次启动 | 快速启动 |
 | 运行时取缓存 | <1ms | 每次请求 | 节省 ~500ms/请求 |
 
-### 3. Memory-First Protocol
+### 4. Memory-First Protocol
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -159,153 +240,77 @@ E2B 沙箱集成       → Skills/Tools 分层   → Prompt-First        → 工
 ### 系统架构图
 
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│                         ZenFlux Agent V5.1                            │
-├──────────────────────────────────────────────────────────────────────┤
-│                                                                       │
-│  ┌────────────────────────────────────────────────────────────────┐ │
-│  │                     协议入口层（平级）                          │ │
-│  │  ┌──────────────┐              ┌──────────────┐                │ │
-│  │  │  routers/    │  HTTP        │  grpc_server/│  gRPC          │ │
-│  │  │  (FastAPI)   │ ◄──────      │  (gRPC)      │ ◄──────        │ │
-│  │  └──────┬───────┘              └──────┬───────┘                │ │
-│  │         │                             │                         │ │
-│  │         └─────────────┬───────────────┘                         │ │
-│  │                       ▼                                         │ │
-│  │  ┌─────────────────────────────────────────────────────────┐   │ │
-│  │  │              services/ 业务逻辑层                        │   │ │
-│  │  │  • chat_service.py  ← 直接调用 SimpleAgent              │   │ │
-│  │  │  • conversation_service.py                              │   │ │
-│  │  │  • mem0_service.py                                      │   │ │
-│  │  └────────────────────┬────────────────────────────────────┘   │ │
-│  └────────────────────────────────────────────────────────────────┘ │
-│                                │                                     │
-│                                ▼                                     │
-│  ┌─────────────────────────────────────────────────────────────────┐│
-│  │                    SimpleAgent（单智能体）                       ││
-│  │  ┌─────────────────────┐  ┌─────────────────────────────────┐  ││
-│  │  │InstancePromptCache  │  │ IntentAnalyzer（意图识别）       │  ││
-│  │  │ • system_prompt     │  │ • 任务复杂度判断                 │  ││
-│  │  │ • intent_prompt     │  │ • 是否需要 Plan                  │  ││
-│  │  │ • 3版本缓存         │  │ • 是否跳过记忆检索               │  ││
-│  │  └─────────────────────┘  └─────────────────────────────────┘  ││
-│  │  ┌─────────────────────┐  ┌─────────────────────────────────┐  ││
-│  │  │ToolSelector         │  │ ContextManager                   │  ││
-│  │  │ToolExecutor         │  │ EventManager                     │  ││
-│  │  └─────────────────────┘  └─────────────────────────────────┘  ││
-│  │                                                                  ││
-│  │  职责：RVR 循环（Read-Reason-Act-Observe-Validate-Write）       ││
-│  └─────────────────────────────────────────────────────────────────┘│
-│                                │                                     │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │                      Memory 三层系统                          │  │
-│  │  ┌──────────────────────────────────────────────────────────┐│  │
-│  │  │ 会话级：WorkingMemory（messages/plan/tool_calls）        ││  │
-│  │  └──────────────────────────────────────────────────────────┘│  │
-│  │  ┌──────────────────────────────────────────────────────────┐│  │
-│  │  │ 用户级：Episodic/Preference/Plan/E2B/Mem0               ││  │
-│  │  │   • Episodic（历史经验）• Preference（偏好）            ││  │
-│  │  │   • PlanMemory（跨Session）• E2BMemory（沙箱）          ││  │
-│  │  │   • Mem0（用户画像，可选）                               ││  │
-│  │  └──────────────────────────────────────────────────────────┘│  │
-│  │  ┌──────────────────────────────────────────────────────────┐│  │
-│  │  │ 系统级：Skill（注册表）• Cache（系统缓存）               ││  │
-│  │  └──────────────────────────────────────────────────────────┘│  │
-│  └──────────────────────────────────────────────────────────────┘  │
-│                                │                                     │
-│                                ▼                                     │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │                      Tool 执行层                              │  │
-│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐        │  │
-│  │  │ MCP Tools│ │ E2B      │ │ Skills   │ │ Built-in │        │  │
-│  │  │ (Dify等) │ │ Sandbox  │ │ (SKILL.md)│ │ Tools    │        │  │
-│  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘        │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-│                                                                      │
-└──────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                         ZenFlux Agent V6.1                                │
+├──────────────────────────────────────────────────────────────────────────┤
+│                                                                           │
+│  ┌─────────────────────────────────────────────────────────────────────┐ │
+│  │                     协议入口层（平级）                               │ │
+│  │  ┌──────────────┐              ┌──────────────┐                     │ │
+│  │  │  routers/    │  HTTP        │  grpc_server/│  gRPC               │ │
+│  │  │  (FastAPI)   │ ◄──────      │  (gRPC)      │ ◄──────             │ │
+│  │  └──────┬───────┘              └──────┬───────┘                     │ │
+│  │         │                             │                              │ │
+│  │         └─────────────┬───────────────┘                              │ │
+│  │                       ▼                                              │ │
+│  │  ┌─────────────────────────────────────────────────────────────┐    │ │
+│  │  │              services/ 业务逻辑层                            │    │ │
+│  │  │  • chat_service.py  ← 直接调用 SimpleAgent                  │    │ │
+│  │  │  • conversation_service.py                                  │    │ │
+│  │  │  • mem0_service.py                                          │    │ │
+│  │  └────────────────────┬────────────────────────────────────────┘    │ │
+│  └─────────────────────────────────────────────────────────────────────┘ │
+│                                │                                          │
+│                                ▼                                          │
+│  ┌──────────────────────────────────────────────────────────────────────┐│
+│  │                    SimpleAgent（单智能体）                            ││
+│  │  ┌─────────────────────────┐  ┌───────────────────────────────────┐ ││
+│  │  │InstancePromptCache      │  │ IntentAnalyzer（意图识别）         │ ││
+│  │  │ • intent_prompt         │  │ • 使用 intent_prompt.md            │ ││
+│  │  │ • simple/medium/complex │  │ • 任务复杂度判断                   │ ││
+│  │  │ • agent_schema          │  │ • 是否跳过记忆检索                 │ ││
+│  │  └─────────────────────────┘  └───────────────────────────────────┘ ││
+│  │  ┌─────────────────────────┐  ┌───────────────────────────────────┐ ││
+│  │  │PromptResultsWriter      │  │ ContextManager                     │ ││
+│  │  │ • 输出到 prompt_results/│  │ EventManager                       │ ││
+│  │  │ • 动态更新检测          │  │                                    │ ││
+│  │  └─────────────────────────┘  └───────────────────────────────────┘ ││
+│  │                                                                       ││
+│  │  职责：RVR 循环（Read-Reason-Act-Observe-Validate-Write）            ││
+│  └──────────────────────────────────────────────────────────────────────┘│
+│                                │                                          │
+│  ┌──────────────────────────────────────────────────────────────────────┐│
+│  │                      Memory 三层系统                                  ││
+│  │  ┌──────────────────────────────────────────────────────────────────┐││
+│  │  │ 会话级：WorkingMemory（messages/plan/tool_calls）                │││
+│  │  └──────────────────────────────────────────────────────────────────┘││
+│  │  ┌──────────────────────────────────────────────────────────────────┐││
+│  │  │ 用户级：Episodic/Preference/Plan/E2B/Mem0                       │││
+│  │  └──────────────────────────────────────────────────────────────────┘││
+│  │  ┌──────────────────────────────────────────────────────────────────┐││
+│  │  │ 系统级：Skill（注册表）• Cache（系统缓存）                       │││
+│  │  └──────────────────────────────────────────────────────────────────┘││
+│  └──────────────────────────────────────────────────────────────────────┘│
+│                                │                                          │
+│                                ▼                                          │
+│  ┌──────────────────────────────────────────────────────────────────────┐│
+│  │                      Tool 执行层                                      ││
+│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐                 ││
+│  │  │ MCP Tools│ │ E2B      │ │ Skills   │ │ Built-in │                 ││
+│  │  │ (Dify等) │ │ Sandbox  │ │ (SKILL.md)│ │ Tools    │                 ││
+│  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘                 ││
+│  └──────────────────────────────────────────────────────────────────────┘│
+│                                                                           │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
-结构和可拓展的积累，目标是结构很牛逼，而且是可扩展的，体现智能体的先进性
-
-### 当前架构：Service → SimpleAgent
-
-**当前版本（V5.1）流程**：用户请求直接调用 SimpleAgent，意图分析在 Agent 内部完成。
+### 启动阶段（V6.1 场景化分解）
 
 ```
-用户请求
-    │
-    ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                   ChatService._run_agent()                       │
-│                                                                  │
-│  1. 加载历史消息 (Context.load_messages)                        │
-│                                                                  │
-│  2. 直接调用 SimpleAgent.chat()                                 │
-│     ┌─────────────────────────────────────────────────────────┐ │
-│     │ SimpleAgent 内部执行：                                   │ │
-│     │   • 意图分析 (IntentAnalyzer)                           │ │
-│     │   • 复杂度判断 → 选择提示词版本                         │ │
-│     │   • 记忆检索（按需）                                     │ │
-│     │   • RVR 循环执行                                         │ │
-│     └─────────────────────────────────────────────────────────┘ │
-│                                                                  │
-│  3. 事件广播 → SSE 流式输出                                     │
-└─────────────────────────────────────────────────────────────────┘
-```
+启动阶段流程（首次 3-5 分钟，后续 <100ms）
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-**代码入口**：`services/chat_service.py` → `_run_agent()`
-
-### 【待扩展】Multi-Agent 路由架构
-
-> ⚠️ 以下内容为预留设计，当前版本暂未启用。代码已在 `core/multi_agent/` 目录预留。
-
-<details>
-<summary>点击展开 Multi-Agent 路由设计（未来版本）</summary>
-
-```
-用户请求
-    │
-    ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                   ChatService._run_agent()                       │
-│                                                                  │
-│  1. 意图分析 (IntentAnalyzer.analyze)                           │
-│     → 返回 IntentResult.needs_multi_agent (LLM Prompt-First)    │
-│                                                                  │
-│  2. Multi-Agent 路由决策                                         │
-│     ┌─────────────────────────────────────────────────────────┐ │
-│     │ if mode == DISABLED:                                     │ │
-│     │     should_use_ma = False                                │ │
-│     │ elif mode == ENABLED:                                    │ │
-│     │     should_use_ma = True                                 │ │
-│     │ else:  # AUTO                                            │ │
-│     │     should_use_ma = intent_result.needs_multi_agent      │ │
-│     └─────────────────────────────────────────────────────────┘ │
-│                                                                  │
-│  3. 执行路径选择                                                 │
-│     ┌──────────────────┐  ┌─────────────────────────────────┐  │
-│     │ should_use_ma=F  │  │ should_use_ma=T                  │  │
-│     │       ↓          │  │       ↓                          │  │
-│     │ SimpleAgent      │  │ _execute_multi_agent()           │  │
-│     │   .chat()        │  │   → MultiAgentOrchestrator       │  │
-│     │   （单任务RVR）  │  │   → 任务分解 → Worker调度 → 聚合 │  │
-│     └──────────────────┘  └─────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-**启用方法**：
-1. 取消注释 `services/chat_service.py` 中的 Multi-Agent 相关代码
-2. 配置 `instances/xxx/config.yaml` 中的 `multi_agent.mode`
-
-</details>
-
-### 启动阶段
-
-```
-启动阶段流程（一次性，2-3秒）
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-instances/test_agent/
+instances/my_agent/
 ├── prompt.md        ─────────┐
 ├── config.yaml               │
 └── .env                      ▼
@@ -314,45 +319,50 @@ instances/test_agent/
                 └─────────┬──────────┘
                           │
                           ▼
-        ┌─────────────────────────────────┐
-        │ InstancePromptCache.load_once() │
-        └─────────────┬───────────────────┘
-                      │
-        ┌─────────────┼─────────────┐
-        │             │             │
-        ▼             ▼             ▼
-┌─────────────┐ ┌─────────────┐ ┌─────────────────────┐
-│LLM 语义分析│ │LLM 语义分析│ │IntentPromptGenerator│
-│→PromptSchema│ │→AgentSchema│ │ .generate()         │
-└──────┬──────┘ └──────┬──────┘ └──────┬──────────────┘
-       │               │               │
-       └───────────────┼───────────────┘
-                       ▼
-        ┌─────────────────────────────────┐
-        │    InstancePromptCache（内存）   │
-        │  ┌──────────────────────────┐   │
-        │  │ • system_prompt_simple   │   │
-        │  │ • system_prompt_medium   │   │
-        │  │ • system_prompt_complex  │   │
-        │  │ • intent_prompt          │   │
-        │  │ • prompt_schema          │   │
-        │  │ • agent_schema           │   │
-        │  └──────────────────────────┘   │
-        └──────────────┬──────────────────┘
-                       │
-                       ▼
-        ┌─────────────────────────────────┐
-        │  持久化到 .cache/ 目录（磁盘）   │
-        │  • prompt_cache.json            │
-        │  • agent_schema.json            │
-        │  • cache_meta.json              │
-        └─────────────────────────────────┘
+        ┌─────────────────────────────────────────────────┐
+        │      InstancePromptCache.load_once()             │
+        │                                                  │
+        │  1. 检查 prompt_results/ 是否存在且有效         │
+        │     → 有效：直接加载（<100ms）                   │
+        │     → 无效/不存在：进入 LLM 分解流程            │
+        └────────────────────┬────────────────────────────┘
+                             │
+            ┌────────────────┼────────────────┐
+            │                │                │
+            ▼                ▼                ▼
+┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
+│ Step 1: Schema  │ │ Step 2: Intent  │ │ Step 3-5:       │
+│ 生成 AgentSchema│ │ 生成意图提示词  │ │ Simple/Medium/  │
+│ (LLM 推断配置)  │ │ (提取意图定义)  │ │ Complex 提示词  │
+└────────┬────────┘ └────────┬────────┘ └────────┬────────┘
+         │                   │                   │
+         └───────────────────┼───────────────────┘
+                             ▼
+        ┌─────────────────────────────────────────────────┐
+        │         PromptResultsWriter 输出                 │
+        │                                                  │
+        │  prompt_results/                                 │
+        │  ├── _metadata.json    # 哈希、时间戳           │
+        │  ├── agent_schema.yaml # Agent 配置             │
+        │  ├── intent_prompt.md  # 意图识别               │
+        │  ├── simple_prompt.md  # 简单任务               │
+        │  ├── medium_prompt.md  # 中等任务               │
+        │  └── complex_prompt.md # 复杂任务               │
+        └────────────────────┬────────────────────────────┘
+                             │
+                             ▼
+        ┌─────────────────────────────────────────────────┐
+        │        InstancePromptCache（内存缓存）           │
+        │  • system_prompt_simple/medium/complex           │
+        │  • intent_prompt                                 │
+        │  • agent_schema                                  │
+        │  • prompt_schema                                 │
+        └─────────────────────────────────────────────────┘
 
 关键产出：
-• PromptSchema：提示词结构（模块、复杂度关键词）
-• AgentSchema：Agent 配置（工具、Skills、组件开关）
-• 3 版本系统提示词：Simple/Medium/Complex
-• 意图识别提示词：动态生成（用户配置优先）
+• AgentSchema：Agent 配置（工具、Skills、组件开关、运行参数）
+• 4 个场景化提示词：Intent/Simple/Medium/Complex
+• 所有输出保存到 prompt_results/ 目录，运营可见可编辑
 ```
 
 **代码入口**：`scripts/instance_loader.py` → `create_agent_from_instance()`
@@ -365,8 +375,43 @@ prompt_cache = await load_instance_cache(
     instance_name=instance_name,
     raw_prompt=instance_prompt,
     config=config.raw_config,
-    force_refresh=False  # 优先加载磁盘缓存
+    force_refresh=False  # 优先加载已生成的 prompt_results
 )
+```
+
+### 动态更新检测（V6.1 新增）
+
+```
+动态更新检测流程
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+                    启动时检测
+                         │
+                         ▼
+        ┌─────────────────────────────────────────────────┐
+        │     比较源文件哈希 vs _metadata.json            │
+        │                                                  │
+        │     prompt.md 哈希变化？                         │
+        │     config.yaml 哈希变化？                       │
+        └────────────────────┬────────────────────────────┘
+                             │
+              ┌──────────────┼──────────────┐
+              │              │              │
+         无变化         有变化         有变化
+              │              │              │
+              ▼              ▼              ▼
+        ┌───────────┐ ┌───────────────────────────────────┐
+        │直接加载   │ │ 检查每个文件是否被手动编辑         │
+        │prompt_    │ │                                    │
+        │results/   │ │ intent_prompt.md 的哈希 ≠ 记录值？ │
+        │           │ │ → 是：保留（手动编辑过）           │
+        │           │ │ → 否：重新生成                     │
+        └───────────┘ └───────────────────────────────────┘
+
+规则：
+• 未编辑的文件：源文件变更时自动更新
+• 手动编辑的文件：保留用户版本，不覆盖
+• 强制重新生成：删除 _metadata.json 或使用 --force-refresh
 ```
 
 ### 运行阶段
@@ -382,19 +427,19 @@ prompt_cache = await load_instance_cache(
 │ Phase 1: 意图识别（Haiku，快速+便宜）                       │
 ├───────────────────────────────────────────────────────────┤
 │ IntentAnalyzer._get_intent_prompt()                       │
-│   → _prompt_cache.get_intent_prompt()  ◄─ 直接从缓存取     │
+│   → _prompt_cache.get_intent_prompt()  ◄─ 从 prompt_results│
 │   → LLM (Haiku)                                           │
 │                                                           │
 │ 输出：IntentResult                                         │
 │   • task_type: content_generation                         │
 │   • complexity: COMPLEX                                   │
 │   • needs_plan: true                                      │
-│   • skip_memory_retrieval: false  ← V4.6 智能决策         │
+│   • skip_memory_retrieval: false                          │
 └───────────────────────────────────────────────────────────┘
             │
             ▼
 ┌───────────────────────────────────────────────────────────┐
-│ Phase 2: 记忆检索（V4.6 按需检索）                          │
+│ Phase 2: 记忆检索（按需检索）                               │
 ├───────────────────────────────────────────────────────────┤
 │ if not skip_memory_retrieval:                             │
 │   → Mem0.search(user_id, query)                           │
@@ -408,7 +453,7 @@ prompt_cache = await load_instance_cache(
 │ Phase 3: 系统提示词组装                                     │
 ├───────────────────────────────────────────────────────────┤
 │ _prompt_cache.get_system_prompt(complexity)               │
-│   → system_prompt_complex  ◄─ 直接从缓存取（预生成）       │
+│   → complex_prompt.md  ◄─ 从 prompt_results 加载          │
 │                                                           │
 │ 注入：                                                     │
 │   • 用户画像（如果检索了 Mem0）                            │
@@ -429,8 +474,8 @@ prompt_cache = await load_instance_cache(
 │   [Write]  → plan_memory.update_step()                    │
 │                                                           │
 │ 性能优势：                                                 │
-│   • 意图提示词：0ms（缓存命中）                            │
-│   • 系统提示词：0ms（缓存命中）                            │
+│   • 意图提示词：0ms（从 prompt_results 取）                │
+│   • 系统提示词：0ms（从 prompt_results 取）                │
 │   • 总节省：~500ms/请求                                    │
 └───────────────────────────────────────────────────────────┘
 ```
@@ -466,14 +511,14 @@ class SimpleAgent:
         event_manager=None,
         schema=None,  # AgentSchema 配置
         system_prompt: str = None,
-        prompt_cache=None  # V5.0: InstancePromptCache
+        prompt_cache=None  # V6.1: InstancePromptCache
     ):
         """初始化 Agent"""
         self.model = model
         self.max_turns = max_turns
         self.event_manager = event_manager
         self.schema = schema
-        self._prompt_cache = prompt_cache  # V5.0 核心
+        self._prompt_cache = prompt_cache  # V6.1 核心
         
         # 初始化子组件
         self.intent_analyzer = create_intent_analyzer(prompt_cache)
@@ -490,20 +535,20 @@ class SimpleAgent:
         处理用户输入（流式返回）
         
         流程：
-        1. 意图识别（IntentAnalyzer）
+        1. 意图识别（使用 intent_prompt.md）
         2. 记忆检索（Mem0，按需）
-        3. 系统提示词组装（从缓存取）
+        3. 系统提示词组装（从 prompt_results 取）
         4. RVR 循环执行
         """
-        # 1. 意图识别（使用缓存的 intent_prompt）
+        # 1. 意图识别（使用 prompt_results 中的 intent_prompt）
         intent = await self.intent_analyzer.analyze(user_input)
         
-        # 2. 记忆检索（V4.6 智能决策）
+        # 2. 记忆检索（智能决策）
         user_profile = None
         if not intent.skip_memory_retrieval:
             user_profile = await self._fetch_user_profile(user_id)
         
-        # 3. 系统提示词组装（V5.0 从缓存取）
+        # 3. 系统提示词组装（V6.1 从 prompt_results 取）
         if self._prompt_cache and self._prompt_cache.is_loaded:
             system_prompt = self._prompt_cache.get_system_prompt(
                 intent.complexity
@@ -518,10 +563,10 @@ class SimpleAgent:
             yield event
 ```
 
-**关键改进（V5.0）**：
-- ✅ 优先使用 `_prompt_cache.get_system_prompt()`（启动时预生成）
-- ✅ 集成智能记忆检索决策（V4.6）
-- ✅ 完全解耦业务逻辑
+**关键改进（V6.1）**：
+- ✅ 从 `prompt_results/` 加载场景化提示词
+- ✅ 意图识别使用专用的 `intent_prompt.md`
+- ✅ 根据复杂度选择 `simple/medium/complex_prompt.md`
 
 ### InstancePromptCache（提示词缓存）
 
@@ -530,19 +575,17 @@ class SimpleAgent:
 **职责**：
 - 实例启动时一次性加载所有提示词版本
 - 运行时提供毫秒级的提示词访问
-- 管理缓存生命周期（包括失效检测）
-- V5.0：支持本地文件持久化
+- **V6.1：场景化提示词分解 + prompt_results 输出**
 
 ```python
 class InstancePromptCache:
     """
     实例级提示词缓存管理器（单例模式）
     
-    核心属性：
-    - prompt_schema: 解析后的提示词结构
-    - agent_schema: Agent 配置
-    - system_prompt_simple/medium/complex: 3 版本系统提示词
-    - intent_prompt: 意图识别提示词
+    V6.1 核心改进：
+    - 5 步分解流程生成场景化提示词
+    - 输出到 prompt_results/ 目录
+    - 动态更新检测
     """
     
     # 单例存储
@@ -560,39 +603,60 @@ class InstancePromptCache:
         raw_prompt: str, 
         config=None, 
         force_refresh=False,
-        cache_dir: Path = None  # V5.0: 磁盘缓存目录
+        instance_dir: Path = None  # V6.1: 实例目录
     ):
         """
         一次性加载（幂等）
         
-        流程：
-        1. 检查磁盘缓存是否有效
-        2. 有效 → 直接加载（< 100ms）
-        3. 无效/无缓存 → LLM 分析（2-3秒）→ 写入磁盘
+        V6.1 流程：
+        1. 检查 prompt_results/ 是否有效
+        2. 有效 → 直接加载（<100ms）
+        3. 无效 → 5 步 LLM 分解（3-5分钟）→ 写入 prompt_results/
         """
-        # V5.0: 优先尝试从磁盘加载
-        if cache_dir and not force_refresh:
-            if await self._try_load_from_disk(cache_dir):
+        self.results_writer = PromptResultsWriter(instance_dir)
+        
+        # 尝试从 prompt_results 加载
+        if not force_refresh:
+            if await self._try_load_from_prompt_results():
                 return
         
-        # LLM 语义分析
-        self.prompt_schema = await self._analyze_prompt_structure(raw_prompt)
-        self.agent_schema = await self._analyze_agent_schema(raw_prompt, config)
+        # LLM 5 步分解流程
+        await self._generate_decomposed_prompts(raw_prompt, config)
         
-        # 生成 3 个版本系统提示词
-        await self._generate_all_prompts()
-        
-        # 生成意图识别提示词
-        self.intent_prompt = IntentPromptGenerator.generate(
-            self.prompt_schema
+        # 输出到 prompt_results/
+        await self.results_writer.write_all(
+            agent_schema=self.agent_schema,
+            intent_prompt=self.intent_prompt,
+            simple_prompt=self.system_prompt_simple,
+            medium_prompt=self.system_prompt_medium,
+            complex_prompt=self.system_prompt_complex
         )
+    
+    async def _generate_decomposed_prompts(self, raw_prompt: str, config):
+        """
+        V6.1 核心：5 步 LLM 分解流程
+        """
+        logger.info("🔄 开始 5 步 LLM 分解流程...")
         
-        # V5.0: 持久化到磁盘
-        if cache_dir:
-            await self._save_to_disk(cache_dir)
+        # Step 1: 生成 AgentSchema
+        await self._generate_agent_schema(raw_prompt, config)
+        
+        # Step 2: 生成意图识别提示词
+        await self._generate_intent_prompt_decomposed(raw_prompt)
+        
+        # Step 3: 生成简单任务提示词
+        await self._generate_simple_prompt_decomposed(raw_prompt)
+        
+        # Step 4: 生成中等任务提示词
+        await self._generate_medium_prompt_decomposed(raw_prompt)
+        
+        # Step 5: 生成复杂任务提示词
+        await self._generate_complex_prompt_decomposed(raw_prompt)
+        
+        logger.info("✅ 5 步分解流程完成")
     
     def get_system_prompt(self, complexity: TaskComplexity) -> str:
-        """获取对应复杂度的系统提示词（直接从缓存取）"""
+        """获取对应复杂度的系统提示词"""
         if complexity == TaskComplexity.SIMPLE:
             return self.system_prompt_simple
         elif complexity == TaskComplexity.MEDIUM:
@@ -605,50 +669,87 @@ class InstancePromptCache:
         return self.intent_prompt
 ```
 
-**使用方式**：
+### PromptResultsWriter（提示词输出管理）
+
+**文件**：`core/prompt/prompt_results_writer.py`（V6.1 新增）
+
+**职责**：
+- 管理 `prompt_results/` 目录的读写
+- 元数据管理（哈希、时间戳）
+- 动态更新检测（保护手动编辑的文件）
 
 ```python
-# 获取缓存实例
-cache = InstancePromptCache.get_instance("test_agent")
-
-# 启动时一次性加载
-await cache.load_once(
-    raw_prompt=prompt,
-    config=config,
-    cache_dir=Path("instances/test_agent/.cache")
-)
-
-# 运行时获取（毫秒级）
-intent_prompt = cache.get_intent_prompt()
-system_prompt = cache.get_system_prompt(TaskComplexity.COMPLEX)
-```
-
-**缓存文件结构**（V5.0）：
-
-```
-instances/test_agent/.cache/
-├── prompt_cache.json       # 3 版本系统提示词 + intent_prompt
-├── agent_schema.json       # AgentSchema 配置
-├── cache_meta.json         # 缓存元数据（哈希、时间戳）
-└── tools_inference.json    # 工具推断缓存
-```
-
-**缓存失效策略**：
-
-```python
-@dataclass
-class CacheMeta:
-    """缓存元数据"""
-    prompt_hash: str        # prompt.md 的哈希
-    config_hash: str        # config.yaml 的哈希
-    combined_hash: str      # 组合哈希
-    created_at: str         # 创建时间
-    version: str = "5.0"    # 缓存版本
-
-# 启动时验证
-if meta.combined_hash != computed_hash:
-    # 配置已变更，重新 LLM 分析
-    pass
+class PromptResultsWriter:
+    """
+    提示词结果输出管理器
+    
+    功能：
+    - 输出生成的提示词到 prompt_results/ 目录
+    - 管理 _metadata.json（源文件哈希、生成时间）
+    - 检测手动编辑，保护用户修改
+    """
+    
+    def __init__(self, instance_dir: Path):
+        self.instance_dir = instance_dir
+        self.results_dir = instance_dir / "prompt_results"
+    
+    async def write_all(
+        self,
+        agent_schema: dict,
+        intent_prompt: str,
+        simple_prompt: str,
+        medium_prompt: str,
+        complex_prompt: str
+    ):
+        """写入所有生成的文件"""
+        await self._ensure_results_dir()
+        
+        # 写入各文件
+        await self._write_file("agent_schema.yaml", yaml.dump(agent_schema))
+        await self._write_file("intent_prompt.md", intent_prompt)
+        await self._write_file("simple_prompt.md", simple_prompt)
+        await self._write_file("medium_prompt.md", medium_prompt)
+        await self._write_file("complex_prompt.md", complex_prompt)
+        
+        # 更新元数据
+        await self._write_metadata()
+        
+        # 写入 README
+        await self._write_readme()
+    
+    async def check_needs_update(self, source_hash: str) -> Dict[str, bool]:
+        """
+        检查哪些文件需要更新
+        
+        返回：{"intent_prompt": True, "simple_prompt": False, ...}
+        - True: 需要重新生成（源文件变更且未手动编辑）
+        - False: 不需要更新（已手动编辑，保护用户修改）
+        """
+        metadata = await self._load_metadata()
+        
+        if metadata.get("source_hash") != source_hash:
+            # 源文件变更，检查每个文件
+            return await self._check_each_file(metadata)
+        
+        return {}  # 无变更
+    
+    async def _check_each_file(self, metadata: dict) -> Dict[str, bool]:
+        """检查每个文件是否被手动编辑"""
+        needs_update = {}
+        
+        for filename in ["intent_prompt.md", "simple_prompt.md", 
+                         "medium_prompt.md", "complex_prompt.md"]:
+            file_path = self.results_dir / filename
+            if file_path.exists():
+                current_hash = self._compute_hash(file_path.read_text())
+                recorded_hash = metadata.get(f"{filename}_hash")
+                
+                # 哈希不匹配 = 被手动编辑过
+                needs_update[filename] = (current_hash == recorded_hash)
+            else:
+                needs_update[filename] = True
+        
+        return needs_update
 ```
 
 ### IntentAnalyzer（意图识别）
@@ -657,8 +758,8 @@ if meta.combined_hash != computed_hash:
 
 **职责**：
 - 快速识别用户意图（使用 Haiku，快+便宜）
+- **V6.1：使用 prompt_results 中的 intent_prompt.md**
 - 判断任务复杂度（Simple/Medium/Complex）
-- V4.6：智能决策是否需要记忆检索
 
 ```python
 class IntentAnalyzer:
@@ -672,13 +773,14 @@ class IntentAnalyzer:
         """
         分析用户意图
         
-        返回：
-        - task_type: 任务类型（content_generation 等）
-        - complexity: 复杂度（SIMPLE/MEDIUM/COMPLEX）
-        - needs_plan: 是否需要创建计划
-        - skip_memory_retrieval: 是否跳过记忆检索（V4.6）
+        V6.1 改进：使用 prompt_results 中生成的 intent_prompt.md
+        该提示词从运营 prompt.md 提取了：
+        - 意图定义（意图1-4）
+        - 关键词映射
+        - 处理逻辑
+        - 特殊路由规则
         """
-        # V5.0: 从缓存获取意图识别提示词
+        # 从 prompt_results 获取意图识别提示词
         intent_prompt = self._get_intent_prompt()
         
         # 使用 Haiku 快速分析
@@ -690,7 +792,7 @@ class IntentAnalyzer:
         return self._parse_intent_result(response)
     
     def _get_intent_prompt(self) -> str:
-        """获取意图识别提示词（V5.0 从缓存取）"""
+        """获取意图识别提示词（V6.1 从 prompt_results 取）"""
         if self._prompt_cache and self._prompt_cache.is_loaded:
             return self._prompt_cache.get_intent_prompt()
         
@@ -698,7 +800,7 @@ class IntentAnalyzer:
         return IntentPromptGenerator.get_default()
 ```
 
-**意图识别输出**（V4.6）：
+**意图识别输出**：
 
 ```json
 {
@@ -734,26 +836,10 @@ Memory 三层架构
 │ 用户级（User Scope）- 跨 Session 保留                   │
 │ ┌────────────────────────────────────────────────────┐ │
 │ │ EpisodicMemory（历史经验）                         │ │
-│ │ • 用户历史任务记录                                  │ │
-│ │ • 成功/失败经验                                     │ │
-│ │                                                    │ │
 │ │ PreferenceMemory（用户偏好）                       │ │
-│ │ • 用户个性化设置                                    │ │
-│ │ • 风格偏好                                          │ │
-│ │                                                    │ │
-│ │ PlanMemory（任务计划持久化，V4.3+）                │ │
-│ │ • 跨 Session 任务计划保存                          │ │
-│ │ • 支持中断恢复                                      │ │
-│ │                                                    │ │
+│ │ PlanMemory（任务计划持久化）                       │ │
 │ │ E2BMemory（E2B 沙箱记忆）                          │ │
-│ │ • 用户的云端计算环境                                │ │
-│ │ • 持久化沙箱 Session                                │ │
-│ │ • 代码执行历史                                      │ │
-│ │                                                    │ │
-│ │ Mem0（用户画像，V4.5+，可选）                      │ │
-│ │ • 向量化语义记忆                                    │ │
-│ │ • 智能按需检索（V4.6）                             │ │
-│ │ • 多向量数据库支持                                  │ │
+│ │ Mem0（用户画像，可选）                             │ │
 │ └────────────────────────────────────────────────────┘ │
 └────────────────────────────────────────────────────────┘
 
@@ -761,12 +847,7 @@ Memory 三层架构
 │ 系统级（System Scope）- 全局共享                        │
 │ ┌────────────────────────────────────────────────────┐ │
 │ │ SkillMemory（Skills 注册表）                       │ │
-│ │ • Skills 元数据和路径                               │ │
-│ │ • 全局共享                                          │ │
-│ │                                                    │ │
 │ │ CacheMemory（系统缓存）                            │ │
-│ │ • 临时数据缓存                                      │ │
-│ │ • TTL 管理                                          │ │
 │ └────────────────────────────────────────────────────┘ │
 └────────────────────────────────────────────────────────┘
 ```
@@ -780,274 +861,16 @@ core/memory/
 ├── user/                # 用户级记忆
 │   ├── episodic.py      # EpisodicMemory
 │   ├── preference.py    # PreferenceMemory
-│   ├── plan.py          # PlanMemory（V4.3+）
+│   ├── plan.py          # PlanMemory
 │   └── e2b.py           # E2BMemory
 ├── system/              # 系统级记忆
 │   ├── skill.py         # SkillMemory
 │   └── cache.py         # CacheMemory
 └── mem0/                # Mem0 用户画像（可选）
     ├── pool.py
+    ├── schemas/         # 多层画像结构
     └── tencent_vectordb.py
 ```
-
-#### WorkingMemory（会话级短期记忆）
-
-**文件**：`core/memory/working.py`
-
-**职责**：
-- 存储当前会话的短期记忆
-- 管理 messages、tool_calls、plan/todo
-
-```python
-class WorkingMemory:
-    """工作记忆 - 当前会话的短期记忆"""
-    
-    def __init__(self):
-        self.messages = []       # 消息历史
-        self.tool_calls = []     # 工具调用记录
-        self.plan_json = None    # Plan 存储
-        self.todo_md = None      # Todo 存储
-    
-    # Plan/Todo CRUD
-    def set_plan(self, plan_json, todo_md): ...
-    def get_plan(self) -> Optional[Dict]: ...
-    def update_plan_step(self, step_index, status, result): ...
-```
-
-#### 用户级记忆（User Scope）
-
-**1. PlanMemory（任务计划持久化，V4.3+）**
-
-**文件**：`core/memory/user/plan.py`
-
-**职责**：
-- 跨 Session 保存任务计划
-- 支持长时运行任务中断恢复
-- 与 WorkingMemory 协同工作
-
-```python
-class PlanMemory:
-    """任务计划持久化记忆"""
-    
-    async def save_plan(self, plan_id: str, plan_data: Dict):
-        """保存任务计划"""
-        pass
-    
-    async def load_plan(self, plan_id: str) -> Optional[Dict]:
-        """加载任务计划"""
-        pass
-    
-    async def list_active_plans(self, user_id: str) -> List[Dict]:
-        """列出用户的活跃任务"""
-        pass
-```
-
-**2. E2BMemory（E2B 沙箱记忆）**
-
-**文件**：`core/memory/user/e2b.py`
-
-**职责**：
-- 管理用户的云端计算环境
-- 持久化沙箱 Session
-- 代码执行历史
-
-**3. EpisodicMemory & PreferenceMemory**
-
-**文件**：`core/memory/user/episodic.py`, `preference.py`
-
-**职责**：
-- 用户历史经验记录
-- 用户偏好设置
-
-#### Mem0（用户画像，可选）
-
-**文件**：`core/memory/mem0/` + `services/mem0_service.py`
-
-**职责**（V4.5+，V5.1 增强）：
-- 跨 Session 用户画像与偏好记忆
-- 基于 Mem0 框架的向量检索
-- 支持多向量数据库（Qdrant、腾讯云 VectorDB）
-- V4.6：智能按需检索
-- **V5.1：多层用户画像结构**
-
-**V5.1 Mem0 模块结构**：
-
-```
-core/memory/mem0/
-├── __init__.py
-├── pool.py                 # Mem0 连接池
-├── config.py               # Mem0 配置
-├── tencent_vectordb.py     # 腾讯云向量数据库
-├── aggregator.py           # 🆕 记忆聚合器
-├── analyzer.py             # 🆕 行为分析器
-├── extractor.py            # 🆕 记忆提取器
-├── planner.py              # 🆕 计划跟踪器
-├── prompts.py              # 🆕 Mem0 提示词
-├── reminder.py             # 🆕 提醒生成器
-├── reporter.py             # 🆕 报告生成器
-├── reranker.py             # 🆕 记忆重排序
-├── formatter.py            # 画像格式化
-└── schemas/                # 🆕 V5.1 多层画像结构
-    ├── persona.py          # UserPersona 用户画像
-    ├── behavior.py         # 行为分析结构
-    ├── emotion.py          # 情感分析结构
-    ├── fragment.py         # 记忆片段结构
-    └── plan.py             # 计划跟踪结构
-```
-
-**UserPersona 数据结构**（V5.1）：
-
-```python
-# core/memory/mem0/schemas/persona.py
-@dataclass
-class UserPersona:
-    """
-    用户画像 - 汇总所有层的分析结果
-    用于 Prompt 注入和个性化响应
-    """
-    user_id: str
-    
-    # 身份推断
-    inferred_role: str = "unknown"  # product_manager/developer/sales
-    role_confidence: float = 0.0
-    work_domain: str = "general"
-    
-    # 行为摘要
-    routine_overview: str = ""      # 工作规律概述
-    work_style: str = ""            # 工作风格
-    time_management: str = ""       # 时间管理方式
-    
-    # 当前状态
-    current_focus: str = ""         # 当前关注点
-    emotional_state: str = "neutral"
-    energy_level: str = "normal"
-    
-    # 计划跟踪
-    active_plans: List[PlanSummary] = field(default_factory=list)
-    upcoming_reminders: List[ReminderSummary] = field(default_factory=list)
-```
-
-```python
-class Mem0Service:
-    """Mem0 用户记忆服务"""
-    
-    async def search(
-        self, 
-        user_id: str, 
-        query: str, 
-        limit: int = 5
-    ) -> List[Memory]:
-        """
-        检索用户记忆（V4.6 按需调用）
-        
-        只在以下场景检索：
-        - PPT 生成（可能有风格偏好）
-        - 代码编写（可能有编码风格）
-        - 推荐任务（需要了解用户喜好）
-        
-        通用查询（天气、百科）跳过检索
-        """
-        pass
-    
-    async def add(
-        self, 
-        user_id: str, 
-        messages: List[Message]
-    ):
-        """添加用户记忆（异步更新）"""
-        pass
-```
-
-**V5.1 后台任务增强**（`utils/background_tasks.py`）：
-
-```python
-class BackgroundTaskService:
-    """
-    后台任务服务
-    
-    支持任务类型：
-    - 对话标题生成
-    - 推荐问题生成
-    - 🆕 V5.1 Mem0 用户记忆增量更新
-    """
-    
-    async def update_mem0_for_user(
-        self, 
-        user_id: str,
-        conversations: List[Conversation]
-    ) -> Mem0UpdateResult:
-        """单用户 Mem0 增量更新"""
-        pass
-    
-    async def batch_update_mem0(
-        self,
-        user_ids: List[str]
-    ) -> Mem0BatchUpdateResult:
-        """批量 Mem0 更新"""
-        pass
-```
-
-#### MemoryManager（统一入口）
-
-**文件**：`core/memory/manager.py`
-
-```python
-class MemoryManager:
-    """
-    统一记忆管理器
-    
-    整合三层记忆，提供统一访问接口
-    """
-    
-    def __init__(self, user_id: str = None, storage_dir: str = None):
-        # 会话级
-        self.working = create_working_memory()
-        
-        # 用户级（懒加载）
-        self.episodic = ...  # EpisodicMemory
-        self.preference = ...  # PreferenceMemory
-        self.plan = ...  # PlanMemory（V4.3+）
-        self.e2b = create_e2b_memory(user_id)
-        
-        # 系统级（单例）
-        self.skill = ...  # SkillMemory
-        self.cache = ...  # CacheMemory
-```
-
-**Mem0 集成流程**（V4.5）：
-
-```
-Phase 2: 记忆检索（按需）
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-if not intent.skip_memory_retrieval:  ← V4.6 智能决策
-    ┌─────────────────────────────────────────┐
-    │ Mem0Service.search(user_id, query)      │
-    └─────────────────┬───────────────────────┘
-                      │
-                      ▼
-    ┌─────────────────────────────────────────┐
-    │ 向量数据库（Qdrant / 腾讯云 VectorDB） │
-    │ • 语义相似度检索                         │
-    │ • 返回 top-k 相关记忆                    │
-    └─────────────────┬───────────────────────┘
-                      │
-                      ▼
-    ┌─────────────────────────────────────────┐
-    │ 用户画像 & 偏好                          │
-    │ • "用户偏好简洁风格的 PPT"               │
-    │ • "用户习惯使用 Python 3.10+"            │
-    └─────────────────┬───────────────────────┘
-                      │
-                      ▼
-    ┌─────────────────────────────────────────┐
-    │ 注入到 System Prompt                     │
-    └─────────────────────────────────────────┘
-```
-
-**参考来源**：
-- [Mem0 官方文档](https://docs.mem0.ai/)
-- [Mem0 论文](https://arxiv.org/abs/2504.19413)
 
 ### Events 系统
 
@@ -1057,31 +880,6 @@ if not intent.skip_memory_retrieval:  ← V4.6 智能决策
 - 统一的事件管理和分发
 - 支持 SSE 流式输出
 - 多平台适配器（ZenO、钉钉、飞书等）
-
-**核心组件**：
-
-```python
-# core/events/manager.py
-class EventManager:
-    """事件管理器"""
-    
-    async def emit(
-        self, 
-        event_type: str, 
-        data: Dict, 
-        session_id: str
-    ):
-        """发送事件"""
-        pass
-
-# core/events/adapters/zeno.py
-class ZenOAdapter(EventAdapter):
-    """ZenO 事件适配器"""
-    
-    def transform(self, event: Dict) -> Optional[Dict]:
-        """转换为 ZenO SSE 格式"""
-        pass
-```
 
 **事件类型**（6 类）：
 
@@ -1103,47 +901,7 @@ class ZenOAdapter(EventAdapter):
 - MCP 工具集成
 - E2B 沙箱支持
 - Skills 加载与调用
-- **V5.1：统一工具加载器**
-
-**核心文件结构**：
-
-```
-core/tool/
-├── __init__.py
-├── executor.py             # 工具执行器
-├── selector.py             # 工具选择器
-├── loader.py               # 🆕 V5.1 统一工具加载器
-├── instance_registry.py    # 实例级工具注册
-├── result_compactor.py     # 结果压缩器
-├── validator.py            # 工具参数验证
-└── capability/             # 能力系统
-    ├── invocation.py       # 调用选择器
-    ├── registry.py         # 能力注册表
-    ├── router.py           # 能力路由
-    ├── skill_loader.py     # Skill 加载器
-    └── types.py            # 类型定义
-```
-
-**V5.1 工具分层加载**：
-
-```python
-# core/tool/loader.py
-class ToolLoader:
-    """
-    统一工具加载器 - 管理三类工具
-    
-    1. 通用工具：从 capabilities.yaml 加载，根据 enabled_capabilities 过滤
-    2. MCP 工具：从 config.yaml 的 mcp_tools 配置加载
-    3. Claude Skills：从 skills/skill_registry.yaml 加载
-    """
-    
-    # 工具类别定义（类别化配置）
-    TOOL_CATEGORIES = {
-        "document_skills": ["pptx", "xlsx", "docx", "pdf"],
-        "sandbox_tools": ["sandbox_run_code", "sandbox_list_dir", ...],
-        "ppt_tools": ["ppt_generator", "slidespeak_render"],
-    }
-```
+- 统一工具加载器
 
 ```
 Tool 系统架构
@@ -1165,28 +923,6 @@ Tool 系统架构
 │ • exa_search │ │ • workflow   │ │ • xlsx       │
 │ • knowledge  │ │              │ │ • docx       │
 └──────────────┘ └──────────────┘ └──────────────┘
-                      │
-                      ▼
-┌────────────────────────────────────────────────────────┐
-│                   ToolExecutor                          │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐             │
-│  │MCP Tools │  │ E2B      │  │ Built-in │             │
-│  │(Dify等)  │  │ Sandbox  │  │ Tools    │             │
-│  └──────────┘  └──────────┘  └──────────┘             │
-└────────────────────────────────────────────────────────┘
-```
-
-**MCP 工具示例**（`instances/test_agent/config.yaml`）：
-
-```yaml
-mcp_tools:
-  - name: text2flowchart
-    server_url: "https://api.dify.ai/mcp/server/XXX/mcp"
-    server_name: "dify"
-    auth_type: "bearer"
-    auth_env: "DIFY_API_KEY"
-    capability: "document_creation"
-    description: "从自然语言描述生成 Mermaid 流程图"
 ```
 
 ### Orchestration 系统
@@ -1199,94 +935,21 @@ mcp_tools:
 - E2B 沙箱深度集成
 - 执行状态追踪
 
-**核心组件**：
-
-```python
-# core/orchestration/code_orchestrator.py
-class CodeOrchestrator:
-    """
-    代码执行编排器
-    
-    流程：代码生成 → 验证 → 执行 → 结果验证
-    特性：
-    - 自动错误分析和重试
-    - 详细执行记录
-    - E2B 沙箱集成
-    """
-    
-    async def execute_code(
-        self, 
-        code: str, 
-        conversation_id: str,
-        max_retries: int = 3
-    ) -> ExecutionResult:
-        """执行代码（带自动恢复）"""
-        pass
-
-# core/orchestration/code_validator.py
-class CodeValidator:
-    """代码验证器 - 执行前验证 + 执行后验证"""
-    pass
-
-# core/orchestration/pipeline_tracer.py
-class E2EPipelineTracer:
-    """端到端流水线追踪器"""
-    pass
-```
-
 ### Inference 系统
 
 **文件**：`core/inference/`
 
-**职责**（V5.1 新增）：
+**职责**：
 - 统一语义推理模块
 - 所有推理通过 LLM 语义完成
 - Few-Shot 教会 LLM 推理模式
 - 保守 fallback，不做关键词猜测
 
-```python
-# core/inference/semantic_inference.py
-class SemanticInferenceEngine:
-    """
-    V5.0 统一语义推理引擎
-    
-    核心理念：
-    - 代码只做调用和解析，不做规则判断
-    - 运营无需配置任何推理规则
-    - 框架内置 Few-Shot 示例
-    """
-    
-    class InferenceType(Enum):
-        COMPLEXITY = "complexity"   # 复杂度推理
-        INTENT = "intent"           # 意图推理
-        CAPABILITY = "capability"   # 能力推理
-        SCHEMA = "schema"           # Schema 推理
-    
-    async def infer(
-        self, 
-        query: str, 
-        inference_type: InferenceType
-    ) -> InferenceResult:
-        """执行语义推理"""
-        pass
-```
-
-**推理流程**：
-
-```
-用户输入 → LLM 语义推理 → 结构化结果
-
-Few-Shot 示例教会 LLM:
-• "构造CRM系统" → Complex (build + 完整架构)
-• "这个系统怎么用" → Simple (询问，非构建)
-• "分析销售趋势" → Medium (分析，单一任务)
-```
-
 ---
 
 ## API 三层架构
 
-V5.0 采用**三层架构**，HTTP 和 gRPC 入口共享业务逻辑：
+V6.1 采用**三层架构**，HTTP 和 gRPC 入口共享业务逻辑：
 
 ```
 协议入口层（平级）           业务逻辑层（共享）
@@ -1310,32 +973,6 @@ grpc_server/ (gRPC)          ↑
 | **grpc_server/** | gRPC 协议处理，调用 Service | ❌ 不写业务逻辑 |
 | **services/** | 业务逻辑实现，被两层复用 | ❌ 不处理协议细节 |
 
-### 示例代码
-
-```python
-# services/chat_service.py（业务逻辑，只写一次）
-class ChatService:
-    async def send_message(self, user_id: str, content: str):
-        """发送消息（核心业务逻辑）"""
-        # HTTP 和 gRPC 都调用这个
-        pass
-
-# routers/chat.py（HTTP 入口）
-@router.post("/chat")
-async def chat(request: ChatRequest):
-    service = get_chat_service()
-    return await service.send_message(request.user_id, request.content)
-
-# grpc_server/chat_servicer.py（gRPC 入口）
-class ChatServicer(chat_pb2_grpc.ChatServiceServicer):
-    async def SendMessage(self, request, context):
-        service = get_chat_service()
-        result = await service.send_message(request.user_id, request.content)
-        return chat_pb2.ChatResponse(...)
-```
-
-**参考文档**：[`02-api-development/RULE.mdc`](.cursor/rules/02-api-development/RULE.mdc)
-
 ---
 
 ## 目录结构
@@ -1344,22 +981,24 @@ class ChatServicer(chat_pb2_grpc.ChatServiceServicer):
 zenflux_agent/
 ├── core/                           # 核心组件
 │   ├── agent/                      # Agent 模块
-│   │   ├── factory.py              # Agent 工厂（LLM 语义分析）
+│   │   ├── factory.py              # Agent 工厂
 │   │   ├── intent_analyzer.py      # 意图分析器
 │   │   ├── simple_agent.py         # SimpleAgent（编排层）
 │   │   └── types.py                # Agent 类型定义
 │   │
-│   ├── prompt/                     # 🔥 V5.0 核心模块
-│   │   ├── instance_cache.py       # InstancePromptCache（单例+持久化）
-│   │   ├── intent_prompt_generator.py  # 动态意图提示词生成
+│   ├── prompt/                     # 🔥 V6.1 核心模块
+│   │   ├── instance_cache.py       # InstancePromptCache（5步分解）
+│   │   ├── prompt_results_writer.py# 🆕 V6.1 结果输出管理
+│   │   ├── framework_rules.py      # 🆕 V6.1 框架规则定义
+│   │   ├── intent_prompt_generator.py  # 意图提示词生成
 │   │   ├── prompt_layer.py         # 提示词分层管理
 │   │   ├── complexity_detector.py  # 复杂度检测器
 │   │   └── llm_analyzer.py         # LLM 提示词语义分析器
 │   │
-│   ├── inference/                  # 🆕 V5.1 语义推理模块
+│   ├── inference/                  # 语义推理模块
 │   │   └── semantic_inference.py   # 统一语义推理引擎
 │   │
-│   ├── orchestration/              # 🆕 代码编排模块
+│   ├── orchestration/              # 代码编排模块
 │   │   ├── code_orchestrator.py    # 代码执行编排器
 │   │   ├── code_validator.py       # 代码验证器
 │   │   └── pipeline_tracer.py      # 流水线追踪器
@@ -1367,212 +1006,93 @@ zenflux_agent/
 │   ├── memory/                     # Memory 系统
 │   │   ├── manager.py              # MemoryManager 统一入口
 │   │   ├── working.py              # WorkingMemory
-│   │   ├── base.py                 # 基类定义
-│   │   ├── mem0/                   # 🆕 V5.1 增强 Mem0 用户画像
+│   │   ├── mem0/                   # Mem0 用户画像
 │   │   │   ├── pool.py             # 连接池
-│   │   │   ├── config.py           # 配置
-│   │   │   ├── aggregator.py       # 记忆聚合器
-│   │   │   ├── analyzer.py         # 行为分析器
-│   │   │   ├── extractor.py        # 记忆提取器
-│   │   │   ├── planner.py          # 计划跟踪器
-│   │   │   ├── prompts.py          # Mem0 提示词
-│   │   │   ├── reminder.py         # 提醒生成器
-│   │   │   ├── reporter.py         # 报告生成器
-│   │   │   ├── reranker.py         # 记忆重排序
-│   │   │   ├── formatter.py        # 画像格式化
-│   │   │   ├── tencent_vectordb.py # 腾讯云向量库
-│   │   │   └── schemas/            # 🆕 多层画像结构
-│   │   │       ├── persona.py      # UserPersona
-│   │   │       ├── behavior.py     # 行为分析
-│   │   │       ├── emotion.py      # 情感分析
-│   │   │       ├── fragment.py     # 记忆片段
-│   │   │       └── plan.py         # 计划跟踪
+│   │   │   ├── schemas/            # 多层画像结构
+│   │   │   └── ...
 │   │   ├── user/                   # 用户记忆
-│   │   │   ├── episodic.py         # EpisodicMemory
-│   │   │   ├── preference.py       # PreferenceMemory
-│   │   │   ├── plan.py             # PlanMemory
-│   │   │   └── e2b.py              # E2BMemory
 │   │   └── system/                 # 系统记忆
-│   │       ├── skill.py            # SkillMemory
-│   │       └── cache.py            # CacheMemory
 │   │
 │   ├── events/                     # Events 系统
 │   │   ├── manager.py              # 事件管理器
-│   │   ├── broadcaster.py          # 事件广播器
-│   │   ├── dispatcher.py           # 事件分发器
-│   │   ├── storage.py              # 事件存储
-│   │   ├── message_events.py       # 消息事件
-│   │   ├── content_events.py       # 内容事件
-│   │   ├── session_events.py       # 会话事件
-│   │   ├── user_events.py          # 用户事件
-│   │   ├── system_events.py        # 系统事件
-│   │   ├── conversation_events.py  # 对话事件
 │   │   └── adapters/               # 平台适配器
-│   │       ├── base.py             # 适配器基类
-│   │       ├── zeno.py             # ZenO 适配器
-│   │       ├── dingtalk.py         # 钉钉适配器
-│   │       ├── feishu.py           # 飞书适配器
-│   │       ├── slack.py            # Slack 适配器
-│   │       └── webhook.py          # Webhook 适配器
 │   │
 │   ├── tool/                       # Tool 系统
 │   │   ├── executor.py             # 工具执行器
 │   │   ├── selector.py             # 工具选择器
-│   │   ├── loader.py               # 🆕 V5.1 统一工具加载器
-│   │   ├── instance_registry.py    # 实例级工具注册
-│   │   ├── result_compactor.py     # 结果压缩器
-│   │   ├── validator.py            # 工具参数验证
+│   │   ├── loader.py               # 统一工具加载器
 │   │   └── capability/             # 能力系统
-│   │       ├── invocation.py       # 调用选择器
-│   │       ├── registry.py         # 能力注册表
-│   │       ├── router.py           # 能力路由
-│   │       ├── skill_loader.py     # Skill 加载器
-│   │       └── types.py            # 类型定义
 │   │
 │   ├── llm/                        # LLM 提供商
 │   │   ├── base.py                 # LLM 基类
-│   │   ├── adaptor.py              # LLM 适配器
 │   │   ├── claude.py               # Claude 服务
-│   │   ├── openai.py               # OpenAI 服务
-│   │   └── gemini.py               # Gemini 服务
+│   │   └── ...
 │   │
-│   ├── context/                    # Context 管理
-│   │   ├── context_engineering.py  # Context Engineering
-│   │   ├── prompt_manager.py       # 提示词管理
-│   │   ├── runtime.py              # 运行时上下文
-│   │   └── conversation.py         # 对话上下文
+│   ├── multi_agent/                # 【预留】Multi-Agent 编排
+│   │   ├── orchestrator.py         # 编排器
+│   │   ├── config.py               # 配置
+│   │   └── scheduling/             # 调度模块
 │   │
-│   ├── schemas/                    # Schema 验证
-│   │   └── validator.py            # Schema 验证器
-│   │
-│   ├── confirmation_manager.py     # 🆕 HITL 确认管理器
-│   ├── workspace_manager.py        # 🆕 工作区管理器
-│   └── agent_manager.py            # Agent 管理器
+│   └── ...
 │
-├── services/                       # 🔥 业务逻辑层（API 三层架构）
-│   ├── chat_service.py             # 聊天服务（被 HTTP 和 gRPC 复用）
+├── services/                       # 业务逻辑层
+│   ├── chat_service.py             # 聊天服务
 │   ├── conversation_service.py     # 对话服务
-│   ├── session_service.py          # 会话服务
 │   ├── mem0_service.py             # Mem0 服务
-│   ├── file_service.py             # 文件服务
-│   ├── knowledge_service.py        # 知识库服务
-│   ├── sandbox_service.py          # 沙盒服务
-│   ├── tool_service.py             # 工具服务
-│   ├── mcp_client.py               # MCP 客户端
-│   └── redis_manager.py            # Redis 管理
+│   └── ...
 │
 ├── routers/                        # HTTP 入口（FastAPI）
 │   ├── chat.py                     # 聊天路由
-│   ├── conversation.py             # 对话路由
-│   ├── mem0_router.py              # Mem0 路由
-│   ├── files.py                    # 文件路由
-│   ├── knowledge.py                # 知识库路由
-│   ├── tools.py                    # 工具路由
-│   ├── workspace.py                # 工作区路由
-│   └── human_confirmation.py       # HITL 确认路由
+│   └── ...
 │
 ├── grpc_server/                    # gRPC 入口
 │   ├── server.py                   # gRPC 服务器
-│   ├── client.py                   # gRPC 客户端
-│   ├── chat_servicer.py            # 聊天 Servicer
-│   ├── session_servicer.py         # 会话 Servicer
-│   └── generated/                  # protoc 生成的代码
-│       ├── tool_service_pb2.py
-│       └── tool_service_pb2_grpc.py
+│   └── ...
 │
 ├── tools/                          # Built-in 工具
-│   ├── base.py                     # 工具基类
-│   ├── plan_todo_tool.py           # Plan/Todo 工具
-│   ├── exa_search.py               # Exa 搜索
-│   ├── knowledge_search.py         # 知识库搜索
-│   ├── ppt_generator.py            # PPT 生成器
-│   ├── slidespeak.py               # SlidesSpeak 集成
-│   ├── sandbox_tools.py            # E2B 沙盒工具
-│   ├── api_calling.py              # API 调用工具
-│   ├── request_human_confirmation.py  # HITL 工具
-│   └── e2b_template_manager.py     # E2B 模板管理
+│   └── ...
 │
 ├── skills/                         # Skills 库
-│   ├── library/                    # 内置 Skills
-│   │   ├── ontology-builder/       # 本体构建
-│   │   ├── planning-task/          # 任务规划
-│   │   ├── ppt-generator/          # PPT 生成
-│   │   ├── slidespeak-generator/   # SlidesSpeak 生成
-│   │   ├── slidespeak-editor/      # SlidesSpeak 编辑
-│   │   └── slidespeak-slide-editor/ # 幻灯片编辑
-│   └── custom_claude_skills/       # 自定义 Skills
+│   └── ...
 │
-├── instances/                      # 实例配置
+├── instances/                      # 🔥 实例配置
 │   ├── _template/                  # 实例模板
 │   │   ├── prompt.md               # 提示词模板
 │   │   ├── config.yaml             # 配置模板
-│   │   ├── config_example_full.yaml    # 完整配置示例
-│   │   ├── config_example_minimal.yaml # 最小配置示例
-│   │   ├── env.example             # 环境变量模板
-│   │   ├── api_desc/               # API 描述
-│   │   └── skills/                 # 实例级 Skills
+│   │   ├── config_example_full.yaml
+│   │   ├── config_example_minimal.yaml
+│   │   ├── env.example
+│   │   ├── prompt_results/         # 🆕 V6.1 生成结果目录
+│   │   │   └── README.md           # 使用说明
+│   │   └── workers/                # Workers 配置
 │   └── test_agent/                 # 测试实例
 │       ├── prompt.md
 │       ├── config.yaml
-│       ├── api_desc/
-│       ├── skills/
-│       └── .cache/                 # V5.0 缓存目录
+│       ├── prompt_results/         # 🆕 自动生成
+│       │   ├── _metadata.json
+│       │   ├── agent_schema.yaml
+│       │   ├── intent_prompt.md
+│       │   ├── simple_prompt.md
+│       │   ├── medium_prompt.md
+│       │   └── complex_prompt.md
+│       └── .cache/                 # 缓存目录
 │
 ├── config/                         # 全局配置
 │   ├── capabilities.yaml           # 能力配置
 │   ├── llm_config/                 # LLM 配置
-│   │   └── profiles.yaml           # LLM 配置文件
+│   │   └── profiles.yaml           # 🆕 包含 prompt_decomposer
 │   └── storage.yaml                # 存储配置
-│
-├── models/                         # Pydantic 数据模型
-│   ├── api.py                      # API 模型
-│   ├── chat.py                     # 聊天模型
-│   ├── database.py                 # 数据库模型
-│   ├── file.py                     # 文件模型
-│   ├── knowledge.py                # 知识库模型
-│   ├── mem0.py                     # Mem0 模型
-│   ├── ragie.py                    # Ragie 模型
-│   └── tool.py                     # 工具模型
-│
-├── utils/                          # 工具函数
-│   ├── background_tasks.py         # 🆕 V5.1 后台任务增强
-│   ├── cache_utils.py              # 缓存工具
-│   ├── file_handler.py             # 文件处理
-│   ├── file_processor.py           # 文件处理器
-│   ├── json_file_store.py          # JSON 存储
-│   ├── json_utils.py               # JSON 工具
-│   ├── knowledge_store.py          # 知识存储
-│   ├── message_utils.py            # 消息工具
-│   ├── ragie_client.py             # Ragie 客户端
-│   ├── s3_uploader.py              # S3 上传
-│   └── usage_tracker.py            # 使用量追踪
-│
-├── prompts/                        # 提示词模板
-│   └── universal_agent_prompt.py   # 通用 Agent 提示词
 │
 ├── scripts/                        # 脚本
 │   ├── instance_loader.py          # 实例加载器
-│   ├── run_instance.py             # 运行实例
-│   ├── run_agent.py                # 运行 Agent
-│   ├── skill_cli.py                # Skill CLI
-│   ├── sync_capabilities.py        # 同步能力配置
-│   ├── generate_grpc.sh            # 生成 gRPC 代码
-│   └── e2e_architecture_verify.py  # E2E 架构验证
-│
-├── tests/                          # 测试
-│   └── dazee_e2e/                  # 🆕 E2E 测试
+│   └── ...
 │
 ├── docs/                           # 文档
 │   └── architecture/               # 架构文档
 │       ├── 00-ARCHITECTURE-OVERVIEW.md  # 本文档
 │       └── archived/               # 历史版本
 │
-├── main.py                         # 应用入口
-├── logger.py                       # 日志配置
-├── requirements.txt                # 依赖
-├── Dockerfile                      # Docker 配置
-├── Dockerfile.production           # 生产 Docker
-└── docker-compose.yml              # Docker Compose
+└── ...
 ```
 
 ---
@@ -1585,7 +1105,7 @@ zenflux_agent/
 - **prompt.md**：运营写的系统提示词（业务规则）
 - **config.yaml**：实例配置（工具、记忆、Agent 参数）
 - **.env**：环境变量（API Keys）
-- **.cache/**：V5.0 缓存目录（启动时自动生成）
+- **prompt_results/**：V6.1 自动生成的场景化提示词
 
 **示例**：`instances/test_agent/config.yaml`
 
@@ -1593,11 +1113,17 @@ zenflux_agent/
 instance:
   name: "test_agent"
   description: "测试智能体"
+  version: "1.0.0"
 
 agent:
   model: "claude-sonnet-4-5-20250929"
   max_turns: 20
   plan_manager_enabled: true
+
+# 🆕 V6.1 Multi-Agent 配置
+multi_agent:
+  # mode 选项：disabled / auto / enabled
+  mode: "disabled"  # 当前版本推荐禁用
 
 mcp_tools:
   - name: text2flowchart
@@ -1606,87 +1132,155 @@ mcp_tools:
 
 memory:
   mem0_enabled: true
-  smart_retrieval: true  # V4.6 智能记忆检索
+  smart_retrieval: true
 ```
+
+### prompt_results/ 目录（V6.1 新增）
+
+```
+instances/my_agent/prompt_results/
+├── README.md          # 使用说明
+├── _metadata.json     # 元数据
+│   {
+│     "source_hash": "abc123...",      # prompt.md + config.yaml 哈希
+│     "created_at": "2026-01-13T...",
+│     "intent_prompt_hash": "def456...",
+│     "simple_prompt_hash": "ghi789...",
+│     ...
+│   }
+├── agent_schema.yaml  # Agent 配置（可编辑）
+├── intent_prompt.md   # 意图识别提示词（可编辑）
+├── simple_prompt.md   # 简单任务提示词（可编辑）
+├── medium_prompt.md   # 中等任务提示词（可编辑）
+└── complex_prompt.md  # 复杂任务提示词（可编辑）
+```
+
+**运营操作指南**：
+
+| 操作 | 方法 |
+|------|------|
+| 查看生成的提示词 | 直接打开 `prompt_results/` 中的 `.md` 文件 |
+| 编辑提示词 | 直接修改文件，下次启动自动生效 |
+| 强制重新生成某个文件 | 删除该文件，下次启动重新生成 |
+| 强制全部重新生成 | 删除 `_metadata.json` |
+| 命令行强制刷新 | `--force-refresh` 参数 |
 
 ### 全局配置（`config/`）
 
 全局共享配置：
 - **capabilities.yaml**：能力配置（工具注册、分类定义）
-- **llm_config/**：LLM 配置（多提供商支持）
-- **storage.yaml**：存储配置（数据库、向量数据库）
+- **llm_config/profiles.yaml**：LLM 配置（包含 `prompt_decomposer`）
+- **storage.yaml**：存储配置
+
+**LLM Profile 示例**（`config/llm_config/profiles.yaml`）：
+
+```yaml
+# V6.1 场景化提示词分解专用
+prompt_decomposer:
+  description: "将运营 prompt 分解为场景化提示词"
+  model: "claude-sonnet-4-5-20250929"
+  max_tokens: 60000
+  temperature: 0
+  enable_thinking: false
+  enable_caching: false
+  timeout: 300.0  # 5 分钟
+  max_retries: 2
+```
 
 ---
 
 ## 快速验证
 
-### 验证 InstancePromptCache 加载
+### 验证 V6.1 场景化分解
 
 ```bash
 cd /Users/liuyi/Documents/langchain/CoT_agent/mvp/zenflux_agent
 source venv/bin/activate
 
-# 首次启动（LLM 分析 + 写缓存）
-python scripts/run_instance.py --instance test_agent
+# 首次启动（LLM 分解，3-5分钟）
+python scripts/instance_loader.py --instance test_agent --info
 ```
 
 **预期日志**：
 
 ```
-🔄 开始 LLM 分析: test_agent
-   LLM 分析: 2312ms
-💾 缓存已保存到磁盘: instances/test_agent/.cache
-✅ InstancePromptCache 加载: Simple=749字符, Medium=760字符, Complex=768字符
+⏳ 正在加载实例: test_agent...
+📂 实例路径: instances/test_agent
+📝 prompt.md 长度: 67890 字符
+
+🔄 开始 5 步 LLM 分解流程...
+   Step 1: 生成 AgentSchema...
+   ✅ AgentSchema 生成成功
+   Step 2: 生成意图识别提示词...
+   ✅ 意图识别提示词生成成功，长度: 3500 字符
+   Step 3: 生成简单任务提示词...
+   ✅ 简单任务提示词生成成功，长度: 8000 字符
+   Step 4: 生成中等任务提示词...
+   ✅ 中等任务提示词生成成功，长度: 12000 字符
+   Step 5: 生成复杂任务提示词...
+   ✅ 复杂任务提示词生成成功，长度: 15000 字符
+✅ 5 步分解流程完成
+
+📁 已输出到 prompt_results/ 目录
+✅ InstancePromptCache 加载完成
 ```
 
-### 验证磁盘持久化
+### 验证 prompt_results 目录
 
 ```bash
-# 再次启动（从磁盘加载）
-python scripts/run_instance.py --instance test_agent
+ls -la instances/test_agent/prompt_results/
+# 预期输出：
+# README.md
+# _metadata.json
+# agent_schema.yaml
+# intent_prompt.md
+# simple_prompt.md
+# medium_prompt.md
+# complex_prompt.md
+
+# 查看元数据
+cat instances/test_agent/prompt_results/_metadata.json
+```
+
+### 验证再次启动（从 prompt_results 加载）
+
+```bash
+# 再次启动（直接加载，<100ms）
+python scripts/instance_loader.py --instance test_agent --info
 ```
 
 **预期日志**：
 
 ```
-✅ 从磁盘缓存加载: test_agent
-   磁盘加载耗时: 45ms
+⏳ 正在加载实例: test_agent...
+✅ 从 prompt_results/ 加载: test_agent
+   加载耗时: 45ms
+✅ InstancePromptCache 加载完成
+   Intent: 3500 字符
+   Simple: 8000 字符
+   Medium: 12000 字符
+   Complex: 15000 字符
 ```
 
-### 验证缓存文件
+### 验证强制刷新
 
 ```bash
-ls -la instances/test_agent/.cache/
-# 预期输出：
-# prompt_cache.json
-# agent_schema.json
-# cache_meta.json
+# 方式 1：删除元数据
+rm instances/test_agent/prompt_results/_metadata.json
+python scripts/instance_loader.py --instance test_agent --info
 
-cat instances/test_agent/.cache/cache_meta.json
-# 预期输出：
-# {
-#   "prompt_hash": "abc123...",
-#   "config_hash": "def456...",
-#   "combined_hash": "ghi789...",
-#   "created_at": "2026-01-11T...",
-#   "version": "5.0"
-# }
+# 方式 2：使用命令行参数
+python scripts/instance_loader.py --instance test_agent --force-refresh
 ```
 
-### 验证 API 三层架构
+### 验证 API
 
 ```bash
 # 测试 HTTP API
 curl -X POST http://localhost:8000/api/v1/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "你好", "session_id": "test"}'
-
-# 测试 gRPC（需要 grpcurl）
-grpcurl -plaintext -d '{"user_id": "test", "message": "你好"}' \
-  localhost:50051 zenflux.ChatService/SendMessage
 ```
-
-**预期**：两个 API 返回相同的业务结果（共享 `services/chat_service.py`）
 
 ---
 
@@ -1694,14 +1288,12 @@ grpcurl -plaintext -d '{"user_id": "test", "message": "你好"}' \
 
 | 文档 | 说明 |
 |------|------|
-| [00-ARCHITECTURE-OVERVIEW.md](./00-ARCHITECTURE-OVERVIEW.md) | V5.1 架构总览（本文档，唯一架构详细文档） |
-| [archived/V4-ARCHITECTURE-HISTORY.md](./archived/V4-ARCHITECTURE-HISTORY.md) | V4.x 历史版本（已归档） |
-| [archived/V5-INSTANCE-CACHE-DESIGN.md](./archived/V5-INSTANCE-CACHE-DESIGN.md) | V5.0 提示词缓存专题设计（已归档） |
+| [00-ARCHITECTURE-OVERVIEW.md](./00-ARCHITECTURE-OVERVIEW.md) | V6.1 架构总览（本文档） |
+| [15-FRAMEWORK_PROMPT_CONTRACT.md](./15-FRAMEWORK_PROMPT_CONTRACT.md) | Prompt-Driven 设计契约 |
+| [archived/](./archived/) | 历史版本（V4.x, V5.x） |
 | [01-MEMORY-PROTOCOL.md](./01-MEMORY-PROTOCOL.md) | Memory-First Protocol 详解 |
 | [03-EVENT-PROTOCOL.md](./03-EVENT-PROTOCOL.md) | SSE 事件协议 |
-| [tool_configuration_guide.md](../tool_configuration_guide.md) | 🆕 工具配置指南 |
-| [tool_reference.md](../tool_reference.md) | 🆕 工具参考手册 |
-| [.cursor/rules/02-api-development/RULE.mdc](../.cursor/rules/02-api-development/RULE.mdc) | API 三层架构开发规范 |
+| [tool_configuration_guide.md](../tool_configuration_guide.md) | 工具配置指南 |
 
 ---
 
@@ -1709,27 +1301,23 @@ grpcurl -plaintext -d '{"user_id": "test", "message": "你好"}' \
 
 | 版本 | 日期 | 核心变化 |
 |------|------|---------|
-| **V5.1** | 2026-01-13 | 🔥 **当前稳定版本**：SimpleAgent 单智能体 + Multi-Agent 预留扩展 |
-| V5.1 | 2026-01-11 | Mem0 多层画像 + 工具分层加载 + 语义推理模块 + HITL 完善 |
-| V5.0 | 2026-01-09 | 实例级提示词缓存 + LLM 语义驱动 Schema + 本地持久化 |
-| V4.6 | 2026-01-08 | 智能记忆检索决策（按需检索 Mem0） |
-| V4.5 | 2026-01-07 | Mem0 用户画像层（跨 Session 记忆） |
-| V4.4 | 2026-01-06 | Skills + Tools 整合（能力分层清晰化） |
-| V4.3 | 2026-01-05 | Plan 持久化 + Session 恢复 |
-| V4.0 | 2026-01-01 | 模块化重构（core/agent/memory/events 分离） |
-| V3.7 | 2025-12-29 | 能力抽象层 + E2B 沙箱集成 |
+| **V6.1** | 2026-01-13 | 🔥 **当前版本**：场景化提示词分解 + prompt_results 输出 + 动态更新检测 |
+| V5.1 | 2026-01-11 | Mem0 多层画像 + 工具分层加载 + 语义推理模块 |
+| V5.0 | 2026-01-09 | 实例级提示词缓存 + LLM 语义驱动 Schema |
+| V4.6 | 2026-01-08 | 智能记忆检索决策 |
+| V4.5 | 2026-01-07 | Mem0 用户画像层 |
 
 ---
 
 **🎯 架构设计目标**：
-- ✅ **简洁清晰**：Service → SimpleAgent 直接调用，无复杂路由
-- ✅ **单一事实来源**：本文档是唯一需要维护的架构详细文档
-- ✅ **代码-文档一致**：所有代码路径、类名、函数名与实际代码一致
-- ✅ **可执行验证**：包含快速验证命令，确保架构可验证
+- ✅ **Prompt-Driven**：运营 prompt.md → LLM 分解 → 场景化提示词
+- ✅ **运营可见可编辑**：prompt_results/ 目录，所有生成文件可直接修改
+- ✅ **智能更新**：检测源文件变更，保护手动编辑
+- ✅ **简洁清晰**：Service → SimpleAgent 直接调用
 - ✅ **Prompt-First**：规则写在 Prompt 里，不写在代码里
-- 📝 **预留扩展**：Multi-Agent 代码已预留，未来版本可启用
+- 📝 **预留扩展**：Multi-Agent 代码已预留，通过 mode 配置启用
 
 **📌 维护原则**：
 - 架构变更时，只需更新此文档
 - 历史版本归档到 `archived/` 目录
-- 专题设计可独立成文档，但总览保持简洁
+- prompt_results/ 中的 README.md 同步更新
