@@ -149,43 +149,6 @@ async def sandbox_run_command(
     return await provider.run_command(conversation_id, command, timeout, cwd)
 
 
-async def sandbox_run_code(
-    conversation_id: str,
-    code: str,
-    language: str = "python",
-    timeout: int = 300,
-    *,
-    auto_create: bool = True,
-    user_id: str = "default_user"
-) -> CodeResult:
-    """
-    在沙盒中执行代码
-    
-    Args:
-        conversation_id: 对话 ID
-        code: 要执行的代码
-        language: 编程语言
-        timeout: 超时时间
-        auto_create: 如果沙盒不存在是否自动创建
-        user_id: 用户 ID（用于自动创建）
-        
-    Returns:
-        代码执行结果
-    """
-    provider = get_sandbox_provider()
-    
-    if not provider.is_available:
-        return CodeResult(
-            success=False,
-            error="沙盒服务不可用，请检查 E2B_API_KEY 配置"
-        )
-    
-    if auto_create:
-        await provider.ensure_sandbox(conversation_id, user_id)
-    
-    return await provider.run_code(conversation_id, code, language, timeout)
-
-
 async def sandbox_read_file(
     conversation_id: str,
     path: str,

@@ -1,6 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import ChatView from '../views/ChatView.vue'
 import KnowledgeView from '../views/KnowledgeView.vue'
+import AgentListView from '../views/AgentListView.vue'
+import AgentCreateView from '../views/AgentCreateView.vue'
 
 const routes = [
   {
@@ -17,6 +19,16 @@ const routes = [
     path: '/knowledge',
     name: 'knowledge',
     component: KnowledgeView
+  },
+  {
+    path: '/agents',
+    name: 'agents',
+    component: AgentListView
+  },
+  {
+    path: '/agents/create',
+    name: 'agent-create',
+    component: AgentCreateView
   }
 ]
 

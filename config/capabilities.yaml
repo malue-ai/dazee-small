@@ -1164,97 +1164,20 @@ capabilities:
     - 探索
     - 自定义
     - 动态
-# ==================== 沙盒统一工具（已合并旧工具） ====================
-# 注意：以下旧工具已删除，功能合并到 sandbox_* 系列工具：
-# - e2b_vibe_coding → sandbox_create_project + sandbox_run_project
-# - e2b_python_sandbox → sandbox_run_code
-- name: sandbox_list_dir
-  type: TOOL
-  subtype: CUSTOM
-  provider: user
-  implementation:
-    module: tools.sandbox_tools
-    class: SandboxListDir
-  capabilities:
-  - sandbox_file_operations
-  - file_operations
-  priority: 85
-  cost:
-    time: fast
-    money: free
-  constraints:
-    requires_api: true
-    api_name: e2b
-    session_scoped: true
-  metadata:
-    description: 列出沙盒目录内容
-    keywords:
-    - sandbox
-    - 沙盒
-    - 目录
-    - 文件列表
-  input_schema:
-    type: object
-    properties:
-      conversation_id:
-        type: string
-        description: 对话 ID
-      path:
-        type: string
-        description: 目录路径（默认 /home/user）
-        default: /home/user
-    required:
-    - conversation_id
-- name: sandbox_read_file
-  type: TOOL
-  subtype: CUSTOM
-  provider: user
-  implementation:
-    module: tools.sandbox_tools
-    class: SandboxReadFile
-  capabilities:
-  - sandbox_file_operations
-  - file_operations
-  - content_reading
-  priority: 85
-  cost:
-    time: fast
-    money: free
-  constraints:
-    requires_api: true
-    api_name: e2b
-    session_scoped: true
-  metadata:
-    description: 读取沙盒文件内容
-    keywords:
-    - sandbox
-    - 沙盒
-    - 读取
-    - 文件
-  input_schema:
-    type: object
-    properties:
-      conversation_id:
-        type: string
-        description: 对话 ID
-      path:
-        type: string
-        description: 文件路径（完整路径）
-    required:
-    - conversation_id
-    - path
+# ==================== 沙盒工具（精简版 - Level 1 核心） ====================
+# 只保留 3 个核心工具，其他用 bash 命令替代
 - name: sandbox_write_file
   type: TOOL
   subtype: CUSTOM
   provider: user
+  level: 1
   implementation:
     module: tools.sandbox_tools
     class: SandboxWriteFile
   capabilities:
   - sandbox_file_operations
-  - file_operations
   - content_writing
-  priority: 85
+  priority: 90
   cost:
     time: fast
     money: free
@@ -1263,70 +1186,20 @@ capabilities:
     api_name: e2b
     session_scoped: true
   metadata:
-    description: 写入沙盒文件
-    keywords:
-    - sandbox
-    - 沙盒
-    - 写入
-    - 文件
-    - 保存
+    description: 写入沙盒文件（目录自动创建）
+    keywords: [sandbox, 沙盒, 写入, 文件]
   input_schema:
     type: object
     properties:
-      conversation_id:
-        type: string
-        description: 对话 ID
-      path:
-        type: string
-        description: 文件路径（完整路径）
-      content:
-        type: string
-        description: 文件内容
-    required:
-    - conversation_id
-    - path
-    - content
-- name: sandbox_delete_file
-  type: TOOL
-  subtype: CUSTOM
-  provider: user
-  implementation:
-    module: tools.sandbox_tools
-    class: SandboxDeleteFile
-  capabilities:
-  - sandbox_file_operations
-  - file_operations
-  priority: 85
-  cost:
-    time: fast
-    money: free
-  constraints:
-    requires_api: true
-    api_name: e2b
-    session_scoped: true
-  metadata:
-    description: 删除沙盒文件或目录
-    keywords:
-    - sandbox
-    - 沙盒
-    - 删除
-    - 文件
-  input_schema:
-    type: object
-    properties:
-      conversation_id:
-        type: string
-        description: 对话 ID
-      path:
-        type: string
-        description: 文件或目录路径
-    required:
-    - conversation_id
-    - path
+      conversation_id: {type: string, description: 对话 ID}
+      path: {type: string, description: 文件路径}
+      content: {type: string, description: 文件内容}
+    required: [conversation_id, path, content]
 - name: sandbox_run_command
   type: TOOL
   subtype: CUSTOM
   provider: user
+  level: 1
   implementation:
     module: tools.sandbox_tools
     class: SandboxRunCommand
@@ -1334,178 +1207,37 @@ capabilities:
   - sandbox_file_operations
   - code_execution
   - command_execution
-  priority: 85
-  cost:
-    time: fast
-    money: low
-  constraints:
-    requires_api: true
-    api_name: e2b
-    session_scoped: true
-  metadata:
-    description: 在沙盒中执行 shell 命令
-    keywords:
-    - sandbox
-    - 沙盒
-    - 命令
-    - shell
-    - 执行
-  input_schema:
-    type: object
-    properties:
-      conversation_id:
-        type: string
-        description: 对话 ID
-      command:
-        type: string
-        description: 要执行的命令
-      timeout:
-        type: integer
-        description: 超时时间（秒，默认 60）
-        default: 60
-    required:
-    - conversation_id
-    - command
-- name: sandbox_run_code
-  type: TOOL
-  subtype: CUSTOM
-  provider: user
-  level: 2
-  cache_stable: true
-  compaction:
-    strategy: truncate
-    result_type: mixed
-    max_size: 10000
-  implementation:
-    module: tools.sandbox_tools
-    class: SandboxRunCode
-  capabilities:
-  - code_sandbox
-  - code_execution
-  - data_analysis
-  - web_scraping
-  - api_calling
   priority: 90
   cost:
     time: fast
     money: low
   constraints:
     requires_api: true
-    requires_network: true
-    api_name: e2b
-    session_scoped: true
-    supports_persistence: true
-  metadata:
-    description: '在沙盒中执行 Python 代码（Code Interpreter）
-
-
-      核心特性：
-
-      • ✅ 完整网络访问（requests, httpx等）
-
-      • ✅ 任意第三方包（自动检测并安装）
-
-      • ✅ 文件系统持久化（跨调用保持）
-
-      • ✅ 流式输出（实时显示stdout/stderr）
-
-      • ✅ 图表生成（matplotlib, plotly）
-
-      '
-    preferred_for:
-    - 数据分析和处理
-    - 网络请求和API调用
-    - 数据可视化
-    - 使用第三方Python包
-    - 多步骤代码执行
-    keywords:
-    - sandbox
-    - python
-    - code
-    - 沙盒
-    - 代码执行
-    - 数据分析
-    - pandas
-    - numpy
-    note: '替代了原有的 e2b_python_sandbox 工具。
-
-      所有代码在同一个沙盒中执行，文件系统状态持久化。
-
-      '
-  input_schema:
-    type: object
-    properties:
-      conversation_id:
-        type: string
-        description: 对话 ID
-      code:
-        type: string
-        description: '要执行的 Python 代码。
-
-          可以使用任意 Python 包（会自动安装）。
-
-          使用 print() 输出结果。
-
-          '
-      timeout:
-        type: integer
-        description: 超时时间（秒，默认 300）
-        default: 300
-        minimum: 10
-        maximum: 3600
-    required:
-    - conversation_id
-    - code
-- name: sandbox_file_exists
-  type: TOOL
-  subtype: CUSTOM
-  provider: user
-  implementation:
-    module: tools.sandbox_tools
-    class: SandboxFileExists
-  capabilities:
-  - sandbox_file_operations
-  - file_operations
-  priority: 85
-  cost:
-    time: fast
-    money: free
-  constraints:
-    requires_api: true
     api_name: e2b
     session_scoped: true
   metadata:
-    description: 检查沙盒文件或目录是否存在
-    keywords:
-    - sandbox
-    - 沙盒
-    - 文件
-    - 存在
-    - 检查
+    description: 执行命令。读文件用cat，列目录用ls，删除用rm
+    keywords: [sandbox, 沙盒, 命令, bash, shell]
   input_schema:
     type: object
     properties:
-      conversation_id:
-        type: string
-        description: 对话 ID
-      path:
-        type: string
-        description: 文件或目录路径
-    required:
-    - conversation_id
-    - path
+      conversation_id: {type: string, description: 对话 ID}
+      command: {type: string, description: 命令}
+      timeout: {type: integer, description: 超时秒数, default: 60}
+    required: [conversation_id, command]
+
 - name: sandbox_create_project
   type: TOOL
   subtype: CUSTOM
   provider: user
+  level: 1
   implementation:
     module: tools.sandbox_tools
     class: SandboxCreateProject
   capabilities:
   - sandbox_file_operations
   - app_generation
-  - project_creation
-  priority: 90
+  priority: 92
   cost:
     time: fast
     money: free
@@ -1514,55 +1246,33 @@ capabilities:
     api_name: e2b
     session_scoped: true
   metadata:
-    description: 在沙盒中创建项目框架
-    preferred_for:
-    - 快速创建项目
-    - 初始化应用
-    - 项目模板
-    keywords:
-    - sandbox
-    - 沙盒
-    - 项目
-    - 创建
-    - 模板
-    - streamlit
-    - gradio
-    - flask
-    - fastapi
+    description: 初始化项目骨架（Initialize project）
+    preferred_for: [初始化项目, 创建项目, 快速开始]
+    keywords: [sandbox, 沙盒, 项目, 初始化, scaffold, streamlit, gradio, flask, fastapi, vue, react, nextjs]
   input_schema:
     type: object
     properties:
-      conversation_id:
-        type: string
-        description: 对话 ID
-      project_name:
-        type: string
-        description: 项目名称
+      conversation_id: {type: string, description: 对话 ID}
+      project_name: {type: string, description: 项目名称（目录名）}
       stack:
         type: string
-        description: 技术栈类型
-        enum:
-        - streamlit
-        - gradio
-        - flask
-        - fastapi
-        - python
-        default: python
-    required:
-    - conversation_id
-    - project_name
+        description: 技术栈
+        enum: [streamlit, gradio, flask, fastapi, python, vue, react, nextjs, nodejs]
+      overwrite: {type: boolean, description: 是否覆盖写入, default: false}
+    required: [conversation_id, project_name, stack]
+
 - name: sandbox_run_project
   type: TOOL
   subtype: CUSTOM
   provider: user
+  level: 1
   implementation:
     module: tools.sandbox_tools
     class: SandboxRunProject
   capabilities:
   - sandbox_file_operations
-  - app_generation
   - project_execution
-  priority: 90
+  priority: 95
   cost:
     time: medium
     money: low
@@ -1572,37 +1282,99 @@ capabilities:
     session_scoped: true
     supports_preview: true
   metadata:
-    description: 运行沙盒中的项目并获取预览 URL
-    preferred_for:
-    - 运行应用
-    - 预览项目
-    - 启动服务
-    keywords:
-    - sandbox
-    - 沙盒
-    - 运行
-    - 启动
-    - 预览
-    - url
+    description: 运行项目并返回预览 URL（推荐方式）
+    preferred_for: [运行项目, 预览项目, 获取预览URL]
+    keywords: [sandbox, 沙盒, 运行, 项目, preview_url, streamlit, gradio, flask, fastapi, vue, react, nextjs, nodejs]
   input_schema:
     type: object
     properties:
+      conversation_id: {type: string, description: 对话 ID}
+      project_path: {type: string, description: 项目路径（如 /home/user/my_app）}
+      stack: {type: string, description: 技术栈, enum: [vue, react, nextjs, nodejs, streamlit, gradio, flask, fastapi]}
+    required: [conversation_id, project_path, stack]
+- name: wenshu_analytics
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  invocation_hint: DIRECT
+  level: 2
+  cache_stable: false
+  implementation:
+    module: tools.wenshu_analytics_tool
+    class: WenshuAnalyticsTool
+  capabilities:
+  - data_analysis
+  - data_visualization
+  - data_query
+  - bi_analytics
+  priority: 85
+  cost:
+    time: medium
+    money: low
+  constraints:
+    requires_api: true
+    requires_network: true
+    api_name: wenshu
+    session_scoped: true
+  metadata:
+    description: '问数平台数据分析工具 - 自然语言查询数据、生成报告和图表
+
+      核心功能：
+      • ✅ 自动创建/复用数据分析会话
+      • ✅ 上传和追加数据文件（Excel、CSV）
+      • ✅ 自然语言数据查询
+      • ✅ 返回 SQL、图表、分析报告
+      
+      参数注入：
+      • conversation_id → 问数平台 task_id（框架自动注入）
+      • user_id → 问数平台 user_id（框架自动注入）
+      '
+    preferred_for:
+    - 数据分析查询
+    - 销售数据分析
+    - 数据可视化
+    - BI 报表
+    keywords:
+    - 问数
+    - 数据分析
+    - 销售额
+    - 数据查询
+    - 图表
+    - 报表
+    - SQL
+    note: '环境变量配置：WENSHU_API_BASE_URL（默认 http://localhost:8080）'
+  input_schema:
+    type: object
+    properties:
+      question:
+        type: string
+        description: 用户的数据分析问题，如 '2024年销售额是多少？'
+      files:
+        type: array
+        description: 要分析的文件列表（可选）
+        items:
+          type: object
+          properties:
+            file_name:
+              type: string
+              description: 文件名，如 '2024年销售数据.xlsx'
+            file_url:
+              type: string
+              description: 文件 URL
+          required:
+          - file_name
+          - file_url
+      lg_code:
+        type: string
+        description: 语言代码（默认 zh-CN）
+        default: zh-CN
       conversation_id:
         type: string
-        description: 对话 ID
-      project_path:
+        description: 对话 ID（框架自动注入，作为问数平台的 task_id）
+      user_id:
         type: string
-        description: 项目路径（相对于 /home/user）
-      stack:
-        type: string
-        description: 技术栈类型
-        enum:
-        - streamlit
-        - gradio
-        - flask
-        - fastapi
-        - python
+        description: 用户 ID（框架自动注入）
     required:
+    - question
     - conversation_id
-    - project_path
-    - stack
+    - user_id

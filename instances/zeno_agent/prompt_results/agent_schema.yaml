@@ -1,0 +1,69 @@
+name: GeneralAgent
+description: 通用智能助手
+intent_analyzer:
+  enabled: true
+  complexity_levels:
+  - low
+  - medium
+  - high
+  task_types:
+  - question_answering
+  - data_analysis
+  - content_generation
+  - code_execution
+  - web_search
+  - file_operation
+  output_formats:
+  - text
+  - json
+  - markdown
+  use_llm: true
+  llm_model: claude-haiku-4-5-20251001
+plan_manager:
+  enabled: true
+  trigger_condition: complexity == 'high' or step_count > 3
+  max_steps: 10
+  granularity: medium
+  allow_dynamic_adjustment: true
+  validation_interval: 3
+  replan_enabled: true
+  max_replan_attempts: 2
+  replan_strategy: incremental
+  failure_threshold: 0.3
+tool_selector:
+  enabled: true
+  available_tools: []
+  selection_strategy: capability_based
+  allow_parallel: false
+  max_parallel_tools: 3
+  base_tools:
+  - plan_todo
+  tool_timeout: 300
+memory_manager:
+  enabled: true
+  retention_policy: session
+  episodic_memory: false
+  working_memory_limit: 20
+  auto_compress: true
+  compress_threshold: 15
+output_formatter:
+  enabled: true
+  default_format: markdown
+  supported_formats:
+  - text
+  - markdown
+  - json
+  - html
+  code_highlighting: true
+  max_output_length: 50000
+  include_metadata: false
+skills: []
+tools: []
+model: claude-sonnet-4-5-20250929
+max_turns: 15
+allow_parallel_tools: false
+context_limits:
+  max_context_tokens: 200000
+  warning_threshold: 0.8
+  truncate_threshold: 0.9
+reasoning: 默认配置，适用于一般场景

@@ -20,12 +20,13 @@ from datetime import datetime
 from uuid import uuid4
 
 from logger import get_logger
-from core.agent import SimpleAgent
+from core.agent import SimpleAgent, create_simple_agent
 from core.context import Context
 # 【待扩展】Multi-Agent 模块（已注释）
 # from core.multi_agent import MultiAgentOrchestrator, MultiAgentConfig
 from services.session_service import SessionService, get_session_service, SessionNotFoundError
 from services.conversation_service import get_conversation_service, ConversationNotFoundError
+from services.agent_registry import get_agent_registry, AgentNotFoundError
 from infra.database import AsyncSessionLocal, crud
 from utils.background_tasks import TaskContext, get_background_task_service
 from utils.message_utils import (
@@ -89,8 +90,9 @@ class ChatService:
         message_id: Optional[str] = None,
         stream: bool = True,
         background_tasks: Optional[List[str]] = None,
-        files: Optional[List[Dict[str, Any]]] = None,
-        variables: Optional[Dict[str, Any]] = None
+        files: Optional[List[Any]] = None,
+        variables: Optional[Dict[str, Any]] = None,
+        agent_id: Optional[str] = None
     ):
         """
         统一的对话入口 ⭐
@@ -100,91 +102,83 @@ class ChatService:
         - stream=False → 返回 Dict，用于 API 集成
         
         Args:
-            message: 用户消息（任意格式，会自动标准化）
+            message: 用户消息
             user_id: 用户 ID
             conversation_id: 对话 ID（可选，不提供则自动创建）
             message_id: 消息 ID（可选）
             stream: 是否流式返回
             background_tasks: 需要启用的后台任务列表，如 ["title_generation"]
-            files: 文件引用列表（可选），每个元素包含 file_id 或 file_url
+            files: 文件引用列表（FileReference 对象或字典）
             variables: 前端上下文变量（可选），如位置、时区等
+            agent_id: Agent 实例 ID（可选，不提供则使用默认 Agent）
             
         Returns:
-            stream=True  → AsyncGenerator[Dict, None]
+            stream=True  → AsyncGenerator
             stream=False → Dict
         """
-        if stream:
-            return self._chat_stream(message, user_id, conversation_id, message_id, background_tasks, files, variables)
-        else:
-            return await self._chat_sync(message, user_id, conversation_id, message_id, background_tasks, files, variables)
-    
-    # ==================== 内部实现 ====================
-    
-    async def _chat_sync(
-        self,
-        message: Any,
-        user_id: str,
-        conversation_id: Optional[str] = None,
-        message_id: Optional[str] = None,
-        background_tasks: Optional[List[str]] = None,
-        files: Optional[List[Dict[str, Any]]] = None,
-        variables: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
-        """
-        同步模式：立即返回 task_id，Agent 在后台运行
+        # ========== 1. 验证 ==========
+        if agent_id:
+            registry = get_agent_registry()
+            if not registry.has_agent(agent_id):
+                available = [a["agent_id"] for a in registry.list_agents()]
+                raise AgentNotFoundError(f"Agent '{agent_id}' 不存在，可用: {available}")
         
-        适用场景：API 集成、不需要实时反馈
-        """
-        try:
-            # 处理文件（如果有）
-            processed_message, files_metadata = await self._process_message_with_files(message, files)
-            normalized_message = normalize_message_format(processed_message)
-            logger.info(f"📨 同步对话请求: user_id={user_id}, files={len(files_metadata) if files_metadata else 0}")
-            
-            # 确保 Conversation 存在
-            is_new_conversation = False
-            if not conversation_id:
-                async with AsyncSessionLocal() as session:
-                    conv = await crud.create_conversation(
-                        session=session,
-                    user_id=user_id,
-                        title="新对话"
-                )
+        # ========== 2. 处理文件 ==========
+        processed_message, files_metadata = await self._process_message_with_files(message, files)
+        normalized_message = normalize_message_format(processed_message)
+        
+        msg_preview = str(message)[:50] if message else ""
+        logger.info(f"📨 对话请求: user={user_id}, agent={agent_id or '默认'}, msg={msg_preview}..., files={len(files_metadata) if files_metadata else 0}")
+        
+        # ========== 3. 创建 Conversation ==========
+        is_new_conversation = False
+        if not conversation_id:
+            async with AsyncSessionLocal() as session:
+                conv = await crud.create_conversation(session=session, user_id=user_id, title="新对话")
                 conversation_id = conv.id
                 is_new_conversation = True
-                logger.info(f"✅ 新对话已创建: id={conversation_id}")
-            
-            # 创建 Session（传入 conversation_service 用于消息持久化）
-            session_id, agent = await self.session_service.create_session(
-                user_id=user_id,
-                message=normalized_message,
-                conversation_id=conversation_id,
-                message_id=message_id,
+                logger.info(f"✅ 新对话: {conversation_id}")
+        
+        # ========== 4. 创建 Session ==========
+        session_id = await self.session_service.create_session(
+            user_id=user_id,
+            message=normalized_message,
+            conversation_id=conversation_id,
+            message_id=message_id,
+        )
+        logger.info(f"✅ Session: {session_id}")
+        
+        # ========== 5. 获取 Agent ==========
+        workspace_dir = str(self.session_service.workspace_manager.get_workspace_root(conversation_id))
+        if agent_id:
+            agent = await get_agent_registry().get_agent(
+                agent_id=agent_id,
+                event_manager=self.session_service.events,
+                workspace_dir=workspace_dir,
                 conversation_service=self.conversation_service
             )
-            
-            # 📍 前端变量处理：直接注入到 Agent 执行的 prompt 中，不需要存储到 Redis
-            # variables 会在 _run_agent() 中传递给 Agent，Agent 会将其注入到 system prompt
-            if variables:
-                logger.info(f"📍 前端变量将注入到 prompt: {list(variables.keys())}")
-            
-            # 启动后台任务
-            asyncio.create_task(
-                self._run_agent(
-                    session_id=session_id,
-                    agent=agent,
-                    message=normalized_message,
-                    user_id=user_id,
-                    conversation_id=conversation_id,
-                    is_new_conversation=is_new_conversation,
-                    background_tasks=background_tasks,
-                    files_metadata=files_metadata,
-                    variables=variables  # 🆕 传递前端变量
-                )
+        else:
+            agent = create_simple_agent(
+                model=self.default_model,
+                workspace_dir=workspace_dir,
+                event_manager=self.session_service.events,
+                conversation_service=self.conversation_service
             )
-            
-            logger.info(f"✅ 后台任务已启动: task_id={session_id}")
-            
+        
+        # ========== 6. 执行 ==========
+        if not stream:
+            # 同步模式：后台运行，立即返回
+            asyncio.create_task(self._run_agent(
+                session_id=session_id,
+                agent=agent,
+                message=normalized_message,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                is_new_conversation=is_new_conversation,
+                background_tasks=background_tasks,
+                files_metadata=files_metadata,
+                variables=variables
+            ))
             return {
                 "task_id": session_id,
                 "conversation_id": conversation_id,
@@ -192,86 +186,32 @@ class ChatService:
                 "status": "running"
             }
         
-        except Exception as e:
-            logger.error(f"❌ 同步对话失败: {str(e)}", exc_info=True)
-            raise AgentExecutionError(f"对话启动失败: {str(e)}") from e
-    
-    async def _chat_stream(
-        self,
-        message: Any,
-        user_id: str,
-        conversation_id: Optional[str] = None,
-        message_id: Optional[str] = None,
-        background_tasks: Optional[List[str]] = None,
-        files: Optional[List[Dict[str, Any]]] = None,
-        variables: Optional[Dict[str, Any]] = None
-    ) -> AsyncGenerator[Dict[str, Any], None]:
-        """
-        流式模式：实时返回事件流
-        
-        适用场景：Web 界面、需要实时反馈
-        """
-        session_id = None
-        try:
-            # 处理文件（如果有）
-            processed_message, files_metadata = await self._process_message_with_files(message, files)
-            normalized_message = normalize_message_format(processed_message)
-            message_preview = str(message)[:50] if message else ""
-            logger.info(f"📨 流式对话请求: user_id={user_id}, message={message_preview}..., files={len(files_metadata) if files_metadata else 0}")
-            
-            # 确保 Conversation 存在
-            is_new_conversation = False
-            if not conversation_id:
-                async with AsyncSessionLocal() as session:
-                    conv = await crud.create_conversation(
-                        session=session,
-                    user_id=user_id,
-                        title="新对话"
-                )
-                conversation_id = conv.id
-                is_new_conversation = True
-                logger.info(f"✅ 新对话已创建: id={conversation_id}")
-            
-            # 创建 Session（传入 conversation_service 用于消息持久化）
-            session_id, agent = await self.session_service.create_session(
-                user_id=user_id,
-                message=normalized_message,
-                conversation_id=conversation_id,
-                message_id=message_id,
-                conversation_service=self.conversation_service
-            )
-            
-            # 📍 前端变量处理：直接注入到 Agent 执行的 prompt 中，不需要存储到 Redis
-            # variables 会在 _run_agent() 中传递给 Agent，Agent 会将其注入到 system prompt
-            if variables:
-                logger.info(f"📍 前端变量将注入到 prompt: {list(variables.keys())}")
-            
-            logger.info(f"🤖 Session 已创建: session_id={session_id}")
-            
-            # 发送初始事件
-            redis = self.session_service.redis
-            events = self.session_service.events
-            
-            await events.session.emit_session_start(
-                session_id=session_id,
-                user_id=user_id,
-                conversation_id=conversation_id
-            )
-            
-            if is_new_conversation:
-                await events.conversation.emit_conversation_start(
+        # 流式模式：返回事件流
+        async def stream_events():
+            try:
+                redis = self.session_service.redis
+                events = self.session_service.events
+                
+                # 发送初始事件
+                await events.session.emit_session_start(
                     session_id=session_id,
-                    conversation={
-                        "id": conversation_id,
-                        "title": "新对话",
-                        "created_at": datetime.now().isoformat(),
-                        "metadata": {}
-                    }
+                    user_id=user_id,
+                    conversation_id=conversation_id
                 )
-            
-            # 启动后台 Agent 任务
-            agent_task = asyncio.create_task(
-                self._run_agent(
+                
+                if is_new_conversation:
+                    await events.conversation.emit_conversation_start(
+                        session_id=session_id,
+                        conversation={
+                            "id": conversation_id,
+                            "title": "新对话",
+                            "created_at": datetime.now().isoformat(),
+                            "metadata": {}
+                        }
+                    )
+                
+                # 启动 Agent 任务
+                agent_task = asyncio.create_task(self._run_agent(
                     session_id=session_id,
                     agent=agent,
                     message=normalized_message,
@@ -280,63 +220,33 @@ class ChatService:
                     is_new_conversation=is_new_conversation,
                     background_tasks=background_tasks,
                     files_metadata=files_metadata,
-                    variables=variables  # 🆕 传递前端变量
-                )
-            )
-            
-            # 🎯 使用 Pub/Sub 订阅实时事件流（更低延迟）
-            try:
-                async for event in redis.subscribe_events(
-                    session_id=session_id,
-                    after_id=0,
-                    timeout=300  # 5分钟超时
-                ):
+                    variables=variables
+                ))
+                
+                # 订阅事件流
+                async for event in redis.subscribe_events(session_id=session_id, after_id=0, timeout=300):
                     yield event
-                    
-                    # 检查 Agent 任务是否异常退出
                     if agent_task.done():
-                        # 注意：不需要 raise，因为 _run_agent 已经处理了错误
-                        # 错误事件已经通过 Pub/Sub 发送给前端了
                         break
                 
-                # 确保 agent_task 完成（或已取消）
                 if not agent_task.done():
                     await agent_task
-            
-            except asyncio.CancelledError:
-                # SSE 连接被取消（用户刷新页面、切换会话等）
-                # 这是正常行为，Agent 应该继续在后台运行
-                logger.info(f"⚠️ SSE 连接取消，Agent 继续在后台运行: session_id={session_id}")
                 
-                # 🛡️ 不要取消 agent_task，让它继续运行
-                # 使用 asyncio.shield 防止任务被取消
-                if not agent_task.done():
-                    # 创建一个后台任务来等待 agent 完成
-                    async def wait_for_agent():
-                        try:
-                            await asyncio.shield(agent_task)
-                            logger.info(f"✅ 后台 Agent 已完成: session_id={session_id}")
-                        except asyncio.CancelledError:
-                            logger.warning(f"⚠️ 后台 Agent 被强制取消: session_id={session_id}")
-                        except Exception as e:
-                            logger.error(f"❌ 后台 Agent 执行失败: {e}")
+                logger.info(f"✅ 流式对话完成: {session_id}")
                     
-                    # 启动后台等待任务（不阻塞当前函数退出）
-                    asyncio.create_task(wait_for_agent())
-                
-                # 正常返回，不抛出异常（SSE 断开是预期行为）
-                return
+            except asyncio.CancelledError:
+                # SSE 断开，Agent 继续后台运行（agent_task 是独立任务，会自动继续）
+                logger.info(f"⚠️ SSE 断开，Agent 后台继续: {session_id}")
             
-            logger.info(f"✅ 流式对话完成: session_id={session_id}")
-        
-        except Exception as e:
-            logger.error(f"❌ 流式对话失败: {str(e)}", exc_info=True)
-            if session_id:
+            except Exception as e:
+                logger.error(f"❌ 流式对话失败: {e}", exc_info=True)
                 try:
                     await self.session_service.end_session(session_id, status="failed")
-                except Exception as ex:
-                    logger.warning(f"⚠️ 结束 Session 失败: {str(ex)}")
-            raise AgentExecutionError(f"流式对话失败: {str(e)}") from e
+                except:
+                    pass
+                raise AgentExecutionError(f"流式对话失败: {e}") from e
+        
+        return stream_events()
     
     async def _run_agent(
         self,
@@ -715,7 +625,7 @@ class ChatService:
     async def _process_message_with_files(
         self,
         message: Any,
-        files: Optional[List[Dict[str, Any]]]
+        files: Optional[List[Any]]
     ) -> tuple[Any, Optional[List[Dict[str, Any]]]]:
         """
         处理文件并合并到消息中
@@ -727,7 +637,7 @@ class ChatService:
         
         Args:
             message: 原始用户消息
-            files: 文件引用列表
+            files: 文件引用列表（FileReference 对象或字典）
             
         Returns:
             tuple: (处理后的消息, 文件元数据列表)
@@ -738,21 +648,34 @@ class ChatService:
             return message, None
         
         try:
+            # 统一转换为字典列表
+            files_data = []
+            for f in files:
+                if hasattr(f, "model_dump"):
+                    files_data.append(f.model_dump())
+                elif isinstance(f, dict):
+                    files_data.append(f)
+                else:
+                    logger.warning(f"⚠️ 未知的文件引用格式: {type(f)}")
+            
+            if not files_data:
+                return message, None
+            
             processor = get_file_processor()
-            processed_files = await processor.process_files(files)
+            processed_files = await processor.process_files(files_data)
             
             if not processed_files:
                 return message, None
             
             logger.info(f"📎 处理了 {len(processed_files)} 个文件")
             
-            # 提取文件元数据（用于保存到数据库）
+            # 提取文件元数据（用于保存到数据库，字段名统一为 API 格式）
             files_metadata = []
             for pf in processed_files:
                 files_metadata.append({
                     "file_id": pf.file_id,
-                    "filename": pf.filename,
-                    "mime_type": pf.mime_type,
+                    "file_name": pf.filename,
+                    "file_type": pf.mime_type,
                     "file_size": pf.file_size,
                     "category": pf.category.value if pf.category else None
                 })

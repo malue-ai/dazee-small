@@ -11,38 +11,28 @@ SANDBOX_FILE_PROTOCOL = """
 
 ### 可用工具
 
-1. **sandbox_list_dir** - 列出目录内容
-   - 用途：查看沙盒中指定目录下的文件和文件夹
-   - 参数：conversation_id, path（默认 /home/user）
-   
-2. **sandbox_read_file** - 读取文件内容
-   - 用途：读取沙盒中文件的文本内容
-   - 参数：conversation_id, path（完整路径）
-   
-3. **sandbox_write_file** - 写入文件
+1. **sandbox_write_file** - 写入文件
    - 用途：创建或更新沙盒中的文件
    - 参数：conversation_id, path, content
    - 注意：目录会自动创建
    
-4. **sandbox_delete_file** - 删除文件
-   - 用途：删除沙盒中的文件或目录
-   - 参数：conversation_id, path
-   - 警告：删除操作不可恢复
-   
-5. **sandbox_run_command** - 执行命令
+2. **sandbox_run_command** - 执行命令
    - 用途：在沙盒中执行 shell 命令
    - 参数：conversation_id, command, timeout
    - 常用命令：
      * `pip install <package>` - 安装 Python 包
      * `npm install` - 安装 Node.js 依赖
-     * `ls -la` - 列出目录详情
+     * `ls -la <path>` - 列出目录详情
+     * `cat <file>` - 读取文件内容
+     * `rm -rf <path>` - 删除文件/目录（谨慎）
+     * `test -e <path>` - 检查文件/目录是否存在
      
-6. **sandbox_create_project** - 创建项目
+3. **sandbox_create_project** - 创建项目
    - 用途：快速创建指定类型的项目框架
    - 参数：conversation_id, project_name, stack
-   - 支持的技术栈：streamlit, gradio, flask, fastapi, python
+   - 支持的技术栈：streamlit, gradio, flask, fastapi, python, vue, react, nextjs, nodejs
 
-7. **sandbox_run_project** - 运行项目
+4. **sandbox_run_project** - 运行项目
    - 用途：启动沙盒中的项目，获取预览 URL
    - 参数：conversation_id, project_path, stack
    - 返回：preview_url（E2B 公网可访问地址）
@@ -50,6 +40,7 @@ SANDBOX_FILE_PROTOCOL = """
      * streamlit/gradio/flask: 入口文件为 `app.py`
      * fastapi: 入口文件为 `main.py`（需要 `main:app`）
      * nodejs/react/vue: 需要 `package.json`
+     * nextjs: 需要 `package.json`（next/react/react-dom）
 
 ### 路径规范
 
@@ -73,7 +64,7 @@ SANDBOX_FILE_PROTOCOL = """
 #### 修改现有文件
 
 ```
-1. 调用 sandbox_read_file 读取当前内容
+1. 使用 sandbox_run_command + cat 读取当前内容
 2. 修改内容
 3. 调用 sandbox_write_file 保存修改
 4. 如果项目已运行，Streamlit/Gradio 会自动热重载
@@ -182,13 +173,42 @@ def build_sandbox_context(conversation_id: str, user_id: str = None) -> str:
 - ✅ 项目目录: `/home/user/<project_name>/`
 - ❌ **禁止使用**: `/tmp`、`/var`、`./` 等本地路径
 
+## 🚨 最重要的规则（必须遵守！）
+
+### 启动 Web 项目时，必须使用 `sandbox_run_project` 工具！
+
+**绝对禁止使用以下方式启动项目：**
+- ❌ `streamlit run app.py` 
+- ❌ `python app.py`
+- ❌ `flask run` / `uvicorn main:app`
+- ❌ `nohup ... &`
+- ❌ `npm start` / `npm run dev`
+
+**原因：bash 启动无法获取 E2B 公网 URL，用户无法访问！**
+
+**正确做法：**
+```json
+{{
+    "name": "sandbox_run_project",
+    "input": {{
+        "conversation_id": "{conversation_id}",
+        "project_path": "/home/user/my_app",
+        "stack": "streamlit"
+    }}
+}}
+```
+
+返回的 `preview_url`（如 `https://8501-xxx.e2b.app`）才是用户能访问的地址！
+
+---
+
 ## 🛠️ 工具说明
 
 ### Claude 原生工具（自动路由到沙盒）
 
 | 工具 | 说明 |
 |------|------|
-| `bash` | 在沙盒中执行 shell 命令 |
+| `bash` | 在沙盒中执行 shell 命令（**不能用于启动 Web 服务**） |
 | `str_replace_based_edit_tool` | 在沙盒中创建/编辑文件 |
 
 ### 沙盒专用工具
@@ -197,8 +217,8 @@ def build_sandbox_context(conversation_id: str, user_id: str = None) -> str:
 |------|------|
 | `sandbox_write_file` | 创建/更新沙盒文件 |
 | `sandbox_read_file` | 读取沙盒文件 |
-| `sandbox_run_command` | 执行命令（安装依赖等） |
-| `sandbox_run_project` | 🚀 启动项目，返回 preview_url |
+| `sandbox_run_command` | 执行命令（查看文件、检查状态等） |
+| `sandbox_run_project` | 🚀 **启动项目的唯一方式**，返回 preview_url |
 
 ## 📁 路径规范
 
@@ -214,11 +234,11 @@ def build_sandbox_context(conversation_id: str, user_id: str = None) -> str:
 
 ## 正确示例
 
-### 使用 bash 工具
+### 使用 bash 工具（仅用于查看/检查，不能启动服务）
 
 ```json
 {{
-    "command": "cd /home/user/my_app && pip install -r requirements.txt"
+    "command": "ls -la /home/user/my_app"
 }}
 ```
 
@@ -294,15 +314,17 @@ def build_sandbox_context(conversation_id: str, user_id: str = None) -> str:
 
 ## 📦 依赖管理
 
-**沙盒环境已预装数据分析包**（pandas, numpy, matplotlib）。
+**沙盒已预装**：pandas, numpy, matplotlib
 
-**Web 框架需要安装**（streamlit, flask, fastapi 等）。
+**需要安装**：streamlit, flask, fastapi 等 Web 框架
 
-### ✅ 正确做法
+### ✅ 正确做法：让 sandbox_run_project 处理
 
-1. **创建代码文件**
-2. **调用 `sandbox_run_project`** - 它会自动检查并安装依赖
-3. **不要手动执行 `pip install`** - 让 `sandbox_run_project` 处理
+1. 创建代码文件（app.py）
+2. 创建 requirements.txt
+3. **直接调用 `sandbox_run_project`** - 它会自动安装依赖并启动
+
+**不要手动执行 `pip install`！**
 
 ## 🚀 启动项目规则
 

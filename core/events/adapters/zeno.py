@@ -215,6 +215,7 @@ class ZenOAdapter(EventAdapter):
         - plan → progress
         - recommended → recommended
         - confirmation_request → clue
+        - 问数平台类型（sql/data/chart/report/intent/application）→ 直接透传
         """
         data = event.get("data", {})
         delta = data.get("delta", {})
@@ -238,6 +239,15 @@ class ZenOAdapter(EventAdapter):
             zeno_delta_type = "clue"
             # 转换 HITL 请求为 clue 格式
             zeno_content = self._convert_hitl_to_clue(content)
+        
+        # 🆕 问数平台智能分析场景：直接透传 delta 类型
+        elif delta_type in (
+            "sql", "data", "chart", "report",  # 智能分析三件套 + 报告
+            "intent", "application",            # 意图和应用状态
+            "preface", "files", "mind", "clue"  # 其他通用类型
+        ):
+            zeno_delta_type = delta_type
+            # 格式已符合规范，直接透传
         
         if not zeno_delta_type:
             return None

@@ -133,9 +133,9 @@ class FileService:
         
         return {
             "file_id": file_record.id,
-            "filename": file_record.filename,
+            "file_name": file_record.filename,
             "file_size": file_record.file_size,
-            "mime_type": file_record.mime_type,
+            "file_type": file_record.mime_type,
             "created_at": file_record.created_at.isoformat() if file_record.created_at else None,
         }
     
@@ -156,8 +156,8 @@ class FileService:
             
             return {
                 "file_id": file_id,
-                "filename": file_record.filename,
-                "url": url
+                "file_name": file_record.filename,
+                "file_url": url
             }
     
     async def delete_file(self, file_id: str) -> Dict[str, Any]:
@@ -177,7 +177,7 @@ class FileService:
             # 删除数据库记录
             await crud.delete_file(session, file_id)
         
-        return {"file_id": file_id}
+        return {"file_id": file_id, "success": True}
     
     # ==================== 文件上传 ====================
     
@@ -198,7 +198,7 @@ class FileService:
             user_id: 用户 ID
             
         Returns:
-            { "file_id", "filename", "file_size", "mime_type", "created_at" }
+            { "file_id", "file_name", "file_size", "file_type", "file_url", "created_at" }
         """
         import uuid
         from datetime import datetime
@@ -236,11 +236,18 @@ class FileService:
             
             logger.info(f"✅ 上传: {file_record.id}, {filename}, {file_size}B, {detected_mime}")
             
+            # 生成访问 URL
+            file_url = self.s3_uploader.get_presigned_url(
+                s3_key=storage_path,
+                expires_in=3600
+            )
+            
             return {
                 "file_id": file_record.id,
-                "filename": filename,
+                "file_name": filename,
                 "file_size": file_size,
-                "mime_type": detected_mime,
+                "file_type": detected_mime,
+                "file_url": file_url,
                 "created_at": datetime.now().isoformat()
             }
         

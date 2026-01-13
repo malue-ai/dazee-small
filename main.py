@@ -20,6 +20,8 @@ from routers import chat_router, knowledge_router, files_router, tools_router, m
 from routers.human_confirmation import router as human_confirmation_router
 from routers.conversation import router as conversation_router
 from routers.workspace import router as workspace_router
+from routers.agents import router as agents_router
+from routers.skills import router as skills_router
 
 
 # ============================================================
@@ -40,6 +42,23 @@ async def lifespan(app: FastAPI):
     from infra.database import init_database, engine
     await init_database()
     print("✅ 数据库初始化完成")
+    
+    # 🆕 预加载所有 Agent 实例
+    print("🤖 预加载 Agent 实例...")
+    from services.agent_registry import get_agent_registry
+    agent_registry = get_agent_registry()
+    try:
+        loaded_count = await agent_registry.preload_all()
+        if loaded_count > 0:
+            print(f"✅ 已预加载 {loaded_count} 个 Agent 实例")
+            # 显示可用的 Agent 列表
+            agents = agent_registry.list_agents()
+            for agent in agents:
+                print(f"   • {agent['agent_id']}: {agent['description'] or '(无描述)'}")
+        else:
+            print("○ 没有发现 Agent 实例（instances/ 目录为空）")
+    except Exception as e:
+        print(f"⚠️ Agent 预加载失败: {e}")
     
     # 启动 gRPC 服务器（如果启用）
     grpc_server = None
@@ -98,7 +117,14 @@ async def lifespan(app: FastAPI):
     # 关闭时 - 清理所有资源
     print("🛑 正在关闭服务...")
     
-    # 0. 关闭定时任务调度器
+    # 0. 清理 Agent Registry
+    try:
+        await agent_registry.cleanup()
+        print("✅ Agent Registry 已清理")
+    except Exception as e:
+        print(f"⚠️ 清理 Agent Registry 失败: {e}")
+    
+    # 0.1 关闭定时任务调度器
     if task_scheduler and task_scheduler.is_running():
         try:
             await task_scheduler.shutdown()
@@ -190,6 +216,8 @@ app.include_router(workspace_router)
 app.include_router(tools_router)
 app.include_router(mem0_router)  # 🆕 V4.4: Mem0 用户画像 API
 app.include_router(tasks_router)  # 🆕 后台任务管理 API
+app.include_router(agents_router)  # 🆕 Agent 管理 API
+app.include_router(skills_router)  # 🆕 Skills 管理 API
 
 
 # ============================================================
@@ -226,7 +254,9 @@ async def root():
             "stream": "/api/v1/chat/stream",
             "session": "/api/v1/session/{session_id}",
             "sessions": "/api/v1/sessions",
-            "human_confirmation": "/api/v1/human-confirmation/{request_id}"
+            "human_confirmation": "/api/v1/human-confirmation/{request_id}",
+            "agents": "/api/v1/agents",
+            "skills": "/api/v1/skills"
         },
         "github": "https://github.com/your-repo/zenflux-agent"
     }

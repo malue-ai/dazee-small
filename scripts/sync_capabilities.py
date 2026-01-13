@@ -50,12 +50,11 @@ TOOL_CATEGORIES = {
     },
     "sandbox_tools": {
         "tools": [
-            "sandbox_list_dir", "sandbox_read_file", "sandbox_write_file",
-            "sandbox_delete_file", "sandbox_file_exists", "sandbox_run_command",
-            "sandbox_run_code", "sandbox_create_project", "sandbox_run_project",
+            "sandbox_write_file", "sandbox_run_command",
+            "sandbox_create_project", "sandbox_run_project",
         ],
-        "description": "代码沙盒工具包 (E2B)",
-        "comment": "包含：文件操作、代码执行、项目运行等全部沙盒工具",
+        "description": "代码沙盒核心工具 (E2B)",
+        "comment": "4 个核心：写文件、执行命令、创建项目、运行项目",
     },
     "ppt_tools": {
         "tools": ["ppt_generator", "slidespeak_render"],

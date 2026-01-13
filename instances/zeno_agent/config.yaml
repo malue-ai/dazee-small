@@ -1,0 +1,80 @@
+# ============================================================
+# ZenO 数据问答助手配置
+# ============================================================
+
+# ==================== 基础信息 ====================
+
+instance:
+  name: "zeno_agent"
+  description: "ZenO 数据问答智能助手，通过自然语言查询数据"
+  version: "1.0.0"
+
+
+# ==================== Agent 配置 ====================
+
+agent:
+  # LLM 配置
+  llm:
+    # 使用较低温度保证回答准确性
+    temperature: 0.3
+    max_tokens: 8192
+
+
+# ==================== REST APIs 配置 ====================
+#
+# ZenO V3 问答接口
+#
+apis:
+  - name: zeno_v3_ask
+    base_url: "http://183.6.79.71:40202"
+    auth:
+      type: api_key
+      header: API-KEY
+      env: ZENO_API_KEY
+    doc: zeno-v3
+    capability: "api_calling"
+    description: "ZenO V3 数据问答接口，支持自然语言查询和数据分析"
+
+
+# ==================== 记忆配置 ====================
+
+memory:
+  # 启用用户记忆，记住查询上下文
+  mem0_enabled: true
+  smart_retrieval: true
+
+
+# ==================== 工具能力配置 ====================
+#
+# ZenO 问答助手主要使用 api_calling，其他能力按需开启
+#
+enabled_capabilities:
+  # --- 信息获取类 ---
+  web_search: 0              # 不需要网络搜索
+  exa_search: 0              # 不需要语义搜索
+  knowledge_search: 0        # 不需要知识库
+
+  # --- 文档生成类 ---
+  document_skills: 0         # 不需要文档生成
+
+  # --- PPT 生成类 ---
+  ppt_generator: 0           # 不需要 PPT
+
+  # --- 代码沙盒类 ---
+  sandbox_tools: 0           # 不需要代码沙盒
+
+  # --- 动态代码执行 ---
+  code_execution: 0          # 不需要代码执行
+
+
+# ==================== 高级配置 ====================
+
+advanced:
+  intent_analyzer:
+    enabled: true
+    use_llm: true
+  
+  output_formatter:
+    default_format: "markdown"
+    code_highlighting: true
+

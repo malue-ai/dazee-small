@@ -712,14 +712,29 @@ class SimpleAgent:
                             logger.warning(f"⚠️ 最后一轮（Turn {turn + 1}）收到工具调用，强制生成文本回复...")
                             # 添加当前响应作为 assistant 消息
                             llm_messages.append(Message(role="assistant", content=response.raw_content))
-                            # 添加系统提示，告诉 LLM 不能再调用工具了
-                            llm_messages.append(Message(
-                                role="user", 
-                                content=[{
-                                    "type": "text",
-                                    "text": "⚠️ 系统提示：已达到最大执行轮次，无法继续执行工具。请直接给用户一个文字回复，总结当前进度和已完成的工作。"
-                                }]
-                            ))
+                            
+                            # 🔧 修复：必须为每个 tool_use 提供 tool_result，否则 Claude API 会报错
+                            # Claude API 要求：每个 tool_use 后面必须紧跟包含对应 tool_result 的 user 消息
+                            tool_results_for_last_turn = []
+                            for tc in response.tool_calls:
+                                if tc.get("type") == "tool_use":
+                                    tool_results_for_last_turn.append({
+                                        "type": "tool_result",
+                                        "tool_use_id": tc.get("id"),
+                                        "content": json.dumps({
+                                            "error": "已达到最大执行轮次，工具未执行",
+                                            "status": "skipped"
+                                        }, ensure_ascii=False),
+                                        "is_error": True
+                                    })
+                            
+                            # 添加 tool_result + 系统提示
+                            user_content = tool_results_for_last_turn + [{
+                                "type": "text",
+                                "text": "⚠️ 系统提示：已达到最大执行轮次，无法继续执行工具。请直接给用户一个文字回复，总结当前进度和已完成的工作。"
+                            }]
+                            llm_messages.append(Message(role="user", content=user_content))
+                            
                             # 再调用一次 LLM，不传递 tools 参数，强制生成文本
                             async for event in self._process_stream(
                                 llm_messages, system_prompt, [], ctx, session_id  # 空 tools 列表
@@ -807,13 +822,29 @@ class SimpleAgent:
                 if is_last_turn:
                     logger.warning(f"⚠️ 最后一轮（Turn {turn + 1}）收到工具调用，强制生成文本回复...")
                     llm_messages.append(Message(role="assistant", content=response.raw_content))
-                    llm_messages.append(Message(
-                        role="user", 
-                        content=[{
-                            "type": "text",
-                            "text": "⚠️ 系统提示：已达到最大执行轮次，无法继续执行工具。请直接给用户一个文字回复，总结当前进度和已完成的工作。"
-                        }]
-                    ))
+                    
+                    # 🔧 修复：必须为每个 tool_use 提供 tool_result，否则 Claude API 会报错
+                    # Claude API 要求：每个 tool_use 后面必须紧跟包含对应 tool_result 的 user 消息
+                    tool_results_for_last_turn = []
+                    for tc in response.tool_calls:
+                        if tc.get("type") == "tool_use":
+                            tool_results_for_last_turn.append({
+                                "type": "tool_result",
+                                "tool_use_id": tc.get("id"),
+                                "content": json.dumps({
+                                    "error": "已达到最大执行轮次，工具未执行",
+                                    "status": "skipped"
+                                }, ensure_ascii=False),
+                                "is_error": True
+                            })
+                    
+                    # 添加 tool_result + 系统提示
+                    user_content = tool_results_for_last_turn + [{
+                        "type": "text",
+                        "text": "⚠️ 系统提示：已达到最大执行轮次，无法继续执行工具。请直接给用户一个文字回复，总结当前进度和已完成的工作。"
+                    }]
+                    llm_messages.append(Message(role="user", content=user_content))
+                    
                     # 再调用一次 LLM，不传递 tools 参数
                     final_response = await self.llm.create_message_async(
                         messages=llm_messages,
@@ -896,6 +927,10 @@ class SimpleAgent:
         complexity_str = getattr(intent, 'complexity', 'medium')
         if complexity_str is None:
             complexity_str = 'medium'
+        
+        # 如果是枚举类型，获取其值
+        if hasattr(complexity_str, 'value'):
+            complexity_str = complexity_str.value
         
         # 映射到 TaskComplexity 枚举
         complexity_map = {
@@ -1316,12 +1351,60 @@ class SimpleAgent:
                     conv_id = session_context.get("conversation_id") or getattr(self, '_current_conversation_id', None) or session_id
                     tool_input.setdefault("conversation_id", conv_id)
                     
+                    # 🆕 检测是否支持流式执行
+                    if self.tool_executor.supports_stream(tool_name):
+                        # ===== 流式执行模式 =====
+                        logger.info(f"🌊 流式执行工具: {tool_name}")
+                        
+                        # 先发 content_start (content 为空，后续通过 delta 流式发送)
+                        tool_result_index = ctx.block.start_new_block("tool_result")
+                        tool_result_block = {
+                            "type": "tool_result",
+                            "tool_use_id": tool_id,
+                            "content": "",  # 流式模式：初始为空
+                            "is_error": False
+                        }
+                        
+                        yield await self.broadcaster.emit_content_start(
+                            session_id=session_id,
+                            index=tool_result_index,
+                            content_block=tool_result_block
+                        )
+                        
+                        # 流式执行工具，每个 chunk 发 content_delta
+                        accumulated_result = ""
+                        async for chunk in self.tool_executor.execute_stream(tool_name, tool_input):
+                            accumulated_result += chunk
+                            yield await self.broadcaster.emit_content_delta(
+                                session_id=session_id,
+                                index=tool_result_index,
+                                delta=chunk
+                            )
+                        
+                        # 发 content_stop
+                        yield await self.broadcaster.emit_content_stop(
+                            session_id=session_id,
+                            index=tool_result_index
+                        )
+                        ctx.block.close_current_block()
+                        
+                        # 尝试解析累积结果用于 PromptManager
+                        try:
+                            result = json.loads(accumulated_result)
+                        except json.JSONDecodeError:
+                            result = {"raw_text": accumulated_result}
+                        
+                        # 工具执行后触发 PromptManager 追加
+                        get_prompt_manager().on_tool_result(ctx, tool_name=tool_name, result=result)
+                        continue  # 流式模式已处理完，跳过下面的非流式逻辑
+                    
+                    # ===== 非流式执行模式（原有逻辑） =====
                     result = await self.tool_executor.execute(tool_name, tool_input)
                     
                     # 工具执行后触发 PromptManager 追加
                     get_prompt_manager().on_tool_result(ctx, tool_name=tool_name, result=result)
                 
-                # 发送 tool_result content block
+                # 发送 tool_result content block（非流式模式）
                 tool_result_index = ctx.block.start_new_block("tool_result")
                 result_content = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
                 

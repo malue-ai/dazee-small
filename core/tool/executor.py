@@ -22,7 +22,8 @@ import asyncio
 import inspect
 import logging
 from importlib import import_module
-from typing import Dict, Any, Optional, List, Callable
+from typing import Dict, Any, Optional, List, Callable, AsyncGenerator
+import json
 
 # 🆕 从 capability 子包导入
 from core.tool.capability import (
@@ -277,6 +278,63 @@ class ToolExecutor:
             return self._maybe_compact(tool_name, result, skip_compaction)
         except Exception as e:
             return {"success": False, "error": str(e)}
+    
+    def supports_stream(self, tool_name: str) -> bool:
+        """
+        检查工具是否支持流式执行
+        
+        Args:
+            tool_name: 工具名称
+            
+        Returns:
+            是否支持流式执行
+        """
+        tool_instance = self._tool_instances.get(tool_name)
+        if not tool_instance:
+            return False
+        
+        # 检查工具是否实现了 execute_stream 方法
+        return hasattr(tool_instance, 'execute_stream') and callable(getattr(tool_instance, 'execute_stream'))
+    
+    async def execute_stream(
+        self,
+        tool_name: str,
+        tool_input: Dict[str, Any]
+    ) -> AsyncGenerator[str, None]:
+        """
+        流式执行工具
+        
+        如果工具支持 execute_stream()，则流式返回结果。
+        否则回退到普通执行，一次性返回完整结果。
+        
+        Args:
+            tool_name: 工具名称
+            tool_input: 工具输入参数
+            
+        Yields:
+            字符串片段（工具结果的增量内容）
+        """
+        tool_instance = self._tool_instances.get(tool_name)
+        
+        # 如果工具支持流式执行
+        if tool_instance and hasattr(tool_instance, 'execute_stream'):
+            execute_stream_method = getattr(tool_instance, 'execute_stream')
+            # 检测是否为 async generator 函数或协程函数
+            if inspect.isasyncgenfunction(execute_stream_method) or asyncio.iscoroutinefunction(execute_stream_method):
+                try:
+                    # 流式执行（与 _execute_tool_instance 保持一致，直接传入 tool_input）
+                    async for chunk in execute_stream_method(**tool_input):
+                        yield chunk
+                    return
+                except Exception as e:
+                    logger.error(f"流式执行工具 {tool_name} 失败: {e}", exc_info=True)
+                    yield json.dumps({"error": str(e)})
+                    return
+        
+        # 回退到非流式执行
+        logger.debug(f"工具 {tool_name} 不支持流式，回退到非流式执行")
+        result = await self.execute(tool_name, tool_input, skip_compaction=True)
+        yield json.dumps(result, ensure_ascii=False)
     
     def _maybe_compact(
         self,

@@ -148,23 +148,32 @@ async def validate_simple_query():
     
     from services.session_service import SessionService
     from services.conversation_service import ConversationService
+    from core.agent import create_simple_agent
     
     session_service = SessionService()
     conversation_service = ConversationService()
     
     # 创建对话
     user_id = "test_user_001"
-    conversation_id = await conversation_service.create_conversation(
+    conversation = await conversation_service.create_conversation(
         user_id=user_id,
         title="天气查询测试"
     )
+    conversation_id = conversation.id  # 取 ID 字符串
     
-    # 创建 Session 和 Agent
+    # 创建 Session（只返回 session_id）
     message = [{"type": "text", "text": user_query}]
-    session_id, agent = await session_service.create_session(
+    session_id = await session_service.create_session(
         user_id=user_id,
         message=message,
         conversation_id=conversation_id,
+    )
+    
+    # 创建 Agent（ChatService 负责，这里测试直接创建）
+    agent = create_simple_agent(
+        model="claude-sonnet-4-5-20250929",
+        workspace_dir=str(session_service.workspace_manager.get_workspace_root(conversation_id)),
+        event_manager=session_service.events,
         conversation_service=conversation_service
     )
     
@@ -412,23 +421,32 @@ async def validate_complex_query():
     
     from services.session_service import SessionService
     from services.conversation_service import ConversationService
+    from core.agent import create_simple_agent
     
     session_service = SessionService()
     conversation_service = ConversationService()
     
     # 创建对话
     user_id = "test_user_complex"
-    conversation_id = await conversation_service.create_conversation(
+    conversation = await conversation_service.create_conversation(
         user_id=user_id,
         title="简单问答测试"
     )
+    conversation_id = conversation.id  # 取 ID 字符串
     
-    # 创建 Session 和 Agent
+    # 创建 Session（只返回 session_id）
     message = [{"type": "text", "text": user_query}]
-    session_id, agent = await session_service.create_session(
+    session_id = await session_service.create_session(
         user_id=user_id,
         message=message,
         conversation_id=conversation_id,
+    )
+    
+    # 创建 Agent（ChatService 负责，这里测试直接创建）
+    agent = create_simple_agent(
+        model="claude-sonnet-4-5-20250929",
+        workspace_dir=str(session_service.workspace_manager.get_workspace_root(conversation_id)),
+        event_manager=session_service.events,
         conversation_service=conversation_service
     )
     

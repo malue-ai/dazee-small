@@ -49,7 +49,6 @@ from .factory import (
 from .factory import (
     sandbox_ensure,
     sandbox_run_command,
-    sandbox_run_code,
     sandbox_read_file,
     sandbox_write_file,
     sandbox_delete_file,
@@ -90,7 +89,6 @@ __all__ = [
     # 快捷函数
     "sandbox_ensure",
     "sandbox_run_command",
-    "sandbox_run_code",
     "sandbox_read_file",
     "sandbox_write_file",
     "sandbox_delete_file",

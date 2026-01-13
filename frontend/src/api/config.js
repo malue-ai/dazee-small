@@ -106,6 +106,43 @@ export const WORKSPACE_API = {
   SANDBOX_COMMAND: (conversationId) => `/v1/workspace/${conversationId}/sandbox/command`,
 }
 
+// Agent API
+export const AGENT_API = {
+  // 列表
+  LIST: `${API_BASE_PATH}/agents`,
+  // 详情
+  DETAIL: (agentId) => `${API_BASE_PATH}/agents/${agentId}`,
+  // 创建
+  CREATE: `${API_BASE_PATH}/agents`,
+  // 更新
+  UPDATE: (agentId) => `${API_BASE_PATH}/agents/${agentId}`,
+  // 删除
+  DELETE: (agentId) => `${API_BASE_PATH}/agents/${agentId}`,
+  // 重载
+  RELOAD: (agentId) => `${API_BASE_PATH}/agents/${agentId}/reload`,
+  
+  // MCP 关联
+  MCP: {
+    LIST: (agentId) => `${API_BASE_PATH}/agents/${agentId}/mcp`,
+    AVAILABLE: (agentId) => `${API_BASE_PATH}/agents/${agentId}/mcp/available`,
+    ENABLE: (agentId, serverName) => `${API_BASE_PATH}/agents/${agentId}/mcp/${serverName}`,
+    UPDATE: (agentId, serverName) => `${API_BASE_PATH}/agents/${agentId}/mcp/${serverName}`,
+    DISABLE: (agentId, serverName) => `${API_BASE_PATH}/agents/${agentId}/mcp/${serverName}`,
+  }
+}
+
+// MCP API (Global)
+export const MCP_API = {
+  // 列表
+  LIST: `${API_BASE_PATH}/tools/mcp`,
+  // 详情
+  DETAIL: (serverName) => `${API_BASE_PATH}/tools/mcp/${serverName}`,
+  // 注册
+  REGISTER: `${API_BASE_PATH}/tools/mcp/register`,
+  // 删除
+  DELETE: (serverName) => `${API_BASE_PATH}/tools/mcp/${serverName}`,
+}
+
 export default {
   CHAT_API,
   SESSION_API,
@@ -113,5 +150,7 @@ export default {
   KNOWLEDGE_API,
   FILES_API,
   WORKSPACE_API,
+  AGENT_API,
+  MCP_API,
 }
 

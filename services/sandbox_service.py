@@ -253,16 +253,47 @@ class SandboxService:
         abs_path = self._normalize_path(path)
         
         try:
-            # 使用快速方法（单次 shell 命令）
-            return await self.provider.list_dir_tree_fast(
-                conversation_id, abs_path, max_depth
-            )
+            # 使用 find 命令快速获取目录树
+            cmd = f"find {abs_path} -maxdepth {max_depth} -printf '%y|%p\\n' 2>/dev/null || true"
+            result = await self.provider.run_command(conversation_id, cmd, timeout=30)
+            
+            if not result.success or not result.output:
+                return await self._list_files_tree_fallback(conversation_id, abs_path, max_depth)
+            
+            # 解析 find 输出，构建树结构
+            lines = result.output.strip().split('\n')
+            path_map: dict[str, FileInfo] = {}
+            root_files: List[FileInfo] = []
+            
+            for line in lines:
+                if '|' not in line:
+                    continue
+                file_type, file_path = line.split('|', 1)
+                if file_path == abs_path:
+                    continue
+                
+                name = file_path.split('/')[-1]
+                is_dir = file_type == 'd'
+                
+                info = FileInfo(
+                    name=name,
+                    path=file_path,
+                    type="directory" if is_dir else "file",
+                    size=None,
+                    children=[] if is_dir else None
+                )
+                path_map[file_path] = info
+                
+                parent_path = '/'.join(file_path.split('/')[:-1])
+                if parent_path == abs_path:
+                    root_files.append(info)
+                elif parent_path in path_map and path_map[parent_path].children is not None:
+                    path_map[parent_path].children.append(info)
+            
+            return root_files
         except Exception as e:
             logger.warning(f"⚠️ 快速目录树获取失败，降级到普通方法: {e}")
-            # 降级到普通方法
-            return await self._list_files_tree_fallback(
-                conversation_id, abs_path, max_depth
-            )
+            return await self._list_files_tree_fallback(conversation_id, abs_path, max_depth)
     
     async def _list_files_tree_fallback(
         self,

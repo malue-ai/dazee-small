@@ -39,17 +39,12 @@ TOOL_CATEGORIES = {
         "pdf",
     ],
     
-    # 代码沙盒类（E2B 沙盒工具）
+    # 代码沙盒类（E2B 沙盒工具 - 4 个核心）
     "sandbox_tools": [
-        "sandbox_list_dir",
-        "sandbox_read_file",
-        "sandbox_write_file",
-        "sandbox_delete_file",
-        "sandbox_file_exists",
-        "sandbox_run_command",
-        "sandbox_run_code",
-        "sandbox_create_project",
-        "sandbox_run_project",
+        "sandbox_write_file",       # 写文件
+        "sandbox_run_command",      # 执行命令（读/列/删 用 bash）
+        "sandbox_create_project",   # 初始化项目
+        "sandbox_run_project",      # 运行项目（返回预览 URL）
     ],
     
     # PPT 生成类（可选扩展）
@@ -65,6 +60,11 @@ CORE_TOOLS = [
     "api_calling",                  # API 调用
     "request_human_confirmation",   # 人工确认
     "file_read",                    # 文件读取
+    # 沙盒工具（Vibe Coding 核心 - 4 个）
+    "sandbox_write_file",           # 写文件
+    "sandbox_run_command",          # 执行命令
+    "sandbox_create_project",       # 初始化项目
+    "sandbox_run_project",          # 运行项目
 ]
 
 

@@ -156,6 +156,7 @@ async def main():
     parser.add_argument("--skip-mcp", action="store_true", help="跳过 MCP 工具注册")
     parser.add_argument("--skip-skills", action="store_true", help="跳过 Claude Skills 注册")
     parser.add_argument("--single", "-s", type=str, help="单次执行（非交互模式）")
+    parser.add_argument("--files", "-f", type=str, nargs="+", help="附加文件 URL（格式: name:url）")
     
     args = parser.parse_args()
     
@@ -220,9 +221,30 @@ async def main():
     # 单次执行模式
     if args.single:
         print(f"\n👤 输入: {args.single}")
+        
+        # 构建消息内容
+        content = args.single
+        
+        # 处理文件参数 - 把文件信息追加到消息内容中
+        if args.files:
+            file_info_lines = ["\n\n---\n**用户上传的文件：**"]
+            for f in args.files:
+                if ":" in f:
+                    name, url = f.split(":", 1)
+                else:
+                    name = f.split("/")[-1]
+                    url = f
+                file_info_lines.append(f"- 文件名: {name}")
+                file_info_lines.append(f"  URL: {url}")
+                print(f"📎 附件: {name}")
+            
+            content += "\n".join(file_info_lines)
+        
+        user_message = {"role": "user", "content": content}
+        
         print("\n🤖 输出: ", end="", flush=True)
         
-        messages = [{"role": "user", "content": args.single}]
+        messages = [user_message]
         
         try:
             async for event in agent.chat(messages=messages):

@@ -18,9 +18,14 @@
           <button @click="createNewConversation" class="new-chat-btn">
             <span class="icon">＋</span> 新建对话
           </button>
-          <button @click="$router.push('/knowledge')" class="nav-btn">
-            <span class="icon">📚</span> 知识库
-          </button>
+          <div class="nav-buttons">
+            <button @click="$router.push('/knowledge')" class="nav-btn">
+              <span class="icon">📚</span> 知识库
+            </button>
+            <button @click="$router.push('/agents')" class="nav-btn">
+              <span class="icon">🤖</span> 智能体
+            </button>
+          </div>
         </div>
 
         <!-- 对话列表 -->
@@ -1428,6 +1433,13 @@ function formatShortTime(dateStr) {
   overflow-y: auto;
 }
 
+.action-buttons {
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .new-chat-btn {
   width: 100%;
   padding: 10px;
@@ -1442,7 +1454,6 @@ function formatShortTime(dateStr) {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  margin-bottom: 12px;
   box-shadow: 0 1px 2px rgba(0,0,0,0.05);
   transition: all 0.2s;
 }
@@ -1452,23 +1463,31 @@ function formatShortTime(dateStr) {
   border-color: #d1d5db;
 }
 
+.nav-buttons {
+  display: flex;
+  gap: 8px;
+}
+
 .nav-btn {
-  width: 100%;
-  padding: 8px 12px;
+  flex: 1;
+  padding: 8px;
   background: transparent;
   color: #4b5563;
-  border: none;
+  border: 1px solid transparent;
   border-radius: 6px;
-  text-align: left;
+  text-align: center;
   cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 14px;
+  justify-content: center;
+  gap: 4px;
+  font-size: 13px;
+  transition: all 0.2s;
 }
 
 .nav-btn:hover {
   background: #e5e7eb;
+  color: #111827;
 }
 
 .section-header {

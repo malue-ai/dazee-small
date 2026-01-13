@@ -72,6 +72,16 @@ TOOL_TO_DELTA_TYPE: Dict[str, str] = {
     # "e2b_python_sandbox": "code",
 }
 
+# 问数平台工具 → 多个 Delta 类型映射
+# 返回结果的字段名直接映射为 delta.type
+WENSHU_ANALYTICS_DELTA_FIELDS = {
+    "sql": "sql",          # SQL 查询语句
+    "data": "data",        # 查询结果数据
+    "chart": "chart",      # 图表配置
+    "report": "report",    # 分析报告
+    "intent": "intent",    # 意图识别（可选）
+}
+
 
 class EventBroadcaster:
     """
@@ -497,6 +507,12 @@ class EventBroadcaster:
         # 查找工具名
         tool_name = self._tool_id_to_name.get(tool_use_id, "")
         
+        # 🆕 问数平台工具特殊处理：发送多个 delta 事件
+        if tool_name == "wenshu_analytics" and not is_error:
+            await self._emit_wenshu_analytics_deltas(session_id, result_content)
+            self._tool_id_to_name.pop(tool_use_id, None)
+            return
+        
         # 检查是否需要发送特殊 delta
         delta_type = TOOL_TO_DELTA_TYPE.get(tool_name)
         
@@ -517,6 +533,116 @@ class EventBroadcaster:
         
         # 清理缓存
         self._tool_id_to_name.pop(tool_use_id, None)
+    
+    async def _emit_wenshu_analytics_deltas(
+        self,
+        session_id: str,
+        result_content: str
+    ) -> None:
+        """
+        为问数平台工具发送多个 delta 事件
+        
+        问数平台返回的结果包含多个字段，每个字段对应一个 delta 事件：
+        - sql: SQL 查询语句
+        - data: 查询结果数据
+        - chart: 图表配置
+        - report: 分析报告 {title, content}
+        - intent_name: 意图名称
+        
+        Args:
+            session_id: Session ID
+            result_content: 工具返回的 JSON 字符串
+        """
+        # 解析结果
+        try:
+            if isinstance(result_content, str):
+                result = json.loads(result_content)
+            else:
+                result = result_content
+        except json.JSONDecodeError:
+            logger.warning(f"⚠️ 问数平台结果解析失败: {result_content[:100]}...")
+            return
+        
+        # 检查是否成功
+        if not result.get("success", False):
+            logger.warning(f"⚠️ 问数平台返回失败: {result.get('error')}")
+            return
+        
+        logger.info(f"📊 问数平台结果处理: intent={result.get('intent_name')}")
+        
+        # 发送 intent delta（智能分析场景）
+        intent_name = result.get("intent_name")
+        if intent_name:
+            intent_data = {
+                "intent_id": result.get("intent", 2),  # 默认 2 = 智能分析
+                "intent_name": intent_name,
+                "platform": "analytics"  # 问数平台都是 analytics 场景
+            }
+            await self._emit_single_delta(session_id, "intent", intent_data)
+        
+        # 发送 sql delta
+        sql = result.get("sql")
+        if sql:
+            await self._emit_single_delta(session_id, "sql", sql)
+        
+        # 发送 data delta
+        data = result.get("data")
+        if data:
+            await self._emit_single_delta(session_id, "data", data)
+        
+        # 发送 chart delta
+        chart = result.get("chart")
+        if chart:
+            await self._emit_single_delta(session_id, "chart", chart)
+        
+        # 发送 report delta
+        report = result.get("report")
+        if report:
+            await self._emit_single_delta(session_id, "report", report)
+        
+        # 发送 application delta（可选，包含 dashboard_id 等）
+        dashboard_id = result.get("dashboard_id")
+        if dashboard_id:
+            app_data = {
+                "application_id": dashboard_id,
+                "name": "数据分析",
+                "status": "success"
+            }
+            await self._emit_single_delta(session_id, "application", app_data)
+    
+    async def _emit_single_delta(
+        self,
+        session_id: str,
+        delta_type: str,
+        content: Any
+    ) -> None:
+        """
+        发送单个 delta 事件
+        
+        Args:
+            session_id: Session ID
+            delta_type: delta 类型
+            content: 内容（对象或字符串）
+        """
+        # 转换为 JSON 字符串（如果是对象）
+        if isinstance(content, (dict, list)):
+            content_str = json.dumps(content, ensure_ascii=False)
+        else:
+            content_str = str(content)
+        
+        logger.debug(f"📤 发送 delta: type={delta_type}")
+        
+        # 保存到数据库
+        await self._save_delta_to_metadata(session_id, delta_type, content)
+        
+        # 发送 SSE 事件
+        await self.events.message.emit_message_delta(
+            session_id=session_id,
+            delta={
+                "type": delta_type,
+                "content": content_str
+            }
+        )
     
     async def _save_delta_to_metadata(
         self,

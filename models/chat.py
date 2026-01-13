@@ -1,5 +1,5 @@
 from typing import Optional, List, Dict, Any, Union, Literal
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator, AliasChoices
 from datetime import datetime
 
 
@@ -12,13 +12,32 @@ class FileReference(BaseModel):
     文件引用
     
     支持两种方式引用文件：
-    1. file_id: 通过我们的文件上传接口上传后返回的 ID
-    2. file_url: 外部 URL（公网可访问）
     
-    二选一，不能同时为空
+    方式1：通过 file_id 引用（使用上传接口返回的 ID）
+    ```json
+    { "file_id": "file_abc123" }
+    ```
+    
+    方式2：直接传文件信息（外部文件）
+    ```json
+    {
+        "file_url": "https://example.com/doc.pdf",
+        "file_name": "报告.pdf",
+        "file_size": 102400,
+        "file_type": "application/pdf"
+    }
+    ```
+    
+    注意：file_id 和 file_url 二选一，不能同时为空
     """
+    # 方式1：通过 file_id 引用
     file_id: Optional[str] = Field(None, description="文件 ID（通过上传接口获取）")
-    file_url: Optional[str] = Field(None, description="文件 URL（外部链接）")
+    
+    # 方式2：直接传文件信息
+    file_url: Optional[str] = Field(None, description="文件访问 URL")
+    file_name: Optional[str] = Field(None, description="文件名")
+    file_size: Optional[int] = Field(None, description="文件大小（字节）")
+    file_type: Optional[str] = Field(None, description="文件类型（MIME）")
     
     @model_validator(mode='after')
     def check_file_reference(self):
@@ -148,6 +167,12 @@ class ChatRequest(BaseModel):
         alias="conversationId",
         description="对话线程ID（客户端会话ID，可选）：用于区分同一用户的多个对话，并在多次请求间延续上下文"
     )
+    agent_id: Optional[str] = Field(
+        None,
+        validation_alias=AliasChoices("agentId", "intentId", "agent_id", "intent_id"),
+        serialization_alias="agentId",
+        description="指定 Agent 实例 ID（对应 instances/ 目录名），支持别名 intentId，不传则使用默认 Agent"
+    )
     stream: bool = Field(True, description="是否使用流式输出（默认为True）")
     background_tasks: Optional[List[str]] = Field(
         None, 
@@ -172,11 +197,17 @@ class ChatRequest(BaseModel):
                     "messageId": "msg_001",
                     "userId": "user_001",
                     "conversationId": "conv_20231224_120000",
+                    "agentId": "test_agent",
                     "stream": True,
                     "backgroundTasks": ["title_generation"],
                     "files": [
                         {"file_id": "file_abc123"},
-                        {"file_url": "https://example.com/image.png"}
+                        {
+                            "file_url": "https://example.com/report.pdf",
+                            "file_name": "季度报告.pdf",
+                            "file_size": 102400,
+                            "file_type": "application/pdf"
+                        }
                     ],
                     "variables": {
                         "location": "北京市朝阳区",

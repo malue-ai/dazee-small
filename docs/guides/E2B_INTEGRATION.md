@@ -145,6 +145,20 @@ capabilities:
 
 ## 使用示例
 
+### 示例 0: Initialize project（推荐）
+
+当用户要做 vibe coding（快速起一个可预览的项目）时，建议走“确定性工具闭环”，避免在 chat 流程里临时拼命令：
+
+```
+1) sandbox_create_project：初始化项目骨架（创建 /home/user/<project_name>/）
+2) sandbox_write_file：按需修改代码
+3) sandbox_run_project：启动项目并返回 preview_url（用户可访问）
+```
+
+特点：
+- 初始化/运行流程更稳定、可复用
+- 预览地址由 `sandbox_run_project` 返回，避免误用 localhost
+
 ### 示例 1: 数据分析
 
 ```python
@@ -321,6 +335,66 @@ task_type_mappings:
   data_analysis:
     - code_execution  # 移除 code_sandbox
     - data_analysis
+```
+
+### Q6: 项目启动失败 / 端口检测超时
+
+**错误**：
+```
+⚠️ 等待端口 8501 超时
+⚠️ 端口 8501 未就绪，但服务可能仍在启动中
+```
+
+**常见原因及排查**：
+
+1. **路径不正确**：确保 `project_path` 是完整路径（`/home/user/xxx`）或仅项目名
+   - ✅ `/home/user/my_app` 或 `my_app`
+   - ❌ `./my_app` 或 `user/my_app`
+
+2. **依赖未安装**：检查 `requirements.txt` 或 `package.json` 是否正确
+   ```bash
+   # 日志会显示依赖安装情况
+   📦 安装 Python 依赖: /home/user/my_app/requirements.txt
+   ```
+
+3. **入口文件缺失**：根据技术栈检查入口文件
+   - streamlit/gradio/flask: `app.py`
+   - fastapi: `main.py`（需要 `main:app`）
+   - react/vue: `package.json` + `npm run dev`
+
+4. **代码报错**：启动失败时会输出诊断信息
+   ```
+   ⚠️ 端口 8501 未就绪，诊断信息:
+   (进程列表和最近日志)
+   ```
+
+**调试方法**：
+```python
+# 手动运行命令查看启动日志
+result = await service.run_command(
+    conversation_id,
+    "cd /home/user/my_app && streamlit run app.py 2>&1 | head -50"
+)
+print(result["stdout"])
+```
+
+### Q7: 预览 URL 无法访问
+
+**原因**：端口检测通过但服务实际没运行
+
+**排查**：
+1. 检查进程是否存在：`ps aux | grep python`
+2. 检查端口是否真正监听：`ss -tlnp | grep 8501`
+3. 确认服务绑定到 `0.0.0.0` 而非 `127.0.0.1`
+
+**E2B 预览 URL 生成方式**（参考 [E2B 文档](https://e2b.dev/docs/commands/run-background)）：
+```python
+# 后台启动服务
+sandbox.commands.run("streamlit run app.py ...", background=True)
+
+# 获取公网可访问的 host
+host = sandbox.get_host(8501)  # 返回类似 8501-xxx.e2b.app
+preview_url = f"https://{host}"
 ```
 
 ## 性能优化

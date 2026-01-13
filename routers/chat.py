@@ -38,6 +38,7 @@ from services import (
     SessionNotFoundError,
     AgentExecutionError,
 )
+from services.agent_registry import AgentNotFoundError
 
 # 配置日志
 logger = get_logger("chat_router")
@@ -61,6 +62,7 @@ class ErrorCode:
     """统一错误码定义"""
     VALIDATION_ERROR = "VALIDATION_ERROR"       # 参数验证失败
     SESSION_NOT_FOUND = "SESSION_NOT_FOUND"     # Session 不存在
+    AGENT_NOT_FOUND = "AGENT_NOT_FOUND"         # Agent 不存在
     AGENT_ERROR = "AGENT_ERROR"                 # Agent 执行错误
     EXTERNAL_SERVICE_ERROR = "EXTERNAL_SERVICE"  # 外部服务错误（LLM、Redis 等）
     INTERNAL_ERROR = "INTERNAL_ERROR"           # 内部错误
@@ -243,6 +245,7 @@ async def chat(
             f"user_id={request.user_id}, "
             f"message_id={request.message_id}, "
             f"conversation_id={request.conversation_id}, "
+            f"agent_id={request.agent_id or '默认'}, "
             f"message={str(request.message)[:50]}..."
         )
         
@@ -253,11 +256,6 @@ async def chat(
             logger.info(f"📎 文件: {len(request.files)} 个")
         if request.background_tasks:
             logger.info(f"⏱️ 后台任务: {request.background_tasks}")
-        
-        # 转换 files 为字典列表
-        files_data = None
-        if request.files:
-            files_data = [f.model_dump() for f in request.files]
         
         # ===== 流式模式（默认） =====
         if request.stream:
@@ -279,8 +277,9 @@ async def chat(
                         message_id=request.message_id,
                         stream=True,
                         background_tasks=request.background_tasks,
-                        files=files_data,
-                        variables=request.variables  # 🆕 传递前端变量
+                        files=request.files,
+                        variables=request.variables,
+                        agent_id=request.agent_id
                     ):
                         # 格式转换
                         if adapter:
@@ -359,11 +358,12 @@ async def chat(
                 message_id=request.message_id,
                 stream=False,
                 background_tasks=request.background_tasks,
-                files=files_data,
-                variables=request.variables  # 🆕 传递前端变量
+                files=request.files,
+                variables=request.variables,
+                agent_id=request.agent_id
             )
             
-            # 后台清理任务（使用带锁的异步清理）
+            # 后台清理任务
             background_tasks.add_task(session_service.cleanup_inactive_sessions)
             
             logger.info(f"✅ 任务已启动: task_id={result['task_id']}")
@@ -377,6 +377,15 @@ async def chat(
     
     except HTTPException:
         raise
+    except AgentNotFoundError as e:
+        logger.warning(f"⚠️ Agent 不存在: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=create_error_response(
+                ErrorCode.AGENT_NOT_FOUND,
+                str(e)
+            )
+        )
     except AgentExecutionError as e:
         logger.error(f"❌ 对话执行失败: {str(e)}")
         raise HTTPException(

@@ -14,15 +14,13 @@ E2B_SANDBOX_PROTOCOL = """
 
 | 工具 | 用途 | 示例 |
 |------|------|------|
-| `sandbox_list_dir` | 列出目录内容 | 查看 `/home/user` 下的文件 |
-| `sandbox_read_file` | 读取文件内容 | 读取代码或配置文件 |
 | `sandbox_write_file` | 创建/更新文件 | 创建 `app.py`、`index.html` 等 |
-| `sandbox_delete_file` | 删除文件 | 清理不需要的文件 |
-| `sandbox_file_exists` | 检查文件是否存在 | 判断文件是否已创建 |
 | `sandbox_run_command` | 执行 shell 命令 | `pip install`、`npm install` 等 |
-| `sandbox_run_code` | 执行 Python 代码 | 数据分析、API 调用等 |
 | `sandbox_create_project` | 创建项目框架 | 快速创建 Streamlit/Gradio 项目 |
 | `sandbox_run_project` | 运行项目 | 启动应用并获取预览 URL |
+
+说明：
+- 目录/文件读取/删除/存在性检查，统一使用 `sandbox_run_command` 执行 `ls/cat/rm/test`。
 
 ### 🚨 路径规范
 
@@ -70,13 +68,8 @@ E2B_SANDBOX_PROTOCOL = """
 #### 执行数据分析
 
 ```
-1. sandbox_run_code: 执行 Python 代码
-   → code: '''
-   import pandas as pd
-   df = pd.read_csv('/home/user/input_data/data.csv')
-   result = df.describe()
-   print(result)
-   '''
+1. sandbox_run_command: 执行 Python 脚本
+   → command: "cd /home/user/project && python analyze.py"
 ```
 
 ### 技术栈支持
@@ -88,6 +81,9 @@ E2B_SANDBOX_PROTOCOL = """
 | flask | app.py | `flask run` |
 | fastapi | main.py | `uvicorn main:app` |
 | python | main.py | `python main.py` |
+| vue/react | package.json | `npm run dev` |
+| nextjs | package.json | `npm run dev` |
+| nodejs | package.json | `npm start` |
 
 ### 示例：创建 Streamlit 应用
 
@@ -159,20 +155,16 @@ def get_e2b_sandbox_protocol() -> str:
 
 # 简化版本（用于 capabilities.yaml）
 E2B_SANDBOX_BRIEF = """
-## 沙盒文件工具
+## 沙盒核心工具（4 个）
 
 ⚠️ **所有文件操作必须使用沙盒工具，不要使用本地文件系统！**
 
 | 工具 | 用途 |
 |------|------|
-| sandbox_list_dir | 列出目录内容 |
-| sandbox_read_file | 读取文件 |
 | sandbox_write_file | 创建/更新文件 |
-| sandbox_delete_file | 删除文件 |
-| sandbox_run_command | 执行命令 |
-| sandbox_run_code | 执行 Python |
-| sandbox_create_project | 创建项目 |
-| sandbox_run_project | 运行项目 |
+| sandbox_run_command | 执行命令（读/列/删 用 bash） |
+| sandbox_create_project | 创建项目骨架 |
+| sandbox_run_project | 运行项目 → 返回预览 URL |
 
 路径从 `/home/user` 开始，如 `/home/user/my_app/app.py`
 """

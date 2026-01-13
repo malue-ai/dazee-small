@@ -57,6 +57,10 @@ from services import (
     ToolExecutionError,
     MCPConnectionError,
     ToolRegistrationError,
+    # MCP 服务
+    get_mcp_service,
+    MCPNotFoundError,
+    MCPAlreadyExistsError,
 )
 
 # 兼容现有 BaseTool
@@ -74,6 +78,7 @@ router = APIRouter(
 
 # 获取服务实例
 tool_service = get_tool_service()
+mcp_service = get_mcp_service()
 
 
 # ============================================================
@@ -353,45 +358,67 @@ async def register_function_tool(
 @router.post(
     "/mcp/register",
     response_model=MCPServerRegistrationResponse,
-    summary="注册 MCP 服务器",
-    description="连接 MCP 服务器并自动发现注册其工具"
+    summary="注册全局 MCP 服务器模板",
+    description="注册全局 MCP 服务器模板，存入数据库供 Agent 使用"
 )
 async def register_mcp_server(
     request: MCPServerRegistration
 ):
     """
-    注册 MCP 服务器
+    注册全局 MCP 服务器模板
     
-    连接到 MCP 服务器，自动发现并注册其提供的所有工具
+    将 MCP 服务器配置存入数据库，供运营人员在配置 Agent 时选择
     
     示例：
     ```
     POST /api/v1/tools/mcp/register
     {
         "server_url": "http://localhost:8080",
-        "server_name": "office365",
+        "server_name": "notion",
         "auth_type": "bearer",
-        "auth_config": {"token_env": "MCP_OFFICE365_TOKEN"}
+        "auth_config": {"token_env": "NOTION_API_KEY"},
+        "description": "Notion 工作区管理"
     }
     ```
     """
     try:
-        logger.info(f"🔌 注册 MCP 服务器: {request.server_name} @ {request.server_url}")
+        logger.info(f"🔌 注册全局 MCP 模板: {request.server_name} @ {request.server_url}")
         
-        response = await tool_service.register_mcp_server(request)
+        # 从 auth_config 中提取 auth_env
+        auth_env = None
+        if request.auth_config:
+            auth_env = request.auth_config.get("token_env") or request.auth_config.get("api_key_env")
         
-        if not response.success:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=response.message
-            )
+        # 存入数据库
+        mcp_data = await mcp_service.register_global_mcp(
+            server_name=request.server_name,
+            server_url=request.server_url,
+            auth_type=request.auth_type,
+            auth_env=auth_env,
+            description=getattr(request, 'description', '') or '',
+            metadata={
+                "auth_config": request.auth_config,
+                "tool_filter": request.tool_filter,
+                "tool_prefix": request.tool_prefix,
+                "auto_reconnect": request.auto_reconnect,
+                "health_check_interval": request.health_check_interval,
+            }
+        )
         
-        return response
+        logger.info(f"✅ 全局 MCP 模板已存入数据库: {request.server_name}, id={mcp_data['id']}")
+        
+        return MCPServerRegistrationResponse(
+            success=True,
+            message=f"全局 MCP 模板 '{request.server_name}' 注册成功（已存入数据库）",
+            server_name=request.server_name,
+            registered_tools=[],  # 仅注册模板，不连接服务器
+            failed_tools=[],
+        )
     
-    except MCPConnectionError as e:
+    except MCPAlreadyExistsError as e:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"MCP 服务器连接失败: {str(e)}"
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e)
         )
     except Exception as e:
         logger.error(f"❌ 注册 MCP 服务器失败: {str(e)}", exc_info=True)
@@ -403,33 +430,187 @@ async def register_mcp_server(
 
 @router.delete(
     "/mcp/{server_name}",
-    summary="注销 MCP 服务器",
-    description="断开 MCP 服务器连接并删除其所有工具"
+    summary="删除全局 MCP 服务器模板",
+    description="从数据库删除 MCP 服务器模板"
 )
 async def unregister_mcp_server(
     server_name: str
 ):
-    """注销 MCP 服务器"""
+    """删除全局 MCP 服务器模板"""
     try:
-        logger.info(f"🗑️ 注销 MCP 服务器: {server_name}")
+        logger.info(f"🗑️ 删除全局 MCP 模板: {server_name}")
         
-        success = await tool_service.unregister_mcp_server(server_name)
+        # 从数据库删除
+        success = await mcp_service.delete_global_mcp(server_name)
         
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"MCP 服务器不存在: {server_name}"
+                detail=f"全局 MCP 模板不存在: {server_name}"
             )
         
+        # 同时尝试断开内存中的连接（如果有）
+        if server_name in tool_service._mcp_clients:
+            await tool_service.unregister_mcp_server(server_name)
+        
         return JSONResponse(
-            content={"success": True, "message": f"MCP 服务器 {server_name} 已注销"}
+            content={"success": True, "message": f"全局 MCP 模板 '{server_name}' 已删除"}
         )
     
+    except MCPNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
     except Exception as e:
-        logger.error(f"❌ 注销 MCP 服务器失败: {str(e)}", exc_info=True)
+        logger.error(f"❌ 删除 MCP 模板失败: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"注销失败: {str(e)}"
+            detail=f"删除失败: {str(e)}"
+        )
+
+
+@router.get(
+    "/mcp",
+    summary="列出全局 MCP 服务器模板",
+    description="获取所有已注册的全局 MCP 服务器模板列表"
+)
+async def list_mcp_servers(
+    include_inactive: bool = Query(False, description="是否包含未激活的服务器"),
+):
+    """
+    列出所有全局 MCP 服务器模板
+    
+    从数据库查询已注册的 MCP 服务器配置
+    """
+    try:
+        # 从数据库查询
+        mcp_servers = await mcp_service.list_global_mcps(
+            include_inactive=include_inactive
+        )
+        
+        # 补充内存中的连接状态
+        for server in mcp_servers:
+            server_name = server.get("server_name", "")
+            if server_name in tool_service._mcp_clients:
+                client = tool_service._mcp_clients[server_name]
+                server["is_connected"] = getattr(client, '_connected', False)
+                server["connected_tools_count"] = len(getattr(client, '_tools', {}))
+            else:
+                server["is_connected"] = False
+                server["connected_tools_count"] = 0
+        
+        return JSONResponse(content={
+            "total": len(mcp_servers),
+            "servers": mcp_servers,
+        })
+    
+    except Exception as e:
+        logger.error(f"❌ 列出 MCP 服务器失败: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"查询失败: {str(e)}"
+        )
+
+
+@router.get(
+    "/mcp/{server_name}",
+    summary="获取全局 MCP 服务器详情",
+    description="获取指定全局 MCP 服务器模板的详细信息"
+)
+async def get_mcp_server_detail(
+    server_name: str
+):
+    """
+    获取全局 MCP 服务器模板详情
+    
+    从数据库查询 MCP 服务器配置和统计信息
+    """
+    try:
+        # 从数据库获取
+        mcp_data = await mcp_service.get_global_mcp(server_name)
+        
+        # 补充内存中的连接状态
+        if server_name in tool_service._mcp_clients:
+            client = tool_service._mcp_clients[server_name]
+            mcp_data["is_connected"] = getattr(client, '_connected', False)
+            mcp_data["connected_tools"] = list(getattr(client, '_tools', {}).keys())
+            mcp_data["connected_tools_count"] = len(getattr(client, '_tools', {}))
+        else:
+            mcp_data["is_connected"] = False
+            mcp_data["connected_tools"] = []
+            mcp_data["connected_tools_count"] = 0
+        
+        return JSONResponse(content=mcp_data)
+    
+    except MCPNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"❌ 获取 MCP 服务器详情失败: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"查询失败: {str(e)}"
+        )
+
+
+class MCPUpdateRequest(BaseModel):
+    """MCP 服务器更新请求"""
+    server_url: Optional[str] = Field(None, description="服务器 URL")
+    auth_type: Optional[str] = Field(None, description="认证类型")
+    auth_env: Optional[str] = Field(None, description="认证环境变量名")
+    description: Optional[str] = Field(None, description="描述")
+    is_active: Optional[bool] = Field(None, description="是否启用")
+    capability: Optional[str] = Field(None, description="能力分类")
+
+
+@router.put(
+    "/mcp/{server_name}",
+    summary="更新全局 MCP 服务器配置",
+    description="更新数据库中的 MCP 服务器模板配置"
+)
+async def update_mcp_server(
+    server_name: str,
+    request: MCPUpdateRequest,
+):
+    """
+    更新全局 MCP 服务器模板配置
+    
+    更新数据库中的 MCP 服务器配置
+    """
+    try:
+        logger.info(f"📝 更新全局 MCP 模板: {server_name}")
+        
+        # 更新数据库
+        mcp_data = await mcp_service.update_global_mcp(
+            server_name=server_name,
+            server_url=request.server_url,
+            auth_type=request.auth_type,
+            auth_env=request.auth_env,
+            description=request.description,
+            is_active=request.is_active,
+            capability=request.capability,
+        )
+        
+        return JSONResponse(content={
+            "success": True,
+            "server_name": server_name,
+            "data": mcp_data,
+            "message": f"全局 MCP 模板 '{server_name}' 更新成功",
+        })
+    
+    except MCPNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"❌ 更新 MCP 服务器配置失败: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"更新失败: {str(e)}"
         )
 
 

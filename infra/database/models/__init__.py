@@ -10,6 +10,7 @@ from infra.database.models.message import Message
 from infra.database.models.file import File
 from infra.database.models.knowledge import Knowledge
 from infra.database.models.sandbox import Sandbox
+from infra.database.models.agent import AgentInstance, SkillInstance, MCPServerInstance
 
 __all__ = [
     "User",
@@ -18,5 +19,8 @@ __all__ = [
     "File",
     "Knowledge",
     "Sandbox",
+    "AgentInstance",
+    "SkillInstance",
+    "MCPServerInstance",
 ]
 

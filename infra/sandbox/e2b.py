@@ -76,7 +76,8 @@ class E2BSandboxProvider(SandboxProvider):
         "fastapi": 8000,
         "streamlit": 8501,
         "nodejs": 3000,
-        "react": 3000,
+        # react 默认按 Vite React（默认端口 5173）处理
+        "react": 5173,
         "nextjs": 3000,
         "vue": 5173,
     }
@@ -532,7 +533,7 @@ class E2BSandboxProvider(SandboxProvider):
                 error=result.stderr if result.exit_code != 0 else None,
                 exit_code=result.exit_code
             )
-        
+            
         except Exception as e:
             # 🔑 关键：正确处理 E2B 的 CommandExitException
             # 这个异常在命令退出码非 0 时抛出，但包含完整的执行结果
@@ -699,7 +700,7 @@ class E2BSandboxProvider(SandboxProvider):
             if isinstance(content, bytes):
                 return content.decode('utf-8')
             return content
-        
+            
         try:
             return await self._with_retry(conversation_id, _do_read)
         except Exception as e:
@@ -731,7 +732,7 @@ class E2BSandboxProvider(SandboxProvider):
             await self._update_activity(conversation_id)
             logger.info(f"📄 文件已写入: {path}")
             return True
-        
+            
         try:
             return await self._with_retry(conversation_id, _do_write)
         except Exception as e:
@@ -783,7 +784,7 @@ class E2BSandboxProvider(SandboxProvider):
                 ))
             
             return result
-        
+            
         try:
             return await self._with_retry(conversation_id, _do_list)
         except Exception as e:
@@ -803,82 +804,6 @@ class E2BSandboxProvider(SandboxProvider):
         except Exception:
             return False
     
-    async def list_dir_tree_fast(
-        self,
-        conversation_id: str,
-        path: str = "/home/user",
-        max_depth: int = 5
-    ) -> List[FileInfo]:
-        """
-        快速获取目录树（单次 shell 命令）
-        
-        使用 find 命令一次性获取整个目录结构，避免多次 API 调用。
-        性能：从 N 次 API 调用（N = 目录数）优化为 1 次。
-        
-        Args:
-            conversation_id: 对话 ID
-            path: 起始路径
-            max_depth: 最大深度
-            
-        Returns:
-            文件树结构
-        """
-        self._check_available()
-        
-        # 使用 find 命令获取目录结构，输出格式：type|path
-        # -maxdepth 限制深度，-printf 格式化输出
-        cmd = f"find {path} -maxdepth {max_depth} -printf '%y|%p\\n' 2>/dev/null || true"
-        
-        result = await self.run_command(conversation_id, cmd, timeout=30)
-        
-        if not result.success or not result.output:
-            # 降级到普通方法
-            return await self.list_dir(conversation_id, path)
-        
-        # 解析 find 输出，构建树结构
-        lines = result.output.strip().split('\n')
-        
-        # 路径 -> FileInfo 的映射
-        path_map: Dict[str, FileInfo] = {}
-        root_files: List[FileInfo] = []
-        
-        for line in lines:
-            if '|' not in line:
-                continue
-            
-            file_type, file_path = line.split('|', 1)
-            
-            # 跳过根路径本身
-            if file_path == path:
-                continue
-            
-            name = file_path.split('/')[-1]
-            is_dir = file_type == 'd'
-            
-            info = FileInfo(
-                name=name,
-                path=file_path,
-                type="directory" if is_dir else "file",
-                size=None,
-                children=[] if is_dir else None
-            )
-            
-            path_map[file_path] = info
-            
-            # 找到父目录
-            parent_path = '/'.join(file_path.split('/')[:-1])
-            
-            if parent_path == path:
-                # 直接子项
-                root_files.append(info)
-            elif parent_path in path_map:
-                # 添加到父目录的 children
-                parent = path_map[parent_path]
-                if parent.children is not None:
-                    parent.children.append(info)
-        
-        return root_files
-    
     # ==================== 项目运行 ====================
     
     async def _wait_for_port(
@@ -890,6 +815,8 @@ class E2BSandboxProvider(SandboxProvider):
     ) -> bool:
         """
         等待端口就绪
+        
+        使用多种检测方式（nc / python socket / curl）确保兼容性。
         
         Args:
             conversation_id: 对话 ID
@@ -903,22 +830,33 @@ class E2BSandboxProvider(SandboxProvider):
         import time
         start_time = time.time()
         
+        # 端口检测命令（按优先级）
+        # 1. nc（最快）；2. python socket（最可靠）；3. curl（兼容性最好）
+        check_cmd = (
+            f"(nc -z localhost {port} 2>/dev/null && echo 'PORT_READY') || "
+            f"(python3 -c \"import socket; s=socket.socket(); s.settimeout(1); "
+            f"r=s.connect_ex(('localhost',{port})); s.close(); exit(0 if r==0 else 1)\" 2>/dev/null && echo 'PORT_READY') || "
+            f"(curl -s --max-time 1 http://localhost:{port}/ >/dev/null 2>&1 && echo 'PORT_READY') || "
+            f"echo 'PORT_WAITING'"
+        )
+        
         while time.time() - start_time < timeout:
             try:
                 result = await self.run_command(
                     conversation_id,
-                    f"nc -z localhost {port} && echo 'ready' || echo 'waiting'",
+                    check_cmd,
                     timeout=5
                 )
-                if "ready" in result.output:
-                    logger.info(f"✅ 端口 {port} 已就绪")
+                if "PORT_READY" in (result.output or ""):
+                    elapsed = time.time() - start_time
+                    logger.info(f"✅ 端口 {port} 已就绪 (耗时 {elapsed:.1f}s)")
                     return True
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"端口检测异常: {e}")
             
             await asyncio.sleep(interval)
         
-        logger.warning(f"⚠️ 等待端口 {port} 超时")
+        logger.warning(f"⚠️ 等待端口 {port} 超时 ({timeout}s)")
         return False
     
     async def run_project(
@@ -932,9 +870,13 @@ class E2BSandboxProvider(SandboxProvider):
         """
         运行项目
         
+        使用 E2B SDK 官方推荐的 background=True 方式启动服务：
+        - process = sandbox.commands.run("npm run dev", background=True)
+        - host = sandbox.get_host(端口)
+        
         Args:
             conversation_id: 对话 ID
-            project_path: 项目路径
+            project_path: 项目路径（支持相对路径或完整路径）
             stack: 技术栈
             wait_for_ready: 是否等待服务就绪
             startup_timeout: 启动超时时间
@@ -947,57 +889,67 @@ class E2BSandboxProvider(SandboxProvider):
         sandbox = await self._get_sandbox_obj(conversation_id)
         port = self.STACK_PORTS.get(stack, 8000)
         
+        # 🔑 路径规范化：确保是完整路径（以 /home/user 开头）
+        if not project_path.startswith("/"):
+            project_path = f"/home/user/{project_path}"
+        elif not project_path.startswith("/home/user"):
+            # 如果是其他绝对路径（如 /app），保持原样
+            pass
+        
+        logger.info(f"📂 项目路径: {project_path}, 技术栈: {stack}")
+        
         # 技术栈配置
+        # 注意：cmd 不再需要 cd，因为我们使用 cwd 参数
         stack_configs = {
             "python": {
-                "cmd": f"cd {project_path} && python app.py",
+                "cmd": "python app.py",
                 "port": 8000,
                 "startup_wait": 3
             },
             "flask": {
-                "cmd": f"cd {project_path} && python app.py",
+                "cmd": "python app.py",
                 "port": 5000,
                 "startup_wait": 3
             },
             "fastapi": {
-                "cmd": f"cd {project_path} && uvicorn main:app --host 0.0.0.0 --port {port}",
+                "cmd": f"uvicorn main:app --host 0.0.0.0 --port {port}",
                 "port": port,
                 "startup_wait": 5
             },
             "streamlit": {
-                "cmd": f"cd {project_path} && streamlit run app.py --server.port {port} --server.address 0.0.0.0",
+                "cmd": f"streamlit run app.py --server.port {port} --server.address 0.0.0.0",
                 "port": port,
                 "startup_wait": 8
             },
             "gradio": {
-                "cmd": f"cd {project_path} && python app.py",
+                "cmd": "python app.py",
                 "port": 7860,
                 "startup_wait": 10
             },
             "nodejs": {
-                "cmd": f"cd {project_path} && npm start",
+                "cmd": "npm start",
                 "port": 3000,
                 "startup_wait": 5
             },
             "react": {
-                "cmd": f"cd {project_path} && npm run dev -- --host 0.0.0.0",
-                "port": 3000,
+                "cmd": "npm run dev -- --host 0.0.0.0 --port 5173 --strictPort",
+                "port": 5173,
                 "startup_wait": 10
             },
             "nextjs": {
-                "cmd": f"cd {project_path} && npm run dev",
+                "cmd": "npm run dev",
                 "port": 3000,
                 "startup_wait": 10
             },
             "vue": {
-                "cmd": f"cd {project_path} && npm run dev -- --host 0.0.0.0",
+                "cmd": "npm run dev -- --host 0.0.0.0 --port 5173 --strictPort",
                 "port": 5173,
                 "startup_wait": 8
             },
         }
         
         config = stack_configs.get(stack, {
-            "cmd": f"cd {project_path} && python app.py",
+            "cmd": "python app.py",
             "port": 8000,
             "startup_wait": 3
         })
@@ -1005,7 +957,7 @@ class E2BSandboxProvider(SandboxProvider):
         command = config["cmd"]
         port = config["port"]
         startup_wait = config["startup_wait"]
-    
+        
         try:
             # 先停止可能存在的旧进程
             await self.run_command(
@@ -1014,12 +966,12 @@ class E2BSandboxProvider(SandboxProvider):
                 timeout=10
             )
             
-            # 检查并安装依赖（优化：跳过已安装的包）
+            # 检查并安装依赖
             req_path = f"{project_path}/requirements.txt"
             pkg_path = f"{project_path}/package.json"
             
             if await self.file_exists(conversation_id, req_path):
-                # 检查主要依赖是否已安装（官方模板通常已预装 streamlit 等）
+                # 检查主要依赖是否已安装
                 check_result = await self.run_command(
                     conversation_id,
                     f"cd {project_path} && head -1 requirements.txt | cut -d'>' -f1 | cut -d'=' -f1 | xargs pip show 2>/dev/null && echo 'INSTALLED' || echo 'NOT_INSTALLED'",
@@ -1046,19 +998,21 @@ class E2BSandboxProvider(SandboxProvider):
                     timeout=180
                 )
             
-            # 后台启动项目
-            logger.info(f"🚀 启动项目: {command}")
-            # 使用 nohup + bash -c 后台启动整个命令链
-            # 注意：必须用 bash -c 包裹，否则 nohup 只作用于第一个命令（如 cd）
-            await self.run_command(
-                conversation_id,
-                f"nohup bash -c '{command}' > /tmp/app.log 2>&1 & sleep 0.5; exit 0",
-                timeout=30
+            # 🔑 关键：使用 E2B SDK 的 background=True 启动服务
+            logger.info(f"🚀 后台启动项目: cd {project_path} && {command}")
+            
+            # 使用 sandbox.commands.run 的 background=True 参数
+            await asyncio.to_thread(
+                sandbox.commands.run,
+                f"cd {project_path} && {command}",
+                background=True,
+                timeout=startup_timeout
             )
             
             # 等待服务就绪
             if wait_for_ready:
                 # 先等待基本启动时间
+                logger.info(f"⏳ 等待服务启动 ({startup_wait}s)...")
                 await asyncio.sleep(startup_wait)
                 
                 # 然后检查端口
@@ -1069,17 +1023,23 @@ class E2BSandboxProvider(SandboxProvider):
                 )
                 
                 if not ready:
-                    # 检查启动日志
-                    logs = await self.run_command(
+                    # 🔑 诊断：获取启动日志帮助排查
+                    diag_result = await self.run_command(
                         conversation_id,
-                        "tail -20 /tmp/app.log 2>/dev/null || echo 'No logs'",
+                        f"ps aux | grep -E 'python|node|streamlit' | head -5; "
+                        f"tail -30 /tmp/app.log 2>/dev/null || "
+                        f"tail -30 {project_path}/nohup.out 2>/dev/null || "
+                        f"echo '(无启动日志)'",
                         timeout=10
                     )
-                    logger.warning(f"⚠️ 服务可能未完全启动，日志:\n{logs.output[:500]}")
+                    diag_info = (diag_result.output or "")[:500]
+                    logger.warning(
+                        f"⚠️ 端口 {port} 未就绪，诊断信息:\n{diag_info}"
+                    )
             else:
                 await asyncio.sleep(startup_wait)
             
-            # 获取预览 URL
+            # 🔑 关键：使用 sandbox.get_host(端口) 获取预览 URL
             host = sandbox.get_host(port)
             preview_url = f"https://{host}"
             

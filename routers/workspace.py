@@ -32,7 +32,7 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
 from logger import get_logger
-from core.workspace_manager import get_workspace_manager, FileInfo as LocalFileInfo
+# 注：已移除本地文件系统模式，仅使用沙盒
 from services.sandbox_service import (
     get_sandbox_service,
     SandboxServiceError,
@@ -346,92 +346,52 @@ async def run_command(
 async def list_files(
     conversation_id: str,
     path: str = Query(default="/home/user", description="目录路径"),
-    use_sandbox: bool = Query(default=True, description="是否使用沙盒"),
     tree: bool = Query(default=False, description="是否返回树形结构")
 ):
     """
-    获取 workspace 文件列表
+    获取 workspace 文件列表（沙盒模式）
     
     Args:
         conversation_id: 对话 ID
-        path: 目录路径（沙盒模式从 /home/user 开始）
-        use_sandbox: 是否使用沙盒（默认 True）
+        path: 目录路径（从 /home/user 开始）
         tree: 是否返回递归树形结构
     """
     try:
-        if use_sandbox:
-            # 使用沙盒
-            service = get_sandbox_service()
-            
-            # 转换沙盒文件信息为响应格式
-            def convert_sandbox_file(f) -> FileItemResponse:
-                return FileItemResponse(
-                    path=f.path,
-                    name=f.name,
-                    type=f.type,
-                    size=f.size,
-                    modified_at=f.modified_at,
-                    children=[convert_sandbox_file(c) for c in f.children] if f.children else None
-                )
-            
-            try:
-                # 根据 tree 参数选择不同的方法
-                if tree:
-                    sandbox_files = await service.list_files_tree(conversation_id, path)
-                else:
-                    sandbox_files = await service.list_files(conversation_id, path)
-                
-                files = [convert_sandbox_file(f) for f in sandbox_files]
-                
-                return FileListResponse(
-                    conversation_id=conversation_id,
-                    files=files,
-                    source="sandbox"
-                )
-            except SandboxNotFoundError:
-                # 沙盒不存在时返回空列表（而不是 404）
-                logger.info(f"沙盒不存在，返回空列表: {conversation_id}")
-                return FileListResponse(
-                    conversation_id=conversation_id,
-                    files=[],
-                    source="sandbox"
-                )
-        else:
-            # 使用本地文件系统
-            manager = get_workspace_manager()
-            
+        service = get_sandbox_service()
+        
+        # 转换沙盒文件信息为响应格式
+        def convert_sandbox_file(f) -> FileItemResponse:
+            return FileItemResponse(
+                path=f.path,
+                name=f.name,
+                type=f.type,
+                size=f.size,
+                modified_at=f.modified_at,
+                children=[convert_sandbox_file(c) for c in f.children] if f.children else None
+            )
+        
+        try:
+            # 根据 tree 参数选择不同的方法
             if tree:
-                items = manager.list_dir_tree(conversation_id, path if path != "/home/user" else ".")
+                sandbox_files = await service.list_files_tree(conversation_id, path)
             else:
-                items = manager.list_dir(conversation_id, path if path != "/home/user" else ".")
+                sandbox_files = await service.list_files(conversation_id, path)
             
-            def convert_item(item: LocalFileInfo) -> FileItemResponse:
-                return FileItemResponse(
-                    path=item.path,
-                    name=os.path.basename(item.path),
-                    type=item.type,
-                    size=item.size,
-                    modified_at=item.modified_at,
-                    children=[convert_item(c) for c in item.children] if item.children else None
-                )
-            
-            files = [convert_item(item) for item in items]
-            total_size = manager.get_workspace_size(conversation_id)
+            files = [convert_sandbox_file(f) for f in sandbox_files]
             
             return FileListResponse(
                 conversation_id=conversation_id,
                 files=files,
-                total_size=total_size,
-                source="local"
+                source="sandbox"
             )
-    
-    except FileNotFoundError as e:
-        # 本地文件系统目录不存在时返回空列表
-        return FileListResponse(
-            conversation_id=conversation_id,
-            files=[],
-            source="local"
-        )
+        except SandboxNotFoundError:
+            # 沙盒不存在时返回空列表（而不是 404）
+            logger.info(f"沙盒不存在，返回空列表: {conversation_id}")
+            return FileListResponse(
+                conversation_id=conversation_id,
+                files=[],
+                source="sandbox"
+            )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except SandboxServiceError as e:
@@ -445,16 +405,14 @@ async def list_files(
 async def get_file(
     conversation_id: str,
     path: str,
-    use_sandbox: bool = Query(default=True, description="是否使用沙盒"),
     download: bool = Query(default=False, description="是否作为下载返回")
 ):
     """
-    获取文件内容或下载文件
+    获取文件内容或下载文件（沙盒模式）
     
     Args:
         conversation_id: 对话 ID
         path: 文件路径
-        use_sandbox: 是否使用沙盒
         download: 是否作为下载返回
     """
     try:
@@ -473,49 +431,24 @@ async def get_file(
         }
         is_text = suffix in text_extensions or Path(path).name in text_extensions
         
-        if use_sandbox:
-            # 使用沙盒（service 层会自动处理路径标准化）
-            service = get_sandbox_service()
-            
-            if is_text and not download:
-                content = await service.read_file(conversation_id, path)
-                return Response(
-                    content=content,
-                    media_type="text/plain; charset=utf-8"
-                )
-            else:
-                content = await service.read_file_bytes(conversation_id, path)
-                filename = os.path.basename(path)
-                return Response(
-                    content=content,
-                    media_type="application/octet-stream",
-                    headers={
-                        "Content-Disposition": f'attachment; filename="{filename}"'
-                    }
-                )
+        service = get_sandbox_service()
+        
+        if is_text and not download:
+            content = await service.read_file(conversation_id, path)
+            return Response(
+                content=content,
+                media_type="text/plain; charset=utf-8"
+            )
         else:
-            # 使用本地文件系统
-            manager = get_workspace_manager()
-            full_path = manager.resolve_path(conversation_id, path)
-            
-            if not full_path.exists():
-                raise HTTPException(status_code=404, detail=f"文件不存在: {path}")
-            
-            if not full_path.is_file():
-                raise HTTPException(status_code=400, detail=f"不是文件: {path}")
-            
-            if download or not is_text:
-                return FileResponse(
-                    path=str(full_path),
-                    filename=full_path.name,
-                    media_type="application/octet-stream"
-                )
-            else:
-                content = full_path.read_text(encoding='utf-8')
-                return Response(
-                    content=content,
-                    media_type="text/plain; charset=utf-8"
-                )
+            content = await service.read_file_bytes(conversation_id, path)
+            filename = os.path.basename(path)
+            return Response(
+                content=content,
+                media_type="application/octet-stream",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{filename}"'
+                }
+            )
     
     except HTTPException:
         raise
@@ -534,50 +467,34 @@ async def get_file(
 async def upload_file(
     conversation_id: str,
     file: UploadFile = File(...),
-    path: Optional[str] = Query(default=None, description="保存路径"),
-    use_sandbox: bool = Query(default=True, description="是否使用沙盒")
+    path: Optional[str] = Query(default=None, description="保存路径")
 ):
     """
-    上传文件到 workspace
+    上传文件到沙盒
     
     Args:
         conversation_id: 对话 ID
         file: 上传的文件
         path: 保存路径（默认为文件名）
-        use_sandbox: 是否使用沙盒
     """
     try:
         save_path = path if path else file.filename
         content = await file.read()
         
-        if use_sandbox:
-            # 使用沙盒
-            service = get_sandbox_service()
-            
-            # 构造完整路径
-            full_path = save_path if save_path.startswith("/") else f"/home/user/{save_path}"
-            
-            result = await service.write_file(conversation_id, full_path, content)
-            
-            logger.info(f"📤 文件上传到沙盒: {full_path} ({result['size']} bytes)")
-            
-            return UploadResponse(
-                success=True,
-                path=full_path,
-                size=result["size"]
-            )
-        else:
-            # 使用本地文件系统
-            manager = get_workspace_manager()
-            result = manager.write_file(conversation_id, save_path, content)
-            
-            logger.info(f"📤 文件上传到本地: {save_path} ({result['size']} bytes)")
-            
-            return UploadResponse(
-                success=True,
-                path=save_path,
-                size=result["size"]
-            )
+        service = get_sandbox_service()
+        
+        # 构造完整路径
+        full_path = save_path if save_path.startswith("/") else f"/home/user/{save_path}"
+        
+        result = await service.write_file(conversation_id, full_path, content)
+        
+        logger.info(f"📤 文件上传到沙盒: {full_path} ({result['size']} bytes)")
+        
+        return UploadResponse(
+            success=True,
+            path=full_path,
+            size=result["size"]
+        )
     
     except SandboxNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -594,41 +511,25 @@ async def upload_file(
 async def write_file(
     conversation_id: str,
     path: str,
-    content: str = Query(..., description="文件内容"),
-    use_sandbox: bool = Query(default=True, description="是否使用沙盒")
+    content: str = Query(..., description="文件内容")
 ):
     """
-    写入文件内容（用于编辑器保存）
+    写入文件内容（用于编辑器保存，沙盒模式）
     
     Args:
         conversation_id: 对话 ID
         path: 文件路径
         content: 文件内容
-        use_sandbox: 是否使用沙盒
     """
     try:
-        if use_sandbox:
-            # 使用沙盒
-            service = get_sandbox_service()
-            
-            # service 层会自动处理路径标准化
-            result = await service.write_file(conversation_id, path, content)
-            
-            return UploadResponse(
-                success=True,
-                path=result["path"],  # 使用 service 返回的标准化路径
-                size=result["size"]
-            )
-        else:
-            # 使用本地文件系统
-            manager = get_workspace_manager()
-            result = manager.write_file(conversation_id, path, content.encode('utf-8'))
-            
-            return UploadResponse(
-                success=True,
-                path=path,
-                size=result["size"]
-            )
+        service = get_sandbox_service()
+        result = await service.write_file(conversation_id, path, content)
+        
+        return UploadResponse(
+            success=True,
+            path=result["path"],
+            size=result["size"]
+        )
     
     except SandboxNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -644,50 +545,29 @@ async def write_file(
 @router.delete("/{conversation_id}/files/{path:path}", response_model=DeleteResponse)
 async def delete_file(
     conversation_id: str,
-    path: str,
-    use_sandbox: bool = Query(default=True, description="是否使用沙盒")
+    path: str
 ):
     """
-    删除文件或目录
+    删除文件或目录（沙盒模式）
     
     Args:
         conversation_id: 对话 ID
         path: 文件或目录路径
-        use_sandbox: 是否使用沙盒
     """
     try:
-        if use_sandbox:
-            # 使用沙盒
-            service = get_sandbox_service()
-            
-            # service 层会自动处理路径标准化
-            success = await service.delete_file(conversation_id, path)
-            
-            if not success:
-                raise HTTPException(status_code=500, detail="删除失败")
-            
-            logger.info(f"🗑️ 沙盒文件删除: {path}")
-            
-            return DeleteResponse(
-                success=True,
-                path=path,
-                message="删除成功"
-            )
-        else:
-            # 使用本地文件系统
-            manager = get_workspace_manager()
-            result = manager.delete_file(conversation_id, path)
-            
-            if not result["success"]:
-                raise HTTPException(status_code=404, detail=result.get("error", "删除失败"))
-            
-            logger.info(f"🗑️ 本地文件删除: {path}")
-            
-            return DeleteResponse(
-                success=True,
-                path=path,
-                message="删除成功"
-            )
+        service = get_sandbox_service()
+        success = await service.delete_file(conversation_id, path)
+        
+        if not success:
+            raise HTTPException(status_code=500, detail="删除失败")
+        
+        logger.info(f"🗑️ 沙盒文件删除: {path}")
+        
+        return DeleteResponse(
+            success=True,
+            path=path,
+            message="删除成功"
+        )
     
     except HTTPException:
         raise
@@ -706,11 +586,10 @@ async def delete_file(
 
 @router.get("/{conversation_id}/projects", response_model=ProjectListResponse)
 async def list_projects(
-    conversation_id: str,
-    use_sandbox: bool = Query(default=True, description="是否使用沙盒")
+    conversation_id: str
 ):
     """
-    获取 workspace 中的项目列表
+    获取沙盒中的项目列表
     
     检测规则：
     - 包含 requirements.txt / package.json / pyproject.toml 的目录
@@ -718,52 +597,30 @@ async def list_projects(
     
     Args:
         conversation_id: 对话 ID
-        use_sandbox: 是否使用沙盒
     """
     try:
-        if use_sandbox:
-            # 使用沙盒 - 列出 /home/user 目录
-            service = get_sandbox_service()
-            
-            try:
-                files = await service.list_files(conversation_id, "/home/user")
-                
-                projects = []
-                for f in files:
-                    if f.type == "directory":
-                        # 检查目录内容
-                        project_info = await _detect_sandbox_project(service, conversation_id, f.path, f.name)
-                        if project_info:
-                            projects.append(project_info)
-                
-                return ProjectListResponse(
-                    conversation_id=conversation_id,
-                    projects=projects
-                )
-            except SandboxNotFoundError:
-                # 沙盒不存在时返回空列表
-                logger.info(f"沙盒不存在，返回空项目列表: {conversation_id}")
-                return ProjectListResponse(
-                    conversation_id=conversation_id,
-                    projects=[]
-                )
-        else:
-            # 使用本地文件系统
-            manager = get_workspace_manager()
-            workspace_root = manager.get_workspace_root(conversation_id)
+        service = get_sandbox_service()
+        
+        try:
+            files = await service.list_files(conversation_id, "/home/user")
             
             projects = []
-            
-            if workspace_root.exists():
-                for item in workspace_root.iterdir():
-                    if item.is_dir():
-                        project_info = _detect_local_project(item)
-                        if project_info:
-                            projects.append(project_info)
+            for f in files:
+                if f.type == "directory":
+                    project_info = await _detect_sandbox_project(service, conversation_id, f.path, f.name)
+                    if project_info:
+                        projects.append(project_info)
             
             return ProjectListResponse(
                 conversation_id=conversation_id,
                 projects=projects
+            )
+        except SandboxNotFoundError:
+            # 沙盒不存在时返回空列表
+            logger.info(f"沙盒不存在，返回空项目列表: {conversation_id}")
+            return ProjectListResponse(
+                conversation_id=conversation_id,
+                projects=[]
             )
     
     except SandboxServiceError as e:
@@ -952,85 +809,3 @@ async def _detect_sandbox_project(
     except Exception as e:
         logger.warning(f"检测项目失败: {dir_path} - {e}")
         return None
-
-
-def _detect_local_project(dir_path: Path) -> Optional[ProjectInfo]:
-    """
-    检测本地目录是否为项目
-    """
-    if not dir_path.is_dir():
-        return None
-    
-    project_type = None
-    entry_file = None
-    has_requirements = False
-    description = None
-    
-    # Python 项目检测
-    if (dir_path / "requirements.txt").exists():
-        has_requirements = True
-        
-        if (dir_path / "app.py").exists():
-            req_content = (dir_path / "requirements.txt").read_text()
-            if "gradio" in req_content.lower():
-                project_type = "gradio"
-            elif "streamlit" in req_content.lower():
-                project_type = "streamlit"
-            elif "flask" in req_content.lower():
-                project_type = "flask"
-            elif "fastapi" in req_content.lower():
-                project_type = "fastapi"
-            else:
-                project_type = "python"
-            entry_file = "app.py"
-        elif (dir_path / "main.py").exists():
-            entry_file = "main.py"
-            project_type = "python"
-    
-    # Node.js 项目检测
-    if (dir_path / "package.json").exists():
-        import json
-        try:
-            pkg = json.loads((dir_path / "package.json").read_text())
-            if "next" in pkg.get("dependencies", {}):
-                project_type = "nextjs"
-                entry_file = "pages/index.tsx" if (dir_path / "pages/index.tsx").exists() else "app/page.tsx"
-            elif "vue" in pkg.get("dependencies", {}):
-                project_type = "vue"
-                entry_file = "src/App.vue"
-            elif "react" in pkg.get("dependencies", {}):
-                project_type = "react"
-                entry_file = "src/App.tsx" if (dir_path / "src/App.tsx").exists() else "src/App.jsx"
-            else:
-                project_type = "nodejs"
-        except:
-            project_type = "nodejs"
-    
-    # 静态网页检测
-    if (dir_path / "index.html").exists() and not project_type:
-        project_type = "static"
-        entry_file = "index.html"
-    
-    if not project_type and not entry_file and not has_requirements:
-        return None
-    
-    # 读取 README 作为描述
-    readme_files = ["README.md", "readme.md", "README.txt", "readme.txt"]
-    for readme in readme_files:
-        readme_path = dir_path / readme
-        if readme_path.exists():
-            try:
-                content = readme_path.read_text(encoding='utf-8')
-                description = content.split('\n')[0].strip('#').strip()[:100]
-            except:
-                pass
-            break
-    
-    return ProjectInfo(
-        name=dir_path.name,
-        path=dir_path.name,
-        type=project_type,
-        entry_file=entry_file,
-        description=description,
-        has_requirements=has_requirements
-    )

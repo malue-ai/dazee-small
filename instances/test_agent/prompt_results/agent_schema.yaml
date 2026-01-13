@@ -1,0 +1,106 @@
+name: Dazee
+description: 高级工作小助理和生活搭子，专注于复杂业务分析、系统设计和深度研究
+intent_analyzer:
+  enabled: true
+  complexity_levels:
+  - simple
+  - medium
+  - complex
+  task_types:
+  - system_design
+  - business_analysis
+  - data_analysis
+  - research
+  - document_generation
+  - conversational
+  output_formats:
+  - markdown
+  - json
+  use_llm: true
+  llm_model: claude-haiku-4-5-20251001
+plan_manager:
+  enabled: true
+  trigger_condition: task_complexity in ['medium', 'complex']
+  max_steps: 15
+  granularity: fine
+  allow_dynamic_adjustment: true
+  validation_interval: 3
+  replan_enabled: true
+  max_replan_attempts: 2
+  replan_strategy: incremental
+  failure_threshold: 0.3
+tool_selector:
+  enabled: true
+  available_tools: []
+  selection_strategy: capability_based
+  allow_parallel: false
+  max_parallel_tools: 1
+  base_tools:
+  - tavily_search
+  - exa_search
+  - current_time
+  - timezone_conversion
+  tool_timeout: 300
+memory_manager:
+  enabled: true
+  retention_policy: session
+  episodic_memory: true
+  working_memory_limit: 30
+  auto_compress: true
+  compress_threshold: 15
+output_formatter:
+  enabled: true
+  default_format: markdown
+  supported_formats:
+  - text
+  - markdown
+  - json
+  - html
+  code_highlighting: true
+  max_output_length: 5000
+  include_metadata: true
+skills:
+- type: custom
+  skill_id: xlsx
+  version: latest
+  required: false
+- type: custom
+  skill_id: pptx
+  version: latest
+  required: false
+- type: custom
+  skill_id: pdf
+  version: latest
+  required: false
+tools:
+- tavily_search
+- exa_search
+- exa_contents
+- perplexity
+- current_time
+- timezone_conversion
+- pdf2markdown
+- text2flowchart
+- text2document
+- ppt_create
+- nano_banana_omni
+- build_ontology_part1
+- build_ontology_part2
+- e2b_sandbox
+model: claude-sonnet-4-5-20250929
+max_turns: 20
+allow_parallel_tools: false
+context_limits:
+  max_context_tokens: 200000
+  warning_threshold: 0.8
+  truncate_threshold: 0.9
+reasoning: "这是一个高度复杂的业务分析和系统设计 Agent，具有以下特点：\n\n1. **多意图识别**：支持系统搭建、BI问数、综合咨询、追问等4种核心意图，需要精细的意图分析能力\n\
+  \n2. **复杂规划能力**：任务分为simple/medium/complex三个复杂度级别，complex任务需要6-15步的详细规划，启用细粒度规划和动态调整\n\
+  \n3. **丰富的工具生态**：\n   - 搜索工具：tavily_search, exa_search, perplexity（深度研究）\n   - 时间工具：current_time\
+  \ + timezone_conversion（原子操作）\n   - 文档处理：pdf2markdown, text2document\n   - 可视化：text2flowchart（流程图）\n\
+  \   - 文档生成：pptx, xlsx（通过skills）\n   - 图片生成：nano_banana_omni\n   - 系统建模：build_ontology（两步流程）\n\
+  \   - 代码执行：e2b_sandbox（数据分析场景）\n\n4. **严格的输出格式**：五段式输出（THINK-PREFACE-TOOL-RESPONSE-JSON），需要精确的格式控制\n\
+  \n5. **质量验证机制**：ReAct验证循环、最终验证清单、诚信原则（禁止伪造URL）\n\n6. **上下文管理**：\n   - 会话级记忆保留\n\
+  \   - 工作记忆限制30条（防止上下文溢出）\n   - 自动压缩历史内容\n   - 多轮对话文件屏障（防止502错误）\n\n7. **HITL机制**：在意图不明确、关键决策点、工具失败等场景主动暂停等待用户输入\n\
+  \n8. **性格与语气**：温暖、专业、有同理心，但在特定意图（如BI问数）下优先执行路由\n\n配置策略：\n- 启用完整的规划管理器（支持重规划）\n-\
+  \ 基于能力的工具选择（不并行，确保质量）\n- 会话级记忆（支持追问场景）\n- 较高的max_turns（20轮，支持复杂多轮交互）\n- 禁用并行工具（确保每个响应只执行一次function_call）"

@@ -123,6 +123,8 @@ class ContentAccumulator:
     _current_text: str = ""                             # 当前 text 内容
     _current_tool_use: Optional[Dict[str, Any]] = None  # 当前 tool_use
     _tool_input_buffer: str = ""                        # 工具输入 JSON 缓冲
+    _current_tool_result: Optional[Dict[str, Any]] = None  # 当前 tool_result（支持流式）
+    _tool_result_content_buffer: str = ""               # tool_result 内容缓冲（流式累积）
     
     # === 向后兼容（保留旧字段名，但不再使用）===
     current_thinking: Optional[Dict[str, Any]] = None
@@ -165,13 +167,26 @@ class ContentAccumulator:
             self._tool_input_buffer = ""
         
         elif block_type == "tool_result":
-            # tool_result 是完整的，直接保存到 all_blocks
-            self.all_blocks.append({
-                "type": "tool_result",
-                "tool_use_id": content_block.get("tool_use_id", ""),
-                "content": content_block.get("content", ""),
-                "is_error": content_block.get("is_error", False)
-            })
+            # tool_result 支持两种模式：
+            # 1. 完整模式：content 有值，直接保存
+            # 2. 流式模式：content 为空，通过 delta 累积
+            initial_content = content_block.get("content", "")
+            if initial_content:
+                # 完整模式：直接保存到 all_blocks
+                self.all_blocks.append({
+                    "type": "tool_result",
+                    "tool_use_id": content_block.get("tool_use_id", ""),
+                    "content": initial_content,
+                    "is_error": content_block.get("is_error", False)
+                })
+            else:
+                # 流式模式：初始化累积状态，等待 delta 和 stop
+                self._current_tool_result = {
+                    "type": "tool_result",
+                    "tool_use_id": content_block.get("tool_use_id", ""),
+                    "is_error": content_block.get("is_error", False)
+                }
+                self._tool_result_content_buffer = ""
         
         elif block_type == "server_tool_use":
             # 服务端工具调用（web_search 等）
@@ -200,6 +215,7 @@ class ContentAccumulator:
         - text block: delta = "我"
         - thinking block: delta = "Let me think..."
         - tool_use block: delta = '{"code": "print('
+        - tool_result block: delta = '{"success": true...'（流式模式）
         
         Args:
             delta: 字符串（增量内容）
@@ -211,6 +227,9 @@ class ContentAccumulator:
         elif self._current_block_type in ("tool_use", "server_tool_use"):
             self._tool_input_buffer += delta
             self._try_parse_tool_input()
+        elif self._current_block_type == "tool_result":
+            # 流式模式：累积 tool_result 内容
+            self._tool_result_content_buffer += delta
     
     def on_content_stop(self, signature: Optional[str] = None) -> None:
         """
@@ -243,7 +262,15 @@ class ContentAccumulator:
                 self.all_blocks.append(self._current_tool_use)
             self._current_tool_use = None
         
-        # tool_result 和 *_tool_result 已在 on_content_start 时保存
+        elif self._current_block_type == "tool_result":
+            # 流式模式：保存累积的 tool_result
+            if self._current_tool_result:
+                self._current_tool_result["content"] = self._tool_result_content_buffer
+                self.all_blocks.append(self._current_tool_result)
+                self._current_tool_result = None
+                self._tool_result_content_buffer = ""
+        
+        # 注意：完整模式的 tool_result 和 *_tool_result 已在 on_content_start 时保存
         
         # 重置当前 block 类型
         self._current_block_type = None

@@ -74,6 +74,25 @@ from infra.database.crud.sandbox import (
     delete_sandbox,
     delete_sandbox_by_conversation,
 )
+from infra.database.crud.mcp import (
+    # 全局 MCP 模板
+    create_global_mcp,
+    get_global_mcp_by_name,
+    list_global_mcps,
+    update_global_mcp,
+    delete_global_mcp,
+    # Agent 实例化 MCP
+    create_agent_mcp,
+    get_agent_mcp,
+    list_agent_mcps,
+    update_agent_mcp,
+    delete_agent_mcp,
+    delete_all_agent_mcps,
+    # 工具注册
+    update_mcp_registered_tools,
+    get_mcp_by_id,
+    check_mcp_exists,
+)
 
 __all__ = [
     # 通用
@@ -142,5 +161,21 @@ __all__ = [
     "list_sandboxes_by_status",
     "delete_sandbox",
     "delete_sandbox_by_conversation",
+    
+    # MCP
+    "create_global_mcp",
+    "get_global_mcp_by_name",
+    "list_global_mcps",
+    "update_global_mcp",
+    "delete_global_mcp",
+    "create_agent_mcp",
+    "get_agent_mcp",
+    "list_agent_mcps",
+    "update_agent_mcp",
+    "delete_agent_mcp",
+    "delete_all_agent_mcps",
+    "update_mcp_registered_tools",
+    "get_mcp_by_id",
+    "check_mcp_exists",
 ]
 

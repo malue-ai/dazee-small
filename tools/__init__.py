@@ -11,6 +11,7 @@ Tools 工具模块
 - exa_search.py: Exa 搜索工具
 - api_calling.py: 通用 API 调用工具
 - e2b_template_manager.py: E2B 模板管理工具
+- wenshu_analytics_tool.py: 问数平台数据分析工具
 
 注意：工具核心逻辑（Selector、Executor）已移至 core/tool/
 

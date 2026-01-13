@@ -66,6 +66,22 @@ from .task_service import (
     TriggerType,
 )
 
+from .agent_registry import (
+    AgentRegistry,
+    get_agent_registry,
+    AgentConfig,
+    AgentNotFoundError,
+)
+
+from .mcp_service import (
+    MCPService,
+    get_mcp_service,
+    MCPServiceError,
+    MCPNotFoundError,
+    MCPAlreadyExistsError,
+    MCPConnectionError as MCPServiceConnectionError,
+)
+
 __all__ = [
     # Knowledge Service
     "KnowledgeService",
@@ -113,5 +129,17 @@ __all__ = [
     "TaskRunResult",
     "TaskStatus",
     "TriggerType",
+    # Agent Registry
+    "AgentRegistry",
+    "get_agent_registry",
+    "AgentConfig",
+    "AgentNotFoundError",
+    # MCP Service
+    "MCPService",
+    "get_mcp_service",
+    "MCPServiceError",
+    "MCPNotFoundError",
+    "MCPAlreadyExistsError",
+    "MCPServiceConnectionError",
 ]
 
