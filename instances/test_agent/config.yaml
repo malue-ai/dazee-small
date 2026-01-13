@@ -42,7 +42,7 @@ agent:
     max_tokens: 16384
     
     # 启用缓存（节省 API 成本）
-    enable_caching: false
+    enable_caching: true
 
 
 # ==================== 工具能力配置 ====================

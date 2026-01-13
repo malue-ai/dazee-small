@@ -232,6 +232,8 @@ class IntentAnalyzer:
         """
         使用 LLM 分析意图
         
+        🆕 V6.3: 支持多层缓存（意图识别提示词 1h 缓存）
+        
         Args:
             messages: 完整的消息列表
             
@@ -256,13 +258,30 @@ class IntentAnalyzer:
                 for msg in truncated_messages
             ]
             
-            # 使用缓存的意图识别提示词
-            intent_prompt = self._get_intent_prompt()
+            # 🆕 V6.3: 使用多层缓存格式（意图识别提示词缓存，Claude 固定 5 分钟）
+            # 意图识别提示词在运行期只读，启用缓存
+            if self._prompt_cache and self._prompt_cache.is_loaded and self.llm.config.enable_caching:
+                # 使用 InstancePromptCache 的缓存构建方法
+                system_blocks = self._prompt_cache.get_cached_intent_blocks()
+                if system_blocks:
+                    logger.debug(f"🗂️ 意图识别使用缓存: 1 层 [5min TTL]")
+                else:
+                    # Fallback: 手动构建缓存格式
+                    intent_prompt = self._get_intent_prompt()
+                    system_blocks = [{
+                        "type": "text",
+                        "text": intent_prompt,
+                        "cache_control": {"type": "ephemeral"}
+                    }]
+            else:
+                # 未启用缓存或无 prompt_cache：使用字符串格式（向后兼容）
+                intent_prompt = self._get_intent_prompt()
+                system_blocks = intent_prompt  # 字符串格式，由 ClaudeLLMService 处理
             
             # 调用 LLM
             response = await self.llm.create_message_async(
                 messages=llm_messages,
-                system=intent_prompt
+                system=system_blocks
             )
             
             # 解析响应

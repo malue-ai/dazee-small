@@ -561,7 +561,7 @@ class ClaudeLLMService(BaseLLMService):
     async def create_message_async(
         self,
         messages: List[Message],
-        system: Optional[str] = None,
+        system: Optional[Union[str, List[Dict[str, Any]]]] = None,
         tools: Optional[List[Union[ToolType, str, Dict]]] = None,
         invocation_type: Optional[str] = None,
         **kwargs
@@ -571,13 +571,27 @@ class ClaudeLLMService(BaseLLMService):
         
         Args:
             messages: 消息列表
-            system: 系统提示词
+            system: 系统提示词，支持两种格式：
+                - str: 单层缓存（向后兼容，启用缓存时自动包装为 5 分钟 TTL）
+                - List[Dict]: 多层缓存（支持自定义 TTL，如 1h）
             tools: 工具列表
             invocation_type: 调用方式
             **kwargs: 其他参数（支持 max_tokens, temperature 覆盖）
             
         Returns:
             LLMResponse 响应对象
+            
+        Example:
+            # 单层缓存（向后兼容）
+            response = await llm.create_message_async(messages, system="You are helpful")
+            
+            # 多层缓存（Claude 固定 5 分钟 TTL）
+            system_blocks = [
+                {"type": "text", "text": "框架规则", "cache_control": {"type": "ephemeral"}},
+                {"type": "text", "text": "实例提示词", "cache_control": {"type": "ephemeral"}},
+                {"type": "text", "text": "用户画像"}  # 不缓存
+            ]
+            response = await llm.create_message_async(messages, system=system_blocks)
         """
         # 构建请求参数（支持 kwargs 覆盖）
         formatted_messages = self._format_messages(messages)
@@ -587,15 +601,21 @@ class ClaudeLLMService(BaseLLMService):
             "messages": formatted_messages
         }
         
-        # System prompt
+        # System prompt（支持多层缓存）
         if system:
-            if self.config.enable_caching:
+            if isinstance(system, list):
+                # 多层缓存格式：直接使用（调用方已构建好 cache_control）
+                request_params["system"] = system
+                logger.debug(f"🗂️ 使用多层缓存 system prompt: {len(system)} 层")
+            elif self.config.enable_caching:
+                # 字符串格式 + 启用缓存：自动包装为单层缓存（5 分钟 TTL）
                 request_params["system"] = [{
                     "type": "text",
                     "text": system,
                     "cache_control": {"type": "ephemeral"}
                 }]
             else:
+                # 字符串格式 + 禁用缓存：直接使用
                 request_params["system"] = system
         
         # Extended Thinking（由 LLM Service 配置控制）
@@ -668,7 +688,7 @@ class ClaudeLLMService(BaseLLMService):
     async def create_message_stream(
         self,
         messages: List[Message],
-        system: Optional[str] = None,
+        system: Optional[Union[str, List[Dict[str, Any]]]] = None,
         tools: Optional[List[Union[ToolType, str, Dict]]] = None,
         on_thinking: Optional[Callable[[str], None]] = None,
         on_content: Optional[Callable[[str], None]] = None,
@@ -680,7 +700,9 @@ class ClaudeLLMService(BaseLLMService):
         
         Args:
             messages: 消息列表
-            system: 系统提示词
+            system: 系统提示词，支持两种格式：
+                - str: 单层缓存（向后兼容，启用缓存时自动包装为 5 分钟 TTL）
+                - List[Dict]: 多层缓存（支持自定义 TTL，如 1h）
             tools: 工具列表
             on_thinking: thinking 回调
             on_content: content 回调
@@ -698,8 +720,22 @@ class ClaudeLLMService(BaseLLMService):
             "messages": formatted_messages
         }
         
+        # System prompt（支持多层缓存，与 create_message_async 保持一致）
         if system:
-            request_params["system"] = system
+            if isinstance(system, list):
+                # 多层缓存格式：直接使用（调用方已构建好 cache_control）
+                request_params["system"] = system
+                logger.debug(f"🗂️ [Stream] 使用多层缓存 system prompt: {len(system)} 层")
+            elif self.config.enable_caching:
+                # 字符串格式 + 启用缓存：自动包装为单层缓存（5 分钟 TTL）
+                request_params["system"] = [{
+                    "type": "text",
+                    "text": system,
+                    "cache_control": {"type": "ephemeral"}
+                }]
+            else:
+                # 字符串格式 + 禁用缓存：直接使用
+                request_params["system"] = system
         
         # Extended Thinking（由 LLM Service 配置控制）
         if self.config.enable_thinking:

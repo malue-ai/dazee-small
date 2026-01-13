@@ -173,10 +173,11 @@ class SimpleAgent:
         # 2. 意图分析器（根据 Schema 决定是否创建）
         if self.schema.intent_analyzer.enabled:
             intent_config = self.schema.intent_analyzer
+            # 🆕 V6.3: 启用 Prompt Caching（意图识别提示词 1h 缓存）
             self.intent_llm = create_claude_service(
                 model=intent_config.llm_model,  # 从 Schema 读取
                 enable_thinking=False,
-                enable_caching=False,
+                enable_caching=True,  # 🆕 V6.3: 启用缓存，节省 82% 成本
                 tools=[],
                 max_tokens=8192  # Claude 3.5 Haiku 最大支持 8192
             )
@@ -226,10 +227,11 @@ class SimpleAgent:
         logger.debug("✓ InvocationSelector 已初始化（V4.4 条件激活）")
         
         # 7. 执行 LLM（Sonnet）
+        # 🆕 V6.3: 启用 Prompt Caching（多层缓存，节省 88% 成本）
         self.llm = create_claude_service(
             model=self.model,  # 使用 Schema 中的 model
             enable_thinking=True,
-            enable_caching=False,
+            enable_caching=True,  # 🆕 V6.3: 启用缓存，支持多层缓存（1h TTL）
             tools=[ToolType.BASH, ToolType.TEXT_EDITOR, ToolType.WEB_SEARCH]
         )
         
@@ -577,22 +579,39 @@ class SimpleAgent:
         user_query = messages[-1]["content"] if messages else ""
         skip_memory = getattr(intent, 'skip_memory_retrieval', False)
         
-        # 4.1 选择 System Prompt（🆕 V5.1: 优先使用动态路由）
-        # 优先级：prompt_cache 动态路由 > 用户自定义 > 框架默认
+        # 4.1 选择 System Prompt（🆕 V6.3: 支持多层缓存）
+        # 优先级：prompt_cache 多层缓存 > 用户自定义 > 框架默认
         
         # 🆕 V5.1: 获取任务复杂度用于动态路由
         from core.prompt import TaskComplexity
         task_complexity = self._get_task_complexity(intent)
         
-        if self.prompt_cache and self.prompt_cache.is_loaded and self.prompt_cache.system_prompt_simple:
-            # 🆕 V5.1: 使用动态提示词路由（根据任务复杂度获取缓存版本）
+        # 🆕 V6.3: 使用多层缓存（prompt_cache 可用时）
+        use_multi_layer_cache = (
+            self.prompt_cache and 
+            self.prompt_cache.is_loaded and 
+            self.prompt_cache.system_prompt_simple and
+            self.llm.config.enable_caching  # 确保 LLM 配置启用了缓存
+        )
+        
+        if use_multi_layer_cache:
+            # 🆕 V6.3: 使用多层缓存格式（Layer 1-3: 1h 缓存, Layer 4: 不缓存）
+            system_prompt = self._build_cached_system_prompt(
+                intent=intent,
+                ctx=ctx,
+                user_id=user_id,
+                user_query=user_query
+            )
+            logger.info(f"✅ 多层缓存 System Prompt: complexity={task_complexity.value}, "
+                       f"layers={len(system_prompt)}")
+        elif self.prompt_cache and self.prompt_cache.is_loaded and self.prompt_cache.system_prompt_simple:
+            # 单层缓存（向后兼容：LLM 配置未启用缓存）
             base_prompt = self.prompt_cache.get_full_system_prompt(task_complexity)
             system_prompt = prompt_manager.build_system_prompt(ctx, base_prompt=base_prompt)
             
-            # 记录使用的版本和大小
             cached_size = len(self.prompt_cache.get_system_prompt(task_complexity))
             full_size = len(base_prompt)
-            logger.info(f"✅ 动态提示词路由: complexity={task_complexity.value}, "
+            logger.info(f"✅ 单层缓存路由: complexity={task_complexity.value}, "
                        f"缓存={cached_size}字符 + 运行时={full_size - cached_size}字符 = {full_size}字符")
         elif self.system_prompt:
             # 使用用户定义的 System Prompt + PromptManager 追加内容
@@ -613,10 +632,11 @@ class SimpleAgent:
             else:
                 logger.info("✅ 使用框架默认 System Prompt + PromptManager（已检索 Mem0 画像）")
         
-        # 记录已追加的片段
-        appended = prompt_manager.get_appended_fragments(ctx)
-        if appended:
-            logger.debug(f"📝 已追加的 Prompt 片段: {appended}")
+        # 记录已追加的片段（仅字符串模式）
+        if isinstance(system_prompt, str):
+            appended = prompt_manager.get_appended_fragments(ctx)
+            if appended:
+                logger.debug(f"📝 已追加的 Prompt 片段: {appended}")
         
         # 4.2 构建 LLM Messages
         llm_messages = [
@@ -946,10 +966,85 @@ class SimpleAgent:
         
         return complexity_map.get(complexity_str.lower(), TaskComplexity.MEDIUM)
     
+    def _build_cached_system_prompt(
+        self,
+        intent,
+        ctx,
+        user_id: str = None,
+        user_query: str = None
+    ) -> List[Dict[str, Any]]:
+        """
+        构建多层缓存的系统提示词（用于 Claude Prompt Caching）
+        
+        缓存策略：
+        - Layer 1: 框架规则（1h 缓存）
+        - Layer 2: 实例提示词（1h 缓存）
+        - Layer 3: Skills + 工具（1h 缓存）
+        - Layer 4: Mem0 用户画像（不缓存）
+        
+        Args:
+            intent: IntentResult 对象
+            ctx: RuntimeContext
+            user_id: 用户 ID（用于 Mem0 检索）
+            user_query: 用户查询（用于 Mem0 语义检索）
+            
+        Returns:
+            List[Dict] - Claude API 的 system blocks 格式
+        """
+        from core.prompt import TaskComplexity
+        
+        # 获取任务复杂度
+        task_complexity = self._get_task_complexity(intent)
+        
+        # 检查是否跳过 Mem0 检索
+        skip_memory = getattr(intent, 'skip_memory_retrieval', False)
+        
+        # 获取 Mem0 用户画像（仅当未跳过检索时）
+        user_profile = None
+        if not skip_memory and user_id and user_query:
+            try:
+                from prompts.universal_agent_prompt import _fetch_user_profile
+                user_profile = _fetch_user_profile(user_id, user_query)
+                if user_profile:
+                    logger.debug(f"📝 Mem0 用户画像: {len(user_profile)} 字符")
+            except Exception as e:
+                logger.warning(f"⚠️ Mem0 检索失败: {e}")
+        
+        # 优先使用 prompt_cache 的多层缓存构建方法
+        if self.prompt_cache and self.prompt_cache.is_loaded and self.prompt_cache.system_prompt_simple:
+            system_blocks = self.prompt_cache.get_cached_system_blocks(
+                complexity=task_complexity,
+                user_profile=user_profile
+            )
+            
+            logger.info(f"✅ 多层缓存 System Prompt: complexity={task_complexity.value}, "
+                       f"layers={len(system_blocks)}")
+            
+            return system_blocks
+        
+        # Fallback: 使用框架默认 Prompt（单层缓存）
+        from prompts.universal_agent_prompt import get_universal_agent_prompt
+        base_prompt = get_universal_agent_prompt(
+            user_id=user_id,
+            user_query=user_query,
+            skip_memory_retrieval=skip_memory
+        )
+        
+        # 单层缓存（向后兼容，Claude 固定 5 分钟 TTL）
+        system_blocks = [{
+            "type": "text",
+            "text": base_prompt,
+            "cache_control": {"type": "ephemeral"}
+        }]
+        
+        logger.info(f"✅ 单层缓存 System Prompt (fallback): {len(base_prompt)} 字符")
+        
+        return system_blocks
+    
     async def _process_stream(
         self,
         messages: List,
-        system_prompt: str,
+        system_prompt,
         tools: List,
         ctx,
         session_id: str

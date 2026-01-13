@@ -16,7 +16,7 @@ profiles:
     temperature: 1.0
     enable_thinking: true
     thinking_budget: 10000
-    enable_caching: false
+    enable_caching: true  # 启用多层 Prompt Caching（节省 88% 成本）
     timeout: 120.0
     max_retries: 3
 
@@ -27,7 +27,7 @@ profiles:
     max_tokens: 2048
     temperature: 0
     enable_thinking: false
-    enable_caching: false
+    enable_caching: true  # 启用 Prompt Caching（意图识别提示词 1h 缓存）
     timeout: 60.0
     max_retries: 2
 
