@@ -195,6 +195,8 @@ SCHEMA_GENERATOR_PROMPT = """
 - auto_compress: bool
 
 ### output_formatter
+**说明**：此配置供 Service 层使用，Agent 本身不做格式化。
+**用途**：Service 层通过 agent.schema.output_formatter 读取配置，按需创建 OutputFormatter。
 - enabled: bool
 - default_format: str (text/markdown/json/html)
 - code_highlighting: bool
@@ -430,7 +432,7 @@ class AgentFactory:
         logger.debug(f"   Intent Analyzer: {'启用' if schema.intent_analyzer.enabled else '禁用'}")
         logger.debug(f"   Plan Manager: {'启用' if schema.plan_manager.enabled else '禁用'}")
         logger.debug(f"   Tool Selector: {'启用' if schema.tool_selector.enabled else '禁用'}")
-        logger.debug(f"   Output Formatter: {schema.output_formatter.default_format}")
+        # 注意：output_formatter 配置保留在 Schema 中，但 Agent 不使用（由 API 层处理）
         if prompt_schema:
             logger.debug(f"   PromptSchema: {prompt_schema.agent_name} ({len(prompt_schema.modules)} 模块)")
         if prompt_cache:

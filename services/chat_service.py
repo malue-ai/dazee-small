@@ -22,6 +22,7 @@ from uuid import uuid4
 from logger import get_logger
 from core.agent import SimpleAgent, create_simple_agent
 from core.context import Context
+from core.output import OutputFormatter, create_output_formatter  # 🆕 V6.3
 # 【待扩展】Multi-Agent 模块（已注释）
 # from core.multi_agent import MultiAgentOrchestrator, MultiAgentConfig
 from services.session_service import SessionService, get_session_service, SessionNotFoundError
@@ -79,6 +80,43 @@ class ChatService:
         # 其他服务
         self.conversation_service = get_conversation_service()  # 用于 Context 加载消息
         self.background_tasks = get_background_task_service()
+        
+        # 🆕 V6.3: OutputFormatter 缓存（按需创建）
+        self._formatters: Dict[str, OutputFormatter] = {}
+    
+    # ==================== 辅助方法 ====================
+    
+    def get_output_formatter(self, agent: SimpleAgent) -> Optional[OutputFormatter]:
+        """
+        从 Agent Schema 获取 OutputFormatter（按需创建）
+        
+        这个方法展示了如何使用 Agent Schema 中的 output_formatter 配置。
+        
+        Args:
+            agent: Agent 实例
+            
+        Returns:
+            OutputFormatter 实例（如果配置启用），否则返回 None
+            
+        使用示例：
+            formatter = service.get_output_formatter(agent)
+            if formatter:
+                formatted = formatter.format(content, format="json")
+        """
+        if not agent.schema or not agent.schema.output_formatter.enabled:
+            return None
+        
+        # 使用 agent_id 作为缓存 key（避免重复创建）
+        agent_id = getattr(agent, 'agent_id', id(agent))
+        cache_key = str(agent_id)
+        
+        if cache_key not in self._formatters:
+            # 从 Agent Schema 读取配置并创建 OutputFormatter
+            formatter_config = agent.schema.output_formatter
+            self._formatters[cache_key] = create_output_formatter(config=formatter_config)
+            logger.info(f"✅ 从 Agent Schema 创建 OutputFormatter: format={formatter_config.default_format}")
+        
+        return self._formatters[cache_key]
     
     # ==================== 统一入口 ====================
     

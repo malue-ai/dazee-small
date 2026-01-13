@@ -85,40 +85,8 @@ mcp_tools:
   # 📌 系统配置构建 Skill（三阶段原子操作）
   # 完整流程：text2flowchart → part1 → part2
   # 预计耗时：约 3-5 分钟
+  #
   
-  # ==================== Google Nano Banana 多模态大模型 ====================
-  - name: nano_banana
-    server_url: "https://api.dify.ai/mcp/server/n7rhBjadwzy9bj90/mcp"
-    server_name: "dify"
-    auth_type: "bearer"
-    auth_env: "DIFY_API_KEY"
-    capability: "document_creation"
-    description: "使用强大的多模态大模型生成图片和编辑图片"
-    
-  - name: chatDocuments
-    server_url: "https://api.dify.ai/mcp/server/GYultzYga8PRayK5/mcp"
-    server_name: "dify"
-    auth_type: "bearer"
-    auth_env: "DIFY_API_KEY"
-    capability: "knowledge_search"
-    description: "支持上传urls的知识问答"
-
-  - name: perplexity_research
-    server_url: "https://api.dify.ai/mcp/server/WH0QvCw9dlNfhqEC/mcp"
-    server_name: "dify"
-    auth_type: "bearer"
-    auth_env: "DIFY_API_KEY"
-    capability: "document_creation"
-    description: "调用 Perplexity AI 进行深度研究，输出 DOCX 文档"
-
-  - name: text2document
-    server_url: "https://api.dify.ai/mcp/server/1lbiTqViu7byguhp/mcp"
-    server_name: "dify"
-    auth_type: "bearer"
-    auth_env: "DIFY_API_KEY"
-    capability: "document_creation"
-    description: "输入的文本格式转化为格式化文档，并提供下载url： 1、markdown格式转换为docx 2、csv格式转换为xlsx"
-
   # 阶段 1：自然语言 → Mermaid 流程图
   - name: text2flowchart
     server_url: "https://api.dify.ai/mcp/server/APXev1xgCP4n5XMn/mcp"
@@ -237,7 +205,17 @@ advanced:
     enabled: true
     use_llm: true
   
-  # 输出格式
+  # 输出格式（V6.3 使用 Pydantic 校验）
   output_formatter:
-    default_format: "markdown"
+    enabled: true
+    default_format: "text"           # 默认文本格式（最简单）
     code_highlighting: true
+    # JSON 输出配置（仅当 default_format="json" 时生效）
+    # json_model_name: "SimpleResponse"  # 使用内置 Pydantic 模型
+    # json_schema:                        # 或使用动态 Schema 定义
+    #   status: {type: "str", required: true}
+    #   message: {type: "str", default: ""}
+    #   data: {type: "any", default: null}
+    # strict_json_validation: false       # true=校验不通过则报错
+    json_ensure_ascii: false
+    json_indent: 2
