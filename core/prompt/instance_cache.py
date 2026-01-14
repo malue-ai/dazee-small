@@ -49,7 +49,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional, Any, Protocol
+from typing import Dict, Optional, Any, Protocol, List
 
 import json
 
@@ -1383,6 +1383,111 @@ class InstancePromptCache:
         # fallback 到默认
         from prompts.intent_recognition_prompt import get_intent_recognition_prompt
         return get_intent_recognition_prompt()
+    
+    def get_cached_system_blocks(
+        self,
+        complexity,
+        user_profile: Optional[str] = None,
+        tools_context: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        构建多层缓存的 system blocks（用于 Claude Prompt Caching）
+        
+        缓存策略（根据变更频率分层）：
+        - Layer 1: 框架规则（1h 缓存）- 框架升级需重启
+        - Layer 2: 实例提示词（1h 缓存）- 运营优化需重启
+        - Layer 3: Skills + 工具（1h 缓存）- 工具更新需重启
+        - Layer 4: Mem0 用户画像（不缓存）- 语义检索，每次不同
+        
+        Args:
+            complexity: TaskComplexity 枚举（SIMPLE/MEDIUM/COMPLEX）
+            user_profile: Mem0 用户画像（可选，不缓存）
+            tools_context: Skills + 工具定义（可选，1h 缓存）
+            
+        Returns:
+            List[Dict] - Claude API 的 system blocks 格式
+            
+        Example:
+            system_blocks = cache.get_cached_system_blocks(
+                complexity=TaskComplexity.MEDIUM,
+                user_profile=mem0_profile,
+                tools_context=skills_metadata
+            )
+            response = await llm.create_message_async(messages, system=system_blocks)
+        """
+        system_blocks = []
+        
+        # Layer 1: 框架规则（缓存）
+        # 框架升级 → 重启 → 运行期稳定
+        framework_prompt = self.runtime_context.get("framework_prompt", "")
+        if framework_prompt:
+            system_blocks.append({
+                "type": "text",
+                "text": f"# 框架能力协议\n\n{framework_prompt}",
+                "cache_control": {"type": "ephemeral"}
+            })
+            logger.debug(f"📦 Layer 1 (框架规则): {len(framework_prompt)} 字符 [cached]")
+        
+        # Layer 2: 实例核心提示词（缓存）
+        # 运营优化 → 重启 → 运行期稳定
+        instance_prompt = self.get_system_prompt(complexity)
+        if instance_prompt:
+            system_blocks.append({
+                "type": "text",
+                "text": instance_prompt,
+                "cache_control": {"type": "ephemeral"}
+            })
+            logger.debug(f"📦 Layer 2 (实例提示词): {len(instance_prompt)} 字符 [cached]")
+        
+        # Layer 3: Skills + 工具定义（缓存）
+        # 工具更新 → 重启 → 运行期稳定
+        # 优先使用传入的 tools_context，否则使用 runtime_context 中的 apis_prompt
+        tools_text = tools_context or self.runtime_context.get("apis_prompt", "")
+        if tools_text:
+            system_blocks.append({
+                "type": "text",
+                "text": tools_text,
+                "cache_control": {"type": "ephemeral"}
+            })
+            logger.debug(f"📦 Layer 3 (Skills+工具): {len(tools_text)} 字符 [1h cache]")
+        
+        # Layer 4: Mem0 用户画像（不缓存）
+        # 基于语义检索，每次 query 不同 → 结果不同 → 不能缓存
+        if user_profile:
+            system_blocks.append({
+                "type": "text",
+                "text": f"# 用户画像\n\n{user_profile}"
+                # 不添加 cache_control，不缓存
+            })
+            logger.debug(f"📦 Layer 4 (用户画像): {len(user_profile)} 字符 [不缓存]")
+        
+        logger.info(f"🗂️ 构建多层缓存 system blocks: {len(system_blocks)} 层")
+        
+        return system_blocks
+    
+    def get_cached_intent_blocks(self) -> List[Dict[str, Any]]:
+        """
+        构建意图识别的 system blocks（用于 Claude Prompt Caching）
+        
+        意图识别提示词在运行期只读，启用缓存（5分钟 TTL，Claude 固定）
+        
+        Returns:
+            List[Dict] - Claude API 的 system blocks 格式
+        """
+        intent_prompt = self.get_intent_prompt()
+        
+        if not intent_prompt:
+            return []
+        
+        system_blocks = [{
+            "type": "text",
+            "text": intent_prompt,
+            "cache_control": {"type": "ephemeral"}
+        }]
+        
+        logger.debug(f"🗂️ 构建意图识别 system blocks: {len(intent_prompt)} 字符 [cached]")
+        
+        return system_blocks
     
     @staticmethod
     def _compute_hash(content: str) -> str:

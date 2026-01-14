@@ -542,6 +542,28 @@ def _merge_config_to_schema(base_schema, config: InstanceConfig):
     if config.intent_analyzer_use_llm is not None:
         merged.intent_analyzer.use_llm = config.intent_analyzer_use_llm
     
+    # === LLM 参数配置覆盖（V6.3 支持 Prompt Caching）===
+    # 注意：这些参数只影响通过 instance_config.llm_params 创建的 LLM service
+    # 不会影响已经从 profiles.yaml 加载的 LLM profile
+    # 此处用于记录配置意图，实际 LLM service 创建时会优先使用 profile
+    # （但保留此逻辑，供未来扩展使用）
+    llm_override_count = 0
+    if config.llm_params.temperature is not None:
+        llm_override_count += 1
+    if config.llm_params.max_tokens is not None:
+        llm_override_count += 1
+    if config.llm_params.enable_thinking is not None:
+        llm_override_count += 1
+    if config.llm_params.thinking_budget is not None:
+        llm_override_count += 1
+    if config.llm_params.enable_caching is not None:
+        llm_override_count += 1
+    if config.llm_params.top_p is not None:
+        llm_override_count += 1
+    
+    if llm_override_count > 0:
+        logger.debug(f"📝 config.yaml 覆盖了 {llm_override_count} 项 LLM 参数 (注意：需要检查是否被 profile 覆盖)")
+    
     # === 输出格式配置覆盖（V6.3 Pydantic 支持）===
     if config.output_format:
         merged.output_formatter.default_format = config.output_format

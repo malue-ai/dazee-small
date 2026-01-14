@@ -48,7 +48,7 @@ memory_manager:
   compress_threshold: 15
 output_formatter:
   enabled: true
-  default_format: markdown
+  default_format: text
   supported_formats:
   - text
   - markdown
@@ -56,6 +56,11 @@ output_formatter:
   - html
   code_highlighting: true
   max_output_length: 50000
+  json_model_name: null
+  json_schema: null
+  strict_json_validation: false
+  json_ensure_ascii: false
+  json_indent: 2
   include_metadata: false
 skills: []
 tools: []
