@@ -1,7 +1,7 @@
-# ZenFlux Agent V6.2 架构文档
+# ZenFlux Agent V6.3 架构文档
 
-> 📅 **最后更新**: 2026-01-13  
-> 🎯 **当前版本**: V6.2 - 配置优先级体系 + AgentSchema 智能兜底  
+> 📅 **最后更新**: 2026-01-14  
+> 🎯 **当前版本**: V6.3 - 上下文压缩三层防护 + RVR 循环深化  
 > 🔗 **历史版本**: 已归档至 [`archived/`](./archived/) 目录  
 > ✅ **架构状态**: 生产就绪，端到端验证通过  
 > 📝 **待扩展**: Multi-Agent 编排（代码已预留，暂未启用）
@@ -34,19 +34,136 @@
 
 ## 版本概述
 
-### V6.2 核心特性
+### V6.3 核心特性
 
-V6.2 是 ZenFlux Agent 的**配置优先级体系 + AgentSchema 智能兜底** 版本，核心架构：
+V6.3 是 ZenFlux Agent 的**上下文压缩三层防护 + RVR 循环深化** 版本，核心架构：
 
-1. **🆕 三级配置优先级**：`config.yaml` > LLM 推断 > `DEFAULT_AGENT_SCHEMA`
-2. **🆕 高质量默认配置**：`DEFAULT_AGENT_SCHEMA` 升级为最佳实践配置（非最小化配置）
-3. **🆕 智能配置合并**：`_merge_config_to_schema()` 函数实现选择性覆盖
-4. **🆕 提示词长度规范**：Simple(8k-15k) < Medium(15k-25k) < Complex(30k-50k)
-5. **场景化提示词分解**：运营 `prompt.md` → LLM 分解为 4 个专用提示词
-6. **SimpleAgent 单智能体**：用户请求 → Service 层 → SimpleAgent，简洁高效
-7. **Prompt-First 原则**：规则写在 Prompt 里，不写在代码里
+1. **🔥 上下文压缩三层防护**：Memory Tool 指导 + 历史消息裁剪 + QoS 成本控制
+2. **🔥 透明化用户体验**：自动处理 + 事件反馈，用户知道发生了什么但无需操作
+3. **🔥 RVR 循环架构稳定**：继续使用 `messages.stream()` + 自主 RVR 循环（不切换到 tool_runner）
+4. **✅ 三级配置优先级**：`config.yaml` > LLM 推断 > `DEFAULT_AGENT_SCHEMA`
+5. **✅ 高质量默认配置**：`DEFAULT_AGENT_SCHEMA` 升级为最佳实践配置
+6. **✅ 智能配置合并**：`_merge_config_to_schema()` 函数实现选择性覆盖
+7. **✅ 场景化提示词分解**：运营 `prompt.md` → LLM 分解为 4 个专用提示词
+8. **SimpleAgent 单智能体**：用户请求 → Service 层 → SimpleAgent，简洁高效
+9. **Prompt-First 原则**：规则写在 Prompt 里，不写在代码里
 
-### V6.2 新增功能
+### V6.3 新增功能
+
+#### 🔥 上下文压缩三层防护策略
+
+**核心问题**：长对话场景下如何保证用户体验和问答效果？
+
+**架构决策**：
+- ✅ 继续使用 `messages.stream()` + 自主 RVR 循环
+- ❌ 不切换到 `tool_runner`（灵活性更高，重构成本极大）
+- ✅ 采用三层防护策略：Memory + 裁剪 + QoS
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                  上下文压缩三层防护策略                                   │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  L1. Memory Tool 状态保存（Claude 自主）                                 │
+│      → 在 System Prompt 中指导 Claude 使用 memory 工具保存重要状态       │
+│      → 周期性保存当前工作进展                                            │
+│      → 完整完成任务，不提前停止                                          │
+│                                                                          │
+│  L2. 历史消息智能裁剪（服务层自动 + 事件通知）                           │
+│      → 保留首轮对话（任务定义）                                          │
+│      → 保留最近 N 轮（当前工作上下文）                                   │
+│      → 保留关键 tool_result（数据和结果）                                │
+│      → 中间轮次丢弃细节，保留摘要                                        │
+│      → 🆕 通过 Events 系统告知用户优化结果                               │
+│                                                                          │
+│  L3. QoS 成本控制（后端监控 + 可选通知）                                 │
+│      → 根据用户等级设置 token 预算（FREE/BASIC/PRO/ENTERPRISE）          │
+│      → 后端日志和成本统计                                                │
+│      → 🆕 接近预算时可选择性提示用户（配置化）                           │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**核心原则**：
+1. ✅ **自动化**：上下文管理自动执行，用户无需手动操作
+2. ✅ **透明化**：通过事件系统告知用户系统在做什么（类似 Cursor）
+3. ✅ **非侵入式**：通知不打断用户当前操作（5秒淡出）
+4. ✅ **问答效果优先**：智能保留关键上下文，不丢信息
+5. ✅ **架构匹配**：与当前 RVR 循环完全兼容
+6. ✅ **维护简单**：~200 行核心代码 + 事件系统集成
+
+**配置管理**：
+- **框架层统一管理**：`config/context_compaction.yaml`
+- **不暴露给运营**：运营人员无需了解技术细节，开箱即用
+- **环境变量支持**：`export QOS_LEVEL=enterprise`（极少数场景）
+
+**代码结构**：
+```
+core/context/compaction/
+└── __init__.py                         # ~200行
+    ├── QoSLevel                        # QoS 等级枚举
+    ├── ContextStrategy                 # 策略配置
+    ├── get_memory_guidance_prompt()    # L1：生成 Memory 指导提示词
+    ├── trim_history_messages()         # L2：智能裁剪历史消息
+    └── should_warn_backend()           # L3：后端预警判断
+
+config/context_compaction.yaml          # 框架配置
+services/chat_service.py                # L2/L3 执行点
+core/agent/simple_agent.py              # L1 Prompt 注入点
+```
+
+**上下文进度条 UI（类似 Cursor）**：
+
+除了事件通知，还应提供**实时可见的进度指示器**：
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  对话界面顶部                                                │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │  上下文: ████████░░░░░░░░ 45%  (90K / 200K tokens)   │  │
+│  └───────────────────────────────────────────────────────┘  │
+│                                                             │
+│  ✓ 对话历史已智能优化，保留 15 条关键消息                   │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**进度条颜色编码**（类似 Cursor）：
+- 🟢 **0-60%**：绿色，正常状态
+- 🟡 **60-80%**：黄色，提示即将优化
+- 🟠 **80-95%**：橙色，即将触发裁剪
+- 🔴 **95-100%**：红色，建议新会话（极少触发）
+
+**实时更新时机**：
+1. 每次用户发送消息后更新
+2. 每次 Agent 回复后更新
+3. 裁剪/压缩后立即更新（显著下降）
+
+**实现方式**：
+- 通过 SSE 事件流持续更新进度条
+- 事件类型：`context_usage_update`
+- 包含：当前 tokens、预算、百分比、颜色等级
+
+**效果对比**：
+
+| 指标 | 之前 | V6.3 |
+|------|------|------|
+| **用户体验** | 可能警告用户 | 🆕 实时进度条 + 事件通知 ✅ |
+| **透明度** | 用户不知道状态 | 🆕 持续可见的上下文使用情况 ✅ |
+| **焦虑感** | "是不是卡住了？" | 🆕 清晰的进度反馈 ✅ |
+| **架构匹配** | ❌ 不匹配（考虑切换 tool_runner） | ✅ 完全匹配现有架构 |
+| **问答效果** | 可能丢关键信息 | 智能保留关键上下文 ✅ |
+| **代码复杂度** | 1,500+ 行（如果用 tool_runner） | ~200 行 + 进度条组件 ✅ |
+| **维护成本** | 需要大规模重构 | 轻量增强 ✅ |
+
+**参考文档**：
+- [上下文压缩策略指南](../guides/context_compression_strategy.md)
+- [上下文管理框架](./context_management_framework.md)
+- [上下文管理架构决策](./context_management_decision.md)
+
+---
+
+### V6.2 功能（延续）
 
 #### 1. 三级配置优先级体系
 
@@ -434,22 +551,25 @@ multi_agent:
 ### 版本演进路线
 
 ```
-V5.0 (2026-01)    V5.1 (2026-01)    V6.1 (2026-01)    V6.2 (2026-01)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-实例级缓存       → Mem0 画像增强   → 场景化提示词分解 → 🔥 三级配置优先级
-LLM 语义驱动     → 语义推理模块   → prompt_results   → 🔥 AgentSchema 智能兜底
-Prompt-First     → 工具分层加载   → 动态更新检测    → 🔥 智能配置合并
-本地持久化       → HITL 完善      → 框架规则引导    → 🔥 提示词长度规范
+V5.0 (2026-01)    V5.1 (2026-01)    V6.1 (2026-01)    V6.2 (2026-01)    V6.3 (2026-01)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+实例级缓存       → Mem0 画像增强   → 场景化提示词分解 → 三级配置优先级 → 🔥 上下文压缩三层防护
+LLM 语义驱动     → 语义推理模块   → prompt_results   → AgentSchema兜底 → 🔥 RVR 循环深化
+Prompt-First     → 工具分层加载   → 动态更新检测    → 智能配置合并   → 🔥 用户体验优先
+本地持久化       → HITL 完善      → 框架规则引导    → 提示词长度规范 → 🔥 架构决策稳定
 ```
 
-| 维度 | V5.1 | V6.1 | V6.2 |
-|------|------|------|------|
-| **配置管理** | 单层配置 | config.yaml | 🆕 三级优先级体系 |
-| **Schema 默认值** | 最小化配置 | 基础配置 | 🆕 高质量最佳实践配置 |
-| **配置合并** | 无 | 简单覆盖 | 🆕 智能选择性合并 |
-| **提示词长度** | 无规范 | 无规范 | 🆕 Simple < Medium < Complex |
-| **模块边界** | 无定义 | 无定义 | 🆕 PROMPT_MODULES_BOUNDARY |
-| **运营容错** | 配置错误即失败 | 基础兜底 | 🆕 高质量兜底保障 |
+| 维度 | V5.1 | V6.1 | V6.2 | V6.3 |
+|------|------|------|------|------|
+| **上下文管理** | 无 | 基础支持 | 基础支持 | 🆕 三层防护策略 |
+| **架构稳定性** | 探索阶段 | 基本稳定 | 配置驱动 | 🆕 RVR 循环确立 |
+| **用户体验** | 基础可用 | 改善 | 改善 | 🆕 静默处理，完全无感知 |
+| **配置管理** | 单层配置 | config.yaml | ✅ 三级优先级体系 | ✅ 三级优先级 + 框架统一管理 |
+| **Schema 默认值** | 最小化配置 | 基础配置 | ✅ 高质量最佳实践配置 | ✅ 高质量最佳实践配置 |
+| **配置合并** | 无 | 简单覆盖 | ✅ 智能选择性合并 | ✅ 智能选择性合并 |
+| **提示词长度** | 无规范 | 无规范 | ✅ Simple < Medium < Complex | ✅ Simple < Medium < Complex |
+| **运营容错** | 配置错误即失败 | 基础兜底 | ✅ 高质量兜底保障 | ✅ 高质量兜底保障 |
+| **代码行数** | ~15K | ~18K | ~20K | ~20K (+200 行压缩模块) |
 
 ---
 
@@ -817,12 +937,32 @@ agent = AgentFactory.from_schema(
             │
             ▼
 ┌───────────────────────────────────────────────────────────┐
-│ Phase 3: 系统提示词组装                                     │
+│ Phase 3: 🆕 历史消息智能裁剪（L2 策略）                     │
+├───────────────────────────────────────────────────────────┤
+│ from core.context.compaction import trim_history_messages │
+│                                                           │
+│ 裁剪逻辑：                                                 │
+│   • 保留首轮对话（任务定义）                               │
+│   • 保留最近 N 轮（当前工作上下文）                        │
+│   • 保留关键 tool_result（数据和结果）                     │
+│   • 中间轮次丢弃细节，保留摘要                             │
+│                                                           │
+│ 🆕 V6.3: 自动处理 + 透明反馈（类似 Cursor）                │
+└───────────────────────────────────────────────────────────┘
+            │
+            ▼
+┌───────────────────────────────────────────────────────────┐
+│ Phase 4: 系统提示词组装（含 L1 Memory 指导）               │
 ├───────────────────────────────────────────────────────────┤
 │ _prompt_cache.get_system_prompt(complexity)               │
 │   → complex_prompt.md  ◄─ 从 prompt_results 加载          │
 │                                                           │
+│ 🆕 L1 策略：注入 Memory Tool 使用指导                      │
+│   from core.context.compaction import get_memory_guidance_prompt│
+│   → 指导 Claude 主动使用 memory 工具保存重要状态          │
+│                                                           │
 │ 注入：                                                     │
+│   • 🆕 Memory Tool 使用指导（L1）                          │
 │   • 用户画像（如果检索了 Mem0）                            │
 │   • Skills 元数据                                          │
 │   • 能力分类描述                                           │
@@ -830,7 +970,7 @@ agent = AgentFactory.from_schema(
             │
             ▼
 ┌───────────────────────────────────────────────────────────┐
-│ Phase 4: RVR 循环执行（Sonnet，强+准确）                    │
+│ Phase 5: RVR 循环执行（Sonnet，强+准确）                    │
 ├───────────────────────────────────────────────────────────┤
 │ for turn in range(max_turns):                             │
 │   [Read]   → plan_memory.get_plan()                       │
@@ -840,9 +980,14 @@ agent = AgentFactory.from_schema(
 │   [Validate]→验证质量                                      │
 │   [Write]  → plan_memory.update_step()                    │
 │                                                           │
+│   🆕 L3 策略：后端监控 + 可选用户通知                      │
+│   if should_warn_backend(estimated_tokens):               │
+│      logger.warning("⚠️ Token 使用预警")  # 仅日志         │
+│                                                           │
 │ 性能优势：                                                 │
 │   • 意图提示词：0ms（从 prompt_results 取）                │
 │   • 系统提示词：0ms（从 prompt_results 取）                │
+│   • 🆕 历史消息裁剪：<10ms（服务层自动）                   │
 │   • 总节省：~500ms/请求                                    │
 └───────────────────────────────────────────────────────────┘
 ```
@@ -1248,7 +1393,7 @@ core/memory/
 - 支持 SSE 流式输出
 - 多平台适配器（ZenO、钉钉、飞书等）
 
-**事件类型**（6 类）：
+**事件类型**（7 类）：
 
 | 事件类别 | 文件 | 说明 |
 |---------|------|------|
@@ -1258,6 +1403,173 @@ core/memory/
 | user_events | `user_events.py` | 用户操作事件 |
 | system_events | `system_events.py` | 系统状态事件 |
 | conversation_events | `conversation_events.py` | 对话流程事件 |
+| 🆕 context_events | `context_events.py` | **V6.3 上下文管理事件** |
+
+### 🆕 上下文事件系统（V6.3）
+
+**文件**：`core/events/context_events.py`
+
+**职责**：
+- 上下文管理操作的透明化反馈
+- 告知用户系统正在做什么（类似 Cursor 的 "Chat context summarized"）
+- 提供优化统计（节省的 tokens、保留的消息数等）
+
+**核心事件类型**：
+
+```python
+class ContextEventType(str, Enum):
+    """上下文管理事件类型"""
+    CONTEXT_USAGE_UPDATE = "context_usage_update"        # 🆕 上下文使用更新（实时）
+    CONTEXT_TRIMMING_START = "context_trimming_start"    # 开始裁剪
+    CONTEXT_TRIMMING_DONE = "context_trimming_done"      # 裁剪完成
+    CONTEXT_COMPACTION_START = "context_compaction_start"  # 开始压缩
+    CONTEXT_COMPACTION_DONE = "context_compaction_done"    # 压缩完成
+    CONTEXT_BUDGET_WARNING = "context_budget_warning"      # Token 预算警告
+
+@dataclass
+class ContextUsageUpdateEvent:
+    """
+    上下文使用更新事件（实时）
+    
+    用于驱动上下文进度条更新（类似 Cursor）
+    
+    前端展示示例：
+    ┌───────────────────────────────────────────────────┐
+    │ 上下文: ████████░░░░░░░░ 45%  (90K / 200K tokens) │
+    └───────────────────────────────────────────────────┘
+    """
+    event_type: ContextEventType = ContextEventType.CONTEXT_USAGE_UPDATE
+    timestamp: datetime
+    
+    # 使用情况
+    current_tokens: int         # 当前使用 tokens
+    budget_tokens: int          # 总预算 tokens
+    usage_percentage: float     # 使用百分比 (0-1)
+    
+    # 颜色等级（用于前端渲染）
+    color_level: str            # "green" / "yellow" / "orange" / "red"
+    
+    # 统计信息
+    message_count: int          # 当前消息数
+    turn_count: int             # 对话轮次数
+    
+    # 可选的建议
+    suggestion: Optional[str] = None  # 如 "建议新开对话"（极少触发）
+
+
+@dataclass
+class ContextTrimmingEvent:
+    """
+    上下文裁剪事件
+    
+    前端展示示例（类似 Cursor）：
+    ┌────────────────────────────────────────────────────┐
+    │ ✓ 对话历史已智能优化，保留 15 条关键消息            │
+    │ 已节省约 50,000 tokens，保持流畅对话  了解更多 >   │
+    └────────────────────────────────────────────────────┘
+    """
+    event_type: ContextEventType
+    timestamp: datetime
+    
+    # 裁剪统计
+    original_messages: int      # 原始消息数
+    trimmed_messages: int       # 裁剪后消息数
+    preserved_turns: int        # 保留的对话轮次
+    
+    # 优化效果
+    tokens_before: Optional[int] = None
+    tokens_after: Optional[int] = None
+    tokens_saved: Optional[int] = None
+    
+    # 用户可读消息
+    display_message: str = "对话历史已智能优化，保留关键上下文"
+    details: Optional[str] = None
+    learn_more_url: Optional[str] = "/docs/context-management"
+```
+
+**使用示例**（在 ChatService 中）：
+
+```python
+# services/chat_service.py
+
+async def chat(self, message: str, user_id: str, **kwargs):
+    """聊天主流程"""
+    
+    # ... 处理逻辑 ...
+    
+    # 1. 🆕 发送上下文使用更新事件（驱动进度条）
+    current_tokens = estimate_tokens(messages)
+    usage_percentage = current_tokens / self.context_strategy.token_budget
+    
+    # 根据使用率确定颜色
+    if usage_percentage < 0.6:
+        color_level = "green"
+    elif usage_percentage < 0.8:
+        color_level = "yellow"
+    elif usage_percentage < 0.95:
+        color_level = "orange"
+    else:
+        color_level = "red"
+    
+    await self.event_manager.emit_event(
+        ContextUsageUpdateEvent(
+            timestamp=datetime.now(),
+            current_tokens=current_tokens,
+            budget_tokens=self.context_strategy.token_budget,
+            usage_percentage=usage_percentage,
+            color_level=color_level,
+            message_count=len(messages),
+            turn_count=len(messages) // 2,
+            suggestion="建议新开对话" if usage_percentage > 0.95 else None
+        )
+    )
+    
+    # 2. L2 裁剪完成后发送事件
+    if trimming_occurred:
+        await self.event_manager.emit_event(
+            ContextTrimmingEvent(
+                event_type=ContextEventType.CONTEXT_TRIMMING_DONE,
+                timestamp=datetime.now(),
+                original_messages=100,
+                trimmed_messages=15,
+                preserved_turns=12,
+                tokens_before=50000,
+                tokens_after=8000,
+                tokens_saved=42000,
+                display_message="✓ 对话历史已优化，保留 15 条关键消息",
+                details="已节省约 42,000 tokens，保持流畅对话"
+            )
+        )
+```
+
+**前端展示效果**：
+
+**1. 上下文进度条（持续显示）**：
+```typescript
+// 前端实时更新进度条
+eventSource.addEventListener('context_usage_update', (event) => {
+  const data = JSON.parse(event.data);
+  
+  updateContextProgressBar({
+    percentage: data.usage_percentage * 100,
+    current: data.current_tokens,
+    budget: data.budget_tokens,
+    colorLevel: data.color_level,
+    messageCount: data.message_count
+  });
+  
+  // 如果有建议，显示提示
+  if (data.suggestion) {
+    showSuggestion(data.suggestion);
+  }
+});
+```
+
+**2. 裁剪通知（临时显示）**：
+- 淡灰色背景，顶部提示条
+- 5 秒后自动淡出
+- 不打断用户当前操作
+- 可点击"了解更多"链接查看详情
 
 ### Tool 系统
 
@@ -1353,7 +1665,21 @@ zenflux_agent/
 │   │   ├── simple_agent.py         # SimpleAgent（编排层）
 │   │   └── types.py                # Agent 类型定义
 │   │
-│   ├── prompt/                     # 🔥 V6.1 核心模块
+│   ├── context/                    # 上下文管理
+│   │   ├── compaction/             # 🔥 V6.3 上下文压缩模块
+│   │   │   └── __init__.py         # 三层防护策略（~200行）
+│   │   ├── context_engineering.py  # 上下文工程
+│   │   ├── conversation.py         # 对话上下文
+│   │   ├── fusion.py               # 上下文融合
+│   │   ├── injector.py             # 上下文注入
+│   │   ├── manager.py              # 上下文管理器
+│   │   ├── prompt_manager.py       # Prompt 管理器
+│   │   ├── provider.py             # 上下文提供商
+│   │   ├── providers/              # 多种上下文提供商
+│   │   ├── retriever.py            # 上下文检索器
+│   │   └── runtime.py              # 运行时上下文
+│   │
+│   ├── prompt/                     # V6.1 提示词模块
 │   │   ├── instance_cache.py       # InstancePromptCache（5步分解）
 │   │   ├── prompt_results_writer.py# 🆕 V6.1 结果输出管理
 │   │   ├── framework_rules.py      # 🆕 V6.1 框架规则定义
@@ -1382,6 +1708,10 @@ zenflux_agent/
 │   │
 │   ├── events/                     # Events 系统
 │   │   ├── manager.py              # 事件管理器
+│   │   ├── context_events.py       # 🔥 V6.3 上下文管理事件
+│   │   ├── message_events.py       # 消息事件
+│   │   ├── content_events.py       # 内容事件
+│   │   ├── session_events.py       # 会话事件
 │   │   └── adapters/               # 平台适配器
 │   │
 │   ├── tool/                       # Tool 系统
@@ -1446,8 +1776,9 @@ zenflux_agent/
 │
 ├── config/                         # 全局配置
 │   ├── capabilities.yaml           # 能力配置
+│   ├── context_compaction.yaml     # 🔥 V6.3 上下文压缩配置
 │   ├── llm_config/                 # LLM 配置
-│   │   └── profiles.yaml           # 🆕 包含 prompt_decomposer
+│   │   └── profiles.yaml           # 包含 prompt_decomposer
 │   └── storage.yaml                # 存储配置
 │
 ├── scripts/                        # 脚本
@@ -1617,8 +1948,97 @@ instances/my_agent/prompt_results/
 
 全局共享配置：
 - **capabilities.yaml**：能力配置（工具注册、分类定义）
+- **🔥 context_compaction.yaml**：上下文压缩配置（三层防护策略）
 - **llm_config/profiles.yaml**：LLM 配置（包含 `prompt_decomposer`）
 - **storage.yaml**：存储配置
+
+#### 🔥 上下文压缩配置（`config/context_compaction.yaml`）
+
+**V6.3 新增**：统一管理上下文压缩策略，运营人员无需配置。
+
+```yaml
+# 上下文压缩配置（三层防护策略）
+#
+# 核心原则：
+# 1. 用户体验和问答效果优先
+# 2. 自动处理 + 透明反馈（类似 Cursor）
+# 3. 非侵入式通知，不打断用户操作
+
+# 默认 QoS 等级
+default_qos_level: "pro"
+
+# QoS 等级对应的 token 预算
+qos_token_budgets:
+  free: 50000        # 免费用户
+  basic: 150000      # 基础付费
+  pro: 200000        # 专业版（默认）
+  enterprise: 1000000  # 企业版
+
+# L2 策略：历史消息裁剪配置
+history_trimming:
+  max_history_messages: 50   # 最大保留消息数
+  preserve_first_n: 2        # 始终保留前 N 轮（建立上下文）
+  preserve_last_n: 10        # 始终保留最近 N 轮（当前上下文）
+  preserve_tool_results: true  # 保留含 tool_result 的消息
+
+# L3 策略：后端预警配置
+backend_warning:
+  warning_threshold: 0.8     # 80% 时后端日志警告
+  enable_metrics: true       # 启用 token 使用统计
+
+# 🆕 V6.3: 用户通知配置
+user_notifications:
+  # 是否启用上下文管理通知
+  enable_notifications: true
+  
+  # 通知级别
+  # - silent: 完全静默（仅后端日志）
+  # - minimal: 仅关键操作（压缩/大量裁剪）
+  # - detailed: 所有操作（推荐，类似 Cursor）
+  notification_level: "detailed"
+  
+  # 🆕 上下文进度条配置
+  progress_bar:
+    enabled: true              # 是否显示进度条
+    position: "top"            # top / bottom / sidebar
+    show_percentage: true      # 显示百分比
+    show_tokens: true          # 显示 token 数值
+    update_frequency: "realtime"  # realtime / on_message
+    
+    # 颜色阈值（百分比）
+    color_thresholds:
+      green_max: 60            # 0-60% 绿色
+      yellow_max: 80           # 60-80% 黄色
+      orange_max: 95           # 80-95% 橙色
+      # 95-100% 红色
+  
+  # 裁剪/压缩通知配置
+  trimming_notifications:
+    show_tokens_saved: true    # 显示节省的 tokens
+    show_preserved_count: true # 显示保留的消息数
+    auto_dismiss_seconds: 5    # 自动消失时间（秒）
+    
+    # 通知样式
+    style:
+      position: "top"          # top / bottom
+      theme: "subtle"          # subtle / prominent
+      show_learn_more: true    # 显示"了解更多"链接
+```
+
+**环境变量支持**（极少数场景）：
+
+```bash
+# 如果需要调整 QoS 等级（极少数情况）
+export QOS_LEVEL=enterprise  # 更宽松的上下文限制
+export QOS_LEVEL=free        # 更严格的成本控制
+```
+
+**设计原则**：
+- ✅ **开箱即用**：默认启用，运营人员无需配置
+- ✅ **自动化 + 透明化**：自动处理 + 事件反馈（类似 Cursor）
+- ✅ **非侵入式**：通知不打断用户，5秒后自动淡出
+- ✅ **框架统一管理**：不暴露给实例配置，简化运营工作
+- ✅ **问答效果优先**：智能保留关键上下文，不丢信息
 
 **LLM Profile 示例**（`config/llm_config/profiles.yaml`）：
 
@@ -1749,7 +2169,8 @@ curl -X POST http://localhost:8000/api/v1/chat \
 
 | 版本 | 日期 | 核心变化 |
 |------|------|---------|
-| **V6.2** | 2026-01-13 | 🔥 **当前版本**：三级配置优先级 + AgentSchema 智能兜底 + 提示词长度规范 |
+| **V6.3** | 2026-01-14 | 🔥 **当前版本**：上下文压缩三层防护 + RVR 循环深化 + 用户体验优先 |
+| V6.2 | 2026-01-13 | 三级配置优先级 + AgentSchema 智能兜底 + 提示词长度规范 |
 | V6.1 | 2026-01-13 | 场景化提示词分解 + prompt_results 输出 + 动态更新检测 |
 | V5.1 | 2026-01-11 | Mem0 多层画像 + 工具分层加载 + 语义推理模块 |
 | V5.0 | 2026-01-09 | 实例级提示词缓存 + LLM 语义驱动 Schema |
@@ -1759,6 +2180,9 @@ curl -X POST http://localhost:8000/api/v1/chat \
 ---
 
 **🎯 架构设计目标**：
+- ✅ **🔥 透明化用户体验**：自动处理 + 事件反馈，用户知道发生了什么但无需操作
+- ✅ **🔥 问答效果优先**：智能保留关键上下文，不丢信息
+- ✅ **🔥 架构稳定性**：RVR 循环深化，不切换到 tool_runner
 - ✅ **配置优先级**：config.yaml > LLM 推断 > DEFAULT_AGENT_SCHEMA
 - ✅ **高质量兜底**：即使运营配置不全/错误，Agent 也能高质量运行
 - ✅ **Prompt-Driven**：运营 prompt.md → LLM 分解 → 场景化提示词
@@ -1766,9 +2190,17 @@ curl -X POST http://localhost:8000/api/v1/chat \
 - ✅ **智能更新**：检测源文件变更，保护手动编辑
 - ✅ **简洁清晰**：Service → SimpleAgent 直接调用
 - ✅ **Prompt-First**：规则写在 Prompt 里，不写在代码里
+- ✅ **开箱即用**：上下文管理默认启用，运营无需配置
 - 📝 **预留扩展**：Multi-Agent 代码已预留，通过 mode 配置启用
 
 **📌 维护原则**：
 - 架构变更时，只需更新此文档
 - 历史版本归档到 `archived/` 目录
 - prompt_results/ 中的 README.md 同步更新
+- 新增功能需同步更新相关文档（guides/、architecture/）
+
+**🔗 相关文档**：
+- [上下文压缩策略指南](../guides/context_compression_strategy.md) - V6.3 核心功能
+- [上下文管理框架](./context_management_framework.md) - 技术架构
+- [上下文管理架构决策](./context_management_decision.md) - 决策过程
+- [架构优化路线图 V2](../reports/architecture_optimization_roadmap_v2.md) - 未来规划

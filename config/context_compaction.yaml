@@ -2,8 +2,8 @@
 #
 # 核心原则：
 # 1. 用户体验和问答效果优先
-# 2. 静默处理，用户无感知
-# 3. 不警告用户，不建议开启新会话
+# 2. 自动处理 + 透明反馈（类似 Cursor）
+# 3. 非侵入式通知，不打断用户操作
 
 # 默认 QoS 等级
 default_qos_level: "pro"
@@ -22,7 +22,45 @@ history_trimming:
   preserve_last_n: 10        # 始终保留最近 N 轮（当前上下文）
   preserve_tool_results: true  # 保留含 tool_result 的消息
 
-# L3 策略：后端预警配置（仅日志，用户无感知）
+# L3 策略：后端预警配置
 backend_warning:
   warning_threshold: 0.8     # 80% 时后端日志警告
   enable_metrics: true       # 启用 token 使用统计
+
+# 🆕 V6.3: 用户通知配置
+user_notifications:
+  # 是否启用上下文管理通知
+  enable_notifications: true
+  
+  # 通知级别
+  # - silent: 完全静默（仅后端日志）
+  # - minimal: 仅关键操作（压缩/大量裁剪）
+  # - detailed: 所有操作（推荐，类似 Cursor）
+  notification_level: "detailed"
+  
+  # 🆕 上下文进度条配置
+  progress_bar:
+    enabled: true              # 是否显示进度条
+    position: "top"            # top / bottom / sidebar
+    show_percentage: true      # 显示百分比
+    show_tokens: true          # 显示 token 数值
+    update_frequency: "realtime"  # realtime / on_message
+    
+    # 颜色阈值（百分比）
+    color_thresholds:
+      green_max: 60            # 0-60% 绿色
+      yellow_max: 80           # 60-80% 黄色
+      orange_max: 95           # 80-95% 橙色
+      # 95-100% 红色
+  
+  # 裁剪/压缩通知配置
+  trimming_notifications:
+    show_tokens_saved: true    # 显示节省的 tokens
+    show_preserved_count: true # 显示保留的消息数
+    auto_dismiss_seconds: 5    # 自动消失时间（秒）
+    
+    # 通知样式
+    style:
+      position: "top"          # top / bottom
+      theme: "subtle"          # subtle / prominent
+      show_learn_more: true    # 显示"了解更多"链接
