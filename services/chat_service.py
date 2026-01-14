@@ -522,7 +522,7 @@ class ChatService:
                 use_multi_agent = False
             
             # 🎯 调用 Agent.chat()
-            # - 意图分析：在 SimpleAgent 内部完成
+            # - 意图分析：由路由层提供（enable_routing=True）或内部完成（默认）
             # - 内容累积：broadcaster 自动处理 content_start/delta/stop
             # - Checkpoint：broadcaster 在每个 content_stop 后自动保存
             # - 最终保存：broadcaster 在 message_stop 时自动完成
@@ -532,7 +532,8 @@ class ChatService:
                 session_id=session_id,
                 message_id=assistant_message_id,
                 enable_stream=True,
-                variables=variables
+                variables=variables,
+                intent=routing_intent  # 🆕 V7: 路由层意图结果（None 则内部分析）
             ):
                 # 检查停止标志（异步）
                 if await redis.is_stopped(session_id):

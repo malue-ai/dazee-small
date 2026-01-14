@@ -316,14 +316,15 @@ class SimpleAgent:
         session_id: str = None,
         message_id: str = None,
         enable_stream: bool = True,
-        variables: Dict[str, Any] = None
+        variables: Dict[str, Any] = None,
+        intent: Optional["IntentResult"] = None  # 🆕 V7: 从路由层传入的意图结果
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Agent 统一执行入口 - 7 阶段完整流程
         
         完整流程（参考 docs/00-ARCHITECTURE-V4.md L1693-1979）：
         阶段 1: Session/Agent 初始化 (在 SessionService.create_session 中完成)
-        阶段 2: Intent Analysis (Haiku 快速分析)
+        阶段 2: Intent Analysis (Haiku 快速分析) - 可跳过（V7 路由层提供）
         阶段 3: Tool Selection (Schema 驱动优先)
         阶段 4: System Prompt 组装 + LLM 调用准备
         阶段 5: Plan Creation (System Prompt 约束 + Claude 自主触发，在 RVR Turn 1 内部)
@@ -338,6 +339,7 @@ class SimpleAgent:
             message_id: 消息ID（用于事件关联）
             enable_stream: 是否流式输出
             variables: 前端上下文变量（如位置、时区等），直接注入到 Prompt
+            intent: 🆕 V7 从路由层传入的意图分析结果（如提供则跳过内部分析）
             
         Yields:
             事件字典
@@ -391,7 +393,39 @@ class SimpleAgent:
         # =====================================================================
         # 阶段 2: Intent Analysis (Haiku 快速分析)
         # =====================================================================
-        if self.schema.intent_analyzer.enabled and self.intent_analyzer:
+        # 🆕 V7: 支持从路由层接收意图结果
+        # - 如果提供了 intent 参数（来自路由层），则跳过内部分析
+        # - 如果未提供 intent，则执行内部意图分析（向后兼容）
+        # =====================================================================
+        
+        if intent is not None:
+            # 🆕 V7: 使用路由层提供的意图结果（跳过内部分析）
+            logger.info(
+                f"🔀 使用路由层意图结果: {intent.task_type.value}, "
+                f"complexity={intent.complexity.value}"
+            )
+            # 保存本轮结果供下次追问使用
+            self._last_intent_result = intent
+            
+            # 发送意图识别结果给前端（来源标记为 routing_layer）
+            intent_delta = {
+                "type": "intent",
+                "content": json.dumps({
+                    "task_type": intent.task_type.value,
+                    "complexity": intent.complexity.value,
+                    "needs_plan": intent.needs_plan,
+                    "confidence": intent.confidence,
+                    "skip_memory_retrieval": intent.skip_memory_retrieval,
+                    "source": "routing_layer"  # 🆕 标记来源
+                }, ensure_ascii=False)
+            }
+            yield await self.broadcaster.emit_message_delta(
+                session_id=session_id,
+                delta=intent_delta
+            )
+            
+        elif self.schema.intent_analyzer.enabled and self.intent_analyzer:
+            # 内部执行意图分析（向后兼容）
             # 🆕 追踪意图分析阶段
             if self._tracer:
                 stage = self._tracer.create_stage("intent_analysis")
