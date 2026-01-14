@@ -1,16 +1,18 @@
 """
-文件存储模块
+存储层抽象
 
-提供统一的文件存储抽象，支持：
-- LocalStorage: 本地文件系统（开发环境）
-- S3Storage: AWS S3（生产环境，待实现）
-- OSSStorage: 阿里云 OSS（国内云，待实现）
+提供统一的存储接口和异步写入优化
 """
 
-from infra.storage.base import StorageBackend
-from infra.storage.local import LocalStorage
+from core.storage.async_writer import AsyncWriter, WriteTask
+from core.storage.batch_writer import BatchWriter, BatchConfig
+from core.storage.storage_manager import StorageManager, get_storage_manager
 
 __all__ = [
-    "StorageBackend",
-    "LocalStorage",
+    "AsyncWriter",
+    "WriteTask",
+    "BatchWriter",
+    "BatchConfig",
+    "StorageManager",
+    "get_storage_manager",
 ]
