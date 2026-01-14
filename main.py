@@ -23,6 +23,7 @@ from routers.workspace import router as workspace_router
 from routers.agents import router as agents_router
 from routers.skills import router as skills_router
 from routers.auth import router as auth_router
+from routers.health import router as health_router
 
 
 # ============================================================
@@ -37,6 +38,15 @@ async def lifespan(app: FastAPI):
     
     # 启动时
     print("🚀 Zenflux Agent API 启动中...")
+    
+    # 🆕 加载容错配置
+    print("🛡️ 加载容错配置...")
+    try:
+        from infra.resilience.config import apply_resilience_config
+        apply_resilience_config()
+        print("✅ 容错配置已加载")
+    except Exception as e:
+        print(f"⚠️ 容错配置加载失败: {e}")
     
     # 初始化数据库
     print("💾 初始化数据库...")
@@ -209,6 +219,7 @@ app.add_middleware(
 
 # 注册路由
 app.include_router(auth_router)  # 认证 API
+app.include_router(health_router)  # 🆕 健康检查路由
 app.include_router(chat_router)
 app.include_router(knowledge_router)
 app.include_router(human_confirmation_router)

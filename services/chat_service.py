@@ -23,6 +23,8 @@ from logger import get_logger
 from core.agent import SimpleAgent, create_simple_agent
 from core.context import Context
 from core.output import OutputFormatter, create_output_formatter  # 🆕 V6.3
+# 🆕 容错机制（基础设施层）
+from infra.resilience import with_timeout, with_retry, get_circuit_breaker
 # 【待扩展】Multi-Agent 模块（已注释）
 # from core.multi_agent import MultiAgentOrchestrator, MultiAgentConfig
 from services.session_service import SessionService, get_session_service, SessionNotFoundError
@@ -83,6 +85,9 @@ class ChatService:
         
         # 🆕 V6.3: OutputFormatter 缓存（按需创建）
         self._formatters: Dict[str, OutputFormatter] = {}
+        
+        # 🆕 容错机制：熔断器
+        self.agent_breaker = get_circuit_breaker("agent_execution")
     
     # ==================== 辅助方法 ====================
     
