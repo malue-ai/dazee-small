@@ -96,7 +96,54 @@
       <div class="h-16 flex items-center justify-between px-8 border-b border-white/20 bg-white/40 backdrop-blur-md sticky top-0 z-20">
         <div class="flex items-center gap-3">
           <h2 class="text-base font-semibold text-gray-800">{{ currentConversationTitle }}</h2>
-          <span class="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-xs font-medium border border-blue-200">Claude 3.5</span>
+          <!-- Agent 选择器 -->
+          <div class="relative group">
+            <button 
+              @click="showAgentSelector = !showAgentSelector"
+              class="px-3 py-1 rounded-full bg-blue-100 text-blue-700 text-xs font-medium border border-blue-200 hover:bg-blue-200 transition-all flex items-center gap-1.5 cursor-pointer"
+              :disabled="isLoading"
+            >
+              <span>{{ currentAgentName || 'Claude 3.5' }}</span>
+              <span class="text-[10px]">{{ showAgentSelector ? '▲' : '▼' }}</span>
+            </button>
+            
+            <!-- Agent 下拉列表 -->
+            <div 
+              v-if="showAgentSelector" 
+              class="absolute top-full left-0 mt-2 w-64 bg-white rounded-xl shadow-2xl border border-gray-100 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200"
+            >
+              <div class="p-2 border-b border-gray-100 bg-gray-50">
+                <p class="text-xs text-gray-500 px-2">选择智能体</p>
+              </div>
+              <div class="max-h-[300px] overflow-y-auto scrollbar-thin">
+                <div v-if="loadingAgents" class="p-4 text-center text-sm text-gray-400">
+                  加载中...
+                </div>
+                <div v-else-if="agents.length === 0" class="p-4 text-center text-sm text-gray-400">
+                  暂无可用智能体
+                </div>
+                <button
+                  v-for="agent in agents"
+                  :key="agent.agent_id"
+                  @click="selectAgent(agent)"
+                  class="w-full text-left px-4 py-3 hover:bg-blue-50 transition-colors border-b border-gray-50 last:border-0"
+                  :class="selectedAgentId === agent.agent_id ? 'bg-blue-50' : ''"
+                >
+                  <div class="flex items-center justify-between">
+                    <div class="flex-1 min-w-0">
+                      <p class="text-sm font-medium text-gray-900 truncate">
+                        {{ agent.name || agent.agent_id }}
+                      </p>
+                      <p class="text-xs text-gray-500 truncate mt-0.5">
+                        {{ agent.description || '无描述' }}
+                      </p>
+                    </div>
+                    <span v-if="selectedAgentId === agent.agent_id" class="ml-2 text-blue-600 text-sm">✓</span>
+                  </div>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
         
         <div class="flex items-center gap-2">
@@ -577,6 +624,13 @@ const previewFile = ref(null)
 const rightSidebarTab = ref('plan')  // 'plan' | 'mind'
 const mermaidCharts = ref([])        // 存储检测到的 Mermaid 图表代码
 
+// --- Agent 选择状态 ---
+const agents = ref([])                  // Agent 列表
+const loadingAgents = ref(false)        // 是否正在加载 Agent
+const showAgentSelector = ref(false)    // 是否显示 Agent 选择器
+const selectedAgentId = ref(null)       // 当前选择的 Agent ID
+const currentAgentName = ref(null)      // 当前 Agent 名称
+
 // --- HITL 人类确认状态 ---
 const showConfirmModal = ref(false)        // 是否显示确认对话框
 const confirmRequest = ref(null)           // 当前确认请求数据
@@ -604,7 +658,10 @@ const currentPlan = computed(() => {
 // --- Lifecycle ---
 onMounted(async () => {
   userId.value = chatStore.initUserId()
-  await loadConversationList()
+  await Promise.all([
+    loadConversationList(),
+    loadAgentList()  // 加载 Agent 列表
+  ])
   
   // 🆕 检查是否有活跃的 Session（用于页面刷新重连）
   // 如果重连成功，会在内部调用 loadConversation，无需重复调用
@@ -630,6 +687,26 @@ watch(inputMessage, () => {
   })
 })
 
+// 监听全局点击事件，关闭 Agent 选择器（点击外部时）
+watch(showAgentSelector, (newVal) => {
+  if (newVal) {
+    // 延迟添加监听器，避免立即触发
+    setTimeout(() => {
+      const closeDropdown = (e) => {
+        // 检查点击是否在下拉菜单或按钮外部
+        const dropdown = document.querySelector('.absolute.top-full')
+        const button = e.target.closest('button')
+        
+        if (dropdown && !dropdown.contains(e.target) && !button) {
+          showAgentSelector.value = false
+          document.removeEventListener('click', closeDropdown)
+        }
+      }
+      document.addEventListener('click', closeDropdown)
+    }, 100)
+  }
+})
+
 // --- Methods ---
 async function loadConversationList() {
   loadingConversations.value = true
@@ -639,6 +716,80 @@ async function loadConversationList() {
   } finally {
     loadingConversations.value = false
   }
+}
+
+// ==================== Agent 管理相关方法 ====================
+
+/**
+ * 加载 Agent 列表
+ */
+async function loadAgentList() {
+  loadingAgents.value = true
+  try {
+    const response = await fetch('/api/v1/agents')
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`)
+    }
+    
+    const result = await response.json()
+    console.log('📦 Agent API 响应:', result)
+    
+    // 🔧 修复：后端返回格式是 { total, agents }，不是 { data: { agents } }
+    const agentsList = result.agents || []
+    
+    // 🆕 添加默认 Agent (base_agent) 到列表开头
+    agents.value = [
+      {
+        agent_id: null,  // null 表示使用后端默认的 base_agent
+        name: '默认智能体',
+        description: '通用对话助手 (base_agent)',
+        is_active: true,
+        version: '1.0.0'
+      },
+      ...agentsList
+    ]
+    
+    // 默认选择第一个（默认 Agent）
+    if (!selectedAgentId.value) {
+      selectAgent(agents.value[0], false)  // 静默选择，不触发对话
+    }
+    
+    console.log('✅ Agent 列表已加载:', agents.value.length, '个')
+  } catch (error) {
+    console.error('❌ 加载 Agent 列表失败:', error)
+    // 失败时至少显示默认 Agent
+    agents.value = [
+      {
+        agent_id: null,
+        name: '默认智能体',
+        description: '通用对话助手 (base_agent)',
+        is_active: true,
+        version: '1.0.0'
+      }
+    ]
+    selectAgent(agents.value[0], false)
+  } finally {
+    loadingAgents.value = false
+  }
+}
+
+/**
+ * 选择 Agent
+ */
+function selectAgent(agent, closeDropdown = true) {
+  // 🔧 agent_id 为 null 表示使用默认 base_agent（后端不传 agent_id）
+  selectedAgentId.value = agent.agent_id
+  currentAgentName.value = agent.name || agent.agent_id || '默认智能体'
+  
+  if (closeDropdown) {
+    showAgentSelector.value = false
+  }
+  
+  console.log('🤖 已选择 Agent:', {
+    id: agent.agent_id || 'base_agent (默认)',
+    name: agent.name,
+    model: agent.model
+  })
 }
 
 async function createNewConversation() {
@@ -788,20 +939,29 @@ async function sendMessage() {
   const reactiveMsg = messages.value[messages.value.length - 1]
   
   try {
+    // 构建请求选项
+    const options = { 
+      files: filesParam,
+      backgroundTasks: ['title_generation', 'recommended_questions'],
+      // 🆕 前端上下文变量，直接注入到 Agent 的 System Prompt
+      variables: {
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        locale: navigator.language,
+        timestamp: new Date().toISOString()
+      }
+    }
+    
+    // 🔧 只有选择了非默认 Agent（agent_id 不为 null）时才传递 agentId
+    // null 表示使用后端默认的 base_agent
+    if (selectedAgentId.value !== null) {
+      options.agentId = selectedAgentId.value
+    }
+    
     await chatStore.sendMessageStream(
       content,
       chatStore.conversationId,
       (event) => handleStreamEvent(event, reactiveMsg),
-      { 
-        files: filesParam,
-        backgroundTasks: ['title_generation', 'recommended_questions'],
-        // 🆕 前端上下文变量，直接注入到 Agent 的 System Prompt
-        variables: {
-          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          locale: navigator.language,
-          timestamp: new Date().toISOString()
-        }
-      }
+      options
     )
     await loadConversationList()
   } catch (e) {

@@ -1,14 +1,17 @@
 """
-人类确认 HTTP 接口
+人类确认路由层
 
-提供 HTTP 端点接收用户对 HITL 确认请求的响应。
+职责：
+- HTTP 请求解析
+- 调用 ConfirmationService 处理业务逻辑
+- 异常转换为 HTTP 异常
 
 工作流程：
 1. Agent 调用 request_human_confirmation 工具
 2. 工具通过 SSE 发送确认请求到前端
 3. 前端显示确认对话框
 4. 用户点击确认/取消 → 调用此接口提交响应
-5. 此接口调用 ConfirmationManager.set_response() 唤醒等待的工具
+5. 此接口调用 ConfirmationService 唤醒等待的工具
 6. 工具获取响应后返回给 LLM
 
 接口列表：
@@ -19,20 +22,26 @@
 参考文档: docs/HITL-SSE-CONFIRMATION-DESIGN.md
 """
 
-import logging
 from typing import Optional, Dict, Any, List, Union
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from core.confirmation_manager import (
-    get_confirmation_manager,
-    ConfirmationRequest
+from logger import get_logger
+from services.confirmation_service import (
+    get_confirmation_service,
+    ConfirmationService,
+    ConfirmationNotFoundError,
+    ConfirmationExpiredError,
+    ConfirmationResponseError,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger("human_confirmation_router")
 
 router = APIRouter(prefix="/api/v1/human-confirmation", tags=["HITL"])
+
+# 获取服务实例
+confirmation_service = get_confirmation_service()
 
 
 # ==================== 请求/响应模型 ====================
@@ -89,9 +98,7 @@ async def get_pending_requests(session_id: Optional[str] = None):
     Returns:
         待处理请求列表
     """
-    manager = get_confirmation_manager()
-    
-    requests = manager.get_pending_requests(session_id)
+    requests = confirmation_service.get_pending_requests(session_id)
     
     return PendingRequestsResponse(
         code=200,
@@ -107,12 +114,10 @@ async def get_pending_requests(session_id: Optional[str] = None):
 )
 async def get_stats():
     """获取统计信息"""
-    manager = get_confirmation_manager()
-    
     return {
         "code": 200,
         "message": "success",
-        "data": manager.stats()
+        "data": confirmation_service.get_stats()
     }
 
 
@@ -140,45 +145,37 @@ async def submit_confirmation(
         
     Raises:
         HTTPException 404: 请求不存在或已过期
+        HTTPException 410: 请求已过期
+        HTTPException 500: 设置响应失败
     """
-    logger.info(f"收到确认响应: request_id={request_id}, response={body.response}")
-    
-    manager = get_confirmation_manager()
-    
-    # 检查请求是否存在
-    request = manager.get_request(request_id)
-    if not request:
-        logger.warning(f"确认请求不存在: request_id={request_id}")
+    try:
+        result = confirmation_service.submit_response(
+            request_id,
+            body.response,
+            body.metadata
+        )
+        
+        return ConfirmationSubmitResponse(
+            code=200,
+            message="响应已提交",
+            data=result
+        )
+        
+    except ConfirmationNotFoundError:
         raise HTTPException(
             status_code=404,
             detail=f"确认请求 {request_id} 不存在或已过期"
         )
-    
-    # 检查是否过期
-    if request.is_expired():
-        logger.warning(f"确认请求已过期: request_id={request_id}")
+    except ConfirmationExpiredError:
         raise HTTPException(
             status_code=410,  # Gone
             detail=f"确认请求 {request_id} 已过期"
         )
-    
-    # 🔥 设置响应，唤醒等待的工具
-    success = manager.set_response(request_id, body.response, body.metadata)
-    
-    if not success:
+    except ConfirmationResponseError:
         raise HTTPException(
             status_code=500,
             detail="设置响应失败"
         )
-    
-    return ConfirmationSubmitResponse(
-        code=200,
-        message="响应已提交",
-        data={
-            "request_id": request_id,
-            "response": body.response
-        }
-    )
 
 
 @router.get(
@@ -200,20 +197,20 @@ async def get_confirmation_request(request_id: str):
     Raises:
         HTTPException 404: 请求不存在
     """
-    manager = get_confirmation_manager()
-    
-    request = manager.get_request(request_id)
-    if not request:
+    try:
+        request = confirmation_service.get_request(request_id)
+        
+        return ConfirmationRequestResponse(
+            code=200,
+            message="success",
+            data=request.to_dict()
+        )
+        
+    except ConfirmationNotFoundError:
         raise HTTPException(
             status_code=404,
             detail=f"确认请求 {request_id} 不存在"
         )
-    
-    return ConfirmationRequestResponse(
-        code=200,
-        message="success",
-        data=request.to_dict()
-    )
 
 
 @router.delete(
@@ -231,19 +228,17 @@ async def cancel_confirmation_request(request_id: str):
     Returns:
         取消结果
     """
-    manager = get_confirmation_manager()
-    
-    success = manager.cancel_request(request_id)
-    
-    if not success:
+    try:
+        confirmation_service.cancel_request(request_id)
+        
+        return {
+            "code": 200,
+            "message": "请求已取消",
+            "data": {"request_id": request_id}
+        }
+        
+    except ConfirmationNotFoundError:
         raise HTTPException(
             status_code=404,
             detail=f"确认请求 {request_id} 不存在"
         )
-    
-    return {
-        "code": 200,
-        "message": "请求已取消",
-        "data": {"request_id": request_id}
-    }
-

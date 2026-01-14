@@ -82,6 +82,24 @@ from .mcp_service import (
     MCPConnectionError as MCPServiceConnectionError,
 )
 
+from .auth_service import (
+    AuthService,
+    get_auth_service,
+    AuthServiceError,
+    InvalidCredentialsError,
+    TokenExpiredError,
+    TokenInvalidError,
+)
+
+from .confirmation_service import (
+    ConfirmationService,
+    get_confirmation_service,
+    ConfirmationServiceError,
+    ConfirmationNotFoundError,
+    ConfirmationExpiredError,
+    ConfirmationResponseError,
+)
+
 __all__ = [
     # Knowledge Service
     "KnowledgeService",
@@ -141,5 +159,19 @@ __all__ = [
     "MCPNotFoundError",
     "MCPAlreadyExistsError",
     "MCPServiceConnectionError",
+    # Auth Service
+    "AuthService",
+    "get_auth_service",
+    "AuthServiceError",
+    "InvalidCredentialsError",
+    "TokenExpiredError",
+    "TokenInvalidError",
+    # Confirmation Service
+    "ConfirmationService",
+    "get_confirmation_service",
+    "ConfirmationServiceError",
+    "ConfirmationNotFoundError",
+    "ConfirmationExpiredError",
+    "ConfirmationResponseError",
 ]
 

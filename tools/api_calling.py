@@ -204,7 +204,7 @@ class APICallingTool:
         """
         try:
             # 1. 解析 URL 和 Headers（支持 api_name 自动注入）
-            final_url, final_headers = self._resolve_api_config(
+            final_url, final_headers, resolve_error = self._resolve_api_config(
                 api_name=api_name,
                 path=path,
                 url=url,
@@ -212,8 +212,8 @@ class APICallingTool:
             )
             
             # 校验 URL
-            if not final_url:
-                return {"error": "必须提供 url 或 api_name 参数"}
+            if not final_url or resolve_error:
+                return {"error": resolve_error or "必须提供 url 或 api_name 参数"}
             
             # 2. 自动替换请求头中的环境变量占位符 ${VAR_NAME}
             final_headers = self._resolve_env_vars(final_headers)
@@ -275,7 +275,7 @@ class APICallingTool:
         path: Optional[str] = None,
         url: Optional[str] = None,
         headers: Optional[Dict[str, str]] = None
-    ) -> tuple[Optional[str], Dict[str, str]]:
+    ) -> tuple[Optional[str], Dict[str, str], Optional[str]]:
         """
         解析 API 配置,支持自动注入
         
@@ -286,7 +286,9 @@ class APICallingTool:
             headers: 额外请求头
             
         Returns:
-            (final_url, final_headers)
+            (final_url, final_headers, error_message)
+            - 成功时 error_message 为 None
+            - 失败时 final_url 为 None，error_message 包含错误原因
         """
         final_headers = headers.copy() if headers else {}
         
@@ -295,11 +297,18 @@ class APICallingTool:
             logger.info(f"🔍 查找 API 配置: api_name={api_name}, apis_config 数量={len(self.apis_config)}")
             api_config = self.apis_config.get(api_name)
             if not api_config:
-                logger.warning(f"⚠️ 未找到预配置的 API: {api_name}，可用: {list(self.apis_config.keys())}")
-                return None, final_headers
+                available_apis = list(self.apis_config.keys()) if self.apis_config else []
+                error_msg = f"未找到预配置的 API: '{api_name}'。可用的 API: {available_apis if available_apis else '无（apis_config 为空）'}"
+                logger.warning(f"⚠️ {error_msg}")
+                return None, final_headers, error_msg
             
             # 拼接 URL
             base_url = api_config.get("base_url", "").rstrip("/")
+            if not base_url:
+                error_msg = f"API '{api_name}' 配置缺少 base_url"
+                logger.error(f"❌ {error_msg}")
+                return None, final_headers, error_msg
+            
             path = (path or "").lstrip("/")
             final_url = f"{base_url}/{path}" if path else base_url
             
@@ -307,11 +316,14 @@ class APICallingTool:
             config_headers = api_config.get("headers", {})
             merged_headers = {**config_headers, **final_headers}
             
-            logger.info(f"🔑 使用预配置 API: {api_name} → {base_url}")
-            return final_url, merged_headers
+            logger.info(f"🔑 使用预配置 API: {api_name} → {final_url}")
+            return final_url, merged_headers, None
         
         # 方式2: 直接使用 URL
-        return url, final_headers
+        if not url:
+            return None, final_headers, "必须提供 url 或 api_name 参数"
+        
+        return url, final_headers, None
     
     async def execute_stream(
         self,
@@ -346,15 +358,15 @@ class APICallingTool:
             字符串片段（SSE 事件的文本内容）
         """
         # 1. 解析 URL 和 Headers
-        final_url, final_headers = self._resolve_api_config(
+        final_url, final_headers, resolve_error = self._resolve_api_config(
             api_name=api_name,
             path=path,
             url=url,
             headers=headers
         )
         
-        if not final_url:
-            yield json.dumps({"error": "必须提供 url 或 api_name 参数"})
+        if not final_url or resolve_error:
+            yield json.dumps({"error": resolve_error or "必须提供 url 或 api_name 参数"})
             return
         
         # 2. 替换环境变量
@@ -396,8 +408,12 @@ class APICallingTool:
                 ) as response:
                     if response.status not in [200, 201]:
                         error_text = await response.text()
-                        logger.error(f"❌ SSE 请求失败 (HTTP {response.status})")
-                        yield json.dumps({"error": error_text, "http_status": response.status})
+                        logger.error(f"❌ SSE 请求失败 (HTTP {response.status}): {error_text[:500]}")
+                        yield json.dumps({
+                            "error": f"HTTP {response.status}: {error_text[:1000]}" if error_text else f"HTTP {response.status} 错误",
+                            "http_status": response.status,
+                            "url": final_url
+                        }, ensure_ascii=False)
                         return
                     
                     logger.info(f"🌊 SSE 连接已建立")
@@ -569,7 +585,11 @@ class APICallingTool:
                 if response.status not in [200, 201]:
                     error_text = await response.text()
                     logger.error(f"❌ SSE 请求失败 (HTTP {response.status}): {error_text[:500]}")
-                    return {"error": error_text, "http_status": response.status}
+                    return {
+                        "error": f"HTTP {response.status}: {error_text[:1000]}" if error_text else f"HTTP {response.status} 错误",
+                        "http_status": response.status,
+                        "url": url
+                    }
                 
                 logger.info(f"🌊 SSE 连接已建立")
                 

@@ -8,9 +8,13 @@ from fastapi import APIRouter, Response, status
 from typing import Dict, Any
 import time
 import asyncio
+import psutil
 
 from logger import get_logger
 from infra.resilience.circuit_breaker import get_all_circuit_breakers
+from infra.cache import get_redis_client
+from infra.resilience.circuit_breaker import get_circuit_breaker
+from infra.database import AsyncSessionLocal
 
 logger = get_logger(__name__)
 
@@ -48,7 +52,6 @@ async def readiness_probe(response: Response):
     
     # 1. 检查 Redis 连接
     try:
-        from infra.redis import get_redis_client
         redis_client = get_redis_client()
         await asyncio.wait_for(redis_client.ping(), timeout=2.0)
         checks["redis"] = {"status": "healthy"}
@@ -58,7 +61,6 @@ async def readiness_probe(response: Response):
     
     # 2. 检查数据库连接
     try:
-        from infra.database import AsyncSessionLocal
         async with AsyncSessionLocal() as session:
             await asyncio.wait_for(session.execute("SELECT 1"), timeout=2.0)
         checks["database"] = {"status": "healthy"}
@@ -68,7 +70,6 @@ async def readiness_probe(response: Response):
     
     # 3. 检查 LLM 服务（可选，避免每次探针都调用）
     # 改为检查熔断器状态
-    from infra.resilience.circuit_breaker import get_circuit_breaker
     try:
         llm_breaker = get_circuit_breaker("llm_service")
         if llm_breaker.is_open:
@@ -111,7 +112,6 @@ async def health_metrics() -> Dict[str, Any]:
     
     # 2. 系统资源（可选）
     try:
-        import psutil
         process = psutil.Process()
         metrics["system"] = {
             "cpu_percent": process.cpu_percent(),

@@ -259,6 +259,8 @@ export const useChatStore = defineStore('chat', {
      * @param {Object} options - 可选配置
      * @param {string[]} options.backgroundTasks - 后台任务列表，如 ['title_generation']
      * @param {Array} options.files - 文件引用列表，如 [{file_id: "xxx"}]
+     * @param {string} options.agentId - Agent ID，如 'test_agent'
+     * @param {Object} options.variables - 前端上下文变量
      */
     async sendMessageStream(content, conversationId = null, onEvent, options = {}) {
       const userId = this.initUserId()
@@ -273,6 +275,12 @@ export const useChatStore = defineStore('chat', {
         
         if (conversationId) {
           requestBody.conversation_id = conversationId
+        }
+        
+        // 🆕 添加 Agent ID 参数
+        if (options.agentId) {
+          requestBody.agent_id = options.agentId
+          console.log('🤖 使用 Agent:', options.agentId)
         }
         
         // 🆕 添加后台任务参数

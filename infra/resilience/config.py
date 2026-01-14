@@ -9,9 +9,9 @@ from pathlib import Path
 from typing import Optional
 
 from logger import get_logger
-from core.resilience.timeout import TimeoutConfig, set_timeout_config
-from core.resilience.retry import RetryConfig, set_retry_config
-from core.resilience.circuit_breaker import CircuitBreakerConfig, get_circuit_breaker
+from infra.resilience.timeout import TimeoutConfig, set_timeout_config
+from infra.resilience.retry import RetryConfig, set_retry_config
+from infra.resilience.circuit_breaker import CircuitBreakerConfig, get_circuit_breaker
 
 logger = get_logger(__name__)
 

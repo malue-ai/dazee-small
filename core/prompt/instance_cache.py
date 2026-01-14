@@ -1417,39 +1417,39 @@ class InstancePromptCache:
         """
         system_blocks = []
         
-        # Layer 1: 框架规则（缓存）
+        # Layer 1: 框架规则
         # 框架升级 → 重启 → 运行期稳定
         framework_prompt = self.runtime_context.get("framework_prompt", "")
         if framework_prompt:
             system_blocks.append({
                 "type": "text",
-                "text": f"# 框架能力协议\n\n{framework_prompt}",
-                "cache_control": {"type": "ephemeral"}
+                "text": f"# 框架能力协议\n\n{framework_prompt}"
+                # 🔧 不在这里添加 cache_control，统一在最后一个 block 添加
             })
-            logger.debug(f"📦 Layer 1 (框架规则): {len(framework_prompt)} 字符 [cached]")
+            logger.debug(f"📦 Layer 1 (框架规则): {len(framework_prompt)} 字符")
         
-        # Layer 2: 实例核心提示词（缓存）
+        # Layer 2: 实例核心提示词
         # 运营优化 → 重启 → 运行期稳定
         instance_prompt = self.get_system_prompt(complexity)
         if instance_prompt:
             system_blocks.append({
                 "type": "text",
-                "text": instance_prompt,
-                "cache_control": {"type": "ephemeral"}
+                "text": instance_prompt
+                # 🔧 不在这里添加 cache_control，统一在最后一个 block 添加
             })
-            logger.debug(f"📦 Layer 2 (实例提示词): {len(instance_prompt)} 字符 [cached]")
+            logger.debug(f"📦 Layer 2 (实例提示词): {len(instance_prompt)} 字符")
         
-        # Layer 3: Skills + 工具定义（缓存）
+        # Layer 3: Skills + 工具定义
         # 工具更新 → 重启 → 运行期稳定
         # 优先使用传入的 tools_context，否则使用 runtime_context 中的 apis_prompt
         tools_text = tools_context or self.runtime_context.get("apis_prompt", "")
         if tools_text:
             system_blocks.append({
                 "type": "text",
-                "text": tools_text,
-                "cache_control": {"type": "ephemeral"}
+                "text": tools_text
+                # 🔧 不在这里添加 cache_control，统一在最后一个 block 添加
             })
-            logger.debug(f"📦 Layer 3 (Skills+工具): {len(tools_text)} 字符 [1h cache]")
+            logger.debug(f"📦 Layer 3 (Skills+工具): {len(tools_text)} 字符")
         
         # Layer 4: Mem0 用户画像（不缓存）
         # 基于语义检索，每次 query 不同 → 结果不同 → 不能缓存
@@ -1479,13 +1479,13 @@ class InstancePromptCache:
         if not intent_prompt:
             return []
         
+        # 🔧 不在这里添加 cache_control，由 claude.py 统一处理
         system_blocks = [{
             "type": "text",
-            "text": intent_prompt,
-            "cache_control": {"type": "ephemeral"}
+            "text": intent_prompt
         }]
         
-        logger.debug(f"🗂️ 构建意图识别 system blocks: {len(intent_prompt)} 字符 [cached]")
+        logger.debug(f"🗂️ 构建意图识别 system blocks: {len(intent_prompt)} 字符")
         
         return system_blocks
     

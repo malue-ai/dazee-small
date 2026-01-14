@@ -48,10 +48,8 @@ from infra.cache import (
 )
 
 # ==================== Storage ====================
-from infra.storage import (
-    StorageBackend,
-    LocalStorage,
-)
+from infra.storage.base import StorageBackend
+from infra.storage.local import LocalStorage
 
 # ==================== Vector (预留) ====================
 from infra.vector import (

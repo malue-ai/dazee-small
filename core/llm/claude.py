@@ -368,14 +368,10 @@ class ClaudeLLMService(BaseLLMService):
             key = f"tool_search_{self._tool_search_type}"
             if key in self.NATIVE_TOOLS:
                 schema = self.NATIVE_TOOLS[key].copy()
-                if self.config.enable_caching:
-                    schema["cache_control"] = {"type": "ephemeral"}
                 return schema
         
         if tool_name in self.NATIVE_TOOLS:
             schema = self.NATIVE_TOOLS[tool_name].copy()
-            if self.config.enable_caching:
-                schema["cache_control"] = {"type": "ephemeral"}
             return schema
         
         return None
@@ -443,8 +439,8 @@ class ClaudeLLMService(BaseLLMService):
             "input_schema": input_schema
         }
         
-        if self.config.enable_caching:
-            tool_def["cache_control"] = {"type": "ephemeral"}
+        # 🔧 不在这里添加 cache_control，统一在 create_message_* 方法中处理
+        # Claude API 限制最多 4 个带 cache_control 的 block
         
         return tool_def
     
@@ -592,8 +588,8 @@ class ClaudeLLMService(BaseLLMService):
             
             # 多层缓存（Claude 固定 5 分钟 TTL）
             system_blocks = [
-                {"type": "text", "text": "框架规则", "cache_control": {"type": "ephemeral"}},
-                {"type": "text", "text": "实例提示词", "cache_control": {"type": "ephemeral"}},
+                {"type": "text", "text": "框架规则", "cache_control": {"type": "ephemeral", "ttl": "1h"}},
+                {"type": "text", "text": "实例提示词", "cache_control": {"type": "ephemeral", "ttl": "1h"}},
                 {"type": "text", "text": "用户画像"}  # 不缓存
             ]
             response = await llm.create_message_async(messages, system=system_blocks)
@@ -609,15 +605,26 @@ class ClaudeLLMService(BaseLLMService):
         # System prompt（支持多层缓存）
         if system:
             if isinstance(system, list):
-                # 多层缓存格式：直接使用（调用方已构建好 cache_control）
-                request_params["system"] = system
-                logger.debug(f"🗂️ 使用多层缓存 system prompt: {len(system)} 层")
+                # 多层缓存格式：在最后一个要缓存的 block 上添加 cache_control
+                system_blocks = [block.copy() if isinstance(block, dict) else {"type": "text", "text": block} for block in system]
+                
+                if self.config.enable_caching and system_blocks:
+                    # 🔧 找到最后一个要缓存的 block（排除用户画像等动态内容）
+                    # 策略：在倒数第二个 block（工具文档）上添加缓存断点
+                    # 这样用户画像（最后一个）不会影响缓存命中
+                    cache_index = len(system_blocks) - 2 if len(system_blocks) > 1 else 0
+                    if cache_index >= 0:
+                        system_blocks[cache_index]["cache_control"] = {"type": "ephemeral", "ttl": "1h"}
+                        logger.debug(f"🗂️ 在 system block[{cache_index}] 添加缓存断点 (1h TTL)")
+                
+                request_params["system"] = system_blocks
+                logger.debug(f"🗂️ 使用多层缓存 system prompt: {len(system_blocks)} 层")
             elif self.config.enable_caching:
-                # 字符串格式 + 启用缓存：自动包装为单层缓存（5 分钟 TTL）
+                # 字符串格式 + 启用缓存：自动包装为单层缓存（1 小时 TTL）
                 request_params["system"] = [{
                     "type": "text",
                     "text": system,
-                    "cache_control": {"type": "ephemeral"}
+                    "cache_control": {"type": "ephemeral", "ttl": "1h"}
                 }]
             else:
                 # 字符串格式 + 禁用缓存：直接使用
@@ -650,8 +657,6 @@ class ClaudeLLMService(BaseLLMService):
             tool_name = custom_tool.get("name", "")
             if tool_name and tool_name not in tool_names_seen:
                 tool_def = custom_tool.copy()
-                if self.config.enable_caching:
-                    tool_def["cache_control"] = {"type": "ephemeral"}
                 all_tools.append(tool_def)
                 tool_names_seen.add(tool_name)
         
@@ -659,6 +664,13 @@ class ClaudeLLMService(BaseLLMService):
             # Tool Search 模式
             if invocation_type == "tool_search" and self._tool_search_mode:
                 all_tools = self.configure_deferred_tools(all_tools)
+            
+            # 🔧 缓存策略：只对最后一个工具添加 cache_control（1 小时 TTL）
+            # Claude API 限制最多 4 个带 cache_control 的 block
+            # 工具定义在运行期稳定，使用较长的缓存时间
+            if self.config.enable_caching and all_tools:
+                all_tools[-1] = all_tools[-1].copy()
+                all_tools[-1]["cache_control"] = {"type": "ephemeral", "ttl": "1h"}
             
             request_params["tools"] = all_tools
             
@@ -728,15 +740,25 @@ class ClaudeLLMService(BaseLLMService):
         # System prompt（支持多层缓存，与 create_message_async 保持一致）
         if system:
             if isinstance(system, list):
-                # 多层缓存格式：直接使用（调用方已构建好 cache_control）
-                request_params["system"] = system
-                logger.debug(f"🗂️ [Stream] 使用多层缓存 system prompt: {len(system)} 层")
+                # 多层缓存格式：在最后一个要缓存的 block 上添加 cache_control
+                system_blocks = [block.copy() if isinstance(block, dict) else {"type": "text", "text": block} for block in system]
+                
+                if self.config.enable_caching and system_blocks:
+                    # 🔧 找到最后一个要缓存的 block（排除用户画像等动态内容）
+                    # 策略：在倒数第二个 block（工具文档）上添加缓存断点
+                    cache_index = len(system_blocks) - 2 if len(system_blocks) > 1 else 0
+                    if cache_index >= 0:
+                        system_blocks[cache_index]["cache_control"] = {"type": "ephemeral", "ttl": "1h"}
+                        logger.debug(f"🗂️ [Stream] 在 system block[{cache_index}] 添加缓存断点 (1h TTL)")
+                
+                request_params["system"] = system_blocks
+                logger.debug(f"🗂️ [Stream] 使用多层缓存 system prompt: {len(system_blocks)} 层")
             elif self.config.enable_caching:
-                # 字符串格式 + 启用缓存：自动包装为单层缓存（5 分钟 TTL）
+                # 字符串格式 + 启用缓存：自动包装为单层缓存（1 小时 TTL）
                 request_params["system"] = [{
                     "type": "text",
                     "text": system,
-                    "cache_control": {"type": "ephemeral"}
+                    "cache_control": {"type": "ephemeral", "ttl": "1h"}
                 }]
             else:
                 # 字符串格式 + 禁用缓存：直接使用
@@ -767,12 +789,16 @@ class ClaudeLLMService(BaseLLMService):
             tool_name = custom_tool.get("name", "")
             if tool_name and tool_name not in tool_names_seen:
                 tool_def = custom_tool.copy()
-                if self.config.enable_caching:
-                    tool_def["cache_control"] = {"type": "ephemeral"}
                 all_tools.append(tool_def)
                 tool_names_seen.add(tool_name)
         
         if all_tools:
+            # 🔧 缓存策略：只对最后一个工具添加 cache_control（1 小时 TTL）
+            # Claude API 限制最多 4 个带 cache_control 的 block
+            if self.config.enable_caching:
+                all_tools[-1] = all_tools[-1].copy()
+                all_tools[-1]["cache_control"] = {"type": "ephemeral", "ttl": "1h"}
+            
             request_params["tools"] = all_tools
         
         # 🆕 Skills Container（如果启用）

@@ -788,18 +788,22 @@ class SimpleAgent:
                             ):
                                 yield server_event
                         
-                        tool_results = []
                         if client_tools:
-                            # 只执行客户端工具
+                            # 执行客户端工具，发送事件给前端
                             async for tool_event in self._execute_tools_stream(
                                 client_tools, session_id, ctx
                             ):
                                 yield tool_event
-                                # 从 content_start 事件中收集 tool_result
-                                if tool_event.get("type") == "content_start":
-                                    content_block = tool_event.get("data", {}).get("content_block", {})
-                                    if content_block.get("type") == "tool_result":
-                                        tool_results.append(content_block)
+                        
+                        # 从 ContentAccumulator 获取 tool_results（流式和非流式统一处理）
+                        tool_results = []
+                        if client_tools:
+                            accumulator = self.broadcaster.get_accumulator(session_id)
+                            if accumulator:
+                                client_tool_ids = {tc.get("id") for tc in client_tools}
+                                for block in accumulator.all_blocks:
+                                    if block.get("type") == "tool_result" and block.get("tool_use_id") in client_tool_ids:
+                                        tool_results.append(block)
                         
                         # 更新消息（用于下一轮 LLM 调用）
                         append_assistant_message(llm_messages, response.raw_content)
@@ -1035,14 +1039,14 @@ class SimpleAgent:
             skip_memory_retrieval=skip_memory
         )
         
-        # 单层缓存（向后兼容，Claude 固定 5 分钟 TTL）
+        # 单层格式（向后兼容）
+        # 🔧 不在这里添加 cache_control，由 claude.py 统一处理
         system_blocks = [{
             "type": "text",
-            "text": base_prompt,
-            "cache_control": {"type": "ephemeral"}
+            "text": base_prompt
         }]
         
-        logger.info(f"✅ 单层缓存 System Prompt (fallback): {len(base_prompt)} 字符")
+        logger.info(f"✅ System Prompt (fallback): {len(base_prompt)} 字符")
         
         return system_blocks
     
@@ -1425,37 +1429,40 @@ class SimpleAgent:
                         # ===== 流式执行模式 =====
                         logger.info(f"🌊 流式执行工具: {tool_name}")
                         
-                        # 先发 content_start (content 为空，后续通过 delta 流式发送)
-                        tool_result_index = ctx.block.start_new_block("tool_result")
-                        tool_result_block = {
+                        # 先发 content_start (content 为空，后续通过 delta 流式发送给前端)
+                        stream_block_index = ctx.block.start_new_block("tool_result_stream")
+                        stream_result_block = {
                             "type": "tool_result",
                             "tool_use_id": tool_id,
-                            "content": "",  # 流式模式：初始为空
+                            "content": "",  # 流式模式：初始为空（前端流式显示用）
                             "is_error": False
                         }
                         
                         yield await self.broadcaster.emit_content_start(
                             session_id=session_id,
-                            index=tool_result_index,
-                            content_block=tool_result_block
+                            index=stream_block_index,
+                            content_block=stream_result_block
                         )
                         
-                        # 流式执行工具，每个 chunk 发 content_delta
+                        # 流式执行工具，每个 chunk 发 content_delta（前端流式显示）
                         accumulated_result = ""
                         async for chunk in self.tool_executor.execute_stream(tool_name, tool_input):
                             accumulated_result += chunk
                             yield await self.broadcaster.emit_content_delta(
                                 session_id=session_id,
-                                index=tool_result_index,
+                                index=stream_block_index,
                                 delta=chunk
                             )
                         
-                        # 发 content_stop
+                        # 发 content_stop（关闭流式显示 block）
+                        # ContentAccumulator 会自动把累积的内容保存到 all_blocks
                         yield await self.broadcaster.emit_content_stop(
                             session_id=session_id,
-                            index=tool_result_index
+                            index=stream_block_index
                         )
                         ctx.block.close_current_block()
+                        
+                        logger.info(f"✅ 流式工具执行完成，累积结果长度: {len(accumulated_result)}")
                         
                         # 尝试解析累积结果用于 PromptManager
                         try:

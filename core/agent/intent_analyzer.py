@@ -270,8 +270,8 @@ class IntentAnalyzer:
                     intent_prompt = self._get_intent_prompt()
                     system_blocks = [{
                         "type": "text",
-                        "text": intent_prompt,
-                        "cache_control": {"type": "ephemeral"}
+                        "text": intent_prompt
+                        # 🔧 不在这里添加 cache_control，由 claude.py 统一处理
                     }]
             else:
                 # 未启用缓存或无 prompt_cache：使用字符串格式（向后兼容）

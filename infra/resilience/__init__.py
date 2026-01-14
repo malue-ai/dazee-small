@@ -4,10 +4,15 @@
 提供统一的超时、重试、熔断、降级机制
 """
 
-from core.resilience.timeout import with_timeout, TimeoutConfig
-from core.resilience.retry import with_retry, RetryConfig
-from core.resilience.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
-from core.resilience.fallback import FallbackStrategy, register_fallback
+from infra.resilience.timeout import with_timeout, TimeoutConfig
+from infra.resilience.retry import with_retry, RetryConfig
+from infra.resilience.circuit_breaker import (
+    CircuitBreaker,
+    CircuitBreakerConfig,
+    get_circuit_breaker,
+    get_all_circuit_breakers,
+)
+from infra.resilience.fallback import FallbackStrategy, register_fallback
 
 __all__ = [
     "with_timeout",
@@ -16,6 +21,8 @@ __all__ = [
     "RetryConfig",
     "CircuitBreaker",
     "CircuitBreakerConfig",
+    "get_circuit_breaker",
+    "get_all_circuit_breakers",
     "FallbackStrategy",
     "register_fallback",
 ]
