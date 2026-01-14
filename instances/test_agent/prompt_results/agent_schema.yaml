@@ -55,21 +55,12 @@ output_formatter:
   - json
   - html
   code_highlighting: true
-<<<<<<< Updated upstream
-  max_output_length: 50000
-=======
   max_output_length: 5000
->>>>>>> Stashed changes
   json_model_name: null
   json_schema: null
   strict_json_validation: false
   json_ensure_ascii: false
   json_indent: 2
-<<<<<<< Updated upstream
-  include_metadata: false
-skills: []
-tools: []
-=======
   include_metadata: true
 skills:
 - type: custom
@@ -92,7 +83,6 @@ tools:
 - e2b_sandbox
 - current_time
 - timezone_conversion
->>>>>>> Stashed changes
 model: claude-sonnet-4-5-20250929
 max_turns: 20
 allow_parallel_tools: false
