@@ -55,7 +55,9 @@ class MCPClientWrapper:
         server_url: str,
         server_name: str,
         auth_token: Optional[str] = None,
-        tool_timeout: float = 300.0  # 🆕 工具调用超时时间（默认 5 分钟）
+        tool_timeout: float = 300.0,  # 工具调用超时时间（默认 5 分钟）
+        connect_timeout: float = 30.0,  # 🆕 连接超时时间（默认 30 秒）
+        max_retries: int = 2  # 🆕 最大重试次数（默认 2 次）
     ):
         """
         初始化 MCP 客户端
@@ -65,52 +67,128 @@ class MCPClientWrapper:
             server_name: 服务器名称（用于工具命名空间）
             auth_token: 认证令牌
             tool_timeout: 工具调用超时时间（秒），默认 300 秒（5 分钟）
+            connect_timeout: 连接超时时间（秒），默认 30 秒
+            max_retries: 最大重试次数，默认 2 次
         """
         self.server_url = server_url
         self.server_name = server_name
         self.auth_token = auth_token
-        self.tool_timeout = tool_timeout  # 🆕 保存超时配置
+        self.tool_timeout = tool_timeout
+        self.connect_timeout = connect_timeout  # 🆕 连接超时配置
+        self.max_retries = max_retries  # 🆕 重试次数配置
         self._session = None
         self._tools: Dict[str, Dict] = {}
         self._connected = False
+        self._connection_failed = False  # 🆕 标记连接是否彻底失败（用于缓存清理）
     
     async def connect(self) -> bool:
         """
         连接到 MCP 服务器（使用 Streamable HTTP 传输）
         
+        支持超时控制和自动重试
+        
         Returns:
             是否连接成功
         """
+        last_error = None
+        
+        for attempt in range(self.max_retries + 1):
+            try:
+                if attempt > 0:
+                    # 重试前等待（指数退避）
+                    delay = min(2 ** attempt, 10)  # 最大等待 10 秒
+                    logger.info(f"⏳ MCP 连接重试 {attempt}/{self.max_retries}，等待 {delay}s...")
+                    await asyncio.sleep(delay)
+                
+                logger.info(f"🔌 连接 MCP 服务器: {self.server_url} (超时: {self.connect_timeout}s)")
+                
+                # 准备 headers
+                headers = {}
+                if self.auth_token:
+                    headers["Authorization"] = f"Bearer {self.auth_token}"
+                
+                # 🆕 使用 asyncio.wait_for 添加连接超时
+                try:
+                    # 使用 Streamable HTTP 客户端连接（带超时）
+                    self._http_cm = streamablehttp_client(self.server_url, headers=headers)
+                    read_stream, write_stream, _ = await asyncio.wait_for(
+                        self._http_cm.__aenter__(),
+                        timeout=self.connect_timeout
+                    )
+                    
+                    # 创建 ClientSession
+                    self._session = ClientSession(read_stream, write_stream)
+                    
+                    # 初始化会话（带超时）
+                    await asyncio.wait_for(
+                        self._session.__aenter__(),
+                        timeout=self.connect_timeout
+                    )
+                    
+                    # 发送 initialize 请求（带超时）
+                    result = await asyncio.wait_for(
+                        self._session.initialize(),
+                        timeout=self.connect_timeout
+                    )
+                    
+                except asyncio.TimeoutError:
+                    raise TimeoutError(f"连接超时（{self.connect_timeout}秒）")
+                
+                server_name = result.serverInfo.name if result.serverInfo else 'unknown'
+                logger.info(f"✅ MCP 服务器连接成功: {server_name}")
+                
+                self._connected = True
+                self._connection_failed = False
+                return True
+                
+            except (RuntimeError, GeneratorExit) as e:
+                # 🆕 anyio cancel scope 错误：不重试，直接标记失败
+                logger.error(f"❌ MCP 连接出现 anyio 错误（不可重试）: {type(e).__name__}: {str(e)}")
+                last_error = e
+                self._connection_failed = True
+                break
+                
+            except (TimeoutError, asyncio.TimeoutError) as e:
+                # 超时错误：可以重试
+                logger.warning(f"⚠️ MCP 连接超时: {str(e)}")
+                last_error = e
+                # 清理可能残留的资源
+                await self._cleanup_connection()
+                
+            except Exception as e:
+                # 其他错误：记录并尝试重试
+                error_type = type(e).__name__
+                logger.warning(f"⚠️ MCP 连接失败 (尝试 {attempt + 1}/{self.max_retries + 1}): {error_type}: {str(e)}")
+                last_error = e
+                # 清理可能残留的资源
+                await self._cleanup_connection()
+        
+        # 所有重试都失败
+        logger.error(f"❌ MCP 服务器连接彻底失败（已重试 {self.max_retries} 次）: {str(last_error)}")
+        self._connected = False
+        self._connection_failed = True
+        return False
+    
+    async def _cleanup_connection(self):
+        """
+        清理连接资源（用于重试前的清理）
+        """
         try:
-            logger.info(f"🔌 连接 MCP 服务器: {self.server_url}")
+            if self._session:
+                try:
+                    await self._session.__aexit__(None, None, None)
+                except Exception:
+                    pass
+                self._session = None
             
-            # 准备 headers
-            headers = {}
-            if self.auth_token:
-                headers["Authorization"] = f"Bearer {self.auth_token}"
-            
-            # 使用 Streamable HTTP 客户端连接
-            self._http_cm = streamablehttp_client(self.server_url, headers=headers)
-            read_stream, write_stream, _ = await self._http_cm.__aenter__()
-            
-            # 创建 ClientSession
-            self._session = ClientSession(read_stream, write_stream)
-            
-            # 初始化会话
-            await self._session.__aenter__()
-            
-            # 发送 initialize 请求
-            result = await self._session.initialize()
-            server_name = result.serverInfo.name if result.serverInfo else 'unknown'
-            logger.info(f"✅ MCP 服务器连接成功: {server_name}")
-            
-            self._connected = True
-            return True
-            
+            if hasattr(self, '_http_cm') and self._http_cm:
+                try:
+                    await self._http_cm.__aexit__(None, None, None)
+                except Exception:
+                    pass
+                self._http_cm = None
         except Exception as e:
-            logger.error(f"❌ MCP 服务器连接失败: {str(e)}")
-            self._connected = False
-            return False
+            logger.debug(f"清理连接资源时出错: {e}")
     
     async def disconnect(self):
         """
@@ -432,8 +510,10 @@ async def get_mcp_client(
     server_name: str,
     auth_token: Optional[str] = None,
     force_reconnect: bool = False,
-    tool_timeout: float = 300.0  # 🆕 工具调用超时时间（默认 5 分钟）
-) -> MCPClientWrapper:
+    tool_timeout: float = 300.0,  # 工具调用超时时间（默认 5 分钟）
+    connect_timeout: float = 30.0,  # 🆕 连接超时时间（默认 30 秒）
+    max_retries: int = 2  # 🆕 最大重试次数（默认 2 次）
+) -> Optional[MCPClientWrapper]:
     """
     获取 MCP 客户端（带缓存）
     
@@ -446,18 +526,23 @@ async def get_mcp_client(
         auth_token: 认证令牌
         force_reconnect: 是否强制重新连接
         tool_timeout: 工具调用超时时间（秒），默认 300 秒（5 分钟）
+        connect_timeout: 连接超时时间（秒），默认 30 秒
+        max_retries: 最大重试次数，默认 2 次
         
     Returns:
-        已连接的 MCPClientWrapper 实例
+        已连接的 MCPClientWrapper 实例，连接失败时返回 None
     """
     global _mcp_client_cache
     
-    # 检查缓存
-    if server_url in _mcp_client_cache and not force_reconnect:
-        client = _mcp_client_cache[server_url]
-        if client._connected:
+    # 🆕 检查缓存中是否有失败的客户端，如果有则移除
+    if server_url in _mcp_client_cache:
+        cached_client = _mcp_client_cache[server_url]
+        if cached_client._connection_failed:
+            logger.info(f"🧹 移除失败的 MCP 客户端缓存: {server_name}")
+            del _mcp_client_cache[server_url]
+        elif cached_client._connected and not force_reconnect:
             logger.debug(f"📦 复用已缓存的 MCP 客户端: {server_name}")
-            return client
+            return cached_client
     
     # 创建新客户端
     logger.info(f"🔧 创建新 MCP 客户端: {server_name} ({server_url})")
@@ -465,7 +550,9 @@ async def get_mcp_client(
         server_url=server_url,
         server_name=server_name,
         auth_token=auth_token,
-        tool_timeout=tool_timeout  # 🆕 传递超时配置
+        tool_timeout=tool_timeout,
+        connect_timeout=connect_timeout,  # 🆕 传递连接超时配置
+        max_retries=max_retries  # 🆕 传递重试次数配置
     )
     
     # 连接
@@ -475,8 +562,11 @@ async def get_mcp_client(
         await client.discover_tools()
         # 缓存
         _mcp_client_cache[server_url] = client
-    
-    return client
+        return client
+    else:
+        # 🆕 连接失败，不缓存，返回 None
+        logger.warning(f"⚠️ MCP 客户端连接失败，不加入缓存: {server_name}")
+        return None
 
 
 def get_cached_mcp_clients() -> Dict[str, MCPClientWrapper]:

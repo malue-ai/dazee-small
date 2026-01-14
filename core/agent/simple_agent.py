@@ -47,6 +47,7 @@ from core.tool.capability import create_capability_registry, create_invocation_s
 from core.orchestration import create_pipeline_tracer, E2EPipelineTracer
 from core.confirmation_manager import get_confirmation_manager, ConfirmationType
 from core.agent.types import IntentResult
+from core.agent.content_handler import ContentHandler, create_content_handler
 from logger import get_logger
 from tools.plan_todo_tool import create_plan_todo_tool
 from utils.usage_tracker import create_usage_tracker
@@ -803,7 +804,9 @@ class SimpleAgent:
                                 client_tool_ids = {tc.get("id") for tc in client_tools}
                                 for block in accumulator.all_blocks:
                                     if block.get("type") == "tool_result" and block.get("tool_use_id") in client_tool_ids:
-                                        tool_results.append(block)
+                                        # 移除 index 字段（Claude API 不接受）
+                                        clean_block = {k: v for k, v in block.items() if k != "index"}
+                                        tool_results.append(clean_block)
                         
                         # 更新消息（用于下一轮 LLM 调用）
                         append_assistant_message(llm_messages, response.raw_content)
@@ -920,7 +923,7 @@ class SimpleAgent:
         
         # 7.3 完成追踪并生成报告
         if self._tracer:
-            final_response = ctx.stream.content if hasattr(ctx, 'stream') else ""
+            final_response = ctx.accumulator.get_text_content()
             self._tracer.set_final_response(final_response[:500] if final_response else "")
             self._tracer.finish()
             logger.debug("✅ E2E Pipeline Report 已生成")
@@ -1061,9 +1064,14 @@ class SimpleAgent:
         """
         处理流式 LLM 响应
         
-        委托给 EventManager 处理事件发射
+        使用 ContentHandler 的手动控制模式（start_block, send_delta, stop_block）
+        处理 LLM 的流式输出（thinking, text, tool_use）
+        
         Extended Thinking 由 LLM Service 配置和 System Prompt 控制
         """
+        # 创建 ContentHandler（手动控制模式）
+        content_handler = create_content_handler(self.broadcaster, ctx.block)
+        
         stream_generator = self.llm.create_message_stream(
             messages=messages,
             system=system_prompt,
@@ -1073,87 +1081,57 @@ class SimpleAgent:
         final_response = None
         
         async for llm_response in stream_generator:
-            # 处理 thinking
+            # ===== 处理 thinking =====
             if llm_response.thinking and llm_response.is_stream:
-                if ctx.block.needs_transition("thinking"):
-                    if ctx.block.is_block_open():
-                        yield await self.broadcaster.emit_content_stop(
-                            session_id=session_id,
-                            index=ctx.block.current_index
-                        )
-                    
-                    block_idx = ctx.block.start_new_block("thinking")
-                    yield await self.broadcaster.emit_content_start(
+                if content_handler.needs_transition("thinking"):
+                    yield await content_handler.start_block(
                         session_id=session_id,
-                        index=block_idx,
-                        content_block={"type": "thinking", "thinking": ""}
+                        block_type="thinking",
+                        initial={"thinking": ""}
                     )
                 
-                # 🆕 简化格式：delta 直接是字符串
-                yield await self.broadcaster.emit_content_delta(
+                yield await content_handler.send_delta(
                     session_id=session_id,
-                    index=ctx.block.current_index,
                     delta=llm_response.thinking
                 )
-                ctx.stream.append_thinking(llm_response.thinking)
+                # ContentAccumulator 通过 EventBroadcaster 自动累积
             
-            # 处理 content
+            # ===== 处理 content（text） =====
             if llm_response.content and llm_response.is_stream:
-                if ctx.block.needs_transition("text"):
-                    if ctx.block.is_block_open():
-                        yield await self.broadcaster.emit_content_stop(
-                            session_id=session_id,
-                            index=ctx.block.current_index
-                        )
-                    
-                    block_idx = ctx.block.start_new_block("text")
-                    yield await self.broadcaster.emit_content_start(
+                if content_handler.needs_transition("text"):
+                    yield await content_handler.start_block(
                         session_id=session_id,
-                        index=block_idx,
-                        content_block={"type": "text", "text": ""}
+                        block_type="text",
+                        initial={"text": ""}
                     )
                 
-                # 🆕 简化格式：delta 直接是字符串
-                yield await self.broadcaster.emit_content_delta(
+                yield await content_handler.send_delta(
                     session_id=session_id,
-                    index=ctx.block.current_index,
                     delta=llm_response.content
                 )
-                ctx.stream.append_content(llm_response.content)
+                # ContentAccumulator 通过 EventBroadcaster 自动累积
             
-            # 🆕 处理流式工具调用 - tool_use 开始
+            # ===== 处理流式工具调用 - tool_use 开始 =====
             if llm_response.tool_use_start and llm_response.is_stream:
                 tool_info = llm_response.tool_use_start
                 tool_type = tool_info.get("type", "tool_use")
                 
-                # 🔧 修复：每个新的 tool_use 都需要关闭前一个 block 并开启新的
-                # 原问题：当连续多个 tool_use 时，needs_transition 返回 False，
-                # 导致前一个 tool_use 没有被保存，input delta 被错误合并
-                if ctx.block.is_block_open():
-                    yield await self.broadcaster.emit_content_stop(
-                        session_id=session_id,
-                        index=ctx.block.current_index
-                    )
-                    ctx.block.close_current_block()
-                
-                block_idx = ctx.block.start_new_block(tool_type)
-                yield await self.broadcaster.emit_content_start(
+                # 每个新的 tool_use 都开启新的 block
+                # start_block 会自动关闭前一个 block
+                yield await content_handler.start_block(
                     session_id=session_id,
-                    index=block_idx,
-                    content_block={
-                        "type": tool_type,
+                    block_type=tool_type,
+                    initial={
                         "id": tool_info.get("id", ""),
                         "name": tool_info.get("name", ""),
                         "input": {}  # input 后续流式发送
                     }
                 )
             
-            # 🆕 处理流式工具调用 - 参数增量
+            # ===== 处理流式工具调用 - 参数增量 =====
             if llm_response.input_delta and llm_response.is_stream:
-                # 简化格式：delta 直接是 JSON 片段字符串
-                yield await self.broadcaster.emit_content_delta(
+                yield await content_handler.send_delta(
                     session_id=session_id,
-                    index=ctx.block.current_index,
                     delta=llm_response.input_delta
                 )
             
@@ -1162,12 +1140,8 @@ class SimpleAgent:
                 final_response = llm_response
         
         # 关闭最后一个 block
-        if ctx.block.is_block_open():
-            yield await self.broadcaster.emit_content_stop(
-                session_id=session_id,
-                index=ctx.block.current_index
-            )
-            ctx.block.close_current_block()
+        if content_handler.is_block_open():
+            yield await content_handler.stop_block(session_id=session_id)
         
         # 保存最终响应到 ctx（供 RVR 循环使用）
         if final_response:
@@ -1179,14 +1153,21 @@ class SimpleAgent:
     async def _execute_single_tool(
         self,
         tool_call: Dict,
-        session_id: str
+        session_id: str,
+        ctx=None
     ) -> Dict[str, Any]:
         """
-        执行单个工具（无 SSE 事件发送，用于并行执行）
+        执行单个工具（纯执行逻辑，不发送 SSE 事件）
+        
+        支持所有工具类型：
+        - 普通工具：通过 tool_executor 执行
+        - plan_todo：特殊处理，更新 plan 缓存
+        - request_human_confirmation：HITL 工具，等待用户响应
         
         Args:
             tool_call: 工具调用信息 {id, name, input}
             session_id: 会话ID
+            ctx: RuntimeContext（可选，用于 PromptManager）
             
         Returns:
             执行结果字典: {
@@ -1202,7 +1183,7 @@ class SimpleAgent:
         tool_input = tool_call['input'] or {}
         tool_id = tool_call['id']
         
-        logger.debug(f"🔧 并行执行工具: {tool_name}")
+        logger.debug(f"🔧 执行工具: {tool_name}")
         
         try:
             # 🛡️ 为工具注入上下文（user_id, session_id, conversation_id）
@@ -1213,8 +1194,38 @@ class SimpleAgent:
             conv_id = session_context.get("conversation_id") or getattr(self, '_current_conversation_id', None) or session_id
             tool_input.setdefault("conversation_id", conv_id)
             
-            # 执行工具
-            result = await self.tool_executor.execute(tool_name, tool_input)
+            # ===== 特殊工具处理 =====
+            if tool_name == "plan_todo":
+                # plan_todo 工具需要 current_plan 参数
+                operation = tool_input.get('operation', 'create_plan')
+                data = tool_input.get('data', {})
+                
+                result = await self.plan_todo_tool.execute(
+                    operation=operation,
+                    data=data,
+                    current_plan=self._plan_cache.get("plan")
+                )
+                
+                # 更新 plan 缓存
+                if result.get("status") == "success" and "plan" in result:
+                    self._plan_cache["plan"] = result.get("plan")
+                    logger.info(f"📋 Plan 操作完成: {operation}")
+            
+            elif tool_name == "request_human_confirmation":
+                # HITL 工具：等待用户响应
+                result = await self._handle_human_confirmation(
+                    tool_input=tool_input,
+                    session_id=session_id,
+                    tool_id=tool_id
+                )
+            
+            else:
+                # ===== 通用工具执行 =====
+                result = await self.tool_executor.execute(tool_name, tool_input)
+            
+            # 触发 PromptManager（如 RAG 上下文追加）
+            if ctx:
+                get_prompt_manager().on_tool_result(ctx, tool_name=tool_name, result=result)
             
             return {
                 "tool_id": tool_id,
@@ -1229,6 +1240,15 @@ class SimpleAgent:
             error_msg = f"工具执行失败: {str(e)}"
             logger.error(f"❌ {error_msg}")
             
+            # 错误保留（Context Engineering）
+            if self.context_engineering:
+                self.context_engineering.record_error(
+                    tool_name=tool_name,
+                    error=e,
+                    input_params=tool_input
+                )
+                logger.debug(f"📝 错误保留: {tool_name} 错误已记录")
+            
             return {
                 "tool_id": tool_id,
                 "tool_name": tool_name,
@@ -1238,29 +1258,24 @@ class SimpleAgent:
                 "error_msg": error_msg
             }
     
-    async def _execute_tools_stream(
+    async def _execute_tools_core(
         self,
         tool_calls: List[Dict],
         session_id: str,
-        ctx  # RuntimeContext
-    ) -> AsyncGenerator[Dict[str, Any], None]:
+        ctx=None
+    ) -> Dict[str, Dict[str, Any]]:
         """
-        执行工具调用（流式版本，yield 出所有事件）
-        
-        🆕 支持并行执行：
-        - 如果 allow_parallel_tools=True，可并行的工具会使用 asyncio.gather 同时执行
-        - 特殊工具（plan_todo, request_human_confirmation）始终串行执行
-        - 并行执行后，按原始顺序发送 SSE 事件
+        执行工具的核心逻辑（支持并行执行，不发送 SSE 事件）
         
         Args:
             tool_calls: 工具调用列表
             session_id: 会话ID
-            ctx: RuntimeContext
+            ctx: RuntimeContext（可选）
             
-        Yields:
-            content_start, content_delta, content_stop 等事件
+        Returns:
+            {tool_id: result_dict} 映射
         """
-        # 分离可并行工具和必须串行的特殊工具
+        # 分离可并行的工具和必须串行的特殊工具
         parallel_tools = []
         serial_tools = []
         
@@ -1271,8 +1286,7 @@ class SimpleAgent:
             else:
                 parallel_tools.append(tc)
         
-        # 存储并行执行的结果，按原始顺序
-        parallel_results = {}
+        results = {}
         
         # ===== 并行执行可并行的工具 =====
         if parallel_tools and self.allow_parallel_tools and len(parallel_tools) > 1:
@@ -1291,17 +1305,16 @@ class SimpleAgent:
                     self._tracer.log_tool_call(tc['name'])
             
             # 并行执行
-            results = await asyncio.gather(
-                *[self._execute_single_tool(tc, session_id) for tc in tools_to_execute],
+            parallel_results = await asyncio.gather(
+                *[self._execute_single_tool(tc, session_id, ctx) for tc in tools_to_execute],
                 return_exceptions=True
             )
             
             # 处理结果
-            for tc, result in zip(tools_to_execute, results):
+            for tc, result in zip(tools_to_execute, parallel_results):
                 tool_id = tc['id']
                 if isinstance(result, Exception):
-                    # asyncio.gather 返回的异常
-                    parallel_results[tool_id] = {
+                    results[tool_id] = {
                         "tool_id": tool_id,
                         "tool_name": tc['name'],
                         "tool_input": tc.get('input', {}),
@@ -1310,231 +1323,144 @@ class SimpleAgent:
                         "error_msg": f"工具执行失败: {str(result)}"
                     }
                 else:
-                    parallel_results[tool_id] = result
-                    
-                    # 🆕 工具执行后 → 触发 PromptManager 追加（如 RAG 上下文）
-                    if not result.get("is_error"):
-                        get_prompt_manager().on_tool_result(ctx, tool_name=tc['name'], result=result.get("result"))
+                    results[tool_id] = result
         else:
             # 不启用并行或只有一个工具，全部串行执行
             serial_tools = parallel_tools + serial_tools
-            parallel_tools = []
         
-        # ===== 按原始顺序发送事件（包括并行执行的结果） =====
+        # ===== 串行执行特殊工具 =====
+        for tc in serial_tools:
+            tool_id = tc['id']
+            
+            # 追踪工具调用
+            if self._tracer:
+                self._tracer.log_tool_call(tc['name'])
+            
+            results[tool_id] = await self._execute_single_tool(tc, session_id, ctx)
+        
+        return results
+    
+    async def _execute_tools_stream(
+        self,
+        tool_calls: List[Dict],
+        session_id: str,
+        ctx  # RuntimeContext
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        执行工具调用并发送 SSE 事件（统一入口）
+        
+        使用 ContentHandler 发送事件，使用 _execute_tools_core 执行工具。
+        支持：
+        - 并行执行（可并行的工具使用 asyncio.gather）
+        - 流式工具执行（支持 execute_stream 的工具）
+        - 特殊工具（plan_todo, request_human_confirmation）
+        
+        事件序列：content_start → content_stop（非流式）
+                或 content_start → content_delta × N → content_stop（流式工具）
+        
+        Args:
+            tool_calls: 工具调用列表
+            session_id: 会话ID
+            ctx: RuntimeContext
+            
+        Yields:
+            content_start, content_delta, content_stop 等事件
+        """
+        # 创建 ContentHandler
+        content_handler = create_content_handler(self.broadcaster, ctx.block)
+        
+        # 分离流式工具和普通工具
+        stream_tools = []
+        normal_tools = []
+        
+        for tc in tool_calls:
+            tool_name = tc.get('name', '')
+            # 串行工具或支持流式的工具需要特殊处理
+            if tool_name in self._serial_only_tools or self.tool_executor.supports_stream(tool_name):
+                stream_tools.append(tc)
+            else:
+                normal_tools.append(tc)
+        
+        # ===== 先执行可并行的普通工具（批量执行，不发送事件） =====
+        normal_results = {}
+        if normal_tools:
+            normal_results = await self._execute_tools_core(normal_tools, session_id, ctx)
+        
+        # ===== 按原始顺序发送事件 =====
         for tool_call in tool_calls:
             tool_name = tool_call['name']
             tool_input = tool_call['input'] or {}
             tool_id = tool_call['id']
             
-            # 检查是否是已并行执行的工具
-            if tool_id in parallel_results:
-                # 从并行结果中获取
-                result_info = parallel_results[tool_id]
-                
-                # 🔧 NOTE: tool_use 事件已在 _process_stream 中发送，这里只发送 tool_result
-                # 确保之前的 block 已关闭
-                if ctx.block.is_block_open():
-                    yield await self.broadcaster.emit_content_stop(
-                        session_id=session_id,
-                        index=ctx.block.current_index
-                    )
-                    ctx.block.close_current_block()
-                
-                # ===== 发送 tool_result content block =====
-                tool_result_index = ctx.block.start_new_block("tool_result")
+            # 检查是否是已执行的普通工具
+            if tool_id in normal_results:
+                result_info = normal_results[tool_id]
                 result = result_info.get("result", {})
                 result_content = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
                 
-                tool_result_block = {
-                    "type": "tool_result",
-                    "tool_use_id": tool_id,
-                    "content": result_content,
-                    "is_error": result_info.get("is_error", False)
-                }
-                
-                yield await self.broadcaster.emit_content_start(
+                # 使用 ContentHandler 发送 tool_result（非流式）
+                yield await content_handler.emit_block(
                     session_id=session_id,
-                    index=tool_result_index,
-                    content_block=tool_result_block
+                    block_type="tool_result",
+                    content={
+                        "tool_use_id": tool_id,
+                        "content": result_content,
+                        "is_error": result_info.get("is_error", False)
+                    }
                 )
-                
-                yield await self.broadcaster.emit_content_stop(
-                    session_id=session_id,
-                    index=tool_result_index
-                )
-                ctx.block.close_current_block()
-                
-                # 错误保留
-                if result_info.get("is_error") and self.context_engineering:
-                    self.context_engineering.record_error(
-                        tool_name=tool_name,
-                        error=Exception(result_info.get("error_msg", "Unknown error")),
-                        input_params=tool_input
-                    )
-                    logger.debug(f"📝 错误保留: {tool_name} 错误已记录")
-                
                 continue
             
-            # ===== 串行执行特殊工具 =====
-            logger.debug(f"🔧 执行工具: {tool_name}")
+            # ===== 处理需要特殊处理的工具 =====
+            logger.debug(f"🔧 处理工具: {tool_name}")
             
             # 追踪工具执行
             if self._tracer:
                 self._tracer.log_tool_call(tool_name)
             
-            # 🔧 NOTE: tool_use 事件已在 _process_stream 中发送，这里只需要确保 block 关闭
-            if ctx.block.is_block_open():
-                yield await self.broadcaster.emit_content_stop(
+            # 检测是否支持流式执行
+            if self.tool_executor.supports_stream(tool_name):
+                # ===== 流式工具执行 =====
+                logger.info(f"🌊 流式执行工具: {tool_name}")
+                
+                # 注入上下文
+                session_context = await self.event_manager.storage.get_session_context(session_id)
+                tool_input.setdefault("session_id", session_id)
+                if session_context.get("user_id"):
+                    tool_input.setdefault("user_id", session_context.get("user_id"))
+                conv_id = session_context.get("conversation_id") or getattr(self, '_current_conversation_id', None) or session_id
+                tool_input.setdefault("conversation_id", conv_id)
+                
+                # 使用 ContentHandler 发送流式 tool_result
+                async def stream_generator():
+                    async for chunk in self.tool_executor.execute_stream(tool_name, tool_input):
+                        yield chunk
+                
+                async for event in content_handler.emit_block_stream(
                     session_id=session_id,
-                    index=ctx.block.current_index
-                )
-                ctx.block.close_current_block()
-            
-            # 执行工具
-            try:
-                # plan_todo 工具需要 current_plan 参数
-                if tool_name == "plan_todo":
-                    operation = tool_input.get('operation', 'create_plan')
-                    data = tool_input.get('data', {})
-                    
-                    result = await self.plan_todo_tool.execute(
-                        operation=operation,
-                        data=data,
-                        current_plan=self._plan_cache.get("plan")
-                    )
-                    
-                    # 更新 plan 缓存
-                    if result.get("status") == "success" and "plan" in result:
-                        self._plan_cache["plan"] = result.get("plan")
-                        logger.info(f"📋 Plan 操作完成: {operation}")
+                    block_type="tool_result",
+                    initial={"tool_use_id": tool_id, "is_error": False},
+                    delta_source=stream_generator()
+                ):
+                    yield event
                 
-                # HITL 工具：Agent 负责发送 SSE 事件并等待用户响应
-                elif tool_name == "request_human_confirmation":
-                    result = await self._handle_human_confirmation(
-                        tool_input=tool_input,
-                        session_id=session_id,
-                        tool_id=tool_id
-                    )
-                else:
-                    # 普通工具（串行模式下执行）
-                    session_context = await self.event_manager.storage.get_session_context(session_id)
-                    tool_input.setdefault("session_id", session_id)
-                    if session_context.get("user_id"):
-                        tool_input.setdefault("user_id", session_context.get("user_id"))
-                    conv_id = session_context.get("conversation_id") or getattr(self, '_current_conversation_id', None) or session_id
-                    tool_input.setdefault("conversation_id", conv_id)
-                    
-                    # 🆕 检测是否支持流式执行
-                    if self.tool_executor.supports_stream(tool_name):
-                        # ===== 流式执行模式 =====
-                        logger.info(f"🌊 流式执行工具: {tool_name}")
-                        
-                        # 先发 content_start (content 为空，后续通过 delta 流式发送给前端)
-                        stream_block_index = ctx.block.start_new_block("tool_result_stream")
-                        stream_result_block = {
-                            "type": "tool_result",
-                            "tool_use_id": tool_id,
-                            "content": "",  # 流式模式：初始为空（前端流式显示用）
-                            "is_error": False
-                        }
-                        
-                        yield await self.broadcaster.emit_content_start(
-                            session_id=session_id,
-                            index=stream_block_index,
-                            content_block=stream_result_block
-                        )
-                        
-                        # 流式执行工具，每个 chunk 发 content_delta（前端流式显示）
-                        accumulated_result = ""
-                        async for chunk in self.tool_executor.execute_stream(tool_name, tool_input):
-                            accumulated_result += chunk
-                            yield await self.broadcaster.emit_content_delta(
-                                session_id=session_id,
-                                index=stream_block_index,
-                                delta=chunk
-                            )
-                        
-                        # 发 content_stop（关闭流式显示 block）
-                        # ContentAccumulator 会自动把累积的内容保存到 all_blocks
-                        yield await self.broadcaster.emit_content_stop(
-                            session_id=session_id,
-                            index=stream_block_index
-                        )
-                        ctx.block.close_current_block()
-                        
-                        logger.info(f"✅ 流式工具执行完成，累积结果长度: {len(accumulated_result)}")
-                        
-                        # 尝试解析累积结果用于 PromptManager
-                        try:
-                            result = json.loads(accumulated_result)
-                        except json.JSONDecodeError:
-                            result = {"raw_text": accumulated_result}
-                        
-                        # 工具执行后触发 PromptManager 追加
-                        get_prompt_manager().on_tool_result(ctx, tool_name=tool_name, result=result)
-                        continue  # 流式模式已处理完，跳过下面的非流式逻辑
-                    
-                    # ===== 非流式执行模式（原有逻辑） =====
-                    result = await self.tool_executor.execute(tool_name, tool_input)
-                    
-                    # 工具执行后触发 PromptManager 追加
-                    get_prompt_manager().on_tool_result(ctx, tool_name=tool_name, result=result)
-                
-                # 发送 tool_result content block（非流式模式）
-                tool_result_index = ctx.block.start_new_block("tool_result")
+                # 触发 PromptManager
+                get_prompt_manager().on_tool_result(ctx, tool_name=tool_name, result={"streamed": True})
+            else:
+                # ===== 串行工具执行（plan_todo, HITL 等）=====
+                result_info = await self._execute_single_tool(tool_call, session_id, ctx)
+                result = result_info.get("result", {})
                 result_content = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
                 
-                tool_result_block = {
-                    "type": "tool_result",
-                    "tool_use_id": tool_id,
-                    "content": result_content,
-                    "is_error": False
-                }
-                
-                yield await self.broadcaster.emit_content_start(
+                # 使用 ContentHandler 发送 tool_result（非流式）
+                yield await content_handler.emit_block(
                     session_id=session_id,
-                    index=tool_result_index,
-                    content_block=tool_result_block
+                    block_type="tool_result",
+                    content={
+                        "tool_use_id": tool_id,
+                        "content": result_content,
+                        "is_error": result_info.get("is_error", False)
+                    }
                 )
-                
-                yield await self.broadcaster.emit_content_stop(
-                    session_id=session_id,
-                    index=tool_result_index
-                )
-                ctx.block.close_current_block()
-                
-            except Exception as e:
-                error_msg = f"工具执行失败: {str(e)}"
-                logger.error(f"❌ {error_msg}")
-                
-                # 错误保留
-                if self.context_engineering:
-                    self.context_engineering.record_error(
-                        tool_name=tool_name,
-                        error=e,
-                        input_params=tool_input
-                    )
-                    logger.debug(f"📝 错误保留: {tool_name} 错误已记录")
-                
-                tool_result_index = ctx.block.start_new_block("tool_result")
-                error_result_block = {
-                    "type": "tool_result",
-                    "tool_use_id": tool_id,
-                    "content": error_msg,
-                    "is_error": True
-                }
-                
-                yield await self.broadcaster.emit_content_start(
-                    session_id=session_id,
-                    index=tool_result_index,
-                    content_block=error_result_block
-                )
-                
-                yield await self.broadcaster.emit_content_stop(
-                    session_id=session_id,
-                    index=tool_result_index
-                )
-                ctx.block.close_current_block()
     
     async def _handle_human_confirmation(
         self,
@@ -1661,6 +1587,8 @@ class SimpleAgent:
         """
         发送服务端工具（如 web_search）的事件到前端
         
+        使用 ContentHandler 统一发送事件。
+        
         服务端工具的特点：
         - 由 Anthropic 服务器执行，不需要我们执行
         - 调用和结果已经包含在 raw_content 中
@@ -1679,49 +1607,28 @@ class SimpleAgent:
         Yields:
             content_start, content_stop 等事件（统一使用 tool_use/tool_result）
         """
+        # 创建 ContentHandler
+        content_handler = create_content_handler(self.broadcaster, ctx.block)
+        
         for block in raw_content:
             block_type = block.get("type", "")
             
             # 处理 server_tool_use → 转换为 tool_use
             if block_type == "server_tool_use":
-                # 关闭之前的 block
-                if ctx.block.is_block_open():
-                    yield await self.broadcaster.emit_content_stop(
-                        session_id=session_id,
-                        index=ctx.block.current_index
-                    )
-                
-                # 发送标准 tool_use 事件（前端不需要知道是服务端工具）
-                block_idx = ctx.block.start_new_block("tool_use")
-                yield await self.broadcaster.emit_content_start(
+                # 使用 ContentHandler 发送 tool_use（非流式）
+                yield await content_handler.emit_block(
                     session_id=session_id,
-                    index=block_idx,
-                    content_block={
-                        "type": "tool_use",  # 统一为 tool_use
+                    block_type="tool_use",
+                    content={
                         "id": block.get("id", ""),
                         "name": block.get("name", ""),
                         "input": block.get("input", {})
                     }
                 )
-                yield await self.broadcaster.emit_content_stop(
-                    session_id=session_id,
-                    index=block_idx
-                )
-                ctx.block.close_current_block()
                 logger.debug(f"🌐 发送服务端工具调用事件（统一为 tool_use）: {block.get('name')}")
             
             # 处理 *_tool_result → 转换为 tool_result
             elif block_type.endswith("_tool_result") and block_type != "tool_result":
-                # 关闭之前的 block
-                if ctx.block.is_block_open():
-                    yield await self.broadcaster.emit_content_stop(
-                        session_id=session_id,
-                        index=ctx.block.current_index
-                    )
-                
-                # 发送标准 tool_result 事件
-                block_idx = ctx.block.start_new_block("tool_result")
-                
                 # 处理 content 字段（可能是列表或字符串）
                 # 注意：Anthropic SDK 返回的对象（如 WebSearchResultBlock）不能直接 JSON 序列化
                 content = block.get("content", [])
@@ -1761,21 +1668,16 @@ class SimpleAgent:
                 else:
                     content_str = str(content)
                 
-                yield await self.broadcaster.emit_content_start(
+                # 使用 ContentHandler 发送 tool_result（非流式）
+                yield await content_handler.emit_block(
                     session_id=session_id,
-                    index=block_idx,
-                    content_block={
-                        "type": "tool_result",  # 统一为 tool_result
+                    block_type="tool_result",
+                    content={
                         "tool_use_id": block.get("tool_use_id", ""),
                         "content": content_str,
                         "is_error": False
                     }
                 )
-                yield await self.broadcaster.emit_content_stop(
-                    session_id=session_id,
-                    index=block_idx
-                )
-                ctx.block.close_current_block()
                 logger.debug(f"🌐 发送服务端工具结果事件（统一为 tool_result）: {block_type}")
     
     async def _execute_tools(
@@ -1785,9 +1687,10 @@ class SimpleAgent:
         ctx  # RuntimeContext
     ) -> List[Dict]:
         """
-        执行工具调用
+        执行工具调用（非流式模式，返回结果列表）
         
-        使用 content_* 事件发送 tool_use 和 tool_result 信息
+        使用 ContentHandler 发送 tool_use 和 tool_result 事件。
+        支持并行执行（与 _execute_tools_stream 共享 _execute_tools_core）。
         
         Args:
             tool_calls: 工具调用列表
@@ -1797,127 +1700,61 @@ class SimpleAgent:
         Returns:
             工具结果列表
         """
+        # 创建 ContentHandler
+        content_handler = create_content_handler(self.broadcaster, ctx.block)
         results = []
         
+        # 追踪工具调用
+        for tc in tool_calls:
+            if self._tracer:
+                self._tracer.log_tool_call(tc['name'])
+        
+        # 发送所有 tool_use 事件（非流式模式需要显式发送）
         for tool_call in tool_calls:
+            tool_id = tool_call['id']
             tool_name = tool_call['name']
             tool_input = tool_call['input'] or {}
-            tool_id = tool_call['id']
             
-            logger.debug(f"🔧 执行工具: {tool_name}")
-            
-            # 🆕 追踪工具执行（V4.2 Code-First）
-            if self._tracer:
-                self._tracer.log_tool_call(tool_name)
-            
-            # ===== 发送 tool_use content block =====
-            # 关闭之前的 block
-            if ctx.block.is_block_open():
-                await self.broadcaster.emit_content_stop(
-                    session_id=session_id,
-                    index=ctx.block.current_index
-                )
-            
-            # 发送 tool_use 事件
-            tool_use_index = ctx.block.start_new_block("tool_use")
-            await self.broadcaster.emit_content_start(
+            await content_handler.emit_block(
                 session_id=session_id,
-                index=tool_use_index,
-                content_block={
-                    "type": "tool_use",
+                block_type="tool_use",
+                content={
                     "id": tool_id,
                     "name": tool_name,
                     "input": tool_input
                 }
             )
+        
+        # 执行所有工具（支持并行）
+        execution_results = await self._execute_tools_core(tool_calls, session_id, ctx)
+        
+        # 按原始顺序发送 tool_result 事件
+        for tool_call in tool_calls:
+            tool_id = tool_call['id']
+            result_info = execution_results.get(tool_id, {})
+            result = result_info.get("result", {})
+            result_content = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
+            is_error = result_info.get("is_error", False)
             
-            # 关闭 tool_use block
-            await self.broadcaster.emit_content_stop(
+            # 使用 ContentHandler 发送 tool_result（非流式）
+            await content_handler.emit_block(
                 session_id=session_id,
-                index=tool_use_index
-            )
-            ctx.block.close_current_block()
-            
-            # ===== 执行工具 =====
-            try:
-                # plan_todo 工具需要 current_plan 参数
-                if tool_name == "plan_todo":
-                    operation = tool_input.get('operation', 'create_plan')
-                    data = tool_input.get('data', {})
-                    
-                    # 🆕 V4.4 修正: Plan 阶段只使用能力类别
-                    # 不注入具体工具列表，避免上下文过长
-                    
-                    result = await self.plan_todo_tool.execute(
-                        operation=operation,
-                        data=data,
-                        current_plan=self._plan_cache.get("plan")
-                    )
-                    
-                    # 更新 plan 缓存
-                    if result.get("status") == "success" and "plan" in result:
-                        self._plan_cache["plan"] = result.get("plan")
-                        logger.info(f"📋 Plan 操作完成: {operation}")
-                else:
-                    # 为所有工具注入上下文（user_id, session_id, conversation_id）
-                    session_context = await self.event_manager.storage.get_session_context(session_id)
-                    tool_input.setdefault("session_id", session_id)
-                    if session_context.get("user_id"):
-                        tool_input.setdefault("user_id", session_context.get("user_id"))
-                    conv_id = session_context.get("conversation_id") or getattr(self, '_current_conversation_id', None) or session_id
-                    tool_input.setdefault("conversation_id", conv_id)
-
-                    # 通用工具执行
-                    result = await self.tool_executor.execute(tool_name, tool_input)
-                
-                # ===== 发送 tool_result content block =====
-                tool_result_index = ctx.block.start_new_block("tool_result")
-                result_content = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
-                tool_result_block = {
-                    "type": "tool_result",
+                block_type="tool_result",
+                content={
                     "tool_use_id": tool_id,
                     "content": result_content,
-                    "is_error": False
+                    "is_error": is_error
                 }
-                
-                await self.broadcaster.emit_content_start(
-                    session_id=session_id,
-                    index=tool_result_index,
-                    content_block=tool_result_block
-                )
-                await self.broadcaster.emit_content_stop(
-                    session_id=session_id,
-                    index=tool_result_index
-                )
-                ctx.block.close_current_block()
-                
-                results.append(tool_result_block)
-                logger.debug(f"✅ 工具执行成功: {tool_name}")
-                
-            except Exception as e:
-                logger.error(f"❌ 工具执行失败: {tool_name}, error={e}")
-                
-                # 发送错误的 tool_result
-                tool_result_index = ctx.block.start_new_block("tool_result")
-                error_result_block = {
-                    "type": "tool_result",
-                    "tool_use_id": tool_id,
-                    "content": json.dumps({"success": False, "error": str(e)}),
-                    "is_error": True
-                }
-                
-                await self.broadcaster.emit_content_start(
-                    session_id=session_id,
-                    index=tool_result_index,
-                    content_block=error_result_block
-                )
-                await self.broadcaster.emit_content_stop(
-                    session_id=session_id,
-                    index=tool_result_index
-                )
-                ctx.block.close_current_block()
-                
-                results.append(error_result_block)
+            )
+            
+            results.append({
+                "type": "tool_result",
+                "tool_use_id": tool_id,
+                "content": result_content,
+                "is_error": is_error
+            })
+            
+            logger.debug(f"{'✅' if not is_error else '❌'} 工具执行{'成功' if not is_error else '失败'}: {tool_call['name']}")
         
         return results
     

@@ -407,39 +407,39 @@ class ContentAccumulator:
         """获取累积的 metadata"""
         return self._metadata.copy()
     
+    # ==================== 内容提取便捷方法 ====================
+    
+    def get_text_content(self) -> str:
+        """
+        获取所有 text block 的内容（拼接）
+        
+        Returns:
+            所有 text 内容的拼接字符串
+        """
+        return "".join(
+            block.get("text", "") 
+            for block in self.all_blocks 
+            if block.get("type") == "text"
+        )
+    
+    def get_thinking_content(self) -> str:
+        """
+        获取所有 thinking block 的内容（拼接）
+        
+        Returns:
+            所有 thinking 内容的拼接字符串
+        """
+        return "".join(
+            block.get("thinking", "") 
+            for block in self.all_blocks 
+            if block.get("type") == "thinking"
+        )
+    
     def reset(self) -> None:
         """完全重置（新的 message 开始时调用）"""
         self.all_blocks = []
         self._active_blocks = {}
         self._metadata = {}
-
-
-# ==================== 向后兼容：保留 StreamAccumulator ====================
-
-@dataclass
-class StreamAccumulator:
-    """
-    流式响应累积器（向后兼容）
-    
-    ⚠️ 已废弃：新代码请使用 ContentAccumulator
-    
-    只累积 thinking 和 text，不支持 tool_use/tool_result
-    """
-    thinking: str = ""          # 累积的 thinking 内容
-    content: str = ""           # 累积的 text 内容
-    
-    def append_thinking(self, text: str):
-        """追加 thinking 内容"""
-        self.thinking += text
-    
-    def append_content(self, text: str):
-        """追加 text 内容"""
-        self.content += text
-    
-    def reset(self):
-        """重置累积器（用于新的 turn）"""
-        self.thinking = ""
-        self.content = ""
 
 
 @dataclass 
@@ -476,11 +476,8 @@ class RuntimeContext:
     # === 流式块状态（用于 SSE 事件）===
     block: BlockState = field(default_factory=BlockState)
     
-    # === Content 累积器（新版，推荐使用）===
+    # === Content 累积器 ===
     accumulator: ContentAccumulator = field(default_factory=ContentAccumulator)
-    
-    # === 向后兼容：保留 stream ===
-    stream: StreamAccumulator = field(default_factory=StreamAccumulator)
     
     # === 执行进度 ===
     step_index: int = 0                      # 步骤索引（用于 status 事件）
@@ -587,13 +584,7 @@ class RuntimeContext:
         - block 状态不重置（需要跨 turn 保持 block 索引连续）
         - accumulator 不重置（多轮内容需要累积）
         """
-        self.stream.reset()  # 向后兼容
-    
-    def reset_stream_for_turn(self):
-        """
-        重置流式累积器（向后兼容）
-        """
-        self.stream.reset()
+        pass  # 目前不需要额外操作
     
     def reset_for_new_chat(self):
         """
@@ -602,7 +593,6 @@ class RuntimeContext:
         self.messages = []
         self.block = BlockState()
         self.accumulator = ContentAccumulator()
-        self.stream = StreamAccumulator()
         self.step_index = 0
         self.current_turn = 0
         self.final_result = None
@@ -643,11 +633,9 @@ class RuntimeContext:
             "step_index": self.step_index,
             "block_index": self.block.index,
             "current_block_type": self.block.current_type,
-            # 新版累积器统计
             "accumulator_stats": self.accumulator.get_stats(),
-            # 向后兼容
-            "accumulated_thinking_length": len(self.stream.thinking),
-            "accumulated_content_length": len(self.stream.content),
+            "accumulated_text_length": len(self.accumulator.get_text_content()),
+            "accumulated_thinking_length": len(self.accumulator.get_thinking_content()),
             "is_completed": self.is_completed(),
             "stop_reason": self.stop_reason
         }

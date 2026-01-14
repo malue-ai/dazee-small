@@ -1,0 +1,6 @@
+skills:
+- name: ontology-builder
+  enabled: true
+  description: 系统配置构建（三阶段原子操作），从自然语言描述生成结构化配置文件
+  skill_id: skill_01XxNzzV4ehSgREZWUAkKgB1
+  registered_at: '2026-01-09T19:56:40.473873'

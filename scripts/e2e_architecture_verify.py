@@ -239,13 +239,14 @@ class ArchitectureVerifier:
                 server_name=server_name,
                 auth_token=auth_token
             )
-            connected = client._connected
+            # 🆕 处理连接失败返回 None 的情况
+            connected = client._connected if client is not None else False
             result = VerificationResult(
                 phase="Phase 1",
                 check_name="MCP 客户端连接",
                 passed=connected,
                 expected="client._connected=True",
-                actual=f"_connected={connected}, server_url={server_url[:50]}...",
+                actual=f"_connected={connected}, server_url={server_url[:50]}..." if client else "client=None (连接失败)",
             )
         except Exception as e:
             connected = False

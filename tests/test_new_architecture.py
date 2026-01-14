@@ -165,12 +165,17 @@ def test_runtime_context():
     print(f"     开始 text block: index={idx2}")
     assert idx2 == 1  # 索引递增
     
-    # 测试 StreamAccumulator
-    print("\n📋 测试 StreamAccumulator:")
-    ctx.stream.append_thinking("这是思考内容")
-    ctx.stream.append_content("这是输出内容")
-    print(f"     thinking: {ctx.stream.thinking}")
-    print(f"     content: {ctx.stream.content}")
+    # 测试 ContentAccumulator 便捷方法
+    print("\n📋 测试 ContentAccumulator 便捷方法:")
+    # 模拟 content 事件
+    ctx.accumulator.on_content_start({"type": "thinking"}, index=2)
+    ctx.accumulator.on_content_delta("这是思考内容", index=2)
+    ctx.accumulator.on_content_stop(index=2)
+    ctx.accumulator.on_content_start({"type": "text"}, index=3)
+    ctx.accumulator.on_content_delta("这是输出内容", index=3)
+    ctx.accumulator.on_content_stop(index=3)
+    print(f"     thinking: {ctx.accumulator.get_thinking_content()}")
+    print(f"     text: {ctx.accumulator.get_text_content()}")
     
     # 测试 summary
     print("\n📋 RuntimeContext summary:")

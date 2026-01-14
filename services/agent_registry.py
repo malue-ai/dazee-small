@@ -379,6 +379,11 @@ class AgentRegistry:
                     auth_token=auth_token
                 )
                 
+                # 🆕 处理连接失败的情况
+                if client is None:
+                    logger.warning(f"⚠️ MCP 客户端连接失败，跳过工具 {name}")
+                    continue
+                
                 if client._connected:
                     tools = client._tools
                     if not tools:

@@ -553,6 +553,66 @@
               class="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all resize-none text-gray-800"
             ></textarea>
           </div>
+          
+          <!-- form 类型（复杂表单） -->
+          <div v-if="confirmRequest?.confirmation_type === 'form'" class="space-y-5">
+            <div v-for="question in confirmRequest?.questions" :key="question.id" class="space-y-2">
+              <!-- 问题标签 -->
+              <label class="block text-sm font-medium text-gray-700">
+                {{ question.label }}
+                <span v-if="question.required !== false" class="text-red-500">*</span>
+              </label>
+              
+              <!-- 提示文字 -->
+              <div v-if="question.hint" class="text-xs text-gray-500 mb-2">{{ question.hint }}</div>
+              
+              <!-- 单选题 -->
+              <div v-if="question.type === 'single_choice'" class="flex flex-col gap-2">
+                <label 
+                  v-for="option in question.options" 
+                  :key="option" 
+                  class="flex items-center p-3 rounded-lg border cursor-pointer transition-all hover:bg-gray-50"
+                  :class="confirmResponse[question.id] === option ? 'border-blue-500 bg-blue-50/50' : 'border-gray-200'"
+                >
+                  <input 
+                    type="radio" 
+                    :value="option" 
+                    v-model="confirmResponse[question.id]"
+                    :name="`form-${question.id}`"
+                    class="mr-3 accent-blue-600"
+                  />
+                  <span class="text-sm text-gray-800">{{ option }}</span>
+                </label>
+              </div>
+              
+              <!-- 多选题 -->
+              <div v-if="question.type === 'multiple_choice'" class="flex flex-col gap-2">
+                <label 
+                  v-for="option in question.options" 
+                  :key="option" 
+                  class="flex items-center p-3 rounded-lg border cursor-pointer transition-all hover:bg-gray-50"
+                  :class="confirmResponse[question.id]?.includes(option) ? 'border-blue-500 bg-blue-50/50' : 'border-gray-200'"
+                >
+                  <input 
+                    type="checkbox" 
+                    :value="option" 
+                    v-model="confirmResponse[question.id]"
+                    class="mr-3 accent-blue-600 rounded"
+                  />
+                  <span class="text-sm text-gray-800">{{ option }}</span>
+                </label>
+              </div>
+              
+              <!-- 文本输入 -->
+              <div v-if="question.type === 'text_input'">
+                <input 
+                  v-model="confirmResponse[question.id]" 
+                  :placeholder="question.hint || '请输入...'"
+                  class="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-sm text-gray-800"
+                />
+              </div>
+            </div>
+          </div>
         </div>
         
         <div class="flex items-center justify-end gap-4 px-8 py-5 bg-gray-50/50 border-t border-gray-100">
@@ -1112,12 +1172,26 @@ function stopGeneration() {
  */
 function showHumanConfirmation(data) {
   confirmRequest.value = data
-  confirmResponse.value = null
   showConfirmModal.value = true
   
-  // 如果是 yes_no 类型，默认选中第一个选项
+  // 根据类型初始化 confirmResponse
   if (data.confirmation_type === 'yes_no' && data.options?.length > 0) {
+    // yes_no 类型：默认选中第一个选项
     confirmResponse.value = data.options[0]
+  } else if (data.confirmation_type === 'multiple_choice') {
+    // multiple_choice 类型：初始化为数组（支持默认值）
+    confirmResponse.value = data.metadata?.default_value || []
+  } else if (data.confirmation_type === 'form') {
+    // form 类型：初始化为对象，设置默认值
+    const formData = {}
+    if (data.questions) {
+      data.questions.forEach(q => {
+        formData[q.id] = q.default !== undefined ? q.default : (q.type === 'multiple_choice' ? [] : '')
+      })
+    }
+    confirmResponse.value = formData
+  } else {
+    confirmResponse.value = null
   }
 }
 
@@ -1128,11 +1202,17 @@ async function submitHumanConfirmation() {
   if (!confirmRequest.value || confirmSubmitting.value) return
   
   const requestId = confirmRequest.value.request_id
-  const response = confirmResponse.value
+  let response = confirmResponse.value
   
+  // 验证必填项
   if (!response && confirmRequest.value.confirmation_type !== 'text_input') {
     alert('请选择一个选项')
     return
+  }
+  
+  // form 类型：将对象序列化为 JSON 字符串
+  if (confirmRequest.value.confirmation_type === 'form' && typeof response === 'object') {
+    response = JSON.stringify(response)
   }
   
   confirmSubmitting.value = true
