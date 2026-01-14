@@ -50,6 +50,11 @@ from core.agent.types import IntentResult
 from logger import get_logger
 from tools.plan_todo_tool import create_plan_todo_tool
 from utils.usage_tracker import create_usage_tracker
+from utils.message_utils import (
+    dict_list_to_messages,
+    append_assistant_message,
+    append_user_message
+)
 
 
 logger = get_logger(__name__)
@@ -86,7 +91,8 @@ class SimpleAgent:
         schema=None,  # 🆕 AgentSchema 配置
         system_prompt: str = None,  # 🆕 System Prompt（作为运行时指令）
         prompt_schema=None,  # 🆕 V4.6: PromptSchema（提示词分层）
-        prompt_cache=None  # 🆕 V4.6.2: InstancePromptCache（实例缓存）
+        prompt_cache=None,  # 🆕 V4.6.2: InstancePromptCache（实例缓存）
+        apis_config: Optional[List[Dict[str, Any]]] = None  # 🆕 预配置的 APIs（用于 api_calling 自动注入）
     ):
         """
         初始化 Agent
@@ -101,6 +107,7 @@ class SimpleAgent:
             system_prompt: System Prompt（运行时传给 LLM 的系统指令）
             prompt_schema: PromptSchema（提示词分层配置）
             prompt_cache: InstancePromptCache（实例提示词缓存）
+            apis_config: 预配置的 API 列表（传给 api_calling 工具自动注入认证）
         """
         if event_manager is None:
             raise ValueError("event_manager 是必需参数")
@@ -121,6 +128,9 @@ class SimpleAgent:
         # 🆕 V4.6: 存储提示词分层配置
         self.prompt_schema = prompt_schema
         self.prompt_cache = prompt_cache
+        
+        # 🆕 预配置的 APIs（用于 api_calling 工具自动注入认证）
+        self.apis_config = apis_config or []
         
         # 从 Schema 读取运行时参数（覆盖传入的参数）
         if schema is not None:
@@ -202,7 +212,8 @@ class SimpleAgent:
         # 4. 工具执行器（总是需要）        
         tool_context = {
             "event_manager": self.event_manager,
-            "workspace_dir": self.workspace_dir
+            "workspace_dir": self.workspace_dir,
+            "apis_config": self.apis_config,  # 🆕 用于 api_calling 自动注入认证
         }
         self.tool_executor = create_tool_executor(
             self.capability_registry,
@@ -639,10 +650,7 @@ class SimpleAgent:
                 logger.debug(f"📝 已追加的 Prompt 片段: {appended}")
         
         # 4.2 构建 LLM Messages
-        llm_messages = [
-            Message(role=msg["role"], content=msg["content"])
-            for msg in messages
-        ]
+        llm_messages = dict_list_to_messages(messages)
         
         # 4.3 Todo 重写（Context Engineering）
         # 对抗 "Lost-in-the-Middle" 现象，让任务目标始终在注意力高区
@@ -654,10 +662,7 @@ class SimpleAgent:
                 inject_errors=True
             )
             # 转换回 Message 对象
-            llm_messages = [
-                Message(role=msg["role"], content=msg["content"])
-                for msg in prepared_messages
-            ]
+            llm_messages = dict_list_to_messages(prepared_messages)
             logger.debug("✅ Context Engineering: Todo 重写完成，Plan 状态已注入消息末尾")
         
         # =====================================================================
@@ -734,7 +739,7 @@ class SimpleAgent:
                         if is_last_turn:
                             logger.warning(f"⚠️ 最后一轮（Turn {turn + 1}）收到工具调用，强制生成文本回复...")
                             # 添加当前响应作为 assistant 消息
-                            llm_messages.append(Message(role="assistant", content=response.raw_content))
+                            append_assistant_message(llm_messages, response.raw_content)
                             
                             # 🔧 修复：必须为每个 tool_use 提供 tool_result，否则 Claude API 会报错
                             # Claude API 要求：每个 tool_use 后面必须紧跟包含对应 tool_result 的 user 消息
@@ -756,7 +761,7 @@ class SimpleAgent:
                                 "type": "text",
                                 "text": "⚠️ 系统提示：已达到最大执行轮次，无法继续执行工具。请直接给用户一个文字回复，总结当前进度和已完成的工作。"
                             }]
-                            llm_messages.append(Message(role="user", content=user_content))
+                            append_user_message(llm_messages, user_content)
                             
                             # 再调用一次 LLM，不传递 tools 参数，强制生成文本
                             async for event in self._process_stream(
@@ -797,7 +802,7 @@ class SimpleAgent:
                                         tool_results.append(content_block)
                         
                         # 更新消息（用于下一轮 LLM 调用）
-                        llm_messages.append(Message(role="assistant", content=response.raw_content))
+                        append_assistant_message(llm_messages, response.raw_content)
                         
                         # 🔒 兜底逻辑：确保每个 tool_use 都有对应的 tool_result
                         # 如果工具执行失败或事件收集失败，生成错误 tool_result
@@ -816,7 +821,7 @@ class SimpleAgent:
                         
                         # 只有当有客户端工具时才添加 user message（现在 tool_results 一定不为空）
                         if client_tools and tool_results:
-                            llm_messages.append(Message(role="user", content=tool_results))
+                            append_user_message(llm_messages, tool_results)
                         # 如果只有服务端工具，不需要添加 user message，直接进入下一轮
                     else:
                         # 没有工具调用，任务完成
@@ -844,7 +849,7 @@ class SimpleAgent:
                 is_last_turn = (turn == self.max_turns - 1)
                 if is_last_turn:
                     logger.warning(f"⚠️ 最后一轮（Turn {turn + 1}）收到工具调用，强制生成文本回复...")
-                    llm_messages.append(Message(role="assistant", content=response.raw_content))
+                    append_assistant_message(llm_messages, response.raw_content)
                     
                     # 🔧 修复：必须为每个 tool_use 提供 tool_result，否则 Claude API 会报错
                     # Claude API 要求：每个 tool_use 后面必须紧跟包含对应 tool_result 的 user 消息
@@ -866,7 +871,7 @@ class SimpleAgent:
                         "type": "text",
                         "text": "⚠️ 系统提示：已达到最大执行轮次，无法继续执行工具。请直接给用户一个文字回复，总结当前进度和已完成的工作。"
                     }]
-                    llm_messages.append(Message(role="user", content=user_content))
+                    append_user_message(llm_messages, user_content)
                     
                     # 再调用一次 LLM，不传递 tools 参数
                     final_response = await self.llm.create_message_async(
@@ -892,12 +897,12 @@ class SimpleAgent:
                     ):
                         yield server_event
                 
-                llm_messages.append(Message(role="assistant", content=response.raw_content))
+                append_assistant_message(llm_messages, response.raw_content)
                 
                 if client_tools:
                     # 只执行客户端工具
                     tool_results = await self._execute_tools(client_tools, session_id, ctx)
-                    llm_messages.append(Message(role="user", content=tool_results))
+                    append_user_message(llm_messages, tool_results)
             
             if ctx.is_completed():
                 break
@@ -1117,25 +1122,27 @@ class SimpleAgent:
                 tool_info = llm_response.tool_use_start
                 tool_type = tool_info.get("type", "tool_use")
                 
-                # 切换到 tool_use block
-                if ctx.block.needs_transition(tool_type):
-                    if ctx.block.is_block_open():
-                        yield await self.broadcaster.emit_content_stop(
-                            session_id=session_id,
-                            index=ctx.block.current_index
-                        )
-                    
-                    block_idx = ctx.block.start_new_block(tool_type)
-                    yield await self.broadcaster.emit_content_start(
+                # 🔧 修复：每个新的 tool_use 都需要关闭前一个 block 并开启新的
+                # 原问题：当连续多个 tool_use 时，needs_transition 返回 False，
+                # 导致前一个 tool_use 没有被保存，input delta 被错误合并
+                if ctx.block.is_block_open():
+                    yield await self.broadcaster.emit_content_stop(
                         session_id=session_id,
-                        index=block_idx,
-                        content_block={
-                            "type": tool_type,
-                            "id": tool_info.get("id", ""),
-                            "name": tool_info.get("name", ""),
-                            "input": {}  # input 后续流式发送
-                        }
+                        index=ctx.block.current_index
                     )
+                    ctx.block.close_current_block()
+                
+                block_idx = ctx.block.start_new_block(tool_type)
+                yield await self.broadcaster.emit_content_start(
+                    session_id=session_id,
+                    index=block_idx,
+                    content_block={
+                        "type": tool_type,
+                        "id": tool_info.get("id", ""),
+                        "name": tool_info.get("name", ""),
+                        "input": {}  # input 后续流式发送
+                    }
+                )
             
             # 🆕 处理流式工具调用 - 参数增量
             if llm_response.input_delta and llm_response.is_stream:
@@ -1156,6 +1163,7 @@ class SimpleAgent:
                 session_id=session_id,
                 index=ctx.block.current_index
             )
+            ctx.block.close_current_block()
         
         # 保存最终响应到 ctx（供 RVR 循环使用）
         if final_response:
@@ -1319,32 +1327,14 @@ class SimpleAgent:
                 # 从并行结果中获取
                 result_info = parallel_results[tool_id]
                 
-                # ===== 发送 tool_use content block =====
+                # 🔧 NOTE: tool_use 事件已在 _process_stream 中发送，这里只发送 tool_result
+                # 确保之前的 block 已关闭
                 if ctx.block.is_block_open():
                     yield await self.broadcaster.emit_content_stop(
                         session_id=session_id,
                         index=ctx.block.current_index
                     )
-                
-                tool_use_index = ctx.block.start_new_block("tool_use")
-                tool_use_block = {
-                    "type": "tool_use",
-                    "id": tool_id,
-                    "name": tool_name,
-                    "input": tool_input
-                }
-                
-                yield await self.broadcaster.emit_content_start(
-                    session_id=session_id,
-                    index=tool_use_index,
-                    content_block=tool_use_block
-                )
-                
-                yield await self.broadcaster.emit_content_stop(
-                    session_id=session_id,
-                    index=tool_use_index
-                )
-                ctx.block.close_current_block()
+                    ctx.block.close_current_block()
                 
                 # ===== 发送 tool_result content block =====
                 tool_result_index = ctx.block.start_new_block("tool_result")
@@ -1388,32 +1378,13 @@ class SimpleAgent:
             if self._tracer:
                 self._tracer.log_tool_call(tool_name)
             
-            # 发送 tool_use content block
+            # 🔧 NOTE: tool_use 事件已在 _process_stream 中发送，这里只需要确保 block 关闭
             if ctx.block.is_block_open():
                 yield await self.broadcaster.emit_content_stop(
                     session_id=session_id,
                     index=ctx.block.current_index
                 )
-            
-            tool_use_index = ctx.block.start_new_block("tool_use")
-            tool_use_block = {
-                "type": "tool_use",
-                "id": tool_id,
-                "name": tool_name,
-                "input": tool_input
-            }
-            
-            yield await self.broadcaster.emit_content_start(
-                session_id=session_id,
-                index=tool_use_index,
-                content_block=tool_use_block
-            )
-            
-            yield await self.broadcaster.emit_content_stop(
-                session_id=session_id,
-                index=tool_use_index
-            )
-            ctx.block.close_current_block()
+                ctx.block.close_current_block()
             
             # 执行工具
             try:

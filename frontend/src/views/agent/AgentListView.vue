@@ -1,60 +1,135 @@
 <template>
-  <div class="agent-view">
+  <div class="h-screen w-full flex flex-col bg-gray-50 relative overflow-hidden text-gray-900 font-sans">
+    <!-- 背景装饰 -->
+    <div class="absolute inset-0 z-0 opacity-20 pointer-events-none">
+      <div class="absolute top-0 left-0 w-[500px] h-[500px] bg-blue-200 rounded-full mix-blend-multiply filter blur-3xl animate-blob"></div>
+      <div class="absolute top-0 right-0 w-[500px] h-[500px] bg-purple-200 rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-2000"></div>
+      <div class="absolute -bottom-8 left-20 w-[500px] h-[500px] bg-pink-200 rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-4000"></div>
+    </div>
+
     <!-- 顶部导航 -->
-    <div class="top-bar">
-      <div class="left-section">
-        <h1 class="page-title">🤖 智能体管理</h1>
+    <div class="h-16 flex items-center justify-between px-8 border-b border-white/20 bg-white/40 backdrop-blur-md sticky top-0 z-20">
+      <div class="flex items-center gap-6">
+        <h1 class="text-lg font-bold flex items-center gap-2 text-gray-800">
+          <span class="text-2xl">🤖</span> 智能体管理
+        </h1>
+        <!-- 搜索框 -->
+        <div class="relative">
+          <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">🔍</span>
+          <input 
+            v-model="searchQuery" 
+            type="text" 
+            placeholder="搜索智能体..."
+            class="pl-9 pr-4 py-2 w-64 bg-white/60 border border-white/40 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all shadow-sm placeholder-gray-400"
+          >
+        </div>
       </div>
-      <div class="right-section">
-        <button @click="$router.push('/agents/create')" class="create-btn">
-          <span class="icon">＋</span> 创建智能体
+      <div class="flex items-center gap-3">
+        <button 
+          @click="fetchAgents" 
+          :disabled="loading"
+          class="p-2.5 bg-white/60 border border-white/40 rounded-xl text-gray-600 hover:bg-white hover:text-blue-600 transition-all shadow-sm"
+          title="刷新"
+        >
+          <span :class="loading ? 'animate-spin inline-block' : ''">🔄</span>
         </button>
-        <button @click="$router.push('/')" class="back-button">
+        <button 
+          @click="$router.push('/agents/create')" 
+          class="flex items-center gap-2 px-5 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-xl hover:bg-gray-800 transition-all shadow-lg shadow-gray-900/10 transform active:scale-95"
+        >
+          <span class="text-lg leading-none">＋</span> 创建智能体
+        </button>
+        <button 
+          @click="$router.push('/')" 
+          class="px-5 py-2.5 bg-white/60 border border-white/40 text-gray-600 text-sm font-medium rounded-xl hover:bg-white hover:text-gray-900 transition-all shadow-sm"
+        >
           ← 返回聊天
         </button>
       </div>
     </div>
 
     <!-- 主内容区 -->
-    <div class="main-content">
-      <div v-if="loading" class="loading-state">
-        <div class="spinner"></div>
-        <p>加载智能体列表...</p>
+    <div class="flex-1 overflow-y-auto p-8 relative z-10 scrollbar-thin">
+      <div v-if="loading" class="flex flex-col items-center justify-center h-[60vh] text-gray-400">
+        <div class="w-10 h-10 border-3 border-gray-200 border-t-gray-900 rounded-full animate-spin mb-6"></div>
+        <p class="text-sm font-medium">加载智能体列表...</p>
       </div>
       
-      <div v-else-if="agents.length === 0" class="empty-state">
-        <div class="empty-icon">🤖</div>
-        <h3>暂无智能体</h3>
-        <p>创建您的第一个智能体来开始使用</p>
-        <button @click="$router.push('/agents/create')" class="primary-btn">
+      <!-- 无智能体状态 -->
+      <div v-else-if="agents.length === 0" class="flex flex-col items-center justify-center h-[60vh] text-gray-400">
+        <div class="w-24 h-24 bg-white/60 rounded-3xl flex items-center justify-center mb-6 shadow-sm border border-white/40">
+          <span class="text-5xl opacity-50">🤖</span>
+        </div>
+        <h3 class="text-xl font-bold text-gray-800 mb-2">暂无智能体</h3>
+        <p class="mb-8 text-gray-500">创建您的第一个智能体来开始使用</p>
+        <button 
+          @click="$router.push('/agents/create')" 
+          class="px-8 py-3 bg-gray-900 text-white font-medium rounded-xl hover:bg-gray-800 transition-all shadow-lg shadow-gray-900/20 transform hover:-translate-y-1"
+        >
           创建智能体
         </button>
       </div>
 
-      <div v-else class="agent-grid">
-        <div v-for="agent in agents" :key="agent.agent_id" class="agent-card">
-          <div class="agent-header">
-            <div class="agent-icon">{{ agent.name[0].toUpperCase() }}</div>
-            <div class="agent-info">
-              <h3 class="agent-name">{{ agent.name }}</h3>
-              <span class="agent-id">{{ agent.agent_id }}</span>
+      <!-- 搜索无结果状态 -->
+      <div v-else-if="filteredAgents.length === 0 && searchQuery" class="flex flex-col items-center justify-center h-[60vh] text-gray-400">
+        <div class="w-24 h-24 bg-white/60 rounded-3xl flex items-center justify-center mb-6 shadow-sm border border-white/40">
+          <span class="text-5xl opacity-50">🔍</span>
+        </div>
+        <h3 class="text-xl font-bold text-gray-800 mb-2">未找到匹配的智能体</h3>
+        <p class="mb-4 text-gray-500">尝试使用不同的关键词搜索</p>
+        <button 
+          @click="searchQuery = ''" 
+          class="px-6 py-2 text-blue-600 font-medium hover:text-blue-700"
+        >
+          清除搜索
+        </button>
+      </div>
+
+      <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        <div 
+          v-for="agent in filteredAgents" 
+          :key="agent.agent_id" 
+          class="group relative bg-white/60 backdrop-blur-sm border border-white/40 rounded-2xl p-6 flex flex-col gap-4 hover:bg-white/80 hover:shadow-xl hover:shadow-gray-200/50 transition-all duration-300 transform hover:-translate-y-1"
+        >
+          <div class="flex items-start justify-between gap-4">
+            <div class="flex items-center gap-4 min-w-0">
+              <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 text-white flex items-center justify-center font-bold text-xl flex-shrink-0 shadow-md">
+                {{ agent.name[0].toUpperCase() }}
+              </div>
+              <div class="flex flex-col min-w-0">
+                <h3 class="font-bold text-gray-800 truncate text-lg">{{ agent.name }}</h3>
+                <span class="text-xs text-gray-400 truncate font-mono opacity-80">{{ agent.agent_id }}</span>
+              </div>
             </div>
-            <div class="agent-status" :class="{ active: agent.is_active }">
-              {{ agent.is_active ? '活跃' : '停用' }}
+            <div 
+              class="px-2.5 py-1 rounded-full text-[10px] font-bold border uppercase tracking-wide"
+              :class="agent.is_active ? 'bg-green-100 text-green-700 border-green-200' : 'bg-gray-100 text-gray-500 border-gray-200'"
+            >
+              {{ agent.is_active ? 'active' : 'inactive' }}
             </div>
           </div>
           
-          <div class="agent-body">
-            <p class="agent-desc">{{ agent.description || '暂无描述' }}</p>
-            <div class="agent-meta">
-              <span class="version">v{{ agent.version }}</span>
-              <span class="model">{{ agent.model || '默认模型' }}</span>
+          <div class="flex-1">
+            <p class="text-sm text-gray-500 line-clamp-2 h-10 mb-4 leading-relaxed">{{ agent.description || '暂无描述' }}</p>
+            <div class="flex items-center gap-2 text-xs text-gray-500">
+              <span class="bg-gray-100/80 px-2.5 py-1 rounded-md border border-gray-200/50 font-mono">v{{ agent.version }}</span>
+              <span class="bg-gray-100/80 px-2.5 py-1 rounded-md border border-gray-200/50 truncate max-w-[140px]">{{ agent.model || '默认模型' }}</span>
             </div>
           </div>
           
-          <div class="agent-footer">
-            <button @click="manageAgent(agent.agent_id)" class="action-btn">管理</button>
-            <button @click="deleteAgent(agent.agent_id)" class="action-btn delete">删除</button>
+          <div class="flex items-center gap-3 pt-5 border-t border-gray-100 mt-auto opacity-80 group-hover:opacity-100 transition-opacity">
+            <button 
+              @click="manageAgent(agent.agent_id)" 
+              class="flex-1 py-2 px-4 bg-white border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors shadow-sm"
+            >
+              管理
+            </button>
+            <button 
+              @click="deleteAgent(agent.agent_id)" 
+              class="flex-1 py-2 px-4 bg-white border border-gray-200 rounded-lg text-sm font-medium text-red-500 hover:bg-red-50 hover:border-red-200 transition-colors shadow-sm"
+            >
+              删除
+            </button>
           </div>
         </div>
       </div>
@@ -63,19 +138,32 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/api/index'
 
 const router = useRouter()
 const agents = ref([])
 const loading = ref(true)
+const searchQuery = ref('')
+
+// 搜索过滤
+const filteredAgents = computed(() => {
+  if (!searchQuery.value.trim()) return agents.value
+  
+  const query = searchQuery.value.toLowerCase()
+  return agents.value.filter(agent => 
+    agent.agent_id.toLowerCase().includes(query) ||
+    agent.name?.toLowerCase().includes(query) ||
+    agent.description?.toLowerCase().includes(query)
+  )
+})
 
 const fetchAgents = async () => {
   try {
     loading.value = true
     const response = await api.get('/v1/agents')
-    agents.value = response.data.agents
+    agents.value = response.data.agents || []
   } catch (error) {
     console.error('获取智能体列表失败:', error)
     alert('获取智能体列表失败')
@@ -85,8 +173,7 @@ const fetchAgents = async () => {
 }
 
 const manageAgent = (agentId) => {
-  // TODO: 实现编辑/详情页面
-  alert(`管理功能开发中: ${agentId}`)
+  router.push(`/agents/${agentId}`)
 }
 
 const deleteAgent = async (agentId) => {
@@ -107,243 +194,35 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.agent-view {
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
-  background-color: #f5f7f9;
+@keyframes blob {
+  0% { transform: translate(0px, 0px) scale(1); }
+  33% { transform: translate(30px, -50px) scale(1.1); }
+  66% { transform: translate(-20px, 20px) scale(0.9); }
+  100% { transform: translate(0px, 0px) scale(1); }
+}
+.animate-blob {
+  animation: blob 15s infinite;
+}
+.animation-delay-2000 {
+  animation-delay: 2s;
+}
+.animation-delay-4000 {
+  animation-delay: 4s;
 }
 
-.top-bar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1rem 2rem;
-  background-color: white;
-  border-bottom: 1px solid #e1e4e8;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+/* 滚动条优化 */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
 }
-
-.page-title {
-  font-size: 1.5rem;
-  font-weight: 600;
-  color: #1a202c;
-  margin: 0;
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
 }
-
-.right-section {
-  display: flex;
-  gap: 1rem;
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: rgba(156, 163, 175, 0.3);
+  border-radius: 3px;
 }
-
-.create-btn {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 1rem;
-  background-color: #3182ce;
-  color: white;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  font-weight: 500;
-  transition: background-color 0.2s;
-}
-
-.create-btn:hover {
-  background-color: #2c5282;
-}
-
-.back-button {
-  padding: 0.5rem 1rem;
-  background-color: white;
-  border: 1px solid #e2e8f0;
-  color: #4a5568;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.back-button:hover {
-  background-color: #f7fafc;
-  border-color: #cbd5e0;
-}
-
-.main-content {
-  flex: 1;
-  padding: 2rem;
-  overflow-y: auto;
-}
-
-.agent-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 1.5rem;
-}
-
-.agent-card {
-  background: white;
-  border-radius: 8px;
-  border: 1px solid #e2e8f0;
-  padding: 1.5rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  transition: transform 0.2s, box-shadow 0.2s;
-}
-
-.agent-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-}
-
-.agent-header {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-}
-
-.agent-icon {
-  width: 40px;
-  height: 40px;
-  background-color: #ebf8ff;
-  color: #3182ce;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: bold;
-  font-size: 1.2rem;
-}
-
-.agent-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.agent-name {
-  margin: 0;
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: #2d3748;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.agent-id {
-  font-size: 0.85rem;
-  color: #718096;
-}
-
-.agent-status {
-  font-size: 0.75rem;
-  padding: 0.2rem 0.5rem;
-  border-radius: 999px;
-  background-color: #edf2f7;
-  color: #718096;
-}
-
-.agent-status.active {
-  background-color: #c6f6d5;
-  color: #276749;
-}
-
-.agent-body {
-  flex: 1;
-}
-
-.agent-desc {
-  color: #4a5568;
-  font-size: 0.9rem;
-  margin-bottom: 1rem;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.agent-meta {
-  display: flex;
-  gap: 0.5rem;
-  font-size: 0.8rem;
-  color: #718096;
-}
-
-.agent-meta span {
-  background: #f7fafc;
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-
-.agent-footer {
-  display: flex;
-  gap: 0.5rem;
-  border-top: 1px solid #e2e8f0;
-  padding-top: 1rem;
-  margin-top: auto;
-}
-
-.action-btn {
-  flex: 1;
-  padding: 0.5rem;
-  border: 1px solid #e2e8f0;
-  background: white;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  color: #4a5568;
-  transition: all 0.2s;
-}
-
-.action-btn:hover {
-  background-color: #f7fafc;
-  color: #2d3748;
-}
-
-.action-btn.delete:hover {
-  background-color: #fff5f5;
-  color: #e53e3e;
-  border-color: #feb2b2;
-}
-
-.loading-state, .empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 400px;
-  color: #718096;
-}
-
-.spinner {
-  border: 3px solid #f3f3f3;
-  border-radius: 50%;
-  border-top: 3px solid #3182ce;
-  width: 24px;
-  height: 24px;
-  animation: spin 1s linear infinite;
-  margin-bottom: 1rem;
-}
-
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-
-.empty-icon {
-  font-size: 3rem;
-  margin-bottom: 1rem;
-}
-
-.primary-btn {
-  margin-top: 1rem;
-  padding: 0.6rem 1.2rem;
-  background-color: #3182ce;
-  color: white;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  font-weight: 500;
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(156, 163, 175, 0.5);
 }
 </style>

@@ -1,152 +1,230 @@
 <template>
-  <div class="agent-create-view">
-    <div class="top-bar">
-      <div class="left-section">
-        <h1 class="page-title">创建新智能体</h1>
-      </div>
-      <div class="right-section">
-        <button @click="$router.push('/agents')" class="back-button">
-          ← 返回列表
-        </button>
-      </div>
+  <div class="h-screen w-full flex flex-col bg-gray-50 relative overflow-hidden text-gray-900 font-sans">
+    <!-- 背景装饰 -->
+    <div class="absolute inset-0 z-0 opacity-20 pointer-events-none">
+      <div class="absolute top-0 left-0 w-[500px] h-[500px] bg-blue-200 rounded-full mix-blend-multiply filter blur-3xl animate-blob"></div>
+      <div class="absolute top-0 right-0 w-[500px] h-[500px] bg-purple-200 rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-2000"></div>
+      <div class="absolute -bottom-8 left-20 w-[500px] h-[500px] bg-pink-200 rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-4000"></div>
     </div>
 
-    <div class="main-content">
-      <div class="form-container">
+    <!-- 顶部导航 -->
+    <div class="h-16 flex items-center justify-between px-8 border-b border-white/20 bg-white/40 backdrop-blur-md sticky top-0 z-20">
+      <h1 class="text-lg font-bold text-gray-800">创建新智能体</h1>
+      <button 
+        @click="$router.push('/agents')" 
+        class="px-5 py-2.5 bg-white/60 border border-white/40 text-gray-600 text-sm font-medium rounded-xl hover:bg-white hover:text-gray-900 transition-all shadow-sm"
+      >
+        ← 返回列表
+      </button>
+    </div>
+
+    <!-- 主内容区 -->
+    <div class="flex-1 overflow-y-auto p-8 relative z-10 flex justify-center">
+      <div class="w-full max-w-3xl bg-white/60 backdrop-blur-xl border border-white/40 rounded-3xl shadow-xl p-10 flex flex-col gap-8">
         <!-- 步骤条 -->
-        <div class="steps">
-          <div class="step" :class="{ active: currentStep === 1, completed: currentStep > 1 }">
-            <div class="step-number">1</div>
-            <div class="step-label">基础信息</div>
+        <div class="flex items-center justify-between px-8">
+          <div class="flex flex-col items-center gap-3 relative z-10">
+            <div 
+              class="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm transition-all shadow-md"
+              :class="currentStep === 1 ? 'bg-gray-900 text-white transform scale-110' : currentStep > 1 ? 'bg-green-500 text-white' : 'bg-white text-gray-400 border border-gray-200'"
+            >
+              {{ currentStep > 1 ? '✓' : '1' }}
+            </div>
+            <span class="text-xs font-semibold uppercase tracking-wide" :class="currentStep === 1 ? 'text-gray-900' : 'text-gray-400'">基础信息</span>
           </div>
-          <div class="step-line"></div>
-          <div class="step" :class="{ active: currentStep === 2, completed: currentStep > 2 }">
-            <div class="step-number">2</div>
-            <div class="step-label">能力配置</div>
+          <div class="flex-1 h-0.5 bg-gray-200 mx-4 relative -top-4">
+            <div class="h-full bg-green-500 transition-all duration-500" :style="{ width: currentStep > 1 ? '100%' : '0%' }"></div>
           </div>
-          <div class="step-line"></div>
-          <div class="step" :class="{ active: currentStep === 3 }">
-            <div class="step-number">3</div>
-            <div class="step-label">MCP 工具</div>
+          <div class="flex flex-col items-center gap-3 relative z-10">
+            <div 
+              class="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm transition-all shadow-md"
+              :class="currentStep === 2 ? 'bg-gray-900 text-white transform scale-110' : currentStep > 2 ? 'bg-green-500 text-white' : 'bg-white text-gray-400 border border-gray-200'"
+            >
+              {{ currentStep > 2 ? '✓' : '2' }}
+            </div>
+            <span class="text-xs font-semibold uppercase tracking-wide" :class="currentStep === 2 ? 'text-gray-900' : 'text-gray-400'">能力配置</span>
+          </div>
+          <div class="flex-1 h-0.5 bg-gray-200 mx-4 relative -top-4">
+            <div class="h-full bg-green-500 transition-all duration-500" :style="{ width: currentStep > 2 ? '100%' : '0%' }"></div>
+          </div>
+          <div class="flex flex-col items-center gap-3 relative z-10">
+            <div 
+              class="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm transition-all shadow-md"
+              :class="currentStep === 3 ? 'bg-gray-900 text-white transform scale-110' : 'bg-white text-gray-400 border border-gray-200'"
+            >
+              3
+            </div>
+            <span class="text-xs font-semibold uppercase tracking-wide" :class="currentStep === 3 ? 'text-gray-900' : 'text-gray-400'">工具配置</span>
           </div>
         </div>
 
         <!-- 步骤 1: 基础信息 -->
-        <div v-if="currentStep === 1" class="step-content">
-          <div class="form-group">
-            <label>Agent ID <span class="required">*</span></label>
+        <div v-if="currentStep === 1" class="flex flex-col gap-6 flex-1 animate-in fade-in slide-in-from-right-4 duration-300">
+          <div class="flex flex-col gap-2">
+            <label class="text-sm font-semibold text-gray-700">
+              Agent ID <span class="text-red-500">*</span>
+            </label>
             <input 
               v-model="form.agent_id" 
               type="text" 
               placeholder="例如: coding_assistant"
-              :class="{ error: errors.agent_id }"
+              class="w-full px-4 py-3 bg-white/50 border rounded-xl text-sm transition-all focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-sm"
+              :class="errors.agent_id ? 'border-red-300 bg-red-50/50' : 'border-gray-200'"
             >
-            <span class="hint">唯一标识符，仅支持小写字母、数字和下划线</span>
+            <span class="text-xs text-gray-400 ml-1">唯一标识符，仅支持小写字母、数字和下划线</span>
           </div>
 
-          <div class="form-group">
-            <label>名称</label>
-            <input v-model="form.name" type="text" placeholder="给智能体起个名字">
+          <div class="flex flex-col gap-2">
+            <label class="text-sm font-semibold text-gray-700">名称</label>
+            <input 
+              v-model="form.name" 
+              type="text" 
+              placeholder="给智能体起个名字"
+              class="w-full px-4 py-3 bg-white/50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all shadow-sm"
+            >
           </div>
 
-          <div class="form-group">
-            <label>描述</label>
-            <textarea v-model="form.description" rows="3" placeholder="描述智能体的功能和用途"></textarea>
+          <div class="flex flex-col gap-2">
+            <label class="text-sm font-semibold text-gray-700">描述</label>
+            <textarea 
+              v-model="form.description" 
+              rows="3" 
+              placeholder="描述智能体的功能和用途"
+              class="w-full px-4 py-3 bg-white/50 border border-gray-200 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all shadow-sm"
+            ></textarea>
           </div>
 
-          <div class="form-group">
-            <label>系统提示词 (Prompt) <span class="required">*</span></label>
+          <div class="flex flex-col gap-2">
+            <label class="text-sm font-semibold text-gray-700">
+              系统提示词 (Prompt) <span class="text-red-500">*</span>
+            </label>
             <textarea 
               v-model="form.prompt" 
-              rows="6" 
+              rows="8" 
               placeholder="设定智能体的角色和行为准则..."
-              :class="{ error: errors.prompt }"
+              class="w-full px-4 py-3 bg-white/50 border rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all shadow-sm font-mono"
+              :class="errors.prompt ? 'border-red-300 bg-red-50/50' : 'border-gray-200'"
             ></textarea>
           </div>
         </div>
 
         <!-- 步骤 2: 能力配置 -->
-        <div v-if="currentStep === 2" class="step-content">
-          <div class="form-group">
-            <label>模型选择</label>
-            <select v-model="form.model">
-              <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet (推荐)</option>
-              <option value="gpt-4o">GPT-4o</option>
-              <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
-            </select>
+        <div v-if="currentStep === 2" class="flex flex-col gap-6 flex-1 animate-in fade-in slide-in-from-right-4 duration-300">
+          <div class="flex flex-col gap-2">
+            <label class="text-sm font-semibold text-gray-700">模型选择</label>
+            <div class="relative">
+              <select 
+                v-model="form.model"
+                class="w-full px-4 py-3 bg-white/50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all cursor-pointer appearance-none shadow-sm"
+              >
+                <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet (推荐)</option>
+                <option value="gpt-4o">GPT-4o</option>
+                <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+              </select>
+              <div class="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">▼</div>
+            </div>
           </div>
 
-          <div class="form-group">
-            <label>最大对话轮数</label>
-            <input v-model.number="form.max_turns" type="number" min="1" max="100">
+          <div class="flex flex-col gap-2">
+            <label class="text-sm font-semibold text-gray-700">最大对话轮数</label>
+            <input 
+              v-model.number="form.max_turns" 
+              type="number" 
+              min="1" 
+              max="100"
+              class="w-full px-4 py-3 bg-white/50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all shadow-sm"
+            >
           </div>
 
-          <div class="form-group checkbox-group">
-            <label class="checkbox-label">
-              <input type="checkbox" v-model="form.plan_manager_enabled">
-              启用计划管理器 (Plan Manager)
-            </label>
-            <span class="hint">适合处理复杂的长流程任务</span>
-          </div>
+          <label class="flex items-center gap-4 p-4 bg-white/50 rounded-xl border border-gray-200 cursor-pointer hover:border-blue-300 transition-all shadow-sm group">
+            <input 
+              type="checkbox" 
+              v-model="form.plan_manager_enabled"
+              class="w-5 h-5 accent-blue-600 cursor-pointer rounded"
+            >
+            <div class="flex-1">
+              <div class="text-sm font-semibold text-gray-800 group-hover:text-blue-700 transition-colors">启用计划管理器 (Plan Manager)</div>
+              <div class="text-xs text-gray-500 mt-0.5">适合处理复杂的长流程任务，智能体会自动拆解步骤</div>
+            </div>
+          </label>
 
-          <div class="capabilities-section">
-            <h3>基础能力</h3>
-            <div class="capability-grid">
-              <label class="capability-item">
-                <input type="checkbox" v-model="form.enabled_capabilities.web_search">
-                <span class="cap-name">🌐 网络搜索</span>
+          <div class="flex flex-col gap-3">
+            <h3 class="text-sm font-semibold text-gray-700">基础能力</h3>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <label class="flex items-center gap-3 p-4 bg-white/50 border border-gray-200 rounded-xl cursor-pointer hover:bg-white hover:border-blue-300 hover:shadow-md transition-all group">
+                <input type="checkbox" v-model="form.enabled_capabilities.web_search" class="w-5 h-5 accent-blue-600 rounded">
+                <span class="text-sm font-medium text-gray-700 group-hover:text-blue-700">🌐 网络搜索</span>
               </label>
-              <label class="capability-item">
-                <input type="checkbox" v-model="form.enabled_capabilities.knowledge_search">
-                <span class="cap-name">📚 知识库检索</span>
+              <label class="flex items-center gap-3 p-4 bg-white/50 border border-gray-200 rounded-xl cursor-pointer hover:bg-white hover:border-blue-300 hover:shadow-md transition-all group">
+                <input type="checkbox" v-model="form.enabled_capabilities.knowledge_search" class="w-5 h-5 accent-blue-600 rounded">
+                <span class="text-sm font-medium text-gray-700 group-hover:text-blue-700">📚 知识库</span>
               </label>
-              <label class="capability-item">
-                <input type="checkbox" v-model="form.enabled_capabilities.code_execution">
-                <span class="cap-name">💻 代码执行</span>
+              <label class="flex items-center gap-3 p-4 bg-white/50 border border-gray-200 rounded-xl cursor-pointer hover:bg-white hover:border-blue-300 hover:shadow-md transition-all group">
+                <input type="checkbox" v-model="form.enabled_capabilities.code_execution" class="w-5 h-5 accent-blue-600 rounded">
+                <span class="text-sm font-medium text-gray-700 group-hover:text-blue-700">💻 代码执行</span>
               </label>
             </div>
           </div>
         </div>
 
-        <!-- 步骤 3: MCP 工具 -->
-        <div v-if="currentStep === 3" class="step-content">
-          <div v-if="loadingMcps" class="loading-text">加载 MCP 列表中...</div>
-          <div v-else class="mcp-list">
-            <div v-for="mcp in availableMcps" :key="mcp.server_name" class="mcp-item">
-              <div class="mcp-header">
-                <label class="checkbox-label">
-                  <input type="checkbox" :value="mcp.server_name" v-model="selectedMcps">
-                  <span class="mcp-name">{{ mcp.server_name }}</span>
+        <!-- 步骤 3: 工具配置（MCP 工具） -->
+        <div v-if="currentStep === 3" class="flex flex-col gap-6 flex-1 animate-in fade-in slide-in-from-right-4 duration-300">
+          <div class="mb-2">
+            <h3 class="text-sm font-semibold text-gray-700 flex items-center gap-2">
+              🔌 MCP 工具 <span class="text-xs font-normal text-gray-400">（可选）</span>
+            </h3>
+            <p class="text-xs text-gray-500 mt-1">选择要启用的外部服务（如 Dify、Coze 工作流）</p>
+          </div>
+          <div v-if="loadingMcps" class="text-center py-12 text-gray-400 text-sm flex flex-col items-center">
+            <div class="w-8 h-8 border-2 border-gray-200 border-t-blue-500 rounded-full animate-spin mb-3"></div>
+            加载 MCP 列表中...
+          </div>
+          <div v-else-if="availableMcps.length === 0" class="text-center py-12 text-gray-400 bg-white/30 rounded-2xl border border-dashed border-gray-200">
+            <span class="text-2xl block mb-2">🔌</span>
+            没有可用的 MCP 工具，可跳过此步骤
+          </div>
+          <div v-else class="flex flex-col gap-4">
+            <div 
+              v-for="mcp in availableMcps" 
+              :key="mcp.server_name" 
+              class="bg-white/50 border border-gray-200 rounded-xl p-5 hover:bg-white hover:border-blue-300 hover:shadow-md transition-all group"
+            >
+              <div class="flex items-start justify-between gap-4 mb-2">
+                <label class="flex items-center gap-3 cursor-pointer flex-1">
+                  <input 
+                    type="checkbox" 
+                    :value="mcp.server_name" 
+                    v-model="selectedMcps"
+                    class="w-5 h-5 accent-blue-600 rounded"
+                  >
+                  <span class="font-bold text-base text-gray-800 group-hover:text-blue-700">{{ mcp.server_name }}</span>
                 </label>
-                <span class="mcp-url">{{ mcp.server_url }}</span>
+                <span class="px-2 py-1 bg-gray-100 rounded text-xs text-gray-500 font-mono">{{ mcp.server_url }}</span>
               </div>
-              <p class="mcp-desc">{{ mcp.description || '暂无描述' }}</p>
+              <p class="text-sm text-gray-500 mb-4 pl-8">{{ mcp.description || '暂无描述' }}</p>
               
-              <!-- 认证配置（如果选中且需要认证） -->
-              <div v-if="selectedMcps.includes(mcp.server_name) && mcp.auth_type !== 'none'" class="mcp-config">
-                <div class="form-group small">
-                  <label>认证环境变量 (Auth Env)</label>
+              <!-- 认证配置 -->
+              <div v-if="selectedMcps.includes(mcp.server_name) && mcp.auth_type !== 'none'" class="ml-8 pt-4 border-t border-dashed border-gray-200 animate-in slide-in-from-top-2">
+                <div class="flex flex-col gap-2">
+                  <label class="text-xs font-semibold text-gray-600 uppercase tracking-wide">认证环境变量 (Auth Env)</label>
                   <input 
                     type="text" 
                     v-model="mcpAuthConfigs[mcp.server_name]"
                     :placeholder="mcp.auth_env || '例如: NOTION_API_KEY'"
+                    class="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-mono"
                   >
                 </div>
               </div>
             </div>
           </div>
-          
-          <div v-if="availableMcps.length === 0 && !loadingMcps" class="empty-text">
-            没有可用的 MCP 工具。请联系管理员添加。
-          </div>
         </div>
 
         <!-- 底部按钮 -->
-        <div class="form-actions">
+        <div class="flex items-center justify-end gap-4 pt-8 border-t border-gray-200/50 mt-auto">
           <button 
             v-if="currentStep > 1" 
             @click="currentStep--" 
-            class="secondary-btn"
+            class="px-6 py-3 bg-white border border-gray-200 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors shadow-sm"
           >
             上一步
           </button>
@@ -154,7 +232,7 @@
           <button 
             v-if="currentStep < 3" 
             @click="nextStep" 
-            class="primary-btn"
+            class="px-8 py-3 bg-gray-900 text-white rounded-xl text-sm font-medium hover:bg-gray-800 transition-all shadow-lg shadow-gray-900/10 transform active:scale-95"
           >
             下一步
           </button>
@@ -162,7 +240,7 @@
           <button 
             v-if="currentStep === 3" 
             @click="submitForm" 
-            class="primary-btn submit" 
+            class="px-8 py-3 bg-gray-900 text-white rounded-xl text-sm font-medium hover:bg-gray-800 transition-all shadow-lg shadow-gray-900/10 transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed" 
             :disabled="submitting"
           >
             {{ submitting ? '创建中...' : '确认创建' }}
@@ -209,7 +287,8 @@ const errors = reactive({
 const fetchMcps = async () => {
   try {
     loadingMcps.value = true
-    const response = await api.get('/v1/mcp/servers')
+    // 正确的后端路由: /api/v1/tools/mcp
+    const response = await api.get('/v1/tools/mcp')
     availableMcps.value = response.data.servers || []
   } catch (error) {
     console.error('获取 MCP 列表失败:', error)
@@ -291,291 +370,19 @@ const submitForm = async () => {
 </script>
 
 <style scoped>
-.agent-create-view {
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
-  background-color: #f5f7f9;
+@keyframes blob {
+  0% { transform: translate(0px, 0px) scale(1); }
+  33% { transform: translate(30px, -50px) scale(1.1); }
+  66% { transform: translate(-20px, 20px) scale(0.9); }
+  100% { transform: translate(0px, 0px) scale(1); }
 }
-
-.top-bar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1rem 2rem;
-  background-color: white;
-  border-bottom: 1px solid #e1e4e8;
+.animate-blob {
+  animation: blob 15s infinite;
 }
-
-.page-title {
-  font-size: 1.5rem;
-  font-weight: 600;
-  margin: 0;
+.animation-delay-2000 {
+  animation-delay: 2s;
 }
-
-.back-button {
-  padding: 0.5rem 1rem;
-  background: white;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.main-content {
-  flex: 1;
-  padding: 2rem;
-  overflow-y: auto;
-  display: flex;
-  justify-content: center;
-}
-
-.form-container {
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-  padding: 2rem;
-  width: 100%;
-  max-width: 800px;
-  display: flex;
-  flex-direction: column;
-}
-
-/* 步骤条 */
-.steps {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 2rem;
-  padding: 0 1rem;
-}
-
-.step {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.5rem;
-  position: relative;
-  z-index: 1;
-}
-
-.step-number {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: #e2e8f0;
-  color: #718096;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 600;
-  transition: all 0.3s;
-}
-
-.step.active .step-number {
-  background: #3182ce;
-  color: white;
-}
-
-.step.completed .step-number {
-  background: #48bb78;
-  color: white;
-}
-
-.step-label {
-  font-size: 0.9rem;
-  color: #718096;
-}
-
-.step-line {
-  flex: 1;
-  height: 2px;
-  background: #e2e8f0;
-  margin: 0 1rem;
-  position: relative;
-  top: -14px;
-}
-
-/* 表单样式 */
-.step-content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-}
-
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.form-group label {
-  font-weight: 500;
-  color: #2d3748;
-}
-
-.required {
-  color: #e53e3e;
-}
-
-input[type="text"],
-input[type="number"],
-select,
-textarea {
-  padding: 0.75rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  font-size: 1rem;
-  transition: border-color 0.2s;
-}
-
-input:focus,
-textarea:focus,
-select:focus {
-  outline: none;
-  border-color: #3182ce;
-  box-shadow: 0 0 0 3px rgba(49, 130, 206, 0.1);
-}
-
-.error {
-  border-color: #e53e3e !important;
-}
-
-.hint {
-  font-size: 0.85rem;
-  color: #718096;
-}
-
-.checkbox-group {
-  flex-direction: row;
-  align-items: center;
-  gap: 1rem;
-}
-
-.checkbox-label {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  cursor: pointer;
-}
-
-/* 能力配置 */
-.capability-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 1rem;
-  margin-top: 0.5rem;
-}
-
-.capability-item {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 1rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.capability-item:hover {
-  background-color: #f7fafc;
-  border-color: #cbd5e0;
-}
-
-/* MCP 列表 */
-.mcp-list {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.mcp-item {
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  padding: 1rem;
-}
-
-.mcp-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.5rem;
-}
-
-.mcp-name {
-  font-weight: 600;
-  color: #2d3748;
-}
-
-.mcp-url {
-  font-size: 0.85rem;
-  color: #718096;
-  background: #f7fafc;
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-
-.mcp-desc {
-  font-size: 0.9rem;
-  color: #4a5568;
-  margin-bottom: 0.5rem;
-}
-
-.mcp-config {
-  margin-top: 1rem;
-  padding-top: 1rem;
-  border-top: 1px dashed #e2e8f0;
-}
-
-.form-group.small {
-  margin-bottom: 0;
-}
-
-.form-group.small input {
-  padding: 0.5rem;
-  font-size: 0.9rem;
-}
-
-/* 底部按钮 */
-.form-actions {
-  margin-top: 2rem;
-  padding-top: 2rem;
-  border-top: 1px solid #e2e8f0;
-  display: flex;
-  justify-content: flex-end;
-  gap: 1rem;
-}
-
-.primary-btn, .secondary-btn {
-  padding: 0.75rem 1.5rem;
-  border-radius: 6px;
-  font-weight: 500;
-  cursor: pointer;
-}
-
-.primary-btn {
-  background-color: #3182ce;
-  color: white;
-  border: none;
-}
-
-.primary-btn:hover {
-  background-color: #2c5282;
-}
-
-.primary-btn:disabled {
-  background-color: #a0aec0;
-  cursor: not-allowed;
-}
-
-.secondary-btn {
-  background-color: white;
-  color: #4a5568;
-  border: 1px solid #e2e8f0;
-}
-
-.secondary-btn:hover {
-  background-color: #f7fafc;
+.animation-delay-4000 {
+  animation-delay: 4s;
 }
 </style>

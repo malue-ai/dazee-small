@@ -487,9 +487,18 @@ capabilities:
   input_schema:
     type: object
     properties:
+      # 方式1: 使用预配置 API（推荐）
+      api_name:
+        type: string
+        description: 预配置的 API 名称（如 coze_api、dify_api），自动注入 base_url 和认证
+      path:
+        type: string
+        description: API 路径（与 api_name 配合使用），例如 /workflow/stream_run
+      # 方式2: 直接指定 URL
       url:
         type: string
-        description: API 端点 URL (完整的 HTTP(S) 地址)
+        description: 完整的 API URL（与 api_name 二选一）
+      # 通用参数
       method:
         type: string
         enum:
@@ -501,36 +510,23 @@ capabilities:
         description: HTTP 方法 (默认 POST)
       headers:
         type: object
-        description: 请求头字典
+        description: 额外的请求头（会与预配置的 headers 合并）
       body:
         type: object
         description: 请求体 (将自动转为 JSON)
-      auth:
-        type: object
-        description: 认证配置
-        properties:
-          type:
-            type: string
-            enum:
-            - api_key
-            - bearer
-            - basic
-          credentials:
-            type: object
-      poll_for_result:
-        type: boolean
-        description: 是否轮询异步任务结果
+      # 请求模式（三选一）
+      mode:
+        type: string
+        enum:
+        - sync
+        - stream
+        - async_poll
+        description: 请求模式 - sync(同步,默认)、stream(SSE流式)、async_poll(异步轮询)
+      # 轮询配置
       poll_config:
         type: object
-        description: 轮询配置
-      download_url_field:
-        type: string
-        description: 响应中下载链接的字段名
-      save_dir:
-        type: string
-        description: 文件保存目录
-    required:
-    - url
+        description: 轮询配置（仅 mode=async_poll 时有效）
+    required: []  # api_name 或 url 至少一个，在代码中校验
 - name: file_read
   type: TOOL
   subtype: NATIVE

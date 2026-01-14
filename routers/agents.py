@@ -102,7 +102,6 @@ async def list_agents(
 
 @router.get(
     "/{agent_id}",
-    response_model=AgentDetail,
     summary="获取 Agent 详情",
     description="获取指定 Agent 的详细配置信息",
 )
@@ -114,33 +113,29 @@ async def get_agent(agent_id: str):
         agent_id: Agent ID
         
     Returns:
-        Agent 详细信息
+        Agent 详细信息（包含 enabled_capabilities 对象）
     """
     registry = get_agent_registry()
     
     try:
         detail_raw = registry.get_agent_detail(agent_id)
         
-        return AgentDetail(
-            agent_id=detail_raw["agent_id"],
-            name=detail_raw["name"],
-            description=detail_raw.get("description", ""),
-            version=detail_raw.get("version", "1.0.0"),
-            is_active=detail_raw.get("is_active", True),
-            model=detail_raw.get("model"),
-            max_turns=detail_raw.get("max_turns"),
-            enabled_capabilities=detail_raw.get("enabled_capabilities", []),
-            mcp_tools=detail_raw.get("mcp_tools", []),
-            apis=detail_raw.get("apis", []),
-            skills=detail_raw.get("skills", []),
-            total_calls=0,  # TODO: 从数据库获取
-            success_calls=0,
-            failed_calls=0,
-            created_at=datetime.fromisoformat(detail_raw["loaded_at"]),
-            updated_at=datetime.fromisoformat(detail_raw["loaded_at"]),
-            last_used_at=None,
-            loaded_at=datetime.fromisoformat(detail_raw["loaded_at"]),
-        )
+        # 返回原始字典，包含 enabled_capabilities 对象格式
+        return {
+            "agent_id": detail_raw["agent_id"],
+            "name": detail_raw["name"],
+            "description": detail_raw.get("description", ""),
+            "version": detail_raw.get("version", "1.0.0"),
+            "is_active": detail_raw.get("is_active", True),
+            "model": detail_raw.get("model"),
+            "max_turns": detail_raw.get("max_turns"),
+            "plan_manager_enabled": detail_raw.get("plan_manager_enabled", False),
+            "enabled_capabilities": detail_raw.get("enabled_capabilities", {}),
+            "mcp_tools": detail_raw.get("mcp_tools", []),
+            "apis": detail_raw.get("apis", []),
+            "skills": detail_raw.get("skills", []),
+            "loaded_at": detail_raw["loaded_at"],
+        }
     except AgentNotFoundError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -148,6 +143,39 @@ async def get_agent(agent_id: str):
                 "code": "AGENT_NOT_FOUND",
                 "message": str(e),
                 "available_agents": registry.list_agents(),
+            }
+        )
+
+
+@router.get(
+    "/{agent_id}/prompt",
+    summary="获取 Agent 的 Prompt",
+    description="获取 Agent 的原始 prompt.md 内容",
+)
+async def get_agent_prompt(agent_id: str):
+    """
+    获取 Agent 的 Prompt 内容
+    
+    Args:
+        agent_id: Agent ID
+        
+    Returns:
+        prompt.md 文件内容
+    """
+    registry = get_agent_registry()
+    
+    try:
+        prompt_content = registry.get_agent_prompt(agent_id)
+        return {
+            "agent_id": agent_id,
+            "prompt": prompt_content,
+        }
+    except AgentNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "AGENT_NOT_FOUND",
+                "message": str(e),
             }
         )
 

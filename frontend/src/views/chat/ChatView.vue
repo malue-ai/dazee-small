@@ -1,217 +1,277 @@
 <template>
-  <div class="app-container light-theme">
+  <div class="h-screen w-full flex bg-gray-50 relative overflow-hidden text-gray-900 font-sans">
+    <!-- 背景装饰 (与登录页一致) -->
+    <div class="absolute inset-0 z-0 opacity-20 pointer-events-none">
+      <div class="absolute top-0 left-0 w-[500px] h-[500px] bg-blue-200 rounded-full mix-blend-multiply filter blur-3xl animate-blob"></div>
+      <div class="absolute top-0 right-0 w-[500px] h-[500px] bg-purple-200 rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-2000"></div>
+      <div class="absolute -bottom-8 left-20 w-[500px] h-[500px] bg-pink-200 rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-4000"></div>
+    </div>
+
     <!-- 左侧侧边栏：历史对话 -->
-    <div class="sidebar left-sidebar" :class="{ collapsed: sidebarCollapsed }">
-      <div class="sidebar-header">
-        <div class="logo-area" v-if="!sidebarCollapsed">
-          <span class="logo-icon">✨</span>
-          <span class="logo-text">ZenFlux</span>
+    <div 
+      class="relative z-10 flex flex-col border-r border-white/20 bg-white/60 backdrop-blur-xl transition-all duration-300 ease-in-out flex-shrink-0"
+      :class="sidebarCollapsed ? 'w-[70px]' : 'w-[280px]'"
+    >
+      <div class="h-16 flex items-center justify-between px-5 border-b border-white/20">
+        <div class="flex items-center gap-3 font-bold text-lg text-gray-800" v-if="!sidebarCollapsed">
+          <div class="w-8 h-8 rounded-xl bg-gray-900 flex items-center justify-center text-white shadow-lg shadow-gray-900/20">
+            ✨
+          </div>
+          <span>ZenFlux</span>
         </div>
-        <button @click="sidebarCollapsed = !sidebarCollapsed" class="icon-btn collapse-btn">
-          <span class="icon">{{ sidebarCollapsed ? '→' : '←' }}</span>
+        <button 
+          @click="sidebarCollapsed = !sidebarCollapsed" 
+          class="p-2 rounded-xl text-gray-500 hover:bg-white/80 hover:text-gray-900 transition-colors"
+        >
+          <span class="text-lg">{{ sidebarCollapsed ? '→' : '←' }}</span>
         </button>
       </div>
 
-      <div v-show="!sidebarCollapsed" class="sidebar-content">
+      <div v-show="!sidebarCollapsed" class="flex-1 flex flex-col p-4 overflow-y-auto scrollbar-thin">
         <!-- 操作按钮 -->
-        <div class="action-buttons">
-          <button @click="createNewConversation" class="new-chat-btn">
-            <span class="icon">＋</span> 新建对话
+        <div class="flex flex-col gap-3 mb-6">
+          <button 
+            @click="createNewConversation" 
+            class="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-900 text-white rounded-xl text-sm font-medium shadow-lg shadow-gray-900/10 hover:bg-gray-800 hover:shadow-gray-900/20 transition-all transform active:scale-95"
+          >
+            <span>＋</span> 新建对话
           </button>
-          <div class="nav-buttons">
-            <button @click="$router.push('/knowledge')" class="nav-btn">
-              <span class="icon">📚</span> 知识库
+          <div class="flex gap-2">
+            <button 
+              @click="$router.push('/knowledge')" 
+              class="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 bg-white/50 border border-white/40 rounded-xl text-xs font-medium text-gray-600 hover:bg-white hover:text-gray-900 hover:border-white/60 transition-all shadow-sm"
+            >
+              <span>📚</span> 知识库
             </button>
-            <button @click="$router.push('/agents')" class="nav-btn">
-              <span class="icon">🤖</span> 智能体
+            <button 
+              @click="$router.push('/agents')" 
+              class="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 bg-white/50 border border-white/40 rounded-xl text-xs font-medium text-gray-600 hover:bg-white hover:text-gray-900 hover:border-white/60 transition-all shadow-sm"
+            >
+              <span>🤖</span> 智能体
             </button>
           </div>
         </div>
 
         <!-- 对话列表 -->
-        <div class="conversations-section">
-          <div class="section-header">最近对话</div>
-          <div v-if="loadingConversations" class="loading-text">加载中...</div>
-          <div v-else-if="conversations.length === 0" class="empty-text">暂无记录</div>
-          <div v-else class="conversation-list">
+        <div class="flex flex-col gap-2">
+          <div class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 px-2">最近对话</div>
+          <div v-if="loadingConversations" class="text-sm text-gray-400 px-2 py-4 text-center">加载中...</div>
+          <div v-else-if="conversations.length === 0" class="text-sm text-gray-400 px-2 py-4 text-center">暂无记录</div>
+          <div v-else class="flex flex-col gap-1">
             <div
               v-for="conv in conversations"
               :key="conv.id"
-              class="conversation-item"
-              :class="{ active: conv.id === chatStore.conversationId }"
+              class="group relative flex flex-col px-4 py-3 rounded-xl cursor-pointer transition-all duration-200 border border-transparent"
+              :class="conv.id === chatStore.conversationId ? 'bg-white shadow-md border-white/40 text-gray-900' : 'text-gray-600 hover:bg-white/50 hover:text-gray-900'"
               @click="loadConversation(conv.id)"
             >
-              <div class="conv-title">{{ conv.title || '未命名对话' }}</div>
-              <div class="conv-meta">
-                <span class="conv-time">{{ formatShortTime(conv.updated_at) }}</span>
-                <button class="delete-icon" @click.stop="confirmDeleteConversation(conv)">🗑️</button>
+              <div class="truncate font-medium text-sm mb-1">{{ conv.title || '未命名对话' }}</div>
+              <div class="flex items-center justify-between text-xs text-gray-400">
+                <span>{{ formatShortTime(conv.updated_at) }}</span>
+                <button 
+                  class="opacity-0 group-hover:opacity-100 p-1 -mr-1 hover:text-red-500 transition-opacity" 
+                  @click.stop="confirmDeleteConversation(conv)"
+                >
+                  🗑️
+                </button>
               </div>
             </div>
           </div>
         </div>
 
         <!-- 用户信息 -->
-        <div class="user-profile">
-          <div class="avatar">U</div>
-          <div class="user-details">
-            <div class="user-name">User</div>
+        <div class="mt-auto pt-4 border-t border-gray-200/50 flex items-center gap-3 px-2">
+          <div class="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-xs font-bold text-white shadow-md">U</div>
+          <div class="flex flex-col">
+            <span class="text-sm font-semibold text-gray-800">User</span>
+            <span class="text-xs text-gray-400">Pro Plan</span>
           </div>
         </div>
       </div>
     </div>
 
     <!-- 中间主区域：对话流 -->
-    <div class="main-column">
-      <!-- 顶部导航栏 (极简) -->
-      <div class="top-bar">
-        <div class="current-chat-info">
-          <h2>{{ currentConversationTitle }}</h2>
+    <div class="flex-1 flex flex-col min-w-0 relative z-10">
+      <!-- 顶部导航栏 -->
+      <div class="h-16 flex items-center justify-between px-8 border-b border-white/20 bg-white/40 backdrop-blur-md sticky top-0 z-20">
+        <div class="flex items-center gap-3">
+          <h2 class="text-base font-semibold text-gray-800">{{ currentConversationTitle }}</h2>
+          <span class="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-xs font-medium border border-blue-200">Claude 3.5</span>
         </div>
         
-        <div class="top-actions">
+        <div class="flex items-center gap-2">
            <button 
             v-if="chatStore.conversationId"
             @click="toggleWorkspace" 
-            class="action-btn"
-            :class="{ active: showWorkspacePanel }"
+            class="p-2.5 rounded-xl transition-all duration-200"
+            :class="showWorkspacePanel ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500 hover:bg-white/50 hover:text-gray-900'"
             title="文件列表"
           >
-            <span class="icon">📂</span>
+            <span class="text-lg">📂</span>
           </button>
           <button 
             @click="toggleRightSidebar" 
-            class="action-btn" 
-            :class="{ active: showRightSidebar }"
+            class="p-2.5 rounded-xl transition-all duration-200" 
+            :class="showRightSidebar ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500 hover:bg-white/50 hover:text-gray-900'"
             title="任务看板"
           >
-            <span class="icon">📋</span>
+            <span class="text-lg">📋</span>
           </button>
         </div>
       </div>
 
       <!-- 消息列表区域 -->
-      <div class="chat-viewport" ref="messagesContainer">
+      <div class="flex-1 overflow-y-auto scroll-smooth p-6 md:p-8" ref="messagesContainer">
         <!-- 欢迎页 -->
-        <div v-if="messages.length === 0" class="welcome-screen">
-          <div class="welcome-icon">✨</div>
-          <h1>有什么我可以帮你的？</h1>
-          <div class="suggestion-grid">
-            <div class="suggestion-card" @click="setInput('帮我生成一个贪吃蛇游戏')">
-              <span class="text">🎮 生成贪吃蛇游戏</span>
+        <div v-if="messages.length === 0" class="h-full flex flex-col items-center justify-center text-center -mt-10">
+          <div class="w-20 h-20 bg-white rounded-3xl shadow-xl flex items-center justify-center mb-8 transform hover:scale-105 transition-transform duration-300">
+            <span class="text-5xl">✨</span>
+          </div>
+          <h1 class="text-3xl font-bold mb-4 text-gray-900">有什么我可以帮你的？</h1>
+          <p class="text-gray-500 mb-10 max-w-md">我是你的 AI 助手，可以协助你完成编码、写作、分析等各种任务。</p>
+          
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4 w-full max-w-3xl px-4">
+            <div 
+              class="p-5 rounded-2xl bg-white border border-gray-100 hover:border-blue-200 hover:shadow-lg cursor-pointer transition-all duration-300 group" 
+              @click="setInput('帮我生成一个贪吃蛇游戏')"
+            >
+              <div class="text-2xl mb-3 group-hover:scale-110 transition-transform">🎮</div>
+              <h3 class="font-semibold text-gray-800 mb-1">生成贪吃蛇游戏</h3>
+              <p class="text-xs text-gray-400">使用 Python 或 JavaScript</p>
             </div>
-            <div class="suggestion-card" @click="setInput('分析一下 requirements.txt')">
-              <span class="text">📊 分析项目依赖</span>
+            <div 
+              class="p-5 rounded-2xl bg-white border border-gray-100 hover:border-blue-200 hover:shadow-lg cursor-pointer transition-all duration-300 group" 
+              @click="setInput('分析一下 requirements.txt')"
+            >
+              <div class="text-2xl mb-3 group-hover:scale-110 transition-transform">📊</div>
+              <h3 class="font-semibold text-gray-800 mb-1">分析项目依赖</h3>
+              <p class="text-xs text-gray-400">检查版本冲突和安全问题</p>
             </div>
-            <div class="suggestion-card" @click="setInput('查询关于 RAG 的最新论文')">
-              <span class="text">🔍 搜索 RAG 论文</span>
+            <div 
+              class="p-5 rounded-2xl bg-white border border-gray-100 hover:border-blue-200 hover:shadow-lg cursor-pointer transition-all duration-300 group" 
+              @click="setInput('查询关于 RAG 的最新论文')"
+            >
+              <div class="text-2xl mb-3 group-hover:scale-110 transition-transform">🔍</div>
+              <h3 class="font-semibold text-gray-800 mb-1">搜索 RAG 论文</h3>
+              <p class="text-xs text-gray-400">获取最新的研究进展</p>
             </div>
           </div>
         </div>
 
         <!-- 消息流 -->
-        <div v-else class="message-list">
+        <div v-else class="max-w-4xl mx-auto flex flex-col gap-8 pb-4">
           <div
             v-for="message in messages"
             :key="message.id"
-            class="message-row"
-            :class="message.role"
+            class="flex gap-5 group"
+            :class="message.role === 'user' ? 'justify-end' : 'justify-start'"
           >
-            <div class="message-avatar">
+            <div 
+              class="w-10 h-10 rounded-xl flex items-center justify-center text-lg flex-shrink-0 mt-1 shadow-sm"
+              :class="message.role === 'assistant' ? 'bg-white border border-gray-100' : 'order-2 hidden'"
+            >
               {{ message.role === 'user' ? '👤' : '🤖' }}
             </div>
             
-            <div class="message-bubble">
+            <div 
+              class="flex-1 min-w-0 max-w-[80%]"
+              :class="message.role === 'user' ? 'order-1 flex justify-end' : ''"
+            >
               <!-- 用户消息 -->
-              <div v-if="message.role === 'user'" class="user-content">
-                <!-- 📎 显示附件（可点击预览） -->
-                <div v-if="message.files && message.files.length > 0" class="message-files">
+              <div v-if="message.role === 'user'" class="flex flex-col items-end gap-2">
+                <!-- 📎 显示附件 -->
+                <div v-if="message.files && message.files.length > 0" class="flex flex-col gap-2 mb-1">
                   <div 
                     v-for="(file, idx) in message.files" 
                     :key="idx" 
-                    class="message-file-item clickable"
+                    class="flex items-center gap-3 p-3 bg-white/80 rounded-xl border border-white/40 cursor-pointer hover:bg-white transition-colors shadow-sm"
                     @click="openAttachmentPreview(file)"
-                    title="点击预览"
                   >
-                    <span class="file-type-icon">{{ getFileTypeIcon(file) }}</span>
-                    <span class="file-info">
-                      <span class="file-title">{{ file.filename || file.name || '文件' }}</span>
-                      <span class="file-type">{{ getFileTypeLabel(file) }}</span>
-                    </span>
-                    <span class="preview-hint">👁️</span>
+                    <span class="text-xl">{{ getFileTypeIcon(file) }}</span>
+                    <div class="flex flex-col text-left">
+                      <span class="text-sm font-medium text-gray-800 truncate max-w-[12rem]">{{ file.filename || file.name || '文件' }}</span>
+                      <span class="text-xs text-gray-500">{{ getFileTypeLabel(file) }}</span>
+                    </div>
                   </div>
                 </div>
                 <!-- 文字内容 -->
-                <div v-if="message.content" class="user-text">{{ message.content }}</div>
+                <div v-if="message.content" class="bg-gray-900 text-white px-5 py-3.5 rounded-2xl rounded-tr-sm text-sm leading-relaxed shadow-lg shadow-gray-900/10 whitespace-pre-wrap">
+                  {{ message.content }}
+                </div>
               </div>
               
               <!-- 助手消息 -->
-              <div v-else class="assistant-content">
-                <MessageContent 
-                  v-if="message.contentBlocks && message.contentBlocks.length > 0"
-                  :content="message.contentBlocks"
-                  :tool-statuses="message.toolStatuses || {}"
-                  @mermaid-detected="handleMermaidDetected"
-                />
-                <template v-else>
-                   <div v-if="message.thinking" class="thinking-box">
-                     {{ message.thinking }}
-                   </div>
-                   <MarkdownRenderer :content="message.content" @mermaid-detected="handleMermaidDetected" />
-                </template>
+              <div v-else class="flex flex-col gap-3">
+                <div class="bg-white/60 backdrop-blur-sm border border-white/40 px-6 py-5 rounded-2xl rounded-tl-sm shadow-sm text-sm leading-relaxed text-gray-800">
+                  <MessageContent 
+                    v-if="message.contentBlocks && message.contentBlocks.length > 0"
+                    :content="message.contentBlocks"
+                    :tool-statuses="message.toolStatuses || {}"
+                    @mermaid-detected="handleMermaidDetected"
+                  />
+                  <template v-else>
+                     <div v-if="message.thinking" class="mb-4 p-4 bg-gray-50/80 border border-gray-100 rounded-xl text-sm text-gray-500 italic">
+                       {{ message.thinking }}
+                     </div>
+                     <MarkdownRenderer :content="message.content" @mermaid-detected="handleMermaidDetected" />
+                  </template>
+                </div>
 
                 <!-- 推荐问题 -->
-                <div v-if="message.recommendedQuestions?.length" class="recommended-section">
-                  <div class="rec-chips">
-                    <button 
-                      v-for="(q, idx) in message.recommendedQuestions" 
-                      :key="idx" 
-                      class="rec-chip"
-                      @click="askRecommendedQuestion(q)"
-                    >
-                      {{ q }}
-                    </button>
-                  </div>
+                <div v-if="message.recommendedQuestions?.length" class="flex flex-wrap gap-2 ml-1">
+                  <button 
+                    v-for="(q, idx) in message.recommendedQuestions" 
+                    :key="idx" 
+                    class="px-4 py-2 bg-white/50 border border-white/60 rounded-full text-xs text-gray-600 hover:text-gray-900 hover:bg-white hover:border-gray-200 transition-all shadow-sm"
+                    @click="askRecommendedQuestion(q)"
+                  >
+                    {{ q }}
+                  </button>
                 </div>
               </div>
             </div>
           </div>
 
           <!-- Loading -->
-          <div v-if="isLoading && !isGenerating" class="message-row assistant">
-             <div class="message-avatar">🤖</div>
-             <div class="message-bubble">
-               <div class="typing-dots"><span>.</span><span>.</span><span>.</span></div>
+          <div v-if="isLoading && !isGenerating" class="flex gap-5">
+             <div class="w-10 h-10 bg-white border border-gray-100 rounded-xl flex items-center justify-center text-lg shadow-sm">🤖</div>
+             <div class="flex items-center h-10">
+               <div class="typing-dots flex gap-1.5 p-3 bg-white/40 rounded-xl">
+                 <span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></span>
+                 <span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-100"></span>
+                 <span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-200"></span>
+               </div>
              </div>
           </div>
         </div>
       </div>
 
       <!-- 输入框区域 -->
-      <div class="input-area">
-        <div class="input-box-wrapper">
+      <div class="px-6 pb-6 pt-2 bg-transparent pointer-events-none sticky bottom-0 z-30">
+        <div class="pointer-events-auto max-w-4xl mx-auto bg-white/80 backdrop-blur-xl border border-white/40 rounded-3xl p-3 shadow-xl shadow-gray-200/50 transition-all duration-300 focus-within:shadow-2xl focus-within:border-blue-200 focus-within:ring-4 focus-within:ring-blue-500/5">
           <!-- 📎 已选文件预览 -->
-          <div v-if="selectedFiles.length > 0" class="selected-files">
+          <div v-if="selectedFiles.length > 0" class="flex flex-wrap gap-2 px-2 pb-3 border-b border-gray-100 mb-2">
             <div 
               v-for="(file, index) in selectedFiles" 
               :key="index" 
-              class="file-chip"
+              class="flex items-center gap-2 pl-3 pr-2 py-1.5 bg-gray-50 rounded-lg text-xs font-medium text-gray-700 border border-gray-100 group"
             >
-              <span class="file-icon">{{ getFileIcon(file) }}</span>
-              <span class="file-name">{{ file.name }}</span>
-              <button class="remove-file" @click="removeFile(index)">×</button>
+              <span class="text-base">{{ getFileIcon(file) }}</span>
+              <span class="max-w-[150px] truncate">{{ file.name }}</span>
+              <button class="p-0.5 rounded-md hover:bg-gray-200 text-gray-400 hover:text-red-500 transition-colors" @click="removeFile(index)">×</button>
             </div>
           </div>
           
-          <div class="input-row">
+          <div class="flex items-end gap-2">
             <!-- 文件上传按钮 -->
             <button 
-              class="attach-btn" 
+              class="p-3 rounded-xl text-gray-400 hover:bg-gray-100 hover:text-gray-900 transition-colors flex-shrink-0" 
               @click="triggerFileUpload"
               :disabled="isLoading || isUploading"
               title="上传文件"
             >
-              <span v-if="isUploading" class="uploading-icon">⏳</span>
-              <span v-else>📎</span>
+              <span v-if="isUploading" class="animate-spin block">⏳</span>
+              <span v-else class="text-xl">📎</span>
             </button>
             <input 
               type="file" 
@@ -231,12 +291,13 @@
               ref="inputTextarea"
               :disabled="isLoading"
               rows="1"
+              class="flex-1 max-h-[200px] py-3 bg-transparent border-none outline-none text-base text-gray-800 placeholder:text-gray-400 resize-none leading-relaxed"
             ></textarea>
             
-            <div class="input-actions">
+            <div class="pb-1">
               <button 
                 v-if="isLoading" 
-                class="send-btn stop-btn" 
+                class="p-3 rounded-xl bg-red-50 text-red-500 hover:bg-red-100 transition-all shadow-sm" 
                 @click="stopGeneration"
                 :disabled="isStopping"
               >
@@ -244,103 +305,134 @@
               </button>
               <button 
                 v-else 
-                class="send-btn" 
+                class="p-3 rounded-xl transition-all shadow-sm flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none" 
+                :class="inputMessage.trim() || selectedFiles.length > 0 ? 'bg-gray-900 text-white hover:bg-gray-800 hover:shadow-lg' : 'bg-gray-100 text-gray-400 cursor-not-allowed'"
                 @click="sendMessage"
                 :disabled="!inputMessage.trim() && selectedFiles.length === 0"
               >
-                ↑
+                <span class="text-lg">↑</span>
               </button>
             </div>
           </div>
+        </div>
+        <div class="text-center mt-2">
+          <p class="text-[10px] text-gray-400">AI 可能生成错误信息，请核对重要事实。</p>
         </div>
       </div>
     </div>
 
     <!-- 右侧侧边栏：Plan & Mind -->
-    <div class="sidebar right-sidebar" v-show="showRightSidebar">
-      <div class="sidebar-header">
-        <div class="sidebar-tabs">
+    <div 
+      v-show="showRightSidebar"
+      class="w-[380px] relative z-10 flex flex-col border-l border-white/20 bg-white/60 backdrop-blur-xl transition-all duration-300 shadow-xl md:shadow-none"
+    >
+      <div class="h-16 flex items-center justify-between px-5 border-b border-white/20">
+        <div class="flex gap-1 p-1.5 bg-white/50 rounded-xl border border-white/40 shadow-sm">
           <button 
-            class="tab-btn" 
-            :class="{ active: rightSidebarTab === 'plan' }"
+            class="px-4 py-1.5 rounded-lg text-xs font-medium transition-all" 
+            :class="rightSidebarTab === 'plan' ? 'bg-gray-900 text-white shadow-md' : 'text-gray-500 hover:text-gray-900'"
             @click="rightSidebarTab = 'plan'"
           >
             📋 任务
           </button>
           <button 
-            class="tab-btn" 
-            :class="{ active: rightSidebarTab === 'mind' }"
+            class="px-4 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5" 
+            :class="rightSidebarTab === 'mind' ? 'bg-gray-900 text-white shadow-md' : 'text-gray-500 hover:text-gray-900'"
             @click="rightSidebarTab = 'mind'"
           >
             🧠 Mind
-            <span v-if="mermaidCharts.length" class="badge">{{ mermaidCharts.length }}</span>
+            <span v-if="mermaidCharts.length" class="px-1.5 py-0.5 rounded-full bg-white/20 text-white text-[10px] leading-none font-bold">{{ mermaidCharts.length }}</span>
           </button>
         </div>
-        <button @click="showRightSidebar = false" class="icon-btn close-btn">✕</button>
+        <button @click="showRightSidebar = false" class="p-2 rounded-xl text-gray-400 hover:bg-white hover:text-gray-900 transition-colors md:hidden">✕</button>
       </div>
       
-      <div class="sidebar-content right-content">
+      <div class="flex-1 overflow-y-auto p-5 scrollbar-thin">
         <!-- 任务看板 -->
-        <PlanWidget v-if="rightSidebarTab === 'plan'" :plan="currentPlan" />
+        <template v-if="rightSidebarTab === 'plan'">
+          <PlanWidget v-if="currentPlan" :plan="currentPlan" />
+          <div v-else class="h-full flex flex-col items-center justify-center text-gray-400 opacity-60">
+            <div class="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mb-4 shadow-sm border border-gray-100">
+              <span class="text-3xl">📋</span>
+            </div>
+            <p class="text-sm font-medium">暂无任务计划</p>
+            <p class="text-xs mt-1">AI 生成计划后将显示在这里</p>
+          </div>
+        </template>
         
         <!-- Mind / Mermaid 图表 -->
-        <MermaidPanel v-else-if="rightSidebarTab === 'mind'" :charts="mermaidCharts" />
+        <template v-else-if="rightSidebarTab === 'mind'">
+          <MermaidPanel v-if="mermaidCharts.length > 0" :charts="mermaidCharts" />
+          <div v-else class="h-full flex flex-col items-center justify-center text-gray-400 opacity-60">
+            <div class="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mb-4 shadow-sm border border-gray-100">
+              <span class="text-3xl">🧠</span>
+            </div>
+            <p class="text-sm font-medium">暂无思维导图</p>
+            <p class="text-xs mt-1">AI 生成图表后将显示在这里</p>
+          </div>
+        </template>
       </div>
     </div>
 
     <!-- 工作区面板 -->
-    <div v-if="showWorkspacePanel && chatStore.conversationId" class="workspace-drawer">
-       <div class="drawer-header">
-         <h3>📁 项目文件</h3>
-         <button @click="showWorkspacePanel = false" class="drawer-close-btn">✕</button>
+    <div v-if="showWorkspacePanel && chatStore.conversationId" class="absolute top-0 bottom-0 right-0 w-[800px] bg-white/90 backdrop-blur-2xl border-l border-white/20 z-40 flex flex-col shadow-2xl animate-in slide-in-from-right duration-300">
+       <div class="h-16 flex items-center justify-between px-6 border-b border-gray-100 bg-white/50">
+         <h3 class="font-bold text-gray-800 flex items-center gap-2">
+           <span class="text-xl">📂</span> 项目文件
+         </h3>
+         <button @click="showWorkspacePanel = false" class="p-2 rounded-xl text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors">✕</button>
        </div>
-       <div class="drawer-body">
-          <div class="workspace-explorer">
+       <div class="flex-1 flex overflow-hidden">
+          <div class="w-[300px] min-w-[300px] border-r border-gray-100 bg-gray-50/50 overflow-y-auto">
              <FileExplorer 
                 :conversation-id="chatStore.conversationId"
                 @file-select="handleFilePreviewSelect"
                 @run-project="handleRunProjectFromExplorer"
              />
           </div>
-          <div v-if="previewFile" class="workspace-preview-pane">
+          <div v-if="previewFile" class="flex-1 flex flex-col bg-white overflow-hidden">
              <FilePreview
                 :conversation-id="chatStore.conversationId"
                 :file-path="previewFile.path"
                 @close="previewFile = null"
              />
           </div>
-          <div v-else class="workspace-empty-preview">
-             <div class="empty-preview-icon">📄</div>
-             <p>选择文件查看内容</p>
+          <div v-else class="flex-1 flex flex-col items-center justify-center text-gray-400 bg-white/50">
+             <div class="w-20 h-20 bg-gray-50 rounded-2xl flex items-center justify-center mb-4">
+               <span class="text-4xl opacity-50">📄</span>
+             </div>
+             <p class="text-sm font-medium">选择文件查看内容</p>
           </div>
        </div>
     </div>
 
     <!-- 附件预览模态框 -->
-    <div v-if="previewingAttachment" class="file-preview-modal" @click.self="closeAttachmentPreview">
-      <div class="preview-modal-content">
-        <div class="preview-modal-header">
-          <span class="preview-filename">{{ previewingAttachment.filename || previewingAttachment.name }}</span>
-          <button class="close-preview-btn" @click="closeAttachmentPreview">✕</button>
+    <div v-if="previewingAttachment" class="fixed inset-0 bg-gray-900/60 backdrop-blur-md z-50 flex items-center justify-center p-6 animate-in fade-in duration-300" @click.self="closeAttachmentPreview">
+      <div class="bg-white rounded-3xl shadow-2xl max-w-[90vw] max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-300 ring-1 ring-white/20">
+        <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-gray-50/50">
+          <span class="font-semibold text-gray-800 truncate max-w-md">{{ previewingAttachment.filename || previewingAttachment.name }}</span>
+          <button class="p-2 rounded-full text-gray-400 hover:bg-gray-200 hover:text-gray-900 transition-colors" @click="closeAttachmentPreview">✕</button>
         </div>
-        <div class="preview-modal-body">
+        <div class="p-8 flex items-center justify-center min-w-[400px] min-h-[300px] overflow-auto bg-gray-50/30">
           <!-- 图片预览 -->
           <img 
             v-if="isImageFile(previewingAttachment)" 
             :src="previewingAttachment.preview_url || getFilePreviewUrl(previewingAttachment)"
             :alt="previewingAttachment.filename"
-            class="preview-image"
+            class="max-w-full max-h-[75vh] object-contain rounded-xl shadow-lg border border-gray-100"
             @error="handlePreviewError"
           />
           <!-- 其他文件 -->
-          <div v-else class="preview-other">
-            <div class="file-icon-large">{{ getFileTypeIcon(previewingAttachment) }}</div>
-            <p class="file-name-large">{{ previewingAttachment.filename || previewingAttachment.name }}</p>
-            <p class="file-meta">{{ getFileTypeLabel(previewingAttachment) }} · {{ formatFileSize(previewingAttachment.file_size) }}</p>
+          <div v-else class="text-center py-12">
+            <div class="w-24 h-24 bg-gray-100 rounded-3xl flex items-center justify-center mx-auto mb-6">
+              <span class="text-6xl">{{ getFileTypeIcon(previewingAttachment) }}</span>
+            </div>
+            <p class="text-xl font-bold text-gray-900 mb-2">{{ previewingAttachment.filename || previewingAttachment.name }}</p>
+            <p class="text-sm text-gray-500 mb-8">{{ getFileTypeLabel(previewingAttachment) }} · {{ formatFileSize(previewingAttachment.file_size) }}</p>
             <a 
               :href="getFilePreviewUrl(previewingAttachment)" 
               target="_blank" 
-              class="download-btn"
+              class="inline-flex items-center justify-center px-8 py-3 bg-gray-900 text-white rounded-xl font-medium hover:bg-gray-800 transition-all shadow-lg hover:shadow-gray-900/20"
             >
               📥 下载 / 打开
             </a>
@@ -350,72 +442,77 @@
     </div>
 
     <!-- HITL 人类确认模态框 -->
-    <div v-if="showConfirmModal" class="hitl-modal-overlay" @click.self="cancelHumanConfirmation">
-      <div class="hitl-modal">
-        <div class="hitl-modal-header">
-          <span class="hitl-title">🤝 需要您的确认</span>
-          <button class="hitl-close-btn" @click="cancelHumanConfirmation">✕</button>
+    <div v-if="showConfirmModal" class="fixed inset-0 bg-gray-900/60 backdrop-blur-md z-50 flex items-center justify-center p-6 animate-in fade-in duration-300" @click.self="cancelHumanConfirmation">
+      <div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden animate-in slide-in-from-bottom-8 duration-300 ring-1 ring-white/20">
+        <div class="flex items-center justify-between px-8 py-5 border-b border-gray-100 bg-gray-50/50">
+          <span class="text-lg font-bold text-gray-900 flex items-center gap-2">
+            <span class="text-2xl">🤝</span> 需要您的确认
+          </span>
+          <button class="p-2 rounded-full text-gray-400 hover:bg-gray-200 hover:text-gray-900 transition-colors" @click="cancelHumanConfirmation">✕</button>
         </div>
         
-        <div class="hitl-modal-body">
+        <div class="p-8 space-y-6">
           <!-- 问题内容 -->
-          <div class="hitl-question">{{ confirmRequest?.question }}</div>
+          <div class="text-lg text-gray-800 font-medium leading-relaxed whitespace-pre-wrap">{{ confirmRequest?.question }}</div>
           
           <!-- 描述（如果有） -->
-          <div v-if="confirmRequest?.description" class="hitl-description">
+          <div v-if="confirmRequest?.description" class="text-sm text-gray-600 bg-blue-50 p-4 rounded-xl border border-blue-100 leading-relaxed">
             {{ confirmRequest.description }}
           </div>
           
           <!-- yes_no / single_choice 类型 -->
-          <div v-if="['yes_no', 'single_choice'].includes(confirmRequest?.confirmation_type)" class="hitl-options">
+          <div v-if="['yes_no', 'single_choice'].includes(confirmRequest?.confirmation_type)" class="flex flex-col gap-3">
             <label 
               v-for="option in confirmRequest?.options" 
               :key="option" 
-              class="hitl-option"
-              :class="{ selected: confirmResponse === option }"
+              class="flex items-center p-4 rounded-xl border-2 cursor-pointer transition-all hover:bg-gray-50"
+              :class="confirmResponse === option ? 'border-blue-500 bg-blue-50/50 ring-1 ring-blue-500/20' : 'border-gray-100'"
             >
               <input 
                 type="radio" 
                 :value="option" 
                 v-model="confirmResponse"
                 name="hitl-option"
+                class="mr-4 accent-blue-600 w-5 h-5"
               />
-              <span class="option-label">{{ option === 'confirm' ? '✅ 确认' : option === 'cancel' ? '❌ 取消' : option }}</span>
+              <span class="text-base font-medium text-gray-800">{{ option === 'confirm' ? '✅ 确认' : option === 'cancel' ? '❌ 取消' : option }}</span>
             </label>
           </div>
           
           <!-- multiple_choice 类型 -->
-          <div v-if="confirmRequest?.confirmation_type === 'multiple_choice'" class="hitl-options">
+          <div v-if="confirmRequest?.confirmation_type === 'multiple_choice'" class="flex flex-col gap-3">
             <label 
               v-for="option in confirmRequest?.options" 
               :key="option" 
-              class="hitl-option"
-              :class="{ selected: confirmResponse?.includes(option) }"
+              class="flex items-center p-4 rounded-xl border-2 cursor-pointer transition-all hover:bg-gray-50"
+              :class="confirmResponse?.includes(option) ? 'border-blue-500 bg-blue-50/50 ring-1 ring-blue-500/20' : 'border-gray-100'"
             >
               <input 
                 type="checkbox" 
                 :value="option" 
                 v-model="confirmResponse"
+                class="mr-4 accent-blue-600 w-5 h-5 rounded"
               />
-              <span class="option-label">{{ option }}</span>
+              <span class="text-base font-medium text-gray-800">{{ option }}</span>
             </label>
           </div>
           
           <!-- text_input 类型 -->
-          <div v-if="confirmRequest?.confirmation_type === 'text_input'" class="hitl-text-input">
+          <div v-if="confirmRequest?.confirmation_type === 'text_input'" class="w-full">
             <textarea 
               v-model="confirmResponse" 
               placeholder="请输入您的回复..."
-              rows="3"
+              rows="4"
+              class="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all resize-none text-gray-800"
             ></textarea>
           </div>
         </div>
         
-        <div class="hitl-modal-footer">
-          <button class="hitl-btn cancel" @click="cancelHumanConfirmation" :disabled="confirmSubmitting">
+        <div class="flex items-center justify-end gap-4 px-8 py-5 bg-gray-50/50 border-t border-gray-100">
+          <button class="px-6 py-2.5 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-200 transition-colors" @click="cancelHumanConfirmation" :disabled="confirmSubmitting">
             取消
           </button>
-          <button class="hitl-btn confirm" @click="submitHumanConfirmation" :disabled="confirmSubmitting">
+          <button class="px-6 py-2.5 rounded-xl text-sm font-medium bg-gray-900 text-white hover:bg-gray-800 transition-all shadow-lg shadow-gray-900/10 transform active:scale-95 disabled:opacity-50" @click="submitHumanConfirmation" :disabled="confirmSubmitting">
             {{ confirmSubmitting ? '提交中...' : '提交' }}
           </button>
         </div>
@@ -426,7 +523,6 @@
 </template>
 
 <script setup>
-// (Script 部分保持不变，逻辑完全通用)
 import { ref, computed, nextTick, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
@@ -1366,1317 +1462,58 @@ function formatShortTime(dateStr) {
 </script>
 
 <style scoped>
-/* --- 浅色极简主题 --- */
-.app-container {
-  display: flex;
-  height: 100vh;
-  width: 100vw;
-  background-color: #ffffff;
-  color: #1f2937;
-  font-family: 'Inter', -apple-system, sans-serif;
-  overflow: hidden;
+/* 滚动条美化 */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
 }
-
-/* --- 左侧边栏 --- */
-.left-sidebar {
-  width: 260px;
-  background-color: #f9fafb; /* 极淡灰 */
-  border-right: 1px solid #e5e7eb;
-  display: flex;
-  flex-direction: column;
-  transition: width 0.3s ease;
-  flex-shrink: 0;
-}
-
-.left-sidebar.collapsed {
-  width: 60px;
-}
-
-.sidebar-header {
-  height: 60px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 16px;
-  /* border-bottom: 1px solid #f3f4f6; 可选，让头部更一体化 */
-}
-
-.logo-area {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 600;
-  font-size: 16px;
-  color: #111827;
-}
-
-.icon-btn {
-  background: none;
-  border: none;
-  color: #6b7280;
-  cursor: pointer;
-  padding: 6px;
-  border-radius: 4px;
-  transition: background 0.2s;
-}
-
-.icon-btn:hover {
-  background: #e5e7eb;
-  color: #111827;
-}
-
-.sidebar-content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  padding: 16px;
-  overflow-y: auto;
-}
-
-.action-buttons {
-  margin-bottom: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.new-chat-btn {
-  width: 100%;
-  padding: 10px;
-  background: #ffffff;
-  color: #374151;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  font-weight: 500;
-  font-size: 14px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-  transition: all 0.2s;
-}
-
-.new-chat-btn:hover {
-  background: #f3f4f6;
-  border-color: #d1d5db;
-}
-
-.nav-buttons {
-  display: flex;
-  gap: 8px;
-}
-
-.nav-btn {
-  flex: 1;
-  padding: 8px;
+.scrollbar-thin::-webkit-scrollbar-track {
   background: transparent;
-  color: #4b5563;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  text-align: center;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  font-size: 13px;
-  transition: all 0.2s;
 }
-
-.nav-btn:hover {
-  background: #e5e7eb;
-  color: #111827;
-}
-
-.section-header {
-  font-size: 12px;
-  color: #9ca3af;
-  margin: 24px 0 8px 0;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.conversation-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.conversation-item {
-  padding: 8px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background 0.2s;
-  color: #4b5563;
-  font-size: 14px;
-}
-
-.conversation-item:hover {
-  background: #e5e7eb;
-  color: #111827;
-}
-
-.conversation-item.active {
-  background: #e5e7eb;
-  color: #111827;
-  font-weight: 500;
-}
-
-.conv-title {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  margin-bottom: 2px;
-}
-
-.conv-meta {
-  display: flex;
-  justify-content: space-between;
-  font-size: 12px;
-  color: #9ca3af;
-}
-
-.delete-icon {
-  background: none;
-  border: none;
-  opacity: 0;
-  cursor: pointer;
-  font-size: 12px;
-}
-
-.conversation-item:hover .delete-icon {
-  opacity: 1;
-}
-
-.user-profile {
-  margin-top: auto;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding-top: 16px;
-  border-top: 1px solid #e5e7eb;
-}
-
-.avatar {
-  width: 28px;
-  height: 28px;
-  background: #e5e7eb;
-  color: #4b5563;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.user-name {
-  font-size: 13px;
-  font-weight: 500;
-  color: #374151;
-}
-
-/* --- 中间主区域 --- */
-.main-column {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  position: relative;
-  background: #ffffff;
-}
-
-.top-bar {
-  height: 60px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 24px;
-  /* border-bottom: 1px solid #f3f4f6;  去掉边框更通透 */
-  background: rgba(255, 255, 255, 0.9);
-  backdrop-filter: blur(8px);
-  position: sticky;
-  top: 0;
-  z-index: 10;
-}
-
-.current-chat-info h2 {
-  font-size: 15px;
-  margin: 0;
-  color: #111827;
-  font-weight: 500;
-}
-
-.top-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.action-btn {
-  background: transparent;
-  border: none;
-  color: #6b7280;
-  padding: 6px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 16px;
-  transition: all 0.2s;
-}
-
-.action-btn:hover {
-  background: #f3f4f6;
-  color: #111827;
-}
-
-.action-btn.active {
-  color: #2563eb;
-  background: #eff6ff;
-}
-
-.chat-viewport {
-  flex: 1;
-  overflow-y: auto;
-  padding: 20px 0;
-  scroll-behavior: smooth;
-}
-
-.message-list {
-  max-width: 768px; /* 限制宽度，提升阅读体验 */
-  margin: 0 auto;
-  padding: 0 24px;
-}
-
-.message-row {
-  display: flex;
-  gap: 16px;
-  margin-bottom: 32px;
-}
-
-.message-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-  background: transparent; /* 去掉背景块 */
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-
-.message-row.assistant .message-avatar {
-  color: #2563eb;
-}
-
-.message-bubble {
-  flex: 1;
-  min-width: 0;
-}
-
-.user-content {
-  background: #f3f4f6; /* 浅灰背景 */
-  padding: 10px 16px;
-  border-radius: 12px;
-  display: inline-block;
-  color: #111827;
-  line-height: 1.6;
-  font-size: 15px;
-  max-width: 100%;
-}
-
-.user-text {
-  word-break: break-word;
-}
-
-/* 用户消息中的文件列表 */
-.message-files {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.message-file-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  background: white;
-  border-radius: 10px;
-  border: 1px solid #e5e7eb;
-}
-
-.file-type-icon {
-  font-size: 20px;
-}
-
-.file-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.file-title {
-  font-size: 14px;
-  font-weight: 500;
-  color: #111827;
-}
-
-.file-type {
-  font-size: 12px;
-  color: #6b7280;
-}
-
-.assistant-content {
-  line-height: 1.6;
-  font-size: 15px;
-  color: #374151;
-}
-
-/* 思考框 (浅色) */
-.thinking-box {
-  margin-bottom: 12px;
-  padding: 12px;
-  background: #f9fafb;
-  border-left: 3px solid #e5e7eb;
-  font-size: 13px;
-  color: #6b7280;
-  border-radius: 4px;
-  font-style: italic;
-}
-
-/* 欢迎页 */
-.welcome-screen {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  color: #4b5563;
-  margin-top: -60px; /* 视觉修正 */
-}
-
-.welcome-icon {
-  font-size: 48px;
-  margin-bottom: 24px;
-}
-
-.welcome-screen h1 {
-  font-size: 24px;
-  font-weight: 600;
-  color: #111827;
-  margin-bottom: 40px;
-}
-
-.suggestion-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-  width: 100%;
-  max-width: 700px;
-  padding: 0 20px;
-}
-
-.suggestion-card {
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  padding: 16px;
-  border-radius: 12px;
-  cursor: pointer;
-  transition: all 0.2s;
-  text-align: center;
-  color: #4b5563;
-  font-size: 14px;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-}
-
-.suggestion-card:hover {
-  border-color: #d1d5db;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-}
-
-/* 输入区域 */
-.input-area {
-  padding: 24px;
-  background: transparent;
-  pointer-events: none; /* 让点击穿透空白区域 */
-  position: sticky;
-  bottom: 0;
-}
-
-.input-box-wrapper {
-  pointer-events: auto;
-  max-width: 768px;
-  margin: 0 auto;
-  background: #ffffff;
-  border: 1px solid #e5e7eb; /* 极细边框 */
-  border-radius: 16px;
-  padding: 12px 16px;
-  transition: all 0.2s;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08); /* 柔和阴影 */
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.input-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 12px;
-  width: 100%;
-}
-
-/* 已选文件预览 */
-.selected-files {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid #f3f4f6;
-}
-
-.file-chip {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  background: #f3f4f6;
-  border-radius: 8px;
-  font-size: 13px;
-  color: #374151;
-}
-
-.file-icon {
-  font-size: 14px;
-}
-
-.file-name {
-  max-width: 150px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.remove-file {
-  background: none;
-  border: none;
-  color: #9ca3af;
-  cursor: pointer;
-  font-size: 16px;
-  padding: 0 2px;
-  line-height: 1;
-}
-
-.remove-file:hover {
-  color: #ef4444;
-}
-
-/* 文件上传按钮 */
-.attach-btn {
-  background: none;
-  border: none;
-  color: #6b7280;
-  cursor: pointer;
-  font-size: 18px;
-  padding: 6px;
-  border-radius: 6px;
-  transition: all 0.2s;
-  flex-shrink: 0;
-}
-
-.attach-btn:hover {
-  background: #f3f4f6;
-  color: #111827;
-}
-
-.attach-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.uploading-icon {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-.input-box-wrapper:focus-within {
-  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.12);
-  border-color: #d1d5db;
-}
-
-textarea {
-  flex: 1;
-  background: transparent;
-  border: none;
-  color: #111827;
-  font-size: 16px;
-  resize: none;
-  outline: none;
-  max-height: 200px;
-  line-height: 1.5;
-  padding: 4px 0;
-}
-
-textarea::placeholder {
-  color: #9ca3af;
-}
-
-.input-actions {
-  padding-bottom: 2px;
-}
-
-.send-btn {
-  background: #111827; /* 黑色按钮 */
-  color: white;
-  border: none;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%; /* 圆形按钮 */
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: opacity 0.2s;
-  font-size: 16px;
-}
-
-.send-btn:disabled {
-  background: #e5e7eb;
-  color: #9ca3af;
-  cursor: default;
-}
-
-.stop-btn {
-  background: #ef4444;
-  border-radius: 16px; /* 停止按钮圆角矩形 */
-  width: auto;
-  padding: 0 16px;
-  font-size: 14px;
-  font-weight: 500;
-}
-
-/* --- 右侧边栏 --- */
-.right-sidebar {
-  width: 340px;
-  background-color: #ffffff;
-  border-left: 1px solid #e5e7eb;
-  display: flex;
-  flex-direction: column;
-}
-
-.right-sidebar .sidebar-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  border-bottom: 1px solid #f3f4f6;
-}
-
-.sidebar-tabs {
-  display: flex;
-  gap: 4px;
-}
-
-.tab-btn {
-  padding: 6px 12px;
-  border: none;
-  background: transparent;
-  color: #6b7280;
-  font-size: 13px;
-  font-weight: 500;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.tab-btn:hover {
-  background: #f3f4f6;
-  color: #374151;
-}
-
-.tab-btn.active {
-  background: #fef3c7;
-  color: #92400e;
-}
-
-.tab-btn .badge {
-  background: #fbbf24;
-  color: #78350f;
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 10px;
-  font-weight: 600;
-}
-
-.right-content {
-  flex: 1;
-  padding: 16px;
-  overflow-y: auto;
-  background: #f9fafb;
-}
-
-/* --- 工作区悬浮面板（暗色主题） --- */
-.workspace-drawer {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  right: 0;
-  width: 700px;
-  background: #0f0f1a;
-  border-left: 1px solid #2d2d44;
-  z-index: 20;
-  display: flex;
-  flex-direction: column;
-  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.4);
-}
-
-.drawer-header {
-  height: 56px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 20px;
-  background: linear-gradient(135deg, #1a1a2e 0%, #13131f 100%);
-  border-bottom: 1px solid #2d2d44;
-}
-
-.drawer-header h3 {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 600;
-  color: #e5e5e5;
-  letter-spacing: 0.3px;
-}
-
-.drawer-close-btn {
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  color: #a0a0b0;
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.drawer-close-btn:hover {
-  background: rgba(239, 68, 68, 0.15);
-  border-color: rgba(239, 68, 68, 0.3);
-  color: #ef4444;
-}
-
-.drawer-body {
-  flex: 1;
-  display: flex;
-  overflow: hidden;
-}
-
-.workspace-explorer {
-  width: 280px;
-  min-width: 280px;
-  border-right: 1px solid #2d2d44;
-  overflow: hidden;
-  background: #13131f;
-}
-
-.workspace-preview-pane {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  background: #0f0f1a;
-  overflow: hidden;
-}
-
-.workspace-empty-preview {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  color: #666;
-  text-align: center;
-  background: #0f0f1a;
-}
-
-.empty-preview-icon {
-  font-size: 48px;
-  margin-bottom: 12px;
-  opacity: 0.5;
-}
-
-.workspace-empty-preview p {
-  margin: 0;
-  font-size: 14px;
-  color: #666;
-}
-
-/* 推荐问题 */
-.rec-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 12px;
-}
-.rec-chip {
-  padding: 6px 12px;
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  color: #4b5563;
-  border-radius: 16px;
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.2s;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: rgba(156, 163, 175, 0.3);
+  border-radius: 3px;
 }
-.rec-chip:hover {
-  border-color: #d1d5db;
-  background: #f9fafb;
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(156, 163, 175, 0.5);
 }
 
-/* Loading Dots */
+/* Loading Dots 动画 */
 .typing-dots span {
   animation: blink 1.4s infinite both;
-  margin: 0 2px;
-  font-size: 20px;
-  color: #9ca3af;
 }
 .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
 .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+
 @keyframes blink {
   0% { opacity: 0.2; }
   20% { opacity: 1; }
   100% { opacity: 0.2; }
 }
 
-@media (max-width: 1024px) {
-  .right-sidebar {
-    position: absolute;
-    right: 0;
-    top: 0;
-    bottom: 0;
-    z-index: 30;
-    box-shadow: -4px 0 24px rgba(0,0,0,0.15);
-  }
+@keyframes blob {
+  0% { transform: translate(0px, 0px) scale(1); }
+  33% { transform: translate(30px, -50px) scale(1.1); }
+  66% { transform: translate(-20px, 20px) scale(0.9); }
+  100% { transform: translate(0px, 0px) scale(1); }
 }
-
-/* ==================== 重连 Modal 样式 ==================== */
-.reconnect-modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  backdrop-filter: blur(4px);
-}
-
-.reconnect-modal {
-  background: white;
-  border-radius: 16px;
-  width: 90%;
-  max-width: 420px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
-  animation: modalSlideIn 0.3s ease;
-}
-
-@keyframes modalSlideIn {
-  from {
-    opacity: 0;
-    transform: translateY(-20px) scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-.reconnect-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 20px 24px;
-  border-bottom: 1px solid #f3f4f6;
-}
-
-.reconnect-icon {
-  font-size: 24px;
-}
-
-.reconnect-header h3 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-  color: #111827;
-}
-
-.reconnect-body {
-  padding: 20px 24px;
-}
-
-.reconnect-body p {
-  margin: 0 0 16px;
-  color: #6b7280;
-  font-size: 14px;
-}
-
-.session-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.session-item {
-  padding: 12px 16px;
-  background: #f9fafb;
-  border-radius: 10px;
-  cursor: pointer;
-  transition: all 0.2s;
-  border: 1px solid transparent;
-}
-
-.session-item:hover {
-  background: #f3f4f6;
-  border-color: #6366f1;
-}
-
-.session-info {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.session-status {
-  padding: 2px 8px;
-  border-radius: 10px;
-  font-size: 11px;
-  font-weight: 500;
-}
-
-.session-status.running {
-  background: #dcfce7;
-  color: #16a34a;
-}
-
-.session-preview {
-  color: #374151;
-  font-size: 13px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-}
-
-.session-progress {
-  margin-top: 8px;
-  height: 4px;
-  background: #e5e7eb;
-  border-radius: 2px;
-  overflow: hidden;
-}
-
-.progress-bar {
-  height: 100%;
-  background: linear-gradient(90deg, #6366f1, #8b5cf6);
-  border-radius: 2px;
-  transition: width 0.3s;
-}
-
-.reconnect-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  padding: 16px 24px;
-  border-top: 1px solid #f3f4f6;
-}
-
-.btn-secondary {
-  padding: 8px 16px;
-  background: #f3f4f6;
-  color: #374151;
-  border: none;
-  border-radius: 8px;
-  font-size: 14px;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.btn-secondary:hover {
-  background: #e5e7eb;
-}
-
-.btn-primary {
-  padding: 8px 20px;
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
-  color: white;
-  border: none;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s;
-}
-
-.btn-primary:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
-}
-
-/* ==================== 文件预览模态框 ==================== */
-.file-preview-modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.7);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 2000;
-  backdrop-filter: blur(4px);
-}
-
-.preview-modal-content {
-  background: white;
-  border-radius: 16px;
-  max-width: 90vw;
-  max-height: 90vh;
-  overflow: hidden;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-  animation: modalFadeIn 0.2s ease;
-}
-
-@keyframes modalFadeIn {
-  from {
-    opacity: 0;
-    transform: scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-.preview-modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 20px;
-  border-bottom: 1px solid #e5e7eb;
-  background: #f9fafb;
-}
-
-.preview-filename {
-  font-weight: 500;
-  color: #111827;
-  max-width: 400px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.close-preview-btn {
-  background: none;
-  border: none;
-  font-size: 20px;
-  color: #6b7280;
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 4px;
-  transition: all 0.2s;
-}
-
-.close-preview-btn:hover {
-  background: #e5e7eb;
-  color: #111827;
-}
-
-.preview-modal-body {
-  padding: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 300px;
-  min-height: 200px;
-}
-
-.preview-image {
-  max-width: 80vw;
-  max-height: 75vh;
-  object-fit: contain;
-  border-radius: 8px;
-}
-
-.preview-other {
-  text-align: center;
-  padding: 40px;
-}
-
-.file-icon-large {
-  font-size: 64px;
-  margin-bottom: 16px;
+.animate-blob {
+  animation: blob 15s infinite;
 }
-
-.file-name-large {
-  font-size: 18px;
-  font-weight: 500;
-  color: #111827;
-  margin-bottom: 8px;
-}
-
-.file-meta {
-  font-size: 14px;
-  color: #6b7280;
-  margin-bottom: 24px;
-}
-
-.download-btn {
-  display: inline-block;
-  padding: 10px 24px;
-  background: #111827;
-  color: white;
-  border-radius: 8px;
-  text-decoration: none;
-  font-size: 14px;
-  transition: all 0.2s;
-}
-
-.download-btn:hover {
-  background: #374151;
-  transform: translateY(-1px);
-}
-
-/* 文件卡片可点击样式 */
-.message-file-item.clickable {
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.message-file-item.clickable:hover {
-  background: #f3f4f6;
-  transform: translateX(2px);
-}
-
-.preview-hint {
-  margin-left: auto;
-  opacity: 0;
-  transition: opacity 0.2s;
-  font-size: 14px;
-}
-
-.message-file-item.clickable:hover .preview-hint {
-  opacity: 1;
-}
-
-.preview-error {
-  text-align: center;
-  padding: 40px;
-  color: #374151;
-}
-
-.preview-error p {
-  margin: 8px 0;
-}
-
-/* ==================== HITL 人类确认模态框 ==================== */
-.hitl-modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  backdrop-filter: blur(4px);
-}
-
-.hitl-modal {
-  background: white;
-  border-radius: 16px;
-  width: 90%;
-  max-width: 480px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
-  animation: hitlModalSlideIn 0.3s ease;
-}
-
-@keyframes hitlModalSlideIn {
-  from {
-    opacity: 0;
-    transform: translateY(-20px) scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-.hitl-modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 20px 24px;
-  border-bottom: 1px solid #e5e7eb;
-}
-
-.hitl-title {
-  font-size: 18px;
-  font-weight: 600;
-  color: #111827;
-}
-
-.hitl-close-btn {
-  background: none;
-  border: none;
-  font-size: 20px;
-  color: #6b7280;
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 4px;
-  transition: all 0.2s;
-}
-
-.hitl-close-btn:hover {
-  background: #e5e7eb;
-  color: #111827;
-}
-
-.hitl-modal-body {
-  padding: 24px;
-}
-
-.hitl-question {
-  font-size: 16px;
-  color: #111827;
-  line-height: 1.6;
-  margin-bottom: 16px;
-  white-space: pre-wrap;
-}
-
-.hitl-description {
-  font-size: 14px;
-  color: #6b7280;
-  margin-bottom: 20px;
-  padding: 12px;
-  background: #f9fafb;
-  border-radius: 8px;
-}
-
-.hitl-options {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.hitl-option {
-  display: flex;
-  align-items: center;
-  padding: 14px 16px;
-  background: #f9fafb;
-  border: 2px solid transparent;
-  border-radius: 10px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.hitl-option:hover {
-  background: #f3f4f6;
-  border-color: #d1d5db;
-}
-
-.hitl-option.selected {
-  background: #eff6ff;
-  border-color: #3b82f6;
-}
-
-.hitl-option input {
-  margin-right: 12px;
-  accent-color: #3b82f6;
-}
-
-.option-label {
-  font-size: 15px;
-  color: #111827;
-}
-
-.hitl-text-input textarea {
-  width: 100%;
-  padding: 12px;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-  font-size: 15px;
-  resize: vertical;
-  font-family: inherit;
-}
-
-.hitl-text-input textarea:focus {
-  outline: none;
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-}
-
-.hitl-modal-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  padding: 16px 24px;
-  border-top: 1px solid #e5e7eb;
-  background: #f9fafb;
-  border-radius: 0 0 16px 16px;
-}
-
-.hitl-btn {
-  padding: 10px 24px;
-  border: none;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.hitl-btn.cancel {
-  background: #e5e7eb;
-  color: #374151;
-}
-
-.hitl-btn.cancel:hover {
-  background: #d1d5db;
+.animation-delay-2000 {
+  animation-delay: 2s;
 }
-
-.hitl-btn.confirm {
-  background: #3b82f6;
-  color: white;
+.animation-delay-4000 {
+  animation-delay: 4s;
 }
 
-.hitl-btn.confirm:hover {
-  background: #2563eb;
+/* 消息内容中的 Markdown 样式修正 */
+:deep(.prose) {
+  max-width: none;
 }
-
-.hitl-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+:deep(.prose pre) {
+  background-color: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
 }
 </style>

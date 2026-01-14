@@ -927,16 +927,22 @@ class KnowledgeService:
             user_id: 用户ID
             
         Returns:
-            UserKnowledgeStats
-            
-        Raises:
-            UserNotFoundError: 用户不存在
+            UserKnowledgeStats（用户不存在时返回空的统计数据）
         """
         logger.info(f"📊 查询用户统计: user_id={user_id}")
         
+        # 用户不存在时返回空的统计数据（与 list_user_documents 行为一致）
         user = self.knowledge_store.get_user(user_id)
         if not user:
-            raise UserNotFoundError(f"用户不存在: user_id={user_id}")
+            logger.info(f"📊 用户 {user_id} 暂无记录，返回空统计")
+            return UserKnowledgeStats(
+                user_id=user_id,
+                total_documents=0,
+                ready_documents=0,
+                processing_documents=0,
+                failed_documents=0,
+                total_size=0
+            )
         
         documents = self.knowledge_store.get_user_documents(user_id)
         

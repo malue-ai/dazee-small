@@ -32,6 +32,7 @@ import anthropic
 import httpx
 
 from logger import get_logger
+from utils.message_utils import messages_to_dict_list
 from .base import (
     BaseLLMService,
     LLMConfig,
@@ -128,6 +129,14 @@ class ClaudeLLMService(BaseLLMService):
         # 🆕 V5.0: 使用配置中的超时和重试设置
         timeout = getattr(config, 'timeout', 120.0)
         max_retries = getattr(config, 'max_retries', 3)
+        
+        # 🔍 DEBUG: 打印 API Key 信息（仅显示前8位和后4位）
+        api_key = config.api_key or ""
+        if api_key:
+            masked_key = f"{api_key[:8]}...{api_key[-4:]}" if len(api_key) > 12 else "***"
+            logger.info(f"🔑 Claude API Key: {masked_key} (长度: {len(api_key)})")
+        else:
+            logger.warning("⚠️ Claude API Key 为空！")
         
         # 异步客户端（增加 timeout 和重试配置）
         # 注意：对于流式响应，timeout 是首个响应的超时，不是整体超时
@@ -489,10 +498,6 @@ class ClaudeLLMService(BaseLLMService):
         
         return configured
     
-    def _format_messages(self, messages: List[Message]) -> List[Dict[str, Any]]:
-        """格式化消息为 Claude API 格式"""
-        return [{"role": msg.role, "content": msg.content} for msg in messages]
-    
     def _format_tools(self, tools: List[Union[ToolType, str, Dict]]) -> List[Dict[str, Any]]:
         """
         格式化工具列表
@@ -594,7 +599,7 @@ class ClaudeLLMService(BaseLLMService):
             response = await llm.create_message_async(messages, system=system_blocks)
         """
         # 构建请求参数（支持 kwargs 覆盖）
-        formatted_messages = self._format_messages(messages)
+        formatted_messages = messages_to_dict_list(messages)
         request_params = {
             "model": self.config.model,
             "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
@@ -713,7 +718,7 @@ class ClaudeLLMService(BaseLLMService):
             LLMResponse 片段
         """
         # 构建请求参数（支持 kwargs 覆盖）
-        formatted_messages = self._format_messages(messages)
+        formatted_messages = messages_to_dict_list(messages)
         request_params = {
             "model": self.config.model,
             "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
@@ -1573,7 +1578,7 @@ class ClaudeLLMService(BaseLLMService):
                 ]
             )
         """
-        formatted_messages = self._format_messages(messages)
+        formatted_messages = messages_to_dict_list(messages)
         
         request_params = {
             "model": self.config.model,

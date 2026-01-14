@@ -159,11 +159,14 @@
       <title>系统构建两步天条</title>
     <content>构建系统配置必须执行固定两步流程：
       1. text2flowchart 生成流程图 → 返回 chart_url
-      2. api_calling 调用 Coze 工作流 → 返回 ontology_json_url
+      2. api_calling 调用 Coze 工作流：
+         - url: `https://api.coze.cn/v1/workflow/stream_run`
+         - workflow_id: `7579565547005837331`
+         - parameters: {chart_url, query, language}
+         - stream: true  ⚠️ 必须！禁止使用 poll_for_result
+         → 返回 ontology_json_url
       
-      【同时遵守】多轮资源生成强制调用天条：每次构建系统都必须真实执行两步工具调用。
-      
-      详见工具目录章节和 ontology-builder Skill 文档。</content>
+      【同时遵守】多轮资源生成强制调用天条：每次构建系统都必须真实执行两步工具调用。</content>
 </rule>
 <rule id="large_input_tool_call_handling" priority="highest">
   <title>大文本输入工具的特殊处理天条</title>
@@ -2062,7 +2065,7 @@ ELSE IF (task_complexity == 'complex'):
 | 获取网页全文内容 | exa_contents | - | 解析用户指定的或主动搜索发现的有价值的 URL 地址 |
 | 处理通用多模态文档 | pdf2markdown | - | 用于下一步工具/大模型分析处理。特别是表格格式 |
 | 梳理业务逻辑/关系 | text2flowchart | - | 将非结构化文本转换为结构化的流程图代码，返回url文件地址 |
-| 构建系统/模型 | text2flowchart → api_calling (Coze) | - | 固定两步流程：1.text2flowchart生成流程图 2.api_calling调用Coze工作流返回ontology_json_url。预计耗时5-10分钟 |
+| 构建系统/模型 | text2flowchart → api_calling (Coze) | - | 固定两步：1.text2flowchart 2.api_calling调用`https://api.coze.cn/v1/workflow/stream_run`(workflow_id=7579565547005837331, stream=true)。耗时5-10分钟 |
 | 生成PPT演示文稿 | ppt_create | - | 专用工具，严格遵循API文档 |
 | 生成Word/Excel文档 | text2document | - | 将Markdown转换为Word或CSV转换为Excel |
 | 文生图（根据文本生成图片） |nano-banana-omni  | - | 根据文本描述生成图片 |
@@ -2277,9 +2280,11 @@ ELSE IF (task_complexity == 'complex'):
 3. 构建卡片：使用 Coze 返回的 ontology_json_url
 
 **Coze 工作流参数**：
-- url: `https://api.coze.cn/v1/workflow/run`
+- url: `https://api.coze.cn/v1/workflow/stream_run`（流式端点）
 - workflow_id: `7579565547005837331`
 - parameters: `{chart_url, query, language}`
+- stream: `true`（必须启用流式模式）
+- ⚠️ **禁止使用 poll_for_result 和 poll_config**（那是传统异步任务用的，Coze SSE 流不适用）
 
 **遵守通用规则**：执行过程遵守"URL输出诚信铁律"和"系统构建两步天条"
 

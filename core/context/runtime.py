@@ -84,14 +84,42 @@ class BlockState:
 
 
 @dataclass
+class BlockContext:
+    """
+    单个 block 的累积上下文
+    
+    支持并行累积多个 block（基于 index）
+    """
+    block_type: str
+    index: int
+    content: str = ""  # text/thinking 内容
+    tool_use: Optional[Dict[str, Any]] = None  # tool_use 数据
+    tool_input_buffer: str = ""  # 工具输入 JSON 缓冲
+    tool_result: Optional[Dict[str, Any]] = None  # tool_result 数据
+    tool_result_buffer: str = ""  # tool_result 内容缓冲
+    is_complete: bool = False  # 是否已完成（收到 content_stop）
+    
+    def try_parse_tool_input(self) -> None:
+        """尝试解析累积的工具输入 JSON"""
+        if not self.tool_input_buffer or not self.tool_use:
+            return
+        
+        try:
+            self.tool_use["input"] = json.loads(self.tool_input_buffer)
+            self.tool_input_buffer = ""
+        except json.JSONDecodeError:
+            pass  # JSON 不完整，继续累积
+
+
+@dataclass
 class ContentAccumulator:
     """
     Content 累积器 - 将流式事件累积成 content_blocks 数组
     
-    核心设计：
-    - 每次 content_stop 时立即将 block 保存到 all_blocks
-    - 保证 blocks 按照实际事件顺序排列
-    - 支持断点恢复（每个 block 完成就保存）
+    基于 index 的并行累积：
+    - 每个 index 对应一个独立的 BlockContext
+    - 多个工具可以并行累积，互不干扰
+    - content_stop 时根据 index 处理对应的 block
     
     输出格式（Claude API 标准）：
     [
@@ -105,71 +133,56 @@ class ContentAccumulator:
     使用示例：
         accumulator = ContentAccumulator()
         
-        # 处理事件（顺序自动保持正确）
-        accumulator.on_content_start({"type": "thinking"})
-        accumulator.on_content_delta({"type": "thinking_delta", "thinking": "让我思考..."})
-        accumulator.on_content_stop()  # ← 立即保存到 all_blocks
+        # 并行处理多个 block
+        accumulator.on_content_start({"type": "tool_use", "id": "t1", "name": "bash"}, index=0)
+        accumulator.on_content_start({"type": "tool_use", "id": "t2", "name": "write_file"}, index=1)
+        accumulator.on_content_delta('{"command": "ls"}', index=0)
+        accumulator.on_content_delta('{"path": "/app"}', index=1)
+        accumulator.on_content_stop(index=0)  # 保存第一个工具
+        accumulator.on_content_stop(index=1)  # 保存第二个工具
         
-        # 获取完整内容（用于数据库）
+        # 获取完整内容
         all_content = accumulator.build_for_db()
     """
     
-    # === 所有已完成的 blocks（按顺序）===
+    # === 所有已完成的 blocks（按 index 顺序）===
     all_blocks: List[Dict[str, Any]] = field(default_factory=list)
     
-    # === 当前正在处理的 block 状态 ===
-    _current_block_type: Optional[str] = None           # 当前 block 类型
-    _current_thinking: str = ""                         # 当前 thinking 内容
-    _current_text: str = ""                             # 当前 text 内容
-    _current_tool_use: Optional[Dict[str, Any]] = None  # 当前 tool_use
-    _tool_input_buffer: str = ""                        # 工具输入 JSON 缓冲
-    _current_tool_result: Optional[Dict[str, Any]] = None  # 当前 tool_result（支持流式）
-    _tool_result_content_buffer: str = ""               # tool_result 内容缓冲（流式累积）
-    
-    # === 向后兼容（保留旧字段名，但不再使用）===
-    current_thinking: Optional[Dict[str, Any]] = None
-    current_text: str = ""
-    current_blocks: List[Dict[str, Any]] = field(default_factory=list)
+    # === 基于 index 的并行累积 ===
+    _active_blocks: Dict[int, BlockContext] = field(default_factory=dict)
     
     # === Metadata 累积（用于 message_delta）===
     _metadata: Dict[str, Any] = field(default_factory=dict)
     
     # ==================== 事件处理方法 ====================
     
-    def on_content_start(self, content_block: Dict[str, Any]) -> None:
+    def on_content_start(self, content_block: Dict[str, Any], index: int) -> None:
         """
         处理 content_start 事件
         
-        开始一个新的 content block，记录类型并初始化状态
-        
         Args:
             content_block: {"type": "thinking|text|tool_use|tool_result", ...}
+            index: block 索引（必需）
         """
         block_type = content_block.get("type")
-        self._current_block_type = block_type
+        ctx = BlockContext(block_type=block_type, index=index)
         
         if block_type == "thinking":
-            # thinking 通过 delta 累积
-            self._current_thinking = ""
+            ctx.content = ""
         
         elif block_type == "text":
-            # text 通过 delta 累积
-            self._current_text = ""
+            ctx.content = ""
         
-        elif block_type == "tool_use":
-            # tool_use 需要等待 input_json_delta 累积完成
-            self._current_tool_use = {
-                "type": "tool_use",
+        elif block_type in ("tool_use", "server_tool_use"):
+            ctx.tool_use = {
+                "type": block_type,
                 "id": content_block.get("id", ""),
                 "name": content_block.get("name", ""),
                 "input": content_block.get("input", {})
             }
-            self._tool_input_buffer = ""
+            ctx.tool_input_buffer = ""
         
         elif block_type == "tool_result":
-            # tool_result 支持两种模式：
-            # 1. 完整模式：content 有值，直接保存
-            # 2. 流式模式：content 为空，通过 delta 累积
             initial_content = content_block.get("content", "")
             if initial_content:
                 # 完整模式：直接保存到 all_blocks
@@ -177,131 +190,125 @@ class ContentAccumulator:
                     "type": "tool_result",
                     "tool_use_id": content_block.get("tool_use_id", ""),
                     "content": initial_content,
-                    "is_error": content_block.get("is_error", False)
+                    "is_error": content_block.get("is_error", False),
+                    "index": index
                 })
+                ctx.is_complete = True  # 标记已完成，不需要再处理 stop
             else:
-                # 流式模式：初始化累积状态，等待 delta 和 stop
-                self._current_tool_result = {
+                # 流式模式
+                ctx.tool_result = {
                     "type": "tool_result",
                     "tool_use_id": content_block.get("tool_use_id", ""),
                     "is_error": content_block.get("is_error", False)
                 }
-                self._tool_result_content_buffer = ""
-        
-        elif block_type == "server_tool_use":
-            # 服务端工具调用（web_search 等）
-            self._current_tool_use = {
-                "type": "server_tool_use",
-                "id": content_block.get("id", ""),
-                "name": content_block.get("name", ""),
-                "input": content_block.get("input", {})
-            }
+                ctx.tool_result_buffer = ""
         
         elif block_type and block_type.endswith("_tool_result"):
             # 服务端工具结果，直接保存
             self.all_blocks.append({
                 "type": block_type,
                 "tool_use_id": content_block.get("tool_use_id", ""),
-                "content": content_block.get("content", [])
+                "content": content_block.get("content", []),
+                "index": index
             })
+            ctx.is_complete = True
+        
+        self._active_blocks[index] = ctx
     
-    def on_content_delta(self, delta: str) -> None:
+    def on_content_delta(self, delta: str, index: int) -> None:
         """
         处理 content_delta 事件
         
-        累积流式内容到当前 block
-        
-        简化格式：delta 直接是字符串，类型由 _current_block_type 决定
-        - text block: delta = "我"
-        - thinking block: delta = "Let me think..."
-        - tool_use block: delta = '{"code": "print('
-        - tool_result block: delta = '{"success": true...'（流式模式）
-        
         Args:
             delta: 字符串（增量内容）
+            index: block 索引（必需）
         """
-        if self._current_block_type == "text":
-            self._current_text += delta
-        elif self._current_block_type == "thinking":
-            self._current_thinking += delta
-        elif self._current_block_type in ("tool_use", "server_tool_use"):
-            self._tool_input_buffer += delta
-            self._try_parse_tool_input()
-        elif self._current_block_type == "tool_result":
-            # 流式模式：累积 tool_result 内容
-            self._tool_result_content_buffer += delta
+        ctx = self._active_blocks.get(index)
+        if not ctx or ctx.is_complete:
+            return
+        
+        if ctx.block_type == "text":
+            ctx.content += delta
+        elif ctx.block_type == "thinking":
+            ctx.content += delta
+        elif ctx.block_type in ("tool_use", "server_tool_use"):
+            ctx.tool_input_buffer += delta
+            ctx.try_parse_tool_input()
+        elif ctx.block_type == "tool_result":
+            ctx.tool_result_buffer += delta
     
-    def on_content_stop(self, signature: Optional[str] = None) -> None:
+    def on_content_stop(self, index: int, signature: Optional[str] = None) -> None:
         """
         处理 content_stop 事件
         
-        核心逻辑：立即将当前 block 保存到 all_blocks
-        这样可以保证 blocks 的顺序与实际事件顺序一致
-        
         Args:
+            index: block 索引（必需）
             signature: thinking 的签名（如果有）
         """
-        if self._current_block_type == "thinking":
-            # 保存 thinking block
-            if self._current_thinking:
-                block = {"type": "thinking", "thinking": self._current_thinking}
+        ctx = self._active_blocks.get(index)
+        if not ctx or ctx.is_complete:
+            return
+        
+        block = None
+        
+        if ctx.block_type == "thinking":
+            if ctx.content:
+                block = {"type": "thinking", "thinking": ctx.content, "index": index}
                 if signature:
                     block["signature"] = signature
-                self.all_blocks.append(block)
-            self._current_thinking = ""
         
-        elif self._current_block_type == "text":
-            # 保存 text block
-            if self._current_text:
-                self.all_blocks.append({"type": "text", "text": self._current_text})
-            self._current_text = ""
+        elif ctx.block_type == "text":
+            if ctx.content:
+                block = {"type": "text", "text": ctx.content, "index": index}
         
-        elif self._current_block_type in ("tool_use", "server_tool_use"):
-            # 保存 tool_use block
-            if self._current_tool_use:
-                self.all_blocks.append(self._current_tool_use)
-            self._current_tool_use = None
+        elif ctx.block_type in ("tool_use", "server_tool_use"):
+            if ctx.tool_use:
+                block = {**ctx.tool_use, "index": index}
         
-        elif self._current_block_type == "tool_result":
-            # 流式模式：保存累积的 tool_result
-            if self._current_tool_result:
-                self._current_tool_result["content"] = self._tool_result_content_buffer
-                self.all_blocks.append(self._current_tool_result)
-                self._current_tool_result = None
-                self._tool_result_content_buffer = ""
+        elif ctx.block_type == "tool_result":
+            if ctx.tool_result:
+                ctx.tool_result["content"] = ctx.tool_result_buffer
+                block = {**ctx.tool_result, "index": index}
         
-        # 注意：完整模式的 tool_result 和 *_tool_result 已在 on_content_start 时保存
+        if block:
+            self.all_blocks.append(block)
         
-        # 重置当前 block 类型
-        self._current_block_type = None
+        ctx.is_complete = True
+        # 清理已完成的 block
+        del self._active_blocks[index]
     
     # ==================== 轮次管理方法 ====================
     
     def finish_turn(self) -> List[Dict[str, Any]]:
         """
-        完成当前轮（向后兼容，新设计中可能不需要调用）
-        
-        由于每个 block 在 content_stop 时已保存到 all_blocks，
-        这个方法现在只是确保任何未完成的内容被保存
+        完成当前轮，处理所有未完成的并行 blocks
         
         Returns:
-            all_blocks 的拷贝
+            all_blocks 的拷贝（按 index 排序）
         """
-        # 如果有未完成的内容，强制保存
-        if self._current_thinking:
-            self.all_blocks.append({"type": "thinking", "thinking": self._current_thinking})
-            self._current_thinking = ""
+        # 完成所有并行 blocks
+        for index, ctx in list(self._active_blocks.items()):
+            if ctx.is_complete:
+                continue
+            
+            block = None
+            if ctx.block_type == "thinking" and ctx.content:
+                block = {"type": "thinking", "thinking": ctx.content, "index": index}
+            elif ctx.block_type == "text" and ctx.content:
+                block = {"type": "text", "text": ctx.content, "index": index}
+            elif ctx.block_type in ("tool_use", "server_tool_use") and ctx.tool_use:
+                block = {**ctx.tool_use, "index": index}
+            elif ctx.block_type == "tool_result" and ctx.tool_result:
+                ctx.tool_result["content"] = ctx.tool_result_buffer
+                block = {**ctx.tool_result, "index": index}
+            
+            if block:
+                self.all_blocks.append(block)
         
-        if self._current_text:
-            self.all_blocks.append({"type": "text", "text": self._current_text})
-            self._current_text = ""
+        self._active_blocks.clear()
         
-        if self._current_tool_use:
-            self.all_blocks.append(self._current_tool_use)
-            self._current_tool_use = None
-        
-        self._current_block_type = None
-        self._tool_input_buffer = ""
+        # 按 index 排序
+        self.all_blocks.sort(key=lambda b: b.get("index", float("inf")))
         
         return [b.copy() for b in self.all_blocks]
     
@@ -320,38 +327,45 @@ class ContentAccumulator:
         """
         构建用于数据库存储的完整 content
         
-        由于每个 block 在 content_stop 时已按顺序保存到 all_blocks，
-        这里直接返回 all_blocks（加上可选的 index）
-        
         Args:
             include_index: 是否包含 index 字段（默认 True）
         
         Returns:
-            完整的 content_blocks 数组，格式如：
-            [
-                {"index": 0, "type": "thinking", "thinking": "..."},
-                {"index": 1, "type": "text", "text": "..."},
-                {"index": 2, "type": "tool_use", ...},
-                {"index": 3, "type": "tool_result", ...}
-            ]
+            完整的 content_blocks 数组，按 index 排序
         """
         # 深拷贝 all_blocks
         result = [block.copy() for block in self.all_blocks]
         
-        # 如果有正在进行的内容（未收到 content_stop），也包含进去
-        if self._current_thinking:
-            result.append({"type": "thinking", "thinking": self._current_thinking})
+        # 收集正在进行的并行 blocks
+        for index, ctx in self._active_blocks.items():
+            if ctx.is_complete:
+                continue
+            
+            block = None
+            if ctx.block_type == "thinking" and ctx.content:
+                block = {"type": "thinking", "thinking": ctx.content, "index": index}
+            elif ctx.block_type == "text" and ctx.content:
+                block = {"type": "text", "text": ctx.content, "index": index}
+            elif ctx.block_type in ("tool_use", "server_tool_use") and ctx.tool_use:
+                block = {**ctx.tool_use, "index": index}
+            elif ctx.block_type == "tool_result" and ctx.tool_result:
+                ctx.tool_result["content"] = ctx.tool_result_buffer
+                block = {**ctx.tool_result, "index": index}
+            
+            if block:
+                result.append(block)
         
-        if self._current_text:
-            result.append({"type": "text", "text": self._current_text})
+        # 按 index 排序
+        result.sort(key=lambda b: b.get("index", float("inf")))
         
-        if self._current_tool_use:
-            result.append(self._current_tool_use.copy())
-        
-        # 给每个 block 加上 index
+        # 重新分配 index（确保连续）
         if include_index:
             for i, block in enumerate(result):
                 block["index"] = i
+        else:
+            # 移除 index 字段
+            for block in result:
+                block.pop("index", None)
         
         return result
     
@@ -368,21 +382,13 @@ class ContentAccumulator:
     
     def has_content(self) -> bool:
         """检查是否有任何内容"""
-        return bool(
-            self.all_blocks or 
-            self._current_thinking or 
-            self._current_text or
-            self._current_tool_use
-        )
+        return bool(self.all_blocks or self._active_blocks)
     
     def get_stats(self) -> Dict[str, Any]:
         """获取累积统计信息"""
         return {
             "total_blocks": len(self.all_blocks),
-            "current_block_type": self._current_block_type,
-            "current_thinking_length": len(self._current_thinking),
-            "current_text_length": len(self._current_text),
-            "has_pending_tool_use": self._current_tool_use is not None
+            "active_blocks": len(self._active_blocks),
         }
     
     # ==================== Metadata 方法 ====================
@@ -402,41 +408,10 @@ class ContentAccumulator:
         return self._metadata.copy()
     
     def reset(self) -> None:
-        """
-        完全重置（新的 message 开始时调用）
-        """
+        """完全重置（新的 message 开始时调用）"""
         self.all_blocks = []
-        self._current_block_type = None
-        self._current_thinking = ""
-        self._current_text = ""
-        self._current_tool_use = None
-        self._tool_input_buffer = ""
+        self._active_blocks = {}
         self._metadata = {}
-        # 向后兼容字段
-        self.current_thinking = None
-        self.current_text = ""
-        self.current_blocks = []
-    
-    # ==================== 私有方法 ====================
-    
-    def _flush_text(self) -> None:
-        """将累积的 text 保存到 all_blocks（向后兼容）"""
-        if self._current_text:
-            self.all_blocks.append({"type": "text", "text": self._current_text})
-            self._current_text = ""
-    
-    def _try_parse_tool_input(self) -> None:
-        """尝试解析累积的工具输入 JSON"""
-        if not self._tool_input_buffer:
-            return
-        
-        # 更新当前 tool_use 的 input
-        if self._current_tool_use:
-            try:
-                self._current_tool_use["input"] = json.loads(self._tool_input_buffer)
-                self._tool_input_buffer = ""
-            except json.JSONDecodeError:
-                pass  # JSON 不完整，继续累积
 
 
 # ==================== 向后兼容：保留 StreamAccumulator ====================

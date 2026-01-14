@@ -11,25 +11,29 @@ API Calling Tool - 通用 API 调用工具
 
 支持的功能:
 - 普通 HTTP 请求 (GET/POST/PUT/DELETE/PATCH)
-- SSE 流式响应（stream=true）
-- 异步任务轮询
-- 文件下载
+- SSE 流式响应（mode="stream"）
+- 异步任务轮询（mode="async_poll"）
+
+调用方式:
+1. 直接指定 URL：url="https://api.example.com/v1/xxx"
+2. 使用预配置 API：api_name="coze_api", path="/workflow/stream_run"
+   （自动注入 base_url 和认证 headers）
 
 示例:
-- slidespeak-generator skill 提供了 SlideSpeak API 的完整文档
-- LLM 读取文档后,使用 api_calling 工具调用 API
-- 无需 slidespeak_render 这样的专门工具
+- config.yaml 中配置了 apis（包含 base_url 和认证信息）
+- LLM 只需指定 api_name + path + body
+- 框架自动补全 URL 和认证头
 """
 
 import os
 import aiohttp
 import asyncio
 import json
-import logging
 from typing import Dict, Any, Optional, List, AsyncGenerator
-from pathlib import Path
 
-logger = logging.getLogger(__name__)
+from logger import get_logger
+
+logger = get_logger("api_calling")
 
 
 class APICallingTool:
@@ -37,22 +41,38 @@ class APICallingTool:
     通用 API 调用工具
     
     支持任意 HTTP API 调用,包括:
-    - RESTful API
-    - SSE 流式响应（通过 execute_stream() 流式返回）
-    - 异步轮询
-    - 文件上传/下载
-    - 认证处理
+    - RESTful API（同步模式）
+    - SSE 流式响应（mode="stream"）
+    - 异步轮询（mode="async_poll"）
+    - 认证自动注入（通过 api_name 匹配预配置）
     
     流式模式说明：
     - execute_stream(): 流式返回，每个 chunk 作为 content_delta 发送给前端
     - execute(): 非流式返回，完整结果一次性返回
+    
+    认证注入说明：
+    - 方式1：直接传 url + headers（完全控制）
+    - 方式2：传 api_name + path（自动从 apis_config 注入 base_url 和认证）
     """
     
-    def __init__(self):
-        """初始化 API 调用工具"""
+    def __init__(self, apis_config: Optional[List[Dict[str, Any]]] = None):
+        """
+        初始化 API 调用工具
+        
+        Args:
+            apis_config: 预配置的 API 列表（从 config.yaml 注入）
+                每个 API 包含: name, base_url, headers, description
+        """
         self.timeout = 600  # 默认超时 10 分钟
         self.max_polls = 150  # 异步任务最多轮询 150 次
         self.poll_interval = 2  # 轮询间隔 2 秒
+        
+        # 🆕 预配置的 APIs（用于 api_name 自动注入）
+        self.apis_config = {api["name"]: api for api in (apis_config or [])}
+        if self.apis_config:
+            logger.info(f"✅ api_calling 初始化，已加载 {len(self.apis_config)} 个 API 配置: {list(self.apis_config.keys())}")
+        else:
+            logger.warning(f"⚠️ api_calling 初始化，apis_config 为空")
     
     @property
     def name(self) -> str:
@@ -62,29 +82,26 @@ class APICallingTool:
     def description(self) -> str:
         return """通用 API 调用工具,支持任意 HTTP API 请求。
 
-支持的功能:
-1. HTTP 请求 (GET/POST/PUT/DELETE/PATCH)
-2. SSE 流式响应 (stream=true)
-3. 自定义 Headers 和认证
-4. JSON/FormData/Multipart 请求体
-5. 异步任务轮询
-6. 文件下载
+支持的模式:
+1. sync（默认）: 同步请求,等待响应后返回
+2. stream: SSE 流式响应,实时返回数据
+3. async_poll: 异步轮询,提交任务后轮询结果
 
-使用方式:
-- 配合 Skills 文档使用
-- Skills 提供 API 的完整说明和 schema
-- 本工具负责实际的 HTTP 调用
+调用方式:
+1. 直接指定 URL: url="https://api.example.com/xxx"
+2. 使用预配置 API: api_name="coze_api", path="/workflow/stream_run"
+   - 自动从配置注入 base_url 和认证 headers
+   - 无需手动填写 API Key
 
-参数:
-- url: API 端点 URL (必需)
+参数说明:
+- api_name: 预配置的 API 名称（与 url 二选一）
+- path: API 路径,与 api_name 配合使用
+- url: 完整的 API URL（与 api_name 二选一）
 - method: HTTP 方法 (默认 POST)
-- headers: 请求头字典
-- body: 请求体 (JSON 或其他格式)
-- auth: 认证配置
-- stream: 是否为 SSE 流式响应 (默认 false)
-- poll_for_result: 是否轮询异步任务结果
-- download_url_field: 响应中的下载链接字段名
-- save_dir: 文件保存目录
+- headers: 额外的请求头（会与预配置合并）
+- body: 请求体 (JSON)
+- mode: 请求模式 sync/stream/async_poll (默认 sync)
+- poll_config: 轮询配置（mode=async_poll 时使用）
 """
     
     @property
@@ -92,10 +109,21 @@ class APICallingTool:
         return {
             "type": "object",
             "properties": {
+                # ===== 方式1: 使用预配置 API（推荐）=====
+                "api_name": {
+                    "type": "string",
+                    "description": "预配置的 API 名称（如 coze_api、dify_api）,自动注入 base_url 和认证"
+                },
+                "path": {
+                    "type": "string",
+                    "description": "API 路径（与 api_name 配合使用）,例如 /workflow/stream_run"
+                },
+                # ===== 方式2: 直接指定 URL =====
                 "url": {
                     "type": "string",
-                    "description": "API 端点 URL (完整的 HTTP(S) 地址)"
+                    "description": "完整的 API URL（与 api_name 二选一）"
                 },
+                # ===== 通用参数 =====
                 "method": {
                     "type": "string",
                     "enum": ["GET", "POST", "PUT", "DELETE", "PATCH"],
@@ -103,38 +131,22 @@ class APICallingTool:
                 },
                 "headers": {
                     "type": "object",
-                    "description": "请求头字典,例如 {'Content-Type': 'application/json', 'X-API-Key': 'xxx'}"
+                    "description": "额外的请求头（会与预配置的 headers 合并）"
                 },
                 "body": {
                     "type": "object",
                     "description": "请求体 (将自动转为 JSON)"
                 },
-                "auth": {
-                    "type": "object",
-                    "description": "认证配置",
-                    "properties": {
-                        "type": {
-                            "type": "string",
-                            "enum": ["api_key", "bearer", "basic"],
-                            "description": "认证类型"
-                        },
-                        "credentials": {
-                            "type": "object",
-                            "description": "认证凭据"
-                        }
-                    }
+                # ===== 请求模式（三选一）=====
+                "mode": {
+                    "type": "string",
+                    "enum": ["sync", "stream", "async_poll"],
+                    "description": "请求模式: sync(同步,默认)、stream(SSE流式)、async_poll(异步轮询)"
                 },
-                "stream": {
-                    "type": "boolean",
-                    "description": "是否为 SSE 流式响应 (默认 false)。启用后会收集流式数据，最终返回完整结果"
-                },
-                "poll_for_result": {
-                    "type": "boolean",
-                    "description": "是否轮询异步任务结果 (默认 false)"
-                },
+                # ===== 轮询配置（mode=async_poll 时使用）=====
                 "poll_config": {
                     "type": "object",
-                    "description": "轮询配置",
+                    "description": "轮询配置（仅 mode=async_poll 时有效）",
                     "properties": {
                         "status_url_field": {
                             "type": "string",
@@ -153,106 +165,86 @@ class APICallingTool:
                             "description": "失败状态值 (默认 'FAILED')"
                         }
                     }
-                },
-                "download_url_field": {
-                    "type": "string",
-                    "description": "响应中下载链接的字段名 (如果需要下载文件)"
-                },
-                "save_dir": {
-                    "type": "string",
-                    "description": "文件保存目录 (默认 ./workspace/outputs)"
                 }
             },
-            "required": ["url"]
+            "required": []  # api_name 或 url 至少一个，在 execute 中校验
         }
     
     async def execute(
         self,
-        url: str,
+        # 方式1: 使用预配置 API
+        api_name: Optional[str] = None,
+        path: Optional[str] = None,
+        # 方式2: 直接指定 URL
+        url: Optional[str] = None,
+        # 通用参数
         method: str = "POST",
         headers: Optional[Dict[str, str]] = None,
         body: Optional[Dict[str, Any]] = None,
-        auth: Optional[Dict[str, Any]] = None,
-        stream: bool = False,
-        poll_for_result: bool = False,
+        # 请求模式
+        mode: str = "sync",  # sync / stream / async_poll
         poll_config: Optional[Dict[str, Any]] = None,
-        download_url_field: Optional[str] = None,
-        save_dir: Optional[str] = None,
-        conversation_id: Optional[str] = None,
-        session_id: Optional[str] = None,
-        **kwargs  # 接收其他注入的上下文
+        **kwargs  # 框架注入的上下文
     ) -> Dict[str, Any]:
         """
         执行 API 调用
         
         Args:
-            url: API 端点 URL
+            api_name: 预配置的 API 名称（自动注入 base_url 和认证）
+            path: API 路径（与 api_name 配合使用）
+            url: 完整的 API URL（与 api_name 二选一）
             method: HTTP 方法
-            headers: 请求头
+            headers: 额外的请求头（会与预配置合并）
             body: 请求体
-            auth: 认证配置
-            stream: 是否为 SSE 流式响应
-            poll_for_result: 是否轮询结果
-            poll_config: 轮询配置
-            download_url_field: 下载链接字段名
-            save_dir: 保存目录（可选）
-            conversation_id: 对话ID（用于计算 workspace 路径）
-            session_id: 会话ID（用于 SSE 事件转发给前端）
+            mode: 请求模式 sync/stream/async_poll
+            poll_config: 轮询配置（mode=async_poll 时使用）
             
         Returns:
             API 原始响应结果（不嵌套包装）
-            
-        注意：
-            如需流式返回，请使用 execute_stream() 方法
         """
-        # 计算正确的保存路径
-        if not save_dir and conversation_id:
-            from core.workspace_manager import get_workspace_manager
-            workspace_manager = get_workspace_manager()
-            workspace_root = workspace_manager.get_workspace_root(conversation_id)
-            save_dir = str(workspace_root / "outputs")
-        elif not save_dir:
-            save_dir = "./workspace/outputs"
-        
         try:
-            # 1. 准备请求头
-            request_headers = headers or {}
+            # 1. 解析 URL 和 Headers（支持 api_name 自动注入）
+            final_url, final_headers = self._resolve_api_config(
+                api_name=api_name,
+                path=path,
+                url=url,
+                headers=headers
+            )
             
-            # 处理认证
-            if auth:
-                request_headers = self._apply_auth(request_headers, auth)
+            # 校验 URL
+            if not final_url:
+                return {"error": "必须提供 url 或 api_name 参数"}
             
-            # 2. 发送请求
-            logger.info(f"📡 调用 API: {method} {url}")
+            # 2. 自动替换请求头中的环境变量占位符 ${VAR_NAME}
+            final_headers = self._resolve_env_vars(final_headers)
+            
+            # 3. 打印请求信息
+            logger.info(f"📡 调用 API: {method} {final_url}")
+            logger.info(f"📤 请求头: {json.dumps({k: v[:20] + '...' if len(str(v)) > 20 else v for k, v in final_headers.items()}, ensure_ascii=False)}")
             if body:
-                logger.debug(f"📤 请求体: {json.dumps(body, ensure_ascii=False)[:200]}...")
+                logger.info(f"📤 请求体: {json.dumps(body, ensure_ascii=False)[:500]}")
             
             async with aiohttp.ClientSession() as session:
-                # ==================== SSE 流式模式（非流式返回，收集后返回完整结果）====================
-                # 注意：如需流式返回，请使用 execute_stream() 方法
-                if stream:
+                # ==================== SSE 流式模式 ====================
+                if mode == "stream":
                     logger.info(f"🌊 SSE 模式（收集后返回完整结果，流式请用 execute_stream）")
                     return await self._send_sse_request(
                         session=session,
-                        url=url,
+                        url=final_url,
                         method=method,
-                        headers=request_headers,
+                        headers=final_headers,
                         body=body
                     )
                 
-                # ==================== 普通请求模式 ====================
+                # ==================== 同步/异步轮询模式 ====================
                 response_data, http_status = await self._send_request(
-                    session, url, method, request_headers, body
+                    session, final_url, method, final_headers, body
                 )
                 
                 # 检查是否有错误
                 if response_data is None:
-                    return {
-                        "error": "API 请求失败（无响应）",
-                        "http_status": http_status
-                    }
+                    return {"error": "API 请求失败（无响应）", "http_status": http_status}
                 
-                # 检查内部错误标记
                 if isinstance(response_data, dict) and response_data.get("_error"):
                     return {
                         "error": response_data.get("_message", "未知错误"),
@@ -261,195 +253,199 @@ class APICallingTool:
                 
                 logger.info(f"✅ API 响应成功")
                 
-                # 3. 异步轮询
-                if poll_for_result and poll_config:
+                # ==================== 异步轮询模式 ====================
+                if mode == "async_poll" and poll_config:
                     logger.info(f"⏳ 开始轮询任务状态...")
                     response_data = await self._poll_for_result(
-                        session, response_data, poll_config, request_headers
+                        session, response_data, poll_config, final_headers
                     )
                     
                     if response_data is None:
-                        return {
-                            "error": "任务轮询失败或超时"
-                        }
+                        return {"error": "任务轮询失败或超时"}
                 
-                # 4. 下载文件
-                if download_url_field and isinstance(response_data, dict) and download_url_field in response_data:
-                    download_url = response_data[download_url_field]
-                    logger.info(f"📥 下载文件: {download_url}")
-                    
-                    local_path = await self._download_file(
-                        session, download_url, save_dir
-                    )
-                    response_data["local_path"] = str(local_path)
-                
-                # 直接返回原始响应（不再嵌套包装）
                 return response_data
         
         except Exception as e:
             logger.error(f"API 调用异常: {e}", exc_info=True)
-            return {
-                "error": str(e)
-            }
+            return {"error": str(e)}
+    
+    def _resolve_api_config(
+        self,
+        api_name: Optional[str] = None,
+        path: Optional[str] = None,
+        url: Optional[str] = None,
+        headers: Optional[Dict[str, str]] = None
+    ) -> tuple[Optional[str], Dict[str, str]]:
+        """
+        解析 API 配置,支持自动注入
+        
+        Args:
+            api_name: 预配置的 API 名称
+            path: API 路径
+            url: 完整 URL
+            headers: 额外请求头
+            
+        Returns:
+            (final_url, final_headers)
+        """
+        final_headers = headers.copy() if headers else {}
+        
+        # 方式1: 使用预配置 API
+        if api_name:
+            logger.info(f"🔍 查找 API 配置: api_name={api_name}, apis_config 数量={len(self.apis_config)}")
+            api_config = self.apis_config.get(api_name)
+            if not api_config:
+                logger.warning(f"⚠️ 未找到预配置的 API: {api_name}，可用: {list(self.apis_config.keys())}")
+                return None, final_headers
+            
+            # 拼接 URL
+            base_url = api_config.get("base_url", "").rstrip("/")
+            path = (path or "").lstrip("/")
+            final_url = f"{base_url}/{path}" if path else base_url
+            
+            # 合并预配置的 headers（预配置优先级低于显式传入）
+            config_headers = api_config.get("headers", {})
+            merged_headers = {**config_headers, **final_headers}
+            
+            logger.info(f"🔑 使用预配置 API: {api_name} → {base_url}")
+            return final_url, merged_headers
+        
+        # 方式2: 直接使用 URL
+        return url, final_headers
     
     async def execute_stream(
         self,
-        url: str,
+        # 方式1: 使用预配置 API
+        api_name: Optional[str] = None,
+        path: Optional[str] = None,
+        # 方式2: 直接指定 URL
+        url: Optional[str] = None,
+        # 通用参数
         method: str = "POST",
         headers: Optional[Dict[str, str]] = None,
         body: Optional[Dict[str, Any]] = None,
-        auth: Optional[Dict[str, Any]] = None,
-        stream: bool = False,
-        conversation_id: Optional[str] = None,
-        **kwargs
+        # 请求模式
+        mode: str = "stream",  # 流式执行默认为 stream
+        **kwargs  # 框架注入的上下文
     ) -> AsyncGenerator[str, None]:
         """
         流式执行 API 调用
         
-        当 stream=True 时，会流式返回 SSE 事件的文本内容。
-        每个 yield 的字符串会作为 content_delta 发送给前端。
+        SSE 流式返回，每个 yield 的字符串会作为 content_delta 发送给前端。
         
         Args:
-            url: API 端点 URL
+            api_name: 预配置的 API 名称
+            path: API 路径
+            url: 完整的 API URL
             method: HTTP 方法
-            headers: 请求头
+            headers: 额外请求头
             body: 请求体
-            auth: 认证配置
-            stream: 是否为 SSE 流式响应
-            conversation_id: 对话ID
+            mode: 请求模式（流式执行时应为 stream）
             
         Yields:
             字符串片段（SSE 事件的文本内容）
         """
-        # 准备请求头
-        request_headers = headers or {}
-        if auth:
-            request_headers = self._apply_auth(request_headers, auth)
+        # 1. 解析 URL 和 Headers
+        final_url, final_headers = self._resolve_api_config(
+            api_name=api_name,
+            path=path,
+            url=url,
+            headers=headers
+        )
         
-        # SSE 流式模式
-        if stream:
-            logger.info(f"🌊 流式执行 API: {method} {url}")
-            
-            # 设置 SSE 接收的 Accept 头
-            request_headers = request_headers.copy()
-            request_headers["Accept"] = "text/event-stream"
-            
-            if body and "Content-Type" not in request_headers:
-                request_headers["Content-Type"] = "application/json"
-            
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.request(
-                        method=method,
-                        url=url,
-                        headers=request_headers,
-                        json=body if body else None,
-                        timeout=aiohttp.ClientTimeout(total=self.timeout)
-                    ) as response:
-                        if response.status not in [200, 201]:
-                            error_text = await response.text()
-                            logger.error(f"❌ SSE 请求失败 (HTTP {response.status})")
-                            yield json.dumps({"error": error_text, "http_status": response.status})
-                            return
-                        
-                        logger.info(f"🌊 SSE 连接已建立")
-                        
-                        # 解析 SSE 流
-                        buffer = ""
-                        current_event = {"event": None, "data": None, "id": None}
-                        
-                        async for chunk in response.content.iter_any():
-                            buffer += chunk.decode("utf-8", errors="ignore")
-                            
-                            # 按行处理
-                            while "\n" in buffer:
-                                line, buffer = buffer.split("\n", 1)
-                                line = line.strip()
-                                
-                                if not line:
-                                    # 空行表示事件结束
-                                    if current_event["data"] is not None:
-                                        event_data = self._parse_sse_event(current_event)
-                                        
-                                        if event_data:
-                                            # 提取文本片段
-                                            text_chunk = self._extract_text_chunk(event_data)
-                                            if text_chunk:
-                                                # 🎯 流式返回文本片段
-                                                yield text_chunk
-                                    
-                                    # 重置
-                                    current_event = {"event": None, "data": None, "id": None}
-                                
-                                elif line.startswith("event:"):
-                                    current_event["event"] = line[6:].strip()
-                                elif line.startswith("data:"):
-                                    data_content = line[5:].strip()
-                                    if current_event["data"] is None:
-                                        current_event["data"] = data_content
-                                    else:
-                                        current_event["data"] += "\n" + data_content
-                                elif line.startswith("id:"):
-                                    current_event["id"] = line[3:].strip()
-                        
-                        # 处理剩余的 buffer
-                        if current_event["data"] is not None:
-                            event_data = self._parse_sse_event(current_event)
-                            if event_data:
-                                text_chunk = self._extract_text_chunk(event_data)
-                                if text_chunk:
-                                    yield text_chunk
-                        
-                        logger.info(f"✅ SSE 流结束")
-            
-            except asyncio.TimeoutError:
-                logger.error(f"❌ SSE 请求超时")
-                yield json.dumps({"error": "SSE 请求超时"})
-            except Exception as e:
-                logger.error(f"❌ SSE 请求异常: {e}", exc_info=True)
-                yield json.dumps({"error": str(e)})
-        else:
-            # 非流式模式：回退到普通执行，一次性返回完整结果
+        if not final_url:
+            yield json.dumps({"error": "必须提供 url 或 api_name 参数"})
+            return
+        
+        # 2. 替换环境变量
+        final_headers = self._resolve_env_vars(final_headers)
+        
+        # 非流式模式：回退到普通执行
+        if mode != "stream":
             result = await self.execute(
+                api_name=api_name,
+                path=path,
                 url=url,
                 method=method,
                 headers=headers,
                 body=body,
-                auth=auth,
-                stream=False,
-                conversation_id=conversation_id,
+                mode=mode,
                 **kwargs
             )
             yield json.dumps(result, ensure_ascii=False)
+            return
+        
+        # 3. SSE 流式模式 - 直接 yield 原始 chunk
+        logger.info(f"🌊 流式执行 API: {method} {final_url}")
+        
+        # 设置 SSE 接收的 Accept 头
+        final_headers = final_headers.copy()
+        final_headers["Accept"] = "text/event-stream"
+        
+        if body and "Content-Type" not in final_headers:
+            final_headers["Content-Type"] = "application/json"
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.request(
+                    method=method,
+                    url=final_url,
+                    headers=final_headers,
+                    json=body if body else None,
+                    timeout=aiohttp.ClientTimeout(total=self.timeout)
+                ) as response:
+                    if response.status not in [200, 201]:
+                        error_text = await response.text()
+                        logger.error(f"❌ SSE 请求失败 (HTTP {response.status})")
+                        yield json.dumps({"error": error_text, "http_status": response.status})
+                        return
+                    
+                    logger.info(f"🌊 SSE 连接已建立")
+                    
+                    # 直接 yield 原始 chunk 内容
+                    async for chunk in response.content.iter_any():
+                        decoded = chunk.decode("utf-8", errors="ignore")
+                        if decoded:
+                            yield decoded
+                    
+                    logger.info(f"✅ SSE 流结束")
+        
+        except asyncio.TimeoutError:
+            logger.error(f"❌ SSE 请求超时")
+            yield json.dumps({"error": "SSE 请求超时"})
+        except Exception as e:
+            logger.error(f"❌ SSE 请求异常: {e}", exc_info=True)
+            yield json.dumps({"error": str(e)})
     
-    def _apply_auth(self, headers: Dict[str, str], auth: Dict[str, Any]) -> Dict[str, str]:
-        """应用认证配置到请求头"""
-        auth_type = auth.get("type", "api_key")
-        credentials = auth.get("credentials", {})
+    def _resolve_env_vars(self, headers: Dict[str, str]) -> Dict[str, str]:
+        """
+        自动替换请求头中的环境变量占位符 ${VAR_NAME}
         
-        if auth_type == "api_key":
-            # API Key 认证
-            header_name = credentials.get("header_name", "X-API-Key")
-            api_key = credentials.get("api_key") or os.getenv(credentials.get("env_var", ""))
-            if api_key:
-                headers[header_name] = api_key
+        这样 LLM 可以使用 ${COZE_API_KEY} 等占位符，
+        框架会自动从环境变量中读取真实值。
+        """
+        import re
         
-        elif auth_type == "bearer":
-            # Bearer Token
-            token = credentials.get("token") or os.getenv(credentials.get("env_var", ""))
-            if token:
-                headers["Authorization"] = f"Bearer {token}"
+        resolved = {}
+        env_var_pattern = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}')
         
-        elif auth_type == "basic":
-            # Basic Auth
-            import base64
-            username = credentials.get("username")
-            password = credentials.get("password")
-            if username and password:
-                auth_str = base64.b64encode(f"{username}:{password}".encode()).decode()
-                headers["Authorization"] = f"Basic {auth_str}"
+        for key, value in headers.items():
+            if isinstance(value, str):
+                def replace_env_var(match):
+                    var_name = match.group(1)
+                    env_value = os.environ.get(var_name)
+                    if env_value:
+                        logger.debug(f"🔑 替换环境变量: ${{{var_name}}} → [已设置]")
+                        return env_value
+                    else:
+                        logger.warning(f"⚠️ 环境变量未设置: {var_name}")
+                        return match.group(0)  # 保留原样
+                
+                resolved[key] = env_var_pattern.sub(replace_env_var, value)
+            else:
+                resolved[key] = value
         
-        return headers
+        return resolved
     
     async def _send_request(
         self,
@@ -479,10 +475,19 @@ class APICallingTool:
                 timeout=aiohttp.ClientTimeout(total=self.timeout)
             ) as response:
                 http_status = response.status
+                content_type = response.headers.get("Content-Type", "")
                 
                 if response.status in [200, 201]:
+                    # 🔧 自动检测 SSE 响应（即使 stream=False 也能正确处理）
+                    if "text/event-stream" in content_type:
+                        logger.warning(
+                            f"⚠️ 检测到 SSE 响应但未设置 stream=True，自动切换到 SSE 模式。"
+                            f"建议：调用此 API 时设置 stream=True"
+                        )
+                        # 内联解析 SSE 流
+                        return await self._parse_sse_response_from_response(response), http_status
+                    
                     # 尝试解析 JSON，失败则返回文本
-                    content_type = response.headers.get("Content-Type", "")
                     if "application/json" in content_type:
                         return await response.json(), http_status
                     else:
@@ -501,6 +506,27 @@ class APICallingTool:
             logger.error(f"❌ 请求失败: {e}")
             return {"_error": True, "_status": 0, "_message": str(e)}, 0
     
+    async def _parse_sse_response_from_response(
+        self,
+        response: aiohttp.ClientResponse
+    ) -> Dict[str, Any]:
+        """
+        从已有的 response 对象读取 SSE 流（用于自动检测 SSE 场景）
+        
+        简化设计：直接累加原始内容返回
+        """
+        try:
+            raw_content = ""
+            async for chunk in response.content.iter_any():
+                raw_content += chunk.decode("utf-8", errors="ignore")
+            
+            logger.info(f"✅ SSE 自动读取完成，共收到 {len(raw_content)} 字符")
+            return {"raw_content": raw_content}
+            
+        except Exception as e:
+            logger.error(f"❌ SSE 自动读取异常: {e}", exc_info=True)
+            return {"error": str(e)}
+    
     async def _send_sse_request(
         self,
         session: aiohttp.ClientSession,
@@ -510,9 +536,10 @@ class APICallingTool:
         body: Optional[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """
-        发送 SSE 流式请求，收集所有数据后返回完整结果
+        发送 SSE 流式请求，收集所有原始数据后返回
         
-        注意：如需流式返回，请使用 execute_stream() 方法
+        简化设计：不解析 SSE 事件格式，直接累加原始内容返回给 Agent
+        Agent 可以自行处理返回的原始数据
         
         Args:
             session: aiohttp 会话
@@ -522,7 +549,7 @@ class APICallingTool:
             body: 请求体
             
         Returns:
-            收集到的所有 SSE 数据
+            {"raw_content": "完整的原始响应内容"}
         """
         # 设置 SSE 接收的 Accept 头
         headers = headers.copy()
@@ -530,9 +557,6 @@ class APICallingTool:
         
         if body and "Content-Type" not in headers:
             headers["Content-Type"] = "application/json"
-        
-        collected_events: List[Dict[str, Any]] = []
-        collected_text: List[str] = []  # 收集文本片段（用于流式文本合并）
         
         try:
             async with session.request(
@@ -545,162 +569,25 @@ class APICallingTool:
                 if response.status not in [200, 201]:
                     error_text = await response.text()
                     logger.error(f"❌ SSE 请求失败 (HTTP {response.status}): {error_text[:500]}")
-                    return {
-                        "error": error_text,
-                        "http_status": response.status
-                    }
+                    return {"error": error_text, "http_status": response.status}
                 
                 logger.info(f"🌊 SSE 连接已建立")
                 
-                # 解析 SSE 流
-                buffer = ""
-                current_event = {"event": None, "data": None, "id": None}
-                
+                # 直接累加所有原始内容
+                raw_content = ""
                 async for chunk in response.content.iter_any():
-                    buffer += chunk.decode("utf-8", errors="ignore")
-                    
-                    # 按行处理
-                    while "\n" in buffer:
-                        line, buffer = buffer.split("\n", 1)
-                        line = line.strip()
-                        
-                        if not line:
-                            # 空行表示事件结束
-                            if current_event["data"] is not None:
-                                event_data = self._parse_sse_event(current_event)
-                                
-                                if event_data:
-                                    collected_events.append({
-                                        "event": current_event["event"],
-                                        "data": event_data
-                                    })
-                                    
-                                    # 提取文本片段（常见的流式文本格式）
-                                    text_chunk = self._extract_text_chunk(event_data)
-                                    if text_chunk:
-                                        collected_text.append(text_chunk)
-                                
-                            # 重置
-                            current_event = {"event": None, "data": None, "id": None}
-                        
-                        elif line.startswith("event:"):
-                            current_event["event"] = line[6:].strip()
-                        elif line.startswith("data:"):
-                            data_content = line[5:].strip()
-                            if current_event["data"] is None:
-                                current_event["data"] = data_content
-                            else:
-                                current_event["data"] += "\n" + data_content
-                        elif line.startswith("id:"):
-                            current_event["id"] = line[3:].strip()
+                    raw_content += chunk.decode("utf-8", errors="ignore")
                 
-                # 处理剩余的 buffer
-                if current_event["data"] is not None:
-                    event_data = self._parse_sse_event(current_event)
-                    if event_data:
-                        collected_events.append({
-                            "event": current_event["event"],
-                            "data": event_data
-                        })
-                        text_chunk = self._extract_text_chunk(event_data)
-                        if text_chunk:
-                            collected_text.append(text_chunk)
+                logger.info(f"✅ SSE 流结束，共收到 {len(raw_content)} 字符")
                 
-                logger.info(f"✅ SSE 流结束，共收到 {len(collected_events)} 个事件")
-                
-                # 合并文本
-                full_text = "".join(collected_text) if collected_text else None
-                
-                # 返回结果
-                result = {
-                    "events_count": len(collected_events),
-                }
-                
-                # 如果收集到了文本，直接返回合并后的文本
-                if full_text:
-                    result["text"] = full_text
-                
-                # 返回最后一个事件的数据（通常包含最终结果）
-                if collected_events:
-                    result["last_event"] = collected_events[-1]
-                    
-                    # 只保留最后几个事件，避免结果过大
-                    if len(collected_events) <= 5:
-                        result["events"] = collected_events
-                    else:
-                        result["events"] = collected_events[-5:]
-                        result["events_truncated"] = True
-                
-                return result
+                return {"raw_content": raw_content}
         
         except asyncio.TimeoutError:
             logger.error(f"❌ SSE 请求超时")
-            return {
-                "error": "SSE 请求超时",
-                "events_count": len(collected_events),
-                "text": "".join(collected_text) if collected_text else None
-            }
+            return {"error": "SSE 请求超时"}
         except Exception as e:
             logger.error(f"❌ SSE 请求异常: {e}", exc_info=True)
-            return {
-                "error": str(e),
-                "events_count": len(collected_events),
-                "text": "".join(collected_text) if collected_text else None
-            }
-    
-    def _parse_sse_event(self, current_event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """解析 SSE 事件数据"""
-        data_str = current_event.get("data")
-        if not data_str:
-            return None
-        
-        # 特殊处理 [DONE] 标记（OpenAI 风格）
-        if data_str.strip() == "[DONE]":
-            return {"done": True}
-        
-        # 尝试解析 JSON
-        try:
-            data = json.loads(data_str)
-            return data
-        except json.JSONDecodeError:
-            # 非 JSON 数据，返回原始文本
-            return {"raw_text": data_str}
-    
-    def _extract_text_chunk(self, event_data: Dict[str, Any]) -> Optional[str]:
-        """
-        从 SSE 事件数据中提取文本片段
-        
-        支持常见的流式 API 格式：
-        - OpenAI: choices[0].delta.content
-        - Anthropic: delta.text
-        - 通用: text, content, message
-        """
-        if not isinstance(event_data, dict):
-            return None
-        
-        # OpenAI 格式
-        choices = event_data.get("choices", [])
-        if choices and isinstance(choices, list):
-            delta = choices[0].get("delta", {})
-            if isinstance(delta, dict):
-                content = delta.get("content")
-                if content:
-                    return content
-        
-        # Anthropic 格式
-        delta = event_data.get("delta", {})
-        if isinstance(delta, dict):
-            text = delta.get("text")
-            if text:
-                return text
-        
-        # 通用格式
-        for key in ["text", "content", "message", "chunk"]:
-            value = event_data.get(key)
-            if isinstance(value, str) and value:
-                return value
-        
-        return None
+            return {"error": str(e)}
     
     async def _poll_for_result(
         self,
@@ -756,59 +643,3 @@ class APICallingTool:
         
         logger.error(f"❌ 轮询超时 ({self.max_polls * self.poll_interval} 秒)")
         return None
-    
-    async def _download_file(
-        self,
-        session: aiohttp.ClientSession,
-        url: str,
-        save_dir: str
-    ) -> Path:
-        """下载文件"""
-        save_path = Path(save_dir)
-        save_path.mkdir(parents=True, exist_ok=True)
-        
-        # 生成文件名
-        from datetime import datetime
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        
-        # 从 URL 或 Content-Disposition 获取文件扩展名
-        ext = ".file"
-        if url.endswith(".pptx"):
-            ext = ".pptx"
-        elif url.endswith(".pdf"):
-            ext = ".pdf"
-        elif url.endswith(".png"):
-            ext = ".png"
-        elif url.endswith(".jpg") or url.endswith(".jpeg"):
-            ext = ".jpg"
-        elif url.endswith(".zip"):
-            ext = ".zip"
-        
-        filename = f"downloaded_{timestamp}{ext}"
-        local_path = save_path / filename
-        
-        # 下载文件
-        async with session.get(url) as response:
-            if response.status == 200:
-                # 尝试从 Content-Disposition 获取文件名
-                content_disposition = response.headers.get("Content-Disposition", "")
-                if "filename=" in content_disposition:
-                    import re
-                    match = re.search(r'filename[*]?=["\']?([^"\';\n]+)', content_disposition)
-                    if match:
-                        original_filename = match.group(1).strip()
-                        # 保留原始扩展名
-                        if "." in original_filename:
-                            ext = "." + original_filename.rsplit(".", 1)[1]
-                            filename = f"downloaded_{timestamp}{ext}"
-                            local_path = save_path / filename
-                
-                with open(local_path, 'wb') as f:
-                    while True:
-                        chunk = await response.content.read(8192)
-                        if not chunk:
-                            break
-                        f.write(chunk)
-        
-        logger.info(f"💾 文件已保存: {local_path}")
-        return local_path

@@ -1,5 +1,6 @@
 {
   "version": "1.0",
+<<<<<<< Updated upstream
   "generated_at": "2026-01-13T22:24:16.100202",
   "source_hashes": {
     "prompt.md": "9c390dc8c82e39dbb8b9f0953e64430c",
@@ -11,6 +12,19 @@
     "simple_prompt": "ae950081ea6271aed804285c1d15325e",
     "medium_prompt": "43156115fcd63cd0e3a1d5e5343f8998",
     "complex_prompt": "b891155abba27f596b942fa03acc9be4"
+=======
+  "generated_at": "2026-01-14T12:15:21.399093",
+  "source_hashes": {
+    "prompt.md": "4f4a9321db1b2360cecd7f861df09140",
+    "config.yaml": "f62662ee0749c09ad2cdc78d75609f98"
+  },
+  "result_hashes": {
+    "agent_schema": "d39848950bd9d141790509b59ced443d",
+    "intent_prompt": "ace602ec7ab421069b95afd1a65afa87",
+    "simple_prompt": "62e7fd5676ac78a22a09b62792e70ce7",
+    "medium_prompt": "27c1edc510dd3af9b0b3fd7afbab0a70",
+    "complex_prompt": "b438c015c602b13ccfdf2c14ec4ed6c8"
+>>>>>>> Stashed changes
   },
   "manually_edited": []
 }

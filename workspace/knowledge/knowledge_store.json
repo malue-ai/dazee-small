@@ -89,6 +89,30 @@
           "updated_at": "2026-01-06T16:55:41.724442"
         }
       ]
+    },
+    "user_698d51a1": {
+      "user_id": "user_698d51a1",
+      "partition_id": "partition_user_698d51a1",
+      "created_at": "2026-01-14T09:34:47.627829",
+      "last_seen_at": "2026-01-14T09:34:47.627843",
+      "documents": [
+        {
+          "document_id": "2f21ba07-44c1-4d8c-928a-e65f5007fec6",
+          "filename": "overview.png",
+          "status": "ready",
+          "metadata": {
+            "s3_key": "knowledge/user_698d51a1/20260114_093446/overview_43d0c183.png",
+            "s3_url": "s3://dify-storage-zenflux/knowledge/user_698d51a1/20260114_093446/overview_43d0c183.png",
+            "file_size": 486346,
+            "storage": "s3",
+            "user_id": "user_698d51a1",
+            "filename": "overview.png",
+            "uploaded_at": "2026-01-14T09:34:47.629382"
+          },
+          "created_at": "2026-01-14T09:34:51.677574",
+          "updated_at": "2026-01-14T09:41:34.229795"
+        }
+      ]
     }
   },
   "conversations": {},

@@ -409,6 +409,7 @@ class AgentFactory:
         conversation_service = None,
         prompt_schema = None,  # 🆕 V4.6: PromptSchema（提示词分层）
         prompt_cache = None,   # 🆕 V4.6.2: InstancePromptCache（提示词缓存）
+        apis_config = None,    # 🆕 预配置的 APIs（用于 api_calling 自动注入）
     ):
         """
         根据 Schema 创建 Agent（设计哲学：Schema 驱动）
@@ -421,6 +422,7 @@ class AgentFactory:
         3. Agent 根据 Schema 动态初始化组件
         4. 🆕 V4.6: PromptSchema 支持根据复杂度动态裁剪提示词
         5. 🆕 V4.6.2: InstancePromptCache 提供预生成的提示词版本
+        6. 🆕 apis_config: 预配置的 APIs，用于 api_calling 工具自动注入认证
         """
         from core.agent.simple_agent import SimpleAgent
         
@@ -437,6 +439,8 @@ class AgentFactory:
             logger.debug(f"   PromptSchema: {prompt_schema.agent_name} ({len(prompt_schema.modules)} 模块)")
         if prompt_cache:
             logger.debug(f"   PromptCache: {prompt_cache.instance_name} (loaded={prompt_cache.is_loaded})")
+        if apis_config:
+            logger.debug(f"   APIs: {len(apis_config)} 个预配置")
         
         # 🆕 V4.6.2: 优先使用 prompt_cache 中的 prompt_schema
         effective_prompt_schema = prompt_schema or (prompt_cache.prompt_schema if prompt_cache else None)
@@ -453,6 +457,7 @@ class AgentFactory:
             system_prompt=system_prompt,  # 🆕 传递 System Prompt（运行时指令）
             prompt_schema=effective_prompt_schema,  # 🆕 V4.6: 传递 PromptSchema（提示词分层）
             prompt_cache=prompt_cache,  # 🆕 V4.6.2: 传递 InstancePromptCache
+            apis_config=apis_config,  # 🆕 传递预配置的 APIs
         )
         
         logger.info(f"✅ Agent 初始化完成: {schema.name}")

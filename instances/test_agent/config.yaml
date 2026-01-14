@@ -96,7 +96,37 @@ mcp_tools:
     capability: "document_creation"
     description: "第一阶段：从自然语言描述生成 Mermaid 流程图，识别核心实体、属性及关系"
     # App ID: a83e8b00-a94e-4cdf-b5f7-ef721e7238c1
+  - name: nano_banana
+    server_url: "https://api.dify.ai/mcp/server/n7rhBjadwzy9bj90/mcp"
+    server_name: "dify"
+    auth_type: "bearer"
+    auth_env: "DIFY_API_KEY"
+    capability: "document_creation"
+    description: "这是一个根据文本描述生成图片的工具，调用后会返回一张真实生成的图片URL"
 
+  - name: chatDocuments
+    server_url: "https://api.dify.ai/mcp/server/GYultzYga8PRayK5/mcp"
+    server_name: "dify"
+    auth_type: "bearer"
+    auth_env: "DIFY_API_KEY"
+    capability: "document_creation"
+    description: "支持上传urls的知识问答"
+
+  - name: text2document
+    server_url: "https://api.dify.ai/mcp/server/1lbiTqViu7byguhp/mcp"
+    server_name: "dify"
+    auth_type: "bearer"
+    auth_env: "DIFY_API_KEY"
+    capability: "document_creation"
+    description: "输入的title参数的值只能是英文，输入的文本格式转化为格式化文档，并提供下载url： 1、markdown格式转换为docx 2、csv格式转换为xlsx。"
+
+  - name: perplxity
+    server_url: "https://api.dify.ai/mcp/server/WH0QvCw9dlNfhqEC/mcp"
+    server_name: "dify"
+    auth_type: "bearer"
+    auth_env: "DIFY_API_KEY"
+    capability: "document_creation"
+    description: "调用 Perplexity AI 进行研究，输出 DOCX 文档"
 # ==================== REST APIs 配置 ====================
 #
 # 📌 运营配置：只需填写 base_url + 认证
@@ -114,6 +144,17 @@ apis:
     doc: dify-api
     capability: "document_creation"  # 🆕 指定能力类别
     description: "Dify API - 工作流执行和对话"
+
+  # Coze API（Ontology Builder 工作流）
+  - name: coze_api
+    base_url: "https://api.coze.cn/v1"
+    auth:
+      type: bearer
+      header: Authorization
+      env: COZE_API_KEY
+    doc: coze-api
+    capability: "document_creation"
+    description: "Coze API - 工作流执行（Ontology Builder）"
 
 
 # ==================== 记忆配置（V4.6）====================

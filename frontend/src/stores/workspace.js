@@ -1,6 +1,21 @@
 import { defineStore } from 'pinia'
 import axios from '@/api/index'
-import { WORKSPACE_API } from '@/api/config'
+
+// Workspace API 路径定义
+const WORKSPACE_API = {
+  FILES: (conversationId) => `/v1/workspace/${conversationId}/files`,
+  PROJECTS: (conversationId) => `/v1/workspace/${conversationId}/projects`,
+  FILE: (conversationId, path) => `/v1/workspace/${conversationId}/file?path=${encodeURIComponent(path)}`,
+  SANDBOX_STATUS: (conversationId) => `/v1/workspace/${conversationId}/sandbox/status`,
+  SANDBOX_INIT: (conversationId) => `/v1/workspace/${conversationId}/sandbox/init`,
+  SANDBOX_PAUSE: (conversationId) => `/v1/workspace/${conversationId}/sandbox/pause`,
+  SANDBOX_RESUME: (conversationId) => `/v1/workspace/${conversationId}/sandbox/resume`,
+  SANDBOX_KILL: (conversationId) => `/v1/workspace/${conversationId}/sandbox/kill`,
+  SANDBOX_COMMAND: (conversationId) => `/v1/workspace/${conversationId}/sandbox/command`,
+  RUN_PROJECT: (conversationId, projectName) => `/v1/workspace/${conversationId}/projects/${projectName}/run`,
+  STOP_PROJECT: (conversationId, projectName) => `/v1/workspace/${conversationId}/projects/${projectName}/stop`,
+  PROJECT_LOGS: (conversationId, projectName) => `/v1/workspace/${conversationId}/projects/${projectName}/logs`
+}
 
 export const useWorkspaceStore = defineStore('workspace', {
   state: () => ({

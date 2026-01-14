@@ -184,7 +184,11 @@ class ToolExecutor:
         """
         根据参数名从 tool_context 解析依赖
         
-        只注入架构级依赖（memory, event_manager, workspace_dir）
+        注入的依赖：
+        - memory: WorkingMemory 实例
+        - event_manager: EventManager 实例
+        - workspace_dir: 工作目录路径
+        - apis_config: 预配置的 API 列表（用于 api_calling）
         """
         kwargs = {}
         
@@ -192,12 +196,14 @@ class ToolExecutor:
             "memory": "memory",
             "event_manager": "event_manager",
             "workspace_dir": "workspace_dir",
+            "apis_config": "apis_config",  # 🆕 用于 api_calling 自动注入认证
         }
         
         for param in params:
             if param in param_mapping:
                 context_key = param_mapping[param]
-                if context_key in self.tool_context and self.tool_context[context_key]:
+                # 注意：使用 `is not None` 而不是 truthy 检查，避免空列表被跳过
+                if context_key in self.tool_context and self.tool_context[context_key] is not None:
                     kwargs[param] = self.tool_context[context_key]
         
         return kwargs

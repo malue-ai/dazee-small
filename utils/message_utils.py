@@ -4,11 +4,20 @@
 提供消息处理相关的通用工具函数：
 - 消息格式标准化
 - 消息内容提取
+- dict <-> Message 对象转换
 
+职责边界：
+- 本模块：通用消息转换（dict <-> Message）
+- core/llm/adaptor.py：LLM 厂商格式转换（Claude/OpenAI/Gemini）
 """
 
-from typing import Any, List, Dict, Optional
+from typing import Any, List, Dict, Optional, TYPE_CHECKING
+
 from logger import get_logger
+
+# 避免循环导入
+if TYPE_CHECKING:
+    from core.llm import Message
 
 logger = get_logger("message_utils")
 
@@ -81,4 +90,76 @@ def extract_text_from_message(message: Any) -> str:
             if isinstance(block, dict) and block.get("type") == "text":
                 return block.get("text", "")
     return ""
+
+
+# ============================================================
+# dict <-> Message 转换函数
+# ============================================================
+
+def dict_list_to_messages(messages: List[Dict[str, Any]]) -> List["Message"]:
+    """
+    将 dict 列表转换为 Message 对象列表
+    
+    Args:
+        messages: 消息字典列表 [{"role": "user", "content": "..."}]
+        
+    Returns:
+        Message 对象列表
+        
+    Examples:
+        >>> msgs = dict_list_to_messages([{"role": "user", "content": "你好"}])
+        >>> msgs[0].role
+        'user'
+    """
+    from core.llm import Message
+    return [Message(role=msg["role"], content=msg["content"]) for msg in messages]
+
+
+def messages_to_dict_list(messages: List["Message"]) -> List[Dict[str, Any]]:
+    """
+    将 Message 对象列表转换为 dict 列表（Claude API 格式）
+    
+    Args:
+        messages: Message 对象列表
+        
+    Returns:
+        消息字典列表 [{"role": "user", "content": "..."}]
+        
+    Examples:
+        >>> from core.llm import Message
+        >>> dicts = messages_to_dict_list([Message(role="user", content="你好")])
+        >>> dicts[0]["role"]
+        'user'
+    """
+    return [{"role": msg.role, "content": msg.content} for msg in messages]
+
+
+def append_assistant_message(
+    messages: List["Message"],
+    raw_content: Any
+) -> None:
+    """
+    追加 assistant 消息到列表
+    
+    Args:
+        messages: Message 对象列表（会被修改）
+        raw_content: 响应内容（通常是 response.raw_content）
+    """
+    from core.llm import Message
+    messages.append(Message(role="assistant", content=raw_content))
+
+
+def append_user_message(
+    messages: List["Message"],
+    content: Any
+) -> None:
+    """
+    追加 user 消息到列表（工具结果等）
+    
+    Args:
+        messages: Message 对象列表（会被修改）
+        content: 消息内容（通常是 tool_results 列表）
+    """
+    from core.llm import Message
+    messages.append(Message(role="user", content=content))
 

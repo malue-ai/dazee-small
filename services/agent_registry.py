@@ -246,6 +246,20 @@ class AgentRegistry:
             storage = get_memory_storage()
             event_manager = create_event_manager(storage)
         
+        # 🆕 准备 apis_config（用于 api_calling 自动注入认证）
+        apis_config = None
+        if config.instance_config and config.instance_config.apis:
+            apis_config = [
+                {
+                    "name": api.name,
+                    "base_url": api.base_url,
+                    "headers": api.headers or {},
+                    "description": api.description,
+                }
+                for api in config.instance_config.apis
+            ]
+            logger.debug(f"   📡 APIs: {[a['name'] for a in apis_config]}")
+        
         # 使用缓存的 AgentSchema 和 PromptCache 创建 Agent
         if config.prompt_cache and config.prompt_cache.is_loaded and config.prompt_cache.agent_schema:
             agent = AgentFactory.from_schema(
@@ -255,6 +269,7 @@ class AgentRegistry:
                 workspace_dir=workspace_dir,
                 conversation_service=conversation_service,
                 prompt_cache=config.prompt_cache,
+                apis_config=apis_config,  # 🆕 传递预配置的 APIs
             )
         else:
             # Fallback: 使用旧方式
@@ -266,6 +281,9 @@ class AgentRegistry:
                 conversation_service=conversation_service,
                 use_default_if_failed=True,
             )
+            # Fallback 模式也需要设置 apis_config
+            if apis_config:
+                agent.apis_config = apis_config
         
         # 应用配置覆盖
         instance_config = config.instance_config
@@ -871,18 +889,72 @@ class AgentRegistry:
         }
         
         if instance_config:
+            # 转换 enabled_capabilities 为布尔值格式（前端友好）
+            enabled_caps = {}
+            if instance_config.enabled_capabilities:
+                for k, v in instance_config.enabled_capabilities.items():
+                    enabled_caps[k] = bool(v) if isinstance(v, int) else v
+            
+            # 格式化 MCP 工具（返回完整配置）
+            mcp_tools_formatted = []
+            for t in (instance_config.mcp_tools or []):
+                mcp_tools_formatted.append({
+                    "name": t.get("name", "unknown"),
+                    "server_url": t.get("server_url", ""),
+                    "server_name": t.get("server_name", ""),
+                    "auth_type": t.get("auth_type", "none"),
+                    "auth_env": t.get("auth_env"),
+                    "capability": t.get("capability"),
+                    "description": t.get("description", ""),
+                })
+            
+            # 格式化 REST APIs（返回完整配置）
+            apis_formatted = []
+            for a in (instance_config.apis or []):
+                apis_formatted.append({
+                    "name": a.name,
+                    "base_url": a.base_url,
+                    "auth_type": a.auth.type if hasattr(a, 'auth') and a.auth else "none",
+                    "auth_env": a.auth.env if hasattr(a, 'auth') and a.auth else None,
+                    "doc": a.doc if hasattr(a, 'doc') else None,
+                    "capability": a.capability if hasattr(a, 'capability') else None,
+                    "description": a.description if hasattr(a, 'description') else "",
+                })
+            
             detail.update({
                 "model": instance_config.model,
                 "max_turns": instance_config.max_turns,
-                "enabled_capabilities": list(instance_config.enabled_capabilities.keys()) if instance_config.enabled_capabilities else [],
-                "mcp_tools": [t.get("name", "unknown") for t in (instance_config.mcp_tools or [])],
-                # apis 是 List[ApiConfig] 数据类，需要用属性访问而非 .get()
-                "apis": [a.name for a in (instance_config.apis or [])],
+                "plan_manager_enabled": instance_config.plan_manager_enabled if hasattr(instance_config, 'plan_manager_enabled') else False,
+                "enabled_capabilities": enabled_caps,
+                "mcp_tools": mcp_tools_formatted,
+                "apis": apis_formatted,
                 # skills 是 List[SkillConfig] 数据类，需要用属性访问
                 "skills": [s.name for s in (instance_config.skills or [])],
             })
         
         return detail
+    
+    def get_agent_prompt(self, agent_id: str) -> str:
+        """
+        获取 Agent 的原始 prompt.md 内容
+        
+        Args:
+            agent_id: Agent ID
+            
+        Returns:
+            prompt.md 文件内容
+        """
+        if agent_id not in self._configs:
+            raise AgentNotFoundError(f"Agent '{agent_id}' 不存在")
+        
+        instances_dir = get_instances_dir()
+        prompt_path = instances_dir / agent_id / "prompt.md"
+        
+        if not prompt_path.exists():
+            return ""
+        
+        with open(prompt_path, "r", encoding="utf-8") as f:
+            return f.read()
     
     # ==================== 清理 ====================
     

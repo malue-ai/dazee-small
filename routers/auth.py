@@ -19,7 +19,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/v1/auth", tags=["认证"])
+router = APIRouter(prefix="/api/v1/auth", tags=["认证"])
 
 
 # ============================================================

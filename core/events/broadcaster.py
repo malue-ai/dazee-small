@@ -351,10 +351,10 @@ class EventBroadcaster:
             if tool_id and tool_name:
                 self._tool_id_to_name[tool_id] = tool_name
         
-        # 🆕 累积内容
+        # 🆕 累积内容（传递 index 支持并行累积）
         accumulator = self._accumulators.get(session_id)
         if accumulator:
-            accumulator.on_content_start(content_block)
+            accumulator.on_content_start(content_block, index=index)
         
         # 发送 content_start
         result = await self.events.content.emit_content_start(
@@ -379,12 +379,12 @@ class EventBroadcaster:
         发送 content_delta 事件
         
         🆕 简化格式：delta 直接是字符串，类型由 content_start 的 content_block.type 决定
-        🆕 自动累积到 ContentAccumulator
+        🆕 自动累积到 ContentAccumulator（传递 index 支持并行累积）
         """
-        # 🆕 累积内容
+        # 🆕 累积内容（传递 index 支持并行累积）
         accumulator = self._accumulators.get(session_id)
         if accumulator:
-            accumulator.on_content_delta(delta)
+            accumulator.on_content_delta(delta, index=index)
         
         return await self.events.content.emit_content_delta(
             session_id=session_id,
@@ -402,13 +402,13 @@ class EventBroadcaster:
         发送 content_stop 事件
         
         🆕 自动：
-        1. 累积到 ContentAccumulator
+        1. 累积到 ContentAccumulator（传递 index 支持并行累积）
         2. Checkpoint 到数据库（断点恢复）
         """
-        # 🆕 累积内容（完成当前 block）
+        # 累积内容（传递 index 支持并行累积）
         accumulator = self._accumulators.get(session_id)
         if accumulator:
-            accumulator.on_content_stop(signature)
+            accumulator.on_content_stop(index=index, signature=signature)
         
         # 发送事件
         result = await self.events.content.emit_content_stop(
