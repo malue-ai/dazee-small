@@ -13,7 +13,7 @@ AgentFactory - Prompt 驱动的 Agent 动态初始化
 """
 
 import json
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, TYPE_CHECKING
 from enum import Enum
 
 from logger import get_logger
@@ -29,6 +29,12 @@ from core.schemas import (
     OutputFormatterConfig,
     SkillConfig,
 )
+
+# 🆕 V7: 类型检查导入（避免循环依赖）
+if TYPE_CHECKING:
+    from core.routing import RoutingDecision
+    from core.agent import SimpleAgent
+    from core.agent.multi import MultiAgentOrchestrator
 
 logger = get_logger(__name__)
 
@@ -240,6 +246,8 @@ class AgentFactory:
     """
     Agent 工厂 - Prompt 驱动的动态初始化
     
+    🆕 V7: 支持路由层集成
+    
     用法：
         # 方式 1: 从 Prompt 创建（推荐）
         agent = await AgentFactory.from_prompt(system_prompt, event_manager)
@@ -250,6 +258,14 @@ class AgentFactory:
         
         # 方式 3: 使用默认配置
         agent = AgentFactory.create_default(event_manager)
+        
+        # 🆕 方式 4: 从路由决策创建（V7 路由集成）
+        routing_decision = await router.route(message, history)
+        agent = await AgentFactory.from_routing_decision(
+            decision=routing_decision,
+            event_manager=event_manager,
+            workspace_dir=workspace_dir
+        )
     """
     
     @classmethod
@@ -697,6 +713,167 @@ def create_agent_from_preset(
         raise ValueError(f"未知预设: {preset_name}，可用: {list(presets.keys())}")
     
     schema = presets[preset_name]()
+    
+    return AgentFactory.from_schema(
+        schema=schema,
+        system_prompt=system_prompt,
+        event_manager=event_manager,
+        **kwargs
+    )
+
+
+# ============================================================
+# 🆕 V7: 路由层集成
+# ============================================================
+
+async def create_agent_from_routing_decision(
+    routing_decision: "RoutingDecision",
+    event_manager,
+    workspace_dir: str = None,
+    conversation_service = None,
+    system_prompt: str = "",
+    **kwargs
+) -> "SimpleAgent":
+    """
+    🆕 V7: 从路由决策创建 Agent（支持意图注入）
+    
+    流程：
+    1. 从 routing_decision 提取 intent 和 complexity
+    2. 根据 complexity 选择 Schema 配置（简单/中等/复杂）
+    3. 创建 Agent，并将 intent 传递给 Agent.chat()
+    
+    Args:
+        routing_decision: 路由决策结果
+        event_manager: 事件管理器
+        workspace_dir: 工作目录
+        conversation_service: 会话服务
+        system_prompt: 系统提示词（可选）
+        **kwargs: 其他参数
+        
+    Returns:
+        配置好的 SimpleAgent 实例（intent 已注入）
+        
+    使用示例：
+        decision = await router.route(message, history)
+        agent = await create_agent_from_routing_decision(
+            decision, event_manager, workspace_dir
+        )
+        
+        # Agent 内部会使用 routing_decision.intent，跳过内部意图分析
+        async for event in agent.chat(messages, intent=decision.intent):
+            yield event
+    """
+    from core.routing import RoutingDecision
+    
+    intent = routing_decision.intent
+    complexity_score = routing_decision.complexity_score
+    
+    logger.info(
+        f"🏭 从路由决策创建 Agent: task_type={intent.task_type.value}, "
+        f"complexity={complexity_score:.2f}"
+    )
+    
+    # 根据复杂度选择 Schema 配置
+    if complexity_score <= 3.0:
+        # 简单任务：快速响应
+        schema = AgentSchema(
+            name="SimpleAgent",
+            description="简单任务快速响应",
+            intent_analyzer=IntentAnalyzerConfig(enabled=False),  # 跳过内部分析
+            plan_manager=PlanManagerConfig(enabled=False),
+            tool_selector=ToolSelectorConfig(enabled=True),
+            max_turns=8,
+            reasoning=f"简单任务（score={complexity_score:.2f}），禁用规划，快速响应"
+        )
+    elif complexity_score <= 6.0:
+        # 中等任务：启用规划
+        schema = AgentSchema(
+            name="MediumAgent",
+            description="中等复杂度任务",
+            intent_analyzer=IntentAnalyzerConfig(enabled=False),  # 跳过内部分析
+            plan_manager=PlanManagerConfig(enabled=True, max_steps=10),
+            tool_selector=ToolSelectorConfig(enabled=True),
+            max_turns=15,
+            reasoning=f"中等任务（score={complexity_score:.2f}），启用规划"
+        )
+    else:
+        # 复杂任务：完整配置
+        schema = AgentSchema(
+            name="ComplexAgent",
+            description="复杂任务完整配置",
+            intent_analyzer=IntentAnalyzerConfig(enabled=False),  # 跳过内部分析
+            plan_manager=PlanManagerConfig(enabled=True, max_steps=20),
+            tool_selector=ToolSelectorConfig(enabled=True),
+            memory_manager=MemoryManagerConfig(
+                retention_policy="session",
+                working_memory_limit=30
+            ),
+            max_turns=25,
+            reasoning=f"复杂任务（score={complexity_score:.2f}），完整配置"
+        )
+    
+    # 创建 Agent（intent 由路由层提供，不再内部分析）
+    agent = AgentFactory.from_schema(
+        schema=schema,
+        system_prompt=system_prompt or "你是一个智能助手，帮助用户完成任务。",
+        event_manager=event_manager,
+        workspace_dir=workspace_dir,
+        conversation_service=conversation_service,
+        **kwargs
+    )
+    
+    logger.info(f"✅ Agent 创建完成: schema={schema.name}, max_turns={schema.max_turns}")
+    
+    return agent
+
+
+async def create_multi_agent_from_routing_decision(
+    routing_decision: "RoutingDecision",
+    **kwargs
+) -> "MultiAgentOrchestrator":
+    """
+    🆕 V7: 从路由决策创建多智能体编排器
+    
+    Args:
+        routing_decision: 路由决策结果
+        **kwargs: 其他参数
+        
+    Returns:
+        MultiAgentOrchestrator 实例
+        
+    注意：P1 待完善多智能体执行逻辑
+    """
+    from core.agent.multi import MultiAgentOrchestrator, ExecutionMode
+    from core.routing import RoutingDecision
+    
+    intent = routing_decision.intent
+    
+    logger.info(
+        f"🏭 从路由决策创建多智能体: task_type={intent.task_type.value}, "
+        f"complexity={routing_decision.complexity_score:.2f}"
+    )
+    
+    # 根据任务类型选择执行模式
+    if intent.task_type.value in ["coding", "research"]:
+        mode = ExecutionMode.SEQUENTIAL
+    elif intent.task_type.value in ["document", "analysis"]:
+        mode = ExecutionMode.PARALLEL
+    else:
+        mode = ExecutionMode.HIERARCHICAL
+    
+    # 创建编排器配置（占位实现，P1 完善）
+    orchestrator = MultiAgentOrchestrator(
+        mode=mode,
+        agents=[
+            {"agent_id": "planner", "role": "planner"},
+            {"agent_id": "executor", "role": "executor"},
+            {"agent_id": "reviewer", "role": "reviewer"},
+        ]
+    )
+    
+    logger.info(f"✅ 多智能体编排器创建完成: mode={mode.value}")
+    
+    return orchestrator
     return AgentFactory.from_schema(schema, system_prompt, event_manager, **kwargs)
 
 
