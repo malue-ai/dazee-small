@@ -29,6 +29,9 @@ from infra.resilience import with_timeout, with_retry, get_circuit_breaker
 from core.context.compaction import QoSLevel, get_compaction_threshold, get_context_awareness_prompt
 # 🆕 V7: 路由模块（单智能体/多智能体路由决策）
 from core.routing import AgentRouter, RoutingDecision
+# 🆕 V7: Token 审计（消耗记录、统计分析、异常检测）
+from core.monitoring import get_token_auditor, TokenAuditor
+from evaluation.models import TokenUsage
 # 【待扩展】Multi-Agent 模块（已注释）
 # from core.multi_agent import MultiAgentOrchestrator, MultiAgentConfig
 from services.session_service import SessionService, get_session_service, SessionNotFoundError
@@ -113,6 +116,9 @@ class ChatService:
         
         if enable_routing:
             logger.info("🔀 路由层已启用：意图分析将在路由层完成")
+        
+        # 🆕 V7: Token 审计器
+        self.token_auditor: TokenAuditor = get_token_auditor()
     
     def _get_router(self) -> AgentRouter:
         """
@@ -626,6 +632,36 @@ class ChatService:
                         task_names=background_tasks,
                         context=task_context
                     )
+            
+            # 🆕 V7: Token 审计记录
+            try:
+                usage_stats = agent.usage_tracker.get_stats()
+                token_usage = TokenUsage(
+                    input_tokens=usage_stats.get("total_input_tokens", 0),
+                    output_tokens=usage_stats.get("total_output_tokens", 0),
+                    thinking_tokens=0,  # TODO: 从 Extended Thinking 中获取
+                    cache_read_tokens=usage_stats.get("total_cache_read_tokens", 0),
+                    cache_write_tokens=usage_stats.get("total_cache_creation_tokens", 0)
+                )
+                
+                self.token_auditor.record(
+                    session_id=session_id,
+                    usage=token_usage,
+                    conversation_id=conversation_id,
+                    user_id=user_id,
+                    agent_id=getattr(agent, 'agent_id', None),
+                    model=self.default_model,
+                    duration_ms=duration_ms,
+                    query_length=len(str(message))
+                )
+                
+                logger.info(
+                    f"📊 Token 审计: input={token_usage.input_tokens:,}, "
+                    f"output={token_usage.output_tokens:,}, "
+                    f"cache_read={token_usage.cache_read_tokens:,}"
+                )
+            except Exception as audit_err:
+                logger.warning(f"⚠️ Token 审计失败: {audit_err}")
             
             logger.info(f"✅ Agent 执行完成: session_id={session_id}, duration={duration_ms}ms")
         
