@@ -27,6 +27,8 @@ from core.output import OutputFormatter, create_output_formatter  # 🆕 V6.3
 from infra.resilience import with_timeout, with_retry, get_circuit_breaker
 # 🆕 上下文压缩（简化版，使用 Claude SDK 原生 compaction）
 from core.context.compaction import QoSLevel, get_compaction_threshold, get_context_awareness_prompt
+# 🆕 V7: 路由模块（单智能体/多智能体路由决策）
+from core.routing import AgentRouter, RoutingDecision
 # 【待扩展】Multi-Agent 模块（已注释）
 # from core.multi_agent import MultiAgentOrchestrator, MultiAgentConfig
 from services.session_service import SessionService, get_session_service, SessionNotFoundError
@@ -72,7 +74,8 @@ class ChatService:
         self,
         session_service: Optional[SessionService] = None,
         default_model: str = "claude-sonnet-4-5-20250929",
-        qos_level: QoSLevel = QoSLevel.PRO  # 🆕 P0: QoS 等级，默认 Pro
+        qos_level: QoSLevel = QoSLevel.PRO,  # 🆕 P0: QoS 等级，默认 Pro
+        enable_routing: bool = False,  # 🆕 V7: 是否启用路由层（默认关闭，向后兼容）
         # 【待扩展】Multi-Agent 配置（已注释）
         # multi_agent_config: Optional[MultiAgentConfig] = None
     ):
@@ -101,6 +104,27 @@ class ChatService:
             f"✅ Context Compaction 配置: qos_level={qos_level.value}, "
             f"threshold={self.compaction_threshold:,} tokens (Claude SDK 原生处理)"
         )
+        
+        # 🆕 V7: 路由器（单智能体/多智能体路由决策）
+        # enable_routing=False: 意图分析在 SimpleAgent 内部完成（向后兼容）
+        # enable_routing=True: 意图分析在路由层完成，支持多智能体路由
+        self.enable_routing = enable_routing
+        self._router: Optional[AgentRouter] = None
+        
+        if enable_routing:
+            logger.info("🔀 路由层已启用：意图分析将在路由层完成")
+    
+    def _get_router(self) -> AgentRouter:
+        """
+        延迟初始化路由器
+        
+        Returns:
+            AgentRouter 实例
+        """
+        if self._router is None:
+            self._router = AgentRouter()
+            logger.debug("🔀 AgentRouter 已初始化")
+        return self._router
     
     # ==================== 辅助方法 ====================
     
@@ -442,16 +466,60 @@ class ChatService:
                 )
             
             # =====================================================================
-            # 🎯 直接调用 SimpleAgent（意图分析在 Agent 内部完成）
+            # 🎯 V7 路由层：决定使用 SimpleAgent 还是 MultiAgentOrchestrator
             # =====================================================================
             # 
-            # 【待扩展】Multi-Agent 路由逻辑已注释，保留作为未来扩展：
-            # - 如需启用 Multi-Agent，取消注释下方代码块
-            # - 参考 core/multi_agent/ 模块
+            # enable_routing=False（默认）:
+            #   - 向后兼容模式
+            #   - 意图分析在 SimpleAgent 内部完成
+            #   - 直接调用 SimpleAgent.chat()
+            # 
+            # enable_routing=True:
+            #   - 路由层模式
+            #   - 意图分析在路由层完成（AgentRouter）
+            #   - 根据复杂度决定使用 SimpleAgent 或 MultiAgentOrchestrator
             # =====================================================================
             
             # 初始化 broadcaster 的消息累积
             agent.broadcaster.start_message(session_id, assistant_message_id)
+            
+            # 路由决策（仅当启用路由时）
+            use_multi_agent = False
+            routing_intent = None
+            
+            if self.enable_routing:
+                router = self._get_router()
+                routing_decision = await router.route(
+                    message=message,
+                    history=history_messages
+                )
+                use_multi_agent = routing_decision.use_multi_agent
+                routing_intent = routing_decision.intent
+                
+                logger.info(
+                    f"🔀 路由决策: complexity={routing_decision.complexity_score:.2f}, "
+                    f"use_multi_agent={use_multi_agent}, "
+                    f"intent={routing_intent.category if routing_intent else 'N/A'}"
+                )
+            
+            # 根据路由决策选择执行路径
+            if use_multi_agent:
+                # 【P1 待实现】多智能体执行
+                # from core.agent.multi import MultiAgentOrchestrator
+                # orchestrator = MultiAgentOrchestrator(...)
+                # async for event in orchestrator.execute(
+                #     intent=routing_intent,
+                #     messages=history_messages,
+                #     session_id=session_id,
+                #     message_id=assistant_message_id
+                # ):
+                #     ...
+                logger.warning(
+                    f"⚠️ 多智能体模式尚未实现，降级为单智能体执行 "
+                    f"(session_id={session_id})"
+                )
+                # 降级为 SimpleAgent
+                use_multi_agent = False
             
             # 🎯 调用 Agent.chat()
             # - 意图分析：在 SimpleAgent 内部完成
