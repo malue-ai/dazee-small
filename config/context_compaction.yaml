@@ -1,0 +1,28 @@
+# 上下文压缩配置（三层防护策略）
+#
+# 核心原则：
+# 1. 用户体验和问答效果优先
+# 2. 静默处理，用户无感知
+# 3. 不警告用户，不建议开启新会话
+
+# 默认 QoS 等级
+default_qos_level: "pro"
+
+# QoS 等级对应的 token 预算
+qos_token_budgets:
+  free: 50000        # 免费用户
+  basic: 150000      # 基础付费
+  pro: 200000        # 专业版（默认）
+  enterprise: 1000000  # 企业版
+
+# L2 策略：历史消息裁剪配置
+history_trimming:
+  max_history_messages: 50   # 最大保留消息数
+  preserve_first_n: 2        # 始终保留前 N 轮（建立上下文）
+  preserve_last_n: 10        # 始终保留最近 N 轮（当前上下文）
+  preserve_tool_results: true  # 保留含 tool_result 的消息
+
+# L3 策略：后端预警配置（仅日志，用户无感知）
+backend_warning:
+  warning_threshold: 0.8     # 80% 时后端日志警告
+  enable_metrics: true       # 启用 token 使用统计

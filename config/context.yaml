@@ -1,0 +1,136 @@
+# 上下文管理框架配置
+# Context Management Framework Configuration
+
+# ==================== 全局配置 ====================
+context_manager:
+  # 融合引擎配置
+  fusion:
+    max_contexts: 10  # 融合后最多保留的上下文数量
+    strategy: "weighted_merge"  # 融合策略: weighted_merge | round_robin
+    
+    # 数据源权重（用于 weighted_merge 策略）
+    weights:
+      knowledge: 1.0  # 知识库权重
+      memory: 0.9     # 用户记忆权重
+    
+    # 去重配置
+    deduplication:
+      enabled: true
+      similarity_threshold: 0.9  # 相似度阈值（0-1），超过此值视为重复
+  
+  # 注入器配置
+  injector:
+    max_tokens: 2000  # 上下文最大 Token 数量（预算控制）
+    format_style: "structured"  # 格式化风格: structured | narrative
+    
+    # Token 估算（用于预算控制）
+    token_estimation:
+      # 简化估算：平均 1 token ≈ N 字符
+      chars_per_token: 2  # 混合语言（中英文）
+  
+  # 性能配置
+  performance:
+    concurrent_retrieval: true  # 是否并发检索多个数据源
+    timeout_seconds: 5  # 单个数据源检索超时时间
+
+# ==================== 数据源配置 ====================
+
+# 知识库提供者（Ragie）
+knowledge_provider:
+  enabled: true
+  name: "ragie"
+  
+  # 检索配置
+  retrieval:
+    top_k: 5  # 每次检索返回的结果数量
+    min_score: 0.7  # 最小相关性评分（低于此值的结果会被过滤）
+  
+  # Ragie 特定配置（TODO: 根据实际 Ragie SDK 调整）
+  ragie:
+    api_key: "${RAGIE_API_KEY}"  # 从环境变量读取
+    endpoint: "https://api.ragie.ai"
+    partition_prefix: "user_"  # 用户分区前缀
+  
+  # 缓存配置（未来优化）
+  cache:
+    enabled: false
+    ttl_seconds: 3600  # 缓存有效期（1小时）
+    max_size: 1000  # 最大缓存条目数
+
+# 用户记忆提供者（Mem0）
+memory_provider:
+  enabled: true
+  name: "mem0"
+  
+  # 检索配置
+  retrieval:
+    top_k: 5  # 每次检索返回的结果数量
+    min_score: 0.6  # 最小相关性评分
+  
+  # Mem0 特定配置
+  mem0:
+    # Mem0 Pool 配置（复用现有配置）
+    pool_size: 5
+    timeout_seconds: 10
+  
+  # 更新配置
+  update:
+    # 对话结束后，是否自动更新用户记忆
+    auto_update: true
+    # 批量更新间隔（秒）
+    batch_interval_seconds: 60
+
+# ==================== 意图配置 ====================
+
+# 根据意图决定检索哪些数据源
+intent_mapping:
+  # 默认意图（未指定意图时使用）
+  default:
+    needs_knowledge: true
+    needs_personalization: true
+  
+  # 具体意图示例
+  intents:
+    # 纯知识问答（如"什么是量子计算？"）
+    knowledge_qa:
+      needs_knowledge: true
+      needs_personalization: false
+    
+    # 个性化推荐（如"推荐一些书"）
+    personalized_recommendation:
+      needs_knowledge: true
+      needs_personalization: true
+    
+    # 闲聊（如"你好"）
+    chitchat:
+      needs_knowledge: false
+      needs_personalization: true
+    
+    # 操作指令（如"帮我创建一个文件"）
+    action:
+      needs_knowledge: false
+      needs_personalization: false
+
+# ==================== 日志配置 ====================
+logging:
+  level: "INFO"  # DEBUG | INFO | WARNING | ERROR
+  
+  # 详细日志（用于调试）
+  verbose:
+    enabled: false
+    log_context_content: false  # 是否记录上下文内容（注意隐私）
+    log_prompt_content: false   # 是否记录完整提示词
+
+# ==================== 监控配置 ====================
+monitoring:
+  # 性能指标
+  metrics:
+    enabled: true
+    track_latency: true  # 跟踪检索延迟
+    track_context_size: true  # 跟踪上下文大小
+  
+  # 健康检查
+  health_check:
+    enabled: true
+    interval_seconds: 60  # 健康检查间隔
+    alert_on_failure: true  # 失败时告警

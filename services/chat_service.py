@@ -25,6 +25,8 @@ from core.context import Context
 from core.output import OutputFormatter, create_output_formatter  # 🆕 V6.3
 # 🆕 容错机制（基础设施层）
 from infra.resilience import with_timeout, with_retry, get_circuit_breaker
+# 🆕 上下文压缩（简化版，使用 Claude SDK 原生 compaction）
+from core.context.compaction import QoSLevel, get_compaction_threshold, get_context_awareness_prompt
 # 【待扩展】Multi-Agent 模块（已注释）
 # from core.multi_agent import MultiAgentOrchestrator, MultiAgentConfig
 from services.session_service import SessionService, get_session_service, SessionNotFoundError
@@ -69,7 +71,8 @@ class ChatService:
     def __init__(
         self,
         session_service: Optional[SessionService] = None,
-        default_model: str = "claude-sonnet-4-5-20250929"
+        default_model: str = "claude-sonnet-4-5-20250929",
+        qos_level: QoSLevel = QoSLevel.PRO  # 🆕 P0: QoS 等级，默认 Pro
         # 【待扩展】Multi-Agent 配置（已注释）
         # multi_agent_config: Optional[MultiAgentConfig] = None
     ):
@@ -88,6 +91,16 @@ class ChatService:
         
         # 🆕 容错机制：熔断器
         self.agent_breaker = get_circuit_breaker("agent_execution")
+        
+        # 🆕 上下文压缩（简化版）
+        # 核心原则：使用 Claude SDK 原生 compaction，用户无感知
+        # QoS 仅用于后端成本统计，不影响用户体验
+        self.qos_level = qos_level
+        self.compaction_threshold = get_compaction_threshold(qos_level)
+        logger.info(
+            f"✅ Context Compaction 配置: qos_level={qos_level.value}, "
+            f"threshold={self.compaction_threshold:,} tokens (Claude SDK 原生处理)"
+        )
     
     # ==================== 辅助方法 ====================
     
@@ -382,7 +395,51 @@ class ChatService:
                 conversation_service=self.conversation_service
             )
             history_messages = await context.load_messages()
-            logger.info(f"📚 历史消息已加载: {len(history_messages)} 条")
+            original_count = len(history_messages)
+            logger.info(f"📚 历史消息已加载: {original_count} 条")
+            
+            # =====================================================================
+            # 🎯 上下文管理策略（三层防护，用户无感知）
+            # =====================================================================
+            # 
+            # L1. Memory Tool 状态保存（在 System Prompt 中指导 Claude）
+            # L2. 历史消息智能裁剪（服务层自动执行）
+            # L3. QoS 成本控制（后端日志警告，用户无感知）
+            # 
+            # 核心原则：
+            # 1. 静默处理，用户完全无感知
+            # 2. 不警告用户，不建议开启新会话
+            # 3. 优先保证问答效果，其次控制成本
+            # =====================================================================
+            
+            # L2 策略：智能裁剪历史消息
+            from core.context.compaction import (
+                get_context_strategy, 
+                trim_history_messages,
+                estimate_tokens,
+                should_warn_backend
+            )
+            
+            context_strategy = get_context_strategy(self.qos_level)
+            
+            # 裁剪历史消息（保留首轮 + 最近 N 轮 + 关键 tool_result）
+            history_messages = trim_history_messages(history_messages, context_strategy)
+            
+            if len(history_messages) < original_count:
+                logger.info(
+                    f"✂️ L2 历史消息裁剪: {original_count} → {len(history_messages)} 条 "
+                    f"(保留前{context_strategy.preserve_first_n}轮 + "
+                    f"最近{context_strategy.preserve_last_n}轮 + tool_results)"
+                )
+            
+            # L3 策略：后端 token 预警（用户无感知）
+            estimated_tokens = estimate_tokens(history_messages)
+            if should_warn_backend(estimated_tokens, context_strategy):
+                logger.warning(
+                    f"⚠️ L3 Token 预警（后端）: {estimated_tokens:,} / "
+                    f"{context_strategy.token_budget:,} tokens "
+                    f"(QoS={self.qos_level.value})"
+                )
             
             # =====================================================================
             # 🎯 直接调用 SimpleAgent（意图分析在 Agent 内部完成）

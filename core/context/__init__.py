@@ -1,81 +1,50 @@
 """
-Context Engineering 模块
+上下文管理框架
 
-先进上下文管理策略实现
+统一管理知识库（Ragie）、用户记忆（Mem0）、历史对话（DB）等数据源，
+为 LLM 提供个性化上下文。
+
+核心理念：
+- Ragie 和 Mem0 本质相同：都是为 LLM 提供上下文的数据源
+- 统一检索、融合、注入流程
+- 易于扩展新的数据源
+
+使用方式：
+    from core.context import get_context_manager
+    
+    context_mgr = get_context_manager()
+    
+    # 获取增强后的提示词
+    enhanced_prompt = await context_mgr.get_enhanced_prompt(
+        base_prompt="你是一个智能助手",
+        query="推荐一些适合我的书",
+        user_id="user_123"
+    )
+    
+    # 更新用户记忆
+    await context_mgr.update_context(
+        user_id="user_123",
+        source_type=ContextType.MEMORY,
+        data={"messages": [...]}
+    )
 """
-
-# 运行时上下文
-from .runtime import RuntimeContext, create_runtime_context
-
-# 会话上下文
-from .conversation import Context, create_context
-
-# 上下文工程优化
-from .context_engineering import (
-    # KV-Cache 优化
-    CacheOptimizer,
-    
-    # Todo 重写
-    TodoRewriter,
-    
-    # 工具遮蔽
-    AgentState,
-    ToolMaskConfig,
-    ToolMasker,
-    
-    # 可恢复压缩
-    CompressedReference,
-    RecoverableCompressor,
-    
-    # 结构化变异
-    StructuralVariation,
-    
-    # 错误保留
-    ErrorRecord,
-    ErrorRetention,
-    
-    # 整合管理器
-    ContextEngineeringManager,
-    create_context_engineering_manager,
-)
-
-from .prompt_manager import (
-    PromptManager,
-    PromptAppendRule,
-    PromptState,
-    AppendedFragment,
-    create_prompt_manager,
-    get_prompt_manager,
-)
+from .provider import ContextProvider, ContextType
+from .manager import ContextManager, get_context_manager
+from .retriever import ContextRetriever
+from .fusion import FusionEngine
+from .injector import ContextInjector
 
 __all__ = [
-    # 运行时上下文
-    "RuntimeContext",
-    "create_runtime_context",
+    # 主入口
+    "ContextManager",
+    "get_context_manager",
     
-    # 会话上下文
-    "Context",
-    "create_context",
+    # 核心接口
+    "ContextProvider",
+    "ContextType",
     
-    # 上下文工程优化
-    "CacheOptimizer",
-    "TodoRewriter",
-    "AgentState",
-    "ToolMaskConfig",
-    "ToolMasker",
-    "CompressedReference",
-    "RecoverableCompressor",
-    "StructuralVariation",
-    "ErrorRecord",
-    "ErrorRetention",
-    "ContextEngineeringManager",
-    "create_context_engineering_manager",
-    
-    # Prompt 管理（与 RuntimeContext 集成）
-    "PromptManager",
-    "PromptAppendRule",
-    "PromptState",
-    "AppendedFragment",
-    "create_prompt_manager",
-    "get_prompt_manager",
+    # 子组件（高级用法）
+    "ContextRetriever",
+    "FusionEngine",
+    "ContextInjector",
 ]

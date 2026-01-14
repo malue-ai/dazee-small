@@ -26,6 +26,7 @@ SimpleAgent - 精简版核心 Agent
 # 1. 标准库
 import asyncio
 import json
+import os
 from datetime import datetime
 from typing import Dict, Any, List, Optional, AsyncGenerator
 
@@ -132,6 +133,23 @@ class SimpleAgent:
         
         # 🆕 预配置的 APIs（用于 api_calling 工具自动注入认证）
         self.apis_config = apis_config or []
+        
+        # 🆕 上下文管理策略（三层防护）
+        # 配置来源：环境变量 QOS_LEVEL + 框架配置 config/context_compaction.yaml
+        # 注意：不从实例配置读取，运营人员无需配置此项
+        from core.context.compaction import get_context_strategy, QoSLevel
+        qos_level_str = os.getenv("QOS_LEVEL", "pro")
+        try:
+            qos_level = QoSLevel(qos_level_str)
+        except ValueError:
+            qos_level = QoSLevel.PRO
+        
+        self.context_strategy = get_context_strategy(qos_level=qos_level)
+        logger.debug(
+            f"✓ 上下文策略: L1_memory={self.context_strategy.enable_memory_guidance}, "
+            f"L2_trim={self.context_strategy.enable_history_trimming}, "
+            f"budget={self.context_strategy.token_budget:,} tokens"
+        )
         
         # 从 Schema 读取运行时参数（覆盖传入的参数）
         if schema is not None:
@@ -627,8 +645,17 @@ class SimpleAgent:
                        f"缓存={cached_size}字符 + 运行时={full_size - cached_size}字符 = {full_size}字符")
         elif self.system_prompt:
             # 使用用户定义的 System Prompt + PromptManager 追加内容
-            system_prompt = prompt_manager.build_system_prompt(ctx, base_prompt=self.system_prompt)
-            logger.info(f"✅ 使用用户定义的 System Prompt + PromptManager 追加 ({len(self.system_prompt)}字符)")
+            enhanced_prompt = self.system_prompt
+            
+            # 🆕 追加 Memory Guidance Prompt（L1 策略，可配置）
+            if self.context_strategy.enable_memory_guidance:
+                from core.context.compaction import get_memory_guidance_prompt
+                memory_guidance = get_memory_guidance_prompt()
+                enhanced_prompt = f"{self.system_prompt}\n\n{memory_guidance}"
+            
+            system_prompt = prompt_manager.build_system_prompt(ctx, base_prompt=enhanced_prompt)
+            logger.info(f"✅ 使用用户定义的 System Prompt + PromptManager 追加 "
+                       f"({len(self.system_prompt)}字符, L1={self.context_strategy.enable_memory_guidance})")
         else:
             # 使用框架默认 Prompt（根据意图识别结果决定是否检索 Mem0）+ PromptManager 追加
             from prompts.universal_agent_prompt import get_universal_agent_prompt
@@ -1029,24 +1056,40 @@ class SimpleAgent:
                 user_profile=user_profile
             )
             
+            # 🆕 追加 Memory Guidance Prompt（L1 策略：指导 Claude 使用 Memory Tool）
+            # 可通过实例配置 context_management.enable_memory_guidance 控制
+            if self.context_strategy.enable_memory_guidance:
+                from core.context.compaction import get_memory_guidance_prompt
+                system_blocks.append({
+                    "type": "text",
+                    "text": f"\n\n{get_memory_guidance_prompt()}"
+                    # 不添加 cache_control，每次都更新
+                })
+            
             logger.info(f"✅ 多层缓存 System Prompt: complexity={task_complexity.value}, "
-                       f"layers={len(system_blocks)}")
+                       f"layers={len(system_blocks)} (含 Context Awareness)")
             
             return system_blocks
         
         # Fallback: 使用框架默认 Prompt（单层缓存）
         from prompts.universal_agent_prompt import get_universal_agent_prompt
+        from core.context.compaction import get_memory_guidance_prompt
+        
         base_prompt = get_universal_agent_prompt(
             user_id=user_id,
             user_query=user_query,
             skip_memory_retrieval=skip_memory
         )
         
+        # 🆕 追加 Memory Guidance Prompt（L1 策略）
+        memory_guidance = get_memory_guidance_prompt()
+        full_prompt = f"{base_prompt}\n\n{memory_guidance}"
+        
         # 单层格式（向后兼容）
         # 🔧 不在这里添加 cache_control，由 claude.py 统一处理
         system_blocks = [{
             "type": "text",
-            "text": base_prompt
+            "text": full_prompt
         }]
         
         logger.info(f"✅ System Prompt (fallback): {len(base_prompt)} 字符")
