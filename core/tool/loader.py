@@ -52,6 +52,11 @@ TOOL_CATEGORIES = {
         "ppt_generator",
         "slidespeak_render",
     ],
+    
+    # 文档解析类（允许使用简写配置）
+    "document_partition": [
+        "document_partition_tool",
+    ],
 }
 
 # 核心工具（Level 1）- 始终启用，不暴露给用户配置

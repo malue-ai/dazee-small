@@ -109,33 +109,52 @@ class DocumentPartitionTool(BaseTool):
         """
         return """Partition API文档解析工具 - 将各种格式的网络文档转为结构化数据（支持分段解析）
 
+⚠️ 重要提示：mode 参数决定了返回的内容范围
+- overview: 仅返回前3页的概要（用于快速了解文档结构）
+- pages: 返回指定页面的完整内容（需配合 pages 参数）
+- full: 返回全部内容（仅限小文档<10页）
+
+如果用户要求"解析文档"、"读取文档"、"分析文档内容"等，通常需要使用 mode='full' 或 mode='pages'，而不是 overview！
+
 核心功能：
 1. 🆕 **分段解析**：支持三种模式，优化大文档处理
-   - overview: 快速概览（3-5秒，返回摘要和目录）
-   - pages: 按需加载（解析指定页面，如 "1-10" 或 "8,12-15"）
-   - full: 完整解析（仅限小文档 <10页）
+   - overview: 快速概览（3-5秒，仅返回前3页摘要和目录）⚠️ 不是完整内容
+   - pages: 按需加载（解析指定页面，如 pages="1-10" 或 pages="8,12-15"）
+   - full: 完整解析（返回全部内容，仅限小文档 <10页）
 2. 解析多种格式：PDF、Word(.docx)、PowerPoint(.pptx)、Excel(.xlsx)、文本(.txt)等
 3. 智能解析策略：auto（自动选择）、fast（快速）、hi_res（高精度含表格）
 4. 仅支持URL输入（不支持本地文件路径）
 5. 自动缓存结果（节省API调用成本）
 
-使用建议：
-- **大文档**（>10页）：先用 mode='overview' 快速查看，再用 mode='pages' 深入分析
-- **小文档**（<10页）：直接用 mode='full' 获取完整内容
-- **特定章节**：根据 overview 返回的目录，用 pages='8-15' 读取指定章节
-- **表格数据**：用 strategy='hi_res' 保留表格结构
+使用决策树（请严格遵循）：
+1. 用户要求"解析/分析/读取文档内容" → 优先使用 mode='full'
+2. 如果文档>10页 → 先用 mode='overview' 查看结构，然后用 mode='pages' 读取关键章节
+3. 用户明确指定"看看目录"、"文档概要" → 使用 mode='overview'
+4. 用户要求"读取第X章"、"分析某个部分" → 使用 mode='pages' + 指定页码
+
+典型场景示例：
+- 场景1：用户上传PDF并说"帮我分析这个文档"
+  正确做法：mode='full'（如果<10页）或 mode='overview' 然后 mode='pages'
+  ❌ 错误做法：只调用 overview 就停止
+  
+- 场景2：用户说"这个论文讲了什么"
+  正确做法：mode='full' 获取完整内容
+  ❌ 错误做法：overview 返回摘要后就回答（信息不完整）
+  
+- 场景3：用户说"看看这个文档的目录"
+  正确做法：mode='overview'
 
 参数说明：
 - source: 文档URL（必需）- HTTP/HTTPS 协议
-- mode: 解析模式（可选，默认 'overview'）
-  * 'overview': 概要模式，快速返回文档结构
-  * 'pages': 分页模式，解析指定页面
-  * 'full': 完整模式，解析全部内容
+- mode: 解析模式（⚠️ 关键参数，默认 'overview' 只返回概要）
+  * 'overview': 概要模式，仅返回前3页的文档结构（不是完整内容！）
+  * 'pages': 分页模式，返回指定页面的完整内容（需设置 pages 参数）
+  * 'full': 完整模式，返回全部内容（<10页的文档推荐使用）
 - pages: 页码范围（mode='pages'时必需），如 "5" 或 "1-10" 或 "1-5,8-10"
 - strategy: 解析策略（可选，默认 'auto'）
-  * 'auto': 自动选择最佳策略
-  * 'fast': 快速提取纯文本
-  * 'hi_res': 高精度解析（含表格、图片）
+  * 'auto': 自动选择最佳策略（推荐，处理时间约1-2分钟）
+  * 'fast': 快速提取纯文本（速度快，约30-60秒）
+  * 'hi_res': 高精度解析（含表格、图片，速度慢，约2-3分钟）⚠️ 需要更长等待时间
 - use_cache: 是否使用缓存（可选，默认 True）
 
 返回格式：
@@ -148,13 +167,14 @@ class DocumentPartitionTool(BaseTool):
     "element_count": 370,
     "processing_time": 3.2
   },
-  "access_hint": {...}  // overview模式会提供访问提示
+  "warning": "...",  // overview模式会有警告提示
+  "next_action": {...}  // 建议的下一步操作
 }
 
-性能优势：
-- 首次响应：3-5秒（vs 传统30秒）
-- Token成本：节省80-90%（按需加载）
-- 用户体验：快速概览 + 按需深入
+性能参考（单页）：
+- fast 策略：30-60秒
+- auto 策略：1-2分钟
+- hi_res 策略：2-3分钟（含 OCR 和表格识别）
 
 注意：此工具仅接受URL输入，不支持本地文件路径
 """
@@ -173,7 +193,7 @@ class DocumentPartitionTool(BaseTool):
                 },
                 "mode": {
                     "type": "string",
-                    "description": "解析模式：'overview'（概要模式，快速返回文档结构）、'pages'（分页模式，解析指定页面）、'full'（完整模式，解析全部内容，仅限小文档<10页）",
+                    "description": "⚠️ 解析模式（决定返回内容范围）：'overview'（仅返回前3页概要，不是完整内容！）、'pages'（返回指定页面完整内容，需配合pages参数）、'full'（返回全部内容，推荐用于文档解析任务）。用户要求'解析文档'时应使用'full'或'pages'，而不是'overview'",
                     "enum": ["overview", "pages", "full"],
                     "default": "overview"
                 },
@@ -184,7 +204,7 @@ class DocumentPartitionTool(BaseTool):
                 },
                 "strategy": {
                     "type": "string",
-                    "description": "解析策略：'auto'（自动选择）、'fast'（快速提取纯文本）、'hi_res'（高精度，适合复杂文档）",
+                    "description": "解析策略：'auto'（自动选择，约1-2分钟）、'fast'（快速提取纯文本，约30-60秒）、'hi_res'（高精度含表格，约2-3分钟）⚠️ hi_res 速度最慢但最准确",
                     "enum": ["auto", "fast", "hi_res"],
                     "default": "auto"
                 },
@@ -490,8 +510,18 @@ class DocumentPartitionTool(BaseTool):
                 # 准备文件
                 file_name = os.path.basename(file_path)
                 
+                # 🆕 根据策略动态调整超时时间
+                # hi_res 策略需要更长的处理时间（OCR + 表格识别）
+                if strategy == "hi_res":
+                    timeout_seconds = 180  # hi_res: 3分钟
+                    logger.debug(f"   使用 hi_res 策略，超时时间: {timeout_seconds}秒")
+                elif strategy == "auto":
+                    timeout_seconds = 120  # auto: 2分钟
+                else:  # fast
+                    timeout_seconds = 60   # fast: 1分钟
+                
                 # 使用aiohttp发送multipart请求
-                timeout = aiohttp.ClientTimeout(total=self.config.timeout_api)
+                timeout = aiohttp.ClientTimeout(total=timeout_seconds)
                 async with aiohttp.ClientSession(timeout=timeout) as session:
                     # 创建multipart表单数据
                     form_data = aiohttp.FormData()
@@ -541,7 +571,7 @@ class DocumentPartitionTool(BaseTool):
                             
             except asyncio.TimeoutError:
                 if attempt == self.config.max_retries - 1:
-                    raise Exception(f"API调用超时（{self.config.timeout_api}秒）")
+                    raise Exception(f"API调用超时（{timeout_seconds}秒，策略={strategy}）")
                 logger.warning(f"超时，重试 {attempt + 1}/{self.config.max_retries}")
             except Exception as e:
                 if attempt == self.config.max_retries - 1:
@@ -901,36 +931,78 @@ class DocumentPartitionTool(BaseTool):
         # 生成摘要
         summary = self._generate_summary(first_pages)
         
+        # 获取总页数
+        total_pages = doc_info.get("total_pages")
+        
+        # 🆕 构建警告信息和下一步建议
+        warning_message = f"⚠️ 这是文档概要（仅解析了前3页，共{total_pages}页）。这不是完整内容！"
+        
+        next_action = None
+        if total_pages:
+            if total_pages <= 10:
+                # 小文档：建议直接读取全部
+                next_action = {
+                    "recommendation": "建议读取完整内容",
+                    "reason": f"文档较小（{total_pages}页），可一次性读取",
+                    "suggested_call": {
+                        "tool": "document_partition_tool",
+                        "parameters": {
+                            "source": source,
+                            "mode": "full",
+                            "strategy": "auto"
+                        }
+                    }
+                }
+            else:
+                # 大文档：建议分段读取
+                next_action = {
+                    "recommendation": "建议分段读取关键章节",
+                    "reason": f"文档较大（{total_pages}页），建议根据大纲选择关键章节",
+                    "suggested_call": {
+                        "tool": "document_partition_tool",
+                        "parameters": {
+                            "source": source,
+                            "mode": "pages",
+                            "pages": "示例: 1-10 或根据大纲选择",
+                            "strategy": "auto"
+                        }
+                    }
+                }
+        
         return {
             "success": True,
             "mode": "overview",
+            "warning": warning_message,  # 🆕 醒目警告
+            "message": "文档概要已生成（仅前3页）",
             "data": {
                 "summary": summary,
                 "outline": outline,
-                "preview": first_pages[:50]  # 前50个元素作为预览
+                "preview": first_pages[:10]  # 减少到前10个元素，避免混淆
             },
             "metadata": {
                 "source": source,
-                "total_pages": doc_info.get("total_pages"),
+                "total_pages": total_pages,
+                "parsed_pages": 3,  # 🆕 明确显示只解析了3页
                 "file_type": doc_info.get("file_type"),
                 "file_size": doc_info.get("file_size"),
                 "element_count": len(first_pages),
                 "from_cache": False
             },
+            "next_action": next_action,  # 🆕 智能建议
             "access_hint": {
-                "message": "这是文档概要。如需完整内容，请使用以下方式：",
+                "message": "若需完整内容，请立即使用以下方式之一：",
                 "examples": [
                     {
-                        "description": "读取特定页面",
-                        "example": f"mode='pages', pages='5-10'"
+                        "description": "📖 读取全部内容（推荐用于小文档）",
+                        "example": f"mode='full'"
                     },
                     {
-                        "description": "读取特定章节（根据大纲）",
-                        "example": f"mode='pages', pages='8-15'"
+                        "description": "📄 读取指定页面（推荐用于大文档）",
+                        "example": f"mode='pages', pages='4-20'"
                     },
                     {
-                        "description": "高精度读取（含表格）",
-                        "example": f"mode='pages', pages='12-14', strategy='hi_res'"
+                        "description": "🔍 高精度读取（含表格结构）",
+                        "example": f"mode='pages', pages='5-15', strategy='hi_res'"
                     }
                 ]
             }
@@ -995,12 +1067,13 @@ class DocumentPartitionTool(BaseTool):
         return {
             "success": True,
             "mode": "pages",
+            "message": f"✅ 成功解析指定页面内容，共 {len(all_elements)} 个元素",
             "data": {"elements": all_elements},
-            "message": f"成功解析 {len(all_elements)} 个元素",
             "metadata": {
                 "source": source,
                 "total_pages": doc_info.get("total_pages"),
                 "requested_pages": sum(e - s + 1 for s, e in page_ranges),
+                "parsed_pages": sum(e - s + 1 for s, e in page_ranges),  # 🆕 明确显示解析的页数
                 "element_count": len(all_elements),
                 "strategy": strategy,
                 "file_type": doc_info.get("file_type"),
@@ -1059,11 +1132,12 @@ class DocumentPartitionTool(BaseTool):
         return {
             "success": True,
             "mode": "full",
+            "message": f"✅ 成功解析文档全部内容，共 {total_pages if total_pages else '未知'} 页，{len(all_elements)} 个元素",
             "data": {"elements": all_elements},
-            "message": f"成功解析全部内容，共 {len(all_elements)} 个元素",
             "metadata": {
                 "source": source,
                 "total_pages": total_pages,
+                "parsed_pages": total_pages,  # 🆕 明确显示解析了全部页
                 "element_count": len(all_elements),
                 "strategy": strategy,
                 "file_type": doc_info.get("file_type"),
