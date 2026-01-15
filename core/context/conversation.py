@@ -97,6 +97,7 @@ class Context:
         
         try:
             # 1. 加载对话元数据（获取压缩信息）
+            # 注意：这一步失败不应该阻止消息加载
             try:
                 conversation = await self.conversation_service.get_conversation(self.conversation_id)
                 if conversation and conversation.metadata:
@@ -106,10 +107,9 @@ class Context:
                         logger.info(
                             f"📦 检测到压缩信息: from_message_id={self.compression_info.get('from_message_id')}"
                         )
-            except Exception:
-                # 新对话，没有历史消息
-                logger.debug(f"新对话，无历史消息: conversation_id={self.conversation_id}")
-                return []
+            except Exception as e:
+                # 获取对话元数据失败，但仍然继续加载消息
+                logger.debug(f"获取对话元数据失败（可能是新对话）: {e}")
             
             # 2. 加载消息
             result = await self.conversation_service.get_conversation_messages(

@@ -1,5 +1,5 @@
 name: Dazee
-description: 温暖专业的高级工作助理和生活搭子，具备多模态理解、智能调度和深度分析能力
+description: 温暖专业的高级工作助理和生活搭子，擅长任务调度、多模态理解和智能规划
 intent_analyzer:
   enabled: true
   complexity_levels:
@@ -9,9 +9,9 @@ intent_analyzer:
   task_types:
   - system_design
   - data_analysis
-  - research
-  - document_processing
+  - consultation
   - follow_up
+  - qa
   output_formats:
   - text
   - markdown
@@ -20,22 +20,22 @@ intent_analyzer:
   llm_model: claude-haiku-4-5-20251001
 plan_manager:
   enabled: true
-  trigger_condition: complexity >= 'medium' or multi_step_required
-  max_steps: 15
-  granularity: medium
+  trigger_condition: task_type not in ['qa', 'simple_query']
+  max_steps: 20
+  granularity: fine
   allow_dynamic_adjustment: true
   validation_interval: 3
   replan_enabled: true
-  max_replan_attempts: 2
+  max_replan_attempts: 3
   replan_strategy: incremental
-  failure_threshold: 0.3
+  failure_threshold: 0.25
 tool_selector:
   enabled: true
   available_tools:
   - tavily_search
   - exa_search
   - exa_contents
-  - perplexity
+  - web_search
   - pdf2markdown
   - text2flowchart
   - ppt_create
@@ -44,18 +44,20 @@ tool_selector:
   - current_time
   - timezone_conversion
   - api_calling
+  - plan_todo
+  - request_human_confirmation
   selection_strategy: capability_based
   allow_parallel: false
   max_parallel_tools: 1
   base_tools:
-  - current_time
-  - timezone_conversion
+  - plan_todo
+  - request_human_confirmation
   tool_timeout: 300
 memory_manager:
   enabled: true
   retention_policy: session
   episodic_memory: true
-  working_memory_limit: 30
+  working_memory_limit: 50
   auto_compress: true
   compress_threshold: 15
 output_formatter:
@@ -67,26 +69,38 @@ output_formatter:
   - json
   - html
   code_highlighting: false
-  max_output_length: 4000
+  max_output_length: 8000
   json_model_name: null
   json_schema: null
   strict_json_validation: false
   json_ensure_ascii: false
   json_indent: 2
   include_metadata: true
-skills: []
+skills:
+- type: custom
+  skill_id: ppt_create
+  version: latest
+  required: false
+- type: custom
+  skill_id: text2document
+  version: latest
+  required: false
+- type: custom
+  skill_id: text2flowchart
+  version: latest
+  required: false
+- type: custom
+  skill_id: pdf2markdown
+  version: latest
+  required: false
+- type: custom
+  skill_id: nano-banana-omni
+  version: latest
+  required: false
 tools:
 - tavily_search
 - exa_search
-- exa_contents
-- perplexity
-- pdf2markdown
-- text2flowchart
-- ppt_create
-- text2document
-- nano-banana-omni
-- current_time
-- timezone_conversion
+- web_search
 - api_calling
 model: claude-sonnet-4-5-20250929
 max_turns: 20
@@ -95,14 +109,34 @@ context_limits:
   max_context_tokens: 200000
   warning_threshold: 0.8
   truncate_threshold: 0.9
-reasoning: "这是一个复杂的多功能助理场景，需要详细分析：\n\n1. **任务复杂度分析**：\n   - 涉及4种主要意图（系统搭建、BI问数、综合咨询、追问）\n\
-  \   - 需要多步骤工作流（如系统搭建需要先生成流程图再调用API）\n   - 包含复杂的意图识别和切换逻辑\n   - 需要处理多模态输入（文本、图片、文档）\n\
-  \n2. **工具需求**：\n   - 搜索类：tavily_search（快速）、perplexity（深度）、exa_search（精准）\n   - 文档处理：pdf2markdown、text2document\n\
-  \   - 可视化：text2flowchart、ppt_create\n   - 图像生成：nano-banana-omni\n   - 时间处理：current_time\
-  \ + timezone_conversion（原子操作）\n   - API集成：api_calling（调用Coze工作流）\n   - 不需要代码沙箱（无编程任务）\n\
-  \n3. **组件配置理由**：\n   - **intent_analyzer**：必须启用，需要识别4种意图类型，使用LLM进行语义理解\n   - **plan_manager**：必须启用，中等粒度规划适合多步骤任务（如系统搭建的两步流程），允许增量重规划以应对工具失败\n\
-  \   - **tool_selector**：基于能力选择，不允许并行（避免资源冲突和502错误），明确列出所有可用工具\n   - **memory_manager**：会话级记忆，支持追问场景，需要记住历史文件处理结果避免重复调用\n\
-  \   - **output_formatter**：Markdown格式，友好展示分析结果和报告\n\n4. **关键约束**：\n   - 严格的URL诚信原则（最高优先级）\n\
-  \   - 文件处理安全（只处理当前轮次文件，防止502）\n   - 参数完整性检查（防止空响应）\n   - HITL机制（意图不明确时暂停）\n   -\
-  \ 耗时工具提前告知（用户体验）\n\n5. **max_turns设置**：20轮，因为：\n   - 系统搭建可能需要多轮迭代优化\n   - BI问数可能涉及多次追问和数据探索\n\
-  \   - 深度研究需要多轮搜索和整合\n   - 追问场景需要保持上下文连续性"
+reasoning: '这是一个高度复杂的多功能助理Agent，具有以下特点：
+
+
+  1. **复杂任务规划**：需要强大的Plan Manager支持系统搭建、BI分析、报告生成等多步骤任务，设置max_steps=20以应对复杂流程
+
+
+  2. **精细意图识别**：需要区分4种意图类型（系统搭建/BI问数/综合咨询/追问），启用LLM增强的Intent Analyzer
+
+
+  3. **丰富工具生态**：涉及搜索、文档处理、图表生成、API调用等多种工具，需要capability_based智能选择策略
+
+
+  4. **强制规划机制**：非简单问答必须使用plan_todo工具，需要在tool_selector中将其设为base_tools
+
+
+  5. **HITL交互**：多处需要用户确认（风格选择、方案决策等），request_human_confirmation为核心工具
+
+
+  6. **会话记忆**：需要追踪历史文件、追问上下文，启用episodic_memory和较大的working_memory_limit(50)
+
+
+  7. **质量验证**：最终验证协议需要replan能力，设置max_replan_attempts=3
+
+
+  8. **安全约束**：文件处理、URL诚信等规则需要通过memory和plan机制保障
+
+
+  9. **禁用并行**：系统强调顺序执行和状态追踪，设置allow_parallel=false
+
+
+  10. **长对话支持**：复杂任务可能需要多轮交互，设置max_turns=25'

@@ -343,11 +343,14 @@ class ChatService:
             events = self.session_service.events
             
             # 生成 Assistant 消息 ID
-            assistant_message_id = f"msg_{uuid4().hex[:24]}"
+            assistant_message_id = uuid4().hex
             
             # 1️⃣ 先保存到数据库（确保数据持久化）
             content_json = json.dumps(message, ensure_ascii=False)
             
+            # 🔧 临时修复：在同一个数据库会话中保存消息并加载历史
+            # 避免 SQLite 并发问题导致的数据库会话隔离问题
+            history_messages = []
             async with AsyncSessionLocal() as session:
                 # 保存用户消息（包含文件元数据）
                 user_metadata = {
@@ -381,6 +384,34 @@ class ChatService:
                     }
                 )
                 logger.info(f"✅ Assistant 占位记录已创建: id={assistant_message_id}")
+                
+                # 🔧 在同一个会话中立即加载消息（避免并发问题）
+                db_messages = await crud.list_messages(
+                    session=session,
+                    conversation_id=conversation_id,
+                    limit=1000,
+                    order="asc"
+                )
+                
+                # 转换为 Agent 格式
+                for db_msg in db_messages:
+                    # 跳过 Assistant 占位消息（status=processing）
+                    if db_msg.role == "assistant" and db_msg.status == "processing":
+                        continue
+                    
+                    # 解析 content
+                    content = db_msg.content
+                    try:
+                        content = json.loads(content) if content else []
+                    except json.JSONDecodeError:
+                        pass
+                    
+                    history_messages.append({
+                        "role": db_msg.role,
+                        "content": content
+                    })
+                
+                logger.info(f"📚 历史消息已加载（同会话）: {len(history_messages)} 条")
             
             # 2️⃣ 数据库成功后，再发送 SSE 事件通知前端
             await events.message.emit_message_start(
@@ -389,14 +420,7 @@ class ChatService:
                 model=self.default_model
             )
             
-            # 🎯 使用 Context 加载历史消息（核心上下文管理模块）
-            context = Context(
-                conversation_id=conversation_id,
-                conversation_service=self.conversation_service
-            )
-            history_messages = await context.load_messages()
             original_count = len(history_messages)
-            logger.info(f"📚 历史消息已加载: {original_count} 条")
             
             # =====================================================================
             # 🎯 上下文管理策略（三层防护，用户无感知）
@@ -769,15 +793,15 @@ class ChatService:
             
             logger.info(f"📎 处理了 {len(processed_files)} 个文件")
             
-            # 提取文件元数据（用于保存到数据库，字段名统一为 API 格式）
+            # 提取文件元数据（用于保存到消息 metadata，供历史记录展示）
+            # 使用 file_url 方式，不依赖数据库
             files_metadata = []
             for pf in processed_files:
                 files_metadata.append({
-                    "file_id": pf.file_id,
+                    "file_url": pf.file_url,
                     "file_name": pf.filename,
                     "file_type": pf.mime_type,
-                    "file_size": pf.file_size,
-                    "category": pf.category.value if pf.category else None
+                    "file_size": pf.file_size
                 })
             
             # 获取原始消息文本

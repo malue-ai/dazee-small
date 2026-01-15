@@ -26,6 +26,11 @@ export const useChatStore = defineStore('chat', {
     _currentBlockType: null,
     // 🆕 待处理的工具调用（用于终端日志关联）
     _pendingToolCalls: {},
+    // 🆕 活跃会话状态映射（conversationId -> sessionInfo）
+    activeSessionsMap: {},
+    // 🆕 轮询定时器
+    _pollingTimer: null,
+    _pollingInterval: 3000,  // 轮询间隔 3 秒
   }),
 
   actions: {
@@ -789,6 +794,110 @@ export const useChatStore = defineStore('chat', {
       this.lastEventId = 0
       this.reconnectAttempts = 0
       this.disconnectSSE()
+      this.stopPollingActiveSessions()
+    },
+
+    // ==================== 活跃会话状态管理 ====================
+
+    /**
+     * 开始轮询活跃会话状态
+     */
+    startPollingActiveSessions() {
+      // 避免重复启动
+      if (this._pollingTimer) {
+        return
+      }
+      
+      console.log('🔄 开始轮询活跃会话状态')
+      
+      // 立即执行一次
+      this.refreshActiveSessions()
+      
+      // 设置定时器
+      this._pollingTimer = setInterval(() => {
+        this.refreshActiveSessions()
+      }, this._pollingInterval)
+    },
+
+    /**
+     * 停止轮询活跃会话状态
+     */
+    stopPollingActiveSessions() {
+      if (this._pollingTimer) {
+        clearInterval(this._pollingTimer)
+        this._pollingTimer = null
+        console.log('⏹️ 停止轮询活跃会话状态')
+      }
+    },
+
+    /**
+     * 刷新活跃会话状态
+     */
+    async refreshActiveSessions() {
+      try {
+        const sessions = await this.getUserSessions()
+        
+        // 构建新的 activeSessionsMap
+        const newMap = {}
+        if (sessions && sessions.length > 0) {
+          for (const session of sessions) {
+            if (session.conversation_id) {
+              newMap[session.conversation_id] = {
+                sessionId: session.session_id,
+                status: session.status,
+                progress: session.progress,
+                startTime: session.start_time,
+                messagePreview: session.message_preview
+              }
+            }
+          }
+        }
+        
+        // 更新状态
+        this.activeSessionsMap = newMap
+        
+        // 如果没有活跃会话了，可以停止轮询（减少请求）
+        if (Object.keys(newMap).length === 0 && this._pollingTimer) {
+          // 注意：不立即停止，保持轮询以便检测新的活跃会话
+          // 可以选择降低轮询频率或保持
+        }
+        
+      } catch (error) {
+        // 静默失败，不影响用户体验
+        console.warn('⚠️ 刷新活跃会话状态失败:', error.message)
+      }
+    },
+
+    /**
+     * 判断指定会话是否正在运行
+     * @param {string} conversationId - 会话ID
+     * @returns {boolean} 是否正在运行
+     */
+    isConversationRunning(conversationId) {
+      if (!conversationId) return false
+      const sessionInfo = this.activeSessionsMap[conversationId]
+      return sessionInfo && sessionInfo.status === 'running'
+    },
+
+    /**
+     * 获取指定会话对应的 session_id
+     * @param {string} conversationId - 会话ID
+     * @returns {string|null} session_id
+     */
+    getSessionIdByConversation(conversationId) {
+      if (!conversationId) return null
+      const sessionInfo = this.activeSessionsMap[conversationId]
+      return sessionInfo?.sessionId || null
+    },
+
+    /**
+     * 获取指定会话的运行信息
+     * @param {string} conversationId - 会话ID
+     * @returns {object|null} 会话运行信息
+     */
+    getConversationSessionInfo(conversationId) {
+      if (!conversationId) return null
+      return this.activeSessionsMap[conversationId] || null
     }
   }
 })
