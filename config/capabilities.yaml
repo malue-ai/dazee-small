@@ -1376,3 +1376,154 @@ capabilities:
     - question
     - conversation_id
     - user_id
+
+# 🆕 文档解析工具（Partition API）
+- name: document_partition_tool
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  invocation_hint: DIRECT
+  level: 2
+  cache_stable: true  # 相同文档的解析结果可以缓存
+  implementation:
+    module: tools.partition
+    class: DocumentPartitionTool
+  capabilities:
+  - document_creation
+  - file_conversion
+  - document_parsing
+  - content_extraction
+  priority: 75
+  cost:
+    time: medium
+    money: paid  # 调用外部 API，需要付费
+  constraints:
+    requires_api: true
+    requires_network: true
+    api_name: unstructured
+    api_key_env: UNSTRUCTURED_API_KEY
+  metadata:
+    description: '文档解析工具 - 将网络文档转为结构化数据（基于 Unstructured Partition API）
+
+      核心功能：
+      • ✅ 解析多种格式：PDF、Word(.docx)、PowerPoint(.pptx)、Excel(.xlsx)、文本等
+      • ✅ 仅支持 URL 输入（不支持本地文件路径）
+      • ✅ 智能解析策略（auto/fast/hi_res）
+      • ✅ 自动缓存解析结果（可配置）
+      • ✅ 提取文字、表格、标题等结构化元素
+      
+      解析策略：
+      • auto：自动选择最佳策略（推荐）
+      • fast：快速提取纯文本（适合简单文档）
+      • hi_res：高精度解析（适合复杂文档，含表格、图表）
+      
+      输出格式：
+      • json：结构化 JSON 格式（包含元素类型、文本、元数据）
+      • text：纯文本拼接（适合直接阅读）
+      
+      环境变量配置：
+      • UNSTRUCTURED_API_KEY：必需，API 密钥
+      • UNSTRUCTURED_API_URL：可选，API 地址
+      • PARTITION_CACHE_ENABLED：可选，是否启用缓存（true/false）
+      • PARTITION_CACHE_DIR：可选，缓存目录路径
+      '
+    preferred_for:
+    - 解析文档内容
+    - 提取 PDF 文字
+    - 分析 Word 文档
+    - 提取 PPT 内容
+    - 文档格式转换
+    - 批量文档处理
+    keywords:
+    - 文档
+    - 解析
+    - PDF
+    - Word
+    - PPT
+    - docx
+    - pptx
+    - 提取
+    - 分析
+    - Partition
+    note: '使用 Unstructured Partition API，需要配置 UNSTRUCTURED_API_KEY。仅支持 URL 输入，不支持本地文件路径。支持缓存以节省 API 调用。'
+  input_schema:
+    type: object
+    properties:
+      source:
+        type: string
+        description: 文档URL（必需），如 'https://example.com/doc.pdf'。仅支持HTTP/HTTPS协议，不支持本地文件路径
+      strategy:
+        type: string
+        description: 解析策略
+        enum:
+        - auto
+        - fast
+        - hi_res
+        default: auto
+      use_cache:
+        type: boolean
+        description: 是否使用缓存（重复解析相同文档时可加速）
+        default: true
+      output_format:
+        type: string
+        description: 输出格式
+        enum:
+        - json
+        - text
+        default: json
+    required:
+    - source
+  result_compaction:
+    enabled: true
+    strategy: summarize
+    max_length: 2000
+    trigger_condition:
+      element_count_gt: 100  # 超过 100 个元素时精简
+
+# 🆕 示例工具（用于演示工具开发）
+- name: example_tool
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  invocation_hint: DIRECT
+  level: 2
+  cache_stable: true  # 相同输入产生相同输出，可缓存
+  implementation:
+    module: tools.example_tool
+    class: ExampleTool
+  capabilities:
+  - text_processing
+  - content_transformation
+  - demo
+  priority: 80
+  cost:
+    time: fast
+    money: free
+  constraints:
+    requires_api: false
+    requires_network: false
+  metadata:
+    description: '示例工具 - 演示如何开发自定义工具
+
+      核心功能：
+      • ✅ 字符串大写转换
+      • ✅ 字符串小写转换
+      • ✅ 字符串反转
+      • ✅ 支持结果重复
+      
+      使用场景：
+      • 演示工具开发流程
+      • 测试工具加载和执行
+      • 作为新工具开发的模板
+      '
+    preferred_for:
+    - 演示工具开发
+    - 测试工具系统
+    - 学习工具框架
+    keywords:
+    - 示例
+    - 演示
+    - 工具开发
+    - 文本处理
+    - 模板
+    note: '这是一个示例工具，用于演示如何开发和注册自定义工具到 ZenFlux Agent 系统中。'

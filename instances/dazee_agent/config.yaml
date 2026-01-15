@@ -68,6 +68,9 @@ enabled_capabilities:
   
   # --- 动态代码执行 ---
   code_execution: 0
+  
+  # --- 文档解析类 ---
+  document_partition: 1      # 🆕 文档解析工具（Partition API）
 
 
 # ==================== MCP 工具声明 ====================
