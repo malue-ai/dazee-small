@@ -390,10 +390,19 @@ class ToolExecutor:
         # 通用处理
         if hasattr(tool_instance, 'execute'):
             execute_method = getattr(tool_instance, 'execute')
+            
+            # 🆕 依赖注入：从 tool_context 解析依赖参数
+            sig = inspect.signature(execute_method)
+            params = [p for p in sig.parameters.keys() if p != 'self']
+            injected_kwargs = self._resolve_dependencies(params, tool_name)
+            
+            # 合并：tool_input 优先级更高（显式传入的参数覆盖注入的）
+            final_kwargs = {**injected_kwargs, **tool_input}
+            
             if asyncio.iscoroutinefunction(execute_method):
-                return await execute_method(**tool_input)
+                return await execute_method(**final_kwargs)
             else:
-                return execute_method(**tool_input)
+                return execute_method(**final_kwargs)
         
         if callable(tool_instance):
             return tool_instance(**tool_input)

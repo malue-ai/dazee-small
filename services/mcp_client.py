@@ -3,17 +3,17 @@ MCP 客户端 - 使用官方 MCP SDK 实现
 
 支持通过 SSE 协议连接 MCP 服务器并调用工具
 """
-
+import re
 import asyncio
 import os
+import httpx
 from typing import Dict, Any, List, Optional
 
 from contextlib import asynccontextmanager
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 
 from logger import get_logger
-import re
 
 logger = get_logger("mcp_client")
 
@@ -55,7 +55,7 @@ class MCPClientWrapper:
         server_url: str,
         server_name: str,
         auth_token: Optional[str] = None,
-        tool_timeout: float = 300.0,  # 工具调用超时时间（默认 5 分钟）
+        tool_timeout: float = 1200.0,  # 工具调用超时时间（默认 20 分钟）
         connect_timeout: float = 30.0,  # 🆕 连接超时时间（默认 30 秒）
         max_retries: int = 2  # 🆕 最大重试次数（默认 2 次）
     ):
@@ -102,15 +102,24 @@ class MCPClientWrapper:
                 
                 logger.info(f"🔌 连接 MCP 服务器: {self.server_url} (超时: {self.connect_timeout}s)")
                 
-                # 准备 headers
+                # 准备认证 headers
                 headers = {}
                 if self.auth_token:
                     headers["Authorization"] = f"Bearer {self.auth_token}"
                 
-                # 🆕 使用 asyncio.wait_for 添加连接超时
+                # 使用 asyncio.wait_for 添加连接超时
                 try:
-                    # 使用 Streamable HTTP 客户端连接（带超时）
-                    self._http_cm = streamablehttp_client(self.server_url, headers=headers)
+                    # 创建带认证的 HTTP 客户端
+                    self._httpx_client = httpx.AsyncClient(
+                        headers=headers,
+                        timeout=httpx.Timeout(self.tool_timeout)
+                    )
+                    
+                    # 使用 Streamable HTTP 客户端连接（新版 API：传入 http_client）
+                    self._http_cm = streamable_http_client(
+                        self.server_url, 
+                        http_client=self._httpx_client
+                    )
                     read_stream, write_stream, _ = await asyncio.wait_for(
                         self._http_cm.__aenter__(),
                         timeout=self.connect_timeout
@@ -187,6 +196,14 @@ class MCPClientWrapper:
                 except Exception:
                     pass
                 self._http_cm = None
+            
+            # 关闭 httpx 客户端
+            if hasattr(self, '_httpx_client') and self._httpx_client:
+                try:
+                    await self._httpx_client.aclose()
+                except Exception:
+                    pass
+                self._httpx_client = None
         except Exception as e:
             logger.debug(f"清理连接资源时出错: {e}")
     
@@ -211,17 +228,26 @@ class MCPClientWrapper:
             finally:
                 self._session = None
         
-        # 🆕 安全地关闭 HTTP 客户端
+        # 安全地关闭 HTTP 上下文管理器
         if hasattr(self, '_http_cm') and self._http_cm:
             try:
                 await self._http_cm.__aexit__(None, None, None)
             except (RuntimeError, GeneratorExit) as e:
                 # 忽略异步上下文在不同任务退出的错误
-                logger.debug(f"HTTP 客户端关闭时出现预期错误: {type(e).__name__}")
+                logger.debug(f"HTTP 上下文关闭时出现预期错误: {type(e).__name__}")
             except Exception as e:
-                logger.warning(f"HTTP 客户端关闭时出错: {e}")
+                logger.warning(f"HTTP 上下文关闭时出错: {e}")
             finally:
                 self._http_cm = None
+        
+        # 安全地关闭 httpx 客户端
+        if hasattr(self, '_httpx_client') and self._httpx_client:
+            try:
+                await self._httpx_client.aclose()
+            except Exception as e:
+                logger.debug(f"httpx 客户端关闭时出错: {e}")
+            finally:
+                self._httpx_client = None
         
         logger.info(f"🔌 已断开 MCP 服务器: {self.server_name}")
     
@@ -284,13 +310,20 @@ class MCPClientWrapper:
         Returns:
             执行结果
         """
+        # #region agent log
+        import json as _json; open('/Users/kens0n/projects/zenflux_agent/.cursor/debug.log', 'a').write(_json.dumps({"location": "mcp_client.py:call_tool:entry", "message": "进入 call_tool", "data": {"tool_name": tool_name, "server_name": self.server_name, "_connected": self._connected, "has_session": self._session is not None}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "A,B,C,E"}) + '\n')
+        # #endregion
+        
+        # 检查连接状态（不在这里重连，避免 anyio 任务作用域错误）
         if not self._connected or not self._session:
-            success = await self.connect()
-            if not success:
-                return {
-                    "success": False,
-                    "error": "无法连接到 MCP 服务器"
-                }
+            logger.warning(f"⚠️ MCP 连接已断开，请重新初始化客户端")
+            # #region agent log
+            import json as _json; open('/Users/kens0n/projects/zenflux_agent/.cursor/debug.log', 'a').write(_json.dumps({"location": "mcp_client.py:call_tool:disconnected", "message": "连接检查失败", "data": {"tool_name": tool_name, "_connected": self._connected, "has_session": self._session is not None}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "A,B,E"}) + '\n')
+            # #endregion
+            return {
+                "success": False,
+                "error": "MCP 连接已断开，请重试（系统会自动重连）"
+            }
         
         try:
             # 获取原始工具名称
@@ -304,7 +337,7 @@ class MCPClientWrapper:
             logger.debug(f"   参数: {arguments}")
             logger.info(f"   ⏱️ 超时设置: {self.tool_timeout}s")
             
-            # 🆕 调用工具（带超时）
+            # 调用工具（带超时）
             try:
                 result = await asyncio.wait_for(
                     self._session.call_tool(original_name, arguments),
@@ -331,17 +364,55 @@ class MCPClientWrapper:
             
             logger.info(f"✅ MCP 工具执行完成: {original_name}")
             
+            # #region agent log
+            import json as _json; open('/Users/kens0n/projects/zenflux_agent/.cursor/debug.log', 'a').write(_json.dumps({"location": "mcp_client.py:call_tool:success", "message": "工具调用成功", "data": {"tool_name": original_name, "output_len": len(output)}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "G"}) + '\n')
+            # #endregion
+            
             return {
                 "success": True,
                 "data": output,
                 "is_error": result.isError if hasattr(result, 'isError') else False
             }
             
-        except Exception as e:
-            logger.error(f"❌ MCP 工具执行失败: {str(e)}")
+        except (RuntimeError, GeneratorExit) as e:
+            # 连接相关错误：标记断开，下次调用时会自动重连
+            error_type = type(e).__name__
+            error_msg = str(e) if str(e) else f"MCP 会话已断开 ({error_type})"
+            
+            logger.error(f"❌ MCP 连接错误: {error_type}: {error_msg}")
+            # #region agent log
+            import json as _json; open('/Users/kens0n/projects/zenflux_agent/.cursor/debug.log', 'a').write(_json.dumps({"location": "mcp_client.py:call_tool:runtime_error", "message": "RuntimeError/GeneratorExit", "data": {"error_type": error_type, "error_msg": error_msg, "tool_name": tool_name}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "C"}) + '\n')
+            # #endregion
+            self._connected = False
+            self._session = None
+            
             return {
                 "success": False,
-                "error": str(e)
+                "error": error_msg
+            }
+            
+        except Exception as e:
+            # 获取详细的异常信息
+            error_type = type(e).__name__
+            error_msg = str(e) if str(e) else f"{error_type}: (无错误消息)"
+            
+            # 记录完整的异常信息，包括类型和堆栈
+            logger.error(f"❌ MCP 工具执行失败: {error_type}: {error_msg}", exc_info=True)
+            
+            # #region agent log
+            import json as _json, traceback as _tb; open('/Users/kens0n/projects/zenflux_agent/.cursor/debug.log', 'a').write(_json.dumps({"location": "mcp_client.py:call_tool:exception", "message": "捕获异常", "data": {"error_type": error_type, "error_msg": error_msg, "tool_name": tool_name, "traceback": _tb.format_exc()[:800]}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "A,B,C,E"}) + '\n')
+            # #endregion
+            
+            # 检查是否是连接相关的错误，如果是则标记断开
+            if "closed" in error_msg.lower() or "cancelled" in error_msg.lower() or error_type == "ClosedResourceError":
+                self._connected = False
+                self._session = None
+                self._connection_failed = True  # 标记需要从缓存移除
+            
+            return {
+                "success": False,
+                "error": f"{error_type}: (无错误消息)" if not str(e) else error_msg,
+                "_need_reconnect": True  # 标记需要重连
             }
     
     @property
@@ -384,7 +455,11 @@ def create_mcp_tool_definition(tool_info: Dict[str, Any], client: 'MCPClientWrap
             "required": ["query"]
         }),
         "_mcp_client": client,  # 保存客户端引用
-        "_original_name": tool_info.get("original_name", tool_info["name"])
+        "_original_name": tool_info.get("original_name", tool_info["name"]),
+        # 保存连接信息，用于断线重连
+        "_server_url": client.server_url,
+        "_server_name": client.server_name,
+        "_auth_token": client.auth_token
     }
 
 
@@ -510,9 +585,9 @@ async def get_mcp_client(
     server_name: str,
     auth_token: Optional[str] = None,
     force_reconnect: bool = False,
-    tool_timeout: float = 300.0,  # 工具调用超时时间（默认 5 分钟）
-    connect_timeout: float = 30.0,  # 🆕 连接超时时间（默认 30 秒）
-    max_retries: int = 2  # 🆕 最大重试次数（默认 2 次）
+    tool_timeout: float = 1200.0,  # 工具调用超时时间（默认 20 分钟）
+    connect_timeout: float = 30.0,  # 连接超时时间（默认 30 秒）
+    max_retries: int = 2  # 最大重试次数（默认 2 次）
 ) -> Optional[MCPClientWrapper]:
     """
     获取 MCP 客户端（带缓存）
@@ -534,15 +609,29 @@ async def get_mcp_client(
     """
     global _mcp_client_cache
     
-    # 🆕 检查缓存中是否有失败的客户端，如果有则移除
+    # #region agent log
+    import json as _json; open('/Users/kens0n/projects/zenflux_agent/.cursor/debug.log', 'a').write(_json.dumps({"location": "mcp_client.py:get_mcp_client:entry", "message": "进入 get_mcp_client", "data": {"server_name": server_name, "force_reconnect": force_reconnect, "cache_keys": list(_mcp_client_cache.keys())}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "A,E"}) + '\n')
+    # #endregion
+    
+    # 检查缓存
     if server_url in _mcp_client_cache:
         cached_client = _mcp_client_cache[server_url]
-        if cached_client._connection_failed:
-            logger.info(f"🧹 移除失败的 MCP 客户端缓存: {server_name}")
-            del _mcp_client_cache[server_url]
-        elif cached_client._connected and not force_reconnect:
+        
+        # #region agent log
+        import json as _json; open('/Users/kens0n/projects/zenflux_agent/.cursor/debug.log', 'a').write(_json.dumps({"location": "mcp_client.py:get_mcp_client:cache_hit", "message": "缓存命中", "data": {"server_name": server_name, "_connected": cached_client._connected, "has_session": cached_client._session is not None}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "A,B,E"}) + '\n')
+        # #endregion
+        
+        if cached_client._connected and not force_reconnect:
+            # 连接正常，复用
             logger.debug(f"📦 复用已缓存的 MCP 客户端: {server_name}")
             return cached_client
+        else:
+            # 连接已断开或强制重连，移除旧缓存（创建新客户端）
+            logger.info(f"🔄 MCP 客户端已断开，创建新连接: {server_name}")
+            # #region agent log
+            import json as _json; open('/Users/kens0n/projects/zenflux_agent/.cursor/debug.log', 'a').write(_json.dumps({"location": "mcp_client.py:get_mcp_client:cache_invalid", "message": "缓存失效需重连", "data": {"server_name": server_name, "_connected": cached_client._connected}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "A,B"}) + '\n')
+            # #endregion
+            del _mcp_client_cache[server_url]
     
     # 创建新客户端
     logger.info(f"🔧 创建新 MCP 客户端: {server_name} ({server_url})")

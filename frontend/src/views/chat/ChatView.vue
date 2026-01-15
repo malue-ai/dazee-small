@@ -1074,11 +1074,12 @@ function handleStreamEvent(event, msg) {
         msg.recommendedQuestions = rec.questions || []
       } catch {}
     }
-    // 🆕 HITL 确认请求（通过 message_delta 发送）
+    // 🆕 HITL 确认请求（备用方案：通过 message_delta 发送）
+    // 现在主要通过 tool_use 事件触发，这个保留作为备用
     if (delta?.type === 'confirmation_request') {
       try {
         const hitlData = typeof delta.content === 'string' ? JSON.parse(delta.content) : delta.content
-        console.log('🤝 收到 HITL 请求:', hitlData)
+        console.log('🤝 收到 HITL 请求（message_delta）:', hitlData)
         showHumanConfirmation(hitlData)
       } catch (e) {
         console.warn('解析 HITL 请求失败:', e)
@@ -1092,7 +1093,15 @@ function handleStreamEvent(event, msg) {
     // 🆕 记录 block 类型到 contentBlocks，用于 content_delta 时判断
     msg.contentBlocks[index] = { ...content_block, _blockType: content_block.type }
     if (content_block.type === 'thinking') msg.thinking = ''
-    if (content_block.type === 'tool_use') msg.toolStatuses[content_block.id] = { pending: true }
+    if (content_block.type === 'tool_use') {
+      msg.toolStatuses[content_block.id] = { pending: true }
+      
+      // 🤝 HITL: 标记这是 request_human_confirmation 工具（参数在 content_stop 时才完整）
+      if (content_block.name === 'request_human_confirmation') {
+        msg.contentBlocks[index]._isHitlTool = true
+        console.log('🤝 检测到 HITL 工具调用，等待参数完整...')
+      }
+    }
     if (content_block.type === 'tool_result') {
       const toolId = content_block.tool_use_id
       if (toolId) {
@@ -1152,6 +1161,27 @@ function handleStreamEvent(event, msg) {
         delete block.partialInput
       } catch {}
     }
+    
+    // 🤝 HITL: 在 content_stop 时显示确认框（此时参数已完整解析）
+    if (block?._isHitlTool && block.input) {
+      try {
+        const input = block.input
+        const hitlData = {
+          question: input.question || '',
+          options: input.options || ['confirm', 'cancel'],
+          confirmation_type: input.confirmation_type || 'yes_no',
+          timeout: input.timeout || 60,
+          description: input.description || '',
+          questions: input.questions || [],
+          default_value: input.default_value,
+          metadata: input.metadata || {}
+        }
+        console.log('🤝 收到 HITL 工具调用（参数完整）:', hitlData)
+        showHumanConfirmation(hitlData)
+      } catch (e) {
+        console.error('解析 HITL 工具参数失败:', e)
+      }
+    }
   }
   
 }
@@ -1201,7 +1231,14 @@ function showHumanConfirmation(data) {
 async function submitHumanConfirmation() {
   if (!confirmRequest.value || confirmSubmitting.value) return
   
-  const requestId = confirmRequest.value.request_id
+  // 使用当前 session_id（前端已经知道）
+  const sessionId = currentSessionId.value
+  if (!sessionId) {
+    console.error('❌ 无法提交 HITL 响应：session_id 不存在')
+    alert('会话状态异常，请刷新页面重试')
+    return
+  }
+  
   let response = confirmResponse.value
   
   // 验证必填项
@@ -1218,7 +1255,7 @@ async function submitHumanConfirmation() {
   confirmSubmitting.value = true
   
   try {
-    const res = await fetch(`/api/v1/human-confirmation/${requestId}`, {
+    const res = await fetch(`/api/v1/human-confirmation/${sessionId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ response })

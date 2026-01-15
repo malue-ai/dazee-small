@@ -167,27 +167,29 @@ class ConfirmationManager:
         metadata: Optional[Dict[str, Any]] = None
     ) -> ConfirmationRequest:
         """
-        创建确认请求
+        创建确认请求（使用 session_id 作为唯一标识）
         
         Args:
             question: 要询问用户的问题
             options: 可选项列表，默认 ["confirm", "cancel"]
             timeout: 超时时间（秒），默认 60
             confirmation_type: 确认类型
-            session_id: 关联的会话ID
+            session_id: 会话ID（作为请求的唯一标识）
             metadata: 额外元数据
             
         Returns:
             创建的确认请求
         """
-        request_id = str(uuid.uuid4())
+        if not session_id:
+            raise ValueError("session_id 是必需的")
         
         # 默认选项
         if options is None:
             options = ["confirm", "cancel"]
         
+        # 使用 session_id 作为 request_id（一个 session 同一时间只有一个 HITL 请求）
         request = ConfirmationRequest(
-            request_id=request_id,
+            request_id=session_id,  # 直接使用 session_id
             question=question,
             options=options,
             timeout=timeout,
@@ -197,9 +199,10 @@ class ConfirmationManager:
             created_at=datetime.now()
         )
         
-        self._pending_requests[request_id] = request
+        # 存储到待处理队列（key 就是 session_id）
+        self._pending_requests[session_id] = request
         
-        logger.info(f"创建确认请求: request_id={request_id}, question={question[:50]}...")
+        logger.info(f"创建确认请求: session_id={session_id}, question={question[:50]}...")
         
         return request
     

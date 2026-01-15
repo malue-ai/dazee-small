@@ -573,7 +573,7 @@ class RedisSessionManager:
                     try:
                         heartbeat_time = datetime.fromisoformat(last_heartbeat)
                         heartbeat_age = (datetime.now() - heartbeat_time).total_seconds()
-                        if heartbeat_age > 120:  # 2 分钟超时
+                        if heartbeat_age > 1200:  # 20 分钟超时
                             logger.warning(
                                 f"⚠️ Session 心跳超时 ({heartbeat_age:.0f}s)，视为已结束: "
                                 f"session_id={session_id}"
@@ -599,7 +599,7 @@ class RedisSessionManager:
             # 清理订阅（在 CancelledError 时也要尽量清理）
             try:
                 await pubsub.unsubscribe(channel)
-                await pubsub.close()
+                await pubsub.aclose()
             except asyncio.CancelledError:
                 # 连接已取消，忽略清理错误
                 logger.debug(f"🔌 Pub/Sub 清理被取消: session_id={session_id}")

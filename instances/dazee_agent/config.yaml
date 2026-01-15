@@ -88,7 +88,7 @@ mcp_tools:
   #
   
   # 阶段 1：自然语言 → Mermaid 流程图
-  - name: text2flowchart
+  - name: Ontology_TextToChart_zen0
     server_url: "https://api.dify.ai/mcp/server/APXev1xgCP4n5XMn/mcp"
     server_name: "dify"
     auth_type: "bearer"
@@ -96,6 +96,7 @@ mcp_tools:
     capability: "document_creation"
     description: "第一阶段：从自然语言描述生成 Mermaid 流程图，识别核心实体、属性及关系"
     # App ID: a83e8b00-a94e-4cdf-b5f7-ef721e7238c1
+    
   - name: nano_banana
     server_url: "https://api.dify.ai/mcp/server/n7rhBjadwzy9bj90/mcp"
     server_name: "dify"

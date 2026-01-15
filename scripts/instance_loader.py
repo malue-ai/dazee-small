@@ -925,6 +925,11 @@ async def _register_mcp_tools(
     for tool_config in mcp_tools:
         name = tool_config.get("name", "unknown")
         try:
+            # 🆕 支持禁用 MCP 工具（在 config.yaml 中设置 enabled: false）
+            if not tool_config.get("enabled", True):
+                logger.info(f"⏭️ MCP 工具 {name} 已被禁用，跳过")
+                continue
+            
             server_url = tool_config.get("server_url")
             server_name = tool_config.get("server_name", name)
             auth_type = tool_config.get("auth_type", "none")
@@ -945,11 +950,17 @@ async def _register_mcp_tools(
             logger.info(f"🔧 注册 MCP 工具: {name} ({server_url})")
             
             # 🆕 使用缓存获取 MCP 客户端（避免重复连接）
-            client = await get_mcp_client(
-                server_url=server_url,
-                server_name=server_name,
-                auth_token=auth_token
-            )
+            try:
+                client = await get_mcp_client(
+                    server_url=server_url,
+                    server_name=server_name,
+                    auth_token=auth_token,
+                    connect_timeout=10.0,  # 缩短超时时间到 10 秒
+                    max_retries=1  # 只重试 1 次
+                )
+            except Exception as conn_error:
+                logger.error(f"❌ MCP 客户端连接异常，跳过工具 {name}: {type(conn_error).__name__}: {str(conn_error)}")
+                continue
             
             # 🆕 处理连接失败的情况
             if client is None:
@@ -981,13 +992,48 @@ async def _register_mcp_tools(
                         # 🆕 V4.6: 获取 capability（用户意图类别）
                         capability = tool_config.get("capability")  # 从 config.yaml 读取
                         
-                        # 创建处理器闭包
-                        async def make_handler(_client, _orig_name):
+                        # 创建处理器闭包（动态获取客户端，支持断线重连）
+                        async def make_handler(_server_url, _server_name, _auth_token, _orig_name):
                             async def handler(tool_input: Dict[str, Any]):
-                                return await _client.call_tool(_orig_name, tool_input)
+                                # #region agent log
+                                import json as _json; open('/Users/kens0n/projects/zenflux_agent/.cursor/debug.log', 'a').write(_json.dumps({"location": "instance_loader.py:handler:entry", "message": "进入 MCP handler(loader)", "data": {"orig_name": _orig_name, "server_name": _server_name}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "A,B"}) + '\n')
+                                # #endregion
+                                # 每次调用时动态获取客户端（断开时会创建新连接）
+                                from services.mcp_client import get_mcp_client
+                                current_client = await get_mcp_client(
+                                    server_url=_server_url,
+                                    server_name=_server_name,
+                                    auth_token=_auth_token
+                                )
+                                if not current_client:
+                                    # #region agent log
+                                    import json as _json; open('/Users/kens0n/projects/zenflux_agent/.cursor/debug.log', 'a').write(_json.dumps({"location": "instance_loader.py:handler:failed", "message": "获取客户端失败", "data": {"orig_name": _orig_name}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "A"}) + '\n')
+                                    # #endregion
+                                    return {"success": False, "error": "MCP 服务器连接失败"}
+                                
+                                # 调用工具
+                                result = await current_client.call_tool(_orig_name, tool_input)
+                                
+                                # 如果需要重连，自动重试一次
+                                if result.get("_need_reconnect"):
+                                    # #region agent log
+                                    import json as _json; open('/Users/kens0n/projects/zenflux_agent/.cursor/debug.log', 'a').write(_json.dumps({"location": "instance_loader.py:handler:auto_retry", "message": "检测到连接断开，自动重连重试", "data": {"orig_name": _orig_name}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "A"}) + '\n')
+                                    # #endregion
+                                    # 强制重连
+                                    current_client = await get_mcp_client(
+                                        server_url=_server_url,
+                                        server_name=_server_name,
+                                        auth_token=_auth_token,
+                                        force_reconnect=True
+                                    )
+                                    if not current_client:
+                                        return {"success": False, "error": "MCP 服务器重连失败"}
+                                    result = await current_client.call_tool(_orig_name, tool_input)
+                                
+                                return result
                             return handler
                         
-                        handler = await make_handler(client, original_name)
+                        handler = await make_handler(server_url, server_name, auth_token, original_name)
                         
                         # 使用已带前缀的 tool_name，不要再加前缀
                         await instance_registry.register_mcp_tool(
@@ -1013,7 +1059,9 @@ async def _register_mcp_tools(
                 logger.warning(f"   ⚠️ 连接失败")
                 
         except Exception as e:
-            logger.warning(f"⚠️ 注册 MCP 工具 {name} 失败: {str(e)}")
+            logger.error(f"❌ 注册 MCP 工具 {name} 失败: {type(e).__name__}: {str(e)}", exc_info=True)
+            # 确保即使发生异常也继续处理下一个工具
+            continue
     
     # 将 MCP 工具定义注入到 Agent（兼容旧逻辑）
     if mcp_tool_definitions and hasattr(agent, '_mcp_tools'):
@@ -1021,16 +1069,55 @@ async def _register_mcp_tools(
     elif mcp_tool_definitions:
         agent._mcp_tools = mcp_tool_definitions
         
-    # 注册 MCP 工具到 tool_executor 的处理器
+    # 注册 MCP 工具到 tool_executor 的处理器（动态获取客户端，支持断线重连）
     if mcp_tool_definitions and hasattr(agent, 'tool_executor'):
+        from services.mcp_client import get_mcp_client
+        
         for tool_def in mcp_tool_definitions:
             tool_name = tool_def['name']
-            client = tool_def['_mcp_client']
             original_name = tool_def['_original_name']
+            # 从 tool_def 获取连接信息（用于重连）
+            server_url = tool_def.get('_server_url')
+            server_name_for_handler = tool_def.get('_server_name')
+            auth_token_for_handler = tool_def.get('_auth_token')
             
-            # 创建工具处理器
-            async def mcp_handler(tool_input: Dict[str, Any], _client=client, _orig_name=original_name):
-                return await _client.call_tool(_orig_name, tool_input)
+            # 创建工具处理器（动态获取客户端，支持自动重连）
+            async def mcp_handler(
+                tool_input: Dict[str, Any], 
+                _url=server_url, 
+                _name=server_name_for_handler, 
+                _token=auth_token_for_handler,
+                _orig_name=original_name
+            ):
+                # #region agent log
+                import json as _json; open('/Users/kens0n/projects/zenflux_agent/.cursor/debug.log', 'a').write(_json.dumps({"location": "instance_loader.py:tool_executor_handler:entry", "message": "进入 tool_executor MCP handler", "data": {"orig_name": _orig_name, "server_name": _name}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "F"}) + '\n')
+                # #endregion
+                current_client = await get_mcp_client(
+                    server_url=_url,
+                    server_name=_name,
+                    auth_token=_token
+                )
+                if not current_client:
+                    return {"success": False, "error": "MCP 服务器连接失败"}
+                
+                result = await current_client.call_tool(_orig_name, tool_input)
+                
+                # 如果需要重连，自动重试
+                if result.get("_need_reconnect"):
+                    # #region agent log
+                    import json as _json; open('/Users/kens0n/projects/zenflux_agent/.cursor/debug.log', 'a').write(_json.dumps({"location": "instance_loader.py:tool_executor_handler:auto_retry", "message": "自动重连重试", "data": {"orig_name": _orig_name}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "F"}) + '\n')
+                    # #endregion
+                    current_client = await get_mcp_client(
+                        server_url=_url,
+                        server_name=_name,
+                        auth_token=_token,
+                        force_reconnect=True
+                    )
+                    if not current_client:
+                        return {"success": False, "error": "MCP 服务器重连失败"}
+                    result = await current_client.call_tool(_orig_name, tool_input)
+                
+                return result
             
             # 注册处理器
             agent.tool_executor.register_handler(tool_name, mcp_handler)

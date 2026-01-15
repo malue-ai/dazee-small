@@ -124,20 +124,20 @@ async def get_stats():
 # ==================== 动态路径接口（必须放在固定路径之后）====================
 
 @router.post(
-    "/{request_id}",
+    "/{session_id}",
     response_model=ConfirmationSubmitResponse,
     summary="提交确认响应",
     description="用户提交对确认请求的响应，唤醒等待的工具"
 )
 async def submit_confirmation(
-    request_id: str,
+    session_id: str,
     body: ConfirmationResponseBody
 ):
     """
     提交用户确认响应
     
     Args:
-        request_id: 确认请求ID（从 SSE 事件中获取）
+        session_id: 会话ID（前端已知，同时也是确认请求的唯一标识）
         body: 响应内容
         
     Returns:
@@ -150,7 +150,7 @@ async def submit_confirmation(
     """
     try:
         result = confirmation_service.submit_response(
-            request_id,
+            session_id,
             body.response,
             body.metadata
         )
@@ -164,12 +164,12 @@ async def submit_confirmation(
     except ConfirmationNotFoundError:
         raise HTTPException(
             status_code=404,
-            detail=f"确认请求 {request_id} 不存在或已过期"
+            detail=f"确认请求（session_id={session_id}）不存在或已过期"
         )
     except ConfirmationExpiredError:
         raise HTTPException(
             status_code=410,  # Gone
-            detail=f"确认请求 {request_id} 已过期"
+            detail=f"确认请求（session_id={session_id}）已过期"
         )
     except ConfirmationResponseError:
         raise HTTPException(

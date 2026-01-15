@@ -200,7 +200,6 @@ class RequestHumanConfirmationTool(BaseTool):
         description: str = "",
         timeout: Optional[int] = None,
         metadata: Optional[Dict[str, Any]] = None,
-        emit_event: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
         session_id: str = "",
         **kwargs
     ) -> Dict[str, Any]:
@@ -262,14 +261,8 @@ class RequestHumanConfirmationTool(BaseTool):
         
         logger.info(f"确认请求已创建: request_id={request.request_id}")
         
-        # 2. 发送 SSE 事件到前端
-        await self._emit_sse_event(
-            emit_event=emit_event,
-            request=request,
-            description=description,
-            questions=questions,
-            conf_type=conf_type
-        )
+        # 2. 前端会通过 tool_use 事件自动显示确认框，无需发送额外的 SSE 事件
+        logger.debug("等待用户通过前端界面响应...")
         
         # 3. 异步等待用户响应
         result = await manager.wait_for_response(request.request_id, timeout)
@@ -323,42 +316,6 @@ class RequestHumanConfirmationTool(BaseTool):
             metadata["questions"] = questions or []
         
         return metadata
-    
-    async def _emit_sse_event(
-        self,
-        emit_event: Optional[Callable[[Dict[str, Any]], Awaitable[None]]],
-        request,
-        description: str,
-        questions: Optional[List[Dict[str, Any]]],
-        conf_type: ConfirmationType
-    ) -> None:
-        """发送 SSE 事件到前端（使用 message_delta 格式）"""
-        if not emit_event:
-            logger.warning("emit_event 回调未注入，无法发送 SSE 事件到前端")
-            return
-        
-        try:
-            # 构建 HITL 请求内容
-            hitl_content = {
-                **request.to_dict(),
-                "description": description,
-                "questions": questions if conf_type == ConfirmationType.FORM else None
-            }
-            
-            # 使用 message_delta 格式，符合事件协议规范
-            event_data = {
-                "type": "message_delta",
-                "data": {
-                    "delta": {
-                        "type": "confirmation_request",
-                        "content": json.dumps(hitl_content, ensure_ascii=False)
-                    }
-                }
-            }
-            await emit_event(event_data)
-            logger.debug("SSE 事件已发送到前端")
-        except Exception as e:
-            logger.error(f"发送 SSE 事件失败: {e}", exc_info=True)
     
     def _process_response(
         self, 

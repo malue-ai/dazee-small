@@ -1,27 +1,26 @@
-name: GeneralAgent
-description: 通用智能助手（高质量默认配置）
+name: Dazee
+description: 温暖专业的高级工作助理和生活搭子，具备多模态理解、智能调度和深度分析能力
 intent_analyzer:
   enabled: true
   complexity_levels:
-  - low
+  - simple
   - medium
-  - high
+  - complex
   task_types:
-  - question_answering
+  - system_design
   - data_analysis
-  - content_generation
-  - code_execution
-  - web_search
-  - file_operation
+  - research
+  - document_processing
+  - follow_up
   output_formats:
   - text
-  - json
   - markdown
+  - structured
   use_llm: true
   llm_model: claude-haiku-4-5-20251001
 plan_manager:
   enabled: true
-  trigger_condition: complexity == 'high' or step_count > 3
+  trigger_condition: complexity >= 'medium' or multi_step_required
   max_steps: 15
   granularity: medium
   allow_dynamic_adjustment: true
@@ -32,43 +31,78 @@ plan_manager:
   failure_threshold: 0.3
 tool_selector:
   enabled: true
-  available_tools: []
+  available_tools:
+  - tavily_search
+  - exa_search
+  - exa_contents
+  - perplexity
+  - pdf2markdown
+  - text2flowchart
+  - ppt_create
+  - text2document
+  - nano-banana-omni
+  - current_time
+  - timezone_conversion
+  - api_calling
   selection_strategy: capability_based
   allow_parallel: false
-  max_parallel_tools: 3
+  max_parallel_tools: 1
   base_tools:
-  - plan_todo
+  - current_time
+  - timezone_conversion
   tool_timeout: 300
 memory_manager:
   enabled: true
   retention_policy: session
-  episodic_memory: false
-  working_memory_limit: 20
+  episodic_memory: true
+  working_memory_limit: 30
   auto_compress: true
   compress_threshold: 15
 output_formatter:
   enabled: true
-  default_format: text
+  default_format: markdown
   supported_formats:
   - text
   - markdown
   - json
   - html
-  code_highlighting: true
-  max_output_length: 50000
+  code_highlighting: false
+  max_output_length: 4000
   json_model_name: null
   json_schema: null
   strict_json_validation: false
   json_ensure_ascii: false
   json_indent: 2
-  include_metadata: false
+  include_metadata: true
 skills: []
-tools: []
+tools:
+- tavily_search
+- exa_search
+- exa_contents
+- perplexity
+- pdf2markdown
+- text2flowchart
+- ppt_create
+- text2document
+- nano-banana-omni
+- current_time
+- timezone_conversion
+- api_calling
 model: claude-sonnet-4-5-20250929
-max_turns: 15
+max_turns: 20
 allow_parallel_tools: false
 context_limits:
   max_context_tokens: 200000
   warning_threshold: 0.8
   truncate_threshold: 0.9
-reasoning: 高质量默认配置：适应大多数场景，平衡能力和稳定性。作为 config.yaml 配置缺失时的兜底。
+reasoning: "这是一个复杂的多功能助理场景，需要详细分析：\n\n1. **任务复杂度分析**：\n   - 涉及4种主要意图（系统搭建、BI问数、综合咨询、追问）\n\
+  \   - 需要多步骤工作流（如系统搭建需要先生成流程图再调用API）\n   - 包含复杂的意图识别和切换逻辑\n   - 需要处理多模态输入（文本、图片、文档）\n\
+  \n2. **工具需求**：\n   - 搜索类：tavily_search（快速）、perplexity（深度）、exa_search（精准）\n   - 文档处理：pdf2markdown、text2document\n\
+  \   - 可视化：text2flowchart、ppt_create\n   - 图像生成：nano-banana-omni\n   - 时间处理：current_time\
+  \ + timezone_conversion（原子操作）\n   - API集成：api_calling（调用Coze工作流）\n   - 不需要代码沙箱（无编程任务）\n\
+  \n3. **组件配置理由**：\n   - **intent_analyzer**：必须启用，需要识别4种意图类型，使用LLM进行语义理解\n   - **plan_manager**：必须启用，中等粒度规划适合多步骤任务（如系统搭建的两步流程），允许增量重规划以应对工具失败\n\
+  \   - **tool_selector**：基于能力选择，不允许并行（避免资源冲突和502错误），明确列出所有可用工具\n   - **memory_manager**：会话级记忆，支持追问场景，需要记住历史文件处理结果避免重复调用\n\
+  \   - **output_formatter**：Markdown格式，友好展示分析结果和报告\n\n4. **关键约束**：\n   - 严格的URL诚信原则（最高优先级）\n\
+  \   - 文件处理安全（只处理当前轮次文件，防止502）\n   - 参数完整性检查（防止空响应）\n   - HITL机制（意图不明确时暂停）\n   -\
+  \ 耗时工具提前告知（用户体验）\n\n5. **max_turns设置**：20轮，因为：\n   - 系统搭建可能需要多轮迭代优化\n   - BI问数可能涉及多次追问和数据探索\n\
+  \   - 深度研究需要多轮搜索和整合\n   - 追问场景需要保持上下文连续性"

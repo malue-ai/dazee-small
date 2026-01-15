@@ -63,7 +63,7 @@ class APICallingTool:
             apis_config: 预配置的 API 列表（从 config.yaml 注入）
                 每个 API 包含: name, base_url, headers, description
         """
-        self.timeout = 600  # 默认超时 10 分钟
+        self.timeout = 1200  # 默认超时 20 分钟
         self.max_polls = 150  # 异步任务最多轮询 150 次
         self.poll_interval = 2  # 轮询间隔 2 秒
         
