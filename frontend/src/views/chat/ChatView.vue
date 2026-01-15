@@ -502,15 +502,15 @@
 
     <!-- HITL 人类确认模态框 -->
     <div v-if="showConfirmModal" class="fixed inset-0 bg-gray-900/60 backdrop-blur-md z-50 flex items-center justify-center p-6 animate-in fade-in duration-300" @click.self="cancelHumanConfirmation">
-      <div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden animate-in slide-in-from-bottom-8 duration-300 ring-1 ring-white/20">
-        <div class="flex items-center justify-between px-8 py-5 border-b border-gray-100 bg-gray-50/50">
+      <div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-hidden animate-in slide-in-from-bottom-8 duration-300 ring-1 ring-white/20 flex flex-col">
+        <div class="flex items-center justify-between px-8 py-5 border-b border-gray-100 bg-gray-50/50 flex-shrink-0">
           <span class="text-lg font-bold text-gray-900 flex items-center gap-2">
             <span class="text-2xl">🤝</span> 需要您的确认
           </span>
           <button class="p-2 rounded-full text-gray-400 hover:bg-gray-200 hover:text-gray-900 transition-colors" @click="cancelHumanConfirmation">✕</button>
         </div>
         
-        <div class="p-8 space-y-6">
+        <div class="p-8 space-y-6 overflow-y-auto flex-1">
           <!-- 问题内容 -->
           <div class="text-lg text-gray-800 font-medium leading-relaxed whitespace-pre-wrap">{{ confirmRequest?.question }}</div>
           
@@ -627,7 +627,7 @@
           </div>
         </div>
         
-        <div class="flex items-center justify-end gap-4 px-8 py-5 bg-gray-50/50 border-t border-gray-100">
+        <div class="flex items-center justify-end gap-4 px-8 py-5 bg-gray-50/50 border-t border-gray-100 flex-shrink-0">
           <button class="px-6 py-2.5 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-200 transition-colors" @click="cancelHumanConfirmation" :disabled="confirmSubmitting">
             取消
           </button>
@@ -1367,7 +1367,11 @@ async function submitHumanConfirmation() {
     })
     
     if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`)
+      // 区分不同的错误类型
+      if (res.status === 404 || res.status === 410) {
+        throw { status: res.status, message: '确认请求已过期或不存在' }
+      }
+      throw { status: res.status, message: `HTTP ${res.status}` }
     }
     
     console.log('✅ HITL 响应已提交:', response)
@@ -1376,7 +1380,16 @@ async function submitHumanConfirmation() {
     confirmResponse.value = null
   } catch (error) {
     console.error('❌ 提交 HITL 响应失败:', error)
-    alert('提交失败，请重试')
+    
+    // 404/410 表示请求已过期，关闭对话框并提示用户
+    if (error && (error.status === 404 || error.status === 410)) {
+      alert('确认请求已过期，请重新发起操作')
+      showConfirmModal.value = false
+      confirmRequest.value = null
+      confirmResponse.value = null
+    } else {
+      alert('提交失败，请重试')
+    }
   } finally {
     confirmSubmitting.value = false
   }
