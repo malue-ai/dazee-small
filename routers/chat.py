@@ -292,6 +292,16 @@ async def chat(
                         # ZenO 格式只输出 data 行
                         yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
                 
+                except asyncio.CancelledError:
+                    # 客户端断开连接，静默处理
+                    logger.debug(f"📡 SSE 连接被客户端断开: user_id={request.user_id}")
+                    return
+                    
+                except GeneratorExit:
+                    # 生成器被关闭（客户端断开）
+                    logger.debug(f"📡 SSE 生成器关闭: user_id={request.user_id}")
+                    return
+                
                 except AgentExecutionError as e:
                     logger.error(f"❌ 流式对话错误: {str(e)}")
                     error_event = {

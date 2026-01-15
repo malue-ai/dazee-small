@@ -65,9 +65,21 @@
               :class="conv.id === chatStore.conversationId ? 'bg-white shadow-md border-white/40 text-gray-900' : 'text-gray-600 hover:bg-white/50 hover:text-gray-900'"
               @click="loadConversation(conv.id)"
             >
-              <div class="truncate font-medium text-sm mb-1">{{ conv.title || '未命名对话' }}</div>
+              <div class="flex items-center gap-2 mb-1">
+                <!-- 🆕 运行状态指示器 -->
+                <span 
+                  v-if="chatStore.isConversationRunning(conv.id)" 
+                  class="w-2 h-2 rounded-full bg-green-500 animate-pulse flex-shrink-0"
+                  title="运行中"
+                ></span>
+                <div class="truncate font-medium text-sm">{{ conv.title || '未命名对话' }}</div>
+              </div>
               <div class="flex items-center justify-between text-xs text-gray-400">
-                <span>{{ formatShortTime(conv.updated_at) }}</span>
+                <span class="flex items-center gap-1">
+                  {{ formatShortTime(conv.updated_at) }}
+                  <!-- 🆕 运行中文本提示 -->
+                  <span v-if="chatStore.isConversationRunning(conv.id)" class="text-green-600 font-medium">· 运行中</span>
+                </span>
                 <button 
                   class="opacity-0 group-hover:opacity-100 p-1 -mr-1 hover:text-red-500 transition-opacity" 
                   @click.stop="confirmDeleteConversation(conv)"
@@ -236,7 +248,7 @@
                   >
                     <span class="text-xl">{{ getFileTypeIcon(file) }}</span>
                     <div class="flex flex-col text-left">
-                      <span class="text-sm font-medium text-gray-800 truncate max-w-[12rem]">{{ file.filename || file.name || '文件' }}</span>
+                      <span class="text-sm font-medium text-gray-800 truncate max-w-[12rem]">{{ file.file_name || file.filename || '文件' }}</span>
                       <span class="text-xs text-gray-500">{{ getFileTypeLabel(file) }}</span>
                     </div>
                   </div>
@@ -336,14 +348,14 @@
               @compositionend="isComposing = false"
               placeholder="输入消息..."
               ref="inputTextarea"
-              :disabled="isLoading"
+              :disabled="isCurrentConversationLoading"
               rows="1"
               class="flex-1 max-h-[200px] py-3 bg-transparent border-none outline-none text-base text-gray-800 placeholder:text-gray-400 resize-none leading-relaxed"
             ></textarea>
             
             <div class="pb-1">
               <button 
-                v-if="isLoading" 
+                v-if="isCurrentConversationLoading" 
                 class="p-3 rounded-xl bg-red-50 text-red-500 hover:bg-red-100 transition-all shadow-sm" 
                 @click="stopGeneration"
                 :disabled="isStopping"
@@ -630,7 +642,7 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted, watch } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
 import { useWorkspaceStore } from '@/stores/workspace'
@@ -665,7 +677,7 @@ const currentSessionId = ref(null)
 
 // --- 文件上传状态 ---
 const fileInput = ref(null)
-const selectedFiles = ref([])  // 已选择的文件 { file, file_id, name, mime_type }
+const selectedFiles = ref([])  // 已选择的文件 { file_url, file_name, file_type, file_size }
 const isUploading = ref(false)
 
 // --- 附件预览状态 ---
@@ -703,6 +715,25 @@ const currentConversationTitle = computed(() => {
   return conv ? conv.title : '新对话'
 })
 
+/**
+ * 🆕 判断当前会话是否在运行
+ * 综合本地 isLoading 和 store 中的活跃会话状态
+ */
+const isCurrentConversationLoading = computed(() => {
+  // 本地正在发送消息，直接返回 true
+  if (isLoading.value) {
+    return true
+  }
+  
+  // 检查 store 中的活跃会话状态
+  const convId = chatStore.conversationId
+  if (convId && chatStore.isConversationRunning(convId)) {
+    return true
+  }
+  
+  return false
+})
+
 const currentPlan = computed(() => {
   // 从后往前查找最后一个有效的 plan
   for (let i = messages.value.length - 1; i >= 0; i--) {
@@ -723,6 +754,9 @@ onMounted(async () => {
     loadAgentList()  // 加载 Agent 列表
   ])
   
+  // 🆕 启动活跃会话状态轮询
+  chatStore.startPollingActiveSessions()
+  
   // 🆕 检查是否有活跃的 Session（用于页面刷新重连）
   // 如果重连成功，会在内部调用 loadConversation，无需重复调用
   const sessionReconnected = await checkActiveSessions()
@@ -732,6 +766,11 @@ onMounted(async () => {
   if (conversationId && !sessionReconnected) {
     await loadConversation(conversationId)
   }
+})
+
+// 🆕 组件卸载时停止轮询
+onUnmounted(() => {
+  chatStore.stopPollingActiveSessions()
 })
 
 watch(() => route.params.conversationId, async (newId) => {
@@ -809,9 +848,11 @@ async function loadAgentList() {
       ...agentsList
     ]
     
-    // 默认选择第一个（默认 Agent）
+    // 默认选择 dazee_agent，如果没有则选择第一个
     if (!selectedAgentId.value) {
-      selectAgent(agents.value[0], false)  // 静默选择，不触发对话
+      const dazeeAgent = agents.value.find(a => a.agent_id === 'dazee_agent')
+      const defaultAgent = dazeeAgent || agents.value[0]
+      selectAgent(defaultAgent, false)  // 静默选择，不触发对话
     }
     
     console.log('✅ Agent 列表已加载:', agents.value.length, '个')
@@ -911,18 +952,68 @@ function processHistoryMessage(msg) {
     filesData = msg.metadata.files
   }
   
+  // 🔧 从 contentBlocks 提取工具状态
+  const contentBlocks = parseContentBlocks(msg.content)
+  const toolStatuses = extractToolStatuses(contentBlocks)
+  
   return {
     id: msg.id,
     role: msg.role,
     content: extractText(msg.content),
     thinking: extractThinking(msg.content),
-    contentBlocks: parseContentBlocks(msg.content),
-    toolStatuses: {},
+    contentBlocks: contentBlocks,
+    toolStatuses: toolStatuses,
     files: filesData,  // 🆕 文件信息
     recommendedQuestions: msg.metadata?.recommended || [],
     planResult: planData,
     timestamp: new Date(msg.created_at)
   }
+}
+
+/**
+ * 从 contentBlocks 中提取工具调用状态
+ * 将 tool_result 与对应的 tool_use 关联起来
+ * 确保没有对应 result 的 tool_use 始终显示为"执行中"
+ */
+function extractToolStatuses(contentBlocks) {
+  const statuses = {}
+  
+  if (!Array.isArray(contentBlocks)) return statuses
+  
+  // 1. 首先将所有 tool_use 标记为 pending（执行中）
+  for (const block of contentBlocks) {
+    if (block.type === 'tool_use' && block.id) {
+      statuses[block.id] = { pending: true }
+    }
+  }
+  
+  // 2. 然后从 tool_result 更新对应的状态
+  for (const block of contentBlocks) {
+    if (block.type === 'tool_result' && block.tool_use_id) {
+      // 判断是否真的是错误（is_error 或 content 中包含 error）
+      let isError = block.is_error === true
+      
+      // 额外检查：即使 is_error 为 false，content 中可能包含错误信息
+      if (!isError && block.content) {
+        const contentStr = typeof block.content === 'string' 
+          ? block.content 
+          : JSON.stringify(block.content)
+        // 检查是否包含常见的错误标识
+        if (contentStr.includes('"error"') || contentStr.includes('"Error"') || 
+            contentStr.includes('HTTP 4') || contentStr.includes('HTTP 5')) {
+          isError = true
+        }
+      }
+      
+      statuses[block.tool_use_id] = {
+        pending: false,
+        success: !isError,
+        result: block.content
+      }
+    }
+  }
+  
+  return statuses
 }
 
 function extractText(content) {
@@ -960,17 +1051,21 @@ async function sendMessage() {
     role: 'user',
     content: content,
     files: hasFiles ? selectedFiles.value.map(f => ({
-      file_id: f.file_id,
-      filename: f.name,
-      mime_type: f.mime_type
+      file_url: f.file_url,
+      file_name: f.file_name,
+      file_type: f.file_type,
+      file_size: f.file_size
     })) : null,
     timestamp: new Date()
   }
   messages.value.push(userMsg)
   
-  // 构建 files 参数（发送给后端）
+  // 构建 files 参数（发送给后端）- 使用 file_url 方式
   const filesParam = hasFiles ? selectedFiles.value.map(f => ({
-    file_id: f.file_id
+    file_url: f.file_url,
+    file_name: f.file_name,
+    file_type: f.file_type,
+    file_size: f.file_size
   })) : null
   
   // 清空输入
@@ -1187,10 +1282,20 @@ function handleStreamEvent(event, msg) {
 }
 
 function stopGeneration() {
-  if (currentSessionId.value) {
+  // 优先使用本地的 session_id（当前组件发起的请求）
+  // 如果没有，则从 store 中获取当前会话对应的 session_id
+  const sessionId = currentSessionId.value || 
+    chatStore.getSessionIdByConversation(chatStore.conversationId)
+  
+  if (sessionId) {
     isStopping.value = true
-    chatStore.stopSession(currentSessionId.value).finally(() => {
-      isStopping.value = false; isLoading.value = false; isGenerating.value = false
+    chatStore.stopSession(sessionId).then(() => {
+      // 停止成功后，刷新活跃会话状态
+      chatStore.refreshActiveSessions()
+    }).finally(() => {
+      isStopping.value = false
+      isLoading.value = false
+      isGenerating.value = false
     })
   }
 }
@@ -1584,13 +1689,14 @@ async function handleFileSelect(event) {
   
   try {
     for (const file of files) {
-      // 上传文件到后端
+      // 上传文件到后端，获取 S3 预签名 URL
       const result = await uploadFile(file)
-      if (result) {
+      if (result && result.file_url) {
+        // 使用 file_url 方式（不依赖数据库）
         selectedFiles.value.push({
-          file_id: result.file_id,
-          name: result.filename || file.name,
-          mime_type: result.mime_type || file.type,
+          file_url: result.file_url,
+          file_name: result.file_name || file.name,
+          file_type: result.file_type || file.type,
           file_size: result.file_size || file.size
         })
       }
@@ -1636,7 +1742,7 @@ function removeFile(index) {
 }
 
 function getFileIcon(file) {
-  const mimeType = file.mime_type || ''
+  const mimeType = file.file_type || file.mime_type || ''
   if (mimeType.startsWith('image/')) return '🖼️'
   if (mimeType === 'application/pdf') return '📄'
   if (mimeType.includes('text/')) return '📝'
@@ -1645,7 +1751,7 @@ function getFileIcon(file) {
 }
 
 function getFileTypeIcon(file) {
-  const mimeType = file.mime_type || ''
+  const mimeType = file.file_type || file.mime_type || ''
   if (mimeType.startsWith('image/')) return '🖼️'
   if (mimeType === 'application/pdf') return '📕'
   if (mimeType.includes('text/')) return '📄'
@@ -1653,7 +1759,7 @@ function getFileTypeIcon(file) {
 }
 
 function getFileTypeLabel(file) {
-  const mimeType = file.mime_type || ''
+  const mimeType = file.file_type || file.mime_type || ''
   if (mimeType.startsWith('image/')) return 'Image'
   if (mimeType === 'application/pdf') return 'PDF'
   if (mimeType === 'text/plain') return 'Text'
@@ -1667,28 +1773,13 @@ function getFileTypeLabel(file) {
 
 function openAttachmentPreview(file) {
   console.log('📄 预览附件:', file)
-  // 直接使用 /preview 端点，无需提前获取 URL
   previewingAttachment.value = { ...file }
 }
 
-async function getFileUrl(fileId) {
-  try {
-    const response = await fetch(`/api/v1/files/${fileId}/url`)
-    if (!response.ok) throw new Error('获取失败')
-    const result = await response.json()
-    console.log('📎 获取文件 URL:', result.data)
-    return result.data.file_url  // API 返回的是 file_url
-  } catch (error) {
-    console.error('获取文件 URL 失败:', error)
-    return null
-  }
-}
-
 function getFilePreviewUrl(file) {
-  // 优先使用代理预览端点（绕过 CORS）
-  if (file.file_id) return `/api/v1/files/${file.file_id}/preview`
-  if (file.preview_url) return file.preview_url
+  // 直接使用 file_url（S3 预签名 URL）
   if (file.file_url) return file.file_url
+  if (file.preview_url) return file.preview_url
   return ''
 }
 
@@ -1697,7 +1788,7 @@ function closeAttachmentPreview() {
 }
 
 function isImageFile(file) {
-  const mimeType = file.mime_type || ''
+  const mimeType = file.file_type || file.mime_type || ''
   return mimeType.startsWith('image/')
 }
 

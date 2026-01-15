@@ -18,8 +18,8 @@ from infra.database.crud.base import get_by_id, delete_by_id
 
 
 def generate_conversation_id() -> str:
-    """生成对话 ID"""
-    return f"conv_{uuid4().hex[:24]}"
+    """生成对话 ID（纯 UUID）"""
+    return uuid4().hex
 
 
 async def create_conversation(

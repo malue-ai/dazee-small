@@ -1,16 +1,15 @@
 """
-File 服务层 - 文件管理业务逻辑
+File 服务层 - 文件上传服务（纯 S3，无数据库）
 
 职责：
-1. 文件 CRUD 业务逻辑
-2. 文件统计和查询
-3. 与 S3 存储交互
-4. 权限检查
+1. 上传文件到 S3
+2. 生成预签名 URL
+3. MIME 类型检测
 
 设计原则：
-- Service 层只调用 crud.xxx() 函数
-- 不直接写 SQLAlchemy 查询
-- 不直接导入数据库模型
+- 不使用数据库存储文件元数据
+- 直接返回 S3 预签名 URL
+- 前端通过 file_url 方式使用文件
 """
 import uuid
 import filetype
@@ -18,7 +17,6 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 
 from logger import get_logger
-from infra.database import AsyncSessionLocal, crud
 from utils import get_s3_uploader
 
 logger = get_logger("file_service")
@@ -65,11 +63,14 @@ def _get_mime_from_extension(filename: str) -> str:
         'jpg': 'image/jpeg',
         'jpeg': 'image/jpeg',
         'gif': 'image/gif',
+        'webp': 'image/webp',
         'svg': 'image/svg+xml',
         'mp4': 'video/mp4',
         'mp3': 'audio/mpeg',
         'zip': 'application/zip',
         'gz': 'application/gzip',
+        'md': 'text/markdown',
+        'csv': 'text/csv',
     }
     
     return mime_map.get(ext, 'application/octet-stream')
@@ -80,107 +81,16 @@ class FileServiceError(Exception):
     pass
 
 
-class FileNotFoundError(FileServiceError):
-    """文件不存在异常"""
-    pass
-
-
 class FileService:
     """
-    文件服务
+    文件服务（纯 S3，无数据库）
     
-    提供文件的完整生命周期管理
+    只提供文件上传到 S3 并返回预签名 URL 的功能
     """
     
     def __init__(self):
         """初始化文件服务"""
         self.s3_uploader = get_s3_uploader()
-    
-    # ==================== 文件查询 ====================
-    
-    async def list_files(
-        self,
-        user_id: str,
-        limit: int = 20,
-        offset: int = 0
-    ) -> Dict[str, Any]:
-        """获取用户文件列表"""
-        async with AsyncSessionLocal() as session:
-            files = await crud.list_files_by_user(
-                session=session,
-                user_id=user_id,
-                limit=limit,
-                offset=offset,
-                order_by="created_at",
-                order_desc=True
-            )
-            
-            total = await crud.count_files_by_user(session=session, user_id=user_id)
-        
-        return {
-            "user_id": user_id,
-            "total": total,
-            "files": files,
-            "has_more": (offset + len(files)) < total
-        }
-    
-    async def get_file(self, file_id: str) -> Dict[str, Any]:
-        """获取文件详情"""
-        async with AsyncSessionLocal() as session:
-            file_record = await crud.get_file(session, file_id)
-        
-        if not file_record:
-            raise FileNotFoundError(f"文件不存在: {file_id}")
-        
-        return {
-            "file_id": file_record.id,
-            "file_name": file_record.filename,
-            "file_size": file_record.file_size,
-            "file_type": file_record.mime_type,
-            "created_at": file_record.created_at.isoformat() if file_record.created_at else None,
-        }
-    
-    # ==================== 文件操作 ====================
-    
-    async def get_download_url(self, file_id: str) -> Dict[str, Any]:
-        """获取下载 URL（预签名，24小时有效）"""
-        async with AsyncSessionLocal() as session:
-            file_record = await crud.get_file(session, file_id)
-            
-            if not file_record:
-                raise FileNotFoundError(f"文件不存在: {file_id}")
-            
-            url = self.s3_uploader.get_presigned_url(
-                s3_key=file_record.storage_path,
-                expires_in=86400
-            )
-            
-            return {
-                "file_id": file_id,
-                "file_name": file_record.filename,
-                "file_url": url
-            }
-    
-    async def delete_file(self, file_id: str) -> Dict[str, Any]:
-        """删除文件"""
-        async with AsyncSessionLocal() as session:
-            file_record = await crud.get_file(session, file_id)
-            
-            if not file_record:
-                raise FileNotFoundError(f"文件不存在: {file_id}")
-            
-            # 删除 S3 文件
-            try:
-                await self.s3_uploader.delete_file(file_record.storage_path)
-            except Exception as e:
-                logger.warning(f"⚠️ S3 删除失败: {str(e)}")
-            
-            # 删除数据库记录
-            await crud.delete_file(session, file_id)
-        
-        return {"file_id": file_id, "success": True}
-    
-    # ==================== 文件上传 ====================
     
     async def upload_file(
         self,
@@ -190,7 +100,7 @@ class FileService:
         user_id: str
     ) -> Dict[str, Any]:
         """
-        上传文件到 S3 并保存记录到数据库
+        上传文件到 S3（不保存到数据库）
         
         Args:
             file_content: 文件内容（字节）
@@ -199,7 +109,7 @@ class FileService:
             user_id: 用户 ID
             
         Returns:
-            { "file_id", "file_name", "file_size", "file_type", "file_url", "created_at" }
+            { "file_url", "file_name", "file_size", "file_type" }
         """        
         file_size = len(file_content)
         
@@ -207,11 +117,11 @@ class FileService:
         detected_mime = detect_mime_type(file_content, filename)
         logger.info(f"MIME 验证: 前端={mime_type}, 后端={detected_mime}")
         
-        # 构建存储路径
+        # 构建存储路径：chat-attachments/{user_id}/{date}/{unique_id}_{filename}
         date_str = datetime.now().strftime("%Y%m%d")
         unique_id = uuid.uuid4().hex[:12]
         safe_filename = "".join(c for c in filename if c.isalnum() or c in "._-")
-        storage_path = f"{user_id}/{date_str}/{unique_id}_{safe_filename}"
+        storage_path = f"chat-attachments/{user_id}/{date_str}/{unique_id}_{safe_filename}"
         
         try:
             # 上传到 S3（使用检测到的 MIME 类型）
@@ -221,80 +131,24 @@ class FileService:
                 content_type=detected_mime
             )
             
-            # 保存到数据库
-            async with AsyncSessionLocal() as session:
-                file_record = await crud.create_file(
-                    session=session,
-                    user_id=user_id,
-                    filename=filename,
-                    file_size=file_size,
-                    mime_type=detected_mime,
-                    storage_path=storage_path
-                )
-            
-            logger.info(f"✅ 上传: {file_record.id}, {filename}, {file_size}B, {detected_mime}")
-            
-            # 生成访问 URL
+            # 生成预签名 URL（24小时有效，足够完成对话）
             file_url = self.s3_uploader.get_presigned_url(
                 s3_key=storage_path,
-                expires_in=3600
+                expires_in=86400  # 24小时
             )
             
+            logger.info(f"✅ 上传成功: {filename}, {file_size}B, {detected_mime}")
+            
             return {
-                "file_id": file_record.id,
+                "file_url": file_url,
                 "file_name": filename,
                 "file_size": file_size,
-                "file_type": detected_mime,
-                "file_url": file_url,
-                "created_at": datetime.now().isoformat()
+                "file_type": detected_mime
             }
         
         except Exception as e:
             logger.error(f"❌ 上传失败: {str(e)}", exc_info=True)
             raise FileServiceError(f"上传失败: {str(e)}")
-    
-    async def get_file_url(self, file_id: str, expiration: int = 3600) -> str:
-        """获取文件访问 URL"""
-        async with AsyncSessionLocal() as session:
-            file_record = await crud.get_file(session, file_id)
-            
-            if not file_record:
-                raise FileNotFoundError(f"文件不存在: {file_id}")
-            
-            return self.s3_uploader.get_presigned_url(
-                s3_key=file_record.storage_path,
-                expires_in=expiration
-            )
-    
-    async def get_file_content(self, file_id: str) -> tuple[bytes, str, str]:
-        """
-        获取文件内容（用于代理预览）
-        
-        Args:
-            file_id: 文件 ID
-            
-        Returns:
-            (文件内容, MIME 类型, 文件名)
-        """
-        async with AsyncSessionLocal() as session:
-            file_record = await crud.get_file(session, file_id)
-            
-            if not file_record:
-                raise FileNotFoundError(f"文件不存在: {file_id}")
-            
-            # 从 S3 下载文件内容
-            s3_client = self.s3_uploader.s3_client
-            bucket_name = self.s3_uploader.bucket_name
-            
-            response = s3_client.get_object(
-                Bucket=bucket_name,
-                Key=file_record.storage_path
-            )
-            content = response['Body'].read()
-            
-            logger.info(f"📥 获取文件内容: {file_record.filename}, {len(content)} bytes")
-            
-            return content, file_record.mime_type, file_record.filename
 
 
 # ==================== 便捷函数 ====================
@@ -313,4 +167,3 @@ def get_file_service() -> FileService:
     if _default_file_service is None:
         _default_file_service = FileService()
     return _default_file_service
-

@@ -38,7 +38,6 @@ from .file_service import (
     FileService,
     get_file_service,
     FileServiceError,
-    FileNotFoundError as FileNotFoundErr,
 )
 
 from .tool_service import (
@@ -127,7 +126,6 @@ __all__ = [
     "FileService",
     "get_file_service",
     "FileServiceError",
-    "FileNotFoundErr",
     # Tool Service
     "ToolService",
     "get_tool_service",

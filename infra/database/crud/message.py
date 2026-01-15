@@ -14,8 +14,8 @@ from infra.database.crud.base import get_by_id
 
 
 def generate_message_id() -> str:
-    """生成消息 ID"""
-    return f"msg_{uuid4().hex[:24]}"
+    """生成消息 ID（纯 UUID）"""
+    return uuid4().hex
 
 
 async def create_message(
