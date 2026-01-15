@@ -1,0 +1,305 @@
+# 意图理解评估套件
+# 
+# 测试智能体理解用户意图的能力，包括：
+# - 显式意图识别
+# - 隐式意图推断
+# - 多意图处理
+# - 上下文理解
+
+id: conversation_intent_understanding
+name: 意图理解评估套件
+description: 评估智能体理解用户真实意图的能力
+category: conversation
+default_trials: 3
+
+metadata:
+  version: "1.0.0"
+  author: "ZenFlux Team"
+  created_at: "2026-01-14"
+  priority: P0
+  reference: "https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents"
+
+tasks:
+  # ==================
+  # 显式意图测试
+  # ==================
+  
+  - id: intent_explicit_001
+    description: "显式意图 - 用户明确要求查询信息"
+    category: explicit_intent
+    input:
+      user_query: "帮我查一下北京今天的天气"
+      conversation_history: []
+      context: {}
+    expected_outcome:
+      intent: "weather_query"
+      confidence: ">0.9"
+      tool_calls: ["weather_api"]
+    graders:
+      - type: code
+        name: check_tool_calls
+        check: "tool_calls_contain('weather_api')"
+      - type: model
+        rubric: grade_intent_understanding
+        min_score: 4
+    trials: 3
+    timeout_seconds: 30
+    tags: ["explicit", "weather", "simple"]
+
+  - id: intent_explicit_002
+    description: "显式意图 - 用户明确要求执行操作"
+    category: explicit_intent
+    input:
+      user_query: "创建一个名为test.py的Python文件，内容是打印Hello World"
+      conversation_history: []
+      context: {}
+    expected_outcome:
+      intent: "file_creation"
+      tool_calls: ["write_file"]
+      response_contains: ["创建", "完成"]
+    graders:
+      - type: code
+        name: check_tool_calls
+        check: "tool_calls_contain('write_file')"
+      - type: code
+        name: check_response
+        check: "check_response_contains(['创建', '完成'])"
+      - type: model
+        rubric: grade_intent_understanding
+        min_score: 4
+    trials: 3
+    timeout_seconds: 30
+    tags: ["explicit", "file_operation", "code"]
+
+  # ==================
+  # 隐式意图测试
+  # ==================
+  
+  - id: intent_implicit_001
+    description: "隐式意图 - 用户想退款但没有明说"
+    category: implicit_intent
+    input:
+      user_query: "我买的东西质量不好，很失望"
+      conversation_history: []
+      context:
+        scenario: "customer_service"
+    expected_outcome:
+      intent: "refund_request"
+      confidence: ">0.7"
+    graders:
+      - type: model
+        rubric: grade_intent_understanding
+        min_score: 4
+      - type: model
+        rubric: |
+          评估智能体是否识别出用户的隐含意图：
+          - 用户表达不满意
+          - 用户可能想要退款或换货
+          - 智能体应主动提供解决方案
+          
+          评分标准（1-5分）：
+          5分：准确识别隐含意图，主动提供退款/换货选项
+          4分：识别用户不满，提供了解决方案
+          3分：识别用户不满，但未主动提供解决方案
+          2分：只是道歉，未理解深层意图
+          1分：完全未理解用户意图
+        min_score: 4
+    trials: 3
+    timeout_seconds: 30
+    tags: ["implicit", "customer_service", "complex"]
+
+  - id: intent_implicit_002
+    description: "隐式意图 - 用户想了解价格但说得比较委婉"
+    category: implicit_intent
+    input:
+      user_query: "这个服务值得购买吗？"
+      conversation_history: []
+      context:
+        scenario: "sales"
+    expected_outcome:
+      intent: "price_inquiry"
+    graders:
+      - type: model
+        rubric: grade_intent_understanding
+        min_score: 3
+      - type: model
+        rubric: |
+          评估智能体是否理解用户在询问性价比：
+          - 用户可能想知道价格
+          - 用户可能在比较竞品
+          - 智能体应该提供价值说明
+          
+          评分标准（1-5分）：
+          5分：理解用户在考虑性价比，主动说明价值和价格
+          4分：理解用户在考虑购买，提供了有用信息
+          3分：回答了问题，但不够全面
+          2分：回答过于笼统
+          1分：未理解用户意图
+        min_score: 3
+    trials: 3
+    timeout_seconds: 30
+    tags: ["implicit", "sales", "medium"]
+
+  # ==================
+  # 多意图测试
+  # ==================
+  
+  - id: intent_multi_001
+    description: "多意图 - 用户同时有多个需求"
+    category: multi_intent
+    input:
+      user_query: "查一下明天北京的天气，顺便帮我预订一张去上海的机票"
+      conversation_history: []
+      context: {}
+    expected_outcome:
+      intent: "multi_intent"
+      tool_calls: ["weather_api", "flight_booking"]
+    graders:
+      - type: model
+        rubric: |
+          评估智能体是否能处理多个意图：
+          1. 查询天气（北京，明天）
+          2. 预订机票（去上海）
+          
+          评分标准（1-5分）：
+          5分：准确识别并处理两个意图
+          4分：识别两个意图，处理基本正确
+          3分：只处理了一个意图
+          2分：两个意图都处理不当
+          1分：完全混淆
+        min_score: 4
+      - type: model
+        rubric: grade_response_quality
+        min_score: 3
+    trials: 3
+    timeout_seconds: 60
+    tags: ["multi_intent", "complex"]
+
+  # ==================
+  # 上下文理解测试
+  # ==================
+  
+  - id: intent_context_001
+    description: "上下文理解 - 需要结合历史对话理解意图"
+    category: context_understanding
+    input:
+      user_query: "那把它改成红色的"
+      conversation_history:
+        - role: user
+          content: "帮我设计一个网页按钮"
+        - role: assistant
+          content: "好的，我为您设计了一个蓝色的圆角按钮..."
+      context: {}
+    expected_outcome:
+      intent: "modify_design"
+      response_contains: ["红色"]
+    graders:
+      - type: code
+        name: check_response
+        check: "check_response_contains(['红色'])"
+      - type: model
+        rubric: |
+          评估智能体是否理解上下文：
+          - 用户说的"它"指的是之前设计的按钮
+          - 用户想把按钮颜色从蓝色改成红色
+          
+          评分标准（1-5分）：
+          5分：准确理解上下文，正确修改按钮颜色
+          4分：理解上下文，基本正确
+          3分：理解了要修改，但有小偏差
+          2分：对上下文理解有较大偏差
+          1分：完全不理解上下文
+        min_score: 4
+    trials: 3
+    timeout_seconds: 30
+    tags: ["context", "design", "continuity"]
+
+  - id: intent_context_002
+    description: "上下文理解 - 代词指代消解"
+    category: context_understanding
+    input:
+      user_query: "把他们都删掉"
+      conversation_history:
+        - role: user
+          content: "列出所有的临时文件"
+        - role: assistant
+          content: "找到以下临时文件：\n1. temp1.txt\n2. temp2.txt\n3. cache.log"
+      context: {}
+    expected_outcome:
+      intent: "delete_files"
+      tool_calls: ["delete_file"]
+    graders:
+      - type: model
+        rubric: |
+          评估智能体是否正确理解代词指代：
+          - "他们"指的是之前列出的临时文件
+          - 用户想删除这些文件
+          
+          评分标准（1-5分）：
+          5分：准确理解"他们"的指代，正确执行删除操作
+          4分：理解指代，执行基本正确
+          3分：理解了要删除，但范围有偏差
+          2分：对指代理解有较大偏差
+          1分：完全不理解指代关系
+        min_score: 4
+    trials: 3
+    timeout_seconds: 30
+    tags: ["context", "reference", "file_operation"]
+
+  # ==================
+  # 边界情况测试
+  # ==================
+  
+  - id: intent_edge_001
+    description: "边界情况 - 模糊不清的请求"
+    category: edge_case
+    input:
+      user_query: "帮帮我"
+      conversation_history: []
+      context: {}
+    expected_outcome:
+      intent: "clarification_needed"
+    graders:
+      - type: model
+        rubric: |
+          评估智能体处理模糊请求的能力：
+          - 用户请求不明确
+          - 智能体应该询问更多信息，而不是猜测
+          
+          评分标准（1-5分）：
+          5分：礼貌地询问用户需要什么帮助
+          4分：尝试了解用户需求，提出澄清问题
+          3分：做了一些假设，但也尝试了解更多
+          2分：做了很多假设，没有询问用户
+          1分：随意猜测用户意图
+        min_score: 4
+    trials: 3
+    timeout_seconds: 30
+    tags: ["edge_case", "ambiguous"]
+
+  - id: intent_edge_002
+    description: "边界情况 - 矛盾的请求"
+    category: edge_case
+    input:
+      user_query: "帮我删除这个文件，但是要保留它"
+      conversation_history: []
+      context: {}
+    expected_outcome:
+      intent: "contradictory_request"
+    graders:
+      - type: model
+        rubric: |
+          评估智能体处理矛盾请求的能力：
+          - 用户的请求自相矛盾
+          - 智能体应该指出矛盾并询问真实意图
+          
+          评分标准（1-5分）：
+          5分：准确指出请求矛盾，询问用户真实意图
+          4分：发现矛盾，尝试澄清
+          3分：注意到问题，但处理不够好
+          2分：忽略矛盾，做出假设
+          1分：完全忽略矛盾，随意执行
+        min_score: 4
+    trials: 3
+    timeout_seconds: 30
+    tags: ["edge_case", "contradictory"]

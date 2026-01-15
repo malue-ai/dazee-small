@@ -24,11 +24,20 @@ ZenFlux Agent 路由模块
 """
 
 from core.routing.router import AgentRouter, RoutingDecision
-from core.routing.complexity_scorer import ComplexityScorer, ComplexityScore
+from core.routing.complexity_scorer import ComplexityScorer, ComplexityScore, ComplexityLevel
+from core.routing.intent_analyzer import IntentAnalyzer  # 🆕 共享模块
+# 重新导出 IntentResult 供外部使用
+from core.agent.types import IntentResult, TaskType, Complexity
 
 __all__ = [
     "AgentRouter",
     "RoutingDecision",
     "ComplexityScorer",
     "ComplexityScore",
+    "ComplexityLevel",
+    "IntentAnalyzer",  # 🆕 共享模块
+    # 重新导出
+    "IntentResult",
+    "TaskType",
+    "Complexity",
 ]

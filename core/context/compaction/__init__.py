@@ -171,12 +171,13 @@ def trim_history_messages(
     last_part = messages[-strategy.preserve_last_n * 2:]
     middle_part = messages[strategy.preserve_first_n * 2:-strategy.preserve_last_n * 2]
     
-    # 中间部分：只保留含 tool_result 的消息
+    # 中间部分：只保留含 tool_result 的消息（客观判断）
+    # 🔑 原则：使用客观特征（tool_result 类型），不使用关键词匹配
     if strategy.preserve_tool_results:
         important_middle = []
         for msg in middle_part:
             content = msg.get("content", "")
-            # 检查是否包含 tool_result
+            # 检查是否包含 tool_result（客观特征）
             if isinstance(content, list):
                 has_tool_result = any(
                     block.get("type") == "tool_result" 
@@ -185,12 +186,8 @@ def trim_history_messages(
                 )
                 if has_tool_result:
                     important_middle.append(msg)
-            # 或者包含重要关键词
-            elif isinstance(content, str) and any(
-                kw in content.lower() 
-                for kw in ["file:", "path:", "error:", "found:", "created:"]
-            ):
-                important_middle.append(msg)
+            # 注意：不再使用关键词匹配判断重要性
+            # LLM 会通过 tool_result 保留关键信息
     else:
         important_middle = []
     
@@ -260,6 +257,33 @@ def should_warn_backend(
     return estimated_tokens >= strategy.token_budget * strategy.warning_threshold
 
 
+# 别名函数（兼容旧 API）
+def get_compaction_threshold(qos_level: QoSLevel = QoSLevel.PRO) -> int:
+    """
+    获取压缩阈值（token 数）
+    
+    当 token 数超过此阈值时，应触发历史消息裁剪
+    
+    Args:
+        qos_level: QoS 等级
+        
+    Returns:
+        Token 阈值
+    """
+    strategy = get_context_strategy(qos_level)
+    return int(strategy.token_budget * strategy.warning_threshold)
+
+
+def get_context_awareness_prompt() -> str:
+    """
+    获取上下文感知提示词
+    
+    别名：get_memory_guidance_prompt
+    用于向 Claude 提供长任务处理指导
+    """
+    return get_memory_guidance_prompt()
+
+
 # 导出
 __all__ = [
     "QoSLevel",
@@ -267,6 +291,8 @@ __all__ = [
     "ContextStrategy",
     "get_context_strategy",
     "get_memory_guidance_prompt",
+    "get_context_awareness_prompt",  # 别名
+    "get_compaction_threshold",      # 别名
     "trim_history_messages",
     "estimate_tokens",
     "should_warn_backend",

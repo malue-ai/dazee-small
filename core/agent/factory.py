@@ -774,35 +774,34 @@ async def create_agent_from_routing_decision(
     )
     
     # 根据复杂度选择 Schema 配置
+    # 🔑 关键原则：Plan 是否启用由 Claude 自主决定（通过 plan_todo 工具），
+    #              我们只设置结构性配置（max_turns）
     if complexity_score <= 3.0:
-        # 简单任务：快速响应
+        # 简单任务：快速响应，限制轮数
         schema = AgentSchema(
             name="SimpleAgent",
             description="简单任务快速响应",
-            intent_analyzer=IntentAnalyzerConfig(enabled=False),  # 跳过内部分析
-            plan_manager=PlanManagerConfig(enabled=False),
+            intent_analyzer=IntentAnalyzerConfig(enabled=False),  # 跳过内部分析（路由层已完成）
             tool_selector=ToolSelectorConfig(enabled=True),
             max_turns=8,
-            reasoning=f"简单任务（score={complexity_score:.2f}），禁用规划，快速响应"
+            reasoning=f"简单任务（score={complexity_score:.2f}），限制 8 轮"
         )
     elif complexity_score <= 6.0:
-        # 中等任务：启用规划
+        # 中等任务：适中轮数
         schema = AgentSchema(
             name="MediumAgent",
             description="中等复杂度任务",
-            intent_analyzer=IntentAnalyzerConfig(enabled=False),  # 跳过内部分析
-            plan_manager=PlanManagerConfig(enabled=True, max_steps=10),
+            intent_analyzer=IntentAnalyzerConfig(enabled=False),  # 跳过内部分析（路由层已完成）
             tool_selector=ToolSelectorConfig(enabled=True),
             max_turns=15,
-            reasoning=f"中等任务（score={complexity_score:.2f}），启用规划"
+            reasoning=f"中等任务（score={complexity_score:.2f}），限制 15 轮"
         )
     else:
-        # 复杂任务：完整配置
+        # 复杂任务：完整轮数配置
         schema = AgentSchema(
             name="ComplexAgent",
             description="复杂任务完整配置",
-            intent_analyzer=IntentAnalyzerConfig(enabled=False),  # 跳过内部分析
-            plan_manager=PlanManagerConfig(enabled=True, max_steps=20),
+            intent_analyzer=IntentAnalyzerConfig(enabled=False),  # 跳过内部分析（路由层已完成）
             tool_selector=ToolSelectorConfig(enabled=True),
             memory_manager=MemoryManagerConfig(
                 retention_policy="session",

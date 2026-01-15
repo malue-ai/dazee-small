@@ -76,13 +76,14 @@ class ComplexityScorer:
     MEDIUM_THRESHOLD = 5.0    # <= 5 为中等任务
     COMPLEX_THRESHOLD = 7.0   # > 5 为复杂任务
     
-    # 任务类型基础复杂度
+    # 任务类型基础复杂度（使用 TaskType 枚举值）
     TASK_TYPE_BASE_SCORES = {
-        TaskType.QUESTION_ANSWERING: 1.0,    # 问答：最简单
+        TaskType.INFORMATION_QUERY: 1.0,     # 信息查询：最简单
+        TaskType.CONVERSATION: 1.5,          # 日常对话：简单
         TaskType.DATA_ANALYSIS: 3.0,         # 数据分析：中等
         TaskType.CONTENT_GENERATION: 4.0,    # 内容生成：中等偏上
         TaskType.CODE_DEVELOPMENT: 5.0,      # 代码开发：较复杂
-        TaskType.WEB_SEARCH: 2.0,            # 网络搜索：简单
+        TaskType.TASK_EXECUTION: 4.0,        # 任务执行：中等偏上
         TaskType.OTHER: 2.0,                 # 其他：默认简单
     }
     

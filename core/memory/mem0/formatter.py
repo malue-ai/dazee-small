@@ -198,56 +198,37 @@ def format_memories_by_category(
     categories: Optional[Dict[str, List[str]]] = None
 ) -> str:
     """
-    按类别格式化记忆
+    格式化记忆列表（按时间倒序）
+    
+    🔑 设计原则：不使用关键词匹配分类，直接呈现记忆让 LLM 理解语义
     
     Args:
         memories: 记忆列表
-        categories: 类别定义，如 {"偏好": ["喜欢", "偏好"], "技能": ["会", "熟悉"]}
+        categories: （已废弃，保留参数兼容性）
         
     Returns:
-        分类格式化的字符串
+        格式化的记忆字符串
     """
     if not memories:
         return ""
     
-    # 默认类别
-    if categories is None:
-        categories = {
-            "用户偏好": ["喜欢", "偏好", "prefer", "like"],
-            "技术技能": ["会", "熟悉", "擅长", "know", "familiar", "expert"],
-            "工作相关": ["工作", "职业", "role", "job", "work"],
-            "其他": []  # 兜底类别
-        }
+    # 按时间或重要性排序（如果有这些字段）
+    sorted_memories = sorted(
+        memories,
+        key=lambda m: m.get("created_at", "") or m.get("timestamp", ""),
+        reverse=True
+    )
     
-    # 分类记忆
-    categorized: Dict[str, List[str]] = {cat: [] for cat in categories}
+    # 构建输出：简单列表，不做分类
+    lines = ["# 用户相关记忆\n"]
     
-    for mem in memories:
+    # 最多显示 15 条最新记忆
+    for mem in sorted_memories[:15]:
         text = mem.get("memory", "")
-        if not text:
-            continue
-        
-        placed = False
-        for cat, keywords in categories.items():
-            if cat == "其他":
-                continue
-            if any(kw.lower() in text.lower() for kw in keywords):
-                categorized[cat].append(text)
-                placed = True
-                break
-        
-        if not placed:
-            categorized["其他"].append(text)
+        if text:
+            lines.append(f"- {text}")
     
-    # 构建输出
-    lines = ["# 用户画像\n"]
-    
-    for cat, items in categorized.items():
-        if items:
-            lines.append(f"## {cat}")
-            for item in items[:5]:  # 每类最多5条
-                lines.append(f"- {item}")
-            lines.append("")
+    lines.append("")
     
     return "\n".join(lines)
 

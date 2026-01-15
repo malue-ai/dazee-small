@@ -388,59 +388,76 @@ class AgentManager:
     
     async def _decompose_task(self, user_query: str) -> TaskPlan:
         """
-        使用 LLM 拆解任务
+        使用 LLM 进行任务分解（语义理解）
         
-        TODO: 当前为简化版 (规则匹配)，V4.1 将接入 LLM
+        🔑 原则：通过 LLM 理解任务语义，而不是关键词匹配
         """
-        # 简化版: 关键词匹配
-        tasks = []
-        task_id = 1
+        logger.info(f"开始任务分解: {user_query}")
         
-        # 检测重构任务
-        if "重构" in user_query or "refactor" in user_query.lower():
-            tasks.append(Task(
-                id=f"task-{task_id}",
-                action="重构代码",
-                specialization="refactor",
-                dependencies=[],
-                estimated_time=600
-            ))
-            task_id += 1
-        
-        # 检测 CSS 任务
-        if "css" in user_query.lower() or "样式" in user_query or "美化" in user_query:
-            tasks.append(Task(
-                id=f"task-{task_id}",
-                action="优化CSS样式",
-                specialization="css",
-                dependencies=[],
-                estimated_time=300
-            ))
-            task_id += 1
-        
-        # 检测测试任务
-        if "测试" in user_query or "test" in user_query.lower():
-            # 如果有重构任务，测试依赖重构
-            dependencies = ["task-1"] if tasks and tasks[0].specialization == "refactor" else []
+        # 使用 LLM 进行任务分解
+        decompose_prompt = f"""请分析以下用户请求，将其分解为具体的子任务：
+
+用户请求：{user_query}
+
+分析要求：
+1. 识别任务类型（如重构、测试、样式优化、功能开发等）
+2. 确定任务之间的依赖关系
+3. 估算每个任务的大致耗时（秒）
+
+请以 JSON 格式返回：
+{{
+  "tasks": [
+    {{
+      "action": "具体任务描述",
+      "specialization": "任务类型（refactor/test/css/general等）",
+      "dependencies": ["依赖的任务ID"],
+      "estimated_time": 300
+    }}
+  ]
+}}
+
+如果是简单任务，返回单个任务即可。"""
+
+        try:
+            response = await self.llm.generate(decompose_prompt, temperature=0.3)
+            import json
+            from utils.json_utils import extract_json
             
-            tasks.append(Task(
-                id=f"task-{task_id}",
-                action="补充单元测试",
-                specialization="test",
-                dependencies=dependencies,
-                estimated_time=400
-            ))
-            task_id += 1
-        
-        # 如果没有匹配到任何任务，创建通用任务
-        if not tasks:
-            tasks.append(Task(
-                id=f"task-{task_id}",
+            # 解析 LLM 返回的任务分解
+            task_data = extract_json(response)
+            tasks = []
+            
+            for idx, task_info in enumerate(task_data.get("tasks", []), start=1):
+                tasks.append(Task(
+                    id=f"task-{idx}",
+                    action=task_info.get("action", user_query),
+                    specialization=task_info.get("specialization", "general"),
+                    dependencies=task_info.get("dependencies", []),
+                    estimated_time=task_info.get("estimated_time", 300)
+                ))
+            
+            # 如果 LLM 未返回任务，创建默认任务
+            if not tasks:
+                tasks.append(Task(
+                    id="task-1",
+                    action=user_query,
+                    specialization="general",
+                    dependencies=[],
+                    estimated_time=300
+                ))
+                
+            logger.info(f"任务分解完成，共 {len(tasks)} 个子任务")
+            
+        except Exception as e:
+            logger.warning(f"LLM 任务分解失败，使用默认任务: {e}")
+            # 降级：创建单个通用任务
+            tasks = [Task(
+                id="task-1",
                 action=user_query,
                 specialization="general",
                 dependencies=[],
                 estimated_time=300
-            ))
+            )]
         
         return TaskPlan(goal=user_query, tasks=tasks)
     

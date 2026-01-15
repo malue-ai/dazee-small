@@ -151,7 +151,7 @@ class AgentRouter:
         使用现有的 IntentAnalyzer，但作为共享模块
         """
         if self._intent_analyzer is None:
-            from core.agent.intent_analyzer import IntentAnalyzer
+            from core.routing.intent_analyzer import IntentAnalyzer  # 🆕 从共享层导入
             self._intent_analyzer = IntentAnalyzer(
                 llm_service=self.llm_service,
                 enable_llm=self.enable_llm,

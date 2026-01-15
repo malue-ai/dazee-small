@@ -310,7 +310,7 @@ class TestE2ERouting:
             # 模拟意图分析结果
             from core.agent.types import IntentResult, TaskType, Complexity
             mock_intent = IntentResult(
-                task_type=TaskType.CODING,
+                task_type=TaskType.CODE_DEVELOPMENT,  # 使用正确的枚举值
                 complexity=Complexity.MEDIUM,
                 needs_plan=True,
                 confidence=0.9
@@ -377,23 +377,37 @@ class TestE2ERouting:
     
     # ==================== 辅助方法 ====================
     
-    def _create_mock_router(self, complexity_score: float = 3.0):
+    def _create_mock_router(self, complexity_score: float = 3.0, task_type=None):
         """创建模拟路由器"""
         router = MagicMock()
         
         from core.agent.types import IntentResult, TaskType, Complexity
+        from core.routing.complexity_scorer import ComplexityScore, ComplexityLevel
+        
+        # 使用传入的 task_type 或默认值
+        used_task_type = task_type if task_type else TaskType.INFORMATION_QUERY
         mock_intent = IntentResult(
-            task_type=TaskType.GENERAL,
+            task_type=used_task_type,
             complexity=Complexity.SIMPLE if complexity_score <= 5 else Complexity.COMPLEX,
             needs_plan=False,
             confidence=0.85
         )
         
-        mock_decision = RoutingDecision(
-            use_multi_agent=(complexity_score > 5),
-            intent=mock_intent,
-            complexity_score=complexity_score,
+        # 创建复杂度评分结果
+        mock_complexity = ComplexityScore(
+            score=complexity_score,
+            level=ComplexityLevel.SIMPLE if complexity_score <= 3 else (
+                ComplexityLevel.MEDIUM if complexity_score <= 6 else ComplexityLevel.COMPLEX
+            ),
             reasoning=f"复杂度评分: {complexity_score}"
+        )
+        
+        # 使用正确的 RoutingDecision 参数
+        mock_decision = RoutingDecision(
+            agent_type="single" if complexity_score <= 5 else "multi",
+            intent=mock_intent,
+            complexity=mock_complexity,
+            user_query="测试查询"
         )
         
         router.route = AsyncMock(return_value=mock_decision)
@@ -444,7 +458,7 @@ class TestAgentFactoryRefactoring:
         
         # 模拟路由决策
         mock_intent = IntentResult(
-            task_type=TaskType.CODING,
+            task_type=TaskType.CODE_DEVELOPMENT,  # 使用正确的枚举值
             complexity=Complexity.MEDIUM,
             needs_plan=True,
             confidence=0.9
@@ -533,7 +547,7 @@ async def test_full_e2e_flow():
             # 模拟路由决策
             from core.agent.types import IntentResult, TaskType, Complexity
             mock_intent = IntentResult(
-                task_type=TaskType.DOCUMENT,
+                task_type=TaskType.DATA_ANALYSIS,  # 使用正确的枚举值
                 complexity=Complexity.MEDIUM,
                 needs_plan=True,
                 confidence=0.88
