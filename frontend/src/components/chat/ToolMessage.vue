@@ -1,11 +1,11 @@
 <template>
   <div class="tool-message">
     <!-- 头部：折叠状态 -->
-    <div class="tool-header" @click="toggle" :class="{ 'is-expanded': isExpanded, 'is-error': isError }">
+    <div class="tool-header" @click="toggle" :class="{ 'is-expanded': isExpanded, 'is-error': isError, 'is-success': isSuccess }">
       <div class="header-left">
         <span class="status-indicator" :class="status"></span>
         <span class="tool-name">{{ formatToolName(name) }}</span>
-        <span class="status-text" v-if="isLoading">执行中...</span>
+        <span class="status-text" :class="{ 'success-text': isSuccess, 'error-text': isError }">{{ statusText }}</span>
       </div>
       
       <div class="header-right">
@@ -32,6 +32,65 @@
 
 <script setup>
 import { ref, computed } from 'vue'
+
+// 工具名中文映射表
+const TOOL_NAME_MAP = {
+  // 沙盒/文件操作
+  'sandbox_write_file': '写入文件',
+  'sandbox_read_file': '读取文件',
+  'sandbox_run_command': '执行命令',
+  'sandbox_run_project': '运行项目',
+  'sandbox_create_project': '创建项目',
+  'write_file': '写入文件',
+  'read_file': '读取文件',
+  'str_replace_editor': '编辑文件',
+  'create_file': '创建文件',
+  
+  // API 调用
+  'api_calling': '调用服务',
+  
+  // 搜索
+  'web_search': '网络搜索',
+  'tavily_search': '网络搜索',
+  'exa_search': '智能搜索',
+  'perplxity': '联网搜索',
+  
+  // 知识库
+  'ragie_retrieve': '知识检索',
+  'knowledge_search': '知识检索',
+  'chatDocuments': '文档问答',
+  
+  // 计划与任务
+  'plan_todo': '任务规划',
+  'scheduled_task': '定时任务',
+  
+  // 文档生成
+  'ppt_generator': 'PPT 生成',
+  'slidespeak_render': '幻灯片渲染',
+  'text2document': '文档生成',
+  
+  // 数据分析
+  'wenshu_analytics': '数据分析',
+  'wenshu_api': '数据查询',
+  
+  // 流程图/图表
+  'Ontology_TextToChart_zen0': '流程图生成',
+  'nano_banana': '图表生成',
+  
+  // 人工确认
+  'request_human_confirmation': '等待确认',
+  
+  // Dify/Coze 集成
+  'dify_api': 'Dify 服务',
+  'coze_api': 'Coze 服务',
+}
+
+// 状态文案映射
+const STATUS_TEXT_MAP = {
+  'pending': '执行中...',
+  'success': '已完成',
+  'error': '执行失败'
+}
 
 const props = defineProps({
   name: String,
@@ -61,14 +120,34 @@ const isExpanded = ref(false)
 
 const isLoading = computed(() => props.status === 'pending')
 const isError = computed(() => props.status === 'error')
+const isSuccess = computed(() => props.status === 'success')
 const isStreaming = computed(() => props.partialInput && !props.input)
+
+// 状态显示文案
+const statusText = computed(() => {
+  return STATUS_TEXT_MAP[props.status] || ''
+})
 
 function toggle() {
   isExpanded.value = !isExpanded.value
 }
 
 function formatToolName(name) {
-  if (!name) return 'System Tool'
+  if (!name) return '工具调用'
+  
+  // 优先使用中文映射
+  if (TOOL_NAME_MAP[name]) {
+    return TOOL_NAME_MAP[name]
+  }
+  
+  // 尝试模糊匹配（处理带前缀的工具名，如 "dify_Ontology_TextToChart_zen0"）
+  for (const [key, value] of Object.entries(TOOL_NAME_MAP)) {
+    if (name.toLowerCase().includes(key.toLowerCase())) {
+      return value
+    }
+  }
+  
+  // 降级：将下划线替换为空格，首字母大写
   return name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
@@ -155,6 +234,14 @@ function formatResult(data) {
 .status-text {
   color: #9ca3af;
   font-size: 12px;
+}
+
+.status-text.success-text {
+  color: #10b981;
+}
+
+.status-text.error-text {
+  color: #ef4444;
 }
 
 .header-right {

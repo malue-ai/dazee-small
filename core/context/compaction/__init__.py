@@ -260,6 +260,33 @@ def should_warn_backend(
     return estimated_tokens >= strategy.token_budget * strategy.warning_threshold
 
 
+def get_compaction_threshold(qos_level: QoSLevel = QoSLevel.PRO) -> int:
+    """
+    根据 QoS 等级获取 token 压缩阈值
+    
+    这是 get_context_strategy() 的简化包装，直接返回 token_budget
+    
+    Args:
+        qos_level: QoS 等级
+        
+    Returns:
+        token 阈值
+    """
+    return QOS_TOKEN_BUDGETS.get(qos_level, 200_000)
+
+
+def get_context_awareness_prompt() -> str:
+    """
+    获取上下文感知提示词（L1 策略的别名）
+    
+    这是 get_memory_guidance_prompt() 的别名，保持 API 兼容性
+    
+    Returns:
+        上下文感知指导 Prompt
+    """
+    return get_memory_guidance_prompt()
+
+
 # 导出
 __all__ = [
     "QoSLevel",
@@ -270,4 +297,7 @@ __all__ = [
     "trim_history_messages",
     "estimate_tokens",
     "should_warn_backend",
+    # 兼容性别名
+    "get_compaction_threshold",
+    "get_context_awareness_prompt",
 ]

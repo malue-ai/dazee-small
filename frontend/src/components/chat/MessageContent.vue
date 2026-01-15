@@ -165,6 +165,8 @@ function formatToolResult(content) {
 function getToolStatus(toolId) {
   const status = props.toolStatuses[toolId]
   if (!status) return 'pending'
+  // 检查 pending 标志（工具正在执行中）
+  if (status.pending) return 'pending'
   return status.success ? 'success' : 'error'
 }
 

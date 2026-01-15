@@ -33,6 +33,8 @@ from .manager import ContextManager, get_context_manager
 from .retriever import ContextRetriever
 from .fusion import FusionEngine
 from .injector import ContextInjector
+from .conversation import Context, create_context
+from .runtime import RuntimeContext, create_runtime_context
 
 __all__ = [
     # 主入口
@@ -47,4 +49,12 @@ __all__ = [
     "ContextRetriever",
     "FusionEngine",
     "ContextInjector",
+    
+    # 对话上下文
+    "Context",
+    "create_context",
+    
+    # 运行时上下文
+    "RuntimeContext",
+    "create_runtime_context",
 ]

@@ -609,6 +609,8 @@ export const useChatStore = defineStore('chat', {
 
     /**
      * 处理 SSE 断线重连
+     * 
+     * 使用后端的 GET /chat/{session_id} 端点重新建立 SSE 连接
      */
     async _handleSSEReconnect(onEvent, resolve, reject) {
       // 检查是否有 session_id（没有就无法重连）
@@ -628,48 +630,140 @@ export const useChatStore = defineStore('chat', {
       this.reconnectAttempts++
       console.log(`🔄 尝试断线重连 (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`)
 
+      // 指数退避延迟
+      const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts - 1), 10000)
+      await new Promise(r => setTimeout(r, delay))
+
       try {
         // 1. 检查 Session 状态
         const sessionStatus = await this.getSessionStatus(this.sessionId)
         console.log('📊 Session 状态:', sessionStatus)
 
         // 如果已经完成，不需要重连
-        if (sessionStatus.status === 'completed' || sessionStatus.status === 'failed') {
-          console.log('✅ Session 已完成，不需要重连')
+        if (['completed', 'failed', 'timeout', 'stopped'].includes(sessionStatus.status)) {
+          console.log('✅ Session 已结束，不需要重连')
           resolve('')
           return
         }
 
-        // 2. 获取丢失的事件
-        console.log(`📥 获取丢失的事件 (after_id=${this.lastEventId})`)
-        const eventsData = await this.getSessionEvents(this.sessionId, this.lastEventId)
-        
-        // 3. 重放丢失的事件
-        if (eventsData.events && eventsData.events.length > 0) {
-          console.log(`🔄 重放 ${eventsData.events.length} 个丢失的事件`)
-          for (const event of eventsData.events) {
-            if (onEvent) {
-              onEvent(event)
+        // 2. 使用 GET /chat/{session_id} 端点重新建立 SSE 连接
+        const reconnectUrl = `/api/v1/chat/${this.sessionId}?after_seq=${this.lastEventId}&format=zenflux`
+        console.log(`🔗 重连 SSE: ${reconnectUrl}`)
+
+        const response = await fetch(reconnectUrl, {
+          method: 'GET',
+          headers: {
+            'Accept': 'text/event-stream'
+          }
+        })
+
+        // 检查响应状态
+        if (!response.ok) {
+          if (response.status === 410) {
+            // Session 已结束（Gone）
+            console.log('ℹ️ Session 已结束 (410 Gone)')
+            resolve('')
+            return
+          }
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+        }
+
+        console.log('✅ SSE 重连成功')
+        this.isConnected = true
+        this.reconnectAttempts = 0
+
+        // 3. 读取 SSE 流
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        let fullResponse = ''
+
+        while (true) {
+          const { done, value } = await reader.read()
+
+          if (done) {
+            console.log('✅ 重连 SSE 流结束')
+            this.isConnected = false
+            break
+          }
+
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+
+          if (!buffer.endsWith('\n')) {
+            buffer = lines.pop() || ''
+          } else {
+            buffer = ''
+          }
+
+          let currentEventType = null
+          let currentEventData = null
+
+          for (const line of lines) {
+            if (line.startsWith('event: ')) {
+              currentEventType = line.slice(7).trim()
+            } else if (line.startsWith('data: ')) {
+              currentEventData = line.slice(6)
+            } else if (line === '' && currentEventData) {
+              // 空行表示事件结束，处理事件
+              try {
+                const event = JSON.parse(currentEventData)
+                const eventType = event.type || currentEventType
+
+                // 处理 reconnect_info 事件（包含上下文信息）
+                if (currentEventType === 'reconnect_info') {
+                  console.log('📋 重连上下文:', event.data)
+                }
+                // 处理 done 事件
+                else if (currentEventType === 'done' || eventType === 'done' || eventType === 'session_end') {
+                  console.log('✅ 重连流完成')
+                  this.isConnected = false
+                  resolve(fullResponse)
+                  return
+                }
+                // 处理其他事件
+                else {
+                  if (onEvent) {
+                    onEvent(event)
+                  }
+
+                  // 更新 lastEventId
+                  const eventSeq = event.seq || event.id
+                  if (eventSeq) {
+                    this.lastEventId = eventSeq
+                  }
+
+                  // 累积文本响应
+                  if (eventType === 'content_delta' && event.data?.delta) {
+                    const delta = event.data.delta
+                    if (typeof delta === 'string') {
+                      fullResponse += delta
+                    } else if (delta?.text) {
+                      fullResponse += delta.text
+                    }
+                  }
+                }
+              } catch (e) {
+                console.warn('解析重连事件失败:', e, currentEventData)
+              }
+
+              currentEventType = null
+              currentEventData = null
             }
-            this.lastEventId = event.id
           }
         }
 
-        // 4. 重新建立 SSE 连接
-        console.log('🔗 重新建立 SSE 连接...')
-        // 注意：这里需要前端重新发送请求，或者使用 EventSource 的重连机制
-        // 由于我们使用 fetch，这里简单地等待一段时间后完成
-        setTimeout(() => {
-          console.log('✅ 断线重连完成')
-          resolve('')
-        }, 1000)
+        resolve(fullResponse)
 
       } catch (error) {
         console.error('❌ 断线重连失败:', error)
-        
-        // 等待后重试
-        await new Promise(resolve => setTimeout(resolve, 1000 * this.reconnectAttempts))
-        await this._handleSSEReconnect(onEvent, resolve, reject)
+
+        // 如果还有重连次数，继续尝试
+        if (this.reconnectAttempts < this.maxReconnectAttempts) {
+          await this._handleSSEReconnect(onEvent, resolve, reject)
+        } else {
+          reject(new Error('SSE 连接断开，重连失败'))
+        }
       }
     },
 
