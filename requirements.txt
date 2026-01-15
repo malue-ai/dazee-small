@@ -51,7 +51,10 @@ tcvectordb>=1.0.0           # 腾讯向量数据库
 # 文件处理
 Pillow>=10.0.0              # 图片压缩
 PyPDF2>=3.0.0               # PDF 文本提取
-python-pptx>=0.6.21         # PPT 生成
+python-docx>=0.8.11         # Word 文档解析（页数估算）
+python-pptx>=0.6.21         # PPT 生成和解析
+openpyxl>=3.0.0             # Excel 表格解析（工作表数量）
+odfpy>=1.4.1                # ODT 文档解析
 unstructured-client>=0.30.6 # 非结构化数据处理客户端
 
 # 定时任务
