@@ -92,6 +92,14 @@ class AgentRegistry:
         # Agent 配置缓存（name -> AgentConfig）
         self._configs: Dict[str, AgentConfig] = {}
         
+        # 🆕 V7.1: Agent 原型缓存（预创建的 Agent 实例，运行时复用）
+        # 原型包含：LLM Service、工具注册表、MCP 客户端等重量级组件
+        # 运行时通过 clone_for_session() 浅克隆并重置会话状态
+        self._agent_prototypes: Dict[str, Any] = {}  # name -> SimpleAgent
+        
+        # 🆕 V7.1: 共享组件（跨 Agent 复用）
+        self._shared_event_manager = None  # 共享的事件管理器（原型创建时使用）
+        
         # 加载状态
         self._loaded = False
         self._loading = False
@@ -189,19 +197,48 @@ class AgentRegistry:
                         loaded_count += 1
                         
                         logger.info(
-                            f"   ✅ {instance_name} 加载完成 "
+                            f"   ✅ {instance_name} 配置加载完成 "
                             f"(耗时 {load_time_ms:.0f}ms)"
                         )
                         
                     except Exception as e:
                         logger.error(f"   ❌ {instance_name} 加载失败: {str(e)}", exc_info=True)
                 
+                # 🆕 V7.1: 预创建 Agent 原型（核心优化）
+                prototype_count = 0
+                logger.info(f"🔧 开始预创建 Agent 原型...")
+                
+                # 创建共享的事件管理器（用于原型初始化）
+                if self._shared_event_manager is None:
+                    storage = get_memory_storage()
+                    self._shared_event_manager = create_event_manager(storage)
+                
+                for instance_name, agent_config in self._configs.items():
+                    try:
+                        prototype_start = datetime.now()
+                        
+                        # 创建 Agent 原型
+                        prototype = await self._create_agent_prototype(
+                            agent_config, 
+                            self._shared_event_manager
+                        )
+                        
+                        if prototype:
+                            self._agent_prototypes[instance_name] = prototype
+                            prototype_count += 1
+                            
+                            prototype_time_ms = (datetime.now() - prototype_start).total_seconds() * 1000
+                            logger.info(f"   🤖 {instance_name} 原型创建完成 ({prototype_time_ms:.0f}ms)")
+                        
+                    except Exception as e:
+                        logger.warning(f"   ⚠️ {instance_name} 原型创建失败，将使用按需创建: {str(e)}")
+                
                 total_time_ms = (datetime.now() - start_time).total_seconds() * 1000
                 self._loaded = True
                 
                 logger.info(
-                    f"🎉 Agent 预加载完成: {loaded_count}/{len(instances)} 个成功 "
-                    f"(总耗时 {total_time_ms:.0f}ms)"
+                    f"🎉 Agent 预加载完成: {loaded_count}/{len(instances)} 配置, "
+                    f"{prototype_count} 原型 (总耗时 {total_time_ms:.0f}ms)"
                 )
                 
                 return loaded_count
@@ -219,7 +256,12 @@ class AgentRegistry:
         conversation_service=None
     ):
         """
-        获取 Agent 实例（工厂模式：每次创建新实例）
+        获取 Agent 实例（🆕 V7.1: 原型复用模式）
+        
+        优化流程：
+        1. 优先从 _agent_prototypes 获取预创建的原型
+        2. 调用 clone_for_session() 浅克隆并重置会话状态
+        3. 如果原型不存在，回退到按需创建
         
         Args:
             agent_id: Agent ID（instances/ 目录名）
@@ -228,7 +270,7 @@ class AgentRegistry:
             conversation_service: 会话服务
             
         Returns:
-            新创建的 Agent 实例
+            就绪的 Agent 实例
             
         Raises:
             AgentNotFoundError: agent_id 不存在
@@ -246,7 +288,24 @@ class AgentRegistry:
             storage = get_memory_storage()
             event_manager = create_event_manager(storage)
         
-        # 🆕 准备 apis_config（用于 api_calling 自动注入认证）
+        # 🆕 V7.1: 优先从原型复用
+        if agent_id in self._agent_prototypes:
+            prototype = self._agent_prototypes[agent_id]
+            
+            # 浅克隆并重置会话状态
+            agent = prototype.clone_for_session(
+                event_manager=event_manager,
+                workspace_dir=workspace_dir,
+                conversation_service=conversation_service
+            )
+            
+            logger.debug(f"🚀 Agent '{agent_id}' 从原型克隆完成（快速路径）")
+            return agent
+        
+        # 🔄 Fallback: 按需创建（首次或原型不存在）
+        logger.info(f"⚠️ Agent '{agent_id}' 原型不存在，按需创建")
+        
+        # 准备 apis_config（用于 api_calling 自动注入认证）
         apis_config = None
         if config.instance_config and config.instance_config.apis:
             apis_config = [
@@ -269,7 +328,7 @@ class AgentRegistry:
                 workspace_dir=workspace_dir,
                 conversation_service=conversation_service,
                 prompt_cache=config.prompt_cache,
-                apis_config=apis_config,  # 🆕 传递预配置的 APIs
+                apis_config=apis_config,
             )
         else:
             # Fallback: 使用旧方式
@@ -297,6 +356,77 @@ class AgentRegistry:
         await self._setup_instance_tools(agent, config)
         
         logger.debug(f"🤖 创建 Agent 实例: {agent_id}")
+        
+        return agent
+    
+    async def _create_agent_prototype(
+        self, 
+        config: AgentConfig,
+        event_manager
+    ):
+        """
+        🆕 V7.1: 创建 Agent 原型（部署态预创建）
+        
+        根据 schema.multi_agent 自动创建：
+        - SimpleAgent：单智能体原型（含 LLM、工具注册表、MCP 客户端）
+        - MultiAgentOrchestrator：多智能体原型（含 LLM、任务分解器、Worker 配置）
+        
+        运行时通过 clone_for_session() 复用这些组件，仅重置会话状态
+        
+        Args:
+            config: AgentConfig
+            event_manager: 共享的事件管理器（用于原型初始化）
+            
+        Returns:
+            SimpleAgent 或 MultiAgentOrchestrator 原型实例
+        """
+        # 准备 apis_config
+        apis_config = None
+        if config.instance_config and config.instance_config.apis:
+            apis_config = [
+                {
+                    "name": api.name,
+                    "base_url": api.base_url,
+                    "headers": api.headers or {},
+                    "description": api.description,
+                }
+                for api in config.instance_config.apis
+            ]
+        
+        # 使用缓存的 AgentSchema 创建 Agent（自动选择单/多智能体）
+        if not (config.prompt_cache and config.prompt_cache.is_loaded and config.prompt_cache.agent_schema):
+            logger.warning(f"⚠️ Agent {config.name} 的 PromptCache 未加载，跳过原型创建")
+            return None
+        
+        # 🆕 V7.1: AgentFactory.from_schema() 会自动根据 schema.multi_agent 创建对应类型
+        agent = AgentFactory.from_schema(
+            schema=config.prompt_cache.agent_schema,
+            system_prompt=config.full_prompt,
+            event_manager=event_manager,
+            workspace_dir=None,  # 原型不绑定工作目录
+            conversation_service=None,  # 原型不绑定会话服务
+            prompt_cache=config.prompt_cache,
+            apis_config=apis_config,
+        )
+        
+        # 应用配置覆盖
+        instance_config = config.instance_config
+        if instance_config:
+            if instance_config.model:
+                agent.model = instance_config.model
+            if instance_config.max_turns:
+                agent.max_turns = instance_config.max_turns
+        
+        # 🆕 V7.1: 仅 SimpleAgent 需要设置实例级工具
+        # MultiAgentOrchestrator 的 Worker 使用自己的工具配置
+        if hasattr(agent, '_setup_instance_tools') or type(agent).__name__ == 'SimpleAgent':
+            await self._setup_instance_tools(agent, config)
+        
+        # 标记为原型（用于 clone_for_session 判断）
+        agent._is_prototype = True
+        
+        agent_type = "MultiAgent" if hasattr(agent.schema, 'multi_agent') and agent.schema.multi_agent else "SimpleAgent"
+        logger.debug(f"   原型类型: {agent_type}")
         
         return agent
     

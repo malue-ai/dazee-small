@@ -52,6 +52,34 @@ class AgentConfig(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
+class OrchestratorConfig(BaseModel):
+    """
+    Orchestrator（编排器）配置
+    
+    V7.1 新增：强弱配对策略
+    - Orchestrator 使用强大的模型（Opus 4.5）进行任务分解和综合
+    """
+    model: str = Field("claude-opus-4-5-20251101", description="Orchestrator 使用的模型")
+    enable_thinking: bool = Field(True, description="是否启用扩展思考")
+    max_tokens: int = Field(16384, description="最大 token 数（必须大于 thinking_budget）")
+    thinking_budget: int = Field(10000, description="Thinking token 预算（必须小于 max_tokens）")
+    temperature: float = Field(0.3, description="温度参数")
+
+
+class WorkerConfig(BaseModel):
+    """
+    Worker（工作者）配置
+    
+    V7.1 新增：强弱配对策略
+    - Worker 使用轻量级模型（如 Sonnet）执行具体任务
+    """
+    model: str = Field("claude-sonnet-4-5-20250929", description="Worker 使用的模型")
+    enable_thinking: bool = Field(True, description="是否启用扩展思考")
+    max_tokens: int = Field(8192, description="最大 token 数（必须大于 thinking_budget）")
+    thinking_budget: int = Field(5000, description="Thinking token 预算（必须小于 max_tokens）")
+    temperature: float = Field(0.5, description="温度参数")
+
+
 class MultiAgentConfig(BaseModel):
     """多智能体编排配置"""
     config_id: str = Field(..., description="配置唯一标识")
@@ -63,6 +91,10 @@ class MultiAgentConfig(BaseModel):
     
     # 智能体配置
     agents: List[AgentConfig] = Field(default_factory=list, description="智能体列表")
+    
+    # V7.1: 强弱配对策略
+    orchestrator_config: Optional[OrchestratorConfig] = Field(None, description="Orchestrator 配置")
+    worker_config: Optional[WorkerConfig] = Field(None, description="Worker 配置")
     
     # 全局参数
     max_total_turns: int = Field(30, description="所有 Agent 总共最大轮次")
@@ -117,6 +149,42 @@ class AgentResult(BaseModel):
     tool_calls: List[Dict[str, Any]] = Field(default_factory=list, description="工具调用记录")
     token_usage: Dict[str, int] = Field(default_factory=dict, description="Token 使用")
     duration_ms: int = Field(0, description="执行耗时")
+    
+    # 时间戳
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    
+    # 元数据
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class SubagentResult(BaseModel):
+    """
+    Subagent 执行结果（上下文隔离版本）
+    
+    V7.1 新增：参考 Anthropic Multi-Agent System
+    - Subagent 在独立的上下文中执行
+    - 只返回压缩的摘要给 Orchestrator
+    - Orchestrator 不保留 Subagent 的完整历史
+    """
+    result_id: str = Field(..., description="结果唯一标识")
+    agent_id: str = Field(..., description="执行的 Subagent")
+    subtask_id: Optional[str] = Field(None, description="关联的子任务 ID")
+    
+    # 执行结果（压缩版本）
+    success: bool = Field(True, description="是否成功")
+    summary: str = Field("", description="结果摘要（< 500 tokens）")
+    full_output: str = Field("", description="完整输出（仅用于存档/调试）")
+    error: Optional[str] = Field(None, description="错误信息")
+    
+    # 统计信息
+    turns_used: int = Field(0, description="使用的轮次")
+    token_usage: Dict[str, int] = Field(default_factory=dict, description="Token 使用")
+    duration_ms: int = Field(0, description="执行耗时")
+    
+    # 上下文隔离信息
+    context_length: int = Field(0, description="Subagent 使用的上下文长度")
+    summary_compression_ratio: float = Field(0.0, description="摘要压缩比")
     
     # 时间戳
     started_at: Optional[datetime] = None

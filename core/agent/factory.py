@@ -439,9 +439,8 @@ class AgentFactory:
         4. 🆕 V4.6: PromptSchema 支持根据复杂度动态裁剪提示词
         5. 🆕 V4.6.2: InstancePromptCache 提供预生成的提示词版本
         6. 🆕 apis_config: 预配置的 APIs，用于 api_calling 工具自动注入认证
+        7. 🆕 V7.1: 支持多智能体（根据 schema.multi_agent 自动选择）
         """
-        from core.agent.simple_agent import SimpleAgent
-        
         logger.info(f"🏗️ 根据 Schema 初始化 Agent: {schema.name}")
         logger.debug(f"   Model: {schema.model}")
         logger.debug(f"   Skills: {[s.skill_id if isinstance(s, SkillConfig) else s for s in schema.skills]}")
@@ -461,26 +460,110 @@ class AgentFactory:
         # 🆕 V4.6.2: 优先使用 prompt_cache 中的 prompt_schema
         effective_prompt_schema = prompt_schema or (prompt_cache.prompt_schema if prompt_cache else None)
         
-        # 🆕 核心改动：直接传递 schema 和 system_prompt 给 SimpleAgent
-        # SimpleAgent 会根据 Schema 动态初始化组件
-        agent = SimpleAgent(
+        # 🆕 V7.1: 根据 schema.multi_agent 决定创建单智能体或多智能体
+        if schema.multi_agent is not None:
+            # 多智能体模式
+            logger.info(f"   🤝 多智能体模式: {schema.multi_agent.mode if hasattr(schema.multi_agent, 'mode') else 'default'}")
+            return cls._create_multi_agent(
+                schema=schema,
+                system_prompt=system_prompt,
+                event_manager=event_manager,
+                workspace_dir=workspace_dir,
+                conversation_service=conversation_service,
+                prompt_schema=effective_prompt_schema,
+                prompt_cache=prompt_cache,
+                apis_config=apis_config,
+            )
+        else:
+            # 单智能体模式
+            from core.agent.simple_agent import SimpleAgent
+            
+            agent = SimpleAgent(
+                model=schema.model,
+                max_turns=schema.max_turns,
+                event_manager=event_manager,
+                workspace_dir=workspace_dir,
+                conversation_service=conversation_service,
+                schema=schema,  # 🆕 传递 Schema（驱动组件初始化）
+                system_prompt=system_prompt,  # 🆕 传递 System Prompt（运行时指令）
+                prompt_schema=effective_prompt_schema,  # 🆕 V4.6: 传递 PromptSchema（提示词分层）
+                prompt_cache=prompt_cache,  # 🆕 V4.6.2: 传递 InstancePromptCache
+                apis_config=apis_config,  # 🆕 传递预配置的 APIs
+            )
+            
+            logger.info(f"✅ SimpleAgent 初始化完成: {schema.name}")
+            if schema.reasoning:
+                logger.info(f"   Reasoning: {schema.reasoning}")
+            
+            return agent
+    
+    @classmethod
+    def _create_multi_agent(
+        cls,
+        schema,
+        system_prompt: str,
+        event_manager,
+        workspace_dir: str,
+        conversation_service,
+        prompt_schema,
+        prompt_cache,
+        apis_config
+    ):
+        """
+        🆕 V7.1: 创建多智能体编排器
+        
+        Args:
+            schema: AgentSchema（包含 multi_agent 配置）
+            其他参数同 from_schema()
+            
+        Returns:
+            MultiAgentOrchestrator 实例
+        """
+        from core.multi_agent import MultiAgentOrchestrator, OrchestratorConfig
+        from core.llm import create_claude_service
+        from core.memory.working import WorkingMemory
+        
+        # 创建 LLM Service（用于任务分解和结果聚合）
+        llm_service = create_claude_service(
             model=schema.model,
-            max_turns=schema.max_turns,
-            event_manager=event_manager,
-            workspace_dir=workspace_dir,
-            conversation_service=conversation_service,
-            schema=schema,  # 🆕 传递 Schema（驱动组件初始化）
-            system_prompt=system_prompt,  # 🆕 传递 System Prompt（运行时指令）
-            prompt_schema=effective_prompt_schema,  # 🆕 V4.6: 传递 PromptSchema（提示词分层）
-            prompt_cache=prompt_cache,  # 🆕 V4.6.2: 传递 InstancePromptCache
-            apis_config=apis_config,  # 🆕 传递预配置的 APIs
+            enable_thinking=True,
+            enable_caching=True,
         )
         
-        logger.info(f"✅ Agent 初始化完成: {schema.name}")
-        if schema.reasoning:
-            logger.info(f"   Reasoning: {schema.reasoning}")
+        # 创建 Memory Manager（TODO: 从 schema 配置）
+        memory_manager = WorkingMemory(event_manager=event_manager)
         
-        return agent
+        # 解析 multi_agent 配置
+        multi_agent_config = schema.multi_agent
+        orchestrator_config = OrchestratorConfig(
+            max_parallel_workers=getattr(multi_agent_config, 'max_parallel_workers', 3),
+            enable_checkpointing=getattr(multi_agent_config, 'enable_checkpointing', True),
+            checkpoint_interval=getattr(multi_agent_config, 'checkpoint_interval', 60),
+        )
+        
+        # 提取 workers 配置
+        workers_config = getattr(multi_agent_config, 'workers', [])
+        
+        # 创建编排器
+        orchestrator = MultiAgentOrchestrator(
+            event_manager=event_manager,
+            memory_manager=memory_manager,
+            llm_service=llm_service,
+            config=orchestrator_config,
+            prompt_cache=prompt_cache,
+            workers_config=workers_config,
+        )
+        
+        # 附加元数据（用于统一接口）
+        orchestrator.schema = schema
+        orchestrator.system_prompt = system_prompt
+        orchestrator.workspace_dir = workspace_dir
+        orchestrator.conversation_service = conversation_service
+        orchestrator.model = schema.model
+        orchestrator.max_turns = schema.max_turns
+        
+        logger.info(f"✅ MultiAgentOrchestrator 初始化完成: {schema.name} ({len(workers_config)} workers)")
+        return orchestrator
     
     @classmethod
     def create_default(

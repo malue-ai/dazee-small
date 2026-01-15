@@ -13,6 +13,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 from pathlib import Path
 from datetime import datetime
+import json
 
 
 @pytest.fixture
@@ -86,6 +87,23 @@ def mock_event_manager():
         
         MockEventManager.return_value = event_manager
         yield event_manager
+
+
+def _build_event_manager_for_token_audit() -> Mock:
+    """构造最小可用的事件管理器 Mock（用于审计测试）"""
+    event_manager = Mock()
+    event_manager.session = Mock()
+    event_manager.session.emit_session_start = AsyncMock()
+    event_manager.session.emit_session_end = AsyncMock()
+    event_manager.conversation = Mock()
+    event_manager.conversation.emit_conversation_start = AsyncMock()
+    event_manager.message = Mock()
+    event_manager.message.emit_message_start = AsyncMock()
+    event_manager.system = Mock()
+    event_manager.system.emit_error = AsyncMock()
+    event_manager.user = Mock()
+    event_manager.content = Mock()
+    return event_manager
 
 
 @pytest.mark.asyncio
@@ -362,8 +380,81 @@ async def test_agent_factory_creates_correct_agent_type(mock_event_manager):
         
         print(f"✓ 创建Agent类型: {agent_complex.__class__.__name__}")
         assert agent_complex.__class__.__name__ == "MultiAgentOrchestrator", "复杂任务应创建多智能体"
+
+
+@pytest.mark.asyncio
+async def test_token_audit_logging_end_to_end(tmp_path):
+    """
+    【E2E场景4】Token 计费审计日志完整流程
     
-    print("\n✅ 所有场景验证通过！")
+    验证：TokenAuditor.record() 被调用后写入 JSON Lines 日志
+    """
+    print("\n" + "="*80)
+    print("【E2E测试】Token 计费审计日志")
+    print("="*80)
+    
+    from core.monitoring.token_audit import TokenAuditor, TokenUsage
+    
+    # 创建临时日志目录
+    log_dir = tmp_path / "tokens"
+    auditor = TokenAuditor(log_dir=str(log_dir), enable_billing_log=True)
+    
+    # 模拟 ChatService 调用 token_auditor.record()
+    user_id = "user_test_100"
+    conversation_id = "conv_test_100"
+    session_id = "session_123"
+    
+    token_usage = TokenUsage(
+        input_tokens=111,
+        output_tokens=22,
+        thinking_tokens=0,
+        cache_read_tokens=10,
+        cache_write_tokens=5
+    )
+    
+    print(f"📝 记录 Token 使用: input={token_usage.input_tokens}, output={token_usage.output_tokens}")
+    
+    # 调用审计记录
+    record = auditor.record(
+        session_id=session_id,
+        usage=token_usage,
+        conversation_id=conversation_id,
+        user_id=user_id,
+        agent_id="test_agent",
+        model="claude-sonnet-4-5-20250929",
+        duration_ms=1500,
+        query_length=50
+    )
+    
+    print(f"✅ Token 记录已创建: {record.record_id}")
+    
+    # 验证日志文件写入
+    today = datetime.now().strftime("%Y-%m-%d")
+    log_file = log_dir / user_id / f"{today}.jsonl"
+    
+    assert log_file.exists(), f"计费日志文件应存在: {log_file}"
+    
+    lines = log_file.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 1, "应写入一条计费日志"
+    
+    # 验证日志内容
+    log_record = json.loads(lines[0])
+    print(f"\n📋 日志内容: {json.dumps(log_record, indent=2, ensure_ascii=False)}")
+    
+    assert log_record["user_id"] == user_id
+    assert log_record["conversation_id"] == conversation_id
+    assert log_record["session_id"] == session_id
+    assert log_record["model"] == "claude-sonnet-4-5-20250929"
+    assert log_record["tokens"]["input"] == 111
+    assert log_record["tokens"]["output"] == 22
+    assert log_record["tokens"]["cache_read"] == 10
+    assert log_record["tokens"]["cache_write"] == 5
+    assert log_record["tokens"]["total"] == 133
+    assert log_record["cost_usd"]["total"] >= 0
+    assert "timestamp" in log_record
+    assert "record_id" in log_record
+    
+    print("\n✅ Token 审计日志验证通过！所有字段正确！")
 
 
 @pytest.mark.asyncio

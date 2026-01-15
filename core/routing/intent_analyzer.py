@@ -93,6 +93,7 @@ class IntentAnalyzer:
             f"🎯 意图分析结果: "
             f"type={result.task_type.value}, "
             f"complexity={result.complexity.value}, "
+            f"score={result.complexity_score:.1f}, "  # 🆕 V7.0
             f"needs_plan={result.needs_plan}, "
             f"needs_persistence={result.needs_persistence}, "
             f"skip_memory={result.skip_memory_retrieval}, "
@@ -310,6 +311,7 @@ class IntentAnalyzer:
         # 默认值
         task_type = TaskType.OTHER
         complexity = Complexity.MEDIUM
+        complexity_score = 5.0     # 🆕 V7.0: 默认复杂度评分
         needs_plan = True
         skip_memory_retrieval = False
         needs_multi_agent = False  # 🆕 V6.0: 默认不需要 Multi-Agent
@@ -326,12 +328,26 @@ class IntentAnalyzer:
             except ValueError:
                 task_type = TaskType.OTHER
             
-            # 解析 complexity
+            # 解析 complexity（等级）
             complexity_str = parsed.get("complexity", "medium")
             try:
                 complexity = Complexity(complexity_str)
             except ValueError:
                 complexity = Complexity.MEDIUM
+            
+            # 🆕 V7.0: 解析 complexity_score（0-10 评分）
+            raw_score = parsed.get("complexity_score")
+            if raw_score is not None:
+                try:
+                    complexity_score = float(raw_score)
+                    # 限制在 0-10 范围内
+                    complexity_score = max(0.0, min(10.0, complexity_score))
+                except (ValueError, TypeError):
+                    # 如果解析失败，根据 complexity 等级推断
+                    complexity_score = self._infer_score_from_complexity(complexity)
+            else:
+                # LLM 未返回 score，根据 complexity 等级推断
+                complexity_score = self._infer_score_from_complexity(complexity)
             
             # 解析 needs_plan
             needs_plan = parsed.get("needs_plan", True)
@@ -350,6 +366,7 @@ class IntentAnalyzer:
         return IntentResult(
             task_type=task_type,
             complexity=complexity,
+            complexity_score=complexity_score,  # 🆕 V7.0
             needs_plan=needs_plan,
             skip_memory_retrieval=skip_memory_retrieval,
             needs_multi_agent=needs_multi_agent,
@@ -358,6 +375,23 @@ class IntentAnalyzer:
             raw_response=content
         )
     
+    def _infer_score_from_complexity(self, complexity: Complexity) -> float:
+        """
+        🆕 V7.0: 根据复杂度等级推断评分（兼容旧 Prompt）
+        
+        Args:
+            complexity: 复杂度等级
+            
+        Returns:
+            float: 推断的复杂度评分
+        """
+        score_map = {
+            Complexity.SIMPLE: 2.0,
+            Complexity.MEDIUM: 5.0,
+            Complexity.COMPLEX: 7.5,
+        }
+        return score_map.get(complexity, 5.0)
+    
     def _get_conservative_default(self) -> IntentResult:
         """
         获取保守默认值
@@ -365,6 +399,7 @@ class IntentAnalyzer:
         V5.0 策略：不做关键词猜测，使用安全默认值
         🆕 V6.0: 默认不需要 Multi-Agent
         🆕 V6.1: 默认不是追问（视为新话题）
+        🆕 V7.0: 默认复杂度评分 5.0
         
         Returns:
             IntentResult（保守默认值）
@@ -373,6 +408,7 @@ class IntentAnalyzer:
         return IntentResult(
             task_type=TaskType.OTHER,
             complexity=Complexity.MEDIUM,
+            complexity_score=5.0,     # 🆕 V7.0: 默认评分
             needs_plan=True,
             skip_memory_retrieval=False,
             needs_multi_agent=False,  # 🆕 V6.0: 默认不需要

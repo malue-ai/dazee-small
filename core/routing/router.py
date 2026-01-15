@@ -1,16 +1,19 @@
 """
 智能体路由器（Agent Router）
 
+🆕 V7.0: Prompt-First 重构 - 复杂度评分由 LLM 直接输出
+
 决策使用单智能体还是多智能体：
 1. 接收用户请求
-2. 调用 IntentAnalyzer 分析意图
-3. 调用 ComplexityScorer 评估复杂度
+2. 调用 IntentAnalyzer 分析意图（包含 complexity_score）
+3. 基于 intent.complexity_score 进行路由决策
 4. 返回路由决策（包含意图和复杂度信息）
 
 架构原则：
 - 路由决策在服务层（ChatService）完成
 - SimpleAgent 和 MultiAgent 是平级的，都接收路由结果
 - 两个框架不互相调用
+- 🆕 V7.0: ComplexityScorer 保留向后兼容，但优先使用 LLM 输出的 complexity_score
 
 使用方式：
     router = AgentRouter(llm_service=claude, prompt_cache=cache)
@@ -32,6 +35,7 @@ from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
 
 from core.agent.types import IntentResult
+# 🆕 V7.0: ComplexityScorer 保留向后兼容，但优先使用 LLM 输出的 complexity_score
 from core.routing.complexity_scorer import ComplexityScorer, ComplexityScore, ComplexityLevel
 
 logger = logging.getLogger(__name__)
@@ -169,10 +173,11 @@ class AgentRouter:
         """
         执行路由决策
         
+        🆕 V7.0: Prompt-First 重构
         流程：
-        1. 意图分析（IntentAnalyzer）
-        2. 复杂度评分（ComplexityScorer）
-        3. 路由决策
+        1. 意图分析（IntentAnalyzer）- 包含 complexity_score
+        2. 优先使用 intent.complexity_score 进行路由决策
+        3. 返回路由决策
         
         Args:
             user_query: 用户查询
@@ -191,7 +196,7 @@ class AgentRouter:
         messages = conversation_history.copy()
         messages.append({"role": "user", "content": user_query})
         
-        # 2. 意图分析
+        # 2. 意图分析（🆕 V7.0: 包含 complexity_score）
         if previous_intent:
             intent = await self.intent_analyzer.analyze_with_context(
                 messages, previous_intent
@@ -199,24 +204,86 @@ class AgentRouter:
         else:
             intent = await self.intent_analyzer.analyze(messages)
         
-        # 3. 复杂度评分
-        complexity = self.complexity_scorer.score(intent, conversation_history)
+        # 3. 🆕 V7.0: 优先使用 LLM 输出的 complexity_score
+        # 如果 LLM 返回了有效的 complexity_score，直接使用
+        # 否则 fallback 到 ComplexityScorer（向后兼容）
+        
+        use_llm_score = hasattr(intent, 'complexity_score') and intent.complexity_score is not None
+        
+        if use_llm_score:
+            # 🆕 V7.0: 使用 LLM 直接输出的 complexity_score
+            score = intent.complexity_score
+            complexity = self._build_complexity_from_intent(intent)
+            logger.info(f"🆕 V7.0: 使用 LLM 输出的 complexity_score={score:.1f}")
+        else:
+            # Fallback: 使用 ComplexityScorer（向后兼容）
+            complexity = self.complexity_scorer.score(intent, conversation_history)
+            score = complexity.score
+            logger.info(f"⚠️ Fallback: 使用 ComplexityScorer score={score:.1f}")
         
         # 4. 路由决策
         # 决策逻辑：
         # - 意图分析明确需要多智能体 → 使用多智能体
         # - 复杂度评分超过阈值 → 使用多智能体
+        # - 🆕 V7.1: 检查预算是否足够
         # - 其他情况 → 使用单智能体
         
+        # 初步决策
         if intent.needs_multi_agent:
             agent_type = "multi"
-            logger.info("🔀 路由决策: 多智能体（意图分析建议）")
-        elif complexity.score > self.complexity_threshold:
+            routing_reason = "意图分析建议多智能体协作"
+            logger.info("🔀 初步路由决策: 多智能体（意图分析建议）")
+        elif score > self.complexity_threshold:
             agent_type = "multi"
-            logger.info(f"🔀 路由决策: 多智能体（复杂度 {complexity.score} > {self.complexity_threshold}）")
+            routing_reason = f"复杂度 {score:.1f} > 阈值 {self.complexity_threshold}"
+            logger.info(f"🔀 初步路由决策: 多智能体（复杂度 {score:.1f} > {self.complexity_threshold}）")
         else:
             agent_type = "single"
-            logger.info(f"🔀 路由决策: 单智能体（复杂度 {complexity.score}）")
+            routing_reason = f"复杂度 {score:.1f} <= 阈值 {self.complexity_threshold}"
+            logger.info(f"🔀 路由决策: 单智能体（复杂度 {score:.1f}）")
+        
+        # 🆕 V7.1: 如果选择多智能体，检查预算是否足够
+        budget_check_passed = True
+        budget_warning = None
+        
+        if agent_type == "multi":
+            from core.monitoring import get_token_budget
+            import os
+            
+            token_budget = get_token_budget()
+            
+            # 获取用户等级（从环境变量或默认）
+            user_tier = os.getenv("QOS_LEVEL", "PRO").upper()
+            
+            # 估算多智能体的 token 消耗
+            # 基于 Anthropic 实践：~15× 单智能体
+            base_tokens = 50_000  # 单智能体平均消耗
+            num_workers = 3  # 默认 worker 数量
+            estimated_tokens = token_budget.estimate_tokens_for_multi_agent(
+                base_tokens=base_tokens,
+                num_workers=num_workers
+            )
+            
+            # 检查预算
+            budget_result = await token_budget.check_budget(
+                user_tier=user_tier,
+                agent_type="multi",
+                estimated_tokens=estimated_tokens,
+                session_id=user_id  # 使用 user_id 作为 session_id
+            )
+            
+            if not budget_result.allowed:
+                # 预算不足，降级到单智能体
+                logger.warning(
+                    f"💰 预算不足，降级到单智能体: {budget_result.reason}"
+                )
+                agent_type = "single"
+                routing_reason = f"预算限制（{budget_result.reason}），降级到单智能体"
+                budget_check_passed = False
+            elif budget_result.warning:
+                # 预算告警，但仍然允许
+                logger.warning(f"💰 {budget_result.warning}")
+                budget_warning = budget_result.warning
         
         decision = RoutingDecision(
             agent_type=agent_type,
@@ -226,11 +293,45 @@ class AgentRouter:
             conversation_history=conversation_history,
             context={
                 "user_id": user_id,
-                "routing_reason": complexity.reasoning,
+                "routing_reason": routing_reason,
+                "score_source": "llm" if use_llm_score else "complexity_scorer",  # 🆕 V7.0
+                "budget_check_passed": budget_check_passed,  # 🆕 V7.1: 预算检查结果
+                "budget_warning": budget_warning,  # 🆕 V7.1: 预算告警
             }
         )
         
         return decision
+    
+    def _build_complexity_from_intent(self, intent: IntentResult) -> ComplexityScore:
+        """
+        🆕 V7.0: 从 IntentResult 构建 ComplexityScore（用于向后兼容）
+        
+        Args:
+            intent: 意图分析结果
+            
+        Returns:
+            ComplexityScore: 复杂度评分结果
+        """
+        score = intent.complexity_score
+        
+        # 根据 score 确定 level
+        if score <= 3.0:
+            level = ComplexityLevel.SIMPLE
+            recommended = "single"
+        elif score <= 5.0:
+            level = ComplexityLevel.MEDIUM
+            recommended = "single"
+        else:
+            level = ComplexityLevel.COMPLEX
+            recommended = "multi"
+        
+        return ComplexityScore(
+            score=score,
+            level=level,
+            dimensions={"llm_score": score},
+            reasoning=f"LLM 直接输出 (score={score:.1f})",
+            recommended_agent=recommended,
+        )
     
     async def route_with_override(
         self,
@@ -263,16 +364,18 @@ class AgentRouter:
     def should_use_multi_agent(
         self,
         intent: IntentResult,
-        complexity: ComplexityScore
+        complexity: Optional[ComplexityScore] = None
     ) -> bool:
         """
         判断是否应该使用多智能体
+        
+        🆕 V7.0: 优先使用 intent.complexity_score
         
         独立的判断逻辑，方便测试和扩展
         
         Args:
             intent: 意图分析结果
-            complexity: 复杂度评分
+            complexity: 复杂度评分（可选，V7.0 后优先使用 intent.complexity_score）
             
         Returns:
             bool: 是否使用多智能体
@@ -281,12 +384,20 @@ class AgentRouter:
         if intent.needs_multi_agent:
             return True
         
-        # 条件2: 复杂度超过阈值
-        if complexity.level == ComplexityLevel.COMPLEX:
-            return True
+        # 🆕 V7.0: 优先使用 intent.complexity_score
+        if hasattr(intent, 'complexity_score') and intent.complexity_score is not None:
+            if intent.complexity_score > self.complexity_threshold:
+                return True
+            return False
         
-        # 条件3: 复杂度评分超过阈值
-        if complexity.score > self.complexity_threshold:
-            return True
+        # Fallback: 使用 ComplexityScore（向后兼容）
+        if complexity:
+            # 条件2: 复杂度等级超过阈值
+            if complexity.level == ComplexityLevel.COMPLEX:
+                return True
+            
+            # 条件3: 复杂度评分超过阈值
+            if complexity.score > self.complexity_threshold:
+                return True
         
         return False

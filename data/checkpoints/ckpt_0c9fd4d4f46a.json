@@ -1,0 +1,76 @@
+{
+  "checkpoint_id": "ckpt_0c9fd4d4f46a",
+  "session_id": "research_20260115_173600",
+  "orchestrator_state_id": "orch_3b48566a",
+  "mode": "parallel",
+  "completed_agents": [
+    "researcher_tech",
+    "researcher_econ",
+    "researcher_ethics"
+  ],
+  "pending_agents": [],
+  "current_agent": null,
+  "agent_results": [
+    {
+      "result_id": "result_9d82421e",
+      "agent_id": "researcher_tech",
+      "task_id": null,
+      "success": false,
+      "output": "",
+      "error": "'ClaudeLLMService' object has no attribute 'generate'",
+      "turns_used": 0,
+      "tool_calls": [],
+      "token_usage": {},
+      "duration_ms": 8,
+      "started_at": "2026-01-15T17:36:00.461091",
+      "completed_at": "2026-01-15T17:36:00.461092",
+      "metadata": {
+        "model": "claude-sonnet-4-5-20250929",
+        "has_subtask": false
+      }
+    },
+    {
+      "result_id": "result_b26bf35d",
+      "agent_id": "researcher_econ",
+      "task_id": null,
+      "success": false,
+      "output": "",
+      "error": "'ClaudeLLMService' object has no attribute 'generate'",
+      "turns_used": 0,
+      "tool_calls": [],
+      "token_usage": {},
+      "duration_ms": 7,
+      "started_at": "2026-01-15T17:36:00.468503",
+      "completed_at": "2026-01-15T17:36:00.468504",
+      "metadata": {
+        "model": "claude-sonnet-4-5-20250929",
+        "has_subtask": false
+      }
+    },
+    {
+      "result_id": "result_2c874eb4",
+      "agent_id": "researcher_ethics",
+      "task_id": null,
+      "success": false,
+      "output": "",
+      "error": "'ClaudeLLMService' object has no attribute 'generate'",
+      "turns_used": 0,
+      "tool_calls": [],
+      "token_usage": {},
+      "duration_ms": 7,
+      "started_at": "2026-01-15T17:36:00.476107",
+      "completed_at": "2026-01-15T17:36:00.476108",
+      "metadata": {
+        "model": "claude-sonnet-4-5-20250929",
+        "has_subtask": false
+      }
+    }
+  ],
+  "task_assignments": [],
+  "last_output": null,
+  "accumulated_context": {},
+  "total_turns": 0,
+  "total_tokens": 0,
+  "created_at": "2026-01-15T17:36:00.479716",
+  "reason": "error:AttributeError"
+}

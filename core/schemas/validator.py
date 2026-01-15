@@ -9,11 +9,15 @@ Schema 验证器 - 定义 Agent 配置的强类型规范
 参考：docs/15-FRAMEWORK_PROMPT_CONTRACT.md
 """
 
-from typing import Dict, Any, List, Optional, Literal
+from typing import Dict, Any, List, Optional, Literal, TYPE_CHECKING
 from pydantic import BaseModel, Field, validator, root_validator
 from enum import Enum
 
 from logger import get_logger
+
+# 🆕 V7: 延迟导入避免循环依赖
+if TYPE_CHECKING:
+    from core.multi_agent.config import MultiAgentConfig
 
 logger = get_logger(__name__)
 
@@ -537,6 +541,42 @@ class AgentSchema(BaseModel):
     )
     
     # ============================================================
+    # 🆕 V7: Multi-Agent 配置（可选）
+    # ============================================================
+    
+    multi_agent: Optional[Any] = Field(
+        default=None,
+        description="Multi-Agent 配置（MultiAgentConfig），None 表示使用 SimpleAgent"
+    )
+    
+    # ============================================================
+    # LLM 超参数配置（可选覆盖）
+    # ============================================================
+    
+    temperature: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=2.0,
+        description="LLM 温度参数（None 使用默认值）"
+    )
+    
+    max_tokens: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="LLM 最大输出 token 数（None 使用默认值）"
+    )
+    
+    enable_thinking: Optional[bool] = Field(
+        default=None,
+        description="是否启用 Extended Thinking（None 使用默认值）"
+    )
+    
+    enable_caching: Optional[bool] = Field(
+        default=None,
+        description="是否启用 Prompt Caching（None 使用默认值）"
+    )
+    
+    # ============================================================
     # 可解释性
     # ============================================================
     
@@ -582,7 +622,7 @@ class AgentSchema(BaseModel):
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典（兼容旧格式）"""
-        return {
+        result = {
             "name": self.name,
             "description": self.description,
             "components": {
@@ -600,6 +640,25 @@ class AgentSchema(BaseModel):
             "context_limits": self.context_limits.dict(),
             "reasoning": self.reasoning,
         }
+        
+        # 🆕 V7: 包含 multi_agent 配置（如果有）
+        if self.multi_agent is not None:
+            if hasattr(self.multi_agent, 'to_dict'):
+                result["multi_agent"] = self.multi_agent.to_dict()
+            else:
+                result["multi_agent"] = self.multi_agent
+        
+        # 🆕 V7: 包含 LLM 超参数（仅非空值）
+        if self.temperature is not None:
+            result["temperature"] = self.temperature
+        if self.max_tokens is not None:
+            result["max_tokens"] = self.max_tokens
+        if self.enable_thinking is not None:
+            result["enable_thinking"] = self.enable_thinking
+        if self.enable_caching is not None:
+            result["enable_caching"] = self.enable_caching
+        
+        return result
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "AgentSchema":

@@ -1,70 +1,83 @@
 """
-ZenFlux 多智能体框架
+多智能体框架模块
 
-设计原则：
-1. 与 SimpleAgent 完全独立，不存在互相调用关系
-2. 通过路由层 (core/routing) 选择使用哪个框架
-3. 支持并行和串行两种执行模式
-4. 共享 core/routing/ 的意图分析和 core/planning/ 的计划协议
+V7.1 核心组件（基于 Anthropic Multi-Agent System 启发）：
+- MultiAgentOrchestrator: 编排器（支持检查点、恢复）
+- CheckpointManager: 检查点管理（故障恢复）
+- LeadAgent: 主控智能体（任务分解、结果综合）
+- Models: 数据模型
 
-架构图：
-```
-                    ChatService
-                        │
-                        ▼
-                   AgentRouter
-                   /         \
-                  /           \
-        SimpleAgent    MultiAgentOrchestrator
-        (单智能体)          (多智能体)
-                              │
-                    ┌─────────┼─────────┐
-                    ▼         ▼         ▼
-                 Agent1    Agent2    Agent3
-                 (专家)    (审核)    (汇总)
-```
-
-执行模式：
-- SEQUENTIAL: 串行执行（前一个 Agent 输出作为后一个输入）
-- PARALLEL: 并行执行（多个 Agent 同时执行，结果汇总）
-- HIERARCHICAL: 层级执行（主 Agent 分配任务给子 Agent）
-
-使用方式：
-    from core.agent.multi import MultiAgentOrchestrator, ExecutionMode
-    
-    orchestrator = MultiAgentOrchestrator(
-        mode=ExecutionMode.SEQUENTIAL,
-        agents=[
-            {"role": "researcher", "model": "claude-sonnet"},
-            {"role": "reviewer", "model": "claude-haiku"},
-            {"role": "summarizer", "model": "claude-sonnet"}
-        ]
-    )
-    
-    async for event in orchestrator.execute(intent, messages):
-        yield event
+设计理念：
+1. **可恢复性**：长时间运行的工作流支持从检查点恢复
+2. **明确分工**：Lead Agent (Opus) 分解任务，Worker Agents (Sonnet) 执行
+3. **完整追踪**：记录每个决策、工具调用、状态转换
 """
 
 from core.agent.multi.models import (
+    # 执行模式
     ExecutionMode,
+    
+    # 角色
     AgentRole,
+    
+    # 配置
     AgentConfig,
     MultiAgentConfig,
+    OrchestratorConfig,
+    WorkerConfig,
+    
+    # 任务
     TaskAssignment,
+    
+    # 结果
     AgentResult,
+    SubagentResult,
     OrchestratorState,
 )
+
 from core.agent.multi.orchestrator import MultiAgentOrchestrator
 
+from core.agent.multi.checkpoint import (
+    Checkpoint,
+    CheckpointManager,
+)
+
+from core.agent.multi.lead_agent import (
+    LeadAgent,
+    SubTask,
+    TaskDecompositionPlan,
+)
+
 __all__ = [
-    # Models
+    # 执行模式
     "ExecutionMode",
+    
+    # 角色
     "AgentRole",
+    
+    # 配置
     "AgentConfig",
     "MultiAgentConfig",
+    "OrchestratorConfig",
+    "WorkerConfig",
+    
+    # 任务
     "TaskAssignment",
+    
+    # 结果
     "AgentResult",
+    "SubagentResult",
     "OrchestratorState",
-    # Orchestrator
+    
+    # 编排器
     "MultiAgentOrchestrator",
+    
+    # 检查点
+    "Checkpoint",
+    "CheckpointManager",
+    
+    # Lead Agent
+    "LeadAgent",
+    "SubTask",
+    "TaskDecompositionPlan",
 ]

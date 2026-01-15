@@ -6,6 +6,7 @@ Token 审计模块
 2. 支持多维度统计（智能体级、会话级、用户级）
 3. 与评估系统集成，用于成本分析
 4. 安全保护：异常消耗告警
+5. 计费日志：按用户+日期写入 JSON Lines 文件
 
 架构位置：core/monitoring/token_audit.py
 依赖：evaluation/models.py (TokenUsage)
@@ -15,12 +16,53 @@ import json
 import logging
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 from evaluation.models import TokenUsage
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# 计费价格表（2026-01 Claude 4.5 定价，$/百万tokens）
+# ============================================================
+
+CLAUDE_PRICING = {
+    # model_name -> {input, output, cache_write, cache_read}
+    "claude-opus-4.5": {
+        "input": 5.0,
+        "output": 25.0,
+        "cache_write": 6.25,   # 25% 加价
+        "cache_read": 0.5      # 90% 折扣
+    },
+    "claude-sonnet-4.5": {
+        "input": 3.0,
+        "output": 15.0,
+        "cache_write": 3.75,
+        "cache_read": 0.3
+    },
+    "claude-sonnet-4-5-20250929": {  # 完整模型名
+        "input": 3.0,
+        "output": 15.0,
+        "cache_write": 3.75,
+        "cache_read": 0.3
+    },
+    "claude-haiku-4.5": {
+        "input": 1.0,
+        "output": 5.0,
+        "cache_write": 1.25,
+        "cache_read": 0.1
+    },
+    # 默认使用 Sonnet 价格
+    "default": {
+        "input": 3.0,
+        "output": 15.0,
+        "cache_write": 3.75,
+        "cache_read": 0.3
+    }
+}
 
 
 class AuditLevel(str, Enum):
@@ -113,6 +155,7 @@ class TokenAuditor:
     2. 多维度统计分析
     3. 异常检测与告警
     4. 与评估系统集成
+    5. 计费日志（JSON Lines 格式，按用户+日期分文件）
     """
     
     def __init__(
@@ -123,13 +166,22 @@ class TokenAuditor:
         max_thinking_tokens: int = 100_000,   # 单次最大 Thinking Token
         # 存储配置
         max_records: int = 10_000,            # 最大保留记录数
-        enable_persistence: bool = False      # 是否持久化（默认内存）
+        enable_persistence: bool = False,     # 是否持久化（默认内存）
+        # 计费日志配置
+        log_dir: str = "logs/tokens",         # 日志目录
+        enable_billing_log: bool = True       # 是否启用计费日志
     ):
         self.max_input_tokens = max_input_tokens
         self.max_output_tokens = max_output_tokens
         self.max_thinking_tokens = max_thinking_tokens
         self.max_records = max_records
         self.enable_persistence = enable_persistence
+        
+        # 计费日志配置
+        self.log_dir = Path(log_dir)
+        self.enable_billing_log = enable_billing_log
+        if enable_billing_log:
+            self.log_dir.mkdir(parents=True, exist_ok=True)
         
         # 内存存储
         self._records: List[TokenAuditRecord] = []
@@ -142,7 +194,8 @@ class TokenAuditor:
         
         logger.info(
             f"✅ TokenAuditor 初始化: max_input={max_input_tokens:,}, "
-            f"max_output={max_output_tokens:,}, max_thinking={max_thinking_tokens:,}"
+            f"max_output={max_output_tokens:,}, max_thinking={max_thinking_tokens:,}, "
+            f"billing_log={'enabled' if enable_billing_log else 'disabled'}"
         )
     
     def record(
@@ -235,6 +288,10 @@ class TokenAuditor:
             f"📊 Token 记录: input={usage.input_tokens:,}, output={usage.output_tokens:,}, "
             f"thinking={usage.thinking_tokens:,}, cache_read={usage.cache_read_tokens:,}"
         )
+        
+        # 写入计费日志
+        if self.enable_billing_log:
+            self._write_to_log(record)
         
         return record
     
@@ -414,6 +471,108 @@ class TokenAuditor:
         
         # 同样处理其他索引...
         logger.info(f"🧹 清理旧审计记录: 移除 {len(removed)} 条")
+    
+    # ============================================================
+    # 计费日志方法
+    # ============================================================
+    
+    def _calculate_cost(self, record: TokenAuditRecord) -> Dict[str, float]:
+        """
+        计算单次调用成本（美元）
+        
+        Args:
+            record: Token 审计记录
+            
+        Returns:
+            成本明细字典
+        """
+        # 获取模型价格
+        model = record.model or "default"
+        # 尝试匹配模型名（支持部分匹配）
+        price = CLAUDE_PRICING.get("default")
+        for key in CLAUDE_PRICING:
+            if key in model.lower() or model.lower() in key:
+                price = CLAUDE_PRICING[key]
+                break
+        
+        usage = record.usage
+        
+        # 计算各项成本
+        input_cost = (usage.input_tokens / 1_000_000) * price["input"]
+        output_cost = (usage.output_tokens / 1_000_000) * price["output"]
+        thinking_cost = (usage.thinking_tokens / 1_000_000) * price["output"]  # thinking 按 output 计费
+        cache_write_cost = (usage.cache_write_tokens / 1_000_000) * price["cache_write"]
+        cache_read_cost = (usage.cache_read_tokens / 1_000_000) * price["cache_read"]
+        
+        total_cost = input_cost + output_cost + thinking_cost + cache_write_cost + cache_read_cost
+        
+        return {
+            "input": round(input_cost, 6),
+            "output": round(output_cost, 6),
+            "thinking": round(thinking_cost, 6),
+            "cache_write": round(cache_write_cost, 6),
+            "cache_read": round(cache_read_cost, 6),
+            "total": round(total_cost, 6)
+        }
+    
+    def _write_to_log(self, record: TokenAuditRecord):
+        """
+        写入计费日志（JSON Lines 格式）
+        
+        日志文件结构：
+        logs/tokens/
+        ├── {user_id}/
+        │   ├── 2026-01-15.jsonl
+        │   └── 2026-01-16.jsonl
+        
+        Args:
+            record: Token 审计记录
+        """
+        try:
+            # 计算成本
+            cost = self._calculate_cost(record)
+            
+            # 用户目录
+            user_id = record.user_id or "unknown"
+            user_dir = self.log_dir / user_id
+            user_dir.mkdir(exist_ok=True)
+            
+            # 日期文件
+            today = datetime.now().strftime("%Y-%m-%d")
+            log_file = user_dir / f"{today}.jsonl"
+            
+            # 构建日志记录
+            log_entry = {
+                "timestamp": record.timestamp.isoformat(),
+                "record_id": record.record_id,
+                "session_id": record.session_id,
+                "conversation_id": record.conversation_id,
+                "user_id": record.user_id,
+                "agent_id": record.agent_id,
+                "model": record.model,
+                "turn_number": record.turn_number,
+                "tokens": {
+                    "input": record.usage.input_tokens,
+                    "output": record.usage.output_tokens,
+                    "thinking": record.usage.thinking_tokens,
+                    "cache_read": record.usage.cache_read_tokens,
+                    "cache_write": record.usage.cache_write_tokens,
+                    "total": record.usage.total_tokens
+                },
+                "cost_usd": cost,
+                "duration_ms": record.duration_ms,
+                "is_anomaly": record.is_anomaly,
+                "anomaly_reason": record.anomaly_reason
+            }
+            
+            # 追加写入
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+            
+            logger.debug(f"💰 计费日志: user={user_id}, cost=${cost['total']:.4f}")
+            
+        except Exception as e:
+            logger.error(f"❌ 写入计费日志失败: {e}")
 
 
 # ============================================================
