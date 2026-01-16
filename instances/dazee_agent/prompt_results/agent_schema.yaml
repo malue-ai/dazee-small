@@ -7,11 +7,9 @@ intent_analyzer:
   - medium
   - complex
   task_types:
-  - system_design
-  - data_analysis
-  - consultation
-  - follow_up
-  - qa
+  - system_building        # 意图1：系统搭建（严格触发条件）
+  - bi_data_analysis       # 意图2：BI智能问数（需已有数据）
+  - general_consultation   # 意图3：综合咨询（兜底意图）
   output_formats:
   - text
   - markdown
@@ -112,31 +110,16 @@ context_limits:
 reasoning: '这是一个高度复杂的多功能助理Agent，具有以下特点：
 
 
-  1. **复杂任务规划**：需要强大的Plan Manager支持系统搭建、BI分析、报告生成等多步骤任务，设置max_steps=20以应对复杂流程
+  1. **三意图识别体系**：
+     - 意图1（系统搭建）：严格触发条件，需≥3个业务实体+业务流程+明确关键词
+     - 意图2（BI问数）：用户必须已提供数据（文件/图片）
+     - 意图3（综合咨询）：兜底意图，处理其他所有场景
+     - 追问归入原意图，不作为独立意图
 
-
-  2. **精细意图识别**：需要区分4种意图类型（系统搭建/BI问数/综合咨询/追问），启用LLM增强的Intent Analyzer
-
-
+  2. **复杂任务规划**：需要强大的Plan Manager支持系统搭建、BI分析、报告生成等多步骤任务，设置max_steps=20以应对复杂流程
   3. **丰富工具生态**：涉及搜索、文档处理、图表生成、API调用等多种工具，需要capability_based智能选择策略
-
-
   4. **强制规划机制**：非简单问答必须使用plan_todo工具，需要在tool_selector中将其设为base_tools
-
-
   5. **HITL交互**：多处需要用户确认（风格选择、方案决策等），request_human_confirmation为核心工具
-
-
-  6. **会话记忆**：需要追踪历史文件、追问上下文，启用episodic_memory和较大的working_memory_limit(50)
-
-
-  7. **质量验证**：最终验证协议需要replan能力，设置max_replan_attempts=3
-
-
-  8. **安全约束**：文件处理、URL诚信等规则需要通过memory和plan机制保障
-
-
-  9. **禁用并行**：系统强调顺序执行和状态追踪，设置allow_parallel=false
-
-
-  10. **长对话支持**：复杂任务可能需要多轮交互，设置max_turns=25'
+  6. **质量验证**：最终验证协议需要replan能力，设置max_replan_attempts=3
+  7. **安全约束**：文件处理、URL诚信等规则需要通过memory和plan机制保障
+  8. **禁用并行**：系统强调顺序执行和状态追踪，设置allow_parallel=false
