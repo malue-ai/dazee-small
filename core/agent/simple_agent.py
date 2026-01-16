@@ -315,8 +315,7 @@ class SimpleAgent:
         messages: List[Dict[str, str]] = None,
         session_id: str = None,
         message_id: str = None,
-        enable_stream: bool = True,
-        variables: Dict[str, Any] = None
+        enable_stream: bool = True
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Agent 统一执行入口 - 7 阶段完整流程
@@ -333,11 +332,10 @@ class SimpleAgent:
         本方法从阶段 2 开始（阶段 1 在 SessionService 中完成）
         
         Args:
-            messages: 完整的消息列表
+            messages: 完整的消息列表（已包含前端变量上下文）
             session_id: 会话ID
             message_id: 消息ID（用于事件关联）
             enable_stream: 是否流式输出
-            variables: 前端上下文变量（如位置、时区等），直接注入到 Prompt
             
         Yields:
             事件字典
@@ -373,11 +371,6 @@ class SimpleAgent:
         
         # 会话开始 → 追加 sandbox_context
         prompt_manager.on_session_start(ctx, conversation_id=conversation_id, user_id=user_id)
-        
-        # 如果有前端变量 → 追加 user_context
-        if variables:
-            prompt_manager.on_context_injected(ctx, variables=variables)
-            logger.info(f"✅ 前端变量已注入 Prompt: {list(variables.keys())}")
         
         if self.enable_tracing:
             self._tracer = create_pipeline_tracer(

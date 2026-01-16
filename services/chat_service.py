@@ -8,8 +8,10 @@
 
 设计原则：
 - chat() 是唯一入口，根据 stream 参数选择模式
+- Session 管理由 SessionService 负责
+- Agent 获取由 AgentPool 负责
+- SessionPool 提供统计视图和协调
 - 内容累积和持久化由 EventBroadcaster 自动处理
-- 数据库操作委托给 ConversationService
 """
 
 import asyncio
@@ -20,23 +22,25 @@ from datetime import datetime
 from uuid import uuid4
 
 from logger import get_logger
-from core.agent import SimpleAgent, create_simple_agent
+from core.agent import SimpleAgent
 from core.context import Context
-from core.output import OutputFormatter, create_output_formatter  # 🆕 V6.3
-# 🆕 容错机制（基础设施层）
+from core.output import OutputFormatter, create_output_formatter
+# 容错机制
 from infra.resilience import with_timeout, with_retry, get_circuit_breaker
-# 🆕 上下文压缩（简化版，使用 Claude SDK 原生 compaction）
+# 上下文压缩
 from core.context.compaction import QoSLevel, get_compaction_threshold, get_context_awareness_prompt
-# 【待扩展】Multi-Agent 模块（已注释）
-# from core.multi_agent import MultiAgentOrchestrator, MultiAgentConfig
+# 服务层
 from services.session_service import SessionService, get_session_service, SessionNotFoundError
 from services.conversation_service import get_conversation_service, ConversationNotFoundError
 from services.agent_registry import get_agent_registry, AgentNotFoundError
+# 资源池架构
+from infra.pools import get_session_pool, get_agent_pool
 from infra.database import AsyncSessionLocal, crud
 from utils.background_tasks import TaskContext, get_background_task_service
 from utils.message_utils import (
     normalize_message_format,
     extract_text_from_message,
+    append_text_to_last_block,
 )
 from utils.file_processor import get_file_processor, FileCategory
 
@@ -68,47 +72,71 @@ class ChatService:
         result = await service.chat(message, user_id, stream=False)
     """
     
+    # 默认 Agent 标识
+    DEFAULT_AGENT_KEY = "__default__"
+    
     def __init__(
         self,
         session_service: Optional[SessionService] = None,
         default_model: str = "claude-sonnet-4-5-20250929",
-        qos_level: QoSLevel = QoSLevel.PRO  # 🆕 P0: QoS 等级，默认 Pro
-        # 【待扩展】Multi-Agent 配置（已注释）
-        # multi_agent_config: Optional[MultiAgentConfig] = None
+        qos_level: QoSLevel = QoSLevel.PRO
     ):
+        # Session 管理
         self.session_service = session_service or get_session_service()
         self.default_model = default_model
         
-        # 【待扩展】Multi-Agent 配置（已注释）
-        # self.multi_agent_config = multi_agent_config or MultiAgentConfig()
+        # 资源池架构
+        self.session_pool = get_session_pool()  # 活跃 Session 追踪
+        self.agent_pool = get_agent_pool()  # Agent 获取
         
         # 其他服务
-        self.conversation_service = get_conversation_service()  # 用于 Context 加载消息
+        self.conversation_service = get_conversation_service()
         self.background_tasks = get_background_task_service()
         
-        # 🆕 V6.3: OutputFormatter 缓存（按需创建）
+        # OutputFormatter 缓存
         self._formatters: Dict[str, OutputFormatter] = {}
         
-        # 🆕 容错机制：熔断器
+        # 容错机制：熔断器
         self.agent_breaker = get_circuit_breaker("agent_execution")
         
-        # 🆕 上下文压缩（简化版）
-        # 核心原则：使用 Claude SDK 原生 compaction，用户无感知
-        # QoS 仅用于后端成本统计，不影响用户体验
+        # 上下文压缩配置
         self.qos_level = qos_level
         self.compaction_threshold = get_compaction_threshold(qos_level)
         logger.info(
-            f"✅ Context Compaction 配置: qos_level={qos_level.value}, "
-            f"threshold={self.compaction_threshold:,} tokens (Claude SDK 原生处理)"
+            f"✅ ChatService 初始化完成: qos_level={qos_level.value}, "
+            f"compaction_threshold={self.compaction_threshold:,} tokens"
         )
-        
-        # 🆕 Agent 池化（懒加载）
-        # 预创建 Agent 原型，每次请求时克隆而非重新创建，避免 50-100ms 初始化延迟
-        self._agent_pool: Dict[str, SimpleAgent] = {}
-        self._pool_initialized = False
-        self._pool_lock = asyncio.Lock()  # 防止并发初始化
     
     # ==================== 辅助方法 ====================
+    
+    def _build_user_context(self, variables: Dict[str, Any]) -> str:
+        """
+        构建用户上下文文本（注入到用户消息中）
+        
+        Args:
+            variables: 前端变量 {"location": {"value": "北京", "description": "用户位置"}, ...}
+            
+        Returns:
+            用户上下文文本
+        """
+        if not variables:
+            return ""
+        
+        lines = ["[用户上下文]"]
+        
+        for var_name, var_data in variables.items():
+            if isinstance(var_data, dict):
+                value = var_data.get("value", "")
+                description = var_data.get("description", "")
+                if value:
+                    if description:
+                        lines.append(f"- {var_name}: {value}（{description}）")
+                    else:
+                        lines.append(f"- {var_name}: {value}")
+            else:
+                lines.append(f"- {var_name}: {var_data}")
+        
+        return "\n".join(lines)
     
     def get_output_formatter(self, agent: SimpleAgent) -> Optional[OutputFormatter]:
         """
@@ -142,101 +170,6 @@ class ChatService:
         
         return self._formatters[cache_key]
     
-    # ==================== Agent 池化 ====================
-    
-    async def _init_agent_pool(self):
-        """
-        初始化 Agent 池（懒加载，首次请求时执行）
-        
-        从 AgentRegistry 获取所有已预加载的 agent_id，
-        为每个创建原型实例并缓存到 _agent_pool
-        
-        优化效果：后续请求从池中克隆 Agent，耗时 < 1ms（原需 50-100ms）
-        """
-        if self._pool_initialized:
-            return
-        
-        async with self._pool_lock:
-            # 双重检查，防止并发初始化
-            if self._pool_initialized:
-                return
-            
-            logger.info("🏊 初始化 Agent 池...")
-            
-            registry = get_agent_registry()
-            for agent_info in registry.list_agents():
-                agent_id = agent_info["agent_id"]
-                try:
-                    # 创建原型（使用临时 event_manager）
-                    prototype = await registry.get_agent(
-                        agent_id=agent_id,
-                        event_manager=self.session_service.events,
-                        workspace_dir=None,
-                        conversation_service=None
-                    )
-                    self._agent_pool[agent_id] = prototype
-                    logger.info(f"   ✅ Agent 原型已创建: {agent_id}")
-                except Exception as e:
-                    logger.warning(f"   ⚠️ Agent 原型创建失败: {agent_id}, {e}")
-            
-            self._pool_initialized = True
-            logger.info(f"🏊 Agent 池初始化完成: {len(self._agent_pool)} 个原型")
-    
-    async def _get_pooled_agent(
-        self,
-        agent_id: str,
-        event_manager,
-        workspace_dir: str,
-        conversation_service
-    ) -> SimpleAgent:
-        """
-        从池中获取 Agent（克隆 + 重置状态）
-        
-        如果池中存在原型，克隆并注入会话级依赖；
-        否则 fallback 到 AgentRegistry.get_agent()
-        
-        Args:
-            agent_id: Agent 实例 ID
-            event_manager: 事件管理器
-            workspace_dir: 工作目录
-            conversation_service: 会话服务
-            
-        Returns:
-            就绪的 Agent 实例
-        """
-        # 确保池已初始化
-        await self._init_agent_pool()
-        
-        if agent_id in self._agent_pool:
-            prototype = self._agent_pool[agent_id]
-            agent = prototype.clone(
-                event_manager=event_manager,
-                workspace_dir=workspace_dir,
-                conversation_service=conversation_service
-            )
-            logger.debug(f"🏊 从池中克隆 Agent: {agent_id}")
-            return agent
-        
-        # Fallback: 不在池中，直接创建
-        logger.debug(f"🏊 Agent 不在池中，直接创建: {agent_id}")
-        return await get_agent_registry().get_agent(
-            agent_id=agent_id,
-            event_manager=event_manager,
-            workspace_dir=workspace_dir,
-            conversation_service=conversation_service
-        )
-    
-    def clear_agent_pool(self):
-        """
-        清空 Agent 池（用于热更新场景）
-        
-        当 AgentRegistry.reload_agent() 被调用后，
-        应同时调用此方法清空池，确保下次请求使用最新配置
-        """
-        self._agent_pool.clear()
-        self._pool_initialized = False
-        logger.info("🏊 Agent 池已清空")
-    
     # ==================== 统一入口 ====================
     
     async def chat(
@@ -258,8 +191,15 @@ class ChatService:
         - stream=True  → 返回 AsyncGenerator，用于 SSE
         - stream=False → 返回 Dict，用于 API 集成
         
+        流程（入口层只做调度，数据准备在执行层）：
+        1. 验证 agent_id
+        2. 创建 Conversation（如果需要）
+        3. 创建 Session
+        4. 获取 Agent（池化优化）
+        5. 调度执行（_run_agent 处理所有数据准备）
+        
         Args:
-            message: 用户消息
+            message: 用户消息（原始格式，由执行层处理）
             user_id: 用户 ID
             conversation_id: 对话 ID（可选，不提供则自动创建）
             message_id: 消息 ID（可选）
@@ -273,21 +213,17 @@ class ChatService:
             stream=True  → AsyncGenerator
             stream=False → Dict
         """
-        # ========== 1. 验证 ==========
+        msg_preview = str(message)[:50] if message else ""
+        logger.info(f"📨 对话请求: user={user_id}, agent={agent_id or '默认'}, msg={msg_preview}...")
+        
+        # ========== 1. 验证 agent_id ==========
         if agent_id:
             registry = get_agent_registry()
             if not registry.has_agent(agent_id):
                 available = [a["agent_id"] for a in registry.list_agents()]
                 raise AgentNotFoundError(f"Agent '{agent_id}' 不存在，可用: {available}")
         
-        # ========== 2. 处理文件 ==========
-        processed_message, files_metadata = await self._process_message_with_files(message, files)
-        normalized_message = normalize_message_format(processed_message)
-        
-        msg_preview = str(message)[:50] if message else ""
-        logger.info(f"📨 对话请求: user={user_id}, agent={agent_id or '默认'}, msg={msg_preview}..., files={len(files_metadata) if files_metadata else 0}")
-        
-        # ========== 3. 创建 Conversation ==========
+        # ========== 2. 创建 Conversation ==========
         is_new_conversation = False
         if not conversation_id:
             async with AsyncSessionLocal() as session:
@@ -296,46 +232,45 @@ class ChatService:
                 is_new_conversation = True
                 logger.info(f"✅ 新对话: {conversation_id}")
         
+        # ========== 3. 检查用户并发限制 ==========
+        await self.session_pool.check_can_create_session(user_id)
+        
         # ========== 4. 创建 Session ==========
         session_id = await self.session_service.create_session(
             user_id=user_id,
-            message=normalized_message,
+            message=message,
             conversation_id=conversation_id,
             message_id=message_id,
         )
         logger.info(f"✅ Session: {session_id}")
         
-        # ========== 5. 获取 Agent（使用池化优化） ==========
+        # ========== 5. 获取 Agent（从 AgentPool）==========
         workspace_dir = str(self.session_service.workspace_manager.get_workspace_root(conversation_id))
-        if agent_id:
-            # 🆕 使用 Agent 池化，从池中克隆而非重新创建，耗时 < 1ms
-            agent = await self._get_pooled_agent(
-                agent_id=agent_id,
-                event_manager=self.session_service.events,
-                workspace_dir=workspace_dir,
-                conversation_service=self.conversation_service
-            )
-        else:
-            # 默认 Agent（无池化，直接创建）
-            agent = create_simple_agent(
-                model=self.default_model,
-                workspace_dir=workspace_dir,
-                event_manager=self.session_service.events,
-                conversation_service=self.conversation_service
-            )
+        pool_key = agent_id or self.DEFAULT_AGENT_KEY
+        agent = await self.agent_pool.acquire(
+            agent_id=pool_key,
+            event_manager=self.session_service.events,
+            workspace_dir=workspace_dir,
+            conversation_service=self.conversation_service
+        )
+        logger.debug(f"✅ Agent 就绪: {pool_key}")
         
-        # ========== 6. 执行 ==========
+        # ========== 6. 更新 SessionPool 状态 ==========
+        await self.session_pool.on_session_start(session_id, user_id, pool_key)
+        
+        # ========== 7. 调度执行 ==========
         if not stream:
             # 同步模式：后台运行，立即返回
             asyncio.create_task(self._run_agent(
                 session_id=session_id,
                 agent=agent,
-                message=normalized_message,
+                agent_id=pool_key,  # 传递 agent_id 用于释放
+                raw_message=message,
                 user_id=user_id,
                 conversation_id=conversation_id,
                 is_new_conversation=is_new_conversation,
                 background_tasks=background_tasks,
-                files_metadata=files_metadata,
+                files=files,
                 variables=variables
             ))
             return {
@@ -346,121 +281,194 @@ class ChatService:
             }
         
         # 流式模式：返回事件流
-        async def stream_events():
-            try:
-                redis = self.session_service.redis
-                events = self.session_service.events
-                
-                # 发送初始事件
-                await events.session.emit_session_start(
-                    session_id=session_id,
-                    user_id=user_id,
-                    conversation_id=conversation_id
-                )
-                
-                if is_new_conversation:
-                    await events.conversation.emit_conversation_start(
-                        session_id=session_id,
-                        conversation={
-                            "id": conversation_id,
-                            "title": "新对话",
-                            "created_at": datetime.now().isoformat(),
-                            "metadata": {}
-                        }
-                    )
-                
-                # 启动 Agent 任务
-                agent_task = asyncio.create_task(self._run_agent(
-                    session_id=session_id,
-                    agent=agent,
-                    message=normalized_message,
-                    user_id=user_id,
-                    conversation_id=conversation_id,
-                    is_new_conversation=is_new_conversation,
-                    background_tasks=background_tasks,
-                    files_metadata=files_metadata,
-                    variables=variables
-                ))
-                
-                # 订阅事件流
-                async for event in redis.subscribe_events(session_id=session_id, after_id=0, timeout=300):
-                    yield event
-                    if agent_task.done():
-                        break
-                
-                if not agent_task.done():
-                    await agent_task
-                
-                logger.info(f"✅ 流式对话完成: {session_id}")
-                    
-            except asyncio.CancelledError:
-                # SSE 断开，Agent 继续后台运行（agent_task 是独立任务，会自动继续）
-                logger.info(f"⚠️ SSE 断开，Agent 后台继续: {session_id}")
-            
-            except Exception as e:
-                logger.error(f"❌ 流式对话失败: {e}", exc_info=True)
-                try:
-                    await self.session_service.end_session(session_id, status="failed")
-                except:
-                    pass
-                raise AgentExecutionError(f"流式对话失败: {e}") from e
+        return self._create_stream_generator(
+            session_id=session_id,
+            agent=agent,
+            agent_id=pool_key,  # 传递 agent_id 用于释放
+            raw_message=message,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            is_new_conversation=is_new_conversation,
+            background_tasks=background_tasks,
+            files=files,
+            variables=variables
+        )
+    
+    async def _create_stream_generator(
+        self,
+        session_id: str,
+        agent: SimpleAgent,
+        agent_id: str,
+        raw_message: Any,
+        user_id: str,
+        conversation_id: str,
+        is_new_conversation: bool,
+        background_tasks: Optional[List[str]],
+        files: Optional[List[Any]],
+        variables: Optional[Dict[str, Any]]
+    ):
+        """
+        创建流式事件生成器
         
-        return stream_events()
+        将流式逻辑抽离，保持 chat() 简洁
+        """
+        try:
+            redis = self.session_service.redis
+            events = self.session_service.events
+            
+            # 发送初始事件
+            await events.session.emit_session_start(
+                session_id=session_id,
+                user_id=user_id,
+                conversation_id=conversation_id
+            )
+            
+            if is_new_conversation:
+                await events.conversation.emit_conversation_start(
+                    session_id=session_id,
+                    conversation={
+                        "id": conversation_id,
+                        "title": "新对话",
+                        "created_at": datetime.now().isoformat(),
+                        "metadata": {}
+                    }
+                )
+            
+            # 启动 Agent 任务
+            agent_task = asyncio.create_task(self._run_agent(
+                session_id=session_id,
+                agent=agent,
+                agent_id=agent_id,
+                raw_message=raw_message,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                is_new_conversation=is_new_conversation,
+                background_tasks=background_tasks,
+                files=files,
+                variables=variables
+            ))
+            
+            # 订阅事件流
+            async for event in redis.subscribe_events(session_id=session_id, after_id=0, timeout=300):
+                yield event
+                if agent_task.done():
+                    break
+            
+            if not agent_task.done():
+                await agent_task
+            
+            logger.info(f"✅ 流式对话完成: {session_id}")
+                
+        except asyncio.CancelledError:
+            # SSE 断开，Agent 继续后台运行
+            logger.info(f"⚠️ SSE 断开，Agent 后台继续: {session_id}")
+        
+        except Exception as e:
+            logger.error(f"❌ 流式对话失败: {e}", exc_info=True)
+            try:
+                # 释放资源
+                await self.agent_pool.release(agent_id)
+                await self.session_pool.on_session_end(session_id, user_id, agent_id)
+                await self.session_service.end_session(session_id, status="failed")
+            except:
+                pass
+            raise AgentExecutionError(f"流式对话失败: {e}") from e
     
     async def _run_agent(
         self,
         session_id: str,
         agent: SimpleAgent,
-        message: List[Dict[str, str]],
+        agent_id: str,
+        raw_message: Any,
         user_id: str,
         conversation_id: str,
         is_new_conversation: bool = False,
         background_tasks: Optional[List[str]] = None,
-        files_metadata: Optional[List[Dict[str, Any]]] = None,
+        files: Optional[List[Any]] = None,
         variables: Optional[Dict[str, Any]] = None
     ):
         """
         执行 Agent（核心逻辑，同步和流式共用）
         
-        流程：
-        1. 保存用户消息
-        2. 创建 Assistant 消息占位
-        3. 调用 Agent.chat()
-           - 内容累积由 EventBroadcaster 自动处理
-           - Checkpoint 在每个 content_stop 后自动保存
-           - 最终保存在 message_stop 时自动完成
-        4. 完成后发送 session_end 事件
+        流程分为 4 个阶段：
+        
+        阶段 1: 输入处理
+          1.1 处理文件（图片、文档 → Claude 格式内容块）
+          1.2 标准化消息格式
+          1.3 注入前端变量（位置、时区等注入到用户消息）
+        
+        阶段 2: 数据库操作
+          2.1 保存用户消息（含文件元数据）
+          2.2 创建 Assistant 消息占位
+          2.3 加载历史消息
+        
+        阶段 3: 执行 Agent
+          3.1 发送 message_start 事件
+          3.2 上下文管理（裁剪历史消息）
+          3.3 调用 Agent.chat（传入 variables）
+        
+        阶段 4: 完成处理
+          4.1 检查最终状态
+          4.2 发送完成事件
+          4.3 执行后台任务（如标题生成）
+          4.4 释放资源（Agent、更新池状态）
         
         Args:
-            background_tasks: 需要启用的后台任务列表，如 ["title_generation"]
-            files_metadata: 文件元数据列表，用于保存到用户消息的 metadata 中
-            variables: 前端上下文变量（如位置、时区），直接注入到 System Prompt
+            session_id: 会话 ID
+            agent: Agent 实例
+            agent_id: Agent ID（用于释放）
+            raw_message: 原始用户消息（未处理）
+            user_id: 用户 ID
+            conversation_id: 对话 ID
+            is_new_conversation: 是否新对话
+            background_tasks: 后台任务列表，如 ["title_generation"]
+            files: 文件引用列表（FileReference 对象或字典）
+            variables: 前端上下文变量（如位置、时区）
         """
         start_time = time.time()
         background_tasks = background_tasks or []
         
         try:
-            logger.info(f"🚀 Agent 开始执行: session_id={session_id}, background_tasks={background_tasks}")
+            logger.info(f"🚀 Agent 开始执行: session_id={session_id}")
             
             redis = self.session_service.redis
             events = self.session_service.events
             
-            # 生成 Assistant 消息 ID
-            assistant_message_id = uuid4().hex
+            # =================================================================
+            # 阶段 1: 输入处理（处理所有用户输入）
+            # =================================================================
             
-            # 1️⃣ 先保存到数据库（确保数据持久化）
+            # 1.1 处理文件（图片、文档 → Claude 格式内容块）
+            processed_message, files_metadata = await self._process_message_with_files(raw_message, files)
+            if files_metadata:
+                logger.info(f"📎 文件处理完成: {len(files_metadata)} 个文件")
+            
+            # 1.2 标准化消息格式
+            message = normalize_message_format(processed_message)
+            
+            # 1.3 注入前端变量（位置、时区等）到用户消息
+            # 注：不能放 System Prompt（会被 cache），必须放在用户消息中
+            # 格式：用户 query 在前，系统注入上下文在后（合并到同一个 text block）
+            if variables:
+                context_text = self._build_user_context(variables)
+                if append_text_to_last_block(message, context_text):
+                    logger.info(f"🌐 前端变量已注入: {list(variables.keys())}")
+            
+            # =================================================================
+            # 阶段 2: 数据库操作（持久化 + 加载历史）
+            # =================================================================
+            # 注：为避免 SQLite 并发问题，保存和加载在同一个数据库会话中
+            
+            assistant_message_id = uuid4().hex
             content_json = json.dumps(message, ensure_ascii=False)
             
-            # 🔧 临时修复：在同一个数据库会话中保存消息并加载历史
-            # 避免 SQLite 并发问题导致的数据库会话隔离问题
             history_messages = []
             async with AsyncSessionLocal() as session:
-                # 保存用户消息（包含文件元数据）
+                # 2.1 保存用户消息（含文件元数据）
                 user_metadata = {
                     "session_id": session_id,
                     "model": self.default_model
                 }
-                # 如果有文件，将文件信息添加到 metadata
                 if files_metadata:
                     user_metadata["files"] = files_metadata
                 
@@ -473,14 +481,14 @@ class ChatService:
                 )
                 logger.debug(f"💾 用户消息已保存，files={len(files_metadata) if files_metadata else 0}")
                 
-                # 创建 Assistant 消息占位（status 使用简单字符串）
+                # 2.2 创建 Assistant 消息占位
                 await crud.create_message(
                     session=session,
                     conversation_id=conversation_id,
                     role="assistant",
                     content="[]",
                     message_id=assistant_message_id,
-                    status="processing",  # processing/completed/stopped/failed
+                    status="processing",
                     metadata={
                         "session_id": session_id,
                         "model": self.default_model,
@@ -488,7 +496,7 @@ class ChatService:
                 )
                 logger.info(f"✅ Assistant 占位记录已创建: id={assistant_message_id}")
                 
-                # 🔧 在同一个会话中立即加载消息（避免并发问题）
+                # 2.3 加载历史消息
                 db_messages = await crud.list_messages(
                     session=session,
                     conversation_id=conversation_id,
@@ -496,49 +504,44 @@ class ChatService:
                     order="asc"
                 )
                 
-                # 转换为 Agent 格式
+                # 转换为 Agent 格式（使用 ClaudeAdaptor 统一处理）
+                from core.llm.adaptor import ClaudeAdaptor
+                
+                raw_messages = []
                 for db_msg in db_messages:
-                    # 跳过 Assistant 占位消息（status=processing）
+                    # 跳过 Assistant 占位消息
                     if db_msg.role == "assistant" and db_msg.status == "processing":
                         continue
                     
-                    # 解析 content
                     content = db_msg.content
                     try:
                         content = json.loads(content) if content else []
                     except json.JSONDecodeError:
                         pass
                     
-                    # 🔧 过滤 thinking 块（Claude API 要求 thinking 块有 signature，历史消息没有）
-                    # 🔧 同时移除 index 字段（Claude API 不接受 content block 中的 index 字段）
-                    if isinstance(content, list):
-                        cleaned_content = []
-                        for block in content:
-                            if isinstance(block, dict):
-                                # 跳过 thinking 和 redacted_thinking 块
-                                if block.get("type") in ("thinking", "redacted_thinking"):
-                                    continue
-                                # 移除 index 字段
-                                clean_block = {k: v for k, v in block.items() if k != "index"}
-                                cleaned_content.append(clean_block)
-                            else:
-                                cleaned_content.append(block)
-                        content = cleaned_content
-                    
-                    history_messages.append({
+                    raw_messages.append({
                         "role": db_msg.role,
                         "content": content
                     })
                 
-                logger.info(f"📚 历史消息已加载（同会话）: {len(history_messages)} 条")
+                # 使用 adaptor 清理和分离消息（处理 thinking/index/tool_result）
+                history_messages = ClaudeAdaptor.prepare_messages_from_db(raw_messages)
+                
+                logger.info(f"📚 历史消息已加载: {len(history_messages)} 条")
             
-            # 2️⃣ 数据库成功后，再发送 SSE 事件通知前端
+            # =================================================================
+            # 阶段 3: 执行 Agent
+            # =================================================================
+            
+            # 3.1 发送 message_start 事件（通知前端开始生成）
             await events.message.emit_message_start(
                 session_id=session_id,
                 message_id=assistant_message_id,
                 model=self.default_model
             )
             
+            # 3.2 上下文管理（裁剪历史消息）
+            # 三层防护策略：L1 Memory Tool / L2 智能裁剪 / L3 Token 预警
             original_count = len(history_messages)
             
             # =====================================================================
@@ -564,50 +567,31 @@ class ChatService:
             )
             
             context_strategy = get_context_strategy(self.qos_level)
-            
-            # 裁剪历史消息（保留首轮 + 最近 N 轮 + 关键 tool_result）
             history_messages = trim_history_messages(history_messages, context_strategy)
             
             if len(history_messages) < original_count:
                 logger.info(
-                    f"✂️ L2 历史消息裁剪: {original_count} → {len(history_messages)} 条 "
-                    f"(保留前{context_strategy.preserve_first_n}轮 + "
-                    f"最近{context_strategy.preserve_last_n}轮 + tool_results)"
+                    f"✂️ 历史裁剪: {original_count} → {len(history_messages)} 条"
                 )
             
-            # L3 策略：后端 token 预警（用户无感知）
+            # L3: 后端 token 预警（用户无感知）
             estimated_tokens = estimate_tokens(history_messages)
             if should_warn_backend(estimated_tokens, context_strategy):
                 logger.warning(
-                    f"⚠️ L3 Token 预警（后端）: {estimated_tokens:,} / "
-                    f"{context_strategy.token_budget:,} tokens "
-                    f"(QoS={self.qos_level.value})"
+                    f"⚠️ Token 预警: {estimated_tokens:,} / {context_strategy.token_budget:,}"
                 )
             
-            # =====================================================================
-            # 🎯 直接调用 SimpleAgent（意图分析在 Agent 内部完成）
-            # =====================================================================
-            # 
-            # 【待扩展】Multi-Agent 路由逻辑已注释，保留作为未来扩展：
-            # - 如需启用 Multi-Agent，取消注释下方代码块
-            # - 参考 core/multi_agent/ 模块
-            # =====================================================================
-            
-            # 初始化 broadcaster 的消息累积
+            # 3.3 调用 Agent.chat()
+            # - variables: 已在阶段 1.3 注入到用户消息，不再传递给 Agent
+            # - 内容累积: broadcaster 自动处理
+            # - 最终保存: broadcaster 在 message_stop 时完成
             agent.broadcaster.start_message(session_id, assistant_message_id)
             
-            # 🎯 调用 Agent.chat()
-            # - 意图分析：在 SimpleAgent 内部完成
-            # - 内容累积：broadcaster 自动处理 content_start/delta/stop
-            # - Checkpoint：broadcaster 在每个 content_stop 后自动保存
-            # - 最终保存：broadcaster 在 message_stop 时自动完成
-            # - variables：直接注入到 System Prompt（前端上下文）
             async for event in agent.chat(
                 messages=history_messages,
                 session_id=session_id,
                 message_id=assistant_message_id,
-                enable_stream=True,
-                variables=variables
+                enable_stream=True
             ):
                 # 检查停止标志（异步）
                 if await redis.is_stopped(session_id):
@@ -617,51 +601,23 @@ class ChatService:
                     await self.session_service.end_session(session_id, status="stopped")
                     break
                 
-                # 🎯 只处理需要额外逻辑的事件
+                # 处理特殊事件
                 event_type = event.get("type", "")
-                
                 if event_type == "conversation_delta":
-                    # conversation 更新同步到数据库
                     await self._handle_conversation_delta(event, conversation_id)
             
-            # =====================================================================
-            # 【待扩展】Multi-Agent 路由逻辑（已注释）
-            # =====================================================================
-            # 
-            # from core.multi_agent.config import MultiAgentMode
-            # 
-            # # 1. 提取用户 query
-            # user_text = extract_text_from_message(message)
-            # 
-            # # 2. 意图分析（获取 needs_multi_agent）
-            # intent_result = None
-            # if hasattr(agent, 'intent_analyzer') and agent.intent_analyzer:
-            #     intent_result = await agent.intent_analyzer.analyze(user_text)
-            # 
-            # # 3. 判断是否使用 Multi-Agent
-            # if self.multi_agent_config.mode == MultiAgentMode.DISABLED:
-            #     should_use_ma = False
-            # elif self.multi_agent_config.mode == MultiAgentMode.ENABLED:
-            #     should_use_ma = True
-            # else:  # AUTO
-            #     should_use_ma = intent_result.needs_multi_agent if intent_result else False
-            # 
-            # # 4. 根据决策选择执行路径
-            # if should_use_ma:
-            #     await self._execute_multi_agent(...)
-            # else:
-            #     # SimpleAgent 逻辑（当前使用）
-            #     pass
-            # =====================================================================
+            # =================================================================
+            # 阶段 4: 完成处理
+            # =================================================================
             
-            # 计算执行时间
             duration_ms = int((time.time() - start_time) * 1000)
             
-            # 检查最终状态（异步）
+            # 4.1 检查最终状态
             final_status = await redis.get_session_status(session_id)
             status = final_status.get("status") if final_status else "completed"
             
             if status != "stopped":
+                # 4.2 发送完成事件
                 await events.session.emit_session_end(
                     session_id=session_id,
                     status="completed",
@@ -669,12 +625,10 @@ class ChatService:
                 )
                 await self.session_service.end_session(session_id, status="completed")
                 
-                # 🎯 统一后台任务调度（新增任务只需在 BackgroundTaskService 中注册）
+                # 4.3 执行后台任务（如标题生成）
                 if background_tasks:
-                    # 提取用户消息文本
                     user_text = extract_text_from_message(message)
                     
-                    # 从 broadcaster 的 accumulator 获取 assistant 文本
                     assistant_text = ""
                     accumulator = agent.broadcaster.get_accumulator(session_id)
                     if accumulator:
@@ -682,7 +636,6 @@ class ChatService:
                             accumulator.build_for_db()
                         )
                     
-                    # 构建任务上下文
                     task_context = TaskContext(
                         session_id=session_id,
                         conversation_id=conversation_id,
@@ -695,17 +648,27 @@ class ChatService:
                         conversation_service=self.conversation_service
                     )
                     
-                    # 统一调度后台任务
                     await self.background_tasks.dispatch_tasks(
                         task_names=background_tasks,
                         context=task_context
                     )
+            
+            # 4.4 释放资源（Agent、更新 SessionPool 状态）
+            await self.agent_pool.release(agent_id)
+            await self.session_pool.on_session_end(session_id, user_id, agent_id)
             
             logger.info(f"✅ Agent 执行完成: session_id={session_id}, duration={duration_ms}ms")
         
         except Exception as e:
             logger.error(f"❌ Agent 执行失败: {str(e)}", exc_info=True)
             duration_ms = int((time.time() - start_time) * 1000)
+            
+            # 释放资源（异常情况）
+            try:
+                await self.agent_pool.release(agent_id)
+                await self.session_pool.on_session_end(session_id, user_id, agent_id)
+            except Exception as release_error:
+                logger.warning(f"⚠️ 释放资源失败: {release_error}")
             
             # 分类错误类型，提供更友好的错误信息
             error_type = "unknown_error"

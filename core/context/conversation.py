@@ -194,20 +194,23 @@ class Context:
         """
         将数据库消息转换为 Agent 格式（符合 Claude API 规范）
         
+        使用 ClaudeAdaptor.prepare_messages_from_db() 统一处理：
+        - 按 index 排序内容块
+        - 清理 thinking 块
+        - 去重 tool_use/tool_result
+        - 分离 tool_result 到 user 消息
+        - 确保 tool_use/tool_result 配对
+        
         Args:
             db_messages: 数据库消息列表（可能是对象或字典）
             
         Returns:
             Agent 格式的消息列表
-            
-        说明：
-        - 数据库存储时，所有 content blocks 都在一条 assistant 消息中
-        - Claude API 要求：tool_result 必须在 user 消息中
-        - 此方法会智能重构：将 assistant 消息中的 tool_result 抽取为独立的 user 消息
-        - ⚠️ 过滤掉 thinking 块（Claude API 要求有 signature，但历史消息不需要）
         """
-        agent_messages = []
+        from core.llm.adaptor import ClaudeAdaptor
         
+        # 转换为统一的 dict 格式
+        raw_messages = []
         for msg in db_messages:
             # 兼容处理：msg 可能是对象或字典
             if isinstance(msg, dict):
@@ -223,276 +226,18 @@ class Context:
                     # 尝试解析为 JSON（新格式：数组）
                     content_array = json.loads(content)
                     if isinstance(content_array, list):
-                        # 直接使用 content 数组（已经是 Claude API 格式）
                         content = content_array
                 except json.JSONDecodeError:
                     # 纯文本（旧格式）
                     pass
             
-            # 🆕 智能重构：将 assistant 消息中的 tool_result 抽取为独立消息
-            if isinstance(content, list) and role == "assistant":
-                reconstructed = self._reconstruct_assistant_message(content)
-                agent_messages.extend(reconstructed)
-            elif isinstance(content, list):
-                # user/system 消息：直接清理
-                cleaned = self._clean_content_blocks(content, role)
-                if cleaned:
-                    agent_messages.append({
-                        "role": role,
-                        "content": cleaned
-                    })
-            else:
-                # 纯文本消息
-                if content:
-                    agent_messages.append({
-                        "role": role,
-                        "content": content
-                    })
-        
-        # 🛡️ 确保 tool_use 和 tool_result 配对
-        agent_messages = self._ensure_tool_pairs(agent_messages)
-        
-        return agent_messages
-    
-    def _reconstruct_assistant_message(
-        self,
-        content_blocks: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
-        """
-        重构 assistant 消息：将 tool_result 抽取为独立的 user 消息
-        
-        数据库存储格式：
-            assistant: [thinking, text, tool_use, tool_result, text, tool_use, tool_result, ...]
-        
-        Claude API 正确格式：
-            assistant: [text, tool_use]
-            user: [tool_result]
-            assistant: [text, tool_use]
-            user: [tool_result]
-            ...
-        
-        Args:
-            content_blocks: assistant 消息的内容块列表
-            
-        Returns:
-            重构后的消息列表（可能包含多条消息）
-        """
-        # 按 index 排序
-        sorted_blocks = sorted(
-            content_blocks,
-            key=lambda b: b.get("index", 999) if isinstance(b, dict) else 999
-        )
-        
-        result_messages = []
-        current_assistant_blocks = []
-        
-        # 🆕 用于去重：记录已添加的 tool_use id 和 tool_result tool_use_id
-        seen_tool_use_ids = set()
-        seen_tool_result_ids = set()
-        
-        for block in sorted_blocks:
-            if not isinstance(block, dict):
-                continue
-            
-            block_type = block.get("type")
-            
-            # 移除 index 字段（Claude API 不接受）
-            clean_block = {k: v for k, v in block.items() if k != "index"}
-            
-            # 跳过 thinking 块
-            if block_type == "thinking":
-                logger.debug(f"🧹 移除 thinking 块（历史消息不需要）")
-                continue
-            
-            # 🆕 tool_use 去重检查
-            if block_type == "tool_use":
-                tool_id = block.get("id")
-                if tool_id in seen_tool_use_ids:
-                    logger.debug(f"🧹 移除重复的 tool_use: {tool_id}")
-                    continue
-                seen_tool_use_ids.add(tool_id)
-            
-            # tool_result 需要作为独立的 user 消息
-            if block_type == "tool_result":
-                # 🆕 tool_result 去重检查
-                tool_use_id = block.get("tool_use_id")
-                if tool_use_id in seen_tool_result_ids:
-                    logger.debug(f"🧹 移除重复的 tool_result: {tool_use_id}")
-                    continue
-                seen_tool_result_ids.add(tool_use_id)
-                
-                # 先保存之前累积的 assistant 内容
-                if current_assistant_blocks:
-                    result_messages.append({
-                        "role": "assistant",
-                        "content": current_assistant_blocks
-                    })
-                    current_assistant_blocks = []
-                
-                # tool_result 作为 user 消息
-                result_messages.append({
-                    "role": "user",
-                    "content": [clean_block]
-                })
-            else:
-                # text, tool_use 等保持在 assistant 消息中
-                current_assistant_blocks.append(clean_block)
-        
-        # 保存最后累积的 assistant 内容
-        if current_assistant_blocks:
-            result_messages.append({
-                "role": "assistant",
-                "content": current_assistant_blocks
+            raw_messages.append({
+                "role": role,
+                "content": content
             })
         
-        return result_messages
-    
-    def _ensure_tool_pairs(
-        self,
-        messages: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
-        """
-        确保 tool_use 和 tool_result 成对出现
-        
-        Claude API 要求：
-        - 每个 tool_use 后面必须紧跟对应的 tool_result（在下一个 user 消息中）
-        - 如果 tool_use 没有对应的 tool_result，需要移除
-        
-        Args:
-            messages: 消息列表
-            
-        Returns:
-            清理后的消息列表
-        """
-        if not messages:
-            return messages
-        
-        # 1. 收集所有 tool_use ID 和 tool_result 对应的 tool_use_id
-        tool_use_ids = set()
-        tool_result_ids = set()
-        
-        for msg in messages:
-            content = msg.get("content", [])
-            if not isinstance(content, list):
-                continue
-            
-            for block in content:
-                if not isinstance(block, dict):
-                    continue
-                block_type = block.get("type")
-                if block_type == "tool_use":
-                    tool_use_ids.add(block.get("id"))
-                elif block_type == "tool_result":
-                    tool_result_ids.add(block.get("tool_use_id"))
-        
-        # 2. 找出配对的 tool_use（既有 tool_use 又有对应的 tool_result）
-        paired_ids = tool_use_ids & tool_result_ids
-        unpaired_tool_use = tool_use_ids - tool_result_ids
-        unpaired_tool_result = tool_result_ids - tool_use_ids
-        
-        if unpaired_tool_use:
-            logger.warning(f"⚠️ 发现 {len(unpaired_tool_use)} 个未配对的 tool_use，将移除")
-        if unpaired_tool_result:
-            logger.warning(f"⚠️ 发现 {len(unpaired_tool_result)} 个未配对的 tool_result，将移除")
-        
-        # 3. 过滤消息，移除未配对的 tool_use 和 tool_result
-        cleaned_messages = []
-        
-        for msg in messages:
-            content = msg.get("content", [])
-            role = msg.get("role", "user")
-            
-            if isinstance(content, list):
-                # 过滤未配对的块
-                filtered_content = []
-                for block in content:
-                    if not isinstance(block, dict):
-                        continue
-                    
-                    block_type = block.get("type")
-                    
-                    if block_type == "tool_use":
-                        tool_id = block.get("id")
-                        if tool_id in paired_ids:
-                            filtered_content.append(block)
-                        else:
-                            logger.debug(f"🧹 移除未配对的 tool_use: {tool_id}")
-                    elif block_type == "tool_result":
-                        tool_use_id = block.get("tool_use_id")
-                        if tool_use_id in paired_ids:
-                            filtered_content.append(block)
-                        else:
-                            logger.debug(f"🧹 移除未配对的 tool_result: {tool_use_id}")
-                    else:
-                        filtered_content.append(block)
-                
-                # 只添加有内容的消息
-                if filtered_content:
-                    cleaned_messages.append({
-                        "role": role,
-                        "content": filtered_content
-                    })
-            else:
-                # 纯文本消息，直接保留
-                if content:
-                    cleaned_messages.append(msg)
-        
-        return cleaned_messages
-    
-    def _clean_content_blocks(
-        self,
-        content_blocks: List[Dict[str, Any]],
-        role: str
-    ) -> List[Dict[str, Any]]:
-        """
-        清理内容块，确保符合 Claude API 要求
-        
-        Claude API 要求：
-        1. thinking 块必须有 signature 字段（我们直接移除所有 thinking 块）
-        2. tool_result 块只能出现在 user 消息中
-        3. tool_use 块只能出现在 assistant 消息中
-        
-        Args:
-            content_blocks: 内容块列表
-            role: 消息角色 (user/assistant)
-            
-        Returns:
-            清理后的内容块列表
-        """
-        # 🆕 按 index 排序（确保顺序正确，即使存储时乱序）
-        sorted_blocks = sorted(
-            content_blocks,
-            key=lambda b: b.get("index", 999) if isinstance(b, dict) else 999
-        )
-        
-        filtered = []
-        
-        for block in sorted_blocks:
-            if not isinstance(block, dict):
-                continue
-                
-            block_type = block.get("type")
-            
-            # 1. 直接移除所有 thinking 块（避免 signature 问题）
-            if block_type == "thinking":
-                logger.debug(f"🧹 移除 thinking 块（历史消息不需要）")
-                continue
-            
-            # 2. tool_result 只能在 user 消息中
-            if block_type == "tool_result" and role != "user":
-                logger.warning(f"⚠️ 移除错误位置的 tool_result 块（应在 user 消息中）")
-                continue
-            
-            # 3. tool_use 只能在 assistant 消息中
-            if block_type == "tool_use" and role != "assistant":
-                logger.warning(f"⚠️ 移除错误位置的 tool_use 块（应在 assistant 消息中）")
-                continue
-            
-            # 🆕 移除 index 字段（Claude API 不接受）
-            clean_block = {k: v for k, v in block.items() if k != "index"}
-            filtered.append(clean_block)
-        
-        return filtered
+        # 使用 adaptor 统一处理（清理 thinking/index、去重、分离 tool_result、配对检查）
+        return ClaudeAdaptor.prepare_messages_from_db(raw_messages)
     
     def count_tokens(self, messages: Optional[List[Dict[str, Any]]] = None) -> int:
         """

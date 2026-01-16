@@ -35,8 +35,7 @@ from routers.health import router as health_router
 from routers.human_confirmation import router as human_confirmation_router
 from routers.skills import router as skills_router
 from routers.workspace import router as workspace_router
-
-
+from infra.pools import get_session_pool, get_agent_pool
 # ==================== 常量定义 ====================
 
 APP_NAME = "Zenflux Agent API"
@@ -65,22 +64,31 @@ async def _init_database() -> None:
     print("✅ 数据库初始化完成")
 
 
-async def _preload_agents() -> None:
-    """预加载所有 Agent 实例"""
-    print("🤖 预加载 Agent 实例...")
+async def _preload_agent_registry() -> int:
+    """
+    预加载 Agent 配置到 AgentRegistry
+    
+    注意：只加载配置，不创建原型实例（由 AgentPool 负责）
+    
+    Returns:
+        加载的 Agent 配置数量
+    """
+    print("📋 加载 Agent 配置...")
     from services.agent_registry import get_agent_registry
     
     agent_registry = get_agent_registry()
     try:
         loaded_count = await agent_registry.preload_all()
         if loaded_count > 0:
-            print(f"✅ 已预加载 {loaded_count} 个 Agent 实例")
+            print(f"✅ 已加载 {loaded_count} 个 Agent 配置")
             for agent in agent_registry.list_agents():
                 print(f"   • {agent['agent_id']}: {agent['description'] or '(无描述)'}")
         else:
-            print("○ 没有发现 Agent 实例（instances/ 目录为空）")
+            print("○ 没有发现 Agent 配置（instances/ 目录为空）")
+        return loaded_count
     except Exception as e:
-        print(f"⚠️ Agent 预加载失败: {e}")
+        print(f"⚠️ Agent 配置加载失败: {e}")
+        return 0
 
 
 async def _start_grpc_server() -> Optional[Any]:
@@ -189,22 +197,48 @@ async def _close_redis() -> None:
         print(f"⚠️ 关闭 Redis 连接失败: {e}")
 
 
-async def _cleanup_agent_pool() -> None:
-    """清理 Agent Pool"""
+async def _init_pools() -> None:
+    """
+    初始化资源池和协调器
+    
+    初始化顺序：
+    1. AgentRegistry 加载配置（已在 _preload_agent_registry 中完成）
+    2. AgentPool 创建原型（基于 Registry 配置）
+    3. SessionPool 初始化（追踪活跃 Session）
+    4. 校准活跃 Session 数据（清理可能的孤立记录）
+    """
     try:
-        from services import get_session_service
-        session_service = get_session_service()
+        print("🏊 初始化资源池...")
         
-        for session_id, agent in list(session_service.agent_pool.items()):
-            try:
-                if hasattr(agent, 'cancel'):
-                    agent.cancel()
-            except Exception:
-                pass
-        session_service.agent_pool.clear()
-        print("✅ Agent Pool 已清理")
+        # 1. 获取 AgentPool 并预加载原型
+        agent_pool = get_agent_pool()
+        loaded_count = await agent_pool.preload_all()
+        print(f"   ✓ AgentPool: {loaded_count} 个原型已缓存")
+        
+        # 2. 获取 SessionPool
+        session_pool = get_session_pool()
+        
+        # 3. 校准活跃 Session 数据（清理服务重启前的孤立记录）
+        calibration_result = await session_pool.calibrate()
+        if calibration_result.get("orphaned_removed", 0) > 0:
+            print(f"   ✓ SessionPool: 校准完成，清理 {calibration_result['orphaned_removed']} 个孤立 Session")
+        else:
+            print(f"   ✓ SessionPool: 已就绪")
+        
+        print(f"✅ 资源池初始化完成")
     except Exception as e:
-        print(f"⚠️ 清理 Agent Pool 失败: {e}")
+        print(f"⚠️ 资源池初始化失败: {e}")
+
+
+async def _cleanup_pools() -> None:
+    """清理资源池"""
+    try:
+        session_pool = get_session_pool()
+        await session_pool.cleanup()
+        
+        print("✅ 资源池已清理")
+    except Exception as e:
+        print(f"⚠️ 清理资源池失败: {e}")
 
 
 async def _close_database() -> None:
@@ -227,7 +261,8 @@ async def lifespan(app: FastAPI):
     
     await _init_resilience_config()
     await _init_database()
-    await _preload_agents()
+    await _preload_agent_registry()  # 加载 Agent 配置
+    await _init_pools()  # 初始化资源池（含 Agent 原型创建和 Session 校准）
     grpc_server = await _start_grpc_server()
     scheduler = await _start_scheduler()
     
@@ -236,11 +271,11 @@ async def lifespan(app: FastAPI):
     # ===== 关闭阶段 =====
     print("🛑 正在关闭服务...")
     
+    await _cleanup_pools()  # 清理资源池
     await _cleanup_agent_registry()
     await _stop_scheduler(scheduler)
     await _stop_grpc_server(grpc_server)
     await _close_redis()
-    await _cleanup_agent_pool()
     await _close_database()
     
     print("👋 Zenflux Agent API 已关闭")
@@ -359,13 +394,16 @@ async def health() -> Dict[str, Any]:
     
     返回服务健康状态
     """
-    from services import get_session_service
-    session_service = get_session_service()
+    session_pool = get_session_pool()
+    stats = await session_pool.get_system_stats()
     
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
-        "active_sessions": len(session_service.agent_pool)
+        "pools": {
+            "agent_prototypes": stats.get("agents", {}).get("total_prototypes", 0),
+            "active_sessions": stats.get("sessions", {}).get("active", 0),
+        }
     }
 
 

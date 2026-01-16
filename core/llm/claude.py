@@ -33,6 +33,7 @@ import httpx
 
 from logger import get_logger
 from utils.message_utils import messages_to_dict_list
+from .adaptor import ClaudeAdaptor
 from .base import (
     BaseLLMService,
     LLMConfig,
@@ -125,6 +126,9 @@ class ClaudeLLMService(BaseLLMService):
             config: LLM 配置
         """
         self.config = config
+        
+        # 消息适配器（统一处理消息格式转换）
+        self._adaptor = ClaudeAdaptor()
         
         # 🆕 V5.0: 使用配置中的超时和重试设置
         timeout = getattr(config, 'timeout', 120.0)
@@ -595,7 +599,9 @@ class ClaudeLLMService(BaseLLMService):
             response = await llm.create_message_async(messages, system=system_blocks)
         """
         # 构建请求参数（支持 kwargs 覆盖）
-        formatted_messages = messages_to_dict_list(messages)
+        # 使用 adaptor 转换消息（自动处理 tool_result 分离等）
+        converted = self._adaptor.convert_messages_to_provider(messages)
+        formatted_messages = converted["messages"]
         request_params = {
             "model": self.config.model,
             "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
@@ -730,7 +736,9 @@ class ClaudeLLMService(BaseLLMService):
             LLMResponse 片段
         """
         # 构建请求参数（支持 kwargs 覆盖）
-        formatted_messages = messages_to_dict_list(messages)
+        # 使用 adaptor 转换消息（自动处理 tool_result 分离等）
+        converted = self._adaptor.convert_messages_to_provider(messages)
+        formatted_messages = converted["messages"]
         request_params = {
             "model": self.config.model,
             "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
@@ -1604,7 +1612,9 @@ class ClaudeLLMService(BaseLLMService):
                 ]
             )
         """
-        formatted_messages = messages_to_dict_list(messages)
+        # 使用 adaptor 转换消息（自动处理 tool_result 分离等）
+        converted = self._adaptor.convert_messages_to_provider(messages)
+        formatted_messages = converted["messages"]
         
         request_params = {
             "model": self.config.model,

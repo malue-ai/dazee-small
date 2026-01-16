@@ -163,3 +163,40 @@ def append_user_message(
     from core.llm import Message
     messages.append(Message(role="user", content=content))
 
+
+def append_text_to_last_block(
+    content_blocks: List[Dict[str, Any]],
+    text: str
+) -> bool:
+    """
+    将文本追加到消息的最后一个 text block
+    
+    用于向用户消息中注入系统上下文（如前端变量、用户记忆等），
+    保持用户 query 在前，系统注入信息在后。
+    
+    Args:
+        content_blocks: 消息内容块列表（会被原地修改）
+        text: 要追加的文本
+        
+    Returns:
+        是否成功追加（找到 text block 并修改）
+        
+    Examples:
+        >>> blocks = [{"type": "text", "text": "帮我创建一个项目"}]
+        >>> append_text_to_last_block(blocks, "\\n---\\n[上下文]\\n- timezone: Asia/Shanghai")
+        True
+        >>> blocks[0]["text"]
+        '帮我创建一个项目\\n---\\n[上下文]\\n- timezone: Asia/Shanghai'
+    """
+    if not text:
+        return False
+    
+    # 从后往前找第一个 text block
+    for i in range(len(content_blocks) - 1, -1, -1):
+        block = content_blocks[i]
+        if isinstance(block, dict) and block.get("type") == "text":
+            block["text"] += text
+            return True
+    
+    return False
+
