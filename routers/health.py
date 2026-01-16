@@ -21,6 +21,20 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/health", tags=["health"])
 
 
+@router.get("", summary="健康检查")
+async def health_root() -> Dict[str, Any]:
+    """
+    健康检查入口
+    
+    Returns:
+        简单存活状态
+    """
+    return {
+        "status": "ok",
+        "timestamp": time.time()
+    }
+
+
 @router.get("/live", summary="存活探针")
 async def liveness_probe():
     """
