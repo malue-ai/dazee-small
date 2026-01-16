@@ -72,24 +72,29 @@ def _calculate_delay(attempt: int, base_delay: float, exponential_base: float, m
     return min(delay, max_delay)
 
 
-def _is_retryable_error(error: Exception, config: RetryConfig) -> bool:
+def _is_retryable_error(
+    error: Exception, 
+    retryable_errors: Tuple[Type[Exception], ...],
+    retryable_status_codes: set = None
+) -> bool:
     """
     判断错误是否可重试
     
     Args:
         error: 异常对象
-        config: 重试配置
+        retryable_errors: 可重试的异常类型元组
+        retryable_status_codes: 可重试的状态码集合
         
     Returns:
         是否可重试
     """
     # 检查异常类型
-    if isinstance(error, config.retryable_errors):
+    if isinstance(error, retryable_errors):
         return True
     
     # 检查 HTTP 状态码（如果是 HTTP 相关异常）
-    if hasattr(error, 'status_code'):
-        return error.status_code in config.retryable_status_codes
+    if retryable_status_codes and hasattr(error, 'status_code'):
+        return error.status_code in retryable_status_codes
     
     # 检查异常消息中是否包含可重试的关键词
     error_str = str(error).lower()
@@ -145,7 +150,7 @@ def with_retry(
                     last_exception = e
                     
                     # 检查是否可重试
-                    if not _is_retryable_error(e, config):
+                    if not _is_retryable_error(e, actual_retryable_errors, config.retryable_status_codes):
                         logger.error(f"❌ {func.__name__} 失败（不可重试）: {str(e)}")
                         raise
                     

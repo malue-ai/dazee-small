@@ -40,6 +40,7 @@ from core.agent.multi import (
     ExecutionMode,
     OrchestratorConfig,
     WorkerConfig,
+    CriticConfig,
 )
 from core.agent.types import IntentResult, TaskType, Complexity
 
@@ -78,6 +79,7 @@ async def test_research_report_scenario():
     logger.info("-"*80)
     
     # 创建 Worker Agents（研究不同方面）
+    # V7.2: 增加超时时间，LLM 调用可能需要 2-3 分钟
     agents = [
         AgentConfig(
             agent_id="researcher_tech",
@@ -85,6 +87,7 @@ async def test_research_report_scenario():
             model="claude-sonnet-4-5-20250929",
             tools=["web_search", "wikipedia"],
             system_prompt="你是一个专注于技术研究的专家",
+            timeout_seconds=180,  # 3 分钟
         ),
         AgentConfig(
             agent_id="researcher_econ",
@@ -92,6 +95,7 @@ async def test_research_report_scenario():
             model="claude-sonnet-4-5-20250929",
             tools=["web_search", "wikipedia"],
             system_prompt="你是一个专注于经济分析的专家",
+            timeout_seconds=180,  # 3 分钟
         ),
         AgentConfig(
             agent_id="researcher_ethics",
@@ -99,6 +103,7 @@ async def test_research_report_scenario():
             model="claude-sonnet-4-5-20250929",
             tools=["web_search", "wikipedia"],
             system_prompt="你是一个专注于伦理研究的专家",
+            timeout_seconds=180,  # 3 分钟
         ),
     ]
     
@@ -126,6 +131,15 @@ async def test_research_report_scenario():
         enable_final_summary=True,
         max_total_turns=30,
         timeout_seconds=300,
+        # V7.2: Critic Agent 配置
+        critic_config=CriticConfig(
+            enabled=True,
+            model="claude-sonnet-4-5-20250929",
+            enable_thinking=True,
+            max_retries=2,
+            auto_pass_on_high_confidence=True,
+            require_human_on_low_confidence=False,  # E2E 测试关闭人工介入
+        ),
     )
     
     logger.info(f"✅ 配置创建完成：")
@@ -232,13 +246,28 @@ async def test_research_report_scenario():
     logger.info("✅ 阶段 4: 验证结果")
     logger.info("-"*80)
     
+    # ===== 6.1 流程验证 =====
     checks = {
         "Orchestrator 启动": any(e.get("type") == "orchestrator_start" for e in events),
         "任务分解完成": task_decomposition is not None,
-        "至少一个 Agent 执行": any(e.get("type") == "agent_start" for e in events),
+        "至少一个 Agent 执行": any(e.get("type") in ("agent_start", "agent_end") for e in events),
         "最终汇总生成": final_output is not None and len(final_output) > 0,
         "Orchestrator 完成": any(e.get("type") == "orchestrator_end" for e in events),
     }
+    
+    # ===== 6.2 报告质量验证（面向用户需求） =====
+    quality_checks = {}
+    if final_output:
+        quality_checks = {
+            "报告长度充足 (>1000字符)": len(final_output) > 1000,
+            "包含技术维度分析": "技术" in final_output,
+            "包含经济维度分析": "经济" in final_output,
+            "包含伦理维度分析": "伦理" in final_output,
+            "有结构化格式 (表格/列表)": "|" in final_output or "- " in final_output,
+        }
+    
+    # 合并检查
+    checks.update(quality_checks)
     
     for check_name, check_result in checks.items():
         status = "✅" if check_result else "❌"

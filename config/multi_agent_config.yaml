@@ -1,5 +1,6 @@
 # 多智能体配置文件
 # V7.1: 强弱配对策略（Anthropic 启发）
+# V7.2: Critic Agent 集成（质量评估与计划调整）
 
 # 默认配置：Opus 4.5 (Orchestrator) + Sonnet 4.5 (Workers)
 default:
@@ -24,6 +25,14 @@ default:
     fail_fast: false
     retry_on_failure: true
     max_retries: 2
+  
+  # V7.2: Critic 配置
+  critic:
+    enabled: true
+    model: "claude-sonnet-4-5-20250929"
+    enable_thinking: true
+    max_retries: 2
+    quality_threshold: 6.0
 
 # 成本优化配置：Sonnet (Orchestrator) + Haiku (Workers)
 cost_optimized:
@@ -46,6 +55,10 @@ cost_optimized:
     fail_fast: true
     retry_on_failure: false
     max_retries: 0
+  
+  # V7.2: Critic 配置（成本优化模式关闭）
+  critic:
+    enabled: false
 
 # 高质量配置：Opus 4.5 (Orchestrator) + Opus 4.5 (Workers)
 high_quality:
@@ -70,6 +83,14 @@ high_quality:
     fail_fast: false
     retry_on_failure: true
     max_retries: 3
+  
+  # V7.2: Critic 配置（高质量模式使用 Opus）
+  critic:
+    enabled: true
+    model: "claude-opus-4-5-20251101"
+    enable_thinking: true
+    max_retries: 3
+    quality_threshold: 7.0
 
 # 快速原型配置：Sonnet (Orchestrator) + Sonnet (Workers)
 prototype:
@@ -92,3 +113,7 @@ prototype:
     fail_fast: true
     retry_on_failure: false
     max_retries: 0
+  
+  # V7.2: Critic 配置（原型模式关闭）
+  critic:
+    enabled: false

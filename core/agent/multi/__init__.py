@@ -25,6 +25,7 @@ from core.agent.multi.models import (
     MultiAgentConfig,
     OrchestratorConfig,
     WorkerConfig,
+    CriticConfig,  # V7.2
     
     # 任务
     TaskAssignment,
@@ -33,6 +34,11 @@ from core.agent.multi.models import (
     AgentResult,
     SubagentResult,
     OrchestratorState,
+    
+    # Critic 相关（V7.2）
+    CriticAction,
+    CriticConfidence,
+    CriticResult,
 )
 
 from core.agent.multi.orchestrator import MultiAgentOrchestrator
@@ -60,6 +66,7 @@ __all__ = [
     "MultiAgentConfig",
     "OrchestratorConfig",
     "WorkerConfig",
+    "CriticConfig",  # V7.2
     
     # 任务
     "TaskAssignment",
@@ -68,6 +75,11 @@ __all__ = [
     "AgentResult",
     "SubagentResult",
     "OrchestratorState",
+    
+    # Critic 相关（V7.2）
+    "CriticAction",
+    "CriticConfidence",
+    "CriticResult",
     
     # 编排器
     "MultiAgentOrchestrator",

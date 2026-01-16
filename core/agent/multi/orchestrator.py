@@ -13,6 +13,10 @@ V7.1 新增特性（基于 Anthropic Multi-Agent System）：
 - ✅ Lead Agent：使用 Opus 进行任务分解和结果综合
 - ✅ 增强追踪：记录每个决策、工具调用、状态转换
 - ✅ 明确任务定义：为每个 Worker 提供清晰的目标、工具、边界
+
+V7.2 新增特性：
+- ✅ Critic Agent：评估执行质量，支持 pass/retry/replan/fail 决策
+- ✅ Plan-Execute-Critique 循环：智能质量保证和计划调整
 """
 
 import asyncio
@@ -30,9 +34,16 @@ from core.agent.multi.models import (
     AgentResult,
     SubagentResult,
     OrchestratorState,
+    CriticConfig,
+    CriticAction,
+    CriticConfidence,
+    CriticResult,
+    PlanAdjustmentHint,  # 🆕 V7.2: 计划调整建议
 )
 from core.agent.multi.checkpoint import CheckpointManager, Checkpoint
 from core.agent.multi.lead_agent import LeadAgent, TaskDecompositionPlan, SubTask
+from core.agent.multi.critic import CriticAgent
+from core.planning.protocol import Plan, PlanStep, StepStatus
 from core.routing import IntentResult
 
 logger = logging.getLogger(__name__)
@@ -129,6 +140,71 @@ class MultiAgentOrchestrator:
             self.lead_agent = None
         self.worker_model = worker_model  # 用于 Worker Agents
         
+        # V7.2: Critic Agent（评估执行质量）
+        critic_config = self.config.critic_config
+        if critic_config and critic_config.enabled:
+            self.critic = CriticAgent(
+                model=critic_config.model,
+                enable_thinking=critic_config.enable_thinking,
+                config=critic_config,
+            )
+            self.critic_config = critic_config
+            logger.info(
+                f"✅ Critic Agent 已启用: model={critic_config.model}, "
+                f"max_retries={critic_config.max_retries}, "
+                f"auto_pass={critic_config.auto_pass_on_high_confidence}"
+            )
+        else:
+            self.critic = None
+            self.critic_config = None
+            logger.info("ℹ️ Critic Agent 未启用")
+        
+        # V7.2: Plan 存储（用于 replan）
+        self.plan: Optional[Plan] = None
+        self.plan_todo_tool = None  # 延迟初始化，避免循环依赖
+        
+        # 🆕 V7.2: 工具和记忆系统（延迟初始化）
+        self._tool_loader = None  # 工具加载器
+        self.tool_executor = None  # 🆕 V7.3: 工具执行器（用于 RVR 循环）
+        self._working_memory = None  # 工作记忆
+        self._mem0_client = None  # Mem0 客户端
+        self.workspace_dir = './workspace'  # 默认工作目录
+        
+        # 🆕 V7.4: Token 使用统计
+        from utils.usage_tracker import create_usage_tracker
+        self.usage_tracker = create_usage_tracker()
+    
+    @property
+    def usage_stats(self) -> Dict[str, int]:
+        """
+        🆕 V7.4: 统一接口，返回 usage 统计
+        
+        与 SimpleAgent.usage_stats 保持一致的接口
+        """
+        return self.usage_tracker.get_stats()
+    
+    def _accumulate_subagent_usage(self, subagent) -> None:
+        """
+        🆕 V7.4: 累积子智能体的 usage
+        
+        Args:
+            subagent: 子智能体实例（需要有 usage_tracker 或 usage_stats）
+        """
+        if hasattr(subagent, 'usage_tracker'):
+            sub_stats = subagent.usage_tracker.get_stats()
+            self.usage_tracker.accumulate_from_dict({
+                "input_tokens": sub_stats.get("total_input_tokens", 0),
+                "output_tokens": sub_stats.get("total_output_tokens", 0),
+                "thinking_tokens": sub_stats.get("total_thinking_tokens", 0),
+                "cache_read_tokens": sub_stats.get("total_cache_read_tokens", 0),
+                "cache_creation_tokens": sub_stats.get("total_cache_creation_tokens", 0),
+            })
+            logger.debug(
+                f"📊 累积子智能体 usage: "
+                f"input={sub_stats.get('total_input_tokens', 0)}, "
+                f"output={sub_stats.get('total_output_tokens', 0)}"
+            )
+        
         # 追踪信息（用于监控和调试）
         self._execution_trace = []
         
@@ -165,6 +241,13 @@ class MultiAgentOrchestrator:
             事件字典
         """
         start_time = time.time()
+        
+        # 🆕 V7.2: 初始化共享资源（工具、记忆）
+        user_id = intent.user_id if intent and hasattr(intent, 'user_id') else None
+        await self._initialize_shared_resources(
+            session_id=session_id,
+            user_id=user_id,
+        )
         
         # V7.1: 尝试从检查点恢复
         checkpoint = None
@@ -224,6 +307,10 @@ class MultiAgentOrchestrator:
                         available_tools=available_tools,
                         intent_info=intent.to_dict() if intent else None,
                     )
+                    
+                    # 🆕 V7.4: 累积 LeadAgent.decompose_task 的 usage
+                    if hasattr(self.lead_agent, 'last_llm_response'):
+                        self.usage_tracker.accumulate(self.lead_agent.last_llm_response)
                     
                     self._trace("lead_agent_decompose_done", {
                         "plan_id": decomposition_plan.plan_id,
@@ -288,6 +375,10 @@ class MultiAgentOrchestrator:
                         original_query=user_query,
                         synthesis_strategy=decomposition_plan.synthesis_strategy if decomposition_plan else None,
                     )
+                    
+                    # 🆕 V7.4: 累积 LeadAgent.synthesize_results 的 usage
+                    if hasattr(self.lead_agent, 'last_llm_response'):
+                        self.usage_tracker.accumulate(self.lead_agent.last_llm_response)
                     
                     self._trace("lead_agent_synthesize_done", {
                         "output_length": len(final_output),
@@ -417,14 +508,28 @@ class MultiAgentOrchestrator:
                 "has_subtask": subtask is not None,
             })
             
-            # 执行 Agent
-            result = await self._execute_single_agent(
-                agent_config, 
-                current_input, 
-                previous_output,
-                session_id,
-                subtask=subtask,
-            )
+            # V7.2: 执行 Agent（带 Critic 评估，内部已包含重试逻辑）
+            try:
+                result = await self._execute_step_with_critique(
+                    agent_config,
+                    subtask,
+                    current_input,
+                    previous_output,
+                    session_id,
+                )
+            except Exception as e:
+                logger.error(f"❌ Agent {agent_id} 执行异常: {e}", exc_info=True)
+                # 创建失败结果
+                result = AgentResult(
+                    result_id=f"result_{uuid4().hex[:8]}",
+                    agent_id=agent_config.agent_id,
+                    success=False,
+                    error=str(e),
+                    turns_used=0,
+                    duration_ms=0,
+                    started_at=datetime.now(),
+                    completed_at=datetime.now(),
+                        )
             
             self._state.agent_results.append(result)
             self._state.completed_agents.append(agent_id)
@@ -478,16 +583,45 @@ class MultiAgentOrchestrator:
         decomposition_plan: Optional[TaskDecompositionPlan] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
-        并行执行模式
+        并行执行模式（带重试）
         
-        所有 Agent 同时执行，最后汇总结果
+        所有 Agent 同时执行，失败时自动重试
         """
-        # 创建所有 Agent 的任务
+        # 创建所有 Agent 的任务（V7.2: 带 Critic 评估）
+        async def execute_with_critique(agent_config, subtask=None):
+            """并行执行单个 Agent（带 Critic 评估）"""
+            try:
+                # V7.2: 使用带 Critic 的执行方法
+                result = await self._execute_step_with_critique(
+                    agent_config=agent_config,
+                    subtask=subtask,
+                    messages=messages,
+                    previous_output=None,
+                    session_id=session_id,
+                )
+                return result
+            except Exception as e:
+                logger.error(f"❌ Agent {agent_config.agent_id} 执行异常: {e}", exc_info=True)
+                return AgentResult(
+                    result_id=f"result_{uuid4().hex[:8]}",
+                    agent_id=agent_config.agent_id,
+                    success=False,
+                    error=str(e),
+                    turns_used=0,
+                    duration_ms=0,
+                    started_at=datetime.now(),
+                    completed_at=datetime.now(),
+                )
+        
+        # 创建所有任务
         tasks = []
-        for agent_config in self.config.agents:
-            task = asyncio.create_task(
-                self._execute_single_agent(agent_config, messages, None, session_id)
-            )
+        for i, agent_config in enumerate(self.config.agents):
+            # 从分解计划获取子任务
+            subtask = None
+            if decomposition_plan and i < len(decomposition_plan.subtasks):
+                subtask = decomposition_plan.subtasks[i]
+            
+            task = asyncio.create_task(execute_with_critique(agent_config, subtask))
             tasks.append((agent_config, task))
         
         # 发送并行开始事件
@@ -693,22 +827,111 @@ class MultiAgentOrchestrator:
             
             user_message = "\n\n".join(user_message_parts)
             
-            # 4. 调用 LLM 执行
+            # 4. 🆕 动态加载工具（根据 SubTask 需求）
+            tools = await self._load_subagent_tools(config, subtask)
+            
+            # 5. 调用 LLM 执行
             from core.llm.base import Message
             
             agent_messages = [Message(role="user", content=user_message)]
             
             logger.debug(f"📤 Subagent system_prompt 长度: {len(system_prompt)} 字符")
             logger.debug(f"📤 Subagent user_message 长度: {len(user_message)} 字符")
+            logger.debug(f"🔧 Subagent 工具数量: {len(tools)}")
             
-            llm_response = await llm.create_message_async(
-                messages=agent_messages,
-                system=system_prompt,
-                temperature=0.5,
-            )
+            # 🆕 V7.3: 实现完整的 RVR 工具执行循环（参考 SimpleAgent）
+            import json
+            max_tool_turns = 5  # 最大工具调用轮次（防止无限循环）
+            turns_used = 0
+            all_tool_results = []  # 收集所有工具执行结果
+            final_response = ""
             
-            # 提取响应文本
-            response = llm_response.content if hasattr(llm_response, 'content') else str(llm_response)
+            for turn in range(max_tool_turns):
+                turns_used += 1
+                
+                logger.info(f"   🔄 Subagent Turn {turn + 1}/{max_tool_turns}")
+                
+                llm_response = await llm.create_message_async(
+                    messages=agent_messages,
+                    system=system_prompt,
+                    temperature=0.5,
+                    tools=tools,
+                )
+                
+                # 🆕 V7.4: 累积每次 LLM 调用的 usage
+                self.usage_tracker.accumulate(llm_response)
+                
+                stop_reason = getattr(llm_response, 'stop_reason', 'end_turn')
+                logger.info(f"   📡 LLM stop_reason: {stop_reason}")
+                
+                # 检查是否有**客户端**工具调用
+                if stop_reason == "tool_use" and hasattr(llm_response, 'tool_calls') and llm_response.tool_calls:
+                    tool_calls = llm_response.tool_calls
+                    logger.info(f"   🔧 LLM 请求调用 {len(tool_calls)} 个工具")
+                    
+                    # 🔑 关键理解：
+                    # - `tool_calls` 只包含**客户端工具**（type="tool_use"）
+                    # - 服务端工具（如 web_search）已由 Anthropic 自动执行，不在 tool_calls 中
+                    # - 所以我们只需要执行 tool_calls 中的工具
+                    
+                    # 添加 assistant 消息（包含 tool_use 块）
+                    agent_messages.append(Message(role="assistant", content=llm_response.raw_content))
+                    
+                    # 执行客户端工具并添加 tool_result
+                    if tool_calls:
+                        tool_results = []
+                        for tc in tool_calls:
+                            tool_name = tc.get('name', '')
+                            tool_input = tc.get('input', {})
+                            tool_id = tc.get('id', '')
+                            
+                            logger.info(f"   🔨 执行客户端工具: {tool_name}")
+                            
+                            try:
+                                result = await self.tool_executor.execute(tool_name, tool_input)
+                                all_tool_results.append({
+                                    "tool": tool_name,
+                                    "input": tool_input,
+                                    "result": result
+                                })
+                                
+                                tool_results.append({
+                                    "type": "tool_result",
+                                    "tool_use_id": tool_id,
+                                    "content": json.dumps(result, ensure_ascii=False)
+                                })
+                                
+                                logger.info(f"   ✅ 工具 {tool_name} 执行完成: success={result.get('success', 'N/A')}")
+                                
+                            except Exception as e:
+                                logger.error(f"   ❌ 工具 {tool_name} 执行失败: {e}")
+                                tool_results.append({
+                                    "type": "tool_result",
+                                    "tool_use_id": tool_id,
+                                    "content": json.dumps({"error": str(e), "success": False}),
+                                    "is_error": True
+                                })
+                        
+                        if tool_results:
+                            agent_messages.append(Message(role="user", content=tool_results))
+                    
+                    # 继续下一轮
+                    continue
+                
+                # 没有工具调用，提取最终响应
+                final_response = llm_response.content if hasattr(llm_response, 'content') else str(llm_response)
+                
+                if stop_reason in ('end_turn', 'stop', 'max_tokens'):
+                    logger.info(f"   ✅ Subagent 完成（{turns_used} 轮），stop_reason={stop_reason}")
+                    break
+            else:
+                # 达到最大轮次
+                logger.warning(f"   ⚠️ Subagent 达到最大工具调用轮次 ({max_tool_turns})")
+                if not final_response:
+                    final_response = llm_response.content if hasattr(llm_response, 'content') else "达到最大执行轮次"
+            
+            # 使用最终响应
+            response = final_response
             
             duration_ms = int((time.time() - start_time) * 1000)
             
@@ -719,7 +942,7 @@ class MultiAgentOrchestrator:
                 agent_id=config.agent_id,
                 success=True,
                 output=response,
-                turns_used=1,
+                turns_used=turns_used,  # 🆕 记录实际轮次
                 duration_ms=duration_ms,
                 started_at=datetime.now(),
                 completed_at=datetime.now(),
@@ -730,6 +953,8 @@ class MultiAgentOrchestrator:
                     "subtask_title": subtask.title if subtask else None,
                     "system_prompt_length": len(system_prompt),
                     "user_message_length": len(user_message),
+                    "tool_calls_count": len(all_tool_results),  # 🆕 工具调用统计
+                    "tool_results": all_tool_results[:5] if all_tool_results else [],  # 🆕 保留前5个工具结果摘要
                 }
             )
             
@@ -797,11 +1022,16 @@ class MultiAgentOrchestrator:
 - 如果有多个发现，使用列表或表格
 """
         
-        # 3. 可用工具指导（Tools Guidance）
+        # 3. 可用工具指导（Tools Guidance）- V7.2 强化工具使用
         if subtask and subtask.tools_required:
             tools_guidance = f"""
 **可用工具**：
 {chr(10).join(f"- {tool}" for tool in subtask.tools_required)}
+
+**⚠️ 重要：你必须主动使用工具获取信息！**
+- 不要仅凭已有知识回答，必须调用工具搜索最新信息
+- 每个子任务至少调用 1-2 次工具
+- 如果任务涉及"研究"、"分析"、"搜索"，你**必须**使用 web_search 或相关工具
 
 **工具选择启发式规则**：
 - 优先使用最直接的工具
@@ -812,6 +1042,11 @@ class MultiAgentOrchestrator:
             tools_guidance = f"""
 **可用工具**：
 {chr(10).join(f"- {tool}" for tool in config.tools)}
+
+**⚠️ 重要：你必须主动使用工具获取信息！**
+- 不要仅凭已有知识回答，必须调用工具获取最新数据
+- 研究任务必须使用搜索工具
+- 你的输出必须包含工具调用获取的实际数据
 
 **工具选择启发式规则**：
 - 根据任务类型选择合适的工具
@@ -967,6 +1202,150 @@ class MultiAgentOrchestrator:
         
         return output[:max_length] + f"\n\n（已截断，原始长度: {len(output)} 字符）"
     
+    async def _initialize_shared_resources(
+        self,
+        session_id: str,
+        user_id: Optional[str] = None,
+        tool_names: Optional[List[str]] = None,
+    ) -> None:
+        """
+        🆕 V7.2: 初始化共享资源（工具、记忆）
+        
+        在 execute() 开始时调用一次，初始化：
+        - 工具加载器（ToolLoader + CapabilityRegistry）
+        - 工作记忆（WorkingMemory）
+        - Mem0 客户端（如果启用）
+        
+        Args:
+            session_id: 会话 ID
+            user_id: 用户 ID（可选）
+            tool_names: 需要加载的工具列表（可选，默认加载核心工具）
+        """
+        # 1. 初始化工具加载器
+        if self._tool_loader is None:
+            from core.tool.loader import ToolLoader
+            from core.tool.capability.registry import CapabilityRegistry
+            
+            self._tool_loader = ToolLoader(
+                global_registry=CapabilityRegistry(),
+            )
+            logger.info("✅ 工具加载器已初始化")
+        
+        # 🆕 V7.3: 初始化工具执行器（用于 Subagent RVR 循环）
+        if self.tool_executor is None:
+            from core.tool.executor import ToolExecutor
+            from core.tool.capability.registry import CapabilityRegistry
+            
+            self.tool_executor = ToolExecutor(
+                registry=CapabilityRegistry(),
+                tool_context={
+                    "workspace_dir": None,  # 多智能体不需要特定工作目录
+                },
+                enable_compaction=True
+            )
+            logger.info("✅ 工具执行器已初始化")
+        
+        # 2. 初始化工作记忆
+        if self._working_memory is None:
+            from core.memory.working import WorkingMemory
+            
+            self._working_memory = WorkingMemory()
+            logger.info(f"✅ 工作记忆已初始化")
+        
+        # 3. 初始化 Mem0 客户端（可选）
+        if self._mem0_client is None and user_id:
+            try:
+                from core.memory.mem0.client import get_mem0_client
+                
+                self._mem0_client = get_mem0_client()
+                logger.info(f"✅ Mem0 客户端已初始化: user_id={user_id}")
+            except Exception as e:
+                logger.warning(f"⚠️ Mem0 客户端初始化失败: {e}，将跳过长期记忆功能")
+                self._mem0_client = None
+    
+    async def _load_subagent_tools(
+        self,
+        config: AgentConfig,
+        subtask: Optional[SubTask] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        🆕 V7.2: 动态加载 Subagent 工具（参考 V4 工具分层设计）
+        
+        工具分层策略（参考 V4-ARCHITECTURE-HISTORY.md）：
+        - Level 1: 核心工具 - 始终加载（plan_todo 等）
+        - Level 2: 动态工具 - 按需加载（web_search, exa_search 等）
+        
+        Args:
+            config: Agent 配置
+            subtask: 子任务定义（包含 tools_required）
+            
+        Returns:
+            List[Dict]: Anthropic 格式的工具定义列表
+        """
+        # 确保工具加载器已初始化
+        if self._tool_loader is None:
+            await self._initialize_shared_resources(session_id="temp")
+        
+        # 1. 确定需要加载的工具（分层策略）
+        # Level 1: 核心工具（始终加载）
+        core_tools = ["plan_todo"]
+        
+        # Level 2: 动态工具（根据 SubTask 或默认配置）
+        if subtask and subtask.tools_required:
+            dynamic_tools = subtask.tools_required
+            logger.debug(f"📋 SubTask 指定工具: {dynamic_tools}")
+        else:
+            # 默认研究工具
+            dynamic_tools = ["web_search", "exa_search", "wikipedia"]
+            logger.debug(f"📋 使用默认工具: {dynamic_tools}")
+        
+        # 合并所有需要的工具
+        all_required_tools = list(set(core_tools + dynamic_tools))
+        
+        # 2. 转换为 enabled_capabilities 格式
+        enabled_capabilities = {tool: True for tool in all_required_tools}
+        
+        # 3. 加载工具
+        try:
+            load_result = self._tool_loader.load_tools(
+                enabled_capabilities=enabled_capabilities,
+            )
+            
+            # 4. 转换为 Anthropic 工具格式（区分原生工具 vs 自定义工具）
+            from core.llm.claude import ClaudeLLMService
+            
+            anthropic_tools = []
+            for capability in load_result.generic_tools:
+                tool_name = capability.name
+                
+                # 🔑 关键：检查是否是 Anthropic 原生工具（如 web_search）
+                native_schema = ClaudeLLMService.NATIVE_TOOLS.get(tool_name)
+                
+                if native_schema:
+                    # 原生工具：使用 Claude 的特殊格式
+                    anthropic_tools.append(native_schema)
+                    logger.debug(f"   📡 原生工具: {tool_name}, type={native_schema.get('type')}")
+                else:
+                    # 自定义工具：使用标准格式
+                    tool_description = capability.metadata.get('description', f"{tool_name} 工具")
+                    tool_schema = capability.input_schema or {"type": "object", "properties": {}}
+                    
+                    anthropic_tools.append({
+                        "name": tool_name,
+                        "description": tool_description,
+                        "input_schema": tool_schema
+                    })
+                    logger.debug(f"   🔧 自定义工具: {tool_name}")
+            
+            tool_names = [t.get('name', t.get('type', 'unknown')) for t in anthropic_tools]
+            logger.info(f"✅ 已加载 {len(anthropic_tools)} 个工具供 Subagent 使用: {tool_names}")
+            return anthropic_tools
+            
+        except Exception as e:
+            logger.error(f"❌ 工具加载失败: {e}", exc_info=True)
+            # 返回空列表但不应该阻止 Agent 执行
+            return []
+    
     async def _spawn_subagent(
         self,
         config: AgentConfig,
@@ -1042,26 +1421,139 @@ class MultiAgentOrchestrator:
             
             user_message = "\n\n".join(user_message_parts)
             
-            # 4. 执行 Subagent
+            # 4. 🆕 动态加载工具
+            tools = await self._load_subagent_tools(config, subtask)
+            
+            # 5. 执行 Subagent
             context_length = len(system_prompt) + len(user_message)
             
-            logger.debug(
+            logger.info(
                 f"📊 Subagent 上下文: system={len(system_prompt)}, "
-                f"user={len(user_message)}, total={context_length}"
+                f"user={len(user_message)}, total={context_length}, tools={len(tools)}"
             )
+            
+            # V7.2 调试：显示第一个工具的完整结构
+            if tools:
+                first_tool = tools[0]
+                logger.info(
+                    f"   🔧 第一个工具示例: name={first_tool.get('name')}, "
+                    f"has_schema={bool(first_tool.get('input_schema'))}, "
+                    f"schema_type={first_tool.get('input_schema', {}).get('type')}"
+                )
             
             from core.llm.base import Message
+            import json
             
-            llm_response = await llm.create_message_async(
-                messages=[Message(role="user", content=user_message)],
-                system=system_prompt,
-                temperature=0.5,
-            )
+            # 🆕 V7.3: 实现完整的 RVR 工具执行循环
+            # 参考 SimpleAgent 的工具调用逻辑 + V4-ARCHITECTURE-HISTORY 分层设计
             
-            # 提取响应文本
-            response = llm_response.content if hasattr(llm_response, 'content') else str(llm_response)
+            messages = [Message(role="user", content=user_message)]
+            max_tool_turns = 5  # 最大工具调用轮次（防止无限循环）
+            turns_used = 0
+            all_tool_results = []  # 收集所有工具执行结果
+            final_response = ""
             
-            # 5. 生成摘要（压缩输出）
+            for turn in range(max_tool_turns):
+                turns_used += 1
+                
+                logger.info(f"   🔄 Subagent Turn {turn + 1}/{max_tool_turns}")
+                
+                llm_response = await llm.create_message_async(
+                    messages=messages,
+                    system=system_prompt,
+                    temperature=0.5,
+                    tools=tools,
+                )
+                
+                stop_reason = getattr(llm_response, 'stop_reason', 'end_turn')
+                logger.info(f"   📡 LLM stop_reason: {stop_reason}")
+                
+                # 检查是否有工具调用
+                if stop_reason == "tool_use" and hasattr(llm_response, 'tool_calls') and llm_response.tool_calls:
+                    tool_calls = llm_response.tool_calls
+                    logger.info(f"   🔧 LLM 请求调用 {len(tool_calls)} 个工具")
+                    
+                    # 🆕 V7.3: 区分客户端工具和服务端工具（参考 SimpleAgent）
+                    # - 客户端工具（tool_use）：需要我们执行并返回 tool_result
+                    # - 服务端工具（server_tool_use）：Anthropic 服务器已执行，结果在 raw_content 中
+                    client_tools = [tc for tc in tool_calls if tc.get("type") == "tool_use"]
+                    server_tools = [tc for tc in tool_calls if tc.get("type") == "server_tool_use"]
+                    
+                    if server_tools:
+                        server_tool_names = [t.get('name') for t in server_tools]
+                        logger.info(f"   🌐 服务端工具已执行: {server_tool_names}")
+                        # 记录服务端工具调用
+                        for st in server_tools:
+                            all_tool_results.append({
+                                "tool": st.get('name'),
+                                "input": st.get('input', {}),
+                                "result": {"handled_by": "anthropic_server"}
+                            })
+                    
+                    # 添加 assistant 消息（包含 tool_use 和 server_tool_use）
+                    messages.append(Message(role="assistant", content=llm_response.raw_content))
+                    
+                    # 只有客户端工具需要我们执行
+                    if client_tools:
+                        tool_results = []
+                        for tc in client_tools:
+                            tool_name = tc.get('name', '')
+                            tool_input = tc.get('input', {})
+                            tool_id = tc.get('id', '')
+                            
+                            logger.info(f"   🔨 执行客户端工具: {tool_name}")
+                            
+                            try:
+                                # 使用 ToolExecutor 执行工具
+                                result = await self.tool_executor.execute(tool_name, tool_input)
+                                all_tool_results.append({
+                                    "tool": tool_name,
+                                    "input": tool_input,
+                                    "result": result
+                                })
+                                
+                                tool_results.append({
+                                    "type": "tool_result",
+                                    "tool_use_id": tool_id,
+                                    "content": json.dumps(result, ensure_ascii=False)
+                                })
+                                
+                                logger.info(f"   ✅ 工具 {tool_name} 执行完成: success={result.get('success', 'N/A')}")
+                                
+                            except Exception as e:
+                                logger.error(f"   ❌ 工具 {tool_name} 执行失败: {e}")
+                                tool_results.append({
+                                    "type": "tool_result",
+                                    "tool_use_id": tool_id,
+                                    "content": json.dumps({"error": str(e), "success": False}),
+                                    "is_error": True
+                                })
+                        
+                        # 只有客户端工具需要添加 tool_result 到 user message
+                        if tool_results:
+                            messages.append(Message(role="user", content=tool_results))
+                    # 如果只有服务端工具，不需要添加 user message，直接进入下一轮
+                    
+                    # 继续下一轮
+                    continue
+                
+                # 没有工具调用，提取最终响应
+                final_response = llm_response.content if hasattr(llm_response, 'content') else str(llm_response)
+                
+                # 如果是文本响应，跳出循环
+                if stop_reason in ('end_turn', 'stop', 'max_tokens'):
+                    logger.info(f"   ✅ Subagent 完成（{turns_used} 轮），stop_reason={stop_reason}")
+                    break
+            else:
+                # 达到最大轮次
+                logger.warning(f"   ⚠️ Subagent 达到最大工具调用轮次 ({max_tool_turns})")
+                if not final_response:
+                    final_response = llm_response.content if hasattr(llm_response, 'content') else "达到最大执行轮次"
+            
+            # 使用最终响应
+            response = final_response
+            
+            # 6. 生成摘要（压缩输出）
             summary = await self._compress_subagent_output(response)
             
             compression_ratio = len(summary) / len(response) if len(response) > 0 else 1.0
@@ -1080,7 +1572,7 @@ class MultiAgentOrchestrator:
                 success=True,
                 summary=summary,
                 full_output=response,
-                turns_used=1,
+                turns_used=turns_used,  # 🆕 记录实际轮次
                 duration_ms=duration_ms,
                 context_length=context_length,
                 summary_compression_ratio=compression_ratio,
@@ -1093,6 +1585,8 @@ class MultiAgentOrchestrator:
                     "user_message_length": len(user_message),
                     "full_output_length": len(response),
                     "summary_length": len(summary),
+                    "tool_calls_count": len(all_tool_results),  # 🆕 工具调用统计
+                    "tool_results": all_tool_results[:5] if all_tool_results else [],  # 🆕 保留前5个工具结果摘要
                 }
             )
             
@@ -1212,3 +1706,263 @@ class MultiAgentOrchestrator:
     def get_state(self) -> Optional[OrchestratorState]:
         """获取当前状态"""
         return self._state
+    
+    # ===================
+    # V7.2: Critic 集成
+    # ===================
+    
+    def _subtask_to_plan_step(self, subtask: SubTask, step_id: str) -> PlanStep:
+        """
+        将 SubTask 转换为 PlanStep（用于 Critic 评估）
+        
+        Args:
+            subtask: 子任务定义
+            step_id: 步骤 ID
+            
+        Returns:
+            PlanStep: Plan 步骤
+        """
+        return PlanStep(
+            id=step_id,
+            description=subtask.description,
+            status=StepStatus.IN_PROGRESS,
+            metadata={
+                "subtask_id": subtask.subtask_id,
+                "title": subtask.title,
+                "expected_output": subtask.expected_output,
+                "success_criteria": subtask.success_criteria,
+                "tools_required": subtask.tools_required,
+                "constraints": subtask.constraints,
+            }
+        )
+    
+    async def _execute_step_with_critique(
+        self,
+        agent_config: AgentConfig,
+        subtask: Optional[SubTask],
+        messages: List[Dict[str, str]],
+        previous_output: Optional[str],
+        session_id: str,
+    ) -> AgentResult:
+        """
+        执行步骤（带 Critic 评估）
+        
+        V7.2 新增：在执行后自动调用 Critic 评估，根据结果决定下一步
+        
+        Args:
+            agent_config: Agent 配置
+            subtask: 子任务定义
+            messages: 消息历史
+            previous_output: 前一个 Agent 的输出
+            session_id: 会话 ID
+            
+        Returns:
+            AgentResult: 执行结果
+        """
+        # 如果未启用 Critic，直接执行
+        if not self.critic or not self.critic_config:
+            return await self._execute_single_agent(
+                agent_config, messages, previous_output, session_id, subtask
+            )
+        
+        # 创建 PlanStep（用于 Critic）
+        step_id = subtask.subtask_id if subtask else f"step_{agent_config.agent_id}"
+        plan_step = self._subtask_to_plan_step(subtask, step_id) if subtask else PlanStep(
+            id=step_id,
+            description=f"执行 {agent_config.role.value} 任务",
+            status=StepStatus.IN_PROGRESS,
+        )
+        
+        max_retries = self.critic_config.max_retries
+        retry_count = 0
+        
+        while retry_count <= max_retries:
+            # 1. Execute
+            result = await self._execute_single_agent(
+                agent_config, messages, previous_output, session_id, subtask
+            )
+            
+            # 如果执行失败，直接返回
+            if not result.success:
+                plan_step.fail(result.error or "执行失败")
+                return result
+            
+            # 2. Critique
+            success_criteria = (
+                subtask.success_criteria 
+                if subtask and subtask.success_criteria 
+                else plan_step.metadata.get("success_criteria", [])
+            )
+            
+            critic_result = await self.critic.critique(
+                executor_output=result.output,
+                plan_step=plan_step,
+                success_criteria=success_criteria,
+                retry_count=retry_count,
+                max_retries=max_retries,
+            )
+            
+            # 3. 记录 Critic 反馈到 PlanStep.metadata
+            plan_step.metadata["critic"] = {
+                "action": critic_result.recommended_action.value,
+                "confidence": critic_result.confidence.value,
+                "reasoning": critic_result.reasoning,
+                "observations": critic_result.observations,
+                "gaps": critic_result.gaps,
+                "suggestions": critic_result.suggestions,
+                "retry_count": retry_count,
+            }
+            
+            # 4. 根据 confidence 和 action 决定是否自动执行
+            can_auto_execute = self.critic.should_auto_execute(critic_result)
+            
+            # 5. 根据 recommended_action 处理
+            if critic_result.recommended_action == CriticAction.PASS:
+                plan_step.complete(result.output)
+                logger.info(
+                    f"✅ Critic PASS: step_id={step_id}, "
+                    f"confidence={critic_result.confidence.value}"
+                )
+                return result
+            
+            elif critic_result.recommended_action == CriticAction.ASK_HUMAN:
+                # 请求人工介入
+                logger.info(
+                    f"👤 Critic ASK_HUMAN: step_id={step_id}, "
+                    f"reasoning={critic_result.reasoning[:100]}..."
+                )
+                # 返回结果，但标记需要人工审核
+                result.metadata["needs_human_review"] = True
+                result.metadata["critic_result"] = critic_result.model_dump()
+                return result
+            
+            elif critic_result.recommended_action == CriticAction.RETRY:
+                # 检查是否可以自动重试
+                if not can_auto_execute and self.critic_config.require_human_on_low_confidence:
+                    logger.info(
+                        f"👤 Critic 建议重试但信心不足，需要人工确认: step_id={step_id}"
+                    )
+                    result.metadata["needs_human_review"] = True
+                    result.metadata["critic_result"] = critic_result.model_dump()
+                    return result
+                
+                retry_count += 1
+                plan_step.metadata["retry_count"] = retry_count
+                plan_step.metadata["suggestions"] = critic_result.suggestions
+                
+                logger.info(
+                    f"🔄 Critic RETRY: step_id={step_id}, "
+                    f"confidence={critic_result.confidence.value}, "
+                    f"retry_count={retry_count}/{max_retries}, "
+                    f"suggestions={critic_result.suggestions}"
+                )
+                
+                # 将改进建议注入到下一次执行的上下文中
+                if subtask:
+                    subtask.context = (
+                        f"{subtask.context}\n\n"
+                        f"【改进建议（重试 {retry_count}/{max_retries}）】\n"
+                        + "\n".join(f"- {s}" for s in critic_result.suggestions)
+                    )
+                else:
+                    # 如果没有 subtask，将建议添加到消息中
+                    messages.append({
+                        "role": "system",
+                        "content": f"改进建议：\n" + "\n".join(f"- {s}" for s in critic_result.suggestions)
+                    })
+                
+                continue  # 重试
+            
+            elif critic_result.recommended_action == CriticAction.REPLAN:
+                logger.warning(
+                    f"⚠️ Critic REPLAN: step_id={step_id}, "
+                    f"reason={critic_result.plan_adjustment.reason if critic_result.plan_adjustment else critic_result.reasoning}"
+                )
+                
+                # 触发计划调整
+                if critic_result.plan_adjustment:
+                    await self._trigger_replan(plan_step, critic_result.plan_adjustment)
+                
+                plan_step.fail("需要调整计划")
+                return AgentResult(
+                    result_id=f"result_{uuid4().hex[:8]}",
+                    agent_id=agent_config.agent_id,
+                    success=False,
+                    output=result.output,
+                    error="Critic 建议调整计划",
+                    metadata={"needs_replan": True, "critic_result": critic_result.model_dump()}
+                )
+        
+        # 超过最大重试次数
+        plan_step.fail(f"超过最大重试次数 ({max_retries})")
+        return AgentResult(
+            result_id=f"result_{uuid4().hex[:8]}",
+            agent_id=agent_config.agent_id,
+            success=False,
+            output=result.output if 'result' in locals() else "",
+            error=f"超过最大重试次数 ({max_retries})",
+        )
+    
+    async def _trigger_replan(
+        self,
+        plan_step: PlanStep,
+        adjustment: PlanAdjustmentHint,
+    ) -> None:
+        """
+        触发计划调整（复用现有组件）
+        
+        V7.2 新增：根据 Critic 的建议调整 Plan
+        
+        Args:
+            plan_step: 当前步骤
+            adjustment: 调整建议
+        """
+        
+        logger.info(f"🔄 触发计划调整: step_id={plan_step.id}, action={adjustment.action}")
+        
+        # 延迟初始化 plan_todo_tool（避免循环依赖）
+        if self.plan_todo_tool is None:
+            try:
+                from tools.plan_todo_tool import PlanTodoTool
+                self.plan_todo_tool = PlanTodoTool()
+            except ImportError:
+                logger.warning("⚠️ plan_todo_tool 未找到，跳过 replan")
+                return
+        
+        # 如果 Plan 不存在，创建一个
+        if self.plan is None:
+            self.plan = Plan(
+                goal="多智能体任务执行",
+                execution_mode="dag",
+            )
+        
+        # 根据 action 处理
+        if adjustment.action == "skip":
+            plan_step.status = StepStatus.SKIPPED
+            logger.info(f"⏭️ 跳过步骤: {plan_step.id}")
+        
+        elif adjustment.action == "insert_before":
+            if adjustment.new_step:
+                new_step = self.plan.add_step(
+                    description=adjustment.new_step,
+                    dependencies=plan_step.dependencies,
+                )
+                plan_step.dependencies = [new_step.id]
+                logger.info(f"➕ 插入新步骤: {new_step.id} -> {plan_step.id}")
+        
+        elif adjustment.action == "modify":
+            # 复用 plan_todo_tool.replan()
+            if adjustment.context_for_replan:
+                try:
+                    await self.plan_todo_tool.replan(
+                        plan=self.plan,
+                        context=adjustment.context_for_replan,
+                        failed_step_id=plan_step.id,
+                    )
+                    logger.info(f"🔧 修改计划: step_id={plan_step.id}")
+                except Exception as e:
+                    logger.error(f"❌ replan 失败: {e}", exc_info=True)
+        
+        # 保存 Plan（如果有 PlanStorage）
+        # 注意：这里暂时不保存，因为 Orchestrator 可能没有 PlanStorage
+        # 如果需要持久化，可以在外部调用时处理

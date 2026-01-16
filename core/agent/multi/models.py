@@ -96,6 +96,9 @@ class MultiAgentConfig(BaseModel):
     orchestrator_config: Optional[OrchestratorConfig] = Field(None, description="Orchestrator 配置")
     worker_config: Optional[WorkerConfig] = Field(None, description="Worker 配置")
     
+    # V7.2: Critic 配置（使用字符串引用，因为 CriticConfig 在后面定义）
+    critic_config: Optional["CriticConfig"] = Field(None, description="Critic Agent 配置")
+    
     # 全局参数
     max_total_turns: int = Field(30, description="所有 Agent 总共最大轮次")
     timeout_seconds: int = Field(300, description="总超时时间")
@@ -226,3 +229,205 @@ class OrchestratorState(BaseModel):
     # 时间戳
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+
+
+class CriticAction(str, Enum):
+    """
+    Critic 推荐行动
+    
+    V7.2 新增：Critic Agent 的推荐行动类型
+    注意：这是推荐，不是强制决策。最终由人或上层系统决定。
+    """
+    PASS = "pass"           # 继续下一步（结果满足需求）
+    RETRY = "retry"         # 带建议重试（有明确改进方向）
+    REPLAN = "replan"       # 调整计划（任务定义有问题）
+    ASK_HUMAN = "ask_human" # 请求人工介入（无法判断或需要澄清）
+
+
+class CriticConfidence(str, Enum):
+    """
+    Critic 对推荐的信心程度
+    
+    V7.2 新增：用于决定是否需要人工确认
+    """
+    HIGH = "high"           # 有充足依据，系统可自动执行
+    MEDIUM = "medium"       # 有一定依据，建议人工确认
+    LOW = "low"             # 缺乏判断依据，必须人工介入
+
+
+# 向后兼容的别名
+CriticVerdict = CriticAction
+
+
+class PlanAdjustmentHint(BaseModel):
+    """
+    Plan 调整建议
+    
+    V7.2 新增：Critic 提供的计划调整建议
+    """
+    action: str = Field(..., description="调整动作：insert_before, modify, skip")
+    reason: str = Field(..., description="调整原因")
+    new_step: Optional[str] = Field(None, description="新步骤描述（如需要）")
+    context_for_replan: Optional[str] = Field(None, description="传递给 plan_todo 的上下文")
+
+
+class CriticResult(BaseModel):
+    """
+    Critic 评估结果（人机协同版本）
+    
+    V7.2 新增：Critic Agent 的评估输出
+    
+    设计原则：
+    - Critic 是顾问，不是裁判
+    - 提供观察和建议，不做硬编码评分
+    - 最终决策由人或上层系统做出
+    """
+    # 观察与分析
+    observations: List[str] = Field(default_factory=list, description="对结果的客观观察")
+    gaps: List[str] = Field(default_factory=list, description="与预期的差距")
+    root_cause: Optional[str] = Field(None, description="问题根因分析")
+    
+    # 建议
+    suggestions: List[str] = Field(default_factory=list, description="具体的改进建议")
+    
+    # 推荐行动（注意：是推荐，不是决策）
+    recommended_action: CriticAction = Field(..., description="推荐的下一步行动")
+    reasoning: str = Field(..., description="推荐理由")
+    confidence: CriticConfidence = Field(CriticConfidence.MEDIUM, description="对推荐的信心程度")
+    
+    # 计划调整（当 recommended_action=replan 时）
+    plan_adjustment: Optional[PlanAdjustmentHint] = Field(None, description="计划调整建议")
+    
+    # 向后兼容
+    @property
+    def verdict(self) -> CriticAction:
+        """向后兼容的 verdict 属性"""
+        return self.recommended_action
+    
+    @property
+    def improvement_hints(self) -> List[str]:
+        """向后兼容的 improvement_hints 属性"""
+        return self.suggestions
+
+
+class CriticConfig(BaseModel):
+    """
+    Critic 配置
+    
+    V7.2 新增：Critic Agent 的配置选项
+    """
+    enabled: bool = Field(True, description="是否启用 Critic")
+    model: str = Field("claude-sonnet-4-5-20250929", description="Critic 使用的模型")
+    enable_thinking: bool = Field(True, description="是否启用扩展思考")
+    max_retries: int = Field(2, description="最大重试次数")
+    
+    # 人机协同配置
+    auto_pass_on_high_confidence: bool = Field(True, description="高信心时自动通过")
+    require_human_on_low_confidence: bool = Field(True, description="低信心时必须人工介入")
+    default_action_on_timeout: CriticAction = Field(CriticAction.ASK_HUMAN, description="超时时的默认行动")
+
+
+# 解析前向引用（Pydantic V2 需要）
+MultiAgentConfig.model_rebuild()
+
+
+def load_multi_agent_config(config_path: str = "config/multi_agent_config.yaml") -> MultiAgentConfig:
+    """
+    ✅ V7.2: 加载多智能体配置
+    
+    从 YAML 文件加载配置，如果文件不存在则使用默认配置
+    
+    Args:
+        config_path: 配置文件路径
+        
+    Returns:
+        MultiAgentConfig: 多智能体配置对象
+    """
+    import yaml
+    from pathlib import Path
+    from logger import get_logger
+    
+    logger = get_logger("multi_agent.config")
+    
+    config_file = Path(config_path)
+    
+    if config_file.exists():
+        try:
+            with open(config_file, 'r', encoding='utf-8') as f:
+                config_data = yaml.safe_load(f)
+            
+            logger.info(f"✅ 已加载多智能体配置: {config_path}")
+            
+            # 解析配置
+            orchestrator_config = OrchestratorConfig(**config_data.get("orchestrator", {}))
+            worker_config = WorkerConfig(**config_data.get("workers", {}))
+            critic_config = CriticConfig(**config_data.get("critic", {})) if "critic" in config_data else None
+            
+            # 构建 Agent 配置列表（从 YAML 中的 agents 节点）
+            agents_data = config_data.get("agents", [])
+            agent_configs = [AgentConfig(**agent) for agent in agents_data]
+            
+            # 如果没有配置 agents，使用默认的 3 个研究者
+            if not agent_configs:
+                agent_configs = [
+                    AgentConfig(
+                        agent_id="researcher_1",
+                        role=AgentRole.RESEARCHER,
+                        model=worker_config.model,
+                        tools=["web_search", "exa_search", "wikipedia"],
+                    ),
+                    AgentConfig(
+                        agent_id="researcher_2",
+                        role=AgentRole.RESEARCHER,
+                        model=worker_config.model,
+                        tools=["web_search", "exa_search", "wikipedia"],
+                    ),
+                    AgentConfig(
+                        agent_id="researcher_3",
+                        role=AgentRole.RESEARCHER,
+                        model=worker_config.model,
+                        tools=["web_search", "exa_search", "wikipedia"],
+                    ),
+                ]
+            
+            return MultiAgentConfig(
+                config_id=f"config_{config_file.stem}",
+                mode=ExecutionMode(config_data.get("mode", "parallel")),
+                agents=agent_configs,
+                orchestrator_config=orchestrator_config,
+                worker_config=worker_config,
+                critic_config=critic_config,
+            )
+            
+        except Exception as e:
+            logger.warning(f"⚠️ 加载配置失败: {e}，使用默认配置")
+    
+    # 默认配置
+    logger.info("使用默认多智能体配置")
+    return MultiAgentConfig(
+        config_id="config_default",
+        mode=ExecutionMode.PARALLEL,
+        agents=[
+            AgentConfig(
+                agent_id="researcher_1",
+                role=AgentRole.RESEARCHER,
+                model="claude-sonnet-4-5-20250929",
+                tools=["web_search", "exa_search", "wikipedia"],
+            ),
+            AgentConfig(
+                agent_id="researcher_2",
+                role=AgentRole.RESEARCHER,
+                model="claude-sonnet-4-5-20250929",
+                tools=["web_search", "exa_search", "wikipedia"],
+            ),
+            AgentConfig(
+                agent_id="researcher_3",
+                role=AgentRole.RESEARCHER,
+                model="claude-sonnet-4-5-20250929",
+                tools=["web_search", "exa_search", "wikipedia"],
+            ),
+        ],
+        orchestrator_config=OrchestratorConfig(),
+        worker_config=WorkerConfig(),
+        critic_config=CriticConfig(enabled=True),
+    )

@@ -32,8 +32,11 @@ from core.routing import AgentRouter, RoutingDecision
 # 🆕 V7: Token 审计（消耗记录、统计分析、异常检测）
 from core.monitoring import get_token_auditor, TokenAuditor
 from evaluation.models import TokenUsage
-# 【待扩展】Multi-Agent 模块（已注释）
-# from core.multi_agent import MultiAgentOrchestrator, MultiAgentConfig
+# 🆕 V7.4: Usage 响应模型（计费信息）
+from models.usage import UsageResponse
+# ✅ V7.2: 多智能体模块
+from core.agent.multi.orchestrator import MultiAgentOrchestrator
+from core.agent.multi.models import MultiAgentConfig
 from services.session_service import SessionService, get_session_service, SessionNotFoundError
 from services.conversation_service import get_conversation_service, ConversationNotFoundError
 from services.agent_registry import get_agent_registry, AgentNotFoundError
@@ -78,15 +81,15 @@ class ChatService:
         session_service: Optional[SessionService] = None,
         default_model: str = "claude-sonnet-4-5-20250929",
         qos_level: QoSLevel = QoSLevel.PRO,  # 🆕 P0: QoS 等级，默认 Pro
-        enable_routing: bool = False,  # 🆕 V7: 是否启用路由层（默认关闭，向后兼容）
-        # 【待扩展】Multi-Agent 配置（已注释）
-        # multi_agent_config: Optional[MultiAgentConfig] = None
+        enable_routing: bool = True,  # ✅ V7.2: 启用路由层（单/多智能体路由决策）
+        multi_agent_config: Optional["MultiAgentConfig"] = None  # ✅ V7.2: 多智能体配置
     ):
         self.session_service = session_service or get_session_service()
         self.default_model = default_model
         
-        # 【待扩展】Multi-Agent 配置（已注释）
-        # self.multi_agent_config = multi_agent_config or MultiAgentConfig()
+        # ✅ V7.2: 多智能体配置
+        from core.agent.multi.models import MultiAgentConfig
+        self.multi_agent_config = multi_agent_config  # 如果为 None，在需要时加载默认配置
         
         # 其他服务
         self.conversation_service = get_conversation_service()  # 用于 Context 加载消息
@@ -510,51 +513,64 @@ class ChatService:
             
             # 根据路由决策选择执行路径
             if use_multi_agent:
-                # 【P1 待实现】多智能体执行
-                # from core.agent.multi import MultiAgentOrchestrator
-                # orchestrator = MultiAgentOrchestrator(...)
-                # async for event in orchestrator.execute(
-                #     intent=routing_intent,
-                #     messages=history_messages,
-                #     session_id=session_id,
-                #     message_id=assistant_message_id
-                # ):
-                #     ...
-                logger.warning(
-                    f"⚠️ 多智能体模式尚未实现，降级为单智能体执行 "
-                    f"(session_id={session_id})"
+                # ✅ V7.2: 多智能体执行
+                logger.info(f"🚀 启用多智能体模式: session_id={session_id}")
+                
+                # 加载多智能体配置
+                if self.multi_agent_config is None:
+                    from core.agent.multi.models import load_multi_agent_config
+                    self.multi_agent_config = load_multi_agent_config()
+                
+                # 创建 MultiAgentOrchestrator
+                orchestrator = MultiAgentOrchestrator(
+                    config=self.multi_agent_config,
+                    enable_checkpoints=True,
+                    enable_lead_agent=True,
                 )
-                # 降级为 SimpleAgent
-                use_multi_agent = False
-            
-            # 🎯 调用 Agent.chat()
-            # - 意图分析：由路由层提供（enable_routing=True）或内部完成（默认）
-            # - 内容累积：broadcaster 自动处理 content_start/delta/stop
-            # - Checkpoint：broadcaster 在每个 content_stop 后自动保存
-            # - 最终保存：broadcaster 在 message_stop 时自动完成
-            # - variables：直接注入到 System Prompt（前端上下文）
-            async for event in agent.chat(
-                messages=history_messages,
-                session_id=session_id,
-                message_id=assistant_message_id,
-                enable_stream=True,
-                variables=variables,
-                intent=routing_intent  # 🆕 V7: 路由层意图结果（None 则内部分析）
-            ):
-                # 检查停止标志（异步）
-                if await redis.is_stopped(session_id):
-                    logger.warning(f"🛑 检测到停止标志: session_id={session_id}")
-                    # 强制保存当前内容
-                    await agent.broadcaster._finalize_message(session_id)
-                    await self.session_service.end_session(session_id, status="stopped")
-                    break
                 
-                # 🎯 只处理需要额外逻辑的事件
-                event_type = event.get("type", "")
+                # 设置工作目录（与 SimpleAgent 一致）
+                orchestrator.workspace_dir = workspace_dir
                 
-                if event_type == "conversation_delta":
-                    # conversation 更新同步到数据库
-                    await self._handle_conversation_delta(event, conversation_id)
+                # 执行多智能体协作
+                async for event in orchestrator.execute(
+                    intent=routing_intent,
+                    messages=[{"role": "user", "content": extract_text_from_message(message)}],
+                    session_id=session_id,
+                    message_id=assistant_message_id,
+                ):
+                    # 转发事件到 EventBroadcaster
+                    # 多智能体事件类型：orchestrator_start, task_decomposition, 
+                    # agent_start, agent_end, orchestrator_summary, orchestrator_end
+                    await agent.broadcaster.emit_raw_event(session_id, event)
+            else:
+                # 🎯 单智能体执行
+                # - 意图分析：由路由层提供（enable_routing=True）或内部完成（默认）
+                # - 内容累积：broadcaster 自动处理 content_start/delta/stop
+                # - Checkpoint：broadcaster 在每个 content_stop 后自动保存
+                # - 最终保存：broadcaster 在 message_stop 时自动完成
+                # - variables：直接注入到 System Prompt（前端上下文）
+                async for event in agent.chat(
+                    messages=history_messages,
+                    session_id=session_id,
+                    message_id=assistant_message_id,
+                    enable_stream=True,
+                    variables=variables,
+                    intent=routing_intent  # 🆕 V7: 路由层意图结果（None 则内部分析）
+                ):
+                    # 检查停止标志（异步）
+                    if await redis.is_stopped(session_id):
+                        logger.warning(f"🛑 检测到停止标志: session_id={session_id}")
+                        # 强制保存当前内容
+                        await agent.broadcaster._finalize_message(session_id)
+                        await self.session_service.end_session(session_id, status="stopped")
+                        break
+                    
+                    # 🎯 只处理需要额外逻辑的事件
+                    event_type = event.get("type", "")
+                    
+                    if event_type == "conversation_delta":
+                        # conversation 更新同步到数据库
+                        await self._handle_conversation_delta(event, conversation_id)
             
             # =====================================================================
             # 【待扩展】Multi-Agent 路由逻辑（已注释）
@@ -633,13 +649,23 @@ class ChatService:
                         context=task_context
                     )
             
-            # 🆕 V7: Token 审计记录
+            # 🆕 V7.4: 生成 UsageResponse（计费信息）
+            usage_response = None
             try:
                 usage_stats = agent.usage_tracker.get_stats()
+                
+                # 🆕 使用 UsageResponse 统一模型
+                usage_response = UsageResponse.from_usage_tracker(
+                    tracker=agent.usage_tracker,
+                    model=self.default_model,
+                    latency=duration_ms / 1000.0  # 毫秒转秒
+                )
+                
+                # Token 审计记录（兼容旧逻辑）
                 token_usage = TokenUsage(
                     input_tokens=usage_stats.get("total_input_tokens", 0),
                     output_tokens=usage_stats.get("total_output_tokens", 0),
-                    thinking_tokens=0,  # TODO: 从 Extended Thinking 中获取
+                    thinking_tokens=usage_stats.get("total_thinking_tokens", 0),  # 🆕 使用实际值
                     cache_read_tokens=usage_stats.get("total_cache_read_tokens", 0),
                     cache_write_tokens=usage_stats.get("total_cache_creation_tokens", 0)
                 )
@@ -658,8 +684,21 @@ class ChatService:
                 logger.info(
                     f"📊 Token 审计: input={token_usage.input_tokens:,}, "
                     f"output={token_usage.output_tokens:,}, "
-                    f"cache_read={token_usage.cache_read_tokens:,}"
+                    f"thinking={token_usage.thinking_tokens:,}, "
+                    f"cache_read={token_usage.cache_read_tokens:,}, "
+                    f"total_price=${usage_response.total_price}"
                 )
+                
+                # 🆕 V7.4: 发送 usage SSE 事件（使用 emit_custom）
+                try:
+                    await events.emit_custom(
+                        session_id=session_id,
+                        event_type="usage",
+                        event_data=usage_response.model_dump()
+                    )
+                except Exception as emit_err:
+                    logger.debug(f"Usage 事件发送失败: {emit_err}")
+                
             except Exception as audit_err:
                 logger.warning(f"⚠️ Token 审计失败: {audit_err}")
             

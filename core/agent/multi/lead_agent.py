@@ -135,6 +135,9 @@ class LeadAgent:
         )
         
         logger.info(f"✅ LeadAgent 初始化: model={model}, max_tokens={max_tokens}, thinking_budget={thinking_budget}")
+        
+        # 🆕 V7.4: 保存最后一次 LLM 响应供 Orchestrator 累积 usage
+        self.last_llm_response = None
     
     # ===================
     # 任务分解
@@ -183,6 +186,8 @@ class LeadAgent:
             system=system_prompt,
             temperature=0.3,  # 降低随机性，保持一致性
         )
+        # 🆕 V7.4: 保存 LLM 响应供 Orchestrator 累积 usage
+        self.last_llm_response = llm_response
         
         # 提取响应文本
         response = llm_response.content if hasattr(llm_response, 'content') else str(llm_response)
@@ -546,6 +551,8 @@ class LeadAgent:
             system=system_prompt,
             temperature=0.5,
         )
+        # 🆕 V7.4: 保存 LLM 响应供 Orchestrator 累积 usage
+        self.last_llm_response = llm_response
         
         # 提取响应文本
         response = llm_response.content if hasattr(llm_response, 'content') else str(llm_response)
@@ -674,6 +681,8 @@ class LeadAgent:
             system=system_prompt,
             temperature=0.2,
         )
+        # 🆕 V7.4: 保存 LLM 响应供 Orchestrator 累积 usage
+        self.last_llm_response = llm_response
         
         # 提取响应文本
         response = llm_response.content if hasattr(llm_response, 'content') else str(llm_response)

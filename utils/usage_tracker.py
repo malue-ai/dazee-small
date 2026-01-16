@@ -47,6 +47,7 @@ class UsageTracker:
         return {
             "total_input_tokens": 0,
             "total_output_tokens": 0,
+            "total_thinking_tokens": 0,  # 🆕 Extended Thinking tokens
             "total_cache_read_tokens": 0,
             "total_cache_creation_tokens": 0,
             "llm_calls": 0
@@ -71,6 +72,7 @@ class UsageTracker:
         # 累积各项统计
         self._stats["total_input_tokens"] += usage.get("input_tokens", 0)
         self._stats["total_output_tokens"] += usage.get("output_tokens", 0)
+        self._stats["total_thinking_tokens"] += usage.get("thinking_tokens", 0)  # 🆕
         self._stats["total_cache_read_tokens"] += usage.get("cache_read_tokens", 0)
         self._stats["total_cache_creation_tokens"] += usage.get("cache_creation_tokens", 0)
         self._stats["llm_calls"] += 1
@@ -79,9 +81,11 @@ class UsageTracker:
             f"📊 Usage 累积: "
             f"input={usage.get('input_tokens', 0)}, "
             f"output={usage.get('output_tokens', 0)}, "
+            f"thinking={usage.get('thinking_tokens', 0)}, "
             f"cache_read={usage.get('cache_read_tokens', 0)}, "
             f"总计: input={self._stats['total_input_tokens']}, "
             f"output={self._stats['total_output_tokens']}, "
+            f"thinking={self._stats['total_thinking_tokens']}, "
             f"calls={self._stats['llm_calls']}"
         )
     
@@ -97,6 +101,7 @@ class UsageTracker:
         
         self._stats["total_input_tokens"] += usage_dict.get("input_tokens", 0)
         self._stats["total_output_tokens"] += usage_dict.get("output_tokens", 0)
+        self._stats["total_thinking_tokens"] += usage_dict.get("thinking_tokens", 0)  # 🆕
         self._stats["total_cache_read_tokens"] += usage_dict.get("cache_read_tokens", 0)
         self._stats["total_cache_creation_tokens"] += usage_dict.get("cache_creation_tokens", 0)
         self._stats["llm_calls"] += 1
@@ -112,14 +117,15 @@ class UsageTracker:
     
     def get_total_tokens(self) -> int:
         """
-        获取总 token 数（input + output）
+        获取总 token 数（input + output + thinking）
         
         Returns:
             总 token 数
         """
         return (
             self._stats["total_input_tokens"] + 
-            self._stats["total_output_tokens"]
+            self._stats["total_output_tokens"] +
+            self._stats["total_thinking_tokens"]
         )
     
     def get_cost_estimate(
@@ -179,6 +185,10 @@ class UsageTracker:
                 stats["total_output_tokens"] / stats["llm_calls"] 
                 if stats["llm_calls"] > 0 else 0
             ),
+            "average_thinking_per_call": (
+                stats["total_thinking_tokens"] / stats["llm_calls"] 
+                if stats["llm_calls"] > 0 else 0
+            ),
             "cache_hit_rate": (
                 stats["total_cache_read_tokens"] / 
                 (stats["total_input_tokens"] + stats["total_cache_read_tokens"])
@@ -194,7 +204,30 @@ class UsageTracker:
             f"calls={self._stats['llm_calls']}, "
             f"input={self._stats['total_input_tokens']}, "
             f"output={self._stats['total_output_tokens']}, "
+            f"thinking={self._stats['total_thinking_tokens']}, "
             f"total={self.get_total_tokens()})"
+        )
+    
+    def to_usage_response(
+        self,
+        model: str = "claude-sonnet-4.5",
+        latency: Optional[float] = None
+    ):
+        """
+        转换为 UsageResponse（用于 API 响应）
+        
+        Args:
+            model: 模型名称
+            latency: 响应延迟（秒）
+            
+        Returns:
+            UsageResponse 实例
+        """
+        from models.usage import UsageResponse
+        return UsageResponse.from_usage_tracker(
+            tracker=self,
+            model=model,
+            latency=latency
         )
 
 
