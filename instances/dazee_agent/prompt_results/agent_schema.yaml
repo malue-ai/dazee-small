@@ -107,8 +107,8 @@ context_limits:
   max_context_tokens: 200000
   warning_threshold: 0.8
   truncate_threshold: 0.9
-reasoning: '这是一个高度复杂的多功能助理Agent，具有以下特点：
-
+reasoning: |
+  这是一个高度复杂的多功能助理Agent，具有以下特点：
 
   1. **三意图识别体系**：
      - 意图1（系统搭建）：严格触发条件，需≥3个业务实体+业务流程+明确关键词

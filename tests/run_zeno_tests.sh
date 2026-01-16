@@ -40,16 +40,19 @@ else
 fi
 echo ""
 
-# 设置 PYTHONPATH
-export PYTHONPATH="/Users/kens0n/projects/zenflux_agent:$PYTHONPATH"
+# 设置 PYTHONPATH（使用脚本所在目录的父目录）
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+export PYTHONPATH="$PROJECT_ROOT:$PYTHONPATH"
 
 # 运行测试
 echo -e "${BLUE}运行单元测试...${NC}"
 echo ""
 
-python << 'EOF'
+python << 'EOF2'
 import sys
-sys.path.insert(0, '/Users/kens0n/projects/zenflux_agent')
+import os
+sys.path.insert(0, os.environ.get('PROJECT_ROOT', '$PROJECT_ROOT'))
 
 # 只导入必要的模块
 import json
@@ -175,7 +178,7 @@ print("✅ 所有测试通过！")
 print("="*60)
 print()
 
-EOF
+EOF2
 
 echo ""
 echo -e "${GREEN}🎉 测试完成！${NC}"

@@ -39,7 +39,7 @@ subscriptions:
 测试适配器的事件转换功能：
 
 ```bash
-cd /Users/kens0n/projects/zenflux_agent
+cd /path/to/zenflux_agent
 python tests/test_zeno_adapter.py
 ```
 

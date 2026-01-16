@@ -97,7 +97,7 @@ def apply_resilience_config(config: Optional[dict] = None):
     
     # 4. 注册降级策略
     if "fallback" in config:
-        from core.resilience.fallback import (
+        from infra.resilience.fallback import (
             register_fallback,
             FallbackType,
             default_llm_fallback,

@@ -310,16 +310,10 @@ class MCPClientWrapper:
         Returns:
             执行结果
         """
-        # #region agent log
-        import json as _json; open('/Users/kens0n/projects/zenflux_agent/.cursor/debug.log', 'a').write(_json.dumps({"location": "mcp_client.py:call_tool:entry", "message": "进入 call_tool", "data": {"tool_name": tool_name, "server_name": self.server_name, "_connected": self._connected, "has_session": self._session is not None}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "A,B,C,E"}) + '\n')
-        # #endregion
         
         # 检查连接状态（不在这里重连，避免 anyio 任务作用域错误）
         if not self._connected or not self._session:
             logger.warning(f"⚠️ MCP 连接已断开，请重新初始化客户端")
-            # #region agent log
-            import json as _json; open('/Users/kens0n/projects/zenflux_agent/.cursor/debug.log', 'a').write(_json.dumps({"location": "mcp_client.py:call_tool:disconnected", "message": "连接检查失败", "data": {"tool_name": tool_name, "_connected": self._connected, "has_session": self._session is not None}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "A,B,E"}) + '\n')
-            # #endregion
             return {
                 "success": False,
                 "error": "MCP 连接已断开，请重试（系统会自动重连）"
@@ -364,9 +358,6 @@ class MCPClientWrapper:
             
             logger.info(f"✅ MCP 工具执行完成: {original_name}")
             
-            # #region agent log
-            import json as _json; open('/Users/kens0n/projects/zenflux_agent/.cursor/debug.log', 'a').write(_json.dumps({"location": "mcp_client.py:call_tool:success", "message": "工具调用成功", "data": {"tool_name": original_name, "output_len": len(output)}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "G"}) + '\n')
-            # #endregion
             
             return {
                 "success": True,
@@ -380,9 +371,6 @@ class MCPClientWrapper:
             error_msg = str(e) if str(e) else f"MCP 会话已断开 ({error_type})"
             
             logger.error(f"❌ MCP 连接错误: {error_type}: {error_msg}")
-            # #region agent log
-            import json as _json; open('/Users/kens0n/projects/zenflux_agent/.cursor/debug.log', 'a').write(_json.dumps({"location": "mcp_client.py:call_tool:runtime_error", "message": "RuntimeError/GeneratorExit", "data": {"error_type": error_type, "error_msg": error_msg, "tool_name": tool_name}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "C"}) + '\n')
-            # #endregion
             self._connected = False
             self._session = None
             
@@ -399,9 +387,6 @@ class MCPClientWrapper:
             # 记录完整的异常信息，包括类型和堆栈
             logger.error(f"❌ MCP 工具执行失败: {error_type}: {error_msg}", exc_info=True)
             
-            # #region agent log
-            import json as _json, traceback as _tb; open('/Users/kens0n/projects/zenflux_agent/.cursor/debug.log', 'a').write(_json.dumps({"location": "mcp_client.py:call_tool:exception", "message": "捕获异常", "data": {"error_type": error_type, "error_msg": error_msg, "tool_name": tool_name, "traceback": _tb.format_exc()[:800]}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "A,B,C,E"}) + '\n')
-            # #endregion
             
             # 检查是否是连接相关的错误，如果是则标记断开
             if "closed" in error_msg.lower() or "cancelled" in error_msg.lower() or error_type == "ClosedResourceError":
@@ -609,17 +594,11 @@ async def get_mcp_client(
     """
     global _mcp_client_cache
     
-    # #region agent log
-    import json as _json; open('/Users/kens0n/projects/zenflux_agent/.cursor/debug.log', 'a').write(_json.dumps({"location": "mcp_client.py:get_mcp_client:entry", "message": "进入 get_mcp_client", "data": {"server_name": server_name, "force_reconnect": force_reconnect, "cache_keys": list(_mcp_client_cache.keys())}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "A,E"}) + '\n')
-    # #endregion
     
     # 检查缓存
     if server_url in _mcp_client_cache:
         cached_client = _mcp_client_cache[server_url]
         
-        # #region agent log
-        import json as _json; open('/Users/kens0n/projects/zenflux_agent/.cursor/debug.log', 'a').write(_json.dumps({"location": "mcp_client.py:get_mcp_client:cache_hit", "message": "缓存命中", "data": {"server_name": server_name, "_connected": cached_client._connected, "has_session": cached_client._session is not None}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "A,B,E"}) + '\n')
-        # #endregion
         
         if cached_client._connected and not force_reconnect:
             # 连接正常，复用
@@ -628,9 +607,6 @@ async def get_mcp_client(
         else:
             # 连接已断开或强制重连，移除旧缓存（创建新客户端）
             logger.info(f"🔄 MCP 客户端已断开，创建新连接: {server_name}")
-            # #region agent log
-            import json as _json; open('/Users/kens0n/projects/zenflux_agent/.cursor/debug.log', 'a').write(_json.dumps({"location": "mcp_client.py:get_mcp_client:cache_invalid", "message": "缓存失效需重连", "data": {"server_name": server_name, "_connected": cached_client._connected}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "A,B"}) + '\n')
-            # #endregion
             del _mcp_client_cache[server_url]
     
     # 创建新客户端

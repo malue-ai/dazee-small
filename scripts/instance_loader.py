@@ -995,9 +995,6 @@ async def _register_mcp_tools(
                         # 创建处理器闭包（动态获取客户端，支持断线重连）
                         async def make_handler(_server_url, _server_name, _auth_token, _orig_name):
                             async def handler(tool_input: Dict[str, Any]):
-                                # #region agent log
-                                import json as _json; open('/Users/kens0n/projects/zenflux_agent/.cursor/debug.log', 'a').write(_json.dumps({"location": "instance_loader.py:handler:entry", "message": "进入 MCP handler(loader)", "data": {"orig_name": _orig_name, "server_name": _server_name}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "A,B"}) + '\n')
-                                # #endregion
                                 # 每次调用时动态获取客户端（断开时会创建新连接）
                                 from services.mcp_client import get_mcp_client
                                 current_client = await get_mcp_client(
@@ -1006,9 +1003,6 @@ async def _register_mcp_tools(
                                     auth_token=_auth_token
                                 )
                                 if not current_client:
-                                    # #region agent log
-                                    import json as _json; open('/Users/kens0n/projects/zenflux_agent/.cursor/debug.log', 'a').write(_json.dumps({"location": "instance_loader.py:handler:failed", "message": "获取客户端失败", "data": {"orig_name": _orig_name}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "A"}) + '\n')
-                                    # #endregion
                                     return {"success": False, "error": "MCP 服务器连接失败"}
                                 
                                 # 调用工具
@@ -1016,9 +1010,6 @@ async def _register_mcp_tools(
                                 
                                 # 如果需要重连，自动重试一次
                                 if result.get("_need_reconnect"):
-                                    # #region agent log
-                                    import json as _json; open('/Users/kens0n/projects/zenflux_agent/.cursor/debug.log', 'a').write(_json.dumps({"location": "instance_loader.py:handler:auto_retry", "message": "检测到连接断开，自动重连重试", "data": {"orig_name": _orig_name}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "A"}) + '\n')
-                                    # #endregion
                                     # 强制重连
                                     current_client = await get_mcp_client(
                                         server_url=_server_url,
@@ -1089,9 +1080,6 @@ async def _register_mcp_tools(
                 _token=auth_token_for_handler,
                 _orig_name=original_name
             ):
-                # #region agent log
-                import json as _json; open('/Users/kens0n/projects/zenflux_agent/.cursor/debug.log', 'a').write(_json.dumps({"location": "instance_loader.py:tool_executor_handler:entry", "message": "进入 tool_executor MCP handler", "data": {"orig_name": _orig_name, "server_name": _name}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "F"}) + '\n')
-                # #endregion
                 current_client = await get_mcp_client(
                     server_url=_url,
                     server_name=_name,
@@ -1104,9 +1092,6 @@ async def _register_mcp_tools(
                 
                 # 如果需要重连，自动重试
                 if result.get("_need_reconnect"):
-                    # #region agent log
-                    import json as _json; open('/Users/kens0n/projects/zenflux_agent/.cursor/debug.log', 'a').write(_json.dumps({"location": "instance_loader.py:tool_executor_handler:auto_retry", "message": "自动重连重试", "data": {"orig_name": _orig_name}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "F"}) + '\n')
-                    # #endregion
                     current_client = await get_mcp_client(
                         server_url=_url,
                         server_name=_name,

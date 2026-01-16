@@ -400,15 +400,9 @@ class AgentRegistry:
                         
                         async def make_handler(_client, _orig_name, _server_url, _server_name, _auth_token):
                             async def handler(tool_input: Dict[str, Any]):
-                                # #region agent log
-                                import json as _json; open('/Users/kens0n/projects/zenflux_agent/.cursor/debug.log', 'a').write(_json.dumps({"location": "agent_registry.py:handler:entry", "message": "进入 MCP handler(registry)", "data": {"orig_name": _orig_name, "client_connected": _client._connected if _client else False}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "A,B,E"}) + '\n')
-                                # #endregion
                                 # 检查客户端状态，断开则重新获取
                                 current_client = _client
                                 if not _client._connected or not _client._session:
-                                    # #region agent log
-                                    import json as _json; open('/Users/kens0n/projects/zenflux_agent/.cursor/debug.log', 'a').write(_json.dumps({"location": "agent_registry.py:handler:reconnect", "message": "需重新获取客户端", "data": {"orig_name": _orig_name}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "A,B"}) + '\n')
-                                    # #endregion
                                     current_client = await get_mcp_client(
                                         server_url=_server_url,
                                         server_name=_server_name,
@@ -423,9 +417,6 @@ class AgentRegistry:
                                 
                                 # 如果需要重连，自动重试一次
                                 if result.get("_need_reconnect"):
-                                    # #region agent log
-                                    import json as _json; open('/Users/kens0n/projects/zenflux_agent/.cursor/debug.log', 'a').write(_json.dumps({"location": "agent_registry.py:handler:auto_retry", "message": "检测到连接断开，自动重连重试", "data": {"orig_name": _orig_name}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "A"}) + '\n')
-                                    # #endregion
                                     # 强制重连
                                     current_client = await get_mcp_client(
                                         server_url=_server_url,
@@ -486,9 +477,6 @@ class AgentRegistry:
                         _token=_auth_token,
                         _orig_name=original_name
                     ):
-                        # #region agent log
-                        import json as _json; open('/Users/kens0n/projects/zenflux_agent/.cursor/debug.log', 'a').write(_json.dumps({"location": "agent_registry.py:tool_executor_handler:entry", "message": "进入 tool_executor MCP handler", "data": {"orig_name": _orig_name, "server_name": _name}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "F"}) + '\n')
-                        # #endregion
                         # 每次调用动态获取客户端
                         current_client = await get_mcp_client(
                             server_url=_url,
@@ -502,9 +490,6 @@ class AgentRegistry:
                         
                         # 如果需要重连，自动重试
                         if result.get("_need_reconnect"):
-                            # #region agent log
-                            import json as _json; open('/Users/kens0n/projects/zenflux_agent/.cursor/debug.log', 'a').write(_json.dumps({"location": "agent_registry.py:tool_executor_handler:auto_retry", "message": "自动重连重试", "data": {"orig_name": _orig_name}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "F"}) + '\n')
-                            # #endregion
                             current_client = await get_mcp_client(
                                 server_url=_url,
                                 server_name=_name,
@@ -515,9 +500,6 @@ class AgentRegistry:
                                 return {"success": False, "error": "MCP 服务器重连失败"}
                             result = await current_client.call_tool(_orig_name, tool_input)
                         
-                        # #region agent log
-                        import json as _json; open('/Users/kens0n/projects/zenflux_agent/.cursor/debug.log', 'a').write(_json.dumps({"location": "agent_registry.py:tool_executor_handler:return", "message": "处理器返回", "data": {"orig_name": _orig_name, "success": result.get("success"), "has_error": "error" in result}, "timestamp": __import__('time').time() * 1000, "sessionId": "debug-session", "hypothesisId": "G"}) + '\n')
-                        # #endregion
                         return result
                     
                     agent.tool_executor.register_handler(tool_name, mcp_handler)
