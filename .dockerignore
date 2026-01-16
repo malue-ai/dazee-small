@@ -45,7 +45,6 @@ frontend/dist/
 
 # 部署文件
 deploy/aws/
-scripts/
 docker-compose.yml
 Dockerfile
 !Dockerfile.production

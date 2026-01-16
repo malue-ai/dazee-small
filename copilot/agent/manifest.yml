@@ -8,12 +8,11 @@ name: agent
 type: Load Balanced Web Service
 
 # ============================================================
-# 镜像配置 - 使用 build 自动构建
+# 镜像配置
+# 使用 location 指定 ECR 镜像地址（由部署脚本自动更新）
 # ============================================================
 image:
-  build:
-    dockerfile: Dockerfile.production
-    context: .
+  location: 308470327605.dkr.ecr.ap-southeast-1.amazonaws.com/zen0-backend/agent:20260116-192330
   port: 80  # Nginx 监听端口
 
 # ============================================================

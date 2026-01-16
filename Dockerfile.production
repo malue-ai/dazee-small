@@ -1,13 +1,25 @@
 # ============================================================
 # Zenflux Agent 生产环境 Dockerfile
 # 单容器部署：Nginx + FastAPI + Vue Frontend
-# Build: 2026-01-16 - 修复健康检查问题
+# Build: 2026-01-16
 # ============================================================
+
+# 构建参数
+ARG REGISTRY=public.ecr.aws/docker/library
+# 是否使用中国镜像源（默认不使用，适配 AWS 海外构建）
+ARG USE_CHINA_MIRROR=false
 
 # ============================================================
 # 阶段 1: 构建前端
 # ============================================================
-FROM --platform=linux/amd64 public.ecr.aws/docker/library/node:20-alpine AS frontend-builder
+FROM ${REGISTRY}/node:20-alpine AS frontend-builder
+
+ARG USE_CHINA_MIRROR=false
+
+# 配置 Alpine 镜像源（仅在国内环境启用）
+RUN if [ "$USE_CHINA_MIRROR" = "true" ]; then \
+    sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories; \
+    fi
 
 WORKDIR /frontend
 
@@ -26,7 +38,9 @@ RUN npm run build
 # ============================================================
 # 阶段 2: 构建后端 + 集成前端
 # ============================================================
-FROM --platform=linux/amd64 public.ecr.aws/docker/library/python:3.12-slim
+FROM ${REGISTRY}/python:3.12-slim
+
+ARG USE_CHINA_MIRROR=false
 
 # 设置环境变量
 ENV PYTHONUNBUFFERED=1 \
@@ -34,8 +48,12 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# 安装 Nginx 和必要的系统工具
-RUN apt-get update && \
+# 配置 Debian 镜像源（仅在国内环境启用）并安装系统依赖
+# Debian Bookworm 使用 DEB822 格式的 sources 文件
+RUN if [ "$USE_CHINA_MIRROR" = "true" ]; then \
+    sed -i 's|URIs: http://deb.debian.org|URIs: http://mirrors.ustc.edu.cn|g' /etc/apt/sources.list.d/debian.sources; \
+    fi && \
+    apt-get update && \
     apt-get install -y --no-install-recommends \
     nginx \
     curl \

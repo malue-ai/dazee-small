@@ -63,3 +63,4 @@ apscheduler>=3.10.0
 # 测试工具
 pytest>=8.0.0             # 测试框架
 pytest-asyncio>=0.23.0    # 异步测试支持
+psutil>=5.9.0             # 系统监控

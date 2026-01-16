@@ -575,9 +575,16 @@ deploy_service() {
     
     cleanup_review_stacks
     
+    # ECR 仓库配置
+    local ECR_REGISTRY="308470327605.dkr.ecr.${REGION}.amazonaws.com"
+    local ECR_REPO="${ECR_REGISTRY}/${APP_NAME}/${SERVICE_NAME}"
+    local IMAGE_TAG=$(date +%Y%m%d-%H%M%S)
+    local FULL_IMAGE="${ECR_REPO}:${IMAGE_TAG}"
+    
     log_info "应用: $APP_NAME"
     log_info "环境: $ENV_NAME"
     log_info "服务: $SERVICE_NAME"
+    log_info "镜像: $FULL_IMAGE"
     log_warning "预计时间: 10-15 分钟"
     echo ""
     
@@ -600,8 +607,36 @@ deploy_service() {
         log_success "服务初始化成功"
     fi
     
+    # 手动构建并推送镜像（解决 Copilot 跨项目目录部署时的 bug）
+    log_step "构建并推送 Docker 镜像"
+    
+    log_info "登录 ECR..."
+    aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+    
+    log_info "构建镜像: $FULL_IMAGE (平台: linux/amd64)"
+    # 指定 linux/amd64 平台，确保与 ECS Fargate 兼容
+    if ! docker build --platform linux/amd64 -f Dockerfile.production -t "$FULL_IMAGE" -t "${ECR_REPO}:latest" .; then
+        log_error "镜像构建失败"
+        exit 1
+    fi
+    
+    log_info "推送镜像..."
+    if ! docker push "$FULL_IMAGE"; then
+        log_error "镜像推送失败"
+        exit 1
+    fi
+    docker push "${ECR_REPO}:latest"
+    
+    log_success "镜像推送完成: $FULL_IMAGE"
+    
+    # 更新 manifest 中的镜像位置
+    log_info "更新 manifest 镜像位置..."
+    sed -i.bak "s|location:.*|location: ${FULL_IMAGE}|" copilot/${SERVICE_NAME}/manifest.yml
+    rm -f copilot/${SERVICE_NAME}/manifest.yml.bak
+    
     START_TIME=$(date +%s)
     
+    # 使用 --no-rollback 避免自动回滚，便于调试
     if $COPILOT svc deploy --name "$SERVICE_NAME" --env "$ENV_NAME"; then
         END_TIME=$(date +%s)
         DURATION=$((END_TIME - START_TIME))
