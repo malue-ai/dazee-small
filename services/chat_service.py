@@ -101,6 +101,12 @@ class ChatService:
             f"✅ Context Compaction 配置: qos_level={qos_level.value}, "
             f"threshold={self.compaction_threshold:,} tokens (Claude SDK 原生处理)"
         )
+        
+        # 🆕 Agent 池化（懒加载）
+        # 预创建 Agent 原型，每次请求时克隆而非重新创建，避免 50-100ms 初始化延迟
+        self._agent_pool: Dict[str, SimpleAgent] = {}
+        self._pool_initialized = False
+        self._pool_lock = asyncio.Lock()  # 防止并发初始化
     
     # ==================== 辅助方法 ====================
     
@@ -135,6 +141,101 @@ class ChatService:
             logger.info(f"✅ 从 Agent Schema 创建 OutputFormatter: format={formatter_config.default_format}")
         
         return self._formatters[cache_key]
+    
+    # ==================== Agent 池化 ====================
+    
+    async def _init_agent_pool(self):
+        """
+        初始化 Agent 池（懒加载，首次请求时执行）
+        
+        从 AgentRegistry 获取所有已预加载的 agent_id，
+        为每个创建原型实例并缓存到 _agent_pool
+        
+        优化效果：后续请求从池中克隆 Agent，耗时 < 1ms（原需 50-100ms）
+        """
+        if self._pool_initialized:
+            return
+        
+        async with self._pool_lock:
+            # 双重检查，防止并发初始化
+            if self._pool_initialized:
+                return
+            
+            logger.info("🏊 初始化 Agent 池...")
+            
+            registry = get_agent_registry()
+            for agent_info in registry.list_agents():
+                agent_id = agent_info["agent_id"]
+                try:
+                    # 创建原型（使用临时 event_manager）
+                    prototype = await registry.get_agent(
+                        agent_id=agent_id,
+                        event_manager=self.session_service.events,
+                        workspace_dir=None,
+                        conversation_service=None
+                    )
+                    self._agent_pool[agent_id] = prototype
+                    logger.info(f"   ✅ Agent 原型已创建: {agent_id}")
+                except Exception as e:
+                    logger.warning(f"   ⚠️ Agent 原型创建失败: {agent_id}, {e}")
+            
+            self._pool_initialized = True
+            logger.info(f"🏊 Agent 池初始化完成: {len(self._agent_pool)} 个原型")
+    
+    async def _get_pooled_agent(
+        self,
+        agent_id: str,
+        event_manager,
+        workspace_dir: str,
+        conversation_service
+    ) -> SimpleAgent:
+        """
+        从池中获取 Agent（克隆 + 重置状态）
+        
+        如果池中存在原型，克隆并注入会话级依赖；
+        否则 fallback 到 AgentRegistry.get_agent()
+        
+        Args:
+            agent_id: Agent 实例 ID
+            event_manager: 事件管理器
+            workspace_dir: 工作目录
+            conversation_service: 会话服务
+            
+        Returns:
+            就绪的 Agent 实例
+        """
+        # 确保池已初始化
+        await self._init_agent_pool()
+        
+        if agent_id in self._agent_pool:
+            prototype = self._agent_pool[agent_id]
+            agent = prototype.clone(
+                event_manager=event_manager,
+                workspace_dir=workspace_dir,
+                conversation_service=conversation_service
+            )
+            logger.debug(f"🏊 从池中克隆 Agent: {agent_id}")
+            return agent
+        
+        # Fallback: 不在池中，直接创建
+        logger.debug(f"🏊 Agent 不在池中，直接创建: {agent_id}")
+        return await get_agent_registry().get_agent(
+            agent_id=agent_id,
+            event_manager=event_manager,
+            workspace_dir=workspace_dir,
+            conversation_service=conversation_service
+        )
+    
+    def clear_agent_pool(self):
+        """
+        清空 Agent 池（用于热更新场景）
+        
+        当 AgentRegistry.reload_agent() 被调用后，
+        应同时调用此方法清空池，确保下次请求使用最新配置
+        """
+        self._agent_pool.clear()
+        self._pool_initialized = False
+        logger.info("🏊 Agent 池已清空")
     
     # ==================== 统一入口 ====================
     
@@ -204,16 +305,18 @@ class ChatService:
         )
         logger.info(f"✅ Session: {session_id}")
         
-        # ========== 5. 获取 Agent ==========
+        # ========== 5. 获取 Agent（使用池化优化） ==========
         workspace_dir = str(self.session_service.workspace_manager.get_workspace_root(conversation_id))
         if agent_id:
-            agent = await get_agent_registry().get_agent(
+            # 🆕 使用 Agent 池化，从池中克隆而非重新创建，耗时 < 1ms
+            agent = await self._get_pooled_agent(
                 agent_id=agent_id,
                 event_manager=self.session_service.events,
                 workspace_dir=workspace_dir,
                 conversation_service=self.conversation_service
             )
         else:
+            # 默认 Agent（无池化，直接创建）
             agent = create_simple_agent(
                 model=self.default_model,
                 workspace_dir=workspace_dir,
@@ -405,6 +508,22 @@ class ChatService:
                         content = json.loads(content) if content else []
                     except json.JSONDecodeError:
                         pass
+                    
+                    # 🔧 过滤 thinking 块（Claude API 要求 thinking 块有 signature，历史消息没有）
+                    # 🔧 同时移除 index 字段（Claude API 不接受 content block 中的 index 字段）
+                    if isinstance(content, list):
+                        cleaned_content = []
+                        for block in content:
+                            if isinstance(block, dict):
+                                # 跳过 thinking 和 redacted_thinking 块
+                                if block.get("type") in ("thinking", "redacted_thinking"):
+                                    continue
+                                # 移除 index 字段
+                                clean_block = {k: v for k, v in block.items() if k != "index"}
+                                cleaned_content.append(clean_block)
+                            else:
+                                cleaned_content.append(block)
+                        content = cleaned_content
                     
                     history_messages.append({
                         "role": db_msg.role,

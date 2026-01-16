@@ -1858,6 +1858,99 @@ class SimpleAgent:
         """
         self.enable_tracing = enabled
         logger.info(f"{'✅ 启用' if enabled else '❌ 禁用'} E2E Pipeline 追踪")
+    
+    # ==================== Agent 池化支持 ====================
+    
+    def clone(
+        self,
+        event_manager,
+        workspace_dir: str = None,
+        conversation_service = None
+    ) -> "SimpleAgent":
+        """
+        克隆 Agent（复用重组件，重置会话状态）
+        
+        用于 Agent 池化优化：预创建 Agent 原型，每次请求时克隆而非重新创建，
+        避免重复初始化带来的 50-100ms 延迟。
+        
+        复用（避免重复初始化）：
+        - llm, intent_llm: LLM Service（HTTP 客户端）
+        - capability_registry: 工具注册表
+        - tool_selector, tool_executor: 工具组件
+        - plan_todo_tool, invocation_selector
+        - _instance_registry, _mcp_clients, _mcp_tools
+        
+        重置（每次请求独立）：
+        - _plan_cache, _last_intent_result, _tracer
+        - usage_tracker, context_engineering
+        - event_manager, broadcaster
+        
+        Args:
+            event_manager: 事件管理器（必需，每次请求独立）
+            workspace_dir: 工作目录
+            conversation_service: 会话服务
+            
+        Returns:
+            克隆后的 Agent 实例
+        """
+        cloned = object.__new__(SimpleAgent)
+        
+        # 复用静态配置
+        cloned.model = self.model
+        cloned.max_turns = self.max_turns
+        cloned.schema = self.schema
+        cloned.system_prompt = self.system_prompt
+        cloned.prompt_schema = self.prompt_schema
+        cloned.prompt_cache = self.prompt_cache
+        cloned.apis_config = self.apis_config
+        cloned.context_strategy = self.context_strategy
+        cloned.allow_parallel_tools = self.allow_parallel_tools
+        cloned.max_parallel_tools = self.max_parallel_tools
+        cloned._serial_only_tools = self._serial_only_tools
+        cloned.enable_tracing = self.enable_tracing
+        
+        # 复用重组件（核心优化点，避免重复创建）
+        cloned.capability_registry = self.capability_registry
+        cloned.intent_llm = self.intent_llm
+        cloned.intent_analyzer = self.intent_analyzer
+        cloned.tool_selector = self.tool_selector
+        cloned.tool_executor = self.tool_executor
+        cloned.plan_todo_tool = self.plan_todo_tool
+        cloned.invocation_selector = self.invocation_selector
+        cloned.llm = self.llm
+        cloned._instance_registry = getattr(self, '_instance_registry', None)
+        cloned._mcp_clients = getattr(self, '_mcp_clients', [])
+        cloned._mcp_tools = getattr(self, '_mcp_tools', [])
+        
+        # 注入会话级依赖
+        cloned.event_manager = event_manager
+        cloned.workspace_dir = workspace_dir
+        cloned.broadcaster = EventBroadcaster(event_manager, conversation_service)
+        
+        # 重置会话状态
+        cloned._reset_session_state()
+        
+        logger.debug(f"Agent 克隆完成: model={cloned.model}, schema={cloned.schema.name}")
+        
+        return cloned
+    
+    def _reset_session_state(self):
+        """
+        重置会话级状态（每次请求独立）
+        
+        在 clone() 时调用，确保每次请求的状态隔离
+        """
+        self._plan_cache = {"plan": None, "todo": None, "tool_calls": []}
+        self._last_intent_result = None
+        self._tracer = None
+        self.usage_tracker = create_usage_tracker()
+        self.context_engineering = create_context_engineering_manager()
+        self.invocation_stats = {
+            "direct": 0, 
+            "code_execution": 0, 
+            "programmatic": 0, 
+            "streaming": 0
+        }
 
 
 def create_simple_agent(

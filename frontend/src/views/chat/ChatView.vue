@@ -1388,7 +1388,7 @@ async function submitHumanConfirmation() {
       confirmRequest.value = null
       confirmResponse.value = null
     } else {
-      alert('提交失败，请重试')
+    alert('提交失败，请重试')
     }
   } finally {
     confirmSubmitting.value = false
