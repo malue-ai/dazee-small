@@ -8,10 +8,12 @@ name: agent
 type: Load Balanced Web Service
 
 # ============================================================
-# 镜像配置
+# 镜像配置 - 使用 build 自动构建
 # ============================================================
 image:
-  location: 308470327605.dkr.ecr.ap-southeast-1.amazonaws.com/zen0-backend/agent:latest
+  build:
+    dockerfile: Dockerfile.production
+    context: .
   port: 80  # Nginx 监听端口
 
 # ============================================================
