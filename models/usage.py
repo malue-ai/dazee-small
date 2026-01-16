@@ -26,30 +26,40 @@ if TYPE_CHECKING:
 # ============================================================
 
 CLAUDE_PRICING = {
+    # Opus 系列
     "claude-opus-4.5": {
         "input": 5.0,
         "output": 25.0,
         "cache_write": 6.25,
         "cache_read": 0.5
     },
+    "claude-opus-4-5-20251101": {  # 完整模型名
+        "input": 5.0,
+        "output": 25.0,
+        "cache_write": 6.25,
+        "cache_read": 0.5
+    },
+    # Sonnet 系列
     "claude-sonnet-4.5": {
         "input": 3.0,
         "output": 15.0,
         "cache_write": 3.75,
         "cache_read": 0.3
     },
-    "claude-sonnet-4-5-20250929": {
+    "claude-sonnet-4-5-20250929": {  # 完整模型名
         "input": 3.0,
         "output": 15.0,
         "cache_write": 3.75,
         "cache_read": 0.3
     },
+    # Haiku 系列
     "claude-haiku-4.5": {
         "input": 1.0,
         "output": 5.0,
         "cache_write": 1.25,
         "cache_read": 0.1
     },
+    # 默认（Sonnet）
     "default": {
         "input": 3.0,
         "output": 15.0,

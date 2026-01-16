@@ -478,7 +478,7 @@ class SimpleAgent:
         
         完整流程（参考 docs/00-ARCHITECTURE-V4.md L1693-1979）：
         阶段 1: Session/Agent 初始化 (在 SessionService.create_session 中完成)
-        阶段 2: Intent Analysis (Haiku 快速分析) - 可跳过（V7 路由层提供）
+        阶段 2: Intent Analysis - 使用路由层传入的意图结果（内部意图分析已移除）
         阶段 3: Tool Selection (Schema 驱动优先)
         阶段 4: System Prompt 组装 + LLM 调用准备
         阶段 5: Plan Creation (System Prompt 约束 + Claude 自主触发，在 RVR Turn 1 内部)
@@ -493,7 +493,7 @@ class SimpleAgent:
             message_id: 消息ID（用于事件关联）
             enable_stream: 是否流式输出
             variables: 前端上下文变量（如位置、时区等），直接注入到 Prompt
-            intent: 🆕 V7 从路由层传入的意图分析结果（如提供则跳过内部分析）
+            intent: V7 从路由层传入的意图分析结果（必需，如未提供则使用默认配置）
             
         Yields:
             事件字典
@@ -545,15 +545,15 @@ class SimpleAgent:
             self._tracer.set_user_query(user_query[:200])
         
         # =====================================================================
-        # 阶段 2: Intent Analysis (Haiku 快速分析)
+        # 阶段 2: Intent Analysis
         # =====================================================================
-        # 🆕 V7: 支持从路由层接收意图结果
-        # - 如果提供了 intent 参数（来自路由层），则跳过内部分析
-        # - 如果未提供 intent，则执行内部意图分析（向后兼容）
+        # V7: 意图分析已在路由层完成（AgentRouter），此处仅使用传入的意图结果
+        # - 如果提供了 intent 参数（来自路由层），使用它
+        # - 如果未提供 intent 参数，使用默认配置（不执行内部分析）
         # =====================================================================
         
         if intent is not None:
-            # 🆕 V7: 使用路由层提供的意图结果（跳过内部分析）
+            # 使用路由层提供的意图结果
             logger.info(
                 f"🔀 使用路由层意图结果: {intent.task_type.value}, "
                 f"complexity={intent.complexity.value}"
@@ -570,7 +570,7 @@ class SimpleAgent:
                     "needs_plan": intent.needs_plan,
                     "confidence": intent.confidence,
                     "skip_memory_retrieval": intent.skip_memory_retrieval,
-                    "source": "routing_layer"  # 🆕 标记来源
+                    "source": "routing_layer"
                 }, ensure_ascii=False)
             }
             yield await self.broadcaster.emit_message_delta(
@@ -578,50 +578,19 @@ class SimpleAgent:
                 delta=intent_delta
             )
             
-        elif self.schema.intent_analyzer.enabled and self.intent_analyzer:
-            # 内部执行意图分析（向后兼容）
-            # 🆕 追踪意图分析阶段
+            # 追踪意图分析阶段
             if self._tracer:
                 stage = self._tracer.create_stage("intent_analysis")
                 stage.start()
-                stage.set_input({"message_count": len(messages)})
-            
-            logger.info("🎯 开始意图分析...")
-            # 🆕 V6.1: 使用 analyze_with_context，追问场景复用上轮 task_type
-            intent = await self.intent_analyzer.analyze_with_context(
-                messages, 
-                previous_result=self._last_intent_result
-            )
-            # 保存本轮结果供下次追问使用
-            self._last_intent_result = intent
-            
-            # 发送意图识别结果给前端
-            intent_delta = {
-                "type": "intent",
-                "content": json.dumps({
-                    "task_type": intent.task_type.value,
-                    "complexity": intent.complexity.value,
-                    "needs_plan": intent.needs_plan,
-                    "confidence": intent.confidence,
-                    "skip_memory_retrieval": intent.skip_memory_retrieval  # 🆕 V4.6
-                }, ensure_ascii=False)
-            }
-            yield await self.broadcaster.emit_message_delta(
-                session_id=session_id,
-                delta=intent_delta
-            )
-            logger.info(f"🎯 意图识别完成: {intent.task_type.value}, complexity={intent.complexity.value}")
-            
-            # 🆕 完成追踪
-            if self._tracer:
                 stage.complete({
                     "task_type": intent.task_type.value,
                     "complexity": intent.complexity.value,
-                    "needs_plan": intent.needs_plan
+                    "needs_plan": intent.needs_plan,
+                    "source": "routing_layer"
                 })
         else:
-            # 不执行意图分析，使用默认配置
-            logger.info("○ 跳过意图分析（Schema 未启用）")
+            # 未提供 intent 参数，使用默认配置（内部意图分析已移除）
+            logger.warning("⚠️ 未提供意图结果，使用默认配置（建议启用路由层）")
             from core.agent.types import IntentResult, TaskType, Complexity
             intent = IntentResult(
                 task_type=TaskType.GENERAL,
@@ -630,10 +599,10 @@ class SimpleAgent:
                 confidence=1.0
             )
             
-            # 🆕 记录跳过
+            # 记录跳过
             if self._tracer:
                 stage = self._tracer.create_stage("intent_analysis")
-                stage.skip("Schema 未启用")
+                stage.skip("未提供意图结果，使用默认配置")
         
         # =====================================================================
         # 阶段 3: Tool Selection (Schema 驱动优先)

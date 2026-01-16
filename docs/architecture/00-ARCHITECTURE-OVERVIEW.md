@@ -887,7 +887,7 @@ async def create_agent_from_instance(instance_name: str):
 │  │                         infra/ 基础设施层                                    │  │
 │  │  ┌───────────────┐ ┌───────────────┐ ┌───────────────┐ ┌───────────────┐    │  │
 │  │  │ sandbox/      │ │ database/     │ │ cache/        │ │ vector/       │    │  │
-│  │  │ 沙箱执行       │ │ 数据库        │ │ Redis 缓存    │ │ 向量数据库    │    │  │
+│  │  │ 沙箱执行       │ │ 数据库         │ │ Redis 缓存    │ │ 向量数据库    │    │  │
 │  │  │ • E2B         │ │ • Models      │ │ • redis.py    │ │ • factory.py  │    │  │
 │  │  │ • factory.py  │ │ • CRUD        │ │               │ │ • base.py     │    │  │
 │  │  └───────────────┘ └───────────────┘ └───────────────┘ └───────────────┘    │  │
@@ -936,21 +936,28 @@ async def create_agent_from_instance(instance_name: str):
     │
     ↓
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ Phase 1: 路由决策 (🆕 V7.2 默认启用)                                         │
+│ Phase 1: 路由决策 (V7 统一路由层)                                            │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │  if enable_routing (默认 True):                                              │
 │      AgentRouter.route()                                                     │
-│       ├─→ IntentAnalyzer.analyze()     ← 使用 intent_prompt.md              │
+│       ├─→ IntentAnalyzer.analyze() (使用 Haiku 快速分析)                     │
 │       │        ↓                                                             │
 │       │   IntentResult:                                                      │
 │       │     • task_type: content_generation                                 │
 │       │     • complexity: COMPLEX                                           │
 │       │     • complexity_score: 7.5 (0-10)                                  │
 │       │     • needs_plan: true                                              │
+│       │     • skip_memory_retrieval: false                                  │
+│       │                                                                      │
+│       ├─→ ComplexityScorer (优先使用 LLM 评分)                              │
 │       │                                                                      │
 │       └─→ RoutingDecision:                                                   │
 │              • use_multi_agent: bool                                         │
-│              • routing_intent: IntentResult                                 │
+│              • intent: IntentResult  (传递给 Agent)                          │
+│              • complexity_score: float                                       │
+│              • fallback_reason: Optional[str]  (Budget不足时降级)            │
+│                                                                              │
+│  ✅ V7架构：意图分析集中在路由层，SimpleAgent不再执行内部分析                  │
 └─────────────────────────────────────────────────────────────────────────────┘
     │
     ↓ (根据 use_multi_agent 决策)
@@ -961,15 +968,16 @@ async def create_agent_from_instance(instance_name: str):
 │  ┌─────────────────────────────────────┐                                    │
 │  │ if use_multi_agent:                 │                                    │
 │  │   ✅ MultiAgentOrchestrator         │                                    │
+│  │   ├─ 接收 intent (来自路由层)       │                                    │
 │  │   ├─ 初始化共享资源:                │                                    │
 │  │   │  • ToolLoader                   │                                    │
 │  │   │  • WorkingMemory                │                                    │
 │  │   │  • Mem0 客户端                  │                                    │
-│  │   ├─ Lead Agent 任务分解            │                                    │
-│  │   ├─ Worker Agents 并行/串行执行    │                                    │
+│  │   ├─ Lead Agent 任务分解 (Sonnet)   │                                    │
+│  │   ├─ Worker Agents 并行/串行 (Haiku)│                                    │
 │  │   │  • 动态加载工具                 │                                    │
 │  │   │  • 工具调用 + LLM 推理          │                                    │
-│  │   ├─ Critic Agent 质量评估         │                                    │
+│  │   ├─ Critic Agent 质量评估 (Sonnet) │                                    │
 │  │   │  • pass / retry / replan       │                                    │
 │  │   └─ Lead Agent 结果综合            │                                    │
 │  └─────────────────────────────────────┘                                    │
@@ -977,11 +985,15 @@ async def create_agent_from_instance(instance_name: str):
 │  ┌─────────────────────────────────────┐                                    │
 │  │ else:                               │                                    │
 │  │   ✅ SimpleAgent (RVR 循环)         │                                    │
-│  │   ├─ Read plan                      │                                    │
-│  │   ├─ Reason (LLM + Thinking)        │                                    │
-│  │   ├─ Act (Tool Execution)           │                                    │
-│  │   ├─ Validate                       │                                    │
-│  │   └─ Write plan                     │                                    │
+│  │   ├─ 接收 intent (来自路由层) ✅    │                                    │
+│  │   ├─ Tool Selection (不再分析intent)│                                    │
+│  │   ├─ System Prompt 组装             │                                    │
+│  │   ├─ RVR Loop:                      │                                    │
+│  │   │  • React (LLM + Thinking)       │                                    │
+│  │   │  • Act (Tool Execution)         │                                    │
+│  │   │  • Validation                   │                                    │
+│  │   │  • Reflection                   │                                    │
+│  │   └─ Final Output                   │                                    │
 │  └─────────────────────────────────────┘                                    │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -998,6 +1010,346 @@ async def create_agent_from_instance(instance_name: str):
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
+### SimpleAgent 完整调用流程
+
+```
+用户请求
+   │
+   ↓
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 阶段 0: 预处理（ChatService）                                                 │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  POST /chat (message, user_id, agent_id)                                     │
+│    ↓                                                                          │
+│  ChatService.chat()                                                           │
+│    ├─→ _process_message_with_files()  # 处理文件上传                         │
+│    ├─→ create_conversation()          # 创建/获取会话                         │
+│    └─→ create_session()                # 创建 Session                         │
+└──────────────────────────────────────────────────────────────────────────────┘
+   │
+   ↓
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 阶段 1: 路由决策（AgentRouter）                                               │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  ChatService → AgentRouter.route(user_query, history, user_id)               │
+│    ↓                                                                          │
+│  ┌────────────────────────────────────┐                                      │
+│  │ IntentAnalyzer.analyze()           │  ← 使用 Haiku 快速分析                │
+│  │   ↓                                │                                      │
+│  │ LLM.create_message_async(Haiku)    │                                      │
+│  │   ↓                                │                                      │
+│  │ 返回 IntentResult:                 │                                      │
+│  │   • task_type: str                 │                                      │
+│  │   • complexity: TaskComplexity     │                                      │
+│  │   • complexity_score: float        │                                      │
+│  │   • needs_plan: bool               │                                      │
+│  │   • skip_memory_retrieval: bool    │                                      │
+│  └────────────────────────────────────┘                                      │
+│    ↓                                                                          │
+│  ComplexityScorer.score() + Budget 检查                                       │
+│    ↓                                                                          │
+│  返回 RoutingDecision:                                                        │
+│    • use_multi_agent: bool            # single/multi 决策                    │
+│    • intent: IntentResult             # 传递给 Agent                         │
+│    • complexity_score: float                                                 │
+│    • fallback_reason: Optional[str]   # Budget 不足时降级                    │
+│                                                                               │
+│  ✅ V7架构：意图分析集中在路由层，SimpleAgent 不再执行内部分析                  │
+└──────────────────────────────────────────────────────────────────────────────┘
+   │
+   ↓
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 阶段 2: Agent 实例化（AgentRegistry）                                         │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  ChatService → AgentRegistry.get_agent(agent_id, event_manager, ...)         │
+│    ↓                                                                          │
+│  从 _agent_prototypes 获取原型                                                │
+│    ↓                                                                          │
+│  prototype.clone_for_session(event_manager, workspace_dir, ...)              │
+│    ├─→ 浅拷贝共享组件（LLM/Registry/Executor/PromptCache）                   │
+│    └─→ 重置 Session 级状态（EventBroadcaster/UsageTracker/_plan_cache）      │
+│    ↓                                                                          │
+│  返回新 SimpleAgent 实例                                                      │
+│                                                                               │
+│  ⚡ 性能优化：<5ms（原 50-100ms，提升 10-20x）                                 │
+└──────────────────────────────────────────────────────────────────────────────┘
+   │
+   ↓
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 阶段 3: Agent 执行（SimpleAgent）                                             │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  SimpleAgent.chat(messages, session_id, intent=intent)  ← 接收路由层 intent  │
+│                                                                               │
+│  ┌──────────────────────────────────────────────────────────────────────┐    │
+│  │ 阶段 3.1: 使用路由层 Intent（内部分析已移除）✅                        │    │
+│  │   if intent is not None:                                            │    │
+│  │       logger.info(f"使用路由层意图: {intent.task_type.value}")       │    │
+│  │   else:                                                             │    │
+│  │       logger.warning("未提供意图，使用默认配置")                      │    │
+│  │   ↓                                                                 │    │
+│  │   emit_message_delta(intent delta)  # 发送意图事件                  │    │
+│  └──────────────────────────────────────────────────────────────────────┘    │
+│                                                                               │
+│  ┌──────────────────────────────────────────────────────────────────────┐    │
+│  │ 阶段 3.2: Tool Selection                                            │    │
+│  │   ToolSelector.select()                                             │    │
+│  │     ├─→ 选择优先级: Schema > Plan > Intent                          │    │
+│  │     ├─→ InvocationSelector.select_strategy()                        │    │
+│  │     └─→ 添加实例级工具 (MCP/REST)                                   │    │
+│  └──────────────────────────────────────────────────────────────────────┘    │
+│                                                                               │
+│  ┌──────────────────────────────────────────────────────────────────────┐    │
+│  │ 阶段 3.3: System Prompt 组装                                        │    │
+│  │   _build_cached_system_prompt() / build_system_prompt()             │    │
+│  │     ├─→ L1 缓存: 核心规则（1h）                                     │    │
+│  │     ├─→ L2 缓存: 工具定义（1h）                                     │    │
+│  │     ├─→ L3 缓存: Memory Guidance（1h）                              │    │
+│  │     └─→ L4 动态: 会话上下文（不缓存）                              │    │
+│  └──────────────────────────────────────────────────────────────────────┘    │
+│                                                                               │
+│  ┌──────────────────────────────────────────────────────────────────────┐    │
+│  │ 阶段 3.4: RVR Loop（React + Validation + Reflection）               │    │
+│  │                                                                      │    │
+│  │  for turn in range(max_turns):                                      │    │
+│  │                                                                      │    │
+│  │    ┌─────────────────────────────────────────────────────────┐      │    │
+│  │    │ _process_stream(messages, system_prompt, tools)         │      │    │
+│  │    │   ↓                                                     │      │    │
+│  │    │ LLM.create_message_stream(Sonnet)                       │      │    │
+│  │    │   ↓ 流式响应                                            │      │    │
+│  │    │   ├─→ thinking_delta  → emit_message_delta(thinking)    │      │    │
+│  │    │   ├─→ content_delta   → emit_message_delta(text)        │      │    │
+│  │    │   └─→ tool_use_start  → emit_message_delta(tool_use)    │      │    │
+│  │    │   ↓                                                     │      │    │
+│  │    │ final_response (stop_reason)                            │      │    │
+│  │    └─────────────────────────────────────────────────────────┘      │    │
+│  │      ↓                                                               │    │
+│  │    if stop_reason == "tool_use":                                    │    │
+│  │      ┌───────────────────────────────────────────────────────┐      │    │
+│  │      │ _execute_tools_stream(tool_calls)                     │      │    │
+│  │      │   ↓                                                   │      │    │
+│  │      │ 并行执行工具（可选）:                                 │      │    │
+│  │      │   ├─→ ToolExecutor.execute(tool_1) ┐                 │      │    │
+│  │      │   └─→ ToolExecutor.execute(tool_2) ┴→ tool_results   │      │    │
+│  │      │   ↓                                                   │      │    │
+│  │      │ emit_message_delta(tool_result)                       │      │    │
+│  │      │   ↓                                                   │      │    │
+│  │      │ append tool_results to messages                       │      │    │
+│  │      │   ↓                                                   │      │    │
+│  │      │ continue loop (下一轮)                                │      │    │
+│  │      └───────────────────────────────────────────────────────┘      │    │
+│  │                                                                      │    │
+│  │    elif stop_reason == "end_turn" / "max_tokens":                   │    │
+│  │      ┌───────────────────────────────────────────────────────┐      │    │
+│  │      │ ctx.set_completed()                                   │      │    │
+│  │      │   ↓                                                   │      │    │
+│  │      │ break loop (退出循环)                                 │      │    │
+│  │      └───────────────────────────────────────────────────────┘      │    │
+│  │                                                                      │    │
+│  └──────────────────────────────────────────────────────────────────────┘    │
+│                                                                               │
+│  ┌──────────────────────────────────────────────────────────────────────┐    │
+│  │ 阶段 3.5: Final Output                                              │    │
+│  │   UsageTracker.get_usage_stats()                                    │    │
+│  │     ↓                                                               │    │
+│  │   emit_message_stop(usage stats)                                    │    │
+│  │     ↓                                                               │    │
+│  │   yield AsyncGenerator[events]                                      │    │
+│  └──────────────────────────────────────────────────────────────────────┘    │
+└──────────────────────────────────────────────────────────────────────────────┘
+   │
+   ↓
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 阶段 4: 后处理（ChatService）                                                 │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  ├─→ 更新 session status                                                     │
+│  ├─→ TokenAuditor.record() # 记录 Token 使用                                 │
+│  ├─→ dispatch_background_tasks() # Mem0 写入、日志记录等                     │
+│  └─→ 返回 AsyncGenerator[SSE events]                                         │
+└──────────────────────────────────────────────────────────────────────────────┘
+   │
+   ↓
+SSE Stream → 用户
+```
+
+**关键决策点**：
+
+| 决策点 | 位置 | 判断依据 | 影响 |
+|-------|------|---------|------|
+| **是否启用路由** | ChatService._run_agent() | enable_routing 配置（默认True） | 是否进行意图分析 |
+| **单/多智能体选择** | AgentRouter.route() | 复杂度评分 >= 阈值 | 执行框架选择 |
+| **工具选择策略** | SimpleAgent (阶段3.2) | Schema > Plan > Intent | LLM可用工具列表 |
+| **是否使用缓存** | SimpleAgent (阶段3.3) | LLM配置 + prompt_cache可用 | Token成本优化 |
+| **RVR循环退出** | SimpleAgent (阶段3.4) | stop_reason / max_turns | 执行完成 |
+
+### MultiAgentOrchestrator 完整调用流程
+
+```
+用户请求（复杂任务）
+   │
+   ↓
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 阶段 1: 路由决策（AgentRouter）                                               │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  ChatService → AgentRouter.route(messages, session_id)                       │
+│    ↓                                                                          │
+│  IntentAnalyzer.analyze() (使用 Haiku)                                        │
+│    ↓                                                                          │
+│  IntentResult(complexity_score=8.5)  # 高复杂度                               │
+│    ↓                                                                          │
+│  if complexity_score >= 7.0:                                                  │
+│    RoutingDecision(use_multi_agent=True)                                      │
+│  else:                                                                        │
+│    RoutingDecision(use_multi_agent=False) → SimpleAgent                       │
+└──────────────────────────────────────────────────────────────────────────────┘
+   │
+   ↓ (use_multi_agent=True)
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 阶段 2: 多智能体初始化（MultiAgentOrchestrator）                              │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  MultiAgentOrchestrator.execute(messages, session_id, intent)                │
+│    ↓                                                                          │
+│  ┌────────────────────────────────────────────┐                              │
+│  │ 检查检查点（可选）                          │                              │
+│  │   if checkpoint exists:                    │                              │
+│  │     CheckpointManager.load_latest()        │                              │
+│  │       ↓                                    │                              │
+│  │     恢复状态（已完成的子任务、中间结果）    │                              │
+│  └────────────────────────────────────────────┘                              │
+│    ↓                                                                          │
+│  ┌────────────────────────────────────────────┐                              │
+│  │ _initialize_shared_resources()             │                              │
+│  │   ├─→ ToolLoader (加载工具)                │                              │
+│  │   ├─→ WorkingMemory (会话级记忆)           │                              │
+│  │   ├─→ Mem0 客户端 (用户级长期记忆)         │                              │
+│  │   └─→ EventBroadcaster (事件管理)          │                              │
+│  └────────────────────────────────────────────┘                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+   │
+   ↓
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 阶段 3: 任务分解（LeadAgent - 使用 Sonnet）                                   │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  LeadAgent.plan_subtasks(task_description, context)                          │
+│    ↓                                                                          │
+│  LLM.generate(Sonnet) ← 使用任务分解 Prompt                                   │
+│    ↓                                                                          │
+│  TaskPlan:                                                                    │
+│    ├─→ subtasks: List[SubTask]                                               │
+│    │     • id: "sub-1", description: "收集数据"                               │
+│    │     • id: "sub-2", description: "分析数据", dependencies: ["sub-1"]      │
+│    │     • id: "sub-3", description: "生成图表", dependencies: ["sub-2"]      │
+│    │     • id: "sub-4", description: "撰写报告", dependencies: ["sub-3"]      │
+│    ├─→ execution_mode: "hybrid" | "parallel" | "sequential"                  │
+│    ├─→ dependencies: Dict[str, List[str]]  # DAG 依赖图                      │
+│    └─→ estimated_time: float                                                 │
+│                                                                               │
+│  emit orchestrator_start event                                               │
+└──────────────────────────────────────────────────────────────────────────────┘
+   │
+   ↓
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 阶段 4: 子任务执行（SubAgents - 使用 Haiku）                                  │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  根据 execution_mode 执行:                                                    │
+│                                                                               │
+│  ┌──────────────────────────────────────────────────────────────────────┐    │
+│  │ 并行模式（无依赖任务同时执行）                                       │    │
+│  │                                                                      │    │
+│  │   SubAgent-1 (sub-1: "收集数据")                                     │    │
+│  │     ├─→ 动态加载工具 (_load_subagent_tools)                          │    │
+│  │     ├─→ LLM.generate(Haiku)                                          │    │
+│  │     └─→ 返回 SubTaskResult                                           │    │
+│  │          ↓                                                           │    │
+│  │   ┌──────────────────────────────────────────────────┐              │    │
+│  │   │ 关键检查点（每个子任务完成后）                    │              │    │
+│  │   │   CheckpointManager.save_checkpoint({            │              │    │
+│  │   │     "completed_subtasks": ["sub-1"],             │              │    │
+│  │   │     "subtask_results": {...}                     │              │    │
+│  │   │   })                                             │              │    │
+│  │   └──────────────────────────────────────────────────┘              │    │
+│  │          ↓                                                           │    │
+│  │   SubAgent-2 (sub-2: "分析数据", depends on sub-1)                   │    │
+│  │     ├─→ 等待 sub-1 完成                                              │    │
+│  │     ├─→ 读取 sub-1 结果（从 shared_context）                         │    │
+│  │     ├─→ LLM.generate(Haiku)                                          │    │
+│  │     └─→ 返回 SubTaskResult                                           │    │
+│  │          ↓                                                           │    │
+│  │   ... 继续执行 sub-3, sub-4 ...                                      │    │
+│  │                                                                      │    │
+│  │   emit agent_start / agent_end events (每个子任务)                   │    │
+│  └──────────────────────────────────────────────────────────────────────┘    │
+│                                                                               │
+│  ⚡ 优化策略:                                                                  │
+│     • 并发限流: max_concurrent=3 (避免过载)                                   │
+│     • 渐进式超时: 根据任务类型动态计算                                        │
+│     • 智能重试: 指数退避 (RateLimitError/NetworkError)                        │
+└──────────────────────────────────────────────────────────────────────────────┘
+   │
+   ↓
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 阶段 5: 质量评审（CriticAgent - 使用 Sonnet）                                 │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  CriticAgent.review(task_description, results, quality_criteria)             │
+│    ↓                                                                          │
+│  LLM.generate(Sonnet) ← 使用 Critic Prompt                                    │
+│    ↓                                                                          │
+│  CriticReview:                                                                │
+│    ├─→ passed: bool                                                          │
+│    ├─→ overall_score: float  # 0-10                                          │
+│    ├─→ issues: List[str]     # 发现的问题                                    │
+│    ├─→ suggestions: List[str]  # 改进建议                                    │
+│    └─→ requires_rework: bool   # 是否需要返工                                │
+│          ↓                                                                    │
+│  ┌────────────────────────────────────────────┐                              │
+│  │ if requires_rework:                        │                              │
+│  │   ├─→ 获取需要重做的子任务 ID              │                              │
+│  │   ├─→ 生成改进提示                         │                              │
+│  │   ├─→ 重新执行问题子任务                   │                              │
+│  │   └─→ 再次评审 (最多 2 次返工)             │                              │
+│  │                                            │                              │
+│  │ else:                                      │                              │
+│  │   └─→ 通过，继续下一步                     │                              │
+│  └────────────────────────────────────────────┘                              │
+│                                                                               │
+│  emit critic_review event                                                    │
+└──────────────────────────────────────────────────────────────────────────────┘
+   │
+   ↓
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 阶段 6: 结果聚合（LeadAgent）                                                 │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  LeadAgent.aggregate_results(subtask_results)                                │
+│    ↓                                                                          │
+│  ├─→ 合并所有子任务结果                                                       │
+│  ├─→ 生成最终输出                                                             │
+│  └─→ 计算总体统计信息:                                                        │
+│        • total_time                                                          │
+│        • total_tokens                                                        │
+│        • success_rate                                                        │
+│          ↓                                                                    │
+│  emit orchestrator_summary / orchestrator_end events                         │
+└──────────────────────────────────────────────────────────────────────────────┘
+   │
+   ↓
+SSE Stream → 用户
+```
+
+**多智能体执行模式**：
+
+| 模式 | 适用场景 | 优点 | 缺点 |
+|-----|---------|------|------|
+| **串行模式** | 严格依赖关系 | 逻辑清晰、易调试 | 总耗时 = Σ(子任务耗时) |
+| **并行模式** | 独立子任务 | 总耗时 ≈ max(子任务耗时) | Token消耗峰值高 |
+| **混合模式** | 部分并行/部分串行 | 兼顾性能和依赖 | 管理复杂度高 |
+
+**强弱配对策略**：
+
+- **LeadAgent**: Sonnet (任务分解、结果聚合)
+- **SubAgents**: Haiku (执行具体子任务)
+- **Critic**: Sonnet (质量评审)
+- **成本优化**: 节省 39% (相比全Sonnet)
+
 ---
 
 ## 核心模块详解
@@ -1006,11 +1358,16 @@ async def create_agent_from_instance(instance_name: str):
 
 **职责**：在服务层完成意图识别和路由决策，为执行框架提供统一入口。
 
+**架构演进（V7）**：
+- ✅ **意图分析集中化**: IntentAnalyzer 从 SimpleAgent 剥离到路由层
+- ✅ **单点分析**: 意图分析只在路由层执行一次，结果传递给 SimpleAgent/MultiAgent
+- ✅ **内部分析移除**: SimpleAgent 不再执行内部意图分析，完全依赖路由层传入的 `intent` 参数
+
 **文件结构**：
 ```
 core/routing/
 ├── __init__.py
-├── intent_analyzer.py      # IntentAnalyzer (从 SimpleAgent 剥离)
+├── intent_analyzer.py      # IntentAnalyzer (共享，使用 Haiku 快速分析)
 ├── router.py               # AgentRouter 路由决策器
 └── complexity_scorer.py    # ComplexityScorer 复杂度评分
 ```
@@ -1051,18 +1408,39 @@ class AgentRouter:
         user_id: Optional[str] = None
     ) -> RoutingDecision:
         """
-        路由决策流程：
-        1. 意图识别
-        2. 复杂度评分
-        3. 路由决策
-        """
-        intent = await self.intent_analyzer.analyze(user_query, conversation_history, user_id)
-        complexity = self.complexity_scorer.score(intent, conversation_history)
+        路由决策流程（V7 架构）：
+        1. 意图识别 (IntentAnalyzer + Haiku)
+        2. 复杂度评分 (优先使用LLM评分)
+        3. 路由决策 (单/多智能体)
+        4. Budget检查 (多智能体场景)
         
-        if complexity.score <= 5:
-            return RoutingDecision(agent_type="single", intent=intent, complexity=complexity)
+        返回：RoutingDecision
+            - use_multi_agent: bool        # 是否使用多智能体
+            - intent: IntentResult         # 意图结果（传递给Agent）
+            - complexity_score: float      # 复杂度评分 (0-10)
+            - reason: str                  # 决策理由
+            - fallback_reason: Optional[str]  # 降级原因
+        """
+        # 1. 意图识别（使用 Haiku）
+        intent = await self.intent_analyzer.analyze(user_query, conversation_history, user_id)
+        
+        # 2. 复杂度评分
+        complexity_score = intent.complexity_score or self.complexity_scorer.score(intent)
+        
+        # 3. 路由决策
+        if intent.needs_multi_agent or complexity_score >= self.complexity_threshold:
+            # 4. Budget检查（多智能体场景）
+            if user_id and not await self.check_budget(user_id, "multi_agent"):
+                # 预算不足，降级为单智能体
+                return RoutingDecision(
+                    use_multi_agent=False, 
+                    intent=intent, 
+                    complexity_score=complexity_score,
+                    fallback_reason="预算不足"
+                )
+            return RoutingDecision(use_multi_agent=True, intent=intent, complexity_score=complexity_score)
         else:
-            return RoutingDecision(agent_type="multi", intent=intent, complexity=complexity)
+            return RoutingDecision(use_multi_agent=False, intent=intent, complexity_score=complexity_score)
 
 # core/routing/complexity_scorer.py
 class ComplexityScorer:
@@ -1129,12 +1507,18 @@ core/agent/
 
 **职责**：单智能体执行框架，实现 RVR（React + Validation + Reflection）循环。
 
+**架构演进（V7）**：
+- ✅ **意图分析外置化**: 不再执行内部意图分析，完全依赖路由层传入的 `intent` 参数
+- ✅ **原型池优化**: 通过 `clone_for_session()` 从原型池浅拷贝（<5ms），性能提升10-20x
+- ✅ **RVR循环**: React + Validation + Reflection 核心循环
+
 ```python
 class SimpleAgent:
     """
     单智能体 - RVR 循环执行
     
     设计哲学：只做编排（Orchestrator），不包含业务逻辑
+    V7 架构：意图分析由路由层统一完成
     """
     
     def __init__(
@@ -1151,25 +1535,83 @@ class SimpleAgent:
         
     async def chat(
         self, 
-        user_input: str, 
-        session_id: str = None,
-        intent_result: IntentAnalysisResult = None  # 从路由层接收
+        messages: List[Dict[str, str]],
+        session_id: str,
+        message_id: str = None,
+        enable_stream: bool = True,
+        variables: Dict[str, Any] = None,
+        intent: Optional[IntentResult] = None  # V7: 从路由层接收（必需）
     ) -> AsyncGenerator[Dict, None]:
         """
         处理用户输入（流式返回）
         
-        流程：
-        1. 使用路由层传入的意图结果
-        2. 记忆检索（按需）
-        3. 系统提示词组装
-        4. RVR 循环执行
-        """
-        # 根据复杂度选择提示词
-        system_prompt = self._prompt_cache.get_system_prompt(intent_result.complexity)
+        执行流程（7阶段）：
+        阶段 1: Session/Agent 初始化（在 SessionService 中完成）
+        阶段 2: 使用路由层传入的 Intent（不再执行内部分析）✅
+        阶段 3: Tool Selection（Schema > Plan > Intent）
+        阶段 4: System Prompt 组装（多层缓存 L1/L2/L3）
+        阶段 5: Plan Creation（Prompt驱动 + Claude自主）
+        阶段 6: RVR Loop 核心执行
+        阶段 7: Final Output & Tracing Report
         
-        # RVR 循环
-        async for event in self._rvr_loop(user_input, system_prompt):
+        Args:
+            messages: 完整消息列表
+            session_id: 会话ID
+            message_id: 消息ID
+            enable_stream: 是否流式输出
+            variables: 前端上下文变量
+            intent: 路由层传入的意图结果（V7必需）
+        
+        Yields:
+            SSE 事件流
+        """
+        # 阶段 2: 使用路由层 Intent（内部分析已移除）
+        if intent is not None:
+            logger.info(f"使用路由层意图: {intent.task_type.value}, complexity={intent.complexity.value}")
+        else:
+            logger.warning("未提供意图结果，使用默认配置（建议启用路由层）")
+            intent = IntentResult.default()
+        
+        # 阶段 3-7: 执行流程...
+        async for event in self._execute_flow(messages, intent, ...):
             yield event
+    
+    def clone_for_session(
+        self,
+        event_manager: EventBroadcaster,
+        workspace_dir: Optional[Path] = None,
+        conversation_service = None
+    ) -> "SimpleAgent":
+        """
+        从原型克隆 Session 级实例（V7.1 优化）
+        
+        浅拷贝重量级组件（共享）：
+        - LLM Services
+        - CapabilityRegistry
+        - ToolExecutor
+        - MCP Client
+        - PromptCache
+        
+        重置 Session 级状态：
+        - EventBroadcaster
+        - UsageTracker
+        - _plan_cache
+        
+        性能：<5ms（原 50-100ms）
+        """
+        cloned = SimpleAgent.__new__(SimpleAgent)
+        
+        # 浅拷贝共享组件
+        cloned.llm = self.llm
+        cloned.tool_executor = self.tool_executor
+        cloned.capability_registry = self.capability_registry
+        
+        # 重置 Session 状态
+        cloned.event_manager = event_manager
+        cloned.usage_tracker = UsageTracker()
+        cloned._plan_cache = {}
+        
+        return cloned
 ```
 
 #### MultiAgentOrchestrator
