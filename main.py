@@ -1,6 +1,7 @@
 """
 Zenflux Agent - FastAPI 服务
 基于 Claude 的智能体 Web API
+Build: 2026-01-16 v2
 """
 
 # ==================== 标准库 ====================
