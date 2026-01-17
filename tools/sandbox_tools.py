@@ -336,16 +336,46 @@ def _get_project_scaffold(stack: str, project_name: str) -> Dict[str, str]:
                 "}\n"
             ),
             "server.js": (
-                "import express from 'express'\n\n"
+                "import express from 'express'\n"
+                "import { fileURLToPath } from 'url'\n"
+                "import { dirname, join } from 'path'\n\n"
+                "const __filename = fileURLToPath(import.meta.url)\n"
+                "const __dirname = dirname(__filename)\n\n"
                 "const app = express()\n"
                 "const port = process.env.PORT ? Number(process.env.PORT) : 3000\n\n"
-                "app.get('/', (_req, res) => {\n"
-                "  res.send('Hello from Node.js')\n"
+                "// 🔑 静态文件服务：提供 public 目录下的文件（HTML/CSS/JS/图片等）\n"
+                "// 将静态资源放在 public/ 目录下，访问时直接使用文件名\n"
+                "// 例如：public/index.html -> http://localhost:3000/index.html\n"
+                "app.use(express.static(join(__dirname, 'public')))\n\n"
+                "// 🔑 也支持根目录下的静态文件（如果你不想用 public 目录）\n"
+                "// 优先级：public 目录 > 根目录\n"
+                "app.use(express.static(__dirname))\n\n"
+                "// API 路由示例\n"
+                "app.get('/api/health', (_req, res) => {\n"
+                "  res.json({ status: 'ok', message: 'Hello from Node.js' })\n"
+                "})\n\n"
+                "// 兜底路由：如果没有匹配的静态文件或 API，返回 index.html（适用于 SPA）\n"
+                "app.get('*', (req, res) => {\n"
+                "  const indexPath = join(__dirname, 'public', 'index.html')\n"
+                "  const rootIndexPath = join(__dirname, 'index.html')\n"
+                "  // 尝试 public/index.html，如果不存在则尝试根目录的 index.html\n"
+                "  res.sendFile(indexPath, (err) => {\n"
+                "    if (err) {\n"
+                "      res.sendFile(rootIndexPath, (err2) => {\n"
+                "        if (err2) {\n"
+                "          res.status(404).send('Not Found - 请创建 index.html 或 public/index.html')\n"
+                "        }\n"
+                "      })\n"
+                "    }\n"
+                "  })\n"
                 "})\n\n"
                 "app.listen(port, '0.0.0.0', () => {\n"
-                "  console.log(`listening on ${port}`)\n"
+                "  console.log(`🚀 Server running at http://localhost:${port}`)\n"
+                "  console.log(`📁 Static files: ./public/ or ./`)\n"
                 "})\n"
             ),
+            # 创建 public 目录的占位文件
+            "public/.gitkeep": "",
         }
 
     raise ValueError(f"不支持的 stack: {stack}")
@@ -465,7 +495,13 @@ class SandboxCreateProject(BaseTool):
         return (
             "在沙盒中初始化项目骨架（Initialize project）。\n"
             "项目将创建在 /home/user/<project_name>/ 下。\n"
-            "注意：该工具只创建文件，不会自动安装依赖。"
+            "注意：该工具只创建文件，不会自动安装依赖。\n\n"
+            "【Node.js 静态文件说明】\n"
+            "Node.js 项目默认配置了 express.static 中间件：\n"
+            "- 静态文件放在 public/ 目录下（推荐）\n"
+            "- 也支持直接放在项目根目录\n"
+            "- 访问方式：http://host/index.html 或 http://host/game.js\n"
+            "- 如果访问根路径 / 会自动寻找 index.html"
         )
 
     @property

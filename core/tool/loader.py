@@ -128,6 +128,7 @@ class ToolLoader:
         """
         self.global_registry = global_registry
         self._all_tool_names = set(global_registry.capabilities.keys())
+        logger.info(f"🔧 ToolLoader 初始化: 注册表中有 {len(self._all_tool_names)} 个工具")
     
     def _expand_category_config(
         self,
@@ -160,7 +161,8 @@ class ToolLoader:
                     if tool_name in self._all_tool_names:
                         expanded[tool_name] = is_enabled
                     else:
-                        logger.debug(f"   ⚠️ 工具 {tool_name} 不在注册表中，跳过")
+                        # 使用 warning 级别，确保被注意到
+                        logger.warning(f"   ⚠️ 工具 {tool_name} 不在注册表中，跳过（类别: {key}）")
             else:
                 # 普通工具配置，直接添加
                 expanded[key] = bool(value)

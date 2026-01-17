@@ -29,8 +29,6 @@ class User(Base):
     
     # 基本信息
     username: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
-    avatar_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(

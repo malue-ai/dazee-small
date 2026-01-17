@@ -1244,9 +1244,30 @@ capabilities:
     api_name: e2b
     session_scoped: true
   metadata:
-    description: 初始化项目骨架（Initialize project）
-    preferred_for: [初始化项目, 创建项目, 快速开始]
-    keywords: [sandbox, 沙盒, 项目, 初始化, scaffold, streamlit, gradio, flask, fastapi, vue, react, nextjs]
+    description: |
+      初始化项目骨架（Initialize project）。
+      
+      【重要：Node.js 项目静态文件配置】
+      nodejs 技术栈默认配置了 express.static 中间件：
+      - 静态文件（HTML/CSS/JS/图片）放在 public/ 目录下（推荐）
+      - 也支持直接放在项目根目录
+      - 创建游戏/Web应用时，将 index.html 和 JS 文件放在 public/ 目录
+      - 访问 http://host/ 会自动寻找 index.html
+      
+      【常见错误避免】
+      ❌ 错误：创建 index.html 后直接访问，只看到 "Hello from Node.js"
+      ✅ 正确：将 index.html 放在 public/ 目录或项目根目录
+    preferred_for: [初始化项目, 创建项目, 快速开始, 创建游戏, Web应用]
+    keywords: [sandbox, 沙盒, 项目, 初始化, scaffold, streamlit, gradio, flask, fastapi, vue, react, nextjs, nodejs, 游戏, 静态文件]
+    note: |
+      Node.js 项目文件结构示例：
+      my_app/
+      ├── server.js      # Express 服务器（已配置静态文件服务）
+      ├── package.json
+      └── public/        # 静态文件目录
+          ├── index.html # 入口页面
+          ├── game.js    # 游戏逻辑
+          └── style.css  # 样式文件
   input_schema:
     type: object
     properties:

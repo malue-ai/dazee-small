@@ -141,12 +141,11 @@ async def _start_scheduler() -> Optional[Any]:
         scheduler = get_scheduler()
         await scheduler.start()
         
-        if scheduler.is_running():c
-            jobs = scheduler.get_jobs()
-            print(f"✅ 定时任务调度器已启动，共 {len(jobs)} 个任务")
+        if scheduler.is_running():
+            print("✅ 定时任务调度器已启动")
         else:
             print("○ 没有配置定时任务，调度器未启动")
-        return scheduler
+        return scheduler   
     
     except Exception as e:
         print(f"⚠️ 定时任务调度器启动失败: {e}")

@@ -96,6 +96,11 @@ class CapabilityRegistry:
                 self._raw_capabilities.append(cap_data)  # 🆕 保存原始配置
             except Exception as e:
                 print(f"⚠️ Warning: Failed to parse capability {cap_data.get('name', 'unknown')}: {e}")
+        
+        # 打印加载结果
+        if self.capabilities:
+            cap_names = list(self.capabilities.keys())
+            print(f"✅ Loaded {len(self.capabilities)} capabilities: {', '.join(cap_names)}")
     
     def _parse_capability(self, data: Dict) -> Capability:
         """解析能力配置"""

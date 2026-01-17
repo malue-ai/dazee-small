@@ -201,17 +201,19 @@ class E2BSandboxProvider(SandboxProvider):
                 os.environ["E2B_API_KEY"] = self.api_key
             
             # 创建沙盒
-            logger.info(f"🆕 创建新沙盒 (auto_pause=True): conversation={conversation_id}")
+            # 注意：e2b-code-interpreter 1.x+ 版本直接使用构造函数创建沙盒
+            # beta_create 方法已被移除
+            logger.info(f"🆕 创建新沙盒: conversation={conversation_id}")
             
             sandbox = await asyncio.to_thread(
-                CodeInterpreter.beta_create,
-                auto_pause=True,
-                timeout=self.DEFAULT_TIMEOUT_MS // 1000,
-                metadata={
-                    "conversation_id": conversation_id,
-                    "user_id": user_id,
-                    "stack": stack or "python"
-                }
+                lambda: CodeInterpreter(
+                    timeout=self.DEFAULT_TIMEOUT_MS // 1000,
+                    metadata={
+                        "conversation_id": conversation_id,
+                        "user_id": user_id,
+                        "stack": stack or "python"
+                    }
+                )
             )
             
             # 等待沙盒就绪
