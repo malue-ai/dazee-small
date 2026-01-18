@@ -130,8 +130,31 @@ def messages_to_dict_list(messages: List["Message"]) -> List[Dict[str, Any]]:
         >>> dicts = messages_to_dict_list([Message(role="user", content="你好")])
         >>> dicts[0]["role"]
         'user'
+    
+    Notes:
+        - 会自动过滤掉内容为空的消息（防止 Claude API 报错）
+        - 保留最后的 assistant 消息即使内容为空（Claude 允许）
     """
-    return [{"role": msg.role, "content": msg.content} for msg in messages]
+    result = []
+    for i, msg in enumerate(messages):
+        # 检查 content 是否有效
+        content = msg.content
+        
+        # 跳过空内容的非最终 assistant 消息
+        is_last_message = (i == len(messages) - 1)
+        is_assistant = (msg.role == "assistant")
+        is_empty = not content or (isinstance(content, str) and not content.strip())
+        
+        if is_empty and not (is_last_message and is_assistant):
+            logger.warning(
+                f"跳过空内容消息: role={msg.role}, "
+                f"index={i}, is_last={is_last_message}"
+            )
+            continue
+        
+        result.append({"role": msg.role, "content": content})
+    
+    return result
 
 
 def append_assistant_message(

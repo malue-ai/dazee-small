@@ -97,6 +97,18 @@ class ToolExecutor:
         
         self._load_tools()
     
+    def update_context(self, context_updates: Dict[str, Any]):
+        """
+        🆕 V7.1: 更新工具上下文
+        
+        用于 Agent 克隆时更新 workspace_dir、event_manager 等
+        
+        Args:
+            context_updates: 要更新的上下文字段
+        """
+        self.tool_context.update(context_updates)
+        logger.debug(f"🔧 ToolExecutor 上下文已更新: {list(context_updates.keys())}")
+    
     def _load_tools(self):
         """从 Registry 加载所有工具"""
         tool_caps = self.registry.find_by_type(CapabilityType.TOOL)

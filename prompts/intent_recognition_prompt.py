@@ -45,6 +45,7 @@ Analyze the user query (considering conversation history if provided) and classi
 {
   "task_type": "information_query|content_generation|data_analysis|code_task|other",
   "complexity": "simple|medium|complex",
+  "complexity_score": 0.0-10.0,
   "needs_plan": true|false,
   "skip_memory_retrieval": true|false,
   "needs_multi_agent": true|false,
@@ -52,7 +53,7 @@ Analyze the user query (considering conversation history if provided) and classi
 }
 ```
 
-**ALL SIX FIELDS ARE REQUIRED** — 不要省略任何字段。即使不确定也要给出最接近的分类。
+**ALL SEVEN FIELDS ARE REQUIRED** — 不要省略任何字段。即使不确定也要给出最接近的分类。
 """
 
 INTENT_PROMPT_TASK_TYPES = """
@@ -75,7 +76,7 @@ INTENT_PROMPT_TASK_TYPES = """
 """
 
 INTENT_PROMPT_COMPLEXITY = """
-### Complexity
+### Complexity (Level)
 - **simple**: Single-step, direct answer
   - 1 action, immediate result
   - Examples: "weather?", "current time?", "what is Python?"
@@ -85,6 +86,23 @@ INTENT_PROMPT_COMPLEXITY = """
   
 - **complex**: 5+ steps, requires planning
   - Examples: "create product PPT with research", "analyze market and write strategy"
+
+### Complexity Score (0-10)
+
+除了 complexity 等级，还需要输出一个精确的 **complexity_score** (0-10):
+
+| 分数范围 | 路由决策 | 典型场景 |
+|----------|----------|----------|
+| 0-3 | 单智能体 | 简单问答、信息查询、翻译 |
+| 3-5 | 单智能体（带 Plan） | 内容生成、数据分析、代码任务 |
+| 5-7 | 可选多智能体 | 较复杂任务，视情况决定 |
+| 7-10 | 多智能体 | 多实体并行研究、复杂工作流 |
+
+**评分维度（参考，非硬规则）**：
+- 任务步骤数：1步(+0) / 2-4步(+2) / 5+步(+4)
+- 工具依赖：无工具(+0) / 1-2工具(+1) / 3+工具(+3)
+- 并行子任务：无(+0) / 有(+3)
+- 上下文依赖：低(+0) / 中(+1) / 高(+2)
 
 ### Needs Plan
 - **true**: complexity is medium or complex
@@ -339,10 +357,10 @@ INTENT_PROMPT_FOOTER = """
 
 - DO NOT analyze what tools/capabilities are needed (that's Sonnet's job)
 - DO NOT create a plan (that's Sonnet's job)
-- ONLY classify: task_type, complexity, needs_plan, skip_memory_retrieval, needs_multi_agent, is_follow_up
+- ONLY classify: task_type, complexity, complexity_score, needs_plan, skip_memory_retrieval, needs_multi_agent, is_follow_up
 - Consider conversation history when determining is_follow_up and task_type
 
-## Example
+## Examples
 
 Input: "Create a professional product presentation with market data"
 
@@ -351,9 +369,40 @@ Output:
 {
   "task_type": "content_generation",
   "complexity": "complex",
+  "complexity_score": 6.5,
   "needs_plan": true,
   "skip_memory_retrieval": false,
   "needs_multi_agent": false,
+  "is_follow_up": false
+}
+```
+
+Input: "What's the weather in Shanghai?"
+
+Output:
+```json
+{
+  "task_type": "information_query",
+  "complexity": "simple",
+  "complexity_score": 1.0,
+  "needs_plan": false,
+  "skip_memory_retrieval": true,
+  "needs_multi_agent": false,
+  "is_follow_up": false
+}
+```
+
+Input: "Research top 5 AI companies and compare their strategies"
+
+Output:
+```json
+{
+  "task_type": "data_analysis",
+  "complexity": "complex",
+  "complexity_score": 8.0,
+  "needs_plan": true,
+  "skip_memory_retrieval": false,
+  "needs_multi_agent": true,
   "is_follow_up": false
 }
 ```

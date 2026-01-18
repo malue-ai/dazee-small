@@ -135,16 +135,35 @@ class SimpleAgent:
         self.apis_config = apis_config or []
         
         # 🆕 上下文管理策略（三层防护）
-        # 配置来源：环境变量 QOS_LEVEL + 框架配置 config/context_compaction.yaml
-        # 注意：不从实例配置读取，运营人员无需配置此项
-        from core.context.compaction import get_context_strategy, QoSLevel
+        # 配置来源：环境变量 QOS_LEVEL + Schema context_limits 覆盖
+        from core.context.compaction import get_context_strategy, QoSLevel, ContextStrategy
         qos_level_str = os.getenv("QOS_LEVEL", "pro")
         try:
             qos_level = QoSLevel(qos_level_str)
         except ValueError:
             qos_level = QoSLevel.PRO
         
-        self.context_strategy = get_context_strategy(qos_level=qos_level)
+        base_strategy = get_context_strategy(qos_level=qos_level)
+        
+        # 🆕 V7: 使用 Schema 中的 context_limits 覆盖默认策略
+        if schema is not None and hasattr(schema, 'context_limits'):
+            ctx_limits = schema.context_limits
+            self.context_strategy = ContextStrategy(
+                enable_memory_guidance=base_strategy.enable_memory_guidance,
+                enable_history_trimming=base_strategy.enable_history_trimming,
+                max_history_messages=base_strategy.max_history_messages,
+                preserve_first_n=base_strategy.preserve_first_n,
+                preserve_last_n=base_strategy.preserve_last_n,
+                preserve_tool_results=base_strategy.preserve_tool_results,
+                qos_level=qos_level,
+                # 🆕 从 Schema context_limits 覆盖
+                token_budget=ctx_limits.max_context_tokens,
+                warning_threshold=ctx_limits.warning_threshold,
+            )
+            logger.debug(f"✓ 上下文策略: 使用 Schema context_limits 覆盖 (budget={ctx_limits.max_context_tokens:,})")
+        else:
+            self.context_strategy = base_strategy
+        
         logger.debug(
             f"✓ 上下文策略: L1_memory={self.context_strategy.enable_memory_guidance}, "
             f"L2_trim={self.context_strategy.enable_history_trimming}, "
@@ -186,7 +205,127 @@ class SimpleAgent:
         self._tracer: Optional[E2EPipelineTracer] = None
         self.enable_tracing = True  # 默认启用追踪
         
+        # 🆕 V7.1: 原型标记（由 AgentRegistry 设置）
+        self._is_prototype = False
+        
         logger.info(f"✅ SimpleAgent 初始化完成 (model={self.model}, schema={self.schema.name})")
+    
+    def clone_for_session(
+        self,
+        event_manager,
+        workspace_dir: str = None,
+        conversation_service = None
+    ) -> "SimpleAgent":
+        """
+        🆕 V7.1: 从原型克隆 Agent 实例（快速路径）
+        
+        复用原型中的重量级组件，仅重置会话级状态
+        
+        复用的组件（不重新创建）：
+        - llm, intent_llm: LLM Service
+        - capability_registry: 能力注册表
+        - tool_executor: 工具执行器
+        - tool_selector: 工具选择器
+        - intent_analyzer: 意图分析器
+        - plan_todo_tool: Plan/Todo 工具
+        - invocation_selector: 调用模式选择器
+        - context_engineering: 上下文工程管理器
+        - _instance_registry: 实例级工具注册表
+        - _mcp_clients, _mcp_tools: MCP 相关
+        
+        重置的状态（每个会话独立）：
+        - event_manager, broadcaster: 事件管理
+        - workspace_dir: 工作目录
+        - _plan_cache: Plan 缓存
+        - invocation_stats: 调用统计
+        - _last_intent_result: 意图结果
+        - _tracer: Pipeline 追踪器
+        - usage_tracker: Usage 统计
+        
+        Args:
+            event_manager: 事件管理器（必需）
+            workspace_dir: 工作目录
+            conversation_service: 会话服务
+            
+        Returns:
+            就绪的 Agent 实例
+        """
+        # 创建新实例（绕过 __init__）
+        clone = object.__new__(SimpleAgent)
+        
+        # ========== 复用原型的重量级组件 ==========
+        clone.model = self.model
+        clone.max_turns = self.max_turns
+        clone.schema = self.schema
+        clone.system_prompt = self.system_prompt
+        clone.prompt_schema = self.prompt_schema
+        clone.prompt_cache = self.prompt_cache
+        clone.apis_config = self.apis_config
+        clone.context_strategy = self.context_strategy
+        
+        # LLM Services（复用）
+        clone.llm = self.llm
+        clone.intent_llm = getattr(self, 'intent_llm', None)
+        
+        # 组件（复用）
+        clone.capability_registry = self.capability_registry
+        clone.tool_executor = self.tool_executor
+        clone.tool_selector = getattr(self, 'tool_selector', None)
+        clone.intent_analyzer = getattr(self, 'intent_analyzer', None)
+        clone.plan_todo_tool = getattr(self, 'plan_todo_tool', None)
+        clone.invocation_selector = self.invocation_selector
+        clone.context_engineering = self.context_engineering
+        
+        # 工具配置（复用）
+        clone.allow_parallel_tools = self.allow_parallel_tools
+        clone.max_parallel_tools = self.max_parallel_tools
+        clone._serial_only_tools = self._serial_only_tools
+        
+        # 实例级工具注册表（复用）
+        clone._instance_registry = getattr(self, '_instance_registry', None)
+        
+        # MCP 相关（复用）
+        clone._mcp_clients = getattr(self, '_mcp_clients', [])
+        clone._mcp_tools = getattr(self, '_mcp_tools', [])
+        
+        # Workers 配置（复用）
+        clone.workers_config = getattr(self, 'workers_config', [])
+        
+        # ========== 设置会话级参数 ==========
+        clone.event_manager = event_manager
+        clone.workspace_dir = workspace_dir
+        
+        # 更新工具执行器的上下文（workspace_dir 等）
+        if clone.tool_executor and hasattr(clone.tool_executor, 'update_context'):
+            clone.tool_executor.update_context({
+                "event_manager": event_manager,
+                "workspace_dir": workspace_dir,
+            })
+        
+        # 创建新的 EventBroadcaster
+        from core.events.broadcaster import EventBroadcaster
+        clone.broadcaster = EventBroadcaster(event_manager, conversation_service)
+        
+        # ========== 重置会话级状态 ==========
+        clone._plan_cache = {"plan": None, "todo": None, "tool_calls": []}
+        clone.invocation_stats = {"direct": 0, "code_execution": 0, "programmatic": 0, "streaming": 0}
+        clone._last_intent_result = None
+        clone._tracer = None
+        clone.enable_tracing = True
+        clone._current_message_id = None
+        clone._current_conversation_id = None
+        clone._current_user_id = None
+        
+        # 创建新的 UsageTracker
+        from utils.usage_tracker import create_usage_tracker
+        clone.usage_tracker = create_usage_tracker()
+        
+        # 标记为非原型
+        clone._is_prototype = False
+        
+        logger.debug(f"🚀 Agent 克隆完成 (model={clone.model}, schema={clone.schema.name})")
+        
+        return clone
     
     def _init_modules(self):
         """
@@ -257,13 +396,28 @@ class SimpleAgent:
         logger.debug("✓ InvocationSelector 已初始化（V4.4 条件激活）")
         
         # 7. 执行 LLM（Sonnet）
-        # 🆕 V6.3: 启用 Prompt Caching（多层缓存，节省 88% 成本）
-        self.llm = create_claude_service(
-            model=self.model,  # 使用 Schema 中的 model
-            enable_thinking=True,
-            enable_caching=True,  # 🆕 V6.3: 启用缓存，支持多层缓存（1h TTL）
-            tools=[ToolType.BASH, ToolType.TEXT_EDITOR, ToolType.WEB_SEARCH]
-        )
+        # 🆕 V7: 从 Schema 读取 LLM 超参数，未配置则使用默认值
+        llm_enable_thinking = self.schema.enable_thinking if self.schema.enable_thinking is not None else True
+        llm_enable_caching = self.schema.enable_caching if self.schema.enable_caching is not None else True
+        
+        # 构建 LLM 参数（仅包含非 None 值）
+        llm_kwargs = {
+            "model": self.model,
+            "enable_thinking": llm_enable_thinking,
+            "enable_caching": llm_enable_caching,
+            "tools": [ToolType.BASH, ToolType.TEXT_EDITOR, ToolType.WEB_SEARCH],
+        }
+        
+        # 🆕 V7: 仅当 Schema 明确配置时才传递 LLM 超参数
+        if self.schema.temperature is not None:
+            llm_kwargs["temperature"] = self.schema.temperature
+        if self.schema.max_tokens is not None:
+            llm_kwargs["max_tokens"] = self.schema.max_tokens
+        
+        self.llm = create_claude_service(**llm_kwargs)
+        
+        logger.debug(f"✓ 执行 LLM 初始化: thinking={llm_enable_thinking}, caching={llm_enable_caching}, "
+                     f"temperature={self.schema.temperature}, max_tokens={self.schema.max_tokens}")
         
         # 注册自定义工具到 LLM（如果有 plan_todo_tool）
         if self.plan_todo_tool:
@@ -315,14 +469,16 @@ class SimpleAgent:
         messages: List[Dict[str, str]] = None,
         session_id: str = None,
         message_id: str = None,
-        enable_stream: bool = True
+        enable_stream: bool = True,
+        variables: Dict[str, Any] = None,
+        intent: Optional["IntentResult"] = None  # 🆕 V7: 从路由层传入的意图结果
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Agent 统一执行入口 - 7 阶段完整流程
         
         完整流程（参考 docs/00-ARCHITECTURE-V4.md L1693-1979）：
         阶段 1: Session/Agent 初始化 (在 SessionService.create_session 中完成)
-        阶段 2: Intent Analysis (Haiku 快速分析)
+        阶段 2: Intent Analysis - 使用路由层传入的意图结果（内部意图分析已移除）
         阶段 3: Tool Selection (Schema 驱动优先)
         阶段 4: System Prompt 组装 + LLM 调用准备
         阶段 5: Plan Creation (System Prompt 约束 + Claude 自主触发，在 RVR Turn 1 内部)
@@ -336,6 +492,8 @@ class SimpleAgent:
             session_id: 会话ID
             message_id: 消息ID（用于事件关联）
             enable_stream: 是否流式输出
+            variables: 前端上下文变量（如位置、时区等），直接注入到 Prompt
+            intent: V7 从路由层传入的意图分析结果（必需，如未提供则使用默认配置）
             
         Yields:
             事件字典
@@ -382,25 +540,23 @@ class SimpleAgent:
             self._tracer.set_user_query(user_query[:200])
         
         # =====================================================================
-        # 阶段 2: Intent Analysis (Haiku 快速分析)
+        # 阶段 2: Intent Analysis
         # =====================================================================
-        if self.schema.intent_analyzer.enabled and self.intent_analyzer:
-            # 🆕 追踪意图分析阶段
-            if self._tracer:
-                stage = self._tracer.create_stage("intent_analysis")
-                stage.start()
-                stage.set_input({"message_count": len(messages)})
-            
-            logger.info("🎯 开始意图分析...")
-            # 🆕 V6.1: 使用 analyze_with_context，追问场景复用上轮 task_type
-            intent = await self.intent_analyzer.analyze_with_context(
-                messages, 
-                previous_result=self._last_intent_result
+        # V7: 意图分析已在路由层完成（AgentRouter），此处仅使用传入的意图结果
+        # - 如果提供了 intent 参数（来自路由层），使用它
+        # - 如果未提供 intent 参数，使用默认配置（不执行内部分析）
+        # =====================================================================
+        
+        if intent is not None:
+            # 使用路由层提供的意图结果
+            logger.info(
+                f"🔀 使用路由层意图结果: {intent.task_type.value}, "
+                f"complexity={intent.complexity.value}"
             )
             # 保存本轮结果供下次追问使用
             self._last_intent_result = intent
             
-            # 发送意图识别结果给前端
+            # 发送意图识别结果给前端（来源标记为 routing_layer）
             intent_delta = {
                 "type": "intent",
                 "content": json.dumps({
@@ -408,25 +564,28 @@ class SimpleAgent:
                     "complexity": intent.complexity.value,
                     "needs_plan": intent.needs_plan,
                     "confidence": intent.confidence,
-                    "skip_memory_retrieval": intent.skip_memory_retrieval  # 🆕 V4.6
+                    "skip_memory_retrieval": intent.skip_memory_retrieval,
+                    "source": "routing_layer"
                 }, ensure_ascii=False)
             }
             yield await self.broadcaster.emit_message_delta(
                 session_id=session_id,
                 delta=intent_delta
             )
-            logger.info(f"🎯 意图识别完成: {intent.task_type.value}, complexity={intent.complexity.value}")
             
-            # 🆕 完成追踪
+            # 追踪意图分析阶段
             if self._tracer:
+                stage = self._tracer.create_stage("intent_analysis")
+                stage.start()
                 stage.complete({
                     "task_type": intent.task_type.value,
                     "complexity": intent.complexity.value,
-                    "needs_plan": intent.needs_plan
+                    "needs_plan": intent.needs_plan,
+                    "source": "routing_layer"
                 })
         else:
-            # 不执行意图分析，使用默认配置
-            logger.info("○ 跳过意图分析（Schema 未启用）")
+            # 未提供 intent 参数，使用默认配置（内部意图分析已移除）
+            logger.warning("⚠️ 未提供意图结果，使用默认配置（建议启用路由层）")
             from core.agent.types import IntentResult, TaskType, Complexity
             intent = IntentResult(
                 task_type=TaskType.GENERAL,
@@ -435,10 +594,10 @@ class SimpleAgent:
                 confidence=1.0
             )
             
-            # 🆕 记录跳过
+            # 记录跳过
             if self._tracer:
                 stage = self._tracer.create_stage("intent_analysis")
-                stage.skip("Schema 未启用")
+                stage.skip("未提供意图结果，使用默认配置")
         
         # =====================================================================
         # 阶段 3: Tool Selection (Schema 驱动优先)

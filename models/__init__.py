@@ -105,6 +105,9 @@ from .knowledge import (
     KnowledgeBaseDetailResponse,
 )
 
+# Usage 模型（计费响应）
+from .usage import UsageResponse, UsageSummary
+
 __all__ = [
     # Content Block 模型
     "TextBlock",
@@ -196,4 +199,7 @@ __all__ = [
     "KnowledgeMemberInvite",
     # 知识库系统模型 - 详情
     "KnowledgeBaseDetailResponse",
+    # Usage 模型
+    "UsageResponse",
+    "UsageSummary",
 ]

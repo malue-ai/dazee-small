@@ -119,7 +119,87 @@ class MultiAgentOrchestrator:
         # 初始化子组件
         self._init_components()
         
+        # 🆕 V7.1: 原型标记（由 AgentRegistry 设置）
+        self._is_prototype = False
+        
         logger.info(f"✅ MultiAgentOrchestrator 初始化完成 (预加载 {len(self.workers_config)} 个 Worker 配置)")
+    
+    def clone_for_session(
+        self,
+        event_manager,
+        workspace_dir: str = None,
+        conversation_service = None
+    ) -> "MultiAgentOrchestrator":
+        """
+        🆕 V7.1: 从原型克隆多智能体编排器（快速路径）
+        
+        复用原型中的重量级组件，仅重置会话级状态
+        
+        复用的组件（不重新创建）：
+        - llm_service: LLM Service
+        - task_decomposer: 任务分解器
+        - result_aggregator: 结果聚合器
+        - workers_config: Worker 配置
+        - config: 编排器配置
+        - prompt_cache: 提示词缓存
+        
+        重置的状态（每个会话独立）：
+        - event_manager: 事件管理器
+        - memory_manager: 记忆管理器（会话级）
+        - fsm_engine: FSM 引擎（会话级状态）
+        - worker_scheduler: Worker 调度器（会话级）
+        - fault_tolerance: 容错层（会话级）
+        
+        Args:
+            event_manager: 事件管理器（必需）
+            workspace_dir: 工作目录
+            conversation_service: 会话服务
+            
+        Returns:
+            就绪的编排器实例
+        """
+        # 创建新实例（绕过 __init__）
+        clone = object.__new__(MultiAgentOrchestrator)
+        
+        # ========== 复用原型的重量级组件 ==========
+        clone.llm_service = self.llm_service
+        clone.config = self.config
+        clone.prompt_cache = self.prompt_cache
+        clone.workers_config = self.workers_config
+        
+        # 复用任务分解器和结果聚合器（无状态）
+        clone.task_decomposer = self.task_decomposer
+        clone.result_aggregator = self.result_aggregator
+        
+        # ========== 设置会话级参数 ==========
+        clone.event_manager = event_manager
+        
+        # 创建新的会话级记忆管理器
+        from core.memory.working import WorkingMemory
+        clone.memory_manager = WorkingMemory(event_manager=event_manager)
+        
+        # 重新初始化会话级组件（FSM、调度器、容错层）
+        clone._init_components()
+        
+        # 附加元数据（如果原型有）
+        if hasattr(self, 'schema'):
+            clone.schema = self.schema
+        if hasattr(self, 'system_prompt'):
+            clone.system_prompt = self.system_prompt
+        if hasattr(self, 'model'):
+            clone.model = self.model
+        if hasattr(self, 'max_turns'):
+            clone.max_turns = self.max_turns
+        
+        clone.workspace_dir = workspace_dir
+        clone.conversation_service = conversation_service
+        
+        # 标记为非原型
+        clone._is_prototype = False
+        
+        logger.debug(f"🚀 MultiAgentOrchestrator 克隆完成 ({len(clone.workers_config)} workers)")
+        
+        return clone
     
     def _init_components(self):
         """初始化子组件"""
@@ -150,6 +230,10 @@ class MultiAgentOrchestrator:
         
         # 容错层
         self.fault_tolerance = create_fault_tolerance_layer()
+        
+        # 🆕 V7.1: 检查点管理器（P0 优化）
+        from core.multi_agent.checkpoint import create_checkpoint_manager
+        self.checkpoint_manager = create_checkpoint_manager()
     
     def _find_worker_config(self, specialization: str):
         """
@@ -166,6 +250,56 @@ class MultiAgentOrchestrator:
                 return worker_config
         return None
     
+    async def resume_from_checkpoint(
+        self,
+        checkpoint_id: str,
+        user_query: str,
+        session_id: str,
+        context: Dict[str, Any] = None
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        🆕 V7.1: 从检查点恢复执行
+        
+        Args:
+            checkpoint_id: 检查点 ID
+            user_query: 用户请求
+            session_id: 会话 ID
+            context: 额外上下文
+            
+        Yields:
+            事件字典
+        """
+        logger.info(f"🔄 从检查点恢复任务: checkpoint_id={checkpoint_id}")
+        
+        try:
+            # 恢复检查点
+            metadata, orchestrator_state, worker_results, ckpt_context = \
+                await self.checkpoint_manager.restore_from_checkpoint(checkpoint_id)
+            
+            task_id = metadata.task_id
+            
+            yield self._emit_event("checkpoint_restored", {
+                "task_id": task_id,
+                "checkpoint_id": checkpoint_id,
+                "phase": metadata.phase,
+                "progress": metadata.progress
+            })
+            
+            # 根据阶段继续执行
+            # TODO: 实现阶段恢复逻辑
+            # 当前简化实现：从头开始执行
+            logger.warning("⚠️ 检查点恢复功能正在开发中，将从头开始执行")
+            
+            async for event in self.execute(user_query, session_id, context):
+                yield event
+        
+        except Exception as e:
+            logger.error(f"❌ 检查点恢复失败: {e}")
+            yield self._emit_event("error", {
+                "checkpoint_id": checkpoint_id,
+                "error": f"检查点恢复失败: {str(e)}"
+            })
+    
     async def execute(
         self,
         user_query: str,
@@ -174,6 +308,8 @@ class MultiAgentOrchestrator:
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         执行 Multi-Agent 任务（流式返回）
+        
+        🆕 V7.1: 支持检查点保存，失败时可从检查点恢复
         
         Args:
             user_query: 用户请求
@@ -233,6 +369,19 @@ class MultiAgentOrchestrator:
                 "reasoning": decomposition_result.reasoning,
                 "parallelizable_groups": decomposition_result.parallelizable_groups
             })
+            
+            # 🆕 V7.1: 保存检查点（任务分解完成）
+            await self.checkpoint_manager.save_checkpoint(
+                task_id=task_id,
+                session_id=session_id,
+                orchestrator_state=task_state.model_dump(),
+                worker_results=[],
+                checkpoint_type="phase",
+                phase="decomposing_complete",
+                progress=0.25,
+                description="任务分解完成",
+                context={"sub_tasks_count": len(decomposition_result.sub_tasks)}
+            )
             
             await self.fsm_engine.transition(task_id, "decompose_complete", {
                 "reasoning": decomposition_result.reasoning,
@@ -300,6 +449,28 @@ class MultiAgentOrchestrator:
                 await self.fsm_engine.transition(task_id, "partial_complete")
             else:
                 await self.fsm_engine.transition(task_id, "all_complete")
+            
+            # 🆕 V7.1: 保存检查点（Worker 执行完成）
+            worker_results_dump = [
+                {
+                    "task_id": r.task_id,
+                    "success": r.success,
+                    "output": r.output[:500] if r.output else "",  # 截断输出
+                    "duration": r.duration
+                }
+                for r in scheduler_result.results.values()
+            ]
+            await self.checkpoint_manager.save_checkpoint(
+                task_id=task_id,
+                session_id=session_id,
+                orchestrator_state=task_state.model_dump(),
+                worker_results=worker_results_dump,
+                checkpoint_type="phase",
+                phase="executing_complete",
+                progress=0.75,
+                description=f"Worker 执行完成 ({scheduler_result.completed_tasks}/{scheduler_result.total_tasks})",
+                context={"completed": scheduler_result.completed_tasks, "failed": scheduler_result.failed_tasks}
+            )
             
             # ==================== Phase 6: 观察 ====================
             yield self._emit_event("phase_start", {

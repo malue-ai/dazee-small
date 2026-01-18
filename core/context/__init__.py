@@ -36,6 +36,12 @@ from .injector import ContextInjector
 from .conversation import Context, create_context
 from .runtime import RuntimeContext, create_runtime_context
 
+# 会话上下文管理
+from .conversation import Context, create_context
+
+# 运行时上下文
+from .runtime import RuntimeContext, create_runtime_context
+
 __all__ = [
     # 主入口
     "ContextManager",

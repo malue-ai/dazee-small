@@ -46,10 +46,12 @@ class IntentResult:
     🆕 V4.6: 新增 skip_memory_retrieval 字段，用于智能决定是否需要 Mem0 记忆检索
     🆕 V6.0: 新增 needs_multi_agent 字段，用于智能决定是否需要 Multi-Agent 协作（Prompt-First）
     🆕 V6.1: 新增 is_follow_up 字段，用于识别追问/上下文延续（避免误判为新话题）
+    🆕 V7.0: 新增 complexity_score 字段，LLM 直接输出 0-10 评分（废弃 ComplexityScorer）
     """
     task_type: TaskType                          # 任务类型
-    complexity: Complexity                       # 复杂度
+    complexity: Complexity                       # 复杂度等级
     needs_plan: bool                             # 是否需要规划
+    complexity_score: float = 5.0                # 🆕 V7.0: 复杂度评分 0-10，由 LLM 直接输出
     needs_persistence: bool = False              # 🆕 V4.3: 是否需要跨 Session 持久化
     skip_memory_retrieval: bool = False          # 🆕 V4.6: 是否跳过 Mem0 记忆检索（默认不跳过）
     needs_multi_agent: bool = False              # 🆕 V6.0: 是否需要 Multi-Agent 协作（默认不需要）
@@ -63,6 +65,7 @@ class IntentResult:
         return {
             "task_type": self.task_type.value,
             "complexity": self.complexity.value,
+            "complexity_score": self.complexity_score,
             "needs_plan": self.needs_plan,
             "needs_persistence": self.needs_persistence,
             "skip_memory_retrieval": self.skip_memory_retrieval,

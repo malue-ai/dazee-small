@@ -89,24 +89,42 @@ class BlockContext:
     单个 block 的累积上下文
     
     支持并行累积多个 block（基于 index）
+    
+    优化：使用 List[str] + join 替代字符串拼接，减少内存分配
     """
     block_type: str
     index: int
-    content: str = ""  # text/thinking 内容
+    content_chunks: List[str] = field(default_factory=list)  # text/thinking 内容（优化：list 替代 str）
     tool_use: Optional[Dict[str, Any]] = None  # tool_use 数据
-    tool_input_buffer: str = ""  # 工具输入 JSON 缓冲
+    tool_input_chunks: List[str] = field(default_factory=list)  # 工具输入 JSON 缓冲（优化：list 替代 str）
     tool_result: Optional[Dict[str, Any]] = None  # tool_result 数据
-    tool_result_buffer: str = ""  # tool_result 内容缓冲
+    tool_result_chunks: List[str] = field(default_factory=list)  # tool_result 内容缓冲（优化：list 替代 str）
     is_complete: bool = False  # 是否已完成（收到 content_stop）
+    
+    @property
+    def content(self) -> str:
+        """懒加载获取完整内容"""
+        return "".join(self.content_chunks)
+    
+    @property
+    def tool_input_buffer(self) -> str:
+        """懒加载获取完整工具输入"""
+        return "".join(self.tool_input_chunks)
+    
+    @property
+    def tool_result_buffer(self) -> str:
+        """懒加载获取完整工具结果"""
+        return "".join(self.tool_result_chunks)
     
     def try_parse_tool_input(self) -> None:
         """尝试解析累积的工具输入 JSON"""
-        if not self.tool_input_buffer or not self.tool_use:
+        if not self.tool_input_chunks or not self.tool_use:
             return
         
         try:
-            self.tool_use["input"] = json.loads(self.tool_input_buffer)
-            self.tool_input_buffer = ""
+            full_buffer = "".join(self.tool_input_chunks)  # 只在解析时 join
+            self.tool_use["input"] = json.loads(full_buffer)
+            self.tool_input_chunks.clear()  # 解析成功后清空
         except json.JSONDecodeError:
             pass  # JSON 不完整，继续累积
 
@@ -168,10 +186,10 @@ class ContentAccumulator:
         ctx = BlockContext(block_type=block_type, index=index)
         
         if block_type == "thinking":
-            ctx.content = ""
+            ctx.content_chunks = []  # 初始化空 list
         
         elif block_type == "text":
-            ctx.content = ""
+            ctx.content_chunks = []  # 初始化空 list
         
         elif block_type in ("tool_use", "server_tool_use"):
             ctx.tool_use = {
@@ -180,7 +198,7 @@ class ContentAccumulator:
                 "name": content_block.get("name", ""),
                 "input": content_block.get("input", {})
             }
-            ctx.tool_input_buffer = ""
+            ctx.tool_input_chunks = []  # 初始化空 list
         
         elif block_type == "tool_result":
             initial_content = content_block.get("content", "")
@@ -201,7 +219,7 @@ class ContentAccumulator:
                     "tool_use_id": content_block.get("tool_use_id", ""),
                     "is_error": content_block.get("is_error", False)
                 }
-                ctx.tool_result_buffer = ""
+                ctx.tool_result_chunks = []  # 初始化空 list
         
         elif block_type and block_type.endswith("_tool_result"):
             # 服务端工具结果，直接保存
@@ -228,14 +246,14 @@ class ContentAccumulator:
             return
         
         if ctx.block_type == "text":
-            ctx.content += delta
+            ctx.content_chunks.append(delta)  # append 替代 +=（优化：减少内存分配）
         elif ctx.block_type == "thinking":
-            ctx.content += delta
+            ctx.content_chunks.append(delta)  # append 替代 +=（优化：减少内存分配）
         elif ctx.block_type in ("tool_use", "server_tool_use"):
-            ctx.tool_input_buffer += delta
+            ctx.tool_input_chunks.append(delta)  # append 替代 +=（优化：减少内存分配）
             ctx.try_parse_tool_input()
         elif ctx.block_type == "tool_result":
-            ctx.tool_result_buffer += delta
+            ctx.tool_result_chunks.append(delta)  # append 替代 +=（优化：减少内存分配）
     
     def on_content_stop(self, index: int, signature: Optional[str] = None) -> None:
         """

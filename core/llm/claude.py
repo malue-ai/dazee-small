@@ -33,7 +33,7 @@ import httpx
 
 from logger import get_logger
 from utils.message_utils import messages_to_dict_list
-from .adaptor import ClaudeAdaptor
+from infra.resilience import with_retry  # 🆕 V7.3: 使用统一的重试机制
 from .base import (
     BaseLLMService,
     LLMConfig,
@@ -563,6 +563,20 @@ class ClaudeLLMService(BaseLLMService):
     # 核心 API 方法
     # ============================================================
     
+    @with_retry(
+        max_retries=3,
+        base_delay=1.0,
+        retryable_errors=(
+            # Anthropic 特定异常
+            anthropic.APIConnectionError,
+            anthropic.APITimeoutError,
+            anthropic.RateLimitError,
+            # HTTPX 底层异常
+            httpx.RemoteProtocolError,
+            httpx.ConnectError,
+            httpx.TimeoutException,
+        )
+    )
     async def create_message_async(
         self,
         messages: List[Message],
@@ -573,6 +587,11 @@ class ClaudeLLMService(BaseLLMService):
     ) -> LLMResponse:
         """
         创建消息（异步）
+        
+        🆕 V7.3: 自动网络重试（指数退避策略）
+        - 最大重试 3 次
+        - 基础延迟 1 秒（指数增长：1s → 2s → 4s）
+        - 自动处理：连接错误、超时、限流（429）
         
         Args:
             messages: 消息列表
@@ -973,20 +992,26 @@ class ClaudeLLMService(BaseLLMService):
                             if hasattr(final_message, 'usage') and final_message.usage:
                                 usage = {
                                     "input_tokens": final_message.usage.input_tokens,
-                                    "output_tokens": final_message.usage.output_tokens
+                                    "output_tokens": final_message.usage.output_tokens,
+                                    "thinking_tokens": 0  # 🆕 Extended Thinking tokens
                                 }
                                 if hasattr(final_message.usage, 'cache_read_input_tokens'):
                                     usage["cache_read_tokens"] = final_message.usage.cache_read_input_tokens
                                 if hasattr(final_message.usage, 'cache_creation_input_tokens'):
                                     usage["cache_creation_tokens"] = final_message.usage.cache_creation_input_tokens
                                 
+                                # 🆕 估算 Extended Thinking tokens
+                                if accumulated_thinking:
+                                    usage["thinking_tokens"] = len(accumulated_thinking) // 4
+                                
                                 # 📊 Token 使用量日志
                                 input_tokens = usage.get("input_tokens", 0)
                                 output_tokens = usage.get("output_tokens", 0)
-                                total_tokens = input_tokens + output_tokens
+                                thinking_tokens = usage.get("thinking_tokens", 0)
+                                total_tokens = input_tokens + output_tokens + thinking_tokens
                                 logger.info(
                                     f"📊 Token 使用: input={input_tokens:,}, output={output_tokens:,}, "
-                                    f"total={total_tokens:,} (model={self.config.model})"
+                                    f"thinking={thinking_tokens:,}, total={total_tokens:,} (model={self.config.model})"
                                 )
                                 
                                 # 🆕 Cache 效果日志（Context Engineering 监控）
@@ -1203,25 +1228,34 @@ class ClaudeLLMService(BaseLLMService):
         if hasattr(response, 'usage'):
             usage = {
                 "input_tokens": response.usage.input_tokens,
-                "output_tokens": response.usage.output_tokens
+                "output_tokens": response.usage.output_tokens,
+                "thinking_tokens": 0  # 🆕 Extended Thinking tokens
             }
             if hasattr(response.usage, 'cache_read_input_tokens'):
                 usage["cache_read_tokens"] = response.usage.cache_read_input_tokens
             if hasattr(response.usage, 'cache_creation_input_tokens'):
                 usage["cache_creation_tokens"] = response.usage.cache_creation_input_tokens
             
+            # 🆕 提取 Extended Thinking tokens（在 thinking 内容中估算）
+            if thinking_text:
+                # 简单估算：thinking 文本长度 / 4 ≈ tokens
+                # Anthropic 目前未在 usage 中单独返回 thinking_tokens，需自行估算
+                estimated_thinking_tokens = len(thinking_text) // 4
+                usage["thinking_tokens"] = estimated_thinking_tokens
+            
             # 📊 Token 使用量日志
             input_tokens = usage.get("input_tokens", 0)
             output_tokens = usage.get("output_tokens", 0)
-            total_tokens = input_tokens + output_tokens
+            thinking_tokens = usage.get("thinking_tokens", 0)
+            total_tokens = input_tokens + output_tokens + thinking_tokens
             logger.info(
                 f"📊 Token 使用: input={input_tokens:,}, output={output_tokens:,}, "
-                f"total={total_tokens:,} (model={self.config.model})"
+                f"thinking={thinking_tokens:,}, total={total_tokens:,} (model={self.config.model})"
             )
             
             # 🆕 Cache 效果日志（Context Engineering 监控）
-            cache_read = usage.get("cache_read_tokens", 0)
-            cache_create = usage.get("cache_creation_tokens", 0)
+            cache_read = usage.get("cache_read_tokens") or 0
+            cache_create = usage.get("cache_creation_tokens") or 0
             if cache_read > 0:
                 saved = cache_read * 0.003 * 0.9 / 1000
                 logger.info(f"✅ Cache HIT: {cache_read:,} tokens (saved ~${saved:.4f})")

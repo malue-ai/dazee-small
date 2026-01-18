@@ -13,7 +13,7 @@ AgentFactory - Prompt 驱动的 Agent 动态初始化
 """
 
 import json
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, TYPE_CHECKING
 from enum import Enum
 
 from logger import get_logger
@@ -29,6 +29,12 @@ from core.schemas import (
     OutputFormatterConfig,
     SkillConfig,
 )
+
+# 🆕 V7: 类型检查导入（避免循环依赖）
+if TYPE_CHECKING:
+    from core.routing import RoutingDecision
+    from core.agent import SimpleAgent
+    from core.agent.multi import MultiAgentOrchestrator
 
 logger = get_logger(__name__)
 
@@ -240,6 +246,8 @@ class AgentFactory:
     """
     Agent 工厂 - Prompt 驱动的动态初始化
     
+    🆕 V7: 支持路由层集成
+    
     用法：
         # 方式 1: 从 Prompt 创建（推荐）
         agent = await AgentFactory.from_prompt(system_prompt, event_manager)
@@ -250,6 +258,14 @@ class AgentFactory:
         
         # 方式 3: 使用默认配置
         agent = AgentFactory.create_default(event_manager)
+        
+        # 🆕 方式 4: 从路由决策创建（V7 路由集成）
+        routing_decision = await router.route(message, history)
+        agent = await AgentFactory.from_routing_decision(
+            decision=routing_decision,
+            event_manager=event_manager,
+            workspace_dir=workspace_dir
+        )
     """
     
     @classmethod
@@ -423,9 +439,8 @@ class AgentFactory:
         4. 🆕 V4.6: PromptSchema 支持根据复杂度动态裁剪提示词
         5. 🆕 V4.6.2: InstancePromptCache 提供预生成的提示词版本
         6. 🆕 apis_config: 预配置的 APIs，用于 api_calling 工具自动注入认证
+        7. 🆕 V7.1: 支持多智能体（根据 schema.multi_agent 自动选择）
         """
-        from core.agent.simple_agent import SimpleAgent
-        
         logger.info(f"🏗️ 根据 Schema 初始化 Agent: {schema.name}")
         logger.debug(f"   Model: {schema.model}")
         logger.debug(f"   Skills: {[s.skill_id if isinstance(s, SkillConfig) else s for s in schema.skills]}")
@@ -445,26 +460,110 @@ class AgentFactory:
         # 🆕 V4.6.2: 优先使用 prompt_cache 中的 prompt_schema
         effective_prompt_schema = prompt_schema or (prompt_cache.prompt_schema if prompt_cache else None)
         
-        # 🆕 核心改动：直接传递 schema 和 system_prompt 给 SimpleAgent
-        # SimpleAgent 会根据 Schema 动态初始化组件
-        agent = SimpleAgent(
+        # 🆕 V7.1: 根据 schema.multi_agent 决定创建单智能体或多智能体
+        if schema.multi_agent is not None:
+            # 多智能体模式
+            logger.info(f"   🤝 多智能体模式: {schema.multi_agent.mode if hasattr(schema.multi_agent, 'mode') else 'default'}")
+            return cls._create_multi_agent(
+                schema=schema,
+                system_prompt=system_prompt,
+                event_manager=event_manager,
+                workspace_dir=workspace_dir,
+                conversation_service=conversation_service,
+                prompt_schema=effective_prompt_schema,
+                prompt_cache=prompt_cache,
+                apis_config=apis_config,
+            )
+        else:
+            # 单智能体模式
+            from core.agent.simple_agent import SimpleAgent
+            
+            agent = SimpleAgent(
+                model=schema.model,
+                max_turns=schema.max_turns,
+                event_manager=event_manager,
+                workspace_dir=workspace_dir,
+                conversation_service=conversation_service,
+                schema=schema,  # 🆕 传递 Schema（驱动组件初始化）
+                system_prompt=system_prompt,  # 🆕 传递 System Prompt（运行时指令）
+                prompt_schema=effective_prompt_schema,  # 🆕 V4.6: 传递 PromptSchema（提示词分层）
+                prompt_cache=prompt_cache,  # 🆕 V4.6.2: 传递 InstancePromptCache
+                apis_config=apis_config,  # 🆕 传递预配置的 APIs
+            )
+            
+            logger.info(f"✅ SimpleAgent 初始化完成: {schema.name}")
+            if schema.reasoning:
+                logger.info(f"   Reasoning: {schema.reasoning}")
+            
+            return agent
+    
+    @classmethod
+    def _create_multi_agent(
+        cls,
+        schema,
+        system_prompt: str,
+        event_manager,
+        workspace_dir: str,
+        conversation_service,
+        prompt_schema,
+        prompt_cache,
+        apis_config
+    ):
+        """
+        🆕 V7.1: 创建多智能体编排器
+        
+        Args:
+            schema: AgentSchema（包含 multi_agent 配置）
+            其他参数同 from_schema()
+            
+        Returns:
+            MultiAgentOrchestrator 实例
+        """
+        from core.multi_agent import MultiAgentOrchestrator, OrchestratorConfig
+        from core.llm import create_claude_service
+        from core.memory.working import WorkingMemory
+        
+        # 创建 LLM Service（用于任务分解和结果聚合）
+        llm_service = create_claude_service(
             model=schema.model,
-            max_turns=schema.max_turns,
-            event_manager=event_manager,
-            workspace_dir=workspace_dir,
-            conversation_service=conversation_service,
-            schema=schema,  # 🆕 传递 Schema（驱动组件初始化）
-            system_prompt=system_prompt,  # 🆕 传递 System Prompt（运行时指令）
-            prompt_schema=effective_prompt_schema,  # 🆕 V4.6: 传递 PromptSchema（提示词分层）
-            prompt_cache=prompt_cache,  # 🆕 V4.6.2: 传递 InstancePromptCache
-            apis_config=apis_config,  # 🆕 传递预配置的 APIs
+            enable_thinking=True,
+            enable_caching=True,
         )
         
-        logger.info(f"✅ Agent 初始化完成: {schema.name}")
-        if schema.reasoning:
-            logger.info(f"   Reasoning: {schema.reasoning}")
+        # 创建 Memory Manager（TODO: 从 schema 配置）
+        memory_manager = WorkingMemory(event_manager=event_manager)
         
-        return agent
+        # 解析 multi_agent 配置
+        multi_agent_config = schema.multi_agent
+        orchestrator_config = OrchestratorConfig(
+            max_parallel_workers=getattr(multi_agent_config, 'max_parallel_workers', 3),
+            enable_checkpointing=getattr(multi_agent_config, 'enable_checkpointing', True),
+            checkpoint_interval=getattr(multi_agent_config, 'checkpoint_interval', 60),
+        )
+        
+        # 提取 workers 配置
+        workers_config = getattr(multi_agent_config, 'workers', [])
+        
+        # 创建编排器
+        orchestrator = MultiAgentOrchestrator(
+            event_manager=event_manager,
+            memory_manager=memory_manager,
+            llm_service=llm_service,
+            config=orchestrator_config,
+            prompt_cache=prompt_cache,
+            workers_config=workers_config,
+        )
+        
+        # 附加元数据（用于统一接口）
+        orchestrator.schema = schema
+        orchestrator.system_prompt = system_prompt
+        orchestrator.workspace_dir = workspace_dir
+        orchestrator.conversation_service = conversation_service
+        orchestrator.model = schema.model
+        orchestrator.max_turns = schema.max_turns
+        
+        logger.info(f"✅ MultiAgentOrchestrator 初始化完成: {schema.name} ({len(workers_config)} workers)")
+        return orchestrator
     
     @classmethod
     def create_default(
@@ -697,6 +796,166 @@ def create_agent_from_preset(
         raise ValueError(f"未知预设: {preset_name}，可用: {list(presets.keys())}")
     
     schema = presets[preset_name]()
+    
+    return AgentFactory.from_schema(
+        schema=schema,
+        system_prompt=system_prompt,
+        event_manager=event_manager,
+        **kwargs
+    )
+
+
+# ============================================================
+# 🆕 V7: 路由层集成
+# ============================================================
+
+async def create_agent_from_routing_decision(
+    routing_decision: "RoutingDecision",
+    event_manager,
+    workspace_dir: str = None,
+    conversation_service = None,
+    system_prompt: str = "",
+    **kwargs
+) -> "SimpleAgent":
+    """
+    🆕 V7: 从路由决策创建 Agent（支持意图注入）
+    
+    流程：
+    1. 从 routing_decision 提取 intent 和 complexity
+    2. 根据 complexity 选择 Schema 配置（简单/中等/复杂）
+    3. 创建 Agent，并将 intent 传递给 Agent.chat()
+    
+    Args:
+        routing_decision: 路由决策结果
+        event_manager: 事件管理器
+        workspace_dir: 工作目录
+        conversation_service: 会话服务
+        system_prompt: 系统提示词（可选）
+        **kwargs: 其他参数
+        
+    Returns:
+        配置好的 SimpleAgent 实例（intent 已注入）
+        
+    使用示例：
+        decision = await router.route(message, history)
+        agent = await create_agent_from_routing_decision(
+            decision, event_manager, workspace_dir
+        )
+        
+        # Agent 内部会使用 routing_decision.intent，跳过内部意图分析
+        async for event in agent.chat(messages, intent=decision.intent):
+            yield event
+    """
+    from core.routing import RoutingDecision
+    
+    intent = routing_decision.intent
+    complexity_score = routing_decision.complexity_score
+    
+    logger.info(
+        f"🏭 从路由决策创建 Agent: task_type={intent.task_type.value}, "
+        f"complexity={complexity_score:.2f}"
+    )
+    
+    # 根据复杂度选择 Schema 配置
+    # 🔑 关键原则：Plan 是否启用由 Claude 自主决定（通过 plan_todo 工具），
+    #              我们只设置结构性配置（max_turns）
+    if complexity_score <= 3.0:
+        # 简单任务：快速响应，限制轮数
+        schema = AgentSchema(
+            name="SimpleAgent",
+            description="简单任务快速响应",
+            intent_analyzer=IntentAnalyzerConfig(enabled=False),  # 跳过内部分析（路由层已完成）
+            tool_selector=ToolSelectorConfig(enabled=True),
+            max_turns=8,
+            reasoning=f"简单任务（score={complexity_score:.2f}），限制 8 轮"
+        )
+    elif complexity_score <= 6.0:
+        # 中等任务：适中轮数
+        schema = AgentSchema(
+            name="MediumAgent",
+            description="中等复杂度任务",
+            intent_analyzer=IntentAnalyzerConfig(enabled=False),  # 跳过内部分析（路由层已完成）
+            tool_selector=ToolSelectorConfig(enabled=True),
+            max_turns=15,
+            reasoning=f"中等任务（score={complexity_score:.2f}），限制 15 轮"
+        )
+    else:
+        # 复杂任务：完整轮数配置
+        schema = AgentSchema(
+            name="ComplexAgent",
+            description="复杂任务完整配置",
+            intent_analyzer=IntentAnalyzerConfig(enabled=False),  # 跳过内部分析（路由层已完成）
+            tool_selector=ToolSelectorConfig(enabled=True),
+            memory_manager=MemoryManagerConfig(
+                retention_policy="session",
+                working_memory_limit=30
+            ),
+            max_turns=25,
+            reasoning=f"复杂任务（score={complexity_score:.2f}），完整配置"
+        )
+    
+    # 创建 Agent（intent 由路由层提供，不再内部分析）
+    agent = AgentFactory.from_schema(
+        schema=schema,
+        system_prompt=system_prompt or "你是一个智能助手，帮助用户完成任务。",
+        event_manager=event_manager,
+        workspace_dir=workspace_dir,
+        conversation_service=conversation_service,
+        **kwargs
+    )
+    
+    logger.info(f"✅ Agent 创建完成: schema={schema.name}, max_turns={schema.max_turns}")
+    
+    return agent
+
+
+async def create_multi_agent_from_routing_decision(
+    routing_decision: "RoutingDecision",
+    **kwargs
+) -> "MultiAgentOrchestrator":
+    """
+    🆕 V7: 从路由决策创建多智能体编排器
+    
+    Args:
+        routing_decision: 路由决策结果
+        **kwargs: 其他参数
+        
+    Returns:
+        MultiAgentOrchestrator 实例
+        
+    注意：P1 待完善多智能体执行逻辑
+    """
+    from core.agent.multi import MultiAgentOrchestrator, ExecutionMode
+    from core.routing import RoutingDecision
+    
+    intent = routing_decision.intent
+    
+    logger.info(
+        f"🏭 从路由决策创建多智能体: task_type={intent.task_type.value}, "
+        f"complexity={routing_decision.complexity_score:.2f}"
+    )
+    
+    # 根据任务类型选择执行模式
+    if intent.task_type.value in ["coding", "research"]:
+        mode = ExecutionMode.SEQUENTIAL
+    elif intent.task_type.value in ["document", "analysis"]:
+        mode = ExecutionMode.PARALLEL
+    else:
+        mode = ExecutionMode.HIERARCHICAL
+    
+    # 创建编排器配置（占位实现，P1 完善）
+    orchestrator = MultiAgentOrchestrator(
+        mode=mode,
+        agents=[
+            {"agent_id": "planner", "role": "planner"},
+            {"agent_id": "executor", "role": "executor"},
+            {"agent_id": "reviewer", "role": "reviewer"},
+        ]
+    )
+    
+    logger.info(f"✅ 多智能体编排器创建完成: mode={mode.value}")
+    
+    return orchestrator
     return AgentFactory.from_schema(schema, system_prompt, event_manager, **kwargs)
 
 
