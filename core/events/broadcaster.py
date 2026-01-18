@@ -718,7 +718,7 @@ class EventBroadcaster:
     
     async def _finalize_message(self, session_id: str) -> None:
         """
-        最终完成消息
+        最终完成消息（内部方法）
         
         在 message_stop 时调用：只更新状态为 "completed"
         
@@ -739,6 +739,26 @@ class EventBroadcaster:
             logger.info(f"✅ 消息完成: message_id={message_id}")
         except Exception as e:
             logger.error(f"❌ 消息完成失败: {str(e)}", exc_info=True)
+    
+    async def finalize_message(self, session_id: str) -> None:
+        """
+        强制完成消息（公开方法）
+        
+        用于在 Session 被停止时强制保存当前内容。
+        会先执行 checkpoint 保存当前累积的内容，然后更新状态为 completed。
+        
+        Args:
+            session_id: Session ID
+        """
+        # 先保存当前累积的内容
+        accumulator = self._accumulators.get(session_id)
+        message_id = self._session_message_ids.get(session_id)
+        
+        if accumulator and message_id:
+            await self._checkpoint_content(session_id, message_id, accumulator)
+        
+        # 然后完成消息
+        await self._finalize_message(session_id)
     
     def _cleanup_session(self, session_id: str) -> None:
         """清理 session 状态"""

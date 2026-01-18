@@ -170,6 +170,39 @@ class ChatService:
         
         return self._formatters[cache_key]
     
+    # ==================== 资源管理 ====================
+    
+    async def _cleanup_session_resources(
+        self,
+        session_id: str,
+        user_id: str,
+        agent_id: str,
+        status: str = "failed"
+    ) -> None:
+        """
+        清理 Session 相关资源（统一的清理入口）
+        
+        Args:
+            session_id: Session ID
+            user_id: 用户 ID
+            agent_id: Agent ID
+            status: Session 最终状态
+        """
+        try:
+            await self.agent_pool.release(agent_id)
+        except Exception as e:
+            logger.warning(f"⚠️ 释放 Agent 失败: {e}")
+        
+        try:
+            await self.session_pool.on_session_end(session_id, user_id, agent_id)
+        except Exception as e:
+            logger.warning(f"⚠️ 更新 SessionPool 失败: {e}")
+        
+        try:
+            await self.session_service.end_session(session_id, status=status)
+        except Exception as e:
+            logger.warning(f"⚠️ 结束 Session 失败: {e}")
+    
     # ==================== 统一入口 ====================
     
     async def chat(
@@ -245,18 +278,37 @@ class ChatService:
         logger.info(f"✅ Session: {session_id}")
         
         # ========== 5. 获取 Agent（从 AgentPool）==========
+        # 注：使用 try-finally 确保资源获取失败时正确清理
         workspace_dir = str(self.session_service.workspace_manager.get_workspace_root(conversation_id))
         pool_key = agent_id or self.DEFAULT_AGENT_KEY
-        agent = await self.agent_pool.acquire(
-            agent_id=pool_key,
-            event_manager=self.session_service.events,
-            workspace_dir=workspace_dir,
-            conversation_service=self.conversation_service
-        )
-        logger.debug(f"✅ Agent 就绪: {pool_key}")
+        agent = None
+        agent_acquired = False
+        session_pool_updated = False
         
-        # ========== 6. 更新 SessionPool 状态 ==========
-        await self.session_pool.on_session_start(session_id, user_id, pool_key)
+        try:
+            agent = await self.agent_pool.acquire(
+                agent_id=pool_key,
+                event_manager=self.session_service.events,
+                workspace_dir=workspace_dir,
+                conversation_service=self.conversation_service
+            )
+            agent_acquired = True
+            logger.debug(f"✅ Agent 就绪: {pool_key}")
+            
+            # ========== 6. 更新 SessionPool 状态 ==========
+            await self.session_pool.on_session_start(session_id, user_id, pool_key)
+            session_pool_updated = True
+            
+        except Exception as e:
+            # 资源获取失败，清理已创建的 Session
+            logger.error(f"❌ 资源获取失败: {e}")
+            try:
+                if agent_acquired:
+                    await self.agent_pool.release(pool_key)
+                await self.session_service.end_session(session_id, status="failed")
+            except Exception as cleanup_error:
+                logger.warning(f"⚠️ 清理失败: {cleanup_error}")
+            raise AgentExecutionError(f"资源获取失败: {e}") from e
         
         # ========== 7. 调度执行 ==========
         if not stream:
@@ -361,17 +413,19 @@ class ChatService:
                 
         except asyncio.CancelledError:
             # SSE 断开，Agent 继续后台运行
+            # 注：资源释放由 _run_agent 的 finally 块负责
             logger.info(f"⚠️ SSE 断开，Agent 后台继续: {session_id}")
+            # 不要 raise，让 agent_task 继续执行
         
         except Exception as e:
             logger.error(f"❌ 流式对话失败: {e}", exc_info=True)
-            try:
-                # 释放资源
-                await self.agent_pool.release(agent_id)
-                await self.session_pool.on_session_end(session_id, user_id, agent_id)
-                await self.session_service.end_session(session_id, status="failed")
-            except:
-                pass
+            # 释放资源
+            await self._cleanup_session_resources(
+                session_id=session_id,
+                user_id=user_id,
+                agent_id=agent_id,
+                status="failed"
+            )
             raise AgentExecutionError(f"流式对话失败: {e}") from e
     
     async def _run_agent(
@@ -597,7 +651,8 @@ class ChatService:
                 if await redis.is_stopped(session_id):
                     logger.warning(f"🛑 检测到停止标志: session_id={session_id}")
                     # 强制保存当前内容
-                    await agent.broadcaster._finalize_message(session_id)
+                    # TODO: broadcaster 应提供公开的 finalize 方法
+                    await agent.broadcaster.finalize_message(session_id)
                     await self.session_service.end_session(session_id, status="stopped")
                     break
                 
@@ -654,8 +709,11 @@ class ChatService:
                     )
             
             # 4.4 释放资源（Agent、更新 SessionPool 状态）
-            await self.agent_pool.release(agent_id)
-            await self.session_pool.on_session_end(session_id, user_id, agent_id)
+            try:
+                await self.agent_pool.release(agent_id)
+                await self.session_pool.on_session_end(session_id, user_id, agent_id)
+            except Exception as release_error:
+                logger.warning(f"⚠️ 释放资源失败: {release_error}")
             
             logger.info(f"✅ Agent 执行完成: session_id={session_id}, duration={duration_ms}ms")
         
@@ -664,11 +722,12 @@ class ChatService:
             duration_ms = int((time.time() - start_time) * 1000)
             
             # 释放资源（异常情况）
-            try:
-                await self.agent_pool.release(agent_id)
-                await self.session_pool.on_session_end(session_id, user_id, agent_id)
-            except Exception as release_error:
-                logger.warning(f"⚠️ 释放资源失败: {release_error}")
+            await self._cleanup_session_resources(
+                session_id=session_id,
+                user_id=user_id,
+                agent_id=agent_id,
+                status="failed"
+            )
             
             # 分类错误类型，提供更友好的错误信息
             error_type = "unknown_error"
@@ -716,11 +775,7 @@ class ChatService:
             except Exception as ex:
                 logger.warning(f"⚠️ 发送 session_end 失败: {str(ex)}")
             
-            # 🎯 更新 Session 状态
-            try:
-                await self.session_service.end_session(session_id, status="failed")
-            except Exception as ex:
-                logger.warning(f"⚠️ 结束 Session 失败: {str(ex)}")
+            # 注：Session 状态已在 _cleanup_session_resources 中更新
             
             # ⚠️ 不要 raise，避免 "Task exception was never retrieved"
             # 异常已经通过事件和日志记录，不需要传播
@@ -926,3 +981,11 @@ def get_chat_service(
             default_model=default_model
         )
     return _default_service
+
+
+def reset_chat_service() -> None:
+    """
+    重置聊天服务单例（仅用于测试）
+    """
+    global _default_service
+    _default_service = None

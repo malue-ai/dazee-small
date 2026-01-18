@@ -36,7 +36,7 @@ from routers.health import router as health_router
 from routers.human_confirmation import router as human_confirmation_router
 from routers.skills import router as skills_router
 from routers.workspace import router as workspace_router
-from infra.pools import get_session_pool, get_agent_pool
+from infra.pools import get_session_pool, get_agent_pool, get_mcp_pool
 # ==================== 常量定义 ====================
 
 APP_NAME = "Zenflux Agent API"
@@ -203,27 +203,41 @@ async def _init_pools() -> None:
     
     初始化顺序：
     1. AgentRegistry 加载配置（已在 _preload_agent_registry 中完成）
-    2. AgentPool 创建原型（基于 Registry 配置）
-    3. SessionPool 初始化（追踪活跃 Session）
-    4. 校准活跃 Session 数据（清理可能的孤立记录）
+    2. MCPPool 预连接所有 MCP 服务器（基于 Registry 配置）
+    3. AgentPool 创建原型（使用 MCPPool 中的连接）
+    4. SessionPool 初始化（追踪活跃 Session）
+    5. 校准活跃 Session 数据（清理可能的孤立记录）
     """
     try:
         print("🏊 初始化资源池...")
         
-        # 1. 获取 AgentPool 并预加载原型
+        # 1. MCPPool 预连接（在 AgentPool 之前，确保 MCP 连接可用）
+        mcp_pool = get_mcp_pool()
+        mcp_results = await mcp_pool.preconnect_all()
+        if mcp_results:
+            connected = sum(1 for v in mcp_results.values() if v)
+            print(f"   ✓ MCPPool: {connected}/{len(mcp_results)} 个 MCP 服务器已连接")
+        else:
+            print(f"   ✓ MCPPool: 无 MCP 配置")
+        
+        # 2. 获取 AgentPool 并预加载原型（使用 MCPPool 中的连接）
         agent_pool = get_agent_pool()
         loaded_count = await agent_pool.preload_all()
         print(f"   ✓ AgentPool: {loaded_count} 个原型已缓存")
         
-        # 2. 获取 SessionPool
+        # 3. 获取 SessionPool
         session_pool = get_session_pool()
         
-        # 3. 校准活跃 Session 数据（清理服务重启前的孤立记录）
+        # 4. 校准活跃 Session 数据（清理服务重启前的孤立记录）
         calibration_result = await session_pool.calibrate()
         if calibration_result.get("orphaned_removed", 0) > 0:
             print(f"   ✓ SessionPool: 校准完成，清理 {calibration_result['orphaned_removed']} 个孤立 Session")
         else:
             print(f"   ✓ SessionPool: 已就绪")
+        
+        # 5. 启动 MCP 健康检查
+        mcp_pool.start_health_check()
+        print(f"   ✓ MCP 健康检查: 已启动")
         
         print(f"✅ 资源池初始化完成")
     except Exception as e:
@@ -233,6 +247,11 @@ async def _init_pools() -> None:
 async def _cleanup_pools() -> None:
     """清理资源池"""
     try:
+        # 1. 清理 MCPPool（停止健康检查，断开连接）
+        mcp_pool = get_mcp_pool()
+        await mcp_pool.cleanup()
+        
+        # 2. 清理 SessionPool
         session_pool = get_session_pool()
         await session_pool.cleanup()
         

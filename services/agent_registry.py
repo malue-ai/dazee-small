@@ -39,7 +39,8 @@ from scripts.instance_loader import (
     _build_apis_prompt_section,
     get_instances_dir,
 )
-from services.mcp_client import get_mcp_client, create_mcp_tool_definition
+from services.mcp_client import create_mcp_tool_definition
+from infra.pools import get_mcp_pool
 
 logger = get_logger("agent_registry")
 
@@ -346,12 +347,15 @@ class AgentRegistry:
         """
         注册 MCP 工具
         
+        使用 MCPPool 获取客户端，复用已建立的连接，避免重复连接延迟。
+        
         Args:
             agent: Agent 实例
             mcp_tools: MCP 工具配置列表
             instance_registry: 实例级工具注册表
         """
         mcp_tool_definitions = []
+        mcp_pool = get_mcp_pool()
         
         for tool_config in mcp_tools:
             name = tool_config.get("name", "unknown")
@@ -372,14 +376,14 @@ class AgentRegistry:
                         logger.warning(f"⚠️ MCP 工具 {name} 的密钥环境变量 {auth_env} 未设置")
                         continue
                 
-                # 获取 MCP 客户端
-                client = await get_mcp_client(
+                # 🆕 使用 MCPPool 获取客户端（复用已建立的连接）
+                client = await mcp_pool.get_client(
                     server_url=server_url,
                     server_name=server_name,
                     auth_token=auth_token
                 )
                 
-                # 🆕 处理连接失败的情况
+                # 处理连接失败的情况
                 if client is None:
                     logger.warning(f"⚠️ MCP 客户端连接失败，跳过工具 {name}")
                     continue
@@ -398,27 +402,25 @@ class AgentRegistry:
                         capability = tool_config.get("capability")
                         original_name = tool_info.get("original_name", tool_name)
                         
-                        async def make_handler(_client, _orig_name, _server_url, _server_name, _auth_token):
+                        async def make_handler(_orig_name, _server_url, _server_name, _auth_token):
                             async def handler(tool_input: Dict[str, Any]):
-                                # 检查客户端状态，断开则重新获取
-                                current_client = _client
-                                if not _client._connected or not _client._session:
-                                    current_client = await get_mcp_client(
-                                        server_url=_server_url,
-                                        server_name=_server_name,
-                                        auth_token=_auth_token,
-                                        force_reconnect=True  # 强制重连
-                                    )
-                                    if not current_client:
-                                        return {"success": False, "error": "MCP 服务器连接失败"}
+                                # 🆕 使用 MCPPool 获取客户端（复用连接）
+                                pool = get_mcp_pool()
+                                current_client = await pool.get_client(
+                                    server_url=_server_url,
+                                    server_name=_server_name,
+                                    auth_token=_auth_token
+                                )
+                                if not current_client:
+                                    return {"success": False, "error": "MCP 服务器连接失败"}
                                 
                                 # 调用工具
                                 result = await current_client.call_tool(_orig_name, tool_input)
                                 
                                 # 如果需要重连，自动重试一次
                                 if result.get("_need_reconnect"):
-                                    # 强制重连
-                                    current_client = await get_mcp_client(
+                                    logger.info(f"🔄 MCP 连接断开，自动重连: {_server_name}")
+                                    current_client = await pool.get_client(
                                         server_url=_server_url,
                                         server_name=_server_name,
                                         auth_token=_auth_token,
@@ -431,7 +433,7 @@ class AgentRegistry:
                                 return result
                             return handler
                         
-                        handler = await make_handler(client, original_name, server_url, server_name, auth_token)
+                        handler = await make_handler(original_name, server_url, server_name, auth_token)
                         
                         await instance_registry.register_mcp_tool(
                             name=tool_name,
@@ -460,7 +462,7 @@ class AgentRegistry:
             else:
                 agent._mcp_tools = mcp_tool_definitions
             
-            # 注册到 tool_executor（带自动重连逻辑）
+            # 注册到 tool_executor（使用 MCPPool 带自动重连逻辑）
             if hasattr(agent, 'tool_executor'):
                 for tool_def in mcp_tool_definitions:
                     tool_name = tool_def['name']
@@ -477,8 +479,9 @@ class AgentRegistry:
                         _token=_auth_token,
                         _orig_name=original_name
                     ):
-                        # 每次调用动态获取客户端
-                        current_client = await get_mcp_client(
+                        # 🆕 使用 MCPPool 获取客户端（复用连接）
+                        pool = get_mcp_pool()
+                        current_client = await pool.get_client(
                             server_url=_url,
                             server_name=_name,
                             auth_token=_token
@@ -490,7 +493,8 @@ class AgentRegistry:
                         
                         # 如果需要重连，自动重试
                         if result.get("_need_reconnect"):
-                            current_client = await get_mcp_client(
+                            logger.info(f"🔄 MCP 连接断开，自动重连: {_name}")
+                            current_client = await pool.get_client(
                                 server_url=_url,
                                 server_name=_name,
                                 auth_token=_token,

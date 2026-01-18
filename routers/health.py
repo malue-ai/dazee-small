@@ -15,6 +15,7 @@ from infra.resilience.circuit_breaker import get_all_circuit_breakers
 from infra.cache import get_redis_client
 from infra.resilience.circuit_breaker import get_circuit_breaker
 from infra.database import AsyncSessionLocal
+from infra.pools import get_mcp_pool, get_session_pool
 
 logger = get_logger(__name__)
 
@@ -140,3 +141,64 @@ async def health_metrics() -> Dict[str, Any]:
         "metrics": metrics,
         "timestamp": time.time()
     }
+
+
+@router.get("/pools", summary="资源池状态")
+async def pool_stats() -> Dict[str, Any]:
+    """
+    资源池状态
+    
+    返回：
+    - SessionPool 统计
+    - MCPPool 统计（连接状态、工具数量、调用统计）
+    """
+    pools = {}
+    
+    # 1. SessionPool 统计
+    try:
+        session_pool = get_session_pool()
+        pools["session_pool"] = await session_pool.get_system_stats()
+    except Exception as e:
+        pools["session_pool"] = {"error": str(e)}
+    
+    # 2. MCPPool 统计
+    try:
+        mcp_pool = get_mcp_pool()
+        pools["mcp_pool"] = await mcp_pool.get_stats()
+    except Exception as e:
+        pools["mcp_pool"] = {"error": str(e)}
+    
+    return {
+        "status": "ok",
+        "pools": pools,
+        "timestamp": time.time()
+    }
+
+
+@router.get("/mcp", summary="MCP 池详细状态")
+async def mcp_pool_stats() -> Dict[str, Any]:
+    """
+    MCP 客户端池详细状态
+    
+    返回：
+    - 已连接的 MCP 服务器列表
+    - 每个服务器的连接状态
+    - 工具数量
+    - 调用统计（缓存命中、重连次数等）
+    """
+    try:
+        mcp_pool = get_mcp_pool()
+        stats = await mcp_pool.get_stats()
+        
+        return {
+            "status": "ok",
+            "mcp": stats,
+            "timestamp": time.time()
+        }
+    except Exception as e:
+        logger.error(f"获取 MCP 池统计失败: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "error": str(e),
+            "timestamp": time.time()
+        }
