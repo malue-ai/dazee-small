@@ -282,19 +282,21 @@ async def run_project_in_sandbox(conversation_id: str, project_path: str = "."):
         conversation_id: 对话ID
         project_path: 项目在 workspace 中的相对路径（默认根目录）
     """
+    from e2b_code_interpreter import Sandbox as CodeInterpreter
+    
     # 1. 打包项目文件
     workspace_path = get_workspace_path(conversation_id)
     project_full_path = workspace_path / project_path
     archive = create_tar_gz(project_full_path)
     
-    # 2. 创建新的 Sandbox
-    sandbox = Sandbox.create(
-        timeout=3600,  # 1小时
-        metadata={
-            "conversation_id": conversation_id,
-            "project_path": project_path
-        }
-    )
+    # 2. 创建新的 Sandbox（e2b-code-interpreter 不支持 metadata）
+    sandbox = CodeInterpreter()
+    # sandbox_id 存储到数据库与 conversation_id 关联
+    # 设置超时（如果 SDK 支持）
+    try:
+        sandbox.set_timeout(3600)  # 1小时
+    except (AttributeError, TypeError):
+        pass  # SDK 版本不支持则忽略
     
     # 3. 上传并解压
     sandbox.files.write("/home/user/project.tar.gz", archive)
@@ -305,13 +307,13 @@ async def run_project_in_sandbox(conversation_id: str, project_path: str = "."):
         sandbox.commands.run("pip install -r requirements.txt")
     
     if has_file(project_full_path / "app.py"):
-        sandbox.commands.run("python app.py &")
+        sandbox.commands.run("python app.py", background=True)
     
     # 5. 返回预览 URL
-    preview_url = sandbox.get_host(7860)
+    preview_url = f"https://{sandbox.get_host(7860)}"
     
     return {
-        "sandbox_id": sandbox.id,
+        "sandbox_id": sandbox.sandbox_id,
         "preview_url": preview_url,
         "expires_at": datetime.now() + timedelta(hours=1)
     }
@@ -588,21 +590,26 @@ class ReadFileTool(BaseTool):
 
 ### 9.2 Sandbox 如何关联 conversation？
 
-通过 metadata 标记：
+通过数据库存储关联关系（e2b-code-interpreter 不支持 metadata 参数）：
 
 ```python
-sandbox = Sandbox.create(
-    timeout=3600,
-    metadata={
-        "conversation_id": conversation_id,
-        "user_id": user_id,
-        "project_path": project_path
-    }
+from e2b_code_interpreter import Sandbox as CodeInterpreter
+
+# 创建沙箱
+sandbox = CodeInterpreter()
+
+# 🔑 关键：sandbox_id 存储到数据库，与业务数据关联
+sandbox_id = sandbox.sandbox_id
+await db.save_sandbox_mapping(
+    conversation_id=conversation_id,
+    user_id=user_id,
+    sandbox_id=sandbox_id,
+    project_path=project_path
 )
 
-# 后续可以通过 metadata 查询
-query = SandboxQuery(metadata={"conversation_id": conversation_id})
-existing = Sandbox.list(query=query)
+# 后续通过数据库查询获取 sandbox_id，再重新连接
+db_record = await db.get_sandbox_by_conversation(conversation_id)
+existing = CodeInterpreter.connect(db_record.sandbox_id)
 ```
 
 ---

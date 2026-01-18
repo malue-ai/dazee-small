@@ -32,26 +32,28 @@
 #### 核心方法
 
 ```python
-from e2b import Sandbox
+# E2B SDK v2+ 推荐使用 e2b_code_interpreter
+from e2b_code_interpreter import Sandbox as CodeInterpreter
+import os
 
-# 1. 创建沙箱
-sandbox = await Sandbox.create(
-    template="base",           # 使用的模板 ID
-    timeout=600,              # 超时时间（秒）
-    metadata={"user_id": "123"}  # 自定义元数据
-)
+# 设置 API Key
+os.environ["E2B_API_KEY"] = "your-api-key"
+
+# 1. 创建沙箱（e2b-code-interpreter 不支持 metadata 参数）
+sandbox = CodeInterpreter()
+# sandbox_id 可存储到数据库，与业务数据关联
 
 # 2. 连接到运行中的沙箱
-sandbox = await Sandbox.connect(sandbox_id="sbx-xxx")
+sandbox = CodeInterpreter.connect(sandbox_id="sbx-xxx")
 
 # 3. 暂停沙箱（持久化状态）
-await sandbox.pause()
+sandbox.pause()
 
-# 4. 恢复沙箱
-sandbox = await Sandbox.resume(sandbox_id="sbx-xxx")
+# 4. 恢复沙箱（通过 connect 重新连接）
+sandbox = CodeInterpreter.connect(sandbox_id="sbx-xxx")
 
 # 5. 终止沙箱
-await sandbox.close()
+sandbox.kill()
 
 # 6. 列出所有运行的沙箱
 sandboxes = await Sandbox.list()
@@ -87,13 +89,15 @@ sandbox.on_scan(
 #### 核心概念
 
 ```python
+from e2b_code_interpreter import Sandbox as CodeInterpreter
+
 # 场景1：长时间运行的任务
-sandbox = await Sandbox.create()
+sandbox = CodeInterpreter()
 # ... 执行任务 ...
-await sandbox.pause()  # 暂停并保存状态
+sandbox.pause()  # 暂停并保存状态
 
 # 场景2：跨会话数据保持
-sandbox = await Sandbox.resume(sandbox_id)  # 恢复之前的状态
+sandbox = CodeInterpreter.connect(sandbox_id)  # 重新连接恢复状态
 # 所有文件、进程、环境变量都保留
 ```
 
@@ -131,10 +135,10 @@ metrics = await sandbox.get_metrics()
 ### 1.5 安全访问控制（Secured Access）
 
 ```python
-# 默认开启（SDK v2.0+）
-sandbox = await Sandbox.create(
-    secured=True  # 默认值
-)
+from e2b_code_interpreter import Sandbox as CodeInterpreter
+
+# E2B SDK v2+ 默认启用安全访问
+sandbox = CodeInterpreter()  # 安全访问默认开启
 
 # 特性：
 # - SDK 与沙箱之间的加密通信
@@ -227,14 +231,15 @@ e2b template delete <template-id>
 e2b template describe <template-id>
 ```
 
-**Python SDK**：
+**Python SDK（v2+）**：
 
 ```python
-from e2b import Sandbox
+from e2b_code_interpreter import Sandbox as CodeInterpreter
 
 # 使用自定义模板创建沙箱
-sandbox = await Sandbox.create(
-    template="my-template-id"
+# 注意：E2B SDK v2+ 使用构造函数，模板需要预先通过 CLI 构建
+sandbox = CodeInterpreter(
+    template="my-template-id"  # 预构建的模板 ID
 )
 ```
 
@@ -570,16 +575,18 @@ async def get_shareable_file_url(sandbox, file_path: str):
 **目标**: 完善基础设施，提升性能和可靠性
 
 ```python
+from e2b_code_interpreter import Sandbox as CodeInterpreter
+
 # 4. 集成沙箱重连机制
 class ResilientSandbox:
     async def execute_with_retry(self, code: str):
         """带重连的执行"""
         try:
-            return await self.sandbox.execute(code)
+            return self.sandbox.run_code(code)
         except ConnectionError:
-            # 尝试重连
-            self.sandbox = await Sandbox.connect(self.sandbox_id)
-            return await self.sandbox.execute(code)
+            # E2B SDK v2+: 使用 connect 方法重连
+            self.sandbox = CodeInterpreter.connect(self.sandbox_id)
+            return self.sandbox.run_code(code)
 
 # 5. 集成批量文件操作
 async def sync_workspace_batch(sandbox, local_dir: str):
@@ -603,23 +610,39 @@ async def monitor_resources(sandbox):
 **目标**: 企业级功能，多租户支持
 
 ```python
-# 7. 模板管理系统
+from e2b_code_interpreter import Sandbox as CodeInterpreter
+import subprocess
+
+# 7. 模板管理系统（E2B SDK v2+ 使用 CLI 构建模板）
 class TemplateManager:
-    async def create_template(self, name: str, dockerfile: str):
-        """动态创建模板"""
+    def create_template(self, name: str, dockerfile: str):
+        """动态创建模板（通过 CLI）"""
         # 写入 e2b.Dockerfile
+        with open("e2b.Dockerfile", "w") as f:
+            f.write(dockerfile)
         # 调用 CLI 构建
-        # 返回 template_id
+        result = subprocess.run(
+            ["e2b", "template", "build", "--name", name],
+            capture_output=True, text=True
+        )
+        # 返回 template_id（从输出解析）
+        return result.stdout
         
-    async def list_templates(self):
-        """列出所有模板"""
+    def list_templates(self):
+        """列出所有模板（通过 CLI）"""
+        result = subprocess.run(
+            ["e2b", "template", "list"],
+            capture_output=True, text=True
+        )
+        return result.stdout
         
-    async def delete_template(self, template_id: str):
-        """删除模板"""
+    def delete_template(self, template_id: str):
+        """删除模板（通过 CLI）"""
+        subprocess.run(["e2b", "template", "delete", template_id])
 
 # 8. 多租户沙箱管理
 class MultiTenantSandboxPool:
-    async def get_or_create_sandbox(
+    def get_or_create_sandbox(
         self, 
         user_id: str, 
         session_id: str
@@ -629,7 +652,9 @@ class MultiTenantSandboxPool:
         if key in self.pool:
             return self.pool[key]
         
-        sandbox = await Sandbox.create()
+        # e2b-code-interpreter: 不支持 metadata，需在应用层管理
+        sandbox = CodeInterpreter()
+        # sandbox_id 可与 user_id/session_id 关联存储到数据库
         self.pool[key] = sandbox
         return sandbox
 ```

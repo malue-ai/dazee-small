@@ -1,22 +1,22 @@
 """
-E2B Template Manager - 模板构建和管理
+E2B Template Manager - 模板配置和管理
 
 职责：
 1. 加载模板配置（从 e2b_templates.yaml）
-2. 按需构建自定义模板
-3. 根据任务类型推荐模板
-4. 缓存已构建的模板
+2. 根据任务类型推荐模板
+3. 返回预构建的模板 ID
+
+注意：E2B SDK v2+ 中，自定义模板需要通过 CLI 工具预先构建：
+  e2b template build --name <template-name>
 
 参考文档：
-- https://e2b.dev/docs/template/defining-template
-- https://e2b.dev/docs/template/build
+- https://e2b.dev/docs/sandbox-template
+- https://e2b.dev/docs/cli/template-build
 """
 
 import yaml
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from pathlib import Path
-
-from e2b import Template, defaultBuildLogger
 
 from logger import get_logger
 
@@ -25,12 +25,17 @@ logger = get_logger("e2b_template")
 
 class E2BTemplateManager:
     """
-    E2B 模板管理器
+    E2B 模板管理器（v2+ 兼容版本）
     
     设计原则：
-    1. 按需构建 - 只在需要时构建模板
-    2. 版本管理 - 模板有版本号，避免冲突
-    3. 自动缓存 - 已构建的模板自动复用
+    1. 配置驱动 - 模板配置与代码分离
+    2. 预构建模板 - 自定义模板需提前通过 CLI 构建
+    3. 运行时包安装 - 未预装的包在运行时安装
+    
+    E2B SDK v2+ 变更说明：
+    - Template Python API 已移除，改用 CLI 构建
+    - 自定义模板需要使用 `e2b template build` 命令预构建
+    - 运行时可通过 sandbox.commands.run("pip install ...") 安装包
     """
     
     def __init__(self, config_path: str = None):
@@ -46,7 +51,7 @@ class E2BTemplateManager:
         
         self.config_path = Path(config_path)
         self.templates_config = self._load_config()
-        self._built_templates = {}  # 缓存已构建的模板
+        self._template_cache: Dict[str, str] = {}  # 模板名称 -> 模板 ID 缓存
         
         logger.info(f"✅ E2B模板管理器已初始化 ({len(self.templates_config.get('templates', {}))} 个模板配置)")
     
@@ -65,23 +70,25 @@ class E2BTemplateManager:
     
     async def get_or_build_template(self, template_name: str) -> str:
         """
-        获取或构建模板
+        获取模板 ID
         
-        工作流：
-        1. 检查是否已构建（缓存）
-        2. 如果没有，构建模板
-        3. 返回模板ID（用于创建沙箱）
+        E2B SDK v2+ 说明：
+        - 对于内置模板（build_method: use_builtin），直接返回 template_id
+        - 对于自定义模板（build_method: custom_build），返回预构建的模板 ID 或降级到 base
+        
+        如果需要自定义模板，请先使用 CLI 构建：
+            e2b template build --name <template-name>
         
         Args:
             template_name: 模板名称（如 "data-analysis"）
         
         Returns:
-            模板ID（用于 Sandbox.create(template_id)）
+            模板 ID（用于创建沙箱）
         """
         # 检查缓存
-        if template_name in self._built_templates:
+        if template_name in self._template_cache:
             logger.debug(f"✅ 使用缓存模板: {template_name}")
-            return self._built_templates[template_name]
+            return self._template_cache[template_name]
         
         # 获取配置
         templates = self.templates_config.get("templates", {})
@@ -97,80 +104,51 @@ class E2BTemplateManager:
             # 使用 E2B 内置模板（无需构建）
             template_id = template_config.get("template_id", "base")
             logger.info(f"✅ 使用内置模板: {template_id}")
-            self._built_templates[template_name] = template_id
+            self._template_cache[template_name] = template_id
             return template_id
         
         elif build_method == "custom_build":
-            # 自定义构建
-            logger.info(f"🔨 构建自定义模板: {template_name}")
-            template_id = await self._build_custom_template(template_name, template_config)
-            self._built_templates[template_name] = template_id
-            return template_id
+            # 自定义模板：检查是否有预构建的 template_id
+            template_id = template_config.get("template_id")
+            
+            if template_id:
+                # 已有预构建模板
+                logger.info(f"✅ 使用预构建模板: {template_id}")
+                self._template_cache[template_name] = template_id
+                return template_id
+            else:
+                # 无预构建模板，降级到 base 并记录所需包
+                pre_install_packages = template_config.get("pre_install_packages", [])
+                logger.warning(
+                    f"⚠️ 模板 {template_name} 未预构建，降级到 base 模板。"
+                    f"所需包将在运行时安装: {', '.join(pre_install_packages[:5])}..."
+                )
+                logger.info(
+                    f"💡 提示：如需更快启动，请使用 CLI 预构建模板：\n"
+                    f"   e2b template build --name {template_name}"
+                )
+                self._template_cache[template_name] = "base"
+                return "base"
         
         else:
             logger.warning(f"⚠️ 未知的构建方法: {build_method}，使用 base 模板")
             return "base"
     
-    async def _build_custom_template(
-        self, 
-        template_name: str,
-        config: Dict[str, Any]
-    ) -> str:
+    def get_runtime_packages(self, template_name: str) -> List[str]:
         """
-        构建自定义模板
+        获取模板所需的运行时包列表
         
-        参考 E2B 文档：https://e2b.dev/docs/template/defining-template
+        当模板未预构建时，这些包需要在运行时安装。
+        
+        Args:
+            template_name: 模板名称
+            
+        Returns:
+            需要安装的包列表
         """
-        try:
-            # 创建模板定义
-            base_template = config.get("base_template", "base")
-            template = Template().fromTemplate(base_template)
-            
-            # 安装包
-            pre_install_packages = config.get("pre_install_packages", [])
-            if pre_install_packages:
-                logger.info(f"📦 预安装包: {', '.join(pre_install_packages)}")
-                template.pipInstall(pre_install_packages)
-            
-            # 设置环境变量
-            env_vars = config.get("env_vars", {})
-            if env_vars:
-                template.setEnvs(env_vars)
-            
-            # 运行自定义命令
-            setup_commands = config.get("setup_commands", [])
-            if setup_commands:
-                for cmd in setup_commands:
-                    template.runCmd(cmd)
-            
-            # 构建模板
-            template_alias = f"{template_name}-v1"  # 添加版本号
-            
-            # 获取构建配置
-            build_config = self.templates_config.get("build_config", {})
-            default_config = build_config.get("default", {})
-            overrides = build_config.get("overrides", {}).get(template_name, {})
-            
-            # 合并配置
-            cpu_count = overrides.get("cpu_count", default_config.get("cpu_count", 2))
-            memory_mb = overrides.get("memory_mb", default_config.get("memory_mb", 2048))
-            
-            await Template.build(
-                template,
-                alias=template_alias,
-                cpuCount=cpu_count,
-                memoryMB=memory_mb,
-                onBuildLogs=defaultBuildLogger()
-            )
-            
-            logger.info(f"✅ 模板构建完成: {template_alias}")
-            return template_alias
-        
-        except Exception as e:
-            logger.error(f"❌ 模板构建失败: {e}", exc_info=True)
-            # 降级：使用 base 模板
-            logger.warning("⚠️ 降级到 base 模板")
-            return "base"
+        templates = self.templates_config.get("templates", {})
+        template_config = templates.get(template_name, {})
+        return template_config.get("pre_install_packages", [])
     
     def get_recommended_template(self, task_type: str) -> str:
         """
@@ -204,19 +182,52 @@ class E2BTemplateManager:
         """列出所有可用模板"""
         templates = self.templates_config.get("templates", {})
         return list(templates.keys())
+    
+    def get_package_mapping(self) -> Dict[str, str]:
+        """
+        获取包名映射（import 名 → pip 包名）
+        
+        例如：cv2 -> opencv-python, PIL -> Pillow
+        
+        Returns:
+            包名映射字典
+        """
+        pkg_mgmt = self.templates_config.get("package_management", {})
+        return pkg_mgmt.get("package_mapping", {})
+    
+    def is_template_prebuilt(self, template_name: str) -> bool:
+        """
+        检查模板是否已预构建
+        
+        Args:
+            template_name: 模板名称
+            
+        Returns:
+            是否已预构建
+        """
+        templates = self.templates_config.get("templates", {})
+        template_config = templates.get(template_name, {})
+        
+        build_method = template_config.get("build_method", "use_builtin")
+        
+        if build_method == "use_builtin":
+            return True  # 内置模板始终可用
+        
+        # 自定义模板需要检查是否有 template_id
+        return bool(template_config.get("template_id"))
 
 
 # ==================== 便捷函数 ====================
 
 def create_e2b_template_manager(config_path: str = None) -> E2BTemplateManager:
     """
-    创建E2B模板管理器
+    创建 E2B 模板管理器
     
     Args:
         config_path: 配置文件路径
     
     Returns:
-        E2BTemplateManager实例
+        E2BTemplateManager 实例
     """
     return E2BTemplateManager(config_path=config_path)
 

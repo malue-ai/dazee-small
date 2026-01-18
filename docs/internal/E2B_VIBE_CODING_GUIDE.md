@@ -569,13 +569,16 @@ console.log(result.stdout)
 
 **tools/e2b_wrapper.py**
 ```python
-from e2b import Sandbox
+# E2B SDK v2+ 使用 e2b_code_interpreter
+from e2b_code_interpreter import Sandbox as CodeInterpreter
 from typing import Dict, Any, Optional
+import os
 
 class E2BWrapper:
     def __init__(self, api_key: str):
         self.api_key = api_key
-        self.active_sandboxes: Dict[str, Sandbox] = {}
+        os.environ["E2B_API_KEY"] = api_key
+        self.active_sandboxes: Dict[str, CodeInterpreter] = {}
     
     async def execute_code(
         self,
@@ -585,9 +588,9 @@ class E2BWrapper:
     ) -> Dict[str, Any]:
         """执行代码"""
         
-        # 创建沙箱
-        sandbox_template = template or 'base'
-        sandbox = await Sandbox.create(sandbox_template, api_key=self.api_key)
+        # e2b-code-interpreter SDK: 直接创建（不支持 metadata 参数）
+        # 元数据需要在应用层管理（如数据库）
+        sandbox = CodeInterpreter()
         
         try:
             # 写入代码文件
