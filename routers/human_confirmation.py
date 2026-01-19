@@ -7,7 +7,7 @@
 - 异常转换为 HTTP 异常
 
 工作流程：
-1. Agent 调用 request_human_confirmation 工具
+1. Agent 调用 hitl 工具
 2. 工具通过 SSE 发送确认请求到前端
 3. 前端显示确认对话框
 4. 用户点击确认/取消 → 调用此接口提交响应
@@ -50,7 +50,7 @@ class ConfirmationResponseBody(BaseModel):
     """确认响应请求体"""
     response: Union[str, List[str], Dict[str, Any]] = Field(
         ...,
-        description="用户响应：字符串（yes_no/single_choice/text_input）、数组（multiple_choice）、或对象（form）"
+        description="用户响应：字符串（text_input）或对象（form）"
     )
     metadata: Optional[Dict[str, Any]] = Field(
         default=None,

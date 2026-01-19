@@ -218,7 +218,7 @@ class ArchitectureVerifier:
         - 工具发现
         - InstanceToolRegistry 注册
         """
-        from services.mcp_client import get_mcp_client
+        from infra.pools import get_mcp_pool
         from core.tool import InstanceToolRegistry, get_capability_registry
         
         self._print_header("阶段 1 (续): MCP 连接和工具发现验证")
@@ -232,9 +232,10 @@ class ArchitectureVerifier:
         auth_env = mcp_config.get("auth_env", "DIFY_API_KEY")
         auth_token = os.getenv(auth_env)
         
-        # 1.6 验证 MCP 客户端连接
+        # 1.6 验证 MCP 客户端连接（使用统一的 MCPPool）
         try:
-            client = await get_mcp_client(
+            mcp_pool = get_mcp_pool()
+            client = await mcp_pool.get_client(
                 server_url=server_url,
                 server_name=server_name,
                 auth_token=auth_token
@@ -347,7 +348,7 @@ class ArchitectureVerifier:
         - task_type/complexity 输出
         - skip_memory_retrieval 判断
         """
-        from core.agent.intent_analyzer import IntentAnalyzer, create_intent_analyzer
+        from core.routing.intent_analyzer import IntentAnalyzer, create_intent_analyzer  # 🆕 V7.0: 使用共享层
         
         self._print_header("阶段 2: 意图分析验证")
         

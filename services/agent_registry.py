@@ -40,7 +40,6 @@ from scripts.instance_loader import (
     _build_apis_prompt_section,
     get_instances_dir,
 )
-from services.mcp_client import create_mcp_tool_definition
 from infra.pools import get_mcp_pool
 
 logger = get_logger("agent_registry")
@@ -254,7 +253,8 @@ class AgentRegistry:
         self,
         agent_id: str,
         event_manager=None,
-        conversation_service=None
+        conversation_service=None,
+        event_dispatcher=None
     ):
         """
         获取 Agent 实例（🆕 V7.1: 原型复用模式）
@@ -268,6 +268,7 @@ class AgentRegistry:
             agent_id: Agent ID（instances/ 目录名）
             event_manager: 事件管理器
             conversation_service: 会话服务
+            event_dispatcher: 事件分发器（用于 ZenO 格式转换，可选）
             
         Returns:
             就绪的 Agent 实例
@@ -295,7 +296,8 @@ class AgentRegistry:
             # 浅克隆并重置会话状态
             agent = prototype.clone_for_session(
                 event_manager=event_manager,
-                conversation_service=conversation_service
+                conversation_service=conversation_service,
+                event_dispatcher=event_dispatcher
             )
             
             logger.debug(f"🚀 Agent '{agent_id}' 从原型克隆完成（快速路径）")
@@ -472,15 +474,16 @@ class AgentRegistry:
         """
         注册 MCP 工具
         
-        使用 MCPPool 获取客户端，复用已建立的连接，避免重复连接延迟。
+        **延迟连接模式**：启动时只注册工具配置，不连接 MCP 服务器，避免 anyio cancel scope 污染。
+        MCP 连接在工具首次被调用时按需建立。
         
         Args:
             agent: Agent 实例
             mcp_tools: MCP 工具配置列表
             instance_registry: 实例级工具注册表
         """
+        logger.info(f"📦 注册 MCP 工具（延迟连接模式）: {len(mcp_tools)} 个配置")
         mcp_tool_definitions = []
-        mcp_pool = get_mcp_pool()
         
         for tool_config in mcp_tools:
             name = tool_config.get("name", "unknown")
@@ -501,81 +504,108 @@ class AgentRegistry:
                         logger.warning(f"⚠️ MCP 工具 {name} 的密钥环境变量 {auth_env} 未设置")
                         continue
                 
-                # 🆕 使用 MCPPool 获取客户端（复用已建立的连接）
-                client = await mcp_pool.get_client(
-                    server_url=server_url,
-                    server_name=server_name,
-                    auth_token=auth_token
-                )
+                # 🆕 延迟连接：启动时只创建工具定义，不连接 MCP 服务器
+                # 使用配置中的工具名作为占位符，实际工具发现在首次调用时进行
                 
-                # 处理连接失败的情况
-                if client is None:
-                    logger.warning(f"⚠️ MCP 客户端连接失败，跳过工具 {name}")
-                    continue
+                # 创建延迟加载的工具定义
+                tool_def = {
+                    "type": "function",
+                    "function": {
+                        "name": f"mcp_{server_name}_{name}",
+                        "description": f"MCP 工具: {name} (来自 {server_name}，首次调用时连接)",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "action": {
+                                    "type": "string",
+                                    "description": "要执行的操作"
+                                },
+                                "params": {
+                                    "type": "object",
+                                    "description": "操作参数"
+                                }
+                            },
+                            "required": ["action"]
+                        }
+                    }
+                }
+                mcp_tool_definitions.append(tool_def)
                 
-                if client._connected:
-                    tools = client._tools
-                    if not tools:
-                        tools_list = await client.discover_tools()
-                        tools = {t['name']: t for t in tools_list}
-                    
-                    for tool_name, tool_info in tools.items():
-                        tool_def = create_mcp_tool_definition(tool_info, client)
-                        mcp_tool_definitions.append(tool_def)
+                # 注册延迟连接的处理器到 InstanceToolRegistry
+                capability = tool_config.get("capability")
+                
+                async def make_lazy_handler(_name, _server_url, _server_name, _auth_token):
+                    """创建延迟连接的 MCP 工具处理器"""
+                    async def handler(tool_input: Dict[str, Any]):
+                        # 🆕 按需连接：在工具被调用时才连接 MCP 服务器
+                        pool = get_mcp_pool()
+                        try:
+                            current_client = await pool.get_client(
+                                server_url=_server_url,
+                                server_name=_server_name,
+                                auth_token=_auth_token
+                            )
+                        except Exception as e:
+                            logger.error(f"❌ MCP 工具 {_name} 连接失败: {e}")
+                            return {"success": False, "error": f"MCP 服务器连接失败: {str(e)}"}
                         
-                        # 注册到 InstanceToolRegistry
-                        capability = tool_config.get("capability")
-                        original_name = tool_info.get("original_name", tool_name)
+                        if not current_client:
+                            return {"success": False, "error": "MCP 服务器连接失败"}
                         
-                        async def make_handler(_orig_name, _server_url, _server_name, _auth_token):
-                            async def handler(tool_input: Dict[str, Any]):
-                                # 🆕 使用 MCPPool 获取客户端（复用连接）
-                                pool = get_mcp_pool()
+                        # 获取实际的工具名（可能需要从 action 参数推断）
+                        action = tool_input.get("action", _name)
+                        params = tool_input.get("params", {})
+                        
+                        # 如果 tool_input 不是 action/params 格式，直接传递
+                        if "action" not in tool_input:
+                            params = tool_input
+                            action = _name
+                        
+                        # 调用工具
+                        result = await current_client.call_tool(action, params)
+                        
+                        # 如果需要重连，自动重试一次
+                        if result.get("_need_reconnect"):
+                            logger.info(f"🔄 MCP 连接断开，自动重连: {_server_name}")
+                            try:
                                 current_client = await pool.get_client(
                                     server_url=_server_url,
                                     server_name=_server_name,
-                                    auth_token=_auth_token
+                                    auth_token=_auth_token,
+                                    force_reconnect=True
                                 )
                                 if not current_client:
-                                    return {"success": False, "error": "MCP 服务器连接失败"}
-                                
-                                # 调用工具
-                                result = await current_client.call_tool(_orig_name, tool_input)
-                                
-                                # 如果需要重连，自动重试一次
-                                if result.get("_need_reconnect"):
-                                    logger.info(f"🔄 MCP 连接断开，自动重连: {_server_name}")
-                                    current_client = await pool.get_client(
-                                        server_url=_server_url,
-                                        server_name=_server_name,
-                                        auth_token=_auth_token,
-                                        force_reconnect=True
-                                    )
-                                    if not current_client:
-                                        return {"success": False, "error": "MCP 服务器重连失败"}
-                                    result = await current_client.call_tool(_orig_name, tool_input)
-                                
-                                return result
-                            return handler
+                                    return {"success": False, "error": "MCP 服务器重连失败"}
+                                result = await current_client.call_tool(action, params)
+                            except Exception as reconnect_error:
+                                logger.error(f"❌ MCP 重连失败: {reconnect_error}")
+                                return {"success": False, "error": f"MCP 重连失败: {str(reconnect_error)}"}
                         
-                        handler = await make_handler(original_name, server_url, server_name, auth_token)
-                        
-                        await instance_registry.register_mcp_tool(
-                            name=tool_name,
-                            server_url=server_url,
-                            server_name=server_name,
-                            tool_info=tool_info,
-                            mcp_client=client,
-                            handler=handler,
-                            capability=capability
-                        )
-                    
-                    # 保存客户端引用
-                    if hasattr(agent, '_mcp_clients'):
-                        if client not in agent._mcp_clients:
-                            agent._mcp_clients.append(client)
-                    else:
-                        agent._mcp_clients = [client]
+                        return result
+                    return handler
+                
+                handler = await make_lazy_handler(name, server_url, server_name, auth_token)
+                
+                # 工具全名（带命名空间）
+                full_tool_name = f"mcp_{server_name}_{name}"
+                
+                # 注册延迟连接的工具处理器到 InstanceToolRegistry
+                await instance_registry.register_mcp_tool(
+                    name=full_tool_name,
+                    server_url=server_url,
+                    server_name=server_name,
+                    tool_info={"name": name, "description": f"MCP 工具 (延迟连接)"},
+                    mcp_client=None,  # 启动时没有客户端
+                    handler=handler,
+                    capability=capability
+                )
+                
+                # 🆕 关键：同时注册到 Agent 的 tool_executor，确保工具可被执行
+                if hasattr(agent, 'tool_executor') and agent.tool_executor:
+                    agent.tool_executor.register_handler(full_tool_name, handler)
+                    logger.debug(f"   📌 已注册到 tool_executor: {full_tool_name}")
+                
+                logger.info(f"   ✅ MCP 工具 {name} 已注册（延迟连接模式）")
                         
             except Exception as e:
                 logger.warning(f"⚠️ 注册 MCP 工具 {name} 失败: {str(e)}")
@@ -587,51 +617,7 @@ class AgentRegistry:
             else:
                 agent._mcp_tools = mcp_tool_definitions
             
-            # 注册到 tool_executor（使用 MCPPool 带自动重连逻辑）
-            if hasattr(agent, 'tool_executor'):
-                for tool_def in mcp_tool_definitions:
-                    tool_name = tool_def['name']
-                    original_name = tool_def['_original_name']
-                    # 获取连接信息用于重连
-                    _server_url = tool_def.get('_server_url')
-                    _server_name = tool_def.get('_server_name')
-                    _auth_token = tool_def.get('_auth_token')
-                    
-                    async def mcp_handler(
-                        tool_input: Dict[str, Any], 
-                        _url=_server_url, 
-                        _name=_server_name, 
-                        _token=_auth_token,
-                        _orig_name=original_name
-                    ):
-                        # 🆕 使用 MCPPool 获取客户端（复用连接）
-                        pool = get_mcp_pool()
-                        current_client = await pool.get_client(
-                            server_url=_url,
-                            server_name=_name,
-                            auth_token=_token
-                        )
-                        if not current_client:
-                            return {"success": False, "error": "MCP 服务器连接失败"}
-                        
-                        result = await current_client.call_tool(_orig_name, tool_input)
-                        
-                        # 如果需要重连，自动重试
-                        if result.get("_need_reconnect"):
-                            logger.info(f"🔄 MCP 连接断开，自动重连: {_name}")
-                            current_client = await pool.get_client(
-                                server_url=_url,
-                                server_name=_name,
-                                auth_token=_token,
-                                force_reconnect=True
-                            )
-                            if not current_client:
-                                return {"success": False, "error": "MCP 服务器重连失败"}
-                            result = await current_client.call_tool(_orig_name, tool_input)
-                        
-                        return result
-                    
-                    agent.tool_executor.register_handler(tool_name, mcp_handler)
+            logger.info(f"📦 已注册 {len(mcp_tool_definitions)} 个 MCP 工具定义（延迟连接模式）")
     
     # ==================== 查询方法 ====================
     

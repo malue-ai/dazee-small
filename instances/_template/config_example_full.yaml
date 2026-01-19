@@ -57,7 +57,7 @@ enabled_capabilities:
   # --- 核心工具 ---
   plan_todo: 1               # 任务规划工具
   api_calling: 1             # 通用 API 调用
-  request_human_confirmation: 1  # 人工确认
+  hitl: 1  # HITL (Human-in-the-Loop)
   file_read: 1               # 文件读取
   code_execution: 1          # 动态代码执行
 

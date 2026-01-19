@@ -387,7 +387,7 @@ class InstancePromptCache:
             # 🆕 V5.5: 优先从 prompt_results/ 加载（运营可编辑版本）
             if not force_refresh and self._prompt_results_writer:
                 disk_start = time.time()
-                if self._try_load_from_prompt_results():
+                if await self._try_load_from_prompt_results():
                     self.metrics.disk_hits += 1
                     self.metrics.disk_load_time_ms = (time.time() - disk_start) * 1000
                     self.metrics.load_time_ms = (time.time() - start_time) * 1000
@@ -453,9 +453,9 @@ class InstancePromptCache:
     # 🆕 V5.5: prompt_results/ 目录加载和保存
     # ============================================================
     
-    def _try_load_from_prompt_results(self) -> bool:
+    async def _try_load_from_prompt_results(self) -> bool:
         """
-        🆕 V5.5: 尝试从 prompt_results/ 加载
+        🆕 V5.5: 尝试从 prompt_results/ 加载（异步版本）
         
         优先使用运营手动编辑的版本
         
@@ -466,12 +466,12 @@ class InstancePromptCache:
             return False
         
         try:
-            # 检查是否需要重新生成
-            regen_flags = self._prompt_results_writer.should_regenerate()
+            # 检查是否需要重新生成（异步调用）
+            regen_flags = await self._prompt_results_writer.should_regenerate()
             
             # 如果所有文件都不需要重新生成，直接加载
             if not any(regen_flags.values()):
-                existing = self._prompt_results_writer.load_existing()
+                existing = await self._prompt_results_writer.load_existing()
                 if existing:
                     self._load_from_prompt_results(existing)
                     logger.debug(f"📂 从 prompt_results/ 加载完成（无需更新）")
@@ -479,7 +479,7 @@ class InstancePromptCache:
             
             # 如果部分文件需要重新生成，先加载现有的（保护手动编辑的）
             if self._prompt_results_writer.is_valid():
-                existing = self._prompt_results_writer.load_existing()
+                existing = await self._prompt_results_writer.load_existing()
                 if existing:
                     # 只加载不需要重新生成的部分
                     self._load_partial_from_prompt_results(existing, regen_flags)
@@ -593,7 +593,7 @@ class InstancePromptCache:
                        "simple_prompt": True, "medium_prompt": True, "complex_prompt": True}
         
         if self._prompt_results_writer:
-            regen_flags = self._prompt_results_writer.should_regenerate()
+            regen_flags = await self._prompt_results_writer.should_regenerate()
         
         # Task 1: 生成 AgentSchema
         if regen_flags.get("agent_schema", True) or not self.agent_schema:

@@ -42,6 +42,8 @@ from core.agent.multi.models import MultiAgentConfig
 from services.session_service import SessionService, get_session_service, SessionNotFoundError
 from services.conversation_service import get_conversation_service, ConversationNotFoundError
 from services.agent_registry import get_agent_registry, AgentNotFoundError
+# 🆕 事件分发器（用于 ZenO 格式转换）
+from core.events.dispatcher import EventDispatcher
 # 资源池架构
 from infra.pools import get_session_pool, get_agent_pool
 from infra.database import AsyncSessionLocal, crud
@@ -133,6 +135,10 @@ class ChatService:
         
         # 🆕 V7: Token 审计器
         self.token_auditor: TokenAuditor = get_token_auditor()
+        
+        # 🆕 事件分发器（用于 ZenO 格式转换）
+        # 当 format=zeno 时，事件会通过 dispatcher 转换为 ZenO 规范格式
+        self.event_dispatcher = EventDispatcher(redis_manager=self.session_service.redis)
     
     def _get_router(self) -> AgentRouter:
         """
@@ -254,7 +260,8 @@ class ChatService:
         background_tasks: Optional[List[str]] = None,
         files: Optional[List[Any]] = None,
         variables: Optional[Dict[str, Any]] = None,
-        agent_id: Optional[str] = None
+        agent_id: Optional[str] = None,
+        output_format: str = "zenflux"
     ):
         """
         统一的对话入口 ⭐
@@ -280,6 +287,7 @@ class ChatService:
             files: 文件引用列表（FileReference 对象或字典）
             variables: 前端上下文变量（可选），如位置、时区等
             agent_id: Agent 实例 ID（可选，不提供则使用默认 Agent）
+            output_format: 输出事件格式（zeno/zenflux），默认 zenflux
             
         Returns:
             stream=True  → AsyncGenerator
@@ -327,7 +335,8 @@ class ChatService:
             agent = await self.agent_pool.acquire(
                 agent_id=pool_key,
                 event_manager=self.session_service.events,
-                conversation_service=self.conversation_service
+                conversation_service=self.conversation_service,
+                event_dispatcher=self.event_dispatcher
             )
             agent_acquired = True
             logger.debug(f"✅ Agent 就绪: {pool_key}")
@@ -360,7 +369,8 @@ class ChatService:
                 is_new_conversation=is_new_conversation,
                 background_tasks=background_tasks,
                 files=files,
-                variables=variables
+                variables=variables,
+                output_format=output_format
             ))
             return {
                 "task_id": session_id,
@@ -380,7 +390,8 @@ class ChatService:
             is_new_conversation=is_new_conversation,
             background_tasks=background_tasks,
             files=files,
-            variables=variables
+            variables=variables,
+            output_format=output_format
         )
     
     async def _create_stream_generator(
@@ -394,15 +405,23 @@ class ChatService:
         is_new_conversation: bool,
         background_tasks: Optional[List[str]],
         files: Optional[List[Any]],
-        variables: Optional[Dict[str, Any]]
+        variables: Optional[Dict[str, Any]],
+        output_format: str = "zenflux"
     ):
         """
         创建流式事件生成器
         
         将流式逻辑抽离，保持 chat() 简洁
+        
+        Args:
+            output_format: 输出事件格式（zeno/zenflux），默认 zenflux
         """
         try:
             redis = self.session_service.redis
+            
+            # 设置 Agent 的输出格式（EventBroadcaster 会使用）
+            if hasattr(agent, 'broadcaster') and agent.broadcaster:
+                agent.broadcaster.set_output_format(output_format, conversation_id)
             events = self.session_service.events
             
             # 发送初始事件
@@ -476,7 +495,8 @@ class ChatService:
         is_new_conversation: bool = False,
         background_tasks: Optional[List[str]] = None,
         files: Optional[List[Any]] = None,
-        variables: Optional[Dict[str, Any]] = None
+        variables: Optional[Dict[str, Any]] = None,
+        output_format: str = "zenflux"
     ):
         """
         执行 Agent（核心逻辑，同步和流式共用）
@@ -711,6 +731,10 @@ class ChatService:
                     f"use_multi_agent={use_multi_agent}, "
                     f"intent={routing_intent.task_type.value if routing_intent else 'N/A'}"
                 )
+            
+            # 🆕 设置 Agent 的输出格式（EventBroadcaster 会使用）
+            if hasattr(agent, 'broadcaster') and agent.broadcaster:
+                agent.broadcaster.set_output_format(output_format, conversation_id)
             
             # 根据路由决策选择执行路径
             if use_multi_agent:

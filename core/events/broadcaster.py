@@ -144,7 +144,9 @@ class EventBroadcaster:
         event_manager,
         seq_manager: "SeqManager" = None,
         conversation_service: "ConversationService" = None,
-        event_dispatcher=None
+        event_dispatcher=None,
+        output_format: str = "zenflux",
+        conversation_id: str = None
     ):
         """
         初始化广播器
@@ -154,11 +156,17 @@ class EventBroadcaster:
             seq_manager: SeqManager 实例（用于统一生成序号）
             conversation_service: ConversationService 实例（用于持久化）
             event_dispatcher: EventDispatcher 实例（用于外部适配器，可选）
+            output_format: 输出事件格式（zeno/zenflux），默认 zenflux
+            conversation_id: 对话 ID（用于 ZenO 格式）
         """
         self.events = event_manager
         self.seq_manager = seq_manager  # 🆕 序号管理器
         self.conversation_service = conversation_service
         self.dispatcher = event_dispatcher  # 外部事件分发器
+        
+        # 输出格式配置（由 chat.py 传递）
+        self.output_format = output_format
+        self.output_conversation_id = conversation_id
         
         # tool_id -> tool_name 缓存（用于 tool_result 时查找工具名）
         self._tool_id_to_name: Dict[str, str] = {}
@@ -190,6 +198,18 @@ class EventBroadcaster:
             "error",
         }
     
+    def set_output_format(self, format: str, conversation_id: str = None) -> None:
+        """
+        设置输出格式（运行时动态配置）
+        
+        Args:
+            format: 输出事件格式（zeno/zenflux）
+            conversation_id: 对话 ID（用于 ZenO 格式）
+        """
+        self.output_format = format
+        if conversation_id:
+            self.output_conversation_id = conversation_id
+    
     async def _get_seq_and_uuid(self, session_id: str) -> tuple:
         """
         统一生成序号和 UUID
@@ -218,9 +238,11 @@ class EventBroadcaster:
         """
         广播单个事件
         
-        🆕 统一生成序号后分发到：
-        1. EventManager → EventStorage（内部存储）
-        2. EventDispatcher → 外部系统（使用同一个 seq）
+        流程：
+        1. 如果有 dispatcher 且 output_format 需要转换（如 zeno）：
+           - 通过 dispatcher 转换事件、编号 seq、存储
+           - 不通过 EventManager 存储（避免重复）
+        2. 否则保持原有行为
         
         Args:
             session_id: Session ID
@@ -230,22 +252,24 @@ class EventBroadcaster:
             发送的事件（如果广播了），否则 None
         """
         try:
-            # 🆕 统一生成序号和 UUID
-            seq, event_uuid = await self._get_seq_and_uuid(session_id)
-            
-            # 路由到对应的 emit 方法（传递 seq 和 event_uuid）
-            result = await self._route_event(session_id, event, seq=seq, event_uuid=event_uuid)
-            
-            # 分发到外部适配器（异步，不阻塞，使用同一个 seq）
-            if result and self.dispatcher:
-                await self.dispatcher.dispatch(
+            # 如果有 dispatcher，使用 dispatcher 处理转换和存储
+            if self.dispatcher:
+                # 通过 dispatcher 转换、编号、存储
+                output_event = await self.dispatcher.dispatch(
                     session_id,
-                    result,
-                    to_internal=False,  # 内部广播已由 _route_event 完成
-                    to_external=True
+                    event,
+                    to_internal=True,   # 存储转换后的事件到 Redis
+                    to_external=True,   # 发送到外部适配器
+                    format=self.output_format,
+                    conversation_id=self.output_conversation_id
                 )
+                return output_event
             
+            # 没有 dispatcher 时，保持原有行为
+            seq, event_uuid = await self._get_seq_and_uuid(session_id)
+            result = await self._route_event(session_id, event, seq=seq, event_uuid=event_uuid)
             return result
+            
         except Exception as e:
             logger.error(f"❌ 广播事件失败: {event.get('type', 'unknown')}, error={str(e)}")
             return None
@@ -1451,6 +1475,33 @@ class EventBroadcaster:
         self._session_message_ids.pop(session_id, None)
         logger.debug(f"🧹 清理 session 状态: {session_id}")
     
+    # ==================== 多智能体事件 ====================
+    
+    async def emit_raw_event(
+        self,
+        session_id: str,
+        event: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        发送原始事件（多智能体场景）
+        
+        用于 MultiAgentOrchestrator 产生的特殊事件类型：
+        - orchestrator_start: 协调器开始
+        - task_decomposition: 任务分解
+        - agent_start: 子 Agent 开始
+        - agent_end: 子 Agent 结束
+        - orchestrator_summary: 协调器总结
+        - orchestrator_end: 协调器结束
+        
+        Args:
+            session_id: Session ID
+            event: 原始事件字典
+            
+        Returns:
+            发送的事件（如果成功），否则 None
+        """
+        return await self.broadcast(session_id, event)
+    
     # ==================== HITL 事件 ====================
     
     async def emit_confirmation_request(
@@ -1459,8 +1510,8 @@ class EventBroadcaster:
         request_id: str,
         question: str,
         options: list = None,
-        confirmation_type: str = "yes_no",
-        timeout: int = 60,
+        confirmation_type: str = "form",
+        timeout: int = 120,
         description: str = "",
         questions: list = None,
         metadata: dict = None
@@ -1476,7 +1527,7 @@ class EventBroadcaster:
             request_id: 确认请求ID（用于匹配响应）
             question: 问题内容
             options: 选项列表
-            confirmation_type: 确认类型（yes_no, single_choice, multiple_choice, text_input, form）
+            confirmation_type: 输入类型（form, text_input）
             timeout: 超时时间（秒）
             description: 补充描述
             questions: 问题列表（form 类型）

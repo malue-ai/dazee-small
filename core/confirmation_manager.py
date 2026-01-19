@@ -32,12 +32,15 @@ logger = get_logger(__name__)
 
 
 class ConfirmationType(Enum):
-    """确认类型枚举"""
-    YES_NO = "yes_no"           # 是/否确认
-    SINGLE_CHOICE = "single_choice"   # 单选题
-    MULTIPLE_CHOICE = "multiple_choice"  # 多选题
-    TEXT_INPUT = "text_input"      # 文本输入
-    FORM = "form"              # 复杂表单（多个问题，支持单选/多选混合）
+    """
+    确认类型枚举
+    
+    只有两种基础类型：
+    - FORM: 结构化表单，支持单选/多选/文本等问题组合
+    - TEXT_INPUT: 简单文本输入
+    """
+    FORM = "form"           # 结构化表单（支持 single_choice/multiple_choice/text_input 问题类型）
+    TEXT_INPUT = "text_input"   # 简单文本输入
 
 
 @dataclass
@@ -162,7 +165,7 @@ class ConfirmationManager:
         question: str,
         options: Optional[List[str]] = None,
         timeout: int = 60,
-        confirmation_type: ConfirmationType = ConfirmationType.YES_NO,
+        confirmation_type: ConfirmationType = ConfirmationType.FORM,
         session_id: str = "",
         metadata: Optional[Dict[str, Any]] = None
     ) -> ConfirmationRequest:

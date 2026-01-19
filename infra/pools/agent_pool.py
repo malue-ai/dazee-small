@@ -178,7 +178,8 @@ class AgentPool:
         self,
         agent_id: str,
         event_manager,
-        conversation_service
+        conversation_service,
+        event_dispatcher = None
     ) -> "SimpleAgent":
         """
         获取 Agent 实例（从原型克隆）
@@ -191,6 +192,7 @@ class AgentPool:
             agent_id: Agent ID（使用 DEFAULT_AGENT_KEY 获取默认 Agent）
             event_manager: 事件管理器
             conversation_service: 会话服务
+            event_dispatcher: 事件分发器（用于 ZenO 格式转换，可选）
             
         Returns:
             克隆的 Agent 实例
@@ -217,7 +219,8 @@ class AgentPool:
             prototype = self._prototypes[agent_id]
             agent = prototype.clone(
                 event_manager=event_manager,
-                conversation_service=conversation_service
+                conversation_service=conversation_service,
+                event_dispatcher=event_dispatcher
             )
             logger.debug(f"🏊 从原型克隆 Agent: {agent_id}")
         else:
@@ -235,7 +238,8 @@ class AgentPool:
                 agent = await self.registry.get_agent(
                     agent_id=agent_id,
                     event_manager=event_manager,
-                    conversation_service=conversation_service
+                    conversation_service=conversation_service,
+                    event_dispatcher=event_dispatcher
                 )
         
         # 增加实例计数

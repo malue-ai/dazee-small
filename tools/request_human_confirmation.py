@@ -1,18 +1,20 @@
 """
-请求人类确认工具 (RequestHumanConfirmationTool)
+HITL 工具 (Human-in-the-Loop)
 
-HITL (Human-in-the-Loop) 核心工具，用于在 Agent 执行过程中请求用户确认或收集偏好。
+用于在 Agent 执行过程中请求用户输入或收集偏好。
 
-支持的表单类型（confirmation_type）：
-┌─────────────────┬────────────────────────────────────────────┐
-│ 类型            │ 说明                                        │
-├─────────────────┼────────────────────────────────────────────┤
-│ yes_no          │ 简单的是/否确认                             │
-│ single_choice   │ 单选题                                      │
-│ multiple_choice │ 多选题                                      │
-│ text_input      │ 文本输入                                    │
-│ form            │ 复杂表单（多个问题组合，支持单选+多选混合）  │
-└─────────────────┴────────────────────────────────────────────┘
+支持的输入类型（input_type）：
+┌─────────────┬────────────────────────────────────────────────────────┐
+│ 类型        │ 说明                                                    │
+├─────────────┼────────────────────────────────────────────────────────┤
+│ form        │ 结构化表单（支持单选/多选/文本问题组合）                │
+│ text_input  │ 简单文本输入                                            │
+└─────────────┴────────────────────────────────────────────────────────┘
+
+form 中的问题类型（question.type）：
+- single_choice: 单选题（包含 yes/no 确认）
+- multiple_choice: 多选题
+- text_input: 文本输入
 
 工作流程：
 1. Agent 调用此工具 → 创建 ConfirmationRequest
@@ -39,16 +41,20 @@ logger = get_logger(__name__)
 
 # ==================== 常量定义 ====================
 
-# 默认选项
-DEFAULT_YES_NO_OPTIONS = ["confirm", "cancel"]
-DEFAULT_TIMEOUT = 60
-FORM_TIMEOUT = 120  # 复杂表单给更多时间
+DEFAULT_TIMEOUT = 60        # 默认超时时间
+FORM_TIMEOUT = 120          # 表单默认超时（给更多时间）
 
 
 # ==================== 问题类型定义 ====================
 
 class QuestionType:
-    """问题类型常量"""
+    """
+    form 中的问题类型常量
+    
+    - SINGLE_CHOICE: 单选题（包含 yes/no 确认场景）
+    - MULTIPLE_CHOICE: 多选题
+    - TEXT_INPUT: 文本输入
+    """
     SINGLE_CHOICE = "single_choice"
     MULTIPLE_CHOICE = "multiple_choice"
     TEXT_INPUT = "text_input"
@@ -56,48 +62,60 @@ class QuestionType:
 
 # ==================== 工具类 ====================
 
-class RequestHumanConfirmationTool(BaseTool):
+class HITLTool(BaseTool):
     """
-    请求人类确认工具
+    HITL (Human-in-the-Loop) 工具
     
-    支持多种表单类型，覆盖从简单确认到复杂表单的所有场景。
+    只有两种输入类型：form（结构化表单）和 text_input（简单文本）。
     
     使用示例：
     
-    1. 简单确认（yes_no）
+    1. 简单文本输入（text_input）
     ```python
-    request_human_confirmation(
-        question="是否删除文件 data.csv？",
-        confirmation_type="yes_no"
+    hitl(
+        title="请输入项目名称",
+        input_type="text_input",
+        description="用于生成报告的标题"
     )
-    # 返回: {"response": "confirm"} 或 {"response": "cancel"}
+    # 返回: {"response": "2024年Q1季度报告"}
     ```
     
-    2. 单选（single_choice）
+    2. 是/否确认（form + single_choice）
     ```python
-    request_human_confirmation(
-        question="选择 PPT 风格",
-        confirmation_type="single_choice",
-        options=["商务专业", "科技未来感", "简约清新"]
+    hitl(
+        title="操作确认",
+        input_type="form",
+        questions=[{
+            "id": "confirm",
+            "label": "是否删除文件 data.csv？",
+            "type": "single_choice",
+            "options": ["确认", "取消"]
+        }]
     )
-    # 返回: {"response": "商务专业"}
+    # 返回: {"response": {"confirm": "确认"}}
     ```
     
-    3. 多选（multiple_choice）
+    3. 单选题（form + single_choice）
     ```python
-    request_human_confirmation(
-        question="选择内容重点（可多选）",
-        confirmation_type="multiple_choice",
-        options=["政策法规", "产业动态", "技术突破", "投融资"]
+    hitl(
+        title="选择 PPT 风格",
+        input_type="form",
+        questions=[{
+            "id": "style",
+            "label": "请选择风格",
+            "type": "single_choice",
+            "options": ["商务专业", "科技未来感", "简约清新"],
+            "default": "商务专业"
+        }]
     )
-    # 返回: {"response": ["政策法规", "产业动态"]}
+    # 返回: {"response": {"style": "商务专业"}}
     ```
     
-    4. 复杂表单（form）
+    4. 多问题表单（form）
     ```python
-    request_human_confirmation(
-        question="收集用户偏好",
-        confirmation_type="form",
+    hitl(
+        title="收集用户偏好",
+        input_type="form",
         description="请选择您的偏好以生成更符合需求的内容",
         questions=[
             {
@@ -113,27 +131,31 @@ class RequestHumanConfirmationTool(BaseTool):
                 "type": "multiple_choice",
                 "options": ["政策法规", "产业动态", "技术突破"],
                 "default": ["政策法规"]
+            },
+            {
+                "id": "additional_notes",
+                "label": "补充说明",
+                "type": "text_input",
+                "hint": "可选，填写其他需求",
+                "required": False
             }
         ]
     )
-    # 返回: {"response": {"target_audience": "公司管理层", "content_focus": ["政策法规", "产业动态"]}}
+    # 返回: {"response": {"target_audience": "公司管理层", "content_focus": ["政策法规"], "additional_notes": ""}}
     ```
     """
     
     @property
     def name(self) -> str:
-        return "request_human_confirmation"
+        return "hitl"
     
     @property
     def description(self) -> str:
-        return """请求用户确认或收集用户偏好。
+        return """HITL (Human-in-the-Loop) 工具，请求用户输入或收集用户偏好。
 
-支持的表单类型：
-- yes_no: 简单的是/否确认（如：删除文件、执行危险操作）
-- single_choice: 单选题（如：选择风格、选择方案）
-- multiple_choice: 多选题（如：选择多个重点内容）
-- text_input: 文本输入（如：输入自定义名称）
-- form: 复杂表单（如：同时收集目标受众、内容重点、结构偏好）
+支持的输入类型：
+- form: 结构化表单（支持单选/多选/文本问题组合，可用于确认、选择、多问题表单等场景）
+- text_input: 简单文本输入（用户输入自定义内容）
 
 调用此工具后会暂停执行，等待用户在前端界面响应后继续。"""
     
@@ -142,34 +164,30 @@ class RequestHumanConfirmationTool(BaseTool):
         return {
             "type": "object",
             "properties": {
-                "question": {
+                "title": {
                     "type": "string",
-                    "description": "问题内容或表单标题"
+                    "description": "表单标题或提示信息"
                 },
-                "confirmation_type": {
+                "input_type": {
                     "type": "string",
-                    "enum": ["yes_no", "single_choice", "multiple_choice", "text_input", "form"],
-                    "description": "表单类型：yes_no（是否确认）、single_choice（单选）、multiple_choice（多选）、text_input（文本输入）、form（复杂表单）",
-                    "default": "yes_no"
-                },
-                "options": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "选项列表，用于 single_choice 和 multiple_choice 类型"
-                },
-                "default_value": {
-                    "description": "默认值。single_choice 为字符串，multiple_choice 为数组"
+                    "enum": ["form", "text_input"],
+                    "description": "输入类型：form（结构化表单）、text_input（简单文本输入）",
+                    "default": "form"
                 },
                 "questions": {
                     "type": "array",
-                    "description": "问题列表，仅用于 form 类型。每个问题包含 id、label、type、options 等字段",
+                    "description": "问题列表，用于 form 类型。每个问题包含 id、label、type、options 等字段",
                     "items": {
                         "type": "object",
                         "properties": {
                             "id": {"type": "string", "description": "问题ID，作为返回结果的 key"},
                             "label": {"type": "string", "description": "问题标签，显示给用户"},
-                            "type": {"type": "string", "enum": ["single_choice", "multiple_choice", "text_input"]},
-                            "options": {"type": "array", "items": {"type": "string"}, "description": "选项列表"},
+                            "type": {
+                                "type": "string", 
+                                "enum": ["single_choice", "multiple_choice", "text_input"],
+                                "description": "问题类型：single_choice（单选，包括是/否确认）、multiple_choice（多选）、text_input（文本）"
+                            },
+                            "options": {"type": "array", "items": {"type": "string"}, "description": "选项列表，用于 single_choice 和 multiple_choice"},
                             "default": {"description": "默认值"},
                             "hint": {"type": "string", "description": "提示文字"},
                             "required": {"type": "boolean", "description": "是否必填", "default": True}
@@ -183,19 +201,17 @@ class RequestHumanConfirmationTool(BaseTool):
                 },
                 "timeout": {
                     "type": "integer",
-                    "description": "超时时间（秒）。简单确认默认60秒，复杂表单默认120秒",
-                    "default": 60
+                    "description": "超时时间（秒）。默认 120 秒",
+                    "default": 120
                 }
             },
-            "required": ["question"]
+            "required": ["title"]
         }
     
     async def execute(
         self,
-        question: str,
-        confirmation_type: str = "yes_no",
-        options: Optional[List[str]] = None,
-        default_value: Optional[Union[str, List[str]]] = None,
+        title: str,
+        input_type: str = "form",
         questions: Optional[List[Dict[str, Any]]] = None,
         description: str = "",
         timeout: Optional[int] = None,
@@ -204,64 +220,57 @@ class RequestHumanConfirmationTool(BaseTool):
         **kwargs
     ) -> Dict[str, Any]:
         """
-        执行确认请求
+        执行用户输入请求
         
         Args:
-            question: 问题内容或表单标题
-            confirmation_type: 表单类型
-            options: 选项列表
-            default_value: 默认值
+            title: 表单标题或提示信息
+            input_type: 输入类型（form 或 text_input）
             questions: 问题列表（form 类型）
             description: 表单描述
             timeout: 超时时间（秒）
             metadata: 额外元数据
-            emit_event: SSE 事件发射回调（由 Agent 注入）
             session_id: 会话ID
             
         Returns:
             {
                 "success": True,
-                "response": "confirm" | ["选项1", "选项2"] | {"field1": "value1", ...},
+                "response": "用户输入" | {"field1": "value1", ...},
                 "timed_out": False
             }
         """
-        # 解析确认类型
-        conf_type = self._parse_confirmation_type(confirmation_type)
+        # 解析输入类型
+        conf_type = self._parse_input_type(input_type)
         
         # 设置默认超时
         if timeout is None:
-            timeout = FORM_TIMEOUT if conf_type == ConfirmationType.FORM else DEFAULT_TIMEOUT
-        
-        # 处理选项
-        options = self._process_options(conf_type, options)
+            timeout = FORM_TIMEOUT
         
         # 构建请求元数据
         request_metadata = self._build_metadata(
             conf_type=conf_type,
             description=description,
             questions=questions,
-            default_value=default_value,
             extra_metadata=metadata
         )
         
-        logger.info(f"HITL 请求: type={confirmation_type}, question={question[:50]}...")
+        logger.info(f"HITL 请求: type={input_type}, title={title[:50]}...")
         
         # 获取确认管理器
         manager = get_confirmation_manager()
         
         # 1. 创建确认请求
         request = manager.create_request(
-            question=question,
-            options=options,
+            question=title,
+            options=None,
             timeout=timeout,
             confirmation_type=conf_type,
             session_id=session_id,
             metadata=request_metadata
         )
         
-        logger.info(f"确认请求已创建: request_id={request.request_id}")
+        logger.info(f"输入请求已创建: request_id={request.request_id}")
         
-        # 2. 前端会通过 tool_use 事件自动显示确认框，无需发送额外的 SSE 事件
+        # 2. 前端会通过 tool_use 事件自动显示表单，无需发送额外的 SSE 事件
         logger.debug("等待用户通过前端界面响应...")
         
         # 3. 异步等待用户响应
@@ -272,31 +281,19 @@ class RequestHumanConfirmationTool(BaseTool):
     
     # ==================== 私有方法 ====================
     
-    def _parse_confirmation_type(self, type_str: str) -> ConfirmationType:
-        """解析确认类型字符串"""
+    def _parse_input_type(self, type_str: str) -> ConfirmationType:
+        """解析输入类型字符串"""
         try:
             return ConfirmationType(type_str)
         except ValueError:
-            logger.warning(f"未知的确认类型: {type_str}，使用默认 yes_no")
-            return ConfirmationType.YES_NO
-    
-    def _process_options(
-        self, 
-        conf_type: ConfirmationType, 
-        options: Optional[List[str]]
-    ) -> Optional[List[str]]:
-        """处理选项列表"""
-        # yes_no 类型使用默认选项
-        if conf_type == ConfirmationType.YES_NO and not options:
-            return DEFAULT_YES_NO_OPTIONS
-        return options
+            logger.warning(f"未知的输入类型: {type_str}，使用默认 form")
+            return ConfirmationType.FORM
     
     def _build_metadata(
         self,
         conf_type: ConfirmationType,
         description: str,
         questions: Optional[List[Dict[str, Any]]],
-        default_value: Optional[Union[str, List[str]]],
         extra_metadata: Optional[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """构建请求元数据"""
@@ -306,13 +303,8 @@ class RequestHumanConfirmationTool(BaseTool):
         if description:
             metadata["description"] = description
         
-        # 添加默认值
-        if default_value is not None:
-            metadata["default_value"] = default_value
-        
         # form 类型添加问题列表
         if conf_type == ConfirmationType.FORM:
-            metadata["form_type"] = "form"
             metadata["questions"] = questions or []
         
         return metadata
@@ -355,11 +347,11 @@ class RequestHumanConfirmationTool(BaseTool):
 
 # ==================== 便捷函数 ====================
 
-def create_request_human_confirmation_tool() -> RequestHumanConfirmationTool:
+def create_hitl_tool() -> HITLTool:
     """
-    创建 RequestHumanConfirmationTool 实例
+    创建 HITLTool 实例
     
     Returns:
-        RequestHumanConfirmationTool 实例
+        HITLTool 实例
     """
-    return RequestHumanConfirmationTool()
+    return HITLTool()

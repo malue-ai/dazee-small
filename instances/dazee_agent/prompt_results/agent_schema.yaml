@@ -35,7 +35,7 @@ tool_selector:
   - exa_contents
   - web_search
   - pdf2markdown
-  - text2flowchart
+  - mcp_dify_Ontology_TextToChart_zen0
   - ppt_create
   - text2document
   - nano-banana-omni
@@ -43,13 +43,13 @@ tool_selector:
   - timezone_conversion
   - api_calling
   - plan_todo
-  - request_human_confirmation
+  - hitl
   selection_strategy: capability_based
   allow_parallel: false
   max_parallel_tools: 1
   base_tools:
   - plan_todo
-  - request_human_confirmation
+  - hitl
   tool_timeout: 300
 memory_manager:
   enabled: true
@@ -84,7 +84,7 @@ skills:
   version: latest
   required: false
 - type: custom
-  skill_id: text2flowchart
+  skill_id: mcp_dify_Ontology_TextToChart_zen0
   version: latest
   required: false
 - type: custom
@@ -119,7 +119,7 @@ reasoning: |
   2. **复杂任务规划**：需要强大的Plan Manager支持系统搭建、BI分析、报告生成等多步骤任务，设置max_steps=20以应对复杂流程
   3. **丰富工具生态**：涉及搜索、文档处理、图表生成、API调用等多种工具，需要capability_based智能选择策略
   4. **强制规划机制**：非简单问答必须使用plan_todo工具，需要在tool_selector中将其设为base_tools
-  5. **HITL交互**：多处需要用户确认（风格选择、方案决策等），request_human_confirmation为核心工具
+  5. **HITL交互**：多处需要用户确认（风格选择、方案决策等），hitl为核心工具
   6. **质量验证**：最终验证协议需要replan能力，设置max_replan_attempts=3
   7. **安全约束**：文件处理、URL诚信等规则需要通过memory和plan机制保障
   8. **禁用并行**：系统强调顺序执行和状态追踪，设置allow_parallel=false

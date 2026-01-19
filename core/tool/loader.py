@@ -63,7 +63,7 @@ TOOL_CATEGORIES = {
 CORE_TOOLS = [
     "plan_todo",                    # 任务规划
     "api_calling",                  # API 调用
-    "request_human_confirmation",   # 人工确认
+    "hitl",                         # HITL (Human-in-the-Loop)
     "file_read",                    # 文件读取
     # 沙盒工具（Vibe Coding 核心 - 4 个）
     "sandbox_write_file",           # 写文件

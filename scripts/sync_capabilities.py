@@ -67,7 +67,7 @@ TOOL_CATEGORIES = {
 CORE_TOOLS = [
     "plan_todo",
     "api_calling", 
-    "request_human_confirmation",
+    "hitl",
     "file_read",
 ]
 

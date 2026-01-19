@@ -41,6 +41,7 @@ from infra.pools import get_session_pool, get_agent_pool, get_mcp_pool
 from infra.database import init_database
 from infra.resilience.config import apply_resilience_config
 from core.tool.capability import get_capability_registry
+from utils import get_s3_uploader
 
 # ==================== 常量定义 ====================
 
@@ -51,11 +52,22 @@ APP_DESCRIPTION = "基于 Claude Sonnet 4.5 的智能体框架"
 
 # ==================== 启动辅助函数 ====================
 
+async def _init_s3_uploader() -> None:
+    """初始化 S3 上传器"""
+    print("☁️ 初始化 S3 上传器...")
+    try:
+        s3_uploader = get_s3_uploader()
+        await s3_uploader.initialize()
+        print("✅ S3 上传器初始化完成")
+    except Exception as e:
+        print(f"⚠️ S3 上传器初始化失败（文件上传功能可能不可用）: {e}")
+
+
 async def _init_resilience_config() -> None:
     """加载容错配置"""
     print("🛡️ 加载容错配置...")
     try:
-        apply_resilience_config()
+        await apply_resilience_config()
         print("✅ 容错配置已加载")
     except Exception as e:
         print(f"⚠️ 容错配置加载失败: {e}")
@@ -208,30 +220,42 @@ async def _close_redis() -> None:
         print(f"⚠️ 关闭 Redis 连接失败: {e}")
 
 
+async def _mcp_preconnect_background(mcp_pool) -> None:
+    """
+    后台 MCP 预连接任务
+    
+    在独立的 asyncio Task 中执行预连接，避免 anyio cancel scope 污染事件循环。
+    预连接失败不会影响应用启动，工具仍可在首次调用时按需连接。
+    """
+    try:
+        results = await mcp_pool.preconnect_all()
+        connected = sum(1 for v in results.values() if v)
+        total = len(results)
+        if total > 0:
+            print(f"   ✓ MCP 后台预连接完成: {connected}/{total} 个服务器")
+    except Exception as e:
+        print(f"   ⚠️ MCP 后台预连接失败（工具将按需连接）: {e}")
+
+
 async def _init_pools() -> None:
     """
     初始化资源池和协调器
     
     初始化顺序：
     1. AgentRegistry 加载配置（已在 _preload_agent_registry 中完成）
-    2. MCPPool 预连接所有 MCP 服务器（基于 Registry 配置）
+    2. MCPPool 初始化（后台预连接所有 MCP 服务器）
     3. AgentPool 创建原型（使用 MCPPool 中的连接）
     4. SessionPool 初始化（追踪活跃 Session）
     5. 校准活跃 Session 数据（清理可能的孤立记录）
+    6. 启动 MCP 健康检查
     """
     try:
         print("🏊 初始化资源池...")
         
-        # 1. MCPPool 预连接（在 AgentPool 之前，确保 MCP 连接可用）
+        # 1. 获取 MCPPool
         mcp_pool = get_mcp_pool()
-        mcp_results = await mcp_pool.preconnect_all()
-        if mcp_results:
-            connected = sum(1 for v in mcp_results.values() if v)
-            print(f"   ✓ MCPPool: {connected}/{len(mcp_results)} 个 MCP 服务器已连接")
-        else:
-            print(f"   ✓ MCPPool: 无 MCP 配置")
         
-        # 2. 获取 AgentPool 并预加载原型（使用 MCPPool 中的连接）
+        # 2. 获取 AgentPool 并预加载原型
         agent_pool = get_agent_pool()
         loaded_count = await agent_pool.preload_all()
         print(f"   ✓ AgentPool: {loaded_count} 个原型已缓存")
@@ -246,9 +270,21 @@ async def _init_pools() -> None:
         else:
             print(f"   ✓ SessionPool: 已就绪")
         
-        # 5. 启动 MCP 健康检查
-        mcp_pool.start_health_check()
-        print(f"   ✓ MCP 健康检查: 已启动")
+        # 5. 启动 MCP 后台预连接任务（不阻塞主启动流程）
+        # 使用 asyncio.create_task 在独立任务中执行，避免 anyio cancel scope 问题
+        enable_mcp_preconnect = os.getenv("MCP_ENABLE_PRECONNECT", "true").lower() == "true"
+        if enable_mcp_preconnect:
+            print(f"   ✓ MCPPool: 启动后台预连接...")
+            asyncio.create_task(_mcp_preconnect_background(mcp_pool))
+        else:
+            print(f"   ✓ MCPPool: 已就绪（按需连接模式）")
+        
+        # 6. 启动 MCP 健康检查
+        try:
+            mcp_pool.start_health_check()
+            print(f"   ✓ MCP 健康检查: 已启动")
+        except Exception:
+            print(f"   ⚠️ MCP 健康检查启动跳过")
         
         print(f"✅ 资源池初始化完成")
     except Exception as e:
@@ -291,6 +327,7 @@ async def lifespan(app: FastAPI):
     
     await _init_resilience_config()
     await _init_database()
+    await _init_s3_uploader()
     await _preload_capability_registry()  # 🆕 加载工具注册表（必须在 Agent 之前）
     await _preload_agent_registry()  # 加载 Agent 配置
     await _init_pools()  # 初始化资源池（含 Agent 原型创建和 Session 校准）

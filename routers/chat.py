@@ -283,21 +283,65 @@ async def chat(
     - `stream=true`: 流式模式（SSE），实时推送事件
     - `stream=false`: 同步模式，立即返回 task_id，客户端轮询查询结果
     
-    ## 参数
-    - **message**: 用户消息（必填）
-    - **user_id**: 用户ID（必填，用于 Session 管理）
-    - **message_id**: 消息ID（可选，用于追踪）
-    - **conversation_id**: 对话ID（可选，用于关联数据库对话）
-    - **stream**: 是否使用流式输出（默认为 true）
-    - **background_tasks**: 后台任务列表（可选），如 `["title_generation"]`
-    - **file**: 附件文件路径或URL（可选）
-    - **variables**: 前端上下文变量（可选），如位置、时区等
+    ---
+    
+    ## 请求参数
+    
+    | 参数 | 类型 | 必填 | 别名 | 说明 |
+    |------|------|------|------|------|
+    | **message** | string | ✅ | - | 用户消息内容 |
+    | **user_id** | string | ✅ | userId | 用户ID，用于多租户隔离、知识库分区、记忆检索 |
+    | **message_id** | string | ❌ | messageId | 消息ID，用于追踪单条消息，前端生成 |
+    | **conversation_id** | string | ❌ | conversationId | 对话线程ID，用于多轮对话上下文延续 |
+    | **agent_id** | string | ❌ | agentId, intentId | 指定 Agent 实例（对应 instances/ 目录名），不传使用默认 |
+    | **stream** | boolean | ❌ | - | 是否使用流式输出，默认 `true` |
+    | **background_tasks** | string[] | ❌ | backgroundTasks | 后台任务列表，如 `["title_generation"]` |
+    | **files** | FileReference[] | ❌ | - | 文件引用列表，支持 file_id 或 file_url |
+    | **variables** | object | ❌ | - | 前端上下文变量，用于个性化响应 |
+    
+    ### variables 字段说明
+    
+    前端可传入的上下文变量，会注入到 System Prompt 中：
+    
+    ```json
+    {
+      "location": "北京市朝阳区",
+      "timezone": "Asia/Shanghai",
+      "locale": "zh-CN",
+      "device": "mobile",
+      "currentTime": "2024-01-15T10:30:00+08:00"
+    }
+    ```
+    
+    ### files 字段说明
+    
+    支持两种方式引用文件：
+    
+    ```json
+    [
+      { "file_id": "file_abc123" },
+      {
+        "file_url": "https://example.com/doc.pdf",
+        "file_name": "报告.pdf",
+        "file_size": 102400,
+        "file_type": "application/pdf"
+      }
+    ]
+    ```
+    
+    ---
+    
+    ## Query 参数
+    
+    | 参数 | 类型 | 默认值 | 说明 |
+    |------|------|--------|------|
+    | **format** | string | `zeno` | 事件输出格式：`zeno`（ZenO SSE 规范 v2.0.1）或 `zenflux`（原始格式） |
     
     ---
     
     ## 模式1：流式模式 (`stream=true`)
     
-    **返回**: SSE 事件流
+    **返回类型**: `text/event-stream` (SSE)
     
     **使用场景**: 需要实时看到 Agent 的思考过程和执行步骤
     
@@ -306,11 +350,43 @@ async def chat(
     - SSE 从 Redis 实时读取事件并推送
     - 支持断线重连（从 Redis 补偿丢失的事件）
     
+    ### SSE 事件类型（ZenO 格式）
+    
+    | 事件类型 | 说明 |
+    |----------|------|
+    | `message_start` | 消息开始，包含 session_id、conversation_id |
+    | `intent` | 意图识别结果（intent_id, intent_name, complexity） |
+    | `content_start` | 内容块开始（text/thinking/tool_use/tool_result） |
+    | `content_delta` | 内容增量（流式文本） |
+    | `content_stop` | 内容块结束 |
+    | `message_stop` | 消息结束，包含完整响应和 usage 统计 |
+    | `error` | 错误事件 |
+    
+    ### SSE 示例
+    
+    ```
+    data: {"type":"message_start","seq":1,"session_id":"sess_xxx","conversation_id":"conv_xxx"}
+    
+    data: {"type":"intent","seq":2,"content":{"intent_id":1,"intent_name":"信息查询","complexity":"simple"}}
+    
+    data: {"type":"content_start","seq":3,"content_type":"text"}
+    
+    data: {"type":"content_delta","seq":4,"delta":{"type":"text","text":"你好"}}
+    
+    data: {"type":"content_stop","seq":5}
+    
+    data: {"type":"message_stop","seq":6,"usage":{"input_tokens":100,"output_tokens":50}}
+    ```
+    
     ---
     
     ## 模式2：同步模式 (`stream=false`)
     
-    **返回**: 
+    **返回类型**: `application/json`
+    
+    **使用场景**: 不需要实时反馈，只关心最终结果（适用于异步任务调度）
+    
+    **响应示例**:
     ```json
     {
       "code": 200,
@@ -323,7 +399,16 @@ async def chat(
     }
     ```
     
-    **使用场景**: 不需要实时反馈，只关心最终结果
+    ---
+    
+    ## 错误码
+    
+    | HTTP Status | 错误码 | 说明 |
+    |-------------|--------|------|
+    | 400 | AGENT_NOT_FOUND | 指定的 Agent 不存在 |
+    | 500 | AGENT_ERROR | Agent 执行失败 |
+    | 503 | EXTERNAL_SERVICE_ERROR | 外部服务不可用 |
+    | 500 | INTERNAL_ERROR | 内部错误 |
     """
     try:
         # 记录请求信息
@@ -390,16 +475,15 @@ async def _handle_stream_chat(request: ChatRequest, format: str) -> StreamingRes
     
     Returns:
         SSE 流式响应
+    
+    注意：
+        事件格式转换和 seq 编号已在 EventDispatcher 中完成，
+        这里直接输出 Redis 中存储的事件即可。
     """
-    # 初始化格式适配器
-    adapter = None
-    if format == "zeno":
-        from core.events.adapters.zeno import ZenOAdapter
-        adapter = ZenOAdapter(conversation_id=request.conversation_id)
-        logger.info("📋 使用 ZenO 格式适配器")
+    logger.info(f"📋 使用 {format} 格式输出事件")
     
     async def event_generator():
-        """生成 SSE 事件流"""
+        """生成 SSE 事件流（直接输出，无需转换）"""
         try:
             async for event in await chat_service.chat(
                 message=request.message,
@@ -410,15 +494,10 @@ async def _handle_stream_chat(request: ChatRequest, format: str) -> StreamingRes
                 background_tasks=request.background_tasks,
                 files=request.files,
                 variables=request.variables,
-                agent_id=request.agent_id
+                agent_id=request.agent_id,
+                output_format=format  # 传递给 chat_service，让 EventDispatcher 处理转换
             ):
-                # 格式转换
-                if adapter:
-                    transformed_event = adapter.transform(event)
-                    if transformed_event is None:
-                        continue
-                    event = transformed_event
-                
+                # 事件已经是正确的格式（由 EventDispatcher 转换），直接输出
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
         
         except asyncio.CancelledError:

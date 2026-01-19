@@ -67,7 +67,9 @@ WORKDIR /app
 COPY requirements.txt .
 
 # 安装 Python 依赖
-RUN pip install --no-cache-dir -r requirements.txt
+# 注意：tcvdb-text 上游包存在哈希不一致问题，需要先单独安装
+RUN pip install --no-cache-dir tcvdb-text && \
+    pip install --no-cache-dir -r requirements.txt
 
 # 复制后端代码
 COPY . .

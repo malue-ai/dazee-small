@@ -74,7 +74,7 @@
 #### 处理流程
 
 1. 通过结构化提问引导需求梳理
-2. 调用 text2flowchart 生成流程图
+2. 调用 mcp_dify_Ontology_TextToChart_zen0 生成流程图
 3. 调用 api_calling 执行 Coze 工作流构建系统配置
 
 ---
@@ -198,7 +198,7 @@
   "intent_name": "系统搭建",
   "complexity": "complex",
   "needs_plan": true,
-  "routing": "text2flowchart → api_calling (Coze workflow)"
+  "routing": "mcp_dify_Ontology_TextToChart_zen0 → api_calling (Coze workflow)"
 }
 ```
 
@@ -221,7 +221,7 @@
   "intent_name": "系统搭建",
   "complexity": "complex",
   "needs_plan": true,
-  "routing": "需求梳理 → text2flowchart → api_calling (Coze)"
+  "routing": "需求梳理 → mcp_dify_Ontology_TextToChart_zen0 → api_calling (Coze)"
 }
 ```
 **判断依据**：涉及4个实体（客户、联系记录、商机、合同），有业务流程需求
@@ -337,7 +337,7 @@
   "intent_name": "综合咨询",
   "complexity": "medium",
   "needs_plan": true,
-  "routing": "text2flowchart（仅流程图）"
+  "routing": "mcp_dify_Ontology_TextToChart_zen0（仅流程图）"
 }
 ```
 **判断依据**：只要流程图，不需要完整系统配置，不触发两步工作流

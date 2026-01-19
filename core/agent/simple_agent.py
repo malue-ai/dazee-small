@@ -15,12 +15,14 @@ SimpleAgent - 精简版核心 Agent
 ┌─────────────────────────────────────────┐
 │              SimpleAgent                │
 │  ┌─────────────┐  ┌─────────────────┐  │
-│  │IntentAnalyzer│  │  ToolSelector   │  │
+│  │ ToolSelector │  │  ToolExecutor   │  │
 │  └─────────────┘  └─────────────────┘  │
 │  ┌─────────────┐  ┌─────────────────┐  │
-│  │ EventManager │  │  ToolExecutor   │  │
+│  │ EventManager │  │  Broadcaster    │  │
 │  └─────────────┘  └─────────────────┘  │
 └─────────────────────────────────────────┘
+
+🆕 V7.0: IntentAnalyzer 已移至路由层 (core/routing/)
 """
 
 # 1. 标准库
@@ -33,7 +35,6 @@ from typing import Dict, Any, List, Optional, AsyncGenerator
 # 2. 第三方库（无）
 
 # 3. 本地模块
-from core.agent.intent_analyzer import create_intent_analyzer
 from core.agent.types import IntentResult, TaskType, Complexity
 from core.agent.content_handler import ContentHandler, create_content_handler
 from core.context.runtime import create_runtime_context
@@ -217,7 +218,8 @@ class SimpleAgent:
     def clone_for_session(
         self,
         event_manager,
-        conversation_service = None
+        conversation_service = None,
+        event_dispatcher = None
     ) -> "SimpleAgent":
         """
         🆕 V7.1: 从原型克隆 Agent 实例（快速路径）
@@ -225,16 +227,17 @@ class SimpleAgent:
         复用原型中的重量级组件，仅重置会话级状态
         
         复用的组件（不重新创建）：
-        - llm, intent_llm: LLM Service
+        - llm: LLM Service
         - capability_registry: 能力注册表
         - tool_executor: 工具执行器
         - tool_selector: 工具选择器
-        - intent_analyzer: 意图分析器
         - plan_todo_tool: Plan/Todo 工具
         - invocation_selector: 调用模式选择器
         - context_engineering: 上下文工程管理器
         - _instance_registry: 实例级工具注册表
         - _mcp_clients, _mcp_tools: MCP 相关
+        
+        🆕 V7.0: IntentAnalyzer 已移至路由层，不再在 SimpleAgent 中创建
         
         重置的状态（每个会话独立）：
         - event_manager, broadcaster: 事件管理
@@ -247,6 +250,7 @@ class SimpleAgent:
         Args:
             event_manager: 事件管理器（必需）
             conversation_service: 会话服务
+            event_dispatcher: 事件分发器（用于 ZenO 格式转换，可选）
             
         Returns:
             就绪的 Agent 实例
@@ -266,13 +270,11 @@ class SimpleAgent:
         
         # LLM Services（复用）
         clone.llm = self.llm
-        clone.intent_llm = getattr(self, 'intent_llm', None)
         
         # 组件（复用）
         clone.capability_registry = self.capability_registry
         clone.tool_executor = self.tool_executor
         clone.tool_selector = getattr(self, 'tool_selector', None)
-        clone.intent_analyzer = getattr(self, 'intent_analyzer', None)
         clone.plan_todo_tool = getattr(self, 'plan_todo_tool', None)
         clone.invocation_selector = self.invocation_selector
         clone.context_engineering = self.context_engineering
@@ -301,8 +303,12 @@ class SimpleAgent:
                 "event_manager": event_manager,
             })
         
-        # 创建新的 EventBroadcaster
-        clone.broadcaster = EventBroadcaster(event_manager, conversation_service=conversation_service)
+        # 创建新的 EventBroadcaster（传入 event_dispatcher 用于 ZenO 格式转换）
+        clone.broadcaster = EventBroadcaster(
+            event_manager,
+            conversation_service=conversation_service,
+            event_dispatcher=event_dispatcher
+        )
         
         # ========== 重置会话级状态 ==========
         clone._plan_cache = {"plan": None, "todo": None, "tool_calls": []}
@@ -335,28 +341,10 @@ class SimpleAgent:
         # 1. 能力注册表（总是需要）
         self.capability_registry = create_capability_registry()
         
-        # 2. 意图分析器（根据 Schema 决定是否创建）
-        if self.schema.intent_analyzer.enabled:
-            intent_config = self.schema.intent_analyzer
-            # 🆕 V6.3: 启用 Prompt Caching（意图识别提示词 1h 缓存）
-            self.intent_llm = create_claude_service(
-                model=intent_config.llm_model,  # 从 Schema 读取
-                enable_thinking=False,
-                enable_caching=True,  # 🆕 V6.3: 启用缓存，节省 82% 成本
-                tools=[],
-                max_tokens=8192  # Claude 3.5 Haiku 最大支持 8192
-            )
-            self.intent_analyzer = create_intent_analyzer(
-                llm_service=self.intent_llm,
-                enable_llm=intent_config.use_llm  # 从 Schema 读取
-            )
-            logger.debug(f"✓ IntentAnalyzer 已启用 (model={intent_config.llm_model})")
-        else:
-            self.intent_llm = None
-            self.intent_analyzer = None
-            logger.debug("○ IntentAnalyzer 未启用")
+        # 🆕 V7.0: IntentAnalyzer 已移至路由层 (core/routing/router.py)
+        # 意图分析在 AgentRouter.route() 中完成，结果通过 intent 参数传入 chat()
         
-        # 3. 工具选择器（根据 Schema 决定是否创建）
+        # 2. 工具选择器（根据 Schema 决定是否创建）
         if self.schema.tool_selector.enabled:
             self.tool_selector = create_tool_selector(registry=self.capability_registry)
             logger.debug(f"✓ ToolSelector 已启用 (strategy={self.schema.tool_selector.selection_strategy})")
@@ -426,7 +414,7 @@ class SimpleAgent:
         self.allow_parallel_tools = self.schema.allow_parallel_tools
         self.max_parallel_tools = self.schema.tool_selector.max_parallel_tools
         # 必须串行执行的特殊工具
-        self._serial_only_tools = {"plan_todo", "request_human_confirmation"}
+        self._serial_only_tools = {"plan_todo", "hitl"}
         logger.debug(f"✓ 并行工具配置: allow={self.allow_parallel_tools}, max={self.max_parallel_tools}")
         
  
@@ -552,17 +540,21 @@ class SimpleAgent:
             # 保存本轮结果供下次追问使用
             self._last_intent_result = intent
             
-            # 发送意图识别结果给前端（来源标记为 routing_layer）
+            # 🆕 V7.5: 发送意图识别结果给前端（使用 intent_id 格式）
+            intent_content = {
+                "intent_id": intent.intent_id,
+                "intent_name": intent.intent_name,
+                "complexity": intent.complexity.value,
+                "needs_plan": intent.needs_plan,
+                "confidence": intent.confidence,
+            }
+            # 仅当 platform 有值时才添加
+            if intent.platform:
+                intent_content["platform"] = intent.platform
+            
             intent_delta = {
                 "type": "intent",
-                "content": json.dumps({
-                    "task_type": intent.task_type.value,
-                    "complexity": intent.complexity.value,
-                    "needs_plan": intent.needs_plan,
-                    "confidence": intent.confidence,
-                    "skip_memory_retrieval": intent.skip_memory_retrieval,
-                    "source": "routing_layer"
-                }, ensure_ascii=False)
+                "content": json.dumps(intent_content, ensure_ascii=False)
             }
             yield await self.broadcaster.emit_message_delta(
                 session_id=session_id,
@@ -574,7 +566,8 @@ class SimpleAgent:
                 stage = self._tracer.create_stage("intent_analysis")
                 stage.start()
                 stage.complete({
-                    "task_type": intent.task_type.value,
+                    "intent_id": intent.intent_id,
+                    "intent_name": intent.intent_name,
                     "complexity": intent.complexity.value,
                     "needs_plan": intent.needs_plan,
                     "source": "routing_layer"
@@ -583,9 +576,11 @@ class SimpleAgent:
             # 未提供 intent 参数，使用默认配置（内部意图分析已移除）
             logger.warning("⚠️ 未提供意图结果，使用默认配置（建议启用路由层）")
             intent = IntentResult(
-                task_type=TaskType.GENERAL,
+                task_type=TaskType.OTHER,  # 🆕 V7.5: 修复为 OTHER
                 complexity=Complexity.MEDIUM,
                 needs_plan=self.schema.plan_manager.enabled,
+                intent_id=3,              # 🆕 V7.5: 默认综合咨询
+                intent_name="综合咨询",    # 🆕 V7.5
                 confidence=1.0
             )
             
@@ -1341,7 +1336,7 @@ class SimpleAgent:
         支持所有工具类型：
         - 普通工具：通过 tool_executor 执行
         - plan_todo：特殊处理，更新 plan 缓存
-        - request_human_confirmation：HITL 工具，等待用户响应
+        - hitl：HITL 工具，等待用户响应
         
         Args:
             tool_call: 工具调用信息 {id, name, input}
@@ -1390,9 +1385,9 @@ class SimpleAgent:
                     self._plan_cache["plan"] = result.get("plan")
                     logger.info(f"📋 Plan 操作完成: {operation}")
             
-            elif tool_name == "request_human_confirmation":
+            elif tool_name == "hitl":
                 # HITL 工具：等待用户响应
-                result = await self._handle_human_confirmation(
+                result = await self._handle_hitl(
                     tool_input=tool_input,
                     session_id=session_id,
                     tool_id=tool_id
@@ -1532,7 +1527,7 @@ class SimpleAgent:
         支持：
         - 并行执行（可并行的工具使用 asyncio.gather）
         - 流式工具执行（支持 execute_stream 的工具）
-        - 特殊工具（plan_todo, request_human_confirmation）
+        - 特殊工具（plan_todo, hitl）
         
         事件序列：content_start → content_stop（非流式）
                 或 content_start → content_delta × N → content_stop（流式工具）
@@ -1641,14 +1636,14 @@ class SimpleAgent:
                     }
                 )
     
-    async def _handle_human_confirmation(
+    async def _handle_hitl(
         self,
         tool_input: Dict[str, Any],
         session_id: str,
         tool_id: str
     ) -> Dict[str, Any]:
         """
-        处理 HITL（Human-in-the-Loop）确认请求
+        处理 HITL（Human-in-the-Loop）请求
         
         流程：
         1. 解析工具输入，创建 ConfirmationRequest
@@ -1662,32 +1657,22 @@ class SimpleAgent:
             tool_id: 工具调用ID
             
         Returns:
-            确认结果
+            用户输入结果
         """
         # 1. 解析参数
-        question = tool_input.get("question", "")
-        confirmation_type_str = tool_input.get("confirmation_type", "yes_no")
-        options = tool_input.get("options")
-        default_value = tool_input.get("default_value")
-        questions = tool_input.get("questions")  # form 类型
+        title = tool_input.get("title", "")
+        input_type_str = tool_input.get("input_type", "form")
+        questions = tool_input.get("questions")
         description = tool_input.get("description", "")
-        timeout = tool_input.get("timeout", 60)
+        timeout = tool_input.get("timeout", 120)
         
-        # 解析确认类型
+        # 解析输入类型
         try:
-            conf_type = ConfirmationType(confirmation_type_str)
+            input_type = ConfirmationType(input_type_str)
         except ValueError:
-            conf_type = ConfirmationType.YES_NO
+            input_type = ConfirmationType.FORM
         
-        # yes_no 类型使用默认选项
-        if conf_type == ConfirmationType.YES_NO and not options:
-            options = ["confirm", "cancel"]
-        
-        # form 类型给更多时间
-        if conf_type == ConfirmationType.FORM and timeout == 60:
-            timeout = 120
-        
-        logger.info(f"🤝 HITL 请求: type={confirmation_type_str}, question={question[:50]}...")
+        logger.info(f"🤝 HITL 请求: type={input_type_str}, title={title[:50]}...")
         
         # 2. 创建确认请求
         manager = get_confirmation_manager()
@@ -1695,33 +1680,30 @@ class SimpleAgent:
         metadata = {}
         if description:
             metadata["description"] = description
-        if default_value is not None:
-            metadata["default_value"] = default_value
-        if conf_type == ConfirmationType.FORM:
-            metadata["form_type"] = "form"
+        if input_type == ConfirmationType.FORM:
             metadata["questions"] = questions or []
         
         request = manager.create_request(
-            question=question,
-            options=options,
+            question=title,
+            options=None,
             timeout=timeout,
-            confirmation_type=conf_type,
+            confirmation_type=input_type,
             session_id=session_id,
             metadata=metadata
         )
         
-        logger.info(f"✅ 确认请求已创建: request_id={request.request_id}")
+        logger.info(f"✅ HITL 请求已创建: request_id={request.request_id}")
         
-        # 3. 通过 EventBroadcaster 发送 SSE 事件到前端（使用 message_delta 格式）
+        # 3. 通过 EventBroadcaster 发送 SSE 事件到前端
         await self.broadcaster.emit_confirmation_request(
             session_id=session_id,
             request_id=request.request_id,
-            question=question,
-            options=options,
-            confirmation_type=confirmation_type_str,
+            question=title,
+            options=None,
+            confirmation_type=input_type_str,
             timeout=timeout,
             description=description,
-            questions=questions if conf_type == ConfirmationType.FORM else None,
+            questions=questions if input_type == ConfirmationType.FORM else None,
             metadata=metadata
         )
         
@@ -1741,7 +1723,7 @@ class SimpleAgent:
         response = result.get("response")
         
         # form 类型：尝试解析 JSON
-        if conf_type == ConfirmationType.FORM and isinstance(response, str):
+        if input_type == ConfirmationType.FORM and isinstance(response, str):
             try:
                 import json as json_module
                 response = json_module.loads(response)
@@ -2000,7 +1982,8 @@ class SimpleAgent:
     def clone(
         self,
         event_manager,
-        conversation_service = None
+        conversation_service = None,
+        event_dispatcher = None
     ) -> "SimpleAgent":
         """
         克隆 Agent（复用重组件，重置会话状态）
@@ -2009,7 +1992,7 @@ class SimpleAgent:
         避免重复初始化带来的 50-100ms 延迟。
         
         复用（避免重复初始化）：
-        - llm, intent_llm: LLM Service（HTTP 客户端）
+        - llm: LLM Service（HTTP 客户端）
         - capability_registry: 工具注册表
         - tool_selector, tool_executor: 工具组件
         - plan_todo_tool, invocation_selector
@@ -2023,6 +2006,7 @@ class SimpleAgent:
         Args:
             event_manager: 事件管理器（必需，每次请求独立）
             conversation_service: 会话服务
+            event_dispatcher: 事件分发器（用于 ZenO 格式转换，可选）
             
         Returns:
             克隆后的 Agent 实例
@@ -2045,8 +2029,6 @@ class SimpleAgent:
         
         # 复用重组件（核心优化点，避免重复创建）
         cloned.capability_registry = self.capability_registry
-        cloned.intent_llm = self.intent_llm
-        cloned.intent_analyzer = self.intent_analyzer
         cloned.tool_selector = self.tool_selector
         cloned.tool_executor = self.tool_executor
         cloned.plan_todo_tool = self.plan_todo_tool
@@ -2058,7 +2040,11 @@ class SimpleAgent:
         
         # 注入会话级依赖
         cloned.event_manager = event_manager
-        cloned.broadcaster = EventBroadcaster(event_manager, conversation_service=conversation_service)
+        cloned.broadcaster = EventBroadcaster(
+            event_manager,
+            conversation_service=conversation_service,
+            event_dispatcher=event_dispatcher
+        )
         
         # 重置会话状态
         cloned._reset_session_state()

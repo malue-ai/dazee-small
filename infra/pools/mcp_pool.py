@@ -424,11 +424,17 @@ class MCPPool:
                 max_retries=config.max_retries,
             )
             
+            # 连接 MCP 服务器
             success = await client.connect()
             
             if success:
                 # 发现工具
-                tools = await client.discover_tools()
+                try:
+                    tools = await client.discover_tools()
+                except (asyncio.CancelledError, asyncio.TimeoutError) as e:
+                    logger.warning(f"⚠️ MCP 工具发现超时/取消 {config.server_name}: {e}")
+                    # 连接成功但工具发现失败，仍然返回客户端（工具列表为空）
+                    tools = []
                 
                 # 更新状态
                 async with self._lock:
@@ -447,9 +453,20 @@ class MCPPool:
                 logger.warning(f"⚠️ MCP 连接失败: {config.server_name}")
                 await self.increment_stat(config.server_name, "connect_failures")
                 return None
+        
+        except asyncio.CancelledError:
+            # CancelledError 不继承自 Exception，需要单独捕获
+            logger.warning(f"⚠️ MCP 连接被取消 {config.server_name}")
+            await self.increment_stat(config.server_name, "connect_failures")
+            return None
+        
+        except (KeyboardInterrupt, SystemExit):
+            # 这些异常需要向上传播
+            raise
                 
-        except Exception as e:
-            logger.error(f"❌ MCP 连接异常 {config.server_name}: {e}")
+        except BaseException as e:
+            # 捕获所有异常，包括 BaseExceptionGroup
+            logger.error(f"❌ MCP 连接异常 {config.server_name}: {type(e).__name__}: {e}")
             await self.increment_stat(config.server_name, "connect_failures")
             return None
     
@@ -528,35 +545,77 @@ class MCPPool:
     async def _do_health_check(self) -> None:
         """
         执行一次健康检查
+        
+        检查所有已知服务器的连接状态，自动重连断开的连接。
+        如果 _servers 为空（尚无连接），会尝试从 AgentRegistry 收集配置并预连接。
         """
         check_time = datetime.now()
+        
+        # 如果没有已知服务器，尝试从配置收集（延迟初始化）
+        if not self._servers:
+            try:
+                configs = await self._collect_mcp_configs()
+                if configs:
+                    logger.info(f"🏥 健康检查发现 {len(configs)} 个 MCP 配置，尝试连接...")
+                    for server_url, config in configs.items():
+                        # 只创建配置记录，不立即连接（避免阻塞健康检查）
+                        async with self._lock:
+                            if server_url not in self._servers:
+                                self._servers[server_url] = MCPServerState(
+                                    config=config,
+                                    client=None,
+                                    connected=False,
+                                )
+            except Exception as e:
+                logger.debug(f"健康检查收集配置失败: {e}")
+        
+        # 统计
+        total_servers = len(self._servers)
+        connected_count = 0
+        disconnected_count = 0
         
         for server_url, state in list(self._servers.items()):
             try:
                 if state.client is None:
                     # 从未成功连接，尝试重连
+                    disconnected_count += 1
                     if state.reconnect_attempts < 3:
-                        logger.info(f"🔄 尝试重连 MCP: {state.config.server_name}")
+                        logger.info(f"🔄 尝试连接 MCP: {state.config.server_name}")
                         state.reconnect_attempts += 1
-                        await self._reconnect(server_url)
+                        success = await self._reconnect(server_url)
+                        if success:
+                            connected_count += 1
+                            disconnected_count -= 1
                     continue
                 
                 if not state.client._connected:
                     # 连接已断开，尝试重连
+                    disconnected_count += 1
                     logger.warning(
                         f"🔄 MCP 连接断开，重连: {state.config.server_name}"
                     )
-                    await self._reconnect(server_url)
+                    success = await self._reconnect(server_url)
+                    if success:
+                        connected_count += 1
+                        disconnected_count -= 1
                 else:
                     # 连接正常，更新健康检查时间
+                    connected_count += 1
                     state.last_health_check = check_time
                     state.reconnect_attempts = 0
                     await self._update_health(state.config.server_name)
                     
             except Exception as e:
+                disconnected_count += 1
                 logger.error(
                     f"健康检查失败 {state.config.server_name}: {e}"
                 )
+        
+        # 日志输出健康检查结果（仅在有服务器时输出）
+        if total_servers > 0:
+            logger.debug(
+                f"🏥 健康检查完成: {connected_count}/{total_servers} 个服务器在线"
+            )
     
     async def _reconnect(self, server_url: str) -> bool:
         """

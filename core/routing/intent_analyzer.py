@@ -302,6 +302,8 @@ class IntentAnalyzer:
         """
         解析 LLM 响应
         
+        🆕 V7.5: 优先解析 intent_id/intent_name，并映射到 TaskType
+        
         Args:
             content: LLM 响应内容
             input_text: 原始用户输入
@@ -317,17 +319,30 @@ class IntentAnalyzer:
         skip_memory_retrieval = False
         needs_multi_agent = False  # 🆕 V6.0: 默认不需要 Multi-Agent
         is_follow_up = False       # 🆕 V6.1: 默认不是追问（视为新话题）
+        # 🆕 V7.5: 新增字段
+        intent_id = None
+        intent_name = None
+        platform = None
         
         # 使用 JSON 提取器解析 LLM 响应
         parsed = extract_json(content)
         
         if parsed and isinstance(parsed, dict):
-            # 解析 task_type
-            task_type_str = parsed.get("task_type", "other")
-            try:
-                task_type = TaskType(task_type_str)
-            except ValueError:
-                task_type = TaskType.OTHER
+            # 🆕 V7.5: 优先解析 intent_id 和 intent_name
+            intent_id = parsed.get("intent_id")
+            intent_name = parsed.get("intent_name")
+            platform = parsed.get("platform")  # 可选字段
+            
+            # 🆕 V7.5: 根据 intent_id 映射到 TaskType（兼容现有逻辑）
+            if intent_id is not None:
+                task_type = self._map_intent_id_to_task_type(intent_id)
+            else:
+                # 兼容旧格式：直接解析 task_type
+                task_type_str = parsed.get("task_type", "other")
+                try:
+                    task_type = TaskType(task_type_str)
+                except ValueError:
+                    task_type = TaskType.OTHER
             
             # 解析 complexity（等级）
             complexity_str = parsed.get("complexity", "medium")
@@ -369,12 +384,37 @@ class IntentAnalyzer:
             complexity=complexity,
             complexity_score=complexity_score,  # 🆕 V7.0
             needs_plan=needs_plan,
+            intent_id=intent_id,        # 🆕 V7.5
+            intent_name=intent_name,    # 🆕 V7.5
+            platform=platform,          # 🆕 V7.5
             skip_memory_retrieval=skip_memory_retrieval,
             needs_multi_agent=needs_multi_agent,
             is_follow_up=is_follow_up,  # 🆕 V6.1
             keywords=[],  # V5.0: 不再提取关键词
             raw_response=content
         )
+    
+    def _map_intent_id_to_task_type(self, intent_id: int) -> TaskType:
+        """
+        🆕 V7.5: 将 intent_id 映射到 TaskType（兼容现有逻辑）
+        
+        映射规则：
+        - intent_id=1 (系统搭建) -> TaskType.TASK_EXECUTION
+        - intent_id=2 (BI智能问数) -> TaskType.DATA_ANALYSIS
+        - intent_id=3 (综合咨询) -> TaskType.OTHER
+        
+        Args:
+            intent_id: 意图 ID
+            
+        Returns:
+            TaskType 枚举值
+        """
+        mapping = {
+            1: TaskType.TASK_EXECUTION,   # 系统搭建
+            2: TaskType.DATA_ANALYSIS,    # BI智能问数
+            3: TaskType.OTHER,            # 综合咨询
+        }
+        return mapping.get(intent_id, TaskType.OTHER)
     
     def _infer_score_from_complexity(self, complexity: Complexity) -> float:
         """
@@ -401,6 +441,7 @@ class IntentAnalyzer:
         🆕 V6.0: 默认不需要 Multi-Agent
         🆕 V6.1: 默认不是追问（视为新话题）
         🆕 V7.0: 默认复杂度评分 5.0
+        🆕 V7.5: 默认 intent_id=3（综合咨询）
         
         Returns:
             IntentResult（保守默认值）
@@ -411,6 +452,9 @@ class IntentAnalyzer:
             complexity=Complexity.MEDIUM,
             complexity_score=5.0,     # 🆕 V7.0: 默认评分
             needs_plan=True,
+            intent_id=3,              # 🆕 V7.5: 默认综合咨询
+            intent_name="综合咨询",    # 🆕 V7.5
+            platform=None,            # 🆕 V7.5
             skip_memory_retrieval=False,
             needs_multi_agent=False,  # 🆕 V6.0: 默认不需要
             is_follow_up=False,       # 🆕 V6.1: 默认不是追问

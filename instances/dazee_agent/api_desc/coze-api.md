@@ -5,7 +5,7 @@
 
 ⚠️ **重要**：
 - 此 API 需要一个**已生成的 Mermaid 流程图文件 URL** 作为输入
-- **必须先使用 `text2flowchart` 工具生成流程图**，获取图表文件 URL 后再调用此 API
+- **必须先使用 `mcp_dify_Ontology_TextToChart_zen0` 工具生成流程图**，获取图表文件 URL 后再调用此 API
 
 ## Base URL
 `https://api.coze.cn/v1`
@@ -69,8 +69,8 @@ api_calling(
 
 ## 典型使用流程
 
-1. **第一步**：使用 `text2flowchart` 工具生成 Mermaid 流程图
-2. **第二步**：从返回结果中获取图表文件 URL
+1. **第一步**：使用 `mcp_dify_Ontology_TextToChart_zen0` 工具生成 Mermaid 流程图
+2. **第二步**：从返回结果中获取图表文件 URL（`chart_url`）
 3. **第三步**：使用 `api_calling` 调用此 API，将图表 URL 传入 `chart_url` 参数
 
 ## 返回格式

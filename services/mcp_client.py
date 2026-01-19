@@ -150,11 +150,16 @@ class MCPClientWrapper:
                 self._connection_failed = False
                 return True
                 
-            except (RuntimeError, GeneratorExit) as e:
-                # 🆕 anyio cancel scope 错误：不重试，直接标记失败
-                logger.error(f"❌ MCP 连接出现 anyio 错误（不可重试）: {type(e).__name__}: {str(e)}")
+            except (RuntimeError, GeneratorExit, BaseExceptionGroup) as e:
+                # 🆕 anyio cancel scope 错误 / ExceptionGroup：不重试，直接标记失败
+                logger.error(f"❌ MCP 连接出现不可恢复错误（不重试）: {type(e).__name__}: {str(e)}")
                 last_error = e
                 self._connection_failed = True
+                # 尝试清理资源
+                try:
+                    await self._cleanup_connection()
+                except Exception:
+                    pass
                 break
                 
             except (TimeoutError, asyncio.TimeoutError) as e:
@@ -268,8 +273,15 @@ class MCPClientWrapper:
         try:
             logger.info(f"🔍 发现 MCP 工具: {self.server_url}")
             
-            # 调用 list_tools
-            result = await self._session.list_tools()
+            # 调用 list_tools（添加超时保护，防止服务器无响应导致卡住）
+            try:
+                result = await asyncio.wait_for(
+                    self._session.list_tools(),
+                    timeout=30.0  # 30 秒超时
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"⚠️ list_tools 超时（30s）: {self.server_name}")
+                return []
             
             tools = []
             for tool in result.tools:
@@ -559,10 +571,11 @@ async def test_mcp_connection():
         await client.disconnect()
 
 
-# ==================== MCP 客户端缓存管理 ====================
-
-# 全局 MCP 客户端缓存（按 server_url 索引）
-_mcp_client_cache: Dict[str, MCPClientWrapper] = {}
+# ==================== MCP 客户端缓存管理（已废弃，使用 MCPPool） ====================
+#
+# 注意：以下函数已废弃，请使用 infra.pools.get_mcp_pool() 代替
+# 这些函数现在委托给 MCPPool 以保持向后兼容
+#
 
 
 async def get_mcp_client(
@@ -570,87 +583,84 @@ async def get_mcp_client(
     server_name: str,
     auth_token: Optional[str] = None,
     force_reconnect: bool = False,
-    tool_timeout: float = 1200.0,  # 工具调用超时时间（默认 20 分钟）
-    connect_timeout: float = 30.0,  # 连接超时时间（默认 30 秒）
-    max_retries: int = 2  # 最大重试次数（默认 2 次）
+    tool_timeout: float = 1200.0,
+    connect_timeout: float = 30.0,
+    max_retries: int = 2
 ) -> Optional[MCPClientWrapper]:
     """
     获取 MCP 客户端（带缓存）
     
-    同一个 server_url 只创建一次连接，后续复用。
-    避免每次用户 query 都重新连接 MCP 服务器。
+    **已废弃**：请使用 `infra.pools.get_mcp_pool().get_client()` 代替
+    
+    此函数现在委托给 MCPPool 以保持向后兼容。
     
     Args:
         server_url: MCP 服务器 URL
         server_name: 服务器名称
         auth_token: 认证令牌
         force_reconnect: 是否强制重新连接
-        tool_timeout: 工具调用超时时间（秒），默认 300 秒（5 分钟）
-        connect_timeout: 连接超时时间（秒），默认 30 秒
-        max_retries: 最大重试次数，默认 2 次
+        tool_timeout: 工具调用超时时间（秒）
+        connect_timeout: 连接超时时间（秒）
+        max_retries: 最大重试次数
         
     Returns:
         已连接的 MCPClientWrapper 实例，连接失败时返回 None
     """
-    global _mcp_client_cache
+    import warnings
+    warnings.warn(
+        "get_mcp_client() 已废弃，请使用 get_mcp_pool().get_client() 代替",
+        DeprecationWarning,
+        stacklevel=2
+    )
     
-    
-    # 检查缓存
-    if server_url in _mcp_client_cache:
-        cached_client = _mcp_client_cache[server_url]
-        
-        
-        if cached_client._connected and not force_reconnect:
-            # 连接正常，复用
-            logger.debug(f"📦 复用已缓存的 MCP 客户端: {server_name}")
-            return cached_client
-        else:
-            # 连接已断开或强制重连，移除旧缓存（创建新客户端）
-            logger.info(f"🔄 MCP 客户端已断开，创建新连接: {server_name}")
-            del _mcp_client_cache[server_url]
-    
-    # 创建新客户端
-    logger.info(f"🔧 创建新 MCP 客户端: {server_name} ({server_url})")
-    client = MCPClientWrapper(
+    # 委托给 MCPPool
+    from infra.pools import get_mcp_pool
+    pool = get_mcp_pool()
+    return await pool.get_client(
         server_url=server_url,
         server_name=server_name,
         auth_token=auth_token,
-        tool_timeout=tool_timeout,
-        connect_timeout=connect_timeout,  # 🆕 传递连接超时配置
-        max_retries=max_retries  # 🆕 传递重试次数配置
+        force_reconnect=force_reconnect
     )
-    
-    # 连接
-    success = await client.connect()
-    if success:
-        # 发现工具
-        await client.discover_tools()
-        # 缓存
-        _mcp_client_cache[server_url] = client
-        return client
-    else:
-        # 🆕 连接失败，不缓存，返回 None
-        logger.warning(f"⚠️ MCP 客户端连接失败，不加入缓存: {server_name}")
-        return None
 
 
 def get_cached_mcp_clients() -> Dict[str, MCPClientWrapper]:
-    """获取所有缓存的 MCP 客户端"""
-    return _mcp_client_cache.copy()
+    """
+    获取所有缓存的 MCP 客户端
+    
+    **已废弃**：请使用 `infra.pools.get_mcp_pool().get_all_clients()` 代替
+    """
+    import warnings
+    warnings.warn(
+        "get_cached_mcp_clients() 已废弃，请使用 get_mcp_pool().get_all_clients() 代替",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    
+    # 委托给 MCPPool
+    from infra.pools import get_mcp_pool
+    pool = get_mcp_pool()
+    return pool.get_all_clients()
 
 
 async def clear_mcp_client_cache():
-    """清除所有 MCP 客户端缓存（断开连接）"""
-    global _mcp_client_cache
+    """
+    清除所有 MCP 客户端缓存（断开连接）
     
-    for url, client in _mcp_client_cache.items():
-        try:
-            await client.disconnect()
-        except Exception as e:
-            logger.warning(f"断开 MCP 客户端 {url} 失败: {e}")
+    **已废弃**：请使用 `infra.pools.get_mcp_pool().cleanup()` 代替
+    """
+    import warnings
+    warnings.warn(
+        "clear_mcp_client_cache() 已废弃，请使用 get_mcp_pool().cleanup() 代替",
+        DeprecationWarning,
+        stacklevel=2
+    )
     
-    _mcp_client_cache.clear()
-    logger.info("🧹 已清除所有 MCP 客户端缓存")
+    # 委托给 MCPPool
+    from infra.pools import get_mcp_pool
+    pool = get_mcp_pool()
+    await pool.cleanup()
+    logger.info("🧹 已清除所有 MCP 客户端缓存（通过 MCPPool）")
 
 
 if __name__ == "__main__":

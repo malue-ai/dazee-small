@@ -47,10 +47,14 @@ class IntentResult:
     🆕 V6.0: 新增 needs_multi_agent 字段，用于智能决定是否需要 Multi-Agent 协作（Prompt-First）
     🆕 V6.1: 新增 is_follow_up 字段，用于识别追问/上下文延续（避免误判为新话题）
     🆕 V7.0: 新增 complexity_score 字段，LLM 直接输出 0-10 评分（废弃 ComplexityScorer）
+    🆕 V7.5: 新增 intent_id/intent_name/platform 字段，支持用户自定义意图分类
     """
-    task_type: TaskType                          # 任务类型
+    task_type: TaskType                          # 任务类型（框架内部使用，由 intent_id 映射）
     complexity: Complexity                       # 复杂度等级
     needs_plan: bool                             # 是否需要规划
+    intent_id: Optional[int] = None              # 🆕 V7.5: 意图 ID（1=系统搭建, 2=BI智能问数, 3=综合咨询）
+    intent_name: Optional[str] = None            # 🆕 V7.5: 意图名称
+    platform: Optional[str] = None               # 🆕 V7.5: 平台标识（ontology/analytics，可选）
     complexity_score: float = 5.0                # 🆕 V7.0: 复杂度评分 0-10，由 LLM 直接输出
     needs_persistence: bool = False              # 🆕 V4.3: 是否需要跨 Session 持久化
     skip_memory_retrieval: bool = False          # 🆕 V4.6: 是否跳过 Mem0 记忆检索（默认不跳过）
@@ -62,7 +66,7 @@ class IntentResult:
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
-        return {
+        result = {
             "task_type": self.task_type.value,
             "complexity": self.complexity.value,
             "complexity_score": self.complexity_score,
@@ -74,4 +78,12 @@ class IntentResult:
             "keywords": self.keywords,
             "confidence": self.confidence
         }
+        # 🆕 V7.5: 添加 intent_id/intent_name/platform（仅当有值时）
+        if self.intent_id is not None:
+            result["intent_id"] = self.intent_id
+        if self.intent_name is not None:
+            result["intent_name"] = self.intent_name
+        if self.platform is not None:
+            result["platform"] = self.platform
+        return result
 

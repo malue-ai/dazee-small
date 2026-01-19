@@ -550,11 +550,11 @@ result = await api_calling(
 
 # HITL机制（Human-in-the-Loop）
 
-**核心原则**：宁可多问一句，不要自作主张。遇到不确定的地方，主动使用 `request_human_confirmation` 工具询问用户。
+**核心原则**：宁可多问一句，不要自作主张。遇到不确定的地方，主动使用 `hitl` 工具询问用户。
 
 ## 触发场景
 
-遇到以下情况时**必须**调用 `request_human_confirmation` 工具：
+遇到以下情况时**必须**调用 `hitl` 工具：
 
 | 场景 | 建议类型 | 示例 |
 |------|---------|------|
@@ -573,7 +573,7 @@ result = await api_calling(
 **场景1：PPT风格选择**
 ```json
 {
-  "name": "request_human_confirmation",
+  "name": "hitl",
   "input": {
     "question": "请选择PPT的视觉风格",
     "confirmation_type": "single_choice",
@@ -586,7 +586,7 @@ result = await api_calling(
 **场景2：内容重点多选**
 ```json
 {
-  "name": "request_human_confirmation",
+  "name": "hitl",
   "input": {
     "question": "报告需要重点关注哪些方面？（可多选）",
     "confirmation_type": "multiple_choice",
@@ -599,7 +599,7 @@ result = await api_calling(
 **场景3：复杂偏好收集**
 ```json
 {
-  "name": "request_human_confirmation",
+  "name": "hitl",
   "input": {
     "question": "PPT生成偏好设置",
     "confirmation_type": "form",

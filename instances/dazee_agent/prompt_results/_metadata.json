@@ -12,6 +12,8 @@
   },
   "manually_edited": [
     "agent_schema",
-    "intent_prompt"
+    "intent_prompt",
+    "medium_prompt",
+    "complex_prompt"
   ]
 }

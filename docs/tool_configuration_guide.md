@@ -83,7 +83,7 @@ slidespeak_render: 1 # SlideSpeak 渲染
 # 核心工具（建议始终启用）
 plan_todo: 1                    # 任务规划
 api_calling: 1                  # API 调用
-request_human_confirmation: 1   # 人工确认
+hitl: 1                         # HITL (Human-in-the-Loop)
 file_read: 1                    # 文件读取
 code_execution: 1               # 代码执行
 ```
@@ -186,7 +186,7 @@ instance:
 
 enabled_capabilities:
   plan_todo: 1
-  request_human_confirmation: 1
+  hitl: 1
   web_search: 1
   knowledge_search: 1
   # 其他工具全部禁用（不列出）
@@ -349,7 +349,7 @@ enabled_capabilities:
 ```yaml
 enabled_capabilities:
   plan_todo: 1                    # 任务规划
-  request_human_confirmation: 1   # 人工确认
+  hitl: 1                         # HITL (Human-in-the-Loop)
   file_read: 1                    # 文件读取
 ```
 

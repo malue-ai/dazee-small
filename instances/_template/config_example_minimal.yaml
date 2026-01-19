@@ -23,7 +23,7 @@ agent:
 enabled_capabilities:
   # 核心工具（必需）
   plan_todo: 1
-  request_human_confirmation: 1
+  hitl: 1
   file_read: 1
   
   # 信息获取（可选）

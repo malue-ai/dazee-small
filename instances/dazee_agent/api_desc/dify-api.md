@@ -1,9 +1,12 @@
-# Dify API - Text2Flowchart 工作流
+# Dify API - 文档生成相关工作流
 
 ## 用途
-**text2flowchart** 工作流：分析文本中的实体、属性和关系，生成 Mermaid flowchart 图表。
 
-⚠️ **重要**：当用户提到"生成流程图"、"flowchart"、"实体关系图" 时，**必须**使用此 API。
+Dify 平台提供多种工作流，主要用于文档处理和生成。
+
+⚠️ **重要**：
+- 流程图生成请使用 MCP 工具 `mcp_dify_Ontology_TextToChart_zen0`，不需要通过此 API 调用
+- 此 API 主要用于其他 Dify 工作流（如有需要）
 
 ## Base URL
 `https://api.dify.ai/v1`
@@ -13,35 +16,21 @@
 - ❌ **禁止**：不要在调用参数中填写 `headers`、`Authorization` 或任何认证信息
 - ✅ **正确做法**：只需指定 `api_name: "dify_api"`，认证头会自动注入
 
-## 接口
+## 流程图生成
 
-### 执行 text2flowchart 工作流
-- **路径**：`POST /workflows/run`
-- **请求体**：
-```json
-{
-  "inputs": {
-    "query": "用户描述的文本内容"
-  },
-  "response_mode": "blocking",
-  "user": "agent_user"
-}
+**⚠️ 不要使用 api_calling 调用 Dify API 来生成流程图！**
+
+请直接使用 MCP 工具：
+
 ```
-- **返回示例**：
-```json
-{
-  "workflow_run_id": "xxx",
-  "data": {
-    "outputs": {
-      "text": "```mermaid\nflowchart TD\n  User[用户] --> Role[角色]\n  Role --> Permission[权限]\n```"
-    }
-  }
-}
+mcp_dify_Ontology_TextToChart_zen0(
+  query="用户描述的文本内容"
+)
 ```
 
-## 使用方法
+返回结果包含流程图 URL：`chart_url`
 
-当用户需要生成 flowchart 时，使用 `api_calling` 工具（**不要填写 headers**）：
+## 使用 api_calling 调用其他 Dify 工作流（如需要）
 
 ```
 api_calling(
@@ -53,5 +42,3 @@ api_calling(
 ```
 
 ⚠️ **不要填写 `url`、`headers`、`Authorization`，认证会自动处理。**
-
-返回的 `data.outputs.text` 包含 Mermaid 格式的 flowchart。

@@ -931,10 +931,12 @@ async def _register_mcp_tools(
     Returns:
         已连接的 MCP 客户端列表
     """
-    from services.mcp_client import get_mcp_client, create_mcp_tool_definition
+    from services.mcp_client import create_mcp_tool_definition
+    from infra.pools import get_mcp_pool
     
     connected_clients = []
     mcp_tool_definitions = []  # Claude API 格式的工具定义
+    mcp_pool = get_mcp_pool()  # 使用统一的 MCPPool 管理连接
     
     for tool_config in mcp_tools:
         name = tool_config.get("name", "unknown")
@@ -963,14 +965,12 @@ async def _register_mcp_tools(
             
             logger.info(f"🔧 注册 MCP 工具: {name} ({server_url})")
             
-            # 🆕 使用缓存获取 MCP 客户端（避免重复连接）
+            # 🆕 统一使用 MCPPool 获取 MCP 客户端（避免重复连接）
             try:
-                client = await get_mcp_client(
+                client = await mcp_pool.get_client(
                     server_url=server_url,
                     server_name=server_name,
-                    auth_token=auth_token,
-                    connect_timeout=10.0,  # 缩短超时时间到 10 秒
-                    max_retries=1  # 只重试 1 次
+                    auth_token=auth_token
                 )
             except Exception as conn_error:
                 logger.error(f"❌ MCP 客户端连接异常，跳过工具 {name}: {type(conn_error).__name__}: {str(conn_error)}")
@@ -1010,8 +1010,9 @@ async def _register_mcp_tools(
                         async def make_handler(_server_url, _server_name, _auth_token, _orig_name):
                             async def handler(tool_input: Dict[str, Any]):
                                 # 每次调用时动态获取客户端（断开时会创建新连接）
-                                from services.mcp_client import get_mcp_client
-                                current_client = await get_mcp_client(
+                                from infra.pools import get_mcp_pool
+                                pool = get_mcp_pool()
+                                current_client = await pool.get_client(
                                     server_url=_server_url,
                                     server_name=_server_name,
                                     auth_token=_auth_token
@@ -1025,7 +1026,7 @@ async def _register_mcp_tools(
                                 # 如果需要重连，自动重试一次
                                 if result.get("_need_reconnect"):
                                     # 强制重连
-                                    current_client = await get_mcp_client(
+                                    current_client = await pool.get_client(
                                         server_url=_server_url,
                                         server_name=_server_name,
                                         auth_token=_auth_token,
@@ -1076,8 +1077,6 @@ async def _register_mcp_tools(
         
     # 注册 MCP 工具到 tool_executor 的处理器（动态获取客户端，支持断线重连）
     if mcp_tool_definitions and hasattr(agent, 'tool_executor'):
-        from services.mcp_client import get_mcp_client
-        
         for tool_def in mcp_tool_definitions:
             tool_name = tool_def['name']
             original_name = tool_def['_original_name']
@@ -1094,7 +1093,9 @@ async def _register_mcp_tools(
                 _token=auth_token_for_handler,
                 _orig_name=original_name
             ):
-                current_client = await get_mcp_client(
+                from infra.pools import get_mcp_pool
+                pool = get_mcp_pool()
+                current_client = await pool.get_client(
                     server_url=_url,
                     server_name=_name,
                     auth_token=_token
@@ -1106,7 +1107,7 @@ async def _register_mcp_tools(
                 
                 # 如果需要重连，自动重试
                 if result.get("_need_reconnect"):
-                    current_client = await get_mcp_client(
+                    current_client = await pool.get_client(
                         server_url=_url,
                         server_name=_name,
                         auth_token=_token,
