@@ -215,7 +215,10 @@ class ZenOAdapter(EventAdapter):
         - 问数平台类型（sql/data/chart/report/intent/application）→ 直接透传
         """
         data = event.get("data", {})
-        delta = data.get("delta", {})
+        # 兼容两种结构：
+        # 1. 旧格式：data.delta = {"type": "...", "content": "..."}
+        # 2. 新格式：data = {"type": "...", "content": "..."}（delta 直接作为 data）
+        delta = data.get("delta") if "delta" in data else data
         delta_type = delta.get("type", "")
         content = delta.get("content", "")
         

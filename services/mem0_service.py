@@ -76,12 +76,20 @@ class Mem0Service:
                 raise Mem0NotInstalledError("mem0 模块未安装") from e
         return self._pool
     
-    def _get_background_service(self) -> Any:
+    def _get_background_service(self):
         """获取后台任务服务（懒加载）"""
         if self._background_service is None:
             from utils.background_tasks import get_background_task_service
             self._background_service = get_background_task_service()
         return self._background_service
+    
+    def _get_mem0_task_functions(self):
+        """获取 Mem0 任务函数（懒加载）"""
+        from utils.background_tasks.tasks.mem0_update import (
+            batch_update_all_memories,
+            update_user_memories,
+        )
+        return batch_update_all_memories, update_user_memories
     
     # ==================== 搜索 ====================
     
@@ -352,7 +360,7 @@ class Mem0Service:
         """
         批量更新所有用户记忆
         
-        复用 BackgroundTaskService 实现
+        直接调用 tasks/mem0_update.py 中的函数
         
         Args:
             since_hours: 处理过去多少小时的会话
@@ -362,15 +370,17 @@ class Mem0Service:
             批量更新结果
         """
         try:
+            batch_update_all_memories, _ = self._get_mem0_task_functions()
             service = self._get_background_service()
             
             logger.info(
                 f"🚀 触发批量更新: since={since_hours}h, max_concurrent={max_concurrent}"
             )
             
-            result = await service.batch_update_all_memories(
+            result = await batch_update_all_memories(
                 since_hours=since_hours,
-                max_concurrent=max_concurrent
+                max_concurrent=max_concurrent,
+                service=service
             )
             
             return BatchUpdateResult(
@@ -402,6 +412,8 @@ class Mem0Service:
         """
         更新单个用户的记忆
         
+        直接调用 tasks/mem0_update.py 中的函数
+        
         Args:
             user_id: 用户 ID
             since_hours: 处理过去多少小时的会话
@@ -410,11 +422,13 @@ class Mem0Service:
             更新结果
         """
         try:
+            _, update_user_memories = self._get_mem0_task_functions()
             service = self._get_background_service()
             
-            result = await service.update_user_memories(
+            result = await update_user_memories(
                 user_id=user_id,
-                since_hours=since_hours
+                since_hours=since_hours,
+                service=service
             )
             
             return UpdateResult(

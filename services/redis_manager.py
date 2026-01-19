@@ -332,10 +332,18 @@ class RedisSessionManager:
         event_data: Dict[str, Any] = None,
         event_id: int = None,
         event_type: str = None,
-        timestamp: str = None
-    ) -> None:
+        timestamp: str = None,
+        output_format: str = "zenflux",
+        adapter=None
+    ) -> Dict[str, Any]:
         """
-        缓冲事件到 Redis 并通过 Pub/Sub 发布
+        缓冲事件到 Redis 并通过 Pub/Sub 发布（统一入口）
+        
+        处理流程：
+        1. 格式转换（如果 output_format != "zenflux"）
+        2. 生成 seq（Redis INCR，原子操作）
+        3. 存入 Redis List
+        4. 通过 Pub/Sub 发布
         
         Args:
             session_id: Session ID
@@ -343,12 +351,17 @@ class RedisSessionManager:
             event_id: 事件 ID（可选，向后兼容）
             event_type: 事件类型（可选）
             timestamp: 时间戳（可选）
+            output_format: 输出格式（zenflux/zeno），默认 zenflux
+            adapter: 格式转换适配器（可选，用于 zeno 格式）
+            
+        Returns:
+            添加了 seq 的完整事件
         """
         client = await self._get_client()
         
-        # 方式1：传入完整事件字典（包含 event_uuid、id 或 seq）
-        if event_data is not None and ("event_uuid" in event_data or "id" in event_data or "seq" in event_data):
-            event = event_data
+        # 方式1：传入完整事件字典
+        if event_data is not None and isinstance(event_data, dict):
+            event = event_data.copy()  # 不修改原对象
         # 方式2：分别传入字段（向后兼容）
         else:
             event = {
@@ -358,6 +371,27 @@ class RedisSessionManager:
                 "timestamp": timestamp
             }
         
+        # 1. 格式转换（如果需要）
+        if output_format == "zeno" and adapter is not None:
+            transformed = adapter.transform(event)
+            if transformed is None:
+                # 事件被适配器过滤，不需要存储
+                return None
+            event = transformed
+        
+        # 2. 生成 seq（Redis INCR，原子操作）
+        # 只有当事件没有 seq 时才生成
+        if "seq" not in event or event.get("seq") is None:
+            seq_key = f"session:{session_id}:seq"
+            seq = await client.incr(seq_key)
+            
+            # 首次创建设置 TTL（1小时）
+            if seq == 1:
+                await client.expire(seq_key, 3600)
+            
+            event["seq"] = seq
+        
+        # 3. 存入 Redis
         event_json = json.dumps(event, ensure_ascii=False)
         
         # 左进（LPUSH），保持最新的在前面
@@ -374,15 +408,14 @@ class RedisSessionManager:
             logger.warning(f"⚠️ 事件数量超过阈值: session_id={session_id}, count={events_count}")
             await client.ltrim(f"session:{session_id}:events", 0, 9999)
         
-        # 🎯 通过 Pub/Sub 发布事件（实时推送）
+        # 4. 通过 Pub/Sub 发布事件（实时推送）
         channel = f"session:{session_id}:stream"
         await client.publish(channel, event_json)
         
         # 更新 last_event_seq
-        if "seq" in event:
-            await self.update_session_status(session_id, last_event_seq=event["seq"])
-        elif "id" in event and event["id"] is not None:
-            await self.update_session_status(session_id, last_event_seq=event["id"])
+        await self.update_session_status(session_id, last_event_seq=event["seq"])
+        
+        return event
     
     async def get_events(
         self,

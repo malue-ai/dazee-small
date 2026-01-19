@@ -218,8 +218,7 @@ class SimpleAgent:
     def clone_for_session(
         self,
         event_manager,
-        conversation_service = None,
-        event_dispatcher = None
+        conversation_service = None
     ) -> "SimpleAgent":
         """
         🆕 V7.1: 从原型克隆 Agent 实例（快速路径）
@@ -250,7 +249,6 @@ class SimpleAgent:
         Args:
             event_manager: 事件管理器（必需）
             conversation_service: 会话服务
-            event_dispatcher: 事件分发器（用于 ZenO 格式转换，可选）
             
         Returns:
             就绪的 Agent 实例
@@ -303,11 +301,10 @@ class SimpleAgent:
                 "event_manager": event_manager,
             })
         
-        # 创建新的 EventBroadcaster（传入 event_dispatcher 用于 ZenO 格式转换）
+        # 创建新的 EventBroadcaster
         clone.broadcaster = EventBroadcaster(
             event_manager,
-            conversation_service=conversation_service,
-            event_dispatcher=event_dispatcher
+            conversation_service=conversation_service
         )
         
         # ========== 重置会话级状态 ==========
@@ -1982,8 +1979,7 @@ class SimpleAgent:
     def clone(
         self,
         event_manager,
-        conversation_service = None,
-        event_dispatcher = None
+        conversation_service = None
     ) -> "SimpleAgent":
         """
         克隆 Agent（复用重组件，重置会话状态）
@@ -2006,7 +2002,6 @@ class SimpleAgent:
         Args:
             event_manager: 事件管理器（必需，每次请求独立）
             conversation_service: 会话服务
-            event_dispatcher: 事件分发器（用于 ZenO 格式转换，可选）
             
         Returns:
             克隆后的 Agent 实例
@@ -2042,8 +2037,7 @@ class SimpleAgent:
         cloned.event_manager = event_manager
         cloned.broadcaster = EventBroadcaster(
             event_manager,
-            conversation_service=conversation_service,
-            event_dispatcher=event_dispatcher
+            conversation_service=conversation_service
         )
         
         # 重置会话状态

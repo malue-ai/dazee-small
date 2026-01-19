@@ -4,14 +4,23 @@
 触发条件：
 - 有用户消息
 - 有助手回复
+
+实现：
+- 使用 LLM 生成问题
+- JSON 解析和回退方案
+- 通过 SSE 推送给前端
 """
 
-from typing import TYPE_CHECKING
+import json
+import re
+from typing import TYPE_CHECKING, Optional, List
 
 from logger import get_logger
+from utils.json_utils import extract_json_list
 from ..registry import background_task
 
 if TYPE_CHECKING:
+    from core.llm.base import Message
     from ..context import TaskContext
     from ..service import BackgroundTaskService
 
@@ -19,7 +28,10 @@ logger = get_logger("background_tasks.recommended_questions")
 
 
 @background_task("recommended_questions")
-async def generate_recommended_questions(ctx: "TaskContext", service: "BackgroundTaskService") -> None:
+async def generate_recommended_questions_task(
+    ctx: "TaskContext",
+    service: "BackgroundTaskService"
+) -> None:
     """
     推荐问题生成任务
     
@@ -29,11 +41,132 @@ async def generate_recommended_questions(ctx: "TaskContext", service: "Backgroun
         logger.debug("○ 跳过推荐问题生成（缺少用户消息或助手回复）")
         return
     
-    await service.generate_recommended_questions(
+    await _generate_recommended_questions(
         session_id=ctx.session_id,
         message_id=ctx.message_id,
         user_message=ctx.user_message,
         assistant_response=ctx.assistant_response,
-        event_manager=ctx.event_manager
+        event_manager=ctx.event_manager,
+        service=service
     )
 
+
+async def _generate_recommended_questions(
+    session_id: str,
+    message_id: str,
+    user_message: str,
+    assistant_response: str,
+    event_manager,
+    service: "BackgroundTaskService"
+) -> Optional[List[str]]:
+    """
+    生成推荐问题（后台任务）
+    
+    根据对话内容生成用户可能感兴趣的后续问题，
+    通过 SSE 推送到前端显示在消息底部
+    """
+    try:
+        logger.info(f"💡 开始生成推荐问题: session_id={session_id}, message_id={message_id}")
+        
+        # 1. 截取内容（避免过长）
+        user_preview = user_message[:300] if len(user_message) > 300 else user_message
+        assistant_preview = assistant_response[:500] if len(assistant_response) > 500 else assistant_response
+        
+        # 2. 使用 LLM 生成推荐问题
+        questions = await _generate_questions_with_llm(user_preview, assistant_preview, service)
+        
+        if not questions:
+            logger.warning("⚠️ LLM 返回空的推荐问题")
+            return None
+        
+        logger.info(f"✅ 推荐问题已生成: {len(questions)} 个")
+        
+        # 3. 通过 SSE 推送给前端
+        if session_id and event_manager:
+            await event_manager.message.emit_message_delta(
+                session_id=session_id,
+                message_id=message_id,
+                delta={
+                    "type": "recommended",
+                    "content": json.dumps({"questions": questions}, ensure_ascii=False)
+                }
+            )
+            logger.info(f"📤 推荐问题已推送到前端")
+        
+        return questions
+    
+    except Exception as e:
+        logger.warning(f"⚠️ 生成推荐问题失败: {str(e)}")
+        return None
+
+
+async def _generate_questions_with_llm(
+    user_message: str,
+    assistant_response: str,
+    service: "BackgroundTaskService"
+) -> Optional[List[str]]:
+    """使用 LLM 生成推荐问题"""
+    try:
+        from core.llm.base import Message  # 延迟导入，避免循环依赖
+        
+        llm = service.get_llm()
+        
+        prompt = service.recommended_questions_prompt.format(
+            user_message=user_message,
+            assistant_response=assistant_response
+        )
+        
+        response = await llm.create_message_async(
+            messages=[Message(role="user", content=prompt)],
+        )
+        
+        if response and hasattr(response, 'content') and response.content:
+            for block in response.content:
+                if hasattr(block, 'text'):
+                    raw_text = block.text.strip()
+                    
+                    # 使用 JSON 提取器
+                    questions = extract_json_list(raw_text, key="questions")
+                    
+                    if questions:
+                        cleaned = []
+                        for q in questions[:3]:
+                            q = q.strip().strip('"\'「」『』')
+                            if len(q) > 30:
+                                q = q[:27] + "..."
+                            if q:
+                                cleaned.append(q)
+                        return cleaned
+                    
+                    # JSON 提取失败，回退到逐行解析
+                    logger.debug("JSON 提取失败，回退到逐行解析")
+                    return _parse_questions_fallback(raw_text)
+        
+        return None
+    
+    except Exception as e:
+        logger.error(f"❌ LLM 生成推荐问题失败: {str(e)}", exc_info=True)
+        return None
+
+
+def _parse_questions_fallback(raw_text: str) -> List[str]:
+    """回退方案：逐行解析 LLM 返回的问题文本"""
+    questions = []
+    
+    for line in raw_text.split('\n'):
+        line = line.strip()
+        
+        if not line:
+            continue
+        
+        line = re.sub(r'^[\d]+[.、)\]]\s*', '', line)
+        line = re.sub(r'^[-•·]\s*', '', line)
+        line = line.strip().strip('"\'「」『』')
+        
+        if len(line) > 30:
+            line = line[:27] + "..."
+        
+        if line and not line.startswith('{') and not line.startswith('['):
+            questions.append(line)
+    
+    return questions[:3]

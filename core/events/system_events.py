@@ -36,8 +36,10 @@ class SystemEventManager(BaseEventManager):
         error_message: str,
         details: Dict[str, Any] = None,
         seq: Optional[int] = None,
-        event_uuid: Optional[str] = None
-    ) -> Dict[str, Any]:
+        event_uuid: Optional[str] = None,
+        output_format: str = "zenflux",
+        adapter: Any = None
+    ) -> Optional[Dict[str, Any]]:
         """
         发送 error 事件
         
@@ -48,9 +50,11 @@ class SystemEventManager(BaseEventManager):
             details: 额外的错误详情（可选）
             seq: 事件序号（可选，来自 EventBroadcaster）
             event_uuid: 事件 UUID（可选）
+            output_format: 输出格式（zenflux/zeno），默认 zenflux
+            adapter: 格式转换适配器（可选）
             
         Returns:
-            事件对象
+            事件对象，如果被过滤则返回 None
         """
         error_data = {
             "type": error_type,
@@ -66,14 +70,19 @@ class SystemEventManager(BaseEventManager):
             data={"error": error_data}
         )
         
-        return await self._send_event(session_id, event, seq=seq, event_uuid=event_uuid)
+        return await self._send_event(
+            session_id, event, seq=seq, event_uuid=event_uuid,
+            output_format=output_format, adapter=adapter
+        )
     
     async def emit_done(
         self,
         session_id: str,
         seq: Optional[int] = None,
-        event_uuid: Optional[str] = None
-    ) -> Dict[str, Any]:
+        event_uuid: Optional[str] = None,
+        output_format: str = "zenflux",
+        adapter: Any = None
+    ) -> Optional[Dict[str, Any]]:
         """
         发送 done 事件（流结束）
         
@@ -81,16 +90,21 @@ class SystemEventManager(BaseEventManager):
             session_id: Session ID
             seq: 事件序号（可选）
             event_uuid: 事件 UUID（可选）
+            output_format: 输出格式（zenflux/zeno），默认 zenflux
+            adapter: 格式转换适配器（可选）
             
         Returns:
-            事件对象
+            事件对象，如果被过滤则返回 None
         """
         event = self._create_event(
             event_type="done",
             data={"type": "done"}
         )
         
-        return await self._send_event(session_id, event, seq=seq, event_uuid=event_uuid)
+        return await self._send_event(
+            session_id, event, seq=seq, event_uuid=event_uuid,
+            output_format=output_format, adapter=adapter
+        )
     
     async def emit_custom(
         self,
@@ -98,8 +112,10 @@ class SystemEventManager(BaseEventManager):
         event_type: str,
         event_data: Dict[str, Any],
         seq: Optional[int] = None,
-        event_uuid: Optional[str] = None
-    ) -> Dict[str, Any]:
+        event_uuid: Optional[str] = None,
+        output_format: str = "zenflux",
+        adapter: Any = None
+    ) -> Optional[Dict[str, Any]]:
         """
         发送自定义事件
         
@@ -109,14 +125,19 @@ class SystemEventManager(BaseEventManager):
             event_data: 事件数据
             seq: 事件序号（可选）
             event_uuid: 事件 UUID（可选）
+            output_format: 输出格式（zenflux/zeno），默认 zenflux
+            adapter: 格式转换适配器（可选）
             
         Returns:
-            事件对象
+            事件对象，如果被过滤则返回 None
         """
         event = self._create_event(
             event_type=event_type,
             data=event_data
         )
         
-        return await self._send_event(session_id, event, seq=seq, event_uuid=event_uuid)
+        return await self._send_event(
+            session_id, event, seq=seq, event_uuid=event_uuid,
+            output_format=output_format, adapter=adapter
+        )
 

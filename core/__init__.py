@@ -87,10 +87,8 @@ from .events import (
     SystemEventManager,
     EventBroadcaster,
     create_broadcaster,
-    # 事件存储（Redis / 内存）
-    RedisEventStorage,
+    # 事件存储（内存，开发环境用）
     InMemoryEventStorage,
-    create_event_storage,
     get_memory_storage,
 )
 
@@ -182,10 +180,8 @@ __all__ = [
     "SystemEventManager",
     "EventBroadcaster",
     "create_broadcaster",
-    # 事件存储
-    "RedisEventStorage",
+    # 事件存储（内存，开发环境用）
     "InMemoryEventStorage",
-    "create_event_storage",
     "get_memory_storage",
     
     # 上下文管理

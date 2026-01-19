@@ -1,7 +1,7 @@
 # Zenflux Agent 系统架构
 
-> 版本: 7.0.0  
-> 更新时间: 2026-01-18
+> 版本: 7.1.0  
+> 更新时间: 2026-01-20
 
 ## 一、系统整体架构
 
@@ -492,11 +492,13 @@ flowchart LR
 
     subgraph broadcaster [EventBroadcaster]
         B1[接收事件] --> B2[累积内容]
-        B2 --> B3[格式转换]
+        B2 --> B3[EventManager]
     end
 
-    subgraph redis [Redis]
-        R1[事件存储] --> R2[Pub/Sub]
+    subgraph storage [RedisSessionManager.buffer_event]
+        S1[格式转换] --> S2[Redis INCR seq]
+        S2 --> S3[存入 Redis]
+        S3 --> S4[Pub/Sub 发布]
     end
 
     subgraph client [客户端]
@@ -505,9 +507,54 @@ flowchart LR
     end
 
     A2 --> B1
-    B3 --> R1
-    R2 --> C1
-    R2 --> C2
+    B3 --> S1
+    S4 --> C1
+    S4 --> C2
+```
+
+### 4.3.1 🆕 V7.2 事件系统架构（重构后）
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              事件流程（简化版）                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│    SimpleAgent / ChatService                                                │
+│         │                                                                   │
+│         ▼                                                                   │
+│    EventBroadcaster / EventManager  ← 统一事件入口                           │
+│         │                                                                   │
+│         │  Agent 使用 EventBroadcaster（含累积、持久化等增强功能）            │
+│         │  Service 使用 EventManager（纯粹的事件发送）                       │
+│         │                                                                   │
+│         ▼                                                                   │
+│    BaseEventManager._send_event()  ← 所有事件最终走这里                      │
+│         │                                                                   │
+│         ▼                                                                   │
+│    storage.buffer_event()  ← 统一处理入口                                    │
+│         │                                                                   │
+│         ├── 格式转换（ZenO adapter，如果需要）                               │
+│         ├── Redis INCR 生成 seq（原子操作）                                  │
+│         ├── 存入 Redis List                                                 │
+│         └── Pub/Sub 发布（实时推送）                                         │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**V7.2 事件系统设计原则：**
+
+| 原则 | 说明 |
+|------|------|
+| **单一入口** | 所有事件通过 `EventManager` 进入 |
+| **统一 seq 生成** | seq 在 `buffer_event` 中由 Redis INCR 原子生成 |
+| **格式转换前置** | 进入 Redis 前完成格式转换（Zenflux → ZenO） |
+| **存储实现分离** | 生产环境用 `RedisSessionManager`，开发环境用 `InMemoryEventStorage` |
+
+**Redis Key 设计：**
+```
+session:{session_id}:seq      → String: 事件序号计数器（Redis INCR）
+session:{session_id}:events   → List: 事件缓冲列表
+session:{session_id}:stream   → Pub/Sub: 实时事件通道
 ```
 
 ### 4.4 AgentPool 获取流程（含 fallback）
@@ -620,10 +667,14 @@ zenflux_agent/
 │   │   ├── selector.py              # 工具选择器
 │   │   └── capability.py            # 能力注册表
 │   │
-│   ├── events/                      # 事件系统
-│   │   ├── manager.py               # 事件管理器
-│   │   ├── broadcaster.py           # 事件广播器
-│   │   └── adapters/                # 格式适配器
+│   ├── events/                      # 事件系统（🆕 V7.1 重构）
+│   │   ├── manager.py               # 事件管理器（聚合各层 EventManager）
+│   │   ├── broadcaster.py           # 事件广播器（Agent 统一入口）
+│   │   ├── base.py                  # 基类和 EventStorage Protocol
+│   │   ├── storage.py               # InMemoryEventStorage（开发环境）
+│   │   ├── dispatcher.py            # 外部 Webhook 发送器
+│   │   ├── *_events.py              # 各层事件管理器（session/message/content 等）
+│   │   └── adapters/                # 格式适配器（ZenO 等）
 │   │
 │   └── context/                     # 上下文管理
 │       ├── compaction/              # 上下文压缩
@@ -786,12 +837,30 @@ reset_session_pool()
 
 两者共享 `ChatService` 单例，保证业务逻辑一致。
 
-### 6.5 事件驱动架构
+### 6.5 事件驱动架构（🆕 V7.2 重构）
 
-- Agent 执行过程产生事件流
-- 通过 Redis Pub/Sub 分发
-- 支持断线重连和事件补偿
-- 使用 ZenO 格式适配器统一输出格式
+**核心设计：**
+- Agent 执行过程产生事件流（Zenflux 内部格式）
+- 统一通过 `EventManager` 入口（Agent 使用 EventBroadcaster 包装）
+- `buffer_event` 负责：格式转换 → seq 生成 → 存储 → Pub/Sub
+- 支持断线重连和事件补偿（基于 seq）
+
+**事件格式：**
+
+| 格式 | 用途 | 说明 |
+|------|------|------|
+| **Zenflux** | 内部处理 | 原始格式，包含完整上下文 |
+| **ZenO** | 前端展示 | 简化格式，符合 ZenO SSE 规范 |
+
+**组件职责：**
+
+| 组件 | 职责 |
+|------|------|
+| `EventBroadcaster` | Agent 事件发送入口，内容累积，持久化 |
+| `RedisSessionManager.buffer_event` | 格式转换、seq 生成、存储、Pub/Sub |
+| `InMemoryEventStorage` | 开发环境的内存实现 |
+| `EventDispatcher` | 外部 Webhook 发送（可选） |
+| `ZenOAdapter` | Zenflux → ZenO 格式转换 |
 
 ### 6.6 实例化配置
 
@@ -904,6 +973,7 @@ finally:
 6. ✅ **Token 审计** - V7 TokenAuditor + UsageResponse
 7. ✅ **计费系统** - V7 多模型定价和成本计算
 8. ✅ **MCP 客户端池化** - MCPPool 连接复用 + 健康检查 + 自动重连
+9. ✅ **事件系统重构** - V7.1 统一 seq 生成、单一入口、格式转换前置
 
 ### 待优化
 1. **LLM Service 池化** - 复用 HTTP 客户端

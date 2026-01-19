@@ -1,9 +1,12 @@
 """
-事件分发器
+事件分发器 - 外部 Webhook 发送
 
-统一分发内部事件到：
-1. 内部通道（Redis Pub/Sub）
-2. 外部适配器（Webhook）
+职责：
+- 将事件发送到外部系统（Webhook、Slack、钉钉、飞书等）
+- 配置管理（从 YAML 加载）
+- 重试和错误处理
+
+注意：内部 Redis 广播由 RedisSessionManager.buffer_event 统一处理
 """
 
 import asyncio
@@ -19,7 +22,6 @@ from core.events.adapters.webhook import WebhookAdapter
 from core.events.adapters.slack import SlackAdapter
 from core.events.adapters.dingtalk import DingTalkAdapter
 from core.events.adapters.feishu import FeishuAdapter
-from core.events.adapters.zeno import ZenOAdapter
 from logger import get_logger
 
 logger = get_logger("event_dispatcher")
@@ -31,89 +33,32 @@ ADAPTER_TYPES = {
     "slack": SlackAdapter,
     "dingtalk": DingTalkAdapter,
     "feishu": FeishuAdapter,
-    "zeno": ZenOAdapter,
 }
 
 
 class EventDispatcher:
     """
-    事件分发器
+    事件分发器（外部 Webhook）
     
     职责：
-    1. 将内部事件分发到 Redis（内部通道）
-    2. 将内部事件转换后发送到外部系统（Webhook）
-    3. 根据 format 参数转换事件格式
-    4. 统一管理 seq 编号（从 1 开始连续递增）
+    - 将事件发送到外部系统（Webhook、Slack、钉钉、飞书等）
+    - 配置管理（从 YAML 加载）
+    - 重试和错误处理
     
     使用示例：
     ```python
-    dispatcher = EventDispatcher(redis_manager)
-    dispatcher.load_config("config/webhooks.yaml")
+    dispatcher = EventDispatcher()
+    await dispatcher.load_config("config/webhooks.yaml")
     
-    # 分发事件（指定格式）
-    await dispatcher.dispatch(session_id, event, format="zeno")
+    # 发送事件到外部
+    await dispatcher.send(event)
     ```
     """
     
-    def __init__(self, redis_manager=None):
-        """
-        初始化事件分发器
-        
-        Args:
-            redis_manager: Redis 管理器（用于内部广播）
-        """
-        self.redis = redis_manager
+    def __init__(self):
+        """初始化事件分发器"""
         self.adapters: List[AdapterConfig] = []
         self._http_client: Optional[httpx.AsyncClient] = None
-        
-        # session_id -> seq 计数器（统一管理输出事件的序号）
-        self._session_seq: Dict[str, int] = {}
-        # session_id -> ZenOAdapter 实例（保持状态，如累积内容）
-        self._session_adapters: Dict[str, ZenOAdapter] = {}
-    
-    def _get_next_seq(self, session_id: str) -> int:
-        """
-        获取下一个 seq（从 1 开始连续递增）
-        
-        Args:
-            session_id: Session ID
-            
-        Returns:
-            下一个 seq 值
-        """
-        if session_id not in self._session_seq:
-            self._session_seq[session_id] = 0
-        self._session_seq[session_id] += 1
-        return self._session_seq[session_id]
-    
-    def _get_adapter(self, session_id: str, format: str, conversation_id: str = None) -> Optional[ZenOAdapter]:
-        """
-        获取或创建 session 的适配器
-        
-        Args:
-            session_id: Session ID
-            format: 事件格式（zeno/zenflux）
-            conversation_id: 对话 ID
-            
-        Returns:
-            适配器实例，如果 format 是 zenflux 则返回 None
-        """
-        if format != "zeno":
-            return None
-        
-        if session_id not in self._session_adapters:
-            self._session_adapters[session_id] = ZenOAdapter(conversation_id=conversation_id)
-        return self._session_adapters[session_id]
-    
-    def reset_session(self, session_id: str) -> None:
-        """
-        重置 session 的状态（seq 和 adapter）
-        
-        Args:
-            session_id: Session ID
-        """
-        self._session_seq.pop(session_id, None)
-        self._session_adapters.pop(session_id, None)
     
     async def _get_http_client(self) -> httpx.AsyncClient:
         """获取或创建 HTTP 客户端"""
@@ -197,10 +142,6 @@ class EventDispatcher:
             at_users = config.get("at_users", [])
             adapter = adapter_class(at_users=at_users)
             adapter.supported_events = events
-        elif adapter_type == "zeno":
-            conversation_id = config.get("conversation_id")
-            adapter = adapter_class(conversation_id=conversation_id)
-            adapter.supported_events = events
         else:
             adapter = adapter_class()
             adapter.supported_events = events
@@ -230,83 +171,22 @@ class EventDispatcher:
         self.adapters.append(config)
         logger.info(f"添加适配器: {config.name}")
     
-    async def dispatch(
-        self,
-        session_id: str,
-        event: Dict[str, Any],
-        to_internal: bool = True,
-        to_external: bool = True,
-        format: str = "zenflux",
-        conversation_id: str = None
-    ) -> Optional[Dict[str, Any]]:
+    async def send(self, event: Dict[str, Any]) -> None:
         """
-        分发事件
-        
-        流程：
-        1. 根据 format 转换事件（zeno 格式会过滤部分事件）
-        2. 统一编号 seq（从 1 开始连续递增）
-        3. 存入 Redis（转换后的事件）
-        4. 发送到外部适配器
-        
-        Args:
-            session_id: Session ID
-            event: 事件数据（原始格式）
-            to_internal: 是否发送到内部通道（Redis）
-            to_external: 是否发送到外部适配器
-            format: 事件格式（zeno/zenflux），默认 zenflux
-            conversation_id: 对话 ID（用于 ZenO 格式）
-            
-        Returns:
-            转换后的事件（如果转换成功），否则 None
-        """
-        output_event = event
-        
-        # 1. 根据 format 转换事件
-        if format == "zeno":
-            adapter = self._get_adapter(session_id, format, conversation_id)
-            if adapter:
-                transformed = adapter.transform(event)
-                if transformed is None:
-                    # 事件被过滤，不需要输出
-                    return None
-                output_event = transformed
-        
-        # 2. 统一编号 seq（仅当事件没有 seq 时才分配）
-        # 避免覆盖 EventBroadcaster/SeqManager 已分配的 seq
-        if "seq" not in output_event or output_event.get("seq") is None:
-            output_event["seq"] = self._get_next_seq(session_id)
-        
-        # 3. 内部广播（Redis）- 存转换后的事件
-        if to_internal and self.redis:
-            try:
-                await self.redis.buffer_event(session_id, output_event)
-            except Exception as e:
-                logger.error(f"内部广播失败: {e}")
-        
-        # 4. 外部适配器（异步，不阻塞主流程）
-        if to_external and self.adapters:
-            for config in self.adapters:
-                if config.enabled and config.adapter.should_handle_extended(event):
-                    # 异步发送，不等待结果
-                    asyncio.create_task(
-                        self._send_to_external(config, event)
-                    )
-        
-        return output_event
-    
-    async def dispatch_to_external_only(
-        self,
-        event: Dict[str, Any]
-    ) -> None:
-        """
-        仅分发到外部适配器（不经过 Redis）
-        
-        用于特殊场景，如直接发送通知
+        发送事件到所有匹配的外部适配器
         
         Args:
             event: 事件数据
         """
-        await self.dispatch("", event, to_internal=False, to_external=True)
+        if not self.adapters:
+            return
+        
+        for config in self.adapters:
+            if config.enabled and config.adapter.should_handle_extended(event):
+                # 异步发送，不阻塞主流程
+                asyncio.create_task(
+                    self._send_to_external(config, event)
+                )
     
     async def _send_to_external(
         self,
@@ -318,7 +198,7 @@ class EventDispatcher:
         
         Args:
             config: 适配器配置
-            event: 原始事件
+            event: 事件数据
             
         Returns:
             是否成功
@@ -397,29 +277,26 @@ class EventDispatcher:
 
 # ==================== 工厂函数 ====================
 
-def create_event_dispatcher(
-    redis_manager=None,
+async def create_event_dispatcher(
     config_path: Optional[str] = None
 ) -> EventDispatcher:
     """
     创建事件分发器
     
     Args:
-        redis_manager: Redis 管理器
         config_path: 配置文件路径（可选）
         
     Returns:
         EventDispatcher 实例
     """
-    dispatcher = EventDispatcher(redis_manager)
+    dispatcher = EventDispatcher()
     
     if config_path:
-        dispatcher.load_config(config_path)
+        await dispatcher.load_config(config_path)
     else:
         # 默认配置路径
         default_path = Path("config/webhooks.yaml")
         if default_path.exists():
-            dispatcher.load_config(str(default_path))
+            await dispatcher.load_config(str(default_path))
     
     return dispatcher
-

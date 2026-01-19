@@ -48,8 +48,10 @@ class ContentEventManager(BaseEventManager):
         index: int,
         content_block: Dict[str, Any],
         seq: Optional[int] = None,
-        event_uuid: Optional[str] = None
-    ) -> Dict[str, Any]:
+        event_uuid: Optional[str] = None,
+        output_format: str = "zenflux",
+        adapter: Any = None
+    ) -> Optional[Dict[str, Any]]:
         """
         发送 content_start 事件
         
@@ -59,9 +61,11 @@ class ContentEventManager(BaseEventManager):
             content_block: 完整的内容块对象（由上层构造）
             seq: 事件序号（可选，来自 EventBroadcaster）
             event_uuid: 事件 UUID（可选）
+            output_format: 输出格式（zenflux/zeno），默认 zenflux
+            adapter: 格式转换适配器（可选）
             
         Returns:
-            发送的事件对象
+            发送的事件对象，如果被过滤则返回 None
             
         示例 content_block 结构：
         - text:        {"type": "text", "text": ""}
@@ -76,7 +80,10 @@ class ContentEventManager(BaseEventManager):
                 "content_block": content_block
             }
         )
-        return await self._send_event(session_id, event, seq=seq, event_uuid=event_uuid)
+        return await self._send_event(
+            session_id, event, seq=seq, event_uuid=event_uuid,
+            output_format=output_format, adapter=adapter
+        )
     
     async def emit_content_delta(
         self,
@@ -84,8 +91,10 @@ class ContentEventManager(BaseEventManager):
         index: int,
         delta: str,
         seq: Optional[int] = None,
-        event_uuid: Optional[str] = None
-    ) -> Dict[str, Any]:
+        event_uuid: Optional[str] = None,
+        output_format: str = "zenflux",
+        adapter: Any = None
+    ) -> Optional[Dict[str, Any]]:
         """
         发送 content_delta 事件
         
@@ -95,9 +104,11 @@ class ContentEventManager(BaseEventManager):
             delta: 增量内容（字符串）
             seq: 事件序号（可选）
             event_uuid: 事件 UUID（可选）
+            output_format: 输出格式（zenflux/zeno），默认 zenflux
+            adapter: 格式转换适配器（可选）
             
         Returns:
-            发送的事件对象
+            发送的事件对象，如果被过滤则返回 None
             
         简化格式：
         delta 直接是字符串，类型由 content_start 的 content_block.type 决定
@@ -112,15 +123,20 @@ class ContentEventManager(BaseEventManager):
                 "delta": delta
             }
         )
-        return await self._send_event(session_id, event, seq=seq, event_uuid=event_uuid)
+        return await self._send_event(
+            session_id, event, seq=seq, event_uuid=event_uuid,
+            output_format=output_format, adapter=adapter
+        )
     
     async def emit_content_stop(
         self,
         session_id: str,
         index: int,
         seq: Optional[int] = None,
-        event_uuid: Optional[str] = None
-    ) -> Dict[str, Any]:
+        event_uuid: Optional[str] = None,
+        output_format: str = "zenflux",
+        adapter: Any = None
+    ) -> Optional[Dict[str, Any]]:
         """
         发送 content_stop 事件
         
@@ -129,9 +145,11 @@ class ContentEventManager(BaseEventManager):
             index: 内容块索引
             seq: 事件序号（可选）
             event_uuid: 事件 UUID（可选）
+            output_format: 输出格式（zenflux/zeno），默认 zenflux
+            adapter: 格式转换适配器（可选）
             
         Returns:
-            发送的事件对象
+            发送的事件对象，如果被过滤则返回 None
         """
         event = self._create_event(
             event_type="content_stop",
@@ -139,4 +157,7 @@ class ContentEventManager(BaseEventManager):
                 "index": index
             }
         )
-        return await self._send_event(session_id, event, seq=seq, event_uuid=event_uuid)
+        return await self._send_event(
+            session_id, event, seq=seq, event_uuid=event_uuid,
+            output_format=output_format, adapter=adapter
+        )

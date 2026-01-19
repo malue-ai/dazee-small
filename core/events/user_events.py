@@ -24,8 +24,10 @@ class UserEventManager(BaseEventManager):
         session_id: str,
         user_id: str,
         action: str,
-        action_data: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+        action_data: Optional[Dict[str, Any]] = None,
+        output_format: str = "zenflux",
+        adapter: Any = None
+    ) -> Optional[Dict[str, Any]]:
         """
         发送用户行为事件
         
@@ -34,9 +36,11 @@ class UserEventManager(BaseEventManager):
             user_id: 用户ID
             action: 行为类型（如 login, logout, send_message）
             action_data: 行为数据
+            output_format: 输出格式（zenflux/zeno），默认 zenflux
+            adapter: 格式转换适配器（可选）
             
         Returns:
-            事件对象
+            事件对象，如果被过滤则返回 None
         """
         event = self._create_event(
             event_type="user_action",
@@ -47,14 +51,19 @@ class UserEventManager(BaseEventManager):
             }
         )
         
-        return await self._send_event(session_id, event)
+        return await self._send_event(
+            session_id, event,
+            output_format=output_format, adapter=adapter
+        )
     
     async def emit_user_preference_update(
         self,
         session_id: str,
         user_id: str,
-        preferences: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        preferences: Dict[str, Any],
+        output_format: str = "zenflux",
+        adapter: Any = None
+    ) -> Optional[Dict[str, Any]]:
         """
         发送用户偏好更新事件
         
@@ -62,9 +71,11 @@ class UserEventManager(BaseEventManager):
             session_id: Session ID
             user_id: 用户ID
             preferences: 用户偏好设置
+            output_format: 输出格式（zenflux/zeno），默认 zenflux
+            adapter: 格式转换适配器（可选）
             
         Returns:
-            事件对象
+            事件对象，如果被过滤则返回 None
         """
         event = self._create_event(
             event_type="user_preference_update",
@@ -74,5 +85,8 @@ class UserEventManager(BaseEventManager):
             }
         )
         
-        return await self._send_event(session_id, event)
+        return await self._send_event(
+            session_id, event,
+            output_format=output_format, adapter=adapter
+        )
 

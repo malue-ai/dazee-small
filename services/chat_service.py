@@ -42,8 +42,6 @@ from core.agent.multi.models import MultiAgentConfig
 from services.session_service import SessionService, get_session_service, SessionNotFoundError
 from services.conversation_service import get_conversation_service, ConversationNotFoundError
 from services.agent_registry import get_agent_registry, AgentNotFoundError
-# 🆕 事件分发器（用于 ZenO 格式转换）
-from core.events.dispatcher import EventDispatcher
 # 资源池架构
 from infra.pools import get_session_pool, get_agent_pool
 from infra.database import AsyncSessionLocal, crud
@@ -136,9 +134,6 @@ class ChatService:
         # 🆕 V7: Token 审计器
         self.token_auditor: TokenAuditor = get_token_auditor()
         
-        # 🆕 事件分发器（用于 ZenO 格式转换）
-        # 当 format=zeno 时，事件会通过 dispatcher 转换为 ZenO 规范格式
-        self.event_dispatcher = EventDispatcher(redis_manager=self.session_service.redis)
     
     def _get_router(self) -> AgentRouter:
         """
@@ -335,8 +330,7 @@ class ChatService:
             agent = await self.agent_pool.acquire(
                 agent_id=pool_key,
                 event_manager=self.session_service.events,
-                conversation_service=self.conversation_service,
-                event_dispatcher=self.event_dispatcher
+                conversation_service=self.conversation_service
             )
             agent_acquired = True
             logger.debug(f"✅ Agent 就绪: {pool_key}")
@@ -419,16 +413,19 @@ class ChatService:
         try:
             redis = self.session_service.redis
             
-            # 设置 Agent 的输出格式（EventBroadcaster 会使用）
+            # 设置输出格式（EventManager 和 EventBroadcaster 都会使用）
+            events = self.session_service.events
+            events.set_output_format(output_format, conversation_id)
             if hasattr(agent, 'broadcaster') and agent.broadcaster:
                 agent.broadcaster.set_output_format(output_format, conversation_id)
-            events = self.session_service.events
             
-            # 发送初始事件
+            # 发送初始事件（使用配置的格式）
             await events.session.emit_session_start(
                 session_id=session_id,
                 user_id=user_id,
-                conversation_id=conversation_id
+                conversation_id=conversation_id,
+                output_format=events.output_format,
+                adapter=events.adapter
             )
             
             if is_new_conversation:
@@ -439,7 +436,9 @@ class ChatService:
                         "title": "新对话",
                         "created_at": datetime.now().isoformat(),
                         "metadata": {}
-                    }
+                    },
+                    output_format=events.output_format,
+                    adapter=events.adapter
                 )
             
             # 启动 Agent 任务
@@ -453,7 +452,8 @@ class ChatService:
                 is_new_conversation=is_new_conversation,
                 background_tasks=background_tasks,
                 files=files,
-                variables=variables
+                variables=variables,
+                output_format=output_format
             ))
             
             # 订阅事件流
@@ -648,7 +648,9 @@ class ChatService:
             await events.message.emit_message_start(
                 session_id=session_id,
                 message_id=assistant_message_id,
-                model=self.default_model
+                model=self.default_model,
+                output_format=events.output_format,
+                adapter=events.adapter
             )
             
             # 3.2 上下文管理（裁剪历史消息）
@@ -779,6 +781,10 @@ class ChatService:
                     variables=variables,
                     intent=routing_intent  # 🆕 V7: 路由层意图结果（None 则内部分析）
                 ):
+                    # 跳过被过滤的事件（ZenO 适配器返回 None）
+                    if event is None:
+                        continue
+                    
                     # 检查停止标志（异步）
                     if await redis.is_stopped(session_id):
                         logger.warning(f"🛑 检测到停止标志: session_id={session_id}")
@@ -809,7 +815,9 @@ class ChatService:
                 await events.session.emit_session_end(
                     session_id=session_id,
                     status="completed",
-                    duration_ms=duration_ms
+                    duration_ms=duration_ms,
+                    output_format=events.output_format,
+                    adapter=events.adapter
                 )
                 await self.session_service.end_session(session_id, status="completed")
                 

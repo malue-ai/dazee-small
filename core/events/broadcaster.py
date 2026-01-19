@@ -3,47 +3,45 @@
 
 职责：
 1. Agent 发送事件的统一入口
-2. 🆕 统一生成事件序号（seq）- 确保所有路径序号一致
-3. 事件增强（特殊工具的 message_delta）
-4. 缓存 tool_id -> tool_name 映射
-5. 内容累积（管理 ContentAccumulator）
-6. 消息持久化（checkpoint + 最终保存）
+2. 事件增强（特殊工具的 message_delta）
+3. 缓存 tool_id -> tool_name 映射
+4. 内容累积（管理 ContentAccumulator）
+5. 消息持久化（checkpoint + 最终保存）
 
-架构：
-    SimpleAgent → EventBroadcaster（统一生成 seq）
+架构（V7 重构后）：
+    SimpleAgent → EventBroadcaster
                         │
-                        ├──→ EventManager → EventStorage（只做存储）
-                        │
-                        └──→ EventDispatcher → 外部系统（使用同一个 seq）
+                        └──→ EventManager（统一入口）
+                              │
+                              └──→ storage.buffer_event()
+                                    │
+                                    ├──→ 格式转换（如果需要）
+                                    ├──→ Redis INCR 生成 seq
+                                    └──→ 存入 Redis + Pub/Sub
 
-为什么需要 Broadcaster？
-=======================
-
-EventManager 是纯粹的事件发送层，而 Broadcaster 提供：
-1. 统一入口 - Agent 只需要知道 Broadcaster
-2. 🆕 序号统一 - 在此层生成 seq，确保无论走哪条路径序号都一致
-3. 增强逻辑 - 特殊工具（plan_todo, web_search）自动发送额外的 message_delta
-4. 状态缓存 - 缓存 tool_id -> tool_name，用于 tool_result 时查找工具名
-5. 内容累积 - 每个 session 维护 ContentAccumulator，自动累积内容
-6. 消息持久化 - content_stop 时 checkpoint，message_stop 时最终保存
+设计说明：
+- 所有事件通过 EventManager 发送（统一入口）
+- seq 在 buffer_event 中统一生成（Redis INCR）
+- 格式转换在 buffer_event 中完成
+- Broadcaster 只负责内部逻辑（累积、增强、持久化）
 
 使用示例：
-    seq_manager = await create_seq_manager()
-    self.broadcaster = EventBroadcaster(event_manager, seq_manager, conversation_service)
+    broadcaster = EventBroadcaster(event_manager, conversation_service)
     
     # 开始消息（关联 message_id）
-    await self.broadcaster.start_message(session_id, message_id)
+    await broadcaster.start_message(session_id, message_id)
     
     # Content 事件（自动累积 + checkpoint）
-    await self.broadcaster.emit_content_start(session_id, index, content_block)
-    await self.broadcaster.emit_content_delta(session_id, index, delta)
-    await self.broadcaster.emit_content_stop(session_id, index)  # ← 自动 checkpoint
+    await broadcaster.emit_content_start(session_id, index, content_block)
+    await broadcaster.emit_content_delta(session_id, index, delta)
+    await broadcaster.emit_content_stop(session_id, index)  # ← 自动 checkpoint
     
     # 结束消息（自动最终保存）
-    await self.broadcaster.emit_message_stop(session_id)  # ← 自动保存完整消息
+    await broadcaster.emit_message_stop(session_id)  # ← 自动保存完整消息
 """
 
 import json
+from datetime import datetime
 from typing import Dict, Any, Optional, Set, TYPE_CHECKING
 from uuid import uuid4
 from logger import get_logger
@@ -51,7 +49,6 @@ from logger import get_logger
 # 避免循环导入
 if TYPE_CHECKING:
     from services.conversation_service import ConversationService
-    from core.events.seq_manager import SeqManager
 
 from core.context.runtime import ContentAccumulator
 
@@ -114,9 +111,12 @@ class EventBroadcaster:
     """
     事件广播器
     
-    将 Agent 产生的事件转发到 EventManager，同时管理内容累积和持久化
+    将 Agent 产生的事件通过 EventManager 发送，同时管理内容累积和持久化
     
-    🆕 核心职责：统一生成事件序号（seq），确保所有分发路径序号一致
+    核心职责：
+    - 内容累积（ContentAccumulator）
+    - 事件增强（特殊工具的 message_delta）
+    - 消息持久化（checkpoint + 最终保存）
     
     支持的事件类型：
     - content_start: 开始一个内容块（text/thinking/tool_use/tool_result）
@@ -129,22 +129,15 @@ class EventBroadcaster:
     - conversation_delta: 对话增量更新
     - error: 错误事件
     
-    注意：Tool 事件统一通过 Content 级事件发送
-    - tool_use → content_start (type: tool_use)
-    - tool_result → content_start (type: tool_result)
-    
-    内容累积和持久化：
-    - 每个 session 维护独立的 ContentAccumulator
-    - content_stop 时自动 checkpoint 到数据库
-    - message_stop 时自动保存完整消息
+    注意：
+    - 所有事件通过 EventManager 发送（统一入口）
+    - seq 在 storage.buffer_event 中统一生成（Redis INCR）
     """
     
     def __init__(
         self,
         event_manager,
-        seq_manager: "SeqManager" = None,
         conversation_service: "ConversationService" = None,
-        event_dispatcher=None,
         output_format: str = "zenflux",
         conversation_id: str = None
     ):
@@ -153,25 +146,24 @@ class EventBroadcaster:
         
         Args:
             event_manager: EventManager 实例
-            seq_manager: SeqManager 实例（用于统一生成序号）
             conversation_service: ConversationService 实例（用于持久化）
-            event_dispatcher: EventDispatcher 实例（用于外部适配器，可选）
             output_format: 输出事件格式（zeno/zenflux），默认 zenflux
             conversation_id: 对话 ID（用于 ZenO 格式）
         """
         self.events = event_manager
-        self.seq_manager = seq_manager  # 🆕 序号管理器
         self.conversation_service = conversation_service
-        self.dispatcher = event_dispatcher  # 外部事件分发器
         
         # 输出格式配置（由 chat.py 传递）
         self.output_format = output_format
         self.output_conversation_id = conversation_id
         
+        # ZenO 适配器（延迟初始化）
+        self._zeno_adapter = None
+        
         # tool_id -> tool_name 缓存（用于 tool_result 时查找工具名）
         self._tool_id_to_name: Dict[str, str] = {}
         
-        # 🆕 tool_id -> tool_input 缓存（用于 api_calling 判断 api_name）
+        # tool_id -> tool_input 缓存（用于 api_calling 判断 api_name）
         self._tool_id_to_input: Dict[str, Dict[str, Any]] = {}
         
         # session_id -> ContentAccumulator 映射
@@ -179,24 +171,21 @@ class EventBroadcaster:
         
         # session_id -> message_id 映射（用于持久化）
         self._session_message_ids: Dict[str, str] = {}
+    
+    def _get_adapter(self):
+        """
+        获取格式转换适配器（延迟初始化）
         
-        # 需要广播的事件类型（可配置）
-        self._broadcast_types: Set[str] = {
-            # Content 级（核心 3 个，包括 tool_use/tool_result）
-            "content_start",
-            "content_delta", 
-            "content_stop",
-            # Message 级
-            "message_start",
-            "message_delta",
-            "message_stop",
-            # Conversation 级
-            "conversation_start",
-            "conversation_delta",
-            "conversation_stop",
-            # System
-            "error",
-        }
+        Returns:
+            适配器实例，如果不需要转换则返回 None
+        """
+        if self.output_format != "zeno":
+            return None
+        
+        if self._zeno_adapter is None:
+            from core.events.adapters.zeno import ZenOAdapter
+            self._zeno_adapter = ZenOAdapter(conversation_id=self.output_conversation_id)
+        return self._zeno_adapter
     
     def set_output_format(self, format: str, conversation_id: str = None) -> None:
         """
@@ -209,181 +198,8 @@ class EventBroadcaster:
         self.output_format = format
         if conversation_id:
             self.output_conversation_id = conversation_id
-    
-    async def _get_seq_and_uuid(self, session_id: str) -> tuple:
-        """
-        统一生成序号和 UUID
-        
-        Args:
-            session_id: Session ID
-            
-        Returns:
-            (seq, event_uuid) 元组
-        """
-        event_uuid = str(uuid4())
-        
-        if self.seq_manager:
-            seq = await self.seq_manager.get_next_seq(session_id)
-        else:
-            # 向后兼容：没有 seq_manager 时返回 None，让 EventManager 自己生成
-            seq = None
-        
-        return seq, event_uuid
-    
-    async def broadcast(
-        self,
-        session_id: str,
-        event: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
-        """
-        广播单个事件
-        
-        流程：
-        1. 如果有 dispatcher 且 output_format 需要转换（如 zeno）：
-           - 通过 dispatcher 转换事件、编号 seq、存储
-           - 不通过 EventManager 存储（避免重复）
-        2. 否则保持原有行为
-        
-        Args:
-            session_id: Session ID
-            event: 原始事件
-            
-        Returns:
-            发送的事件（如果广播了），否则 None
-        """
-        try:
-            # 如果有 dispatcher，使用 dispatcher 处理转换和存储
-            if self.dispatcher:
-                # 通过 dispatcher 转换、编号、存储
-                output_event = await self.dispatcher.dispatch(
-                    session_id,
-                    event,
-                    to_internal=True,   # 存储转换后的事件到 Redis
-                    to_external=True,   # 发送到外部适配器
-                    format=self.output_format,
-                    conversation_id=self.output_conversation_id
-                )
-                return output_event
-            
-            # 没有 dispatcher 时，保持原有行为
-            seq, event_uuid = await self._get_seq_and_uuid(session_id)
-            result = await self._route_event(session_id, event, seq=seq, event_uuid=event_uuid)
-            return result
-            
-        except Exception as e:
-            logger.error(f"❌ 广播事件失败: {event.get('type', 'unknown')}, error={str(e)}")
-            return None
-    
-    async def _route_event(
-        self,
-        session_id: str,
-        event: Dict[str, Any],
-        seq: Optional[int] = None,
-        event_uuid: Optional[str] = None
-    ) -> Optional[Dict[str, Any]]:
-        """
-        路由事件到对应的 EventManager 方法
-        
-        Args:
-            session_id: Session ID
-            event: 事件对象
-            seq: 事件序号（来自 broadcast）
-            event_uuid: 事件 UUID（来自 broadcast）
-            
-        Returns:
-            发送的事件或 None
-        """
-        event_type = event.get("type", "")
-        data = event.get("data", {})
-        
-        # Content 级事件（使用统一的 emit 方法，会自动处理特殊工具）
-        if event_type == "content_start":
-            content_block = data.get("content_block", {})
-            index = data.get("index", 0)
-            return await self.emit_content_start(
-                session_id, index, content_block, seq=seq, event_uuid=event_uuid
-            )
-        
-        elif event_type == "content_delta":
-            delta = data.get("delta", {})
-            index = data.get("index", 0)
-            return await self.emit_content_delta(
-                session_id, index, delta, seq=seq, event_uuid=event_uuid
-            )
-        
-        elif event_type == "content_stop":
-            index = data.get("index", 0)
-            return await self.emit_content_stop(
-                session_id, index, seq=seq, event_uuid=event_uuid
-            )
-        
-        # Message 级事件
-        elif event_type == "message_start":
-            message = data.get("message", {})
-            return await self.emit_message_start(
-                session_id=session_id,
-                message_id=message.get("id", ""),
-                model=message.get("model", ""),
-                seq=seq,
-                event_uuid=event_uuid
-            )
-        
-        elif event_type == "message_delta":
-            return await self.emit_message_delta(
-                session_id=session_id,
-                delta=data.get("delta", data),  # 兼容新旧格式
-                message_id=data.get("message_id"),
-                seq=seq,
-                event_uuid=event_uuid
-            )
-        
-        elif event_type == "message_stop":
-            return await self.emit_message_stop(
-                session_id=session_id,
-                seq=seq,
-                event_uuid=event_uuid
-            )
-        
-        # Conversation 级事件
-        elif event_type == "conversation_start":
-            return await self._emit_conversation_start(
-                session_id=session_id,
-                conversation=data,
-                seq=seq,
-                event_uuid=event_uuid
-            )
-        
-        elif event_type == "conversation_delta":
-            conversation_id = data.get("conversation_id", "")
-            delta = data.get("delta", {})
-            return await self._emit_conversation_delta(
-                session_id=session_id,
-                conversation_id=conversation_id,
-                delta=delta,
-                seq=seq,
-                event_uuid=event_uuid
-            )
-        
-        # Error 事件
-        elif event_type == "error":
-            return await self._emit_error(
-                session_id=session_id,
-                error_type=data.get("error_type", "unknown"),
-                error_message=data.get("error_message", ""),
-                seq=seq,
-                event_uuid=event_uuid
-            )
-        
-        # 其他事件：使用通用方法
-        else:
-            logger.debug(f"📤 广播通用事件: {event_type}")
-            return await self._emit_custom(
-                session_id=session_id,
-                event_type=event_type,
-                event_data=data,
-                seq=seq,
-                event_uuid=event_uuid
-            )
+            # 重置适配器以使用新的 conversation_id
+            self._zeno_adapter = None
     
     
     # ==================== 消息生命周期管理 ====================
@@ -444,12 +260,10 @@ class EventBroadcaster:
         self,
         session_id: str,
         index: int,
-        content_block: Dict[str, Any],
-        seq: Optional[int] = None,
-        event_uuid: Optional[str] = None
-    ) -> Dict[str, Any]:
+        content_block: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         """
-        发送 content_start 事件（统一入口）
+        发送 content_start 事件
         
         会自动处理：
         - tool_use: 记录 tool_id -> tool_name 映射
@@ -460,13 +274,10 @@ class EventBroadcaster:
             session_id: Session ID
             index: 内容块索引
             content_block: 内容块
-            seq: 事件序号（可选，来自 broadcast）
-            event_uuid: 事件 UUID（可选，来自 broadcast）
+            
+        Returns:
+            发送的事件，如果被过滤则返回 None
         """
-        # 直接调用时（非 broadcast），自动生成序号
-        if seq is None and self.seq_manager:
-            seq, event_uuid = await self._get_seq_and_uuid(session_id)
-        
         # 记录 tool_use 的工具名和输入参数
         if content_block.get("type") == "tool_use":
             tool_id = content_block.get("id", "")
@@ -474,33 +285,26 @@ class EventBroadcaster:
             tool_input = content_block.get("input", {})
             if tool_id and tool_name:
                 self._tool_id_to_name[tool_id] = tool_name
-                # 🆕 缓存工具输入参数（用于 api_calling 判断 api_name）
                 if tool_input:
                     self._tool_id_to_input[tool_id] = tool_input
         
-        # 累积内容（传递 index 支持并行累积）
+        # 累积内容
         accumulator = self._accumulators.get(session_id)
         if accumulator:
             accumulator.on_content_start(content_block, index=index)
         
-        # 发送 content_start（传递 seq 和 event_uuid）
+        # 通过 EventManager 发送事件
         result = await self.events.content.emit_content_start(
             session_id=session_id,
             index=index,
             content_block=content_block,
-            seq=seq,
-            event_uuid=event_uuid
+            output_format=self.output_format,
+            adapter=self._get_adapter()
         )
         
         # tool_result 时额外发送特殊工具的 message_delta
         if content_block.get("type") == "tool_result":
             await self._emit_special_tool_delta(session_id, content_block)
-        
-        # 分发到外部适配器（如果直接调用）
-        if result and self.dispatcher and seq is not None:
-            await self.dispatcher.dispatch(
-                session_id, result, to_internal=False, to_external=True
-            )
         
         return result
     
@@ -508,95 +312,72 @@ class EventBroadcaster:
         self,
         session_id: str,
         index: int,
-        delta: str,
-        seq: Optional[int] = None,
-        event_uuid: Optional[str] = None
-    ) -> Dict[str, Any]:
+        delta: str
+    ) -> Optional[Dict[str, Any]]:
         """
         发送 content_delta 事件
         
         简化格式：delta 直接是字符串，类型由 content_start 的 content_block.type 决定
-        自动累积到 ContentAccumulator（传递 index 支持并行累积）
+        自动累积到 ContentAccumulator
         
         Args:
             session_id: Session ID
             index: 内容块索引
             delta: 内容增量
-            seq: 事件序号（可选）
-            event_uuid: 事件 UUID（可选）
+            
+        Returns:
+            发送的事件，如果被过滤则返回 None
         """
-        # 直接调用时，自动生成序号
-        if seq is None and self.seq_manager:
-            seq, event_uuid = await self._get_seq_and_uuid(session_id)
-        
-        # 累积内容（传递 index 支持并行累积）
+        # 累积内容
         accumulator = self._accumulators.get(session_id)
         if accumulator:
             accumulator.on_content_delta(delta, index=index)
         
-        result = await self.events.content.emit_content_delta(
+        # 通过 EventManager 发送事件
+        return await self.events.content.emit_content_delta(
             session_id=session_id,
             index=index,
             delta=delta,
-            seq=seq,
-            event_uuid=event_uuid
+            output_format=self.output_format,
+            adapter=self._get_adapter()
         )
-        
-        # 分发到外部适配器
-        if result and self.dispatcher and seq is not None:
-            await self.dispatcher.dispatch(
-                session_id, result, to_internal=False, to_external=True
-            )
-        
-        return result
     
     async def emit_content_stop(
         self,
         session_id: str,
         index: int,
-        signature: Optional[str] = None,
-        seq: Optional[int] = None,
-        event_uuid: Optional[str] = None
-    ) -> Dict[str, Any]:
+        signature: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
         """
         发送 content_stop 事件
         
         自动：
-        1. 累积到 ContentAccumulator（传递 index 支持并行累积）
+        1. 累积到 ContentAccumulator
         2. Checkpoint 到数据库（断点恢复）
         
         Args:
             session_id: Session ID
             index: 内容块索引
             signature: 签名（Extended Thinking 用）
-            seq: 事件序号（可选）
-            event_uuid: 事件 UUID（可选）
+            
+        Returns:
+            发送的事件，如果被过滤则返回 None
         """
-        # 直接调用时，自动生成序号
-        if seq is None and self.seq_manager:
-            seq, event_uuid = await self._get_seq_and_uuid(session_id)
-        
-        # 累积内容（传递 index 支持并行累积）
+        # 累积内容
         accumulator = self._accumulators.get(session_id)
         if accumulator:
             accumulator.on_content_stop(index=index, signature=signature)
         
-        # 发送事件
+        # 通过 EventManager 发送事件
         result = await self.events.content.emit_content_stop(
             session_id=session_id,
             index=index,
-            seq=seq,
-            event_uuid=event_uuid
+            output_format=self.output_format,
+            adapter=self._get_adapter()
         )
         
         # Checkpoint 到数据库
         await self._checkpoint_message(session_id)
-        
-        # 分发到外部适配器
-        if result and self.dispatcher and seq is not None:
-            await self.dispatcher.dispatch(
-                session_id, result, to_internal=False, to_external=True
-            )
         
         return result
     
@@ -604,10 +385,8 @@ class EventBroadcaster:
         self,
         session_id: str,
         message_id: str,
-        model: str,
-        seq: Optional[int] = None,
-        event_uuid: Optional[str] = None
-    ) -> Dict[str, Any]:
+        model: str
+    ) -> Optional[Dict[str, Any]]:
         """
         发送 message_start 事件
         
@@ -615,37 +394,25 @@ class EventBroadcaster:
             session_id: Session ID
             message_id: 消息 ID
             model: 模型名称
-            seq: 事件序号（可选）
-            event_uuid: 事件 UUID（可选）
+            
+        Returns:
+            发送的事件，如果被过滤则返回 None
         """
-        # 直接调用时，自动生成序号
-        if seq is None and self.seq_manager:
-            seq, event_uuid = await self._get_seq_and_uuid(session_id)
-        
-        result = await self.events.message.emit_message_start(
+        # 通过 EventManager 发送事件
+        return await self.events.message.emit_message_start(
             session_id=session_id,
             message_id=message_id,
             model=model,
-            seq=seq,
-            event_uuid=event_uuid
+            output_format=self.output_format,
+            adapter=self._get_adapter()
         )
-        
-        # 分发到外部适配器
-        if result and self.dispatcher and seq is not None:
-            await self.dispatcher.dispatch(
-                session_id, result, to_internal=False, to_external=True
-            )
-        
-        return result
     
     async def emit_message_delta(
         self,
         session_id: str,
         delta: Dict[str, Any],
-        message_id: str = None,
-        seq: Optional[int] = None,
-        event_uuid: Optional[str] = None
-    ) -> Dict[str, Any]:
+        message_id: str = None
+    ) -> Optional[Dict[str, Any]]:
         """
         发送 message_delta 事件
         
@@ -653,36 +420,24 @@ class EventBroadcaster:
             session_id: Session ID
             delta: Delta 内容
             message_id: 消息 ID（可选）
-            seq: 事件序号（可选）
-            event_uuid: 事件 UUID（可选）
+            
+        Returns:
+            发送的事件，如果被过滤则返回 None
         """
-        # 直接调用时，自动生成序号
-        if seq is None and self.seq_manager:
-            seq, event_uuid = await self._get_seq_and_uuid(session_id)
-        
-        result = await self.events.message.emit_message_delta(
+        # 通过 EventManager 发送事件
+        return await self.events.message.emit_message_delta(
             session_id=session_id,
             delta=delta,
             message_id=message_id,
-            seq=seq,
-            event_uuid=event_uuid
+            output_format=self.output_format,
+            adapter=self._get_adapter()
         )
-        
-        # 分发到外部适配器
-        if result and self.dispatcher and seq is not None:
-            await self.dispatcher.dispatch(
-                session_id, result, to_internal=False, to_external=True
-            )
-        
-        return result
     
     async def emit_message_stop(
         self,
         session_id: str,
-        message_id: str = None,
-        seq: Optional[int] = None,
-        event_uuid: Optional[str] = None
-    ) -> Dict[str, Any]:
+        message_id: str = None
+    ) -> Optional[Dict[str, Any]]:
         """
         发送 message_stop 事件
         
@@ -693,32 +448,23 @@ class EventBroadcaster:
         Args:
             session_id: Session ID
             message_id: 消息 ID（可选）
-            seq: 事件序号（可选）
-            event_uuid: 事件 UUID（可选）
+            
+        Returns:
+            发送的事件，如果被过滤则返回 None
         """
-        # 直接调用时，自动生成序号
-        if seq is None and self.seq_manager:
-            seq, event_uuid = await self._get_seq_and_uuid(session_id)
-        
         # 最终保存完整消息
         await self._finalize_message(session_id)
         
-        # 发送事件
+        # 通过 EventManager 发送事件
         result = await self.events.message.emit_message_stop(
             session_id=session_id,
             message_id=message_id,
-            seq=seq,
-            event_uuid=event_uuid
+            output_format=self.output_format,
+            adapter=self._get_adapter()
         )
         
         # 清理 session 状态
         self._cleanup_session(session_id)
-        
-        # 分发到外部适配器
-        if result and self.dispatcher and seq is not None:
-            await self.dispatcher.dispatch(
-                session_id, result, to_internal=False, to_external=True
-            )
         
         return result
     
@@ -731,122 +477,71 @@ class EventBroadcaster:
         title: str
     ) -> Dict[str, Any]:
         """发送标题更新（后台生成标题时使用）"""
-        seq, event_uuid = await self._get_seq_and_uuid(session_id)
         return await self._emit_conversation_delta(
             session_id=session_id,
             conversation_id=conversation_id,
-            delta={"title": title},
-            seq=seq,
-            event_uuid=event_uuid
+            delta={"title": title}
         )
     
-    # ==================== 内部事件发送方法（带 seq 参数）====================
+    # ==================== 内部事件发送方法 ====================
     
     async def _emit_conversation_start(
         self,
         session_id: str,
-        conversation: Dict[str, Any],
-        seq: Optional[int] = None,
-        event_uuid: Optional[str] = None
-    ) -> Dict[str, Any]:
+        conversation: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         """发送 conversation_start 事件（内部方法）"""
-        if seq is None and self.seq_manager:
-            seq, event_uuid = await self._get_seq_and_uuid(session_id)
-        
-        result = await self.events.conversation.emit_conversation_start(
+        return await self.events.conversation.emit_conversation_start(
             session_id=session_id,
             conversation=conversation,
-            seq=seq,
-            event_uuid=event_uuid
+            output_format=self.output_format,
+            adapter=self._get_adapter()
         )
-        
-        if result and self.dispatcher and seq is not None:
-            await self.dispatcher.dispatch(
-                session_id, result, to_internal=False, to_external=True
-            )
-        
-        return result
     
     async def _emit_conversation_delta(
         self,
         session_id: str,
         conversation_id: str,
-        delta: Dict[str, Any],
-        seq: Optional[int] = None,
-        event_uuid: Optional[str] = None
-    ) -> Dict[str, Any]:
+        delta: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         """发送 conversation_delta 事件（内部方法）"""
-        if seq is None and self.seq_manager:
-            seq, event_uuid = await self._get_seq_and_uuid(session_id)
-        
-        result = await self.events.conversation.emit_conversation_delta(
+        return await self.events.conversation.emit_conversation_delta(
             session_id=session_id,
             conversation_id=conversation_id,
             delta=delta,
-            seq=seq,
-            event_uuid=event_uuid
+            output_format=self.output_format,
+            adapter=self._get_adapter()
         )
-        
-        if result and self.dispatcher and seq is not None:
-            await self.dispatcher.dispatch(
-                session_id, result, to_internal=False, to_external=True
-            )
-        
-        return result
     
     async def _emit_error(
         self,
         session_id: str,
         error_type: str,
-        error_message: str,
-        seq: Optional[int] = None,
-        event_uuid: Optional[str] = None
-    ) -> Dict[str, Any]:
+        error_message: str
+    ) -> Optional[Dict[str, Any]]:
         """发送 error 事件（内部方法）"""
-        if seq is None and self.seq_manager:
-            seq, event_uuid = await self._get_seq_and_uuid(session_id)
-        
-        result = await self.events.system.emit_error(
+        return await self.events.system.emit_error(
             session_id=session_id,
             error_type=error_type,
             error_message=error_message,
-            seq=seq,
-            event_uuid=event_uuid
+            output_format=self.output_format,
+            adapter=self._get_adapter()
         )
-        
-        if result and self.dispatcher and seq is not None:
-            await self.dispatcher.dispatch(
-                session_id, result, to_internal=False, to_external=True
-            )
-        
-        return result
     
     async def _emit_custom(
         self,
         session_id: str,
         event_type: str,
-        event_data: Dict[str, Any],
-        seq: Optional[int] = None,
-        event_uuid: Optional[str] = None
-    ) -> Dict[str, Any]:
+        event_data: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         """发送自定义事件（内部方法）"""
-        if seq is None and self.seq_manager:
-            seq, event_uuid = await self._get_seq_and_uuid(session_id)
-        
-        result = await self.events.emit_custom(
+        return await self.events.system.emit_custom(
             session_id=session_id,
             event_type=event_type,
             event_data=event_data,
-            seq=seq,
-            event_uuid=event_uuid
+            output_format=self.output_format,
+            adapter=self._get_adapter()
         )
-        
-        if result and self.dispatcher and seq is not None:
-            await self.dispatcher.dispatch(
-                session_id, result, to_internal=False, to_external=True
-            )
-        
-        return result
     
     # ==================== 特殊工具处理（内部方法）====================
     
@@ -963,13 +658,15 @@ class EventBroadcaster:
             # 直接保存到数据库 metadata（增量合并）
             await self._save_delta_to_metadata(session_id, delta_type, result_content)
             
-            # 发送 SSE 事件给前端
+            # 发送 SSE 事件给前端（通过 EventManager）
             await self.events.message.emit_message_delta(
                 session_id=session_id,
                 delta={
                     "type": delta_type,
                     "content": result_content
-                }
+                },
+                output_format=self.output_format,
+                adapter=self._get_adapter()
             )
         
         # 清理缓存
@@ -1344,13 +1041,15 @@ class EventBroadcaster:
         # 保存到数据库
         await self._save_delta_to_metadata(session_id, delta_type, content)
         
-        # 发送 SSE 事件
+        # 发送 SSE 事件（通过 EventManager）
         await self.events.message.emit_message_delta(
             session_id=session_id,
             delta={
                 "type": delta_type,
                 "content": content_str
-            }
+            },
+            output_format=self.output_format,
+            adapter=self._get_adapter()
         )
     
     async def _save_delta_to_metadata(
@@ -1500,7 +1199,17 @@ class EventBroadcaster:
         Returns:
             发送的事件（如果成功），否则 None
         """
-        return await self.broadcast(session_id, event)
+        event_type = event.get("type", "unknown")
+        event_data = event.get("data", {})
+        
+        # 通过 EventManager 发送自定义事件
+        return await self.events.system.emit_custom(
+            session_id=session_id,
+            event_type=event_type,
+            event_data=event_data,
+            output_format=self.output_format,
+            adapter=self._get_adapter()
+        )
     
     # ==================== HITL 事件 ====================
     
@@ -1578,26 +1287,26 @@ class EventBroadcaster:
 
 def create_broadcaster(
     event_manager,
-    seq_manager: "SeqManager" = None,
     conversation_service: "ConversationService" = None,
-    event_dispatcher=None
+    output_format: str = "zenflux",
+    conversation_id: str = None
 ) -> EventBroadcaster:
     """
     创建事件广播器
     
     Args:
         event_manager: EventManager 实例
-        seq_manager: SeqManager 实例（用于统一生成序号）
         conversation_service: ConversationService 实例（用于持久化）
-        event_dispatcher: EventDispatcher 实例（用于外部适配器，可选）
+        output_format: 输出格式（zenflux/zeno），默认 zenflux
+        conversation_id: 对话 ID（用于 ZenO 格式）
         
     Returns:
         EventBroadcaster 实例
     """
     return EventBroadcaster(
         event_manager=event_manager,
-        seq_manager=seq_manager,
         conversation_service=conversation_service,
-        event_dispatcher=event_dispatcher
+        output_format=output_format,
+        conversation_id=conversation_id
     )
 
