@@ -343,4 +343,64 @@ class ChatServicer(_ChatServicerBase):
                 data=json.dumps({"error": str(e)}),
                 timestamp=0
             )
+    
+    async def ChatMockStream(
+        self,
+        request: tool_service_pb2.ChatMockRequest,
+        context: grpc.aio.ServicerContext
+    ) -> AsyncIterator[tool_service_pb2.ChatEvent]:
+        """
+        Mock 流式接口（用于前端测试）
+        
+        返回预定义的 ZenO 格式事件流，无需调用真实 Agent
+        
+        Args:
+            request: Mock 请求，包含 scenario 和 delay_ms
+            context: gRPC 上下文
+            
+        Yields:
+            ChatEvent 事件流
+        """
+        try:
+            scenario = request.scenario or "analytics"
+            delay_ms = request.delay_ms if request.delay_ms > 0 else 50
+            
+            logger.info(f"📨 gRPC Mock 请求: scenario={scenario}, delay={delay_ms}ms")
+            
+            # 调用 chat_service 的 mock 方法
+            async for sse_line in self.chat_service.chat_mock(
+                scenario=scenario,
+                delay_ms=delay_ms
+            ):
+                # chat_mock 返回的是 "data: {...}\n\n" 格式，需要解析
+                if sse_line.startswith("data: "):
+                    json_str = sse_line[6:].strip()
+                    if json_str:
+                        try:
+                            event_data = json.loads(json_str)
+                            
+                            grpc_event = tool_service_pb2.ChatEvent(
+                                event_type=event_data.get("type", "message"),
+                                data=json_str,
+                                timestamp=safe_int(event_data.get("timestamp", 0)),
+                                seq=safe_int(event_data.get("seq", 0)),
+                                event_uuid=""
+                            )
+                            
+                            yield grpc_event
+                        except json.JSONDecodeError:
+                            continue
+            
+            logger.info("✅ gRPC Mock 流完成")
+        
+        except Exception as e:
+            logger.error(f"❌ gRPC Mock 错误: {str(e)}", exc_info=True)
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(f"Mock 流失败: {str(e)}")
+            
+            yield tool_service_pb2.ChatEvent(
+                event_type="error",
+                data=json.dumps({"error": str(e)}),
+                timestamp=0
+            )
 

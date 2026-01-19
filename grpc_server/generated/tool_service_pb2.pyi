@@ -7,28 +7,6 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
-class HealthCheckRequest(_message.Message):
-    __slots__ = ("service",)
-    SERVICE_FIELD_NUMBER: _ClassVar[int]
-    service: str
-    def __init__(self, service: _Optional[str] = ...) -> None: ...
-
-class HealthCheckResponse(_message.Message):
-    __slots__ = ("status",)
-    class ServingStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
-        __slots__ = ()
-        UNKNOWN: _ClassVar[HealthCheckResponse.ServingStatus]
-        SERVING: _ClassVar[HealthCheckResponse.ServingStatus]
-        NOT_SERVING: _ClassVar[HealthCheckResponse.ServingStatus]
-        SERVICE_UNKNOWN: _ClassVar[HealthCheckResponse.ServingStatus]
-    UNKNOWN: HealthCheckResponse.ServingStatus
-    SERVING: HealthCheckResponse.ServingStatus
-    NOT_SERVING: HealthCheckResponse.ServingStatus
-    SERVICE_UNKNOWN: HealthCheckResponse.ServingStatus
-    STATUS_FIELD_NUMBER: _ClassVar[int]
-    status: HealthCheckResponse.ServingStatus
-    def __init__(self, status: _Optional[_Union[HealthCheckResponse.ServingStatus, str]] = ...) -> None: ...
-
 class ChatRequest(_message.Message):
     __slots__ = ("message", "user_id", "conversation_id", "message_id", "stream", "background_tasks", "files", "variables")
     class VariablesEntry(_message.Message):
@@ -103,6 +81,36 @@ class ReconnectRequest(_message.Message):
     session_id: str
     after_seq: int
     def __init__(self, session_id: _Optional[str] = ..., after_seq: _Optional[int] = ...) -> None: ...
+
+class ChatMockRequest(_message.Message):
+    __slots__ = ("scenario", "delay_ms")
+    SCENARIO_FIELD_NUMBER: _ClassVar[int]
+    DELAY_MS_FIELD_NUMBER: _ClassVar[int]
+    scenario: str
+    delay_ms: int
+    def __init__(self, scenario: _Optional[str] = ..., delay_ms: _Optional[int] = ...) -> None: ...
+
+class HealthCheckRequest(_message.Message):
+    __slots__ = ("service",)
+    SERVICE_FIELD_NUMBER: _ClassVar[int]
+    service: str
+    def __init__(self, service: _Optional[str] = ...) -> None: ...
+
+class HealthCheckResponse(_message.Message):
+    __slots__ = ("status",)
+    class ServingStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+        __slots__ = ()
+        UNKNOWN: _ClassVar[HealthCheckResponse.ServingStatus]
+        SERVING: _ClassVar[HealthCheckResponse.ServingStatus]
+        NOT_SERVING: _ClassVar[HealthCheckResponse.ServingStatus]
+        SERVICE_UNKNOWN: _ClassVar[HealthCheckResponse.ServingStatus]
+    UNKNOWN: HealthCheckResponse.ServingStatus
+    SERVING: HealthCheckResponse.ServingStatus
+    NOT_SERVING: HealthCheckResponse.ServingStatus
+    SERVICE_UNKNOWN: HealthCheckResponse.ServingStatus
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    status: HealthCheckResponse.ServingStatus
+    def __init__(self, status: _Optional[_Union[HealthCheckResponse.ServingStatus, str]] = ...) -> None: ...
 
 class SessionStatusRequest(_message.Message):
     __slots__ = ("session_id",)

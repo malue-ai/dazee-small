@@ -577,6 +577,46 @@ async def _handle_sync_chat(
     )
 
 
+# ==================== Mock 测试接口 ====================
+
+@router.get("/chat/mock")
+async def chat_mock(
+    scenario: str = Query("analytics", description="场景类型：analytics（智能分析）或 build（系统搭建）"),
+    delay: int = Query(50, description="事件间隔（毫秒）", ge=10, le=500)
+):
+    """
+    Mock SSE 事件流（用于前端测试）
+    
+    返回预定义的 ZenO 格式 SSE 事件流，无需调用真实 Agent。
+    
+    ## 参数
+    - **scenario**: 场景类型
+      - `analytics`: 智能分析（SQL、图表、报告）
+      - `build`: 系统搭建（代码生成、应用部署）
+    - **delay**: 事件间隔（毫秒），默认 50ms
+    
+    ## 使用场景
+    - 前端开发调试
+    - UI 组件测试
+    - 演示展示
+    """
+    logger.info(f"📨 Mock 请求: scenario={scenario}, delay={delay}ms")
+    
+    async def mock_generator():
+        async for event in chat_service.chat_mock(scenario=scenario, delay_ms=delay):
+            yield event
+    
+    return StreamingResponse(
+        mock_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )
+
+
 # ==================== SSE 重连接口 ====================
 
 @router.get("/chat/{session_id}")

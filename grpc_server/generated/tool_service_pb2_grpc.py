@@ -26,9 +26,7 @@ if _version_not_supported:
 
 
 class HealthStub(object):
-    """==================== Health 服务（gRPC 健康检查） ====================
-    遵循 gRPC Health Checking Protocol
-    https://github.com/grpc/grpc/blob/master/doc/health-checking.md
+    """==================== Health 服务（健康检查） ====================
     """
 
     def __init__(self, channel):
@@ -50,9 +48,7 @@ class HealthStub(object):
 
 
 class HealthServicer(object):
-    """==================== Health 服务（gRPC 健康检查） ====================
-    遵循 gRPC Health Checking Protocol
-    https://github.com/grpc/grpc/blob/master/doc/health-checking.md
+    """==================== Health 服务（健康检查） ====================
     """
 
     def Check(self, request, context):
@@ -91,9 +87,7 @@ def add_HealthServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class Health(object):
-    """==================== Health 服务（gRPC 健康检查） ====================
-    遵循 gRPC Health Checking Protocol
-    https://github.com/grpc/grpc/blob/master/doc/health-checking.md
+    """==================== Health 服务（健康检查） ====================
     """
 
     @staticmethod
@@ -176,6 +170,11 @@ class ChatServiceStub(object):
                 request_serializer=tool__service__pb2.ReconnectRequest.SerializeToString,
                 response_deserializer=tool__service__pb2.ChatEvent.FromString,
                 _registered_method=True)
+        self.ChatMockStream = channel.unary_stream(
+                '/zenflux.ChatService/ChatMockStream',
+                request_serializer=tool__service__pb2.ChatMockRequest.SerializeToString,
+                response_deserializer=tool__service__pb2.ChatEvent.FromString,
+                _registered_method=True)
 
 
 class ChatServiceServicer(object):
@@ -203,6 +202,13 @@ class ChatServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ChatMockStream(self, request, context):
+        """Mock 流式接口（用于前端测试）
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_ChatServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -219,6 +225,11 @@ def add_ChatServiceServicer_to_server(servicer, server):
             'ReconnectStream': grpc.unary_stream_rpc_method_handler(
                     servicer.ReconnectStream,
                     request_deserializer=tool__service__pb2.ReconnectRequest.FromString,
+                    response_serializer=tool__service__pb2.ChatEvent.SerializeToString,
+            ),
+            'ChatMockStream': grpc.unary_stream_rpc_method_handler(
+                    servicer.ChatMockStream,
+                    request_deserializer=tool__service__pb2.ChatMockRequest.FromString,
                     response_serializer=tool__service__pb2.ChatEvent.SerializeToString,
             ),
     }
@@ -303,6 +314,33 @@ class ChatService(object):
             target,
             '/zenflux.ChatService/ReconnectStream',
             tool__service__pb2.ReconnectRequest.SerializeToString,
+            tool__service__pb2.ChatEvent.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ChatMockStream(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/zenflux.ChatService/ChatMockStream',
+            tool__service__pb2.ChatMockRequest.SerializeToString,
             tool__service__pb2.ChatEvent.FromString,
             options,
             channel_credentials,

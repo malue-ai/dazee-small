@@ -79,6 +79,10 @@ class ChatService:
         
         # 同步模式（推荐用于 API 集成）
         result = await service.chat(message, user_id, stream=False)
+        
+        # Mock 模式（用于前端测试）
+        async for event in service.chat_mock(scenario="analytics"):
+            yield event
     """
     
     # 默认 Agent 标识
@@ -1149,6 +1153,684 @@ class ChatService:
             logger.error(f"❌ 处理文件失败: {str(e)}", exc_info=True)
             # 文件处理失败，返回原始消息，不影响对话
             return message, None
+    
+    # ==================== Mock 数据返回（用于前端测试）====================
+    
+    async def chat_mock(
+        self,
+        scenario: str = "analytics",
+        delay_ms: int = 50
+    ) -> AsyncGenerator[str, None]:
+        """
+        返回 Mock SSE 事件流（用于前端测试和演示）
+        
+        Args:
+            scenario: 场景类型，支持 "analytics"（智能分析）和 "build"（系统搭建）
+            delay_ms: 事件之间的延迟（毫秒），默认 50ms
+            
+        Yields:
+            SSE 格式的事件字符串
+            
+        使用示例：
+            async for event in service.chat_mock(scenario="analytics"):
+                yield event
+        """
+        import time
+        
+        # 生成唯一标识
+        timestamp_base = int(time.time() * 1000)
+        session_id = f"sess_mock_{uuid4().hex[:12]}"
+        message_id = f"msg_{session_id}"
+        conversation_id = f"conv_mock_{uuid4().hex[:12]}"
+        
+        # 根据场景选择 mock 数据
+        if scenario == "build":
+            events = self._get_mock_events_build(
+                session_id=session_id,
+                message_id=message_id,
+                conversation_id=conversation_id,
+                timestamp_base=timestamp_base
+            )
+        else:
+            # 默认使用 analytics 场景
+            events = self._get_mock_events_analytics(
+                session_id=session_id,
+                message_id=message_id,
+                conversation_id=conversation_id,
+                timestamp_base=timestamp_base
+            )
+        
+        # 逐个发送事件
+        delay_s = delay_ms / 1000.0
+        for event in events:
+            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+            await asyncio.sleep(delay_s)
+        
+        logger.info(f"✅ Mock 数据发送完成: scenario={scenario}, events={len(events)}")
+    
+    def _get_mock_events_analytics(
+        self,
+        session_id: str,
+        message_id: str,
+        conversation_id: str,
+        timestamp_base: int
+    ) -> List[Dict[str, Any]]:
+        """
+        获取智能分析场景的 Mock 事件序列
+        
+        包含：intent → thinking → progress → sql → data → chart → mind → report → response → files → recommended → done
+        """
+        seq = 0
+        events = []
+        
+        def next_event(event_type: str, **kwargs) -> Dict[str, Any]:
+            nonlocal seq
+            seq += 1
+            base = {
+                "type": event_type,
+                "message_id": message_id,
+                "session_id": session_id,
+                "seq": seq,
+                "timestamp": timestamp_base + seq * 50
+            }
+            if seq == 1:
+                base["conversation_id"] = conversation_id
+            base.update(kwargs)
+            return base
+        
+        # 1. message.assistant.start
+        events.append(next_event("message.assistant.start"))
+        
+        # 2. intent
+        events.append(next_event(
+            "message.assistant.delta",
+            delta={"type": "intent", "content": json.dumps({
+                "intent_id": 2,
+                "intent_name": "智能分析",
+                "platform": "analytics"
+            }, ensure_ascii=False)}
+        ))
+        
+        # 3. thinking（分段发送）
+        thinking_parts = [
+            "用", "户想要", "分析", "本月的", "销售数据，", "这是一个", "智能分析", "场景。",
+            "\n\n我需要：", "\n1. 首先", "构建SQL", "查询语句", "，从订单表", "中获取数据",
+            "\n2. 然后", "生成可视化", "图表", "进行展示",
+            "\n3. 最后", "总结分析", "结果并", "给出建议",
+            "\n\n让我", "开始执行", "这个分析", "任务..."
+        ]
+        for part in thinking_parts:
+            events.append(next_event(
+                "message.assistant.delta",
+                delta={"type": "thinking", "content": part}
+            ))
+        
+        # 4. progress - 开始
+        events.append(next_event(
+            "message.assistant.delta",
+            delta={"type": "progress", "content": json.dumps({
+                "title": "销售数据分析",
+                "status": "running",
+                "current": 0,
+                "total": 4,
+                "subtasks": [
+                    {"title": "构建查询", "status": "running", "desc": ""},
+                    {"title": "执行查询", "status": "pending", "desc": ""},
+                    {"title": "生成图表", "status": "pending", "desc": ""},
+                    {"title": "生成报告", "status": "pending", "desc": ""}
+                ]
+            }, ensure_ascii=False)}
+        ))
+        
+        # 5. SQL
+        sql_content = """SELECT 
+  product_name,
+  product_category,
+  SUM(quantity) as total_quantity,
+  SUM(sales_amount) as total_sales,
+  COUNT(DISTINCT order_id) as order_count
+FROM orders o
+JOIN products p ON o.product_id = p.id
+WHERE order_date >= '2026-01-01' 
+  AND order_date < '2026-02-01'
+GROUP BY product_name, product_category
+ORDER BY total_sales DESC
+LIMIT 10"""
+        events.append(next_event(
+            "message.assistant.delta",
+            delta={"type": "sql", "content": sql_content}
+        ))
+        
+        # 6. progress - SQL 完成
+        events.append(next_event(
+            "message.assistant.delta",
+            delta={"type": "progress", "content": json.dumps({
+                "title": "销售数据分析",
+                "status": "running",
+                "current": 1,
+                "total": 4,
+                "subtasks": [
+                    {"title": "构建查询", "status": "success", "desc": "SQL已生成"},
+                    {"title": "执行查询", "status": "running", "desc": ""},
+                    {"title": "生成图表", "status": "pending", "desc": ""},
+                    {"title": "生成报告", "status": "pending", "desc": ""}
+                ]
+            }, ensure_ascii=False)}
+        ))
+        
+        # 7. data
+        data_content = [
+            {"product_name": "智能手表Pro", "product_category": "电子产品", "total_quantity": 1250, "total_sales": 187500, "order_count": 892},
+            {"product_name": "无线蓝牙耳机", "product_category": "电子产品", "total_quantity": 2100, "total_sales": 147000, "order_count": 1560},
+            {"product_name": "运动跑鞋X1", "product_category": "运动服饰", "total_quantity": 1800, "total_sales": 126000, "order_count": 1420},
+            {"product_name": "羽绒服冬季款", "product_category": "服装", "total_quantity": 680, "total_sales": 108800, "order_count": 520},
+            {"product_name": "智能台灯", "product_category": "家居", "total_quantity": 1500, "total_sales": 97500, "order_count": 1280}
+        ]
+        events.append(next_event(
+            "message.assistant.delta",
+            delta={"type": "data", "content": json.dumps(data_content, ensure_ascii=False)}
+        ))
+        
+        # 8. progress - 查询完成
+        events.append(next_event(
+            "message.assistant.delta",
+            delta={"type": "progress", "content": json.dumps({
+                "title": "销售数据分析",
+                "status": "running",
+                "current": 2,
+                "total": 4,
+                "subtasks": [
+                    {"title": "构建查询", "status": "success", "desc": "SQL已生成"},
+                    {"title": "执行查询", "status": "success", "desc": "获取5条记录"},
+                    {"title": "生成图表", "status": "running", "desc": ""},
+                    {"title": "生成报告", "status": "pending", "desc": ""}
+                ]
+            }, ensure_ascii=False)}
+        ))
+        
+        # 9. chart - 柱状图
+        chart_bar = {
+            "title": {"text": "本月产品销售额排行榜", "subtext": "2026年1月", "left": "center"},
+            "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
+            "legend": {"data": ["销售额", "订单数"], "top": "bottom"},
+            "xAxis": {
+                "type": "category",
+                "data": ["智能手表Pro", "无线蓝牙耳机", "运动跑鞋X1", "羽绒服冬季款", "智能台灯"],
+                "axisLabel": {"rotate": 45}
+            },
+            "yAxis": [
+                {"type": "value", "name": "销售额(元)", "position": "left"},
+                {"type": "value", "name": "订单数", "position": "right"}
+            ],
+            "series": [
+                {"name": "销售额", "type": "bar", "data": [187500, 147000, 126000, 108800, 97500], "itemStyle": {"color": "#5470c6"}},
+                {"name": "订单数", "type": "line", "yAxisIndex": 1, "data": [892, 1560, 1420, 520, 1280], "itemStyle": {"color": "#91cc75"}}
+            ]
+        }
+        events.append(next_event(
+            "message.assistant.delta",
+            delta={"type": "chart", "content": json.dumps(chart_bar, ensure_ascii=False)}
+        ))
+        
+        # 10. chart - 饼图
+        chart_pie = {
+            "title": {"text": "各品类销售占比", "left": "center"},
+            "tooltip": {"trigger": "item", "formatter": "{a} <br/>{b}: {c} ({d}%)"},
+            "legend": {"orient": "vertical", "left": "left"},
+            "series": [{
+                "name": "品类销售",
+                "type": "pie",
+                "radius": ["40%", "70%"],
+                "data": [
+                    {"value": 334500, "name": "电子产品"},
+                    {"value": 126000, "name": "运动服饰"},
+                    {"value": 97500, "name": "家居"},
+                    {"value": 108800, "name": "服装"}
+                ]
+            }]
+        }
+        events.append(next_event(
+            "message.assistant.delta",
+            delta={"type": "chart", "content": json.dumps(chart_pie, ensure_ascii=False)}
+        ))
+        
+        # 11. mind - 脑图
+        mind_content = {
+            "mermaid_content": """mindmap
+  root((销售分析))
+    电子产品
+      智能手表Pro: 18.75万
+      无线蓝牙耳机: 14.7万
+    运动服饰
+      运动跑鞋X1: 12.6万
+    家居
+      智能台灯: 9.75万
+    服装
+      羽绒服: 10.88万""",
+            "chart_type": "mindmap"
+        }
+        events.append(next_event(
+            "message.assistant.delta",
+            delta={"type": "mind", "content": json.dumps(mind_content, ensure_ascii=False)}
+        ))
+        
+        # 12. progress - 图表完成
+        events.append(next_event(
+            "message.assistant.delta",
+            delta={"type": "progress", "content": json.dumps({
+                "title": "销售数据分析",
+                "status": "running",
+                "current": 3,
+                "total": 4,
+                "subtasks": [
+                    {"title": "构建查询", "status": "success", "desc": "SQL已生成"},
+                    {"title": "执行查询", "status": "success", "desc": "获取5条记录"},
+                    {"title": "生成图表", "status": "success", "desc": "已生成3个图表"},
+                    {"title": "生成报告", "status": "running", "desc": ""}
+                ]
+            }, ensure_ascii=False)}
+        ))
+        
+        # 13. report
+        report_content = {
+            "title": "2026年1月销售数据分析报告",
+            "summary": "本月总销售额达到66.68万元，电子产品品类表现最佳，占比50.2%",
+            "sections": [
+                {"title": "销售概览", "content": "本月共产生5,572笔订单，涉及5款热销产品，总销售额66.68万元。"},
+                {"title": "热销产品分析", "content": "TOP3产品分别是：智能手表Pro（18.75万）、无线蓝牙耳机（14.7万）、运动跑鞋X1（12.6万）。"},
+                {"title": "趋势与建议", "content": "1. 建议加大智能手表Pro的推广力度\n2. 电子产品品类可继续拓展新品"}
+            ]
+        }
+        events.append(next_event(
+            "message.assistant.delta",
+            delta={"type": "report", "content": json.dumps(report_content, ensure_ascii=False)}
+        ))
+        
+        # 14. progress - 全部完成
+        events.append(next_event(
+            "message.assistant.delta",
+            delta={"type": "progress", "content": json.dumps({
+                "title": "销售数据分析",
+                "status": "completed",
+                "current": 4,
+                "total": 4,
+                "subtasks": [
+                    {"title": "构建查询", "status": "success", "desc": "SQL已生成"},
+                    {"title": "执行查询", "status": "success", "desc": "获取5条记录"},
+                    {"title": "生成图表", "status": "success", "desc": "已生成3个图表"},
+                    {"title": "生成报告", "status": "success", "desc": "报告已生成"}
+                ]
+            }, ensure_ascii=False)}
+        ))
+        
+        # 15. response（分段发送）
+        response_parts = [
+            "根据", "您的", "需求，", "我已完成", "本月", "销售数据", "分析，", "主要", "发现", "如下：",
+            "\n\n", "## 📊", " 销售", "概览", "\n\n",
+            "- **总销售额**", "：66.68万元", "\n- **总订单数**", "：5,572笔", "\n- **热销产品**", "：5款",
+            "\n\n", "## 🏆", " TOP3", " 热销产品", "\n\n",
+            "| 排名 |", " 产品名称 |", " 销售额 |", "\n|:---:|", "------|", "------:|",
+            "\n| 🥇 |", " 智能手表Pro |", " 18.75万 |",
+            "\n| 🥈 |", " 无线蓝牙耳机 |", " 14.7万 |",
+            "\n| 🥉 |", " 运动跑鞋X1 |", " 12.6万 |",
+            "\n\n", "以上图表", "和报告", "已为您", "生成完毕。"
+        ]
+        for part in response_parts:
+            events.append(next_event(
+                "message.assistant.delta",
+                delta={"type": "response", "content": part}
+            ))
+        
+        # 16. files
+        files_content = [
+            {"name": "sales_report_202601.xlsx", "type": "xlsx", "url": "https://cdn.example.com/files/sales_report_202601.xlsx", "size": 156800},
+            {"name": "sales_chart_bar.png", "type": "image", "url": "https://cdn.example.com/files/sales_chart_bar.png", "size": 89600}
+        ]
+        events.append(next_event(
+            "message.assistant.delta",
+            delta={"type": "files", "content": json.dumps(files_content, ensure_ascii=False)}
+        ))
+        
+        # 17. recommended
+        recommended_content = ["查看上月销售对比", "分析各区域销售情况", "查看电子产品品类详情", "预测下月销售趋势"]
+        events.append(next_event(
+            "message.assistant.delta",
+            delta={"type": "recommended", "content": json.dumps(recommended_content, ensure_ascii=False)}
+        ))
+        
+        # 18. message.assistant.done
+        final_content = """根据您的需求，我已完成本月销售数据分析，主要发现如下：
+
+## 📊 销售概览
+
+- **总销售额**：66.68万元
+- **总订单数**：5,572笔
+- **热销产品**：5款
+
+## 🏆 TOP3 热销产品
+
+| 排名 | 产品名称 | 销售额 |
+|:---:|------|------:|
+| 🥇 | 智能手表Pro | 18.75万 |
+| 🥈 | 无线蓝牙耳机 | 14.7万 |
+| 🥉 | 运动跑鞋X1 | 12.6万 |
+
+以上图表和报告已为您生成完毕。"""
+        events.append(next_event(
+            "message.assistant.done",
+            data={"content": final_content}
+        ))
+        
+        return events
+    
+    def _get_mock_events_build(
+        self,
+        session_id: str,
+        message_id: str,
+        conversation_id: str,
+        timestamp_base: int
+    ) -> List[Dict[str, Any]]:
+        """
+        获取系统搭建场景的 Mock 事件序列
+        
+        包含：intent → thinking → progress → mind → response → files → application → recommended → done
+        """
+        seq = 0
+        events = []
+        
+        def next_event(event_type: str, **kwargs) -> Dict[str, Any]:
+            nonlocal seq
+            seq += 1
+            base = {
+                "type": event_type,
+                "message_id": message_id,
+                "session_id": session_id,
+                "seq": seq,
+                "timestamp": timestamp_base + seq * 50
+            }
+            if seq == 1:
+                base["conversation_id"] = conversation_id
+            base.update(kwargs)
+            return base
+        
+        # 1. message.assistant.start
+        events.append(next_event("message.assistant.start"))
+        
+        # 2. intent
+        events.append(next_event(
+            "message.assistant.delta",
+            delta={"type": "intent", "content": json.dumps({
+                "intent_id": 1,
+                "intent_name": "系统搭建",
+                "platform": "ontology"
+            }, ensure_ascii=False)}
+        ))
+        
+        # 3. thinking（分段发送）
+        thinking_parts = [
+            "用户", "想要", "搭建一个", "待办事项", "管理系统，", "这是一个", "系统搭建", "任务。",
+            "\n\n我需要：", "\n1. 分析", "用户需求，", "确定功能", "模块",
+            "\n2. 设计", "系统架构", "和数据模型",
+            "\n3. 使用", "代码沙箱", "生成代码",
+            "\n4. 部署", "并测试", "应用"
+        ]
+        for part in thinking_parts:
+            events.append(next_event(
+                "message.assistant.delta",
+                delta={"type": "thinking", "content": part}
+            ))
+        
+        # 4. progress - 开始
+        events.append(next_event(
+            "message.assistant.delta",
+            delta={"type": "progress", "content": json.dumps({
+                "title": "搭建待办事项管理系统",
+                "status": "running",
+                "current": 0,
+                "total": 5,
+                "subtasks": [
+                    {"title": "需求分析", "status": "running", "desc": ""},
+                    {"title": "架构设计", "status": "pending", "desc": ""},
+                    {"title": "代码生成", "status": "pending", "desc": ""},
+                    {"title": "部署应用", "status": "pending", "desc": ""},
+                    {"title": "功能测试", "status": "pending", "desc": ""}
+                ]
+            }, ensure_ascii=False)}
+        ))
+        
+        # 5. progress - 需求分析完成
+        events.append(next_event(
+            "message.assistant.delta",
+            delta={"type": "progress", "content": json.dumps({
+                "title": "搭建待办事项管理系统",
+                "status": "running",
+                "current": 1,
+                "total": 5,
+                "subtasks": [
+                    {"title": "需求分析", "status": "success", "desc": "已确定4个核心功能"},
+                    {"title": "架构设计", "status": "running", "desc": ""},
+                    {"title": "代码生成", "status": "pending", "desc": ""},
+                    {"title": "部署应用", "status": "pending", "desc": ""},
+                    {"title": "功能测试", "status": "pending", "desc": ""}
+                ]
+            }, ensure_ascii=False)}
+        ))
+        
+        # 6. mind - 架构图
+        mind_content = {
+            "mermaid_content": """graph TD
+    A[待办事项系统] --> B[前端界面]
+    A --> C[后端逻辑]
+    A --> D[数据存储]
+    B --> B1[任务列表]
+    B --> B2[添加任务]
+    B --> B3[筛选排序]
+    C --> C1[CRUD操作]
+    C --> C2[状态管理]
+    D --> D1[SQLite数据库]""",
+            "chart_type": "flowchart"
+        }
+        events.append(next_event(
+            "message.assistant.delta",
+            delta={"type": "mind", "content": json.dumps(mind_content, ensure_ascii=False)}
+        ))
+        
+        # 7. progress - 架构设计完成
+        events.append(next_event(
+            "message.assistant.delta",
+            delta={"type": "progress", "content": json.dumps({
+                "title": "搭建待办事项管理系统",
+                "status": "running",
+                "current": 2,
+                "total": 5,
+                "subtasks": [
+                    {"title": "需求分析", "status": "success", "desc": "已确定4个核心功能"},
+                    {"title": "架构设计", "status": "success", "desc": "Streamlit + SQLite"},
+                    {"title": "代码生成", "status": "running", "desc": ""},
+                    {"title": "部署应用", "status": "pending", "desc": ""},
+                    {"title": "功能测试", "status": "pending", "desc": ""}
+                ]
+            }, ensure_ascii=False)}
+        ))
+        
+        # 8. response - 开始部分
+        response_parts_1 = [
+            "好的", "，我", "来帮您", "搭建一个", "待办事项", "管理系统。",
+            "\n\n", "## 📋", " 系统", "功能", "\n\n",
+            "- ✅", " 添加/", "编辑/", "删除", "任务",
+            "\n- 🔄", " 状态", "切换", "（待办/", "进行中/", "已完成）",
+            "\n- 🎯", " 优先级", "设置", "（高/中/低）",
+            "\n- 📅", " 截止日期", "管理",
+            "\n\n", "## 🛠️", " 技术", "栈", "\n\n",
+            "- **前端**", "：Streamlit",
+            "\n- **后端**", "：Python",
+            "\n- **数据库**", "：SQLite",
+            "\n\n", "正在", "为您", "生成", "代码..."
+        ]
+        for part in response_parts_1:
+            events.append(next_event(
+                "message.assistant.delta",
+                delta={"type": "response", "content": part}
+            ))
+        
+        # 9. progress - 代码生成完成
+        events.append(next_event(
+            "message.assistant.delta",
+            delta={"type": "progress", "content": json.dumps({
+                "title": "搭建待办事项管理系统",
+                "status": "running",
+                "current": 3,
+                "total": 5,
+                "subtasks": [
+                    {"title": "需求分析", "status": "success", "desc": "已确定4个核心功能"},
+                    {"title": "架构设计", "status": "success", "desc": "Streamlit + SQLite"},
+                    {"title": "代码生成", "status": "success", "desc": "生成3个文件"},
+                    {"title": "部署应用", "status": "running", "desc": ""},
+                    {"title": "功能测试", "status": "pending", "desc": ""}
+                ]
+            }, ensure_ascii=False)}
+        ))
+        
+        # 10. files
+        files_content = [
+            {"name": "app.py", "type": "python", "url": "https://cdn.example.com/sandbox/todo_app/app.py", "size": 8500},
+            {"name": "database.py", "type": "python", "url": "https://cdn.example.com/sandbox/todo_app/database.py", "size": 3200},
+            {"name": "requirements.txt", "type": "text", "url": "https://cdn.example.com/sandbox/todo_app/requirements.txt", "size": 120}
+        ]
+        events.append(next_event(
+            "message.assistant.delta",
+            delta={"type": "files", "content": json.dumps(files_content, ensure_ascii=False)}
+        ))
+        
+        # 11. application - pending
+        events.append(next_event(
+            "message.assistant.delta",
+            delta={"type": "application", "content": json.dumps({
+                "application_id": "app_todo_system_001",
+                "status": "pending",
+                "name": "待办事项管理系统"
+            }, ensure_ascii=False)}
+        ))
+        
+        # 12. application - building
+        for progress in [20, 50, 80]:
+            events.append(next_event(
+                "message.assistant.delta",
+                delta={"type": "application", "content": json.dumps({
+                    "application_id": "app_todo_system_001",
+                    "status": "building",
+                    "name": "待办事项管理系统",
+                    "build_progress": progress
+                }, ensure_ascii=False)}
+            ))
+        
+        # 13. application - success
+        events.append(next_event(
+            "message.assistant.delta",
+            delta={"type": "application", "content": json.dumps({
+                "application_id": "app_todo_system_001",
+                "status": "success",
+                "name": "待办事项管理系统",
+                "build_progress": 100,
+                "url": "https://app.example.com/todo_system_001"
+            }, ensure_ascii=False)}
+        ))
+        
+        # 14. progress - 部署完成
+        events.append(next_event(
+            "message.assistant.delta",
+            delta={"type": "progress", "content": json.dumps({
+                "title": "搭建待办事项管理系统",
+                "status": "running",
+                "current": 4,
+                "total": 5,
+                "subtasks": [
+                    {"title": "需求分析", "status": "success", "desc": "已确定4个核心功能"},
+                    {"title": "架构设计", "status": "success", "desc": "Streamlit + SQLite"},
+                    {"title": "代码生成", "status": "success", "desc": "生成3个文件"},
+                    {"title": "部署应用", "status": "success", "desc": "应用已上线"},
+                    {"title": "功能测试", "status": "running", "desc": ""}
+                ]
+            }, ensure_ascii=False)}
+        ))
+        
+        # 15. progress - 全部完成
+        events.append(next_event(
+            "message.assistant.delta",
+            delta={"type": "progress", "content": json.dumps({
+                "title": "搭建待办事项管理系统",
+                "status": "completed",
+                "current": 5,
+                "total": 5,
+                "subtasks": [
+                    {"title": "需求分析", "status": "success", "desc": "已确定4个核心功能"},
+                    {"title": "架构设计", "status": "success", "desc": "Streamlit + SQLite"},
+                    {"title": "代码生成", "status": "success", "desc": "生成3个文件"},
+                    {"title": "部署应用", "status": "success", "desc": "应用已上线"},
+                    {"title": "功能测试", "status": "success", "desc": "全部通过"}
+                ]
+            }, ensure_ascii=False)}
+        ))
+        
+        # 16. response - 完成部分
+        response_parts_2 = [
+            "\n\n", "## ✅", " 搭建", "完成", "\n\n",
+            "您的", "待办事项", "管理系统", "已经", "搭建", "完成", "并部署", "上线！",
+            "\n\n", "🔗 **访问", "地址**", "：", "https://app", ".example.com/", "todo_system_001",
+            "\n\n", "### 使用", "说明", "\n\n",
+            "1. 点击", "\"添加任务\"", "按钮", "创建", "新任务",
+            "\n2. 点击", "任务", "状态", "切换", "完成", "状态",
+            "\n3. 使用", "侧边栏", "筛选", "不同", "状态", "的任务",
+            "\n\n", "源代码", "已打包", "，您可以", "下载", "后进行", "二次", "开发。"
+        ]
+        for part in response_parts_2:
+            events.append(next_event(
+                "message.assistant.delta",
+                delta={"type": "response", "content": part}
+            ))
+        
+        # 17. recommended
+        recommended_content = ["添加用户登录功能", "增加任务分类标签", "添加提醒通知功能", "导出任务列表为Excel"]
+        events.append(next_event(
+            "message.assistant.delta",
+            delta={"type": "recommended", "content": json.dumps(recommended_content, ensure_ascii=False)}
+        ))
+        
+        # 18. message.assistant.done
+        final_content = """好的，我来帮您搭建一个待办事项管理系统。
+
+## 📋 系统功能
+
+- ✅ 添加/编辑/删除任务
+- 🔄 状态切换（待办/进行中/已完成）
+- 🎯 优先级设置（高/中/低）
+- 📅 截止日期管理
+
+## 🛠️ 技术栈
+
+- **前端**：Streamlit
+- **后端**：Python
+- **数据库**：SQLite
+
+## ✅ 搭建完成
+
+您的待办事项管理系统已经搭建完成并部署上线！
+
+🔗 **访问地址**：https://app.example.com/todo_system_001
+
+### 使用说明
+
+1. 点击"添加任务"按钮创建新任务
+2. 点击任务状态切换完成状态
+3. 使用侧边栏筛选不同状态的任务
+
+源代码已打包，您可以下载后进行二次开发。"""
+        events.append(next_event(
+            "message.assistant.done",
+            data={"content": final_content}
+        ))
+        
+        return events
 
 
 # ==================== 便捷函数 ====================
