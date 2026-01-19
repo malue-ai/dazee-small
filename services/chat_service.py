@@ -318,7 +318,6 @@ class ChatService:
         
         # ========== 5. 获取 Agent（从 AgentPool）==========
         # 注：使用 try-finally 确保资源获取失败时正确清理
-        workspace_dir = str(self.session_service.workspace_manager.get_workspace_root(conversation_id))
         pool_key = agent_id or self.DEFAULT_AGENT_KEY
         agent = None
         agent_acquired = False
@@ -328,7 +327,6 @@ class ChatService:
             agent = await self.agent_pool.acquire(
                 agent_id=pool_key,
                 event_manager=self.session_service.events,
-                workspace_dir=workspace_dir,
                 conversation_service=self.conversation_service
             )
             agent_acquired = True
@@ -699,16 +697,19 @@ class ChatService:
             if self.enable_routing:
                 router = self._get_router()
                 routing_decision = await router.route(
-                    message=message,
-                    history=history_messages
+                    user_query=message,
+                    conversation_history=history_messages
                 )
-                use_multi_agent = routing_decision.use_multi_agent
+                use_multi_agent = routing_decision.agent_type == "multi"
                 routing_intent = routing_decision.intent
                 
+                # 获取复杂度评分
+                complexity_score = routing_decision.complexity.score if routing_decision.complexity else 0.0
+                
                 logger.info(
-                    f"🔀 路由决策: complexity={routing_decision.complexity_score:.2f}, "
+                    f"🔀 路由决策: complexity={complexity_score:.2f}, "
                     f"use_multi_agent={use_multi_agent}, "
-                    f"intent={routing_intent.category if routing_intent else 'N/A'}"
+                    f"intent={routing_intent.task_type.value if routing_intent else 'N/A'}"
                 )
             
             # 根据路由决策选择执行路径
@@ -727,9 +728,6 @@ class ChatService:
                     enable_checkpoints=True,
                     enable_lead_agent=True,
                 )
-                
-                # 设置工作目录（与 SimpleAgent 一致）
-                orchestrator.workspace_dir = workspace_dir
                 
                 # 执行多智能体协作
                 async for event in orchestrator.execute(

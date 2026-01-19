@@ -27,15 +27,23 @@ PromptManager - 事件驱动的 Prompt 追加管理
     system_prompt = prompt_mgr.build_system_prompt(ctx, base_prompt="...")
 """
 
-import logging
-from typing import Dict, Any, List, Optional, Callable, TYPE_CHECKING
+# 1. 标准库
+import asyncio
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Dict, Any, List, Optional, Callable, TYPE_CHECKING
+
+# 2. 第三方库
+import aiofiles
+
+# 3. 本地模块
+from logger import get_logger
 
 if TYPE_CHECKING:
     from .runtime import RuntimeContext
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ===== 追加规则定义 =====
@@ -137,7 +145,7 @@ class PromptState:
             return True
         return False
     
-    def clear(self):
+    def clear(self) -> None:
         """清空所有追加"""
         self.appended_fragments.clear()
         logger.debug("🗑️ 清空所有 Prompt 追加")
@@ -154,7 +162,7 @@ class PromptManager:
     
     使用方式：
         ctx = RuntimeContext(session_id="sess_123")
-        prompt_mgr = PromptManager()
+        prompt_mgr = await PromptManager.get_instance_async()  # 异步获取单例
         
         # 会话开始
         prompt_mgr.on_session_start(ctx, conversation_id="conv_456")
@@ -171,33 +179,65 @@ class PromptManager:
     # RuntimeContext 中存储 PromptState 的属性名
     PROMPT_STATE_ATTR = "_prompt_state"
     
-    def __init__(self, fragments_dir: str = "prompts/fragments"):
+    def __init__(self, fragments_dir: str = "prompts/fragments") -> None:
         # 片段目录
         self._fragments_dir = Path(fragments_dir)
         
-        # 片段缓存（启动时加载）
+        # 片段缓存（初始化后异步加载）
         self._fragment_cache: Dict[str, str] = {}
+        self._initialized: bool = False
+    
+    async def initialize(self) -> None:
+        """
+        异步初始化：加载片段文件
         
-        # 加载片段
-        self._load_fragments()
+        使用方式：
+            prompt_mgr = PromptManager()
+            await prompt_mgr.initialize()
+        """
+        if self._initialized:
+            return
+        
+        await self._load_fragments_async()
+        self._initialized = True
+        logger.debug("[PromptManager] 初始化完成")
     
     @classmethod
     def get_instance(cls, fragments_dir: str = "prompts/fragments") -> "PromptManager":
-        """获取单例实例"""
+        """
+        获取单例实例（同步版本，需要额外调用 initialize()）
+        
+        注意：返回的实例需要调用 await initialize() 完成初始化
+        """
         if cls._instance is None:
             cls._instance = cls(fragments_dir)
         return cls._instance
     
-    def _load_fragments(self):
-        """加载所有片段文件到缓存"""
+    @classmethod
+    async def get_instance_async(cls, fragments_dir: str = "prompts/fragments") -> "PromptManager":
+        """
+        获取已初始化的单例实例（异步版本）
+        
+        推荐使用此方法获取实例
+        """
+        instance = cls.get_instance(fragments_dir)
+        await instance.initialize()
+        return instance
+    
+    async def _load_fragments_async(self) -> None:
+        """异步加载所有片段文件到缓存"""
         if not self._fragments_dir.exists():
             logger.warning(f"片段目录不存在: {self._fragments_dir}")
             return
         
-        for file_path in self._fragments_dir.glob("*.md"):
+        # 使用 asyncio.to_thread 包装同步的 glob 操作
+        file_paths = await asyncio.to_thread(list, self._fragments_dir.glob("*.md"))
+        
+        for file_path in file_paths:
             fragment_id = file_path.stem  # 文件名（不含扩展名）
             try:
-                self._fragment_cache[fragment_id] = file_path.read_text(encoding="utf-8")
+                async with aiofiles.open(file_path, 'r', encoding='utf-8') as f:
+                    self._fragment_cache[fragment_id] = await f.read()
                 logger.debug(f"📄 加载片段: {fragment_id}")
             except Exception as e:
                 logger.error(f"加载片段失败 {fragment_id}: {e}")
@@ -494,14 +534,14 @@ class PromptManager:
         """
         return list(self._fragment_cache.keys())
     
-    def reload_fragments(self):
+    async def reload_fragments(self) -> None:
         """
-        重新加载所有片段（热更新）
+        重新加载所有片段（异步热更新）
         
         适用于修改了 prompts/fragments/ 下的文件后，不重启服务即可生效
         """
         self._fragment_cache.clear()
-        self._load_fragments()
+        await self._load_fragments_async()
         logger.info(f"🔄 重新加载片段，共 {len(self._fragment_cache)} 个")
     
     # ===== 内部追加方法 =====
@@ -608,9 +648,7 @@ class PromptManager:
         Returns:
             渲染后的字符串
         """
-        import re
-        
-        def replace_var(match):
+        def replace_var(match) -> str:
             var_name = match.group(1).strip()
             value = variables.get(var_name)
             if value is not None:
@@ -798,7 +836,7 @@ class PromptManager:
         state = self._get_or_create_state(ctx)
         return state.has_fragment(fragment_id)
     
-    def clear_prompts(self, ctx: "RuntimeContext"):
+    def clear_prompts(self, ctx: "RuntimeContext") -> None:
         """
         清空当前上下文的所有追加
         
@@ -838,10 +876,24 @@ def create_prompt_manager(fragments_dir: str = "prompts/fragments") -> PromptMan
 
 def get_prompt_manager() -> PromptManager:
     """
-    获取 PromptManager 单例
+    获取 PromptManager 单例（同步版本）
+    
+    注意：返回的实例可能未初始化，需要调用 await initialize()
     
     Returns:
-        PromptManager 单例实例
+        PromptManager 单例实例（可能未初始化）
     """
     return PromptManager.get_instance()
+
+
+async def get_prompt_manager_async() -> PromptManager:
+    """
+    获取已初始化的 PromptManager 单例（异步版本）
+    
+    推荐使用此函数获取 PromptManager
+    
+    Returns:
+        已初始化的 PromptManager 单例实例
+    """
+    return await PromptManager.get_instance_async()
 

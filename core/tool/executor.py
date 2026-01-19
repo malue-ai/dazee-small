@@ -18,25 +18,32 @@ ToolExecutor - 工具执行器
 - 具体工具实现在 tools/ 目录下
 """
 
+# 1. 标准库
 import asyncio
 import inspect
-import logging
+import json
 from importlib import import_module
 from typing import Dict, Any, Optional, List, Callable, AsyncGenerator
-import json
 
-# 🆕 从 capability 子包导入
+# 2. 第三方库（无）
+
+# 3. 本地模块
 from core.tool.capability import (
     CapabilityRegistry,
     CapabilityType,
     Capability,
     create_capability_registry
 )
-
-# 🆕 结果精简器
 from core.tool.result_compactor import ResultCompactor, create_result_compactor
+from infra.sandbox import (
+    get_sandbox_provider,
+    SandboxNotAvailableError,
+    SandboxNotFoundError,
+    SandboxConnectionError,
+)
+from logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ToolExecutor:
@@ -45,11 +52,6 @@ class ToolExecutor:
     
     从 CapabilityRegistry 加载工具，动态执行
     """
-    
-    # 工具类映射（已废弃，仅向后兼容）
-    TOOL_CLASS_MAPPING = {
-        "slidespeak_render": ("tools.slidespeak", "SlideSpeakTool"),
-    }
     
     # Claude Server-side 工具（由 Anthropic 服务器处理，不需要本地执行）
     CLAUDE_SERVER_TOOLS = {
@@ -80,7 +82,7 @@ class ToolExecutor:
             tool_context: 工具上下文（用于依赖注入）
                 - memory: WorkingMemory 实例
                 - event_manager: EventManager 实例
-                - workspace_dir: 工作目录路径
+                - apis_config: 预配置的 API 列表
             enable_compaction: 是否启用结果精简（默认 True）
         """
         self.registry = registry or create_capability_registry()
@@ -101,7 +103,7 @@ class ToolExecutor:
         """
         🆕 V7.1: 更新工具上下文
         
-        用于 Agent 克隆时更新 workspace_dir、event_manager 等
+        用于 Agent 克隆时更新 event_manager 等会话级依赖
         
         Args:
             context_updates: 要更新的上下文字段
@@ -127,13 +129,11 @@ class ToolExecutor:
         """
         动态加载自定义工具（支持依赖注入）
         
-        优先级：
-        1. capabilities.yaml 中的 implementation 配置（推荐）
-        2. TOOL_CLASS_MAPPING 硬编码映射（向后兼容）
+        从 capabilities.yaml 的 implementation 配置加载工具类
         """
         tool_name = cap.name
         
-        # 方法1：从 capabilities.yaml 的 implementation 配置加载
+        # 从 capabilities.yaml 的 implementation 配置加载
         implementation = cap.metadata.get("implementation")
         if implementation:
             try:
@@ -168,20 +168,8 @@ class ToolExecutor:
             except Exception as e:
                 logger.error(f"❌ 加载工具 {tool_name} 失败: {e}")
         
-        # 方法2：从 TOOL_CLASS_MAPPING 加载（向后兼容）
-        if tool_name in self.TOOL_CLASS_MAPPING:
-            module_path, class_name = self.TOOL_CLASS_MAPPING[tool_name]
-            try:
-                module = import_module(module_path)
-                tool_class = getattr(module, class_name)
-                self._tool_instances[tool_name] = tool_class()
-                logger.info(f"✅ 加载工具 (legacy): {tool_name}")
-                return
-            except Exception as e:
-                logger.error(f"❌ 加载工具 {tool_name} 失败: {e}")
-        
-        # 未找到加载方式
-        logger.warning(f"⚠️ 工具 {tool_name} 无法加载，跳过")
+        # 未找到 implementation 配置
+        logger.warning(f"⚠️ 工具 {tool_name} 无 implementation 配置，跳过")
         self._tool_instances[tool_name] = None
     
     def _get_init_params(self, tool_class) -> List[str]:
@@ -199,7 +187,6 @@ class ToolExecutor:
         注入的依赖：
         - memory: WorkingMemory 实例
         - event_manager: EventManager 实例
-        - workspace_dir: 工作目录路径
         - apis_config: 预配置的 API 列表（用于 api_calling）
         """
         kwargs = {}
@@ -207,7 +194,6 @@ class ToolExecutor:
         param_mapping = {
             "memory": "memory",
             "event_manager": "event_manager",
-            "workspace_dir": "workspace_dir",
             "apis_config": "apis_config",  # 🆕 用于 api_calling 自动注入认证
         }
         
@@ -443,13 +429,6 @@ class ToolExecutor:
             return {"success": False, "error": "缺少 conversation_id，无法确定沙盒"}
         
         # 使用统一的沙盒抽象层
-        from infra.sandbox import (
-            get_sandbox_provider,
-            SandboxNotAvailableError,
-            SandboxNotFoundError,
-            SandboxConnectionError,
-        )
-        
         try:
             sandbox = get_sandbox_provider()
             

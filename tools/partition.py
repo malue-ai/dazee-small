@@ -8,20 +8,22 @@ Partition API文档解析工具
 - 提供文档内容的结构化输出，便于大模型处理
 """
 
-import logging
+from logger import get_logger
 import os
+import io
 import tempfile
 import time
 import hashlib
 import json
-from typing import Dict, Any, Optional, List, Union
+from typing import Dict, Any, Optional, List, Union, Tuple
 from pathlib import Path
 import aiohttp
+import aiofiles
 import asyncio
 from dataclasses import dataclass, asdict
 from tools.base import BaseTool
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -69,7 +71,6 @@ class DocumentPartitionTool(BaseTool):
         - config: PartitionConfig配置对象
         - event_manager: 事件管理器（可选）
         - memory: WorkingMemory实例（可选）
-        - workspace_dir: 工作目录（可选）
         """
         super().__init__()
         
@@ -82,11 +83,14 @@ class DocumentPartitionTool(BaseTool):
             if not api_key:
                 logger.warning("未配置 UNSTRUCTURED_API_KEY，工具将无法使用")
             
+            # 缓存目录使用系统临时目录
+            default_cache_dir = os.path.join(tempfile.gettempdir(), "zenflux_partition_cache")
+            
             self.config = PartitionConfig(
                 api_key=api_key,
                 api_url=os.getenv("UNSTRUCTURED_API_URL", "https://api.unstructuredapp.io/general/v0/general"),
                 cache_enabled=os.getenv("PARTITION_CACHE_ENABLED", "false").lower() == "true",
-                cache_dir=os.getenv("PARTITION_CACHE_DIR", "./cache/partition")
+                cache_dir=os.getenv("PARTITION_CACHE_DIR", default_cache_dir)
             )
         
         # 🆕 标记工具是否可用
@@ -94,9 +98,8 @@ class DocumentPartitionTool(BaseTool):
         
         self.event_manager = kwargs.get("event_manager")
         self.memory = kwargs.get("memory")
-        self.workspace_dir = kwargs.get("workspace_dir")
         
-        # 初始化缓存目录
+        # 初始化缓存目录（使用系统临时目录）
         if self.config.cache_enabled:
             Path(self.config.cache_dir).mkdir(parents=True, exist_ok=True)
         
@@ -495,7 +498,7 @@ class DocumentPartitionTool(BaseTool):
             if use_cache and self.config.cache_enabled:
                 cache_params = f"{source}_{mode}_{pages or 'none'}_{strategy}"
                 cache_key = hashlib.md5(cache_params.encode()).hexdigest()
-                cached_result = self._load_from_cache(cache_key)
+                cached_result = await self._load_from_cache(cache_key)
                 if cached_result:
                     logger.info(f"💾 使用缓存结果: {cache_key}")
                     if "metadata" not in cached_result:
@@ -634,7 +637,7 @@ class DocumentPartitionTool(BaseTool):
                 
                 # 11. 保存到缓存
                 if cache_key and self.config.cache_enabled and result.get("success"):
-                    self._save_to_cache(cache_key, result)
+                    await self._save_to_cache(cache_key, result)
                 
                 # 12. 发送事件
                 if self.event_manager and result.get("success"):
@@ -768,9 +771,9 @@ class DocumentPartitionTool(BaseTool):
                         chunk_size = min(self.CHUNK_SIZE, 10 * 1024 * 1024)  # 最大 10MB 每块
                         downloaded = 0
                         
-                        with open(temp_path, 'wb') as f:
+                        async with aiofiles.open(temp_path, 'wb') as f:
                             async for chunk in response.content.iter_chunked(chunk_size):
-                                f.write(chunk)
+                                await f.write(chunk)
                                 downloaded += len(chunk)
                                 
                                 # 🆕 每下载 10MB 记录一次进度
@@ -810,34 +813,21 @@ class DocumentPartitionTool(BaseTool):
             file_path: 文件路径
             strategy: 解析策略
             user_id: 用户ID
-            pages: 页码范围（可选），如 "1-5"
+        pages: 页码范围（可选），如 "1-5"
         """
         # 🆕 如果指定了页码范围且是 PDF，先提取指定页码生成临时文件
         temp_extracted_file = None
         if pages and file_path.lower().endswith('.pdf'):
             try:
-                import PyPDF2
-                from PyPDF2 import PdfWriter
+                logger.debug(f"   🔧 提取 PDF 页码（异步线程）: {pages}")
                 
-                logger.debug(f"   🔧 提取 PDF 页码: {pages}")
+                temp_extracted_file = await self._extract_pdf_pages(
+                    file_path=file_path,
+                    pages=pages
+                )
                 
-                # 解析页码范围
                 start_page = int(pages.split('-')[0])
                 end_page = int(pages.split('-')[1]) if '-' in pages else start_page
-                
-                # 读取原始 PDF
-                reader = PyPDF2.PdfReader(file_path)
-                writer = PdfWriter()
-                
-                # 提取指定页码（PyPDF2 索引从 0 开始）
-                for page_num in range(start_page - 1, end_page):
-                    writer.add_page(reader.pages[page_num])
-                
-                # 生成临时文件
-                temp_extracted_file = file_path.replace('.pdf', f'_pages_{pages.replace("-", "_")}.pdf')
-                with open(temp_extracted_file, 'wb') as output_file:
-                    writer.write(output_file)
-                
                 extracted_size = os.path.getsize(temp_extracted_file) / (1024 * 1024)
                 logger.info(
                     f"   ✂️  已提取第 {start_page}-{end_page} 页 "
@@ -888,10 +878,11 @@ class DocumentPartitionTool(BaseTool):
                                 form_data.add_field('ending_page_number', pages.split('-')[1])
                             logger.debug(f"   ⚠️ 使用 API 参数方式指定页码（提取失败）: {pages}")
                         
-                        with open(file_path, 'rb') as f:
+                        async with aiofiles.open(file_path, 'rb') as f:
+                            file_content = await f.read()
                             form_data.add_field(
                                 'files',
-                                f.read(),
+                                file_content,
                                 filename=file_name,
                                 content_type=self._get_mime_type(file_path)
                             )
@@ -1031,16 +1022,17 @@ class DocumentPartitionTool(BaseTool):
         content = f"{source}_{strategy}_{self.config.api_key[:8]}"
         return hashlib.md5(content.encode()).hexdigest()
     
-    def _load_from_cache(self, cache_key: str) -> Optional[Dict]:
-        """从缓存加载"""
+    async def _load_from_cache(self, cache_key: str) -> Optional[Dict]:
+        """从缓存加载（异步）"""
         if not self.config.cache_enabled:
             return None
         
         cache_file = Path(self.config.cache_dir) / f"{cache_key}.json"
         if cache_file.exists():
             try:
-                with open(cache_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
+                async with aiofiles.open(cache_file, 'r', encoding='utf-8') as f:
+                    content = await f.read()
+                    data = json.loads(content)
                     # 检查缓存是否过期（默认24小时）
                     cache_age = time.time() - data.get("metadata", {}).get("timestamp", 0)
                     if cache_age < 24 * 3600:
@@ -1051,15 +1043,16 @@ class DocumentPartitionTool(BaseTool):
         
         return None
     
-    def _save_to_cache(self, cache_key: str, data: Dict):
-        """保存到缓存"""
+    async def _save_to_cache(self, cache_key: str, data: Dict):
+        """保存到缓存（异步）"""
         if not self.config.cache_enabled:
             return
         
         cache_file = Path(self.config.cache_dir) / f"{cache_key}.json"
         try:
-            with open(cache_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            cache_file.parent.mkdir(parents=True, exist_ok=True)
+            async with aiofiles.open(cache_file, 'w', encoding='utf-8') as f:
+                await f.write(json.dumps(data, ensure_ascii=False, indent=2))
         except Exception as e:
             logger.warning(f"保存缓存失败: {e}")
     
@@ -1084,12 +1077,126 @@ class DocumentPartitionTool(BaseTool):
         }
         
         try:
-            await self.event_manager.emit(
-                event_type="tool.document_parsed",
-                data=event_data
-            )
+                await self.event_manager.emit(
+                    event_type="tool.document_parsed",
+                    data=event_data
+                )
         except Exception as e:
             logger.warning(f"发送事件失败: {e}")
+
+    async def _extract_pdf_pages(
+        self,
+        file_path: str,
+        pages: str
+    ) -> str:
+        """异步提取 PDF 指定页码，避免阻塞事件循环"""
+        # 先解析页码范围（可能在等待 to_thread 之前就抛异常）
+        start_page = int(pages.split('-')[0])
+        end_page = int(pages.split('-')[1]) if '-' in pages else start_page
+        page_label = pages.replace("-", "_")
+
+        def _extract() -> bytes:
+            import PyPDF2
+            from PyPDF2 import PdfWriter
+
+            reader = PyPDF2.PdfReader(file_path)
+            writer = PdfWriter()
+            for page_num in range(start_page - 1, end_page):
+                writer.add_page(reader.pages[page_num])
+
+            buffer = io.BytesIO()
+            writer.write(buffer)
+            return buffer.getvalue()
+
+        pdf_bytes = await asyncio.to_thread(_extract)
+        temp_extracted_file = file_path.replace('.pdf', f'_pages_{page_label}.pdf')
+        async with aiofiles.open(temp_extracted_file, 'wb') as output_file:
+            await output_file.write(pdf_bytes)
+
+        return temp_extracted_file
+
+    async def _load_pdf_metadata(self, file_path: str) -> Tuple[Optional[int], Dict[str, Any]]:
+        """在线程中读取 PDF 信息，避免阻塞"""
+        def _load():
+            import PyPDF2
+
+            with open(file_path, "rb") as f:
+                reader = PyPDF2.PdfReader(f)
+                meta = reader.metadata or {}
+                return (
+                    len(reader.pages),
+                    {
+                        "title": meta.get("/Title", ""),
+                        "author": meta.get("/Author", ""),
+                        "subject": meta.get("/Subject", "")
+                    }
+                )
+
+        return await asyncio.to_thread(_load)
+
+    async def _load_docx_metadata(self, file_path: str) -> Tuple[Optional[int], Dict[str, Any], int]:
+        """在线程中读取 Word 信息，避免阻塞"""
+        def _load():
+            from docx import Document
+
+            doc = Document(file_path)
+            paragraph_count = len([p for p in doc.paragraphs if p.text.strip()])
+            total_pages = max(1, paragraph_count // 8)
+            core_props = doc.core_properties
+            metadata = {
+                "title": core_props.title or "",
+                "author": core_props.author or "",
+                "subject": core_props.subject or ""
+            } if core_props else {}
+            return total_pages, metadata, paragraph_count
+
+        return await asyncio.to_thread(_load)
+
+    async def _load_excel_metadata(self, file_path: str) -> Tuple[Optional[int], Dict[str, Any]]:
+        """在线程中读取 Excel 信息，避免阻塞"""
+        def _load():
+            import openpyxl
+
+            wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
+            sheets = wb.sheetnames
+            return len(sheets), {
+                "sheets": sheets,
+                "sheet_count": len(sheets)
+            }
+
+        return await asyncio.to_thread(_load)
+
+    async def _load_ppt_metadata(self, file_path: str) -> Tuple[Optional[int], Dict[str, Any]]:
+        """在线程中读取 PPT 信息，避免阻塞"""
+        def _load():
+            from pptx import Presentation
+
+            prs = Presentation(file_path)
+            slide_count = len(prs.slides)
+            return slide_count, {
+                "slide_count": slide_count,
+                "note": "PPT 的'页'是幻灯片数量"
+            }
+
+        return await asyncio.to_thread(_load)
+
+    async def _load_odt_metadata(self, file_path: str) -> Tuple[Optional[int], Dict[str, Any], int]:
+        """在线程中读取 ODT 信息，避免阻塞"""
+        def _load():
+            from odf import text
+            from odf.opendocument import load
+
+            doc = load(file_path)
+            paragraphs = doc.getElementsByType(text.P)
+            paragraph_count = len(paragraphs)
+            total_pages = max(1, paragraph_count // 8)
+            metadata = {
+                "paragraph_count": paragraph_count,
+                "note": "基于段落数估算（8段/页）"
+            }
+            return total_pages, metadata, paragraph_count
+
+        return await asyncio.to_thread(_load)
     
     # ============================================================
     # 🆕 分段解析策略相关方法
@@ -1119,47 +1226,18 @@ class DocumentPartitionTool(BaseTool):
             # PDF 文件 - 使用 PyPDF2
             if file_type == '.pdf':
                 try:
-                    import PyPDF2
-                    
-                    with open(temp_file, 'rb') as f:
-                        reader = PyPDF2.PdfReader(f)
-                        total_pages = len(reader.pages)
-                        
-                        # 尝试读取元数据
-                        if reader.metadata:
-                            metadata = {
-                                "title": reader.metadata.get("/Title", ""),
-                                "author": reader.metadata.get("/Author", ""),
-                                "subject": reader.metadata.get("/Subject", "")
-                            }
-                    
+                    total_pages, metadata = await self._load_pdf_metadata(temp_file)
                     logger.info(f"📄 PDF 文档: 共 {total_pages} 页")
                 
                 except ImportError:
                     logger.warning("PyPDF2 未安装，无法获取 PDF 页数")
+                except Exception as e:
+                    logger.warning(f"读取 PDF 文档失败: {e}")
             
             # Word 文档 - 使用 python-docx
             elif file_type in ['.docx', '.doc']:
                 try:
-                    from docx import Document
-                    
-                    doc = Document(temp_file)
-                    # Word 没有"页"的概念，粗略估算：
-                    # - 每段约 3-5 行
-                    # - A4 纸约 40 行
-                    # - 估算公式：max(1, 段落数 / 8)
-                    paragraph_count = len([p for p in doc.paragraphs if p.text.strip()])
-                    total_pages = max(1, paragraph_count // 8)
-                    
-                    # 读取文档属性
-                    core_props = doc.core_properties
-                    if core_props:
-                        metadata = {
-                            "title": core_props.title or "",
-                            "author": core_props.author or "",
-                            "subject": core_props.subject or ""
-                        }
-                    
+                    total_pages, metadata, paragraph_count = await self._load_docx_metadata(temp_file)
                     logger.info(f"📄 Word 文档: 估算 {total_pages} 页（{paragraph_count} 个段落）")
                 
                 except ImportError:
@@ -1170,16 +1248,7 @@ class DocumentPartitionTool(BaseTool):
             # Excel 文件 - 使用 openpyxl
             elif file_type in ['.xlsx', '.xls']:
                 try:
-                    import openpyxl
-                    
-                    wb = openpyxl.load_workbook(temp_file, read_only=True, data_only=True)
-                    total_pages = len(wb.sheetnames)  # Excel 的"页"是工作表数量
-                    
-                    metadata = {
-                        "sheets": wb.sheetnames,
-                        "sheet_count": len(wb.sheetnames)
-                    }
-                    
+                    total_pages, metadata = await self._load_excel_metadata(temp_file)
                     logger.info(f"📊 Excel 文档: {total_pages} 个工作表")
                 
                 except ImportError:
@@ -1190,8 +1259,9 @@ class DocumentPartitionTool(BaseTool):
             # CSV 文件 - 视为单页
             elif file_type == '.csv':
                 try:
-                    with open(temp_file, 'r', encoding='utf-8', errors='ignore') as f:
-                        row_count = sum(1 for _ in f)
+                    async with aiofiles.open(temp_file, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = await f.read()
+                        row_count = content.count('\n') + (1 if content and not content.endswith('\n') else 0)
                     
                     total_pages = 1  # CSV 通常视为单页
                     metadata = {
@@ -1207,16 +1277,7 @@ class DocumentPartitionTool(BaseTool):
             # PowerPoint 文件 - 使用 python-pptx
             elif file_type in ['.pptx', '.ppt']:
                 try:
-                    from pptx import Presentation
-                    
-                    prs = Presentation(temp_file)
-                    total_pages = len(prs.slides)  # 幻灯片数量
-                    
-                    metadata = {
-                        "slide_count": total_pages,
-                        "note": "PPT 的'页'是幻灯片数量"
-                    }
-                    
+                    total_pages, metadata = await self._load_ppt_metadata(temp_file)
                     logger.info(f"📊 PowerPoint 文档: {total_pages} 张幻灯片")
                 
                 except ImportError:
@@ -1227,8 +1288,9 @@ class DocumentPartitionTool(BaseTool):
             # TXT 文件 - 估算页数（按行数）
             elif file_type == '.txt':
                 try:
-                    with open(temp_file, 'r', encoding='utf-8', errors='ignore') as f:
-                        line_count = sum(1 for _ in f)
+                    async with aiofiles.open(temp_file, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = await f.read()
+                        line_count = content.count('\n') + (1 if content and not content.endswith('\n') else 0)
                     
                     # 估算：A4 纸约 40 行/页
                     total_pages = max(1, line_count // 40)
@@ -1258,22 +1320,7 @@ class DocumentPartitionTool(BaseTool):
             # ODT 文件 - 使用 odfpy
             elif file_type == '.odt':
                 try:
-                    from odf import text, teletype
-                    from odf.opendocument import load
-                    
-                    doc = load(temp_file)
-                    # 统计段落数
-                    paragraphs = doc.getElementsByType(text.P)
-                    paragraph_count = len(paragraphs)
-                    
-                    # 估算：每 8 个段落约 1 页
-                    total_pages = max(1, paragraph_count // 8)
-                    
-                    metadata = {
-                        "paragraph_count": paragraph_count,
-                        "note": "基于段落数估算（8段/页）"
-                    }
-                    
+                    total_pages, metadata, paragraph_count = await self._load_odt_metadata(temp_file)
                     logger.info(f"📄 ODT 文档: 估算 {total_pages} 页（{paragraph_count} 个段落）")
                 
                 except ImportError:
@@ -1968,7 +2015,6 @@ def create_document_partition_tool(**kwargs) -> DocumentPartitionTool:
             - config: PartitionConfig 配置对象
             - event_manager: 事件管理器
             - memory: WorkingMemory 实例
-            - workspace_dir: 工作目录
     
     Returns:
         DocumentPartitionTool 实例

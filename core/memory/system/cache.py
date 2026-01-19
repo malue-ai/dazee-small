@@ -109,7 +109,7 @@ class CacheMemory(BaseMemory):
         
         return entry.get("value", default)
     
-    def delete(self, key: str):
+    def delete(self, key: str) -> None:
         """删除缓存"""
         if key in self._cache:
             del self._cache[key]
@@ -118,11 +118,11 @@ class CacheMemory(BaseMemory):
         """检查缓存是否存在且未过期"""
         return self.get(key) is not None
     
-    def clear(self):
+    def clear(self) -> None:
         """清空所有缓存"""
         self._cache.clear()
     
-    def cleanup_expired(self):
+    def cleanup_expired(self) -> None:
         """清理过期缓存"""
         now = datetime.now().isoformat()
         expired_keys = [

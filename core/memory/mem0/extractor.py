@@ -5,11 +5,16 @@ Dazee 碎片记忆提取器
 使用 llm_config 配置系统管理模型参数，无需硬编码
 """
 
+# 1. 标准库
 import json
 import uuid
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 
+# 2. 第三方库（无）
+
+# 3. 本地模块
+from core.llm import Message
 from logger import get_logger
 from .schemas import (
     FragmentMemory,
@@ -122,7 +127,7 @@ class FragmentExtractor:
         return self._profile
     
     @property
-    def llm_service(self):
+    def llm_service(self) -> Any:
         """懒加载 LLM 服务"""
         if self._llm_service is None:
             from core.llm import create_llm_service
@@ -244,8 +249,6 @@ class FragmentExtractor:
         
         使用 llm_config 配置的模型，通过 core.llm 服务统一调用
         """
-        from core.llm import Message
-        
         messages = [Message(role="user", content=prompt)]
         
         # 使用统一的 LLM 服务接口

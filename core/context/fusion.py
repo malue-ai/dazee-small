@@ -8,11 +8,11 @@
 4. 控制总数量（Token 预算）
 """
 from typing import List, Dict, Any
-import logging
 
 from core.context.provider import ContextType
+from logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class FusionEngine:
@@ -24,7 +24,7 @@ class FusionEngine:
     - round_robin: 轮询策略
     """
     
-    def __init__(self, max_contexts: int = 10):
+    def __init__(self, max_contexts: int = 10) -> None:
         """
         Args:
             max_contexts: 最多返回的上下文数量
@@ -198,7 +198,7 @@ class FusionEngine:
         
         return result
     
-    def set_weights(self, weights: Dict[ContextType, float]):
+    def set_weights(self, weights: Dict[ContextType, float]) -> None:
         """
         设置数据源权重
         

@@ -13,9 +13,9 @@ Usage Tracker - Token 使用统计跟踪器
 """
 
 from typing import Dict, Any, Optional
-import logging
+from logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class UsageTracker:
@@ -38,7 +38,7 @@ class UsageTracker:
         tracker.reset()
     """
     
-    def __init__(self):
+    def __init__(self) -> None:
         """初始化 UsageTracker"""
         self._stats = self._create_empty_stats()
     

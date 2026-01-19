@@ -10,12 +10,12 @@ Enhanced Usage Tracker
 4. 基于 Message ID 去重（遵循 Claude SDK 最佳实践）
 """
 
-import logging
+from logger import get_logger
 from typing import List, Optional, Set
 from core.billing.models import LLMCallRecord
 from core.billing.pricing import get_pricing_for_model, calculate_cost
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class EnhancedUsageTracker:

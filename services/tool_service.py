@@ -144,7 +144,7 @@ class MCPClient:
     负责与 MCP 服务器通信
     """
     
-    def __init__(self, config: MCPConfig):
+    def __init__(self, config: MCPConfig) -> None:
         """
         初始化 MCP 客户端
         
@@ -490,7 +490,7 @@ class ToolService:
     提供工具注册、管理、执行等业务逻辑
     """
     
-    def __init__(self):
+    def __init__(self) -> None:
         """初始化工具服务"""
         # 工具定义存储
         self._tools: Dict[str, ToolDefinition] = {}

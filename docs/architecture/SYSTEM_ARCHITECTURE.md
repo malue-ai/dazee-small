@@ -1,17 +1,19 @@
 # Zenflux Agent 系统架构
 
-> 版本: 3.8.0  
-> 更新时间: 2026-01-16
+> 版本: 7.0.0  
+> 更新时间: 2026-01-18
 
 ## 一、系统整体架构
+
+### 1.1 V7 架构总览
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                              客户端 (Client)                                 │
 │                     Web App / Mobile App / API Consumer                      │
-└───────────────────────────────┬─────────────────────────────────────────────┘
-                                │
-                                ▼
+└───────────────────────────────────┬─────────────────────────────────────────┘
+                                    │
+                                    ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                              入口层 (Entry Layer)                            │
 ├─────────────────────────────────┬───────────────────────────────────────────┤
@@ -19,8 +21,8 @@
 │    (FastAPI - routers/*.py)     │    (grpc_server/*_servicer.py)            │
 │         Port: 8000              │           Port: 50051                      │
 └─────────────────────────────────┴───────────────────────────────────────────┘
-                                │
-                                ▼
+                                    │
+                                    ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                              服务层 (Service Layer)                          │
 ├─────────────────────────────────────────────────────────────────────────────┤
@@ -28,19 +30,40 @@
 ├─────────────────────────────────────────────────────────────────────────────┤
 │           Mem0Service  │  KnowledgeService  │  TaskService                  │
 └─────────────────────────────────────────────────────────────────────────────┘
-                               │
-                               ▼
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        🆕 V7 路由层 (Routing Layer)                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│   AgentRouter (路由决策)  │  IntentAnalyzer (意图分析)  │  ComplexityScorer   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                         路由决策: complexity_score                           │
+│              ┌─────────────────┴─────────────────┐                          │
+│              ▼                                   ▼                          │
+│      < 0.6 (简单)                        >= 0.6 (复杂)                       │
+│      SimpleAgent                    MultiAgentOrchestrator                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                              核心层 (Core Layer)                             │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │    SimpleAgent    │    ClaudeService    │    ToolExecutor    │  EventManager │
-│   (编排引擎)       │    (LLM 调用)        │    (工具执行)       │   (事件分发)   │
+│   (单智能体引擎)    │    (LLM 调用)        │    (工具执行)       │   (事件分发)   │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│  IntentAnalyzer  │  ToolSelector  │  PlanManager  │  ContextEngineering      │
-│   (意图分析)       │   (工具选择)     │   (计划管理)   │    (上下文工程)          │
+│ 🆕 MultiAgent    │  ToolSelector  │  PlanManager  │  ContextEngineering      │
+│   Orchestrator   │   (工具选择)     │   (计划管理)   │    (上下文工程)          │
+│  (多智能体编排)    │                │              │                         │
 └─────────────────────────────────────────────────────────────────────────────┘
-                               │
-                               ▼
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        🆕 V7 监控层 (Monitoring Layer)                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  TokenAuditor (审计) │ UsageTracker (用量) │ UsageResponse (计费) │ Billing  │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                           基础设施层 (Infrastructure)                        │
 ├─────────────────────────────────────────────────────────────────────────────┤
@@ -51,6 +74,38 @@
 │   (事件/缓存)      │   (SQLite/PG)    │   (外部工具)      │    (代码执行)       │
 └──────────────────┴──────────────────┴──────────────────┴────────────────────┘
 ```
+
+### 1.2 V7 路由决策流程
+
+```
+用户请求
+    │
+    ▼
+┌──────────────────────────────────────┐
+│         AgentRouter (路由层)          │
+│  1. IntentAnalyzer: 分析用户意图       │
+│  2. ComplexityScorer: 评估任务复杂度   │
+└──────────────────────────────────────┘
+    │
+    ├─── complexity < 0.6 ───► SimpleAgent (单智能体)
+    │                          快速响应，适合简单任务
+    │
+    └─── complexity >= 0.6 ──► MultiAgentOrchestrator (多智能体)
+                               复杂任务分解，多角色协作
+                               │
+                               ├── Lead Agent (Opus) - 任务分解、结果综合
+                               ├── Worker Agents (Sonnet) - 执行具体任务
+                               └── Critic Agent (Sonnet) - 质量评审
+```
+
+### 1.3 V7 多智能体配置
+
+| 配置模式 | Orchestrator | Worker | Critic | 适用场景 |
+|---------|-------------|--------|--------|---------|
+| `default` | Opus 4.5 | Sonnet 4.5 | Sonnet | 平衡质量和成本 |
+| `cost_optimized` | Sonnet | Haiku | 关闭 | 控制成本 |
+| `high_quality` | Opus | Opus | Opus | 追求最高质量 |
+| `prototype` | Sonnet | Sonnet | 关闭 | 快速原型 |
 
 ## 二、资源池架构详解
 
@@ -72,17 +127,17 @@
 │  └── 维护 zf:sessions:active (Set) 可靠追踪                                  │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                   │                                          │
-│            ┌──────────────────────┴──────────────────────┐                   │
-│            ▼                                             ▼                   │
-│   ┌─────────────────────┐                    ┌─────────────────────┐         │
-│   │      UserPool       │                    │      AgentPool      │         │
-│   │  ├── add_session    │                    │  ├── preload_all    │         │
-│   │  ├── remove_session │                    │  ├── acquire        │         │
-│   │  ├── get_stats      │                    │  │   ├─ 快路径: clone│         │
-│   │  └── 限流预留接口    │                    │  │   └─ 慢路径: 创建 │         │
-│   │                     │                    │  ├── release        │         │
-│   │                     │                    │  └── get_stats      │         │
-│   └─────────────────────┘                    └─────────────────────┘         │
+│    ┌──────────────────────────────┼──────────────────────────────┐           │
+│    ▼                              ▼                              ▼           │
+│ ┌─────────────────┐    ┌─────────────────────┐    ┌─────────────────────┐   │
+│ │    UserPool     │    │      AgentPool      │    │  🆕 MCPPool         │   │
+│ │ ├─ add_session  │    │  ├── preload_all    │    │  ├── preconnect_all │   │
+│ │ ├─ remove_sess  │    │  ├── acquire        │    │  ├── get_client     │   │
+│ │ ├─ get_stats    │    │  │   ├─ 快路径:clone │    │  ├── health_check   │   │
+│ │ └─ 限流预留     │    │  │   └─ 慢路径:创建  │    │  ├── auto_reconnect │   │
+│ │                 │    │  ├── release        │    │  └── get_stats      │   │
+│ │                 │    │  └── get_stats      │    │                     │   │
+│ └─────────────────┘    └─────────────────────┘    └─────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
@@ -94,16 +149,68 @@
 │  zf:user:{user_id}:stats      → Hash: 用户统计                              │
 │  zf:agent:{agent_id}:instances→ String: 当前活跃实例数（原子计数）            │
 │  zf:agent:{agent_id}:stats    → Hash: Agent 调用统计                        │
+│  🆕 zf:mcp:{server}:stats     → Hash: MCP 调用统计                          │
+│  🆕 zf:mcp:{server}:health    → String: 最后健康检查时间                     │
+│  🆕 zf:mcp:active             → Set: 活跃的 MCP 服务器                       │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 资源池职责
+### 2.1 MCPPool 架构
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                            MCPPool (连接池)                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  职责：                                                                      │
+│  - 应用启动时预连接所有 MCP 服务器                                            │
+│  - 提供统一的客户端获取接口（带并发控制）                                      │
+│  - 健康检查和自动重连                                                        │
+│  - 统计监控                                                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                     MCPServerState (每个服务器)                       │    │
+│  │  ├── config: MCPConfig        # 配置（URL、认证、超时等）             │    │
+│  │  ├── client: MCPClientWrapper # 客户端实例                           │    │
+│  │  ├── connected: bool          # 连接状态                             │    │
+│  │  ├── tools_count: int         # 工具数量                             │    │
+│  │  └── reconnect_attempts: int  # 重连尝试次数                          │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                                                             │
+│  主要方法：                                                                  │
+│  ├── preconnect_all()      → 并行预连接所有 MCP 服务器                       │
+│  ├── get_client(url)       → 获取/复用 MCP 客户端（带并发信号量）            │
+│  ├── start_health_check()  → 启动后台健康检查任务                            │
+│  ├── stop_health_check()   → 停止健康检查                                   │
+│  └── cleanup()             → 清理所有连接                                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 2.2 MCPPool 启动流程
+
+```
+应用启动 (main.py lifespan)
+    │
+    ├── 1. MCPPool.preconnect_all()    ← 在 AgentPool 之前
+    │       ├── 从 AgentRegistry 收集 MCP 配置
+    │       ├── 并行连接所有 MCP 服务器
+    │       └── 建立连接，缓存客户端实例
+    │
+    ├── 2. AgentPool.preload_all()     ← 使用 MCPPool 中的连接
+    │       └── 创建 Agent 原型时，MCP 工具使用已建立的连接
+    │
+    └── 3. MCPPool.start_health_check()
+            └── 启动后台健康检查任务（30s 间隔）
+```
+
+### 2.3 资源池职责
 
 | 组件 | 职责 | 存储 |
 |---|------|------|
 | **UserPool** | 用户活跃 Session 追踪、统计、限流预留 | Redis |
 | **AgentPool** | Agent 原型缓存、实例获取/释放（含 fallback）、使用统计 | 本地内存 + Redis |
 | **SessionPool** | 追踪层：追踪活跃 Session 集合、提供统计视图、Session 校准 | Redis |
+| **🆕 MCPPool** | MCP 客户端连接复用、健康检查、自动重连、调用统计 | 本地内存 + Redis |
 
 ## 三、系统详细架构
 
@@ -455,7 +562,7 @@ zenflux_agent/
 │   └── ...
 │
 ├── services/                        # 服务层（业务逻辑）
-│   ├── chat_service.py              # 核心对话服务
+│   ├── chat_service.py              # 核心对话服务（🆕 含路由层集成）
 │   ├── session_service.py           # Session 生命周期管理
 │   ├── agent_registry.py            # Agent 配置注册表
 │   ├── conversation_service.py      # 对话持久化
@@ -466,28 +573,87 @@ zenflux_agent/
 │
 ├── core/                            # 核心模块
 │   ├── agent/                       # Agent 实现
-│   │   ├── simple_agent.py          # 编排引擎
+│   │   ├── simple_agent.py          # 单智能体编排引擎
 │   │   ├── factory.py               # Agent 工厂
-│   │   └── intent_analyzer.py       # 意图分析
+│   │   ├── types.py                 # 类型定义（IntentResult 等）
+│   │   └── multi/                   # 🆕 V7: 多智能体系统
+│   │       ├── __init__.py          # 模块导出
+│   │       ├── orchestrator.py      # 多智能体编排器
+│   │       ├── lead_agent.py        # 主控智能体
+│   │       ├── critic.py            # 评审智能体
+│   │       ├── checkpoint.py        # 检查点管理
+│   │       └── models.py            # 数据模型
+│   │
+│   ├── routing/                     # 🆕 V7: 路由层
+│   │   ├── __init__.py              # 模块导出
+│   │   ├── router.py                # AgentRouter 路由决策器
+│   │   ├── intent_analyzer.py       # IntentAnalyzer 意图分析
+│   │   └── complexity_scorer.py     # ComplexityScorer 复杂度评分
+│   │
+│   ├── monitoring/                  # 🆕 V7: 监控系统
+│   │   ├── __init__.py              # 模块导出
+│   │   ├── token_audit.py           # Token 审计
+│   │   ├── token_budget.py          # Token 预算管理
+│   │   ├── production_monitor.py    # 生产监控
+│   │   ├── failure_detector.py      # 失败检测
+│   │   └── failure_case_db.py       # 失败案例数据库
+│   │
+│   ├── billing/                     # 🆕 V7: 计费系统
+│   │   ├── __init__.py              # 模块导出
+│   │   ├── pricing.py               # 多模型定价
+│   │   ├── tracker.py               # 费用追踪
+│   │   └── models.py                # 计费数据模型
+│   │
+│   ├── planning/                    # 🆕 V7: 计划层
+│   │   ├── __init__.py              # 模块导出
+│   │   ├── protocol.py              # 计划协议
+│   │   ├── storage.py               # 计划存储
+│   │   └── validators.py            # 计划验证器
+│   │
 │   ├── llm/                         # LLM 服务
-│   │   ├── claude_service.py        # Claude API 封装
+│   │   ├── claude.py                # Claude API 封装
 │   │   ├── adaptor.py               # 消息格式适配器
-│   │   └── message.py               # 消息模型
+│   │   └── base.py                  # 基础类型定义
+│   │
 │   ├── tool/                        # 工具系统
 │   │   ├── executor.py              # 工具执行器
 │   │   ├── selector.py              # 工具选择器
 │   │   └── capability.py            # 能力注册表
+│   │
 │   ├── events/                      # 事件系统
 │   │   ├── manager.py               # 事件管理器
 │   │   ├── broadcaster.py           # 事件广播器
 │   │   └── adapters/                # 格式适配器
+│   │
 │   └── context/                     # 上下文管理
-│       ├── compaction.py            # 上下文压缩
-│       └── runtime.py               # 运行时上下文
+│       ├── compaction/              # 上下文压缩
+│       ├── runtime.py               # 运行时上下文
+│       └── rag_optimization.py      # 🆕 V7: RAG 优化
+│
+├── models/                          # 数据模型
+│   ├── __init__.py                  # 模块导出
+│   ├── usage.py                     # 🆕 V7: UsageResponse 计费响应模型
+│   └── ...
+│
+├── evaluation/                      # 🆕 V7: 评估框架
+│   ├── __init__.py                  # 模块导出
+│   ├── harness.py                   # 测试框架
+│   ├── models.py                    # 评估数据模型
+│   ├── qos_config.py                # QoS 配置
+│   ├── graders/                     # 评分器
+│   │   ├── code_based.py            # 代码评测
+│   │   ├── model_based.py           # 模型评测
+│   │   └── human.py                 # 人工评测
+│   └── config/                      # 评估配置
+│       └── settings.yaml
 │
 ├── tools/                           # 内置工具
 │   ├── web_search.py                # 网页搜索
 │   ├── api_calling.py               # API 调用
+│   └── ...
+│
+├── utils/                           # 工具函数
+│   ├── usage_tracker.py             # Token 用量追踪（与 UsageResponse 关联）
 │   └── ...
 │
 ├── infra/                           # 基础设施
@@ -495,14 +661,21 @@ zenflux_agent/
 │   │   ├── __init__.py              # 导出
 │   │   ├── user_pool.py             # 用户池（用户活跃 Session 追踪）
 │   │   ├── agent_pool.py            # Agent 池（原型缓存+实例管理）
-│   │   └── session_pool.py          # Session 池（活跃 Session 追踪+统计）
+│   │   ├── session_pool.py          # Session 池（活跃 Session 追踪+统计）
+│   │   └── mcp_pool.py              # 🆕 MCP 池（连接复用+健康检查+自动重连）
 │   ├── database/                    # 数据库
 │   │   ├── __init__.py              # 连接管理
 │   │   ├── crud.py                  # CRUD 操作
 │   │   └── models.py                # ORM 模型
 │   └── resilience/                  # 容错机制
 │       ├── circuit_breaker.py       # 熔断器
-│       └── retry.py                 # 重试
+│       └── retry.py                 # 重试（🆕 V7: with_retry 统一重试）
+│
+├── config/                          # 全局配置
+│   ├── llm_config.py                # LLM 配置
+│   ├── capabilities.yaml            # 工具能力配置
+│   ├── multi_agent_config.yaml      # 🆕 V7: 多智能体配置
+│   └── ...
 │
 ├── instances/                       # Agent 实例配置
 │   ├── _template/                   # 模板
@@ -512,14 +685,12 @@ zenflux_agent/
 │   │   └── .cache/                  # 缓存
 │   └── ...
 │
-├── config/                          # 全局配置
-│   ├── llm_config.py                # LLM 配置
-│   ├── capabilities.yaml            # 工具能力配置
-│   └── ...
-│
 └── docs/                            # 文档
-    └── architecture/                # 架构文档
-        └── SYSTEM_ARCHITECTURE.md   # 本文件
+    ├── architecture/                # 架构文档
+    │   └── SYSTEM_ARCHITECTURE.md   # 本文件
+    └── analysis/                    # 🆕 V7: 流程分析
+        ├── SIMPLE_AGENT_FLOW_ANALYSIS.md
+        └── MULTI_AGENT_FLOW_ANALYSIS.md
 ```
 
 ## 六、关键设计决策
@@ -665,13 +836,77 @@ finally:
 2. 记录错误到 `context_engineering`（错误保留）
 3. 让 Agent 在下轮决定如何处理
 
-## 八、后续优化方向
+## 八、V7 新增功能
 
-1. ✅ **资源池架构** - UserPool、AgentPool、SessionPool 已实现
+### 8.1 路由层 (core/routing/)
+
+| 组件 | 职责 |
+|------|------|
+| `AgentRouter` | 路由决策器，决定使用单智能体还是多智能体 |
+| `IntentAnalyzer` | 意图分析器，从 SimpleAgent 剥离成为共享模块 |
+| `ComplexityScorer` | 复杂度评分器，评估任务难度 |
+
+### 8.2 多智能体系统 (core/agent/multi/)
+
+| 组件 | 职责 |
+|------|------|
+| `MultiAgentOrchestrator` | 多智能体编排器，协调多个智能体协作 |
+| `LeadAgent` | 主控智能体（Opus），负责任务分解和结果综合 |
+| `Critic` | 评审智能体，负责质量评估和计划调整 |
+| `CheckpointManager` | 检查点管理，支持长时间任务的断点续传 |
+
+### 8.3 监控与计费
+
+| 组件 | 职责 |
+|------|------|
+| `TokenAuditor` | Token 审计，记录每次请求的 Token 消耗 |
+| `UsageTracker` | 用量追踪，累积多次 LLM 调用的统计 |
+| `UsageResponse` | 计费响应模型，标准化的 API 响应格式 |
+| `TokenBudget` | Token 预算管理 |
+
+### 8.4 数据流变化
+
+**V6 流程:**
+```
+用户消息 → ChatService → SimpleAgent → LLM → 响应
+                            ↓
+                      (内部意图分析)
+```
+
+**V7 流程:**
+```
+用户消息 → ChatService → AgentRouter → 路由决策
+                              ↓
+              ┌───────────────┴───────────────┐
+              ↓                               ↓
+        SimpleAgent                   MultiAgentOrchestrator
+        (简单任务)                     (复杂任务)
+              ↓                               ↓
+            LLM                    Lead → Workers → Critic
+              ↓                               ↓
+        ┌─────┴─────────────────────────────┘
+        ↓
+    TokenAuditor (审计记录)
+        ↓
+    UsageResponse (计费信息)
+        ↓
+    SSE: usage 事件 → 前端
+```
+
+## 九、后续优化方向
+
+### 已完成
+1. ✅ **资源池架构** - UserPool、AgentPool、SessionPool、MCPPool 已实现
 2. ✅ **可靠计数** - 使用 Set 存储 + 校准机制
 3. ✅ **依赖注入** - 支持测试时注入 mock
-4. **MCP 工具池化** - 复用 MCP 客户端连接
-5. **LLM Service 池化** - 复用 HTTP 客户端
-6. **上下文压缩优化** - 更智能的历史裁剪策略
-7. **Multi-Agent 支持** - 多 Agent 协作编排
-8. **UserPool 限流** - 基于 Redis 的滑动窗口限流
+4. ✅ **Multi-Agent 支持** - V7 多智能体编排系统
+5. ✅ **路由层** - V7 单智能体/多智能体路由决策
+6. ✅ **Token 审计** - V7 TokenAuditor + UsageResponse
+7. ✅ **计费系统** - V7 多模型定价和成本计算
+8. ✅ **MCP 客户端池化** - MCPPool 连接复用 + 健康检查 + 自动重连
+
+### 待优化
+1. **LLM Service 池化** - 复用 HTTP 客户端
+2. **上下文压缩优化** - 更智能的历史裁剪策略
+3. **UserPool 限流** - 基于 Redis 的滑动窗口限流
+4. **评估框架完善** - 自动化测试套件

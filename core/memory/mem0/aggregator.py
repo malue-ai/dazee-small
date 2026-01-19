@@ -12,9 +12,16 @@ Mem0 数据聚合器
 - 异步执行，不阻塞主流程
 """
 
+# 1. 标准库
 import json
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
+
+# 2. 第三方库（无）
+
+# 3. 本地模块
+from core.llm import create_llm_service, Message
+from core.memory.mem0.pool import get_mem0_pool
 from logger import get_logger
 
 logger = get_logger("memory.mem0.aggregator")
@@ -158,7 +165,6 @@ async def aggregate_user_emotion(
         )
         
         # 调用 LLM
-        from core.llm import create_llm_service, Message
         llm = create_llm_service(model="claude-haiku-4-5-20251001")
         response = await llm.create_message_async(
             messages=[Message(role="user", content=prompt)],
@@ -283,7 +289,6 @@ async def aggregate_work_summary(
         )
         
         # 调用 LLM
-        from core.llm import create_llm_service, Message
         llm = create_llm_service(model="claude-haiku-4-5-20251001")
         response = await llm.create_message_async(
             messages=[Message(role="user", content=prompt)],
@@ -338,7 +343,6 @@ async def aggregate_weekly_summary(user_id: str) -> Dict[str, Any]:
     
     # 检索记忆
     try:
-        from core.memory.mem0.pool import get_mem0_pool
         pool = get_mem0_pool()
         memories = pool.get_all(user_id=user_id, limit=100)
     except Exception as e:

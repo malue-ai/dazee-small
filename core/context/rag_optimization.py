@@ -11,13 +11,14 @@ RAG 管道优化模块
 依赖：utils/ragie_client.py, services/mem0_service.py
 """
 
-import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from enum import Enum
 
-logger = logging.getLogger(__name__)
+from logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class IndexStatus(str, Enum):
@@ -89,7 +90,7 @@ class IncrementalIndexManager:
     4. 处理索引失败和重试
     """
     
-    def __init__(self, config: Optional[RAGConfig] = None):
+    def __init__(self, config: Optional[RAGConfig] = None) -> None:
         self.config = config or RAGConfig()
         
         # 索引队列（内存）
@@ -266,7 +267,7 @@ class RAGQualityEvaluator:
     4. 答案准确率（Accuracy）
     """
     
-    def __init__(self):
+    def __init__(self) -> None:
         self._evaluation_records: List[Dict[str, Any]] = []
     
     def record_retrieval(

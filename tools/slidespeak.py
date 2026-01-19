@@ -3,14 +3,20 @@ SlideSpeak工具 - 高质量PPT渲染
 
 这是一个普通工具，注册到工具注册表中。
 用于调用SlideSpeak API渲染PPT。
+
+安全说明：
+- 此工具不操作本地文件系统
+- PPT 产物直接返回 SlideSpeak 的下载 URL
+- 如需持久化存储，通过 S3 上传（而非本地文件）
 """
 
 import os
 import aiohttp
 import asyncio
 from typing import Dict, Any, Optional
-from pathlib import Path
-# from tools.base import BaseTool
+from logger import get_logger
+
+logger = get_logger("slidespeak_tool")
 
 
 class SlideSpeakTool:
@@ -150,9 +156,9 @@ class SlideSpeakTool:
                     },
                     "required": ["template", "slides"]
                 },
-                "save_dir": {
-                    "type": "string",
-                    "description": "保存PPT文件的目录路径（可选，默认./workspace/outputs/ppt）"
+                "upload_to_s3": {
+                    "type": "boolean",
+                    "description": "是否上传到 S3 持久化存储（默认 False，直接返回 SlideSpeak 临时链接）"
                 }
             },
             "required": ["config"]
@@ -161,35 +167,35 @@ class SlideSpeakTool:
     async def execute(
         self, 
         config: Dict[str, Any], 
-        save_dir: Optional[str] = None,
+        upload_to_s3: bool = False,
         conversation_id: Optional[str] = None,
+        user_id: Optional[str] = None,
         **kwargs  # 接收其他注入的上下文
     ) -> Dict[str, Any]:
         """
         执行PPT渲染
         
+        安全说明：
+        - 不操作本地文件系统
+        - 返回 SlideSpeak 的下载 URL（临时链接）
+        - 如需持久化，设置 upload_to_s3=True 上传到 S3
+        
         Args:
             config: SlideSpeak配置
-            save_dir: 保存目录（可选）
-            conversation_id: 对话ID（用于计算 workspace 路径）
+            upload_to_s3: 是否上传到 S3（默认 False，直接返回 SlideSpeak URL）
+            conversation_id: 对话ID（用于 S3 路径）
+            user_id: 用户ID（用于 S3 路径）
             
         Returns:
             {
                 "success": True/False,
-                "download_url": "https://...",
-                "local_path": "/path/to/file.pptx",
+                "download_url": "https://...",  # SlideSpeak 临时链接 或 S3 预签名 URL
+                "s3_key": "...",                # 仅当 upload_to_s3=True 时返回
                 "slides_count": 10,
                 "error": "错误信息（如果失败）"
             }
         """
         try:
-            # 计算正确的保存路径
-            if not save_dir and conversation_id:
-                from core.workspace_manager import get_workspace_manager
-                workspace_manager = get_workspace_manager()
-                workspace_root = workspace_manager.get_workspace_root(conversation_id)
-                save_dir = str(workspace_root / "outputs" / "ppt")
-            
             # 1. 创建PPT生成任务
             task_id = await self._create_presentation(config)
             
@@ -202,7 +208,7 @@ class SlideSpeakTool:
                     "error": "任务超时或失败"
                 }
             
-            # 3. 下载PPT文件
+            # 3. 获取下载链接
             download_url = result.get("url")
             if not download_url:
                 return {
@@ -210,24 +216,90 @@ class SlideSpeakTool:
                     "error": "未获取到下载链接"
                 }
             
-            local_path = await self._download_file(
-                download_url,
-                save_dir or "./workspace/outputs/ppt"
-            )
-            
-            return {
+            response_data = {
                 "success": True,
                 "download_url": download_url,
-                "local_path": local_path,
                 "slides_count": len(config.get("slides", [])),
                 "presentation_id": result.get("presentation_id")
             }
             
+            # 4. 如果需要持久化，上传到 S3
+            if upload_to_s3:
+                try:
+                    s3_result = await self._upload_to_s3(
+                        download_url=download_url,
+                        conversation_id=conversation_id,
+                        user_id=user_id
+                    )
+                    response_data["s3_key"] = s3_result.get("s3_key")
+                    response_data["download_url"] = s3_result.get("presigned_url")  # 使用 S3 预签名 URL
+                    logger.info(f"✅ PPT 已上传到 S3: {s3_result.get('s3_key')}")
+                except Exception as e:
+                    logger.warning(f"⚠️ S3 上传失败，返回原始 URL: {e}")
+                    # S3 上传失败不影响整体结果，继续返回 SlideSpeak URL
+            
+            return response_data
+            
         except Exception as e:
+            logger.error(f"❌ PPT 渲染失败: {e}", exc_info=True)
             return {
                 "success": False,
                 "error": str(e)
             }
+    
+    async def _upload_to_s3(
+        self,
+        download_url: str,
+        conversation_id: Optional[str] = None,
+        user_id: Optional[str] = None
+    ) -> Dict[str, str]:
+        """
+        从 SlideSpeak 下载 PPT 并上传到 S3
+        
+        Args:
+            download_url: SlideSpeak 下载链接
+            conversation_id: 对话ID
+            user_id: 用户ID
+            
+        Returns:
+            S3 上传结果
+        """
+        import time
+        from utils.s3_uploader import get_s3_uploader
+        
+        # 1. 下载 PPT 内容到内存
+        async with aiohttp.ClientSession() as session:
+            async with session.get(download_url, timeout=aiohttp.ClientTimeout(total=60)) as response:
+                if response.status != 200:
+                    raise Exception(f"下载失败: HTTP {response.status}")
+                ppt_content = await response.read()
+        
+        # 2. 生成 S3 对象名
+        timestamp = int(time.time())
+        filename = f"ppt_{timestamp}.pptx"
+        s3_key = f"outputs/ppt/{conversation_id or 'default'}/{filename}"
+        
+        # 3. 上传到 S3
+        s3_uploader = get_s3_uploader()
+        result = await s3_uploader.upload_bytes(
+            file_content=ppt_content,
+            object_name=s3_key,
+            content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            metadata={
+                "conversation_id": conversation_id or "unknown",
+                "user_id": user_id or "unknown",
+                "source": "slidespeak"
+            }
+        )
+        
+        # 4. 生成预签名 URL
+        presigned_url = s3_uploader.get_presigned_url(s3_key, expires_in=86400)  # 24小时
+        
+        return {
+            "s3_key": s3_key,
+            "presigned_url": presigned_url,
+            "size": result.get("size")
+        }
     
     def _normalize_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -384,25 +456,4 @@ class SlideSpeakTool:
                 
                 return download_url
     
-    async def _download_file(self, url: str, save_dir: str) -> str:
-        """下载PPT文件到本地"""
-        save_path = Path(save_dir)
-        save_path.mkdir(parents=True, exist_ok=True)
-        
-        # 生成文件名
-        import time
-        filename = f"ppt_{int(time.time())}.pptx"
-        file_path = save_path / filename
-        
-        # 下载文件
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as response:
-                if response.status != 200:
-                    raise Exception(f"下载失败: {response.status}")
-                
-                with open(file_path, "wb") as f:
-                    async for chunk in response.content.iter_chunked(8192):
-                        f.write(chunk)
-        
-        return str(file_path.absolute())
 

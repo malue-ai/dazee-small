@@ -43,10 +43,6 @@ class ConversationService:
     注意：所有数据库操作都通过 crud 层完成
     """
     
-    def __init__(self):
-        """初始化对话服务"""
-        pass
-    
     # ==================== 对话 CRUD ====================
     
     async def create_conversation(

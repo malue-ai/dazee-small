@@ -118,7 +118,7 @@ class SandboxService:
     # E2B 沙盒的工作目录
     SANDBOX_HOME = "/home/user"
     
-    def __init__(self):
+    def __init__(self) -> None:
         """初始化沙盒服务"""
         self._provider: Optional[SandboxProvider] = None
         logger.info("✅ SandboxService 初始化完成（使用 infra/sandbox 层）")

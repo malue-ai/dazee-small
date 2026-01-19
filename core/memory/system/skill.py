@@ -17,6 +17,7 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 from pathlib import Path
 import json
+import aiofiles
 from logger import get_logger
 
 from ..base import BaseMemory, MemoryConfig, MemoryScope, StorageBackend
@@ -38,10 +39,14 @@ class SkillMemory(BaseMemory):
     
     缓存机制：
     - skill_id 持久化到本地文件，避免重复注册
-    - Agent 启动时自动加载缓存
+    - Agent 启动时异步加载缓存
+    
+    使用方式：
+        memory = SkillMemory()
+        await memory.initialize()  # 必须调用以加载缓存
     """
     
-    def __init__(self):
+    def __init__(self) -> None:
         config = MemoryConfig(
             scope=MemoryScope.SYSTEM,
             backend=StorageBackend.MEMORY
@@ -51,41 +56,55 @@ class SkillMemory(BaseMemory):
         self.skills: Dict[str, Dict[str, Any]] = {}
         # 🆕 skill_id 缓存 {skill_name: skill_id}
         self.skill_id_cache: Dict[str, str] = {}
-        
-        # 启动时加载持久化缓存
-        self._load_skill_id_cache()
+        self._initialized: bool = False
     
-    def _load_skill_id_cache(self):
-        """从文件加载 skill_id 缓存"""
+    async def initialize(self) -> None:
+        """
+        异步初始化：加载持久化缓存
+        
+        使用方式：
+            memory = SkillMemory()
+            await memory.initialize()
+        """
+        if self._initialized:
+            return
+        
+        await self._load_skill_id_cache_async()
+        self._initialized = True
+        logger.debug("[SkillMemory] 初始化完成")
+    
+    async def _load_skill_id_cache_async(self) -> None:
+        """异步从文件加载 skill_id 缓存"""
         if SKILL_CACHE_FILE.exists():
             try:
-                with open(SKILL_CACHE_FILE, 'r', encoding='utf-8') as f:
-                    self.skill_id_cache = json.load(f)
+                async with aiofiles.open(SKILL_CACHE_FILE, 'r', encoding='utf-8') as f:
+                    content = await f.read()
+                    self.skill_id_cache = json.loads(content)
                 logger.info(f"[SkillMemory] 加载 skill_id 缓存: {len(self.skill_id_cache)} 个")
             except Exception as e:
                 logger.warning(f"[SkillMemory] 加载缓存失败: {e}")
                 self.skill_id_cache = {}
     
-    def _save_skill_id_cache(self):
-        """持久化 skill_id 缓存到文件"""
+    async def _save_skill_id_cache_async(self) -> None:
+        """异步持久化 skill_id 缓存到文件"""
         try:
             SKILL_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-            with open(SKILL_CACHE_FILE, 'w', encoding='utf-8') as f:
-                json.dump(self.skill_id_cache, f, ensure_ascii=False, indent=2)
+            async with aiofiles.open(SKILL_CACHE_FILE, 'w', encoding='utf-8') as f:
+                await f.write(json.dumps(self.skill_id_cache, ensure_ascii=False, indent=2))
             logger.debug(f"[SkillMemory] 保存 skill_id 缓存: {len(self.skill_id_cache)} 个")
         except Exception as e:
             logger.error(f"[SkillMemory] 保存缓存失败: {e}")
     
-    def register_skill(
+    async def register_skill(
         self,
         skill_name: str,
         skill_path: str,
         description: str = "",
         skill_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None
-    ):
+    ) -> None:
         """
-        注册一个 Skill
+        注册一个 Skill（异步版本）
         
         Args:
             skill_name: Skill 名称
@@ -106,7 +125,7 @@ class SkillMemory(BaseMemory):
         # 🆕 缓存 skill_id
         if skill_id:
             self.skill_id_cache[skill_name] = skill_id
-            self._save_skill_id_cache()
+            await self._save_skill_id_cache_async()
         
         logger.debug(f"[SkillMemory] 注册 Skill: {skill_name}, skill_id={skill_id}")
     
@@ -145,9 +164,9 @@ class SkillMemory(BaseMemory):
         """检查 Skill 是否已注册到 Claude 服务器"""
         return skill_name in self.skill_id_cache
     
-    def set_skill_id(self, skill_name: str, skill_id: str):
+    async def set_skill_id(self, skill_name: str, skill_id: str) -> None:
         """
-        设置 skill_id（异步注册后调用）
+        设置 skill_id（异步版本）
         
         Args:
             skill_name: Skill 名称
@@ -159,8 +178,8 @@ class SkillMemory(BaseMemory):
         if skill_name in self.skills:
             self.skills[skill_name]["skill_id"] = skill_id
         
-        # 持久化
-        self._save_skill_id_cache()
+        # 异步持久化
+        await self._save_skill_id_cache_async()
         logger.info(f"[SkillMemory] 缓存 skill_id: {skill_name} → {skill_id}")
     
     def get_all_skill_ids(self) -> Dict[str, str]:
@@ -191,28 +210,28 @@ class SkillMemory(BaseMemory):
             for skill_id in self.skill_id_cache.values()
         ]
     
-    def remove_skill_id(self, skill_name: str):
-        """移除 skill_id 缓存"""
+    async def remove_skill_id(self, skill_name: str) -> None:
+        """移除 skill_id 缓存（异步版本）"""
         if skill_name in self.skill_id_cache:
             del self.skill_id_cache[skill_name]
-            self._save_skill_id_cache()
+            await self._save_skill_id_cache_async()
             logger.info(f"[SkillMemory] 移除 skill_id: {skill_name}")
     
     # ==================== 原有方法 ====================
     
-    def unregister_skill(self, skill_name: str):
-        """注销 Skill"""
+    async def unregister_skill(self, skill_name: str) -> None:
+        """注销 Skill（异步版本）"""
         if skill_name in self.skills:
             del self.skills[skill_name]
         # 🆕 同时移除 skill_id
-        self.remove_skill_id(skill_name)
+        await self.remove_skill_id(skill_name)
         logger.debug(f"[SkillMemory] 注销 Skill: {skill_name}")
     
-    def clear(self):
-        """清空所有 Skills"""
+    async def clear(self) -> None:
+        """清空所有 Skills（异步版本）"""
         self.skills.clear()
         self.skill_id_cache.clear()
-        self._save_skill_id_cache()
+        await self._save_skill_id_cache_async()
     
     def to_dict(self) -> Dict[str, Any]:
         """序列化为字典"""
@@ -227,6 +246,25 @@ class SkillMemory(BaseMemory):
 
 
 def create_skill_memory() -> SkillMemory:
-    """创建 SkillMemory 实例"""
+    """
+    创建 SkillMemory 实例
+    
+    注意：创建后需要调用 await memory.initialize() 完成异步初始化
+    
+    Returns:
+        SkillMemory 实例（需要调用 initialize() 加载缓存）
+    """
     return SkillMemory()
+
+
+async def create_skill_memory_async() -> SkillMemory:
+    """
+    创建并初始化 SkillMemory 实例（异步版本）
+    
+    Returns:
+        已初始化的 SkillMemory 实例
+    """
+    memory = create_skill_memory()
+    await memory.initialize()
+    return memory
 

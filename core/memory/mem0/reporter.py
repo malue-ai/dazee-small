@@ -74,7 +74,7 @@ class Reporter:
     智能汇报和个性化响应生成器
     """
     
-    def __init__(self):
+    def __init__(self) -> None:
         """初始化汇报器"""
         logger.info("[Reporter] 初始化完成")
     

@@ -12,11 +12,20 @@ AgentFactory - Prompt 驱动的 Agent 动态初始化
 参考：docs/15-FRAMEWORK_PROMPT_CONTRACT.md
 """
 
+# 1. 标准库
 import json
+import re
+from pathlib import Path
 from typing import Optional, List, Dict, Any, TYPE_CHECKING
 from enum import Enum
 
+# 2. 第三方库（无）
+
+# 3. 本地模块
 from logger import get_logger
+from core.llm import Message, create_claude_service
+from core.memory.working import WorkingMemory
+from core.agent.multi import MultiAgentOrchestrator, OrchestratorConfig
 
 # 导入强类型 Schema
 from core.schemas import (
@@ -263,8 +272,7 @@ class AgentFactory:
         routing_decision = await router.route(message, history)
         agent = await AgentFactory.from_routing_decision(
             decision=routing_decision,
-            event_manager=event_manager,
-            workspace_dir=workspace_dir
+            event_manager=event_manager
         )
     """
     
@@ -273,7 +281,6 @@ class AgentFactory:
         cls,
         system_prompt: str,
         event_manager,
-        workspace_dir: str = None,
         conversation_service = None,
         llm_service = None,
         use_default_if_failed: bool = True,
@@ -295,7 +302,6 @@ class AgentFactory:
         Args:
             system_prompt: 系统提示词
             event_manager: 事件管理器
-            workspace_dir: 工作目录
             conversation_service: 会话服务
             llm_service: LLM 服务（用于生成 Schema，默认用 Haiku）
             use_default_if_failed: 生成失败时使用默认 Schema
@@ -307,8 +313,6 @@ class AgentFactory:
         Returns:
             配置好的 Agent 实例
         """
-        from pathlib import Path
-        
         schema = None
         schema_data = None
         
@@ -351,7 +355,6 @@ class AgentFactory:
             schema=schema,
             system_prompt=system_prompt,
             event_manager=event_manager,
-            workspace_dir=workspace_dir,
             conversation_service=conversation_service,
             prompt_schema=prompt_schema,  # 🆕 V4.6: 传递 PromptSchema
         )
@@ -363,8 +366,6 @@ class AgentFactory:
         llm_service = None
     ) -> AgentSchema:
         """调用 LLM 生成 Schema"""
-        from core.llm import Message
-        
         if llm_service is None:
             from core.llm import create_claude_service
             # 🆕 使用配置化的 LLM Profile
@@ -421,7 +422,6 @@ class AgentFactory:
         schema: AgentSchema,
         system_prompt: str,
         event_manager,
-        workspace_dir: str = None,
         conversation_service = None,
         prompt_schema = None,  # 🆕 V4.6: PromptSchema（提示词分层）
         prompt_cache = None,   # 🆕 V4.6.2: InstancePromptCache（提示词缓存）
@@ -468,7 +468,6 @@ class AgentFactory:
                 schema=schema,
                 system_prompt=system_prompt,
                 event_manager=event_manager,
-                workspace_dir=workspace_dir,
                 conversation_service=conversation_service,
                 prompt_schema=effective_prompt_schema,
                 prompt_cache=prompt_cache,
@@ -482,7 +481,6 @@ class AgentFactory:
                 model=schema.model,
                 max_turns=schema.max_turns,
                 event_manager=event_manager,
-                workspace_dir=workspace_dir,
                 conversation_service=conversation_service,
                 schema=schema,  # 🆕 传递 Schema（驱动组件初始化）
                 system_prompt=system_prompt,  # 🆕 传递 System Prompt（运行时指令）
@@ -503,7 +501,6 @@ class AgentFactory:
         schema,
         system_prompt: str,
         event_manager,
-        workspace_dir: str,
         conversation_service,
         prompt_schema,
         prompt_cache,
@@ -519,10 +516,6 @@ class AgentFactory:
         Returns:
             MultiAgentOrchestrator 实例
         """
-        from core.multi_agent import MultiAgentOrchestrator, OrchestratorConfig
-        from core.llm import create_claude_service
-        from core.memory.working import WorkingMemory
-        
         # 创建 LLM Service（用于任务分解和结果聚合）
         llm_service = create_claude_service(
             model=schema.model,
@@ -557,7 +550,6 @@ class AgentFactory:
         # 附加元数据（用于统一接口）
         orchestrator.schema = schema
         orchestrator.system_prompt = system_prompt
-        orchestrator.workspace_dir = workspace_dir
         orchestrator.conversation_service = conversation_service
         orchestrator.model = schema.model
         orchestrator.max_turns = schema.max_turns
@@ -569,7 +561,6 @@ class AgentFactory:
     def create_default(
         cls,
         event_manager,
-        workspace_dir: str = None,
         conversation_service = None
     ):
         """创建默认配置的 Agent"""
@@ -577,15 +568,12 @@ class AgentFactory:
             schema=DEFAULT_AGENT_SCHEMA,
             system_prompt="",
             event_manager=event_manager,
-            workspace_dir=workspace_dir,
             conversation_service=conversation_service
         )
     
     @staticmethod
     def _extract_json(text: str) -> Dict[str, Any]:
         """从文本中提取 JSON"""
-        import re
-        
         # 尝试找 ```json ... ``` 块
         json_match = re.search(r'```json\s*([\s\S]*?)\s*```', text)
         if json_match:
@@ -812,7 +800,6 @@ def create_agent_from_preset(
 async def create_agent_from_routing_decision(
     routing_decision: "RoutingDecision",
     event_manager,
-    workspace_dir: str = None,
     conversation_service = None,
     system_prompt: str = "",
     **kwargs
@@ -828,7 +815,6 @@ async def create_agent_from_routing_decision(
     Args:
         routing_decision: 路由决策结果
         event_manager: 事件管理器
-        workspace_dir: 工作目录
         conversation_service: 会话服务
         system_prompt: 系统提示词（可选）
         **kwargs: 其他参数
@@ -839,7 +825,7 @@ async def create_agent_from_routing_decision(
     使用示例：
         decision = await router.route(message, history)
         agent = await create_agent_from_routing_decision(
-            decision, event_manager, workspace_dir
+            decision, event_manager
         )
         
         # Agent 内部会使用 routing_decision.intent，跳过内部意图分析
@@ -899,7 +885,6 @@ async def create_agent_from_routing_decision(
         schema=schema,
         system_prompt=system_prompt or "你是一个智能助手，帮助用户完成任务。",
         event_manager=event_manager,
-        workspace_dir=workspace_dir,
         conversation_service=conversation_service,
         **kwargs
     )

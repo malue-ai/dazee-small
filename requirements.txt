@@ -13,7 +13,7 @@ python-dotenv>=1.0.0
 
 # 其他工具
 python-multipart>=0.0.6
-aiofiles>=23.0.0          # 异步文件操作
+aiofiles>=24.1.0          # 异步文件操作
 aiohttp>=3.9.0            # 异步 HTTP 客户端
 httpx>=0.27.0     # HTTP 客户端（用于 MCP、测试）
 filetype>=1.2.0           # 文件类型检测（纯 Python，无需系统依赖）

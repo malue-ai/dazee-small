@@ -58,7 +58,7 @@ class ConfirmationService:
     - 统一日志记录
     """
     
-    def __init__(self):
+    def __init__(self) -> None:
         self._manager: ConfirmationManager = get_confirmation_manager()
     
     def get_request(self, request_id: str) -> ConfirmationRequest:

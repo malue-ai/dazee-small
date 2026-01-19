@@ -24,8 +24,10 @@ Checkpoint Manager - 检查点恢复机制
     state, results = await manager.restore_from_checkpoint(checkpoint_id)
 """
 
+import asyncio
 import json
-import logging
+import aiofiles
+from logger import get_logger
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional
@@ -33,7 +35,7 @@ from enum import Enum
 from pydantic import BaseModel
 from uuid import uuid4
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class CheckpointType(str, Enum):
@@ -152,12 +154,13 @@ class CheckpointManager:
             context=context or {}
         )
         
-        # 保存到文件
+        # 保存到文件（异步）
         checkpoint_file = self._get_checkpoint_path(task_id, checkpoint_id)
         checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
         
-        with open(checkpoint_file, 'w', encoding='utf-8') as f:
-            json.dump(checkpoint.model_dump(mode='json'), f, indent=2, ensure_ascii=False, default=str)
+        content = json.dumps(checkpoint.model_dump(mode='json'), indent=2, ensure_ascii=False, default=str)
+        async with aiofiles.open(checkpoint_file, 'w', encoding='utf-8') as f:
+            await f.write(content)
         
         logger.info(
             f"💾 检查点已保存: {checkpoint_id} "
@@ -193,14 +196,15 @@ class CheckpointManager:
             checkpoint_file = self._get_checkpoint_path(task_id, checkpoint_id)
         else:
             # 搜索所有任务目录
-            checkpoint_file = self._find_checkpoint(checkpoint_id)
+            checkpoint_file = await self._find_checkpoint_async(checkpoint_id)
         
         if not checkpoint_file or not checkpoint_file.exists():
             raise FileNotFoundError(f"检查点不存在: {checkpoint_id}")
         
-        # 加载检查点
-        with open(checkpoint_file, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+        # 加载检查点（异步）
+        async with aiofiles.open(checkpoint_file, 'r', encoding='utf-8') as f:
+            content = await f.read()
+            data = json.loads(content)
         
         checkpoint = Checkpoint(**data)
         
@@ -236,10 +240,13 @@ class CheckpointManager:
             return []
         
         checkpoints = []
-        for checkpoint_file in task_dir.glob("*.json"):
+        # 使用 asyncio.to_thread 包装同步的 glob 操作
+        checkpoint_files = await asyncio.to_thread(list, task_dir.glob("*.json"))
+        for checkpoint_file in checkpoint_files:
             try:
-                with open(checkpoint_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
+                async with aiofiles.open(checkpoint_file, 'r', encoding='utf-8') as f:
+                    content = await f.read()
+                    data = json.loads(content)
                 checkpoint = Checkpoint(**data)
                 checkpoints.append(checkpoint.metadata)
             except Exception as e:
@@ -309,9 +316,11 @@ class CheckpointManager:
         """获取检查点文件路径"""
         return self.storage_dir / task_id / f"{checkpoint_id}.json"
     
-    def _find_checkpoint(self, checkpoint_id: str) -> Optional[Path]:
-        """在所有任务目录中查找检查点"""
-        for task_dir in self.storage_dir.iterdir():
+    async def _find_checkpoint_async(self, checkpoint_id: str) -> Optional[Path]:
+        """异步在所有任务目录中查找检查点"""
+        # 使用 asyncio.to_thread 包装同步的目录遍历
+        task_dirs = await asyncio.to_thread(list, self.storage_dir.iterdir())
+        for task_dir in task_dirs:
             if task_dir.is_dir():
                 checkpoint_file = task_dir / f"{checkpoint_id}.json"
                 if checkpoint_file.exists():

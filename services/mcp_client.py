@@ -455,7 +455,7 @@ class MCPToolExecutor:
     封装 MCP 工具调用，供 Agent 使用
     """
     
-    def __init__(self, client: MCPClientWrapper, tool_name: str, original_name: str):
+    def __init__(self, client: MCPClientWrapper, tool_name: str, original_name: str) -> None:
         self.client = client
         self.tool_name = tool_name
         self.original_name = original_name

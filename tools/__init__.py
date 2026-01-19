@@ -14,27 +14,9 @@ Tools 工具模块
 - wenshu_analytics_tool.py: 问数平台数据分析工具
 
 注意：工具核心逻辑（Selector、Executor）已移至 core/tool/
-
-向后兼容导出（推荐使用 core.tool）：
-- ToolSelector, create_tool_selector
-- ToolExecutor, create_tool_executor
+      请使用 `from core.tool import ToolSelector, ToolExecutor` 导入
 """
 
-# 向后兼容：从 core.tool 重导出
-from core.tool import (
-    ToolSelector,
-    ToolSelectionResult,
-    create_tool_selector,
-    ToolExecutor,
-    create_tool_executor,
-)
-
-__all__ = [
-    # 向后兼容（已废弃，推荐使用 core.tool）
-    "ToolSelector",
-    "ToolSelectionResult",
-    "create_tool_selector",
-    "ToolExecutor",
-    "create_tool_executor",
-]
+# 此模块不再导出任何内容，请使用 core.tool
+__all__: list[str] = []
 

@@ -11,6 +11,7 @@ from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 import httpx
 import yaml
+import aiofiles
 from pathlib import Path
 
 from core.events.adapters.base import EventAdapter, AdapterConfig
@@ -75,9 +76,9 @@ class EventDispatcher:
             await self._http_client.aclose()
             self._http_client = None
     
-    def load_config(self, config_path: str) -> None:
+    async def load_config(self, config_path: str) -> None:
         """
-        从 YAML 配置文件加载适配器配置
+        异步从 YAML 配置文件加载适配器配置
         
         Args:
             config_path: 配置文件路径
@@ -88,8 +89,9 @@ class EventDispatcher:
             return
         
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                config = yaml.safe_load(f)
+            async with aiofiles.open(path, "r", encoding="utf-8") as f:
+                content = await f.read()
+                config = yaml.safe_load(content)
             
             subscriptions = config.get("subscriptions", [])
             

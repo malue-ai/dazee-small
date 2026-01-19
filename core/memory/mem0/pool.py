@@ -48,7 +48,7 @@ class Mem0MemoryPool:
                     cls._instance = instance
         return cls._instance
     
-    def __init__(self, config: Optional[Mem0Config] = None):
+    def __init__(self, config: Optional[Mem0Config] = None) -> None:
         """
         初始化缓存池
         

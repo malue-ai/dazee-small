@@ -15,8 +15,13 @@
 - 是否跳过记忆检索
 """
 
+# 1. 标准库
 from typing import Optional, List, Dict, Any
 
+# 2. 第三方库（无）
+
+# 3. 本地模块
+from core.prompt.prompt_layer import TaskComplexity
 from logger import get_logger
 
 logger = get_logger("intent_prompt_generator")
@@ -279,8 +284,6 @@ class IntentPromptGenerator:
         
         优先使用用户定义的复杂度关键词
         """
-        from core.prompt import TaskComplexity
-        
         if not schema or not schema.complexity_keywords:
             return DEFAULT_COMPLEXITY_RULES
         

@@ -34,22 +34,31 @@ from typing import Dict, Any, List, Optional, AsyncGenerator
 
 # 3. 本地模块
 from core.agent.intent_analyzer import create_intent_analyzer
+from core.agent.types import IntentResult, TaskType, Complexity
+from core.agent.content_handler import ContentHandler, create_content_handler
 from core.context.runtime import create_runtime_context
 from core.context.context_engineering import (
     ContextEngineeringManager, 
     AgentState, 
     create_context_engineering_manager
 )
-from core.context.prompt_manager import get_prompt_manager, PromptManager
+from core.context.compaction import (
+    get_context_strategy,
+    get_memory_guidance_prompt,
+    QoSLevel,
+    ContextStrategy
+)
+from core.context.prompt_manager import get_prompt_manager, get_prompt_manager_async, PromptManager
 from core.events.broadcaster import EventBroadcaster
 from core.llm import Message, LLMResponse, ToolType, create_claude_service
+from core.orchestration import create_pipeline_tracer, E2EPipelineTracer
+from core.prompt import TaskComplexity
+from core.schemas import DEFAULT_AGENT_SCHEMA
 from core.tool import create_tool_executor, create_tool_selector
 from core.tool.capability import create_capability_registry, create_invocation_selector
-from core.orchestration import create_pipeline_tracer, E2EPipelineTracer
 from core.confirmation_manager import get_confirmation_manager, ConfirmationType
-from core.agent.types import IntentResult
-from core.agent.content_handler import ContentHandler, create_content_handler
 from logger import get_logger
+from prompts.universal_agent_prompt import get_universal_agent_prompt
 from tools.plan_todo_tool import create_plan_todo_tool
 from utils.usage_tracker import create_usage_tracker
 from utils.message_utils import (
@@ -88,7 +97,6 @@ class SimpleAgent:
         model: str = "claude-sonnet-4-5-20250929",
         max_turns: int = 20,
         event_manager=None,
-        workspace_dir: str = None,
         conversation_service=None,
         schema=None,  # 🆕 AgentSchema 配置
         system_prompt: str = None,  # 🆕 System Prompt（作为运行时指令）
@@ -103,7 +111,6 @@ class SimpleAgent:
             model: 模型名称
             max_turns: 最大轮次
             event_manager: EventManager 实例（必需）
-            workspace_dir: 工作目录
             conversation_service: ConversationService 实例（用于消息持久化）
             schema: AgentSchema 配置（定义组件启用状态和参数）
             system_prompt: System Prompt（运行时传给 LLM 的系统指令）
@@ -118,10 +125,8 @@ class SimpleAgent:
         self.model = model
         self.max_turns = max_turns
         self.event_manager = event_manager  # 保留引用（兼容）
-        self.workspace_dir = workspace_dir
         
         # 🆕 Schema 驱动：存储 Schema 配置
-        from core.schemas import DEFAULT_AGENT_SCHEMA
         self.schema = schema if schema is not None else DEFAULT_AGENT_SCHEMA
         
         # 🆕 System Prompt：存储系统指令（如果未提供，使用默认）
@@ -136,7 +141,6 @@ class SimpleAgent:
         
         # 🆕 上下文管理策略（三层防护）
         # 配置来源：环境变量 QOS_LEVEL + Schema context_limits 覆盖
-        from core.context.compaction import get_context_strategy, QoSLevel, ContextStrategy
         qos_level_str = os.getenv("QOS_LEVEL", "pro")
         try:
             qos_level = QoSLevel(qos_level_str)
@@ -213,7 +217,6 @@ class SimpleAgent:
     def clone_for_session(
         self,
         event_manager,
-        workspace_dir: str = None,
         conversation_service = None
     ) -> "SimpleAgent":
         """
@@ -235,7 +238,6 @@ class SimpleAgent:
         
         重置的状态（每个会话独立）：
         - event_manager, broadcaster: 事件管理
-        - workspace_dir: 工作目录
         - _plan_cache: Plan 缓存
         - invocation_stats: 调用统计
         - _last_intent_result: 意图结果
@@ -244,7 +246,6 @@ class SimpleAgent:
         
         Args:
             event_manager: 事件管理器（必需）
-            workspace_dir: 工作目录
             conversation_service: 会话服务
             
         Returns:
@@ -293,17 +294,14 @@ class SimpleAgent:
         
         # ========== 设置会话级参数 ==========
         clone.event_manager = event_manager
-        clone.workspace_dir = workspace_dir
         
-        # 更新工具执行器的上下文（workspace_dir 等）
+        # 更新工具执行器的上下文
         if clone.tool_executor and hasattr(clone.tool_executor, 'update_context'):
             clone.tool_executor.update_context({
                 "event_manager": event_manager,
-                "workspace_dir": workspace_dir,
             })
         
         # 创建新的 EventBroadcaster
-        from core.events.broadcaster import EventBroadcaster
         clone.broadcaster = EventBroadcaster(event_manager, conversation_service)
         
         # ========== 重置会话级状态 ==========
@@ -317,7 +315,6 @@ class SimpleAgent:
         clone._current_user_id = None
         
         # 创建新的 UsageTracker
-        from utils.usage_tracker import create_usage_tracker
         clone.usage_tracker = create_usage_tracker()
         
         # 标记为非原型
@@ -367,10 +364,9 @@ class SimpleAgent:
             self.tool_selector = None
             logger.debug("○ ToolSelector 未启用")
         
-        # 4. 工具执行器（总是需要）        
+        # 4. 工具执行器（总是需要）
         tool_context = {
             "event_manager": self.event_manager,
-            "workspace_dir": self.workspace_dir,
             "apis_config": self.apis_config,  # 🆕 用于 api_calling 自动注入认证
         }
         self.tool_executor = create_tool_executor(
@@ -525,7 +521,7 @@ class SimpleAgent:
         
         # ===== 🆕 初始化 PromptManager（事件驱动 Prompt 追加） =====
         ctx = create_runtime_context(session_id=session_id, max_turns=self.max_turns)
-        prompt_manager = get_prompt_manager()
+        prompt_manager = await get_prompt_manager_async()  # 使用异步版本确保片段已加载
         
         # 会话开始 → 追加 sandbox_context
         prompt_manager.on_session_start(ctx, conversation_id=conversation_id, user_id=user_id)
@@ -586,7 +582,6 @@ class SimpleAgent:
         else:
             # 未提供 intent 参数，使用默认配置（内部意图分析已移除）
             logger.warning("⚠️ 未提供意图结果，使用默认配置（建议启用路由层）")
-            from core.agent.types import IntentResult, TaskType, Complexity
             intent = IntentResult(
                 task_type=TaskType.GENERAL,
                 complexity=Complexity.MEDIUM,
@@ -765,7 +760,6 @@ class SimpleAgent:
         # 优先级：prompt_cache 多层缓存 > 用户自定义 > 框架默认
         
         # 🆕 V5.1: 获取任务复杂度用于动态路由
-        from core.prompt import TaskComplexity
         task_complexity = self._get_task_complexity(intent)
         
         # 🆕 V6.3: 使用多层缓存（prompt_cache 可用时）
@@ -801,7 +795,6 @@ class SimpleAgent:
             
             # 🆕 追加 Memory Guidance Prompt（L1 策略，可配置）
             if self.context_strategy.enable_memory_guidance:
-                from core.context.compaction import get_memory_guidance_prompt
                 memory_guidance = get_memory_guidance_prompt()
                 enhanced_prompt = f"{self.system_prompt}\n\n{memory_guidance}"
             
@@ -810,7 +803,6 @@ class SimpleAgent:
                        f"({len(self.system_prompt)}字符, L1={self.context_strategy.enable_memory_guidance})")
         else:
             # 使用框架默认 Prompt（根据意图识别结果决定是否检索 Mem0）+ PromptManager 追加
-            from prompts.universal_agent_prompt import get_universal_agent_prompt
             base_prompt = get_universal_agent_prompt(
                 conversation_id=conversation_id,
                 user_id=user_id,
@@ -1132,8 +1124,6 @@ class SimpleAgent:
         Returns:
             TaskComplexity 枚举值
         """
-        from core.prompt import TaskComplexity
-        
         if intent is None:
             return TaskComplexity.MEDIUM  # 默认中等复杂度
         
@@ -1182,8 +1172,6 @@ class SimpleAgent:
         Returns:
             List[Dict] - Claude API 的 system blocks 格式
         """
-        from core.prompt import TaskComplexity
-        
         # 获取任务复杂度
         task_complexity = self._get_task_complexity(intent)
         
@@ -1211,7 +1199,6 @@ class SimpleAgent:
             # 🆕 追加 Memory Guidance Prompt（L1 策略：指导 Claude 使用 Memory Tool）
             # 可通过实例配置 context_management.enable_memory_guidance 控制
             if self.context_strategy.enable_memory_guidance:
-                from core.context.compaction import get_memory_guidance_prompt
                 system_blocks.append({
                     "type": "text",
                     "text": f"\n\n{get_memory_guidance_prompt()}"
@@ -1224,9 +1211,6 @@ class SimpleAgent:
             return system_blocks
         
         # Fallback: 使用框架默认 Prompt（单层缓存）
-        from prompts.universal_agent_prompt import get_universal_agent_prompt
-        from core.context.compaction import get_memory_guidance_prompt
-        
         base_prompt = get_universal_agent_prompt(
             user_id=user_id,
             user_query=user_query,
@@ -1420,7 +1404,7 @@ class SimpleAgent:
             
             # 触发 PromptManager（如 RAG 上下文追加）
             if ctx:
-                get_prompt_manager().on_tool_result(ctx, tool_name=tool_name, result=result)
+                (await get_prompt_manager_async()).on_tool_result(ctx, tool_name=tool_name, result=result)
             
             return {
                 "tool_id": tool_id,
@@ -1639,7 +1623,7 @@ class SimpleAgent:
                     yield event
                 
                 # 触发 PromptManager
-                get_prompt_manager().on_tool_result(ctx, tool_name=tool_name, result={"streamed": True})
+                (await get_prompt_manager_async()).on_tool_result(ctx, tool_name=tool_name, result={"streamed": True})
             else:
                 # ===== 串行工具执行（plan_todo, HITL 等）=====
                 result_info = await self._execute_single_tool(tool_call, session_id, ctx)
@@ -2016,7 +2000,6 @@ class SimpleAgent:
     def clone(
         self,
         event_manager,
-        workspace_dir: str = None,
         conversation_service = None
     ) -> "SimpleAgent":
         """
@@ -2039,7 +2022,6 @@ class SimpleAgent:
         
         Args:
             event_manager: 事件管理器（必需，每次请求独立）
-            workspace_dir: 工作目录
             conversation_service: 会话服务
             
         Returns:
@@ -2076,7 +2058,6 @@ class SimpleAgent:
         
         # 注入会话级依赖
         cloned.event_manager = event_manager
-        cloned.workspace_dir = workspace_dir
         cloned.broadcaster = EventBroadcaster(event_manager, conversation_service)
         
         # 重置会话状态
@@ -2107,7 +2088,6 @@ class SimpleAgent:
 
 def create_simple_agent(
     model: str = "claude-sonnet-4-5-20250929",
-    workspace_dir: str = None,
     event_manager=None,
     conversation_service=None
 ) -> SimpleAgent:
@@ -2116,7 +2096,6 @@ def create_simple_agent(
     
     Args:
         model: 模型名称
-        workspace_dir: 工作目录
         event_manager: EventManager 实例（必需）
         conversation_service: ConversationService 实例（用于消息持久化）
         
@@ -2128,7 +2107,6 @@ def create_simple_agent(
     
     return SimpleAgent(
         model=model,
-        workspace_dir=workspace_dir,
         event_manager=event_manager,
         conversation_service=conversation_service
     )

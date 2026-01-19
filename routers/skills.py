@@ -5,6 +5,9 @@ Skills 管理路由
 创建 Skill 时自动同步到 Claude API（通过 auto_register 参数控制）
 """
 
+import asyncio
+import re
+import shutil
 from typing import Optional, List
 from datetime import datetime
 from pathlib import Path
@@ -29,6 +32,36 @@ router = APIRouter(prefix="/api/v1/skills", tags=["Skills 管理"])
 # 辅助函数
 # ============================================================
 
+_NAME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]*$")
+
+
+def _validate_name(value: str, label: str) -> None:
+    if not value or not _NAME_RE.match(value):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "VALIDATION_ERROR",
+                "message": f"{label}格式不合法: {value}，必须以字母开头，只能包含字母、数字、下划线、连字符",
+            },
+        )
+
+
+def _ensure_within(base_dir: Path, target_path: Path, label: str) -> Path:
+    base_dir = base_dir.resolve()
+    target_path = target_path.resolve()
+    try:
+        target_path.relative_to(base_dir)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "VALIDATION_ERROR",
+                "message": f"{label}路径不合法",
+            },
+        )
+    return target_path
+
+
 def _get_skills_library_dir() -> Path:
     """获取 skills/library 目录路径"""
     current_file = Path(__file__)
@@ -40,7 +73,20 @@ def _get_instance_skills_dir(agent_id: str) -> Path:
     """获取 instances/{agent_id}/skills 目录路径"""
     current_file = Path(__file__)
     project_root = current_file.parent.parent
-    return project_root / "instances" / agent_id / "skills"
+    instances_dir = project_root / "instances"
+    skills_dir = instances_dir / agent_id / "skills"
+    return _ensure_within(instances_dir, skills_dir, "agent_id")
+
+
+def _get_skill_dir(skill_name: str, agent_id: Optional[str]) -> Path:
+    """获取指定 Skill 的目录路径（带安全校验）"""
+    _validate_name(skill_name, "Skill 名称")
+    if agent_id:
+        _validate_name(agent_id, "agent_id")
+        base_dir = _get_instance_skills_dir(agent_id)
+    else:
+        base_dir = _get_skills_library_dir()
+    return _ensure_within(base_dir, base_dir / skill_name, "Skill 名称")
 
 
 def _parse_skill_metadata(skill_md_path: Path) -> dict:
@@ -188,6 +234,7 @@ async def list_skills(
     
     # Agent 特定 Skills
     if agent_id:
+        _validate_name(agent_id, "agent_id")
         instance_skills_dir = _get_instance_skills_dir(agent_id)
         agent_skills = _scan_skills_in_dir(instance_skills_dir, agent_id)
         skills.extend(agent_skills)
@@ -239,32 +286,24 @@ async def get_skill(
     Returns:
         Skill 详细信息
     """
-    # 确定搜索路径
-    if agent_id:
-        search_paths = [_get_instance_skills_dir(agent_id)]
-    else:
-        search_paths = [_get_skills_library_dir()]
+    skill_dir = _get_skill_dir(skill_name, agent_id)
+    skill_md_path = skill_dir / "SKILL.md"
     
-    # 搜索 Skill
-    for search_dir in search_paths:
-        skill_dir = search_dir / skill_name
-        skill_md_path = skill_dir / "SKILL.md"
+    if skill_md_path.exists():
+        metadata = _parse_skill_metadata(skill_md_path)
         
-        if skill_md_path.exists():
-            metadata = _parse_skill_metadata(skill_md_path)
-            
-            return SkillDetail(
-                name=metadata.get("name", skill_name),
-                description=metadata.get("description", ""),
-                agent_id=agent_id or "global",
-                is_enabled=True,
-                is_registered=False,  # TODO: 从数据库获取
-                skill_id=None,
-                skill_path=str(skill_dir),
-                created_at=datetime.fromtimestamp(skill_md_path.stat().st_mtime),
-                registered_at=None,
-                updated_at=datetime.fromtimestamp(skill_md_path.stat().st_mtime),
-            )
+        return SkillDetail(
+            name=metadata.get("name", skill_name),
+            description=metadata.get("description", ""),
+            agent_id=agent_id or "global",
+            is_enabled=True,
+            is_registered=False,  # TODO: 从数据库获取
+            skill_id=None,
+            skill_path=str(skill_dir),
+            created_at=datetime.fromtimestamp(skill_md_path.stat().st_mtime),
+            registered_at=None,
+            updated_at=datetime.fromtimestamp(skill_md_path.stat().st_mtime),
+        )
     
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
@@ -292,21 +331,11 @@ async def create_skill(request: SkillCreateRequest):
     
     在 instances/{agent_id}/skills/ 目录下创建新的 Skill
     """
-    import re
-    
     # 验证 skill_name 格式
-    if not re.match(r'^[a-zA-Z][a-zA-Z0-9_-]*$', request.name):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "code": "VALIDATION_ERROR",
-                "message": f"Skill 名称格式不合法: {request.name}，必须以字母开头，只能包含字母、数字、下划线、连字符",
-            }
-        )
+    _validate_name(request.name, "Skill 名称")
     
     # 确定目标目录
-    skills_dir = _get_instance_skills_dir(request.agent_id)
-    skill_dir = skills_dir / request.name
+    skill_dir = _get_skill_dir(request.name, request.agent_id)
     
     if skill_dir.exists():
         raise HTTPException(
@@ -356,10 +385,9 @@ async def create_skill(request: SkillCreateRequest):
         }
         
     except Exception as e:
-        # 回滚
-        import shutil
+        # 回滚（异步删除）
         if skill_dir.exists():
-            shutil.rmtree(skill_dir)
+            await asyncio.to_thread(shutil.rmtree, skill_dir)
         
         logger.error(f"创建 Skill 失败: {e}", exc_info=True)
         raise HTTPException(
@@ -388,10 +416,7 @@ async def update_skill(
     更新 Skill 的 SKILL.md 内容
     """
     # 确定搜索路径
-    if agent_id:
-        skill_dir = _get_instance_skills_dir(agent_id) / skill_name
-    else:
-        skill_dir = _get_skills_library_dir() / skill_name
+    skill_dir = _get_skill_dir(skill_name, agent_id)
     
     skill_md_path = skill_dir / "SKILL.md"
     
@@ -456,12 +481,15 @@ async def delete_skill(
     删除 Skill 的目录和所有文件
     """
     # 确定搜索路径
-    if agent_id:
-        skill_dir = _get_instance_skills_dir(agent_id) / skill_name
-    else:
-        skill_dir = _get_skills_library_dir() / skill_name
+    skill_dir = _get_skill_dir(skill_name, agent_id)
     
     if not skill_dir.exists():
+        if force:
+            return {
+                "success": True,
+                "name": skill_name,
+                "message": f"Skill '{skill_name}' 不存在，已忽略",
+            }
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
@@ -471,8 +499,7 @@ async def delete_skill(
         )
     
     try:
-        import shutil
-        shutil.rmtree(skill_dir)
+        await asyncio.to_thread(shutil.rmtree, skill_dir)
         
         logger.info(f"🗑️ 删除 Skill: {skill_name}")
         
@@ -483,6 +510,13 @@ async def delete_skill(
         }
         
     except Exception as e:
+        if force:
+            logger.warning(f"删除 Skill 失败但已忽略: {e}")
+            return {
+                "success": True,
+                "name": skill_name,
+                "message": f"Skill '{skill_name}' 删除失败已忽略",
+            }
         logger.error(f"删除 Skill 失败: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -515,4 +549,3 @@ async def list_prebuilt_skills():
         "total": len(PREBUILT_SKILLS),
         "skills": PREBUILT_SKILLS,
     }
-

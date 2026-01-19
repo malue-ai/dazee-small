@@ -15,16 +15,23 @@ V6.0 核心编排器，管理多 Agent 协作的完整生命周期
 4. 结果聚合（ResultAggregator）
 """
 
+# 1. 标准库
 import asyncio
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, Any, Optional, AsyncGenerator, List
 
+# 2. 第三方库（无）
+
+# 3. 本地模块
+from core.llm.base import Message
+from core.memory.working import WorkingMemory
+from core.multi_agent.checkpoint import create_checkpoint_manager
 from logger import get_logger
 from .fsm import FSMEngine, TaskState, TaskStatus, SubTaskStatus
 from .decomposition import TaskDecomposer
-from .scheduling import WorkerScheduler, ResultAggregator, ExecutionStrategy
+from .scheduling import WorkerScheduler, ResultAggregator, ExecutionStrategy, ExecutionResult
 from .fault_tolerance import FaultToleranceLayer, create_fault_tolerance_layer
 
 logger = get_logger("multi_agent_orchestrator")
@@ -127,7 +134,6 @@ class MultiAgentOrchestrator:
     def clone_for_session(
         self,
         event_manager,
-        workspace_dir: str = None,
         conversation_service = None
     ) -> "MultiAgentOrchestrator":
         """
@@ -152,7 +158,6 @@ class MultiAgentOrchestrator:
         
         Args:
             event_manager: 事件管理器（必需）
-            workspace_dir: 工作目录
             conversation_service: 会话服务
             
         Returns:
@@ -175,7 +180,6 @@ class MultiAgentOrchestrator:
         clone.event_manager = event_manager
         
         # 创建新的会话级记忆管理器
-        from core.memory.working import WorkingMemory
         clone.memory_manager = WorkingMemory(event_manager=event_manager)
         
         # 重新初始化会话级组件（FSM、调度器、容错层）
@@ -191,7 +195,6 @@ class MultiAgentOrchestrator:
         if hasattr(self, 'max_turns'):
             clone.max_turns = self.max_turns
         
-        clone.workspace_dir = workspace_dir
         clone.conversation_service = conversation_service
         
         # 标记为非原型
@@ -232,7 +235,6 @@ class MultiAgentOrchestrator:
         self.fault_tolerance = create_fault_tolerance_layer()
         
         # 🆕 V7.1: 检查点管理器（P0 优化）
-        from core.multi_agent.checkpoint import create_checkpoint_manager
         self.checkpoint_manager = create_checkpoint_manager()
     
     def _find_worker_config(self, specialization: str):
@@ -566,8 +568,6 @@ class MultiAgentOrchestrator:
         
         这是注入到 WorkerScheduler 的执行函数
         """
-        from .scheduling.worker_scheduler import ExecutionResult
-        
         logger.info(
             f"Worker {worker.id} 执行任务: {sub_task.id} ({sub_task.action})"
         )
@@ -604,8 +604,6 @@ class MultiAgentOrchestrator:
     
     async def _call_worker_llm(self, worker, sub_task):
         """调用 Worker LLM"""
-        from core.llm.base import Message
-        
         response = await self.llm_service.create_message_async(
             model="claude-sonnet-4-5-20250929",
             max_tokens=16000,  # 增加以满足 extended thinking 要求

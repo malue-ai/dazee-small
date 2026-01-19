@@ -6,8 +6,11 @@
 
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
+import yaml
+import aiofiles
 
 
 class ExecutionMode(str, Enum):
@@ -331,9 +334,9 @@ class CriticConfig(BaseModel):
 MultiAgentConfig.model_rebuild()
 
 
-def load_multi_agent_config(config_path: str = "config/multi_agent_config.yaml") -> MultiAgentConfig:
+async def load_multi_agent_config(config_path: str = "config/multi_agent_config.yaml") -> MultiAgentConfig:
     """
-    ✅ V7.2: 加载多智能体配置
+    ✅ V7.2: 异步加载多智能体配置
     
     从 YAML 文件加载配置，如果文件不存在则使用默认配置
     
@@ -343,8 +346,6 @@ def load_multi_agent_config(config_path: str = "config/multi_agent_config.yaml")
     Returns:
         MultiAgentConfig: 多智能体配置对象
     """
-    import yaml
-    from pathlib import Path
     from logger import get_logger
     
     logger = get_logger("multi_agent.config")
@@ -353,8 +354,9 @@ def load_multi_agent_config(config_path: str = "config/multi_agent_config.yaml")
     
     if config_file.exists():
         try:
-            with open(config_file, 'r', encoding='utf-8') as f:
-                config_data = yaml.safe_load(f)
+            async with aiofiles.open(config_file, 'r', encoding='utf-8') as f:
+                content = await f.read()
+                config_data = yaml.safe_load(content)
             
             logger.info(f"✅ 已加载多智能体配置: {config_path}")
             

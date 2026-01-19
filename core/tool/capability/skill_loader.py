@@ -16,9 +16,11 @@ Skill 内容加载器
 - File is Everything：所有知识存储在文件中
 """
 
+import asyncio
 from typing import Dict, Optional, List
 from pathlib import Path
 from dataclasses import dataclass, field
+import aiofiles
 
 
 @dataclass
@@ -59,9 +61,9 @@ class SkillLoader:
         """初始化 Skill 加载器"""
         self._cache: Dict[str, SkillInfo] = {}
     
-    def load_skill_content(self, skill_path: str) -> Optional[str]:
+    async def load_skill_content(self, skill_path: str) -> Optional[str]:
         """
-        加载 SKILL.md 完整内容（Level 2）
+        异步加载 SKILL.md 完整内容（Level 2）
         
         Args:
             skill_path: Skill 目录路径（从 Capability.metadata 获取）
@@ -82,7 +84,8 @@ class SkillLoader:
             return None
         
         try:
-            content = skill_md.read_text(encoding='utf-8')
+            async with aiofiles.open(skill_md, 'r', encoding='utf-8') as f:
+                content = await f.read()
             
             # 缓存
             if skill_path not in self._cache:
@@ -99,9 +102,9 @@ class SkillLoader:
             print(f"⚠️ Failed to load {skill_md}: {e}")
             return None
     
-    def load_skill_resources(self, skill_path: str) -> Dict[str, str]:
+    async def load_skill_resources(self, skill_path: str) -> Dict[str, str]:
         """
-        加载 Skill 资源文件（Level 3）
+        异步加载 Skill 资源文件（Level 3）
         
         Args:
             skill_path: Skill 目录路径
@@ -120,10 +123,13 @@ class SkillLoader:
         resources_dir = Path(skill_path) / "resources"
         
         if resources_dir.exists():
-            for file in resources_dir.iterdir():
+            # 使用 asyncio.to_thread 包装同步的目录遍历
+            files = await asyncio.to_thread(list, resources_dir.iterdir())
+            for file in files:
                 if file.is_file():
                     try:
-                        resources[file.name] = file.read_text(encoding='utf-8')
+                        async with aiofiles.open(file, 'r', encoding='utf-8') as f:
+                            resources[file.name] = await f.read()
                     except Exception as e:
                         print(f"⚠️ Failed to read {file}: {e}")
         
@@ -139,9 +145,9 @@ class SkillLoader:
         
         return resources
     
-    def get_skill_scripts(self, skill_path: str) -> Dict[str, str]:
+    async def get_skill_scripts(self, skill_path: str) -> Dict[str, str]:
         """
-        获取 Skill 脚本文件路径
+        异步获取 Skill 脚本文件路径
         
         Args:
             skill_path: Skill 目录路径
@@ -153,7 +159,9 @@ class SkillLoader:
         scripts_dir = Path(skill_path) / "scripts"
         
         if scripts_dir.exists():
-            for file in scripts_dir.iterdir():
+            # 使用 asyncio.to_thread 包装同步的目录遍历
+            files = await asyncio.to_thread(list, scripts_dir.iterdir())
+            for file in files:
                 if file.is_file() and file.suffix == '.py':
                     scripts[file.stem] = str(file)
         
@@ -171,9 +179,9 @@ class SkillLoader:
         """
         return self._cache.get(skill_path)
     
-    def preload_skill(self, skill_path: str) -> SkillInfo:
+    async def preload_skill(self, skill_path: str) -> SkillInfo:
         """
-        预加载 Skill 的所有内容
+        异步预加载 Skill 的所有内容
         
         Args:
             skill_path: Skill 目录路径
@@ -182,8 +190,8 @@ class SkillLoader:
             完全加载的 SkillInfo
         """
         # 加载所有内容
-        self.load_skill_content(skill_path)
-        self.load_skill_resources(skill_path)
+        await self.load_skill_content(skill_path)
+        await self.load_skill_resources(skill_path)
         
         return self._cache.get(skill_path)
     

@@ -12,8 +12,10 @@
 3. 检查点包含完整的执行状态（已完成的 Agent、中间结果、上下文）
 """
 
+import asyncio
 import json
-import logging
+import aiofiles
+from logger import get_logger
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -28,7 +30,7 @@ from core.agent.multi.models import (
     TaskAssignment,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class Checkpoint(BaseModel):
@@ -230,7 +232,7 @@ class CheckpointManager:
         checkpoint_id: str
     ) -> Optional[Checkpoint]:
         """
-        加载指定的检查点
+        加载指定的检查点（异步）
         
         Args:
             checkpoint_id: 检查点 ID
@@ -244,8 +246,9 @@ class CheckpointManager:
             return None
         
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
+                content = await f.read()
+                data = json.loads(content)
             
             checkpoint = Checkpoint(**data)
             return checkpoint
@@ -342,23 +345,26 @@ class CheckpointManager:
     
     async def cleanup_old_checkpoints(self) -> int:
         """
-        清理过期的检查点
+        清理过期的检查点（异步）
         
         Returns:
             int: 清理的数量
         """
         deleted = 0
         
-        for file_path in self.storage_path.glob("*.json"):
+        # 使用 asyncio.to_thread 包装同步的 glob 操作
+        file_paths = await asyncio.to_thread(list, self.storage_path.glob("*.json"))
+        for file_path in file_paths:
             try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
+                async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
+                    content = await f.read()
+                    data = json.loads(content)
                 
                 created_at = datetime.fromisoformat(data["created_at"])
                 age_days = (datetime.now() - created_at).days
                 
                 if age_days > self.retention_days:
-                    file_path.unlink()
+                    await asyncio.to_thread(file_path.unlink)
                     deleted += 1
             except Exception as e:
                 logger.error(f"清理检查点失败 {file_path}: {e}")
@@ -377,25 +383,29 @@ class CheckpointManager:
         return self.storage_path / f"{checkpoint_id}.json"
     
     async def _persist_checkpoint(self, checkpoint: Checkpoint) -> None:
-        """持久化检查点到磁盘"""
+        """持久化检查点到磁盘（异步）"""
         file_path = self._get_checkpoint_path(checkpoint.checkpoint_id)
         
         data = checkpoint.model_dump(mode="json")
+        content = json.dumps(data, ensure_ascii=False, indent=2, default=str)
         
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2, default=str)
+        async with aiofiles.open(file_path, "w", encoding="utf-8") as f:
+            await f.write(content)
     
     async def _load_session_checkpoints(
         self,
         session_id: str
     ) -> List[Checkpoint]:
-        """加载会话的所有检查点"""
+        """加载会话的所有检查点（异步）"""
         checkpoints = []
         
-        for file_path in self.storage_path.glob("*.json"):
+        # 使用 asyncio.to_thread 包装同步的 glob 操作
+        file_paths = await asyncio.to_thread(list, self.storage_path.glob("*.json"))
+        for file_path in file_paths:
             try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
+                async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
+                    content = await f.read()
+                    data = json.loads(content)
                 
                 if data.get("session_id") == session_id:
                     checkpoint = Checkpoint(**data)

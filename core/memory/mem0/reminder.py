@@ -23,7 +23,7 @@ class Reminder:
     根据用户计划和行为模式生成提醒
     """
     
-    def __init__(self):
+    def __init__(self) -> None:
         """初始化提醒调度器"""
         # 用户提醒存储（user_id -> List[ReminderItem]）
         self._user_reminders: Dict[str, List[ReminderItem]] = {}

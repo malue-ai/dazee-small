@@ -50,10 +50,6 @@ class MCPService:
     提供 MCP 服务器的完整生命周期管理
     """
     
-    def __init__(self):
-        """初始化 MCP 服务"""
-        pass
-    
     # ==================== 全局 MCP 模板管理 ====================
     
     async def register_global_mcp(

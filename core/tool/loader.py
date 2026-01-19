@@ -18,13 +18,13 @@
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from pathlib import Path
-import logging
 
 from .capability.registry import CapabilityRegistry
 from .capability.types import Capability
 from .instance_registry import InstanceToolRegistry
+from logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ==================== 工具类别定义 ====================

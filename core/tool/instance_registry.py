@@ -21,9 +21,12 @@
     all_tools = instance_registry.get_all_tools()
 """
 
+import json
+import aiofiles
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any, Callable, Awaitable
 from enum import Enum
+from pathlib import Path
 
 from logger import get_logger
 
@@ -522,9 +525,9 @@ class InstanceToolRegistry:
     
     # ==================== 缓存管理（🆕 V4.6）====================
     
-    def load_inference_cache(self, cache_path) -> bool:
+    async def load_inference_cache(self, cache_path) -> bool:
         """
-        加载工具推断缓存
+        异步加载工具推断缓存
         
         Args:
             cache_path: 缓存文件路径（Path 对象或字符串）
@@ -532,26 +535,24 @@ class InstanceToolRegistry:
         Returns:
             成功返回 True
         """
-        from pathlib import Path
-        
         cache_file = Path(cache_path)
         if not cache_file.exists():
             logger.debug(f"工具推断缓存文件不存在: {cache_file}")
             return False
         
         try:
-            import json
-            with open(cache_file, 'r', encoding='utf-8') as f:
-                self._inference_cache = json.load(f)
+            async with aiofiles.open(cache_file, 'r', encoding='utf-8') as f:
+                content = await f.read()
+                self._inference_cache = json.loads(content)
             logger.info(f"✅ 加载工具推断缓存: {len(self._inference_cache)} 个工具")
             return True
         except Exception as e:
             logger.error(f"加载工具推断缓存失败: {str(e)}")
             return False
     
-    def save_inference_cache(self, cache_path) -> bool:
+    async def save_inference_cache(self, cache_path) -> bool:
         """
-        保存工具推断缓存
+        异步保存工具推断缓存
         
         Args:
             cache_path: 缓存文件路径（Path 对象或字符串）
@@ -559,15 +560,12 @@ class InstanceToolRegistry:
         Returns:
             成功返回 True
         """
-        from pathlib import Path
-        import json
-        
         cache_file = Path(cache_path)
         cache_file.parent.mkdir(parents=True, exist_ok=True)
         
         try:
-            with open(cache_file, 'w', encoding='utf-8') as f:
-                json.dump(self._inference_cache, f, indent=2, ensure_ascii=False)
+            async with aiofiles.open(cache_file, 'w', encoding='utf-8') as f:
+                await f.write(json.dumps(self._inference_cache, indent=2, ensure_ascii=False))
             logger.info(f"✅ 保存工具推断缓存: {len(self._inference_cache)} 个工具")
             return True
         except Exception as e:

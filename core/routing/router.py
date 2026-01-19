@@ -30,15 +30,15 @@
         result = await multi_agent.execute(decision.to_agent_context())
 """
 
-import logging
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
 
 from core.agent.types import IntentResult
 # 🆕 V7.0: ComplexityScorer 保留向后兼容，但优先使用 LLM 输出的 complexity_score
 from core.routing.complexity_scorer import ComplexityScorer, ComplexityScore, ComplexityLevel
+from logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

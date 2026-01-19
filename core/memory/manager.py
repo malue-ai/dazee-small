@@ -126,7 +126,7 @@ class MemoryManager:
     
     # ==================== 生命周期管理 ====================
     
-    def start_task(self, task_id: str, user_intent: str):
+    def start_task(self, task_id: str, user_intent: str) -> None:
         """
         开始新任务
         
@@ -144,9 +144,9 @@ class MemoryManager:
         
         logger.debug(f"[MemoryManager] 开始任务: task_id={task_id}")
     
-    def end_task(self, result: Any, save_to_episodic: bool = True):
+    async def end_task(self, result: Any, save_to_episodic: bool = True) -> None:
         """
-        结束任务
+        结束任务（异步版本）
         
         Args:
             result: 任务结果
@@ -156,7 +156,12 @@ class MemoryManager:
         user_intent = self.working.get_metadata("user_intent", "")
         
         if save_to_episodic:
-            self.episodic.add_episode(
+            # 确保 episodic 已初始化
+            episodic = self.episodic
+            if not episodic._initialized:
+                await episodic.initialize()
+            
+            await episodic.add_episode(
                 task_id=task_id,
                 user_intent=user_intent,
                 result=result,
@@ -165,26 +170,26 @@ class MemoryManager:
         
         logger.debug(f"[MemoryManager] 结束任务: task_id={task_id}")
     
-    def clear_session(self):
+    def clear_session(self) -> None:
         """清空会话级记忆（保留持久沙箱）"""
         self.working.clear()
         self.e2b.clear_temporary()  # 只清除临时沙箱
     
-    def clear_all(self):
-        """清空所有记忆（慎用）"""
+    async def clear_all(self) -> None:
+        """清空所有记忆（异步版本，慎用）"""
         self.working.clear()
         self.e2b.clear_all()  # 清除所有沙箱（包括持久）
         
         if self._episodic:
-            self._episodic.clear()
+            await self._episodic.clear()
         if self._preference:
-            self._preference.clear()
+            await self._preference.clear()
         if self._plan:
-            self._plan.clear()  # 🆕 清除任务计划
+            await self._plan.clear()  # 🆕 清除任务计划
         if self._skill:
-            self._skill.clear()
+            await self._skill.clear()
         if self._cache:
-            self._cache.clear()
+            self._cache.clear()  # CacheMemory.clear() 仍然是同步的
     
     # ==================== 上下文生成 ====================
     
@@ -220,7 +225,7 @@ class MemoryManager:
     
     # ==================== 用户切换 ====================
     
-    def switch_user(self, user_id: str):
+    def switch_user(self, user_id: str) -> None:
         """
         切换用户
         

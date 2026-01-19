@@ -19,13 +19,17 @@ V7.2 新增特性：
 - ✅ Plan-Execute-Critique 循环：智能质量保证和计划调整
 """
 
+# 1. 标准库
 import asyncio
-import logging
 import time
 from datetime import datetime
 from typing import Any, AsyncGenerator, Dict, List, Optional
 from uuid import uuid4
 
+# 2. 第三方库（无）
+
+# 3. 本地模块
+from utils.usage_tracker import create_usage_tracker
 from core.agent.multi.models import (
     ExecutionMode,
     AgentConfig,
@@ -45,8 +49,9 @@ from core.agent.multi.lead_agent import LeadAgent, TaskDecompositionPlan, SubTas
 from core.agent.multi.critic import CriticAgent
 from core.planning.protocol import Plan, PlanStep, StepStatus
 from core.routing import IntentResult
+from logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class MultiAgentOrchestrator:
@@ -168,11 +173,30 @@ class MultiAgentOrchestrator:
         self.tool_executor = None  # 🆕 V7.3: 工具执行器（用于 RVR 循环）
         self._working_memory = None  # 工作记忆
         self._mem0_client = None  # Mem0 客户端
-        self.workspace_dir = './workspace'  # 默认工作目录
         
         # 🆕 V7.4: Token 使用统计
-        from utils.usage_tracker import create_usage_tracker
         self.usage_tracker = create_usage_tracker()
+        
+        # 初始化标记
+        self._initialized: bool = False
+    
+    async def initialize(self) -> None:
+        """
+        异步初始化：加载需要异步初始化的组件
+        
+        使用方式：
+            orchestrator = MultiAgentOrchestrator(...)
+            await orchestrator.initialize()
+        """
+        if self._initialized:
+            return
+        
+        # 初始化 Critic Agent
+        if self.critic:
+            await self.critic.initialize()
+        
+        self._initialized = True
+        logger.debug("[MultiAgentOrchestrator] 初始化完成")
     
     @property
     def usage_stats(self) -> Dict[str, int]:
@@ -1238,9 +1262,7 @@ class MultiAgentOrchestrator:
             
             self.tool_executor = ToolExecutor(
                 registry=CapabilityRegistry(),
-                tool_context={
-                    "workspace_dir": None,  # 多智能体不需要特定工作目录
-                },
+                tool_context={},
                 enable_compaction=True
             )
             logger.info("✅ 工具执行器已初始化")

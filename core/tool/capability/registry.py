@@ -13,9 +13,11 @@
 - 易于扩展：支持动态注册
 """
 
+import asyncio
 from typing import Dict, List, Optional, Any
 from pathlib import Path
 import yaml
+import aiofiles
 
 from .types import Capability, CapabilityType
 
@@ -26,6 +28,10 @@ class CapabilityRegistry:
     
     管理所有能力（Skills/Tools/MCP/Code）
     从 capabilities.yaml 加载配置，同时扫描 skills/library/ 发现 Skills
+    
+    使用方式：
+        registry = CapabilityRegistry()
+        await registry.initialize()  # 必须调用以加载配置
     """
     
     def __init__(
@@ -47,12 +53,26 @@ class CapabilityRegistry:
         
         self._config_path = config_path or self._default_config_path()
         self._skills_dir = skills_dir or self._default_skills_dir()
+        self._initialized: bool = False
+    
+    async def initialize(self) -> None:
+        """
+        异步初始化：加载配置和扫描 Skills
+        
+        使用方式：
+            registry = CapabilityRegistry()
+            await registry.initialize()
+        """
+        if self._initialized:
+            return
         
         # 加载 Tools/MCP 配置
-        self._load_config()
+        await self._load_config_async()
         
         # 扫描 Skills
-        self._scan_skills()
+        await self._scan_skills_async()
+        
+        self._initialized = True
     
     def _default_config_path(self) -> str:
         """获取默认配置文件路径"""
@@ -62,8 +82,8 @@ class CapabilityRegistry:
         """获取默认 Skills 目录"""
         return str(Path(__file__).parent.parent.parent.parent / "skills" / "library")
     
-    def _load_config(self):
-        """从 YAML 配置文件加载能力"""
+    async def _load_config_async(self) -> None:
+        """异步从 YAML 配置文件加载能力"""
         config_path = Path(self._config_path)
         
         if not config_path.exists():
@@ -71,8 +91,9 @@ class CapabilityRegistry:
             return
         
         try:
-            with open(config_path, 'r', encoding='utf-8') as f:
-                config = yaml.safe_load(f)
+            async with aiofiles.open(config_path, 'r', encoding='utf-8') as f:
+                content = await f.read()
+                config = yaml.safe_load(content)
         except Exception as e:
             print(f"⚠️ Warning: Failed to load config: {e}")
             return
@@ -130,9 +151,9 @@ class CapabilityRegistry:
             cache_stable=data.get('cache_stable', False)  # 🆕 结果是否稳定可缓存
         )
     
-    def _scan_skills(self):
+    async def _scan_skills_async(self) -> None:
         """
-        扫描 Skills 目录
+        异步扫描 Skills 目录
         
         将 Skills 注册为 Capability(type=SKILL)
         """
@@ -142,8 +163,11 @@ class CapabilityRegistry:
             print(f"⚠️ Skills directory not found: {skills_dir}")
             return
         
+        # 使用 asyncio.to_thread 包装同步的目录遍历
+        skill_dirs = await asyncio.to_thread(list, skills_dir.iterdir())
+        
         skill_count = 0
-        for skill_dir in skills_dir.iterdir():
+        for skill_dir in skill_dirs:
             if not skill_dir.is_dir():
                 continue
             
@@ -151,8 +175,8 @@ class CapabilityRegistry:
             if not skill_md.exists():
                 continue
             
-            # 解析 YAML frontmatter
-            metadata = self._parse_skill_frontmatter(skill_md)
+            # 异步解析 YAML frontmatter
+            metadata = await self._parse_skill_frontmatter_async(skill_md)
             if not metadata:
                 continue
             
@@ -184,10 +208,11 @@ class CapabilityRegistry:
         if skill_count > 0:
             print(f"✅ Scanned {skill_count} skills from {skills_dir}")
     
-    def _parse_skill_frontmatter(self, skill_md: Path) -> Optional[Dict]:
-        """解析 SKILL.md 的 YAML frontmatter"""
+    async def _parse_skill_frontmatter_async(self, skill_md: Path) -> Optional[Dict]:
+        """异步解析 SKILL.md 的 YAML frontmatter"""
         try:
-            content = skill_md.read_text(encoding='utf-8')
+            async with aiofiles.open(skill_md, 'r', encoding='utf-8') as f:
+                content = await f.read()
             if not content.startswith('---'):
                 return None
             

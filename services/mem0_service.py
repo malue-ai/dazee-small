@@ -55,7 +55,7 @@ class Mem0Service:
     
     _instance: Optional["Mem0Service"] = None
     
-    def __init__(self):
+    def __init__(self) -> None:
         self._pool = None
         self._background_service = None
     
@@ -66,7 +66,7 @@ class Mem0Service:
             cls._instance = cls()
         return cls._instance
     
-    def _get_pool(self):
+    def _get_pool(self) -> Any:
         """获取 Mem0 Pool（懒加载）"""
         if self._pool is None:
             try:
@@ -76,7 +76,7 @@ class Mem0Service:
                 raise Mem0NotInstalledError("mem0 模块未安装") from e
         return self._pool
     
-    def _get_background_service(self):
+    def _get_background_service(self) -> Any:
         """获取后台任务服务（懒加载）"""
         if self._background_service is None:
             from utils.background_tasks import get_background_task_service

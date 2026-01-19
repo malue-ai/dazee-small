@@ -21,12 +21,17 @@
 └─────────────────────────────────────────────────────────────┘
 """
 
-import json
+# 1. 标准库
 import asyncio
+import json
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any, Set
 from enum import Enum
+from typing import Dict, List, Optional, Any, Set
 
+# 2. 第三方库（无）
+
+# 3. 本地模块
+from core.llm import Message
 from logger import get_logger
 
 logger = get_logger("llm_prompt_analyzer")
@@ -466,7 +471,6 @@ async def merge_with_framework_rules(user_prompt: str) -> str:
             max_retries=profile.get("max_retries", 2)
         )
         
-        from core.llm import Message
         response = await llm_service.create_message_async(
             system=system_prompt,
             messages=[Message(role="user", content=user_message)],

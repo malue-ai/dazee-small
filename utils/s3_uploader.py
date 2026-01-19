@@ -15,8 +15,10 @@ AWS S3 上传工具 - S3 Uploader
 """
 
 import os
+import io
 import boto3
 import hashlib
+import aiofiles
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 from pathlib import Path
@@ -52,6 +54,10 @@ class S3Uploader:
     - 预签名 URL 生成
     - 文件删除
     - 批量操作
+    
+    使用方式：
+        uploader = S3Uploader()
+        await uploader.initialize()  # 必须调用以加载配置
     """
     
     def __init__(self, config_path: str = "config/storage.yaml"):
@@ -61,18 +67,35 @@ class S3Uploader:
         Args:
             config_path: 配置文件路径
         """
-        self.config = self._load_config(config_path)
+        self._config_path = config_path
+        self.config: Dict[str, Any] = {}
         self.s3_client = None
+        self.bucket_name = ""
+        self._initialized: bool = False
+    
+    async def initialize(self) -> None:
+        """
+        异步初始化：加载配置并创建 S3 客户端
+        
+        使用方式：
+            uploader = S3Uploader()
+            await uploader.initialize()
+        """
+        if self._initialized:
+            return
+        
+        self.config = await self._load_config_async(self._config_path)
         self.bucket_name = self.config["aws"]["s3"]["bucket_name"]
         
         # 初始化 boto3 客户端
         self._init_s3_client()
         
+        self._initialized = True
         logger.info(f"✅ S3 Uploader 初始化完成: bucket={self.bucket_name}")
     
-    def _load_config(self, config_path: str) -> Dict[str, Any]:
+    async def _load_config_async(self, config_path: str) -> Dict[str, Any]:
         """
-        加载配置文件
+        异步加载配置文件
         
         Args:
             config_path: 配置文件路径
@@ -81,8 +104,9 @@ class S3Uploader:
             配置字典
         """
         try:
-            with open(config_path, 'r', encoding='utf-8') as f:
-                config = yaml.safe_load(f)
+            async with aiofiles.open(config_path, 'r', encoding='utf-8') as f:
+                content = await f.read()
+                config = yaml.safe_load(content)
             
             # 替换环境变量
             aws_config = config.get("aws", {})
@@ -195,20 +219,22 @@ class S3Uploader:
             # 5. 获取 ACL
             acl = self.config["aws"]["s3"]["acl"].get(category, "private")
             
-            # 6. 上传到 S3
+            # 6. 上传到 S3（异步读取文件内容）
             logger.info(f"📤 上传文件: {filename} → {s3_key}")
             
-            with open(file_path, 'rb') as f:
-                self.s3_client.upload_fileobj(
-                    f,
-                    self.bucket_name,
-                    s3_key,
-                    ExtraArgs={
-                        'ContentType': content_type,
-                        'Metadata': file_metadata,
-                        'ACL': acl
-                    }
-                )
+            async with aiofiles.open(file_path, 'rb') as f:
+                file_content = await f.read()
+            
+            self.s3_client.upload_fileobj(
+                io.BytesIO(file_content),
+                self.bucket_name,
+                s3_key,
+                ExtraArgs={
+                    'ContentType': content_type,
+                    'Metadata': file_metadata,
+                    'ACL': acl
+                }
+            )
             
             logger.info(f"✅ 上传成功: {s3_key}")
             

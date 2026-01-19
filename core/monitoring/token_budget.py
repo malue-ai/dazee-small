@@ -16,9 +16,9 @@ Token Budget - 多智能体 Token 预算管理
 from typing import Dict, Tuple, Optional
 from enum import Enum
 from pydantic import BaseModel
-import logging
+from logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class QoSTier(str, Enum):

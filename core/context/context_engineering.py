@@ -15,16 +15,23 @@
 - 先进 Agent 上下文管理最佳实践
 """
 
+# 1. 标准库
+import hashlib
 import json
 import random
-import hashlib
-from typing import Dict, Any, List, Optional, Tuple
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-import logging
+from typing import Dict, Any, List, Optional, Tuple
 
-logger = logging.getLogger(__name__)
+# 2. 第三方库（无）
+
+# 3. 本地模块
+from tools.plan_todo_tool import PlanTodoTool
+from logger import get_logger
+
+logger = get_logger(__name__)
 
 
 # ===== 1. KV-Cache 优化 =====
@@ -89,7 +96,6 @@ class CacheOptimizer:
         Returns:
             (不含时间戳的内容, 提取的时间戳)
         """
-        import re
         # 匹配常见时间戳格式
         timestamp_patterns = [
             r'\[(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)\]',
@@ -164,7 +170,6 @@ class TodoRewriter:
             return messages
         
         # 生成 Plan 上下文（精简格式）
-        from tools.plan_todo_tool import PlanTodoTool
         plan_context = PlanTodoTool.get_context_for_llm(plan)
         
         if not plan_context or plan_context == "[Plan] No active plan":
@@ -275,7 +280,7 @@ class ToolMasker:
     - ZenFlux 实现：在工具选择阶段过滤
     """
     
-    def __init__(self, config: Optional[ToolMaskConfig] = None):
+    def __init__(self, config: Optional[ToolMaskConfig] = None) -> None:
         self.config = config or ToolMaskConfig()
         self._current_state = AgentState.IDLE
         self._state_history: List[Tuple[datetime, AgentState]] = []
@@ -421,7 +426,7 @@ class RecoverableCompressor:
     需要时可按需读取特定页面
     """
     
-    def __init__(self, max_summary_chars: int = 300):
+    def __init__(self, max_summary_chars: int = 300) -> None:
         self.max_summary_chars = max_summary_chars
         self._reference_store: Dict[str, CompressedReference] = {}
     
@@ -714,7 +719,7 @@ class StructuralVariation:
         
         return "\n".join(result)
     
-    def adjust_variation_level(self, context_length: int, repetition_count: int = 0):
+    def adjust_variation_level(self, context_length: int, repetition_count: int = 0) -> None:
         """
         动态调整变异等级
         
@@ -759,7 +764,7 @@ class ErrorRetention:
     效果：模型能看到「刚才这个关键词没找到结果」，下一步自然会换个方向
     """
     
-    def __init__(self, max_errors: int = 10):
+    def __init__(self, max_errors: int = 10) -> None:
         self.max_errors = max_errors
         self._errors: List[ErrorRecord] = []
     
@@ -801,7 +806,7 @@ class ErrorRetention:
         
         return record
     
-    def record_recovery(self, error_record: ErrorRecord, recovery_action: str):
+    def record_recovery(self, error_record: ErrorRecord, recovery_action: str) -> None:
         """
         记录恢复动作
         
@@ -841,7 +846,7 @@ class ErrorRetention:
         """获取最近的错误"""
         return self._errors[-count:]
     
-    def clear(self):
+    def clear(self) -> None:
         """清除错误记录"""
         self._errors.clear()
 
@@ -861,7 +866,7 @@ class ContextEngineeringManager:
     - 错误保留
     """
     
-    def __init__(self):
+    def __init__(self) -> None:
         self.cache_optimizer = CacheOptimizer()
         self.todo_rewriter = TodoRewriter()
         self.tool_masker = ToolMasker()
@@ -920,7 +925,7 @@ class ContextEngineeringManager:
         """获取当前状态下允许的工具"""
         return self.tool_masker.get_allowed_tools(all_tools)
     
-    def transition_state(self, new_state: AgentState):
+    def transition_state(self, new_state: AgentState) -> None:
         """转换 Agent 状态"""
         self.tool_masker.transition_to(new_state)
     

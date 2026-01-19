@@ -10,14 +10,14 @@
 6. 响应质量问题
 """
 
-import logging
+from logger import get_logger
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional
 from dataclasses import dataclass, field
 from enum import Enum
 from collections import defaultdict
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class FailureType(str, Enum):

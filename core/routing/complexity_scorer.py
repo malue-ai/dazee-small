@@ -14,14 +14,14 @@
 5. 领域知识要求
 """
 
-import logging
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
 from enum import Enum
 
 from core.agent.types import IntentResult, TaskType, Complexity
+from logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ComplexityLevel(str, Enum):
@@ -86,10 +86,6 @@ class ComplexityScorer:
         TaskType.TASK_EXECUTION: 4.0,        # 任务执行：中等偏上
         TaskType.OTHER: 2.0,                 # 其他：默认简单
     }
-    
-    def __init__(self):
-        """初始化复杂度评分器"""
-        pass
     
     def score(
         self,

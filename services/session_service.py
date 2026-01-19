@@ -22,7 +22,6 @@ from uuid import uuid4
 
 from logger import get_logger
 from core.events import create_event_manager
-from core.workspace_manager import WorkspaceManager
 from services.redis_manager import get_redis_manager
 
 logger = get_logger("session_service")
@@ -64,19 +63,10 @@ class SessionService:
     注意：不负责 Agent 创建和管理
     """
     
-    def __init__(
-        self,
-        default_workspace: str = "./workspace"
-    ):
+    def __init__(self):
         """
         初始化 Session 服务
-        
-        Args:
-            default_workspace: 默认工作目录
         """
-        self.default_workspace = default_workspace
-        self.workspace_manager = WorkspaceManager(base_dir=default_workspace)
-        
         # Redis 管理器
         self.redis = get_redis_manager()
         
@@ -343,13 +333,9 @@ class SessionService:
 _default_service: Optional[SessionService] = None
 
 
-def get_session_service(
-    default_workspace: str = "./workspace"
-) -> SessionService:
+def get_session_service() -> SessionService:
     """获取默认 Session 服务单例"""
     global _default_service
     if _default_service is None:
-        _default_service = SessionService(
-            default_workspace=default_workspace
-        )
+        _default_service = SessionService()
     return _default_service

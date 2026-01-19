@@ -13,7 +13,8 @@ Token 审计模块
 """
 
 import json
-import logging
+import aiofiles
+from logger import get_logger
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -22,7 +23,7 @@ from pydantic import BaseModel, Field
 
 from evaluation.models import TokenUsage
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ============================================================
@@ -198,7 +199,7 @@ class TokenAuditor:
             f"billing_log={'enabled' if enable_billing_log else 'disabled'}"
         )
     
-    def record(
+    async def record(
         self,
         session_id: str,
         usage: TokenUsage,
@@ -289,9 +290,9 @@ class TokenAuditor:
             f"thinking={usage.thinking_tokens:,}, cache_read={usage.cache_read_tokens:,}"
         )
         
-        # 写入计费日志
+        # 写入计费日志（异步）
         if self.enable_billing_log:
-            self._write_to_log(record)
+            await self._write_to_log(record)
         
         return record
     
@@ -515,9 +516,9 @@ class TokenAuditor:
             "total": round(total_cost, 6)
         }
     
-    def _write_to_log(self, record: TokenAuditRecord):
+    async def _write_to_log(self, record: TokenAuditRecord):
         """
-        写入计费日志（JSON Lines 格式）
+        写入计费日志（JSON Lines 格式，异步）
         
         日志文件结构：
         logs/tokens/
@@ -565,9 +566,9 @@ class TokenAuditor:
                 "anomaly_reason": record.anomaly_reason
             }
             
-            # 追加写入
-            with open(log_file, "a", encoding="utf-8") as f:
-                f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+            # 异步追加写入
+            async with aiofiles.open(log_file, "a", encoding="utf-8") as f:
+                await f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
             
             logger.debug(f"💰 计费日志: user={user_id}, cost=${cost['total']:.4f}")
             

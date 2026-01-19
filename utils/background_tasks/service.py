@@ -11,18 +11,26 @@
 - 任务实现在 tasks/ 目录下，使用 @background_task 装饰器
 """
 
+# 1. 标准库
 import asyncio
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, TYPE_CHECKING
 
-from logger import get_logger
-from core.llm import create_llm_service
-from core.llm.base import Message
+# 2. 第三方库（无）
+
+# 3. 本地模块
+# 注意：core.llm 延迟导入，避免循环依赖
+# 循环链：core.llm -> utils.message_utils -> utils -> utils.background_tasks -> core.llm
 from core.events.manager import EventManager
+from logger import get_logger
 from utils.json_utils import extract_json_list
 
 from .context import TaskContext, Mem0UpdateResult, Mem0BatchUpdateResult
 from .registry import get_task_registry, get_registered_task_names
+
+if TYPE_CHECKING:
+    from core.llm import create_llm_service
+    from core.llm.base import Message
 
 logger = get_logger("background_tasks.service")
 
@@ -45,7 +53,7 @@ class BackgroundTaskService:
     2. 使用 @background_task("task_name") 装饰器
     """
     
-    def __init__(self):
+    def __init__(self) -> None:
         """初始化后台任务服务"""
         # 使用 Haiku（快速、便宜，适合简单任务）
         self.llm = None  # 延迟初始化，避免启动时加载
@@ -83,10 +91,11 @@ class BackgroundTaskService:
 {{"questions": ["问题1", "问题2", "问题3"]}}
 ```"""
     
-    def _get_llm(self):
+    def _get_llm(self) -> Any:
         """懒加载 LLM 服务"""
         if self.llm is None:
             from config.llm_config import get_llm_profile
+            from core.llm import create_llm_service  # 延迟导入，避免循环依赖
             profile = get_llm_profile("background_task")
             self.llm = create_llm_service(**profile)
         return self.llm
@@ -194,6 +203,7 @@ class BackgroundTaskService:
     async def _generate_title_with_llm(self, message: str) -> Optional[str]:
         """使用 LLM 生成标题"""
         try:
+            from core.llm.base import Message  # 延迟导入，避免循环依赖
             llm = self._get_llm()
             prompt = self.title_generation_prompt.format(message=message)
             
@@ -275,6 +285,7 @@ class BackgroundTaskService:
     ) -> Optional[List[str]]:
         """使用 LLM 生成推荐问题"""
         try:
+            from core.llm.base import Message  # 延迟导入，避免循环依赖
             llm = self._get_llm()
             
             prompt = self.recommended_questions_prompt.format(

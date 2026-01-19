@@ -610,7 +610,6 @@ def _merge_config_to_schema(base_schema, config: InstanceConfig):
 async def create_agent_from_instance(
     instance_name: str,
     event_manager = None,
-    workspace_dir: str = None,
     conversation_service = None,
     skip_mcp_registration: bool = False,
     skip_skills_registration: bool = False,
@@ -645,7 +644,6 @@ async def create_agent_from_instance(
     Args:
         instance_name: 实例名称
         event_manager: 事件管理器
-        workspace_dir: 工作目录
         conversation_service: 会话服务
         skip_mcp_registration: 是否跳过 MCP 工具注册
         skip_skills_registration: 是否跳过 Skills 注册
@@ -806,7 +804,6 @@ async def create_agent_from_instance(
             schema=merged_schema,
             system_prompt=None,  # 运行时从 prompt_cache 动态获取
             event_manager=event_manager,
-            workspace_dir=workspace_dir,
             conversation_service=conversation_service,
             prompt_cache=prompt_cache,
         )
@@ -822,7 +819,6 @@ async def create_agent_from_instance(
         agent = await AgentFactory.from_prompt(
             system_prompt=fallback_prompt,
             event_manager=event_manager,
-            workspace_dir=workspace_dir,
             conversation_service=conversation_service,
             use_default_if_failed=True,
             cache_dir=str(cache_dir),
@@ -867,7 +863,7 @@ async def create_agent_from_instance(
     # 🆕 V4.6: 加载工具推断缓存（用于增量推断）
     tools_cache_file = cache_dir / "tools_inference.json"
     if tools_cache_file.exists() and not force_refresh:
-        instance_registry.load_inference_cache(tools_cache_file)
+        await instance_registry.load_inference_cache(tools_cache_file)
         logger.info("✅ 已加载工具推断缓存")
     
     # 10. 注册 MCP 工具（使用 InstanceToolRegistry，利用缓存）
@@ -882,7 +878,7 @@ async def create_agent_from_instance(
     
     # 🆕 V4.6: 保存工具推断缓存（包含新推断的工具）
     cache_dir.mkdir(parents=True, exist_ok=True)
-    instance_registry.save_inference_cache(tools_cache_file)
+    await instance_registry.save_inference_cache(tools_cache_file)
     logger.info("✅ 已保存工具推断缓存")
     
     # 12. 🆕 V4.6 统一工具统计（仅用于调试日志）

@@ -14,11 +14,16 @@ Redis Key 设计：
 - zenflux:session:{session_id}:heartbeat → 心跳时间戳
 """
 
+# 1. 标准库
 import json
-from typing import Dict, Any, List, Optional
-from datetime import datetime
 from collections import defaultdict
+from datetime import datetime
+from typing import Dict, Any, List, Optional
 
+# 2. 第三方库（无）
+
+# 3. 本地模块
+from infra.cache import get_redis_client
 from logger import get_logger
 
 logger = get_logger("events.storage")
@@ -356,7 +361,6 @@ async def create_event_storage(redis_client=None) -> RedisEventStorage:
     
     # 尝试从 infra.cache 获取
     try:
-        from infra.cache import get_redis_client
         client = await get_redis_client()
         if client.is_connected:
             logger.info("✅ 使用 Redis 事件存储")

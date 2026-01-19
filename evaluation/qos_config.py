@@ -11,13 +11,13 @@ QoS 评估配置
 依赖：core/context/compaction (QoSLevel)
 """
 
-import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from core.context.compaction import QoSLevel
+from logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

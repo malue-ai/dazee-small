@@ -15,12 +15,13 @@ ResultCompactor - 工具结果精简器
 """
 
 import json
-import logging
 from typing import Dict, Any, Optional, Callable, List
 from dataclasses import dataclass
 from enum import Enum
 
-logger = logging.getLogger(__name__)
+from logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class CompactionStrategy(Enum):

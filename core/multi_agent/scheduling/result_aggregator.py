@@ -10,10 +10,15 @@
 - 最终输出生成
 """
 
+# 1. 标准库
 import json
 from dataclasses import dataclass
 from typing import Dict, List, Any, Optional
 
+# 2. 第三方库（无）
+
+# 3. 本地模块
+from core.llm.base import Message
 from logger import get_logger
 from ..decomposition.prompts import AGGREGATION_PROMPT
 
@@ -166,8 +171,6 @@ class ResultAggregator:
         )
         
         # 调用 LLM
-        from core.llm.base import Message
-        
         response = await self.llm_service.create_message_async(
             model=self.model,
             max_tokens=16000,  # 增加以满足 extended thinking 要求

@@ -25,7 +25,7 @@ HITL (Human-in-the-Loop) 核心工具，用于在 Agent 执行过程中请求用
 """
 
 import json
-import logging
+from logger import get_logger
 from typing import Dict, Any, Optional, List, Callable, Awaitable, Union
 
 from tools.base import BaseTool
@@ -34,7 +34,7 @@ from core.confirmation_manager import (
     ConfirmationType
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ==================== 常量定义 ====================

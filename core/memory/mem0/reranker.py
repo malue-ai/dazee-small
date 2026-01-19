@@ -60,7 +60,7 @@ class LLMReranker:
         reranked = await reranker.rerank(query, candidates, top_k=5)
     """
     
-    def __init__(self, llm_service=None):
+    def __init__(self, llm_service=None) -> None:
         """
         初始化 Reranker
         
@@ -69,7 +69,7 @@ class LLMReranker:
         """
         self._llm = llm_service
     
-    def _get_llm(self):
+    def _get_llm(self) -> Any:
         """获取 LLM 服务（懒加载）"""
         if self._llm is None:
             try:

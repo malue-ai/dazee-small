@@ -88,7 +88,7 @@ class FileService:
     只提供文件上传到 S3 并返回预签名 URL 的功能
     """
     
-    def __init__(self):
+    def __init__(self) -> None:
         """初始化文件服务"""
         self.s3_uploader = get_s3_uploader()
     

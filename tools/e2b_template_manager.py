@@ -15,6 +15,7 @@ E2B Template Manager - 模板配置和管理
 """
 
 import yaml
+import aiofiles
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 
@@ -36,6 +37,10 @@ class E2BTemplateManager:
     - Template Python API 已移除，改用 CLI 构建
     - 自定义模板需要使用 `e2b template build` 命令预构建
     - 运行时可通过 sandbox.commands.run("pip install ...") 安装包
+    
+    使用方式：
+        manager = E2BTemplateManager()
+        await manager.initialize()  # 必须调用以加载配置
     """
     
     def __init__(self, config_path: str = None):
@@ -50,20 +55,35 @@ class E2BTemplateManager:
             config_path = Path(__file__).parent.parent / "config" / "e2b_templates.yaml"
         
         self.config_path = Path(config_path)
-        self.templates_config = self._load_config()
+        self.templates_config: Dict[str, Any] = {"templates": {}, "routing_rules": []}
         self._template_cache: Dict[str, str] = {}  # 模板名称 -> 模板 ID 缓存
+        self._initialized: bool = False
+    
+    async def initialize(self) -> None:
+        """
+        异步初始化：加载配置
         
+        使用方式：
+            manager = E2BTemplateManager()
+            await manager.initialize()
+        """
+        if self._initialized:
+            return
+        
+        self.templates_config = await self._load_config_async()
+        self._initialized = True
         logger.info(f"✅ E2B模板管理器已初始化 ({len(self.templates_config.get('templates', {}))} 个模板配置)")
     
-    def _load_config(self) -> Dict:
-        """加载模板配置"""
+    async def _load_config_async(self) -> Dict:
+        """异步加载模板配置"""
         if not self.config_path.exists():
             logger.warning(f"⚠️ 模板配置文件不存在: {self.config_path}")
             return {"templates": {}, "routing_rules": []}
         
         try:
-            with open(self.config_path) as f:
-                return yaml.safe_load(f)
+            async with aiofiles.open(self.config_path, 'r', encoding='utf-8') as f:
+                content = await f.read()
+                return yaml.safe_load(content)
         except Exception as e:
             logger.error(f"❌ 加载模板配置失败: {e}")
             return {"templates": {}, "routing_rules": []}

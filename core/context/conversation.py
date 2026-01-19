@@ -20,6 +20,7 @@ from typing import List, Dict, Any, Optional, Tuple, TYPE_CHECKING
 import tiktoken
 
 # 3. 本地模块
+from core.llm.adaptor import ClaudeAdaptor
 from logger import get_logger
 
 if TYPE_CHECKING:
@@ -71,7 +72,7 @@ class Context:
         self.compression_info: Optional[Dict[str, Any]] = None
     
     @property
-    def tokenizer(self):
+    def tokenizer(self) -> Any:
         """延迟加载 tokenizer（避免初始化时阻塞）"""
         if self._tokenizer is None:
             try:
@@ -207,8 +208,6 @@ class Context:
         Returns:
             Agent 格式的消息列表
         """
-        from core.llm.adaptor import ClaudeAdaptor
-        
         # 转换为统一的 dict 格式
         raw_messages = []
         for msg in db_messages:

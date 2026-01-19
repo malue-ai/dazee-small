@@ -73,7 +73,7 @@ class AuthService:
     - 用户信息管理
     """
     
-    def __init__(self):
+    def __init__(self) -> None:
         self._password = AUTH_PASSWORD
         self._secret = JWT_SECRET
         self._expire_hours = TOKEN_EXPIRE_HOURS

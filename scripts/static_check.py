@@ -1,9 +1,19 @@
 """
 静态检查脚本 - 验证文件和代码结构（不需要导入）
+
+包含：
+1. SSE 重连机制检查（原有）
+2. 代码清洁度检查（新增）- 确保代码库中没有已废弃的 WorkspaceManager 引用
+
+架构说明：
+- core/workspace_manager.py 已删除
+- 代码中不应再有 WorkspaceManager 的引用
 """
 
 import os
 import re
+import glob
+from pathlib import Path
 
 
 def check_file_exists(filepath):
@@ -255,7 +265,123 @@ def main():
         return 1
 
 
+def check_deprecated_workspace_references(base_dir: str = None) -> tuple[bool, list[str]]:
+    """
+    检查代码库中是否有已废弃的 WorkspaceManager 引用
+    
+    架构变更：
+    - core/workspace_manager.py 已删除
+    - 所有文件操作应通过 E2B 沙盒或 S3 进行
+    - workspace_dir 参数已从 Agent/Service 中移除
+    
+    Args:
+        base_dir: 项目根目录，默认自动检测
+        
+    Returns:
+        (是否通过, 问题列表)
+    """
+    if base_dir is None:
+        # 自动检测项目根目录
+        current_file = Path(__file__).resolve()
+        base_dir = str(current_file.parent.parent)
+    
+    # 废弃的模式
+    deprecated_patterns = [
+        (r"from\s+core\.workspace_manager\s+import", "workspace_manager 已废弃"),
+        (r"import\s+core\.workspace_manager", "workspace_manager 已废弃"),
+        (r"WorkspaceManager\s*\(", "WorkspaceManager 类已删除"),
+        (r"get_workspace_manager\s*\(\s*\)", "get_workspace_manager() 已删除"),
+    ]
+    
+    violations = []
+    
+    # 扫描整个项目的 Python 文件（排除一些目录）
+    exclude_dirs = {'__pycache__', '.git', 'venv', 'env', '.venv', 'node_modules'}
+    
+    for root, dirs, files in os.walk(base_dir):
+        # 排除不需要检查的目录
+        dirs[:] = [d for d in dirs if d not in exclude_dirs]
+        
+        for filename in files:
+            if not filename.endswith('.py'):
+                continue
+                
+            py_file = os.path.join(root, filename)
+            rel_path = os.path.relpath(py_file, base_dir)
+            
+            try:
+                with open(py_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    lines = content.split('\n')
+                
+                for pattern, description in deprecated_patterns:
+                    for line_num, line in enumerate(lines, 1):
+                        # 跳过注释行
+                        stripped = line.strip()
+                        if stripped.startswith('#'):
+                            continue
+                        if re.search(pattern, line):
+                            violations.append(
+                                f"{rel_path}:{line_num} - {description}\n    {line.strip()}"
+                            )
+            except Exception as e:
+                violations.append(f"{rel_path}: 读取文件失败 - {e}")
+    
+    return len(violations) == 0, violations
+
+
+def run_cleanup_check():
+    """
+    运行代码清洁度检查（独立入口）
+    
+    用于 CI/CD 或开发时验证
+    
+    检查内容：
+    - 确保代码库中没有已废弃的 WorkspaceManager 引用
+    - 确保所有文件操作都通过 E2B 沙盒或 S3 进行
+    """
+    print("=" * 70)
+    print("代码清洁度检查 - WorkspaceManager 废弃引用")
+    print("=" * 70)
+    print("\n新架构说明：")
+    print("  - core/workspace_manager.py 已删除")
+    print("  - 所有文件操作应通过 E2B 沙盒进行")
+    print("  - 产物存储应通过 S3 进行")
+    print("  - 临时文件使用系统临时目录 (/tmp)")
+    print()
+    
+    passed, violations = check_deprecated_workspace_references()
+    
+    if passed:
+        print("✅ 代码清洁度检查通过！")
+        print("\n代码库中没有发现已废弃的 WorkspaceManager 引用。")
+        return 0
+    else:
+        print(f"❌ 发现 {len(violations)} 个废弃引用：\n")
+        for v in violations:
+            print(f"  • {v}")
+        print("\n请移除这些引用，改用 E2B 沙盒或 S3 存储。")
+        return 1
+
+
 if __name__ == "__main__":
     import sys
-    sys.exit(main())
+    
+    # 支持多种模式
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "--cleanup":
+            # 运行代码清洁度检查
+            sys.exit(run_cleanup_check())
+        elif sys.argv[1] == "--security":
+            # 向后兼容，运行代码清洁度检查
+            sys.exit(run_cleanup_check())
+        else:
+            print(f"未知参数: {sys.argv[1]}")
+            print("用法:")
+            print("  python static_check.py           # 运行 SSE 完整性检查")
+            print("  python static_check.py --cleanup # 运行代码清洁度检查")
+            sys.exit(1)
+    else:
+        # 运行原有的完整检查
+        sys.exit(main())
 

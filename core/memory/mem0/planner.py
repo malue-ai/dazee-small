@@ -7,10 +7,15 @@ Dazee PDCA 计划管理器
 使用 llm_config 配置系统管理模型参数
 """
 
+# 1. 标准库
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 
+# 2. 第三方库（无）
+
+# 3. 本地模块
+from core.llm import Message
 from logger import get_logger
 from .schemas import (
     WorkPlan,
@@ -133,7 +138,7 @@ class PDCAManager:
         return self._profile
     
     @property
-    def llm_service(self):
+    def llm_service(self) -> Any:
         """懒加载 LLM 服务"""
         if self._llm_service is None:
             from core.llm import create_llm_service
@@ -463,8 +468,6 @@ class PDCAManager:
     
     async def _call_llm(self, prompt: str) -> str:
         """调用 LLM"""
-        from core.llm import Message
-        
         messages = [Message(role="user", content=prompt)]
         response = await self.llm_service.create_message_async(messages)
         

@@ -42,7 +42,7 @@ class AgentPool:
         await pool.preload_all()
         
         # 获取 Agent 实例（克隆）
-        agent = await pool.acquire("test_agent", event_manager, workspace_dir, conversation_service)
+        agent = await pool.acquire("test_agent", event_manager, conversation_service)
         
         # 释放 Agent（减少计数）
         await pool.release("test_agent")
@@ -113,7 +113,6 @@ class AgentPool:
                     prototype = await self.registry.get_agent(
                         agent_id=agent_id,
                         event_manager=temp_event_manager,
-                        workspace_dir=None,
                         conversation_service=None
                     )
                     self._prototypes[agent_id] = prototype
@@ -131,7 +130,6 @@ class AgentPool:
                 from core.agent import create_simple_agent
                 default_prototype = create_simple_agent(
                     model=self.default_model,
-                    workspace_dir=None,
                     event_manager=temp_event_manager,
                     conversation_service=None
                 )
@@ -180,7 +178,6 @@ class AgentPool:
         self,
         agent_id: str,
         event_manager,
-        workspace_dir: str,
         conversation_service
     ) -> "SimpleAgent":
         """
@@ -193,7 +190,6 @@ class AgentPool:
         Args:
             agent_id: Agent ID（使用 DEFAULT_AGENT_KEY 获取默认 Agent）
             event_manager: 事件管理器
-            workspace_dir: 工作目录
             conversation_service: 会话服务
             
         Returns:
@@ -221,7 +217,6 @@ class AgentPool:
             prototype = self._prototypes[agent_id]
             agent = prototype.clone(
                 event_manager=event_manager,
-                workspace_dir=workspace_dir,
                 conversation_service=conversation_service
             )
             logger.debug(f"🏊 从原型克隆 Agent: {agent_id}")
@@ -233,7 +228,6 @@ class AgentPool:
                 from core.agent import create_simple_agent
                 agent = create_simple_agent(
                     model=self.default_model,
-                    workspace_dir=workspace_dir,
                     event_manager=event_manager,
                     conversation_service=conversation_service
                 )
@@ -241,7 +235,6 @@ class AgentPool:
                 agent = await self.registry.get_agent(
                     agent_id=agent_id,
                     event_manager=event_manager,
-                    workspace_dir=workspace_dir,
                     conversation_service=conversation_service
                 )
         

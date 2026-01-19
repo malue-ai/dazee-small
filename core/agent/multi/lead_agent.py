@@ -12,14 +12,17 @@ Lead Agent (Planner) - 主控智能体
 3. 结果综合：整合所有 Worker 的输出
 """
 
+# 1. 标准库
 import asyncio
-import logging
+import json
 from datetime import datetime
 from typing import Any, AsyncGenerator, Dict, List, Optional
 from uuid import uuid4
 
+# 2. 第三方库
 from pydantic import BaseModel, Field
 
+# 3. 本地模块
 from core.agent.multi.models import (
     AgentConfig,
     AgentRole,
@@ -27,8 +30,10 @@ from core.agent.multi.models import (
     TaskAssignment,
 )
 from core.llm import create_claude_service
+from core.llm.base import Message
+from logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class SubTask(BaseModel):
@@ -177,8 +182,6 @@ class LeadAgent:
         )
         
         # 调用 LLM 进行分解
-        from core.llm.base import Message
-        
         messages = [Message(role="user", content=user_message)]
         
         llm_response = await self.llm.create_message_async(
@@ -360,8 +363,6 @@ class LeadAgent:
         original_query: str
     ) -> TaskDecompositionPlan:
         """解析 LLM 的分解响应"""
-        import json
-        
         try:
             # 尝试从响应中提取 JSON
             # 可能包含在代码块中
@@ -542,8 +543,6 @@ class LeadAgent:
         )
         
         # 调用 LLM 进行综合
-        from core.llm.base import Message
-        
         messages = [Message(role="user", content=user_message)]
         
         llm_response = await self.llm.create_message_async(
@@ -672,8 +671,6 @@ class LeadAgent:
 
 请评估这个结果的质量。"""
         
-        from core.llm.base import Message
-        
         messages = [Message(role="user", content=user_message)]
         
         llm_response = await self.llm.create_message_async(
@@ -688,7 +685,6 @@ class LeadAgent:
         response = llm_response.content if hasattr(llm_response, 'content') else str(llm_response)
         
         # 解析 JSON
-        import json
         try:
             if "```json" in response:
                 start = response.index("```json") + 7

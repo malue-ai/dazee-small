@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+import aiofiles
 import yaml
 
 from logger import get_logger
@@ -89,7 +90,7 @@ class AgentRegistry:
         agents = registry.list_agents()
     """
     
-    def __init__(self):
+    def __init__(self) -> None:
         # Agent 配置缓存（name -> AgentConfig）
         self._configs: Dict[str, AgentConfig] = {}
         
@@ -253,7 +254,6 @@ class AgentRegistry:
         self,
         agent_id: str,
         event_manager=None,
-        workspace_dir: str = None,
         conversation_service=None
     ):
         """
@@ -267,7 +267,6 @@ class AgentRegistry:
         Args:
             agent_id: Agent ID（instances/ 目录名）
             event_manager: 事件管理器
-            workspace_dir: 工作目录
             conversation_service: 会话服务
             
         Returns:
@@ -296,7 +295,6 @@ class AgentRegistry:
             # 浅克隆并重置会话状态
             agent = prototype.clone_for_session(
                 event_manager=event_manager,
-                workspace_dir=workspace_dir,
                 conversation_service=conversation_service
             )
             
@@ -326,7 +324,6 @@ class AgentRegistry:
                 schema=config.prompt_cache.agent_schema,
                 system_prompt=config.full_prompt,
                 event_manager=event_manager,
-                workspace_dir=workspace_dir,
                 conversation_service=conversation_service,
                 prompt_cache=config.prompt_cache,
                 apis_config=apis_config,
@@ -337,7 +334,6 @@ class AgentRegistry:
             agent = await AgentFactory.from_prompt(
                 system_prompt=config.full_prompt,
                 event_manager=event_manager,
-                workspace_dir=workspace_dir,
                 conversation_service=conversation_service,
                 use_default_if_failed=True,
             )
@@ -404,7 +400,6 @@ class AgentRegistry:
             schema=config.prompt_cache.agent_schema,
             system_prompt=config.full_prompt,
             event_manager=event_manager,
-            workspace_dir=None,  # 原型不绑定工作目录
             conversation_service=None,  # 原型不绑定会话服务
             prompt_cache=config.prompt_cache,
             apis_config=apis_config,
@@ -776,12 +771,13 @@ class AgentRegistry:
                     "retention_policy": "user",
                 }
             
-            # 写入 config.yaml
+            # 写入 config.yaml（异步）
             config_path = agent_dir / "config.yaml"
-            with open(config_path, "w", encoding="utf-8") as f:
-                yaml.dump(config_data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+            config_content = yaml.dump(config_data, allow_unicode=True, default_flow_style=False, sort_keys=False)
+            async with aiofiles.open(config_path, "w", encoding="utf-8") as f:
+                await f.write(config_content)
             
-            # 写入 prompt.md
+            # 写入 prompt.md（异步）
             prompt_path = agent_dir / "prompt.md"
             prompt_content = prompt if prompt else f"""# {agent_id}
 
@@ -793,8 +789,8 @@ class AgentRegistry:
 
 请根据用户需求提供帮助。
 """
-            with open(prompt_path, "w", encoding="utf-8") as f:
-                f.write(prompt_content)
+            async with aiofiles.open(prompt_path, "w", encoding="utf-8") as f:
+                await f.write(prompt_content)
             
             # 预加载新创建的 Agent
             await self._load_single_agent(agent_id)
@@ -808,10 +804,9 @@ class AgentRegistry:
             }
             
         except Exception as e:
-            # 回滚：删除已创建的目录
-            import shutil
+            # 回滚：删除已创建的目录（异步）
             if agent_dir.exists():
-                shutil.rmtree(agent_dir)
+                await asyncio.to_thread(shutil.rmtree, agent_dir)
             raise
     
     async def update_agent(
@@ -847,9 +842,10 @@ class AgentRegistry:
         config_path = agent_dir / "config.yaml"
         prompt_path = agent_dir / "prompt.md"
         
-        # 读取现有配置
-        with open(config_path, "r", encoding="utf-8") as f:
-            config_data = yaml.safe_load(f)
+        # 读取现有配置（异步）
+        async with aiofiles.open(config_path, "r", encoding="utf-8") as f:
+            content = await f.read()
+            config_data = yaml.safe_load(content)
         
         # 更新配置
         updated_fields = []
@@ -892,14 +888,15 @@ class AgentRegistry:
             config_data["memory"] = memory
             updated_fields.append("memory")
         
-        # 写入更新后的配置
-        with open(config_path, "w", encoding="utf-8") as f:
-            yaml.dump(config_data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+        # 写入更新后的配置（异步）
+        config_content = yaml.dump(config_data, allow_unicode=True, default_flow_style=False, sort_keys=False)
+        async with aiofiles.open(config_path, "w", encoding="utf-8") as f:
+            await f.write(config_content)
         
-        # 更新 prompt.md
+        # 更新 prompt.md（异步）
         if prompt is not None:
-            with open(prompt_path, "w", encoding="utf-8") as f:
-                f.write(prompt)
+            async with aiofiles.open(prompt_path, "w", encoding="utf-8") as f:
+                await f.write(prompt)
             updated_fields.append("prompt")
         
         # 重新加载 Agent 配置
@@ -935,9 +932,9 @@ class AgentRegistry:
         agent_dir = instances_dir / agent_id
         
         try:
-            # 删除文件系统
+            # 删除文件系统（异步）
             if agent_dir.exists():
-                shutil.rmtree(agent_dir)
+                await asyncio.to_thread(shutil.rmtree, agent_dir)
                 logger.info(f"🗑️ 已删除目录: {agent_dir}")
         except Exception as e:
             if not force:
@@ -1133,9 +1130,9 @@ class AgentRegistry:
         
         return detail
     
-    def get_agent_prompt(self, agent_id: str) -> str:
+    async def get_agent_prompt(self, agent_id: str) -> str:
         """
-        获取 Agent 的原始 prompt.md 内容
+        获取 Agent 的原始 prompt.md 内容（异步）
         
         Args:
             agent_id: Agent ID
@@ -1152,8 +1149,8 @@ class AgentRegistry:
         if not prompt_path.exists():
             return ""
         
-        with open(prompt_path, "r", encoding="utf-8") as f:
-            return f.read()
+        async with aiofiles.open(prompt_path, "r", encoding="utf-8") as f:
+            return await f.read()
     
     # ==================== 清理 ====================
     

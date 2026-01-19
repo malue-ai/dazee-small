@@ -22,13 +22,13 @@
 
 import uuid
 import asyncio
-import logging
+from logger import get_logger
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ConfirmationType(Enum):

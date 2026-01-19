@@ -5,6 +5,21 @@ alwaysApply: true
 
 # 通用开发规范
 
+## Python 版本
+- 项目使用 **Python 3.12+**
+- 可使用 3.12 新特性（如类型参数语法 `type X = ...`、`@override` 装饰器等）
+
+## 异步编程规范
+- 项目基于 **异步框架（FastAPI + asyncio）**
+- **禁止**在异步函数中使用同步阻塞操作：
+  - ❌ `with open()` → ✅ `async with aiofiles.open()`
+  - ❌ `time.sleep()` → ✅ `await asyncio.sleep()`
+  - ❌ `requests.get()` → ✅ `await httpx.AsyncClient().get()` 或 `aiohttp`
+  - ❌ `json.load(file)` → ✅ `json.loads(await file.read())`
+  - ❌ `shutil.copy()` → ✅ 使用 `aiofiles` 或封装异步版本
+- 文件 I/O 必须使用 `aiofiles` 库
+- HTTP 请求必须使用 `httpx` 或 `aiohttp`
+
 ## 语言规范
 - 所有代码注释使用**中文**
 - 所有文档使用**中文**编写

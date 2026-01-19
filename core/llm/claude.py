@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 
 import anthropic
 import httpx
+import aiofiles
 
 from logger import get_logger
 from utils.message_utils import messages_to_dict_list
@@ -42,6 +43,7 @@ from .base import (
     ToolType,
     LLMProvider
 )
+from .adaptor import ClaudeAdaptor
 
 
 # ============================================================
@@ -191,12 +193,12 @@ class ClaudeLLMService(BaseLLMService):
     # Beta Headers 管理
     # ============================================================
     
-    def _add_beta(self, beta_header: str):
+    def _add_beta(self, beta_header: str) -> None:
         """添加 Beta Header"""
         if beta_header not in self._betas:
             self._betas.append(beta_header)
     
-    def _remove_beta(self, beta_header: str):
+    def _remove_beta(self, beta_header: str) -> None:
         """移除 Beta Header"""
         if beta_header in self._betas:
             self._betas.remove(beta_header)
@@ -205,7 +207,7 @@ class ClaudeLLMService(BaseLLMService):
     # 功能开关
     # ============================================================
     
-    def enable_memory_tool(self, base_path: str = "./memory_storage"):
+    def enable_memory_tool(self, base_path: str = "./memory_storage") -> None:
         """
         启用 Memory Tool
         
@@ -216,7 +218,7 @@ class ClaudeLLMService(BaseLLMService):
         self._memory_base_path = base_path
         self._add_beta("context-management-2025-06-27")
     
-    def disable_memory_tool(self):
+    def disable_memory_tool(self) -> None:
         """禁用 Memory Tool"""
         self._memory_enabled = False
         if not self._context_editing_enabled:
@@ -244,14 +246,14 @@ class ClaudeLLMService(BaseLLMService):
         }
         self._add_beta("context-management-2025-06-27")
     
-    def disable_context_editing(self):
+    def disable_context_editing(self) -> None:
         """禁用 Context Editing"""
         self._context_editing_enabled = False
         self._context_editing_config = {}
         if not self._memory_enabled:
             self._remove_beta("context-management-2025-06-27")
     
-    def enable_tool_search(self, search_type: str = "bm25"):
+    def enable_tool_search(self, search_type: str = "bm25") -> None:
         """
         启用 Tool Search 模式
         
@@ -262,25 +264,25 @@ class ClaudeLLMService(BaseLLMService):
         self._tool_search_type = search_type
         self._add_beta("advanced-tool-use-2025-11-20")
     
-    def disable_tool_search(self):
+    def disable_tool_search(self) -> None:
         """禁用 Tool Search 模式"""
         self._tool_search_mode = False
         self._remove_beta("advanced-tool-use-2025-11-20")
     
-    def enable_programmatic_tool_calling(self):
+    def enable_programmatic_tool_calling(self) -> None:
         """启用 Programmatic Tool Calling 模式"""
         self._programmatic_mode = True
         self._code_execution_mode = True
     
-    def disable_programmatic_tool_calling(self):
+    def disable_programmatic_tool_calling(self) -> None:
         """禁用 Programmatic Tool Calling 模式"""
         self._programmatic_mode = False
     
-    def enable_code_execution(self):
+    def enable_code_execution(self) -> None:
         """启用 Code Execution 模式"""
         self._code_execution_mode = True
     
-    def disable_code_execution(self):
+    def disable_code_execution(self) -> None:
         """禁用 Code Execution 模式"""
         self._code_execution_mode = False
     
@@ -541,7 +543,7 @@ class ClaudeLLMService(BaseLLMService):
         
         return formatted
     
-    def _validate_tool_dict(self, tool_dict: Dict[str, Any], index: int):
+    def _validate_tool_dict(self, tool_dict: Dict[str, Any], index: int) -> None:
         """验证工具字典是否包含不可序列化的对象"""
         for key, value in tool_dict.items():
             if isinstance(value, ToolType):
@@ -1137,7 +1139,7 @@ class ClaudeLLMService(BaseLLMService):
         Returns:
             JSON 字符串
         """
-        def default_handler(o):
+        def default_handler(o) -> Any:
             """自定义序列化处理器"""
             if hasattr(o, 'model_dump'):
                 # Pydantic v2 对象
@@ -1468,7 +1470,7 @@ class ClaudeLLMService(BaseLLMService):
     # Skills API
     # ============================================================
     
-    def enable_skills(self, skills: List[Dict[str, Any]]):
+    def enable_skills(self, skills: List[Dict[str, Any]]) -> None:
         """
         启用 Skills 功能
         
@@ -1494,7 +1496,7 @@ class ClaudeLLMService(BaseLLMService):
         
         logger.info(f"✅ Skills 已启用: {len(skills)} 个技能")
     
-    def disable_skills(self):
+    def disable_skills(self) -> None:
         """禁用 Skills 功能"""
         self._skills_enabled = False
         self._skills_container = {}
@@ -1673,14 +1675,14 @@ class ClaudeLLMService(BaseLLMService):
     # Files API
     # ============================================================
     
-    def download_file(
+    async def download_file(
         self,
         file_id: str,
         output_path: str,
         overwrite: bool = True
     ) -> Optional[FileInfo]:
         """
-        下载文件
+        下载文件（异步版本）
         
         Args:
             file_id: 文件 ID
@@ -1707,8 +1709,9 @@ class ClaudeLLMService(BaseLLMService):
             # 下载文件
             file_content = self.sync_client.beta.files.download(file_id=file_id)
             
-            with open(output_path, 'wb') as f:
-                f.write(file_content.read())
+            # 异步写入文件
+            async with aiofiles.open(output_path, 'wb') as f:
+                await f.write(file_content.read())
             
             logger.info(f"✅ 文件已下载: {output_path} ({metadata.size_bytes} bytes)")
             
@@ -1785,7 +1788,7 @@ class ClaudeLLMService(BaseLLMService):
         """
         file_ids = []
         
-        def find_file_ids(obj, depth=0):
+        def find_file_ids(obj, depth=0) -> None:
             """递归查找 file_id"""
             if depth > 10:
                 return
@@ -1819,12 +1822,12 @@ class ClaudeLLMService(BaseLLMService):
     # Citations (引用)
     # ============================================================
     
-    def enable_citations(self):
+    def enable_citations(self) -> None:
         """启用 Citations 功能"""
         self._citations_enabled = True
         logger.info("✅ Citations 已启用")
     
-    def disable_citations(self):
+    def disable_citations(self) -> None:
         """禁用 Citations 功能"""
         self._citations_enabled = False
     

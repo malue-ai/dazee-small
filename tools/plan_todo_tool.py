@@ -47,14 +47,15 @@ Plan/Todo Tool - 任务规划工具（智能版本 + 持久化支持）
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 import json
-import logging
+import aiofiles
+from logger import get_logger
 import os
 import re
 from pathlib import Path
 
 from core.llm import create_claude_service, Message
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ===== Skill 发现模块 =====
@@ -62,9 +63,9 @@ SKILLS_LIBRARY_PATH = Path(__file__).parent.parent / "skills" / "library"
 CAPABILITIES_FILE = Path(__file__).parent.parent / "config" / "capabilities.yaml"
 
 
-def get_registered_skills_from_config() -> List[Dict[str, Any]]:
+async def get_registered_skills_from_config() -> List[Dict[str, Any]]:
     """
-    从 capabilities.yaml 读取已注册的 Skills（包含 skill_id）
+    从 capabilities.yaml 读取已注册的 Skills（包含 skill_id）（异步）
     
     这是运行时的主要数据来源，不需要扫描本地目录。
     
@@ -89,8 +90,9 @@ def get_registered_skills_from_config() -> List[Dict[str, Any]]:
         return []
     
     try:
-        with open(CAPABILITIES_FILE, 'r', encoding='utf-8') as f:
-            config = yaml.safe_load(f) or {}
+        async with aiofiles.open(CAPABILITIES_FILE, 'r', encoding='utf-8') as f:
+            content = await f.read()
+            config = yaml.safe_load(content) or {}
         
         skills = []
         for cap in config.get("capabilities", []):
@@ -106,9 +108,9 @@ def get_registered_skills_from_config() -> List[Dict[str, Any]]:
         return []
 
 
-def discover_skills() -> List[Dict[str, Any]]:
+async def discover_skills() -> List[Dict[str, Any]]:
     """
-    发现可用 Skills
+    发现可用 Skills（异步）
     
     优先从 capabilities.yaml 读取已注册的 Skills（包含 skill_id），
     如果没有注册信息，则扫描本地 skills/library/ 目录。
@@ -127,8 +129,8 @@ def discover_skills() -> List[Dict[str, Any]]:
             ...
         ]
     """
-    # 1. 先从 capabilities.yaml 读取已注册的 Skills
-    registered_skills = get_registered_skills_from_config()
+    # 1. 先从 capabilities.yaml 读取已注册的 Skills（异步）
+    registered_skills = await get_registered_skills_from_config()
     registered_names = {s["name"] for s in registered_skills}
     
     # 2. 构建返回列表（已注册的优先）
@@ -160,7 +162,7 @@ def discover_skills() -> List[Dict[str, Any]]:
                 continue
             
             try:
-                skill_info = _parse_skill_md(skill_md_path)
+                skill_info = await _parse_skill_md(skill_md_path)
                 if skill_info:
                     skill_info["path"] = str(skill_dir)
                     skill_info["skill_id"] = None  # 未注册
@@ -173,12 +175,12 @@ def discover_skills() -> List[Dict[str, Any]]:
     return skills
 
 
-def _parse_skill_md(skill_md_path: Path) -> Optional[Dict[str, Any]]:
+async def _parse_skill_md(skill_md_path: Path) -> Optional[Dict[str, Any]]:
     """
-    解析 SKILL.md 文件，提取元数据
+    解析 SKILL.md 文件，提取元数据（异步）
     """
-    with open(skill_md_path, 'r', encoding='utf-8') as f:
-        content = f.read()
+    async with aiofiles.open(skill_md_path, 'r', encoding='utf-8') as f:
+        content = await f.read()
     
     # 解析 YAML frontmatter
     frontmatter_match = re.match(r'^---\n(.*?)\n---', content, re.DOTALL)

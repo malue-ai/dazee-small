@@ -37,12 +37,20 @@ memory.e2b.set_session(sandbox_session)
 memory.e2b.add_execution(code, result, duration)
 memory.e2b.add_persistent_sandbox(session, name="数据分析环境")
 
-# 用户级记忆
-memory.episodic.add_episode(task_id, user_intent, result)
-memory.preference.set_preference("theme", "dark")
+# 用户级记忆（需要先初始化）
+episodic = memory.episodic
+await episodic.initialize()
+await episodic.add_episode(task_id, user_intent, result)
 
-# 系统级记忆
-memory.skill.register_skill("ppt_gen", "/path/to/skill")
+preference = memory.preference
+await preference.initialize()
+await preference.set_preference("theme", "dark")
+
+# 系统级记忆（需要先初始化）
+skill = memory.skill
+await skill.initialize()
+await skill.register_skill("ppt_gen", "/path/to/skill")
+
 memory.cache.set("key", value, ttl_seconds=3600)
 ```
 """
@@ -67,8 +75,10 @@ from .working import (
 from .user import (
     EpisodicMemory,
     create_episodic_memory,
+    create_episodic_memory_async,
     PreferenceMemory,
     create_preference_memory,
+    create_preference_memory_async,
     E2BSandboxSession,
     E2BMemory,
     create_e2b_memory,
@@ -78,6 +88,7 @@ from .user import (
 from .system import (
     SkillMemory,
     create_skill_memory,
+    create_skill_memory_async,
     CacheMemory,
     create_cache_memory,
 )
@@ -106,8 +117,10 @@ __all__ = [
     # 用户级记忆
     "EpisodicMemory",
     "create_episodic_memory",
+    "create_episodic_memory_async",
     "PreferenceMemory",
     "create_preference_memory",
+    "create_preference_memory_async",
     "E2BSandboxSession",
     "E2BMemory",
     "create_e2b_memory",
@@ -115,6 +128,7 @@ __all__ = [
     # 系统级记忆
     "SkillMemory",
     "create_skill_memory",
+    "create_skill_memory_async",
     "CacheMemory",
     "create_cache_memory",
     

@@ -128,7 +128,7 @@ class TaskService:
         result = await service.run_task("mem0_update", user_id="user_123")
     """
     
-    def __init__(self):
+    def __init__(self) -> None:
         self.background_service = get_background_task_service()
     
     def list_tasks(self, include_scheduled_only: bool = False) -> List[Dict[str, Any]]:

@@ -17,18 +17,22 @@ V5.0 IntentAnalyzer - 意图分析器
 """
 
 # 1. 标准库
-import logging
 from typing import Dict, Any, Optional, List
 
+# 2. 第三方库（无）
+
 # 3. 本地模块
-from utils.json_utils import extract_json
 from core.agent.types import (
     IntentResult,
     TaskType,
     Complexity,
 )
+from core.llm import Message
+from prompts.intent_recognition_prompt import get_intent_recognition_prompt
+from utils.json_utils import extract_json
+from logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class IntentAnalyzer:
@@ -223,7 +227,6 @@ class IntentAnalyzer:
                 return cached
         
         # Fallback: 使用默认提示词
-        from prompts.intent_recognition_prompt import get_intent_recognition_prompt
         return get_intent_recognition_prompt()
     
     async def _analyze_with_llm(
@@ -241,8 +244,6 @@ class IntentAnalyzer:
         Returns:
             IntentResult
         """
-        from core.llm import Message
-        
         try:
             # 截断消息，保留最近的
             max_messages_for_intent = 30

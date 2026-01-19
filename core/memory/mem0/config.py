@@ -115,7 +115,7 @@ class EmbedderConfig:
     api_key: Optional[str] = field(default=None)
     base_url: Optional[str] = field(default=None)  # 用于 Ollama 等本地服务
     
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """初始化后处理：根据 provider 设置 api_key"""
         if self.api_key is None:
             if self.provider == "openai":
@@ -161,7 +161,7 @@ class LLMConfig:
     api_key: Optional[str] = field(default=None)
     base_url: Optional[str] = field(default=None)
     
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """初始化后处理：根据 provider 设置 api_key"""
         if self.api_key is None:
             if self.provider == "anthropic":
