@@ -2219,7 +2219,7 @@ def get_universal_agent_prompt(
             prompt += "\n\n---\n\n" + user_profile
     ...
 
-# core/agent/simple_agent.py - 传递意图结果
+# core/agent/simple/simple_agent.py - 传递意图结果
 skip_memory = getattr(intent, 'skip_memory_retrieval', False)
 system_prompt = get_universal_agent_prompt(
     user_id=user_id,
@@ -3107,7 +3107,7 @@ core/prompt/__init__.py                 ← 导出 InstancePromptCache + IntentP
 core/agent/factory.py                   ← 🔥 删除 _infer_schema_from_prompt 硬编码规则
                                            新增 _generate_schema_with_llm（Few-shot 引导）
 prompts/intent_recognition_prompt.py    ← 🔄 重构为模块化结构（支持动态组装）
-core/agent/simple_agent.py              ← 🔄 从缓存获取系统提示词（运行时零开销）
+core/agent/simple/simple_agent.py              ← 🔄 从缓存获取系统提示词（运行时零开销）
 core/agent/intent_analyzer.py           ← 🔄 使用缓存的 intent_prompt
 scripts/instance_loader.py              ← 🔄 启动时调用 cache.load_once()
 
@@ -3136,7 +3136,7 @@ core/memory/mem0/tencent_vectordb.py ← 🆕 腾讯云VectorDB适配器
 utils/background_tasks.py          ← 🆕 V4.6 整合 Mem0 异步批量更新
 routers/mem0_router.py             ← REST API 端点（复用 BackgroundTaskService）
 prompts/universal_agent_prompt.py  ← 添加 _fetch_user_profile() + 自动注入
-core/agent/simple_agent.py         ← Phase 4 用户画像注入（Agent透明）
+core/agent/simple/simple_agent.py         ← Phase 4 用户画像注入（Agent透明）
 env.template                       ← 环境变量模板
 test_mem0_e2e.py                   ← 端对端测试脚本
 docs/MEM0_SETUP_GUIDE.md           ← 设置指南

@@ -84,7 +84,7 @@ core/context/compaction/
     └── should_warn_backend()         # L3
 
 services/chat_service.py  # L2/L3 执行点
-core/agent/simple_agent.py  # L1 Prompt 注入点
+core/agent/simple/simple_agent.py  # L1 Prompt 注入点
 ```
 
 ## 🎉 关键收益

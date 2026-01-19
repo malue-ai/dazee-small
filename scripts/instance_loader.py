@@ -788,9 +788,9 @@ async def create_agent_from_instance(
         
         # 注入 multi_agent 配置到合并后的 Schema
         if config.multi_agent_enabled:
-            from core.multi_agent.config import MultiAgentConfig
+            from core.agent.multi.models import MultiAgentConfig
             
-            multi_agent_config = MultiAgentConfig.from_dict(config.raw_config.get("multi_agent", {}))
+            multi_agent_config = MultiAgentConfig.model_validate(config.raw_config.get("multi_agent", {}))
             merged_schema.multi_agent = multi_agent_config
             
             logger.info(f"✅ 注入 multi_agent 配置到 AgentSchema: mode={multi_agent_config.mode.value}")

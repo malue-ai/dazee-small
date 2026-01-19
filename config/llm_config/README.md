@@ -24,7 +24,7 @@ profiles:
 
 | Profile 名称 | 调用位置 | 用途 | 模型 |
 |-------------|---------|------|------|
-| `main_agent` | `core/agent/simple_agent.py` | 主 Agent 对话 | Sonnet |
+| `main_agent` | `core/agent/simple/simple_agent.py` | 主 Agent 对话 | Sonnet |
 | `intent_analyzer` | `core/agent/intent_analyzer.py` | 意图分析 | Haiku |
 | `semantic_inference` | `core/inference/semantic_inference.py` | 语义推理 | Haiku |
 | `llm_analyzer` | `core/prompt/llm_analyzer.py` | 提示词分析 | Haiku |

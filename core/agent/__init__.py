@@ -2,7 +2,8 @@
 Agent 模块
 
 提供 Agent 核心功能：
-- SimpleAgent: 核心编排器（精简版）
+- SimpleAgent: 单智能体编排器（RVR 循环）
+- MultiAgentOrchestrator: 多智能体编排器（Leader-Worker 模式）
 - ContentHandler: 统一的 Content Block 处理器
 - AgentFactory: Prompt 驱动的动态初始化
 - IntentAnalyzer: 意图分析器
@@ -10,7 +11,8 @@ Agent 模块
 - Schema: 强类型配置定义
 
 目录结构：
-- simple_agent.py: 核心 Agent（只做编排）
+- simple/: Simple Agent 模块
+- multi/: Multi Agent 模块
 - content_handler.py: 统一的 Content Block 处理器
 - factory.py: Agent 工厂（动态初始化）
 - intent_analyzer.py: 意图分析器
@@ -26,9 +28,17 @@ from core.agent.intent_analyzer import (
     IntentAnalyzer,
     create_intent_analyzer
 )
-from core.agent.simple_agent import (
+from core.agent.simple import (
     SimpleAgent,
     create_simple_agent
+)
+from core.agent.multi import (
+    MultiAgentOrchestrator,
+    LeadAgent,
+    CheckpointManager,
+    ExecutionMode,
+    AgentRole,
+    MultiAgentConfig,
 )
 from core.agent.content_handler import (
     ContentHandler,
@@ -60,9 +70,16 @@ __all__ = [
     "TaskType",
     "Complexity",
     "IntentResult",
-    # Agent
+    # Simple Agent
     "SimpleAgent",
     "create_simple_agent",
+    # Multi Agent
+    "MultiAgentOrchestrator",
+    "LeadAgent",
+    "CheckpointManager",
+    "ExecutionMode",
+    "AgentRole",
+    "MultiAgentConfig",
     # ContentHandler
     "ContentHandler",
     "create_content_handler",

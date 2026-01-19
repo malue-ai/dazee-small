@@ -576,7 +576,7 @@ class ChatService:
             # 【待扩展】Multi-Agent 路由逻辑（已注释）
             # =====================================================================
             # 
-            # from core.multi_agent.config import MultiAgentMode
+            # from core.agent.multi.models import ExecutionMode
             # 
             # # 1. 提取用户 query
             # user_text = extract_text_from_message(message)
@@ -767,7 +767,7 @@ class ChatService:
     # 【待扩展】Multi-Agent 执行方法（已注释）
     # 
     # 如需启用 Multi-Agent 功能，取消注释以下方法，并：
-    # 1. 取消注释顶部的 from core.multi_agent import ... 
+    # 1. 取消注释顶部的 from core.agent.multi import ... 
     # 2. 取消注释 __init__ 中的 multi_agent_config 参数
     # 3. 取消注释 _run_agent 中的 Multi-Agent 路由逻辑
     # =========================================================================

@@ -56,8 +56,8 @@ class LLMCallRecord(BaseModel):
     
     @property
     def total_tokens(self) -> int:
-        """总 tokens = input + output + thinking"""
-        return self.input_tokens + self.output_tokens + self.thinking_tokens
+        """总 tokens = input + output + thinking + cache_read（反映真实使用量）"""
+        return self.input_tokens + self.output_tokens + self.thinking_tokens + self.cache_read_tokens
     
     class Config:
         json_encoders = {
@@ -77,7 +77,8 @@ class UsageResponse(BaseModel):
     - 提供详细的调用明细
     """
     # 累积统计（所有调用的总和）
-    prompt_tokens: int = Field(0, description="总输入 tokens")
+    # 遵循 Claude Platform 规范：prompt_tokens = input_tokens + cache_read_tokens + cache_write_tokens
+    prompt_tokens: int = Field(0, description="总输入 tokens（包含 input + cache_read + cache_write）")
     completion_tokens: int = Field(0, description="总输出 tokens")
     thinking_tokens: int = Field(0, description="总 thinking tokens")
     cache_read_tokens: int = Field(0, description="总缓存读取 tokens")
@@ -147,11 +148,19 @@ class UsageResponse(BaseModel):
         total_cache_read_price = sum(call.cache_read_price for call in tracker.calls)
         total_cache_write_price = sum(call.cache_write_price for call in tracker.calls)
         
-        # 计算加权平均单价
-        weighted_input_price = (
-            sum(call.input_tokens * call.input_unit_price for call in tracker.calls) 
-            / total_input if total_input > 0 else 0.0
-        )
+        # 计算加权平均单价（考虑所有输入 tokens，包括缓存）
+        # prompt_unit_price 基于 total_prompt_tokens（input + cache_read + cache_write）
+        total_prompt_tokens_for_weighting = total_input + total_cache_read + total_cache_write
+        if total_prompt_tokens_for_weighting > 0:
+            # 加权平均：考虑 input_tokens、cache_read_tokens、cache_write_tokens 各自的单价
+            weighted_input_price = (
+                sum(call.input_tokens * call.input_unit_price for call in tracker.calls) +
+                sum(call.cache_read_tokens * call.cache_read_unit_price for call in tracker.calls) +
+                sum(call.cache_write_tokens * call.cache_write_unit_price for call in tracker.calls)
+            ) / total_prompt_tokens_for_weighting
+        else:
+            weighted_input_price = 0.0
+        
         weighted_output_price = (
             sum(call.output_tokens * call.output_unit_price for call in tracker.calls) 
             / total_output if total_output > 0 else 0.0
@@ -167,14 +176,18 @@ class UsageResponse(BaseModel):
             for call in tracker.calls
         )
         
+        # 根据 Claude Platform 规范：total_input_tokens = input_tokens + cache_read_tokens + cache_write_tokens
+        # 这三个字段是独立的：input_tokens 是未缓存部分，cache_read/write 是缓存部分
+        total_prompt_tokens = total_input + total_cache_read + total_cache_write
+        
         return cls(
-            prompt_tokens=total_input,
+            prompt_tokens=total_prompt_tokens,  # 包含 input + cache_read + cache_write
             completion_tokens=total_output,
             thinking_tokens=total_thinking,
             cache_read_tokens=total_cache_read,
             cache_write_tokens=total_cache_write,
-            total_tokens=total_input + total_output + total_thinking,
-            prompt_price=round(total_input_price, 6),
+            total_tokens=total_prompt_tokens + total_output + total_thinking,  # 包含所有输入 tokens（含缓存）
+            prompt_price=round(total_input_price, 6),  # 只包含 input_tokens 的价格（不含缓存）
             completion_price=round(total_output_price, 6),
             thinking_price=round(total_thinking_price, 6),
             cache_read_price=round(total_cache_read_price, 6),

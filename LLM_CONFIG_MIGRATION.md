@@ -27,7 +27,7 @@
 | `utils/background_tasks.py` | `background_task` | 移除硬编码，使用配置化 Profile |
 | `tools/plan_todo_tool.py` | `plan_manager` | 移除硬编码，使用配置化 Profile |
 
-**注意**: `core/agent/simple_agent.py` 的主 Agent 对话使用的是从 `instances/{name}/config.yaml` 传入的 LLM 配置，已经是配置化的，无需修改。
+**注意**: `core/agent/simple/simple_agent.py` 的主 Agent 对话使用的是从 `instances/{name}/config.yaml` 传入的 LLM 配置，已经是配置化的，无需修改。
 
 ## 📊 配置对比
 

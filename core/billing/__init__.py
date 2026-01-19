@@ -1,71 +1,74 @@
 """
 Billing 模块 - 统一的 Token 计费管理
 
-V7.5 重大重构：支持多模型调用记录和价格明细
+核心功能：
+- 记录每次 LLM 调用（model, tokens, price）
+- 支持多模型调用追踪
+- 自动计算价格（包含缓存）
+- Message ID 去重
+- 生成聚合统计报告
 
 模块结构：
 - models.py: 计费数据模型（LLMCallRecord, UsageResponse）
-- tracker.py: 增强的 UsageTracker（支持多模型 + Message ID 去重）
-- pricing.py: 模型定价表和成本计算（统一来源）
+- tracker.py: EnhancedUsageTracker（统一实现）
+- pricing.py: 模型定价表和成本计算
 
 使用示例：
-    from core.billing import (
-        EnhancedUsageTracker,
-        UsageResponse,
-        LLMCallRecord,
-        get_pricing_for_model,
-        calculate_cost
-    )
+    from core.billing import EnhancedUsageTracker, UsageResponse
     
     # 创建 tracker
     tracker = EnhancedUsageTracker()
     
-    # 记录意图识别调用（Haiku）
+    # 记录调用
     tracker.record_call(
-        llm_response=intent_response,
-        model="claude-haiku-4.5",
-        purpose="intent_analysis"
+        llm_response=response,
+        model="claude-sonnet-4",
+        purpose="main_response",
+        message_id=response.id
     )
     
-    # 记录主对话调用（Sonnet）
-    tracker.record_call(
-        llm_response=main_response,
-        model="claude-sonnet-4.5",
-        purpose="main_response"
-    )
-    
-    # 生成响应（自动包含所有调用明细）
+    # 生成响应（包含调用明细）
     usage = UsageResponse.from_tracker(tracker, latency=4.0)
 """
 
-# 🆕 V7.5 新模块
 from core.billing.models import LLMCallRecord, UsageResponse
-from core.billing.tracker import EnhancedUsageTracker
-
-# 定价和成本计算
+from core.billing.tracker import EnhancedUsageTracker, create_enhanced_usage_tracker
 from core.billing.pricing import (
     calculate_cost,
     get_pricing_for_model,
     estimate_monthly_cost,
 )
 
-# 🔄 向后兼容：重导出旧接口
-from models.usage import get_model_pricing, CLAUDE_PRICING
-from utils.usage_tracker import UsageTracker, create_usage_tracker
+# 重导出定价表（延迟导入以避免循环依赖）
+def get_model_pricing(model: str):
+    """获取模型定价（延迟导入）"""
+    from models.usage import get_model_pricing as _get_model_pricing
+    return _get_model_pricing(model)
+
+def get_claude_pricing():
+    """获取 CLAUDE_PRICING（延迟导入）"""
+    from models.usage import CLAUDE_PRICING as _CLAUDE_PRICING
+    return _CLAUDE_PRICING
+
+CLAUDE_PRICING = None  # 占位，实际使用时调用 get_claude_pricing()
+
+# 统一别名
+UsageTracker = EnhancedUsageTracker
+create_usage_tracker = create_enhanced_usage_tracker
 
 __all__ = [
-    # 🆕 V7.5 新接口（推荐）
+    # 数据模型
     "LLMCallRecord",
     "UsageResponse",
+    # Tracker
     "EnhancedUsageTracker",
-    # Pricing
+    "UsageTracker",
+    "create_enhanced_usage_tracker",
+    "create_usage_tracker",
+    # 定价
     "CLAUDE_PRICING",
     "get_model_pricing",
     "get_pricing_for_model",
     "calculate_cost",
     "estimate_monthly_cost",
-    # 🔄 旧接口（向后兼容）
-    "UsageTracker",
-    "create_usage_tracker",
 ]
-

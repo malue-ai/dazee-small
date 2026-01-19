@@ -165,7 +165,7 @@ async for event in agent.chat(
 
 | 模块 | 位置 | 说明 |
 |------|------|------|
-| **Agent 编排** | `core/agent/simple_agent.py` | 核心编排器 |
+| **Agent 编排** | `core/agent/simple/simple_agent.py` | 核心编排器 |
 | **意图分析** | `core/agent/intent_analyzer.py` | 意图识别 |
 | **工具选择** | `core/tool/selector.py` | 工具选择器 |
 | **工具执行** | `core/tool/executor.py` | 工具执行器 |
@@ -218,7 +218,7 @@ async for event in agent.chat(
 
 | 文件 | 替代 |
 |------|------|
-| `core/agent.py` | `core/agent/simple_agent.py` |
+| `core/agent.py` | `core/agent/simple/simple_agent.py` |
 | `core/memory.py` | `core/memory/` 目录 |
 | `core/llm_service.py` | `core/llm/` 目录 |
 | `core/planning.py` | 已删除（使用 `plan_todo_tool`） |

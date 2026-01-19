@@ -195,3 +195,164 @@ class EnhancedUsageTracker:
         self._seen_message_ids.clear()
         self._call_counter = 0
         logger.debug("🔄 UsageTracker 已重置")
+    
+    # ========== 向后兼容方法（兼容旧版 UsageTracker 接口）==========
+    
+    def accumulate(
+        self, 
+        llm_response, 
+        model: str = None,
+        purpose: str = "main_response"
+    ) -> None:
+        """
+        向后兼容：累积 LLM 响应的 usage 统计
+        
+        这是旧版 UsageTracker.accumulate() 的兼容接口。
+        内部调用 record_call() 实现完整功能。
+        
+        Args:
+            llm_response: LLMResponse 对象（需要有 usage 属性）
+            model: 模型名称（如果 llm_response 有 model 属性则使用它）
+            purpose: 调用目的
+        """
+        if not llm_response:
+            return
+        
+        # 从 llm_response 获取模型名称
+        if model is None:
+            model = getattr(llm_response, 'model', None) or "claude-sonnet-4.5"
+        
+        # 从 llm_response 获取 message_id（用于去重）
+        message_id = getattr(llm_response, 'id', None)
+        
+        # 调用新版 record_call
+        self.record_call(
+            llm_response=llm_response,
+            model=model,
+            purpose=purpose,
+            message_id=message_id
+        )
+    
+    def accumulate_from_dict(self, usage_dict: dict, model: str = "claude-sonnet-4.5") -> None:
+        """
+        向后兼容：从字典累积 usage
+        
+        Args:
+            usage_dict: usage 字典，包含 input_tokens, output_tokens 等
+            model: 模型名称
+        """
+        if not usage_dict:
+            return
+        
+        # 创建一个模拟的 response 对象
+        class MockResponse:
+            usage = usage_dict
+        
+        self.record_call(
+            llm_response=MockResponse(),
+            model=model,
+            purpose="from_dict"
+        )
+    
+    def get_stats(self) -> dict:
+        """
+        向后兼容：获取当前统计数据（与旧版 UsageTracker.get_stats() 格式兼容）
+        
+        Returns:
+            统计字典（与旧版格式完全一致）
+        """
+        return {
+            "total_input_tokens": sum(c.input_tokens for c in self.calls),
+            "total_output_tokens": sum(c.output_tokens for c in self.calls),
+            "total_thinking_tokens": sum(c.thinking_tokens for c in self.calls),
+            "total_cache_read_tokens": sum(c.cache_read_tokens for c in self.calls),
+            "total_cache_creation_tokens": sum(c.cache_write_tokens for c in self.calls),  # 注意：旧版用 creation
+            "llm_calls": len(self.calls)
+        }
+    
+    def get_total_tokens(self) -> int:
+        """
+        向后兼容：获取总 token 数
+        
+        Returns:
+            总 token 数（input + output + thinking）
+        """
+        return sum(
+            c.input_tokens + c.output_tokens + c.thinking_tokens
+            for c in self.calls
+        )
+    
+    def get_cost_estimate(
+        self,
+        input_price_per_mtok: float = None,  # 忽略，使用实际定价
+        output_price_per_mtok: float = None,
+        cache_read_price_per_mtok: float = None,
+        cache_creation_price_per_mtok: float = None
+    ) -> float:
+        """
+        向后兼容：估算成本
+        
+        注意：此方法忽略传入的价格参数，使用实际的模型定价。
+        
+        Returns:
+            总成本（USD）
+        """
+        return sum(c.total_price for c in self.calls)
+    
+    def snapshot(self) -> dict:
+        """
+        向后兼容：创建当前统计的快照
+        
+        Returns:
+            包含统计和计算信息的字典
+        """
+        stats = self.get_stats()
+        total_tokens = self.get_total_tokens()
+        total_input_tokens = stats["total_input_tokens"]
+        total_cache_read_tokens = stats["total_cache_read_tokens"]
+        
+        return {
+            **stats,
+            "total_tokens": total_tokens,
+            "estimated_cost_usd": self.get_cost_estimate(),
+            "average_input_per_call": (
+                total_input_tokens / stats["llm_calls"]
+                if stats["llm_calls"] > 0 else 0
+            ),
+            "average_output_per_call": (
+                stats["total_output_tokens"] / stats["llm_calls"]
+                if stats["llm_calls"] > 0 else 0
+            ),
+            "average_thinking_per_call": (
+                stats["total_thinking_tokens"] / stats["llm_calls"]
+                if stats["llm_calls"] > 0 else 0
+            ),
+            "cache_hit_rate": (
+                total_cache_read_tokens /
+                (total_input_tokens + total_cache_read_tokens)
+                if (total_input_tokens + total_cache_read_tokens) > 0
+                else 0
+            )
+        }
+    
+    def __repr__(self) -> str:
+        """字符串表示"""
+        stats = self.get_stats()
+        return (
+            f"EnhancedUsageTracker("
+            f"calls={stats['llm_calls']}, "
+            f"input={stats['total_input_tokens']}, "
+            f"output={stats['total_output_tokens']}, "
+            f"thinking={stats['total_thinking_tokens']}, "
+            f"total={self.get_total_tokens()})"
+        )
+
+
+def create_enhanced_usage_tracker() -> EnhancedUsageTracker:
+    """
+    创建 EnhancedUsageTracker 实例（工厂函数）
+    
+    Returns:
+        EnhancedUsageTracker 实例
+    """
+    return EnhancedUsageTracker()

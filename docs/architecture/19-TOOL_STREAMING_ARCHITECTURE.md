@@ -217,7 +217,7 @@ async def create_message_stream(
 负责执行工具并发送流式事件。
 
 ```python
-# core/agent/simple_agent.py
+# core/agent/simple/simple_agent.py
 
 # ===== 调用方：_run_loop =====
 # 执行工具并收集结果

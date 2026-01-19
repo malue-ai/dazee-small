@@ -17,7 +17,7 @@ from logger import get_logger
 
 # 🆕 V7: 延迟导入避免循环依赖
 if TYPE_CHECKING:
-    from core.multi_agent.config import MultiAgentConfig
+    from core.agent.multi.models import MultiAgentConfig
 
 logger = get_logger(__name__)
 

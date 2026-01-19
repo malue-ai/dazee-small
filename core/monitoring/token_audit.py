@@ -31,12 +31,32 @@ logger = logging.getLogger(__name__)
 
 CLAUDE_PRICING = {
     # model_name -> {input, output, cache_write, cache_read}
+    # Opus 系列
     "claude-opus-4.5": {
         "input": 5.0,
         "output": 25.0,
-        "cache_write": 6.25,   # 25% 加价
-        "cache_read": 0.5      # 90% 折扣
+        "cache_write": 6.25,   # 5m cache: 25% 加价
+        "cache_read": 0.5      # cache hit: 90% 折扣
     },
+    "claude-opus-4.1": {
+        "input": 15.0,
+        "output": 75.0,
+        "cache_write": 18.75,
+        "cache_read": 1.5
+    },
+    "claude-opus-4": {
+        "input": 15.0,
+        "output": 75.0,
+        "cache_write": 18.75,
+        "cache_read": 1.5
+    },
+    "claude-opus-3": {  # deprecated
+        "input": 15.0,
+        "output": 75.0,
+        "cache_write": 18.75,
+        "cache_read": 1.5
+    },
+    # Sonnet 系列
     "claude-sonnet-4.5": {
         "input": 3.0,
         "output": 15.0,
@@ -49,11 +69,36 @@ CLAUDE_PRICING = {
         "cache_write": 3.75,
         "cache_read": 0.3
     },
+    "claude-sonnet-4": {
+        "input": 3.0,
+        "output": 15.0,
+        "cache_write": 3.75,
+        "cache_read": 0.3
+    },
+    "claude-sonnet-3.7": {  # deprecated
+        "input": 3.0,
+        "output": 15.0,
+        "cache_write": 3.75,
+        "cache_read": 0.3
+    },
+    # Haiku 系列
     "claude-haiku-4.5": {
         "input": 1.0,
         "output": 5.0,
         "cache_write": 1.25,
         "cache_read": 0.1
+    },
+    "claude-haiku-3.5": {
+        "input": 0.8,
+        "output": 4.0,
+        "cache_write": 1.0,
+        "cache_read": 0.08
+    },
+    "claude-haiku-3": {
+        "input": 0.25,
+        "output": 1.25,
+        "cache_write": 0.3,
+        "cache_read": 0.03
     },
     # 默认使用 Sonnet 价格
     "default": {

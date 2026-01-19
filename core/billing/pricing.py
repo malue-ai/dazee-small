@@ -5,15 +5,16 @@ Pricing 模块 - 模型定价和成本计算
 
 价格来源：Anthropic 官方定价（2026-01）
 单位：美元 / 百万 tokens
+
+注意：为避免循环导入，此模块不依赖 models.usage
 """
 
 from typing import Dict, Optional, Tuple
-from models.usage import CLAUDE_PRICING, get_model_pricing
 
 
 def get_pricing_for_model(model: str) -> Dict[str, float]:
     """
-    获取模型定价（别名，与 models.usage.get_model_pricing 一致）
+    获取模型定价
     
     Args:
         model: 模型名称
@@ -21,6 +22,8 @@ def get_pricing_for_model(model: str) -> Dict[str, float]:
     Returns:
         定价字典 {input, output, cache_write, cache_read}
     """
+    # 延迟导入以避免循环导入
+    from models.usage import get_model_pricing
     return get_model_pricing(model)
 
 
@@ -62,7 +65,7 @@ def calculate_cost(
         #     "total_cost": 0.375      # float
         # }
     """
-    pricing = get_model_pricing(model)
+    pricing = get_pricing_for_model(model)
     
     # 计算各项成本（USD，float 类型）
     input_cost = (input_tokens / 1_000_000) * pricing["input"]
@@ -108,7 +111,7 @@ def estimate_monthly_cost(
     Returns:
         月度成本估算字典
     """
-    pricing = get_model_pricing(model)
+    pricing = get_pricing_for_model(model)
     
     # 月度请求数（按30天计算）
     monthly_requests = daily_requests * 30

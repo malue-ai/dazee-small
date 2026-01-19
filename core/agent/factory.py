@@ -476,7 +476,7 @@ class AgentFactory:
             )
         else:
             # 单智能体模式
-            from core.agent.simple_agent import SimpleAgent
+            from core.agent.simple import SimpleAgent
             
             agent = SimpleAgent(
                 model=schema.model,
@@ -519,7 +519,8 @@ class AgentFactory:
         Returns:
             MultiAgentOrchestrator 实例
         """
-        from core.multi_agent import MultiAgentOrchestrator, OrchestratorConfig
+        from core.agent.multi import MultiAgentOrchestrator
+        from core.agent.multi.models import OrchestratorConfig
         from core.llm import create_claude_service
         from core.memory.working import WorkingMemory
         

@@ -9,7 +9,7 @@
 
 import pytest
 from unittest.mock import Mock, AsyncMock
-from core.agent.simple_agent import SimpleAgent
+from core.agent.simple import SimpleAgent
 from core.context.context_engineering import (
     ContextEngineeringManager,
     AgentState,
