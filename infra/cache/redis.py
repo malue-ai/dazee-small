@@ -300,11 +300,35 @@ async def create_redis_client(redis_url: str = None) -> RedisClient:
     try:
         import redis.asyncio as aioredis
         
-        client = aioredis.from_url(redis_url, decode_responses=False)
+        # 检测是否使用 TLS（rediss:// 前缀）
+        use_ssl = redis_url.startswith("rediss://")
+        
+        # 构建连接参数
+        # 根据 AWS MemoryDB 文档：https://docs.aws.amazon.com/memorydb/latest/devguide/getting-started.html#connect-tls
+        # 必须明确启用 TLS（对应 redis-cli 的 --tls 参数）
+        connection_kwargs = {
+            "decode_responses": False,
+            "socket_connect_timeout": 30,  # 增加超时时间（秒），TLS 握手可能需要更长时间
+            "socket_timeout": 30,
+        }
+        
+        if use_ssl:
+            # TLS 连接配置（根据 AWS MemoryDB 文档要求）
+            # redis-py 7.x 的 from_url 会自动识别 rediss:// 并启用 TLS
+            # 不需要显式设置 ssl=True（会导致错误）
+            import ssl
+            # MemoryDB 使用 AWS 管理的证书，但可能需要跳过主机名验证
+            # 根据文档，应该验证证书，但可以先尝试 CERT_NONE 以排除证书问题
+            connection_kwargs["ssl_cert_reqs"] = ssl.CERT_NONE  # 临时使用，生产环境应改为 CERT_REQUIRED
+            connection_kwargs["ssl_check_hostname"] = False
+            logger.debug("🔒 Redis TLS 连接已启用（AWS MemoryDB，rediss:// 自动启用 TLS）")
+        
+        # from_url 会自动识别 rediss://，但我们需要明确设置 ssl=True
+        client = aioredis.from_url(redis_url, **connection_kwargs)
         # 测试连接
         await client.ping()
         
-        logger.info(f"✅ Redis 客户端已连接: {redis_url}")
+        logger.info(f"✅ Redis 客户端已连接: {redis_url[:50]}... (TLS={'启用' if use_ssl else '禁用'})")
         return RedisClient(client)
         
     except ImportError:

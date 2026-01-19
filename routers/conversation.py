@@ -299,17 +299,19 @@ async def delete_conversation(conversation_id: str):
 async def get_conversation_messages(
     conversation_id: str,
     limit: int = Query(50, description="每页数量", ge=1, le=200),
-    offset: int = Query(0, description="偏移量", ge=0),
-    order: str = Query("asc", description="排序方式（asc/desc）")
+    offset: int = Query(0, description="偏移量（当 before_cursor 为 None 时使用）", ge=0),
+    order: str = Query("asc", description="排序方式（asc/desc）"),
+    before_cursor: Optional[str] = Query(None, description="游标（message_id），用于分页加载更早的消息")
 ):
     """
-    获取对话的历史消息
+    获取对话的历史消息（支持基于游标的分页，对齐文档规范）
     
     ## 参数
     - **conversation_id**: 对话ID
     - **limit**: 每页数量（默认50，最大200）
-    - **offset**: 偏移量（默认0）
+    - **offset**: 偏移量（默认0，当 before_cursor 为 None 时使用）
     - **order**: 排序方式（asc=时间正序, desc=时间倒序）
+    - **before_cursor**: 游标（message_id），用于分页加载更早的消息（对齐文档规范）
     
     ## 返回
     ```json
@@ -320,19 +322,11 @@ async def get_conversation_messages(
         "conversation_id": "conv_abc123",
         "messages": [
           {
-            "id": 1,
+            "id": "msg_xxx",
             "conversation_id": "conv_abc123",
             "role": "user",
-            "content": "你好",
+            "content": [{"type": "text", "text": "你好"}],
             "created_at": "2024-01-01T12:00:00",
-            "metadata": {}
-          },
-          {
-            "id": 2,
-            "conversation_id": "conv_abc123",
-            "role": "assistant",
-            "content": "你好！有什么可以帮助你的吗？",
-            "created_at": "2024-01-01T12:00:05",
             "metadata": {}
           },
           ...
@@ -340,20 +334,21 @@ async def get_conversation_messages(
         "total": 100,
         "limit": 50,
         "offset": 0,
-        "has_more": true
+        "has_more": true,
+        "next_cursor": "msg_yyy"  // 用于下次分页（当使用 before_cursor 时）
       }
     }
     ```
     
     ## 使用场景
-    - 加载对话历史
-    - 实现分页加载
+    - **初始加载**：不传 before_cursor，使用 offset 分页
+    - **向上滚动加载**：传 before_cursor，获取更早的消息（对齐文档规范）
     - 搜索历史消息
     """
     try:
         logger.info(
             f"📨 获取对话历史: conversation_id={conversation_id}, "
-            f"limit={limit}, offset={offset}, order={order}"
+            f"limit={limit}, offset={offset}, order={order}, before_cursor={before_cursor}"
         )
         
         # 验证排序方式
@@ -367,10 +362,14 @@ async def get_conversation_messages(
             conversation_id=conversation_id,
             limit=limit,
             offset=offset,
-            order=order
+            order=order,
+            before_cursor=before_cursor
         )
         
-        logger.info(f"✅ 返回 {len(result['messages'])} 条消息")
+        logger.info(
+            f"✅ 返回 {len(result['messages'])} 条消息, "
+            f"has_more={result.get('has_more')}, next_cursor={result.get('next_cursor')}"
+        )
         
         return APIResponse(
             code=200,

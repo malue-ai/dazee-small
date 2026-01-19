@@ -6,10 +6,12 @@ from datetime import datetime
 from typing import Optional, TYPE_CHECKING
 import json
 
-from sqlalchemy import String, DateTime, Text, ForeignKey
+from sqlalchemy import String, DateTime, Text, ForeignKey, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.dialects.postgresql import JSONB
 
 from infra.database.base import Base
+from infra.database.engine import IS_SQLITE
 
 if TYPE_CHECKING:
     from infra.database.models.user import User
@@ -52,11 +54,13 @@ class Conversation(Base):
         index=True
     )
     
-    # 元数据（JSON 存储，包含压缩信息等）
-    _metadata: Mapped[str] = mapped_column(
-        "metadata",
-        Text,
-        default="{}",
+    # 元数据（使用 JSONB 类型，PostgreSQL 自动优化）
+    # 注意：SQLAlchemy 的 metadata 是保留字，使用 _metadata 作为字段名
+    # 应用层通过 extra_data 属性访问（直接读写 dict，无需序列化）
+    _metadata: Mapped[dict] = mapped_column(
+        "metadata",  # 数据库字段名仍然是 metadata
+        JSONB if not IS_SQLITE else JSON,  # PostgreSQL 使用 JSONB，SQLite 使用 JSON
+        default={},
         nullable=False
     )
     
@@ -70,13 +74,13 @@ class Conversation(Base):
     
     @property
     def extra_data(self) -> dict:
-        """获取元数据（自动解析 JSON）"""
-        return json.loads(self._metadata) if self._metadata else {}
+        """获取元数据（直接返回 dict，无需序列化）"""
+        return self._metadata if isinstance(self._metadata, dict) else {}
     
     @extra_data.setter
     def extra_data(self, value: dict):
-        """设置元数据（自动序列化为 JSON）"""
-        self._metadata = json.dumps(value, ensure_ascii=False)
+        """设置元数据（直接设置 dict，自动序列化为 JSONB）"""
+        self._metadata = value if isinstance(value, dict) else {}
     
     def __repr__(self) -> str:
         return f"<Conversation(id={self.id}, title={self.title})>"

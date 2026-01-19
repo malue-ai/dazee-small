@@ -232,19 +232,29 @@ class ConversationService:
         conversation_id: str,
         limit: int = 50,
         offset: int = 0,
-        order: str = "asc"
+        order: str = "asc",
+        before_cursor: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        获取对话的历史消息
+        获取对话的历史消息（支持基于游标的分页）
         
         Args:
             conversation_id: 对话ID
             limit: 每页数量
-            offset: 偏移量
+            offset: 偏移量（当 before_cursor 为 None 时使用）
             order: 排序方式（asc/desc）
+            before_cursor: 游标（message_id），用于分页加载更早的消息
             
         Returns:
-            {"conversation_id": str, "messages": [...], "total": int, ...}
+            {
+                "conversation_id": str,
+                "messages": [...],
+                "total": int,
+                "limit": int,
+                "offset": int,
+                "has_more": bool,
+                "next_cursor": Optional[str]  # 用于下次分页
+            }
             
         Raises:
             ConversationNotFoundError: 对话不存在
@@ -256,13 +266,22 @@ class ConversationService:
             # 获取总数
             total = await crud.count_messages_in_conversation(session, conversation_id)
             
-            # 获取消息列表
-            db_messages = await crud.list_messages(
-                session=session,
-                conversation_id=conversation_id,
-                limit=limit,
-                order=order
-            )
+            # 如果提供了 before_cursor，使用游标分页（对齐文档规范）
+            if before_cursor:
+                db_messages = await crud.list_messages_before_cursor(
+                    session=session,
+                    conversation_id=conversation_id,
+                    cursor_message_id=before_cursor,
+                    limit=limit + 1  # 多取一条判断 has_more
+                )
+            else:
+                # 使用 offset 分页（向后兼容）
+                db_messages = await crud.list_messages(
+                    session=session,
+                    conversation_id=conversation_id,
+                    limit=limit,
+                    order=order
+                )
             
             # 转换为字典列表
             messages = []
@@ -291,12 +310,23 @@ class ConversationService:
                     "created_at": db_msg.created_at.isoformat() if db_msg.created_at else None,
                     "metadata": db_msg.extra_data
                 })
-        
-        has_more = (offset + len(messages)) < total
+            
+            # 判断是否有更多消息
+            if before_cursor:
+                has_more = len(messages) > limit
+                if has_more:
+                    messages = messages[:limit]
+                # 反转为正序（从旧到新）
+                messages.reverse()
+                next_cursor = messages[0].get("id") if messages and has_more else None
+            else:
+                has_more = (offset + len(messages)) < total
+                next_cursor = None
         
         logger.info(
             f"✅ 获取历史消息: conversation_id={conversation_id}, "
-            f"total={total}, returned={len(messages)}, has_more={has_more}"
+            f"total={total}, returned={len(messages)}, has_more={has_more}, "
+            f"before_cursor={before_cursor}"
         )
         
         return {
@@ -305,7 +335,8 @@ class ConversationService:
             "total": total,
             "limit": limit,
             "offset": offset,
-            "has_more": has_more
+            "has_more": has_more,
+            "next_cursor": next_cursor
         }
     
     async def add_message(
@@ -400,10 +431,10 @@ class ConversationService:
             if not db_msg:
                 raise ValueError(f"消息不存在: id={message_id}")
             
-            # 合并 metadata
+            # 深度合并 metadata（对齐文档规范）
             existing_metadata = db_msg.extra_data or {}
             if metadata:
-                existing_metadata.update(metadata)
+                existing_metadata = self._deep_merge_metadata(existing_metadata, metadata)
             
             # 更新消息
             updated_msg = await crud.update_message(
@@ -452,6 +483,28 @@ class ConversationService:
         logger.info(f"✅ 对话摘要: conversation_id={conversation_id}, message_count={summary['message_count']}")
         
         return summary
+    
+    # ==================== 辅助方法 ====================
+    
+    @staticmethod
+    def _deep_merge_metadata(existing: dict, new: dict) -> dict:
+        """
+        深度合并 metadata（对齐文档规范）
+        
+        Args:
+            existing: 现有 metadata
+            new: 新 metadata
+            
+        Returns:
+            合并后的 metadata
+        """
+        result = existing.copy()
+        for key, value in new.items():
+            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+                result[key] = ConversationService._deep_merge_metadata(result[key], value)
+            else:
+                result[key] = value
+        return result
 
 
 # ==================== 便捷函数 ====================

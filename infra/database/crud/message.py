@@ -37,7 +37,7 @@ async def create_message(
         created_at=datetime.now(),
     )
     if metadata:
-        msg.extra_data = metadata
+        msg._metadata = metadata
     
     session.add(msg)
     await session.commit()
@@ -70,14 +70,34 @@ async def update_message(
     if status is not None:
         msg.status = status
     if metadata is not None:
-        # 合并 metadata
-        existing = msg.extra_data
-        existing.update(metadata)
-        msg.extra_data = existing
+        # 深度合并 metadata（对齐文档规范）
+        existing = msg._metadata or {}
+        merged = _deep_merge_metadata(existing, metadata)
+        msg._metadata = merged
     
     await session.commit()
     await session.refresh(msg)
     return msg
+
+
+def _deep_merge_metadata(existing: dict, new: dict) -> dict:
+    """
+    深度合并 metadata（对齐文档规范）
+    
+    Args:
+        existing: 现有 metadata
+        new: 新 metadata
+        
+    Returns:
+        合并后的 metadata
+    """
+    result = existing.copy()
+    for key, value in new.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge_metadata(result[key], value)
+        else:
+            result[key] = value
+    return result
 
 
 async def list_messages(
@@ -95,6 +115,49 @@ async def list_messages(
         query = query.order_by(Message.created_at.asc())
     
     query = query.limit(limit)
+    
+    result = await session.execute(query)
+    return list(result.scalars().all())
+
+
+async def list_messages_before_cursor(
+    session: AsyncSession,
+    conversation_id: str,
+    cursor_message_id: str,
+    limit: int = 50
+) -> List[Message]:
+    """
+    基于游标的分页查询（对齐文档规范）
+    
+    获取指定消息 ID 之前的 N 条消息（用于向上滚动加载）
+    
+    Args:
+        session: 数据库会话
+        conversation_id: 对话 ID
+        cursor_message_id: 游标消息 ID（获取此消息之前的消息）
+        limit: 返回数量
+        
+    Returns:
+        消息列表（按创建时间倒序，从新到旧）
+    """
+    # 先获取游标消息的创建时间
+    cursor_msg = await get_message(session, cursor_message_id)
+    if not cursor_msg:
+        # 游标消息不存在，返回空列表
+        return []
+    
+    cursor_time = cursor_msg.created_at
+    
+    # 查询创建时间早于游标消息的消息
+    query = (
+        select(Message)
+        .where(
+            Message.conversation_id == conversation_id,
+            Message.created_at < cursor_time
+        )
+        .order_by(Message.created_at.desc())  # 从新到旧
+        .limit(limit)
+    )
     
     result = await session.execute(query)
     return list(result.scalars().all())

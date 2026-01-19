@@ -36,7 +36,7 @@ docs/
 │   ├── CONVERSATION_DELTA_PATTERN.md
 │   └── MULTI_AGENT_ROADMAP.md
 │
-├── guides/                          # 📖 使用指南 (10个)
+├── guides/                          # 📖 使用指南 (11个)
 │   ├── E2B_INTEGRATION.md           # E2B 集成指南
 │   ├── E2B_QUICKSTART.md            # E2B 快速开始
 │   ├── E2B_SANDBOX_LIFECYCLE_GUIDE.md
@@ -44,6 +44,7 @@ docs/
 │   ├── E2B_CORE_CAPABILITIES_ANALYSIS.md
 │   ├── MEM0_EMBEDDING_GUIDE.md
 │   ├── MEM0_SETUP_GUIDE.md
+│   ├── MEM0_SCHEMA_REFERENCE.md     # Mem0 字段定义参考
 │   ├── GRPC_INTEGRATION.md
 │   ├── PROMPT_DRIVEN_IMPLEMENTATION.md
 │   └── RESULT_COMPACTOR_IMPLEMENTATION.md

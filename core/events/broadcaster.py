@@ -137,6 +137,12 @@ class EventBroadcaster:
         # 🆕 session_id -> message_id 映射（用于持久化）
         self._session_message_ids: Dict[str, str] = {}
         
+        # 🆕 session_id -> conversation_id 映射（用于内存缓存更新）
+        self._session_conversation_ids: Dict[str, str] = {}
+        
+        # ✅ 新增：usage 累积（内存中，等待 _finalize_message 时合并写入）
+        self._session_usage: Dict[str, dict] = {}
+        
         # 需要广播的事件类型（可配置）
         self._broadcast_types: Set[str] = {
             # Content 级（核心 3 个，包括 tool_use/tool_result）
@@ -281,7 +287,8 @@ class EventBroadcaster:
     def start_message(
         self,
         session_id: str,
-        message_id: str
+        message_id: str,
+        conversation_id: Optional[str] = None
     ) -> None:
         """
         开始一条新消息（初始化累积器）
@@ -291,38 +298,39 @@ class EventBroadcaster:
         Args:
             session_id: Session ID
             message_id: 消息 ID（用于持久化）
+            conversation_id: 对话 ID（用于内存缓存更新）
         """
         self._accumulators[session_id] = ContentAccumulator()
         self._session_message_ids[session_id] = message_id
+        if conversation_id:
+            self._session_conversation_ids[session_id] = conversation_id
         logger.debug(f"📝 开始消息累积: session={session_id}, message_id={message_id}")
     
     async def accumulate_usage(
         self,
         session_id: str,
-        usage: Dict[str, int]
+        usage: Dict[str, Any]  # 改为接受完整的 UsageResponse.model_dump()
     ) -> None:
         """
-        保存 token 使用量到数据库（增量合并）
+        累积 usage 到内存（不立即推送，等待 _finalize_message 时合并写入）
+        
+        ✅ 优化：避免多次数据库写入，在 _finalize_message 时一次性写入
         
         Args:
             session_id: Session ID
-            usage: 使用量字典
+            usage: UsageResponse.model_dump() 或 usage dict（完整的计费信息）
         """
-        if not self.conversation_service:
-            return
-        
         message_id = self._session_message_ids.get(session_id)
         if not message_id:
             return
         
-        try:
-            await self.conversation_service.update_message(
-                message_id=message_id,
-                metadata={"usage": usage}
-            )
-            logger.debug(f"📊 保存 usage: message_id={message_id}, tokens={usage}")
-        except Exception as e:
-            logger.warning(f"⚠️ 保存 usage 失败: {str(e)}")
+        # ✅ 在内存中累积（不立即推送）
+        self._session_usage[session_id] = usage
+        
+        logger.debug(
+            f"📊 Usage 已累积到内存: session={session_id}, message_id={message_id}, "
+            f"total_tokens={usage.get('total_tokens', 0)}, total_price=${usage.get('total_price', 0):.6f}"
+        )
     
     def get_accumulator(self, session_id: str) -> Optional[ContentAccumulator]:
         """获取 session 的累积器（供外部查询）"""
@@ -674,14 +682,16 @@ class EventBroadcaster:
                 pass
         
         try:
-            # 直接更新数据库（update_message 会增量合并 metadata）
-            await self.conversation_service.update_message(
+            # 异步更新：推送到 Redis Streams
+            from infra.message_queue import get_message_queue_client
+            mq_client = await get_message_queue_client()
+            await mq_client.push_update_event(
                 message_id=message_id,
                 metadata={delta_type: parsed_content}
             )
-            logger.debug(f"📦 保存 metadata: message_id={message_id}, type={delta_type}")
+            logger.debug(f"📦 Metadata delta 已推送到 Redis Streams: message_id={message_id}, type={delta_type}")
         except Exception as e:
-            logger.warning(f"⚠️ 保存 metadata 失败: {str(e)}")
+            logger.warning(f"⚠️ 推送 metadata delta 到 Redis Streams 失败: {str(e)}")
     
     # ==================== 消息持久化（内部方法）====================
     
@@ -707,20 +717,24 @@ class EventBroadcaster:
                 return
             
             content_json = json.dumps(content_blocks, ensure_ascii=False)
-            await self.conversation_service.update_message(
+            
+            # 异步更新：推送到 Redis Streams（checkpoint）
+            from infra.message_queue import get_message_queue_client
+            mq_client = await get_message_queue_client()
+            await mq_client.push_update_event(
                 message_id=message_id,
                 content=content_json,
                 status="processing"
             )
-            logger.debug(f"📍 Checkpoint: message_id={message_id}, blocks={len(content_blocks)}")
+            logger.debug(f"📍 Checkpoint 已推送到 Redis Streams: message_id={message_id}, blocks={len(content_blocks)}")
         except Exception as e:
-            logger.warning(f"⚠️ Checkpoint 保存失败: {str(e)}")
+            logger.warning(f"⚠️ Checkpoint 推送失败: {str(e)}")
     
     async def _finalize_message(self, session_id: str) -> None:
         """
-        最终完成消息
+        最终完成消息（两阶段持久化 - 阶段二）
         
-        在 message_stop 时调用：只更新状态为 "completed"
+        在 message_stop 时调用：更新状态为 "completed"，更新 metadata.stream.phase
         
         注意：content 已在 checkpoint 保存，plan/usage 等已在 message_delta 时保存
         """
@@ -728,22 +742,103 @@ class EventBroadcaster:
             return
         
         message_id = self._session_message_ids.get(session_id)
+        accumulator = self._accumulators.get(session_id)
+        
         if not message_id:
             return
         
         try:
-            await self.conversation_service.update_message(
+            # 获取当前累积的内容（用于计算 chunk_count）
+            content_blocks = accumulator.build_for_db() if accumulator else []
+            chunk_count = len(content_blocks)
+            content_json = json.dumps(content_blocks, ensure_ascii=False) if content_blocks else "[]"
+            
+            # ✅ 合并所有 metadata（一次性写入：stream.phase + usage）
+            update_metadata = {
+                "stream": {
+                    "phase": "final",
+                    "chunk_count": chunk_count
+                }
+            }
+            
+            # ✅ 合并 usage（如果存在，避免多次数据库写入）
+            if session_id in self._session_usage:
+                usage_data = self._session_usage[session_id]
+                if usage_data:
+                    update_metadata["usage"] = usage_data
+                    logger.debug(f"📊 合并 usage 到 metadata: total_tokens={usage_data.get('total_tokens', 0)}")
+            
+            # ✅ 一次性推送：content + status + 完整 metadata（包含 usage）
+            from infra.message_queue import get_message_queue_client
+            mq_client = await get_message_queue_client()
+            
+            await mq_client.push_update_event(
                 message_id=message_id,
-                status="completed"
+                content=content_json,
+                status="completed",
+                metadata=update_metadata  # 包含 stream.phase + usage
             )
-            logger.info(f"✅ 消息完成: message_id={message_id}")
+            logger.info(
+                f"✅ 消息完成（合并写入）: message_id={message_id}, chunks={chunk_count}, "
+                f"has_usage={'usage' in update_metadata}"
+            )
+            
+            # 清理内存中的 usage
+            self._session_usage.pop(session_id, None)
+            
+            # 更新内存缓存（SessionCacheService）
+            conversation_id = self._session_conversation_ids.get(session_id)
+            if conversation_id:
+                try:
+                    from services.session_cache_service import get_session_cache_service
+                    session_cache = get_session_cache_service()
+                    context = await session_cache.get_context(conversation_id)
+                    # 更新消息内容
+                    for msg in context.messages:
+                        if msg.id == message_id:
+                            msg.content = content_json
+                            # 深度合并 metadata
+                            if isinstance(msg.metadata, dict) and isinstance(update_metadata, dict):
+                                for key, value in update_metadata.items():
+                                    if key in msg.metadata and isinstance(msg.metadata[key], dict) and isinstance(value, dict):
+                                        msg.metadata[key].update(value)
+                                    else:
+                                        msg.metadata[key] = value
+                            break
+                except Exception as cache_err:
+                    logger.warning(f"⚠️ 更新内存缓存失败（不影响主流程）: {cache_err}")
+                
         except Exception as e:
             logger.error(f"❌ 消息完成失败: {str(e)}", exc_info=True)
+            # 失败时也推送到 Redis Streams 进行异步重试
+            try:
+                from infra.message_queue import get_message_queue_client
+                mq_client = await get_message_queue_client()
+                update_metadata = {
+                    "stream": {
+                        "phase": "final",
+                        "chunk_count": 0
+                    },
+                    "error": {
+                        "code": "finalize_failed",
+                        "message": str(e)
+                    }
+                }
+                await mq_client.push_update_event(
+                    message_id=message_id,
+                    status="failed",
+                    metadata=update_metadata
+                )
+                logger.info(f"✅ 失败消息已推送到 Redis Streams 进行异步重试: {message_id}")
+            except Exception as mq_err:
+                logger.warning(f"⚠️ 推送到 Redis Streams 也失败: {mq_err}")
     
     def _cleanup_session(self, session_id: str) -> None:
         """清理 session 状态"""
         self._accumulators.pop(session_id, None)
         self._session_message_ids.pop(session_id, None)
+        self._session_conversation_ids.pop(session_id, None)
+        self._session_usage.pop(session_id, None)  # 清理 usage
         logger.debug(f"🧹 清理 session 状态: {session_id}")
     
     # ==================== HITL 事件 ====================

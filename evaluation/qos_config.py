@@ -100,6 +100,7 @@ QOS_EVAL_CONFIGS: Dict[QoSLevel, QoSEvalConfig] = {
             "tools/complex_chains",            # 复杂工具链
             "reasoning/multi_step",            # 多步推理
             "format/output_structure",
+            "coding/basic_code_generation",    # 基础代码生成
         ],
         trials_per_task=3,
         timeout_seconds=60,
@@ -126,6 +127,8 @@ QOS_EVAL_CONFIGS: Dict[QoSLevel, QoSEvalConfig] = {
             "reasoning/multi_step",
             "reasoning/complex_analysis",      # 复杂分析
             "format/output_structure",
+            "multi_agent/task_decomposition", # 多智能体任务分解
+            "multi_agent/coordination",       # 多智能体协作
             "security/input_validation",       # 输入验证
             "security/output_filtering",       # 输出过滤
         ],

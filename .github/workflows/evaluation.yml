@@ -1,0 +1,172 @@
+name: ZenFlux Agent Evaluation
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+  schedule:
+    # 每天凌晨 2 点运行全面评估
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      qos_level:
+        description: 'QoS Level to evaluate'
+        required: false
+        default: 'BASIC'
+        type: choice
+        options:
+          - FREE
+          - BASIC
+          - PRO
+          - ENTERPRISE
+          - ALL
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # 获取完整历史用于回归检测
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      
+      - name: Install Promptfoo
+        run: npm install -g promptfoo
+      
+      - name: Install dependencies
+        run: |
+          cd CoT_agent/mvp/zenflux_agent
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+      
+      - name: Download baseline report
+        id: baseline
+        continue-on-error: true
+        run: |
+          # 从最近的成功构建下载基线报告
+          # 这里使用 GitHub API 或从 artifacts 下载
+          # 简化实现：使用固定路径
+          mkdir -p evaluation/baselines
+          if [ -f "evaluation/baselines/baseline.json" ]; then
+            echo "baseline_path=evaluation/baselines/baseline.json" >> $GITHUB_OUTPUT
+          else
+            echo "baseline_path=" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Run evaluation
+        id: eval
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          QOS_LEVEL: ${{ github.event.inputs.qos_level || 'BASIC' }}
+          BASELINE_PATH: ${{ steps.baseline.outputs.baseline_path }}
+        run: |
+          cd CoT_agent/mvp/zenflux_agent
+          
+          # 运行评估
+          if [ -n "$BASELINE_PATH" ]; then
+            python -m evaluation.ci_integration \
+              --qos-level "$QOS_LEVEL" \
+              --baseline "$BASELINE_PATH" \
+              --strict
+          else
+            python -m evaluation.ci_integration \
+              --qos-level "$QOS_LEVEL" \
+              --strict
+          fi
+      
+      - name: Upload evaluation report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: evaluation-report
+          path: |
+            CoT_agent/mvp/zenflux_agent/evaluation/reports/*.json
+            CoT_agent/mvp/zenflux_agent/evaluation/alerts.log
+          retention-days: 30
+      
+      - name: Upload dashboard
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: evaluation-dashboard
+          path: CoT_agent/mvp/zenflux_agent/evaluation/reports/dashboard.json
+          retention-days: 30
+      
+      - name: Update baseline (on main branch)
+        if: github.ref == 'refs/heads/main' && success()
+        run: |
+          cd CoT_agent/mvp/zenflux_agent
+          # 将最新的成功报告设为新基线
+          mkdir -p evaluation/baselines
+          cp evaluation/reports/$(ls -t evaluation/reports/*.json | head -1) \
+             evaluation/baselines/baseline.json
+      
+      - name: Comment PR with results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const dashboardPath = 'CoT_agent/mvp/zenflux_agent/evaluation/reports/dashboard.json';
+            
+            if (!fs.existsSync(dashboardPath)) {
+              console.log('Dashboard not found, skipping comment');
+              return;
+            }
+            
+            const dashboard = JSON.parse(fs.readFileSync(dashboardPath, 'utf8'));
+            const latestReport = dashboard.reports[0];
+            
+            const comment = `## 🤖 ZenFlux Agent 评估报告
+            
+            **总体得分**: ${(latestReport.overall_score * 100).toFixed(1)}%
+            **质量分层**: ${latestReport.quality_tier}
+            **回归检测**: ${latestReport.regression_detected ? '⚠️ 检测到回归' : '✅ 无回归'}
+            
+            ### 关键指标
+            | 指标 | 当前值 | 阈值 | 状态 |
+            |------|--------|------|------|
+            ${latestReport.metrics.slice(0, 5).map(m => 
+              `| ${m.description} | ${(m.value * 100).toFixed(1)}% | ${(m.threshold * 100).toFixed(1)}% | ${m.passed ? '✅' : '❌'} |`
+            ).join('\n')}
+            
+            详细报告请查看 [Artifacts](${context.payload.pull_request.html_url}/checks)
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+      
+      - name: Notify on failure
+        if: failure()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ -n "$SLACK_WEBHOOK_URL" ]; then
+            curl -X POST "$SLACK_WEBHOOK_URL" \
+              -H 'Content-Type: application/json' \
+              -d "{
+                \"text\": \"🚨 ZenFlux Agent 评估失败\",
+                \"attachments\": [{
+                  \"color\": \"danger\",
+                  \"text\": \"Workflow: ${{ github.workflow }}\\nBranch: ${{ github.ref }}\\nCommit: ${{ github.sha }}\"
+                }]
+              }"
+          fi

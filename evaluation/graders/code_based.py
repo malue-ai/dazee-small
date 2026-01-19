@@ -553,6 +553,163 @@ class CodeBasedGraders:
         )
     
     # ===================
+    # 代码语法检查
+    # ===================
+    
+    @staticmethod
+    def check_code_syntax(
+        transcript: Transcript,
+        language: str = "python"
+    ) -> GradeResult:
+        """
+        验证生成的代码语法是否正确
+        
+        Args:
+            transcript: 转录记录
+            language: 编程语言（python/javascript/typescript等）
+            
+        Returns:
+            GradeResult: 评分结果
+        """
+        response = transcript.get_final_response() or ""
+        
+        # 提取代码块
+        code_blocks = []
+        if language == "python":
+            # 提取 Python 代码块
+            pattern = r'```(?:python)?\s*\n(.*?)```'
+            matches = re.findall(pattern, response, re.DOTALL)
+            code_blocks.extend(matches)
+            
+            # 如果没有代码块，尝试提取整个响应中的 Python 代码
+            if not code_blocks:
+                # 简单检测：是否包含 def、class、import 等 Python 关键字
+                if any(keyword in response for keyword in ["def ", "class ", "import ", "from "]):
+                    code_blocks.append(response)
+        
+        if not code_blocks:
+            return GradeResult(
+                grader_type=GraderType.CODE,
+                grader_name="check_code_syntax",
+                passed=True,
+                score=1.0,
+                explanation="未检测到代码块",
+                details={"language": language, "code_blocks_found": 0},
+            )
+        
+        # 验证语法（Python 使用 ast 模块）
+        syntax_errors = []
+        if language == "python":
+            import ast
+            for i, code in enumerate(code_blocks):
+                try:
+                    ast.parse(code)
+                except SyntaxError as e:
+                    syntax_errors.append({
+                        "block_index": i,
+                        "error": str(e),
+                        "line": e.lineno,
+                        "offset": e.offset,
+                    })
+        
+        passed = len(syntax_errors) == 0
+        
+        return GradeResult(
+            grader_type=GraderType.CODE,
+            grader_name="check_code_syntax",
+            passed=passed,
+            score=1.0 if passed else max(0.0, 1.0 - len(syntax_errors) / len(code_blocks)),
+            explanation=f"语法错误: {len(syntax_errors)}/{len(code_blocks)} 个代码块" if syntax_errors else None,
+            details={
+                "language": language,
+                "code_blocks_count": len(code_blocks),
+                "syntax_errors": syntax_errors,
+            },
+        )
+    
+    # ===================
+    # 中间结果检查点验证
+    # ===================
+    
+    @staticmethod
+    def check_checkpoint(
+        transcript: Transcript,
+        checkpoint_name: str,
+        check_expression: str
+    ) -> GradeResult:
+        """
+        验证中间结果检查点
+        
+        Args:
+            transcript: 转录记录
+            checkpoint_name: 检查点名称
+            check_expression: 检查表达式，如 'plan_step_count >= 1'
+            
+        Returns:
+            GradeResult: 评分结果
+        """
+        # 构建评估上下文
+        context = {
+            "plan_step_count": len(transcript.metadata.get("plan", {}).get("steps", [])),
+            "tool_calls_count": len(transcript.tool_calls),
+            "messages_count": len(transcript.messages),
+            "token_usage": transcript.token_usage.total_tokens,
+            "has_plan": "plan" in transcript.metadata,
+            "has_tool_calls": len(transcript.tool_calls) > 0,
+        }
+        
+        # 添加工具调用相关的辅助函数
+        def tool_calls_contain(tool_name: str) -> bool:
+            return tool_name in transcript.get_all_tool_names()
+        
+        def tool_calls_count() -> int:
+            return len(transcript.tool_calls)
+        
+        # 安全执行检查表达式
+        try:
+            # 将表达式中的函数调用替换为实际调用
+            safe_expr = check_expression
+            # 替换 tool_calls_contain('xxx') 为实际调用
+            import re as regex_module
+            tool_contain_pattern = r"tool_calls_contain\(['\"](.+?)['\"]\)"
+            matches = regex_module.findall(tool_contain_pattern, safe_expr)
+            for tool_name in matches:
+                result = tool_calls_contain(tool_name)
+                safe_expr = safe_expr.replace(
+                    f"tool_calls_contain('{tool_name}')",
+                    str(result)
+                ).replace(
+                    f'tool_calls_contain("{tool_name}")',
+                    str(result)
+                )
+            
+            # 替换 tool_calls_count() 为实际调用
+            safe_expr = safe_expr.replace("tool_calls_count()", str(tool_calls_count()))
+            
+            # 执行表达式
+            result = eval(safe_expr, {"__builtins__": {}}, context)
+            
+            passed = bool(result)
+            
+        except Exception as e:
+            passed = False
+            result = None
+        
+        return GradeResult(
+            grader_type=GraderType.CODE,
+            grader_name=f"check_checkpoint_{checkpoint_name}",
+            passed=passed,
+            score=1.0 if passed else 0.0,
+            explanation=f"检查点 '{checkpoint_name}' 未通过: {check_expression}" if not passed else None,
+            details={
+                "checkpoint_name": checkpoint_name,
+                "check_expression": check_expression,
+                "context": context,
+                "result": result,
+            },
+        )
+    
+    # ===================
     # Plan Schema 验证
     # ===================
     

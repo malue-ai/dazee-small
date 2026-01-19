@@ -378,42 +378,88 @@ class ChatService:
             # 生成 Assistant 消息 ID
             assistant_message_id = f"msg_{uuid4().hex[:24]}"
             
-            # 1️⃣ 先保存到数据库（确保数据持久化）
+            # 1️⃣ 异步持久化：推送到 Redis Streams（两阶段持久化）
             content_json = json.dumps(message, ensure_ascii=False)
             
-            async with AsyncSessionLocal() as session:
-                # 保存用户消息（包含文件元数据）
-                user_metadata = {
-                    "session_id": session_id,
-                    "model": self.default_model
-                }
-                # 如果有文件，将文件信息添加到 metadata
-                if files_metadata:
-                    user_metadata["files"] = files_metadata
-                
-                await crud.create_message(
-                    session=session,
-                    conversation_id=conversation_id,
+            # 准备用户消息元数据
+            user_metadata = {
+                "schema_version": "message_meta_v1",
+                "session_id": session_id,
+                "model": self.default_model
+            }
+            # 如果有文件，将文件信息添加到 metadata
+            if files_metadata:
+                user_metadata["files"] = files_metadata
+            
+            # 生成用户消息 ID
+            user_message_id = f"msg_{uuid4().hex[:24]}"
+            
+            # 推送到 Redis Streams（异步持久化 - 用户消息）
+            from infra.message_queue import get_message_queue_client
+            from services.session_cache_service import get_session_cache_service, MessageContext
+            from datetime import datetime
+            
+            mq_client = await get_message_queue_client()
+            
+            # 推送用户消息到 Redis Streams
+            await mq_client.push_create_event(
+                message_id=user_message_id,
+                conversation_id=conversation_id,
+                role="user",
+                content=content_json,
+                status="completed",
+                metadata=user_metadata
+            )
+            logger.info(f"✅ 用户消息已推送到 Redis Streams: {user_message_id}, files={len(files_metadata) if files_metadata else 0}")
+            
+            # 更新内存缓存（SessionCacheService）
+            try:
+                session_cache = get_session_cache_service()
+                user_message_ctx = MessageContext(
+                    id=user_message_id,
                     role="user",
                     content=content_json,
+                    created_at=datetime.now(),
                     metadata=user_metadata
                 )
-                logger.debug(f"💾 用户消息已保存，files={len(files_metadata) if files_metadata else 0}")
-                
-                # 创建 Assistant 消息占位（status 使用简单字符串）
-                await crud.create_message(
-                    session=session,
-                    conversation_id=conversation_id,
+                await session_cache.append_message(conversation_id, user_message_ctx)
+            except Exception as cache_err:
+                logger.warning(f"⚠️ 更新内存缓存失败（不影响主流程）: {cache_err}")
+            
+            # 创建 Assistant 消息占位（两阶段持久化 - 阶段一）
+            placeholder_metadata = {
+                "schema_version": "message_meta_v1",
+                "session_id": session_id,
+                "model": self.default_model,
+                "stream": {
+                    "phase": "placeholder",
+                    "chunk_count": 0
+                }
+            }
+            
+            # 推送占位消息到 Redis Streams（异步持久化）
+            await mq_client.push_create_event(
+                message_id=assistant_message_id,
+                conversation_id=conversation_id,
+                role="assistant",
+                content="[]",  # 空数组
+                status="streaming",  # 关键：标记为流式状态（对齐文档规范）
+                metadata=placeholder_metadata
+            )
+            logger.info(f"✅ Assistant 占位消息已推送到 Redis Streams: {assistant_message_id}")
+            
+            # 更新内存缓存（SessionCacheService）
+            try:
+                assistant_message_ctx = MessageContext(
+                    id=assistant_message_id,
                     role="assistant",
                     content="[]",
-                    message_id=assistant_message_id,
-                    status="processing",  # processing/completed/stopped/failed
-                    metadata={
-                        "session_id": session_id,
-                        "model": self.default_model,
-                    }
+                    created_at=datetime.now(),
+                    metadata=placeholder_metadata
                 )
-                logger.info(f"✅ Assistant 占位记录已创建: id={assistant_message_id}")
+                await session_cache.append_message(conversation_id, assistant_message_ctx)
+            except Exception as cache_err:
+                logger.warning(f"⚠️ 更新内存缓存失败（不影响主流程）: {cache_err}")
             
             # 2️⃣ 数据库成功后，再发送 SSE 事件通知前端
             await events.message.emit_message_start(
@@ -490,7 +536,7 @@ class ChatService:
             # =====================================================================
             
             # 初始化 broadcaster 的消息累积
-            agent.broadcaster.start_message(session_id, assistant_message_id)
+            agent.broadcaster.start_message(session_id, assistant_message_id, conversation_id)
             
             # 路由决策（仅当启用路由时）
             use_multi_agent = False
@@ -687,6 +733,13 @@ class ChatService:
                     f"thinking={token_usage.thinking_tokens:,}, "
                     f"cache_read={token_usage.cache_read_tokens:,}, "
                     f"total_price=${usage_response.total_price}"
+                )
+                
+                # ✅ 累积 usage 到内存（等待 _finalize_message 时合并写入）
+                # 注意：不立即推送，避免多次数据库写入
+                await agent.broadcaster.accumulate_usage(
+                    session_id=session_id,
+                    usage=usage_response.model_dump()  # 传递完整的 UsageResponse
                 )
                 
                 # 🆕 V7.4: 发送 usage SSE 事件（使用 emit_custom）
