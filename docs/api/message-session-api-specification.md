@@ -609,6 +609,71 @@ curl -X GET "http://localhost:8000/api/v1/conversations/conv_abc123/messages?lim
 
 ---
 
+### 7. 预加载会话上下文（内存缓存）
+
+**接口**: `POST /api/v1/conversations/{conversation_id}/preload`
+
+**描述**: 用户打开会话窗口时，提前把最近 N 条消息加载到内存缓存，提升后续问答响应速度。
+
+**路径参数**:
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `conversation_id` | `string` | 对话 ID |
+
+**查询参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `limit` | `integer` | ❌ | 预加载消息数量（默认：50，最大：200） |
+| `force` | `boolean` | ❌ | 是否强制刷新缓存（默认：false） |
+
+**请求示例**:
+
+```bash
+# 预加载最近 50 条
+curl -X POST "http://localhost:8000/api/v1/conversations/conv_abc123/preload?limit=50" \
+  -H "Content-Type: application/json"
+
+# 强制刷新缓存
+curl -X POST "http://localhost:8000/api/v1/conversations/conv_abc123/preload?limit=50&force=true" \
+  -H "Content-Type: application/json"
+```
+
+**响应示例**:
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "conversation_id": "conv_abc123",
+    "cache_hit": false,
+    "message_count": 50,
+    "oldest_cursor": "msg_0001",
+    "last_updated": "2024-01-01T12:00:00",
+    "effective_limit": 50
+  }
+}
+```
+
+**响应字段说明**:
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `cache_hit` | `boolean` | 是否命中已有缓存 |
+| `message_count` | `integer` | 本次加载的消息条数 |
+| `oldest_cursor` | `string` | 当前内存窗口最旧消息 ID |
+| `last_updated` | `string` | 内存缓存更新时间 |
+| `effective_limit` | `integer` | 实际生效的加载数量（受内存窗口限制） |
+
+**使用场景**:
+
+- **会话页打开**：用户进入会话详情页时预加载
+- **提升首问性能**：减少首次提问前的冷启动延迟
+
+---
+
 ## 错误处理
 
 ### 错误码

@@ -2254,6 +2254,7 @@ metadata = {"usage": usage.model_dump()}
 - ✅ **两阶段持久化**：占位消息 + 完整更新，保证流式消息可靠性
 - ✅ **异步写入**：Redis Streams 解耦，不阻塞 API 响应
 - ✅ **内存缓存**：SessionCacheService 实现纳秒级读取
+- ✅ **缓存预加载**：用户打开会话窗口时主动预热，提升首次响应速度
 - ✅ **游标分页**：支持长会话历史查询
 - ✅ **合并写入优化**：计费信息与最终消息合并，减少 50% 数据库操作
 
@@ -2286,6 +2287,7 @@ SessionCacheService (内存缓存)    InsertWorker/UpdateWorker → PostgreSQL
 1. 优先从 SessionCacheService 内存缓存读取
 2. 缓存未命中时从数据库加载（冷启动）
 3. 分页加载使用游标（`before_cursor`）
+4. 预加载机制：用户打开会话窗口时主动预热缓存（`POST /conversations/{id}/preload`）
 
 ---
 

@@ -13,7 +13,7 @@
 
 import json
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from datetime import datetime
 from logger import get_logger
 from services.conversation_service import ConversationService, get_conversation_service
@@ -92,6 +92,50 @@ class SessionCacheService:
             logger.debug(f"📚 会话上下文已加载（冷启动）: conversation_id={conversation_id}")
         
         return self._active_sessions[conversation_id]
+
+    async def warmup_context(
+        self,
+        conversation_id: str,
+        limit: int = 50,
+        force: bool = False
+    ) -> Dict[str, Any]:
+        """
+        预加载会话上下文到内存缓存（支持 API 触发）
+
+        Args:
+            conversation_id: 对话 ID
+            limit: 预加载消息数量（默认 50）
+            force: 是否强制刷新（默认 False）
+
+        Returns:
+            预加载结果
+        """
+        effective_limit = min(limit, self._max_context_size)
+        if not force and conversation_id in self._active_sessions:
+            logger.info(
+                "✅ 会话上下文已存在（无需预加载）: conversation_id=%s",
+                conversation_id
+            )
+            return {
+                "context": self._active_sessions[conversation_id],
+                "cache_hit": True,
+                "effective_limit": effective_limit
+            }
+
+        context = await self._load_from_db(conversation_id, limit=effective_limit)
+        context.last_updated = datetime.now()
+        self._active_sessions[conversation_id] = context
+        logger.info(
+            "✅ 会话上下文预加载完成: conversation_id=%s, messages=%d, limit=%d",
+            conversation_id,
+            len(context.messages),
+            effective_limit
+        )
+        return {
+            "context": context,
+            "cache_hit": False,
+            "effective_limit": effective_limit
+        }
     
     async def append_message(
         self,
@@ -251,6 +295,15 @@ class SessionCacheService:
             "max_context_size": self._max_context_size,
             "memory_usage_mb": total_messages * 0.001  # 粗略估算（每条消息约 1KB）
         }
+
+    def get_max_context_size(self) -> int:
+        """
+        获取内存上下文窗口大小上限
+
+        Returns:
+            内存窗口大小
+        """
+        return self._max_context_size
 
 
 # ==================== 单例管理 ====================

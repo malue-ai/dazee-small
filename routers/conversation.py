@@ -25,6 +25,7 @@ from services.conversation_service import (
     ConversationService,
     ConversationNotFoundError
 )
+from services.session_cache_service import get_session_cache_service
 
 # 配置日志
 logger = get_logger("conversation_router")
@@ -388,6 +389,87 @@ async def get_conversation_messages(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取历史消息失败: {str(e)}"
+        )
+
+
+@router.post("/{conversation_id}/preload", response_model=APIResponse[dict])
+async def preload_conversation_context(
+    conversation_id: str,
+    limit: int = Query(50, description="预加载消息数量", ge=1, le=200),
+    force: bool = Query(False, description="是否强制刷新缓存")
+):
+    """
+    预加载会话上下文到内存缓存（用于用户打开会话窗口前）
+
+    ## 参数
+    - **conversation_id**: 对话ID
+    - **limit**: 预加载消息数量（默认50，最大200）
+    - **force**: 是否强制刷新缓存（默认False）
+
+    ## 返回
+    ```json
+    {
+      "code": 200,
+      "message": "success",
+      "data": {
+        "conversation_id": "conv_abc123",
+        "cache_hit": false,
+        "message_count": 50,
+        "oldest_cursor": "msg_0001",
+        "last_updated": "2024-01-01T12:00:00",
+        "effective_limit": 50
+      }
+    }
+    ```
+    """
+    try:
+        logger.info(
+            f"📨 预加载会话上下文: conversation_id={conversation_id}, "
+            f"limit={limit}, force={force}"
+        )
+
+        # 校验对话是否存在
+        await conversation_service.get_conversation(conversation_id)
+
+        session_cache = get_session_cache_service()
+        result = await session_cache.warmup_context(
+            conversation_id=conversation_id,
+            limit=limit,
+            force=force
+        )
+        context = result["context"]
+
+        data = {
+            "conversation_id": conversation_id,
+            "cache_hit": result["cache_hit"],
+            "message_count": len(context.messages),
+            "oldest_cursor": context.oldest_cursor,
+            "last_updated": context.last_updated.isoformat() if context.last_updated else None,
+            "effective_limit": result["effective_limit"]
+        }
+
+        logger.info(
+            f"✅ 会话上下文预加载完成: conversation_id={conversation_id}, "
+            f"message_count={data['message_count']}, cache_hit={data['cache_hit']}"
+        )
+
+        return APIResponse(
+            code=200,
+            message="success",
+            data=data
+        )
+
+    except ConversationNotFoundError as e:
+        logger.warning(f"⚠️ 对话不存在: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"❌ 预加载会话上下文失败: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"预加载会话上下文失败: {str(e)}"
         )
 
 
