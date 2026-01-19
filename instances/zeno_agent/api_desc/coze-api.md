@@ -10,10 +10,10 @@
 ## Base URL
 `https://api.coze.cn/v1`
 
-## 认证
-- Header: `Authorization: Bearer {COZE_API_KEY}`
-- 环境变量已配置: `COZE_API_KEY`
-- **使用 `api_name: "coze_api"` 时认证自动注入，无需手动填写**
+## 认证（自动注入）
+- **认证已自动配置，调用时无需填写 `headers` 参数**
+- ❌ **禁止**：不要在调用参数中填写 `headers`、`Authorization` 或任何认证信息
+- ✅ **正确做法**：只需指定 `api_name: "coze_api"`，认证头会自动注入
 
 ## 接口
 
@@ -46,7 +46,7 @@
 
 ## 使用方法
 
-使用 `api_calling` 工具调用：
+使用 `api_calling` 工具调用（**注意：不要填写 headers 参数**）：
 
 ```
 api_calling(
@@ -64,6 +64,8 @@ api_calling(
   }
 )
 ```
+
+⚠️ **调用时只需要以上参数，不要添加 `headers`、`url` 等参数，认证会自动处理。**
 
 ## 典型使用流程
 

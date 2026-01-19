@@ -19,9 +19,11 @@ delta 格式（简化版）：
 - tool_use: delta = '{"code": "print('
 
 设计原则：纯粹的事件发送层，不关心具体结构，由上层决定
+
+注意：序号（seq）由 EventBroadcaster 层统一生成
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from core.events.base import BaseEventManager
 
 
@@ -36,13 +38,17 @@ class ContentEventManager(BaseEventManager):
     1. 职责清晰：只负责发送事件
     2. 灵活性：上层可以构造任何结构
     3. 可扩展：后续接入 OpenAI/Gemini 时，只需要在 Agent 层做适配
+    
+    注意：推荐通过 EventBroadcaster 调用，由其统一生成 seq
     """
     
     async def emit_content_start(
         self,
         session_id: str,
         index: int,
-        content_block: Dict[str, Any]
+        content_block: Dict[str, Any],
+        seq: Optional[int] = None,
+        event_uuid: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         发送 content_start 事件
@@ -51,6 +57,8 @@ class ContentEventManager(BaseEventManager):
             session_id: Session ID
             index: 内容块索引
             content_block: 完整的内容块对象（由上层构造）
+            seq: 事件序号（可选，来自 EventBroadcaster）
+            event_uuid: 事件 UUID（可选）
             
         Returns:
             发送的事件对象
@@ -68,13 +76,15 @@ class ContentEventManager(BaseEventManager):
                 "content_block": content_block
             }
         )
-        return await self._send_event(session_id, event)
+        return await self._send_event(session_id, event, seq=seq, event_uuid=event_uuid)
     
     async def emit_content_delta(
         self,
         session_id: str,
         index: int,
-        delta: str
+        delta: str,
+        seq: Optional[int] = None,
+        event_uuid: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         发送 content_delta 事件
@@ -83,6 +93,8 @@ class ContentEventManager(BaseEventManager):
             session_id: Session ID
             index: 内容块索引
             delta: 增量内容（字符串）
+            seq: 事件序号（可选）
+            event_uuid: 事件 UUID（可选）
             
         Returns:
             发送的事件对象
@@ -100,12 +112,14 @@ class ContentEventManager(BaseEventManager):
                 "delta": delta
             }
         )
-        return await self._send_event(session_id, event)
+        return await self._send_event(session_id, event, seq=seq, event_uuid=event_uuid)
     
     async def emit_content_stop(
         self,
         session_id: str,
-        index: int
+        index: int,
+        seq: Optional[int] = None,
+        event_uuid: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         发送 content_stop 事件
@@ -113,6 +127,8 @@ class ContentEventManager(BaseEventManager):
         Args:
             session_id: Session ID
             index: 内容块索引
+            seq: 事件序号（可选）
+            event_uuid: 事件 UUID（可选）
             
         Returns:
             发送的事件对象
@@ -123,4 +139,4 @@ class ContentEventManager(BaseEventManager):
                 "index": index
             }
         )
-        return await self._send_event(session_id, event)
+        return await self._send_event(session_id, event, seq=seq, event_uuid=event_uuid)

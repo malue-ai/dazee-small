@@ -409,9 +409,11 @@ def _prepare_apis(apis: List[ApiConfig]) -> List[ApiConfig]:
                     headers[api.auth_header] = f"Bearer {auth_value}"
                 else:  # api_key
                     headers[api.auth_header] = auth_value
-                logger.info(f"   🔑 API {api.name}: 已配置认证")
+                # 🔍 调试：显示 token 的前 10 位和后 4 位
+                masked_value = f"{auth_value[:10]}...{auth_value[-4:]}" if len(auth_value) > 14 else "***"
+                logger.info(f"   🔑 API {api.name}: 已配置认证 (token: {masked_value})")
             else:
-                logger.warning(f"⚠️ API {api.name}: 环境变量 {api.auth_env} 未设置")
+                logger.warning(f"⚠️ API {api.name}: 环境变量 {api.auth_env} 未设置（当前环境变量列表中无此项）")
         
         api.headers = headers
     
@@ -485,17 +487,33 @@ def load_instance_env(instance_name: str) -> None:
     Args:
         instance_name: 实例名称
     """
+    import os
+    
     try:
         from dotenv import load_dotenv
     except ImportError:
-        logger.warning("python-dotenv 未安装，跳过 .env 加载")
+        logger.warning("❌ python-dotenv 未安装，跳过 .env 加载")
         return
     
     env_path = get_instances_dir() / instance_name / ".env"
+    logger.info(f"🔍 检查实例 .env 文件: {env_path}")
     
     if env_path.exists():
-        load_dotenv(env_path, override=True)
-        logger.info(f"✅ 已加载环境变量: {env_path}")
+        # 加载前检查关键环境变量
+        coze_before = os.getenv("COZE_API_KEY", "")
+        
+        result = load_dotenv(env_path, override=True)
+        
+        # 加载后检查
+        coze_after = os.getenv("COZE_API_KEY", "")
+        
+        if coze_after and coze_after != coze_before:
+            masked = f"{coze_after[:10]}...{coze_after[-4:]}" if len(coze_after) > 14 else "***"
+            logger.info(f"✅ 已加载环境变量: {env_path} (COZE_API_KEY: {masked})")
+        elif coze_after:
+            logger.info(f"✅ 已加载环境变量: {env_path} (COZE_API_KEY 未变化)")
+        else:
+            logger.warning(f"⚠️ 已加载 .env 但 COZE_API_KEY 仍为空: {env_path}")
     else:
         logger.warning(f"⚠️ .env 文件不存在: {env_path}")
 

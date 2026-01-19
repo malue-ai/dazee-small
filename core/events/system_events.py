@@ -12,9 +12,11 @@ System 级事件管理 - SystemEventManager
 - overloaded_error : 服务过载
 - internal_error   : 内部错误
 - validation_error : 参数验证错误
+
+注意：序号（seq）由 EventBroadcaster 层统一生成
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from core.events.base import BaseEventManager
 
 
@@ -23,6 +25,8 @@ class SystemEventManager(BaseEventManager):
     System 级事件管理器
     
     负责系统相关的事件
+    
+    注意：推荐通过 EventBroadcaster 调用，由其统一生成 seq
     """
     
     async def emit_error(
@@ -30,7 +34,9 @@ class SystemEventManager(BaseEventManager):
         session_id: str,
         error_type: str,
         error_message: str,
-        details: Dict[str, Any] = None
+        details: Dict[str, Any] = None,
+        seq: Optional[int] = None,
+        event_uuid: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         发送 error 事件
@@ -40,6 +46,8 @@ class SystemEventManager(BaseEventManager):
             error_type: 错误类型
             error_message: 错误消息
             details: 额外的错误详情（可选）
+            seq: 事件序号（可选，来自 EventBroadcaster）
+            event_uuid: 事件 UUID（可选）
             
         Returns:
             事件对象
@@ -58,17 +66,21 @@ class SystemEventManager(BaseEventManager):
             data={"error": error_data}
         )
         
-        return await self._send_event(session_id, event)
+        return await self._send_event(session_id, event, seq=seq, event_uuid=event_uuid)
     
     async def emit_done(
         self,
-        session_id: str
+        session_id: str,
+        seq: Optional[int] = None,
+        event_uuid: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         发送 done 事件（流结束）
         
         Args:
             session_id: Session ID
+            seq: 事件序号（可选）
+            event_uuid: 事件 UUID（可选）
             
         Returns:
             事件对象
@@ -78,13 +90,15 @@ class SystemEventManager(BaseEventManager):
             data={"type": "done"}
         )
         
-        return await self._send_event(session_id, event)
+        return await self._send_event(session_id, event, seq=seq, event_uuid=event_uuid)
     
     async def emit_custom(
         self,
         session_id: str,
         event_type: str,
-        event_data: Dict[str, Any]
+        event_data: Dict[str, Any],
+        seq: Optional[int] = None,
+        event_uuid: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         发送自定义事件
@@ -93,6 +107,8 @@ class SystemEventManager(BaseEventManager):
             session_id: Session ID
             event_type: 事件类型
             event_data: 事件数据
+            seq: 事件序号（可选）
+            event_uuid: 事件 UUID（可选）
             
         Returns:
             事件对象
@@ -102,5 +118,5 @@ class SystemEventManager(BaseEventManager):
             data=event_data
         )
         
-        return await self._send_event(session_id, event)
+        return await self._send_event(session_id, event, seq=seq, event_uuid=event_uuid)
 

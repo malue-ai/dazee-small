@@ -76,45 +76,65 @@ class EventManager:
     async def emit_conversation_start(
         self,
         session_id: str,
-        conversation: Dict[str, Any]
+        conversation: Dict[str, Any],
+        seq: int = None,
+        event_uuid: str = None
     ) -> Dict[str, Any]:
         """便捷方法：发送 conversation_start 事件"""
-        return await self.conversation.emit_conversation_start(session_id, conversation)
+        return await self.conversation.emit_conversation_start(
+            session_id, conversation, seq=seq, event_uuid=event_uuid
+        )
     
     async def emit_message_start(
         self,
         session_id: str,
         message_id: str,
-        model: str
+        model: str,
+        seq: int = None,
+        event_uuid: str = None
     ) -> Dict[str, Any]:
         """便捷方法：发送 message_start 事件"""
-        return await self.message.emit_message_start(session_id, message_id, model)
+        return await self.message.emit_message_start(
+            session_id, message_id, model, seq=seq, event_uuid=event_uuid
+        )
     
     async def emit_message_stop(
         self,
         session_id: str,
-        message_id: str = None
+        message_id: str = None,
+        seq: int = None,
+        event_uuid: str = None
     ) -> Dict[str, Any]:
         """便捷方法：发送 message_stop 事件"""
-        return await self.message.emit_message_stop(session_id, message_id)
+        return await self.message.emit_message_stop(
+            session_id, message_id, seq=seq, event_uuid=event_uuid
+        )
     
     async def emit_error(
         self,
         session_id: str,
         error_type: str,
-        error_message: str
+        error_message: str,
+        seq: int = None,
+        event_uuid: str = None
     ) -> Dict[str, Any]:
         """便捷方法：发送 error 事件"""
-        return await self.system.emit_error(session_id, error_type, error_message)
+        return await self.system.emit_error(
+            session_id, error_type, error_message, seq=seq, event_uuid=event_uuid
+        )
     
     async def emit_custom(
         self,
         session_id: str,
         event_type: str,
-        event_data: Dict[str, Any]
+        event_data: Dict[str, Any],
+        seq: int = None,
+        event_uuid: str = None
     ) -> Dict[str, Any]:
         """便捷方法：发送自定义事件"""
-        return await self.system.emit_custom(session_id, event_type, event_data)
+        return await self.system.emit_custom(
+            session_id, event_type, event_data, seq=seq, event_uuid=event_uuid
+        )
 
 
 def create_event_manager(storage: EventStorage) -> EventManager:

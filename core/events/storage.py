@@ -8,10 +8,15 @@
 2. InMemoryEventStorage - 开发环境，内存存储
 
 Redis Key 设计：
-- zenflux:session:{session_id}:seq       → 序号计数器
+- zenflux:session:{session_id}:seq       → 序号计数器（⚠️ 已废弃，由 SeqManager 管理）
 - zenflux:session:{session_id}:context   → Session 上下文
 - zenflux:session:{session_id}:events    → 事件列表（支持断线重连）
 - zenflux:session:{session_id}:heartbeat → 心跳时间戳
+
+注意：
+- 序号生成已移至 SeqManager，由 EventBroadcaster 统一调用
+- 此模块只负责存储，不再负责序号生成
+- generate_session_seq 方法保留以向后兼容，但已废弃
 """
 
 # 1. 标准库
@@ -77,6 +82,9 @@ class RedisEventStorage:
     async def generate_session_seq(self, session_id: str) -> int:
         """
         生成 Session 内的事件序号（从 1 开始递增）
+        
+        ⚠️ 已废弃：推荐使用 SeqManager.get_next_seq()
+        此方法保留以向后兼容，新代码应通过 EventBroadcaster 发送事件
         """
         if not self.is_available:
             return 0
@@ -263,7 +271,12 @@ class InMemoryEventStorage:
     # ==================== EventStorage Protocol ====================
     
     async def generate_session_seq(self, session_id: str) -> int:
-        """生成 Session 内的事件序号"""
+        """
+        生成 Session 内的事件序号
+        
+        ⚠️ 已废弃：推荐使用 SeqManager.get_next_seq()
+        此方法保留以向后兼容，新代码应通过 EventBroadcaster 发送事件
+        """
         self._seq[session_id] += 1
         return self._seq[session_id]
     

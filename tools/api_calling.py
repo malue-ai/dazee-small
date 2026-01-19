@@ -275,7 +275,7 @@ class APICallingTool:
         path: Optional[str] = None,
         url: Optional[str] = None,
         headers: Optional[Dict[str, str]] = None
-    ) -> tuple[Optional[str], Dict[str, str], Optional[str]]:
+    ) -> tuple[Optional[str], Dict[str, str], Optional[str], Dict[str, Any]]:
         """
         解析 API 配置,支持自动注入
         
@@ -286,11 +286,13 @@ class APICallingTool:
             headers: 额外请求头
             
         Returns:
-            (final_url, final_headers, error_message)
+            (final_url, final_headers, error_message, meta_info)
             - 成功时 error_message 为 None
             - 失败时 final_url 为 None，error_message 包含错误原因
+            - meta_info: 元数据信息 {api_name, base_url, path}，用于下游识别 API 来源
         """
         final_headers = headers.copy() if headers else {}
+        meta_info: Dict[str, Any] = {}
         
         # 方式1: 使用预配置 API
         if api_name:
@@ -300,30 +302,59 @@ class APICallingTool:
                 available_apis = list(self.apis_config.keys()) if self.apis_config else []
                 error_msg = f"未找到预配置的 API: '{api_name}'。可用的 API: {available_apis if available_apis else '无（apis_config 为空）'}"
                 logger.warning(f"⚠️ {error_msg}")
-                return None, final_headers, error_msg
+                return None, final_headers, error_msg, meta_info
             
             # 拼接 URL
             base_url = api_config.get("base_url", "").rstrip("/")
             if not base_url:
                 error_msg = f"API '{api_name}' 配置缺少 base_url"
                 logger.error(f"❌ {error_msg}")
-                return None, final_headers, error_msg
+                return None, final_headers, error_msg, meta_info
             
+            # 🔧 智能处理路径前缀重复问题
+            # 如果 base_url 以 /v1 结尾，而 path 以 /v1/ 开头，自动去除 path 中的 /v1
+            original_path = path
             path = (path or "").lstrip("/")
+            if path:
+                # 检测并移除重复的版本前缀（如 v1/v1/...）
+                from urllib.parse import urlparse
+                base_path = urlparse(base_url).path.rstrip("/")
+                if base_path:
+                    # 提取 base_url 中的最后一个路径段（如 /v1）
+                    base_suffix = base_path.split("/")[-1]  # "v1"
+                    # 如果 path 以相同前缀开头，去除它
+                    if path.startswith(f"{base_suffix}/"):
+                        original_path_for_log = path
+                        path = path[len(base_suffix) + 1:]  # 去除 "v1/"
+                        logger.warning(
+                            f"⚠️ 检测到路径重复前缀，自动修正: "
+                            f"'{original_path_for_log}' → '{path}'"
+                        )
+            
             final_url = f"{base_url}/{path}" if path else base_url
             
-            # 合并预配置的 headers（预配置优先级低于显式传入）
+            # 合并 headers：预配置的 headers + LLM 传入的 headers
             config_headers = api_config.get("headers", {})
             merged_headers = {**config_headers, **final_headers}
             
+            # 🆕 构建元数据信息（用于下游识别 API 来源）
+            meta_info = {
+                "api_name": api_name,
+                "base_url": base_url,
+                "path": f"/{path}" if path else "",
+                "capability": api_config.get("capability", "")
+            }
+            
             logger.info(f"🔑 使用预配置 API: {api_name} → {final_url}")
-            return final_url, merged_headers, None
+            return final_url, merged_headers, None, meta_info
         
         # 方式2: 直接使用 URL
         if not url:
-            return None, final_headers, "必须提供 url 或 api_name 参数"
+            return None, final_headers, "必须提供 url 或 api_name 参数", meta_info
         
-        return url, final_headers, None
+        # 直接使用 URL 时，meta_info 只包含 url
+        meta_info = {"url": url}
+        return url, final_headers, None, meta_info
     
     async def execute_stream(
         self,

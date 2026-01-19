@@ -6,8 +6,8 @@ Build: 2026-01-16 v2
 
 # ==================== 标准库 ====================
 import os
+import asyncio
 from contextlib import asynccontextmanager
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -22,25 +22,30 @@ load_dotenv(dotenv_path=_env_path, override=True)
 
 # ==================== 本地模块 ====================
 from routers import (
+    agents_router,
+    auth_router,
     chat_router,
+    conversation_router,
     files_router,
+    health_router,
+    human_confirmation_router,
     knowledge_router,
     mem0_router,
+    skills_router,
     tasks_router,
     tools_router,
+    workspace_router,
 )
-from routers.agents import router as agents_router
-from routers.auth import router as auth_router
-from routers.conversation import router as conversation_router
-from routers.health import router as health_router
-from routers.human_confirmation import router as human_confirmation_router
-from routers.skills import router as skills_router
-from routers.workspace import router as workspace_router
+from grpc_server.server import GRPCServer
 from infra.pools import get_session_pool, get_agent_pool, get_mcp_pool
+from infra.database import init_database
+from infra.resilience.config import apply_resilience_config
+from core.tool.capability import get_capability_registry
+
 # ==================== 常量定义 ====================
 
 APP_NAME = "Zenflux Agent API"
-APP_VERSION = "3.6.0"
+APP_VERSION = "0.7.5"
 APP_DESCRIPTION = "基于 Claude Sonnet 4.5 的智能体框架"
 
 
@@ -50,7 +55,6 @@ async def _init_resilience_config() -> None:
     """加载容错配置"""
     print("🛡️ 加载容错配置...")
     try:
-        from infra.resilience.config import apply_resilience_config
         apply_resilience_config()
         print("✅ 容错配置已加载")
     except Exception as e:
@@ -60,9 +64,20 @@ async def _init_resilience_config() -> None:
 async def _init_database() -> None:
     """初始化数据库"""
     print("💾 初始化数据库...")
-    from infra.database import init_database
     await init_database()
     print("✅ 数据库初始化完成")
+
+
+async def _preload_capability_registry() -> None:
+    """
+    预加载 CapabilityRegistry（工具注册表）
+    
+    必须在 Agent 加载之前完成，确保 capabilities.yaml 中的工具被正确加载
+    """
+    print("📋 加载工具注册表...")
+    registry = get_capability_registry()
+    await registry.initialize()
+    print(f"✅ 已加载 {len(registry.capabilities)} 个工具能力")
 
 
 async def _preload_agent_registry() -> int:
@@ -94,16 +109,12 @@ async def _preload_agent_registry() -> int:
 
 async def _start_grpc_server() -> Optional[Any]:
     """启动 gRPC 服务器"""
-    import asyncio
-    
     enable_grpc = os.getenv("ENABLE_GRPC", "false").lower() == "true"
     if not enable_grpc:
         return None
     
     try:
-        print("📡 启动 gRPC 服务器...")
-        from grpc_server.server import GRPCServer
-        
+        print("📡 启动 gRPC 服务器...")        
         grpc_host = os.getenv("GRPC_HOST", "0.0.0.0")
         grpc_port = int(os.getenv("GRPC_PORT", "50051"))
         grpc_workers_env = os.getenv("GRPC_MAX_WORKERS", "0")
@@ -280,6 +291,7 @@ async def lifespan(app: FastAPI):
     
     await _init_resilience_config()
     await _init_database()
+    await _preload_capability_registry()  # 🆕 加载工具注册表（必须在 Agent 之前）
     await _preload_agent_registry()  # 加载 Agent 配置
     await _init_pools()  # 初始化资源池（含 Agent 原型创建和 Session 校准）
     grpc_server = await _start_grpc_server()
@@ -404,26 +416,6 @@ async def root() -> Dict[str, Any]:
         }
     
     return response
-
-
-@app.get("/health")
-async def health() -> Dict[str, Any]:
-    """
-    健康检查
-    
-    返回服务健康状态
-    """
-    session_pool = get_session_pool()
-    stats = await session_pool.get_system_stats()
-    
-    return {
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "pools": {
-            "agent_prototypes": stats.get("agents", {}).get("total_prototypes", 0),
-            "active_sessions": stats.get("sessions", {}).get("active", 0),
-        }
-    }
 
 
 # ==================== 启动入口 ====================
