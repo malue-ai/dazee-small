@@ -8,22 +8,20 @@ Partition API文档解析工具
 - 提供文档内容的结构化输出，便于大模型处理
 """
 
-from logger import get_logger
+import logging
 import os
-import io
 import tempfile
 import time
 import hashlib
 import json
-from typing import Dict, Any, Optional, List, Union, Tuple
+from typing import Dict, Any, Optional, List, Union
 from pathlib import Path
 import aiohttp
-import aiofiles
 import asyncio
 from dataclasses import dataclass, asdict
 from tools.base import BaseTool
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -71,6 +69,7 @@ class DocumentPartitionTool(BaseTool):
         - config: PartitionConfig配置对象
         - event_manager: 事件管理器（可选）
         - memory: WorkingMemory实例（可选）
+        - workspace_dir: 工作目录（可选）
         """
         super().__init__()
         
@@ -83,14 +82,11 @@ class DocumentPartitionTool(BaseTool):
             if not api_key:
                 logger.warning("未配置 UNSTRUCTURED_API_KEY，工具将无法使用")
             
-            # 缓存目录使用系统临时目录
-            default_cache_dir = os.path.join(tempfile.gettempdir(), "zenflux_partition_cache")
-            
             self.config = PartitionConfig(
                 api_key=api_key,
                 api_url=os.getenv("UNSTRUCTURED_API_URL", "https://api.unstructuredapp.io/general/v0/general"),
                 cache_enabled=os.getenv("PARTITION_CACHE_ENABLED", "false").lower() == "true",
-                cache_dir=os.getenv("PARTITION_CACHE_DIR", default_cache_dir)
+                cache_dir=os.getenv("PARTITION_CACHE_DIR", "./cache/partition")
             )
         
         # 🆕 标记工具是否可用
@@ -98,8 +94,9 @@ class DocumentPartitionTool(BaseTool):
         
         self.event_manager = kwargs.get("event_manager")
         self.memory = kwargs.get("memory")
+        self.workspace_dir = kwargs.get("workspace_dir")
         
-        # 初始化缓存目录（使用系统临时目录）
+        # 初始化缓存目录
         if self.config.cache_enabled:
             Path(self.config.cache_dir).mkdir(parents=True, exist_ok=True)
         
@@ -125,7 +122,7 @@ class DocumentPartitionTool(BaseTool):
 
 🚨🚨🚨 **【核心规则】用户指定页码时必看！** 🚨🚨🚨
 
-⚠️ 默认情况下，工具只返回前3页概要（overview模式）！
+⚠️ overview 模式会解析全部页面（使用 fast 策略，5页一批）！
 ⚠️ 如果用户说"解析70-90页"、"读取第5页"、"分析10到20页"，你必须：
 
 ✅ **正确调用方式**（两个参数都必须传）：
@@ -137,12 +134,12 @@ class DocumentPartitionTool(BaseTool):
 }
 ```
 
-❌ **错误调用方式**（会导致只返回前3页，不是用户要的70-90页）：
+❌ **错误调用方式**（overview 会解析全部页面，不是用户要的70-90页）：
 ```json
 {
   "source": "https://...",
   "strategy": "hi_res"
-  // ❌ 没有 mode='pages' → 默认 overview → 只返回前3页
+  // ❌ 没有 mode='pages' → 默认 overview → 会解析全部页面（不是70-90页）
   // ❌ 没有 pages="70-90" → 无法知道要哪些页
 }
 ```
@@ -169,37 +166,42 @@ class DocumentPartitionTool(BaseTool):
    - "分析10-20页" → mode='pages', pages="10-20"
 
 2️⃣ **用户要完整内容** → 根据文档大小选择
-   - 小文档（<10页）→ mode='full'
-   - 大文档（>10页）→ 先 overview，再 pages 分段读取
+   - 小文档（<10页）→ mode='full' 或 mode='overview'（都可以）
+   - 大文档（>10页）→ mode='overview'（5页一批处理全部）
 
-3️⃣ **用户要概要/目录** → mode='overview'
+3️⃣ **用户要快速了解** → mode='overview'
    - "这个文档讲了什么"
-   - "快速浏览"
+   - "解析这个文档"（默认会解析全部）
 
 ⚠️ mode 参数的作用：
-- overview: 只返回前3页概要（不是完整内容！）
-- pages: 返回指定页面的完整内容 ⭐ 用户指定页码时必用
-- full: 返回全部内容（仅限小文档<10页）
+- overview: 解析全部页面（使用 fast 策略，>5页自动分批）✅ 返回完整内容
+- pages: 返回指定页面的完整内容（>5页自动分批）⭐ 用户指定页码时必用
+- full: 返回全部内容（可选策略，>5页自动分批）
 
 ---
 
 核心功能：
-1. 🆕 **分段解析**：支持三种模式，优化大文档处理
-   - overview: 快速概览（3-5秒，仅返回前3页摘要和目录）⚠️ 不是完整内容
+1. 🆕 **统一分批解析**：所有模式超过5页自动分批处理
+   - overview: 全文解析（使用 fast 策略，5页一批，返回全部内容）✅ 处理全部页面
    - pages: 按需加载（解析指定页面，如 pages="1-10" 或 pages="8,12-15"）
-   - full: 完整解析（返回全部内容，仅限小文档 <10页）
-2. 解析多种格式（11种核心文档格式）：
+   - full: 完整解析（返回全部内容，>5页自动分批）
+   - 统一批次大小：5页/批（可配置）
+2. 🆕 **智能时间估算**：开始处理前自动估算所需时间
+   - 根据页数、文件大小、策略自动计算
+   - 提供详细的时间分解（下载+解析）
+   - 大文档会提示预计等待时间
+3. 解析多种格式（11种核心文档格式）：
    - 文档：PDF、Word(.doc/.docx)、TXT、RTF、ODT
    - 表格：Excel(.xls/.xlsx)、CSV
    - 演示：PowerPoint(.ppt/.pptx)
    ⚠️ 注意：不支持图片格式（PNG/JPG/TIFF），请使用模型的原生视觉能力处理图片
-3. 智能解析策略：fast（快速，默认）、auto（自动选择）、hi_res（高精度含表格）
-4. 🆕 **文件大小智能控制**：
+4. 智能解析策略：fast（快速，默认）、auto（自动选择）、hi_res（高精度含表格）
+5. 🆕 **文件大小智能控制**：
    - ✅ 最佳实践：≤20MB（快速稳定）
    - ⚠️ 警告阈值：20-50MB（自动降级为 fast 策略）
    - ❌ 硬性限制：>50MB（PDF可分页处理，其他格式拒绝）
-5. 仅支持URL输入（不支持本地文件路径）
-6. 自动缓存结果（节省API调用成本）
+6. 仅支持URL输入（不支持本地文件路径）
+7. 自动缓存结果（节省API调用成本）
 
 🎯 智能模式选择策略（请严格遵循）：
 
@@ -209,21 +211,23 @@ class DocumentPartitionTool(BaseTool):
    - "读取第5页" → mode='pages', pages="5"
    - "分析10-20页和30-40页" → mode='pages', pages="10-20,30-40"
    
-2️⃣ **小文档（<5页）→ 直接使用 mode='full'**
-   - 用户说"解析/分析/读取文档"时，优先尝试 full 模式
-   - 如果 overview 返回"文档仅有X页"，说明已是完整内容，无需再调用
+2️⃣ **小文档（<5页）→ 直接使用 mode='full' 或 mode='overview'**
+   - 用户说"解析/分析/读取文档"时，两种模式都可以
+   - 小文档会一次性解析，不分批
    
 3️⃣ **中等文档（5-10页）→ 根据需求选择**
-   - 快速了解 → mode='overview'
-   - 详细分析 → mode='full'
+   - 快速了解 → mode='overview'（固定 fast 策略）
+   - 详细分析 → mode='full'（可选策略）
+   - 都会自动分批（5页/批）
    
-4️⃣ **大文档（>10页）→ 分段读取**
-   - 先 mode='overview' 查看结构
-   - 再 mode='pages' 读取关键章节
+4️⃣ **大文档（>10页）→ 自动分批**
+   - mode='overview'：全部解析（fast 策略，5页/批）
+   - mode='full'：全部解析（可选策略，5页/批）
+   - mode='pages'：按需解析（可选策略，5页/批）
    
 5️⃣ **特殊需求**
-   - 只看目录/概要 → mode='overview'
-   - 读取指定章节 → mode='pages' + 页码
+   - 只看部分内容 → mode='pages' + 页码
+   - 高精度表格 → mode='full' 或 'pages' + strategy='hi_res'
 
 ⚠️ 典型错误场景（请务必避免）：
 - ❌ **最常见错误**：用户说"解析70到90页"，你只传了 source 和 strategy，没传 mode 和 pages
@@ -236,7 +240,7 @@ class DocumentPartitionTool(BaseTool):
     # ❌ 缺少 mode='pages'
     # ❌ 缺少 pages="70-90"
   }
-  # 结果：只返回前3页（默认overview模式），不是用户要的70-90页！
+  # 结果：会解析全部页面（overview 默认行为），不是用户要的70-90页！
   ```
   ✅ 正确调用示例：
   ```python
@@ -248,21 +252,21 @@ class DocumentPartitionTool(BaseTool):
   }
   ```
 
-- ❌ 用户上传 1 页 Word，你调用 overview 后看到"可能不是完整内容"，然后调用 full
-  ✅ 正确：overview 已返回全部内容（因为只有1页），无需再调用
+- ❌ 用户上传 1 页 Word，你调用 overview 后又调用 full
+  ✅ 正确：overview 已返回全部内容，无需再调用
   
-- ❌ 用户说"分析这个论文"，你只调用 overview 就回答问题
-  ✅ 正确：先 overview 判断页数，如果<10页用 full，否则 pages
+- ❌ 用户说"分析这个论文"，你不调用工具就回答
+  ✅ 正确：调用 overview 即可获取全部内容，然后分析
   
 - ❌ 看到 "共None页" 就认为文档很大
   ✅ 正确：None 表示未知页数（Word/Excel），可能实际很小，建议尝试 full
 
 参数说明：
 - source: 文档URL（必需）- HTTP/HTTPS 协议
-- mode: 解析模式（⚠️ 关键参数，默认 'overview' 只返回概要）
-  * 'overview': 概要模式，仅返回前3页的文档结构（不是完整内容！）
-  * 'pages': 分页模式，返回指定页面的完整内容（需设置 pages 参数）⭐ **用户指定页码时必用**
-  * 'full': 完整模式，返回全部内容（<10页的文档推荐使用）
+- mode: 解析模式（⚠️ 关键参数，默认 'overview' 返回全部内容）
+  * 'overview': 全文模式，返回文档全部内容（使用 fast 策略，>5页自动分批）✅ 处理全部页面
+  * 'pages': 分页模式，返回指定页面的完整内容（需设置 pages 参数，>5页自动分批）⭐ **用户指定页码时必用**
+  * 'full': 完整模式，返回全部内容（可选策略，>5页自动分批）
 - pages: 页码范围（⚠️ mode='pages'时必需！）
   * 格式示例：
     - "5" → 单页
@@ -284,7 +288,16 @@ class DocumentPartitionTool(BaseTool):
   "metadata": {
     "total_pages": 20,
     "element_count": 370,
-    "processing_time": 3.2
+    "processing_time": 3.2,
+    "time_estimate": {  // 🆕 时间估算信息
+      "estimated_total_seconds": 180,
+      "estimated_total_minutes": 3.0,
+      "breakdown": {
+        "下载文件": "5秒",
+        "解析文档": "175秒（20页 × 45秒/页）",
+        "分批处理": "4批次"
+      }
+    }
   },
   "warning": "...",  // overview模式会有警告提示
   "next_action": {...}  // 建议的下一步操作
@@ -332,7 +345,7 @@ class DocumentPartitionTool(BaseTool):
                 },
                 "mode": {
                     "type": "string",
-                    "description": "解析模式（决定返回哪些页面）：'overview'（仅前3页概要）、'pages'（指定页面，需配合pages参数）、'full'（全部内容，限<10页）。用户说'解析第X页'时必须传 mode='pages' + pages='X'，否则只返回概要！",
+                    "description": "解析模式（决定返回哪些页面）：'overview'（全部内容，fast策略，>5页自动分批）、'pages'（指定页面，需配合pages参数，>5页自动分批）、'full'（全部内容，可选策略，>5页自动分批）。用户说'解析第X页'时必须传 mode='pages' + pages='X'！",
                     "enum": ["overview", "pages", "full"]
                 },
                 "pages": {
@@ -384,6 +397,176 @@ class DocumentPartitionTool(BaseTool):
             logger.warning(f"HEAD 请求获取文件大小失败: {e}，将在下载时检查")
         
         return None
+    
+    def _format_time_estimate_message(
+        self,
+        time_estimate: Dict[str, Any],
+        mode: str,
+        processing_pages: Optional[int],
+        total_pages: Optional[int]
+    ) -> str:
+        """
+        格式化时间估算消息
+        
+        Args:
+            time_estimate: 时间估算字典
+            mode: 解析模式
+            processing_pages: 实际处理的页数
+            total_pages: 文档总页数
+            
+        Returns:
+            格式化的消息字符串
+        """
+        strategy_name = {
+            "fast": "快速",
+            "auto": "自动",
+            "hi_res": "高精度"
+        }.get(time_estimate['strategy'], time_estimate['strategy'])
+        
+        total_seconds = time_estimate['estimated_total_seconds']
+        total_minutes = time_estimate['estimated_total_minutes']
+        
+        # 基础信息
+        if total_seconds < 60:
+            time_str = f"{total_seconds}秒"
+        elif total_minutes < 60:
+            time_str = f"{total_minutes}分钟（约{total_seconds}秒）"
+        else:
+            hours = int(total_minutes / 60)
+            remaining_minutes = total_minutes % 60
+            time_str = f"{hours}小时{remaining_minutes}分钟"
+        
+        # 构建消息
+        if processing_pages:
+            page_info = f"{processing_pages}页"
+            if total_pages and processing_pages < total_pages:
+                page_info += f"（共{total_pages}页）"
+        else:
+            page_info = "未知页数"
+        
+        message = f"预计处理时间: {time_str} | 策略: {strategy_name} | 页数: {page_info}"
+        
+        # 添加详细分解
+        breakdown = time_estimate.get('breakdown', {})
+        if breakdown:
+            details = " | ".join([f"{k}: {v}" for k, v in breakdown.items()])
+            message += f"\n   详细: {details}"
+        
+        return message
+    
+    def _estimate_processing_time(
+        self,
+        total_pages: Optional[int],
+        file_size_mb: float,
+        strategy: str,
+        mode: str,
+        batch_size: int
+    ) -> Dict[str, Any]:
+        """
+        估算文档处理时间
+        
+        根据页数、文件大小、策略和模式估算处理时间
+        
+        Args:
+            total_pages: 总页数（可能为 None）
+            file_size_mb: 文件大小（MB）
+            strategy: 解析策略
+            mode: 解析模式
+            batch_size: 批次大小
+            
+        Returns:
+            估算信息字典
+        """
+        # 策略对应的每页处理时间（秒）
+        strategy_time_per_page = {
+            "fast": 45,      # 30-60秒，取中位数
+            "auto": 90,      # 1-2分钟，取中位数
+            "hi_res": 150    # 2-3分钟，取中位数（含OCR和表格识别）
+        }
+        
+        base_time_per_page = strategy_time_per_page.get(strategy, 60)
+        
+        # 根据文件大小调整系数（大文件处理更慢）
+        size_factor = 1.0
+        if file_size_mb > 10:
+            size_factor = 1.2  # 大文件增加20%时间
+        elif file_size_mb > 20:
+            size_factor = 1.5  # 超大文件增加50%时间
+        
+        # 下载时间估算（假设 1MB/秒的网速）
+        download_time = max(5, file_size_mb * 1.2)  # 最少5秒
+        
+        if total_pages:
+            # 已知页数：精确估算
+            processing_pages = total_pages
+            
+            # 计算批次数
+            if processing_pages > batch_size:
+                batch_count = (processing_pages + batch_size - 1) // batch_size
+            else:
+                batch_count = 1
+            
+            # 总处理时间 = 每页时间 × 页数 × 大小系数
+            processing_time = base_time_per_page * processing_pages * size_factor
+            
+            # 分批处理有额外开销（每批之间有网络通信）
+            if batch_count > 1:
+                batch_overhead = batch_count * 2  # 每批增加2秒开销
+                processing_time += batch_overhead
+            
+            total_time = download_time + processing_time
+            
+            return {
+                "estimated_total_seconds": int(total_time),
+                "estimated_download_seconds": int(download_time),
+                "estimated_processing_seconds": int(processing_time),
+                "estimated_total_minutes": round(total_time / 60, 1),
+                "total_pages": processing_pages,
+                "batch_count": batch_count,
+                "strategy": strategy,
+                "time_per_page_seconds": int(base_time_per_page * size_factor),
+                "breakdown": {
+                    "下载文件": f"{int(download_time)}秒",
+                    "解析文档": f"{int(processing_time)}秒（{processing_pages}页 × {int(base_time_per_page * size_factor)}秒/页）",
+                    "分批处理": f"{batch_count}批次" if batch_count > 1 else "无需分批"
+                }
+            }
+        else:
+            # 未知页数：根据文件大小粗略估算
+            # 假设：PDF约每页100KB，Word约每页50KB
+            estimated_pages = max(1, int(file_size_mb * 10))  # 保守估计
+            
+            # 计算批次数
+            if estimated_pages > batch_size:
+                batch_count = (estimated_pages + batch_size - 1) // batch_size
+            else:
+                batch_count = 1
+            
+            processing_time = base_time_per_page * estimated_pages * size_factor
+            
+            if batch_count > 1:
+                batch_overhead = batch_count * 2
+                processing_time += batch_overhead
+            
+            total_time = download_time + processing_time
+            
+            return {
+                "estimated_total_seconds": int(total_time),
+                "estimated_download_seconds": int(download_time),
+                "estimated_processing_seconds": int(processing_time),
+                "estimated_total_minutes": round(total_time / 60, 1),
+                "total_pages": None,
+                "estimated_pages": estimated_pages,
+                "batch_count": batch_count,
+                "strategy": strategy,
+                "time_per_page_seconds": int(base_time_per_page * size_factor),
+                "note": "页数未知，根据文件大小估算",
+                "breakdown": {
+                    "下载文件": f"{int(download_time)}秒",
+                    "解析文档": f"{int(processing_time)}秒（估计{estimated_pages}页 × {int(base_time_per_page * size_factor)}秒/页）",
+                    "分批处理": f"约{batch_count}批次" if batch_count > 1 else "无需分批"
+                }
+            }
     
     async def execute(
         self,
@@ -498,7 +681,7 @@ class DocumentPartitionTool(BaseTool):
             if use_cache and self.config.cache_enabled:
                 cache_params = f"{source}_{mode}_{pages or 'none'}_{strategy}"
                 cache_key = hashlib.md5(cache_params.encode()).hexdigest()
-                cached_result = await self._load_from_cache(cache_key)
+                cached_result = self._load_from_cache(cache_key)
                 if cached_result:
                     logger.info(f"💾 使用缓存结果: {cache_key}")
                     if "metadata" not in cached_result:
@@ -560,6 +743,8 @@ class DocumentPartitionTool(BaseTool):
                 # 5.3 最佳实践范围（≤20MB）
                 else:
                     logger.info(f"✅ 文件大小: {file_size_mb:.1f}MB（在最佳范围内）")
+            else:
+                file_size_mb = 0.0  # 未知大小
             
             # 6. 下载文档（支持分块下载）
             temp_file = await self._download_url_file(source)
@@ -598,6 +783,37 @@ class DocumentPartitionTool(BaseTool):
                 # 7.2 记录文件大小信息
                 logger.debug(f"文件实际大小: {actual_file_size_mb:.2f} MB")
                 
+                # 🆕 7.3 估算处理时间并通知用户
+                total_pages = doc_info.get("total_pages")
+                
+                # 确定实际要处理的页数
+                processing_pages = total_pages
+                if mode == "pages" and pages:
+                    # pages 模式：只处理指定页面
+                    page_ranges = self._parse_page_ranges(pages, total_pages)
+                    processing_pages = sum(end - start + 1 for start, end in page_ranges)
+                
+                # 估算处理时间
+                time_estimate = self._estimate_processing_time(
+                    total_pages=processing_pages,
+                    file_size_mb=actual_file_size_mb,
+                    strategy=strategy,
+                    mode=mode,
+                    batch_size=self.config.pages_batch_size
+                )
+                
+                # 🆕 生成友好的时间提示
+                time_message = self._format_time_estimate_message(time_estimate, mode, processing_pages, total_pages)
+                
+                # 🆕 记录时间估算
+                logger.info(f"⏱️  {time_message}")
+                
+                # 🆕 如果处理时间超过1分钟，输出友好提示
+                if time_estimate['estimated_total_seconds'] > 60:
+                    logger.info(
+                        f"📌 提示: 文档较大，预计需要 {time_estimate['estimated_total_minutes']} 分钟，请耐心等待..."
+                    )
+                
                 # 8. 根据模式处理
                 if mode == "overview":
                     # 概要模式
@@ -626,6 +842,9 @@ class DocumentPartitionTool(BaseTool):
                     result["metadata"]["processing_time"] = time.time() - start_time
                     result["metadata"]["actual_file_size_mb"] = round(actual_file_size_mb, 2)
                     
+                    # 🆕 添加时间估算信息
+                    result["metadata"]["time_estimate"] = time_estimate
+                    
                     # 🆕 添加降级标记
                     if auto_downgrade_strategy:
                         result["metadata"]["strategy_downgraded"] = True
@@ -637,7 +856,7 @@ class DocumentPartitionTool(BaseTool):
                 
                 # 11. 保存到缓存
                 if cache_key and self.config.cache_enabled and result.get("success"):
-                    await self._save_to_cache(cache_key, result)
+                    self._save_to_cache(cache_key, result)
                 
                 # 12. 发送事件
                 if self.event_manager and result.get("success"):
@@ -771,9 +990,9 @@ class DocumentPartitionTool(BaseTool):
                         chunk_size = min(self.CHUNK_SIZE, 10 * 1024 * 1024)  # 最大 10MB 每块
                         downloaded = 0
                         
-                        async with aiofiles.open(temp_path, 'wb') as f:
+                        with open(temp_path, 'wb') as f:
                             async for chunk in response.content.iter_chunked(chunk_size):
-                                await f.write(chunk)
+                                f.write(chunk)
                                 downloaded += len(chunk)
                                 
                                 # 🆕 每下载 10MB 记录一次进度
@@ -813,21 +1032,34 @@ class DocumentPartitionTool(BaseTool):
             file_path: 文件路径
             strategy: 解析策略
             user_id: 用户ID
-        pages: 页码范围（可选），如 "1-5"
+            pages: 页码范围（可选），如 "1-5"
         """
         # 🆕 如果指定了页码范围且是 PDF，先提取指定页码生成临时文件
         temp_extracted_file = None
         if pages and file_path.lower().endswith('.pdf'):
             try:
-                logger.debug(f"   🔧 提取 PDF 页码（异步线程）: {pages}")
+                import PyPDF2
+                from PyPDF2 import PdfWriter
                 
-                temp_extracted_file = await self._extract_pdf_pages(
-                    file_path=file_path,
-                    pages=pages
-                )
+                logger.debug(f"   🔧 提取 PDF 页码: {pages}")
                 
+                # 解析页码范围
                 start_page = int(pages.split('-')[0])
                 end_page = int(pages.split('-')[1]) if '-' in pages else start_page
+                
+                # 读取原始 PDF
+                reader = PyPDF2.PdfReader(file_path)
+                writer = PdfWriter()
+                
+                # 提取指定页码（PyPDF2 索引从 0 开始）
+                for page_num in range(start_page - 1, end_page):
+                    writer.add_page(reader.pages[page_num])
+                
+                # 生成临时文件
+                temp_extracted_file = file_path.replace('.pdf', f'_pages_{pages.replace("-", "_")}.pdf')
+                with open(temp_extracted_file, 'wb') as output_file:
+                    writer.write(output_file)
+                
                 extracted_size = os.path.getsize(temp_extracted_file) / (1024 * 1024)
                 logger.info(
                     f"   ✂️  已提取第 {start_page}-{end_page} 页 "
@@ -878,11 +1110,10 @@ class DocumentPartitionTool(BaseTool):
                                 form_data.add_field('ending_page_number', pages.split('-')[1])
                             logger.debug(f"   ⚠️ 使用 API 参数方式指定页码（提取失败）: {pages}")
                         
-                        async with aiofiles.open(file_path, 'rb') as f:
-                            file_content = await f.read()
+                        with open(file_path, 'rb') as f:
                             form_data.add_field(
                                 'files',
-                                file_content,
+                                f.read(),
                                 filename=file_name,
                                 content_type=self._get_mime_type(file_path)
                             )
@@ -1022,17 +1253,16 @@ class DocumentPartitionTool(BaseTool):
         content = f"{source}_{strategy}_{self.config.api_key[:8]}"
         return hashlib.md5(content.encode()).hexdigest()
     
-    async def _load_from_cache(self, cache_key: str) -> Optional[Dict]:
-        """从缓存加载（异步）"""
+    def _load_from_cache(self, cache_key: str) -> Optional[Dict]:
+        """从缓存加载"""
         if not self.config.cache_enabled:
             return None
         
         cache_file = Path(self.config.cache_dir) / f"{cache_key}.json"
         if cache_file.exists():
             try:
-                async with aiofiles.open(cache_file, 'r', encoding='utf-8') as f:
-                    content = await f.read()
-                    data = json.loads(content)
+                with open(cache_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
                     # 检查缓存是否过期（默认24小时）
                     cache_age = time.time() - data.get("metadata", {}).get("timestamp", 0)
                     if cache_age < 24 * 3600:
@@ -1043,16 +1273,15 @@ class DocumentPartitionTool(BaseTool):
         
         return None
     
-    async def _save_to_cache(self, cache_key: str, data: Dict):
-        """保存到缓存（异步）"""
+    def _save_to_cache(self, cache_key: str, data: Dict):
+        """保存到缓存"""
         if not self.config.cache_enabled:
             return
         
         cache_file = Path(self.config.cache_dir) / f"{cache_key}.json"
         try:
-            cache_file.parent.mkdir(parents=True, exist_ok=True)
-            async with aiofiles.open(cache_file, 'w', encoding='utf-8') as f:
-                await f.write(json.dumps(data, ensure_ascii=False, indent=2))
+            with open(cache_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.warning(f"保存缓存失败: {e}")
     
@@ -1077,126 +1306,12 @@ class DocumentPartitionTool(BaseTool):
         }
         
         try:
-                await self.event_manager.emit(
-                    event_type="tool.document_parsed",
-                    data=event_data
-                )
+            await self.event_manager.emit(
+                event_type="tool.document_parsed",
+                data=event_data
+            )
         except Exception as e:
             logger.warning(f"发送事件失败: {e}")
-
-    async def _extract_pdf_pages(
-        self,
-        file_path: str,
-        pages: str
-    ) -> str:
-        """异步提取 PDF 指定页码，避免阻塞事件循环"""
-        # 先解析页码范围（可能在等待 to_thread 之前就抛异常）
-        start_page = int(pages.split('-')[0])
-        end_page = int(pages.split('-')[1]) if '-' in pages else start_page
-        page_label = pages.replace("-", "_")
-
-        def _extract() -> bytes:
-            import PyPDF2
-            from PyPDF2 import PdfWriter
-
-            reader = PyPDF2.PdfReader(file_path)
-            writer = PdfWriter()
-            for page_num in range(start_page - 1, end_page):
-                writer.add_page(reader.pages[page_num])
-
-            buffer = io.BytesIO()
-            writer.write(buffer)
-            return buffer.getvalue()
-
-        pdf_bytes = await asyncio.to_thread(_extract)
-        temp_extracted_file = file_path.replace('.pdf', f'_pages_{page_label}.pdf')
-        async with aiofiles.open(temp_extracted_file, 'wb') as output_file:
-            await output_file.write(pdf_bytes)
-
-        return temp_extracted_file
-
-    async def _load_pdf_metadata(self, file_path: str) -> Tuple[Optional[int], Dict[str, Any]]:
-        """在线程中读取 PDF 信息，避免阻塞"""
-        def _load():
-            import PyPDF2
-
-            with open(file_path, "rb") as f:
-                reader = PyPDF2.PdfReader(f)
-                meta = reader.metadata or {}
-                return (
-                    len(reader.pages),
-                    {
-                        "title": meta.get("/Title", ""),
-                        "author": meta.get("/Author", ""),
-                        "subject": meta.get("/Subject", "")
-                    }
-                )
-
-        return await asyncio.to_thread(_load)
-
-    async def _load_docx_metadata(self, file_path: str) -> Tuple[Optional[int], Dict[str, Any], int]:
-        """在线程中读取 Word 信息，避免阻塞"""
-        def _load():
-            from docx import Document
-
-            doc = Document(file_path)
-            paragraph_count = len([p for p in doc.paragraphs if p.text.strip()])
-            total_pages = max(1, paragraph_count // 8)
-            core_props = doc.core_properties
-            metadata = {
-                "title": core_props.title or "",
-                "author": core_props.author or "",
-                "subject": core_props.subject or ""
-            } if core_props else {}
-            return total_pages, metadata, paragraph_count
-
-        return await asyncio.to_thread(_load)
-
-    async def _load_excel_metadata(self, file_path: str) -> Tuple[Optional[int], Dict[str, Any]]:
-        """在线程中读取 Excel 信息，避免阻塞"""
-        def _load():
-            import openpyxl
-
-            wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
-            sheets = wb.sheetnames
-            return len(sheets), {
-                "sheets": sheets,
-                "sheet_count": len(sheets)
-            }
-
-        return await asyncio.to_thread(_load)
-
-    async def _load_ppt_metadata(self, file_path: str) -> Tuple[Optional[int], Dict[str, Any]]:
-        """在线程中读取 PPT 信息，避免阻塞"""
-        def _load():
-            from pptx import Presentation
-
-            prs = Presentation(file_path)
-            slide_count = len(prs.slides)
-            return slide_count, {
-                "slide_count": slide_count,
-                "note": "PPT 的'页'是幻灯片数量"
-            }
-
-        return await asyncio.to_thread(_load)
-
-    async def _load_odt_metadata(self, file_path: str) -> Tuple[Optional[int], Dict[str, Any], int]:
-        """在线程中读取 ODT 信息，避免阻塞"""
-        def _load():
-            from odf import text
-            from odf.opendocument import load
-
-            doc = load(file_path)
-            paragraphs = doc.getElementsByType(text.P)
-            paragraph_count = len(paragraphs)
-            total_pages = max(1, paragraph_count // 8)
-            metadata = {
-                "paragraph_count": paragraph_count,
-                "note": "基于段落数估算（8段/页）"
-            }
-            return total_pages, metadata, paragraph_count
-
-        return await asyncio.to_thread(_load)
     
     # ============================================================
     # 🆕 分段解析策略相关方法
@@ -1226,18 +1341,47 @@ class DocumentPartitionTool(BaseTool):
             # PDF 文件 - 使用 PyPDF2
             if file_type == '.pdf':
                 try:
-                    total_pages, metadata = await self._load_pdf_metadata(temp_file)
+                    import PyPDF2
+                    
+                    with open(temp_file, 'rb') as f:
+                        reader = PyPDF2.PdfReader(f)
+                        total_pages = len(reader.pages)
+                        
+                        # 尝试读取元数据
+                        if reader.metadata:
+                            metadata = {
+                                "title": reader.metadata.get("/Title", ""),
+                                "author": reader.metadata.get("/Author", ""),
+                                "subject": reader.metadata.get("/Subject", "")
+                            }
+                    
                     logger.info(f"📄 PDF 文档: 共 {total_pages} 页")
                 
                 except ImportError:
                     logger.warning("PyPDF2 未安装，无法获取 PDF 页数")
-                except Exception as e:
-                    logger.warning(f"读取 PDF 文档失败: {e}")
             
             # Word 文档 - 使用 python-docx
             elif file_type in ['.docx', '.doc']:
                 try:
-                    total_pages, metadata, paragraph_count = await self._load_docx_metadata(temp_file)
+                    from docx import Document
+                    
+                    doc = Document(temp_file)
+                    # Word 没有"页"的概念，粗略估算：
+                    # - 每段约 3-5 行
+                    # - A4 纸约 40 行
+                    # - 估算公式：max(1, 段落数 / 8)
+                    paragraph_count = len([p for p in doc.paragraphs if p.text.strip()])
+                    total_pages = max(1, paragraph_count // 8)
+                    
+                    # 读取文档属性
+                    core_props = doc.core_properties
+                    if core_props:
+                        metadata = {
+                            "title": core_props.title or "",
+                            "author": core_props.author or "",
+                            "subject": core_props.subject or ""
+                        }
+                    
                     logger.info(f"📄 Word 文档: 估算 {total_pages} 页（{paragraph_count} 个段落）")
                 
                 except ImportError:
@@ -1248,7 +1392,16 @@ class DocumentPartitionTool(BaseTool):
             # Excel 文件 - 使用 openpyxl
             elif file_type in ['.xlsx', '.xls']:
                 try:
-                    total_pages, metadata = await self._load_excel_metadata(temp_file)
+                    import openpyxl
+                    
+                    wb = openpyxl.load_workbook(temp_file, read_only=True, data_only=True)
+                    total_pages = len(wb.sheetnames)  # Excel 的"页"是工作表数量
+                    
+                    metadata = {
+                        "sheets": wb.sheetnames,
+                        "sheet_count": len(wb.sheetnames)
+                    }
+                    
                     logger.info(f"📊 Excel 文档: {total_pages} 个工作表")
                 
                 except ImportError:
@@ -1259,9 +1412,8 @@ class DocumentPartitionTool(BaseTool):
             # CSV 文件 - 视为单页
             elif file_type == '.csv':
                 try:
-                    async with aiofiles.open(temp_file, 'r', encoding='utf-8', errors='ignore') as f:
-                        content = await f.read()
-                        row_count = content.count('\n') + (1 if content and not content.endswith('\n') else 0)
+                    with open(temp_file, 'r', encoding='utf-8', errors='ignore') as f:
+                        row_count = sum(1 for _ in f)
                     
                     total_pages = 1  # CSV 通常视为单页
                     metadata = {
@@ -1277,7 +1429,16 @@ class DocumentPartitionTool(BaseTool):
             # PowerPoint 文件 - 使用 python-pptx
             elif file_type in ['.pptx', '.ppt']:
                 try:
-                    total_pages, metadata = await self._load_ppt_metadata(temp_file)
+                    from pptx import Presentation
+                    
+                    prs = Presentation(temp_file)
+                    total_pages = len(prs.slides)  # 幻灯片数量
+                    
+                    metadata = {
+                        "slide_count": total_pages,
+                        "note": "PPT 的'页'是幻灯片数量"
+                    }
+                    
                     logger.info(f"📊 PowerPoint 文档: {total_pages} 张幻灯片")
                 
                 except ImportError:
@@ -1288,9 +1449,8 @@ class DocumentPartitionTool(BaseTool):
             # TXT 文件 - 估算页数（按行数）
             elif file_type == '.txt':
                 try:
-                    async with aiofiles.open(temp_file, 'r', encoding='utf-8', errors='ignore') as f:
-                        content = await f.read()
-                        line_count = content.count('\n') + (1 if content and not content.endswith('\n') else 0)
+                    with open(temp_file, 'r', encoding='utf-8', errors='ignore') as f:
+                        line_count = sum(1 for _ in f)
                     
                     # 估算：A4 纸约 40 行/页
                     total_pages = max(1, line_count // 40)
@@ -1320,7 +1480,22 @@ class DocumentPartitionTool(BaseTool):
             # ODT 文件 - 使用 odfpy
             elif file_type == '.odt':
                 try:
-                    total_pages, metadata, paragraph_count = await self._load_odt_metadata(temp_file)
+                    from odf import text, teletype
+                    from odf.opendocument import load
+                    
+                    doc = load(temp_file)
+                    # 统计段落数
+                    paragraphs = doc.getElementsByType(text.P)
+                    paragraph_count = len(paragraphs)
+                    
+                    # 估算：每 8 个段落约 1 页
+                    total_pages = max(1, paragraph_count // 8)
+                    
+                    metadata = {
+                        "paragraph_count": paragraph_count,
+                        "note": "基于段落数估算（8段/页）"
+                    }
+                    
                     logger.info(f"📄 ODT 文档: 估算 {total_pages} 页（{paragraph_count} 个段落）")
                 
                 except ImportError:
@@ -1624,13 +1799,14 @@ class DocumentPartitionTool(BaseTool):
         user_id: str
     ) -> Dict[str, Any]:
         """
-        概要模式：快速返回文档结构
+        概要模式：解析全部页面（使用 fast 策略，5页一批）
         
         策略：
-        1. 🆕 智能选择页数（根据文档类型和大小）
+        1. 🆕 处理全部页面（不再只处理前几页）
         2. 使用 fast 策略（速度快）
-        3. 提取文档大纲（标题层级）
-        4. 生成简要摘要
+        3. 按 5 页为一批分批处理
+        4. 提取文档大纲（标题层级）
+        5. 生成简要摘要
         
         Args:
             temp_file: 临时文件路径
@@ -1641,134 +1817,120 @@ class DocumentPartitionTool(BaseTool):
         Returns:
             概要结果
         """
-        # 🆕 智能页数选择逻辑
         total_pages = doc_info.get("total_pages")
         file_type = doc_info.get("file_type", "")
         
-        # 根据文档类型和大小智能决定解析页数
-        overview_pages = self._get_smart_overview_pages(file_type, total_pages)
+        # 🆕 处理全部页面，使用批处理策略（统一使用配置的 batch_size）
+        batch_size = self.config.pages_batch_size  # 每批 5 页（来自配置）
+        all_elements = []
+        processing_details = []
         
-        logger.info(f"📋 生成文档概要（智能解析第 {overview_pages} 页）")
+        if total_pages:
+            logger.info(f"📋 生成文档概要（解析全部 {total_pages} 页，{batch_size}页/批）")
+            
+            # 计算批次数
+            total_batches = (total_pages + batch_size - 1) // batch_size
+            
+            # 分批处理所有页面
+            for batch_idx in range(total_batches):
+                batch_start = batch_idx * batch_size + 1
+                batch_end = min(batch_start + batch_size - 1, total_pages)
+                batch_page_count = batch_end - batch_start + 1
+                
+                logger.info(f"   📦 批次 {batch_idx + 1}/{total_batches}: 第 {batch_start}-{batch_end} 页 ({batch_page_count}页)")
+                
+                try:
+                    # 调用 API（使用 fast 策略）
+                    result = await self._call_partition_api(
+                        file_path=temp_file,
+                        strategy="fast",
+                        user_id=user_id,
+                        pages=f"{batch_start}-{batch_end}"
+                    )
+                    
+                    all_elements.extend(result)
+                    processing_details.append({
+                        "pages": f"{batch_start}-{batch_end}",
+                        "element_count": len(result),
+                        "status": "success",
+                        "batch_info": f"批次 {batch_idx + 1}/{total_batches}"
+                    })
+                    logger.info(f"      ✅ 成功: {len(result)} 个元素")
+                    
+                except Exception as e:
+                    logger.error(f"      ❌ 失败: {e}")
+                    processing_details.append({
+                        "pages": f"{batch_start}-{batch_end}",
+                        "status": "failed",
+                        "error": str(e),
+                        "batch_info": f"批次 {batch_idx + 1}/{total_batches}"
+                    })
+        else:
+            # 未知页数，尝试解析全部（不分批）
+            logger.info(f"📋 生成文档概要（文档页数未知，尝试解析全部）")
+            
+            try:
+                all_elements = await self._call_partition_api(
+                    file_path=temp_file,
+                    strategy="fast",
+                    user_id=user_id
+                )
+                processing_details.append({
+                    "pages": "全部",
+                    "element_count": len(all_elements),
+                    "status": "success"
+                })
+                logger.info(f"   ✅ 成功: {len(all_elements)} 个元素")
+            except Exception as e:
+                logger.error(f"   ❌ 失败: {e}")
+                processing_details.append({
+                    "pages": "全部",
+                    "status": "failed",
+                    "error": str(e)
+                })
         
-        # 解析指定页数
-        first_pages = await self._call_partition_api(
-            file_path=temp_file,
-            strategy="fast",
-            user_id=user_id,
-            pages=overview_pages
-        )
+        # 统计成功和失败的批次
+        success_count = sum(1 for d in processing_details if d["status"] == "success")
+        failed_count = sum(1 for d in processing_details if d["status"] == "failed")
         
         # 提取大纲
-        outline = self._extract_outline(first_pages, doc_info)
+        outline = self._extract_outline(all_elements, doc_info)
         
         # 生成摘要
-        summary = self._generate_summary(first_pages)
+        summary = self._generate_summary(all_elements)
         
-        # 🆕 解析实际页数范围
-        parsed_page_range = overview_pages
-        if '-' in overview_pages:
-            start_page, end_page = overview_pages.split('-')
-            parsed_page_count = int(end_page) - int(start_page) + 1
-        else:
-            parsed_page_count = 1
-        
-        # 🆕 构建智能警告信息（根据实际解析的页数）
+        # 构建消息
         if total_pages:
-            # 如果已知页数
-            if parsed_page_count >= total_pages:
-                # 已全部解析
-                warning_message = f"✅ 文档仅有 {total_pages} 页，已全部解析。"
-            else:
-                # 部分解析：明确提示
-                warning_message = (
-                    f"⚠️ 这是文档概要（已解析第 {parsed_page_range} 页，共 {total_pages} 页）。"
-                    f"这不是完整内容！"
-                )
+            warning_message = f"✅ 已解析文档全部 {total_pages} 页（成功批次: {success_count}/{len(processing_details)}）"
         else:
-            # 未知页数（如 Word/Excel 等）
-            if file_type in ['.docx', '.doc', '.odt', '.rtf']:
-                warning_message = f"⚠️ 这是文档的部分内容（已解析第 {parsed_page_range} 页）。可能不是完整内容。"
-            elif file_type in ['.xlsx', '.xls']:
-                warning_message = f"⚠️ 这是 Excel 文档的部分内容（已解析第 {parsed_page_range} 个工作表）。"
-            elif file_type == '.csv':
-                warning_message = "⚠️ 这是 CSV 文件的部分内容。"
-            elif file_type in ['.pptx', '.ppt']:
-                warning_message = f"⚠️ 这是 PPT 的部分内容（已解析第 {parsed_page_range} 张）。"
-            elif file_type == '.txt':
-                warning_message = f"⚠️ 这是 TXT 文件的部分内容（已解析第 {parsed_page_range} 页）。"
-            else:
-                warning_message = f"⚠️ 这是文档概要（已解析第 {parsed_page_range} 页）。可能需要完整读取。"
-        
-        next_action = None
-        if total_pages:
-            if total_pages <= 10:
-                # 小文档：建议直接读取全部
-                next_action = {
-                    "recommendation": "建议读取完整内容",
-                    "reason": f"文档较小（{total_pages}页），可一次性读取",
-                    "suggested_call": {
-                        "tool": "document_partition_tool",
-                        "parameters": {
-                            "source": source,
-                            "mode": "full",
-                            "strategy": "auto"
-                        }
-                    }
-                }
-            else:
-                # 大文档：建议分段读取
-                next_action = {
-                    "recommendation": "建议分段读取关键章节",
-                    "reason": f"文档较大（{total_pages}页），建议根据大纲选择关键章节",
-                    "suggested_call": {
-                        "tool": "document_partition_tool",
-                        "parameters": {
-                            "source": source,
-                            "mode": "pages",
-                            "pages": "示例: 1-10 或根据大纲选择",
-                            "strategy": "auto"
-                        }
-                    }
-                }
+            warning_message = f"✅ 已解析文档全部内容（共 {len(all_elements)} 个元素）"
         
         return {
             "success": True,
             "mode": "overview",
-            "warning": warning_message,  # 🆕 醒目警告
-            "message": f"文档概要已生成（已解析第 {parsed_page_range} 页）",  # 🆕 动态显示
+            "warning": warning_message,
+            "message": f"文档概要已生成（已解析全部内容）",
             "data": {
                 "summary": summary,
                 "outline": outline,
-                "preview": first_pages[:10]  # 减少到前10个元素，避免混淆
+                "elements": all_elements  # 🆕 返回全部元素，不再只是 preview
             },
             "metadata": {
                 "source": source,
                 "total_pages": total_pages,
-                "parsed_pages": parsed_page_range,  # 🆕 显示实际解析的页码范围
-                "parsed_page_count": parsed_page_count,  # 🆕 显示解析的页数
+                "parsed_pages": f"1-{total_pages}" if total_pages else "全部",
+                "parsed_page_count": total_pages if total_pages else len(all_elements),
                 "file_type": doc_info.get("file_type"),
                 "file_size": doc_info.get("file_size"),
-                "element_count": len(first_pages),
+                "element_count": len(all_elements),
+                "strategy": "fast",
+                "batch_size": batch_size,
+                "total_batches": len(processing_details),
+                "success_batches": success_count,
+                "failed_batches": failed_count,
+                "processing_details": processing_details,
                 "from_cache": False,
-                "smart_overview": True  # 🆕 标记使用了智能页数选择
-            },
-            "next_action": next_action,  # 🆕 智能建议
-            "access_hint": {
-                "message": "若需完整内容，请立即使用以下方式之一：",
-                "examples": [
-                    {
-                        "description": "📖 读取全部内容（推荐用于小文档）",
-                        "example": f"mode='full'"
-                    },
-                    {
-                        "description": "📄 读取指定页面（推荐用于大文档）",
-                        "example": f"mode='pages', pages='4-20'"
-                    },
-                    {
-                        "description": "🔍 高精度读取（含表格结构）",
-                        "example": f"mode='pages', pages='5-15', strategy='hi_res'"
-                    }
-                ]
+                "full_document": True  # 🆕 标记已解析全部文档
             }
         }
     
@@ -1916,7 +2078,11 @@ class DocumentPartitionTool(BaseTool):
         user_id: str
     ) -> Dict[str, Any]:
         """
-        完整模式：解析全部内容（仅限小文档）
+        完整模式：解析全部内容（超过5页自动分批）
+        
+        🆕 统一分批策略：
+        - 文档 ≤5页：一次性解析
+        - 文档 >5页：自动分批处理（5页/批）
         
         Args:
             temp_file: 临时文件路径
@@ -1929,37 +2095,98 @@ class DocumentPartitionTool(BaseTool):
             完整结果
         """
         total_pages = doc_info.get("total_pages")
+        batch_size = self.config.pages_batch_size  # 统一使用配置的 batch_size（默认5页）
         
-        # 检查页数限制
-        if total_pages and total_pages > 10:
-            return {
-                "success": False,
-                "error": "DOCUMENT_TOO_LARGE",
-                "error_code": 413,
-                "message": f"文档过大（{total_pages}页），超过完整模式限制（10页）",
-                "metadata": {
-                    "total_pages": total_pages,
-                    "max_full_pages": 10
-                },
-                "suggestion": "请使用 mode='pages' 分段读取，或使用 mode='overview' 先查看概要"
-            }
+        all_elements = []
+        processing_details = []
         
-        logger.info(f"📚 完整模式：解析全部 {total_pages if total_pages else '未知'} 页")
+        if total_pages and total_pages > batch_size:
+            # 文档较大，使用分批处理
+            logger.info(f"📚 完整模式：解析全部 {total_pages} 页（{batch_size}页/批）")
+            
+            # 计算批次数
+            total_batches = (total_pages + batch_size - 1) // batch_size
+            
+            # 分批处理所有页面
+            for batch_idx in range(total_batches):
+                batch_start = batch_idx * batch_size + 1
+                batch_end = min(batch_start + batch_size - 1, total_pages)
+                batch_page_count = batch_end - batch_start + 1
+                
+                logger.info(f"   📦 批次 {batch_idx + 1}/{total_batches}: 第 {batch_start}-{batch_end} 页 ({batch_page_count}页)")
+                
+                try:
+                    # 调用 API
+                    result = await self._call_partition_api(
+                        file_path=temp_file,
+                        strategy=strategy,
+                        user_id=user_id,
+                        pages=f"{batch_start}-{batch_end}"
+                    )
+                    
+                    all_elements.extend(result)
+                    processing_details.append({
+                        "pages": f"{batch_start}-{batch_end}",
+                        "element_count": len(result),
+                        "status": "success",
+                        "batch_info": f"批次 {batch_idx + 1}/{total_batches}"
+                    })
+                    logger.info(f"      ✅ 成功: {len(result)} 个元素")
+                    
+                except Exception as e:
+                    logger.error(f"      ❌ 失败: {e}")
+                    processing_details.append({
+                        "pages": f"{batch_start}-{batch_end}",
+                        "status": "failed",
+                        "error": str(e),
+                        "batch_info": f"批次 {batch_idx + 1}/{total_batches}"
+                    })
+        else:
+            # 小文档或未知页数，一次性解析
+            if total_pages:
+                logger.info(f"📚 完整模式：解析全部 {total_pages} 页（小文档，一次性处理）")
+            else:
+                logger.info(f"📚 完整模式：解析全部内容（页数未知，一次性处理）")
+            
+            try:
+                # 调用 API 解析全部内容
+                all_elements = await self._call_partition_api(
+                    file_path=temp_file,
+                    strategy=strategy,
+                    user_id=user_id
+                )
+                
+                processing_details.append({
+                    "pages": f"1-{total_pages}" if total_pages else "全部",
+                    "element_count": len(all_elements),
+                    "status": "success"
+                })
+                logger.info(f"   ✅ 成功: {len(all_elements)} 个元素")
+                
+            except Exception as e:
+                logger.error(f"   ❌ 失败: {e}")
+                processing_details.append({
+                    "pages": f"1-{total_pages}" if total_pages else "全部",
+                    "status": "failed",
+                    "error": str(e)
+                })
         
-        # 调用 API 解析全部内容
-        all_elements = await self._call_partition_api(
-            file_path=temp_file,
-            strategy=strategy,
-            user_id=user_id
-        )
+        # 统计成功和失败的批次
+        success_count = sum(1 for d in processing_details if d["status"] == "success")
+        failed_count = sum(1 for d in processing_details if d["status"] == "failed")
         
         # 🆕 构建友好的消息
         element_count = len(all_elements)
         file_type = doc_info.get("file_type", "")
         
+        # 构建消息（包含批次信息）
         if total_pages:
-            # 已知页数
-            message = f"✅ 成功解析文档全部内容，共 {total_pages} 页，{element_count} 个元素"
+            if len(processing_details) > 1:
+                # 分批处理
+                message = f"✅ 成功解析文档全部内容，共 {total_pages} 页，{element_count} 个元素（成功批次: {success_count}/{len(processing_details)}）"
+            else:
+                # 一次性处理
+                message = f"✅ 成功解析文档全部内容，共 {total_pages} 页，{element_count} 个元素"
         else:
             # 未知页数：根据文件类型给出具体说明
             if file_type in ['.docx', '.doc']:
@@ -1989,11 +2216,16 @@ class DocumentPartitionTool(BaseTool):
             "metadata": {
                 "source": source,
                 "total_pages": total_pages,
-                "parsed_pages": total_pages if total_pages else "全部",
+                "parsed_pages": f"1-{total_pages}" if total_pages else "全部",
                 "element_count": element_count,
                 "strategy": strategy,
                 "file_type": file_type,
                 "file_size": doc_info.get("file_size"),
+                "batch_size": batch_size,  # 🆕 添加批次大小
+                "total_batches": len(processing_details),  # 🆕 总批次数
+                "success_batches": success_count,  # 🆕 成功批次数
+                "failed_batches": failed_count,  # 🆕 失败批次数
+                "processing_details": processing_details,  # 🆕 详细批次信息
                 "from_cache": False
             }
         }
@@ -2015,6 +2247,7 @@ def create_document_partition_tool(**kwargs) -> DocumentPartitionTool:
             - config: PartitionConfig 配置对象
             - event_manager: 事件管理器
             - memory: WorkingMemory 实例
+            - workspace_dir: 工作目录
     
     Returns:
         DocumentPartitionTool 实例
