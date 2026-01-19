@@ -1404,7 +1404,7 @@ capabilities:
   subtype: CUSTOM
   provider: user
   invocation_hint: DIRECT
-  level: 2
+  level: 1
   cache_stable: true  # 相同文档的解析结果可以缓存
   implementation:
     module: tools.partition
