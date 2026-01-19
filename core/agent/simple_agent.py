@@ -181,7 +181,7 @@ class SimpleAgent:
         
         # 🆕 使用 EventBroadcaster 作为事件发送的统一入口
         # 传入 conversation_service 用于自动持久化
-        self.broadcaster = EventBroadcaster(event_manager, conversation_service)
+        self.broadcaster = EventBroadcaster(event_manager, conversation_service=conversation_service)
         
         # ===== 根据 Schema 动态初始化各模块 =====
         self._init_modules()
@@ -302,7 +302,7 @@ class SimpleAgent:
             })
         
         # 创建新的 EventBroadcaster
-        clone.broadcaster = EventBroadcaster(event_manager, conversation_service)
+        clone.broadcaster = EventBroadcaster(event_manager, conversation_service=conversation_service)
         
         # ========== 重置会话级状态 ==========
         clone._plan_cache = {"plan": None, "todo": None, "tool_calls": []}
@@ -2058,7 +2058,7 @@ class SimpleAgent:
         
         # 注入会话级依赖
         cloned.event_manager = event_manager
-        cloned.broadcaster = EventBroadcaster(event_manager, conversation_service)
+        cloned.broadcaster = EventBroadcaster(event_manager, conversation_service=conversation_service)
         
         # 重置会话状态
         cloned._reset_session_state()

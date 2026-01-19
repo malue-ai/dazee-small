@@ -17,9 +17,14 @@
     "timestamp": str,         # ISO 时间戳
     "data": dict              # 事件数据
 }
+
+架构说明：
+- 序号（seq）由 SeqManager 在 EventBroadcaster 层统一生成
+- EventStorage 只负责存储，不再生成序号
+- 保留 generate_session_seq 方法以向后兼容，但推荐使用 SeqManager
 """
 
-from typing import Dict, Any, Protocol
+from typing import Dict, Any, Protocol, Optional
 from datetime import datetime
 from uuid import uuid4
 from logger import get_logger
@@ -32,10 +37,17 @@ class EventStorage(Protocol):
     事件存储协议（抽象接口）
     
     所有方法都是异步的，支持异步 Redis 客户端
+    
+    注意：序号生成已移至 SeqManager，generate_session_seq 保留以向后兼容
     """
     
     async def generate_session_seq(self, session_id: str) -> int:
-        """生成 session 内的事件序号（从 1 开始）"""
+        """
+        生成 session 内的事件序号（从 1 开始）
+        
+        ⚠️ 已废弃：推荐使用 SeqManager.get_next_seq()
+        保留此方法以向后兼容
+        """
         ...
     
     async def get_session_context(self, session_id: str) -> Dict[str, Any]:
@@ -60,6 +72,10 @@ class BaseEventManager:
     - 通过 EventStorage 协议处理存储（解耦具体实现）
     
     所有具体的事件管理器都继承此类
+    
+    注意：
+    - 推荐通过 EventBroadcaster 发送事件（统一生成 seq）
+    - 直接调用子管理器时，可以传入已生成的 seq 和 event_uuid
     """
     
     def __init__(self, storage: EventStorage):
@@ -76,14 +92,16 @@ class BaseEventManager:
         session_id: str,
         event: Dict[str, Any],
         conversation_id: str = None,
-        message_id: str = None
+        message_id: str = None,
+        seq: Optional[int] = None,
+        event_uuid: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         发送事件（内部方法）
         
-        自动处理：
-        - 生成 UUID（全局唯一事件标识符）
-        - 生成 session 内序号 seq（从 1 开始递增）
+        处理逻辑：
+        - 如果提供了 seq 和 event_uuid，直接使用（来自 EventBroadcaster）
+        - 如果未提供，则自动生成（向后兼容）
         - 添加通用上下文字段
         - 委托给 storage 处理存储和心跳
         
@@ -92,15 +110,19 @@ class BaseEventManager:
             event: 事件对象（必须包含 type 和 data）
             conversation_id: Conversation ID（可选，会从 storage 获取）
             message_id: Message ID（可选）
+            seq: 事件序号（可选，来自 SeqManager）
+            event_uuid: 事件 UUID（可选，来自上层）
             
         Returns:
             完整的事件对象
         """
-        # 1. 生成全局唯一 UUID
-        event_uuid = str(uuid4())
+        # 1. 使用提供的 UUID 或生成新的
+        if event_uuid is None:
+            event_uuid = str(uuid4())
         
-        # 2. 生成 session 内序号（从 1 开始）- 异步
-        seq = await self.storage.generate_session_seq(session_id)
+        # 2. 使用提供的 seq 或从 storage 生成（向后兼容）
+        if seq is None:
+            seq = await self.storage.generate_session_seq(session_id)
         
         # 3. 获取上下文信息（如果没有提供）- 异步
         if not conversation_id:
