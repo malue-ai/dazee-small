@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from grpc_server.client import ZenfluxGRPCClient
 
 
-async def test_chat_stream(agent_id: str = "zeno_agent"):
+async def test_chat_stream(agent_id: str = "zeno_agent", host: str = "localhost:50051"):
     """
     测试 ChatStream 接口
     
@@ -27,13 +27,15 @@ async def test_chat_stream(agent_id: str = "zeno_agent"):
     
     Args:
         agent_id: Agent 实例 ID，默认 zeno_agent
+        host: gRPC 服务器地址，默认 localhost:50051
     """
     print("=" * 60)
     print(f"🚀 测试 gRPC ChatStream 接口 (agent_id={agent_id})")
+    print(f"🌐 服务器地址: {host}")
     print("=" * 60)
     
     try:
-        async with ZenfluxGRPCClient("localhost:50051") as client:
+        async with ZenfluxGRPCClient(host) as client:
             event_count = 0
             
             # 调用 chat_stream（如果服务端启用了 mock，会返回 mock 数据）
@@ -104,7 +106,10 @@ async def test_chat_stream(agent_id: str = "zeno_agent"):
 
 
 if __name__ == "__main__":
-    # 从命令行参数获取 agent_id
+    # 从命令行参数获取 agent_id 和 host
+    # 用法: python test_grpc_chat_stream.py [agent_id] [host]
+    # 例如: python test_grpc_chat_stream.py zeno_agent agent.malue.ai:50051
     agent_id = sys.argv[1] if len(sys.argv) > 1 else "zeno_agent"
-    success = asyncio.run(test_chat_stream(agent_id))
+    host = sys.argv[2] if len(sys.argv) > 2 else "localhost:50051"
+    success = asyncio.run(test_chat_stream(agent_id, host))
     sys.exit(0 if success else 1)

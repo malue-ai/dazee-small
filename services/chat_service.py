@@ -1882,26 +1882,17 @@ def get_chat_service(
     """
     获取默认聊天服务单例
     
-    Mock 模式配置优先级：
-    1. 函数参数（enable_mock, mock_scenario）
-    2. 环境变量（ENABLE_MOCK_MODE, MOCK_SCENARIO）
-    3. 默认值（False, "analytics"）
-    
-    环境变量：
-        ENABLE_MOCK_MODE: true/false，启用 mock 模式
-        MOCK_SCENARIO: analytics/build，mock 场景
+    Mock 模式配置：
+    - 🎭 默认启用 Mock 模式（enable_mock=True）
+    - 可通过函数参数覆盖（enable_mock=False 禁用）
+    - 默认场景：analytics
     """
-    import os
-    
     global _default_service
     if _default_service is None:
-        # 读取环境变量配置
-        env_mock = os.getenv("ENABLE_MOCK_MODE", "false").lower() == "true"
-        env_scenario = os.getenv("MOCK_SCENARIO", "analytics")
-        
-        # 参数优先级：函数参数 > 环境变量 > 默认值
-        final_mock = enable_mock if enable_mock is not None else env_mock
-        final_scenario = mock_scenario if mock_scenario is not None else env_scenario
+        # 🎭 Mock 模式：默认启用，返回预定义数据（不调用 LLM）
+        # 如需使用真实 LLM，传入 enable_mock=False
+        final_mock = enable_mock if enable_mock is not None else True
+        final_scenario = mock_scenario if mock_scenario is not None else "analytics"
         
         _default_service = ChatService(
             session_service=session_service,
