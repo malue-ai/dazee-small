@@ -545,16 +545,23 @@ class ChatService:
             if self.enable_routing:
                 router = self._get_router()
                 routing_decision = await router.route(
-                    message=message,
-                    history=history_messages
+                    user_query=message,
+                    conversation_history=history_messages
                 )
-                use_multi_agent = routing_decision.use_multi_agent
+                use_multi_agent = (routing_decision.agent_type == "multi")
                 routing_intent = routing_decision.intent
                 
+                # 获取复杂度评分
+                complexity_score = 0.0
+                if routing_intent and hasattr(routing_intent, 'complexity_score'):
+                    complexity_score = routing_intent.complexity_score
+                elif routing_decision.complexity:
+                    complexity_score = routing_decision.complexity.score
+                
                 logger.info(
-                    f"🔀 路由决策: complexity={routing_decision.complexity_score:.2f}, "
+                    f"🔀 路由决策: complexity={complexity_score:.2f}, "
                     f"use_multi_agent={use_multi_agent}, "
-                    f"intent={routing_intent.category if routing_intent else 'N/A'}"
+                    f"intent={routing_intent.task_type.value if routing_intent else 'N/A'}"
                 )
             
             # 根据路由决策选择执行路径
