@@ -6,7 +6,7 @@ ZenO 适配器
 ZenO 规范特点：
 1. 生命周期事件：message.assistant.created/start/done/error
 2. 业务事件统一用：message.assistant.delta + delta.type
-3. delta.type 包括：intent, preface, thinking, response, progress, clue, files, mind, sql, data, chart, recommended, application
+3. delta.type 包括：intent, preface, thinking, response, progress, clue, files, mind, sql, data, chart, recommended, application, billing
 
 参考文档：ZenO 会话详情页 SSE 数据规范 v2.0.1
 """
@@ -244,7 +244,8 @@ class ZenOAdapter(EventAdapter):
         elif delta_type in (
             "sql", "data", "chart", "report",  # 智能分析三件套 + 报告
             "intent", "application",            # 意图和应用状态
-            "preface", "files", "mind", "clue"  # 其他通用类型
+            "preface", "files", "mind", "clue", # 其他通用类型
+            "billing"                           # 🆕 计费信息
         ):
             zeno_delta_type = delta_type
             # 格式已符合规范，直接透传

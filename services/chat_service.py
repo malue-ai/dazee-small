@@ -742,15 +742,9 @@ class ChatService:
                     usage=usage_response.model_dump()  # 传递完整的 UsageResponse
                 )
                 
-                # 🆕 V7.4: 发送 usage SSE 事件（使用 emit_custom）
-                try:
-                    await events.emit_custom(
-                        session_id=session_id,
-                        event_type="usage",
-                        event_data=usage_response.model_dump()
-                    )
-                except Exception as emit_err:
-                    logger.debug(f"Usage 事件发送失败: {emit_err}")
+                # 注意：billing 事件已在 Agent 内部发送（message_stop 之前）
+                # 这里不再重复发送，避免重复计费信息
+                logger.debug(f"✅ Usage 数据已累积到内存，等待最终保存")
                 
             except Exception as audit_err:
                 logger.warning(f"⚠️ Token 审计失败: {audit_err}")

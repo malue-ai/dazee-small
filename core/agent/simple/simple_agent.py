@@ -543,6 +543,24 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
             "cache_creation_tokens": stats.get("total_cache_creation_tokens", 0),
         })
         
+        # 🆕 V7.5: 发送 billing 信息（作为最后一个 message_delta，在 message_stop 之前）
+        from models.usage import UsageResponse
+        usage_response = UsageResponse.from_usage_tracker(
+            tracker=self.usage_tracker,
+            model=self.model,
+            latency=0  # Agent 内部不计算总延迟（由 ChatService 计算）
+        )
+        
+        yield {
+            "type": "message_delta",
+            "data": {
+                "type": "billing",
+                "content": usage_response.model_dump()
+            }
+        }
+        logger.debug(f"📊 Billing 事件已发送: total_price=${usage_response.total_price:.6f}")
+        
+        # message_stop 作为最后一个事件
         yield await self.broadcaster.emit_message_stop(
             session_id=session_id,
             message_id=self._current_message_id

@@ -1,8 +1,8 @@
 # Token 计费系统 V7.5 - 实施总结
 
-> **版本**: V7.5 统一版  
-> **更新日期**: 2026-01-18  
-> **状态**: ✅ 实施完成，框架已统一，E2E 测试通过
+> **版本**: V7.5 统一版 + Billing Event Integration  
+> **更新日期**: 2026-01-20  
+> **状态**: ✅ 实施完成，框架已统一，billing 事件已集成，E2E 测试通过
 
 ---
 
@@ -22,6 +22,8 @@
 | **调用追溯** | ✅ llm_call_details 包含完整调用链 |
 | **代码统一** | ✅ UsageTracker = EnhancedUsageTracker |
 | **价格格式** | ✅ 全部 float 类型 |
+| **Billing 事件** | ✅ 作为 message_delta 类型发送，ZenO 规范兼容 |
+| **事件时序** | ✅ billing 在 message_stop 之前发送，顺序保证 |
 
 ---
 
@@ -75,9 +77,11 @@ ClaudeLLMService.create_message_stream() (core/llm/claude.py)
         ↓
       EnhancedUsageTracker 记录调用（自动计算价格）
         ↓
-      ChatService 生成 UsageResponse
+      SimpleAgent.chat() 在 message_stop 之前发送 billing 事件
         ↓
-      发送 SSE 事件 {"event": "usage", "data": {...}}
+      发送 SSE 事件 {"type": "message_delta", "data": {"type": "billing", "content": {...}}}
+        ↓
+      ChatService 累积 usage 数据到内存
         ↓
       记录到数据库 metadata.usage
 ```
@@ -110,8 +114,11 @@ MultiAgentOrchestrator.execute() (core/agent/multi/orchestrator.py)
 |------|------|------|
 | `core/agent/simple/simple_agent.py` | `__init__()` | 初始化 `self.usage_tracker` |
 | `core/agent/simple/simple_agent.py` | `_chat_loop()` | 调用 `usage_tracker.accumulate()` |
-| `services/chat_service.py` | `_run_agent()` | 获取 `usage_tracker.get_stats()` |
+| `core/agent/simple/simple_agent.py` | `chat()` | 在 message_stop 前发送 billing 事件 |
+| `services/chat_service.py` | `_run_agent()` | 累积 usage 数据到内存 |
 | `models/usage.py` | `UsageResponse.from_usage_tracker()` | 生成最终 UsageResponse |
+| `core/events/message_events.py` | `emit_message_delta()` | 发送 billing delta 事件 |
+| `core/events/adapters/zeno.py` | `_convert_message_delta()` | 转换 billing 为 ZenO 格式 |
 
 ---
 
@@ -372,14 +379,14 @@ class SimpleAgent:
         self.usage_tracker.accumulate(response)
 ```
 
-### 在 ChatService 中生成响应
+### 在 ChatService 中累积 usage 数据
 
 ```python
 from models.usage import UsageResponse
 
 class ChatService:
     async def _run_agent(self, ...):
-        # 执行 agent
+        # 执行 agent（agent 内部会发送 billing 事件）
         result = await agent.chat(...)
         
         # 生成 UsageResponse
@@ -389,9 +396,197 @@ class ChatService:
             latency=duration_ms / 1000.0
         )
         
-        # 发送 SSE 事件
-        broadcaster.emit_custom("usage", usage.model_dump())
+        # 累积 usage 到内存（不发送事件，避免重复）
+        # billing 事件已在 Agent.chat() 中发送
+        await agent.broadcaster.accumulate_usage(
+            session_id=session_id,
+            usage=usage.model_dump()
+        )
 ```
+
+---
+
+## 📡 Billing Event 集成（V7.5 新增）
+
+### 事件格式
+
+billing 信息作为 `message_delta` 事件发送，统一到 ZenO 事件规范中：
+
+```typescript
+// SSE 事件格式
+{
+  "type": "message_delta",
+  "data": {
+    "type": "billing",           // Delta 类型标识
+    "content": {                 // UsageResponse 完整数据
+      "prompt_tokens": 7100,
+      "completion_tokens": 265,
+      "thinking_tokens": 0,
+      "cache_read_tokens": 5000,
+      "cache_write_tokens": 2000,
+      "total_tokens": 7365,
+      
+      "prompt_price": 0.004725,
+      "completion_price": 0.003975,
+      "thinking_price": 0.0,
+      "cache_read_price": 0.0015,
+      "cache_write_price": 0.0075,
+      "total_price": 0.0102,
+      
+      "prompt_unit_price": 0.665,
+      "completion_unit_price": 15.0,
+      "currency": "USD",
+      
+      "cache_hit_rate": 0.7042,
+      "cost_saved_by_cache": 0.0135,
+      
+      "latency": 0.0,
+      "llm_calls": 2,
+      
+      "llm_call_details": [
+        {
+          "call_id": "call_001",
+          "model": "claude-sonnet-4",
+          "purpose": "intent_analysis",
+          "timestamp": "2026-01-20T10:30:00",
+          "input_tokens": 800,
+          "output_tokens": 65,
+          "thinking_tokens": 0,
+          "cache_read_tokens": 5000,
+          "cache_write_tokens": 0,
+          "input_unit_price": 3.0,
+          "output_unit_price": 15.0,
+          "cache_read_unit_price": 0.3,
+          "cache_write_unit_price": 3.75,
+          "input_total_price": 0.0024,
+          "output_total_price": 0.000975,
+          "thinking_total_price": 0.0,
+          "cache_read_price": 0.0015,
+          "cache_write_price": 0.0,
+          "total_price": 0.004875,
+          "latency": 1.245
+        },
+        {
+          "call_id": "call_002",
+          "model": "claude-sonnet-4",
+          "purpose": "main_response",
+          // ... 第二次调用的详细信息
+        }
+      ]
+    }
+  }
+}
+```
+
+### 事件发送时序
+
+**关键保证：billing 事件在 message_stop 之前发送**
+
+```
+事件顺序：
+1. message_start           ← 消息开始
+2. content_block_start     ← 内容块开始
+3. content_block_delta     ← 流式内容（多个）
+   ...
+N-2. content_block_stop    ← 内容块结束
+N-1. message_delta (billing) ← 计费信息（倒数第二个）✅
+N. message_stop            ← 消息结束（最后一个）
+```
+
+**实现机制**：
+
+```python
+# core/agent/simple/simple_agent.py (第 546-568 行)
+
+async def chat(self, ...):
+    # ... 执行对话逻辑 ...
+    
+    # 🆕 在 message_stop 之前发送 billing 事件
+    from models.usage import UsageResponse
+    usage_response = UsageResponse.from_usage_tracker(
+        tracker=self.usage_tracker,
+        model=self.model,
+        latency=0
+    )
+    
+    # 第一个 yield：billing 事件
+    yield {
+        "type": "message_delta",
+        "data": {
+            "type": "billing",
+            "content": usage_response.model_dump()
+        }
+    }
+    
+    # 第二个 yield：message_stop 事件
+    yield await self.broadcaster.emit_message_stop(
+        session_id=session_id,
+        message_id=self._current_message_id
+    )
+```
+
+**顺序保证原理**：
+
+- Python generator 的 `yield` 语句保证顺序执行
+- billing 的 `yield` 在 message_stop 的 `yield` 之前
+- SSE 事件按 yield 顺序发送，无法乱序
+
+### ZenO 适配器支持
+
+```python
+# core/events/adapters/zeno.py (第 244-251 行)
+
+elif delta_type in (
+    "sql", "data", "chart", "report",
+    "intent", "application",
+    "preface", "files", "mind", "clue",
+    "billing"  # ← 新增支持
+):
+    zeno_delta_type = delta_type
+    # billing 格式符合 ZenO 规范，直接透传
+```
+
+### 前端集成示例
+
+```typescript
+// 前端 SSE 事件处理
+eventSource.addEventListener('message', (event) => {
+  const data = JSON.parse(event.data);
+  
+  if (data.type === 'message_delta') {
+    const { type: deltaType, content } = data.data;
+    
+    if (deltaType === 'billing') {
+      // 处理计费信息
+      console.log('Total Price:', content.total_price);
+      console.log('Cache Hit Rate:', content.cache_hit_rate);
+      console.log('LLM Calls:', content.llm_calls);
+      
+      // 显示计费详情
+      content.llm_call_details.forEach(call => {
+        console.log(`Call ${call.call_id}:`, {
+          model: call.model,
+          purpose: call.purpose,
+          tokens: call.input_tokens + call.output_tokens,
+          price: call.total_price,
+          latency: call.latency
+        });
+      });
+      
+      // 更新 UI
+      updateBillingUI(content);
+    }
+  }
+});
+```
+
+### 关键技术细节
+
+1. **事件类型统一**：billing 不再是独立的 custom 事件，而是 message_delta 的一种类型
+2. **时序保证**：通过 generator yield 顺序保证，无需额外同步机制
+3. **数据完整性**：content 包含完整的 UsageResponse，无需额外查询
+4. **ZenO 兼容**：billing delta 直接透传，符合 ZenO v2.0.1 规范
+5. **避免重复**：billing 事件在 Agent 内发送，ChatService 只累积数据到内存
 
 ---
 
@@ -413,11 +608,14 @@ class ChatService:
 | 价格计算不匹配 | 模型名与定价不一致 | 统一模型名标准化 |
 | Message ID 重复记录 | 流式响应多个 chunk | 添加去重逻辑 |
 | 循环导入 | utils 导入 core | 移除 __init__.py 中的循环引用 |
+| billing 事件在 message_stop 之后 | 在 ChatService 发送事件 | 移到 SimpleAgent.chat() 中，利用 yield 保证顺序 |
+| billing 事件重复发送 | Agent 和 ChatService 都发送 | ChatService 只累积数据，不发送事件 |
 
 ---
 
 ## ✅ Checklist
 
+### 核心计费功能
 - [x] `core/billing/` 包含所有计费相关代码
 - [x] 定价表包含所有模型的缓存价格
 - [x] `UsageResponse` 包含 `llm_call_details` 字段
@@ -429,6 +627,14 @@ class ChatService:
 - [x] prompt_tokens = input + cache_read + cache_write
 - [x] 框架已统一（UsageTracker = EnhancedUsageTracker）
 
+### Billing Event 集成
+- [x] billing 作为 message_delta 类型发送（不是独立 custom 事件）
+- [x] billing 事件在 message_stop 之前发送
+- [x] 使用 generator yield 保证事件顺序
+- [x] ZenO 适配器支持 billing delta 类型
+- [x] ChatService 移除重复的 emit_custom("usage")
+- [x] billing 事件包含完整 UsageResponse 数据
+
 ---
 
 ## 📚 相关文档
@@ -439,9 +645,9 @@ class ChatService:
 
 ---
 
-## 🔄 代码更新记录（2026-01-18）
+## 🔄 代码更新记录
 
-### 已统一的模块
+### V7.5 统一版（2026-01-18）
 
 | 文件 | 更新内容 | 状态 |
 |------|---------|------|
@@ -449,6 +655,15 @@ class ChatService:
 | `core/billing/__init__.py` | 移除向后兼容注释，简化导出接口 | ✅ 完成 |
 | `models/usage.py` | 重导出 `core/billing/models.UsageResponse`，移除旧类定义 | ✅ 完成 |
 | `core/billing/pricing.py` | 延迟导入以解决循环依赖 | ✅ 完成 |
+
+### Billing Event Integration（2026-01-20）
+
+| 文件 | 更新内容 | 状态 |
+|------|---------|------|
+| `core/agent/simple/simple_agent.py` | 在 message_stop 前发送 billing 事件（第 546-568 行） | ✅ 完成 |
+| `services/chat_service.py` | 移除 emit_custom("usage")，改为累积到内存（第 738-747 行） | ✅ 完成 |
+| `core/events/message_events.py` | 添加 billing delta 类型文档（第 23 行） | ✅ 完成 |
+| `core/events/adapters/zeno.py` | 支持 billing delta 类型透传（第 248 行） | ✅ 完成 |
 
 ### 测试验证结果
 
@@ -485,6 +700,10 @@ class ChatService:
 
 ---
 
-**更新日期**: 2026-01-18  
-**文档版本**: V7.5 统一版（代码已统一）  
+**更新日期**: 2026-01-20  
+**文档版本**: V7.5 统一版 + Billing Event Integration  
 **维护者**: ZenFlux Agent Team
+
+**更新历史**:
+- 2026-01-20: 集成 billing 事件到 message_delta，保证事件时序
+- 2026-01-18: 统一计费框架，完成多模型和缓存计费
