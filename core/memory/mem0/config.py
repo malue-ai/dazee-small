@@ -120,6 +120,8 @@ class EmbedderConfig:
         if self.api_key is None:
             if self.provider == "openai":
                 self.api_key = os.getenv("OPENAI_API_KEY")
+                if not self.base_url:
+                    self.base_url = os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE")
             elif self.provider == "google":
                 self.api_key = os.getenv("GOOGLE_API_KEY")
             elif self.provider == "huggingface":
@@ -168,6 +170,8 @@ class LLMConfig:
                 self.api_key = os.getenv("ANTHROPIC_API_KEY")
             elif self.provider == "openai":
                 self.api_key = os.getenv("OPENAI_API_KEY")
+                if not self.base_url:
+                    self.base_url = os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE")
             elif self.provider == "google":
                 self.api_key = os.getenv("GOOGLE_API_KEY")
             elif self.provider == "ollama":

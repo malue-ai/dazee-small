@@ -1,6 +1,6 @@
 # Simple Agent 模块
 
-单智能体执行引擎，支持 RVR (Read-Reason-Act-Observe-Validate-Write-Repeat) 循环。
+单智能体执行引擎，支持 RVR (React + Validation + Reflection) 循环。
 
 ## 📁 目录结构
 

@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 
 from logger import get_logger
-from .schemas import (
+from ..schemas import (
     WorkPlan,
     PDCAPhase,
     CheckResult,

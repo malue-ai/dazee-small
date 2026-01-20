@@ -816,6 +816,7 @@ SessionCacheService (内存缓存)
 - ✅ 无需 VPN，可直接连接本地 Redis
 - ✅ 适合本地开发和功能验证
 - ✅ 快速启动，无网络延迟
+- ✅ **完全兼容 MemoryDB Streams 功能**（详见 [Redis Streams 兼容性文档](./redis-streams-compatibility.md)）
 
 **配置方式**：
 ```bash
@@ -828,6 +829,11 @@ export DEPLOYMENT_ENV=development
 ```
 redis://localhost:6379/0
 ```
+
+**兼容性说明**：
+- 本地 Redis >= 5.0 完全支持所有 Redis Streams 功能
+- 本地测试通过的代码可以直接部署到 AWS MemoryDB，无需修改
+- 运行兼容性测试：`python tests/e2e_message_session/test_redis_streams_compatibility.py`
 
 #### AWS 生产部署环境
 

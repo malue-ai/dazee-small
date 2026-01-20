@@ -165,7 +165,7 @@ class Mem0MemoryPool:
                 # 3. 实际使用我们创建的TencentVectorDB实例
                 #
                 # 导入自定义 Prompt（强调数字/金额/时间细节）
-                from core.memory.mem0.prompts import (
+                from core.memory.mem0.update.prompts import (
                     CUSTOM_FACT_EXTRACTION_PROMPT,
                     CUSTOM_UPDATE_MEMORY_PROMPT
                 )
@@ -189,7 +189,7 @@ class Mem0MemoryPool:
             else:
                 # 使用标准配置（Qdrant等）
                 # 导入自定义 Prompt（强调数字/金额/时间细节）
-                from core.memory.mem0.prompts import (
+                from core.memory.mem0.update.prompts import (
                     CUSTOM_FACT_EXTRACTION_PROMPT,
                     CUSTOM_UPDATE_MEMORY_PROMPT
                 )
@@ -271,7 +271,11 @@ class Mem0MemoryPool:
         self,
         user_id: str,
         messages: List[Dict[str, str]],
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        memory_type: Optional[str] = None,
+        source: Optional[str] = None,
+        visibility: Optional[str] = None,
+        ttl_minutes: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         添加记忆
@@ -280,6 +284,10 @@ class Mem0MemoryPool:
             user_id: 用户 ID
             messages: 消息列表 [{"role": "user", "content": "..."}, ...]
             metadata: 额外元数据
+            memory_type: 记忆类型（explicit/implicit/behavior/emotion/preference）
+            source: 记忆来源（user_card/conversation/behavior_analysis 等）
+            visibility: 可见性（public/private/filtered）
+            ttl_minutes: 过期时间（分钟），None 表示永不过期
             
         Returns:
             添加结果
@@ -289,16 +297,32 @@ class Mem0MemoryPool:
             return {"results": []}
         
         try:
+            # 构建增强的元数据
+            enhanced_metadata = metadata or {}
+            if memory_type:
+                enhanced_metadata["memory_type"] = memory_type
+            if source:
+                enhanced_metadata["source"] = source
+            if visibility:
+                enhanced_metadata["visibility"] = visibility
+            if ttl_minutes is not None:
+                enhanced_metadata["ttl_minutes"] = ttl_minutes
+                from datetime import datetime, timedelta
+                enhanced_metadata["expires_at"] = (
+                    datetime.now() + timedelta(minutes=ttl_minutes)
+                ).isoformat()
+            
             result = self.memory.add(
                 messages=messages,
                 user_id=user_id,
-                metadata=metadata
+                metadata=enhanced_metadata
             )
             
             results_count = len(result.get("results", []))
             logger.info(
                 f"[Mem0Pool] 添加记忆: user_id={user_id}, "
-                f"messages={len(messages)}, 新增={results_count}"
+                f"messages={len(messages)}, 新增={results_count}, "
+                f"type={memory_type or 'default'}"
             )
             return result
             

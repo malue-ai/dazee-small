@@ -22,7 +22,7 @@ from datetime import datetime
 from logger import get_logger
 
 if TYPE_CHECKING:
-    from .schemas import UserPersona, WorkPlan, EmotionState
+    from ..schemas import UserPersona, WorkPlan, EmotionState, MemoryCard
 
 logger = get_logger("memory.mem0.formatter")
 
@@ -305,7 +305,10 @@ def format_dazee_persona_for_prompt(
     include_plans: bool = True,
     include_emotion: bool = True,
     include_reminders: bool = True,
-    max_plans: int = 2
+    include_explicit_memories: bool = True,
+    max_plans: int = 2,
+    max_explicit: int = 3,
+    max_tokens: Optional[int] = None
 ) -> str:
     """
     将 Dazee UserPersona 格式化为 Prompt 注入文本
@@ -315,7 +318,10 @@ def format_dazee_persona_for_prompt(
         include_plans: 是否包含活跃计划
         include_emotion: 是否包含情绪状态
         include_reminders: 是否包含待提醒事项
+        include_explicit_memories: 是否包含显式记忆（新增）
         max_plans: 最多显示几个计划
+        max_explicit: 最多显示几个显式记忆（新增）
+        max_tokens: Token 上限（新增，超过则裁剪内容）
         
     Returns:
         格式化的 Prompt 文本
@@ -384,6 +390,10 @@ def format_dazee_persona_for_prompt(
             # 阻碍
             if plan.blockers:
                 sections.append(f"  - 阻碍: {plan.blockers[0]}")
+            if plan.check_results:
+                sections.append(f"  - 检查: {plan.check_results[0]}")
+            if plan.act_actions:
+                sections.append(f"  - 行动: {plan.act_actions[0]}")
         sections.append("")
     
     # 待提醒
@@ -393,6 +403,18 @@ def format_dazee_persona_for_prompt(
             time_str = reminder.time.strftime("%m月%d日 %H:%M")
             sections.append(f"- [{time_str}] {reminder.content}")
         sections.append("")
+    
+    # 显式记忆（新增）
+    if include_explicit_memories and persona.metadata.get("explicit_memories"):
+        explicit_cards = persona.metadata.get("explicit_memories", [])
+        if explicit_cards:
+            sections.append("**用户记忆卡片**:")
+            for card in explicit_cards[:max_explicit]:
+                if card.get("title"):
+                    sections.append(f"- {card['title']}: {card.get('content', '')[:50]}...")
+                else:
+                    sections.append(f"- {card.get('content', '')[:60]}...")
+            sections.append("")
     
     # 注意事项
     notes = []
@@ -406,7 +428,20 @@ def format_dazee_persona_for_prompt(
             sections.append(f"- {note}")
         sections.append("")
     
-    return "\n".join(sections)
+    result = "\n".join(sections)
+    
+    # Token 限制（简单估算：1 token ≈ 2 中文字符）
+    if max_tokens:
+        char_limit = max_tokens * 2
+        if len(result) > char_limit:
+            # 裁剪内容（保留前面的关键信息）
+            result = result[:char_limit] + "\n...（内容已裁剪）"
+            logger.warning(
+                f"[Formatter] 画像内容超过 Token 限制: {max_tokens}, "
+                f"已裁剪到 {char_limit} 字符"
+            )
+    
+    return result
 
 
 def format_plan_summary(
@@ -486,7 +521,9 @@ def create_dazee_prompt_section(
     persona: Optional["UserPersona"] = None,
     memories: Optional[List[Dict[str, Any]]] = None,
     plans: Optional[List["WorkPlan"]] = None,
-    emotion: Optional["EmotionState"] = None
+    emotion: Optional["EmotionState"] = None,
+    explicit_memories: Optional[List["MemoryCard"]] = None,
+    max_tokens: Optional[int] = None
 ) -> Optional[str]:
     """
     创建完整的 Dazee Prompt 注入 Section
@@ -498,13 +535,24 @@ def create_dazee_prompt_section(
         memories: 传统 Mem0 记忆列表（回退）
         plans: 计划列表（可选增强）
         emotion: 情绪状态（可选增强）
+        explicit_memories: 显式记忆卡片列表（新增）
+        max_tokens: Token 上限（新增）
         
     Returns:
         格式化的 Prompt Section
     """
     # 优先使用 Persona
     if persona:
-        return format_dazee_persona_for_prompt(persona)
+        # 如果有显式记忆，添加到 persona 的 metadata 中
+        if explicit_memories:
+            persona.metadata["explicit_memories"] = [
+                card.to_dict() for card in explicit_memories
+            ]
+        return format_dazee_persona_for_prompt(
+            persona,
+            include_explicit_memories=True,
+            max_tokens=max_tokens or persona.max_prompt_tokens
+        )
     
     # 回退到传统格式
     sections = []

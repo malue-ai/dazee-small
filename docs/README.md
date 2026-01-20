@@ -42,9 +42,7 @@ docs/
 │   ├── E2B_SANDBOX_LIFECYCLE_GUIDE.md
 │   ├── E2B_ARCHITECTURE_VALIDATION.md
 │   ├── E2B_CORE_CAPABILITIES_ANALYSIS.md
-│   ├── MEM0_EMBEDDING_GUIDE.md
-│   ├── MEM0_SETUP_GUIDE.md
-│   ├── MEM0_SCHEMA_REFERENCE.md     # Mem0 字段定义参考
+│   ├── MEM0_GUIDE.md                # Mem0 统一指南（配置/Embedding/Schema）
 │   ├── GRPC_INTEGRATION.md
 │   ├── PROMPT_DRIVEN_IMPLEMENTATION.md
 │   └── RESULT_COMPACTOR_IMPLEMENTATION.md

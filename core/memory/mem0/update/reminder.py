@@ -11,7 +11,7 @@ from typing import Optional, Dict, Any, List, Callable
 from enum import Enum
 
 from logger import get_logger
-from .schemas import WorkPlan, ReminderItem, ReminderType
+from ..schemas import WorkPlan, ReminderItem, ReminderType
 
 logger = get_logger("dazee.reminder")
 

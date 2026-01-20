@@ -33,7 +33,7 @@ class TestRefactorSmokeTest:
     def test_formatter_import_and_basic_call(self):
         """测试：记忆格式化模块（删除了关键词分类）"""
         # 导入不崩溃
-        from core.memory.mem0.formatter import format_memories_by_category
+        from core.memory.mem0.retrieval.formatter import format_memories_by_category
         
         # 创建简单的测试数据
         memories = [

@@ -130,6 +130,17 @@ profiles:
     timeout: 60.0
     max_retries: 2
 
+  # ==================== 记忆更新阶段 ====================
+  memory_update:
+    description: "记忆更新阶段（过滤/冲突/更新决策），使用语义理解"
+    model: "claude-haiku-4-5-20251001"
+    max_tokens: 1024
+    temperature: 0
+    enable_thinking: false
+    enable_caching: false
+    timeout: 30.0
+    max_retries: 2
+
   # ==================== 计划管理 ====================
   plan_manager:
     description: "智能任务规划和管理，需要深度推理能力"

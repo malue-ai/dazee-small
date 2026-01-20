@@ -1867,6 +1867,32 @@ core/context/
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
+#### 失败经验总结（Failure Summary）
+
+**目标**：当对话失败/中断时生成结构化总结，用于续聊恢复与上下文压缩。  
+**实现位置**：`core/context/failure_summary.py`  
+**配置位置**：`config/context_compaction.yaml` → `failure_summary`
+
+**触发条件**：
+- 停止原因命中配置（默认：`max_turns_reached`）
+
+**生成流程**：
+1. 截取会话消息（按 `keep_recent_messages` + 字符上限）
+2. LLM 生成结构化 JSON（目标/进度/失败原因/约束/下一步等）
+3. 写入 Session 元数据，并可用于后续上下文融合
+
+**配置示例**：
+```yaml
+failure_summary:
+  enabled: true
+  trigger_on_stop_reasons:
+    - "max_turns_reached"
+  keep_recent_messages: 20
+  max_input_chars: 12000
+  max_summary_chars: 1200
+  max_block_chars: 1000
+```
+
 ### 记忆系统 (core/memory/)
 
 **三层架构**：
@@ -1905,6 +1931,96 @@ core/context/
 │                                                                         │
 └────────────────────────────────────────────────────────────────────────┘
 ```
+
+#### Mem0 引擎：在线检索 + 抽取/更新读写分离（核心）
+
+**目标**：严格区分在线检索（读）与抽取/更新（写），与 V4 的 “按需检索” 一致，
+避免每次请求都触发写入或重计算，保证低延迟 + 可控成本。
+
+**目录结构（V7.5）**：
+```
+core/memory/mem0/
+├── retrieval/   # 在线检索（读路径）
+├── extraction/  # 碎片抽取（写路径前置）
+└── update/      # 更新阶段（写路径）
+```
+
+**在线检索（Retrieval / Read Path）**：
+```
+用户 Query
+  → Intent 分析（LLM，输出 skip_memory_retrieval）
+  → 若 skip_memory_retrieval=false：
+      → Mem0 向量检索（pool.search，在线索引）
+      → Reranker 重排（retrieval/reranker.py）
+      → Formatter 结构化（retrieval/formatter.py）
+      → 注入 System Prompt（MemoryManager.get_context_for_llm）
+```
+
+**抽取/更新（Extraction + Update / Write Path）**：
+```
+会话消息（历史记录 / 显式记忆卡片）
+  → 抽取：FragmentExtractor（extraction/extractor.py）
+  → 更新：QualityController（update/quality_control.py，LLM 决策）
+  → 写入：Mem0 Pool（pool.add / update / delete）
+  → 聚合：BehaviorAnalyzer / PDCAManager / Reminder / Reporter / PersonaBuilder
+  → 批处理：background_tasks 触发周度聚合（update/aggregator.py）
+```
+
+**与 Zenflux Agent 的关系（读写分离）**：
+- **请求路径（读）**：路由层完成意图识别 → 决策是否检索 → Mem0 在线索引检索 → Prompt 注入
+- **更新路径（写）**：对话结束或后台任务触发抽取与更新 → Mem0 写入与聚合
+- **核心原则**：读路径只做检索与格式化，写路径只做抽取/更新与聚合，互不阻塞
+
+**按需检索（与 V4 一致）**：
+- 通用问答（天气/百科/汇率）→ `skip_memory_retrieval=true`
+- 需要个性化的任务（报告/邮件/推荐/风格延续）→ `skip_memory_retrieval=false`
+- 不确定时默认检索 → `skip_memory_retrieval=false`
+
+#### 近期结构与实现更新（记忆系统）
+
+- **目录重构**：`core/memory/mem0/` 拆分为 `extraction/`、`retrieval/`、`update/`，旧的单体模块文件移除
+- **显式记忆**：新增 `schemas/explicit_memory.py`，支持记忆卡片（用户主动上传）
+- **更新决策**：`update/quality_control.py` 采用 LLM 语义判断 `ADD/UPDATE/DELETE/NONE`
+- **画像增强**：`update/persona_builder.py` 与 `retrieval/formatter.py` 注入 PDCA 细节（检查结果/行动项）
+- **检索增强**：`retrieval/reranker.py` 支持二次重排（由 `Mem0Service.search_with_rerank()` 调用）
+- **配置增强**：`mem0/config.py` 支持 `OPENAI_BASE_URL / OPENAI_API_BASE` 代理透传
+- **MemoryManager 扩展**：显式记忆卡片 CRUD + 与 Update Stage 决策联动
+
+#### 相关结构变更（上下文与文档）
+
+- **失败经验总结**：新增 `core/context/failure_summary.py` 与测试 `tests/test_core/test_failure_summary.py`，配置落在 `config/context_compaction.yaml`
+- **文档收敛**：新增 `docs/architecture/23-MEMORY-ENHANCEMENT.md` 与 `docs/guides/MEM0_GUIDE.md`，旧 `MEM0_*_GUIDE` 文档已归档/移除
+- **SimpleAgent 模块化**：`core/agent/simple/` 拆分为 `simple_agent_context.py`/`simple_agent_loop.py`/`simple_agent_tools.py` 等
+
+#### 调用流程（Mem0 读写分离）
+
+**读路径（在线检索）**：
+```
+ChatService.chat()
+  → AgentRouter.route()  # 产出 skip_memory_retrieval
+  → MemoryManager.get_context_for_llm()
+    → Mem0Pool.search(user_id, query)
+    → RetrievalReranker.rerank() (可选)
+    → RetrievalFormatter.format_*()
+  → 注入 System Prompt
+```
+
+**写路径（抽取/更新）**：
+```
+对话结束或后台任务触发
+  → FragmentExtractor.extract(messages)
+  → QualityController.update_decision(ADD/UPDATE/DELETE/NONE)
+  → Mem0Pool.add/update/delete
+  → Aggregator/PersonaBuilder/Reporter
+```
+
+#### 关键问题与逻辑说明
+
+1. **读写严格隔离**：读路径只做检索与格式化，写路径只做抽取/更新/聚合，避免阻塞在线请求。  
+2. **按需检索开关**：`skip_memory_retrieval` 由意图分析产出，通用问答默认跳过以降低延迟。  
+3. **更新阶段 LLM 驱动**：敏感信息过滤、冲突处理与记忆合并统一交由 LLM 决策，避免硬编码规则。  
+4. **显式记忆优先**：用户上传的记忆卡片直接进入 Update Stage，确保“用户显式意图”优先级。  
+5. **PDCA 注入**：PersonaBuilder/Formatter 输出检查结果与行动项，提升面向任务场景的可执行性。  
 
 ### 工具能力层 (core/tool/)
 
@@ -2068,6 +2184,39 @@ prompt_decomposer:
   max_tokens: 60000
   temperature: 0
   timeout: 300.0
+
+# 记忆更新阶段（语义判断）
+memory_update:
+  model: "claude-haiku-4-5-20251001"
+  max_tokens: 1024
+  temperature: 0
+  enable_thinking: false
+  enable_caching: false
+  timeout: 30.0
+```
+
+#### Claude Context Editing（服务端自动清理）
+
+**目标**：在不影响用户体验的前提下，控制上下文规模并提升缓存命中率。  
+**实现位置**：`core/llm/claude.py` → `enable_context_editing()` / `create_message_stream()`
+
+**核心流程**：
+1. LLM 服务启用 `context_management`，由 Claude 服务端执行清理策略  
+2. 根据是否启用 Prompt Caching 自动计算 `clear_at_least`  
+3. 默认排除服务端工具结果（`web_search`, `web_fetch`）  
+4. 流式请求自动走 `beta.messages.stream` 以支持 Context Editing
+
+**策略配置（简化）**：
+```python
+llm.enable_context_editing(
+    clear_tool_uses=True,
+    clear_thinking=False,
+    trigger_threshold=30000,
+    keep_tool_uses=10,
+    clear_at_least=None,   # 自动计算
+    exclude_tools=["web_search", "web_fetch"],
+    keep_all_thinking=False
+)
 ```
 
 ### 事件系统 (core/events/)

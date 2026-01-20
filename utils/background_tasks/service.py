@@ -720,7 +720,7 @@ class BackgroundTaskService:
             return
         
         try:
-            from core.memory.mem0.aggregator import (
+            from core.memory.mem0.update.aggregator import (
                 aggregate_user_emotion,
                 aggregate_work_summary,
             )

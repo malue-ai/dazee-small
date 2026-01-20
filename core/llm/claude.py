@@ -72,6 +72,18 @@ logger = get_logger("llm.claude")
 # 详细日志开关：设置 LLM_DEBUG_VERBOSE=1 可打印完整请求/响应
 LLM_DEBUG_VERBOSE = os.getenv("LLM_DEBUG_VERBOSE", "").lower() in ("1", "true", "yes")
 
+# Context Editing 触发阈值（默认比例）
+DEFAULT_CONTEXT_WINDOW_TOKENS = 200_000
+DEFAULT_CONTEXT_TRIGGER_RATIO = 0.7
+MODEL_CONTEXT_WINDOWS = {
+    "claude-opus-4-5": 200_000,
+    "claude-opus-4-1": 200_000,
+    "claude-opus-4": 200_000,
+    "claude-sonnet-4-5": 200_000,
+    "claude-sonnet-4": 200_000,
+    "claude-haiku-4-5": 200_000,
+}
+
 
 class ClaudeLLMService(BaseLLMService):
     """
@@ -170,6 +182,14 @@ class ClaudeLLMService(BaseLLMService):
         # Context Editing 配置
         self._context_editing_enabled = False
         self._context_editing_config: Dict[str, Any] = {}
+        self._context_editing_policy: Dict[str, Any] = {
+            "adaptive": True,
+            "adaptive_trigger_tokens": 0,
+            "early_trigger_tokens": 0,
+            "min_turns": 30,
+            "tool_result_count_threshold": 8,
+            "tool_result_tokens_threshold": 5000,
+        }
         
         # 工具注册表（用于自定义工具）
         self._tool_registry: Dict[str, Dict[str, Any]] = {}
@@ -197,6 +217,19 @@ class ClaudeLLMService(BaseLLMService):
         """移除 Beta Header"""
         if beta_header in self._betas:
             self._betas.remove(beta_header)
+
+    def _get_model_context_window(self) -> int:
+        """
+        获取模型上下文窗口（用于自适应触发阈值）
+        
+        Returns:
+            上下文窗口 token 数
+        """
+        model_name = (self.config.model or "").lower()
+        for key, window in MODEL_CONTEXT_WINDOWS.items():
+            if key in model_name:
+                return window
+        return DEFAULT_CONTEXT_WINDOW_TOKENS
     
     # ============================================================
     # 功能开关
@@ -221,25 +254,145 @@ class ClaudeLLMService(BaseLLMService):
     
     def enable_context_editing(
         self,
-        mode: str = "progressive",
-        clear_threshold: int = 150000,
-        retain_tool_uses: int = 10
+        clear_tool_uses: bool = True,
+        clear_thinking: bool = False,
+        trigger_threshold: Optional[int] = None,  # input_tokens
+        keep_tool_uses: int = 10,
+        clear_at_least: Optional[int] = None,  # input_tokens，None 则自动计算
+        exclude_tools: Optional[List[str]] = None,
+        keep_all_thinking: bool = False  # 🆕 保留所有 thinking blocks（最大化缓存命中）
     ):
         """
-        启用 Context Editing
+        启用 Context Editing（服务端自动清理）
+        
+        根据 Claude Platform 官方文档：
+        https://platform.claude.com/docs/en/build-with-claude/context-editing
+        
+        **最佳实践**：
+        - 如果启用 Prompt Caching，`clear_at_least` 应该设置得更大（如 10000-15000），
+          以抵消缓存失效的成本
+        - 如果启用 Extended Thinking 和 Prompt Caching，建议设置 `keep_all_thinking=True`
+          以最大化缓存命中率
+        - 默认排除服务端工具（如 `web_search`），因为它们的结果通常很重要
+        - 自适应触发以**上下文长度**为主，当长度接近阈值时，
+          轮次/工具结果作为**提前触发**的辅助信号
         
         Args:
-            mode: 清理模式 ("progressive" | "aggressive")
-            clear_threshold: 触发清理的 token 阈值
-            retain_tool_uses: 保留最近 N 个工具调用
+            clear_tool_uses: 是否清理工具结果（clear_tool_uses_20250919）
+            clear_thinking: 是否清理 thinking blocks（clear_thinking_20251015）
+            trigger_threshold: 触发清理的 token 阈值（input_tokens）
+                - None: 按模型上下文窗口比例自动计算（默认 70%）
+            keep_tool_uses: 保留最近 N 个工具调用
+            clear_at_least: 每次至少清理的 token 数（input_tokens）
+                - None: 根据 Prompt Caching 状态自动计算
+                - 启用缓存时：max(10000, trigger_threshold // 3)
+                - 未启用缓存时：max(3000, trigger_threshold // 6)
+            exclude_tools: 排除的工具列表（不清理这些工具的结果）
+                - None: 默认排除服务端工具（web_search, web_fetch）
+            keep_all_thinking: 是否保留所有 thinking blocks（最大化缓存命中率）
+                - True: keep: "all"（保留所有 thinking blocks）
+                - False: keep: {type: "thinking_turns", value: 1}（只保留最后一轮）
         """
         self._context_editing_enabled = True
-        self._context_editing_config = {
-            "mode": mode,
-            "clear_threshold": clear_threshold,
-            "retain_tool_uses": retain_tool_uses
+        
+        edits = []
+        
+        # 🆕 触发阈值自动计算（按上下文窗口比例）
+        if trigger_threshold is None:
+            context_window = self._get_model_context_window()
+            trigger_threshold = int(context_window * DEFAULT_CONTEXT_TRIGGER_RATIO)
+            logger.debug(
+                f"🔧 trigger_threshold 自动计算: {trigger_threshold} "
+                f"(context_window={context_window}, ratio={DEFAULT_CONTEXT_TRIGGER_RATIO})"
+            )
+
+        # 🆕 自适应触发策略（上下文长度为主，轮次/工具结果为辅）
+        adaptive_trigger_tokens = max(0, int(trigger_threshold))
+        early_trigger_tokens = int(adaptive_trigger_tokens * 0.6)
+        self._context_editing_policy = {
+            "adaptive": True,
+            "adaptive_trigger_tokens": adaptive_trigger_tokens,
+            "early_trigger_tokens": early_trigger_tokens,
+            "min_turns": 30,
+            "tool_result_count_threshold": 8,
+            "tool_result_tokens_threshold": 5000,
         }
+        
+        logger.debug(
+            "🧭 Context Editing 自适应策略: "
+            f"adaptive=True, trigger_tokens={adaptive_trigger_tokens}, "
+            f"early_trigger_tokens={early_trigger_tokens}, "
+            "min_turns=30, tool_result_count>=8, tool_result_tokens>=5000"
+        )
+        
+        # 🆕 自动计算 clear_at_least（根据文档建议）
+        if clear_at_least is None:
+            if self.config.enable_caching:
+                # 启用缓存时，需要清理更多 tokens 以抵消缓存失效成本
+                # 文档建议：确保清理足够的 tokens 才值得
+                clear_at_least = max(10000, trigger_threshold // 3)
+                logger.debug(f"🔧 clear_at_least 自动计算（启用缓存）: {clear_at_least}")
+            else:
+                # 未启用缓存时，可以使用较小的值
+                clear_at_least = max(3000, trigger_threshold // 6)
+                logger.debug(f"🔧 clear_at_least 自动计算（未启用缓存）: {clear_at_least}")
+        
+        # 🆕 默认排除服务端工具（根据文档建议）
+        default_exclude = ["web_search", "web_fetch"]
+        if exclude_tools is None:
+            exclude_tools = default_exclude
+        else:
+            # 合并用户指定的排除工具
+            exclude_tools = list(set(exclude_tools + default_exclude))
+        
+        # Tool result clearing
+        if clear_tool_uses:
+            tool_edit: Dict[str, Any] = {
+                "type": "clear_tool_uses_20250919",
+                "trigger": {
+                    "type": "input_tokens",
+                    "value": trigger_threshold
+                },
+                "keep": {
+                    "type": "tool_uses",
+                    "value": keep_tool_uses
+                },
+                "clear_at_least": {
+                    "type": "input_tokens",
+                    "value": clear_at_least
+                }
+            }
+            if exclude_tools:
+                tool_edit["exclude_tools"] = exclude_tools
+            edits.append(tool_edit)
+            logger.debug(f"🔧 Tool result clearing: trigger={trigger_threshold}, keep={keep_tool_uses}, clear_at_least={clear_at_least}, exclude={exclude_tools}")
+        
+        # Thinking block clearing
+        if clear_thinking:
+            if keep_all_thinking:
+                # 🆕 最大化缓存命中：保留所有 thinking blocks
+                edits.append({
+                    "type": "clear_thinking_20251015",
+                    "keep": "all"
+                })
+                logger.debug("🔧 Thinking block clearing: keep=all (最大化缓存命中)")
+            else:
+                # 默认：只保留最后一轮的 thinking
+                edits.append({
+                    "type": "clear_thinking_20251015",
+                    "keep": {
+                        "type": "thinking_turns",
+                        "value": 1
+                    }
+                })
+                logger.debug("🔧 Thinking block clearing: keep=last_turn")
+        
+        self._context_editing_config = {
+            "edits": edits
+        }
+        
         self._add_beta("context-management-2025-06-27")
+        logger.info(f"✅ Context Editing 已启用: {len(edits)} 个策略 (trigger={trigger_threshold}, clear_at_least={clear_at_least})")
     
     def disable_context_editing(self):
         """禁用 Context Editing"""
@@ -247,6 +400,136 @@ class ClaudeLLMService(BaseLLMService):
         self._context_editing_config = {}
         if not self._memory_enabled:
             self._remove_beta("context-management-2025-06-27")
+
+    def _estimate_block_tokens(self, block: Any) -> int:
+        """
+        估算单个 content block 的 token 数
+        
+        Args:
+            block: content block
+            
+        Returns:
+            估算 token 数
+        """
+        if isinstance(block, dict):
+            block_type = block.get("type", "")
+            if block_type == "text":
+                return self.count_tokens(str(block.get("text", "")))
+            if block_type in ("thinking", "redacted_thinking"):
+                return self.count_tokens(str(block.get("thinking", "")))
+            if block_type in ("tool_use", "server_tool_use"):
+                return self.count_tokens(self._safe_json_dumps(block.get("input", {})))
+            if block_type == "tool_result" or str(block_type).endswith("_tool_result"):
+                return self.count_tokens(self._safe_json_dumps(block.get("content", "")))
+            
+            return self.count_tokens(self._safe_json_dumps(block))
+        
+        return self.count_tokens(str(block))
+
+    def _analyze_context_for_editing(self, messages: List[Dict[str, Any]]) -> Dict[str, int]:
+        """
+        分析上下文状态（用于自适应触发）
+        
+        Args:
+            messages: 格式化后的消息列表
+            
+        Returns:
+            上下文统计信息
+        """
+        total_tokens = 0
+        turns = 0
+        tool_result_count = 0
+        tool_result_tokens = 0
+        
+        for msg in messages:
+            if msg.get("role") == "user":
+                turns += 1
+            
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                for block in content:
+                    tokens = self._estimate_block_tokens(block)
+                    total_tokens += tokens
+                    
+                    if isinstance(block, dict):
+                        block_type = block.get("type", "")
+                        if block_type == "tool_result" or str(block_type).endswith("_tool_result"):
+                            tool_result_count += 1
+                            tool_result_tokens += tokens
+            else:
+                total_tokens += self.count_tokens(str(content))
+        
+        return {
+            "turns": turns,
+            "estimated_tokens": total_tokens,
+            "tool_result_count": tool_result_count,
+            "tool_result_tokens": tool_result_tokens,
+        }
+
+    def _should_apply_context_editing(self, messages: List[Dict[str, Any]]) -> bool:
+        """
+        判断是否附加 context_management（自适应触发）
+        
+        Args:
+            messages: 格式化后的消息列表
+            
+        Returns:
+            是否需要附加 context_management
+        """
+        if not self._context_editing_enabled:
+            return False
+        
+        if not self._context_editing_config.get("edits"):
+            return False
+        
+        policy = self._context_editing_policy or {}
+        if not policy.get("adaptive", True):
+            return True
+        
+        stats = self._analyze_context_for_editing(messages)
+        trigger_tokens = policy.get("adaptive_trigger_tokens", 0)
+        early_trigger_tokens = policy.get("early_trigger_tokens", 0)
+        min_turns = policy.get("min_turns", 0)
+        tool_result_count_threshold = policy.get("tool_result_count_threshold", 0)
+        tool_result_tokens_threshold = policy.get("tool_result_tokens_threshold", 0)
+        
+        if trigger_tokens and stats["estimated_tokens"] >= trigger_tokens:
+            logger.debug(
+                f"🧠 Context Editing 触发: tokens={stats['estimated_tokens']}, "
+                f"threshold={trigger_tokens}"
+            )
+            return True
+
+        # 仅在上下文接近阈值时，允许辅助信号提前触发
+        if early_trigger_tokens and stats["estimated_tokens"] >= early_trigger_tokens:
+            if min_turns and stats["turns"] >= min_turns:
+                logger.debug(
+                    f"🧠 Context Editing 触发: turns={stats['turns']}, "
+                    f"threshold={min_turns} (early_trigger_tokens={early_trigger_tokens})"
+                )
+                return True
+            
+            if (
+                tool_result_count_threshold
+                and stats["tool_result_count"] >= tool_result_count_threshold
+            ):
+                logger.debug(
+                    f"🧠 Context Editing 触发: tool_results={stats['tool_result_count']}, "
+                    f"threshold={tool_result_count_threshold} (early_trigger_tokens={early_trigger_tokens})"
+                )
+                return True
+            
+            if (
+                tool_result_tokens_threshold
+                and stats["tool_result_tokens"] >= tool_result_tokens_threshold
+            ):
+                logger.debug(
+                    f"🧠 Context Editing 触发: tool_result_tokens={stats['tool_result_tokens']}, "
+                    f"threshold={tool_result_tokens_threshold} (early_trigger_tokens={early_trigger_tokens})"
+                )
+                return True
+        
+        return False
     
     def enable_tool_search(self, search_type: str = "bm25"):
         """
@@ -697,8 +980,8 @@ class ClaudeLLMService(BaseLLMService):
             # 调试日志
             logger.debug(f"Tools: {[t.get('name', 'unknown') for t in all_tools]}")
         
-        # Context Editing
-        if self._context_editing_enabled:
+        # Context Editing（自适应触发）
+        if self._should_apply_context_editing(formatted_messages):
             request_params["context_management"] = self._context_editing_config
         
         # 调试日志
@@ -820,6 +1103,10 @@ class ClaudeLLMService(BaseLLMService):
                 all_tools[-1]["cache_control"] = {"type": "ephemeral", "ttl": "1h"}
             
             request_params["tools"] = all_tools
+
+        # Context Editing（流式模式，自适应触发）
+        if self._should_apply_context_editing(formatted_messages):
+            request_params["context_management"] = self._context_editing_config
         
         # 🆕 Skills Container（如果启用）
         # 根据 Claude Skills 官方标准：Skills 模式下 tools 只能是 code_execution
@@ -884,6 +1171,12 @@ class ClaudeLLMService(BaseLLMService):
             if self._skills_enabled and "betas" in request_params:
                 # 使用 beta API（支持 Skills Container）
                 stream_ctx = self.async_client.beta.messages.stream(**request_params)
+            elif self._betas:
+                # 使用 beta API（支持 Context Editing / Memory / Tool Search 等）
+                stream_ctx = self.async_client.beta.messages.stream(
+                    betas=self._betas,
+                    **request_params
+                )
             else:
                 # 使用标准 API
                 stream_ctx = self.async_client.messages.stream(**request_params)
@@ -1936,6 +2229,8 @@ def create_claude_service(
     api_key: Optional[str] = None,
     enable_thinking: bool = True,
     enable_caching: bool = False,
+    enable_context_editing: Optional[bool] = None,
+    context_editing: Optional[Dict[str, Any]] = None,
     **kwargs
 ) -> ClaudeLLMService:
     """
@@ -1946,6 +2241,8 @@ def create_claude_service(
         api_key: API 密钥（默认从环境变量读取）
         enable_thinking: 启用 Extended Thinking
         enable_caching: 启用 Prompt Caching
+        enable_context_editing: 是否启用 Context Editing（None 则读取环境变量）
+        context_editing: Context Editing 参数配置（可选）
         **kwargs: 其他配置参数
         
     Returns:
@@ -1953,6 +2250,18 @@ def create_claude_service(
     """
     if api_key is None:
         api_key = os.getenv("ANTHROPIC_API_KEY")
+
+    # 🆕 Context Editing 开关（统一入口）
+    if enable_context_editing is None:
+        enable_context_editing = os.getenv("ENABLE_CONTEXT_EDITING", "").lower() in ("1", "true", "yes")
+    elif isinstance(enable_context_editing, str):
+        enable_context_editing = enable_context_editing.lower() in ("1", "true", "yes")
+    
+    # 兼容从 kwargs 传入（避免误传到 LLMConfig）
+    if "context_editing" in kwargs:
+        context_editing = kwargs.pop("context_editing")
+    if "enable_context_editing" in kwargs:
+        enable_context_editing = kwargs.pop("enable_context_editing")
     
     config = LLMConfig(
         provider=LLMProvider.CLAUDE,
@@ -1960,8 +2269,18 @@ def create_claude_service(
         api_key=api_key,
         enable_thinking=enable_thinking,
         enable_caching=enable_caching,
+        enable_context_editing=bool(enable_context_editing),
         **kwargs
     )
     
-    return ClaudeLLMService(config)
+    llm_service = ClaudeLLMService(config)
+    
+    # 🆕 自动启用 Context Editing（全局统一入口）
+    if enable_context_editing:
+        if isinstance(context_editing, dict):
+            llm_service.enable_context_editing(**context_editing)
+        else:
+            llm_service.enable_context_editing()
+    
+    return llm_service
 

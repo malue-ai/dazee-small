@@ -12,8 +12,16 @@ from .fragment import (
     EmotionHint,
     RelationHint,
     TodoHint,
+    PreferenceHint,
+    TopicHint,
+    ConstraintHint,
+    ToolHint,
+    GoalHint,
     TimeSlot,
     DayOfWeek,
+    MemoryType,
+    MemorySource,
+    MemoryVisibility,
 )
 
 # 行为模式（5W1H）
@@ -26,6 +34,9 @@ from .behavior import (
     Collaborator,
     Motivation,
     WorkStyle,
+    PreferenceStability,
+    PeriodicityAnalysis,
+    ConflictDetection,
 )
 
 # PDCA 工作计划
@@ -59,6 +70,12 @@ from .persona import (
     ReminderSummary,
 )
 
+# 显式记忆
+from .explicit_memory import (
+    MemoryCard,
+    MemoryCardCategory,
+)
+
 
 __all__ = [
     # Fragment
@@ -68,8 +85,16 @@ __all__ = [
     "EmotionHint",
     "RelationHint",
     "TodoHint",
+    "PreferenceHint",
+    "TopicHint",
+    "ConstraintHint",
+    "ToolHint",
+    "GoalHint",
     "TimeSlot",
     "DayOfWeek",
+    "MemoryType",
+    "MemorySource",
+    "MemoryVisibility",
     # Behavior
     "BehaviorPattern",
     "DateRange",
@@ -79,6 +104,9 @@ __all__ = [
     "Collaborator",
     "Motivation",
     "WorkStyle",
+    "PreferenceStability",
+    "PeriodicityAnalysis",
+    "ConflictDetection",
     # Plan
     "WorkPlan",
     "TodoItem",
@@ -101,4 +129,7 @@ __all__ = [
     "UserPersona",
     "PlanSummary",
     "ReminderSummary",
+    # Explicit Memory
+    "MemoryCard",
+    "MemoryCardCategory",
 ]

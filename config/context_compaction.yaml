@@ -64,3 +64,15 @@ user_notifications:
       position: "top"          # top / bottom
       theme: "subtle"          # subtle / prominent
       show_learn_more: true    # 显示"了解更多"链接
+
+# 失败经验总结（MVP）
+failure_summary:
+  enabled: true
+  trigger_on_stop_reasons:
+    - "max_turns_reached"
+  # 保留最近消息条数（None 则沿用 ContextStrategy）
+  keep_recent_messages: 20
+  # 输入/输出字符上限（控制成本）
+  max_input_chars: 12000
+  max_summary_chars: 1200
+  max_block_chars: 1000

@@ -582,6 +582,7 @@ class ChatService:
                 )
                 
                 # 设置工作目录（与 SimpleAgent 一致）
+                workspace_dir = str(self.session_service.workspace_manager.get_workspace_root(conversation_id))
                 orchestrator.workspace_dir = workspace_dir
                 
                 # 执行多智能体协作
@@ -595,6 +596,75 @@ class ChatService:
                     # 多智能体事件类型：orchestrator_start, task_decomposition, 
                     # agent_start, agent_end, orchestrator_summary, orchestrator_end
                     await agent.broadcaster.emit_raw_event(session_id, event)
+                
+                # 🆕 检查 MultiAgent 执行状态，生成失败总结（如需要）
+                try:
+                    from core.context.failure_summary import (
+                        generate_failure_summary_for_multiagent,
+                        get_failure_summary_config
+                    )
+                    from core.llm import create_claude_service
+                    
+                    orchestrator_state = orchestrator.get_state()
+                    if orchestrator_state:
+                        # 检查是否需要生成失败总结
+                        config = get_failure_summary_config()
+                        if config.enabled:
+                            # 创建 LLM 服务用于生成总结
+                            summary_llm = create_claude_service(
+                                model="claude-sonnet-4-5-20250929",
+                                enable_thinking=False,
+                                enable_caching=False
+                            )
+                            
+                            # 生成失败总结
+                            failure_summary = await generate_failure_summary_for_multiagent(
+                                orchestrator_state=orchestrator_state,
+                                messages=history_messages,
+                                llm_service=summary_llm,
+                                config=config
+                            )
+                            
+                            # 如果生成了失败总结，写入 conversation metadata
+                            if failure_summary and failure_summary.summary_text:
+                                # 获取现有 metadata
+                                conversation = await self.conversation_service.get_conversation(conversation_id)
+                                existing_metadata = conversation.metadata if isinstance(conversation.metadata, dict) else {}
+                                
+                                # 构建压缩信息（与 SimpleAgent 保持一致）
+                                compression_info = {
+                                    "compressed_at": datetime.now().isoformat(),
+                                    "from_message_id": None,  # MultiAgent 不基于 message_id
+                                    "summary": failure_summary.summary_text,
+                                    "source": "multiagent_failure_summary",
+                                    "stop_reason": orchestrator_state.status,
+                                    "failed_agents": [
+                                        {
+                                            "agent_id": r.agent_id,
+                                            "error": r.error,
+                                            "turns_used": r.turns_used
+                                        }
+                                        for r in orchestrator_state.agent_results
+                                        if not r.success
+                                    ]
+                                }
+                                
+                                # 合并到 metadata
+                                existing_metadata["compression"] = compression_info
+                                
+                                # 更新 conversation
+                                await self.conversation_service.update_conversation(
+                                    conversation_id=conversation_id,
+                                    metadata=existing_metadata
+                                )
+                                
+                                logger.info(
+                                    f"✅ MultiAgent 失败总结已写入 conversation metadata: "
+                                    f"conversation_id={conversation_id}, "
+                                    f"summary_length={len(failure_summary.summary_text)}"
+                                )
+                except Exception as e:
+                    logger.warning(f"⚠️ MultiAgent 失败总结生成失败: {e}", exc_info=True)
             else:
                 # 🎯 单智能体执行
                 # - 意图分析：由路由层提供（enable_routing=True）或内部完成（默认）

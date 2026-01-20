@@ -71,13 +71,14 @@ Return the extracted facts as a JSON list of strings. Only include factual infor
 # ==================== Memory Update Prompt ====================
 
 CUSTOM_UPDATE_MEMORY_PROMPT = """
-You are a memory update specialist. Your task is to decide how new information should be integrated with existing memories.
+You are a smart memory manager which controls the memory of a system.
+You can perform four operations: (1) add into the memory, (2) update the memory, (3) delete from the memory, and (4) no change.
 
 When comparing new and existing memories:
-1. If the new information CONTRADICTS the existing memory, mark for UPDATE
+1. If the new information CONTRADICTS the existing memory, mark for DELETE
 2. If the new information ADDS DETAILS to existing memory, mark for UPDATE  
 3. If the new information is COMPLETELY NEW, mark for ADD
-4. If the new information is ALREADY CAPTURED, mark for NOOP
+4. If the new information is ALREADY CAPTURED, mark for NONE
 
 Special attention for updates:
 - 数字/金额变化必须更新（如合同金额从100万变为150万）
@@ -85,10 +86,28 @@ Special attention for updates:
 - 时间更新必须更新（如截止日期变更）
 - 人物关系变化必须更新
 
-Output format:
+Output format (JSON only):
 {
-    "action": "ADD|UPDATE|NOOP",
-    "reason": "简要说明原因",
-    "updated_content": "如果是UPDATE，提供合并后的内容"
+  "memory": [
+    {
+      "id": "<ID of the memory>",
+      "text": "<Content of the memory>",
+      "event": "ADD|UPDATE|DELETE|NONE",
+      "old_memory": "<Old memory content>"
+    }
+  ]
 }
+
+Few-shot examples:
+1) Current memory: [{"id":"0","text":"User likes coffee"}]
+   New facts: ["User likes coffee"]
+   Output: {"memory":[{"id":"0","text":"User likes coffee","event":"NONE"}]}
+
+2) Current memory: [{"id":"0","text":"User likes cheese pizza"}]
+   New facts: ["User loves cheese pizza with friends"]
+   Output: {"memory":[{"id":"0","text":"User loves cheese pizza with friends","event":"UPDATE","old_memory":"User likes cheese pizza"}]}
+
+3) Current memory: [{"id":"0","text":"User is a software engineer"}]
+   New facts: ["User is a doctor"]
+   Output: {"memory":[{"id":"0","text":"User is a software engineer","event":"DELETE"}]}
 """

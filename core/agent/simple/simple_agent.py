@@ -41,6 +41,10 @@ from typing import Dict, Any, List, Optional, AsyncGenerator
 # 3. 本地模块
 from core.agent.intent_analyzer import create_intent_analyzer
 from core.context.runtime import create_runtime_context
+from core.context.failure_summary import (
+    FailureSummaryGenerator,
+    get_failure_summary_config
+)
 from core.context.context_engineering import (
     ContextEngineeringManager, 
     AgentState, 
@@ -130,6 +134,7 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
         self.max_turns = max_turns
         self.event_manager = event_manager
         self.workspace_dir = workspace_dir
+        self.conversation_service = conversation_service
         
         # Schema 驱动
         from core.schemas import DEFAULT_AGENT_SCHEMA
@@ -147,6 +152,10 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
         
         # 上下文管理策略（三层防护）
         self._init_context_strategy(schema)
+
+        # 失败经验总结（MVP）
+        self.failure_summary_config = get_failure_summary_config()
+        self.failure_summary_generator: Optional[FailureSummaryGenerator] = None
         
         # 从 Schema 读取运行时参数
         if schema is not None:
@@ -272,6 +281,7 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
         # ========== 设置会话级参数 ==========
         clone.event_manager = event_manager
         clone.workspace_dir = workspace_dir
+        clone.conversation_service = conversation_service
         
         # 更新工具执行器的上下文
         if clone.tool_executor and hasattr(clone.tool_executor, 'update_context'):
@@ -292,6 +302,10 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
         clone._current_message_id = None
         clone._current_conversation_id = None
         clone._current_user_id = None
+
+        # 失败经验总结（复用配置，生成器延迟初始化）
+        clone.failure_summary_config = self.failure_summary_config
+        clone.failure_summary_generator = None
         
         # 创建新的 UsageTracker
         clone.usage_tracker = create_usage_tracker()
@@ -565,6 +579,15 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
             session_id=session_id,
             message_id=self._current_message_id
         )
+
+        # 失败经验总结式上下文管理（MVP：仅 SimpleAgent）
+        await self._maybe_generate_failure_summary(
+            conversation_id=conversation_id,
+            stop_reason=ctx.stop_reason,
+            session_id=session_id,
+            user_id=user_id
+        )
+
         logger.info(f"✅ Agent 执行完成: turns={ctx.current_turn}")
     
     def _process_intent(self, intent: Optional["IntentResult"], ctx) -> "IntentResult":
@@ -602,6 +625,108 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
             stage.skip("未提供意图结果，使用默认配置")
         
         return intent
+
+    async def _maybe_generate_failure_summary(
+        self,
+        conversation_id: str,
+        stop_reason: Optional[str],
+        session_id: str,
+        user_id: Optional[str]
+    ) -> None:
+        """
+        在失败/中断时生成失败经验总结，并写入对话 metadata
+        
+        Args:
+            conversation_id: 对话 ID
+            stop_reason: 停止原因
+            session_id: 会话 ID
+            user_id: 用户 ID
+        """
+        config = self.failure_summary_config
+        if not config.enabled:
+            return
+        if not stop_reason or stop_reason not in config.trigger_on_stop_reasons:
+            return
+        if not self.conversation_service:
+            logger.warning("⚠️ 未提供 conversation_service，跳过失败总结")
+            return
+        if not conversation_id:
+            logger.warning("⚠️ 未提供 conversation_id，跳过失败总结")
+            return
+        
+        try:
+            result = await self.conversation_service.get_conversation_messages(
+                conversation_id=conversation_id,
+                limit=1000,
+                order="asc"
+            )
+            db_messages = result.get("messages", [])
+        except Exception as e:
+            logger.warning(f"⚠️ 获取对话消息失败，跳过失败总结: {e}")
+            return
+        
+        if not db_messages:
+            return
+        
+        keep_recent = config.keep_recent_messages or max(self.context_strategy.preserve_last_n * 2, 2)
+        if len(db_messages) <= keep_recent:
+            logger.info("📦 消息数量不足，跳过失败总结")
+            return
+        
+        early_messages = db_messages[:-keep_recent]
+        compress_from_message = db_messages[-(keep_recent + 1)]
+        from_message_id = compress_from_message.get("id") if isinstance(compress_from_message, dict) else None
+        if not from_message_id:
+            logger.warning("⚠️ 未找到压缩起点 message_id，跳过失败总结")
+            return
+        
+        if self.failure_summary_generator is None:
+            self.failure_summary_generator = FailureSummaryGenerator(self.llm, config)
+        
+        summary_result = await self.failure_summary_generator.generate(
+            messages=early_messages,
+            stop_reason=stop_reason
+        )
+        if not summary_result.summary_text:
+            logger.info("📦 失败总结为空，跳过写入")
+            return
+        
+        try:
+            conversation = await self.conversation_service.get_conversation(conversation_id)
+            existing_metadata = conversation.metadata if isinstance(conversation.metadata, dict) else {}
+            
+            compression_info = {
+                "compressed_at": summary_result.created_at or datetime.now().isoformat(),
+                "from_message_id": from_message_id,
+                "summary": summary_result.summary_text,
+                "type": "failure_summary",
+                "stop_reason": stop_reason,
+                "session_id": session_id,
+                "message_id": self._current_message_id,
+                "user_id": user_id,
+            }
+            
+            existing_metadata["compression"] = compression_info
+            existing_metadata["failure_summary"] = {
+                "created_at": summary_result.created_at or datetime.now().isoformat(),
+                "stop_reason": stop_reason,
+                "summary": summary_result.summary_text,
+                "raw": summary_result.raw_text,
+                "session_id": session_id,
+                "message_id": self._current_message_id,
+                "user_id": user_id,
+            }
+            
+            await self.conversation_service.update_conversation(
+                conversation_id=conversation_id,
+                metadata=existing_metadata
+            )
+            logger.info(
+                f"✅ 失败总结已写入 metadata: conversation_id={conversation_id}, "
+                f"stop_reason={stop_reason}"
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ 写入失败总结失败: {e}")
     
     async def _select_tools(self, intent: "IntentResult", ctx):
         """工具选择"""

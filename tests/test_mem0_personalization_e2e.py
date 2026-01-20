@@ -22,6 +22,7 @@ import asyncio
 import os
 import sys
 import time
+import re
 from datetime import datetime
 from typing import List, Dict, Any
 
@@ -111,6 +112,247 @@ def print_info(message: str, indent: int = 0):
     print(f"{prefix}{message}")
 
 
+# ==================== 规则化评分工具 ====================
+
+def _normalize_text(text: str) -> str:
+    """文本标准化（小写+空白压缩）"""
+    return re.sub(r"\s+", " ", text or "").lower().strip()
+
+
+def _has_structure(text: str) -> bool:
+    """判断是否具备结构化输出特征"""
+    if not text:
+        return False
+    return bool(
+        re.search(r"(^|\n)\s*[-*]\s+\S+", text)
+        or re.search(r"(^|\n)\s*\d+\.\s+\S+", text)
+        or re.search(r"(^|\n)#+\s+\S+", text)
+        or re.search(r"\*\*.+\*\*", text)
+    )
+
+
+def _has_code_block(text: str, patterns: List[str]) -> bool:
+    """判断是否包含代码/示例块"""
+    if not text:
+        return False
+    if "```" in text:
+        return True
+    return any(re.search(p, text, re.IGNORECASE) for p in patterns)
+
+
+def _keyword_hit(text: str, keywords: List[str]) -> bool:
+    """关键词命中（忽略大小写）"""
+    if not keywords:
+        return False
+    normalized = _normalize_text(text)
+    return any(k.lower() in normalized for k in keywords)
+
+def _match_patterns(text: str, patterns: List[str]) -> List[str]:
+    """命中正则模式（返回命中的 pattern 列表）"""
+    if not patterns:
+        return []
+    raw_text = text or ""
+    hits = []
+    for pattern in patterns:
+        if re.search(pattern, raw_text, re.IGNORECASE):
+            hits.append(pattern)
+    return hits
+
+
+def score_response(text: str, rules: Dict[str, Any]) -> Dict[str, Any]:
+    """规则化评分（非 LLM 评审，仅用于验证）"""
+    normalized = _normalize_text(text)
+    weights = rules.get("weights", {})
+    min_length = rules.get("min_length", 80)
+    threshold = rules.get("threshold", 80)
+    normalize_score = rules.get("normalize_score", True)
+
+    score = 0
+    max_score = 0
+    details = []
+    violations = []
+    hard_failed = False
+
+    # 长度要求
+    length_weight = weights.get("min_length", 0)
+    max_score += length_weight
+    if len(text or "") >= min_length:
+        score += length_weight
+        details.append(f"长度达标(+{length_weight})")
+    else:
+        details.append(f"长度不足(<{min_length})")
+        hard_failed = True
+
+    # 必须命中（多组）- 记忆命中
+    must_groups = rules.get("must_include_groups", [])
+    must_weight = weights.get("must_group", 12)
+    for idx, group in enumerate(must_groups, 1):
+        group_keywords = group.get("keywords", []) if isinstance(group, dict) else group
+        group_label = group.get("label", f"must_{idx}") if isinstance(group, dict) else f"must_{idx}"
+        max_score += must_weight
+        if _keyword_hit(normalized, group_keywords):
+            score += must_weight
+            details.append(f"{group_label} 命中(+{must_weight})")
+        else:
+            details.append(f"{group_label} 未命中")
+            hard_failed = True
+
+    # 任务完成度（必需）
+    task_groups = rules.get("task_groups", [])
+    task_weight = weights.get("task_group", 10)
+    for idx, group in enumerate(task_groups, 1):
+        group_keywords = group.get("keywords", []) if isinstance(group, dict) else group
+        group_label = group.get("label", f"task_{idx}") if isinstance(group, dict) else f"task_{idx}"
+        max_score += task_weight
+        if _keyword_hit(normalized, group_keywords):
+            score += task_weight
+            details.append(f"{group_label} 命中(+{task_weight})")
+        else:
+            details.append(f"{group_label} 未命中")
+            hard_failed = True
+
+    # 相关性关键词
+    relevance_keywords = rules.get("relevance_keywords", [])
+    relevance_weight = weights.get("relevance", 12)
+    max_score += relevance_weight
+    if _keyword_hit(normalized, relevance_keywords):
+        score += relevance_weight
+        details.append(f"相关性命中(+{relevance_weight})")
+    else:
+        details.append("相关性不足")
+        hard_failed = True
+
+    # 结构化输出
+    if rules.get("require_structure"):
+        structure_weight = weights.get("structure", 10)
+        max_score += structure_weight
+        if _has_structure(text):
+            score += structure_weight
+            details.append(f"结构化输出(+{structure_weight})")
+        else:
+            details.append("结构化输出不足")
+            hard_failed = True
+
+    # 代码/示例块
+    if rules.get("require_code_block"):
+        code_weight = weights.get("code_block", 10)
+        max_score += code_weight
+        code_patterns = rules.get("code_patterns", [])
+        if _has_code_block(text, code_patterns):
+            score += code_weight
+            details.append(f"包含代码/示例(+{code_weight})")
+        else:
+            details.append("缺少代码/示例")
+            hard_failed = True
+
+    # 应该命中（加分项）
+    should_groups = rules.get("should_include_groups", [])
+    should_weight = weights.get("should_group", 6)
+    for idx, group in enumerate(should_groups, 1):
+        group_keywords = group.get("keywords", []) if isinstance(group, dict) else group
+        group_label = group.get("label", f"should_{idx}") if isinstance(group, dict) else f"should_{idx}"
+        max_score += should_weight
+        if _keyword_hit(normalized, group_keywords):
+            score += should_weight
+            details.append(f"{group_label} 命中(+{should_weight})")
+        else:
+            details.append(f"{group_label} 未命中")
+
+    # 事实一致性冲突（硬失败）
+    conflict_groups = rules.get("conflict_groups", [])
+    conflict_hit = False
+    for idx, group in enumerate(conflict_groups, 1):
+        group_keywords = group.get("keywords", []) if isinstance(group, dict) else group
+        group_label = group.get("label", f"conflict_{idx}") if isinstance(group, dict) else f"conflict_{idx}"
+        if _keyword_hit(normalized, group_keywords):
+            conflict_hit = True
+            violations.append(f"{group_label} 命中")
+            hard_failed = True
+
+    # 禁止词（跨用户污染等，硬失败）
+    forbidden_groups = rules.get("forbidden_groups", [])
+    forbidden_penalty = weights.get("forbidden_penalty", 0)
+    for idx, group in enumerate(forbidden_groups, 1):
+        group_keywords = group.get("keywords", []) if isinstance(group, dict) else group
+        group_label = group.get("label", f"forbidden_{idx}") if isinstance(group, dict) else f"forbidden_{idx}"
+        if _keyword_hit(normalized, group_keywords):
+            score -= forbidden_penalty
+            violations.append(f"{group_label} 命中(-{forbidden_penalty})")
+            hard_failed = True
+
+    # 一致性奖励
+    consistency_reward = weights.get("consistency_reward", 0)
+    if consistency_reward > 0:
+        max_score += consistency_reward
+        if not conflict_hit:
+            score += consistency_reward
+            details.append(f"事实一致(+{consistency_reward})")
+        else:
+            details.append("事实一致性失败")
+
+    # 拒答/空泛
+    refusal_keywords = rules.get("refusal_keywords", [])
+    refusal_penalty = weights.get("refusal_penalty", 10)
+    if _keyword_hit(normalized, refusal_keywords):
+        score -= refusal_penalty
+        violations.append(f"拒答/空泛(-{refusal_penalty})")
+        hard_failed = True
+
+    # 幻觉检测（硬失败）
+    hallucination_groups = rules.get("hallucination_groups", [])
+    hallucination_patterns = rules.get("hallucination_patterns", [])
+    hallucination_allow = rules.get("hallucination_allow_keywords", [])
+    hallucination_hit = False
+    if hallucination_groups and _keyword_hit(normalized, hallucination_groups):
+        hallucination_hit = True
+        violations.append("疑似幻觉/无依据断言")
+        hard_failed = True
+
+    pattern_hits = _match_patterns(text, hallucination_patterns)
+    if pattern_hits and not _keyword_hit(normalized, hallucination_allow):
+        hallucination_hit = True
+        violations.append("疑似编造数字/数据")
+        hard_failed = True
+
+    no_hallu_reward = weights.get("no_hallucination_reward", 0)
+    if no_hallu_reward > 0:
+        max_score += no_hallu_reward
+        if not hallucination_hit:
+            score += no_hallu_reward
+            details.append(f"无幻觉(+{no_hallu_reward})")
+        else:
+            details.append("幻觉风险")
+
+    final_score = max(0, score)
+    normalized_score = (final_score / max_score * 100) if (normalize_score and max_score > 0) else final_score
+    passed = normalized_score >= threshold and not hard_failed
+
+    return {
+        "score": final_score,
+        "max_score": max_score,
+        "threshold": threshold,
+        "normalized_score": normalized_score,
+        "passed": passed,
+        "details": details,
+        "violations": violations,
+        "hard_failed": hard_failed
+    }
+
+
+async def collect_stream_text(event_stream) -> str:
+    """从 ChatService 流式事件中收集最终文本"""
+    final_text = ""
+    async for event in event_stream:
+        event_type = event.get("type", "")
+        data = event.get("data", {}) if isinstance(event, dict) else {}
+        if event_type == "content_delta":
+            delta = data.get("delta", {})
+            if delta.get("type") == "text_delta":
+                final_text += delta.get("text", "")
+        elif event_type in ["message_stop", "session_end", "message.assistant.done"]:
+            break
+    return final_text
+
 # ==================== Mock 数据：跨会话对话历史 ====================
 
 MOCK_CONVERSATION_SESSIONS = {
@@ -141,7 +383,48 @@ MOCK_CONVERSATION_SESSIONS = {
             }
         ],
         "expected_features": ["React", "TypeScript", "函数式", "hooks", "Tailwind"],
-        "test_query": "帮我写一个用户注册表单组件"
+        "test_query": "帮我写一个用户注册表单组件",
+        "response_rules": {
+            "min_length": 180,
+            "threshold": 88,
+            "normalize_score": True,
+            "require_code_block": True,
+            "code_patterns": [r"<form", r"function\s+\w+\(", r"const\s+\w+\s*="],
+            "relevance_keywords": ["注册", "表单", "组件"],
+            "must_include_groups": [
+                {"label": "技术栈", "keywords": ["React", "TypeScript", "TS"]},
+                {"label": "偏好", "keywords": ["函数式", "函数组件", "hooks", "hook"]},
+            ],
+            "task_groups": [
+                {"label": "账号字段", "keywords": ["邮箱", "邮件", "用户名", "账号", "手机号"]},
+                {"label": "密码字段", "keywords": ["密码", "确认密码", "重复密码"]},
+            ],
+            "should_include_groups": [
+                {"label": "样式偏好", "keywords": ["Tailwind", "className"]},
+                {"label": "表单校验", "keywords": ["校验", "验证", "错误", "提示"]},
+            ],
+            "conflict_groups": [
+                {"label": "偏好冲突", "keywords": ["class 组件", "class component", "Vue", "Angular"]},
+            ],
+            "forbidden_groups": [
+                {"label": "跨用户污染", "keywords": ["产品经理", "销售数据", "图表", "可视化"]}
+            ],
+            "hallucination_groups": ["根据你提供的数据", "我已经分析", "数据库显示"],
+            "hallucination_allow_keywords": ["示例", "假设", "占位"],
+            "refusal_keywords": ["无法", "不能", "抱歉", "不确定"],
+            "weights": {
+                "min_length": 0,
+                "must_group": 15,
+                "task_group": 10,
+                "relevance": 10,
+                "code_block": 15,
+                "should_group": 5,
+                "consistency_reward": 20,
+                "no_hallucination_reward": 10,
+                "forbidden_penalty": 0,
+                "refusal_penalty": 15
+            }
+        }
     },
     "manager_bob": {
         "user_id": "test_bob_mem0_002",
@@ -161,7 +444,54 @@ MOCK_CONVERSATION_SESSIONS = {
             }
         ],
         "expected_features": ["产品经理", "数据分析", "图表", "可视化"],
-        "test_query": "帮我分析这个月的销售数据"
+        "test_query": "帮我分析这个月的销售数据",
+        "response_rules": {
+            "min_length": 160,
+            "threshold": 88,
+            "normalize_score": True,
+            "require_structure": True,
+            "relevance_keywords": ["销售", "数据", "分析"],
+            "must_include_groups": [
+                {"label": "角色偏好", "keywords": ["产品经理", "数据分析"]},
+                {"label": "表达方式", "keywords": ["图表", "可视化", "趋势"]},
+            ],
+            "task_groups": [
+                {"label": "分析维度", "keywords": ["环比", "同比", "趋势", "维度"]},
+                {"label": "行动建议", "keywords": ["建议", "结论", "行动", "洞察"]},
+            ],
+            "should_include_groups": [
+                {"label": "指标范围", "keywords": ["客单价", "转化", "渠道", "区域", "品类"]},
+                {"label": "数据请求", "keywords": ["请提供", "需要", "数据口径", "样例", "缺少数据"]},
+            ],
+            "conflict_groups": [
+                {"label": "技术栈冲突", "keywords": ["React", "TypeScript", "Tailwind", "组件"]},
+            ],
+            "forbidden_groups": [
+                {"label": "跨用户污染", "keywords": ["React", "TypeScript", "Tailwind", "组件"]}
+            ],
+            "hallucination_groups": ["根据你提供的数据", "我已分析", "我查看了数据", "数据如下"],
+            "hallucination_patterns": [
+                r"\d+(?:\.\d+)?\s*%",
+                r"[￥$]\s*\d+(?:\.\d+)?",
+                r"\d+(?:\.\d+)?\s*(万|千|亿|元|块|美元|人民币)",
+                r"(增长|下降|提升|降低)\s*\d+",
+                r"(环比|同比)\s*\d+"
+            ],
+            "hallucination_allow_keywords": ["假设", "示例", "占位", "请提供", "需要数据", "若提供", "如果"],
+            "refusal_keywords": ["无法", "不能", "抱歉", "不确定"],
+            "weights": {
+                "min_length": 0,
+                "must_group": 15,
+                "task_group": 10,
+                "relevance": 10,
+                "structure": 15,
+                "should_group": 5,
+                "consistency_reward": 20,
+                "no_hallucination_reward": 10,
+                "forbidden_penalty": 0,
+                "refusal_penalty": 15
+            }
+        }
     }
 }
 
@@ -175,6 +505,7 @@ class Mem0PersonalizationE2ETest:
         self.result = TestResult()
         self.test_users = MOCK_CONVERSATION_SESSIONS
         self.extracted_memories = {}  # 存储提取的记忆供后续验证
+        self.e2e_scores = {}
     
     async def run_all(self):
         """运行所有测试"""
@@ -394,6 +725,17 @@ class Mem0PersonalizationE2ETest:
                 if missing_features:
                     print_warning(f"未检测到特征: {', '.join(missing_features)}", indent=2)
                     # 不算失败，因为 LLM 可能用不同词汇表达
+
+                # 用户隔离：不应包含其他用户的核心特征
+                other_features = []
+                for other_name, other_data in self.test_users.items():
+                    if other_name == user_name:
+                        continue
+                    other_features.extend(other_data.get("expected_features", []))
+                contaminated = [f for f in other_features if f.lower() in all_memory_text.lower()]
+                if contaminated:
+                    print_error(f"检测到跨用户污染: {', '.join(contaminated)}")
+                    all_passed = False
                 
                 # 只要提取了记忆就算成功
                 if memories:
@@ -558,52 +900,83 @@ class Mem0PersonalizationE2ETest:
         print_section("步骤 5: V4 端到端个性化响应验证")
         
         print_info("📌 提示: 这个测试需要调用完整的 Agent", indent=1)
-        print_info("由于需要 LLM 调用，可能需要较长时间", indent=1)
-        print_info("为了测试速度，我们只验证 Prompt 构建流程\n", indent=1)
+        print_info("由于需要 LLM 调用，可能需要较长时间\n", indent=1)
         
         try:
-            from prompts.universal_agent_prompt import get_universal_agent_prompt
+            from services.chat_service import get_chat_service
             
             all_passed = True
+            failed_users = []
+            
+            chat_service = get_chat_service()
             
             for user_name, user_data in self.test_users.items():
                 user_id = user_data["user_id"]
                 user_display_name = user_data["name"]
                 test_query = user_data["test_query"]
+                response_rules = user_data.get("response_rules", {})
                 
                 print_info(f"\n🔍 验证用户: {user_display_name}", indent=1)
                 print_info(f"查询: \"{test_query}\"", indent=2)
                 
-                # 构建完整的 System Prompt（包含 Mem0 画像）
-                system_prompt = get_universal_agent_prompt(
+                # 完整调用 Agent
+                stream = await chat_service.chat(
+                    message=test_query,
                     user_id=user_id,
-                    user_query=test_query,
-                    skip_memory_retrieval=False,  # 启用 Mem0 检索
-                    include_skills=False,
-                    include_e2b=False
+                    stream=True
                 )
                 
-                # 检查 Prompt 中是否包含用户画像
-                has_profile = "用户画像" in system_prompt or any(
-                    feature.lower() in system_prompt.lower() 
-                    for feature in user_data["expected_features"][:2]
-                )
+                response_text = await collect_stream_text(stream)
                 
-                if has_profile:
-                    print_success(f"{user_display_name} System Prompt 包含用户画像")
-                    print_info(f"Prompt 长度: {len(system_prompt)} 字符", indent=3)
-                else:
-                    print_warning(f"{user_display_name} System Prompt 未包含明显的用户画像")
+                if not response_text:
+                    print_error(f"{user_display_name} 未生成有效响应")
                     all_passed = False
+                    failed_users.append(user_display_name)
+                    continue
+                
+                # 规则化评分
+                score_result = score_response(response_text, response_rules)
+                score = score_result["score"]
+                threshold = score_result["threshold"]
+                normalized_score = score_result.get("normalized_score", score)
+                max_score = score_result["max_score"]
+                self.e2e_scores[user_id] = {
+                    "user_name": user_display_name,
+                    "query": test_query,
+                    "normalized_score": normalized_score,
+                    "raw_score": score,
+                    "max_score": max_score,
+                    "passed": score_result["passed"],
+                    "details": score_result["details"],
+                    "violations": score_result["violations"]
+                }
+                
+                print_info(
+                    f"评分: {normalized_score:.1f}/100 (原始 {score}/{max_score}) (阈值 {threshold})",
+                    indent=3
+                )
+                for detail in score_result["details"]:
+                    print_info(f"- {detail}", indent=4)
+                for violation in score_result["violations"]:
+                    print_warning(f"{user_display_name} 违规: {violation}", indent=4)
+                
+                if score_result["passed"]:
+                    print_success(f"{user_display_name} 个性化响应评分通过")
+                else:
+                    print_error(f"{user_display_name} 个性化响应评分未达标")
+                    all_passed = False
+                    failed_users.append(user_display_name)
             
             if all_passed:
                 print_success("\n✅ 端到端个性化响应验证通过")
                 self.result.passed += 1
-                self.result.add_detail("e2e", "success", "System Prompt 成功注入用户画像")
+                self.result.add_detail("e2e", "success", "个性化响应评分通过")
             else:
-                print_warning("\n⚠️  端到端个性化响应验证部分通过")
-                self.result.warnings += 1
-                self.result.add_detail("e2e", "warning", "部分用户画像注入不明显")
+                print_error("\n❌ 端到端个性化响应验证未通过")
+                if failed_users:
+                    print_info(f"未达标用户: {', '.join(failed_users)}", indent=1)
+                self.result.failed += 1
+                self.result.add_detail("e2e", "failed", f"未达标用户: {failed_users}")
             
         except Exception as e:
             print_error(f"端到端个性化响应验证失败: {e}")
@@ -687,6 +1060,27 @@ class Mem0PersonalizationE2ETest:
                     for i, mem in enumerate(self.extracted_memories[user_id][:5], 1):
                         f.write(f"{i}. {mem.get('memory', 'N/A')}\n")
                     f.write("\n")
+
+            f.write("## 端到端评分（规则化）\n\n")
+            for user_name, user_data in self.test_users.items():
+                user_id = user_data["user_id"]
+                score_info = self.e2e_scores.get(user_id)
+                f.write(f"### {user_data['name']}\n\n")
+                if not score_info:
+                    f.write("- 无评分结果（可能未执行 V4）\n\n")
+                    continue
+                f.write(f"- 评分: {score_info['normalized_score']:.1f}/100\n")
+                f.write(f"- 原始分: {score_info['raw_score']}/{score_info['max_score']}\n")
+                f.write(f"- 结论: {'通过' if score_info['passed'] else '未通过'}\n")
+                if score_info.get("details"):
+                    f.write("- 评分细节:\n")
+                    for detail in score_info["details"]:
+                        f.write(f"  - {detail}\n")
+                if score_info.get("violations"):
+                    f.write("- 违规项:\n")
+                    for violation in score_info["violations"]:
+                        f.write(f"  - {violation}\n")
+                f.write("\n")
             
             f.write("## 结论\n\n")
             if self.result.failed == 0:

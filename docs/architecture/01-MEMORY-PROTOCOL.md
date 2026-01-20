@@ -184,6 +184,19 @@ User Query
 | **持久化** | 混乱 | 按层级明确 | ✅ 可维护 |
 | **plan_todo** | 存储在 WorkingMemory | 独立工具管理 | ✅ 解耦 |
 
+### 2.4 V4.5 记忆能力增强（新增）
+
+**显式记忆 + 隐式行为捕获 + 画像注入**：
+
+| 功能 | 说明 | 实现位置 |
+|------|------|---------|
+| **显式记忆卡片** | 用户主动上传记忆，支持 CRUD | `MemoryManager.create_memory_card()` |
+| **碎片提取增强** | 新增偏好、主题、约束、工具、目标等维度 | `FragmentExtractor.extract()` |
+| **行为分析增强** | 偏好稳定性、周期性、冲突检测 | `BehaviorAnalyzer.analyze()` |
+| **画像生成** | 聚合多维度数据生成 UserPersona | `PersonaBuilder.build_persona()` |
+| **Prompt 注入** | 预计算注入模式，可配置 sections | `MemoryManager.get_context_for_llm()` |
+| **质量控制** | 敏感信息过滤、冲突处理、TTL 管理 | `QualityController` |
+
 **核心原则（不变）**：
 - ✅ Memory-First：始终从 Memory 读取状态
 - ✅ 显式调用：LLM 必须主动调用 plan_todo.get_plan()
