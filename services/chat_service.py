@@ -80,9 +80,8 @@ class ChatService:
         # 同步模式（推荐用于 API 集成）
         result = await service.chat(message, user_id, stream=False)
         
-        # Mock 模式（用于前端测试）
-        async for event in service.chat_mock(scenario="analytics"):
-            yield event
+        # Mock 模式（通过配置启用，chat() 接口自动返回 mock 数据）
+        # 设置环境变量 ENABLE_MOCK_MODE=true 或初始化时传入 enable_mock=True
     """
     
     # 默认 Agent 标识
@@ -94,11 +93,17 @@ class ChatService:
         default_model: str = "claude-sonnet-4-5-20250929",
         qos_level: QoSLevel = QoSLevel.PRO,  # 🆕 P0: QoS 等级，默认 Pro
         enable_routing: bool = True,  # ✅ V7.2: 启用路由层（单/多智能体路由决策）
-        multi_agent_config: Optional["MultiAgentConfig"] = None  # ✅ V7.2: 多智能体配置
+        multi_agent_config: Optional["MultiAgentConfig"] = None,  # ✅ V7.2: 多智能体配置
+        enable_mock: bool = True,  # 🆕 Mock 模式：启用后 chat() 返回 mock 数据
+        mock_scenario: str = "analytics"  # 🆕 Mock 场景：analytics / build
     ):
         # Session 管理
         self.session_service = session_service or get_session_service()
         self.default_model = default_model
+        
+        # 🆕 Mock 模式配置
+        self.enable_mock = enable_mock
+        self.mock_scenario = mock_scenario
         
         # 资源池架构
         self.session_pool = get_session_pool()  # 活跃 Session 追踪
@@ -121,9 +126,12 @@ class ChatService:
         # 上下文压缩配置
         self.qos_level = qos_level
         self.compaction_threshold = get_compaction_threshold(qos_level)
+        
+        # 日志记录初始化状态
+        mock_status = f"mock_mode={enable_mock}, scenario={mock_scenario}" if enable_mock else "mock_mode=disabled"
         logger.info(
             f"✅ ChatService 初始化完成: qos_level={qos_level.value}, "
-            f"compaction_threshold={self.compaction_threshold:,} tokens"
+            f"compaction_threshold={self.compaction_threshold:,} tokens, {mock_status}"
         )
         
         # 🆕 V7: 路由器（单智能体/多智能体路由决策）
@@ -260,7 +268,8 @@ class ChatService:
         files: Optional[List[Any]] = None,
         variables: Optional[Dict[str, Any]] = None,
         agent_id: Optional[str] = None,
-        output_format: str = "zenflux"
+        output_format: str = "zenflux",
+        mock_scenario: Optional[str] = None  # 🆕 允许请求级别覆盖 mock 场景
     ):
         """
         统一的对话入口 ⭐
@@ -268,6 +277,10 @@ class ChatService:
         根据 stream 参数自动选择模式：
         - stream=True  → 返回 AsyncGenerator，用于 SSE
         - stream=False → 返回 Dict，用于 API 集成
+        
+        Mock 模式：
+        - 当 enable_mock=True 时，直接返回 mock 数据，不调用真实 Agent
+        - 可通过 mock_scenario 参数指定场景（analytics/build）
         
         流程（入口层只做调度，数据准备在执行层）：
         1. 验证 agent_id
@@ -287,12 +300,34 @@ class ChatService:
             variables: 前端上下文变量（可选），如位置、时区等
             agent_id: Agent 实例 ID（可选，不提供则使用默认 Agent）
             output_format: 输出事件格式（zeno/zenflux），默认 zenflux
+            mock_scenario: Mock 场景（可选，覆盖服务级别配置）
             
         Returns:
             stream=True  → AsyncGenerator
             stream=False → Dict
         """
         msg_preview = str(message)[:50] if message else ""
+        
+        # 🆕 Mock 模式：直接返回 mock 数据
+        if self.enable_mock:
+            scenario = mock_scenario or self.mock_scenario
+            logger.info(f"🎭 Mock 模式: user={user_id}, scenario={scenario}, msg={msg_preview}...")
+            
+            if stream:
+                # 流式模式：返回 mock 事件流
+                return self.chat_mock(scenario=scenario, delay_ms=50)
+            else:
+                # 同步模式：返回 mock 任务信息
+                mock_session_id = f"mock_sess_{uuid4().hex[:12]}"
+                mock_conv_id = conversation_id or f"mock_conv_{uuid4().hex[:12]}"
+                return {
+                    "task_id": mock_session_id,
+                    "conversation_id": mock_conv_id,
+                    "message": "[Mock] 任务已启动",
+                    "status": "running",
+                    "mock": True
+                }
+        
         logger.info(f"📨 对话请求: user={user_id}, agent={agent_id or '默认'}, msg={msg_preview}...")
         
         # ========== 1. 验证 agent_id ==========
@@ -1840,14 +1875,39 @@ _default_service: Optional[ChatService] = None
 
 def get_chat_service(
     session_service: Optional[SessionService] = None,
-    default_model: str = "claude-sonnet-4-5-20250929"
+    default_model: str = "claude-sonnet-4-5-20250929",
+    enable_mock: Optional[bool] = None,
+    mock_scenario: Optional[str] = None
 ) -> ChatService:
-    """获取默认聊天服务单例"""
+    """
+    获取默认聊天服务单例
+    
+    Mock 模式配置优先级：
+    1. 函数参数（enable_mock, mock_scenario）
+    2. 环境变量（ENABLE_MOCK_MODE, MOCK_SCENARIO）
+    3. 默认值（False, "analytics"）
+    
+    环境变量：
+        ENABLE_MOCK_MODE: true/false，启用 mock 模式
+        MOCK_SCENARIO: analytics/build，mock 场景
+    """
+    import os
+    
     global _default_service
     if _default_service is None:
+        # 读取环境变量配置
+        env_mock = os.getenv("ENABLE_MOCK_MODE", "false").lower() == "true"
+        env_scenario = os.getenv("MOCK_SCENARIO", "analytics")
+        
+        # 参数优先级：函数参数 > 环境变量 > 默认值
+        final_mock = enable_mock if enable_mock is not None else env_mock
+        final_scenario = mock_scenario if mock_scenario is not None else env_scenario
+        
         _default_service = ChatService(
             session_service=session_service,
-            default_model=default_model
+            default_model=default_model,
+            enable_mock=final_mock,
+            mock_scenario=final_scenario
         )
     return _default_service
 

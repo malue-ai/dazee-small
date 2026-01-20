@@ -21,6 +21,58 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type HealthCheckResponse_ServingStatus int32
+
+const (
+	HealthCheckResponse_UNKNOWN         HealthCheckResponse_ServingStatus = 0
+	HealthCheckResponse_SERVING         HealthCheckResponse_ServingStatus = 1
+	HealthCheckResponse_NOT_SERVING     HealthCheckResponse_ServingStatus = 2
+	HealthCheckResponse_SERVICE_UNKNOWN HealthCheckResponse_ServingStatus = 3
+)
+
+// Enum value maps for HealthCheckResponse_ServingStatus.
+var (
+	HealthCheckResponse_ServingStatus_name = map[int32]string{
+		0: "UNKNOWN",
+		1: "SERVING",
+		2: "NOT_SERVING",
+		3: "SERVICE_UNKNOWN",
+	}
+	HealthCheckResponse_ServingStatus_value = map[string]int32{
+		"UNKNOWN":         0,
+		"SERVING":         1,
+		"NOT_SERVING":     2,
+		"SERVICE_UNKNOWN": 3,
+	}
+)
+
+func (x HealthCheckResponse_ServingStatus) Enum() *HealthCheckResponse_ServingStatus {
+	p := new(HealthCheckResponse_ServingStatus)
+	*p = x
+	return p
+}
+
+func (x HealthCheckResponse_ServingStatus) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (HealthCheckResponse_ServingStatus) Descriptor() protoreflect.EnumDescriptor {
+	return file_tool_service_proto_enumTypes[0].Descriptor()
+}
+
+func (HealthCheckResponse_ServingStatus) Type() protoreflect.EnumType {
+	return &file_tool_service_proto_enumTypes[0]
+}
+
+func (x HealthCheckResponse_ServingStatus) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use HealthCheckResponse_ServingStatus.Descriptor instead.
+func (HealthCheckResponse_ServingStatus) EnumDescriptor() ([]byte, []int) {
+	return file_tool_service_proto_rawDescGZIP(), []int{7, 0}
+}
+
 type ChatRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	Message         string                 `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`                                                                               // 用户消息（文本或JSON字符串）
@@ -31,6 +83,7 @@ type ChatRequest struct {
 	BackgroundTasks []string               `protobuf:"bytes,6,rep,name=background_tasks,json=backgroundTasks,proto3" json:"background_tasks,omitempty"`                                        // 后台任务列表
 	Files           []*FileReference       `protobuf:"bytes,7,rep,name=files,proto3" json:"files,omitempty"`                                                                                   // 文件引用列表
 	Variables       map[string]string      `protobuf:"bytes,8,rep,name=variables,proto3" json:"variables,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // 前端上下文变量
+	AgentId         *string                `protobuf:"bytes,9,opt,name=agent_id,json=agentId,proto3,oneof" json:"agent_id,omitempty"`                                                          // Agent 实例 ID（可选，对应 instances/ 目录名）
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -119,6 +172,13 @@ func (x *ChatRequest) GetVariables() map[string]string {
 		return x.Variables
 	}
 	return nil
+}
+
+func (x *ChatRequest) GetAgentId() string {
+	if x != nil && x.AgentId != nil {
+		return *x.AgentId
+	}
+	return ""
 }
 
 type FileReference struct {
@@ -393,6 +453,146 @@ func (x *ReconnectRequest) GetAfterSeq() int32 {
 	return 0
 }
 
+type ChatMockRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Scenario      string                 `protobuf:"bytes,1,opt,name=scenario,proto3" json:"scenario,omitempty"`               // 场景类型：analytics, build
+	DelayMs       int32                  `protobuf:"varint,2,opt,name=delay_ms,json=delayMs,proto3" json:"delay_ms,omitempty"` // 事件间隔（毫秒），默认 50
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ChatMockRequest) Reset() {
+	*x = ChatMockRequest{}
+	mi := &file_tool_service_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ChatMockRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ChatMockRequest) ProtoMessage() {}
+
+func (x *ChatMockRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_tool_service_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ChatMockRequest.ProtoReflect.Descriptor instead.
+func (*ChatMockRequest) Descriptor() ([]byte, []int) {
+	return file_tool_service_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *ChatMockRequest) GetScenario() string {
+	if x != nil {
+		return x.Scenario
+	}
+	return ""
+}
+
+func (x *ChatMockRequest) GetDelayMs() int32 {
+	if x != nil {
+		return x.DelayMs
+	}
+	return 0
+}
+
+type HealthCheckRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Service       string                 `protobuf:"bytes,1,opt,name=service,proto3" json:"service,omitempty"` // 服务名称，空字符串表示整体状态
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HealthCheckRequest) Reset() {
+	*x = HealthCheckRequest{}
+	mi := &file_tool_service_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HealthCheckRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HealthCheckRequest) ProtoMessage() {}
+
+func (x *HealthCheckRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_tool_service_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HealthCheckRequest.ProtoReflect.Descriptor instead.
+func (*HealthCheckRequest) Descriptor() ([]byte, []int) {
+	return file_tool_service_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *HealthCheckRequest) GetService() string {
+	if x != nil {
+		return x.Service
+	}
+	return ""
+}
+
+type HealthCheckResponse struct {
+	state         protoimpl.MessageState            `protogen:"open.v1"`
+	Status        HealthCheckResponse_ServingStatus `protobuf:"varint,1,opt,name=status,proto3,enum=zenflux.HealthCheckResponse_ServingStatus" json:"status,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HealthCheckResponse) Reset() {
+	*x = HealthCheckResponse{}
+	mi := &file_tool_service_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HealthCheckResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HealthCheckResponse) ProtoMessage() {}
+
+func (x *HealthCheckResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_tool_service_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HealthCheckResponse.ProtoReflect.Descriptor instead.
+func (*HealthCheckResponse) Descriptor() ([]byte, []int) {
+	return file_tool_service_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *HealthCheckResponse) GetStatus() HealthCheckResponse_ServingStatus {
+	if x != nil {
+		return x.Status
+	}
+	return HealthCheckResponse_UNKNOWN
+}
+
 type SessionStatusRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
@@ -402,7 +602,7 @@ type SessionStatusRequest struct {
 
 func (x *SessionStatusRequest) Reset() {
 	*x = SessionStatusRequest{}
-	mi := &file_tool_service_proto_msgTypes[5]
+	mi := &file_tool_service_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -414,7 +614,7 @@ func (x *SessionStatusRequest) String() string {
 func (*SessionStatusRequest) ProtoMessage() {}
 
 func (x *SessionStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tool_service_proto_msgTypes[5]
+	mi := &file_tool_service_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -427,7 +627,7 @@ func (x *SessionStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionStatusRequest.ProtoReflect.Descriptor instead.
 func (*SessionStatusRequest) Descriptor() ([]byte, []int) {
-	return file_tool_service_proto_rawDescGZIP(), []int{5}
+	return file_tool_service_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *SessionStatusRequest) GetSessionId() string {
@@ -456,7 +656,7 @@ type SessionStatusResponse struct {
 
 func (x *SessionStatusResponse) Reset() {
 	*x = SessionStatusResponse{}
-	mi := &file_tool_service_proto_msgTypes[6]
+	mi := &file_tool_service_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -468,7 +668,7 @@ func (x *SessionStatusResponse) String() string {
 func (*SessionStatusResponse) ProtoMessage() {}
 
 func (x *SessionStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tool_service_proto_msgTypes[6]
+	mi := &file_tool_service_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -481,7 +681,7 @@ func (x *SessionStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionStatusResponse.ProtoReflect.Descriptor instead.
 func (*SessionStatusResponse) Descriptor() ([]byte, []int) {
-	return file_tool_service_proto_rawDescGZIP(), []int{6}
+	return file_tool_service_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *SessionStatusResponse) GetSessionId() string {
@@ -572,7 +772,7 @@ type SessionEventsRequest struct {
 
 func (x *SessionEventsRequest) Reset() {
 	*x = SessionEventsRequest{}
-	mi := &file_tool_service_proto_msgTypes[7]
+	mi := &file_tool_service_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -584,7 +784,7 @@ func (x *SessionEventsRequest) String() string {
 func (*SessionEventsRequest) ProtoMessage() {}
 
 func (x *SessionEventsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tool_service_proto_msgTypes[7]
+	mi := &file_tool_service_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -597,7 +797,7 @@ func (x *SessionEventsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionEventsRequest.ProtoReflect.Descriptor instead.
 func (*SessionEventsRequest) Descriptor() ([]byte, []int) {
-	return file_tool_service_proto_rawDescGZIP(), []int{7}
+	return file_tool_service_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *SessionEventsRequest) GetSessionId() string {
@@ -634,7 +834,7 @@ type SessionEventsResponse struct {
 
 func (x *SessionEventsResponse) Reset() {
 	*x = SessionEventsResponse{}
-	mi := &file_tool_service_proto_msgTypes[8]
+	mi := &file_tool_service_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -646,7 +846,7 @@ func (x *SessionEventsResponse) String() string {
 func (*SessionEventsResponse) ProtoMessage() {}
 
 func (x *SessionEventsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tool_service_proto_msgTypes[8]
+	mi := &file_tool_service_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -659,7 +859,7 @@ func (x *SessionEventsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionEventsResponse.ProtoReflect.Descriptor instead.
 func (*SessionEventsResponse) Descriptor() ([]byte, []int) {
-	return file_tool_service_proto_rawDescGZIP(), []int{8}
+	return file_tool_service_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *SessionEventsResponse) GetSessionId() string {
@@ -706,7 +906,7 @@ type UserSessionsRequest struct {
 
 func (x *UserSessionsRequest) Reset() {
 	*x = UserSessionsRequest{}
-	mi := &file_tool_service_proto_msgTypes[9]
+	mi := &file_tool_service_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -718,7 +918,7 @@ func (x *UserSessionsRequest) String() string {
 func (*UserSessionsRequest) ProtoMessage() {}
 
 func (x *UserSessionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tool_service_proto_msgTypes[9]
+	mi := &file_tool_service_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -731,7 +931,7 @@ func (x *UserSessionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserSessionsRequest.ProtoReflect.Descriptor instead.
 func (*UserSessionsRequest) Descriptor() ([]byte, []int) {
-	return file_tool_service_proto_rawDescGZIP(), []int{9}
+	return file_tool_service_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *UserSessionsRequest) GetUserId() string {
@@ -752,7 +952,7 @@ type UserSessionsResponse struct {
 
 func (x *UserSessionsResponse) Reset() {
 	*x = UserSessionsResponse{}
-	mi := &file_tool_service_proto_msgTypes[10]
+	mi := &file_tool_service_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -764,7 +964,7 @@ func (x *UserSessionsResponse) String() string {
 func (*UserSessionsResponse) ProtoMessage() {}
 
 func (x *UserSessionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tool_service_proto_msgTypes[10]
+	mi := &file_tool_service_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -777,7 +977,7 @@ func (x *UserSessionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserSessionsResponse.ProtoReflect.Descriptor instead.
 func (*UserSessionsResponse) Descriptor() ([]byte, []int) {
-	return file_tool_service_proto_rawDescGZIP(), []int{10}
+	return file_tool_service_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *UserSessionsResponse) GetUserId() string {
@@ -816,7 +1016,7 @@ type SessionInfo struct {
 
 func (x *SessionInfo) Reset() {
 	*x = SessionInfo{}
-	mi := &file_tool_service_proto_msgTypes[11]
+	mi := &file_tool_service_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -828,7 +1028,7 @@ func (x *SessionInfo) String() string {
 func (*SessionInfo) ProtoMessage() {}
 
 func (x *SessionInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_tool_service_proto_msgTypes[11]
+	mi := &file_tool_service_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -841,7 +1041,7 @@ func (x *SessionInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionInfo.ProtoReflect.Descriptor instead.
 func (*SessionInfo) Descriptor() ([]byte, []int) {
-	return file_tool_service_proto_rawDescGZIP(), []int{11}
+	return file_tool_service_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *SessionInfo) GetSessionId() string {
@@ -902,7 +1102,7 @@ type StopSessionRequest struct {
 
 func (x *StopSessionRequest) Reset() {
 	*x = StopSessionRequest{}
-	mi := &file_tool_service_proto_msgTypes[12]
+	mi := &file_tool_service_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -914,7 +1114,7 @@ func (x *StopSessionRequest) String() string {
 func (*StopSessionRequest) ProtoMessage() {}
 
 func (x *StopSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tool_service_proto_msgTypes[12]
+	mi := &file_tool_service_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -927,7 +1127,7 @@ func (x *StopSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StopSessionRequest.ProtoReflect.Descriptor instead.
 func (*StopSessionRequest) Descriptor() ([]byte, []int) {
-	return file_tool_service_proto_rawDescGZIP(), []int{12}
+	return file_tool_service_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *StopSessionRequest) GetSessionId() string {
@@ -948,7 +1148,7 @@ type StopSessionResponse struct {
 
 func (x *StopSessionResponse) Reset() {
 	*x = StopSessionResponse{}
-	mi := &file_tool_service_proto_msgTypes[13]
+	mi := &file_tool_service_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -960,7 +1160,7 @@ func (x *StopSessionResponse) String() string {
 func (*StopSessionResponse) ProtoMessage() {}
 
 func (x *StopSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tool_service_proto_msgTypes[13]
+	mi := &file_tool_service_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -973,7 +1173,7 @@ func (x *StopSessionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StopSessionResponse.ProtoReflect.Descriptor instead.
 func (*StopSessionResponse) Descriptor() ([]byte, []int) {
-	return file_tool_service_proto_rawDescGZIP(), []int{13}
+	return file_tool_service_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *StopSessionResponse) GetSessionId() string {
@@ -1006,7 +1206,7 @@ type EndSessionRequest struct {
 
 func (x *EndSessionRequest) Reset() {
 	*x = EndSessionRequest{}
-	mi := &file_tool_service_proto_msgTypes[14]
+	mi := &file_tool_service_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1018,7 +1218,7 @@ func (x *EndSessionRequest) String() string {
 func (*EndSessionRequest) ProtoMessage() {}
 
 func (x *EndSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tool_service_proto_msgTypes[14]
+	mi := &file_tool_service_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1031,7 +1231,7 @@ func (x *EndSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EndSessionRequest.ProtoReflect.Descriptor instead.
 func (*EndSessionRequest) Descriptor() ([]byte, []int) {
-	return file_tool_service_proto_rawDescGZIP(), []int{14}
+	return file_tool_service_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *EndSessionRequest) GetSessionId() string {
@@ -1051,7 +1251,7 @@ type EndSessionResponse struct {
 
 func (x *EndSessionResponse) Reset() {
 	*x = EndSessionResponse{}
-	mi := &file_tool_service_proto_msgTypes[15]
+	mi := &file_tool_service_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1063,7 +1263,7 @@ func (x *EndSessionResponse) String() string {
 func (*EndSessionResponse) ProtoMessage() {}
 
 func (x *EndSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tool_service_proto_msgTypes[15]
+	mi := &file_tool_service_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1076,7 +1276,7 @@ func (x *EndSessionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EndSessionResponse.ProtoReflect.Descriptor instead.
 func (*EndSessionResponse) Descriptor() ([]byte, []int) {
-	return file_tool_service_proto_rawDescGZIP(), []int{15}
+	return file_tool_service_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *EndSessionResponse) GetSessionId() string {
@@ -1101,7 +1301,7 @@ type ListSessionsRequest struct {
 
 func (x *ListSessionsRequest) Reset() {
 	*x = ListSessionsRequest{}
-	mi := &file_tool_service_proto_msgTypes[16]
+	mi := &file_tool_service_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1113,7 +1313,7 @@ func (x *ListSessionsRequest) String() string {
 func (*ListSessionsRequest) ProtoMessage() {}
 
 func (x *ListSessionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tool_service_proto_msgTypes[16]
+	mi := &file_tool_service_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1126,7 +1326,7 @@ func (x *ListSessionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSessionsRequest.ProtoReflect.Descriptor instead.
 func (*ListSessionsRequest) Descriptor() ([]byte, []int) {
-	return file_tool_service_proto_rawDescGZIP(), []int{16}
+	return file_tool_service_proto_rawDescGZIP(), []int{19}
 }
 
 type ListSessionsResponse struct {
@@ -1139,7 +1339,7 @@ type ListSessionsResponse struct {
 
 func (x *ListSessionsResponse) Reset() {
 	*x = ListSessionsResponse{}
-	mi := &file_tool_service_proto_msgTypes[17]
+	mi := &file_tool_service_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1151,7 +1351,7 @@ func (x *ListSessionsResponse) String() string {
 func (*ListSessionsResponse) ProtoMessage() {}
 
 func (x *ListSessionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tool_service_proto_msgTypes[17]
+	mi := &file_tool_service_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1164,7 +1364,7 @@ func (x *ListSessionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSessionsResponse.ProtoReflect.Descriptor instead.
 func (*ListSessionsResponse) Descriptor() ([]byte, []int) {
-	return file_tool_service_proto_rawDescGZIP(), []int{17}
+	return file_tool_service_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ListSessionsResponse) GetSessions() []*SessionInfo {
@@ -1194,7 +1394,7 @@ type ToolRequest struct {
 
 func (x *ToolRequest) Reset() {
 	*x = ToolRequest{}
-	mi := &file_tool_service_proto_msgTypes[18]
+	mi := &file_tool_service_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1206,7 +1406,7 @@ func (x *ToolRequest) String() string {
 func (*ToolRequest) ProtoMessage() {}
 
 func (x *ToolRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tool_service_proto_msgTypes[18]
+	mi := &file_tool_service_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1219,7 +1419,7 @@ func (x *ToolRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolRequest.ProtoReflect.Descriptor instead.
 func (*ToolRequest) Descriptor() ([]byte, []int) {
-	return file_tool_service_proto_rawDescGZIP(), []int{18}
+	return file_tool_service_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ToolRequest) GetToolName() string {
@@ -1269,7 +1469,7 @@ type ToolResponse struct {
 
 func (x *ToolResponse) Reset() {
 	*x = ToolResponse{}
-	mi := &file_tool_service_proto_msgTypes[19]
+	mi := &file_tool_service_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1281,7 +1481,7 @@ func (x *ToolResponse) String() string {
 func (*ToolResponse) ProtoMessage() {}
 
 func (x *ToolResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tool_service_proto_msgTypes[19]
+	mi := &file_tool_service_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1294,7 +1494,7 @@ func (x *ToolResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolResponse.ProtoReflect.Descriptor instead.
 func (*ToolResponse) Descriptor() ([]byte, []int) {
-	return file_tool_service_proto_rawDescGZIP(), []int{19}
+	return file_tool_service_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *ToolResponse) GetSuccess() bool {
@@ -1336,7 +1536,7 @@ type ToolChunk struct {
 
 func (x *ToolChunk) Reset() {
 	*x = ToolChunk{}
-	mi := &file_tool_service_proto_msgTypes[20]
+	mi := &file_tool_service_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1348,7 +1548,7 @@ func (x *ToolChunk) String() string {
 func (*ToolChunk) ProtoMessage() {}
 
 func (x *ToolChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_tool_service_proto_msgTypes[20]
+	mi := &file_tool_service_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1361,7 +1561,7 @@ func (x *ToolChunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolChunk.ProtoReflect.Descriptor instead.
 func (*ToolChunk) Descriptor() ([]byte, []int) {
-	return file_tool_service_proto_rawDescGZIP(), []int{20}
+	return file_tool_service_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ToolChunk) GetChunkType() string {
@@ -1394,7 +1594,7 @@ type ToolBatchRequest struct {
 
 func (x *ToolBatchRequest) Reset() {
 	*x = ToolBatchRequest{}
-	mi := &file_tool_service_proto_msgTypes[21]
+	mi := &file_tool_service_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1406,7 +1606,7 @@ func (x *ToolBatchRequest) String() string {
 func (*ToolBatchRequest) ProtoMessage() {}
 
 func (x *ToolBatchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tool_service_proto_msgTypes[21]
+	mi := &file_tool_service_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1419,7 +1619,7 @@ func (x *ToolBatchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolBatchRequest.ProtoReflect.Descriptor instead.
 func (*ToolBatchRequest) Descriptor() ([]byte, []int) {
-	return file_tool_service_proto_rawDescGZIP(), []int{21}
+	return file_tool_service_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *ToolBatchRequest) GetRequests() []*ToolRequest {
@@ -1438,7 +1638,7 @@ type ToolBatchResponse struct {
 
 func (x *ToolBatchResponse) Reset() {
 	*x = ToolBatchResponse{}
-	mi := &file_tool_service_proto_msgTypes[22]
+	mi := &file_tool_service_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1450,7 +1650,7 @@ func (x *ToolBatchResponse) String() string {
 func (*ToolBatchResponse) ProtoMessage() {}
 
 func (x *ToolBatchResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tool_service_proto_msgTypes[22]
+	mi := &file_tool_service_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1463,7 +1663,7 @@ func (x *ToolBatchResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolBatchResponse.ProtoReflect.Descriptor instead.
 func (*ToolBatchResponse) Descriptor() ([]byte, []int) {
-	return file_tool_service_proto_rawDescGZIP(), []int{22}
+	return file_tool_service_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ToolBatchResponse) GetResponses() []*ToolResponse {
@@ -1486,7 +1686,7 @@ type AgentTaskRequest struct {
 
 func (x *AgentTaskRequest) Reset() {
 	*x = AgentTaskRequest{}
-	mi := &file_tool_service_proto_msgTypes[23]
+	mi := &file_tool_service_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1498,7 +1698,7 @@ func (x *AgentTaskRequest) String() string {
 func (*AgentTaskRequest) ProtoMessage() {}
 
 func (x *AgentTaskRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tool_service_proto_msgTypes[23]
+	mi := &file_tool_service_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1511,7 +1711,7 @@ func (x *AgentTaskRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentTaskRequest.ProtoReflect.Descriptor instead.
 func (*AgentTaskRequest) Descriptor() ([]byte, []int) {
-	return file_tool_service_proto_rawDescGZIP(), []int{23}
+	return file_tool_service_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *AgentTaskRequest) GetTaskId() string {
@@ -1562,7 +1762,7 @@ type AgentTaskResponse struct {
 
 func (x *AgentTaskResponse) Reset() {
 	*x = AgentTaskResponse{}
-	mi := &file_tool_service_proto_msgTypes[24]
+	mi := &file_tool_service_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1574,7 +1774,7 @@ func (x *AgentTaskResponse) String() string {
 func (*AgentTaskResponse) ProtoMessage() {}
 
 func (x *AgentTaskResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tool_service_proto_msgTypes[24]
+	mi := &file_tool_service_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1587,7 +1787,7 @@ func (x *AgentTaskResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentTaskResponse.ProtoReflect.Descriptor instead.
 func (*AgentTaskResponse) Descriptor() ([]byte, []int) {
-	return file_tool_service_proto_rawDescGZIP(), []int{24}
+	return file_tool_service_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *AgentTaskResponse) GetSuccess() bool {
@@ -1636,7 +1836,7 @@ type AgentTaskEvent struct {
 
 func (x *AgentTaskEvent) Reset() {
 	*x = AgentTaskEvent{}
-	mi := &file_tool_service_proto_msgTypes[25]
+	mi := &file_tool_service_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1648,7 +1848,7 @@ func (x *AgentTaskEvent) String() string {
 func (*AgentTaskEvent) ProtoMessage() {}
 
 func (x *AgentTaskEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_tool_service_proto_msgTypes[25]
+	mi := &file_tool_service_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1661,7 +1861,7 @@ func (x *AgentTaskEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentTaskEvent.ProtoReflect.Descriptor instead.
 func (*AgentTaskEvent) Descriptor() ([]byte, []int) {
-	return file_tool_service_proto_rawDescGZIP(), []int{25}
+	return file_tool_service_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *AgentTaskEvent) GetEventType() string {
@@ -1695,7 +1895,7 @@ type AgentStatusRequest struct {
 
 func (x *AgentStatusRequest) Reset() {
 	*x = AgentStatusRequest{}
-	mi := &file_tool_service_proto_msgTypes[26]
+	mi := &file_tool_service_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1707,7 +1907,7 @@ func (x *AgentStatusRequest) String() string {
 func (*AgentStatusRequest) ProtoMessage() {}
 
 func (x *AgentStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tool_service_proto_msgTypes[26]
+	mi := &file_tool_service_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1720,7 +1920,7 @@ func (x *AgentStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentStatusRequest.ProtoReflect.Descriptor instead.
 func (*AgentStatusRequest) Descriptor() ([]byte, []int) {
-	return file_tool_service_proto_rawDescGZIP(), []int{26}
+	return file_tool_service_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *AgentStatusRequest) GetAgentId() string {
@@ -1749,7 +1949,7 @@ type AgentStatusResponse struct {
 
 func (x *AgentStatusResponse) Reset() {
 	*x = AgentStatusResponse{}
-	mi := &file_tool_service_proto_msgTypes[27]
+	mi := &file_tool_service_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1761,7 +1961,7 @@ func (x *AgentStatusResponse) String() string {
 func (*AgentStatusResponse) ProtoMessage() {}
 
 func (x *AgentStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tool_service_proto_msgTypes[27]
+	mi := &file_tool_service_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1774,7 +1974,7 @@ func (x *AgentStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentStatusResponse.ProtoReflect.Descriptor instead.
 func (*AgentStatusResponse) Descriptor() ([]byte, []int) {
-	return file_tool_service_proto_rawDescGZIP(), []int{27}
+	return file_tool_service_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *AgentStatusResponse) GetStatus() string {
@@ -1809,7 +2009,7 @@ var File_tool_service_proto protoreflect.FileDescriptor
 
 const file_tool_service_proto_rawDesc = "" +
 	"\n" +
-	"\x12tool_service.proto\x12\azenflux\"\xa7\x03\n" +
+	"\x12tool_service.proto\x12\azenflux\"\xd4\x03\n" +
 	"\vChatRequest\x12\x18\n" +
 	"\amessage\x18\x01 \x01(\tR\amessage\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12,\n" +
@@ -1819,12 +2019,14 @@ const file_tool_service_proto_rawDesc = "" +
 	"\x06stream\x18\x05 \x01(\bR\x06stream\x12)\n" +
 	"\x10background_tasks\x18\x06 \x03(\tR\x0fbackgroundTasks\x12,\n" +
 	"\x05files\x18\a \x03(\v2\x16.zenflux.FileReferenceR\x05files\x12A\n" +
-	"\tvariables\x18\b \x03(\v2#.zenflux.ChatRequest.VariablesEntryR\tvariables\x1a<\n" +
+	"\tvariables\x18\b \x03(\v2#.zenflux.ChatRequest.VariablesEntryR\tvariables\x12\x1e\n" +
+	"\bagent_id\x18\t \x01(\tH\x02R\aagentId\x88\x01\x01\x1a<\n" +
 	"\x0eVariablesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\x12\n" +
 	"\x10_conversation_idB\r\n" +
-	"\v_message_id\"\x96\x01\n" +
+	"\v_message_idB\v\n" +
+	"\t_agent_id\"\x96\x01\n" +
 	"\rFileReference\x12\x1c\n" +
 	"\afile_id\x18\x01 \x01(\tH\x00R\x06fileId\x88\x01\x01\x12\x1e\n" +
 	"\bfile_url\x18\x02 \x01(\tH\x01R\afileUrl\x88\x01\x01\x12 \n" +
@@ -1858,7 +2060,19 @@ const file_tool_service_proto_rawDesc = "" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12 \n" +
 	"\tafter_seq\x18\x02 \x01(\x05H\x00R\bafterSeq\x88\x01\x01B\f\n" +
 	"\n" +
-	"_after_seq\"5\n" +
+	"_after_seq\"H\n" +
+	"\x0fChatMockRequest\x12\x1a\n" +
+	"\bscenario\x18\x01 \x01(\tR\bscenario\x12\x19\n" +
+	"\bdelay_ms\x18\x02 \x01(\x05R\adelayMs\".\n" +
+	"\x12HealthCheckRequest\x12\x18\n" +
+	"\aservice\x18\x01 \x01(\tR\aservice\"\xaa\x01\n" +
+	"\x13HealthCheckResponse\x12B\n" +
+	"\x06status\x18\x01 \x01(\x0e2*.zenflux.HealthCheckResponse.ServingStatusR\x06status\"O\n" +
+	"\rServingStatus\x12\v\n" +
+	"\aUNKNOWN\x10\x00\x12\v\n" +
+	"\aSERVING\x10\x01\x12\x0f\n" +
+	"\vNOT_SERVING\x10\x02\x12\x13\n" +
+	"\x0fSERVICE_UNKNOWN\x10\x03\"5\n" +
 	"\x14SessionStatusRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\"\xdf\x03\n" +
@@ -1988,12 +2202,16 @@ const file_tool_service_proto_rawDesc = "" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12!\n" +
 	"\fcurrent_step\x18\x02 \x01(\tR\vcurrentStep\x12\x1a\n" +
 	"\bprogress\x18\x03 \x01(\x05R\bprogress\x12!\n" +
-	"\factive_tools\x18\x04 \x03(\tR\vactiveTools2\xc0\x01\n" +
+	"\factive_tools\x18\x04 \x03(\tR\vactiveTools2\x92\x01\n" +
+	"\x06Health\x12B\n" +
+	"\x05Check\x12\x1b.zenflux.HealthCheckRequest\x1a\x1c.zenflux.HealthCheckResponse\x12D\n" +
+	"\x05Watch\x12\x1b.zenflux.HealthCheckRequest\x1a\x1c.zenflux.HealthCheckResponse0\x012\x82\x02\n" +
 	"\vChatService\x123\n" +
 	"\x04Chat\x12\x14.zenflux.ChatRequest\x1a\x15.zenflux.ChatResponse\x128\n" +
 	"\n" +
 	"ChatStream\x12\x14.zenflux.ChatRequest\x1a\x12.zenflux.ChatEvent0\x01\x12B\n" +
-	"\x0fReconnectStream\x12\x19.zenflux.ReconnectRequest\x1a\x12.zenflux.ChatEvent0\x012\xe4\x03\n" +
+	"\x0fReconnectStream\x12\x19.zenflux.ReconnectRequest\x1a\x12.zenflux.ChatEvent0\x01\x12@\n" +
+	"\x0eChatMockStream\x12\x18.zenflux.ChatMockRequest\x1a\x12.zenflux.ChatEvent0\x012\xe4\x03\n" +
 	"\x0eSessionService\x12Q\n" +
 	"\x10GetSessionStatus\x12\x1d.zenflux.SessionStatusRequest\x1a\x1e.zenflux.SessionStatusResponse\x12Q\n" +
 	"\x10GetSessionEvents\x12\x1d.zenflux.SessionEventsRequest\x1a\x1e.zenflux.SessionEventsResponse\x12N\n" +
@@ -2023,85 +2241,97 @@ func file_tool_service_proto_rawDescGZIP() []byte {
 	return file_tool_service_proto_rawDescData
 }
 
-var file_tool_service_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
+var file_tool_service_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_tool_service_proto_msgTypes = make([]protoimpl.MessageInfo, 34)
 var file_tool_service_proto_goTypes = []any{
-	(*ChatRequest)(nil),           // 0: zenflux.ChatRequest
-	(*FileReference)(nil),         // 1: zenflux.FileReference
-	(*ChatResponse)(nil),          // 2: zenflux.ChatResponse
-	(*ChatEvent)(nil),             // 3: zenflux.ChatEvent
-	(*ReconnectRequest)(nil),      // 4: zenflux.ReconnectRequest
-	(*SessionStatusRequest)(nil),  // 5: zenflux.SessionStatusRequest
-	(*SessionStatusResponse)(nil), // 6: zenflux.SessionStatusResponse
-	(*SessionEventsRequest)(nil),  // 7: zenflux.SessionEventsRequest
-	(*SessionEventsResponse)(nil), // 8: zenflux.SessionEventsResponse
-	(*UserSessionsRequest)(nil),   // 9: zenflux.UserSessionsRequest
-	(*UserSessionsResponse)(nil),  // 10: zenflux.UserSessionsResponse
-	(*SessionInfo)(nil),           // 11: zenflux.SessionInfo
-	(*StopSessionRequest)(nil),    // 12: zenflux.StopSessionRequest
-	(*StopSessionResponse)(nil),   // 13: zenflux.StopSessionResponse
-	(*EndSessionRequest)(nil),     // 14: zenflux.EndSessionRequest
-	(*EndSessionResponse)(nil),    // 15: zenflux.EndSessionResponse
-	(*ListSessionsRequest)(nil),   // 16: zenflux.ListSessionsRequest
-	(*ListSessionsResponse)(nil),  // 17: zenflux.ListSessionsResponse
-	(*ToolRequest)(nil),           // 18: zenflux.ToolRequest
-	(*ToolResponse)(nil),          // 19: zenflux.ToolResponse
-	(*ToolChunk)(nil),             // 20: zenflux.ToolChunk
-	(*ToolBatchRequest)(nil),      // 21: zenflux.ToolBatchRequest
-	(*ToolBatchResponse)(nil),     // 22: zenflux.ToolBatchResponse
-	(*AgentTaskRequest)(nil),      // 23: zenflux.AgentTaskRequest
-	(*AgentTaskResponse)(nil),     // 24: zenflux.AgentTaskResponse
-	(*AgentTaskEvent)(nil),        // 25: zenflux.AgentTaskEvent
-	(*AgentStatusRequest)(nil),    // 26: zenflux.AgentStatusRequest
-	(*AgentStatusResponse)(nil),   // 27: zenflux.AgentStatusResponse
-	nil,                           // 28: zenflux.ChatRequest.VariablesEntry
-	nil,                           // 29: zenflux.ToolRequest.MetadataEntry
-	nil,                           // 30: zenflux.AgentTaskRequest.ContextEntry
+	(HealthCheckResponse_ServingStatus)(0), // 0: zenflux.HealthCheckResponse.ServingStatus
+	(*ChatRequest)(nil),                    // 1: zenflux.ChatRequest
+	(*FileReference)(nil),                  // 2: zenflux.FileReference
+	(*ChatResponse)(nil),                   // 3: zenflux.ChatResponse
+	(*ChatEvent)(nil),                      // 4: zenflux.ChatEvent
+	(*ReconnectRequest)(nil),               // 5: zenflux.ReconnectRequest
+	(*ChatMockRequest)(nil),                // 6: zenflux.ChatMockRequest
+	(*HealthCheckRequest)(nil),             // 7: zenflux.HealthCheckRequest
+	(*HealthCheckResponse)(nil),            // 8: zenflux.HealthCheckResponse
+	(*SessionStatusRequest)(nil),           // 9: zenflux.SessionStatusRequest
+	(*SessionStatusResponse)(nil),          // 10: zenflux.SessionStatusResponse
+	(*SessionEventsRequest)(nil),           // 11: zenflux.SessionEventsRequest
+	(*SessionEventsResponse)(nil),          // 12: zenflux.SessionEventsResponse
+	(*UserSessionsRequest)(nil),            // 13: zenflux.UserSessionsRequest
+	(*UserSessionsResponse)(nil),           // 14: zenflux.UserSessionsResponse
+	(*SessionInfo)(nil),                    // 15: zenflux.SessionInfo
+	(*StopSessionRequest)(nil),             // 16: zenflux.StopSessionRequest
+	(*StopSessionResponse)(nil),            // 17: zenflux.StopSessionResponse
+	(*EndSessionRequest)(nil),              // 18: zenflux.EndSessionRequest
+	(*EndSessionResponse)(nil),             // 19: zenflux.EndSessionResponse
+	(*ListSessionsRequest)(nil),            // 20: zenflux.ListSessionsRequest
+	(*ListSessionsResponse)(nil),           // 21: zenflux.ListSessionsResponse
+	(*ToolRequest)(nil),                    // 22: zenflux.ToolRequest
+	(*ToolResponse)(nil),                   // 23: zenflux.ToolResponse
+	(*ToolChunk)(nil),                      // 24: zenflux.ToolChunk
+	(*ToolBatchRequest)(nil),               // 25: zenflux.ToolBatchRequest
+	(*ToolBatchResponse)(nil),              // 26: zenflux.ToolBatchResponse
+	(*AgentTaskRequest)(nil),               // 27: zenflux.AgentTaskRequest
+	(*AgentTaskResponse)(nil),              // 28: zenflux.AgentTaskResponse
+	(*AgentTaskEvent)(nil),                 // 29: zenflux.AgentTaskEvent
+	(*AgentStatusRequest)(nil),             // 30: zenflux.AgentStatusRequest
+	(*AgentStatusResponse)(nil),            // 31: zenflux.AgentStatusResponse
+	nil,                                    // 32: zenflux.ChatRequest.VariablesEntry
+	nil,                                    // 33: zenflux.ToolRequest.MetadataEntry
+	nil,                                    // 34: zenflux.AgentTaskRequest.ContextEntry
 }
 var file_tool_service_proto_depIdxs = []int32{
-	1,  // 0: zenflux.ChatRequest.files:type_name -> zenflux.FileReference
-	28, // 1: zenflux.ChatRequest.variables:type_name -> zenflux.ChatRequest.VariablesEntry
-	3,  // 2: zenflux.SessionEventsResponse.events:type_name -> zenflux.ChatEvent
-	11, // 3: zenflux.UserSessionsResponse.sessions:type_name -> zenflux.SessionInfo
-	11, // 4: zenflux.ListSessionsResponse.sessions:type_name -> zenflux.SessionInfo
-	29, // 5: zenflux.ToolRequest.metadata:type_name -> zenflux.ToolRequest.MetadataEntry
-	18, // 6: zenflux.ToolBatchRequest.requests:type_name -> zenflux.ToolRequest
-	19, // 7: zenflux.ToolBatchResponse.responses:type_name -> zenflux.ToolResponse
-	30, // 8: zenflux.AgentTaskRequest.context:type_name -> zenflux.AgentTaskRequest.ContextEntry
-	0,  // 9: zenflux.ChatService.Chat:input_type -> zenflux.ChatRequest
-	0,  // 10: zenflux.ChatService.ChatStream:input_type -> zenflux.ChatRequest
-	4,  // 11: zenflux.ChatService.ReconnectStream:input_type -> zenflux.ReconnectRequest
-	5,  // 12: zenflux.SessionService.GetSessionStatus:input_type -> zenflux.SessionStatusRequest
-	7,  // 13: zenflux.SessionService.GetSessionEvents:input_type -> zenflux.SessionEventsRequest
-	9,  // 14: zenflux.SessionService.GetUserSessions:input_type -> zenflux.UserSessionsRequest
-	12, // 15: zenflux.SessionService.StopSession:input_type -> zenflux.StopSessionRequest
-	14, // 16: zenflux.SessionService.EndSession:input_type -> zenflux.EndSessionRequest
-	16, // 17: zenflux.SessionService.ListSessions:input_type -> zenflux.ListSessionsRequest
-	18, // 18: zenflux.ToolService.ExecuteTool:input_type -> zenflux.ToolRequest
-	18, // 19: zenflux.ToolService.ExecuteToolStream:input_type -> zenflux.ToolRequest
-	21, // 20: zenflux.ToolService.ExecuteToolBatch:input_type -> zenflux.ToolBatchRequest
-	23, // 21: zenflux.AgentService.ExecuteTask:input_type -> zenflux.AgentTaskRequest
-	23, // 22: zenflux.AgentService.ExecuteTaskStream:input_type -> zenflux.AgentTaskRequest
-	26, // 23: zenflux.AgentService.GetAgentStatus:input_type -> zenflux.AgentStatusRequest
-	2,  // 24: zenflux.ChatService.Chat:output_type -> zenflux.ChatResponse
-	3,  // 25: zenflux.ChatService.ChatStream:output_type -> zenflux.ChatEvent
-	3,  // 26: zenflux.ChatService.ReconnectStream:output_type -> zenflux.ChatEvent
-	6,  // 27: zenflux.SessionService.GetSessionStatus:output_type -> zenflux.SessionStatusResponse
-	8,  // 28: zenflux.SessionService.GetSessionEvents:output_type -> zenflux.SessionEventsResponse
-	10, // 29: zenflux.SessionService.GetUserSessions:output_type -> zenflux.UserSessionsResponse
-	13, // 30: zenflux.SessionService.StopSession:output_type -> zenflux.StopSessionResponse
-	15, // 31: zenflux.SessionService.EndSession:output_type -> zenflux.EndSessionResponse
-	17, // 32: zenflux.SessionService.ListSessions:output_type -> zenflux.ListSessionsResponse
-	19, // 33: zenflux.ToolService.ExecuteTool:output_type -> zenflux.ToolResponse
-	20, // 34: zenflux.ToolService.ExecuteToolStream:output_type -> zenflux.ToolChunk
-	22, // 35: zenflux.ToolService.ExecuteToolBatch:output_type -> zenflux.ToolBatchResponse
-	24, // 36: zenflux.AgentService.ExecuteTask:output_type -> zenflux.AgentTaskResponse
-	25, // 37: zenflux.AgentService.ExecuteTaskStream:output_type -> zenflux.AgentTaskEvent
-	27, // 38: zenflux.AgentService.GetAgentStatus:output_type -> zenflux.AgentStatusResponse
-	24, // [24:39] is the sub-list for method output_type
-	9,  // [9:24] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	2,  // 0: zenflux.ChatRequest.files:type_name -> zenflux.FileReference
+	32, // 1: zenflux.ChatRequest.variables:type_name -> zenflux.ChatRequest.VariablesEntry
+	0,  // 2: zenflux.HealthCheckResponse.status:type_name -> zenflux.HealthCheckResponse.ServingStatus
+	4,  // 3: zenflux.SessionEventsResponse.events:type_name -> zenflux.ChatEvent
+	15, // 4: zenflux.UserSessionsResponse.sessions:type_name -> zenflux.SessionInfo
+	15, // 5: zenflux.ListSessionsResponse.sessions:type_name -> zenflux.SessionInfo
+	33, // 6: zenflux.ToolRequest.metadata:type_name -> zenflux.ToolRequest.MetadataEntry
+	22, // 7: zenflux.ToolBatchRequest.requests:type_name -> zenflux.ToolRequest
+	23, // 8: zenflux.ToolBatchResponse.responses:type_name -> zenflux.ToolResponse
+	34, // 9: zenflux.AgentTaskRequest.context:type_name -> zenflux.AgentTaskRequest.ContextEntry
+	7,  // 10: zenflux.Health.Check:input_type -> zenflux.HealthCheckRequest
+	7,  // 11: zenflux.Health.Watch:input_type -> zenflux.HealthCheckRequest
+	1,  // 12: zenflux.ChatService.Chat:input_type -> zenflux.ChatRequest
+	1,  // 13: zenflux.ChatService.ChatStream:input_type -> zenflux.ChatRequest
+	5,  // 14: zenflux.ChatService.ReconnectStream:input_type -> zenflux.ReconnectRequest
+	6,  // 15: zenflux.ChatService.ChatMockStream:input_type -> zenflux.ChatMockRequest
+	9,  // 16: zenflux.SessionService.GetSessionStatus:input_type -> zenflux.SessionStatusRequest
+	11, // 17: zenflux.SessionService.GetSessionEvents:input_type -> zenflux.SessionEventsRequest
+	13, // 18: zenflux.SessionService.GetUserSessions:input_type -> zenflux.UserSessionsRequest
+	16, // 19: zenflux.SessionService.StopSession:input_type -> zenflux.StopSessionRequest
+	18, // 20: zenflux.SessionService.EndSession:input_type -> zenflux.EndSessionRequest
+	20, // 21: zenflux.SessionService.ListSessions:input_type -> zenflux.ListSessionsRequest
+	22, // 22: zenflux.ToolService.ExecuteTool:input_type -> zenflux.ToolRequest
+	22, // 23: zenflux.ToolService.ExecuteToolStream:input_type -> zenflux.ToolRequest
+	25, // 24: zenflux.ToolService.ExecuteToolBatch:input_type -> zenflux.ToolBatchRequest
+	27, // 25: zenflux.AgentService.ExecuteTask:input_type -> zenflux.AgentTaskRequest
+	27, // 26: zenflux.AgentService.ExecuteTaskStream:input_type -> zenflux.AgentTaskRequest
+	30, // 27: zenflux.AgentService.GetAgentStatus:input_type -> zenflux.AgentStatusRequest
+	8,  // 28: zenflux.Health.Check:output_type -> zenflux.HealthCheckResponse
+	8,  // 29: zenflux.Health.Watch:output_type -> zenflux.HealthCheckResponse
+	3,  // 30: zenflux.ChatService.Chat:output_type -> zenflux.ChatResponse
+	4,  // 31: zenflux.ChatService.ChatStream:output_type -> zenflux.ChatEvent
+	4,  // 32: zenflux.ChatService.ReconnectStream:output_type -> zenflux.ChatEvent
+	4,  // 33: zenflux.ChatService.ChatMockStream:output_type -> zenflux.ChatEvent
+	10, // 34: zenflux.SessionService.GetSessionStatus:output_type -> zenflux.SessionStatusResponse
+	12, // 35: zenflux.SessionService.GetSessionEvents:output_type -> zenflux.SessionEventsResponse
+	14, // 36: zenflux.SessionService.GetUserSessions:output_type -> zenflux.UserSessionsResponse
+	17, // 37: zenflux.SessionService.StopSession:output_type -> zenflux.StopSessionResponse
+	19, // 38: zenflux.SessionService.EndSession:output_type -> zenflux.EndSessionResponse
+	21, // 39: zenflux.SessionService.ListSessions:output_type -> zenflux.ListSessionsResponse
+	23, // 40: zenflux.ToolService.ExecuteTool:output_type -> zenflux.ToolResponse
+	24, // 41: zenflux.ToolService.ExecuteToolStream:output_type -> zenflux.ToolChunk
+	26, // 42: zenflux.ToolService.ExecuteToolBatch:output_type -> zenflux.ToolBatchResponse
+	28, // 43: zenflux.AgentService.ExecuteTask:output_type -> zenflux.AgentTaskResponse
+	29, // 44: zenflux.AgentService.ExecuteTaskStream:output_type -> zenflux.AgentTaskEvent
+	31, // 45: zenflux.AgentService.GetAgentStatus:output_type -> zenflux.AgentStatusResponse
+	28, // [28:46] is the sub-list for method output_type
+	10, // [10:28] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_tool_service_proto_init() }
@@ -2114,21 +2344,22 @@ func file_tool_service_proto_init() {
 	file_tool_service_proto_msgTypes[2].OneofWrappers = []any{}
 	file_tool_service_proto_msgTypes[3].OneofWrappers = []any{}
 	file_tool_service_proto_msgTypes[4].OneofWrappers = []any{}
-	file_tool_service_proto_msgTypes[6].OneofWrappers = []any{}
-	file_tool_service_proto_msgTypes[7].OneofWrappers = []any{}
-	file_tool_service_proto_msgTypes[11].OneofWrappers = []any{}
+	file_tool_service_proto_msgTypes[9].OneofWrappers = []any{}
+	file_tool_service_proto_msgTypes[10].OneofWrappers = []any{}
+	file_tool_service_proto_msgTypes[14].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_tool_service_proto_rawDesc), len(file_tool_service_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   31,
+			NumEnums:      1,
+			NumMessages:   34,
 			NumExtensions: 0,
-			NumServices:   4,
+			NumServices:   5,
 		},
 		GoTypes:           file_tool_service_proto_goTypes,
 		DependencyIndexes: file_tool_service_proto_depIdxs,
+		EnumInfos:         file_tool_service_proto_enumTypes,
 		MessageInfos:      file_tool_service_proto_msgTypes,
 	}.Build()
 	File_tool_service_proto = out.File

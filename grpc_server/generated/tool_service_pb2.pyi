@@ -8,7 +8,7 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class ChatRequest(_message.Message):
-    __slots__ = ("message", "user_id", "conversation_id", "message_id", "stream", "background_tasks", "files", "variables")
+    __slots__ = ("message", "user_id", "conversation_id", "message_id", "stream", "background_tasks", "files", "variables", "agent_id")
     class VariablesEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -24,6 +24,7 @@ class ChatRequest(_message.Message):
     BACKGROUND_TASKS_FIELD_NUMBER: _ClassVar[int]
     FILES_FIELD_NUMBER: _ClassVar[int]
     VARIABLES_FIELD_NUMBER: _ClassVar[int]
+    AGENT_ID_FIELD_NUMBER: _ClassVar[int]
     message: str
     user_id: str
     conversation_id: str
@@ -32,7 +33,8 @@ class ChatRequest(_message.Message):
     background_tasks: _containers.RepeatedScalarFieldContainer[str]
     files: _containers.RepeatedCompositeFieldContainer[FileReference]
     variables: _containers.ScalarMap[str, str]
-    def __init__(self, message: _Optional[str] = ..., user_id: _Optional[str] = ..., conversation_id: _Optional[str] = ..., message_id: _Optional[str] = ..., stream: bool = ..., background_tasks: _Optional[_Iterable[str]] = ..., files: _Optional[_Iterable[_Union[FileReference, _Mapping]]] = ..., variables: _Optional[_Mapping[str, str]] = ...) -> None: ...
+    agent_id: str
+    def __init__(self, message: _Optional[str] = ..., user_id: _Optional[str] = ..., conversation_id: _Optional[str] = ..., message_id: _Optional[str] = ..., stream: bool = ..., background_tasks: _Optional[_Iterable[str]] = ..., files: _Optional[_Iterable[_Union[FileReference, _Mapping]]] = ..., variables: _Optional[_Mapping[str, str]] = ..., agent_id: _Optional[str] = ...) -> None: ...
 
 class FileReference(_message.Message):
     __slots__ = ("file_id", "file_url", "file_name")

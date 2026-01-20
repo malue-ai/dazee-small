@@ -85,6 +85,7 @@ message ChatRequest {
   repeated string background_tasks = 6; // 后台任务列表
   repeated FileReference files = 7;    // 文件引用列表
   map<string, string> variables = 8;   // 前端上下文变量
+  optional string agent_id = 9;        // Agent 实例 ID（可选，对应 instances/ 目录名）
 }
 
 message FileReference {

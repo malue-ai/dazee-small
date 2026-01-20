@@ -95,6 +95,8 @@ class ChatServicer(_ChatServicerBase):
         """
         聊天接口（同步模式）
         
+        注意：当 ChatService 启用 mock 模式时，会返回 mock 任务信息
+        
         Args:
             request: 聊天请求
             context: gRPC 上下文
@@ -103,10 +105,17 @@ class ChatServicer(_ChatServicerBase):
             聊天响应
         """
         try:
-            logger.info(
-                f"📨 gRPC 聊天请求: user_id={request.user_id}, "
-                f"message={request.message[:50]}..."
-            )
+            # 检查是否 mock 模式
+            if self.chat_service.enable_mock:
+                logger.info(
+                    f"🎭 gRPC Mock 聊天请求: user_id={request.user_id}, "
+                    f"message={request.message[:50]}..."
+                )
+            else:
+                logger.info(
+                    f"📨 gRPC 聊天请求: user_id={request.user_id}, "
+                    f"message={request.message[:50]}..."
+                )
             
             # 转换文件引用
             files_data = None
@@ -123,7 +132,10 @@ class ChatServicer(_ChatServicerBase):
             # 转换变量
             variables = dict(request.variables) if request.variables else None
             
-            # 调用业务服务（同步模式）
+            # 获取 agent_id（可选）
+            agent_id = request.agent_id if request.agent_id else None
+            
+            # 调用业务服务（同步模式，mock 模式下会返回 mock 任务信息）
             result = await self.chat_service.chat(
                 message=request.message,
                 user_id=request.user_id,
@@ -132,7 +144,8 @@ class ChatServicer(_ChatServicerBase):
                 stream=False,
                 background_tasks=list(request.background_tasks) if request.background_tasks else None,
                 files=files_data,
-                variables=variables
+                variables=variables,
+                agent_id=agent_id
             )
             
             logger.info(f"✅ gRPC 任务已启动: task_id={result['task_id']}")
@@ -166,6 +179,8 @@ class ChatServicer(_ChatServicerBase):
         聊天接口（流式模式）
         
         使用 ZenO 格式适配器，保持与 HTTP API 一致的事件格式
+        
+        注意：当 ChatService 启用 mock 模式时，会自动返回 mock 数据流
         """
         try:
             logger.info(
@@ -190,10 +205,18 @@ class ChatServicer(_ChatServicerBase):
             
             # 初始化 ZenO 格式适配器
             adapter = ZenOAdapter(conversation_id=request.conversation_id or None)
-            logger.info("📋 gRPC 流式聊天使用 ZenO 格式适配器")
             
-            # 调用业务服务（流式模式）
-            async for event in await self.chat_service.chat(
+            # 检查是否 mock 模式
+            if self.chat_service.enable_mock:
+                logger.info("🎭 gRPC 流式聊天使用 Mock 模式")
+            else:
+                logger.info("📋 gRPC 流式聊天使用 ZenO 格式适配器")
+            
+            # 获取 agent_id（可选）
+            agent_id = request.agent_id if request.agent_id else None
+            
+            # 调用业务服务（流式模式，mock 模式下会自动返回 mock 数据）
+            event_stream = await self.chat_service.chat(
                 message=request.message,
                 user_id=request.user_id,
                 conversation_id=request.conversation_id or None,
@@ -201,9 +224,31 @@ class ChatServicer(_ChatServicerBase):
                 stream=True,
                 background_tasks=list(request.background_tasks) if request.background_tasks else None,
                 files=files_data,
-                variables=variables
-            ):
-                # 使用 ZenO 适配器转换事件
+                variables=variables,
+                agent_id=agent_id
+            )
+            
+            async for event in event_stream:
+                # Mock 模式返回的是 SSE 格式字符串 "data: {...}\n\n"
+                if self.chat_service.enable_mock and isinstance(event, str):
+                    if event.startswith("data: "):
+                        json_str = event[6:].strip()
+                        if json_str:
+                            try:
+                                event_data = json.loads(json_str)
+                                grpc_event = tool_service_pb2.ChatEvent(
+                                    event_type=event_data.get("type", "message"),
+                                    data=json_str,
+                                    timestamp=safe_int(event_data.get("timestamp", 0)),
+                                    seq=safe_int(event_data.get("seq", 0)),
+                                    event_uuid=""
+                                )
+                                yield grpc_event
+                            except json.JSONDecodeError:
+                                continue
+                    continue
+                
+                # 正常模式：使用 ZenO 适配器转换事件
                 transformed_event = adapter.transform(event)
                 
                 if transformed_event is None:
