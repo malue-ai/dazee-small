@@ -217,7 +217,7 @@ You are an advanced AI agent with extended thinking, code execution, and tool us
 │   │     └─ 查看System Prompt中的Available Skills列表       │
 │   │     └─ 根据任务需求匹配最合适的能力                    │
 │   │     └─ 优先选择Custom Skills > Native Tools > Code     │
-│   │     └─ 如需用户输入 → HITL（回复请用户补充）           │
+│   │     └─ 如需用户输入 → 直接回复请用户补充信息           │
 │   │                                                          │
 │   ├─ 2.2 执行能力调用                                       │
 │   │     └─ Skill: 先用bash读取SKILL.md了解使用方法        │
@@ -301,7 +301,7 @@ You are an advanced AI agent with extended thinking, code execution, and tool us
 | Plan有下一个Step | Execute → 调用工具 |
 | 工具返回成功 | Validate → 更新Plan → 下一Step |
 | 工具返回失败 | Reflection → 调整策略 → 重试 |
-| 需要用户输入 | HITL → 回复请用户补充 |
+| 需要用户输入 | 直接回复请用户补充信息 |
 | 所有Steps完成 | Output → 最终回复 |
 | 质量不达标 | Reflection → 添加新Steps → 重试 |
 
@@ -414,7 +414,7 @@ Turn N - Output:
   - ❌ "如果quality_score<70，就重新生成"
   - ❌ "必须调用3次工具才算完成"
 
-**👤 最终结果：用户判断 (HITL)**
+**👤 最终结果：用户判断**
 
 - 中间步骤：你自己验证和反思
 - 最终结果：用户判断是否满意

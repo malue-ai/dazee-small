@@ -112,6 +112,11 @@ class CapabilityRegistry:
         # 加载每个能力
         for cap_data in config.get('capabilities', []):
             try:
+                # 🆕 跳过显式禁用的能力
+                if cap_data.get('enabled') is False:
+                    print(f"⏭️ Skipped disabled capability: {cap_data.get('name', 'unknown')}")
+                    continue
+                
                 capability = self._parse_capability(cap_data)
                 self.capabilities[capability.name] = capability
                 self._raw_capabilities.append(cap_data)  # 🆕 保存原始配置
