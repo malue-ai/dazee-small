@@ -7,10 +7,23 @@
 #
 # ============================================================
 
+# Qwen 扩展参数默认值建议（未设置时不透传，避免影响提示词驱动）
+# - enable_search: false
+# - search_options: {"search_mode": "auto"}  # enable_search=true 时
+# - incremental_output: true  # stream=true 时推荐
+# - n: 1  # tools 时固定
+# - response_format: {"type": "text"}  # JSON 输出场景再设置
+# - logprobs/top_logprobs: false/0
+# - top_k/seed/stop: 默认不设
+# - vl_high_resolution_images/vl_enable_image_hw_output: false
+# - enable_code_interpreter: false（仅 qwen3-max-preview 思考模式）
+# 详细说明见 config/llm_config/qwen_recommended_configs.md
+
 profiles:
   # ==================== 主 Agent 对话 ====================
   main_agent:
     description: "主 Agent 对话处理，需要最强推理能力和大输出窗口"
+    provider: "claude"
     model: "claude-sonnet-4-5-20250929"
     max_tokens: 64000
     temperature: 1.0
@@ -19,10 +32,57 @@ profiles:
     enable_caching: true  # 启用多层 Prompt Caching（节省 88% 成本）
     timeout: 120.0
     max_retries: 3
+    fallbacks:
+      # 同模型多服务商：同一 provider + model，不同 base_url/api_key_env
+      - provider: "claude"
+        model: "claude-sonnet-4-5-20250929"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_A"
+        base_url: "https://api.anthropic.com"
+        max_tokens: 64000
+        temperature: 1.0
+        enable_thinking: true
+        thinking_budget: 10000
+        enable_caching: true
+        timeout: 120.0
+        max_retries: 3
+      - provider: "claude"
+        model: "claude-sonnet-4-5-20250929"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_B"
+        base_url: "https://anthropic-proxy-b.example.com/v1"
+        max_tokens: 64000
+        temperature: 1.0
+        enable_thinking: true
+        thinking_budget: 10000
+        enable_caching: true
+        timeout: 120.0
+        max_retries: 3
+      # 跨厂商主备：不同 provider
+      # Qwen-Max: 最强国产模型，作为SimpleAgent备选（稳定工具调用、指令遵循）
+      # 注意：复杂推理和工具调用可能不如Claude，需要充分测试
+      - provider: "qwen"
+        model: "qwen-max"
+        api_key_env: "QWEN_API_KEY"
+        base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+        temperature: 0.8  # 略低于Claude，在创造性和稳定性间平衡
+        top_p: 0.9
+        max_tokens: 32000  # Qwen-Max最大输出可能小于Claude，根据实际调整
+        result_format: "message"
+        # 工具调用优化（如果支持）
+        # tool_choice: "auto"
+        # parallel_tool_calls: true
+        repetition_penalty: 1.05  # 降低重复
+      - provider: "openai"
+        model: "deepseek-chat"
+        api_key_env: "DEEPSEEK_API_KEY"
+        base_url: "https://api.deepseek.com/v1"
+    policy:
+      max_failures: 2
+      cooldown_seconds: 120
 
   # ==================== 意图分析 ====================
   intent_analyzer:
     description: "分析用户意图，需要快速响应，使用轻量模型"
+    provider: "claude"
     model: "claude-haiku-4-5-20251001"
     max_tokens: 2048
     temperature: 0
@@ -30,6 +90,209 @@ profiles:
     enable_caching: true  # 启用 Prompt Caching（意图识别提示词 1h 缓存）
     timeout: 60.0
     max_retries: 2
+    fallbacks:
+      # 同模型多服务商：同一 provider + model，不同 base_url/api_key_env
+      - provider: "claude"
+        model: "claude-haiku-4-5-20251001"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_A"
+        base_url: "https://api.anthropic.com"
+        max_tokens: 2048
+        temperature: 0
+        enable_thinking: false
+        enable_caching: true
+        timeout: 60.0
+        max_retries: 2
+      - provider: "claude"
+        model: "claude-haiku-4-5-20251001"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_B"
+        base_url: "https://anthropic-proxy-b.example.com/v1"
+        max_tokens: 2048
+        temperature: 0
+        enable_thinking: false
+        enable_caching: true
+        timeout: 60.0
+        max_retries: 2
+      # 跨厂商主备：不同 provider
+      # Qwen-Plus: 高性价比，适合意图分析（低延迟、准确意图理解）
+      - provider: "qwen"
+        model: "qwen-plus"
+        api_key_env: "QWEN_API_KEY"
+        base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+        temperature: 0  # 确定性输出，保证意图识别准确性
+        top_p: 0.9
+        max_tokens: 2048
+        result_format: "message"
+    policy:
+      max_failures: 2
+      cooldown_seconds: 120
+
+  # ==================== 多智能体 Lead ====================
+  lead_agent:
+    description: "多智能体 LeadAgent 任务分解与汇总"
+    provider: "claude"
+    model: "claude-opus-4-5-20251101"
+    max_tokens: 16384
+    temperature: 0.3
+    enable_thinking: true
+    thinking_budget: 10000
+    enable_caching: false
+    timeout: 120.0
+    max_retries: 2
+    fallbacks:
+      # 同模型多服务商：同一 provider + model，不同 base_url/api_key_env
+      - provider: "claude"
+        model: "claude-opus-4-5-20251101"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_A"
+        base_url: "https://api.anthropic.com"
+        max_tokens: 16384
+        temperature: 0.3
+        enable_thinking: true
+        thinking_budget: 10000
+        enable_caching: false
+        timeout: 120.0
+        max_retries: 2
+      - provider: "claude"
+        model: "claude-opus-4-5-20251101"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_B"
+        base_url: "https://anthropic-proxy-b.example.com/v1"
+        max_tokens: 16384
+        temperature: 0.3
+        enable_thinking: true
+        thinking_budget: 10000
+        enable_caching: false
+        timeout: 120.0
+        max_retries: 2
+      # 跨厂商主备：不同 provider
+      # Qwen-Max: 最强国产模型，强推理能力、任务分解能力，良好长上下文支持
+      - provider: "qwen"
+        model: "qwen-max"
+        api_key_env: "QWEN_API_KEY"
+        base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+        temperature: 0.3  # 与主模型保持一致，保证任务分解的准确性
+        top_p: 0.9
+        max_tokens: 16384
+        result_format: "message"
+        # 注意：Qwen3系列支持enable_thinking，但当前使用qwen-max，暂不启用
+        # enable_thinking: true
+        # thinking_budget: 8000  # 略低于Claude，考虑性能差距
+      - provider: "openai"
+        model: "deepseek-reasoner"
+        api_key_env: "DEEPSEEK_API_KEY"
+        base_url: "https://api.deepseek.com/v1"
+    policy:
+      max_failures: 2
+      cooldown_seconds: 180
+
+  # ==================== 多智能体 Worker ====================
+  worker_agent:
+    description: "多智能体 Worker 执行任务"
+    provider: "claude"
+    model: "claude-sonnet-4-5-20250929"
+    max_tokens: 8192
+    temperature: 0.5
+    enable_thinking: true
+    thinking_budget: 5000
+    enable_caching: false
+    timeout: 90.0
+    max_retries: 2
+    fallbacks:
+      # 同模型多服务商：同一 provider + model，不同 base_url/api_key_env
+      - provider: "claude"
+        model: "claude-sonnet-4-5-20250929"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_A"
+        base_url: "https://api.anthropic.com"
+        max_tokens: 8192
+        temperature: 0.5
+        enable_thinking: true
+        thinking_budget: 5000
+        enable_caching: false
+        timeout: 90.0
+        max_retries: 2
+      - provider: "claude"
+        model: "claude-sonnet-4-5-20250929"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_B"
+        base_url: "https://anthropic-proxy-b.example.com/v1"
+        max_tokens: 8192
+        temperature: 0.5
+        enable_thinking: true
+        thinking_budget: 5000
+        enable_caching: false
+        timeout: 90.0
+        max_retries: 2
+      # 跨厂商主备：不同 provider
+      # Qwen-Max: 能力最接近Claude Sonnet，稳定执行、工具调用
+      # 注意：工具调用格式可能不同，需要适配
+      - provider: "qwen"
+        model: "qwen-max"
+        api_key_env: "QWEN_API_KEY"
+        base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+        temperature: 0.5  # 与主模型保持一致
+        top_p: 0.9
+        max_tokens: 8192
+        result_format: "message"
+        # 工具调用优化参数（如果支持）
+        # tool_choice: "auto"  # 自动选择工具
+        # parallel_tool_calls: true  # 并行工具调用提升效率
+        repetition_penalty: 1.05  # 降低重复，提升执行质量
+      - provider: "openai"
+        model: "deepseek-chat"
+        api_key_env: "DEEPSEEK_API_KEY"
+        base_url: "https://api.deepseek.com/v1"
+    policy:
+      max_failures: 2
+      cooldown_seconds: 120
+
+  # ==================== 多智能体 Critic ====================
+  critic_agent:
+    description: "多智能体 Critic 质量评估"
+    provider: "claude"
+    model: "claude-sonnet-4-5-20250929"
+    max_tokens: 4096
+    temperature: 0.3
+    enable_thinking: true
+    thinking_budget: 4000
+    enable_caching: false
+    timeout: 90.0
+    max_retries: 2
+    fallbacks:
+      # 同模型多服务商：同一 provider + model，不同 base_url/api_key_env
+      - provider: "claude"
+        model: "claude-sonnet-4-5-20250929"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_A"
+        base_url: "https://api.anthropic.com"
+        max_tokens: 4096
+        temperature: 0.3
+        enable_thinking: true
+        thinking_budget: 4000
+        enable_caching: false
+        timeout: 90.0
+        max_retries: 2
+      - provider: "claude"
+        model: "claude-sonnet-4-5-20250929"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_B"
+        base_url: "https://anthropic-proxy-b.example.com/v1"
+        max_tokens: 4096
+        temperature: 0.3
+        enable_thinking: true
+        thinking_budget: 4000
+        enable_caching: false
+        timeout: 90.0
+        max_retries: 2
+      # 跨厂商主备：不同 provider
+      # Qwen-Max: 强评审能力，低幻觉率（相比Claude可能略高，但已是最佳选择）
+      - provider: "qwen"
+        model: "qwen-max"
+        api_key_env: "QWEN_API_KEY"
+        base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+        temperature: 0.2  # 更低温度，降低幻觉，提升评审准确性
+        top_p: 0.9
+        max_tokens: 4096
+        result_format: "message"
+        repetition_penalty: 1.05  # 降低重复
+        presence_penalty: 0.3  # 轻微降低内容重复度
+    policy:
+      max_failures: 2
+      cooldown_seconds: 120
 
   # ==================== 语义推理 ====================
   semantic_inference:
@@ -144,6 +407,7 @@ profiles:
   # ==================== 计划管理 ====================
   plan_manager:
     description: "智能任务规划和管理，需要深度推理能力"
+    provider: "claude"
     model: "claude-sonnet-4-5-20250929"
     max_tokens: 8192
     temperature: 1.0
@@ -152,6 +416,35 @@ profiles:
     enable_caching: false
     timeout: 120.0
     max_retries: 2
+    fallbacks:
+      # 同模型多服务商：同一 provider + model，不同 base_url/api_key_env
+      - provider: "claude"
+        model: "claude-sonnet-4-5-20250929"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_A"
+        base_url: "https://api.anthropic.com"
+        max_tokens: 8192
+        temperature: 1.0
+        enable_thinking: true
+        thinking_budget: 5000
+        enable_caching: false
+        timeout: 120.0
+        max_retries: 2
+      - provider: "claude"
+        model: "claude-sonnet-4-5-20250929"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_B"
+        base_url: "https://anthropic-proxy-b.example.com/v1"
+        max_tokens: 8192
+        temperature: 1.0
+        enable_thinking: true
+        thinking_budget: 5000
+        enable_caching: false
+        timeout: 120.0
+        max_retries: 2
+      # 跨厂商主备：不同 provider
+      - provider: "qwen"
+        model: "qwen-max"
+        api_key_env: "QWEN_API_KEY"
+        base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 
 # ============================================================
 # 配置说明

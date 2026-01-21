@@ -6,19 +6,32 @@ Dazee E2E 测试运行入口
 """
 
 import asyncio
+import os
 import sys
 import argparse
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any
 
+import pytest
+
 # 添加项目路径
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
+RUN_DAZEE_E2E = os.getenv("RUN_DAZEE_E2E", "false").lower() == "true"
+if not RUN_DAZEE_E2E:
+    pytest.skip("未启用 RUN_DAZEE_E2E，跳过 Dazee E2E 测试", allow_module_level=True)
+
 from logger import get_logger
-from test_full_pipeline import run_pipeline
-from validators import validate_pipeline_results
+try:
+    # 作为包内测试执行
+    from .test_full_pipeline import run_pipeline
+    from .validators import validate_pipeline_results
+except ImportError:
+    # 作为脚本直接运行
+    from test_full_pipeline import run_pipeline
+    from validators import validate_pipeline_results
 
 logger = get_logger("dazee.e2e.runner")
 

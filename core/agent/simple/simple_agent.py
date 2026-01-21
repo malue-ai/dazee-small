@@ -34,7 +34,7 @@ SimpleAgent - 精简版核心 Agent
 import json
 import os
 from datetime import datetime
-from typing import Dict, Any, List, Optional, AsyncGenerator
+from typing import Dict, Any, List, Optional, AsyncGenerator, TYPE_CHECKING
 
 # 2. 第三方库（无）
 
@@ -52,12 +52,15 @@ from core.context.context_engineering import (
 )
 from core.context.prompt_manager import get_prompt_manager, PromptManager
 from core.events.broadcaster import EventBroadcaster
-from core.llm import Message, LLMResponse, ToolType, create_claude_service
-from core.tool import create_tool_executor, create_tool_selector
+from core.llm import Message, LLMResponse, ToolType, create_llm_service
+from core.tool import create_tool_executor, create_tool_selector, create_unified_tool_caller
 from core.tool.capability import create_capability_registry, create_invocation_selector
 from core.orchestration import create_pipeline_tracer, E2EPipelineTracer
 from core.confirmation_manager import get_confirmation_manager, ConfirmationType
 from core.agent.types import IntentResult
+
+if TYPE_CHECKING:
+    from core.llm.base import LLMConfig
 from core.agent.content_handler import ContentHandler, create_content_handler
 from logger import get_logger
 from tools.plan_todo_tool import create_plan_todo_tool
@@ -325,16 +328,22 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
         # 2. 意图分析器
         if self.schema.intent_analyzer.enabled:
             intent_config = self.schema.intent_analyzer
-            self.intent_llm = create_claude_service(
-                model=intent_config.llm_model,
-                enable_thinking=False,
-                enable_caching=True,
-                tools=[],
-                max_tokens=8192
-            )
+            from config.llm_config import get_llm_profile
+            intent_profile = get_llm_profile("intent_analyzer")
+            profile_provider = str(intent_profile.get("provider", "claude")).lower()
+            if profile_provider == "claude":
+                intent_profile["model"] = intent_config.llm_model
+            intent_profile.update({
+                "enable_thinking": False,
+                "enable_caching": True,
+                "tools": [],
+                "max_tokens": 8192
+            })
+            self.intent_llm = create_llm_service(**intent_profile)
             self.intent_analyzer = create_intent_analyzer(
                 llm_service=self.intent_llm,
-                enable_llm=intent_config.use_llm
+                enable_llm=intent_config.use_llm,
+                prompt_cache=self.prompt_cache
             )
             logger.debug(f"✓ IntentAnalyzer 已启用 (model={intent_config.llm_model})")
         else:
@@ -349,6 +358,9 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
         else:
             self.tool_selector = None
             logger.debug("○ ToolSelector 未启用")
+        
+        # 3.1 🆕 统一工具调用协调器
+        self.unified_tool_caller = create_unified_tool_caller(self.capability_registry)
         
         # 4. 工具执行器
         tool_context = {
@@ -382,7 +394,6 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
         llm_enable_caching = self.schema.enable_caching if self.schema.enable_caching is not None else True
         
         llm_kwargs = {
-            "model": self.model,
             "enable_thinking": llm_enable_thinking,
             "enable_caching": llm_enable_caching,
             "tools": [ToolType.BASH, ToolType.TEXT_EDITOR, ToolType.WEB_SEARCH],
@@ -392,8 +403,14 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
             llm_kwargs["temperature"] = self.schema.temperature
         if self.schema.max_tokens is not None:
             llm_kwargs["max_tokens"] = self.schema.max_tokens
-        
-        self.llm = create_claude_service(**llm_kwargs)
+
+        from config.llm_config import get_llm_profile
+        main_profile = get_llm_profile("main_agent")
+        profile_provider = str(main_profile.get("provider", "claude")).lower()
+        if profile_provider == "claude":
+            main_profile["model"] = self.model
+        main_profile.update(llm_kwargs)
+        self.llm = create_llm_service(**main_profile)
         
         logger.debug(f"✓ 执行 LLM 初始化: thinking={llm_enable_thinking}, caching={llm_enable_caching}")
         
@@ -428,9 +445,12 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
         registered_skills = self.capability_registry.get_registered_skills()
         
         if registered_skills:
-            self.llm.enable_skills(registered_skills)
-            skill_names = [s.get('skill_id', 'unknown')[:20] + '...' for s in registered_skills]
-            logger.info(f"🎯 已启用 {len(registered_skills)} 个 Claude Skills: {skill_names}")
+            if hasattr(self.llm, "supports_skills") and self.llm.supports_skills():
+                self.llm.enable_skills(registered_skills)
+                skill_names = [s.get('skill_id', 'unknown')[:20] + '...' for s in registered_skills]
+                logger.info(f"🎯 已启用 {len(registered_skills)} 个 Claude Skills: {skill_names}")
+            else:
+                logger.info("ℹ️ 当前模型不支持 Claude Skills，已自动跳过 Skills 启用")
         else:
             logger.debug("○ 没有已注册的 Claude Skills")
     
@@ -511,13 +531,14 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
         
         # ===== 阶段 4: System Prompt 组装 =====
         user_query = messages[-1]["content"] if messages else ""
+        llm_config = self._get_llm_config()
         system_prompt = build_system_prompt(
             intent=intent,
             prompt_cache=self.prompt_cache,
             prompt_manager=prompt_manager,
             context_strategy=self.context_strategy,
             system_prompt=self.system_prompt,
-            llm_enable_caching=self.llm.config.enable_caching,
+            llm_enable_caching=llm_config.enable_caching if llm_config else False,
             user_id=user_id,
             user_query=user_query,
             ctx=ctx
@@ -614,7 +635,7 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
         logger.warning("⚠️ 未提供意图结果，使用默认配置")
         from core.agent.types import IntentResult, TaskType, Complexity
         intent = IntentResult(
-            task_type=TaskType.GENERAL,
+            task_type=TaskType.OTHER,
             complexity=Complexity.MEDIUM,
             needs_plan=self.schema.plan_manager.enabled,
             confidence=1.0
@@ -625,6 +646,21 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
             stage.skip("未提供意图结果，使用默认配置")
         
         return intent
+
+    def _get_llm_config(self) -> Optional["LLMConfig"]:
+        """
+        获取 LLM 配置（兼容 ModelRouter）
+        
+        Returns:
+            LLMConfig 或 None
+        """
+        if hasattr(self.llm, "config"):
+            return self.llm.config
+        if hasattr(self.llm, "primary") and hasattr(self.llm.primary, "service"):
+            service = self.llm.primary.service
+            if hasattr(service, "config"):
+                return service.config
+        return None
 
     async def _maybe_generate_failure_summary(
         self,
@@ -741,19 +777,22 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
         use_skill_path = False
         invocation_strategy = None
         
-        # V4.4: Skill 路径
+        # V4.4: Skill 路径（仅当当前 LLM 支持 Skills）
         if plan and plan.get('recommended_skill'):
-            use_skill_path = True
-            selection_source = "skill"
-            skill_info = plan.get('recommended_skill')
-            skill_name = skill_info.get('name', 'unknown') if isinstance(skill_info, dict) else skill_info
-            logger.info(f"🎯 V4.4 Skill 路径: 使用 Claude Skill '{skill_name}'")
-            
-            invocation_strategy = self.invocation_selector.select_strategy(
-                task_type=intent.task_type.value,
-                selected_tools=[],
-                plan_result=plan
-            )
+            if hasattr(self.llm, "supports_skills") and self.llm.supports_skills():
+                use_skill_path = True
+                selection_source = "skill"
+                skill_info = plan.get('recommended_skill')
+                skill_name = skill_info.get('name', 'unknown') if isinstance(skill_info, dict) else skill_info
+                logger.info(f"🎯 V4.4 Skill 路径: 使用 Claude Skill '{skill_name}'")
+                
+                invocation_strategy = self.invocation_selector.select_strategy(
+                    task_type=intent.task_type.value,
+                    selected_tools=[],
+                    plan_result=plan
+                )
+            else:
+                logger.info("ℹ️ 当前模型不支持 Claude Skills，忽略推荐 Skill 路径")
         
         # 确定所需能力
         if self.schema.tools:
@@ -767,6 +806,14 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
         else:
             required_capabilities = self.capability_registry.get_capabilities_for_task_type(
                 intent.task_type.value
+            )
+
+        # 🆕 Skills 不可用时，尝试注入 fallback 工具
+        if plan and plan.get('recommended_skill'):
+            required_capabilities = self.unified_tool_caller.ensure_skill_fallback(
+                required_capabilities=required_capabilities,
+                recommended_skill=plan.get('recommended_skill'),
+                llm_service=self.llm
             )
         
         # 获取可用 API 并选择工具

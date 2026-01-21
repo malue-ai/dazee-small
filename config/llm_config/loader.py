@@ -30,6 +30,7 @@ logger = get_logger(__name__)
 
 # 全局缓存（避免重复读取文件）
 _config_cache: Optional[Dict[str, Any]] = None
+_global_override_cache: Optional[Dict[str, Any]] = None
 
 
 def _load_config() -> Dict[str, Any]:
@@ -74,7 +75,176 @@ def _load_config() -> Dict[str, Any]:
         raise yaml.YAMLError(f"配置文件格式错误: {e}")
 
 
-def get_llm_profile(profile_name: str, **overrides) -> Dict[str, Any]:
+def _apply_env_overrides(
+    profile: Dict[str, Any],
+    profile_name: str,
+    env_prefix: str = "LLM_"
+) -> Dict[str, Any]:
+    """
+    应用环境变量覆盖
+    """
+    env_key_prefix = f"{env_prefix}{profile_name.upper()}_"
+    
+    env_mappings = {
+        f"{env_key_prefix}MODEL": ("model", str),
+        f"{env_key_prefix}MAX_TOKENS": ("max_tokens", int),
+        f"{env_key_prefix}TEMPERATURE": ("temperature", float),
+        f"{env_key_prefix}ENABLE_THINKING": ("enable_thinking", lambda v: v.lower() in ("true", "1", "yes")),
+        f"{env_key_prefix}THINKING_BUDGET": ("thinking_budget", int),
+        f"{env_key_prefix}TIMEOUT": ("timeout", float),
+        f"{env_key_prefix}MAX_RETRIES": ("max_retries", int),
+        f"{env_key_prefix}PROVIDER": ("provider", str),
+        f"{env_key_prefix}BASE_URL": ("base_url", str),
+        f"{env_key_prefix}API_KEY_ENV": ("api_key_env", str),
+        f"{env_key_prefix}API_KEY": ("api_key", str),
+        f"{env_key_prefix}COMPAT": ("compat", str),
+    }
+    
+    overrides = {}
+    for env_key, (config_key, cast_type) in env_mappings.items():
+        env_value = os.getenv(env_key)
+        if env_value is None:
+            continue
+        try:
+            overrides[config_key] = cast_type(env_value)
+        except ValueError:
+            logger.warning(f"⚠️ 环境变量 {env_key} 值无效，已忽略")
+    
+    if overrides:
+        profile.update(overrides)
+        logger.info(f"🌍 Profile '{profile_name}' 已应用环境变量覆盖: {list(overrides.keys())}")
+    
+    return profile
+
+
+def _get_global_config_path() -> Optional[Path]:
+    """
+    获取全局配置文件路径（config.yaml）
+    """
+    path_value = (
+        os.getenv("LLM_GLOBAL_CONFIG_PATH")
+        or os.getenv("ZENFLUX_CONFIG_PATH")
+        or os.getenv("INSTANCE_CONFIG_PATH")
+    )
+    if path_value:
+        return Path(path_value)
+    
+    instance_name = (
+        os.getenv("ZENFLUX_INSTANCE")
+        or os.getenv("INSTANCE_NAME")
+        or os.getenv("AGENT_INSTANCE")
+    )
+    if not instance_name:
+        return None
+    
+    project_root = Path(__file__).resolve().parents[2]
+    return project_root / "instances" / instance_name / "config.yaml"
+
+
+def _load_global_override_from_config() -> Dict[str, Any]:
+    """
+    从 config.yaml 读取全局 LLM 切换配置
+    """
+    global _global_override_cache
+    if _global_override_cache is not None:
+        return _global_override_cache
+    
+    config_path = _get_global_config_path()
+    if not config_path or not config_path.exists():
+        _global_override_cache = {}
+        return _global_override_cache
+    
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            raw = yaml.safe_load(f) or {}
+    except Exception as e:
+        logger.warning(f"⚠️ 读取全局 config.yaml 失败: {e}")
+        _global_override_cache = {}
+        return _global_override_cache
+    
+    override = raw.get("llm_global", {}) if isinstance(raw, dict) else {}
+    if not override or not override.get("enabled", False):
+        _global_override_cache = {}
+        return _global_override_cache
+    
+    _global_override_cache = override
+    logger.info(f"✅ 已加载全局 LLM 覆盖配置: {config_path}")
+    return _global_override_cache
+
+
+def _apply_global_overrides(profile: Dict[str, Any], profile_name: str) -> Dict[str, Any]:
+    """
+    应用全局一键切换覆盖（用于全局切换 Provider）
+    
+    说明：
+    - LLM_FORCE_PROVIDER / LLM_GLOBAL_PROVIDER 可一键切换全局 Provider
+    - 若未显式指定 model，将按角色默认模型映射
+    """
+    provider = os.getenv("LLM_FORCE_PROVIDER") or os.getenv("LLM_GLOBAL_PROVIDER")
+    global_override = {}
+    if not provider:
+        global_override = _load_global_override_from_config()
+        provider = str(global_override.get("provider", "")).lower() if global_override else ""
+    
+    if not provider:
+        return profile
+    
+    provider = provider.strip().lower()
+    overrides: Dict[str, Any] = {"provider": provider}
+    
+    # 模型映射（未指定时）
+    model = os.getenv("LLM_FORCE_MODEL") or os.getenv("LLM_GLOBAL_MODEL")
+    if not model:
+        model_map = global_override.get("model_map", {}) if global_override else {}
+        if isinstance(model_map, dict):
+            model = model_map.get(profile_name) or model_map.get("default")
+        if provider == "qwen":
+            if profile_name == "intent_analyzer":
+                model = "qwen-plus"
+            else:
+                model = "qwen-max"
+    if model:
+        overrides["model"] = model
+    
+    # base_url（未指定时）
+    base_url = os.getenv("LLM_FORCE_BASE_URL") or os.getenv("LLM_GLOBAL_BASE_URL")
+    if not base_url and provider == "qwen":
+        base_url = (
+            (global_override.get("base_url") if global_override else None)
+            or os.getenv("QWEN_BASE_URL")
+            or "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+        )
+    if base_url:
+        overrides["base_url"] = base_url
+    
+    # api_key_env（未指定时）
+    api_key_env = os.getenv("LLM_FORCE_API_KEY_ENV") or os.getenv("LLM_GLOBAL_API_KEY_ENV")
+    if not api_key_env and provider == "qwen":
+        api_key_env = (global_override.get("api_key_env") if global_override else None) or "QWEN_API_KEY"
+    if api_key_env:
+        overrides["api_key_env"] = api_key_env
+    
+    # compat（未指定时）
+    compat = os.getenv("LLM_FORCE_COMPAT") or os.getenv("LLM_GLOBAL_COMPAT")
+    if not compat and provider == "qwen":
+        compat = (global_override.get("compat") if global_override else None) or "qwen"
+    if compat:
+        overrides["compat"] = compat
+    
+    profile.update(overrides)
+    source = "env" if (os.getenv("LLM_FORCE_PROVIDER") or os.getenv("LLM_GLOBAL_PROVIDER")) else "config.yaml"
+    logger.warning(
+        f"🚨 Profile '{profile_name}' 启用全局覆盖({source}): {list(overrides.keys())}"
+    )
+    
+    return profile
+
+
+def get_llm_profile(
+    profile_name: str,
+    env_prefix: str = "LLM_",
+    **overrides
+) -> Dict[str, Any]:
     """
     获取指定的 LLM Profile 配置
     
@@ -118,7 +288,10 @@ def get_llm_profile(profile_name: str, **overrides) -> Dict[str, Any]:
         profile.update(overrides)
         logger.debug(f"🔧 Profile '{profile_name}' 已覆盖参数: {list(overrides.keys())}")
     
-    return profile
+    # 环境变量覆盖（用于手动切换）
+    profile = _apply_env_overrides(profile, profile_name, env_prefix=env_prefix)
+    # 全局一键切换覆盖（最高优先级）
+    return _apply_global_overrides(profile, profile_name)
 
 
 def list_profiles() -> Dict[str, str]:
@@ -153,8 +326,9 @@ def reload_config():
         from config.llm_config import reload_config
         reload_config()
     """
-    global _config_cache
+    global _config_cache, _global_override_cache
     _config_cache = None
+    _global_override_cache = None
     _load_config()
     logger.info("🔄 LLM 配置已重新加载")
 
@@ -187,43 +361,8 @@ def get_llm_profile_from_env(
         profile = get_llm_profile_from_env("semantic_inference")
         # profile["max_tokens"] 将是 1000
     """
-    # 获取基础配置
-    profile = get_llm_profile(profile_name)
-    
-    # 构建环境变量前缀
-    env_key_prefix = f"{env_prefix}{profile_name.upper()}_"
-    
-    # 支持的环境变量覆盖
-    env_mappings = {
-        f"{env_key_prefix}MODEL": "model",
-        f"{env_key_prefix}MAX_TOKENS": "max_tokens",
-        f"{env_key_prefix}TEMPERATURE": "temperature",
-        f"{env_key_prefix}ENABLE_THINKING": "enable_thinking",
-        f"{env_key_prefix}THINKING_BUDGET": "thinking_budget",
-        f"{env_key_prefix}TIMEOUT": "timeout",
-        f"{env_key_prefix}MAX_RETRIES": "max_retries",
-    }
-    
-    # 应用环境变量覆盖
-    overrides = {}
-    for env_key, config_key in env_mappings.items():
-        env_value = os.getenv(env_key)
-        if env_value is not None:
-            # 类型转换
-            if config_key in ["max_tokens", "thinking_budget", "max_retries"]:
-                overrides[config_key] = int(env_value)
-            elif config_key in ["temperature", "timeout"]:
-                overrides[config_key] = float(env_value)
-            elif config_key == "enable_thinking":
-                overrides[config_key] = env_value.lower() in ("true", "1", "yes")
-            else:
-                overrides[config_key] = env_value
-    
-    if overrides:
-        profile.update(overrides)
-        logger.info(f"🌍 Profile '{profile_name}' 已应用环境变量覆盖: {list(overrides.keys())}")
-    
-    return profile
+    # 直接复用统一入口（已包含环境变量覆盖）
+    return get_llm_profile(profile_name, env_prefix=env_prefix)
 
 
 # ============================================================

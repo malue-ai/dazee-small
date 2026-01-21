@@ -355,6 +355,34 @@ class AgentFactory:
             conversation_service=conversation_service,
             prompt_schema=prompt_schema,  # 🆕 V4.6: 传递 PromptSchema
         )
+
+    @classmethod
+    def create_router(
+        cls,
+        prompt_cache=None
+    ):
+        """
+        创建路由器（注入 InstancePromptCache）
+        """
+        from core.routing import AgentRouter
+        from core.llm import create_llm_service
+        from config.llm_config import get_llm_profile
+        
+        profile = get_llm_profile("intent_analyzer")
+        profile.setdefault("tools", [])
+        llm_service = create_llm_service(**profile)
+        
+        return AgentRouter(llm_service=llm_service, prompt_cache=prompt_cache)
+
+    @classmethod
+    def create_route(
+        cls,
+        prompt_cache=None
+    ):
+        """
+        兼容入口：create_route → create_router
+        """
+        return cls.create_router(prompt_cache=prompt_cache)
     
     @classmethod
     async def _generate_schema(
@@ -366,11 +394,11 @@ class AgentFactory:
         from core.llm import Message
         
         if llm_service is None:
-            from core.llm import create_claude_service
+            from core.llm import create_llm_service
             # 🆕 使用配置化的 LLM Profile
             from config.llm_config import get_llm_profile
             profile = get_llm_profile("schema_generator")
-            llm_service = create_claude_service(**profile)
+            llm_service = create_llm_service(**profile)
         
         response = await llm_service.create_message_async(
             messages=[Message(
@@ -521,15 +549,18 @@ class AgentFactory:
         """
         from core.agent.multi import MultiAgentOrchestrator
         from core.agent.multi.models import OrchestratorConfig
-        from core.llm import create_claude_service
+        from core.llm import create_llm_service
+        from config.llm_config import get_llm_profile
         from core.memory.working import WorkingMemory
         
         # 创建 LLM Service（用于任务分解和结果聚合）
-        llm_service = create_claude_service(
-            model=schema.model,
-            enable_thinking=True,
-            enable_caching=True,
-        )
+        profile = get_llm_profile("lead_agent")
+        profile.update({
+            "model": schema.model,
+            "enable_thinking": True,
+            "enable_caching": True,
+        })
+        llm_service = create_llm_service(**profile)
         
         # 创建 Memory Manager（TODO: 从 schema 配置）
         memory_manager = WorkingMemory(event_manager=event_manager)

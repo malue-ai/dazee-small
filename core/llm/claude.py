@@ -933,15 +933,16 @@ class ClaudeLLMService(BaseLLMService):
                 # 字符串格式 + 禁用缓存：直接使用
                 request_params["system"] = system
         
-        # Extended Thinking（由 LLM Service 配置控制）
-        if self.config.enable_thinking:
+        # Extended Thinking（支持覆盖 enable_thinking）
+        enable_thinking = kwargs.get("enable_thinking", self.config.enable_thinking)
+        if enable_thinking:
             request_params["thinking"] = {
                 "type": "enabled",
                 "budget_tokens": self.config.thinking_budget
             }
             request_params["temperature"] = 1.0  # Required for thinking
         else:
-            request_params["temperature"] = self.config.temperature
+            request_params["temperature"] = kwargs.get("temperature", self.config.temperature)
         
         # Tools
         all_tools = []
@@ -1067,13 +1068,16 @@ class ClaudeLLMService(BaseLLMService):
                 # 字符串格式 + 禁用缓存：直接使用
                 request_params["system"] = system
         
-        # Extended Thinking（由 LLM Service 配置控制）
-        if self.config.enable_thinking:
+        # Extended Thinking（支持覆盖 enable_thinking）
+        enable_thinking = kwargs.get("enable_thinking", self.config.enable_thinking)
+        if enable_thinking:
             request_params["thinking"] = {
                 "type": "enabled",
                 "budget_tokens": self.config.thinking_budget
             }
             request_params["temperature"] = 1.0
+        else:
+            request_params["temperature"] = kwargs.get("temperature", self.config.temperature)
         
         # Tools
         all_tools = []
@@ -1749,6 +1753,24 @@ class ClaudeLLMService(BaseLLMService):
                 cleaned_messages.append(msg)
         
         return cleaned_messages
+
+    def supports_native_tools(self) -> bool:
+        """
+        Claude 支持原生工具
+        
+        Returns:
+            是否支持原生工具
+        """
+        return True
+
+    def supports_skills(self) -> bool:
+        """
+        Claude 支持 Skills 容器
+        
+        Returns:
+            是否支持 Skills
+        """
+        return True
 
     # ============================================================
     # Skills API

@@ -924,6 +924,16 @@ class AgentRegistry:
                 "reloaded_count": count,
                 "message": f"已重新加载 {count} 个 Agent",
             }
+
+    def get_router(self, agent_id: str):
+        """
+        获取路由器（统一走 AgentFactory.create_route）
+        """
+        if agent_id not in self._configs:
+            raise AgentNotFoundError(f"Agent '{agent_id}' 不存在")
+        
+        config = self._configs[agent_id]
+        return AgentFactory.create_route(prompt_cache=config.prompt_cache)
     
     async def _load_single_agent(self, agent_id: str, force_refresh: bool = False):
         """

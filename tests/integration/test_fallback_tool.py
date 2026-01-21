@@ -1,4 +1,4 @@
-si xiang#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 测试 fallback_tool 功能（独立版本）
 
@@ -16,7 +16,8 @@ def test_fallback_tool():
     print("=" * 60)
     
     # 1. 加载配置文件
-    config_path = Path(__file__).parent.parent / "config" / "capabilities.yaml"
+    project_root = Path(__file__).resolve().parents[2]
+    config_path = project_root / "config" / "capabilities.yaml"
     
     with open(config_path, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)

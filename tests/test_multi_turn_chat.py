@@ -9,6 +9,7 @@
 """
 
 import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -16,9 +17,15 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from  import create_simple_agent
+import pytest
+
+from core import create_simple_agent
+
+SKIP_LLM_TESTS = os.getenv("RUN_LLM_TESTS", "false").lower() != "true"
 
 
+@pytest.mark.asyncio
+@pytest.mark.skipif(SKIP_LLM_TESTS, reason="需要真实 LLM，未启用 RUN_LLM_TESTS")
 async def test_multi_turn_basic():
     """测试基础多轮对话"""
     print("="*60)
@@ -68,6 +75,8 @@ async def test_multi_turn_basic():
     return True
 
 
+@pytest.mark.asyncio
+@pytest.mark.skipif(SKIP_LLM_TESTS, reason="需要真实 LLM，未启用 RUN_LLM_TESTS")
 async def test_session_lifecycle():
     """测试会话生命周期"""
     print("\n" + "="*60)
@@ -107,6 +116,8 @@ async def test_session_lifecycle():
     return True
 
 
+@pytest.mark.asyncio
+@pytest.mark.skipif(SKIP_LLM_TESTS, reason="需要真实 LLM，未启用 RUN_LLM_TESTS")
 async def test_auto_session():
     """测试自动会话管理"""
     print("\n" + "="*60)

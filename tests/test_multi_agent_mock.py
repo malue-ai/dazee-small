@@ -260,41 +260,44 @@ AI 对医疗行业的影响是多维度的，既带来技术和经济的显著�
                 session_id=session_id,
                 resume_from_checkpoint=False,
             ):
-            events.append(event)
-            event_type = event.get("type")
-            
-            if event_type == "orchestrator_start":
-                logger.info(f"✅ [1] Orchestrator 启动: {event.get('agent_count')} Agents")
-            
-            elif event_type == "task_decomposition":
-                task_decomposition = event
-                logger.info(f"✅ [2] 任务分解完成:")
-                logger.info(f"     • 子任务数量: {event.get('subtasks_count')}")
-                logger.info(f"     • 执行模式: {event.get('execution_mode')}")
-            
-            elif event_type == "agent_start":
-                logger.info(f"✅ [3] Agent 启动: {event.get('agent_id')}")
-                if event.get('subtask_title'):
-                    logger.info(f"     • 子任务: {event.get('subtask_title')}")
-            
-            elif event_type == "agent_end":
-                agent_executions.append(event)
-                logger.info(f"✅ [4] Agent 完成: {event.get('agent_id')}")
-                logger.info(f"     • 成功: {event.get('success')}")
-                output_preview = event.get('output_preview', '')
-                if output_preview:
-                    logger.info(f"     • 输出预览: {output_preview[:80]}...")
-            
-            elif event_type == "orchestrator_summary":
-                final_output = event.get("content")
-                logger.info(f"✅ [5] 结果综合完成:")
-                logger.info(f"     • 由 Lead Agent 综合: {event.get('synthesized_by_lead_agent')}")
-                logger.info(f"     • 输出长度: {len(final_output)} 字符")
-            
-            elif event_type == "orchestrator_end":
-                logger.info(f"✅ [6] Orchestrator 完成:")
-                logger.info(f"     • 耗时: {event.get('duration_ms')}ms")
-                logger.info(f"     • Agent 结果: {event.get('agent_results')} 个")
+                events.append(event)
+                event_type = event.get("type")
+                
+                if event_type == "orchestrator_start":
+                    logger.info(f"✅ [1] Orchestrator 启动: {event.get('agent_count')} Agents")
+                
+                elif event_type == "task_decomposition":
+                    task_decomposition = event
+                    logger.info(f"✅ [2] 任务分解完成:")
+                    logger.info(f"     • 子任务数量: {event.get('subtasks_count')}")
+                    logger.info(f"     • 执行模式: {event.get('execution_mode')}")
+                
+                elif event_type == "agent_start":
+                    logger.info(f"✅ [3] Agent 启动: {event.get('agent_id')}")
+                    if event.get('subtask_title'):
+                        logger.info(f"     • 子任务: {event.get('subtask_title')}")
+                
+                elif event_type == "agent_end":
+                    agent_executions.append(event)
+                    logger.info(f"✅ [4] Agent 完成: {event.get('agent_id')}")
+                    logger.info(f"     • 成功: {event.get('success')}")
+                    output_preview = event.get('output_preview', '')
+                    if output_preview:
+                        logger.info(f"     • 输出预览: {output_preview[:80]}...")
+                
+                elif event_type == "orchestrator_summary":
+                    final_output = event.get("content")
+                    logger.info(f"✅ [5] 结果综合完成:")
+                    logger.info(f"     • 由 Lead Agent 综合: {event.get('synthesized_by_lead_agent')}")
+                    logger.info(f"     • 输出长度: {len(final_output)} 字符")
+                
+                elif event_type == "orchestrator_end":
+                    logger.info(f"✅ [6] Orchestrator 完成:")
+                    logger.info(f"     • 耗时: {event.get('duration_ms')}ms")
+                    logger.info(f"     • Agent 结果: {event.get('agent_results')} 个")
+        except Exception as e:
+            logger.error(f"❌ Orchestrator 执行失败: {e}", exc_info=True)
+            raise
     
     # ===== 验证结果 =====
     logger.info("\n" + "="*80)

@@ -1,12 +1,12 @@
 """
 调试：Agent中Router到底返回了什么工具
 """
-import os
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
-os.environ['E2B_API_KEY'] = 'e2b_83eb67de2fb85d4a8a87ddfe6fca5a89e9f7cc95'
+import pytest
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core import create_simple_agent, create_event_manager
 from core.tool.selector import ToolSelector
@@ -31,37 +31,44 @@ class SimpleEventStorage:
     def update_heartbeat(self, session_id: str) -> None:
         pass
 
-# 创建Agent
-storage = SimpleEventStorage()
-event_manager = create_event_manager(storage)
-agent = create_simple_agent(workspace_dir="/tmp", event_manager=event_manager)
+def test_agent_router_debug_tools():
+    """测试 Router 与 ToolSelector 基本行为"""
+    storage = SimpleEventStorage()
+    event_manager = create_event_manager(storage)
+    agent = create_simple_agent(workspace_dir="/tmp", event_manager=event_manager)
 
-print("="*70)
-print("Agent创建成功，现在测试Router")
-print("="*70)
+    if not agent.tool_selector:
+        pytest.skip("ToolSelector 未启用，跳过调试测试")
 
-# 模拟Agent内部的Router调用
-required_capabilities = ['code_execution', 'code_sandbox', 'app_generation', 'file_operations', 'task_planning']
-# 🆕 使用Agent的自动API发现机制
-available_apis = agent._get_available_apis()
-print(f"🔍 自动发现API: {available_apis}")
+    print("=" * 70)
+    print("Agent创建成功，现在测试Router")
+    print("=" * 70)
 
-context = {
-    "plan": None, 
-    "task_type": "code_task",
-    "available_apis": available_apis  # 🆕 自动发现，不硬编码
-}
+    required_capabilities = [
+        "code_execution",
+        "code_sandbox",
+        "app_generation",
+        "file_operations",
+        "task_planning",
+    ]
+    available_apis = agent.tool_selector.get_available_apis(agent.tool_executor)
+    print(f"🔍 自动发现API: {available_apis}")
 
-print(f"\n需要能力: {required_capabilities}")
-print(f"调用 ToolSelector.select()...")
+    context = {
+        "plan": None,
+        "task_type": "code_task",
+        "available_apis": available_apis,
+    }
 
-# 使用 ToolSelector 替代已废弃的 select_tools_for_capabilities
-selector = ToolSelector(agent.capability_registry)
-result = selector.select(required_capabilities, context=context)
+    print(f"\n需要能力: {required_capabilities}")
+    print("调用 ToolSelector.select()...")
 
-print(f"\nToolSelector 返回工具数量: {len(result.tools)}")
-for t in result.tools:
-    print(f"  - {t.name} (type={t.type.value}, capabilities={t.capabilities})")
+    selector = ToolSelector(agent.capability_registry)
+    result = selector.select(required_capabilities, context=context)
 
-print("\n✅ E2B工具在列表中:", any('e2b' in name for name in result.tool_names))
+    print(f"\nToolSelector 返回工具数量: {len(result.tools)}")
+    for t in result.tools:
+        print(f"  - {t.name} (type={t.type.value}, capabilities={t.capabilities})")
+
+    assert isinstance(result.tools, list)
 

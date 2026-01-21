@@ -23,7 +23,7 @@ from core.agent.multi.models import (
     PlanAdjustmentHint,
 )
 from core.planning.protocol import PlanStep
-from core.llm import create_claude_service, Message
+from core.llm import create_llm_service, Message
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +50,7 @@ class CriticAgent:
         model: str = "claude-sonnet-4-5-20250929",
         enable_thinking: bool = True,
         config: Optional[CriticConfig] = None,
+        llm_profile_name: str = "critic_agent",
     ):
         """
         初始化 Critic Agent
@@ -63,11 +64,16 @@ class CriticAgent:
         self.enable_thinking = enable_thinking
         self.config = config or CriticConfig()
         
-        # 创建 LLM 服务
-        self.llm = create_claude_service(
-            model=model,
-            enable_thinking=enable_thinking,
-        )
+        # 创建 LLM 服务（支持主备路由）
+        from config.llm_config import get_llm_profile
+        profile = get_llm_profile(llm_profile_name)
+        profile_provider = str(profile.get("provider", "claude")).lower()
+        if profile_provider == "claude":
+            profile["model"] = model
+        profile.update({
+            "enable_thinking": enable_thinking,
+        })
+        self.llm = create_llm_service(**profile)
         
         # 加载系统提示词
         self.system_prompt = self._load_system_prompt()

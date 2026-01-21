@@ -291,10 +291,17 @@ class OpenAIAdaptor(BaseAdaptor):
             tool_calls = []
             for tc in message.tool_calls:
                 import json
+                tool_input = {}
+                if tc.function.arguments:
+                    try:
+                        tool_input = json.loads(tc.function.arguments)
+                    except json.JSONDecodeError:
+                        tool_input = {}
                 tool_call = {
                     "id": tc.id,
                     "name": tc.function.name,
-                    "input": json.loads(tc.function.arguments) if tc.function.arguments else {}
+                    "input": tool_input,
+                    "type": "tool_use"
                 }
                 tool_calls.append(tool_call)
                 raw_content.append({
@@ -350,10 +357,16 @@ class OpenAIAdaptor(BaseAdaptor):
             tool_calls = []
             for tc in message["tool_calls"]:
                 func = tc.get("function", {})
+                raw_arguments = func.get("arguments", "{}")
+                try:
+                    tool_input = json.loads(raw_arguments)
+                except json.JSONDecodeError:
+                    tool_input = {}
                 tool_call = {
                     "id": tc.get("id", ""),
                     "name": func.get("name", ""),
-                    "input": json.loads(func.get("arguments", "{}"))
+                    "input": tool_input,
+                    "type": "tool_use"
                 }
                 tool_calls.append(tool_call)
                 raw_content.append({
@@ -545,7 +558,8 @@ class GeminiAdaptor(BaseAdaptor):
                 tool_call = {
                     "id": f"gemini_{fc.name}",  # Gemini 没有 id，生成一个
                     "name": fc.name,
-                    "input": dict(fc.args) if fc.args else {}
+                    "input": dict(fc.args) if fc.args else {},
+                    "type": "tool_use"
                 }
                 tool_calls.append(tool_call)
                 raw_content.append({
@@ -607,7 +621,8 @@ class GeminiAdaptor(BaseAdaptor):
                 tool_call = {
                     "id": f"gemini_{fc.get('name', '')}",
                     "name": fc.get("name", ""),
-                    "input": fc.get("args", {})
+                    "input": fc.get("args", {}),
+                    "type": "tool_use"
                 }
                 tool_calls.append(tool_call)
                 raw_content.append({

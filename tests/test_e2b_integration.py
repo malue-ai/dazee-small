@@ -20,9 +20,29 @@ from pathlib import Path
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import pytest
+
+RUN_E2B_TESTS = os.getenv("RUN_E2B_TESTS", "false").lower() == "true"
+if not RUN_E2B_TESTS:
+    pytest.skip("未启用 RUN_E2B_TESTS，跳过 E2B 集成测试", allow_module_level=True)
+
+try:
+    from infra.sandbox.e2b import E2B_AVAILABLE
+except Exception as e:
+    pytest.skip(f"E2B 依赖不可用: {e}", allow_module_level=True)
+
+if not os.getenv("E2B_API_KEY"):
+    pytest.skip("E2B_API_KEY 未设置，跳过 E2B 集成测试", allow_module_level=True)
+
+if not E2B_AVAILABLE:
+    pytest.skip("E2B SDK 未安装，跳过 E2B 集成测试", allow_module_level=True)
+
 from logger import get_logger
 from core.memory import WorkingMemory, E2BSandboxSession
-from tools.e2b_sandbox import E2BPythonSandbox, E2B_AVAILABLE
+try:
+    from tools.e2b_sandbox import E2BPythonSandbox
+except Exception as e:
+    pytest.skip(f"E2B 工具不可用: {e}", allow_module_level=True)
 from tools.e2b_template_manager import E2BTemplateManager
 
 logger = get_logger("e2b_test")

@@ -21,6 +21,7 @@ from uuid import uuid4
 
 from logger import get_logger
 from core.agent import SimpleAgent, create_simple_agent
+from core.llm import create_llm_service
 from core.context import Context
 from core.output import OutputFormatter, create_output_formatter  # 🆕 V6.3
 # 🆕 容错机制（基础设施层）
@@ -123,16 +124,17 @@ class ChatService:
         # 🆕 V7: Token 审计器
         self.token_auditor: TokenAuditor = get_token_auditor()
     
-    def _get_router(self) -> AgentRouter:
+    def _get_router(self, prompt_cache=None) -> AgentRouter:
         """
         延迟初始化路由器
         
         Returns:
             AgentRouter 实例
         """
-        if self._router is None:
-            self._router = AgentRouter()
-            logger.debug("🔀 AgentRouter 已初始化")
+        if self._router is None or getattr(self._router, "prompt_cache", None) is not prompt_cache:
+            from core.agent import AgentFactory
+            self._router = AgentFactory.create_router(prompt_cache=prompt_cache)
+            logger.debug("🔀 AgentRouter 已初始化（统一走 AgentFactory）")
         return self._router
     
     # ==================== 辅助方法 ====================
@@ -168,6 +170,52 @@ class ChatService:
             logger.info(f"✅ 从 Agent Schema 创建 OutputFormatter: format={formatter_config.default_format}")
         
         return self._formatters[cache_key]
+
+    async def _emit_llm_switch_event(
+        self,
+        session_id: str,
+        probe_result: Dict[str, Any],
+        role: str
+    ) -> None:
+        """
+        发送模型切换事件（探针触发）
+        """
+        try:
+            await self.session_service.events.emit_custom(
+                session_id=session_id,
+                event_type="llm_switch",
+                event_data={
+                    "reason": "probe_failed",
+                    "role": role,
+                    "from": probe_result.get("primary"),
+                    "to": probe_result.get("selected"),
+                    "errors": probe_result.get("errors", []),
+                    "timestamp": datetime.now().isoformat()
+                }
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ 发送模型切换事件失败: {e}")
+
+    async def _probe_llm_service(
+        self,
+        llm_service: Any,
+        session_id: str,
+        role: str,
+        max_retries: int = 3
+    ) -> Optional[Dict[str, Any]]:
+        """
+        服务层 LLM 存活探针
+        """
+        if not llm_service or not hasattr(llm_service, "probe"):
+            return None
+        
+        result = await llm_service.probe(
+            max_retries=max_retries,
+            include_unhealthy=True
+        )
+        if result and result.get("switched"):
+            await self._emit_llm_switch_event(session_id, result, role)
+        return result
     
     # ==================== 统一入口 ====================
     
@@ -543,7 +591,7 @@ class ChatService:
             routing_intent = None
             
             if self.enable_routing:
-                router = self._get_router()
+                router = self._get_router(prompt_cache=getattr(agent, "prompt_cache", None))
                 routing_decision = await router.route(
                     user_query=message,
                     conversation_history=history_messages
@@ -584,6 +632,20 @@ class ChatService:
                 # 设置工作目录（与 SimpleAgent 一致）
                 workspace_dir = str(self.session_service.workspace_manager.get_workspace_root(conversation_id))
                 orchestrator.workspace_dir = workspace_dir
+
+                # 🆕 服务层存活探针（Lead/Critic）
+                if orchestrator.lead_agent and hasattr(orchestrator.lead_agent, "llm"):
+                    await self._probe_llm_service(
+                        orchestrator.lead_agent.llm,
+                        session_id=session_id,
+                        role="lead_agent"
+                    )
+                if orchestrator.critic and hasattr(orchestrator.critic, "llm"):
+                    await self._probe_llm_service(
+                        orchestrator.critic.llm,
+                        session_id=session_id,
+                        role="critic_agent"
+                    )
                 
                 # 执行多智能体协作
                 async for event in orchestrator.execute(
@@ -603,7 +665,8 @@ class ChatService:
                         generate_failure_summary_for_multiagent,
                         get_failure_summary_config
                     )
-                    from core.llm import create_claude_service
+                    from core.llm import create_llm_service
+                    from config.llm_config import get_llm_profile
                     
                     orchestrator_state = orchestrator.get_state()
                     if orchestrator_state:
@@ -611,11 +674,13 @@ class ChatService:
                         config = get_failure_summary_config()
                         if config.enabled:
                             # 创建 LLM 服务用于生成总结
-                            summary_llm = create_claude_service(
-                                model="claude-sonnet-4-5-20250929",
-                                enable_thinking=False,
-                                enable_caching=False
-                            )
+                            summary_profile = get_llm_profile("main_agent")
+                            summary_profile.update({
+                                "model": "claude-sonnet-4-5-20250929",
+                                "enable_thinking": False,
+                                "enable_caching": False
+                            })
+                            summary_llm = create_llm_service(**summary_profile)
                             
                             # 生成失败总结
                             failure_summary = await generate_failure_summary_for_multiagent(
@@ -672,6 +737,11 @@ class ChatService:
                 # - Checkpoint：broadcaster 在每个 content_stop 后自动保存
                 # - 最终保存：broadcaster 在 message_stop 时自动完成
                 # - variables：直接注入到 System Prompt（前端上下文）
+                await self._probe_llm_service(
+                    agent.llm,
+                    session_id=session_id,
+                    role="simple_agent"
+                )
                 async for event in agent.chat(
                     messages=history_messages,
                     session_id=session_id,

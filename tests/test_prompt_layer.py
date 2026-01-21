@@ -9,6 +9,7 @@
 
 import sys
 from pathlib import Path
+import pytest
 
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -23,8 +24,9 @@ from core.prompt import (
 )
 
 
-def test_parse_prompt():
-    """测试解析 prompt_example.md"""
+@pytest.fixture
+def schema() -> PromptSchema:
+    """解析 prompt_example.md 并返回 Schema"""
     print("=" * 60)
     print("📝 测试 1: 解析运营提示词")
     print("=" * 60)
@@ -34,7 +36,7 @@ def test_parse_prompt():
     
     if not prompt_file.exists():
         print(f"⚠️ 文件不存在: {prompt_file}")
-        return None
+        pytest.skip("prompt_example.md 不存在，跳过提示词分层测试")
     
     with open(prompt_file, "r", encoding="utf-8") as f:
         raw_prompt = f.read()
@@ -62,6 +64,11 @@ def test_parse_prompt():
     return schema
 
 
+def test_parse_prompt(schema: PromptSchema) -> None:
+    """测试解析 prompt_example.md"""
+    assert schema is not None
+
+
 def test_generate_prompts(schema: PromptSchema):
     """测试生成不同版本的提示词"""
     print("\n" + "=" * 60)
@@ -77,6 +84,42 @@ def test_generate_prompts(schema: PromptSchema):
         # 显示前 200 字符
         preview = prompt[:200].replace("\n", " ")
         print(f"   预览: {preview}...")
+
+
+def test_prompt_length_order() -> None:
+    """
+    简单版本应不大于中等版本，中等版本不大于复杂版本
+    """
+    prompt_file = PROJECT_ROOT / "prompts/templates/prompt_example.md"
+    if not prompt_file.exists():
+        return
+
+    with open(prompt_file, "r", encoding="utf-8") as f:
+        raw_prompt = f.read()
+
+    schema = parse_prompt(raw_prompt)
+    simple_prompt = generate_prompt(schema, TaskComplexity.SIMPLE)
+    medium_prompt = generate_prompt(schema, TaskComplexity.MEDIUM)
+    complex_prompt = generate_prompt(schema, TaskComplexity.COMPLEX)
+
+    assert len(simple_prompt) <= len(medium_prompt)
+    assert len(medium_prompt) <= len(complex_prompt)
+
+
+def test_medium_prompt_strips_tools_catalog() -> None:
+    """中等版本应移除工具清单，避免过长"""
+    prompt_file = PROJECT_ROOT / "prompts/templates/prompt_example.md"
+    if not prompt_file.exists():
+        return
+
+    with open(prompt_file, "r", encoding="utf-8") as f:
+        raw_prompt = f.read()
+
+    schema = parse_prompt(raw_prompt)
+    medium_prompt = generate_prompt(schema, TaskComplexity.MEDIUM)
+
+    assert "可用工具列表" not in medium_prompt
+    assert "<tools_catalog>" not in medium_prompt
 
 
 def test_complexity_detection(schema: PromptSchema):

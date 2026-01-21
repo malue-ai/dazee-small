@@ -6,9 +6,16 @@ Dazee E2E 完整流程测试
 """
 
 import asyncio
+import os
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from pathlib import Path
+
+import pytest
+
+RUN_DAZEE_E2E = os.getenv("RUN_DAZEE_E2E", "false").lower() == "true"
+if not RUN_DAZEE_E2E:
+    pytest.skip("未启用 RUN_DAZEE_E2E，跳过 Dazee E2E 测试", allow_module_level=True)
 
 from logger import get_logger
 from core.memory.mem0 import (
@@ -23,13 +30,24 @@ from core.memory.mem0 import (
     ReminderItem,
 )
 
-from test_data import (
-    get_weekly_conversations,
-    get_test_metadata,
-    TEST_USER_ID,
-    TEST_USER_NAME,
-    TEST_SESSION_ID_PREFIX,
-)
+try:
+    # 作为包内测试执行
+    from .test_data import (
+        get_weekly_conversations,
+        get_test_metadata,
+        TEST_USER_ID,
+        TEST_USER_NAME,
+        TEST_SESSION_ID_PREFIX,
+    )
+except ImportError:
+    # 作为脚本直接运行
+    from test_data import (
+        get_weekly_conversations,
+        get_test_metadata,
+        TEST_USER_ID,
+        TEST_USER_NAME,
+        TEST_SESSION_ID_PREFIX,
+    )
 
 logger = get_logger("dazee.e2e.pipeline")
 

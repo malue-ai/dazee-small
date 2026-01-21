@@ -99,6 +99,10 @@ README_TEMPLATE = """# 生成的系统提示词
 
 本目录包含由 LLM 根据 `prompt.md` 自动生成的场景化系统提示词。
 
+## 长度对比
+
+{length_summary}
+
 ## 文件说明
 
 | 文件 | 用途 | 可编辑 |
@@ -225,8 +229,10 @@ class PromptResultsWriter:
             
             # 3. 写入 README
             readme_path = self.results_dir / "README.md"
+            length_summary = self._build_length_summary(results)
             readme_content = README_TEMPLATE.format(
-                generated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                generated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                length_summary=length_summary
             )
             readme_path.write_text(readme_content, encoding="utf-8")
             
@@ -249,6 +255,27 @@ class PromptResultsWriter:
         except Exception as e:
             logger.error(f"❌ 写入 prompt_results 失败: {e}")
             return False
+
+    @staticmethod
+    def _build_length_summary(results: PromptResults) -> str:
+        """生成提示词长度对比表"""
+        entries = [
+            ("intent_prompt.md", results.intent_prompt),
+            ("simple_prompt.md", results.simple_prompt),
+            ("medium_prompt.md", results.medium_prompt),
+            ("complex_prompt.md", results.complex_prompt),
+        ]
+        base_len = len(results.complex_prompt) or max(len(content) for _, content in entries) or 1
+
+        lines = [
+            "| 文件 | 字符数 | 相对复杂版 |",
+            "|---|---:|---:|",
+        ]
+        for filename, content in entries:
+            length = len(content)
+            ratio = f"{length / base_len * 100:.1f}%"
+            lines.append(f"| {filename} | {length} | {ratio} |")
+        return "\n".join(lines)
     
     def should_regenerate(self) -> Dict[str, bool]:
         """

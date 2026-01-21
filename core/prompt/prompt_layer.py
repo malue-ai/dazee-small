@@ -721,6 +721,29 @@ class PromptGenerator:
         TaskComplexity.MEDIUM: 40000,   # ~10k tokens
         TaskComplexity.COMPLEX: 80000,  # ~20k tokens
     }
+
+    # 🆕 V7.6: 更细粒度的提示词精简规则
+    SIMPLE_AGGRESSIVE_MODULES = {
+        PromptModule.TOOL_SELECTION,
+        PromptModule.PROGRESS_FEEDBACK,
+        PromptModule.PLAN_OBJECT,
+        PromptModule.REACT_VALIDATION,
+        PromptModule.QUALITY_GATES,
+        PromptModule.FINAL_DELIVERY,
+        PromptModule.HITL,
+        PromptModule.DATA_CONTEXT,
+        PromptModule.CONTEXT_PROTECTION,
+    }
+
+    MEDIUM_STRIP_EXAMPLE_MODULES = {
+        PromptModule.TOOL_SELECTION,
+        PromptModule.PROGRESS_FEEDBACK,
+        PromptModule.PLAN_OBJECT,
+        PromptModule.REACT_VALIDATION,
+        PromptModule.QUALITY_GATES,
+        PromptModule.FINAL_DELIVERY,
+        PromptModule.HITL,
+    }
     
     @classmethod
     def generate(
@@ -784,6 +807,15 @@ class PromptGenerator:
                 content = module_content.simplified_content
             else:
                 content = module_content.content
+
+            # 🆕 V7.6: 细粒度精简（避免输出格式被过度裁剪）
+            condensed = cls._condense_module_content(
+                content=content,
+                module=module_content.module,
+                complexity=complexity
+            )
+            if condensed.strip():
+                content = condensed
             
             # 🆕 V5.1: 应用模块大小限制
             max_size = size_limits.get(module_content.module)
@@ -813,6 +845,84 @@ class PromptGenerator:
             logger.debug(f"   排除模块: {[m.value for m in schema.excluded_modules]}")
         
         return result
+
+    @classmethod
+    def _condense_module_content(
+        cls,
+        content: str,
+        module: PromptModule,
+        complexity: TaskComplexity
+    ) -> str:
+        """
+        🆕 V7.6: 按复杂度精简模块内容
+        
+        策略：
+        - SIMPLE: 移除示例与代码块，仅保留核心规则
+        - MEDIUM: 移除大段示例，保留关键规则与流程
+        - COMPLEX: 不做额外精简
+        """
+        if complexity == TaskComplexity.COMPLEX:
+            return content
+
+        # 避免破坏输出格式模块的 JSON 模板
+        if module == PromptModule.OUTPUT_FORMAT:
+            return content
+
+        condensed = content
+
+        if complexity == TaskComplexity.SIMPLE and module in cls.SIMPLE_AGGRESSIVE_MODULES:
+            condensed = cls._strip_examples(condensed)
+            condensed = cls._strip_code_blocks(condensed)
+            condensed = cls._keep_first_lines(condensed, max_lines=40)
+            return condensed
+
+        if complexity == TaskComplexity.MEDIUM and module in cls.MEDIUM_STRIP_EXAMPLE_MODULES:
+            if module == PromptModule.TOOL_SELECTION:
+                condensed = cls._strip_tools_catalog(condensed)
+            condensed = cls._strip_examples(condensed)
+            condensed = cls._strip_code_blocks(condensed)
+            return condensed
+
+        return condensed
+
+    @staticmethod
+    def _strip_code_blocks(content: str) -> str:
+        """移除三引号代码块，避免示例过长"""
+        return re.sub(r"```.*?```", "", content, flags=re.DOTALL)
+
+    @staticmethod
+    def _strip_tools_catalog(content: str) -> str:
+        """移除工具清单块，保留选择策略与规则"""
+        # XML 工具清单
+        content = re.sub(r"<tools_catalog>.*?</tools_catalog>", "", content, flags=re.DOTALL)
+        # Markdown 工具清单章节
+        content = re.sub(
+            r"(?:^|\n)##\s+可用工具列表.*?(?=\n##\s|\Z)",
+            "",
+            content,
+            flags=re.DOTALL
+        )
+        return content
+
+    @staticmethod
+    def _strip_examples(content: str) -> str:
+        """移除示例段落（标题或 XML 示例块）"""
+        # 移除 Markdown 示例段
+        content = re.sub(
+            r"(?:^|\n)#{2,3}\s*(示例|Example).*?(?=\n#{2,3}\s|$)",
+            "",
+            content,
+            flags=re.DOTALL
+        )
+        # 移除 XML 示例段
+        content = re.sub(r"<example>.*?</example>", "", content, flags=re.DOTALL)
+        return content
+
+    @staticmethod
+    def _keep_first_lines(content: str, max_lines: int) -> str:
+        """保留前若干行，控制长度"""
+        lines = [line for line in content.splitlines() if line.strip()]
+        return "\n".join(lines[:max_lines])
     
     @classmethod
     def _generate_from_raw_prompt(

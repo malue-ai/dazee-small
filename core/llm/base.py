@@ -27,6 +27,7 @@ class LLMProvider(Enum):
     CLAUDE = "claude"
     OPENAI = "openai"
     GEMINI = "gemini"
+    QWEN = "qwen"
 
 
 class ToolType(Enum):
@@ -94,6 +95,8 @@ class LLMConfig:
         provider: LLM 提供商
         model: 模型名称
         api_key: API 密钥
+        base_url: API 基础地址（OpenAI 兼容厂商）
+        api_key_env: API Key 环境变量名称（可选）
         enable_thinking: 启用 Extended Thinking（Claude 特有）
         thinking_budget: Thinking token 预算
         enable_caching: 启用 Prompt Caching
@@ -107,6 +110,9 @@ class LLMConfig:
     provider: LLMProvider
     model: str
     api_key: str
+    base_url: Optional[str] = None
+    compat: Optional[str] = None
+    api_key_env: Optional[str] = None
     
     # Core capabilities
     enable_thinking: bool = True
@@ -116,6 +122,10 @@ class LLMConfig:
     
     # 基础参数
     temperature: float = 1.0
+    top_p: Optional[float] = None
+    frequency_penalty: Optional[float] = None
+    presence_penalty: Optional[float] = None
+    repetition_penalty: Optional[float] = None
     max_tokens: int = 64000  # Claude Sonnet 4.5 最大支持 64K output tokens
     
     # Tools
@@ -124,6 +134,24 @@ class LLMConfig:
     # 高级功能
     enable_context_editing: bool = False
     enable_structured_output: bool = False
+    result_format: Optional[str] = None
+    tool_choice: Optional[str] = None
+    parallel_tool_calls: Optional[bool] = None
+
+    # Qwen 扩展参数（未设置时不透传）
+    top_k: Optional[int] = None
+    seed: Optional[int] = None
+    stop: Optional[Union[str, List[str]]] = None
+    n: Optional[int] = None
+    response_format: Optional[Dict[str, Any]] = None
+    logprobs: Optional[bool] = None
+    top_logprobs: Optional[int] = None
+    enable_search: Optional[bool] = None
+    search_options: Optional[Dict[str, Any]] = None
+    incremental_output: Optional[bool] = None
+    vl_high_resolution_images: Optional[bool] = None
+    vl_enable_image_hw_output: Optional[bool] = None
+    enable_code_interpreter: Optional[bool] = None
     
     # 网络配置
     timeout: float = 120.0  # 请求超时（秒），默认 2 分钟
@@ -283,6 +311,75 @@ class BaseLLMService(ABC):
             token 数量
         """
         pass
+
+    def supports_native_tools(self) -> bool:
+        """
+        是否支持 Claude 原生工具（bash/text_editor/web_search）
+        
+        Returns:
+            是否支持原生工具
+        """
+        return False
+
+    def supports_skills(self) -> bool:
+        """
+        是否支持 Claude Skills 容器
+        
+        Returns:
+            是否支持 Skills
+        """
+        return False
+
+    async def probe(
+        self,
+        max_retries: int = 3,
+        message: str = "ping",
+        **kwargs
+    ) -> Dict[str, Any]:
+        """
+        服务存活探针（默认实现）
+        
+        Args:
+            max_retries: 最大重试次数
+            message: 探针消息内容
+        
+        Returns:
+            探针结果
+        """
+        from infra.resilience.retry import retry_async
+        
+        config = getattr(self, "config", None)
+        provider = getattr(config, "provider", None)
+        provider_value = provider.value if provider else "unknown"
+        model = getattr(config, "model", "unknown")
+        target = {
+            "name": f"{provider_value}:{model}",
+            "provider": provider_value,
+            "model": model
+        }
+        
+        async def _call():
+            return await self.create_message_async(
+                messages=[Message(role="user", content=message)],
+                system=None,
+                tools=None,
+                max_tokens=1,
+                temperature=0.0,
+                enable_thinking=False,
+                enable_caching=False,
+            )
+        
+        if provider == LLMProvider.CLAUDE:
+            await _call()
+        else:
+            await retry_async(_call, max_retries=max_retries)
+        
+        return {
+            "primary": target,
+            "selected": target,
+            "switched": False,
+            "errors": []
+        }
     
     def convert_to_tool_schema(self, capability: Dict[str, Any]) -> Dict[str, Any]:
         """

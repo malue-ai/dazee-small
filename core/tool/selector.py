@@ -183,8 +183,13 @@ class ToolSelector:
             matched = self.registry.find_by_capability_tag(capability_tag)
             
             if not matched:
-                logger.warning(f"⚠️ 未找到匹配能力的工具: {capability_tag}")
-                continue
+                # 兼容：直接按工具/能力名称匹配
+                direct_cap = self.registry.get(capability_tag)
+                if direct_cap:
+                    matched = [direct_cap]
+                else:
+                    logger.warning(f"⚠️ 未找到匹配能力的工具: {capability_tag}")
+                    continue
             
             # 按优先级排序
             matched.sort(key=lambda c: c.priority, reverse=True)

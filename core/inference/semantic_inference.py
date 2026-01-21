@@ -254,11 +254,11 @@ class SemanticInference:
         """获取 LLM 服务（懒加载）"""
         if self._llm_service is None:
             try:
-                from core.llm import create_claude_service
+                from core.llm import create_llm_service
                 # 🆕 使用配置化的 LLM Profile
                 from config.llm_config import get_llm_profile
                 profile = get_llm_profile("semantic_inference")
-                self._llm_service = create_claude_service(**profile)
+                self._llm_service = create_llm_service(**profile)
             except Exception as e:
                 logger.warning(f"⚠️ LLM 服务初始化失败: {e}")
                 return None

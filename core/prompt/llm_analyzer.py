@@ -180,19 +180,14 @@ class LLMPromptAnalyzer:
     def _get_llm_service(self):
         """懒加载 LLM 服务（使用配置文件中的 llm_analyzer profile）"""
         if self._llm_service is None:
-            from core.llm import create_claude_service
+            from core.llm import create_llm_service
             from config.llm_config import get_llm_profile
             
             # 🆕 V5.3: 从配置文件获取 LLM Profile（优先使用 Claude Sonnet 4.5）
             profile = get_llm_profile("llm_analyzer")
             logger.info(f"📦 使用 LLM Profile: llm_analyzer, model={profile.get('model')}")
             
-            self._llm_service = create_claude_service(
-                model=profile.get("model"),
-                enable_thinking=profile.get("enable_thinking", False),
-                timeout=profile.get("timeout", 30.0),
-                max_retries=profile.get("max_retries", 2)
-            )
+            self._llm_service = create_llm_service(**profile)
         return self._llm_service
     
     async def analyze(self, raw_prompt: str) -> LLMAnalysisResult:
@@ -447,7 +442,7 @@ async def merge_with_framework_rules(user_prompt: str) -> str:
         合并后的最终系统提示词
     """
     from core.prompt.framework_rules import get_merge_prompts
-    from core.llm import create_claude_service
+    from core.llm import create_llm_service
     from config.llm_config import get_llm_profile
     
     # 🆕 V5.3: 从配置文件获取 LLM Profile（优先使用 Claude Sonnet 4.5）
@@ -458,13 +453,7 @@ async def merge_with_framework_rules(user_prompt: str) -> str:
     system_prompt, user_message = get_merge_prompts(user_prompt)
 
     try:
-        # 使用 create_claude_service（正确传递模型名和参数）
-        llm_service = create_claude_service(
-            model=profile.get("model"),
-            enable_thinking=profile.get("enable_thinking", False),
-            timeout=profile.get("timeout", 120.0),
-            max_retries=profile.get("max_retries", 2)
-        )
+        llm_service = create_llm_service(**profile)
         
         from core.llm import Message
         response = await llm_service.create_message_async(

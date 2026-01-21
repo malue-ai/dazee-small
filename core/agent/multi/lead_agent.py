@@ -26,7 +26,7 @@ from core.agent.multi.models import (
     ExecutionMode,
     TaskAssignment,
 )
-from core.llm import create_claude_service
+from core.llm import create_llm_service
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +107,7 @@ class LeadAgent:
         enable_thinking: bool = True,
         thinking_budget: int = 10000,
         max_tokens: int = 16384,
+        llm_profile_name: str = "lead_agent",
     ):
         """
         初始化 Lead Agent
@@ -126,13 +127,18 @@ class LeadAgent:
             max_tokens = thinking_budget + 1000
             logger.warning(f"⚠️ max_tokens ({max_tokens}) 必须大于 thinking_budget ({thinking_budget})，已自动调整")
         
-        # 创建 LLM 服务
-        self.llm = create_claude_service(
-            model=model,
-            enable_thinking=enable_thinking,
-            max_tokens=max_tokens,
-            thinking_budget=thinking_budget,
-        )
+        # 创建 LLM 服务（支持主备路由）
+        from config.llm_config import get_llm_profile
+        profile = get_llm_profile(llm_profile_name)
+        profile_provider = str(profile.get("provider", "claude")).lower()
+        if profile_provider == "claude":
+            profile["model"] = model
+        profile.update({
+            "enable_thinking": enable_thinking,
+            "max_tokens": max_tokens,
+            "thinking_budget": thinking_budget,
+        })
+        self.llm = create_llm_service(**profile)
         
         logger.info(f"✅ LeadAgent 初始化: model={model}, max_tokens={max_tokens}, thinking_budget={thinking_budget}")
         

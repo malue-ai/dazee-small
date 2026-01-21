@@ -28,6 +28,22 @@ instance:
   # 版本号（可选）
   version: "1.0.0"
 
+# ==================== 全局 LLM 一键切换（可选）====================
+#
+# 说明：
+# - enabled=true 时，全局强制切换所有 LLM 到指定 Provider
+# - 适用于 Claude 不可用时，一键切换到 Qwen
+#
+llm_global:
+  enabled: false
+  provider: "qwen"
+  base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+  api_key_env: "QWEN_API_KEY"
+  compat: "qwen"
+  model_map:
+    intent_analyzer: "qwen-plus"
+    default: "qwen-max"
+
 
 # ==================== Agent 配置覆盖（可选）====================
 # 

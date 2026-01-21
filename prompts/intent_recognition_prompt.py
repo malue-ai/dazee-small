@@ -458,6 +458,7 @@ def get_intent_recognition_prompt(
         custom_complexity_rules or INTENT_PROMPT_COMPLEXITY,
         custom_context_rules or INTENT_PROMPT_CONTEXT_AWARENESS,
         custom_memory_rules or INTENT_PROMPT_MEMORY,
+        custom_multi_agent_rules or INTENT_PROMPT_MULTI_AGENT,
         INTENT_PROMPT_FOOTER,
     ]
     

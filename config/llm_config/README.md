@@ -2,7 +2,7 @@
 
 ## 概述
 
-项目中所有 LLM 调用点的超参数（模型、温度、max_tokens 等）已统一配置化，开发人员可在 [`llm_profiles.yaml`](llm_profiles.yaml) 中集中管理。
+项目中所有 LLM 调用点的超参数（模型、温度、max_tokens 等）已统一配置化，开发人员可在 [`profiles.yaml`](profiles.yaml) 中集中管理。
 
 ## 配置文件结构
 
@@ -10,6 +10,7 @@
 profiles:
   profile_name:
     description: "Profile 用途说明"
+    provider: "claude"
     model: "claude-sonnet-4-5-20250929"
     max_tokens: 64000
     temperature: 1.0
@@ -18,6 +19,16 @@ profiles:
     enable_caching: false
     timeout: 120.0
     max_retries: 3
+    # 备选模型（OpenAI-Compatible 端点可用于 Qwen/DeepSeek）
+    fallbacks:
+      - provider: "qwen"
+        model: "qwen-max"
+        api_key_env: "QWEN_API_KEY"
+        base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    # 路由策略
+    policy:
+      max_failures: 2
+      cooldown_seconds: 120
 ```
 
 ## 已配置的 LLM 调用点
@@ -104,6 +115,28 @@ export LLM_SEMANTIC_INFERENCE_TEMPERATURE=0.3
 llm = create_llm_service(**profile)
 ```
 
+## 全局一键切换（config.yaml）
+
+当 Claude 不可用时，可在实例的 `config.yaml` 中启用全局切换，统一替换为 Qwen。
+
+**配置位置**：`instances/{name}/config.yaml`
+
+```yaml
+llm_global:
+  enabled: true
+  provider: "qwen"
+  base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+  api_key_env: "QWEN_API_KEY"
+  compat: "qwen"
+  model_map:
+    intent_analyzer: "qwen-plus"
+    default: "qwen-max"
+```
+
+**可选环境变量**：
+- `LLM_GLOBAL_CONFIG_PATH`: 指定 config.yaml 绝对路径
+- `ZENFLUX_INSTANCE` / `INSTANCE_NAME` / `AGENT_INSTANCE`: 指定实例名称
+
 ## 参数说明
 
 ### model
@@ -161,6 +194,39 @@ llm = create_llm_service(**profile)
 - **类型**: `integer`
 - **说明**: 最大重试次数
 - **推荐值**: 1-3
+
+### provider
+- **类型**: `string`
+- **说明**: LLM 提供商（`claude` / `openai` / `gemini` / `qwen`）
+- **示例**: `claude`
+
+### fallbacks
+- **类型**: `array`
+- **说明**: 备选模型列表，用于故障切换（支持 OpenAI-Compatible）
+- **同模型多服务商**：同一 `provider + model` 可配置多条，
+  使用 `base_url` + `api_key_env` 区分  
+- **跨厂商主备**：使用不同 `provider` 实现主备切换（如 Claude → Qwen）
+
+### base_url
+- **类型**: `string`
+- **说明**: OpenAI-Compatible API 基础地址
+- **示例**: `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`
+
+### compat
+- **类型**: `string`
+- **说明**: 兼容适配标识（如 `qwen` / `deepseek`），用于默认 base_url 选择
+
+### api_key_env
+- **类型**: `string`
+- **说明**: API Key 的环境变量名称
+- **示例**: `QWEN_API_KEY`
+
+### policy
+- **类型**: `object`
+- **说明**: 路由策略
+- **字段**:
+  - `max_failures`: 失败阈值
+  - `cooldown_seconds`: 冷却时间（秒）
 
 ## 查看可用 Profile
 

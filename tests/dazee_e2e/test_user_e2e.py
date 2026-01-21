@@ -25,6 +25,7 @@ Dazee 真正的端到端验证测试 - 用户视角
 """
 
 import asyncio
+import os
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -33,9 +34,15 @@ from dataclasses import dataclass
 import json
 import re
 
+import pytest
+
 # 添加项目路径
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
+
+RUN_DAZEE_E2E = os.getenv("RUN_DAZEE_E2E", "false").lower() == "true"
+if not RUN_DAZEE_E2E:
+    pytest.skip("未启用 RUN_DAZEE_E2E，跳过 Dazee 用户 E2E 测试", allow_module_level=True)
 
 # 首先加载 test_agent 实例的环境变量（包含 API Key）
 from scripts.instance_loader import load_instance_env

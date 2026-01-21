@@ -7,6 +7,9 @@ pydantic==2.5.3
 anthropic>=0.21.0
 mcp>=0.1.0
 
+# Qwen DashScope SDK
+dashscope>=1.25.0
+
 # 配置管理
 pyyaml>=6.0
 python-dotenv>=1.0.0

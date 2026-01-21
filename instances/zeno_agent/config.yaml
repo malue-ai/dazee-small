@@ -16,6 +16,20 @@ instance:
   description: "测试智能体 - 支持搜索、数据分析和 Dify 工作流"
   version: "1.0.0"
 
+# ==================== 全局 LLM 一键切换 ====================
+#
+# Claude 不可用时，全局切换到 Qwen
+#
+llm_global:
+  enabled: false
+  provider: "qwen"
+  base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+  api_key_env: "QWEN_API_KEY"
+  compat: "qwen"
+  model_map:
+    intent_analyzer: "qwen-plus"
+    default: "qwen-max"
+
 
 # ==================== Agent 配置覆盖 ====================
 

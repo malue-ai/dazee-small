@@ -64,6 +64,7 @@ class OrchestratorConfig(BaseModel):
     max_tokens: int = Field(16384, description="最大 token 数（必须大于 thinking_budget）")
     thinking_budget: int = Field(10000, description="Thinking token 预算（必须小于 max_tokens）")
     temperature: float = Field(0.3, description="温度参数")
+    llm_profile_name: Optional[str] = Field(None, description="LLM Profile 名称（可选）")
 
 
 class WorkerConfig(BaseModel):
@@ -78,6 +79,7 @@ class WorkerConfig(BaseModel):
     max_tokens: int = Field(8192, description="最大 token 数（必须大于 thinking_budget）")
     thinking_budget: int = Field(5000, description="Thinking token 预算（必须小于 max_tokens）")
     temperature: float = Field(0.5, description="温度参数")
+    llm_profile_name: Optional[str] = Field(None, description="LLM Profile 名称（可选）")
 
 
 class MultiAgentConfig(BaseModel):
@@ -320,6 +322,7 @@ class CriticConfig(BaseModel):
     model: str = Field("claude-sonnet-4-5-20250929", description="Critic 使用的模型")
     enable_thinking: bool = Field(True, description="是否启用扩展思考")
     max_retries: int = Field(2, description="最大重试次数")
+    llm_profile_name: Optional[str] = Field(None, description="LLM Profile 名称（可选）")
     
     # 人机协同配置
     auto_pass_on_high_confidence: bool = Field(True, description="高信心时自动通过")

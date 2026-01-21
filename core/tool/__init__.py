@@ -78,6 +78,12 @@ from core.tool.loader import (
     CORE_TOOLS,        # 🆕 核心工具列表
 )
 
+# 🆕 统一工具调用器
+from core.tool.unified_tool_caller import (
+    UnifiedToolCaller,
+    create_unified_tool_caller,
+)
+
 __all__ = [
     # 选择器
     "ToolSelector",
@@ -120,5 +126,8 @@ __all__ = [
     "create_tool_loader",
     "TOOL_CATEGORIES",
     "CORE_TOOLS",
+    # 🆕 统一工具调用器
+    "UnifiedToolCaller",
+    "create_unified_tool_caller",
 ]
 

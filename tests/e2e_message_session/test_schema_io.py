@@ -10,9 +10,15 @@ import sys
 import json
 from pathlib import Path
 
+import pytest
+
 # 添加项目根目录到路径
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
+
+RUN_E2E_DB_TESTS = os.getenv("RUN_E2E_DB_TESTS", "false").lower() == "true"
+if not RUN_E2E_DB_TESTS:
+    pytest.skip("未启用 RUN_E2E_DB_TESTS，跳过数据库/Redis 端到端测试", allow_module_level=True)
 
 # 导入测试配置（自动设置环境变量）
 # 注意：必须在导入其他模块之前设置环境变量
@@ -38,7 +44,7 @@ from infra.database.crud import (
 )
 from infra.cache.redis import get_redis_client
 from infra.message_queue.streams import MessageQueueClient, get_message_queue_client
-from fixtures import (
+from .fixtures import (
     create_mock_user_data,
     create_mock_conversation_data,
     create_mock_message_data,

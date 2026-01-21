@@ -129,10 +129,12 @@ class MultiAgentOrchestrator:
         # V7.1: 传递配置给 LeadAgent
         if enable_lead_agent:
             if self.config.orchestrator_config:
+                profile_name = self.config.orchestrator_config.llm_profile_name or "lead_agent"
                 self.lead_agent = LeadAgent(
                     model=orchestrator_model,
                     thinking_budget=self.config.orchestrator_config.thinking_budget,
                     max_tokens=self.config.orchestrator_config.max_tokens,
+                    llm_profile_name=profile_name,
                 )
             else:
                 self.lead_agent = LeadAgent(model=orchestrator_model)
@@ -143,10 +145,12 @@ class MultiAgentOrchestrator:
         # V7.2: Critic Agent（评估执行质量）
         critic_config = self.config.critic_config
         if critic_config and critic_config.enabled:
+            critic_profile = critic_config.llm_profile_name or "critic_agent"
             self.critic = CriticAgent(
                 model=critic_config.model,
                 enable_thinking=critic_config.enable_thinking,
                 config=critic_config,
+                llm_profile_name=critic_profile,
             )
             self.critic_config = critic_config
             logger.info(
@@ -173,6 +177,16 @@ class MultiAgentOrchestrator:
         # 🆕 V7.4: Token 使用统计
         from utils.usage_tracker import create_usage_tracker
         self.usage_tracker = create_usage_tracker()
+        
+        # 追踪信息（用于监控和调试）
+        self._execution_trace = []
+        
+        logger.info(
+            f"✅ MultiAgentOrchestrator 初始化: mode={self.config.mode.value}, "
+            f"agents={len(self.config.agents)}, checkpoints={enable_checkpoints}, "
+            f"lead_agent={enable_lead_agent}, "
+            f"orchestrator_model={orchestrator_model}, worker_model={worker_model}"
+        )
     
     @property
     def usage_stats(self) -> Dict[str, int]:
@@ -204,16 +218,49 @@ class MultiAgentOrchestrator:
                 f"input={sub_stats.get('total_input_tokens', 0)}, "
                 f"output={sub_stats.get('total_output_tokens', 0)}"
             )
+
+    async def _probe_worker_llm(
+        self,
+        llm_service: Any,
+        agent_id: str,
+        role: str,
+        subtask_id: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Worker LLM 存活探针（执行前）
         
-        # 追踪信息（用于监控和调试）
-        self._execution_trace = []
+        Args:
+            llm_service: LLM 服务实例
+            agent_id: 子智能体 ID
+            role: 子智能体角色
+            subtask_id: 子任务 ID（可选）
         
-        logger.info(
-            f"✅ MultiAgentOrchestrator 初始化: mode={self.config.mode.value}, "
-            f"agents={len(self.config.agents)}, checkpoints={enable_checkpoints}, "
-            f"lead_agent={enable_lead_agent}, "
-            f"orchestrator_model={orchestrator_model}, worker_model={worker_model}"
+        Returns:
+            探针结果（包含是否切换）
+        """
+        if not llm_service or not hasattr(llm_service, "probe"):
+            return None
+        
+        result = await llm_service.probe(
+            max_retries=3,
+            include_unhealthy=True
         )
+        if result and result.get("switched"):
+            trace_data = {
+                "agent_id": agent_id,
+                "role": role,
+                "from": result.get("primary"),
+                "to": result.get("selected"),
+                "errors": result.get("errors", [])
+            }
+            if subtask_id:
+                trace_data["subtask_id"] = subtask_id
+            self._trace("llm_switch", trace_data)
+            logger.warning(
+                f"🔁 Subagent 模型切换: agent_id={agent_id}, role={role}, "
+                f"from={result.get('primary')}, to={result.get('selected')}"
+            )
+        return result
     
     async def execute(
         self,
@@ -784,24 +831,42 @@ class MultiAgentOrchestrator:
             
             # 2. 创建独立的 LLM 服务（上下文隔离）
             # V7.1: 使用配置的 Worker 模型（强弱配对）
-            from core.llm import create_claude_service
+            from core.llm import create_llm_service
+            from config.llm_config import get_llm_profile
             
-            worker_model = self.worker_model if hasattr(self, 'worker_model') else config.model
+            worker_model = self.worker_model if hasattr(self, "worker_model") else config.model
+            profile_name = (
+                self.config.worker_config.llm_profile_name
+                if self.config.worker_config else None
+            ) or "worker_agent"
             
+            worker_profile = get_llm_profile(profile_name)
+            profile_provider = str(worker_profile.get("provider", "claude")).lower()
+            if profile_provider == "claude":
+                worker_profile["model"] = worker_model
             if self.config.worker_config:
-                llm = create_claude_service(
-                    model=worker_model,
-                    enable_thinking=self.config.worker_config.enable_thinking,
-                    max_tokens=self.config.worker_config.max_tokens,
-                    thinking_budget=self.config.worker_config.thinking_budget,
-                )
+                worker_profile.update({
+                    "enable_thinking": self.config.worker_config.enable_thinking,
+                    "max_tokens": self.config.worker_config.max_tokens,
+                    "thinking_budget": self.config.worker_config.thinking_budget,
+                })
             else:
-                llm = create_claude_service(
-                    model=worker_model,
-                    enable_thinking=True,
-                    max_tokens=8192,
-                    thinking_budget=5000,  # 默认值，确保小于 max_tokens
-                )
+                worker_profile.update({
+                    "enable_thinking": True,
+                    "max_tokens": 8192,
+                    "thinking_budget": 5000,
+                })
+            
+            llm = create_llm_service(**worker_profile)
+            
+            # 🆕 Worker 探针：执行前做存活检查（失败自动切换）
+            role_name = config.role.value if hasattr(config.role, "value") else str(config.role)
+            await self._probe_worker_llm(
+                llm_service=llm,
+                agent_id=config.agent_id,
+                role=role_name,
+                subtask_id=subtask.subtask_id if subtask else None
+            )
             
             # 3. 构建用户消息（只传递必要信息）
             user_message_parts = []
@@ -1388,24 +1453,41 @@ class MultiAgentOrchestrator:
             
             # 2. 创建独立的 LLM 服务
             # V7.1: 使用配置的 Worker 模型（强弱配对）
-            from core.llm import create_claude_service
+            from core.llm import create_llm_service
+            from config.llm_config import get_llm_profile
             
-            worker_model = self.worker_model if hasattr(self, 'worker_model') else config.model
+            worker_model = self.worker_model if hasattr(self, "worker_model") else config.model
+            profile_name = (
+                self.config.worker_config.llm_profile_name
+                if self.config.worker_config else None
+            ) or "worker_agent"
             
+            worker_profile = get_llm_profile(profile_name)
             if self.config.worker_config:
-                llm = create_claude_service(
-                    model=worker_model,
-                    enable_thinking=self.config.worker_config.enable_thinking,
-                    max_tokens=self.config.worker_config.max_tokens,
-                    thinking_budget=self.config.worker_config.thinking_budget,
-                )
+                worker_profile.update({
+                    "model": worker_model,
+                    "enable_thinking": self.config.worker_config.enable_thinking,
+                    "max_tokens": self.config.worker_config.max_tokens,
+                    "thinking_budget": self.config.worker_config.thinking_budget,
+                })
             else:
-                llm = create_claude_service(
-                    model=worker_model,
-                    enable_thinking=True,
-                    max_tokens=8192,
-                    thinking_budget=5000,  # 默认值，确保小于 max_tokens
-                )
+                worker_profile.update({
+                    "model": worker_model,
+                    "enable_thinking": True,
+                    "max_tokens": 8192,
+                    "thinking_budget": 5000,
+                })
+            
+            llm = create_llm_service(**worker_profile)
+            
+            # 🆕 Worker 探针：执行前做存活检查（失败自动切换）
+            role_name = config.role.value if hasattr(config.role, "value") else str(config.role)
+            await self._probe_worker_llm(
+                llm_service=llm,
+                agent_id=config.agent_id,
+                role=role_name,
+                subtask_id=subtask.subtask_id if subtask else None
+            )
             
             # 3. 构建用户消息（只传递摘要，不传完整历史）
             user_message_parts = [

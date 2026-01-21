@@ -52,7 +52,7 @@ import os
 import re
 from pathlib import Path
 
-from core.llm import create_claude_service, Message
+from core.llm import create_llm_service, Message
 
 logger = logging.getLogger(__name__)
 
@@ -539,7 +539,7 @@ class PlanTodoTool:
         # 🆕 使用配置化的 LLM Profile
         from config.llm_config import get_llm_profile
         profile = get_llm_profile("plan_manager")
-        self._llm = create_claude_service(**profile)
+        self._llm = create_llm_service(**profile)
         
         persistence_status = "启用" if memory_manager else "禁用"
         logger.info(f"✅ PlanTodoTool 初始化完成（智能版本，Extended Thinking，持久化: {persistence_status}）")
