@@ -3205,7 +3205,7 @@ zenflux_agent/
 │   │   │
 │   │   └── multi/                  # Multi Agent 模块（独立）
 │   │       ├── __init__.py         # 导出 MultiAgentOrchestrator
-│   │       ├── orchestrator.py     # MultiAgentOrchestrator (1969 行)
+│   │       ├── orchestrator.py     # MultiAgentOrchestrator (2051 行，含 Worker 探针)
 │   │       ├── lead_agent.py       # LeadAgent 任务分解 (709 行)
 │   │       ├── critic.py           # CriticAgent 质量评估 (359 行)
 │   │       ├── checkpoint.py       # 检查点恢复 (407 行)
@@ -3248,12 +3248,27 @@ zenflux_agent/
 │   │   ├── executor.py             # 工具执行器
 │   │   ├── loader.py               # 工具加载器
 │   │   ├── selector.py             # 工具选择器
+│   │   ├── unified_tool_caller.py  # 🆕 V7.6: 统一工具调用器（Skills/Fallback）
+│   │   ├── validator.py            # 工具验证器
+│   │   ├── result_compactor.py    # 结果精简器
+│   │   ├── instance_registry.py   # 实例工具注册表
 │   │   └── capability/             # 能力系统
+│   │       ├── registry.py         # 能力注册表
+│   │       ├── router.py           # 能力路由
+│   │       ├── invocation.py       # 调用管理
+│   │       ├── skill_loader.py     # Skills 加载器
+│   │       └── types.py            # 能力类型定义
 │   │
-│   ├── llm/                        # LLM 适配层
-│   │   ├── base.py                 # LLM 基类
-│   │   ├── claude.py               # Claude 适配
-│   │   ├── openai.py               # OpenAI 适配
+│   ├── llm/                        # 🆕 V7.6: LLM 适配层（多模型容灾）
+│   │   ├── __init__.py             # 统一导出（create_llm_service）
+│   │   ├── base.py                 # LLM 基类（LLMProvider, LLMConfig, BaseLLMService）
+│   │   ├── router.py               # 🆕 ModelRouter（主备切换、优先级轮询）
+│   │   ├── health_monitor.py       # 🆕 LLMHealthMonitor（健康监控）
+│   │   ├── tool_call_utils.py      # 🆕 tool_calls 规范化工具
+│   │   ├── adaptor.py              # 消息/工具格式适配器（Claude/OpenAI/Gemini）
+│   │   ├── claude.py               # Claude 适配（Extended Thinking, Skills）
+│   │   ├── openai.py               # OpenAI 适配（兼容 Qwen/DeepSeek）
+│   │   ├── qwen.py                 # 🆕 Qwen 适配（DashScope SDK）
 │   │   └── gemini.py               # Gemini 适配
 │   │
 │   ├── events/                     # 事件系统
@@ -3317,14 +3332,51 @@ zenflux_agent/
 │   └── graders/                    # 评分器
 │
 ├── tools/                          # Built-in 工具
+│   └── plan_todo_tool.py           # 计划管理工具
+│
 ├── skills/                         # Skills 库
+│   └── library/                    # 自定义 Skills
+│
 ├── instances/                      # 实例配置
+│   ├── _template/                  # 模板配置
+│   │   └── config.yaml             # 配置模板（含 llm_global）
+│   └── {name}/                     # 实例目录
+│       ├── prompt.md               # 系统提示词
+│       └── config.yaml             # 实例配置
+│
 ├── config/                         # 全局配置
+│   ├── llm_config/                 # 🆕 V7.6: LLM 配置管理
+│   │   ├── __init__.py             # 导出 get_llm_profile
+│   │   ├── loader.py               # 配置加载器（支持全局覆盖）
+│   │   ├── profiles.yaml           # 角色级 LLM 配置（含 fallbacks）
+│   │   ├── README.md               # 配置说明文档
+│   │   ├── qwen_fallback_optimization.md  # Qwen 回退优化指南
+│   │   └── qwen_recommended_configs.md    # Qwen 推荐配置
+│   ├── capabilities.yaml           # 工具能力定义（含 fallback_tool）
+│   └── context_compaction.yaml     # 上下文压缩配置
+│
 ├── scripts/                        # 脚本
 │   ├── instance_loader.py          # 实例加载器
 │   └── ...
+│
+├── tests/                          # 测试套件
+│   ├── test_e2e_fallback_claude_to_qwen.py  # 🆕 Claude→Qwen 回退 E2E
+│   ├── test_e2e_intent_single_agent.py      # 🆕 意图+单智能体 E2E
+│   ├── test_plan_todo_qwen_e2e.py           # 🆕 PlanTodo Qwen E2E
+│   ├── test_llm_profile_global_override.py  # 🆕 全局覆盖测试
+│   ├── test_llm_router_probe.py             # 🆕 路由探针测试
+│   ├── test_llm_router_tool_filter.py       # 🆕 工具过滤测试
+│   ├── test_llm_switch_event.py             # 🆕 切换事件测试
+│   ├── test_qwen_provider.py                # 🆕 Qwen Provider 测试
+│   ├── test_qwen_smoke.py                   # 🆕 Qwen 冒烟测试
+│   ├── test_tool_call_utils.py              # 🆕 tool_calls 规范化测试
+│   ├── test_tool_calls_compat.py            # 🆕 工具调用兼容性测试
+│   ├── test_unified_tool_caller.py          # 🆕 统一工具调用器测试
+│   └── ...                         # 其他测试文件
+│
 └── docs/                           # 文档
     └── architecture/               # 架构文档
+        └── 00-ARCHITECTURE-OVERVIEW.md  # 主架构文档
 ```
 
 ---
