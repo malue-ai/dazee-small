@@ -1867,6 +1867,16 @@ core/context/
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
+#### 下一步优化计划（上下文压缩/Context Editing）
+
+> 目标：保持用户无感知的前提下，提高上下文稳定性与成本可控性。
+
+- **L2 裁剪改为 Token 预算驱动**：按模型上下文窗口比例裁剪，替代按消息条数
+- **中间段摘要回注**：被裁剪内容生成结构化摘要，插入历史以降低语义断层
+- **关键消息标记保留**：任务目标/约束/决策/关键 tool_result 优先保留
+- **大工具结果压缩**：对超大 tool_result 进行摘要/截断，保留关键信息
+- **Context Editing 触发观测**：记录触发次数与策略，便于线上调优
+
 #### 失败经验总结（Failure Summary）
 
 **目标**：当对话失败/中断时生成结构化总结，用于续聊恢复与上下文压缩。  
@@ -2211,7 +2221,7 @@ memory_update:
 llm.enable_context_editing(
     clear_tool_uses=True,
     clear_thinking=False,
-    trigger_threshold=30000,
+    trigger_threshold=None,  # 按模型上下文窗口比例自动计算（默认 70%）
     keep_tool_uses=10,
     clear_at_least=None,   # 自动计算
     exclude_tools=["web_search", "web_fetch"],
