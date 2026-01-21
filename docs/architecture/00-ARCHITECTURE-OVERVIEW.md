@@ -1,8 +1,8 @@
 # ZenFlux Agent V7.5 架构文档
 
-> **最后更新**: 2026-01-19  
+> **最后更新**: 2026-01-21  
 > **历史版本**: 已归档至 [`archived/`](./archived/) 目录  
-> **架构状态**: 框架统一完成，计费系统 V7.5（EnhancedUsageTracker），缓存计费符合 Claude Platform 规范，消息会话管理（含缓存预加载）
+> **架构状态**: 框架统一完成，计费系统 V7.5（EnhancedUsageTracker），缓存计费符合 Claude Platform 规范，消息会话管理（含缓存预加载），多模型容灾与优先级轮询（V7.6）
 
 ---
 
@@ -39,6 +39,7 @@
   - [事件系统 (core/events/)](#事件系统-coreevents)
   - [监控系统 (core/monitoring/)](#监控系统-coremonitoring)
 - [服务层与 API 架构](#服务层与-api-架构)
+- [多模型容灾与 Qwen 接入 (V7.6)](#多模型容灾与-qwen-接入-v76)
 - [提示词缓存系统 (core/prompt/)](#提示词缓存系统-coreprompt)
 - [启动与运行流程](#启动与运行流程)
 - [配置管理体系](#配置管理体系)
@@ -2510,6 +2511,212 @@ grpc_server/ (gRPC)          ↑
 
 ---
 
+## 多模型容灾与 Qwen 接入 (V7.6)
+
+**定位**：Qwen 接入是重大更新，需确保“真实端到端流程可用 + 全局一键切换 + 主备容灾”。
+
+### 自顶向下调用流程（真实链路）
+
+```
+用户请求
+  ↓
+routers/chat.py 或 grpc_server/chat_servicer.py
+  ↓
+ChatService.chat()
+  ├─ AgentRegistry.get_agent()                 # 原型克隆（Simple/Multi）
+  ├─ AgentFactory.create_router(prompt_cache)  # 统一路由入口
+  │   └─ AgentRouter.route()
+  │       └─ IntentAnalyzer.analyze()
+  │           └─ create_llm_service(profile=intent_analyzer)
+  │               └─ ModelRouter (primary + fallbacks)
+  │                   └─ QwenLLMService / ClaudeLLMService
+  └─ RoutingDecision(agent_type)
+      ├─ SimpleAgent.chat()
+      │   └─ create_llm_service(profile=main_agent)
+      │       └─ ModelRouter (primary + fallbacks)
+      └─ MultiAgentOrchestrator.execute()
+          ├─ create_llm_service(profile=lead_agent)
+          ├─ create_llm_service(profile=worker_agent)
+          └─ create_llm_service(profile=critic_agent)
+```
+
+**探针与切换位置**：
+- `ChatService._probe_llm_service()`：执行前对 Lead/Critic/Single LLM 做探针（默认 3 次重试）。
+- `MultiAgentOrchestrator._probe_worker_llm()`：Worker 执行前探针，失败即切换并发出 `llm_switch` 事件。
+- `ModelRouter.probe()`：探针失败会强制标记目标为不可用并选择备选。
+
+### 配置项说明（全局/角色/环境变量）
+
+| 层级 | 位置 | 关键字段 | 作用 |
+|------|------|----------|------|
+| 角色级 | `config/llm_config/profiles.yaml` | `provider` / `model` / `fallbacks` / `policy` | 定义主模型与备选链路 |
+| 全局 | `instances/{name}/config.yaml` | `llm_global` | 一键覆盖所有 profile |
+| 环境 | `.env` | `QWEN_API_KEY` / `DASHSCOPE_API_KEY` | Qwen API Key |
+| 环境 | `.env` | `QWEN_BASE_URL` | Qwen 基础地址（新加坡：`https://dashscope-intl.aliyuncs.com/compatible-mode/v1`） |
+| 环境 | OS Env | `LLM_<PROFILE>_<PARAM>` | 单 profile 覆盖（如 `LLM_MAIN_AGENT_TEMPERATURE`） |
+| 环境 | OS Env | `LLM_GLOBAL_CONFIG_PATH` | 指定 `config.yaml` 绝对路径 |
+| 环境 | OS Env | `ZENFLUX_INSTANCE` / `INSTANCE_NAME` / `AGENT_INSTANCE` | 指定实例名称 |
+
+**备注**：
+- Qwen 使用 DashScope SDK；当配置 `compatible-mode/v1` 时会自动规范为 `/api/v1`。
+- 未设置 `QWEN_API_KEY` 时会回退读取 `DASHSCOPE_API_KEY`。
+
+**全局一键切换示例**：
+```yaml
+llm_global:
+  enabled: true
+  provider: "qwen"
+  base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+  api_key_env: "QWEN_API_KEY"
+  compat: "qwen"
+  model_map:
+    intent_analyzer: "qwen-plus"
+    default: "qwen-max"
+```
+
+### 主备策略与降级策略
+
+1. **主备链路来源**  
+   - 主模型来自 profile 的 `provider + model`。  
+   - **同模型多服务商**：`fallbacks[]` 中保持相同 `provider + model`，
+     仅用 `base_url + api_key_env` 区分不同服务商。  
+   - **跨厂商主备**：`fallbacks[]` 中使用不同 `provider`（如 Claude → Qwen → DeepSeek）。
+
+2. **切换触发**  
+   - 探针失败或调用异常 → `ModelRouter` 标记目标不可用。  
+   - 达到 `policy.max_failures` 后进入冷却，`policy.cooldown_seconds` 后再恢复。
+
+3. **工具/Skills 降级**  
+   - 自动化：非 Claude 模型会自动过滤非 dict 工具，并跳过 Claude Skills 容器。  
+   - 配置化：`capabilities.yaml` 配好 `fallback_tool` 后自动生效，无需每次手动切换。
+
+4. **优先级轮询与自动回切**  
+   - **触发机制**：服务层在请求前探针（`ChatService` 与 `MultiAgentOrchestrator`），
+     使用 `probe(include_unhealthy=True)` 轮询所有优先级目标（包括当前被标记不可用的高优先级服务）。  
+   - **优先级来源**：`profiles.yaml` 的 `primary → fallbacks[]` 顺序即优先级，
+     **先同模型多服务商（相同 `provider + model`，不同 `base_url + api_key_env`），再跨厂商主备（不同 `provider`）**。  
+   - **调用流程**：  
+     1) `AgentFactory/create_llm_service` 读取 profile 构建 `ModelRouter`；  
+     2) `probe(include_unhealthy=True)` 按优先级逐一 `ping`，失败记入熔断/冷却；  
+     3) 成功即更新 `last_selected`，返回 `selected` 与 `switched`；  
+     4) `switched=true` 时发送 `llm_switch` 事件并继续执行。  
+   - **回切机制**：高优先级恢复时，下一次探针命中即自动回切（`include_unhealthy=True` 确保每次探针都优先检查高优先级服务）。  
+   - **示例配置**（`profiles.yaml`）：
+     ```yaml
+     main_agent:
+       provider: "claude"
+       model: "claude-sonnet-4-5-20250929"
+       fallbacks:
+         # 同模型多服务商（优先级 1-2）
+         - provider: "claude"
+           model: "claude-sonnet-4-5-20250929"
+           api_key_env: "CLAUDE_API_KEY_VENDOR_A"
+           base_url: "https://api.anthropic.com"
+         - provider: "claude"
+           model: "claude-sonnet-4-5-20250929"
+           api_key_env: "CLAUDE_API_KEY_VENDOR_B"
+           base_url: "https://anthropic-proxy-b.example.com/v1"
+         # 跨厂商主备（优先级 3-4）
+         - provider: "qwen"
+           model: "qwen-max"
+           api_key_env: "QWEN_API_KEY"
+           base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+         - provider: "openai"
+           model: "deepseek-chat"
+           api_key_env: "DEEPSEEK_API_KEY"
+           base_url: "https://api.deepseek.com/v1"
+     ```
+
+5. **调用关系与验证**  
+   - **调用关系**：`AgentFactory` → `create_llm_service` → `ModelRouter` →
+     `ChatService/MultiAgentOrchestrator.probe` → `ModelRouter.create_message_*`。  
+   - **验证方式**：  
+     1) 配置同模型多服务商（不同 `base_url + api_key_env`）；  
+     2) 人为让主服务失败（无效 key/断网）触发 fallback；  
+     3) 观察 `llm_switch` 事件与日志 `selected` 目标；  
+     4) 恢复主服务后再次请求，确认自动回切。  
+   - **验证日志示例**（Claude 401 → Qwen 成功）：
+     ```
+     [ERROR] Claude API 调用失败: Error code: 401 - invalid x-api-key
+     [WARNING] 模型调用失败: target=claude:claude-haiku-4-5-20251001, failures=1
+     [INFO] LLM 健康状态变化: fallback_2:qwen:qwen-plus -> healthy
+     [INFO] 意图分析结果: type=information_query, complexity=simple, score=1.0
+     ```  
+   - **`llm_switch` 事件结构**：
+     ```json
+     {
+       "event_type": "llm_switch",
+       "reason": "probe_failed",
+       "role": "simple_agent",
+       "from": {
+         "name": "claude:claude-sonnet-4-5-20250929",
+         "provider": "claude",
+         "model": "claude-sonnet-4-5-20250929"
+       },
+       "to": {
+         "name": "fallback_2:qwen:qwen-max",
+         "provider": "qwen",
+         "model": "qwen-max",
+         "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+       },
+       "errors": [
+         {
+           "target": "claude:claude-sonnet-4-5-20250929",
+           "provider": "claude",
+           "model": "claude-sonnet-4-5-20250929",
+           "error": "Error code: 401 - invalid x-api-key"
+         }
+       ],
+       "timestamp": "2026-01-21T19:03:24.199Z"
+     }
+     ```
+
+### 新增功能与流程（工具兼容回归）
+
+- **tool_calls 统一规范化**：新增 `core/llm/tool_call_utils.py`，统一将入参归一为 `{id, name, input, type}`，并对非法 JSON 降级为空对象。  
+- **Qwen/OpenAI/Gemini 对齐**：  
+  - Qwen：解析响应后输出 `tool_calls` + `raw_content` 的 `tool_use` 块。  
+  - OpenAI/Gemini 适配器：补齐 `type=tool_use`，并处理非法 JSON 参数。  
+  - OpenAI 流式：最终 `tool_calls` 补齐 `type=tool_use`。  
+- **Router + Skills fallback**：当路由目标包含非 Skills 模型时，自动注入 `fallback_tool`，避免主备切换后能力缺失。
+
+**测试覆盖（新增）**：
+- `tests/test_tool_call_utils.py`（多种入参形态/非法 JSON/缺失 ID）  
+- `tests/test_tool_calls_compat.py`（OpenAI/Qwen tool_calls 解析）  
+- `tests/test_llm_router_tool_filter.py`（非 Claude 工具过滤含流式路径）  
+
+### 端到端真实流程验证（Qwen）
+
+**目标**：按真实用户请求链路验证路由 + LLM 选择 + plan_todo 执行。  
+**约束**：只允许 mock DB/MQ/Redis/SessionCache，LLM 调用必须真实。
+
+**验证步骤**：
+1. 准备环境变量（实例 `.env`）  
+   - `QWEN_API_KEY`（或 `DASHSCOPE_API_KEY`）  
+   - `QWEN_BASE_URL=https://dashscope-intl.aliyuncs.com/compatible-mode/v1`
+2. 启用全局切换（`instances/{name}/config.yaml`）  
+   - `llm_global.enabled=true`  
+   - `model_map.intent_analyzer=qwen-plus`  
+   - `model_map.default=qwen-max`
+3. 执行端到端测试（真实调用 Qwen）：  
+   - `python -m pytest -q tests/test_e2e_intent_single_agent.py`  
+   - `python -m pytest -q tests/test_plan_todo_qwen_e2e.py`  
+   - `python -m pytest -q tests/test_llm_profile_global_override.py`  
+   - `python -m pytest -q tests/test_e2e_fallback_claude_to_qwen.py`（新增：Claude 不可用→Qwen 回退）
+
+**最近一次验证结果（真实 Qwen）**：
+- 2026-01-21：以上 4 个用例全部通过（6 passed，68s）。  
+- **Claude→Qwen 回退验证**：主服务 401 失败后，自动切换至 Qwen 并成功完成意图识别与对话，`llm_switch` 事件正确记录切换信息。
+
+### 待解决项（必须跟踪）
+
+1. **计费覆盖**：`core/billing/pricing.py` 仍缺少 Qwen 定价模型。  
+2. **工具兼容回归**：已补齐 `tool_calls` 规范化与单测，仍需覆盖更多真实工具矩阵（含多智能体场景）。  
+3. **策略调优**：主备切换阈值（`max_failures/cooldown`）与告警策略需要生产数据校准。  
+4. **多智能体验证**：Qwen 在 `Lead/Worker/Critic` 组合下的稳定性与成本评估待补齐。
+
+---
+
 ## 提示词缓存系统 (core/prompt/)
 
 ### InstancePromptCache
@@ -3463,7 +3670,7 @@ delay = min(base_delay × (exponential_base ^ attempt), max_delay) + jitter
 | AgentSchema 添加 multi_agent 字段 | ✅ 已完成 | `core/schemas/validator.py` |
 | AgentSchema 添加 LLM 超参数字段 | ✅ 已完成 | temperature/max_tokens/enable_thinking/enable_caching |
 | context_limits 配置生效 | ✅ 已完成 | `SimpleAgent.__init__` 读取并覆盖 context_strategy |
-| LLM 超参数传递链路 | ✅ 已完成 | `SimpleAgent._init_modules()` → create_claude_service() |
+| LLM 超参数传递链路 | ✅ 已完成 | `SimpleAgent._init_modules()` → create_llm_service() |
 | Schema to_dict() 包含 multi_agent | ✅ 已完成 | `validator.py to_dict()` |
 
 ---
