@@ -947,18 +947,19 @@ class ChatService:
                     f"output={token_usage.output_tokens:,}, "
                     f"thinking={token_usage.thinking_tokens:,}, "
                     f"cache_read={token_usage.cache_read_tokens:,}, "
-                    f"total_price=${usage_response.total_price}"
+                    f"total_price=${usage_response.total_price:.6f}"
                 )
                 
-                # 🆕 V7.4: 发送 usage SSE 事件
-                try:
-                    await events.system.emit_custom(
-                        session_id=session_id,
-                        event_type="usage",
-                        event_data=usage_response.model_dump()
-                    )
-                except Exception as emit_err:
-                    logger.debug(f"Usage 事件发送失败: {emit_err}")
+                # ✅ 补充更新：将完整的 usage（包含 latency）推送到消息队列
+                # 注意：Agent 已经发送了 message_stop 并保存了基础数据（latency=0）
+                # 这里发送补充更新，只更新 metadata.usage 字段
+                from infra.message_queue import get_message_queue_client
+                mq_client = await get_message_queue_client()
+                await mq_client.push_update_event(
+                    message_id=assistant_message_id,
+                    metadata={"usage": usage_response.model_dump()}  # 只更新 usage
+                )
+                logger.debug(f"✅ 完整 Usage 数据已补充更新 (latency={duration_ms / 1000.0:.2f}s)")
                 
             except Exception as audit_err:
                 logger.warning(f"⚠️ Token 审计失败: {audit_err}")

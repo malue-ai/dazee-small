@@ -60,7 +60,7 @@ from core.tool.capability import create_capability_registry, create_invocation_s
 from logger import get_logger
 from prompts.universal_agent_prompt import get_universal_agent_prompt
 from tools.plan_todo_tool import create_plan_todo_tool
-from utils.usage_tracker import create_usage_tracker
+from core.billing.tracker import create_enhanced_usage_tracker
 from utils.message_utils import (
     dict_list_to_messages,
     append_assistant_message,
@@ -201,8 +201,8 @@ class SimpleAgent:
         # 整合 KV-Cache 优化、Todo 重写、工具遮蔽、可恢复压缩、结构化变异、错误保留
         self.context_engineering = create_context_engineering_manager()
         
-        # ===== Usage 统计（使用 UsageTracker） =====
-        self.usage_tracker = create_usage_tracker()
+        # ===== # Usage 统计（使用增强版，支持工具调用计费） =====
+        self.usage_tracker = create_enhanced_usage_tracker()
         
         # ===== 🆕 E2E Pipeline Tracer（V4.2 Code-First 优化） =====
         # 追踪器按 session 创建，在 chat() 中初始化
@@ -316,8 +316,8 @@ class SimpleAgent:
         clone._current_conversation_id = None
         clone._current_user_id = None
         
-        # 创建新的 UsageTracker
-        clone.usage_tracker = create_usage_tracker()
+        # 创建新的 EnhancedUsageTracker（支持工具调用计费）
+        clone.usage_tracker = create_enhanced_usage_tracker()
         
         # 标记为非原型
         clone._is_prototype = False
@@ -1090,15 +1090,33 @@ class SimpleAgent:
             self._tracer.finish()
             logger.debug("✅ E2E Pipeline Report 已生成")
         
-        # 7.4 发送完成事件并累积 usage 统计
-        stats = self.usage_stats
-        await self.broadcaster.accumulate_usage(session_id, {
-            "input_tokens": stats.get("total_input_tokens", 0),
-            "output_tokens": stats.get("total_output_tokens", 0),
-            "cache_read_tokens": stats.get("total_cache_read_tokens", 0),
-            "cache_creation_tokens": stats.get("total_cache_creation_tokens", 0),
-        })
+        # 🆕 V7.5: 生成完整的 billing 信息
+        from models.usage import UsageResponse
+        usage_response = UsageResponse.from_usage_tracker(
+            tracker=self.usage_tracker,
+            model=self.model,
+            latency=0  # Agent 内部不计算总延迟（由 ChatService 计算）
+        )
         
+        # 累积 usage 到内存（供 _finalize_message 保存到数据库）
+        # 注意：如果通过 ChatService 调用，此数据会被 ChatService 的完整数据覆盖（包含总延迟）
+        # 如果 Agent 独立使用，此数据确保 usage 信息被正确保存
+        await self.broadcaster.accumulate_usage(
+            session_id=session_id,
+            usage=usage_response.model_dump()
+        )
+        
+        # 发送 billing 事件到前端（作为最后一个 message_delta，在 message_stop 之前）
+        yield {
+            "type": "message_delta",
+            "data": {
+                "type": "billing",
+                "content": usage_response.model_dump()
+            }
+        }
+        logger.debug(f"📊 Billing 事件已发送: total_price=${usage_response.total_price:.6f}")
+        
+        # message_stop 作为最后一个事件（保持向后兼容）
         yield await self.broadcaster.emit_message_stop(
             session_id=session_id,
             message_id=self._current_message_id
@@ -1388,6 +1406,16 @@ class SimpleAgent:
             # 触发 PromptManager（如 RAG 上下文追加）
             if ctx:
                 (await get_prompt_manager_async()).on_tool_result(ctx, tool_name=tool_name, result=result)
+            
+            # 🆕 V7.5.1: 工具调用成功，记录计费
+            # 注意：usage_tracker 由 SimpleAgent 提供（EnhancedUsageTracker）
+            if hasattr(self, 'usage_tracker'):
+                self.usage_tracker.record_tool_call(
+                    tool_name=tool_name,
+                    success=True,
+                    params=tool_input  # 传递参数用于 api_calling 等通用工具的价格查询
+                )
+                logger.debug(f"💰 工具计费已记录: {tool_name}")
             
             return {
                 "tool_id": tool_id,
@@ -1944,7 +1972,7 @@ class SimpleAgent:
         self._plan_cache = {"plan": None, "todo": None, "tool_calls": []}
         self._last_intent_result = None
         self._tracer = None
-        self.usage_tracker = create_usage_tracker()
+        self.usage_tracker = create_enhanced_usage_tracker()
         self.context_engineering = create_context_engineering_manager()
         self.invocation_stats = {
             "direct": 0, 

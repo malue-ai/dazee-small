@@ -3,7 +3,8 @@ Billing 数据模型
 
 定义计费相关的核心数据结构：
 - LLMCallRecord: 单次 LLM 调用记录
-- UsageResponse: 完整的 Usage 响应（Dify 兼容 + 多模型支持）
+- ToolCallRecord: 工具调用记录（聚合统计）
+- UsageResponse: 完整的 Usage 响应（Dify 兼容 + 多模型 + 工具计费）
 
 所有价格字段使用 float 类型（单位：USD），方便前端处理和计算
 """
@@ -56,13 +57,46 @@ class LLMCallRecord(BaseModel):
     
     @property
     def total_tokens(self) -> int:
-        """总 tokens = input + output + thinking"""
-        return self.input_tokens + self.output_tokens + self.thinking_tokens
+        """总 tokens = input + output + thinking + cache_read（反映真实使用量）"""
+        return self.input_tokens + self.output_tokens + self.thinking_tokens + self.cache_read_tokens
     
     class Config:
         json_encoders = {
             datetime: lambda v: v.isoformat()
         }
+
+
+class ToolCallRecord(BaseModel):
+    """
+    工具调用记录（聚合统计）
+    
+    设计原则：
+    - 按工具聚合：同一工具只有一个 call_id，count 累加
+    - 调用成功后记录：失败不计费
+    - 免费工具也记录：tool_price = 0.0
+    
+    示例：
+        {
+            "call_id": "call_001",
+            "count": 2,
+            "tool_name": "web_search",
+            "tool_price": 0.01,
+            "total_price": 0.02
+        }
+    """
+    # 基础信息
+    call_id: str = Field(..., description="调用标识（按工具聚合）")
+    count: int = Field(..., description="调用次数（同一工具累加）")
+    tool_name: str = Field(..., description="工具名称")
+    
+    # 价格信息（USD）
+    tool_price: float = Field(..., description="单次调用价格（USD）")
+    total_price: float = Field(..., description="总价格（count * tool_price，USD）")
+    
+    @property
+    def is_free(self) -> bool:
+        """是否免费工具"""
+        return self.tool_price == 0.0
 
 
 class UsageResponse(BaseModel):
@@ -77,7 +111,8 @@ class UsageResponse(BaseModel):
     - 提供详细的调用明细
     """
     # 累积统计（所有调用的总和）
-    prompt_tokens: int = Field(0, description="总输入 tokens")
+    # 遵循 Claude Platform 规范：prompt_tokens = input_tokens + cache_read_tokens + cache_write_tokens
+    prompt_tokens: int = Field(0, description="总输入 tokens（包含 input + cache_read + cache_write）")
     completion_tokens: int = Field(0, description="总输出 tokens")
     thinking_tokens: int = Field(0, description="总 thinking tokens")
     cache_read_tokens: int = Field(0, description="总缓存读取 tokens")
@@ -114,6 +149,16 @@ class UsageResponse(BaseModel):
         description="每次 LLM 调用的详细记录"
     )
     
+    # 🆕 工具调用明细（V7.5.1 新增）
+    tool_call_details: List['ToolCallRecord'] = Field(
+        default_factory=list,
+        description="工具调用详细记录（按工具聚合）"
+    )
+    
+    # 🆕 工具计费（V7.5.1 新增）
+    tool_total_price: float = Field(0.0, description="工具调用总价格（USD）")
+    llm_total_price: float = Field(0.0, description="LLM 调用总价格（USD）")
+    
     @classmethod
     def from_tracker(
         cls,
@@ -130,7 +175,12 @@ class UsageResponse(BaseModel):
         Returns:
             UsageResponse 对象
         """
-        if not tracker.calls:
+        # 🔄 V7.5.1: 即使没有 LLM 调用，也需要检查工具调用
+        has_llm_calls = bool(tracker.calls)
+        has_tool_calls = bool(hasattr(tracker, 'tool_calls') and tracker.tool_calls)
+        
+        # 如果既没有 LLM 调用也没有工具调用，返回空响应
+        if not has_llm_calls and not has_tool_calls:
             return cls()
         
         # 累积所有调用的统计
@@ -147,11 +197,19 @@ class UsageResponse(BaseModel):
         total_cache_read_price = sum(call.cache_read_price for call in tracker.calls)
         total_cache_write_price = sum(call.cache_write_price for call in tracker.calls)
         
-        # 计算加权平均单价
-        weighted_input_price = (
-            sum(call.input_tokens * call.input_unit_price for call in tracker.calls) 
-            / total_input if total_input > 0 else 0.0
-        )
+        # 计算加权平均单价（考虑所有输入 tokens，包括缓存）
+        # prompt_unit_price 基于 total_prompt_tokens（input + cache_read + cache_write）
+        total_prompt_tokens_for_weighting = total_input + total_cache_read + total_cache_write
+        if total_prompt_tokens_for_weighting > 0:
+            # 加权平均：考虑 input_tokens、cache_read_tokens、cache_write_tokens 各自的单价
+            weighted_input_price = (
+                sum(call.input_tokens * call.input_unit_price for call in tracker.calls) +
+                sum(call.cache_read_tokens * call.cache_read_unit_price for call in tracker.calls) +
+                sum(call.cache_write_tokens * call.cache_write_unit_price for call in tracker.calls)
+            ) / total_prompt_tokens_for_weighting
+        else:
+            weighted_input_price = 0.0
+        
         weighted_output_price = (
             sum(call.output_tokens * call.output_unit_price for call in tracker.calls) 
             / total_output if total_output > 0 else 0.0
@@ -167,23 +225,30 @@ class UsageResponse(BaseModel):
             for call in tracker.calls
         )
         
+        # 根据 Claude Platform 规范：total_input_tokens = input_tokens + cache_read_tokens + cache_write_tokens
+        # 这三个字段是独立的：input_tokens 是未缓存部分，cache_read/write 是缓存部分
+        total_prompt_tokens = total_input + total_cache_read + total_cache_write
+        
+        # 🆕 V7.5.1: 工具计费
+        tool_call_details = list(tracker.tool_calls.values()) if hasattr(tracker, 'tool_calls') else []
+        tool_total = sum(record.total_price for record in tool_call_details)
+        
+        # LLM 总价
+        llm_total = total_input_price + total_output_price + total_thinking_price + total_cache_read_price + total_cache_write_price
+        
         return cls(
-            prompt_tokens=total_input,
+            prompt_tokens=total_prompt_tokens,  # 包含 input + cache_read + cache_write
             completion_tokens=total_output,
             thinking_tokens=total_thinking,
             cache_read_tokens=total_cache_read,
             cache_write_tokens=total_cache_write,
-            total_tokens=total_input + total_output + total_thinking,
-            prompt_price=round(total_input_price, 6),
+            total_tokens=total_prompt_tokens + total_output + total_thinking,  # 包含所有输入 tokens（含缓存）
+            prompt_price=round(total_input_price, 6),  # 只包含 input_tokens 的价格（不含缓存）
             completion_price=round(total_output_price, 6),
             thinking_price=round(total_thinking_price, 6),
             cache_read_price=round(total_cache_read_price, 6),
             cache_write_price=round(total_cache_write_price, 6),
-            total_price=round(
-                total_input_price + total_output_price + total_thinking_price 
-                + total_cache_read_price + total_cache_write_price, 
-                6
-            ),
+            total_price=round(llm_total + tool_total, 6),  # 🔄 V7.5.1: LLM + 工具总价
             prompt_unit_price=round(weighted_input_price, 2),
             completion_unit_price=round(weighted_output_price, 2),
             latency=latency,
@@ -191,7 +256,11 @@ class UsageResponse(BaseModel):
             model=tracker.calls[0].model if tracker.calls else "unknown",
             cache_hit_rate=round(cache_hit_rate, 4),
             cost_saved_by_cache=round(cost_saved_by_cache, 6),
-            llm_call_details=tracker.calls  # 🔥 关键：包含所有调用明细
+            llm_call_details=tracker.calls,  # 🔥 关键：包含所有调用明细
+            # 🆕 V7.5.1: 工具计费
+            tool_call_details=tool_call_details,
+            tool_total_price=round(tool_total, 6),
+            llm_total_price=round(llm_total, 6)
         )
     
     class Config:
