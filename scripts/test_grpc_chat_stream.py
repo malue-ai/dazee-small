@@ -53,6 +53,15 @@ async def test_chat_stream(agent_id: str = "zeno_agent", host: str = "localhost:
                     print(f"\n📝 [{event_count}] 助手消息开始")
                     print(f"   message_id: {event.get('message_id', 'N/A')}")
                 
+                elif event_type == "message.assistant.delta":
+                    # ZenO 格式的增量更新
+                    delta = event.get("delta", {})
+                    delta_type = delta.get("type", "unknown")
+                    content = delta.get("content", "")
+                    # 只打印前 80 个字符
+                    preview = content[:80] + "..." if len(content) > 80 else content
+                    print(f"   💬 [{event_count}] [{delta_type}] {preview}")
+                
                 elif event_type == "message.assistant.streaming":
                     content = event.get("content", "")
                     # 只打印前 80 个字符

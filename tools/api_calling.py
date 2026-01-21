@@ -389,7 +389,7 @@ class APICallingTool:
             字符串片段（SSE 事件的文本内容）
         """
         # 1. 解析 URL 和 Headers
-        final_url, final_headers, resolve_error = self._resolve_api_config(
+        final_url, final_headers, resolve_error, _ = self._resolve_api_config(
             api_name=api_name,
             path=path,
             url=url,

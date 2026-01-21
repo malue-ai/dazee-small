@@ -74,6 +74,17 @@ class ConversationService:
             
             logger.info(f"✅ 对话创建成功: id={db_conv.id}, user_id={user_id}")
             
+            # 处理 extra_data 可能是 JSON 字符串的情况
+            metadata = db_conv.extra_data
+            if isinstance(metadata, str):
+                try:
+                    metadata = json.loads(metadata) if metadata else {}
+                except json.JSONDecodeError:
+                    logger.warning(f"对话 {db_conv.id} 的 metadata 解析失败，使用空字典")
+                    metadata = {}
+            elif metadata is None:
+                metadata = {}
+            
             # 转换为 Pydantic 模型
             return Conversation(
                 id=db_conv.id,
@@ -81,7 +92,7 @@ class ConversationService:
                 title=db_conv.title,
                 created_at=db_conv.created_at,
                 updated_at=db_conv.updated_at,
-                metadata=db_conv.extra_data
+                metadata=metadata
             )
     
     async def get_conversation(self, conversation_id: str) -> Conversation:
@@ -103,13 +114,24 @@ class ConversationService:
         if not db_conv:
             raise ConversationNotFoundError(f"对话不存在: {conversation_id}")
         
+        # 处理 extra_data 可能是 JSON 字符串的情况
+        metadata = db_conv.extra_data
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata) if metadata else {}
+            except json.JSONDecodeError:
+                logger.warning(f"对话 {conversation_id} 的 metadata 解析失败，使用空字典")
+                metadata = {}
+        elif metadata is None:
+            metadata = {}
+        
         return Conversation(
             id=db_conv.id,
             user_id=db_conv.user_id,
             title=db_conv.title,
             created_at=db_conv.created_at,
             updated_at=db_conv.updated_at,
-            metadata=db_conv.extra_data
+            metadata=metadata
         )
     
     async def list_conversations(
@@ -183,13 +205,24 @@ class ConversationService:
             
             logger.info(f"✅ 对话更新成功: id={conversation_id}")
             
+            # 处理 extra_data 可能是 JSON 字符串的情况
+            metadata = db_conv.extra_data
+            if isinstance(metadata, str):
+                try:
+                    metadata = json.loads(metadata) if metadata else {}
+                except json.JSONDecodeError:
+                    logger.warning(f"对话 {conversation_id} 的 metadata 解析失败，使用空字典")
+                    metadata = {}
+            elif metadata is None:
+                metadata = {}
+            
             return Conversation(
                 id=db_conv.id,
                 user_id=db_conv.user_id,
                 title=db_conv.title,
                 created_at=db_conv.created_at,
                 updated_at=db_conv.updated_at,
-                metadata=db_conv.extra_data
+                metadata=metadata
             )
     
     async def delete_conversation(self, conversation_id: str) -> Dict[str, Any]:
@@ -268,6 +301,17 @@ class ConversationService:
                 # content 是 JSONB 类型，ORM 返回 list，无需 json.loads
                 content = db_msg.content if db_msg.content else []
                 
+                # 处理 extra_data 可能是 JSON 字符串的情况
+                metadata = db_msg.extra_data
+                if isinstance(metadata, str):
+                    try:
+                        metadata = json.loads(metadata) if metadata else {}
+                    except json.JSONDecodeError:
+                        logger.warning(f"消息 {db_msg.id} 的 metadata 解析失败，使用空字典")
+                        metadata = {}
+                elif metadata is None:
+                    metadata = {}
+                
                 messages.append({
                     "id": db_msg.id,
                     "conversation_id": db_msg.conversation_id,
@@ -275,7 +319,7 @@ class ConversationService:
                     "content": content,
                     "status": db_msg.status,
                     "created_at": db_msg.created_at.isoformat() if db_msg.created_at else None,
-                    "metadata": db_msg.extra_data
+                    "metadata": metadata
                 })
         
         has_more = (offset + len(messages)) < total
@@ -406,6 +450,17 @@ class ConversationService:
         if isinstance(final_content, list):
             final_content = json.dumps(final_content, ensure_ascii=False)
         
+        # 处理 extra_data 可能是 JSON 字符串的情况
+        final_metadata = existing_metadata
+        if isinstance(final_metadata, str):
+            try:
+                final_metadata = json.loads(final_metadata) if final_metadata else {}
+            except json.JSONDecodeError:
+                logger.warning(f"消息 {message_id} 的 metadata 解析失败，使用空字典")
+                final_metadata = {}
+        elif final_metadata is None:
+            final_metadata = {}
+        
         return Message(
             id=updated_msg.id,
             conversation_id=updated_msg.conversation_id,
@@ -413,7 +468,7 @@ class ConversationService:
             content=final_content,
             status=status if status is not None else updated_msg.status,
             created_at=updated_msg.created_at,
-            metadata=existing_metadata
+            metadata=final_metadata
         )
     
     async def get_conversation_summary(self, conversation_id: str) -> Dict[str, Any]:

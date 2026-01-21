@@ -125,8 +125,8 @@ class ChatServicer(_ChatServicerBase):
             # 转换变量
             variables = dict(request.variables) if request.variables else None
             
-            # 获取 agent_id（可选）
-            agent_id = request.agent_id if request.agent_id else None
+            # 获取 agent_id（默认为 dazee_agent）
+            agent_id = request.agent_id if request.agent_id else "dazee_agent"
             
             # 调用业务服务（同步模式，mock 模式下会返回 mock 任务信息）
             result = await self.chat_service.chat(
@@ -200,8 +200,8 @@ class ChatServicer(_ChatServicerBase):
             adapter = ZenOAdapter(conversation_id=request.conversation_id or None)
             logger.info("📋 gRPC 流式聊天使用 ZenO 格式适配器")
             
-            # 获取 agent_id（可选）
-            agent_id = request.agent_id if request.agent_id else None
+            # 获取 agent_id（默认为 dazee_agent）
+            agent_id = request.agent_id if request.agent_id else "dazee_agent"
             
             # 调用业务服务（流式模式，mock 模式下会自动返回 mock 数据）
             event_stream = await self.chat_service.chat(

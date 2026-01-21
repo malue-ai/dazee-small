@@ -62,6 +62,7 @@ enabled_capabilities:
   
   # --- PPT 生成类 ---
   ppt_generator: 0           # 闭环 PPT 生成工具
+  slidespeak_render: 1       # SlideSpeak PPT 渲染工具
   
   # --- 代码沙盒类 ---
   sandbox_tools: 0           # 包含全部沙盒工具
