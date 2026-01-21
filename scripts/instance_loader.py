@@ -991,7 +991,12 @@ async def _register_mcp_tools(
                 logger.info(f"   ✅ 注册成功: 发现 {len(tools)} 个工具")
                 
                 for tool_name, tool_info in tools.items():
-                    logger.info(f"      • {tool_name}")
+                    # 🔍 显示工具的 input_schema 参数，便于调试
+                    schema = tool_info.get("input_schema", {})
+                    props = schema.get("properties", {}) if isinstance(schema, dict) else {}
+                    param_info = f"参数: {list(props.keys())}" if props else "无参数定义"
+                    logger.info(f"      • {tool_name} ({param_info})")
+                    
                     # 创建 Claude API 格式的工具定义
                     tool_def = create_mcp_tool_definition(tool_info, client)
                     mcp_tool_definitions.append(tool_def)

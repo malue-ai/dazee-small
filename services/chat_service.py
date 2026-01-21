@@ -31,6 +31,8 @@ from infra.resilience import with_timeout, with_retry, get_circuit_breaker
 from core.context.compaction import QoSLevel, get_compaction_threshold, get_context_awareness_prompt
 # 🆕 V7: 路由模块（单智能体/多智能体路由决策）
 from core.routing import AgentRouter, RoutingDecision
+# 🆕 V7.6: 路由层 LLM（用于意图分析）
+from core.llm.claude_anthropic import create_claude_service
 # 🆕 V7: Token 审计（消耗记录、统计分析、异常检测）
 from core.monitoring import get_token_auditor, TokenAuditor
 from evaluation.models import TokenUsage
@@ -137,16 +139,39 @@ class ChatService:
         self.token_auditor: TokenAuditor = get_token_auditor()
         
     
-    def _get_router(self) -> AgentRouter:
+    def _get_router(self, prompt_cache=None) -> AgentRouter:
         """
         延迟初始化路由器
+        
+        🆕 V7.6 修复：传入 LLM 服务，使意图分析真正调用 LLM
+        使用 haiku 模型以获得更快的响应速度和更低的成本
+        
+        🆕 V7.6.1: 支持传入 prompt_cache（使用实例自定义的意图识别提示词）
+        
+        Args:
+            prompt_cache: InstancePromptCache（可选，用于加载实例自定义的 intent_prompt）
         
         Returns:
             AgentRouter 实例
         """
-        if self._router is None:
-            self._router = AgentRouter()
-            logger.debug("🔀 AgentRouter 已初始化")
+        # 🆕 V7.6.1: 如果传入了 prompt_cache，需要重新创建 router（因为 prompt 可能不同）
+        if self._router is None or prompt_cache is not None:
+            # 创建轻量级 LLM 服务（用于意图分析）
+            # 使用 haiku 模型：快速、低成本，适合分类任务
+            routing_llm = create_claude_service(
+                model="claude-haiku-4-5-20251001",
+                enable_thinking=False,  # 意图分析不需要深度思考
+                enable_caching=False
+            )
+            
+            self._router = AgentRouter(
+                llm_service=routing_llm,
+                enable_llm=True,
+                prompt_cache=prompt_cache  # 🆕 V7.6.1: 传入实例级 prompt_cache
+            )
+            
+            cache_info = "（使用实例自定义提示词）" if prompt_cache else "（使用默认提示词）"
+            logger.info(f"🔀 AgentRouter 已初始化 {cache_info}")
         return self._router
     
     # ==================== 辅助方法 ====================
@@ -749,7 +774,9 @@ class ChatService:
             routing_intent = None
             
             if self.enable_routing:
-                router = self._get_router()
+                # 🆕 V7.6.1: 传入 agent 的 prompt_cache（使用实例自定义的 intent_prompt）
+                agent_prompt_cache = getattr(agent, 'prompt_cache', None)
+                router = self._get_router(prompt_cache=agent_prompt_cache)
                 routing_decision = await router.route(
                     user_query=message,
                     conversation_history=history_messages

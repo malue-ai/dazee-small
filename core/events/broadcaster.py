@@ -302,10 +302,7 @@ class EventBroadcaster:
             adapter=self._get_adapter()
         )
         
-        # tool_result 时调用 adapter 的增强方法生成额外 delta
-        # 具体的业务增强逻辑由 Adapter 实现（如 ZenOAdapter 会拆分为 sql/data/chart 等）
-        if content_block.get("type") == "tool_result":
-            await self._emit_adapter_enhanced_deltas(session_id, content_block)
+        # 🆕 V7.6: tool_result 增强处理已移至 content_stop（因为 content_start 时 content 为空）
         
         return result
     
@@ -392,7 +389,8 @@ class EventBroadcaster:
         
         自动：
         1. 累积到 ContentAccumulator
-        2. Checkpoint 到数据库（仅 REALTIME 策略）
+        2. 更新 tool_input 缓存（tool_use 类型）
+        3. Checkpoint 到数据库（仅 REALTIME 策略）
         
         Args:
             session_id: Session ID
@@ -404,8 +402,21 @@ class EventBroadcaster:
         """
         # 累积内容
         accumulator = self._accumulators.get(session_id)
+        block_ctx = None
         if accumulator:
+            # 🔧 必须在 on_content_stop 之前获取 block_ctx，因为 stop 后会删除
+            block_ctx = accumulator._active_blocks.get(index)
             accumulator.on_content_stop(index=index, signature=signature)
+            
+            # 🆕 V7.6: 更新 tool_input 缓存（tool_use 类型）
+            # content_start 时 input 可能为空（Claude 流式响应中 input 是逐步填充的）
+            # content_stop 时 input 已完整，需要更新缓存供 tool_result 时使用
+            if block_ctx and block_ctx.tool_use:
+                tool_id = block_ctx.tool_use.get("id", "")
+                tool_input = block_ctx.tool_use.get("input", {})
+                if tool_id and tool_input:
+                    self._tool_id_to_input[tool_id] = tool_input
+                    logger.debug(f"🔧 更新 tool_input 缓存: tool_id={tool_id}, keys={list(tool_input.keys())}")
         
         # 通过 EventManager 发送事件
         result = await self.events.content.emit_content_stop(
@@ -414,6 +425,16 @@ class EventBroadcaster:
             output_format=self.output_format,
             adapter=self._get_adapter()
         )
+        
+        # 🆕 V7.6: tool_result 时调用 adapter 的增强方法生成额外 delta
+        # 必须在 content_stop 时调用，因为 content_start 时 content 是空的
+        if block_ctx and block_ctx.block_type == "tool_result" and block_ctx.tool_result:
+            # 构建完整的 tool_result_block
+            tool_result_block = {
+                **block_ctx.tool_result,
+                "content": block_ctx.tool_result_buffer  # 使用累积的完整内容
+            }
+            await self._emit_adapter_enhanced_deltas(session_id, tool_result_block)
         
         # 🆕 根据策略决定是否 checkpoint
         # REALTIME: 每个 content_stop 都保存（断点恢复能力强）

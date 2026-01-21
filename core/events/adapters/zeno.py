@@ -29,8 +29,7 @@ logger = get_logger("zeno_adapter")
 # 需要发送特殊 message_delta 的工具
 # key: 工具名, value: delta.type（ZenO 前端根据这个渲染对应 UI）
 TOOL_TO_DELTA_TYPE: Dict[str, str] = {
-    # Plan 相关
-    "plan_todo": "plan",
+    # Plan 相关：plan_todo 需要特殊处理（转换为 progress 格式），不在此映射
     
     # 搜索类
     "web_search": "search",
@@ -38,6 +37,9 @@ TOOL_TO_DELTA_TYPE: Dict[str, str] = {
     
     # PPT 生成
     "slidespeak_generate": "ppt",
+    
+    # 🆕 V7.6: 沙盒项目启动
+    "sandbox_run_project": "sandbox",
     
     # 代码执行（可选，看前端是否需要特殊 UI）
     # "bash": "code",
@@ -86,7 +88,7 @@ class ZenOAdapter(EventAdapter):
     - message_start → message.assistant.created + message.assistant.start
     - content_delta (thinking) → message.assistant.delta (type: thinking)
     - content_delta (text) → message.assistant.delta (type: response)
-    - message_delta:plan → message.assistant.delta (type: progress)
+    - tool_result:plan_todo → message.assistant.delta (type: progress)  # 通过 enhance_tool_result 处理
     - message_delta:recommended → message.assistant.delta (type: recommended)
     - message_delta:confirmation_request → message.assistant.delta (type: clue)
     - message_stop → message.assistant.done
@@ -268,10 +270,10 @@ class ZenOAdapter(EventAdapter):
         转换 message_delta → message.assistant.delta
         
         根据内部 delta.type 映射：
-        - plan → progress
         - recommended → recommended
-        - confirmation_request → clue
         - 问数平台类型（sql/data/chart/report/intent/application）→ 直接透传
+        
+        注意：plan 类型已移至 enhance_tool_result 中处理（plan_todo 工具结果直接转换为 progress）
         """
         data = event.get("data", {})
         # 兼容两种结构：
@@ -285,12 +287,9 @@ class ZenOAdapter(EventAdapter):
         zeno_delta_type = None
         zeno_content = content
         
-        if delta_type == "plan":
-            zeno_delta_type = "progress"
-            # 转换 plan 格式为 progress 格式
-            zeno_content = self._convert_plan_to_progress(content)
+        # plan 类型已移至 enhance_tool_result 处理，此处不再处理
         
-        elif delta_type == "recommended":
+        if delta_type == "recommended":
             zeno_delta_type = "recommended"
             # recommended 格式兼容，直接使用
         
@@ -299,15 +298,11 @@ class ZenOAdapter(EventAdapter):
         #     # 转换 HITL 请求为 clue 格式
         #     zeno_content = self._convert_hitl_to_clue(content)
         
-        # 🆕 问数平台智能分析场景：直接透传 delta 类型
-        elif delta_type in (
-            "sql", "data", "chart", "report",  # 智能分析三件套 + 报告
-            "intent", "application",            # 意图和应用状态
-            "preface", "files", "mind", "clue",  # 其他通用类型
-            "billing"                           # 🆕 计费信息
-        ):
+        # 直接通过 message_delta 发送的类型
+        elif delta_type in ("intent", "billing"):
             zeno_delta_type = delta_type
             # 格式已符合规范，直接透传
+            # 注意：sql/data/chart/report/application 等通过 enhance_tool_result 处理
         
         if not zeno_delta_type:
             return None
@@ -412,9 +407,11 @@ class ZenOAdapter(EventAdapter):
             }
         }
     
-    def _convert_plan_to_progress(self, content: str) -> str:
+    def _convert_plan_to_progress(self, content: Any) -> str:
         """
         将 Zenflux plan 格式转换为 ZenO progress 格式
+        
+        支持 str（JSON 字符串）或 dict（已解析的对象）作为输入
         
         Zenflux Plan:
         {
@@ -438,11 +435,21 @@ class ZenOAdapter(EventAdapter):
                 {"title": "调用API", "status": "running"}
             ]
         }
+        
+        Args:
+            content: plan 数据（str 或 dict）
+            
+        Returns:
+            ZenO progress 格式的 JSON 字符串
         """
         try:
-            plan = json.loads(content) if isinstance(content, str) else content
+            if isinstance(content, str):
+                plan = json.loads(content)
+            else:
+                plan = content
         except json.JSONDecodeError:
-            return content
+            # 如果是字符串但解析失败，返回原内容
+            return content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
         
         # 转换步骤状态
         status_map = {
@@ -723,6 +730,55 @@ class ZenOAdapter(EventAdapter):
             }
         }
     
+    def create_sandbox_delta(
+        self,
+        message_id: str,
+        sandbox_id: str,
+        status: str,
+        preview_url: str = None,
+        project_path: str = None,
+        stack: str = None,
+        error: str = None
+    ) -> Dict[str, Any]:
+        """
+        创建 sandbox 类型的 delta 事件（沙盒项目启动）
+        
+        Args:
+            message_id: 消息 ID
+            sandbox_id: 沙盒/对话 ID
+            status: 状态 (pending, building, running, success, failed)
+            preview_url: E2B 预览 URL（成功时返回）
+            project_path: 项目路径
+            stack: 技术栈 (streamlit, flask, vue 等)
+            error: 错误信息（失败时返回）
+            
+        Returns:
+            Zeno 格式的 delta 事件
+        """
+        sandbox_data = {
+            "sandbox_id": sandbox_id,
+            "status": status  # pending, building, running, success, failed
+        }
+        
+        if preview_url:
+            sandbox_data["preview_url"] = preview_url
+        if project_path:
+            sandbox_data["project_path"] = project_path
+        if stack:
+            sandbox_data["stack"] = stack
+        if error:
+            sandbox_data["error"] = error
+        
+        return {
+            "type": "message.assistant.delta",
+            "message_id": message_id,
+            "timestamp": int(time.time() * 1000),
+            "delta": {
+                "type": "sandbox",
+                "content": json.dumps(sandbox_data, ensure_ascii=False)
+            }
+        }
+    
     # ===========================================================================
     # 工具结果增强（将 tool_result 拆分为多个 delta）
     # ===========================================================================
@@ -776,9 +832,15 @@ class ZenOAdapter(EventAdapter):
                 logger.debug(f"🔍 识别到流程图生成类 API: api_name={api_name}")
                 return self._generate_flowchart_deltas(result_content)
         
-        # 向后兼容：专用工具 wenshu_analytics（将废弃）
-        if tool_name == "wenshu_analytics":
-            return self._generate_analytics_deltas(result_content)
+        # plan_todo 工具的特殊处理（直接转换为 progress 格式）
+        if tool_name == "plan_todo":
+            logger.debug(f"🔧 处理 plan_todo 工具结果")
+            return self._generate_plan_progress_deltas(result_content)
+        
+        # 🆕 V7.6: sandbox_run_project 工具的特殊处理（提取 preview_url）
+        if tool_name == "sandbox_run_project":
+            logger.debug(f"🔧 处理 sandbox_run_project 工具结果")
+            return self._generate_sandbox_deltas(result_content, tool_input)
         
         # 检查是否需要发送特殊 delta（简单工具）
         delta_type = TOOL_TO_DELTA_TYPE.get(tool_name)
@@ -787,6 +849,52 @@ class ZenOAdapter(EventAdapter):
             return [self._create_delta(delta_type, result_content)]
         
         return []
+    
+    def _generate_plan_progress_deltas(self, result_content: str) -> List[Dict[str, Any]]:
+        """
+        为 plan_todo 工具生成 progress delta
+        
+        提取 plan_todo 返回结果中的 plan 字段，转换为 ZenO progress 格式
+        
+        plan_todo 返回格式：
+        {
+            "status": "success",
+            "message": "Plan created: xxx",
+            "plan": {
+                "goal": "xxx",
+                "steps": [...],
+                "current_step": 0,
+                "progress": 0.0,
+                ...
+            }
+        }
+        
+        Args:
+            result_content: plan_todo 工具返回的 JSON 字符串
+            
+        Returns:
+            delta 列表（包含一个 progress 类型的 delta）
+        """
+        try:
+            if isinstance(result_content, str):
+                result = json.loads(result_content)
+            else:
+                result = result_content
+        except json.JSONDecodeError:
+            logger.warning(f"⚠️ plan_todo 结果解析失败: {str(result_content)[:100]}...")
+            return []
+        
+        # 提取 plan 字段
+        plan = result.get("plan")
+        if not plan:
+            logger.debug("plan_todo 结果中没有 plan 字段，跳过 progress delta 生成")
+            return []
+        
+        # 转换为 progress 格式
+        progress_content = self._convert_plan_to_progress(plan)
+        
+        logger.debug(f"📋 生成 plan_todo progress delta")
+        return [self._create_delta("progress", progress_content)]
     
     def _generate_analytics_deltas(self, result_content: str) -> List[Dict[str, Any]]:
         """
@@ -797,7 +905,6 @@ class ZenOAdapter(EventAdapter):
         - data: 查询结果数据
         - chart: 图表配置
         - report: 分析报告 {title, content}
-        - intent_name: 意图名称
         
         Args:
             result_content: 工具返回的 JSON 字符串
@@ -822,17 +929,9 @@ class ZenOAdapter(EventAdapter):
             logger.warning(f"⚠️ 分析类 API 返回失败: {result.get('error')}")
             return deltas
         
-        logger.info(f"📊 分析类 API 结果处理: intent={result.get('intent_name')}")
+        logger.info(f"📊 分析类 API 结果处理")
         
-        # 生成 intent delta（智能分析场景）
-        intent_name = result.get("intent_name")
-        if intent_name:
-            intent_data = {
-                "intent_id": result.get("intent", 2),  # 默认 2 = 智能分析
-                "intent_name": intent_name,
-                "platform": "analytics"  # 分析类 API 都是 analytics 场景
-            }
-            deltas.append(self._create_delta("intent", intent_data))
+        # 注意：intent 不在此处理，由其他机制发送
         
         # 生成 sql delta
         sql = result.get("sql")
@@ -863,6 +962,74 @@ class ZenOAdapter(EventAdapter):
                 "status": "success"
             }
             deltas.append(self._create_delta("application", app_data))
+        
+        return deltas
+    
+    def _generate_sandbox_deltas(
+        self,
+        result_content: str,
+        tool_input: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """
+        🆕 V7.6: 为 sandbox_run_project 工具生成 sandbox delta
+        
+        sandbox_run_project 返回格式：
+        {
+            "success": true,
+            "preview_url": "https://3000-xxx.e2b.app",
+            "message": "项目已启动，访问: ...",
+            "error": null
+        }
+        
+        生成的 delta 类型：
+        - sandbox: 包含 preview_url、status 等信息
+        
+        Args:
+            result_content: 工具返回的 JSON 字符串
+            tool_input: 工具输入参数（包含 project_path、stack 等）
+            
+        Returns:
+            delta 列表（包含一个 sandbox 类型的 delta）
+        """
+        deltas = []
+        
+        # 解析结果
+        try:
+            if isinstance(result_content, str):
+                result = json.loads(result_content)
+            else:
+                result = result_content
+        except json.JSONDecodeError:
+            logger.warning(f"⚠️ sandbox_run_project 结果解析失败: {str(result_content)[:100]}...")
+            return deltas
+        
+        # 提取信息
+        success = result.get("success", False)
+        preview_url = result.get("preview_url")
+        error = result.get("error")
+        
+        # 从 tool_input 获取额外信息
+        conversation_id = tool_input.get("conversation_id", "")
+        project_path = tool_input.get("project_path", "")
+        stack = tool_input.get("stack", "")
+        
+        # 构建 sandbox delta 数据
+        sandbox_data = {
+            "sandbox_id": conversation_id,
+            "status": "success" if success else "failed",
+        }
+        
+        if preview_url:
+            sandbox_data["preview_url"] = preview_url
+        if project_path:
+            sandbox_data["project_path"] = project_path
+        if stack:
+            sandbox_data["stack"] = stack
+        if error:
+            sandbox_data["error"] = error
+        
+        logger.info(f"🚀 生成 sandbox delta: preview_url={preview_url}, status={'success' if success else 'failed'}")
+        deltas.append(self._create_delta("sandbox", sandbox_data))
         
         return deltas
     

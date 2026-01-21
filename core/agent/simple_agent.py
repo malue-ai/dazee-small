@@ -683,18 +683,24 @@ class SimpleAgent:
                 tools_for_llm.append(tool_def)
                 if tool_def["name"] not in selection.tool_names:
                     selection.tool_names.append(tool_def["name"])
-        # 兼容旧逻辑：直接添加 _mcp_tools
+        # 兼容旧逻辑：直接添加 _mcp_tools（已废弃，建议使用 _instance_registry）
         elif hasattr(self, '_mcp_tools') and self._mcp_tools:
             for mcp_tool in self._mcp_tools:
-                # 🆕 优先使用工具自带的 input_schema，默认使用 prompt 参数
+                # 🔧 使用工具自带的 input_schema，不再使用写死的 prompt 默认值
+                # 如果没有 schema，使用空 schema（允许任意参数）
+                input_schema = mcp_tool.get("input_schema")
+                if not input_schema or not isinstance(input_schema, dict):
+                    input_schema = {
+                        "type": "object",
+                        "properties": {},
+                        "required": []
+                    }
+                    logger.warning(f"⚠️ MCP 工具 {mcp_tool['name']} 没有 input_schema，使用空 schema")
+                
                 mcp_tool_def = {
                     "name": mcp_tool["name"],
                     "description": mcp_tool.get("description", ""),
-                    "input_schema": mcp_tool.get("input_schema", {
-                        "type": "object",
-                        "properties": {"prompt": {"type": "string", "description": "输入提示/查询内容"}},
-                        "required": ["prompt"]
-                    })
+                    "input_schema": input_schema
                 }
                 tools_for_llm.append(mcp_tool_def)
                 if mcp_tool["name"] not in selection.tool_names:
@@ -1389,13 +1395,17 @@ class SimpleAgent:
         logger.debug(f"🔧 执行工具: {tool_name}")
         
         try:
-            # 🛡️ 为工具注入上下文（user_id, session_id, conversation_id）
-            session_context = await self.event_manager.storage.get_session_context(session_id)
-            tool_input.setdefault("session_id", session_id)
-            if session_context.get("user_id"):
-                tool_input.setdefault("user_id", session_context.get("user_id"))
-            conv_id = session_context.get("conversation_id") or getattr(self, '_current_conversation_id', None) or session_id
-            tool_input.setdefault("conversation_id", conv_id)
+            # 🛡️ 仅对沙盒相关工具注入上下文（user_id, session_id, conversation_id）
+            # ⚠️ 不要对所有工具注入，否则 MCP 工具会收到错误参数
+            SANDBOX_TOOLS = {"bash", "str_replace_based_edit_tool", "sandbox_run_project", 
+                            "sandbox_create_project", "sandbox_write_file", "sandbox_run_command"}
+            if tool_name in SANDBOX_TOOLS:
+                session_context = await self.event_manager.storage.get_session_context(session_id)
+                tool_input.setdefault("session_id", session_id)
+                if session_context.get("user_id"):
+                    tool_input.setdefault("user_id", session_context.get("user_id"))
+                conv_id = session_context.get("conversation_id") or getattr(self, '_current_conversation_id', None) or session_id
+                tool_input.setdefault("conversation_id", conv_id)
             
             # ===== 特殊工具处理 =====
             if tool_name == "plan_todo":
@@ -1627,13 +1637,17 @@ class SimpleAgent:
                 # ===== 流式工具执行 =====
                 logger.info(f"🌊 流式执行工具: {tool_name}")
                 
-                # 注入上下文
-                session_context = await self.event_manager.storage.get_session_context(session_id)
-                tool_input.setdefault("session_id", session_id)
-                if session_context.get("user_id"):
-                    tool_input.setdefault("user_id", session_context.get("user_id"))
-                conv_id = session_context.get("conversation_id") or getattr(self, '_current_conversation_id', None) or session_id
-                tool_input.setdefault("conversation_id", conv_id)
+                # 🛡️ 仅对沙盒相关工具注入上下文
+                # ⚠️ 不要对所有工具注入，否则 MCP 工具会收到错误参数
+                SANDBOX_TOOLS = {"bash", "str_replace_based_edit_tool", "sandbox_run_project", 
+                                "sandbox_create_project", "sandbox_write_file", "sandbox_run_command"}
+                if tool_name in SANDBOX_TOOLS:
+                    session_context = await self.event_manager.storage.get_session_context(session_id)
+                    tool_input.setdefault("session_id", session_id)
+                    if session_context.get("user_id"):
+                        tool_input.setdefault("user_id", session_context.get("user_id"))
+                    conv_id = session_context.get("conversation_id") or getattr(self, '_current_conversation_id', None) or session_id
+                    tool_input.setdefault("conversation_id", conv_id)
                 
                 # 使用 ContentHandler 发送流式 tool_result
                 async def stream_generator():

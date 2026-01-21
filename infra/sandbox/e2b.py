@@ -948,7 +948,7 @@ class E2BSandboxProvider(SandboxProvider):
         project_path: str,
         stack: str,
         wait_for_ready: bool = True,
-        startup_timeout: int = 60
+        startup_timeout: int = 3600  # 🆕 V7.6: 改为 1 小时（3600 秒）
     ) -> Optional[str]:
         """
         运行项目

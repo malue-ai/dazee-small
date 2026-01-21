@@ -74,19 +74,17 @@ class InstanceTool:
         Returns:
             Claude API 兼容的工具定义
         """
+        # 🔧 不再使用写死的 prompt 默认值
+        # 如果没有 input_schema，使用空 schema（允许任意参数）
+        schema = self.input_schema if self.input_schema else {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
         return {
             "name": self.name,
             "description": self.description,
-            "input_schema": self.input_schema or {
-                "type": "object",
-                "properties": {
-                    "prompt": {
-                        "type": "string",
-                        "description": "输入提示/查询内容"
-                    }
-                },
-                "required": ["prompt"]
-            }
+            "input_schema": schema
         }
     
     def to_capability_dict(self) -> Dict[str, Any]:
@@ -302,11 +300,24 @@ class InstanceToolRegistry:
                 capability = cached_capabilities[0]  # 使用缓存的第一个能力
                 logger.debug(f"   从缓存获取能力: {capability}")
         
+        # 🔍 获取并验证 input_schema
+        input_schema = tool_info.get("input_schema", {})
+        if not input_schema or not isinstance(input_schema, dict):
+            input_schema = {}
+            logger.warning(f"⚠️ MCP 工具 {name} 没有 input_schema")
+        else:
+            # 记录 schema 参数信息，便于调试
+            props = input_schema.get("properties", {})
+            if props:
+                logger.info(f"   📋 input_schema 参数: {list(props.keys())}")
+            else:
+                logger.debug(f"   📋 input_schema 为空或无 properties")
+        
         tool = InstanceTool(
             name=name,
             type=InstanceToolType.MCP,
             description=tool_info.get("description", ""),
-            input_schema=tool_info.get("input_schema", {}),
+            input_schema=input_schema,
             capability=capability,  # 🆕 传递 capability
             server_url=server_url,
             server_name=server_name,
@@ -434,7 +445,15 @@ class InstanceToolRegistry:
         Returns:
             Claude API 兼容的工具定义列表
         """
-        return [t.to_claude_tool() for t in self._tools.values()]
+        tools = []
+        for t in self._tools.values():
+            tool_def = t.to_claude_tool()
+            # 🔍 调试：显示每个工具的 schema
+            schema = tool_def.get("input_schema", {})
+            props = schema.get("properties", {}) if isinstance(schema, dict) else {}
+            logger.info(f"📤 Claude 工具: {tool_def['name']} -> 参数: {list(props.keys()) if props else '(无)'}")
+            tools.append(tool_def)
+        return tools
     
     def get_tools_for_discovery(self) -> List[Dict[str, Any]]:
         """

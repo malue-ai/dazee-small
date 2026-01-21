@@ -55,7 +55,6 @@ from services import (
     ToolNotFoundError,
     ToolAlreadyExistsError,
     ToolExecutionError,
-    MCPConnectionError,
     ToolRegistrationError,
     # MCP 服务
     get_mcp_service,
@@ -449,9 +448,8 @@ async def unregister_mcp_server(
                 detail=f"全局 MCP 模板不存在: {server_name}"
             )
         
-        # 同时尝试断开内存中的连接（如果有）
-        if server_name in tool_service._mcp_clients:
-            await tool_service.unregister_mcp_server(server_name)
+        # 注意：MCP 连接由 MCPPool 管理，删除模板不影响运行时连接
+        # 如需断开连接，可通过 MCPPool.cleanup() 或重启服务
         
         return JSONResponse(
             content={"success": True, "message": f"全局 MCP 模板 '{server_name}' 已删除"}
@@ -489,11 +487,15 @@ async def list_mcp_servers(
             include_inactive=include_inactive
         )
         
-        # 补充内存中的连接状态
+        # 从 MCPPool 补充运行时连接状态
+        from infra.pools import get_mcp_pool
+        mcp_pool = get_mcp_pool()
+        pool_clients = mcp_pool.get_all_clients()
+        
         for server in mcp_servers:
-            server_name = server.get("server_name", "")
-            if server_name in tool_service._mcp_clients:
-                client = tool_service._mcp_clients[server_name]
+            server_url = server.get("server_url", "")
+            if server_url in pool_clients:
+                client = pool_clients[server_url]
                 server["is_connected"] = getattr(client, '_connected', False)
                 server["connected_tools_count"] = len(getattr(client, '_tools', {}))
             else:
@@ -530,9 +532,14 @@ async def get_mcp_server_detail(
         # 从数据库获取
         mcp_data = await mcp_service.get_global_mcp(server_name)
         
-        # 补充内存中的连接状态
-        if server_name in tool_service._mcp_clients:
-            client = tool_service._mcp_clients[server_name]
+        # 从 MCPPool 补充运行时连接状态
+        from infra.pools import get_mcp_pool
+        mcp_pool = get_mcp_pool()
+        server_url = mcp_data.get("server_url", "")
+        pool_clients = mcp_pool.get_all_clients()
+        
+        if server_url in pool_clients:
+            client = pool_clients[server_url]
             mcp_data["is_connected"] = getattr(client, '_connected', False)
             mcp_data["connected_tools"] = list(getattr(client, '_tools', {}).keys())
             mcp_data["connected_tools_count"] = len(getattr(client, '_tools', {}))
@@ -1016,7 +1023,11 @@ async def health_check():
     """工具服务健康检查"""
     try:
         tools = tool_service.list_tools()
-        mcp_clients = len(tool_service._mcp_clients)
+        
+        # 从 MCPPool 获取连接数
+        from infra.pools import get_mcp_pool
+        mcp_pool = get_mcp_pool()
+        mcp_clients = len(mcp_pool.get_all_clients())
         
         return JSONResponse(content={
             "status": "healthy",

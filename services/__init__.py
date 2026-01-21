@@ -47,11 +47,9 @@ from .tool_service import (
     ToolNotFoundError,
     ToolAlreadyExistsError,
     ToolExecutionError,
-    MCPConnectionError,
     ToolRegistrationError,
     # 工具处理器
     ToolHandler,
-    MCPClient,
     # 装饰器
     tool,
 )
@@ -133,10 +131,8 @@ __all__ = [
     "ToolNotFoundError",
     "ToolAlreadyExistsError",
     "ToolExecutionError",
-    "MCPConnectionError",
     "ToolRegistrationError",
     "ToolHandler",
-    "MCPClient",
     "tool",
     # Task Service
     "TaskService",

@@ -327,22 +327,43 @@ class IntentAnalyzer:
         # 使用 JSON 提取器解析 LLM 响应
         parsed = extract_json(content)
         
+        # 🔧 DEBUG: 打印 LLM 原始响应和解析结果
+        logger.info(f"📝 LLM 意图响应原文: {content[:500]}")
+        logger.info(f"📝 JSON 解析结果: {parsed}")
+        
         if parsed and isinstance(parsed, dict):
             # 🆕 V7.5: 优先解析 intent_id 和 intent_name
             intent_id = parsed.get("intent_id")
             intent_name = parsed.get("intent_name")
             platform = parsed.get("platform")  # 可选字段
             
+            logger.info(f"📝 解析到: intent_id={intent_id}, intent_name={intent_name}, platform={platform}")
+            
             # 🆕 V7.5: 根据 intent_id 映射到 TaskType（兼容现有逻辑）
             if intent_id is not None:
                 task_type = self._map_intent_id_to_task_type(intent_id)
+                logger.info(f"📝 intent_id={intent_id} 映射到 task_type={task_type.value}")
             else:
                 # 兼容旧格式：直接解析 task_type
                 task_type_str = parsed.get("task_type", "other")
+                logger.info(f"📝 未找到 intent_id，使用旧格式: task_type_str={task_type_str}")
+                
+                # 🆕 V7.6: 兼容 LLM 返回的 "code_task" → 枚举中的 "code_development"
+                task_type_mapping = {
+                    "code_task": "code_development",  # prompt 用 code_task，枚举是 code_development
+                }
+                task_type_str = task_type_mapping.get(task_type_str, task_type_str)
+                
                 try:
                     task_type = TaskType(task_type_str)
                 except ValueError:
                     task_type = TaskType.OTHER
+                
+                logger.info(f"📝 task_type_str={task_type_str} 转换为 task_type={task_type.value}")
+                
+                # 🆕 V7.6: 当没有 intent_id 时，根据 task_type 生成默认值
+                intent_id, intent_name = self._map_task_type_to_intent(task_type)
+                logger.info(f"📝 反向映射: task_type={task_type.value} -> intent_id={intent_id}, intent_name={intent_name}")
             
             # 解析 complexity（等级）
             complexity_str = parsed.get("complexity", "medium")
@@ -415,6 +436,29 @@ class IntentAnalyzer:
             3: TaskType.OTHER,            # 综合咨询
         }
         return mapping.get(intent_id, TaskType.OTHER)
+    
+    def _map_task_type_to_intent(self, task_type: TaskType) -> tuple[int, str]:
+        """
+        🆕 V7.6: 根据 TaskType 生成默认的 intent_id 和 intent_name
+        
+        当 LLM 返回的是旧格式（task_type）而不是新格式（intent_id）时，
+        根据 task_type 生成对应的 intent_id 和 intent_name，保持前端显示一致。
+        
+        Args:
+            task_type: 任务类型枚举
+            
+        Returns:
+            tuple[int, str]: (intent_id, intent_name)
+        """
+        mapping = {
+            TaskType.TASK_EXECUTION: (1, "系统搭建"),
+            TaskType.DATA_ANALYSIS: (2, "数据分析"),
+            TaskType.INFORMATION_QUERY: (4, "信息查询"),
+            TaskType.CONTENT_GENERATION: (5, "内容生成"),
+            TaskType.CODE_DEVELOPMENT: (6, "代码任务"),  # 🆕 V7.6: 修正为 CODE_DEVELOPMENT
+            TaskType.OTHER: (3, "综合咨询"),
+        }
+        return mapping.get(task_type, (3, "综合咨询"))
     
     def _infer_score_from_complexity(self, complexity: Complexity) -> float:
         """

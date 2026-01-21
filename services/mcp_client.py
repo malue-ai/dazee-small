@@ -287,11 +287,25 @@ class MCPClientWrapper:
             for tool in result.tools:
                 # 清理工具名称，确保符合 Anthropic API 要求
                 sanitized_name = sanitize_tool_name(f"{self.server_name}_{tool.name}")
+                
+                # 🔧 兼容 inputSchema（MCP SDK 驼峰）和 input_schema（下划线）两种属性名
+                # 注意：使用 `is not None` 而不是 truthiness 检查，因为空字典 {} 也是有效的 schema
+                input_schema = {}
+                if hasattr(tool, 'inputSchema') and tool.inputSchema is not None:
+                    input_schema = tool.inputSchema
+                elif hasattr(tool, 'input_schema') and tool.input_schema is not None:
+                    input_schema = tool.input_schema
+                
+                # 🔍 调试：输出实际获取到的 schema（更详细）
+                logger.info(f"   🔍 工具 {tool.name} 原始 inputSchema: {getattr(tool, 'inputSchema', 'N/A')}")
+                schema_props = input_schema.get("properties", {}) if isinstance(input_schema, dict) else {}
+                logger.info(f"   📋 工具 {tool.name} 解析后 input_schema 参数: {list(schema_props.keys()) if schema_props else '(空)'}")
+                
                 tool_info = {
                     "name": sanitized_name,  # 添加命名空间并清理
                     "original_name": tool.name,
                     "description": tool.description or "",
-                    "input_schema": tool.inputSchema if hasattr(tool, 'inputSchema') else {},
+                    "input_schema": input_schema,
                     "server_name": self.server_name
                 }
                 self._tools[tool_info["name"]] = tool_info
@@ -299,7 +313,11 @@ class MCPClientWrapper:
             
             logger.info(f"✅ 发现 {len(tools)} 个 MCP 工具")
             for t in tools:
-                logger.info(f"   • {t['name']}: {t['description'][:50]}...")
+                # 🔍 显示工具参数信息，便于调试
+                schema = t.get('input_schema', {})
+                props = schema.get('properties', {}) if isinstance(schema, dict) else {}
+                param_info = f"参数: {list(props.keys())}" if props else "无参数定义"
+                logger.info(f"   • {t['name']}: {t['description'][:50]}... ({param_info})")
             
             return tools
             
@@ -340,7 +358,13 @@ class MCPClientWrapper:
                 original_name = tool_name[len(f"{self.server_name}_"):]
             
             logger.info(f"🔧 调用 MCP 工具: {original_name}")
-            logger.debug(f"   参数: {arguments}")
+            logger.info(f"   📥 传入参数: {arguments}")  # 改为 INFO 级别便于调试
+            
+            # 🔍 显示工具期望的 schema（便于对比）
+            expected_schema = self._tools.get(tool_name, {}).get("input_schema", {})
+            expected_params = list(expected_schema.get("properties", {}).keys()) if expected_schema else []
+            logger.info(f"   📋 期望参数: {expected_params}")
+            
             logger.info(f"   ⏱️ 超时设置: {self.tool_timeout}s")
             
             # 调用工具（带超时）
@@ -438,19 +462,26 @@ def create_mcp_tool_definition(tool_info: Dict[str, Any], client: 'MCPClientWrap
     Returns:
         Claude API 工具定义
     """
+    # 🔧 获取 input_schema，不再使用写死的 prompt 默认值
+    # 如果 MCP 服务器没有返回 schema，使用空 schema（允许任意参数）
+    input_schema = tool_info.get("input_schema")
+    if not input_schema or not isinstance(input_schema, dict):
+        # 空 schema：允许工具接收任意参数，由 MCP 服务器自行处理
+        input_schema = {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+        logger.warning(f"⚠️ MCP 工具 {tool_info['name']} 没有 input_schema，使用空 schema")
+    else:
+        # 🔍 调试：记录实际的 schema 参数
+        props = input_schema.get("properties", {})
+        logger.debug(f"📋 MCP 工具 {tool_info['name']} schema 参数: {list(props.keys())}")
+    
     return {
         "name": tool_info["name"],
         "description": tool_info.get("description", ""),
-        "input_schema": tool_info.get("input_schema", {
-            "type": "object",
-            "properties": {
-                "prompt": {
-                    "type": "string",
-                    "description": "输入提示/查询内容"
-                }
-            },
-            "required": ["prompt"]
-        }),
+        "input_schema": input_schema,
         "_mcp_client": client,  # 保存客户端引用
         "_original_name": tool_info.get("original_name", tool_info["name"]),
         # 保存连接信息，用于断线重连
