@@ -43,6 +43,28 @@ class ConversationService:
     注意：所有数据库操作都通过 crud 层完成
     """
     
+    @staticmethod
+    def _parse_metadata(metadata: Any) -> dict:
+        """
+        解析 metadata 为字典（从 JSONB 字段）
+        
+        Args:
+            metadata: JSONB 字段（可能是 dict 或 JSON 字符串）
+            
+        Returns:
+            字典对象
+        """
+        if metadata is None:
+            return {}
+        if isinstance(metadata, dict):
+            return metadata
+        if isinstance(metadata, str):
+            try:
+                return json.loads(metadata)
+            except json.JSONDecodeError:
+                return {}
+        return {}
+    
     # ==================== 对话 CRUD ====================
     
     async def create_conversation(
@@ -79,9 +101,10 @@ class ConversationService:
                 id=db_conv.id,
                 user_id=db_conv.user_id,
                 title=db_conv.title,
+                status=db_conv.status,
                 created_at=db_conv.created_at,
                 updated_at=db_conv.updated_at,
-                metadata=db_conv.extra_data
+                metadata=self._parse_metadata(db_conv.extra_data)
             )
     
     async def get_conversation(self, conversation_id: str) -> Conversation:
@@ -107,9 +130,10 @@ class ConversationService:
             id=db_conv.id,
             user_id=db_conv.user_id,
             title=db_conv.title,
+            status=db_conv.status,
             created_at=db_conv.created_at,
             updated_at=db_conv.updated_at,
-            metadata=db_conv.extra_data
+            metadata=self._parse_metadata(db_conv.extra_data)
         )
     
     async def list_conversations(
@@ -187,9 +211,10 @@ class ConversationService:
                 id=db_conv.id,
                 user_id=db_conv.user_id,
                 title=db_conv.title,
+                status=db_conv.status,
                 created_at=db_conv.created_at,
                 updated_at=db_conv.updated_at,
-                metadata=db_conv.extra_data
+                metadata=self._parse_metadata(db_conv.extra_data)
             )
     
     async def delete_conversation(self, conversation_id: str) -> Dict[str, Any]:
@@ -381,8 +406,18 @@ class ConversationService:
             if not db_msg:
                 raise ValueError(f"消息不存在: id={message_id}")
             
-            # 合并 metadata
+            # 🔥 修复：确保 existing_metadata 是字典（从数据库读取可能是字符串）
+            import json
             existing_metadata = db_msg.extra_data or {}
+            if isinstance(existing_metadata, str):
+                try:
+                    existing_metadata = json.loads(existing_metadata)
+                except json.JSONDecodeError:
+                    existing_metadata = {}
+            elif not isinstance(existing_metadata, dict):
+                existing_metadata = {}
+            
+            # 合并 metadata
             if metadata:
                 existing_metadata.update(metadata)
             
@@ -400,8 +435,17 @@ class ConversationService:
         
         logger.info(f"✅ 消息更新成功: id={message_id}{status_info}")
         
+        # 🔥 修复：确保返回的 metadata 是字典
+        final_metadata = updated_msg.extra_data or {}
+        if isinstance(final_metadata, str):
+            try:
+                final_metadata = json.loads(final_metadata)
+            except json.JSONDecodeError:
+                final_metadata = {}
+        elif not isinstance(final_metadata, dict):
+            final_metadata = {}
+        
         # content 是 JSONB（list），需要转换为 JSON 字符串给 Pydantic 模型
-        import json
         final_content = content if content is not None else updated_msg.content
         if isinstance(final_content, list):
             final_content = json.dumps(final_content, ensure_ascii=False)
@@ -413,7 +457,7 @@ class ConversationService:
             content=final_content,
             status=status if status is not None else updated_msg.status,
             created_at=updated_msg.created_at,
-            metadata=existing_metadata
+            metadata=final_metadata
         )
     
     async def get_conversation_summary(self, conversation_id: str) -> Dict[str, Any]:

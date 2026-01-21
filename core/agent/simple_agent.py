@@ -1103,18 +1103,22 @@ class SimpleAgent:
         # 如果 Agent 独立使用，此数据确保 usage 信息被正确保存
         await self.broadcaster.accumulate_usage(
             session_id=session_id,
-            usage=usage_response.model_dump()
+            usage=usage_response.model_dump(mode='json')
         )
         
         # 发送 billing 事件到前端（作为最后一个 message_delta，在 message_stop 之前）
-        yield {
-            "type": "message_delta",
-            "data": {
+        billing_event = await self.broadcaster.emit_message_delta(
+            session_id=session_id,
+            delta={
                 "type": "billing",
-                "content": usage_response.model_dump()
-            }
-        }
-        logger.debug(f"📊 Billing 事件已发送: total_price=${usage_response.total_price:.6f}")
+                "content": usage_response.model_dump(mode='json')
+            },
+            message_id=self._current_message_id,
+            persist=False  # billing 信息已通过 accumulate_usage 保存，这里只发送 SSE 事件
+        )
+        if billing_event:
+            yield billing_event
+            logger.debug(f"📊 Billing 事件已发送: total_price=${usage_response.total_price:.6f}")
         
         # message_stop 作为最后一个事件（保持向后兼容）
         yield await self.broadcaster.emit_message_stop(

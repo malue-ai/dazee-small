@@ -27,6 +27,7 @@ class Conversation(BaseModel):
     id: str = Field(..., description="对话唯一标识（UUID）")
     user_id: str = Field(..., description="用户ID")
     title: str = Field(default="新对话", description="对话标题")
+    status: str = Field(default="active", description="对话状态")
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     metadata: Optional[dict] = Field(default_factory=dict, description="对话元数据")

@@ -899,7 +899,7 @@ class ChatService:
                     cache_write_tokens=usage_stats.get("total_cache_creation_tokens", 0)
                 )
                 
-                self.token_auditor.record(
+                await self.token_auditor.record(
                     session_id=session_id,
                     usage=token_usage,
                     conversation_id=conversation_id,
@@ -918,16 +918,17 @@ class ChatService:
                     f"total_price=${usage_response.total_price:.6f}"
                 )
                 
-                # ✅ 补充更新：将完整的 usage（包含 latency）推送到消息队列
+                # ✅ 补充更新：将完整的 usage（包含 latency）更新到消息
                 # 注意：Agent 已经发送了 message_stop 并保存了基础数据（latency=0）
-                # 这里发送补充更新，只更新 metadata.usage 字段
-                from infra.message_queue import get_message_queue_client
-                mq_client = await get_message_queue_client()
-                await mq_client.push_update_event(
-                    message_id=assistant_message_id,
-                    metadata={"usage": usage_response.model_dump()}  # 只更新 usage
-                )
-                logger.debug(f"✅ 完整 Usage 数据已补充更新 (latency={duration_ms / 1000.0:.2f}s)")
+                # 这里更新消息的 metadata.usage 字段
+                try:
+                    await self.conversation_service.update_message(
+                        message_id=assistant_message_id,
+                        metadata={"usage": usage_response.model_dump(mode='json')}
+                    )
+                    logger.debug(f"✅ 完整 Usage 数据已补充更新 (latency={duration_ms / 1000.0:.2f}s)")
+                except Exception as update_err:
+                    logger.warning(f"⚠️ 更新 Usage 数据失败: {update_err}")
                 
             except Exception as audit_err:
                 logger.warning(f"⚠️ Token 审计失败: {audit_err}")
