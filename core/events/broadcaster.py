@@ -3,10 +3,10 @@
 
 职责：
 1. Agent 发送事件的统一入口
-2. 事件增强（特殊工具的 message_delta）
-3. 缓存 tool_id -> tool_name 映射
-4. 内容累积（管理 ContentAccumulator）
-5. 消息持久化（checkpoint + 最终保存）
+2. 缓存 tool_id -> tool_name 映射
+3. 内容累积（管理 ContentAccumulator）
+4. 消息持久化（checkpoint + 最终保存）
+5. 【仅 ZenO 格式】事件增强（特殊工具的 message_delta）
 
 架构（V7 重构后）：
     SimpleAgent → EventBroadcaster
@@ -25,6 +25,11 @@
 - 格式转换在 buffer_event 中完成
 - Broadcaster 只负责内部逻辑（累积、增强、持久化）
 
+输出格式差异：
+- zenflux（默认）：保持原始事件结构，tool_result 不做拆分
+- zeno：tool_result 会被拆分为多个 message_delta（sql/data/chart/intent 等）
+        这是 ZenO 前端规范特有的业务语义增强
+
 使用示例：
     broadcaster = EventBroadcaster(event_manager, conversation_service)
     
@@ -42,7 +47,8 @@
 
 import json
 from datetime import datetime
-from typing import Dict, Any, Optional, Set, TYPE_CHECKING
+from enum import Enum
+from typing import Dict, Any, Optional, Set, TYPE_CHECKING, Literal
 from uuid import uuid4
 from logger import get_logger
 
@@ -55,10 +61,33 @@ from core.context.runtime import ContentAccumulator
 logger = get_logger("events.broadcaster")
 
 
-# ==================== 工具 → Delta 类型映射 ====================
+# ===========================================================================
+# 常量定义
+# ===========================================================================
 
+# 持久化策略枚举
+class PersistenceStrategy(str, Enum):
+    """
+    消息持久化策略
+    
+    - REALTIME: 实时存储，每个 content_stop 都 checkpoint（断点恢复能力强）
+    - DEFERRED: 延迟存储，只在 message_stop 时一次性保存（减少 DB 写入）
+    """
+    REALTIME = "realtime"
+    DEFERRED = "deferred"
+
+
+# 策略类型别名（方便使用字符串）
+PersistenceStrategyType = Literal["realtime", "deferred"]
+
+
+# ===========================================================================
+# ZenO 特有配置（仅 output_format == "zeno" 时使用）
+# ===========================================================================
+
+# 工具 → Delta 类型映射
 # 需要发送特殊 message_delta 的工具
-# key: 工具名, value: delta.type（前端根据这个渲染对应 UI）
+# key: 工具名, value: delta.type（ZenO 前端根据这个渲染对应 UI）
 TOOL_TO_DELTA_TYPE: Dict[str, str] = {
     # Plan 相关
     "plan_todo": "plan",
@@ -139,7 +168,8 @@ class EventBroadcaster:
         event_manager,
         conversation_service: "ConversationService" = None,
         output_format: str = "zenflux",
-        conversation_id: str = None
+        conversation_id: str = None,
+        persistence_strategy: PersistenceStrategyType = "realtime"
     ):
         """
         初始化广播器
@@ -149,6 +179,9 @@ class EventBroadcaster:
             conversation_service: ConversationService 实例（用于持久化）
             output_format: 输出事件格式（zeno/zenflux），默认 zenflux
             conversation_id: 对话 ID（用于 ZenO 格式）
+            persistence_strategy: 持久化策略
+                - "realtime": 实时存储，每个 content_stop 都 checkpoint（默认，断点恢复能力强）
+                - "deferred": 延迟存储，只在 message_stop 时保存（减少 DB 写入）
         """
         self.events = event_manager
         self.conversation_service = conversation_service
@@ -156,6 +189,9 @@ class EventBroadcaster:
         # 输出格式配置（由 chat.py 传递）
         self.output_format = output_format
         self.output_conversation_id = conversation_id
+        
+        # 🆕 持久化策略
+        self.persistence_strategy = PersistenceStrategy(persistence_strategy)
         
         # ZenO 适配器（延迟初始化）
         self._zeno_adapter = None
@@ -171,6 +207,11 @@ class EventBroadcaster:
         
         # session_id -> message_id 映射（用于持久化）
         self._session_message_ids: Dict[str, str] = {}
+        
+        # 🆕 session_id -> pending_metadata 映射（DEFERRED 策略用，累积 message_delta 的 metadata）
+        self._pending_metadata: Dict[str, Dict[str, Any]] = {}
+        
+        logger.debug(f"EventBroadcaster 初始化: persistence_strategy={persistence_strategy}")
     
     def _get_adapter(self):
         """
@@ -201,8 +242,22 @@ class EventBroadcaster:
             # 重置适配器以使用新的 conversation_id
             self._zeno_adapter = None
     
+    def set_persistence_strategy(self, strategy: PersistenceStrategyType) -> None:
+        """
+        设置持久化策略（运行时动态配置）
+        
+        Args:
+            strategy: 持久化策略
+                - "realtime": 实时存储，每个 content_stop 都 checkpoint
+                - "deferred": 延迟存储，只在 message_stop 时保存
+        """
+        self.persistence_strategy = PersistenceStrategy(strategy)
+        logger.debug(f"持久化策略已切换: {strategy}")
     
-    # ==================== 消息生命周期管理 ====================
+    
+    # ===========================================================================
+    # 消息生命周期管理
+    # ===========================================================================
     
     def start_message(
         self,
@@ -220,6 +275,7 @@ class EventBroadcaster:
         """
         self._accumulators[session_id] = ContentAccumulator()
         self._session_message_ids[session_id] = message_id
+        self._pending_metadata[session_id] = {}  # 🆕 初始化 pending metadata
         logger.debug(f"📝 开始消息累积: session={session_id}, message_id={message_id}")
     
     async def accumulate_usage(
@@ -254,7 +310,9 @@ class EventBroadcaster:
         """获取 session 的累积器（供外部查询）"""
         return self._accumulators.get(session_id)
     
-    # ==================== 便捷发送方法（SimpleAgent 直接调用）====================
+    # ===========================================================================
+    # 核心事件发送方法
+    # ===========================================================================
     
     async def emit_content_start(
         self,
@@ -302,8 +360,10 @@ class EventBroadcaster:
             adapter=self._get_adapter()
         )
         
-        # tool_result 时额外发送特殊工具的 message_delta
-        if content_block.get("type") == "tool_result":
+        # 🆕 仅 ZenO 格式：tool_result 时额外发送特殊工具的 message_delta
+        # 这些 delta（sql/data/chart/intent 等）是 ZenO 规范特有的业务语义增强
+        # Zenflux 原生格式保持 tool_result 的原始结构，不做拆分
+        if self.output_format == "zeno" and content_block.get("type") == "tool_result":
             await self._emit_special_tool_delta(session_id, content_block)
         
         return result
@@ -353,7 +413,7 @@ class EventBroadcaster:
         
         自动：
         1. 累积到 ContentAccumulator
-        2. Checkpoint 到数据库（断点恢复）
+        2. Checkpoint 到数据库（仅 REALTIME 策略）
         
         Args:
             session_id: Session ID
@@ -376,8 +436,11 @@ class EventBroadcaster:
             adapter=self._get_adapter()
         )
         
-        # Checkpoint 到数据库
-        await self._checkpoint_message(session_id)
+        # 🆕 根据策略决定是否 checkpoint
+        # REALTIME: 每个 content_stop 都保存（断点恢复能力强）
+        # DEFERRED: 跳过，等 message_stop 时一次性保存
+        if self.persistence_strategy == PersistenceStrategy.REALTIME:
+            await self._checkpoint_message(session_id)
         
         return result
     
@@ -411,27 +474,106 @@ class EventBroadcaster:
         self,
         session_id: str,
         delta: Dict[str, Any],
-        message_id: str = None
+        message_id: str = None,
+        persist: bool = True
     ) -> Optional[Dict[str, Any]]:
         """
         发送 message_delta 事件
         
+        自动：
+        1. 发送 SSE 事件
+        2. 保存到数据库 metadata（增量合并/替换）
+        
         Args:
             session_id: Session ID
-            delta: Delta 内容
+            delta: Delta 内容，支持两种格式：
+                - {"type": "xxx", "content": "..."}: 用 type 作为 key 保存 content
+                - {"usage": {...}, ...}: 直接合并到 metadata
             message_id: 消息 ID（可选）
+            persist: 是否保存到数据库（默认 True）
             
         Returns:
             发送的事件，如果被过滤则返回 None
         """
-        # 通过 EventManager 发送事件
-        return await self.events.message.emit_message_delta(
+        # 1. 先发送 SSE 事件
+        result = await self.events.message.emit_message_delta(
             session_id=session_id,
             delta=delta,
             message_id=message_id,
             output_format=self.output_format,
             adapter=self._get_adapter()
         )
+        
+        # 2. 保存到数据库 metadata（增量合并/替换）
+        if persist:
+            await self._persist_message_delta(session_id, delta)
+        
+        return result
+    
+    async def _persist_message_delta(
+        self,
+        session_id: str,
+        delta: Dict[str, Any]
+    ) -> None:
+        """
+        持久化 message_delta 到数据库 metadata
+        
+        根据持久化策略：
+        - REALTIME：立即保存到数据库
+        - DEFERRED：累积到 _pending_metadata，等 message_stop 时一起保存
+        
+        规则：
+        - delta 有 type 字段：用 type 作为 key，content 作为 value
+        - delta 无 type 字段：直接合并整个 delta 到 metadata
+        - metadata 中已存在的字段会被替换，不存在的字段会增量添加
+        
+        Args:
+            session_id: Session ID
+            delta: Delta 内容
+        """
+        if not self.conversation_service:
+            return
+        
+        msg_id = self._session_message_ids.get(session_id)
+        if not msg_id:
+            return
+        
+        # 解析 delta 格式
+        if "type" in delta and "content" in delta:
+            # 格式1：{"type": "xxx", "content": "..."}
+            delta_type = delta["type"]
+            content = delta["content"]
+            
+            # 解析 content（可能是 JSON 字符串）
+            parsed_content = content
+            if isinstance(content, str):
+                try:
+                    parsed_content = json.loads(content)
+                except json.JSONDecodeError:
+                    pass
+            
+            metadata_update = {delta_type: parsed_content}
+        else:
+            # 格式2：直接是 metadata 字段，如 {"usage": {...}}
+            metadata_update = delta
+        
+        # 🆕 根据策略决定是立即保存还是累积
+        if self.persistence_strategy == PersistenceStrategy.REALTIME:
+            # REALTIME：立即保存到数据库
+            try:
+                await self.conversation_service.update_message(
+                    message_id=msg_id,
+                    metadata=metadata_update
+                )
+                logger.debug(f"📦 message_delta 已保存: message_id={msg_id}, keys={list(metadata_update.keys())}")
+            except Exception as e:
+                logger.warning(f"⚠️ message_delta 保存失败: {str(e)}")
+        else:
+            # DEFERRED：累积到 pending_metadata，等 message_stop 时一起保存
+            if session_id not in self._pending_metadata:
+                self._pending_metadata[session_id] = {}
+            self._pending_metadata[session_id].update(metadata_update)
+            logger.debug(f"📦 message_delta 已累积: session={session_id}, keys={list(metadata_update.keys())}")
     
     async def emit_message_stop(
         self,
@@ -441,9 +583,11 @@ class EventBroadcaster:
         """
         发送 message_stop 事件
         
-        自动：
-        1. 最终保存完整消息到数据库
-        2. 清理 session 状态
+        自动（无论哪种持久化策略都会执行）：
+        1. 保存累积的 metadata（DEFERRED 策略）
+        2. Checkpoint 当前累积内容（确保最后的内容不丢失）
+        3. 更新消息状态为 completed
+        4. 清理 session 状态
         
         Args:
             session_id: Session ID
@@ -452,7 +596,14 @@ class EventBroadcaster:
         Returns:
             发送的事件，如果被过滤则返回 None
         """
-        # 最终保存完整消息
+        # 🆕 DEFERRED 策略：先保存累积的 metadata
+        await self._flush_pending_metadata(session_id)
+        
+        # Checkpoint 当前累积的内容（防止最后一段 delta 丢失）
+        # 无论 REALTIME 还是 DEFERRED 策略，message_stop 时都必须保存 content
+        await self._checkpoint_message(session_id)
+        
+        # 更新状态为 completed
         await self._finalize_message(session_id)
         
         # 通过 EventManager 发送事件
@@ -468,7 +619,34 @@ class EventBroadcaster:
         
         return result
     
-    # ==================== Conversation 快捷方法 ====================
+    async def _flush_pending_metadata(self, session_id: str) -> None:
+        """
+        刷新累积的 metadata 到数据库（DEFERRED 策略用）
+        
+        Args:
+            session_id: Session ID
+        """
+        if not self.conversation_service:
+            return
+        
+        msg_id = self._session_message_ids.get(session_id)
+        pending = self._pending_metadata.get(session_id)
+        
+        if not msg_id or not pending:
+            return
+        
+        try:
+            await self.conversation_service.update_message(
+                message_id=msg_id,
+                metadata=pending
+            )
+            logger.debug(f"📦 累积 metadata 已保存: message_id={msg_id}, keys={list(pending.keys())}")
+        except Exception as e:
+            logger.warning(f"⚠️ 累积 metadata 保存失败: {str(e)}")
+    
+    # ===========================================================================
+    # Conversation 事件
+    # ===========================================================================
     
     async def emit_conversation_title(
         self,
@@ -483,7 +661,7 @@ class EventBroadcaster:
             delta={"title": title}
         )
     
-    # ==================== 内部事件发送方法 ====================
+    # 内部事件发送方法
     
     async def _emit_conversation_start(
         self,
@@ -543,7 +721,18 @@ class EventBroadcaster:
             adapter=self._get_adapter()
         )
     
-    # ==================== 特殊工具处理（内部方法）====================
+    # ===========================================================================
+    # 特殊工具处理（仅 ZenO 格式）
+    # 
+    # 这些方法将 tool_result 拆分为多个 message_delta 事件：
+    # - sql/data/chart/report：智能分析场景（问数平台）
+    # - intent：意图识别
+    # - interface：系统配置（Ontology Builder）
+    # - mind：Mermaid 图表（流程图）
+    # 
+    # 只有 output_format == "zeno" 时才会触发，
+    # Zenflux 原生格式保持 tool_result 的原始结构。
+    # ===========================================================================
     
     def _is_analytics_api(self, tool_use_id: str) -> bool:
         """
@@ -655,18 +844,13 @@ class EventBroadcaster:
         if delta_type and not is_error:
             logger.debug(f"🔧 发送特殊工具 delta: type={delta_type}, tool={tool_name}")
             
-            # 直接保存到数据库 metadata（增量合并）
-            await self._save_delta_to_metadata(session_id, delta_type, result_content)
-            
-            # 发送 SSE 事件给前端（通过 EventManager）
-            await self.events.message.emit_message_delta(
+            # 统一使用 emit_message_delta（自动发送 + 保存到 metadata）
+            await self.emit_message_delta(
                 session_id=session_id,
                 delta={
                     "type": delta_type,
                     "content": result_content
-                },
-                output_format=self.output_format,
-                adapter=self._get_adapter()
+                }
             )
         
         # 清理缓存
@@ -1023,7 +1207,7 @@ class EventBroadcaster:
         content: Any
     ) -> None:
         """
-        发送单个 delta 事件
+        发送单个 delta 事件（内部方法）
         
         Args:
             session_id: Session ID
@@ -1038,60 +1222,18 @@ class EventBroadcaster:
         
         logger.debug(f"📤 发送 delta: type={delta_type}")
         
-        # 保存到数据库
-        await self._save_delta_to_metadata(session_id, delta_type, content)
-        
-        # 发送 SSE 事件（通过 EventManager）
-        await self.events.message.emit_message_delta(
+        # 统一使用 emit_message_delta（自动发送 + 保存到 metadata）
+        await self.emit_message_delta(
             session_id=session_id,
             delta={
                 "type": delta_type,
                 "content": content_str
-            },
-            output_format=self.output_format,
-            adapter=self._get_adapter()
+            }
         )
     
-    async def _save_delta_to_metadata(
-        self,
-        session_id: str,
-        delta_type: str,
-        content: Any
-    ) -> None:
-        """
-        直接保存 delta 到数据库 metadata（增量合并）
-        
-        Args:
-            session_id: Session ID
-            delta_type: delta 类型（plan/search/knowledge/ppt 等）
-            content: delta 内容
-        """
-        if not self.conversation_service:
-            return
-        
-        message_id = self._session_message_ids.get(session_id)
-        if not message_id:
-            return
-        
-        # 解析 content（可能是 JSON 字符串）
-        parsed_content = content
-        if isinstance(content, str):
-            try:
-                parsed_content = json.loads(content)
-            except json.JSONDecodeError:
-                pass
-        
-        try:
-            # 直接更新数据库（update_message 会增量合并 metadata）
-            await self.conversation_service.update_message(
-                message_id=message_id,
-                metadata={delta_type: parsed_content}
-            )
-            logger.debug(f"📦 保存 metadata: message_id={message_id}, type={delta_type}")
-        except Exception as e:
-            logger.warning(f"⚠️ 保存 metadata 失败: {str(e)}")
-    
-    # ==================== 消息持久化（内部方法）====================
+    # ===========================================================================
+    # 消息持久化
+    # ===========================================================================
     
     async def _checkpoint_message(self, session_id: str) -> None:
         """
@@ -1153,28 +1295,37 @@ class EventBroadcaster:
         强制完成消息（公开方法）
         
         用于在 Session 被停止时强制保存当前内容。
-        会先执行 checkpoint 保存当前累积的内容，然后更新状态为 completed。
+        流程：
+        1. 保存累积的 metadata（DEFERRED 策略）
+        2. Checkpoint 当前累积的 content
+        3. 更新状态为 completed
         
         Args:
             session_id: Session ID
         """
-        # 先保存当前累积的内容
+        # 🆕 先保存累积的 metadata（DEFERRED 策略）
+        await self._flush_pending_metadata(session_id)
+        
+        # 保存当前累积的 content
         accumulator = self._accumulators.get(session_id)
         message_id = self._session_message_ids.get(session_id)
         
         if accumulator and message_id:
-            await self._checkpoint_content(session_id, message_id, accumulator)
+            await self._checkpoint_message(session_id)
         
-        # 然后完成消息
+        # 更新状态为 completed
         await self._finalize_message(session_id)
     
     def _cleanup_session(self, session_id: str) -> None:
         """清理 session 状态"""
         self._accumulators.pop(session_id, None)
         self._session_message_ids.pop(session_id, None)
+        self._pending_metadata.pop(session_id, None)  # 🆕 清理累积的 metadata
         logger.debug(f"🧹 清理 session 状态: {session_id}")
     
-    # ==================== 多智能体事件 ====================
+    # ===========================================================================
+    # 多智能体事件
+    # ===========================================================================
     
     async def emit_raw_event(
         self,
@@ -1211,66 +1362,9 @@ class EventBroadcaster:
             adapter=self._get_adapter()
         )
     
-    # ==================== HITL 事件 ====================
-    
-    async def emit_confirmation_request(
-        self,
-        session_id: str,
-        request_id: str,
-        question: str,
-        options: list = None,
-        confirmation_type: str = "form",
-        timeout: int = 120,
-        description: str = "",
-        questions: list = None,
-        metadata: dict = None
-    ) -> Dict[str, Any]:
-        """
-        发送人类确认请求事件（HITL）
-        
-        通过 message_delta 发送，delta.type = "confirmation_request"
-        前端收到此事件后应显示确认对话框，用户响应后通过 HTTP POST 提交。
-        
-        Args:
-            session_id: 会话ID
-            request_id: 确认请求ID（用于匹配响应）
-            question: 问题内容
-            options: 选项列表
-            confirmation_type: 输入类型（form, text_input）
-            timeout: 超时时间（秒）
-            description: 补充描述
-            questions: 问题列表（form 类型）
-            metadata: 额外元数据
-            
-        Returns:
-            发送的事件
-        """
-        import json
-        
-        # 构建 HITL 请求内容
-        hitl_content = {
-            "request_id": request_id,
-            "question": question,
-            "options": options or ["confirm", "cancel"],
-            "confirmation_type": confirmation_type,
-            "timeout": timeout,
-            "description": description,
-            "questions": questions,
-            "metadata": metadata or {}
-        }
-        
-        # 通过 message_delta 发送，符合事件协议规范
-        delta = {
-            "type": "confirmation_request",
-            "content": json.dumps(hitl_content, ensure_ascii=False)
-        }
-        
-        event = await self.emit_message_delta(session_id, delta)
-        logger.info(f"🤝 发送 HITL 请求: request_id={request_id}, type={confirmation_type}")
-        
-        return event
-    
-    # ==================== 配置管理 ====================
+    # ===========================================================================
+    # 配置管理
+    # ===========================================================================
     
     @staticmethod
     def register_tool_delta_type(tool_name: str, delta_type: str) -> None:

@@ -14,7 +14,6 @@ class User(BaseModel):
     
     id: Optional[int] = None
     username: str = Field(..., description="用户名")
-    email: Optional[str] = Field(None, description="邮箱")
     created_at: Optional[datetime] = None
     metadata: Optional[dict] = Field(default_factory=dict, description="用户元数据")
     
@@ -46,29 +45,20 @@ class Message(BaseModel):
     - role: 角色 (user/assistant/system)
     - content: 消息内容（JSON 数组格式，兼容 Claude API）
         格式: [
-            {"type": "thinking", "thinking": "...", "signature": "..."},  # thinking 完整保存
+            {"type": "thinking", "thinking": "...", "signature": "..."},
             {"type": "text", "text": "..."},
             {"type": "tool_use", "id": "...", "name": "...", "input": {...}},
             {"type": "tool_result", "tool_use_id": "...", "content": "..."}
         ]
-        说明：thinking block 完整保存在 content 数组最前面（含 signature），确保 RVR 循环正常工作
-    - status: 消息状态（字符串）
-        取值: processing/completed/stopped/failed
-    - score: 评分/质量分数
+    - status: 消息状态 (processing/completed/stopped/failed)
     - metadata: 其他元数据（如 session_id, model, usage 等）
-            
-    存储策略说明：
-    - content: 完整存储所有内容块（thinking + text + tool_use + tool_result）
-    - status: 纯状态字段，不再混入 thinking 内容
-    - 前端: 从 content 中提取 thinking block 来展示思考过程
     """
     
     id: str = Field(..., description="消息唯一标识（UUID）")
     conversation_id: str = Field(..., description="所属对话ID（UUID）")
     role: str = Field(..., description="角色: user/assistant/system")
     content: str = Field(..., description="消息内容（JSON 数组格式）")
-    status: Optional[str] = Field(None, description="消息状态（JSON 对象）")
-    score: Optional[float] = Field(None, description="评分/质量分数")
+    status: Optional[str] = Field(None, description="消息状态")
     created_at: Optional[datetime] = None
     metadata: Optional[dict] = Field(default_factory=dict, description="消息元数据")
     

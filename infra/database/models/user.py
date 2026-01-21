@@ -1,12 +1,14 @@
 """
 用户模型
+
+使用 PostgreSQL JSONB 类型存储 metadata
 """
 
 from datetime import datetime
-from typing import Optional, TYPE_CHECKING
-import json
+from typing import Optional, Dict, Any, TYPE_CHECKING
 
-from sqlalchemy import String, DateTime, Text
+from sqlalchemy import String, DateTime, Index
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from infra.database.base import Base
@@ -18,9 +20,14 @@ if TYPE_CHECKING:
 
 class User(Base):
     """
-    用户表
+    用户表（PostgreSQL JSONB 版本）
     
     存储用户基本信息
+    
+    metadata 存储：
+    - preferences: 用户偏好设置
+    - profile: 用户资料信息
+    - custom_data: 自定义数据
     """
     __tablename__ = "users"
     
@@ -28,7 +35,11 @@ class User(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     
     # 基本信息
-    username: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    username: Mapped[Optional[str]] = mapped_column(
+        String(100), 
+        nullable=True,
+        index=True  # 添加索引，便于用户名查询
+    )
     
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(
@@ -36,19 +47,19 @@ class User(Base):
         default=datetime.now,
         nullable=False
     )
-    updated_at: Mapped[Optional[datetime]] = mapped_column(
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=datetime.now,
         onupdate=datetime.now,
-        nullable=True
+        nullable=False
     )
     
-    # 元数据（JSON 存储）
-    _metadata: Mapped[str] = mapped_column(
+    # ✅ 使用 JSONB 存储 extra_data（数据库列名: metadata）
+    extra_data: Mapped[Dict[str, Any]] = mapped_column(
         "metadata",
-        Text,
-        default="{}",
-        nullable=False
+        JSONB,
+        nullable=False,
+        default=dict
     )
     
     # 关系
@@ -60,16 +71,6 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan"
     )
-    
-    @property
-    def extra_data(self) -> dict:
-        """获取元数据（自动解析 JSON）"""
-        return json.loads(self._metadata) if self._metadata else {}
-    
-    @extra_data.setter
-    def extra_data(self, value: dict):
-        """设置元数据（自动序列化为 JSON）"""
-        self._metadata = json.dumps(value, ensure_ascii=False)
     
     def __repr__(self) -> str:
         return f"<User(id={self.id}, username={self.username})>"

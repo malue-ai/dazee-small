@@ -337,14 +337,26 @@ class ChatService:
                 available = [a["agent_id"] for a in registry.list_agents()]
                 raise AgentNotFoundError(f"Agent '{agent_id}' 不存在，可用: {available}")
         
-        # ========== 2. 创建 Conversation ==========
+        # ========== 2. 创建/校验 Conversation ==========
         is_new_conversation = False
         if not conversation_id:
+            # 创建新对话
             async with AsyncSessionLocal() as session:
                 conv = await crud.create_conversation(session=session, user_id=user_id, title="新对话")
                 conversation_id = conv.id
                 is_new_conversation = True
                 logger.info(f"✅ 新对话: {conversation_id}")
+        else:
+            # 🆕 修复：校验 conversation_id 存在性和归属
+            try:
+                conv = await self.conversation_service.get_conversation(conversation_id)
+                if conv.user_id != user_id:
+                    raise ValueError(f"对话 {conversation_id} 不属于用户 {user_id}")
+                logger.debug(f"✅ 对话校验通过: {conversation_id}")
+            except ConversationNotFoundError:
+                raise ValueError(f"对话 {conversation_id} 不存在")
+            except Exception as e:
+                raise ValueError(f"对话校验失败: {e}") from e
         
         # ========== 3. 检查用户并发限制 ==========
         await self.session_pool.check_can_create_session(user_id)
@@ -577,6 +589,7 @@ class ChatService:
         """
         start_time = time.time()
         background_tasks = background_tasks or []
+        assistant_message_id = None  # 用于异常处理时更新状态
         
         try:
             logger.info(f"🚀 Agent 开始执行: session_id={session_id}")
@@ -609,7 +622,7 @@ class ChatService:
             # =================================================================
             # 注：为避免 SQLite 并发问题，保存和加载在同一个数据库会话中
             
-            assistant_message_id = uuid4().hex
+            assistant_message_id = uuid4().hex  # 提升到外层，供异常处理使用
             content_json = json.dumps(message, ensure_ascii=False)
             
             history_messages = []
@@ -805,6 +818,14 @@ class ChatService:
                     # 多智能体事件类型：orchestrator_start, task_decomposition, 
                     # agent_start, agent_end, orchestrator_summary, orchestrator_end
                     await agent.broadcaster.emit_raw_event(session_id, event)
+                
+                # 🆕 修复：多智能体分支结束后，需要触发 message_stop 和最终持久化
+                # 否则 assistant 占位会一直停在 processing，历史里看不到最终内容
+                await agent.broadcaster.emit_message_stop(
+                    session_id=session_id,
+                    message_id=assistant_message_id
+                )
+                logger.info(f"✅ 多智能体执行完成，已触发 message_stop: {session_id}")
             else:
                 # 🎯 单智能体执行
                 # - 意图分析：由路由层提供（enable_routing=True）或内部完成（默认）
@@ -827,8 +848,9 @@ class ChatService:
                     # 检查停止标志（异步）
                     if await redis.is_stopped(session_id):
                         logger.warning(f"🛑 检测到停止标志: session_id={session_id}")
-                        # 强制保存当前内容
-                        await agent.broadcaster._finalize_message(session_id)
+                        # 🆕 修复：先 checkpoint 当前累积内容，再 finalize
+                        # 使用公开方法 finalize_message（会先 checkpoint），而不是 _finalize_message
+                        await agent.broadcaster.finalize_message(session_id)
                         await self.session_service.end_session(session_id, status="stopped")
                         break
                     
@@ -928,9 +950,9 @@ class ChatService:
                     f"total_price=${usage_response.total_price}"
                 )
                 
-                # 🆕 V7.4: 发送 usage SSE 事件（使用 emit_custom）
+                # 🆕 V7.4: 发送 usage SSE 事件
                 try:
-                    await events.emit_custom(
+                    await events.system.emit_custom(
                         session_id=session_id,
                         event_type="usage",
                         event_data=usage_response.model_dump()
@@ -947,13 +969,16 @@ class ChatService:
             logger.error(f"❌ Agent 执行失败: {str(e)}", exc_info=True)
             duration_ms = int((time.time() - start_time) * 1000)
             
-            # 释放资源（异常情况）
-            await self._cleanup_session_resources(
-                session_id=session_id,
-                user_id=user_id,
-                agent_id=agent_id,
-                status="failed"
-            )
+            # 🆕 修复：更新 assistant 消息状态（避免 DB 留下 processing 占位）
+            if assistant_message_id:
+                try:
+                    await self.conversation_service.update_message(
+                        message_id=assistant_message_id,
+                        status="failed"
+                    )
+                    logger.debug(f"📝 Assistant 消息状态已更新为 failed: {assistant_message_id}")
+                except Exception as update_err:
+                    logger.warning(f"⚠️ 更新消息状态失败: {update_err}")
             
             # 分类错误类型，提供更友好的错误信息
             error_type = "unknown_error"
@@ -1001,10 +1026,24 @@ class ChatService:
             except Exception as ex:
                 logger.warning(f"⚠️ 发送 session_end 失败: {str(ex)}")
             
-            # 注：Session 状态已在 _cleanup_session_resources 中更新
+            # 注：Session 状态将在 finally 块中清理
             
             # ⚠️ 不要 raise，避免 "Task exception was never retrieved"
             # 异常已经通过事件和日志记录，不需要传播
+        
+        finally:
+            # 🆕 修复：确保资源始终释放（成功/失败/停止都执行）
+            # 无论正常完成、异常失败还是被停止，都需要释放 Agent 和更新 SessionPool
+            try:
+                await self._cleanup_session_resources(
+                    session_id=session_id,
+                    user_id=user_id,
+                    agent_id=agent_id,
+                    status="completed"  # 这里的 status 只影响 Session，不影响 Message
+                )
+                logger.debug(f"🧹 资源已释放: session_id={session_id}, agent_id={agent_id}")
+            except Exception as cleanup_err:
+                logger.error(f"❌ 资源清理失败: {cleanup_err}", exc_info=True)
     
     # =========================================================================
     # 【待扩展】Multi-Agent 执行方法（已注释）
@@ -1527,7 +1566,7 @@ LIMIT 10"""
         ))
         
         # 17. recommended
-        recommended_content = ["查看上月销售对比", "分析各区域销售情况", "查看电子产品品类详情", "预测下月销售趋势"]
+        recommended_content = {"questions": ["查看上月销售对比", "分析各区域销售情况", "查看电子产品品类详情", "预测下月销售趋势"]}
         events.append(next_event(
             "message.assistant.delta",
             delta={"type": "recommended", "content": json.dumps(recommended_content, ensure_ascii=False)}
@@ -1825,7 +1864,7 @@ LIMIT 10"""
             ))
         
         # 17. recommended
-        recommended_content = ["添加用户登录功能", "增加任务分类标签", "添加提醒通知功能", "导出任务列表为Excel"]
+        recommended_content = {"questions": ["添加用户登录功能", "增加任务分类标签", "添加提醒通知功能", "导出任务列表为Excel"]}
         events.append(next_event(
             "message.assistant.delta",
             delta={"type": "recommended", "content": json.dumps(recommended_content, ensure_ascii=False)}

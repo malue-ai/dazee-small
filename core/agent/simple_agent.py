@@ -57,7 +57,6 @@ from core.prompt import TaskComplexity
 from core.schemas import DEFAULT_AGENT_SCHEMA
 from core.tool import create_tool_executor, create_tool_selector
 from core.tool.capability import create_capability_registry, create_invocation_selector
-from core.confirmation_manager import get_confirmation_manager, ConfirmationType
 from logger import get_logger
 from prompts.universal_agent_prompt import get_universal_agent_prompt
 from tools.plan_todo_tool import create_plan_todo_tool
@@ -1382,14 +1381,6 @@ class SimpleAgent:
                     self._plan_cache["plan"] = result.get("plan")
                     logger.info(f"📋 Plan 操作完成: {operation}")
             
-            elif tool_name == "hitl":
-                # HITL 工具：等待用户响应
-                result = await self._handle_hitl(
-                    tool_input=tool_input,
-                    session_id=session_id,
-                    tool_id=tool_id
-                )
-            
             else:
                 # ===== 通用工具执行 =====
                 result = await self.tool_executor.execute(tool_name, tool_input)
@@ -1632,109 +1623,6 @@ class SimpleAgent:
                         "is_error": result_info.get("is_error", False)
                     }
                 )
-    
-    async def _handle_hitl(
-        self,
-        tool_input: Dict[str, Any],
-        session_id: str,
-        tool_id: str
-    ) -> Dict[str, Any]:
-        """
-        处理 HITL（Human-in-the-Loop）请求
-        
-        流程：
-        1. 解析工具输入，创建 ConfirmationRequest
-        2. 通过 EventBroadcaster 发送 SSE 事件到前端
-        3. 等待用户通过 HTTP POST 响应
-        4. 返回结果给 Agent
-        
-        Args:
-            tool_input: 工具输入参数
-            session_id: 会话ID
-            tool_id: 工具调用ID
-            
-        Returns:
-            用户输入结果
-        """
-        # 1. 解析参数
-        title = tool_input.get("title", "")
-        input_type_str = tool_input.get("input_type", "form")
-        questions = tool_input.get("questions")
-        description = tool_input.get("description", "")
-        timeout = tool_input.get("timeout", 120)
-        
-        # 解析输入类型
-        try:
-            input_type = ConfirmationType(input_type_str)
-        except ValueError:
-            input_type = ConfirmationType.FORM
-        
-        logger.info(f"🤝 HITL 请求: type={input_type_str}, title={title[:50]}...")
-        
-        # 2. 创建确认请求
-        manager = get_confirmation_manager()
-        
-        metadata = {}
-        if description:
-            metadata["description"] = description
-        if input_type == ConfirmationType.FORM:
-            metadata["questions"] = questions or []
-        
-        request = manager.create_request(
-            question=title,
-            options=None,
-            timeout=timeout,
-            confirmation_type=input_type,
-            session_id=session_id,
-            metadata=metadata
-        )
-        
-        logger.info(f"✅ HITL 请求已创建: request_id={request.request_id}")
-        
-        # 3. 通过 EventBroadcaster 发送 SSE 事件到前端
-        await self.broadcaster.emit_confirmation_request(
-            session_id=session_id,
-            request_id=request.request_id,
-            question=title,
-            options=None,
-            confirmation_type=input_type_str,
-            timeout=timeout,
-            description=description,
-            questions=questions if input_type == ConfirmationType.FORM else None,
-            metadata=metadata
-        )
-        
-        # 4. 等待用户响应
-        result = await manager.wait_for_response(request.request_id, timeout)
-        
-        # 5. 处理结果
-        if result.get("timed_out"):
-            logger.warning(f"⏰ 用户响应超时 ({timeout}s)")
-            return {
-                "success": False,
-                "timed_out": True,
-                "response": "timeout",
-                "message": f"用户未在 {timeout} 秒内响应"
-            }
-        
-        response = result.get("response")
-        
-        # form 类型：尝试解析 JSON
-        if input_type == ConfirmationType.FORM and isinstance(response, str):
-            try:
-                import json as json_module
-                response = json_module.loads(response)
-            except json.JSONDecodeError:
-                logger.warning(f"无法解析 form 响应为 JSON: {response[:100] if response else ''}")
-        
-        logger.info(f"✅ 用户已响应: {type(response).__name__}")
-        
-        return {
-            "success": True,
-            "timed_out": False,
-            "response": response,
-            "metadata": result.get("metadata", {})
-        }
     
     async def _emit_server_tool_blocks_stream(
         self,

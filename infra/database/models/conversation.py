@@ -1,12 +1,14 @@
 """
 对话模型
+
+使用 PostgreSQL JSONB 类型存储 metadata
 """
 
 from datetime import datetime
-from typing import Optional, TYPE_CHECKING
-import json
+from typing import Optional, Dict, Any, TYPE_CHECKING
 
-from sqlalchemy import String, DateTime, Text, ForeignKey
+from sqlalchemy import String, DateTime, ForeignKey, Index
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from infra.database.base import Base
@@ -18,9 +20,14 @@ if TYPE_CHECKING:
 
 class Conversation(Base):
     """
-    对话表
+    对话表（PostgreSQL JSONB 版本）
     
     存储对话（会话）信息
+    
+    metadata 存储：
+    - compaction_info: 上下文压缩信息
+    - agent_config: Agent 配置信息
+    - custom_data: 用户自定义数据
     """
     __tablename__ = "conversations"
     
@@ -37,6 +44,9 @@ class Conversation(Base):
     
     # 基本信息
     title: Mapped[str] = mapped_column(String(255), default="新对话", nullable=False)
+
+    # 状态
+    status: Mapped[str] = mapped_column(String(32), default="active", nullable=False)
     
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(
@@ -48,16 +58,15 @@ class Conversation(Base):
         DateTime,
         default=datetime.now,
         onupdate=datetime.now,
-        nullable=False,
-        index=True
+        nullable=False
     )
     
-    # 元数据（JSON 存储，包含压缩信息等）
-    _metadata: Mapped[str] = mapped_column(
+    # ✅ 使用 JSONB 存储 extra_data（数据库列名: metadata）
+    extra_data: Mapped[Dict[str, Any]] = mapped_column(
         "metadata",
-        Text,
-        default="{}",
-        nullable=False
+        JSONB,
+        nullable=False,
+        default=dict
     )
     
     # 关系
@@ -68,15 +77,10 @@ class Conversation(Base):
         order_by="Message.created_at"
     )
     
-    @property
-    def extra_data(self) -> dict:
-        """获取元数据（自动解析 JSON）"""
-        return json.loads(self._metadata) if self._metadata else {}
-    
-    @extra_data.setter
-    def extra_data(self, value: dict):
-        """设置元数据（自动序列化为 JSON）"""
-        self._metadata = json.dumps(value, ensure_ascii=False)
+    # 复合索引：user_id + updated_at（按更新时间倒序查询用户对话列表）
+    __table_args__ = (
+        Index('idx_conversations_user_updated', 'user_id', 'updated_at'),
+    )
     
     def __repr__(self) -> str:
         return f"<Conversation(id={self.id}, title={self.title})>"

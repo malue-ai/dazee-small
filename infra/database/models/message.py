@@ -1,29 +1,36 @@
 """
 消息模型
+
+使用 PostgreSQL JSONB 类型存储 content 和 metadata
 """
 
 from datetime import datetime
-from typing import Optional, TYPE_CHECKING
-import json
+from typing import Optional, List, Dict, Any, TYPE_CHECKING
 
-from sqlalchemy import String, DateTime, Text, Float, ForeignKey
+from sqlalchemy import String, DateTime, ForeignKey, Index
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from infra.database.base import Base
-
-if TYPE_CHECKING:
-    from infra.database.models.conversation import Conversation
+from infra.database.models.conversation import Conversation
 
 
 class Message(Base):
     """
-    消息表
+    消息表（PostgreSQL JSONB 版本）
     
     存储对话中的消息（用户消息和 AI 回复）
     
     content 格式（Claude API 标准）：
     - 用户消息: [{"type": "text", "text": "..."}]
     - AI 回复: [{"type": "thinking", ...}, {"type": "text", "text": "..."}, {"type": "tool_use", ...}]
+    
+    metadata 存储：
+    - session_id: 会话 ID
+    - model: 使用的模型
+    - usage: token 使用量和计费信息
+    - files: 附件文件信息
+    - plan: Agent 规划信息
     """
     __tablename__ = "messages"
     
@@ -44,65 +51,42 @@ class Message(Base):
         nullable=False
     )  # user, assistant, system
     
-    content: Mapped[str] = mapped_column(
-        Text,
-        nullable=False
-    )  # JSON 格式的 content blocks
+    # ✅ 使用 JSONB 存储 content blocks（直接存取 list）
+    content: Mapped[List[Dict[str, Any]]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=list
+    )
     
     # 状态（用于流式更新）
     status: Mapped[Optional[str]] = mapped_column(
-        Text,
-        nullable=True
-    )  # 字符串: processing/completed/stopped/failed
-    
-    # 评分（用于用户反馈）
-    score: Mapped[Optional[float]] = mapped_column(
-        Float,
-        nullable=True
-    )
+        String(32),
+        nullable=True,
+        index=True  # 添加索引，便于查询 streaming 状态的消息
+    )  # processing/completed/stopped/failed
     
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=datetime.now,
-        nullable=False,
-        index=True
+        nullable=False
     )
     
-    # 元数据
-    _metadata: Mapped[str] = mapped_column(
+    # ✅ 使用 JSONB 存储 extra_data（数据库列名: metadata）
+    extra_data: Mapped[Dict[str, Any]] = mapped_column(
         "metadata",
-        Text,
-        default="{}",
-        nullable=False
+        JSONB,
+        nullable=False,
+        default=dict
     )
     
     # 关系
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")
     
-    @property
-    def extra_data(self) -> dict:
-        """获取元数据（自动解析 JSON）"""
-        return json.loads(self._metadata) if self._metadata else {}
-    
-    @extra_data.setter
-    def extra_data(self, value: dict):
-        """设置元数据（自动序列化为 JSON）"""
-        self._metadata = json.dumps(value, ensure_ascii=False)
-    
-    @property
-    def content_blocks(self) -> list:
-        """获取 content blocks（自动解析 JSON）"""
-        try:
-            return json.loads(self.content) if self.content else []
-        except json.JSONDecodeError:
-            # 兼容旧格式（纯文本）
-            return [{"type": "text", "text": self.content}]
-    
-    @content_blocks.setter
-    def content_blocks(self, value: list):
-        """设置 content blocks（自动序列化为 JSON）"""
-        self.content = json.dumps(value, ensure_ascii=False)
+    # 复合索引：conversation_id + created_at（常用查询模式）
+    __table_args__ = (
+        Index('idx_messages_conv_created', 'conversation_id', 'created_at'),
+    )
     
     def get_text_content(self) -> str:
         """
@@ -110,7 +94,7 @@ class Message(Base):
         
         从 content blocks 中提取所有 text 类型的内容
         """
-        blocks = self.content_blocks
+        blocks = self.content or []
         text_parts = [
             block.get("text", "")
             for block in blocks

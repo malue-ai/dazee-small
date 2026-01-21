@@ -31,10 +31,8 @@ from logger import get_logger
 from typing import Dict, Any, Optional, List, Callable, Awaitable, Union
 
 from tools.base import BaseTool
-from core.confirmation_manager import (
-    get_confirmation_manager,
-    ConfirmationType
-)
+from models.hitl import ConfirmationType
+from services.confirmation_service import get_confirmation_manager
 
 logger = get_logger(__name__)
 

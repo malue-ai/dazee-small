@@ -310,6 +310,6 @@ data: {"type": "message.assistant.delta", "message_id": "msg_sess_20260119_11000
 
 data: {"type": "message.assistant.delta", "message_id": "msg_sess_20260119_110000_def456", "session_id": "sess_20260119_110000_def456", "seq": 156, "timestamp": 1768791617850, "delta": {"type": "response", "content": "开发。"}}
 
-data: {"type": "message.assistant.delta", "message_id": "msg_sess_20260119_110000_def456", "session_id": "sess_20260119_110000_def456", "seq": 157, "timestamp": 1768791618000, "delta": {"type": "recommended", "content": "[\"添加用户登录功能\",\"增加任务分类标签\",\"添加提醒通知功能\",\"导出任务列表为Excel\",\"查看代码实现细节\"]"}}
+data: {"type": "message.assistant.delta", "message_id": "msg_sess_20260119_110000_def456", "session_id": "sess_20260119_110000_def456", "seq": 157, "timestamp": 1768791618000, "delta": {"type": "recommended", "content": "{\"questions\":[\"添加用户登录功能\",\"增加任务分类标签\",\"添加提醒通知功能\",\"导出任务列表为Excel\",\"查看代码实现细节\"]}"}}
 
 data: {"type": "message.assistant.done", "message_id": "msg_sess_20260119_110000_def456", "session_id": "sess_20260119_110000_def456", "seq": 158, "timestamp": 1768791618200, "data": {"content": "好的，我来帮您搭建一个待办事项管理系统。\n\n## 📋 系统功能\n\n- ✅ 添加/编辑/删除任务\n- 🔄 状态切换（待办/进行中/已完成）\n- 🎯 优先级设置（高/中/低）\n- 📅 截止日期管理\n- 🔍 搜索和筛选\n- 📊 任务统计仪表盘\n\n## 🛠️ 技术栈\n\n- **前端**：Streamlit\n- **后端**：Python\n- **数据库**：SQLite\n\n正在为您生成代码...\n\n## ✅ 搭建完成\n\n您的待办事项管理系统已经搭建完成并部署上线！\n\n🔗 **访问地址**：https://app.example.com/todo_system_001\n\n### 使用说明\n\n1. 点击\"添加任务\"按钮创建新任务\n2. 点击任务状态切换完成状态\n3. 使用侧边栏筛选不同状态的任务\n4. 查看统计仪表盘了解任务完成情况\n\n源代码已打包，您可以下载后进行二次开发。"}}

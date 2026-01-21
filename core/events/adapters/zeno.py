@@ -108,6 +108,10 @@ class ZenOAdapter(EventAdapter):
         if event_type == "error":
             return self._transform_error(event, message_id, timestamp, session_id)
         
+        # 🆕 修复：处理 session_end 事件（支持列表中声明了但之前没有处理）
+        if event_type == "session_end":
+            return self._transform_session_end(event, message_id, timestamp)
+        
         # 其他事件暂不转换
         return None
     
@@ -134,7 +138,6 @@ class ZenOAdapter(EventAdapter):
             "conversation_id": conversation_id,
             "session_id": session_id,
             "timestamp": timestamp
-            # seq 由 EventDispatcher 统一添加
         }
     
     def _transform_content_delta(
@@ -235,10 +238,10 @@ class ZenOAdapter(EventAdapter):
             zeno_delta_type = "recommended"
             # recommended 格式兼容，直接使用
         
-        elif delta_type == "confirmation_request":
-            zeno_delta_type = "clue"
-            # 转换 HITL 请求为 clue 格式
-            zeno_content = self._convert_hitl_to_clue(content)
+        # elif delta_type == "confirmation_request":
+        #     zeno_delta_type = "clue"
+        #     # 转换 HITL 请求为 clue 格式
+        #     zeno_content = self._convert_hitl_to_clue(content)
         
         # 🆕 问数平台智能分析场景：直接透传 delta 类型
         elif delta_type in (

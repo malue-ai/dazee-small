@@ -263,27 +263,15 @@ class ConversationService:
             # 转换为字典列表
             messages = []
             for db_msg in db_messages:
-                # 解析 content (JSON 数组)
-                content = db_msg.content
-                try:
-                    content = json.loads(content) if content else []
-                except json.JSONDecodeError:
-                    pass
-                
-                # 解析 status (JSON 对象)
-                status = db_msg.status
-                try:
-                    status = json.loads(status) if status else None
-                except json.JSONDecodeError:
-                    pass
+                # content 是 JSONB 类型，ORM 返回 list，无需 json.loads
+                content = db_msg.content if db_msg.content else []
                 
                 messages.append({
                     "id": db_msg.id,
                     "conversation_id": db_msg.conversation_id,
                     "role": db_msg.role,
                     "content": content,
-                    "status": status,
-                    "score": db_msg.score,
+                    "status": db_msg.status,
                     "created_at": db_msg.created_at.isoformat() if db_msg.created_at else None,
                     "metadata": db_msg.extra_data
                 })
@@ -310,7 +298,6 @@ class ConversationService:
         role: str,
         content: str,
         status: Optional[str] = None,
-        score: Optional[float] = None,
         metadata: Optional[Dict[str, Any]] = None,
         message_id: Optional[str] = None
     ) -> Message:
@@ -321,8 +308,7 @@ class ConversationService:
             conversation_id: 对话ID
             role: 角色（user/assistant/system）
             content: 消息内容（JSON 数组格式）
-            status: 消息状态（JSON 对象字符串）
-            score: 评分/质量分数
+            status: 消息状态
             metadata: 消息元数据
             message_id: 消息ID（可选）
             
@@ -363,7 +349,6 @@ class ConversationService:
             role=role,
             content=content,
             status=status,
-            score=score,
             created_at=now,
             metadata=metadata or {}
         )
@@ -373,7 +358,6 @@ class ConversationService:
         message_id: str,
         content: Optional[str] = None,
         status: Optional[str] = None,
-        score: Optional[float] = None,
         metadata: Optional[Dict[str, Any]] = None
     ) -> Message:
         """
@@ -383,7 +367,6 @@ class ConversationService:
             message_id: 消息ID
             content: 消息内容
             status: 消息状态
-            score: 评分
             metadata: 元数据（合并更新）
             
         Returns:
@@ -415,13 +398,18 @@ class ConversationService:
         
         logger.info(f"✅ 消息更新成功: id={message_id}{status_info}")
         
+        # content 是 JSONB（list），需要转换为 JSON 字符串给 Pydantic 模型
+        import json
+        final_content = content if content is not None else updated_msg.content
+        if isinstance(final_content, list):
+            final_content = json.dumps(final_content, ensure_ascii=False)
+        
         return Message(
             id=updated_msg.id,
             conversation_id=updated_msg.conversation_id,
             role=updated_msg.role,
-            content=content if content is not None else updated_msg.content,
+            content=final_content,
             status=status if status is not None else updated_msg.status,
-            score=score if score is not None else updated_msg.score,
             created_at=updated_msg.created_at,
             metadata=existing_metadata
         )
