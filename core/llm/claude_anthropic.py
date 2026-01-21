@@ -144,49 +144,20 @@ class ClaudeLLMService(BaseLLMService):
         else:
             logger.warning("⚠️ Claude API Key 为空！")
         
-        # 🆕 支持自定义 API 端点（如万界方舟）
-        # 优先级：config.base_url > ANTHROPIC_BASE_URL 环境变量 > 默认官方端点
-        base_url = getattr(config, 'base_url', None) or os.getenv("ANTHROPIC_BASE_URL")
-        
-        # 🔧 万界方舟需要 Authorization: Bearer 认证，而不是 x-api-key
-        # 检测是否使用万界方舟端点
-        is_wanjie = base_url and "wanjiedata.com" in base_url
-        
-        if base_url:
-            logger.info(f"🌐 使用自定义 API 端点: {base_url}")
-            if is_wanjie:
-                logger.info("🔑 检测到万界方舟，使用 Bearer Token 认证")
-        
         # 异步客户端（增加 timeout 和重试配置）
         # 注意：对于流式响应，timeout 是首个响应的超时，不是整体超时
-        if is_wanjie:
-            # 万界方舟：使用 auth_token（Bearer 认证）
-            self.async_client = anthropic.AsyncAnthropic(
-                auth_token=config.api_key,
-                base_url=base_url,
-                timeout=timeout,
-                max_retries=max_retries
-            )
-            self.sync_client = anthropic.Anthropic(
-                auth_token=config.api_key,
-                base_url=base_url,
-                timeout=timeout,
-                max_retries=max_retries
-            )
-        else:
-            # 官方 API：使用 api_key（x-api-key 认证）
-            self.async_client = anthropic.AsyncAnthropic(
-                api_key=config.api_key,
-                base_url=base_url,
-                timeout=timeout,
-                max_retries=max_retries
-            )
-            self.sync_client = anthropic.Anthropic(
-                api_key=config.api_key,
-                base_url=base_url,
-                timeout=timeout,
-                max_retries=max_retries
-            )
+        self.async_client = anthropic.AsyncAnthropic(
+            api_key=config.api_key,
+            timeout=timeout,
+            max_retries=max_retries
+        )
+        
+        # 同步客户端（用于 Skills/Files API）
+        self.sync_client = anthropic.Anthropic(
+            api_key=config.api_key,
+            timeout=timeout,
+            max_retries=max_retries
+        )
         
         # Beta 功能配置
         self._betas: List[str] = []
