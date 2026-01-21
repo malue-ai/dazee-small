@@ -38,11 +38,11 @@ async def test_chat_stream(agent_id: str = "zeno_agent", host: str = "localhost:
         async with ZenfluxGRPCClient(host) as client:
             event_count = 0
             
-            # 调用 chat_stream（如果服务端启用了 mock，会返回 mock 数据）
+            # 调用 chat_stream（不传 conversation_id，让系统自动创建新对话）
             async for event in client.chat_stream(
                 message="帮我分析一下销售数据",
                 user_id="test_user_001",
-                conversation_id="test_conv_001",
+                conversation_id=None,  # 不传 conversation_id，自动创建新对话
                 agent_id=agent_id
             ):
                 event_count += 1

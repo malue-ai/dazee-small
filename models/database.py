@@ -1,7 +1,7 @@
 """
 数据库模型定义
 
-使用 SQLite 存储用户、对话和消息数据
+使用 PostgreSQL 存储用户、对话和消息数据
 """
 
 from datetime import datetime
@@ -27,7 +27,7 @@ class Conversation(BaseModel):
     id: str = Field(..., description="对话唯一标识（UUID）")
     user_id: str = Field(..., description="用户ID")
     title: str = Field(default="新对话", description="对话标题")
-    status: str = Field(default="active", description="对话状态")
+    status: str = Field(default="active", description="对话状态（active/archived/deleted）")
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     metadata: Optional[dict] = Field(default_factory=dict, description="对话元数据")

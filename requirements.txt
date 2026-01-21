@@ -18,8 +18,9 @@ aiohttp>=3.9.0            # 异步 HTTP 客户端
 httpx>=0.27.0     # HTTP 客户端（用于 MCP、测试）
 filetype>=1.2.0           # 文件类型检测（纯 Python，无需系统依赖）
 
-# 数据库
-aiosqlite>=0.19.0
+# 数据库（PostgreSQL）
+asyncpg>=0.29.0           # PostgreSQL 异步驱动
+greenlet>=3.0.0           # SQLAlchemy 异步支持
 sqlalchemy[asyncio]>=2.0.0
 alembic>=1.13.0           # 数据库迁移
 

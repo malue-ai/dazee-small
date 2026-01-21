@@ -6,7 +6,7 @@
 - 会话管理
 - ORM 模型
 - CRUD 操作
-- 支持 SQLite / PostgreSQL / MySQL
+- 使用 PostgreSQL 作为唯一数据库后端
 """
 
 from infra.database.engine import (

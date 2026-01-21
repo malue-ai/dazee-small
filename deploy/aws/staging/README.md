@@ -208,7 +208,7 @@ cp env.template .env
 - **内存**: 1 GB
 - **存储**: EFS (按使用量计费)
 - **Redis**: 复用 `zen0-backend-staging-redis`
-- **数据库**: SQLite on EFS
+- **数据库**: PostgreSQL (RDS)
 
 ---
 

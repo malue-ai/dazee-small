@@ -143,18 +143,8 @@ async def update_message(
     if status is not None:
         msg.status = status
     if metadata is not None:
-        # 深度合并 extra_data（JSONB 支持直接操作）
-        # 🔥 修复：确保 existing 是字典（可能从数据库读取为字符串）
-        existing = msg.extra_data or {}
-        if isinstance(existing, str):
-            # 如果是字符串，尝试解析为字典
-            try:
-                existing = json.loads(existing)
-            except json.JSONDecodeError:
-                existing = {}
-        elif not isinstance(existing, dict):
-            existing = {}
-        
+        # 深度合并 extra_data（PostgreSQL JSONB 支持直接操作）
+        existing = _parse_metadata(msg.extra_data) if msg.extra_data else {}
         new_metadata = _parse_metadata(metadata)
         
         # 深度合并：对于嵌套的 dict，递归合并
