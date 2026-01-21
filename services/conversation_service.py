@@ -63,6 +63,8 @@ class ConversationService:
             创建的对话对象（Pydantic 模型）
         """
         async with AsyncSessionLocal() as session:
+            # 确保用户存在
+            await crud.get_or_create_user(session, user_id=user_id)
             db_conv = await crud.create_conversation(
                 session=session,
                 user_id=user_id,
