@@ -71,7 +71,7 @@
 │     UserPool (用户追踪)  │  AgentPool (实例管理)  │  SessionPool (追踪)      │
 ├──────────────────┬──────────────────┬──────────────────┬────────────────────┤
 │      Redis       │     Database     │    MCP Servers   │    E2B Sandbox     │
-│   (事件/缓存)      │   (SQLite/PG)    │   (外部工具)      │    (代码执行)       │
+│   (事件/缓存)      │   (PostgreSQL)   │   (外部工具)      │    (代码执行)       │
 └──────────────────┴──────────────────┴──────────────────┴────────────────────┘
 ```
 
@@ -281,7 +281,7 @@ flowchart TB
             AP[AgentPool<br/>实例管理]
         end
         REDIS[(Redis<br/>事件流/缓存/池状态)]
-        DB[(Database<br/>SQLite/PostgreSQL)]
+        DB[(Database<br/>PostgreSQL)]
         MCP_SERVER[MCP Servers<br/>外部工具服务]
         E2B[E2B Sandbox<br/>代码执行沙箱]
     end

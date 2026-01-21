@@ -143,8 +143,8 @@ async def update_message(
     if status is not None:
         msg.status = status
     if metadata is not None:
-        # 深度合并 extra_data（JSONB 支持直接操作）
-        existing = msg.extra_data or {}
+        # 深度合并 extra_data（PostgreSQL JSONB 支持直接操作）
+        existing = _parse_metadata(msg.extra_data) if msg.extra_data else {}
         new_metadata = _parse_metadata(metadata)
         
         # 深度合并：对于嵌套的 dict，递归合并

@@ -12,7 +12,7 @@ type: Load Balanced Web Service
 # 使用 location 指定 ECR 镜像地址（由部署脚本自动更新）
 # ============================================================
 image:
-  location: 308470327605.dkr.ecr.ap-southeast-1.amazonaws.com/zen0-backend/agent:20260120-144933
+  location: 308470327605.dkr.ecr.ap-southeast-1.amazonaws.com/zen0-backend/agent:20260121-182906
   port: 80  # Nginx 监听端口
 
 # ============================================================
@@ -27,7 +27,7 @@ http:
     unhealthy_threshold: 3
     interval: 30s
     timeout: 10s
-    grace_period: 120s  # 启动宽限期（2分钟）
+    grace_period: 300s  # 启动宽限期（5分钟，PostgreSQL 初始化需要更长时间）
   deregistration_delay: 30s
 
 # ============================================================
@@ -143,6 +143,7 @@ environments:
     
     # 从 SSM Parameter Store 获取敏感配置
     secrets:
+      DATABASE_URL: /copilot/zen0-backend/staging/secrets/DATABASE_URL
       ANTHROPIC_API_KEY: /copilot/zen0-backend/staging/secrets/ANTHROPIC_API_KEY
       E2B_API_KEY: /copilot/zen0-backend/staging/secrets/E2B_API_KEY
       RAGIE_API_KEY: /copilot/zen0-backend/staging/secrets/RAGIE_API_KEY

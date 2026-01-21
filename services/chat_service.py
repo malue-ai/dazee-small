@@ -311,14 +311,22 @@ class ChatService:
                 is_new_conversation = True
                 logger.info(f"✅ 新对话: {conversation_id}")
         else:
-            # 🆕 修复：校验 conversation_id 存在性和归属
+            # 🆕 修复：校验 conversation_id 存在性和归属，不存在则自动创建
             try:
                 conv = await self.conversation_service.get_conversation(conversation_id)
                 if conv.user_id != user_id:
                     raise ValueError(f"对话 {conversation_id} 不属于用户 {user_id}")
                 logger.debug(f"✅ 对话校验通过: {conversation_id}")
             except ConversationNotFoundError:
-                raise ValueError(f"对话 {conversation_id} 不存在")
+                # 对话不存在，自动创建新对话
+                logger.info(f"⚠️ 对话 {conversation_id} 不存在，自动创建新对话")
+                conv = await self.conversation_service.create_conversation(
+                    user_id=user_id,
+                    title=message[:50] if len(message) <= 50 else message[:47] + "..."
+                )
+                conversation_id = conv.id
+                is_new_conversation = True
+                logger.info(f"✅ 自动创建对话: {conversation_id}")
             except Exception as e:
                 raise ValueError(f"对话校验失败: {e}") from e
         
@@ -573,20 +581,13 @@ class ChatService:
             # 1.2 标准化消息格式
             message = normalize_message_format(processed_message)
             
-            # 1.3 注入前端变量（位置、时区等）到用户消息
-            # 注：不能放 System Prompt（会被 cache），必须放在用户消息中
-            # 格式：用户 query 在前，系统注入上下文在后（合并到同一个 text block）
-            if variables:
-                context_text = self._build_user_context(variables)
-                if append_text_to_last_block(message, context_text):
-                    logger.info(f"🌐 前端变量已注入: {list(variables.keys())}")
-            
             # =================================================================
             # 阶段 2: 数据库操作（持久化 + 加载历史）
             # =================================================================
-            # 注：为避免 SQLite 并发问题，保存和加载在同一个数据库会话中
             
             assistant_message_id = uuid4().hex  # 提升到外层，供异常处理使用
+            
+            # 🎯 先保存原始消息（不含前端注入的上下文）
             content_json = json.dumps(message, ensure_ascii=False)
             
             history_messages = []
@@ -659,6 +660,17 @@ class ChatService:
                 history_messages = ClaudeAdaptor.prepare_messages_from_db(raw_messages)
                 
                 logger.info(f"📚 历史消息已加载: {len(history_messages)} 条")
+            
+            # 1.3 注入前端变量到最新的用户消息（传给 LLM，但不保存到数据库）
+            # 注：必须在保存数据库之后、调用 LLM 之前执行
+            # 原因：前端上下文（时区、timestamp等）对 LLM 有用，但不应污染历史记录
+            if variables and history_messages:
+                # 获取最后一条用户消息（就是刚才保存的）
+                last_message = history_messages[-1]
+                if last_message.get("role") == "user":
+                    context_text = self._build_user_context(variables)
+                    if append_text_to_last_block(last_message["content"], context_text):
+                        logger.info(f"🌐 前端变量已注入到 LLM 消息: {list(variables.keys())}")
             
             # =================================================================
             # 阶段 3: 执行 Agent
