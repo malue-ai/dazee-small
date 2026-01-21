@@ -64,7 +64,8 @@ from core.billing.tracker import create_enhanced_usage_tracker
 from utils.message_utils import (
     dict_list_to_messages,
     append_assistant_message,
-    append_user_message
+    append_user_message,
+    extract_text_from_message
 )
 
 
@@ -743,8 +744,17 @@ class SimpleAgent:
         # 4.2 构建 LLM Messages
         # 4.3 Todo 重写（Context Engineering - 对抗 Lost-in-the-Middle）
         
-# 🆕 V4.6: 获取用户当前 query 和 Mem0 检索决策
-        user_query = messages[-1]["content"] if messages else ""
+        # 🆕 V4.6: 获取用户当前 query 和 Mem0 检索决策
+        # 从最后一条消息中提取文本（content 可能是 list 或 string）
+        if messages:
+            last_content = messages[-1]["content"]
+            if isinstance(last_content, list):
+                # Claude API 格式：[{"type": "text", "text": "..."}, ...]
+                user_query = extract_text_from_message(last_content)
+            else:
+                user_query = str(last_content)
+        else:
+            user_query = ""
         skip_memory = getattr(intent, 'skip_memory_retrieval', False)
         
         # 4.1 选择 System Prompt（🆕 V6.3: 支持多层缓存）
