@@ -505,25 +505,32 @@ class AgentRegistry:
                 # 使用配置中的工具名作为占位符，实际工具发现在首次调用时进行
                 
                 # 创建延迟加载的工具定义
+                # 🆕 优先使用配置中的 input_schema，否则使用通用默认 schema
+                tool_description = tool_config.get("description", f"MCP 工具: {name}")
+                config_input_schema = tool_config.get("input_schema")
+                
+                if config_input_schema:
+                    # 使用配置文件中定义的 schema
+                    parameters = config_input_schema
+                else:
+                    # 默认 schema：使用 prompt 参数（大多数 Dify 工具的通用格式）
+                    parameters = {
+                        "type": "object",
+                        "properties": {
+                            "prompt": {
+                                "type": "string",
+                                "description": "输入提示/查询内容"
+                            }
+                        },
+                        "required": ["prompt"]
+                    }
+                
                 tool_def = {
                     "type": "function",
                     "function": {
                         "name": f"mcp_{server_name}_{name}",
-                        "description": f"MCP 工具: {name} (来自 {server_name}，首次调用时连接)",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "action": {
-                                    "type": "string",
-                                    "description": "要执行的操作"
-                                },
-                                "params": {
-                                    "type": "object",
-                                    "description": "操作参数"
-                                }
-                            },
-                            "required": ["action"]
-                        }
+                        "description": tool_description,
+                        "parameters": parameters
                     }
                 }
                 mcp_tool_definitions.append(tool_def)
@@ -549,14 +556,12 @@ class AgentRegistry:
                         if not current_client:
                             return {"success": False, "error": "MCP 服务器连接失败"}
                         
-                        # 获取实际的工具名（可能需要从 action 参数推断）
-                        action = tool_input.get("action", _name)
-                        params = tool_input.get("params", {})
+                        # 🆕 简化参数处理：直接传递 tool_input
+                        # MCP 工具的参数格式应与配置的 input_schema 一致
+                        action = _name  # 使用原始工具名
+                        params = tool_input  # 直接传递所有参数
                         
-                        # 如果 tool_input 不是 action/params 格式，直接传递
-                        if "action" not in tool_input:
-                            params = tool_input
-                            action = _name
+                        logger.debug(f"📤 MCP 工具调用: {action}, params={params}")
                         
                         # 调用工具
                         result = await current_client.call_tool(action, params)

@@ -444,12 +444,12 @@ def create_mcp_tool_definition(tool_info: Dict[str, Any], client: 'MCPClientWrap
         "input_schema": tool_info.get("input_schema", {
             "type": "object",
             "properties": {
-                "query": {
+                "prompt": {
                     "type": "string",
-                    "description": "输入文本"
+                    "description": "输入提示/查询内容"
                 }
             },
-            "required": ["query"]
+            "required": ["prompt"]
         }),
         "_mcp_client": client,  # 保存客户端引用
         "_original_name": tool_info.get("original_name", tool_info["name"]),

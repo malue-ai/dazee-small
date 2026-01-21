@@ -80,12 +80,12 @@ class InstanceTool:
             "input_schema": self.input_schema or {
                 "type": "object",
                 "properties": {
-                    "query": {
+                    "prompt": {
                         "type": "string",
-                        "description": "输入内容"
+                        "description": "输入提示/查询内容"
                     }
                 },
-                "required": ["query"]
+                "required": ["prompt"]
             }
         }
     

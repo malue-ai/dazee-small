@@ -685,13 +685,14 @@ class SimpleAgent:
         # 兼容旧逻辑：直接添加 _mcp_tools
         elif hasattr(self, '_mcp_tools') and self._mcp_tools:
             for mcp_tool in self._mcp_tools:
+                # 🆕 优先使用工具自带的 input_schema，默认使用 prompt 参数
                 mcp_tool_def = {
                     "name": mcp_tool["name"],
                     "description": mcp_tool.get("description", ""),
                     "input_schema": mcp_tool.get("input_schema", {
                         "type": "object",
-                        "properties": {"query": {"type": "string"}},
-                        "required": ["query"]
+                        "properties": {"prompt": {"type": "string", "description": "输入提示/查询内容"}},
+                        "required": ["prompt"]
                     })
                 }
                 tools_for_llm.append(mcp_tool_def)
