@@ -22,48 +22,10 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 from evaluation.models import TokenUsage
+# 使用统一的定价数据源
+from core.billing.pricing_data import CLAUDE_PRICING, get_model_pricing
 
 logger = get_logger(__name__)
-
-
-# ============================================================
-# 计费价格表（2026-01 Claude 4.5 定价，$/百万tokens）
-# ============================================================
-
-CLAUDE_PRICING = {
-    # model_name -> {input, output, cache_write, cache_read}
-    "claude-opus-4.5": {
-        "input": 5.0,
-        "output": 25.0,
-        "cache_write": 6.25,   # 25% 加价
-        "cache_read": 0.5      # 90% 折扣
-    },
-    "claude-sonnet-4.5": {
-        "input": 3.0,
-        "output": 15.0,
-        "cache_write": 3.75,
-        "cache_read": 0.3
-    },
-    "claude-sonnet-4-5-20250929": {  # 完整模型名
-        "input": 3.0,
-        "output": 15.0,
-        "cache_write": 3.75,
-        "cache_read": 0.3
-    },
-    "claude-haiku-4.5": {
-        "input": 1.0,
-        "output": 5.0,
-        "cache_write": 1.25,
-        "cache_read": 0.1
-    },
-    # 默认使用 Sonnet 价格
-    "default": {
-        "input": 3.0,
-        "output": 15.0,
-        "cache_write": 3.75,
-        "cache_read": 0.3
-    }
-}
 
 
 class AuditLevel(str, Enum):

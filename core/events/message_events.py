@@ -20,6 +20,7 @@ message_delta 统一结构：
 - knowledge   : 知识检索 {"type": "knowledge", "content": "..."}
 - ppt         : PPT 生成 {"type": "ppt", "content": "..."}
 - intent      : 意图分析 {"type": "intent", "content": {...}}
+- billing     : 计费信息 {"type": "billing", "content": {...}}
 
 注意：
 - Tool 事件通过 Content 级事件发送（tool_use/tool_result）

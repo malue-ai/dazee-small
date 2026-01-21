@@ -49,8 +49,10 @@ from core.billing.pricing import (
     estimate_monthly_cost,
 )
 
+# 定价数据
+from core.billing.pricing_data import CLAUDE_PRICING, get_model_pricing
+
 # 🔄 向后兼容：重导出旧接口
-from models.usage import get_model_pricing, CLAUDE_PRICING
 from utils.usage_tracker import UsageTracker, create_usage_tracker
 
 __all__ = [

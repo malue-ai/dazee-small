@@ -8,7 +8,7 @@ Pricing 模块 - 模型定价和成本计算
 """
 
 from typing import Dict, Optional, Tuple
-from models.usage import CLAUDE_PRICING, get_model_pricing
+from core.billing.pricing_data import CLAUDE_PRICING, get_model_pricing
 
 
 def get_pricing_for_model(model: str) -> Dict[str, float]:

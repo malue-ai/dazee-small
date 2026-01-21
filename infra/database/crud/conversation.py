@@ -161,6 +161,20 @@ async def list_conversations_with_stats(
     result = await session.execute(query)
     rows = result.all()
     
+    # 辅助函数：确保 metadata 是字典
+    def _ensure_dict(value):
+        if value is None:
+            return {}
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            try:
+                import json
+                return json.loads(value)
+            except json.JSONDecodeError:
+                return {}
+        return {}
+    
     return [
         {
             "id": row.Conversation.id,
@@ -169,7 +183,7 @@ async def list_conversations_with_stats(
             "status": row.Conversation.status,
             "created_at": row.Conversation.created_at.isoformat() if row.Conversation.created_at else None,
             "updated_at": row.Conversation.updated_at.isoformat() if row.Conversation.updated_at else None,
-            "metadata": row.Conversation.extra_data,
+            "metadata": _ensure_dict(row.Conversation.extra_data),
             "message_count": row.message_count,
             "last_message_at": row.last_message_at.isoformat() if row.last_message_at else None,
             "last_message": row.last_content
