@@ -12,12 +12,68 @@ ZenO 规范特点：
 """
 
 import json
+import re
 import time
 from typing import Dict, Any, List, Optional
 from core.events.adapters.base import EventAdapter
 from logger import get_logger
 
 logger = get_logger("zeno_adapter")
+
+
+# ===========================================================================
+# ZenO 特有常量配置
+# ===========================================================================
+
+# 工具 → Delta 类型映射
+# 需要发送特殊 message_delta 的工具
+# key: 工具名, value: delta.type（ZenO 前端根据这个渲染对应 UI）
+TOOL_TO_DELTA_TYPE: Dict[str, str] = {
+    # Plan 相关
+    "plan_todo": "plan",
+    
+    # 搜索类
+    "web_search": "search",
+    "knowledge_search": "knowledge",
+    
+    # PPT 生成
+    "slidespeak_generate": "ppt",
+    
+    # 代码执行（可选，看前端是否需要特殊 UI）
+    # "bash": "code",
+    # "e2b_python_sandbox": "code",
+}
+
+# 问数平台工具 → 多个 Delta 类型映射
+# 返回结果的字段名直接映射为 delta.type
+WENSHU_ANALYTICS_DELTA_FIELDS = {
+    "sql": "sql",          # SQL 查询语句
+    "data": "data",        # 查询结果数据
+    "chart": "chart",      # 图表配置
+    "report": "report",    # 分析报告
+    "intent": "intent",    # 意图识别（可选）
+}
+
+# 需要拆分响应的分析类 API（通过 api_name 识别）
+# 当 api_calling 工具使用这些 api_name 时，自动拆分响应为多个 delta 事件
+ANALYTICS_API_NAMES = {
+    "wenshu_api",      # 问数平台 API
+    "wenshu",          # 简写形式
+}
+
+# 系统搭建类 API（Ontology Builder 等）
+# 返回 interface 类型：系统配置（实体、属性、关系）
+ONTOLOGY_API_NAMES = {
+    "coze_api",        # Coze Ontology Builder 工作流
+    "coze",            # 简写形式
+}
+
+# 流程图生成类 API（text2flowchart 等）
+# 返回 mind 类型：Mermaid 图表（流程图/思维导图）
+FLOWCHART_API_NAMES = {
+    "dify_api",        # Dify text2flowchart 工作流
+    "dify",            # 简写形式
+}
 
 
 class ZenOAdapter(EventAdapter):
@@ -665,4 +721,450 @@ class ZenOAdapter(EventAdapter):
                 "content": json.dumps(app_data, ensure_ascii=False)
             }
         }
-
+    
+    # ===========================================================================
+    # 工具结果增强（将 tool_result 拆分为多个 delta）
+    # ===========================================================================
+    
+    def enhance_tool_result(
+        self,
+        tool_name: str,
+        tool_input: Dict[str, Any],
+        tool_result: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """
+        增强 tool_result，返回额外的 delta 列表
+        
+        根据工具类型和 api_name 生成额外的 message_delta 事件：
+        - wenshu_api → 拆分为 sql/data/chart/report/intent 等（智能分析）
+        - coze_api → 转换为 interface（系统配置，Ontology Builder）
+        - dify_api → 转换为 mind（Mermaid 流程图，text2flowchart）
+        - 其他特殊工具 → 根据 TOOL_TO_DELTA_TYPE 映射
+        
+        Args:
+            tool_name: 工具名称（如 "api_calling"）
+            tool_input: 工具输入参数（包含 api_name 等）
+            tool_result: 工具返回结果（content_block 格式）
+            
+        Returns:
+            delta 列表，每个元素是 {"type": "xxx", "content": "..."}
+        """
+        is_error = tool_result.get("is_error", False)
+        result_content = tool_result.get("content", "")
+        
+        # 错误结果不增强
+        if is_error:
+            return []
+        
+        # api_calling 工具的特殊处理（通过 api_name 识别）
+        if tool_name == "api_calling":
+            api_name = tool_input.get("api_name", "")
+            
+            # 1. 问数平台 API → 拆分为 sql/data/chart/report 等
+            if api_name in ANALYTICS_API_NAMES:
+                logger.debug(f"🔍 识别到分析类 API: api_name={api_name}")
+                return self._generate_analytics_deltas(result_content)
+            
+            # 2. 系统搭建类 API（Coze Ontology Builder）→ interface
+            if api_name in ONTOLOGY_API_NAMES:
+                logger.debug(f"🔍 识别到系统搭建类 API: api_name={api_name}")
+                return self._generate_ontology_deltas(result_content)
+            
+            # 3. 流程图生成类 API（Dify text2flowchart）→ mind
+            if api_name in FLOWCHART_API_NAMES:
+                logger.debug(f"🔍 识别到流程图生成类 API: api_name={api_name}")
+                return self._generate_flowchart_deltas(result_content)
+        
+        # 向后兼容：专用工具 wenshu_analytics（将废弃）
+        if tool_name == "wenshu_analytics":
+            return self._generate_analytics_deltas(result_content)
+        
+        # 检查是否需要发送特殊 delta（简单工具）
+        delta_type = TOOL_TO_DELTA_TYPE.get(tool_name)
+        if delta_type:
+            logger.debug(f"🔧 生成特殊工具 delta: type={delta_type}, tool={tool_name}")
+            return [self._create_delta(delta_type, result_content)]
+        
+        return []
+    
+    def _generate_analytics_deltas(self, result_content: str) -> List[Dict[str, Any]]:
+        """
+        为分析类 API（如问数平台）生成多个 delta
+        
+        分析类 API 返回的结果包含多个字段，每个字段对应一个 delta：
+        - sql: SQL 查询语句
+        - data: 查询结果数据
+        - chart: 图表配置
+        - report: 分析报告 {title, content}
+        - intent_name: 意图名称
+        
+        Args:
+            result_content: 工具返回的 JSON 字符串
+            
+        Returns:
+            delta 列表
+        """
+        deltas = []
+        
+        # 解析结果
+        try:
+            if isinstance(result_content, str):
+                result = json.loads(result_content)
+            else:
+                result = result_content
+        except json.JSONDecodeError:
+            logger.warning(f"⚠️ 分析类 API 结果解析失败: {str(result_content)[:100]}...")
+            return deltas
+        
+        # 检查是否成功
+        if not result.get("success", False):
+            logger.warning(f"⚠️ 分析类 API 返回失败: {result.get('error')}")
+            return deltas
+        
+        logger.info(f"📊 分析类 API 结果处理: intent={result.get('intent_name')}")
+        
+        # 生成 intent delta（智能分析场景）
+        intent_name = result.get("intent_name")
+        if intent_name:
+            intent_data = {
+                "intent_id": result.get("intent", 2),  # 默认 2 = 智能分析
+                "intent_name": intent_name,
+                "platform": "analytics"  # 分析类 API 都是 analytics 场景
+            }
+            deltas.append(self._create_delta("intent", intent_data))
+        
+        # 生成 sql delta
+        sql = result.get("sql")
+        if sql:
+            deltas.append(self._create_delta("sql", sql))
+        
+        # 生成 data delta
+        data = result.get("data")
+        if data:
+            deltas.append(self._create_delta("data", data))
+        
+        # 生成 chart delta
+        chart = result.get("chart")
+        if chart:
+            deltas.append(self._create_delta("chart", chart))
+        
+        # 生成 report delta
+        report = result.get("report")
+        if report:
+            deltas.append(self._create_delta("report", report))
+        
+        # 生成 application delta（可选，包含 dashboard_id 等）
+        dashboard_id = result.get("dashboard_id")
+        if dashboard_id:
+            app_data = {
+                "application_id": dashboard_id,
+                "name": "数据分析",
+                "status": "success"
+            }
+            deltas.append(self._create_delta("application", app_data))
+        
+        return deltas
+    
+    def _generate_ontology_deltas(self, result_content: str) -> List[Dict[str, Any]]:
+        """
+        为系统搭建类 API（Coze Ontology Builder）生成 delta
+        
+        Coze SSE 返回格式（解析后）：
+        - 最终结果通常在最后一个 Message 事件的 content 中
+        - 包含系统配置（实体、属性、关系）
+        
+        生成的 delta 类型：
+        - intent: 意图识别
+        - interface: 系统配置（实体、属性、关系）
+        - application: 应用状态
+        
+        Args:
+            result_content: 工具返回的内容（可能是 JSON 或原始 SSE）
+            
+        Returns:
+            delta 列表
+        """
+        deltas = []
+        
+        # 解析结果
+        parsed_result = self._parse_coze_sse_result(result_content)
+        
+        if not parsed_result:
+            logger.warning(f"⚠️ Coze API 结果解析失败: {str(result_content)[:200]}...")
+            return deltas
+        
+        logger.info(f"🏗️ Ontology Builder 结果处理")
+        
+        # 生成 intent delta（系统搭建场景）
+        intent_data = {
+            "intent_id": 1,  # 1 = 系统搭建
+            "intent_name": "系统搭建",
+            "platform": "ontology"
+        }
+        deltas.append(self._create_delta("intent", intent_data))
+        
+        # 生成 interface delta（系统配置）
+        # parsed_result 可能是配置对象或包含配置的结构
+        interface_data = parsed_result
+        
+        # 如果结果嵌套在特定字段中，尝试提取
+        if isinstance(parsed_result, dict):
+            interface_data = (
+                parsed_result.get("config") or
+                parsed_result.get("ontology") or
+                parsed_result.get("entities") or
+                parsed_result.get("result") or
+                parsed_result
+            )
+        
+        deltas.append(self._create_delta("interface", interface_data))
+        
+        # 生成 application delta（构建状态）
+        # 注意：这里不再使用 session_id，因为我们是返回 delta 列表
+        app_data = {
+            "application_id": "ontology_build",
+            "name": "系统配置",
+            "status": "success"
+        }
+        deltas.append(self._create_delta("application", app_data))
+        
+        return deltas
+    
+    def _generate_flowchart_deltas(self, result_content: str) -> List[Dict[str, Any]]:
+        """
+        为流程图生成类 API（Dify text2flowchart）生成 delta
+        
+        Dify 返回格式：
+        {
+            "workflow_run_id": "xxx",
+            "data": {
+                "outputs": {
+                    "text": "```mermaid\\nflowchart TD\\n  ...\\n```"
+                }
+            }
+        }
+        
+        生成的 delta 类型：
+        - intent: 意图识别
+        - mind: Mermaid 图表（流程图/思维导图）
+        
+        Args:
+            result_content: 工具返回的 JSON 字符串
+            
+        Returns:
+            delta 列表
+        """
+        deltas = []
+        
+        # 解析结果
+        try:
+            if isinstance(result_content, str):
+                result = json.loads(result_content)
+            else:
+                result = result_content
+        except json.JSONDecodeError:
+            logger.warning(f"⚠️ Dify API 结果解析失败: {str(result_content)[:200]}...")
+            return deltas
+        
+        logger.info(f"📊 text2flowchart 结果处理")
+        
+        # 提取 Mermaid 内容
+        mermaid_content = None
+        
+        # 方式1: data.outputs.text
+        if isinstance(result, dict):
+            data = result.get("data", {})
+            outputs = data.get("outputs", {})
+            mermaid_content = outputs.get("text", "")
+            
+            # 方式2: 直接在 result 中
+            if not mermaid_content:
+                mermaid_content = result.get("text", "")
+            
+            # 方式3: raw_content（如果是 SSE 流式返回）
+            if not mermaid_content:
+                raw = result.get("raw_content", "")
+                if raw:
+                    mermaid_content = self._extract_mermaid_from_raw(raw)
+        
+        if not mermaid_content:
+            logger.warning(f"⚠️ 未找到 Mermaid 内容")
+            return deltas
+        
+        # 清理 Mermaid 代码块标记
+        mermaid_content = self._clean_mermaid_content(mermaid_content)
+        
+        # 生成 intent delta（系统搭建场景，流程图是其一部分）
+        intent_data = {
+            "intent_id": 1,  # 1 = 系统搭建
+            "intent_name": "系统搭建",
+            "platform": "flowchart"
+        }
+        deltas.append(self._create_delta("intent", intent_data))
+        
+        # 生成 mind delta（Mermaid 图表）
+        mind_data = {
+            "mermaid_content": mermaid_content,
+            "chart_type": "flowchart"
+        }
+        deltas.append(self._create_delta("mind", mind_data))
+        
+        return deltas
+    
+    def _parse_coze_sse_result(self, result_content: str) -> Any:
+        """
+        解析 Coze SSE 返回结果
+        
+        Coze SSE 格式：
+        event: Message
+        data: {"content": "...", "node_is_finish": true, ...}
+        
+        event: Done
+        data: {"debug_url": "..."}
+        
+        Args:
+            result_content: 原始返回内容（可能是 JSON 或 SSE 流）
+            
+        Returns:
+            解析后的结果对象
+        """
+        # 尝试直接解析 JSON
+        try:
+            if isinstance(result_content, str):
+                result = json.loads(result_content)
+                
+                # 如果是 raw_content 格式，需要进一步解析 SSE
+                if "raw_content" in result:
+                    return self._parse_coze_sse_stream(result["raw_content"])
+                
+                return result
+            return result_content
+        except json.JSONDecodeError:
+            pass
+        
+        # 尝试解析 SSE 流
+        return self._parse_coze_sse_stream(result_content)
+    
+    def _parse_coze_sse_stream(self, raw_content: str) -> Any:
+        """
+        解析 Coze SSE 流内容，提取最终结果
+        
+        Args:
+            raw_content: 原始 SSE 流内容
+            
+        Returns:
+            最终结果（最后一个 Message 事件的 content）
+        """
+        final_content = ""
+        
+        for line in raw_content.split("\n"):
+            line = line.strip()
+            
+            if line.startswith("data:"):
+                data_str = line[5:].strip()
+                try:
+                    data = json.loads(data_str)
+                    content = data.get("content", "")
+                    if content:
+                        final_content += content
+                except json.JSONDecodeError:
+                    continue
+        
+        # 尝试将累积的内容解析为 JSON
+        if final_content:
+            try:
+                return json.loads(final_content)
+            except json.JSONDecodeError:
+                return final_content
+        
+        return None
+    
+    def _extract_mermaid_from_raw(self, raw_content: str) -> str:
+        """
+        从原始 SSE 流中提取 Mermaid 内容
+        
+        Args:
+            raw_content: 原始 SSE 流内容
+            
+        Returns:
+            Mermaid 内容
+        """
+        # 尝试匹配 ```mermaid ... ```
+        pattern = r'```mermaid\s*([\s\S]*?)```'
+        match = re.search(pattern, raw_content)
+        if match:
+            return match.group(1).strip()
+        
+        # 尝试匹配 flowchart 或 mindmap 开头的内容
+        for prefix in ['flowchart', 'mindmap', 'graph', 'sequenceDiagram']:
+            if prefix in raw_content:
+                # 找到 Mermaid 内容的开始位置
+                start = raw_content.find(prefix)
+                if start != -1:
+                    # 提取到下一个 ``` 或文件结束
+                    end = raw_content.find('```', start)
+                    if end != -1:
+                        return raw_content[start:end].strip()
+                    return raw_content[start:].strip()
+        
+        return ""
+    
+    def _clean_mermaid_content(self, content: str) -> str:
+        """
+        清理 Mermaid 代码块标记
+        
+        Args:
+            content: 可能包含代码块标记的 Mermaid 内容
+            
+        Returns:
+            清理后的 Mermaid 内容
+        """
+        content = content.strip()
+        
+        # 移除 ```mermaid 开头
+        if content.startswith("```mermaid"):
+            content = content[10:].strip()
+        elif content.startswith("```"):
+            content = content[3:].strip()
+        
+        # 移除 ``` 结尾
+        if content.endswith("```"):
+            content = content[:-3].strip()
+        
+        return content
+    
+    def _create_delta(self, delta_type: str, content: Any) -> Dict[str, Any]:
+        """
+        创建单个 delta 结构
+        
+        Args:
+            delta_type: delta 类型
+            content: 内容（对象或字符串）
+            
+        Returns:
+            delta 字典 {"type": "xxx", "content": "..."}
+        """
+        # 转换为 JSON 字符串（如果是对象）
+        if isinstance(content, (dict, list)):
+            content_str = json.dumps(content, ensure_ascii=False)
+        else:
+            content_str = str(content)
+        
+        logger.debug(f"📤 创建 delta: type={delta_type}")
+        
+        return {
+            "type": delta_type,
+            "content": content_str
+        }
+    
+    @staticmethod
+    def register_tool_delta_type(tool_name: str, delta_type: str) -> None:
+        """
+        注册工具的 delta 类型（动态添加）
+        
+        Args:
+            tool_name: 工具名
+            delta_type: delta.type（前端根据这个渲染 UI）
+        """
+        TOOL_TO_DELTA_TYPE[tool_name] = delta_type
+        logger.info(f"✅ 注册工具 delta: {tool_name} -> {delta_type}")
