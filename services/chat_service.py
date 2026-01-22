@@ -805,7 +805,7 @@ class ChatService:
                 # 加载多智能体配置
                 if self.multi_agent_config is None:
                     from core.agent.multi.models import load_multi_agent_config
-                    self.multi_agent_config = load_multi_agent_config()
+                    self.multi_agent_config = await load_multi_agent_config()
                 
                 # 创建 MultiAgentOrchestrator
                 orchestrator = MultiAgentOrchestrator(

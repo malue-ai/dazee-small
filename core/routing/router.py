@@ -228,19 +228,24 @@ class AgentRouter:
         # - 🆕 V7.1: 检查预算是否足够
         # - 其他情况 → 使用单智能体
         
-        # 初步决策
-        if intent.needs_multi_agent:
-            agent_type = "multi"
-            routing_reason = "意图分析建议多智能体协作"
-            logger.info("🔀 初步路由决策: 多智能体（意图分析建议）")
-        elif score > self.complexity_threshold:
-            agent_type = "multi"
-            routing_reason = f"复杂度 {score:.1f} > 阈值 {self.complexity_threshold}"
-            logger.info(f"🔀 初步路由决策: 多智能体（复杂度 {score:.1f} > {self.complexity_threshold}）")
-        else:
-            agent_type = "single"
-            routing_reason = f"复杂度 {score:.1f} <= 阈值 {self.complexity_threshold}"
-            logger.info(f"🔀 路由决策: 单智能体（复杂度 {score:.1f}）")
+        # 🚫 临时禁用多智能体（待稳定后移除此代码块）
+        agent_type = "single"
+        routing_reason = "多智能体暂时禁用"
+        logger.info("🔀 路由决策: 单智能体（多智能体暂时禁用）")
+        
+        # 以下代码暂时禁用，待多智能体稳定后恢复
+        # if intent.needs_multi_agent:
+        #     agent_type = "multi"
+        #     routing_reason = "意图分析建议多智能体协作"
+        #     logger.info("🔀 初步路由决策: 多智能体（意图分析建议）")
+        # elif score > self.complexity_threshold:
+        #     agent_type = "multi"
+        #     routing_reason = f"复杂度 {score:.1f} > 阈值 {self.complexity_threshold}"
+        #     logger.info(f"🔀 初步路由决策: 多智能体（复杂度 {score:.1f} > {self.complexity_threshold}）")
+        # else:
+        #     agent_type = "single"
+        #     routing_reason = f"复杂度 {score:.1f} <= 阈值 {self.complexity_threshold}"
+        #     logger.info(f"🔀 路由决策: 单智能体（复杂度 {score:.1f}）")
         
         # 🆕 V7.1: 如果选择多智能体，检查预算是否足够
         budget_check_passed = True

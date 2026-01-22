@@ -177,6 +177,9 @@ class MultiAgentOrchestrator:
         # 🆕 V7.4: Token 使用统计
         self.usage_tracker = create_usage_tracker()
         
+        # 追踪信息（用于监控和调试）
+        self._execution_trace = []
+        
         # 初始化标记
         self._initialized: bool = False
     
@@ -228,16 +231,6 @@ class MultiAgentOrchestrator:
                 f"input={sub_stats.get('total_input_tokens', 0)}, "
                 f"output={sub_stats.get('total_output_tokens', 0)}"
             )
-        
-        # 追踪信息（用于监控和调试）
-        self._execution_trace = []
-        
-        logger.info(
-            f"✅ MultiAgentOrchestrator 初始化: mode={self.config.mode.value}, "
-            f"agents={len(self.config.agents)}, checkpoints={enable_checkpoints}, "
-            f"lead_agent={enable_lead_agent}, "
-            f"orchestrator_model={orchestrator_model}, worker_model={worker_model}"
-        )
     
     async def execute(
         self,
