@@ -13,6 +13,7 @@
   "manually_edited": [
     "agent_schema",
     "intent_prompt",
+    "simple_prompt",
     "medium_prompt",
     "complex_prompt"
   ]
