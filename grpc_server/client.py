@@ -42,7 +42,7 @@ class ZenfluxGRPCClient:
                 print(event)
     """
     
-    def __init__(self, server_address: str = "localhost:50051", timeout: int = 300):
+    def __init__(self, server_address: str = "localhost:50051", timeout: int = 1800):
         """
         初始化 gRPC 客户端
         

@@ -708,7 +708,7 @@ async def _reconnect_event_generator(
         async for event in redis.subscribe_events(
             session_id=session_id,
             after_id=last_seq,
-            timeout=300
+            timeout=1800
         ):
             if adapter:
                 transformed_event = adapter.transform(event)

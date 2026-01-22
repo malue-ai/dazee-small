@@ -505,7 +505,7 @@ class ChatService:
             ))
             
             # 订阅事件流
-            async for event in redis.subscribe_events(session_id=session_id, after_id=0, timeout=300):
+            async for event in redis.subscribe_events(session_id=session_id, after_id=0, timeout=1800):
                 yield event
                 if agent_task.done():
                     break

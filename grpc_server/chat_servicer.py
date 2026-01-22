@@ -327,7 +327,7 @@ class ChatServicer(_ChatServicerBase):
             async for event in redis.subscribe_events(
                 session_id=request.session_id,
                 after_id=last_seq,
-                timeout=300
+                timeout=1800
             ):
                 transformed_event = adapter.transform(event)
                 if transformed_event is None:

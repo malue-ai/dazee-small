@@ -524,7 +524,7 @@ class RedisSessionManager:
         self,
         session_id: str,
         after_id: Optional[int] = None,
-        timeout: int = 300
+        timeout: int = 1800
     ):
         """
         使用 Pub/Sub 订阅实时事件流（推荐）
