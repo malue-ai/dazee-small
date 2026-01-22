@@ -46,11 +46,6 @@ class ToolExecutor:
     从 CapabilityRegistry 加载工具，动态执行
     """
     
-    # 工具类映射（已废弃，仅向后兼容）
-    TOOL_CLASS_MAPPING = {
-        "slidespeak_render": ("tools.slidespeak", "SlideSpeakTool"),
-    }
-    
     # Claude Server-side 工具（由 Anthropic 服务器处理，不需要本地执行）
     CLAUDE_SERVER_TOOLS = {
         "web_search",      # 搜索由 Anthropic 服务器执行
@@ -110,30 +105,46 @@ class ToolExecutor:
         logger.debug(f"🔧 ToolExecutor 上下文已更新: {list(context_updates.keys())}")
     
     def _load_tools(self):
-        """从 Registry 加载所有工具"""
+        """
+        从 Registry 加载所有工具
+        
+        🆕 V7.7: 工具加载隔离 - 单个工具加载失败不影响其他工具
+        """
         tool_caps = self.registry.find_by_type(CapabilityType.TOOL)
+        loaded_count = 0
+        failed_tools = []
         
         for cap in tool_caps:
             tool_name = cap.name
             
-            if cap.provider == "system":
-                # 系统工具（Claude 原生）- 不需要实例化
+            try:
+                if cap.provider == "system":
+                    # 系统工具（Claude 原生）- 不需要实例化
+                    self._tool_instances[tool_name] = None
+                    loaded_count += 1
+                elif cap.provider == "user":
+                    # 用户自定义工具 - 尝试动态加载
+                    self._load_custom_tool(cap)
+                    if self._tool_instances.get(tool_name) is not None:
+                        loaded_count += 1
+            except Exception as e:
+                # 🆕 隔离失败：记录错误但继续加载其他工具
+                logger.warning(f"⚠️ 工具 {tool_name} 加载失败，跳过: {e}")
                 self._tool_instances[tool_name] = None
-            elif cap.provider == "user":
-                # 用户自定义工具 - 尝试动态加载
-                self._load_custom_tool(cap)
+                failed_tools.append(tool_name)
+        
+        if failed_tools:
+            logger.warning(f"⚠️ {len(failed_tools)} 个工具加载失败: {failed_tools}")
+        logger.info(f"✅ 工具加载完成: {loaded_count} 成功, {len(failed_tools)} 失败")
     
     def _load_custom_tool(self, cap: Capability):
         """
         动态加载自定义工具（支持依赖注入）
         
-        优先级：
-        1. capabilities.yaml 中的 implementation 配置（推荐）
-        2. TOOL_CLASS_MAPPING 硬编码映射（向后兼容）
+        从 capabilities.yaml 中的 implementation 配置加载
         """
         tool_name = cap.name
         
-        # 方法1：从 capabilities.yaml 的 implementation 配置加载
         implementation = cap.metadata.get("implementation")
         if implementation:
             try:
@@ -168,20 +179,8 @@ class ToolExecutor:
             except Exception as e:
                 logger.error(f"❌ 加载工具 {tool_name} 失败: {e}")
         
-        # 方法2：从 TOOL_CLASS_MAPPING 加载（向后兼容）
-        if tool_name in self.TOOL_CLASS_MAPPING:
-            module_path, class_name = self.TOOL_CLASS_MAPPING[tool_name]
-            try:
-                module = import_module(module_path)
-                tool_class = getattr(module, class_name)
-                self._tool_instances[tool_name] = tool_class()
-                logger.info(f"✅ 加载工具 (legacy): {tool_name}")
-                return
-            except Exception as e:
-                logger.error(f"❌ 加载工具 {tool_name} 失败: {e}")
-        
-        # 未找到加载方式
-        logger.warning(f"⚠️ 工具 {tool_name} 无法加载，跳过")
+        # 未找到 implementation 配置
+        logger.warning(f"⚠️ 工具 {tool_name} 无 implementation 配置，跳过")
         self._tool_instances[tool_name] = None
     
     def _get_init_params(self, tool_class) -> List[str]:

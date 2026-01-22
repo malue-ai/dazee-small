@@ -75,8 +75,9 @@ class ToolSelector:
     """
     
     # 默认核心工具（作为 Level 1 的备用，实际从 capabilities.yaml 读取）
-    # 🆕 包含 request_human_confirmation：HITL 是通用能力，任何任务都可能需要人工确认
-    DEFAULT_CORE_TOOLS = ["plan_todo", "bash", "request_human_confirmation"]
+    # 注意：bash 是 Claude 原生工具（NATIVE_TOOLS），不应在核心工具列表中
+    # 核心工具列表应与 capabilities.yaml 中 level:1 的定义一致
+    DEFAULT_CORE_TOOLS = ["plan_todo", "request_human_confirmation"]
     
     # Claude 原生工具（直接使用字符串）
     # 注意：computer 和 memory 工具需要特殊 beta header，暂不包含在默认列表中

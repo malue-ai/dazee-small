@@ -7,9 +7,13 @@ Lead Agent (Planner) - 主控智能体
 - 与 Worker Agents (Sonnet) 协作
 
 设计原则：
-1. 明确的任务分解：每个子任务有清晰的目标、输出格式、工具、边界
+1. 明确的任务分解：每个步骤有清晰的目标、输出格式、工具、边界
 2. 上下文管理：为每个 Worker 提供必要的上下文
 3. 结果综合：整合所有 Worker 的输出
+
+V7.8 重构：
+- SubTask 类已废弃，统一使用 PlanStep
+- TaskDecompositionPlan.subtasks 返回 List[PlanStep]
 """
 
 import asyncio
@@ -26,35 +30,15 @@ from core.agent.multi.models import (
     ExecutionMode,
     TaskAssignment,
 )
+from core.planning.protocol import PlanStep, StepStatus
 from core.llm import create_llm_service
 
 logger = logging.getLogger(__name__)
 
 
-class SubTask(BaseModel):
-    """子任务定义"""
-    subtask_id: str = Field(..., description="子任务 ID")
-    title: str = Field(..., description="子任务标题")
-    description: str = Field(..., description="详细描述")
-    
-    # 执行参数
-    assigned_agent_role: AgentRole = Field(AgentRole.EXECUTOR, description="分配的角色")
-    tools_required: List[str] = Field(default_factory=list, description="需要的工具")
-    
-    # 输出要求
-    expected_output: str = Field("", description="期望的输出格式")
-    success_criteria: List[str] = Field(default_factory=list, description="成功标准")
-    
-    # 依赖关系
-    depends_on: List[str] = Field(default_factory=list, description="依赖的子任务 ID")
-    priority: int = Field(0, description="优先级")
-    
-    # 上下文
-    context: str = Field("", description="执行上下文")
-    
-    # 约束
-    constraints: List[str] = Field(default_factory=list, description="约束条件")
-    max_time_seconds: int = Field(60, description="最大执行时间")
+# V7.8: SubTask 已废弃，统一使用 PlanStep
+# 保留别名以便迁移期间兼容
+SubTask = PlanStep
 
 
 class TaskDecompositionPlan(BaseModel):
@@ -65,8 +49,8 @@ class TaskDecompositionPlan(BaseModel):
     original_query: str = Field(..., description="原始用户查询")
     decomposed_goal: str = Field(..., description="分解后的目标描述")
     
-    # 子任务
-    subtasks: List[SubTask] = Field(default_factory=list, description="子任务列表")
+    # 步骤（V7.8: 统一使用 PlanStep）
+    subtasks: List[PlanStep] = Field(default_factory=list, description="步骤列表")
     
     # 执行模式
     execution_mode: ExecutionMode = Field(ExecutionMode.PARALLEL, description="建议的执行模式")
@@ -384,24 +368,29 @@ class LeadAgent:
             
             data = json.loads(json_text)
             
-            # 构建 SubTask 对象
+            # V7.8: 构建 PlanStep 对象（替代 SubTask）
             subtasks = []
             for st_data in data.get("subtasks", []):
-                subtask = SubTask(
-                    subtask_id=st_data.get("subtask_id", f"task_{len(subtasks)+1}"),
-                    title=st_data.get("title", ""),
+                step_id = st_data.get("subtask_id", f"task_{len(subtasks)+1}")
+                step = PlanStep(
+                    id=step_id,
                     description=st_data.get("description", ""),
-                    assigned_agent_role=AgentRole(st_data.get("assigned_agent_role", "executor")),
+                    status=StepStatus.PENDING,
+                    dependencies=st_data.get("depends_on", []),
+                    assigned_agent_role=st_data.get("assigned_agent_role", "executor"),
                     tools_required=st_data.get("tools_required", []),
                     expected_output=st_data.get("expected_output", ""),
                     success_criteria=st_data.get("success_criteria", []),
-                    depends_on=st_data.get("depends_on", []),
-                    priority=st_data.get("priority", 0),
-                    context=st_data.get("context", ""),
                     constraints=st_data.get("constraints", []),
                     max_time_seconds=st_data.get("max_time_seconds", 60),
+                    priority=st_data.get("priority", 0),
+                    context=st_data.get("context", ""),
+                    metadata={
+                        "title": st_data.get("title", ""),
+                        "subtask_id": step_id,  # 兼容性字段
+                    }
                 )
-                subtasks.append(subtask)
+                subtasks.append(step)
             
             # 构建 Plan
             plan = TaskDecompositionPlan(
@@ -493,20 +482,21 @@ class LeadAgent:
         user_query: str
     ) -> TaskDecompositionPlan:
         """创建降级计划（当分解失败时）"""
-        logger.warning("⚠️ 使用降级计划：创建单个子任务")
+        logger.warning("⚠️ 使用降级计划：创建单个步骤")
         
         return TaskDecompositionPlan(
             plan_id=f"plan_fallback_{uuid4().hex[:8]}",
             original_query=user_query,
             decomposed_goal=user_query,
             subtasks=[
-                SubTask(
-                    subtask_id="task_fallback",
-                    title="执行原始任务",
+                PlanStep(
+                    id="task_fallback",
                     description=user_query,
-                    assigned_agent_role=AgentRole.EXECUTOR,
+                    status=StepStatus.PENDING,
+                    assigned_agent_role="executor",
                     expected_output="任务执行结果",
                     context=user_query,
+                    metadata={"title": "执行原始任务"},
                 )
             ],
             execution_mode=ExecutionMode.SEQUENTIAL,
