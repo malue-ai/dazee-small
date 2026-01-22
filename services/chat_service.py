@@ -850,13 +850,33 @@ class ChatService:
                     # agent_start, agent_end, orchestrator_summary, orchestrator_end
                     await agent.broadcaster.emit_raw_event(session_id, event)
                 
-                # 🔧 在 message_stop 前保存 assistant_text（用于后台任务）
+                # 🔧 在 message_stop 前执行后台任务（保证 recommended 在 done 之前）
                 if background_tasks:
                     accumulator = agent.broadcaster.get_accumulator(session_id)
                     if accumulator:
                         _assistant_text_for_tasks = extract_text_from_message(
                             accumulator.build_for_db()
                         )
+                    
+                    # 执行后台任务
+                    user_text = extract_text_from_message(message)
+                    task_context = TaskContext(
+                        session_id=session_id,
+                        conversation_id=conversation_id,
+                        user_id=user_id,
+                        message_id=assistant_message_id,
+                        user_message=user_text,
+                        assistant_response=_assistant_text_for_tasks,
+                        is_new_conversation=is_new_conversation,
+                        event_manager=events,
+                        conversation_service=self.conversation_service
+                    )
+                    await self.background_tasks.dispatch_tasks(
+                        task_names=background_tasks,
+                        context=task_context
+                    )
+                    # 标记已执行，阶段 4 不再重复执行
+                    background_tasks = []
                 
                 # 🆕 修复：多智能体分支结束后，需要触发 message_stop 和最终持久化
                 # 否则 assistant 占位会一直停在 processing，历史里看不到最终内容
@@ -896,21 +916,42 @@ class ChatService:
                     # 🎯 只处理需要额外逻辑的事件
                     event_type = event.get("type", "")
                     
-                    # 🔧 在收到 billing 事件时保存 assistant_text（在 message_stop 前）
-                    # 因为 emit_message_stop 会调用 _cleanup_session 清理 accumulator
-                    # 事件顺序：... → billing (message_delta/message.assistant.delta) → message_stop
+                    # 🔧 在收到 billing 事件时执行后台任务（在 message_stop 前）
+                    # 事件顺序：... → billing → [recommended] → message_stop → session_end
+                    # 这样 recommended 会在 message.assistant.done 之前发送
                     if event_type in ("message_delta", "message.assistant.delta") and background_tasks:
                         delta = event.get("data", {}).get("delta", {})
                         # 兼容 ZenO 格式（delta 直接在 event 中）
                         if not delta:
                             delta = event.get("delta", {})
                         if delta.get("type") == "billing":
+                            # 1. 保存 assistant_text
                             accumulator = agent.broadcaster.get_accumulator(session_id)
                             if accumulator:
                                 _assistant_text_for_tasks = extract_text_from_message(
                                     accumulator.build_for_db()
                                 )
                                 logger.debug(f"🔧 已保存 assistant_text: {len(_assistant_text_for_tasks)} 字符")
+                            
+                            # 2. 执行后台任务（在 message_stop 之前）
+                            user_text = extract_text_from_message(message)
+                            task_context = TaskContext(
+                                session_id=session_id,
+                                conversation_id=conversation_id,
+                                user_id=user_id,
+                                message_id=assistant_message_id,
+                                user_message=user_text,
+                                assistant_response=_assistant_text_for_tasks,
+                                is_new_conversation=is_new_conversation,
+                                event_manager=events,
+                                conversation_service=self.conversation_service
+                            )
+                            await self.background_tasks.dispatch_tasks(
+                                task_names=background_tasks,
+                                context=task_context
+                            )
+                            # 标记已执行，阶段 4 不再重复执行
+                            background_tasks = []
                     
                     if event_type == "conversation_delta":
                         # conversation 更新同步到数据库
@@ -930,17 +971,9 @@ class ChatService:
             status = final_status.get("status") if final_status else "completed"
             
             if status != "stopped":
-                # 4.2 发送完成事件
-                await events.session.emit_session_end(
-                    session_id=session_id,
-                    status="completed",
-                    duration_ms=duration_ms,
-                    output_format=events.output_format,
-                    adapter=events.adapter
-                )
-                await self.session_service.end_session(session_id, status="completed")
-                
-                # 4.3 执行后台任务（如标题生成、推荐问题）
+                # 4.2 执行后台任务（回退机制）
+                # 注意：正常情况下后台任务已在 billing 事件时执行（message_stop 之前）
+                # 这里作为回退，防止 billing 事件未触发的情况
                 if background_tasks:
                     user_text = extract_text_from_message(message)
                     
@@ -960,6 +993,16 @@ class ChatService:
                         task_names=background_tasks,
                         context=task_context
                     )
+                
+                # 4.3 发送完成事件（在后台任务之后，确保推荐问题等已发送）
+                await events.session.emit_session_end(
+                    session_id=session_id,
+                    status="completed",
+                    duration_ms=duration_ms,
+                    output_format=events.output_format,
+                    adapter=events.adapter
+                )
+                await self.session_service.end_session(session_id, status="completed")
             
             # 🆕 V7.4: 生成 UsageResponse（计费信息）
             usage_response = None
