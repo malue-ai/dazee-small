@@ -537,6 +537,18 @@ class AgentRegistry:
                     description = tool_info.get("description", "")
                     input_schema = tool_info.get("input_schema", {})
                     
+                    # 🆕 检查配置文件中是否有该工具的自定义描述（覆盖 MCP 服务器的描述）
+                    config_description = None
+                    for tool_config in mcp_tools:
+                        if tool_config.get("name") == original_name and tool_config.get("server_url") == server_url:
+                            config_description = tool_config.get("description")
+                            if config_description:
+                                logger.info(f"      ✏️ 使用配置文件中的自定义描述覆盖 MCP 描述")
+                                description = config_description
+                                # 同时更新 tool_info 中的 description
+                                tool_info["description"] = config_description
+                            break
+                    
                     # 🔍 显示工具的参数信息
                     schema_props = input_schema.get("properties", {}) if isinstance(input_schema, dict) else {}
                     param_info = f"参数: {list(schema_props.keys())}" if schema_props else "无参数"
