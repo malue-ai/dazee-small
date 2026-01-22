@@ -2479,7 +2479,7 @@ def _complexity_to_schema(cls, complexity_score: float) -> AgentSchema:
 
 #### SimpleAgent（单智能体）
 
-**职责**：单智能体执行框架，实现 RVR（React +alidation）循环。
+**职责**：单智能体执行框架，实现 RVR（React + Validation + Reflection）循环。
 
 **架构演进**：
 - ✅ **V7.0**: 意图分析外置化，依赖路由层传入 `intent`
