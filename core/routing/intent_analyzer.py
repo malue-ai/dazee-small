@@ -301,6 +301,8 @@ class IntentAnalyzer:
         """
         解析 LLM 响应
         
+        🆕 V7.8: 新增 LLM 语义建议字段解析
+        
         Args:
             content: LLM 响应内容
             input_text: 原始用户输入
@@ -316,6 +318,11 @@ class IntentAnalyzer:
         skip_memory_retrieval = False
         needs_multi_agent = False  # 🆕 V6.0: 默认不需要 Multi-Agent
         is_follow_up = False       # 🆕 V6.1: 默认不是追问（视为新话题）
+        
+        # 🆕 V7.8: LLM 语义建议字段
+        suggested_planning_depth = None
+        requires_deep_reasoning = False
+        tool_usage_hint = None
         
         # 使用 JSON 提取器解析 LLM 响应
         parsed = extract_json(content)
@@ -360,19 +367,45 @@ class IntentAnalyzer:
             
             # 🆕 V6.1: 解析 is_follow_up（上下文追问识别）
             is_follow_up = parsed.get("is_follow_up", False)
+            
+            # ==================== V7.8: LLM 语义建议 ====================
+            # 这些字段供 AgentFactory 参数映射时优先使用
+            
+            # suggested_planning_depth（可选）
+            raw_planning = parsed.get("suggested_planning_depth")
+            if raw_planning in ("none", "minimal", "full"):
+                suggested_planning_depth = raw_planning
+            
+            # requires_deep_reasoning
+            requires_deep_reasoning = parsed.get("requires_deep_reasoning", False)
+            
+            # tool_usage_hint（可选）
+            raw_tool_hint = parsed.get("tool_usage_hint")
+            if raw_tool_hint in ("single", "sequential", "parallel"):
+                tool_usage_hint = raw_tool_hint
+            
+            logger.debug(
+                f"   V7.8 语义建议: planning={suggested_planning_depth}, "
+                f"deep_reasoning={requires_deep_reasoning}, "
+                f"tools={tool_usage_hint}"
+            )
         else:
             logger.warning(f"无法从 LLM 响应中提取 JSON: {content[:100]}...")
         
         return IntentResult(
             task_type=task_type,
             complexity=complexity,
-            complexity_score=complexity_score,  # 🆕 V7.0
+            complexity_score=complexity_score,
             needs_plan=needs_plan,
             skip_memory_retrieval=skip_memory_retrieval,
             needs_multi_agent=needs_multi_agent,
-            is_follow_up=is_follow_up,  # 🆕 V6.1
+            is_follow_up=is_follow_up,
             keywords=[],  # V5.0: 不再提取关键词
-            raw_response=content
+            raw_response=content,
+            # 🆕 V7.8: LLM 语义建议
+            suggested_planning_depth=suggested_planning_depth,
+            requires_deep_reasoning=requires_deep_reasoning,
+            tool_usage_hint=tool_usage_hint,
         )
     
     def _infer_score_from_complexity(self, complexity: Complexity) -> float:

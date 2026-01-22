@@ -49,11 +49,15 @@ Analyze the user query (considering conversation history if provided) and classi
   "needs_plan": true|false,
   "skip_memory_retrieval": true|false,
   "needs_multi_agent": true|false,
-  "is_follow_up": true|false
+  "is_follow_up": true|false,
+  "suggested_planning_depth": null|"none"|"minimal"|"full",
+  "requires_deep_reasoning": true|false,
+  "tool_usage_hint": null|"single"|"sequential"|"parallel"
 }
 ```
 
-**ALL SEVEN FIELDS ARE REQUIRED** — 不要省略任何字段。即使不确定也要给出最接近的分类。
+**ALL FIELDS ARE REQUIRED** — 不要省略任何字段。即使不确定也要给出最接近的分类。
+对于可选字段（suggested_planning_depth, tool_usage_hint），如果不确定可以填 null。
 """
 
 INTENT_PROMPT_TASK_TYPES = """
@@ -107,6 +111,27 @@ INTENT_PROMPT_COMPLEXITY = """
 ### Needs Plan
 - **true**: complexity is medium or complex
 - **false**: complexity is simple
+
+### V7.8 LLM 语义建议（可选，用于运行时参数优化）
+
+这些字段帮助框架更精准地配置 Agent 运行时参数：
+
+**suggested_planning_depth** (可选):
+- none: 不需要规划（直接回答）
+- minimal: 最小规划（3-5 步）
+- full: 完整规划（详细步骤 + 质量验证）
+- 不确定时填 null
+
+**requires_deep_reasoning**:
+- true: 即使问题简短，也需要深度推理（如"解释量子纠缠"）
+- false: 任务复杂度与问题长度相符
+- 默认 false
+
+**tool_usage_hint** (可选):
+- single: 只需 1 个工具调用
+- sequential: 多个工具串行调用（有依赖）
+- parallel: 多个工具可并行调用（无依赖）
+- 不确定时填 null
 """
 
 INTENT_PROMPT_CONTEXT_AWARENESS = """
@@ -357,7 +382,7 @@ INTENT_PROMPT_FOOTER = """
 
 - DO NOT analyze what tools/capabilities are needed (that's Sonnet's job)
 - DO NOT create a plan (that's Sonnet's job)
-- ONLY classify: task_type, complexity, complexity_score, needs_plan, skip_memory_retrieval, needs_multi_agent, is_follow_up
+- ONLY classify the fields in the output format
 - Consider conversation history when determining is_follow_up and task_type
 
 ## Examples
@@ -373,7 +398,10 @@ Output:
   "needs_plan": true,
   "skip_memory_retrieval": false,
   "needs_multi_agent": false,
-  "is_follow_up": false
+  "is_follow_up": false,
+  "suggested_planning_depth": "full",
+  "requires_deep_reasoning": false,
+  "tool_usage_hint": "sequential"
 }
 ```
 
@@ -388,7 +416,10 @@ Output:
   "needs_plan": false,
   "skip_memory_retrieval": true,
   "needs_multi_agent": false,
-  "is_follow_up": false
+  "is_follow_up": false,
+  "suggested_planning_depth": "none",
+  "requires_deep_reasoning": false,
+  "tool_usage_hint": "single"
 }
 ```
 
@@ -403,7 +434,28 @@ Output:
   "needs_plan": true,
   "skip_memory_retrieval": false,
   "needs_multi_agent": true,
-  "is_follow_up": false
+  "is_follow_up": false,
+  "suggested_planning_depth": "full",
+  "requires_deep_reasoning": true,
+  "tool_usage_hint": "parallel"
+}
+```
+
+Input: "Explain quantum entanglement simply"
+
+Output:
+```json
+{
+  "task_type": "information_query",
+  "complexity": "simple",
+  "complexity_score": 2.0,
+  "needs_plan": false,
+  "skip_memory_retrieval": true,
+  "needs_multi_agent": false,
+  "is_follow_up": false,
+  "suggested_planning_depth": "none",
+  "requires_deep_reasoning": true,
+  "tool_usage_hint": null
 }
 ```
 

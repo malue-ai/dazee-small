@@ -10,7 +10,7 @@ Schema 验证器 - 定义 Agent 配置的强类型规范
 """
 
 from typing import Dict, Any, List, Optional, Literal, TYPE_CHECKING
-from pydantic import BaseModel, Field, validator, root_validator
+from pydantic import BaseModel, Field, validator
 from enum import Enum
 
 from logger import get_logger
@@ -589,25 +589,6 @@ class AgentSchema(BaseModel):
     # 验证器
     # ============================================================
     
-    @root_validator(pre=True)
-    def handle_legacy_format(cls, values):
-        """
-        处理旧格式兼容性
-        
-        旧格式使用 components: Dict[str, Any]
-        新格式使用独立的强类型字段
-        """
-        # 如果有旧格式的 components 字段，转换为新格式
-        if "components" in values and isinstance(values["components"], dict):
-            components = values.pop("components")
-            
-            for comp_name in ["intent_analyzer", "plan_manager", "tool_selector", 
-                           "memory_manager", "output_formatter"]:
-                if comp_name in components and comp_name not in values:
-                    values[comp_name] = components[comp_name]
-        
-        return values
-    
     @validator("model")
     def validate_model(cls, v):
         """验证模型名称"""
@@ -621,7 +602,7 @@ class AgentSchema(BaseModel):
     # ============================================================
     
     def to_dict(self) -> Dict[str, Any]:
-        """转换为字典（兼容旧格式）"""
+        """转换为字典"""
         result = {
             "name": self.name,
             "description": self.description,
