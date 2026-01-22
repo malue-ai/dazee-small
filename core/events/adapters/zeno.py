@@ -1130,11 +1130,9 @@ class ZenOAdapter(EventAdapter):
             logger.warning("⚠️ send_files 结果中没有 files 字段")
             return deltas
         
-        # 构建 files delta 数据（直接使用 files 数组）
-        files_data = {"files": files}
-        
+        # 构建 files delta 数据（直接使用 files 数组，不要再包一层）
         logger.info(f"📁 生成 files delta: 包含 {len(files)} 个文件")
-        deltas.append(self._create_delta("files", files_data))
+        deltas.append(self._create_delta("files", files))
         
         return deltas
     

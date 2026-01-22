@@ -204,7 +204,7 @@ class APICallingTool:
         """
         try:
             # 1. 解析 URL 和 Headers（支持 api_name 自动注入）
-            final_url, final_headers, resolve_error = self._resolve_api_config(
+            final_url, final_headers, resolve_error, _ = self._resolve_api_config(
                 api_name=api_name,
                 path=path,
                 url=url,

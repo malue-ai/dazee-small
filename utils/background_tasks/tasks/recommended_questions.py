@@ -144,19 +144,28 @@ async def _generate_questions_with_llm(
                 
                 # 使用 JSON 提取器
                 questions = extract_json_list(raw_text, key="questions")
+                logger.debug(f"📋 JSON 提取结果: {questions}")
                 
                 if questions:
                     cleaned = []
                     for q in questions[:3]:
-                        q = q.strip().strip('"\'「」『』')
+                        q = q.strip().strip('"\'「」『』,')
+                        
+                        # 过滤掉明显不是问题的内容（markdown/JSON 语法）
+                        if _is_invalid_question(q):
+                            logger.debug(f"⚠️ 跳过无效问题: {q}")
+                            continue
+                        
                         if len(q) > 30:
                             q = q[:27] + "..."
-                        if q:
+                        if q and len(q) >= 5:
                             cleaned.append(q)
-                    return cleaned
+                    
+                    if cleaned:
+                        return cleaned
                 
-                # JSON 提取失败，回退到逐行解析
-                logger.debug("JSON 提取失败，回退到逐行解析")
+                # JSON 提取失败或结果无效，回退到逐行解析
+                logger.debug("JSON 提取失败或结果无效，回退到逐行解析")
                 return _parse_questions_fallback(raw_text)
         
         return None
@@ -166,9 +175,42 @@ async def _generate_questions_with_llm(
         return None
 
 
+def _is_invalid_question(text: str) -> bool:
+    """检查文本是否是无效的问题（markdown/JSON 语法等）"""
+    if not text:
+        return True
+    
+    # 无效模式
+    invalid_patterns = [
+        r'^```',           # markdown 代码块
+        r'^"?questions"?\s*:',  # JSON key
+        r'^\[',            # JSON 数组
+        r'^\]',
+        r'^\{',            # JSON 对象
+        r'^\}',
+        r'^json$',         # 单独的 json 标记
+    ]
+    
+    for pattern in invalid_patterns:
+        if re.match(pattern, text, re.IGNORECASE):
+            return True
+    
+    return False
+
+
 def _parse_questions_fallback(raw_text: str) -> List[str]:
     """回退方案：逐行解析 LLM 返回的问题文本"""
     questions = []
+    
+    # 需要跳过的模式（markdown 代码块、JSON 语法等）
+    skip_patterns = [
+        r'^```',           # markdown 代码块标记
+        r'^"?questions"?\s*:',  # JSON key
+        r'^\[',            # JSON 数组开始
+        r'^\]',            # JSON 数组结束
+        r'^\{',            # JSON 对象开始
+        r'^\}',            # JSON 对象结束
+    ]
     
     for line in raw_text.split('\n'):
         line = line.strip()
@@ -176,14 +218,27 @@ def _parse_questions_fallback(raw_text: str) -> List[str]:
         if not line:
             continue
         
+        # 跳过 markdown 和 JSON 语法
+        should_skip = False
+        for pattern in skip_patterns:
+            if re.match(pattern, line, re.IGNORECASE):
+                should_skip = True
+                break
+        if should_skip:
+            continue
+        
         line = re.sub(r'^[\d]+[.、)\]]\s*', '', line)
         line = re.sub(r'^[-•·]\s*', '', line)
-        line = line.strip().strip('"\'「」『』')
+        line = line.strip().strip('"\'「」『』,')  # 也去掉尾部逗号
+        
+        # 过滤掉太短或包含 JSON 语法的内容
+        if len(line) < 5:
+            continue
         
         if len(line) > 30:
             line = line[:27] + "..."
         
-        if line and not line.startswith('{') and not line.startswith('['):
+        if line:
             questions.append(line)
     
     return questions[:3]
