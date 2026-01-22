@@ -252,7 +252,7 @@
   "intent_name": "综合咨询",
   "complexity": "medium",
   "needs_plan": true,
-  "routing": "web_search → 整理分析"
+  "routing": "信息检索 → 整理分析"
 }
 ```
 **判断依据**：需要先搜索数据，用户没有提供现成数据

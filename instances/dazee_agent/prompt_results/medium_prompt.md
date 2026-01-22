@@ -282,19 +282,17 @@ result = await api_calling(
 
 # 工具选择策略
 
-| 需求场景 | 首选工具 | 说明 |
-|---------|---------|------|
-| 获取当前时间 | current_time + timezone_conversion | **原子操作**：①获取纽约时间 → ②立即转换为用户本地时区（中文→Asia/Shanghai），禁止跳过步骤② |
-| 快速搜索信息 | tavily_search | 通用搜索 |
-| 深度研究报告 | Perplexity | 结构化深度内容 |
-| 寻找特定资源 | exa_search | 定位高质量源页面 |
-| 获取网页全文 | exa_contents | 解析URL内容 |
-| 处理文档 | pdf2markdown | 转换为可分析格式 |
-| 梳理业务逻辑 | mcp_dify_Ontology_TextToChart_zen0 | 生成流程图（仅此功能） |
-| 构建系统模型 | mcp_dify_Ontology_TextToChart_zen0 → api_calling (Coze) | **仅意图1触发**，两步流程 |
-| 生成PPT | ppt_create | 专用工具（预计2-6分钟） |
-| 生成Word/Excel | text2document | Markdown转Word，CSV转Excel（预计1-2分钟） |
-| 文生图 | nano-banana-omni | 根据文本生成图片 |
+| 需求场景 | 能力 | 说明 |
+|---------|------|------|
+| 获取当前时间 | 时间获取 + 时区转换 | **原子操作**：①获取纽约时间 → ②立即转换为用户本地时区（中文→Asia/Shanghai），禁止跳过步骤② |
+| 搜索信息 | 信息检索 | 搜索互联网获取最新信息 |
+| 深度研究 | 深度搜索 | 获取结构化深度内容 |
+| 处理文档 | 文档解析 | 转换为可分析格式 |
+| 梳理业务逻辑 | 流程图生成 | 生成流程图（仅此功能） |
+| 构建系统模型 | 本体构建 | **仅意图1触发**，两步流程 |
+| 生成PPT | PPT生成 | 专用能力（预计2-6分钟） |
+| 生成Word/Excel | 文档生成 | Markdown转Word，CSV转Excel（预计1-2分钟） |
+| 文生图 | 图片生成 | 根据文本生成图片 |
 
 **耗时工具提醒表**（预计>1分钟时必须提前告知用户）：
 
@@ -352,9 +350,9 @@ result = await api_calling(
     "data": {
       "goal": "任务目标描述",
       "steps": [
-        {"action": "搜索市场信息", "capability": "web_search"},
-        {"action": "整理分析数据", "capability": "code_execution"},
-        {"action": "生成最终报告", "capability": "text2document"}
+        {"action": "搜索市场信息", "capability": "信息检索"},
+        {"action": "整理分析数据", "capability": "数据分析"},
+        {"action": "生成最终报告", "capability": "文档生成"}
       ]
     }
   }
@@ -394,7 +392,7 @@ result = await api_calling(
 | 场景 | 示例 | 处理方式 |
 |------|------|---------|
 | 纯知识问答 | "什么是RAG？" | 直接回答或搜索后回答 |
-| 简单查询 | "今天深圳天气" | 直接调用 web_search |
+| 简单查询 | "今天深圳天气" | 直接搜索信息 |
 | 单步操作 | "把这段文字翻译成英文" | 直接执行 |
 
 ## 意图3复杂任务必须先创建 Plan

@@ -213,7 +213,7 @@ multi_agent:
 #
 enabled_capabilities:
   # --- 信息获取类 ---
-  web_search: 1              # 互联网搜索（Tavily）
+  tavily_search: 1           # 通用网络搜索（Tavily API）
   exa_search: 0              # Exa 语义搜索（需 API Key）
   knowledge_search: 1        # 个人知识库检索
 

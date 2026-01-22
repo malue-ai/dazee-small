@@ -34,10 +34,7 @@ class ToolType(Enum):
     工具类型（统一抽象）
     
     Claude Server Tools (服务端执行):
-    - WEB_SEARCH: 网页搜索
-    - WEB_FETCH: 网页获取 (Beta)
-    - CODE_EXECUTION: 代码执行 (Beta)
-    - MEMORY: 记忆工具 (Beta)
+    - CODE_EXECUTION: 代码执行（Skills 功能需要）
     - TOOL_SEARCH: 工具搜索 (Beta)
     
     Claude Client Tools (客户端执行):
@@ -47,12 +44,12 @@ class ToolType(Enum):
     
     自定义工具:
     - CUSTOM: 用户自定义工具
+    
+    注：web_search/web_fetch/memory 已移除，改用客户端工具（tavily_search, exa_search, Mem0）
     """
-    # Server Tools
-    WEB_SEARCH = "web_search"
-    WEB_FETCH = "web_fetch"
+    # Server Tools（仅保留 code_execution 用于 Skills）
+    # 🆕 web_search/web_fetch/memory 已移除，改用客户端工具
     CODE_EXECUTION = "code_execution"
-    MEMORY = "memory"
     TOOL_SEARCH = "tool_search"
     
     # Client Tools

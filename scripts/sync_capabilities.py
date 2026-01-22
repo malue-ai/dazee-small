@@ -74,10 +74,10 @@ CORE_TOOLS = [
 # 工具分组（用于生成配置时的注释分组）
 TOOL_GROUPS = {
     "信息获取类": {
-        "tools": ["web_search", "exa_search", "knowledge_search"],
-        "defaults": {"web_search": 1, "exa_search": 0, "knowledge_search": 1},
+        "tools": ["tavily_search", "exa_search", "knowledge_search"],
+        "defaults": {"tavily_search": 1, "exa_search": 0, "knowledge_search": 1},
         "comments": {
-            "web_search": "互联网搜索（Tavily）",
+            "tavily_search": "通用网络搜索（Tavily API）",
             "exa_search": "Exa 语义搜索（需 API Key）",
             "knowledge_search": "个人知识库检索",
         }

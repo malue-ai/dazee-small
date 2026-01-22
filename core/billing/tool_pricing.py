@@ -44,9 +44,8 @@ logger = get_logger(__name__)
 TOOL_PRICING = {
     # ==================== Claude 服务端工具（不单独计费）====================
     # 这些工具由 Anthropic 服务器执行，成本已包含在 Claude API 调用费用中
-    "web_search": 0.0,                     # Claude 官方 Web 搜索
-    "code_execution": 0.0,                 # Claude 代码执行沙箱
-    "memory": 0.0,                         # Claude 记忆功能
+    # 🆕 仅保留 code_execution 用于 Skills 功能
+    "code_execution": 0.0,                 # Claude 代码执行沙箱（Skills 需要）
     
     # ==================== 内部工具（免费）====================
     "file_read": 0.0,                      # 文件读取

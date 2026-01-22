@@ -27,7 +27,7 @@ enabled_capabilities:
   file_read: 1
   
   # 信息获取（可选）
-  web_search: 1
+  tavily_search: 1           # 通用网络搜索（Tavily API）
   knowledge_search: 1
   
   # 其他工具全部禁用

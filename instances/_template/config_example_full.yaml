@@ -35,7 +35,7 @@ enabled_capabilities:
   pdf: 1                     # PDF 生成
   
   # --- 信息获取类 ---
-  web_search: 1              # 互联网搜索
+  tavily_search: 1           # 通用网络搜索（Tavily API）
   exa_search: 1              # Exa 语义搜索
   knowledge_search: 1        # 个人知识库检索
   

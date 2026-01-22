@@ -550,10 +550,13 @@ capabilities:
         description: The file path to read
     required:
     - path
-- name: web_search
+# 🆕 Tavily 搜索（替代 Claude Server Tool: web_search）
+# 切换模型时可用，不依赖 Anthropic 服务端
+- name: tavily_search
   type: TOOL
-  subtype: NATIVE
-  provider: system
+  subtype: CUSTOM
+  provider: user
+  invocation_hint: DIRECT
   level: 2
   cache_stable: true
   compaction:
@@ -562,9 +565,13 @@ capabilities:
     max_size: 3000
     summary_chars: 200
     max_items: 10
+  implementation:
+    module: tools.tavily_search
+    class: TavilySearchTool
   capabilities:
   - information_retrieval
   - web_search
+  - news_search
   priority: 85
   cost:
     time: medium
@@ -572,14 +579,46 @@ capabilities:
   constraints:
     requires_api: true
     requires_network: true
+    api_name: tavily
+    api_key_env: TAVILY_API_KEY
   metadata:
-    description: Search the web for information
+    description: 通用网络搜索（基于 Tavily API），替代 Claude web_search Server Tool
+    preferred_for:
+    - 快速搜索信息
+    - 获取最新新闻
+    - 通用知识检索
+    - 事实查询
+    keywords:
+    - 搜索
+    - search
+    - 查询
+    - 新闻
+    - 信息
+    note: 与 exa_search 互补：tavily_search 适合快速通用搜索，exa_search 适合语义搜索和高质量资源定位
   input_schema:
     type: object
     properties:
       query:
         type: string
-        description: The search query string
+        description: 搜索查询（支持自然语言）
+      search_depth:
+        type: string
+        description: 搜索深度：basic（快速）或 advanced（深入）
+        enum: [basic, advanced]
+        default: basic
+      max_results:
+        type: integer
+        description: 返回结果数量（默认5，最大20）
+        default: 5
+      include_answer:
+        type: boolean
+        description: 是否包含 AI 生成的摘要答案
+        default: true
+      topic:
+        type: string
+        description: 搜索主题：general（通用）或 news（新闻）
+        enum: [general, news]
+        default: general
     required:
     - query
 - name: exa_search

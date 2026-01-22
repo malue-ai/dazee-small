@@ -818,6 +818,9 @@ class ChatService:
             if hasattr(agent, 'broadcaster') and agent.broadcaster:
                 agent.broadcaster.set_output_format(output_format, conversation_id)
             
+            # 🔧 用于保存 assistant_text（在 message_stop 清理 accumulator 前获取）
+            _assistant_text_for_tasks = ""
+            
             # 根据路由决策选择执行路径
             if use_multi_agent:
                 # ✅ V7.2: 多智能体执行
@@ -846,6 +849,14 @@ class ChatService:
                     # 多智能体事件类型：orchestrator_start, task_decomposition, 
                     # agent_start, agent_end, orchestrator_summary, orchestrator_end
                     await agent.broadcaster.emit_raw_event(session_id, event)
+                
+                # 🔧 在 message_stop 前保存 assistant_text（用于后台任务）
+                if background_tasks:
+                    accumulator = agent.broadcaster.get_accumulator(session_id)
+                    if accumulator:
+                        _assistant_text_for_tasks = extract_text_from_message(
+                            accumulator.build_for_db()
+                        )
                 
                 # 🆕 修复：多智能体分支结束后，需要触发 message_stop 和最终持久化
                 # 否则 assistant 占位会一直停在 processing，历史里看不到最终内容
@@ -885,6 +896,22 @@ class ChatService:
                     # 🎯 只处理需要额外逻辑的事件
                     event_type = event.get("type", "")
                     
+                    # 🔧 在收到 billing 事件时保存 assistant_text（在 message_stop 前）
+                    # 因为 emit_message_stop 会调用 _cleanup_session 清理 accumulator
+                    # 事件顺序：... → billing (message_delta/message.assistant.delta) → message_stop
+                    if event_type in ("message_delta", "message.assistant.delta") and background_tasks:
+                        delta = event.get("data", {}).get("delta", {})
+                        # 兼容 ZenO 格式（delta 直接在 event 中）
+                        if not delta:
+                            delta = event.get("delta", {})
+                        if delta.get("type") == "billing":
+                            accumulator = agent.broadcaster.get_accumulator(session_id)
+                            if accumulator:
+                                _assistant_text_for_tasks = extract_text_from_message(
+                                    accumulator.build_for_db()
+                                )
+                                logger.debug(f"🔧 已保存 assistant_text: {len(_assistant_text_for_tasks)} 字符")
+                    
                     if event_type == "conversation_delta":
                         # conversation 更新同步到数据库
                         await self._handle_conversation_delta(event, conversation_id)
@@ -894,6 +921,9 @@ class ChatService:
             # =================================================================
             
             duration_ms = int((time.time() - start_time) * 1000)
+            
+            # 🔧 使用事件循环中保存的 assistant_text（在 message_stop 清理 accumulator 前获取）
+            assistant_text = _assistant_text_for_tasks
             
             # 4.1 检查最终状态
             final_status = await redis.get_session_status(session_id)
@@ -910,16 +940,9 @@ class ChatService:
                 )
                 await self.session_service.end_session(session_id, status="completed")
                 
-                # 4.3 执行后台任务（如标题生成）
+                # 4.3 执行后台任务（如标题生成、推荐问题）
                 if background_tasks:
                     user_text = extract_text_from_message(message)
-                    
-                    assistant_text = ""
-                    accumulator = agent.broadcaster.get_accumulator(session_id)
-                    if accumulator:
-                        assistant_text = extract_text_from_message(
-                            accumulator.build_for_db()
-                        )
                     
                     task_context = TaskContext(
                         session_id=session_id,
@@ -927,7 +950,7 @@ class ChatService:
                         user_id=user_id,
                         message_id=assistant_message_id,
                         user_message=user_text,
-                        assistant_response=assistant_text,
+                        assistant_response=assistant_text,  # 使用提前获取的 assistant_text
                         is_new_conversation=is_new_conversation,
                         event_manager=events,
                         conversation_service=self.conversation_service

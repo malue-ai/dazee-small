@@ -68,11 +68,10 @@ class InvocationSelector:
     """
     
     # Claude Server 内置工具（无需客户端实现）
+    # 🆕 仅保留 code_execution 用于 Skills 功能
+    # web_search/web_fetch/memory 已移除，改用客户端工具
     SERVER_TOOLS = {
-        "web_search", "web_search_20250305",
-        "web_fetch",
-        "code_execution",
-        "memory"
+        "code_execution"
     }
     
     # 大参数阈值 (10KB)
