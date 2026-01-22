@@ -47,6 +47,7 @@ class IntentResult:
     🆕 V6.0: 新增 needs_multi_agent 字段，用于智能决定是否需要 Multi-Agent 协作（Prompt-First）
     🆕 V6.1: 新增 is_follow_up 字段，用于识别追问/上下文延续（避免误判为新话题）
     🆕 V7.0: 新增 complexity_score 字段，LLM 直接输出 0-10 评分（废弃 ComplexityScorer）
+    🆕 V7.8: 新增 LLM 语义建议字段，供 AgentFactory 参数映射时使用
     """
     task_type: TaskType                          # 任务类型
     complexity: Complexity                       # 复杂度等级
@@ -60,6 +61,14 @@ class IntentResult:
     confidence: float = 1.0                      # 置信度
     raw_response: Optional[str] = None           # LLM 原始响应（用于调试）
     
+    # ==================== V7.8 LLM 语义建议 ====================
+    # 这些字段由 IntentAnalyzer 输出，供 AgentFactory 参数映射时优先使用
+    # 相比硬规则，LLM 能更好地理解"虽然问题简短但需要深度分析"等边界情况
+    
+    suggested_planning_depth: Optional[str] = None  # 🆕 V7.8: none / minimal / full
+    requires_deep_reasoning: bool = False        # 🆕 V7.8: 是否需要深度推理（即使问题简短）
+    tool_usage_hint: Optional[str] = None        # 🆕 V7.8: single / sequential / parallel
+    
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {
@@ -72,6 +81,10 @@ class IntentResult:
             "needs_multi_agent": self.needs_multi_agent,
             "is_follow_up": self.is_follow_up,
             "keywords": self.keywords,
-            "confidence": self.confidence
+            "confidence": self.confidence,
+            # V7.8 LLM 语义建议
+            "suggested_planning_depth": self.suggested_planning_depth,
+            "requires_deep_reasoning": self.requires_deep_reasoning,
+            "tool_usage_hint": self.tool_usage_hint,
         }
 

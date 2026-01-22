@@ -580,9 +580,8 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
         
         # 🆕 V7.5: 发送 billing 信息（作为最后一个 message_delta，在 message_stop 之前）
         from models.usage import UsageResponse
-        usage_response = UsageResponse.from_usage_tracker(
+        usage_response = UsageResponse.from_tracker(
             tracker=self.usage_tracker,
-            model=self.model,
             latency=0  # Agent 内部不计算总延迟（由 ChatService 计算）
         )
         
@@ -765,7 +764,26 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
             logger.warning(f"⚠️ 写入失败总结失败: {e}")
     
     async def _select_tools(self, intent: "IntentResult", ctx):
-        """工具选择"""
+        """
+        工具选择 - 三级优先级策略
+        
+        优先级（互斥选择）：
+        1. Schema 配置（schema.tools）- 运营显式配置，最高优先级
+        2. Plan 推荐（plan.required_capabilities）- 任务规划推荐
+        3. Intent 推断（intent → task_type → capabilities）- 意图分析兜底
+        
+        V7.6 改进：
+        - ✅ Schema 工具有效性验证（过滤无效工具）
+        - ✅ 覆盖透明化日志（记录被忽略的 Plan/Intent 建议）
+        - ✅ 增强 Tracer 追踪（完整记录选择决策链路）
+        
+        Args:
+            intent: 意图分析结果
+            ctx: Agent 上下文
+            
+        Returns:
+            (tools_for_llm, selection): LLM 工具列表和选择结果
+        """
         if self._tracer:
             tool_stage = self._tracer.create_stage("tool_selection")
             tool_stage.start()
@@ -776,6 +794,13 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
         selection_source = "intent"
         use_skill_path = False
         invocation_strategy = None
+        
+        # 🆕 V7.6: 收集各层建议用于透明化日志
+        plan_capabilities = plan.get('required_capabilities', []) if plan else []
+        intent_capabilities = self.capability_registry.get_capabilities_for_task_type(
+            intent.task_type.value
+        ) if intent else []
+        overridden_sources = []  # 记录被覆盖的来源
         
         # V4.4: Skill 路径（仅当当前 LLM 支持 Skills）
         if plan and plan.get('recommended_skill'):
@@ -794,19 +819,54 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
             else:
                 logger.info("ℹ️ 当前模型不支持 Claude Skills，忽略推荐 Skill 路径")
         
-        # 确定所需能力
+        # 🆕 V7.7: 确定所需能力（Schema + Plan 合并策略，Intent 兜底）
+        # 改进：从互斥选择改为合并策略，避免 Schema 配置后 Plan 推荐被完全忽略
+        required_capabilities = []
+        selection_sources = []
+        
+        # 1. Schema 配置（最高优先级，直接使用）
         if self.schema.tools:
-            required_capabilities = self.schema.tools
-            if not use_skill_path:
-                selection_source = "schema"
-        elif plan and plan.get('required_capabilities'):
-            required_capabilities = plan['required_capabilities']
-            if not use_skill_path:
-                selection_source = "plan"
-        else:
-            required_capabilities = self.capability_registry.get_capabilities_for_task_type(
-                intent.task_type.value
-            )
+            valid_tools = []
+            invalid_tools = []
+            for tool_name in self.schema.tools:
+                if self.capability_registry.get(tool_name) or tool_name in self.tool_selector.NATIVE_TOOLS:
+                    valid_tools.append(tool_name)
+                else:
+                    invalid_tools.append(tool_name)
+            
+            if invalid_tools:
+                logger.warning(
+                    f"⚠️ Schema 配置了无效工具: {invalid_tools}，已自动过滤。"
+                    f"有效工具: {valid_tools}"
+                )
+            
+            required_capabilities.extend(valid_tools)
+            if valid_tools:
+                selection_sources.append("schema")
+        
+        # 2. Plan 推荐（补充，不覆盖已有的）
+        if plan and plan.get('required_capabilities'):
+            plan_caps = plan['required_capabilities']
+            added_from_plan = []
+            for cap in plan_caps:
+                if cap not in required_capabilities:
+                    required_capabilities.append(cap)
+                    added_from_plan.append(cap)
+            if added_from_plan:
+                selection_sources.append("plan")
+                logger.debug(f"📋 Plan 补充能力: {added_from_plan}")
+        
+        # 3. Intent 推断（兜底，仅当前面都为空时使用）
+        if not required_capabilities:
+            required_capabilities = intent_capabilities
+            if intent_capabilities:
+                selection_sources.append("intent")
+        
+        # 确定最终来源标识
+        if not use_skill_path:
+            selection_source = "+".join(selection_sources) if selection_sources else "intent"
+            if len(selection_sources) > 1:
+                logger.info(f"📋 工具选择合并策略: {selection_source}, 能力: {required_capabilities[:5]}")
 
         # 🆕 Skills 不可用时，尝试注入 fallback 工具
         if plan and plan.get('recommended_skill'):
@@ -861,18 +921,31 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
                 if mcp_tool["name"] not in selection.tool_names:
                     selection.tool_names.append(mcp_tool["name"])
         
-        logger.info(f"📋 选择工具: {selection.tool_names}")
+        # 🆕 V7.6: 增强的选择总结日志
+        logger.info(
+            f"✅ 工具选择完成 [{selection_source}]: "
+            f"共 {len(selection.tool_names)} 个工具 - {selection.tool_names}"
+        )
+        if overridden_sources:
+            logger.info(f"   └─ 覆盖了来源: {', '.join(overridden_sources)}")
         
+        # 🆕 V7.6: 增强的 Tracer 记录
         if self._tracer:
             tool_stage.set_input({
-                "required_capabilities": required_capabilities[:5] if required_capabilities else [],
+                "schema_tools": self.schema.tools if self.schema.tools else [],
+                "plan_capabilities": plan_capabilities[:5] if plan_capabilities else [],
+                "intent_capabilities": intent_capabilities[:5] if intent_capabilities else [],
                 "selection_source": selection_source,
                 "use_skill_path": use_skill_path
             })
             tool_stage.complete({
                 "tool_count": len(selection.tool_names),
-                "tools": selection.tool_names[:5],
-                "invocation_type": invocation_strategy.type.value if invocation_strategy else "skill"
+                "tools": selection.tool_names[:8],  # 显示更多工具
+                "base_tools": selection.base_tools,
+                "dynamic_tools": selection.dynamic_tools[:5],
+                "overridden_sources": overridden_sources,
+                "invocation_type": invocation_strategy.type.value if invocation_strategy else "skill",
+                "final_source": selection_source
             })
         
         return tools_for_llm, selection
