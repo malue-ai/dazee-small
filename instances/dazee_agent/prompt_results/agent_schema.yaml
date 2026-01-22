@@ -33,7 +33,6 @@ tool_selector:
   - tavily_search
   - exa_search
   - exa_contents
-  - web_search
   - pdf2markdown
   - mcp_dify_Ontology_TextToChart_zen0
   - ppt_create
@@ -74,32 +73,10 @@ output_formatter:
   json_ensure_ascii: false
   json_indent: 2
   include_metadata: true
-skills:
-- type: custom
-  skill_id: ppt_create
-  version: latest
-  required: false
-- type: custom
-  skill_id: text2document
-  version: latest
-  required: false
-- type: custom
-  skill_id: mcp_dify_Ontology_TextToChart_zen0
-  version: latest
-  required: false
-- type: custom
-  skill_id: pdf2markdown
-  version: latest
-  required: false
-- type: custom
-  skill_id: nano-banana-omni
-  version: latest
-  required: false
-tools:
-- tavily_search
-- exa_search
-- web_search
-- api_calling
+capabilities:
+- 信息检索
+- 深度搜索
+- API调用
 model: claude-sonnet-4-5-20250929
 max_turns: 20
 allow_parallel_tools: false

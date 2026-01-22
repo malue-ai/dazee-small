@@ -53,7 +53,7 @@ agent:
 #
 enabled_capabilities:
   # --- 信息获取类 ---
-  web_search: 1              # 互联网搜索
+  tavily_search: 1           # 通用网络搜索（Tavily API）
   exa_search: 0              # Exa 语义搜索（暂不启用）
   knowledge_search: 1        # 个人知识库检索
   
@@ -71,6 +71,9 @@ enabled_capabilities:
   
   # --- 文档解析类 ---
   document_partition: 1      # 🆕 文档解析工具（Partition API）
+  
+  # --- 文件发送类 ---
+  send_files: 1              # 🆕 文件发送工具（发送文件信息到前端）
 
 
 # ==================== MCP 工具声明 ====================

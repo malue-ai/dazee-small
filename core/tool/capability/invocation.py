@@ -68,11 +68,10 @@ class InvocationSelector:
     """
     
     # Claude Server 内置工具（无需客户端实现）
+    # 🆕 仅保留 code_execution 用于 Skills 功能
+    # web_search/web_fetch/memory 已移除，改用客户端工具
     SERVER_TOOLS = {
-        "web_search", "web_search_20250305",
-        "web_fetch",
-        "code_execution",
-        "memory"
+        "code_execution"
     }
     
     # 大参数阈值 (10KB)
@@ -306,7 +305,8 @@ class InvocationSelector:
         3. 添加 tool_search_tool
         """
         # 常用工具（不延迟加载）
-        frequent_tools = {"bash", "web_search", "plan_todo", "str_replace_based_edit_tool"}
+        # 🆕 web_search 已移除，改用 tavily_search
+        frequent_tools = {"bash", "tavily_search", "plan_todo", "str_replace_based_edit_tool"}
         
         configured_tools = []
         

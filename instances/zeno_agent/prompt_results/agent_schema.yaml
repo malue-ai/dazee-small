@@ -79,7 +79,6 @@ tools:
 - tavily_search
 - exa_search
 - exa_contents
-- web_search
 - e2b_sandbox
 - current_time
 - timezone_conversion

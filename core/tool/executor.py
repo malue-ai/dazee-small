@@ -54,10 +54,10 @@ class ToolExecutor:
     """
     
     # Claude Server-side 工具（由 Anthropic 服务器处理，不需要本地执行）
+    # 🆕 仅保留 code_execution 用于 Skills 功能
+    # web_search/memory 已移除，改用客户端工具（tavily_search, Mem0）
     CLAUDE_SERVER_TOOLS = {
-        "web_search",      # 搜索由 Anthropic 服务器执行
-        "code_execution",  # 代码执行在 Anthropic 沙箱中
-        "memory",          # 记忆由 Anthropic 管理
+        "code_execution",  # 代码执行在 Anthropic 沙箱中（Skills 需要）
     }
     
     # Claude Client-side 工具（需要本地执行！）

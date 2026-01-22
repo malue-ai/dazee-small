@@ -105,12 +105,11 @@ class ClaudeLLMService(BaseLLMService):
     """
     
     # Claude 原生工具的 API 格式映射
+    # 🆕 移除 web_search/web_fetch/memory，改用客户端工具
+    # 这样在切换模型时仍然可用
     NATIVE_TOOLS = {
-        # Server-side Tools
-        "web_search": {"type": "web_search_20250305", "name": "web_search"},
-        "web_fetch": {"type": "web_fetch", "name": "web_fetch"},
+        # Server-side Tools（仅保留 code_execution 用于 Skills）
         "code_execution": {"type": "code_execution", "name": "code_execution"},
-        "memory": {"type": "memory_20250818", "name": "memory"},
         "tool_search_bm25": {"type": "tool_search_tool_bm25_20251119", "name": "tool_search_tool"},
         "tool_search_regex": {"type": "tool_search_tool_regex_20251119", "name": "tool_search_tool"},
         
@@ -168,10 +167,6 @@ class ClaudeLLMService(BaseLLMService):
         self._tool_search_type = "bm25"
         self._code_execution_mode = False
         
-        # Memory Tool 配置
-        self._memory_enabled = False
-        self._memory_base_path = "./memory_storage"
-        
         # Context Editing 配置
         self._context_editing_enabled = False
         self._context_editing_config: Dict[str, Any] = {}
@@ -207,23 +202,6 @@ class ClaudeLLMService(BaseLLMService):
     # 功能开关
     # ============================================================
     
-    def enable_memory_tool(self, base_path: str = "./memory_storage") -> None:
-        """
-        启用 Memory Tool
-        
-        Args:
-            base_path: 记忆文件存储路径
-        """
-        self._memory_enabled = True
-        self._memory_base_path = base_path
-        self._add_beta("context-management-2025-06-27")
-    
-    def disable_memory_tool(self) -> None:
-        """禁用 Memory Tool"""
-        self._memory_enabled = False
-        if not self._context_editing_enabled:
-            self._remove_beta("context-management-2025-06-27")
-    
     def enable_context_editing(
         self,
         mode: str = "progressive",
@@ -250,8 +228,7 @@ class ClaudeLLMService(BaseLLMService):
         """禁用 Context Editing"""
         self._context_editing_enabled = False
         self._context_editing_config = {}
-        if not self._memory_enabled:
-            self._remove_beta("context-management-2025-06-27")
+        self._remove_beta("context-management-2025-06-27")
     
     def enable_tool_search(self, search_type: str = "bm25") -> None:
         """
@@ -478,7 +455,8 @@ class ClaudeLLMService(BaseLLMService):
             配置好的工具列表
         """
         if frequent_tools is None:
-            frequent_tools = ["bash", "web_search", "plan_todo"]
+            # 🆕 web_search 已移除，改用 tavily_search
+            frequent_tools = ["bash", "tavily_search", "plan_todo"]
         
         configured = []
         

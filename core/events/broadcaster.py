@@ -302,7 +302,26 @@ class EventBroadcaster:
             adapter=self._get_adapter()
         )
         
-        # 🆕 V7.6: tool_result 增强处理已移至 content_stop（因为 content_start 时 content 为空）
+        # 🆕 V7.7: tool_result 增强处理
+        # - 完整模式（content 有值）：在 content_start 时立即处理
+        # - 流式模式（content 为空）：在 content_stop 时处理
+        if content_block.get("type") == "tool_result":
+            initial_content = content_block.get("content", "")
+            tool_use_id = content_block.get("tool_use_id", "")
+            tool_name = self._tool_id_to_name.get(tool_use_id, "unknown")
+            logger.info(f"🔧 [tool_result] tool_use_id={tool_use_id}, tool_name={tool_name}, has_content={bool(initial_content)}, content_len={len(initial_content) if initial_content else 0}")
+            if initial_content:
+                # 完整模式：立即调用增强方法
+                tool_result_block = {
+                    "type": "tool_result",
+                    "tool_use_id": tool_use_id,
+                    "content": initial_content,
+                    "is_error": content_block.get("is_error", False)
+                }
+                logger.info(f"🔧 [tool_result] 完整模式，调用 enhance_tool_result: tool_name={tool_name}")
+                await self._emit_adapter_enhanced_deltas(session_id, tool_result_block)
+            else:
+                logger.info(f"🔧 [tool_result] 流式模式，等待 content_stop 处理")
         
         return result
     
@@ -320,11 +339,14 @@ class EventBroadcaster:
         """
         adapter = self._get_adapter()
         if not adapter:
+            logger.warning("🔧 [_emit_adapter_enhanced_deltas] adapter 为空，跳过增强")
             return
         
         tool_use_id = tool_result_block.get("tool_use_id", "")
         tool_name = self._tool_id_to_name.get(tool_use_id, "")
         tool_input = self._tool_id_to_input.get(tool_use_id, {})
+        
+        logger.info(f"🔧 [_emit_adapter_enhanced_deltas] tool_use_id={tool_use_id}, tool_name={tool_name}, adapter={adapter.name if hasattr(adapter, 'name') else type(adapter)}")
         
         # 调用 adapter 的增强方法
         deltas = adapter.enhance_tool_result(

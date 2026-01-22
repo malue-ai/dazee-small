@@ -14,46 +14,51 @@
 - 内容累积和持久化由 EventBroadcaster 自动处理
 """
 
+# 1. 标准库
 import asyncio
 import json
 import time
-from typing import Dict, Any, Optional, AsyncGenerator, List
 from datetime import datetime
+from typing import Any, AsyncGenerator, Dict, List, Optional
 from uuid import uuid4
+
 
 from logger import get_logger
 from core.agent import SimpleAgent
-from core.context import Context
-from core.output import OutputFormatter, create_output_formatter
-# 容错机制
-from infra.resilience import with_timeout, with_retry, get_circuit_breaker
-# 上下文压缩
-from core.context.compaction import QoSLevel, get_compaction_threshold, get_context_awareness_prompt
-# 🆕 V7: 路由模块（单智能体/多智能体路由决策）
-from core.routing import AgentRouter, RoutingDecision
-# 🆕 V7.6: 路由层 LLM（用于意图分析）
-from core.llm.claude_anthropic import create_claude_service
-# 🆕 V7: Token 审计（消耗记录、统计分析、异常检测）
-from core.monitoring import get_token_auditor, TokenAuditor
-from evaluation.models import TokenUsage
-# 🆕 V7.4: Usage 响应模型（计费信息）
-from models.usage import UsageResponse
-# ✅ V7.2: 多智能体模块
-from core.agent.multi.orchestrator import MultiAgentOrchestrator
 from core.agent.multi.models import MultiAgentConfig
-from services.session_service import SessionService, get_session_service, SessionNotFoundError
-from services.conversation_service import get_conversation_service, ConversationNotFoundError
-from services.agent_registry import get_agent_registry, AgentNotFoundError
-# 资源池架构
-from infra.pools import get_session_pool, get_agent_pool
-from infra.database import AsyncSessionLocal, crud
-from utils.background_tasks import TaskContext, get_background_task_service
-from utils.message_utils import (
-    normalize_message_format,
-    extract_text_from_message,
-    append_text_to_last_block,
+from core.agent.multi.orchestrator import MultiAgentOrchestrator
+from core.context import Context
+from core.context.compaction import (
+    QoSLevel,
+    get_compaction_threshold,
+    get_context_awareness_prompt,
 )
-from utils.file_processor import get_file_processor, FileCategory
+from core.output import OutputFormatter, create_output_formatter
+from core.llm.claude_anthropic import create_claude_service
+from core.routing import AgentRouter, RoutingDecision
+from core.monitoring import TokenAuditor, get_token_auditor
+from infra.database import AsyncSessionLocal, crud
+from infra.pools import get_agent_pool, get_session_pool
+from infra.resilience import get_circuit_breaker, with_retry, with_timeout
+from services.agent_registry import AgentNotFoundError, get_agent_registry
+from services.conversation_service import (
+    ConversationNotFoundError,
+    get_conversation_service,
+)
+from services.session_service import (
+    SessionNotFoundError,
+    SessionService,
+    get_session_service,
+)
+from evaluation.models import TokenUsage
+from models.usage import UsageResponse
+from utils.background_tasks import TaskContext, get_background_task_service
+from utils.file_processor import FileCategory, get_file_processor
+from utils.message_utils import (
+    append_text_to_last_block,
+    extract_text_from_message,
+    normalize_message_format,
+)
 
 logger = get_logger("chat_service")
 
@@ -588,11 +593,15 @@ class ChatService:
         background_tasks = background_tasks or []
         assistant_message_id = None  # 用于异常处理时更新状态
         
+        # 🆕 将 events 和 redis 提前初始化，确保 except 块可以访问
+        redis = self.session_service.redis
+        events = self.session_service.events
+        
+        # 🆕 提前设置 output_format，确保 error 事件也使用正确的格式
+        events.set_output_format(output_format, conversation_id)
+        
         try:
             logger.info(f"🚀 Agent 开始执行: session_id={session_id}")
-            
-            redis = self.session_service.redis
-            events = self.session_service.events
             
             # =================================================================
             # 阶段 1: 输入处理（处理所有用户输入）
@@ -792,10 +801,25 @@ class ChatService:
                     f"use_multi_agent={use_multi_agent}, "
                     f"intent={routing_intent.task_type.value if routing_intent else 'N/A'}"
                 )
+                
+                # 🔧 DEBUG: 打印完整的 intent 结果
+                if routing_intent:
+                    logger.info(
+                        f"🎯 Intent 详情: "
+                        f"intent_id={routing_intent.intent_id}, "
+                        f"intent_name={routing_intent.intent_name}, "
+                        f"task_type={routing_intent.task_type.value}, "
+                        f"complexity={routing_intent.complexity.value}, "
+                        f"needs_plan={routing_intent.needs_plan}, "
+                        f"confidence={routing_intent.confidence}"
+                    )
             
             # 🆕 设置 Agent 的输出格式（EventBroadcaster 会使用）
             if hasattr(agent, 'broadcaster') and agent.broadcaster:
                 agent.broadcaster.set_output_format(output_format, conversation_id)
+            
+            # 🔧 用于保存 assistant_text（在 message_stop 清理 accumulator 前获取）
+            _assistant_text_for_tasks = ""
             
             # 根据路由决策选择执行路径
             if use_multi_agent:
@@ -825,6 +849,14 @@ class ChatService:
                     # 多智能体事件类型：orchestrator_start, task_decomposition, 
                     # agent_start, agent_end, orchestrator_summary, orchestrator_end
                     await agent.broadcaster.emit_raw_event(session_id, event)
+                
+                # 🔧 在 message_stop 前保存 assistant_text（用于后台任务）
+                if background_tasks:
+                    accumulator = agent.broadcaster.get_accumulator(session_id)
+                    if accumulator:
+                        _assistant_text_for_tasks = extract_text_from_message(
+                            accumulator.build_for_db()
+                        )
                 
                 # 🆕 修复：多智能体分支结束后，需要触发 message_stop 和最终持久化
                 # 否则 assistant 占位会一直停在 processing，历史里看不到最终内容
@@ -864,6 +896,22 @@ class ChatService:
                     # 🎯 只处理需要额外逻辑的事件
                     event_type = event.get("type", "")
                     
+                    # 🔧 在收到 billing 事件时保存 assistant_text（在 message_stop 前）
+                    # 因为 emit_message_stop 会调用 _cleanup_session 清理 accumulator
+                    # 事件顺序：... → billing (message_delta/message.assistant.delta) → message_stop
+                    if event_type in ("message_delta", "message.assistant.delta") and background_tasks:
+                        delta = event.get("data", {}).get("delta", {})
+                        # 兼容 ZenO 格式（delta 直接在 event 中）
+                        if not delta:
+                            delta = event.get("delta", {})
+                        if delta.get("type") == "billing":
+                            accumulator = agent.broadcaster.get_accumulator(session_id)
+                            if accumulator:
+                                _assistant_text_for_tasks = extract_text_from_message(
+                                    accumulator.build_for_db()
+                                )
+                                logger.debug(f"🔧 已保存 assistant_text: {len(_assistant_text_for_tasks)} 字符")
+                    
                     if event_type == "conversation_delta":
                         # conversation 更新同步到数据库
                         await self._handle_conversation_delta(event, conversation_id)
@@ -873,6 +921,9 @@ class ChatService:
             # =================================================================
             
             duration_ms = int((time.time() - start_time) * 1000)
+            
+            # 🔧 使用事件循环中保存的 assistant_text（在 message_stop 清理 accumulator 前获取）
+            assistant_text = _assistant_text_for_tasks
             
             # 4.1 检查最终状态
             final_status = await redis.get_session_status(session_id)
@@ -889,16 +940,9 @@ class ChatService:
                 )
                 await self.session_service.end_session(session_id, status="completed")
                 
-                # 4.3 执行后台任务（如标题生成）
+                # 4.3 执行后台任务（如标题生成、推荐问题）
                 if background_tasks:
                     user_text = extract_text_from_message(message)
-                    
-                    assistant_text = ""
-                    accumulator = agent.broadcaster.get_accumulator(session_id)
-                    if accumulator:
-                        assistant_text = extract_text_from_message(
-                            accumulator.build_for_db()
-                        )
                     
                     task_context = TaskContext(
                         session_id=session_id,
@@ -906,7 +950,7 @@ class ChatService:
                         user_id=user_id,
                         message_id=assistant_message_id,
                         user_message=user_text,
-                        assistant_response=assistant_text,
+                        assistant_response=assistant_text,  # 使用提前获取的 assistant_text
                         is_new_conversation=is_new_conversation,
                         event_manager=events,
                         conversation_service=self.conversation_service
@@ -1011,26 +1055,30 @@ class ChatService:
                 error_type = "connection_error"
                 user_message = "网络连接失败，请检查网络"
             
-            # 🎯 发送详细的错误事件到前端
+            # 🎯 发送详细的错误事件到前端（使用正确的输出格式）
             try:
-                await self.session_service.events.system.emit_error(
+                await events.system.emit_error(
                     session_id=session_id,
                     error_type=error_type,
                     error_message=user_message,
                     details={
                         "error_class": type(e).__name__,
                         "duration_ms": duration_ms
-                    }
+                    },
+                    output_format=events.output_format,
+                    adapter=events.adapter
                 )
             except Exception as ex:
                 logger.warning(f"⚠️ 发送错误事件失败: {str(ex)}")
             
-            # 🎯 发送 session_end 事件
+            # 🎯 发送 session_end 事件（使用正确的输出格式）
             try:
-                await self.session_service.events.session.emit_session_end(
+                await events.session.emit_session_end(
                     session_id=session_id,
                     status="failed",
-                    duration_ms=duration_ms
+                    duration_ms=duration_ms,
+                    output_format=events.output_format,
+                    adapter=events.adapter
                 )
             except Exception as ex:
                 logger.warning(f"⚠️ 发送 session_end 失败: {str(ex)}")

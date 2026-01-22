@@ -126,7 +126,8 @@ class BackgroundTaskService:
     async def dispatch_tasks(
         self,
         task_names: List[str],
-        context: TaskContext
+        context: TaskContext,
+        wait: bool = True
     ) -> Dict[str, bool]:
         """
         统一后台任务调度入口 ⭐
@@ -136,12 +137,15 @@ class BackgroundTaskService:
         Args:
             task_names: 要执行的任务名列表，如 ["title_generation", "recommended_questions"]
             context: 任务上下文，包含所有任务可能需要的参数
+            wait: 是否等待任务完成（默认 True，确保 SSE 事件在流关闭前发送）
             
         Returns:
-            Dict[str, bool]: 各任务是否成功启动
+            Dict[str, bool]: 各任务是否成功执行/启动
         """
         results = {}
         registry = get_task_registry()
+        tasks = []
+        task_name_map = {}  # task -> task_name 映射
         
         for task_name in task_names:
             if task_name not in registry:
@@ -152,13 +156,31 @@ class BackgroundTaskService:
             task_func = registry[task_name]
             
             try:
-                # 启动后台任务（不等待完成）
-                asyncio.create_task(task_func(context, self))
-                results[task_name] = True
+                # 创建任务
+                task = asyncio.create_task(task_func(context, self))
+                tasks.append(task)
+                task_name_map[id(task)] = task_name
+                results[task_name] = True  # 先标记为启动成功
                 logger.info(f"🚀 后台任务已启动: {task_name}")
             except Exception as e:
                 logger.warning(f"⚠️ 启动后台任务失败: {task_name}, error={e}")
                 results[task_name] = False
+        
+        if wait and tasks:
+            # 等待所有任务完成（确保 SSE 事件在流关闭前发送）
+            logger.debug(f"⏳ 等待 {len(tasks)} 个后台任务完成...")
+            done, _ = await asyncio.wait(tasks, return_when=asyncio.ALL_COMPLETED)
+            
+            # 检查任务执行结果
+            for task in done:
+                task_name = task_name_map.get(id(task), "unknown")
+                if task.exception():
+                    logger.warning(f"⚠️ 后台任务执行失败: {task_name}, error={task.exception()}")
+                    results[task_name] = False
+                else:
+                    logger.debug(f"✅ 后台任务执行完成: {task_name}")
+            
+            logger.info(f"✅ 所有后台任务已完成")
         
         return results
     

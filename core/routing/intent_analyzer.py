@@ -245,13 +245,14 @@ class IntentAnalyzer:
             IntentResult
         """
         try:
-            # 截断消息，保留最近的
-            max_messages_for_intent = 30
+            # 🔧 V7.6.2: 只保留最近 3 轮对话（6 条消息），避免 LLM 进入对话模式
+            # 太长的历史会导致 LLM 忽略 system prompt 继续对话
+            max_messages_for_intent = 6  # 3 轮对话 = 6 条消息
             truncated_messages = messages[-max_messages_for_intent:] if len(messages) > max_messages_for_intent else messages
             
             if len(truncated_messages) < len(messages):
                 logger.info(
-                    f"📝 意图分析: 截断消息 {len(messages)} → {len(truncated_messages)} 条"
+                    f"📝 意图分析: 截断消息 {len(messages)} → {len(truncated_messages)} 条（最近3轮）"
                 )
             
             # 转换消息格式
@@ -280,11 +281,33 @@ class IntentAnalyzer:
                 intent_prompt = self._get_intent_prompt()
                 system_blocks = intent_prompt  # 字符串格式，由 ClaudeLLMService 处理
             
+            # 🔧 DEBUG: 打印意图识别的输入
+            logger.info(f"📤 [Intent LLM] 输入消息数: {len(llm_messages)}")
+            for i, msg in enumerate(llm_messages[-3:]):  # 只打印最后3条
+                content_preview = str(msg.content)[:200] if msg.content else ""
+                logger.info(f"📤 [Intent LLM] 消息[{i}] role={msg.role}: {content_preview}...")
+            
+            # 打印 system prompt 信息（包含内容预览）
+            if isinstance(system_blocks, str):
+                logger.info(f"📤 [Intent LLM] System Prompt 长度: {len(system_blocks)} 字符")
+                logger.info(f"📤 [Intent LLM] System Prompt 预览: {system_blocks[:500]}...")
+            elif isinstance(system_blocks, list) and system_blocks:
+                total_len = sum(len(b.get("text", "")) for b in system_blocks if isinstance(b, dict))
+                logger.info(f"📤 [Intent LLM] System Blocks 数量: {len(system_blocks)}, 总长度: {total_len} 字符")
+                if system_blocks and isinstance(system_blocks[0], dict):
+                    first_text = system_blocks[0].get("text", "")[:500]
+                    logger.info(f"📤 [Intent LLM] System Block[0] 预览: {first_text}...")
+            else:
+                logger.warning(f"⚠️ [Intent LLM] System Prompt 为空或无效: {type(system_blocks)}, 值: {system_blocks}")
+            
             # 调用 LLM
             response = await self.llm.create_message_async(
                 messages=llm_messages,
                 system=system_blocks
             )
+            
+            # 🔧 DEBUG: 打印 LLM 原始返回
+            logger.info(f"📥 [Intent LLM] 原始返回内容:\n{response.content}")
             
             # 解析响应
             last_user_text = self._extract_last_user_text(messages)
@@ -330,6 +353,7 @@ class IntentAnalyzer:
         # 🔧 DEBUG: 打印 LLM 原始响应和解析结果
         logger.info(f"📝 LLM 意图响应原文: {content[:500]}")
         logger.info(f"📝 JSON 解析结果: {parsed}")
+        logger.info(f"📝 parsed 类型: {type(parsed)}, 是否为 dict: {isinstance(parsed, dict)}")
         
         if parsed and isinstance(parsed, dict):
             # 🆕 V7.5: 优先解析 intent_id 和 intent_name
@@ -343,6 +367,10 @@ class IntentAnalyzer:
             if intent_id is not None:
                 task_type = self._map_intent_id_to_task_type(intent_id)
                 logger.info(f"📝 intent_id={intent_id} 映射到 task_type={task_type.value}")
+                # 🔧 V7.6.2: 如果 LLM 返回了 intent_id 但没返回 intent_name，根据 intent_id 生成
+                if intent_name is None:
+                    intent_name = self._get_intent_name_by_id(intent_id)
+                    logger.info(f"📝 intent_name 为空，根据 intent_id 生成: {intent_name}")
             else:
                 # 兼容旧格式：直接解析 task_type
                 task_type_str = parsed.get("task_type", "other")
@@ -399,6 +427,9 @@ class IntentAnalyzer:
             is_follow_up = parsed.get("is_follow_up", False)
         else:
             logger.warning(f"无法从 LLM 响应中提取 JSON: {content[:100]}...")
+            # 🔧 V7.6.2: JSON 解析失败时设置默认 intent_id/intent_name，避免返回 null
+            intent_id = 3              # 默认综合咨询
+            intent_name = "综合咨询"
         
         return IntentResult(
             task_type=task_type,
@@ -459,6 +490,28 @@ class IntentAnalyzer:
             TaskType.OTHER: (3, "综合咨询"),
         }
         return mapping.get(task_type, (3, "综合咨询"))
+    
+    def _get_intent_name_by_id(self, intent_id: int) -> str:
+        """
+        🆕 V7.6.2: 根据 intent_id 获取 intent_name
+        
+        当 LLM 返回了 intent_id 但没有返回 intent_name 时使用
+        
+        Args:
+            intent_id: 意图 ID
+            
+        Returns:
+            str: 意图名称
+        """
+        mapping = {
+            1: "系统搭建",
+            2: "BI智能问数",
+            3: "综合咨询",
+            4: "信息查询",
+            5: "内容生成",
+            6: "代码任务",
+        }
+        return mapping.get(intent_id, "综合咨询")
     
     def _infer_score_from_complexity(self, complexity: Complexity) -> float:
         """

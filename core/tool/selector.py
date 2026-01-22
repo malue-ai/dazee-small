@@ -80,8 +80,9 @@ class ToolSelector:
     
     # Claude 原生工具（直接使用字符串）
     # 注意：computer 和 memory 工具需要特殊 beta header，暂不包含在默认列表中
-    # 支持的原生工具：bash, text_editor, web_search
-    NATIVE_TOOLS = ["bash", "text_editor", "web_search"]
+    # 支持的原生工具：bash, text_editor
+    # 🆕 web_search 已移除，改用客户端工具（tavily_search, exa_search 等）
+    NATIVE_TOOLS = ["bash", "text_editor"]
     
     def __init__(
         self,
