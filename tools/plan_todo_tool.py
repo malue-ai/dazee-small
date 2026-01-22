@@ -46,6 +46,7 @@ Plan/Todo Tool - 任务规划工具（智能版本 + 持久化支持）
 
 from typing import Dict, Any, List, Optional
 from datetime import datetime
+import asyncio
 import json
 import logging
 import os
@@ -871,11 +872,17 @@ class PlanTodoTool:
         if matched_skills:
             logger.info(f"   推荐 Skills: {[s['name'] for s in matched_skills]}")
         
+        # LLM 调用超时配置（秒）
+        LLM_TIMEOUT = 30.0
+        
         try:
-            # 调用 Claude（启用 Extended Thinking）
-            response = await self._llm.create_message_async(
-                messages=[Message(role="user", content=prompt)],
-                system="你是一个专业的任务规划专家，擅长将复杂任务分解为可执行的步骤。"
+            # 调用 Claude（启用 Extended Thinking），添加超时保护
+            response = await asyncio.wait_for(
+                self._llm.create_message_async(
+                    messages=[Message(role="user", content=prompt)],
+                    system="你是一个专业的任务规划专家，擅长将复杂任务分解为可执行的步骤。"
+                ),
+                timeout=LLM_TIMEOUT
             )
             
             # 解析 JSON 响应
@@ -908,15 +915,27 @@ class PlanTodoTool:
                 "recommended_skill": recommended_skill,
                 "matched_skills": matched_skills  # 传递匹配的 Skills
             })
+        
+        except asyncio.TimeoutError:
+            logger.warning(f"⚠️ Plan LLM 调用超时 ({LLM_TIMEOUT}s)，使用轻量级规划")
+            # 超时降级：保留 matched_skills 信息，生成简单计划
+            return self._create_plan_from_data({
+                "goal": user_query,
+                "steps": [{"action": user_query, "capability": "task_planning", "purpose": "执行用户请求"}],
+                "user_query": user_query,
+                "matched_skills": matched_skills,  # 保留 Skill 匹配结果
+                "information_gaps": ["LLM 超时，未能生成详细计划"]
+            })
             
         except json.JSONDecodeError as e:
             logger.error(f"❌ JSON 解析失败: {e}")
             logger.error(f"   响应内容: {content[:200]}...")
-            # 降级：使用简单的默认计划
+            # 降级：使用简单的默认计划，保留 matched_skills
             return self._create_plan_from_data({
                 "goal": user_query,
                 "steps": [{"action": user_query, "capability": "task_planning"}],
-                "user_query": user_query
+                "user_query": user_query,
+                "matched_skills": matched_skills  # 保留 Skill 匹配结果
             })
         except Exception as e:
             logger.error(f"❌ Claude 调用失败: {e}", exc_info=True)

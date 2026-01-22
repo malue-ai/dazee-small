@@ -84,9 +84,8 @@ async def test_llm_with_usage():
     cost_estimate = usage_tracker.get_cost_estimate()
     
     # 6. 构建 UsageResponse
-    usage_response = UsageResponse.from_usage_tracker(
+    usage_response = UsageResponse.from_tracker(
         tracker=usage_tracker,
-        model=llm_service.config.model,
         latency=duration
     )
     

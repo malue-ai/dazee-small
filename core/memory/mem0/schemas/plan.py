@@ -125,18 +125,6 @@ class ActionItem:
     created_at: datetime = field(default_factory=datetime.now)
 
 
-# 保留旧的 Reminder 类以保持兼容性
-@dataclass
-class Reminder:
-    """提醒（兼容旧版本）"""
-    id: str
-    type: str  # deadline_approaching/blocker_followup/checkpoint/custom
-    trigger_time: datetime
-    message: str
-    status: str = "scheduled"  # scheduled/sent/cancelled
-    sent_at: Optional[datetime] = None
-
-
 @dataclass
 class WorkPlan:
     """
@@ -176,7 +164,7 @@ class WorkPlan:
     check_results: List[CheckResult] = field(default_factory=list)
     
     # Act - 行动
-    reminders: List[Reminder] = field(default_factory=list)
+    reminders: List[ReminderItem] = field(default_factory=list)
     actions_taken: List[dict] = field(default_factory=list)  # {action, timestamp, result}
     action_history: List[ActionItem] = field(default_factory=list)
     lessons_learned: List[str] = field(default_factory=list)

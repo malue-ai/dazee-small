@@ -221,9 +221,8 @@ class TestUsageResponse:
         }
         tracker.accumulate(mock_response)
         
-        usage = UsageResponse.from_usage_tracker(
+        usage = UsageResponse.from_tracker(
             tracker=tracker,
-            model="claude-sonnet-4.5",
             latency=8.117
         )
         
@@ -428,9 +427,8 @@ class TestIntegration:
             tracker.accumulate(mock_response)
         
         # 3. 生成 UsageResponse
-        usage = UsageResponse.from_usage_tracker(
+        usage = UsageResponse.from_tracker(
             tracker=tracker,
-            model="claude-sonnet-4.5",
             latency=15.5
         )
         

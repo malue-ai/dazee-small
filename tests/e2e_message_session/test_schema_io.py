@@ -27,7 +27,7 @@ config_path = Path(__file__).parent / "config.py"
 spec = importlib.util.spec_from_file_location("config", config_path)
 config = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(config)
-TestConfig = config.TestConfig
+DeploymentConfig = config.DeploymentConfig
 
 from logger import get_logger
 from infra.database.engine import AsyncSessionLocal

@@ -91,6 +91,3 @@ class DeploymentConfig:
 
 # 自动设置环境变量
 DeploymentConfig.setup_env()
-
-# 为了向后兼容，保留 TestConfig 别名
-TestConfig = DeploymentConfig

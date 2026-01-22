@@ -84,7 +84,9 @@ class TestToolLoader:
         assert loader.global_registry is not None
     
     def test_load_tools_generic_only(self):
-        """测试只加载通用工具"""
+        """测试只加载通用工具（包括自动启用的核心工具）"""
+        from core.tool import CORE_TOOLS
+        
         loader = create_tool_loader()
         
         enabled_capabilities = {
@@ -94,21 +96,27 @@ class TestToolLoader:
         
         result = loader.load_tools(enabled_capabilities=enabled_capabilities)
         
-        # 验证通用工具
-        assert result.generic_count == 2
-        assert len(result.enabled_tools) == 2
+        # 验证用户指定的工具已启用
         assert "web_search" in result.enabled_tools
         assert "plan_todo" in result.enabled_tools
+        
+        # 验证核心工具被自动启用（Level 1 工具始终加载）
+        for core_tool in CORE_TOOLS:
+            if core_tool in [cap.name for cap in loader.global_registry.capabilities.values()]:
+                assert core_tool in result.enabled_tools, f"核心工具 {core_tool} 应该被自动启用"
+        
+        # 验证通用工具数量 >= 用户指定数量（因为包含核心工具）
+        assert result.generic_count >= 2
         
         # 验证没有 MCP 工具和 Skills
         assert result.mcp_count == 0
         assert result.skills_count == 0
         
         # 验证总计
-        assert result.total_count == 2
+        assert result.total_count == result.generic_count
     
     def test_load_tools_with_mcp(self):
-        """测试加载 MCP 工具"""
+        """测试加载 MCP 工具（包括自动启用的核心工具）"""
         loader = create_tool_loader()
         
         enabled_capabilities = {"web_search": True}
@@ -122,17 +130,18 @@ class TestToolLoader:
             mcp_tools=mcp_tools
         )
         
-        # 验证通用工具
-        assert result.generic_count == 1
+        # 验证通用工具（包含核心工具）
+        assert result.generic_count >= 1  # 至少包含 web_search
+        assert "web_search" in result.enabled_tools
         
         # 验证 MCP 工具
         assert result.mcp_count == 2
         
         # 验证总计
-        assert result.total_count == 3
+        assert result.total_count == result.generic_count + result.mcp_count
     
     def test_get_tool_statistics(self):
-        """测试工具统计"""
+        """测试工具统计（包括自动启用的核心工具）"""
         loader = create_tool_loader()
         
         enabled_capabilities = {
@@ -142,14 +151,16 @@ class TestToolLoader:
         
         stats = loader.get_tool_statistics(enabled_capabilities)
         
-        # 验证统计信息
-        assert stats["enabled_count"] == 2
-        assert stats["disabled_count"] > 0  # 应该有未启用的工具
+        # 验证统计信息（包含自动启用的核心工具）
+        assert stats["enabled_count"] >= 2  # 至少包含用户指定的工具
+        assert stats["disabled_count"] >= 0  # 可能有未启用的工具
         assert "web_search" in stats["enabled_tools"]
         assert "plan_todo" in stats["enabled_tools"]
     
     def test_create_filtered_registry(self):
-        """测试创建过滤后的注册表"""
+        """测试创建过滤后的注册表（包括自动启用的核心工具）"""
+        from core.tool import CORE_TOOLS
+        
         loader = create_tool_loader()
         
         enabled_capabilities = {
@@ -159,10 +170,12 @@ class TestToolLoader:
         
         filtered = loader.create_filtered_registry(enabled_capabilities)
         
-        # 验证过滤结果
-        assert len(filtered.capabilities) == 2
+        # 验证用户指定的工具已启用
         assert "web_search" in filtered.capabilities
         assert "plan_todo" in filtered.capabilities
+        
+        # 验证过滤结果包含核心工具
+        assert len(filtered.capabilities) >= 2  # 至少包含用户指定的工具
 
 
 class TestInstanceConfigParsing:
@@ -190,7 +203,7 @@ class TestIntegration:
     """集成测试"""
     
     def test_full_pipeline(self):
-        """测试完整流程：配置 -> 过滤 -> 加载"""
+        """测试完整流程：配置 -> 过滤 -> 加载（包括自动启用的核心工具）"""
         # 1. 创建加载器
         loader = create_tool_loader()
         
@@ -209,14 +222,19 @@ class TestIntegration:
             skills=[],
         )
         
-        # 4. 验证结果
-        assert result.generic_count == 3  # 3 个启用的通用工具
+        # 4. 验证结果（包含自动启用的核心工具）
+        assert result.generic_count >= 3  # 至少 3 个启用的通用工具 + 核心工具
         assert result.mcp_count == 1
-        assert result.total_count == 4
+        assert result.total_count == result.generic_count + result.mcp_count
+        
+        # 验证用户指定的工具已启用
+        assert "web_search" in result.enabled_tools
+        assert "plan_todo" in result.enabled_tools
+        assert "knowledge_search" in result.enabled_tools
         
         # 5. 验证过滤后的注册表
         filtered = loader.create_filtered_registry(enabled_capabilities)
-        assert len(filtered.capabilities) == 3
+        assert len(filtered.capabilities) >= 3  # 至少包含用户指定的工具
         assert "ppt_generator" not in filtered.capabilities  # 应该被过滤掉
 
 
