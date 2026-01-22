@@ -341,12 +341,10 @@ class ChatService:
                 is_new_conversation = True
                 logger.info(f"✅ 新对话: {conversation_id}")
         else:
-            # 🆕 修复：校验 conversation_id 存在性和归属，不存在则自动创建
+            # 校验 conversation_id 存在性，不存在则自动创建（支持多用户访问同一对话）
             try:
                 conv = await self.conversation_service.get_conversation(conversation_id)
-                if conv.user_id != user_id:
-                    raise ValueError(f"对话 {conversation_id} 不属于用户 {user_id}")
-                logger.debug(f"✅ 对话校验通过: {conversation_id}")
+                logger.debug(f"✅ 对话存在: {conversation_id}")
             except ConversationNotFoundError:
                 # 对话不存在，自动创建新对话
                 logger.info(f"⚠️ 对话 {conversation_id} 不存在，自动创建新对话")

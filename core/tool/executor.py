@@ -263,12 +263,13 @@ class ToolExecutor:
         if not cap or cap.type != CapabilityType.TOOL:
             return {"success": False, "error": f"Tool {tool_name} not found"}
         
-        # 3. 系统工具
+        # 3. 系统工具：直接返回 tool_input 作为结果
+        # 这样 ZenO 适配器可以统一从 tool_result 中提取数据
         if cap.provider == "system":
             return {
                 "success": True,
-                "message": f"System tool {tool_name} is handled by Claude natively",
-                "handled_by": "claude"
+                "handled_by": "claude",
+                **tool_input  # 把 tool_input 中的字段合并到结果中
             }
         
         # 4. 用户自定义工具

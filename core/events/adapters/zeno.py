@@ -1082,7 +1082,7 @@ class ZenOAdapter(EventAdapter):
         """
         🆕 V7.7: 为 send_files 工具生成 files delta
         
-        send_files 返回格式：
+        send_files 返回格式（系统工具会直接返回 tool_input）：
         {
             "success": true,
             "files": [
@@ -1127,7 +1127,7 @@ class ZenOAdapter(EventAdapter):
         # 提取 files 字段
         files = result.get("files", [])
         if not files:
-            logger.debug("send_files 结果中没有 files 字段，跳过 files delta 生成")
+            logger.warning("⚠️ send_files 结果中没有 files 字段")
             return deltas
         
         # 构建 files delta 数据（直接使用 files 数组）
