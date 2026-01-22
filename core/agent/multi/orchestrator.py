@@ -1311,7 +1311,8 @@ class MultiAgentOrchestrator:
             logger.debug(f"📋 SubTask 指定工具: {dynamic_tools}")
         else:
             # 默认研究工具
-            dynamic_tools = ["web_search", "exa_search", "wikipedia"]
+            # 🆕 web_search 已移除，改用 tavily_search
+            dynamic_tools = ["tavily_search", "exa_search", "wikipedia"]
             logger.debug(f"📋 使用默认工具: {dynamic_tools}")
         
         # 合并所有需要的工具

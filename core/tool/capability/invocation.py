@@ -305,7 +305,8 @@ class InvocationSelector:
         3. 添加 tool_search_tool
         """
         # 常用工具（不延迟加载）
-        frequent_tools = {"bash", "web_search", "plan_todo", "str_replace_based_edit_tool"}
+        # 🆕 web_search 已移除，改用 tavily_search
+        frequent_tools = {"bash", "tavily_search", "plan_todo", "str_replace_based_edit_tool"}
         
         configured_tools = []
         

@@ -386,7 +386,7 @@ class SimpleAgent:
             "model": self.model,
             "enable_thinking": llm_enable_thinking,
             "enable_caching": llm_enable_caching,
-            "tools": [ToolType.BASH, ToolType.TEXT_EDITOR, ToolType.WEB_SEARCH],
+            "tools": [ToolType.BASH, ToolType.TEXT_EDITOR],  # 🆕 移除 WEB_SEARCH，改用客户端工具
         }
         
         # 🆕 V7: 仅当 Schema 明确配置时才传递 LLM 超参数
@@ -976,13 +976,29 @@ class SimpleAgent:
                                 yield tool_event
                         
                         # 从 ContentAccumulator 获取 tool_results（流式和非流式统一处理）
+                        # 🔒 V7.8: 添加去重检查，避免与消息历史中的 tool_result 重复
                         tool_results = []
                         if client_tools:
                             accumulator = self.broadcaster.get_accumulator(session_id)
                             if accumulator:
                                 client_tool_ids = {tc.get("id") for tc in client_tools}
+                                
+                                # 🆕 收集消息历史中已有的 tool_result IDs（用于去重）
+                                existing_tool_result_ids = set()
+                                for msg in llm_messages:
+                                    msg_content = msg.content if hasattr(msg, 'content') else msg.get('content', [])
+                                    if isinstance(msg_content, list):
+                                        for block in msg_content:
+                                            if isinstance(block, dict) and block.get("type") == "tool_result":
+                                                existing_tool_result_ids.add(block.get("tool_use_id"))
+                                
                                 for block in accumulator.all_blocks:
                                     if block.get("type") == "tool_result" and block.get("tool_use_id") in client_tool_ids:
+                                        tool_use_id = block.get("tool_use_id")
+                                        # 🔒 跳过已经在消息历史中的 tool_result
+                                        if tool_use_id in existing_tool_result_ids:
+                                            logger.debug(f"🧹 跳过重复的 tool_result: {tool_use_id}")
+                                            continue
                                         # 移除 index 字段（Claude API 不接受）
                                         clean_block = {k: v for k, v in block.items() if k != "index"}
                                         tool_results.append(clean_block)

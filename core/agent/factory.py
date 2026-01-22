@@ -690,7 +690,7 @@ class AgentPresets:
             name="ResearchAgent",
             description="深度研究助手，擅长搜索、分析和总结信息",
             skills=[],
-            tools=["web_search", "exa_search"],
+            tools=["tavily_search", "exa_search"],
             max_turns=20,
             plan_manager=PlanManagerConfig(
                 enabled=True,
@@ -715,7 +715,7 @@ class AgentPresets:
                 SkillConfig(skill_id="pptx", type="custom"),
                 SkillConfig(skill_id="pdf", type="custom"),
             ],
-            tools=["e2b_sandbox", "web_search"],
+            tools=["e2b_sandbox", "tavily_search"],
             max_turns=15,
             plan_manager=PlanManagerConfig(
                 enabled=True,

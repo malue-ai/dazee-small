@@ -14,7 +14,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from infra.database.base import Base
 
 if TYPE_CHECKING:
-    from infra.database.models.conversation import Conversation
     from infra.database.models.file import File
 
 
@@ -63,10 +62,6 @@ class User(Base):
     )
     
     # 关系
-    conversations: Mapped[list["Conversation"]] = relationship(
-        back_populates="user",
-        cascade="all, delete-orphan"
-    )
     files: Mapped[list["File"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan"

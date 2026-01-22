@@ -271,18 +271,19 @@ class ClaudeAdaptor(BaseAdaptor):
     @staticmethod
     def ensure_tool_pairs(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        确保 tool_use 和 tool_result 成对出现
+        确保 tool_use 和 tool_result 成对出现（同时去重）
         
         Claude API 要求：
         - 每个 tool_use 后面必须紧跟对应的 tool_result（在下一个 user 消息中）
         - 如果 tool_use 没有对应的 tool_result，需要移除
         - 如果 tool_result 没有对应的 tool_use，也需要移除
+        - 🆕 每个 tool_use_id 只能有一个 tool_result（去重）
         
         Args:
             messages: 消息列表
             
         Returns:
-            清理后的消息列表（只保留配对的 tool_use/tool_result）
+            清理后的消息列表（只保留配对且不重复的 tool_use/tool_result）
         """
         if not messages:
             return messages
@@ -315,7 +316,11 @@ class ClaudeAdaptor(BaseAdaptor):
         if unpaired_tool_result:
             logger.warning(f"⚠️ 发现 {len(unpaired_tool_result)} 个未配对的 tool_result，将移除: {unpaired_tool_result}")
         
-        # 3. 过滤消息，移除未配对的 tool_use 和 tool_result
+        # 3. 🆕 过滤消息，移除未配对的 tool_use 和 tool_result，同时去重
+        # 记录已添加的 tool_use 和 tool_result ID（用于去重）
+        added_tool_use_ids: set = set()
+        added_tool_result_ids: set = set()
+        
         cleaned_messages = []
         
         for msg in messages:
@@ -323,7 +328,7 @@ class ClaudeAdaptor(BaseAdaptor):
             role = msg.get("role", "user")
             
             if isinstance(content, list):
-                # 过滤未配对的块
+                # 过滤未配对的块 + 去重
                 filtered_content = []
                 for block in content:
                     if not isinstance(block, dict):
@@ -334,12 +339,22 @@ class ClaudeAdaptor(BaseAdaptor):
                     if block_type == "tool_use":
                         tool_id = block.get("id")
                         if tool_id in paired_ids:
+                            # 🆕 检查是否已添加过（去重）
+                            if tool_id in added_tool_use_ids:
+                                logger.warning(f"🧹 移除重复的 tool_use: {tool_id}")
+                                continue
+                            added_tool_use_ids.add(tool_id)
                             filtered_content.append(block)
                         else:
                             logger.debug(f"🧹 移除未配对的 tool_use: {tool_id}")
                     elif block_type == "tool_result":
                         tool_use_id = block.get("tool_use_id")
                         if tool_use_id in paired_ids:
+                            # 🆕 检查是否已添加过（去重）
+                            if tool_use_id in added_tool_result_ids:
+                                logger.warning(f"🧹 移除重复的 tool_result: {tool_use_id}")
+                                continue
+                            added_tool_result_ids.add(tool_use_id)
                             filtered_content.append(block)
                         else:
                             logger.debug(f"🧹 移除未配对的 tool_result: {tool_use_id}")
@@ -356,6 +371,12 @@ class ClaudeAdaptor(BaseAdaptor):
                 # 纯文本消息，直接保留
                 if content:
                     cleaned_messages.append(msg)
+        
+        # 🆕 统计去重信息
+        duplicate_tool_use = len(tool_use_ids) - len(added_tool_use_ids)
+        duplicate_tool_result = len(tool_result_ids) - len(added_tool_result_ids)
+        if duplicate_tool_use > 0 or duplicate_tool_result > 0:
+            logger.warning(f"🧹 去重: 移除 {duplicate_tool_use} 个重复 tool_use, {duplicate_tool_result} 个重复 tool_result")
         
         logger.info(f"✅ ensure_tool_pairs: {len(messages)} → {len(cleaned_messages)} 条消息")
         return cleaned_messages

@@ -140,6 +140,13 @@ class ZenOAdapter(EventAdapter):
         message_id = data.get("message_id") or self._current_message_id or f"msg_{session_id}"
         timestamp = int(time.time() * 1000)  # 毫秒时间戳
         
+        # 🆕 入口日志：记录收到的事件类型
+        logger.debug(
+            f"[transform] 收到事件: type={event_type}, "
+            f"session={session_id[:8] if session_id else 'N/A'}, "
+            f"current_block_type={self._current_block_type}"
+        )
+        
         # 更新 message_id 缓存
         if data.get("message_id"):
             self._current_message_id = data.get("message_id")
@@ -151,10 +158,26 @@ class ZenOAdapter(EventAdapter):
         # 处理 content_start：记录当前 block 类型
         if event_type == "content_start":
             content_block = data.get("content_block", {})
-            self._current_block_type = content_block.get("type")
+            block_type = content_block.get("type")
+            
+            # 🆕 详细日志：记录 content_block 的类型和结构
+            logger.debug(
+                f"[content_start] block_type={block_type}, "
+                f"content_block_keys={list(content_block.keys())}, "
+                f"index={data.get('index')}"
+            )
+            
+            self._current_block_type = block_type
             return None  # content_start 不需要转换为 ZenO 事件
         
         if event_type == "content_delta":
+            # 🆕 日志：记录当前 block 类型和 delta 预览
+            delta_preview = str(data.get("delta", ""))[:50]
+            logger.debug(
+                f"[content_delta] _current_block_type={self._current_block_type}, "
+                f"index={data.get('index')}, "
+                f"delta_preview={delta_preview}"
+            )
             return self._transform_content_delta(event, message_id, timestamp, session_id)
         
         if event_type == "message_delta":
@@ -228,6 +251,7 @@ class ZenOAdapter(EventAdapter):
             text = delta.get("text") or delta.get("thinking") or ""
         
         if not text:
+            logger.debug(f"[_transform_content_delta] delta 为空，跳过")
             return None
         
         # 🆕 使用 _current_block_type 判断 delta 类型
@@ -236,15 +260,19 @@ class ZenOAdapter(EventAdapter):
         
         if block_type == "thinking":
             zeno_delta_type = "thinking"
+            logger.debug(f"[_transform_content_delta] 思考内容: len={len(text)}")
         elif block_type == "text":
             zeno_delta_type = "response"
             # 累积内容（用于 done 事件）
             self._accumulated_content += text
+            logger.debug(f"[_transform_content_delta] 文本内容: len={len(text)}, accumulated_len={len(self._accumulated_content)}")
         elif block_type in ("tool_use", "server_tool_use"):
             # 工具参数增量不需要转换为 ZenO 事件
+            logger.debug(f"[_transform_content_delta] 工具参数增量，跳过转换: block_type={block_type}")
             return None
         else:
             # 未知类型，跳过
+            logger.warning(f"[_transform_content_delta] 未知 block_type: '{block_type}'，跳过转换")
             return None
         
         return {
@@ -299,12 +327,18 @@ class ZenOAdapter(EventAdapter):
         #     zeno_content = self._convert_hitl_to_clue(content)
         
         # 直接通过 message_delta 发送的类型
-        elif delta_type in ("intent", "billing"):
+        # 🆕 V7.7: 统一支持所有通过 enhance_tool_result 生成的 delta 类型
+        # 包括：intent, billing, progress, sql, data, chart, report, application, mind, interface, sandbox, files
+        elif delta_type in (
+            "intent", "billing", "progress",  # 基础类型
+            "sql", "data", "chart", "report", "application",  # 问数平台类型
+            "mind", "interface", "sandbox", "files",  # 系统搭建/流程图/沙箱/文件类型
+        ):
             zeno_delta_type = delta_type
-            # 格式已符合规范，直接透传
-            # 注意：sql/data/chart/report/application 等通过 enhance_tool_result 处理
+            # 格式已符合 ZenO 规范，直接透传
         
         if not zeno_delta_type:
+            logger.debug(f"[_transform_message_delta] 未知 delta_type: '{delta_type}'，跳过转换")
             return None
         
         return {
@@ -394,18 +428,17 @@ class ZenOAdapter(EventAdapter):
         event: Dict[str, Any],
         message_id: str,
         timestamp: int
-    ) -> Dict[str, Any]:
+    ) -> Optional[Dict[str, Any]]:
         """
-        转换 session_end → message.assistant.done
+        转换 session_end 事件
+        
+        🆕 修复：session_end 不再生成 message.assistant.done，
+        因为 message_stop 已经发送了 done 事件。
+        session_end 是会话级别的结束，不是消息级别的。
         """
-        return {
-            "type": "message.assistant.done",
-            "message_id": message_id,
-            "timestamp": timestamp,
-            "data": {
-                "content": self._accumulated_content
-            }
-        }
+        # session_end 不需要转换为 ZenO 事件，避免重复的 done
+        logger.debug(f"[session_end] 会话结束，不生成 done 事件（已由 message_stop 处理）")
+        return None
     
     def _convert_plan_to_progress(self, content: Any) -> str:
         """
@@ -809,8 +842,11 @@ class ZenOAdapter(EventAdapter):
         is_error = tool_result.get("is_error", False)
         result_content = tool_result.get("content", "")
         
+        logger.info(f"🔧 [enhance_tool_result] tool_name={tool_name}, is_error={is_error}, content_len={len(result_content) if result_content else 0}")
+        
         # 错误结果不增强
         if is_error:
+            logger.info(f"🔧 [enhance_tool_result] 错误结果，跳过增强")
             return []
         
         # api_calling 工具的特殊处理（通过 api_name 识别）
@@ -834,13 +870,22 @@ class ZenOAdapter(EventAdapter):
         
         # plan_todo 工具的特殊处理（直接转换为 progress 格式）
         if tool_name == "plan_todo":
-            logger.debug(f"🔧 处理 plan_todo 工具结果")
-            return self._generate_plan_progress_deltas(result_content)
+            logger.info(f"🔧 [enhance_tool_result] 识别到 plan_todo，生成 progress delta")
+            deltas = self._generate_plan_progress_deltas(result_content)
+            logger.info(f"🔧 [enhance_tool_result] plan_todo 生成了 {len(deltas)} 个 delta")
+            return deltas
         
         # 🆕 V7.6: sandbox_run_project 工具的特殊处理（提取 preview_url）
         if tool_name == "sandbox_run_project":
             logger.debug(f"🔧 处理 sandbox_run_project 工具结果")
             return self._generate_sandbox_deltas(result_content, tool_input)
+        
+        # 🆕 V7.7: send_files 工具的特殊处理（生成 files delta）
+        if tool_name == "send_files":
+            logger.info(f"🔧 [enhance_tool_result] 识别到 send_files，生成 files delta")
+            deltas = self._generate_files_deltas(result_content)
+            logger.info(f"🔧 [enhance_tool_result] send_files 生成了 {len(deltas)} 个 delta")
+            return deltas
         
         # 检查是否需要发送特殊 delta（简单工具）
         delta_type = TOOL_TO_DELTA_TYPE.get(tool_name)
@@ -1030,6 +1075,66 @@ class ZenOAdapter(EventAdapter):
         
         logger.info(f"🚀 生成 sandbox delta: preview_url={preview_url}, status={'success' if success else 'failed'}")
         deltas.append(self._create_delta("sandbox", sandbox_data))
+        
+        return deltas
+    
+    def _generate_files_deltas(self, result_content: str) -> List[Dict[str, Any]]:
+        """
+        🆕 V7.7: 为 send_files 工具生成 files delta
+        
+        send_files 返回格式：
+        {
+            "success": true,
+            "files": [
+                {
+                    "name": "报告.pptx",
+                    "type": "pptx",
+                    "url": "https://...",
+                    "upload_id": "file_xxx",
+                    "size": 1024000,        // 可选
+                    "thumbnail": "https://...",  // 可选
+                    "description": "AI技术分享"  // 可选
+                }
+            ]
+        }
+        
+        生成的 delta 类型：
+        - files: 文件列表，供前端渲染
+        
+        Args:
+            result_content: 工具返回的 JSON 字符串
+            
+        Returns:
+            delta 列表（包含一个 files 类型的 delta）
+        """
+        deltas = []
+        
+        # 解析结果
+        try:
+            if isinstance(result_content, str):
+                result = json.loads(result_content)
+            else:
+                result = result_content
+        except json.JSONDecodeError:
+            logger.warning(f"⚠️ send_files 结果解析失败: {str(result_content)[:100]}...")
+            return deltas
+        
+        # 检查是否成功
+        if not result.get("success", False):
+            logger.warning(f"⚠️ send_files 返回失败: {result.get('error')}")
+            return deltas
+        
+        # 提取 files 字段
+        files = result.get("files", [])
+        if not files:
+            logger.debug("send_files 结果中没有 files 字段，跳过 files delta 生成")
+            return deltas
+        
+        # 构建 files delta 数据（直接使用 files 数组）
+        files_data = {"files": files}
+        
+        logger.info(f"📁 生成 files delta: 包含 {len(files)} 个文件")
+        deltas.append(self._create_delta("files", files_data))
         
         return deltas
     

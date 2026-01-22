@@ -1177,6 +1177,75 @@ capabilities:
             default: incremental
     required:
     - operation
+# 🆕 V7.7: send_files 文件发送工具
+# 用于在回复中包含文件时，通过 SSE 事件返回结构化的文件数据
+- name: send_files
+  type: TOOL
+  subtype: CUSTOM
+  provider: system
+  invocation_hint: DIRECT
+  level: 1  # 核心工具，始终加载
+  cache_stable: false
+  implementation:
+    module: tools.send_files
+    class: SendFilesTool
+  capabilities:
+  - file_sharing
+  - response_enhancement
+  priority: 90
+  cost:
+    time: instant
+    money: free
+  constraints:
+    requires_api: false
+  metadata:
+    description: 发送文件信息到前端，用于展示可下载的文件列表。当工具调用返回了文件URL时使用此工具。
+    preferred_for:
+    - 返回文件下载链接
+    - 展示生成的文件
+    - 文件列表展示
+    keywords:
+    - 文件
+    - 下载
+    - file
+    - download
+  input_schema:
+    type: object
+    properties:
+      files:
+        type: array
+        description: 文件列表
+        items:
+          type: object
+          properties:
+            name:
+              type: string
+              description: 文件名（包含扩展名）
+            type:
+              type: string
+              description: 文件类型/扩展名（如 pptx, docx, xlsx, pdf, png）
+            url:
+              type: string
+              description: 文件下载链接（必须是真实可访问的URL）
+            upload_id:
+              type: string
+              description: 文件上传ID（如果没有可以生成一个唯一ID）
+            size:
+              type: integer
+              description: 文件大小（字节，可选）
+            thumbnail:
+              type: string
+              description: 文件预览缩略图URL（可选）
+            description:
+              type: string
+              description: 文件描述（可选）
+          required:
+          - name
+          - type
+          - url
+          - upload_id
+    required:
+    - files
 - name: code_execution
   type: CODE
   subtype: DYNAMIC

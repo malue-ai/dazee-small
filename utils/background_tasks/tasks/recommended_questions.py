@@ -83,13 +83,17 @@ async def _generate_recommended_questions(
         
         # 3. 通过 SSE 推送给前端
         if session_id and event_manager:
+            # 🆕 使用 event_manager 已配置的 output_format 和 adapter
+            # 确保 Zeno 格式时能正确转换
             await event_manager.message.emit_message_delta(
                 session_id=session_id,
                 message_id=message_id,
                 delta={
                     "type": "recommended",
                     "content": json.dumps({"questions": questions}, ensure_ascii=False)
-                }
+                },
+                output_format=getattr(event_manager, 'output_format', 'zenflux'),
+                adapter=getattr(event_manager, 'adapter', None)
             )
             logger.info(f"📤 推荐问题已推送到前端")
         
@@ -121,26 +125,39 @@ async def _generate_questions_with_llm(
         )
         
         if response and hasattr(response, 'content') and response.content:
-            for block in response.content:
-                if hasattr(block, 'text'):
-                    raw_text = block.text.strip()
-                    
-                    # 使用 JSON 提取器
-                    questions = extract_json_list(raw_text, key="questions")
-                    
-                    if questions:
-                        cleaned = []
-                        for q in questions[:3]:
-                            q = q.strip().strip('"\'「」『』')
-                            if len(q) > 30:
-                                q = q[:27] + "..."
-                            if q:
-                                cleaned.append(q)
-                        return cleaned
-                    
-                    # JSON 提取失败，回退到逐行解析
-                    logger.debug("JSON 提取失败，回退到逐行解析")
-                    return _parse_questions_fallback(raw_text)
+            content = response.content
+            
+            # 提取原始文本：支持字符串或 TextBlock 列表
+            raw_text = None
+            if isinstance(content, str):
+                # content 直接是字符串
+                raw_text = content.strip()
+            elif isinstance(content, list):
+                # content 是 TextBlock 列表
+                for block in content:
+                    if hasattr(block, 'text'):
+                        raw_text = block.text.strip()
+                        break
+            
+            if raw_text:
+                logger.debug(f"📝 LLM 原始返回: {raw_text[:300]}...")
+                
+                # 使用 JSON 提取器
+                questions = extract_json_list(raw_text, key="questions")
+                
+                if questions:
+                    cleaned = []
+                    for q in questions[:3]:
+                        q = q.strip().strip('"\'「」『』')
+                        if len(q) > 30:
+                            q = q[:27] + "..."
+                        if q:
+                            cleaned.append(q)
+                    return cleaned
+                
+                # JSON 提取失败，回退到逐行解析
+                logger.debug("JSON 提取失败，回退到逐行解析")
+                return _parse_questions_fallback(raw_text)
         
         return None
     

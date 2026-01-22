@@ -12,5 +12,7 @@
     "medium_prompt": "87754225ed3fd44069dd78b329022574",
     "complex_prompt": "57078ac2c9840723dbb7ef229afb3523"
   },
-  "manually_edited": []
+  "manually_edited": [
+    "agent_schema"
+  ]
 }

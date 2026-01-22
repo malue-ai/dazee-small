@@ -33,7 +33,6 @@ tool_selector:
   - tavily_search
   - exa_search
   - exa_contents
-  - web_search
   - pdf2markdown
   - mcp_dify_Ontology_TextToChart_zen0
   - ppt_create

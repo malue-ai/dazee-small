@@ -455,7 +455,8 @@ class ClaudeLLMService(BaseLLMService):
             配置好的工具列表
         """
         if frequent_tools is None:
-            frequent_tools = ["bash", "web_search", "plan_todo"]
+            # 🆕 web_search 已移除，改用 tavily_search
+            frequent_tools = ["bash", "tavily_search", "plan_todo"]
         
         configured = []
         

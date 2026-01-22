@@ -94,10 +94,13 @@ async def _generate_conversation_title(
         
         # 5. 通过 SSE 推送给前端
         if session_id and event_manager:
+            # 🆕 使用 event_manager 已配置的 output_format 和 adapter
             await event_manager.conversation.emit_conversation_delta(
                 session_id=session_id,
                 conversation_id=conversation_id,
-                delta={"title": title}
+                delta={"title": title},
+                output_format=getattr(event_manager, 'output_format', 'zenflux'),
+                adapter=getattr(event_manager, 'adapter', None)
             )
             logger.info(f"📤 标题更新事件已推送到前端: {title}")
         
