@@ -92,6 +92,9 @@ class ChatService:
         from core.agent.multi.models import MultiAgentConfig
         self.multi_agent_config = multi_agent_config  # 如果为 None，在需要时加载默认配置
         
+        # 🆕 V7.9: 多智能体原型（延迟初始化，用于 clone_for_session）
+        self._multi_agent_prototype: Optional["MultiAgentOrchestrator"] = None
+        
         # 其他服务
         self.conversation_service = get_conversation_service()  # 用于 Context 加载消息
         self.background_tasks = get_background_task_service()
@@ -136,6 +139,46 @@ class ChatService:
             self._router = AgentFactory.create_router(prompt_cache=prompt_cache)
             logger.debug("🔀 AgentRouter 已初始化（统一走 AgentFactory）")
         return self._router
+    
+    def _get_multi_agent_orchestrator(self, workspace_dir: str) -> "MultiAgentOrchestrator":
+        """
+        🆕 V7.9: 获取 MultiAgentOrchestrator 实例（原型 + 浅拷贝）
+        
+        优化流程：
+        1. 首次调用：创建原型（50-100ms）
+        2. 后续调用：浅拷贝（<10ms）
+        
+        Args:
+            workspace_dir: 工作目录（会话级）
+            
+        Returns:
+            MultiAgentOrchestrator 实例
+        """
+        # 延迟初始化原型
+        if self._multi_agent_prototype is None:
+            # 加载多智能体配置
+            if self.multi_agent_config is None:
+                from core.agent.multi.models import load_multi_agent_config
+                self.multi_agent_config = load_multi_agent_config()
+            
+            # 创建原型
+            self._multi_agent_prototype = MultiAgentOrchestrator(
+                config=self.multi_agent_config,
+                enable_checkpoints=True,
+                enable_lead_agent=True,
+            )
+            self._multi_agent_prototype._is_prototype = True
+            logger.info("🤖 MultiAgentOrchestrator 原型创建完成")
+        
+        # 浅拷贝
+        orchestrator = self._multi_agent_prototype.clone_for_session(
+            event_manager=None,  # 多智能体不需要外部 event_manager
+            workspace_dir=workspace_dir,
+            conversation_service=None,
+        )
+        
+        logger.debug(f"🚀 MultiAgentOrchestrator 浅拷贝完成: workspace_dir={workspace_dir}")
+        return orchestrator
     
     # ==================== 辅助方法 ====================
     
@@ -617,21 +660,11 @@ class ChatService:
                 # ✅ V7.2: 多智能体执行
                 logger.info(f"🚀 启用多智能体模式: session_id={session_id}")
                 
-                # 加载多智能体配置
-                if self.multi_agent_config is None:
-                    from core.agent.multi.models import load_multi_agent_config
-                    self.multi_agent_config = load_multi_agent_config()
-                
-                # 创建 MultiAgentOrchestrator
-                orchestrator = MultiAgentOrchestrator(
-                    config=self.multi_agent_config,
-                    enable_checkpoints=True,
-                    enable_lead_agent=True,
-                )
-                
                 # 设置工作目录（与 SimpleAgent 一致）
                 workspace_dir = str(self.session_service.workspace_manager.get_workspace_root(conversation_id))
-                orchestrator.workspace_dir = workspace_dir
+                
+                # 🆕 V7.9: 使用原型 + 浅拷贝（性能优化）
+                orchestrator = self._get_multi_agent_orchestrator(workspace_dir)
 
                 # 🆕 服务层存活探针（Lead/Critic）
                 if orchestrator.lead_agent and hasattr(orchestrator.lead_agent, "llm"):
@@ -848,9 +881,8 @@ class ChatService:
                 usage_stats = agent.usage_tracker.get_stats()
                 
                 # 🆕 使用 UsageResponse 统一模型
-                usage_response = UsageResponse.from_usage_tracker(
+                usage_response = UsageResponse.from_tracker(
                     tracker=agent.usage_tracker,
-                    model=self.default_model,
                     latency=duration_ms / 1000.0  # 毫秒转秒
                 )
                 

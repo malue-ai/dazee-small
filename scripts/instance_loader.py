@@ -788,12 +788,37 @@ async def create_agent_from_instance(
         
         # 注入 multi_agent 配置到合并后的 Schema
         if config.multi_agent_enabled:
-            from core.agent.multi.models import MultiAgentConfig
+            from core.agent.multi.models import MultiAgentConfig, ExecutionMode
+            import uuid
             
-            multi_agent_config = MultiAgentConfig.model_validate(config.raw_config.get("multi_agent", {}))
+            # V7.8: 从实例配置构建 MultiAgentConfig
+            # 实例配置只需 mode，其他使用框架默认值
+            raw_multi = config.raw_config.get("multi_agent", {})
+            mode_str = raw_multi.get("mode", "auto")
+            
+            # 解析执行模式
+            try:
+                mode = ExecutionMode(mode_str)
+            except ValueError:
+                # 如果是 "auto"/"enabled"/"disabled" 等实例配置值，映射到 ExecutionMode
+                mode_mapping = {
+                    "auto": ExecutionMode.PARALLEL,  # auto 模式使用 DAGScheduler
+                    "enabled": ExecutionMode.PARALLEL,
+                    "disabled": ExecutionMode.SEQUENTIAL,
+                }
+                mode = mode_mapping.get(mode_str, ExecutionMode.PARALLEL)
+            
+            multi_agent_config = MultiAgentConfig(
+                config_id=f"instance_{config.instance_name}_{uuid.uuid4().hex[:8]}",
+                name=f"{config.instance_name} Multi-Agent",
+                description=f"自动生成的多智能体配置 (mode={mode_str})",
+                mode=mode,
+                max_total_turns=raw_multi.get("max_total_turns", 30),
+                timeout_seconds=raw_multi.get("timeout_seconds", 3600),
+            )
             merged_schema.multi_agent = multi_agent_config
             
-            logger.info(f"✅ 注入 multi_agent 配置到 AgentSchema: mode={multi_agent_config.mode.value}")
+            logger.info(f"✅ 注入 multi_agent 配置到 AgentSchema: mode={mode.value}")
         
         # 更新 prompt_cache 中的 agent_schema（供后续使用）
         prompt_cache.agent_schema = merged_schema

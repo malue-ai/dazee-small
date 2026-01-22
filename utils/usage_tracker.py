@@ -33,12 +33,8 @@ Usage Tracker - Token 使用统计跟踪器
     stats = tracker.get_stats()
     
     # 生成 UsageResponse（包含调用明细）
-    from models.usage import UsageResponse
-    usage = UsageResponse.from_usage_tracker(
-        tracker=tracker,
-        model="claude-sonnet-4",
-        latency=2.0
-    )
+    from core.billing.models import UsageResponse
+    usage = UsageResponse.from_tracker(tracker, latency=2.0)
 """
 
 from core.billing.tracker import EnhancedUsageTracker, create_enhanced_usage_tracker

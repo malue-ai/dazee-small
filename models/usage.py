@@ -138,33 +138,6 @@ def get_model_pricing(model: str) -> Dict[str, float]:
     return CLAUDE_PRICING["default"]
 
 
-# ========== 便捷方法（向后兼容）==========
-
-def from_usage_tracker_helper(
-    tracker: 'UsageTracker',
-    model: str = "claude-sonnet-4",
-    latency: Optional[float] = None,
-) -> UsageResponse:
-    """
-    从 UsageTracker 创建 UsageResponse（便捷方法）
-    
-    内部调用 UsageResponse.from_tracker()，统一使用新版实现
-    
-    Args:
-        tracker: UsageTracker 实例
-        model: 模型名称（用于设置主模型，如果 tracker 为空）
-        latency: 总延迟（秒）
-        
-    Returns:
-        UsageResponse 实例
-    """
-    return UsageResponse.from_tracker(tracker, latency=latency or 0.0)
-
-
-# 添加到 UsageResponse 类的静态方法（向后兼容）
-UsageResponse.from_usage_tracker = staticmethod(from_usage_tracker_helper)
-
-
 class UsageSummary(BaseModel):
     """
     使用量摘要（用于统计页面）

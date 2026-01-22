@@ -196,7 +196,7 @@ class EnhancedUsageTracker:
         self._call_counter = 0
         logger.debug("🔄 UsageTracker 已重置")
     
-    # ========== 向后兼容方法（兼容旧版 UsageTracker 接口）==========
+    # ========== 便捷方法 ==========
     
     def accumulate(
         self, 
@@ -205,9 +205,8 @@ class EnhancedUsageTracker:
         purpose: str = "main_response"
     ) -> None:
         """
-        向后兼容：累积 LLM 响应的 usage 统计
+        累积 LLM 响应的 usage 统计
         
-        这是旧版 UsageTracker.accumulate() 的兼容接口。
         内部调用 record_call() 实现完整功能。
         
         Args:
@@ -235,7 +234,7 @@ class EnhancedUsageTracker:
     
     def accumulate_from_dict(self, usage_dict: dict, model: str = "claude-sonnet-4.5") -> None:
         """
-        向后兼容：从字典累积 usage
+        从字典累积 usage
         
         Args:
             usage_dict: usage 字典，包含 input_tokens, output_tokens 等
@@ -256,23 +255,23 @@ class EnhancedUsageTracker:
     
     def get_stats(self) -> dict:
         """
-        向后兼容：获取当前统计数据（与旧版 UsageTracker.get_stats() 格式兼容）
+        获取当前统计数据
         
         Returns:
-            统计字典（与旧版格式完全一致）
+            统计字典
         """
         return {
             "total_input_tokens": sum(c.input_tokens for c in self.calls),
             "total_output_tokens": sum(c.output_tokens for c in self.calls),
             "total_thinking_tokens": sum(c.thinking_tokens for c in self.calls),
             "total_cache_read_tokens": sum(c.cache_read_tokens for c in self.calls),
-            "total_cache_creation_tokens": sum(c.cache_write_tokens for c in self.calls),  # 注意：旧版用 creation
+            "total_cache_creation_tokens": sum(c.cache_write_tokens for c in self.calls),
             "llm_calls": len(self.calls)
         }
     
     def get_total_tokens(self) -> int:
         """
-        向后兼容：获取总 token 数
+        获取总 token 数
         
         Returns:
             总 token 数（input + output + thinking）
@@ -282,17 +281,9 @@ class EnhancedUsageTracker:
             for c in self.calls
         )
     
-    def get_cost_estimate(
-        self,
-        input_price_per_mtok: float = None,  # 忽略，使用实际定价
-        output_price_per_mtok: float = None,
-        cache_read_price_per_mtok: float = None,
-        cache_creation_price_per_mtok: float = None
-    ) -> float:
+    def get_cost_estimate(self) -> float:
         """
-        向后兼容：估算成本
-        
-        注意：此方法忽略传入的价格参数，使用实际的模型定价。
+        获取成本估算
         
         Returns:
             总成本（USD）
@@ -301,7 +292,7 @@ class EnhancedUsageTracker:
     
     def snapshot(self) -> dict:
         """
-        向后兼容：创建当前统计的快照
+        创建当前统计的快照
         
         Returns:
             包含统计和计算信息的字典
