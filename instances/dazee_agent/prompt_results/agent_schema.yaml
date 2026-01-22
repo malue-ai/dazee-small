@@ -71,4 +71,9 @@ context_limits:
   max_context_tokens: 200000
   warning_threshold: 0.8
   truncate_threshold: 0.9
+multi_agent: null
+temperature: null
+max_tokens: null
+enable_thinking: null
+enable_caching: null
 reasoning: 高质量默认配置：适应大多数场景，平衡能力和稳定性。作为 config.yaml 配置缺失时的兜底。

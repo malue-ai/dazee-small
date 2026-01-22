@@ -168,54 +168,29 @@ memory:
   # retention_policy: "user"
 
 
-# ==================== Multi-Agent 配置（V6.0）====================
+# ==================== Multi-Agent 配置（V7.8 极简版）====================
 #
-# 📌 用途：启用多智能体协作模式
+# 📌 设计原则：运营只需配置 mode，其他由框架智能处理
 #
-# 💡 适用场景：
+# 💡 何时启用多智能体？
 #   - 可并行化的复杂任务（重构 + CSS 优化 + 测试）
 #   - 多实体研究任务（分析 10 家公司）
 #   - 多维度分析任务
 #
-# 📁 Workers 配置目录：
-#   instances/{instance}/workers/
-#   ├── worker_registry.yaml  # Workers 注册表
-#   ├── refactor/prompt.md    # 重构专家提示词
-#   ├── css/prompt.md         # CSS 专家提示词
-#   └── test/prompt.md        # 测试专家提示词
+# 🤖 自动化能力：
+#   - LeadAgent 自动分解任务并分配 Worker
+#   - DAGScheduler 自动调度依赖和并行执行
+#   - Critic Agent 自动评估和触发重试/重规划
 #
 multi_agent:
-  # 🆕 V6.0 mode 选项（替代旧的 enabled 字段）：
-  #   - disabled: 禁用 Multi-Agent，始终使用 SimpleAgent（默认）
-  #   - auto: 自动判断（基于任务复杂度和关键词）
-  #   - enabled: 始终使用 Multi-Agent
+  # mode 选项：
+  #   - disabled: 禁用，始终使用单智能体（默认）
+  #   - auto: 自动判断（复杂度评分 > 7 时启用）
+  #   - enabled: 始终使用多智能体
   mode: "disabled"
   
-  # 最大并发 Worker 数量（控制资源使用）
-  max_parallel_workers: 5
-  
-  # 执行策略
-  #   - auto: 自动选择（根据任务依赖关系）
-  #   - parallel: 强制并行（适合无依赖任务）
-  #   - sequential: 强制串行（适合有依赖任务）
-  # execution_strategy: "auto"
-  
-  # 容错配置
-  # enable_checkpointing: true
-  # max_retries: 3
-  
-  # 超时配置
-  # task_timeout_seconds: 3600       # 总任务超时（秒）
-  # worker_timeout_seconds: 600      # 单 Worker 超时（秒）
-  
-  # 自动触发配置（mode=auto 时生效）
-  # auto_trigger_keywords:
-  #   - "研究"
-  #   - "分析"
-  #   - "对比"
-  #   - "调研"
-  #   - "报告"
-  # auto_trigger_min_complexity: "complex"
+  # 🔧 高级配置（通常无需修改，框架有合理默认值）
+  # max_parallel_workers: 5       # 最大并发 Worker 数（默认 5）
 
 
 # ==================== 工具能力配置 ====================
