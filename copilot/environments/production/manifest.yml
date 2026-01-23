@@ -1,0 +1,16 @@
+# The manifest for the "production" environment.
+# Read the full specification for the "Environment" type at:
+#  https://aws.github.io/copilot-cli/docs/manifest/environment/
+
+# Your environment name will be used in naming your resources like VPC, cluster, etc.
+name: production
+type: Environment
+
+# 注意：Production 环境已由 zen0-backend 创建
+# agent 服务复用现有的 production 环境基础设施（VPC、ECS Cluster 等）
+
+# Configure observability for your environment resources.
+observability:
+  # 生产环境启用容器洞察（Container Insights）
+  # 提供更详细的 ECS 任务级别监控指标
+  container_insights: true

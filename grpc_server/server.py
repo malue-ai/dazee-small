@@ -10,6 +10,9 @@ import asyncio
 from concurrent import futures
 from logger import get_logger
 
+# 导入认证拦截器
+from grpc_server.auth import AuthInterceptor
+
 # 导入生成的 protobuf 代码
 try:
     from grpc_server.generated import tool_service_pb2_grpc
@@ -61,9 +64,13 @@ class GRPCServer:
             
             logger.info("🚀 启动 gRPC 服务器...")
             
-            # 创建异步 gRPC 服务器
+            # 创建认证拦截器
+            interceptors = [AuthInterceptor()]
+            
+            # 创建异步 gRPC 服务器（带认证拦截器）
             self.server = grpc.aio.server(
-                futures.ThreadPoolExecutor(max_workers=self.max_workers)
+                futures.ThreadPoolExecutor(max_workers=self.max_workers),
+                interceptors=interceptors
             )
             
             # 注册所有服务
