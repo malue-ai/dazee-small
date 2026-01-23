@@ -167,6 +167,15 @@ class ZenOAdapter(EventAdapter):
                 f"index={data.get('index')}"
             )
             
+            # 🆕 新的 text 块开始时，如果已有累积内容，添加换行分隔符
+            # 这样多轮 text 内容（比如工具调用后的回复）之间会有清晰的分隔
+            if block_type == "text" and self._accumulated_content:
+                self._accumulated_content += "\n\n"
+                logger.debug(
+                    f"[content_start] 新 text 块，添加换行分隔符，"
+                    f"accumulated_len={len(self._accumulated_content)}"
+                )
+            
             self._current_block_type = block_type
             return None  # content_start 不需要转换为 ZenO 事件
         
@@ -310,6 +319,14 @@ class ZenOAdapter(EventAdapter):
         delta = data.get("delta") if "delta" in data else data
         delta_type = delta.get("type", "")
         content = delta.get("content", "")
+        
+        # 🔧 确保 content 是正确的格式（对象而非 JSON 字符串）
+        # 如果 content 是字符串且看起来像 JSON，尝试解析它
+        if isinstance(content, str) and content.startswith(("{", "[")):
+            try:
+                content = json.loads(content)
+            except json.JSONDecodeError:
+                pass  # 保持原字符串
         
         # 映射 delta 类型
         zeno_delta_type = None

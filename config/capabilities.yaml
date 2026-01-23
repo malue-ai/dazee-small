@@ -815,6 +815,7 @@ capabilities:
   type: TOOL
   subtype: CUSTOM
   provider: user
+  level: 1  # 🆕 设为核心工具，始终加载
   implementation:
     module: tools.slidespeak
     class: SlideSpeakTool

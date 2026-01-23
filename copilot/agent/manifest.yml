@@ -12,7 +12,7 @@ type: Load Balanced Web Service
 # 使用 location 指定 ECR 镜像地址（由部署脚本自动更新）
 # ============================================================
 image:
-  location: 308470327605.dkr.ecr.ap-southeast-1.amazonaws.com/zen0-backend/agent:20260122-210423
+  location: 308470327605.dkr.ecr.ap-southeast-1.amazonaws.com/zen0-backend/agent:20260123-105320
   port: 80  # Nginx 监听端口
 
 # ============================================================
@@ -147,10 +147,22 @@ environments:
     secrets:
       DATABASE_URL: /copilot/zen0-backend/staging/secrets/DATABASE_URL
       ANTHROPIC_API_KEY: /copilot/zen0-backend/staging/secrets/ANTHROPIC_API_KEY
+      OPENAI_API_KEY: /copilot/zen0-backend/staging/secrets/OPENAI_API_KEY
+      TAVILY_API_KEY: /copilot/zen0-backend/staging/secrets/TAVILY_API_KEY
+      EXA_API_KEY: /copilot/zen0-backend/staging/secrets/EXA_API_KEY
+      SLIDESPEAK_API_KEY: /copilot/zen0-backend/staging/secrets/SLIDESPEAK_API_KEY
       E2B_API_KEY: /copilot/zen0-backend/staging/secrets/E2B_API_KEY
       RAGIE_API_KEY: /copilot/zen0-backend/staging/secrets/RAGIE_API_KEY
       AWS_ACCESS_KEY_ID: /copilot/zen0-backend/staging/secrets/AWS_ACCESS_KEY_ID
       AWS_SECRET_ACCESS_KEY: /copilot/zen0-backend/staging/secrets/AWS_SECRET_ACCESS_KEY
-      TAVILY_API_KEY: /copilot/zen0-backend/staging/secrets/TAVILY_API_KEY
-      EXA_API_KEY: /copilot/zen0-backend/staging/secrets/EXA_API_KEY
-      SLIDESPEAK_API_KEY: /copilot/zen0-backend/staging/secrets/SLIDESPEAK_API_KEY
+      # 向量数据库
+      QDRANT_API_KEY: /copilot/zen0-backend/staging/secrets/QDRANT_API_KEY
+      TENCENT_VDB_API_KEY: /copilot/zen0-backend/staging/secrets/TENCENT_VDB_API_KEY
+      # 外部 API（Dify/Coze/问数）
+      DIFY_API_KEY: /copilot/zen0-backend/staging/secrets/DIFY_API_KEY
+      COZE_API_KEY: /copilot/zen0-backend/staging/secrets/COZE_API_KEY
+      WENSHU_API_KEY: /copilot/zen0-backend/staging/secrets/WENSHU_API_KEY
+      WENSHU_API_BASE_URL: /copilot/zen0-backend/staging/secrets/WENSHU_API_BASE_URL
+      # 文档解析
+      UNSTRUCTURED_API_KEY: /copilot/zen0-backend/staging/secrets/UNSTRUCTURED_API_KEY
+      UNSTRUCTURED_API_URL: /copilot/zen0-backend/staging/secrets/UNSTRUCTURED_API_URL

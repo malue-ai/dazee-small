@@ -171,7 +171,8 @@ class ChatServicer(_ChatServicerBase):
         """
         聊天接口（流式模式）
         
-        使用 ZenO 格式适配器，保持与 HTTP API 一致的事件格式
+        使用 output_format="zeno" 让 EventBroadcaster 在内部处理格式转换，
+        保持与 HTTP API 一致的事件格式（包括 progress、intent 等 delta 事件）
         
         注意：当 ChatService 启用 mock 模式时，会自动返回 mock 数据流
         """
@@ -195,15 +196,17 @@ class ChatServicer(_ChatServicerBase):
             
             # 转换变量
             variables = dict(request.variables) if request.variables else None
-            
-            # 初始化 ZenO 格式适配器
-            adapter = ZenOAdapter(conversation_id=request.conversation_id or None)
-            logger.info("📋 gRPC 流式聊天使用 ZenO 格式适配器")
+
             
             # 获取 agent_id（默认为 dazee_agent）
             agent_id = request.agent_id if request.agent_id else "dazee_agent"
             
-            # 调用业务服务（流式模式，mock 模式下会自动返回 mock 数据）
+            # 获取 agent_id（默认为 dazee_agent）
+            agent_id = request.agent_id if request.agent_id else "dazee_agent"
+            
+            # 调用业务服务（流式模式）
+            # 🔧 传递 output_format="zeno"，让 EventBroadcaster 在内部处理格式转换
+            # 这样 progress、intent 等 delta 事件会被正确转换为 ZenO 格式
             event_stream = await self.chat_service.chat(
                 message=request.message,
                 user_id=request.user_id,
@@ -213,12 +216,13 @@ class ChatServicer(_ChatServicerBase):
                 background_tasks=list(request.background_tasks) if request.background_tasks else None,
                 files=files_data,
                 variables=variables,
-                agent_id=agent_id
+                agent_id=agent_id,
+                output_format="zeno"  # 🆕 与 HTTP API 保持一致
             )
             
             async for event in event_stream:
-                # 使用 ZenO 适配器转换事件
-                transformed_event = adapter.transform(event)
+                # 事件已在内部转换为 ZenO 格式，直接使用
+                transformed_event = event
                 
                 if transformed_event is None:
                     continue
