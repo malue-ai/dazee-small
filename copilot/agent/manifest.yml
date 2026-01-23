@@ -12,7 +12,7 @@ type: Load Balanced Web Service
 # 使用 location 指定 ECR 镜像地址（由部署脚本自动更新）
 # ============================================================
 image:
-  location: 308470327605.dkr.ecr.ap-southeast-1.amazonaws.com/zen0-backend/agent:20260123-170942
+  location: 308470327605.dkr.ecr.ap-southeast-1.amazonaws.com/zen0-backend/agent:20260123-233911
   port: 80  # Nginx 监听端口
 
 # ============================================================
@@ -190,15 +190,15 @@ environments:
     # 禁用 HTTP/ALB（避免证书冲突）
     http: false
     
-    # NLB 健康检查改为 gRPC 端口
+    # NLB 健康检查（gRPC 端口，增加宽容度）
     nlb:
       port: 50051/tcp
       target_port: 50051
       healthcheck:
         port: 50051  # 通过 gRPC 端口做 TCP 健康检查
         healthy_threshold: 2
-        unhealthy_threshold: 2
-        interval: 10s
+        unhealthy_threshold: 5   # 允许 5 次失败再标记不健康
+        interval: 30s            # 30 秒检查一次，给 gRPC 更多启动时间
     
     # 网络配置
     network:
@@ -226,12 +226,14 @@ environments:
     # 从 SSM Parameter Store 获取敏感配置
     # 复用 zen0-backend production 的 secrets
     secrets:
-      # 数据库（PostgreSQL）- 使用 DB_DSN 组合格式
+      # 数据库（PostgreSQL）
+      DATABASE_URL: /copilot/zen0-backend/production/secrets/DATABASE_URL
       DB_DSN: /copilot/zen0-backend/production/secrets/DB_DSN
       
-      # MemoryDB for Redis（持久化存储）
+      # MemoryDB for Redis（持久化存储，需要 TLS + ACL 认证）
       REDIS_HOST: /copilot/zen0-backend/production/secrets/REDIS_HOST
       REDIS_PORT: /copilot/zen0-backend/production/secrets/REDIS_PORT
+      REDIS_USER: /copilot/zen0-backend/production/secrets/REDIS_USER
       REDIS_PASSWORD: /copilot/zen0-backend/production/secrets/REDIS_PASSWORD
       
       # AI 服务 API Keys

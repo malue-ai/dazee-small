@@ -151,8 +151,12 @@ class SessionService:
         
         流程：
         1. 设置 Redis 停止标志
-        2. chat_service 事件循环检测到标志后会发送 billing 事件
-        3. 发送 session_stopped 事件通知前端
+        2. chat_service 事件循环检测到标志后会：
+           - 发送 billing 事件（message_delta type=billing）
+           - 发送 session_stopped 事件
+        
+        注意：此方法只设置停止标志，不发送事件。
+        所有事件（billing、session_stopped）由 chat_service 统一发送，确保正确的事件顺序。
         
         Args:
             session_id: Session ID
@@ -168,27 +172,20 @@ class SessionService:
         if not status:
             raise SessionNotFoundError(f"Session 不存在或已过期: session_id={session_id}")
         
-        # 设置停止标志（chat_service 事件循环会检测并发送 billing 事件）
+        # 设置停止标志（chat_service 事件循环会检测并发送 billing 和 session_stopped 事件）
         await self.redis.set_stop_flag(session_id)
         
-        # 更新 Session 状态为 stopped
-        await self.redis.update_session_status(
-            session_id,
-            status="stopped",
-            last_heartbeat=datetime.now().isoformat()
-        )
+        # 注意：不在这里更新状态和发送事件
+        # chat_service 检测到停止标志后会：
+        # 1. 发送 billing 事件
+        # 2. 发送 session_stopped 事件
+        # 3. 调用 end_session() 更新状态
         
-        # 发送停止事件（通知前端）
-        await self.events.session.emit_session_stopped(
-            session_id=session_id,
-            reason="user_requested"
-        )
-        
-        logger.info(f"🛑 Session 已停止: session_id={session_id}")
+        logger.info(f"🛑 已设置停止标志: session_id={session_id}")
         
         return {
             "session_id": session_id,
-            "status": "stopped",
+            "status": "stopping",  # 标记为 stopping，实际 stopped 由 chat_service 设置
             "stopped_at": datetime.now().isoformat()
         }
     

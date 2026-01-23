@@ -261,7 +261,11 @@ class APICallingTool:
                 if mode == "async_poll" and poll_config:
                     logger.info(f"⏳ 开始轮询任务状态...")
                     response_data = await self._poll_for_result(
-                        session, response_data, poll_config, final_headers
+                        session=session,
+                        initial_response=response_data,
+                        poll_config=poll_config,
+                        headers=final_headers,
+                        request_body=body  # 🆕 传递 body 用于提取 workflow_id 等变量
                     )
                     
                     if response_data is None:
@@ -776,51 +780,160 @@ class APICallingTool:
             logger.error(f"❌ SSE 请求异常: {e}", exc_info=True)
             return {"error": str(e)}
     
+    def _get_nested_value(self, data: Dict[str, Any], field_path: str) -> Any:
+        """
+        从嵌套字典中获取值
+        
+        支持点分隔的路径，如 "data.execute_id" 或 "data.output"
+        
+        Args:
+            data: 数据字典
+            field_path: 字段路径，支持点分隔（如 "data.execute_id"）
+            
+        Returns:
+            字段值，未找到时返回 None
+        """
+        if not field_path or not data:
+            return None
+        
+        keys = field_path.split(".")
+        value = data
+        
+        for key in keys:
+            if isinstance(value, dict):
+                value = value.get(key)
+            else:
+                return None
+            
+            if value is None:
+                return None
+        
+        return value
+    
     async def _poll_for_result(
         self,
         session: aiohttp.ClientSession,
         initial_response: Dict[str, Any],
         poll_config: Dict[str, Any],
-        headers: Dict[str, str]
+        headers: Dict[str, str],
+        request_body: Optional[Dict[str, Any]] = None
     ) -> Optional[Dict[str, Any]]:
-        """轮询异步任务结果"""
-        # 提取任务 ID 或状态 URL
-        task_id_field = poll_config.get("status_url_field", "task_id")
-        task_id = initial_response.get(task_id_field)
+        """
+        轮询异步任务结果
         
-        if not task_id:
-            logger.warning(f"⚠️ 未找到任务 ID (字段: {task_id_field})")
+        支持多变量 URL 模板，变量来源：
+        1. 从 request_body 中提取（如 workflow_id）
+        2. 从 initial_response 中提取（如 execute_id）
+        
+        poll_config 配置项：
+        - status_url_template: URL 模板，支持多个变量，如 "{base_url}/workflows/{workflow_id}/run_histories/{execute_id}"
+        - execute_id_field: 响应中 execute_id 的字段路径，支持嵌套（如 "data.execute_id"），默认 "execute_id"
+        - body_vars: 需要从 request_body 提取的变量列表，如 ["workflow_id"]
+        - status_field: 轮询响应中状态的字段路径，如 "data.status"，默认 "status"
+        - result_field: 最终结果的字段路径，如 "data.output"，默认返回整个响应
+        - success_status: 成功状态值，默认 "Success"
+        - failed_status: 失败状态值，默认 "Fail"
+        
+        Args:
+            session: aiohttp 会话
+            initial_response: 初始请求的响应
+            poll_config: 轮询配置
+            headers: 请求头
+            request_body: 原始请求体（用于提取 workflow_id 等变量）
+            
+        Returns:
+            轮询成功时返回结果，失败或超时返回 None
+        """
+        request_body = request_body or {}
+        
+        # ===== 1. 构建 URL 模板变量 =====
+        url_vars: Dict[str, str] = {}
+        
+        # 1.1 从 request_body 提取变量（如 workflow_id）
+        body_vars = poll_config.get("body_vars", [])
+        for var_name in body_vars:
+            var_value = request_body.get(var_name)
+            if var_value:
+                url_vars[var_name] = str(var_value)
+                logger.debug(f"🔑 从 body 提取变量: {var_name}={var_value}")
+            else:
+                logger.warning(f"⚠️ body 中未找到变量: {var_name}")
+        
+        # 1.2 从 initial_response 提取 execute_id（支持嵌套路径）
+        execute_id_field = poll_config.get("execute_id_field", "execute_id")
+        execute_id = self._get_nested_value(initial_response, execute_id_field)
+        
+        # 兼容旧配置：也支持 status_url_field
+        if not execute_id:
+            legacy_field = poll_config.get("status_url_field", "task_id")
+            execute_id = self._get_nested_value(initial_response, legacy_field) or initial_response.get(legacy_field)
+        
+        if execute_id:
+            url_vars["execute_id"] = str(execute_id)
+            url_vars["task_id"] = str(execute_id)  # 兼容旧模板
+            logger.info(f"🔑 从响应提取 execute_id: {execute_id}")
+        else:
+            logger.warning(f"⚠️ 未找到 execute_id (字段: {execute_id_field})")
             return initial_response
         
-        # 构建状态查询 URL
+        # ===== 2. 构建轮询 URL =====
         status_url_template = poll_config.get("status_url_template", "")
-        status_url = status_url_template.format(task_id=task_id)
+        if not status_url_template:
+            logger.error("❌ poll_config 缺少 status_url_template")
+            return initial_response
         
-        # 轮询
-        success_status = poll_config.get("success_status", "SUCCESS")
-        failed_status = poll_config.get("failed_status", "FAILED")
+        try:
+            status_url = status_url_template.format(**url_vars)
+            logger.info(f"🔗 轮询 URL: {status_url}")
+        except KeyError as e:
+            logger.error(f"❌ URL 模板变量缺失: {e}，可用变量: {url_vars}")
+            return initial_response
         
+        # ===== 3. 轮询配置 =====
+        success_status = poll_config.get("success_status", "Success")
+        failed_status = poll_config.get("failed_status", "Fail")
+        status_field = poll_config.get("status_field", "status")
+        result_field = poll_config.get("result_field")  # 可选，为空则返回整个响应
+        
+        # ===== 4. 开始轮询 =====
         for i in range(self.max_polls):
             try:
                 async with session.get(
                     status_url,
                     headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=10)
+                    timeout=aiohttp.ClientTimeout(total=30)
                 ) as response:
                     if response.status == 200:
                         result = await response.json()
-                        status = result.get("task_status") or result.get("status")
+                        
+                        # 获取状态（支持嵌套路径）
+                        status = self._get_nested_value(result, status_field)
+                        # 兼容旧格式
+                        if status is None:
+                            status = result.get("task_status") or result.get("status")
+                        
+                        logger.debug(f"🔄 轮询状态: {status}")
                         
                         if status == success_status:
                             logger.info(f"✅ 任务完成!")
+                            # 提取结果（支持嵌套路径）
+                            if result_field:
+                                final_result = self._get_nested_value(result, result_field)
+                                return final_result if final_result is not None else result
+                            # 兼容旧格式
                             return result.get("task_result") or result.get("task_info") or result
+                        
                         elif status == failed_status:
-                            logger.error(f"❌ 任务失败")
-                            return None
+                            error_msg = self._get_nested_value(result, "data.error_message") or result.get("error_message", "未知错误")
+                            logger.error(f"❌ 任务失败: {error_msg}")
+                            return {"error": f"任务执行失败: {error_msg}", "raw_response": result}
                         
                         # 记录进度
                         if i % 10 == 0:
-                            logger.info(f"⏳ 处理中... ({i * self.poll_interval}秒)")
+                            logger.info(f"⏳ 处理中... ({i * self.poll_interval}秒), 状态: {status}")
+                    else:
+                        error_text = await response.text()
+                        logger.warning(f"⚠️ 轮询请求失败 (HTTP {response.status}): {error_text[:200]}")
                 
                 await asyncio.sleep(self.poll_interval)
             
@@ -829,4 +942,4 @@ class APICallingTool:
                 await asyncio.sleep(self.poll_interval)
         
         logger.error(f"❌ 轮询超时 ({self.max_polls * self.poll_interval} 秒)")
-        return None
+        return {"error": f"任务轮询超时（{self.max_polls * self.poll_interval}秒）"}

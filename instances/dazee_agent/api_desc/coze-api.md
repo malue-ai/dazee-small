@@ -17,8 +17,9 @@
 
 ## 接口
 
-### 执行 Ontology Builder 工作流（流式）
-- **路径**：`POST /workflow/stream_run`
+### 执行 Ontology Builder 工作流（异步轮询）
+- **路径**：`POST /workflow/run`
+- **模式**：`async_poll`（异步提交 + 自动轮询结果）
 - **请求体**：
 ```json
 {
@@ -27,7 +28,8 @@
     "chart_url": "https://xxx.com/xxx.txt",
     "query": "系统名称",
     "language": "中文"
-  }
+  },
+  "is_async": true
 }
 ```
 
@@ -39,6 +41,7 @@
 | `parameters.chart_url` | string | ✅ | **Mermaid 流程图文件的 URL 地址**（必须是可访问的 HTTP URL） |
 | `parameters.query` | string | ✅ | 系统名称或主题描述 |
 | `parameters.language` | string | ✅ | 输出语言，如 `"中文"` 或 `"English"` |
+| `is_async` | boolean | ✅ | 必须设置为 `true`，启用异步执行模式 |
 
 ⚠️ **注意**：
 - `chart_url` 必须是**真实的文件 URL**，不能是描述性文本
@@ -51,21 +54,43 @@
 ```
 api_calling(
   api_name="coze_api",
-  path="/workflow/stream_run",
+  path="/workflow/run",
   method="POST",
-  mode="stream",
+  mode="async_poll",
   body={
     "workflow_id": "7579565547005837331",
     "parameters": {
       "chart_url": "流程图文件的 URL",
       "query": "个人健康记录管理系统",
       "language": "中文"
-    }
+    },
+    "is_async": true
+  },
+  poll_config={
+    "execute_id_field": "execute_id",
+    "status_url_template": "https://api.coze.cn/v1/workflows/{workflow_id}/run_histories/{execute_id}",
+    "body_vars": ["workflow_id"],
+    "status_field": "data.status",
+    "result_field": "data.output",
+    "success_status": "Success",
+    "failed_status": "Fail"
   }
 )
 ```
 
 ⚠️ **调用时只需要以上参数，不要添加 `headers`、`url` 等参数，认证会自动处理。**
+
+### poll_config 说明
+
+| 参数 | 说明 |
+|------|------|
+| `execute_id_field` | 初始响应中 execute_id 的路径，Coze API 返回 `execute_id` 在根级别 |
+| `status_url_template` | 轮询 URL 模板，`{workflow_id}` 和 `{execute_id}` 会自动替换 |
+| `body_vars` | 需要从请求 body 提取的变量列表 |
+| `status_field` | 轮询响应中状态字段的路径 |
+| `result_field` | 最终结果字段的路径 |
+| `success_status` | 成功状态值 |
+| `failed_status` | 失败状态值 |
 
 ## 典型使用流程
 
@@ -75,5 +100,10 @@ api_calling(
 
 ## 返回格式
 
-SSE 流式返回，最终结果包含生成的系统配置信息。
+异步轮询模式会自动等待任务完成，最终返回 `data.output` 中的结果（系统配置信息）。
+
+### 执行流程
+1. 提交任务 → 返回 `execute_id`
+2. 自动轮询 `/workflows/{workflow_id}/run_histories/{execute_id}`
+3. 状态变为 `Success` 时返回结果
 

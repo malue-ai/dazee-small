@@ -70,7 +70,7 @@
 
 ---
 
-### 意图 2: BI智能问数 (bi_data_analysis)
+### 意图 2: 智能分析 (smart_analysis)
 
 **前置条件：用户必须已经有数据**
 
@@ -173,9 +173,9 @@
 | 单步操作 | false | 如简单翻译、单次工具调用 |
 | PPT生成 | true | 需要多步骤规划 |
 | 报告生成 | true | 需要调研、整理、生成 |
-| **意图2（BI智能问数）** | **false** | 直接调用 wenshu_api，无需规划 |
+| **意图2（智能分析）** | **false** | 需要调用 wenshu_api |
 | 意图3调研+分析 | true | 需要先搜索数据再分析 |
-| 系统搭建（意图1） | true | 需要需求梳理、流程图、配置（但有专属流程） |
+| 系统搭建（意图1） | true | 需要创建 Plan 进行需求梳理、流程图、配置 |
 | 调研任务 | true | 需要搜索、整合、分析 |
 | 追问（简单） | false | 直接基于记忆回答 |
 | 追问（复杂） | true | 需要重新生成或深度优化 |
@@ -195,7 +195,7 @@
 ```
 
 **字段说明**:
-- `intent_id`: 1=系统搭建, 2=BI智能问数, 3=综合咨询
+- `intent_id`: 1=系统搭建, 2=智能分析, 3=综合咨询
 - `intent_name`: 意图的中文名称
 - `complexity`: simple | medium | complex
 - `needs_plan`: 是否需要创建执行计划
@@ -231,12 +231,12 @@
 ```
 **判断依据**：只有一个实体（TODO项），不满足多实体条件
 
-### 示例 3: BI智能问数
+### 示例 3: 智能分析
 **用户输入**: "分析这个销售数据表，生成趋势图" + [上传CSV文件]
 ```json
 {
   "intent_id": 2,
-  "intent_name": "BI智能问数",
+  "intent_name": "智能分析",
   "complexity": "medium",
   "needs_plan": false,
   "routing": "api_calling (wenshu_api)"
@@ -287,7 +287,7 @@
 ```json
 {
   "intent_id": 2,
-  "intent_name": "BI智能问数",
+  "intent_name": "智能分析",
   "complexity": "medium",
   "needs_plan": false,
   "routing": "api_calling (wenshu_api)"
@@ -313,7 +313,7 @@
 ```json
 {
   "intent_id": 2,
-  "intent_name": "BI智能问数",
+  "intent_name": "智能分析",
   "complexity": "medium",
   "needs_plan": true,
   "routing": "新任务，非追问"

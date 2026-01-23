@@ -7,9 +7,8 @@ gRPC Chat 服务端实现
 
 import grpc
 import json
-import asyncio
 from datetime import datetime
-from typing import AsyncIterator, Any, Optional
+from typing import AsyncIterator, Any
 from logger import get_logger
 
 # 导入生成的 protobuf 代码
@@ -128,7 +127,7 @@ class ChatServicer(_ChatServicerBase):
             # 获取 agent_id（默认为 dazee_agent）
             agent_id = request.agent_id if request.agent_id else "dazee_agent"
             
-            # 调用业务服务（同步模式，mock 模式下会返回 mock 任务信息）
+            # 调用业务服务
             result = await self.chat_service.chat(
                 message=request.message,
                 user_id=request.user_id,
@@ -172,9 +171,7 @@ class ChatServicer(_ChatServicerBase):
         聊天接口（流式模式）
         
         使用 output_format="zeno" 让 EventBroadcaster 在内部处理格式转换，
-        保持与 HTTP API 一致的事件格式（包括 progress、intent 等 delta 事件）
-        
-        注意：当 ChatService 启用 mock 模式时，会自动返回 mock 数据流
+        保持与 HTTP API 一致的事件格式
         """
         try:
             logger.info(
@@ -196,17 +193,11 @@ class ChatServicer(_ChatServicerBase):
             
             # 转换变量
             variables = dict(request.variables) if request.variables else None
-
             
             # 获取 agent_id（默认为 dazee_agent）
             agent_id = request.agent_id if request.agent_id else "dazee_agent"
             
-            # 获取 agent_id（默认为 dazee_agent）
-            agent_id = request.agent_id if request.agent_id else "dazee_agent"
-            
-            # 调用业务服务（流式模式）
-            # 🔧 传递 output_format="zeno"，让 EventBroadcaster 在内部处理格式转换
-            # 这样 progress、intent 等 delta 事件会被正确转换为 ZenO 格式
+            # 调用业务服务（流式模式），与 HTTP API 保持一致
             event_stream = await self.chat_service.chat(
                 message=request.message,
                 user_id=request.user_id,
@@ -221,21 +212,13 @@ class ChatServicer(_ChatServicerBase):
             )
             
             async for event in event_stream:
-                # 事件已在内部转换为 ZenO 格式，直接使用
-                transformed_event = event
-                
-                if transformed_event is None:
+                if event is None:
                     continue
                 
-                grpc_event = tool_service_pb2.ChatEvent(
-                    event_type=transformed_event.get("type", "message"),
-                    data=json.dumps(transformed_event, ensure_ascii=False),
-                    timestamp=safe_int(transformed_event.get("timestamp", 0)),
-                    seq=safe_int(event.get("seq", 0)),
-                    event_uuid=str(event.get("event_uuid", ""))
+                # 直接返回原始 event JSON，与 HTTP API 完全一致
+                yield tool_service_pb2.ChatEvent(
+                    data=json.dumps(event, ensure_ascii=False)
                 )
-                
-                yield grpc_event
             
             logger.info("✅ gRPC 流式聊天完成")
         
@@ -244,10 +227,20 @@ class ChatServicer(_ChatServicerBase):
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"流式聊天失败: {str(e)}")
             
+            # 与 HTTP API 错误格式一致
+            error_event = {
+                "type": "message.assistant.error",
+                "message_id": request.message_id or "",
+                "timestamp": int(datetime.now().timestamp() * 1000),
+                "error": {
+                    "type": "unknown",
+                    "code": "INTERNAL_ERROR",
+                    "message": str(e),
+                    "retryable": False
+                }
+            }
             yield tool_service_pb2.ChatEvent(
-                event_type="error",
-                data=json.dumps({"error": str(e)}),
-                timestamp=0
+                data=json.dumps(error_event, ensure_ascii=False)
             )
     
     async def ReconnectStream(
@@ -283,19 +276,7 @@ class ChatServicer(_ChatServicerBase):
             adapter = ZenOAdapter(conversation_id=status_data.get("conversation_id"))
             logger.info("📋 gRPC 重连使用 ZenO 格式适配器")
             
-            # 发送重连信息
-            reconnect_info = tool_service_pb2.ChatEvent(
-                event_type="reconnect_info",
-                data=json.dumps({
-                    "session_id": request.session_id,
-                    "conversation_id": status_data.get("conversation_id"),
-                    "message_id": status_data.get("message_id"),
-                    "status": session_status,
-                    "last_event_seq": status_data.get("last_event_seq", 0)
-                }, ensure_ascii=False),
-                timestamp=0
-            )
-            yield reconnect_info
+
             
             # 获取历史事件
             history_events = await self.session_service.get_session_events(
@@ -307,18 +288,22 @@ class ChatServicer(_ChatServicerBase):
             if history_events:
                 logger.info(f"📤 推送 {len(history_events)} 个历史事件")
                 for event in history_events:
-                    transformed_event = adapter.transform(event)
-                    if transformed_event is None:
-                        continue
+                    # 🔧 与 HTTP API 一致：判断事件是否已经是 zeno 格式
+                    event_type = event.get("type", "")
+                    is_zeno_format = event_type.startswith("message.assistant.") or event_type == "reconnect_info"
                     
-                    grpc_event = tool_service_pb2.ChatEvent(
-                        event_type=transformed_event.get("type", "message"),
-                        data=json.dumps(transformed_event, ensure_ascii=False),
-                        timestamp=safe_int(transformed_event.get("timestamp", 0)),
-                        seq=safe_int(event.get("seq", 0)),
-                        event_uuid=str(event.get("event_uuid", ""))
+                    if is_zeno_format:
+                        # 已经是 zeno 格式，直接透传
+                        output_event = event
+                    else:
+                        # 需要转换
+                        output_event = adapter.transform(event)
+                        if output_event is None:
+                            continue
+                    
+                    yield tool_service_pb2.ChatEvent(
+                        data=json.dumps(output_event, ensure_ascii=False)
                     )
-                    yield grpc_event
             
             # 订阅实时事件
             redis = self.session_service.redis
@@ -333,20 +318,24 @@ class ChatServicer(_ChatServicerBase):
                 after_id=last_seq,
                 timeout=1800
             ):
-                transformed_event = adapter.transform(event)
-                if transformed_event is None:
-                    continue
+                # 🔧 与 HTTP API 一致：判断事件是否已经是 zeno 格式
+                event_type = event.get("type", "")
+                is_zeno_format = event_type.startswith("message.assistant.") or event_type == "reconnect_info"
                 
-                grpc_event = tool_service_pb2.ChatEvent(
-                    event_type=transformed_event.get("type", "message"),
-                    data=json.dumps(transformed_event, ensure_ascii=False),
-                    timestamp=safe_int(transformed_event.get("timestamp", 0)),
-                    seq=safe_int(event.get("seq", 0)),
-                    event_uuid=str(event.get("event_uuid", ""))
+                if is_zeno_format:
+                    output_event = event
+                else:
+                    output_event = adapter.transform(event)
+                    if output_event is None:
+                        continue
+                
+                yield tool_service_pb2.ChatEvent(
+                    data=json.dumps(output_event, ensure_ascii=False)
                 )
-                yield grpc_event
                 
-                if transformed_event.get("type") in ["message.assistant.done", "message.assistant.error"]:
+                # 🔧 与 HTTP API 一致的结束条件
+                output_type = output_event.get("type", "")
+                if output_type in ["session_end", "message_complete", "message.assistant.done"]:
                     break
             
             logger.info("✅ gRPC 重连流结束")
@@ -356,69 +345,18 @@ class ChatServicer(_ChatServicerBase):
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"重连失败: {str(e)}")
             
+            # 与 HTTP API 错误格式一致
+            error_event = {
+                "type": "message.assistant.error",
+                "message_id": "",
+                "timestamp": int(datetime.now().timestamp() * 1000),
+                "error": {
+                    "type": "unknown",
+                    "code": "INTERNAL_ERROR",
+                    "message": str(e),
+                    "retryable": False
+                }
+            }
             yield tool_service_pb2.ChatEvent(
-                event_type="error",
-                data=json.dumps({"error": str(e)}),
-                timestamp=0
+                data=json.dumps(error_event, ensure_ascii=False)
             )
-    
-    async def ChatMockStream(
-        self,
-        request: tool_service_pb2.ChatMockRequest,
-        context: grpc.aio.ServicerContext
-    ) -> AsyncIterator[tool_service_pb2.ChatEvent]:
-        """
-        Mock 流式接口（用于前端测试）
-        
-        返回预定义的 ZenO 格式事件流，无需调用真实 Agent
-        
-        Args:
-            request: Mock 请求，包含 scenario 和 delay_ms
-            context: gRPC 上下文
-            
-        Yields:
-            ChatEvent 事件流
-        """
-        try:
-            scenario = request.scenario or "analytics"
-            delay_ms = request.delay_ms if request.delay_ms > 0 else 50
-            
-            logger.info(f"📨 gRPC Mock 请求: scenario={scenario}, delay={delay_ms}ms")
-            
-            # 调用 chat_service 的 mock 方法
-            async for sse_line in self.chat_service.chat_mock(
-                scenario=scenario,
-                delay_ms=delay_ms
-            ):
-                # chat_mock 返回的是 "data: {...}\n\n" 格式，需要解析
-                if sse_line.startswith("data: "):
-                    json_str = sse_line[6:].strip()
-                    if json_str:
-                        try:
-                            event_data = json.loads(json_str)
-                            
-                            grpc_event = tool_service_pb2.ChatEvent(
-                                event_type=event_data.get("type", "message"),
-                                data=json_str,
-                                timestamp=safe_int(event_data.get("timestamp", 0)),
-                                seq=safe_int(event_data.get("seq", 0)),
-                                event_uuid=""
-                            )
-                            
-                            yield grpc_event
-                        except json.JSONDecodeError:
-                            continue
-            
-            logger.info("✅ gRPC Mock 流完成")
-        
-        except Exception as e:
-            logger.error(f"❌ gRPC Mock 错误: {str(e)}", exc_info=True)
-            context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(f"Mock 流失败: {str(e)}")
-            
-            yield tool_service_pb2.ChatEvent(
-                event_type="error",
-                data=json.dumps({"error": str(e)}),
-                timestamp=0
-            )
-

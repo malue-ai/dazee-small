@@ -939,8 +939,18 @@ class ChatService:
                         except Exception as e:
                             logger.error(f"❌ 中止时发送 billing 事件失败: {str(e)}", exc_info=True)
                         
-                        # 4. finalize 消息并结束 session
+                        # 4. finalize 消息
                         await agent.broadcaster.finalize_message(session_id)
+                        
+                        # 5. 发送 session_stopped 事件（在 billing 之后）
+                        await events.session.emit_session_stopped(
+                            session_id=session_id,
+                            reason="user_requested",
+                            output_format=events.output_format,
+                            adapter=events.adapter
+                        )
+                        
+                        # 6. 结束 session
                         await self.session_service.end_session(session_id, status="stopped")
                         break
                     

@@ -290,29 +290,15 @@ cleanup_failed_resources() {
 setup_env_variables() {
     log_step "配置环境变量"
     
-    # 使用临时文件合并所有 .env
+    # 使用临时文件存储 .env
     local merged_env=$(mktemp)
-    local total_files=0
     
-    # 1. 读取项目根目录 .env（基础配置）
-    if [ -f ".env" ]; then
-        log_info "📄 项目级 .env"
-        _load_env_file ".env" "$merged_env"
-        ((total_files++))
-    else
-        log_warning "⚠️ 项目级 .env 不存在"
-    fi
-    
-    # 2. 读取 production 专用 .env（如果存在）
+    # 只读取 .env.production（Production 环境专用配置）
     if [ -f ".env.production" ]; then
         log_info "📄 Production 专用 .env.production"
         _load_env_file ".env.production" "$merged_env"
-        ((total_files++))
-    fi
-    
-    # 检查是否有 .env 文件
-    if [ $total_files -eq 0 ]; then
-        log_warning "未找到 .env 文件，跳过环境变量上传"
+    else
+        log_warning "⚠️ .env.production 不存在，跳过环境变量上传"
         rm -f "$merged_env"
         return 0
     fi

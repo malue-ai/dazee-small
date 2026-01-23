@@ -71,19 +71,19 @@ class AuthInterceptor(grpc.aio.ServerInterceptor):
         Args:
             continuation: 继续执行的函数
             handler_call_details: 包含请求元数据的详情对象
+                - method: 请求的方法名
+                - invocation_metadata: 请求元数据（不包含 peer，peer 需要从 context 获取）
         
         Returns:
             继续处理请求
         """
         
         method = handler_call_details.method
-        peer = handler_call_details.peer
         
-        # 记录所有请求用于审计
-        if is_internal_ip(peer):
-            logger.info(f"[gRPC 请求] 内网 - 方法: {method}, 客户端: {peer}")
-        else:
-            logger.info(f"[gRPC 请求] 公网 - 方法: {method}, 客户端: {peer}")
+        # 注意：handler_call_details 没有 peer 属性
+        # peer 地址需要在 RPC handler 中通过 context.peer() 获取
+        # 这里只记录方法名
+        logger.debug(f"[gRPC 请求] 方法: {method}")
         
         # 直接通过，无需认证
         return await continuation(handler_call_details)
