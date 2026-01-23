@@ -106,13 +106,15 @@ show_help() {
 
 环境:
   staging                         测试环境
+  production                      生产环境
 
 操作:
   deploy                          部署服务
   status                          查看状态
   logs                            查看日志
-  start                           启动环境
-  stop                            停止环境
+  start                           启动环境 (仅 staging)
+  stop                            停止环境 (仅 staging)
+  rollback                        回滚版本 (仅 production)
   clean                           清理资源
   exec                            进入容器
 
@@ -137,6 +139,8 @@ show_help() {
   ./deploy.sh staging deploy --notify      # 部署并发送通知
   ./deploy.sh staging status               # 查看 staging 状态
   ./deploy.sh staging logs                 # 查看日志
+  ./deploy.sh production deploy            # 部署 production
+  ./deploy.sh production status            # 查看 production 状态
   ./deploy.sh config                       # 配置 Webhook
 
 EOF
@@ -294,7 +298,7 @@ get_service_info() {
     # 根据环境设置服务 URL
     case "$env" in
         staging) service_url="https://agent.malue.ai" ;;
-        production) service_url="https://agent.dazee.ai" ;;
+        production) service_url="内网服务 (agent.production.zen0-backend.local:50051)" ;;
     esac
     
     # 获取 Git 信息
@@ -590,15 +594,17 @@ show_env_menu() {
     echo -e "${BOLD}请选择环境:${NC}"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "  1) Staging     (测试环境)"
+    echo "  2) Production  (生产环境)"
     echo ""
     echo "  c) 配置管理"
     echo "  0) 退出"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
-    read -p "请选择 [0-1/c]: " choice
+    read -p "请选择 [0-2/c]: " choice
     
     case $choice in
         1) SELECTED_ENV="staging" ;;
+        2) SELECTED_ENV="production" ;;
         c|C) manage_config; return 1 ;;
         0) echo ""; log_info "再见！"; exit 0 ;;
         *) log_error "无效选择"; return 1 ;;
@@ -618,27 +624,52 @@ show_action_menu() {
     echo "  1) deploy    - 部署服务"
     echo "  2) status    - 查看状态"
     echo "  3) logs      - 查看日志"
-    echo "  4) start     - 启动环境"
-    echo "  5) stop      - 停止环境"
-    echo "  6) exec      - 进入容器"
-    echo "  7) clean     - 清理资源"
-    echo ""
-    echo "  0) 返回上级"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo ""
-    read -p "请选择 [0-7]: " choice
     
-    case $choice in
-        1) SELECTED_ACTION="deploy" ;;
-        2) SELECTED_ACTION="status" ;;
-        3) SELECTED_ACTION="logs" ;;
-        4) SELECTED_ACTION="start" ;;
-        5) SELECTED_ACTION="stop" ;;
-        6) SELECTED_ACTION="exec" ;;
-        7) SELECTED_ACTION="clean" ;;
-        0) return 1 ;;
-        *) log_error "无效选择"; return 1 ;;
-    esac
+    # Production 环境不支持 start/stop，支持 rollback
+    if [ "$env" = "production" ]; then
+        echo "  4) rollback  - 回滚版本"
+        echo "  5) exec      - 进入容器"
+        echo "  6) clean     - 清理资源"
+        echo ""
+        echo "  0) 返回上级"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        read -p "请选择 [0-6]: " choice
+        
+        case $choice in
+            1) SELECTED_ACTION="deploy" ;;
+            2) SELECTED_ACTION="status" ;;
+            3) SELECTED_ACTION="logs" ;;
+            4) SELECTED_ACTION="rollback" ;;
+            5) SELECTED_ACTION="exec" ;;
+            6) SELECTED_ACTION="clean" ;;
+            0) return 1 ;;
+            *) log_error "无效选择"; return 1 ;;
+        esac
+    else
+        # Staging 环境支持 start/stop
+        echo "  4) start     - 启动环境"
+        echo "  5) stop      - 停止环境"
+        echo "  6) exec      - 进入容器"
+        echo "  7) clean     - 清理资源"
+        echo ""
+        echo "  0) 返回上级"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        read -p "请选择 [0-7]: " choice
+        
+        case $choice in
+            1) SELECTED_ACTION="deploy" ;;
+            2) SELECTED_ACTION="status" ;;
+            3) SELECTED_ACTION="logs" ;;
+            4) SELECTED_ACTION="start" ;;
+            5) SELECTED_ACTION="stop" ;;
+            6) SELECTED_ACTION="exec" ;;
+            7) SELECTED_ACTION="clean" ;;
+            0) return 1 ;;
+            *) log_error "无效选择"; return 1 ;;
+        esac
+    fi
     
     return 0
 }
@@ -708,10 +739,9 @@ execute_action() {
     else
         log_error "操作失败 (退出码: $exit_code)"
         
-        # 失败时自动发送通知（如果配置了 Webhook）
-        if [ -n "$WECHAT_WEBHOOK_URL" ] && [ "$FORCE_NOTIFY" != "no" ]; then
-            send_wechat_notify "$env" "$action" "error" "$duration" "操作失败，退出码: $exit_code"
-        fi
+        # 部署错误时不发送企微通知，避免打扰团队
+        # 用户可通过查看日志了解详细信息
+        log_info "部署失败，跳过企微通知。请查看上方错误信息进行排查。"
     fi
     
     return $exit_code
@@ -774,11 +804,11 @@ main() {
                 manage_config "$@"
                 exit 0
                 ;;
-            staging)
+            staging|production)
                 env=$1
                 shift
                 ;;
-            deploy|status|logs|start|stop|clean|exec)
+            deploy|status|logs|start|stop|clean|exec|rollback)
                 action=$1
                 shift
                 ;;
@@ -792,13 +822,13 @@ main() {
     # 验证参数
     if [ -z "$env" ]; then
         log_error "未指定环境"
-        echo "用法: ./deploy.sh <staging> <操作>"
+        echo "用法: ./deploy.sh <staging|production> <操作>"
         exit 1
     fi
     
     if [ -z "$action" ]; then
         log_error "未指定操作"
-        echo "用法: ./deploy.sh $env <deploy|status|logs|start|stop|clean|exec>"
+        echo "用法: ./deploy.sh $env <deploy|status|logs|start|stop|clean|exec|rollback>"
         exit 1
     fi
     

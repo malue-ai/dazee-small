@@ -12,7 +12,7 @@ type: Load Balanced Web Service
 # 使用 location 指定 ECR 镜像地址（由部署脚本自动更新）
 # ============================================================
 image:
-  location: 308470327605.dkr.ecr.ap-southeast-1.amazonaws.com/zen0-backend/agent:20260123-113329
+  location: 308470327605.dkr.ecr.ap-southeast-1.amazonaws.com/zen0-backend/agent:20260123-160257
   port: 80  # Nginx 监听端口
 
 # ============================================================
@@ -165,3 +165,90 @@ environments:
       # 文档解析
       UNSTRUCTURED_API_KEY: /copilot/zen0-backend/staging/secrets/UNSTRUCTURED_API_KEY
       UNSTRUCTURED_API_URL: /copilot/zen0-backend/staging/secrets/UNSTRUCTURED_API_URL
+
+  # ============================================================
+  # Production 环境配置
+  # Load Balanced Web Service：仅使用 NLB 提供内网 gRPC
+  # 禁用 HTTP/ALB，健康检查通过 NLB TCP 端口进行
+  # 其他服务通过 NLB 或 Service Connect 访问：
+  #   agent.production.zen0-backend.local:50051
+  # ============================================================
+  production:
+    # 资源配置（1 vCPU + 2GB）
+    cpu: 1024
+    memory: 2048
+    
+    # 副本配置（高可用）
+    count:
+      range: 2-10
+      cooldown:
+        in: 60s
+        out: 300s
+      cpu_percentage: 70
+      memory_percentage: 80
+    
+    # 禁用 HTTP/ALB（避免证书冲突）
+    http: false
+    
+    # NLB 健康检查改为 gRPC 端口
+    nlb:
+      port: 50051/tcp
+      target_port: 50051
+      healthcheck:
+        port: 50051  # 通过 gRPC 端口做 TCP 健康检查
+        healthy_threshold: 2
+        unhealthy_threshold: 2
+        interval: 10s
+    
+    # 网络配置
+    network:
+      connect: true  # 启用 Service Connect，内网 DNS: agent.production.zen0-backend.local
+      vpc:
+        placement: private
+    
+    # 环境变量
+    variables:
+      LOG_LEVEL: INFO
+      MAX_TOKENS: 8192
+      TEMPERATURE: "0.7"
+      AWS_DEFAULT_REGION: ap-southeast-1
+      AWS_S3_BUCKET: dify-storage-zenflux
+      # gRPC 配置
+      ENABLE_GRPC: "true"
+      GRPC_HOST: "0.0.0.0"
+      GRPC_PORT: "50051"
+      GRPC_MAX_WORKERS: "20"
+      # CORS 配置：Production 环境限制允许的域名
+      ALLOWED_ORIGINS: "https://api.dazee.ai,https://www.dazee.ai"
+      # 万界方舟 API 端点（用于 Claude API 代理）
+      ANTHROPIC_BASE_URL: "https://maas-openapi.wanjiedata.com/api/anthropic"
+    
+    # 从 SSM Parameter Store 获取敏感配置
+    # 复用 zen0-backend production 的 secrets
+    secrets:
+      # 数据库（PostgreSQL）- 使用 DB_DSN 组合格式
+      DB_DSN: /copilot/zen0-backend/production/secrets/DB_DSN
+      
+      # MemoryDB for Redis（持久化存储）
+      REDIS_HOST: /copilot/zen0-backend/production/secrets/REDIS_HOST
+      REDIS_PORT: /copilot/zen0-backend/production/secrets/REDIS_PORT
+      REDIS_PASSWORD: /copilot/zen0-backend/production/secrets/REDIS_PASSWORD
+      
+      # AI 服务 API Keys
+      ANTHROPIC_API_KEY: /copilot/zen0-backend/production/secrets/ANTHROPIC_API_KEY
+      E2B_API_KEY: /copilot/zen0-backend/production/secrets/E2B_API_KEY
+      RAGIE_API_KEY: /copilot/zen0-backend/production/secrets/RAGIE_API_KEY
+      TAVILY_API_KEY: /copilot/zen0-backend/production/secrets/TAVILY_API_KEY
+      EXA_API_KEY: /copilot/zen0-backend/production/secrets/EXA_API_KEY
+      SLIDESPEAK_API_KEY: /copilot/zen0-backend/production/secrets/SLIDESPEAK_API_KEY
+      
+      # AWS 凭证（S3 访问）
+      AWS_ACCESS_KEY_ID: /copilot/zen0-backend/production/secrets/AWS_ACCESS_KEY_ID
+      AWS_SECRET_ACCESS_KEY: /copilot/zen0-backend/production/secrets/AWS_SECRET_ACCESS_KEY
+      
+      # 其他关键配置
+      OPENAI_API_KEY: /copilot/zen0-backend/production/secrets/OPENAI_API_KEY
+      DIFY_API_KEY: /copilot/zen0-backend/production/secrets/DIFY_API_KEY
+      COZE_API_KEY: /copilot/zen0-backend/production/secrets/COZE_API_KEY
+      QDRANT_API_KEY: /copilot/zen0-backend/production/secrets/QDRANT_API_KEY
+
