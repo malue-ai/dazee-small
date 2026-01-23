@@ -70,11 +70,16 @@ ONTOLOGY_API_NAMES = {
     "coze",            # 简写形式
 }
 
-# 流程图生成类 API（text2flowchart 等）
-# 返回 mind 类型：Mermaid 图表（流程图/思维导图）
-FLOWCHART_API_NAMES = {
-    "dify_api",        # Dify text2flowchart 工作流
-    "dify",            # 简写形式
+# 🆕 V7.8: 流程图生成已改用 MCP 工具，不再通过 api_calling
+# FLOWCHART_API_NAMES 已废弃，保留注释说明历史
+# 原配置：{"dify_api", "dify"}
+
+# MCP 工具名模式：用于识别流程图生成类 MCP 工具
+# 这些工具直接通过 MCP 调用，不经过 api_calling
+# 命名格式：(mcp_)dify_Ontology_TextToChart_xxx
+MCP_FLOWCHART_TOOL_PATTERNS = {
+    "dify_Ontology_TextToChart",  # Dify 流程图生成工具
+    "TextToChart",                # 简写模式
 }
 
 
@@ -832,7 +837,7 @@ class ZenOAdapter(EventAdapter):
     # 工具结果增强（将 tool_result 拆分为多个 delta）
     # ===========================================================================
     
-    def enhance_tool_result(
+    async def enhance_tool_result(
         self,
         tool_name: str,
         tool_input: Dict[str, Any],
@@ -845,10 +850,11 @@ class ZenOAdapter(EventAdapter):
         - wenshu_api → 拆分为 sql/data/chart/report/intent 等（智能分析）
         - coze_api → 转换为 interface（系统配置，Ontology Builder）
         - dify_api → 转换为 mind（Mermaid 流程图，text2flowchart）
+        - MCP 流程图工具（如 dify_Ontology_TextToChart）→ 下载 str_url 内容，转换为 mind
         - 其他特殊工具 → 根据 TOOL_TO_DELTA_TYPE 映射
         
         Args:
-            tool_name: 工具名称（如 "api_calling"）
+            tool_name: 工具名称（如 "api_calling"、"dify_Ontology_TextToChart_zen0"）
             tool_input: 工具输入参数（包含 api_name 等）
             tool_result: 工具返回结果（content_block 格式）
             
@@ -865,6 +871,12 @@ class ZenOAdapter(EventAdapter):
             logger.info(f"🔧 [enhance_tool_result] 错误结果，跳过增强")
             return []
         
+        # 🆕 V7.8: MCP 流程图工具的特殊处理
+        # 识别 MCP 工具名模式（如 dify_Ontology_TextToChart_zen0、mcp_dify_Ontology_TextToChart_xxx）
+        if self._is_mcp_flowchart_tool(tool_name):
+            logger.info(f"🔍 识别到 MCP 流程图工具: tool_name={tool_name}")
+            return await self._generate_mcp_flowchart_deltas(result_content)
+        
         # api_calling 工具的特殊处理（通过 api_name 识别）
         if tool_name == "api_calling":
             api_name = tool_input.get("api_name", "")
@@ -879,10 +891,6 @@ class ZenOAdapter(EventAdapter):
                 logger.debug(f"🔍 识别到系统搭建类 API: api_name={api_name}")
                 return self._generate_ontology_deltas(result_content)
             
-            # 3. 流程图生成类 API（Dify text2flowchart）→ mind
-            if api_name in FLOWCHART_API_NAMES:
-                logger.debug(f"🔍 识别到流程图生成类 API: api_name={api_name}")
-                return self._generate_flowchart_deltas(result_content)
         
         # plan_todo 工具的特殊处理（直接转换为 progress 格式）
         if tool_name == "plan_todo":
@@ -910,6 +918,152 @@ class ZenOAdapter(EventAdapter):
             return [self._create_delta(delta_type, result_content)]
         
         return []
+    
+    def _is_mcp_flowchart_tool(self, tool_name: str) -> bool:
+        """
+        检查是否是 MCP 流程图工具
+        
+        MCP 工具名格式：
+        - dify_Ontology_TextToChart_zen0
+        - mcp_dify_Ontology_TextToChart_xxx
+        - TextToChart_xxx
+        
+        Args:
+            tool_name: 工具名称
+            
+        Returns:
+            是否是 MCP 流程图工具
+        """
+        # 移除可能的前缀（mcp_）
+        normalized_name = tool_name
+        if normalized_name.startswith("mcp_"):
+            normalized_name = normalized_name[4:]
+        
+        # 检查是否匹配流程图工具模式
+        for pattern in MCP_FLOWCHART_TOOL_PATTERNS:
+            if pattern in normalized_name:
+                return True
+        
+        return False
+    
+    async def _generate_mcp_flowchart_deltas(self, result_content: str) -> List[Dict[str, Any]]:
+        """
+        🆕 V7.8: 为 MCP 流程图工具生成 mind delta
+        
+        MCP 流程图工具（如 dify_Ontology_TextToChart_zen0）返回格式：
+        {
+            "success": true,
+            "data": "{\"str_url\": \"https://xxx.txt\"}"
+        }
+        
+        处理流程：
+        1. 解析返回结果，提取 str_url
+        2. 下载 txt 文件内容（包含 Mermaid 图表）
+        3. 生成 mind delta
+        
+        注意：不再生成 intent delta，避免重复
+        
+        Args:
+            result_content: 工具返回的 JSON 字符串
+            
+        Returns:
+            delta 列表（只包含 mind 类型的 delta）
+        """
+        import httpx
+        
+        deltas = []
+        
+        # 解析结果
+        try:
+            if isinstance(result_content, str):
+                result = json.loads(result_content)
+            else:
+                result = result_content
+        except json.JSONDecodeError:
+            logger.warning(f"⚠️ MCP 流程图工具结果解析失败: {str(result_content)[:200]}...")
+            return deltas
+        
+        # 检查是否成功
+        if not result.get("success", False):
+            logger.warning(f"⚠️ MCP 流程图工具返回失败: {result.get('error')}")
+            return deltas
+        
+        logger.info(f"📊 MCP 流程图工具结果处理")
+        
+        # 提取 str_url（可能嵌套在 data 字段中）
+        str_url = None
+        
+        # 尝试从 data 字段提取
+        data = result.get("data")
+        if data:
+            # data 可能是 JSON 字符串
+            if isinstance(data, str):
+                try:
+                    data = json.loads(data)
+                except json.JSONDecodeError:
+                    pass
+            
+            if isinstance(data, dict):
+                str_url = data.get("str_url")
+        
+        # 直接从 result 提取
+        if not str_url:
+            str_url = result.get("str_url")
+        
+        if not str_url:
+            logger.warning(f"⚠️ MCP 流程图工具结果中没有 str_url 字段: {str(result)[:200]}")
+            return deltas
+        
+        logger.info(f"📥 开始下载流程图内容: {str_url}")
+        
+        # 下载 txt 文件内容
+        mermaid_content = await self._fetch_flowchart_content(str_url)
+        
+        if not mermaid_content:
+            logger.warning(f"⚠️ 流程图内容下载失败或为空")
+            return deltas
+        
+        # 清理 Mermaid 代码块标记
+        mermaid_content = self._clean_mermaid_content(mermaid_content)
+        
+        # 生成 mind delta（不生成 intent，避免重复）
+        mind_data = {
+            "flowchart_content": mermaid_content
+        }
+        deltas.append(self._create_delta("mind", mind_data))
+        
+        logger.info(f"✅ MCP 流程图 mind delta 生成完成，内容长度: {len(mermaid_content)}")
+        
+        return deltas
+    
+    async def _fetch_flowchart_content(self, url: str) -> Optional[str]:
+        """
+        下载流程图内容（txt 文件）
+        
+        Args:
+            url: txt 文件 URL
+            
+        Returns:
+            文件内容，失败返回 None
+        """
+        import httpx
+        
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                content = response.text
+                logger.debug(f"📥 流程图内容下载成功，长度: {len(content)}")
+                return content
+        except httpx.TimeoutException:
+            logger.error(f"❌ 下载流程图内容超时: {url}")
+            return None
+        except httpx.HTTPStatusError as e:
+            logger.error(f"❌ 下载流程图内容 HTTP 错误: {e.response.status_code}, url={url}")
+            return None
+        except Exception as e:
+            logger.error(f"❌ 下载流程图内容失败: {str(e)}", exc_info=True)
+            return None
     
     def _generate_plan_progress_deltas(self, result_content: str) -> List[Dict[str, Any]]:
         """
@@ -1106,7 +1260,6 @@ class ZenOAdapter(EventAdapter):
                     "name": "报告.pptx",
                     "type": "pptx",
                     "url": "https://...",
-                    "upload_id": "file_xxx",
                     "size": 1024000,        // 可选
                     "thumbnail": "https://...",  // 可选
                     "description": "AI技术分享"  // 可选

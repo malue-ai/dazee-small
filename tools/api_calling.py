@@ -304,8 +304,9 @@ class APICallingTool:
                 logger.warning(f"⚠️ {error_msg}")
                 return None, final_headers, error_msg, meta_info
             
-            # 拼接 URL
-            base_url = api_config.get("base_url", "").rstrip("/")
+            # 拼接 URL（并替换环境变量）
+            base_url = api_config.get("base_url", "")
+            base_url = self._resolve_env_var_in_string(base_url).rstrip("/")
             if not base_url:
                 error_msg = f"API '{api_name}' 配置缺少 base_url"
                 logger.error(f"❌ {error_msg}")
@@ -336,6 +337,25 @@ class APICallingTool:
             # 合并 headers：预配置的 headers + LLM 传入的 headers
             config_headers = api_config.get("headers", {})
             merged_headers = {**config_headers, **final_headers}
+            
+            # 🔐 处理 auth 配置（自动注入认证头）
+            auth_config = api_config.get("auth")
+            if auth_config:
+                auth_type = auth_config.get("type", "bearer")  # 默认 bearer
+                auth_header = auth_config.get("header", "Authorization")  # 默认 Authorization
+                auth_env = auth_config.get("env")  # 环境变量名
+                
+                if auth_env:
+                    auth_value = os.environ.get(auth_env)
+                    if auth_value:
+                        # bearer 类型添加 "Bearer " 前缀，其他类型直接使用值
+                        if auth_type == "bearer":
+                            merged_headers[auth_header] = f"Bearer {auth_value}"
+                        else:
+                            merged_headers[auth_header] = auth_value
+                        logger.debug(f"🔐 注入认证头: {auth_header} (来自环境变量 {auth_env})")
+                    else:
+                        logger.warning(f"⚠️ 认证环境变量未设置: {auth_env}")
             
             # 🆕 构建元数据信息（用于下游识别 API 来源）
             meta_info = {
@@ -464,6 +484,47 @@ class APICallingTool:
             logger.error(f"❌ SSE 请求异常: {e}", exc_info=True)
             yield json.dumps({"error": str(e)})
     
+    def _resolve_env_var_in_string(self, value: str) -> str:
+        """
+        替换单个字符串中的环境变量占位符 ${VAR_NAME}
+        
+        用于处理 base_url 等配置中的环境变量。
+        支持处理 URL 编码后的占位符（如 $%7BVAR_NAME%7D）。
+        
+        Args:
+            value: 包含环境变量占位符的字符串
+            
+        Returns:
+            替换后的字符串
+        """
+        import re
+        from urllib.parse import unquote
+        
+        if not isinstance(value, str):
+            return value
+        
+        # 🔧 先尝试 URL 解码，处理被编码的 ${...} 占位符
+        # 例如：$%7BWENSHU_API_BASE_URL%7D → ${WENSHU_API_BASE_URL}
+        if '%7B' in value or '%7D' in value:
+            decoded_value = unquote(value)
+            if decoded_value != value:
+                logger.debug(f"🔓 URL 解码: {value[:50]}... → {decoded_value[:50]}...")
+                value = decoded_value
+        
+        env_var_pattern = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}')
+        
+        def replace_env_var(match):
+            var_name = match.group(1)
+            env_value = os.environ.get(var_name)
+            if env_value:
+                logger.debug(f"🔑 替换环境变量: ${{{var_name}}} → [已设置]")
+                return env_value
+            else:
+                logger.warning(f"⚠️ 环境变量未设置: {var_name}")
+                return match.group(0)  # 保留原样
+        
+        return env_var_pattern.sub(replace_env_var, value)
+    
     def _resolve_env_vars(self, headers: Dict[str, str]) -> Dict[str, str]:
         """
         自动替换请求头中的环境变量占位符 ${VAR_NAME}
@@ -471,26 +532,10 @@ class APICallingTool:
         这样 LLM 可以使用 ${COZE_API_KEY} 等占位符，
         框架会自动从环境变量中读取真实值。
         """
-        import re
-        
         resolved = {}
-        env_var_pattern = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}')
         
         for key, value in headers.items():
-            if isinstance(value, str):
-                def replace_env_var(match):
-                    var_name = match.group(1)
-                    env_value = os.environ.get(var_name)
-                    if env_value:
-                        logger.debug(f"🔑 替换环境变量: ${{{var_name}}} → [已设置]")
-                        return env_value
-                    else:
-                        logger.warning(f"⚠️ 环境变量未设置: {var_name}")
-                        return match.group(0)  # 保留原样
-                
-                resolved[key] = env_var_pattern.sub(replace_env_var, value)
-            else:
-                resolved[key] = value
+            resolved[key] = self._resolve_env_var_in_string(value) if isinstance(value, str) else value
         
         return resolved
     

@@ -9,7 +9,7 @@
 `${WENSHU_API_BASE_URL}`（环境变量配置）
 
 ## 认证
-- Header: `Authorization: Bearer {WENSHU_API_KEY}`
+- Header: `API-KEY: {WENSHU_API_KEY}`
 - 环境变量已配置: `WENSHU_API_KEY`
 - **使用 `api_name: "wenshu_api"` 时认证自动注入**
 

@@ -14,7 +14,6 @@ send_files 工具 - 发送文件信息到前端
 """
 
 import json
-import uuid
 from typing import Dict, Any, List, Optional
 
 from logger import get_logger
@@ -35,7 +34,6 @@ class SendFilesTool:
                 "name": "报告.pptx",
                 "type": "pptx",
                 "url": "https://...",
-                "upload_id": "file_xxx",
                 "size": 1024000,        # 可选
                 "thumbnail": "https://...",  # 可选
                 "description": "AI技术分享"  # 可选
@@ -57,7 +55,7 @@ class SendFilesTool:
 - 需要在回复中向用户展示可下载/可预览的文件
 
 参数说明：
-- files: 文件数组，每个文件包含 name、type、url、upload_id 等字段
+- files: 文件数组，每个文件包含 name、type、url 等字段
 
 示例：
 {
@@ -66,7 +64,6 @@ class SendFilesTool:
             "name": "AI技术分享.pptx",
             "type": "pptx",
             "url": "https://example.com/files/ai_tech.pptx",
-            "upload_id": "file_123456",
             "description": "2024年AI新技术分享演示文稿"
         }
     ]
@@ -74,7 +71,6 @@ class SendFilesTool:
 
 注意：
 - url 必须是真实的可访问链接，不要编造
-- upload_id 如果没有，可以生成一个唯一ID
 - type 应该是文件扩展名（如 pptx, docx, xlsx, pdf, png 等）"""
     
     @property
@@ -99,10 +95,6 @@ class SendFilesTool:
                                 "type": "string",
                                 "description": "文件下载链接（必须是真实可访问的URL）"
                             },
-                            "upload_id": {
-                                "type": "string",
-                                "description": "文件上传ID（如果没有可以生成一个唯一ID）"
-                            },
                             "size": {
                                 "type": "integer",
                                 "description": "文件大小（字节，可选）"
@@ -116,7 +108,7 @@ class SendFilesTool:
                                 "description": "文件描述（可选）"
                             }
                         },
-                        "required": ["name", "type", "url", "upload_id"]
+                        "required": ["name", "type", "url"]
                     },
                     "description": "文件列表"
                 }
@@ -158,8 +150,7 @@ class SendFilesTool:
             validated_file = {
                 "name": file_info["name"],
                 "type": file_info.get("type") or self._extract_file_type(file_info["name"]),
-                "url": file_info["url"],
-                "upload_id": file_info.get("upload_id") or f"file_{uuid.uuid4().hex[:12]}"
+                "url": file_info["url"]
             }
             
             # 可选字段

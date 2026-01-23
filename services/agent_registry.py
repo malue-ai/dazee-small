@@ -312,6 +312,12 @@ class AgentRegistry:
                     "base_url": api.base_url,
                     "headers": api.headers or {},
                     "description": api.description,
+                    # 🔐 认证配置（用于 api_calling 动态注入）
+                    "auth": {
+                        "type": api.auth_type,
+                        "header": api.auth_header,
+                        "env": api.auth_env,
+                    } if api.auth_env else None,
                 }
                 for api in config.instance_config.apis
             ]
@@ -385,6 +391,12 @@ class AgentRegistry:
                     "base_url": api.base_url,
                     "headers": api.headers or {},
                     "description": api.description,
+                    # 🔐 认证配置（用于 api_calling 动态注入）
+                    "auth": {
+                        "type": api.auth_type,
+                        "header": api.auth_header,
+                        "env": api.auth_env,
+                    } if api.auth_env else None,
                 }
                 for api in config.instance_config.apis
             ]

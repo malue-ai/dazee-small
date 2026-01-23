@@ -402,12 +402,12 @@ def _prepare_apis(apis: List[ApiConfig]) -> List[ApiConfig]:
         headers = {}
         
         # 构建认证头
-        if api.auth_type in ("bearer", "api_key") and api.auth_env:
+        if api.auth_type in ("bearer", "api_key", "token") and api.auth_env:
             auth_value = os.getenv(api.auth_env)
             if auth_value:
                 if api.auth_type == "bearer":
                     headers[api.auth_header] = f"Bearer {auth_value}"
-                else:  # api_key
+                else:  # api_key 或 token：直接使用值
                     headers[api.auth_header] = auth_value
                 # 🔍 调试：显示 token 的前 10 位和后 4 位
                 masked_value = f"{auth_value[:10]}...{auth_value[-4:]}" if len(auth_value) > 14 else "***"

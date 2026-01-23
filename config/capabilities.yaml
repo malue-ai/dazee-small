@@ -1228,9 +1228,6 @@ capabilities:
             url:
               type: string
               description: 文件下载链接（必须是真实可访问的URL）
-            upload_id:
-              type: string
-              description: 文件上传ID（如果没有可以生成一个唯一ID）
             size:
               type: integer
               description: 文件大小（字节，可选）
@@ -1244,7 +1241,6 @@ capabilities:
           - name
           - type
           - url
-          - upload_id
     required:
     - files
 - name: code_execution

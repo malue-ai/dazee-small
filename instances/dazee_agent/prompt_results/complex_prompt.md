@@ -43,7 +43,6 @@
       "name": "生成的图片.png",
       "type": "png",
       "url": "https://example.com/files/image.png",
-      "upload_id": "file_abc123",
       "description": "AI生成的图片"
     }
   ]
@@ -52,7 +51,6 @@
 
 **注意**：
 - `url` 必须是工具调用返回的真实链接，**严禁编造**
-- `upload_id` 如果工具没有返回，可以生成一个唯一ID
 - `type` 应该是文件扩展名（pptx, docx, xlsx, pdf, png, jpg 等）
 
 ## 基本规则

@@ -275,6 +275,25 @@ class FileProcessor:
         ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
         return ext_to_mime.get(ext, "application/octet-stream")
     
+    def _format_file_size(self, size_bytes: int) -> str:
+        """
+        格式化文件大小为可读字符串
+        
+        Args:
+            size_bytes: 文件大小（字节）
+            
+        Returns:
+            格式化后的字符串，如 "1.5 KB", "2.3 MB"
+        """
+        if size_bytes < 1024:
+            return f"{size_bytes} B"
+        elif size_bytes < 1024 * 1024:
+            return f"{size_bytes / 1024:.1f} KB"
+        elif size_bytes < 1024 * 1024 * 1024:
+            return f"{size_bytes / (1024 * 1024):.1f} MB"
+        else:
+            return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
+    
     def build_message_content(
         self,
         processed_files: List[ProcessedFile],
@@ -300,11 +319,26 @@ class FileProcessor:
                     content_blocks.append(pf.content_block)
             
             elif pf.category == FileCategory.TEXT:
-                # 纯文本：拼进附件说明
+                # 纯文本：拼进附件说明，同时保留原始元数据
                 if pf.text_content:
-                    attachment_texts.append(
-                        f"📄 {pf.filename}:\n```\n{pf.text_content}\n```"
-                    )
+                    # 构建元数据行（文件名 | MIME类型 | 大小）
+                    meta_parts = [pf.filename]
+                    if pf.mime_type:
+                        meta_parts.append(pf.mime_type)
+                    if pf.file_size:
+                        # 格式化文件大小
+                        size_str = self._format_file_size(pf.file_size)
+                        meta_parts.append(size_str)
+                    meta_line = " | ".join(meta_parts)
+                    
+                    # 构建附件文本
+                    attachment_text = f"📄 {meta_line}:\n```\n{pf.text_content}\n```"
+                    
+                    # 保留原始 URL（如果有）
+                    if pf.file_url:
+                        attachment_text += f"\n   原始文件: {pf.file_url}"
+                    
+                    attachment_texts.append(attachment_text)
             
             elif pf.category == FileCategory.DOCUMENT:
                 # 复杂文档：提供 URL，让 Agent 决定

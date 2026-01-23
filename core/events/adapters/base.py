@@ -149,7 +149,7 @@ class EventAdapter(ABC):
         
         return False
     
-    def enhance_tool_result(
+    async def enhance_tool_result(
         self,
         tool_name: str,
         tool_input: Dict[str, Any],

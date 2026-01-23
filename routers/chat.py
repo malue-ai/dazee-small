@@ -656,28 +656,7 @@ async def _reconnect_event_generator(
         adapter: 格式适配器
     """
     try:
-        # 1. 发送重连信息
-        reconnect_info = {
-            "type": "reconnect_info",
-            "data": {
-                "session_id": session_id,
-                "conversation_id": status_data.get("conversation_id"),
-                "message_id": status_data.get("message_id"),
-                "user_id": status_data.get("user_id"),
-                "status": status_data.get("status"),
-                "last_event_seq": status_data.get("last_event_seq", 0),
-                "start_time": status_data.get("start_time"),
-                "message_preview": status_data.get("message_preview", "")
-            },
-            "timestamp": datetime.now().isoformat()
-        }
-        
-        yield f"event: reconnect_info\n"
-        yield f"data: {json.dumps(reconnect_info, ensure_ascii=False)}\n\n"
-        
-        logger.info(f"📤 已发送 reconnect_info: conversation_id={status_data.get('conversation_id')}")
-        
-        # 2. 获取并推送历史事件
+        # 1. 获取并推送历史事件
         history_events = await session_service.get_session_events(
             session_id=session_id,
             after_id=after_seq or 0,
@@ -687,7 +666,12 @@ async def _reconnect_event_generator(
         if history_events:
             logger.info(f"📤 推送 {len(history_events)} 个历史事件")
             for event in history_events:
-                if adapter:
+                # 🔧 修复：判断事件是否已经是 zeno 格式
+                # 如果是 zeno 格式，直接透传；否则才需要转换
+                event_type = event.get("type", "")
+                is_zeno_format = event_type.startswith("message.assistant.") or event_type == "reconnect_info"
+                
+                if adapter and not is_zeno_format:
                     transformed_event = adapter.transform(event)
                     if transformed_event is None:
                         continue
@@ -695,7 +679,7 @@ async def _reconnect_event_generator(
                 
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
         
-        # 3. 订阅实时事件流
+        # 2. 订阅实时事件流
         redis = session_service.redis
         last_seq = after_seq or 0
         if history_events:
@@ -710,26 +694,22 @@ async def _reconnect_event_generator(
             after_id=last_seq,
             timeout=1800
         ):
-            if adapter:
+            # 🔧 修复：判断事件是否已经是 zeno 格式
+            event_type = event.get("type", "message")
+            is_zeno_format = event_type.startswith("message.assistant.") or event_type == "reconnect_info"
+            
+            if adapter and not is_zeno_format:
                 transformed_event = adapter.transform(event)
                 if transformed_event is None:
                     continue
                 event = transformed_event
-            
-            event_type = event.get("type", "message")
-            event_uuid = event.get("event_uuid", "") or event.get("timestamp", "")
-            
-            yield f"id: {event_uuid}\n"
-            yield f"event: {event_type}\n"
+                event_type = event.get("type", "message")
+            # 🔧 修复：zeno 格式只需要 data: 行，不需要 id: 和 event: 行
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
             
             # 检查是否结束
             if event_type in ["session_end", "message_complete", "message.assistant.done"]:
                 break
-        
-        # 发送完成事件
-        yield f"event: done\n"
-        yield f"data: {{}}\n\n"
         logger.info(f"✅ SSE 重连流结束: session_id={session_id}")
         
     except asyncio.CancelledError:

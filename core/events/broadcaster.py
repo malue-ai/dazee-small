@@ -348,8 +348,8 @@ class EventBroadcaster:
         
         logger.info(f"🔧 [_emit_adapter_enhanced_deltas] tool_use_id={tool_use_id}, tool_name={tool_name}, adapter={adapter.name if hasattr(adapter, 'name') else type(adapter)}")
         
-        # 调用 adapter 的增强方法
-        deltas = adapter.enhance_tool_result(
+        # 调用 adapter 的增强方法（异步）
+        deltas = await adapter.enhance_tool_result(
             tool_name=tool_name,
             tool_input=tool_input,
             tool_result=tool_result_block

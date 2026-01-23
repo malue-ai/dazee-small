@@ -57,7 +57,6 @@
       "name": "AI技术分享.pptx",
       "type": "pptx",
       "url": "https://example.com/files/ai_tech.pptx",
-      "upload_id": "file_abc123",
       "description": "2024年AI新技术分享演示文稿"
     }
   ]
@@ -66,7 +65,6 @@
 
 **注意**：
 - `url` 必须是工具调用返回的真实链接，**严禁编造**
-- `upload_id` 如果工具没有返回，可以生成一个唯一ID
 - `type` 应该是文件扩展名（pptx, docx, xlsx, pdf, png 等）
 
 ## 基本规则

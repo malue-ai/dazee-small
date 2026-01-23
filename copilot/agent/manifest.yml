@@ -12,7 +12,7 @@ type: Load Balanced Web Service
 # 使用 location 指定 ECR 镜像地址（由部署脚本自动更新）
 # ============================================================
 image:
-  location: 308470327605.dkr.ecr.ap-southeast-1.amazonaws.com/zen0-backend/agent:20260123-105320
+  location: 308470327605.dkr.ecr.ap-southeast-1.amazonaws.com/zen0-backend/agent:20260123-113329
   port: 80  # Nginx 监听端口
 
 # ============================================================
@@ -140,8 +140,7 @@ environments:
       # CORS 配置：staging 环境限制允许的域名
       ALLOWED_ORIGINS: "https://agent.malue.ai,https://malue.ai,http://localhost:3000"
       # gRPC 配置继承自默认值（ENABLE_GRPC=true, GRPC_PORT=50051）
-      # 万界方舟 API 端点（用于 Claude API 代理）
-      ANTHROPIC_BASE_URL: "https://maas-openapi.wanjiedata.com/api/anthropic"
+
     
     # 从 SSM Parameter Store 获取敏感配置
     secrets:
