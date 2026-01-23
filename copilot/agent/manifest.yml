@@ -226,9 +226,6 @@ environments:
     # 从 SSM Parameter Store 获取敏感配置
     # 复用 zen0-backend production 的 secrets
     secrets:
-      # gRPC API 密钥（用于认证）
-      GRPC_API_KEY: /copilot/zen0-backend/production/secrets/GRPC_API_KEY
-      
       # 数据库（PostgreSQL）- 使用 DB_DSN 组合格式
       DB_DSN: /copilot/zen0-backend/production/secrets/DB_DSN
       
