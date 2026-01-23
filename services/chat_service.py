@@ -239,26 +239,91 @@ class ChatService:
         except Exception as e:
             logger.warning(f"⚠️ 发送模型切换事件失败: {e}")
 
+    # Role 到 Profile 的映射（用于条件探测）
+    _ROLE_TO_PROFILE_MAP = {
+        "simple_agent": "main_agent",
+        "lead_agent": "lead_agent",
+        "critic_agent": "critic_agent",
+        "worker_agent": "worker_agent",
+        "intent_analyzer": "intent_analyzer",
+    }
+
     async def _probe_llm_service(
         self,
         llm_service: Any,
         session_id: str,
         role: str,
-        max_retries: int = 3
+        max_retries: Optional[int] = None,
+        timeout_seconds: Optional[float] = None
     ) -> Optional[Dict[str, Any]]:
         """
-        服务层 LLM 存活探针
+        服务层 LLM 条件探针（V7.11 重构）
+        
+        🆕 条件探测策略：
+        - 后台健康 → 直接跳过（零延迟）
+        - 后台不健康 → 执行请求级探测确认
+        
+        设计思路：
+        - 正常情况：依赖后台探测 + ModelRouter 自动切换，不阻塞用户
+        - 异常情况：后台发现问题时，提供额外的"最后确认"保护
+        
+        配置来源（优先级从高到低）：
+        1. 环境变量 (LLM_PROBE_TIMEOUT)
+        2. profiles.yaml 中的 health_probe.request_probe 配置
+        3. 默认值 (timeout=5.0s, max_retries=1)
         """
+        import asyncio
+        
         if not llm_service or not hasattr(llm_service, "probe"):
             return None
         
-        result = await llm_service.probe(
-            max_retries=max_retries,
-            include_unhealthy=True
-        )
-        if result and result.get("switched"):
-            await self._emit_llm_switch_event(session_id, result, role)
-        return result
+        # ========== 1. 条件探测：检查后台健康状态 ==========
+        profile_name = self._ROLE_TO_PROFILE_MAP.get(role, role)
+        try:
+            from services.health_probe_service import get_health_probe_service
+            probe_service = get_health_probe_service()
+            
+            # 后台探测显示健康，直接跳过请求级探测
+            if probe_service.is_healthy(profile_name):
+                logger.debug(f"✅ 后台健康，跳过请求级探测: role={role}, profile={profile_name}")
+                return None
+            
+            # 后台探测显示不健康，执行请求级探测确认
+            logger.warning(f"⚠️ 后台探测显示不健康，执行请求级确认: role={role}, profile={profile_name}")
+        except Exception as e:
+            # 后台服务不可用，降级为跳过探测（依赖 ModelRouter 切换）
+            logger.debug(f"⏭️ 后台探测服务不可用，跳过请求级探测: role={role}, error={e}")
+            return None
+        
+        # ========== 2. 执行请求级探测（仅当后台不健康时） ==========
+        try:
+            from config.llm_config import get_health_probe_config
+            config = get_health_probe_config()
+            request_probe_config = config.get("request_probe", {})
+        except Exception:
+            request_probe_config = {}
+        
+        # 使用配置值（参数可覆盖）
+        actual_timeout = timeout_seconds if timeout_seconds is not None else request_probe_config.get("timeout_seconds", 5.0)
+        actual_retries = max_retries if max_retries is not None else request_probe_config.get("max_retries", 1)
+        
+        try:
+            result = await asyncio.wait_for(
+                llm_service.probe(
+                    max_retries=actual_retries,
+                    include_unhealthy=True
+                ),
+                timeout=actual_timeout
+            )
+            if result and result.get("switched"):
+                await self._emit_llm_switch_event(session_id, result, role)
+            return result
+        except asyncio.TimeoutError:
+            logger.warning(f"⏱️ LLM 探针超时: role={role}, timeout={actual_timeout}s")
+            return None
+        except Exception as e:
+            logger.warning(f"⚠️ LLM 探针失败: role={role}, error={e}")
+            return None
     
     # ==================== 统一入口 ====================
     

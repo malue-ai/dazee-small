@@ -23,10 +23,10 @@ class RouterPolicy:
     
     Attributes:
         max_failures: 最大失败次数（超过即进入冷却）
-        cooldown_seconds: 冷却时间（秒）
+        cooldown_seconds: 冷却时间（秒），可通过 LLM_ROUTER_COOLDOWN_SECONDS 环境变量覆盖
     """
     max_failures: int = 2
-    cooldown_seconds: int = 120
+    cooldown_seconds: int = 600  # 默认 10 分钟（V7.11：从 1 小时改为 10 分钟）
 
 
 def _resolve_policy(policy: Optional[Dict[str, Any]]) -> RouterPolicy:

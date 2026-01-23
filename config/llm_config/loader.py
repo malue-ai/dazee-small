@@ -366,6 +366,115 @@ def get_llm_profile_from_env(
 
 
 # ============================================================
+# 🆕 V7.10 健康探测配置
+# ============================================================
+
+def get_health_probe_config() -> Dict[str, Any]:
+    """
+    获取健康探测配置
+    
+    配置优先级：
+    1. 环境变量（最高优先级）
+    2. profiles.yaml 中的 health_probe 配置
+    3. 默认值
+    
+    🆕 V7.11 条件探测策略：
+    - request_probe.enabled 已废弃（条件探测自动根据后台健康状态决定）
+    - 后台健康 → 自动跳过请求级探测（零延迟）
+    - 后台不健康 → 自动执行请求级探测确认
+    
+    环境变量：
+    - LLM_PROBE_TIMEOUT: 条件探测超时（覆盖 request_probe.timeout_seconds）
+    - LLM_HEALTH_PROBE_ENABLED: 后台探测开关（覆盖 background_probe.enabled）
+    - LLM_HEALTH_PROBE_INTERVAL: 后台探测间隔（覆盖 background_probe.interval_seconds）
+    - LLM_HEALTH_PROBE_TIMEOUT: 后台探测超时（覆盖 background_probe.timeout_seconds）
+    - LLM_HEALTH_PROBE_PROFILES: 后台探测 Profile 列表（逗号分隔）
+    
+    Returns:
+        健康探测配置字典
+        
+    Example:
+        config = get_health_probe_config()
+        # config = {
+        #     "request_probe": {
+        #         "timeout_seconds": 5.0,
+        #         "max_retries": 1
+        #         # 注意：V7.11 移除 enabled，改为条件探测策略
+        #     },
+        #     "background_probe": {
+        #         "enabled": True,
+        #         "interval_seconds": 30,
+        #         "timeout_seconds": 10,
+        #         "profiles": ["main_agent", "intent_analyzer", ...]
+        #     }
+        # }
+    """
+    config = _load_config()
+    
+    # 获取 YAML 配置（如果存在）
+    yaml_config = config.get("health_probe", {})
+    
+    # 默认值（V7.11：移除 request_probe.enabled，改为条件探测策略）
+    default_config = {
+        "request_probe": {
+            # V7.11：enabled 已废弃，条件探测自动根据后台健康状态决定
+            "timeout_seconds": 5.0,
+            "max_retries": 1,
+        },
+        "background_probe": {
+            "enabled": True,
+            "interval_seconds": 30,
+            "timeout_seconds": 10,
+            "profiles": ["main_agent", "intent_analyzer", "lead_agent", "worker_agent", "critic_agent"],
+        }
+    }
+    
+    # 合并 YAML 配置
+    result = default_config.copy()
+    if yaml_config:
+        if "request_probe" in yaml_config:
+            result["request_probe"].update(yaml_config["request_probe"])
+        if "background_probe" in yaml_config:
+            result["background_probe"].update(yaml_config["background_probe"])
+    
+    # 应用环境变量覆盖（最高优先级）
+    # 条件探测配置（V7.11：移除 LLM_PROBE_ENABLED，改为条件探测策略）
+    env_probe_timeout = os.getenv("LLM_PROBE_TIMEOUT")
+    if env_probe_timeout is not None:
+        try:
+            result["request_probe"]["timeout_seconds"] = float(env_probe_timeout)
+        except ValueError:
+            pass
+    
+    # 后台探测
+    env_health_enabled = os.getenv("LLM_HEALTH_PROBE_ENABLED")
+    if env_health_enabled is not None:
+        result["background_probe"]["enabled"] = env_health_enabled.lower() in ("true", "1", "yes")
+    
+    env_health_interval = os.getenv("LLM_HEALTH_PROBE_INTERVAL")
+    if env_health_interval is not None:
+        try:
+            result["background_probe"]["interval_seconds"] = int(env_health_interval)
+        except ValueError:
+            pass
+    
+    env_health_timeout = os.getenv("LLM_HEALTH_PROBE_TIMEOUT")
+    if env_health_timeout is not None:
+        try:
+            result["background_probe"]["timeout_seconds"] = float(env_health_timeout)
+        except ValueError:
+            pass
+    
+    env_health_profiles = os.getenv("LLM_HEALTH_PROBE_PROFILES")
+    if env_health_profiles:
+        result["background_probe"]["profiles"] = [
+            p.strip() for p in env_health_profiles.split(",") if p.strip()
+        ]
+    
+    return result
+
+
+# ============================================================
 # 导出
 # ============================================================
 
@@ -374,4 +483,5 @@ __all__ = [
     "list_profiles",
     "reload_config",
     "get_llm_profile_from_env",
+    "get_health_probe_config",
 ]
