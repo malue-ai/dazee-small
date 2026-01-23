@@ -551,7 +551,7 @@ class SimpleAgent:
             
             intent_delta = {
                 "type": "intent",
-                "content": json.dumps(intent_content, ensure_ascii=False)
+                "content": intent_content
             }
             yield await self.broadcaster.emit_message_delta(
                 session_id=session_id,

@@ -90,7 +90,7 @@ async def _generate_recommended_questions(
                 message_id=message_id,
                 delta={
                     "type": "recommended",
-                    "content": json.dumps({"questions": questions}, ensure_ascii=False)
+                    "content": {"questions": questions}
                 },
                 output_format=getattr(event_manager, 'output_format', 'zenflux'),
                 adapter=getattr(event_manager, 'adapter', None)

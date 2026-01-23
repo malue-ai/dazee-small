@@ -128,11 +128,11 @@ async def update_user_memories(
                 message_id=f"mem0_update_{user_id}",
                 delta={
                     "type": "mem0_update",
-                    "content": json.dumps({
+                    "content": {
                         "user_id": user_id,
                         "memories_added": memories_added,
                         "conversations_processed": len(conversations)
-                    }, ensure_ascii=False)
+                    }
                 }
             )
         

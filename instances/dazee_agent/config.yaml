@@ -61,7 +61,7 @@ enabled_capabilities:
   document_skills: 0         # 包含：pptx, xlsx, docx, pdf
   
   # --- PPT 生成类 ---
-  ppt_generator: 0           # 闭环 PPT 生成工具
+  ppt_generator: 1           # 闭环 PPT 生成工具
   
   # --- 代码沙盒类 ---
   sandbox_tools: 0           # 包含全部沙盒工具

@@ -440,7 +440,7 @@ class ZenOAdapter(EventAdapter):
         logger.debug(f"[session_end] 会话结束，不生成 done 事件（已由 message_stop 处理）")
         return None
     
-    def _convert_plan_to_progress(self, content: Any) -> str:
+    def _convert_plan_to_progress(self, content: Any) -> Dict[str, Any]:
         """
         将 Zenflux plan 格式转换为 ZenO progress 格式
         
@@ -473,7 +473,7 @@ class ZenOAdapter(EventAdapter):
             content: plan 数据（str 或 dict）
             
         Returns:
-            ZenO progress 格式的 JSON 字符串
+            ZenO progress 格式的字典对象
         """
         try:
             if isinstance(content, str):
@@ -481,8 +481,8 @@ class ZenOAdapter(EventAdapter):
             else:
                 plan = content
         except json.JSONDecodeError:
-            # 如果是字符串但解析失败，返回原内容
-            return content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
+            # 如果是字符串但解析失败，返回空对象
+            return {"title": "任务执行中", "status": "running", "current": 0, "total": 0, "subtasks": []}
         
         # 转换步骤状态
         status_map = {
@@ -518,9 +518,9 @@ class ZenOAdapter(EventAdapter):
             "subtasks": subtasks
         }
         
-        return json.dumps(progress_data, ensure_ascii=False)
+        return progress_data
     
-    def _convert_hitl_to_clue(self, content: str) -> str:
+    def _convert_hitl_to_clue(self, content: str) -> Dict[str, Any]:
         """
         将 Zenflux HITL 请求转换为 ZenO clue 格式
         
@@ -543,7 +543,7 @@ class ZenOAdapter(EventAdapter):
         try:
             hitl = json.loads(content) if isinstance(content, str) else content
         except json.JSONDecodeError:
-            return content
+            return {"tasks": []}
         
         request_id = hitl.get("request_id", "")
         question = hitl.get("question", "请确认")
@@ -576,8 +576,7 @@ class ZenOAdapter(EventAdapter):
                 }
             })
         
-        clue_data = {"tasks": tasks}
-        return json.dumps(clue_data, ensure_ascii=False)
+        return {"tasks": tasks}
     
     # ==================== 扩展方法：发送 ZenO 特有事件 ====================
     
@@ -610,7 +609,7 @@ class ZenOAdapter(EventAdapter):
             "timestamp": int(time.time() * 1000),
             "delta": {
                 "type": "intent",
-                "content": json.dumps(intent_data, ensure_ascii=False)
+                "content": intent_data
             }
         }
     
@@ -651,7 +650,7 @@ class ZenOAdapter(EventAdapter):
             "timestamp": int(time.time() * 1000),
             "delta": {
                 "type": "mind",
-                "content": json.dumps(mind_data, ensure_ascii=False)
+                "content": mind_data
             }
         }
     
@@ -672,7 +671,7 @@ class ZenOAdapter(EventAdapter):
             "timestamp": int(time.time() * 1000),
             "delta": {
                 "type": "files",
-                "content": json.dumps(files, ensure_ascii=False)
+                "content": files
             }
         }
     
@@ -708,7 +707,7 @@ class ZenOAdapter(EventAdapter):
             "timestamp": int(time.time() * 1000),
             "delta": {
                 "type": "data",
-                "content": json.dumps(data, ensure_ascii=False)
+                "content": data
             }
         }
     
@@ -729,7 +728,7 @@ class ZenOAdapter(EventAdapter):
             "timestamp": int(time.time() * 1000),
             "delta": {
                 "type": "chart",
-                "content": json.dumps(chart_config, ensure_ascii=False)
+                "content": chart_config
             }
         }
     
@@ -759,7 +758,7 @@ class ZenOAdapter(EventAdapter):
             "timestamp": int(time.time() * 1000),
             "delta": {
                 "type": "application",
-                "content": json.dumps(app_data, ensure_ascii=False)
+                "content": app_data
             }
         }
     
@@ -808,7 +807,7 @@ class ZenOAdapter(EventAdapter):
             "timestamp": int(time.time() * 1000),
             "delta": {
                 "type": "sandbox",
-                "content": json.dumps(sandbox_data, ensure_ascii=False)
+                "content": sandbox_data
             }
         }
     
@@ -1410,22 +1409,16 @@ class ZenOAdapter(EventAdapter):
         
         Args:
             delta_type: delta 类型
-            content: 内容（对象或字符串）
+            content: 内容（对象、数组或字符串）
             
         Returns:
-            delta 字典 {"type": "xxx", "content": "..."}
+            delta 字典 {"type": "xxx", "content": ...}（content 为对象，非 JSON 字符串）
         """
-        # 转换为 JSON 字符串（如果是对象）
-        if isinstance(content, (dict, list)):
-            content_str = json.dumps(content, ensure_ascii=False)
-        else:
-            content_str = str(content)
-        
         logger.debug(f"📤 创建 delta: type={delta_type}")
         
         return {
             "type": delta_type,
-            "content": content_str
+            "content": content
         }
     
     @staticmethod
