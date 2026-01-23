@@ -1427,9 +1427,12 @@ class SimpleAgent:
             # 这些值不会直接传入工具参数，而是通过 **kwargs 供工具内部使用
             if tool_name == "api_calling":
                 session_context = await self.event_manager.storage.get_session_context(session_id)
-                tool_input["user_id"] = session_context.get("user_id") or getattr(self, '_current_user_id', None)
+                injected_user_id = session_context.get("user_id") or getattr(self, '_current_user_id', None)
+                injected_conv_id = session_context.get("conversation_id") or getattr(self, '_current_conversation_id', None) or session_id
+                tool_input["user_id"] = injected_user_id
                 tool_input["session_id"] = session_id
-                tool_input["conversation_id"] = session_context.get("conversation_id") or getattr(self, '_current_conversation_id', None) or session_id
+                tool_input["conversation_id"] = injected_conv_id
+                logger.info(f"🔑 [api_calling 上下文注入] user_id={injected_user_id}, session_id={session_id}, conversation_id={injected_conv_id}")
             
             # ===== 特殊工具处理 =====
             if tool_name == "plan_todo":
@@ -1672,6 +1675,16 @@ class SimpleAgent:
                         tool_input.setdefault("user_id", session_context.get("user_id"))
                     conv_id = session_context.get("conversation_id") or getattr(self, '_current_conversation_id', None) or session_id
                     tool_input.setdefault("conversation_id", conv_id)
+                
+                # 🆕 V7.9.2: 为 api_calling 工具注入上下文（流式执行路径）
+                if tool_name == "api_calling":
+                    session_context = await self.event_manager.storage.get_session_context(session_id)
+                    injected_user_id = session_context.get("user_id") or getattr(self, '_current_user_id', None)
+                    injected_conv_id = session_context.get("conversation_id") or getattr(self, '_current_conversation_id', None) or session_id
+                    tool_input["user_id"] = injected_user_id
+                    tool_input["session_id"] = session_id
+                    tool_input["conversation_id"] = injected_conv_id
+                    logger.info(f"🔑 [api_calling 流式上下文注入] user_id={injected_user_id}, session_id={session_id}, conversation_id={injected_conv_id}")
                 
                 # 使用 ContentHandler 发送流式 tool_result
                 async def stream_generator():

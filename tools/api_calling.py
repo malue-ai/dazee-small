@@ -427,6 +427,10 @@ class APICallingTool:
         # 2. 替换环境变量
         final_headers = self._resolve_env_vars(final_headers)
         
+        # 3. 🆕 V7.9.2: 替换 body 中的上下文占位符（与 execute 保持一致）
+        if body:
+            body = self._resolve_body_placeholders(body, kwargs)
+        
         # 非流式模式：回退到普通执行
         if mode != "stream":
             result = await self.execute(
@@ -569,6 +573,10 @@ class APICallingTool:
         """
         import re
         import copy
+        
+        # 🔍 调试日志：记录收到的 context 键和值
+        logger.info(f"🔑 [_resolve_body_placeholders] context keys: {list(context.keys())}")
+        logger.info(f"🔑 [_resolve_body_placeholders] conversation_id={context.get('conversation_id')}, user_id={context.get('user_id')}, session_id={context.get('session_id')}")
         
         # 深拷贝避免修改原始数据
         resolved_body = copy.deepcopy(body)

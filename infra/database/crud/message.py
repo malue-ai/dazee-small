@@ -13,6 +13,7 @@ import json
 
 from sqlalchemy import select 
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from infra.database.models import Message, Conversation
 from infra.database.crud.base import get_by_id
@@ -140,6 +141,8 @@ async def update_message(
     
     if content is not None:
         msg.content = _parse_content(content)
+        # ⚠️ 标记 JSONB 字段为已修改
+        flag_modified(msg, 'content')
     if status is not None:
         msg.status = status
     if metadata is not None:
@@ -155,6 +158,9 @@ async def update_message(
                 existing[key] = value
         
         msg.extra_data = existing
+        
+        # ⚠️ 重要：标记 JSONB 字段为已修改（否则 SQLAlchemy 不会将更改写入数据库）
+        flag_modified(msg, 'extra_data')
     
     # 同步更新对话的 updated_at（保证活跃对话在列表中上浮）
     conv = await session.get(Conversation, msg.conversation_id)
@@ -163,6 +169,7 @@ async def update_message(
     
     await session.commit()
     await session.refresh(msg)
+    
     return msg
 
 

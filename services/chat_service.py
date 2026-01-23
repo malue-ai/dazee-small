@@ -816,6 +816,10 @@ class ChatService:
             if hasattr(agent, 'broadcaster') and agent.broadcaster:
                 agent.broadcaster.set_output_format(output_format, conversation_id)
             
+            # 🔧 Session context 已经在 session_service.create_session() 中保存到 Redis
+            # 工具（如 api_calling）可以通过 agent.event_manager.storage.get_session_context(session_id) 获取
+            logger.debug(f"🔑 Session context 已就绪: session_id={session_id}, conversation_id={conversation_id}, user_id={user_id}")
+            
             # 🔧 用于保存 assistant_text（在 message_stop 清理 accumulator 前获取）
             _assistant_text_for_tasks = ""
             
@@ -905,8 +909,37 @@ class ChatService:
                     # 检查停止标志（异步）
                     if await redis.is_stopped(session_id):
                         logger.warning(f"🛑 检测到停止标志: session_id={session_id}")
-                        # 🆕 修复：先 checkpoint 当前累积内容，再 finalize
-                        # 使用公开方法 finalize_message（会先 checkpoint），而不是 _finalize_message
+                        
+                        # 发送 billing 事件（直接从 agent.usage_tracker 获取数据）
+                        try:
+                            # 1. 生成 UsageResponse
+                            usage_response = UsageResponse.from_usage_tracker(
+                                tracker=agent.usage_tracker,
+                                model=agent.model,
+                                latency=int((time.time() - start_time) * 1000)
+                            )
+                            
+                            # 2. 发送 billing 事件到前端
+                            await agent.broadcaster.emit_message_delta(
+                                session_id=session_id,
+                                delta={
+                                    "type": "billing",
+                                    "content": usage_response.model_dump(mode='json')
+                                },
+                                message_id=assistant_message_id,
+                                persist=False
+                            )
+                            logger.info(f"📊 中止时已发送 billing 事件: total_price=${usage_response.total_price:.6f}")
+                            
+                            # 3. 保存 usage 到数据库
+                            await agent.broadcaster.accumulate_usage(
+                                session_id=session_id,
+                                usage=usage_response.model_dump(mode='json')
+                            )
+                        except Exception as e:
+                            logger.error(f"❌ 中止时发送 billing 事件失败: {str(e)}", exc_info=True)
+                        
+                        # 4. finalize 消息并结束 session
                         await agent.broadcaster.finalize_message(session_id)
                         await self.session_service.end_session(session_id, status="stopped")
                         break

@@ -23,7 +23,7 @@ from core.billing.models import UsageResponse, LLMCallRecord
 from core.billing.pricing_data import CLAUDE_PRICING, get_model_pricing
 
 if TYPE_CHECKING:
-    from utils.usage_tracker import UsageTracker
+    from core.billing.tracker import EnhancedUsageTracker
 
 
 # ============================================================
@@ -42,17 +42,17 @@ __all__ = [
 # ========== 便捷方法（向后兼容）==========
 
 def from_usage_tracker_helper(
-    tracker: 'UsageTracker',
+    tracker: 'EnhancedUsageTracker',
     model: str = "claude-sonnet-4",
     latency: Optional[float] = None,
 ) -> UsageResponse:
     """
-    从 UsageTracker 创建 UsageResponse（便捷方法）
+    从 EnhancedUsageTracker 创建 UsageResponse（便捷方法）
     
     内部调用 UsageResponse.from_tracker()，统一使用新版实现
     
     Args:
-        tracker: UsageTracker 实例
+        tracker: EnhancedUsageTracker 实例
         model: 模型名称（用于设置主模型，如果 tracker 为空）
         latency: 总延迟（秒）
         

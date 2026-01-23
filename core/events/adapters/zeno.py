@@ -889,7 +889,7 @@ class ZenOAdapter(EventAdapter):
             # 2. 系统搭建类 API（Coze Ontology Builder）→ interface
             if api_name in ONTOLOGY_API_NAMES:
                 logger.debug(f"🔍 识别到系统搭建类 API: api_name={api_name}")
-                return self._generate_ontology_deltas(result_content)
+                return await self._generate_ontology_deltas(result_content)
             
         
         # plan_todo 工具的特殊处理（直接转换为 progress 格式）
@@ -1184,10 +1184,13 @@ class ZenOAdapter(EventAdapter):
         # 生成 application delta（可选，包含 dashboard_id 等）
         dashboard_id = actual_data.get("dashboard_id")
         if dashboard_id:
+            # 从 report.title 获取名称，从 success 字段获取状态
+            report_title = report.get("title", "数据分析") if report else "数据分析"
+            app_status = "success" if actual_data.get("success") else "failed"
             app_data = {
                 "application_id": dashboard_id,
-                "name": "数据分析",
-                "status": "success"
+                "name": report_title,
+                "status": app_status
             }
             deltas.append(self._create_delta("application", app_data))
         
@@ -1318,17 +1321,18 @@ class ZenOAdapter(EventAdapter):
         
         return deltas
     
-    def _generate_ontology_deltas(self, result_content: str) -> List[Dict[str, Any]]:
+    async def _generate_ontology_deltas(self, result_content: str) -> List[Dict[str, Any]]:
         """
         为系统搭建类 API（Coze Ontology Builder）生成 delta
         
         Coze SSE 返回格式（解析后）：
         - 最终结果通常在最后一个 Message 事件的 content 中
+        - content 可能是 JSON 对象，也可能是指向 JSON 文件的 URL
         - 包含系统配置（实体、属性、关系）
         
         生成的 delta 类型：
         - intent: 意图识别
-        - interface: 系统配置（实体、属性、关系）
+        - interface: 系统配置（实体、属性、关系）—— content 为 JSON 字符串
         - application: 应用状态
         
         Args:
@@ -1348,13 +1352,19 @@ class ZenOAdapter(EventAdapter):
         
         logger.info(f"🏗️ Ontology Builder 结果处理")
         
-        # 生成 intent delta（系统搭建场景）
-        intent_data = {
-            "intent_id": 1,  # 1 = 系统搭建
-            "intent_name": "系统搭建",
-            "platform": "ontology"
-        }
-        deltas.append(self._create_delta("intent", intent_data))
+        # 🆕 V7.10: 检测 parsed_result 是否是 URL，如果是则下载内容
+        # Coze 有时会返回指向 S3/OSS 的 JSON 文件 URL 而不是直接返回内容
+        if isinstance(parsed_result, str) and self._is_json_url(parsed_result):
+            logger.info(f"📥 检测到 Ontology 结果是 URL，开始下载: {parsed_result[:100]}...")
+            downloaded_content = await self._fetch_json_content(parsed_result)
+            if downloaded_content:
+                parsed_result = downloaded_content
+                logger.info(f"✅ Ontology 内容下载成功，内容类型: {type(parsed_result).__name__}")
+            else:
+                logger.warning(f"⚠️ Ontology 内容下载失败，使用原始 URL 作为内容")
+        
+        # 🆕 V7.10.2: 只生成 interface delta，移除 intent 和 application delta
+        # 前端已通过路由层的 intent delta 获知意图，不需要重复发送
         
         # 生成 interface delta（系统配置）
         # parsed_result 可能是配置对象或包含配置的结构
@@ -1370,18 +1380,85 @@ class ZenOAdapter(EventAdapter):
                 parsed_result
             )
         
-        deltas.append(self._create_delta("interface", interface_data))
+        # 🆕 将 interface_data 序列化为 JSON 字符串
+        # 前端期望 content 是 JSON 字符串，如：
+        # {"type": "interface", "content": "{\"ontology\":{...},\"config\":{...}}"}
+        if isinstance(interface_data, (dict, list)):
+            interface_content = json.dumps(interface_data, ensure_ascii=False)
+        else:
+            interface_content = str(interface_data)
         
-        # 生成 application delta（构建状态）
-        # 注意：这里不再使用 session_id，因为我们是返回 delta 列表
-        app_data = {
-            "application_id": "ontology_build",
-            "name": "系统配置",
-            "status": "success"
-        }
-        deltas.append(self._create_delta("application", app_data))
+        deltas.append(self._create_delta("interface", interface_content))
         
         return deltas
+    
+    def _is_json_url(self, value: str) -> bool:
+        """
+        检测字符串是否是指向 JSON 文件的 URL
+        
+        Args:
+            value: 待检测的字符串
+            
+        Returns:
+            是否是 JSON URL
+        """
+        if not isinstance(value, str):
+            return False
+        
+        value = value.strip()
+        
+        # 检查是否是 HTTP/HTTPS URL
+        if not (value.startswith("http://") or value.startswith("https://")):
+            return False
+        
+        # 检查是否是 JSON 文件 URL（常见的云存储路径）
+        # 支持 .json 后缀或常见的云存储域名
+        json_indicators = [
+            ".json",
+            "s3.amazonaws.com",
+            "s3.ap-southeast",
+            "oss-cn-",
+            "aliyuncs.com",
+            "blob.core.windows.net",
+        ]
+        
+        return any(indicator in value.lower() for indicator in json_indicators)
+    
+    async def _fetch_json_content(self, url: str) -> Any:
+        """
+        下载 JSON 文件内容
+        
+        Args:
+            url: JSON 文件 URL
+            
+        Returns:
+            解析后的 JSON 对象，失败返回 None
+        """
+        import httpx
+        
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                content = response.text
+                logger.debug(f"📥 JSON 内容下载成功，长度: {len(content)}")
+                
+                # 尝试解析 JSON
+                try:
+                    return json.loads(content)
+                except json.JSONDecodeError:
+                    logger.warning(f"⚠️ 下载的内容不是有效 JSON: {content[:200]}...")
+                    return content
+                    
+        except httpx.TimeoutException:
+            logger.error(f"❌ 下载 JSON 内容超时: {url}")
+            return None
+        except httpx.HTTPStatusError as e:
+            logger.error(f"❌ 下载 JSON 内容 HTTP 错误: {e.response.status_code}, url={url}")
+            return None
+        except Exception as e:
+            logger.error(f"❌ 下载 JSON 内容失败: {str(e)}", exc_info=True)
+            return None
     
     def _generate_flowchart_deltas(self, result_content: str) -> List[Dict[str, Any]]:
         """
@@ -1446,15 +1523,7 @@ class ZenOAdapter(EventAdapter):
         
         # 清理 Mermaid 代码块标记
         mermaid_content = self._clean_mermaid_content(mermaid_content)
-        
-        # 生成 intent delta（系统搭建场景，流程图是其一部分）
-        intent_data = {
-            "intent_id": 1,  # 1 = 系统搭建
-            "intent_name": "系统搭建",
-            "platform": "flowchart"
-        }
-        deltas.append(self._create_delta("intent", intent_data))
-        
+                
         # 生成 mind delta（Mermaid 图表）
         mind_data = {
             "mermaid_content": mermaid_content,
@@ -1502,13 +1571,18 @@ class ZenOAdapter(EventAdapter):
         """
         解析 Coze SSE 流内容，提取最终结果
         
+        🆕 V7.10.1: 修复累积空 {} 的问题
+        - 只取最后一个非空、有意义的 content
+        - 如果 content 是 URL，直接返回 URL
+        - 如果 content 是 JSON 对象，累积后解析
+        
         Args:
             raw_content: 原始 SSE 流内容
             
         Returns:
             最终结果（最后一个 Message 事件的 content）
         """
-        final_content = ""
+        contents = []  # 收集所有非空 content
         
         for line in raw_content.split("\n"):
             line = line.strip()
@@ -1518,17 +1592,31 @@ class ZenOAdapter(EventAdapter):
                 try:
                     data = json.loads(data_str)
                     content = data.get("content", "")
-                    if content:
-                        final_content += content
+                    if content and content.strip() and content.strip() != "{}":
+                        contents.append(content)
                 except json.JSONDecodeError:
                     continue
         
-        # 尝试将累积的内容解析为 JSON
+        if not contents:
+            return None
+        
+        # 🆕 检查最后一个 content 是否是 URL
+        last_content = contents[-1].strip()
+        if last_content.startswith("http://") or last_content.startswith("https://"):
+            logger.info(f"🔗 检测到 Coze 返回 URL: {last_content[:100]}...")
+            return last_content
+        
+        # 尝试将所有内容累积后解析为 JSON
+        final_content = "".join(contents)
         if final_content:
             try:
                 return json.loads(final_content)
             except json.JSONDecodeError:
-                return final_content
+                # 如果解析失败，尝试只用最后一个 content
+                try:
+                    return json.loads(last_content)
+                except json.JSONDecodeError:
+                    return final_content
         
         return None
     
