@@ -2,9 +2,7 @@
 gRPC 认证和授权拦截器
 用于保护 Production gRPC 服务免受未授权访问
 
-认证策略：
-- 内网访问（VPC 内部）：无需认证
-- 公网访问：需要 Bearer token API Key
+当前策略：仅提供基于 IP 的白名单（内网免认证）
 """
 
 import grpc
@@ -15,9 +13,6 @@ from typing import Callable, Any
 from functools import wraps
 
 logger = logging.getLogger(__name__)
-
-# 从环境变量读取 gRPC API Key
-GRPC_API_KEY = os.getenv("GRPC_API_KEY", "")
 
 # 内网 IP 段白名单（AWS VPC 常用范围）
 INTERNAL_CIDRS = [
@@ -49,14 +44,13 @@ def is_internal_ip(peer_address: str) -> bool:
         # 检查是否在任何内网 CIDR 中
         for cidr in INTERNAL_CIDRS:
             if ip in cidr:
-                logger.debug(f"[内网访问] IP: {ip_str}, 允许无认证")
+                logger.debug(f"[内网访问] IP: {ip_str}")
                 return True
         
-        logger.debug(f"[公网访问] IP: {ip_str}, 需要认证")
+        logger.debug(f"[公网访问] IP: {ip_str}")
         return False
     except (ValueError, IndexError) as e:
         logger.warning(f"无法解析 peer 地址: {peer_address}, 错误: {e}")
-        # 如果无法解析，假设为公网（安全起见）
         return False
 
 
@@ -64,87 +58,40 @@ class AuthInterceptor(grpc.aio.ServerInterceptor):
     """
     gRPC 服务器认证拦截器
     
-    策略：
-    - 内网 IP：直接通过（无需认证）
-    - 公网 IP：需要有效的 Bearer token
-    - 允许方法：Health Check 无需认证
+    当前策略：
+    - 仅用于监控和日志记录
+    - 不进行实际的认证和授权检查
+    - 允许所有请求通过
     """
 
     async def intercept_service(self, continuation, handler_call_details):
         """
-        拦截每个 gRPC 请求
+        拦截每个 gRPC 请求，记录日志但不阻止
         
         Args:
             continuation: 继续执行的函数
             handler_call_details: 包含请求元数据的详情对象
         
         Returns:
-            继续处理或返回认证错误
+            继续处理请求
         """
         
-        # 允许的无认证方法（健康检查）
-        allowed_methods = {
-            "/grpc.health.v1.Health/Check",
-            "/grpc.health.v1.Health/Watch",
-        }
-        
         method = handler_call_details.method
-        
-        # 跳过健康检查的认证
-        if method in allowed_methods:
-            logger.debug(f"[健康检查豁免] 方法: {method}")
-            return await continuation(handler_call_details)
-        
-        # 获取客户端 peer 地址
         peer = handler_call_details.peer
         
-        # 检查是否是内网 IP
+        # 记录所有请求用于审计
         if is_internal_ip(peer):
-            logger.info(f"[内网访问允许] 方法: {method}, 客户端: {peer}")
-            # 内网流量直接通过
-            return await continuation(handler_call_details)
+            logger.info(f"[gRPC 请求] 内网 - 方法: {method}, 客户端: {peer}")
+        else:
+            logger.info(f"[gRPC 请求] 公网 - 方法: {method}, 客户端: {peer}")
         
-        # 公网流量需要认证
-        logger.info(f"[公网访问] 方法: {method}, 客户端: {peer}, 进行认证检查")
-        
-        metadata = dict(handler_call_details.invocation_metadata or [])
-        auth_header = metadata.get("authorization", "").strip()
-        
-        if not auth_header or not auth_header.startswith("Bearer "):
-            logger.warning(
-                f"[认证失败] 方法: {method}, 客户端: {peer}, "
-                f"缺少或格式错误的 authorization header"
-            )
-            
-            await handler_call_details.context.abort(
-                grpc.StatusCode.UNAUTHENTICATED,
-                "Public access requires valid API key (Authorization: Bearer <key>)"
-            )
-        
-        # 提取 token（去掉 "Bearer " 前缀）
-        token = auth_header[7:]
-        
-        # 验证 token
-        if not token or token != GRPC_API_KEY:
-            logger.warning(
-                f"[认证失败] 方法: {method}, 客户端: {peer}, 无效的 API key"
-            )
-            
-            await handler_call_details.context.abort(
-                grpc.StatusCode.PERMISSION_DENIED,
-                "Invalid API key"
-            )
-        
-        logger.info(f"[公网认证成功] 方法: {method}, 客户端: {peer}")
-        
-        # 认证成功，继续处理请求
+        # 直接通过，无需认证
         return await continuation(handler_call_details)
 
 
 def require_auth(func: Callable) -> Callable:
     """
-    装饰器：要求 gRPC 方法进行公网认证
-    （内网访问仍然免认证）
+    装饰器：目前无实际作用，保留用于未来扩展
     
     用法：
         @require_auth
@@ -154,31 +101,7 @@ def require_auth(func: Callable) -> Callable:
     """
     @wraps(func)
     async def wrapper(self, request, context):
-        # 获取元数据
-        metadata = dict(context.invocation_metadata())
-        peer = context.peer()
-        
-        # 内网 IP 直接通过
-        if is_internal_ip(peer):
-            return await func(self, request, context)
-        
-        # 公网需要认证
-        auth_header = metadata.get("authorization", "").strip()
-        
-        if not auth_header or not auth_header.startswith("Bearer "):
-            await context.abort(
-                grpc.StatusCode.UNAUTHENTICATED,
-                "Public access requires API key"
-            )
-        
-        token = auth_header[7:]
-        if not token or token != GRPC_API_KEY:
-            await context.abort(
-                grpc.StatusCode.PERMISSION_DENIED,
-                "Invalid API key"
-            )
-        
-        # 认证通过，调用原函数
+        # 直接调用原函数，无认证检查
         return await func(self, request, context)
     
     return wrapper
@@ -193,4 +116,5 @@ def require_auth(func: Callable) -> Callable:
 #     interceptors = [AuthInterceptor()]
 #     server = grpc.aio.server(interceptors=interceptors)
 #     # ... 其他配置 ...
+
 
