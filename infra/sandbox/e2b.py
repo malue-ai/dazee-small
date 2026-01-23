@@ -444,6 +444,27 @@ class E2BSandboxProvider(SandboxProvider):
                 
                 return sandbox
             except Exception as e:
+                error_str = str(e).lower()
+                # 检测沙盒是否已被 E2B 删除（not found / paused sandbox not found）
+                if "not found" in error_str:
+                    logger.warning(
+                        f"⚠️ 沙盒已被删除，将自动重建: {db_sandbox.e2b_sandbox_id}"
+                    )
+                    # 清理旧的 e2b_sandbox_id 并创建新沙盒
+                    async with AsyncSessionLocal() as session:
+                        await crud.update_sandbox_e2b_id(
+                            session, conversation_id, "", status="deleted"
+                        )
+                    
+                    # 使用保存的 user_id 和 stack 创建新沙盒
+                    await self._create_new_sandbox(
+                        conversation_id,
+                        user_id=db_sandbox.user_id,
+                        stack=db_sandbox.stack
+                    )
+                    # 返回新创建的沙盒对象
+                    return self._sandbox_pool[conversation_id]
+                
                 logger.error(f"❌ 重新连接沙盒失败: {e}")
                 raise SandboxConnectionError(
                     f"沙盒连接失败，可能已被删除: {e}"
@@ -484,7 +505,7 @@ class E2BSandboxProvider(SandboxProvider):
         """
         last_error = None
         connection_keywords = [
-            'sandbox was not found', 'connection', 'timeout',
+            'not found', 'connection', 'timeout',
             'unavailable', 'disconnected'
         ]
         

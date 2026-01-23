@@ -570,6 +570,10 @@ class APICallingTool:
         import re
         import copy
         
+        # 🔍 调试日志：记录收到的 context 键和值
+        logger.info(f"🔑 [_resolve_body_placeholders] context keys: {list(context.keys())}")
+        logger.info(f"🔑 [_resolve_body_placeholders] conversation_id={context.get('conversation_id')}, user_id={context.get('user_id')}, session_id={context.get('session_id')}")
+        
         # 深拷贝避免修改原始数据
         resolved_body = copy.deepcopy(body)
         
