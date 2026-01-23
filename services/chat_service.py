@@ -816,16 +816,9 @@ class ChatService:
             if hasattr(agent, 'broadcaster') and agent.broadcaster:
                 agent.broadcaster.set_output_format(output_format, conversation_id)
             
-            # 🔧 V7.9.1: 设置 session context，确保 api_calling 等工具可以获取 conversation_id
-            # 问题：session_service.create_session 保存到 Redis，但 InMemoryStorage 没有同步
-            # 修复：在调用 agent.chat() 之前，手动设置 session context
-            if hasattr(agent, 'event_manager') and agent.event_manager:
-                await agent.event_manager.storage.set_session_context(
-                    session_id=session_id,
-                    conversation_id=conversation_id,
-                    user_id=user_id
-                )
-                logger.debug(f"🔑 已设置 session context: conversation_id={conversation_id}, user_id={user_id}")
+            # 🔧 Session context 已经在 session_service.create_session() 中保存到 Redis
+            # 工具（如 api_calling）可以通过 agent.event_manager.storage.get_session_context(session_id) 获取
+            logger.debug(f"🔑 Session context 已就绪: session_id={session_id}, conversation_id={conversation_id}, user_id={user_id}")
             
             # 🔧 用于保存 assistant_text（在 message_stop 清理 accumulator 前获取）
             _assistant_text_for_tasks = ""
