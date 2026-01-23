@@ -1423,6 +1423,14 @@ class SimpleAgent:
                 conv_id = session_context.get("conversation_id") or getattr(self, '_current_conversation_id', None) or session_id
                 tool_input.setdefault("conversation_id", conv_id)
             
+            # 🆕 V7.9: 为 api_calling 工具注入上下文（用于替换 body 中的占位符）
+            # 这些值不会直接传入工具参数，而是通过 **kwargs 供工具内部使用
+            if tool_name == "api_calling":
+                session_context = await self.event_manager.storage.get_session_context(session_id)
+                tool_input["user_id"] = session_context.get("user_id") or getattr(self, '_current_user_id', None)
+                tool_input["session_id"] = session_id
+                tool_input["conversation_id"] = session_context.get("conversation_id") or getattr(self, '_current_conversation_id', None) or session_id
+            
             # ===== 特殊工具处理 =====
             if tool_name == "plan_todo":
                 # plan_todo 工具需要 current_plan 参数

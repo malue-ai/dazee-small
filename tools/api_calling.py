@@ -218,7 +218,11 @@ class APICallingTool:
             # 2. 自动替换请求头中的环境变量占位符 ${VAR_NAME}
             final_headers = self._resolve_env_vars(final_headers)
             
-            # 3. 打印请求信息
+            # 3. 🆕 自动替换 body 中的上下文占位符 ${user_id}, ${conversation_id} 等
+            if body:
+                body = self._resolve_body_placeholders(body, kwargs)
+            
+            # 4. 打印请求信息
             logger.info(f"📡 调用 API: {method} {final_url}")
             logger.info(f"📤 请求头: {json.dumps({k: v[:20] + '...' if len(str(v)) > 20 else v for k, v in final_headers.items()}, ensure_ascii=False)}")
             if body:
@@ -538,6 +542,85 @@ class APICallingTool:
             resolved[key] = self._resolve_env_var_in_string(value) if isinstance(value, str) else value
         
         return resolved
+    
+    def _resolve_body_placeholders(
+        self,
+        body: Dict[str, Any],
+        context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        🆕 V7.9: 替换 body 中的上下文占位符
+        
+        支持的占位符：
+        - ${user_id}: 从 context 中获取用户 ID
+        - ${conversation_id}: 从 context 中获取会话 ID
+        - ${session_id}: 从 context 中获取 session ID
+        
+        占位符替换顺序：
+        1. 先从 context（框架注入的上下文）获取
+        2. 再从环境变量获取
+        
+        Args:
+            body: 请求体字典
+            context: 框架注入的上下文（来自 **kwargs）
+            
+        Returns:
+            替换后的 body
+        """
+        import re
+        import copy
+        
+        # 深拷贝避免修改原始数据
+        resolved_body = copy.deepcopy(body)
+        
+        # 支持的上下文占位符映射
+        # key: 占位符名（不含 ${}），value: context 中的 key
+        context_mapping = {
+            "user_id": "user_id",
+            "conversation_id": "conversation_id",
+            "session_id": "session_id",
+        }
+        
+        # 占位符正则：${VAR_NAME}
+        placeholder_pattern = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}')
+        
+        def replace_in_value(value):
+            """递归替换字符串中的占位符"""
+            if isinstance(value, str):
+                def replace_placeholder(match):
+                    var_name = match.group(1)
+                    
+                    # 1. 先从 context 获取
+                    if var_name in context_mapping:
+                        context_key = context_mapping[var_name]
+                        context_value = context.get(context_key)
+                        if context_value:
+                            logger.debug(f"🔑 替换上下文占位符: ${{{var_name}}} → {context_value[:20] if len(str(context_value)) > 20 else context_value}")
+                            return str(context_value)
+                    
+                    # 2. 再从环境变量获取
+                    env_value = os.environ.get(var_name)
+                    if env_value:
+                        logger.debug(f"🔑 替换环境变量占位符: ${{{var_name}}} → [已设置]")
+                        return env_value
+                    
+                    # 3. 未找到，保留原样并警告
+                    logger.warning(f"⚠️ 占位符未解析: ${{{var_name}}}（context 和环境变量中均未找到）")
+                    return match.group(0)
+                
+                return placeholder_pattern.sub(replace_placeholder, value)
+            
+            elif isinstance(value, dict):
+                return {k: replace_in_value(v) for k, v in value.items()}
+            
+            elif isinstance(value, list):
+                return [replace_in_value(item) for item in value]
+            
+            else:
+                return value
+        
+        resolved_body = replace_in_value(resolved_body)
+        return resolved_body
     
     async def _send_request(
         self,

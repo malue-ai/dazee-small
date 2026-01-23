@@ -1139,9 +1139,22 @@ class ZenOAdapter(EventAdapter):
             logger.warning(f"⚠️ 分析类 API 结果解析失败: {str(result_content)[:100]}...")
             return deltas
         
+        # 🔧 V7.9: 支持嵌套数据结构
+        # 问数平台返回格式：{"code":0, "data": {"success":true, "report":..., "chart":..., "data":...}}
+        # 需要从 data 字段中提取实际内容
+        actual_data = result
+        if "data" in result and isinstance(result.get("data"), dict):
+            # 检查外层 code 是否成功
+            if result.get("code") not in (0, None):
+                logger.warning(f"⚠️ 分析类 API 返回错误码: code={result.get('code')}, msg={result.get('msg')}")
+                return deltas
+            actual_data = result["data"]
+            logger.debug(f"📊 检测到嵌套数据结构，提取 data 字段")
+        
         # 检查是否成功
-        if not result.get("success", False):
-            logger.warning(f"⚠️ 分析类 API 返回失败: {result.get('error')}")
+        if not actual_data.get("success", False):
+            error_msg = actual_data.get("error") or result.get("msg") or result.get("error")
+            logger.warning(f"⚠️ 分析类 API 返回失败: {error_msg}")
             return deltas
         
         logger.info(f"📊 分析类 API 结果处理")
@@ -1149,27 +1162,27 @@ class ZenOAdapter(EventAdapter):
         # 注意：intent 不在此处理，由其他机制发送
         
         # 生成 sql delta
-        sql = result.get("sql")
+        sql = actual_data.get("sql")
         if sql:
             deltas.append(self._create_delta("sql", sql))
         
-        # 生成 data delta
-        data = result.get("data")
-        if data:
-            deltas.append(self._create_delta("data", data))
+        # 生成 data delta（注意：这里的 data 是查询结果数据，不是外层的 data 字段）
+        data_result = actual_data.get("data")
+        if data_result:
+            deltas.append(self._create_delta("data", data_result))
         
         # 生成 chart delta
-        chart = result.get("chart")
+        chart = actual_data.get("chart")
         if chart:
             deltas.append(self._create_delta("chart", chart))
         
         # 生成 report delta
-        report = result.get("report")
+        report = actual_data.get("report")
         if report:
             deltas.append(self._create_delta("report", report))
         
         # 生成 application delta（可选，包含 dashboard_id 等）
-        dashboard_id = result.get("dashboard_id")
+        dashboard_id = actual_data.get("dashboard_id")
         if dashboard_id:
             app_data = {
                 "application_id": dashboard_id,
