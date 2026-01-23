@@ -40,7 +40,7 @@ V7.5 重大重构：支持多模型调用记录和价格明细
 
 # 🆕 V7.5 新模块
 from core.billing.models import LLMCallRecord, UsageResponse
-from core.billing.tracker import EnhancedUsageTracker
+from core.billing.tracker import EnhancedUsageTracker, create_enhanced_usage_tracker
 
 # 定价和成本计算
 from core.billing.pricing import (
@@ -52,8 +52,9 @@ from core.billing.pricing import (
 # 定价数据
 from core.billing.pricing_data import CLAUDE_PRICING, get_model_pricing
 
-# 🔄 向后兼容：重导出旧接口
-from utils.usage_tracker import UsageTracker, create_usage_tracker
+# 🔄 向后兼容：别名（指向 EnhancedUsageTracker）
+UsageTracker = EnhancedUsageTracker
+create_usage_tracker = create_enhanced_usage_tracker
 
 __all__ = [
     # 🆕 V7.5 新接口（推荐）

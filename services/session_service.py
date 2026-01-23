@@ -149,6 +149,11 @@ class SessionService:
         """
         停止正在运行的 Session（用户主动中断）
         
+        流程：
+        1. 设置 Redis 停止标志
+        2. chat_service 事件循环检测到标志后会发送 billing 事件
+        3. 发送 session_stopped 事件通知前端
+        
         Args:
             session_id: Session ID
             
@@ -163,7 +168,7 @@ class SessionService:
         if not status:
             raise SessionNotFoundError(f"Session 不存在或已过期: session_id={session_id}")
         
-        # 设置停止标志（Agent 会检测并停止执行）
+        # 设置停止标志（chat_service 事件循环会检测并发送 billing 事件）
         await self.redis.set_stop_flag(session_id)
         
         # 更新 Session 状态为 stopped

@@ -29,7 +29,7 @@ from uuid import uuid4
 # 2. 第三方库（无）
 
 # 3. 本地模块
-from utils.usage_tracker import create_usage_tracker
+from core.billing.tracker import create_enhanced_usage_tracker
 from core.agent.multi.models import (
     ExecutionMode,
     AgentConfig,
@@ -175,7 +175,7 @@ class MultiAgentOrchestrator:
         self._mem0_client = None  # Mem0 客户端
         
         # 🆕 V7.4: Token 使用统计
-        self.usage_tracker = create_usage_tracker()
+        self.usage_tracker = create_enhanced_usage_tracker()
         
         # 追踪信息（用于监控和调试）
         self._execution_trace = []
@@ -904,6 +904,16 @@ class MultiAgentOrchestrator:
                             
                             logger.info(f"   🔨 执行客户端工具: {tool_name}")
                             
+                            # 🆕 V7.10: 为 api_calling 工具注入上下文（用于替换 body 中的占位符）
+                            if tool_name == "api_calling":
+                                tool_input["user_id"] = getattr(self, '_current_user_id', None)
+                                tool_input["session_id"] = getattr(self, '_current_session_id', None) or session_id
+                                tool_input["conversation_id"] = getattr(self, '_current_session_id', None) or session_id
+                                logger.info(
+                                    f"   🔑 [api_calling 上下文注入] user_id={tool_input.get('user_id')}, "
+                                    f"session_id={tool_input.get('session_id')}, conversation_id={tool_input.get('conversation_id')}"
+                                )
+                            
                             try:
                                 result = await self.tool_executor.execute(tool_name, tool_input)
                                 all_tool_results.append({
@@ -1238,6 +1248,10 @@ class MultiAgentOrchestrator:
             user_id: 用户 ID（可选）
             tool_names: 需要加载的工具列表（可选，默认加载核心工具）
         """
+        # 🆕 V7.10: 保存上下文信息，供工具执行时注入使用
+        self._current_session_id = session_id
+        self._current_user_id = user_id
+        
         # 1. 初始化工具加载器
         if self._tool_loader is None:
             from core.tool.loader import ToolLoader
@@ -1518,6 +1532,16 @@ class MultiAgentOrchestrator:
                             tool_id = tc.get('id', '')
                             
                             logger.info(f"   🔨 执行客户端工具: {tool_name}")
+                            
+                            # 🆕 V7.10: 为 api_calling 工具注入上下文（用于替换 body 中的占位符）
+                            if tool_name == "api_calling":
+                                tool_input["user_id"] = getattr(self, '_current_user_id', None)
+                                tool_input["session_id"] = getattr(self, '_current_session_id', None)
+                                tool_input["conversation_id"] = getattr(self, '_current_session_id', None)
+                                logger.info(
+                                    f"   🔑 [api_calling 上下文注入] user_id={tool_input.get('user_id')}, "
+                                    f"session_id={tool_input.get('session_id')}, conversation_id={tool_input.get('conversation_id')}"
+                                )
                             
                             try:
                                 # 使用 ToolExecutor 执行工具

@@ -326,6 +326,33 @@ class RedisSessionManager:
             "user_id": status_data.get("user_id")
         }
     
+    async def set_session_context(
+        self,
+        session_id: str,
+        conversation_id: Optional[str] = None,
+        user_id: Optional[str] = None
+    ) -> None:
+        """
+        设置 session 上下文信息
+        
+        用于在 Agent 执行前同步 session context，确保工具（如 api_calling）
+        可以正确获取 conversation_id 等信息。
+        
+        Args:
+            session_id: Session ID
+            conversation_id: 对话 ID（可选）
+            user_id: 用户 ID（可选）
+        """
+        fields = {}
+        if conversation_id is not None:
+            fields["conversation_id"] = conversation_id
+        if user_id is not None:
+            fields["user_id"] = user_id
+        
+        if fields:
+            await self.update_session_status(session_id, **fields)
+            logger.debug(f"🔑 已设置 session context: session_id={session_id}, {fields}")
+    
     async def buffer_event(
         self,
         session_id: str,
