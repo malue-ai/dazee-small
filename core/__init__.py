@@ -14,7 +14,7 @@ ZenFlux Agent V4.2 Core Module
 """
 
 # Agent（新架构）
-from .agent import SimpleAgent, create_simple_agent
+from .agent import SimpleAgent, RVRBAgent, create_simple_agent
 
 # 能力路由（从新路径导入）
 from .tool.capability import (
@@ -121,6 +121,7 @@ from .orchestration import (
 __all__ = [
     # Agent
     "SimpleAgent",
+    "RVRBAgent",
     "create_simple_agent",
     
     # 能力路由

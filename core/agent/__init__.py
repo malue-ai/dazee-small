@@ -47,6 +47,7 @@ from core.agent.coordinator import (
 # Simple Agent
 from core.agent.simple import (
     SimpleAgent,
+    RVRBAgent,
     create_simple_agent
 )
 
@@ -111,6 +112,7 @@ __all__ = [
     
     # Simple Agent
     "SimpleAgent",
+    "RVRBAgent",
     "create_simple_agent",
     
     # Multi Agent

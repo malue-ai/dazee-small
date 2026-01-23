@@ -323,6 +323,9 @@ class IntentAnalyzer:
         requires_deep_reasoning = False
         tool_usage_hint = None
         
+        # 🆕 V8.0: 执行策略
+        execution_strategy = "rvr"
+        
         # 使用 JSON 提取器解析 LLM 响应
         parsed = extract_json(content)
         
@@ -374,10 +377,16 @@ class IntentAnalyzer:
             if raw_tool_hint in ("single", "sequential", "parallel"):
                 tool_usage_hint = raw_tool_hint
             
+            # 🆕 V8.0: execution_strategy
+            raw_strategy = parsed.get("execution_strategy")
+            if raw_strategy in ("rvr", "rvr-b"):
+                execution_strategy = raw_strategy
+            
             logger.debug(
                 f"   V7.8 语义建议: planning={suggested_planning_depth}, "
                 f"deep_reasoning={requires_deep_reasoning}, "
-                f"tools={tool_usage_hint}"
+                f"tools={tool_usage_hint}, "
+                f"strategy={execution_strategy}"  # 🆕 V8.0
             )
         else:
             logger.warning(f"无法从 LLM 响应中提取 JSON: {content[:100]}...")
@@ -396,6 +405,8 @@ class IntentAnalyzer:
             suggested_planning_depth=suggested_planning_depth,
             requires_deep_reasoning=requires_deep_reasoning,
             tool_usage_hint=tool_usage_hint,
+            # 🆕 V8.0: 执行策略
+            execution_strategy=execution_strategy,
         )
     
     def _get_conservative_default(self) -> IntentResult:

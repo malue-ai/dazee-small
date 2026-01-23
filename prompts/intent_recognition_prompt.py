@@ -52,7 +52,8 @@ Analyze the user query (considering conversation history if provided) and classi
   "is_follow_up": true|false,
   "suggested_planning_depth": null|"none"|"minimal"|"full",
   "requires_deep_reasoning": true|false,
-  "tool_usage_hint": null|"single"|"sequential"|"parallel"
+  "tool_usage_hint": null|"single"|"sequential"|"parallel",
+  "execution_strategy": "rvr"|"rvr-b"
 }
 ```
 
@@ -132,6 +133,25 @@ INTENT_PROMPT_COMPLEXITY = """
 - sequential: 多个工具串行调用（有依赖）
 - parallel: 多个工具可并行调用（无依赖）
 - 不确定时填 null
+
+### V8.0 执行策略（单智能体路由）
+
+**execution_strategy** (必填):
+- **rvr**: 标准执行循环（React-Validate-Reflect）
+  - 适用：简单确定性任务、单步工具调用、直接问答
+  - 特点：轻量高效，无回溯开销
+  
+- **rvr-b**: 带回溯的执行循环（RVR + Backtrack）
+  - 适用：探索性任务、可能失败需重试、多步骤复杂任务
+  - 特点：工具失败可尝试替代方案，策略动态调整
+
+**判断依据**：
+- 任务是否可能失败并需要备选方案？→ rvr-b
+- 是否涉及多步骤且步骤间有依赖？→ rvr-b
+- 是否为探索性任务（结果不确定）？→ rvr-b
+- 简单问答、单一工具、确定性结果？→ rvr
+
+**默认值**: rvr（不确定时使用标准循环）
 """
 
 INTENT_PROMPT_CONTEXT_AWARENESS = """
@@ -303,78 +323,94 @@ INTENT_PROMPT_MEMORY = """
 """
 
 INTENT_PROMPT_MULTI_AGENT = """
-### Needs Multi-Agent
+### Needs Multi-Agent（单/多智能体选择）
 
-判断任务是否需要多智能体协作。根据以下示例的思路自行推理：
+判断任务是否需要多智能体协作。这是路由决策的核心字段。
+
+#### 判断维度（系统化评估）
+
+| 维度 | 单智能体 (false) | 多智能体 (true) |
+|------|-----------------|-----------------|
+| 子任务数量 | 1 个主任务 | 3+ 个独立子任务 |
+| 子任务依赖 | 串行依赖/需协同 | 互相独立/可并行 |
+| 实体数量 | 单一对象 | 多个独立实体 |
+| 信息源 | 单一来源 | 多个独立来源 |
+| 处理模式 | 顺序处理 | 分治并行 |
+
+#### 典型场景映射
+
+**单智能体 (false)**：
+- 简单问答：天气、翻译、概念解释
+- 单任务执行：写代码、生成文档、数据分析（单数据源）
+- 串行工作流：重构代码 → 写测试（有依赖）
+- 交互对话：多轮问答、需求澄清
+
+**多智能体 (true)**：
+- 多实体研究：Top N 公司分析、竞品对比
+- 多源信息聚合：多个 API/数据库并行查询
+- 分治任务：大文档拆分处理、多语言并行翻译
+- 对比分析：多个框架/产品/方案对比
+
+#### Few-Shot 示例
 
 <examples>
 <example>
 <query>研究 Top 5 云计算公司的 AI 战略，生成分析报告</query>
-<reasoning>需要对多个独立实体进行并行研究，每个公司的研究互不依赖，适合多智能体并行处理</reasoning>
+<reasoning>5 个独立实体，每个公司的研究互不依赖，适合 Leader-Worker 并行处理</reasoning>
 <needs_multi_agent>true</needs_multi_agent>
 </example>
 
 <example>
-<query>今天上海天气怎么样？</query>
-<reasoning>简单查询，单一智能体即可完成</reasoning>
+<query>帮我写一个 Python 排序算法并补充单元测试</query>
+<reasoning>虽有多步骤（写代码+测试），但测试依赖代码结果，需串行执行</reasoning>
 <needs_multi_agent>false</needs_multi_agent>
 </example>
 
 <example>
 <query>对比 AWS、Azure、GCP 三家云服务商的定价策略</query>
-<reasoning>需要同时收集三家公司的信息并对比，可并行处理多个独立子任务</reasoning>
-<needs_multi_agent>true</needs_multi_agent>
-</example>
-
-<example>
-<query>帮我写一个 Python 排序算法</query>
-<reasoning>单一代码任务，不需要多智能体</reasoning>
-<needs_multi_agent>false</needs_multi_agent>
-</example>
-
-<example>
-<query>分析全球 Top 10 科技公司的财报数据，找出增长趋势</query>
-<reasoning>需要收集和分析 10 家公司的财报，每个公司的分析可以并行执行</reasoning>
+<reasoning>3 个独立实体，信息收集可并行，最后汇总对比</reasoning>
 <needs_multi_agent>true</needs_multi_agent>
 </example>
 
 <example>
 <query>帮我生成一个产品介绍 PPT</query>
-<reasoning>单一文档生成任务，单个智能体按步骤完成即可</reasoning>
+<reasoning>单一文档生成任务，虽然有多个 slide，但内容有连贯性，不适合拆分</reasoning>
 <needs_multi_agent>false</needs_multi_agent>
 </example>
 
 <example>
-<query>调研国内外主流 AI 框架（TensorFlow、PyTorch、Jax、PaddlePaddle）的性能对比</query>
-<reasoning>需要对多个框架进行独立调研和性能测试，适合并行处理</reasoning>
+<query>调研 TensorFlow、PyTorch、Jax、PaddlePaddle 的性能对比</query>
+<reasoning>4 个独立框架，每个框架的调研可并行，最后汇总对比</reasoning>
 <needs_multi_agent>true</needs_multi_agent>
 </example>
 
 <example>
-<query>重构这段代码并补充单元测试</query>
-<reasoning>虽然有多个子任务（重构+测试），但需要串行执行且相互依赖，单智能体即可</reasoning>
+<query>帮我把这篇 10 页的英文论文翻译成中文</query>
+<reasoning>虽然文档较长，但翻译需要保持上下文一致性，不适合拆分并行</reasoning>
 <needs_multi_agent>false</needs_multi_agent>
 </example>
 
 <example>
-<query>分析竞品 A、B、C 的功能特点和用户评价</query>
-<reasoning>对多个竞品进行独立分析，可以并行收集和整理信息</reasoning>
+<query>同时查询北京、上海、广州、深圳四个城市的天气</query>
+<reasoning>4 个独立查询，互不依赖，可并行执行</reasoning>
 <needs_multi_agent>true</needs_multi_agent>
 </example>
 
 <example>
-<query>翻译这篇英文文章</query>
-<reasoning>单一翻译任务，不需要多智能体</reasoning>
+<query>分析我们公司上季度的销售数据，找出增长点</query>
+<reasoning>单一数据源的分析任务，单智能体按步骤完成即可</reasoning>
 <needs_multi_agent>false</needs_multi_agent>
 </example>
 </examples>
 
-**核心判断标准**：
-- ✅ 需要 Multi-Agent：任务可分解为多个**独立且可并行**的子任务（如研究多个实体、对比多个对象）
-- ❌ 不需要 Multi-Agent：单一任务、串行依赖任务、或虽有多步骤但需协同完成的任务
+#### 决策公式
 
-**默认值**: false（不需要，即默认使用单智能体）
-**原则**: 不确定时选择 false，避免过度使用多智能体增加复杂度
+```
+needs_multi_agent = (独立子任务数 >= 3) AND (子任务互不依赖) AND (可从并行中获益)
+```
+
+**默认值**: false（不确定时使用单智能体，避免不必要的复杂度和成本）
+**成本提示**: 多智能体消耗约 10-15× 单智能体的 token，谨慎使用
 """
 
 INTENT_PROMPT_FOOTER = """
@@ -401,7 +437,8 @@ Output:
   "is_follow_up": false,
   "suggested_planning_depth": "full",
   "requires_deep_reasoning": false,
-  "tool_usage_hint": "sequential"
+  "tool_usage_hint": "sequential",
+  "execution_strategy": "rvr-b"
 }
 ```
 
@@ -419,7 +456,8 @@ Output:
   "is_follow_up": false,
   "suggested_planning_depth": "none",
   "requires_deep_reasoning": false,
-  "tool_usage_hint": "single"
+  "tool_usage_hint": "single",
+  "execution_strategy": "rvr"
 }
 ```
 
@@ -437,7 +475,8 @@ Output:
   "is_follow_up": false,
   "suggested_planning_depth": "full",
   "requires_deep_reasoning": true,
-  "tool_usage_hint": "parallel"
+  "tool_usage_hint": "parallel",
+  "execution_strategy": "rvr-b"
 }
 ```
 
@@ -455,7 +494,8 @@ Output:
   "is_follow_up": false,
   "suggested_planning_depth": "none",
   "requires_deep_reasoning": true,
-  "tool_usage_hint": null
+  "tool_usage_hint": null,
+  "execution_strategy": "rvr"
 }
 ```
 

@@ -51,6 +51,7 @@ class RoutingDecision:
     
     Attributes:
         agent_type: 推荐的智能体类型（"single" 或 "multi"）
+        execution_strategy: 🆕 V8.0 单智能体执行策略（"rvr" 或 "rvr-b"）
         intent: 意图分析结果
         complexity: 复杂度评分结果
         user_query: 原始用户查询
@@ -58,6 +59,7 @@ class RoutingDecision:
         context: 额外上下文
     """
     agent_type: str = "single"
+    execution_strategy: str = "rvr"  # 🆕 V8.0: "rvr" | "rvr-b"
     intent: Optional[IntentResult] = None
     complexity: Optional[ComplexityScore] = None
     user_query: str = ""
@@ -68,6 +70,7 @@ class RoutingDecision:
         """转换为字典"""
         return {
             "agent_type": self.agent_type,
+            "execution_strategy": self.execution_strategy,  # 🆕 V8.0
             "intent": self.intent.to_dict() if hasattr(self.intent, 'to_dict') else self._intent_to_dict(),
             "complexity": self.complexity.to_dict() if self.complexity else None,
             "user_query": self.user_query,
@@ -222,25 +225,21 @@ class AgentRouter:
             logger.info(f"⚠️ Fallback: 使用 ComplexityScorer score={score:.1f}")
         
         # 4. 路由决策
+        # 🆕 V8.0: 完全依赖 LLM 语义判断，移除硬编码阈值
         # 决策逻辑：
-        # - 意图分析明确需要多智能体 → 使用多智能体
-        # - 复杂度评分超过阈值 → 使用多智能体
-        # - 🆕 V7.1: 检查预算是否足够
-        # - 其他情况 → 使用单智能体
+        # - intent.needs_multi_agent = true → 使用多智能体
+        # - intent.needs_multi_agent = false → 使用单智能体
+        # - 🆕 V7.1: 检查预算是否足够（可能降级）
         
-        # 初步决策
+        # 初步决策（完全基于 LLM 语义判断）
         if intent.needs_multi_agent:
             agent_type = "multi"
-            routing_reason = "意图分析建议多智能体协作"
-            logger.info("🔀 初步路由决策: 多智能体（意图分析建议）")
-        elif score > self.complexity_threshold:
-            agent_type = "multi"
-            routing_reason = f"复杂度 {score:.1f} > 阈值 {self.complexity_threshold}"
-            logger.info(f"🔀 初步路由决策: 多智能体（复杂度 {score:.1f} > {self.complexity_threshold}）")
+            routing_reason = f"LLM 语义判断: 需要多智能体协作（score={score:.1f}）"
+            logger.info(f"🔀 路由决策: 多智能体（LLM 语义判断，score={score:.1f}）")
         else:
             agent_type = "single"
-            routing_reason = f"复杂度 {score:.1f} <= 阈值 {self.complexity_threshold}"
-            logger.info(f"🔀 路由决策: 单智能体（复杂度 {score:.1f}）")
+            routing_reason = f"LLM 语义判断: 单智能体即可（score={score:.1f}）"
+            logger.info(f"🔀 路由决策: 单智能体（LLM 语义判断，score={score:.1f}）")
         
         # 🆕 V7.1: 如果选择多智能体，检查预算是否足够
         budget_check_passed = True
@@ -285,8 +284,12 @@ class AgentRouter:
                 logger.warning(f"💰 {budget_result.warning}")
                 budget_warning = budget_result.warning
         
+        # 🆕 V8.0: 从 intent 获取执行策略（由 LLM 语义判断）
+        execution_strategy = getattr(intent, 'execution_strategy', 'rvr') if intent else 'rvr'
+        
         decision = RoutingDecision(
             agent_type=agent_type,
+            execution_strategy=execution_strategy,  # 🆕 V8.0
             intent=intent,
             complexity=complexity,
             user_query=user_query,
@@ -369,35 +372,15 @@ class AgentRouter:
         """
         判断是否应该使用多智能体
         
-        🆕 V7.0: 优先使用 intent.complexity_score
-        
-        独立的判断逻辑，方便测试和扩展
+        🆕 V8.0: 完全依赖 LLM 语义判断（intent.needs_multi_agent）
+        移除硬编码的 complexity_threshold 阈值
         
         Args:
             intent: 意图分析结果
-            complexity: 复杂度评分（可选，V7.0 后优先使用 intent.complexity_score）
+            complexity: 复杂度评分（仅用于日志，不参与决策）
             
         Returns:
             bool: 是否使用多智能体
         """
-        # 条件1: 意图分析明确需要
-        if intent.needs_multi_agent:
-            return True
-        
-        # 🆕 V7.0: 优先使用 intent.complexity_score
-        if hasattr(intent, 'complexity_score') and intent.complexity_score is not None:
-            if intent.complexity_score > self.complexity_threshold:
-                return True
-            return False
-        
-        # Fallback: 使用 ComplexityScore（向后兼容）
-        if complexity:
-            # 条件2: 复杂度等级超过阈值
-            if complexity.level == ComplexityLevel.COMPLEX:
-                return True
-            
-            # 条件3: 复杂度评分超过阈值
-            if complexity.score > self.complexity_threshold:
-                return True
-        
-        return False
+        # V8.0: 完全依赖 LLM 语义判断
+        return intent.needs_multi_agent

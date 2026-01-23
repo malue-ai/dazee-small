@@ -2,17 +2,20 @@
 DAG 调度器（DAGScheduler）
 
 V7.7 新增模块
+V8.0 增强：支持部分重规划（Partial Replan）
 
 提供多智能体 DAG 调度能力：
 1. 依赖分析和并行组计算
 2. 分层执行（每层可并行，层间串行）
 3. 失败重试和级联失败处理
 4. 依赖结果注入
+5. 🆕 部分重规划（从指定步骤开始重新规划）
 
 设计原则：
 - 与 Plan 协议解耦，只关注调度逻辑
 - 支持回调函数，方便集成事件系统
 - 异步执行，充分利用并发能力
+- 支持动态重规划，实现 RVR-B 回溯
 """
 
 import asyncio
@@ -558,3 +561,225 @@ class DAGScheduler:
                 logger.warning(f"⚠️ on_step_end 回调异常: {e}")
         
         return result
+    
+    # ===================
+    # V8.0: 部分重规划支持
+    # ===================
+    
+    def get_affected_steps(
+        self,
+        plan: Plan,
+        from_step_id: str
+    ) -> List[PlanStep]:
+        """
+        获取需要重新执行的步骤（从指定步骤开始）
+        
+        包括：
+        1. 指定的步骤本身
+        2. 所有直接或间接依赖该步骤的后续步骤
+        
+        Args:
+            plan: Plan 对象
+            from_step_id: 起始步骤 ID
+            
+        Returns:
+            List[PlanStep]: 受影响的步骤列表
+        """
+        if not plan.steps:
+            return []
+        
+        step_map = {step.id: step for step in plan.steps}
+        
+        if from_step_id not in step_map:
+            logger.warning(f"⚠️ 步骤 {from_step_id} 不存在于 Plan 中")
+            return []
+        
+        # 构建反向依赖图（谁依赖了我）
+        dependents: Dict[str, Set[str]] = {step.id: set() for step in plan.steps}
+        for step in plan.steps:
+            for dep_id in step.dependencies:
+                if dep_id in dependents:
+                    dependents[dep_id].add(step.id)
+        
+        # BFS 找出所有受影响的步骤
+        affected: Set[str] = {from_step_id}
+        queue = [from_step_id]
+        
+        while queue:
+            current_id = queue.pop(0)
+            for dependent_id in dependents.get(current_id, set()):
+                if dependent_id not in affected:
+                    affected.add(dependent_id)
+                    queue.append(dependent_id)
+        
+        # 按原始顺序返回
+        affected_steps = [step for step in plan.steps if step.id in affected]
+        logger.info(f"📋 受影响的步骤: {[s.id for s in affected_steps]}")
+        
+        return affected_steps
+    
+    def reset_steps_for_replan(
+        self,
+        plan: Plan,
+        from_step_id: str
+    ) -> Plan:
+        """
+        重置指定步骤及其后续步骤的状态，准备重新执行
+        
+        Args:
+            plan: Plan 对象
+            from_step_id: 起始步骤 ID
+            
+        Returns:
+            Plan: 重置后的 Plan（修改原对象）
+        """
+        affected_steps = self.get_affected_steps(plan, from_step_id)
+        
+        for step in affected_steps:
+            # 重置状态为 PENDING
+            step.status = StepStatus.PENDING
+            step.result = None
+            step.error = None
+            step.retry_count = 0
+            step.started_at = None
+            step.completed_at = None
+            step.injected_context = None
+            
+            logger.debug(f"🔄 重置步骤 {step.id} 状态为 PENDING")
+        
+        logger.info(
+            f"✅ 已重置 {len(affected_steps)} 个步骤，准备从 {from_step_id} 开始重新执行"
+        )
+        
+        return plan
+    
+    async def execute_partial(
+        self,
+        plan: Plan,
+        from_step_id: str,
+        executor: StepExecutor,
+        on_step_start: Optional[OnStepStart] = None,
+        on_step_end: Optional[OnStepEnd] = None,
+        on_group_start: Optional[OnGroupStart] = None,
+        on_group_end: Optional[OnGroupEnd] = None,
+        reset_steps: bool = True,
+    ) -> DAGExecutionResult:
+        """
+        部分执行 Plan（从指定步骤开始）
+        
+        用于回溯场景：当某个步骤失败后，可以从该步骤开始重新执行
+        
+        执行流程：
+        1. 获取受影响的步骤
+        2. 重置这些步骤的状态
+        3. 重新计算并行组（只包含待执行的步骤）
+        4. 执行
+        
+        Args:
+            plan: 待执行的 Plan
+            from_step_id: 从哪个步骤开始
+            executor: 步骤执行器函数
+            on_step_start: 步骤开始回调
+            on_step_end: 步骤结束回调
+            on_group_start: 组开始回调
+            on_group_end: 组结束回调
+            reset_steps: 是否重置步骤状态
+            
+        Returns:
+            DAGExecutionResult: 执行结果
+        """
+        logger.info(f"🔄 部分重规划执行: 从步骤 {from_step_id} 开始")
+        
+        # 重置受影响的步骤
+        if reset_steps:
+            self.reset_steps_for_replan(plan, from_step_id)
+        
+        # 正常执行（compute_parallel_groups 会自动跳过已完成的步骤）
+        return await self.execute(
+            plan=plan,
+            executor=executor,
+            on_step_start=on_step_start,
+            on_step_end=on_step_end,
+            on_group_start=on_group_start,
+            on_group_end=on_group_end,
+        )
+    
+    def can_partial_replan(
+        self,
+        plan: Plan,
+        from_step_id: str
+    ) -> tuple[bool, str]:
+        """
+        检查是否可以从指定步骤开始部分重规划
+        
+        Args:
+            plan: Plan 对象
+            from_step_id: 起始步骤 ID
+            
+        Returns:
+            (can_replan, reason): 是否可以重规划及原因
+        """
+        if not plan.steps:
+            return False, "Plan 为空"
+        
+        step_map = {step.id: step for step in plan.steps}
+        
+        if from_step_id not in step_map:
+            return False, f"步骤 {from_step_id} 不存在"
+        
+        # 检查该步骤的所有依赖是否已完成
+        step = step_map[from_step_id]
+        for dep_id in step.dependencies:
+            if dep_id not in step_map:
+                return False, f"依赖步骤 {dep_id} 不存在"
+            
+            dep_step = step_map[dep_id]
+            if dep_step.status != StepStatus.COMPLETED:
+                return False, f"依赖步骤 {dep_id} 未完成"
+        
+        return True, "可以重规划"
+    
+    def get_replan_suggestion(
+        self,
+        plan: Plan,
+        failed_step_id: str,
+        error_message: str = ""
+    ) -> Dict[str, Any]:
+        """
+        获取重规划建议
+        
+        Args:
+            plan: Plan 对象
+            failed_step_id: 失败的步骤 ID
+            error_message: 错误消息
+            
+        Returns:
+            重规划建议字典
+        """
+        affected_steps = self.get_affected_steps(plan, failed_step_id)
+        can_replan, reason = self.can_partial_replan(plan, failed_step_id)
+        
+        # 获取已完成的步骤
+        completed_steps = [
+            step for step in plan.steps
+            if step.status == StepStatus.COMPLETED
+        ]
+        
+        suggestion = {
+            "can_partial_replan": can_replan,
+            "reason": reason,
+            "from_step_id": failed_step_id,
+            "affected_step_count": len(affected_steps),
+            "affected_step_ids": [s.id for s in affected_steps],
+            "completed_step_count": len(completed_steps),
+            "completed_step_ids": [s.id for s in completed_steps],
+            "error_message": error_message,
+            "recommendation": "partial_replan" if can_replan else "full_replan",
+        }
+        
+        # 如果无法部分重规划，建议全部重规划
+        if not can_replan:
+            suggestion["alternative"] = "full_replan"
+            suggestion["alternative_reason"] = "依赖步骤未完成，需要从头开始"
+        
+        return suggestion

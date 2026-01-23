@@ -43,6 +43,7 @@ from core.schemas import (
 if TYPE_CHECKING:
     from core.routing import RoutingDecision
     from core.agent.protocol import AgentProtocol
+    from core.agent.types import IntentResult
 
 logger = get_logger(__name__)
 
@@ -211,14 +212,17 @@ class AgentFactory:
         **kwargs
     ):
         """
-        从路由决策创建 SimpleAgent
+        从路由决策创建单智能体（SimpleAgent 或 RVRBAgent）
         
         核心逻辑：
         1. 使用 base_schema 作为基础（保留实例级配置）
         2. 根据 complexity_score 微调运行时参数
         3. 选择对应复杂度的提示词（从 prompt_cache）
+        4. 根据复杂度选择 Agent 类型：
+           - 简单（0-4）: SimpleAgent（标准 RVR）
+           - 中低（4-7）: RVRBAgent（RVR + Backtrack）
         """
-        from core.agent.simple import SimpleAgent
+        from core.agent.simple import SimpleAgent, RVRBAgent
         
         # 获取复杂度评分
         intent = decision.intent
@@ -264,8 +268,12 @@ class AgentFactory:
                 effective_system_prompt = cached_prompt
                 logger.info(f"   使用 {complexity_level} 层提示词")
         
-        # 创建 Agent
-        agent = SimpleAgent(
+        # 🆕 V8.0: 根据路由决策的 execution_strategy 选择 Agent 类型
+        # 由 LLM 在意图分析时语义判断，而不是硬编码分数阈值
+        execution_strategy = getattr(decision, 'execution_strategy', 'rvr')
+        use_rvrb = execution_strategy == "rvr-b"
+        
+        common_kwargs = dict(
             model=schema.model,
             max_turns=schema.max_turns,
             event_manager=event_manager,
@@ -277,7 +285,22 @@ class AgentFactory:
             **kwargs
         )
         
-        logger.info(f"✅ SimpleAgent 创建完成: max_turns={schema.max_turns}")
+        if use_rvrb:
+            agent = RVRBAgent(
+                max_backtracks=3,
+                **common_kwargs
+            )
+            logger.info(
+                f"✅ RVRBAgent 创建完成: max_turns={schema.max_turns}, "
+                f"max_backtracks=3, complexity={complexity_score:.2f}"
+            )
+        else:
+            agent = SimpleAgent(**common_kwargs)
+            logger.info(
+                f"✅ SimpleAgent 创建完成: max_turns={schema.max_turns}, "
+                f"complexity={complexity_score:.2f}"
+            )
+        
         return agent
     
     @classmethod

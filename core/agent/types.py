@@ -69,6 +69,12 @@ class IntentResult:
     requires_deep_reasoning: bool = False        # 🆕 V7.8: 是否需要深度推理（即使问题简短）
     tool_usage_hint: Optional[str] = None        # 🆕 V7.8: single / sequential / parallel
     
+    # ==================== V8.0 执行策略 ====================
+    # 由 LLM 语义判断，决定使用 SimpleAgent 还是 RVRBAgent
+    execution_strategy: str = "rvr"  # 🆕 V8.0: "rvr" | "rvr-b"
+    # - rvr: 标准 RVR 循环（简单确定性任务）
+    # - rvr-b: RVR + Backtrack（探索性任务、可能失败需重试、多步骤任务）
+    
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {
@@ -86,5 +92,7 @@ class IntentResult:
             "suggested_planning_depth": self.suggested_planning_depth,
             "requires_deep_reasoning": self.requires_deep_reasoning,
             "tool_usage_hint": self.tool_usage_hint,
+            # V8.0 执行策略
+            "execution_strategy": self.execution_strategy,
         }
 

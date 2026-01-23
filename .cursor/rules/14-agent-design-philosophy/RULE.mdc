@@ -1,0 +1,210 @@
+---
+description: "智能体设计理念：LLM-First、提示词驱动、语义优先"
+alwaysApply: true
+---
+
+# 智能体设计理念
+
+## 核心原则：LLM-First
+
+本项目采用 **大模型优先（LLM-First）** 的设计理念，充分信任和发挥大语言模型的深度语义理解与推理能力。
+
+### 1. 提示词驱动优先
+
+**优先使用提示词工程解决问题，而非硬编码规则。**
+
+```python
+# ✅ 推荐：提示词驱动，让模型理解和推理
+async def classify_intent(user_input: str) -> str:
+    """使用 LLM 进行意图识别"""
+    prompt = """
+    分析用户输入的意图，从以下类别中选择最匹配的：
+    - query: 查询信息
+    - action: 执行操作
+    - clarification: 需要澄清
+    
+    用户输入：{user_input}
+    
+    请分析用户的真实意图，考虑上下文和隐含含义。
+    """
+    return await llm.generate(prompt.format(user_input=user_input))
+
+# ❌ 避免：硬编码关键词匹配
+def classify_intent(user_input: str) -> str:
+    """硬规则意图识别 - 难以覆盖所有情况"""
+    if any(kw in user_input for kw in ["查询", "什么是", "告诉我"]):
+        return "query"
+    elif any(kw in user_input for kw in ["执行", "运行", "帮我"]):
+        return "action"
+    return "unknown"
+```
+
+### 2. 语义理解优于模式匹配
+
+**信任模型的语义理解能力，避免脆弱的正则表达式和关键词匹配。**
+
+```python
+# ✅ 推荐：语义理解
+async def extract_entities(text: str) -> Dict[str, Any]:
+    """让 LLM 理解文本语义，提取实体"""
+    prompt = """
+    从以下文本中提取关键实体信息：
+    - 人名、组织、地点
+    - 时间、日期
+    - 数值、金额
+    
+    请理解文本语义，即使表达方式不同也要正确识别。
+    文本：{text}
+    """
+    return await llm.generate_structured(prompt.format(text=text))
+
+# ❌ 避免：正则表达式硬匹配
+def extract_entities(text: str) -> Dict[str, Any]:
+    """正则匹配 - 脆弱且难以维护"""
+    date_pattern = r"\d{4}[-/]\d{2}[-/]\d{2}"
+    # 无法处理 "下周三"、"明天" 等自然语言表达
+```
+
+### 3. 动态决策优于静态规则
+
+**让模型根据上下文动态决策，而非预设固定的决策树。**
+
+```python
+# ✅ 推荐：动态推理决策
+async def determine_next_action(
+    context: Context, 
+    history: List[Message]
+) -> Action:
+    """根据上下文让 LLM 推理下一步行动"""
+    prompt = """
+    当前上下文：{context}
+    对话历史：{history}
+    
+    分析当前情况，决定最合适的下一步行动：
+    1. 考虑用户的真实需求
+    2. 评估已有信息是否充分
+    3. 选择最有效的执行路径
+    """
+    return await llm.reason_and_decide(prompt)
+
+# ❌ 避免：硬编码决策树
+def determine_next_action(state: str) -> Action:
+    """固定状态机 - 无法处理复杂情况"""
+    if state == "init":
+        return Action.GREET
+    elif state == "waiting":
+        return Action.PROMPT
+    # 状态爆炸，难以维护
+```
+
+### 4. 容错与自我修正
+
+**利用模型的自我反思能力，实现错误检测和自动修正。**
+
+```python
+# ✅ 推荐：让模型自我检查和修正
+async def execute_with_reflection(task: Task) -> Result:
+    """执行任务并自我反思"""
+    result = await execute_task(task)
+    
+    # 让模型检查结果
+    reflection = await llm.reflect(
+        prompt="""
+        检查以下执行结果是否正确：
+        任务：{task}
+        结果：{result}
+        
+        如发现问题，提出修正建议。
+        """
+    )
+    
+    if reflection.needs_correction:
+        return await self.correct_and_retry(task, reflection.suggestions)
+    
+    return result
+```
+
+## 硬规则的适用场景
+
+以下场景可以考虑使用硬编码规则：
+
+### 1. 简单确定性任务
+
+```python
+# ✅ 适合硬规则：格式验证
+def is_valid_email(email: str) -> bool:
+    """邮箱格式验证 - 规则明确，无需推理"""
+    return bool(re.match(r'^[\w\.-]+@[\w\.-]+\.\w+$', email))
+
+# ✅ 适合硬规则：数值计算
+def calculate_total(items: List[Item]) -> float:
+    """金额计算 - 纯数学运算"""
+    return sum(item.price * item.quantity for item in items)
+```
+
+### 2. 低延迟要求场景
+
+```python
+# ✅ 适合硬规则：需要毫秒级响应
+def quick_filter(message: str) -> bool:
+    """快速过滤 - 延迟敏感，使用简单规则"""
+    blocked_keywords = ["spam", "广告"]
+    return not any(kw in message.lower() for kw in blocked_keywords)
+
+# 复杂判断交给异步 LLM 处理
+async def deep_analysis(message: str) -> AnalysisResult:
+    """深度分析 - 可接受较高延迟"""
+    return await llm.analyze(message)
+```
+
+### 3. 安全边界检查
+
+```python
+# ✅ 适合硬规则：安全边界必须确定性保证
+def validate_input_length(text: str, max_length: int = 10000) -> bool:
+    """输入长度限制 - 安全边界"""
+    return len(text) <= max_length
+
+def sanitize_path(path: str) -> str:
+    """路径净化 - 防止路径遍历攻击"""
+    return os.path.normpath(path).lstrip('/')
+```
+
+## 决策指南
+
+在选择实现方式时，考虑以下因素：
+
+| 因素 | 选择 LLM | 选择硬规则 |
+|------|---------|-----------|
+| 任务复杂度 | 语义理解、推理、判断 | 简单格式验证、计算 |
+| 输入多样性 | 自然语言、多种表达 | 固定格式、结构化 |
+| 延迟要求 | 可接受 100ms+ | 需要 <10ms |
+| 准确性要求 | 允许概率性输出 | 必须 100% 确定 |
+| 维护成本 | 提示词易于调整 | 规则简单明确 |
+| 边界情况 | 需要灵活处理 | 边界明确固定 |
+
+## 实践建议
+
+1. **默认选择 LLM**：遇到新问题时，先考虑能否用提示词解决
+2. **渐进式优化**：先用 LLM 验证可行性，再针对热点路径优化
+3. **混合架构**：快速预过滤（硬规则）+ 深度处理（LLM）
+4. **持续评估**：监控 LLM 调用的准确性和延迟，按需调整
+
+```python
+# ✅ 混合架构示例
+async def process_request(request: Request) -> Response:
+    """
+    混合处理策略：
+    1. 硬规则快速预检
+    2. LLM 深度理解和处理
+    """
+    # 快速预检（硬规则，毫秒级）
+    if not quick_validate(request):
+        return Response.invalid()
+    
+    # 深度处理（LLM，语义理解）
+    understanding = await llm.understand(request)
+    result = await llm.process(understanding)
+    
+    return Response.success(result)
+```
