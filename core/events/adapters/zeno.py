@@ -1184,10 +1184,13 @@ class ZenOAdapter(EventAdapter):
         # 生成 application delta（可选，包含 dashboard_id 等）
         dashboard_id = actual_data.get("dashboard_id")
         if dashboard_id:
+            # 从 report.title 获取名称，从 success 字段获取状态
+            report_title = report.get("title", "数据分析") if report else "数据分析"
+            app_status = "success" if actual_data.get("success") else "failed"
             app_data = {
                 "application_id": dashboard_id,
-                "name": "数据分析",
-                "status": "success"
+                "name": report_title,
+                "status": app_status
             }
             deltas.append(self._create_delta("application", app_data))
         
