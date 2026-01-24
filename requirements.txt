@@ -44,6 +44,7 @@ boto3>=1.34.0
 # gRPC（内部微服务通信）- 版本需要匹配
 grpcio>=1.66.0
 grpcio-tools>=1.66.0
+grpcio-reflection>=1.66.0
 protobuf>=5.26.0
 
 # Mem0 记忆系统

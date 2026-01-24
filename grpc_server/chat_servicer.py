@@ -32,6 +32,7 @@ _ChatServicerBase = (
 
 # 导入业务服务（复用 services 层）
 from services import get_chat_service, get_session_service
+from services.session_service import SessionNotFoundError
 
 # 导入 ZenO 格式适配器
 from core.events.adapters.zeno import ZenOAdapter
@@ -172,7 +173,12 @@ class ChatServicer(_ChatServicerBase):
         
         使用 output_format="zeno" 让 EventBroadcaster 在内部处理格式转换，
         保持与 HTTP API 一致的事件格式
+        
+        🆕 优化：
+        - 检测客户端断开连接，提前终止处理
+        - 记录更详细的错误信息
         """
+        event_count = 0
         try:
             logger.info(
                 f"📨 gRPC 流式聊天请求: user_id={request.user_id}, "
@@ -212,20 +218,43 @@ class ChatServicer(_ChatServicerBase):
             )
             
             async for event in event_stream:
+                # 🆕 检查客户端是否已断开连接
+                if context.cancelled():
+                    logger.warning(
+                        f"⚠️ gRPC 客户端已断开连接，停止流式响应: "
+                        f"user_id={request.user_id}, events_sent={event_count}"
+                    )
+                    return
+                
                 if event is None:
                     continue
+                
+                event_count += 1
                 
                 # 直接返回原始 event JSON，与 HTTP API 完全一致
                 yield tool_service_pb2.ChatEvent(
                     data=json.dumps(event, ensure_ascii=False)
                 )
             
-            logger.info("✅ gRPC 流式聊天完成")
+            logger.info(f"✅ gRPC 流式聊天完成: events_sent={event_count}")
         
         except Exception as e:
-            logger.error(f"❌ gRPC 流式聊天错误: {str(e)}", exc_info=True)
+            error_str = str(e)
+            # 🆕 区分连接断开和其他错误
+            if context.cancelled() or "cancelled" in error_str.lower():
+                logger.warning(
+                    f"⚠️ gRPC 流式聊天被取消: user_id={request.user_id}, "
+                    f"events_sent={event_count}, reason={error_str}"
+                )
+                return
+            
+            logger.error(
+                f"❌ gRPC 流式聊天错误: {error_str}, "
+                f"events_sent={event_count}",
+                exc_info=True
+            )
             context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(f"流式聊天失败: {str(e)}")
+            context.set_details(f"流式聊天失败: {error_str}")
             
             # 与 HTTP API 错误格式一致
             error_event = {
@@ -235,7 +264,7 @@ class ChatServicer(_ChatServicerBase):
                 "error": {
                     "type": "unknown",
                     "code": "INTERNAL_ERROR",
-                    "message": str(e),
+                    "message": error_str,
                     "retryable": False
                 }
             }
@@ -250,7 +279,12 @@ class ChatServicer(_ChatServicerBase):
     ) -> AsyncIterator[tool_service_pb2.ChatEvent]:
         """
         重连到已存在的会话（流式）
+        
+        🆕 优化：
+        - 检测客户端断开连接，提前终止处理
+        - 记录更详细的错误信息
         """
+        event_count = 0
         try:
             logger.info(
                 f"📨 gRPC 重连请求: session_id={request.session_id}, "
@@ -288,6 +322,14 @@ class ChatServicer(_ChatServicerBase):
             if history_events:
                 logger.info(f"📤 推送 {len(history_events)} 个历史事件")
                 for event in history_events:
+                    # 🆕 检查客户端是否已断开连接
+                    if context.cancelled():
+                        logger.warning(
+                            f"⚠️ gRPC 重连客户端断开（历史事件阶段）: "
+                            f"session_id={request.session_id}, events_sent={event_count}"
+                        )
+                        return
+                    
                     # 🔧 与 HTTP API 一致：判断事件是否已经是 zeno 格式
                     event_type = event.get("type", "")
                     is_zeno_format = event_type.startswith("message.assistant.") or event_type == "reconnect_info"
@@ -301,6 +343,7 @@ class ChatServicer(_ChatServicerBase):
                         if output_event is None:
                             continue
                     
+                    event_count += 1
                     yield tool_service_pb2.ChatEvent(
                         data=json.dumps(output_event, ensure_ascii=False)
                     )
@@ -318,6 +361,14 @@ class ChatServicer(_ChatServicerBase):
                 after_id=last_seq,
                 timeout=1800
             ):
+                # 🆕 检查客户端是否已断开连接
+                if context.cancelled():
+                    logger.warning(
+                        f"⚠️ gRPC 重连客户端断开（实时事件阶段）: "
+                        f"session_id={request.session_id}, events_sent={event_count}"
+                    )
+                    return
+                
                 # 🔧 与 HTTP API 一致：判断事件是否已经是 zeno 格式
                 event_type = event.get("type", "")
                 is_zeno_format = event_type.startswith("message.assistant.") or event_type == "reconnect_info"
@@ -329,6 +380,7 @@ class ChatServicer(_ChatServicerBase):
                     if output_event is None:
                         continue
                 
+                event_count += 1
                 yield tool_service_pb2.ChatEvent(
                     data=json.dumps(output_event, ensure_ascii=False)
                 )
@@ -338,12 +390,50 @@ class ChatServicer(_ChatServicerBase):
                 if output_type in ["session_end", "message_complete", "message.assistant.done"]:
                     break
             
-            logger.info("✅ gRPC 重连流结束")
+            logger.info(f"✅ gRPC 重连流结束: events_sent={event_count}")
+        
+        except SessionNotFoundError as e:
+            # 🆕 Session 不存在：这是预期的业务场景，不应该记录 ERROR
+            logger.info(
+                f"📋 Session 不存在或已过期: session_id={request.session_id}"
+            )
+            context.set_code(grpc.StatusCode.NOT_FOUND)
+            context.set_details(f"Session 不存在或已过期: {request.session_id}")
+            
+            # 返回友好的错误事件，告知客户端需要创建新会话
+            error_event = {
+                "type": "message.assistant.error",
+                "message_id": "",
+                "timestamp": int(datetime.now().timestamp() * 1000),
+                "error": {
+                    "type": "session_not_found",
+                    "code": "SESSION_NOT_FOUND",
+                    "message": f"Session 不存在或已过期，请创建新会话",
+                    "retryable": False,
+                    "session_id": request.session_id
+                }
+            }
+            yield tool_service_pb2.ChatEvent(
+                data=json.dumps(error_event, ensure_ascii=False)
+            )
         
         except Exception as e:
-            logger.error(f"❌ gRPC 重连错误: {str(e)}", exc_info=True)
+            error_str = str(e)
+            # 🆕 区分连接断开和其他错误
+            if context.cancelled() or "cancelled" in error_str.lower():
+                logger.warning(
+                    f"⚠️ gRPC 重连被取消: session_id={request.session_id}, "
+                    f"events_sent={event_count}, reason={error_str}"
+                )
+                return
+            
+            logger.error(
+                f"❌ gRPC 重连错误: {error_str}, "
+                f"session_id={request.session_id}, events_sent={event_count}",
+                exc_info=True
+            )
             context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(f"重连失败: {str(e)}")
+            context.set_details(f"重连失败: {error_str}")
             
             # 与 HTTP API 错误格式一致
             error_event = {
@@ -353,7 +443,7 @@ class ChatServicer(_ChatServicerBase):
                 "error": {
                     "type": "unknown",
                     "code": "INTERNAL_ERROR",
-                    "message": str(e),
+                    "message": error_str,
                     "retryable": False
                 }
             }

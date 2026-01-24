@@ -76,9 +76,8 @@ class SessionService:
     # ==================== Session 生命周期 ====================
     
     def _generate_session_id(self) -> str:
-        """生成运行会话ID"""
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        return f"sess_{ts}_{uuid4().hex[:8]}"
+        """生成运行会话ID（纯 UUID）"""
+        return uuid4().hex
     
     async def create_session(
         self,

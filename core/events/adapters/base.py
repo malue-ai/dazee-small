@@ -153,7 +153,8 @@ class EventAdapter(ABC):
         self,
         tool_name: str,
         tool_input: Dict[str, Any],
-        tool_result: Dict[str, Any]
+        tool_result: Dict[str, Any],
+        conversation_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         增强 tool_result，返回额外的 delta 列表（可选实现）
@@ -171,6 +172,7 @@ class EventAdapter(ABC):
                     "content": "...",
                     "is_error": False
                 }
+            conversation_id: 实际的对话 ID（用于 sandbox 等工具的 delta 生成）
             
         Returns:
             delta 列表，每个元素是 {"type": "xxx", "content": "..."}

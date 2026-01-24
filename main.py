@@ -203,7 +203,8 @@ async def _stop_grpc_server(grpc_server: Optional[Any]) -> None:
     """关闭 gRPC 服务器"""
     if grpc_server:
         try:
-            await grpc_server.stop(grace_period=5)
+            # 🆕 使用 gRPC 服务器实例配置的 grace_period（默认 30 秒）
+            await grpc_server.stop()
             print("✅ gRPC 服务器已关闭")
         except Exception as e:
             print(f"⚠️ 关闭 gRPC 服务器失败: {e}")

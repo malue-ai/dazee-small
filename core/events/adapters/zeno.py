@@ -245,6 +245,14 @@ class ZenOAdapter(EventAdapter):
         if event_type == "session_end":
             return self._transform_session_end(event, message_id, timestamp)
         
+        # 🆕 心跳事件：直接透传，保持连接活跃
+        if event_type == "ping":
+            return {
+                "type": "ping",
+                "timestamp": event.get("timestamp", int(time.time() * 1000)),
+                "session_id": session_id
+            }
+        
         # 其他事件暂不转换
         return None
     
@@ -327,9 +335,10 @@ class ZenOAdapter(EventAdapter):
                 logger.debug(f"[_transform_content_delta] 文本内容(response): len={len(text)}, accumulated_len={len(self._accumulated_content)}")
             # 累积内容（用于 done 事件）
             self._accumulated_content += text
-        elif block_type in ("tool_use", "server_tool_use"):
-            # 工具参数增量不需要转换为 ZenO 事件
-            logger.debug(f"[_transform_content_delta] 工具参数增量，跳过转换: block_type={block_type}")
+        elif block_type in ("tool_use", "server_tool_use", "tool_result"):
+            # 工具参数增量和工具结果不需要转换为 ZenO 事件
+            # tool_result 的处理由 enhance_tool_result 负责
+            logger.debug(f"[_transform_content_delta] 工具相关增量，跳过转换: block_type={block_type}")
             return None
         else:
             # 未知类型，跳过
@@ -888,7 +897,8 @@ class ZenOAdapter(EventAdapter):
         self,
         tool_name: str,
         tool_input: Dict[str, Any],
-        tool_result: Dict[str, Any]
+        tool_result: Dict[str, Any],
+        conversation_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         增强 tool_result，返回额外的 delta 列表
@@ -904,6 +914,8 @@ class ZenOAdapter(EventAdapter):
             tool_name: 工具名称（如 "api_calling"、"dify_Ontology_TextToChart_zen0"）
             tool_input: 工具输入参数（包含 api_name 等）
             tool_result: 工具返回结果（content_block 格式）
+            conversation_id: 实际的对话 ID（用于 sandbox 等工具的 delta 生成，
+                            避免使用 AI 可能传入的占位符如 "$CONVERSATION_ID"）
             
         Returns:
             delta 列表，每个元素是 {"type": "xxx", "content": "..."}
@@ -949,7 +961,7 @@ class ZenOAdapter(EventAdapter):
         # 🆕 V7.6: sandbox_run_project 工具的特殊处理（提取 preview_url）
         if tool_name == "sandbox_run_project":
             logger.debug(f"🔧 处理 sandbox_run_project 工具结果")
-            return self._generate_sandbox_deltas(result_content, tool_input)
+            return self._generate_sandbox_deltas(result_content, tool_input, conversation_id)
         
         # 🆕 V7.7: send_files 工具的特殊处理（生成 files delta）
         if tool_name == "send_files":
@@ -1246,7 +1258,8 @@ class ZenOAdapter(EventAdapter):
     def _generate_sandbox_deltas(
         self,
         result_content: str,
-        tool_input: Dict[str, Any]
+        tool_input: Dict[str, Any],
+        actual_conversation_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         🆕 V7.6: 为 sandbox_run_project 工具生成 sandbox delta
@@ -1265,6 +1278,7 @@ class ZenOAdapter(EventAdapter):
         Args:
             result_content: 工具返回的 JSON 字符串
             tool_input: 工具输入参数（包含 project_path、stack 等）
+            actual_conversation_id: 实际的对话 ID（优先使用，避免 AI 传入占位符如 "$CONVERSATION_ID"）
             
         Returns:
             delta 列表（包含一个 sandbox 类型的 delta）
@@ -1287,9 +1301,21 @@ class ZenOAdapter(EventAdapter):
         error = result.get("error")
         
         # 从 tool_input 获取额外信息
-        conversation_id = tool_input.get("conversation_id", "")
+        tool_conversation_id = tool_input.get("conversation_id", "")
         project_path = tool_input.get("project_path", "")
         stack = tool_input.get("stack", "")
+        
+        # 优先使用传入的实际 conversation_id，避免 AI 传入的占位符（如 "$CONVERSATION_ID"）
+        # 如果 tool_conversation_id 是占位符（以 $ 开头）或为空，则使用 actual_conversation_id
+        if actual_conversation_id and (
+            not tool_conversation_id or 
+            tool_conversation_id.startswith("$") or
+            tool_conversation_id.startswith("{")
+        ):
+            conversation_id = actual_conversation_id
+            logger.info(f"🔧 sandbox_id 使用实际 conversation_id: {conversation_id[:20]}... (原值: {tool_conversation_id})")
+        else:
+            conversation_id = tool_conversation_id
         
         # 构建 sandbox delta 数据
         sandbox_data = {

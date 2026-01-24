@@ -590,6 +590,8 @@ class RedisSessionManager:
         
         try:
             start_time = datetime.now()
+            last_event_time = datetime.now()  # 🆕 跟踪最后发送事件的时间
+            ping_interval = 30  # 🆕 30 秒无事件则发送 ping
             
             while True:
                 # 检查超时
@@ -616,8 +618,21 @@ class RedisSessionManager:
                         if event_seq > last_id:
                             yield event
                             last_id = event_seq
+                            last_event_time = datetime.now()  # 🆕 更新最后事件时间
                     except json.JSONDecodeError:
                         logger.warning(f"⚠️ 无法解析 Pub/Sub 消息: {message['data']}")
+                
+                # 🆕 心跳机制：超过 30 秒无事件则发送 ping，保持连接活跃
+                idle_seconds = (datetime.now() - last_event_time).total_seconds()
+                if idle_seconds >= ping_interval:
+                    ping_event = {
+                        "type": "ping",
+                        "timestamp": int(datetime.now().timestamp() * 1000),
+                        "session_id": session_id
+                    }
+                    yield ping_event
+                    last_event_time = datetime.now()
+                    logger.debug(f"💓 发送 ping 心跳: session_id={session_id}, idle={idle_seconds:.0f}s")
                 
                 # 检查 session 是否结束
                 session_data = await self.get_session_status(session_id)
