@@ -111,6 +111,8 @@ class SandboxStatusResponse(BaseModel):
     status: str  # creating/running/paused/killed/none
     stack: Optional[str] = None
     preview_url: Optional[str] = None
+    active_project_path: Optional[str] = None  # 当前运行的项目路径
+    active_project_stack: Optional[str] = None  # 当前运行的项目技术栈
     created_at: Optional[str] = None
     last_active_at: Optional[str] = None
 
@@ -176,6 +178,8 @@ async def get_sandbox_status(conversation_id: str):
             status=info.status,
             stack=info.stack,
             preview_url=info.preview_url,
+            active_project_path=info.active_project_path,
+            active_project_stack=info.active_project_stack,
             created_at=info.created_at,
             last_active_at=info.last_active_at
         )
@@ -214,6 +218,8 @@ async def init_sandbox(
             status=info.status,
             stack=info.stack,
             preview_url=info.preview_url,
+            active_project_path=info.active_project_path,
+            active_project_stack=info.active_project_stack,
             created_at=info.created_at,
             last_active_at=info.last_active_at
         )
@@ -273,6 +279,8 @@ async def resume_sandbox(conversation_id: str):
             status=info.status,
             stack=info.stack,
             preview_url=info.preview_url,
+            active_project_path=info.active_project_path,
+            active_project_stack=info.active_project_stack,
             created_at=info.created_at,
             last_active_at=info.last_active_at
         )
@@ -607,9 +615,12 @@ async def list_projects(
             projects = []
             for f in files:
                 if f.type == "directory":
-                    project_info = await _detect_sandbox_project(service, conversation_id, f.path, f.name)
-                    if project_info:
-                        projects.append(project_info)
+                    # 调用 service 层的项目检测方法
+                    project_dict = await service.detect_project(
+                        conversation_id, f.path, f.name
+                    )
+                    if project_dict:
+                        projects.append(ProjectInfo(**project_dict))
             
             return ProjectListResponse(
                 conversation_id=conversation_id,
@@ -727,85 +738,3 @@ async def get_project_logs(
         raise HTTPException(status_code=500, detail="获取项目日志失败")
 
 
-# ==================== 辅助函数 ====================
-
-async def _detect_sandbox_project(
-    service,
-    conversation_id: str,
-    dir_path: str,
-    dir_name: str
-) -> Optional[ProjectInfo]:
-    """
-    检测沙盒目录是否为项目
-    """
-    try:
-        files = await service.list_files(conversation_id, dir_path)
-        file_names = {f.name for f in files}
-        
-        project_type = None
-        entry_file = None
-        has_requirements = False
-        
-        # Python 项目检测
-        if "requirements.txt" in file_names:
-            has_requirements = True
-            
-            if "app.py" in file_names:
-                # 读取 requirements.txt 判断框架
-                try:
-                    req_content = await service.read_file(conversation_id, f"{dir_path}/requirements.txt")
-                    if "gradio" in req_content.lower():
-                        project_type = "gradio"
-                    elif "streamlit" in req_content.lower():
-                        project_type = "streamlit"
-                    elif "flask" in req_content.lower():
-                        project_type = "flask"
-                    elif "fastapi" in req_content.lower():
-                        project_type = "fastapi"
-                    else:
-                        project_type = "python"
-                except:
-                    project_type = "python"
-                entry_file = "app.py"
-            elif "main.py" in file_names:
-                entry_file = "main.py"
-                project_type = "python"
-        
-        # Node.js 项目检测
-        if "package.json" in file_names:
-            try:
-                import json
-                pkg_content = await service.read_file(conversation_id, f"{dir_path}/package.json")
-                pkg = json.loads(pkg_content)
-                deps = pkg.get("dependencies", {})
-                
-                if "next" in deps:
-                    project_type = "nextjs"
-                elif "vue" in deps:
-                    project_type = "vue"
-                elif "react" in deps:
-                    project_type = "react"
-                else:
-                    project_type = "nodejs"
-            except:
-                project_type = "nodejs"
-        
-        # 静态网页检测
-        if "index.html" in file_names and not project_type:
-            project_type = "static"
-            entry_file = "index.html"
-        
-        if not project_type and not entry_file and not has_requirements:
-            return None
-        
-        return ProjectInfo(
-            name=dir_name,
-            path=dir_name,
-            type=project_type,
-            entry_file=entry_file,
-            has_requirements=has_requirements
-        )
-        
-    except Exception as e:
-        logger.warning(f"检测项目失败: {dir_path} - {e}")
-        return None

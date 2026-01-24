@@ -289,6 +289,8 @@ class E2BSandboxProvider(SandboxProvider):
                     else SandboxStatus.CREATING,
                 stack=db_sandbox.stack,
                 preview_url=db_sandbox.preview_url,
+                active_project_path=db_sandbox.active_project_path,
+                active_project_stack=db_sandbox.active_project_stack,
                 created_at=db_sandbox.created_at.isoformat() \
                     if db_sandbox.created_at else None,
                 last_active_at=db_sandbox.last_active_at.isoformat() \
@@ -298,6 +300,9 @@ class E2BSandboxProvider(SandboxProvider):
     async def pause_sandbox(self, conversation_id: str) -> bool:
         """
         暂停沙盒
+        
+        暂停前会自动停止运行中的项目（但不清除数据库记录），
+        恢复时会自动重启项目
         
         Args:
             conversation_id: 对话 ID
@@ -309,6 +314,11 @@ class E2BSandboxProvider(SandboxProvider):
             return False
         
         try:
+            # 1. 先停止运行中的项目（不清除数据库记录，恢复时需要用）
+            logger.info(f"⏹️ 暂停前停止项目进程: {conversation_id}")
+            await self._stop_running_project(conversation_id)
+            
+            # 2. 暂停沙盒
             sandbox = self._sandbox_pool[conversation_id]
             await sandbox.pause()
             del self._sandbox_pool[conversation_id]
@@ -328,6 +338,8 @@ class E2BSandboxProvider(SandboxProvider):
         """
         恢复沙盒
         
+        恢复后会自动重启暂停前运行的项目（如果有记录）
+        
         Args:
             conversation_id: 对话 ID
             
@@ -346,7 +358,12 @@ class E2BSandboxProvider(SandboxProvider):
         if not db_sandbox or not db_sandbox.e2b_sandbox_id:
             raise SandboxNotFoundError(f"沙盒不存在: {conversation_id}")
         
+        # 保存项目信息（恢复后需要用）
+        active_project_path = db_sandbox.active_project_path
+        active_project_stack = db_sandbox.active_project_stack
+        
         try:
+            # 1. 重连沙盒
             sandbox = await self._connect_sandbox(db_sandbox.e2b_sandbox_id)
             self._sandbox_pool[conversation_id] = sandbox
             
@@ -356,6 +373,24 @@ class E2BSandboxProvider(SandboxProvider):
                 )
             
             logger.info(f"▶️ 沙盒已恢复: {conversation_id}")
+            
+            # 2. 如果有记录的项目，自动重启
+            if active_project_path and active_project_stack:
+                logger.info(
+                    f"🔄 检测到之前运行的项目，自动重启: "
+                    f"{active_project_path} ({active_project_stack})"
+                )
+                preview_url = await self.run_project(
+                    conversation_id,
+                    active_project_path,
+                    active_project_stack,
+                    wait_for_ready=True
+                )
+                if preview_url:
+                    logger.info(f"✅ 项目已自动重启: {preview_url}")
+                else:
+                    logger.warning(f"⚠️ 项目自动重启失败")
+            
             return await self.get_sandbox(conversation_id)
         except Exception as e:
             raise SandboxError(f"恢复沙盒失败: {e}")
@@ -963,6 +998,43 @@ class E2BSandboxProvider(SandboxProvider):
         logger.warning(f"⚠️ 等待端口 {port} 超时 ({timeout}s)")
         return False
     
+    async def _stop_running_project(self, conversation_id: str) -> bool:
+        """
+        停止当前运行的项目
+        
+        通过 pkill 杀掉所有可能的项目进程，
+        但不清除数据库中的项目记录（用于恢复时重启）
+        
+        Args:
+            conversation_id: 对话 ID
+            
+        Returns:
+            是否成功
+        """
+        try:
+            # 杀掉常见的项目进程
+            kill_commands = [
+                "pkill -f 'streamlit' 2>/dev/null || true",
+                "pkill -f 'gradio' 2>/dev/null || true",
+                "pkill -f 'uvicorn' 2>/dev/null || true",
+                "pkill -f 'flask' 2>/dev/null || true",
+                "pkill -f 'python app.py' 2>/dev/null || true",
+                "pkill -f 'python main.py' 2>/dev/null || true",
+                "pkill -f 'npm run dev' 2>/dev/null || true",
+                "pkill -f 'node' 2>/dev/null || true",
+                "pkill -f 'vite' 2>/dev/null || true",
+            ]
+            
+            for cmd in kill_commands:
+                await self.run_command(conversation_id, cmd, timeout=5)
+            
+            logger.info(f"⏹️ 已停止沙盒中的项目进程: {conversation_id}")
+            return True
+            
+        except Exception as e:
+            logger.warning(f"⚠️ 停止项目进程时出错: {e}")
+            return False
+    
     async def run_project(
         self,
         conversation_id: str,
@@ -973,6 +1045,9 @@ class E2BSandboxProvider(SandboxProvider):
     ) -> Optional[str]:
         """
         运行项目
+        
+        注意：每个沙盒只能运行一个对外项目，
+        如果已有项目在运行，会先停止旧项目
         
         Args:
             conversation_id: 对话 ID
@@ -995,6 +1070,17 @@ class E2BSandboxProvider(SandboxProvider):
         
         logger.info(f"📂 项目路径: {project_path}, 技术栈: {stack}")
         
+        # 检查是否已有项目在运行，如有则先停止
+        async with AsyncSessionLocal() as session:
+            db_sandbox = await crud.get_sandbox_by_conversation(
+                session, conversation_id
+            )
+            if db_sandbox and db_sandbox.active_project_path:
+                logger.info(
+                    f"⚠️ 检测到已有项目运行中: {db_sandbox.active_project_path}，将先停止"
+                )
+                await self._stop_running_project(conversation_id)
+        
         # 技术栈配置
         config = self._get_stack_config(stack, port)
         command = config["cmd"]
@@ -1002,7 +1088,7 @@ class E2BSandboxProvider(SandboxProvider):
         startup_wait = config["startup_wait"]
         
         try:
-            # 停止旧进程
+            # 停止可能残留的进程
             await self.run_command(
                 conversation_id,
                 f"pkill -f '{project_path}' 2>/dev/null || true",
@@ -1039,7 +1125,11 @@ class E2BSandboxProvider(SandboxProvider):
             host = sandbox.get_host(port)
             preview_url = f"https://{host}"
             
+            # 更新数据库：保存项目信息和预览 URL
             async with AsyncSessionLocal() as session:
+                await crud.update_sandbox_project(
+                    session, conversation_id, project_path, stack, preview_url
+                )
                 await crud.update_sandbox_status(
                     session, conversation_id, "running", preview_url
                 )

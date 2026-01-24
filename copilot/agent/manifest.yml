@@ -12,7 +12,7 @@ type: Load Balanced Web Service
 # 使用 location 指定 ECR 镜像地址（由部署脚本自动更新）
 # ============================================================
 image:
-  location: 308470327605.dkr.ecr.ap-southeast-1.amazonaws.com/zen0-backend/agent:20260124-090509
+  location: 308470327605.dkr.ecr.ap-southeast-1.amazonaws.com/zen0-backend/agent:20260124-102305
   port: 80  # Nginx 监听端口
 
 # ============================================================
@@ -24,10 +24,10 @@ http:
     path: '/health'
     success_codes: '200'
     healthy_threshold: 2
-    unhealthy_threshold: 3
+    unhealthy_threshold: 5    # 允许 5 次失败再标记不健康（避免因短暂负载导致重启）
     interval: 30s
-    timeout: 10s
-    grace_period: 300s  # 启动宽限期（5分钟，PostgreSQL 初始化需要更长时间）
+    timeout: 20s              # 增加超时时间（长任务执行期间 /health 响应可能较慢）
+    grace_period: 300s        # 启动宽限期（5分钟，PostgreSQL 初始化需要更长时间）
   deregistration_delay: 30s
 
 # ============================================================
@@ -44,8 +44,8 @@ nlb:
   healthcheck:
     port: 80
     healthy_threshold: 2
-    unhealthy_threshold: 2
-    interval: 10s
+    unhealthy_threshold: 5    # 允许 5 次失败再标记不健康
+    interval: 30s             # 延长检查间隔
 
 # ============================================================
 # 资源配置（默认/Staging）
@@ -127,9 +127,10 @@ environments:
       healthcheck:
         path: /health
         healthy_threshold: 2
-        unhealthy_threshold: 3
+        unhealthy_threshold: 5    # 允许 5 次失败再标记不健康
         interval: 30s
-        timeout: 10s
+        timeout: 20s              # 增加超时时间
+        grace_period: 300s        # 启动宽限期
       alias: agent.malue.ai
       hosted_zone: Z09256181GREC1AN4SOOS  # malue.ai 的托管区域 ID
     

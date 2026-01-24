@@ -599,7 +599,7 @@ perform_health_check() {
     
     local elapsed=0
     while [ $elapsed -lt $HEALTH_CHECK_TIMEOUT ]; do
-        local running
+        local running=""
         running=$(aws ecs describe-services \
             --cluster "$cluster" \
             --services "$service" \
@@ -607,7 +607,7 @@ perform_health_check() {
             --query 'services[0].runningCount' \
             --output text 2>/dev/null) || running=""
         
-        local desired
+        local desired=""
         desired=$(aws ecs describe-services \
             --cluster "$cluster" \
             --services "$service" \

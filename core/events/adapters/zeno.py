@@ -179,6 +179,9 @@ class ZenOAdapter(EventAdapter):
                 f"index={data.get('index')}"
             )
             
+            # 用于标记是否需要发送换行符事件
+            should_send_newline = False
+            
             # 🆕 简化逻辑：只要收到 content_start 且 type=text 且不是第一个 text 块，就加换行
             # 这样多轮 text 内容（比如工具调用后的回复）之间会有清晰的分隔
             if block_type == "text":
@@ -186,6 +189,8 @@ class ZenOAdapter(EventAdapter):
                     self._accumulated_content += "\n\n"
                     # 后续 text 块使用 response 类型
                     self._current_block_is_preface = False
+                    # 🔧 标记需要发送换行符事件
+                    should_send_newline = True
                     logger.debug(
                         f"[content_start] 新 text 块，添加换行分隔符，"
                         f"accumulated_len={len(self._accumulated_content)}"
@@ -199,7 +204,23 @@ class ZenOAdapter(EventAdapter):
                         logger.debug("[content_start] 首轮第一个 text 块，标记为 preface")
             
             self._current_block_type = block_type
-            return None  # content_start 不需要转换为 ZenO 事件
+            
+            # 🔧 如果需要发送换行符，返回一个 delta 事件
+            if should_send_newline:
+                logger.debug("[content_start] 发送换行符 delta 事件")
+                return {
+                    "type": "message.assistant.delta",
+                    "message_id": message_id,
+                    "session_id": session_id,
+                    "timestamp": timestamp,
+                    "delta": {
+                        "type": "response",
+                        "content": "\n\n"
+                    }
+                    # seq 由 EventDispatcher 统一添加
+                }
+            
+            return None  # 其他情况 content_start 不需要转换为 ZenO 事件
         
         if event_type == "content_delta":
             # 🆕 日志：记录当前 block 类型和 delta 预览
@@ -1393,18 +1414,9 @@ class ZenOAdapter(EventAdapter):
         # 前端已通过路由层的 intent delta 获知意图，不需要重复发送
         
         # 生成 interface delta（系统配置）
-        # parsed_result 可能是配置对象或包含配置的结构
+        # 🆕 V7.10.3: 直接使用完整的 parsed_result，不做任何字段提取
+        # 前端需要完整的 JSON 结构来处理
         interface_data = parsed_result
-        
-        # 如果结果嵌套在特定字段中，尝试提取
-        if isinstance(parsed_result, dict):
-            interface_data = (
-                parsed_result.get("config") or
-                parsed_result.get("ontology") or
-                parsed_result.get("entities") or
-                parsed_result.get("result") or
-                parsed_result
-            )
         
         # 🆕 将 interface_data 序列化为 JSON 字符串
         # 前端期望 content 是 JSON 字符串，如：

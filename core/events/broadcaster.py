@@ -589,7 +589,7 @@ class EventBroadcaster:
                 )
                 logger.debug(f"📦 message_delta 已保存: message_id={msg_id}, keys={list(metadata_update.keys())}")
             except Exception as e:
-                logger.warning(f"⚠️ message_delta 保存失败: {str(e)}")
+                logger.warning(f"⚠️ message_delta 保存失败: {str(e) or type(e).__name__}", exc_info=True)
         else:
             # DEFERRED：累积到 pending_metadata，等 message_stop 时一起保存
             if session_id not in self._pending_metadata:

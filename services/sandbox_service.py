@@ -51,6 +51,8 @@ class SandboxInfo:
     status: str
     stack: Optional[str]
     preview_url: Optional[str]
+    active_project_path: Optional[str]  # 当前运行的项目路径
+    active_project_stack: Optional[str]  # 当前运行的项目技术栈
     created_at: Optional[str]
     last_active_at: Optional[str]
 
@@ -93,6 +95,8 @@ def _convert_sandbox_info(info: InfraSandboxInfo) -> SandboxInfo:
         status=info.status.value if hasattr(info.status, 'value') else str(info.status),
         stack=info.stack,
         preview_url=info.preview_url,
+        active_project_path=info.active_project_path,
+        active_project_stack=info.active_project_stack,
         created_at=info.created_at,
         last_active_at=info.last_active_at
     )
@@ -518,6 +522,106 @@ class SandboxService:
                 "success": False,
                 "error": str(e)
             }
+    
+    # ==================== 项目检测 ====================
+    
+    async def detect_project(
+        self,
+        conversation_id: str,
+        dir_path: str,
+        dir_name: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        检测目录是否为可运行的项目
+        
+        检测规则：
+        - Python: requirements.txt + app.py/main.py
+        - Node.js: package.json（检测框架类型）
+        - 静态网页: index.html
+        
+        Args:
+            conversation_id: 对话 ID
+            dir_path: 目录完整路径
+            dir_name: 目录名称
+            
+        Returns:
+            项目信息字典，非项目时返回 None
+        """
+        try:
+            files = await self.list_files(conversation_id, dir_path)
+            file_names = {f.name for f in files}
+            
+            project_type = None
+            entry_file = None
+            has_requirements = False
+            
+            # Python 项目检测
+            if "requirements.txt" in file_names:
+                has_requirements = True
+                
+                if "app.py" in file_names:
+                    # 读取 requirements.txt 判断框架
+                    try:
+                        req_content = await self.read_file(
+                            conversation_id, f"{dir_path}/requirements.txt"
+                        )
+                        if "gradio" in req_content.lower():
+                            project_type = "gradio"
+                        elif "streamlit" in req_content.lower():
+                            project_type = "streamlit"
+                        elif "flask" in req_content.lower():
+                            project_type = "flask"
+                        elif "fastapi" in req_content.lower():
+                            project_type = "fastapi"
+                        else:
+                            project_type = "python"
+                    except Exception:
+                        project_type = "python"
+                    entry_file = "app.py"
+                elif "main.py" in file_names:
+                    entry_file = "main.py"
+                    project_type = "python"
+            
+            # Node.js 项目检测
+            if "package.json" in file_names:
+                try:
+                    import json
+                    pkg_content = await self.read_file(
+                        conversation_id, f"{dir_path}/package.json"
+                    )
+                    pkg = json.loads(pkg_content)
+                    deps = pkg.get("dependencies", {})
+                    
+                    if "next" in deps:
+                        project_type = "nextjs"
+                    elif "vue" in deps:
+                        project_type = "vue"
+                    elif "react" in deps:
+                        project_type = "react"
+                    else:
+                        project_type = "nodejs"
+                except Exception:
+                    project_type = "nodejs"
+            
+            # 静态网页检测
+            if "index.html" in file_names and not project_type:
+                project_type = "static"
+                entry_file = "index.html"
+            
+            if not project_type and not entry_file and not has_requirements:
+                return None
+            
+            return {
+                "name": dir_name,
+                "path": dir_name,
+                "type": project_type,
+                "entry_file": entry_file,
+                "has_requirements": has_requirements
+            }
+            
+        except Exception as e:
+            logger.warning(f"⚠️ 检测项目失败: {dir_path} - {e}")
+            return None
     
     # ==================== 代码执行 ====================
     
