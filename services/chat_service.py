@@ -386,6 +386,12 @@ class ChatService:
             agent_acquired = True
             logger.debug(f"✅ Agent 就绪: {pool_key}")
             
+            # 🆕 共享 Tracker 方案：创建共享 Tracker 并注入到 Agent
+            from core.billing.tracker import EnhancedUsageTracker
+            shared_tracker = EnhancedUsageTracker()
+            agent.usage_tracker = shared_tracker  # 替换 Agent 的 Tracker
+            logger.debug(f"🔨 创建共享 Tracker 并注入到 Agent: session_id={session_id}, tracker_id={id(shared_tracker)}")
+            
             # ========== 6. 更新 SessionPool 状态 ==========
             await self.session_pool.on_session_start(session_id, user_id, pool_key)
             session_pool_updated = True
@@ -759,6 +765,13 @@ class ChatService:
                 )
             
             # =====================================================================
+            # 🆕 共享 Tracker 方案：使用 Agent 已注入的共享 Tracker（避免重复创建）
+            # =====================================================================
+            # shared_tracker 已在 chat() 方法中创建并注入到 agent.usage_tracker
+            shared_tracker = agent.usage_tracker
+            logger.debug(f"✅ 使用 Agent 的共享 Tracker: session_id={session_id}, tracker_id={id(shared_tracker)}")
+            
+            # =====================================================================
             # 🎯 V7 路由层：决定使用 SimpleAgent 还是 MultiAgentOrchestrator
             # =====================================================================
             # 
@@ -786,7 +799,8 @@ class ChatService:
                 router = self._get_router(prompt_cache=agent_prompt_cache)
                 routing_decision = await router.route(
                     user_query=message,
-                    conversation_history=history_messages
+                    conversation_history=history_messages,
+                    tracker=shared_tracker  # 🆕 传递共享 Tracker 用于意图识别计费
                 )
                 use_multi_agent = routing_decision.agent_type == "multi"
                 routing_intent = routing_decision.intent
@@ -910,11 +924,11 @@ class ChatService:
                     if await redis.is_stopped(session_id):
                         logger.warning(f"🛑 检测到停止标志: session_id={session_id}")
                         
-                        # 发送 billing 事件（直接从 agent.usage_tracker 获取数据）
+                        # 发送 billing 事件（使用 Agent 的 Tracker，已经是共享的）
                         try:
-                            # 1. 生成 UsageResponse
+                            # 1. 生成 UsageResponse（Agent 的 Tracker 已经是共享的）
                             usage_response = UsageResponse.from_usage_tracker(
-                                tracker=agent.usage_tracker,
+                                tracker=agent.usage_tracker,  # 使用 Agent 的 Tracker（已注入共享 Tracker）
                                 model=agent.model,
                                 latency=int((time.time() - start_time) * 1000)
                             )

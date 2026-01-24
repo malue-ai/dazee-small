@@ -53,7 +53,13 @@ CLAUDE_PRICING: Dict[str, Dict[str, float]] = {
     },
     
     # Haiku 系列
-    "claude-haiku-4.5": {
+    "claude-haiku-4-5-20251001": {  # 完整版本号
+        "input": 1.0,
+        "output": 5.0,
+        "cache_write": 1.25,
+        "cache_read": 0.05
+    },
+    "claude-haiku-4.5": {  # 短名称（兼容）
         "input": 1.0,
         "output": 5.0,
         "cache_write": 1.25,

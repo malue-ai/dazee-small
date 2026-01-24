@@ -70,7 +70,8 @@ class IntentAnalyzer:
     
     async def analyze(
         self,
-        messages: List[Dict[str, Any]]
+        messages: List[Dict[str, Any]],
+        tracker=None  # 🆕 共享 Tracker（可选，用于记录 LLM 消耗）
     ) -> IntentResult:
         """
         分析用户意图
@@ -79,13 +80,14 @@ class IntentAnalyzer:
         
         Args:
             messages: 完整的消息列表（包含上下文）
+            tracker: EnhancedUsageTracker 实例（可选，用于计费追踪）
             
         Returns:
             IntentResult 意图分析结果
         """
         if self.enable_llm:
-            # 使用 LLM 进行分析
-            result = await self._analyze_with_llm(messages)
+            # 使用 LLM 进行分析（传递 tracker）
+            result = await self._analyze_with_llm(messages, tracker=tracker)
         else:
             # 使用保守默认值（不做关键词匹配）
             result = self._get_conservative_default()
@@ -110,7 +112,8 @@ class IntentAnalyzer:
     async def analyze_with_context(
         self,
         messages: List[Dict[str, Any]],
-        previous_result: Optional[IntentResult] = None
+        previous_result: Optional[IntentResult] = None,
+        tracker=None  # 🆕 共享 Tracker（可选）
     ) -> IntentResult:
         """
         🆕 V6.1 带上下文的意图分析（追问场景优化）
@@ -121,6 +124,7 @@ class IntentAnalyzer:
         Args:
             messages: 完整的消息列表（包含上下文）
             previous_result: 上一轮的意图分析结果（用于追问场景复用）
+            tracker: EnhancedUsageTracker 实例（可选，用于计费追踪）
             
         Returns:
             IntentResult 意图分析结果
@@ -135,8 +139,8 @@ class IntentAnalyzer:
             intent_result = await analyzer.analyze_with_context(messages, previous)
             agent._last_intent_result = intent_result
         """
-        # 1. 执行正常分析
-        result = await self.analyze(messages)
+        # 1. 执行正常分析（传递 tracker）
+        result = await self.analyze(messages, tracker=tracker)
         
         # 2. 如果是追问且有上轮结果，继承 task_type
         if result.is_follow_up and previous_result:
@@ -231,7 +235,8 @@ class IntentAnalyzer:
     
     async def _analyze_with_llm(
         self,
-        messages: List[Dict[str, Any]]
+        messages: List[Dict[str, Any]],
+        tracker=None  # 🆕 共享 Tracker（可选）
     ) -> IntentResult:
         """
         使用 LLM 分析意图
@@ -240,6 +245,7 @@ class IntentAnalyzer:
         
         Args:
             messages: 完整的消息列表
+            tracker: EnhancedUsageTracker 实例（可选，用于计费追踪）
             
         Returns:
             IntentResult
@@ -305,6 +311,15 @@ class IntentAnalyzer:
                 messages=llm_messages,
                 system=system_blocks
             )
+            
+            # 🆕 共享 Tracker 方案：记录意图识别的 LLM 消耗
+            if tracker:
+                tracker.record_call(
+                    llm_response=response,
+                    model=self.llm.config.model,  # 🔧 修复：使用 config.model 而不是 llm.model
+                    purpose="intent_analysis"
+                )
+                logger.debug(f"💰 意图识别计费已记录到共享 Tracker: tracker_id={id(tracker)}")
             
             # 🔧 DEBUG: 打印 LLM 原始返回
             logger.info(f"📥 [Intent LLM] 原始返回内容:\n{response.content}")
