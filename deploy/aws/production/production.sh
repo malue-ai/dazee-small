@@ -323,12 +323,21 @@ setup_env_variables() {
         
         local param_name="/copilot/${APP_NAME}/${ENV_NAME}/secrets/${key}"
         
+        # 上传参数值
         if aws ssm put-parameter \
             --name "$param_name" \
             --value "$value" \
             --type "SecureString" \
             --overwrite \
             --region "$REGION" &> /dev/null; then
+            
+            # 添加 copilot 必需的标签（ECS Task Execution Role 依赖这些标签来访问 secrets）
+            aws ssm add-tags-to-resource \
+                --resource-type Parameter \
+                --resource-id "$param_name" \
+                --tags "Key=copilot-application,Value=${APP_NAME}" "Key=copilot-environment,Value=${ENV_NAME}" \
+                --region "$REGION" &> /dev/null || true
+            
             log_info "  ✓ $key"
             ((success_count++))
         else
@@ -590,19 +599,29 @@ perform_health_check() {
     
     local elapsed=0
     while [ $elapsed -lt $HEALTH_CHECK_TIMEOUT ]; do
-        local running=$(aws ecs describe-services \
+        local running
+        running=$(aws ecs describe-services \
             --cluster "$cluster" \
             --services "$service" \
             --region "$REGION" \
             --query 'services[0].runningCount' \
-            --output text 2>/dev/null)
+            --output text 2>/dev/null) || running=""
         
-        local desired=$(aws ecs describe-services \
+        local desired
+        desired=$(aws ecs describe-services \
             --cluster "$cluster" \
             --services "$service" \
             --region "$REGION" \
             --query 'services[0].desiredCount' \
-            --output text 2>/dev/null)
+            --output text 2>/dev/null) || desired=""
+        
+        # 跳过空值或无效值
+        if [ -z "$running" ] || [ -z "$desired" ] || [ "$running" = "None" ] || [ "$desired" = "None" ]; then
+            sleep $HEALTH_CHECK_INTERVAL
+            elapsed=$((elapsed + HEALTH_CHECK_INTERVAL))
+            echo -n "."
+            continue
+        fi
         
         if [ "$running" = "$desired" ] && [ "$running" != "0" ]; then
             log_success "健康检查通过（运行任务: $running/$desired）"

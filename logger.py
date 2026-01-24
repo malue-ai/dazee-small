@@ -1,6 +1,6 @@
 """
 日志管理模块
-提供日志初始化和管理功能
+提供日志初始化和管理功能，默认输出 JSON 格式日志
 
 使用指南:
 =========
@@ -13,6 +13,10 @@
    logger.info("处理开始")
    logger.error("发生错误", exc_info=True)
    ```
+   
+   输出示例:
+   {"timestamp": "2024-01-01T12:00:00.123", "level": "INFO", "logger": "zenflux.module", 
+    "message": "处理开始", "filename": "module.py", "lineno": 42, "funcName": "process"}
 
 2. 指定模块名:
    ```python
@@ -32,7 +36,7 @@
        # ... 处理逻辑
    ```
 
-4. 结构化日志 (JSON格式):
+4. 结构化日志 (添加额外字段):
    ```python
    logger.info("用户登录", extra={
        "user_id": "12345",
@@ -40,6 +44,10 @@
        "ip_address": "192.168.1.1"
    })
    ```
+   
+   输出示例:
+   {"timestamp": "...", "level": "INFO", "message": "用户登录", 
+    "user_id": "12345", "action": "login", "ip_address": "192.168.1.1", ...}
 
 5. 性能监控:
    ```python
@@ -47,7 +55,7 @@
    start_time = time.time()
    # ... 业务逻辑
    logger.info("操作完成", extra={
-       "duration": time.time() - start_time,
+       "duration_ms": (time.time() - start_time) * 1000,
        "operation": "data_processing"
    })
    ```
@@ -57,7 +65,7 @@
 - 使用 get_logger() 而不是直接使用 logging.getLogger()
 - 避免使用 print() 语句，统一使用日志系统
 - 在异常处理中使用 exc_info=True 记录完整异常信息
-- 使用结构化日志字段便于后续分析和监控
+- 使用 extra={} 添加结构化字段，便于日志分析和监控
 - 根据环境调整日志级别 (开发: DEBUG, 生产: INFO/WARNING)
 
 日志级别使用建议:
@@ -76,6 +84,9 @@ import sys
 import os
 import functools
 import inspect
+import json
+import traceback
+from datetime import datetime, timezone
 
 
 # ============================================================
@@ -88,8 +99,115 @@ LOG_CONFIG = {
     "file": "logs/app.log",  # 日志文件路径
     "max_size": 10 * 1024 * 1024,  # 单个日志文件最大大小 (10MB)
     "backup_count": 5,  # 保留的日志文件数量
-    "json_format": False,  # 是否使用JSON格式
+    "json_format": True,  # 默认使用 JSON 格式
 }
+
+
+class JsonFormatter(logging.Formatter):
+    """
+    自定义 JSON 日志格式化器
+    
+    输出格式示例:
+    {
+        "timestamp": "2024-01-01T12:00:00.123456+00:00",
+        "level": "INFO",
+        "logger": "zenflux.module",
+        "message": "处理完成",
+        "filename": "module.py",
+        "lineno": 42,
+        "funcName": "process_data",
+        "pathname": "/app/module.py",
+        "extra_field": "value"  # 来自 extra 参数
+    }
+    """
+    
+    # 需要排除的内置 LogRecord 属性（不输出到 JSON）
+    RESERVED_ATTRS = {
+        'name', 'msg', 'args', 'created', 'levelname', 'levelno',
+        'pathname', 'filename', 'module', 'exc_info', 'exc_text',
+        'stack_info', 'lineno', 'funcName', 'msecs', 'relativeCreated',
+        'thread', 'threadName', 'processName', 'process', 'message',
+        'taskName'
+    }
+    
+    def __init__(
+        self,
+        include_pathname: bool = False,
+        include_thread: bool = False,
+        include_process: bool = False,
+    ):
+        """
+        初始化 JSON 格式化器
+        
+        Args:
+            include_pathname: 是否包含完整文件路径（默认只显示文件名）
+            include_thread: 是否包含线程信息
+            include_process: 是否包含进程信息
+        """
+        super().__init__()
+        self.include_pathname = include_pathname
+        self.include_thread = include_thread
+        self.include_process = include_process
+    
+    def format(self, record: logging.LogRecord) -> str:
+        """格式化日志记录为 JSON 字符串"""
+        # 构建基础日志结构
+        log_data = {
+            "timestamp": datetime.fromtimestamp(
+                record.created, tz=timezone.utc
+            ).isoformat(timespec='milliseconds'),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+            "filename": record.filename,
+            "lineno": record.lineno,
+            "funcName": record.funcName or "<module>",
+        }
+        
+        # 可选：添加完整路径
+        if self.include_pathname:
+            log_data["pathname"] = record.pathname
+        
+        # 可选：添加线程信息
+        if self.include_thread:
+            log_data["thread"] = record.thread
+            log_data["threadName"] = record.threadName
+        
+        # 可选：添加进程信息
+        if self.include_process:
+            log_data["process"] = record.process
+            log_data["processName"] = record.processName
+        
+        # 处理异常信息
+        if record.exc_info:
+            log_data["exception"] = {
+                "type": record.exc_info[0].__name__ if record.exc_info[0] else None,
+                "message": str(record.exc_info[1]) if record.exc_info[1] else None,
+                "traceback": self._format_traceback(record.exc_info),
+            }
+        
+        # 添加 stack_info（如果有）
+        if record.stack_info:
+            log_data["stack_info"] = record.stack_info
+        
+        # 添加 extra 字段（用户自定义字段）
+        for key, value in record.__dict__.items():
+            if key not in self.RESERVED_ATTRS:
+                # 尝试序列化，如果失败则转为字符串
+                try:
+                    json.dumps(value)
+                    log_data[key] = value
+                except (TypeError, ValueError):
+                    log_data[key] = str(value)
+        
+        # 序列化为 JSON（确保中文正常显示）
+        return json.dumps(log_data, ensure_ascii=False, default=str)
+    
+    def _format_traceback(self, exc_info) -> str | None:
+        """格式化异常堆栈"""
+        if exc_info and exc_info[0] is not None:
+            return ''.join(traceback.format_exception(*exc_info)).strip()
+        return None
 
 
 class Logger:
@@ -107,32 +225,51 @@ class Logger:
         # 获取并应用日志配置字典
         config_dict = cls.get_logger_config()
         logging.config.dictConfig(config_dict)
+        
+        # 应用 JSON 格式化器（如果启用）
+        cls._apply_json_formatter()
 
         cls._initialized = True
         logging.info("日志系统已初始化")
+    
+    # JSON 格式化器实例（复用以提高性能）
+    _json_formatter: JsonFormatter | None = None
+    _standard_formatter: logging.Formatter | None = None
+    
+    @classmethod
+    def _get_formatter(cls, use_json: bool) -> logging.Formatter:
+        """获取格式化器（带缓存）"""
+        if use_json:
+            if cls._json_formatter is None:
+                cls._json_formatter = JsonFormatter(
+                    include_pathname=False,  # 默认不包含完整路径
+                    include_thread=False,
+                    include_process=False,
+                )
+            return cls._json_formatter
+        else:
+            if cls._standard_formatter is None:
+                cls._standard_formatter = logging.Formatter(
+                    fmt="%(asctime)s [%(levelname)s] %(name)s [%(filename)s:%(lineno)d] %(funcName)s: %(message)s",
+                    datefmt="%Y-%m-%d %H:%M:%S"
+                )
+            return cls._standard_formatter
     
     @classmethod
     def get_logger_config(cls) -> Dict[str, Any]:
         """获取日志配置"""
         log_config = LOG_CONFIG
         
-        # 构建 formatters 字典
-        formatters = {
-            "standard": {
-                "format": "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-            }
-        }
-        if log_config["json_format"]:
-            formatters["json"] = {
-                "format": "%(asctime)s %(levelname)s %(name)s %(message)s %(pathname)s %(lineno)d",
-                "class": "pythonjsonlogger.jsonlogger.JsonFormatter"
-            }
-        
-        # 构建日志配置字典
+        # 构建日志配置字典（不使用 dictConfig 的 formatters，手动设置）
         config = {
             "version": 1,
             "disable_existing_loggers": False,
-            "formatters": formatters,
+            "formatters": {
+                "standard": {
+                    "format": "%(asctime)s [%(levelname)s] %(name)s [%(filename)s:%(lineno)d] %(funcName)s: %(message)s",
+                    "datefmt": "%Y-%m-%d %H:%M:%S"
+                }
+            },
             "handlers": {},
             "loggers": {
                 "zenflux": {
@@ -152,7 +289,7 @@ class Logger:
             config["handlers"]["console"] = {
                 "class": "logging.StreamHandler",
                 "level": log_config["level"],
-                "formatter": "json" if log_config["json_format"] else "standard",
+                "formatter": "standard",  # 先用 standard，后面手动替换
                 "stream": "ext://sys.stdout"
             }
             config["loggers"]["zenflux"]["handlers"].append("console")
@@ -167,7 +304,7 @@ class Logger:
             config["handlers"]["file"] = {
                 "class": "logging.handlers.RotatingFileHandler",
                 "level": log_config["level"],
-                "formatter": "json" if log_config["json_format"] else "standard",
+                "formatter": "standard",  # 先用 standard，后面手动替换
                 "filename": log_config["file"],
                 "maxBytes": log_config["max_size"],
                 "backupCount": log_config["backup_count"],
@@ -177,6 +314,24 @@ class Logger:
             config["root"]["handlers"].append("file")
         
         return config
+    
+    @classmethod
+    def _apply_json_formatter(cls) -> None:
+        """应用 JSON 格式化器到所有 handlers"""
+        if not LOG_CONFIG["json_format"]:
+            return
+        
+        formatter = cls._get_formatter(use_json=True)
+        
+        # 获取 zenflux logger 的所有 handlers
+        zenflux_logger = logging.getLogger("zenflux")
+        for handler in zenflux_logger.handlers:
+            handler.setFormatter(formatter)
+        
+        # 获取 root logger 的所有 handlers
+        root_logger = logging.getLogger()
+        for handler in root_logger.handlers:
+            handler.setFormatter(formatter)
     
     @classmethod
     def get_logger(cls, name: Optional[str] = None) -> logging.Logger:
@@ -261,6 +416,27 @@ class Logger:
         """
         config_dict = cls.get_logger_config()
         logging.config.dictConfig(config_dict)
+        # 重新应用 JSON 格式化器
+        cls._apply_json_formatter()
+    
+    @classmethod
+    def enable_json_format(cls, enable: bool = True) -> None:
+        """
+        启用或禁用 JSON 格式日志
+        
+        Args:
+            enable: 是否启用 JSON 格式
+        """
+        LOG_CONFIG["json_format"] = enable
+        
+        # 获取适当的格式化器
+        formatter = cls._get_formatter(use_json=enable)
+        
+        # 更新所有 handlers 的格式化器
+        for logger_name in ["zenflux", ""]:  # zenflux 和 root logger
+            logger = logging.getLogger(logger_name) if logger_name else logging.getLogger()
+            for handler in logger.handlers:
+                handler.setFormatter(formatter)
     
     @classmethod
     def enable_console_logging(cls, enable: bool = True) -> None:

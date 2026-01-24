@@ -12,7 +12,7 @@ type: Load Balanced Web Service
 # 使用 location 指定 ECR 镜像地址（由部署脚本自动更新）
 # ============================================================
 image:
-  location: 308470327605.dkr.ecr.ap-southeast-1.amazonaws.com/zen0-backend/agent:20260123-233911
+  location: 308470327605.dkr.ecr.ap-southeast-1.amazonaws.com/zen0-backend/agent:20260124-090509
   port: 80  # Nginx 监听端口
 
 # ============================================================
@@ -230,11 +230,9 @@ environments:
       DATABASE_URL: /copilot/zen0-backend/production/secrets/DATABASE_URL
       DB_DSN: /copilot/zen0-backend/production/secrets/DB_DSN
       
-      # MemoryDB for Redis（持久化存储，需要 TLS + ACL 认证）
+      # ElastiCache Redis（无密码认证）
       REDIS_HOST: /copilot/zen0-backend/production/secrets/REDIS_HOST
       REDIS_PORT: /copilot/zen0-backend/production/secrets/REDIS_PORT
-      REDIS_USER: /copilot/zen0-backend/production/secrets/REDIS_USER
-      REDIS_PASSWORD: /copilot/zen0-backend/production/secrets/REDIS_PASSWORD
       
       # AI 服务 API Keys
       ANTHROPIC_API_KEY: /copilot/zen0-backend/production/secrets/ANTHROPIC_API_KEY
