@@ -811,6 +811,14 @@ class ChatService:
                         f"needs_plan={routing_intent.needs_plan}, "
                         f"confidence={routing_intent.confidence}"
                     )
+                    
+                    # 🆕 V7.7: 当 intent_id=1（系统搭建）时，自动添加线索生成任务
+                    if routing_intent.intent_id == 1:
+                        if background_tasks is None:
+                            background_tasks = []
+                        if "clue_generation" not in background_tasks:
+                            background_tasks.append("clue_generation")
+                            logger.info("🔍 已添加线索生成后台任务（intent_id=1）")
             
             # 🆕 设置 Agent 的输出格式（EventBroadcaster 会使用）
             if hasattr(agent, 'broadcaster') and agent.broadcaster:
@@ -871,7 +879,9 @@ class ChatService:
                         assistant_response=_assistant_text_for_tasks,
                         is_new_conversation=is_new_conversation,
                         event_manager=events,
-                        conversation_service=self.conversation_service
+                        conversation_service=self.conversation_service,
+                        # 🆕 V7.7: 传递 intent_id 到后台任务（用于 clue_generation 判断）
+                        metadata={"intent_id": routing_intent.intent_id if routing_intent else None}
                     )
                     await self.background_tasks.dispatch_tasks(
                         task_names=background_tasks,
@@ -985,7 +995,9 @@ class ChatService:
                                 assistant_response=_assistant_text_for_tasks,
                                 is_new_conversation=is_new_conversation,
                                 event_manager=events,
-                                conversation_service=self.conversation_service
+                                conversation_service=self.conversation_service,
+                                # 🆕 V7.7: 传递 intent_id 到后台任务（用于 clue_generation 判断）
+                                metadata={"intent_id": routing_intent.intent_id if routing_intent else None}
                             )
                             await self.background_tasks.dispatch_tasks(
                                 task_names=background_tasks,
@@ -1027,7 +1039,9 @@ class ChatService:
                         assistant_response=assistant_text,  # 使用提前获取的 assistant_text
                         is_new_conversation=is_new_conversation,
                         event_manager=events,
-                        conversation_service=self.conversation_service
+                        conversation_service=self.conversation_service,
+                        # 🆕 V7.7: 传递 intent_id 到后台任务（用于 clue_generation 判断）
+                        metadata={"intent_id": routing_intent.intent_id if routing_intent else None}
                     )
                     
                     await self.background_tasks.dispatch_tasks(

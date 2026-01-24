@@ -348,7 +348,7 @@ setup_env_variables() {
     # 清理临时文件
     rm -f "$merged_env" "$unique_env"
     
-    log_success "环境变量上传完成（${success_count}/${var_count} 个成功）"
+    log_success "环境变量上传完成 (${success_count}/${var_count} 个成功)"
 }
 
 # 辅助函数：加载单个 .env 文件到临时文件
@@ -497,7 +497,14 @@ deploy_service() {
     fi
     
     # ECR 仓库配置（动态获取 Account ID）
-    local ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+    local ACCOUNT_ID=""
+    ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null) || ACCOUNT_ID=""
+    
+    if [ -z "$ACCOUNT_ID" ]; then
+        log_error "无法获取 AWS Account ID"
+        exit 1
+    fi
+    
     local ECR_REGISTRY="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com"
     local ECR_REPO="${ECR_REGISTRY}/${APP_NAME}/${SERVICE_NAME}"
     local IMAGE_TAG=$(date +%Y%m%d-%H%M%S)
@@ -560,7 +567,7 @@ deploy_service() {
     if $COPILOT svc deploy --name "$SERVICE_NAME" --env "$ENV_NAME"; then
         END_TIME=$(date +%s)
         DURATION=$((END_TIME - START_TIME))
-        log_success "服务部署成功（用时: $((DURATION/60))分$((DURATION%60))秒）"
+        log_success "服务部署成功 (用时: $((DURATION/60))分$((DURATION%60))秒)"
         
         save_state "deployed"
         log_to_file "Service deployed successfully"
@@ -571,24 +578,55 @@ deploy_service() {
     fi
 }
 
+run_database_migration() {
+    log_step "运行数据库迁移"
+    
+    log_info "通过 ECS Exec 执行迁移脚本"
+    
+    # 获取 ECS 集群和服务信息
+    local cluster=""
+    cluster=$(aws ecs list-clusters --region "$REGION" \
+        --query "clusterArns[?contains(@, '${APP_NAME}-${ENV_NAME}')]" \
+        --output text 2>/dev/null | head -1) || cluster=""
+    
+    if [ -z "$cluster" ]; then
+        log_warning "无法获取 ECS 集群，跳过数据库迁移"
+        return 0
+    fi
+    
+    # 执行迁移（通过 copilot svc exec）
+    log_info "执行迁移命令..."
+    
+    if $COPILOT svc exec \
+        --name "$SERVICE_NAME" \
+        --env "$ENV_NAME" \
+        --command "python -c 'from infra.database import init_database; import asyncio; asyncio.run(init_database())'"; then
+        log_success "数据库迁移完成"
+    else
+        log_warning "数据库迁移失败（可能已初始化）"
+    fi
+}
+
 perform_health_check() {
     log_step "执行健康检查"
     
     # Production 不配置公网域名，通过 ECS 任务状态检查
     log_info "检查 ECS 任务状态..."
     
-    local cluster=$(aws ecs list-clusters --region "$REGION" \
+    local cluster=""
+    cluster=$(aws ecs list-clusters --region "$REGION" \
         --query "clusterArns[?contains(@, '${APP_NAME}-${ENV_NAME}')]" \
-        --output text 2>/dev/null | head -1)
+        --output text 2>/dev/null | head -1) || cluster=""
     
     if [ -z "$cluster" ]; then
         log_warning "无法获取 ECS 集群，跳过健康检查"
         return 0
     fi
     
-    local service=$(aws ecs list-services --cluster "$cluster" --region "$REGION" \
+    local service=""
+    service=$(aws ecs list-services --cluster "$cluster" --region "$REGION" \
         --query "serviceArns[?contains(@, '$SERVICE_NAME')]" \
-        --output text 2>/dev/null | head -1)
+        --output text 2>/dev/null | head -1) || service=""
     
     if [ -z "$service" ]; then
         log_warning "无法获取 ECS 服务，跳过健康检查"
@@ -605,7 +643,7 @@ perform_health_check() {
             --services "$service" \
             --region "$REGION" \
             --query 'services[0].runningCount' \
-            --output text 2>/dev/null) || running=""
+            --output text 2>/dev/null | tr -cd '0-9') || running=""
         
         local desired=""
         desired=$(aws ecs describe-services \
@@ -613,7 +651,7 @@ perform_health_check() {
             --services "$service" \
             --region "$REGION" \
             --query 'services[0].desiredCount' \
-            --output text 2>/dev/null) || desired=""
+            --output text 2>/dev/null | tr -cd '0-9') || desired=""
         
         # 跳过空值或无效值
         if [ -z "$running" ] || [ -z "$desired" ] || [ "$running" = "None" ] || [ "$desired" = "None" ]; then
@@ -624,7 +662,7 @@ perform_health_check() {
         fi
         
         if [ "$running" = "$desired" ] && [ "$running" != "0" ]; then
-            log_success "健康检查通过（运行任务: $running/$desired）"
+            log_success "健康检查通过 (运行任务: $running/$desired)"
             echo ""
             log_success "🎉 部署完成！"
             echo ""
@@ -658,11 +696,12 @@ rollback_service() {
         log_info "获取可用版本..."
         
         local ecr_repo="${APP_NAME}/${SERVICE_NAME}"
-        local images=$(aws ecr describe-images \
+        local images=""
+        images=$(aws ecr describe-images \
             --repository-name "$ecr_repo" \
             --region "$REGION" \
             --query 'imageDetails[*].{Tag:imageTags[0],PushedAt:imagePushedAt}' \
-            --output json 2>/dev/null | jq -r 'sort_by(.PushedAt) | reverse | .[0:10] | .[] | "\(.Tag) (\(.PushedAt))"')
+            --output json 2>/dev/null | jq -r 'sort_by(.PushedAt) | reverse | .[0:10] | .[] | "\(.Tag) (\(.PushedAt))"' 2>/dev/null) || images=""
         
         if [ -z "$images" ]; then
             log_error "无法获取镜像列表"
@@ -683,19 +722,22 @@ rollback_service() {
     
     log_info "回滚到版本: $target_version"
     
-    # 获取当前任务定义
-    local cluster=$(aws ecs list-clusters --region "$REGION" \
+    # 获取 ECS 集群
+    local cluster=""
+    cluster=$(aws ecs list-clusters --region "$REGION" \
         --query "clusterArns[?contains(@, '${APP_NAME}-${ENV_NAME}')]" \
-        --output text 2>/dev/null | head -1)
+        --output text 2>/dev/null | head -1) || cluster=""
     
     if [ -z "$cluster" ]; then
         log_error "未找到 ECS 集群"
         exit 1
     fi
     
-    local service=$(aws ecs list-services --cluster "$cluster" --region "$REGION" \
+    # 获取 ECS 服务
+    local service=""
+    service=$(aws ecs list-services --cluster "$cluster" --region "$REGION" \
         --query "serviceArns[?contains(@, '$SERVICE_NAME')]" \
-        --output text 2>/dev/null | head -1)
+        --output text 2>/dev/null | head -1) || service=""
     
     if [ -z "$service" ]; then
         log_error "未找到 ECS 服务"
@@ -703,33 +745,58 @@ rollback_service() {
     fi
     
     # 获取当前任务定义
-    local current_task_def=$(aws ecs describe-services \
+    local current_task_def=""
+    current_task_def=$(aws ecs describe-services \
         --cluster "$cluster" \
         --services "$service" \
         --region "$REGION" \
         --query 'services[0].taskDefinition' \
-        --output text)
+        --output text 2>/dev/null) || current_task_def=""
+    
+    if [ -z "$current_task_def" ] || [ "$current_task_def" = "None" ]; then
+        log_error "无法获取当前任务定义"
+        exit 1
+    fi
     
     log_info "当前任务定义: $current_task_def"
     
     # 获取 ECR 仓库 URI
-    local account_id=$(aws sts get-caller-identity --query Account --output text)
+    local account_id=""
+    account_id=$(aws sts get-caller-identity --query Account --output text 2>/dev/null) || account_id=""
+    
+    if [ -z "$account_id" ]; then
+        log_error "无法获取 AWS Account ID"
+        exit 1
+    fi
+    
     local ecr_uri="${account_id}.dkr.ecr.${REGION}.amazonaws.com/${APP_NAME}/${SERVICE_NAME}:${target_version}"
     
     log_info "目标镜像: $ecr_uri"
     
     # 创建新的任务定义
-    local new_task_def=$(aws ecs describe-task-definition \
+    local new_task_def=""
+    new_task_def=$(aws ecs describe-task-definition \
         --task-definition "$current_task_def" \
         --region "$REGION" \
-        --query 'taskDefinition' | \
-        jq --arg IMAGE "$ecr_uri" '.containerDefinitions[0].image = $IMAGE | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)')
+        --query 'taskDefinition' 2>/dev/null | \
+        jq --arg IMAGE "$ecr_uri" '.containerDefinitions[0].image = $IMAGE | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' 2>/dev/null) || new_task_def=""
     
-    local new_task_def_arn=$(echo "$new_task_def" | aws ecs register-task-definition \
+    if [ -z "$new_task_def" ] || [ "$new_task_def" = "null" ]; then
+        log_error "无法创建新任务定义"
+        exit 1
+    fi
+    
+    local new_task_def_arn=""
+    new_task_def_arn=$(echo "$new_task_def" | aws ecs register-task-definition \
         --region "$REGION" \
         --cli-input-json file:///dev/stdin \
         --query 'taskDefinition.taskDefinitionArn' \
-        --output text)
+        --output text 2>/dev/null) || new_task_def_arn=""
+    
+    if [ -z "$new_task_def_arn" ] || [ "$new_task_def_arn" = "None" ]; then
+        log_error "无法注册新任务定义"
+        exit 1
+    fi
     
     log_info "新任务定义: $new_task_def_arn"
     
@@ -795,29 +862,33 @@ show_status() {
     # 检查 ECS
     echo ""
     echo "ECS 状态:"
-    local cluster=$(aws ecs list-clusters --region "$REGION" \
+    local cluster=""
+    cluster=$(aws ecs list-clusters --region "$REGION" \
         --query "clusterArns[?contains(@, '${APP_NAME}-${ENV_NAME}')]" \
-        --output text 2>/dev/null | head -1)
+        --output text 2>/dev/null | head -1) || cluster=""
     
     if [ -n "$cluster" ]; then
-        local service=$(aws ecs list-services --cluster "$cluster" --region "$REGION" \
+        local service=""
+        service=$(aws ecs list-services --cluster "$cluster" --region "$REGION" \
             --query "serviceArns[?contains(@, '$SERVICE_NAME')]" \
-            --output text 2>/dev/null | head -1)
+            --output text 2>/dev/null | head -1) || service=""
         
         if [ -n "$service" ]; then
-            local running=$(aws ecs describe-services \
+            local running=""
+            running=$(aws ecs describe-services \
                 --cluster "$cluster" \
                 --services "$service" \
                 --region "$REGION" \
                 --query 'services[0].runningCount' \
-                --output text 2>/dev/null)
+                --output text 2>/dev/null | tr -cd '0-9') || running="0"
             
-            local desired=$(aws ecs describe-services \
+            local desired=""
+            desired=$(aws ecs describe-services \
                 --cluster "$cluster" \
                 --services "$service" \
                 --region "$REGION" \
                 --query 'services[0].desiredCount' \
-                --output text 2>/dev/null)
+                --output text 2>/dev/null | tr -cd '0-9') || desired="0"
             
             echo "  运行任务: $running/$desired"
         fi
@@ -899,6 +970,7 @@ main() {
             if [ "$env_only" != "true" ]; then
                 deploy_service
                 [ "$skip_health" != "true" ] && perform_health_check
+                run_database_migration
             fi
             
             log_success "部署完成"

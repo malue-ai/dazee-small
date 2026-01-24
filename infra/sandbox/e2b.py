@@ -67,8 +67,7 @@ class E2BSandboxProvider(SandboxProvider):
     # 默认超时（临时设为 5 分钟用于测试）
     # 配合 auto_pause=True，超时后沙盒会自动暂停而非销毁
     # 暂停的沙盒可在 30 天内恢复，节省成本
-    # TODO: 测试完成后改回 30 * 60（30 分钟）
-    DEFAULT_TIMEOUT_SECONDS: int = 5 * 60  # 5 分钟（测试用）
+    DEFAULT_TIMEOUT_SECONDS: int = 30 * 60  # 30 分钟
     
     def __init__(self, api_key: Optional[str] = None) -> None:
         """
