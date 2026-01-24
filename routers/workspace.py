@@ -6,7 +6,7 @@ Workspace API Router
 - GET  /workspace/{conv_id}/files/{path} - 获取/下载文件
 - POST /workspace/{conv_id}/files      - 上传文件
 - DELETE /workspace/{conv_id}/files/{path} - 删除文件
-- GET  /workspace/{conv_id}/projects   - 获取项目列表
+- GET  /workspace/{conv_id}/projects   - 获取项目列表（检测可运行的项目）
 
 沙盒管理接口：
 - GET  /workspace/{conv_id}/sandbox/status  - 获取沙盒状态
@@ -14,11 +14,9 @@ Workspace API Router
 - POST /workspace/{conv_id}/sandbox/pause   - 暂停沙盒
 - POST /workspace/{conv_id}/sandbox/resume  - 恢复沙盒
 - POST /workspace/{conv_id}/sandbox/kill    - 终止沙盒
-
-项目运行接口：
-- POST /workspace/{conv_id}/projects/{name}/run   - 运行项目
-- POST /workspace/{conv_id}/projects/{name}/stop  - 停止项目
-- GET  /workspace/{conv_id}/projects/{name}/logs  - 获取日志
+- POST /workspace/{conv_id}/sandbox/run     - 运行项目
+- POST /workspace/{conv_id}/sandbox/stop    - 停止项目
+- GET  /workspace/{conv_id}/sandbox/logs    - 获取项目日志
 """
 
 import os
@@ -125,6 +123,7 @@ class SandboxInitRequest(BaseModel):
 
 class ProjectRunRequest(BaseModel):
     """项目运行请求"""
+    project_path: str  # 项目路径（目录名）
     stack: str  # streamlit/gradio/python/flask/fastapi
 
 
@@ -641,10 +640,9 @@ async def list_projects(
         raise HTTPException(status_code=500, detail="获取项目列表失败")
 
 
-@router.post("/{conversation_id}/projects/{project_name}/run", response_model=ProjectRunResponse)
+@router.post("/{conversation_id}/sandbox/run", response_model=ProjectRunResponse)
 async def run_project(
     conversation_id: str,
-    project_name: str,
     request: ProjectRunRequest
 ):
     """
@@ -652,14 +650,13 @@ async def run_project(
     
     Args:
         conversation_id: 对话 ID
-        project_name: 项目名称
-        request: 运行请求（指定技术栈）
+        request: 运行请求（包含项目路径和技术栈）
     """
     try:
         service = get_sandbox_service()
         result = await service.run_project(
             conversation_id=conversation_id,
-            project_path=project_name,
+            project_path=request.project_path,
             stack=request.stack
         )
         
@@ -679,17 +676,15 @@ async def run_project(
         raise HTTPException(status_code=500, detail="运行项目失败")
 
 
-@router.post("/{conversation_id}/projects/{project_name}/stop")
-async def stop_project(
-    conversation_id: str,
-    project_name: str
-):
+@router.post("/{conversation_id}/sandbox/stop")
+async def stop_project(conversation_id: str):
     """
     停止项目
     
+    每个沙盒只有一个运行中的项目，无需指定项目名
+    
     Args:
         conversation_id: 对话 ID
-        project_name: 项目名称
     """
     try:
         service = get_sandbox_service()
@@ -706,28 +701,25 @@ async def stop_project(
         raise HTTPException(status_code=500, detail="停止项目失败")
 
 
-@router.get("/{conversation_id}/projects/{project_name}/logs")
+@router.get("/{conversation_id}/sandbox/logs")
 async def get_project_logs(
     conversation_id: str,
-    project_name: str,
     lines: int = Query(default=100, description="日志行数")
 ):
     """
     获取项目日志
     
+    每个沙盒只有一个运行中的项目，无需指定项目名
+    
     Args:
         conversation_id: 对话 ID
-        project_name: 项目名称
         lines: 日志行数
     """
     try:
         service = get_sandbox_service()
         logs = await service.get_logs(conversation_id, lines)
         
-        return {
-            "project": project_name,
-            "logs": logs
-        }
+        return {"logs": logs}
     
     except SandboxNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))

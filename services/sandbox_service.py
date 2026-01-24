@@ -532,12 +532,12 @@ class SandboxService:
         dir_name: str
     ) -> Optional[Dict[str, Any]]:
         """
-        检测目录是否为可运行的项目
+        检测目录是否为项目
         
         检测规则：
-        - Python: requirements.txt + app.py/main.py
-        - Node.js: package.json（检测框架类型）
-        - 静态网页: index.html
+        - requirements.txt + app.py/main.py -> Python 项目
+        - package.json -> Node.js 项目（检测 next/vue/react）
+        - index.html（无其他配置）-> 静态网页
         
         Args:
             conversation_id: 对话 ID
@@ -546,6 +546,13 @@ class SandboxService:
             
         Returns:
             项目信息字典，非项目时返回 None
+            {
+                "name": str,
+                "path": str,
+                "type": str | None,
+                "entry_file": str | None,
+                "has_requirements": bool
+            }
         """
         try:
             files = await self.list_files(conversation_id, dir_path)
@@ -565,13 +572,14 @@ class SandboxService:
                         req_content = await self.read_file(
                             conversation_id, f"{dir_path}/requirements.txt"
                         )
-                        if "gradio" in req_content.lower():
+                        req_lower = req_content.lower()
+                        if "gradio" in req_lower:
                             project_type = "gradio"
-                        elif "streamlit" in req_content.lower():
+                        elif "streamlit" in req_lower:
                             project_type = "streamlit"
-                        elif "flask" in req_content.lower():
+                        elif "flask" in req_lower:
                             project_type = "flask"
-                        elif "fastapi" in req_content.lower():
+                        elif "fastapi" in req_lower:
                             project_type = "fastapi"
                         else:
                             project_type = "python"
@@ -608,6 +616,7 @@ class SandboxService:
                 project_type = "static"
                 entry_file = "index.html"
             
+            # 无法识别为项目
             if not project_type and not entry_file and not has_requirements:
                 return None
             

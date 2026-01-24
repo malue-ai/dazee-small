@@ -975,3 +975,475 @@ class AgentService(object):
             timeout,
             metadata,
             _registered_method=True)
+
+
+class SandboxServiceStub(object):
+    """==================== Sandbox 服务（沙盒管理） ====================
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.GetStatus = channel.unary_unary(
+                '/zenflux.SandboxService/GetStatus',
+                request_serializer=tool__service__pb2.SandboxStatusRequest.SerializeToString,
+                response_deserializer=tool__service__pb2.SandboxStatusResponse.FromString,
+                _registered_method=True)
+        self.Init = channel.unary_unary(
+                '/zenflux.SandboxService/Init',
+                request_serializer=tool__service__pb2.SandboxInitRequest.SerializeToString,
+                response_deserializer=tool__service__pb2.SandboxStatusResponse.FromString,
+                _registered_method=True)
+        self.Pause = channel.unary_unary(
+                '/zenflux.SandboxService/Pause',
+                request_serializer=tool__service__pb2.SandboxPauseRequest.SerializeToString,
+                response_deserializer=tool__service__pb2.SandboxOperationResponse.FromString,
+                _registered_method=True)
+        self.Resume = channel.unary_unary(
+                '/zenflux.SandboxService/Resume',
+                request_serializer=tool__service__pb2.SandboxResumeRequest.SerializeToString,
+                response_deserializer=tool__service__pb2.SandboxStatusResponse.FromString,
+                _registered_method=True)
+        self.Kill = channel.unary_unary(
+                '/zenflux.SandboxService/Kill',
+                request_serializer=tool__service__pb2.SandboxKillRequest.SerializeToString,
+                response_deserializer=tool__service__pb2.SandboxOperationResponse.FromString,
+                _registered_method=True)
+        self.RunProject = channel.unary_unary(
+                '/zenflux.SandboxService/RunProject',
+                request_serializer=tool__service__pb2.SandboxRunProjectRequest.SerializeToString,
+                response_deserializer=tool__service__pb2.SandboxRunProjectResponse.FromString,
+                _registered_method=True)
+        self.StopProject = channel.unary_unary(
+                '/zenflux.SandboxService/StopProject',
+                request_serializer=tool__service__pb2.SandboxStopProjectRequest.SerializeToString,
+                response_deserializer=tool__service__pb2.SandboxOperationResponse.FromString,
+                _registered_method=True)
+        self.GetLogs = channel.unary_unary(
+                '/zenflux.SandboxService/GetLogs',
+                request_serializer=tool__service__pb2.SandboxLogsRequest.SerializeToString,
+                response_deserializer=tool__service__pb2.SandboxLogsResponse.FromString,
+                _registered_method=True)
+        self.RunCommand = channel.unary_unary(
+                '/zenflux.SandboxService/RunCommand',
+                request_serializer=tool__service__pb2.SandboxCommandRequest.SerializeToString,
+                response_deserializer=tool__service__pb2.SandboxCommandResponse.FromString,
+                _registered_method=True)
+        self.ListFiles = channel.unary_unary(
+                '/zenflux.SandboxService/ListFiles',
+                request_serializer=tool__service__pb2.SandboxListFilesRequest.SerializeToString,
+                response_deserializer=tool__service__pb2.SandboxListFilesResponse.FromString,
+                _registered_method=True)
+
+
+class SandboxServiceServicer(object):
+    """==================== Sandbox 服务（沙盒管理） ====================
+    """
+
+    def GetStatus(self, request, context):
+        """获取沙盒状态
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Init(self, request, context):
+        """初始化沙盒
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Pause(self, request, context):
+        """暂停沙盒
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Resume(self, request, context):
+        """恢复沙盒
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Kill(self, request, context):
+        """终止沙盒
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RunProject(self, request, context):
+        """运行项目
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def StopProject(self, request, context):
+        """停止项目
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetLogs(self, request, context):
+        """获取项目日志
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RunCommand(self, request, context):
+        """执行命令
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListFiles(self, request, context):
+        """获取文件列表
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_SandboxServiceServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'GetStatus': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetStatus,
+                    request_deserializer=tool__service__pb2.SandboxStatusRequest.FromString,
+                    response_serializer=tool__service__pb2.SandboxStatusResponse.SerializeToString,
+            ),
+            'Init': grpc.unary_unary_rpc_method_handler(
+                    servicer.Init,
+                    request_deserializer=tool__service__pb2.SandboxInitRequest.FromString,
+                    response_serializer=tool__service__pb2.SandboxStatusResponse.SerializeToString,
+            ),
+            'Pause': grpc.unary_unary_rpc_method_handler(
+                    servicer.Pause,
+                    request_deserializer=tool__service__pb2.SandboxPauseRequest.FromString,
+                    response_serializer=tool__service__pb2.SandboxOperationResponse.SerializeToString,
+            ),
+            'Resume': grpc.unary_unary_rpc_method_handler(
+                    servicer.Resume,
+                    request_deserializer=tool__service__pb2.SandboxResumeRequest.FromString,
+                    response_serializer=tool__service__pb2.SandboxStatusResponse.SerializeToString,
+            ),
+            'Kill': grpc.unary_unary_rpc_method_handler(
+                    servicer.Kill,
+                    request_deserializer=tool__service__pb2.SandboxKillRequest.FromString,
+                    response_serializer=tool__service__pb2.SandboxOperationResponse.SerializeToString,
+            ),
+            'RunProject': grpc.unary_unary_rpc_method_handler(
+                    servicer.RunProject,
+                    request_deserializer=tool__service__pb2.SandboxRunProjectRequest.FromString,
+                    response_serializer=tool__service__pb2.SandboxRunProjectResponse.SerializeToString,
+            ),
+            'StopProject': grpc.unary_unary_rpc_method_handler(
+                    servicer.StopProject,
+                    request_deserializer=tool__service__pb2.SandboxStopProjectRequest.FromString,
+                    response_serializer=tool__service__pb2.SandboxOperationResponse.SerializeToString,
+            ),
+            'GetLogs': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetLogs,
+                    request_deserializer=tool__service__pb2.SandboxLogsRequest.FromString,
+                    response_serializer=tool__service__pb2.SandboxLogsResponse.SerializeToString,
+            ),
+            'RunCommand': grpc.unary_unary_rpc_method_handler(
+                    servicer.RunCommand,
+                    request_deserializer=tool__service__pb2.SandboxCommandRequest.FromString,
+                    response_serializer=tool__service__pb2.SandboxCommandResponse.SerializeToString,
+            ),
+            'ListFiles': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListFiles,
+                    request_deserializer=tool__service__pb2.SandboxListFilesRequest.FromString,
+                    response_serializer=tool__service__pb2.SandboxListFilesResponse.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'zenflux.SandboxService', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('zenflux.SandboxService', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class SandboxService(object):
+    """==================== Sandbox 服务（沙盒管理） ====================
+    """
+
+    @staticmethod
+    def GetStatus(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/zenflux.SandboxService/GetStatus',
+            tool__service__pb2.SandboxStatusRequest.SerializeToString,
+            tool__service__pb2.SandboxStatusResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Init(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/zenflux.SandboxService/Init',
+            tool__service__pb2.SandboxInitRequest.SerializeToString,
+            tool__service__pb2.SandboxStatusResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Pause(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/zenflux.SandboxService/Pause',
+            tool__service__pb2.SandboxPauseRequest.SerializeToString,
+            tool__service__pb2.SandboxOperationResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Resume(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/zenflux.SandboxService/Resume',
+            tool__service__pb2.SandboxResumeRequest.SerializeToString,
+            tool__service__pb2.SandboxStatusResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Kill(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/zenflux.SandboxService/Kill',
+            tool__service__pb2.SandboxKillRequest.SerializeToString,
+            tool__service__pb2.SandboxOperationResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RunProject(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/zenflux.SandboxService/RunProject',
+            tool__service__pb2.SandboxRunProjectRequest.SerializeToString,
+            tool__service__pb2.SandboxRunProjectResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def StopProject(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/zenflux.SandboxService/StopProject',
+            tool__service__pb2.SandboxStopProjectRequest.SerializeToString,
+            tool__service__pb2.SandboxOperationResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetLogs(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/zenflux.SandboxService/GetLogs',
+            tool__service__pb2.SandboxLogsRequest.SerializeToString,
+            tool__service__pb2.SandboxLogsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RunCommand(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/zenflux.SandboxService/RunCommand',
+            tool__service__pb2.SandboxCommandRequest.SerializeToString,
+            tool__service__pb2.SandboxCommandResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListFiles(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/zenflux.SandboxService/ListFiles',
+            tool__service__pb2.SandboxListFilesRequest.SerializeToString,
+            tool__service__pb2.SandboxListFilesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)

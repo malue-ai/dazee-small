@@ -64,8 +64,11 @@ class E2BSandboxProvider(SandboxProvider):
         "vue": 5173,
     }
     
-    # 默认超时（1 小时）
-    DEFAULT_TIMEOUT_MS: int = 60 * 60 * 1000
+    # 默认超时（临时设为 5 分钟用于测试）
+    # 配合 auto_pause=True，超时后沙盒会自动暂停而非销毁
+    # 暂停的沙盒可在 30 天内恢复，节省成本
+    # TODO: 测试完成后改回 30 * 60（30 分钟）
+    DEFAULT_TIMEOUT_SECONDS: int = 5 * 60  # 5 分钟（测试用）
     
     def __init__(self, api_key: Optional[str] = None) -> None:
         """
@@ -206,8 +209,18 @@ class E2BSandboxProvider(SandboxProvider):
             
             logger.info(f"🆕 创建新沙盒: conversation={conversation_id}")
             
-            timeout_seconds = self.DEFAULT_TIMEOUT_MS // 1000
-            sandbox = await AsyncSandbox.create(timeout=timeout_seconds)
+            # 使用 _create 直接创建沙盒，启用 auto_pause
+            # auto_pause=True: 超时后自动暂停而非销毁，可在 30 天内恢复
+            # 注意：AsyncSandbox.create() 硬编码了 auto_pause=False，所以需要直接调用 _create
+            sandbox = await AsyncSandbox._create(
+                template=None,
+                timeout=self.DEFAULT_TIMEOUT_SECONDS,
+                auto_pause=True,
+                allow_internet_access=True,
+                metadata=None,
+                envs=None,
+                secure=True
+            )
             
             await asyncio.sleep(2)
             self._sandbox_pool[conversation_id] = sandbox

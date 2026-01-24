@@ -74,6 +74,39 @@ service AgentService {
   rpc GetAgentStatus(AgentStatusRequest) returns (AgentStatusResponse);
 }
 
+// ==================== Sandbox 服务（沙盒管理） ====================
+service SandboxService {
+  // 获取沙盒状态
+  rpc GetStatus(SandboxStatusRequest) returns (SandboxStatusResponse);
+  
+  // 初始化沙盒
+  rpc Init(SandboxInitRequest) returns (SandboxStatusResponse);
+  
+  // 暂停沙盒
+  rpc Pause(SandboxPauseRequest) returns (SandboxOperationResponse);
+  
+  // 恢复沙盒
+  rpc Resume(SandboxResumeRequest) returns (SandboxStatusResponse);
+  
+  // 终止沙盒
+  rpc Kill(SandboxKillRequest) returns (SandboxOperationResponse);
+  
+  // 运行项目
+  rpc RunProject(SandboxRunProjectRequest) returns (SandboxRunProjectResponse);
+  
+  // 停止项目
+  rpc StopProject(SandboxStopProjectRequest) returns (SandboxOperationResponse);
+  
+  // 获取项目日志
+  rpc GetLogs(SandboxLogsRequest) returns (SandboxLogsResponse);
+  
+  // 执行命令
+  rpc RunCommand(SandboxCommandRequest) returns (SandboxCommandResponse);
+  
+  // 获取文件列表
+  rpc ListFiles(SandboxListFilesRequest) returns (SandboxListFilesResponse);
+}
+
 // ==================== Chat 服务消息定义 ====================
 
 message ChatRequest {
@@ -284,5 +317,108 @@ message AgentStatusResponse {
   string current_step = 2;
   int32 progress = 3;                  // 进度 0-100
   repeated string active_tools = 4;
+}
+
+// ==================== Sandbox 服务消息定义 ====================
+
+message SandboxStatusRequest {
+  string conversation_id = 1;
+}
+
+message SandboxStatusResponse {
+  string conversation_id = 1;
+  optional string sandbox_id = 2;
+  optional string e2b_sandbox_id = 3;
+  string status = 4;                   // creating/running/paused/killed/none
+  optional string stack = 5;
+  optional string preview_url = 6;
+  optional string active_project_path = 7;
+  optional string active_project_stack = 8;
+  optional string created_at = 9;
+  optional string last_active_at = 10;
+}
+
+message SandboxInitRequest {
+  string conversation_id = 1;
+  string user_id = 2;
+  optional string stack = 3;
+}
+
+message SandboxPauseRequest {
+  string conversation_id = 1;
+}
+
+message SandboxResumeRequest {
+  string conversation_id = 1;
+}
+
+message SandboxKillRequest {
+  string conversation_id = 1;
+}
+
+message SandboxOperationResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message SandboxRunProjectRequest {
+  string conversation_id = 1;
+  string project_path = 2;             // 项目路径（目录名）
+  string stack = 3;                    // streamlit/gradio/python/flask/fastapi
+}
+
+message SandboxRunProjectResponse {
+  bool success = 1;
+  optional string preview_url = 2;
+  optional string message = 3;
+  optional string error = 4;
+}
+
+message SandboxStopProjectRequest {
+  string conversation_id = 1;
+}
+
+message SandboxLogsRequest {
+  string conversation_id = 1;
+  int32 lines = 2;                     // 日志行数，默认 100
+}
+
+message SandboxLogsResponse {
+  string logs = 1;
+}
+
+message SandboxCommandRequest {
+  string conversation_id = 1;
+  string command = 2;
+  int32 timeout = 3;                   // 超时时间（秒），默认 60
+}
+
+message SandboxCommandResponse {
+  bool success = 1;
+  optional int32 exit_code = 2;
+  optional string stdout = 3;
+  optional string stderr = 4;
+  optional string error = 5;
+}
+
+message SandboxListFilesRequest {
+  string conversation_id = 1;
+  string path = 2;                     // 目录路径，默认 /home/user
+  bool tree = 3;                       // 是否返回树形结构
+}
+
+message SandboxFileInfo {
+  string path = 1;
+  string name = 2;
+  string type = 3;                     // file / directory
+  optional int64 size = 4;
+  optional string modified_at = 5;
+  repeated SandboxFileInfo children = 6;
+}
+
+message SandboxListFilesResponse {
+  string conversation_id = 1;
+  repeated SandboxFileInfo files = 2;
+  string source = 3;                   // sandbox
 }
 
