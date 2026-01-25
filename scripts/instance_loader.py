@@ -1133,14 +1133,17 @@ async def _register_mcp_tools(
 
 def validate_skill_directory(skill_path: Path) -> Dict[str, Any]:
     """
-    验证 Skill 目录结构（参考标准 skill_utils.validate_skill_directory）
+    验证 Skill 目录结构
+    
+    参考官方文档：https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices
     
     检查项：
     - SKILL.md 存在
     - YAML frontmatter 格式正确
-    - 包含 name 和 description 字段
-    - frontmatter 不超过 1024 字符
+    - name 字段：最大 64 字符，只能包含小写字母、数字和连字符，不能包含保留词
+    - description 字段：必须非空，最大 1024 字符，不能包含 XML 标签
     - 总大小不超过 8MB
+    - SKILL.md 正文推荐不超过 500 行
     
     Args:
         skill_path: Skill 目录路径
@@ -1154,7 +1157,13 @@ def validate_skill_directory(skill_path: Path) -> Dict[str, Any]:
             "info": Dict[str, Any]
         }
     """
+    import re
+    import yaml
+    
     result = {"valid": True, "errors": [], "warnings": [], "info": {}}
+    
+    # 保留词（不能用于 name）
+    RESERVED_WORDS = ["anthropic", "claude"]
     
     # 检查目录存在
     if not skill_path.exists():
@@ -1180,25 +1189,85 @@ def validate_skill_directory(skill_path: Path) -> Dict[str, Any]:
         try:
             # 提取 frontmatter
             end_idx = content.index("---", 3)
-            frontmatter = content[3:end_idx].strip()
+            frontmatter_str = content[3:end_idx].strip()
+            body_content = content[end_idx + 3:].strip()
             
-            # 检查必需字段
-            if "name:" not in frontmatter:
+            # 解析 YAML
+            try:
+                frontmatter = yaml.safe_load(frontmatter_str) or {}
+            except yaml.YAMLError as e:
+                result["valid"] = False
+                result["errors"].append(f"YAML 解析错误: {str(e)}")
+                frontmatter = {}
+            
+            # ===== name 字段验证（官方文档要求）=====
+            name = frontmatter.get("name", "")
+            
+            if not name:
                 result["valid"] = False
                 result["errors"].append("YAML frontmatter 缺少 'name' 字段")
+            else:
+                # 最大 64 字符
+                if len(name) > 64:
+                    result["valid"] = False
+                    result["errors"].append(f"name 超过 64 字符 (当前: {len(name)})")
+                
+                # 只能包含小写字母、数字和连字符
+                if not re.match(r'^[a-z0-9-]+$', name):
+                    result["valid"] = False
+                    result["errors"].append(
+                        f"name 只能包含小写字母、数字和连字符: '{name}'"
+                    )
+                
+                # 不能包含 XML 标签
+                if re.search(r'<[^>]+>', name):
+                    result["valid"] = False
+                    result["errors"].append("name 不能包含 XML 标签")
+                
+                # 不能包含保留词
+                for reserved in RESERVED_WORDS:
+                    if reserved in name.lower():
+                        result["valid"] = False
+                        result["errors"].append(
+                            f"name 不能包含保留词 '{reserved}'"
+                        )
             
-            if "description:" not in frontmatter:
-                result["valid"] = False
-                result["errors"].append("YAML frontmatter 缺少 'description' 字段")
+            result["info"]["name"] = name
             
-            # 检查 frontmatter 大小
-            if len(frontmatter) > 1024:
+            # ===== description 字段验证（官方文档要求）=====
+            description = frontmatter.get("description") or ""
+            
+            # 确保是字符串类型
+            if not isinstance(description, str):
+                description = str(description) if description else ""
+            
+            if not description.strip():
                 result["valid"] = False
-                result["errors"].append(
-                    f"YAML frontmatter 超过 1024 字符 (当前: {len(frontmatter)})"
+                result["errors"].append("YAML frontmatter 缺少 'description' 字段或为空")
+            else:
+                # 最大 1024 字符
+                if len(description) > 1024:
+                    result["valid"] = False
+                    result["errors"].append(
+                        f"description 超过 1024 字符 (当前: {len(description)})"
+                    )
+                
+                # 不能包含 XML 标签
+                if re.search(r'<[^>]+>', description):
+                    result["valid"] = False
+                    result["errors"].append("description 不能包含 XML 标签")
+            
+            result["info"]["description"] = (description[:100] + "...") if description and len(description) > 100 else description
+            result["info"]["frontmatter_size"] = len(frontmatter_str)
+            
+            # ===== SKILL.md 正文行数检查（官方推荐）=====
+            body_lines = len(body_content.split('\n'))
+            result["info"]["body_lines"] = body_lines
+            
+            if body_lines > 500:
+                result["warnings"].append(
+                    f"SKILL.md 正文超过 500 行 (当前: {body_lines})，建议拆分到单独文件"
                 )
-            
-            result["info"]["frontmatter_size"] = len(frontmatter)
             
         except ValueError:
             result["valid"] = False
@@ -1293,12 +1362,13 @@ async def _register_skills(
             logger.info(f"   🔧 注册 Skill: {skill.name}")
             logger.info(f"      目录验证通过 (大小: {validation['info']['total_size_mb']:.2f} MB)")
             
-            # 调用 Anthropic API 注册（遵循标准 skill_utils.py 实现）
-            # 参数: display_title（显示名称）, files（目录内容）
+            # 调用 Anthropic API 注册（参考官方文档格式）
+            # 参数: display_title（显示名称）, files（目录内容）, betas（API 版本）
             display_title = skill.description or skill.name
             skill_create = client.beta.skills.create(
                 display_title=display_title,
-                files=files_from_dir(str(skill.skill_path))
+                files=files_from_dir(str(skill.skill_path)),
+                betas=["skills-2025-10-02"]
             )
             
             # 更新 skill_id（标准返回字段）
@@ -1369,6 +1439,420 @@ def _update_skill_registry(instance_name: str, skills: List[SkillConfig]) -> Non
 
 
 # ============================================================
+# Skills 管理功能（注册/注销/更新/状态）
+# ============================================================
+
+def get_anthropic_client():
+    """
+    获取带 Skills beta 的 Anthropic 客户端
+    
+    Returns:
+        Anthropic 客户端实例
+        
+    Raises:
+        ImportError: anthropic 库未安装
+        ValueError: API Key 未配置
+    """
+    try:
+        from anthropic import Anthropic
+    except ImportError:
+        raise ImportError("❌ anthropic 库未安装，请运行: pip install anthropic")
+    
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise ValueError("❌ ANTHROPIC_API_KEY 未配置，请在 .env 文件中设置")
+    
+    return Anthropic(
+        api_key=api_key,
+        default_headers={"anthropic-beta": "skills-2025-10-02"}
+    )
+
+
+def scan_skills_directory(instance_name: str) -> List[SkillConfig]:
+    """
+    扫描实例目录中的所有 Skills（包括未在 registry 中的）
+    
+    Args:
+        instance_name: 实例名称
+        
+    Returns:
+        SkillConfig 列表
+    """
+    import yaml
+    
+    skills_dir = get_instances_dir() / instance_name / "skills"
+    
+    if not skills_dir.exists():
+        return []
+    
+    # 加载现有注册表
+    registry_path = skills_dir / "skill_registry.yaml"
+    registered_skills = {}
+    if registry_path.exists():
+        with open(registry_path, "r", encoding="utf-8") as f:
+            registry = yaml.safe_load(f) or {}
+        for s in registry.get("skills", []):
+            if isinstance(s, dict):
+                registered_skills[s.get("name")] = s
+    
+    skills = []
+    
+    # 扫描 skills 目录
+    for skill_dir in skills_dir.iterdir():
+        if not skill_dir.is_dir():
+            continue
+        
+        # 跳过特殊目录
+        if skill_dir.name.startswith("_") or skill_dir.name == "__pycache__":
+            continue
+        
+        # 检查 SKILL.md 是否存在
+        skill_md = skill_dir / "SKILL.md"
+        if not skill_md.exists():
+            continue
+        
+        # 获取已注册信息
+        registered_info = registered_skills.get(skill_dir.name, {})
+        
+        # 从 SKILL.md 提取描述
+        description = registered_info.get("description", "")
+        if not description:
+            try:
+                content = skill_md.read_text(encoding="utf-8")
+                if content.startswith("---"):
+                    end_idx = content.index("---", 3)
+                    frontmatter = content[3:end_idx].strip()
+                    metadata = yaml.safe_load(frontmatter)
+                    description = metadata.get("description", skill_dir.name)
+            except:
+                description = skill_dir.name
+        
+        skills.append(SkillConfig(
+            name=skill_dir.name,
+            enabled=registered_info.get("enabled", True),
+            description=description,
+            skill_id=registered_info.get("skill_id"),
+            registered_at=registered_info.get("registered_at"),
+            skill_path=skill_dir
+        ))
+    
+    return skills
+
+
+def register_skill_to_claude(
+    instance_name: str,
+    skill_name: str,
+    force: bool = False
+) -> Dict[str, Any]:
+    """
+    注册单个 Skill 到 Claude
+    
+    Args:
+        instance_name: 实例名称
+        skill_name: Skill 名称
+        force: 是否强制重新注册
+        
+    Returns:
+        注册结果 {"success": bool, "message": str, "skill_id": str|None}
+    """
+    from datetime import datetime
+    from anthropic.lib import files_from_dir
+    
+    # 扫描获取 skill 信息
+    skills = scan_skills_directory(instance_name)
+    skill = next((s for s in skills if s.name == skill_name), None)
+    
+    if not skill:
+        return {"success": False, "message": f"Skill '{skill_name}' 不存在", "skill_id": None}
+    
+    # 检查是否已注册
+    if skill.skill_id and not force:
+        return {"success": True, "message": f"已注册 (skill_id: {skill.skill_id})", "skill_id": skill.skill_id}
+    
+    # 验证目录结构
+    validation = validate_skill_directory(skill.skill_path)
+    if not validation["valid"]:
+        return {"success": False, "message": f"验证失败: {'; '.join(validation['errors'])}", "skill_id": None}
+    
+    try:
+        client = get_anthropic_client()
+        
+        # 调用 API 创建 Skill（参考官方文档格式）
+        display_title = skill.description or skill.name
+        skill_create = client.beta.skills.create(
+            display_title=display_title,
+            files=files_from_dir(str(skill.skill_path)),
+            betas=["skills-2025-10-02"]
+        )
+        
+        # 更新并保存
+        skill.skill_id = skill_create.id
+        skill.registered_at = datetime.now().isoformat()
+        
+        # 更新所有 skills 的注册表
+        _update_skill_registry(instance_name, skills)
+        
+        return {"success": True, "message": f"注册成功", "skill_id": skill.skill_id}
+        
+    except Exception as e:
+        return {"success": False, "message": f"API 错误: {str(e)}", "skill_id": None}
+
+
+def unregister_skill_from_claude(
+    instance_name: str,
+    skill_name: str
+) -> Dict[str, Any]:
+    """
+    从 Claude 注销 Skill
+    
+    Args:
+        instance_name: 实例名称
+        skill_name: Skill 名称
+        
+    Returns:
+        注销结果 {"success": bool, "message": str}
+    """
+    # 扫描获取 skill 信息
+    skills = scan_skills_directory(instance_name)
+    skill = next((s for s in skills if s.name == skill_name), None)
+    
+    if not skill:
+        return {"success": False, "message": f"Skill '{skill_name}' 不存在"}
+    
+    if not skill.skill_id:
+        return {"success": False, "message": f"Skill '{skill_name}' 未注册"}
+    
+    try:
+        client = get_anthropic_client()
+        
+        # 先删除所有版本（参考官方文档：删除 Skill 前必须删除所有版本）
+        try:
+            versions = client.beta.skills.versions.list(
+                skill_id=skill.skill_id,
+                betas=["skills-2025-10-02"]
+            )
+            for version in versions.data:
+                client.beta.skills.versions.delete(
+                    skill_id=skill.skill_id,
+                    version=version.version,
+                    betas=["skills-2025-10-02"]
+                )
+        except:
+            pass  # 版本不存在时忽略
+        
+        # 删除 Skill（使用关键字参数，符合官方文档格式）
+        client.beta.skills.delete(
+            skill_id=skill.skill_id,
+            betas=["skills-2025-10-02"]
+        )
+        
+        # 清除本地 skill_id
+        skill.skill_id = None
+        skill.registered_at = None
+        
+        # 更新注册表
+        _update_skill_registry(instance_name, skills)
+        
+        return {"success": True, "message": "注销成功"}
+        
+    except Exception as e:
+        # 即使 API 失败，也清除本地记录（可能服务器上已不存在）
+        skill.skill_id = None
+        skill.registered_at = None
+        _update_skill_registry(instance_name, skills)
+        
+        return {"success": True, "message": f"本地已清除 (服务器可能已不存在: {str(e)})"}
+
+
+def update_skill_version(
+    instance_name: str,
+    skill_name: str
+) -> Dict[str, Any]:
+    """
+    更新 Skill 版本（上传新版本到已注册的 Skill）
+    
+    Args:
+        instance_name: 实例名称
+        skill_name: Skill 名称
+        
+    Returns:
+        更新结果 {"success": bool, "message": str, "version": str|None}
+    """
+    from anthropic.lib import files_from_dir
+    
+    # 扫描获取 skill 信息
+    skills = scan_skills_directory(instance_name)
+    skill = next((s for s in skills if s.name == skill_name), None)
+    
+    if not skill:
+        return {"success": False, "message": f"Skill '{skill_name}' 不存在", "version": None}
+    
+    if not skill.skill_id:
+        return {"success": False, "message": f"Skill '{skill_name}' 未注册，请先注册", "version": None}
+    
+    # 验证目录结构
+    validation = validate_skill_directory(skill.skill_path)
+    if not validation["valid"]:
+        return {"success": False, "message": f"验证失败: {'; '.join(validation['errors'])}", "version": None}
+    
+    try:
+        client = get_anthropic_client()
+        
+        # 创建新版本（参考官方文档格式）
+        version = client.beta.skills.versions.create(
+            skill_id=skill.skill_id,
+            files=files_from_dir(str(skill.skill_path)),
+            betas=["skills-2025-10-02"]
+        )
+        
+        return {"success": True, "message": "更新成功", "version": version.version}
+        
+    except Exception as e:
+        return {"success": False, "message": f"API 错误: {str(e)}", "version": None}
+
+
+def register_all_instance_skills(
+    instance_name: str,
+    force: bool = False
+) -> Dict[str, Any]:
+    """
+    注册实例的所有未注册 Skills
+    
+    Args:
+        instance_name: 实例名称
+        force: 是否强制重新注册已有的
+        
+    Returns:
+        注册统计 {"total": int, "registered": int, "skipped": int, "failed": int, "details": [...]}
+    """
+    results = {
+        "instance": instance_name,
+        "total": 0,
+        "registered": 0,
+        "skipped": 0,
+        "failed": 0,
+        "details": []
+    }
+    
+    skills = scan_skills_directory(instance_name)
+    
+    if not skills:
+        return results
+    
+    results["total"] = len(skills)
+    
+    for skill in skills:
+        if not skill.enabled:
+            results["skipped"] += 1
+            results["details"].append({"name": skill.name, "status": "disabled", "message": "已禁用"})
+            continue
+        
+        if skill.skill_id and not force:
+            results["skipped"] += 1
+            results["details"].append({"name": skill.name, "status": "exists", "message": f"已注册 ({skill.skill_id})"})
+            continue
+        
+        result = register_skill_to_claude(instance_name, skill.name, force=force)
+        
+        if result["success"] and result.get("skill_id"):
+            results["registered"] += 1
+            results["details"].append({"name": skill.name, "status": "success", "message": f"skill_id: {result['skill_id']}"})
+        elif result["success"]:
+            results["skipped"] += 1
+            results["details"].append({"name": skill.name, "status": "exists", "message": result["message"]})
+        else:
+            results["failed"] += 1
+            results["details"].append({"name": skill.name, "status": "failed", "message": result["message"]})
+    
+    return results
+
+
+def get_skills_status(instance_name: Optional[str] = None) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    获取 Skills 状态
+    
+    Args:
+        instance_name: 实例名称（None 则获取所有实例）
+        
+    Returns:
+        {instance_name: [{"name": ..., "enabled": ..., "skill_id": ..., "status": ...}, ...]}
+    """
+    status = {}
+    
+    instances = [instance_name] if instance_name else list_instances()
+    
+    for inst in instances:
+        skills = scan_skills_directory(inst)
+        inst_status = []
+        
+        for skill in skills:
+            if skill.skill_id:
+                skill_status = "registered"
+            elif not skill.enabled:
+                skill_status = "disabled"
+            else:
+                skill_status = "pending"
+            
+            inst_status.append({
+                "name": skill.name,
+                "enabled": skill.enabled,
+                "skill_id": skill.skill_id,
+                "description": skill.description,
+                "status": skill_status,
+                "registered_at": skill.registered_at
+            })
+        
+        status[inst] = inst_status
+    
+    return status
+
+
+def print_skills_status(instance_name: Optional[str] = None):
+    """打印 Skills 状态"""
+    print("\n📋 Skills 状态总览")
+    print("=" * 70)
+    
+    status = get_skills_status(instance_name)
+    
+    if not status:
+        print("  没有找到任何实例")
+        return
+    
+    total_skills = 0
+    total_registered = 0
+    
+    for inst_name, skills in status.items():
+        print(f"\n📦 实例: {inst_name}")
+        print("-" * 50)
+        
+        if not skills:
+            print("  (无 Skills)")
+            continue
+        
+        for skill in skills:
+            total_skills += 1
+            
+            if skill["status"] == "registered":
+                total_registered += 1
+                icon = "✅"
+                text = f"已注册 ({skill['skill_id'][:20]}...)" if skill['skill_id'] and len(skill['skill_id']) > 20 else f"已注册 ({skill['skill_id']})"
+            elif skill["status"] == "disabled":
+                icon = "⏸️"
+                text = "已禁用"
+            else:
+                icon = "❌"
+                text = "待注册"
+            
+            desc = skill['description'][:40] + "..." if len(skill['description']) > 40 else skill['description']
+            print(f"  {icon} {skill['name']}")
+            print(f"     描述: {desc}")
+            print(f"     状态: {text}")
+    
+    print("\n" + "=" * 70)
+    print(f"📊 总计: {total_skills} 个 Skills, {total_registered} 个已注册, {total_skills - total_registered} 个待处理")
+
+
+# ============================================================
 # 便捷函数
 # ============================================================
 
@@ -1410,17 +1894,129 @@ def print_available_instances():
 if __name__ == "__main__":
     import argparse
     
-    parser = argparse.ArgumentParser(description="智能体实例加载器")
+    parser = argparse.ArgumentParser(
+        description="智能体实例加载器 & Skills 管理工具",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+示例:
+  # 实例管理
+  python scripts/instance_loader.py --list                     # 列出所有实例
+  python scripts/instance_loader.py -i dazee_agent --info      # 显示实例详情
+  
+  # Skills 管理
+  python scripts/instance_loader.py --skills-status            # 查看所有实例的 Skills 状态
+  python scripts/instance_loader.py -i dazee_agent --skills-status  # 查看指定实例
+  python scripts/instance_loader.py -i dazee_agent --register-skills  # 注册所有未注册 Skills
+  python scripts/instance_loader.py -i dazee_agent --register remotion  # 注册指定 Skill
+  python scripts/instance_loader.py -i dazee_agent --unregister remotion  # 注销指定 Skill
+  python scripts/instance_loader.py -i dazee_agent --update remotion  # 更新 Skill 版本
+  python scripts/instance_loader.py -i dazee_agent --register remotion --force  # 强制重新注册
+        """
+    )
+    
+    # 实例相关参数
     parser.add_argument("--list", "-l", action="store_true", help="列出所有可用实例")
-    parser.add_argument("--instance", "-i", type=str, help="要加载的实例名称")
+    parser.add_argument("--instance", "-i", type=str, help="指定实例名称")
     parser.add_argument("--info", action="store_true", help="显示实例详细信息")
+    
+    # Skills 管理参数
+    parser.add_argument("--skills-status", action="store_true", help="显示 Skills 状态")
+    parser.add_argument("--register-skills", action="store_true", help="注册实例的所有未注册 Skills")
+    parser.add_argument("--register", type=str, metavar="SKILL", help="注册指定 Skill")
+    parser.add_argument("--unregister", type=str, metavar="SKILL", help="注销指定 Skill")
+    parser.add_argument("--update", type=str, metavar="SKILL", help="更新指定 Skill 版本")
+    parser.add_argument("--force", "-f", action="store_true", help="强制重新注册（配合 --register 使用）")
     
     args = parser.parse_args()
     
-    if args.list:
-        print_available_instances()
-    elif args.instance and args.info:
-        try:
+    try:
+        # ==================== 实例管理 ====================
+        if args.list:
+            print_available_instances()
+        
+        # ==================== Skills 状态 ====================
+        elif args.skills_status:
+            print_skills_status(args.instance)
+        
+        # ==================== 注册所有 Skills ====================
+        elif args.register_skills:
+            if not args.instance:
+                print("❌ 请使用 --instance 指定实例名称")
+                exit(1)
+            
+            print(f"\n🚀 注册实例 [{args.instance}] 的所有 Skills...")
+            if args.force:
+                print("   模式: 强制重新注册")
+            
+            results = register_all_instance_skills(args.instance, force=args.force)
+            
+            print(f"\n📊 结果: 总计 {results['total']} | 注册 {results['registered']} | 跳过 {results['skipped']} | 失败 {results['failed']}")
+            
+            for detail in results["details"]:
+                if detail["status"] == "success":
+                    icon = "✅"
+                elif detail["status"] in ("exists", "disabled"):
+                    icon = "⏭️"
+                else:
+                    icon = "❌"
+                print(f"   {icon} {detail['name']}: {detail['message']}")
+            
+            if results["registered"] > 0:
+                print(f"\n✨ 已更新 skill_registry.yaml")
+        
+        # ==================== 注册单个 Skill ====================
+        elif args.register:
+            if not args.instance:
+                print("❌ 请使用 --instance 指定实例名称")
+                exit(1)
+            
+            print(f"\n🔧 注册 Skill: {args.register}")
+            if args.force:
+                print("   模式: 强制重新注册")
+            
+            result = register_skill_to_claude(args.instance, args.register, force=args.force)
+            
+            if result["success"]:
+                print(f"✅ {result['message']}")
+                if result.get("skill_id"):
+                    print(f"   skill_id: {result['skill_id']}")
+            else:
+                print(f"❌ {result['message']}")
+        
+        # ==================== 注销 Skill ====================
+        elif args.unregister:
+            if not args.instance:
+                print("❌ 请使用 --instance 指定实例名称")
+                exit(1)
+            
+            print(f"\n🗑️ 注销 Skill: {args.unregister}")
+            
+            result = unregister_skill_from_claude(args.instance, args.unregister)
+            
+            if result["success"]:
+                print(f"✅ {result['message']}")
+            else:
+                print(f"❌ {result['message']}")
+        
+        # ==================== 更新 Skill 版本 ====================
+        elif args.update:
+            if not args.instance:
+                print("❌ 请使用 --instance 指定实例名称")
+                exit(1)
+            
+            print(f"\n🔄 更新 Skill 版本: {args.update}")
+            
+            result = update_skill_version(args.instance, args.update)
+            
+            if result["success"]:
+                print(f"✅ {result['message']}")
+                if result.get("version"):
+                    print(f"   新版本: {result['version']}")
+            else:
+                print(f"❌ {result['message']}")
+        
+        # ==================== 显示实例信息 ====================
+        elif args.instance and args.info:
             config = load_instance_config(args.instance)
             print(f"📋 实例信息: {args.instance}")
             print(f"   名称: {config.name}")
@@ -1483,7 +2079,12 @@ if __name__ == "__main__":
                     else:
                         info = worker.worker_type
                     print(f"         {status} {worker.name} [{worker.worker_type}] ({worker.specialization}): {info}")
-        except Exception as e:
-            print(f"❌ 加载失败: {str(e)}")
-    else:
-        parser.print_help()
+        
+        else:
+            parser.print_help()
+            
+    except Exception as e:
+        print(f"❌ 错误: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        exit(1)
