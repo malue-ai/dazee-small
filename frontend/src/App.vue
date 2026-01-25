@@ -9,6 +9,7 @@ import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import DefaultLayout from '@/layouts/DefaultLayout.vue'
 import AuthLayout from '@/layouts/AuthLayout.vue'
+import DashboardLayout from '@/layouts/DashboardLayout.vue'
 
 const route = useRoute()
 
@@ -17,6 +18,9 @@ const layout = computed(() => {
   const layoutName = route.meta.layout as string | undefined
   if (layoutName === 'auth') {
     return AuthLayout
+  }
+  if (layoutName === 'dashboard') {
+    return DashboardLayout
   }
   return DefaultLayout
 })
