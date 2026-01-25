@@ -267,11 +267,27 @@ export function useChat() {
       sessionStore.setCurrentSessionId(data.session_id)
     }
 
+    // 处理 session 开始事件
+    if (type === 'session_start') {
+      console.log('🚀 Session 开始:', data.session_id)
+      // session_start 主要用于保存 session_id，已在上面处理
+    }
+
     // 处理会话开始事件
     if (type === 'conversation_start' && data.conversation_id) {
       if (!conversationStore.currentId) {
         conversationStore.currentId = data.conversation_id
         conversationStore.fetchList()
+      }
+    }
+
+    // 处理消息开始事件 - 更新占位消息的 ID
+    if (type === 'message_start') {
+      const messageId = data.message_id || data.message?.id
+      if (messageId) {
+        // 将占位消息的临时 ID 更新为后端返回的 message_id
+        msg.id = messageId
+        console.log('📝 Message 开始，ID 已更新:', messageId)
       }
     }
 

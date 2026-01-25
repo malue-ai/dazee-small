@@ -70,20 +70,31 @@
           <!-- 助手消息 -->
           <div v-else class="flex flex-col gap-3">
             <div class="text-sm leading-relaxed text-gray-800 px-1">
+              <!-- 有内容块时使用 MessageContent -->
               <MessageContent 
                 v-if="message.contentBlocks && message.contentBlocks.length > 0"
                 :content="message.contentBlocks"
                 :tool-statuses="message.toolStatuses || {}"
                 @mermaid-detected="charts => emit('mermaid-detected', charts)"
               />
+              <!-- 无内容块时 -->
               <template v-else>
+                <!-- 有思考内容 -->
                 <div v-if="message.thinking" class="mb-4 p-4 bg-gray-50 border border-gray-100 rounded-xl text-sm text-gray-500 italic">
                   {{ message.thinking }}
                 </div>
+                <!-- 有文本内容 -->
                 <MarkdownRenderer 
+                  v-if="message.content"
                   :content="message.content" 
                   @mermaid-detected="charts => emit('mermaid-detected', charts)" 
                 />
+                <!-- 空消息且正在加载（仅最后一条消息显示） -->
+                <div v-else-if="loading && isLastMessage(message)" class="flex items-center gap-1.5 py-2 text-gray-400">
+                  <span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0ms"></span>
+                  <span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 150ms"></span>
+                  <span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 300ms"></span>
+                </div>
               </template>
             </div>
 
@@ -102,19 +113,6 @@
         </div>
       </div>
 
-      <!-- Loading (Skeleton) -->
-      <div v-if="loading && !generating" class="flex gap-5">
-        <div class="w-10 h-10 flex items-center justify-center">
-          <Bot class="w-6 h-6 text-gray-600" />
-        </div>
-        <div class="flex-1 max-w-[80%] pt-2">
-          <div class="space-y-2 animate-pulse">
-            <div class="h-4 bg-gray-100 rounded w-1/3"></div>
-            <div class="h-4 bg-gray-100 rounded w-2/3"></div>
-            <div class="h-4 bg-gray-100 rounded w-1/2"></div>
-          </div>
-        </div>
-      </div>
     </div>
   </div>
 </template>
@@ -188,6 +186,13 @@ const suggestions = [
  */
 function getFileTypeLabel(mimeType: string): string {
   return getLabel(mimeType)
+}
+
+/**
+ * 判断是否是最后一条消息
+ */
+function isLastMessage(message: UIMessage): boolean {
+  return props.messages[props.messages.length - 1]?.id === message.id
 }
 
 /**
