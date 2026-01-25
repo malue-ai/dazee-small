@@ -80,8 +80,29 @@
               <!-- 无内容块时 -->
               <template v-else>
                 <!-- 有思考内容 -->
-                <div v-if="message.thinking" class="mb-4 p-4 bg-gray-50 border border-gray-100 rounded-xl text-sm text-gray-500 italic">
-                  {{ message.thinking }}
+                <div v-if="message.thinking" class="thinking-inline">
+                  <div class="thinking-inline-header" @click="toggleThinking(message.id)">
+                    <div class="thinking-inline-left">
+                      <svg class="thinking-inline-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <circle cx="12" cy="12" r="10"/>
+                        <path d="M12 16v-4M12 8h.01"/>
+                      </svg>
+                      <span>思考过程</span>
+                    </div>
+                    <svg 
+                      class="thinking-inline-chevron" 
+                      :class="{ 'is-expanded': expandedThinking[message.id] }"
+                      viewBox="0 0 24 24" 
+                      fill="none" 
+                      stroke="currentColor" 
+                      stroke-width="2"
+                    >
+                      <polyline points="6 9 12 15 18 9"/>
+                    </svg>
+                  </div>
+                  <div v-show="expandedThinking[message.id]" class="thinking-inline-content">
+                    {{ message.thinking }}
+                  </div>
                 </div>
                 <!-- 有文本内容 -->
                 <MarkdownRenderer 
@@ -156,6 +177,14 @@ const emit = defineEmits<{
 
 /** 容器引用 */
 const containerRef = ref<HTMLElement | null>(null)
+
+/** 思考过程展开状态 */
+const expandedThinking = ref<Record<string, boolean>>({})
+
+/** 切换思考过程展开 */
+function toggleThinking(messageId: string): void {
+  expandedThinking.value[messageId] = !expandedThinking.value[messageId]
+}
 
 /** 建议列表 */
 const suggestions = [
@@ -256,5 +285,60 @@ defineExpose({
   background-color: #f3f4f6;
   border: 1px solid #e5e7eb;
   border-radius: 0.5rem;
+}
+
+/* 内联思考过程 - Apple 风格 */
+.thinking-inline {
+  margin-bottom: 16px;
+  background: #f9fafb;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.thinking-inline-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.thinking-inline-header:hover {
+  background: #f3f4f6;
+}
+
+.thinking-inline-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #6b7280;
+}
+
+.thinking-inline-icon {
+  width: 16px;
+  height: 16px;
+  color: #9ca3af;
+}
+
+.thinking-inline-chevron {
+  width: 16px;
+  height: 16px;
+  color: #9ca3af;
+  transition: transform 0.2s ease;
+}
+
+.thinking-inline-chevron.is-expanded {
+  transform: rotate(180deg);
+}
+
+.thinking-inline-content {
+  padding: 0 14px 14px;
+  font-size: 13px;
+  color: #6b7280;
+  line-height: 1.6;
+  white-space: pre-wrap;
 }
 </style>
