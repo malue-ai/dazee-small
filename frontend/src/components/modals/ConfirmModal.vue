@@ -1,0 +1,292 @@
+<template>
+  <Teleport to="body">
+    <div 
+      v-if="show"
+      class="fixed inset-0 bg-gray-900/60 backdrop-blur-md z-50 flex items-center justify-center p-6 animate-in fade-in duration-300" 
+      @click.self="emit('cancel')"
+    >
+      <div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-hidden animate-in slide-in-from-bottom-8 duration-300 ring-1 ring-white/20 flex flex-col">
+        <!-- 头部 -->
+        <div class="flex items-center justify-between px-8 py-5 border-b border-gray-100 bg-gray-50/50 flex-shrink-0">
+          <span class="text-lg font-bold text-gray-900 flex items-center gap-2">
+            <span class="text-2xl">🤝</span> 需要您的确认
+          </span>
+          <button 
+            class="p-2 rounded-full text-gray-400 hover:bg-gray-200 hover:text-gray-900 transition-colors" 
+            @click="emit('cancel')"
+          >
+            ✕
+          </button>
+        </div>
+        
+        <!-- 内容区 -->
+        <div class="p-8 space-y-6 overflow-y-auto flex-1">
+          <!-- 问题内容 -->
+          <div class="text-lg text-gray-800 font-medium leading-relaxed whitespace-pre-wrap">
+            {{ request?.question }}
+          </div>
+          
+          <!-- 描述 -->
+          <div 
+            v-if="request?.description" 
+            class="text-sm text-gray-600 bg-blue-50 p-4 rounded-xl border border-blue-100 leading-relaxed"
+          >
+            {{ request.description }}
+          </div>
+          
+          <!-- yes_no / single_choice 类型 -->
+          <div v-if="isYesNoOrSingleChoice" class="flex flex-col gap-3">
+            <label 
+              v-for="option in request?.options" 
+              :key="option" 
+              class="flex items-center p-4 rounded-xl border-2 cursor-pointer transition-all hover:bg-gray-50"
+              :class="selectedValue === option ? 'border-blue-500 bg-blue-50/50 ring-1 ring-blue-500/20' : 'border-gray-100'"
+            >
+              <input 
+                type="radio" 
+                :value="option" 
+                v-model="selectedValue"
+                name="hitl-option"
+                class="mr-4 accent-blue-600 w-5 h-5"
+              />
+              <span class="text-base font-medium text-gray-800">
+                {{ option === 'confirm' ? '✅ 确认' : option === 'cancel' ? '❌ 取消' : option }}
+              </span>
+            </label>
+          </div>
+          
+          <!-- multiple_choice 类型 -->
+          <div v-if="isMultipleChoice" class="flex flex-col gap-3">
+            <label 
+              v-for="option in request?.options" 
+              :key="option" 
+              class="flex items-center p-4 rounded-xl border-2 cursor-pointer transition-all hover:bg-gray-50"
+              :class="selectedValues.includes(option) ? 'border-blue-500 bg-blue-50/50 ring-1 ring-blue-500/20' : 'border-gray-100'"
+            >
+              <input 
+                type="checkbox" 
+                :value="option" 
+                v-model="selectedValues"
+                class="mr-4 accent-blue-600 w-5 h-5 rounded"
+              />
+              <span class="text-base font-medium text-gray-800">{{ option }}</span>
+            </label>
+          </div>
+          
+          <!-- text_input 类型 -->
+          <div v-if="isTextInput" class="w-full">
+            <textarea 
+              v-model="textValue" 
+              placeholder="请输入您的回复..."
+              rows="4"
+              class="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all resize-none text-gray-800"
+            ></textarea>
+          </div>
+          
+          <!-- form 类型 -->
+          <div v-if="isForm" class="space-y-5">
+            <div v-for="question in request?.questions" :key="question.id" class="space-y-2">
+              <!-- 问题标签 -->
+              <label class="block text-sm font-medium text-gray-700">
+                {{ question.label }}
+                <span v-if="question.required !== false" class="text-red-500">*</span>
+              </label>
+              
+              <!-- 提示文字 -->
+              <div v-if="question.hint" class="text-xs text-gray-500 mb-2">
+                {{ question.hint }}
+              </div>
+              
+              <!-- 单选题 -->
+              <div v-if="question.type === 'single_choice'" class="flex flex-col gap-2">
+                <label 
+                  v-for="option in question.options" 
+                  :key="option" 
+                  class="flex items-center p-3 rounded-lg border cursor-pointer transition-all hover:bg-gray-50"
+                  :class="formData[question.id] === option ? 'border-blue-500 bg-blue-50/50' : 'border-gray-200'"
+                >
+                  <input 
+                    type="radio" 
+                    :value="option" 
+                    v-model="formData[question.id]"
+                    :name="`form-${question.id}`"
+                    class="mr-3 accent-blue-600"
+                  />
+                  <span class="text-sm text-gray-800">{{ option }}</span>
+                </label>
+              </div>
+              
+              <!-- 多选题 -->
+              <div v-if="question.type === 'multiple_choice'" class="flex flex-col gap-2">
+                <label 
+                  v-for="option in question.options" 
+                  :key="option" 
+                  class="flex items-center p-3 rounded-lg border cursor-pointer transition-all hover:bg-gray-50"
+                  :class="(formData[question.id] as string[] || []).includes(option) ? 'border-blue-500 bg-blue-50/50' : 'border-gray-200'"
+                >
+                  <input 
+                    type="checkbox" 
+                    :value="option" 
+                    v-model="formData[question.id]"
+                    class="mr-3 accent-blue-600 rounded"
+                  />
+                  <span class="text-sm text-gray-800">{{ option }}</span>
+                </label>
+              </div>
+              
+              <!-- 文本输入 -->
+              <div v-if="question.type === 'text_input'">
+                <input 
+                  v-model="formData[question.id]" 
+                  :placeholder="question.hint || '请输入...'"
+                  class="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-sm text-gray-800"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 底部按钮 -->
+        <div class="flex items-center justify-end gap-4 px-8 py-5 bg-gray-50/50 border-t border-gray-100 flex-shrink-0">
+          <button 
+            class="px-6 py-2.5 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-200 transition-colors" 
+            @click="emit('cancel')" 
+            :disabled="submitting"
+          >
+            取消
+          </button>
+          <button 
+            class="px-6 py-2.5 rounded-xl text-sm font-medium bg-gray-900 text-white hover:bg-gray-800 transition-all shadow-lg shadow-gray-900/10 transform active:scale-95 disabled:opacity-50" 
+            @click="handleSubmit" 
+            :disabled="submitting"
+          >
+            {{ submitting ? '提交中...' : '提交' }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
+</template>
+
+<script setup lang="ts">
+import { ref, computed, watch } from 'vue'
+import type { HITLConfirmRequest, HITLFormQuestion, HITLResponse } from '@/types'
+
+// ==================== Props ====================
+
+interface Props {
+  /** 是否显示 */
+  show: boolean
+  /** 确认请求数据 */
+  request: HITLConfirmRequest | null
+  /** 是否正在提交 */
+  submitting?: boolean
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  submitting: false
+})
+
+// ==================== Emits ====================
+
+const emit = defineEmits<{
+  /** 提交响应 */
+  (e: 'submit', response: HITLResponse): void
+  /** 取消 */
+  (e: 'cancel'): void
+}>()
+
+// ==================== State ====================
+
+/** 单选值 */
+const selectedValue = ref<string>('')
+
+/** 多选值 */
+const selectedValues = ref<string[]>([])
+
+/** 文本值 */
+const textValue = ref('')
+
+/** 表单数据 */
+const formData = ref<Record<string, string | string[]>>({})
+
+// ==================== Computed ====================
+
+/** 确认类型 */
+const confirmationType = computed(() => props.request?.confirmation_type || 'yes_no')
+
+/** 是否为 yes_no 或 single_choice */
+const isYesNoOrSingleChoice = computed(() => 
+  ['yes_no', 'single_choice'].includes(confirmationType.value)
+)
+
+/** 是否为 multiple_choice */
+const isMultipleChoice = computed(() => confirmationType.value === 'multiple_choice')
+
+/** 是否为 text_input */
+const isTextInput = computed(() => confirmationType.value === 'text_input')
+
+/** 是否为 form */
+const isForm = computed(() => confirmationType.value === 'form')
+
+// ==================== Watchers ====================
+
+// 监听 request 变化，重置状态
+watch(() => props.request, (newRequest) => {
+  if (newRequest) {
+    initializeResponse(newRequest)
+  }
+}, { immediate: true })
+
+// ==================== Methods ====================
+
+/**
+ * 初始化响应值
+ */
+function initializeResponse(request: HITLConfirmRequest): void {
+  const type = request.confirmation_type
+
+  if (type === 'yes_no' && request.options?.length) {
+    selectedValue.value = request.options[0]
+  } else if (type === 'single_choice' && request.options?.length) {
+    selectedValue.value = (request.default_value as string) || request.options[0]
+  } else if (type === 'multiple_choice') {
+    selectedValues.value = (request.default_value as string[]) || []
+  } else if (type === 'text_input') {
+    textValue.value = (request.default_value as string) || ''
+  } else if (type === 'form') {
+    const data: Record<string, string | string[]> = {}
+    if (request.questions) {
+      request.questions.forEach((q: HITLFormQuestion) => {
+        if (q.default !== undefined) {
+          data[q.id] = q.default
+        } else {
+          data[q.id] = q.type === 'multiple_choice' ? [] : ''
+        }
+      })
+    }
+    formData.value = data
+  }
+}
+
+/**
+ * 处理提交
+ */
+function handleSubmit(): void {
+  let response: HITLResponse
+
+  if (isYesNoOrSingleChoice.value) {
+    response = selectedValue.value
+  } else if (isMultipleChoice.value) {
+    response = selectedValues.value
+  } else if (isTextInput.value) {
+    response = textValue.value
+  } else if (isForm.value) {
+    response = formData.value
+  } else {
+    response = ''
+  }
+
+  emit('submit', response)
+}
+</script>

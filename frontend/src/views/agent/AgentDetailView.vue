@@ -1,27 +1,20 @@
 <template>
-  <div class="h-screen w-full flex flex-col bg-gray-50 relative overflow-hidden text-gray-900 font-sans">
-    <!-- 背景装饰 -->
-    <div class="absolute inset-0 z-0 opacity-20 pointer-events-none">
-      <div class="absolute top-0 left-0 w-[500px] h-[500px] bg-blue-200 rounded-full mix-blend-multiply filter blur-3xl animate-blob"></div>
-      <div class="absolute top-0 right-0 w-[500px] h-[500px] bg-purple-200 rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-2000"></div>
-      <div class="absolute -bottom-8 left-20 w-[500px] h-[500px] bg-pink-200 rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-4000"></div>
-    </div>
-
-    <!-- 顶部导航 -->
-    <div class="h-16 flex items-center justify-between px-8 border-b border-white/20 bg-white/40 backdrop-blur-md sticky top-0 z-20">
+  <div class="h-full flex flex-col overflow-hidden bg-white">
+    <!-- 顶部工具栏 -->
+    <div class="h-16 flex items-center justify-between px-8 border-b border-gray-100 bg-white sticky top-0 z-10">
       <div class="flex items-center gap-4">
         <button 
           @click="$router.push('/agents')" 
-          class="p-2 rounded-lg text-gray-500 hover:bg-white hover:text-gray-900 transition-all"
+          class="p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 transition-all"
         >
-          ←
+          <ArrowLeft class="w-5 h-5" />
         </button>
         <div class="flex items-center gap-3">
-          <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 text-white flex items-center justify-center font-bold text-lg shadow-md">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center font-bold text-lg text-gray-600 border border-gray-200">
             {{ agent?.name?.[0]?.toUpperCase() || 'A' }}
           </div>
           <div>
-            <h1 class="text-lg font-bold text-gray-800">{{ agent?.name || agentId }}</h1>
+            <h1 class="text-base font-bold text-gray-800">{{ agent?.name || agentId }}</h1>
             <span class="text-xs text-gray-400 font-mono">{{ agentId }}</span>
           </div>
         </div>
@@ -30,9 +23,9 @@
         <button 
           @click="reloadAgent" 
           :disabled="reloading"
-          class="flex items-center gap-2 px-4 py-2 bg-white/60 border border-white/40 text-gray-600 text-sm font-medium rounded-xl hover:bg-white hover:text-blue-600 transition-all shadow-sm disabled:opacity-50"
+          class="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-600 text-sm font-medium rounded-xl hover:bg-gray-50 hover:text-blue-600 transition-all shadow-sm disabled:opacity-50"
         >
-          <span :class="reloading ? 'animate-spin' : ''">🔄</span>
+          <RefreshCw class="w-4 h-4" :class="reloading ? 'animate-spin' : ''" />
           {{ reloading ? '重载中...' : '热重载' }}
         </button>
         <button 
@@ -40,6 +33,7 @@
           :disabled="saving || !hasChanges"
           class="flex items-center gap-2 px-5 py-2 bg-gray-900 text-white text-sm font-medium rounded-xl hover:bg-gray-800 transition-all shadow-lg shadow-gray-900/10 disabled:opacity-50 disabled:cursor-not-allowed"
         >
+          <Save class="w-4 h-4" />
           {{ saving ? '保存中...' : '保存更改' }}
         </button>
       </div>
@@ -48,7 +42,7 @@
     <!-- 加载状态 -->
     <div v-if="loading" class="flex-1 flex items-center justify-center">
       <div class="flex flex-col items-center gap-4">
-        <div class="w-10 h-10 border-3 border-gray-200 border-t-gray-900 rounded-full animate-spin"></div>
+        <Loader2 class="w-10 h-10 animate-spin text-gray-300" />
         <p class="text-sm text-gray-500">加载智能体配置...</p>
       </div>
     </div>
@@ -56,79 +50,79 @@
     <!-- 主内容区 -->
     <div v-else class="flex-1 flex overflow-hidden relative z-10">
       <!-- 左侧导航 -->
-      <div class="w-56 border-r border-white/20 bg-white/40 backdrop-blur-xl p-4 flex flex-col gap-2">
+      <div class="w-60 border-r border-gray-100 bg-gray-50 p-4 flex flex-col gap-1">
         <button
           v-for="tab in tabs"
           :key="tab.id"
           @click="activeTab = tab.id"
-          class="flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all text-left"
+          class="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-all text-left"
           :class="activeTab === tab.id 
-            ? 'bg-white shadow-md text-gray-900' 
-            : 'text-gray-600 hover:bg-white/60 hover:text-gray-800'"
+            ? 'bg-white shadow-sm text-gray-900 border border-gray-200' 
+            : 'text-gray-600 hover:bg-gray-200/50 hover:text-gray-800'"
         >
-          <span class="text-lg">{{ tab.icon }}</span>
+          <component :is="tab.icon" class="w-4 h-4" :class="activeTab === tab.id ? 'text-gray-800' : 'text-gray-400'" />
           {{ tab.label }}
         </button>
       </div>
 
       <!-- 右侧内容 -->
-      <div class="flex-1 overflow-y-auto p-8 scrollbar-thin">
+      <div class="flex-1 overflow-y-auto p-8 scrollbar-thin bg-white">
         <!-- 基础信息 -->
-        <div v-if="activeTab === 'basic'" class="max-w-3xl space-y-6">
-          <div class="bg-white/60 backdrop-blur-sm border border-white/40 rounded-2xl p-6 space-y-6">
-            <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
-              📋 基础信息
+        <div v-if="activeTab === 'basic'" class="max-w-3xl space-y-8">
+          <div class="space-y-6">
+            <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2 border-b border-gray-100 pb-4">
+              <ClipboardList class="w-5 h-5 text-gray-500" />
+              基础信息
             </h2>
             
             <div class="grid grid-cols-2 gap-6">
               <div class="flex flex-col gap-2">
-                <label class="text-sm font-semibold text-gray-700">Agent ID</label>
+                <label class="text-sm font-medium text-gray-700">Agent ID</label>
                 <input 
                   :value="agentId" 
                   disabled
-                  class="w-full px-4 py-3 bg-gray-100 border border-gray-200 rounded-xl text-sm text-gray-500 cursor-not-allowed font-mono"
+                  class="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-500 cursor-not-allowed font-mono"
                 >
               </div>
               
               <div class="flex flex-col gap-2">
-                <label class="text-sm font-semibold text-gray-700">版本</label>
+                <label class="text-sm font-medium text-gray-700">版本</label>
                 <input 
                   v-model="form.version" 
                   type="text"
-                  class="w-full px-4 py-3 bg-white/50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-mono"
+                  class="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 focus:border-gray-400 transition-all font-mono"
                 >
               </div>
             </div>
 
             <div class="flex flex-col gap-2">
-              <label class="text-sm font-semibold text-gray-700">名称</label>
+              <label class="text-sm font-medium text-gray-700">名称</label>
               <input 
                 v-model="form.name" 
                 type="text"
                 placeholder="智能体名称"
-                class="w-full px-4 py-3 bg-white/50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                class="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 focus:border-gray-400 transition-all"
               >
             </div>
 
             <div class="flex flex-col gap-2">
-              <label class="text-sm font-semibold text-gray-700">描述</label>
+              <label class="text-sm font-medium text-gray-700">描述</label>
               <textarea 
                 v-model="form.description" 
                 rows="3"
                 placeholder="描述智能体的功能和用途"
-                class="w-full px-4 py-3 bg-white/50 border border-gray-200 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                class="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-gray-200 focus:border-gray-400 transition-all"
               ></textarea>
             </div>
 
-            <div class="flex items-center gap-4">
-              <label class="text-sm font-semibold text-gray-700">状态</label>
-              <label class="flex items-center gap-3 cursor-pointer">
-                <input 
-                  type="checkbox" 
-                  v-model="form.is_active"
-                  class="w-5 h-5 accent-green-600 rounded"
-                >
-                <span class="text-sm" :class="form.is_active ? 'text-green-600 font-medium' : 'text-gray-500'">
+            <div class="flex items-center gap-4 pt-2">
+              <label class="text-sm font-medium text-gray-700">状态</label>
+              <label class="flex items-center gap-2 cursor-pointer select-none">
+                <div class="relative inline-flex items-center cursor-pointer">
+                  <input type="checkbox" v-model="form.is_active" class="sr-only peer">
+                  <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-green-500"></div>
+                </div>
+                <span class="text-sm font-medium" :class="form.is_active ? 'text-green-600' : 'text-gray-500'">
                   {{ form.is_active ? '已激活' : '未激活' }}
                 </span>
               </label>
@@ -138,21 +132,22 @@
 
         <!-- Prompt 配置 -->
         <div v-if="activeTab === 'prompt'" class="max-w-4xl space-y-6">
-          <div class="bg-white/60 backdrop-blur-sm border border-white/40 rounded-2xl p-6 space-y-6">
-            <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
-              ✍️ 系统提示词
+          <div class="space-y-6">
+            <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2 border-b border-gray-100 pb-4">
+              <PenTool class="w-5 h-5 text-gray-500" />
+              系统提示词
             </h2>
             
             <div class="flex flex-col gap-2">
-              <div class="flex items-center justify-between">
-                <label class="text-sm font-semibold text-gray-700">System Prompt</label>
-                <span class="text-xs text-gray-400">{{ form.prompt?.length || 0 }} 字符</span>
+              <div class="flex items-center justify-between mb-1">
+                <label class="text-sm font-medium text-gray-700">System Prompt</label>
+                <span class="text-xs text-gray-400 font-mono">{{ form.prompt?.length || 0 }} 字符</span>
               </div>
               <textarea 
                 v-model="form.prompt" 
                 rows="20"
                 placeholder="设定智能体的角色、能力和行为准则..."
-                class="w-full px-4 py-3 bg-white/50 border border-gray-200 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-mono leading-relaxed"
+                class="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-gray-200 focus:border-gray-400 transition-all font-mono leading-relaxed"
               ></textarea>
             </div>
           </div>
@@ -160,17 +155,18 @@
 
         <!-- 模型配置 -->
         <div v-if="activeTab === 'model'" class="max-w-3xl space-y-6">
-          <div class="bg-white/60 backdrop-blur-sm border border-white/40 rounded-2xl p-6 space-y-6">
-            <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
-              🧠 模型配置
+          <div class="space-y-6">
+            <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2 border-b border-gray-100 pb-4">
+              <BrainCircuit class="w-5 h-5 text-gray-500" />
+              模型配置
             </h2>
             
             <div class="flex flex-col gap-2">
-              <label class="text-sm font-semibold text-gray-700">模型选择</label>
+              <label class="text-sm font-medium text-gray-700">模型选择</label>
               <div class="relative">
                 <select 
                   v-model="form.model"
-                  class="w-full px-4 py-3 bg-white/50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all cursor-pointer appearance-none"
+                  class="w-full pl-4 pr-10 py-2.5 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 focus:border-gray-400 transition-all cursor-pointer appearance-none"
                 >
                   <option value="claude-sonnet-4-20250514">Claude Sonnet 4 (最新)</option>
                   <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
@@ -178,190 +174,195 @@
                   <option value="gpt-4o-mini">GPT-4o Mini</option>
                   <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
                 </select>
-                <div class="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">▼</div>
+                <ChevronDown class="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
               </div>
             </div>
 
             <div class="flex flex-col gap-2">
-              <label class="text-sm font-semibold text-gray-700">最大对话轮数</label>
+              <label class="text-sm font-medium text-gray-700">最大对话轮数</label>
               <input 
                 v-model.number="form.max_turns" 
                 type="number" 
                 min="1" 
                 max="100"
-                class="w-full px-4 py-3 bg-white/50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                class="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 focus:border-gray-400 transition-all"
               >
               <span class="text-xs text-gray-400">限制单次对话的最大工具调用轮数</span>
             </div>
 
-            <label class="flex items-center gap-4 p-4 bg-white/50 rounded-xl border border-gray-200 cursor-pointer hover:border-blue-300 transition-all group">
+            <label class="flex items-start gap-3 p-4 bg-gray-50 rounded-xl border border-gray-200 cursor-pointer hover:border-gray-300 transition-all group">
               <input 
                 type="checkbox" 
                 v-model="form.plan_manager_enabled"
-                class="w-5 h-5 accent-blue-600 cursor-pointer rounded"
+                class="mt-1 w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
               >
               <div class="flex-1">
-                <div class="text-sm font-semibold text-gray-800 group-hover:text-blue-700 transition-colors">启用计划管理器</div>
-                <div class="text-xs text-gray-500 mt-0.5">适合处理复杂的长流程任务</div>
+                <div class="text-sm font-medium text-gray-800 group-hover:text-gray-900 transition-colors">启用计划管理器</div>
+                <div class="text-xs text-gray-500 mt-1">适合处理复杂的长流程任务</div>
               </div>
             </label>
           </div>
         </div>
 
         <!-- 工具配置 -->
-        <div v-if="activeTab === 'tools'" class="max-w-4xl space-y-6">
+        <div v-if="activeTab === 'tools'" class="max-w-4xl space-y-8">
           <!-- 内置工具 -->
-          <div class="bg-white/60 backdrop-blur-sm border border-white/40 rounded-2xl p-6 space-y-6">
-            <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
-              ⚡ 内置工具
+          <div class="space-y-6">
+            <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2 border-b border-gray-100 pb-4">
+              <Zap class="w-5 h-5 text-gray-500" />
+              内置工具
             </h2>
-            <p class="text-sm text-gray-500 -mt-2">选择该智能体可使用的内置功能</p>
             
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <label 
                 v-for="cap in availableCapabilities" 
                 :key="cap.id"
-                class="flex items-center gap-3 p-4 bg-white/50 border border-gray-200 rounded-xl cursor-pointer hover:bg-white hover:border-blue-300 hover:shadow-md transition-all group"
+                class="flex items-start gap-3 p-4 bg-white border border-gray-200 rounded-xl cursor-pointer hover:border-gray-300 hover:shadow-sm transition-all group"
+                :class="form.enabled_capabilities?.[cap.id] ? 'border-blue-200 bg-blue-50/10' : ''"
               >
                 <input 
                   type="checkbox" 
                   :checked="form.enabled_capabilities?.[cap.id]"
                   @change="toggleCapability(cap.id)"
-                  class="w-5 h-5 accent-blue-600 rounded"
+                  class="mt-1 w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                 >
                 <div class="flex-1">
-                  <div class="text-sm font-medium text-gray-700 group-hover:text-blue-700 flex items-center gap-2">
-                    <span>{{ cap.icon }}</span>
+                  <div class="text-sm font-medium text-gray-700 flex items-center gap-2 mb-1">
+                    <component :is="cap.icon" class="w-4 h-4 text-gray-500" />
                     {{ cap.label }}
                   </div>
-                  <div class="text-xs text-gray-400 mt-0.5">{{ cap.description }}</div>
+                  <div class="text-xs text-gray-400 leading-snug">{{ cap.description }}</div>
                 </div>
               </label>
             </div>
           </div>
 
           <!-- MCP 工具 -->
-          <div class="bg-white/60 backdrop-blur-sm border border-white/40 rounded-2xl p-6 space-y-6">
-            <div class="flex items-center justify-between">
-              <div>
-                <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
-                  🔌 MCP 工具
-                </h2>
-                <p class="text-sm text-gray-500 mt-1">通过 MCP 协议连接的外部服务（如 Dify、Coze 工作流）</p>
-              </div>
+          <div class="space-y-6">
+            <div class="flex items-center justify-between border-b border-gray-100 pb-4">
+              <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+                <Plug class="w-5 h-5 text-gray-500" />
+                MCP 工具
+              </h2>
               <button 
                 @click="fetchAvailableMcps"
-                class="text-sm text-blue-600 hover:text-blue-700 font-medium"
+                class="text-sm text-gray-500 hover:text-gray-800 font-medium flex items-center gap-1"
               >
+                <RefreshCw class="w-3.5 h-3.5" />
                 刷新列表
               </button>
             </div>
 
             <!-- 已启用的 MCP -->
             <div v-if="enabledMcps.length > 0" class="space-y-3">
-              <h3 class="text-sm font-semibold text-gray-600">已启用 ({{ enabledMcps.length }})</h3>
+              <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">已启用 ({{ enabledMcps.length }})</h3>
               <div 
                 v-for="mcp in enabledMcps" 
                 :key="mcp.server_name"
-                class="flex items-center justify-between p-4 bg-green-50/50 border border-green-200 rounded-xl"
+                class="flex items-center justify-between p-4 bg-green-50/50 border border-green-100 rounded-xl"
               >
                 <div class="flex items-center gap-3">
-                  <span class="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center text-green-600">✓</span>
+                  <div class="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center text-green-600">
+                    <Check class="w-5 h-5" />
+                  </div>
                   <div>
-                    <div class="font-medium text-gray-800">{{ mcp.name || mcp.server_name }}</div>
+                    <div class="font-medium text-gray-800 text-sm">{{ mcp.name || mcp.server_name }}</div>
                     <div class="text-xs text-gray-500">{{ mcp.description || '暂无描述' }}</div>
-                    <div class="text-xs text-gray-400 mt-1 font-mono">{{ mcp.server_url }}</div>
+                    <div class="text-xs text-gray-400 mt-0.5 font-mono">{{ mcp.server_url }}</div>
                   </div>
                 </div>
                 <button 
                   @click="disableMcp(mcp.server_name || mcp.name)"
-                  class="px-3 py-1.5 text-xs font-medium text-red-500 bg-white border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
+                  class="px-3 py-1.5 text-xs font-medium text-red-600 bg-white border border-red-100 rounded-lg hover:bg-red-50 transition-colors"
                 >
                   禁用
                 </button>
               </div>
             </div>
 
-            <!-- 可用的 MCP（全局模板） -->
+            <!-- 可用的 MCP -->
             <div v-if="availableMcps.length > 0" class="space-y-3">
-              <h3 class="text-sm font-semibold text-gray-600">可添加 ({{ availableMcps.length }})</h3>
+              <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">可添加 ({{ availableMcps.length }})</h3>
               <div 
                 v-for="mcp in availableMcps" 
                 :key="mcp.server_name"
-                class="flex items-center justify-between p-4 bg-white/50 border border-gray-200 rounded-xl hover:border-blue-300 transition-colors"
+                class="flex items-center justify-between p-4 bg-white border border-gray-200 rounded-xl hover:border-gray-300 transition-colors"
               >
                 <div class="flex items-center gap-3">
-                  <span class="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center text-gray-400">🔌</span>
+                  <div class="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center text-gray-400">
+                    <Plug class="w-5 h-5" />
+                  </div>
                   <div>
-                    <div class="font-medium text-gray-800">{{ mcp.server_name }}</div>
+                    <div class="font-medium text-gray-800 text-sm">{{ mcp.server_name }}</div>
                     <div class="text-xs text-gray-500">{{ mcp.description || '暂无描述' }}</div>
                   </div>
                 </div>
                 <button 
                   @click="enableMcp(mcp.server_name)"
-                  class="px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
+                  class="px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 border border-blue-100 rounded-lg hover:bg-blue-100 transition-colors"
                 >
                   启用
                 </button>
               </div>
             </div>
 
-            <div v-if="enabledMcps.length === 0 && availableMcps.length === 0" class="text-center py-8 text-gray-400">
-              <span class="text-3xl block mb-2">🔌</span>
-              <p class="text-sm">暂无可用的 MCP 工具</p>
-              <p class="text-xs mt-1">在 config.yaml 的 mcp_tools 中配置</p>
+            <div v-if="enabledMcps.length === 0 && availableMcps.length === 0" class="text-center py-8 bg-gray-50 rounded-xl border border-gray-100 border-dashed">
+              <Plug class="w-8 h-8 text-gray-300 mx-auto mb-2" />
+              <p class="text-sm text-gray-500">暂无可用的 MCP 工具</p>
+              <p class="text-xs text-gray-400 mt-1">在 config.yaml 的 mcp_tools 中配置</p>
             </div>
           </div>
 
           <!-- REST APIs -->
-          <div class="bg-white/60 backdrop-blur-sm border border-white/40 rounded-2xl p-6 space-y-6">
-            <div>
-              <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
-                🌐 REST APIs
-              </h2>
-              <p class="text-sm text-gray-500 mt-1">通过 api_calling 工具调用的 REST 接口</p>
-            </div>
+          <div class="space-y-6">
+            <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2 border-b border-gray-100 pb-4">
+              <Globe class="w-5 h-5 text-gray-500" />
+              REST APIs
+            </h2>
 
             <div v-if="agent?.apis?.length > 0" class="space-y-3">
               <div 
                 v-for="api in agent.apis" 
                 :key="api.name"
-                class="flex items-center justify-between p-4 bg-blue-50/50 border border-blue-200 rounded-xl"
+                class="flex items-center justify-between p-4 bg-blue-50/30 border border-blue-100 rounded-xl"
               >
                 <div class="flex items-center gap-3">
-                  <span class="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center text-blue-600">🌐</span>
+                  <div class="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center text-blue-600">
+                    <Globe class="w-5 h-5" />
+                  </div>
                   <div>
-                    <div class="font-medium text-gray-800">{{ api.name }}</div>
+                    <div class="font-medium text-gray-800 text-sm">{{ api.name }}</div>
                     <div class="text-xs text-gray-500">{{ api.description || '暂无描述' }}</div>
-                    <div class="text-xs text-gray-400 mt-1 font-mono">{{ api.base_url }}</div>
+                    <div class="text-xs text-gray-400 mt-0.5 font-mono">{{ api.base_url }}</div>
                   </div>
                 </div>
-                <span class="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded-md">{{ api.auth_type || 'none' }}</span>
+                <span class="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded-md font-medium">{{ api.auth_type || 'none' }}</span>
               </div>
             </div>
 
-            <div v-else class="text-center py-8 text-gray-400">
-              <span class="text-3xl block mb-2">🌐</span>
-              <p class="text-sm">暂无 REST API 配置</p>
-              <p class="text-xs mt-1">在 config.yaml 的 apis 中配置</p>
+            <div v-else class="text-center py-8 bg-gray-50 rounded-xl border border-gray-100 border-dashed">
+              <Globe class="w-8 h-8 text-gray-300 mx-auto mb-2" />
+              <p class="text-sm text-gray-500">暂无 REST API 配置</p>
+              <p class="text-xs text-gray-400 mt-1">在 config.yaml 的 apis 中配置</p>
             </div>
           </div>
         </div>
 
         <!-- 危险操作 -->
         <div v-if="activeTab === 'danger'" class="max-w-3xl space-y-6">
-          <div class="bg-red-50/50 backdrop-blur-sm border border-red-200 rounded-2xl p-6 space-y-6">
-            <h2 class="text-lg font-bold text-red-700 flex items-center gap-2">
-              ⚠️ 危险操作
+          <div class="space-y-6">
+            <h2 class="text-lg font-bold text-red-600 flex items-center gap-2 border-b border-red-100 pb-4">
+              <AlertTriangle class="w-5 h-5" />
+              危险操作
             </h2>
             
-            <div class="p-4 bg-white/80 rounded-xl border border-red-100">
-              <h3 class="font-semibold text-gray-800 mb-2">删除智能体</h3>
-              <p class="text-sm text-gray-500 mb-4">此操作将永久删除该智能体的所有配置文件，无法恢复。</p>
+            <div class="p-6 bg-red-50/50 rounded-xl border border-red-100">
+              <h3 class="font-semibold text-gray-800 mb-2 text-sm">删除智能体</h3>
+              <p class="text-sm text-gray-500 mb-4 leading-relaxed">此操作将永久删除该智能体的所有配置文件，无法恢复。请谨慎操作。</p>
               <button 
                 @click="deleteAgent"
                 :disabled="deleting"
-                class="px-5 py-2.5 bg-red-500 text-white text-sm font-medium rounded-xl hover:bg-red-600 transition-all disabled:opacity-50"
+                class="px-5 py-2.5 bg-white border border-red-200 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 transition-all disabled:opacity-50"
               >
                 {{ deleting ? '删除中...' : '删除智能体' }}
               </button>
@@ -377,6 +378,22 @@
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import api from '@/api/index'
+import { 
+  ArrowLeft, 
+  RefreshCw, 
+  Save, 
+  Loader2, 
+  ClipboardList, 
+  PenTool, 
+  BrainCircuit, 
+  Wrench, 
+  AlertTriangle, 
+  Zap, 
+  Plug, 
+  Globe,
+  ChevronDown,
+  Check
+} from 'lucide-vue-next'
 
 const router = useRouter()
 const route = useRoute()
@@ -419,19 +436,19 @@ const availableMcps = ref([])
 
 // 标签页配置
 const tabs = [
-  { id: 'basic', label: '基础信息', icon: '📋' },
-  { id: 'prompt', label: '提示词', icon: '✍️' },
-  { id: 'model', label: '模型配置', icon: '🧠' },
-  { id: 'tools', label: '工具配置', icon: '🔧' },
-  { id: 'danger', label: '危险操作', icon: '⚠️' },
+  { id: 'basic', label: '基础信息', icon: ClipboardList },
+  { id: 'prompt', label: '提示词', icon: PenTool },
+  { id: 'model', label: '模型配置', icon: BrainCircuit },
+  { id: 'tools', label: '工具配置', icon: Wrench },
+  { id: 'danger', label: '危险操作', icon: AlertTriangle },
 ]
 
 // 可用能力列表
 const availableCapabilities = [
-  { id: 'web_search', label: '网络搜索', icon: '🌐', description: '允许搜索互联网获取信息' },
-  { id: 'knowledge_search', label: '知识库检索', icon: '📚', description: '从用户知识库中检索相关内容' },
-  { id: 'code_execution', label: '代码执行', icon: '💻', description: '在沙盒环境中执行代码' },
-  { id: 'file_operations', label: '文件操作', icon: '📁', description: '读写文件系统' },
+  { id: 'web_search', label: '网络搜索', icon: Globe, description: '允许搜索互联网获取信息' },
+  { id: 'knowledge_search', label: '知识库检索', icon: ClipboardList, description: '从用户知识库中检索相关内容' },
+  { id: 'code_execution', label: '代码执行', icon: Zap, description: '在沙盒环境中执行代码' },
+  { id: 'file_operations', label: '文件操作', icon: ClipboardList, description: '读写文件系统' },
 ]
 
 // 检测是否有变更
@@ -620,22 +637,6 @@ watch(() => route.params.agentId, async (newId) => {
 </script>
 
 <style scoped>
-@keyframes blob {
-  0% { transform: translate(0px, 0px) scale(1); }
-  33% { transform: translate(30px, -50px) scale(1.1); }
-  66% { transform: translate(-20px, 20px) scale(0.9); }
-  100% { transform: translate(0px, 0px) scale(1); }
-}
-.animate-blob {
-  animation: blob 15s infinite;
-}
-.animation-delay-2000 {
-  animation-delay: 2s;
-}
-.animation-delay-4000 {
-  animation-delay: 4s;
-}
-
 /* 滚动条优化 */
 .scrollbar-thin::-webkit-scrollbar {
   width: 6px;
