@@ -217,7 +217,7 @@ class APICallingTool:
             
             # 4. 发送请求
             logger.info(f"📡 {method} {final_url}")
-            logger.debug(f"📤 请求体: {json.dumps(body, ensure_ascii=False)[:500] if body else 'None'}")
+            logger.info(f"📤 完整请求参数: url={final_url}, method={method}, headers={final_headers}, body={json.dumps(body, ensure_ascii=False) if body else 'None'}")
             
             async with aiohttp.ClientSession() as session:
                 # SSE 流式模式

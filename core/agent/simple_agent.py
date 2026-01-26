@@ -457,6 +457,7 @@ class SimpleAgent:
         self,
         messages: List[Dict[str, str]] = None,
         session_id: str = None,
+        conversation_id: str = None,
         message_id: str = None,
         enable_stream: bool = True,
         variables: Dict[str, Any] = None,
@@ -505,7 +506,7 @@ class SimpleAgent:
         
         # ===== 初始化会话上下文 =====
         session_context = await self.event_manager.storage.get_session_context(session_id)
-        conversation_id = session_context.get("conversation_id", "default")
+        conversation_id = session_context.get("conversation_id", conversation_id)
         user_id = session_context.get("user_id")  # 用于 System Prompt 注入
         # 🆕 前端变量直接从参数传入（不再从 Redis 读取），用于注入 System Prompt
         # 存储为实例变量，供后续使用
@@ -823,7 +824,6 @@ class SimpleAgent:
         else:
             # 使用框架默认 Prompt（根据意图识别结果决定是否检索 Mem0）+ PromptManager 追加
             base_prompt = get_universal_agent_prompt(
-                conversation_id=conversation_id,
                 user_id=user_id,
                 user_query=user_query,
                 skip_memory_retrieval=skip_memory  # 🆕 V4.6: 传递意图识别结果

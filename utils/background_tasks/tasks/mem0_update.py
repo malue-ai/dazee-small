@@ -121,21 +121,6 @@ async def update_user_memories(
             f"新增记忆={memories_added}"
         )
         
-        # 通过 SSE 推送进度（可选）
-        if session_id and event_manager:
-            await event_manager.message.emit_message_delta(
-                session_id=session_id,
-                message_id=f"mem0_update_{user_id}",
-                delta={
-                    "type": "mem0_update",
-                    "content": {
-                        "user_id": user_id,
-                        "memories_added": memories_added,
-                        "conversations_processed": len(conversations)
-                    }
-                }
-            )
-        
         return Mem0UpdateResult(
             user_id=user_id,
             success=True,

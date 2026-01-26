@@ -358,6 +358,7 @@ class RedisSessionManager:
             return {}
         
         return {
+            "message_id": status_data.get("message_id"),
             "conversation_id": status_data.get("conversation_id"),
             "user_id": status_data.get("user_id")
         }
@@ -366,24 +367,28 @@ class RedisSessionManager:
         self,
         session_id: str,
         conversation_id: Optional[str] = None,
-        user_id: Optional[str] = None
+        user_id: Optional[str] = None,
+        message_id: Optional[str] = None
     ) -> None:
         """
         设置 session 上下文信息
         
         用于在 Agent 执行前同步 session context，确保工具（如 api_calling）
-        可以正确获取 conversation_id 等信息。
+        可以正确获取 conversation_id、message_id 等信息。
         
         Args:
             session_id: Session ID
             conversation_id: 对话 ID（可选）
             user_id: 用户 ID（可选）
+            message_id: Assistant 消息 ID（可选，在 _run_agent 开始时设置）
         """
         fields = {}
         if conversation_id is not None:
             fields["conversation_id"] = conversation_id
         if user_id is not None:
             fields["user_id"] = user_id
+        if message_id is not None:
+            fields["message_id"] = message_id
         
         if fields:
             await self.update_session_status(session_id, **fields)
@@ -433,17 +438,6 @@ class RedisSessionManager:
                 "data": event_data,
                 "timestamp": timestamp
             }
-        
-        # 🔍 追踪日志：记录转换前的 conversation_id (DEBUG 级别)
-        evt_type = event.get("type", "unknown")
-        conv_id_before = event.get("conversation_id")
-        logger.debug(
-            f"🔍 [buffer_event] 转换前: "
-            f"type={evt_type}, "
-            f"session_id={session_id}, "
-            f"conversation_id={conv_id_before}, "
-            f"output_format={output_format}"
-        )
         
         # 1. 格式转换（如果需要）
         if output_format == "zeno" and adapter is not None:

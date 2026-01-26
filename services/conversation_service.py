@@ -71,7 +71,8 @@ class ConversationService:
         self,
         user_id: str,
         title: str = "新对话",
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        conversation_id: Optional[str] = None
     ) -> Conversation:
         """
         创建新对话
@@ -80,6 +81,8 @@ class ConversationService:
             user_id: 用户ID
             title: 对话标题
             metadata: 对话元数据
+            conversation_id: 可选的对话 ID（如果不提供则自动生成，
+                           用于前端传入的 conversation_id 不存在时保持 ID 一致）
             
         Returns:
             创建的对话对象（Pydantic 模型）
@@ -91,7 +94,8 @@ class ConversationService:
                 session=session,
                 user_id=user_id,
                 title=title,
-                metadata=metadata
+                metadata=metadata,
+                conversation_id=conversation_id
             )
             
             logger.info(f"✅ 对话创建成功: id={db_conv.id}, user_id={user_id}")
@@ -443,11 +447,17 @@ class ConversationService:
         Returns:
             更新后的消息对象
         """
+        logger.debug(f"🔧 [DB_DEBUG] update_message 开始: message_id={message_id}, has_content={content is not None}, status={status}, metadata_keys={list(metadata.keys()) if metadata else None}")
+        
         async with AsyncSessionLocal() as session:
+            logger.debug(f"🔧 [DB_DEBUG] 获取数据库会话成功")
+            
             # 先获取现有消息
             db_msg = await crud.get_message(session, message_id)
+            logger.debug(f"🔧 [DB_DEBUG] 查询消息: message_id={message_id}, found={db_msg is not None}")
             
             if not db_msg:
+                logger.error(f"❌ [DB_DEBUG] 消息不存在: message_id={message_id}")
                 raise ValueError(f"消息不存在: id={message_id}")
             
             # 🔥 修复：确保 existing_metadata 是字典（从数据库读取可能是字符串）
@@ -464,15 +474,24 @@ class ConversationService:
             # 合并 metadata
             if metadata:
                 existing_metadata.update(metadata)
+                logger.debug(f"🔧 [DB_DEBUG] metadata 合并后: keys={list(existing_metadata.keys())}")
             
             # 更新消息
-            updated_msg = await crud.update_message(
-                session=session,
-                message_id=message_id,
-                content=content,
-                status=status,
-                metadata=existing_metadata
-            )
+            logger.debug(f"🔧 [DB_DEBUG] 准备调用 crud.update_message: message_id={message_id}, has_content={content is not None}, status={status}")
+            try:
+                updated_msg = await crud.update_message(
+                    session=session,
+                    message_id=message_id,
+                    content=content,
+                    status=status,
+                    metadata=existing_metadata
+                )
+                logger.debug(f"🔧 [DB_DEBUG] crud.update_message 返回: updated_msg={updated_msg is not None}")
+                if updated_msg:
+                    logger.debug(f"🔧 [DB_DEBUG] 更新后消息详情: id={updated_msg.id}, role={updated_msg.role}, status={updated_msg.status}, content_type={type(updated_msg.content).__name__}")
+            except Exception as db_err:
+                logger.error(f"❌ [DB_DEBUG] crud.update_message 失败: message_id={message_id}, error={db_err}", exc_info=True)
+                raise
         
         # 日志
         status_info = f", status={status}" if status else ""

@@ -321,7 +321,7 @@ class ChatService:
             stream=False → Dict
         """
         msg_preview = str(message)[:50] if message else ""
-        logger.info(f"📨 对话请求: user={user_id}, agent={agent_id or '默认'}, msg={msg_preview}...")
+        logger.info(f"📨 对话请求: user={user_id}, agent={agent_id or '默认'}, conv={conversation_id}, msg_id={message_id}, msg={msg_preview}...")
         
         # ========== 1. 验证 agent_id ==========
         if agent_id:
@@ -492,6 +492,7 @@ class ChatService:
             if is_new_conversation:
                 await events.conversation.emit_conversation_start(
                     session_id=session_id,
+                    conversation_id=conversation_id,
                     conversation={
                         "id": conversation_id,
                         "title": "新对话",
@@ -645,14 +646,14 @@ class ChatService:
                 if files_metadata:
                     user_metadata["files"] = files_metadata
                 
-                await crud.create_message(
+                user_msg = await crud.create_message(
                     session=session,
                     conversation_id=conversation_id,
                     role="user",
                     content=content_json,
                     metadata=user_metadata
                 )
-                logger.debug(f"💾 用户消息已保存，files={len(files_metadata) if files_metadata else 0}")
+                logger.info(f"💾 用户消息已保存: conversation_id={conversation_id}, message_id={user_msg.id}, files={len(files_metadata) if files_metadata else 0}")
                 
                 # 2.2 创建 Assistant 消息占位
                 await crud.create_message(
@@ -694,7 +695,7 @@ class ChatService:
                         elif content is None:
                             content = []
                     except json.JSONDecodeError:
-                        pass
+                        logger.warning(f"JSON 解析失败: message_id={db_msg.id}")
                     
                     raw_messages.append({
                         "role": db_msg.role,
@@ -704,7 +705,7 @@ class ChatService:
                 # 使用 adaptor 清理和分离消息（处理 thinking/index/tool_result）
                 history_messages = ClaudeAdaptor.prepare_messages_from_db(raw_messages)
                 
-                logger.info(f"📚 历史消息已加载: {len(history_messages)} 条")
+                logger.info(f"📚 历史消息已加载: conversation_id={conversation_id}, count={len(history_messages)} 条")
             
             # 1.3 注入前端变量到最新的用户消息（传给 LLM，但不保存到数据库）
             # 注：必须在保存数据库之后、调用 LLM 之前执行
@@ -724,6 +725,7 @@ class ChatService:
             # 3.1 发送 message_start 事件（通知前端开始生成）
             await events.message.emit_message_start(
                 session_id=session_id,
+                conversation_id=conversation_id,
                 message_id=assistant_message_id,
                 model=self.default_model,
                 output_format=events.output_format,
@@ -845,9 +847,15 @@ class ChatService:
             if hasattr(agent, 'broadcaster') and agent.broadcaster:
                 agent.broadcaster.set_output_format(output_format, conversation_id)
             
-            # 🔧 Session context 已经在 session_service.create_session() 中保存到 Redis
+            # 🔧 更新 Session context，增加 assistant_message_id
             # 工具（如 api_calling）可以通过 agent.event_manager.storage.get_session_context(session_id) 获取
-            logger.debug(f"🔑 Session context 已就绪: session_id={session_id}, conversation_id={conversation_id}, user_id={user_id}")
+            await redis.set_session_context(
+                session_id=session_id,
+                conversation_id=conversation_id,
+                user_id=user_id,
+                message_id=assistant_message_id  # 🆕 存储 assistant_message_id
+            )
+            logger.debug(f"🔑 Session context 已就绪: session_id={session_id}, conversation_id={conversation_id}, user_id={user_id}, message_id={assistant_message_id}")
             
             # 🔧 用于保存 assistant_text（在 message_stop 清理 accumulator 前获取）
             _assistant_text_for_tasks = ""
@@ -928,6 +936,7 @@ class ChatService:
                 async for event in agent.chat(
                     messages=history_messages,
                     session_id=session_id,
+                    conversation_id=conversation_id,  # 🆕 直接传入，避免依赖 Redis
                     message_id=assistant_message_id,
                     enable_stream=True,
                     variables=variables,
@@ -984,6 +993,7 @@ class ChatService:
                         # 6. 发送 session_stopped 事件（在 done 之后）
                         await events.session.emit_session_stopped(
                             session_id=session_id,
+                            conversation_id=conversation_id,
                             reason="user_requested",
                             output_format=events.output_format,
                             adapter=events.adapter
@@ -1081,6 +1091,7 @@ class ChatService:
                 # 4.3 发送完成事件（在后台任务之后，确保推荐问题等已发送）
                 await events.session.emit_session_end(
                     session_id=session_id,
+                    conversation_id=conversation_id,
                     status="completed",
                     duration_ms=duration_ms,
                     output_format=events.output_format,
@@ -1186,6 +1197,7 @@ class ChatService:
             try:
                 await events.system.emit_error(
                     session_id=session_id,
+                    conversation_id=conversation_id,
                     error_type=error_type,
                     error_message=user_message,
                     details={
@@ -1202,6 +1214,7 @@ class ChatService:
             try:
                 await events.session.emit_session_end(
                     session_id=session_id,
+                    conversation_id=conversation_id,
                     status="failed",
                     duration_ms=duration_ms,
                     output_format=events.output_format,

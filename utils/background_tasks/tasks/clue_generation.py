@@ -126,6 +126,7 @@ async def generate_clue_task(
     
     await _generate_clues(
         session_id=ctx.session_id,
+        conversation_id=ctx.conversation_id,
         message_id=ctx.message_id,
         user_message=ctx.user_message,
         assistant_response=ctx.assistant_response,
@@ -136,6 +137,7 @@ async def generate_clue_task(
 
 async def _generate_clues(
     session_id: str,
+    conversation_id: str,
     message_id: str,
     user_message: str,
     assistant_response: str,
@@ -172,11 +174,12 @@ async def _generate_clues(
             
             await event_manager.message.emit_message_delta(
                 session_id=session_id,
-                message_id=message_id,
+                conversation_id=conversation_id,
                 delta={
                     "type": "clue",
                     "content": clue_content  # JSON 字符串格式
                 },
+                message_id=message_id,
                 output_format=getattr(event_manager, 'output_format', 'zenflux'),
                 adapter=getattr(event_manager, 'adapter', None)
             )

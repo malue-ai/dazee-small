@@ -21,11 +21,24 @@ async def create_conversation(
     session: AsyncSession,
     user_id: str,
     title: str = "新对话",
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = None,
+    conversation_id: Optional[str] = None
 ) -> Conversation:
-    """创建对话"""
+    """
+    创建对话
+    
+    Args:
+        session: 数据库会话
+        user_id: 用户 ID
+        title: 对话标题
+        metadata: 对话元数据
+        conversation_id: 可选的对话 ID（如果不提供则自动生成）
+    
+    Returns:
+        创建的对话对象
+    """
     conv = Conversation(
-        id=str(uuid4()),
+        id=conversation_id or str(uuid4()),
         user_id=user_id,
         title=title,
         created_at=datetime.now(),

@@ -298,6 +298,7 @@ class EventBroadcaster:
         # 通过 EventManager 发送事件
         result = await self.events.content.emit_content_start(
             session_id=session_id,
+            conversation_id=self.output_conversation_id,
             index=index,
             content_block=content_block,
             message_id=message_id,
@@ -402,6 +403,7 @@ class EventBroadcaster:
         # 通过 EventManager 发送事件
         return await self.events.content.emit_content_delta(
             session_id=session_id,
+            conversation_id=self.output_conversation_id,
             index=index,
             delta=delta,
             message_id=message_id,
@@ -454,6 +456,7 @@ class EventBroadcaster:
         # 通过 EventManager 发送事件
         result = await self.events.content.emit_content_stop(
             session_id=session_id,
+            conversation_id=self.output_conversation_id,
             index=index,
             message_id=message_id,
             output_format=self.output_format,
@@ -498,6 +501,7 @@ class EventBroadcaster:
         # 通过 EventManager 发送事件
         return await self.events.message.emit_message_start(
             session_id=session_id,
+            conversation_id=self.output_conversation_id,
             message_id=message_id,
             model=model,
             output_format=self.output_format,
@@ -532,6 +536,7 @@ class EventBroadcaster:
         # 1. 先发送 SSE 事件
         result = await self.events.message.emit_message_delta(
             session_id=session_id,
+            conversation_id=self.output_conversation_id,
             delta=delta,
             message_id=message_id,
             output_format=self.output_format,
@@ -630,27 +635,36 @@ class EventBroadcaster:
         Returns:
             发送的事件，如果被过滤则返回 None
         """
+        logger.info(f"🔧 [DB_DEBUG] emit_message_stop 开始: session_id={session_id}, message_id={message_id}")
+        
         # 🆕 DEFERRED 策略：先保存累积的 metadata
+        logger.debug(f"🔧 [DB_DEBUG] emit_message_stop: 步骤 1 - flush_pending_metadata")
         await self._flush_pending_metadata(session_id)
         
         # Checkpoint 当前累积的内容（防止最后一段 delta 丢失）
         # 无论 REALTIME 还是 DEFERRED 策略，message_stop 时都必须保存 content
+        logger.debug(f"🔧 [DB_DEBUG] emit_message_stop: 步骤 2 - checkpoint_message")
         await self._checkpoint_message(session_id)
         
         # 更新状态为 completed
+        logger.debug(f"🔧 [DB_DEBUG] emit_message_stop: 步骤 3 - finalize_message")
         await self._finalize_message(session_id)
         
         # 通过 EventManager 发送事件
+        logger.debug(f"🔧 [DB_DEBUG] emit_message_stop: 步骤 4 - 发送 message_stop 事件")
         result = await self.events.message.emit_message_stop(
             session_id=session_id,
+            conversation_id=self.output_conversation_id,
             message_id=message_id,
             output_format=self.output_format,
             adapter=self._get_adapter()
         )
         
         # 清理 session 状态
+        logger.debug(f"🔧 [DB_DEBUG] emit_message_stop: 步骤 5 - cleanup_session")
         self._cleanup_session(session_id)
         
+        logger.info(f"🔧 [DB_DEBUG] emit_message_stop 完成: session_id={session_id}")
         return result
     
     async def _flush_pending_metadata(self, session_id: str) -> None:
@@ -705,6 +719,7 @@ class EventBroadcaster:
         """发送 conversation_start 事件（内部方法）"""
         return await self.events.conversation.emit_conversation_start(
             session_id=session_id,
+            conversation_id=self.output_conversation_id,
             conversation=conversation,
             output_format=self.output_format,
             adapter=self._get_adapter()
@@ -734,6 +749,7 @@ class EventBroadcaster:
         """发送 error 事件（内部方法）"""
         return await self.events.system.emit_error(
             session_id=session_id,
+            conversation_id=self.output_conversation_id,
             error_type=error_type,
             error_message=error_message,
             output_format=self.output_format,
@@ -749,6 +765,7 @@ class EventBroadcaster:
         """发送自定义事件（内部方法）"""
         return await self.events.system.emit_custom(
             session_id=session_id,
+            conversation_id=self.output_conversation_id,
             event_type=event_type,
             event_data=event_data,
             output_format=self.output_format,
@@ -766,29 +783,41 @@ class EventBroadcaster:
         每次 content_stop 后调用，保存当前累积的内容
         状态设为 "processing"
         """
+        logger.debug(f"🔧 [DB_DEBUG] _checkpoint_message 开始: session_id={session_id}, has_conversation_service={self.conversation_service is not None}")
+        
         if not self.conversation_service:
+            logger.warning(f"🔧 [DB_DEBUG] _checkpoint_message 跳过: conversation_service 为 None")
             return
         
         accumulator = self._accumulators.get(session_id)
         message_id = self._session_message_ids.get(session_id)
         
+        logger.debug(f"🔧 [DB_DEBUG] _checkpoint_message: session_id={session_id}, has_accumulator={accumulator is not None}, message_id={message_id}")
+        
         if not accumulator or not message_id:
+            logger.debug(f"🔧 [DB_DEBUG] _checkpoint_message 跳过: accumulator 或 message_id 为空")
             return
         
         try:
             content_blocks = accumulator.build_for_db()
+            logger.debug(f"🔧 [DB_DEBUG] _checkpoint_message: content_blocks 数量={len(content_blocks) if content_blocks else 0}")
             if not content_blocks:
+                logger.debug(f"🔧 [DB_DEBUG] _checkpoint_message 跳过: content_blocks 为空")
                 return
             
             content_json = json.dumps(content_blocks, ensure_ascii=False)
+            logger.debug(f"🔧 [DB_DEBUG] _checkpoint_message: content_json 长度={len(content_json)}, 准备调用 update_message")
+            
             await self.conversation_service.update_message(
                 message_id=message_id,
                 content=content_json,
                 status="processing"
             )
             logger.debug(f"📍 Checkpoint: message_id={message_id}, blocks={len(content_blocks)}")
+            logger.info(f"🔧 [DB_DEBUG] _checkpoint_message 成功: message_id={message_id}")
         except Exception as e:
             logger.warning(f"⚠️ Checkpoint 保存失败: {str(e)}")
+            logger.error(f"🔧 [DB_DEBUG] _checkpoint_message 异常: session_id={session_id}, error={e}", exc_info=True)
     
     async def _finalize_message(self, session_id: str) -> None:
         """
@@ -798,21 +827,30 @@ class EventBroadcaster:
         
         注意：content 已在 checkpoint 保存，plan/usage 等已在 message_delta 时保存
         """
+        logger.debug(f"🔧 [DB_DEBUG] _finalize_message 开始: session_id={session_id}, has_conversation_service={self.conversation_service is not None}")
+        
         if not self.conversation_service:
+            logger.warning(f"🔧 [DB_DEBUG] _finalize_message 跳过: conversation_service 为 None")
             return
         
         message_id = self._session_message_ids.get(session_id)
+        logger.debug(f"🔧 [DB_DEBUG] _finalize_message: session_id={session_id}, message_id={message_id}")
+        
         if not message_id:
+            logger.warning(f"🔧 [DB_DEBUG] _finalize_message 跳过: message_id 为空")
             return
         
         try:
+            logger.debug(f"🔧 [DB_DEBUG] _finalize_message: 准备更新状态为 completed, message_id={message_id}")
             await self.conversation_service.update_message(
                 message_id=message_id,
                 status="completed"
             )
             logger.info(f"✅ 消息完成: message_id={message_id}")
+            logger.debug(f"🔧 [DB_DEBUG] _finalize_message 成功: message_id={message_id}")
         except Exception as e:
             logger.error(f"❌ 消息完成失败: {str(e)}", exc_info=True)
+            logger.error(f"🔧 [DB_DEBUG] _finalize_message 异常: session_id={session_id}, message_id={message_id}, error={e}")
     
     async def finalize_message(self, session_id: str) -> None:
         """
@@ -827,18 +865,28 @@ class EventBroadcaster:
         Args:
             session_id: Session ID
         """
+        logger.info(f"🔧 [DB_DEBUG] finalize_message（公开方法）开始: session_id={session_id}")
+        
         # 🆕 先保存累积的 metadata（DEFERRED 策略）
+        logger.debug(f"🔧 [DB_DEBUG] finalize_message: 步骤 1 - flush_pending_metadata")
         await self._flush_pending_metadata(session_id)
         
         # 保存当前累积的 content
         accumulator = self._accumulators.get(session_id)
         message_id = self._session_message_ids.get(session_id)
+        logger.debug(f"🔧 [DB_DEBUG] finalize_message: has_accumulator={accumulator is not None}, message_id={message_id}")
         
         if accumulator and message_id:
+            logger.debug(f"🔧 [DB_DEBUG] finalize_message: 步骤 2 - checkpoint_message")
             await self._checkpoint_message(session_id)
+        else:
+            logger.warning(f"🔧 [DB_DEBUG] finalize_message: 跳过 checkpoint（accumulator 或 message_id 为空）")
         
         # 更新状态为 completed
+        logger.debug(f"🔧 [DB_DEBUG] finalize_message: 步骤 3 - _finalize_message")
         await self._finalize_message(session_id)
+        
+        logger.info(f"🔧 [DB_DEBUG] finalize_message（公开方法）完成: session_id={session_id}")
     
     def _cleanup_session(self, session_id: str) -> None:
         """清理 session 状态"""
@@ -880,6 +928,7 @@ class EventBroadcaster:
         # 通过 EventManager 发送自定义事件
         return await self.events.system.emit_custom(
             session_id=session_id,
+            conversation_id=self.output_conversation_id,
             event_type=event_type,
             event_data=event_data,
             output_format=self.output_format,

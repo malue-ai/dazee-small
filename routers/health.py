@@ -10,6 +10,8 @@ import time
 import asyncio
 import psutil
 
+from sqlalchemy import text
+
 from logger import get_logger
 from infra.resilience.circuit_breaker import get_all_circuit_breakers
 from infra.cache import get_redis_client
@@ -67,9 +69,9 @@ async def readiness_probe(response: Response):
     
     # 1. 检查 Redis 连接
     try:
-        redis_client = get_redis_client()
-        await asyncio.wait_for(redis_client.ping(), timeout=2.0)
-        checks["redis"] = {"status": "healthy"}
+        redis_client = await get_redis_client()  # get_redis_client 是异步函数
+        ping_result = await asyncio.wait_for(redis_client.ping(), timeout=2.0)
+        checks["redis"] = {"status": "healthy" if ping_result else "unhealthy"}
     except Exception as e:
         checks["redis"] = {"status": "unhealthy", "error": str(e)}
         all_ready = False
@@ -77,7 +79,7 @@ async def readiness_probe(response: Response):
     # 2. 检查数据库连接
     try:
         async with AsyncSessionLocal() as session:
-            await asyncio.wait_for(session.execute("SELECT 1"), timeout=2.0)
+            await asyncio.wait_for(session.execute(text("SELECT 1")), timeout=2.0)
         checks["database"] = {"status": "healthy"}
     except Exception as e:
         checks["database"] = {"status": "unhealthy", "error": str(e)}

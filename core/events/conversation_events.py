@@ -36,6 +36,7 @@ class ConversationEventManager(BaseEventManager):
     async def emit_conversation_start(
         self,
         session_id: str,
+        conversation_id: str,
         conversation: Dict[str, Any],
         seq: Optional[int] = None,
         event_uuid: Optional[str] = None,
@@ -47,6 +48,7 @@ class ConversationEventManager(BaseEventManager):
         
         Args:
             session_id: Session ID
+            conversation_id: 对话 ID（必填）
             conversation: Conversation 完整数据
             seq: 事件序号（可选，来自 EventBroadcaster）
             event_uuid: 事件 UUID（可选）
@@ -68,7 +70,9 @@ class ConversationEventManager(BaseEventManager):
         )
         
         return await self._send_event(
-            session_id, event, seq=seq, event_uuid=event_uuid,
+            session_id, event,
+            conversation_id=conversation_id,
+            seq=seq, event_uuid=event_uuid,
             output_format=output_format, adapter=adapter
         )
     
@@ -121,7 +125,9 @@ class ConversationEventManager(BaseEventManager):
         )
         
         return await self._send_event(
-            session_id, event, seq=seq, event_uuid=event_uuid,
+            session_id, event,
+            conversation_id=conversation_id,
+            seq=seq, event_uuid=event_uuid,
             output_format=output_format, adapter=adapter
         )
     
@@ -141,7 +147,7 @@ class ConversationEventManager(BaseEventManager):
         
         Args:
             session_id: Session ID
-            conversation_id: 对话ID
+            conversation_id: 对话 ID（必填）
             final_status: 最终状态（completed/stopped/failed）
             summary: 会话摘要（可选）
             seq: 事件序号（可选）
@@ -162,6 +168,8 @@ class ConversationEventManager(BaseEventManager):
         )
         
         return await self._send_event(
-            session_id, event, seq=seq, event_uuid=event_uuid,
+            session_id, event,
+            conversation_id=conversation_id,
+            seq=seq, event_uuid=event_uuid,
             output_format=output_format, adapter=adapter
         )

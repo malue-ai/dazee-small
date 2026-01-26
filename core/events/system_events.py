@@ -32,6 +32,7 @@ class SystemEventManager(BaseEventManager):
     async def emit_error(
         self,
         session_id: str,
+        conversation_id: str,
         error_type: str,
         error_message: str,
         details: Dict[str, Any] = None,
@@ -45,6 +46,7 @@ class SystemEventManager(BaseEventManager):
         
         Args:
             session_id: Session ID
+            conversation_id: 对话 ID（必填）
             error_type: 错误类型
             error_message: 错误消息
             details: 额外的错误详情（可选）
@@ -71,13 +73,16 @@ class SystemEventManager(BaseEventManager):
         )
         
         return await self._send_event(
-            session_id, event, seq=seq, event_uuid=event_uuid,
+            session_id, event,
+            conversation_id=conversation_id,
+            seq=seq, event_uuid=event_uuid,
             output_format=output_format, adapter=adapter
         )
     
     async def emit_done(
         self,
         session_id: str,
+        conversation_id: str,
         seq: Optional[int] = None,
         event_uuid: Optional[str] = None,
         output_format: str = "zenflux",
@@ -88,6 +93,7 @@ class SystemEventManager(BaseEventManager):
         
         Args:
             session_id: Session ID
+            conversation_id: 对话 ID（必填）
             seq: 事件序号（可选）
             event_uuid: 事件 UUID（可选）
             output_format: 输出格式（zenflux/zeno），默认 zenflux
@@ -102,13 +108,16 @@ class SystemEventManager(BaseEventManager):
         )
         
         return await self._send_event(
-            session_id, event, seq=seq, event_uuid=event_uuid,
+            session_id, event,
+            conversation_id=conversation_id,
+            seq=seq, event_uuid=event_uuid,
             output_format=output_format, adapter=adapter
         )
     
     async def emit_custom(
         self,
         session_id: str,
+        conversation_id: str,
         event_type: str,
         event_data: Dict[str, Any],
         seq: Optional[int] = None,
@@ -121,6 +130,7 @@ class SystemEventManager(BaseEventManager):
         
         Args:
             session_id: Session ID
+            conversation_id: 对话 ID（必填）
             event_type: 事件类型
             event_data: 事件数据
             seq: 事件序号（可选）
@@ -137,7 +147,9 @@ class SystemEventManager(BaseEventManager):
         )
         
         return await self._send_event(
-            session_id, event, seq=seq, event_uuid=event_uuid,
+            session_id, event,
+            conversation_id=conversation_id,
+            seq=seq, event_uuid=event_uuid,
             output_format=output_format, adapter=adapter
         )
 

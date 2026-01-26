@@ -43,6 +43,7 @@ async def generate_recommended_questions_task(
     
     await _generate_recommended_questions(
         session_id=ctx.session_id,
+        conversation_id=ctx.conversation_id,
         message_id=ctx.message_id,
         user_message=ctx.user_message,
         assistant_response=ctx.assistant_response,
@@ -53,6 +54,7 @@ async def generate_recommended_questions_task(
 
 async def _generate_recommended_questions(
     session_id: str,
+    conversation_id: str,
     message_id: str,
     user_message: str,
     assistant_response: str,
@@ -87,11 +89,12 @@ async def _generate_recommended_questions(
             # 确保 Zeno 格式时能正确转换
             await event_manager.message.emit_message_delta(
                 session_id=session_id,
-                message_id=message_id,
+                conversation_id=conversation_id,
                 delta={
                     "type": "recommended",
                     "content": {"questions": questions}
                 },
+                message_id=message_id,
                 output_format=getattr(event_manager, 'output_format', 'zenflux'),
                 adapter=getattr(event_manager, 'adapter', None)
             )

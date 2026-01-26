@@ -4,7 +4,7 @@ Plan/Todo Tool - 任务规划工具（智能版本 + 持久化支持）
 设计原则：
 1. 工具封装闭环：内部调用 Claude + Extended Thinking 生成智能计划
 2. Agent 无需特殊逻辑，只负责编排
-3. 🆕 自动持久化：通过 PlanMemory 支持跨 Session 恢复
+3. 自动持久化：通过 PlanMemory 支持跨 Session 恢复
 4. 返回纯 JSON，前端自己渲染 UI
 
 架构关系（V4.3 更新）：
@@ -44,23 +44,70 @@ Plan/Todo Tool - 任务规划工具（智能版本 + 持久化支持）
 - autonomous-coding 示例: feature_list.json + claude-progress.txt
 """
 
-from typing import Dict, Any, List, Optional
-from datetime import datetime
+# 1. 标准库
+import asyncio
+import copy
 import json
-import aiofiles
-from logger import get_logger
-import os
 import re
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from core.llm import create_claude_service, Message
+# 2. 第三方库
+import aiofiles
+import yaml
+
+# 3. 本地模块
+from config.llm_config import get_llm_profile
+from core.llm import Message, create_claude_service
+from logger import get_logger
+
+if TYPE_CHECKING:
+    from core.tool.capability import CapabilityRegistry
+    from core.memory import MemoryManager
 
 logger = get_logger(__name__)
 
+# 线程池执行器（用于同步 I/O 操作）
+_executor = ThreadPoolExecutor(max_workers=2)
 
 # ===== Skill 发现模块 =====
 SKILLS_LIBRARY_PATH = Path(__file__).parent.parent / "skills" / "library"
 CAPABILITIES_FILE = Path(__file__).parent.parent / "config" / "capabilities.yaml"
+
+
+def _sync_scan_skill_dirs(
+    skills_path: Path,
+    registered_names: set
+) -> List[tuple[Path, Path]]:
+    """
+    同步扫描 Skills 目录（在线程池中执行）
+    
+    Args:
+        skills_path: Skills 库路径
+        registered_names: 已注册的 Skill 名称集合
+        
+    Returns:
+        [(skill_dir, skill_md_path), ...] 需要解析的 Skill 目录列表
+    """
+    result = []
+    if not skills_path.exists():
+        return result
+    
+    for skill_dir in skills_path.iterdir():
+        if not skill_dir.is_dir() or skill_dir.name.startswith('_'):
+            continue
+        
+        # 跳过已注册的
+        if skill_dir.name in registered_names:
+            continue
+        
+        skill_md_path = skill_dir / "SKILL.md"
+        if skill_md_path.exists():
+            result.append((skill_dir, skill_md_path))
+    
+    return result
 
 
 async def get_registered_skills_from_config() -> List[Dict[str, Any]]:
@@ -83,10 +130,8 @@ async def get_registered_skills_from_config() -> List[Dict[str, Any]]:
             ...
         ]
     """
-    import yaml
-    
     if not CAPABILITIES_FILE.exists():
-        logger.warning(f"⚠️ 配置文件不存在: {CAPABILITIES_FILE}")
+        logger.warning(f"配置文件不存在: {CAPABILITIES_FILE}")
         return []
     
     try:
@@ -100,11 +145,11 @@ async def get_registered_skills_from_config() -> List[Dict[str, Any]]:
             if cap.get("type") == "SKILL" and cap.get("skill_id"):
                 skills.append(cap)
         
-        logger.info(f"📚 从 capabilities.yaml 读取 {len(skills)} 个已注册 Skills")
+        logger.info(f"从 capabilities.yaml 读取 {len(skills)} 个已注册 Skills")
         return skills
         
     except Exception as e:
-        logger.error(f"❌ 读取 capabilities.yaml 失败: {e}")
+        logger.error(f"读取 capabilities.yaml 失败: {e}", exc_info=True)
         return []
 
 
@@ -147,31 +192,27 @@ async def discover_skills() -> List[Dict[str, Any]]:
             "summary": cap.get("metadata", {}).get("description", "")[:200]
         })
     
-    # 3. 扫描本地目录，补充未注册的 Skills
-    if SKILLS_LIBRARY_PATH.exists():
-        for skill_dir in SKILLS_LIBRARY_PATH.iterdir():
-            if not skill_dir.is_dir() or skill_dir.name.startswith('_'):
-                continue
-            
-            # 跳过已注册的
-            if skill_dir.name in registered_names:
-                continue
-            
-            skill_md_path = skill_dir / "SKILL.md"
-            if not skill_md_path.exists():
-                continue
-            
-            try:
-                skill_info = await _parse_skill_md(skill_md_path)
-                if skill_info:
-                    skill_info["path"] = str(skill_dir)
-                    skill_info["skill_id"] = None  # 未注册
-                    skills.append(skill_info)
-                    logger.debug(f"⚠️ 发现未注册 Skill: {skill_info['name']}")
-            except Exception as e:
-                logger.warning(f"⚠️ 解析 Skill 失败 {skill_dir.name}: {e}")
+    # 3. 扫描本地目录，补充未注册的 Skills（在线程池中执行同步 I/O）
+    loop = asyncio.get_event_loop()
+    skill_dirs_to_parse = await loop.run_in_executor(
+        _executor,
+        _sync_scan_skill_dirs,
+        SKILLS_LIBRARY_PATH,
+        registered_names
+    )
     
-    logger.info(f"📚 共发现 {len(skills)} 个 Skills（{len(registered_skills)} 个已注册）")
+    for skill_dir, skill_md_path in skill_dirs_to_parse:
+        try:
+            skill_info = await _parse_skill_md(skill_md_path)
+            if skill_info:
+                skill_info["path"] = str(skill_dir)
+                skill_info["skill_id"] = None  # 未注册
+                skills.append(skill_info)
+                logger.debug(f"发现未注册 Skill: {skill_info['name']}")
+        except Exception as e:
+            logger.warning(f"解析 Skill 失败 {skill_dir.name}: {e}", exc_info=True)
+    
+    logger.info(f"共发现 {len(skills)} 个 Skills（{len(registered_skills)} 个已注册）")
     return skills
 
 
@@ -229,7 +270,7 @@ async def _parse_skill_md(skill_md_path: Path) -> Optional[Dict[str, Any]]:
     return skill_info if skill_info["name"] else None
 
 
-def match_skills_for_query(query: str, skills: List[Dict]) -> List[Dict]:
+def match_skills_for_query(query: str, skills: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     根据用户查询匹配最相关的 Skills
     
@@ -288,7 +329,9 @@ def match_skills_for_query(query: str, skills: List[Dict]) -> List[Dict]:
     return matched[:3]  # 返回 top 3
 
 
-async def discover_all_tools(instance_tools: List[Dict] = None) -> List[Dict[str, Any]]:
+async def discover_all_tools(
+    instance_tools: Optional[List[Dict[str, Any]]] = None
+) -> List[Dict[str, Any]]:
     """
     🆕 V4.4 统一工具发现
     
@@ -331,13 +374,16 @@ async def discover_all_tools(instance_tools: List[Dict] = None) -> List[Dict[str
                     "priority": tool.get("priority", 80)
                 })
     
-    logger.info(f"📚 统一工具发现: {len(all_tools)} 个工具（{len(skills)} 全局 + {len(instance_tools or [])} 实例）")
+    logger.info(f"统一工具发现: {len(all_tools)} 个工具（{len(skills)} 全局 + {len(instance_tools or [])} 实例）")
     return all_tools
 
 
-def match_tools_for_query(query: str, tools: List[Dict]) -> List[Dict]:
+def match_tools_for_query(
+    query: str,
+    tools: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
     """
-    🆕 V4.4 统一工具匹配
+    统一工具匹配
     
     根据用户查询匹配最相关的工具（Skills + MCP + APIs）
     
@@ -551,25 +597,27 @@ class PlanTodoTool:
 外部可通过静态方法 get_progress() / get_current_step() / get_context_for_llm() 查询计划状态。
 """
     
-    def __init__(self, registry=None, memory_manager=None):
+    def __init__(
+        self,
+        registry: Optional["CapabilityRegistry"] = None,
+        memory_manager: Optional["MemoryManager"] = None
+    ):
         """
         初始化工具
         
         Args:
             registry: CapabilityRegistry 实例（用于动态生成 Schema）
-            memory_manager: MemoryManager 实例（用于 Plan 持久化）🆕
+            memory_manager: MemoryManager 实例（用于 Plan 持久化）
         """
         self._registry = registry
-        self._memory_manager = memory_manager  # 🆕 PlanMemory 通过 MemoryManager 访问
+        self._memory_manager = memory_manager
         
         # 创建专用 LLM Service（启用 Extended Thinking）
-        # 🆕 使用配置化的 LLM Profile
-        from config.llm_config import get_llm_profile
         profile = get_llm_profile("plan_manager")
         self._llm = create_claude_service(**profile)
         
         persistence_status = "启用" if memory_manager else "禁用"
-        logger.info(f"✅ PlanTodoTool 初始化完成（智能版本，Extended Thinking，持久化: {persistence_status}）")
+        logger.info(f"PlanTodoTool 初始化完成（智能版本，Extended Thinking，持久化: {persistence_status}）")
     
     def get_input_schema(self) -> Dict:
         """
@@ -690,17 +738,17 @@ class PlanTodoTool:
                 # 智能计划生成（调用 Claude + Extended Thinking）
                 result = await self._create_plan_smart(data)
                 
-                # 🆕 自动持久化到 PlanMemory
+                # 自动持久化到 PlanMemory
                 if result.get("status") == "success" and self._memory_manager:
                     plan = result.get("plan", {})
-                    self._persist_plan(plan)
+                    await self._persist_plan(plan)
                 
                 return result
                 
             elif operation == "update_step":
                 result = self._update_step(data, current_plan)
                 
-                # 🆕 同步步骤状态到 PlanMemory
+                # 同步步骤状态到 PlanMemory
                 if result.get("status") == "success" and self._memory_manager:
                     plan = result.get("plan", {})
                     task_id = plan.get("task_id")
@@ -710,7 +758,7 @@ class PlanTodoTool:
                     
                     if task_id is not None and step_index is not None:
                         passes = (status == "completed")
-                        self._memory_manager.plan.update_step_status(
+                        await self._memory_manager.plan.update_step_status(
                             task_id=task_id,
                             step_index=step_index,
                             passes=passes,
@@ -726,10 +774,10 @@ class PlanTodoTool:
                 # 重新规划（保留已完成步骤或全量重规划）
                 result = await self._replan(data, current_plan)
                 
-                # 🆕 更新持久化的计划
+                # 更新持久化的计划
                 if result.get("status") == "success" and self._memory_manager:
                     plan = result.get("plan", {})
-                    self._persist_plan(plan)
+                    await self._persist_plan(plan)
                 
                 return result
             else:
@@ -739,12 +787,12 @@ class PlanTodoTool:
                     "available": ["create_plan", "update_step", "add_step", "replan"]
                 }
         except Exception as e:
-            logger.error(f"❌ PlanTodoTool 执行失败: {e}", exc_info=True)
+            logger.error(f"PlanTodoTool 执行失败: {e}", exc_info=True)
             return {"status": "error", "message": str(e)}
     
-    def _persist_plan(self, plan: Dict) -> None:
+    async def _persist_plan(self, plan: Dict[str, Any]) -> None:
         """
-        持久化计划到 PlanMemory
+        持久化计划到 PlanMemory（异步）
         
         Args:
             plan: 计划数据
@@ -766,7 +814,7 @@ class PlanTodoTool:
                 "replan_count": plan.get("replan_count", 0)
             }
             
-            self._memory_manager.plan.save_plan(
+            await self._memory_manager.plan.save_plan(
                 task_id=task_id,
                 goal=goal,
                 steps=steps,
@@ -774,10 +822,10 @@ class PlanTodoTool:
                 metadata=metadata
             )
             
-            logger.info(f"[PlanTodoTool] 计划已持久化: task_id={task_id}")
+            logger.info(f"计划已持久化: task_id={task_id}")
             
         except Exception as e:
-            logger.warning(f"[PlanTodoTool] 持久化失败（不影响主流程）: {e}")
+            logger.warning(f"持久化失败（不影响主流程）: {e}", exc_info=True)
     
     def get_or_load_plan(self, task_id: str, current_plan: Optional[Dict] = None) -> Optional[Dict]:
         """
@@ -882,9 +930,9 @@ class PlanTodoTool:
             ])
             skills_section = SKILLS_SECTION_TEMPLATE.format(skills_list=skills_list)
             registered_count = sum(1 for s in matched_skills if s.get("skill_id"))
-            logger.info(f"🎯 匹配到 {len(matched_skills)} 个 Skills（{registered_count} 个已注册）: {[s['name'] for s in matched_skills]}")
+            logger.info(f"匹配到 {len(matched_skills)} 个 Skills（{registered_count} 个已注册）: {[s['name'] for s in matched_skills]}")
         else:
-            logger.info("ℹ️ 未匹配到专业 Skill，将使用通用工具")
+            logger.info("未匹配到专业 Skill，将使用通用工具")
         
         # 构建 Prompt（包含 Skill 信息）
         prompt = PLAN_GENERATION_PROMPT.format(
@@ -893,11 +941,12 @@ class PlanTodoTool:
             skills_section=skills_section
         )
         
-        logger.info(f"🧠 调用 Claude + Extended Thinking 生成计划...")
+        logger.info("调用 Claude + Extended Thinking 生成计划...")
         logger.info(f"   用户需求: {user_query[:100]}...")
         if matched_skills:
             logger.info(f"   推荐 Skills: {[s['name'] for s in matched_skills]}")
         
+        content = ""  # 预定义，避免 except 块中未定义
         try:
             # 调用 Claude（启用 Extended Thinking）
             response = await self._llm.create_message_async(
@@ -919,12 +968,15 @@ class PlanTodoTool:
             
             plan_data = json.loads(content)
             
-            logger.info(f"✅ Claude 生成计划成功: {plan_data.get('goal', '')[:50]}...")
+            logger.info(f"Claude 生成计划成功: {plan_data.get('goal', '')[:50]}...")
             
             # 提取推荐的 Skill
             recommended_skill = plan_data.get("recommended_skill")
             if recommended_skill:
-                logger.info(f"🎯 推荐使用 Skill: {recommended_skill.get('name')} - {recommended_skill.get('reason', '')[:50]}")
+                logger.info(
+                    f"推荐使用 Skill: {recommended_skill.get('name')} "
+                    f"- {recommended_skill.get('reason', '')[:50]}"
+                )
             
             # 使用生成的数据创建计划
             return self._create_plan_from_data({
@@ -933,12 +985,13 @@ class PlanTodoTool:
                 "information_gaps": plan_data.get("information_gaps", []),
                 "user_query": user_query,
                 "recommended_skill": recommended_skill,
-                "matched_skills": matched_skills  # 传递匹配的 Skills
+                "matched_skills": matched_skills
             })
             
         except json.JSONDecodeError as e:
-            logger.error(f"❌ JSON 解析失败: {e}")
-            logger.error(f"   响应内容: {content[:200]}...")
+            logger.error(f"JSON 解析失败: {e}", exc_info=True)
+            if content:
+                logger.error(f"响应内容: {content[:200]}...")
             # 降级：使用简单的默认计划
             return self._create_plan_from_data({
                 "goal": user_query,
@@ -946,10 +999,10 @@ class PlanTodoTool:
                 "user_query": user_query
             })
         except Exception as e:
-            logger.error(f"❌ Claude 调用失败: {e}", exc_info=True)
+            logger.error(f"Claude 调用失败: {e}", exc_info=True)
             return {"status": "error", "message": f"Plan generation failed: {str(e)}"}
     
-    def _create_plan_from_data(self, data: Dict) -> Dict:
+    def _create_plan_from_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
         从数据创建计划结构（纯计算）
         
@@ -963,8 +1016,8 @@ class PlanTodoTool:
         steps = data.get('steps', [])
         information_gaps = data.get('information_gaps', [])
         user_query = data.get('user_query', '')
-        recommended_skill = data.get('recommended_skill')  # 🆕
-        matched_skills = data.get('matched_skills', [])    # 🆕
+        recommended_skill = data.get('recommended_skill')
+        matched_skills = data.get('matched_skills', [])
         
         if not goal:
             return {"status": "error", "message": "Goal is required"}
@@ -1030,7 +1083,11 @@ class PlanTodoTool:
             "plan": plan
         }
     
-    def _update_step(self, data: Dict, current_plan: Optional[Dict]) -> Dict:
+    def _update_step(
+        self,
+        data: Dict[str, Any],
+        current_plan: Optional[Dict[str, Any]]
+    ) -> Dict[str, Any]:
         """
         更新步骤状态（纯计算）
         
@@ -1101,7 +1158,11 @@ class PlanTodoTool:
             "plan": plan
         }
     
-    def _add_step(self, data: Dict, current_plan: Optional[Dict]) -> Dict:
+    def _add_step(
+        self,
+        data: Dict[str, Any],
+        current_plan: Optional[Dict[str, Any]]
+    ) -> Dict[str, Any]:
         """
         动态添加步骤（纯计算）
         
@@ -1148,7 +1209,11 @@ class PlanTodoTool:
             "plan": plan
         }
     
-    async def _replan(self, data: Dict, current_plan: Optional[Dict]) -> Dict:
+    async def _replan(
+        self,
+        data: Dict[str, Any],
+        current_plan: Optional[Dict[str, Any]]
+    ) -> Dict[str, Any]:
         """
         重新生成计划（调用 Claude + Extended Thinking）
         
@@ -1182,9 +1247,7 @@ class PlanTodoTool:
                 "replan_count": replan_count - 1
             }
         
-        logger.info(f"🔄 开始重新规划 (第 {replan_count} 次)...")
-        logger.info(f"   原因: {reason}")
-        logger.info(f"   策略: {strategy}")
+        logger.info(f"开始重新规划 (第 {replan_count} 次), 原因: {reason}, 策略: {strategy}")
         
         # 获取原始用户需求
         user_query = current_plan.get('user_query', current_plan.get('goal', ''))
@@ -1261,6 +1324,8 @@ class PlanTodoTool:
                         step_data = step
                     
                     new_index = len(new_plan["steps"])
+                    # 第一个新步骤（i == 0）设置为 in_progress
+                    is_first_new_step = (i == 0)
                     new_plan["steps"].append({
                         "step_id": new_index + 1,
                         "index": new_index,
@@ -1268,10 +1333,10 @@ class PlanTodoTool:
                         "capability": step_data.get('capability', ''),
                         "purpose": step_data.get('purpose', ''),
                         "expected_output": step_data.get('expected_output', ''),
-                        "status": "in_progress" if new_index == len(new_plan["steps"]) else "pending",
+                        "status": "in_progress" if is_first_new_step else "pending",
                         "result": None,
                         "retry_count": 0,
-                        "started_at": now if new_index == len(new_plan["steps"]) - 1 else None,
+                        "started_at": now if is_first_new_step else None,
                         "completed_at": None
                     })
                 
@@ -1296,7 +1361,7 @@ class PlanTodoTool:
                 new_plan["replan_reason"] = reason
                 new_plan["previous_completed_steps"] = completed_steps  # 保存历史记录
             
-            logger.info(f"✅ 重新规划完成: {len(new_plan['steps'])} 个步骤")
+            logger.info(f"重新规划完成: {len(new_plan['steps'])} 个步骤")
             
             return {
                 "status": "success",
@@ -1306,10 +1371,10 @@ class PlanTodoTool:
             }
             
         except json.JSONDecodeError as e:
-            logger.error(f"❌ 重规划 JSON 解析失败: {e}")
+            logger.error(f"重规划 JSON 解析失败: {e}", exc_info=True)
             return {"status": "error", "message": f"Replan JSON parse error: {str(e)}"}
         except Exception as e:
-            logger.error(f"❌ 重规划失败: {e}", exc_info=True)
+            logger.error(f"重规划失败: {e}", exc_info=True)
             return {"status": "error", "message": f"Replan failed: {str(e)}"}
     
     def _build_replan_prompt(
@@ -1317,8 +1382,8 @@ class PlanTodoTool:
         user_query: str,
         reason: str,
         strategy: str,
-        completed_steps: List[Dict],
-        failed_steps: List[Dict],
+        completed_steps: List[Dict[str, Any]],
+        failed_steps: List[Dict[str, Any]],
         pending_steps: List[str],
         original_goal: str
     ) -> str:
@@ -1405,15 +1470,14 @@ class PlanTodoTool:
         
         return prompt
     
-    def _deep_copy_plan(self, plan: Dict) -> Dict:
+    def _deep_copy_plan(self, plan: Dict[str, Any]) -> Dict[str, Any]:
         """深拷贝 plan 对象"""
-        import copy
         return copy.deepcopy(plan)
     
     # ==================== 辅助方法（静态，供外部使用）====================
     
     @staticmethod
-    def get_progress(plan: Optional[Dict]) -> Dict[str, Any]:
+    def get_progress(plan: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         """
         获取计划进度信息
         
@@ -1458,7 +1522,7 @@ class PlanTodoTool:
         }
     
     @staticmethod
-    def get_current_step(plan: Optional[Dict]) -> Optional[Dict]:
+    def get_current_step(plan: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         """获取当前步骤"""
         if not plan:
             return None
@@ -1469,7 +1533,7 @@ class PlanTodoTool:
         return None
     
     @staticmethod
-    def get_context_for_llm(plan: Optional[Dict]) -> str:
+    def get_context_for_llm(plan: Optional[Dict[str, Any]]) -> str:
         """
         获取精简的 Plan 上下文给 LLM
         
@@ -1529,13 +1593,16 @@ PLAN_TODO_TOOL_SCHEMA = {
 }
 
 
-def create_plan_todo_tool(registry=None, memory_manager=None) -> PlanTodoTool:
+def create_plan_todo_tool(
+    registry: Optional["CapabilityRegistry"] = None,
+    memory_manager: Optional["MemoryManager"] = None
+) -> PlanTodoTool:
     """
     创建 Plan/Todo 工具实例
     
     Args:
         registry: CapabilityRegistry 实例（用于动态生成 Schema）
-        memory_manager: MemoryManager 实例（用于 Plan 持久化）🆕
+        memory_manager: MemoryManager 实例（用于 Plan 持久化）
     
     Returns:
         PlanTodoTool 实例

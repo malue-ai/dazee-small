@@ -149,28 +149,10 @@ class ZenOAdapter(EventAdapter):
         event_type = event.get("type", "")
         data = event.get("data", {})
         session_id = event.get("session_id", "")
+        conversation_id = event.get("conversation_id") or self.conversation_id or ""
         
-        # 🔍 追踪 conversation_id 来源
-        conv_from_event = event.get("conversation_id")
-        conv_from_self = self.conversation_id
-        conversation_id = conv_from_event or conv_from_self or ""
-        
-        # 🔍 追踪日志：记录 conversation_id 来源
-        logger.info(
-            f"🔍 [ZenO.transform] conversation_id 来源追踪: "
-            f"type={event_type}, "
-            f"session_id={session_id}, "
-            f"from_event={conv_from_event}, "
-            f"from_self={conv_from_self}, "
-            f"final={conversation_id}"
-        )
-        
-        # 获取 message_id：优先从 data，其次从 message.id（message_start 事件），最后用缓存
-        message_id = (
-            data.get("message_id") or 
-            event.get("message", {}).get("id") or 
-            self._current_message_id
-        )
+        # 获取 message_id：优先从事件顶层，其次从 data，再从 message.id（message_start 事件），最后用缓存
+        message_id = event.get("message_id")
         timestamp = int(time.time() * 1000)  # 毫秒时间戳
         
         # 🆕 入口日志：记录收到的事件类型
@@ -1690,15 +1672,46 @@ class ZenOAdapter(EventAdapter):
         """
         # 尝试直接解析 JSON
         try:
+            # 如果是字符串，先解析为 JSON
             if isinstance(result_content, str):
                 result = json.loads(result_content)
-                
-                # 如果是 raw_content 格式，需要进一步解析 SSE
-                if "raw_content" in result:
-                    return self._parse_coze_sse_stream(result["raw_content"])
-                
-                return result
-            return result_content
+            else:
+                result = result_content
+            
+            # 如果是 raw_content 格式，需要进一步解析 SSE
+            if isinstance(result, dict) and "raw_content" in result:
+                return self._parse_coze_sse_stream(result["raw_content"])
+            
+            # 处理轮询响应格式：{code: 0, data: [{output: "..."}]}
+            if isinstance(result, dict) and "data" in result and isinstance(result.get("data"), list):
+                data_list = result["data"]
+                if data_list and isinstance(data_list[0], dict) and "output" in data_list[0]:
+                    output = data_list[0]["output"]
+                    logger.info(f"🔄 提取轮询响应 data[0].output")
+                    # output 是 JSON 字符串：{"Output": "{\"data\":\"url\"}", "node_status": "{}"}
+                    if isinstance(output, str):
+                        try:
+                            parsed = json.loads(output)
+                            # 提取 Output 字段
+                            if isinstance(parsed, dict) and "Output" in parsed:
+                                output_str = parsed["Output"]
+                                if output_str:
+                                    try:
+                                        output_obj = json.loads(output_str)
+                                        # Output 结构：{content_type, data, original_result, type_for_model}
+                                        # 实际数据在 data 字段中
+                                        if isinstance(output_obj, dict) and "data" in output_obj:
+                                            logger.info(f"🔄 提取 Output.data")
+                                            return output_obj["data"]
+                                        return output_obj
+                                    except (json.JSONDecodeError, TypeError):
+                                        return output_str
+                            return parsed
+                        except json.JSONDecodeError:
+                            return output
+                    return output
+            
+            return result
         except json.JSONDecodeError:
             pass
         

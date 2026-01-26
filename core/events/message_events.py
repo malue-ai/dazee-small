@@ -48,6 +48,7 @@ class MessageEventManager(BaseEventManager):
     async def emit_message_start(
         self,
         session_id: str,
+        conversation_id: str,
         message_id: str,
         model: str,
         seq: Optional[int] = None,
@@ -60,6 +61,7 @@ class MessageEventManager(BaseEventManager):
         
         Args:
             session_id: Session ID
+            conversation_id: 对话 ID（必填）
             message_id: 消息ID
             model: 模型名称
             seq: 事件序号（可选，来自 EventBroadcaster）
@@ -89,13 +91,16 @@ class MessageEventManager(BaseEventManager):
         }
         
         return await self._send_event(
-            session_id, event, message_id=message_id, seq=seq, event_uuid=event_uuid,
+            session_id, event,
+            conversation_id=conversation_id,
+            message_id=message_id, seq=seq, event_uuid=event_uuid,
             output_format=output_format, adapter=adapter
         )
     
     async def emit_message_delta(
         self,
         session_id: str,
+        conversation_id: str,
         delta: Dict[str, Any],
         message_id: Optional[str] = None,
         seq: Optional[int] = None,
@@ -108,6 +113,7 @@ class MessageEventManager(BaseEventManager):
         
         Args:
             session_id: Session ID
+            conversation_id: 对话 ID（必填）
             delta: Delta 内容，统一结构 {"type": "xxx", "content": ...}
             message_id: 消息 ID（可选）
             seq: 事件序号（可选）
@@ -138,13 +144,16 @@ class MessageEventManager(BaseEventManager):
         )
         
         return await self._send_event(
-            session_id, event, message_id=message_id, seq=seq, event_uuid=event_uuid,
+            session_id, event,
+            conversation_id=conversation_id,
+            message_id=message_id, seq=seq, event_uuid=event_uuid,
             output_format=output_format, adapter=adapter
         )
     
     async def emit_message_stop(
         self,
         session_id: str,
+        conversation_id: str,
         message_id: Optional[str] = None,
         seq: Optional[int] = None,
         event_uuid: Optional[str] = None,
@@ -156,6 +165,7 @@ class MessageEventManager(BaseEventManager):
         
         Args:
             session_id: Session ID
+            conversation_id: 对话 ID（必填）
             message_id: Message ID（可选）
             seq: 事件序号（可选）
             event_uuid: 事件 UUID（可选）
@@ -171,7 +181,9 @@ class MessageEventManager(BaseEventManager):
         )
         
         return await self._send_event(
-            session_id, event, message_id=message_id, seq=seq, event_uuid=event_uuid,
+            session_id, event,
+            conversation_id=conversation_id,
+            message_id=message_id, seq=seq, event_uuid=event_uuid,
             output_format=output_format, adapter=adapter
         )
     

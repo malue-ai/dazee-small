@@ -415,14 +415,29 @@ class SandboxRunCommand(BaseTool):
                                     session, conversation_id
                                 )
                                 
+                                logger.debug(
+                                    f"📊 查询沙盒记录: conversation_id={conversation_id}, "
+                                    f"db_sandbox={db_sandbox is not None}, "
+                                    f"last_active_at={db_sandbox.last_active_at if db_sandbox else 'N/A'}"
+                                )
+                                
                                 if db_sandbox and db_sandbox.last_active_at:
                                     default_timeout = provider.DEFAULT_TIMEOUT_SECONDS
                                     last_active_ts = db_sandbox.last_active_at.timestamp()
                                     expires_ts = last_active_ts + default_timeout
                                     result["expires_at"] = int(expires_ts * 1000)
                                     result["timeout_seconds"] = max(0, int(expires_ts - time.time()))
+                                    logger.info(
+                                        f"📅 沙盒过期时间: expires_at={result['expires_at']}, "
+                                        f"timeout_seconds={result['timeout_seconds']}"
+                                    )
+                                else:
+                                    logger.warning(
+                                        f"⚠️ 无法计算过期时间: db_sandbox存在={db_sandbox is not None}, "
+                                        f"last_active_at={getattr(db_sandbox, 'last_active_at', 'N/A')}"
+                                    )
                         except Exception as e:
-                            logger.warning(f"⚠️ 获取沙盒过期时间失败: {e}")
+                            logger.warning(f"⚠️ 获取沙盒过期时间失败: {e}", exc_info=True)
                     except Exception as e:
                         logger.warning(f"⚠️ 获取 URL 失败: {e}")
                         result["url_error"] = str(e)
@@ -560,6 +575,12 @@ class SandboxGetPublicUrl(BaseTool):
                         session, conversation_id
                     )
                     
+                    logger.debug(
+                        f"📊 查询沙盒记录: conversation_id={conversation_id}, "
+                        f"db_sandbox={db_sandbox is not None}, "
+                        f"last_active_at={db_sandbox.last_active_at if db_sandbox else 'N/A'}"
+                    )
+                    
                     if db_sandbox and db_sandbox.last_active_at:
                         # E2B 默认超时时间（30 分钟）
                         default_timeout = provider.DEFAULT_TIMEOUT_SECONDS
@@ -573,13 +594,18 @@ class SandboxGetPublicUrl(BaseTool):
                         now_ts = time.time()
                         timeout_seconds = max(0, int(expires_ts - now_ts))
                         
-                        logger.debug(
+                        logger.info(
                             f"📅 沙盒过期时间: expires_at={expires_at}, "
                             f"timeout_seconds={timeout_seconds}"
                         )
+                    else:
+                        logger.warning(
+                            f"⚠️ 无法计算过期时间: db_sandbox存在={db_sandbox is not None}, "
+                            f"last_active_at={getattr(db_sandbox, 'last_active_at', 'N/A')}"
+                        )
             except Exception as e:
                 # 获取过期时间失败不影响主功能
-                logger.warning(f"⚠️ 获取沙盒过期时间失败: {e}")
+                logger.warning(f"⚠️ 获取沙盒过期时间失败: {e}", exc_info=True)
             
             result = {
                 "success": True,

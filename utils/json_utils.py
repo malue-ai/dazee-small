@@ -79,7 +79,8 @@ class JSONExtractor:
         if result is not None:
             logger.debug("✅ 修复后解析成功")
         else:
-            logger.warning("❌ 所有 JSON 解析尝试均失败")
+            # 降级为 DEBUG：JSON 解析失败是预期场景，调用方会处理 None 返回值
+            logger.debug("JSON 解析失败，返回 None（调用方会处理）")
         return result
         
     @staticmethod

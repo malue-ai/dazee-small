@@ -22,6 +22,7 @@ class UserEventManager(BaseEventManager):
     async def emit_user_action(
         self,
         session_id: str,
+        conversation_id: str,
         user_id: str,
         action: str,
         action_data: Optional[Dict[str, Any]] = None,
@@ -33,6 +34,7 @@ class UserEventManager(BaseEventManager):
         
         Args:
             session_id: Session ID
+            conversation_id: 对话 ID（必填）
             user_id: 用户ID
             action: 行为类型（如 login, logout, send_message）
             action_data: 行为数据
@@ -53,12 +55,14 @@ class UserEventManager(BaseEventManager):
         
         return await self._send_event(
             session_id, event,
+            conversation_id=conversation_id,
             output_format=output_format, adapter=adapter
         )
     
     async def emit_user_preference_update(
         self,
         session_id: str,
+        conversation_id: str,
         user_id: str,
         preferences: Dict[str, Any],
         output_format: str = "zenflux",
@@ -69,6 +73,7 @@ class UserEventManager(BaseEventManager):
         
         Args:
             session_id: Session ID
+            conversation_id: 对话 ID（必填）
             user_id: 用户ID
             preferences: 用户偏好设置
             output_format: 输出格式（zenflux/zeno），默认 zenflux
@@ -87,6 +92,7 @@ class UserEventManager(BaseEventManager):
         
         return await self._send_event(
             session_id, event,
+            conversation_id=conversation_id,
             output_format=output_format, adapter=adapter
         )
 

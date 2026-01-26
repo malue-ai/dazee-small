@@ -87,6 +87,7 @@ class SessionEventManager(BaseEventManager):
     async def emit_session_stopped(
         self,
         session_id: str,
+        conversation_id: str,
         reason: str = "user_requested",
         output_format: str = "zenflux",
         adapter: Any = None
@@ -96,6 +97,7 @@ class SessionEventManager(BaseEventManager):
         
         Args:
             session_id: Session ID
+            conversation_id: 对话 ID（必填）
             reason: 停止原因（user_requested/timeout/error）
             output_format: 输出格式（zenflux/zeno），默认 zenflux
             adapter: 格式转换适配器（可选）
@@ -114,12 +116,14 @@ class SessionEventManager(BaseEventManager):
         
         return await self._send_event(
             session_id, event,
+            conversation_id=conversation_id,
             output_format=output_format, adapter=adapter
         )
     
     async def emit_session_end(
         self,
         session_id: str,
+        conversation_id: str,
         status: str,
         duration_ms: int,
         output_format: str = "zenflux",
@@ -130,6 +134,7 @@ class SessionEventManager(BaseEventManager):
         
         Args:
             session_id: Session ID
+            conversation_id: 对话 ID（必填）
             status: 会话状态（completed/failed/cancelled）
             duration_ms: 会话持续时间（毫秒）
             output_format: 输出格式（zenflux/zeno），默认 zenflux
@@ -149,12 +154,14 @@ class SessionEventManager(BaseEventManager):
         
         return await self._send_event(
             session_id, event,
+            conversation_id=conversation_id,
             output_format=output_format, adapter=adapter
         )
     
     async def emit_heartbeat(
         self,
         session_id: str,
+        conversation_id: str,
         output_format: str = "zenflux",
         adapter: Any = None
     ) -> Optional[Dict[str, Any]]:
@@ -163,6 +170,7 @@ class SessionEventManager(BaseEventManager):
         
         Args:
             session_id: Session ID
+            conversation_id: 对话 ID（必填）
             output_format: 输出格式（zenflux/zeno），默认 zenflux
             adapter: 格式转换适配器（可选）
             
@@ -176,6 +184,7 @@ class SessionEventManager(BaseEventManager):
         
         return await self._send_event(
             session_id, event,
+            conversation_id=conversation_id,
             output_format=output_format, adapter=adapter
         )
 
