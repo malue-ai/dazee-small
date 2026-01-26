@@ -288,7 +288,7 @@ def match_skills_for_query(query: str, skills: List[Dict]) -> List[Dict]:
     return matched[:3]  # 返回 top 3
 
 
-def discover_all_tools(instance_tools: List[Dict] = None) -> List[Dict[str, Any]]:
+async def discover_all_tools(instance_tools: List[Dict] = None) -> List[Dict[str, Any]]:
     """
     🆕 V4.4 统一工具发现
     
@@ -305,8 +305,8 @@ def discover_all_tools(instance_tools: List[Dict] = None) -> List[Dict[str, Any]
     """
     all_tools = []
     
-    # 1. 获取全局 Skills
-    skills = discover_skills()
+    # 1. 获取全局 Skills（异步）
+    skills = await discover_skills()
     for skill in skills:
         all_tools.append({
             "name": skill["name"],
@@ -864,7 +864,7 @@ class PlanTodoTool:
         # 🆕 V4.4 修正: Plan 阶段只发现 Skills（用于 skill_id 匹配）
         # 不获取所有具体工具，避免上下文过长
         # 具体工具在执行阶段根据 Plan 步骤的 capability 动态选择
-        all_skills = discover_skills()
+        all_skills = await discover_skills()
         matched_skills = match_skills_for_query(user_query, all_skills)
         
         # 构建 Skills 信息段落

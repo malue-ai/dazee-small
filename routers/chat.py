@@ -504,8 +504,8 @@ async def _handle_stream_chat(request: ChatRequest, format: str) -> StreamingRes
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
                 
                 # 🔧 检测流结束事件，发送 SSE 协议层面的 event: done
-                # zenflux: message_stop, zeno: message.assistant.done
-                if event_type in ("message_stop", "message.assistant.done"):
+                # zenflux: message_stop, zeno: message.assistant.done, session.stopped（用户主动停止）
+                if event_type in ("message_stop", "message.assistant.done", "session.stopped"):
                     yield "event: done\ndata: {}\n\n"
         
         except asyncio.CancelledError:
@@ -717,7 +717,8 @@ async def _reconnect_event_generator(
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
             
             # 🔧 检测流结束事件，发送 SSE 协议层面的 event: done
-            if event_type in ("message_stop", "message.assistant.done"):
+            # 包含 session.stopped（用户主动停止）
+            if event_type in ("message_stop", "message.assistant.done", "session.stopped"):
                 yield "event: done\ndata: {}\n\n"
                 break
             

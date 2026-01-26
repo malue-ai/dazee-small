@@ -25,6 +25,7 @@ class SessionEventManager(BaseEventManager):
         session_id: str,
         user_id: str,
         conversation_id: str,
+        message_id: Optional[str] = None,
         output_format: str = "zenflux",
         adapter: Any = None
     ) -> Optional[Dict[str, Any]]:
@@ -35,24 +36,32 @@ class SessionEventManager(BaseEventManager):
             session_id: Session ID
             user_id: 用户ID
             conversation_id: 对话ID
+            message_id: 消息ID（可选，zenflux 格式中使用）
             output_format: 输出格式（zenflux/zeno），默认 zenflux
             adapter: 格式转换适配器（可选）
             
         Returns:
             事件对象，如果被过滤则返回 None
         """
+        data = {
+            "session_id": session_id,
+            "user_id": user_id,
+            "conversation_id": conversation_id,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # 🆕 zenflux 格式添加 message_id
+        if message_id:
+            data["message_id"] = message_id
+        
         event = self._create_event(
             event_type="session_start",
-            data={
-                "session_id": session_id,
-                "user_id": user_id,
-                "conversation_id": conversation_id,
-                "timestamp": datetime.now().isoformat()
-            }
+            data=data
         )
         
         return await self._send_event(
             session_id, event,
+            message_id=message_id,
             output_format=output_format, adapter=adapter
         )
     

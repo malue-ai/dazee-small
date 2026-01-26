@@ -561,7 +561,7 @@ class E2BSandboxProvider(SandboxProvider):
             await self._update_activity(conversation_id)
             
             stdout, stderr = self._parse_execution_logs(execution)
-            artifacts = self._parse_execution_results(execution)
+            artifacts = await self._parse_execution_results(execution, conversation_id)
             
             has_error = hasattr(execution, 'error') and execution.error is not None
             error_msg = None
@@ -609,21 +609,71 @@ class E2BSandboxProvider(SandboxProvider):
         
         return stdout, stderr
     
-    def _parse_execution_results(self, execution: Any) -> List[Dict[str, Any]]:
-        """解析执行结果（图表等）"""
+    async def _parse_execution_results(
+        self,
+        execution: Any,
+        conversation_id: str
+    ) -> List[Dict[str, Any]]:
+        """
+        解析执行结果（图表等）
+        
+        注意：为避免 base64 图片数据导致对话历史膨胀，
+        图片会被上传到 S3，返回结果中只包含 URL。
+        """
         artifacts = []
         
         if not hasattr(execution, 'results') or not execution.results:
             return artifacts
         
-        for result in execution.results:
+        for idx, result in enumerate(execution.results):
             artifact = {}
+            
+            # 处理 PNG 图片：上传到 S3，只返回 URL
             if hasattr(result, 'png') and result.png:
-                artifact = {"type": "image", "format": "png", "data": result.png}
+                url = await self._upload_image_to_s3(
+                    result.png, "png", conversation_id, idx
+                )
+                if url:
+                    artifact = {"type": "image", "format": "png", "url": url}
+                else:
+                    # 上传失败时，截断 base64 数据，避免上下文爆炸
+                    artifact = {
+                        "type": "image",
+                        "format": "png",
+                        "data_preview": result.png[:100] + "..." if len(result.png) > 100 else result.png,
+                        "data_length": len(result.png),
+                        "note": "图片已生成，但上传失败"
+                    }
+            
+            # 处理 SVG 图片：同样上传到 S3
             elif hasattr(result, 'svg') and result.svg:
-                artifact = {"type": "image", "format": "svg", "data": result.svg}
+                url = await self._upload_image_to_s3(
+                    result.svg, "svg", conversation_id, idx
+                )
+                if url:
+                    artifact = {"type": "image", "format": "svg", "url": url}
+                else:
+                    artifact = {
+                        "type": "image",
+                        "format": "svg",
+                        "data_preview": result.svg[:200] + "..." if len(result.svg) > 200 else result.svg,
+                        "data_length": len(result.svg),
+                        "note": "图片已生成，但上传失败"
+                    }
+            
             elif hasattr(result, 'html') and result.html:
-                artifact = {"type": "html", "data": result.html}
+                # HTML 内容通常不会太大，但也做截断保护
+                html_data = result.html
+                if len(html_data) > 10000:
+                    artifact = {
+                        "type": "html",
+                        "data_preview": html_data[:500] + "...",
+                        "data_length": len(html_data),
+                        "note": "HTML 内容已截断"
+                    }
+                else:
+                    artifact = {"type": "html", "data": html_data}
+            
             elif hasattr(result, 'text') and result.text:
                 artifact = {"type": "text", "data": result.text}
             
@@ -631,6 +681,65 @@ class E2BSandboxProvider(SandboxProvider):
                 artifacts.append(artifact)
         
         return artifacts
+    
+    async def _upload_image_to_s3(
+        self,
+        image_data: str,
+        format: str,
+        conversation_id: str,
+        index: int
+    ) -> Optional[str]:
+        """
+        将图片上传到 S3 并返回 URL
+        
+        Args:
+            image_data: base64 编码的图片数据
+            format: 图片格式（png/svg）
+            conversation_id: 对话 ID
+            index: 图片索引
+            
+        Returns:
+            预签名 URL，失败返回 None
+        """
+        try:
+            import base64
+            from utils.s3_uploader import get_s3_uploader
+            
+            uploader = get_s3_uploader()
+            await uploader.initialize()
+            
+            # 生成唯一文件名
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"sandbox_{conversation_id[:8]}_{timestamp}_{index}.{format}"
+            object_name = f"sandbox-artifacts/{conversation_id}/{filename}"
+            
+            # 确定内容类型
+            content_type = "image/png" if format == "png" else "image/svg+xml"
+            
+            # 解码 base64（如果是 PNG）
+            if format == "png":
+                file_content = base64.b64decode(image_data)
+            else:
+                # SVG 是文本格式
+                file_content = image_data.encode('utf-8')
+            
+            # 上传到 S3
+            result = await uploader.upload_bytes(
+                file_content=file_content,
+                object_name=object_name,
+                content_type=content_type,
+                acl="public-read"  # 允许直接访问
+            )
+            
+            # 生成预签名 URL（7天有效）
+            url = uploader.get_presigned_url(result["key"], expires_in=7 * 24 * 3600)
+            
+            logger.info(f"📤 沙盒图片已上传到 S3: {filename}, size={len(file_content)}")
+            return url
+            
+        except Exception as e:
+            logger.warning(f"⚠️ 沙盒图片上传 S3 失败: {e}")
+            return None
 
     # ==================== 文件操作 ====================
     

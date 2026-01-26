@@ -77,6 +77,28 @@ capabilities:
 - 信息检索
 - 深度搜索
 - API调用
+
+# ==================== API Schema 定义 ====================
+# 
+# api_calling 工具的简化调用方式：
+#   api_name: 选择 API
+#   parameters: 动态参数
+#
+# 其他配置（method, mode, poll_config 等）从 config.yaml 自动注入
+#
+api_schemas:
+  coze_api:
+    description: "Ontology Builder - 系统配置生成"
+    parameters:
+      chart_url: "Mermaid 流程图 URL"
+      query: "系统名称"
+      language: "中文 | English"
+  
+  wenshu_api:
+    description: "问数平台 - BI 数据分析"
+    parameters:
+      question: "数据分析问题"
+      files: "数据文件列表（可选）"
 model: claude-sonnet-4-5
 max_turns: 20
 allow_parallel_tools: false

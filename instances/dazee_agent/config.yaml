@@ -147,8 +147,9 @@ mcp_tools:
 apis:
   # 问数平台 API（BI智能问数）
   # ⚠️ base_url 是完整接口地址，调用时无需填写 path
+  # 📌 AI 只需填写：question + files（可选）
   - name: wenshu_api
-    base_url: "http://183.6.79.71:40202/api/v3/ask"
+    base_url: "http://183.6.79.71:40202/api/v3/zeno/chat/question"
     auth:
       type: token
       header: API-KEY
@@ -156,9 +157,17 @@ apis:
     doc: wenshu-api
     capability: "data_analysis"
     description: "问数平台 API - 数据分析和问答"
+    # 🆕 默认请求模板（user_id/task_id 使用占位符自动注入）
+    default_method: "POST"
+    body_template:
+      user_id: "${user_id}"
+      task_id: "${conversation_id}"
+      lg_code: "zh-CN"
+      # question 和 files 由 AI 填写
 
   # Coze API（Ontology Builder 工作流）
   # ⚠️ base_url 是完整接口地址，调用时 path 留空
+  # 📌 AI 只需填写 parameters 中的 3 个值：chart_url, query, language
   - name: coze_api
     base_url: "https://api.coze.cn/v1/workflow/run"
     auth:
@@ -168,6 +177,29 @@ apis:
     doc: coze-api
     capability: "document_creation"
     description: "Coze API - 工作流执行（Ontology Builder）"
+    # 🆕 默认请求模板（AI 只需填写 parameters）
+    default_mode: "async_poll"
+    default_method: "POST"
+    body_template:
+      workflow_id: "7579565547005837331"
+      is_async: true
+      # 🆕 用占位符声明 AI 需要填写的字段（框架自动注入）
+      parameters:
+        chart_url: "${chart_url}"       # AI 填写：流程图 URL
+        query: "${query}"               # AI 填写：系统名称/描述
+        language: "${language}"         # AI 填写：输出语言
+    poll_config:
+      execute_id_field: "execute_id"
+      status_url_template: "https://api.coze.cn/v1/workflows/{workflow_id}/run_histories/{execute_id}"
+      body_vars: ["workflow_id"]
+      # 🔧 Coze API 返回 data 是数组
+      # ⚠️ 实际字段是 output（有值表示成功），不是 execute_status
+      status_field: "data.0.output"
+      # 🆕 使用 __non_empty__ 判断：output 有值即为成功
+      success_status: "__non_empty__"
+      # 🆕 检查 error_message 判断失败
+      failed_status: "__error__"
+      check_code: true  # 检查 code 字段，code !== 0 立即报错
 
 
 # ==================== 记忆配置（V4.6）====================

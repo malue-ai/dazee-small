@@ -464,17 +464,21 @@ class ChatService:
         try:
             redis = self.session_service.redis
             
+            # 🆕 预先生成 message_id（在 session_start 前生成，确保整个流程使用同一个 ID）
+            assistant_message_id = str(uuid4())
+            
             # 设置输出格式（EventManager 和 EventBroadcaster 都会使用）
             events = self.session_service.events
             events.set_output_format(output_format, conversation_id)
             if hasattr(agent, 'broadcaster') and agent.broadcaster:
                 agent.broadcaster.set_output_format(output_format, conversation_id)
             
-            # 发送初始事件（使用配置的格式）
+            # 发送初始事件（使用配置的格式，包含 message_id）
             await events.session.emit_session_start(
                 session_id=session_id,
                 user_id=user_id,
                 conversation_id=conversation_id,
+                message_id=assistant_message_id,
                 output_format=events.output_format,
                 adapter=events.adapter
             )
@@ -492,7 +496,7 @@ class ChatService:
                     adapter=events.adapter
                 )
             
-            # 启动 Agent 任务
+            # 启动 Agent 任务（传递预先生成的 message_id）
             agent_task = asyncio.create_task(self._run_agent(
                 session_id=session_id,
                 agent=agent,
@@ -504,7 +508,8 @@ class ChatService:
                 background_tasks=background_tasks,
                 files=files,
                 variables=variables,
-                output_format=output_format
+                output_format=output_format,
+                message_id=assistant_message_id
             ))
             
             # 订阅事件流
@@ -547,7 +552,8 @@ class ChatService:
         background_tasks: Optional[List[str]] = None,
         files: Optional[List[Any]] = None,
         variables: Optional[Dict[str, Any]] = None,
-        output_format: str = "zenflux"
+        output_format: str = "zenflux",
+        message_id: Optional[str] = None
     ):
         """
         执行 Agent（核心逻辑，同步和流式共用）
@@ -617,7 +623,8 @@ class ChatService:
             # 阶段 2: 数据库操作（持久化 + 加载历史）
             # =================================================================
             
-            assistant_message_id = str(uuid4())  # 完整 UUID
+            # 🆕 使用传入的 message_id，如果没有传入则生成新的
+            assistant_message_id = message_id or str(uuid4())
             
             # 🎯 先保存原始消息（不含前端注入的上下文）
             content_json = json.dumps(message, ensure_ascii=False)

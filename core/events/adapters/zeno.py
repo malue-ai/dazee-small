@@ -113,6 +113,7 @@ class ZenOAdapter(EventAdapter):
         "message_delta",
         "error",
         "session_end",
+        "session_stopped",  # 🆕 用户主动停止事件
     ]
     
     def __init__(self, conversation_id: Optional[str] = None):
@@ -250,6 +251,10 @@ class ZenOAdapter(EventAdapter):
         # 🆕 修复：处理 session_end 事件（支持列表中声明了但之前没有处理）
         if event_type == "session_end":
             return self._transform_session_end(event, message_id, timestamp)
+        
+        # 🆕 用户主动停止事件
+        if event_type == "session_stopped":
+            return self._transform_session_stopped(event, session_id, timestamp)
         
         # 🆕 心跳事件：直接透传，保持连接活跃
         if event_type == "ping":
@@ -523,6 +528,33 @@ class ZenOAdapter(EventAdapter):
         # session_end 不需要转换为 ZenO 事件，避免重复的 done
         logger.debug(f"[session_end] 会话结束，不生成 done 事件（已由 message_stop 处理）")
         return None
+    
+    def _transform_session_stopped(
+        self,
+        event: Dict[str, Any],
+        session_id: str,
+        timestamp: int
+    ) -> Dict[str, Any]:
+        """
+        转换 session_stopped → session.stopped
+        
+        🆕 用户主动停止时发送，让前端知道是用户中断而非正常结束
+        """
+        data = event.get("data", {})
+        reason = data.get("reason", "user_requested")
+        stopped_at = data.get("stopped_at", "")
+        
+        logger.debug(f"[session_stopped] 用户主动停止: session={session_id[:8] if session_id else 'N/A'}, reason={reason}")
+        
+        return {
+            "type": "session.stopped",
+            "session_id": session_id,
+            "timestamp": timestamp,
+            "data": {
+                "reason": reason,
+                "stopped_at": stopped_at
+            }
+        }
     
     def _convert_plan_to_progress(self, content: Any) -> Dict[str, Any]:
         """
