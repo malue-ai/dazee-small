@@ -219,7 +219,7 @@ class FragmentExtractor:
         
         # 构建 FragmentMemory
         fragment = FragmentMemory(
-            id=f"frag_{timestamp.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}",
+            id=str(uuid.uuid4()),
             user_id=user_id,
             session_id=session_id,
             message=message,

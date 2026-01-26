@@ -47,6 +47,7 @@ class ContentEventManager(BaseEventManager):
         session_id: str,
         index: int,
         content_block: Dict[str, Any],
+        message_id: Optional[str] = None,
         seq: Optional[int] = None,
         event_uuid: Optional[str] = None,
         output_format: str = "zenflux",
@@ -59,6 +60,7 @@ class ContentEventManager(BaseEventManager):
             session_id: Session ID
             index: 内容块索引
             content_block: 完整的内容块对象（由上层构造）
+            message_id: 消息 ID（可选）
             seq: 事件序号（可选，来自 EventBroadcaster）
             event_uuid: 事件 UUID（可选）
             output_format: 输出格式（zenflux/zeno），默认 zenflux
@@ -81,7 +83,7 @@ class ContentEventManager(BaseEventManager):
             }
         )
         return await self._send_event(
-            session_id, event, seq=seq, event_uuid=event_uuid,
+            session_id, event, message_id=message_id, seq=seq, event_uuid=event_uuid,
             output_format=output_format, adapter=adapter
         )
     
@@ -90,6 +92,7 @@ class ContentEventManager(BaseEventManager):
         session_id: str,
         index: int,
         delta: str,
+        message_id: Optional[str] = None,
         seq: Optional[int] = None,
         event_uuid: Optional[str] = None,
         output_format: str = "zenflux",
@@ -102,6 +105,7 @@ class ContentEventManager(BaseEventManager):
             session_id: Session ID
             index: 内容块索引
             delta: 增量内容（字符串）
+            message_id: 消息 ID（可选）
             seq: 事件序号（可选）
             event_uuid: 事件 UUID（可选）
             output_format: 输出格式（zenflux/zeno），默认 zenflux
@@ -124,7 +128,7 @@ class ContentEventManager(BaseEventManager):
             }
         )
         return await self._send_event(
-            session_id, event, seq=seq, event_uuid=event_uuid,
+            session_id, event, message_id=message_id, seq=seq, event_uuid=event_uuid,
             output_format=output_format, adapter=adapter
         )
     
@@ -132,6 +136,7 @@ class ContentEventManager(BaseEventManager):
         self,
         session_id: str,
         index: int,
+        message_id: Optional[str] = None,
         seq: Optional[int] = None,
         event_uuid: Optional[str] = None,
         output_format: str = "zenflux",
@@ -143,6 +148,7 @@ class ContentEventManager(BaseEventManager):
         Args:
             session_id: Session ID
             index: 内容块索引
+            message_id: 消息 ID（可选）
             seq: 事件序号（可选）
             event_uuid: 事件 UUID（可选）
             output_format: 输出格式（zenflux/zeno），默认 zenflux
@@ -158,6 +164,6 @@ class ContentEventManager(BaseEventManager):
             }
         )
         return await self._send_event(
-            session_id, event, seq=seq, event_uuid=event_uuid,
+            session_id, event, message_id=message_id, seq=seq, event_uuid=event_uuid,
             output_format=output_format, adapter=adapter
         )

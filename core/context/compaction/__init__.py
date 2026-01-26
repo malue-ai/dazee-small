@@ -32,6 +32,27 @@ from enum import Enum
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 
+import tiktoken
+
+from logger import get_logger
+
+logger = get_logger("context.compaction")
+
+# 全局 tokenizer 缓存（延迟初始化）
+_tokenizer = None
+
+
+def _get_tokenizer():
+    """获取 tokenizer（延迟初始化，全局缓存）"""
+    global _tokenizer
+    if _tokenizer is None:
+        try:
+            _tokenizer = tiktoken.get_encoding("cl100k_base")
+            logger.debug("✅ tiktoken tokenizer 初始化成功")
+        except Exception as e:
+            logger.warning(f"⚠️ 无法加载 tiktoken: {e}，将使用字符数估算")
+    return _tokenizer
+
 
 class QoSLevel(str, Enum):
     """
@@ -210,34 +231,68 @@ def trim_history_messages(
 
 def estimate_tokens(messages: List[Dict[str, Any]], system_prompt: str = "") -> int:
     """
-    估算消息列表的 token 数
+    计算消息列表的 token 数
     
-    简化估算：1 个中文字符 ≈ 1.5 tokens，1 个英文单词 ≈ 1.3 tokens
-    这是一个粗略估算，实际 token 数可能有 ±20% 误差
+    使用 tiktoken（cl100k_base 编码）进行精确计算。
+    如果 tiktoken 不可用，则使用字符估算（1 字符 ≈ 0.5 tokens）。
     
     Args:
         messages: 消息列表
         system_prompt: 系统提示词
         
     Returns:
-        估算的 token 数
+        token 数量
     """
-    total_chars = len(system_prompt)
+    tokenizer = _get_tokenizer()
+    
+    def _extract_text(content: Any) -> str:
+        """递归提取所有文本内容"""
+        if isinstance(content, str):
+            return content
+        elif isinstance(content, list):
+            texts = []
+            for item in content:
+                texts.append(_extract_text(item))
+            return " ".join(texts)
+        elif isinstance(content, dict):
+            block_type = content.get("type", "")
+            if block_type == "text":
+                return content.get("text", "")
+            elif block_type == "tool_result":
+                result_content = content.get("content", "")
+                return _extract_text(result_content)
+            elif block_type == "tool_use":
+                # 工具名称 + 参数
+                tool_name = content.get("name", "")
+                tool_input = content.get("input", {})
+                return f"{tool_name}: {str(tool_input)}"
+            elif block_type == "thinking":
+                return content.get("thinking", "")
+            else:
+                # 其他类型，尝试提取常见字段
+                return str(content.get("text", "") or content.get("content", ""))
+        else:
+            return str(content)
+    
+    # 收集所有文本
+    all_text = system_prompt or ""
     
     for msg in messages:
+        role = msg.get("role", "")
         content = msg.get("content", "")
-        if isinstance(content, str):
-            total_chars += len(content)
-        elif isinstance(content, list):
-            for block in content:
-                if isinstance(block, dict):
-                    if block.get("type") == "text":
-                        total_chars += len(block.get("text", ""))
-                    elif block.get("type") == "tool_result":
-                        total_chars += len(str(block.get("content", "")))
+        msg_text = f"{role}: {_extract_text(content)}"
+        all_text += "\n" + msg_text
     
-    # 粗略估算：平均 1 字符 ≈ 0.5 tokens（中英文混合）
-    return int(total_chars * 0.5)
+    # 使用 tiktoken 精确计算
+    if tokenizer:
+        try:
+            tokens = len(tokenizer.encode(all_text))
+            return tokens
+        except Exception as e:
+            logger.warning(f"tiktoken 编码失败: {e}，使用字符估算")
+    
+    # Fallback：字符估算（1 token ≈ 2 字符，对中英文混合较准确）
+    return len(all_text) // 2
 
 
 def should_warn_backend(

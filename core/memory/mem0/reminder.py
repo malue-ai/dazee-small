@@ -61,7 +61,7 @@ class Reminder:
             ReminderItem
         """
         reminder = ReminderItem(
-            id=f"rem_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}",
+            id=str(uuid.uuid4()),
             user_id=user_id,
             content=content,
             reminder_type=reminder_type,
@@ -384,7 +384,7 @@ class Reminder:
         
         # 创建新提醒
         new_reminder = ReminderItem(
-            id=f"rem_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}",
+            id=str(uuid.uuid4()),
             user_id=user_id,
             content=reminder.content,
             reminder_type=reminder.reminder_type,

@@ -93,7 +93,7 @@ async def send_chat_and_collect_events(
         事件列表
     """
     if user_id is None:
-        user_id = f"test_user_{uuid4().hex[:8]}"
+        user_id = f"test_user_{uuid4()}"
     
     request_data = {
         "message": message,
@@ -290,13 +290,13 @@ class TestDazeeChatSeqMultipleSessions:
         # 第一个会话
         events1 = await send_chat_and_collect_events(
             "第一个会话，请简短回复",
-            user_id=f"test_user_1_{uuid4().hex[:8]}"
+            user_id=f"test_user_1_{uuid4()}"
         )
         
         # 第二个会话
         events2 = await send_chat_and_collect_events(
             "第二个会话，请简短回复",
-            user_id=f"test_user_2_{uuid4().hex[:8]}"
+            user_id=f"test_user_2_{uuid4()}"
         )
         
         seq1 = extract_seq_values(events1)

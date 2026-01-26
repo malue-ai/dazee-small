@@ -134,7 +134,7 @@ class CheckpointManager:
             Checkpoint: 检查点对象
         """
         checkpoint = Checkpoint(
-            checkpoint_id=f"ckpt_{uuid4().hex[:12]}",
+            checkpoint_id=str(uuid4()),
             session_id=state.session_id,
             orchestrator_state_id=state.state_id,
             mode=state.mode,

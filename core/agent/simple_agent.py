@@ -47,7 +47,9 @@ from core.context.compaction import (
     get_context_strategy,
     get_memory_guidance_prompt,
     QoSLevel,
-    ContextStrategy
+    ContextStrategy,
+    trim_history_messages,
+    estimate_tokens
 )
 from core.context.prompt_manager import get_prompt_manager, get_prompt_manager_async, PromptManager
 from core.events.broadcaster import EventBroadcaster
@@ -556,7 +558,8 @@ class SimpleAgent:
             }
             yield await self.broadcaster.emit_message_delta(
                 session_id=session_id,
-                delta=intent_delta
+                delta=intent_delta,
+                message_id=self._current_message_id
             )
             
             # 追踪意图分析阶段
@@ -863,6 +866,81 @@ class SimpleAgent:
         # 验证: 通过 E2EPipelineTracer 检查复杂任务的第一个 tool_call 是否是 plan_todo
         
         # =====================================================================
+        # 阶段 5.5: 上下文长度检查与自动裁剪（防止 Token 溢出）
+        # =====================================================================
+        # 在进入 RVR 循环之前，检查当前上下文的 token 估算值
+        # 如果超过安全阈值（token_budget - 20000 buffer），自动裁剪历史消息
+        # 这可以防止 Claude API 返回 "prompt is too long" 错误
+        
+        # 计算 system_prompt 的长度（支持多层缓存格式）
+        system_prompt_text = ""
+        if isinstance(system_prompt, list):
+            for block in system_prompt:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    system_prompt_text += block.get("text", "")
+                elif isinstance(block, str):
+                    system_prompt_text += block
+        else:
+            system_prompt_text = system_prompt or ""
+        
+        # 转换消息为字典格式用于 token 估算
+        messages_for_estimate = [
+            {"role": m.role, "content": m.content} if hasattr(m, 'role') else m 
+            for m in llm_messages
+        ]
+        
+        # 估算当前 token 数
+        estimated_tokens = estimate_tokens(messages_for_estimate, system_prompt_text)
+        
+        # 计算安全阈值（token_budget - 20000 用于输出和工具结果）
+        # Claude API 限制：200K tokens（输入），所以留出足够空间
+        safe_threshold = self.context_strategy.token_budget - 20000
+        
+        if estimated_tokens > safe_threshold:
+            logger.warning(
+                f"⚠️ 上下文长度警告: 估算 {estimated_tokens:,} tokens > 安全阈值 {safe_threshold:,} tokens"
+            )
+            
+            # 使用 context_strategy 进行历史消息裁剪
+            trimmed_messages = trim_history_messages(messages_for_estimate, self.context_strategy)
+            
+            # 重新估算裁剪后的 token 数
+            trimmed_tokens = estimate_tokens(trimmed_messages, system_prompt_text)
+            
+            logger.info(
+                f"✂️ 历史消息已裁剪: {len(messages_for_estimate)} → {len(trimmed_messages)} 条消息, "
+                f"token 估算: {estimated_tokens:,} → {trimmed_tokens:,}"
+            )
+            
+            # 更新 llm_messages
+            llm_messages = dict_list_to_messages(trimmed_messages)
+            
+            # 如果裁剪后仍然超过阈值，进行更激进的裁剪
+            if trimmed_tokens > safe_threshold:
+                logger.warning(f"⚠️ 裁剪后仍超过阈值，进行激进裁剪...")
+                
+                # 激进策略：只保留前 2 条和最后 6 条消息
+                aggressive_strategy = ContextStrategy(
+                    enable_history_trimming=True,
+                    max_history_messages=20,
+                    preserve_first_n=1,
+                    preserve_last_n=3,
+                    preserve_tool_results=False  # 不保留中间的 tool_result
+                )
+                
+                aggressively_trimmed = trim_history_messages(trimmed_messages, aggressive_strategy)
+                aggressive_tokens = estimate_tokens(aggressively_trimmed, system_prompt_text)
+                
+                logger.info(
+                    f"✂️ 激进裁剪: {len(trimmed_messages)} → {len(aggressively_trimmed)} 条消息, "
+                    f"token 估算: {trimmed_tokens:,} → {aggressive_tokens:,}"
+                )
+                
+                llm_messages = dict_list_to_messages(aggressively_trimmed)
+        else:
+            logger.debug(f"📊 上下文长度正常: 估算 {estimated_tokens:,} tokens < 安全阈值 {safe_threshold:,}")
+        
+        # =====================================================================
         # 阶段 6: RVR Loop (核心执行)
         # =====================================================================
         # Read-Reason-Act-Observe-Validate-Write-Repeat 循环
@@ -892,6 +970,29 @@ class SimpleAgent:
             # [Validate] 在下一轮 thinking 中验证结果质量 
             # [Write] 更新状态（plan_todo.update_step()）
             # [Repeat] 如果 stop_reason == "tool_use" 则继续循环
+            
+            # 🆕 每轮开始时检查上下文长度（工具结果可能导致累积溢出）
+            if turn > 0:  # 第一轮已在阶段 5.5 检查过
+                messages_for_check = [
+                    {"role": m.role, "content": m.content} if hasattr(m, 'role') else m 
+                    for m in llm_messages
+                ]
+                current_tokens = estimate_tokens(messages_for_check, system_prompt_text)
+                
+                if current_tokens > safe_threshold:
+                    logger.warning(
+                        f"⚠️ Turn {turn + 1}: 上下文累积溢出 ({current_tokens:,} > {safe_threshold:,})，执行裁剪..."
+                    )
+                    
+                    trimmed = trim_history_messages(messages_for_check, self.context_strategy)
+                    trimmed_tokens = estimate_tokens(trimmed, system_prompt_text)
+                    
+                    logger.info(
+                        f"✂️ Turn {turn + 1} 裁剪: {len(messages_for_check)} → {len(trimmed)} 条消息, "
+                        f"{current_tokens:,} → {trimmed_tokens:,} tokens"
+                    )
+                    
+                    llm_messages = dict_list_to_messages(trimmed)
             
             # 调用 LLM（Extended Thinking 由 System Prompt 和 Claude 自主决定）
             if enable_stream:
@@ -1312,26 +1413,30 @@ class SimpleAgent:
         Yields:
             思考内容的增量字符串
         """
-        # 模拟思考的 Prompt
-        simulated_prompt = """你是一个AI助手的"思考展示器"。
-根据用户的问题，以第一人称展示你的思考过程。
+        # 模拟思考的 Prompt（语言自适应）
+        simulated_prompt = """You are a "thinking display" for an AI assistant.
+Based on the user's question, show your thinking process in first person.
 
-要求：
-1. 只展示对问题的理解和解答思路
-2. 不要提及任何工具、API、代码、内部实现
-3. 语言自然，像人类在思考一样
-4. 控制在 100-200 字
+Requirements:
+1. Only show your understanding of the question and approach to solving it
+2. Do not mention any tools, APIs, code, or internal implementation
+3. Natural language, like a human thinking
+4. Keep it to 100-200 words
+5. **IMPORTANT: Respond in the SAME LANGUAGE as the user's question**
+   - If the user writes in English → respond in English
+   - If the user writes in Chinese → respond in Chinese
+   - If the user writes in a mix → use the dominant language
 
-用户问题: {query}
+User question: {query}
 
-请输出你的思考过程:"""
+Please output your thinking process:"""
         
         logger.info(f"🧠 开始生成模拟思考: query={user_query[:50]}...")
         
         try:
             async for chunk in self.llm.create_message_stream(
                 messages=[Message(role="user", content=simulated_prompt.format(query=user_query))],
-                system="你是一个思考展示助手。只输出思考过程，不要有多余内容。",
+                system="You are a thinking display assistant. Only output the thinking process, no extra content. Respond in the same language as the user's question.",
                 tools=[],
                 override_thinking=False  # 模拟思考本身不需要原生 thinking
             ):
@@ -1339,38 +1444,73 @@ class SimpleAgent:
                     yield chunk.content
         except Exception as e:
             logger.error(f"❌ 模拟思考生成失败: {e}")
-            yield f"[思考过程生成失败: {str(e)}]"
+            yield f"[Thinking process generation failed: {str(e)}]"
     
     def _extract_user_query(self, messages: List) -> str:
         """
-        从消息列表中提取最后一条用户消息
+        从消息列表中提取最后一条用户消息（纯净版本）
         
         Args:
             messages: 消息列表（Message 对象或字典）
             
         Returns:
-            用户查询字符串（限制 500 字符）
+            用户查询字符串（限制 500 字符，不含系统注入的上下文信息）
         """
+        raw_content = ""
+        
         for msg in reversed(messages):
             # 处理 Message 对象
             if hasattr(msg, 'role') and msg.role == 'user':
                 content = msg.content
                 if isinstance(content, str):
-                    return content[:500]
+                    raw_content = content
+                    break
                 elif isinstance(content, list):
                     for block in content:
                         if isinstance(block, dict) and block.get('type') == 'text':
-                            return block.get('text', '')[:500]
+                            raw_content = block.get('text', '')
+                            break
+                    if raw_content:
+                        break
             # 处理字典格式
             elif isinstance(msg, dict) and msg.get('role') == 'user':
                 content = msg.get('content', '')
                 if isinstance(content, str):
-                    return content[:500]
+                    raw_content = content
+                    break
                 elif isinstance(content, list):
                     for block in content:
                         if isinstance(block, dict) and block.get('type') == 'text':
-                            return block.get('text', '')[:500]
-        return ""
+                            raw_content = block.get('text', '')
+                            break
+                    if raw_content:
+                        break
+        
+        if not raw_content:
+            return ""
+        
+        # 过滤掉系统注入的上下文信息（如 [用户上下文]、[提取的文档信息] 等）
+        # 这些信息不应该暴露给模拟思考，避免泄露 locale、timezone 等内部信息
+        clean_content = raw_content
+        
+        # 移除 [用户上下文] 部分
+        if "[用户上下文]" in clean_content:
+            # 找到 [用户上下文] 的位置，截取之前的内容
+            idx = clean_content.find("[用户上下文]")
+            clean_content = clean_content[:idx].strip()
+        
+        # 移除 [提取的文档信息] 部分
+        if "[提取的文档信息]" in clean_content:
+            idx = clean_content.find("[提取的文档信息]")
+            clean_content = clean_content[:idx].strip()
+        
+        # 移除其他可能的系统注入标记
+        for marker in ["[图片url列表信息]", "[文档url列表信息]"]:
+            if marker in clean_content:
+                idx = clean_content.find(marker)
+                clean_content = clean_content[:idx].strip()
+        
+        return clean_content[:500] if clean_content else ""
     
     async def _process_stream(
         self,
@@ -1401,7 +1541,7 @@ class SimpleAgent:
             is_first_turn: 是否是第一轮（用于控制模拟思考生成）
         """
         # 创建 ContentHandler（手动控制模式）
-        content_handler = create_content_handler(self.broadcaster, ctx.block)
+        content_handler = create_content_handler(self.broadcaster, ctx.block, self._current_message_id)
         
         # 获取 thinking_mode 配置（默认 native 保持向后兼容）
         thinking_mode = getattr(self.schema, 'thinking_mode', 'native')
@@ -1747,7 +1887,7 @@ class SimpleAgent:
             content_start, content_delta, content_stop 等事件
         """
         # 创建 ContentHandler
-        content_handler = create_content_handler(self.broadcaster, ctx.block)
+        content_handler = create_content_handler(self.broadcaster, ctx.block, self._current_message_id)
         
         # 分离流式工具和普通工具
         stream_tools = []
@@ -1887,7 +2027,7 @@ class SimpleAgent:
             content_start, content_stop 等事件（统一使用 tool_use/tool_result）
         """
         # 创建 ContentHandler
-        content_handler = create_content_handler(self.broadcaster, ctx.block)
+        content_handler = create_content_handler(self.broadcaster, ctx.block, self._current_message_id)
         
         for block in raw_content:
             block_type = block.get("type", "")
@@ -1980,7 +2120,7 @@ class SimpleAgent:
             工具结果列表
         """
         # 创建 ContentHandler
-        content_handler = create_content_handler(self.broadcaster, ctx.block)
+        content_handler = create_content_handler(self.broadcaster, ctx.block, self._current_message_id)
         results = []
         
         # 追踪工具调用

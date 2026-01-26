@@ -178,7 +178,7 @@ class PDCAManager:
             
             # 创建 WorkPlan
             plan = WorkPlan(
-                id=f"plan_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}",
+                id=str(uuid.uuid4()),
                 user_id=user_id,
                 title=plan_data.get("title", "未命名计划"),
                 description=plan_data.get("description", ""),

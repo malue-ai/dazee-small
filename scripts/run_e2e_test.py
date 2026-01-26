@@ -113,7 +113,7 @@ async def send_chat_request(
 ) -> Tuple[List[Dict[str, Any]], float]:
     """发送聊天请求并收集所有事件"""
     if user_id is None:
-        user_id = f"test_user_{uuid4().hex[:8]}"
+        user_id = str(uuid4())
     
     request_data = {
         "message": message,

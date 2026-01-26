@@ -13,11 +13,6 @@ from infra.database.models import User
 from infra.database.crud.base import get_by_id
 
 
-def generate_user_id() -> str:
-    """生成用户 ID（UUID）"""
-    return f"user_{uuid4().hex[:16]}"
-
-
 async def get_user_by_username(
     session: AsyncSession,
     username: str
@@ -73,7 +68,7 @@ async def get_or_create_user_by_username(
     
     # 创建新用户，user_id 使用 UUID
     user = User(
-        id=generate_user_id(),
+        id=str(uuid4()),
         username=username,
         created_at=datetime.now(),
     )

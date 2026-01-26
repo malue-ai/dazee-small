@@ -121,7 +121,7 @@ class Plan(BaseModel):
         updated_at: 更新时间
         metadata: 额外元数据
     """
-    plan_id: str = Field(default_factory=lambda: f"plan_{uuid.uuid4().hex[:12]}")
+    plan_id: str = Field(default_factory=lambda: f"plan_{uuid.uuid4()}")
     goal: str = Field(..., description="目标描述")
     steps: List[PlanStep] = Field(default_factory=list, description="步骤列表")
     execution_mode: Literal["linear", "dag"] = Field(default="linear", description="执行模式")

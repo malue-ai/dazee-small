@@ -149,7 +149,13 @@ class ZenOAdapter(EventAdapter):
         data = event.get("data", {})
         session_id = event.get("session_id", "")
         conversation_id = event.get("conversation_id") or self.conversation_id or ""
-        message_id = data.get("message_id") or self._current_message_id or f"msg_{session_id}"
+        
+        # 获取 message_id：优先从 data，其次从 message.id（message_start 事件），最后用缓存
+        message_id = (
+            data.get("message_id") or 
+            event.get("message", {}).get("id") or 
+            self._current_message_id
+        )
         timestamp = int(time.time() * 1000)  # 毫秒时间戳
         
         # 🆕 入口日志：记录收到的事件类型
@@ -160,8 +166,8 @@ class ZenOAdapter(EventAdapter):
         )
         
         # 更新 message_id 缓存
-        if data.get("message_id"):
-            self._current_message_id = data.get("message_id")
+        if message_id:
+            self._current_message_id = message_id
         
         # 根据事件类型转换（不传 seq，由 EventDispatcher 统一添加）
         if event_type == "message_start":

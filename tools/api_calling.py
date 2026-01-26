@@ -16,13 +16,13 @@ API Calling Tool - 通用 API 调用工具
 
 调用方式:
 1. 直接指定 URL：url="https://api.example.com/v1/xxx"
-2. 使用预配置 API：api_name="coze_api", path="/workflow/stream_run"
-   （自动注入 base_url 和认证 headers）
+2. 使用预配置 API：api_name="coze_api"
+   （自动注入完整 URL 和认证 headers）
 
 示例:
-- config.yaml 中配置了 apis（包含 base_url 和认证信息）
-- LLM 只需指定 api_name + path + body
-- 框架自动补全 URL 和认证头
+- config.yaml 中配置了 apis（包含完整 URL 和认证信息）
+- LLM 只需指定 api_name + body
+- 框架自动注入 URL 和认证头
 """
 
 import os
@@ -90,13 +90,12 @@ class APICallingTool:
 
 调用方式:
 1. 直接指定 URL: url="https://api.example.com/xxx"
-2. 使用预配置 API: api_name="coze_api", path="/workflow/stream_run"
-   - 自动从配置注入 base_url 和认证 headers
-   - 无需手动填写 API Key
+2. 使用预配置 API: api_name="coze_api"
+   - 自动从配置注入完整 URL 和认证 headers
+   - 无需手动填写 API Key 或路径
 
 参数说明:
-- api_name: 预配置的 API 名称（与 url 二选一）
-- path: API 路径,与 api_name 配合使用
+- api_name: 预配置的 API 名称（与 url 二选一，完整 URL 已配置）
 - url: 完整的 API URL（与 api_name 二选一）
 - method: HTTP 方法 (默认 POST)
 - headers: 额外的请求头（会与预配置合并）
@@ -113,11 +112,7 @@ class APICallingTool:
                 # ===== 方式1: 使用预配置 API（推荐）=====
                 "api_name": {
                     "type": "string",
-                    "description": "预配置的 API 名称（如 coze_api、dify_api）,自动注入 base_url 和认证"
-                },
-                "path": {
-                    "type": "string",
-                    "description": "API 路径（与 api_name 配合使用）,例如 /workflow/stream_run"
+                    "description": "预配置的 API 名称（如 coze_api、wenshu_api）,自动注入完整 URL 和认证"
                 },
                 # ===== 方式2: 直接指定 URL =====
                 "url": {
@@ -175,7 +170,6 @@ class APICallingTool:
         self,
         # 方式1: 使用预配置 API
         api_name: Optional[str] = None,
-        path: Optional[str] = None,
         # 方式2: 直接指定 URL
         url: Optional[str] = None,
         # 通用参数
@@ -185,29 +179,34 @@ class APICallingTool:
         # 请求模式
         mode: str = "sync",  # sync / stream / async_poll
         poll_config: Optional[Dict[str, Any]] = None,
+        # 兼容旧调用（忽略 path 参数）
+        path: Optional[str] = None,
         **kwargs  # 框架注入的上下文
     ) -> Dict[str, Any]:
         """
         执行 API 调用
         
         Args:
-            api_name: 预配置的 API 名称（自动注入 base_url 和认证）
-            path: API 路径（与 api_name 配合使用）
+            api_name: 预配置的 API 名称（自动注入完整 URL 和认证）
             url: 完整的 API URL（与 api_name 二选一）
             method: HTTP 方法
             headers: 额外的请求头（会与预配置合并）
             body: 请求体
             mode: 请求模式 sync/stream/async_poll
             poll_config: 轮询配置（mode=async_poll 时使用）
+            path: 已废弃，保留兼容性（会被忽略）
             
         Returns:
             API 原始响应结果（不嵌套包装）
         """
+        # 如果传了 path 参数，记录警告（已废弃）
+        if path:
+            logger.warning(f"⚠️ path 参数已废弃，将被忽略。请使用完整 URL 配置。传入的 path: {path}")
+        
         try:
             # 1. 解析 URL 和 Headers（支持 api_name 自动注入）
             final_url, final_headers, resolve_error, _ = self._resolve_api_config(
                 api_name=api_name,
-                path=path,
                 url=url,
                 headers=headers
             )
@@ -281,7 +280,6 @@ class APICallingTool:
     def _resolve_api_config(
         self,
         api_name: Optional[str] = None,
-        path: Optional[str] = None,
         url: Optional[str] = None,
         headers: Optional[Dict[str, str]] = None
     ) -> tuple[Optional[str], Dict[str, str], Optional[str], Dict[str, Any]]:
@@ -289,8 +287,7 @@ class APICallingTool:
         解析 API 配置,支持自动注入
         
         Args:
-            api_name: 预配置的 API 名称
-            path: API 路径
+            api_name: 预配置的 API 名称（配置中已包含完整 URL）
             url: 完整 URL
             headers: 额外请求头
             
@@ -298,14 +295,14 @@ class APICallingTool:
             (final_url, final_headers, error_message, meta_info)
             - 成功时 error_message 为 None
             - 失败时 final_url 为 None，error_message 包含错误原因
-            - meta_info: 元数据信息 {api_name, base_url, path}，用于下游识别 API 来源
+            - meta_info: 元数据信息 {api_name, url}，用于下游识别 API 来源
         """
         final_headers = headers.copy() if headers else {}
         meta_info: Dict[str, Any] = {}
         
-        # 方式1: 使用预配置 API
+        # 方式1: 使用预配置 API（完整 URL 已配置）
         if api_name:
-            logger.info(f"🔍 查找 API 配置: api_name={api_name}, apis_config 数量={len(self.apis_config)}")
+            logger.info(f"🔍 查找 API 配置: api_name={api_name}")
             api_config = self.apis_config.get(api_name)
             if not api_config:
                 available_apis = list(self.apis_config.keys()) if self.apis_config else []
@@ -313,35 +310,13 @@ class APICallingTool:
                 logger.warning(f"⚠️ {error_msg}")
                 return None, final_headers, error_msg, meta_info
             
-            # 拼接 URL（并替换环境变量）
-            base_url = api_config.get("base_url", "")
-            base_url = self._resolve_env_var_in_string(base_url).rstrip("/")
-            if not base_url:
+            # 获取完整 URL（并替换环境变量）
+            final_url = api_config.get("base_url", "")
+            final_url = self._resolve_env_var_in_string(final_url)
+            if not final_url:
                 error_msg = f"API '{api_name}' 配置缺少 base_url"
                 logger.error(f"❌ {error_msg}")
                 return None, final_headers, error_msg, meta_info
-            
-            # 🔧 智能处理路径前缀重复问题
-            # 如果 base_url 以 /v1 结尾，而 path 以 /v1/ 开头，自动去除 path 中的 /v1
-            original_path = path
-            path = (path or "").lstrip("/")
-            if path:
-                # 检测并移除重复的版本前缀（如 v1/v1/...）
-                from urllib.parse import urlparse
-                base_path = urlparse(base_url).path.rstrip("/")
-                if base_path:
-                    # 提取 base_url 中的最后一个路径段（如 /v1）
-                    base_suffix = base_path.split("/")[-1]  # "v1"
-                    # 如果 path 以相同前缀开头，去除它
-                    if path.startswith(f"{base_suffix}/"):
-                        original_path_for_log = path
-                        path = path[len(base_suffix) + 1:]  # 去除 "v1/"
-                        logger.warning(
-                            f"⚠️ 检测到路径重复前缀，自动修正: "
-                            f"'{original_path_for_log}' → '{path}'"
-                        )
-            
-            final_url = f"{base_url}/{path}" if path else base_url
             
             # 合并 headers：预配置的 headers + LLM 传入的 headers
             config_headers = api_config.get("headers", {})
@@ -366,11 +341,10 @@ class APICallingTool:
                     else:
                         logger.warning(f"⚠️ 认证环境变量未设置: {auth_env}")
             
-            # 🆕 构建元数据信息（用于下游识别 API 来源）
+            # 构建元数据信息
             meta_info = {
                 "api_name": api_name,
-                "base_url": base_url,
-                "path": f"/{path}" if path else "",
+                "url": final_url,
                 "capability": api_config.get("capability", "")
             }
             
@@ -389,7 +363,6 @@ class APICallingTool:
         self,
         # 方式1: 使用预配置 API
         api_name: Optional[str] = None,
-        path: Optional[str] = None,
         # 方式2: 直接指定 URL
         url: Optional[str] = None,
         # 通用参数
@@ -406,8 +379,7 @@ class APICallingTool:
         SSE 流式返回，每个 yield 的字符串会作为 content_delta 发送给前端。
         
         Args:
-            api_name: 预配置的 API 名称
-            path: API 路径
+            api_name: 预配置的 API 名称（完整 URL 已配置）
             url: 完整的 API URL
             method: HTTP 方法
             headers: 额外请求头
@@ -420,7 +392,6 @@ class APICallingTool:
         # 1. 解析 URL 和 Headers
         final_url, final_headers, resolve_error, _ = self._resolve_api_config(
             api_name=api_name,
-            path=path,
             url=url,
             headers=headers
         )
@@ -432,7 +403,7 @@ class APICallingTool:
         # 2. 替换环境变量
         final_headers = self._resolve_env_vars(final_headers)
         
-        # 3. 🆕 V7.9.2: 替换 body 中的上下文占位符（与 execute 保持一致）
+        # 3. 替换 body 中的上下文占位符
         if body:
             body = self._resolve_body_placeholders(body, kwargs)
         
@@ -440,7 +411,6 @@ class APICallingTool:
         if mode != "stream":
             result = await self.execute(
                 api_name=api_name,
-                path=path,
                 url=url,
                 method=method,
                 headers=headers,

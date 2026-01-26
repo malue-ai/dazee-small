@@ -136,13 +136,30 @@ class E2BSandboxProvider(SandboxProvider):
         # 3. 创建新沙盒
         return await self._create_new_sandbox(conversation_id, user_id, stack)
     
+    # 创建沙盒时可重试的网络错误关键词
+    _RETRYABLE_CREATE_ERRORS = [
+        'disconnected', 'connection', 'timeout', 'temporarily unavailable',
+        'server error', '502', '503', '504', 'network'
+    ]
+    
     async def _create_new_sandbox(
         self,
         conversation_id: str,
         user_id: str,
-        stack: Optional[str] = None
+        stack: Optional[str] = None,
+        max_retries: int = 2,
+        base_delay: float = 1.0
     ) -> SandboxInfo:
-        """创建新沙盒"""
+        """
+        创建新沙盒（带重试机制）
+        
+        Args:
+            conversation_id: 对话 ID
+            user_id: 用户 ID
+            stack: 技术栈
+            max_retries: 最大重试次数
+            base_delay: 基础重试延迟（秒），采用指数退避
+        """
         async with AsyncSessionLocal() as session:
             db_sandbox = await crud.get_sandbox_by_conversation(
                 session, conversation_id
@@ -156,46 +173,70 @@ class E2BSandboxProvider(SandboxProvider):
                     stack=stack
                 )
         
-        try:
-            if self.api_key != os.getenv("E2B_API_KEY"):
-                os.environ["E2B_API_KEY"] = self.api_key
-            
-            logger.info(f"🆕 创建 Code Interpreter 沙盒: conversation={conversation_id}")
-            
-            # 使用 beta_create 启用自动暂停功能
-            # 超时后沙盒会自动暂停（而不是销毁），可以恢复
-            sandbox = await AsyncSandbox.beta_create(
-                auto_pause=True,  # 超时后自动暂停
-                timeout=self.DEFAULT_TIMEOUT_SECONDS,
-                metadata={"conversation_id": conversation_id, "user_id": user_id}
-            )
-            
-            await asyncio.sleep(1)
-            self._sandbox_pool[conversation_id] = sandbox
-            
-            async with AsyncSessionLocal() as session:
-                await crud.update_sandbox_e2b_id(
-                    session, conversation_id, sandbox.sandbox_id
+        if self.api_key != os.getenv("E2B_API_KEY"):
+            os.environ["E2B_API_KEY"] = self.api_key
+        
+        last_error: Optional[Exception] = None
+        
+        for attempt in range(max_retries + 1):
+            try:
+                logger.info(
+                    f"🆕 创建 Code Interpreter 沙盒: conversation={conversation_id}"
+                    + (f" (重试 {attempt}/{max_retries})" if attempt > 0 else "")
                 )
-                await crud.update_sandbox_status(
-                    session, conversation_id, "running"
+                
+                # 使用 beta_create 启用自动暂停功能
+                # 超时后沙盒会自动暂停（而不是销毁），可以恢复
+                sandbox = await AsyncSandbox.beta_create(
+                    auto_pause=True,  # 超时后自动暂停
+                    timeout=self.DEFAULT_TIMEOUT_SECONDS,
+                    metadata={"conversation_id": conversation_id, "user_id": user_id}
                 )
-            
-            logger.info(f"✅ 沙盒创建成功: {sandbox.sandbox_id}")
-            
-            return SandboxInfo(
-                id=conversation_id,
-                conversation_id=conversation_id,
-                user_id=user_id,
-                provider_sandbox_id=sandbox.sandbox_id,
-                status=SandboxStatus.RUNNING,
-                stack=stack,
-                created_at=datetime.now().isoformat()
-            )
-            
-        except Exception as e:
-            logger.error(f"❌ 创建沙盒失败: {e}", exc_info=True)
-            raise SandboxError(f"创建沙盒失败: {e}")
+                
+                await asyncio.sleep(1)
+                self._sandbox_pool[conversation_id] = sandbox
+                
+                async with AsyncSessionLocal() as session:
+                    await crud.update_sandbox_e2b_id(
+                        session, conversation_id, sandbox.sandbox_id
+                    )
+                    await crud.update_sandbox_status(
+                        session, conversation_id, "running"
+                    )
+                
+                logger.info(f"✅ 沙盒创建成功: {sandbox.sandbox_id}")
+                
+                return SandboxInfo(
+                    id=conversation_id,
+                    conversation_id=conversation_id,
+                    user_id=user_id,
+                    provider_sandbox_id=sandbox.sandbox_id,
+                    status=SandboxStatus.RUNNING,
+                    stack=stack,
+                    created_at=datetime.now().isoformat()
+                )
+                
+            except Exception as e:
+                last_error = e
+                error_str = str(e).lower()
+                
+                # 判断是否为可重试的网络错误
+                is_retryable = any(
+                    kw in error_str for kw in self._RETRYABLE_CREATE_ERRORS
+                )
+                
+                if is_retryable and attempt < max_retries:
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(
+                        f"⚠️ 创建沙盒失败，将在 {delay:.1f}s 后重试 "
+                        f"({attempt + 1}/{max_retries}): {e}"
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                
+                # 不可重试或已达到最大重试次数
+                logger.error(f"❌ 创建沙盒失败: {e}", exc_info=True)
+                raise SandboxError(f"创建沙盒失败: {e}")
     
     async def _connect_sandbox(self, e2b_sandbox_id: str) -> Any:
         """连接到已有沙盒"""

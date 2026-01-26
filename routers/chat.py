@@ -498,7 +498,15 @@ async def _handle_stream_chat(request: ChatRequest, format: str) -> StreamingRes
                 output_format=format  # 传递给 chat_service，让 EventDispatcher 处理转换
             ):
                 # 事件已经是正确的格式（由 EventDispatcher 转换），直接输出
+                event_type = event.get("type", "")
+                
+                # 事件输出
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                
+                # 🔧 检测流结束事件，发送 SSE 协议层面的 event: done
+                # zenflux: message_stop, zeno: message.assistant.done
+                if event_type in ("message_stop", "message.assistant.done"):
+                    yield "event: done\ndata: {}\n\n"
         
         except asyncio.CancelledError:
             logger.debug(f"📡 SSE 连接被客户端断开: user_id={request.user_id}")
@@ -704,11 +712,17 @@ async def _reconnect_event_generator(
                     continue
                 event = transformed_event
                 event_type = event.get("type", "message")
-            # 🔧 修复：zeno 格式只需要 data: 行，不需要 id: 和 event: 行
+            
+            # 事件输出
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
             
-            # 检查是否结束
-            if event_type in ["session_end", "message_complete", "message.assistant.done"]:
+            # 🔧 检测流结束事件，发送 SSE 协议层面的 event: done
+            if event_type in ("message_stop", "message.assistant.done"):
+                yield "event: done\ndata: {}\n\n"
+                break
+            
+            # 检查是否结束（其他结束类型）
+            if event_type in ["session_end", "message_complete"]:
                 break
         logger.info(f"✅ SSE 重连流结束: session_id={session_id}")
         

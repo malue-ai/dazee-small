@@ -7,18 +7,18 @@
 - 此 API 需要一个**已生成的 Mermaid 流程图文件 URL** 作为输入
 - **必须先使用 `mcp_dify_Ontology_TextToChart_zen0` 工具生成流程图**，获取图表文件 URL 后再调用此 API
 
-## Base URL
-`https://api.coze.cn/v1`
+## 完整接口地址
+`https://api.coze.cn/v1/workflow/run`
 
 ## 认证（自动注入）
 - **认证已自动配置，调用时无需填写 `headers` 参数**
 - ❌ **禁止**：不要在调用参数中填写 `headers`、`Authorization` 或任何认证信息
-- ✅ **正确做法**：只需指定 `api_name: "coze_api"`，认证头会自动注入
+- ✅ **正确做法**：只需指定 `api_name: "coze_api"`，**无需填写 path 参数**
 
 ## 接口
 
 ### 执行 Ontology Builder 工作流（异步轮询）
-- **路径**：`POST /workflow/run`
+- **完整地址**：`POST https://api.coze.cn/v1/workflow/run`（已配置，无需填写 path）
 - **模式**：`async_poll`（异步提交 + 自动轮询结果）
 - **请求体**：
 ```json
@@ -49,12 +49,11 @@
 
 ## 使用方法
 
-使用 `api_calling` 工具调用（**注意：不要填写 headers 参数**）：
+使用 `api_calling` 工具调用（**注意：不要填写 headers 和 path 参数**）：
 
 ```
 api_calling(
   api_name="coze_api",
-  path="/workflow/run",
   method="POST",
   mode="async_poll",
   body={
@@ -78,7 +77,9 @@ api_calling(
 )
 ```
 
-⚠️ **调用时只需要以上参数，不要添加 `headers`、`url` 等参数，认证会自动处理。**
+⚠️ **调用时只需要以上参数**：
+- ❌ 不要添加 `path` 参数（接口地址已完整配置）
+- ❌ 不要添加 `headers`、`url` 参数（认证会自动处理）
 
 ### poll_config 说明
 

@@ -19,11 +19,6 @@ from infra.database.models import Message, Conversation
 from infra.database.crud.base import get_by_id
 
 
-def generate_message_id() -> str:
-    """生成消息 ID（纯 UUID）"""
-    return uuid4().hex
-
-
 def _parse_content(content: Union[str, List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
     """
     解析 content 为 list 格式
@@ -89,7 +84,7 @@ async def create_message(
         metadata: 元数据（JSON 字符串或 dict）
     """
     msg = Message(
-        id=message_id or generate_message_id(),
+        id=message_id or str(uuid4()),
         conversation_id=conversation_id,
         role=role,
         content=_parse_content(content),

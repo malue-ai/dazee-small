@@ -17,11 +17,6 @@ from infra.database.models.message import Message
 from infra.database.crud.base import get_by_id, delete_by_id
 
 
-def generate_conversation_id() -> str:
-    """生成对话 ID（纯 UUID）"""
-    return uuid4().hex
-
-
 async def create_conversation(
     session: AsyncSession,
     user_id: str,
@@ -30,7 +25,7 @@ async def create_conversation(
 ) -> Conversation:
     """创建对话"""
     conv = Conversation(
-        id=generate_conversation_id(),
+        id=str(uuid4()),
         user_id=user_id,
         title=title,
         created_at=datetime.now(),

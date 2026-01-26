@@ -146,8 +146,9 @@ mcp_tools:
 #
 apis:
   # 问数平台 API（BI智能问数）
+  # ⚠️ base_url 是完整接口地址，调用时无需填写 path
   - name: wenshu_api
-    base_url: "${WENSHU_API_BASE_URL}"
+    base_url: "http://183.6.79.71:40202/api/v3/ask"
     auth:
       type: token
       header: API-KEY
@@ -157,8 +158,9 @@ apis:
     description: "问数平台 API - 数据分析和问答"
 
   # Coze API（Ontology Builder 工作流）
+  # ⚠️ base_url 是完整接口地址，调用时 path 留空
   - name: coze_api
-    base_url: "https://api.coze.cn/v1"
+    base_url: "https://api.coze.cn/v1/workflow/run"
     auth:
       type: bearer
       header: Authorization

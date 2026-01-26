@@ -75,10 +75,6 @@ class SessionService:
     
     # ==================== Session 生命周期 ====================
     
-    def _generate_session_id(self) -> str:
-        """生成运行会话ID（纯 UUID）"""
-        return uuid4().hex
-    
     async def create_session(
         self,
         user_id: str,
@@ -99,7 +95,7 @@ class SessionService:
             session_id: 会话 ID
         """
         # 1️⃣ 生成 session_id
-        session_id = self._generate_session_id()
+        session_id = str(uuid4())
         
         logger.info(f"🔨 创建新的 Session: session_id={session_id}, conversation_id={conversation_id}")
         
@@ -152,10 +148,11 @@ class SessionService:
         1. 设置 Redis 停止标志
         2. chat_service 事件循环检测到标志后会：
            - 发送 billing 事件（message_delta type=billing）
+           - 发送 message_stop 事件（对应 ZenO 的 message.assistant.done）
            - 发送 session_stopped 事件
         
         注意：此方法只设置停止标志，不发送事件。
-        所有事件（billing、session_stopped）由 chat_service 统一发送，确保正确的事件顺序。
+        所有事件（billing、message_stop、session_stopped）由 chat_service 统一发送，确保正确的事件顺序。
         
         Args:
             session_id: Session ID
@@ -177,8 +174,9 @@ class SessionService:
         # 注意：不在这里更新状态和发送事件
         # chat_service 检测到停止标志后会：
         # 1. 发送 billing 事件
-        # 2. 发送 session_stopped 事件
-        # 3. 调用 end_session() 更新状态
+        # 2. 发送 message_stop 事件（对应 ZenO 的 message.assistant.done）
+        # 3. 发送 session_stopped 事件
+        # 4. 调用 end_session() 更新状态
         
         logger.info(f"🛑 已设置停止标志: session_id={session_id}")
         

@@ -386,7 +386,7 @@ class ConversationService:
         Returns:
             创建的消息对象
         """
-        msg_id = message_id or f"msg_{uuid4().hex[:24]}"
+        msg_id = message_id or str(uuid4())
         now = datetime.now()
         
         async with AsyncSessionLocal() as session:

@@ -19,7 +19,7 @@ from fastapi import APIRouter, HTTPException, status, Query, Body
 from fastapi.responses import StreamingResponse, JSONResponse
 from typing import Optional, List, Dict, Any
 import json
-import uuid
+from uuid import uuid4
 from datetime import datetime
 
 from logger import get_logger
@@ -753,7 +753,7 @@ async def execute_tool(
         logger.info(f"🔧 执行工具请求: tool={request.tool_name}, stream={request.stream}")
         
         # 生成调用 ID
-        invocation_id = f"inv_{uuid.uuid4().hex[:12]}"
+        invocation_id = str(uuid4())
         
         # 创建调用对象
         invocation = ToolInvocation(

@@ -40,7 +40,7 @@ async def test_memory_storage_buffer_event():
     from core.events.storage import InMemoryEventStorage
     
     storage = InMemoryEventStorage()
-    session_id = f"test-session-{uuid4().hex[:8]}"
+    session_id = f"test-session-{uuid4()}"
     
     # 发送多个事件，验证 seq 递增
     events_sent = []
@@ -82,8 +82,8 @@ async def test_memory_storage_with_zeno_format():
     from core.events.adapters.zeno import ZenOAdapter
     
     storage = InMemoryEventStorage()
-    session_id = f"test-session-{uuid4().hex[:8]}"
-    conversation_id = f"conv-{uuid4().hex[:8]}"
+    session_id = f"test-session-{uuid4()}"
+    conversation_id = f"conv-{uuid4()}"
     
     adapter = ZenOAdapter(conversation_id=conversation_id)
     
@@ -137,7 +137,7 @@ async def test_redis_storage_buffer_event():
             return True
         
         manager = RedisSessionManager(redis_client)
-        session_id = f"test-session-{uuid4().hex[:8]}"
+        session_id = f"test-session-{uuid4()}"
         
         # 发送多个事件
         events_sent = []
@@ -197,7 +197,7 @@ async def test_broadcaster_event_manager():
         output_format="zenflux"
     )
     
-    session_id = f"test-session-{uuid4().hex[:8]}"
+    session_id = f"test-session-{uuid4()}"
     
     # 通过 broadcaster 发送事件
     result1 = await broadcaster.emit_content_start(
@@ -258,19 +258,19 @@ async def test_broadcaster_with_zeno_format():
     storage = get_memory_storage()
     event_manager = create_event_manager(storage)
     
-    conversation_id = f"conv-{uuid4().hex[:8]}"
+    conversation_id = f"conv-{uuid4()}"
     broadcaster = EventBroadcaster(
         event_manager=event_manager,
         output_format="zeno",
         conversation_id=conversation_id
     )
     
-    session_id = f"test-session-{uuid4().hex[:8]}"
+    session_id = f"test-session-{uuid4()}"
     
     # 发送消息事件
     result = await broadcaster.emit_message_start(
         session_id=session_id,
-        message_id=f"msg-{uuid4().hex[:8]}",
+        message_id=f"msg-{uuid4()}",
         model="claude-3"
     )
     

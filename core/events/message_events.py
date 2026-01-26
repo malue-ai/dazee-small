@@ -89,7 +89,7 @@ class MessageEventManager(BaseEventManager):
         }
         
         return await self._send_event(
-            session_id, event, seq=seq, event_uuid=event_uuid,
+            session_id, event, message_id=message_id, seq=seq, event_uuid=event_uuid,
             output_format=output_format, adapter=adapter
         )
     

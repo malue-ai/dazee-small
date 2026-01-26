@@ -103,7 +103,7 @@ class MultiAgentOrchestrator:
                 ))
             
             self.config = MultiAgentConfig(
-                config_id=f"config_{uuid4().hex[:8]}",
+                config_id=f"config_{uuid4()}",
                 mode=mode,
                 agents=agent_configs,
             )
@@ -285,7 +285,7 @@ class MultiAgentOrchestrator:
         # 初始化状态（如果没有恢复）
         if not self._state:
             self._state = OrchestratorState(
-                state_id=f"orch_{uuid4().hex[:8]}",
+                state_id=f"orch_{uuid4()}",
                 session_id=session_id,
                 config_id=self.config.config_id,
                 mode=self.config.mode,
@@ -511,7 +511,7 @@ class MultiAgentOrchestrator:
             
             # 创建任务分配
             task = TaskAssignment(
-                task_id=f"task_{uuid4().hex[:8]}",
+                task_id=f"task_{uuid4()}",
                 agent_id=agent_id,
                 instruction=subtask.description if subtask else f"执行 {agent_config.role.value} 任务",
                 source_agent=self._state.completed_agents[-1] if self._state.completed_agents else None,
@@ -538,7 +538,7 @@ class MultiAgentOrchestrator:
                 logger.error(f"❌ Agent {agent_id} 执行异常: {e}", exc_info=True)
                 # 创建失败结果
                 result = AgentResult(
-                    result_id=f"result_{uuid4().hex[:8]}",
+                    result_id=f"result_{uuid4()}",
                     agent_id=agent_config.agent_id,
                     success=False,
                     error=str(e),
@@ -620,7 +620,7 @@ class MultiAgentOrchestrator:
             except Exception as e:
                 logger.error(f"❌ Agent {agent_config.agent_id} 执行异常: {e}", exc_info=True)
                 return AgentResult(
-                    result_id=f"result_{uuid4().hex[:8]}",
+                    result_id=f"result_{uuid4()}",
                     agent_id=agent_config.agent_id,
                     success=False,
                     error=str(e),
@@ -657,7 +657,7 @@ class MultiAgentOrchestrator:
                 )
             except asyncio.TimeoutError:
                 result = AgentResult(
-                    result_id=f"result_{uuid4().hex[:8]}",
+                    result_id=f"result_{uuid4()}",
                     agent_id=agent_config.agent_id,
                     success=False,
                     error="执行超时",
@@ -965,7 +965,7 @@ class MultiAgentOrchestrator:
             logger.info(f"✅ Subagent 执行完成: {config.agent_id}, 耗时 {duration_ms}ms")
             
             return AgentResult(
-                result_id=f"result_{uuid4().hex[:8]}",
+                result_id=f"result_{uuid4()}",
                 agent_id=config.agent_id,
                 success=True,
                 output=response,
@@ -991,7 +991,7 @@ class MultiAgentOrchestrator:
             duration_ms = int((time.time() - start_time) * 1000)
             
             return AgentResult(
-                result_id=f"result_{uuid4().hex[:8]}",
+                result_id=f"result_{uuid4()}",
                 agent_id=config.agent_id,
                 success=False,
                 output="",
@@ -1606,7 +1606,7 @@ class MultiAgentOrchestrator:
             )
             
             return SubagentResult(
-                result_id=f"subresult_{uuid4().hex[:8]}",
+                result_id=f"subresult_{uuid4()}",
                 agent_id=config.agent_id,
                 subtask_id=subtask.subtask_id,
                 success=True,
@@ -1636,7 +1636,7 @@ class MultiAgentOrchestrator:
             duration_ms = int((time.time() - start_time) * 1000)
             
             return SubagentResult(
-                result_id=f"subresult_{uuid4().hex[:8]}",
+                result_id=f"subresult_{uuid4()}",
                 agent_id=config.agent_id,
                 subtask_id=subtask.subtask_id,
                 success=False,
@@ -1925,7 +1925,7 @@ class MultiAgentOrchestrator:
                 
                 plan_step.fail("需要调整计划")
                 return AgentResult(
-                    result_id=f"result_{uuid4().hex[:8]}",
+                    result_id=f"result_{uuid4()}",
                     agent_id=agent_config.agent_id,
                     success=False,
                     output=result.output,
@@ -1936,7 +1936,7 @@ class MultiAgentOrchestrator:
         # 超过最大重试次数
         plan_step.fail(f"超过最大重试次数 ({max_retries})")
         return AgentResult(
-            result_id=f"result_{uuid4().hex[:8]}",
+            result_id=f"result_{uuid4()}",
             agent_id=agent_config.agent_id,
             success=False,
             output=result.output if 'result' in locals() else "",

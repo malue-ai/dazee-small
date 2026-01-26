@@ -260,7 +260,8 @@ class EventBroadcaster:
         self,
         session_id: str,
         index: int,
-        content_block: Dict[str, Any]
+        content_block: Dict[str, Any],
+        message_id: str = None
     ) -> Optional[Dict[str, Any]]:
         """
         发送 content_start 事件
@@ -274,6 +275,7 @@ class EventBroadcaster:
             session_id: Session ID
             index: 内容块索引
             content_block: 内容块
+            message_id: 消息 ID
             
         Returns:
             发送的事件，如果被过滤则返回 None
@@ -298,6 +300,7 @@ class EventBroadcaster:
             session_id=session_id,
             index=index,
             content_block=content_block,
+            message_id=message_id,
             output_format=self.output_format,
             adapter=self._get_adapter()
         )
@@ -357,10 +360,12 @@ class EventBroadcaster:
         )
         
         # 发送生成的 delta 事件
+        msg_id = self._session_message_ids.get(session_id)
         for delta in deltas:
             await self.emit_message_delta(
                 session_id=session_id,
-                delta=delta
+                delta=delta,
+                message_id=msg_id
             )
         
         # 清理工具缓存
@@ -371,7 +376,8 @@ class EventBroadcaster:
         self,
         session_id: str,
         index: int,
-        delta: str
+        delta: str,
+        message_id: str = None
     ) -> Optional[Dict[str, Any]]:
         """
         发送 content_delta 事件
@@ -383,6 +389,7 @@ class EventBroadcaster:
             session_id: Session ID
             index: 内容块索引
             delta: 内容增量
+            message_id: 消息 ID
             
         Returns:
             发送的事件，如果被过滤则返回 None
@@ -397,6 +404,7 @@ class EventBroadcaster:
             session_id=session_id,
             index=index,
             delta=delta,
+            message_id=message_id,
             output_format=self.output_format,
             adapter=self._get_adapter()
         )
@@ -405,7 +413,8 @@ class EventBroadcaster:
         self,
         session_id: str,
         index: int,
-        signature: Optional[str] = None
+        signature: Optional[str] = None,
+        message_id: str = None
     ) -> Optional[Dict[str, Any]]:
         """
         发送 content_stop 事件
@@ -419,6 +428,7 @@ class EventBroadcaster:
             session_id: Session ID
             index: 内容块索引
             signature: 签名（Extended Thinking 用）
+            message_id: 消息 ID
             
         Returns:
             发送的事件，如果被过滤则返回 None
@@ -445,6 +455,7 @@ class EventBroadcaster:
         result = await self.events.content.emit_content_stop(
             session_id=session_id,
             index=index,
+            message_id=message_id,
             output_format=self.output_format,
             adapter=self._get_adapter()
         )

@@ -322,9 +322,16 @@ export function useSSE() {
                   fullResponse = data.data.final_result
                 }
 
-                // 流结束
-                if (eventType === 'done' || eventType === 'session_end') {
-                  console.log('✅ 流结束:', eventType)
+                // 流结束（检查 SSE 协议层面的 event: done，或 JSON 中的 type）
+                // SSE 协议：event: done
+                // JSON type: message_stop, message.assistant.done, session_end
+                if (
+                  currentEvent.event === 'done' ||  // SSE 协议层面的 event: done
+                  eventType === 'message_stop' ||
+                  eventType === 'message.assistant.done' ||
+                  eventType === 'session_end'
+                ) {
+                  console.log('✅ 流结束:', currentEvent.event || eventType)
                   return fullResponse
                 }
               } catch (e) {

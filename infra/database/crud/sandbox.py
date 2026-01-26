@@ -16,11 +16,6 @@ from infra.database.models.sandbox import Sandbox
 from infra.database.crud.base import get_by_id, delete_by_id
 
 
-def generate_sandbox_id() -> str:
-    """生成沙盒记录 ID"""
-    return f"sbx_{uuid4().hex[:24]}"
-
-
 async def create_sandbox(
     session: AsyncSession,
     conversation_id: str,
@@ -48,7 +43,7 @@ async def create_sandbox(
         创建的沙盒记录
     """
     sandbox = Sandbox(
-        id=generate_sandbox_id(),
+        id=str(uuid4()),
         conversation_id=conversation_id,
         user_id=user_id,
         e2b_sandbox_id=e2b_sandbox_id,

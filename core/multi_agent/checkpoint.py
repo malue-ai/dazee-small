@@ -132,7 +132,7 @@ class CheckpointManager:
             检查点 ID
         """
         # 生成检查点 ID
-        checkpoint_id = f"ckpt_{uuid4().hex[:8]}"
+        checkpoint_id = str(uuid4())
         
         # 创建元数据
         metadata = CheckpointMetadata(

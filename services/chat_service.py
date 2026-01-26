@@ -617,7 +617,7 @@ class ChatService:
             # 阶段 2: 数据库操作（持久化 + 加载历史）
             # =================================================================
             
-            assistant_message_id = uuid4().hex  # 提升到外层，供异常处理使用
+            assistant_message_id = str(uuid4())  # 完整 UUID
             
             # 🎯 先保存原始消息（不含前端注入的上下文）
             content_json = json.dumps(message, ensure_ascii=False)
@@ -952,7 +952,15 @@ class ChatService:
                         # 4. finalize 消息
                         await agent.broadcaster.finalize_message(session_id)
                         
-                        # 5. 发送 session_stopped 事件（在 billing 之后）
+                        # 5. 发送 message_stop 事件（对应 ZenO 的 message.assistant.done）
+                        # 🔧 修复：中止时必须发送 done 来正确结束 SSE 流
+                        await agent.broadcaster.emit_message_stop(
+                            session_id=session_id,
+                            message_id=assistant_message_id
+                        )
+                        logger.info(f"✅ 中止时已发送 message_stop (done) 事件")
+                        
+                        # 6. 发送 session_stopped 事件（在 done 之后）
                         await events.session.emit_session_stopped(
                             session_id=session_id,
                             reason="user_requested",
@@ -960,7 +968,7 @@ class ChatService:
                             adapter=events.adapter
                         )
                         
-                        # 6. 结束 session
+                        # 7. 结束 session
                         await self.session_service.end_session(session_id, status="stopped")
                         break
                     

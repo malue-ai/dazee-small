@@ -400,7 +400,7 @@ class LeadAgent:
             
             # 构建 Plan
             plan = TaskDecompositionPlan(
-                plan_id=f"plan_{uuid4().hex[:8]}",
+                plan_id=str(uuid4()),
                 original_query=original_query,
                 decomposed_goal=data.get("decomposed_goal", original_query),
                 subtasks=subtasks,
@@ -491,7 +491,7 @@ class LeadAgent:
         logger.warning("⚠️ 使用降级计划：创建单个子任务")
         
         return TaskDecompositionPlan(
-            plan_id=f"plan_fallback_{uuid4().hex[:8]}",
+            plan_id=str(uuid4()),
             original_query=user_query,
             decomposed_goal=user_query,
             subtasks=[

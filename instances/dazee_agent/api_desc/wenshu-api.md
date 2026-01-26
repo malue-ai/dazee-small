@@ -1,22 +1,22 @@
 # 问数平台 API - 数据分析问答
 
 ## 用途
-**问数平台 V3**：数据分析和问答接口，支持上传文件、自然语言查询、返回分析报告和图表。
+**问数平台**：数据分析和问答接口，支持上传文件、自然语言查询、返回分析报告和图表。
 
 ⚠️ **重要**：当识别为 **意图2（BI智能问数）** 时，必须使用此 API。
 
-## Base URL
-`${WENSHU_API_BASE_URL}`（环境变量配置）
+## 完整接口地址
+完整 URL 已配置，调用时无需填写 path 参数。
 
-## 认证
-- Header: `API-KEY: {WENSHU_API_KEY}`
-- 环境变量已配置: `WENSHU_API_KEY`
-- **使用 `api_name: "wenshu_api"` 时认证自动注入**
+## 认证（自动注入）
+- **认证已自动配置，调用时无需填写 `headers` 参数**
+- ❌ **禁止**：不要在调用参数中填写 `headers`、`API-KEY` 或任何认证信息
+- ✅ **正确做法**：只需指定 `api_name: "wenshu_api"`，**无需填写 path 参数**
 
 ## 接口
 
 ### 数据分析问答
-- **路径**：`POST /api/v3/ask`
+- **完整地址**：已配置，无需填写 path
 - **请求体**：
 ```json
 {
@@ -81,12 +81,11 @@
 
 ## 使用方法
 
-使用 `api_calling` 工具调用：
+使用 `api_calling` 工具调用（**注意：不要填写 headers 和 path 参数**）：
 
 ```
 api_calling(
   api_name="wenshu_api",
-  path="/api/v3/ask",
   method="POST",
   body={
     "user_id": "${user_id}",
@@ -99,6 +98,10 @@ api_calling(
   }
 )
 ```
+
+⚠️ **调用时只需要以上参数**：
+- ❌ 不要添加 `path` 参数（接口地址已完整配置）
+- ❌ 不要添加 `headers` 参数（认证会自动处理）
 
 ## 使用场景
 

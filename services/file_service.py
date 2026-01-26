@@ -119,7 +119,7 @@ class FileService:
         
         # 构建存储路径：chat-attachments/{user_id}/{date}/{unique_id}_{filename}
         date_str = datetime.now().strftime("%Y%m%d")
-        unique_id = uuid.uuid4().hex[:12]
+        unique_id = str(uuid.uuid4())
         safe_filename = "".join(c for c in filename if c.isalnum() or c in "._-")
         storage_path = f"chat-attachments/{user_id}/{date_str}/{unique_id}_{safe_filename}"
         

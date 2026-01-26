@@ -321,7 +321,7 @@ class MultiAgentOrchestrator:
         Yields:
             事件字典
         """
-        task_id = f"ma-task-{uuid.uuid4().hex[:8]}"
+        task_id = f"ma-task-{uuid.uuid4()}"
         start_time = datetime.now()
         
         logger.info(f"开始 Multi-Agent 任务: task_id={task_id}")

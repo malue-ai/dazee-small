@@ -431,7 +431,7 @@ class BehaviorAnalyzer:
             date_range = DateRange(start=datetime.now(), end=datetime.now())
         
         return BehaviorPattern(
-            id=f"bp_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}",
+            id=str(uuid.uuid4()),
             user_id=user_id,
             analysis_period=date_range,
             fragment_count=len(fragments),
@@ -455,7 +455,7 @@ class BehaviorAnalyzer:
     def _create_empty_pattern(self, user_id: str) -> BehaviorPattern:
         """创建空的行为模式"""
         return BehaviorPattern(
-            id=f"bp_empty_{uuid.uuid4().hex[:6]}",
+            id=str(uuid.uuid4()),
             user_id=user_id,
             analysis_period=DateRange(start=datetime.now(), end=datetime.now()),
             fragment_count=0,

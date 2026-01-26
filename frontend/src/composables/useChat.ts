@@ -212,6 +212,8 @@ export function useChat() {
         },
         onDisconnected: () => {
           console.log('✅ SSE 已断开')
+          // 🔧 重置停止状态（用户主动停止时，SSE 会在收到 done 后断开）
+          isStopping.value = false
         },
         onError: (error) => {
           console.error('❌ SSE 错误:', error)
@@ -234,6 +236,9 @@ export function useChat() {
 
   /**
    * 停止生成
+   * 
+   * 注意：不立即断开 SSE，等待后端发送 done 事件后由事件处理器断开
+   * 事件顺序：billing → message_stop (done) → session_stopped
    */
   async function stopGeneration(): Promise<void> {
     const sessionId = sessionStore.currentSessionId ||
@@ -247,13 +252,20 @@ export function useChat() {
     isStopping.value = true
 
     try {
+      // 只发送停止请求，不立即断开 SSE
+      // SSE 会在收到 message.assistant.done 或 session_stopped 事件后由事件处理器断开
       await sessionStore.stop(sessionId)
+      // 🔧 修复：不在这里 disconnect，让事件处理器在收到 done 后断开
+      // sse.disconnect()
+    } catch (error) {
+      // 停止请求失败时才强制断开
+      console.error('❌ 停止请求失败:', error)
       sse.disconnect()
-    } finally {
       isStopping.value = false
       isLoading.value = false
       isGenerating.value = false
     }
+    // 注意：isStopping、isLoading、isGenerating 状态会在收到 done 事件时由事件处理器重置
   }
 
   /**

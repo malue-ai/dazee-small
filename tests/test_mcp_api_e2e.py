@@ -170,7 +170,7 @@ async def send_chat_request(
         (事件列表, 耗时秒数)
     """
     if user_id is None:
-        user_id = f"test_user_{uuid4().hex[:8]}"
+        user_id = str(uuid4())
     
     request_data = {
         "message": message,

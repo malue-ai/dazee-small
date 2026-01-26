@@ -421,7 +421,7 @@ class FailureDetector:
     def _generate_id(self, prefix: str) -> str:
         """生成唯一ID"""
         import uuid
-        return f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+        return f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4()}"
     
     def _record_case(self, case: FailureCase) -> None:
         """
