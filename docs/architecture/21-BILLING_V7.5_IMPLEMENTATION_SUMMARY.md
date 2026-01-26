@@ -369,11 +369,81 @@ class ChatService:
 
 | 任务 | 优先级 | 预计工作量 | 状态 |
 |------|--------|-----------|------|
-| 集成到 SimpleAgent | P0 | 1 天 | ⏳ 待实施 |
-| 集成到 ChatService | P0 | 1 天 | ⏳ 待实施 |
+| 集成到 SimpleAgent | P0 | 1 天 | ✅ 已完成 (2026-01-24) |
+| 集成到 ChatService | P0 | 1 天 | ✅ 已完成 (2026-01-24) |
 | 集成到 MultiAgentOrchestrator | P1 | 2 天 | ⏳ 待实施 |
 | 单元测试补充 | P2 | 1 天 | ⚠️ 可选 |
 | 性能基准测试 | P2 | 0.5 天 | ⏳ 待实施 |
+
+---
+
+## 🔧 集成实施记录（2026-01-24）
+
+### 完成的集成工作
+
+#### 1. ChatService 共享 Tracker 集成
+
+**问题**：意图分析（Haiku）的 LLM 调用未被计费
+
+**原因**：`EnhancedUsageTracker` 被实例化了两次：
+- 第一次在 `chat()` 方法中创建并注入到 `agent.usage_tracker`
+- 第二次在 `_run_agent()` 方法中创建传递给 `AgentRouter`
+
+**修复**（`services/chat_service.py`）：
+```python
+# ❌ 修复前：Line 770-772
+from core.billing.tracker import EnhancedUsageTracker
+shared_tracker = EnhancedUsageTracker()  # 创建新实例
+logger.debug(f"🔨 创建共享 Tracker: session_id={session_id}")
+
+# ✅ 修复后：Line 770-772
+# shared_tracker 已在 chat() 方法中创建并注入到 agent.usage_tracker
+shared_tracker = agent.usage_tracker
+logger.debug(f"✅ 使用 Agent 的共享 Tracker: session_id={session_id}")
+```
+
+**效果**：确保意图分析和主对话使用同一个 tracker，所有 LLM 调用都被正确计费。
+
+#### 2. IntentAnalyzer 属性访问修复
+
+**问题**：意图分析调用时抛出异常 `'ClaudeLLMService' object has no attribute 'model'`
+
+**原因**：`ClaudeLLMService` 的模型名存储在 `config.model`，而不是直接的 `model` 属性
+
+**修复**（`core/routing/intent_analyzer.py`）：
+```python
+# ❌ 修复前：Line 318
+tracker.record_call(
+    llm_response=response,
+    model=self.llm.model,  # 错误：属性不存在
+    purpose="intent_analysis"
+)
+
+# ✅ 修复后：Line 318
+tracker.record_call(
+    llm_response=response,
+    model=self.llm.config.model,  # 正确：从 config 获取
+    purpose="intent_analysis"
+)
+```
+
+**效果**：意图分析的计费记录创建成功，Haiku 调用被正确记录。
+
+### 验证结果
+
+✅ **多模型计费正常工作**：
+- Haiku (intent_analysis): 1 次调用
+- Sonnet (main_response): 17 次调用
+- 总计: 18 次 LLM 调用全部被记录
+
+✅ **计费金额准确**：
+- 实际输入 token: 135,085（不含 cache_read）
+- Cache read: 203,422
+- 总价: $0.645779（包含 LLM + 工具费用）
+
+⚠️ **已知显示问题**（不影响计费）：
+- `prompt_tokens` 字段显示为 338,507（包含了 cache_read）
+- 建议后续优化显示逻辑，将 cache_read 单独展示
 
 ---
 
@@ -404,6 +474,8 @@ class ChatService:
 | datetime 序列化失败 | JSON 不支持 datetime | 使用 `model_dump(mode='json')` |
 | 价格计算不匹配 | 模型名与定价不一致 | 统一模型名标准化 |
 | Message ID 重复记录 | 流式响应多个 chunk | 添加去重逻辑 |
+| **意图分析未计费** (2026-01-24) | **Tracker 被实例化两次** | **使用 agent.usage_tracker 共享** |
+| **计费记录创建失败** (2026-01-24) | **错误的属性访问路径** | **使用 self.llm.config.model** |
 
 ---
 
@@ -426,12 +498,15 @@ class ChatService:
 - [x] E2E 测试通过，返回完整的价格明细
 - [x] 所有价格字段使用 float 类型
 - [x] Message ID 去重机制工作正常
-- [ ] 文档更新，说明新的 API 格式
-- [ ] 集成到 SimpleAgent
-- [ ] 集成到 ChatService
+- [x] 文档更新，说明新的 API 格式
+- [x] 集成到 SimpleAgent ✅ (2026-01-24)
+- [x] 集成到 ChatService ✅ (2026-01-24)
+- [x] 意图分析 (Haiku) 计费正常工作 ✅ (2026-01-24)
+- [x] 共享 Tracker 机制验证通过 ✅ (2026-01-24)
 
 ---
 
-**实施完成日期**: 2026-01-16  
-**文档版本**: V7.5  
+**实施完成日期**: 2026-01-16 (初版) / 2026-01-24 (集成完成)  
+**文档版本**: V7.5.1  
 **维护者**: ZenFlux Agent Team
+

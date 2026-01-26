@@ -106,7 +106,8 @@ class SimpleAgent:
         system_prompt: str = None,  # 🆕 System Prompt（作为运行时指令）
         prompt_schema=None,  # 🆕 V4.6: PromptSchema（提示词分层）
         prompt_cache=None,  # 🆕 V4.6.2: InstancePromptCache（实例缓存）
-        apis_config: Optional[List[Dict[str, Any]]] = None  # 🆕 预配置的 APIs（用于 api_calling 自动注入）
+        apis_config: Optional[List[Dict[str, Any]]] = None,  # 🆕 预配置的 APIs（用于 api_calling 自动注入）
+        usage_tracker=None  # 🆕 共享 Tracker 方案：支持外部注入 Tracker
     ):
         """
         初始化 Agent
@@ -121,6 +122,7 @@ class SimpleAgent:
             prompt_schema: PromptSchema（提示词分层配置）
             prompt_cache: InstancePromptCache（实例提示词缓存）
             apis_config: 预配置的 API 列表（传给 api_calling 工具自动注入认证）
+            usage_tracker: EnhancedUsageTracker 实例（可选，用于共享计费追踪）
         """
         if event_manager is None:
             raise ValueError("event_manager 是必需参数")
@@ -206,7 +208,10 @@ class SimpleAgent:
         self.context_engineering = create_context_engineering_manager()
         
         # ===== # Usage 统计（使用增强版，支持工具调用计费） =====
-        self.usage_tracker = create_enhanced_usage_tracker()
+        # 🆕 共享 Tracker 方案：优先使用注入的 Tracker，否则创建新的（向后兼容）
+        self.usage_tracker = usage_tracker if usage_tracker is not None else create_enhanced_usage_tracker()
+        if usage_tracker is not None:
+            logger.debug(f"✅ Agent 使用共享 Tracker: {id(self.usage_tracker)}")
         
         # ===== 🆕 E2E Pipeline Tracer（V4.2 Code-First 优化） =====
         # 追踪器按 session 创建，在 chat() 中初始化

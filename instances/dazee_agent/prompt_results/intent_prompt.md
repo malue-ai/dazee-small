@@ -116,12 +116,26 @@
 - 生成PPT、文档、图片
 - 图片识别和OCR
 - 代码生成、脚本编写
+- **视频创作、动画设计**（使用 Remotion Skill）
+
+#### 视频创作子场景（Remotion Skill）
+
+当用户请求涉及以下内容时，判定为意图3并标注 routing 为 Remotion Skill：
+
+| 触发关键词 | 示例 |
+|-----------|------|
+| 视频、video、短视频 | "帮我创建一个产品宣传视频" |
+| 动画、animation、动效 | "做一个文字动画效果" |
+| motion graphics、动态图表 | "创建动态数据可视化" |
+| 字幕动画、打字机效果 | "实现 TikTok 风格的字幕" |
+| 转场、过渡效果 | "设计场景切换动画" |
+| Remotion | "用 Remotion 做一个视频" |
 
 #### 与意图1/2的核心区别
 
 - **意图1**：需要完整的**多实体系统设计**（≥3个实体+业务流程）
 - **意图2**：用户**已有数据**，直接分析
-- **意图3**：其他所有场景
+- **意图3**：其他所有场景（包括视频创作）
 
 ---
 
@@ -334,6 +348,58 @@
 ```
 **判断依据**：只要流程图，不需要完整系统配置，不触发两步工作流
 
+### 示例 11: 视频创作（Remotion Skill）
+**用户输入**: "帮我创建一个产品宣传视频的动画效果"
+```json
+{
+  "intent_id": 3,
+  "intent_name": "综合咨询",
+  "complexity": "complex",
+  "needs_plan": true,
+  "routing": "Remotion Skill → 生成视频代码"
+}
+```
+**判断依据**：涉及视频/动画创作，使用 Remotion Skill 生成代码
+
+### 示例 12: 动态数据可视化（Remotion Skill）
+**用户输入**: "做一个柱状图动画展示销售数据变化"
+```json
+{
+  "intent_id": 3,
+  "intent_name": "综合咨询",
+  "complexity": "medium",
+  "needs_plan": true,
+  "routing": "Remotion Skill (charts.md)"
+}
+```
+**判断依据**：需要动态图表动画，使用 Remotion Skill 的 charts 规则
+
+### 示例 13: 文字动画效果（Remotion Skill）
+**用户输入**: "实现一个打字机文字动画效果"
+```json
+{
+  "intent_id": 3,
+  "intent_name": "综合咨询",
+  "complexity": "simple",
+  "needs_plan": false,
+  "routing": "Remotion Skill (text-animations.md)"
+}
+```
+**判断依据**：单一动画效果，简单任务，直接使用 Remotion Skill 生成代码
+
+### 示例 14: 短视频字幕（Remotion Skill）
+**用户输入**: "帮我做一个 TikTok 风格的字幕动画"
+```json
+{
+  "intent_id": 3,
+  "intent_name": "综合咨询",
+  "complexity": "medium",
+  "needs_plan": true,
+  "routing": "Remotion Skill (display-captions.md)"
+}
+```
+**判断依据**：涉及字幕动画，使用 Remotion Skill 的 display-captions 规则
+
 ---
 
 ## 关键规则总结
@@ -343,3 +409,4 @@
 3. **意图3是兜底**：不满足1和2的条件就是意图3
 4. **追问保持原意图**：追问时输出原任务的intent_id，不存在独立的"追问意图"
 5. **意图切换识别**：处理对象变化视为新任务，重新判断意图
+6. **视频创作归入意图3**：涉及"视频"、"动画"、"video"、"animation"等关键词时，判定为意图3，routing 指向 Remotion Skill

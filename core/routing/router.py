@@ -168,13 +168,14 @@ class AgentRouter:
         user_query: str,
         conversation_history: Optional[List[Dict[str, Any]]] = None,
         user_id: Optional[str] = None,
-        previous_intent: Optional[IntentResult] = None
+        previous_intent: Optional[IntentResult] = None,
+        tracker=None  # 🆕 共享 Tracker（可选，用于意图识别计费）
     ) -> RoutingDecision:
         """
         执行路由决策
         
         🆕 V7.0: Prompt-First 重构
-        流程：
+        流程:
         1. 意图分析（IntentAnalyzer）- 包含 complexity_score
         2. 优先使用 intent.complexity_score 进行路由决策
         3. 返回路由决策
@@ -184,6 +185,7 @@ class AgentRouter:
             conversation_history: 对话历史
             user_id: 用户ID（用于个性化路由）
             previous_intent: 上一轮意图结果（用于追问场景）
+            tracker: EnhancedUsageTracker 实例（可选，用于计费追踪）
             
         Returns:
             RoutingDecision: 路由决策
@@ -202,7 +204,8 @@ class AgentRouter:
                 messages, previous_intent
             )
         else:
-            intent = await self.intent_analyzer.analyze(messages)
+            # 🆕 传递 tracker 用于意图识别计费
+            intent = await self.intent_analyzer.analyze(messages, tracker=tracker)
         
         # 3. 🆕 V7.0: 优先使用 LLM 输出的 complexity_score
         # 如果 LLM 返回了有效的 complexity_score，直接使用

@@ -197,10 +197,13 @@ class CapabilityRouter:
         Score = base_priority           # 基础优先级 (0-100)
               + type_weight × 5         # 类型权重
               + subtype_weight × 5      # 子类型权重
-              + keyword_match × 2       # 关键词匹配
+              + keyword_hint × 0.5      # 关键词提示（辅助参考）
               + quality_match × 20      # 质量要求匹配
               + context_bonus           # 上下文加分
               - cost_penalty            # 成本惩罚
+        
+        注：关键词匹配权重较低，主要作为辅助排序依据。
+        最终能力选择建议结合 LLM 语义理解进行。
         """
         score = float(cap.priority)
         
@@ -212,9 +215,9 @@ class CapabilityRouter:
         subtype_weight = self.subtype_weights.get(cap.subtype, 0)
         score += subtype_weight * 5
         
-        # 关键词匹配
+        # 关键词提示（辅助参考，权重较低）
         keyword_score = cap.matches_keywords(keywords)
-        score += keyword_score * 2
+        score += keyword_score * 0.5
         
         # 质量要求匹配
         score += self._quality_match_score(cap, quality_requirement)
