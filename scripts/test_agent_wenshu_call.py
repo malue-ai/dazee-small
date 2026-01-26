@@ -7,7 +7,7 @@
 
 import asyncio
 import json
-import aiohttp
+import httpx
 import argparse
 from datetime import datetime
 
@@ -94,23 +94,24 @@ async def call_chat_api(
     event_count = 0
     
     try:
-        timeout = aiohttp.ClientTimeout(total=300)  # 5 分钟超时
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(
+        timeout = httpx.Timeout(300.0)  # 5 分钟超时
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            async with client.stream(
+                "POST",
                 url,
                 headers={"Content-Type": "application/json"},
                 json=request_body
             ) as response:
-                print(f"📡 HTTP 状态码: {response.status}")
+                print(f"📡 HTTP 状态码: {response.status_code}")
                 
-                if response.status != 200:
-                    error_text = await response.text()
-                    print(f"❌ 错误响应: {error_text}")
+                if response.status_code != 200:
+                    error_text = await response.aread()
+                    print(f"❌ 错误响应: {error_text.decode()}")
                     return None
                 
                 # 读取 SSE 流
-                async for line in response.content:
-                    line = line.decode("utf-8").strip()
+                async for line in response.aiter_lines():
+                    line = line.strip()
                     
                     if not line:
                         continue
@@ -187,10 +188,10 @@ async def call_chat_api(
                             print(data_str, end="", flush=True)
                             full_content += data_str
     
-    except asyncio.TimeoutError:
+    except httpx.TimeoutException:
         print("\n❌ 请求超时")
         return None
-    except aiohttp.ClientError as e:
+    except httpx.HTTPError as e:
         print(f"\n❌ 连接错误: {e}")
         return None
     except Exception as e:

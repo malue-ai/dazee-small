@@ -10,8 +10,6 @@ API Calling Tool - 通用 API 调用工具
 1. 简化调用（推荐）：api_name + parameters
    - AI 只需传 api_name 和动态参数
    - 其他配置从 config.yaml 自动注入
-   
-2. 兼容旧方式：api_name + body + method + mode
 """
 
 import os
@@ -30,7 +28,12 @@ logger = get_logger("api_calling")
 # ============================================================
 # 占位符正则（全局复用）
 # ============================================================
-PLACEHOLDER_PATTERN = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}')
+# ${xxx} - 框架注入（从 context 获取：user_id, conversation_id 等）
+INJECT_PLACEHOLDER = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}')
+# {{xxx}} - AI 填写（从 parameters 获取）
+AI_PLACEHOLDER = re.compile(r'\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}')
+# 兼容旧格式
+PLACEHOLDER_PATTERN = INJECT_PLACEHOLDER
 
 
 class APICallingTool:
@@ -66,23 +69,56 @@ class APICallingTool:
     
     @property
     def description(self) -> str:
-        available_apis = list(self.apis_config.keys()) if self.apis_config else []
-        apis_desc = ", ".join(available_apis) if available_apis else "无"
+        if not self.apis_config:
+            return "通用 API 调用工具（暂无可用 API）"
+        
+        # 动态生成每个 API 的参数说明
+        api_docs = []
+        for name, config in self.apis_config.items():
+            desc = config.get("description", "")
+            
+            # 从 request_body 中提取 {{xxx}} AI 参数
+            request_body = config.get("request_body", {})
+            ai_params = self._extract_ai_params(request_body)
+            
+            if ai_params:
+                params_str = ", ".join(ai_params)
+                api_docs.append(f"  - {name}: {desc}\n    参数: {{{params_str}}}")
+            else:
+                api_docs.append(f"  - {name}: {desc}")
+        
+        apis_section = "\n".join(api_docs)
         
         return f"""通用 API 调用工具。
 
-可用的 API: {apis_desc}
+可用 API:
+{apis_section}
 
-调用方式（极简）:
-- api_name: 选择要调用的 API
-- parameters: 该 API 需要的动态参数
+调用格式:
+{{
+  "api_name": "API名称",
+  "parameters": {{...AI需要填写的参数...}}
+}}
 
-示例:
-  coze_api: parameters={{chart_url, query, language}}
-  wenshu_api: parameters={{question, files}}
-
-其他配置自动从系统注入，无需填写。
+注意: 其他字段（user_id等）由系统自动注入，AI 只需填写 api_name 和 parameters。
 """
+    
+    def _extract_ai_params(self, data: Any, prefix: str = "") -> list[str]:
+        """从 request_body 中提取 {{xxx}} AI 参数名"""
+        params = []
+        
+        if isinstance(data, str):
+            match = AI_PLACEHOLDER.fullmatch(data)
+            if match:
+                params.append(match.group(1))
+        elif isinstance(data, dict):
+            for k, v in data.items():
+                params.extend(self._extract_ai_params(v, f"{prefix}{k}."))
+        elif isinstance(data, list):
+            for item in data:
+                params.extend(self._extract_ai_params(item, prefix))
+        
+        return params
     
     @property
     def parameters(self) -> Dict[str, Any]:
@@ -226,7 +262,9 @@ class APICallingTool:
         """
         根据 api_name 和 AI parameters 构建完整请求
         
-        占位符替换：body_template 中的 ${xxx} 会被替换为 parameters[xxx]
+        占位符处理：
+        - {{xxx}} = AI 填写（在此方法中替换为 parameters 中的值）
+        - ${xxx} = 框架注入（在 execute 方法中由 _resolve_system_placeholders 替换）
         """
         api_config = self.apis_config.get(api_name)
         if not api_config:
@@ -235,13 +273,18 @@ class APICallingTool:
         method = api_config.get("default_method", "POST")
         mode = api_config.get("default_mode", "sync")
         poll_config = api_config.get("poll_config")
-        body_template = api_config.get("body_template", {})
         
-        # 深拷贝并注入 AI 参数到占位符
+        # 优先使用 request_body（新格式），兼容 body_template（旧格式）
+        body_template = api_config.get("request_body") or api_config.get("body_template", {})
+        
+        # 深拷贝模板
         body = copy.deepcopy(body_template)
-        body = self._replace_placeholders(body, parameters)
+        
+        # 替换 {{xxx}} AI 占位符
+        body = self._replace_ai_placeholders(body, parameters)
         
         logger.debug(f"📋 构建请求: api={api_name}, method={method}, mode={mode}")
+        logger.debug(f"📋 body（AI占位符已替换）: {json.dumps(body, ensure_ascii=False)[:500]}")
         
         return {
             "method": method,
@@ -249,6 +292,51 @@ class APICallingTool:
             "poll_config": poll_config,
             "body": body
         }, None
+    
+    def _replace_ai_placeholders(
+        self,
+        data: Any,
+        parameters: Dict[str, Any]
+    ) -> Any:
+        """
+        替换 {{xxx}} AI 占位符
+        
+        - 如果整个值是 {{xxx}}，保留原始类型（数组、对象等）
+        - 如果是混合内容，转换为字符串
+        """
+        if isinstance(data, str):
+            # 检查是否是单个完整的 AI 占位符（如 "{{files}}"）
+            single_match = AI_PLACEHOLDER.fullmatch(data)
+            if single_match:
+                var_name = single_match.group(1)
+                if var_name in parameters:
+                    return parameters[var_name]
+                # AI 未提供该参数，返回 None（可选字段）
+                return None
+            
+            # 混合内容，替换为字符串
+            def replace_match(match):
+                var_name = match.group(1)
+                if var_name in parameters:
+                    value = parameters[var_name]
+                    return str(value) if not isinstance(value, str) else value
+                return match.group(0)
+            
+            return AI_PLACEHOLDER.sub(replace_match, data)
+        
+        elif isinstance(data, dict):
+            result = {}
+            for k, v in data.items():
+                replaced = self._replace_ai_placeholders(v, parameters)
+                # 跳过 None 值（AI 未提供的可选字段）
+                if replaced is not None:
+                    result[k] = replaced
+            return result
+        
+        elif isinstance(data, list):
+            return [self._replace_ai_placeholders(item, parameters) for item in data]
+        
+        return data
     
     def _merge_body_template(
         self,
@@ -287,8 +375,24 @@ class APICallingTool:
             data: 待替换的数据（支持 str, dict, list）
             replacements: 替换映射 {占位符名: 值}
             warn_missing: 是否对未找到的占位符发出警告
+        
+        特殊处理：
+            - 如果整个字符串是单个占位符（如 "${files}"），保留原始类型（数组/对象）
+            - 如果字符串包含多个占位符或混合内容，转换为字符串
         """
         if isinstance(data, str):
+            # 🆕 检查是否是单个完整占位符（如 "${files}"）
+            single_match = PLACEHOLDER_PATTERN.fullmatch(data)
+            if single_match:
+                var_name = single_match.group(1)
+                if var_name in replacements:
+                    # 直接返回原始值，保留类型（数组、对象等）
+                    return replacements[var_name]
+                if warn_missing:
+                    logger.warning(f"⚠️ 占位符未解析: ${{{var_name}}}")
+                return data
+            
+            # 混合内容或多个占位符，转换为字符串
             def replace_match(match):
                 var_name = match.group(1)
                 if var_name in replacements:

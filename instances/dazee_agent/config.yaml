@@ -145,9 +145,9 @@ mcp_tools:
 # 📚 capability：指定 API 满足的用户意图类别
 #
 apis:
-  # 问数平台 API（BI智能问数）
-  # ⚠️ base_url 是完整接口地址，调用时无需填写 path
-  # 📌 AI 只需填写：question + files（可选）
+  # ============================================================
+  # wenshu_api - 问数平台（BI智能问数）
+  # ============================================================
   - name: wenshu_api
     base_url: "http://183.6.79.71:40202/api/v3/zeno/chat/question"
     auth:
@@ -157,17 +157,25 @@ apis:
     doc: wenshu-api
     capability: "data_analysis"
     description: "问数平台 API - 数据分析和问答"
-    # 🆕 默认请求模板（user_id/task_id 使用占位符自动注入）
     default_method: "POST"
-    body_template:
-      user_id: "${user_id}"
-      task_id: "${conversation_id}"
-      lg_code: "zh-CN"
-      # question 和 files 由 AI 填写
+    
+    # 📦 完整请求体（标记说明：${xxx}=框架注入, {{xxx}}=AI填写, 其他=固定值）
+    request_body:
+      user_id: "${user_id}"              # 框架注入：从 session 获取
+      task_id: "${conversation_id}"      # 框架注入：从 conversation 获取
+      lg_code: "zh-CN"                   # 固定值
+      question: "{{question}}"           # AI 填写：用户的问题（必填）
+      files: "{{files}}"                 # AI 填写：文件列表（可选）
+    
+    # 📤 AI 输出示例：
+    # {
+    #   "api_name": "wenshu_api",
+    #   "parameters": {"question": "分析销售数据", "files": [...]}
+    # }
 
-  # Coze API（Ontology Builder 工作流）
-  # ⚠️ base_url 是完整接口地址，调用时 path 留空
-  # 📌 AI 只需填写 parameters 中的 3 个值：chart_url, query, language
+  # ============================================================
+  # coze_api - Coze 工作流（Ontology Builder）
+  # ============================================================
   - name: coze_api
     base_url: "https://api.coze.cn/v1/workflow/run"
     auth:
@@ -177,17 +185,23 @@ apis:
     doc: coze-api
     capability: "document_creation"
     description: "Coze API - 工作流执行（Ontology Builder）"
-    # 🆕 默认请求模板（AI 只需填写 parameters）
     default_mode: "async_poll"
     default_method: "POST"
-    body_template:
-      workflow_id: "7579565547005837331"
-      is_async: true
-      # 🆕 用占位符声明 AI 需要填写的字段（框架自动注入）
+    
+    # 📦 完整请求体（标记说明：${xxx}=框架注入, {{xxx}}=AI填写, 其他=固定值）
+    request_body:
+      workflow_id: "7579565547005837331"   # 固定值
+      is_async: true                       # 固定值
       parameters:
-        chart_url: "${chart_url}"       # AI 填写：流程图 URL
-        query: "${query}"               # AI 填写：系统名称/描述
-        language: "${language}"         # AI 填写：输出语言
+        chart_url: "{{chart_url}}"         # AI 填写：流程图 URL（必填）
+        query: "{{query}}"                 # AI 填写：系统名称（必填）
+        language: "{{language}}"           # AI 填写：输出语言（必填）
+    
+    # 📤 AI 输出示例：
+    # {
+    #   "api_name": "coze_api",
+    #   "parameters": {"chart_url": "https://...", "query": "订单系统", "language": "中文"}
+    # }
     poll_config:
       execute_id_field: "execute_id"
       status_url_template: "https://api.coze.cn/v1/workflows/{workflow_id}/run_histories/{execute_id}"
