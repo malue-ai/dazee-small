@@ -142,9 +142,9 @@ class BaseEventManager:
         if event_uuid is None:
             event_uuid = str(uuid4())
         
-        # 🔍 追踪日志：记录入参的 conversation_id
+        # 🔍 追踪日志：记录入参的 conversation_id (DEBUG 级别)
         event_type = event.get("type", "unknown")
-        logger.info(
+        logger.debug(
             f"🔍 [_send_event] 入参追踪: "
             f"type={event_type}, "
             f"session_id={session_id}, "
@@ -155,14 +155,14 @@ class BaseEventManager:
         if not conversation_id:
             session_context = await self.storage.get_session_context(session_id)
             conversation_id = session_context.get("conversation_id")
-            logger.info(
+            logger.debug(
                 f"🔍 [_send_event] 从 Redis 获取 conversation_id: "
                 f"session_id={session_id}, "
                 f"conversation_id(Redis)={conversation_id}"
             )
         
-        # 🔍 追踪日志：记录最终使用的 conversation_id
-        logger.info(
+        # 🔍 追踪日志：记录最终使用的 conversation_id (DEBUG 级别)
+        logger.debug(
             f"🔍 [_send_event] 最终使用: "
             f"type={event_type}, "
             f"session_id={session_id}, "

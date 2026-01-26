@@ -434,10 +434,10 @@ class RedisSessionManager:
                 "timestamp": timestamp
             }
         
-        # 🔍 追踪日志：记录转换前的 conversation_id
+        # 🔍 追踪日志：记录转换前的 conversation_id (DEBUG 级别)
         evt_type = event.get("type", "unknown")
         conv_id_before = event.get("conversation_id")
-        logger.info(
+        logger.debug(
             f"🔍 [buffer_event] 转换前: "
             f"type={evt_type}, "
             f"session_id={session_id}, "
