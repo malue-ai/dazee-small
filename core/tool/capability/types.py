@@ -60,11 +60,16 @@ class Capability:
         """
         计算关键词匹配度
         
+        用法说明：
+        - 关键词匹配作为辅助排序依据，权重较低
+        - 建议结合 LLM 语义理解进行最终决策
+        - 匹配分数供参考，不作为唯一判断标准
+        
         Args:
             keywords: 待匹配的关键词列表
             
         Returns:
-            匹配分数（越高越匹配）
+            匹配分数
         """
         if not keywords:
             return 0
@@ -77,15 +82,15 @@ class Capability:
         for kw in keywords:
             kw_lower = kw.lower()
             
-            # 能力标签匹配（权重最高）
+            # 能力标签匹配
             if any(kw_lower in str(c).lower() for c in self.capabilities):
                 score += 15
             
-            # preferred_for 匹配（权重高）
+            # preferred_for 匹配
             if any(kw_lower in str(p).lower() for p in preferred_for):
                 score += 10
             
-            # keywords 匹配（权重中）
+            # keywords 匹配
             if any(kw_lower in str(k).lower() for k in cap_keywords):
                 score += 5
             

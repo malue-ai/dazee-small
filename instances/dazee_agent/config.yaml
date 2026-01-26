@@ -83,6 +83,7 @@ enabled_capabilities:
 #   - web_search: 信息搜索
 #   - data_analysis: 数据分析
 #   - ppt_generation: 演示文稿生成
+#   - video_creation: 视频/动画创作（Remotion Skill）
 #   - 更多选项见 _template/config.yaml
 #
 mcp_tools:
