@@ -65,6 +65,7 @@ class LLMParams:
     thinking_budget: Optional[int] = None  # Thinking token 预算
     enable_caching: Optional[bool] = None  # 启用 Prompt Caching
     top_p: Optional[float] = None  # 核采样参数
+    thinking_mode: Optional[str] = None  # 思考模式: native/simulated/none
 
 
 @dataclass
@@ -263,7 +264,8 @@ def load_instance_config(instance_name: str) -> InstanceConfig:
         enable_thinking=llm_config.get("enable_thinking"),
         thinking_budget=llm_config.get("thinking_budget"),
         enable_caching=llm_config.get("enable_caching"),
-        top_p=llm_config.get("top_p")
+        top_p=llm_config.get("top_p"),
+        thinking_mode=llm_config.get("thinking_mode")  # 思考模式: native/simulated/none
     )
     
     # 加载 Skills 配置（Claude Skills 官方 API）
@@ -578,6 +580,11 @@ def _merge_config_to_schema(base_schema, config: InstanceConfig):
         llm_override_count += 1
     if config.llm_params.top_p is not None:
         llm_override_count += 1
+    if config.llm_params.thinking_mode is not None:
+        llm_override_count += 1
+        # 🆕 V7.10: 将 thinking_mode 应用到 AgentSchema
+        merged.thinking_mode = config.llm_params.thinking_mode
+        logger.info(f"🧠 thinking_mode 配置: {config.llm_params.thinking_mode}")
     
     if llm_override_count > 0:
         logger.debug(f"📝 config.yaml 覆盖了 {llm_override_count} 项 LLM 参数 (注意：需要检查是否被 profile 覆盖)")
@@ -1441,6 +1448,8 @@ if __name__ == "__main__":
                 llm_info.append(f"max_tokens={llm.max_tokens}")
             if llm.enable_thinking is not None:
                 llm_info.append(f"thinking={'开' if llm.enable_thinking else '关'}")
+            if llm.thinking_mode is not None:
+                llm_info.append(f"thinking_mode={llm.thinking_mode}")
             if llm.enable_caching is not None:
                 llm_info.append(f"caching={'开' if llm.enable_caching else '关'}")
             

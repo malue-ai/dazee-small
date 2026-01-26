@@ -72,7 +72,8 @@ class APICallingTool:
         if self.apis_config:
             logger.info(f"✅ api_calling 初始化，已加载 {len(self.apis_config)} 个 API 配置: {list(self.apis_config.keys())}")
         else:
-            logger.warning(f"⚠️ api_calling 初始化，apis_config 为空")
+            # 没有预配置 API 是正常的（如默认 Agent），使用 DEBUG 级别
+            logger.debug(f"📡 api_calling 初始化，无预配置 API（需通过 url 参数直接调用）")
     
     @property
     def name(self) -> str:

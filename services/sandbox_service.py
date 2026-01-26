@@ -1,10 +1,10 @@
 """
-Sandbox 服务层 - 沙盒业务封装
+Sandbox 服务层 - 沙盒业务封装（简化版）
 
 职责：
 1. 路径标准化（相对路径 -> 绝对路径）
-2. 项目运行管理（检测、启动、停止）
-3. 流式代码执行输出
+2. 异常转换（infra 层异常 -> 服务层异常）
+3. 核心功能：文件操作、命令执行、代码执行
 
 设计原则：
 - 直接使用 infra/sandbox 层的类型定义（避免重复）
@@ -25,9 +25,9 @@ from infra.sandbox import (
     get_sandbox_provider,
     SandboxProvider,
     SandboxInfo as InfraSandboxInfo,
-    FileInfo,  # 直接使用，不再重复定义
-    CommandResult,  # 直接使用
-    CodeResult,  # 直接使用
+    FileInfo,
+    CommandResult,
+    CodeResult,
     SandboxError,
     SandboxNotFoundError as InfraSandboxNotFoundError,
     SandboxConnectionError as InfraSandboxConnectionError,
@@ -51,19 +51,10 @@ class SandboxInfo:
     status: str
     stack: Optional[str]
     preview_url: Optional[str]
-    active_project_path: Optional[str]  # 当前运行的项目路径
-    active_project_stack: Optional[str]  # 当前运行的项目技术栈
+    active_project_path: Optional[str]
+    active_project_stack: Optional[str]
     created_at: Optional[str]
     last_active_at: Optional[str]
-
-
-@dataclass
-class RunResult:
-    """项目运行结果"""
-    success: bool
-    preview_url: Optional[str] = None
-    message: Optional[str] = None
-    error: Optional[str] = None
 
 
 # ==================== 异常类 ====================
@@ -106,17 +97,16 @@ def _convert_sandbox_info(info: InfraSandboxInfo) -> SandboxInfo:
 
 class SandboxService:
     """
-    沙盒服务（业务层封装）
+    沙盒服务（业务层封装 - 简化版）
     
     职责：
     1. 路径标准化：相对路径 -> 绝对路径
     2. 异常转换：infra 层异常 -> 服务层异常
-    3. 业务功能：递归目录列表、项目管理、日志获取
+    3. 核心功能：文件操作、命令执行、代码执行
     
     注意：
     - 数据类型直接使用 infra/sandbox 层定义（FileInfo, CommandResult, CodeResult）
-    - 连接池由 infra 层统一管理，确保 bash 工具和 sandbox_* 工具共享连接
-    - 性能优化在 infra 层实现（skip_validation、_with_retry）
+    - 连接池由 infra 层统一管理
     """
     
     # E2B 沙盒的工作目录
@@ -125,7 +115,7 @@ class SandboxService:
     def __init__(self) -> None:
         """初始化沙盒服务"""
         self._provider: Optional[SandboxProvider] = None
-        logger.info("✅ SandboxService 初始化完成（使用 infra/sandbox 层）")
+        logger.info("✅ SandboxService 初始化完成")
     
     @property
     def provider(self) -> SandboxProvider:
@@ -234,7 +224,6 @@ class SandboxService:
         abs_path = self._normalize_path(path)
         
         try:
-            # FileInfo 直接使用 infra 层类型，无需转换
             return await self.provider.list_dir(conversation_id, abs_path)
         except InfraSandboxNotFoundError as e:
             raise SandboxNotFoundError(str(e))
@@ -251,20 +240,17 @@ class SandboxService:
         """
         递归列出沙盒目录内容（树形结构）
         
-        性能优化：使用单次 shell 命令获取整个目录树，
-        从 N 次 API 调用优化为 1 次（N = 目录数量）
+        性能优化：使用单次 shell 命令获取整个目录树
         """
         abs_path = self._normalize_path(path)
         
         try:
-            # 使用 find 命令快速获取目录树
             cmd = f"find {abs_path} -maxdepth {max_depth} -printf '%y|%p\\n' 2>/dev/null || true"
             result = await self.provider.run_command(conversation_id, cmd, timeout=30)
             
             if not result.success or not result.output:
-                return await self._list_files_tree_fallback(conversation_id, abs_path, max_depth)
+                return await self.list_files(conversation_id, path)
             
-            # 解析 find 输出，构建树结构
             lines = result.output.strip().split('\n')
             path_map: dict[str, FileInfo] = {}
             root_files: List[FileInfo] = []
@@ -296,44 +282,8 @@ class SandboxService:
             
             return root_files
         except Exception as e:
-            logger.warning(f"⚠️ 快速目录树获取失败，降级到普通方法: {e}")
-            return await self._list_files_tree_fallback(conversation_id, abs_path, max_depth)
-    
-    async def _list_files_tree_fallback(
-        self,
-        conversation_id: str,
-        path: str,
-        max_depth: int
-    ) -> List[FileInfo]:
-        """目录树获取的降级方法（并行递归）"""
-        if max_depth <= 0:
+            logger.warning(f"⚠️ 目录树获取失败，降级到普通方法: {e}")
             return await self.list_files(conversation_id, path)
-        
-        files = await self.list_files(conversation_id, path)
-        directories = [f for f in files if f.type == "directory"]
-        
-        if not directories:
-            return files
-        
-        # 并行获取所有子目录内容
-        async def get_children(dir_info: FileInfo) -> tuple[FileInfo, List[FileInfo]]:
-            try:
-                children = await self._list_files_tree_fallback(
-                    conversation_id,
-                    dir_info.path,
-                    max_depth - 1
-                )
-                return (dir_info, children)
-            except Exception as e:
-                logger.warning(f"⚠️ 获取子目录失败: {dir_info.path}, {e}")
-                return (dir_info, [])
-        
-        results = await asyncio.gather(*[get_children(d) for d in directories])
-        
-        for dir_info, children in results:
-            dir_info.children = children
-        
-        return files
     
     async def read_file(
         self,
@@ -373,7 +323,6 @@ class SandboxService:
         """写入沙盒文件"""
         abs_path = self._normalize_path(path)
         
-        # 如果是 bytes，转换为 str
         if isinstance(content, bytes):
             content = content.decode('utf-8')
         
@@ -427,73 +376,6 @@ class SandboxService:
             logger.error(f"❌ 检查文件失败: {abs_path} - {e}", exc_info=True)
             return False
     
-    # ==================== 项目运行 ====================
-    
-    async def run_project(
-        self,
-        conversation_id: str,
-        project_path: str,
-        stack: str
-    ) -> RunResult:
-        """运行项目"""
-        try:
-            preview_url = await self.provider.run_project(
-                conversation_id, project_path, stack
-            )
-            
-            if preview_url:
-                logger.info(f"✅ 项目启动成功: {preview_url}")
-                return RunResult(
-                    success=True,
-                    preview_url=preview_url,
-                    message=f"项目已启动，访问: {preview_url}"
-                )
-            else:
-                return RunResult(
-                    success=False,
-                    error="项目启动失败"
-                )
-        except InfraSandboxNotFoundError as e:
-            raise SandboxNotFoundError(str(e))
-        except Exception as e:
-            logger.error(f"❌ 运行项目失败: {e}", exc_info=True)
-            return RunResult(
-                success=False,
-                error=str(e)
-            )
-    
-    async def stop_project(self, conversation_id: str) -> bool:
-        """停止项目"""
-        try:
-            # 通过 run_command 杀死进程
-            result = await self.run_command(
-                conversation_id,
-                "pkill -f streamlit || pkill -f gradio || pkill -f 'python app.py' || true",
-                timeout=30
-            )
-            logger.info(f"⏹️ 项目已停止: {conversation_id}")
-            return True
-        except Exception as e:
-            logger.error(f"❌ 停止项目失败: {e}", exc_info=True)
-            return False
-    
-    async def get_logs(
-        self,
-        conversation_id: str,
-        lines: int = 100
-    ) -> str:
-        """获取项目日志"""
-        try:
-            result = await self.run_command(
-                conversation_id,
-                f"tail -n {lines} /tmp/app.log 2>/dev/null || echo 'No logs found'",
-                timeout=30
-            )
-            return result.get("stdout", "")
-        except Exception as e:
-            logger.error(f"❌ 获取日志失败: {e}", exc_info=True)
-            return f"获取日志失败: {e}"
-    
     # ==================== 命令执行 ====================
     
     async def run_command(
@@ -523,115 +405,6 @@ class SandboxService:
                 "error": str(e)
             }
     
-    # ==================== 项目检测 ====================
-    
-    async def detect_project(
-        self,
-        conversation_id: str,
-        dir_path: str,
-        dir_name: str
-    ) -> Optional[Dict[str, Any]]:
-        """
-        检测目录是否为项目
-        
-        检测规则：
-        - requirements.txt + app.py/main.py -> Python 项目
-        - package.json -> Node.js 项目（检测 next/vue/react）
-        - index.html（无其他配置）-> 静态网页
-        
-        Args:
-            conversation_id: 对话 ID
-            dir_path: 目录完整路径
-            dir_name: 目录名称
-            
-        Returns:
-            项目信息字典，非项目时返回 None
-            {
-                "name": str,
-                "path": str,
-                "type": str | None,
-                "entry_file": str | None,
-                "has_requirements": bool
-            }
-        """
-        try:
-            files = await self.list_files(conversation_id, dir_path)
-            file_names = {f.name for f in files}
-            
-            project_type = None
-            entry_file = None
-            has_requirements = False
-            
-            # Python 项目检测
-            if "requirements.txt" in file_names:
-                has_requirements = True
-                
-                if "app.py" in file_names:
-                    # 读取 requirements.txt 判断框架
-                    try:
-                        req_content = await self.read_file(
-                            conversation_id, f"{dir_path}/requirements.txt"
-                        )
-                        req_lower = req_content.lower()
-                        if "gradio" in req_lower:
-                            project_type = "gradio"
-                        elif "streamlit" in req_lower:
-                            project_type = "streamlit"
-                        elif "flask" in req_lower:
-                            project_type = "flask"
-                        elif "fastapi" in req_lower:
-                            project_type = "fastapi"
-                        else:
-                            project_type = "python"
-                    except Exception:
-                        project_type = "python"
-                    entry_file = "app.py"
-                elif "main.py" in file_names:
-                    entry_file = "main.py"
-                    project_type = "python"
-            
-            # Node.js 项目检测
-            if "package.json" in file_names:
-                try:
-                    import json
-                    pkg_content = await self.read_file(
-                        conversation_id, f"{dir_path}/package.json"
-                    )
-                    pkg = json.loads(pkg_content)
-                    deps = pkg.get("dependencies", {})
-                    
-                    if "next" in deps:
-                        project_type = "nextjs"
-                    elif "vue" in deps:
-                        project_type = "vue"
-                    elif "react" in deps:
-                        project_type = "react"
-                    else:
-                        project_type = "nodejs"
-                except Exception:
-                    project_type = "nodejs"
-            
-            # 静态网页检测
-            if "index.html" in file_names and not project_type:
-                project_type = "static"
-                entry_file = "index.html"
-            
-            # 无法识别为项目
-            if not project_type and not entry_file and not has_requirements:
-                return None
-            
-            return {
-                "name": dir_name,
-                "path": dir_name,
-                "type": project_type,
-                "entry_file": entry_file,
-                "has_requirements": has_requirements
-            }
-            
-        except Exception as e:
-            logger.warning(f"⚠️ 检测项目失败: {dir_path} - {e}")
-            return None
-    
     # ==================== 代码执行 ====================
     
     async def run_code(
@@ -643,7 +416,7 @@ class SandboxService:
         on_stderr: Optional[Callable[[str], None]] = None
     ) -> CodeResult:
         """
-        执行 Python 代码（Code Interpreter）
+        执行代码（Code Interpreter）
         
         注意：流式回调在 infra 层不直接支持，此处简化处理
         """
@@ -652,7 +425,6 @@ class SandboxService:
                 conversation_id, code, "python", timeout
             )
             
-            # 如果有回调，在返回前调用
             if on_stdout and result.stdout:
                 for line in result.stdout.split('\n'):
                     on_stdout(line)
@@ -660,7 +432,6 @@ class SandboxService:
                 for line in result.stderr.split('\n'):
                     on_stderr(line)
             
-            # CodeResult 直接使用 infra 层类型，无需转换
             return result
             
         except InfraSandboxNotFoundError as e:
@@ -671,7 +442,6 @@ class SandboxService:
                 success=False,
                 error=str(e)
             )
-    
 
 
 # ==================== 便捷函数 ====================

@@ -13,6 +13,7 @@
 - 可扩展性：易于添加新的工具类型
 - 🆕 类别化配置：支持工具组配置（如 sandbox_tools、document_skills）
 - 🆕 核心工具自动启用：Level 1 工具始终可用，无需用户配置
+- 🆕 统一配置：从 config/tool_registry.yaml 读取工具分类
 """
 
 from typing import List, Dict, Any, Optional
@@ -24,53 +25,22 @@ from .capability.types import Capability
 from .instance_registry import InstanceToolRegistry
 from logger import get_logger
 
+# 🆕 从统一配置读取工具分类
+from core.tool.registry_config import get_core_tools, get_tool_categories
+
 logger = get_logger(__name__)
 
 
 # ==================== 工具类别定义 ====================
+# 🆕 从 config/tool_registry.yaml 统一配置读取
 # 类别化配置：用户配置一个类别，自动展开为多个工具
+# 直接调用 get_tool_categories() 获取，保持与配置同步
 
-TOOL_CATEGORIES = {
-    # 文档生成类（Claude Skills）
-    "document_skills": [
-        "pptx",
-        "xlsx", 
-        "docx",
-        "pdf",
-    ],
-    
-    # 代码沙盒类（E2B 沙盒工具 - 4 个核心）
-    "sandbox_tools": [
-        "sandbox_write_file",       # 写文件
-        "sandbox_run_command",      # 执行命令（读/列/删 用 bash）
-        "sandbox_create_project",   # 初始化项目
-        "sandbox_run_project",      # 运行项目（返回预览 URL）
-    ],
-    
-    # PPT 生成类（可选扩展）
-    "ppt_tools": [
-        "ppt_generator",
-        "slidespeak_render",
-    ],
-    
-    # 文档解析类（允许使用简写配置）
-    "document_partition": [
-        "document_partition_tool",
-    ],
-}
+TOOL_CATEGORIES = get_tool_categories()
 
 # 核心工具（Level 1）- 始终启用，不暴露给用户配置
-CORE_TOOLS = [
-    "plan_todo",                    # 任务规划
-    "api_calling",                  # API 调用
-    "hitl",                         # HITL (Human-in-the-Loop)
-    "file_read",                    # 文件读取
-    # 沙盒工具（Vibe Coding 核心 - 4 个）
-    "sandbox_write_file",           # 写文件
-    "sandbox_run_command",          # 执行命令
-    "sandbox_create_project",       # 初始化项目
-    "sandbox_run_project",          # 运行项目
-]
+# 🆕 从 config/tool_registry.yaml 统一配置读取
+CORE_TOOLS = get_core_tools()
 
 
 @dataclass

@@ -28,6 +28,9 @@ from core.tool.capability import (
     create_capability_registry
 )
 
+# 🆕 从统一配置读取工具分类
+from core.tool.registry_config import get_core_tools
+
 logger = Logger.get_logger(__name__)
 
 
@@ -71,18 +74,18 @@ class ToolSelector:
             required_capabilities=["web_search", "ppt_generation"],
             context={"task_type": "content_generation"}
         )
-        print(result.tool_names)  # ["plan_todo", "bash", "web_search", "slidespeak_render"]
+        print(result.tool_names)  # ["plan_todo", "sandbox_run_command", "web_search", ...]
     """
     
     # 默认核心工具（作为 Level 1 的备用，实际从 capabilities.yaml 读取）
-    # 🆕 包含 hitl：HITL 是通用能力，任何任务都可能需要人工输入
-    DEFAULT_CORE_TOOLS = ["plan_todo", "bash", "hitl"]
+    # 🆕 从 config/tool_registry.yaml 统一配置读取
+    DEFAULT_CORE_TOOLS = get_core_tools()
     
-    # Claude 原生工具（直接使用字符串）
-    # 注意：computer 和 memory 工具需要特殊 beta header，暂不包含在默认列表中
-    # 支持的原生工具：bash, text_editor
-    # 🆕 web_search 已移除，改用客户端工具（tavily_search, exa_search 等）
-    NATIVE_TOOLS = ["bash", "text_editor"]
+    # Claude 原生工具（已移除，统一使用自定义沙盒工具）
+    # 🆕 bash -> sandbox_run_command
+    # 🆕 text_editor -> sandbox_write_file
+    # 这样可以支持多模型（GPT-4, Qwen, DeepSeek 等）
+    NATIVE_TOOLS = []
     
     def __init__(
         self,

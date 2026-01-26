@@ -1,5 +1,5 @@
 <template>
-  <div class="flex-1 overflow-y-auto scroll-smooth p-6 md:p-8" ref="containerRef">
+  <div class="flex-1 overflow-y-auto overflow-x-hidden scroll-smooth p-6 md:p-8 scrollbar-thin" ref="containerRef">
     <!-- 欢迎页 -->
     <div v-if="messages.length === 0" class="h-full flex flex-col items-center justify-center text-center -mt-10">
       <div class="w-20 h-20 bg-white rounded-3xl shadow-lg border border-gray-100 flex items-center justify-center mb-8 transform hover:scale-105 transition-transform duration-300">
@@ -25,7 +25,7 @@
     </div>
 
     <!-- 消息流 -->
-    <div v-else class="max-w-4xl mx-auto flex flex-col gap-8 pb-4">
+    <div v-else class="max-w-4xl mx-auto flex flex-col gap-8 pb-4 overflow-hidden">
       <div
         v-for="message in messages"
         :key="message.id"
@@ -41,7 +41,7 @@
         </div>
         
         <div 
-          class="flex-1 min-w-0 max-w-[80%]"
+          class="flex-1 min-w-0 max-w-[80%] overflow-hidden"
           :class="message.role === 'user' ? 'order-1 flex justify-end' : ''"
         >
           <!-- 用户消息 -->
@@ -68,39 +68,27 @@
           </div>
           
           <!-- 助手消息 -->
-          <div v-else class="flex flex-col gap-3">
-            <div class="text-sm leading-relaxed text-gray-800 px-1">
+          <div v-else class="flex flex-col gap-3 overflow-hidden">
+            <div class="text-sm leading-relaxed text-gray-800 px-1 overflow-x-auto">
               <!-- 有内容块时使用 MessageContent -->
               <MessageContent 
                 v-if="message.contentBlocks && message.contentBlocks.length > 0"
                 :content="message.contentBlocks"
                 :tool-statuses="message.toolStatuses || {}"
-                @mermaid-detected="charts => emit('mermaid-detected', charts)"
+                @mermaid-detected="(charts: string[]) => emit('mermaid-detected', charts)"
               />
               <!-- 无内容块时 -->
               <template v-else>
                 <!-- 有思考内容 -->
                 <div v-if="message.thinking" class="thinking-inline">
-                  <div class="thinking-inline-header" @click="toggleThinking(message.id)">
+                  <div class="thinking-inline-header" @click="toggleThinking(String(message.id))">
                     <div class="thinking-inline-left">
-                      <svg class="thinking-inline-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <circle cx="12" cy="12" r="10"/>
-                        <path d="M12 16v-4M12 8h.01"/>
-                      </svg>
+                      <span class="thinking-inline-dot"></span>
                       <span>思考过程</span>
                     </div>
-                    <svg 
-                      class="thinking-inline-chevron" 
-                      :class="{ 'is-expanded': expandedThinking[message.id] }"
-                      viewBox="0 0 24 24" 
-                      fill="none" 
-                      stroke="currentColor" 
-                      stroke-width="2"
-                    >
-                      <polyline points="6 9 12 15 18 9"/>
-                    </svg>
+                    <span class="thinking-inline-toggle">{{ expandedThinking[message.id] ? '收起' : '展开' }}</span>
                   </div>
-                  <div v-show="expandedThinking[message.id]" class="thinking-inline-content">
+                  <div v-show="expandedThinking[message.id]" class="thinking-inline-body">
                     {{ message.thinking }}
                   </div>
                 </div>
@@ -108,7 +96,7 @@
                 <MarkdownRenderer 
                   v-if="message.content"
                   :content="message.content" 
-                  @mermaid-detected="charts => emit('mermaid-detected', charts)" 
+                  @mermaid-detected="(charts: string[]) => emit('mermaid-detected', charts)" 
                 />
                 <!-- 空消息且正在加载（仅最后一条消息显示） -->
                 <div v-else-if="loading && isLastMessage(message)" class="flex items-center gap-1.5 py-2 text-gray-400">
@@ -181,9 +169,9 @@ const containerRef = ref<HTMLElement | null>(null)
 /** 思考过程展开状态 */
 const expandedThinking = ref<Record<string, boolean>>({})
 
-/** 切换思考过程展开 */
-function toggleThinking(messageId: string): void {
-  expandedThinking.value[messageId] = !expandedThinking.value[messageId]
+/** 切换思考过程 */
+function toggleThinking(id: string): void {
+  expandedThinking.value[id] = !expandedThinking.value[id]
 }
 
 /** 建议列表 */
@@ -264,6 +252,25 @@ defineExpose({
 </script>
 
 <style scoped>
+/* 滚动条美化 - 默认透明，hover 时显示 */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 3px;
+}
+.scrollbar-thin:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(156, 163, 175, 0.3);
+}
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(156, 163, 175, 0.5);
+}
+
 /* Loading Dots 动画 */
 .typing-dots span {
   animation: blink 1.4s infinite both;
@@ -280,18 +287,25 @@ defineExpose({
 /* 消息内容中的 Markdown 样式修正 */
 :deep(.prose) {
   max-width: none;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 :deep(.prose pre) {
   background-color: #f3f4f6;
   border: 1px solid #e5e7eb;
   border-radius: 0.5rem;
+  overflow-x: auto;
+  max-width: 100%;
+}
+:deep(.prose code) {
+  word-break: break-all;
 }
 
-/* 内联思考过程 - Apple 风格 */
+/* 内联思考过程 - 简洁风格 */
 .thinking-inline {
-  margin-bottom: 16px;
-  background: #f9fafb;
-  border-radius: 12px;
+  margin-bottom: 12px;
+  background: #f8f9fa;
+  border-radius: 10px;
   overflow: hidden;
 }
 
@@ -301,11 +315,11 @@ defineExpose({
   justify-content: space-between;
   padding: 10px 14px;
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background 0.15s;
 }
 
 .thinking-inline-header:hover {
-  background: #f3f4f6;
+  background: #f1f3f4;
 }
 
 .thinking-inline-left {
@@ -314,30 +328,25 @@ defineExpose({
   gap: 8px;
   font-size: 13px;
   font-weight: 500;
-  color: #6b7280;
+  color: #5f6368;
 }
 
-.thinking-inline-icon {
-  width: 16px;
-  height: 16px;
-  color: #9ca3af;
+.thinking-inline-dot {
+  width: 6px;
+  height: 6px;
+  background: #9aa0a6;
+  border-radius: 50%;
 }
 
-.thinking-inline-chevron {
-  width: 16px;
-  height: 16px;
-  color: #9ca3af;
-  transition: transform 0.2s ease;
+.thinking-inline-toggle {
+  font-size: 12px;
+  color: #9aa0a6;
 }
 
-.thinking-inline-chevron.is-expanded {
-  transform: rotate(180deg);
-}
-
-.thinking-inline-content {
-  padding: 0 14px 14px;
+.thinking-inline-body {
+  padding: 0 14px 12px;
   font-size: 13px;
-  color: #6b7280;
+  color: #5f6368;
   line-height: 1.6;
   white-space: pre-wrap;
 }

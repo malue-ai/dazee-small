@@ -233,7 +233,7 @@ export const useConversationStore = defineStore('conversation', () => {
     // 解析 Plan 数据
     let planData: PlanData | null = null
     if (msg.metadata?.plan) {
-      let rawPlan = msg.metadata.plan
+      let rawPlan: string | object | null = msg.metadata.plan
       
       if (typeof rawPlan === 'string') {
         try {
@@ -275,13 +275,21 @@ export const useConversationStore = defineStore('conversation', () => {
   }
 
   /**
+   * 内容块基础类型
+   */
+  interface ContentBlockBase {
+    type: string
+    [key: string]: unknown
+  }
+
+  /**
    * 从内容中提取文本
    */
   function extractText(content: string | object[]): string {
     if (typeof content === 'string') return content
     if (Array.isArray(content)) {
-      return content
-        .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+      return (content as ContentBlockBase[])
+        .filter((b): b is ContentBlockBase & { type: 'text'; text: string } => b.type === 'text')
         .map(b => b.text)
         .join('\n')
     }
@@ -293,8 +301,9 @@ export const useConversationStore = defineStore('conversation', () => {
    */
   function extractThinking(content: string | object[]): string {
     if (Array.isArray(content)) {
-      const block = content.find((b): b is { type: 'thinking'; thinking: string } => 
-        b.type === 'thinking'
+      const block = (content as ContentBlockBase[]).find(
+        (b): b is ContentBlockBase & { type: 'thinking'; thinking: string } => 
+          b.type === 'thinking'
       )
       return block?.thinking || ''
     }

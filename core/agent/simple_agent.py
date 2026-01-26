@@ -57,6 +57,7 @@ from core.prompt import TaskComplexity
 from core.schemas import DEFAULT_AGENT_SCHEMA
 from core.tool import create_tool_executor, create_tool_selector
 from core.tool.capability import create_capability_registry, create_invocation_selector
+from core.tool.registry_config import get_sandbox_tools  # 🆕 从统一配置读取
 from logger import get_logger
 from prompts.universal_agent_prompt import get_universal_agent_prompt
 from tools.plan_todo_tool import create_plan_todo_tool
@@ -722,12 +723,12 @@ class SimpleAgent:
             })
         
         # =====================================================================
-        # 阶段 3.5: 沙盒环境预创建（确保后续工具调用有沙盒可用）
+        # 阶段 3.5: 沙盒环境预创建（真正的后台执行，不阻塞主流程）
         # =====================================================================
-        # 检查是否需要沙盒（选择了 bash/text_editor/sandbox_* 等工具）
-        sandbox_tools = {"bash", "str_replace_based_edit_tool", "text_editor"}
-        sandbox_tools.update(t for t in selection.tool_names if t.startswith("sandbox_"))
-        needs_sandbox = bool(sandbox_tools & set(selection.tool_names))
+        # 检查是否需要沙盒（选择了 sandbox_* 工具）
+        # 🆕 移除 bash/text_editor，统一使用 sandbox_run_command/sandbox_write_file
+        sandbox_tools = set(t for t in selection.tool_names if t.startswith("sandbox_"))
+        needs_sandbox = bool(sandbox_tools)
         
         if needs_sandbox:
             try:
@@ -735,9 +736,11 @@ class SimpleAgent:
                 sandbox = get_sandbox_provider()
                 
                 if sandbox.is_available:
-                    # 预创建沙盒（后台执行，不阻塞主流程）
-                    await sandbox.ensure_sandbox(conversation_id, user_id)
-                    logger.info(f"🏖️ 沙盒环境已就绪: conversation_id={conversation_id}")
+                    # 🆕 真正的后台创建：使用 create_task，不阻塞主流程
+                    # 工具执行时会通过 ensure_sandbox() 等待后台任务完成
+                    from tools.sandbox_tools import start_sandbox_creation_background
+                    start_sandbox_creation_background(conversation_id, user_id)
+                    logger.info(f"🚀 沙盒后台创建已启动: conversation_id={conversation_id}")
                 else:
                     logger.warning("⚠️ 沙盒服务不可用，跳过预创建")
             except Exception as e:
@@ -872,6 +875,9 @@ class SimpleAgent:
         # [Repeat] if stop_reason == "tool_use"
         # 注：RuntimeContext ctx 已在阶段 1 初始化（与 PromptManager 一起）
         
+        # 🆕 记录是否已生成模拟思考（确保只在第一轮生成一次）
+        simulated_thinking_generated = False
+        
         for turn in range(self.max_turns):
             ctx.next_turn()
             logger.info(f"{'='*60}")
@@ -890,10 +896,16 @@ class SimpleAgent:
             # 调用 LLM（Extended Thinking 由 System Prompt 和 Claude 自主决定）
             if enable_stream:
                 # 流式处理 LLM 响应
+                # 🔑 只在第一轮传递模拟思考标记,后续轮次不再生成
                 async for event in self._process_stream(
-                    llm_messages, system_prompt, tools_for_llm, ctx, session_id
+                    llm_messages, system_prompt, tools_for_llm, ctx, session_id,
+                    is_first_turn=(turn == 0 and not simulated_thinking_generated)
                 ):
                     yield event
+                
+                # 标记已生成模拟思考
+                if turn == 0:
+                    simulated_thinking_generated = True
                     
                 # 流结束后，从 ctx 获取 LLM 响应
                 response = ctx.last_llm_response
@@ -944,8 +956,10 @@ class SimpleAgent:
                             append_user_message(llm_messages, user_content)
                             
                             # 再调用一次 LLM，不传递 tools 参数，强制生成文本
+                            # 🔑 最后一轮强制回复不生成模拟思考
                             async for event in self._process_stream(
-                                llm_messages, system_prompt, [], ctx, session_id  # 空 tools 列表
+                                llm_messages, system_prompt, [], ctx, session_id,
+                                is_first_turn=False  # 不是第一轮，不生成模拟思考
                             ):
                                 yield event
                             # 标记完成
@@ -1278,13 +1292,94 @@ class SimpleAgent:
         
         return system_blocks
     
+    async def _generate_simulated_thinking(
+        self,
+        user_query: str,
+        session_id: str,
+        ctx
+    ) -> AsyncGenerator[str, None]:
+        """
+        生成模拟思考（Simulated Thinking）
+        
+        单独调用一次 LLM，生成用户友好的思考过程。
+        不暴露项目内部逻辑、工具调用细节、技术架构等敏感信息。
+        
+        Args:
+            user_query: 用户查询
+            session_id: 会话ID
+            ctx: RuntimeContext
+            
+        Yields:
+            思考内容的增量字符串
+        """
+        # 模拟思考的 Prompt
+        simulated_prompt = """你是一个AI助手的"思考展示器"。
+根据用户的问题，以第一人称展示你的思考过程。
+
+要求：
+1. 只展示对问题的理解和解答思路
+2. 不要提及任何工具、API、代码、内部实现
+3. 语言自然，像人类在思考一样
+4. 控制在 100-200 字
+
+用户问题: {query}
+
+请输出你的思考过程:"""
+        
+        logger.info(f"🧠 开始生成模拟思考: query={user_query[:50]}...")
+        
+        try:
+            async for chunk in self.llm.create_message_stream(
+                messages=[Message(role="user", content=simulated_prompt.format(query=user_query))],
+                system="你是一个思考展示助手。只输出思考过程，不要有多余内容。",
+                tools=[],
+                override_thinking=False  # 模拟思考本身不需要原生 thinking
+            ):
+                if chunk.content and chunk.is_stream:
+                    yield chunk.content
+        except Exception as e:
+            logger.error(f"❌ 模拟思考生成失败: {e}")
+            yield f"[思考过程生成失败: {str(e)}]"
+    
+    def _extract_user_query(self, messages: List) -> str:
+        """
+        从消息列表中提取最后一条用户消息
+        
+        Args:
+            messages: 消息列表（Message 对象或字典）
+            
+        Returns:
+            用户查询字符串（限制 500 字符）
+        """
+        for msg in reversed(messages):
+            # 处理 Message 对象
+            if hasattr(msg, 'role') and msg.role == 'user':
+                content = msg.content
+                if isinstance(content, str):
+                    return content[:500]
+                elif isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict) and block.get('type') == 'text':
+                            return block.get('text', '')[:500]
+            # 处理字典格式
+            elif isinstance(msg, dict) and msg.get('role') == 'user':
+                content = msg.get('content', '')
+                if isinstance(content, str):
+                    return content[:500]
+                elif isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict) and block.get('type') == 'text':
+                            return block.get('text', '')[:500]
+        return ""
+    
     async def _process_stream(
         self,
         messages: List,
         system_prompt,
         tools: List,
         ctx,
-        session_id: str
+        session_id: str,
+        is_first_turn: bool = False  # 🆕 标识是否是第一轮
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         处理流式 LLM 响应
@@ -1292,22 +1387,64 @@ class SimpleAgent:
         使用 ContentHandler 的手动控制模式（start_block, send_delta, stop_block）
         处理 LLM 的流式输出（thinking, text, tool_use）
         
-        Extended Thinking 由 LLM Service 配置和 System Prompt 控制
+        支持三种 thinking 模式：
+        - native: 原生 Extended Thinking（默认）
+        - simulated: 模拟思考（单独调用 LLM 生成用户友好的思考过程，仅第一轮）
+        - none: 不展示思考
+        
+        Args:
+            messages: 消息列表
+            system_prompt: 系统提示词
+            tools: 工具列表
+            ctx: RuntimeContext
+            session_id: 会话ID
+            is_first_turn: 是否是第一轮（用于控制模拟思考生成）
         """
         # 创建 ContentHandler（手动控制模式）
         content_handler = create_content_handler(self.broadcaster, ctx.block)
         
+        # 获取 thinking_mode 配置（默认 native 保持向后兼容）
+        thinking_mode = getattr(self.schema, 'thinking_mode', 'native')
+        logger.debug(f"🧠 Thinking 模式: {thinking_mode}")
+        
+        # ===== 模拟思考：只在第一轮且配置为 simulated 时生成 =====
+        if thinking_mode == "simulated" and is_first_turn:
+            user_query = self._extract_user_query(messages)
+            if user_query:
+                # 开始 thinking block
+                yield await content_handler.start_block(
+                    session_id=session_id,
+                    block_type="thinking",
+                    initial={"thinking": ""}
+                )
+                
+                # 流式输出模拟思考内容
+                async for delta in self._generate_simulated_thinking(user_query, session_id, ctx):
+                    yield await content_handler.send_delta(
+                        session_id=session_id,
+                        delta=delta
+                    )
+                
+                # 关闭 thinking block
+                yield await content_handler.stop_block(session_id=session_id)
+                logger.info("✅ 模拟思考生成完成")
+        
+        # ===== 正式调用 LLM =====
+        # simulated/none 模式关闭原生 thinking，native 模式使用默认配置
+        override_thinking = None if thinking_mode == "native" else False
+        
         stream_generator = self.llm.create_message_stream(
             messages=messages,
             system=system_prompt,
-            tools=tools
+            tools=tools,
+            override_thinking=override_thinking
         )
         
         final_response = None
         
         async for llm_response in stream_generator:
-            # ===== 处理 thinking =====
-            if llm_response.thinking and llm_response.is_stream:
+            # ===== 处理 thinking（仅 native 模式） =====
+            if llm_response.thinking and llm_response.is_stream and thinking_mode == "native":
                 if content_handler.needs_transition("thinking"):
                     yield await content_handler.start_block(
                         session_id=session_id,
@@ -1413,15 +1550,16 @@ class SimpleAgent:
         try:
             # 🛡️ 仅对沙盒相关工具注入上下文（user_id, session_id, conversation_id）
             # ⚠️ 不要对所有工具注入，否则 MCP 工具会收到错误参数
-            SANDBOX_TOOLS = {"bash", "str_replace_based_edit_tool", "sandbox_run_project", 
-                            "sandbox_create_project", "sandbox_write_file", "sandbox_run_command"}
+            # 🆕 从 config/tool_registry.yaml 统一配置读取
+            # 🔧 使用强制赋值而非 setdefault，确保 LLM 生成的错误值被系统值覆盖
+            SANDBOX_TOOLS = get_sandbox_tools()
             if tool_name in SANDBOX_TOOLS:
                 session_context = await self.event_manager.storage.get_session_context(session_id)
-                tool_input.setdefault("session_id", session_id)
+                tool_input["session_id"] = session_id  # 强制覆盖
                 if session_context.get("user_id"):
-                    tool_input.setdefault("user_id", session_context.get("user_id"))
+                    tool_input["user_id"] = session_context.get("user_id")  # 强制覆盖
                 conv_id = session_context.get("conversation_id") or getattr(self, '_current_conversation_id', None) or session_id
-                tool_input.setdefault("conversation_id", conv_id)
+                tool_input["conversation_id"] = conv_id  # 强制覆盖，防止 LLM 编造
             
             # 🆕 V7.9: 为 api_calling 工具注入上下文（用于替换 body 中的占位符）
             # 这些值不会直接传入工具参数，而是通过 **kwargs 供工具内部使用
@@ -1666,15 +1804,16 @@ class SimpleAgent:
                 
                 # 🛡️ 仅对沙盒相关工具注入上下文
                 # ⚠️ 不要对所有工具注入，否则 MCP 工具会收到错误参数
-                SANDBOX_TOOLS = {"bash", "str_replace_based_edit_tool", "sandbox_run_project", 
-                                "sandbox_create_project", "sandbox_write_file", "sandbox_run_command"}
+                # 🆕 从 config/tool_registry.yaml 统一配置读取
+                # 🔧 使用强制赋值而非 setdefault，确保 LLM 生成的错误值被系统值覆盖
+                SANDBOX_TOOLS = get_sandbox_tools()
                 if tool_name in SANDBOX_TOOLS:
                     session_context = await self.event_manager.storage.get_session_context(session_id)
-                    tool_input.setdefault("session_id", session_id)
+                    tool_input["session_id"] = session_id  # 强制覆盖
                     if session_context.get("user_id"):
-                        tool_input.setdefault("user_id", session_context.get("user_id"))
+                        tool_input["user_id"] = session_context.get("user_id")  # 强制覆盖
                     conv_id = session_context.get("conversation_id") or getattr(self, '_current_conversation_id', None) or session_id
-                    tool_input.setdefault("conversation_id", conv_id)
+                    tool_input["conversation_id"] = conv_id  # 强制覆盖，防止 LLM 编造
                 
                 # 🆕 V7.9.2: 为 api_calling 工具注入上下文（流式执行路径）
                 if tool_name == "api_calling":

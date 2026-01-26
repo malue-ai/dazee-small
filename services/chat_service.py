@@ -34,7 +34,7 @@ from core.context.compaction import (
     get_context_awareness_prompt,
 )
 from core.output import OutputFormatter, create_output_formatter
-from core.llm.claude_anthropic import create_claude_service
+from core.llm.claude import create_claude_service
 from core.routing import AgentRouter, RoutingDecision
 from core.monitoring import TokenAuditor, get_token_auditor
 from infra.database import AsyncSessionLocal, crud

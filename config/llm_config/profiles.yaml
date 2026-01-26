@@ -11,7 +11,7 @@ profiles:
   # ==================== 主 Agent 对话 ====================
   main_agent:
     description: "主 Agent 对话处理，需要最强推理能力和大输出窗口"
-    model: "claude-sonnet-4-5-20250929"
+    model: "claude-sonnet-4-5"
     max_tokens: 64000
     temperature: 1.0
     enable_thinking: true
@@ -23,7 +23,7 @@ profiles:
   # ==================== 意图分析 ====================
   intent_analyzer:
     description: "分析用户意图，需要快速响应，使用轻量模型"
-    model: "claude-haiku-4-5-20251001"
+    model: "claude-haiku-4-5"
     max_tokens: 2048
     temperature: 0
     enable_thinking: false
@@ -34,7 +34,7 @@ profiles:
   # ==================== 语义推理 ====================
   semantic_inference:
     description: "工具调用时机判断，需要确定性输出"
-    model: "claude-haiku-4-5-20251001"
+    model: "claude-haiku-4-5"
     max_tokens: 500
     temperature: 0
     enable_thinking: false
@@ -45,7 +45,7 @@ profiles:
   # ==================== 提示词分析 ====================
   llm_analyzer:
     description: "分析运营写的原始提示词，生成结构化 Schema（支持超长 prompt）"
-    model: "claude-sonnet-4-5-20250929"
+    model: "claude-sonnet-4-5"
     max_tokens: 64000
     temperature: 0
     enable_thinking: false
@@ -56,7 +56,7 @@ profiles:
   # ==================== Schema 生成 ====================
   schema_generator:
     description: "根据 Prompt 动态生成 Agent Schema"
-    model: "claude-sonnet-4-5-20250929"
+    model: "claude-sonnet-4-5"
     max_tokens: 4096
     temperature: 0
     enable_thinking: false
@@ -67,7 +67,7 @@ profiles:
   # ==================== 提示词智能合并 ====================
   prompt_merger:
     description: "智能合并框架规则与运营 prompt（支持超长 prompt）"
-    model: "claude-sonnet-4-5-20250929"
+    model: "claude-sonnet-4-5"
     max_tokens: 64000
     temperature: 0
     enable_thinking: false
@@ -78,7 +78,7 @@ profiles:
   # ==================== 🆕 V5.5 场景化提示词分解 ====================
   prompt_decomposer:
     description: "将运营 prompt 分解为场景化提示词（意图/简单/中等/复杂）"
-    model: "claude-sonnet-4-5-20250929"
+    model: "claude-sonnet-4-5"
     max_tokens: 60000  # Claude Sonnet 4.5 max output = 64000
     temperature: 0
     enable_thinking: false
@@ -89,7 +89,7 @@ profiles:
   # ==================== 工具能力推断 ====================
   tool_capability_inference:
     description: "推断工具的业务能力分类，用于智能工具选择"
-    model: "claude-haiku-4-5-20251001"
+    model: "claude-haiku-4-5"
     max_tokens: 100
     temperature: 0.3
     enable_thinking: false
@@ -100,7 +100,7 @@ profiles:
   # ==================== 后台任务 ====================
   background_task:
     description: "后台任务（如对话标题生成），使用轻量模型"
-    model: "claude-haiku-4-5-20251001"
+    model: "claude-haiku-4-5"
     max_tokens: 100
     temperature: 0.7
     enable_thinking: false
@@ -111,7 +111,7 @@ profiles:
   # ==================== Dazee 碎片记忆提取 ====================
   fragment_extractor:
     description: "从对话中提取隐性信息（任务、情绪、待办等），使用轻量模型快速推理"
-    model: "claude-haiku-4-5-20251001"
+    model: "claude-haiku-4-5"
     max_tokens: 1024
     temperature: 0
     enable_thinking: false
@@ -122,7 +122,7 @@ profiles:
   # ==================== Dazee 行为分析 ====================
   behavior_analyzer:
     description: "分析用户工作规律和 5W1H 行为模式，需要深度推理"
-    model: "claude-haiku-4-5-20251001"
+    model: "claude-haiku-4-5"
     max_tokens: 2048
     temperature: 0.3
     enable_thinking: false
@@ -133,7 +133,7 @@ profiles:
   # ==================== 计划管理 ====================
   plan_manager:
     description: "智能任务规划和管理，需要深度推理能力"
-    model: "claude-sonnet-4-5-20250929"
+    model: "claude-sonnet-4-5"
     max_tokens: 8192
     temperature: 1.0
     enable_thinking: true
@@ -148,8 +148,8 @@ profiles:
 #
 # 参数说明：
 # - model: 模型名称
-#   - claude-sonnet-4-5-20250929: 最强推理能力，适合复杂任务
-#   - claude-haiku-4-5-20251001: 轻量快速，适合简单任务
+#   - claude-sonnet-4-5: 最强推理能力，适合复杂任务
+#   - claude-haiku-4-5: 轻量快速，适合简单任务
 #
 # - max_tokens: 最大输出 token 数
 #   - 根据任务复杂度调整：简单任务 100-500，复杂任务 2048-64000

@@ -39,16 +39,13 @@ enabled_capabilities:
   exa_search: 1              # Exa 语义搜索
   knowledge_search: 1        # 个人知识库检索
   
-  # --- 数据处理类（沙盒工具）---
-  sandbox_list_dir: 1        # 沙盒列目录
-  sandbox_read_file: 1       # 沙盒读文件
-  sandbox_write_file: 1      # 沙盒写文件
-  sandbox_delete_file: 1     # 沙盒删文件
-  sandbox_file_exists: 1     # 沙盒检查文件存在
-  sandbox_run_command: 1     # 沙盒运行命令
-  sandbox_run_code: 1        # 沙盒代码执行
-  sandbox_create_project: 1  # 沙盒项目创建
-  sandbox_run_project: 1     # 沙盒项目运行
+  # --- 沙盒工具（E2B）---
+  sandbox_write_file: 1      # 写入文件
+  sandbox_read_file: 1       # 读取文件
+  sandbox_list_files: 1      # 列出目录
+  sandbox_run_command: 1     # 执行命令（支持 background）
+  sandbox_execute_python: 1  # 执行 Python 代码
+  sandbox_get_public_url: 1  # 获取公开 URL
   
   # --- PPT 生成类 ---
   ppt_generator: 1           # 闭环 PPT 生成工具

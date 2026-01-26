@@ -5,14 +5,14 @@
 # 默认配置：Opus 4.5 (Orchestrator) + Sonnet 4.5 (Workers)
 default:
   orchestrator:
-    model: "claude-opus-4-5-20251101"
+    model: "claude-opus-4-5"
     enable_thinking: true
     max_tokens: 16384
     thinking_budget: 10000
     temperature: 0.3
   
   worker:
-    model: "claude-sonnet-4-5-20250929"
+    model: "claude-sonnet-4-5"
     enable_thinking: true
     max_tokens: 8192
     thinking_budget: 5000
@@ -29,7 +29,7 @@ default:
   # V7.2: Critic 配置
   critic:
     enabled: true
-    model: "claude-sonnet-4-5-20250929"
+    model: "claude-sonnet-4-5"
     enable_thinking: true
     max_retries: 2
     quality_threshold: 6.0
@@ -37,7 +37,7 @@ default:
 # 成本优化配置：Sonnet (Orchestrator) + Haiku (Workers)
 cost_optimized:
   orchestrator:
-    model: "claude-sonnet-4-5-20250929"
+    model: "claude-sonnet-4-5"
     enable_thinking: false
     max_tokens: 8192
     temperature: 0.3
@@ -63,14 +63,14 @@ cost_optimized:
 # 高质量配置：Opus 4.5 (Orchestrator) + Opus 4.5 (Workers)
 high_quality:
   orchestrator:
-    model: "claude-opus-4-5-20251101"
+    model: "claude-opus-4-5"
     enable_thinking: true
     max_tokens: 16384
     thinking_budget: 10000
     temperature: 0.2
   
   worker:
-    model: "claude-opus-4-5-20251101"
+    model: "claude-opus-4-5"
     enable_thinking: true
     max_tokens: 16384
     thinking_budget: 10000
@@ -87,7 +87,7 @@ high_quality:
   # V7.2: Critic 配置（高质量模式使用 Opus）
   critic:
     enabled: true
-    model: "claude-opus-4-5-20251101"
+    model: "claude-opus-4-5"
     enable_thinking: true
     max_retries: 3
     quality_threshold: 7.0
@@ -95,13 +95,13 @@ high_quality:
 # 快速原型配置：Sonnet (Orchestrator) + Sonnet (Workers)
 prototype:
   orchestrator:
-    model: "claude-sonnet-4-5-20250929"
+    model: "claude-sonnet-4-5"
     enable_thinking: false
     max_tokens: 4096
     temperature: 0.5
   
   worker:
-    model: "claude-sonnet-4-5-20250929"
+    model: "claude-sonnet-4-5"
     enable_thinking: false
     max_tokens: 4096
     temperature: 0.7

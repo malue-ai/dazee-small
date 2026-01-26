@@ -129,6 +129,9 @@ onMounted(async () => {
   line-height: 1.6;
   color: #374151;
   font-size: 15px;
+  max-width: 100%;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .markdown-body h1,
@@ -172,13 +175,15 @@ onMounted(async () => {
 
 .markdown-body pre {
   padding: 16px;
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: hidden;
   font-size: 85%;
   line-height: 1.45;
   background-color: #f9fafb;
   border-radius: 8px;
   border: 1px solid #e5e7eb;
   margin-bottom: 16px;
+  max-width: 100%;
 }
 
 .markdown-body pre code {
@@ -234,10 +239,19 @@ onMounted(async () => {
 .markdown-body a {
   color: #2563eb;
   text-decoration: none;
+  word-break: break-all;
 }
 
 .markdown-body a:hover {
   text-decoration: underline;
+}
+
+/* 长文本/URL 强制换行 */
+.markdown-body p,
+.markdown-body li,
+.markdown-body td {
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .markdown-body img {

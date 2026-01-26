@@ -35,6 +35,7 @@ import aiofiles
 from logger import get_logger
 from utils.message_utils import messages_to_dict_list
 from infra.resilience import with_retry  # 🆕 V7.3: 使用统一的重试机制
+from core.tool.registry_config import get_frequent_tools  # 🆕 从统一配置读取
 from .base import (
     BaseLLMService,
     LLMConfig,
@@ -107,15 +108,17 @@ class ClaudeLLMService(BaseLLMService):
     # Claude 原生工具的 API 格式映射
     # 🆕 移除 web_search/web_fetch/memory，改用客户端工具
     # 这样在切换模型时仍然可用
+    # 🆕 移除 bash/text_editor，统一使用自定义沙盒工具（sandbox_run_command, sandbox_write_file）
+    # 这样可以支持多模型（GPT-4, Qwen, DeepSeek 等）
     NATIVE_TOOLS = {
         # Server-side Tools（仅保留 code_execution 用于 Skills）
         "code_execution": {"type": "code_execution", "name": "code_execution"},
         "tool_search_bm25": {"type": "tool_search_tool_bm25_20251119", "name": "tool_search_tool"},
         "tool_search_regex": {"type": "tool_search_tool_regex_20251119", "name": "tool_search_tool"},
         
-        # Client-side Tools
-        "bash": {"type": "bash_20250124", "name": "bash"},
-        "text_editor": {"type": "text_editor_20250728", "name": "str_replace_based_edit_tool"},
+        # Client-side Tools（已移除 bash/text_editor，改用自定义沙盒工具）
+        # "bash": {"type": "bash_20250124", "name": "bash"},
+        # "text_editor": {"type": "text_editor_20250728", "name": "str_replace_based_edit_tool"},
         "computer": {"type": "computer_20250124", "name": "computer", "display_width_px": 1024, "display_height_px": 768},
     }
     
@@ -484,8 +487,8 @@ class ClaudeLLMService(BaseLLMService):
             配置好的工具列表
         """
         if frequent_tools is None:
-            # 🆕 web_search 已移除，改用 tavily_search
-            frequent_tools = ["bash", "tavily_search", "plan_todo"]
+            # 🆕 从 config/tool_registry.yaml 统一配置读取
+            frequent_tools = get_frequent_tools()
         
         configured = []
         
@@ -744,6 +747,7 @@ class ClaudeLLMService(BaseLLMService):
         on_thinking: Optional[Callable[[str], None]] = None,
         on_content: Optional[Callable[[str], None]] = None,
         on_tool_call: Optional[Callable[[Dict], None]] = None,
+        override_thinking: Optional[bool] = None,
         **kwargs
     ) -> AsyncIterator[LLMResponse]:
         """
@@ -758,6 +762,7 @@ class ClaudeLLMService(BaseLLMService):
             on_thinking: thinking 回调
             on_content: content 回调
             on_tool_call: tool_call 回调
+            override_thinking: 动态覆盖 thinking 配置（None 使用默认配置，True/False 强制开启/关闭）
             **kwargs: 其他参数（支持 max_tokens 覆盖）
             
         Yields:
@@ -800,8 +805,10 @@ class ClaudeLLMService(BaseLLMService):
                 # 字符串格式 + 禁用缓存：直接使用
                 request_params["system"] = system
         
-        # Extended Thinking（由 LLM Service 配置控制）
-        if self.config.enable_thinking:
+        # Extended Thinking（支持动态覆盖）
+        # override_thinking 优先级高于配置：None=使用配置, True/False=强制开启/关闭
+        effective_thinking = override_thinking if override_thinking is not None else self.config.enable_thinking
+        if effective_thinking:
             request_params["thinking"] = {
                 "type": "enabled",
                 "budget_tokens": self.config.thinking_budget

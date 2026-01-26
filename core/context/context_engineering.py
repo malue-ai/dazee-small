@@ -257,11 +257,12 @@ class AgentState(Enum):
 class ToolMaskConfig:
     """工具遮蔽配置"""
     # 状态 → 允许的工具前缀
+    # 🆕 bash/text_editor 已移除，改用 sandbox_* 工具
     state_tool_prefixes: Dict[AgentState, List[str]] = field(default_factory=lambda: {
-        AgentState.IDLE: ["plan_", "web_", "file_", "bash"],
+        AgentState.IDLE: ["plan_", "web_", "file_", "sandbox_"],
         AgentState.PLANNING: ["plan_"],
         AgentState.BROWSING: ["web_", "browser_", "exa_"],
-        AgentState.CODING: ["bash", "text_editor", "e2b_", "code_"],
+        AgentState.CODING: ["sandbox_", "e2b_", "code_"],
         AgentState.SEARCHING: ["web_", "exa_", "knowledge_"],
         AgentState.EXECUTING: ["*"],  # 允许所有
         AgentState.VALIDATING: ["plan_", "file_"],
@@ -388,7 +389,7 @@ class ToolMasker:
                 return AgentState.PLANNING
             elif tool_name.startswith(("web_", "exa_", "browser_")):
                 return AgentState.BROWSING
-            elif tool_name.startswith(("bash", "e2b_", "code_")):
+            elif tool_name.startswith(("sandbox_", "e2b_", "code_")):
                 return AgentState.CODING
         
         if any(kw in action_lower for kw in ["搜索", "查找", "search", "find"]):

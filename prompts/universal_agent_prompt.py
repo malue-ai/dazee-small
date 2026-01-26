@@ -40,6 +40,7 @@ You are an advanced AI agent with extended thinking, code execution, and tool us
 2) **计划优先**：非纯问答任务，第一个工具必须 `plan_todo.create_plan()`，后续每步前 `get_plan`，完成后 `update_step`。  
 3) **信息充分**：缺信息先搜索/读取，再产出；禁止虚构或占位内容。  
 4) **验证闭环**：输出前执行 [Final Validation]，不足则迭代或澄清，不得直接 end_turn。
+5) **禁止输出沙盒 URL**：使用 sandbox_* 工具启动服务后，**严禁在回复中输出预览链接**（如 `https://xxx.e2b.app`），系统会自动将链接推送到前端。
 
 ---
 
@@ -1462,57 +1463,24 @@ def _fetch_user_profile(user_id: str, user_query: str, max_memories: int = 10) -
 def get_universal_agent_prompt(
     include_skills: bool = True,
     skills_dir: Optional[str] = None,
-    include_e2b: bool = True,
-    session_summary: Optional[str] = None,  # 🆕 V4.3: 动态注入进度恢复协议
-    conversation_id: Optional[str] = None,  # 🆕 动态注入会话上下文
-    user_id: Optional[str] = None,          # 🆕 动态注入用户 ID
-    user_query: Optional[str] = None,       # 🆕 V4.6: 用户查询（用于 Mem0 搜索）
-    skip_memory_retrieval: bool = False     # 🆕 V4.6: 是否跳过 Mem0 记忆检索
+    session_summary: Optional[str] = None,
+    user_id: Optional[str] = None,
+    user_query: Optional[str] = None,
+    skip_memory_retrieval: bool = False
 ) -> str:
     """
     获取通用智能体框架系统提示词
     
     Args:
-        include_skills: 是否包含Skills metadata
-        skills_dir: Skills目录路径
-        include_e2b: 是否包含E2B协议（默认True）
-        session_summary: 🆕 Session 进度恢复摘要（框架自动注入，用户透明）
-        conversation_id: 🆕 会话 ID（用于沙盒工具调用）
-        user_id: 🆕 用户 ID（可选）
-        user_query: 🆕 V4.6 用户查询（用于 Mem0 语义搜索）
-        skip_memory_retrieval: 🆕 V4.6 是否跳过 Mem0 记忆检索
+        include_skills: 是否包含 Skills metadata
+        skills_dir: Skills 目录路径
+        session_summary: Session 进度恢复摘要（框架自动注入）
+        user_id: 用户 ID（用于 Mem0 记忆检索）
+        user_query: 用户查询（用于 Mem0 语义搜索）
+        skip_memory_retrieval: 是否跳过 Mem0 记忆检索
         
     Returns:
         完整的系统提示词
-        
-    🆕 V4.3 新增：
-    - session_summary: 从 PlanMemory 获取的进度恢复协议
-    - 用于跨 Session 恢复任务进度
-    - 对用户完全透明，框架自动处理
-    
-    🆕 V4.4 新增：
-    - conversation_id: 动态注入会话上下文，让 Agent 正确调用 sandbox_* 工具
-    - user_id: 用户标识
-    
-    🆕 V4.6 新增：
-    - user_query: 用户当前查询，用于 Mem0 语义搜索相关记忆
-    - skip_memory_retrieval: 由意图分析决定，跳过无需个性化的查询
-    
-    示例：
-        # 首次 Session（无进度）
-        prompt = get_universal_agent_prompt()
-        
-        # 后续 Session（自动恢复进度）
-        summary = plan_memory.get_session_summary(task_id)
-        prompt = get_universal_agent_prompt(session_summary=summary)
-        
-        # 带会话上下文和 Mem0 记忆检索
-        prompt = get_universal_agent_prompt(
-            conversation_id="conv_xxx",
-            user_id="user_001",
-            user_query="帮我生成一个PPT",
-            skip_memory_retrieval=False  # 检索用户偏好
-        )
     """
     prompt = UNIVERSAL_AGENT_PROMPT
     
@@ -1522,28 +1490,9 @@ def get_universal_agent_prompt(
         if user_profile:
             prompt += user_profile
     
-    # 🆕 V4.3: 注入 Session 进度恢复协议（用户透明）
+    # 注入 Session 进度恢复协议
     if session_summary:
         prompt += "\n\n" + session_summary
-    
-    # 添加 E2B 协议
-    if include_e2b:
-        try:
-            from prompts.e2b_sandbox_protocol import get_e2b_sandbox_protocol
-            e2b_protocol = get_e2b_sandbox_protocol()
-            prompt += "\n\n---\n\n" + e2b_protocol
-        except Exception as e:
-            # 如果加载失败，不影响主流程
-            pass
-    
-    # 🆕 V4.4: 注入沙盒运行时上下文（conversation_id 等）
-    if conversation_id:
-        from prompts.sandbox_file_protocol import build_sandbox_context
-        sandbox_context = build_sandbox_context(
-            conversation_id=conversation_id,
-            user_id=user_id
-        )
-        prompt += sandbox_context
     
     # 添加 Skills vs Tools 决策规则 + Skills Metadata
     if include_skills:

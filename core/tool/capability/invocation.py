@@ -22,6 +22,9 @@ from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 from enum import Enum
 
+# 🆕 从统一配置读取工具分类
+from core.tool.registry_config import get_frequent_tools
+
 
 class InvocationType(Enum):
     """调用方式类型"""
@@ -305,8 +308,8 @@ class InvocationSelector:
         3. 添加 tool_search_tool
         """
         # 常用工具（不延迟加载）
-        # 🆕 web_search 已移除，改用 tavily_search
-        frequent_tools = {"bash", "tavily_search", "plan_todo", "str_replace_based_edit_tool"}
+        # 🆕 从 config/tool_registry.yaml 统一配置读取
+        frequent_tools = set(get_frequent_tools())
         
         configured_tools = []
         

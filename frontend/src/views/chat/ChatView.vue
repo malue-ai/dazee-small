@@ -18,10 +18,10 @@
     />
 
     <!-- 右侧主区域 -->
-    <div class="flex-1 flex flex-col min-w-0 relative z-10">
-      <div class="flex-1 flex flex-col overflow-hidden relative">
-        
-      <!-- 顶部导航栏 -->
+    <div class="flex-1 flex min-w-0 relative z-10 overflow-hidden">
+      <!-- 聊天内容区域 -->
+      <div class="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <!-- 顶部导航栏 -->
         <ChatHeader
           :title="conversationStore.currentTitle"
           :agents="agents"
@@ -34,7 +34,7 @@
           @toggle-sidebar="showRightSidebar = !showRightSidebar"
         />
 
-      <!-- 消息列表区域 -->
+        <!-- 消息列表区域 -->
         <MessageList
           ref="messageListRef"
           :messages="conversationStore.messages"
@@ -44,7 +44,7 @@
           @file-preview="handleFilePreview"
         />
 
-      <!-- 输入框区域 -->
+        <!-- 输入框区域 -->
         <ChatInputArea
           ref="inputAreaRef"
           v-model="inputMessage"
@@ -58,14 +58,15 @@
           @upload-click="handleUploadClick"
           @remove-file="handleRemoveFile"
         />
+      </div>
 
-        <!-- 统一的右侧面板（任务/Mind/工作区） -->
-        <Transition name="slide-right">
-    <div 
-      v-show="showRightSidebar"
-            class="absolute top-4 right-4 bottom-4 bg-white rounded-2xl shadow-xl border border-gray-100 flex flex-col z-20 overflow-hidden"
-            :class="rightSidebarTab === 'workspace' ? 'w-[600px]' : 'w-[380px]'"
-    >
+      <!-- 统一的右侧面板（任务/工作区） -->
+      <Transition name="slide-right">
+        <div 
+          v-if="showRightSidebar"
+          class="flex-shrink-0 bg-white flex flex-col overflow-hidden my-4 mr-4 ml-3 rounded-2xl shadow-xl border border-gray-100"
+          :class="rightSidebarTab === 'workspace' ? 'w-[600px]' : 'w-[380px]'"
+        >
             <!-- 顶部 Tab 栏 -->
             <div class="h-14 flex items-center justify-between px-4 border-b border-gray-100 flex-shrink-0">
               <div class="flex gap-1 p-1 bg-gray-100 rounded-lg">
@@ -134,11 +135,9 @@
           </div>
        </div>
     </div>
-        </div>
-        </Transition>
-
-        </div>
-          </div>
+            </div>
+      </Transition>
+    </div>
           
     <!-- 文件上传 input -->
               <input 
@@ -272,7 +271,7 @@ onMounted(async () => {
   // 启动活跃会话轮询
   sessionStore.startPolling(conversationStore.userId)
   
-  // 根据路由加载会话
+  // 根据路由加载会话（只在 onMounted 中加载一次）
   const conversationId = route.params.conversationId
   if (conversationId && typeof conversationId === 'string') {
     await conversationStore.load(conversationId)
@@ -286,11 +285,12 @@ onUnmounted(() => {
   sessionStore.stopPolling()
 })
 
-// 监听路由变化
+// 监听路由变化（跳过初始值，只监听后续变化）
 watch(
   () => route.params.conversationId,
-  async (newId) => {
-    if (newId && typeof newId === 'string') {
+  async (newId, oldId) => {
+    // 只在路由实际变化时加载（避免重复加载）
+    if (newId && typeof newId === 'string' && newId !== oldId) {
       await conversationStore.load(newId)
     }
   }
@@ -479,7 +479,7 @@ async function handleHITLCancel(): Promise<void> {
 </script>
 
 <style scoped>
-/* 滚动条美化 */
+/* 滚动条美化 - 默认透明，hover 时显示 */
 .scrollbar-thin::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -488,23 +488,30 @@ async function handleHITLCancel(): Promise<void> {
   background: transparent;
 }
 .scrollbar-thin::-webkit-scrollbar-thumb {
-  background-color: rgba(156, 163, 175, 0.3);
+  background-color: transparent;
   border-radius: 3px;
+}
+/* 鼠标悬停在容器上时显示滚动条 */
+.scrollbar-thin:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(156, 163, 175, 0.3);
 }
 .scrollbar-thin::-webkit-scrollbar-thumb:hover {
   background-color: rgba(156, 163, 175, 0.5);
 }
 
-/* 页面过渡动画 */
+/* 右侧面板过渡动画 - 使用 width 和 margin 实现平滑推开效果 */
 .slide-right-enter-active,
 .slide-right-leave-active {
-  transition: all 0.3s ease-out;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .slide-right-enter-from,
 .slide-right-leave-to {
-  transform: translateX(20px);
+  width: 0 !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
   opacity: 0;
+  overflow: hidden;
 }
 
 </style>

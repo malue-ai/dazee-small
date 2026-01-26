@@ -142,7 +142,7 @@ class MCPPool:
         self._shutdown = False
         
         # 配置
-        self.max_concurrent_per_server = int(os.getenv("MCP_MAX_CONCURRENT", "5"))
+        self.max_concurrent_per_server = int(os.getenv("MCP_MAX_CONCURRENT", "20"))
         self.health_check_interval = int(os.getenv("MCP_HEALTH_CHECK_INTERVAL", "60"))
         self.connect_timeout = float(os.getenv("MCP_CONNECT_TIMEOUT", "30.0"))
         self.tool_timeout = float(os.getenv("MCP_TOOL_TIMEOUT", "1200.0"))
@@ -177,30 +177,59 @@ class MCPPool:
         
         logger.info(f"   📦 发现 {len(configs)} 个 MCP 服务器")
         
-        # 2. 并行连接
+        # 2. 并行连接（每个连接有独立超时）
         results = {}
-        tasks = []
         
-        for server_url, config in configs.items():
-            tasks.append(self._connect_server(server_url, config))
+        async def connect_with_timeout(server_url: str, config: MCPConfig) -> tuple[str, bool]:
+            """带超时的连接"""
+            try:
+                # 单个连接最多等 30 秒
+                result = await asyncio.wait_for(
+                    self._connect_server(server_url, config),
+                    timeout=30.0
+                )
+                return (server_url, result)
+            except asyncio.TimeoutError:
+                logger.warning(f"   ⏱️ {config.server_name}: 连接超时")
+                return (server_url, False)
+            except Exception as e:
+                logger.warning(f"   ❌ {config.server_name}: {type(e).__name__}")
+                return (server_url, False)
         
-        # 等待所有连接完成
-        connect_results = await asyncio.gather(*tasks, return_exceptions=True)
+        tasks = [
+            connect_with_timeout(server_url, config)
+            for server_url, config in configs.items()
+        ]
+        
+        # 等待所有连接完成（总超时 60 秒）
+        try:
+            connect_results = await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=60.0
+            )
+        except asyncio.TimeoutError:
+            logger.warning("⚠️ MCP 预连接总体超时")
+            connect_results = []
         
         # 3. 整理结果
-        for (server_url, config), result in zip(configs.items(), connect_results):
+        for result in connect_results:
             if isinstance(result, Exception):
-                logger.warning(f"   ❌ {config.server_name}: 连接失败 - {result}")
-                results[server_url] = False
-            else:
-                results[server_url] = result
-                if result:
-                    logger.info(f"   ✅ {config.server_name}: 已连接")
-                else:
-                    logger.warning(f"   ❌ {config.server_name}: 连接失败")
+                continue
+            if isinstance(result, tuple) and len(result) == 2:
+                server_url, success = result
+                results[server_url] = success
+                config = configs.get(server_url)
+                if config:
+                    if success:
+                        logger.info(f"   ✅ {config.server_name}: 已连接")
+                    else:
+                        logger.warning(f"   ❌ {config.server_name}: 连接失败")
         
-        # 4. 更新 Redis 统计
-        await self._update_active_servers()
+        # 4. 更新 Redis 统计（静默失败）
+        try:
+            await self._update_active_servers()
+        except Exception:
+            pass
         
         connected = sum(1 for v in results.values() if v)
         logger.info(f"🔌 MCP 预连接完成: {connected}/{len(results)} 个服务器")
@@ -289,7 +318,11 @@ class MCPPool:
             
             if success:
                 # 发现工具
-                tools = await client.discover_tools()
+                try:
+                    tools = await client.discover_tools()
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    # 工具发现失败不影响连接
+                    tools = []
                 
                 # 保存状态
                 async with self._lock:
@@ -301,8 +334,11 @@ class MCPPool:
                         tools_count=len(tools),
                     )
                 
-                # 更新统计
-                await self.increment_stat(config.server_name, "connects")
+                # 更新统计（静默失败）
+                try:
+                    await self.increment_stat(config.server_name, "connects")
+                except Exception:
+                    pass
                 
                 return True
             else:
@@ -315,17 +351,31 @@ class MCPPool:
                     )
                 
                 return False
-                
-        except Exception as e:
-            logger.error(f"连接 MCP 服务器失败 {config.server_name}: {e}")
+        
+        except asyncio.CancelledError:
+            # CancelledError 需要特殊处理，不要在取消上下文中 await
+            logger.warning(f"⚠️ MCP 连接被取消 {config.server_name}")
+            return False
+        
+        except (GeneratorExit, RuntimeError) as e:
+            # anyio cancel scope 相关的异常
+            logger.warning(f"⚠️ MCP 连接异常退出 {config.server_name}: {type(e).__name__}")
+            return False
+        
+        except BaseException as e:
+            # 捕获所有异常，包括 BaseExceptionGroup
+            logger.error(f"连接 MCP 服务器失败 {config.server_name}: {type(e).__name__}: {e}")
             
             # 保存配置以便后续重连
-            async with self._lock:
-                self._servers[server_url] = MCPServerState(
-                    config=config,
-                    client=None,
-                    connected=False,
-                )
+            try:
+                async with self._lock:
+                    self._servers[server_url] = MCPServerState(
+                        config=config,
+                        client=None,
+                        connected=False,
+                    )
+            except Exception:
+                pass
             
             return False
     
@@ -456,18 +506,29 @@ class MCPPool:
         
         except asyncio.CancelledError:
             # CancelledError 不继承自 Exception，需要单独捕获
+            # 注意：在取消上下文中不要再 await 其他操作，否则会导致 anyio cancel scope 问题
             logger.warning(f"⚠️ MCP 连接被取消 {config.server_name}")
-            await self.increment_stat(config.server_name, "connect_failures")
+            # 不在这里记录统计，避免在取消上下文中 await
             return None
         
         except (KeyboardInterrupt, SystemExit):
             # 这些异常需要向上传播
             raise
+        
+        except (GeneratorExit, RuntimeError) as e:
+            # GeneratorExit 和某些 RuntimeError（如 anyio cancel scope 问题）
+            # 不应该记录统计，直接返回
+            logger.warning(f"⚠️ MCP 连接异常退出 {config.server_name}: {type(e).__name__}")
+            return None
                 
         except BaseException as e:
             # 捕获所有异常，包括 BaseExceptionGroup
             logger.error(f"❌ MCP 连接异常 {config.server_name}: {type(e).__name__}: {e}")
-            await self.increment_stat(config.server_name, "connect_failures")
+            # 尝试记录统计，但如果失败也不抛出异常
+            try:
+                await self.increment_stat(config.server_name, "connect_failures")
+            except Exception:
+                pass  # 静默忽略统计失败
             return None
     
     def get_client_sync(self, server_url: str) -> Optional["MCPClientWrapper"]:

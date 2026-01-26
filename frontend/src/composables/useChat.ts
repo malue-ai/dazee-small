@@ -461,12 +461,15 @@ export function useChat() {
 
     if (blockType === 'text') {
       msg.content += deltaText
-      if (block && 'text' in block) {
+      // 🔧 修复：直接设置 text 属性，不检查是否存在
+      // 后端 content_start 可能只发送 { type: 'text' } 而没有 text 字段
+      if (block) {
         (block as any).text = ((block as any).text || '') + deltaText
       }
     } else if (blockType === 'thinking') {
       msg.thinking = (msg.thinking || '') + deltaText
-      if (block && 'thinking' in block) {
+      // 🔧 修复：直接设置 thinking 属性
+      if (block) {
         (block as any).thinking = ((block as any).thinking || '') + deltaText
       }
     } else if (blockType === 'tool_use' || blockType === 'server_tool_use') {

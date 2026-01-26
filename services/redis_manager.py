@@ -48,7 +48,7 @@ class RedisSessionManager:
     
     async def _get_client(self) -> redis.Redis:
         """
-        获取或创建 Redis 客户端（懒加载）
+        获取或创建 Redis 客户端（懒加载，带重试）
         """
         if self._client is None:
             self._client = redis.Redis(
@@ -56,15 +56,51 @@ class RedisSessionManager:
                 port=self.redis_port,
                 db=self.redis_db,
                 password=self.redis_password,
-            decode_responses=True  # 自动解码为字符串
+                decode_responses=True,  # 自动解码为字符串
+                socket_connect_timeout=5.0,  # 连接超时 5 秒
+                socket_timeout=5.0,  # 操作超时 5 秒
+                retry_on_timeout=True,  # 超时自动重试
+            )
+        
+        # 简单重试逻辑：最多尝试 3 次
+        max_retries = 3
+        last_error = None
+        
+        for attempt in range(1, max_retries + 1):
+            try:
+                await asyncio.wait_for(
+                    self._client.ping(),
+                    timeout=3.0  # 每次 ping 最多等 3 秒
+                )
+                if attempt > 1:
+                    logger.info(f"✅ Redis 重连成功 (尝试 {attempt}/{max_retries})")
+                return self._client
+            except asyncio.TimeoutError as e:
+                last_error = e
+                logger.warning(
+                    f"⚠️ Redis ping 超时 (尝试 {attempt}/{max_retries}): "
+                    f"{self.redis_host}:{self.redis_port}"
+                )
+                if attempt < max_retries:
+                    await asyncio.sleep(0.5 * attempt)  # 递增延迟
+            except Exception as e:
+                last_error = e
+                logger.warning(
+                    f"⚠️ Redis 连接失败 (尝试 {attempt}/{max_retries}): {str(e)}"
+                )
+                if attempt < max_retries:
+                    await asyncio.sleep(0.5 * attempt)
+        
+        # 所有重试都失败
+        logger.error(
+            f"❌ Redis 连接失败（已尝试 {max_retries} 次）: "
+            f"{self.redis_host}:{self.redis_port}, "
+            f"最后错误: {str(last_error)}"
         )
-        try:
-            await self._client.ping()
-        except Exception as e:
-            logger.error(f"❌ Redis 连接失败: {str(e)}")
-            self._client = None
-            raise
-        return self._client
+        self._client = None
+        raise ConnectionError(
+            f"无法连接到 Redis {self.redis_host}:{self.redis_port}"
+        ) from last_error
     
     @property
     def client(self) -> redis.Redis:

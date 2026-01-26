@@ -152,25 +152,35 @@ class AgentPool:
     
     async def _init_agent_meta(self, agent_id: str, info: Dict[str, Any]) -> None:
         """
-        初始化 Agent 元数据到 Redis
+        初始化 Agent 元数据到 Redis（失败时仅记录警告，不阻塞启动）
         
         Args:
             agent_id: Agent ID
             info: Agent 信息
         """
-        client = await self.redis._get_client()
-        
-        # 元数据
-        meta_key = f"{self.KEY_PREFIX}:{agent_id}:meta"
-        await client.hset(meta_key, mapping={
-            "agent_id": agent_id,
-            "description": info.get("description", ""),
-            "loaded_at": datetime.now().isoformat(),
-        })
-        
-        # 初始化实例计数为 0
-        instances_key = f"{self.KEY_PREFIX}:{agent_id}:instances"
-        await client.set(instances_key, "0")
+        try:
+            client = await self.redis._get_client()
+            
+            # 元数据
+            meta_key = f"{self.KEY_PREFIX}:{agent_id}:meta"
+            await client.hset(meta_key, mapping={
+                "agent_id": agent_id,
+                "description": info.get("description", ""),
+                "loaded_at": datetime.now().isoformat(),
+            })
+            
+            # 初始化实例计数为 0
+            instances_key = f"{self.KEY_PREFIX}:{agent_id}:instances"
+            await client.set(instances_key, "0")
+            
+            logger.debug(f"✅ Agent 元数据已写入 Redis: {agent_id}")
+        except Exception as e:
+            # Redis 初始化失败不应该阻塞整个应用启动
+            # 只记录警告，允许应用在无 Redis 的情况下运行（功能降级）
+            logger.warning(
+                f"⚠️ 初始化 Agent 元数据到 Redis 失败（Agent 仍可正常使用）: "
+                f"{agent_id}, 错误: {str(e)}"
+            )
     
     # ==================== 实例获取/释放 ====================
     

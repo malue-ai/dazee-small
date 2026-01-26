@@ -17,20 +17,21 @@ export const FILE_WRITE_TOOLS = [
  */
 export const TERMINAL_TOOLS = [
   'sandbox_run_command',
-  'run_project',
-  'sandbox_run_project'
+  'run_project'
 ] as const
 
 /**
  * 工具名称中文映射表
  */
 export const TOOL_NAME_MAP: Record<string, string> = {
-  // 沙盒/文件操作
+  // 沙盒工具（E2B）
   'sandbox_write_file': '写入文件',
   'sandbox_read_file': '读取文件',
+  'sandbox_list_files': '列出目录',
   'sandbox_run_command': '执行命令',
-  'sandbox_run_project': '运行项目',
-  'sandbox_create_project': '创建项目',
+  'sandbox_execute_python': '执行代码',
+  'sandbox_get_public_url': '获取URL',
+  // 其他文件操作
   'write_file': '写入文件',
   'read_file': '读取文件',
   'str_replace_editor': '编辑文件',
@@ -161,7 +162,7 @@ export const DEFAULT_CONFIG = {
   RECONNECT_MAX_DELAY: 10000,
   
   /** 活跃会话轮询间隔（毫秒） */
-  POLLING_INTERVAL: 3000,
+  POLLING_INTERVAL: 5000,
   
   /** 默认分页大小 */
   PAGE_SIZE: 20,

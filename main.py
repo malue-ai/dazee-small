@@ -50,6 +50,45 @@ APP_VERSION = "0.7.5"
 APP_DESCRIPTION = "基于 Claude Sonnet 4.5 的智能体框架"
 
 
+# ==================== 异步异常处理 ====================
+
+def _setup_asyncio_exception_handler() -> None:
+    """
+    设置自定义的 asyncio 异常处理器
+    
+    用于抑制 MCP SDK 的 streamable_http_client 在关闭时产生的
+    "Attempted to exit cancel scope in a different task" 错误。
+    
+    这是 anyio 和 MCP SDK 的已知问题，在应用关闭后清理异步生成器时会触发，
+    但不影响应用的正常运行。
+    """
+    loop = asyncio.get_event_loop()
+    original_handler = loop.get_exception_handler()
+    
+    def custom_exception_handler(loop, context):
+        exception = context.get("exception")
+        message = context.get("message", "")
+        
+        # 检查是否是 MCP streamable_http_client 关闭时的已知错误
+        if exception and isinstance(exception, RuntimeError):
+            error_msg = str(exception)
+            if "Attempted to exit cancel scope in a different task" in error_msg:
+                # 忽略这个特定错误，它发生在应用关闭后，不影响正常运行
+                return
+        
+        # 检查是否是异步生成器关闭时的错误（包含 streamable_http_client）
+        if "streamable_http_client" in message:
+            return
+        
+        # 对于其他错误，使用原始处理器或默认处理
+        if original_handler:
+            original_handler(loop, context)
+        else:
+            loop.default_exception_handler(context)
+    
+    loop.set_exception_handler(custom_exception_handler)
+
+
 # ==================== 启动辅助函数 ====================
 
 async def _init_s3_uploader() -> None:
@@ -325,6 +364,9 @@ async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # ===== 启动阶段 =====
     print("🚀 Zenflux Agent API 启动中...")
+    
+    # 设置自定义异常处理器（抑制 MCP 关闭时的已知错误）
+    _setup_asyncio_exception_handler()
     
     await _init_resilience_config()
     await _init_database()

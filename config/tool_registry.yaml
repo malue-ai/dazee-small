@@ -1,0 +1,75 @@
+# ==================== 统一工具注册配置 ====================
+#
+# 设计原则：
+# 1. 所有工具分类配置集中在此文件
+# 2. 各模块从此配置读取，避免分散定义
+# 3. 修改工具分类时只需编辑此文件
+#
+# 使用方式：
+#   from config.tool_registry import get_core_tools, get_sandbox_tools, get_frequent_tools
+#
+
+# ==================== 核心工具（Level 1）====================
+# 始终启用的工具，不暴露给用户配置
+# 用于：core/tool/loader.py, core/tool/selector.py
+core_tools:
+  - plan_todo                   # 任务规划
+  - api_calling                 # API 调用
+  - hitl                        # HITL (Human-in-the-Loop)
+  - file_read                   # 文件读取
+  # 沙盒工具（Vibe Coding 核心 - 6 个，贴近 E2B 原生 API）
+  - sandbox_write_file          # 写入文件
+  - sandbox_read_file           # 读取文件
+  - sandbox_list_files          # 列出目录
+  - sandbox_run_command         # 执行命令（支持 background）
+  - sandbox_execute_python      # 执行 Python 代码
+  - sandbox_get_public_url      # 获取公开 URL
+
+# ==================== 沙盒工具 ====================
+# 需要注入 conversation_id 的工具
+# 用于：core/agent/simple_agent.py
+sandbox_tools:
+  - sandbox_write_file
+  - sandbox_read_file
+  - sandbox_list_files
+  - sandbox_run_command
+  - sandbox_execute_python
+  - sandbox_get_public_url
+
+# ==================== 常用工具（不延迟加载）====================
+# Tool Search 模式下不延迟加载的工具
+# 用于：core/llm/claude.py, core/tool/capability/invocation.py
+frequent_tools:
+  - sandbox_run_command
+  - sandbox_write_file
+  - tavily_search
+  - plan_todo
+
+# ==================== 工具类别（简写展开）====================
+# 用户配置一个类别，自动展开为多个工具
+# 用于：core/tool/loader.py
+tool_categories:
+  # 文档生成类（Claude Skills）
+  document_skills:
+    - pptx
+    - xlsx
+    - docx
+    - pdf
+  
+  # 代码沙盒类（E2B 沙盒工具 - 6 个，贴近 E2B 原生 API）
+  sandbox_tools:
+    - sandbox_write_file
+    - sandbox_read_file
+    - sandbox_list_files
+    - sandbox_run_command
+    - sandbox_execute_python
+    - sandbox_get_public_url
+  
+  # PPT 生成类（可选扩展）
+  ppt_tools:
+    - ppt_generator
+    - slidespeak_render
+  
+  # 文档解析类（允许使用简写配置）
+  document_partition:
+    - document_partition_tool

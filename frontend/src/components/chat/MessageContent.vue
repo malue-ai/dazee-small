@@ -3,31 +3,17 @@
     <!-- 渲染所有内容块 -->
     <template v-for="(block, index) in contentBlocks" :key="index">
       <!-- 思考过程 -->
-      <div v-if="block.type === 'thinking'" class="thinking-block">
+      <div v-if="block.type === 'thinking'" class="thinking-card">
         <div class="thinking-header" @click="toggleBlock(index)">
-          <div class="thinking-left">
-            <svg class="thinking-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <circle cx="12" cy="12" r="10"/>
-              <path d="M12 16v-4M12 8h.01"/>
-            </svg>
-            <span class="thinking-title">思考过程</span>
+          <div class="thinking-label">
+            <span class="thinking-dot"></span>
+            <span>思考过程</span>
           </div>
-          <svg 
-            class="thinking-chevron" 
-            :class="{ 'is-expanded': expandedBlocks[index] }"
-            viewBox="0 0 24 24" 
-            fill="none" 
-            stroke="currentColor" 
-            stroke-width="2"
-          >
-            <polyline points="6 9 12 15 18 9"/>
-          </svg>
+          <span class="thinking-toggle">{{ expandedBlocks[index] ? '收起' : '展开' }}</span>
         </div>
-        <Transition name="collapse">
-          <div v-show="expandedBlocks[index]" class="thinking-content">
-            <p>{{ block.thinking }}</p>
-          </div>
-        </Transition>
+        <div v-show="expandedBlocks[index]" class="thinking-body">
+          {{ block.thinking }}
+        </div>
       </div>
 
       <!-- 文本内容 -->
@@ -221,16 +207,19 @@ function formatFileSize(bytes) {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  max-width: 100%;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .content-block {
   border-radius: 8px;
 }
 
-/* 思考过程 - Apple 风格 */
-.thinking-block {
-  background: #f9fafb;
-  border-radius: 12px;
+/* 思考过程 - 简洁风格 */
+.thinking-card {
+  background: #f8f9fa;
+  border-radius: 10px;
   overflow: hidden;
 }
 
@@ -240,74 +229,41 @@ function formatFileSize(bytes) {
   justify-content: space-between;
   padding: 10px 14px;
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background 0.15s;
 }
 
 .thinking-header:hover {
-  background: #f3f4f6;
+  background: #f1f3f4;
 }
 
-.thinking-left {
+.thinking-label {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.thinking-icon {
-  width: 16px;
-  height: 16px;
-  color: #9ca3af;
-}
-
-.thinking-title {
   font-size: 13px;
   font-weight: 500;
-  color: #6b7280;
+  color: #5f6368;
 }
 
-.thinking-chevron {
-  width: 16px;
-  height: 16px;
-  color: #9ca3af;
-  transition: transform 0.2s ease;
+.thinking-dot {
+  width: 6px;
+  height: 6px;
+  background: #9aa0a6;
+  border-radius: 50%;
 }
 
-.thinking-chevron.is-expanded {
-  transform: rotate(180deg);
+.thinking-toggle {
+  font-size: 12px;
+  color: #9aa0a6;
 }
 
-.thinking-content {
-  padding: 0 14px 14px;
-}
-
-.thinking-content p {
-  margin: 0;
+.thinking-body {
+  padding: 0 14px 12px;
   font-size: 13px;
-  color: #6b7280;
+  color: #5f6368;
   line-height: 1.6;
   white-space: pre-wrap;
   word-wrap: break-word;
-}
-
-/* 折叠动画 */
-.collapse-enter-active,
-.collapse-leave-active {
-  transition: all 0.2s ease;
-  overflow: hidden;
-}
-
-.collapse-enter-from,
-.collapse-leave-to {
-  opacity: 0;
-  max-height: 0;
-  padding-top: 0;
-  padding-bottom: 0;
-}
-
-.collapse-enter-to,
-.collapse-leave-from {
-  opacity: 1;
-  max-height: 500px;
 }
 
 /* 文本内容 */

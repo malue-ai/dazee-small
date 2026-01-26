@@ -571,6 +571,11 @@ class AgentSchema(BaseModel):
         description="是否启用 Extended Thinking（None 使用默认值）"
     )
     
+    thinking_mode: Literal["native", "simulated", "none"] = Field(
+        default="native",
+        description="思考模式: native=原生Extended Thinking, simulated=模拟思考（单独调用LLM生成用户友好的思考过程）, none=不展示思考"
+    )
+    
     enable_caching: Optional[bool] = Field(
         default=None,
         description="是否启用 Prompt Caching（None 使用默认值）"
@@ -657,6 +662,9 @@ class AgentSchema(BaseModel):
             result["enable_thinking"] = self.enable_thinking
         if self.enable_caching is not None:
             result["enable_caching"] = self.enable_caching
+        
+        # 🆕 V7.10: thinking_mode 始终包含（有默认值）
+        result["thinking_mode"] = self.thinking_mode
         
         return result
     

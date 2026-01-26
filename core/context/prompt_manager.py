@@ -265,7 +265,7 @@ class PromptManager:
         user_id: Optional[str] = None
     ) -> bool:
         """
-        会话开始时调用 → 追加 sandbox_context
+        会话开始时调用
         
         Args:
             ctx: RuntimeContext 实例
@@ -273,23 +273,12 @@ class PromptManager:
             user_id: 用户 ID（可选）
             
         Returns:
-            是否成功追加
+            是否成功
         """
         state = self._get_or_create_state(ctx)
         state.conversation_id = conversation_id
         state.user_id = user_id
-        
-        # 构建沙盒上下文
-        content = self._build_sandbox_context(state)
-        if not content:
-            return False
-        
-        return state.append(
-            fragment_id="sandbox_context",
-            content=content,
-            priority=100,
-            event_type="session_start"
-        )
+        return True
     
     def on_tool_result(
         self,
@@ -660,48 +649,6 @@ class PromptManager:
         return re.sub(r'\{\{(\w+)\}\}', replace_var, template)
     
     # ===== 动态内容生成 =====
-    
-    def _build_sandbox_context(self, state: PromptState) -> str:
-        """
-        构建沙盒上下文
-        
-        Args:
-            state: PromptState 实例
-            
-        Returns:
-            沙盒上下文内容
-        """
-        conversation_id = state.conversation_id
-        user_id = state.user_id
-        
-        if not conversation_id:
-            return ""
-        
-        content = f"""
-# 📌 当前会话上下文（CRITICAL）
-
-**必须使用以下参数调用 sandbox_* 工具：**
-
-- **conversation_id**: `{conversation_id}`
-"""
-        
-        if user_id:
-            content += f"- **user_id**: `{user_id}`\n"
-        
-        content += f"""
-## 沙盒工具使用示例
-
-```json
-{{
-    "conversation_id": "{conversation_id}",
-    "path": "/home/user/app/index.html",
-    "content": "..."
-}}
-```
-
-⚠️ **注意**：调用 sandbox_* 工具时必须使用上面的 conversation_id，否则会失败。
-"""
-        return content.strip()
     
     def _build_user_context(self, variables: Dict[str, Any]) -> str:
         """

@@ -3,54 +3,24 @@
     <!-- 头部 -->
     <div class="tool-header" @click="toggle">
       <div class="tool-left">
-        <!-- 状态图标 -->
-        <div class="status-dot" :class="status">
-          <svg v-if="isLoading" class="spinner" viewBox="0 0 24 24" fill="none">
-            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" opacity="0.25"/>
-            <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-          </svg>
-          <svg v-else-if="isSuccess" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="20 6 9 17 4 12"/>
-          </svg>
-          <svg v-else-if="isError" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="18" y1="6" x2="6" y2="18"/>
-            <line x1="6" y1="6" x2="18" y2="18"/>
-          </svg>
-        </div>
-        <!-- 工具名 + 状态 -->
-        <div class="tool-info">
-          <span class="tool-name">{{ formatToolName(name) }}</span>
-          <span class="tool-status" :class="status">{{ statusText }}</span>
-        </div>
+        <span class="tool-dot" :class="status"></span>
+        <span class="tool-name">{{ formatToolName(name) }}</span>
+        <span class="tool-status" :class="status">{{ statusText }}</span>
       </div>
-      <!-- 展开箭头 -->
-      <svg 
-        class="chevron" 
-        :class="{ 'is-expanded': isExpanded }"
-        viewBox="0 0 24 24" 
-        fill="none" 
-        stroke="currentColor" 
-        stroke-width="2"
-      >
-        <polyline points="6 9 12 15 18 9"/>
-      </svg>
+      <span class="tool-toggle">{{ isExpanded ? '收起' : '详情' }}</span>
     </div>
     
-    <!-- 详情（可折叠） -->
-    <Transition name="slide">
-      <div v-show="isExpanded" class="tool-body">
-        <!-- 输入 -->
-        <div class="tool-section">
-          <div class="section-label">输入参数</div>
-          <pre class="code-block" :class="{ 'is-streaming': isStreaming }">{{ formatJson(displayInput) }}</pre>
-        </div>
-        <!-- 输出 -->
-        <div v-if="result" class="tool-section">
-          <div class="section-label">执行结果</div>
-          <pre class="code-block" :class="{ 'is-error': isError }">{{ formatResult(result) }}</pre>
-        </div>
+    <!-- 详情 -->
+    <div v-show="isExpanded" class="tool-body">
+      <div class="tool-section">
+        <div class="tool-section-label">输入</div>
+        <pre class="tool-code" :class="{ 'is-streaming': isStreaming }">{{ formatJson(displayInput) }}</pre>
       </div>
-    </Transition>
+      <div v-if="result" class="tool-section">
+        <div class="tool-section-label">输出</div>
+        <pre class="tool-code" :class="{ 'is-error': isError }">{{ formatResult(result) }}</pre>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -59,12 +29,14 @@ import { ref, computed } from 'vue'
 
 // 工具名中文映射表
 const TOOL_NAME_MAP = {
-  // 沙盒/文件操作
+  // 沙盒工具（E2B）
   'sandbox_write_file': '写入文件',
   'sandbox_read_file': '读取文件',
+  'sandbox_list_files': '列出目录',
   'sandbox_run_command': '执行命令',
-  'sandbox_run_project': '运行项目',
-  'sandbox_create_project': '创建项目',
+  'sandbox_execute_python': '执行代码',
+  'sandbox_get_public_url': '获取URL',
+  // 其他文件操作
   'write_file': '写入文件',
   'read_file': '读取文件',
   'str_replace_editor': '编辑文件',
@@ -192,11 +164,11 @@ function formatResult(data) {
 </script>
 
 <style scoped>
-/* Apple 风格工具卡片 */
+/* 工具卡片 - 简洁风格 */
 .tool-card {
   margin: 8px 0;
-  background: #f9fafb;
-  border-radius: 12px;
+  background: #f8f9fa;
+  border-radius: 10px;
   overflow: hidden;
 }
 
@@ -206,11 +178,11 @@ function formatResult(data) {
   justify-content: space-between;
   padding: 10px 14px;
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background 0.15s;
 }
 
 .tool-header:hover {
-  background: #f3f4f6;
+  background: #f1f3f4;
 }
 
 .tool-left {
@@ -219,115 +191,82 @@ function formatResult(data) {
   gap: 10px;
 }
 
-/* 状态圆点/图标 */
-.status-dot {
-  width: 20px;
-  height: 20px;
+.tool-dot {
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
+  background: #9aa0a6;
 }
 
-.status-dot.pending {
-  background: #fef3c7;
-  color: #d97706;
+.tool-dot.pending {
+  background: #fbbc04;
+  animation: pulse 1.2s infinite;
 }
 
-.status-dot.success {
-  background: #d1fae5;
-  color: #059669;
+.tool-dot.success {
+  background: #34a853;
 }
 
-.status-dot.error {
-  background: #fee2e2;
-  color: #dc2626;
+.tool-dot.error {
+  background: #ea4335;
 }
 
-.status-dot svg {
-  width: 12px;
-  height: 12px;
-}
-
-.status-dot .spinner {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-/* 工具信息 */
-.tool-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
 }
 
 .tool-name {
   font-size: 13px;
   font-weight: 500;
-  color: #374151;
+  color: #3c4043;
 }
 
 .tool-status {
   font-size: 12px;
-  color: #9ca3af;
+  color: #9aa0a6;
 }
 
 .tool-status.success {
-  color: #059669;
+  color: #34a853;
 }
 
 .tool-status.error {
-  color: #dc2626;
+  color: #ea4335;
 }
 
-/* 展开箭头 */
-.chevron {
-  width: 16px;
-  height: 16px;
-  color: #9ca3af;
-  transition: transform 0.2s ease;
-  flex-shrink: 0;
+.tool-toggle {
+  font-size: 12px;
+  color: #9aa0a6;
 }
 
-.chevron.is-expanded {
-  transform: rotate(180deg);
-}
-
-/* 详情区域 */
 .tool-body {
-  padding: 0 14px 14px;
+  padding: 0 14px 12px;
 }
 
 .tool-section {
-  margin-top: 12px;
+  margin-top: 10px;
 }
 
 .tool-section:first-child {
   margin-top: 0;
 }
 
-.section-label {
+.tool-section-label {
   font-size: 11px;
   font-weight: 500;
-  color: #9ca3af;
+  color: #9aa0a6;
   margin-bottom: 6px;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
 }
 
-.code-block {
+.tool-code {
   margin: 0;
   padding: 10px 12px;
   background: #ffffff;
   border-radius: 8px;
-  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-family: 'SF Mono', Monaco, Consolas, monospace;
   font-size: 12px;
-  color: #4b5563;
+  color: #5f6368;
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-all;
@@ -335,15 +274,15 @@ function formatResult(data) {
   overflow-y: auto;
 }
 
-.code-block.is-error {
-  background: #fef2f2;
-  color: #b91c1c;
+.tool-code.is-error {
+  background: #fce8e6;
+  color: #c5221f;
 }
 
-.code-block.is-streaming {
-  background: linear-gradient(90deg, #ffffff 0%, #f0fdf4 50%, #ffffff 100%);
+.tool-code.is-streaming {
+  background: linear-gradient(90deg, #fff 0%, #e8f5e9 50%, #fff 100%);
   background-size: 200% 100%;
-  animation: shimmer 2s ease-in-out infinite;
+  animation: shimmer 1.5s ease-in-out infinite;
 }
 
 @keyframes shimmer {
@@ -352,35 +291,12 @@ function formatResult(data) {
 }
 
 /* 滚动条 */
-.code-block::-webkit-scrollbar {
+.tool-code::-webkit-scrollbar {
   width: 4px;
 }
 
-.code-block::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.code-block::-webkit-scrollbar-thumb {
-  background: #d1d5db;
+.tool-code::-webkit-scrollbar-thumb {
+  background: #dadce0;
   border-radius: 2px;
-}
-
-/* 展开动画 */
-.slide-enter-active,
-.slide-leave-active {
-  transition: all 0.2s ease;
-  overflow: hidden;
-}
-
-.slide-enter-from,
-.slide-leave-to {
-  opacity: 0;
-  max-height: 0;
-}
-
-.slide-enter-to,
-.slide-leave-from {
-  opacity: 1;
-  max-height: 500px;
 }
 </style>

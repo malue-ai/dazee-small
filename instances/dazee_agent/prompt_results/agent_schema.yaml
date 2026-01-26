@@ -15,7 +15,7 @@ intent_analyzer:
   - markdown
   - structured
   use_llm: true
-  llm_model: claude-haiku-4-5-20251001
+  llm_model: claude-haiku-4-5
 plan_manager:
   enabled: true
   trigger_condition: task_type not in ['qa', 'simple_query']
@@ -77,7 +77,7 @@ capabilities:
 - 信息检索
 - 深度搜索
 - API调用
-model: claude-sonnet-4-5-20250929
+model: claude-sonnet-4-5
 max_turns: 20
 allow_parallel_tools: false
 context_limits:

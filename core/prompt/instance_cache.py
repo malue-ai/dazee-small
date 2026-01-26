@@ -393,6 +393,11 @@ class InstancePromptCache:
                     self.metrics.load_time_ms = (time.time() - start_time) * 1000
                     self.is_loaded = True
                     
+                    # 🆕 V7.10: 从磁盘加载后也要应用 config.yaml 的覆盖配置
+                    # 确保 thinking_mode 等运行时配置生效
+                    if config:
+                        self._merge_config_overrides(config)
+                    
                     logger.info(f"✅ 从 prompt_results/ 加载: {self.instance_name}")
                     logger.info(f"   加载耗时: {self.metrics.disk_load_time_ms:.0f}ms")
                     return True
@@ -1107,10 +1112,17 @@ class InstancePromptCache:
         
         # 合并 LLM 超参数
         llm_config = agent_config.get("llm", {})
-        if llm_config and hasattr(self.agent_schema, 'llm_config'):
-            for key, value in llm_config.items():
-                if hasattr(self.agent_schema.llm_config, key):
-                    setattr(self.agent_schema.llm_config, key, value)
+        if llm_config:
+            # 🆕 V7.10: 处理 thinking_mode（直接在 AgentSchema 上）
+            if "thinking_mode" in llm_config:
+                self.agent_schema.thinking_mode = llm_config["thinking_mode"]
+                logger.info(f"🧠 thinking_mode 配置已应用: {llm_config['thinking_mode']}")
+            
+            # 处理其他 LLM 配置（如果有 llm_config 属性）
+            if hasattr(self.agent_schema, 'llm_config'):
+                for key, value in llm_config.items():
+                    if key != "thinking_mode" and hasattr(self.agent_schema.llm_config, key):
+                        setattr(self.agent_schema.llm_config, key, value)
     
     async def _generate_all_prompts(self):
         """

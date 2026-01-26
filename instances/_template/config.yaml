@@ -69,6 +69,12 @@ agent:
     # Thinking token 预算（enable_thinking 为 true 时有效）
     # thinking_budget: 10000
     
+    # 🆕 V7.10: 思考模式（控制思考内容的展示方式）
+    # - native: 原生 Extended Thinking（默认，直接展示 Claude 的内部推理）
+    # - simulated: 模拟思考（单独调用 LLM 生成用户友好的思考过程，不暴露内部逻辑）
+    # - none: 不展示思考
+    # thinking_mode: "native"
+    
     # Prompt Caching（减少重复内容的 API 调用成本）
     # enable_caching: false
     

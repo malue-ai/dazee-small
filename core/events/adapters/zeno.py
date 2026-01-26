@@ -38,8 +38,8 @@ TOOL_TO_DELTA_TYPE: Dict[str, str] = {
     # PPT 生成
     "slidespeak_generate": "ppt",
     
-    # 🆕 V7.6: 沙盒项目启动
-    "sandbox_run_project": "sandbox",
+    # 沙盒工具 - 获取公开 URL 时生成 sandbox delta
+    "sandbox_get_public_url": "sandbox",
     
     # 代码执行（可选，看前端是否需要特殊 UI）
     # "bash": "code",
@@ -958,10 +958,21 @@ class ZenOAdapter(EventAdapter):
             logger.info(f"🔧 [enhance_tool_result] plan_todo 生成了 {len(deltas)} 个 delta")
             return deltas
         
-        # 🆕 V7.6: sandbox_run_project 工具的特殊处理（提取 preview_url）
-        if tool_name == "sandbox_run_project":
-            logger.debug(f"🔧 处理 sandbox_run_project 工具结果")
+        # 沙盒工具：sandbox_get_public_url 的特殊处理（提取 url）
+        if tool_name == "sandbox_get_public_url":
+            logger.debug(f"🔧 处理 sandbox_get_public_url 工具结果")
             return self._generate_sandbox_deltas(result_content, tool_input, conversation_id)
+        
+        # 沙盒工具：sandbox_run_command 后台模式返回 URL 时也生成 sandbox delta
+        if tool_name == "sandbox_run_command":
+            try:
+                result = json.loads(result_content) if isinstance(result_content, str) else result_content
+                # 只有当结果包含 url 字段时才生成 delta
+                if result.get("url") and result.get("background"):
+                    logger.debug(f"🔧 处理 sandbox_run_command 后台模式返回的 URL")
+                    return self._generate_sandbox_deltas(result_content, tool_input, conversation_id)
+            except (json.JSONDecodeError, TypeError):
+                pass
         
         # 🆕 V7.7: send_files 工具的特殊处理（生成 files delta）
         if tool_name == "send_files":
@@ -1262,23 +1273,22 @@ class ZenOAdapter(EventAdapter):
         actual_conversation_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
-        🆕 V7.6: 为 sandbox_run_project 工具生成 sandbox delta
+        为 sandbox_get_public_url 工具生成 sandbox delta
         
-        sandbox_run_project 返回格式：
+        sandbox_get_public_url 返回格式：
         {
             "success": true,
-            "preview_url": "https://3000-xxx.e2b.app",
-            "message": "项目已启动，访问: ...",
-            "error": null
+            "url": "https://3000-xxx.e2b.app",
+            "port": 3000
         }
         
         生成的 delta 类型：
-        - sandbox: 包含 preview_url、status 等信息
+        - sandbox: 包含 url、status 等信息
         
         Args:
             result_content: 工具返回的 JSON 字符串
-            tool_input: 工具输入参数（包含 project_path、stack 等）
-            actual_conversation_id: 实际的对话 ID（优先使用，避免 AI 传入占位符如 "$CONVERSATION_ID"）
+            tool_input: 工具输入参数（包含 conversation_id、port 等）
+            actual_conversation_id: 实际的对话 ID
             
         Returns:
             delta 列表（包含一个 sandbox 类型的 delta）
@@ -1292,47 +1302,35 @@ class ZenOAdapter(EventAdapter):
             else:
                 result = result_content
         except json.JSONDecodeError:
-            logger.warning(f"⚠️ sandbox_run_project 结果解析失败: {str(result_content)[:100]}...")
+            logger.warning(f"⚠️ sandbox_get_public_url 结果解析失败: {str(result_content)[:100]}...")
             return deltas
         
         # 提取信息
         success = result.get("success", False)
-        preview_url = result.get("preview_url")
+        # 兼容 url 和 preview_url 两种字段名
+        public_url = result.get("url") or result.get("preview_url")
+        port = result.get("port")
         error = result.get("error")
+        # 从工具结果中获取 E2B 实际沙箱 ID
+        sandbox_id = result.get("sandbox_id", "")
         
-        # 从 tool_input 获取额外信息
-        tool_conversation_id = tool_input.get("conversation_id", "")
-        project_path = tool_input.get("project_path", "")
-        stack = tool_input.get("stack", "")
-        
-        # 优先使用传入的实际 conversation_id，避免 AI 传入的占位符（如 "$CONVERSATION_ID"）
-        # 如果 tool_conversation_id 是占位符（以 $ 开头）或为空，则使用 actual_conversation_id
-        if actual_conversation_id and (
-            not tool_conversation_id or 
-            tool_conversation_id.startswith("$") or
-            tool_conversation_id.startswith("{")
-        ):
-            conversation_id = actual_conversation_id
-            logger.info(f"🔧 sandbox_id 使用实际 conversation_id: {conversation_id[:20]}... (原值: {tool_conversation_id})")
-        else:
-            conversation_id = tool_conversation_id
-        
-        # 构建 sandbox delta 数据
+        # 构建 sandbox delta 数据（符合前端 SandboxData 接口）
+        # status: 'success' | 'error' | 'running' | 'pending'
         sandbox_data = {
-            "sandbox_id": conversation_id,
-            "status": "success" if success else "failed",
+            "sandbox_id": sandbox_id,  # E2B 实际沙箱 ID
+            "status": "success" if success else "error",
+            "project_path": "/home/user/project",  # 默认项目路径
+            "stack": "nodejs",  # 默认技术栈
         }
         
-        if preview_url:
-            sandbox_data["preview_url"] = preview_url
-        if project_path:
-            sandbox_data["project_path"] = project_path
-        if stack:
-            sandbox_data["stack"] = stack
+        if public_url:
+            sandbox_data["preview_url"] = public_url
+        if port:
+            sandbox_data["port"] = port
         if error:
             sandbox_data["error"] = error
         
-        logger.info(f"🚀 生成 sandbox delta: preview_url={preview_url}, status={'success' if success else 'failed'}")
+        logger.info(f"🚀 生成 sandbox delta: sandbox_id={sandbox_id}, url={public_url}, status={'success' if success else 'error'}")
         deltas.append(self._create_delta("sandbox", sandbox_data))
         
         return deltas
