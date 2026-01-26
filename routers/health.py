@@ -202,3 +202,105 @@ async def mcp_pool_stats() -> Dict[str, Any]:
             "error": str(e),
             "timestamp": time.time()
         }
+
+
+# ==================== 管理员 API ====================
+
+@router.post("/admin/calibrate", summary="校准 Session 数据")
+async def calibrate_sessions(deep: bool = False) -> Dict[str, Any]:
+    """
+    校准 Session 数据（管理员接口）
+    
+    清理孤立的 Session 记录，解决因服务重启或异常退出导致的数据不一致问题。
+    
+    Args:
+        deep: 是否进行深度校准（同时清理用户级别的孤立记录）
+        
+    Returns:
+        校准结果（清理数量等）
+    """
+    try:
+        session_pool = get_session_pool()
+        result = await session_pool.calibrate(deep=deep)
+        
+        return {
+            "status": "ok",
+            "result": result,
+            "timestamp": time.time()
+        }
+    except Exception as e:
+        logger.error(f"校准失败: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "error": str(e),
+            "timestamp": time.time()
+        }
+
+
+@router.delete("/admin/user/{user_id}/sessions", summary="清理用户 Session")
+async def clear_user_sessions(user_id: str) -> Dict[str, Any]:
+    """
+    清理指定用户的所有活跃 Session（管理员接口）
+    
+    用于手动清理用户的僵尸 Session 记录。
+    
+    ⚠️ 警告：这会强制结束用户的所有活跃会话！
+    
+    Args:
+        user_id: 用户 ID
+        
+    Returns:
+        清理结果
+    """
+    try:
+        session_pool = get_session_pool()
+        cleaned_count = await session_pool.clear_user_sessions(user_id)
+        
+        return {
+            "status": "ok",
+            "user_id": user_id,
+            "sessions_cleared": cleaned_count,
+            "timestamp": time.time()
+        }
+    except Exception as e:
+        logger.error(f"清理用户 Session 失败: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "error": str(e),
+            "timestamp": time.time()
+        }
+
+
+@router.get("/admin/user/{user_id}/sessions", summary="查看用户活跃 Session")
+async def get_user_sessions(user_id: str) -> Dict[str, Any]:
+    """
+    查看指定用户的活跃 Session 列表（管理员接口）
+    
+    用于诊断用户的 Session 状态。
+    
+    Args:
+        user_id: 用户 ID
+        
+    Returns:
+        用户的活跃 Session 列表
+    """
+    try:
+        session_pool = get_session_pool()
+        sessions = await session_pool.get_user_active_sessions(user_id)
+        stats = await session_pool.get_user_stats(user_id)
+        
+        return {
+            "status": "ok",
+            "user_id": user_id,
+            "active_sessions": sessions,
+            "session_count": len(sessions),
+            "stats": stats,
+            "timestamp": time.time()
+        }
+    except Exception as e:
+        logger.error(f"获取用户 Session 失败: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "error": str(e),
+            "timestamp": time.time()
+        }

@@ -303,7 +303,7 @@ class AgentRegistry:
         # 🔄 Fallback: 按需创建（首次或原型不存在）
         logger.info(f"⚠️ Agent '{agent_id}' 原型不存在，按需创建")
         
-        # 准备 apis_config（用于 api_calling 自动注入认证）
+        # 准备 apis_config（用于 api_calling 自动注入认证和请求体模板）
         apis_config = None
         if config.instance_config and config.instance_config.apis:
             apis_config = [
@@ -318,6 +318,11 @@ class AgentRegistry:
                         "header": api.auth_header,
                         "env": api.auth_env,
                     } if api.auth_env else None,
+                    # 请求体配置（用于 api_calling 自动合成请求）
+                    "request_body": api.request_body,
+                    "default_method": api.default_method,
+                    "default_mode": api.default_mode,
+                    "poll_config": api.poll_config,
                 }
                 for api in config.instance_config.apis
             ]
@@ -382,7 +387,7 @@ class AgentRegistry:
         Returns:
             SimpleAgent 或 MultiAgentOrchestrator 原型实例
         """
-        # 准备 apis_config
+        # 准备 apis_config（用于 api_calling 自动注入认证和请求体模板）
         apis_config = None
         if config.instance_config and config.instance_config.apis:
             apis_config = [
@@ -397,6 +402,11 @@ class AgentRegistry:
                         "header": api.auth_header,
                         "env": api.auth_env,
                     } if api.auth_env else None,
+                    # 请求体配置（用于 api_calling 自动合成请求）
+                    "request_body": api.request_body,
+                    "default_method": api.default_method,
+                    "default_mode": api.default_mode,
+                    "poll_config": api.poll_config,
                 }
                 for api in config.instance_config.apis
             ]

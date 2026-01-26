@@ -11,6 +11,9 @@ Session 级事件管理 - SessionEventManager
 from typing import Dict, Any, Optional
 from datetime import datetime
 from core.events.base import BaseEventManager
+from logger import get_logger
+
+logger = get_logger("session_events")
 
 
 class SessionEventManager(BaseEventManager):
@@ -43,6 +46,14 @@ class SessionEventManager(BaseEventManager):
         Returns:
             事件对象，如果被过滤则返回 None
         """
+        # 🔍 追踪日志：记录入参
+        logger.info(
+            f"🔍 [emit_session_start] 入参追踪: "
+            f"session_id={session_id}, "
+            f"conversation_id={conversation_id}, "
+            f"user_id={user_id}"
+        )
+        
         data = {
             "session_id": session_id,
             "user_id": user_id,
@@ -59,8 +70,16 @@ class SessionEventManager(BaseEventManager):
             data=data
         )
         
+        # 🔍 追踪日志：记录传给 _send_event 的 conversation_id
+        logger.info(
+            f"🔍 [emit_session_start] 调用 _send_event: "
+            f"session_id={session_id}, "
+            f"conversation_id(传参)={conversation_id}"
+        )
+        
         return await self._send_event(
             session_id, event,
+            conversation_id=conversation_id,  # 🔧 显式传递，避免从 Redis 重复获取
             message_id=message_id,
             output_format=output_format, adapter=adapter
         )

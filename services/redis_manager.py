@@ -434,6 +434,17 @@ class RedisSessionManager:
                 "timestamp": timestamp
             }
         
+        # 🔍 追踪日志：记录转换前的 conversation_id
+        evt_type = event.get("type", "unknown")
+        conv_id_before = event.get("conversation_id")
+        logger.info(
+            f"🔍 [buffer_event] 转换前: "
+            f"type={evt_type}, "
+            f"session_id={session_id}, "
+            f"conversation_id={conv_id_before}, "
+            f"output_format={output_format}"
+        )
+        
         # 1. 格式转换（如果需要）
         if output_format == "zeno" and adapter is not None:
             transformed = adapter.transform(event)
@@ -441,6 +452,15 @@ class RedisSessionManager:
                 # 事件被适配器过滤，不需要存储
                 return None
             event = transformed
+            
+            # 🔍 追踪日志：记录 ZenO 转换后的 conversation_id
+            conv_id_after = event.get("conversation_id")
+            logger.info(
+                f"🔍 [buffer_event] ZenO 转换后: "
+                f"type={event.get('type')}, "
+                f"session_id={session_id}, "
+                f"conversation_id={conv_id_after}"
+            )
         
         # 2. 生成 seq（Redis INCR，原子操作）
         # 只有当事件没有 seq 时才生成

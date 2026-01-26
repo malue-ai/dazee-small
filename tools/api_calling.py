@@ -94,13 +94,20 @@ class APICallingTool:
 可用 API:
 {apis_section}
 
-调用格式:
+⚠️ 必须使用以下调用格式（不要使用 body 参数！）:
 {{
   "api_name": "API名称",
   "parameters": {{...AI需要填写的参数...}}
 }}
 
-注意: 其他字段（user_id等）由系统自动注入，AI 只需填写 api_name 和 parameters。
+示例:
+- wenshu_api: {{"api_name": "wenshu_api", "parameters": {{"question": "xxx", "files": [...]}}}}
+- coze_api: {{"api_name": "coze_api", "parameters": {{"chart_url": "xxx", "query": "xxx", "language": "中文"}}}}
+
+重要提示:
+- 必须使用 parameters 字段（不是 body）
+- workflow_id、user_id 等系统字段由框架自动注入，AI 无需填写
+- 只需填写 api_name 和 parameters 两个字段
 """
     
     def _extract_ai_params(self, data: Any, prefix: str = "") -> list[str]:
@@ -150,14 +157,13 @@ class APICallingTool:
         # 简化调用方式（推荐）
         api_name: Optional[str] = None,
         parameters: Optional[Dict[str, Any]] = None,
-        # 兼容旧调用方式
+        # 内部使用 / 直接 URL 调用
         url: Optional[str] = None,
         method: Optional[str] = None,
         headers: Optional[Dict[str, str]] = None,
         body: Optional[Dict[str, Any]] = None,
         mode: Optional[str] = None,
         poll_config: Optional[Dict[str, Any]] = None,
-        path: Optional[str] = None,  # 已废弃
         **kwargs  # 框架注入的上下文
     ) -> Dict[str, Any]:
         """
@@ -165,15 +171,9 @@ class APICallingTool:
         
         简化调用方式（推荐）：
             api_name + parameters
-            
-        兼容旧调用方式：
-            api_name + body + method + mode + poll_config
         """
-        if path:
-            logger.warning(f"⚠️ path 参数已废弃，将被忽略")
-        
         try:
-            # ===== 简化调用方式：api_name + parameters =====
+            # ===== 简化调用方式：api_name + parameters（推荐） =====
             if api_name and parameters is not None and body is None:
                 logger.info(f"📡 [简化调用] api_name={api_name}, parameters={list(parameters.keys())}")
                 
@@ -186,21 +186,19 @@ class APICallingTool:
                 poll_config = request_config.get("poll_config")
                 body = request_config["body"]
             
-            # ===== 兼容旧调用方式 =====
-            elif api_name:
+            # ===== 错误：使用了 body 而不是 parameters =====
+            elif api_name and body is not None and parameters is None:
+                # 检测到 AI 使用旧的 body 参数，返回错误提示
+                logger.warning(f"❌ AI 使用了 body 参数而不是 parameters，api_name={api_name}")
                 api_config = self.apis_config.get(api_name, {})
-                method = method or api_config.get("default_method", "POST")
-                mode = mode or api_config.get("default_mode", "sync")
+                request_body = api_config.get("request_body", {})
+                ai_params = self._extract_ai_params(request_body)
+                params_hint = ", ".join(ai_params) if ai_params else "参考 API 文档"
                 
-                # poll_config 优先使用 config.yaml 中的配置
-                config_poll_config = api_config.get("poll_config")
-                if mode == "async_poll" and config_poll_config:
-                    if poll_config:
-                        logger.warning(f"⚠️ 忽略 LLM 传入的 poll_config，使用系统配置")
-                    poll_config = config_poll_config
-                
-                # 合并 body_template
-                body = self._merge_body_template(api_config, body)
+                return {
+                    "error": f"调用格式错误！请使用 parameters 而不是 body。正确格式：{{\"api_name\": \"{api_name}\", \"parameters\": {{{params_hint}}}}}",
+                    "hint": f"系统字段（如 workflow_id、user_id）由框架自动注入，AI 只需填写：{params_hint}"
+                }
             
             method = method or "POST"
             mode = mode or "sync"
@@ -236,6 +234,7 @@ class APICallingTool:
                     return {"error": response_data.get("_message", "未知错误"), "http_status": response_data.get("_status", 0)}
                 
                 logger.info(f"✅ API 响应成功")
+                logger.info(f"🔍 [调试] mode={mode}, poll_config={poll_config is not None}")
                 
                 # 异步轮询模式
                 if mode == "async_poll" and poll_config:
@@ -274,11 +273,11 @@ class APICallingTool:
         mode = api_config.get("default_mode", "sync")
         poll_config = api_config.get("poll_config")
         
-        # 优先使用 request_body（新格式），兼容 body_template（旧格式）
-        body_template = api_config.get("request_body") or api_config.get("body_template", {})
+        # 获取请求体模板
+        request_body = api_config.get("request_body", {})
         
         # 深拷贝模板
-        body = copy.deepcopy(body_template)
+        body = copy.deepcopy(request_body)
         
         # 替换 {{xxx}} AI 占位符
         body = self._replace_ai_placeholders(body, parameters)
@@ -337,26 +336,6 @@ class APICallingTool:
             return [self._replace_ai_placeholders(item, parameters) for item in data]
         
         return data
-    
-    def _merge_body_template(
-        self,
-        api_config: Dict[str, Any],
-        body: Optional[Dict[str, Any]]
-    ) -> Optional[Dict[str, Any]]:
-        """合并 body_template 和传入的 body"""
-        body_template = api_config.get("body_template")
-        if not body_template:
-            return body
-        
-        merged = copy.deepcopy(body_template)
-        if body:
-            for key, value in body.items():
-                if key == "parameters" and "parameters" in merged:
-                    merged["parameters"] = {**merged.get("parameters", {}), **value}
-                else:
-                    merged[key] = value
-        
-        return merged
     
     # ============================================================
     # 占位符替换
@@ -630,9 +609,26 @@ class APICallingTool:
         headers: Optional[Dict[str, str]] = None,
         body: Optional[Dict[str, Any]] = None,
         mode: str = "stream",
+        parameters: Optional[Dict[str, Any]] = None,  # 🆕 支持简化调用
         **kwargs
     ) -> AsyncGenerator[str, None]:
         """流式执行 API 调用"""
+        
+        # ===== 🆕 简化调用方式：api_name + parameters =====
+        poll_config = None  # 初始化 poll_config
+        if api_name and parameters is not None and body is None:
+            logger.info(f"📡 [流式简化调用] api_name={api_name}, parameters={list(parameters.keys())}")
+            
+            request_config, error = self._build_request_from_config(api_name, parameters)
+            if error:
+                yield json.dumps({"error": error})
+                return
+            
+            method = request_config["method"]
+            mode = request_config["mode"]
+            poll_config = request_config.get("poll_config")  # 🔧 修复：提取 poll_config
+            body = request_config["body"]
+        
         final_url, final_headers, error, _ = self._resolve_api_config(api_name, url, headers)
         
         if not final_url or error:
@@ -644,7 +640,23 @@ class APICallingTool:
             body = self._resolve_system_placeholders(body, kwargs)
         
         if mode != "stream":
-            result = await self.execute(api_name=api_name, url=url, method=method, headers=headers, body=body, mode=mode, **kwargs)
+            # 🔧 过滤掉 AI 可能非法传入的参数（这些参数不在工具定义中，会与我们显式传入的参数冲突）
+            filtered_kwargs = {k: v for k, v in kwargs.items() 
+                              if k not in ('poll_config', 'mode', 'method', 'url', 'headers', 'body')}
+            
+            # 如果已经通过 parameters 构建了 body，则直接传 body + 原始 parameters + poll_config
+            # 这样 execute 中的 "parameters is None" 检查不会误报，且异步轮询能正常执行
+            result = await self.execute(
+                api_name=api_name,
+                url=url,
+                method=method,
+                headers=headers,
+                body=body,
+                mode=mode,
+                poll_config=poll_config,  # 🔧 使用配置中的 poll_config，忽略 AI 传入的
+                parameters=parameters,  # 始终传入，避免误报警告
+                **filtered_kwargs  # 🔧 使用过滤后的 kwargs
+            )
             yield json.dumps(result, ensure_ascii=False)
             return
         

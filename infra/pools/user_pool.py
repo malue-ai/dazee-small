@@ -318,6 +318,68 @@ class UserPool:
     
     # ==================== 清理 ====================
     
+    async def clear_user_sessions(self, user_id: str) -> int:
+        """
+        清理用户的所有活跃 Session（强制清理）
+        
+        用于服务重启后或管理员手动清理场景。
+        
+        Args:
+            user_id: 用户 ID
+            
+        Returns:
+            被清理的 Session 数量
+        """
+        client = await self.redis._get_client()
+        key = f"{self.KEY_PREFIX}:{user_id}:sessions"
+        
+        # 获取当前数量
+        count = await client.scard(key)
+        
+        if count > 0:
+            # 删除整个集合
+            await client.delete(key)
+            logger.info(f"🧹 用户 {user_id} 清理 {count} 个活跃 Session")
+        
+        return count
+    
+    async def remove_stale_sessions(
+        self,
+        user_id: str,
+        valid_sessions: List[str]
+    ) -> int:
+        """
+        移除用户的过期/孤立 Session
+        
+        保留 valid_sessions 中的 Session，移除其他所有 Session。
+        
+        Args:
+            user_id: 用户 ID
+            valid_sessions: 仍然有效的 Session ID 列表
+            
+        Returns:
+            被移除的 Session 数量
+        """
+        client = await self.redis._get_client()
+        key = f"{self.KEY_PREFIX}:{user_id}:sessions"
+        
+        # 获取用户当前所有 Session
+        current_sessions = await client.smembers(key)
+        if not current_sessions:
+            return 0
+        
+        # 找出需要移除的 Session
+        valid_set = set(valid_sessions)
+        stale_sessions = [s for s in current_sessions if s not in valid_set]
+        
+        if stale_sessions:
+            await client.srem(key, *stale_sessions)
+            logger.info(
+                f"🧹 用户 {user_id} 移除 {len(stale_sessions)} 个过期 Session"
+            )
+        
+        return len(stale_sessions)
+    
     async def cleanup(self) -> None:
         """
         清理资源（关闭时调用）

@@ -3,7 +3,7 @@
 测试 Coze API 占位符注入功能
 
 验证：
-1. body_template 中的 ${chart_url}, ${query}, ${language} 占位符
+1. request_body 中的 {{chart_url}}, {{query}}, {{language}} AI 占位符
 2. AI parameters 自动注入到占位符位置
 3. 最终发送的 body 结构正确
 """

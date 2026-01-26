@@ -54,6 +54,11 @@ class ApiConfig:
     # 运行时填充
     headers: Dict[str, str] = field(default_factory=dict)
     doc_content: str = ""
+    # 请求体配置（用于 api_calling 工具自动合成请求）
+    request_body: Optional[Dict[str, Any]] = None  # 请求体模板
+    default_method: str = "POST"  # 默认 HTTP 方法
+    default_mode: str = "sync"  # 默认模式：sync / stream / async_poll
+    poll_config: Optional[Dict[str, Any]] = None  # 异步轮询配置
 
 
 @dataclass
@@ -384,7 +389,12 @@ def _load_apis_config(instance_name: str, apis_raw: List[Dict]) -> List[ApiConfi
             auth_env=auth_env,
             doc=doc_name,
             description=api_data.get("description", ""),
-            doc_content=doc_content
+            doc_content=doc_content,
+            # 请求体配置（用于 api_calling 工具自动合成请求）
+            request_body=api_data.get("request_body"),
+            default_method=api_data.get("default_method", "POST"),
+            default_mode=api_data.get("default_mode", "sync"),
+            poll_config=api_data.get("poll_config"),
         ))
     
     return result

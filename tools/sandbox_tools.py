@@ -23,6 +23,8 @@
 """
 
 import asyncio
+import time
+from datetime import datetime
 from typing import Dict, Any, Optional
 
 from logger import get_logger
@@ -33,6 +35,7 @@ from services.sandbox_service import (
     SandboxNotFoundError
 )
 from infra.sandbox import get_sandbox_provider
+from infra.database import AsyncSessionLocal, crud
 
 logger = get_logger("sandbox_tools")
 
@@ -404,6 +407,22 @@ class SandboxRunCommand(BaseTool):
                         result["url"] = url
                         result["port"] = port
                         logger.info(f"🌐 服务 URL: {url}")
+                        
+                        # 🆕 添加过期时间信息
+                        try:
+                            async with AsyncSessionLocal() as session:
+                                db_sandbox = await crud.get_sandbox_by_conversation(
+                                    session, conversation_id
+                                )
+                                
+                                if db_sandbox and db_sandbox.last_active_at:
+                                    default_timeout = provider.DEFAULT_TIMEOUT_SECONDS
+                                    last_active_ts = db_sandbox.last_active_at.timestamp()
+                                    expires_ts = last_active_ts + default_timeout
+                                    result["expires_at"] = int(expires_ts * 1000)
+                                    result["timeout_seconds"] = max(0, int(expires_ts - time.time()))
+                        except Exception as e:
+                            logger.warning(f"⚠️ 获取沙盒过期时间失败: {e}")
                     except Exception as e:
                         logger.warning(f"⚠️ 获取 URL 失败: {e}")
                         result["url_error"] = str(e)
@@ -530,12 +549,52 @@ class SandboxGetPublicUrl(BaseTool):
             host = sandbox.get_host(port)
             url = f"https://{host}"
             
-            return {
+            # 计算过期时间
+            expires_at = None
+            timeout_seconds = None
+            
+            try:
+                # 从数据库获取沙盒的最后活跃时间
+                async with AsyncSessionLocal() as session:
+                    db_sandbox = await crud.get_sandbox_by_conversation(
+                        session, conversation_id
+                    )
+                    
+                    if db_sandbox and db_sandbox.last_active_at:
+                        # E2B 默认超时时间（30 分钟）
+                        default_timeout = provider.DEFAULT_TIMEOUT_SECONDS
+                        
+                        # 计算过期时间戳（毫秒）
+                        last_active_ts = db_sandbox.last_active_at.timestamp()
+                        expires_ts = last_active_ts + default_timeout
+                        expires_at = int(expires_ts * 1000)  # 转换为毫秒
+                        
+                        # 计算剩余秒数
+                        now_ts = time.time()
+                        timeout_seconds = max(0, int(expires_ts - now_ts))
+                        
+                        logger.debug(
+                            f"📅 沙盒过期时间: expires_at={expires_at}, "
+                            f"timeout_seconds={timeout_seconds}"
+                        )
+            except Exception as e:
+                # 获取过期时间失败不影响主功能
+                logger.warning(f"⚠️ 获取沙盒过期时间失败: {e}")
+            
+            result = {
                 "success": True,
                 "url": url,
                 "port": port,
                 "sandbox_id": sandbox.sandbox_id  # E2B 实际沙箱 ID
             }
+            
+            # 添加过期时间信息（如果获取成功）
+            if expires_at is not None:
+                result["expires_at"] = expires_at
+            if timeout_seconds is not None:
+                result["timeout_seconds"] = timeout_seconds
+            
+            return result
         except Exception as e:
             return {"success": False, "error": str(e)}
 

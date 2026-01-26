@@ -200,71 +200,6 @@ async def test_poll_status_check():
     return poll_count == 3 and result is not None
 
 
-async def test_body_template_merge():
-    """测试 body_template 自动合并功能（新特性）"""
-    print("\n📋 测试 body_template 自动合并...")
-    
-    # 模拟 config.yaml 中的 API 配置
-    apis_config = [
-        {
-            "name": "coze_api",
-            "base_url": "https://api.coze.cn/v1/workflow/run",
-            "default_mode": "async_poll",
-            "default_method": "POST",
-            "body_template": {
-                "workflow_id": "7579565547005837331",
-                "is_async": True
-            },
-            "poll_config": {
-                "execute_id_field": "execute_id",
-                "status_url_template": "https://api.coze.cn/v1/workflows/{workflow_id}/run_histories/{execute_id}",
-                "body_vars": ["workflow_id"],
-                "status_field": "data.status",
-                "success_status": "Success"
-            }
-        }
-    ]
-    
-    tool = APICallingTool(apis_config=apis_config)
-    
-    # 模拟 AI 只传 parameters（极简调用）
-    ai_body = {
-        "parameters": {
-            "chart_url": "https://example.com/chart.txt",
-            "query": "测试系统",
-            "language": "中文"
-        }
-    }
-    
-    # 测试合并逻辑
-    api_config = tool.apis_config.get("coze_api", {})
-    body_template = api_config.get("body_template", {})
-    
-    # 手动模拟合并逻辑
-    merged_body = body_template.copy()
-    for key, value in ai_body.items():
-        merged_body[key] = value
-    
-    # 验证结果
-    checks = [
-        ("workflow_id 被保留", merged_body.get("workflow_id") == "7579565547005837331"),
-        ("is_async 被保留", merged_body.get("is_async") == True),
-        ("parameters 被合并", merged_body.get("parameters", {}).get("chart_url") == "https://example.com/chart.txt"),
-        ("query 被合并", merged_body.get("parameters", {}).get("query") == "测试系统"),
-    ]
-    
-    passed = 0
-    for name, result in checks:
-        print(f"  {'✅' if result else '❌'} {name}")
-        if result:
-            passed += 1
-    
-    print(f"\n  合并后的 body: {json.dumps(merged_body, ensure_ascii=False, indent=2)}")
-    print(f"  结果: {passed}/{len(checks)} 通过")
-    
-    return passed == len(checks)
-
-
 async def test_simplified_call():
     """测试简化调用方式：api_name + parameters"""
     print("\n📋 测试简化调用方式...")
@@ -276,10 +211,14 @@ async def test_simplified_call():
             "base_url": "https://api.coze.cn/v1/workflow/run",
             "default_mode": "async_poll",
             "default_method": "POST",
-            "body_template": {
+            "request_body": {
                 "workflow_id": "7579565547005837331",
                 "is_async": True,
-                "parameters": {}  # AI 填写的参数会合并到这里
+                "parameters": {
+                    "chart_url": "{{chart_url}}",
+                    "query": "{{query}}",
+                    "language": "{{language}}"
+                }
             },
             "poll_config": {
                 "execute_id_field": "execute_id",
@@ -293,10 +232,12 @@ async def test_simplified_call():
             "name": "wenshu_api",
             "base_url": "http://example.com/api/v3/ask",
             "default_method": "POST",
-            "body_template": {
+            "request_body": {
                 "user_id": "${user_id}",
                 "task_id": "${conversation_id}",
-                "lg_code": "zh-CN"
+                "lg_code": "zh-CN",
+                "question": "{{question}}",
+                "files": "{{files}}"
             }
         }
     ]
@@ -373,7 +314,6 @@ async def run_mock_tests():
     results.append(("_get_nested_value", await test_get_nested_value()))
     results.append(("URL 模板变量替换", await test_poll_url_template()))
     results.append(("轮询状态检查", await test_poll_status_check()))
-    results.append(("body_template 自动合并", await test_body_template_merge()))
     results.append(("简化调用方式", await test_simplified_call()))
     
     print("\n" + "=" * 60)

@@ -9,6 +9,8 @@
 
 ## AI 调用格式
 
+⚠️ **必须使用 `parameters` 字段，不要使用 `body` 字段！**
+
 ```json
 {
   "api_name": "coze_api",
@@ -17,6 +19,14 @@
     "query": "系统名称",
     "language": "中文"
   }
+}
+```
+
+❌ **错误示例（不要这样调用）：**
+```json
+{
+  "api_name": "coze_api",
+  "body": { ... }  // 错误！会导致缺少 workflow_id
 }
 ```
 
@@ -30,7 +40,7 @@
 | `query` | string | ✅ | 系统名称或描述 |
 | `language` | string | ✅ | 输出语言：`"中文"` 或 `"English"` |
 
-> 💡 其他字段（workflow_id, is_async）由系统自动注入，AI 无需填写
+> 💡 workflow_id、is_async、user_id 等字段由系统自动注入，AI 无需填写
 
 ---
 

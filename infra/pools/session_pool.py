@@ -306,7 +306,7 @@ class SessionPool:
     
     # ==================== 校准机制（解决计数器不一致问题） ====================
     
-    async def calibrate(self) -> Dict[str, Any]:
+    async def calibrate(self, deep: bool = False) -> Dict[str, Any]:
         """
         校准活跃 Session 数据
         
@@ -316,7 +316,11 @@ class SessionPool:
         1. 获取活跃 Session 集合中的所有 ID
         2. 检查每个 Session 的元数据是否存在
         3. 移除没有元数据的孤立 Session
+        4. (deep=True) 同时清理用户级别的孤立 Session 记录
         
+        Args:
+            deep: 是否进行深度校准（同时清理用户级别的孤立记录）
+            
         Returns:
             校准结果（清理数量等）
         """
@@ -325,33 +329,37 @@ class SessionPool:
             
             # 获取所有活跃 Session
             active_sessions = await client.smembers(self.ACTIVE_SESSIONS_KEY)
-            
-            if not active_sessions:
-                return {
-                    "status": "success",
-                    "total_checked": 0,
-                    "orphaned_removed": 0,
-                }
+            active_session_set = set(active_sessions) if active_sessions else set()
             
             orphaned_sessions = []
+            user_sessions_cleaned = 0
             
-            for session_id in active_sessions:
-                meta_key = f"{self.SESSION_META_PREFIX}:{session_id}"
-                exists = await client.exists(meta_key)
+            if active_sessions:
+                for session_id in active_sessions:
+                    meta_key = f"{self.SESSION_META_PREFIX}:{session_id}"
+                    exists = await client.exists(meta_key)
+                    
+                    if not exists:
+                        orphaned_sessions.append(session_id)
                 
-                if not exists:
-                    orphaned_sessions.append(session_id)
+                # 移除孤立的 Session
+                if orphaned_sessions:
+                    await client.srem(self.ACTIVE_SESSIONS_KEY, *orphaned_sessions)
+                    logger.info(f"🔄 校准完成: 移除 {len(orphaned_sessions)} 个孤立 Session")
             
-            # 移除孤立的 Session
-            if orphaned_sessions:
-                await client.srem(self.ACTIVE_SESSIONS_KEY, *orphaned_sessions)
-                logger.info(f"🔄 校准完成: 移除 {len(orphaned_sessions)} 个孤立 Session")
+            # 深度校准：清理用户级别的孤立 Session
+            if deep:
+                user_sessions_cleaned = await self._calibrate_user_sessions(
+                    client, active_session_set
+                )
             
             return {
                 "status": "success",
-                "total_checked": len(active_sessions),
+                "total_checked": len(active_sessions) if active_sessions else 0,
                 "orphaned_removed": len(orphaned_sessions),
                 "orphaned_ids": orphaned_sessions[:10],  # 只返回前 10 个
+                "user_sessions_cleaned": user_sessions_cleaned,
+                "deep_calibration": deep,
             }
             
         except Exception as e:
@@ -360,6 +368,103 @@ class SessionPool:
                 "status": "error",
                 "error": str(e),
             }
+    
+    async def _calibrate_user_sessions(
+        self,
+        client,
+        valid_sessions: set
+    ) -> int:
+        """
+        校准用户级别的 Session 记录
+        
+        扫描所有用户的 sessions 集合，移除不在 valid_sessions 中的孤立记录。
+        
+        Args:
+            client: Redis 客户端
+            valid_sessions: 全局有效的 Session ID 集合
+            
+        Returns:
+            清理的总 Session 数量
+        """
+        total_cleaned = 0
+        
+        try:
+            # 扫描所有用户的 sessions key
+            # 格式：zf:user:{user_id}:sessions
+            cursor = 0
+            user_keys = []
+            
+            while True:
+                cursor, keys = await client.scan(
+                    cursor=cursor,
+                    match="zf:user:*:sessions",
+                    count=100
+                )
+                user_keys.extend(keys)
+                if cursor == 0:
+                    break
+            
+            # 对每个用户清理孤立 Session
+            for key in user_keys:
+                # 从 key 中提取 user_id
+                # 格式：zf:user:{user_id}:sessions
+                parts = key.split(":")
+                if len(parts) >= 4:
+                    user_id = parts[2]
+                    cleaned = await self.user_pool.remove_stale_sessions(
+                        user_id, list(valid_sessions)
+                    )
+                    total_cleaned += cleaned
+            
+            if total_cleaned > 0:
+                logger.info(f"🔄 用户级校准完成: 清理 {total_cleaned} 个孤立 Session")
+                
+        except Exception as e:
+            logger.warning(f"⚠️ 用户级校准失败: {e}")
+        
+        return total_cleaned
+    
+    async def clear_user_sessions(self, user_id: str) -> int:
+        """
+        清理指定用户的所有活跃 Session（管理员接口）
+        
+        同时清理：
+        1. 全局活跃 Session 集合中该用户的 Session
+        2. 用户级别的 sessions 集合
+        
+        Args:
+            user_id: 用户 ID
+            
+        Returns:
+            清理的 Session 数量
+        """
+        try:
+            client = await self.redis._get_client()
+            
+            # 1. 获取用户的所有 Session
+            user_sessions = await self.user_pool.get_active_sessions(user_id)
+            
+            if not user_sessions:
+                return 0
+            
+            # 2. 从全局活跃 Session 集合中移除
+            await client.srem(self.ACTIVE_SESSIONS_KEY, *user_sessions)
+            
+            # 3. 删除对应的元数据
+            for session_id in user_sessions:
+                meta_key = f"{self.SESSION_META_PREFIX}:{session_id}"
+                await client.delete(meta_key)
+            
+            # 4. 清理用户级别的 sessions 集合
+            await self.user_pool.clear_user_sessions(user_id)
+            
+            logger.info(f"🧹 已清理用户 {user_id} 的 {len(user_sessions)} 个 Session")
+            
+            return len(user_sessions)
+            
+        except Exception as e:
+            logger.error(f"❌ 清理用户 Session 失败: {e}", exc_info=True)
+            return 0
     
     # ==================== 清理 ====================
     

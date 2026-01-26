@@ -53,10 +53,10 @@ def test_config_parse():
         print(f"     capability: {api.get('capability', 'N/A')}")
         print(f"     doc: {api.get('doc', 'N/A')}")
         
-        # 检查 body_template
-        body_template = api.get("body_template", {})
-        if body_template:
-            print(f"     body_template 字段: {list(body_template.keys())}")
+        # 检查 request_body
+        request_body = api.get("request_body", {})
+        if request_body:
+            print(f"     request_body 字段: {list(request_body.keys())}")
     
     return apis
 

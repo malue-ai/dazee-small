@@ -46,8 +46,11 @@ def get_grpc_server_options() -> List[Tuple[str, any]]:
         ("grpc.keepalive_timeout_ms", keepalive_timeout),
         ("grpc.keepalive_permit_without_calls", True),
         ("grpc.http2.max_pings_without_data", 0),  # 无限制
-        ("grpc.http2.min_recv_ping_interval_without_data_ms", 1000),  # 1 秒（允许非常频繁的 ping）
+        ("grpc.http2.min_recv_ping_interval_without_data_ms", 100),  # 100ms（更宽松，防止 Too many pings）
         ("grpc.http2.min_sent_ping_interval_without_data_ms", 5000),  # 5 秒
+        # 🆕 增加 ping 容忍度：防止 "Too many pings" 错误
+        # max_ping_strikes=0 表示不限制客户端 ping 频率
+        ("grpc.http2.max_ping_strikes", 0),
         
         # 连接生命周期管理
         ("grpc.max_connection_idle_ms", max_connection_idle),

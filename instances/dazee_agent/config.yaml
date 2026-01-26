@@ -203,16 +203,16 @@ apis:
     #   "parameters": {"chart_url": "https://...", "query": "订单系统", "language": "中文"}
     # }
     poll_config:
-      execute_id_field: "execute_id"
+      execute_id_field: "execute_id"  # Coze 初始响应直接返回 execute_id 在顶层
       status_url_template: "https://api.coze.cn/v1/workflows/{workflow_id}/run_histories/{execute_id}"
       body_vars: ["workflow_id"]
-      # 🔧 Coze API 返回 data 是数组
-      # ⚠️ 实际字段是 output（有值表示成功），不是 execute_status
-      status_field: "data.0.output"
-      # 🆕 使用 __non_empty__ 判断：output 有值即为成功
-      success_status: "__non_empty__"
-      # 🆕 检查 error_message 判断失败
-      failed_status: "__error__"
+      # 🔧 根据 Coze API 文档：https://www.coze.cn/open/playground/workflow_run_history
+      # execute_status: Success / Running / Fail
+      status_field: "data.0.execute_status"
+      success_status: "Success"
+      failed_status: "Fail"
+      # output 字段包含工作流输出结果
+      output_field: "data.0.output"
       check_code: true  # 检查 code 字段，code !== 0 立即报错
 
 

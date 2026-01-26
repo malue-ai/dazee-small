@@ -164,6 +164,7 @@ plan_todo.create_plan({
 - ❌ **禁止下载和解析 ontology_json_url 内容**
 - ❌ **禁止在回复中展示技术链接**：不要向用户显示 chart_url 或 ontology_json_url 链接
 - ❌ **禁止使用 send_files 发送系统构建产物**：流程图和配置 JSON 是技术中间产物，不要发送给用户
+- ❌ **禁止使用 `body` 参数调用 api_calling**：必须使用 `parameters`，否则会缺少 workflow_id 导致失败
 
 **禁止使用的术语**：❌ "本体论" / "ontology"（对用户不可见）
 

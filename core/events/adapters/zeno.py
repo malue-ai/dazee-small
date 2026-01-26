@@ -149,7 +149,21 @@ class ZenOAdapter(EventAdapter):
         event_type = event.get("type", "")
         data = event.get("data", {})
         session_id = event.get("session_id", "")
-        conversation_id = event.get("conversation_id") or self.conversation_id or ""
+        
+        # 🔍 追踪 conversation_id 来源
+        conv_from_event = event.get("conversation_id")
+        conv_from_self = self.conversation_id
+        conversation_id = conv_from_event or conv_from_self or ""
+        
+        # 🔍 追踪日志：记录 conversation_id 来源
+        logger.info(
+            f"🔍 [ZenO.transform] conversation_id 来源追踪: "
+            f"type={event_type}, "
+            f"session_id={session_id}, "
+            f"from_event={conv_from_event}, "
+            f"from_self={conv_from_self}, "
+            f"final={conversation_id}"
+        )
         
         # 获取 message_id：优先从 data，其次从 message.id（message_start 事件），最后用缓存
         message_id = (
@@ -886,7 +900,9 @@ class ZenOAdapter(EventAdapter):
         preview_url: str = None,
         project_path: str = None,
         stack: str = None,
-        error: str = None
+        error: str = None,
+        expires_at: int = None,
+        timeout_seconds: int = None
     ) -> Dict[str, Any]:
         """
         创建 sandbox 类型的 delta 事件（沙盒项目启动）
@@ -899,6 +915,8 @@ class ZenOAdapter(EventAdapter):
             project_path: 项目路径
             stack: 技术栈 (streamlit, flask, vue 等)
             error: 错误信息（失败时返回）
+            expires_at: 沙盒过期时间（毫秒时间戳），前端可用于显示倒计时
+            timeout_seconds: 沙盒超时时间（秒），剩余存活时间
             
         Returns:
             Zeno 格式的 delta 事件
@@ -916,6 +934,10 @@ class ZenOAdapter(EventAdapter):
             sandbox_data["stack"] = stack
         if error:
             sandbox_data["error"] = error
+        if expires_at is not None:
+            sandbox_data["expires_at"] = expires_at
+        if timeout_seconds is not None:
+            sandbox_data["timeout_seconds"] = timeout_seconds
         
         return {
             "type": "message.assistant.delta",
@@ -1317,11 +1339,13 @@ class ZenOAdapter(EventAdapter):
         {
             "success": true,
             "url": "https://3000-xxx.e2b.app",
-            "port": 3000
+            "port": 3000,
+            "expires_at": 1737900000000,  // 可选：毫秒时间戳
+            "timeout_seconds": 3600       // 可选：剩余秒数
         }
         
         生成的 delta 类型：
-        - sandbox: 包含 url、status 等信息
+        - sandbox: 包含 url、status、过期时间等信息
         
         Args:
             result_content: 工具返回的 JSON 字符串
@@ -1352,6 +1376,10 @@ class ZenOAdapter(EventAdapter):
         # 从工具结果中获取 E2B 实际沙箱 ID
         sandbox_id = result.get("sandbox_id", "")
         
+        # 🆕 提取过期时间信息
+        expires_at = result.get("expires_at")  # 毫秒时间戳
+        timeout_seconds = result.get("timeout_seconds")  # 剩余秒数
+        
         # 构建 sandbox delta 数据（符合前端 SandboxData 接口）
         # status: 'success' | 'error' | 'running' | 'pending'
         sandbox_data = {
@@ -1368,7 +1396,17 @@ class ZenOAdapter(EventAdapter):
         if error:
             sandbox_data["error"] = error
         
-        logger.info(f"🚀 生成 sandbox delta: sandbox_id={sandbox_id}, url={public_url}, status={'success' if success else 'error'}")
+        # 🆕 添加过期时间字段
+        if expires_at is not None:
+            sandbox_data["expires_at"] = expires_at
+        if timeout_seconds is not None:
+            sandbox_data["timeout_seconds"] = timeout_seconds
+        
+        logger.info(
+            f"🚀 生成 sandbox delta: sandbox_id={sandbox_id}, url={public_url}, "
+            f"status={'success' if success else 'error'}, "
+            f"expires_at={expires_at}, timeout_seconds={timeout_seconds}"
+        )
         deltas.append(self._create_delta("sandbox", sandbox_data))
         
         return deltas
