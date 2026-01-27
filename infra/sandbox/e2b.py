@@ -243,7 +243,11 @@ class E2BSandboxProvider(SandboxProvider):
         if self.api_key != os.getenv("E2B_API_KEY"):
             os.environ["E2B_API_KEY"] = self.api_key
         
-        sandbox = await AsyncSandbox.connect(e2b_sandbox_id)
+        # 恢复沙盒时设置 30 分钟超时（与创建时一致）
+        sandbox = await AsyncSandbox.connect(
+            e2b_sandbox_id,
+            timeout=self.DEFAULT_TIMEOUT_SECONDS
+        )
         
         try:
             await sandbox.commands.run("echo 'connected'", timeout=15)
@@ -281,14 +285,48 @@ class E2BSandboxProvider(SandboxProvider):
             )
     
     async def pause_sandbox(self, conversation_id: str) -> bool:
-        """暂停沙盒"""
-        if conversation_id not in self._sandbox_pool:
-            return False
+        """
+        暂停沙盒
+        
+        支持从内存池或数据库恢复连接后暂停：
+        1. 先检查内存池中是否有活跃连接
+        2. 如果没有，从数据库获取 e2b_sandbox_id 并连接后暂停
+        """
+        sandbox = None
+        e2b_sandbox_id = None
         
         try:
-            sandbox = self._sandbox_pool[conversation_id]
+            # 1. 优先使用内存池中的连接
+            if conversation_id in self._sandbox_pool:
+                sandbox = self._sandbox_pool[conversation_id]
+                del self._sandbox_pool[conversation_id]
+            else:
+                # 2. 从数据库获取 e2b_sandbox_id 并连接
+                async with AsyncSessionLocal() as session:
+                    db_sandbox = await crud.get_sandbox_by_conversation(
+                        session, conversation_id
+                    )
+                
+                if not db_sandbox or not db_sandbox.e2b_sandbox_id:
+                    logger.warning(f"⚠️ 沙盒不存在或无 e2b_sandbox_id: {conversation_id}")
+                    return False
+                
+                e2b_sandbox_id = db_sandbox.e2b_sandbox_id
+                
+                # 连接到沙盒
+                try:
+                    sandbox = await self._connect_sandbox(e2b_sandbox_id)
+                except Exception as conn_err:
+                    # 连接失败可能沙盒已不存在，更新 DB 状态
+                    logger.warning(f"⚠️ 连接沙盒失败，可能已被删除: {conn_err}")
+                    async with AsyncSessionLocal() as session:
+                        await crud.update_sandbox_status(
+                            session, conversation_id, "stopped"
+                        )
+                    return False
+            
+            # 3. 执行暂停
             await sandbox.beta_pause()  # beta 功能
-            del self._sandbox_pool[conversation_id]
             
             async with AsyncSessionLocal() as session:
                 await crud.update_sandbox_status(
@@ -297,6 +335,7 @@ class E2BSandboxProvider(SandboxProvider):
             
             logger.info(f"⏸️ 沙盒已暂停: {conversation_id}")
             return True
+            
         except Exception as e:
             logger.error(f"❌ 暂停沙盒失败: {e}", exc_info=True)
             return False
@@ -326,20 +365,59 @@ class E2BSandboxProvider(SandboxProvider):
             raise SandboxError(f"恢复沙盒失败: {e}")
     
     async def destroy_sandbox(self, conversation_id: str) -> bool:
-        """销毁沙盒"""
+        """
+        销毁沙盒
+        
+        支持从内存池或数据库恢复连接后销毁：
+        1. 先检查内存池中是否有活跃连接
+        2. 如果没有，从数据库获取 e2b_sandbox_id 并连接后销毁
+        """
+        sandbox = None
+        e2b_sandbox_id = None
+        
         try:
+            # 1. 优先使用内存池中的连接
             if conversation_id in self._sandbox_pool:
                 sandbox = self._sandbox_pool[conversation_id]
-                await sandbox.kill()
                 del self._sandbox_pool[conversation_id]
+            else:
+                # 2. 从数据库获取 e2b_sandbox_id
+                async with AsyncSessionLocal() as session:
+                    db_sandbox = await crud.get_sandbox_by_conversation(
+                        session, conversation_id
+                    )
+                
+                if db_sandbox and db_sandbox.e2b_sandbox_id:
+                    e2b_sandbox_id = db_sandbox.e2b_sandbox_id
+                    
+                    # 尝试连接并销毁
+                    try:
+                        sandbox = await self._connect_sandbox(e2b_sandbox_id)
+                    except Exception as conn_err:
+                        # 连接失败可能沙盒已不存在，这是正常情况
+                        logger.info(
+                            f"ℹ️ 连接沙盒失败（可能已被 E2B 自动销毁）: {conn_err}"
+                        )
+                        sandbox = None
             
+            # 3. 如果有连接，执行销毁
+            if sandbox:
+                try:
+                    await sandbox.kill()
+                    logger.info(f"🗑️ E2B 沙盒已销毁: {e2b_sandbox_id or conversation_id}")
+                except Exception as kill_err:
+                    # 销毁失败也继续更新 DB 状态
+                    logger.warning(f"⚠️ 销毁沙盒时出错（可能已不存在）: {kill_err}")
+            
+            # 4. 更新数据库状态
             async with AsyncSessionLocal() as session:
                 await crud.update_sandbox_status(
                     session, conversation_id, "stopped"
                 )
             
-            logger.info(f"🗑️ 沙盒已销毁: {conversation_id}")
+            logger.info(f"🗑️ 沙盒状态已更新为 stopped: {conversation_id}")
             return True
+            
         except Exception as e:
             logger.error(f"❌ 销毁沙盒失败: {e}", exc_info=True)
             return False
@@ -759,6 +837,45 @@ class E2BSandboxProvider(SandboxProvider):
             if "not found" in str(e).lower():
                 raise FileNotFoundError(f"文件不存在: {path}")
             raise SandboxError(f"读取文件失败: {e}")
+    
+    async def read_file_binary(self, conversation_id: str, path: str) -> bytes:
+        """
+        读取二进制文件
+        
+        用于读取非文本文件（如 Excel、PDF、图片等），
+        使用 E2B SDK 的 format="bytes" 参数直接读取原始字节。
+        
+        Args:
+            conversation_id: 对话 ID
+            path: 文件路径
+            
+        Returns:
+            文件的二进制内容（bytes）
+            
+        Raises:
+            FileNotFoundError: 文件不存在
+            SandboxError: 读取失败
+        """
+        self._check_available()
+        
+        async def _do_read_binary(sandbox: Any) -> bytes:
+            # 使用 format="bytes" 直接读取二进制内容
+            # E2B SDK: sandbox.files.read(path, format="bytes") -> bytearray
+            content = await sandbox.files.read(path, format="bytes")
+            # bytearray 转换为 bytes
+            if isinstance(content, bytearray):
+                return bytes(content)
+            if isinstance(content, bytes):
+                return content
+            # 兜底：如果返回的是字符串，编码为 bytes
+            return content.encode('utf-8')
+        
+        try:
+            return await self._with_retry(conversation_id, _do_read_binary)
+        except Exception as e:
+            if "not found" in str(e).lower():
+                raise FileNotFoundError(f"文件不存在: {path}")
+            raise SandboxError(f"读取二进制文件失败: {e}")
     
     async def write_file(
         self,

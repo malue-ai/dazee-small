@@ -174,6 +174,11 @@ class AgentPool:
             await client.set(instances_key, "0")
             
             logger.debug(f"✅ Agent 元数据已写入 Redis: {agent_id}")
+        except asyncio.CancelledError:
+            # CancelledError 需要单独捕获（不继承自 Exception）
+            logger.warning(
+                f"⚠️ 初始化 Agent 元数据到 Redis 被取消（Agent 仍可正常使用）: {agent_id}"
+            )
         except Exception as e:
             # Redis 初始化失败不应该阻塞整个应用启动
             # 只记录警告，允许应用在无 Redis 的情况下运行（功能降级）

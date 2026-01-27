@@ -308,7 +308,7 @@ class PromptManager:
             return self._append_rag_context(state, result)
         
         # 文件相关工具 → 追加文件上下文
-        if tool_name in ("file_upload", "file_read"):
+        if tool_name in ("file_upload", "sandbox_read_file"):
             return self._append_file_context(state, result)
         
         # E2B 沙盒工具 → 追加 E2B 规范（如果还没追加）

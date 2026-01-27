@@ -308,11 +308,30 @@ class SandboxService:
         conversation_id: str,
         path: str
     ) -> bytes:
-        """读取沙盒文件内容（二进制）"""
-        content = await self.read_file(conversation_id, path)
-        if isinstance(content, bytes):
-            return content
-        return content.encode('utf-8')
+        """
+        读取沙盒文件内容（二进制）
+        
+        用于读取非文本文件（如 Excel、PDF、图片等），
+        使用 E2B SDK 的 format="bytes" 直接读取原始字节。
+        
+        Args:
+            conversation_id: 对话 ID
+            path: 文件路径（支持相对路径，会自动转换为绝对路径）
+            
+        Returns:
+            文件的二进制内容（bytes）
+        """
+        abs_path = self._normalize_path(path)
+        
+        try:
+            return await self.provider.read_file_binary(conversation_id, abs_path)
+        except InfraSandboxNotFoundError as e:
+            raise SandboxNotFoundError(str(e))
+        except FileNotFoundError:
+            raise
+        except Exception as e:
+            logger.error(f"❌ 读取二进制文件失败: {abs_path} - {e}", exc_info=True)
+            raise SandboxServiceError(f"读取二进制文件失败: {e}")
     
     async def write_file(
         self,

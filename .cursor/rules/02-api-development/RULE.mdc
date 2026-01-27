@@ -1,5 +1,5 @@
 ---
-description: "API 开发规范：FastAPI 路由 + gRPC 服务，三层架构"
+description: "API 三层架构规范"
 globs:
   - "routers/**/*.py"
   - "grpc/**/*.py"
@@ -8,209 +8,39 @@ globs:
 alwaysApply: false
 ---
 
-# API 开发规范
+# API 三层架构
 
-## 🏗️ 三层架构
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      协议入口层（平级）                       │
-│  ┌──────────────┐                    ┌──────────────┐       │
-│  │   routers/   │  HTTP (前端调用)    │    grpc/     │  gRPC │
-│  │   chat.py    │ ◄────────────      │ chat_servicer│ ◄──── │
-│  └──────┬───────┘                    └──────┬───────┘  (Go) │
-│         │                                   │               │
-│         └─────────────┬─────────────────────┘               │
-│                       ▼                                     │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │                  services/ 业务逻辑层                 │   │
-│  │                  chat_service.py                     │   │
-│  │                  （只写一次，被复用）                   │   │
-│  └──────────────────────────┬──────────────────────────┘   │
-│                             ▼                               │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │                  models/ 数据模型层                   │   │
-│  │                  chat.py, mem0.py                    │   │
-│  └─────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## ⭐ 核心原则：业务逻辑只写一次
-
-```python
-# ✅ 正确：一个 Service，两个入口复用
-
-# services/chat_service.py（业务逻辑，只写一次）
-class ChatService:
-    async def send_message(self, user_id: str, content: str) -> ChatResponse:
-        # 业务逻辑...
-        return ChatResponse(...)
-
-# routers/chat.py（HTTP 入口）
-@router.post("/chat")
-async def chat(request: ChatRequest):
-    service = get_chat_service()
-    return await service.send_message(request.user_id, request.content)
-
-# grpc/chat_servicer.py（gRPC 入口，给 Go 调用）
-class ChatServicer(chat_pb2_grpc.ChatServiceServicer):
-    async def SendMessage(self, request, context):
-        service = get_chat_service()
-        result = await service.send_message(request.user_id, request.content)
-        return chat_pb2.ChatResponse(message=result.message)
-```
-
-```python
-# ❌ 错误：两套业务逻辑
-
-# routers/chat.py
-@router.post("/chat")
-async def chat(request: ChatRequest):
-    # 业务逻辑写在这里...  ❌
-
-# grpc/chat_servicer.py
-class ChatServicer(...):
-    async def SendMessage(self, request, context):
-        # 又写一遍业务逻辑...  ❌
-```
-
-## 📁 目录结构
+## 架构原则
 
 ```
-models/              # 数据模型（Pydantic）
-├── chat.py          # Chat 相关模型
-├── mem0.py          # Mem0 相关模型
-└── api.py           # 通用 API 响应模型
-
-services/            # 业务逻辑层（核心！只写一次）
-├── chat_service.py
-├── mem0_service.py
-└── session_service.py
-
-routers/             # HTTP 入口（FastAPI）
-├── chat.py
-├── mem0_router.py
-└── conversation.py
-
-grpc/                # gRPC 入口（给 Go 服务调用）
-├── server.py        # gRPC 服务器
-├── chat_servicer.py
-├── session_servicer.py
-├── protos/          # .proto 定义文件
-└── generated/       # protoc 生成的代码
+routers/     → HTTP 入口（协议转换）
+grpc/        → gRPC 入口（协议转换）
+    ↓
+services/    → 业务逻辑（只写一次！）
+    ↓
+models/      → 数据模型（Pydantic）
 ```
 
-## 📦 Models 层
+## 核心原则
+- **业务逻辑只写一次**：Service 层实现业务逻辑，被 HTTP 和 gRPC 复用
+- Router 和 gRPC Servicer 只做协议转换
+- 使用 Pydantic 模型进行数据验证
 
-所有数据模型使用 Pydantic，被 Service/Router/gRPC 共享：
+## 标准模式
+- `models/` 定义 Pydantic 请求/响应模型
+- `services/` 实现核心业务逻辑
+- `routers/` 提供 HTTP API（调用 Service）
+- `grpc/` 提供 gRPC API（调用同一个 Service）
 
-```python
-# models/chat.py
-from pydantic import BaseModel, Field
+## FastAPI 指南
+- 使用函数式组件和 Pydantic 模型
+- 路由定义带清晰的返回类型注解
+- 用中间件处理日志、错误监控
+- HTTPException 用于预期错误
+- 依赖注入管理状态和共享资源
 
-class ChatRequest(BaseModel):
-    user_id: str = Field(..., description="用户 ID")
-    content: str = Field(..., description="消息内容")
-
-class ChatResponse(BaseModel):
-    message_id: str
-    content: str
-    created_at: str
-```
-
-## 🔧 Service 层（核心）
-
-业务逻辑集中在 Service 层，**只写一次**：
-
-```python
-# services/chat_service.py
-from models.chat import ChatRequest, ChatResponse
-
-class ChatService:
-    _instance = None
-    
-    @classmethod
-    def get_instance(cls) -> "ChatService":
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
-    
-    async def send_message(self, user_id: str, content: str) -> ChatResponse:
-        """
-        发送消息（核心业务逻辑）
-        
-        - HTTP 调用这个
-        - gRPC 也调用这个
-        - 逻辑只写一次！
-        """
-        # ... 业务逻辑 ...
-        return ChatResponse(...)
-
-def get_chat_service() -> ChatService:
-    return ChatService.get_instance()
-```
-
-## 🌐 Router 层（HTTP 入口）
-
-只做协议转换，调用 Service：
-
-```python
-# routers/chat.py
-from fastapi import APIRouter
-from models.chat import ChatRequest, ChatResponse
-from services.chat_service import get_chat_service
-
-router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
-
-@router.post("/send", response_model=ChatResponse)
-async def send_message(request: ChatRequest):
-    """HTTP 入口 - 前端调用"""
-    service = get_chat_service()
-    return await service.send_message(request.user_id, request.content)
-```
-
-## 📡 gRPC 层（gRPC 入口）
-
-同样只做协议转换，调用 Service：
-
-```python
-# grpc/chat_servicer.py
-from grpc import aio
-from grpc.generated import chat_pb2, chat_pb2_grpc
-from services.chat_service import get_chat_service
-
-class ChatServicer(chat_pb2_grpc.ChatServiceServicer):
-    """gRPC 入口 - Go 服务调用"""
-    
-    def __init__(self):
-        self.service = get_chat_service()
-    
-    async def SendMessage(self, request, context):
-        result = await self.service.send_message(
-            user_id=request.user_id,
-            content=request.content
-        )
-        return chat_pb2.ChatResponse(
-            message_id=result.message_id,
-            content=result.content
-        )
-```
-
-## ⚠️ 禁止事项
-
-| 禁止 | 说明 |
-|------|------|
-| ❌ 业务逻辑写在 Router | Router 只做 HTTP 协议处理 |
-| ❌ 业务逻辑写在 gRPC Servicer | Servicer 只做 gRPC 协议处理 |
-| ❌ HTTP 和 gRPC 各写一套逻辑 | 违背三层架构原则 |
-| ❌ 用 Dict 代替 Pydantic Model | 失去类型检查和验证 |
-| ❌ Service 处理协议细节 | Service 不应该知道是 HTTP 还是 gRPC |
-
-## ✅ 检查清单
-
-新增 API 时，按顺序完成：
-
-1. [ ] **Models**: 定义请求/响应模型 (`models/xxx.py`)
-2. [ ] **Service**: 实现业务逻辑 (`services/xxx_service.py`)
-3. [ ] **Router**: 添加 HTTP 端点 (`routers/xxx.py`)
-4. [ ] **gRPC** (如需要): 添加 gRPC servicer (`grpc/xxx_servicer.py`)
+## 禁止事项
+- ❌ 业务逻辑写在 Router 或 gRPC Servicer
+- ❌ HTTP 和 gRPC 各写一套业务逻辑
+- ❌ 用 Dict 代替 Pydantic Model
+- ❌ Service 层处理协议细节（HTTP/gRPC）

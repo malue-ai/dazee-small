@@ -15,7 +15,7 @@
 计费规则：
 - Claude Server-side 工具（web_search, code_execution 等）：$0.00（成本已在 LLM 计费中）
 - 第三方 API 工具（exa_search, ragie 等）：按实际调用成本计费
-- 内部工具（file_read, plan_todo 等）：$0.00（免费）
+- 内部工具（sandbox_read_file, plan_todo 等）：$0.00（免费）
 
 使用示例：
     from core.billing.tool_pricing import get_tool_pricing, calculate_tool_cost
@@ -48,7 +48,7 @@ TOOL_PRICING = {
     "code_execution": 0.0,                 # Claude 代码执行沙箱（Skills 需要）
     
     # ==================== 内部工具（免费）====================
-    "file_read": 0.0,                      # 文件读取
+    "sandbox_read_file": 0.0,              # 沙盒文件读取
     "plan_todo": 0.0,                      # 任务规划
     "request_human_confirmation": 0.0,     # 人工确认
     "hitl": 0.0,                           # HITL (Human-in-the-Loop)

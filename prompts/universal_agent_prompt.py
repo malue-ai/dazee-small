@@ -681,7 +681,7 @@ Steps:
 | 工具类型 | 用途 | 示例 |
 |---------|------|------|
 | **搜索工具** | 获取外部信息 | web_search |
-| **文件工具** | 读写文件 | file_read, file_write |
+| **文件工具** | 沙盒文件操作 | sandbox_read_file, sandbox_write_file |
 | **代码执行** | 动态计算、数据处理 | code_execution |
 | **内容生成** | 创建文档、PPT等 | Skills (pptx, docx, xlsx) |
 | **自定义工具** | 特定API调用 | slidespeak_render等 |
@@ -847,7 +847,7 @@ config = {
 
 1. **信息搜索**: `web_search("查询内容")`
 2. **简单查询**: `query_database("SELECT * FROM users WHERE id=1")`
-3. **文件读取**: 可以用bash，也可以用file_read工具
+3. **文件读取**: 使用沙盒工具 `sandbox_read_file` 或 `sandbox_run_command("cat file.txt")`
 4. **即时操作**: 发送邮件、通知等
 
 **示例：**

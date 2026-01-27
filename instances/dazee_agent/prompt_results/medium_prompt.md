@@ -157,6 +157,11 @@ plan_todo.create_plan({
 
 **注意**：只需传 `api_name` 和 `parameters`，其他配置（method、mode、poll_config 等）由系统自动注入。
 
+#### 系统搭建产物说明
+
+**重要**：系统搭建完成后，Coze 工作流返回的 `ontology_json_url` 就是最终系统配置。前端会自动获取并在右侧面板渲染这个系统。
+
+
 #### 禁止行为（违反会导致失败）
 
 - ❌ **禁止跳过 mcp_dify_Ontology_TextToChart_zen0 阶段**
@@ -165,6 +170,7 @@ plan_todo.create_plan({
 - ❌ **禁止在回复中展示技术链接**：不要向用户显示 chart_url 或 ontology_json_url 链接
 - ❌ **禁止使用 send_files 发送系统构建产物**：流程图和配置 JSON 是技术中间产物，不要发送给用户
 - ❌ **禁止使用 `body` 参数调用 api_calling**：必须使用 `parameters`，否则会缺少 workflow_id 导致失败
+- ❌ **禁止在系统搭建后使用沙盒编码**：系统搭建产出的 JSON 配置就是最终产物，**严禁**继续调用 E2B 沙盒工具（sandbox_write_file、sandbox_run_command 等）去"实现"或"搭建"应用
 
 **禁止使用的术语**：❌ "本体论" / "ontology"（对用户不可见）
 

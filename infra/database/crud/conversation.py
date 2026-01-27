@@ -61,6 +61,58 @@ async def get_conversation(
     return await get_by_id(session, Conversation, conversation_id)
 
 
+async def get_or_create_conversation(
+    session: AsyncSession,
+    user_id: str,
+    conversation_id: Optional[str] = None,
+    title: str = "新对话",
+    metadata: Optional[Dict[str, Any]] = None
+) -> tuple[Conversation, bool]:
+    """
+    获取或创建对话（单次 DB 操作，优化性能）
+    
+    逻辑：
+    1. 如果 conversation_id 为空 → 创建新对话
+    2. 如果 conversation_id 存在 → 尝试获取
+    3. 如果对话不存在 → 使用该 ID 创建新对话
+    
+    Args:
+        session: 数据库会话
+        user_id: 用户 ID
+        conversation_id: 对话 ID（可选，不提供则自动生成）
+        title: 对话标题（仅在创建时使用）
+        metadata: 对话元数据（仅在创建时使用）
+        
+    Returns:
+        (Conversation, is_new) - 对话对象和是否新创建标志
+    """
+    # 如果没有指定 conversation_id，直接创建新对话
+    if not conversation_id:
+        conv = await create_conversation(
+            session=session,
+            user_id=user_id,
+            title=title,
+            metadata=metadata
+        )
+        return conv, True
+    
+    # 尝试获取已存在的对话
+    conv = await get_conversation(session, conversation_id)
+    
+    if conv:
+        return conv, False
+    
+    # 对话不存在，使用指定的 ID 创建新对话
+    conv = await create_conversation(
+        session=session,
+        user_id=user_id,
+        title=title,
+        metadata=metadata,
+        conversation_id=conversation_id
+    )
+    return conv, True
+
+
 async def update_conversation(
     session: AsyncSession,
     conversation_id: str,

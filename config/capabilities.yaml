@@ -527,31 +527,6 @@ capabilities:
         type: object
         description: 轮询配置（仅 mode=async_poll 时有效）
     required: []  # api_name 或 url 至少一个，在代码中校验
-- name: file_read
-  type: TOOL
-  subtype: NATIVE
-  provider: system
-  capabilities:
-  - file_operations
-  - content_reading
-  priority: 90
-  cost:
-    time: fast
-    money: free
-  constraints:
-    requires_api: false
-  metadata:
-    description: Read file contents from the file system
-  input_schema:
-    type: object
-    properties:
-      path:
-        type: string
-        description: The file path to read
-    required:
-    - path
-# 🆕 Tavily 搜索（替代 Claude Server Tool: web_search）
-# 切换模型时可用，不依赖 Anthropic 服务端
 - name: tavily_search
   type: TOOL
   subtype: CUSTOM
@@ -1178,8 +1153,6 @@ capabilities:
             default: incremental
     required:
     - operation
-# 🆕 V7.7: send_files 文件发送工具
-# 用于在回复中包含文件时，通过 SSE 事件返回结构化的文件数据
 - name: send_files
   type: TOOL
   subtype: CUSTOM
@@ -1268,8 +1241,6 @@ capabilities:
     - 探索
     - 自定义
     - 动态
-# ==================== 沙盒工具（精简版 - Level 1 核心） ====================
-# 只保留 3 个核心工具，其他用 bash 命令替代
 - name: sandbox_write_file
   type: TOOL
   subtype: CUSTOM
@@ -1342,8 +1313,6 @@ capabilities:
       port: {type: integer, description: 服务端口（background=true 时指定，自动返回 URL）}
       timeout: {type: integer, description: 超时秒数, default: 120}
     required: [conversation_id, command]
-
-# 新增沙盒工具
 - name: sandbox_read_file
   type: TOOL
   subtype: CUSTOM
@@ -1371,7 +1340,6 @@ capabilities:
       conversation_id: {type: string, description: 对话 ID}
       path: {type: string, description: 文件路径}
     required: [conversation_id, path]
-
 - name: sandbox_list_files
   type: TOOL
   subtype: CUSTOM
@@ -1399,7 +1367,6 @@ capabilities:
       conversation_id: {type: string, description: 对话 ID}
       path: {type: string, description: 目录路径（默认 /home/user/project）}
     required: [conversation_id]
-
 - name: sandbox_execute_python
   type: TOOL
   subtype: CUSTOM
@@ -1437,7 +1404,6 @@ capabilities:
       code: {type: string, description: Python 代码}
       timeout: {type: integer, description: 超时秒数, default: 300}
     required: [conversation_id, code]
-
 - name: sandbox_get_public_url
   type: TOOL
   subtype: CUSTOM
@@ -1476,9 +1442,47 @@ capabilities:
       conversation_id: {type: string, description: 对话 ID}
       port: {type: integer, description: 服务端口, default: 3000}
     required: [conversation_id]
-# 🆕 文档解析工具（Partition API）
-# 注：问数平台数据分析功能已通过 api_calling 工具实现，
-# 配置在 instances/{agent}/config.yaml 的 apis 中（api_name: wenshu_api）
+- name: sandbox_upload_file
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  level: 1
+  implementation:
+    module: tools.sandbox_tools
+    class: SandboxUploadFile
+  capabilities:
+  - sandbox_file_operations
+  - file_upload
+  - s3_storage
+  priority: 90
+  cost:
+    time: medium
+    money: low
+  constraints:
+    requires_api: true
+    api_name: e2b
+    session_scoped: true
+  metadata:
+    description: |
+      将沙盒中的文件上传到 S3 并返回下载链接。
+      
+      用途：
+      - 将沙盒中生成的文件（Excel、PDF、图片等）持久化存储
+      - 让前端用户可以下载沙盒中生成的文件
+      
+      典型工作流：
+      1. sandbox_execute_python 生成文件
+      2. sandbox_upload_file 上传到 S3 获取 URL
+      3. send_files 发送下载链接给前端
+    preferred_for: [文件上传, S3存储, 下载链接]
+    keywords: [sandbox, 沙盒, upload, 上传, s3, 下载]
+  input_schema:
+    type: object
+    properties:
+      conversation_id: {type: string, description: 对话 ID}
+      path: {type: string, description: 沙盒中的文件路径}
+      filename: {type: string, description: 下载时显示的文件名（可选）}
+    required: [conversation_id, path]
 - name: document_partition_tool
   type: TOOL
   subtype: CUSTOM

@@ -467,7 +467,7 @@ class RecoverableCompressor:
         
         self._reference_store[ref_id] = ref
         
-        compressed_text = f"[FILE:{ref_id}] {file_path}\n📝 摘要: {summary}\n💾 可通过 file_read 恢复完整内容"
+        compressed_text = f"[FILE:{ref_id}] {file_path}\n📝 摘要: {summary}\n💾 可通过 sandbox_read_file 恢复完整内容"
         
         return compressed_text, ref
     

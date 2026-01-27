@@ -36,8 +36,9 @@ def get_grpc_server_options() -> List[Tuple[str, any]]:
     # 从环境变量读取配置，提供合理默认值
     keepalive_time = int(os.getenv("GRPC_KEEPALIVE_TIME_MS", "30000"))  # 30 秒
     keepalive_timeout = int(os.getenv("GRPC_KEEPALIVE_TIMEOUT_MS", "10000"))  # 10 秒
-    max_connection_idle = int(os.getenv("GRPC_MAX_CONNECTION_IDLE_MS", "300000"))  # 5 分钟
-    max_connection_age = int(os.getenv("GRPC_MAX_CONNECTION_AGE_MS", "36000000"))  # 1 小时
+    # 🔧 增加空闲超时到 30 分钟，适配长时间运行的任务（如 PPT 生成、视频处理）
+    max_connection_idle = int(os.getenv("GRPC_MAX_CONNECTION_IDLE_MS", "1800000"))  # 30 分钟
+    max_connection_age = int(os.getenv("GRPC_MAX_CONNECTION_AGE_MS", "3600000"))  # 1 小时
     max_connection_age_grace = int(os.getenv("GRPC_MAX_CONNECTION_AGE_GRACE_MS", "60000"))  # 1 分钟
     
     return [

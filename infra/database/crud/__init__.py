@@ -19,6 +19,7 @@ from infra.database.crud.user import (
 from infra.database.crud.conversation import (
     create_conversation,
     get_conversation,
+    get_or_create_conversation,
     update_conversation,
     list_conversations,
     count_conversations,
@@ -101,6 +102,7 @@ __all__ = [
     # Conversation
     "create_conversation",
     "get_conversation",
+    "get_or_create_conversation",
     "update_conversation",
     "list_conversations",
     "count_conversations",

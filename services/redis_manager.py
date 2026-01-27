@@ -446,15 +446,6 @@ class RedisSessionManager:
                 # 事件被适配器过滤，不需要存储
                 return None
             event = transformed
-            
-            # 🔍 追踪日志：记录 ZenO 转换后的 conversation_id
-            conv_id_after = event.get("conversation_id")
-            logger.info(
-                f"🔍 [buffer_event] ZenO 转换后: "
-                f"type={event.get('type')}, "
-                f"session_id={session_id}, "
-                f"conversation_id={conv_id_after}"
-            )
         
         # 2. 生成 seq（Redis INCR，原子操作）
         # 只有当事件没有 seq 时才生成

@@ -310,8 +310,6 @@ class ChatServicer(_ChatServicerBase):
             adapter = ZenOAdapter(conversation_id=status_data.get("conversation_id"))
             logger.info("📋 gRPC 重连使用 ZenO 格式适配器")
             
-
-            
             # 获取历史事件
             history_events = await self.session_service.get_session_events(
                 session_id=request.session_id,

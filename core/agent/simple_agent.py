@@ -461,7 +461,8 @@ class SimpleAgent:
         message_id: str = None,
         enable_stream: bool = True,
         variables: Dict[str, Any] = None,
-        intent: Optional["IntentResult"] = None  # 🆕 V7: 从路由层传入的意图结果
+        intent: Optional["IntentResult"] = None,  # 🆕 V7: 从路由层传入的意图结果
+        preface_config: Optional[Dict[str, Any]] = None  # 🆕 V7.8: Preface 配置
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Agent 统一执行入口 - 7 阶段完整流程
@@ -469,6 +470,7 @@ class SimpleAgent:
         完整流程（参考 docs/00-ARCHITECTURE-V4.md L1693-1979）：
         阶段 1: Session/Agent 初始化 (在 SessionService.create_session 中完成)
         阶段 2: Intent Analysis - 使用路由层传入的意图结果（内部意图分析已移除）
+        阶段 2.5: Preface - 流式生成开场白（在 intent 之后）
         阶段 3: Tool Selection (Schema 驱动优先)
         阶段 4: System Prompt 组装 + LLM 调用准备
         阶段 5: Plan Creation (System Prompt 约束 + Claude 自主触发，在 RVR Turn 1 内部)
@@ -484,6 +486,7 @@ class SimpleAgent:
             enable_stream: 是否流式输出
             variables: 前端上下文变量（如位置、时区等），直接注入到 Prompt
             intent: V7 从路由层传入的意图分析结果（必需，如未提供则使用默认配置）
+            preface_config: V7.8 Preface 配置 {"user_message": str, "tracker": obj}
             
         Yields:
             事件字典
@@ -595,6 +598,29 @@ class SimpleAgent:
             if self._tracer:
                 stage = self._tracer.create_stage("intent_analysis")
                 stage.skip("未提供意图结果，使用默认配置")
+        
+        # =====================================================================
+        # 阶段 2.5: Preface - 流式生成开场白（在 intent 之后）
+        # =====================================================================
+        # 使用 haiku 模型快速生成简短开场白，边生成边发送
+        logger.info(f"🎬 Preface 阶段: preface_config={preface_config is not None}, intent={intent is not None}")
+        if preface_config and intent is not None:
+            logger.info(f"🚀 开始生成 Preface: user_message={preface_config.get('user_message', '')[:50]}...")
+            preface_text = await self._generate_preface_stream(
+                intent=intent,
+                user_message=preface_config.get("user_message", ""),
+                session_id=session_id,
+                tracker=preface_config.get("tracker")
+            )
+            if preface_text:
+                # 把 preface 作为 assistant 消息添加到上下文，避免后续回复重复
+                messages.append({
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": preface_text}]
+                })
+                logger.info(f"✨ Preface 已添加到上下文: len={len(preface_text)}")
+            else:
+                logger.warning("⚠️ Preface 生成返回空值")
         
         # =====================================================================
         # 阶段 3: Tool Selection (Schema 驱动优先)
@@ -1397,6 +1423,102 @@ class SimpleAgent:
         logger.info(f"✅ System Prompt (fallback): {len(base_prompt)} 字符")
         
         return system_blocks
+    
+    async def _generate_preface_stream(
+        self,
+        intent: "IntentResult",
+        user_message: str,
+        session_id: str,
+        tracker=None
+    ) -> Optional[str]:
+        """
+        流式生成 Preface 开场白（在 intent 之后执行）
+        
+        使用 haiku 模型快速生成简短开场白，边生成边发送 delta 事件。
+        
+        Args:
+            intent: 意图识别结果
+            user_message: 用户原始消息
+            session_id: Session ID
+            tracker: UsageTracker（可选，用于计费追踪）
+            
+        Returns:
+            完整的开场白文本，失败返回 None
+        """
+        try:
+            logger.info("📝 _generate_preface_stream: 开始执行")
+            # 使用 haiku 模型：快速、低成本
+            preface_llm = create_claude_service(
+                model="claude-haiku-4-5-20251001",
+                enable_thinking=False,
+                enable_caching=False
+            )
+            logger.info("📝 _generate_preface_stream: LLM 服务已创建")
+            
+            # 构建 Preface 生成提示词
+            intent_info = f"意图: {intent.intent_name or intent.task_type.value}"
+            if intent.platform:
+                intent_info += f", 平台: {intent.platform}"
+            
+            prompt = f"""你是一个友好的AI助手。用户发送了一条消息，系统已识别出用户意图。
+请生成一句简短的开场白（15-30字），让用户知道你已理解需求并即将开始处理。
+
+要求：
+1. 语气友好、专业
+2. 简洁明了，不要啰嗦
+3. 体现你理解了用户的需求
+4. 不要重复用户的原话
+5. 使用与用户相同的语言（中文/英文）
+
+{intent_info}
+用户消息: {user_message[:200]}
+
+直接输出开场白，不要任何解释或前缀："""
+
+            # 调用 LLM 流式生成 Preface
+            llm_messages = [Message(role="user", content=prompt)]
+            
+            accumulated_text = ""
+            final_response = None
+            
+            async for chunk in preface_llm.create_message_stream(
+                messages=llm_messages,
+                max_tokens=150
+            ):
+                # 流式输出内容
+                if chunk.content and chunk.is_stream:
+                    accumulated_text += chunk.content
+                    # 发送流式 delta 事件（不 yield，直接 await）
+                    # persist=False: preface 不需要保存到数据库
+                    await self.broadcaster.emit_message_delta(
+                        session_id=session_id,
+                        delta={"type": "preface", "content": chunk.content},
+                        message_id=self._current_message_id,
+                        persist=False
+                    )
+                
+                # 保存最终响应（用于计费）
+                if not chunk.is_stream:
+                    final_response = chunk
+            
+            # 记录 Token 使用（如果提供了 tracker）
+            if tracker and final_response:
+                tracker.record_call(
+                    llm_response=final_response,
+                    model="claude-haiku-4-5-20251001",
+                    purpose="preface"
+                )
+            
+            preface_text = accumulated_text.strip()
+            if preface_text:
+                logger.info(f"✨ Preface 流式生成完成: {preface_text[:50]}...")
+                return preface_text
+            
+            return None
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Preface 流式生成失败: {str(e)}")
+            return None
     
     async def _generate_simulated_thinking(
         self,

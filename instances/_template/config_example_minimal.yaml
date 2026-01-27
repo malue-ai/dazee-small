@@ -24,7 +24,7 @@ enabled_capabilities:
   # 核心工具（必需）
   plan_todo: 1
   hitl: 1
-  file_read: 1
+  # 文件读取请使用 sandbox_read_file
   
   # 信息获取（可选）
   tavily_search: 1           # 通用网络搜索（Tavily API）

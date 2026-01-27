@@ -619,23 +619,26 @@ async def reconnect_chat_stream(
     
     session_status = status_data.get("status")
     
-    # 如果 Session 已完成，返回错误
-    if session_status in ["completed", "failed", "timeout", "stopped"]:
-        logger.info(f"ℹ️ Session 已结束: status={session_status}")
-        raise HTTPException(
-            status_code=status.HTTP_410_GONE,
-            detail=create_error_response(
-                ErrorCode.SESSION_NOT_FOUND,
-                f"Session 已结束 (status={session_status})，请从数据库读取历史记录"
-            )
-        )
-    
     # 初始化格式适配器
     adapter = None
     if format == "zeno":
         from core.events.adapters.zeno import ZenOAdapter
         adapter = ZenOAdapter(conversation_id=status_data.get("conversation_id"))
         logger.info("📋 重连使用 ZenO 格式适配器")
+    
+    # 🔧 修复：Session 已完成时，不抛出错误，而是返回历史事件和完成状态
+    # 这样前端可以正常获取历史数据，而不是收到一个错误
+    if session_status in ["completed", "failed", "timeout", "stopped"]:
+        logger.info(f"ℹ️ Session 已结束: status={session_status}，返回历史事件")
+        return StreamingResponse(
+            _completed_session_event_generator(session_id, status_data, after_seq, adapter, session_status),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            }
+        )
     
     return StreamingResponse(
         _reconnect_event_generator(session_id, status_data, after_seq, adapter),

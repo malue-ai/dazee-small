@@ -92,8 +92,8 @@ class ZenOAdapter(EventAdapter):
     映射关系：
     - message_start → message.assistant.created + message.assistant.start
     - content_delta (thinking) → message.assistant.delta (type: thinking)
-    - content_delta (text, 首轮第一个) → message.assistant.delta (type: preface)
-    - content_delta (text, 后续) → message.assistant.delta (type: response)
+    - content_delta (text) → message.assistant.delta (type: response)
+    - message_delta (preface) → message.assistant.delta (type: preface)  # 🆕 V7.8: 由 chat_service 独立发送
     - tool_result:plan_todo → message.assistant.delta (type: progress)  # 通过 enhance_tool_result 处理
     - message_delta:recommended → message.assistant.delta (type: recommended)
     - message_delta:confirmation_request → message.assistant.delta (type: clue)
@@ -132,10 +132,6 @@ class ZenOAdapter(EventAdapter):
         self._current_block_type: Optional[str] = None
         # 标记是否已经有过 text 块（用于判断是否需要添加换行分隔符）
         self._has_text_started: bool = False
-        # 标记是否是首轮第一个 text 块（用于区分 preface 和 response）
-        self._is_first_text_block: bool = True
-        # 标记当前 text 块是否使用 preface 类型
-        self._current_block_is_preface: bool = False
     
     def transform(self, event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
@@ -187,11 +183,10 @@ class ZenOAdapter(EventAdapter):
             
             # 🆕 简化逻辑：只要收到 content_start 且 type=text 且不是第一个 text 块，就加换行
             # 这样多轮 text 内容（比如工具调用后的回复）之间会有清晰的分隔
+            # 🆕 V7.8: Preface 已移至 chat_service 独立阶段，此处所有 text 块统一使用 response 类型
             if block_type == "text":
                 if self._has_text_started:
                     self._accumulated_content += "\n\n"
-                    # 后续 text 块使用 response 类型
-                    self._current_block_is_preface = False
                     # 🔧 标记需要发送换行符事件
                     should_send_newline = True
                     logger.debug(
@@ -200,11 +195,7 @@ class ZenOAdapter(EventAdapter):
                     )
                 else:
                     self._has_text_started = True
-                    # 🆕 首轮第一个 text 块使用 preface 类型
-                    if self._is_first_text_block:
-                        self._current_block_is_preface = True
-                        self._is_first_text_block = False
-                        logger.debug("[content_start] 首轮第一个 text 块，标记为 preface")
+                    logger.debug("[content_start] 首个 text 块开始")
             
             self._current_block_type = block_type
             
@@ -280,8 +271,6 @@ class ZenOAdapter(EventAdapter):
         self._accumulated_content = ""
         self._current_block_type = None
         self._has_text_started = False
-        self._is_first_text_block = True  # 重置首轮 text 块标记
-        self._current_block_is_preface = False  # 重置当前块 preface 标记
         
         return {
             "type": "message.assistant.start",
@@ -307,8 +296,7 @@ class ZenOAdapter(EventAdapter):
         
         映射规则：
         - thinking → delta.type: "thinking"
-        - text（首轮第一个）→ delta.type: "preface"
-        - text（后续）→ delta.type: "response"
+        - text → delta.type: "response"（🆕 V7.8: Preface 已移至 chat_service 独立阶段）
         - tool_use → 忽略（工具参数不需要转换）
         """
         data = event.get("data", {})
@@ -333,13 +321,10 @@ class ZenOAdapter(EventAdapter):
             zeno_delta_type = "thinking"
             logger.debug(f"[_transform_content_delta] 思考内容: len={len(text)}")
         elif block_type == "text":
-            # 🆕 首轮第一个 text 块整体使用 preface，后续 text 块使用 response
-            if self._current_block_is_preface:
-                zeno_delta_type = "preface"
-                logger.debug(f"[_transform_content_delta] 首轮文本(preface): len={len(text)}")
-            else:
-                zeno_delta_type = "response"
-                logger.debug(f"[_transform_content_delta] 文本内容(response): len={len(text)}, accumulated_len={len(self._accumulated_content)}")
+            # 🆕 V7.8: 所有 text 块统一使用 response 类型
+            # Preface 已移至 chat_service 独立阶段，通过 emit_message_delta 直接发送
+            zeno_delta_type = "response"
+            logger.debug(f"[_transform_content_delta] 文本内容(response): len={len(text)}, accumulated_len={len(self._accumulated_content)}")
             # 累积内容（用于 done 事件）
             self._accumulated_content += text
         elif block_type in ("tool_use", "server_tool_use", "tool_result"):
@@ -414,8 +399,9 @@ class ZenOAdapter(EventAdapter):
         # 直接通过 message_delta 发送的类型
         # 🆕 V7.7: 统一支持所有通过 enhance_tool_result 生成的 delta 类型
         # 包括：intent, billing, progress, sql, data, chart, report, application, mind, interface, sandbox, files
+        # 🆕 V7.8: 添加 preface（开场白）类型
         elif delta_type in (
-            "intent", "billing", "progress",  # 基础类型
+            "intent", "billing", "progress", "preface",  # 基础类型（V7.8: 添加 preface）
             "sql", "data", "chart", "report", "application",  # 问数平台类型
             "mind", "interface", "sandbox", "files",  # 系统搭建/流程图/沙箱/文件类型
         ):

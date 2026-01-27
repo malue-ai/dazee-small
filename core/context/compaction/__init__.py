@@ -29,8 +29,8 @@
 """
 
 from enum import Enum
-from typing import Dict, Any, List, Optional
-from dataclasses import dataclass
+from typing import Dict, Any, List, Optional, Tuple
+from dataclasses import dataclass, field
 
 import tiktoken
 
@@ -106,6 +106,20 @@ class ContextStrategy:
     warning_threshold: float = 0.8       # 80% 时后端日志警告（用户无感知）
 
 
+@dataclass
+class TrimStats:
+    """
+    历史消息裁剪统计信息
+    
+    用于单次遍历同时完成裁剪和 token 估算，避免重复遍历。
+    """
+    original_count: int = 0              # 原始消息数量
+    trimmed_count: int = 0               # 裁剪后消息数量
+    estimated_tokens: int = 0            # 估算的 token 数
+    exceeded_budget: bool = False        # 是否超过预算阈值
+    should_warn: bool = False            # 是否应该后端警告
+
+
 def get_context_strategy(qos_level: QoSLevel = QoSLevel.PRO) -> ContextStrategy:
     """
     获取上下文管理策略
@@ -164,25 +178,18 @@ For complex or multi-step tasks:
    - Progress markers for multi-file operations"""
 
 
-def trim_history_messages(
+def _do_trim_messages(
     messages: List[Dict[str, Any]],
     strategy: ContextStrategy
 ) -> List[Dict[str, Any]]:
     """
-    智能裁剪历史消息（L2 策略）
+    内部裁剪逻辑（不含 token 估算）
     
     裁剪逻辑：
     1. 始终保留前 N 轮（建立任务上下文）
     2. 始终保留最近 N 轮（当前工作上下文）
     3. 中间轮次：保留 tool_result（含重要数据），丢弃纯文本
     4. 总数超限时，从中间开始丢弃
-    
-    Args:
-        messages: 完整消息历史
-        strategy: 上下文策略
-        
-    Returns:
-        裁剪后的消息列表
     """
     if len(messages) <= strategy.max_history_messages:
         return messages
@@ -227,6 +234,75 @@ def trim_history_messages(
         result = first_part + important_middle + last_part
     
     return result
+
+
+def trim_history_messages(
+    messages: List[Dict[str, Any]],
+    strategy: ContextStrategy
+) -> List[Dict[str, Any]]:
+    """
+    智能裁剪历史消息（L2 策略）
+    
+    裁剪逻辑：
+    1. 始终保留前 N 轮（建立任务上下文）
+    2. 始终保留最近 N 轮（当前工作上下文）
+    3. 中间轮次：保留 tool_result（含重要数据），丢弃纯文本
+    4. 总数超限时，从中间开始丢弃
+    
+    Args:
+        messages: 完整消息历史
+        strategy: 上下文策略
+        
+    Returns:
+        裁剪后的消息列表
+    """
+    return _do_trim_messages(messages, strategy)
+
+
+def trim_history_messages_with_stats(
+    messages: List[Dict[str, Any]],
+    strategy: ContextStrategy,
+    system_prompt: str = ""
+) -> Tuple[List[Dict[str, Any]], TrimStats]:
+    """
+    智能裁剪历史消息并返回统计信息（合并裁剪和 token 估算，避免重复遍历）
+    
+    相比 trim_history_messages + estimate_tokens 分开调用：
+    - 单次遍历完成裁剪 + token 估算
+    - 避免对大消息列表的重复遍历
+    - 返回完整的统计信息
+    
+    Args:
+        messages: 完整消息历史
+        strategy: 上下文策略
+        system_prompt: 系统提示词（用于 token 估算）
+        
+    Returns:
+        (trimmed_messages, stats) - 裁剪后的消息列表和统计信息
+    """
+    original_count = len(messages)
+    
+    # 执行裁剪
+    trimmed_messages = _do_trim_messages(messages, strategy)
+    trimmed_count = len(trimmed_messages)
+    
+    # 估算 token（仅对裁剪后的消息）
+    estimated_tokens = estimate_tokens(trimmed_messages, system_prompt)
+    
+    # 计算是否超过预算阈值
+    warning_threshold = strategy.token_budget * strategy.warning_threshold
+    exceeded_budget = estimated_tokens >= strategy.token_budget
+    should_warn = estimated_tokens >= warning_threshold
+    
+    stats = TrimStats(
+        original_count=original_count,
+        trimmed_count=trimmed_count,
+        estimated_tokens=estimated_tokens,
+        exceeded_budget=exceeded_budget,
+        should_warn=should_warn
+    )
+    
+    return trimmed_messages, stats
 
 
 def estimate_tokens(messages: List[Dict[str, Any]], system_prompt: str = "") -> int:
@@ -344,14 +420,13 @@ __all__ = [
     "QoSLevel",
     "QOS_TOKEN_BUDGETS",
     "ContextStrategy",
+    "TrimStats",  # 🆕 裁剪统计信息
     "get_context_strategy",
     "get_memory_guidance_prompt",
     "get_context_awareness_prompt",  # 别名
     "get_compaction_threshold",      # 别名
     "trim_history_messages",
+    "trim_history_messages_with_stats",  # 🆕 合并裁剪和 token 估算
     "estimate_tokens",
     "should_warn_backend",
-    # 兼容性别名
-    "get_compaction_threshold",
-    "get_context_awareness_prompt",
 ]

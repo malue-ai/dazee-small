@@ -333,7 +333,8 @@ class SandboxRunCommand(BaseTool):
             "用途：\n"
             "- 安装依赖：npm install, pip install\n"
             "- 启动服务器：npm start, python app.py（使用 background=true + port）\n"
-            "- 文件操作：cat, ls, rm, mkdir\n\n"
+            "- 文件操作：cat, ls, rm, mkdir\n"
+            "- 下载文件：curl -o /path/to/file URL 或 wget -O /path/to/file URL\n\n"
             "默认工作目录: /home/user/project\n\n"
             "⚠️ 启动服务器时：\n"
             "- 设置 background=true 让服务在后台运行\n"
@@ -625,9 +626,190 @@ class SandboxGetPublicUrl(BaseTool):
             return {"success": False, "error": str(e)}
 
 
+# ==================== 工具 7: 上传文件到 S3 ====================
+
+class SandboxUploadFile(BaseTool):
+    """
+    将沙盒中的文件上传到 S3 并返回下载链接
+    
+    用于将沙盒中生成的文件（如 Excel、PDF、图片等）持久化存储，
+    让前端用户可以下载。
+    
+    工作流程：
+    1. 从沙盒读取文件（使用 format="bytes" 支持二进制文件）
+    2. 上传到 S3
+    3. 返回预签名 URL（24小时有效）
+    
+    典型使用场景：
+    1. sandbox_execute_python 生成 Excel 文件
+    2. sandbox_upload_file 上传到 S3
+    3. send_files 发送下载链接给前端
+    """
+    
+    # 文件类型到 Content-Type 的映射
+    CONTENT_TYPES = {
+        '.pdf': 'application/pdf',
+        '.doc': 'application/msword',
+        '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        '.ppt': 'application/vnd.ms-powerpoint',
+        '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        '.xls': 'application/vnd.ms-excel',
+        '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        '.txt': 'text/plain',
+        '.md': 'text/markdown',
+        '.json': 'application/json',
+        '.csv': 'text/csv',
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.gif': 'image/gif',
+        '.webp': 'image/webp',
+        '.svg': 'image/svg+xml',
+        '.mp3': 'audio/mpeg',
+        '.mp4': 'video/mp4',
+        '.wav': 'audio/wav',
+        '.zip': 'application/zip',
+        '.rar': 'application/x-rar-compressed',
+        '.html': 'text/html',
+    }
+    
+    @property
+    def name(self) -> str:
+        return "sandbox_upload_file"
+    
+    @property
+    def description(self) -> str:
+        return (
+            "将沙盒中的文件上传到 S3 并返回下载链接。\n\n"
+            "用途：\n"
+            "- 将沙盒中生成的文件（Excel、PDF、图片等）持久化存储\n"
+            "- 让前端用户可以下载沙盒中生成的文件\n\n"
+            "典型工作流：\n"
+            "1. sandbox_execute_python 生成文件\n"
+            "2. sandbox_upload_file 上传到 S3 获取 URL\n"
+            "3. send_files 发送下载链接给前端\n\n"
+            "返回值包含 url（预签名下载链接，24小时有效）"
+        )
+    
+    @property
+    def parameters(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "conversation_id": {
+                    "type": "string",
+                    "description": "对话 ID（系统自动注入，无需手动传递）"
+                },
+                "path": {
+                    "type": "string",
+                    "description": "沙盒中的文件路径（相对路径自动基于 /home/user/project）"
+                },
+                "filename": {
+                    "type": "string",
+                    "description": "下载时显示的文件名（可选，默认使用原文件名）"
+                }
+            },
+            "required": ["path"]
+        }
+    
+    async def execute(
+        self,
+        conversation_id: str,
+        path: str,
+        filename: Optional[str] = None,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """
+        执行文件上传
+        
+        Args:
+            conversation_id: 对话 ID
+            path: 沙盒中的文件路径
+            filename: 下载时显示的文件名（可选）
+            
+        Returns:
+            {
+                "success": bool,
+                "url": str,          # 预签名下载链接
+                "filename": str,     # 文件名
+                "size": int,         # 文件大小（字节）
+                "s3_key": str        # S3 对象键
+            }
+        """
+        import hashlib
+        from pathlib import Path
+        
+        try:
+            await ensure_sandbox(conversation_id, kwargs.get("user_id", "default_user"))
+            
+            # 标准化路径
+            normalized_path = _normalize_path(path)
+            
+            # 确定文件名
+            if not filename:
+                filename = Path(normalized_path).name
+            
+            # 1. 从沙盒读取文件（二进制模式）
+            provider = get_sandbox_provider()
+            file_content = await provider.read_file_binary(conversation_id, normalized_path)
+            file_size = len(file_content)
+            
+            logger.info(f"📖 从沙盒读取文件: {normalized_path} ({file_size} bytes)")
+            
+            # 2. 生成 S3 key
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            file_hash = hashlib.md5(f"{filename}{timestamp}".encode()).hexdigest()[:8]
+            file_ext = Path(filename).suffix
+            unique_filename = f"{Path(filename).stem}_{file_hash}{file_ext}"
+            s3_key = f"outputs/sandbox/{conversation_id}/{unique_filename}"
+            
+            # 3. 确定 Content-Type
+            content_type = self.CONTENT_TYPES.get(
+                file_ext.lower(),
+                'application/octet-stream'
+            )
+            
+            # 4. 上传到 S3
+            from utils.s3_uploader import get_s3_uploader
+            
+            s3_uploader = get_s3_uploader()
+            await s3_uploader.initialize()
+            
+            await s3_uploader.upload_bytes(
+                file_content=file_content,
+                object_name=s3_key,
+                content_type=content_type,
+                metadata={
+                    "conversation_id": conversation_id,
+                    "original_filename": filename,
+                    "sandbox_path": normalized_path
+                },
+                acl="private"
+            )
+            
+            # 5. 生成预签名 URL（24小时有效）
+            presigned_url = s3_uploader.get_presigned_url(s3_key, expires_in=86400)
+            
+            logger.info(f"✅ 沙盒文件已上传 S3: {filename} → {s3_key}")
+            
+            return {
+                "success": True,
+                "url": presigned_url,
+                "filename": filename,
+                "size": file_size,
+                "s3_key": s3_key
+            }
+            
+        except FileNotFoundError:
+            return {"success": False, "error": f"文件不存在: {path}"}
+        except Exception as e:
+            logger.error(f"❌ 沙盒文件上传失败: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+
 # ==================== 工具注册 ====================
 
-# 6 个标准工具（贴近 E2B 原生 API）
+# 7 个标准工具（贴近 E2B 原生 API）
 SANDBOX_TOOLS = [
     SandboxWriteFile,       # 写入文件
     SandboxReadFile,        # 读取文件
@@ -635,6 +817,7 @@ SANDBOX_TOOLS = [
     SandboxRunCommand,      # 执行命令（支持 background）
     SandboxExecutePython,   # 执行 Python 代码
     SandboxGetPublicUrl,    # 获取公开 URL
+    SandboxUploadFile,      # 上传文件到 S3
 ]
 
 

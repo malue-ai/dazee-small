@@ -18,6 +18,7 @@
 import asyncio
 import json
 import time
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, AsyncGenerator, Dict, List, Optional
 from uuid import uuid4
@@ -30,12 +31,15 @@ from core.agent.multi.orchestrator import MultiAgentOrchestrator
 from core.context import Context
 from core.context.compaction import (
     QoSLevel,
+    TrimStats,
     get_compaction_threshold,
     get_context_awareness_prompt,
+    get_context_strategy,
+    trim_history_messages_with_stats,
 )
 from core.output import OutputFormatter, create_output_formatter
 from core.llm.claude import create_claude_service
-from core.routing import AgentRouter, RoutingDecision
+from core.routing import AgentRouter, RoutingDecision, IntentResult
 from core.monitoring import TokenAuditor, get_token_auditor
 from infra.database import AsyncSessionLocal, crud
 from infra.pools import get_agent_pool, get_session_pool
@@ -53,12 +57,14 @@ from services.session_service import (
 from evaluation.models import TokenUsage
 from models.usage import UsageResponse
 from utils.background_tasks import TaskContext, get_background_task_service
-from utils.file_processor import FileCategory, get_file_processor
 from utils.message_utils import (
     append_text_to_last_block,
+    dict_list_to_messages,
     extract_text_from_message,
     normalize_message_format,
 )
+from utils.file_processor import get_file_processor
+from utils.query_utils import apply_conversation_delta, format_variables
 
 logger = get_logger("chat_service")
 
@@ -179,37 +185,6 @@ class ChatService:
             logger.info(f"🔀 AgentRouter 已初始化 {cache_info}")
         return self._router
     
-    # ==================== 辅助方法 ====================
-    
-    def _build_user_context(self, variables: Dict[str, Any]) -> str:
-        """
-        构建用户上下文文本（注入到用户消息中）
-        
-        Args:
-            variables: 前端变量 {"location": {"value": "北京", "description": "用户位置"}, ...}
-            
-        Returns:
-            用户上下文文本
-        """
-        if not variables:
-            return ""
-        
-        lines = ["[用户上下文]"]
-        
-        for var_name, var_data in variables.items():
-            if isinstance(var_data, dict):
-                value = var_data.get("value", "")
-                description = var_data.get("description", "")
-                if value:
-                    if description:
-                        lines.append(f"- {var_name}: {value}（{description}）")
-                    else:
-                        lines.append(f"- {var_name}: {value}")
-            else:
-                lines.append(f"- {var_name}: {var_data}")
-        
-        return "\n".join(lines)
-    
     def get_output_formatter(self, agent: SimpleAgent) -> Optional[OutputFormatter]:
         """
         从 Agent Schema 获取 OutputFormatter（按需创建）
@@ -275,6 +250,79 @@ class ChatService:
         except Exception as e:
             logger.warning(f"⚠️ 结束 Session 失败: {e}")
     
+    @asynccontextmanager
+    async def acquire_agent_context(
+        self,
+        agent_id: str,
+        session_id: str,
+        user_id: str
+    ):
+        """
+        Agent 资源上下文管理器
+        
+        自动管理 Agent 获取和释放，无论成功/失败/异常都能正确清理资源。
+        
+        用法：
+            async with self.acquire_agent_context(agent_id, session_id, user_id) as agent:
+                # 使用 agent
+                await agent.chat(...)
+            # 退出时自动释放 Agent 和更新 SessionPool
+        
+        Args:
+            agent_id: Agent ID（pool key）
+            session_id: Session ID
+            user_id: 用户 ID
+            
+        Yields:
+            SimpleAgent 实例
+            
+        Raises:
+            AgentExecutionError: 资源获取失败
+        """
+        agent = None
+        session_pool_updated = False
+        
+        try:
+            # 获取 Agent
+            agent = await self.agent_pool.acquire(
+                agent_id=agent_id,
+                event_manager=self.session_service.events,
+                conversation_service=self.conversation_service
+            )
+            logger.debug(f"✅ Agent 已获取: {agent_id}")
+            
+            # 创建并注入共享 Tracker
+            from core.billing.tracker import EnhancedUsageTracker
+            shared_tracker = EnhancedUsageTracker()
+            agent.usage_tracker = shared_tracker
+            logger.debug(f"🔨 共享 Tracker 已注入: session_id={session_id}")
+            
+            # 更新 SessionPool 状态
+            await self.session_pool.on_session_start(session_id, user_id, agent_id)
+            session_pool_updated = True
+            
+            yield agent
+            
+        except Exception as e:
+            logger.error(f"❌ Agent 上下文错误: {e}")
+            raise AgentExecutionError(f"资源获取失败: {e}") from e
+            
+        finally:
+            # 释放 Agent
+            if agent is not None:
+                try:
+                    await self.agent_pool.release(agent_id)
+                    logger.debug(f"🧹 Agent 已释放: {agent_id}")
+                except Exception as e:
+                    logger.warning(f"⚠️ 释放 Agent 失败: {e}")
+            
+            # 更新 SessionPool
+            if session_pool_updated:
+                try:
+                    await self.session_pool.on_session_end(session_id, user_id, agent_id)
+                except Exception as e:
+                    logger.warning(f"⚠️ 更新 SessionPool 失败: {e}")
+    
     # ==================== 统一入口 ====================
     
     async def chat(
@@ -291,21 +339,26 @@ class ChatService:
         output_format: str = "zenflux"
     ):
         """
-        统一的对话入口 ⭐
+        统一的对话入口
         
         根据 stream 参数自动选择模式：
         - stream=True  → 返回 AsyncGenerator，用于 SSE
         - stream=False → 返回 Dict，用于 API 集成
         
-        流程（入口层只做调度，数据准备在执行层）：
+        流程（入口层负责准备，执行层负责执行）：
         1. 验证 agent_id
-        2. 创建 Conversation（如果需要）
-        3. 创建 Session
-        4. 获取 Agent（池化优化）
-        5. 调度执行（_run_agent 处理所有数据准备）
+        2. 创建/校验 Conversation
+        3. 生成 assistant_message_id
+        4. 处理文件
+        5. 标准化消息
+        6. 保存用户消息
+        7. 创建 Assistant 占位
+        8. 检查并发 + 创建 Session
+        9. 获取 Agent
+        10. 调度执行
         
         Args:
-            message: 用户消息（原始格式，由执行层处理）
+            message: 用户消息（原始格式）
             user_id: 用户 ID
             conversation_id: 对话 ID（可选，不提供则自动创建）
             message_id: 消息 ID（可选）
@@ -331,38 +384,96 @@ class ChatService:
                 raise AgentNotFoundError(f"Agent '{agent_id}' 不存在，可用: {available}")
         
         # ========== 2. 创建/校验 Conversation ==========
-        is_new_conversation = False
-        if not conversation_id:
-            # 创建新对话（先确保用户存在）
-            async with AsyncSessionLocal() as session:
-                await crud.get_or_create_user(session, user_id=user_id)
-                conv = await crud.create_conversation(session=session, user_id=user_id, title="新对话")
-                conversation_id = conv.id
-                is_new_conversation = True
-                logger.info(f"✅ 新对话: {conversation_id}")
-        else:
-            # 校验 conversation_id 存在性，不存在则自动创建（支持多用户访问同一对话）
-            try:
-                conv = await self.conversation_service.get_conversation(conversation_id)
-                logger.debug(f"✅ 对话存在: {conversation_id}")
-            except ConversationNotFoundError:
-                # 对话不存在，使用传入的 conversation_id 创建新对话（保持 ID 一致）
-                logger.info(f"⚠️ 对话 {conversation_id} 不存在，使用该 ID 创建新对话")
-                conv = await self.conversation_service.create_conversation(
-                    user_id=user_id,
-                    title=message[:50] if len(message) <= 50 else message[:47] + "...",
-                    conversation_id=conversation_id  # 使用传入的 ID
-                )
-                # 注：conv.id 应该等于传入的 conversation_id
-                is_new_conversation = True
-                logger.info(f"✅ 新对话已创建: {conv.id}")
-            except Exception as e:
-                raise ValueError(f"对话校验失败: {e}") from e
+        try:
+            conv, is_new_conversation = await self.conversation_service.get_or_create_conversation(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                title="新对话"
+            )
+            conversation_id = conv.id
+        except Exception as e:
+            raise ValueError(f"对话创建/校验失败: {e}") from e
         
-        # ========== 3. 检查用户并发限制 ==========
+        # ========== 3. 生成 assistant_message_id ==========
+        assistant_message_id = str(uuid4())
+        
+        # ========== 4. 处理文件 ==========
+        files_metadata = None
+        raw_message = message  # 保存原始消息
+        if files:
+            processor = get_file_processor()
+            # 统一转换为字典列表
+            files_data = [
+                f.model_dump() if hasattr(f, "model_dump") else f
+                for f in files if isinstance(f, (dict,)) or hasattr(f, "model_dump")
+            ]
+            if files_data:
+                processed_files = await processor.process_files(files_data)
+                if processed_files:
+                    # 提取文件元数据
+                    files_metadata = [
+                        {"file_url": pf.file_url, "file_name": pf.filename, 
+                         "file_type": pf.mime_type, "file_size": pf.file_size}
+                        for pf in processed_files
+                    ]
+                    # 获取原始消息文本
+                    original_text = raw_message if isinstance(raw_message, str) else str(raw_message)
+                    if isinstance(raw_message, list):
+                        original_text = "".join(
+                            b.get("text", "") for b in raw_message 
+                            if isinstance(b, dict) and b.get("type") == "text"
+                        )
+                    # 构建 content blocks
+                    raw_message = processor.build_message_content(processed_files, original_text)
+                    logger.info(f"📎 文件处理完成: {len(files_metadata)} 个文件")
+        
+        # ========== 5. 标准化消息 ==========
+        normalized_message = normalize_message_format(raw_message)
+        
+        # ========== 6. 保存用户消息 + 7. 创建 Assistant 占位 ==========
+        content_json = json.dumps(normalized_message, ensure_ascii=False)
+        user_message_id = None
+        
+        try:
+            async with AsyncSessionLocal() as session:
+                # 6. 保存用户消息（含文件元数据）
+                user_metadata = {
+                    "session_id": None,  # Session 尚未创建，后续可更新
+                    "model": self.default_model
+                }
+                if files_metadata:
+                    user_metadata["files"] = files_metadata
+                
+                user_msg = await crud.create_message(
+                    session=session,
+                    conversation_id=conversation_id,
+                    role="user",
+                    content=content_json,
+                    metadata=user_metadata
+                )
+                user_message_id = user_msg.id
+                logger.info(f"💾 用户消息已保存: conversation_id={conversation_id}, message_id={user_message_id}, files={len(files_metadata) if files_metadata else 0}")
+                
+                # 7. 创建 Assistant 占位
+                await crud.create_message(
+                    session=session,
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content="[]",
+                    message_id=assistant_message_id,
+                    status="processing",
+                    metadata={
+                        "model": self.default_model,
+                    }
+                )
+                logger.info(f"✅ Assistant 占位已创建: id={assistant_message_id}")
+        except Exception as e:
+            logger.error(f"❌ 消息保存失败: {e}")
+            raise ValueError(f"消息保存失败: {e}") from e
+        
+        # ========== 8. 检查并发 + 创建 Session ==========
         await self.session_pool.check_can_create_session(user_id)
         
-        # ========== 4. 创建 Session ==========
         session_id = await self.session_service.create_session(
             user_id=user_id,
             message=message,
@@ -371,8 +482,16 @@ class ChatService:
         )
         logger.info(f"✅ Session: {session_id}")
         
-        # ========== 5. 获取 Agent（从 AgentPool）==========
-        # 注：使用 try-finally 确保资源获取失败时正确清理
+        # 更新用户消息的 session_id（可选，用于追踪）
+        try:
+            await self.conversation_service.update_message(
+                message_id=user_message_id,
+                metadata={"session_id": session_id}
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ 更新用户消息 session_id 失败: {e}")
+        
+        # ========== 9. 获取 Agent ==========
         pool_key = agent_id or self.DEFAULT_AGENT_KEY
         agent = None
         agent_acquired = False
@@ -387,19 +506,27 @@ class ChatService:
             agent_acquired = True
             logger.debug(f"✅ Agent 就绪: {pool_key}")
             
-            # 🆕 共享 Tracker 方案：创建共享 Tracker 并注入到 Agent
+            # 创建共享 Tracker 并注入到 Agent
             from core.billing.tracker import EnhancedUsageTracker
             shared_tracker = EnhancedUsageTracker()
-            agent.usage_tracker = shared_tracker  # 替换 Agent 的 Tracker
-            logger.debug(f"🔨 创建共享 Tracker 并注入到 Agent: session_id={session_id}, tracker_id={id(shared_tracker)}")
+            agent.usage_tracker = shared_tracker
+            logger.debug(f"🔨 共享 Tracker 已注入: session_id={session_id}")
             
-            # ========== 6. 更新 SessionPool 状态 ==========
+            # 更新 SessionPool 状态
             await self.session_pool.on_session_start(session_id, user_id, pool_key)
             session_pool_updated = True
             
         except Exception as e:
-            # 资源获取失败，清理已创建的 Session
             logger.error(f"❌ 资源获取失败: {e}")
+            # 更新 Assistant 占位状态为 failed
+            try:
+                await self.conversation_service.update_message(
+                    message_id=assistant_message_id,
+                    status="failed"
+                )
+            except Exception as update_err:
+                logger.warning(f"⚠️ 更新 Assistant 状态失败: {update_err}")
+            # 清理 Session
             try:
                 if agent_acquired:
                     await self.agent_pool.release(pool_key)
@@ -408,19 +535,19 @@ class ChatService:
                 logger.warning(f"⚠️ 清理失败: {cleanup_error}")
             raise AgentExecutionError(f"资源获取失败: {e}") from e
         
-        # ========== 7. 调度执行 ==========
+        # ========== 10. 调度执行 ==========
         if not stream:
             # 同步模式：后台运行，立即返回
             asyncio.create_task(self._run_agent(
                 session_id=session_id,
                 agent=agent,
-                agent_id=pool_key,  # 传递 agent_id 用于释放
-                raw_message=message,
+                agent_id=pool_key,
+                message=normalized_message,
                 user_id=user_id,
                 conversation_id=conversation_id,
+                assistant_message_id=assistant_message_id,
                 is_new_conversation=is_new_conversation,
                 background_tasks=background_tasks,
-                files=files,
                 variables=variables,
                 output_format=output_format
             ))
@@ -435,13 +562,13 @@ class ChatService:
         return self._create_stream_generator(
             session_id=session_id,
             agent=agent,
-            agent_id=pool_key,  # 传递 agent_id 用于释放
-            raw_message=message,
+            agent_id=pool_key,
+            message=normalized_message,
             user_id=user_id,
             conversation_id=conversation_id,
+            assistant_message_id=assistant_message_id,
             is_new_conversation=is_new_conversation,
             background_tasks=background_tasks,
-            files=files,
             variables=variables,
             output_format=output_format
         )
@@ -451,28 +578,33 @@ class ChatService:
         session_id: str,
         agent: SimpleAgent,
         agent_id: str,
-        raw_message: Any,
+        message: List[Dict[str, Any]],
         user_id: str,
         conversation_id: str,
+        assistant_message_id: str,
         is_new_conversation: bool,
         background_tasks: Optional[List[str]],
-        files: Optional[List[Any]],
         variables: Optional[Dict[str, Any]],
         output_format: str = "zenflux"
     ):
         """
         创建流式事件生成器
         
-        将流式逻辑抽离，保持 chat() 简洁
-        
         Args:
-            output_format: 输出事件格式（zeno/zenflux），默认 zenflux
+            session_id: Session ID
+            agent: Agent 实例
+            agent_id: Agent ID
+            message: 已标准化的消息（content blocks 格式）
+            user_id: 用户 ID
+            conversation_id: 对话 ID
+            assistant_message_id: Assistant 消息 ID（在 chat() 中生成）
+            is_new_conversation: 是否新对话
+            background_tasks: 后台任务列表
+            variables: 前端上下文变量
+            output_format: 输出事件格式
         """
         try:
             redis = self.session_service.redis
-            
-            # 🆕 预先生成 message_id（在 session_start 前生成，确保整个流程使用同一个 ID）
-            assistant_message_id = str(uuid4())
             
             # 设置输出格式（EventManager 和 EventBroadcaster 都会使用）
             events = self.session_service.events
@@ -480,7 +612,7 @@ class ChatService:
             if hasattr(agent, 'broadcaster') and agent.broadcaster:
                 agent.broadcaster.set_output_format(output_format, conversation_id)
             
-            # 发送初始事件（使用配置的格式，包含 message_id）
+            # 发送初始事件
             await events.session.emit_session_start(
                 session_id=session_id,
                 user_id=user_id,
@@ -504,20 +636,19 @@ class ChatService:
                     adapter=events.adapter
                 )
             
-            # 启动 Agent 任务（传递预先生成的 message_id）
+            # 启动 Agent 任务
             agent_task = asyncio.create_task(self._run_agent(
                 session_id=session_id,
                 agent=agent,
                 agent_id=agent_id,
-                raw_message=raw_message,
+                message=message,
                 user_id=user_id,
                 conversation_id=conversation_id,
+                assistant_message_id=assistant_message_id,
                 is_new_conversation=is_new_conversation,
                 background_tasks=background_tasks,
-                files=files,
                 variables=variables,
-                output_format=output_format,
-                message_id=assistant_message_id
+                output_format=output_format
             ))
             
             # 订阅事件流
@@ -533,13 +664,10 @@ class ChatService:
                 
         except asyncio.CancelledError:
             # SSE 断开，Agent 继续后台运行
-            # 注：资源释放由 _run_agent 的 finally 块负责
             logger.info(f"⚠️ SSE 断开，Agent 后台继续: {session_id}")
-            # 不要 raise，让 agent_task 继续执行
         
         except Exception as e:
             logger.error(f"❌ 流式对话失败: {e}", exc_info=True)
-            # 释放资源
             await self._cleanup_session_resources(
                 session_id=session_id,
                 user_id=user_id,
@@ -553,125 +681,68 @@ class ChatService:
         session_id: str,
         agent: SimpleAgent,
         agent_id: str,
-        raw_message: Any,
+        message: List[Dict[str, Any]],
         user_id: str,
         conversation_id: str,
+        assistant_message_id: str,
         is_new_conversation: bool = False,
         background_tasks: Optional[List[str]] = None,
-        files: Optional[List[Any]] = None,
         variables: Optional[Dict[str, Any]] = None,
-        output_format: str = "zenflux",
-        message_id: Optional[str] = None
+        output_format: str = "zenflux"
     ):
         """
         执行 Agent（核心逻辑，同步和流式共用）
         
-        流程分为 4 个阶段：
+        流程分为 3 个阶段：
         
-        阶段 1: 输入处理
-          1.1 处理文件（图片、文档 → Claude 格式内容块）
-          1.2 标准化消息格式
-          1.3 注入前端变量（位置、时区等注入到用户消息）
+        阶段 1: 数据准备
+          1.1 加载历史消息
+          1.2 注入前端变量（位置、时区等）
         
-        阶段 2: 数据库操作
-          2.1 保存用户消息（含文件元数据）
-          2.2 创建 Assistant 消息占位
-          2.3 加载历史消息
+        阶段 2: 执行 Agent
+          2.1 发送 message_start 事件
+          2.2 上下文管理（裁剪历史消息）
+          2.3 调用 Agent.chat
         
-        阶段 3: 执行 Agent
-          3.1 发送 message_start 事件
-          3.2 上下文管理（裁剪历史消息）
-          3.3 调用 Agent.chat（传入 variables）
-        
-        阶段 4: 完成处理
-          4.1 检查最终状态
-          4.2 发送完成事件
-          4.3 执行后台任务（如标题生成）
-          4.4 释放资源（Agent、更新池状态）
+        阶段 3: 完成处理
+          3.1 检查最终状态
+          3.2 发送完成事件
+          3.3 执行后台任务（如标题生成）
+          3.4 释放资源（Agent、更新池状态）
         
         Args:
             session_id: 会话 ID
             agent: Agent 实例
             agent_id: Agent ID（用于释放）
-            raw_message: 原始用户消息（未处理）
+            message: 已标准化的用户消息（content blocks 格式）
             user_id: 用户 ID
             conversation_id: 对话 ID
+            assistant_message_id: Assistant 消息 ID（在 chat() 中已创建）
             is_new_conversation: 是否新对话
-            background_tasks: 后台任务列表，如 ["title_generation"]
-            files: 文件引用列表（FileReference 对象或字典）
+            background_tasks: 后台任务列表
             variables: 前端上下文变量（如位置、时区）
+            output_format: 输出事件格式
         """
         start_time = time.time()
         background_tasks = background_tasks or []
-        assistant_message_id = None  # 用于异常处理时更新状态
         
-        # 🆕 将 events 和 redis 提前初始化，确保 except 块可以访问
+        # 将 events 和 redis 提前初始化，确保 except 块可以访问
         redis = self.session_service.redis
         events = self.session_service.events
         
-        # 🆕 提前设置 output_format，确保 error 事件也使用正确的格式
+        # 提前设置 output_format，确保 error 事件也使用正确的格式
         events.set_output_format(output_format, conversation_id)
         
         try:
             logger.info(f"🚀 Agent 开始执行: session_id={session_id}")
             
             # =================================================================
-            # 阶段 1: 输入处理（处理所有用户输入）
+            # 阶段 1: 数据准备
             # =================================================================
             
-            # 1.1 处理文件（图片、文档 → Claude 格式内容块）
-            processed_message, files_metadata = await self._process_message_with_files(raw_message, files)
-            if files_metadata:
-                logger.info(f"📎 文件处理完成: {len(files_metadata)} 个文件")
-            
-            # 1.2 标准化消息格式
-            message = normalize_message_format(processed_message)
-            
-            # =================================================================
-            # 阶段 2: 数据库操作（持久化 + 加载历史）
-            # =================================================================
-            
-            # 🆕 使用传入的 message_id，如果没有传入则生成新的
-            assistant_message_id = message_id or str(uuid4())
-            
-            # 🎯 先保存原始消息（不含前端注入的上下文）
-            content_json = json.dumps(message, ensure_ascii=False)
-            
+            # 1.1 加载历史消息
             history_messages = []
             async with AsyncSessionLocal() as session:
-                # 2.1 保存用户消息（含文件元数据）
-                user_metadata = {
-                    "session_id": session_id,
-                    "model": self.default_model
-                }
-                if files_metadata:
-                    user_metadata["files"] = files_metadata
-                
-                user_msg = await crud.create_message(
-                    session=session,
-                    conversation_id=conversation_id,
-                    role="user",
-                    content=content_json,
-                    metadata=user_metadata
-                )
-                logger.info(f"💾 用户消息已保存: conversation_id={conversation_id}, message_id={user_msg.id}, files={len(files_metadata) if files_metadata else 0}")
-                
-                # 2.2 创建 Assistant 消息占位
-                await crud.create_message(
-                    session=session,
-                    conversation_id=conversation_id,
-                    role="assistant",
-                    content="[]",
-                    message_id=assistant_message_id,
-                    status="processing",
-                    metadata={
-                        "session_id": session_id,
-                        "model": self.default_model,
-                    }
-                )
-                logger.info(f"✅ Assistant 占位记录已创建: id={assistant_message_id}")
-                
-                # 2.3 加载历史消息
                 db_messages = await crud.list_messages(
                     session=session,
                     conversation_id=conversation_id,
@@ -708,22 +779,21 @@ class ChatService:
                 
                 logger.info(f"📚 历史消息已加载: conversation_id={conversation_id}, count={len(history_messages)} 条")
             
-            # 1.3 注入前端变量到最新的用户消息（传给 LLM，但不保存到数据库）
-            # 注：必须在保存数据库之后、调用 LLM 之前执行
+            # 1.2 注入前端变量到最新的用户消息（传给 LLM，但不保存到数据库）
             # 原因：前端上下文（时区、timestamp等）对 LLM 有用，但不应污染历史记录
             if variables and history_messages:
                 # 获取最后一条用户消息（就是刚才保存的）
                 last_message = history_messages[-1]
                 if last_message.get("role") == "user":
-                    context_text = self._build_user_context(variables)
+                    context_text = format_variables(variables)
                     if append_text_to_last_block(last_message["content"], context_text):
                         logger.info(f"🌐 前端变量已注入到 LLM 消息: {list(variables.keys())}")
             
             # =================================================================
-            # 阶段 3: 执行 Agent
+            # 阶段 2: 执行 Agent
             # =================================================================
             
-            # 3.1 发送 message_start 事件（通知前端开始生成）
+            # 2.1 发送 message_start 事件（通知前端开始生成）
             await events.message.emit_message_start(
                 session_id=session_id,
                 conversation_id=conversation_id,
@@ -733,7 +803,7 @@ class ChatService:
                 adapter=events.adapter
             )
             
-            # 3.2 上下文管理（裁剪历史消息）
+            # 2.2 上下文管理（裁剪历史消息）
             # 三层防护策略：L1 Memory Tool / L2 智能裁剪 / L3 Token 预警
             original_count = len(history_messages)
             
@@ -751,27 +821,23 @@ class ChatService:
             # 3. 优先保证问答效果，其次控制成本
             # =====================================================================
             
-            # L2 策略：智能裁剪历史消息
-            from core.context.compaction import (
-                get_context_strategy, 
-                trim_history_messages,
-                estimate_tokens,
-                should_warn_backend
+            # 🆕 优化：使用 trim_history_messages_with_stats 合并裁剪和 token 估算
+            # 避免对消息列表的重复遍历，提升性能
+            context_strategy = get_context_strategy(self.qos_level)
+            history_messages, trim_stats = trim_history_messages_with_stats(
+                history_messages, 
+                context_strategy
             )
             
-            context_strategy = get_context_strategy(self.qos_level)
-            history_messages = trim_history_messages(history_messages, context_strategy)
-            
-            if len(history_messages) < original_count:
+            if trim_stats.trimmed_count < trim_stats.original_count:
                 logger.info(
-                    f"✂️ 历史裁剪: {original_count} → {len(history_messages)} 条"
+                    f"✂️ 历史裁剪: {trim_stats.original_count} → {trim_stats.trimmed_count} 条"
                 )
             
             # L3: 后端 token 预警（用户无感知）
-            estimated_tokens = estimate_tokens(history_messages)
-            if should_warn_backend(estimated_tokens, context_strategy):
+            if trim_stats.should_warn:
                 logger.warning(
-                    f"⚠️ Token 预警: {estimated_tokens:,} / {context_strategy.token_budget:,}"
+                    f"⚠️ Token 预警: {trim_stats.estimated_tokens:,} / {context_strategy.token_budget:,}"
                 )
             
             # =====================================================================
@@ -843,6 +909,9 @@ class ChatService:
                         if "clue_generation" not in background_tasks:
                             background_tasks.append("clue_generation")
                             logger.info("🔍 已添加线索生成后台任务（intent_id=1）")
+                    
+                    # 🆕 V7.8: Preface 配置（传给 Agent，在 intent 之后流式生成）
+                    # Preface 生成移至 SimpleAgent.chat()，确保在 intent 事件之后发送
             
             # 🆕 设置 Agent 的输出格式（EventBroadcaster 会使用）
             if hasattr(agent, 'broadcaster') and agent.broadcaster:
@@ -917,7 +986,7 @@ class ChatService:
                         task_names=background_tasks,
                         context=task_context
                     )
-                    # 标记已执行，阶段 4 不再重复执行
+                    # 标记已执行，阶段 3 不再重复执行
                     background_tasks = []
                 
                 # 🆕 修复：多智能体分支结束后，需要触发 message_stop 和最终持久化
@@ -934,6 +1003,12 @@ class ChatService:
                 # - Checkpoint：broadcaster 在每个 content_stop 后自动保存
                 # - 最终保存：broadcaster 在 message_stop 时自动完成
                 # - variables：直接注入到 System Prompt（前端上下文）
+                # 🆕 V7.8: 构建 preface_config（在 intent 之后流式生成开场白）
+                preface_config = {
+                    "user_message": extract_text_from_message(message),
+                    "tracker": shared_tracker
+                } if routing_intent else None
+                
                 async for event in agent.chat(
                     messages=history_messages,
                     session_id=session_id,
@@ -941,7 +1016,8 @@ class ChatService:
                     message_id=assistant_message_id,
                     enable_stream=True,
                     variables=variables,
-                    intent=routing_intent  # 🆕 V7: 路由层意图结果（None 则内部分析）
+                    intent=routing_intent,  # 🆕 V7: 路由层意图结果（None 则内部分析）
+                    preface_config=preface_config  # 🆕 V7.8: Preface 配置
                 ):
                     # 跳过被过滤的事件（ZenO 适配器返回 None）
                     if event is None:
@@ -1043,15 +1119,15 @@ class ChatService:
                                 task_names=background_tasks,
                                 context=task_context
                             )
-                            # 标记已执行，阶段 4 不再重复执行
+                            # 标记已执行，阶段 3 不再重复执行
                             background_tasks = []
                     
                     if event_type == "conversation_delta":
                         # conversation 更新同步到数据库
-                        await self._handle_conversation_delta(event, conversation_id)
+                        await apply_conversation_delta(self.conversation_service, event, conversation_id)
             
             # =================================================================
-            # 阶段 4: 完成处理
+            # 阶段 3: 完成处理
             # =================================================================
             
             duration_ms = int((time.time() - start_time) * 1000)
@@ -1059,12 +1135,12 @@ class ChatService:
             # 🔧 使用事件循环中保存的 assistant_text（在 message_stop 清理 accumulator 前获取）
             assistant_text = _assistant_text_for_tasks
             
-            # 4.1 检查最终状态
+            # 3.1 检查最终状态
             final_status = await redis.get_session_status(session_id)
             status = final_status.get("status") if final_status else "completed"
             
             if status != "stopped":
-                # 4.2 执行后台任务（回退机制）
+                # 3.2 执行后台任务（回退机制）
                 # 注意：正常情况下后台任务已在 billing 事件时执行（message_stop 之前）
                 # 这里作为回退，防止 billing 事件未触发的情况
                 if background_tasks:
@@ -1089,7 +1165,7 @@ class ChatService:
                         context=task_context
                     )
                 
-                # 4.3 发送完成事件（在后台任务之后，确保推荐问题等已发送）
+                # 3.3 发送完成事件（在后台任务之后，确保推荐问题等已发送）
                 await events.session.emit_session_end(
                     session_id=session_id,
                     conversation_id=conversation_id,
@@ -1287,146 +1363,6 @@ class ChatService:
     #         pass
     # =========================================================================
     
-    async def _handle_conversation_delta(
-        self,
-        event: Dict[str, Any],
-        conversation_id: str
-    ) -> None:
-        """
-        处理 conversation_delta 事件，同步到数据库
-        
-        Args:
-            event: conversation_delta 事件
-            conversation_id: 对话 ID
-            
-        支持的字段：
-            {"title": "新标题"}
-            {"metadata": {...}}
-        """
-        try:
-            data = event.get("data", {})
-            
-            # 直接检查字段名
-            if "title" in data:
-                await self.conversation_service.update_conversation(
-                    conversation_id=conversation_id,
-                    title=data["title"]
-                )
-                logger.info(f"📝 Conversation 标题已更新: {data['title']}")
-                
-            if "metadata" in data:
-                await self.conversation_service.update_conversation(
-                    conversation_id=conversation_id,
-                    metadata=data["metadata"]
-                )
-                logger.info(f"📝 Conversation metadata 已更新")
-                
-        except Exception as e:
-            logger.warning(f"⚠️ 处理 conversation_delta 失败: {str(e)}")
-    
-    def _extract_text_from_content_blocks(
-        self,
-        content_blocks: List[Dict[str, Any]]
-    ) -> str:
-        """
-        从 content_blocks 中提取纯文本
-        
-        Args:
-            content_blocks: content blocks 列表
-            
-        Returns:
-            合并后的纯文本
-        """
-        texts = []
-        for block in content_blocks:
-            block_type = block.get("type")
-            if block_type == "text":
-                text = block.get("text", "")
-                if text:
-                    texts.append(text)
-        return "\n".join(texts)
-    
-    async def _process_message_with_files(
-        self,
-        message: Any,
-        files: Optional[List[Any]]
-    ) -> tuple[Any, Optional[List[Dict[str, Any]]]]:
-        """
-        处理文件并合并到消息中
-        
-        文件处理策略：
-        - 图片 (image/*) → 作为 ImageBlock 传给 LLM
-        - 纯文本 (text/*) → 读取内容拼进消息
-        - 复杂文档 (PDF等) → 生成 URL，让 Agent 决定如何处理
-        
-        Args:
-            message: 原始用户消息
-            files: 文件引用列表（FileReference 对象或字典）
-            
-        Returns:
-            tuple: (处理后的消息, 文件元数据列表)
-            - 处理后的消息（可能是字符串或 content blocks 列表）
-            - 文件元数据列表（用于保存到数据库，供历史记录展示）
-        """
-        if not files:
-            return message, None
-        
-        try:
-            # 统一转换为字典列表
-            files_data = []
-            for f in files:
-                if hasattr(f, "model_dump"):
-                    files_data.append(f.model_dump())
-                elif isinstance(f, dict):
-                    files_data.append(f)
-                else:
-                    logger.warning(f"⚠️ 未知的文件引用格式: {type(f)}")
-            
-            if not files_data:
-                return message, None
-            
-            processor = get_file_processor()
-            processed_files = await processor.process_files(files_data)
-            
-            if not processed_files:
-                return message, None
-            
-            logger.info(f"📎 处理了 {len(processed_files)} 个文件")
-            
-            # 提取文件元数据（用于保存到消息 metadata，供历史记录展示）
-            # 使用 file_url 方式，不依赖数据库
-            files_metadata = []
-            for pf in processed_files:
-                files_metadata.append({
-                    "file_url": pf.file_url,
-                    "file_name": pf.filename,
-                    "file_type": pf.mime_type,
-                    "file_size": pf.file_size
-                })
-            
-            # 获取原始消息文本
-            if isinstance(message, str):
-                original_text = message
-            elif isinstance(message, list):
-                # 已经是 content blocks 格式
-                original_text = ""
-                for block in message:
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        original_text += block.get("text", "")
-            else:
-                original_text = str(message)
-            
-            # 使用 FileProcessor 构建 content blocks
-            content_blocks = processor.build_message_content(processed_files, original_text)
-            
-            return content_blocks, files_metadata
-            
-        except Exception as e:
-            logger.error(f"❌ 处理文件失败: {str(e)}", exc_info=True)
-            # 文件处理失败，返回原始消息，不影响对话
-            return message, None
-
-
 # ==================== 便捷函数 ====================
 
 _default_service: Optional[ChatService] = None

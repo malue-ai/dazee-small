@@ -1,91 +1,69 @@
 ---
-description: "通用开发规范：中文注释、命名规范、代码风格"
+description: "Python、FastAPI 核心开发规范"
 alwaysApply: true
 ---
 
-# 通用开发规范
+# Python/FastAPI 开发规范
 
-## Python 版本
-- 项目使用 **Python 3.12+**
-- 可使用 3.12 新特性（如类型参数语法 `type X = ...`、`@override` 装饰器等）
+你是 Python、FastAPI 和异步编程专家。
 
-## 异步编程规范
-- 项目基于 **异步框架（FastAPI + asyncio）**
-- **禁止**在异步函数中使用同步阻塞操作：
-  - ❌ `with open()` → ✅ `async with aiofiles.open()`
-  - ❌ `time.sleep()` → ✅ `await asyncio.sleep()`
-  - ❌ `requests.get()` → ✅ `await httpx.AsyncClient().get()` 或 `aiohttp`
-  - ❌ `json.load(file)` → ✅ `json.loads(await file.read())`
-  - ❌ `shutil.copy()` → ✅ 使用 `aiofiles` 或封装异步版本
-- 文件 I/O 必须使用 `aiofiles` 库
-- HTTP 请求必须使用 `httpx` 或 `aiohttp`
+## 核心原则
+- 编写简洁、技术性强的代码
+- 优先函数式编程，避免不必要的类
+- 使用有意义的变量名（`is_active`, `has_permission`）
+- 文件/目录用 `snake_case`
+- 所有注释和文档使用**中文**
 
-## 语言规范
-- 所有代码注释使用**中文**
-- 所有文档使用**中文**编写
-- Git commit 信息使用中文
+## Python/FastAPI
+- 纯函数用 `def`，异步用 `async def`
+- 所有函数**必须有类型注解**，优先 Pydantic 模型
+- 简洁条件：`if condition: do_something()`
+- **RORO 模式**：使用"接收对象，返回对象"（Receive an Object, Return an Object）模式
 
-## 命名规范
-- 变量名、函数名：`snake_case`
-- 类名：`PascalCase`
-- 常量：`UPPER_CASE`
-- 文件名：`snake_case.py`
+## 异步编程（必须遵守）
+- 项目基于 **FastAPI + asyncio**，禁止阻塞操作
+- ❌ `with open()` → ✅ `async with aiofiles.open()`
+- ❌ `time.sleep()` → ✅ `await asyncio.sleep()`
+- ❌ `requests.get()` → ✅ `await httpx.AsyncClient().get()`
+- 并发用 `asyncio.gather()`，超时用 `asyncio.wait_for()`，限流用 `Semaphore`
+
+## 错误处理
+- 函数开头处理错误（Guard Clauses），使用早返回避免嵌套
+- 业务异常直接向上抛，系统异常记录堆栈后包装
+- 所有错误日志必须 `exc_info=True`
+- 实现适当的日志记录和自定义错误类型
+
+## 数据模型
+- 所有 API 输入/输出使用 Pydantic BaseModel
+- 使用 Field 添加描述和约束
+- 枚举用 Enum
+
+## 数据库和 ORM
+- 使用 **PostgreSQL** 作为主数据库
+- 使用 **SQLAlchemy 2.0** 的 ORM 特性（异步模式）
+- 使用清晰的 CRUD 层封装数据库操作
+
+## 性能优化
+- **异步操作**：最小化阻塞 I/O 操作
+- **缓存**：使用 Redis 或内存存储为频繁访问的数据实现缓存策略
+- **懒加载**：对大型数据集和 API 响应使用懒加载技术
+
+## API 设计
+- 遵循 **RESTful API 设计原则**
+- 依赖 **FastAPI 的依赖注入系统**管理状态和共享资源
+- 失败时添加 `"error"` 字段
+
+## 依赖
+- FastAPI、Pydantic v2、httpx、aiofiles、asyncpg、SQLAlchemy 2.0
 
 ## 代码风格
-- 使用 4 个空格缩进
-- 每行最大长度 100 字符
-- 函数之间空 2 行
-- 类方法之间空 1 行
-- 运算符两侧加空格
+- 4 空格缩进，每行 ≤ 100 字符
+- 导入顺序：标准库 → 第三方库 → 本地模块
+- Google 风格 docstring（中文）
 
-## 导入顺序
-```python
-# 1. 标准库
-import os
-import sys
-from typing import List, Dict
-
-# 2. 第三方库
-from fastapi import APIRouter
-from pydantic import BaseModel
-
-# 3. 本地模块
-from core.agent import Agent
-from models.chat import ChatMessage
-```
-
-## 类型注解
-所有函数必须包含类型注解：
-
-```python
-from typing import List, Dict, Optional, Union
-
-def process_data(
-    items: List[str],
-    config: Optional[Dict[str, Any]] = None
-) -> Dict[str, Union[str, int]]:
-    """使用类型注解提高代码可读性"""
-    pass
-```
-
-## 文档字符串
-使用 Google 风格的 docstring：
-
-```python
-def function(arg1: str, arg2: int) -> bool:
-    """
-    函数简短描述
-    
-    Args:
-        arg1: 参数1的说明
-        arg2: 参数2的说明
-        
-    Returns:
-        返回值说明
-        
-    Raises:
-        ValueError: 什么情况下抛出
-    """
-    pass
-```
-
+## 禁止事项
+- ❌ 阻塞 I/O
+- ❌ 使用 `print()`
+- ❌ 记录敏感信息（密码、token、API key）
+- ❌ 吞异常：`except: pass`
+- ❌ 返回格式不一致

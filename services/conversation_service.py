@@ -162,6 +162,75 @@ class ConversationService:
             metadata=metadata
         )
     
+    async def get_or_create_conversation(
+        self,
+        user_id: str,
+        conversation_id: Optional[str] = None,
+        title: str = "新对话",
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> tuple[Conversation, bool]:
+        """
+        获取或创建对话（单次 DB 操作，优化性能）
+        
+        Args:
+            user_id: 用户 ID
+            conversation_id: 对话 ID（可选，不提供则自动生成）
+            title: 对话标题（仅在创建时使用）
+            metadata: 对话元数据（仅在创建时使用）
+            
+        Returns:
+            (Conversation, is_new) - 对话对象和是否新创建标志
+        """
+        async with AsyncSessionLocal() as session:
+            # 确保用户存在
+            await crud.get_or_create_user(session, user_id=user_id)
+            
+            # 调用 crud 层函数
+            db_conv, is_new = await crud.get_or_create_conversation(
+                session=session,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                title=title,
+                metadata=metadata
+            )
+            
+            if is_new:
+                logger.info(f"✅ 新对话已创建: id={db_conv.id}, user_id={user_id}")
+            else:
+                logger.debug(f"✅ 对话已存在: id={db_conv.id}")
+            
+            return self._db_to_model(db_conv), is_new
+    
+    def _db_to_model(self, db_conv) -> Conversation:
+        """
+        将数据库对象转换为 Pydantic 模型（内部工具方法）
+        
+        Args:
+            db_conv: 数据库对话对象
+            
+        Returns:
+            Conversation Pydantic 模型
+        """
+        metadata = db_conv.extra_data
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata) if metadata else {}
+            except json.JSONDecodeError:
+                logger.warning(f"对话 {db_conv.id} 的 metadata 解析失败，使用空字典")
+                metadata = {}
+        elif metadata is None:
+            metadata = {}
+        
+        return Conversation(
+            id=db_conv.id,
+            user_id=db_conv.user_id,
+            title=db_conv.title,
+            status=db_conv.status,
+            created_at=db_conv.created_at,
+            updated_at=db_conv.updated_at,
+            metadata=metadata
+        )
+    
     async def list_conversations(
         self,
         user_id: str,
