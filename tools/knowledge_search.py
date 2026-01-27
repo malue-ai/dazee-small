@@ -12,7 +12,7 @@
 """
 
 from typing import Any, Dict, Optional, List
-from tools.base import BaseTool
+from core.tool.base import BaseTool, ToolContext
 from logger import get_logger
 from utils.ragie_client import get_ragie_client
 from utils.knowledge_store import get_knowledge_store
@@ -22,106 +22,42 @@ logger = get_logger("knowledge_search")
 
 class KnowledgeSearchTool(BaseTool):
     """
-    专业 RAG 检索工具
+    专业 RAG 检索工具（input_schema 由 capabilities.yaml 定义）
     
     功能特性：
-    - 🎯 精准检索：基于 Ragie 的语义检索引擎
-    - 📖 结构化返回：包含文本、评分、来源、引用
-    - 🔗 引用追踪：自动生成 [1], [2] 格式的引用标记
-    - 📊 质量控制：过滤低相关性结果（score < 0.3）
-    - 💡 智能摘要：提取 top-3 片段供 LLM 快速理解
-    
-    使用场景：
-    - 用户询问个人文档中的内容
-    - 需要基于已有资料生成回答
-    - 引用用户上传的专业文档
-    
-    注意事项：
-    - ⚠️ 必须提供 user_id（从 WorkingMemory 自动注入）
-    - ⚠️ 知识库为空时会友好提示
-    - ⚠️ 始终包含来源引用，避免幻觉
+    - 精准检索：基于 Ragie 的语义检索引擎
+    - 结构化返回：包含文本、评分、来源、引用
+    - 用户隔离：每个用户有独立的知识空间
     """
     
+    name = "knowledge_search"
+    
     def __init__(self):
-        super().__init__()
         self.ragie_client = get_ragie_client()
         self.knowledge_store = get_knowledge_store()
     
-    @property
-    def name(self) -> str:
-        return "knowledge_search"
-    
-    @property
-    def description(self) -> str:
-        return (
-            "🔍 从用户的个人知识库中检索相关信息（专业 RAG 检索）\n"
-            "\n"
-            "**适用场景**：\n"
-            "- 用户询问「我的文档中...」\n"
-            "- 需要基于用户上传的资料回答问题\n"
-            "- 引用用户的专业文档、笔记、报告等\n"
-            "\n"
-            "**返回格式**：\n"
-            "- 按相关性评分排序的文档片段\n"
-            "- 每个片段包含来源文档名称\n"
-            "- 自动生成引用标记 [1], [2], [3]\n"
-            "- 包含可直接使用的摘要文本\n"
-            "\n"
-            "**重要提示**：\n"
-            "- ✅ 必须基于检索结果回答，禁止编造内容\n"
-            "- ✅ 回答时需包含引用标记（如：根据文档[1]...）\n"
-            "- ✅ 如果未找到相关内容，明确告知用户\n"
-            "\n"
-            "每个用户有独立的知识空间，只能检索自己的内容。"
-        )
-    
-    @property
-    def parameters(self) -> Dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "检索查询文本，描述你想要找到的信息"
-                },
-                "top_k": {
-                    "type": "integer",
-                    "description": "返回的结果数量，默认 5",
-                    "default": 5,
-                    "minimum": 1,
-                    "maximum": 20
-                },
-                "metadata_filter": {
-                    "type": "object",
-                    "description": "元数据过滤条件（可选），如 {\"tags\": [\"important\"], \"source\": \"upload\"}",
-                    "additionalProperties": True
-                }
-            },
-            "required": ["query"]
-        }
-    
-    async def execute(
-        self,
-        query: str,
-        top_k: int = 5,
-        metadata_filter: Optional[Dict[str, Any]] = None,
-        **kwargs
-    ) -> Dict[str, Any]:
+    async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
         """
         执行知识库检索
         
         Args:
-            query: 检索查询文本
-            top_k: 返回结果数量
-            metadata_filter: 元数据过滤条件
-            **kwargs: 额外参数（从 WorkingMemory 注入）
+            params: 工具参数
+                - query: 检索查询文本
+                - top_k: 返回结果数量
+                - metadata_filter: 元数据过滤条件
+            context: 工具执行上下文
         
         Returns:
             检索结果，包含相关文档片段
         """
+        # 从 params 提取参数
+        query = params.get("query", "")
+        top_k = params.get("top_k", 5)
+        metadata_filter = params.get("metadata_filter")
+        
         try:
-            # 1. 从 WorkingMemory 获取 user_id（由 Agent 自动注入）
-            user_id = kwargs.get("user_id")
+            # 1. 从 context 获取 user_id
+            user_id = context.user_id
             if not user_id:
                 return {
                     "success": False,

@@ -3,16 +3,17 @@
     <!-- 渲染所有内容块 -->
     <template v-for="(block, index) in contentBlocks" :key="index">
       <!-- 思考过程 -->
-      <div v-if="block.type === 'thinking'" class="thinking-card">
+      <div v-if="block.type === 'thinking'" class="thinking-card" :class="{ 'is-streaming': isStreaming }">
         <div class="thinking-header" @click="toggleBlock(index)">
           <div class="thinking-label">
-            <span class="thinking-dot"></span>
-            <span>思考过程</span>
+            <span class="thinking-dot" :class="{ 'is-active': isStreaming }"></span>
+            <span>{{ isStreaming ? '正在思考...' : '思考过程' }}</span>
           </div>
-          <span class="thinking-toggle">{{ expandedBlocks[index] ? '收起' : '展开' }}</span>
+          <span class="thinking-toggle">{{ isThinkingExpanded(index) ? '收起' : '展开' }}</span>
         </div>
-        <div v-show="expandedBlocks[index]" class="thinking-body">
-          {{ block.thinking }}
+        <div v-show="isThinkingExpanded(index)" class="thinking-body">
+          <span>{{ block.thinking }}</span>
+          <span v-if="isStreaming" class="typing-cursor"></span>
         </div>
       </div>
 
@@ -82,7 +83,7 @@
 </template>
 
 <script setup>
-import { ref, computed, reactive } from 'vue'
+import { ref, computed, reactive, watch } from 'vue'
 import MarkdownRenderer from './MarkdownRenderer.vue'
 import ToolMessage from './ToolMessage.vue'
 
@@ -96,6 +97,11 @@ const props = defineProps({
   toolStatuses: {
     type: Object,
     default: () => ({})
+  },
+  // 是否正在流式输出
+  isStreaming: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -109,6 +115,38 @@ function handleMermaidDetected(charts) {
 
 // 展开/收起状态
 const expandedBlocks = reactive({})
+
+// 用户手动操作过的块（记录用户是否手动展开/收起过）
+const userToggledBlocks = reactive({})
+
+// 监听 isStreaming 变化，流式输出时自动展开 thinking，结束后自动折叠
+watch(
+  () => props.isStreaming,
+  (streaming, wasStreaming) => {
+    // 流式结束时，自动折叠所有用户没有手动操作过的 thinking 块
+    if (wasStreaming && !streaming) {
+      contentBlocks.value.forEach((block, index) => {
+        if (block.type === 'thinking' && !userToggledBlocks[index]) {
+          expandedBlocks[index] = false
+        }
+      })
+    }
+  }
+)
+
+// 计算属性：判断某个 thinking 块是否应该展开
+const isThinkingExpanded = (index) => {
+  // 如果用户手动操作过，使用用户的选择
+  if (userToggledBlocks[index] !== undefined) {
+    return expandedBlocks[index] ?? false
+  }
+  // 流式输出时自动展开
+  if (props.isStreaming) {
+    return true
+  }
+  // 默认折叠
+  return expandedBlocks[index] ?? false
+}
 
 // 解析内容块
 const contentBlocks = computed(() => {
@@ -139,9 +177,13 @@ const contentBlocks = computed(() => {
   return []
 })
 
-// 切换块的展开/收起
+// 切换块的展开/收起（用户手动操作）
 function toggleBlock(index) {
-  expandedBlocks[index] = !expandedBlocks[index]
+  // 记录用户手动操作过
+  userToggledBlocks[index] = true
+  // 切换展开/收起状态
+  const currentState = isThinkingExpanded(index)
+  expandedBlocks[index] = !currentState
 }
 
 // 格式化工具结果
@@ -250,6 +292,24 @@ function formatFileSize(bytes) {
   height: 6px;
   background: #9aa0a6;
   border-radius: 50%;
+  transition: all 0.3s ease;
+}
+
+/* 流式输出时的脉冲动画 */
+.thinking-dot.is-active {
+  background: #4285f4;
+  animation: pulse 1.5s infinite ease-in-out;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.3);
+    opacity: 0.7;
+  }
 }
 
 .thinking-toggle {
@@ -264,6 +324,31 @@ function formatFileSize(bytes) {
   line-height: 1.6;
   white-space: pre-wrap;
   word-wrap: break-word;
+}
+
+/* 打字机光标效果 */
+.typing-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background-color: #4285f4;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  animation: blink-cursor 0.8s infinite;
+}
+
+@keyframes blink-cursor {
+  0%, 50% {
+    opacity: 1;
+  }
+  51%, 100% {
+    opacity: 0;
+  }
+}
+
+/* 流式输出时的卡片边框效果 */
+.thinking-card.is-streaming {
+  border-left: 2px solid #4285f4;
 }
 
 /* 文本内容 */

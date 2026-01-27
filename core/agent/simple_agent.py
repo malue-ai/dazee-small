@@ -305,9 +305,7 @@ class SimpleAgent:
         
         # 更新工具执行器的上下文
         if clone.tool_executor and hasattr(clone.tool_executor, 'update_context'):
-            clone.tool_executor.update_context({
-                "event_manager": event_manager,
-            })
+            clone.tool_executor.update_context(event_manager=event_manager)
         
         # 创建新的 EventBroadcaster
         clone.broadcaster = EventBroadcaster(
@@ -358,10 +356,11 @@ class SimpleAgent:
             logger.debug("○ ToolSelector 未启用")
         
         # 4. 工具执行器（总是需要）
-        tool_context = {
-            "event_manager": self.event_manager,
-            "apis_config": self.apis_config,  # 🆕 用于 api_calling 自动注入认证
-        }
+        from core.tool.base import create_tool_context
+        tool_context = create_tool_context(
+            event_manager=self.event_manager,
+            apis_config=self.apis_config,
+        )
         self.tool_executor = create_tool_executor(
             self.capability_registry,
             tool_context=tool_context

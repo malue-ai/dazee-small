@@ -19,7 +19,7 @@ from pathlib import Path
 import aiohttp
 import asyncio
 from dataclasses import dataclass, asdict
-from tools.base import BaseTool
+from core.tool.base import BaseTool, ToolContext
 
 logger = logging.getLogger(__name__)
 
@@ -45,21 +45,15 @@ class PartitionConfig:
 
 class DocumentPartitionTool(BaseTool):
     """
-    Partition API文档解析工具
+    Partition API文档解析工具（input_schema 由 capabilities.yaml 定义）
     
     功能特性：
     - 仅支持URL输入（不支持本地文件）
     - 智能选择解析策略（fast/auto/hi_res）
     - 自动下载URL文件并缓存
-    - 支持批量处理
-    - 提供详细的结构化文档信息
-    
-    使用场景：
-    - 需要从网络文档中提取结构化信息供大模型分析
-    - 处理用户提供的文档URL（PDF、Word、PPT等）
-    - 批量解析在线文档库中的文件
-    - 将网络文档内容转为结构化数据
     """
+    
+    name = "document_partition_tool"
     
     def __init__(self, **kwargs):
         """
@@ -107,271 +101,6 @@ class DocumentPartitionTool(BaseTool):
         self.RECOMMENDED_SIZE = self.config.recommended_size_mb * 1024 * 1024
         self.MAX_SIZE = self.config.max_size_mb * 1024 * 1024
         self.CHUNK_SIZE = self.config.chunk_size_mb * 1024 * 1024
-    
-    @property
-    def name(self) -> str:
-        """工具名称（唯一标识）"""
-        return "document_partition_tool"
-    
-    @property
-    def description(self) -> str:
-        """
-        工具描述（给LLM看的，详细说明何时使用）
-        """
-        return """Partition API文档解析工具 - 将各种格式的网络文档转为结构化数据（支持分段解析）
-
-🚨🚨🚨 **【核心规则】用户指定页码时必看！** 🚨🚨🚨
-
-⚠️ overview 模式会解析全部页面（使用 fast 策略，5页一批）！
-⚠️ 如果用户说"解析70-90页"、"读取第5页"、"分析10到20页"，你必须：
-
-✅ **正确调用方式**（两个参数都必须传）：
-```json
-{
-  "source": "https://...",
-  "mode": "pages",        // ← 必须！告诉工具返回指定页面
-  "pages": "70-90"        // ← 必须！告诉工具具体哪些页
-}
-```
-
-❌ **错误调用方式**（overview 会解析全部页面，不是用户要的70-90页）：
-```json
-{
-  "source": "https://...",
-  "strategy": "hi_res"
-  // ❌ 没有 mode='pages' → 默认 overview → 会解析全部页面（不是70-90页）
-  // ❌ 没有 pages="70-90" → 无法知道要哪些页
-}
-```
-
-❌ **错误示例3**：只传 mode 不传 pages
-```json
-{
-  "source": "https://...",
-  "mode": "pages"
-  // ❌ 只有 mode 没有 pages → 工具不知道要哪些页，会报错
-}
-```
-
-🎯 **记住**：用户说页码 = 你必须传 mode='pages' + pages 参数！
-
----
-
-📋 **完整使用规则**：
-
-1️⃣ **用户指定页码** → mode='pages' + pages="70-90"
-   示例：
-   - "解析70-90页" → mode='pages', pages="70-90"
-   - "读取第5页" → mode='pages', pages="5"
-   - "分析10-20页" → mode='pages', pages="10-20"
-
-2️⃣ **用户要完整内容** → 根据文档大小选择
-   - 小文档（<10页）→ mode='full' 或 mode='overview'（都可以）
-   - 大文档（>10页）→ mode='overview'（5页一批处理全部）
-
-3️⃣ **用户要快速了解** → mode='overview'
-   - "这个文档讲了什么"
-   - "解析这个文档"（默认会解析全部）
-
-⚠️ mode 参数的作用：
-- overview: 解析全部页面（使用 fast 策略，>5页自动分批）✅ 返回完整内容
-- pages: 返回指定页面的完整内容（>5页自动分批）⭐ 用户指定页码时必用
-- full: 返回全部内容（可选策略，>5页自动分批）
-
----
-
-核心功能：
-1. 🆕 **统一分批解析**：所有模式超过5页自动分批处理
-   - overview: 全文解析（使用 fast 策略，5页一批，返回全部内容）✅ 处理全部页面
-   - pages: 按需加载（解析指定页面，如 pages="1-10" 或 pages="8,12-15"）
-   - full: 完整解析（返回全部内容，>5页自动分批）
-   - 统一批次大小：5页/批（可配置）
-2. 🆕 **智能时间估算**：开始处理前自动估算所需时间
-   - 根据页数、文件大小、策略自动计算
-   - 提供详细的时间分解（下载+解析）
-   - 大文档会提示预计等待时间
-3. 解析多种格式（11种核心文档格式）：
-   - 文档：PDF、Word(.doc/.docx)、TXT、RTF、ODT
-   - 表格：Excel(.xls/.xlsx)、CSV
-   - 演示：PowerPoint(.ppt/.pptx)
-   ⚠️ 注意：不支持图片格式（PNG/JPG/TIFF），请使用模型的原生视觉能力处理图片
-4. 智能解析策略：fast（快速，默认）、auto（自动选择）、hi_res（高精度含表格）
-5. 🆕 **文件大小智能控制**：
-   - ✅ 最佳实践：≤20MB（快速稳定）
-   - ⚠️ 警告阈值：20-50MB（自动降级为 fast 策略）
-   - ❌ 硬性限制：>50MB（PDF可分页处理，其他格式拒绝）
-6. 仅支持URL输入（不支持本地文件路径）
-7. 自动缓存结果（节省API调用成本）
-
-🎯 智能模式选择策略（请严格遵循）：
-
-1️⃣ **用户明确指定页码** ⭐ **最高优先级**
-   示例：
-   - "解析70到90页" → mode='pages', pages="70-90"
-   - "读取第5页" → mode='pages', pages="5"
-   - "分析10-20页和30-40页" → mode='pages', pages="10-20,30-40"
-   
-2️⃣ **小文档（<5页）→ 直接使用 mode='full' 或 mode='overview'**
-   - 用户说"解析/分析/读取文档"时，两种模式都可以
-   - 小文档会一次性解析，不分批
-   
-3️⃣ **中等文档（5-10页）→ 根据需求选择**
-   - 快速了解 → mode='overview'（固定 fast 策略）
-   - 详细分析 → mode='full'（可选策略）
-   - 都会自动分批（5页/批）
-   
-4️⃣ **大文档（>10页）→ 自动分批**
-   - mode='overview'：全部解析（fast 策略，5页/批）
-   - mode='full'：全部解析（可选策略，5页/批）
-   - mode='pages'：按需解析（可选策略，5页/批）
-   
-5️⃣ **特殊需求**
-   - 只看部分内容 → mode='pages' + 页码
-   - 高精度表格 → mode='full' 或 'pages' + strategy='hi_res'
-
-⚠️ 典型错误场景（请务必避免）：
-- ❌ **最常见错误**：用户说"解析70到90页"，你只传了 source 和 strategy，没传 mode 和 pages
-  ✅ 正确：mode='pages', pages="70-90"
-  ❌ 错误调用示例：
-  ```python
-  {
-    "source": "...",
-    "strategy": "hi_res"
-    # ❌ 缺少 mode='pages'
-    # ❌ 缺少 pages="70-90"
-  }
-  # 结果：会解析全部页面（overview 默认行为），不是用户要的70-90页！
-  ```
-  ✅ 正确调用示例：
-  ```python
-  {
-    "source": "...",
-    "mode": "pages",        # ✅ 必须指定
-    "pages": "70-90",       # ✅ 必须指定
-    "strategy": "hi_res"
-  }
-  ```
-
-- ❌ 用户上传 1 页 Word，你调用 overview 后又调用 full
-  ✅ 正确：overview 已返回全部内容，无需再调用
-  
-- ❌ 用户说"分析这个论文"，你不调用工具就回答
-  ✅ 正确：调用 overview 即可获取全部内容，然后分析
-  
-- ❌ 看到 "共None页" 就认为文档很大
-  ✅ 正确：None 表示未知页数（Word/Excel），可能实际很小，建议尝试 full
-
-参数说明：
-- source: 文档URL（必需）- HTTP/HTTPS 协议
-- mode: 解析模式（⚠️ 关键参数，默认 'overview' 返回全部内容）
-  * 'overview': 全文模式，返回文档全部内容（使用 fast 策略，>5页自动分批）✅ 处理全部页面
-  * 'pages': 分页模式，返回指定页面的完整内容（需设置 pages 参数，>5页自动分批）⭐ **用户指定页码时必用**
-  * 'full': 完整模式，返回全部内容（可选策略，>5页自动分批）
-- pages: 页码范围（⚠️ mode='pages'时必需！）
-  * 格式示例：
-    - "5" → 单页
-    - "1-10" → 范围
-    - "1-5,8-10" → 多个范围
-    - "70-90" → 大文档的特定范围
-  * ⚠️ 如果用户说"解析70到90页"，必须传 mode='pages' 和 pages="70-90"
-- strategy: 解析策略（可选，默认 'fast'）
-  * 'fast': 快速提取纯文本（速度快，约30-60秒）⭐ 默认策略
-  * 'auto': 自动选择最佳策略（处理时间约1-2分钟）
-  * 'hi_res': 高精度解析（含表格、图片，速度慢，约2-3分钟）⚠️ 需要更长等待时间
-- use_cache: 是否使用缓存（可选，默认 True）
-
-返回格式：
-{
-  "success": true/false,
-  "mode": "overview/pages/full",
-  "data": {...},  // 解析结果
-  "metadata": {
-    "total_pages": 20,
-    "element_count": 370,
-    "processing_time": 3.2,
-    "time_estimate": {  // 🆕 时间估算信息
-      "estimated_total_seconds": 180,
-      "estimated_total_minutes": 3.0,
-      "breakdown": {
-        "下载文件": "5秒",
-        "解析文档": "175秒（20页 × 45秒/页）",
-        "分批处理": "4批次"
-      }
-    }
-  },
-  "warning": "...",  // overview模式会有警告提示
-  "next_action": {...}  // 建议的下一步操作
-}
-
-性能参考（单页）：
-- fast 策略：30-60秒
-- auto 策略：1-2分钟
-- hi_res 策略：2-3分钟（含 OCR 和表格识别）
-
-📏 文件大小限制详情：
-1. **≤20MB（最佳实践）**：
-   - 快速处理，稳定性最佳
-   - 使用原始策略（auto/fast/hi_res）
-   - 推荐的文件大小范围
-
-2. **20-50MB（警告阈值）**：
-   - 仍可处理，但会有性能警告
-   - 自动降级为 fast 策略（提高成功率）
-   - 建议用户压缩或优化文档
-
-3. **>50MB（硬性限制）**：
-   - PDF 文档：提示使用 mode='pages' 分段读取
-   - 非PDF文档：拒绝处理，返回错误
-   - 建议：分割文件或压缩后再上传
-
-⚠️ 注意事项：
-- 此工具仅接受URL输入，不支持本地文件路径
-- 文件大小检查通过 HEAD 请求预检（不下载文件）
-- 如 HEAD 请求失败，下载后仍会检查实际大小
-- 大文件自动降级策略对用户透明，但会在元数据中标注
-"""
-    
-    @property
-    def parameters(self) -> Dict[str, Any]:
-        """
-        工具参数定义（JSON Schema格式）
-        """
-        return {
-            "type": "object",
-            "properties": {
-                "source": {
-                    "type": "string",
-                    "description": "文档URL（必需）：如 'https://example.com/doc.pdf'。仅支持HTTP/HTTPS协议的URL，不支持本地文件路径"
-                },
-                "mode": {
-                    "type": "string",
-                    "description": "解析模式（决定返回哪些页面）：'overview'（全部内容，fast策略，>5页自动分批）、'pages'（指定页面，需配合pages参数，>5页自动分批）、'full'（全部内容，可选策略，>5页自动分批）。用户说'解析第X页'时必须传 mode='pages' + pages='X'！",
-                    "enum": ["overview", "pages", "full"]
-                },
-                "pages": {
-                    "type": "string",
-                    "description": "页码范围（mode='pages'时必需）。格式：'5'（单页）、'1-10'（范围）、'1-5,8-10'（多段）。用户说'解析X页'时必须传此参数，例如用户说'解析70-90页'时传 pages='70-90'。"
-                },
-                "strategy": {
-                    "type": "string",
-                    "description": "解析策略：'fast'（快速提取纯文本，约30-60秒，默认）、'auto'（自动选择，约1-2分钟）、'hi_res'（高精度含表格，约2-3分钟）⚠️ hi_res 速度最慢但最准确",
-                    "enum": ["auto", "fast", "hi_res"],
-                    "default": "fast"
-                },
-                "use_cache": {
-                    "type": "boolean",
-                    "description": "是否使用缓存，重复解析相同文档时可加速",
-                    "default": True
-                },
-                "output_format": {
-                    "type": "string",
-                    "description": "输出格式：'json'（结构化JSON）或 'text'（纯文本拼接）",
-                    "enum": ["json", "text"],
-                    "default": "json"
-                }
-            },
-            "required": ["source"]  # 必需参数
-        }
     
     async def _get_file_size_from_url(self, url: str) -> Optional[int]:
         """
@@ -568,37 +297,38 @@ class DocumentPartitionTool(BaseTool):
                 }
             }
     
-    async def execute(
-        self,
-        source: str,
-        mode: Optional[str] = None,
-        pages: Optional[str] = None,
-        strategy: str = "fast",  # 默认使用 fast 策略
-        use_cache: bool = True,
-        output_format: str = "json",
-        **kwargs
-    ) -> Dict[str, Any]:
+    async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
         """
         执行文档解析（支持分段策略）
         
         Args:
-            source: 文档URL（必须是HTTP/HTTPS协议）
-            mode: 解析模式（⚠️ 如果传了 pages 参数，必须明确指定 mode='pages'）
-                - overview: 概要模式（快速返回文档结构）
-                - pages: 分页模式（解析指定页面）
-                - full: 完整模式（解析全部内容，仅限小文档<10页）
-            pages: 页码范围（mode='pages'时使用），如 "1-5" 或 "8,10,12-15"
-            strategy: 解析策略（auto/fast/hi_res）
-            use_cache: 是否使用缓存
-            output_format: 输出格式（json/text）
-            **kwargs: 框架自动注入的参数
-                - user_id: 用户ID
-                - conversation_id: 对话ID
-                - session_id: 会话ID
+            params: 工具参数
+                - source: 文档URL（必须是HTTP/HTTPS协议）
+                - mode: 解析模式
+                    - overview: 概要模式（快速返回文档结构）
+                    - pages: 分页模式（解析指定页面）
+                    - full: 完整模式（解析全部内容）
+                - pages: 页码范围（mode='pages'时使用），如 "1-5"
+                - strategy: 解析策略（fast/auto/hi_res）
+                - use_cache: 是否使用缓存
+                - output_format: 输出格式（json/text）
+            context: 工具执行上下文
         
         Returns:
             标准格式的返回字典
         """
+        # 从 params 提取参数
+        source = params.get("source", "")
+        mode = params.get("mode")
+        pages = params.get("pages")
+        strategy = params.get("strategy", "fast")
+        use_cache = params.get("use_cache", True)
+        output_format = params.get("output_format", "json")
+        
+        # 从 context 获取用户信息
+        user_id = context.user_id or "unknown"
+        conversation_id = context.conversation_id or "unknown"
+        
         # 🔧 智能默认逻辑：根据参数自动推断 mode
         if mode is None:
             if pages:
@@ -672,11 +402,7 @@ class DocumentPartitionTool(BaseTool):
                     "message": "策略必须是 auto、fast 或 hi_res"
                 }
             
-            # 3. 获取框架参数
-            user_id = kwargs.get("user_id", "unknown")
-            conversation_id = kwargs.get("conversation_id", "unknown")
-            
-            # 4. 检查缓存（基于 mode + pages + strategy）
+            # 3. 检查缓存（基于 mode + pages + strategy）
             cache_key = None
             if use_cache and self.config.cache_enabled:
                 cache_params = f"{source}_{mode}_{pages or 'none'}_{strategy}"

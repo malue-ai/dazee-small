@@ -292,11 +292,50 @@ class ChatServicer(_ChatServicerBase):
             )
             
             # 检查 Session 是否存在
-            status_data = await self.session_service.get_session_status(request.session_id)
+            try:
+                status_data = await self.session_service.get_session_status(request.session_id)
+            except SessionNotFoundError:
+                # Session 不存在：返回友好的通知事件，不设置 gRPC 错误状态
+                logger.info(
+                    f"📋 Session 不存在或已过期（预检查）: session_id={request.session_id}"
+                )
+                info_event = {
+                    "type": "message.assistant.info",
+                    "message_id": "",
+                    "timestamp": int(datetime.now().timestamp() * 1000),
+                    "info": {
+                        "type": "session_not_found",
+                        "code": "SESSION_NOT_FOUND",
+                        "message": "会话不存在或已过期，请创建新会话",
+                        "action": "create_new_session",
+                        "session_id": request.session_id
+                    }
+                }
+                yield tool_service_pb2.ChatEvent(
+                    data=json.dumps(info_event, ensure_ascii=False)
+                )
+                return
             
             if not status_data:
-                context.set_code(grpc.StatusCode.NOT_FOUND)
-                context.set_details("Session 不存在或已过期")
+                # 理论上不会到达这里（get_session_status 会抛异常）
+                logger.info(
+                    f"📋 Session 状态为空: session_id={request.session_id}"
+                )
+                info_event = {
+                    "type": "message.assistant.info",
+                    "message_id": "",
+                    "timestamp": int(datetime.now().timestamp() * 1000),
+                    "info": {
+                        "type": "session_not_found",
+                        "code": "SESSION_NOT_FOUND",
+                        "message": "会话不存在或已过期，请创建新会话",
+                        "action": "create_new_session",
+                        "session_id": request.session_id
+                    }
+                }
+                yield tool_service_pb2.ChatEvent(
+                    data=json.dumps(info_event, ensure_ascii=False)
+                )
                 return
             
             session_status = status_data.get("status")
@@ -391,28 +430,30 @@ class ChatServicer(_ChatServicerBase):
             logger.info(f"✅ gRPC 重连流结束: events_sent={event_count}")
         
         except SessionNotFoundError as e:
-            # 🆕 Session 不存在：这是预期的业务场景，不应该记录 ERROR
+            # 🆕 Session 不存在：这是预期的业务场景，不应该记录 ERROR 也不设置 gRPC 错误状态
             logger.info(
                 f"📋 Session 不存在或已过期: session_id={request.session_id}"
             )
-            context.set_code(grpc.StatusCode.NOT_FOUND)
-            context.set_details(f"Session 不存在或已过期: {request.session_id}")
+            # ⚠️ 不设置 gRPC 错误状态码，避免触发上层错误报警
+            # context.set_code(grpc.StatusCode.NOT_FOUND)
+            # context.set_details(f"Session 不存在或已过期: {request.session_id}")
             
-            # 返回友好的错误事件，告知客户端需要创建新会话
-            error_event = {
-                "type": "message.assistant.error",
+            # 返回友好的通知事件（而非错误事件），告知客户端需要创建新会话
+            # 使用 "message.assistant.info" 类型，表示这是信息提示而非错误
+            info_event = {
+                "type": "message.assistant.info",
                 "message_id": "",
                 "timestamp": int(datetime.now().timestamp() * 1000),
-                "error": {
+                "info": {
                     "type": "session_not_found",
                     "code": "SESSION_NOT_FOUND",
-                    "message": f"Session 不存在或已过期，请创建新会话",
-                    "retryable": False,
+                    "message": "会话不存在或已过期，请创建新会话",
+                    "action": "create_new_session",
                     "session_id": request.session_id
                 }
             }
             yield tool_service_pb2.ChatEvent(
-                data=json.dumps(error_event, ensure_ascii=False)
+                data=json.dumps(info_event, ensure_ascii=False)
             )
         
         except Exception as e:

@@ -400,12 +400,32 @@ capabilities:
     api_name: ragie
     user_isolation: true
   metadata:
-    description: 从用户的个人知识库中检索相关信息（基于 Ragie）
+    description: |
+      🔍 从用户的个人知识库中检索相关信息（专业 RAG 检索）
+      
+      **适用场景**：
+      - 用户询问「我的文档中...」
+      - 需要基于用户上传的资料回答问题
+      - 引用用户的专业文档、笔记、报告等
+      
+      **返回格式**：
+      - 按相关性评分排序的文档片段
+      - 每个片段包含来源文档名称
+      - 自动生成引用标记 [1], [2], [3]
+      - 包含可直接使用的摘要文本
+      
+      **重要提示**：
+      - ✅ 必须基于检索结果回答，禁止编造内容
+      - ✅ 回答时需包含引用标记（如：根据文档[1]...）
+      - ✅ 如果未找到相关内容，明确告知用户
+      
+      每个用户有独立的知识空间，只能检索自己的内容。
     preferred_for:
     - 查找用户上传的文档
     - 检索个人笔记和资料
     - 搜索历史上传的内容
     - 个人知识回忆
+    - 基于文档回答问题
     keywords:
     - 知识库
     - 个人文档
@@ -413,26 +433,19 @@ capabilities:
     - 搜索
     - 我的文档
     - 上传的资料
-    note: '特性：
-
+    - RAG
+    note: |
+      特性：
       - 每个用户有独立的知识空间（Partition）
-
       - 自动从 WorkingMemory 获取 user_id
-
       - 支持语义搜索和元数据过滤
-
       - 返回格式化的摘要供 LLM 使用
-
-
+      - 自动生成引用标记，便于追溯来源
+      
       使用场景：
-
       - "帮我找一下之前上传的产品文档"
-
       - "我记得有份关于XX的资料"
-
       - "查一下我的笔记里有没有XX"
-
-      '
 - name: api_calling
   type: TOOL
   subtype: CUSTOM
@@ -557,7 +570,20 @@ capabilities:
     api_name: tavily
     api_key_env: TAVILY_API_KEY
   metadata:
-    description: 通用网络搜索（基于 Tavily API），替代 Claude web_search Server Tool
+    description: |
+      使用 Tavily API 进行通用网络搜索。
+      
+      特点：
+      - 通用搜索：快速获取互联网信息
+      - AI 摘要：自动生成搜索结果的智能摘要
+      - 深度搜索：basic（快速）或 advanced（深入）
+      - 域名过滤：可指定包含或排除的域名
+      
+      适用场景：
+      - 快速查询事实信息
+      - 获取最新新闻动态
+      - 搜索产品/公司信息
+      - 通用知识检索
     preferred_for:
     - 快速搜索信息
     - 获取最新新闻
@@ -578,7 +604,7 @@ capabilities:
         description: 搜索查询（支持自然语言）
       search_depth:
         type: string
-        description: 搜索深度：basic（快速）或 advanced（深入）
+        description: 搜索深度：basic（快速）或 advanced（深入，更多结果）
         enum: [basic, advanced]
         default: basic
       max_results:
@@ -587,11 +613,25 @@ capabilities:
         default: 5
       include_answer:
         type: boolean
-        description: 是否包含 AI 生成的摘要答案
+        description: 是否包含 AI 生成的摘要答案（默认true）
         default: true
+      include_raw_content:
+        type: boolean
+        description: 是否包含网页原始内容（默认false，会增加响应大小）
+        default: false
+      include_domains:
+        type: array
+        items:
+          type: string
+        description: 只搜索这些域名（可选），如 ['github.com', 'stackoverflow.com']
+      exclude_domains:
+        type: array
+        items:
+          type: string
+        description: 排除这些域名（可选），如 ['pinterest.com']
       topic:
         type: string
-        description: 搜索主题：general（通用）或 news（新闻）
+        description: 搜索主题类型：general（通用）或 news（新闻）
         enum: [general, news]
         default: general
     required:
@@ -624,7 +664,25 @@ capabilities:
     requires_network: true
     api_name: exa
   metadata:
-    description: High-quality semantic search using Exa API with content extraction
+    description: |
+      使用 Exa API 进行高质量的语义搜索。
+      
+      特点：
+      - 语义理解：理解查询意图，返回最相关内容
+      - 网页内容提取：自动提取网页正文内容
+      - 时间过滤：支持按发布时间过滤结果
+      - 分类搜索：支持按类别过滤（papers, news, github等）
+      
+      适用场景：
+      - 学术论文搜索
+      - 深度研究和调研
+      - 高质量资源定位
+      - 语义相关内容发现
+    preferred_for:
+    - 学术论文搜索
+    - 深度研究
+    - 高质量资源定位
+    - 语义搜索
     keywords:
     - search
     - research
@@ -633,7 +691,10 @@ capabilities:
     - papers
     - news
     - articles
-    note: 比web_search更强大，支持语义理解和内容提取
+    - 搜索
+    - 研究
+    - 语义
+    note: 与 tavily_search 互补：exa_search 适合语义搜索和高质量资源定位，tavily_search 适合快速通用搜索
   input_schema:
     type: object
     properties:
@@ -642,11 +703,11 @@ capabilities:
         description: 搜索查询（支持自然语言）
       num_results:
         type: integer
-        description: 返回结果数量（1-10，默认10）
+        description: 返回结果数量（默认10，最大10）
         default: 10
       category:
         type: string
-        description: 内容分类过滤
+        description: 内容分类（papers/news/github/company/personal_site/pdf/tweet）
         enum:
         - papers
         - news
@@ -657,7 +718,7 @@ capabilities:
         - tweet
       include_text:
         type: boolean
-        description: 是否包含网页正文内容
+        description: 是否包含网页正文内容（默认true）
         default: true
       start_published_date:
         type: string
@@ -806,15 +867,30 @@ capabilities:
     requires_api: true
     api_name: slidespeak
   metadata:
-    description: SlideSpeak API rendering tool for professional PPT generation
-    note: 🎨 Generates high-quality presentations with professional layouts and designs
-    used_by: slidespeak-generator
+    description: |
+      使用 SlideSpeak API 渲染高质量 PPT。
+      
+      支持：
+      - 复杂布局（ITEMS, COMPARISON, TIMELINE, BIG_NUMBER, CHART, TABLE, SWOT等）
+      - 自动图片获取
+      - 专业模板应用
+      - 高质量渲染
+      
+      输入：SlideSpeak 配置（包含 slides 数组）
+      输出：PPT 文件下载链接
+    note: 🎨 底层渲染工具，通常由 ppt_generator 内部调用，也可直接使用
+    used_by: ppt_generator
+    preferred_for:
+    - 直接渲染 PPT
+    - 自定义 SlideSpeak 配置
+    - 专业布局控制
     keywords:
     - ppt
     - presentation
     - slidespeak
     - professional
     - 专业
+    - 渲染
   input_schema:
     type: object
     properties:
@@ -1027,7 +1103,7 @@ capabilities:
   type: TOOL
   subtype: SESSION
   provider: system
-  invocation_hint: DIRECT  # 🆕 V4.4: 标准 tool_use，核心规划工具
+  invocation_hint: DIRECT
   level: 1
   cache_stable: true
   implementation:
@@ -1036,11 +1112,8 @@ capabilities:
   capabilities:
   - task_planning
   - progress_tracking
-  - session_memory
   - plan_crud
   - todo_crud
-  - replan
-  - adaptive_planning
   priority: 95
   cost:
     time: instant
@@ -1049,58 +1122,25 @@ capabilities:
     requires_api: false
     session_scoped: true
   metadata:
-    description: '任务规划工具（智能版本）- 内部调用 Claude + Extended Thinking
-
-
-      核心能力：
-
-      - create_plan: 智能生成任务计划（调用 Claude + Extended Thinking）
-
-      - update_step: 更新步骤状态
-
-      - add_step: 动态添加步骤
-
-      - replan: 🆕 重新生成计划（保留已完成步骤或全量重规划）
-
-      - get_plan: 获取当前计划状态
-
-
-      重新规划（replan）触发场景：
-
-      - 多个步骤连续失败
-
-      - 发现原计划遗漏关键信息
-
-      - 用户需求发生变化
-
-      - 执行过程中发现更优方案
-
-
-      策略选项：
-
-      - incremental: 保留已完成步骤，只重新生成剩余步骤（默认）
-
-      - full: 全量重新生成计划
-
-      '
+    description: |
+      任务规划工具（Cursor 风格）- 文件驱动的简洁 CRUD 工具
+      
+      核心操作：
+      - create: 创建计划（Agent 决定步骤内容）
+      - update_todo: 更新步骤状态
+      - get: 获取当前计划
+      - add_todo: 动态添加步骤
+      
+      特性：
+      - 本地 Markdown 文件是唯一状态源
+      - 所有 todos 完成后自动删除文件
+      - 工具只做 CRUD，不调用 LLM
     keywords:
     - plan
     - todo
     - 计划
     - 任务
     - 进度
-    - replan
-    - 重新规划
-    - 自适应
-    note: 'V4.2.1 新增 replan 能力：
-
-      - Claude 可在 RVR 循环中自主决定是否调用 replan
-
-      - 支持 incremental（增量）和 full（全量）两种重规划策略
-
-      - 最大重规划次数限制：3 次
-
-      '
   input_schema:
     type: object
     properties:
@@ -1108,49 +1148,48 @@ capabilities:
         type: string
         description: 操作类型
         enum:
-        - create_plan
-        - update_step
-        - get_plan
-        - add_step
-        - replan
-        - clear
+        - create
+        - update_todo
+        - get
+        - add_todo
       data:
         type: object
-        description: 操作数据
+        description: 操作数据（根据 operation 不同而不同）
         properties:
-          user_query:
+          name:
             type: string
-            description: 用户原始需求（create_plan 时必需）
-          goal:
+            description: 计划名称（create 时使用）
+          overview:
             type: string
-            description: 任务目标（create_plan 可选，会自动生成）
+            description: 计划概述/目标（create 时使用）
           steps:
             type: array
-            description: 步骤列表（create_plan 可选，会自动生成）
-          step_index:
-            type: integer
-            description: 步骤索引（update_step 时必需）
+            description: 步骤列表（create 时使用）
+            items:
+              type: object
+              properties:
+                content:
+                  type: string
+                  description: 步骤内容
+          id:
+            type: string
+            description: todo ID，如 "step-0"（update_todo 时必需）
           status:
             type: string
-            description: 步骤状态（update_step 时必需）
+            description: 新状态（update_todo 时必需）
             enum:
             - pending
             - in_progress
             - completed
-            - failed
           result:
             type: string
-            description: 步骤结果（update_step 时可选）
-          reason:
+            description: 完成结果说明（update_todo 时可选）
+          content:
             type: string
-            description: 重新规划原因（replan 时必需）
-          strategy:
+            description: todo 内容（add_todo 时必需）
+          after:
             type: string
-            description: 重规划策略（replan 时可选）
-            enum:
-            - full
-            - incremental
-            default: incremental
+            description: 插入到哪个 todo 之后（add_todo 时可选）
     required:
     - operation
 - name: send_files

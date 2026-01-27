@@ -25,7 +25,7 @@ from datetime import datetime
 from enum import Enum
 
 from logger import get_logger
-from tools.base import BaseTool
+from core.tool.base import BaseTool, ToolContext
 
 logger = get_logger("tools.scheduled_task")
 
@@ -79,92 +79,51 @@ class UserScheduledTask:
 
 class ScheduledTaskTool(BaseTool):
     """
-    定时任务工具
+    定时任务工具（input_schema 由 capabilities.yaml 定义）
     
-    让 AI 可以为用户管理定时任务
-    
-    支持操作：
-    - create: 创建定时任务
-    - list: 查看用户的定时任务
-    - cancel: 取消定时任务
-    - update: 更新定时任务
+    让 AI 可以为用户管理定时任务。
     """
     
     name = "scheduled_task"
-    description = """管理用户的定时任务。
-
-可用操作：
-- create: 创建定时提醒或定时任务
-- list: 查看用户的所有定时任务
-- cancel: 取消指定的定时任务
-- update: 更新定时任务
-
-创建任务时需要指定：
-- title: 任务标题
-- trigger_type: 触发类型 (once/daily/weekly/cron)
-- trigger_config: 触发配置，如 {"time": "09:00", "days": ["monday", "friday"]}
-- action: 执行动作，如 {"type": "send_message", "content": "提醒内容"}
-"""
     
     def __init__(self, user_id: str = None, conversation_id: str = None):
         self.user_id = user_id
         self.conversation_id = conversation_id
     
-    def get_input_schema(self) -> Dict[str, Any]:
-        """获取输入 Schema"""
-        return {
-            "type": "object",
-            "properties": {
-                "operation": {
-                    "type": "string",
-                    "enum": ["create", "list", "cancel", "update"],
-                    "description": "操作类型"
-                },
-                "task_id": {
-                    "type": "string",
-                    "description": "任务 ID（cancel/update 时需要）"
-                },
-                "title": {
-                    "type": "string",
-                    "description": "任务标题（create 时需要）"
-                },
-                "trigger_type": {
-                    "type": "string",
-                    "enum": ["once", "daily", "weekly", "cron"],
-                    "description": "触发类型（create 时需要）"
-                },
-                "trigger_config": {
-                    "type": "object",
-                    "description": "触发配置，如 {\"time\": \"09:00\", \"date\": \"2026-01-15\"}"
-                },
-                "action": {
-                    "type": "object",
-                    "description": "执行动作，如 {\"type\": \"send_message\", \"content\": \"提醒内容\"}"
-                },
-            },
-            "required": ["operation"]
-        }
-    
-    async def execute(self, **kwargs) -> Dict[str, Any]:
+    async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
         """
         执行工具
         
-        TODO: 完整实现数据库操作
+        Args:
+            params: 工具输入参数
+                - operation: 操作类型（create/list/cancel/update）
+                - task_id: 任务 ID
+                - title: 任务标题
+                - trigger_type: 触发类型
+                - trigger_config: 触发配置
+                - action: 执行动作
+            context: 工具执行上下文
         """
-        operation = kwargs.get("operation")
+        # 从 context 获取用户信息（如果 __init__ 没有设置）
+        if not self.user_id:
+            self.user_id = context.user_id
+        if not self.conversation_id:
+            self.conversation_id = context.conversation_id
+        
+        operation = params.get("operation")
         
         if operation == "create":
-            return await self._create_task(**kwargs)
+            return await self._create_task(params)
         elif operation == "list":
             return await self._list_tasks()
         elif operation == "cancel":
-            return await self._cancel_task(kwargs.get("task_id"))
+            return await self._cancel_task(params.get("task_id"))
         elif operation == "update":
-            return await self._update_task(**kwargs)
+            return await self._update_task(params)
         else:
             return {"success": False, "error": f"未知操作: {operation}"}
     
-    async def _create_task(self, **kwargs) -> Dict[str, Any]:
+    async def _create_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         创建定时任务
         
@@ -173,10 +132,10 @@ class ScheduledTaskTool(BaseTool):
         - 注册到用户任务调度器
         - 计算 next_run_at
         """
-        title = kwargs.get("title", "未命名任务")
-        trigger_type = kwargs.get("trigger_type", "once")
-        trigger_config = kwargs.get("trigger_config", {})
-        action = kwargs.get("action", {"type": "send_message", "content": "定时提醒"})
+        title = params.get("title", "未命名任务")
+        trigger_type = params.get("trigger_type", "once")
+        trigger_config = params.get("trigger_config", {})
+        action = params.get("action", {"type": "send_message", "content": "定时提醒"})
         
         logger.info(f"🕐 创建定时任务: user_id={self.user_id}, title={title}, trigger={trigger_type}")
         
@@ -239,7 +198,7 @@ class ScheduledTaskTool(BaseTool):
             "note": "⚠️ 当前为占位实现"
         }
     
-    async def _update_task(self, **kwargs) -> Dict[str, Any]:
+    async def _update_task(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         更新定时任务
         
@@ -248,7 +207,7 @@ class ScheduledTaskTool(BaseTool):
         - 重新计算 next_run_at
         - 更新调度器
         """
-        task_id = kwargs.get("task_id")
+        task_id = params.get("task_id")
         if not task_id:
             return {"success": False, "error": "缺少 task_id"}
         

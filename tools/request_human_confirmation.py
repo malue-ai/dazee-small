@@ -30,7 +30,7 @@ import json
 from logger import get_logger
 from typing import Dict, Any, Optional, List, Callable, Awaitable, Union
 
-from tools.base import BaseTool
+from core.tool.base import BaseTool, ToolContext
 from models.hitl import ConfirmationType
 from services.confirmation_service import get_confirmation_manager
 
@@ -62,172 +62,30 @@ class QuestionType:
 
 class HITLTool(BaseTool):
     """
-    HITL (Human-in-the-Loop) 工具
+    HITL (Human-in-the-Loop) 工具（input_schema 由 capabilities.yaml 定义）
     
-    只有两种输入类型：form（结构化表单）和 text_input（简单文本）。
-    
-    使用示例：
-    
-    1. 简单文本输入（text_input）
-    ```python
-    hitl(
-        title="请输入项目名称",
-        input_type="text_input",
-        description="用于生成报告的标题"
-    )
-    # 返回: {"response": "2024年Q1季度报告"}
-    ```
-    
-    2. 是/否确认（form + single_choice）
-    ```python
-    hitl(
-        title="操作确认",
-        input_type="form",
-        questions=[{
-            "id": "confirm",
-            "label": "是否删除文件 data.csv？",
-            "type": "single_choice",
-            "options": ["确认", "取消"]
-        }]
-    )
-    # 返回: {"response": {"confirm": "确认"}}
-    ```
-    
-    3. 单选题（form + single_choice）
-    ```python
-    hitl(
-        title="选择 PPT 风格",
-        input_type="form",
-        questions=[{
-            "id": "style",
-            "label": "请选择风格",
-            "type": "single_choice",
-            "options": ["商务专业", "科技未来感", "简约清新"],
-            "default": "商务专业"
-        }]
-    )
-    # 返回: {"response": {"style": "商务专业"}}
-    ```
-    
-    4. 多问题表单（form）
-    ```python
-    hitl(
-        title="收集用户偏好",
-        input_type="form",
-        description="请选择您的偏好以生成更符合需求的内容",
-        questions=[
-            {
-                "id": "target_audience",
-                "label": "目标受众",
-                "type": "single_choice",
-                "options": ["公司管理层", "技术团队", "行业公众"],
-                "default": "公司管理层"
-            },
-            {
-                "id": "content_focus",
-                "label": "内容重点（可多选）",
-                "type": "multiple_choice",
-                "options": ["政策法规", "产业动态", "技术突破"],
-                "default": ["政策法规"]
-            },
-            {
-                "id": "additional_notes",
-                "label": "补充说明",
-                "type": "text_input",
-                "hint": "可选，填写其他需求",
-                "required": False
-            }
-        ]
-    )
-    # 返回: {"response": {"target_audience": "公司管理层", "content_focus": ["政策法规"], "additional_notes": ""}}
-    ```
+    支持两种输入类型：form（结构化表单）和 text_input（简单文本）。
     """
     
-    @property
-    def name(self) -> str:
-        return "hitl"
-    
-    @property
-    def description(self) -> str:
-        return """HITL (Human-in-the-Loop) 工具，请求用户输入或收集用户偏好。
-
-支持的输入类型：
-- form: 结构化表单（支持单选/多选/文本问题组合，可用于确认、选择、多问题表单等场景）
-- text_input: 简单文本输入（用户输入自定义内容）
-
-调用此工具后会暂停执行，等待用户在前端界面响应后继续。"""
-    
-    @property
-    def parameters(self) -> Dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "title": {
-                    "type": "string",
-                    "description": "表单标题或提示信息"
-                },
-                "input_type": {
-                    "type": "string",
-                    "enum": ["form", "text_input"],
-                    "description": "输入类型：form（结构化表单）、text_input（简单文本输入）",
-                    "default": "form"
-                },
-                "questions": {
-                    "type": "array",
-                    "description": "问题列表，用于 form 类型。每个问题包含 id、label、type、options 等字段",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "id": {"type": "string", "description": "问题ID，作为返回结果的 key"},
-                            "label": {"type": "string", "description": "问题标签，显示给用户"},
-                            "type": {
-                                "type": "string", 
-                                "enum": ["single_choice", "multiple_choice", "text_input"],
-                                "description": "问题类型：single_choice（单选，包括是/否确认）、multiple_choice（多选）、text_input（文本）"
-                            },
-                            "options": {"type": "array", "items": {"type": "string"}, "description": "选项列表，用于 single_choice 和 multiple_choice"},
-                            "default": {"description": "默认值"},
-                            "hint": {"type": "string", "description": "提示文字"},
-                            "required": {"type": "boolean", "description": "是否必填", "default": True}
-                        },
-                        "required": ["id", "label", "type"]
-                    }
-                },
-                "description": {
-                    "type": "string",
-                    "description": "表单描述或补充说明"
-                },
-                "timeout": {
-                    "type": "integer",
-                    "description": "超时时间（秒）。默认 120 秒",
-                    "default": 120
-                }
-            },
-            "required": ["title"]
-        }
+    name = "hitl"
     
     async def execute(
         self,
-        title: str,
-        input_type: str = "form",
-        questions: Optional[List[Dict[str, Any]]] = None,
-        description: str = "",
-        timeout: Optional[int] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        session_id: str = "",
-        **kwargs
+        params: Dict[str, Any],
+        context: ToolContext
     ) -> Dict[str, Any]:
         """
         执行用户输入请求
         
         Args:
-            title: 表单标题或提示信息
-            input_type: 输入类型（form 或 text_input）
-            questions: 问题列表（form 类型）
-            description: 表单描述
-            timeout: 超时时间（秒）
-            metadata: 额外元数据
-            session_id: 会话ID
+            params: 工具输入参数
+                - title: 表单标题或提示信息
+                - input_type: 输入类型（form 或 text_input）
+                - questions: 问题列表（form 类型）
+                - description: 表单描述
+                - timeout: 超时时间（秒）
+                - metadata: 额外元数据
+            context: 工具执行上下文
             
         Returns:
             {
@@ -236,6 +94,20 @@ class HITLTool(BaseTool):
                 "timed_out": False
             }
         """
+        # 从 params 提取参数
+        title = params.get("title", "")
+        if not title:
+            return {"success": False, "error": "缺少必需参数: title"}
+        
+        input_type = params.get("input_type", "form")
+        questions = params.get("questions")
+        description = params.get("description", "")
+        timeout = params.get("timeout")
+        metadata = params.get("metadata")
+        
+        # 从 context 获取 session_id
+        session_id = context.session_id or ""
+        
         # 解析输入类型
         conf_type = self._parse_input_type(input_type)
         

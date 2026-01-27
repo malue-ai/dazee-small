@@ -69,8 +69,11 @@ class FileProcessor:
         "application/json", "application/xml"
     }
     
-    # 最大文本大小（1MB）
-    MAX_TEXT_SIZE = 1 * 1024 * 1024
+    # 最大文本大小（50KB）
+    MAX_TEXT_SIZE = 50 * 1024
+    
+    # 预览文本最大字符数
+    MAX_PREVIEW_CHARS = 200
     
     async def process_files(
         self,
@@ -175,7 +178,18 @@ class FileProcessor:
             else:
                 try:
                     content = await self._download_from_url(url)
-                    text_content = content.decode("utf-8", errors="replace")
+                    # 尝试多种编码格式
+                    try:
+                        # 优先尝试 utf-8-sig (可以处理带 BOM 的 utf-8)
+                        text_content = content.decode("utf-8-sig")
+                    except UnicodeDecodeError:
+                        try:
+                            # 尝试中文编码
+                            text_content = content.decode("gb18030")
+                        except UnicodeDecodeError:
+                            # 最后回退到 utf-8 replace
+                            text_content = content.decode("utf-8", errors="replace")
+
                     return ProcessedFile(
                         category=category,
                         filename=filename,
@@ -332,7 +346,11 @@ class FileProcessor:
                     meta_line = " | ".join(meta_parts)
                     
                     # 构建附件文本
-                    attachment_text = f"📄 {meta_line}:\n```\n{pf.text_content}\n```"
+                    content_preview = pf.text_content
+                    if len(content_preview) > self.MAX_PREVIEW_CHARS:
+                        content_preview = content_preview[:self.MAX_PREVIEW_CHARS] + "\n... (内容过长已截断)"
+
+                    attachment_text = f"📄 {meta_line}:\n```\n{content_preview}\n```"
                     
                     # 保留原始 URL（如果有）
                     if pf.file_url:

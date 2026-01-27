@@ -4,128 +4,44 @@ send_files 工具 - 发送文件信息到前端
 用于在 Agent 回复中包含文件时，通过 SSE 事件返回结构化的文件数据。
 前端会根据 files 类型的 delta 事件渲染文件列表，支持预览和下载。
 
-使用场景：
-- 工具调用返回了文件 URL（如 PPT、文档、图片等）
-- 需要在回复中向用户展示可下载的文件
-- 沙盒文件上传后返回的 URL
-
-注意：
-- 文件 URL 必须是可访问的链接
-- 沙盒文件请先使用 sandbox_upload_file 工具上传到 S3 获取 URL
+配置说明：
+- input_schema 在 config/capabilities.yaml 中定义
+- 运营可直接修改 YAML 调整参数，无需改代码
 """
 
 from pathlib import Path
 from typing import Dict, Any, List
 
+from core.tool.base import BaseTool, ToolContext
 from logger import get_logger
 
 logger = get_logger(__name__)
 
 
-class SendFilesTool:
+class SendFilesTool(BaseTool):
     """
-    发送文件信息工具
+    发送文件信息工具（input_schema 由 capabilities.yaml 定义）
     
     将文件信息结构化后发送给前端，前端会渲染为可下载的文件列表。
-    
-    FilesData 格式：
-    {
-        "files": [
-            {
-                "name": "报告.pptx",
-                "type": "pptx",
-                "url": "https://...",
-                "size": 1024000,        # 可选
-                "thumbnail": "https://...",  # 可选
-                "description": "AI技术分享"  # 可选
-            }
-        ]
-    }
     """
     
-    @property
-    def name(self) -> str:
-        return "send_files"
+    name = "send_files"
     
-    @property
-    def description(self) -> str:
-        return """发送文件信息到前端，用于展示可下载的文件列表。
-
-使用场景：
-- 当工具调用返回了文件 URL（如 PPT、Word、Excel、图片等）
-- 当 sandbox_upload_file 工具上传文件后返回了 URL
-- 需要在回复中向用户展示可下载/可预览的文件
-
-示例：
-{
-    "files": [
-        {
-            "name": "AI技术分享.pptx",
-            "type": "pptx",
-            "url": "https://example.com/files/ai_tech.pptx",
-            "description": "AI 技术分享演示文稿"
-        }
-    ]
-}
-
-注意：
-- url 必须是真实可访问的链接
-- 沙盒中的文件请先使用 sandbox_upload_file 工具上传到 S3
-- type 可选，会根据文件名自动推断"""
-    
-    @property
-    def parameters(self) -> Dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "files": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "name": {
-                                "type": "string",
-                                "description": "文件名（包含扩展名）"
-                            },
-                            "type": {
-                                "type": "string",
-                                "description": "文件类型/扩展名（如 pptx, docx, xlsx, pdf, png）"
-                            },
-                            "url": {
-                                "type": "string",
-                                "description": "文件下载链接（必填）"
-                            },
-                            "size": {
-                                "type": "integer",
-                                "description": "文件大小（字节，可选）"
-                            },
-                            "thumbnail": {
-                                "type": "string",
-                                "description": "文件预览缩略图URL（可选）"
-                            },
-                            "description": {
-                                "type": "string",
-                                "description": "文件描述（可选）"
-                            }
-                        },
-                        "required": ["name", "url"]
-                    },
-                    "description": "文件列表"
-                }
-            },
-            "required": ["files"]
-        }
-    
-    async def execute(self, files: List[Dict[str, Any]]) -> Dict[str, Any]:
+    async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
         """
         执行工具 - 返回文件信息
         
         Args:
-            files: 文件列表，每个文件必须包含 name 和 url
+            params: 工具输入参数
+                - files: 文件列表，每个文件必须包含 name 和 url
+            context: 工具执行上下文
             
         Returns:
             包含文件信息的结果
         """
+        # 从 params 提取参数
+        files = params.get("files", [])
+        
         if not files:
             return {
                 "success": False,

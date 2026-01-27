@@ -97,10 +97,14 @@ class SessionServicer(_SessionServicerBase):
             )
         
         except SessionNotFoundError as e:
-            logger.warning(f"⚠️ Session 不存在: {str(e)}")
-            context.set_code(grpc.StatusCode.NOT_FOUND)
-            context.set_details("Session 不存在或已过期")
-            return tool_service_pb2.SessionStatusResponse()
+            # Session 不存在是正常业务场景，记录为 info 级别
+            logger.info(f"📋 Session 不存在: {str(e)}")
+            # 返回空响应即可，不设置错误状态码（避免触发上层报警）
+            # 客户端可以根据空响应判断 session 不存在
+            return tool_service_pb2.SessionStatusResponse(
+                session_id="",
+                status="not_found"
+            )
         
         except Exception as e:
             logger.error(f"❌ gRPC 查询 Session 状态错误: {str(e)}", exc_info=True)
@@ -151,10 +155,15 @@ class SessionServicer(_SessionServicerBase):
             )
         
         except SessionNotFoundError as e:
-            logger.warning(f"⚠️ Session 不存在: {str(e)}")
-            context.set_code(grpc.StatusCode.NOT_FOUND)
-            context.set_details("Session 不存在或已过期")
-            return tool_service_pb2.SessionEventsResponse()
+            # Session 不存在是正常业务场景，记录为 info 级别
+            logger.info(f"📋 Session 不存在: {str(e)}")
+            # 返回空响应即可，不设置错误状态码（避免触发上层报警）
+            return tool_service_pb2.SessionEventsResponse(
+                session_id=request.session_id,
+                events=[],
+                total=0,
+                has_more=False
+            )
         
         except Exception as e:
             logger.error(f"❌ gRPC 获取 Session 事件错误: {str(e)}", exc_info=True)
@@ -216,10 +225,13 @@ class SessionServicer(_SessionServicerBase):
             )
         
         except SessionNotFoundError as e:
-            logger.warning(f"⚠️ Session 不存在: {str(e)}")
-            context.set_code(grpc.StatusCode.NOT_FOUND)
-            context.set_details("Session 不存在或已过期")
-            return tool_service_pb2.StopSessionResponse()
+            # Session 不存在是正常业务场景，记录为 info 级别
+            logger.info(f"📋 Session 不存在: {str(e)}")
+            # 返回空响应即可，不设置错误状态码（避免触发上层报警）
+            return tool_service_pb2.StopSessionResponse(
+                session_id=request.session_id,
+                status="not_found"
+            )
         
         except Exception as e:
             logger.error(f"❌ gRPC 停止 Session 错误: {str(e)}", exc_info=True)
@@ -244,10 +256,13 @@ class SessionServicer(_SessionServicerBase):
             )
         
         except SessionNotFoundError as e:
-            logger.warning(f"⚠️ Session 不存在: {str(e)}")
-            context.set_code(grpc.StatusCode.NOT_FOUND)
-            context.set_details("Session 不存在或已过期")
-            return tool_service_pb2.EndSessionResponse()
+            # Session 不存在是正常业务场景，记录为 info 级别
+            logger.info(f"📋 Session 不存在: {str(e)}")
+            # 返回空响应即可，不设置错误状态码（避免触发上层报警）
+            return tool_service_pb2.EndSessionResponse(
+                session_id=request.session_id,
+                summary=json.dumps({"status": "not_found", "message": "Session 不存在或已过期"}, ensure_ascii=False)
+            )
         
         except Exception as e:
             logger.error(f"❌ gRPC 结束 Session 错误: {str(e)}", exc_info=True)

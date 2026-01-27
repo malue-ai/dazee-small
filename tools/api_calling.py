@@ -6,10 +6,9 @@ API Calling Tool - 通用 API 调用工具
 - SSE 流式响应（mode="stream"）
 - 异步任务轮询（mode="async_poll"）
 
-调用方式:
-1. 简化调用（推荐）：api_name + parameters
-   - AI 只需传 api_name 和动态参数
-   - 其他配置从 config.yaml 自动注入
+配置说明：
+- input_schema 在 config/capabilities.yaml 中定义
+- 运营可直接修改 YAML 调整参数，无需改代码
 """
 
 import os
@@ -20,6 +19,7 @@ import asyncio
 import json
 from typing import Dict, Any, Optional, List, AsyncGenerator
 
+from core.tool.base import BaseTool, ToolContext
 from logger import get_logger
 
 logger = get_logger("api_calling")
@@ -36,17 +36,17 @@ AI_PLACEHOLDER = re.compile(r'\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}')
 PLACEHOLDER_PATTERN = INJECT_PLACEHOLDER
 
 
-class APICallingTool:
+class APICallingTool(BaseTool):
     """
-    通用 API 调用工具
+    通用 API 调用工具（input_schema 由 capabilities.yaml 定义）
     
     支持：
     - RESTful API（同步模式）
     - SSE 流式响应（mode="stream"）
     - 异步轮询（mode="async_poll"）
-    - 认证自动注入（通过 api_name 匹配预配置）
-    - 占位符自动替换（${xxx} 格式）
     """
+    
+    name = "api_calling"
     
     def __init__(self, apis_config: Optional[List[Dict[str, Any]]] = None):
         """初始化 API 调用工具"""
@@ -60,55 +60,8 @@ class APICallingTool:
             logger.info(f"✅ api_calling 初始化，已加载 {len(self.apis_config)} 个 API: {list(self.apis_config.keys())}")
     
     # ============================================================
-    # 属性定义
+    # 辅助方法
     # ============================================================
-    
-    @property
-    def name(self) -> str:
-        return "api_calling"
-    
-    @property
-    def description(self) -> str:
-        if not self.apis_config:
-            return "通用 API 调用工具（暂无可用 API）"
-        
-        # 动态生成每个 API 的参数说明
-        api_docs = []
-        for name, config in self.apis_config.items():
-            desc = config.get("description", "")
-            
-            # 从 request_body 中提取 {{xxx}} AI 参数
-            request_body = config.get("request_body", {})
-            ai_params = self._extract_ai_params(request_body)
-            
-            if ai_params:
-                params_str = ", ".join(ai_params)
-                api_docs.append(f"  - {name}: {desc}\n    参数: {{{params_str}}}")
-            else:
-                api_docs.append(f"  - {name}: {desc}")
-        
-        apis_section = "\n".join(api_docs)
-        
-        return f"""通用 API 调用工具。
-
-可用 API:
-{apis_section}
-
-⚠️ 必须使用以下调用格式（不要使用 body 参数！）:
-{{
-  "api_name": "API名称",
-  "parameters": {{...AI需要填写的参数...}}
-}}
-
-示例:
-- wenshu_api: {{"api_name": "wenshu_api", "parameters": {{"question": "xxx", "files": [...]}}}}
-- coze_api: {{"api_name": "coze_api", "parameters": {{"chart_url": "xxx", "query": "xxx", "language": "中文"}}}}
-
-重要提示:
-- 必须使用 parameters 字段（不是 body）
-- workflow_id、user_id 等系统字段由框架自动注入，AI 无需填写
-- 只需填写 api_name 和 parameters 两个字段
-"""
     
     def _extract_ai_params(self, data: Any, prefix: str = "") -> list[str]:
         """从 request_body 中提取 {{xxx}} AI 参数名"""
@@ -127,51 +80,47 @@ class APICallingTool:
         
         return params
     
-    @property
-    def parameters(self) -> Dict[str, Any]:
-        """暴露给 AI 的参数定义（极简版）"""
-        available_apis = list(self.apis_config.keys()) if self.apis_config else []
-        
-        return {
-            "type": "object",
-            "properties": {
-                "api_name": {
-                    "type": "string",
-                    "enum": available_apis if available_apis else None,
-                    "description": f"选择要调用的 API。可用: {', '.join(available_apis) if available_apis else '无'}"
-                },
-                "parameters": {
-                    "type": "object",
-                    "description": "API 所需的动态参数（参考 API 文档）"
-                }
-            },
-            "required": ["api_name", "parameters"]
-        }
-    
     # ============================================================
     # 核心执行方法
     # ============================================================
     
     async def execute(
         self,
-        # 简化调用方式（推荐）
-        api_name: Optional[str] = None,
-        parameters: Optional[Dict[str, Any]] = None,
-        # 内部使用 / 直接 URL 调用
-        url: Optional[str] = None,
-        method: Optional[str] = None,
-        headers: Optional[Dict[str, str]] = None,
-        body: Optional[Dict[str, Any]] = None,
-        mode: Optional[str] = None,
-        poll_config: Optional[Dict[str, Any]] = None,
-        **kwargs  # 框架注入的上下文
+        params: Dict[str, Any],
+        context: ToolContext
     ) -> Dict[str, Any]:
         """
         执行 API 调用
         
-        简化调用方式（推荐）：
-            api_name + parameters
+        Args:
+            params: 工具输入参数
+                - api_name: API 名称（简化调用）
+                - parameters: API 动态参数（简化调用）
+                - url: 直接 URL 调用
+                - method: HTTP 方法
+                - headers: 请求头
+                - body: 请求体
+                - mode: 调用模式
+                - poll_config: 轮询配置
+            context: 工具执行上下文
         """
+        # 从 params 提取参数
+        api_name = params.get("api_name")
+        parameters = params.get("parameters")
+        url = params.get("url")
+        method = params.get("method")
+        headers = params.get("headers")
+        body = params.get("body")
+        mode = params.get("mode")
+        poll_config = params.get("poll_config")
+        
+        # 构建框架注入的上下文（用于占位符替换）
+        kwargs = {
+            "user_id": context.user_id,
+            "conversation_id": context.conversation_id,
+            "session_id": context.session_id
+        }
+        
         try:
             # ===== 简化调用方式：api_name + parameters（推荐） =====
             if api_name and parameters is not None and body is None:

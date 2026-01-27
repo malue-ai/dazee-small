@@ -1262,14 +1262,15 @@ class MultiAgentOrchestrator:
             )
             logger.info("✅ 工具加载器已初始化")
         
-        # 🆕 V7.3: 初始化工具执行器（用于 Subagent RVR 循环）
+        # 初始化工具执行器（用于 Subagent RVR 循环）
         if self.tool_executor is None:
             from core.tool.executor import ToolExecutor
+            from core.tool.base import create_tool_context
             from core.tool.capability.registry import CapabilityRegistry
             
             self.tool_executor = ToolExecutor(
                 registry=CapabilityRegistry(),
-                tool_context={},
+                tool_context=create_tool_context(),
                 enable_compaction=True
             )
             logger.info("✅ 工具执行器已初始化")

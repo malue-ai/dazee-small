@@ -28,7 +28,7 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 
 from logger import get_logger
-from tools.base import BaseTool
+from core.tool.base import BaseTool, ToolContext
 from services.sandbox_service import (
     get_sandbox_service,
     SandboxServiceError,
@@ -168,35 +168,19 @@ async def ensure_sandbox(conversation_id: str, user_id: str = "default_user") ->
 # ==================== 工具 1: 写文件 ====================
 
 class SandboxWriteFile(BaseTool):
-    """写文件到沙盒"""
+    """写文件到沙盒（input_schema 由 capabilities.yaml 定义）"""
     
-    @property
-    def name(self) -> str:
-        return "sandbox_write_file"
+    name = "sandbox_write_file"
     
-    @property
-    def description(self) -> str:
-        return (
-            "在沙盒中写入文件。目录不存在会自动创建。\n"
-            "默认项目目录: /home/user/project\n"
-            "路径示例：src/index.js → /home/user/project/src/index.js"
-        )
-    
-    @property
-    def parameters(self) -> Dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "conversation_id": {"type": "string", "description": "对话 ID"},
-                "path": {"type": "string", "description": "文件路径（相对路径自动基于 /home/user/project）"},
-                "content": {"type": "string", "description": "文件内容"}
-            },
-            "required": ["path", "content"]
-        }
-    
-    async def execute(self, conversation_id: str, path: str, content: str, **kwargs) -> Dict[str, Any]:
+    async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
+        """执行写文件操作"""
+        conversation_id = context.conversation_id
+        path = params.get("path", "")
+        content = params.get("content", "")
+        user_id = context.user_id or "default_user"
+        
         try:
-            await ensure_sandbox(conversation_id, kwargs.get("user_id", "default_user"))
+            await ensure_sandbox(conversation_id, user_id)
             service = get_sandbox_service()
             
             normalized_path = _normalize_path(path)
@@ -214,34 +198,18 @@ class SandboxWriteFile(BaseTool):
 # ==================== 工具 2: 读取文件 ====================
 
 class SandboxReadFile(BaseTool):
-    """从沙盒读取文件"""
+    """从沙盒读取文件（input_schema 由 capabilities.yaml 定义）"""
     
-    @property
-    def name(self) -> str:
-        return "sandbox_read_file"
+    name = "sandbox_read_file"
     
-    @property
-    def description(self) -> str:
-        return (
-            "读取沙盒中的文件内容。\n"
-            "默认项目目录: /home/user/project\n"
-            "路径示例：src/index.js → /home/user/project/src/index.js"
-        )
-    
-    @property
-    def parameters(self) -> Dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "conversation_id": {"type": "string", "description": "对话 ID"},
-                "path": {"type": "string", "description": "文件路径（相对路径自动基于 /home/user/project）"}
-            },
-            "required": ["path"]
-        }
-    
-    async def execute(self, conversation_id: str, path: str, **kwargs) -> Dict[str, Any]:
+    async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
+        """执行读文件操作"""
+        conversation_id = context.conversation_id
+        path = params.get("path", "")
+        user_id = context.user_id or "default_user"
+        
         try:
-            await ensure_sandbox(conversation_id, kwargs.get("user_id", "default_user"))
+            await ensure_sandbox(conversation_id, user_id)
             
             provider = get_sandbox_provider()
             normalized_path = _normalize_path(path)
@@ -261,38 +229,18 @@ class SandboxReadFile(BaseTool):
 # ==================== 工具 3: 列出目录 ====================
 
 class SandboxListFiles(BaseTool):
-    """列出沙盒中的目录内容"""
+    """列出沙盒中的目录内容（input_schema 由 capabilities.yaml 定义）"""
     
-    @property
-    def name(self) -> str:
-        return "sandbox_list_files"
+    name = "sandbox_list_files"
     
-    @property
-    def description(self) -> str:
-        return (
-            "列出沙盒中指定目录的文件和子目录。\n"
-            "默认目录: /home/user/project"
-        )
-    
-    @property
-    def parameters(self) -> Dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "conversation_id": {"type": "string", "description": "对话 ID（系统自动注入，无需手动传递）"},
-                "path": {"type": "string", "description": "目录路径（默认 /home/user/project）"}
-            },
-            "required": []
-        }
-    
-    async def execute(
-        self,
-        conversation_id: str,
-        path: Optional[str] = None,
-        **kwargs
-    ) -> Dict[str, Any]:
+    async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
+        """执行列出目录操作"""
+        conversation_id = context.conversation_id
+        path = params.get("path")
+        user_id = context.user_id or "default_user"
+        
         try:
-            await ensure_sandbox(conversation_id, kwargs.get("user_id", "default_user"))
+            await ensure_sandbox(conversation_id, user_id)
             
             provider = get_sandbox_provider()
             normalized_path = _normalize_path(path) if path else SANDBOX_PROJECT_ROOT
@@ -320,55 +268,22 @@ class SandboxListFiles(BaseTool):
 # ==================== 工具 4: 执行命令 ====================
 
 class SandboxRunCommand(BaseTool):
-    """在沙盒中执行命令"""
+    """在沙盒中执行命令（input_schema 由 capabilities.yaml 定义）"""
     
-    @property
-    def name(self) -> str:
-        return "sandbox_run_command"
+    name = "sandbox_run_command"
     
-    @property
-    def description(self) -> str:
-        return (
-            "在沙盒中执行终端命令。\n\n"
-            "用途：\n"
-            "- 安装依赖：npm install, pip install\n"
-            "- 启动服务器：npm start, python app.py（使用 background=true + port）\n"
-            "- 文件操作：cat, ls, rm, mkdir\n"
-            "- 下载文件：curl -o /path/to/file URL 或 wget -O /path/to/file URL\n\n"
-            "默认工作目录: /home/user/project\n\n"
-            "⚠️ 启动服务器时：\n"
-            "- 设置 background=true 让服务在后台运行\n"
-            "- 设置 port 参数，会自动返回公开访问 URL\n"
-            "- 服务必须监听 0.0.0.0 才能从外部访问"
-        )
-    
-    @property
-    def parameters(self) -> Dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "conversation_id": {"type": "string", "description": "对话 ID"},
-                "command": {"type": "string", "description": "要执行的命令"},
-                "background": {"type": "boolean", "description": "是否在后台运行（用于启动服务器）", "default": False},
-                "port": {"type": "integer", "description": "服务端口（background=true 时指定，会自动返回公开 URL）"},
-                "cwd": {"type": "string", "description": "工作目录（默认 /home/user/project）"},
-                "timeout": {"type": "integer", "description": "超时秒数（默认 120，background 模式忽略）", "default": 120}
-            },
-            "required": ["command"]
-        }
-    
-    async def execute(
-        self,
-        conversation_id: str,
-        command: str,
-        background: bool = False,
-        port: Optional[int] = None,
-        cwd: Optional[str] = None,
-        timeout: int = 120,
-        **kwargs
-    ) -> Dict[str, Any]:
+    async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
+        """执行命令"""
+        conversation_id = context.conversation_id
+        command = params.get("command", "")
+        background = params.get("background", False)
+        port = params.get("port")
+        cwd = params.get("cwd")
+        timeout = params.get("timeout", 120)
+        user_id = context.user_id or "default_user"
+        
         try:
-            await ensure_sandbox(conversation_id, kwargs.get("user_id", "default_user"))
+            await ensure_sandbox(conversation_id, user_id)
             
             provider = get_sandbox_provider()
             sandbox = await provider._get_sandbox_obj(conversation_id)
@@ -463,47 +378,19 @@ class SandboxRunCommand(BaseTool):
 # ==================== 工具 5: 执行 Python 代码 ====================
 
 class SandboxExecutePython(BaseTool):
-    """在沙盒中执行 Python 代码（Code Interpreter）"""
+    """在沙盒中执行 Python 代码（input_schema 由 capabilities.yaml 定义）"""
     
-    @property
-    def name(self) -> str:
-        return "sandbox_execute_python"
+    name = "sandbox_execute_python"
     
-    @property
-    def description(self) -> str:
-        return (
-            "执行 Python 代码并返回结果（基于 Jupyter 内核）。\n\n"
-            "特性：\n"
-            "- 上下文共享：多次执行间变量、导入、函数定义会保留\n"
-            "- 图表支持：matplotlib 等图表会自动捕获并返回\n"
-            "- 预装包：pandas、numpy、matplotlib 等无需手动安装\n\n"
-            "适用场景：\n"
-            "- 数据分析和可视化\n"
-            "- 快速计算和验证\n"
-            "- 生成图表"
-        )
-    
-    @property
-    def parameters(self) -> Dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "conversation_id": {"type": "string", "description": "对话 ID"},
-                "code": {"type": "string", "description": "要执行的 Python 代码"},
-                "timeout": {"type": "integer", "description": "超时秒数（默认 300）", "default": 300}
-            },
-            "required": ["code"]
-        }
-    
-    async def execute(
-        self,
-        conversation_id: str,
-        code: str,
-        timeout: int = 300,
-        **kwargs
-    ) -> Dict[str, Any]:
+    async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
+        """执行 Python 代码"""
+        conversation_id = context.conversation_id
+        code = params.get("code", "")
+        timeout = params.get("timeout", 300)
+        user_id = context.user_id or "default_user"
+        
         try:
-            await ensure_sandbox(conversation_id, kwargs.get("user_id", "default_user"))
+            await ensure_sandbox(conversation_id, user_id)
             
             provider = get_sandbox_provider()
             result = await provider.run_code(conversation_id, code, timeout=timeout)
@@ -525,39 +412,18 @@ class SandboxExecutePython(BaseTool):
 # ==================== 工具 6: 获取公开 URL ====================
 
 class SandboxGetPublicUrl(BaseTool):
-    """获取沙盒服务的公开 URL"""
+    """获取沙盒服务的公开 URL（input_schema 由 capabilities.yaml 定义）"""
     
-    @property
-    def name(self) -> str:
-        return "sandbox_get_public_url"
+    name = "sandbox_get_public_url"
     
-    @property
-    def description(self) -> str:
-        return (
-            "获取沙盒中运行服务的公开 URL。\n"
-            "在使用 sandbox_run_command(background=true) 启动服务后调用此工具获取访问链接。\n"
-            "默认端口: 3000"
-        )
-    
-    @property
-    def parameters(self) -> Dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "conversation_id": {"type": "string", "description": "对话 ID（系统自动注入，无需手动传递）"},
-                "port": {"type": "integer", "description": "服务端口", "default": 3000}
-            },
-            "required": []
-        }
-    
-    async def execute(
-        self,
-        conversation_id: str,
-        port: int = 3000,
-        **kwargs
-    ) -> Dict[str, Any]:
+    async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
+        """获取公开 URL"""
+        conversation_id = context.conversation_id
+        port = params.get("port", 3000)
+        user_id = context.user_id or "default_user"
+        
         try:
-            await ensure_sandbox(conversation_id, kwargs.get("user_id", "default_user"))
+            await ensure_sandbox(conversation_id, user_id)
             
             provider = get_sandbox_provider()
             sandbox = await provider._get_sandbox_obj(conversation_id)
@@ -630,21 +496,15 @@ class SandboxGetPublicUrl(BaseTool):
 
 class SandboxUploadFile(BaseTool):
     """
-    将沙盒中的文件上传到 S3 并返回下载链接
-    
-    用于将沙盒中生成的文件（如 Excel、PDF、图片等）持久化存储，
-    让前端用户可以下载。
+    将沙盒中的文件上传到 S3 并返回下载链接（input_schema 由 capabilities.yaml 定义）
     
     工作流程：
     1. 从沙盒读取文件（使用 format="bytes" 支持二进制文件）
     2. 上传到 S3
     3. 返回预签名 URL（24小时有效）
-    
-    典型使用场景：
-    1. sandbox_execute_python 生成 Excel 文件
-    2. sandbox_upload_file 上传到 S3
-    3. send_files 发送下载链接给前端
     """
+    
+    name = "sandbox_upload_file"
     
     # 文件类型到 Content-Type 的映射
     CONTENT_TYPES = {
@@ -673,59 +533,15 @@ class SandboxUploadFile(BaseTool):
         '.html': 'text/html',
     }
     
-    @property
-    def name(self) -> str:
-        return "sandbox_upload_file"
-    
-    @property
-    def description(self) -> str:
-        return (
-            "将沙盒中的文件上传到 S3 并返回下载链接。\n\n"
-            "用途：\n"
-            "- 将沙盒中生成的文件（Excel、PDF、图片等）持久化存储\n"
-            "- 让前端用户可以下载沙盒中生成的文件\n\n"
-            "典型工作流：\n"
-            "1. sandbox_execute_python 生成文件\n"
-            "2. sandbox_upload_file 上传到 S3 获取 URL\n"
-            "3. send_files 发送下载链接给前端\n\n"
-            "返回值包含 url（预签名下载链接，24小时有效）"
-        )
-    
-    @property
-    def parameters(self) -> Dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "conversation_id": {
-                    "type": "string",
-                    "description": "对话 ID（系统自动注入，无需手动传递）"
-                },
-                "path": {
-                    "type": "string",
-                    "description": "沙盒中的文件路径（相对路径自动基于 /home/user/project）"
-                },
-                "filename": {
-                    "type": "string",
-                    "description": "下载时显示的文件名（可选，默认使用原文件名）"
-                }
-            },
-            "required": ["path"]
-        }
-    
-    async def execute(
-        self,
-        conversation_id: str,
-        path: str,
-        filename: Optional[str] = None,
-        **kwargs
-    ) -> Dict[str, Any]:
+    async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
         """
         执行文件上传
         
         Args:
-            conversation_id: 对话 ID
-            path: 沙盒中的文件路径
-            filename: 下载时显示的文件名（可选）
+            params: 工具参数
+                - path: 沙盒中的文件路径
+                - filename: 下载时显示的文件名（可选）
+            context: 工具执行上下文
             
         Returns:
             {
@@ -739,8 +555,13 @@ class SandboxUploadFile(BaseTool):
         import hashlib
         from pathlib import Path
         
+        conversation_id = context.conversation_id
+        path = params.get("path", "")
+        filename = params.get("filename")
+        user_id = context.user_id or "default_user"
+        
         try:
-            await ensure_sandbox(conversation_id, kwargs.get("user_id", "default_user"))
+            await ensure_sandbox(conversation_id, user_id)
             
             # 标准化路径
             normalized_path = _normalize_path(path)

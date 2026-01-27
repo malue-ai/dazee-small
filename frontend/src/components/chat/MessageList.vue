@@ -75,21 +75,23 @@
                 v-if="message.contentBlocks && message.contentBlocks.length > 0"
                 :content="message.contentBlocks"
                 :tool-statuses="message.toolStatuses || {}"
+                :is-streaming="isMessageStreaming(message)"
                 @mermaid-detected="(charts: string[]) => emit('mermaid-detected', charts)"
               />
               <!-- 无内容块时 -->
               <template v-else>
                 <!-- 有思考内容 -->
-                <div v-if="message.thinking" class="thinking-inline">
+                <div v-if="message.thinking" class="thinking-inline" :class="{ 'is-streaming': isMessageStreaming(message) }">
                   <div class="thinking-inline-header" @click="toggleThinking(String(message.id))">
                     <div class="thinking-inline-left">
-                      <span class="thinking-inline-dot"></span>
-                      <span>思考过程</span>
+                      <span class="thinking-inline-dot" :class="{ 'is-active': isMessageStreaming(message) }"></span>
+                      <span>{{ isMessageStreaming(message) ? '正在思考...' : '思考过程' }}</span>
                     </div>
-                    <span class="thinking-inline-toggle">{{ expandedThinking[message.id] ? '收起' : '展开' }}</span>
+                    <span class="thinking-inline-toggle">{{ isThinkingExpandedInline(message) ? '收起' : '展开' }}</span>
                   </div>
-                  <div v-show="expandedThinking[message.id]" class="thinking-inline-body">
-                    {{ message.thinking }}
+                  <div v-show="isThinkingExpandedInline(message)" class="thinking-inline-body">
+                    <span>{{ message.thinking }}</span>
+                    <span v-if="isMessageStreaming(message)" class="typing-cursor"></span>
                   </div>
                 </div>
                 <!-- 有文本内容 -->
@@ -169,9 +171,29 @@ const containerRef = ref<HTMLElement | null>(null)
 /** 思考过程展开状态 */
 const expandedThinking = ref<Record<string, boolean>>({})
 
-/** 切换思考过程 */
+/** 用户手动操作过的思考块 */
+const userToggledThinking = ref<Record<string, boolean>>({})
+
+/** 切换思考过程（用户手动操作） */
 function toggleThinking(id: string): void {
-  expandedThinking.value[id] = !expandedThinking.value[id]
+  userToggledThinking.value[id] = true
+  const currentState = isThinkingExpandedInline({ id } as UIMessage)
+  expandedThinking.value[id] = !currentState
+}
+
+/** 判断内联 thinking 是否展开（支持流式自动展开） */
+function isThinkingExpandedInline(message: UIMessage): boolean {
+  const id = String(message.id)
+  // 如果用户手动操作过，使用用户的选择
+  if (userToggledThinking.value[id] !== undefined) {
+    return expandedThinking.value[id] ?? false
+  }
+  // 流式输出时自动展开
+  if (isMessageStreaming(message)) {
+    return true
+  }
+  // 默认折叠
+  return expandedThinking.value[id] ?? false
 }
 
 /** 建议列表 */
@@ -210,6 +232,14 @@ function getFileTypeLabel(mimeType: string): string {
  */
 function isLastMessage(message: UIMessage): boolean {
   return props.messages[props.messages.length - 1]?.id === message.id
+}
+
+/**
+ * 判断消息是否正在流式输出
+ * 条件：是最后一条助手消息 + 正在生成中
+ */
+function isMessageStreaming(message: UIMessage): boolean {
+  return message.role === 'assistant' && isLastMessage(message) && (props.loading || props.generating)
 }
 
 /**
@@ -336,6 +366,24 @@ defineExpose({
   height: 6px;
   background: #9aa0a6;
   border-radius: 50%;
+  transition: all 0.3s ease;
+}
+
+/* 流式输出时的脉冲动画 */
+.thinking-inline-dot.is-active {
+  background: #4285f4;
+  animation: pulse 1.5s infinite ease-in-out;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.3);
+    opacity: 0.7;
+  }
 }
 
 .thinking-inline-toggle {
@@ -349,5 +397,30 @@ defineExpose({
   color: #5f6368;
   line-height: 1.6;
   white-space: pre-wrap;
+}
+
+/* 打字机光标效果 */
+.typing-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background-color: #4285f4;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  animation: blink-cursor 0.8s infinite;
+}
+
+@keyframes blink-cursor {
+  0%, 50% {
+    opacity: 1;
+  }
+  51%, 100% {
+    opacity: 0;
+  }
+}
+
+/* 流式输出时的卡片边框效果 */
+.thinking-inline.is-streaming {
+  border-left: 2px solid #4285f4;
 }
 </style>
