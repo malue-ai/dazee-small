@@ -31,7 +31,7 @@ from core.events import create_event_manager, get_memory_storage
 from core.prompt import load_instance_cache
 from core.tool import InstanceToolRegistry, get_capability_registry, create_tool_loader
 from prompts.universal_agent_prompt import get_universal_agent_prompt
-from scripts.instance_loader import (
+from utils.instance_loader import (
     list_instances,
     load_instance_config,
     load_instance_prompt,

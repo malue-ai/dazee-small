@@ -20,7 +20,7 @@ logger = get_logger("run_agent")
 
 async def run_agent(instance_name: str, query: str = None, force_refresh: bool = False):
     """运行 Agent"""
-    from scripts.instance_loader import create_agent_from_instance
+    from utils.instance_loader import create_agent_from_instance
     from infra.pools import get_mcp_pool
     
     print(f"\n🚀 启动实例: {instance_name}")

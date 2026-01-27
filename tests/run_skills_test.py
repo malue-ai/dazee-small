@@ -78,7 +78,7 @@ def cleanup_test_skill_directory(skill_dir: Path):
 
 def test_validation():
     """测试目录验证功能（参考官方最佳实践）"""
-    from scripts.instance_loader import validate_skill_directory
+    from utils.instance_loader import validate_skill_directory
     
     print("\n" + "=" * 60)
     print("测试 1: 目录验证功能 (Best Practices)")
@@ -213,7 +213,7 @@ description:
 def test_code_correctness():
     """验证代码与 API 文档一致性"""
     import inspect
-    from scripts.instance_loader import (
+    from utils.instance_loader import (
         get_anthropic_client,
         register_skill_to_claude,
         unregister_skill_from_claude,
@@ -288,7 +288,7 @@ def test_code_correctness():
 
 def test_local_functions():
     """测试本地功能（无需 API）"""
-    from scripts.instance_loader import (
+    from utils.instance_loader import (
         list_instances,
         get_skills_status,
         scan_skills_directory,

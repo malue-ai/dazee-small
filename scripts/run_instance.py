@@ -134,7 +134,7 @@ async def interactive_chat(agent, instance_name: str):
 async def main():
     """主函数"""
     import argparse
-    from scripts.instance_loader import (
+    from utils.instance_loader import (
         list_instances,
         print_available_instances,
         create_agent_from_instance,

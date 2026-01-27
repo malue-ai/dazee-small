@@ -1917,17 +1917,17 @@ if __name__ == "__main__":
         epilog="""
 示例:
   # 实例管理
-  python scripts/instance_loader.py --list                     # 列出所有实例
-  python scripts/instance_loader.py -i dazee_agent --info      # 显示实例详情
+  python utils/instance_loader.py --list                     # 列出所有实例
+  python utils/instance_loader.py -i dazee_agent --info      # 显示实例详情
   
   # Skills 管理
-  python scripts/instance_loader.py --skills-status            # 查看所有实例的 Skills 状态
-  python scripts/instance_loader.py -i dazee_agent --skills-status  # 查看指定实例
-  python scripts/instance_loader.py -i dazee_agent --register-skills  # 注册所有未注册 Skills
-  python scripts/instance_loader.py -i dazee_agent --register remotion  # 注册指定 Skill
-  python scripts/instance_loader.py -i dazee_agent --unregister remotion  # 注销指定 Skill
-  python scripts/instance_loader.py -i dazee_agent --update remotion  # 更新 Skill 版本
-  python scripts/instance_loader.py -i dazee_agent --register remotion --force  # 强制重新注册
+  python utils/instance_loader.py --skills-status            # 查看所有实例的 Skills 状态
+  python utils/instance_loader.py -i dazee_agent --skills-status  # 查看指定实例
+  python utils/instance_loader.py -i dazee_agent --register-skills  # 注册所有未注册 Skills
+  python utils/instance_loader.py -i dazee_agent --register remotion  # 注册指定 Skill
+  python utils/instance_loader.py -i dazee_agent --unregister remotion  # 注销指定 Skill
+  python utils/instance_loader.py -i dazee_agent --update remotion  # 更新 Skill 版本
+  python utils/instance_loader.py -i dazee_agent --register remotion --force  # 强制重新注册
         """
     )
     

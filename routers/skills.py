@@ -240,7 +240,7 @@ async def list_skills(
         skills.extend(agent_skills)
     elif not include_global:
         # 列出所有 Agent 的 Skills
-        from scripts.instance_loader import list_instances
+        from utils.instance_loader import list_instances
         for instance_name in list_instances():
             instance_skills_dir = _get_instance_skills_dir(instance_name)
             agent_skills = _scan_skills_in_dir(instance_skills_dir, instance_name)

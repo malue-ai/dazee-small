@@ -160,7 +160,7 @@ class TestSkillValidation:
     
     def test_validate_skill_directory_valid(self):
         """测试：有效的 Skill 目录应该通过验证"""
-        from scripts.instance_loader import validate_skill_directory
+        from utils.instance_loader import validate_skill_directory
         
         # 创建有效的测试目录
         skill_dir = create_test_skill_directory(
@@ -185,7 +185,7 @@ class TestSkillValidation:
     
     def test_validate_skill_directory_missing_skillmd(self):
         """测试：缺少 SKILL.md 应该验证失败"""
-        from scripts.instance_loader import validate_skill_directory
+        from utils.instance_loader import validate_skill_directory
         
         # 创建缺少 SKILL.md 的目录
         temp_dir = Path(tempfile.mkdtemp())
@@ -210,7 +210,7 @@ class TestSkillValidation:
     
     def test_validate_skill_directory_invalid_frontmatter(self):
         """测试：无效的 YAML frontmatter 应该验证失败"""
-        from scripts.instance_loader import validate_skill_directory
+        from utils.instance_loader import validate_skill_directory
         
         temp_dir = Path(tempfile.mkdtemp())
         skill_dir = temp_dir / "bad-frontmatter"
@@ -239,7 +239,7 @@ title: Missing name field
     
     def test_validate_skill_directory_nonexistent(self):
         """测试：不存在的目录应该验证失败"""
-        from scripts.instance_loader import validate_skill_directory
+        from utils.instance_loader import validate_skill_directory
         
         result = validate_skill_directory(Path("/nonexistent/path"))
         
@@ -600,7 +600,7 @@ class TestInstanceLoaderSkillsFunctions:
     
     def test_get_skills_status(self):
         """测试：获取 Skills 状态"""
-        from scripts.instance_loader import get_skills_status, list_instances
+        from utils.instance_loader import get_skills_status, list_instances
         
         print("\n" + "=" * 50)
         print("测试: get_skills_status()")
@@ -626,7 +626,7 @@ class TestInstanceLoaderSkillsFunctions:
     
     def test_scan_skills_directory(self):
         """测试：扫描 Skills 目录"""
-        from scripts.instance_loader import scan_skills_directory, list_instances
+        from utils.instance_loader import scan_skills_directory, list_instances
         
         print("\n" + "=" * 50)
         print("测试: scan_skills_directory()")
@@ -648,7 +648,7 @@ class TestInstanceLoaderSkillsFunctions:
     
     def test_load_skill_registry(self):
         """测试：加载 skill_registry.yaml"""
-        from scripts.instance_loader import load_skill_registry, list_instances
+        from utils.instance_loader import load_skill_registry, list_instances
         
         print("\n" + "=" * 50)
         print("测试: load_skill_registry()")
@@ -673,7 +673,7 @@ class TestCodeCorrectness:
     
     def test_verify_api_call_format(self):
         """验证 API 调用格式是否符合文档规范"""
-        from scripts.instance_loader import (
+        from utils.instance_loader import (
             get_anthropic_client,
             register_skill_to_claude,
             unregister_skill_from_claude,
@@ -723,7 +723,7 @@ class TestCodeCorrectness:
     
     def test_verify_skill_validation_rules(self):
         """验证 Skill 目录验证规则是否符合文档要求"""
-        from scripts.instance_loader import validate_skill_directory
+        from utils.instance_loader import validate_skill_directory
         import inspect
         
         print("\n" + "=" * 50)
