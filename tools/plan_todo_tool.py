@@ -1061,12 +1061,22 @@ class PlanTodoTool:
             else:
                 step_data = step
             
+            # 🔧 确保 action 字段不为空（必填字段）
+            action = step_data.get('action', '').strip()
+            if not action:
+                # 降级策略：使用 purpose 或生成默认值
+                action = step_data.get('purpose', '').strip()
+                if not action:
+                    action = f"步骤 {i + 1}"
+                logger.warning(f"步骤 {i + 1} 缺少 action 字段，使用降级值: {action}")
+            
             plan["steps"].append({
                 "step_id": i + 1,
                 "index": i,
-                "action": step_data.get('action', ''),
+                "action": action,
                 "capability": step_data.get('capability', ''),
-                "skill_hint": step_data.get('skill_hint', ''),  # 🆕 Skill 提示
+                "skill_hint": step_data.get('skill_hint', ''),  # Skill 提示
+                "skill_id": step_data.get('skill_id', ''),  # Skill ID
                 "query": step_data.get('query', ''),
                 "purpose": step_data.get('purpose', ''),
                 "expected_output": step_data.get('expected_output', ''),
@@ -1176,9 +1186,12 @@ class PlanTodoTool:
         if not current_plan:
             return {"status": "error", "message": "No active plan"}
         
-        action = data.get('action', '')
+        action = data.get('action', '').strip()
         capability = data.get('capability', '')
         purpose = data.get('purpose', '')
+        skill_hint = data.get('skill_hint', '')
+        skill_id = data.get('skill_id', '')
+        expected_output = data.get('expected_output', '')
         
         if not action:
             return {"status": "error", "message": "action is required"}
@@ -1194,7 +1207,11 @@ class PlanTodoTool:
             "index": new_index,
             "action": action,
             "capability": capability,
+            "skill_hint": skill_hint,
+            "skill_id": skill_id,
+            "query": "",
             "purpose": purpose,
+            "expected_output": expected_output,
             "status": "pending",
             "result": None,
             "retry_count": 0,
@@ -1323,14 +1340,24 @@ class PlanTodoTool:
                     else:
                         step_data = step
                     
+                    # 🔧 确保 action 字段不为空
+                    action = step_data.get('action', '').strip()
+                    if not action:
+                        action = step_data.get('purpose', '').strip()
+                        if not action:
+                            action = f"步骤 {len(new_plan['steps']) + 1}"
+                        logger.warning(f"replan 步骤 {i + 1} 缺少 action，使用降级值: {action}")
+                    
                     new_index = len(new_plan["steps"])
                     # 第一个新步骤（i == 0）设置为 in_progress
                     is_first_new_step = (i == 0)
                     new_plan["steps"].append({
                         "step_id": new_index + 1,
                         "index": new_index,
-                        "action": step_data.get('action', ''),
+                        "action": action,
                         "capability": step_data.get('capability', ''),
+                        "skill_hint": step_data.get('skill_hint', ''),
+                        "skill_id": step_data.get('skill_id', ''),
                         "purpose": step_data.get('purpose', ''),
                         "expected_output": step_data.get('expected_output', ''),
                         "status": "in_progress" if is_first_new_step else "pending",

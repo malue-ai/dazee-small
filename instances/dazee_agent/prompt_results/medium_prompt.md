@@ -410,6 +410,35 @@ plan_todo.create_plan({
 
 ### 1. 创建计划（第一个工具调用）
 
+**⚠️ 调用 `plan_todo.create_plan()` 时，必须确保每个 step 都有完整的 `action` 字段！**
+
+**正确示例**：
+```json
+{
+  "operation": "create_plan",
+  "data": {
+    "user_query": "帮我做一个AI行业分析PPT",
+    "goal": "制作AI行业分析PPT",
+    "steps": [
+      {"action": "搜索AI行业最新资讯和数据", "capability": "web_search", "purpose": "收集素材"},
+      {"action": "整理内容大纲", "capability": "task_planning", "purpose": "结构化内容"},
+      {"action": "生成PPT演示文稿", "capability": "ppt_generation", "purpose": "产出最终文件"}
+    ]
+  }
+}
+```
+
+**action 字段规范**：
+- **必填**：每个 step 的 `action` 字段不能为空
+- **用户友好**：使用日常语言描述（如"搜索资料"而非"调用 web_search 工具"）
+- **简洁明了**：5-15 个字，说明这一步要做什么
+
+**❌ 错误示例**：
+```json
+{"action": "", "capability": "web_search"}  // action 为空
+{"capability": "web_search", "purpose": "搜索"}  // 缺少 action 字段
+```
+
 ### 2. 执行过程中
 
 | 时机 | 操作 | 说明 |

@@ -346,15 +346,16 @@ class ChatService:
                 conv = await self.conversation_service.get_conversation(conversation_id)
                 logger.debug(f"✅ 对话存在: {conversation_id}")
             except ConversationNotFoundError:
-                # 对话不存在，自动创建新对话
-                logger.info(f"⚠️ 对话 {conversation_id} 不存在，自动创建新对话")
+                # 对话不存在，使用传入的 conversation_id 创建新对话（保持 ID 一致）
+                logger.info(f"⚠️ 对话 {conversation_id} 不存在，使用该 ID 创建新对话")
                 conv = await self.conversation_service.create_conversation(
                     user_id=user_id,
-                    title=message[:50] if len(message) <= 50 else message[:47] + "..."
+                    title=message[:50] if len(message) <= 50 else message[:47] + "...",
+                    conversation_id=conversation_id  # 使用传入的 ID
                 )
-                conversation_id = conv.id
+                # 注：conv.id 应该等于传入的 conversation_id
                 is_new_conversation = True
-                logger.info(f"✅ 自动创建对话: {conversation_id}")
+                logger.info(f"✅ 新对话已创建: {conv.id}")
             except Exception as e:
                 raise ValueError(f"对话校验失败: {e}") from e
         

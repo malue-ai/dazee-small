@@ -1401,6 +1401,7 @@ class SimpleAgent:
     async def _generate_simulated_thinking(
         self,
         user_query: str,
+        messages: List,
         session_id: str,
         ctx
     ) -> AsyncGenerator[str, None]:
@@ -1412,15 +1413,19 @@ class SimpleAgent:
         
         Args:
             user_query: 用户查询
+            messages: 完整的对话历史（用于上下文理解）
             session_id: 会话ID
             ctx: RuntimeContext
             
         Yields:
             思考内容的增量字符串
         """
-        # 模拟思考的 Prompt（语言自适应）
+        # 构建对话历史摘要（最多取最近 5 轮，避免 prompt 过长）
+        conversation_context = self._build_conversation_context(messages, max_turns=5)
+        
+        # 模拟思考的 Prompt（语言自适应，包含上下文）
         simulated_prompt = """You are a "thinking display" for an AI assistant.
-Based on the user's question, show your thinking process in first person.
+Based on the conversation context and current question, show your thinking process in first person.
 
 Requirements:
 1. Only show your understanding of the question and approach to solving it
@@ -1431,16 +1436,27 @@ Requirements:
    - If the user writes in English → respond in English
    - If the user writes in Chinese → respond in Chinese
    - If the user writes in a mix → use the dominant language
+6. If there's conversation context, use it to understand references like "this", "that", "it", etc.
 
-User question: {query}
+{context_section}
+
+Current question: {query}
 
 Please output your thinking process:"""
         
-        logger.info(f"🧠 开始生成模拟思考: query={user_query[:50]}...")
+        # 构建上下文部分（如果有历史的话）
+        context_section = ""
+        if conversation_context:
+            context_section = f"Conversation context:\n{conversation_context}\n"
+        
+        logger.info(f"🧠 开始生成模拟思考: query={user_query[:50]}..., context_length={len(conversation_context)}")
         
         try:
             async for chunk in self.llm.create_message_stream(
-                messages=[Message(role="user", content=simulated_prompt.format(query=user_query))],
+                messages=[Message(role="user", content=simulated_prompt.format(
+                    context_section=context_section,
+                    query=user_query
+                ))],
                 system="You are a thinking display assistant. Only output the thinking process, no extra content. Respond in the same language as the user's question.",
                 tools=[],
                 override_thinking=False  # 模拟思考本身不需要原生 thinking
@@ -1450,6 +1466,81 @@ Please output your thinking process:"""
         except Exception as e:
             logger.error(f"❌ 模拟思考生成失败: {e}")
             yield f"[Thinking process generation failed: {str(e)}]"
+    
+    def _build_conversation_context(self, messages: List, max_turns: int = 5) -> str:
+        """
+        构建对话历史摘要（用于模拟思考的上下文）
+        
+        Args:
+            messages: 消息列表
+            max_turns: 最多保留的对话轮数
+            
+        Returns:
+            格式化的对话历史字符串
+        """
+        if not messages:
+            return ""
+        
+        # 收集最近的对话（排除最后一条用户消息，因为它会单独作为 current question）
+        context_parts = []
+        turn_count = 0
+        
+        # 倒序遍历，跳过最后一条用户消息
+        skipped_last_user = False
+        for msg in reversed(messages):
+            # 获取角色和内容
+            if hasattr(msg, 'role'):
+                role = msg.role
+                content = msg.content
+            elif isinstance(msg, dict):
+                role = msg.get('role', '')
+                content = msg.get('content', '')
+            else:
+                continue
+            
+            # 跳过最后一条用户消息
+            if role == 'user' and not skipped_last_user:
+                skipped_last_user = True
+                continue
+            
+            # 跳过系统消息和工具结果
+            if role in ('system', 'tool'):
+                continue
+            
+            # 提取文本内容
+            text_content = ""
+            if isinstance(content, str):
+                text_content = content
+            elif isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get('type') == 'text':
+                        text_content = block.get('text', '')
+                        break
+            
+            if not text_content:
+                continue
+            
+            # 清理内容（移除系统注入的上下文信息）
+            clean_content = text_content
+            for marker in ["[用户上下文]", "[提取的文档信息]", "[图片url列表信息]", "[文档url列表信息]"]:
+                if marker in clean_content:
+                    idx = clean_content.find(marker)
+                    clean_content = clean_content[:idx].strip()
+            
+            # 截断过长的内容
+            if len(clean_content) > 200:
+                clean_content = clean_content[:200] + "..."
+            
+            if clean_content:
+                role_label = "User" if role == "user" else "Assistant"
+                context_parts.insert(0, f"{role_label}: {clean_content}")
+                
+                if role == "user":
+                    turn_count += 1
+                    if turn_count >= max_turns:
+                        break
+        
+        return "\n".join(context_parts)
     
     def _extract_user_query(self, messages: List) -> str:
         """
@@ -1563,8 +1654,8 @@ Please output your thinking process:"""
                     initial={"thinking": ""}
                 )
                 
-                # 流式输出模拟思考内容
-                async for delta in self._generate_simulated_thinking(user_query, session_id, ctx):
+                # 流式输出模拟思考内容（传入对话历史用于上下文理解）
+                async for delta in self._generate_simulated_thinking(user_query, messages, session_id, ctx):
                     yield await content_handler.send_delta(
                         session_id=session_id,
                         delta=delta
