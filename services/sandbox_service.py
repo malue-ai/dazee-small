@@ -258,7 +258,9 @@ class SandboxService:
             )
             
             # 获取目录树（按路径排序，确保父目录在子文件前面）
-            cmd = f"find {abs_path} -maxdepth {max_depth} -printf '%y|%p\\n' 2>/dev/null | sort -t'|' -k2 || true"
+            # 排除 node_modules、.git、__pycache__ 等大型/无用目录
+            prune_expr = "-name node_modules -o -name .git -o -name __pycache__ -o -name .venv -o -name venv -o -name .next -o -name dist -o -name build -o -name .cache"
+            cmd = f"find {abs_path} -maxdepth {max_depth} \\( {prune_expr} \\) -prune -o -printf '%y|%p\\n' 2>/dev/null | sort -t'|' -k2 || true"
             result = await self.provider.run_command(conversation_id, cmd, timeout=30)
             
             if not result.success or not result.output or not result.output.strip():

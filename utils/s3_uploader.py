@@ -22,6 +22,7 @@ import aiofiles
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 from pathlib import Path
+from urllib.parse import quote, unquote
 from botocore.exceptions import ClientError, NoCredentialsError
 import yaml
 
@@ -43,6 +44,34 @@ class S3ConfigError(S3UploaderError):
 class S3UploadError(S3UploaderError):
     """S3 上传失败"""
     pass
+
+
+def _sanitize_metadata(metadata: Dict[str, str]) -> Dict[str, str]:
+    """
+    清理 metadata，将非 ASCII 字符进行 URL 编码
+    
+    S3 metadata 只能包含 ASCII 字符，中文等 Unicode 字符需要编码。
+    使用 URL 编码（percent-encoding）来处理，便于后续解码还原。
+    
+    Args:
+        metadata: 原始 metadata 字典
+        
+    Returns:
+        编码后的 metadata 字典（所有值都是 ASCII 安全的）
+    """
+    sanitized = {}
+    for key, value in metadata.items():
+        if value is None:
+            continue
+        # 检查是否包含非 ASCII 字符
+        try:
+            value.encode('ascii')
+            # 纯 ASCII，直接使用
+            sanitized[key] = value
+        except UnicodeEncodeError:
+            # 包含非 ASCII 字符，进行 URL 编码
+            sanitized[key] = quote(value, safe='')
+    return sanitized
 
 
 class S3Uploader:
@@ -204,7 +233,7 @@ class S3Uploader:
                 conversation_id=conversation_id
             )
             
-            # 3. 准备元数据
+            # 3. 准备元数据（对非 ASCII 字符进行 URL 编码）
             file_metadata = metadata or {}
             file_metadata.update({
                 "uploaded_at": datetime.now().isoformat(),
@@ -212,6 +241,7 @@ class S3Uploader:
                 "user_id": user_id or "unknown",
                 "category": category
             })
+            file_metadata = _sanitize_metadata(file_metadata)
             
             # 4. 确定内容类型
             content_type = self._get_content_type(filename)
@@ -294,11 +324,12 @@ class S3Uploader:
             if file_size > max_size:
                 raise S3UploadError(f"文件过大: {file_size} bytes > {max_size} bytes")
             
-            # 准备元数据
+            # 准备元数据（对非 ASCII 字符进行 URL 编码）
             file_metadata = metadata or {}
             file_metadata.update({
                 "uploaded_at": datetime.now().isoformat(),
             })
+            file_metadata = _sanitize_metadata(file_metadata)
             
             # 上传到 S3
             logger.info(f"📤 上传字节内容: {object_name} ({file_size} bytes)")

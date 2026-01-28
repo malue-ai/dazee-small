@@ -19,8 +19,9 @@
     "paths": {
       "@/*": ["client/src/*"],
       "@shared/*": ["shared/*"]
-    }
+    },
+    "types": ["vite/client"]
   },
-  "include": ["client/src", "server"],
+  "include": ["client/src", "server", "shared"],
   "exclude": ["node_modules", "dist"]
 }
