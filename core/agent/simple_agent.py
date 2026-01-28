@@ -48,6 +48,7 @@ from core.context.compaction import (
     get_memory_guidance_prompt,
     QoSLevel,
     ContextStrategy,
+    trim_by_token_budget,
     trim_history_messages,
     estimate_tokens
 )
@@ -161,10 +162,11 @@ class SimpleAgent:
             self.context_strategy = ContextStrategy(
                 enable_memory_guidance=base_strategy.enable_memory_guidance,
                 enable_history_trimming=base_strategy.enable_history_trimming,
-                max_history_messages=base_strategy.max_history_messages,
-                preserve_first_n=base_strategy.preserve_first_n,
-                preserve_last_n=base_strategy.preserve_last_n,
+                # 🆕 纯 token 驱动的裁剪配置
+                preserve_first_messages=base_strategy.preserve_first_messages,
+                preserve_last_messages=base_strategy.preserve_last_messages,
                 preserve_tool_results=base_strategy.preserve_tool_results,
+                trim_threshold=base_strategy.trim_threshold,
                 qos_level=qos_level,
                 # 🆕 从 Schema context_limits 覆盖
                 token_budget=ctx_limits.max_context_tokens,
@@ -843,11 +845,16 @@ class SimpleAgent:
                 f"⚠️ 上下文长度警告: 估算 {estimated_tokens:,} tokens > 安全阈值 {safe_threshold:,} tokens"
             )
             
-            # 使用 context_strategy 进行历史消息裁剪
-            trimmed_messages = trim_history_messages(messages_for_estimate, self.context_strategy)
-            
-            # 重新估算裁剪后的 token 数
-            trimmed_tokens = estimate_tokens(trimmed_messages, system_prompt_text)
+            # 🆕 使用纯 token 驱动的裁剪
+            trimmed_messages, trim_stats = trim_by_token_budget(
+                messages=messages_for_estimate,
+                token_budget=safe_threshold,
+                preserve_first_messages=self.context_strategy.preserve_first_messages,
+                preserve_last_messages=self.context_strategy.preserve_last_messages,
+                preserve_tool_results=self.context_strategy.preserve_tool_results,
+                system_prompt=system_prompt_text
+            )
+            trimmed_tokens = trim_stats.estimated_tokens
             
             logger.info(
                 f"✂️ 历史消息已裁剪: {len(messages_for_estimate)} → {len(trimmed_messages)} 条消息, "
@@ -861,17 +868,17 @@ class SimpleAgent:
             if trimmed_tokens > safe_threshold:
                 logger.warning(f"⚠️ 裁剪后仍超过阈值，进行激进裁剪...")
                 
-                # 激进策略：只保留前 2 条和最后 6 条消息
-                aggressive_strategy = ContextStrategy(
-                    enable_history_trimming=True,
-                    max_history_messages=20,
-                    preserve_first_n=1,
-                    preserve_last_n=3,
-                    preserve_tool_results=False  # 不保留中间的 tool_result
+                # 激进策略：更小的 token 预算，只保留最少消息
+                aggressive_budget = int(safe_threshold * 0.6)  # 60% 的安全阈值
+                aggressively_trimmed, aggressive_stats = trim_by_token_budget(
+                    messages=trimmed_messages,
+                    token_budget=aggressive_budget,
+                    preserve_first_messages=2,
+                    preserve_last_messages=6,
+                    preserve_tool_results=False,  # 不保留中间的 tool_result
+                    system_prompt=system_prompt_text
                 )
-                
-                aggressively_trimmed = trim_history_messages(trimmed_messages, aggressive_strategy)
-                aggressive_tokens = estimate_tokens(aggressively_trimmed, system_prompt_text)
+                aggressive_tokens = aggressive_stats.estimated_tokens
                 
                 logger.info(
                     f"✂️ 激进裁剪: {len(trimmed_messages)} → {len(aggressively_trimmed)} 条消息, "
@@ -936,8 +943,16 @@ class SimpleAgent:
                         f"⚠️ Turn {turn + 1}: 上下文累积溢出 ({current_tokens:,} > {safe_threshold:,})，执行裁剪..."
                     )
                     
-                    trimmed = trim_history_messages(messages_for_check, self.context_strategy)
-                    trimmed_tokens = estimate_tokens(trimmed, system_prompt_text)
+                    # 🆕 使用纯 token 驱动的裁剪
+                    trimmed, trim_stats = trim_by_token_budget(
+                        messages=messages_for_check,
+                        token_budget=safe_threshold,
+                        preserve_first_messages=self.context_strategy.preserve_first_messages,
+                        preserve_last_messages=self.context_strategy.preserve_last_messages,
+                        preserve_tool_results=self.context_strategy.preserve_tool_results,
+                        system_prompt=system_prompt_text
+                    )
+                    trimmed_tokens = trim_stats.estimated_tokens
                     
                     logger.info(
                         f"✂️ Turn {turn + 1} 裁剪: {len(messages_for_check)} → {len(trimmed)} 条消息, "

@@ -407,12 +407,22 @@ export function useChat() {
   function tryUpdatePlanFromContent(content: string, msg: UIMessage): void {
     if (!content) return
     
+    /**
+     * 同步更新消息级别和会话级别的 Plan
+     * 确保右侧任务进度面板实时更新
+     */
+    const syncPlanUpdate = (planData: PlanData) => {
+      msg.planResult = planData
+      // 🔧 同步更新会话级别的 conversationPlan，确保 PlanWidget 实时刷新
+      conversationStore.updatePlan(planData)
+      console.log('📋 Plan 已同步更新:', planData?.name, `(${planData.todos?.filter(t => t.status === 'completed').length || 0}/${planData.todos?.length || 0} 完成)`)
+    }
+    
     try {
       // 尝试解析完整 JSON
       const resultContent = JSON.parse(content)
       if (resultContent?.plan) {
-        msg.planResult = resultContent.plan as PlanData
-        console.log('📋 流式更新 Plan:', msg.planResult?.name)
+        syncPlanUpdate(resultContent.plan as PlanData)
       }
     } catch {
       // JSON 不完整，尝试提取部分 plan 数据（用于流式显示）
@@ -438,8 +448,7 @@ export function useChat() {
           if (endIndex > 0) {
             const planData = JSON.parse(planJson.substring(0, endIndex))
             if (planData?.name || planData?.todos) {
-              msg.planResult = planData as PlanData
-              console.log('📋 流式更新 Plan (部分):', planData?.name)
+              syncPlanUpdate(planData as PlanData)
             }
           }
         } catch {

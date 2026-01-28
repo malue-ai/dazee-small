@@ -1715,3 +1715,69 @@ capabilities:
     max_length: 2000
     trigger_condition:
       element_count_gt: 100  # 超过 100 个元素时精简
+- name: clue_generation
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  invocation_hint: DIRECT
+  level: 2
+  cache_stable: false
+  implementation:
+    module: tools.clue_generation
+    class: ClueGenerationTool
+  capabilities:
+  - user_guidance
+  - task_suggestion
+  - conversation_analysis
+  priority: 80
+  cost:
+    time: fast
+    money: low
+  constraints:
+    requires_api: false
+  metadata:
+    description: |
+      分析对话内容，生成后续操作建议（线索）。
+      
+      **何时使用此工具**：
+      1. 完成用户的主要任务后，需要提供延伸操作建议时
+      2. 助手给出了可转发/分享的内容（如报告、方案、总结）
+      3. 对话中存在需要用户确认或做出选择的情况
+      4. 用户的问题需要后续跟进操作
+      5. 生成了文件、报告等交付物，需要引导用户下一步操作
+      
+      **不要使用的情况**：
+      - 简单的问答对话（用户只是咨询问题）
+      - 对话尚未完成，还在执行中
+      - 用户明确表示不需要更多帮助
+      
+      **生成的线索类型**：
+      - reply: 需要用户回复确认的问题
+      - forward: 可以转发/分享的内容
+      - confirm: 需要用户确认的操作
+      - upload: 需要用户上传文件
+    preferred_for:
+    - 任务完成后的延伸建议
+    - 引导用户下一步操作
+    - 生成可操作的建议列表
+    keywords:
+    - 线索
+    - 建议
+    - 操作
+    - 后续
+    - clue
+    - suggestion
+    note: |
+      工具会自动通过 SSE 将线索推送到前端，前端会渲染为可点击的操作按钮。
+      每次最多生成 4 个线索，每个线索文本不超过 30 字。
+  input_schema:
+    type: object
+    properties:
+      user_message:
+        type: string
+        description: 用户消息内容（当前对话中用户发送的消息）
+      assistant_response:
+        type: string
+        description: 助手回复内容（当前对话中助手的回复，包含刚完成的任务结果）
+    required:
+    - assistant_response

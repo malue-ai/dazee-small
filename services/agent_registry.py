@@ -476,6 +476,22 @@ class AgentRegistry:
             instance_config.enabled_capabilities
         )
         
+        # 🔧 V7.7 修复：更新 agent.capability_registry 为过滤后的版本
+        # 确保 _register_tools_to_llm 使用正确的工具列表
+        agent.capability_registry = filtered_registry
+        
+        # 🔧 V7.7: 同时更新 tool_executor.registry（确保工具执行使用正确的注册表）
+        if hasattr(agent, 'tool_executor') and agent.tool_executor:
+            agent.tool_executor.registry = filtered_registry
+            # 重新加载工具实例
+            agent.tool_executor._load_tools()
+            logger.debug(f"   🔧 已更新 tool_executor 注册表并重新加载工具")
+        
+        # 🔧 V7.7: 重新注册工具到 LLM（使用过滤后的注册表）
+        if hasattr(agent, '_register_tools_to_llm'):
+            agent._register_tools_to_llm()
+            logger.debug(f"   🔧 已重新注册工具到 LLM（过滤后）")
+        
         # 使用过滤后的 registry 创建实例级注册表
         instance_registry = InstanceToolRegistry(global_registry=filtered_registry)
         agent._instance_registry = instance_registry

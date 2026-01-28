@@ -976,6 +976,13 @@ class ZenOAdapter(EventAdapter):
             logger.info(f"🔧 [enhance_tool_result] plan_todo 生成了 {len(deltas)} 个 delta")
             return deltas
         
+        # clue_generation 工具的特殊处理（转换为 clue 格式）
+        if tool_name == "clue_generation":
+            logger.info(f"🔧 [enhance_tool_result] 识别到 clue_generation，生成 clue delta")
+            deltas = self._generate_clue_deltas(result_content)
+            logger.info(f"🔧 [enhance_tool_result] clue_generation 生成了 {len(deltas)} 个 delta")
+            return deltas
+        
         # 沙盒工具：sandbox_get_public_url 的特殊处理（提取 url）
         if tool_name == "sandbox_get_public_url":
             logger.debug(f"🔧 处理 sandbox_get_public_url 工具结果")
@@ -1198,6 +1205,59 @@ class ZenOAdapter(EventAdapter):
         
         logger.debug(f"📋 生成 plan_todo progress delta")
         return [self._create_delta("progress", progress_content)]
+    
+    def _generate_clue_deltas(self, result_content: str) -> List[Dict[str, Any]]:
+        """
+        为 clue_generation 工具生成 clue delta
+        
+        clue_generation 返回格式：
+        {
+            "success": true,
+            "message": "成功生成 X 个操作建议",
+            "tasks": [
+                {"id": "clue_1", "text": "线索描述", "act": "reply", "payload": {...}}
+            ]
+        }
+        
+        生成的 delta 类型：
+        - clue: 操作线索列表，供前端渲染
+        
+        Args:
+            result_content: clue_generation 工具返回的 JSON 字符串
+            
+        Returns:
+            delta 列表（包含一个 clue 类型的 delta）
+        """
+        deltas = []
+        
+        # 解析结果
+        try:
+            if isinstance(result_content, str):
+                result = json.loads(result_content)
+            else:
+                result = result_content
+        except json.JSONDecodeError:
+            logger.warning(f"⚠️ clue_generation 结果解析失败: {str(result_content)[:100]}...")
+            return deltas
+        
+        # 检查是否成功
+        if not result.get("success", False):
+            logger.warning(f"⚠️ clue_generation 返回失败: {result.get('error')}")
+            return deltas
+        
+        # 提取 tasks 字段
+        tasks = result.get("tasks", [])
+        if not tasks:
+            logger.debug("clue_generation 结果中没有 tasks 或 tasks 为空，跳过 clue delta 生成")
+            return deltas
+        
+        # 构建 clue delta 数据（直接使用 tasks 数组，包装为 {"tasks": [...]} 格式）
+        clue_data = {"tasks": tasks}
+        
+        logger.info(f"🔍 生成 clue delta: 包含 {len(tasks)} 个操作建议")
+        deltas.append(self._create_delta("clue", clue_data))
+        
+        return deltas
     
     def _generate_analytics_deltas(self, result_content: str) -> List[Dict[str, Any]]:
         """

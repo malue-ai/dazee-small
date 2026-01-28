@@ -25,7 +25,7 @@ agent:
   model: "claude-sonnet-4-5"
   
   # 最大对话轮数
-  max_turns: 20
+  max_turns: 30
   
   # 启用计划管理器（处理复杂任务）
   plan_manager_enabled: true
@@ -81,6 +81,9 @@ enabled_capabilities:
   
   # --- HITL（Human-in-the-Loop）---
   hitl: 1                      # 🆕 启用人机交互确认工具
+  
+  # --- 线索生成类 ---
+  clue_generation: 1           # 🆕 线索生成工具（操作建议）
 
 
 # ==================== MCP 工具声明 ====================

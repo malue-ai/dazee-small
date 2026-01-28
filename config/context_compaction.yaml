@@ -15,12 +15,12 @@ qos_token_budgets:
   pro: 200000        # 专业版（默认）
   enterprise: 1000000  # 企业版
 
-# L2 策略：历史消息裁剪配置
+# L2 策略：历史消息裁剪配置（纯 token 驱动）
 history_trimming:
-  max_history_messages: 50   # 最大保留消息数
-  preserve_first_n: 2        # 始终保留前 N 轮（建立上下文）
-  preserve_last_n: 10        # 始终保留最近 N 轮（当前上下文）
-  preserve_tool_results: true  # 保留含 tool_result 的消息
+  preserve_first_messages: 4   # 始终保留开头 N 条消息（任务上下文）
+  preserve_last_messages: 20   # 尽量保留最近 N 条消息（当前上下文）
+  preserve_tool_results: true  # 保留中间的 tool_result（含重要数据）
+  trim_threshold: 0.8          # token 使用率超过此阈值时触发裁剪
 
 # L3 策略：后端预警配置
 backend_warning:

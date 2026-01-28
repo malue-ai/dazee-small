@@ -1,5 +1,6 @@
 import express, { Request, Response, NextFunction } from "express";
 import { createServer } from "http";
+import cors from "cors";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -13,6 +14,15 @@ async function startServer() {
   // ============================================
   // 中间件配置
   // ============================================
+  
+  // CORS 配置 - 允许前端开发服务器跨域访问
+  app.use(cors({
+    origin: process.env.NODE_ENV === "production" 
+      ? false  // 生产环境禁用 CORS（同源）
+      : ["http://localhost:5173", "http://127.0.0.1:5173"],  // 开发环境允许 Vite 端口
+    credentials: true,
+  }));
+  
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
@@ -130,10 +140,12 @@ async function startServer() {
   });
 
   const port = process.env.PORT || 3000;
+  const host = process.env.HOST || "0.0.0.0";  // 监听所有网络接口
 
-  server.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}/`);
+  server.listen(Number(port), host, () => {
+    console.log(`Server running on http://${host}:${port}/`);
     console.log(`API available at http://localhost:${port}/api`);
+    console.log(`Health check: http://localhost:${port}/api/health`);
   });
 }
 

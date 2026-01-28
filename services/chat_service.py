@@ -35,6 +35,7 @@ from core.context.compaction import (
     get_compaction_threshold,
     get_context_awareness_prompt,
     get_context_strategy,
+    trim_by_token_budget,
     trim_history_messages_with_stats,
 )
 from core.output import OutputFormatter, create_output_formatter
@@ -147,6 +148,10 @@ class ChatService:
         # 🆕 V8.1: 意图识别开关（暂时关闭，跳过 IntentAnalyzer 调用）
         # 设置为 False 时，跳过意图识别，使用默认的 IntentResult
         self.enable_intent_analysis = False  # TODO: 需要时改回 True
+        
+        # 🆕 V8.2: Preface 开场白开关（独立于意图识别）
+        # 设置为 True 时，会在 Agent 响应前生成简短的开场白
+        self.enable_preface = True
         
         if enable_routing:
             if self.enable_intent_analysis:
@@ -977,12 +982,17 @@ class ChatService:
             # 3. 优先保证问答效果，其次控制成本
             # =====================================================================
             
-            # 🆕 优化：使用 trim_history_messages_with_stats 合并裁剪和 token 估算
-            # 避免对消息列表的重复遍历，提升性能
+            # 🆕 L2 策略：纯 token 驱动的上下文裁剪
+            # 基于 token 预算而非消息数量，更精确地控制上下文长度
             context_strategy = get_context_strategy(self.qos_level)
-            history_messages, trim_stats = trim_history_messages_with_stats(
-                history_messages, 
-                context_strategy
+            token_budget = int(context_strategy.token_budget * context_strategy.trim_threshold)
+            
+            history_messages, trim_stats = trim_by_token_budget(
+                messages=history_messages,
+                token_budget=token_budget,
+                preserve_first_messages=context_strategy.preserve_first_messages,
+                preserve_last_messages=context_strategy.preserve_last_messages,
+                preserve_tool_results=context_strategy.preserve_tool_results
             )
             
             if trim_stats.trimmed_count < trim_stats.original_count:
@@ -1070,48 +1080,28 @@ class ChatService:
                 )
                 logger.info("⏭️ 意图识别已跳过，使用默认 IntentResult")
             
-            # 🆕 V8.1: 统一处理 routing_intent（无论是 LLM 分析还是默认值）
-            if routing_intent:
-                # 🆕 V7.7: 当 intent_id=1（系统搭建）时，自动添加线索生成任务
-                if routing_intent.intent_id == 1:
-                    if background_tasks is None:
-                        background_tasks = []
-                    if "clue_generation" not in background_tasks:
-                        background_tasks.append("clue_generation")
-                        logger.info("🔍 已添加线索生成后台任务（intent_id=1）")
+            # 🆕 V8.2: 已移除 intent 事件发送（不再向前端发送意图识别结果）
+            # routing_intent 仅用于内部逻辑（preface、后台任务等）
                 
-                # =====================================================================
-                # 🆕 V8.0: 前置处理层（从 SimpleAgent 移出）
-                # 意图事件发送和 Preface 生成在服务层完成，Agent 只负责核心执行
-                # =====================================================================
-                
-                # 1. 发送 intent 事件到前端
-                await self._emit_intent_event(
+            # 生成 Preface 开场白（独立于意图识别）
+            if self.enable_preface and routing_intent:
+                user_text = extract_text_from_message(message)
+                preface_text = await self._generate_preface_stream(
                     intent=routing_intent,
+                    user_message=user_text,
                     session_id=session_id,
                     message_id=assistant_message_id,
-                    broadcaster=agent.broadcaster
+                    broadcaster=agent.broadcaster,
+                    tracker=shared_tracker
                 )
                 
-                # 2. 生成 Preface 开场白（仅当启用意图识别时生成，默认值跳过）
-                if self.enable_intent_analysis:
-                    user_text = extract_text_from_message(message)
-                    preface_text = await self._generate_preface_stream(
-                        intent=routing_intent,
-                        user_message=user_text,
-                        session_id=session_id,
-                        message_id=assistant_message_id,
-                        broadcaster=agent.broadcaster,
-                        tracker=shared_tracker
-                    )
-                    
-                    # 3. 将 preface 添加到消息历史（避免 Agent 重复生成）
-                    if preface_text:
-                        history_messages.append({
-                            "role": "assistant",
-                            "content": [{"type": "text", "text": preface_text}]
-                        })
-                        logger.info(f"✨ Preface 已添加到上下文: len={len(preface_text)}")
+                # 3. 将 preface 添加到消息历史（避免 Agent 重复生成）
+                if preface_text:
+                    history_messages.append({
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": preface_text}]
+                    })
+                    logger.info(f"✨ Preface 已添加到上下文: len={len(preface_text)}")
             
             # 🆕 设置 Agent 的输出格式（EventBroadcaster 会使用）
             if hasattr(agent, 'broadcaster') and agent.broadcaster:

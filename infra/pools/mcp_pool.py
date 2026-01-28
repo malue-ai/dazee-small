@@ -182,6 +182,10 @@ class MCPPool:
         
         async def connect_with_timeout(server_url: str, config: MCPConfig) -> tuple[str, bool]:
             """带超时的连接"""
+            # 使用 URL 后缀区分相同 server_name 的不同服务器
+            url_suffix = server_url.split("/")[-2][:8] if "/" in server_url else ""
+            display_name = f"{config.server_name}({url_suffix})" if url_suffix else config.server_name
+            
             try:
                 # 单个连接最多等 30 秒
                 result = await asyncio.wait_for(
@@ -190,10 +194,10 @@ class MCPPool:
                 )
                 return (server_url, result)
             except asyncio.TimeoutError:
-                logger.warning(f"   ⏱️ {config.server_name}: 连接超时")
+                logger.warning(f"   ⏱️ {display_name}: 连接超时")
                 return (server_url, False)
             except Exception as e:
-                logger.warning(f"   ❌ {config.server_name}: {type(e).__name__}")
+                logger.warning(f"   ❌ {display_name}: {type(e).__name__}")
                 return (server_url, False)
         
         tasks = [
@@ -220,10 +224,12 @@ class MCPPool:
                 results[server_url] = success
                 config = configs.get(server_url)
                 if config:
+                    # 使用工具名称 + 简化 URL 后缀来区分相同 server_name 的不同服务器
+                    url_suffix = server_url.split("/")[-2][:8] if "/" in server_url else ""
+                    display_name = f"{config.server_name}({url_suffix})" if url_suffix else config.server_name
                     if success:
-                        logger.info(f"   ✅ {config.server_name}: 已连接")
-                    else:
-                        logger.warning(f"   ❌ {config.server_name}: 连接失败")
+                        logger.info(f"   ✅ {display_name}: 已连接")
+
         
         # 4. 更新 Redis 统计（静默失败）
         try:
@@ -293,12 +299,16 @@ class MCPPool:
         """
         from services.mcp_client import MCPClientWrapper
         
+        # 使用 URL 后缀区分相同 server_name 的不同服务器
+        url_suffix = server_url.split("/")[-2][:8] if "/" in server_url else ""
+        display_name = f"{config.server_name}({url_suffix})" if url_suffix else config.server_name
+        
         try:
             # 获取认证令牌
             auth_token = config.get_auth_token()
             if config.auth_type in ("bearer", "api_key") and not auth_token:
                 logger.warning(
-                    f"⚠️ MCP {config.server_name} 的密钥环境变量 "
+                    f"⚠️ MCP {display_name} 的密钥环境变量 "
                     f"{config.auth_env} 未设置，跳过"
                 )
                 return False

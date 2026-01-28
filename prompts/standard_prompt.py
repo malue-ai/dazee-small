@@ -14,14 +14,14 @@ def _get_standard_prompt_template() -> str:
 
 # 核心规则
 - 纯问答（如“什么是RAG/今天天气”）→ 直接 web_search 回答。
-- 其他任务 → **第一个工具调用必须是 plan_todo.create_plan()**，后续每步前 get_plan，完成后 update_step。
+- 其他任务 → **第一个工具调用必须是 plan_todo.create_plan()**，后续每步前 get_plan，完成后 update_todo。
 - 所有工具调用必须真实出现在 <function_calls>。
 - 信息不足先搜索/读取，再产出；禁止编造或占位内容。
 - 输出前做 [Final Validation]，不足则迭代或澄清，不要直接 end_turn。
 
 # 执行流程
 1) Intent → 决定是否纯问答；否则走 plan_todo.create_plan()。
-2) 按 Plan 执行，每步：get_plan → tool → validate → update_step。
+2) 按 Plan 执行，每步：get_plan → tool → validate → update_todo。
 3) Final Validation → PASS 返回，ITERATE 继续，CLARIFICATION 询问。
 
 # 工具使用（高效）

@@ -241,6 +241,14 @@ export const useConversationStore = defineStore('conversation', () => {
   }
 
   /**
+   * 更新当前会话的 Plan（用于流式更新）
+   * @param plan - 新的 Plan 数据
+   */
+  function updatePlan(plan: PlanData | null): void {
+    conversationPlan.value = plan
+  }
+
+  /**
    * 处理历史消息，转换为 UIMessage 格式
    */
   function processHistoryMessage(msg: Message): UIMessage {
@@ -260,9 +268,9 @@ export const useConversationStore = defineStore('conversation', () => {
       if (rawPlan && typeof rawPlan === 'object') {
         const plan = rawPlan as Record<string, unknown>
         if (plan.plan) {
-          planData = plan.plan as PlanData
+          planData = plan.plan as unknown as PlanData
         } else if (plan.goal || plan.steps) {
-          planData = plan as PlanData
+          planData = plan as unknown as PlanData
         }
       }
     }
@@ -411,6 +419,7 @@ export const useConversationStore = defineStore('conversation', () => {
     addUserMessage,
     addAssistantMessage,
     getLastAssistantMessage,
-    reset
+    reset,
+    updatePlan
   }
 })
