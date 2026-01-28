@@ -62,8 +62,8 @@ from core.tool.capability import create_capability_registry, create_invocation_s
 from core.tool.registry_config import get_sandbox_tools  # 🆕 从统一配置读取
 from logger import get_logger
 from prompts.universal_agent_prompt import get_universal_agent_prompt
-from tools.plan_todo_tool import create_plan_todo_tool
 from core.billing.tracker import create_enhanced_usage_tracker
+from tools.plan_todo_tool import load_plan_for_session, format_plan_for_prompt
 from utils.message_utils import (
     dict_list_to_messages,
     append_assistant_message,
@@ -192,11 +192,7 @@ class SimpleAgent:
         # ===== 根据 Schema 动态初始化各模块 =====
         self._init_modules()
         
-        # ===== 状态（Context Isolation 原则） =====
-        # ⚠️ 这是工具返回值的缓存，不是隐式状态
-        # 所有更新都通过 plan_todo 工具显式执行，此处仅缓存以避免重复调用
-        # 参考: docs/12-CONTEXT_ENGINEERING_OPTIMIZATION.md
-        self._plan_cache = {"plan": None, "todo": None, "tool_calls": []}
+        # ===== 状态 =====
         self.invocation_stats = {"direct": 0, "code_execution": 0, "programmatic": 0, "streaming": 0}
         
         # 🆕 V6.1: 上轮意图分析结果（用于追问场景优化）
@@ -238,7 +234,6 @@ class SimpleAgent:
         - capability_registry: 能力注册表
         - tool_executor: 工具执行器
         - tool_selector: 工具选择器
-        - plan_todo_tool: Plan/Todo 工具
         - invocation_selector: 调用模式选择器
         - context_engineering: 上下文工程管理器
         - _instance_registry: 实例级工具注册表
@@ -248,7 +243,6 @@ class SimpleAgent:
         
         重置的状态（每个会话独立）：
         - event_manager, broadcaster: 事件管理
-        - _plan_cache: Plan 缓存
         - invocation_stats: 调用统计
         - _last_intent_result: 意图结果
         - _tracer: Pipeline 追踪器
@@ -281,7 +275,6 @@ class SimpleAgent:
         clone.capability_registry = self.capability_registry
         clone.tool_executor = self.tool_executor
         clone.tool_selector = getattr(self, 'tool_selector', None)
-        clone.plan_todo_tool = getattr(self, 'plan_todo_tool', None)
         clone.invocation_selector = self.invocation_selector
         clone.context_engineering = self.context_engineering
         
@@ -314,7 +307,6 @@ class SimpleAgent:
         )
         
         # ========== 重置会话级状态 ==========
-        clone._plan_cache = {"plan": None, "todo": None, "tool_calls": []}
         clone.invocation_stats = {"direct": 0, "code_execution": 0, "programmatic": 0, "streaming": 0}
         clone._last_intent_result = None
         clone._tracer = None
@@ -366,15 +358,7 @@ class SimpleAgent:
             tool_context=tool_context
         )
         
-        # 5. Plan/Todo 工具（根据 Schema 决定是否创建）
-        if self.schema.plan_manager.enabled:
-            self.plan_todo_tool = create_plan_todo_tool(registry=self.capability_registry)
-            logger.debug(f"✓ PlanManager 已启用 (max_steps={self.schema.plan_manager.max_steps})")
-        else:
-            self.plan_todo_tool = None
-            logger.debug("○ PlanManager 未启用")
-        
-        # 6. 🆕 InvocationSelector（V4.4 条件激活）
+        # 5. 🆕 InvocationSelector（V4.4 条件激活）
         # 仅在无匹配 Skill 时生效，选择调用模式（DIRECT/PROGRAMMATIC/TOOL_SEARCH）
         self.invocation_selector = create_invocation_selector(
             enable_tool_search=True,  # 启用 Tool Search（工具数量 > 30 时使用）
@@ -407,9 +391,8 @@ class SimpleAgent:
         logger.debug(f"✓ 执行 LLM 初始化: thinking={llm_enable_thinking}, caching={llm_enable_caching}, "
                      f"temperature={self.schema.temperature}, max_tokens={self.schema.max_tokens}")
         
-        # 注册自定义工具到 LLM（如果有 plan_todo_tool）
-        if self.plan_todo_tool:
-            self._register_tools_to_llm()
+        # 注册自定义工具到 LLM
+        self._register_tools_to_llm()
         
         # 🆕 启用已注册的 Claude Skills
         self._enable_registered_skills()
@@ -427,9 +410,6 @@ class SimpleAgent:
         """注册工具到 LLM Service"""
         tool_schemas = self.capability_registry.get_tool_schemas()
         for schema in tool_schemas:
-            if schema['name'] == 'plan_todo':
-                schema['input_schema'] = self.plan_todo_tool.get_input_schema()
-            
             self.llm.add_custom_tool(
                 name=schema['name'],
                 description=schema['description'],
@@ -460,32 +440,35 @@ class SimpleAgent:
         message_id: str = None,
         enable_stream: bool = True,
         variables: Dict[str, Any] = None,
-        intent: Optional["IntentResult"] = None,  # 🆕 V7: 从路由层传入的意图结果
-        preface_config: Optional[Dict[str, Any]] = None  # 🆕 V7.8: Preface 配置
+        intent: Optional["IntentResult"] = None,  # deprecated: 由服务层处理
+        preface_config: Optional[Dict[str, Any]] = None  # deprecated: 由服务层处理
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
-        Agent 统一执行入口 - 7 阶段完整流程
+        Agent 统一执行入口 - 核心执行流程
         
-        完整流程（参考 docs/00-ARCHITECTURE-V4.md L1693-1979）：
+        🆕 V8.0: 前置处理层重构
+        阶段 2 (Intent 事件) 和 阶段 2.5 (Preface 生成) 已移至 ChatService._run_agent()
+        本方法现在从阶段 3 开始，专注于核心推理和执行
+        
+        完整流程：
         阶段 1: Session/Agent 初始化 (在 SessionService.create_session 中完成)
-        阶段 2: Intent Analysis - 使用路由层传入的意图结果（内部意图分析已移除）
-        阶段 2.5: Preface - 流式生成开场白（在 intent 之后）
+        阶段 2: Intent 事件发送 (🆕 在 ChatService 中完成)
+        阶段 2.5: Preface 生成 (🆕 在 ChatService 中完成)
         阶段 3: Tool Selection (Schema 驱动优先)
         阶段 4: System Prompt 组装 + LLM 调用准备
-        阶段 5: Plan Creation (System Prompt 约束 + Claude 自主触发，在 RVR Turn 1 内部)
+        阶段 5: Plan Creation (System Prompt 约束 + Claude 自主触发)
         阶段 6: RVR Loop (核心执行)
         阶段 7: Final Output & Tracing Report
         
-        本方法从阶段 2 开始（阶段 1 在 SessionService 中完成）
-        
         Args:
-            messages: 完整的消息列表（已包含前端变量上下文）
+            messages: 完整的消息列表（可能已包含 preface 消息）
             session_id: 会话ID
+            conversation_id: 对话ID
             message_id: 消息ID（用于事件关联）
             enable_stream: 是否流式输出
             variables: 前端上下文变量（如位置、时区等），直接注入到 Prompt
-            intent: V7 从路由层传入的意图分析结果（必需，如未提供则使用默认配置）
-            preface_config: V7.8 Preface 配置 {"user_message": str, "tracker": obj}
+            intent: (deprecated) 仅用于向后兼容，由服务层处理
+            preface_config: (deprecated) 已移至服务层，不再使用
             
         Yields:
             事件字典
@@ -515,6 +498,14 @@ class SimpleAgent:
         self._current_conversation_id = conversation_id
         self._current_user_id = user_id
         
+        # ===== 🆕 加载现有计划（Cursor 风格，文件驱动） =====
+        # 如果会话有未完成的计划，加载它并注入到 prompt 中
+        self._current_plan = None
+        if conversation_id:
+            self._current_plan = await load_plan_for_session(conversation_id)
+            if self._current_plan:
+                logger.info(f"📋 检测到现有计划: {self._current_plan.get('name', 'Unknown')}")
+        
         # ===== 🆕 初始化 PromptManager（事件驱动 Prompt 追加） =====
         ctx = create_runtime_context(session_id=session_id, max_turns=self.max_turns)
         prompt_manager = await get_prompt_manager_async()  # 使用异步版本确保片段已加载
@@ -532,94 +523,27 @@ class SimpleAgent:
             self._tracer.set_user_query(user_query[:200])
         
         # =====================================================================
-        # 阶段 2: Intent Analysis
+        # 阶段 2 & 2.5: 已移至服务层 (ChatService._run_agent)
         # =====================================================================
-        # V7: 意图分析已在路由层完成（AgentRouter），此处仅使用传入的意图结果
-        # - 如果提供了 intent 参数（来自路由层），使用它
-        # - 如果未提供 intent 参数，使用默认配置（不执行内部分析）
+        # 🆕 V8.0: 意图事件发送和 Preface 生成由 ChatService 在调用 chat() 前完成
+        # 这里仅处理 intent 为空时的默认值（向后兼容）
         # =====================================================================
         
-        if intent is not None:
-            # 使用路由层提供的意图结果
-            logger.info(
-                f"🔀 使用路由层意图结果: {intent.task_type.value}, "
-                f"complexity={intent.complexity.value}"
-            )
-            # 保存本轮结果供下次追问使用
-            self._last_intent_result = intent
-            
-            # 🆕 V7.5: 发送意图识别结果给前端（使用 intent_id 格式）
-            intent_content = {
-                "intent_id": intent.intent_id,
-                "intent_name": intent.intent_name,
-                "complexity": intent.complexity.value,
-                "needs_plan": intent.needs_plan,
-                "confidence": intent.confidence,
-            }
-            # 仅当 platform 有值时才添加
-            if intent.platform:
-                intent_content["platform"] = intent.platform
-            
-            intent_delta = {
-                "type": "intent",
-                "content": intent_content
-            }
-            yield await self.broadcaster.emit_message_delta(
-                session_id=session_id,
-                delta=intent_delta,
-                message_id=self._current_message_id
-            )
-            
-            # 追踪意图分析阶段
-            if self._tracer:
-                stage = self._tracer.create_stage("intent_analysis")
-                stage.start()
-                stage.complete({
-                    "intent_id": intent.intent_id,
-                    "intent_name": intent.intent_name,
-                    "complexity": intent.complexity.value,
-                    "needs_plan": intent.needs_plan,
-                    "source": "routing_layer"
-                })
-        else:
-            # 未提供 intent 参数，使用默认配置（内部意图分析已移除）
-            logger.warning("⚠️ 未提供意图结果，使用默认配置（建议启用路由层）")
+        if intent is None:
+            # 未提供 intent 参数，使用默认配置（向后兼容）
+            logger.debug("⚠️ 未提供意图结果，使用默认配置（建议通过服务层调用）")
             intent = IntentResult(
-                task_type=TaskType.OTHER,  # 🆕 V7.5: 修复为 OTHER
+                task_type=TaskType.OTHER,
                 complexity=Complexity.MEDIUM,
                 needs_plan=self.schema.plan_manager.enabled,
-                intent_id=3,              # 🆕 V7.5: 默认综合咨询
-                intent_name="综合咨询",    # 🆕 V7.5
+                intent_id=3,
+                intent_name="综合咨询",
                 confidence=1.0
             )
-            
-            # 记录跳过
-            if self._tracer:
-                stage = self._tracer.create_stage("intent_analysis")
-                stage.skip("未提供意图结果，使用默认配置")
-        
-        # =====================================================================
-        # 阶段 2.5: Preface - 流式生成开场白（在 intent 之后）
-        # =====================================================================
-        # 使用 haiku 模型快速生成简短开场白，边生成边发送
-        logger.info(f"🎬 Preface 阶段: preface_config={preface_config is not None}, intent={intent is not None}")
-        if preface_config and intent is not None:
-            logger.info(f"🚀 开始生成 Preface: user_message={preface_config.get('user_message', '')[:50]}...")
-            preface_text = await self._generate_preface_stream(
-                intent=intent,
-                user_message=preface_config.get("user_message", ""),
-                session_id=session_id,
-                tracker=preface_config.get("tracker")
-            )
-            if preface_text:
-                # 把 preface 作为 assistant 消息添加到上下文，避免后续回复重复
-                messages.append({
-                    "role": "assistant",
-                    "content": [{"type": "text", "text": preface_text}]
-                })
-                logger.info(f"✨ Preface 已添加到上下文: len={len(preface_text)}")
-            else:
-                logger.warning("⚠️ Preface 生成返回空值")
+        else:
+            # 保存本轮结果供下次追问使用
+            self._last_intent_result = intent
+            logger.debug(f"✅ 使用服务层意图结果: {intent.task_type.value}")
         
         # =====================================================================
         # 阶段 3: Tool Selection (Schema 驱动优先)
@@ -635,7 +559,7 @@ class SimpleAgent:
         logger.info("🔧 开始工具选择...")
         
         # 确定所需能力（优先级：Schema > Plan > Intent 推断）
-        plan = self._plan_cache.get("plan")
+        plan = self._current_plan
         selection_source = "intent"  # 记录选择来源
         
         # 🆕 V4.4: 检查是否使用 Skill 路径
@@ -868,18 +792,15 @@ class SimpleAgent:
         # 4.2 构建 LLM Messages
         llm_messages = dict_list_to_messages(messages)
         
-        # 4.3 Todo 重写（Context Engineering）
-        # 对抗 "Lost-in-the-Middle" 现象，让任务目标始终在注意力高区
-        if self.context_engineering and self._plan_cache.get("plan"):
-            prepared_messages = self.context_engineering.prepare_messages_for_llm(
-                messages=[{"role": m.role, "content": m.content} for m in llm_messages],
-                plan=self._plan_cache.get("plan"),
-                inject_plan=True,
-                inject_errors=True
-            )
-            # 转换回 Message 对象
-            llm_messages = dict_list_to_messages(prepared_messages)
-            logger.debug("✅ Context Engineering: Todo 重写完成，Plan 状态已注入消息末尾")
+        # 4.3 Plan 注入（Cursor 风格：如果有现有计划，追加到 system_prompt）
+        if self._current_plan:
+            plan_text = format_plan_for_prompt(self._current_plan)
+            if isinstance(system_prompt, str):
+                system_prompt = system_prompt + plan_text
+            elif isinstance(system_prompt, list):
+                # 多层缓存格式，追加到最后
+                system_prompt.append({"type": "text", "text": plan_text})
+            logger.info(f"📋 已将现有计划注入 System Prompt: {self._current_plan.get('name', 'Unknown')}")
         
         # =====================================================================
         # 阶段 5: Plan Creation (System Prompt 约束 + Claude 自主触发)
@@ -1929,26 +1850,8 @@ Please output your thinking process:"""
                 tool_input["conversation_id"] = injected_conv_id
                 logger.info(f"🔑 [api_calling 上下文注入] user_id={injected_user_id}, session_id={session_id}, conversation_id={injected_conv_id}")
             
-            # ===== 特殊工具处理 =====
-            if tool_name == "plan_todo":
-                # plan_todo 工具需要 current_plan 参数
-                operation = tool_input.get('operation', 'create_plan')
-                data = tool_input.get('data', {})
-                
-                result = await self.plan_todo_tool.execute(
-                    operation=operation,
-                    data=data,
-                    current_plan=self._plan_cache.get("plan")
-                )
-                
-                # 更新 plan 缓存
-                if result.get("status") == "success" and "plan" in result:
-                    self._plan_cache["plan"] = result.get("plan")
-                    logger.info(f"📋 Plan 操作完成: {operation}")
-            
-            else:
-                # ===== 通用工具执行 =====
-                result = await self.tool_executor.execute(tool_name, tool_input)
+            # ===== 通用工具执行 =====
+            result = await self.tool_executor.execute(tool_name, tool_input)
             
             # 触发 PromptManager（如 RAG 上下文追加）
             if ctx:
@@ -2406,24 +2309,6 @@ Please output your thinking process:"""
         """
         return self.usage_tracker.get_stats()
     
-    def get_plan(self) -> Optional[Dict]:
-        """获取当前计划"""
-        return self._plan_cache.get("plan")
-    
-    def get_progress(self) -> Dict[str, Any]:
-        """获取当前进度"""
-        plan = self._plan_cache.get("plan")
-        if not plan:
-            return {"total": 0, "completed": 0, "progress": 0.0}
-        
-        total = len(plan.get("steps", []))
-        completed = sum(1 for s in plan.get("steps", []) if s.get("status") == "completed")
-        return {
-            "total": total,
-            "completed": completed,
-            "progress": completed / total if total > 0 else 0.0
-        }
-    
     # ===== 🆕 V4.2 Code-First 追踪方法 =====
     
     def get_trace_report(self) -> Optional[Dict[str, Any]]:
@@ -2469,11 +2354,11 @@ Please output your thinking process:"""
         - llm: LLM Service（HTTP 客户端）
         - capability_registry: 工具注册表
         - tool_selector, tool_executor: 工具组件
-        - plan_todo_tool, invocation_selector
+        - invocation_selector
         - _instance_registry, _mcp_clients, _mcp_tools
         
         重置（每次请求独立）：
-        - _plan_cache, _last_intent_result, _tracer
+        - _last_intent_result, _tracer
         - usage_tracker, context_engineering
         - event_manager, broadcaster
         
@@ -2504,7 +2389,6 @@ Please output your thinking process:"""
         cloned.capability_registry = self.capability_registry
         cloned.tool_selector = self.tool_selector
         cloned.tool_executor = self.tool_executor
-        cloned.plan_todo_tool = self.plan_todo_tool
         cloned.invocation_selector = self.invocation_selector
         cloned.llm = self.llm
         cloned._instance_registry = getattr(self, '_instance_registry', None)
@@ -2531,7 +2415,6 @@ Please output your thinking process:"""
         
         在 clone() 时调用，确保每次请求的状态隔离
         """
-        self._plan_cache = {"plan": None, "todo": None, "tool_calls": []}
         self._last_intent_result = None
         self._tracer = None
         self.usage_tracker = create_enhanced_usage_tracker()

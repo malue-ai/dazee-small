@@ -39,6 +39,7 @@ from core.context.compaction import (
 )
 from core.output import OutputFormatter, create_output_formatter
 from core.llm.claude import create_claude_service
+from core.llm import Message
 from core.routing import AgentRouter, RoutingDecision, IntentResult
 from core.monitoring import TokenAuditor, get_token_auditor
 from infra.database import AsyncSessionLocal, crud
@@ -216,6 +217,154 @@ class ChatService:
             logger.info(f"✅ 从 Agent Schema 创建 OutputFormatter: format={formatter_config.default_format}")
         
         return self._formatters[cache_key]
+    
+    # ==================== 前置处理层 ====================
+    
+    async def _emit_intent_event(
+        self,
+        intent: "IntentResult",
+        session_id: str,
+        message_id: str,
+        broadcaster
+    ) -> None:
+        """
+        发送意图识别结果到前端
+        
+        从 SimpleAgent.chat() 阶段 2 移入，实现关注点分离。
+        
+        Args:
+            intent: 意图识别结果
+            session_id: Session ID
+            message_id: 消息 ID
+            broadcaster: EventBroadcaster 实例
+        """
+        intent_content = {
+            "intent_id": intent.intent_id,
+            "intent_name": intent.intent_name,
+            "complexity": intent.complexity.value,
+            "needs_plan": intent.needs_plan,
+            "confidence": intent.confidence,
+        }
+        # 仅当 platform 有值时才添加
+        if intent.platform:
+            intent_content["platform"] = intent.platform
+        
+        intent_delta = {
+            "type": "intent",
+            "content": intent_content
+        }
+        
+        await broadcaster.emit_message_delta(
+            session_id=session_id,
+            delta=intent_delta,
+            message_id=message_id
+        )
+        
+        logger.info(
+            f"🎯 Intent 事件已发送: intent_id={intent.intent_id}, "
+            f"intent_name={intent.intent_name}"
+        )
+    
+    async def _generate_preface_stream(
+        self,
+        intent: "IntentResult",
+        user_message: str,
+        session_id: str,
+        message_id: str,
+        broadcaster,
+        tracker=None
+    ) -> Optional[str]:
+        """
+        流式生成 Preface 开场白（在 intent 之后执行）
+        
+        从 SimpleAgent 移入，实现关注点分离。
+        使用 haiku 模型快速生成简短开场白，边生成边发送 delta 事件。
+        
+        Args:
+            intent: 意图识别结果
+            user_message: 用户原始消息
+            session_id: Session ID
+            message_id: 消息 ID
+            broadcaster: EventBroadcaster 实例
+            tracker: UsageTracker（可选，用于计费追踪）
+            
+        Returns:
+            完整的开场白文本，失败返回 None
+        """
+        try:
+            logger.info("📝 _generate_preface_stream: 开始执行")
+            # 使用 haiku 模型：快速、低成本
+            preface_llm = create_claude_service(
+                model="claude-haiku-4-5-20251001",
+                enable_thinking=False,
+                enable_caching=False
+            )
+            logger.info("📝 _generate_preface_stream: LLM 服务已创建")
+            
+            # 构建 Preface 生成提示词
+            intent_info = f"意图: {intent.intent_name or intent.task_type.value}"
+            if intent.platform:
+                intent_info += f", 平台: {intent.platform}"
+            
+            prompt = f"""你是一个友好的AI助手。用户发送了一条消息，系统已识别出用户意图。
+请生成一句简短的开场白（15-30字），让用户知道你已理解需求并即将开始处理。
+
+要求：
+1. 语气友好、专业
+2. 简洁明了，不要啰嗦
+3. 体现你理解了用户的需求
+4. 不要重复用户的原话
+5. 使用与用户相同的语言（中文/英文）
+
+{intent_info}
+用户消息: {user_message[:200]}
+
+直接输出开场白，不要任何解释或前缀："""
+
+            # 调用 LLM 流式生成 Preface
+            llm_messages = [Message(role="user", content=prompt)]
+            
+            accumulated_text = ""
+            final_response = None
+            
+            async for chunk in preface_llm.create_message_stream(
+                messages=llm_messages,
+                max_tokens=150
+            ):
+                # 流式输出内容
+                if chunk.content and chunk.is_stream:
+                    accumulated_text += chunk.content
+                    # 发送流式 delta 事件
+                    # persist=False: preface 不需要保存到数据库
+                    await broadcaster.emit_message_delta(
+                        session_id=session_id,
+                        delta={"type": "preface", "content": chunk.content},
+                        message_id=message_id,
+                        persist=False
+                    )
+                
+                # 保存最终响应（用于计费）
+                if not chunk.is_stream:
+                    final_response = chunk
+            
+            # 记录 Token 使用（如果提供了 tracker）
+            if tracker and final_response:
+                tracker.record_call(
+                    llm_response=final_response,
+                    model="claude-haiku-4-5-20251001",
+                    purpose="preface"
+                )
+            
+            preface_text = accumulated_text.strip()
+            if preface_text:
+                logger.info(f"✨ Preface 流式生成完成: {preface_text[:50]}...")
+                return preface_text
+            
+            return None
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Preface 流式生成失败: {str(e)}")
+            return None
     
     # ==================== 资源管理 ====================
     
@@ -910,8 +1059,37 @@ class ChatService:
                             background_tasks.append("clue_generation")
                             logger.info("🔍 已添加线索生成后台任务（intent_id=1）")
                     
-                    # 🆕 V7.8: Preface 配置（传给 Agent，在 intent 之后流式生成）
-                    # Preface 生成移至 SimpleAgent.chat()，确保在 intent 事件之后发送
+                    # =====================================================================
+                    # 🆕 V8.0: 前置处理层（从 SimpleAgent 移出）
+                    # 意图事件发送和 Preface 生成在服务层完成，Agent 只负责核心执行
+                    # =====================================================================
+                    
+                    # 1. 发送 intent 事件到前端
+                    await self._emit_intent_event(
+                        intent=routing_intent,
+                        session_id=session_id,
+                        message_id=assistant_message_id,
+                        broadcaster=agent.broadcaster
+                    )
+                    
+                    # 2. 生成 Preface 开场白
+                    user_text = extract_text_from_message(message)
+                    preface_text = await self._generate_preface_stream(
+                        intent=routing_intent,
+                        user_message=user_text,
+                        session_id=session_id,
+                        message_id=assistant_message_id,
+                        broadcaster=agent.broadcaster,
+                        tracker=shared_tracker
+                    )
+                    
+                    # 3. 将 preface 添加到消息历史（避免 Agent 重复生成）
+                    if preface_text:
+                        history_messages.append({
+                            "role": "assistant",
+                            "content": [{"type": "text", "text": preface_text}]
+                        })
+                        logger.info(f"✨ Preface 已添加到上下文: len={len(preface_text)}")
             
             # 🆕 设置 Agent 的输出格式（EventBroadcaster 会使用）
             if hasattr(agent, 'broadcaster') and agent.broadcaster:
@@ -998,26 +1176,19 @@ class ChatService:
                 logger.info(f"✅ 多智能体执行完成，已触发 message_stop: {session_id}")
             else:
                 # 🎯 单智能体执行
-                # - 意图分析：由路由层提供（enable_routing=True）或内部完成（默认）
+                # 🆕 V8.0: 意图事件和 Preface 已在服务层完成
                 # - 内容累积：broadcaster 自动处理 content_start/delta/stop
                 # - Checkpoint：broadcaster 在每个 content_stop 后自动保存
                 # - 最终保存：broadcaster 在 message_stop 时自动完成
                 # - variables：直接注入到 System Prompt（前端上下文）
-                # 🆕 V7.8: 构建 preface_config（在 intent 之后流式生成开场白）
-                preface_config = {
-                    "user_message": extract_text_from_message(message),
-                    "tracker": shared_tracker
-                } if routing_intent else None
                 
                 async for event in agent.chat(
                     messages=history_messages,
                     session_id=session_id,
-                    conversation_id=conversation_id,  # 🆕 直接传入，避免依赖 Redis
+                    conversation_id=conversation_id,
                     message_id=assistant_message_id,
                     enable_stream=True,
-                    variables=variables,
-                    intent=routing_intent,  # 🆕 V7: 路由层意图结果（None 则内部分析）
-                    preface_config=preface_config  # 🆕 V7.8: Preface 配置
+                    variables=variables
                 ):
                     # 跳过被过滤的事件（ZenO 适配器返回 None）
                     if event is None:

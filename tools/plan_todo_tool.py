@@ -299,6 +299,82 @@ class PlanTodoTool(BaseTool):
 """
 
 
+# ===== 辅助函数 =====
+
+def get_plan_path(conversation_id: str) -> Path:
+    """获取计划文件路径"""
+    return PLANS_DIR / f"{conversation_id}.plan.md"
+
+
+async def load_plan_for_session(conversation_id: str) -> Optional[Dict]:
+    """
+    会话开始时加载现有计划（异步版本）
+    
+    Args:
+        conversation_id: 会话 ID
+        
+    Returns:
+        计划数据，如果不存在则返回 None
+    """
+    path = get_plan_path(conversation_id)
+    if not path.exists():
+        return None
+    
+    try:
+        async with aiofiles.open(path, 'r', encoding='utf-8') as f:
+            content = await f.read()
+        
+        # 解析 YAML front matter
+        if content.startswith('---'):
+            parts = content.split('---', 2)
+            if len(parts) >= 3:
+                plan = yaml.safe_load(parts[1])
+                logger.info(f"📋 已加载现有计划: {plan.get('name', 'Unknown')}, conversation_id={conversation_id}")
+                return plan
+    except Exception as e:
+        logger.error(f"加载计划失败: {e}", exc_info=True)
+    
+    return None
+
+
+def format_plan_for_prompt(plan: Dict) -> str:
+    """
+    将计划格式化为可注入 prompt 的文本
+    
+    Args:
+        plan: 计划数据
+        
+    Returns:
+        格式化的文本
+    """
+    if not plan:
+        return ""
+    
+    todos = plan.get("todos", [])
+    total = len(todos)
+    completed = sum(1 for t in todos if t.get("status") == "completed")
+    in_progress = sum(1 for t in todos if t.get("status") == "in_progress")
+    
+    # 构建进度文本
+    progress_lines = []
+    for t in todos:
+        status_icon = "✅" if t["status"] == "completed" else ("🔄" if t["status"] == "in_progress" else "⏳")
+        result_text = f" - {t['result']}" if t.get("result") else ""
+        progress_lines.append(f"  {status_icon} {t['content']}{result_text}")
+    
+    return f"""
+## 当前任务计划
+
+**目标**: {plan.get('name', '任务计划')}
+**进度**: {completed}/{total} 完成, {in_progress} 进行中
+
+**步骤**:
+{chr(10).join(progress_lines)}
+
+请继续执行未完成的步骤。完成一个步骤后，使用 plan_todo 工具更新状态。
+"""
+
+
 # 工厂函数（兼容旧接口）
 def create_plan_todo_tool(**kwargs) -> PlanTodoTool:
     """创建 PlanTodoTool 实例"""
