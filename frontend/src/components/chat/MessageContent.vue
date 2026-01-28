@@ -2,6 +2,8 @@
   <div class="message-content">
     <!-- 渲染所有内容块 -->
     <template v-for="(block, index) in contentBlocks" :key="index">
+      <!-- 跳过 null/undefined 块 -->
+      <template v-if="block">
       <!-- 思考过程 -->
       <div v-if="block.type === 'thinking'" class="thinking-card" :class="{ 'is-streaming': isStreaming }">
         <div class="thinking-header" @click="toggleBlock(index)">
@@ -12,7 +14,7 @@
           <span class="thinking-toggle">{{ isThinkingExpanded(index) ? '收起' : '展开' }}</span>
         </div>
         <div v-show="isThinkingExpanded(index)" class="thinking-body">
-          <span>{{ block.thinking }}</span>
+          <MarkdownRenderer :content="block.thinking || ''" />
           <span v-if="isStreaming" class="typing-cursor"></span>
         </div>
       </div>
@@ -23,12 +25,13 @@
       </div>
 
       <!-- 工具调用 (合并 Tool Use 和 Tool Result) -->
-      <template v-else-if="block.type === 'tool_use'">
+      <template v-else-if="block.type === 'tool_use' || block.type === 'server_tool_use'">
         <ToolMessage 
           :name="block.name"
           :input="block.input"
           :partial-input="block.partialInput"
           :result="getToolResultContent(block.id)"
+          :partial-result="getToolPartialResult(block.id)"
           :status="getToolStatus(block.id)"
         />
       </template>
@@ -73,6 +76,7 @@
           <pre>{{ JSON.stringify(block, null, 2) }}</pre>
         </div>
       </div>
+      </template>
     </template>
 
     <!-- 如果没有内容块，显示纯文本 -->
@@ -149,12 +153,17 @@ const isThinkingExpanded = (index) => {
 }
 
 // 解析内容块
+// 注意：使用 getter 函数让 Vue 能够追踪数组元素内部属性的变化
 const contentBlocks = computed(() => {
   const content = props.content
   
-  // 如果是数组，直接使用
+  // 如果是数组，映射每个元素以建立响应式依赖
   if (Array.isArray(content)) {
-    return content
+    return content.map(block => {
+      if (!block) return block
+      // 返回新对象，包含所有原始属性（这会让 Vue 追踪每个属性）
+      return { ...block }
+    })
   }
   
   // 如果是字符串，尝试解析 JSON
@@ -163,7 +172,7 @@ const contentBlocks = computed(() => {
     try {
       const parsed = JSON.parse(content)
       if (Array.isArray(parsed)) {
-        return parsed
+        return [...parsed]
       }
       // 如果是对象，包装成数组
       if (typeof parsed === 'object' && parsed !== null) {
@@ -212,11 +221,24 @@ function getToolStatus(toolId) {
   return status.success ? 'success' : 'error'
 }
 
-// 获取工具结果内容
+// 获取工具结果内容（完整）
 function getToolResultContent(toolId) {
   const status = props.toolStatuses[toolId]
   if (!status || !status.result) return null
+  // 只有当不再 pending 时才返回完整结果
+  if (status.pending) return null
   return status.result
+}
+
+// 获取工具流式结果（部分）
+function getToolPartialResult(toolId) {
+  // 从 contentBlocks 中查找对应的 tool_result 块
+  for (const block of contentBlocks.value) {
+    if (block && block.type === 'tool_result' && block.tool_use_id === toolId) {
+      return block.content || null
+    }
+  }
+  return null
 }
 
 // 检查是否有配对的 Tool Use
@@ -322,8 +344,20 @@ function formatFileSize(bytes) {
   font-size: 13px;
   color: #5f6368;
   line-height: 1.6;
-  white-space: pre-wrap;
-  word-wrap: break-word;
+}
+
+.thinking-body :deep(.markdown-body) {
+  font-size: 13px;
+  color: #5f6368;
+}
+
+.thinking-body :deep(.markdown-body p) {
+  margin-bottom: 8px;
+}
+
+.thinking-body :deep(.markdown-body pre) {
+  background: #f1f3f4;
+  border: 1px solid #e8eaed;
 }
 
 /* 打字机光标效果 */

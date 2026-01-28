@@ -373,13 +373,13 @@ class ConversationService:
             order: 排序方式（asc/desc）
             
         Returns:
-            {"conversation_id": str, "messages": [...], "total": int, ...}
+            {"conversation_id": str, "conversation_metadata": dict, "messages": [...], "total": int, ...}
             
         Raises:
             ConversationNotFoundError: 对话不存在
         """
-        # 先检查对话是否存在
-        await self.get_conversation(conversation_id)
+        # 获取对话信息（同时验证对话是否存在）
+        conversation = await self.get_conversation(conversation_id)
         
         async with AsyncSessionLocal() as session:
             # 获取总数
@@ -429,6 +429,7 @@ class ConversationService:
         
         return {
             "conversation_id": conversation_id,
+            "conversation_metadata": conversation.metadata,
             "messages": messages,
             "total": total,
             "limit": limit,

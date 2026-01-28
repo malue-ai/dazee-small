@@ -296,8 +296,28 @@ async def _init_pools() -> None:
         mcp_pool = get_mcp_pool()
         
         # 2. 获取 AgentPool 并预加载原型
+        # 🔧 将预加载放在独立 task 中，隔离 MCP 的 anyio cancel scope
+        # 避免 MCP 连接失败时的 cancel scope 污染后续的 Redis 操作
         agent_pool = get_agent_pool()
-        loaded_count = await agent_pool.preload_all()
+        
+        async def _isolated_preload():
+            """隔离 MCP cancel scope 的预加载包装"""
+            try:
+                return await agent_pool.preload_all()
+            except asyncio.CancelledError:
+                print("   ⚠️ AgentPool 预加载被取消")
+                return 0
+            except Exception as e:
+                print(f"   ⚠️ AgentPool 预加载出错: {e}")
+                return 0
+        
+        # 在独立 task 中运行，确保 cancel scope 不泄漏到主流程
+        preload_task = asyncio.create_task(_isolated_preload())
+        loaded_count = await preload_task
+        
+        # 短暂等待让事件循环处理任何残留的 cancel scope
+        await asyncio.sleep(0.01)
+        
         print(f"   ✓ AgentPool: {loaded_count} 个原型已缓存")
         
         # 3. 获取 SessionPool

@@ -343,6 +343,7 @@ class TestDazeeChatEventContent:
             "chart",
             "recommended",
             "application",
+            "dashboard",
             "interface",
         }
         

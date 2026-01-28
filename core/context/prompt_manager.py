@@ -1,10 +1,13 @@
 """
-PromptManager - 事件驱动的 Prompt 追加管理
+PromptManager - 事件驱动的用户消息上下文追加管理
+
+🆕 V8.0: 所有追加内容都追加到用户消息（而非 System Prompt）
 
 核心思想：
 - 与 RuntimeContext 高度耦合，在 Agent 运行时动态追加
-- 事件触发 Prompt 追加（不是写死的规则）
+- 事件触发上下文追加（不是写死的规则）
 - 防止重复追加（同一 fragment_id 只追加一次）
+- 追加位置：messages 中最后一条 user 消息的 text block 后面
 
 使用场景：
 - 第 1 轮：session_start → 追加 sandbox_context
@@ -23,8 +26,8 @@ PromptManager - 事件驱动的 Prompt 追加管理
     # 工具执行后（如 RAG）
     prompt_mgr.on_tool_result(ctx, tool_name="rag_search", result=rag_result)
     
-    # 获取当前 System Prompt（包含所有追加）
-    system_prompt = prompt_mgr.build_system_prompt(ctx, base_prompt="...")
+    # 获取用户消息追加内容（用于追加到最后一条 user message）
+    user_context = prompt_mgr.build_user_context(ctx)
 """
 
 # 1. 标准库
@@ -72,10 +75,15 @@ class PromptState:
     Prompt 追加状态（存储在 RuntimeContext 中）
     
     每个 RuntimeContext 独立维护，追加是累积的
+    
+    🆕 V8.0: 所有追加内容都追加到用户消息（而非 System Prompt）
+    追加位置: messages 中最后一条 user 消息的 {type: "text", text: "..."} 后面
     """
     conversation_id: Optional[str] = None
     user_id: Optional[str] = None
     appended_fragments: Dict[str, AppendedFragment] = field(default_factory=dict)
+    # 🆕 V8.0: 跟踪已追加到用户消息的片段 ID（防止重复追加）
+    synced_to_message: set = field(default_factory=set)
     
     def append(
         self,
@@ -128,6 +136,40 @@ class PromptState:
             reverse=True  # 优先级高的在前
         )
         return "\n\n---\n\n".join(f.content for f in sorted_fragments)
+    
+    def get_unsynced_content(self) -> str:
+        """
+        🆕 V8.0: 获取尚未同步到用户消息的新片段内容
+        
+        Returns:
+            新片段的组装内容（空字符串表示无新内容）
+        """
+        unsynced = {
+            fid: frag for fid, frag in self.appended_fragments.items()
+            if fid not in self.synced_to_message
+        }
+        
+        if not unsynced:
+            return ""
+        
+        sorted_fragments = sorted(
+            unsynced.values(),
+            key=lambda f: f.priority,
+            reverse=True
+        )
+        return "\n\n---\n\n".join(f.content for f in sorted_fragments)
+    
+    def mark_synced(self, fragment_ids: List[str] = None) -> None:
+        """
+        🆕 V8.0: 标记片段已同步到用户消息
+        
+        Args:
+            fragment_ids: 要标记的片段 ID 列表（None 表示标记所有）
+        """
+        if fragment_ids is None:
+            self.synced_to_message = set(self.appended_fragments.keys())
+        else:
+            self.synced_to_message.update(fragment_ids)
     
     def has_fragment(self, fragment_id: str) -> bool:
         """检查是否已追加某片段"""
@@ -727,34 +769,128 @@ class PromptManager:
         
         return "\n".join(lines)
     
-    # ===== System Prompt 构建 =====
+    # ===== 用户消息上下文构建 =====
     
+    def build_user_context(self, ctx: "RuntimeContext") -> str:
+        """
+        构建用户消息追加内容
+        
+        🆕 V8.0: 用于追加到用户消息（而非 System Prompt）
+        
+        Args:
+            ctx: RuntimeContext 实例
+            
+        Returns:
+            追加内容（空字符串表示无追加）
+        """
+        state = self._get_or_create_state(ctx)
+        return state.get_sorted_content()
+    
+    def append_to_user_message(
+        self,
+        ctx: "RuntimeContext",
+        messages: List[Dict[str, Any]]
+    ) -> bool:
+        """
+        将新的追加内容附加到消息列表中最后一条 user 消息
+        
+        🆕 V8.0: 核心方法，在 Agent 的 RVR 循环中调用
+        只追加尚未同步的新内容，防止重复追加
+        
+        追加位置：最后一条 user 消息的 content 中，最后一个 text block 的 text 字段后面
+        
+        Args:
+            ctx: RuntimeContext 实例
+            messages: 消息列表（会被原地修改）
+            
+        Returns:
+            是否成功追加
+            
+        示例：
+            # 原始消息
+            messages = [
+                {"role": "user", "content": [{"type": "text", "text": "帮我查询..."}]}
+            ]
+            
+            # 追加后
+            messages = [
+                {"role": "user", "content": [
+                    {"type": "text", "text": "帮我查询...\\n\\n---\\n\\n# 📚 相关知识\\n..."}
+                ]}
+            ]
+        """
+        state = self._get_or_create_state(ctx)
+        
+        # 🆕 V8.0: 只获取尚未同步到用户消息的新片段
+        appended_content = state.get_unsynced_content()
+        if not appended_content:
+            return False
+        
+        # 找到最后一条 user 消息
+        last_user_msg = None
+        for msg in reversed(messages):
+            if msg.get("role") == "user":
+                last_user_msg = msg
+                break
+        
+        if not last_user_msg:
+            logger.warning("⚠️ 未找到 user 消息，无法追加上下文")
+            return False
+        
+        content = last_user_msg.get("content")
+        
+        # 处理 content 是字符串的情况
+        if isinstance(content, str):
+            last_user_msg["content"] = f"{content}\n\n---\n\n{appended_content}"
+            state.mark_synced()  # 标记所有片段为已同步
+            logger.info(f"📝 已追加上下文到 user 消息（字符串格式）")
+            return True
+        
+        # 处理 content 是 list 的情况（content blocks）
+        if isinstance(content, list):
+            # 找到最后一个 text block
+            for block in reversed(content):
+                if isinstance(block, dict) and block.get("type") == "text":
+                    original_text = block.get("text", "")
+                    block["text"] = f"{original_text}\n\n---\n\n{appended_content}"
+                    state.mark_synced()  # 标记所有片段为已同步
+                    logger.info(f"📝 已追加上下文到 user 消息（content blocks 格式）")
+                    return True
+            
+            # 没有 text block，添加一个新的
+            content.append({
+                "type": "text",
+                "text": f"\n\n---\n\n{appended_content}"
+            })
+            state.mark_synced()  # 标记所有片段为已同步
+            logger.info(f"📝 已追加上下文到 user 消息（新增 text block）")
+            return True
+        
+        logger.warning(f"⚠️ 无法识别的 content 格式: {type(content)}")
+        return False
+    
+    # 🆕 向后兼容：保留 build_system_prompt 但标记为 deprecated
     def build_system_prompt(
         self,
         ctx: "RuntimeContext",
         base_prompt: Optional[str] = None
     ) -> str:
         """
-        构建最终 System Prompt
+        (deprecated) 构建 System Prompt
+        
+        🆕 V8.0: 此方法已废弃，请使用 build_user_context() 或 append_to_user_message()
+        保留此方法仅为向后兼容
         
         Args:
             ctx: RuntimeContext 实例
-            base_prompt: 基础 Prompt（可选，如果不传则只返回追加内容）
+            base_prompt: 基础 Prompt（可选）
             
         Returns:
-            完整的 System Prompt
+            base_prompt（不再追加内容）
         """
-        state = self._get_or_create_state(ctx)
-        
-        # 获取所有追加内容
-        appended_content = state.get_sorted_content()
-        
-        if base_prompt:
-            if appended_content:
-                return f"{base_prompt}\n\n---\n\n{appended_content}"
-            return base_prompt
-        
-        return appended_content
+        logger.warning("⚠️ build_system_prompt 已废弃，请使用 build_user_context() 或 append_to_user_message()")
+        # 不再追加内容到 system prompt，直接返回 base_prompt
+        return base_prompt or ""
     
     def get_appended_fragments(self, ctx: "RuntimeContext") -> List[str]:
         """

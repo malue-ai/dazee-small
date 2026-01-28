@@ -1102,7 +1102,7 @@ capabilities:
 - name: plan_todo
   type: TOOL
   subtype: SESSION
-  provider: system
+  provider: user
   invocation_hint: DIRECT
   level: 1
   cache_stable: true
@@ -1116,25 +1116,24 @@ capabilities:
   - todo_crud
   priority: 95
   cost:
-    time: instant
-    money: free
+    time: medium
+    money: low
   constraints:
     requires_api: false
     session_scoped: true
   metadata:
     description: |
-      任务规划工具（Cursor 风格）- 文件驱动的简洁 CRUD 工具
+      任务规划工具
       
       核心操作：
-      - create: 创建计划（Agent 决定步骤内容）
+      - create: 创建计划（只需传任务描述，内部 LLM 自动生成详细计划）
       - update_todo: 更新步骤状态
       - get: 获取当前计划
       - add_todo: 动态添加步骤
       
       特性：
-      - 本地 Markdown 文件是唯一状态源
-      - 所有 todos 完成后自动删除文件
-      - 工具只做 CRUD，不调用 LLM
+      - create 时内部调用专门的 Plan Generator LLM
+      - 自动生成问题分析、流程图、执行方案
     keywords:
     - plan
     - todo
@@ -1156,24 +1155,15 @@ capabilities:
         type: object
         description: 操作数据（根据 operation 不同而不同）
         properties:
-          name:
+          task:
             type: string
-            description: 计划名称（create 时使用）
-          overview:
+            description: 任务描述（create 时必需，只需简单描述任务目标）
+          context:
             type: string
-            description: 计划概述/目标（create 时使用）
-          steps:
-            type: array
-            description: 步骤列表（create 时使用）
-            items:
-              type: object
-              properties:
-                content:
-                  type: string
-                  description: 步骤内容
+            description: 额外上下文信息（create 时可选）
           id:
             type: string
-            description: todo ID，如 "step-0"（update_todo 时必需）
+            description: todo ID，如 "1"（update_todo 时必需）
           status:
             type: string
             description: 新状态（update_todo 时必需）
@@ -1300,7 +1290,27 @@ capabilities:
     api_name: e2b
     session_scoped: true
   metadata:
-    description: 写入沙盒文件（目录自动创建）
+    description: |
+      写入沙盒文件（目录自动创建）。
+      
+      【核心原则】用户是非技术人员，最终交付物必须是可直接使用的界面。
+      
+      【最佳实践】
+      1. 任何"系统/管理/平台"类项目必须包含前端界面（index.html 或 Vue/React）
+      2. 纯展示/小游戏用单文件 index.html（内嵌 CSS/JS）
+      3. 需要数据存储的系统必须同时创建：前端界面 + 后端 API
+      
+      【典型工作流 - 招聘系统】
+      1. sandbox_write_file("backend/main.py", FastAPI 后端代码)
+      2. sandbox_write_file("frontend/index.html", 完整的管理界面)  ← 用户能看到的界面！
+      3. sandbox_run_command 启动后端 (background=true, port=8000)
+      4. sandbox_run_command 启动前端 (background=true, port=3000)
+      5. 告知用户"系统已启动"，系统自动发送前端链接
+      
+      【关键检查】
+      任务完成前问自己：用户点击链接后能看到可操作的界面吗？
+      - 如果只有后端 API → 任务未完成，必须补充前端界面
+      - 如果用户需要懂代码才能用 → 任务失败
     keywords: [sandbox, 沙盒, 写入, 文件]
   input_schema:
     type: object
@@ -1333,15 +1343,35 @@ capabilities:
     description: |
       执行终端命令。支持后台运行服务器。
       
-      用途：
-      - 安装依赖：npm install, pip install
-      - 启动服务器：npm start, python app.py（使用 background=true + port）
-      - 文件操作：cat, ls, rm, mkdir
+      【核心原则】用户是非技术人员，他们需要可点击访问的链接，而不是命令行输出。
       
-      启动服务器时：
-      - 设置 background=true
-      - 设置 port 参数，会自动返回公开访问 URL
-      - 服务必须监听 0.0.0.0
+      【启动服务 - 最佳实践】
+      1. 设置 background=true + port 参数
+      2. 系统会自动返回公开 URL（https://xxx.e2b.dev）
+      3. 用户点击链接即可访问，无需任何技术操作
+      4. 服务必须监听 0.0.0.0（不是 127.0.0.1 或 localhost）
+      
+      【典型用法】
+      
+      静态 HTML 项目：
+        sandbox_run_command(command="python3 -m http.server 8000", background=true, port=8000)
+      
+      Vue/React 项目：
+        sandbox_run_command(command="npm run dev -- --host 0.0.0.0", background=true, port=5173)
+      
+      FastAPI 后端：
+        sandbox_run_command(command="uvicorn main:app --host 0.0.0.0 --port 8000", background=true, port=8000)
+      
+      Node.js/Express 后端：
+        sandbox_run_command(command="node server.js", background=true, port=3000)
+      
+      【完整系统（前端+后端）工作流】
+      1. 启动后端：sandbox_run_command("uvicorn main:app --host 0.0.0.0 --port 8000", background=true, port=8000, cwd="backend")
+      2. 启动前端：sandbox_run_command("python3 -m http.server 3000", background=true, port=3000, cwd="frontend")
+      3. 告知用户"系统已启动，您可以开始使用了"
+      4. 系统自动发送前端预览链接（用户点击即可访问界面）
+      
+      【注意】localhost:3000 是沙盒内部地址，用户无法访问！必须使用 port 参数获取公开 URL。
     keywords: [sandbox, 沙盒, 命令, bash, shell, 启动服务器]
   input_schema:
     type: object
@@ -1349,7 +1379,7 @@ capabilities:
       conversation_id: {type: string, description: 对话 ID}
       command: {type: string, description: 命令}
       background: {type: boolean, description: 是否后台运行（启动服务器时使用）, default: false}
-      port: {type: integer, description: 服务端口（background=true 时指定，自动返回 URL）}
+      port: {type: integer, description: 服务端口（background=true 时指定，自动返回公开 URL，用户可直接访问）}
       timeout: {type: integer, description: 超时秒数, default: 120}
     required: [conversation_id, command]
 - name: sandbox_read_file
@@ -1464,15 +1494,23 @@ capabilities:
   metadata:
     description: |
       获取沙盒中运行服务的公开 URL。
-      在使用 sandbox_run_command(background=true) 启动服务后调用此工具。
       
-      常用端口：
+      【说明】
+      使用 sandbox_run_command(background=true, port=xxx) 时会自动返回公开 URL，
+      通常不需要单独调用此工具。
+      
+      【最佳实践】
+      - 优先在 sandbox_run_command 中指定 port 参数，直接获取 URL
+      - 此工具用于：之前启动了服务但忘记指定 port、需要再次获取 URL
+      
+      【常用端口】
+      - 静态 HTML (python -m http.server): 8000
       - Vite (React/Vue): 5173
-      - Next.js: 3000
-      - Node.js/Express: 3000
-      - Streamlit: 8501
-      - Gradio: 7860
-      - FastAPI/Flask: 8000/5000
+      - Next.js / Node.js / Express: 3000
+      - FastAPI / Flask: 8000 / 5000
+      
+      【注意】用户是非技术人员，获取 URL 后系统会自动发送给前端，
+      只需告知用户"系统已启动"即可，无需在回复中展示技术细节。
     preferred_for: [获取URL, 预览链接, 公开URL]
     keywords: [sandbox, 沙盒, url, 预览, public]
   input_schema:
@@ -1522,6 +1560,60 @@ capabilities:
       path: {type: string, description: 沙盒中的文件路径}
       filename: {type: string, description: 下载时显示的文件名（可选）}
     required: [conversation_id, path]
+- name: sandbox_init_project
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  level: 1
+  implementation:
+    module: tools.sandbox_tools
+    class: SandboxInitProject
+  capabilities:
+  - sandbox_file_operations
+  - content_writing
+  priority: 95
+  cost:
+    time: fast
+    money: free
+  constraints:
+    requires_api: true
+    api_name: e2b
+    session_scoped: true
+  metadata:
+    description: |
+      【神器】一键初始化专业项目脚手架（包含前端+后端+设计文档）。
+      
+      【强烈推荐】
+      开发任何系统/应用前，先用这个工具初始化项目！模板包含：
+      - 完整的目录结构（components/、pages/、hooks/、lib/）
+      - 前后端分离架构
+      - TypeScript 类型定义
+      - TailwindCSS 样式
+      - IDEAS.md 设计文档（帮你理解项目结构）
+      
+      【支持的模板】
+      1. react_fullstack (推荐): Vite + React + TypeScript + TailwindCSS + Express
+         - 前端端口: 5173
+         - 后端端口: 3000
+      
+      【使用方法】
+      1. 调用 sandbox_init_project(template="react_fullstack")
+      2. 工具自动写入所有文件（package.json, 组件, 页面, API 等）
+      3. 查看返回的 startup_hint 执行启动命令
+      4. 阅读 IDEAS.md 了解项目结构
+      5. 在现有代码基础上修改业务逻辑
+      
+      【关键优势】
+      - 不用从零写代码，在成熟脚手架上"装修"
+      - 保证有完整的前端界面（用户能看到）
+      - 目录结构清晰，便于维护
+    keywords: [sandbox, 沙盒, 初始化, 模板, 脚手架, react, vite, typescript]
+  input_schema:
+    type: object
+    properties:
+      conversation_id: {type: string, description: 对话 ID}
+      template: {type: string, description: 模板名称 (react_fullstack | node_fullstack | static_html), default: react_fullstack}
+    required: [conversation_id]
 - name: document_partition_tool
   type: TOOL
   subtype: CUSTOM

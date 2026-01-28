@@ -144,8 +144,15 @@ class ChatService:
         self.enable_routing = enable_routing
         self._router: Optional[AgentRouter] = None
         
+        # 🆕 V8.1: 意图识别开关（暂时关闭，跳过 IntentAnalyzer 调用）
+        # 设置为 False 时，跳过意图识别，使用默认的 IntentResult
+        self.enable_intent_analysis = False  # TODO: 需要时改回 True
+        
         if enable_routing:
-            logger.info("🔀 路由层已启用：意图分析将在路由层完成")
+            if self.enable_intent_analysis:
+                logger.info("🔀 路由层已启用：意图分析将在路由层完成")
+            else:
+                logger.info("🔀 路由层已启用（意图识别已关闭）")
         
         # 🆕 V7: Token 审计器
         self.token_auditor: TokenAuditor = get_token_auditor()
@@ -1018,7 +1025,7 @@ class ChatService:
             use_multi_agent = False
             routing_intent = None
             
-            if self.enable_routing:
+            if self.enable_routing and self.enable_intent_analysis:
                 # 🆕 V7.6.1: 传入 agent 的 prompt_cache（使用实例自定义的 intent_prompt）
                 agent_prompt_cache = getattr(agent, 'prompt_cache', None)
                 router = self._get_router(prompt_cache=agent_prompt_cache)
@@ -1050,29 +1057,44 @@ class ChatService:
                         f"needs_plan={routing_intent.needs_plan}, "
                         f"confidence={routing_intent.confidence}"
                     )
-                    
-                    # 🆕 V7.7: 当 intent_id=1（系统搭建）时，自动添加线索生成任务
-                    if routing_intent.intent_id == 1:
-                        if background_tasks is None:
-                            background_tasks = []
-                        if "clue_generation" not in background_tasks:
-                            background_tasks.append("clue_generation")
-                            logger.info("🔍 已添加线索生成后台任务（intent_id=1）")
-                    
-                    # =====================================================================
-                    # 🆕 V8.0: 前置处理层（从 SimpleAgent 移出）
-                    # 意图事件发送和 Preface 生成在服务层完成，Agent 只负责核心执行
-                    # =====================================================================
-                    
-                    # 1. 发送 intent 事件到前端
-                    await self._emit_intent_event(
-                        intent=routing_intent,
-                        session_id=session_id,
-                        message_id=assistant_message_id,
-                        broadcaster=agent.broadcaster
-                    )
-                    
-                    # 2. 生成 Preface 开场白
+            elif self.enable_routing and not self.enable_intent_analysis:
+                # 🆕 V8.1: 意图识别已关闭，使用默认 IntentResult（跳过 LLM 调用）
+                from core.agent.types import IntentResult, TaskType, Complexity
+                routing_intent = IntentResult(
+                    task_type=TaskType.OTHER,
+                    complexity=Complexity.MEDIUM,
+                    needs_plan=False,
+                    intent_id=3,
+                    intent_name="综合咨询",
+                    confidence=1.0
+                )
+                logger.info("⏭️ 意图识别已跳过，使用默认 IntentResult")
+            
+            # 🆕 V8.1: 统一处理 routing_intent（无论是 LLM 分析还是默认值）
+            if routing_intent:
+                # 🆕 V7.7: 当 intent_id=1（系统搭建）时，自动添加线索生成任务
+                if routing_intent.intent_id == 1:
+                    if background_tasks is None:
+                        background_tasks = []
+                    if "clue_generation" not in background_tasks:
+                        background_tasks.append("clue_generation")
+                        logger.info("🔍 已添加线索生成后台任务（intent_id=1）")
+                
+                # =====================================================================
+                # 🆕 V8.0: 前置处理层（从 SimpleAgent 移出）
+                # 意图事件发送和 Preface 生成在服务层完成，Agent 只负责核心执行
+                # =====================================================================
+                
+                # 1. 发送 intent 事件到前端
+                await self._emit_intent_event(
+                    intent=routing_intent,
+                    session_id=session_id,
+                    message_id=assistant_message_id,
+                    broadcaster=agent.broadcaster
+                )
+                
+                # 2. 生成 Preface 开场白（仅当启用意图识别时生成，默认值跳过）
+                if self.enable_intent_analysis:
                     user_text = extract_text_from_message(message)
                     preface_text = await self._generate_preface_stream(
                         intent=routing_intent,

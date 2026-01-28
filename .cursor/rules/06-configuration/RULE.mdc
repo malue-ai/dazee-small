@@ -19,55 +19,23 @@ alwaysApply: false
 - 相关配置分组
 - 层级 <= 4 层
 
-### 推荐结构
-
-```yaml
-service_name: "ZenFlux Agent"
-
-server:
-  host: "0.0.0.0"
-  port: 8000
-
-llm:
-  provider: "openai"
-  model: "gpt-4"
-  temperature: 0.7
-  api_key: ${OPENAI_API_KEY}  # 从环境变量读取
-
-logging:
-  level: "INFO"
-  file: "logs/app.log"
-```
+## 配置结构设计
+- 顶层放服务名称等元信息
+- 按功能分组（server、llm、logging 等）
+- 敏感配置使用 `${ENV_VAR}` 占位符从环境变量读取
 
 ## 环境变量
-- 所有密钥使用 `${ENV_VAR}` 或 `os.getenv()` 读取
-- `.env` 仅用于本地开发
+- 所有密钥必须从环境变量读取
+- `.env` 仅用于本地开发，不提交到版本控制
+- 生产环境通过系统环境变量或密钥管理服务注入
 
-### .env 示例
-
-```bash
-OPENAI_API_KEY=sk-...
-LOG_LEVEL=INFO
-APP_ENV=development
-```
-
-## 配置校验
-
-启动时验证配置：
-
-```python
-def validate_config(cfg: dict) -> None:
-    """启动前配置校验"""
-    llm = cfg.get("llm", {})
-    if not llm.get("provider"):
-        raise ValueError("缺少配置: llm.provider")
-    
-    port = cfg.get("server", {}).get("port")
-    if not isinstance(port, int) or not (1 <= port <= 65535):
-        raise ValueError("配置错误: server.port 必须是 1-65535 的整数")
-```
+## 配置校验原则
+- 应用启动时立即验证必要配置
+- 缺少必要配置时抛出清晰的中文错误信息
+- 验证配置值的类型和范围（如端口号 1-65535）
 
 ## 禁止事项
 - ❌ YAML 中硬编码 API key、token、密码
 - ❌ 生产和开发配置混在一起
 - ❌ 使用含糊键名（如 `x1`, `cfg2`）
+- ❌ 配置层级过深（超过 4 层）

@@ -72,6 +72,7 @@ VALID_DELTA_TYPES = {
     "report",       # 分析报告
     "interface",    # 系统配置
     "application",  # 应用数据
+    "dashboard",    # 仪表盘数据
     "recommended",  # 推荐问题
     "billing",      # 计费信息
     "search",       # 搜索结果

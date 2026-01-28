@@ -721,6 +721,44 @@ class ClaudeLLMService(BaseLLMService):
         # 调试日志
         logger.debug(f"📤 LLM 请求: model={self.config.model}, messages={len(messages)}")
         
+        # 🚨 调试日志：打印完整 messages（用于排查 403 错误）
+        logger.info("=" * 80)
+        logger.info("🔍 [DEBUG-ASYNC] 完整 request_params:")
+        logger.info(f"   model: {request_params.get('model')}")
+        logger.info(f"   max_tokens: {request_params.get('max_tokens')}")
+        if "system" in request_params:
+            system_val = request_params.get("system")
+            if isinstance(system_val, list):
+                logger.info(f"   system: (list, {len(system_val)} blocks)")
+            else:
+                logger.info(f"   system: {str(system_val)[:200]}...")
+        logger.info(f"   messages ({len(request_params.get('messages', []))}):")
+        for i, msg in enumerate(request_params.get('messages', [])):
+            logger.info(f"   ── Message [{i}] ──")
+            logger.info(f"      role: {msg.get('role')}")
+            content = msg.get('content')
+            if isinstance(content, list):
+                logger.info(f"      content: (list, {len(content)} blocks)")
+                for j, block in enumerate(content):
+                    if isinstance(block, dict):
+                        block_type = block.get('type', 'unknown')
+                        if block_type == 'text':
+                            text_preview = str(block.get('text', ''))[:300]
+                            logger.info(f"         [{j}] type=text, text={text_preview}...")
+                        elif block_type == 'tool_use':
+                            logger.info(f"         [{j}] type=tool_use, id={block.get('id')}, name={block.get('name')}")
+                        elif block_type == 'tool_result':
+                            logger.info(f"         [{j}] type=tool_result, tool_use_id={block.get('tool_use_id')}")
+                        else:
+                            logger.info(f"         [{j}] type={block_type}")
+                    else:
+                        logger.info(f"         [{j}] (non-dict): {str(block)[:100]}...")
+            elif isinstance(content, str):
+                logger.info(f"      content: {content[:300]}...")
+            else:
+                logger.info(f"      content: (type={type(content).__name__})")
+        logger.info("=" * 80)
+        
         # API 调用
         try:
             if self._betas:
@@ -860,6 +898,59 @@ class ClaudeLLMService(BaseLLMService):
         
         # 请求日志（INFO 级别）
         logger.info(f"📤 Claude 请求: model={self.config.model}, tools={len(all_tools)}, messages={len(formatted_messages)}")
+        
+        # 🚨 调试日志：打印完整 messages（用于排查 403 错误）
+        logger.info("=" * 80)
+        logger.info("🔍 [DEBUG] 完整 request_params:")
+        logger.info(f"   model: {request_params.get('model')}")
+        logger.info(f"   max_tokens: {request_params.get('max_tokens')}")
+        if "thinking" in request_params:
+            logger.info(f"   thinking: {request_params.get('thinking')}")
+        if "system" in request_params:
+            system_val = request_params.get("system")
+            if isinstance(system_val, list):
+                logger.info(f"   system: (list, {len(system_val)} blocks)")
+                for idx, block in enumerate(system_val):
+                    if isinstance(block, dict):
+                        text_preview = str(block.get('text', ''))[:200]
+                        logger.info(f"      [{idx}] type={block.get('type')}, text={text_preview}...")
+            else:
+                logger.info(f"   system: {str(system_val)[:200]}...")
+        logger.info(f"   messages ({len(request_params.get('messages', []))}):")
+        for i, msg in enumerate(request_params.get('messages', [])):
+            logger.info(f"   ── Message [{i}] ──")
+            logger.info(f"      role: {msg.get('role')}")
+            content = msg.get('content')
+            if isinstance(content, list):
+                logger.info(f"      content: (list, {len(content)} blocks)")
+                for j, block in enumerate(content):
+                    if isinstance(block, dict):
+                        block_type = block.get('type', 'unknown')
+                        if block_type == 'text':
+                            text_preview = str(block.get('text', ''))[:300]
+                            logger.info(f"         [{j}] type=text, text={text_preview}...")
+                        elif block_type == 'tool_use':
+                            logger.info(f"         [{j}] type=tool_use, id={block.get('id')}, name={block.get('name')}")
+                        elif block_type == 'tool_result':
+                            logger.info(f"         [{j}] type=tool_result, tool_use_id={block.get('tool_use_id')}")
+                            result_content = block.get('content', '')
+                            if isinstance(result_content, str):
+                                logger.info(f"            content: {result_content[:200]}...")
+                            elif isinstance(result_content, list):
+                                logger.info(f"            content: (list, {len(result_content)} items)")
+                        else:
+                            logger.info(f"         [{j}] type={block_type}, keys={list(block.keys())}")
+                    else:
+                        logger.info(f"         [{j}] (non-dict): {str(block)[:100]}...")
+            elif isinstance(content, str):
+                logger.info(f"      content: {content[:300]}...")
+            else:
+                logger.info(f"      content: (type={type(content).__name__}) {str(content)[:200]}...")
+        if "tools" in request_params:
+            logger.info(f"   tools ({len(request_params['tools'])}):")
+            for tool in request_params['tools']:
+                logger.info(f"      - {tool.get('name', 'unknown')}")
+        logger.info("=" * 80)
         
         # 详细日志：完整请求参数
         if LLM_DEBUG_VERBOSE:

@@ -1,8 +1,8 @@
 """
-线索生成任务 - 当 intent_id=1（系统搭建）时生成操作线索
+线索生成任务 - 每次对话完成后生成操作线索
 
 触发条件：
-- intent_id = 1（系统搭建类意图）
+- 每次对话完成后自动触发
 
 实现：
 - 根据对话内容生成可操作的线索（clue）
@@ -112,14 +112,8 @@ async def generate_clue_task(
     线索生成任务
     
     根据对话内容生成用户可能需要的操作线索
-    仅在 intent_id=1（系统搭建）时触发
+    每次对话完成后自动触发
     """
-    # 检查 intent_id 是否为 1
-    intent_id = ctx.metadata.get("intent_id")
-    if intent_id != 1:
-        logger.debug(f"○ 跳过线索生成（intent_id={intent_id}，非系统搭建类意图）")
-        return
-    
     if not ctx.user_message:
         logger.debug("○ 跳过线索生成（缺少用户消息）")
         return

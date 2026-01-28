@@ -160,6 +160,7 @@ export const useSessionStore = defineStore('session', () => {
 
   /**
    * 刷新活跃会话状态（内部方法）
+   * 当没有活跃会话时自动停止轮询，减少无效请求
    */
   async function refreshActiveSessionsInternal(userId: string): Promise<void> {
     try {
@@ -182,6 +183,12 @@ export const useSessionStore = defineStore('session', () => {
       }
 
       activeSessionsMap.value = newMap
+
+      // 如果没有活跃会话，自动停止轮询
+      if (Object.keys(newMap).length === 0 && pollingTimer) {
+        console.log('📭 没有活跃会话，停止轮询')
+        stopPolling()
+      }
     } catch (error) {
       // 静默失败，不影响用户体验
       console.warn('⚠️ 刷新活跃会话状态失败:', (error as Error).message)

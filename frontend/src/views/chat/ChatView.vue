@@ -20,7 +20,10 @@
     <!-- 右侧主区域 -->
     <div class="flex-1 flex min-w-0 relative z-10 overflow-hidden">
       <!-- 聊天内容区域 -->
-      <div class="flex-1 flex flex-col min-w-0 overflow-hidden">
+      <div 
+        class="flex flex-col min-w-0 overflow-hidden transition-all duration-300"
+        :class="showRightSidebar ? 'w-1/2' : 'flex-1'"
+      >
         <!-- 顶部导航栏 -->
         <ChatHeader
           :title="conversationStore.currentTitle"
@@ -64,8 +67,7 @@
       <Transition name="slide-right">
         <div 
           v-if="showRightSidebar"
-          class="flex-shrink-0 bg-white flex flex-col overflow-hidden my-4 mr-4 ml-3 rounded-2xl shadow-xl border border-gray-100"
-          :class="rightSidebarTab === 'workspace' ? 'w-[600px]' : 'w-[380px]'"
+          class="w-1/2 flex-shrink-0 bg-white flex flex-col overflow-hidden my-4 mr-4 ml-3 rounded-2xl shadow-xl border border-gray-100"
         >
             <!-- 顶部 Tab 栏 -->
             <div class="h-14 flex items-center justify-between px-4 border-b border-gray-100 flex-shrink-0">
@@ -180,7 +182,6 @@ import { useAuthStore } from '@/stores/auth'
 // Composables
 import { useChat } from '@/composables/useChat'
 import { useFileUpload } from '@/composables/useFileUpload'
-import { useHITL } from '@/composables/useHITL'
 import { ClipboardList, FileText, X } from 'lucide-vue-next'
 
 // Components
@@ -208,7 +209,7 @@ const authStore = useAuthStore()
 
 const chat = useChat()
 const fileUpload = useFileUpload()
-const hitl = useHITL()
+const hitl = chat.hitl
 
 // ==================== State ====================
 
@@ -236,12 +237,18 @@ const fileInputRef = ref<HTMLInputElement | null>(null)
 
 // ==================== Computed ====================
 
-/** 当前 Plan */
+/** 当前 Plan（优先从 conversation_metadata 获取，否则从消息中查找） */
 const currentPlan = computed<PlanData | null>(() => {
+  // 优先使用从 conversation_metadata 加载的 plan
+  if (conversationStore.conversationPlan) {
+    return conversationStore.conversationPlan
+  }
+  
+  // 否则从消息列表中查找最新的 plan
   const messages = conversationStore.messages
   for (let i = messages.length - 1; i >= 0; i--) {
     const plan = messages[i].planResult
-    if (plan && typeof plan === 'object' && (plan.goal || plan.steps)) {
+    if (plan && typeof plan === 'object' && plan.todos) {
       return plan
     }
   }
@@ -285,16 +292,6 @@ onUnmounted(() => {
   sessionStore.stopPolling()
 })
 
-// 监听路由变化（跳过初始值，只监听后续变化）
-watch(
-  () => route.params.conversationId,
-  async (newId, oldId) => {
-    // 只在路由实际变化时加载（避免重复加载）
-    if (newId && typeof newId === 'string' && newId !== oldId) {
-      await conversationStore.load(newId)
-    }
-  }
-)
 
 // ==================== Methods ====================
 
@@ -339,7 +336,7 @@ function handleSelectAgent(agent: Agent): void {
 
 /** 选择会话 */
 async function handleSelectConversation(id: string): Promise<void> {
-  await conversationStore.load(id)
+  // 只更新路由，由 useChat 的 watch 统一处理加载
   router.push({ name: 'conversation', params: { conversationId: id } })
 }
 

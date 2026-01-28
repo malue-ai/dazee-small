@@ -28,7 +28,8 @@ from typing import Dict, Any, List, Optional, Tuple
 # 2. 第三方库（无）
 
 # 3. 本地模块
-from tools.plan_todo_tool import PlanTodoTool
+from tools.plan_todo_tool import format_plan_for_prompt
+from utils.message_utils import append_text_to_last_block
 from logger import get_logger
 
 logger = get_logger(__name__)
@@ -169,23 +170,25 @@ class TodoRewriter:
         if not plan:
             return messages
         
-        # 生成 Plan 上下文（精简格式）
-        plan_context = PlanTodoTool.get_context_for_llm(plan)
+        # 生成 Plan 上下文（使用新的格式化函数）
+        plan_context = format_plan_for_prompt(plan)
         
-        if not plan_context or plan_context == "[Plan] No active plan":
+        if not plan_context:
             return messages
         
         # 深拷贝避免修改原列表
         result = [msg.copy() for msg in messages]
         
         if position == "end" and result:
-            # 找到最后一条用户消息
+            # 找到最后一条用户消息，使用通用方法追加
             for i in range(len(result) - 1, -1, -1):
                 if result[i].get("role") == "user":
                     content = result[i].get("content", "")
                     if isinstance(content, str):
-                        # 注入到用户消息末尾
                         result[i]["content"] = f"{content}\n\n---\n📋 {plan_context}"
+                    elif isinstance(content, list):
+                        # content_blocks 格式，使用通用方法
+                        append_text_to_last_block(content, f"\n\n---\n📋 {plan_context}")
                     break
         
         elif position == "user_prefix" and result:
@@ -195,6 +198,12 @@ class TodoRewriter:
                     content = result[i].get("content", "")
                     if isinstance(content, str):
                         result[i]["content"] = f"📋 {plan_context}\n\n---\n{content}"
+                    elif isinstance(content, list):
+                        # content_blocks 格式，在第一个 text block 前添加
+                        for block in content:
+                            if isinstance(block, dict) and block.get("type") == "text":
+                                block["text"] = f"📋 {plan_context}\n\n---\n{block['text']}"
+                                break
                     break
         
         return result
@@ -205,7 +214,7 @@ class TodoRewriter:
         生成 Todo 提醒文本（用于注入末尾）
         
         Args:
-            plan: 当前计划
+            plan: 当前计划（新格式：name, overview, todos）
             
         Returns:
             Todo 提醒文本
@@ -213,16 +222,23 @@ class TodoRewriter:
         if not plan:
             return ""
         
-        goal = plan.get("goal", "")
-        current_step = plan.get("current_step", 0)
-        total_steps = plan.get("total_steps", 0)
-        completed = plan.get("completed_steps", 0)
-        status = plan.get("status", "executing")
+        # 新格式：name, todos
+        goal = plan.get("name", "")
+        todos = plan.get("todos", [])
+        total_steps = len(todos)
+        completed = sum(1 for t in todos if t.get("status") == "completed")
+        in_progress_todos = [t for t in todos if t.get("status") == "in_progress"]
+        pending_todos = [t for t in todos if t.get("status") == "pending"]
         
-        steps = plan.get("steps", [])
+        # 确定当前步骤
+        current_step = completed
         current_action = ""
-        if 0 <= current_step < len(steps):
-            current_action = steps[current_step].get("action", "")
+        if in_progress_todos:
+            current_action = in_progress_todos[0].get("content", "")
+        elif pending_todos:
+            current_action = pending_todos[0].get("content", "")
+        
+        status = "completed" if completed == total_steps else "executing"
         
         lines = [
             f"🎯 **当前目标**: {goal}",

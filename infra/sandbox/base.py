@@ -332,7 +332,7 @@ class SandboxProvider(ABC):
     async def list_dir(
         self,
         conversation_id: str,
-        path: str = "/home/user"
+        path: str = "/home/user/project"
     ) -> List[FileInfo]:
         """
         列出目录内容

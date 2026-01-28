@@ -153,7 +153,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     convId: string,
     options: { path?: string; tree?: boolean } = {}
   ): Promise<FileItem[]> {
-    const { path = '/home/user', tree = true } = options
+    const { path = '/home/user/project', tree = true } = options
 
     conversationId.value = convId
     isLoadingFiles.value = true

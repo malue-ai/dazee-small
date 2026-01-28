@@ -318,6 +318,10 @@ async def get_conversation_messages(
       "message": "success",
       "data": {
         "conversation_id": "conv_abc123",
+        "conversation_metadata": {
+          "sandbox_type": "e2b",
+          "project_type": "react_fullstack"
+        },
         "messages": [
           {
             "id": 1,

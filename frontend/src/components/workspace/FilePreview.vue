@@ -203,6 +203,14 @@ function getIconClass() {
   return colorMap[ext] || 'text-gray-400'
 }
 
+/**
+ * 规范化文件路径用于 URL
+ */
+function normalizePathForUrl(path: string): string {
+  const cleanPath = path.startsWith('/') ? path.slice(1) : path
+  return cleanPath.split('/').map(encodeURIComponent).join('/')
+}
+
 // 加载文件内容
 async function loadFile() {
   isLoading.value = true
@@ -210,7 +218,7 @@ async function loadFile() {
   try {
     if (isImage.value) {
       // 图片使用 URL
-      imageUrl.value = `/api/v1/workspace/${props.conversationId}/files/${props.filePath}?download=true`
+      imageUrl.value = `/api/v1/workspace/${props.conversationId}/files/${normalizePathForUrl(props.filePath)}?download=true`
     } else {
       // 文本文件获取内容
       const content = await workspaceStore.getFileContent(props.conversationId, props.filePath)

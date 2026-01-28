@@ -125,7 +125,6 @@ class EventAdapter(ABC):
         
         可以配置订阅特定的 delta 类型，如：
         - "message_delta:confirmation_request"
-        - "message_delta:plan"
         - "message_delta:recommended"
         
         Args:

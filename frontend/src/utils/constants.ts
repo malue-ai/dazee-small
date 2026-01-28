@@ -162,7 +162,7 @@ export const DEFAULT_CONFIG = {
   RECONNECT_MAX_DELAY: 10000,
   
   /** 活跃会话轮询间隔（毫秒） */
-  POLLING_INTERVAL: 5000,
+  POLLING_INTERVAL: 20000,
   
   /** 默认分页大小 */
   PAGE_SIZE: 20,

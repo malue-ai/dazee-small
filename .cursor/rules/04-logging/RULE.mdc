@@ -6,74 +6,32 @@ alwaysApply: true
 # 日志规范
 
 ## 核心原则
-- 使用 `from logger import get_logger` 获取日志记录器
+- 使用项目统一的日志模块（参考 `logger.py`）
 - 在请求入口设置上下文（request_id/session_id/user_id）便于追踪
 - 控制台输出易读格式，文件输出 JSON 格式
-- 错误单独记录到 `logs/error.log`
+- 错误单独记录到独立的错误日志文件
 
-## 基础使用
-```python
-from logger import get_logger
-
-logger = get_logger()  # 自动获取模块名
-
-logger.debug("调试信息")           # 仅开发环境
-logger.info("正常操作")
-logger.warning("警告")
-logger.error("错误", exc_info=True)  # 记录异常堆栈
-logger.critical("严重错误")
-```
+## 日志级别使用
+- **DEBUG**：仅开发环境，详细调试信息
+- **INFO**：正常操作，关键业务流程
+- **WARNING**：潜在问题，不影响正常运行
+- **ERROR**：错误情况，需要关注（必须包含堆栈）
+- **CRITICAL**：严重错误，系统可能无法继续运行
 
 ## 上下文追踪
-```python
-from logger import set_request_context
-
-# 请求开始时设置
-set_request_context(
-    request_id="req-123",
-    session_id="sess-456",
-    user_id="user-789"
-)
-
-# 后续日志自动包含上下文
-logger.info("处理请求")
-# 输出: 2024-01-01 12:00:00 [INFO] [req-123] [sess-456] [user-789] module.py:42: 处理请求
-```
+- 请求开始时设置追踪上下文（request_id、session_id、user_id）
+- 后续日志自动包含上下文信息，便于问题排查
+- 日志格式应包含：时间戳、级别、上下文 ID、模块位置、消息
 
 ## 结构化日志
-```python
-# 添加额外字段
-logger.info("操作完成", extra={
-    "duration_ms": 123,
-    "operation": "db_query"
-})
-```
-
-## 性能监控
-```python
-from logger import log_execution_time
-
-with log_execution_time("数据库查询"):
-    results = await db.query(...)
-```
+- 使用 extra 字段添加结构化数据（耗时、操作类型等）
+- 便于日志聚合和分析
 
 ## 最佳实践
-- 包含上下文信息：`logger.info(f"处理任务 task_id={task_id}")`
-- 记录异常必须 `exc_info=True`
+- 日志消息包含足够的上下文信息（如 `task_id=xxx`）
+- 记录异常时必须包含堆栈信息
 - 记录关键操作的开始和结束
-- 使用 extra 添加性能指标
-
-## 日志文件
-- `logs/app.log`：所有日志（JSON 格式）
-- `logs/error.log`：仅错误日志（JSON 格式）
-- 控制台：彩色易读格式
-
-## 查看日志
-```bash
-tail -f logs/app.log              # 最新日志
-tail -f logs/error.log            # 错误日志
-grep "req-123" logs/app.log | jq  # 搜索请求
-```
+- 使用性能监控工具记录耗时操作
 
 ## 禁止事项
 - ❌ 记录敏感信息（密码、token、API key）

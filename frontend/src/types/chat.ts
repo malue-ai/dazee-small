@@ -67,7 +67,7 @@ export interface ContentStopData {
  */
 export interface MessageDeltaData {
   delta: {
-    type: 'plan' | 'recommended' | 'confirmation_request'
+    type: 'plan' | 'recommended' | 'confirmation_request' | 'preface'
     content: string | object
   }
 }
@@ -207,21 +207,24 @@ export interface AttachedFile {
 }
 
 /**
- * 计划步骤
+ * 计划步骤（plan_todo 工具格式）
  */
 export interface PlanStep {
   id: string
-  title: string
+  content: string
   status: 'pending' | 'in_progress' | 'completed' | 'failed'
-  description?: string
+  result?: string
 }
 
 /**
- * 计划数据
+ * 计划数据（plan_todo 工具格式）
  */
 export interface PlanData {
-  goal?: string
-  steps?: PlanStep[]
+  name: string
+  overview?: string
+  detailed_plan?: string
+  todos: PlanStep[]
+  created_at?: string
 }
 
 /**

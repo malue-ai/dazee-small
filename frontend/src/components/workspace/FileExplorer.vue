@@ -26,10 +26,24 @@
       </div>
     </div>
     
+    <!-- 沙盒准备中 -->
+    <div v-if="isPreparingSandbox" class="flex-1 flex flex-col items-center justify-center text-gray-400 gap-2">
+      <Loader2 class="w-5 h-5 animate-spin" />
+      <span class="text-xs">沙盒启动中...</span>
+      <span class="text-[10px] text-gray-300">首次加载可能需要几秒钟</span>
+    </div>
+    
     <!-- 加载状态 -->
-    <div v-if="isLoading" class="flex-1 flex flex-col items-center justify-center text-gray-400 gap-2">
+    <div v-else-if="isLoading" class="flex-1 flex flex-col items-center justify-center text-gray-400 gap-2">
       <Loader2 class="w-5 h-5 animate-spin" />
       <span class="text-xs">加载中...</span>
+    </div>
+    
+    <!-- 错误状态 -->
+    <div v-else-if="sandboxError" class="flex-1 flex flex-col items-center justify-center text-red-400 gap-2 p-4">
+      <AlertCircle class="w-6 h-6" />
+      <span class="text-xs text-center">{{ sandboxError }}</span>
+      <button @click="loadFiles" class="text-xs text-blue-500 hover:underline mt-1">重试</button>
     </div>
     
     <!-- 空状态 -->
@@ -40,7 +54,7 @@
     </div>
     
     <!-- 文件树 -->
-    <div v-else class="flex-1 overflow-y-auto p-2 scrollbar-thin">
+    <div v-else class="flex-1 overflow-y-auto py-2 scrollbar-thin">
       <FileTreeNode
         v-for="item in files"
         :key="item.path"
@@ -95,7 +109,7 @@
 import { ref, computed, watch } from 'vue'
 import { useWorkspaceStore } from '@/stores/workspace'
 import FileTreeNode from './FileTreeNode.vue'
-import { Folder, FolderOpen, RefreshCw, Loader2, Play, Globe, Code2, Zap, FileCode } from 'lucide-vue-next'
+import { Folder, FolderOpen, RefreshCw, Loader2, Play, Globe, Code2, Zap, FileCode, AlertCircle } from 'lucide-vue-next'
 
 // Props
 const props = defineProps({
@@ -113,6 +127,8 @@ const workspaceStore = useWorkspaceStore()
 
 // 状态
 const isAllExpanded = ref(false)
+const isPreparingSandbox = ref(false)
+const sandboxError = ref<string | null>(null)
 
 // 计算属性
 const isLoading = computed(() => workspaceStore.isLoadingFiles)
@@ -138,19 +154,42 @@ const fileCount = computed(() => {
   return countFiles(files.value)
 })
 
-// 加载文件
+// 加载文件（先检查沙盒状态）
 async function loadFiles() {
   if (!props.conversationId) return
   
+  sandboxError.value = null
+  
   try {
+    // 1. 先获取沙盒状态
+    isPreparingSandbox.value = true
+    const status = await workspaceStore.fetchSandboxStatus(props.conversationId)
+    
+    // 2. 根据状态决定操作
+    if (status.status === 'none' || status.status === 'killed') {
+      // 沙盒不存在，需要初始化
+      console.log('沙盒不存在，正在初始化...')
+      await workspaceStore.initSandbox(props.conversationId, 'default_user')
+    } else if (status.status === 'paused') {
+      // 沙盒已暂停，需要恢复
+      console.log('沙盒已暂停，正在恢复...')
+      await workspaceStore.resumeSandbox(props.conversationId)
+    }
+    // status === 'running' 或 'creating' 时直接继续
+    
+    isPreparingSandbox.value = false
+    
+    // 3. 获取文件列表
     await Promise.all([
-      workspaceStore.fetchFiles(props.conversationId, { tree: true }),
+      workspaceStore.fetchFiles(props.conversationId, { path: '/home/user/project', tree: true }),
       workspaceStore.fetchProjects(props.conversationId)
     ])
     // 默认展开所有目录
     workspaceStore.expandAll()
     isAllExpanded.value = true
-  } catch (error) {
+  } catch (error: any) {
+    isPreparingSandbox.value = false
+    sandboxError.value = error.message || '加载失败'
     console.error('加载文件失败:', error)
   }
 }

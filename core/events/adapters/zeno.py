@@ -113,7 +113,7 @@ class ZenOAdapter(EventAdapter):
         "message_delta",
         "error",
         "session_end",
-        "session_stopped",  # 🆕 用户主动停止事件
+        "session_stopped",
     ]
     
     def __init__(self, conversation_id: Optional[str] = None):
@@ -397,12 +397,9 @@ class ZenOAdapter(EventAdapter):
         #     zeno_content = self._convert_hitl_to_clue(content)
         
         # 直接通过 message_delta 发送的类型
-        # 🆕 V7.7: 统一支持所有通过 enhance_tool_result 生成的 delta 类型
-        # 包括：intent, billing, progress, sql, data, chart, report, application, mind, interface, sandbox, files
-        # 🆕 V7.8: 添加 preface（开场白）类型
         elif delta_type in (
             "intent", "billing", "progress", "preface",  # 基础类型（V7.8: 添加 preface）
-            "sql", "data", "chart", "report", "application",  # 问数平台类型
+            "sql", "data", "chart", "report", "dashboard", "application", # 问数平台类型
             "mind", "interface", "sandbox", "files",  # 系统搭建/流程图/沙箱/文件类型
         ):
             zeno_delta_type = delta_type
@@ -540,30 +537,27 @@ class ZenOAdapter(EventAdapter):
     
     def _convert_plan_to_progress(self, content: Any) -> Dict[str, Any]:
         """
-        将 Zenflux plan 格式转换为 ZenO progress 格式
+        将 plan_todo 格式转换为 ZenO progress 格式
         
-        支持 str（JSON 字符串）或 dict（已解析的对象）作为输入
-        
-        Zenflux Plan:
+        plan_todo 输入格式:
         {
-            "goal": "生成PPT",
-            "steps": [
-                {"index": 0, "action": "分析需求", "status": "completed"},
-                {"index": 1, "action": "调用API", "status": "in_progress"}
-            ],
-            "current_step": 1,
-            "progress": 0.5
+            "name": "制作 AI PPT",
+            "overview": "为用户生成一份 AI 技术分享 PPT",
+            "todos": [
+                {"id": "step-0", "content": "搜索资料", "status": "completed", "result": "找到5篇"},
+                {"id": "step-1", "content": "整理大纲", "status": "in_progress"}
+            ]
         }
         
-        ZenO Progress:
+        ZenO Progress 输出:
         {
-            "title": "生成PPT",
+            "title": "制作 AI PPT",
             "status": "running",
             "current": 1,
             "total": 2,
             "subtasks": [
-                {"title": "分析需求", "status": "success"},
-                {"title": "调用API", "status": "running"}
+                {"title": "搜索资料", "status": "success", "desc": "找到5篇"},
+                {"title": "整理大纲", "status": "running"}
             ]
         }
         
@@ -579,10 +573,9 @@ class ZenOAdapter(EventAdapter):
             else:
                 plan = content
         except json.JSONDecodeError:
-            # 如果是字符串但解析失败，返回空对象
             return {"title": "任务执行中", "status": "running", "current": 0, "total": 0, "subtasks": []}
         
-        # 转换步骤状态
+        # 状态映射：plan_todo → ZenO
         status_map = {
             "pending": "pending",
             "in_progress": "running",
@@ -590,33 +583,30 @@ class ZenOAdapter(EventAdapter):
             "failed": "error"
         }
         
-        steps = plan.get("steps", [])
+        # 转换 todos → subtasks
+        todos = plan.get("todos", [])
         subtasks = []
-        for step in steps:
+        for todo in todos:
             subtasks.append({
-                "title": step.get("action", ""),
-                "status": status_map.get(step.get("status", "pending"), "pending"),
-                "desc": step.get("result", "")
+                "title": todo.get("content", ""),
+                "status": status_map.get(todo.get("status", "pending"), "pending"),
+                "desc": todo.get("result", "")
             })
         
-        # 计算完成数
-        completed_count = sum(1 for s in steps if s.get("status") == "completed")
-        total = len(steps)
+        # 计算进度
+        completed_count = sum(1 for t in todos if t.get("status") == "completed")
+        total = len(todos)
         
         # 整体状态
-        overall_status = "running"
-        if plan.get("progress", 0) >= 1.0:
-            overall_status = "completed"
+        overall_status = "completed" if (total > 0 and completed_count == total) else "running"
         
-        progress_data = {
-            "title": plan.get("goal", "任务执行中"),
+        return {
+            "title": plan.get("name", "任务执行中"),
             "status": overall_status,
             "current": completed_count,
             "total": total,
             "subtasks": subtasks
         }
-        
-        return progress_data
     
     def _convert_hitl_to_clue(self, content: str) -> Dict[str, Any]:
         """
@@ -1218,6 +1208,7 @@ class ZenOAdapter(EventAdapter):
         - data: 查询结果数据
         - chart: 图表配置
         - report: 分析报告 {title, content}
+        - dashboard: 仪表盘数据 {dashboard_id, name, status}（可选）
         
         Args:
             result_content: 工具返回的 JSON 字符串
@@ -1279,18 +1270,18 @@ class ZenOAdapter(EventAdapter):
         if report:
             deltas.append(self._create_delta("report", report))
         
-        # 生成 application delta（可选，包含 dashboard_id 等）
+        # 生成 dashboard delta（可选，包含 dashboard_id 等）
         dashboard_id = actual_data.get("dashboard_id")
         if dashboard_id:
             # 从 report.title 获取名称，从 success 字段获取状态
             report_title = report.get("title", "数据分析") if report else "数据分析"
             app_status = "success" if actual_data.get("success") else "failed"
             app_data = {
-                "application_id": dashboard_id,
+                "dashboard_id": dashboard_id,
                 "name": report_title,
                 "status": app_status
             }
-            deltas.append(self._create_delta("application", app_data))
+            deltas.append(self._create_delta("dashboard", app_data))
         
         return deltas
     

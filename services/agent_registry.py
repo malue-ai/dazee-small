@@ -536,20 +536,41 @@ class AgentRegistry:
                         logger.warning(f"⚠️ MCP 服务器 {server_name} 的密钥环境变量 {auth_env} 未设置，跳过")
                         continue
                 
-                # 🔧 通过 MCPPool 连接并发现工具（获取真实的 input_schema）
+                # 🔧 将 MCP 连接操作隔离到独立 task 中，避免 anyio cancel scope 污染主流程
+                async def _isolated_mcp_connect(_pool, _server_url, _server_name, _auth_token):
+                    """在独立 task 中连接 MCP，隔离 cancel scope"""
+                    try:
+                        client = await _pool.get_client(
+                            server_url=_server_url,
+                            server_name=_server_name,
+                            auth_token=_auth_token
+                        )
+                        if client:
+                            tools = await client.discover_tools()
+                            return client, tools
+                        return None, []
+                    except asyncio.CancelledError:
+                        logger.warning(f"   ⚠️ MCP 连接被取消（隔离）: {_server_name}")
+                        return None, []
+                    except Exception as e:
+                        logger.warning(f"   ⚠️ MCP 连接异常（隔离）: {_server_name}: {e}")
+                        return None, []
+                
                 logger.info(f"   🔌 连接 MCP 服务器: {server_name}")
-                client = await pool.get_client(
-                    server_url=server_url,
-                    server_name=server_name,
-                    auth_token=auth_token
+                
+                # 在独立 task 中执行 MCP 连接，隔离 anyio cancel scope
+                connect_task = asyncio.create_task(
+                    _isolated_mcp_connect(pool, server_url, server_name, auth_token)
                 )
+                client, tools = await connect_task
+                
+                # 短暂等待让事件循环处理残留的 cancel scope
+                await asyncio.sleep(0)
                 
                 if not client:
                     logger.warning(f"   ❌ MCP 服务器 {server_name} 连接失败，跳过")
                     continue
                 
-                # 发现工具（包含真实的 input_schema）
-                tools = await client.discover_tools()
                 logger.info(f"   ✅ {server_name}: 发现 {len(tools)} 个工具")
                 
                 # 注册每个发现的工具

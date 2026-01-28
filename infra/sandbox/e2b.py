@@ -122,6 +122,15 @@ class E2BSandboxProvider(SandboxProvider):
                 sandbox = await self._connect_sandbox(db_sandbox.e2b_sandbox_id)
                 self._sandbox_pool[conversation_id] = sandbox
                 
+                # 确保项目目录存在
+                try:
+                    await sandbox.commands.run(
+                        "mkdir -p /home/user/project", 
+                        timeout=10
+                    )
+                except Exception as init_err:
+                    logger.warning(f"⚠️ 初始化项目目录失败: {init_err}")
+                
                 async with AsyncSessionLocal() as session:
                     await crud.update_sandbox_status(
                         session, conversation_id, "running"
@@ -195,6 +204,16 @@ class E2BSandboxProvider(SandboxProvider):
                 
                 await asyncio.sleep(1)
                 self._sandbox_pool[conversation_id] = sandbox
+                
+                # 初始化项目目录
+                try:
+                    await sandbox.commands.run(
+                        "mkdir -p /home/user/project", 
+                        timeout=10
+                    )
+                    logger.info("📁 项目目录初始化完成: /home/user/project")
+                except Exception as init_err:
+                    logger.warning(f"⚠️ 初始化项目目录失败: {init_err}")
                 
                 async with AsyncSessionLocal() as session:
                     await crud.update_sandbox_e2b_id(
@@ -353,6 +372,15 @@ class E2BSandboxProvider(SandboxProvider):
         try:
             sandbox = await self._connect_sandbox(db_sandbox.e2b_sandbox_id)
             self._sandbox_pool[conversation_id] = sandbox
+            
+            # 确保项目目录存在
+            try:
+                await sandbox.commands.run(
+                    "mkdir -p /home/user/project", 
+                    timeout=10
+                )
+            except Exception as init_err:
+                logger.warning(f"⚠️ 初始化项目目录失败: {init_err}")
             
             async with AsyncSessionLocal() as session:
                 await crud.update_sandbox_status(
@@ -916,7 +944,7 @@ class E2BSandboxProvider(SandboxProvider):
     async def list_dir(
         self,
         conversation_id: str,
-        path: str = "/home/user"
+        path: str = "/home/user/project"
     ) -> List[FileInfo]:
         """列出目录内容"""
         self._check_available()

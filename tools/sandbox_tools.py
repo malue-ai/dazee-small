@@ -174,10 +174,12 @@ class SandboxWriteFile(BaseTool):
     
     async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
         """执行写文件操作"""
+        # 始终使用 context.conversation_id（由系统注入，可信）
+        # 忽略 Agent 传入的 conversation_id，避免写入错误的沙盒
         conversation_id = context.conversation_id
         path = params.get("path", "")
         content = params.get("content", "")
-        user_id = context.user_id or "default_user"
+        user_id = params.get("user_id") or context.user_id or "default_user"
         
         try:
             await ensure_sandbox(conversation_id, user_id)
@@ -204,9 +206,10 @@ class SandboxReadFile(BaseTool):
     
     async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
         """执行读文件操作"""
+        # 始终使用 context.conversation_id（由系统注入，可信）
         conversation_id = context.conversation_id
         path = params.get("path", "")
-        user_id = context.user_id or "default_user"
+        user_id = params.get("user_id") or context.user_id or "default_user"
         
         try:
             await ensure_sandbox(conversation_id, user_id)
@@ -235,9 +238,10 @@ class SandboxListFiles(BaseTool):
     
     async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
         """执行列出目录操作"""
+        # 始终使用 context.conversation_id（由系统注入，可信）
         conversation_id = context.conversation_id
         path = params.get("path")
-        user_id = context.user_id or "default_user"
+        user_id = params.get("user_id") or context.user_id or "default_user"
         
         try:
             await ensure_sandbox(conversation_id, user_id)
@@ -274,13 +278,14 @@ class SandboxRunCommand(BaseTool):
     
     async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
         """执行命令"""
+        # 始终使用 context.conversation_id（由系统注入，可信）
         conversation_id = context.conversation_id
         command = params.get("command", "")
         background = params.get("background", False)
         port = params.get("port")
         cwd = params.get("cwd")
         timeout = params.get("timeout", 120)
-        user_id = context.user_id or "default_user"
+        user_id = params.get("user_id") or context.user_id or "default_user"
         
         try:
             await ensure_sandbox(conversation_id, user_id)
@@ -384,10 +389,11 @@ class SandboxExecutePython(BaseTool):
     
     async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
         """执行 Python 代码"""
+        # 始终使用 context.conversation_id（由系统注入，可信）
         conversation_id = context.conversation_id
         code = params.get("code", "")
         timeout = params.get("timeout", 300)
-        user_id = context.user_id or "default_user"
+        user_id = params.get("user_id") or context.user_id or "default_user"
         
         try:
             await ensure_sandbox(conversation_id, user_id)
@@ -418,9 +424,10 @@ class SandboxGetPublicUrl(BaseTool):
     
     async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
         """获取公开 URL"""
+        # 始终使用 context.conversation_id（由系统注入，可信）
         conversation_id = context.conversation_id
         port = params.get("port", 3000)
-        user_id = context.user_id or "default_user"
+        user_id = params.get("user_id") or context.user_id or "default_user"
         
         try:
             await ensure_sandbox(conversation_id, user_id)
@@ -555,10 +562,11 @@ class SandboxUploadFile(BaseTool):
         import hashlib
         from pathlib import Path
         
+        # 始终使用 context.conversation_id（由系统注入，可信）
         conversation_id = context.conversation_id
         path = params.get("path", "")
         filename = params.get("filename")
-        user_id = context.user_id or "default_user"
+        user_id = params.get("user_id") or context.user_id or "default_user"
         
         try:
             await ensure_sandbox(conversation_id, user_id)
@@ -628,9 +636,80 @@ class SandboxUploadFile(BaseTool):
             return {"success": False, "error": str(e)}
 
 
+# ==================== 工具 8: 初始化项目模板 ====================
+
+class SandboxInitProject(BaseTool):
+    """
+    使用预置模板初始化项目（input_schema 由 capabilities.yaml 定义）
+    
+    优势：
+    1. 一键生成完整项目结构（前端+后端）
+    2. 避免 Agent 逐个写文件时的遗漏或错误
+    3. 模板文件存储在 templates/ 目录，方便维护
+    """
+    
+    name = "sandbox_init_project"
+    
+    async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
+        """执行项目初始化"""
+        from tools.project_templates import (
+            get_template_files, 
+            list_templates, 
+            get_template_startup_command,
+            get_template_ports
+        )
+        
+        # 始终使用 context.conversation_id（由系统注入，可信）
+        # 忽略 Agent 传入的 conversation_id，避免写入错误的沙盒
+        conversation_id = context.conversation_id
+        template_name = params.get("template", "react_fullstack")  # 默认使用 React 模板
+        user_id = params.get("user_id") or context.user_id or "default_user"
+        
+        try:
+            await ensure_sandbox(conversation_id, user_id)
+            service = get_sandbox_service()
+            
+            # 获取模板文件（从文件系统读取）
+            files = get_template_files(template_name)
+            if not files:
+                available = list_templates()
+                return {
+                    "success": False,
+                    "error": f"模板 '{template_name}' 不存在。可用模板: {list(available.keys())}"
+                }
+            
+            # 批量写入文件
+            created_files = []
+            for file_path, content in files.items():
+                normalized_path = _normalize_path(file_path)
+                await service.write_file(conversation_id, normalized_path, content)
+                created_files.append(file_path)
+            
+            logger.info(f"🚀 项目模板 '{template_name}' 初始化完成，共 {len(created_files)} 个文件")
+            
+            # 获取启动命令和端口信息
+            startup_command = get_template_startup_command(template_name)
+            ports = get_template_ports(template_name)
+            
+            return {
+                "success": True,
+                "message": f"项目已基于模板 '{template_name}' 初始化成功。",
+                "template": template_name,
+                "created_files": created_files,
+                "file_count": len(created_files),
+                "ports": ports,
+                "startup_hint": startup_command,
+                "next_step": "请查看 IDEAS.md 了解项目结构，然后根据业务需求修改代码。"
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ 初始化项目失败: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+
 # ==================== 工具注册 ====================
 
-# 7 个标准工具（贴近 E2B 原生 API）
+# 8 个标准工具（贴近 E2B 原生 API + 模板增强）
 SANDBOX_TOOLS = [
     SandboxWriteFile,       # 写入文件
     SandboxReadFile,        # 读取文件
@@ -639,6 +718,7 @@ SANDBOX_TOOLS = [
     SandboxExecutePython,   # 执行 Python 代码
     SandboxGetPublicUrl,    # 获取公开 URL
     SandboxUploadFile,      # 上传文件到 S3
+    SandboxInitProject,     # 初始化项目模板
 ]
 
 

@@ -243,7 +243,7 @@ class SandboxServicer(pb2_grpc.SandboxServiceServicer):
         """获取文件列表"""
         try:
             service = get_sandbox_service()
-            path = request.path if request.path else "/home/user"
+            path = request.path if request.path else "/home/user/project"
             
             # 根据 tree 参数选择方法
             if request.tree:

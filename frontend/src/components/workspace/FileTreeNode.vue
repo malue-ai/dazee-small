@@ -1,19 +1,23 @@
 <template>
-  <div class="select-none" :style="{ paddingLeft: depth * 14 + 'px' }">
+  <div class="select-none">
     <!-- 节点内容 -->
     <div 
-      class="flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer transition-colors group"
-      :class="isDirectory 
-        ? 'hover:bg-blue-50 text-gray-700' 
-        : 'hover:bg-gray-100 text-gray-600'"
+      class="flex items-center gap-1.5 py-1.5 pr-2 cursor-pointer transition-colors group border-l-2"
+      :class="[
+        isSelected 
+          ? 'bg-blue-50 border-blue-500 text-blue-700' 
+          : 'border-transparent hover:bg-gray-100 text-gray-600',
+        isDirectory ? 'font-medium' : ''
+      ]"
+      :style="{ paddingLeft: (depth * 12 + 12) + 'px' }"
       @click="handleClick"
     >
       <!-- 展开/收起图标 -->
-      <span v-if="isDirectory" class="w-3 h-3 flex items-center justify-center text-gray-400">
+      <span v-if="isDirectory" class="w-3 h-3 flex items-center justify-center text-gray-400 flex-shrink-0">
         <ChevronDown v-if="isExpanded" class="w-3 h-3" />
         <ChevronRight v-else class="w-3 h-3" />
       </span>
-      <span v-else class="w-3"></span>
+      <span v-else class="w-3 flex-shrink-0"></span>
       
       <!-- 文件/文件夹图标 -->
       <component :is="getIcon()" class="w-4 h-4 flex-shrink-0" :class="getIconClass()" />
@@ -21,7 +25,6 @@
       <!-- 名称 -->
       <span 
         class="flex-1 text-xs truncate" 
-        :class="isDirectory ? 'font-medium text-gray-800' : 'text-gray-600'"
         :title="item.path"
       >
         {{ fileName }}
@@ -99,6 +102,7 @@ const workspaceStore = useWorkspaceStore()
 // 计算属性
 const isDirectory = computed(() => props.item.type === 'directory')
 const isExpanded = computed(() => workspaceStore.isDirExpanded(props.item.path))
+const isSelected = computed(() => workspaceStore.selectedFile?.path === props.item.path)
 
 // 获取文件名
 const fileName = computed(() => {

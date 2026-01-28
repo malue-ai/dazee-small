@@ -45,7 +45,7 @@ MAX_EVENTS = 5000
 VALID_DELTA_TYPES = {
     "intent", "thinking", "response", "progress", "preface",
     "clue", "files", "mind", "sql", "data", "chart", "report",
-    "interface", "application", "recommended", "billing",
+    "interface", "application", "dashboard", "recommended", "billing",
     "search", "knowledge", "ppt",
 }
 

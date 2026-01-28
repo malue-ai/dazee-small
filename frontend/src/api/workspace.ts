@@ -17,11 +17,23 @@ import type {
 
 // ==================== API 路径定义 ====================
 
+/**
+ * 规范化文件路径用于 URL
+ * - 移除开头的 / 避免双斜杠
+ * - 对每个路径段进行 URL 编码
+ */
+function normalizePathForUrl(path: string): string {
+  // 移除开头的斜杠
+  const cleanPath = path.startsWith('/') ? path.slice(1) : path
+  // 对每个路径段进行编码，保留斜杠
+  return cleanPath.split('/').map(encodeURIComponent).join('/')
+}
+
 const PATHS = {
   FILES: (conversationId: string) => `/v1/workspace/${conversationId}/files`,
   PROJECTS: (conversationId: string) => `/v1/workspace/${conversationId}/projects`,
   FILE: (conversationId: string, path: string) =>
-    `/v1/workspace/${conversationId}/file?path=${encodeURIComponent(path)}`,
+    `/v1/workspace/${conversationId}/files/${normalizePathForUrl(path)}`,
   SANDBOX_STATUS: (conversationId: string) => `/v1/workspace/${conversationId}/sandbox/status`,
   SANDBOX_INIT: (conversationId: string) => `/v1/workspace/${conversationId}/sandbox/init`,
   SANDBOX_PAUSE: (conversationId: string) => `/v1/workspace/${conversationId}/sandbox/pause`,
@@ -46,7 +58,7 @@ const PATHS = {
  */
 export async function getFiles(
   conversationId: string,
-  path = '/home/user',
+  path = '/home/user/project',
   tree = true
 ): Promise<{ files: FileItem[]; total_size: number }> {
   const response = await api.get<{ files: FileItem[]; total_size: number }>(

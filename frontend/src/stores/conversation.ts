@@ -20,6 +20,9 @@ export const useConversationStore = defineStore('conversation', () => {
   /** 当前会话的消息列表 */
   const messages = ref<UIMessage[]>([])
 
+  /** 当前会话的 Plan（从 conversation_metadata 加载） */
+  const conversationPlan = ref<PlanData | null>(null)
+
   /** 用户 ID */
   const userId = ref<string>('')
 
@@ -109,10 +112,18 @@ export const useConversationStore = defineStore('conversation', () => {
   async function load(conversationId: string): Promise<void> {
     currentId.value = conversationId
     loadingMessages.value = true
+    conversationPlan.value = null  // 重置 plan
 
     try {
       const result = await chatApi.getConversationMessages(conversationId, 100, 0, 'asc')
       messages.value = result.messages.map(processHistoryMessage)
+      
+      // 从 conversation_metadata 中提取 plan
+      if (result.conversation_metadata?.plan) {
+        conversationPlan.value = result.conversation_metadata.plan as PlanData
+        console.log('📋 从会话元数据加载 Plan:', conversationPlan.value?.name)
+      }
+      
       console.log('✅ 历史消息已加载:', messages.value.length, '条')
     } catch (error) {
       console.error('❌ 加载消息失败:', error)
@@ -189,6 +200,7 @@ export const useConversationStore = defineStore('conversation', () => {
 
   /**
    * 添加助手消息（空消息，用于流式填充）
+   * 注意：返回的是数组中的响应式对象，而不是原始对象
    */
   function addAssistantMessage(): UIMessage {
     const msg: UIMessage = {
@@ -203,7 +215,8 @@ export const useConversationStore = defineStore('conversation', () => {
       timestamp: new Date()
     }
     messages.value.push(msg)
-    return msg
+    // 返回数组中的最后一个元素（被 Vue Proxy 包装的响应式对象）
+    return messages.value[messages.value.length - 1]
   }
 
   /**
@@ -224,6 +237,7 @@ export const useConversationStore = defineStore('conversation', () => {
   function reset(): void {
     currentId.value = null
     messages.value = []
+    conversationPlan.value = null
   }
 
   /**
@@ -377,6 +391,7 @@ export const useConversationStore = defineStore('conversation', () => {
     conversations,
     currentId,
     messages,
+    conversationPlan,
     userId,
     loading,
     loadingMessages,

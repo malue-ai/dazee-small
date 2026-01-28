@@ -42,6 +42,13 @@ from .conversation import Context, create_context
 # 运行时上下文
 from .runtime import RuntimeContext, create_runtime_context
 
+# 元数据获取器
+from .metadata_provider import (
+    ConversationMetadataProvider,
+    load_plan_for_context,
+    load_context_metadata,
+)
+
 __all__ = [
     # 主入口
     "ContextManager",
@@ -63,4 +70,9 @@ __all__ = [
     # 运行时上下文
     "RuntimeContext",
     "create_runtime_context",
+    
+    # 元数据获取器
+    "ConversationMetadataProvider",
+    "load_plan_for_context",
+    "load_context_metadata",
 ]

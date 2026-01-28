@@ -9,13 +9,15 @@ import { useConversationStore } from '@/stores/conversation'
 import { useSessionStore } from '@/stores/session'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useSSE, type SSEEventHandler } from './useSSE'
+import { useHITL } from './useHITL'
 import type {
   UIMessage,
   AttachedFile,
   SendMessageOptions,
   ContentBlock,
   PlanData,
-  Agent
+  Agent,
+  HITLConfirmRequest
 } from '@/types'
 import { FILE_WRITE_TOOLS, TERMINAL_TOOLS, BACKGROUND_TASKS } from '@/utils'
 
@@ -28,6 +30,7 @@ export function useChat() {
   const conversationStore = useConversationStore()
   const sessionStore = useSessionStore()
   const workspaceStore = useWorkspaceStore()
+  const hitl = useHITL()
   const sse = useSSE()
 
   // ==================== 状态 ====================
@@ -209,6 +212,11 @@ export function useChat() {
         onEvent: (event) => handleStreamEvent(event, assistantMsg),
         onConnected: () => {
           console.log('✅ SSE 已连接')
+          // 启动活跃会话轮询（如果之前因为没有活跃会话而停止了）
+          const userId = conversationStore.userId
+          if (userId) {
+            sessionStore.startPolling(userId)
+          }
         },
         onDisconnected: () => {
           console.log('✅ SSE 已断开')
@@ -325,6 +333,33 @@ export function useChat() {
     if (type === 'content_stop') {
       handleContentStop(data, msg)
     }
+
+    // 兼容 ZenO 格式（message.assistant.*）
+    if (type === 'message.assistant.delta') {
+      const delta = (event as any).delta
+      if (delta?.type === 'thinking') {
+        msg.thinking = (msg.thinking || '') + (delta.content || '')
+      } else if (delta?.type === 'response') {
+        msg.content += (delta.content || '')
+      } else if (delta?.type === 'clue') {
+        try {
+          const raw = typeof delta.content === 'string' ? JSON.parse(delta.content) : delta.content
+          const request = normalizeHITLRequest(raw)
+          if (request && !hitl.showModal.value) {
+            hitl.show(request)
+          }
+        } catch {
+          // 忽略解析错误
+        }
+      }
+    }
+
+    if (type === 'message.assistant.error') {
+      const error = (event as any).error
+      if (error?.message) {
+        msg.content += `\n❌ ${error.message}`
+      }
+    }
   }
 
   /**
@@ -332,25 +367,6 @@ export function useChat() {
    */
   function handleMessageDelta(delta: { type: string; content: string | object }, msg: UIMessage): void {
     if (!delta) return
-
-    if (delta.type === 'plan') {
-      try {
-        let planData = typeof delta.content === 'string'
-          ? JSON.parse(delta.content)
-          : delta.content
-
-        // 处理嵌套结构
-        if (planData?.plan) {
-          msg.planResult = planData.plan as PlanData
-        } else if (planData?.goal || planData?.steps) {
-          msg.planResult = planData as PlanData
-        }
-
-        console.log('📋 Plan 已更新:', msg.planResult)
-      } catch (e) {
-        console.warn('解析 Plan 失败:', e)
-      }
-    }
 
     if (delta.type === 'recommended') {
       try {
@@ -362,12 +378,187 @@ export function useChat() {
         // 忽略解析错误
       }
     }
+
+    if (delta.type === 'preface') {
+      const text = typeof delta.content === 'string' ? delta.content : JSON.stringify(delta.content)
+      msg.content += text || ''
+    }
+
+    if (delta.type === 'confirmation_request') {
+      try {
+        const raw = typeof delta.content === 'string'
+          ? JSON.parse(delta.content)
+          : delta.content
+        const request = normalizeHITLRequest(raw)
+        if (request && !hitl.showModal.value) {
+          hitl.show(request)
+        }
+      } catch (e) {
+        console.warn('解析 HITL 请求失败:', e)
+      }
+    }
+  }
+
+  /**
+   * 尝试从内容中解析并更新 Plan（支持流式解析）
+   * @param content - 工具返回的内容（可能是不完整的 JSON）
+   * @param msg - 当前消息
+   */
+  function tryUpdatePlanFromContent(content: string, msg: UIMessage): void {
+    if (!content) return
+    
+    try {
+      // 尝试解析完整 JSON
+      const resultContent = JSON.parse(content)
+      if (resultContent?.plan) {
+        msg.planResult = resultContent.plan as PlanData
+        console.log('📋 流式更新 Plan:', msg.planResult?.name)
+      }
+    } catch {
+      // JSON 不完整，尝试提取部分 plan 数据（用于流式显示）
+      // 只在能找到 "plan": { 时尝试解析
+      const planMatch = content.match(/"plan"\s*:\s*(\{[\s\S]*)/)?.[1]
+      if (planMatch) {
+        try {
+          // 尝试补全 JSON（简单处理）
+          let planJson = planMatch
+          // 计算大括号平衡
+          let depth = 0
+          let endIndex = 0
+          for (let i = 0; i < planJson.length; i++) {
+            if (planJson[i] === '{') depth++
+            else if (planJson[i] === '}') {
+              depth--
+              if (depth === 0) {
+                endIndex = i + 1
+                break
+              }
+            }
+          }
+          if (endIndex > 0) {
+            const planData = JSON.parse(planJson.substring(0, endIndex))
+            if (planData?.name || planData?.todos) {
+              msg.planResult = planData as PlanData
+              console.log('📋 流式更新 Plan (部分):', planData?.name)
+            }
+          }
+        } catch {
+          // 忽略解析错误
+        }
+      }
+    }
+  }
+
+  /**
+   * 初始化内容块（统一处理所有类型）
+   * 确保每种类型的内容块都有正确的初始结构
+   */
+  function initContentBlock(contentBlock: ContentBlock): ContentBlock {
+    const block = { ...contentBlock, _blockType: contentBlock.type }
+    
+    // 根据类型初始化字段
+    switch (contentBlock.type) {
+      case 'text':
+        if (!('text' in block)) {
+          (block as any).text = ''
+        }
+        break
+      case 'thinking':
+        if (!('thinking' in block)) {
+          (block as any).thinking = ''
+        }
+        break
+      case 'tool_use':
+      case 'server_tool_use':
+        if (!('partialInput' in block)) {
+          (block as any).partialInput = ''
+        }
+        break
+      case 'tool_result':
+        // tool_result 的 content 可能在 content_start 时就完整发送
+        // 也可能通过 delta 流式发送
+        if (!('content' in block)) {
+          (block as any).content = ''
+        }
+        break
+    }
+    
+    return block as ContentBlock
+  }
+
+  /**
+   * 更新内容块（统一处理流式增量）
+   * 通过替换数组元素来确保响应式更新
+   */
+  function updateContentBlock(msg: UIMessage, index: number, deltaText: string): void {
+    const block = msg.contentBlocks[index]
+    if (!block) {
+      // 容错：如果缺少 content_start，按文本块补齐
+      const fallbackBlock = initContentBlock({ type: 'text', text: '' } as ContentBlock)
+      msg.contentBlocks[index] = fallbackBlock
+    }
+
+    const current = msg.contentBlocks[index]
+    if (!current) return
+
+    const blockType = (current as any)._blockType || currentBlockType || ''
+
+    switch (blockType) {
+      case 'text':
+        msg.content += deltaText
+        // 直接修改现有对象属性（Vue 3 Proxy 会追踪）
+        ;(current as any).text = ((current as any).text || '') + deltaText
+        break
+        
+      case 'thinking':
+        msg.thinking = (msg.thinking || '') + deltaText
+        // 直接修改现有对象属性
+        ;(current as any).thinking = ((current as any).thinking || '') + deltaText
+        break
+        
+      case 'tool_use':
+      case 'server_tool_use':
+        ;(current as any).partialInput = ((current as any).partialInput || '') + deltaText
+        
+        // 更新 pending tool input
+        const toolIds = Object.keys(pendingToolCalls.value)
+        if (toolIds.length > 0) {
+          const lastId = toolIds[toolIds.length - 1]
+          pendingToolCalls.value[lastId].input += deltaText
+        }
+
+        // 更新实时预览
+        if (workspaceStore.isLivePreviewing && deltaText) {
+          workspaceStore.updateLivePreview(deltaText)
+        }
+        break
+        
+      case 'tool_result':
+        // 流式累加工具结果内容
+        ;(current as any).content = ((current as any).content || '') + deltaText
+        
+        // 同步更新 toolStatuses 中的结果
+        const toolUseId = (current as any).tool_use_id
+        if (toolUseId && msg.toolStatuses[toolUseId]) {
+          msg.toolStatuses[toolUseId].result = (current as any).content
+        }
+
+        // plan_todo 工具：流式更新 Plan
+        if (toolUseId) {
+          const toolCall = pendingToolCalls.value[toolUseId]
+          if (toolCall?.name === 'plan_todo') {
+            tryUpdatePlanFromContent((current as any).content, msg)
+          }
+        }
+        break
+    }
   }
 
   /**
    * 处理内容块开始
    */
   function handleContentStart(data: { index: number; content_block: ContentBlock }, msg: UIMessage): void {
+    if (!data || typeof data.index !== 'number' || !data.content_block) return
     const { index, content_block } = data
 
     // 扩展 contentBlocks 数组
@@ -375,10 +566,12 @@ export function useChat() {
       msg.contentBlocks.push(null as unknown as ContentBlock)
     }
 
-    // 记录 block 类型
-    msg.contentBlocks[index] = { ...content_block, _blockType: content_block.type } as ContentBlock
+    // 初始化并存储内容块
+    const initializedBlock = initContentBlock(content_block)
+    msg.contentBlocks[index] = initializedBlock
     currentBlockType = content_block.type
 
+    // 类型特定处理
     if (content_block.type === 'thinking') {
       msg.thinking = ''
     }
@@ -420,8 +613,10 @@ export function useChat() {
         result: content
       }
 
-      // 处理终端输出
+      // 获取对应的工具调用信息
       const toolCall = pendingToolCalls.value[toolUseId]
+
+      // 处理终端输出
       if (toolCall && TERMINAL_TOOLS.includes(toolCall.name as any)) {
         let outputText = content
         try {
@@ -443,18 +638,9 @@ export function useChat() {
         delete pendingToolCalls.value[toolUseId]
       }
 
-      // 提取 Plan 数据
-      try {
-        const resultContent = typeof content === 'string'
-          ? JSON.parse(content)
-          : content
-
-        if (resultContent?.plan) {
-          msg.planResult = resultContent.plan as PlanData
-          console.log('📋 从工具结果中提取 Plan:', msg.planResult)
-        }
-      } catch {
-        // 忽略解析错误
+      // plan_todo 工具：提取 Plan 数据（非流式情况，content_start 时已有完整数据）
+      if (toolCall?.name === 'plan_todo' && content) {
+        tryUpdatePlanFromContent(content, msg)
       }
     }
   }
@@ -463,50 +649,25 @@ export function useChat() {
    * 处理内容增量
    */
   function handleContentDelta(data: { index: number; delta: string | object }, msg: UIMessage): void {
+    if (!data || typeof data.index !== 'number') return
     const { index, delta } = data
-    const block = msg.contentBlocks[index]
-    const blockType = (block as any)?._blockType || currentBlockType || ''
 
+    // 提取 delta 文本
     const deltaText = typeof delta === 'string'
       ? delta
       : ((delta as any).text || (delta as any).thinking || (delta as any).partial_json || '')
 
-    if (blockType === 'text') {
-      msg.content += deltaText
-      // 🔧 修复：直接设置 text 属性，不检查是否存在
-      // 后端 content_start 可能只发送 { type: 'text' } 而没有 text 字段
-      if (block) {
-        (block as any).text = ((block as any).text || '') + deltaText
-      }
-    } else if (blockType === 'thinking') {
-      msg.thinking = (msg.thinking || '') + deltaText
-      // 🔧 修复：直接设置 thinking 属性
-      if (block) {
-        (block as any).thinking = ((block as any).thinking || '') + deltaText
-      }
-    } else if (blockType === 'tool_use' || blockType === 'server_tool_use') {
-      if (block) {
-        (block as any).partialInput = ((block as any).partialInput || '') + deltaText
-      }
+    if (!deltaText) return
 
-      // 更新 pending tool input
-      const toolIds = Object.keys(pendingToolCalls.value)
-      if (toolIds.length > 0) {
-        const lastId = toolIds[toolIds.length - 1]
-        pendingToolCalls.value[lastId].input += deltaText
-      }
-
-      // 更新实时预览
-      if (workspaceStore.isLivePreviewing && deltaText) {
-        workspaceStore.updateLivePreview(deltaText)
-      }
-    }
+    // 统一更新内容块
+    updateContentBlock(msg, index, deltaText)
   }
 
   /**
    * 处理内容块停止
    */
   function handleContentStop(data: { index: number }, msg: UIMessage): void {
+    if (!data || typeof data.index !== 'number') return
     const { index } = data
     const block = msg.contentBlocks[index]
 
@@ -517,6 +678,18 @@ export function useChat() {
         delete (block as any).partialInput
       } catch {
         // 忽略解析错误
+      }
+    }
+
+    // HITL：工具输入完整后弹窗
+    if (block && (block as any).type === 'tool_use') {
+      const toolName = (block as any).name as string
+      if (toolName === 'hitl' || toolName === 'request_human_confirmation') {
+        const rawInput = (block as any).input || {}
+        const request = normalizeHITLRequest(rawInput)
+        if (request && !hitl.showModal.value) {
+          hitl.show(request)
+        }
       }
     }
 
@@ -541,6 +714,22 @@ export function useChat() {
             // 忽略解析错误
           }
         }
+      }
+    }
+
+    // plan_todo 工具：tool_result 完整后最终确认 Plan 数据
+    if (block && block.type === 'tool_result') {
+      const toolUseId = (block as any).tool_use_id
+      const toolCall = toolUseId ? pendingToolCalls.value[toolUseId] : null
+      
+      if (toolCall?.name === 'plan_todo') {
+        const content = (block as any).content
+        if (content) {
+          tryUpdatePlanFromContent(content, msg)
+          console.log('📋 Plan 数据已确认:', msg.planResult?.name)
+        }
+        // 清理 pendingToolCalls
+        delete pendingToolCalls.value[toolUseId]
       }
     }
   }
@@ -575,6 +764,7 @@ export function useChat() {
     isGenerating,
     isStopping,
     selectedAgent,
+    hitl,
 
     // 计算属性
     messages,
@@ -592,4 +782,36 @@ export function useChat() {
     sendMessage,
     stopGeneration
   }
+}
+
+/**
+ * 规范化 HITL 请求（兼容不同字段命名）
+ */
+function normalizeHITLRequest(raw: any): HITLConfirmRequest | null {
+  if (!raw) return null
+  if (typeof raw === 'string') {
+    try {
+      return normalizeHITLRequest(JSON.parse(raw))
+    } catch {
+      return null
+    }
+  }
+  if (typeof raw !== 'object') return null
+
+  const question = raw.question || raw.title || ''
+  if (!question) return null
+
+  const confirmationType = raw.confirmation_type || raw.input_type ||
+    (raw.questions ? 'form' : 'yes_no')
+
+  return {
+    question,
+    options: raw.options,
+    confirmation_type: confirmationType,
+    timeout: raw.timeout,
+    description: raw.description || raw.metadata?.description,
+    questions: raw.questions || raw.metadata?.questions,
+    default_value: raw.default_value,
+    metadata: raw.metadata
+  } as HITLConfirmRequest
 }

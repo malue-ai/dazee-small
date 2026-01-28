@@ -15,12 +15,13 @@ message_delta 统一结构：
 支持的 type：
 - usage       : 使用统计 {"type": "usage", "content": {"stop_reason": "end_turn"}}
 - recommended : 推荐问题 {"type": "recommended", "content": "[...]"}
-- plan        : 计划更新 {"type": "plan", "content": {...}}
 - search      : 搜索结果 {"type": "search", "content": "..."}
 - knowledge   : 知识检索 {"type": "knowledge", "content": "..."}
 - ppt         : PPT 生成 {"type": "ppt", "content": "..."}
 - intent      : 意图分析 {"type": "intent", "content": {...}}
 - billing     : 计费信息 {"type": "billing", "content": {...}}
+
+注意：Plan 数据通过 tool_result (plan_todo 工具) 发送，不使用 message_delta
 
 注意：
 - Tool 事件通过 Content 级事件发送（tool_use/tool_result）

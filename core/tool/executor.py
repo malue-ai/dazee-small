@@ -298,8 +298,14 @@ class ToolExecutor:
             
             if inspect.isasyncgenfunction(execute_stream_method):
                 try:
-                    async for chunk in execute_stream_method(**tool_input):
-                        yield chunk
+                    # 新式工具（BaseTool 子类）：传递 params 和 context
+                    if isinstance(tool_instance, BaseTool):
+                        async for chunk in execute_stream_method(tool_input, ctx):
+                            yield chunk
+                    else:
+                        # 旧式工具：使用 **kwargs
+                        async for chunk in execute_stream_method(**tool_input):
+                            yield chunk
                     return
                 except Exception as e:
                     logger.error(f"流式执行工具 {tool_name} 失败: {e}", exc_info=True)

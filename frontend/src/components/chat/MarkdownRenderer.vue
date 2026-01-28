@@ -30,17 +30,22 @@ mermaid.initialize({
 // 自定义 marked renderer 处理 mermaid 代码块
 const renderer = new marked.Renderer()
 
-renderer.code = function(code, language) {
-  if (language === 'mermaid') {
+// marked v5+ 使用对象参数 { text, lang }，旧版本使用 (code, language)
+renderer.code = function(codeOrObj, language) {
+  // 兼容新旧版本的 marked
+  const code = typeof codeOrObj === 'object' ? codeOrObj.text : codeOrObj
+  const lang = typeof codeOrObj === 'object' ? codeOrObj.lang : language
+  
+  if (lang === 'mermaid') {
     // 返回一个带有特殊类的 div，稍后会被 mermaid 渲染
     const id = 'mermaid-' + Math.random().toString(36).substr(2, 9)
     return `<div class="mermaid-container"><pre class="mermaid" id="${id}">${code}</pre></div>`
   }
   
   // 普通代码高亮
-  if (language && hljs.getLanguage(language)) {
+  if (lang && hljs.getLanguage(lang)) {
     try {
-      return `<pre><code class="hljs language-${language}">${hljs.highlight(code, { language }).value}</code></pre>`
+      return `<pre><code class="hljs language-${lang}">${hljs.highlight(code, { language: lang }).value}</code></pre>`
     } catch (err) {}
   }
   return `<pre><code class="hljs">${hljs.highlightAuto(code).value}</code></pre>`

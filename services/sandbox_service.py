@@ -218,7 +218,7 @@ class SandboxService:
     async def list_files(
         self,
         conversation_id: str,
-        path: str = "/home/user"
+        path: str = "/home/user/project"
     ) -> List[FileInfo]:
         """列出沙盒目录内容"""
         abs_path = self._normalize_path(path)
@@ -228,33 +228,47 @@ class SandboxService:
         except InfraSandboxNotFoundError as e:
             raise SandboxNotFoundError(str(e))
         except Exception as e:
+            # 如果目录不存在，返回空列表
+            if "not found" in str(e).lower() or "no such file" in str(e).lower():
+                logger.info(f"📁 目录不存在: {abs_path}，返回空列表")
+                return []
             logger.error(f"❌ 列出目录失败: {abs_path} - {e}", exc_info=True)
             raise SandboxServiceError(f"列出目录失败: {e}")
     
     async def list_files_tree(
         self,
         conversation_id: str,
-        path: str = "/home/user",
+        path: str = "/home/user/project",
         max_depth: int = 5
     ) -> List[FileInfo]:
         """
         递归列出沙盒目录内容（树形结构）
         
-        性能优化：使用单次 shell 命令获取整个目录树
+        使用 find 命令一次性获取整个目录树，性能更好。
+        如果目录不存在会自动创建。
         """
         abs_path = self._normalize_path(path)
         
         try:
-            cmd = f"find {abs_path} -maxdepth {max_depth} -printf '%y|%p\\n' 2>/dev/null || true"
+            # 确保目录存在
+            await self.provider.run_command(
+                conversation_id, 
+                f"mkdir -p {abs_path}", 
+                timeout=10
+            )
+            
+            # 获取目录树（按路径排序，确保父目录在子文件前面）
+            cmd = f"find {abs_path} -maxdepth {max_depth} -printf '%y|%p\\n' 2>/dev/null | sort -t'|' -k2 || true"
             result = await self.provider.run_command(conversation_id, cmd, timeout=30)
             
-            if not result.success or not result.output:
-                return await self.list_files(conversation_id, path)
+            if not result.success or not result.output or not result.output.strip():
+                return []
             
             lines = result.output.strip().split('\n')
             path_map: dict[str, FileInfo] = {}
             root_files: List[FileInfo] = []
             
+            # 第一遍：创建所有 FileInfo 节点
             for line in lines:
                 if '|' not in line:
                     continue
@@ -273,7 +287,9 @@ class SandboxService:
                     children=[] if is_dir else None
                 )
                 path_map[file_path] = info
-                
+            
+            # 第二遍：建立父子关系
+            for file_path, info in path_map.items():
                 parent_path = '/'.join(file_path.split('/')[:-1])
                 if parent_path == abs_path:
                     root_files.append(info)
@@ -281,9 +297,11 @@ class SandboxService:
                     path_map[parent_path].children.append(info)
             
             return root_files
+        except InfraSandboxNotFoundError as e:
+            raise SandboxNotFoundError(str(e))
         except Exception as e:
-            logger.warning(f"⚠️ 目录树获取失败，降级到普通方法: {e}")
-            return await self.list_files(conversation_id, path)
+            logger.warning(f"⚠️ 目录树获取失败: {e}")
+            return []
     
     async def read_file(
         self,

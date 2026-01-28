@@ -120,6 +120,143 @@ class CommandResponse(BaseModel):
     error: Optional[str] = None
 
 
+class ProjectInfo(BaseModel):
+    """项目信息"""
+    name: str
+    path: str
+    type: str  # python, nodejs, react, vue, nextjs, flask, fastapi 等
+    entry_file: Optional[str] = None
+    port: Optional[int] = None
+    status: Optional[str] = "stopped"  # stopped, running, error
+
+
+class ProjectListResponse(BaseModel):
+    """项目列表响应"""
+    conversation_id: str
+    projects: List[ProjectInfo]
+
+
+# ==================== 项目检测 API ====================
+
+@router.get("/{conversation_id}/projects", response_model=ProjectListResponse)
+async def get_projects(conversation_id: str):
+    """
+    获取项目列表
+    
+    扫描沙盒中的项目目录，检测可运行的项目类型。
+    通过识别特征文件（package.json, requirements.txt 等）来判断项目类型。
+    
+    Args:
+        conversation_id: 对话 ID
+    """
+    try:
+        service = get_sandbox_service()
+        
+        # 检查沙盒是否存在
+        sandbox_info = await service.get_sandbox_status(conversation_id)
+        if not sandbox_info or sandbox_info.status == "none":
+            # 沙盒不存在时返回空列表
+            return ProjectListResponse(
+                conversation_id=conversation_id,
+                projects=[]
+            )
+        
+        projects: List[ProjectInfo] = []
+        project_root = "/home/user/project"
+        
+        # 使用命令检测项目类型
+        # 检查根目录下的特征文件
+        detect_cmd = f"""
+cd {project_root} 2>/dev/null || exit 0
+echo "=== ROOT ==="
+ls -la 2>/dev/null | head -30
+echo "=== PACKAGE_JSON ==="
+cat package.json 2>/dev/null | head -20 || echo "NOT_FOUND"
+echo "=== REQUIREMENTS ==="
+cat requirements.txt 2>/dev/null | head -10 || echo "NOT_FOUND"
+echo "=== PYPROJECT ==="
+cat pyproject.toml 2>/dev/null | head -20 || echo "NOT_FOUND"
+"""
+        result = await service.run_command(conversation_id, detect_cmd, timeout=15)
+        
+        if result.get("success") and result.get("stdout"):
+            output = result["stdout"]
+            
+            # 解析项目类型
+            project_type = None
+            entry_file = None
+            port = None
+            
+            # 检测 Node.js 项目
+            if "package.json" in output and "NOT_FOUND" not in output.split("=== PACKAGE_JSON ===")[1].split("===")[0]:
+                pkg_section = output.split("=== PACKAGE_JSON ===")[1].split("===")[0]
+                
+                # 判断具体框架
+                if '"next"' in pkg_section:
+                    project_type = "nextjs"
+                    port = 3000
+                elif '"vue"' in pkg_section:
+                    project_type = "vue"
+                    port = 5173
+                elif '"react"' in pkg_section:
+                    project_type = "react"
+                    port = 3000
+                else:
+                    project_type = "nodejs"
+                    port = 3000
+                
+                # 检测入口文件
+                if '"main"' in pkg_section:
+                    entry_file = "package.json"
+            
+            # 检测 Python 项目
+            elif "requirements.txt" in output or "pyproject.toml" in output:
+                req_section = output.split("=== REQUIREMENTS ===")[1].split("===")[0] if "=== REQUIREMENTS ===" in output else ""
+                pyproject_section = output.split("=== PYPROJECT ===")[1] if "=== PYPROJECT ===" in output else ""
+                
+                if "fastapi" in req_section.lower() or "fastapi" in pyproject_section.lower():
+                    project_type = "fastapi"
+                    entry_file = "main.py"
+                    port = 8000
+                elif "flask" in req_section.lower() or "flask" in pyproject_section.lower():
+                    project_type = "flask"
+                    entry_file = "app.py"
+                    port = 5000
+                elif "streamlit" in req_section.lower():
+                    project_type = "streamlit"
+                    entry_file = "app.py"
+                    port = 8501
+                else:
+                    project_type = "python"
+                    entry_file = "main.py"
+            
+            # 如果检测到项目类型，添加到列表
+            if project_type:
+                projects.append(ProjectInfo(
+                    name="project",
+                    path=project_root,
+                    type=project_type,
+                    entry_file=entry_file,
+                    port=port,
+                    status="stopped"
+                ))
+        
+        return ProjectListResponse(
+            conversation_id=conversation_id,
+            projects=projects
+        )
+    
+    except SandboxNotFoundError:
+        # 沙盒不存在时返回空列表
+        return ProjectListResponse(
+            conversation_id=conversation_id,
+            projects=[]
+        )
+    except Exception as e:
+        logger.error(f"获取项目列表失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="获取项目列表失败")
+
+
 # ==================== 沙盒管理 API ====================
 
 @router.get("/{conversation_id}/sandbox/status", response_model=SandboxStatusResponse)
@@ -322,17 +459,20 @@ async def run_command(
 @router.get("/{conversation_id}/files", response_model=FileListResponse)
 async def list_files(
     conversation_id: str,
-    path: str = Query(default="/home/user", description="目录路径"),
-    tree: bool = Query(default=False, description="是否返回树形结构")
+    path: str = Query(default="/home/user/project", description="目录路径"),
+    tree: bool = Query(default=True, description="是否返回树形结构")
 ):
     """
     获取 workspace 文件列表（沙盒模式）
     
     Args:
         conversation_id: 对话 ID
-        path: 目录路径（从 /home/user 开始）
+        path: 目录路径，默认为项目目录 /home/user/project
         tree: 是否返回递归树形结构
     """
+    # 强制使用项目目录，忽略其他路径请求（不向后兼容）
+    path = "/home/user/project"
+    
     try:
         service = get_sandbox_service()
         
@@ -461,7 +601,7 @@ async def upload_file(
         service = get_sandbox_service()
         
         # 构造完整路径
-        full_path = save_path if save_path.startswith("/") else f"/home/user/{save_path}"
+        full_path = save_path if save_path.startswith("/") else f"/home/user/project/{save_path}"
         
         result = await service.write_file(conversation_id, full_path, content)
         
