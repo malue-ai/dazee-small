@@ -29,7 +29,7 @@ from core.agent.multi.models import (
     ExecutionMode,
     TaskAssignment,
 )
-from core.llm import create_claude_service
+from core.llm import create_llm_service
 from core.llm.base import Message
 from logger import get_logger
 
@@ -132,7 +132,8 @@ class LeadAgent:
             logger.warning(f"⚠️ max_tokens ({max_tokens}) 必须大于 thinking_budget ({thinking_budget})，已自动调整")
         
         # 创建 LLM 服务
-        self.llm = create_claude_service(
+        self.llm = create_llm_service(
+            provider="claude",  # 🆕 V7.10
             model=model,
             enable_thinking=enable_thinking,
             max_tokens=max_tokens,

@@ -595,6 +595,8 @@ class ClaudeLLMService(BaseLLMService):
         system: Optional[Union[str, List[Dict[str, Any]]]] = None,
         tools: Optional[List[Union[ToolType, str, Dict]]] = None,
         invocation_type: Optional[str] = None,
+        override_thinking: Optional[bool] = None,
+        is_probe: bool = False,
         **kwargs
     ) -> LLMResponse:
         """
@@ -612,6 +614,7 @@ class ClaudeLLMService(BaseLLMService):
                 - List[Dict]: 多层缓存（支持自定义 TTL，如 1h）
             tools: 工具列表
             invocation_type: 调用方式
+            is_probe: 是否为探测请求（探测失败不记录 ERROR）
             **kwargs: 其他参数（支持 max_tokens, temperature 覆盖）
             
         Returns:
@@ -667,8 +670,10 @@ class ClaudeLLMService(BaseLLMService):
                 # 字符串格式 + 禁用缓存：直接使用
                 request_params["system"] = system
         
-        # Extended Thinking（由 LLM Service 配置控制）
-        if self.config.enable_thinking:
+        # Extended Thinking（支持动态覆盖）
+        # override_thinking 优先级高于配置：None=使用配置, True/False=强制开启/关闭
+        effective_thinking = override_thinking if override_thinking is not None else self.config.enable_thinking
+        if effective_thinking:
             request_params["thinking"] = {
                 "type": "enabled",
                 "budget_tokens": self.config.thinking_budget
@@ -769,7 +774,9 @@ class ClaudeLLMService(BaseLLMService):
             else:
                 response = await self.async_client.messages.create(**request_params)
         except Exception as e:
-            logger.error(f"Claude API 调用失败: {e}")
+            # 探测请求失败时不记录 ERROR（在 router.probe 中已记录 INFO）
+            if not is_probe:
+                logger.error(f"Claude API 调用失败: {e}")
             raise
         
         # 调试日志

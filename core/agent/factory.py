@@ -23,7 +23,7 @@ from enum import Enum
 
 # 3. 本地模块
 from logger import get_logger
-from core.llm import Message, create_claude_service
+from core.llm import Message, create_llm_service
 from core.memory.working import WorkingMemory
 from core.agent.multi import MultiAgentOrchestrator, OrchestratorConfig
 
@@ -367,11 +367,10 @@ class AgentFactory:
     ) -> AgentSchema:
         """调用 LLM 生成 Schema"""
         if llm_service is None:
-            from core.llm import create_claude_service
             # 🆕 使用配置化的 LLM Profile
             from config.llm_config import get_llm_profile
             profile = get_llm_profile("schema_generator")
-            llm_service = create_claude_service(**profile)
+            llm_service = create_llm_service(**profile)
         
         response = await llm_service.create_message_async(
             messages=[Message(
@@ -517,11 +516,10 @@ class AgentFactory:
             MultiAgentOrchestrator 实例
         """
         # 创建 LLM Service（用于任务分解和结果聚合）
-        llm_service = create_claude_service(
-            model=schema.model,
-            enable_thinking=True,
-            enable_caching=True,
-        )
+        # 🆕 V7.10: 使用 create_llm_service 支持多模型容灾
+        from config.llm_config import get_llm_profile
+        llm_config = get_llm_profile("main_agent")  # MultiAgent 使用 main_agent 配置
+        llm_service = create_llm_service(**llm_config)
         
         # 创建 Memory Manager（TODO: 从 schema 配置）
         memory_manager = WorkingMemory(event_manager=event_manager)

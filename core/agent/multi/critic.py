@@ -28,7 +28,7 @@ from core.agent.multi.models import (
     PlanAdjustmentHint,
 )
 from core.planning.protocol import PlanStep
-from core.llm import create_claude_service, Message
+from core.llm import create_llm_service, Message
 from logger import get_logger
 
 logger = get_logger(__name__)
@@ -74,7 +74,8 @@ class CriticAgent:
         self.config = config or CriticConfig()
         
         # 创建 LLM 服务
-        self.llm = create_claude_service(
+        self.llm = create_llm_service(
+            provider="claude",  # 🆕 V7.10
             model=model,
             enable_thinking=enable_thinking,
         )

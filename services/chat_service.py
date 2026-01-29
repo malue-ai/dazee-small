@@ -39,8 +39,8 @@ from core.context.compaction import (
     trim_history_messages_with_stats,
 )
 from core.output import OutputFormatter, create_output_formatter
-from core.llm.claude import create_claude_service
-from core.llm import Message
+from core.llm import create_llm_service, Message
+from config.llm_config.loader import get_llm_profile
 from core.routing import AgentRouter, RoutingDecision, IntentResult
 from core.monitoring import TokenAuditor, get_token_auditor
 from infra.database import AsyncSessionLocal, crud
@@ -180,13 +180,11 @@ class ChatService:
         """
         # 🆕 V7.6.1: 如果传入了 prompt_cache，需要重新创建 router（因为 prompt 可能不同）
         if self._router is None or prompt_cache is not None:
-            # 创建轻量级 LLM 服务（用于意图分析）
+            # 🆕 V7.10: 创建轻量级 LLM 服务（用于意图分析）
             # 使用 haiku 模型：快速、低成本，适合分类任务
-            routing_llm = create_claude_service(
-                model="claude-haiku-4-5-20251001",
-                enable_thinking=False,  # 意图分析不需要深度思考
-                enable_caching=False
-            )
+            # 🔧 使用 intent_analyzer profile（支持多模型容灾）
+            intent_profile = get_llm_profile("intent_analyzer")
+            routing_llm = create_llm_service(**intent_profile)
             
             self._router = AgentRouter(
                 llm_service=routing_llm,
@@ -305,12 +303,10 @@ class ChatService:
         """
         try:
             logger.info("📝 _generate_preface_stream: 开始执行")
-            # 使用 haiku 模型：快速、低成本
-            preface_llm = create_claude_service(
-                model="claude-haiku-4-5-20251001",
-                enable_thinking=False,
-                enable_caching=False
-            )
+            # 🆕 V7.10: 使用 haiku 模型：快速、低成本
+            # 🔧 使用 intent_analyzer profile（支持多模型容灾）
+            intent_profile = get_llm_profile("intent_analyzer")
+            preface_llm = create_llm_service(**intent_profile)
             logger.info("📝 _generate_preface_stream: LLM 服务已创建")
             
             # 构建 Preface 生成提示词
@@ -1547,6 +1543,127 @@ class ChatService:
     # =========================================================================
     
 # ==================== 便捷函数 ====================
+
+    async def _emit_llm_switch_event(
+        self,
+        session_id: str,
+        probe_result: dict,
+        role: str
+    ) -> None:
+        """
+        发送 LLM 切换事件
+        
+        Args:
+            session_id: 会话 ID
+            probe_result: 探测结果，包含 primary、selected、errors 等信息
+            role: Agent 角色（如 simple_agent、lead_agent 等）
+        """
+        try:
+            event_data = {
+                "role": role,
+                "from": probe_result.get("primary", {}),
+                "to": probe_result.get("selected", {}),
+                "reason": "health_check_failed" if probe_result.get("switched") else "manual",
+                "errors": probe_result.get("errors", [])
+            }
+            
+            await self.session_service.events.emit_custom(
+                session_id=session_id,
+                event_type="llm_switch",
+                event_data=event_data
+            )
+            
+            logger.info(
+                "LLM 切换事件已发送",
+                extra={
+                    "session_id": session_id,
+                    "role": role,
+                    "from_provider": event_data["from"].get("provider"),
+                    "to_provider": event_data["to"].get("provider")
+                }
+            )
+        except Exception as e:
+            logger.warning(
+                f"发送 LLM 切换事件失败: {e}",
+                extra={"session_id": session_id},
+                exc_info=True
+            )
+    
+    async def _probe_llm_service(
+        self,
+        llm_service: Any,
+        session_id: str,
+        role: str = "simple_agent"
+    ) -> Optional[dict]:
+        """
+        请求级 LLM 探针（条件探测策略）
+        
+        仅在后台健康探测不健康时执行，避免阻塞用户请求
+        
+        Args:
+            llm_service: LLM 服务实例（可能是 ModelRouter）
+            session_id: 会话 ID
+            role: Agent 角色
+        
+        Returns:
+            探测结果字典，如果跳过探测则返回 None
+        """
+        # 检查是否是 ModelRouter
+        from core.llm.router import ModelRouter
+        if not isinstance(llm_service, ModelRouter):
+            return None
+        
+        # V7.11 条件探测策略：检查后台健康状态
+        from services.health_probe_service import get_health_probe_service
+        health_service = get_health_probe_service()
+        
+        if health_service and health_service.is_healthy(role):
+            # 后台健康，跳过请求级探测
+            logger.debug(
+                "后台健康探测正常，跳过请求级探测",
+                extra={"session_id": session_id, "role": role}
+            )
+            return None
+        
+        # 后台不健康，执行请求级探测确认
+        try:
+            import os
+            timeout = float(os.getenv("LLM_PROBE_TIMEOUT", "5.0"))
+            
+            logger.info(
+                "后台健康探测异常，执行请求级探测确认",
+                extra={"session_id": session_id, "role": role, "timeout": timeout}
+            )
+            
+            probe_result = await asyncio.wait_for(
+                llm_service.probe(max_retries=0),
+                timeout=timeout
+            )
+            
+            # 如果发生切换，发送事件
+            if probe_result.get("switched"):
+                await self._emit_llm_switch_event(
+                    session_id=session_id,
+                    probe_result=probe_result,
+                    role=role
+                )
+            
+            return probe_result
+            
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"请求级探测超时 ({timeout}s)",
+                extra={"session_id": session_id, "role": role}
+            )
+            return None
+        except Exception as e:
+            logger.error(
+                f"请求级探测失败: {e}",
+                extra={"session_id": session_id, "role": role},
+                exc_info=True
+            )
+            return None
+
 
 _default_service: Optional[ChatService] = None
 

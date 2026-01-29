@@ -215,6 +215,31 @@ async def _start_scheduler() -> Optional[Any]:
     return None
 
 
+async def _start_health_probe_service() -> Optional[Any]:
+    """
+    启动健康探测服务（🆕 V7.10）
+    
+    后台异步探测所有 LLM 模型健康状态，与用户请求完全解耦
+    """
+    try:
+        print("🩺 启动健康探测服务...")
+        from services.health_probe_service import start_health_probe_service
+        
+        service = await start_health_probe_service()
+        
+        if service._running:
+            print(f"✅ 健康探测服务已启动: "
+                  f"interval={service.interval}s, profiles={service.profiles}")
+        else:
+            print("○ 健康探测服务已禁用 (LLM_HEALTH_PROBE_ENABLED=false)")
+        
+        return service
+    
+    except Exception as e:
+        print(f"⚠️ 健康探测服务启动失败: {e}")
+        return None
+
+
 # ==================== 关闭辅助函数 ====================
 
 async def _cleanup_agent_registry() -> None:
@@ -236,6 +261,19 @@ async def _stop_scheduler(scheduler: Optional[Any]) -> None:
             print("✅ 定时任务调度器已关闭")
         except Exception as e:
             print(f"⚠️ 关闭定时任务调度器失败: {e}")
+
+
+async def _stop_health_probe_service(service: Optional[Any]) -> None:
+    """
+    停止健康探测服务（🆕 V7.10）
+    """
+    if service:
+        try:
+            from services.health_probe_service import stop_health_probe_service
+            await stop_health_probe_service()
+            print("✅ 健康探测服务已关闭")
+        except Exception as e:
+            print(f"⚠️ 关闭健康探测服务失败: {e}")
 
 
 async def _stop_grpc_server(grpc_server: Optional[Any]) -> None:
@@ -396,6 +434,7 @@ async def lifespan(app: FastAPI):
     await _init_pools()  # 初始化资源池（含 Agent 原型创建和 Session 校准）
     grpc_server = await _start_grpc_server()
     scheduler = await _start_scheduler()
+    health_probe_service = await _start_health_probe_service()  # 🆕 V7.10: 启动健康探测
     
     yield
     
@@ -404,6 +443,7 @@ async def lifespan(app: FastAPI):
     
     await _cleanup_pools()  # 清理资源池
     await _cleanup_agent_registry()
+    await _stop_health_probe_service(health_probe_service)  # 🆕 V7.10: 停止健康探测
     await _stop_scheduler(scheduler)
     await _stop_grpc_server(grpc_server)
     await _close_redis()

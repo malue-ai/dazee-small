@@ -98,6 +98,7 @@ class LLMConfig:
         temperature: 温度参数
         max_tokens: 最大输出 token 数
         tools: 工具列表
+        base_url: API 基础 URL（可选，用于自定义 endpoint 或代理）
         timeout: 请求超时时间（秒）
         max_retries: 最大重试次数
     """
@@ -123,6 +124,7 @@ class LLMConfig:
     enable_structured_output: bool = False
     
     # 网络配置
+    base_url: Optional[str] = None  # API 基础 URL（可选，用于自定义 endpoint）
     timeout: float = 120.0  # 请求超时（秒），默认 2 分钟
     max_retries: int = 3    # 最大重试次数
 

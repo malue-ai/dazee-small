@@ -56,14 +56,11 @@ class PlanTodoTool(BaseTool):
     async def _get_llm(self):
         """延迟加载 LLM 服务"""
         if self._llm is None:
-            from core.llm import create_llm_service, LLMProvider
-            # 使用 Haiku 模型生成 plan（成本低、速度快）
-            self._llm = create_llm_service(
-                provider=LLMProvider.CLAUDE,
-                model="claude-3-5-haiku-latest",
-                max_tokens=4096,
-                enable_thinking=False  # plan 生成不需要 thinking
-            )
+            from config.llm_config.loader import get_llm_profile
+            from core.llm import create_llm_service
+            # 使用 plan_generator profile（快速、便宜，适合计划生成）
+            profile = get_llm_profile("plan_generator")
+            self._llm = create_llm_service(**profile)
         return self._llm
     
     async def _get_conversation_service(self):

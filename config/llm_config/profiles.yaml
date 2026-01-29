@@ -11,7 +11,10 @@ profiles:
   # ==================== 主 Agent 对话 ====================
   main_agent:
     description: "主 Agent 对话处理，需要最强推理能力和大输出窗口"
+    provider: "claude"                       # 提供商
     model: "claude-sonnet-4-5"
+    api_key_env: "ANTHROPIC_API_KEY"        # 主 API Key
+    base_url: "https://api.anthropic.com"   # Base URL（可选，默认官方地址）
     max_tokens: 64000
     temperature: 1.0
     enable_thinking: true
@@ -19,17 +22,57 @@ profiles:
     enable_caching: true  # 启用多层 Prompt Caching（节省 88% 成本）
     timeout: 120.0
     max_retries: 3
+    
+    # 🆕 V7.10 多模型容灾配置
+    fallbacks:
+      # Fallback 0: 同模型，不同 Provider (Vendor A)
+      - provider: "claude"
+        model: "claude-sonnet-4-5"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_A"
+        base_url: "https://api.anthropic.com"
+      
+      # Fallback 1: 同模型，不同 Provider (Vendor B)
+      - provider: "claude"
+        model: "claude-sonnet-4-5"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_B"
+        base_url: "https://api.anthropic.com"
+    
+    # 路由策略
+    policy:
+      max_failures: 2          # 失败 2 次后进入熔断
+      cooldown_seconds: 600    # 熔断冷却时间 10 分钟
 
   # ==================== 意图分析 ====================
   intent_analyzer:
     description: "分析用户意图，需要快速响应，使用轻量模型"
+    provider: "claude"
     model: "claude-haiku-4-5"
+    api_key_env: "ANTHROPIC_API_KEY"
+    base_url: "https://api.anthropic.com"
     max_tokens: 2048
     temperature: 0
     enable_thinking: false
     enable_caching: true  # 启用 Prompt Caching（意图识别提示词 1h 缓存）
     timeout: 60.0
     max_retries: 2
+    
+    # 🆕 V7.10 多模型容灾配置
+    fallbacks:
+      # Fallback 0: 同模型，不同 Provider (Vendor A)
+      - provider: "claude"
+        model: "claude-haiku-4-5"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_A"
+        base_url: "https://api.anthropic.com"
+      
+      # Fallback 1: 同模型，不同 Provider (Vendor B)
+      - provider: "claude"
+        model: "claude-haiku-4-5"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_B"
+        base_url: "https://api.anthropic.com"
+    
+    policy:
+      max_failures: 3          # 轻量模型更稳定，提高阈值
+      cooldown_seconds: 300    # 冷却时间 5 分钟
 
   # ==================== 语义推理 ====================
   semantic_inference:
@@ -41,6 +84,21 @@ profiles:
     enable_caching: false
     timeout: 30.0
     max_retries: 2
+    
+    # 🆕 V7.10: 多模型容灾配置
+    fallbacks:
+      - provider: "claude"
+        model: "claude-haiku-4-5"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_A"
+        base_url: "https://api.anthropic.com"
+      - provider: "claude"
+        model: "claude-haiku-4-5"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_B"
+        base_url: "https://api.anthropic.com"
+    
+    policy:
+      max_failures: 2
+      cooldown_seconds: 600
 
   # ==================== 提示词分析 ====================
   llm_analyzer:
@@ -52,6 +110,21 @@ profiles:
     enable_caching: false
     timeout: 600.0  # 10 分钟，支持超长 prompt 分析
     max_retries: 3
+    
+    # 🆕 V7.10: 多模型容灾配置
+    fallbacks:
+      - provider: "claude"
+        model: "claude-sonnet-4-5"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_A"
+        base_url: "https://api.anthropic.com"
+      - provider: "claude"
+        model: "claude-sonnet-4-5"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_B"
+        base_url: "https://api.anthropic.com"
+    
+    policy:
+      max_failures: 2
+      cooldown_seconds: 600
 
   # ==================== Schema 生成 ====================
   schema_generator:
@@ -63,6 +136,21 @@ profiles:
     enable_caching: false
     timeout: 90.0
     max_retries: 2
+    
+    # 🆕 V7.10: 多模型容灾配置
+    fallbacks:
+      - provider: "claude"
+        model: "claude-sonnet-4-5"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_A"
+        base_url: "https://api.anthropic.com"
+      - provider: "claude"
+        model: "claude-sonnet-4-5"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_B"
+        base_url: "https://api.anthropic.com"
+    
+    policy:
+      max_failures: 2
+      cooldown_seconds: 600
 
   # ==================== 提示词智能合并 ====================
   prompt_merger:
@@ -74,6 +162,21 @@ profiles:
     enable_caching: false
     timeout: 600.0  # 10 分钟，支持超长 prompt 合并
     max_retries: 3
+    
+    # 🆕 V7.10: 多模型容灾配置
+    fallbacks:
+      - provider: "claude"
+        model: "claude-sonnet-4-5"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_A"
+        base_url: "https://api.anthropic.com"
+      - provider: "claude"
+        model: "claude-sonnet-4-5"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_B"
+        base_url: "https://api.anthropic.com"
+    
+    policy:
+      max_failures: 2
+      cooldown_seconds: 600
 
   # ==================== 🆕 V5.5 场景化提示词分解 ====================
   prompt_decomposer:
@@ -107,6 +210,50 @@ profiles:
     enable_caching: false
     timeout: 30.0
     max_retries: 1
+    
+    # 🆕 V7.10: 多模型容灾配置
+    fallbacks:
+      - provider: "claude"
+        model: "claude-haiku-4-5"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_A"
+        base_url: "https://api.anthropic.com"
+      - provider: "claude"
+        model: "claude-haiku-4-5"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_B"
+        base_url: "https://api.anthropic.com"
+    
+    policy:
+      max_failures: 2          # 失败 2 次后熔断
+      cooldown_seconds: 600    # 熔断冷却时间 10 分钟
+
+  # ==================== 计划生成 ====================
+  plan_generator:
+    description: "plan_todo 工具内部生成计划，使用轻量模型快速生成"
+    provider: "claude"
+    model: "claude-3-5-haiku-latest"
+    api_key_env: "ANTHROPIC_API_KEY"
+    base_url: "https://api.anthropic.com"
+    max_tokens: 4096
+    temperature: 0
+    enable_thinking: false
+    enable_caching: false
+    timeout: 60.0
+    max_retries: 2
+    
+    # 🆕 V7.10: 多模型容灾配置
+    fallbacks:
+      - provider: "claude"
+        model: "claude-3-5-haiku-latest"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_A"
+        base_url: "https://api.anthropic.com"
+      - provider: "claude"
+        model: "claude-3-5-haiku-latest"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_B"
+        base_url: "https://api.anthropic.com"
+    
+    policy:
+      max_failures: 2          # 失败 2 次后熔断
+      cooldown_seconds: 600    # 熔断冷却时间 10 分钟
 
   # ==================== Dazee 碎片记忆提取 ====================
   fragment_extractor:
@@ -133,7 +280,10 @@ profiles:
   # ==================== 计划管理 ====================
   plan_manager:
     description: "智能任务规划和管理，需要深度推理能力"
+    provider: "claude"
     model: "claude-sonnet-4-5"
+    api_key_env: "ANTHROPIC_API_KEY"
+    base_url: "https://api.anthropic.com"
     max_tokens: 8192
     temperature: 1.0
     enable_thinking: true
@@ -141,6 +291,59 @@ profiles:
     enable_caching: false
     timeout: 120.0
     max_retries: 2
+    
+    # 🆕 V7.10 多模型容灾配置
+    fallbacks:
+      # Fallback 0: 同模型，不同 Provider (Vendor A)
+      - provider: "claude"
+        model: "claude-sonnet-4-5"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_A"
+        base_url: "https://api.anthropic.com"
+      
+      # Fallback 1: 同模型，不同 Provider (Vendor B)
+      - provider: "claude"
+        model: "claude-sonnet-4-5"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_B"
+        base_url: "https://api.anthropic.com"
+    
+    policy:
+      max_failures: 2          # 失败 2 次后进入熔断
+      cooldown_seconds: 600    # 熔断冷却时间 10 分钟
+
+# ============================================================
+# 多模型容灾配置（🆕 V7.10+）
+# ============================================================
+#
+# fallbacks: 备选模型列表（按优先级排序）
+#   示例：主模型故障时自动切换到备选模型
+#   - provider: "claude"
+#     model: "claude-sonnet-4-5-20250929"
+#     api_key_env: "CLAUDE_API_KEY_VENDOR_A"
+#
+# policy: 路由策略配置
+#   - max_failures: 最大失败次数（超过进入冷却）
+#   - cooldown_seconds: 冷却时间（默认 600 秒）
+#
+# health_probe: 健康探测配置
+#   - request_probe: 请求级探测（条件探测，后台不健康时执行）
+#   - background_probe: 后台异步探测（与用户请求解耦）
+#
+
+# ==================== 健康探测全局配置 ====================
+health_probe:
+  # 条件探测（V7.11：后台健康则跳过，不健康则确认）
+  request_probe:
+    timeout_seconds: 5.0
+    max_retries: 1
+  
+  # 后台健康探测（定期探测所有模型）
+  background_probe:
+    enabled: true
+    interval_seconds: 120  # 2 分钟探测一次
+    timeout_seconds: 10
+    profiles:
+      - main_agent
+      - intent_analyzer
 
 # ============================================================
 # 配置说明
@@ -175,5 +378,25 @@ profiles:
 #
 # - max_retries: 最大重试次数
 #   - 推荐值：1-3
+#
+# - api_key_env: API Key 环境变量名称
+#   - 从环境变量读取 API Key（推荐）
+#
+# - base_url: API Base URL（可选）
+#   - 默认：官方 API 地址
+#   - 自定义：代理商 API 地址
+#
+# - provider: 提供商（🆕 V7.10）
+#   - claude: Claude AI
+#   - openai: OpenAI（待实现）
+#   - qwen: 通义千问（待实现）
+#
+# - fallbacks: 备选模型列表（🆕 V7.10）
+#   - 主模型故障时自动切换到备选模型
+#   - 优先级：fallbacks[0] > fallbacks[1] > ...
+#
+# - policy: 路由策略（🆕 V7.10）
+#   - max_failures: 熔断阈值（默认 2）
+#   - cooldown_seconds: 冷却时间（默认 600s）
 #
 # ============================================================

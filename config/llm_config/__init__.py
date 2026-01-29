@@ -30,6 +30,7 @@ from .loader import (
     list_profiles,
     reload_config,
     get_llm_profile_from_env,
+    get_health_probe_config,
     # 异步版本
     get_llm_profile_async,
     list_profiles_async,
@@ -42,6 +43,7 @@ __all__ = [
     "list_profiles",
     "reload_config",
     "get_llm_profile_from_env",
+    "get_health_probe_config",
     # 异步版本
     "get_llm_profile_async",
     "list_profiles_async",

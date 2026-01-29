@@ -801,19 +801,21 @@ class MultiAgentOrchestrator:
             
             # 2. 创建独立的 LLM 服务（上下文隔离）
             # V7.1: 使用配置的 Worker 模型（强弱配对）
-            from core.llm import create_claude_service
+            from core.llm import create_llm_service
             
             worker_model = self.worker_model if hasattr(self, 'worker_model') else config.model
             
             if self.config.worker_config:
-                llm = create_claude_service(
+                llm = create_llm_service(
+                    provider="claude",  # 🆕 V7.10
                     model=worker_model,
                     enable_thinking=self.config.worker_config.enable_thinking,
                     max_tokens=self.config.worker_config.max_tokens,
                     thinking_budget=self.config.worker_config.thinking_budget,
                 )
             else:
-                llm = create_claude_service(
+                llm = create_llm_service(
+                    provider="claude",  # 🆕 V7.10
                     model=worker_model,
                     enable_thinking=True,
                     max_tokens=8192,
@@ -1419,19 +1421,21 @@ class MultiAgentOrchestrator:
             
             # 2. 创建独立的 LLM 服务
             # V7.1: 使用配置的 Worker 模型（强弱配对）
-            from core.llm import create_claude_service
+            from core.llm import create_llm_service
             
             worker_model = self.worker_model if hasattr(self, 'worker_model') else config.model
             
             if self.config.worker_config:
-                llm = create_claude_service(
+                llm = create_llm_service(
+                    provider="claude",  # 🆕 V7.10
                     model=worker_model,
                     enable_thinking=self.config.worker_config.enable_thinking,
                     max_tokens=self.config.worker_config.max_tokens,
                     thinking_budget=self.config.worker_config.thinking_budget,
                 )
             else:
-                llm = create_claude_service(
+                llm = create_llm_service(
+                    provider="claude",  # 🆕 V7.10
                     model=worker_model,
                     enable_thinking=True,
                     max_tokens=8192,

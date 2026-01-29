@@ -54,7 +54,7 @@ from core.context.compaction import (
 )
 from core.context.prompt_manager import get_prompt_manager, get_prompt_manager_async, PromptManager
 from core.events.broadcaster import EventBroadcaster
-from core.llm import Message, LLMResponse, ToolType, create_claude_service
+from core.llm import Message, LLMResponse, ToolType, create_llm_service
 from core.orchestration import create_pipeline_tracer, E2EPipelineTracer
 from core.prompt import TaskComplexity
 from core.schemas import DEFAULT_AGENT_SCHEMA
@@ -370,28 +370,35 @@ class SimpleAgent:
         logger.debug("✓ InvocationSelector 已初始化（V4.4 条件激活）")
         
         # 7. 执行 LLM（Sonnet）
-        # 🆕 V7: 从 Schema 读取 LLM 超参数，未配置则使用默认值
-        llm_enable_thinking = self.schema.enable_thinking if self.schema.enable_thinking is not None else True
-        llm_enable_caching = self.schema.enable_caching if self.schema.enable_caching is not None else True
+        # 🆕 V7.10: 从 LLM Profile 加载配置（支持多模型容灾）
+        from config.llm_config import get_llm_profile
         
-        # 构建 LLM 参数（仅包含非 None 值）
-        llm_kwargs = {
-            "model": self.model,
-            "enable_thinking": llm_enable_thinking,
-            "enable_caching": llm_enable_caching,
-            "tools": [ToolType.BASH, ToolType.TEXT_EDITOR],  # 🆕 移除 WEB_SEARCH，改用客户端工具
-        }
+        # 加载 main_agent 的 LLM 配置（包括 fallbacks 和 policy）
+        llm_config = get_llm_profile("main_agent")
         
-        # 🆕 V7: 仅当 Schema 明确配置时才传递 LLM 超参数
+        # 🆕 V7: 从 Schema 读取 LLM 超参数，覆盖 Profile 默认值
+        if self.schema.enable_thinking is not None:
+            llm_config["enable_thinking"] = self.schema.enable_thinking
+        if self.schema.enable_caching is not None:
+            llm_config["enable_caching"] = self.schema.enable_caching
         if self.schema.temperature is not None:
-            llm_kwargs["temperature"] = self.schema.temperature
+            llm_config["temperature"] = self.schema.temperature
         if self.schema.max_tokens is not None:
-            llm_kwargs["max_tokens"] = self.schema.max_tokens
+            llm_config["max_tokens"] = self.schema.max_tokens
         
-        self.llm = create_claude_service(**llm_kwargs)
+        # 添加内置工具（Schema 中的 tools 配置会在后面注册）
+        llm_config["tools"] = [ToolType.BASH, ToolType.TEXT_EDITOR]
         
-        logger.debug(f"✓ 执行 LLM 初始化: thinking={llm_enable_thinking}, caching={llm_enable_caching}, "
-                     f"temperature={self.schema.temperature}, max_tokens={self.schema.max_tokens}")
+        # 创建 LLM Service（可能是 ModelRouter 或单个 LLM Service）
+        self.llm = create_llm_service(**llm_config)
+        
+        logger.debug(
+            f"✓ 执行 LLM 初始化: profile=main_agent, "
+            f"thinking={llm_config.get('enable_thinking')}, "
+            f"caching={llm_config.get('enable_caching')}, "
+            f"temperature={self.schema.temperature}, "
+            f"max_tokens={self.schema.max_tokens}"
+        )
         
         # 注册自定义工具到 LLM
         self._register_tools_to_llm()
@@ -731,11 +738,13 @@ class SimpleAgent:
         task_complexity = self._get_task_complexity(intent)
         
         # 🆕 V6.3: 使用多层缓存（prompt_cache 可用时）
+        # 🆕 V7.10: 兼容 ModelRouter（检查 config 是否存在）
+        llm_config = getattr(self.llm, 'config', None)
         use_multi_layer_cache = (
             self.prompt_cache and 
             self.prompt_cache.is_loaded and 
             self.prompt_cache.system_prompt_simple and
-            self.llm.config.enable_caching  # 确保 LLM 配置启用了缓存
+            llm_config and llm_config.enable_caching  # 确保 LLM 配置启用了缓存
         )
         
         if use_multi_layer_cache:
