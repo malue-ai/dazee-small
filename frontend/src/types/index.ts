@@ -101,16 +101,6 @@ export type {
   SkillResource
 } from './skills'
 
-// 从 tutorial.ts 导出教程相关类型
-export type {
-  TutorialActionType,
-  TutorialAction,
-  TutorialStep,
-  TutorialChapter,
-  Tutorial,
-  TutorialProgress
-} from './tutorial'
-
 // ==================== 兼容性类型别名 ====================
 // 保持向后兼容，旧代码可以继续使用这些名称
 

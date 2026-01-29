@@ -54,16 +54,17 @@ const routes = [
     component: () => import('@/views/skills/SkillsView.vue'),
     meta: { layout: 'dashboard' }
   },
+  // ==================== 文档浏览 ====================
   {
-    path: '/tutorial',
-    name: 'tutorial',
-    component: () => import('@/views/tutorial/TutorialView.vue'),
+    path: '/docs',
+    name: 'docs',
+    component: () => import('@/views/docs/DocsView.vue'),
     meta: { layout: 'dashboard' }
   },
   {
-    path: '/tutorial/:chapterId',
-    name: 'tutorial-chapter',
-    component: () => import('@/views/tutorial/TutorialView.vue'),
+    path: '/docs/:docPath(.*)',
+    name: 'docs-detail',
+    component: () => import('@/views/docs/DocsView.vue'),
     meta: { layout: 'dashboard' }
   }
 ]

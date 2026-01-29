@@ -86,9 +86,9 @@ import {
   BookOpen, 
   Bot, 
   Puzzle, 
-  GraduationCap, 
   MessageSquare,
-  LogOut 
+  LogOut,
+  FileText
 } from 'lucide-vue-next'
 
 const route = useRoute()
@@ -101,7 +101,7 @@ const mainNavItems = [
   { path: '/knowledge', icon: BookOpen, label: '知识库' },
   { path: '/agents', icon: Bot, label: '智能体' },
   { path: '/skills', icon: Puzzle, label: '技能' },
-  { path: '/tutorial', icon: GraduationCap, label: '教程', badge: 'New' }
+  { path: '/docs', icon: FileText, label: '文档' }
 ]
 
 // ==================== 计算属性 ====================

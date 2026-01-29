@@ -998,7 +998,7 @@ capabilities:
   subtype: CUSTOM
   provider: user
   level: 1
-  enabled: false  # 暂时禁用 HITL 工具
+  enabled: true  # 暂时禁用 HITL 工具
   implementation:
     module: tools.request_human_confirmation
     class: HITLTool

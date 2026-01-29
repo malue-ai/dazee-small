@@ -26,6 +26,7 @@ from routers import (
     auth_router,
     chat_router,
     conversation_router,
+    docs_router,
     files_router,
     health_router,
     human_confirmation_router,
@@ -464,6 +465,7 @@ app.include_router(mem0_router)
 app.include_router(tasks_router)
 app.include_router(agents_router)
 app.include_router(skills_router)
+app.include_router(docs_router)
 
 
 # ==================== 基础路由 ====================

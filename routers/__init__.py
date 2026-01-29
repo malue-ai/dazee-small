@@ -11,6 +11,7 @@ from .health import router as health_router
 from .human_confirmation import router as human_confirmation_router
 from .skills import router as skills_router
 from .workspace import router as workspace_router
+from .docs import router as docs_router
 
 __all__ = [
     "chat_router",
@@ -26,5 +27,6 @@ __all__ = [
     "human_confirmation_router",
     "skills_router",
     "workspace_router",
+    "docs_router",
 ]
 
