@@ -1,14 +1,13 @@
 """
-Plan/Todo Tool - 任务规划工具（Cursor 风格）
+Plan/Todo Tool - 任务规划工具（纯存储版本）
 
 设计原则：
-1. 数据库驱动：Plan 存储在 Conversation.extra_data.plan
-2. 内部 LLM 调用：create 时调用专门的 Plan Generator 生成详细计划
-3. 流式返回：支持 SSE 流式推送 plan 生成过程
-4. 简单 CRUD：update/get/add 只做读写，不调用 LLM
+1. 纯 CRUD 工具：只负责存储和管理，不调用 LLM
+2. 主模型生成：plan 内容由调用本工具的主模型直接生成
+3. 数据库驱动：Plan 存储在 Conversation.metadata.plan
 
 存储位置：
-- Conversation.extra_data.plan（JSONB）
+- Conversation.metadata.plan（JSONB）
 
 Plan 数据结构：
 {
@@ -21,26 +20,33 @@ Plan 数据结构：
     ],
     "created_at": "2026-01-28T10:00:00"
 }
+
+使用方式：
+- 主模型分析用户任务，生成完整的 plan 数据
+- 调用 plan_todo(operation="create", data={...plan数据...}) 存储
+- 执行过程中调用 update_todo 更新状态
 """
 
-import json
 from datetime import datetime
-from typing import Any, Dict, Optional, AsyncGenerator, List
+from typing import Any, Dict, Optional, List
 
 from core.tool.base import BaseTool, ToolContext
-from core.llm.base import Message
 from logger import get_logger
-from prompts.plan_generator_prompt import build_plan_generator_prompt
 
 logger = get_logger(__name__)
 
 
 class PlanTodoTool(BaseTool):
     """
-    Cursor 风格的任务规划工具（数据库驱动版本）
+    任务规划工具（纯存储版本）
+    
+    设计原则：
+    - 纯 CRUD 工具，不调用 LLM
+    - plan 内容由主模型直接生成并传入
+    - 本工具只负责存储、查询、更新
     
     支持操作：
-    - create: 创建计划（内部调用 LLM 生成详细 plan）
+    - create: 创建计划（直接保存主模型生成的完整 plan 数据）
     - update_todo: 更新单个 todo 的状态
     - get: 获取当前计划
     - add_todo: 动态添加新 todo
@@ -50,18 +56,7 @@ class PlanTodoTool(BaseTool):
     
     def __init__(self):
         """初始化工具"""
-        self._llm = None
         self._conversation_service = None
-    
-    async def _get_llm(self):
-        """延迟加载 LLM 服务"""
-        if self._llm is None:
-            from config.llm_config.loader import get_llm_profile
-            from core.llm import create_llm_service
-            # 使用 plan_generator profile（快速、便宜，适合计划生成）
-            profile = get_llm_profile("plan_generator")
-            self._llm = create_llm_service(**profile)
-        return self._llm
     
     async def _get_conversation_service(self):
         """延迟加载 ConversationService"""
@@ -99,248 +94,68 @@ class PlanTodoTool(BaseTool):
         else:
             return {"success": False, "error": f"未知操作: {operation}"}
     
-    async def execute_stream(
-        self, 
-        params: Dict[str, Any], 
-        context: ToolContext
-    ) -> AsyncGenerator[str, None]:
-        """
-        流式执行（仅 create 操作支持流式）
-        
-        Yields:
-            流式内容块
-        """
-        operation = params.get("operation", "get")
-        data = params.get("data", {})
-        
-        if operation == "create":
-            async for chunk in self._create_stream(data, context):
-                yield chunk
-        else:
-            # 其他操作不支持流式，直接返回结果
-            result = await self.execute(params, context)
-            yield json.dumps(result, ensure_ascii=False)
-    
     async def _create(self, data: Dict, context: ToolContext) -> Dict[str, Any]:
         """
-        创建计划（非流式版本）
+        创建计划（直接存储主模型生成的 plan 数据）
         
         Args:
-            data:
-                - task: 任务描述（必需）
-                - context: 额外上下文（可选）
-        """
-        task = data.get("task", "")
-        extra_context = data.get("context", "")
+            data: 计划数据，支持两种形式：
+                1) 直接传 plan 字段（name/overview/detailed_plan/todos）
+                2) 传入 { "plan": { ... } }
         
-        if not task:
-            return {"success": False, "error": "缺少任务描述 (task)"}
+        Returns:
+            {"success": True, "plan": plan} 或 {"success": False, "error": "..."}
+        """
+        if data is None:
+            return {"success": False, "error": "缺少计划数据 (plan)"}
+        
+        plan_data = data.get("plan") if isinstance(data, dict) and "plan" in data else data
+        if not isinstance(plan_data, dict):
+            return {"success": False, "error": "计划数据格式不正确 (plan 需为对象)"}
+        
+        # 校验必需字段
+        name = plan_data.get("name")
+        todos = plan_data.get("todos", [])
+        
+        if not name:
+            return {"success": False, "error": "缺少计划名称 (name)"}
+        if not isinstance(todos, list) or len(todos) == 0:
+            return {"success": False, "error": "缺少步骤列表 (todos)"}
         
         try:
-            # 调用 LLM 生成详细 plan
-            plan = await self._generate_plan(task, extra_context)
+            # 构建 plan 数据（保留扩展字段）
+            plan = dict(plan_data)
+            plan.setdefault("overview", "")
+            plan.setdefault("detailed_plan", "")
+            plan.setdefault("created_at", datetime.now().isoformat())
+            plan["todos"] = []
+            
+            # 处理 todos，确保每个 todo 有正确的结构
+            for i, todo in enumerate(todos):
+                if isinstance(todo, dict):
+                    todo_data = todo
+                else:
+                    todo_data = {"content": str(todo)}
+                
+                processed_todo = {
+                    "id": str(todo_data.get("id", str(i + 1))),
+                    "content": todo_data.get("content", ""),
+                    "status": todo_data.get("status", "pending")
+                }
+                if todo_data.get("result"):
+                    processed_todo["result"] = todo_data["result"]
+                plan["todos"].append(processed_todo)
             
             # 存储到数据库
             await self._save_plan(plan, context.conversation_id)
             
-            logger.info(f"✅ 计划已创建: {plan.get('name')}")
+            logger.info(f"✅ 计划已创建: {plan.get('name')}, 共 {len(plan['todos'])} 个步骤")
             return {"success": True, "plan": plan}
             
         except Exception as e:
             logger.error(f"❌ 创建计划失败: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
     
-    async def _create_stream(
-        self, 
-        data: Dict, 
-        context: ToolContext
-    ) -> AsyncGenerator[str, None]:
-        """
-        流式创建计划
-        
-        Yields:
-            工具结果 JSON 字符串（与非流式返回格式一致）
-        """
-        task = data.get("task", "")
-        extra_context = data.get("context", "")
-        
-        if not task:
-            yield json.dumps({"success": False, "error": "缺少任务描述 (task)"}, ensure_ascii=False)
-            return
-        
-        try:
-            # 构建 prompt
-            system_prompt, user_prompt = build_plan_generator_prompt(task, extra_context)
-            
-            # 获取 LLM
-            llm = await self._get_llm()
-            
-            # 流式调用 LLM
-            full_content = ""
-            async for chunk in llm.create_message_stream(
-                messages=[Message(role="user", content=user_prompt)],
-                system=system_prompt
-            ):
-                if chunk.content:
-                    full_content += chunk.content
-            
-            # 解析 JSON 结果
-            plan = self._parse_plan_json(full_content)
-            plan["created_at"] = datetime.now().isoformat()
-            
-            # 初始化 todos 状态
-            for todo in plan.get("todos", []):
-                if "status" not in todo:
-                    todo["status"] = "pending"
-            
-            # 存储到数据库
-            await self._save_plan(plan, context.conversation_id)
-            
-            logger.info(f"✅ 计划已创建（流式）: {plan.get('name')}")
-            yield json.dumps({"success": True, "plan": plan}, ensure_ascii=False)
-            
-        except Exception as e:
-            logger.error(f"❌ 流式创建计划失败: {e}", exc_info=True)
-            yield json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
-    
-    async def _generate_plan(self, task: str, extra_context: str = "") -> Dict[str, Any]:
-        """
-        调用 LLM 生成详细计划（非流式）
-        
-        Args:
-            task: 任务描述
-            extra_context: 额外上下文
-            
-        Returns:
-            计划数据
-        """
-        # 构建 prompt
-        system_prompt, user_prompt = build_plan_generator_prompt(task, extra_context)
-        
-        # 获取 LLM
-        llm = await self._get_llm()
-        
-        # 调用 LLM
-        response = await llm.create_message_async(
-            messages=[Message(role="user", content=user_prompt)],
-            system=system_prompt
-        )
-        
-        # 解析 JSON 结果
-        plan = self._parse_plan_json(response.content)
-        plan["created_at"] = datetime.now().isoformat()
-        
-        # 初始化 todos 状态
-        for todo in plan.get("todos", []):
-            if "status" not in todo:
-                todo["status"] = "pending"
-        
-        return plan
-    
-    def _parse_plan_json(self, content: str) -> Dict[str, Any]:
-        """
-        解析 LLM 返回的 JSON
-        
-        Args:
-            content: LLM 返回的内容（可能包含 markdown 代码块）
-            
-        Returns:
-            解析后的计划数据
-        """
-        if not content:
-            return {
-                "name": "任务计划",
-                "overview": "自动生成的计划",
-                "detailed_plan": "",
-                "todos": []
-            }
-
-        def is_plan_dict(obj: Any) -> bool:
-            return (
-                isinstance(obj, dict)
-                and "name" in obj
-                and "overview" in obj
-                and "detailed_plan" in obj
-                and "todos" in obj
-            )
-
-        def extract_json_objects(text: str) -> List[str]:
-            # 提取所有顶层 JSON 对象（支持多段拼接输出）
-            objs: List[str] = []
-            depth = 0
-            start = None
-            in_string = False
-            escape = False
-
-            for i, ch in enumerate(text):
-                if in_string:
-                    if escape:
-                        escape = False
-                    elif ch == "\\":
-                        escape = True
-                    elif ch == "\"":
-                        in_string = False
-                    continue
-
-                if ch == "\"":
-                    in_string = True
-                    continue
-
-                if ch == "{":
-                    if depth == 0:
-                        start = i
-                    depth += 1
-                elif ch == "}":
-                    if depth > 0:
-                        depth -= 1
-                        if depth == 0 and start is not None:
-                            objs.append(text[start:i + 1])
-                            start = None
-
-            return objs
-
-        # 尝试直接解析
-        try:
-            parsed = json.loads(content)
-            if is_plan_dict(parsed):
-                return parsed
-            # 如果不是完整 plan 结构，继续尝试其他方式
-        except json.JSONDecodeError:
-            pass
-        
-        # 尝试提取 JSON 代码块
-        import re
-        json_blocks = re.findall(r'```(?:json)?\s*([\s\S]*?)```', content)
-        for block in json_blocks:
-            try:
-                parsed = json.loads(block.strip())
-                if is_plan_dict(parsed):
-                    return parsed
-            except json.JSONDecodeError:
-                pass
-        
-        # 尝试解析所有顶层 JSON 对象（处理重复/拼接输出）
-        first_dict = None
-        for obj_text in extract_json_objects(content):
-            try:
-                parsed = json.loads(obj_text)
-                if is_plan_dict(parsed):
-                    return parsed
-                if isinstance(parsed, dict) and first_dict is None:
-                    first_dict = parsed
-            except json.JSONDecodeError:
-                continue
-        if first_dict:
-            return first_dict
-        
-        # 解析失败，返回默认结构
-        logger.warning(f"⚠️ Plan JSON 解析失败，使用默认结构")
-        return {
-            "name": "任务计划",
-            "overview": "自动生成的计划",
-            "detailed_plan": content,
-            "todos": []
-        }
     
     async def _update_todo(self, data: Dict, context: ToolContext) -> Dict[str, Any]:
         """

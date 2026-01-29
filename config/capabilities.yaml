@@ -16,6 +16,7 @@ task_type_mappings:
     - news_search          # 新闻搜索
     - academic_search      # 学术搜索
     - market_data          # 市场数据
+    - knowledge_base       # 个人知识库检索
 
   # 内容生成类任务
   content_generation:
@@ -560,6 +561,8 @@ capabilities:
   - information_retrieval
   - web_search
   - news_search
+  - academic_search
+  - market_data
   priority: 85
   cost:
     time: medium
@@ -1142,24 +1145,25 @@ capabilities:
   - todo_crud
   priority: 95
   cost:
-    time: medium
-    money: low
+    time: fast
+    money: free
   constraints:
     requires_api: false
     session_scoped: true
   metadata:
     description: |
-      任务规划工具
+      任务规划工具（纯存储版本）
       
       核心操作：
-      - create: 创建计划（只需传任务描述，内部 LLM 自动生成详细计划）
+      - create: 创建计划（传入主模型生成的完整 plan 数据）
       - update_todo: 更新步骤状态
       - get: 获取当前计划
       - add_todo: 动态添加步骤
       
-      特性：
-      - create 时内部调用专门的 Plan Generator LLM
-      - 自动生成问题分析、流程图、执行方案
+      设计原则：
+      - 纯 CRUD 工具，不调用 LLM
+      - plan 内容由主模型直接生成并传入
+      - 本工具只负责存储、查询、更新
     keywords:
     - plan
     - todo
@@ -1181,12 +1185,76 @@ capabilities:
         type: object
         description: 操作数据（根据 operation 不同而不同）
         properties:
-          task:
+          # create 操作的字段（推荐使用 plan 对象）
+          plan:
+            type: object
+            description: 计划数据（create 时必需）
+            properties:
+              name:
+                type: string
+                description: 计划名称
+              overview:
+                type: string
+                description: 一句话概述
+              detailed_plan:
+                type: string
+                description: 详细 Markdown 文档
+              todos:
+                type: array
+                description: 步骤列表
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                      description: 步骤 ID，如 "1", "2"
+                    content:
+                      type: string
+                      description: 步骤描述
+                    status:
+                      type: string
+                      description: 状态（pending/in_progress/completed/failed）
+                      default: pending
+                      enum:
+                      - pending
+                      - in_progress
+                      - completed
+                      - failed
+                    result:
+                      type: string
+                      description: 完成结果说明
+          # 兼容：create 操作的字段（直接传入完整 plan）
+          name:
             type: string
-            description: 任务描述（create 时必需，只需简单描述任务目标）
-          context:
+            description: 计划名称（create 时必需）
+          overview:
             type: string
-            description: 额外上下文信息（create 时可选）
+            description: 一句话概述（create 时可选）
+          detailed_plan:
+            type: string
+            description: 详细 Markdown 文档（create 时可选）
+          todos:
+            type: array
+            description: 步骤列表（create 时必需）
+            items:
+              type: object
+              properties:
+                id:
+                  type: string
+                  description: 步骤 ID，如 "1", "2"
+                content:
+                  type: string
+                  description: 步骤描述
+                status:
+                  type: string
+                  description: 状态（pending/in_progress/completed/failed）
+                  default: pending
+                  enum:
+                  - pending
+                  - in_progress
+                  - completed
+                  - failed
+          # update_todo 操作的字段
           id:
             type: string
             description: todo ID，如 "1"（update_todo 时必需）
@@ -1197,9 +1265,11 @@ capabilities:
             - pending
             - in_progress
             - completed
+            - failed
           result:
             type: string
             description: 完成结果说明（update_todo 时可选）
+          # add_todo 操作的字段
           content:
             type: string
             description: todo 内容（add_todo 时必需）
@@ -1306,7 +1376,10 @@ capabilities:
     class: SandboxWriteFile
   capabilities:
   - sandbox_file_operations
+  - app_generation
+  - app_generation
   - content_writing
+  - app_generation
   priority: 90
   cost:
     time: fast
@@ -1354,8 +1427,10 @@ capabilities:
     class: SandboxRunCommand
   capabilities:
   - sandbox_file_operations
+  - app_generation
   - code_execution
   - command_execution
+  - app_generation
   priority: 90
   cost:
     time: fast
@@ -1508,6 +1583,7 @@ capabilities:
   - sandbox_file_operations
   - code_execution
   - data_analysis
+  - app_generation
   priority: 91
   cost:
     time: medium
@@ -1589,6 +1665,7 @@ capabilities:
   - sandbox_file_operations
   - file_upload
   - s3_storage
+  - app_generation
   priority: 90
   cost:
     time: medium
@@ -1628,6 +1705,7 @@ capabilities:
   capabilities:
   - sandbox_file_operations
   - content_writing
+  - app_generation
   priority: 95
   cost:
     time: fast

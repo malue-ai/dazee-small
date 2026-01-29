@@ -55,9 +55,31 @@ class APICallingTool(BaseTool):
         self.poll_interval = 2  # 轮询间隔 2 秒
         
         # 预配置的 APIs（用于 api_name 自动注入）
-        self.apis_config = {api["name"]: api for api in (apis_config or [])}
-        if self.apis_config:
-            logger.info(f"✅ api_calling 初始化，已加载 {len(self.apis_config)} 个 API: {list(self.apis_config.keys())}")
+        # 🔧 注意：运行时优先使用 context.apis_config（通过 _get_apis_config 方法）
+        self._init_apis_config = {api["name"]: api for api in (apis_config or [])}
+        if self._init_apis_config:
+            logger.info(f"✅ api_calling 初始化，已加载 {len(self._init_apis_config)} 个 API: {list(self._init_apis_config.keys())}")
+    
+    def _get_apis_config(self, context: Optional[ToolContext] = None) -> Dict[str, Any]:
+        """
+        获取有效的 APIs 配置
+        
+        优先级：context.apis_config > self._init_apis_config
+        
+        Args:
+            context: 工具执行上下文
+            
+        Returns:
+            API 配置字典 {api_name: api_config}
+        """
+        # 优先从 context 获取（运行时注入）
+        if context and context.apis_config:
+            apis_config = {api["name"]: api for api in context.apis_config}
+            if apis_config:
+                return apis_config
+        
+        # 回退到初始化时的配置
+        return self._init_apis_config
     
     # ============================================================
     # 辅助方法
@@ -114,6 +136,9 @@ class APICallingTool(BaseTool):
         mode = params.get("mode")
         poll_config = params.get("poll_config")
         
+        # 🔧 获取有效的 APIs 配置（优先从 context 获取）
+        apis_config = self._get_apis_config(context)
+        
         # 构建框架注入的上下文（用于占位符替换）
         kwargs = {
             "user_id": context.user_id,
@@ -126,7 +151,7 @@ class APICallingTool(BaseTool):
             if api_name and parameters is not None and body is None:
                 logger.info(f"📡 [简化调用] api_name={api_name}, parameters={list(parameters.keys())}")
                 
-                request_config, error = self._build_request_from_config(api_name, parameters)
+                request_config, error = self._build_request_from_config(api_name, parameters, apis_config)
                 if error:
                     return {"error": error}
                 
@@ -139,7 +164,7 @@ class APICallingTool(BaseTool):
             elif api_name and body is not None and parameters is None:
                 # 检测到 AI 使用旧的 body 参数，返回错误提示
                 logger.warning(f"❌ AI 使用了 body 参数而不是 parameters，api_name={api_name}")
-                api_config = self.apis_config.get(api_name, {})
+                api_config = apis_config.get(api_name, {})
                 request_body = api_config.get("request_body", {})
                 ai_params = self._extract_ai_params(request_body)
                 params_hint = ", ".join(ai_params) if ai_params else "参考 API 文档"
@@ -153,7 +178,7 @@ class APICallingTool(BaseTool):
             mode = mode or "sync"
             
             # 1. 解析 URL 和 Headers
-            final_url, final_headers, error, _ = self._resolve_api_config(api_name, url, headers)
+            final_url, final_headers, error, _ = self._resolve_api_config(api_name, url, headers, apis_config)
             if not final_url or error:
                 return {"error": error or "必须提供 url 或 api_name 参数"}
             
@@ -205,7 +230,8 @@ class APICallingTool(BaseTool):
     def _build_request_from_config(
         self,
         api_name: str,
-        parameters: Dict[str, Any]
+        parameters: Dict[str, Any],
+        apis_config: Optional[Dict[str, Any]] = None
     ) -> tuple[Dict[str, Any], Optional[str]]:
         """
         根据 api_name 和 AI parameters 构建完整请求
@@ -213,10 +239,16 @@ class APICallingTool(BaseTool):
         占位符处理：
         - {{xxx}} = AI 填写（在此方法中替换为 parameters 中的值）
         - ${xxx} = 框架注入（在 execute 方法中由 _resolve_system_placeholders 替换）
+        
+        Args:
+            api_name: API 名称
+            parameters: AI 填写的参数
+            apis_config: API 配置字典（优先从 context 获取）
         """
-        api_config = self.apis_config.get(api_name)
+        apis_config = apis_config or {}
+        api_config = apis_config.get(api_name)
         if not api_config:
-            return {}, f"未找到 API '{api_name}'，可用: {list(self.apis_config.keys())}"
+            return {}, f"未找到 API '{api_name}'，可用: {list(apis_config.keys())}"
         
         method = api_config.get("default_method", "POST")
         mode = api_config.get("default_mode", "sync")
@@ -398,22 +430,30 @@ class APICallingTool(BaseTool):
         self,
         api_name: Optional[str] = None,
         url: Optional[str] = None,
-        headers: Optional[Dict[str, str]] = None
+        headers: Optional[Dict[str, str]] = None,
+        apis_config: Optional[Dict[str, Any]] = None
     ) -> tuple[Optional[str], Dict[str, str], Optional[str], Dict[str, Any]]:
         """
         解析 API 配置
+        
+        Args:
+            api_name: API 名称
+            url: 直接 URL
+            headers: 请求头
+            apis_config: API 配置字典（优先从 context 获取）
         
         Returns:
             (final_url, final_headers, error_message, meta_info)
         """
         final_headers = headers.copy() if headers else {}
         meta_info: Dict[str, Any] = {}
+        apis_config = apis_config or {}
         
         # 方式1: 使用预配置 API
         if api_name:
-            api_config = self.apis_config.get(api_name)
+            api_config = apis_config.get(api_name)
             if not api_config:
-                available = list(self.apis_config.keys()) if self.apis_config else []
+                available = list(apis_config.keys()) if apis_config else []
                 return None, final_headers, f"未找到 API: '{api_name}'，可用: {available}", meta_info
             
             # 获取 URL
@@ -552,23 +592,41 @@ class APICallingTool(BaseTool):
     
     async def execute_stream(
         self,
-        api_name: Optional[str] = None,
-        url: Optional[str] = None,
-        method: str = "POST",
-        headers: Optional[Dict[str, str]] = None,
-        body: Optional[Dict[str, Any]] = None,
-        mode: str = "stream",
-        parameters: Optional[Dict[str, Any]] = None,  # 🆕 支持简化调用
-        **kwargs
+        params: Dict[str, Any],
+        context: ToolContext
     ) -> AsyncGenerator[str, None]:
-        """流式执行 API 调用"""
+        """
+        流式执行 API 调用（符合 BaseTool 接口）
+        
+        Args:
+            params: 工具输入参数（包含 api_name, parameters, url, method, headers, body, mode 等）
+            context: 执行上下文
+        """
+        # 从 params 中提取各个参数
+        api_name = params.get("api_name")
+        url = params.get("url")
+        method = params.get("method", "POST")
+        headers = params.get("headers")
+        body = params.get("body")
+        mode = params.get("mode", "stream")
+        parameters = params.get("parameters")
+        
+        # 🔧 获取有效的 APIs 配置（优先从 context 获取）
+        apis_config = self._get_apis_config(context)
+        
+        # 构建 kwargs（用于系统占位符替换）
+        kwargs = {
+            "user_id": context.user_id,
+            "conversation_id": context.conversation_id,
+            "session_id": context.session_id
+        }
         
         # ===== 🆕 简化调用方式：api_name + parameters =====
         poll_config = None  # 初始化 poll_config
         if api_name and parameters is not None and body is None:
             logger.info(f"📡 [流式简化调用] api_name={api_name}, parameters={list(parameters.keys())}")
             
-            request_config, error = self._build_request_from_config(api_name, parameters)
+            request_config, error = self._build_request_from_config(api_name, parameters, apis_config)
             if error:
                 yield json.dumps({"error": error})
                 return
@@ -578,7 +636,7 @@ class APICallingTool(BaseTool):
             poll_config = request_config.get("poll_config")  # 🔧 修复：提取 poll_config
             body = request_config["body"]
         
-        final_url, final_headers, error, _ = self._resolve_api_config(api_name, url, headers)
+        final_url, final_headers, error, _ = self._resolve_api_config(api_name, url, headers, apis_config)
         
         if not final_url or error:
             yield json.dumps({"error": error or "必须提供 url 或 api_name"})
@@ -589,23 +647,8 @@ class APICallingTool(BaseTool):
             body = self._resolve_system_placeholders(body, kwargs)
         
         if mode != "stream":
-            # 🔧 过滤掉 AI 可能非法传入的参数（这些参数不在工具定义中，会与我们显式传入的参数冲突）
-            filtered_kwargs = {k: v for k, v in kwargs.items() 
-                              if k not in ('poll_config', 'mode', 'method', 'url', 'headers', 'body')}
-            
-            # 如果已经通过 parameters 构建了 body，则直接传 body + 原始 parameters + poll_config
-            # 这样 execute 中的 "parameters is None" 检查不会误报，且异步轮询能正常执行
-            result = await self.execute(
-                api_name=api_name,
-                url=url,
-                method=method,
-                headers=headers,
-                body=body,
-                mode=mode,
-                poll_config=poll_config,  # 🔧 使用配置中的 poll_config，忽略 AI 传入的
-                parameters=parameters,  # 始终传入，避免误报警告
-                **filtered_kwargs  # 🔧 使用过滤后的 kwargs
-            )
+            # 非流式模式：调用 execute 方法
+            result = await self.execute(params, context)
             yield json.dumps(result, ensure_ascii=False)
             return
         

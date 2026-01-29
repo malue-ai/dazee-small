@@ -642,6 +642,7 @@ class SandboxUploadFile(BaseTool):
     name = "sandbox_upload_file"
     
     # 文件类型到 Content-Type 的映射
+    # 文本类型需要指定 charset=utf-8 避免中文乱码
     CONTENT_TYPES = {
         '.pdf': 'application/pdf',
         '.doc': 'application/msword',
@@ -650,22 +651,22 @@ class SandboxUploadFile(BaseTool):
         '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
         '.xls': 'application/vnd.ms-excel',
         '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        '.txt': 'text/plain',
-        '.md': 'text/markdown',
-        '.json': 'application/json',
-        '.csv': 'text/csv',
+        '.txt': 'text/plain; charset=utf-8',
+        '.md': 'text/markdown; charset=utf-8',
+        '.json': 'application/json; charset=utf-8',
+        '.csv': 'text/csv; charset=utf-8',
         '.png': 'image/png',
         '.jpg': 'image/jpeg',
         '.jpeg': 'image/jpeg',
         '.gif': 'image/gif',
         '.webp': 'image/webp',
-        '.svg': 'image/svg+xml',
+        '.svg': 'image/svg+xml; charset=utf-8',
         '.mp3': 'audio/mpeg',
         '.mp4': 'video/mp4',
         '.wav': 'audio/wav',
         '.zip': 'application/zip',
         '.rar': 'application/x-rar-compressed',
-        '.html': 'text/html',
+        '.html': 'text/html; charset=utf-8',
     }
     
     async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:

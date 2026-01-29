@@ -8,12 +8,13 @@ HITL 工具 (Human-in-the-Loop)
 ═══════════════════════════════════════════════════════════════════════════════
 
 参数：
-┌─────────────┬────────────────────────────────────────────────────────────┐
-│ title       │ 表单标题（必需）                                            │
-│ description │ 表单描述                                                    │
-│ questions   │ 问题数组（必需）                                            │
-│ timeout     │ 超时时间（秒），默认 120                                    │
-└─────────────┴────────────────────────────────────────────────────────────┘
+┌────────────────────────┬────────────────────────────────────────────────────────────┐
+│ title                  │ 表单标题（必需）                                            │
+│ description            │ 表单描述                                                    │
+│ questions              │ 问题数组（必需）                                            │
+│ timeout                │ 超时时间（秒），默认 120                                    │
+│ use_default_on_timeout │ 超时时是否使用默认值，默认 True                             │
+└────────────────────────┴────────────────────────────────────────────────────────────┘
 
 questions 中的问题类型：
 - single_choice: 单选（包括 yes/no，options 文本可自定义）
@@ -146,6 +147,8 @@ class HITLTool(BaseTool):
         
         description = params.get("description", "")
         timeout = params.get("timeout", FORM_TIMEOUT)
+        # 🆕 超时时是否使用默认值（默认 True）
+        use_default_on_timeout = params.get("use_default_on_timeout", True)
         
         # 从 context 获取 session_id
         session_id = context.session_id or ""
@@ -181,15 +184,44 @@ class HITLTool(BaseTool):
         result = await manager.wait_for_response(request.request_id, timeout)
         
         # 处理并返回结果
-        return self._process_response(result, timeout)
+        return self._process_response(result, timeout, questions, use_default_on_timeout)
     
     # ==================== 私有方法 ====================
     
-    def _process_response(self, result: Dict[str, Any], timeout: int) -> Dict[str, Any]:
-        """处理用户响应"""
+    def _process_response(
+        self,
+        result: Dict[str, Any],
+        timeout: int,
+        questions: List[Dict[str, Any]],
+        use_default_on_timeout: bool = True
+    ) -> Dict[str, Any]:
+        """
+        处理用户响应
+        
+        Args:
+            result: 等待响应的结果
+            timeout: 超时时间
+            questions: 问题列表（用于提取默认值）
+            use_default_on_timeout: 超时时是否使用默认值
+        """
         # 超时处理
         if result.get("timed_out"):
             logger.warning(f"用户响应超时 ({timeout}s)")
+            
+            # 🆕 超时时使用默认值
+            if use_default_on_timeout:
+                default_response = self._extract_default_values(questions)
+                if default_response:
+                    logger.info(f"⏱️ 超时，使用默认值: {default_response}")
+                    return {
+                        "success": True,  # 使用默认值视为成功
+                        "timed_out": True,
+                        "used_default": True,
+                        "response": default_response,
+                        "message": f"用户未在 {timeout} 秒内响应，已使用默认值"
+                    }
+            
+            # 没有默认值或不使用默认值
             return {
                 "success": False,
                 "timed_out": True,
@@ -214,6 +246,36 @@ class HITLTool(BaseTool):
             "response": response,
             "metadata": result.get("metadata", {})
         }
+    
+    def _extract_default_values(self, questions: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """
+        从问题列表中提取默认值
+        
+        Args:
+            questions: 问题列表
+            
+        Returns:
+            默认值字典 {question_id: default_value}，如果任何必填问题没有默认值则返回 None
+        """
+        defaults = {}
+        
+        for question in questions:
+            q_id = question.get("id")
+            if not q_id:
+                continue
+            
+            default = question.get("default")
+            required = question.get("required", True)  # 默认必填
+            
+            if default is not None:
+                defaults[q_id] = default
+            elif required:
+                # 必填问题没有默认值，无法使用默认响应
+                logger.debug(f"问题 '{q_id}' 是必填项但没有默认值，无法使用默认响应")
+                return None
+            # 非必填且无默认值的问题，跳过
+        
+        return defaults if defaults else None
 
 
 # ==================== 便捷函数 ====================

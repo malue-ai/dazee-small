@@ -5,7 +5,61 @@ Plan Generator Prompt - 专门用于生成高质量任务计划的提示词
 1. 生成 Cursor 风格的 Plan（结构化 + 详细文档）
 2. 包含问题分析、流程图、修改方案、关键点
 3. 步骤具体可执行，每步有明确的输出
+4. 🆕 V7.1: 支持动态注入可用工具列表，让规划更精准
 """
+
+from typing import List, Dict, Any, Optional
+
+
+# 默认工具速查表（当没有动态传入时使用）
+DEFAULT_TOOLS_REFERENCE = """
+## 🔧 执行 Agent 可用工具速查
+
+规划时请参考以下工具能力，确保步骤可执行：
+
+### 沙盒工具组（Web 应用开发）
+| 工具 | 用途 |
+|------|------|
+| sandbox_init_project | 初始化项目脚手架（react_fullstack 模板） |
+| sandbox_list_files | 列出目录文件 |
+| sandbox_read_file | 读取文件内容 |
+| sandbox_write_file | 写入文件 |
+| sandbox_run_command | 执行命令（支持后台运行、多服务启动） |
+| sandbox_execute_python | 执行 Python 代码（数据分析、图表生成） |
+| sandbox_upload_file | 上传文件到 S3 获取下载链接 |
+| sandbox_get_public_url | 获取服务公开 URL |
+
+### 信息检索工具
+| 工具 | 用途 |
+|------|------|
+| tavily_search | 通用网络搜索 |
+| knowledge_search | 用户个人知识库检索 |
+
+### 文档处理工具
+| 工具 | 用途 |
+|------|------|
+| document_partition_tool | 解析网络文档（PDF/Word/PPT） |
+| slidespeak_render | 渲染高质量 PPT |
+| send_files | 发送文件给用户 |
+
+### API 调用工具
+| 工具 | 用途 |
+|------|------|
+| api_calling | 通用 HTTP API 调用 |
+
+### 交互工具
+| 工具 | 用途 |
+|------|------|
+| hitl | 请求用户确认/选择 |
+| clue_generation | 生成后续操作建议 |
+
+### MCP 工具（按实例配置）
+| 工具 | 用途 |
+|------|------|
+| mcp_dify_Ontology_TextToChart_zen0 | 文本转 Mermaid 流程图 |
+| mcp_dify_nano_banana | 文本生成图片 |
+"""
+
 
 PLAN_GENERATOR_SYSTEM_PROMPT = """你是一个专业的任务规划专家。你的职责是将用户的任务需求转化为结构化的执行计划。
 
@@ -78,6 +132,7 @@ flowchart TD
 6. **使用和用户语言一致**：所有内容使用和用户语言一致的语言输出
 7. **🚨 Web应用必须初始化项目**：任何 Web 应用/游戏/系统开发，**第一步必须是初始化项目框架**，在成熟脚手架上开发，禁止从零写 HTML/JS
 8. **🚫 禁止技术术语**：步骤描述必须通俗易懂，禁止出现函数调用、代码片段等技术性表达（如 sandbox_init_project、npm install 等），用自然语言描述要做的事情
+9. **🆕 基于可用工具规划**：参考"可用工具速查"部分，确保规划的步骤可以用现有工具完成。如果某个步骤需要的能力不在工具列表中，请调整方案或明确标注风险
 
 ## 示例
 
@@ -107,20 +162,82 @@ PLAN_GENERATOR_USER_TEMPLATE = """请为以下任务生成执行计划：
 {context}"""
 
 
-def build_plan_generator_prompt(task: str, context: str = "") -> tuple[str, str]:
+def format_tools_reference(tools: Optional[List[Dict[str, Any]]] = None) -> str:
+    """
+    格式化工具速查表
+    
+    Args:
+        tools: 工具列表，每个工具包含 name, description 字段
+               如果为 None，使用默认工具速查表
+    
+    Returns:
+        格式化的工具速查 Markdown 文本
+    """
+    if tools is None:
+        return DEFAULT_TOOLS_REFERENCE
+    
+    if not tools:
+        return ""
+    
+    # 动态生成工具速查表
+    lines = [
+        "",
+        "## 🔧 执行 Agent 可用工具速查",
+        "",
+        "规划时请参考以下工具能力，确保步骤可执行：",
+        "",
+        "| 工具 | 用途 |",
+        "|------|------|",
+    ]
+    
+    for tool in tools:
+        name = tool.get("name", "unknown")
+        # 提取描述的第一行作为简短说明
+        desc = tool.get("description", "")
+        if isinstance(desc, str):
+            # 取第一行或前 50 个字符
+            first_line = desc.split("\n")[0].strip()
+            if len(first_line) > 60:
+                first_line = first_line[:57] + "..."
+            desc = first_line
+        lines.append(f"| {name} | {desc} |")
+    
+    lines.append("")
+    return "\n".join(lines)
+
+
+def build_plan_generator_prompt(
+    task: str, 
+    context: str = "",
+    available_tools: Optional[List[Dict[str, Any]]] = None
+) -> tuple[str, str]:
     """
     构建 Plan Generator 的 system 和 user prompt
     
     Args:
         task: 任务描述
         context: 额外上下文（如用户偏好、历史记录等）
+        available_tools: 🆕 可用工具列表（可选）
+            每个工具为 dict，包含 name, description 字段
+            如果为 None，使用默认工具速查表
+            如果为空列表 []，则不显示工具速查
     
     Returns:
         (system_prompt, user_prompt)
     """
+    # 构建工具速查部分
+    tools_reference = format_tools_reference(available_tools)
+    
+    # 组装完整的 system prompt
+    full_system_prompt = PLAN_GENERATOR_SYSTEM_PROMPT
+    if tools_reference:
+        full_system_prompt = f"{PLAN_GENERATOR_SYSTEM_PROMPT}\n{tools_reference}"
+    
+    # 构建 user prompt
     context_section = f"额外上下文：\n{context}" if context else ""
     user_prompt = PLAN_GENERATOR_USER_TEMPLATE.format(
         task=task,
         context=context_section
     )
-    return PLAN_GENERATOR_SYSTEM_PROMPT, user_prompt
+    
+    return full_system_prompt, user_prompt

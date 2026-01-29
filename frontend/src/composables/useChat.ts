@@ -136,6 +136,16 @@ export function useChat() {
    * 创建新会话
    */
   async function createNewConversation(): Promise<void> {
+    // 断开现有 SSE 连接
+    if (sse.isConnected.value) {
+      sse.disconnect()
+    }
+    
+    // 重置所有加载状态
+    isLoading.value = false
+    isGenerating.value = false
+    isStopping.value = false
+    
     conversationStore.reset()
     router.push({ name: 'chat' })
     await conversationStore.fetchList()
@@ -149,7 +159,11 @@ export function useChat() {
       sse.disconnect()
     }
 
+    // 重置所有加载状态（确保切换会话时状态正确）
     isLoading.value = false
+    isGenerating.value = false
+    isStopping.value = false
+    
     await conversationStore.load(convId)
 
     // 更新路由

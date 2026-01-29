@@ -119,8 +119,8 @@ mcp_tools:
     server_name: "dify"
     auth_type: "bearer"
     auth_env: "DIFY_API_KEY"
-    capability: "document_creation"
-    description: "这是一个根据文本描述生成图片的工具，调用后会返回一张真实生成的图片URL"
+    capability: "image_generation"
+    description: "根据文本描述生成图片的工具，调用后会返回一张真实生成的图片 URL"
 
   - name: chatDocuments
     server_url: "https://api.dify.ai/mcp/server/GYultzYga8PRayK5/mcp"
@@ -138,13 +138,13 @@ mcp_tools:
     capability: "document_creation"
     description: "输入的title参数的值只能是英文，输入的文本格式转化为格式化文档，并提供下载url： 1、markdown格式转换为docx 2、csv格式转换为xlsx。"
 
-  - name: perplxity
+  - name: perplexity
     server_url: "https://api.dify.ai/mcp/server/WH0QvCw9dlNfhqEC/mcp"
     server_name: "dify"
     auth_type: "bearer"
     auth_env: "DIFY_API_KEY"
     capability: "document_creation"
-    description: "调用 Perplexity AI 进行研究，输出 DOCX 文档"
+    description: "调用 Perplexity AI 进行深度研究，输出 DOCX 研究报告文档"
 # ==================== REST APIs 配置 ====================
 #
 # 📌 运营配置：只需填写 base_url + 认证
