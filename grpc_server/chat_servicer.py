@@ -340,9 +340,29 @@ class ChatServicer(_ChatServicerBase):
             
             session_status = status_data.get("status")
             
+            # 🔧 优化：Session 已结束时返回友好的事件通知，而非 gRPC 错误
+            # 这是正常的业务场景（会话完成后客户端短暂重连），不应触发错误报警
             if session_status in ["completed", "failed", "timeout", "stopped"]:
-                context.set_code(grpc.StatusCode.FAILED_PRECONDITION)
-                context.set_details(f"Session 已结束 (status={session_status})")
+                logger.info(
+                    f"ℹ️ Session 已结束，返回结束通知: session_id={request.session_id}, "
+                    f"status={session_status}"
+                )
+                end_event = {
+                    "type": "message.assistant.info",
+                    "message_id": "",
+                    "timestamp": int(datetime.now().timestamp() * 1000),
+                    "info": {
+                        "type": "session_ended",
+                        "code": "SESSION_ENDED",
+                        "message": f"会话已结束 (status={session_status})",
+                        "action": "no_reconnect_needed",
+                        "session_id": request.session_id,
+                        "final_status": session_status
+                    }
+                }
+                yield tool_service_pb2.ChatEvent(
+                    data=json.dumps(end_event, ensure_ascii=False)
+                )
                 return
             
             # 初始化 ZenO 格式适配器

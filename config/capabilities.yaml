@@ -1070,35 +1070,61 @@ capabilities:
   input_schema:
     type: object
     properties:
-      question:
+      title:
         type: string
-        description: 要询问用户的问题，应该清晰描述操作内容和影响
-      options:
+        description: 表单标题，简要说明本次交互的目的
+      description:
+        type: string
+        description: 表单描述，补充说明或上下文信息
+      questions:
         type: array
+        description: |
+          问题数组。支持三种问题类型：
+          - single_choice: 单选（包括 yes/no 确认，options 文本可自定义）
+          - multiple_choice: 多选
+          - text_input: 文本输入
         items:
-          type: string
-        description: 可选项列表，默认 ['confirm', 'cancel']。可以自定义选项如 ['商务风格', '学术风格', '创意风格']
-        default:
-        - confirm
-        - cancel
+          type: object
+          properties:
+            id:
+              type: string
+              description: 问题唯一标识，用于返回结果的 key
+            label:
+              type: string
+              description: 问题标签/显示文本
+            type:
+              type: string
+              enum:
+              - single_choice
+              - multiple_choice
+              - text_input
+              description: 问题类型
+            options:
+              type: array
+              items:
+                type: string
+              description: 选项列表（single_choice/multiple_choice 必需），文本可自定义如 ["确认删除", "取消操作"]
+            default:
+              type: string
+              description: 默认选中值
+            required:
+              type: boolean
+              description: 是否必填
+              default: true
+            hint:
+              type: string
+              description: 输入提示/占位符
+          required:
+          - id
+          - label
+          - type
       timeout:
         type: integer
-        description: 超时时间（秒），默认 60 秒
-        default: 60
-      confirmation_type:
-        type: string
-        enum:
-        - yes_no
-        - single_choice
-        - multiple_choice
-        - text_input
-        description: 确认类型，默认 yes_no
-        default: yes_no
-      metadata:
-        type: object
-        description: 额外信息，用于前端展示（如操作详情、影响范围等）
+        description: 超时时间（秒），默认 120 秒
+        default: 120
     required:
-    - question
+    - title
+    - questions
 - name: plan_todo
   type: TOOL
   subtype: SESSION
@@ -1340,46 +1366,84 @@ capabilities:
     session_scoped: true
   metadata:
     description: |
-      执行终端命令。支持后台运行服务器。
+      执行终端命令。支持单命令或多命令批量执行，可一键启动前后端服务。
       
       【核心原则】用户是非技术人员，他们需要可点击访问的链接，而不是命令行输出。
       
-      【启动服务 - 最佳实践】
-      1. 设置 background=true + port 参数
-      2. 系统会自动返回公开 URL（https://xxx.e2b.dev）
-      3. 用户点击链接即可访问，无需任何技术操作
-      4. 服务必须监听 0.0.0.0（不是 127.0.0.1 或 localhost）
+      【模式一：单命令】使用 command 参数
       
-      【典型用法】
+      sandbox_run_command(
+        command="npm run dev -- --host 0.0.0.0",
+        background=true,
+        port=5173
+      )
       
-      静态 HTML 项目：
-        sandbox_run_command(command="python3 -m http.server 8000", background=true, port=8000)
+      【模式二：多命令批量启动】使用 commands 参数（推荐）
       
-      Vue/React 项目：
-        sandbox_run_command(command="npm run dev -- --host 0.0.0.0", background=true, port=5173)
+      一次调用同时启动前端和后端：
+      sandbox_run_command(commands=[
+        { "name": "backend", "command": "npm run server", "port": 3000 },
+        { "name": "frontend", "command": "npm run dev", "port": 5173 }
+      ])
       
-      FastAPI 后端：
-        sandbox_run_command(command="uvicorn main:app --host 0.0.0.0 --port 8000", background=true, port=8000)
+      返回值包含所有服务的 URL：
+      {
+        "success": true,
+        "urls": { "backend": "https://xxx.e2b.dev", "frontend": "https://yyy.e2b.dev" },
+        "services": [...]
+      }
       
-      Node.js/Express 后端：
-        sandbox_run_command(command="node server.js", background=true, port=3000)
+      【常用命令示例】
+      - 静态 HTML：python3 -m http.server 8000
+      - React/Vue：npm run dev -- --host 0.0.0.0
+      - FastAPI：uvicorn main:app --host 0.0.0.0 --port 8000
+      - Express：node server.js
       
-      【完整系统（前端+后端）工作流】
-      1. 启动后端：sandbox_run_command("uvicorn main:app --host 0.0.0.0 --port 8000", background=true, port=8000, cwd="backend")
-      2. 启动前端：sandbox_run_command("python3 -m http.server 3000", background=true, port=3000, cwd="frontend")
-      3. 告知用户"系统已启动，您可以开始使用了"
-      4. 系统自动发送前端预览链接（用户点击即可访问界面）
-      
-      【注意】localhost:3000 是沙盒内部地址，用户无法访问！必须使用 port 参数获取公开 URL。
+      【注意事项】
+      - 服务必须监听 0.0.0.0（不是 127.0.0.1 或 localhost）
+      - 启动前确保已执行 npm install 安装依赖
+      - 使用 port 参数获取公开 URL，localhost 用户无法访问
     keywords: [sandbox, 沙盒, 命令, bash, shell, 启动服务器]
   input_schema:
     type: object
     properties:
-      command: {type: string, description: 命令}
-      background: {type: boolean, description: 是否后台运行（启动服务器时使用）, default: false}
-      port: {type: integer, description: 服务端口（background=true 时指定，自动返回公开 URL，用户可直接访问）}
-      timeout: {type: integer, description: 超时秒数, default: 120}
-    required: [command]
+      command:
+        type: string
+        description: 单命令模式 - 要执行的命令
+      commands:
+        type: array
+        description: 多命令模式 - 批量启动多个服务（优先于 command）
+        items:
+          type: object
+          properties:
+            name:
+              type: string
+              description: 服务名称（如 backend、frontend）
+            command:
+              type: string
+              description: 要执行的命令
+            port:
+              type: integer
+              description: 服务端口
+            cwd:
+              type: string
+              description: 工作目录
+          required: [command]
+      background:
+        type: boolean
+        description: 是否后台运行（单命令模式，启动服务器时使用）
+        default: false
+      port:
+        type: integer
+        description: 服务端口（单命令模式，自动返回公开 URL）
+      cwd:
+        type: string
+        description: 工作目录
+      timeout:
+        type: integer
+        description: 超时秒数（单命令同步模式）
+        default: 120
+    required: []
 - name: sandbox_read_file
   type: TOOL
   subtype: CUSTOM
@@ -1574,37 +1638,30 @@ capabilities:
     session_scoped: true
   metadata:
     description: |
-      【神器】一键初始化专业项目脚手架（包含前端+后端+设计文档）。
-      
-      【强烈推荐】
-      开发任何系统/应用前，先用这个工具初始化项目！模板包含：
-      - 完整的目录结构（components/、pages/、hooks/、lib/）
-      - 前后端分离架构
-      - TypeScript 类型定义
-      - TailwindCSS 样式
-      - IDEAS.md 设计文档（帮你理解项目结构）
+      一键初始化项目脚手架，自动生成完整目录结构和配置文件。
       
       【支持的模板】
-      1. react_fullstack (推荐): Vite + React + TypeScript + TailwindCSS + Express
-         - 前端端口: 5173
-         - 后端端口: 3000
       
-      【使用方法】
-      1. 调用 sandbox_init_project(template="react_fullstack")
-      2. 工具自动写入所有文件（package.json, 组件, 页面, API 等）
-      3. 查看返回的 startup_hint 执行启动命令
-      4. 阅读 IDEAS.md 了解项目结构
-      5. 在现有代码基础上修改业务逻辑
-      
-      【关键优势】
-      - 不用从零写代码，在成熟脚手架上"装修"
-      - 保证有完整的前端界面（用户能看到）
-      - 目录结构清晰，便于维护
-    keywords: [sandbox, 沙盒, 初始化, 模板, 脚手架, react, vite, typescript]
+      1. react_fullstack（推荐，默认）
+         - 技术栈：Vite + React + TypeScript + TailwindCSS + Express
+         - 前端端口：5173，后端端口：3000
+         - 包含：components/、pages/、hooks/、lib/、IDEAS.md
+         - 启动：npm install && npm run dev
+         - 适用：需要完整前后端分离的 Web 应用
+         
+      【返回值说明】
+      - created_files: 创建的文件列表
+      - ports: { frontend: 5173, backend: 3000 }
+      - startup_hint: 启动命令提示
+    keywords: [sandbox, 沙盒, 初始化, 模板, 脚手架, react, node, html]
   input_schema:
     type: object
     properties:
-      template: {type: string, description: 模板名称 (react_fullstack), default: react_fullstack}
+      template:
+        type: string
+        description: 模板名称
+        enum: [react_fullstack]
+        default: react_fullstack
     required: []
 - name: document_partition_tool
   type: TOOL

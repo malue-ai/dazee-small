@@ -17,12 +17,12 @@ class ConfirmationType(Enum):
     """
     确认类型枚举
     
-    只有两种基础类型：
-    - FORM: 结构化表单，支持单选/多选/文本等问题组合
-    - TEXT_INPUT: 简单文本输入
+    统一使用 FORM 表单模式，通过 questions 数组支持：
+    - single_choice: 单选（包括 yes/no，options 文本可自定义）
+    - multiple_choice: 多选
+    - text_input: 文本输入
     """
-    FORM = "form"           # 结构化表单（支持 single_choice/multiple_choice/text_input 问题类型）
-    TEXT_INPUT = "text_input"   # 简单文本输入
+    FORM = "form"  # 表单模式（唯一类型）
 
 
 @dataclass

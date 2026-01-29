@@ -507,6 +507,8 @@ async def _handle_stream_chat(request: ChatRequest, format: str) -> StreamingRes
                 # zenflux: message_stop, zeno: message.assistant.done, session.stopped（用户主动停止）
                 if event_type in ("message_stop", "message.assistant.done", "session.stopped"):
                     yield "event: done\ndata: {}\n\n"
+                    # 🔧 修复：收到 done 事件后必须终止循环，防止后续异步事件（如外部计费系统错误）被输出
+                    break
         
         except asyncio.CancelledError:
             logger.debug(f"📡 SSE 连接被客户端断开: user_id={request.user_id}")
