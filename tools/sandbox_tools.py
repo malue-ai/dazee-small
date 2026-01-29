@@ -277,16 +277,144 @@ class SandboxRunCommand(BaseTool):
     name = "sandbox_run_command"
     
     async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
-        """执行命令"""
-        # 始终使用 context.conversation_id（由系统注入，可信）
+        """执行命令（支持单命令或多命令批量执行）"""
         conversation_id = context.conversation_id
+        user_id = params.get("user_id") or context.user_id or "default_user"
+        
+        # 检查是否使用多命令模式
+        commands = params.get("commands")
+        if commands and isinstance(commands, list) and len(commands) > 0:
+            return await self._execute_multiple(commands, conversation_id, user_id)
+        
+        # 单命令模式（向后兼容）
         command = params.get("command", "")
         background = params.get("background", False)
         port = params.get("port")
         cwd = params.get("cwd")
         timeout = params.get("timeout", 120)
-        user_id = params.get("user_id") or context.user_id or "default_user"
         
+        return await self._execute_single(
+            command=command,
+            background=background,
+            port=port,
+            cwd=cwd,
+            timeout=timeout,
+            conversation_id=conversation_id,
+            user_id=user_id
+        )
+    
+    async def _execute_multiple(
+        self, 
+        commands: list, 
+        conversation_id: str, 
+        user_id: str
+    ) -> Dict[str, Any]:
+        """
+        批量执行多个后台命令（一键启动前后端）
+        
+        Args:
+            commands: 命令配置列表，每项包含 command, port, cwd, name(可选)
+        """
+        try:
+            await ensure_sandbox(conversation_id, user_id)
+            
+            provider = get_sandbox_provider()
+            sandbox = await provider._get_sandbox_obj(conversation_id)
+            
+            results = []
+            urls = {}
+            
+            for idx, cmd_config in enumerate(commands):
+                cmd = cmd_config.get("command", "")
+                port = cmd_config.get("port")
+                cwd = cmd_config.get("cwd")
+                name = cmd_config.get("name", f"service_{idx + 1}")
+                
+                if not cmd:
+                    results.append({
+                        "name": name,
+                        "success": False,
+                        "error": "命令不能为空"
+                    })
+                    continue
+                
+                # 标准化工作目录
+                normalized_cwd = _normalize_path(cwd) if cwd else SANDBOX_PROJECT_ROOT
+                full_command = f"cd {normalized_cwd} && {cmd}"
+                
+                # 后台启动
+                logger.info(f"🚀 后台执行命令 [{name}]: {cmd}")
+                try:
+                    await sandbox.commands.run(
+                        f"{full_command} > /tmp/{name}.log 2>&1",
+                        background=True,
+                        timeout=10
+                    )
+                except Exception as e:
+                    if "timeout" not in str(e).lower():
+                        logger.warning(f"⚠️ 后台命令异常（可能正常）[{name}]: {e}")
+                
+                cmd_result = {
+                    "name": name,
+                    "success": True,
+                    "command": cmd
+                }
+                
+                # 获取公开 URL
+                if port:
+                    try:
+                        host = sandbox.get_host(port)
+                        url = f"https://{host}"
+                        cmd_result["url"] = url
+                        cmd_result["port"] = port
+                        urls[name] = url
+                        logger.info(f"🌐 服务 URL [{name}]: {url}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ 获取 URL 失败 [{name}]: {e}")
+                        cmd_result["url_error"] = str(e)
+                
+                results.append(cmd_result)
+            
+            # 获取过期时间（只查一次）
+            expires_info = {}
+            try:
+                async with AsyncSessionLocal() as session:
+                    db_sandbox = await crud.get_sandbox_by_conversation(
+                        session, conversation_id
+                    )
+                    if db_sandbox and db_sandbox.last_active_at:
+                        default_timeout = provider.DEFAULT_TIMEOUT_SECONDS
+                        last_active_ts = db_sandbox.last_active_at.timestamp()
+                        expires_ts = last_active_ts + default_timeout
+                        expires_info["expires_at"] = int(expires_ts * 1000)
+                        expires_info["timeout_seconds"] = max(0, int(expires_ts - time.time()))
+            except Exception as e:
+                logger.warning(f"⚠️ 获取沙盒过期时间失败: {e}", exc_info=True)
+            
+            return {
+                "success": all(r.get("success") for r in results),
+                "mode": "multiple",
+                "services": results,
+                "urls": urls,
+                "sandbox_id": sandbox.sandbox_id,
+                **expires_info
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ 批量执行命令失败: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+    
+    async def _execute_single(
+        self,
+        command: str,
+        background: bool,
+        port: Optional[int],
+        cwd: Optional[str],
+        timeout: int,
+        conversation_id: str,
+        user_id: str
+    ) -> Dict[str, Any]:
+        """执行单个命令"""
         try:
             await ensure_sandbox(conversation_id, user_id)
             
@@ -317,7 +445,7 @@ class SandboxRunCommand(BaseTool):
                     "success": True,
                     "background": True,
                     "message": f"命令已在后台启动: {command}",
-                    "sandbox_id": sandbox.sandbox_id,  # E2B 实际沙箱 ID
+                    "sandbox_id": sandbox.sandbox_id,
                 }
                 
                 # 如果指定了端口，自动返回公开 URL
@@ -329,7 +457,7 @@ class SandboxRunCommand(BaseTool):
                         result["port"] = port
                         logger.info(f"🌐 服务 URL: {url}")
                         
-                        # 🆕 添加过期时间信息
+                        # 添加过期时间信息
                         try:
                             async with AsyncSessionLocal() as session:
                                 db_sandbox = await crud.get_sandbox_by_conversation(
@@ -646,9 +774,13 @@ class SandboxInitProject(BaseTool):
     1. 一键生成完整项目结构（前端+后端）
     2. 避免 Agent 逐个写文件时的遗漏或错误
     3. 模板文件存储在 templates/ 目录，方便维护
+    4. 并发写入文件，性能优化
     """
     
     name = "sandbox_init_project"
+    
+    # 并发写入的最大并发数（避免过多并发导致 E2B 限流）
+    MAX_CONCURRENT_WRITES = 10
     
     async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
         """执行项目初始化"""
@@ -667,7 +799,6 @@ class SandboxInitProject(BaseTool):
         
         try:
             await ensure_sandbox(conversation_id, user_id)
-            service = get_sandbox_service()
             
             # 获取模板文件（从文件系统读取）
             files = get_template_files(template_name)
@@ -678,12 +809,10 @@ class SandboxInitProject(BaseTool):
                     "error": f"模板 '{template_name}' 不存在。可用模板: {list(available.keys())}"
                 }
             
-            # 批量写入文件
-            created_files = []
-            for file_path, content in files.items():
-                normalized_path = _normalize_path(file_path)
-                await service.write_file(conversation_id, normalized_path, content)
-                created_files.append(file_path)
+            # 并发批量写入文件
+            created_files = await self._write_files_concurrent(
+                conversation_id, files
+            )
             
             logger.info(f"🚀 项目模板 '{template_name}' 初始化完成，共 {len(created_files)} 个文件")
             
@@ -705,6 +834,87 @@ class SandboxInitProject(BaseTool):
         except Exception as e:
             logger.error(f"❌ 初始化项目失败: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
+    
+    async def _write_files_concurrent(
+        self,
+        conversation_id: str,
+        files: Dict[str, str]
+    ) -> list[str]:
+        """
+        并发批量写入文件到沙盒
+        
+        优化策略：
+        1. 先收集并一次性创建所有需要的目录
+        2. 然后使用 asyncio.gather() 并发写入所有文件
+        3. 使用 Semaphore 限制最大并发数，避免 E2B 限流
+        
+        Args:
+            conversation_id: 对话 ID
+            files: 文件路径 -> 内容的字典
+            
+        Returns:
+            成功写入的文件路径列表
+        """
+        provider = get_sandbox_provider()
+        sandbox = await provider._get_sandbox_obj(conversation_id)
+        
+        # 1. 收集所有需要创建的目录（去重）
+        dirs_to_create = set()
+        normalized_files: Dict[str, str] = {}
+        
+        for file_path, content in files.items():
+            normalized_path = _normalize_path(file_path)
+            normalized_files[normalized_path] = content
+            
+            # 提取目录路径
+            dir_path = "/".join(normalized_path.split("/")[:-1])
+            if dir_path:
+                dirs_to_create.add(dir_path)
+        
+        # 2. 一条命令创建所有目录（大幅减少网络请求）
+        if dirs_to_create:
+            dirs_list = " ".join(sorted(dirs_to_create))
+            try:
+                await sandbox.commands.run(f"mkdir -p {dirs_list}", timeout=30)
+                logger.debug(f"📁 批量创建目录完成: {len(dirs_to_create)} 个目录")
+            except Exception as e:
+                logger.warning(f"⚠️ 批量创建目录失败，将逐个创建: {e}")
+        
+        # 3. 使用 Semaphore 限制并发数，并发写入所有文件
+        semaphore = asyncio.Semaphore(self.MAX_CONCURRENT_WRITES)
+        created_files: list[str] = []
+        
+        async def write_single_file(path: str, content: str) -> Optional[str]:
+            """写入单个文件（带并发限制）"""
+            async with semaphore:
+                try:
+                    await sandbox.files.write(path, content)
+                    return path
+                except Exception as e:
+                    logger.warning(f"⚠️ 写入文件失败: {path} - {e}")
+                    return None
+        
+        # 创建所有写入任务
+        tasks = [
+            write_single_file(path, content)
+            for path, content in normalized_files.items()
+        ]
+        
+        # 并发执行所有任务
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # 收集成功写入的文件
+        for result in results:
+            if isinstance(result, str):
+                # 转换回相对路径用于返回
+                relative_path = result.replace(f"{SANDBOX_PROJECT_ROOT}/", "")
+                created_files.append(relative_path)
+            elif isinstance(result, Exception):
+                logger.warning(f"⚠️ 文件写入异常: {result}")
+        
+        logger.info(f"📝 并发写入完成: {len(created_files)}/{len(files)} 个文件")
+        
+        return created_files
 
 
 # ==================== 工具注册 ====================

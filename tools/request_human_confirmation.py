@@ -3,22 +3,55 @@ HITL 工具 (Human-in-the-Loop)
 
 用于在 Agent 执行过程中请求用户输入或收集偏好。
 
-支持的输入类型（input_type）：
-┌─────────────┬────────────────────────────────────────────────────────┐
-│ 类型        │ 说明                                                    │
-├─────────────┼────────────────────────────────────────────────────────┤
-│ form        │ 结构化表单（支持单选/多选/文本问题组合）                │
-│ text_input  │ 简单文本输入                                            │
-└─────────────┴────────────────────────────────────────────────────────┘
+═══════════════════════════════════════════════════════════════════════════════
+                              表单模式 (form)
+═══════════════════════════════════════════════════════════════════════════════
 
-form 中的问题类型（question.type）：
-- single_choice: 单选题（包含 yes/no 确认）
-- multiple_choice: 多选题
+参数：
+┌─────────────┬────────────────────────────────────────────────────────────┐
+│ title       │ 表单标题（必需）                                            │
+│ description │ 表单描述                                                    │
+│ questions   │ 问题数组（必需）                                            │
+│ timeout     │ 超时时间（秒），默认 120                                    │
+└─────────────┴────────────────────────────────────────────────────────────┘
+
+questions 中的问题类型：
+- single_choice: 单选（包括 yes/no，options 文本可自定义）
+- multiple_choice: 多选
 - text_input: 文本输入
+
+调用示例：
+hitl(
+  title="确认操作",
+  description="请确认以下操作",
+  questions=[
+    {
+      "id": "confirm", 
+      "label": "确定要删除这些文件吗？", 
+      "type": "single_choice", 
+      "options": ["是的，删除", "不，取消"]
+    }
+  ]
+)
+
+hitl(
+  title="收集用户偏好",
+  description="请选择您的偏好以生成更符合需求的内容",
+  questions=[
+    {"id": "style", "label": "选择风格", "type": "single_choice", 
+     "options": ["商务专业", "科技未来感", "简约清新"], "default": "商务专业"},
+    {"id": "focus", "label": "内容重点", "type": "multiple_choice", 
+     "options": ["政策法规", "产业动态", "技术突破"]},
+    {"id": "notes", "label": "补充说明", "type": "text_input", 
+     "hint": "可选", "required": false}
+  ]
+)
+
+═══════════════════════════════════════════════════════════════════════════════
 
 工作流程：
 1. Agent 调用此工具 → 创建 ConfirmationRequest
-2. 通过 emit_event 发送 SSE 事件 → 前端渲染表单
+2. 通过 tool_use SSE 事件 → 前端渲染表单界面
 3. 异步等待用户响应（不阻塞事件循环）
 4. 用户提交 → HTTP POST 唤醒等待
 5. 返回结果给 Agent → 继续执行
@@ -62,9 +95,12 @@ class QuestionType:
 
 class HITLTool(BaseTool):
     """
-    HITL (Human-in-the-Loop) 工具（input_schema 由 capabilities.yaml 定义）
+    HITL (Human-in-the-Loop) 工具
     
-    支持两种输入类型：form（结构化表单）和 text_input（简单文本）。
+    统一表单模式，通过 questions 数组支持：
+    - single_choice: 单选（包括 yes/no，options 文本可自定义）
+    - multiple_choice: 多选
+    - text_input: 文本输入
     """
     
     name = "hitl"
@@ -75,116 +111,81 @@ class HITLTool(BaseTool):
         context: ToolContext
     ) -> Dict[str, Any]:
         """
-        执行用户输入请求
+        执行用户输入请求（表单模式）
         
         Args:
             params: 工具输入参数
-                - title: 表单标题或提示信息
-                - input_type: 输入类型（form 或 text_input）
-                - questions: 问题列表（form 类型）
+                - title: 表单标题（必需）
                 - description: 表单描述
-                - timeout: 超时时间（秒）
-                - metadata: 额外元数据
+                - questions: 问题数组（必需），每个问题包含：
+                    - id: 问题唯一标识
+                    - label: 问题标签
+                    - type: single_choice / multiple_choice / text_input
+                    - options: 选项列表（单选/多选时必需）
+                    - default: 默认值
+                    - required: 是否必填
+                    - hint: 输入提示
+                - timeout: 超时时间（秒），默认 120
             context: 工具执行上下文
             
         Returns:
             {
                 "success": True,
-                "response": "用户输入" | {"field1": "value1", ...},
+                "response": {"question_id": "用户选择/输入", ...},
                 "timed_out": False
             }
         """
-        # 从 params 提取参数
+        # 提取参数
         title = params.get("title", "")
         if not title:
             return {"success": False, "error": "缺少必需参数: title"}
         
-        input_type = params.get("input_type", "form")
         questions = params.get("questions")
+        if not questions:
+            return {"success": False, "error": "缺少必需参数: questions"}
+        
         description = params.get("description", "")
-        timeout = params.get("timeout")
-        metadata = params.get("metadata")
+        timeout = params.get("timeout", FORM_TIMEOUT)
         
         # 从 context 获取 session_id
         session_id = context.session_id or ""
         
-        # 解析输入类型
-        conf_type = self._parse_input_type(input_type)
+        # 构建表单元数据
+        form_metadata = {
+            "type": "form",
+            "description": description,
+            "questions": questions
+        }
         
-        # 设置默认超时
-        if timeout is None:
-            timeout = FORM_TIMEOUT
-        
-        # 构建请求元数据
-        request_metadata = self._build_metadata(
-            conf_type=conf_type,
-            description=description,
-            questions=questions,
-            extra_metadata=metadata
-        )
-        
-        logger.info(f"HITL 请求: type={input_type}, title={title[:50]}...")
+        logger.info(f"HITL 表单请求: title={title[:50]}..., questions={len(questions)}")
         
         # 获取确认管理器
         manager = get_confirmation_manager()
         
-        # 1. 创建确认请求
+        # 创建确认请求
         request = manager.create_request(
             question=title,
             options=None,
             timeout=timeout,
-            confirmation_type=conf_type,
+            confirmation_type=ConfirmationType.FORM,
             session_id=session_id,
-            metadata=request_metadata
+            metadata=form_metadata
         )
         
         logger.info(f"输入请求已创建: request_id={request.request_id}")
         
-        # 2. 前端会通过 tool_use 事件自动显示表单，无需发送额外的 SSE 事件
+        # 前端会通过 tool_use 事件自动显示表单
         logger.debug("等待用户通过前端界面响应...")
         
-        # 3. 异步等待用户响应
+        # 异步等待用户响应
         result = await manager.wait_for_response(request.request_id, timeout)
         
-        # 4. 处理并返回结果
-        return self._process_response(result, conf_type, timeout)
+        # 处理并返回结果
+        return self._process_response(result, timeout)
     
     # ==================== 私有方法 ====================
     
-    def _parse_input_type(self, type_str: str) -> ConfirmationType:
-        """解析输入类型字符串"""
-        try:
-            return ConfirmationType(type_str)
-        except ValueError:
-            logger.warning(f"未知的输入类型: {type_str}，使用默认 form")
-            return ConfirmationType.FORM
-    
-    def _build_metadata(
-        self,
-        conf_type: ConfirmationType,
-        description: str,
-        questions: Optional[List[Dict[str, Any]]],
-        extra_metadata: Optional[Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        """构建请求元数据"""
-        metadata = extra_metadata.copy() if extra_metadata else {}
-        
-        # 添加描述
-        if description:
-            metadata["description"] = description
-        
-        # form 类型添加问题列表
-        if conf_type == ConfirmationType.FORM:
-            metadata["questions"] = questions or []
-        
-        return metadata
-    
-    def _process_response(
-        self, 
-        result: Dict[str, Any], 
-        conf_type: ConfirmationType,
-        timeout: int
-    ) -> Dict[str, Any]:
+    def _process_response(self, result: Dict[str, Any], timeout: int) -> Dict[str, Any]:
         """处理用户响应"""
         # 超时处理
         if result.get("timed_out"):
@@ -192,18 +193,18 @@ class HITLTool(BaseTool):
             return {
                 "success": False,
                 "timed_out": True,
-                "response": "timeout",
+                "response": None,
                 "message": f"用户未在 {timeout} 秒内响应"
             }
         
         response = result.get("response")
         
-        # form 类型：尝试解析 JSON
-        if conf_type == ConfirmationType.FORM and isinstance(response, str):
+        # 尝试解析 JSON（前端可能返回 JSON 字符串）
+        if isinstance(response, str):
             try:
                 response = json.loads(response)
             except json.JSONDecodeError:
-                logger.warning(f"无法解析 form 响应为 JSON: {response[:100]}")
+                pass  # 保持原始字符串
         
         logger.info(f"用户已响应: {type(response).__name__}")
         

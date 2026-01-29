@@ -615,7 +615,7 @@ class AgentRegistry:
                     
                     # 创建工具处理器（闭包捕获变量）
                     async def make_handler(_server_url, _server_name, _auth_token, _orig_name):
-                        async def handler(tool_input: Dict[str, Any]):
+                        async def handler(tool_input: Dict[str, Any], context=None):
                             # 获取/重连 MCP 客户端
                             current_client = await pool.get_client(
                                 server_url=_server_url,

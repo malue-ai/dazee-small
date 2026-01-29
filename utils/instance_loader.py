@@ -1109,7 +1109,8 @@ async def _register_mcp_tools(
             
             # 创建工具处理器（动态获取客户端，支持自动重连）
             async def mcp_handler(
-                tool_input: Dict[str, Any], 
+                tool_input: Dict[str, Any],
+                context=None,
                 _url=server_url, 
                 _name=server_name_for_handler, 
                 _token=auth_token_for_handler,

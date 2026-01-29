@@ -86,10 +86,21 @@ import {
   BookOpen, 
   Bot, 
   Puzzle, 
-  GraduationCap, 
   MessageSquare,
-  LogOut 
+  LogOut,
+  FileText
 } from 'lucide-vue-next'
+import type { FunctionalComponent } from 'vue'
+import type { LucideProps } from 'lucide-vue-next'
+
+// ==================== 类型定义 ====================
+
+interface NavItem {
+  path: string
+  icon: FunctionalComponent<LucideProps>
+  label: string
+  badge?: string
+}
 
 const route = useRoute()
 const router = useRouter()
@@ -97,11 +108,11 @@ const authStore = useAuthStore()
 
 // ==================== 导航配置 ====================
 
-const mainNavItems = [
+const mainNavItems: NavItem[] = [
   { path: '/knowledge', icon: BookOpen, label: '知识库' },
   { path: '/agents', icon: Bot, label: '智能体' },
   { path: '/skills', icon: Puzzle, label: '技能' },
-  { path: '/tutorial', icon: GraduationCap, label: '教程', badge: 'New' }
+  { path: '/docs', icon: FileText, label: '文档' }
 ]
 
 // ==================== 计算属性 ====================
