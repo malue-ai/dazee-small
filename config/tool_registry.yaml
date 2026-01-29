@@ -23,6 +23,7 @@ core_tools:
   - sandbox_execute_python      # 执行 Python 代码
   - sandbox_get_public_url      # 获取公开 URL
   - sandbox_upload_file         # 上传文件到 S3
+  - sandbox_init_project        # 项目脚手架初始化
 
 # ==================== 沙盒工具 ====================
 sandbox_tools:
@@ -33,6 +34,7 @@ sandbox_tools:
   - sandbox_execute_python
   - sandbox_get_public_url
   - sandbox_upload_file
+  - sandbox_init_project      # 🆕 项目脚手架初始化
 
 # ==================== 常用工具（不延迟加载）====================
 # Tool Search 模式下不延迟加载的工具
@@ -54,7 +56,7 @@ tool_categories:
     - docx
     - pdf
   
-  # 代码沙盒类（E2B 沙盒工具 - 7 个，贴近 E2B 原生 API）
+  # 代码沙盒类（E2B 沙盒工具 - 8 个，贴近 E2B 原生 API）
   sandbox_tools:
     - sandbox_write_file
     - sandbox_read_file
@@ -63,6 +65,7 @@ tool_categories:
     - sandbox_execute_python
     - sandbox_get_public_url
     - sandbox_upload_file
+    - sandbox_init_project      # 🆕 项目脚手架初始化
   
   # PPT 生成类（可选扩展）
   ppt_tools:

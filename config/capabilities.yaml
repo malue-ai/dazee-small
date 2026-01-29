@@ -1315,10 +1315,9 @@ capabilities:
   input_schema:
     type: object
     properties:
-      conversation_id: {type: string, description: 对话 ID}
       path: {type: string, description: 文件路径}
       content: {type: string, description: 文件内容}
-    required: [conversation_id, path, content]
+    required: [path, content]
 - name: sandbox_run_command
   type: TOOL
   subtype: CUSTOM
@@ -1376,12 +1375,11 @@ capabilities:
   input_schema:
     type: object
     properties:
-      conversation_id: {type: string, description: 对话 ID}
       command: {type: string, description: 命令}
       background: {type: boolean, description: 是否后台运行（启动服务器时使用）, default: false}
       port: {type: integer, description: 服务端口（background=true 时指定，自动返回公开 URL，用户可直接访问）}
       timeout: {type: integer, description: 超时秒数, default: 120}
-    required: [conversation_id, command]
+    required: [command]
 - name: sandbox_read_file
   type: TOOL
   subtype: CUSTOM
@@ -1406,9 +1404,8 @@ capabilities:
   input_schema:
     type: object
     properties:
-      conversation_id: {type: string, description: 对话 ID}
       path: {type: string, description: 文件路径}
-    required: [conversation_id, path]
+    required: [path]
 - name: sandbox_list_files
   type: TOOL
   subtype: CUSTOM
@@ -1433,9 +1430,8 @@ capabilities:
   input_schema:
     type: object
     properties:
-      conversation_id: {type: string, description: 对话 ID}
       path: {type: string, description: 目录路径（默认 /home/user/project）}
-    required: [conversation_id]
+    required: []
 - name: sandbox_execute_python
   type: TOOL
   subtype: CUSTOM
@@ -1469,10 +1465,9 @@ capabilities:
   input_schema:
     type: object
     properties:
-      conversation_id: {type: string, description: 对话 ID}
       code: {type: string, description: Python 代码}
       timeout: {type: integer, description: 超时秒数, default: 300}
-    required: [conversation_id, code]
+    required: [code]
 - name: sandbox_get_public_url
   type: TOOL
   subtype: CUSTOM
@@ -1516,9 +1511,8 @@ capabilities:
   input_schema:
     type: object
     properties:
-      conversation_id: {type: string, description: 对话 ID}
       port: {type: integer, description: 服务端口, default: 3000}
-    required: [conversation_id]
+    required: []
 - name: sandbox_upload_file
   type: TOOL
   subtype: CUSTOM
@@ -1556,10 +1550,9 @@ capabilities:
   input_schema:
     type: object
     properties:
-      conversation_id: {type: string, description: 对话 ID}
       path: {type: string, description: 沙盒中的文件路径}
       filename: {type: string, description: 下载时显示的文件名（可选）}
-    required: [conversation_id, path]
+    required: [path]
 - name: sandbox_init_project
   type: TOOL
   subtype: CUSTOM
@@ -1611,9 +1604,8 @@ capabilities:
   input_schema:
     type: object
     properties:
-      conversation_id: {type: string, description: 对话 ID}
-      template: {type: string, description: 模板名称 (react_fullstack | node_fullstack | static_html), default: react_fullstack}
-    required: [conversation_id]
+      template: {type: string, description: 模板名称 (react_fullstack), default: react_fullstack}
+    required: []
 - name: document_partition_tool
   type: TOOL
   subtype: CUSTOM
