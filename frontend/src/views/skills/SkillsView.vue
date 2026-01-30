@@ -1,19 +1,19 @@
 <template>
   <div class="h-full flex flex-col overflow-hidden bg-white">
     <!-- 顶部工具栏 -->
-    <div class="h-16 flex items-center justify-between px-8 border-b border-gray-100 bg-white sticky top-0 z-10">
+    <div class="h-16 flex items-center justify-between px-6 border-b border-gray-100 bg-white sticky top-0 z-10 flex-shrink-0">
       <div class="flex items-center gap-4">
         <h1 class="text-lg font-bold flex items-center gap-2 text-gray-800">
           <Puzzle class="w-6 h-6 text-blue-500" />
-          Skill 管理
+          Skills 全局库
         </h1>
         <div class="text-sm text-gray-500 bg-gray-50 px-2.5 py-1 rounded-md border border-gray-100">
-          共 {{ skills.length }} 个 Skill
+          共 {{ globalSkills.length }} 个 Skill
         </div>
       </div>
       <div class="flex items-center gap-3">
         <button 
-          @click="fetchSkills" 
+          @click="fetchGlobalSkills" 
           :disabled="loading"
           class="p-2.5 bg-gray-50 border border-gray-200 rounded-xl text-gray-600 hover:bg-gray-100 hover:text-blue-600 transition-all"
           title="刷新"
@@ -21,11 +21,11 @@
           <RefreshCw class="w-4 h-4" :class="loading ? 'animate-spin' : ''" />
         </button>
         <button 
-          @click="showCreateModal = true"
+          @click="showUploadModal = true"
           class="flex items-center gap-2 px-5 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-xl hover:bg-gray-800 transition-all shadow-lg shadow-gray-900/10 active:scale-95"
         >
-          <Plus class="w-4 h-4" />
-          创建 Skill
+          <Upload class="w-4 h-4" />
+          上传 Skill
         </button>
       </div>
     </div>
@@ -33,7 +33,7 @@
     <!-- 主内容区 -->
     <div class="flex-1 flex overflow-hidden">
       <!-- 左侧 Skill 列表 -->
-      <div class="w-[320px] border-r border-gray-100 bg-gray-50 overflow-y-auto p-4 flex flex-col">
+      <div class="w-72 border-r border-gray-100 bg-gray-50 overflow-y-auto p-4 flex flex-col flex-shrink-0">
         <!-- 搜索框 -->
         <div class="relative mb-4 group">
           <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 group-focus-within:text-blue-500 transition-colors" />
@@ -54,6 +54,7 @@
         <div v-else-if="filteredSkills.length === 0" class="text-center py-12 text-gray-400 bg-white/50 rounded-2xl border border-dashed border-gray-200">
           <Puzzle class="w-8 h-8 mx-auto mb-2 text-gray-300" />
           <p class="text-sm">暂无 Skill</p>
+          <p class="text-xs mt-1">上传新的 Skill 来扩展能力</p>
         </div>
 
         <!-- Skill 列表 -->
@@ -69,34 +70,13 @@
           >
             <div class="flex items-start justify-between mb-2">
               <h3 class="font-semibold text-gray-900 text-sm truncate pr-2">{{ skill.name }}</h3>
-              <span 
-                class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide border"
-                :class="getPriorityClass(skill.priority)"
-              >
-                {{ skill.priority }}
-              </span>
             </div>
-            <p class="text-xs text-gray-500 line-clamp-2 mb-3 leading-relaxed">{{ skill.description }}</p>
-            <div class="flex flex-wrap gap-1">
-              <span 
-                v-for="tag in skill.preferred_for.slice(0, 3)" 
-                :key="tag"
-                class="px-2 py-0.5 bg-gray-50 text-gray-600 rounded text-[10px] border border-gray-100"
-              >
-                {{ tag }}
-              </span>
-              <span 
-                v-if="skill.preferred_for.length > 3" 
-                class="px-2 py-0.5 bg-gray-50 text-gray-400 rounded text-[10px] border border-gray-100"
-              >
-                +{{ skill.preferred_for.length - 3 }}
-              </span>
-            </div>
+            <p class="text-xs text-gray-500 line-clamp-2 leading-relaxed">{{ skill.description || '暂无描述' }}</p>
           </div>
         </div>
       </div>
 
-      <!-- 右侧详情/编辑区 -->
+      <!-- 右侧详情区 -->
       <div class="flex-1 flex flex-col overflow-hidden bg-white">
         <!-- 未选中状态 -->
         <div v-if="!selectedSkill" class="flex-1 flex flex-col items-center justify-center text-gray-400">
@@ -104,251 +84,250 @@
             <Puzzle class="w-10 h-10 opacity-30" />
           </div>
           <p class="text-sm font-medium text-gray-500">选择一个 Skill 查看详情</p>
-          <p class="text-xs mt-1 text-gray-400">或创建新的 Skill</p>
+          <p class="text-xs mt-1 text-gray-400">或上传新的 Skill</p>
         </div>
 
         <!-- 详情视图 -->
         <template v-else>
           <!-- 详情头部 -->
           <div class="h-16 flex items-center justify-between px-8 border-b border-gray-100 bg-white flex-shrink-0">
-            <div class="flex items-center gap-3">
-              <h2 class="text-lg font-bold text-gray-900">{{ selectedSkill.name }}</h2>
-              <span 
-                class="px-2.5 py-1 rounded-lg text-xs font-bold uppercase border"
-                :class="getPriorityClass(selectedSkill.priority)"
-              >
-                {{ selectedSkill.priority }}
-              </span>
-            </div>
-            <div class="flex items-center gap-2">
-              <button 
-                @click="isEditing = !isEditing"
-                class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all"
-                :class="isEditing 
-                  ? 'bg-blue-600 text-white shadow-md' 
-                  : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-gray-900'"
-              >
-                <Edit2 v-if="!isEditing" class="w-4 h-4" />
-                <Save v-else class="w-4 h-4" />
-                {{ isEditing ? '编辑中' : '编辑' }}
-              </button>
-              <button 
-                @click="handleDelete"
-                class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-white border border-red-200 text-red-500 hover:bg-red-50 transition-all"
-              >
-                <Trash2 class="w-4 h-4" />
-                删除
-              </button>
-            </div>
+            <h2 class="text-lg font-bold text-gray-900">{{ selectedSkill.name }}</h2>
+            <button 
+              @click="handleDelete"
+              :disabled="actionLoading"
+              class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-white border border-red-200 text-red-500 hover:bg-red-50 transition-all"
+            >
+              <Trash2 class="w-4 h-4" />
+              删除
+            </button>
           </div>
 
           <!-- 详情内容 -->
-          <div class="flex-1 overflow-y-auto p-8 scrollbar-thin">
-            <!-- 基本信息 -->
-            <div class="bg-gray-50/50 rounded-2xl border border-gray-100 p-6 mb-6">
-              <h3 class="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2 uppercase tracking-wide">
-                <ClipboardList class="w-4 h-4 text-gray-500" /> 基本信息
-              </h3>
-              
-              <div class="space-y-6">
-                <div>
-                  <label class="text-xs font-semibold text-gray-500 mb-1.5 block uppercase">描述</label>
-                  <p v-if="!isEditing" class="text-sm text-gray-700 leading-relaxed">{{ selectedSkill.description }}</p>
-                  <textarea 
-                    v-else 
-                    v-model="editForm.description"
-                    rows="3"
-                    class="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                  ></textarea>
-                </div>
+          <div class="flex-1 overflow-y-auto p-6 scrollbar-thin">
+            <div class="max-w-7xl mx-auto space-y-6">
+            <!-- 加载详情中 -->
+            <div v-if="detailLoading" class="flex items-center justify-center py-12 text-gray-400">
+              <Loader2 class="w-6 h-6 animate-spin mr-2" /> 加载详情中...
+            </div>
 
-                <div>
-                  <label class="text-xs font-semibold text-gray-500 mb-1.5 block uppercase">适用场景</label>
-                  <div v-if="!isEditing" class="flex flex-wrap gap-2">
-                    <span 
-                      v-for="tag in selectedSkill.preferred_for" 
-                      :key="tag"
-                      class="px-3 py-1 bg-blue-50 text-blue-700 border border-blue-100 rounded-lg text-xs font-medium"
-                    >
-                      {{ tag }}
-                    </span>
+            <template v-else-if="skillDetail">
+              <!-- 基本信息 -->
+              <div class="bg-gray-50/50 rounded-2xl border border-gray-100 p-6">
+                <h3 class="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2 uppercase tracking-wide">
+                  <ClipboardList class="w-4 h-4 text-gray-500" /> 基本信息
+                </h3>
+                
+                <div class="space-y-4">
+                  <div>
+                    <label class="text-xs font-semibold text-gray-500 mb-1.5 block uppercase">描述</label>
+                    <p class="text-sm text-gray-700 leading-relaxed">{{ skillDetail.description || '暂无描述' }}</p>
                   </div>
-                  <input 
-                    v-else 
-                    v-model="editForm.preferred_for_text"
-                    placeholder="用逗号分隔多个标签"
-                    class="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                  >
-                </div>
 
+                  <!-- 适用场景 -->
+                  <div v-if="skillDetail.preferred_for?.length">
+                    <label class="text-xs font-semibold text-gray-500 mb-1.5 block uppercase">适用场景</label>
+                    <div class="flex flex-wrap gap-2">
+                      <span 
+                        v-for="tag in skillDetail.preferred_for" 
+                        :key="tag"
+                        class="px-3 py-1 bg-blue-50 text-blue-700 border border-blue-100 rounded-lg text-xs font-medium"
+                      >
+                        {{ tag }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 文件信息 -->
+              <div v-if="skillDetail.scripts?.length || skillDetail.resources?.length" class="bg-gray-50/50 rounded-2xl border border-gray-100 p-6">
+                <h3 class="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2 uppercase tracking-wide">
+                  <FolderOpen class="w-4 h-4 text-gray-500" /> 文件结构
+                </h3>
+                
                 <div class="grid grid-cols-2 gap-6">
                   <div>
-                    <label class="text-xs font-semibold text-gray-500 mb-1.5 block uppercase">脚本</label>
+                    <label class="text-xs font-semibold text-gray-500 mb-2 block uppercase">脚本文件 (scripts/)</label>
                     <div class="space-y-2">
                       <div 
-                        v-for="script in selectedSkill.scripts" 
+                        v-for="script in skillDetail.scripts" 
                         :key="script"
-                        class="flex items-center gap-2 px-3 py-2 bg-white border border-gray-200 rounded-lg text-xs text-gray-600 font-mono"
+                        @click="viewFile('scripts', script)"
+                        class="flex items-center gap-2 px-3 py-2 bg-white border border-gray-200 rounded-lg text-xs text-gray-600 font-mono cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-all group"
                       >
-                        <FileCode class="w-3.5 h-3.5 text-gray-400" /> {{ script }}
+                        <FileCode class="w-3.5 h-3.5 text-blue-500" /> 
+                        <span class="flex-1">{{ script }}</span>
+                        <Eye class="w-3.5 h-3.5 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
                       </div>
-                      <div v-if="selectedSkill.scripts.length === 0" class="text-xs text-gray-400 italic bg-white/50 px-3 py-2 rounded-lg border border-dashed border-gray-200">
-                        无脚本
+                      <div v-if="!skillDetail.scripts?.length" class="text-xs text-gray-400 italic bg-white/50 px-3 py-2 rounded-lg border border-dashed border-gray-200">
+                        无脚本文件
                       </div>
                     </div>
                   </div>
                   <div>
-                    <label class="text-xs font-semibold text-gray-500 mb-1.5 block uppercase">资源</label>
+                    <label class="text-xs font-semibold text-gray-500 mb-2 block uppercase">资源文件 (resources/)</label>
                     <div class="space-y-2">
                       <div 
-                        v-for="res in selectedSkill.resources" 
+                        v-for="res in skillDetail.resources" 
                         :key="res"
-                        class="flex items-center gap-2 px-3 py-2 bg-white border border-gray-200 rounded-lg text-xs text-gray-600 font-mono"
+                        @click="viewFile('resources', res)"
+                        class="flex items-center gap-2 px-3 py-2 bg-white border border-gray-200 rounded-lg text-xs text-gray-600 font-mono cursor-pointer hover:border-green-400 hover:bg-green-50 transition-all group"
                       >
-                        <FolderOpen class="w-3.5 h-3.5 text-gray-400" /> {{ res }}
+                        <FileJson class="w-3.5 h-3.5 text-green-500" /> 
+                        <span class="flex-1">{{ res }}</span>
+                        <Eye class="w-3.5 h-3.5 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
                       </div>
-                      <div v-if="selectedSkill.resources.length === 0" class="text-xs text-gray-400 italic bg-white/50 px-3 py-2 rounded-lg border border-dashed border-gray-200">
-                        无资源
+                      <div v-if="!skillDetail.resources?.length" class="text-xs text-gray-400 italic bg-white/50 px-3 py-2 rounded-lg border border-dashed border-gray-200">
+                        无资源文件
                       </div>
                     </div>
                   </div>
                 </div>
               </div>
-            </div>
 
-            <!-- 文档内容 -->
-            <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
-              <h3 class="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2 uppercase tracking-wide">
-                <FileText class="w-4 h-4 text-gray-500" /> SKILL.md 文档
-              </h3>
-              
-              <div v-if="!isEditing" class="prose prose-sm max-w-none prose-headings:font-bold prose-h1:text-xl prose-h2:text-lg prose-p:text-gray-600 prose-pre:bg-gray-50 prose-pre:border prose-pre:border-gray-100">
-                <div class="text-sm text-gray-700 whitespace-pre-wrap font-mono leading-relaxed">{{ selectedSkill.content }}</div>
+              <!-- SKILL.md 文档内容 -->
+              <div v-if="skillDetail.content" class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+                <h3 class="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2 uppercase tracking-wide">
+                  <FileText class="w-4 h-4 text-gray-500" /> SKILL.md 文档
+                </h3>
+                
+                <div class="prose prose-sm max-w-none bg-gray-50 rounded-xl p-4 border border-gray-100 max-h-[500px] overflow-y-auto">
+                  <pre class="text-xs text-gray-700 whitespace-pre-wrap font-mono leading-relaxed">{{ skillDetail.content }}</pre>
+                </div>
               </div>
-              <textarea 
-                v-else 
-                v-model="editForm.content"
-                rows="20"
-                class="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all leading-relaxed"
-              ></textarea>
-            </div>
-
-            <!-- 编辑模式下的保存按钮 -->
-            <div v-if="isEditing" class="mt-8 flex justify-end gap-3 sticky bottom-0 bg-white py-4 border-t border-gray-100">
-              <button 
-                @click="cancelEdit"
-                class="px-6 py-2.5 rounded-xl text-sm font-medium bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-all"
-              >
-                取消
-              </button>
-              <button 
-                @click="saveEdit"
-                class="px-6 py-2.5 rounded-xl text-sm font-medium bg-gray-900 text-white hover:bg-gray-800 transition-all shadow-lg shadow-gray-900/10 flex items-center gap-2"
-              >
-                <Save class="w-4 h-4" />
-                保存更改
-              </button>
+            </template>
             </div>
           </div>
         </template>
       </div>
     </div>
 
-    <!-- 创建 Modal -->
+    <!-- 上传 Modal -->
     <Teleport to="body">
       <div 
-        v-if="showCreateModal"
-        class="fixed inset-0 bg-gray-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-6 transition-opacity"
-        @click.self="showCreateModal = false"
+        v-if="showUploadModal"
+        class="fixed inset-0 bg-gray-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-6"
+        @click.self="showUploadModal = false"
       >
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col transform transition-all scale-100">
-          <!-- Modal 头部 -->
-          <div class="px-8 py-5 border-b border-gray-100 flex items-center justify-between bg-white sticky top-0 z-10">
-            <h3 class="text-lg font-bold text-gray-900 flex items-center gap-2">
-              <Plus class="w-5 h-5 text-blue-500" />
-              创建新 Skill
-            </h3>
-            <button 
-              @click="showCreateModal = false"
-              class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
-            >
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+          <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+            <h3 class="text-lg font-bold text-gray-900">上传新 Skill</h3>
+            <button @click="showUploadModal = false" class="p-2 rounded-lg text-gray-400 hover:bg-gray-100">
               <X class="w-5 h-5" />
             </button>
           </div>
-
-          <!-- Modal 内容 -->
-          <div class="flex-1 overflow-y-auto p-8 space-y-6">
+          <div class="p-6 space-y-4">
             <div>
-              <label class="text-sm font-semibold text-gray-700 mb-2 block">Skill 名称 <span class="text-red-500">*</span></label>
+              <label class="text-sm font-medium text-gray-700 mb-2 block">Skill 名称</label>
               <input 
-                v-model="createForm.name"
+                v-model="uploadSkillName"
                 placeholder="例如: my-custom-skill"
-                class="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20"
               >
-              <p class="text-xs text-gray-400 mt-1.5 ml-1">只能包含小写字母、数字和连字符</p>
+              <p class="text-xs text-gray-400 mt-1">只能包含小写字母、数字和连字符</p>
             </div>
-
             <div>
-              <label class="text-sm font-semibold text-gray-700 mb-2 block">描述 <span class="text-red-500">*</span></label>
-              <textarea 
-                v-model="createForm.description"
-                rows="3"
-                placeholder="描述这个 Skill 的功能和用途..."
-                class="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all resize-none"
-              ></textarea>
-            </div>
-
-            <div class="grid grid-cols-2 gap-6">
-              <div>
-                <label class="text-sm font-semibold text-gray-700 mb-2 block">优先级</label>
-                <div class="relative">
-                  <select 
-                    v-model="createForm.priority"
-                    class="w-full pl-4 pr-10 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all appearance-none cursor-pointer"
-                  >
-                    <option value="high">🔥 高 (High)</option>
-                    <option value="medium">⚡ 中 (Medium)</option>
-                    <option value="low">☕ 低 (Low)</option>
-                  </select>
-                  <ChevronDown class="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-                </div>
+              <label class="text-sm font-medium text-gray-700 mb-2 block">上传 ZIP 文件</label>
+              <div 
+                class="border-2 border-dashed border-gray-200 rounded-lg p-6 text-center hover:border-blue-400 transition-colors cursor-pointer"
+                @click="fileInput?.click()"
+                @dragover.prevent
+                @drop.prevent="handleFileDrop"
+              >
+                <Upload class="w-8 h-8 mx-auto mb-2 text-gray-400" />
+                <p class="text-sm text-gray-500">
+                  {{ uploadFile ? uploadFile.name : '点击选择或拖拽文件' }}
+                </p>
+                <p class="text-xs text-gray-400 mt-1">ZIP 文件，必须包含 SKILL.md</p>
               </div>
-              <div>
-                <label class="text-sm font-semibold text-gray-700 mb-2 block">适用场景</label>
-                <input 
-                  v-model="createForm.preferred_for_text"
-                  placeholder="例如: task planning, coding"
-                  class="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                >
-              </div>
-            </div>
-
-            <div>
-              <label class="text-sm font-semibold text-gray-700 mb-2 block">SKILL.md 内容</label>
-              <textarea 
-                v-model="createForm.content"
-                rows="12"
-                placeholder="# My Skill&#10;&#10;Description of what this skill does...&#10;&#10;## When to Use&#10;&#10;- Scenario 1&#10;- Scenario 2"
-                class="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all leading-relaxed"
-              ></textarea>
+              <input 
+                ref="fileInput"
+                type="file" 
+                accept=".zip"
+                @change="handleFileSelect"
+                class="hidden"
+              >
             </div>
           </div>
+          <div class="px-6 py-4 border-t border-gray-100 flex justify-end gap-3 bg-gray-50">
+            <button @click="showUploadModal = false" class="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">取消</button>
+            <button 
+              @click="handleUpload"
+              :disabled="!uploadSkillName || !uploadFile || actionLoading"
+              class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            >
+              {{ actionLoading ? '上传中...' : '上传' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
-          <!-- Modal 底部 -->
-          <div class="px-8 py-5 border-t border-gray-100 flex justify-end gap-3 bg-gray-50 sticky bottom-0">
-            <button 
-              @click="showCreateModal = false"
-              class="px-6 py-2.5 rounded-xl text-sm font-medium text-gray-600 hover:bg-white hover:shadow-sm border border-transparent hover:border-gray-200 transition-all"
-            >
-              取消
-            </button>
-            <button 
-              @click="handleCreate"
-              :disabled="!createForm.name || !createForm.description"
-              class="px-8 py-2.5 rounded-xl text-sm font-medium bg-gray-900 text-white hover:bg-gray-800 transition-all shadow-lg shadow-gray-900/10 disabled:opacity-50 disabled:cursor-not-allowed transform active:scale-95"
-            >
-              创建 Skill
-            </button>
+    <!-- 文件查看 Modal -->
+    <Teleport to="body">
+      <div 
+        v-if="showFileModal"
+        class="fixed inset-0 bg-gray-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-6"
+        @click.self="showFileModal = false"
+      >
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
+          <!-- 弹窗头部 -->
+          <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+            <div class="flex items-center gap-3">
+              <div class="w-9 h-9 rounded-lg flex items-center justify-center" :class="currentFileType === 'scripts' ? 'bg-blue-100' : 'bg-green-100'">
+                <FileCode v-if="currentFileType === 'scripts'" class="w-5 h-5 text-blue-600" />
+                <FileJson v-else class="w-5 h-5 text-green-600" />
+              </div>
+              <div>
+                <h3 class="text-base font-bold text-gray-900">{{ currentFileName }}</h3>
+                <p class="text-xs text-gray-500">
+                  {{ currentFileType === 'scripts' ? '脚本文件' : '资源文件' }} · {{ selectedSkill?.name }}
+                </p>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <button 
+                v-if="fileContent && !fileContent.is_binary"
+                @click="copyFileContent"
+                class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+              >
+                <Copy class="w-3.5 h-3.5" />
+                复制
+              </button>
+              <button @click="showFileModal = false" class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors">
+                <X class="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+          
+          <!-- 弹窗内容 -->
+          <div class="flex-1 overflow-hidden">
+            <!-- 加载中 -->
+            <div v-if="fileLoading" class="flex items-center justify-center h-64 text-gray-400">
+              <Loader2 class="w-6 h-6 animate-spin mr-2" /> 加载文件中...
+            </div>
+            
+            <!-- 二进制文件提示 -->
+            <div v-else-if="fileContent?.is_binary" class="flex flex-col items-center justify-center h-64 text-gray-400">
+              <FileWarning class="w-12 h-12 mb-3 text-gray-300" />
+              <p class="text-sm font-medium text-gray-500">此文件为二进制格式</p>
+              <p class="text-xs mt-1">无法显示内容，文件大小: {{ formatFileSize(fileContent.size) }}</p>
+            </div>
+            
+            <!-- 文件内容 -->
+            <div v-else-if="fileContent" class="h-full overflow-auto">
+              <div class="p-1">
+                <div class="bg-gray-900 rounded-xl overflow-hidden">
+                  <!-- 语言标签 -->
+                  <div class="flex items-center justify-between px-4 py-2 bg-gray-800 border-b border-gray-700">
+                    <span class="text-xs font-medium text-gray-400">{{ fileContent.language?.toUpperCase() || 'TEXT' }}</span>
+                    <span class="text-xs text-gray-500">{{ formatFileSize(fileContent.size) }}</span>
+                  </div>
+                  <!-- 代码内容 -->
+                  <pre class="p-4 text-sm text-gray-300 font-mono leading-relaxed overflow-auto max-h-[calc(85vh-180px)] whitespace-pre-wrap break-words"><code>{{ fileContent.content }}</code></pre>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -357,216 +336,193 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import * as skillsApi from '@/api/skills'
-import type { Skill, SkillPriority } from '@/types'
+import type { SkillSummary } from '@/types'
+import type { SkillDetailResponse } from '@/api/skills'
 import { 
   Puzzle, 
   Search, 
   RefreshCw, 
-  Plus, 
   Loader2, 
-  Edit2, 
-  Save, 
   Trash2, 
-  ClipboardList, 
-  FileCode, 
-  FolderOpen, 
-  FileText,
+  ClipboardList,
   X,
-  ChevronDown
+  Upload,
+  FileCode,
+  FileJson,
+  FileText,
+  FolderOpen,
+  Eye,
+  Copy,
+  FileWarning
 } from 'lucide-vue-next'
+import type { SkillFileContentResponse } from '@/api/skills'
 
 // ==================== 状态 ====================
 
-const skills = ref<Skill[]>([])
 const loading = ref(false)
+const actionLoading = ref(false)
+const detailLoading = ref(false)
 const searchQuery = ref('')
-const selectedSkill = ref<Skill | null>(null)
-const isEditing = ref(false)
-const showCreateModal = ref(false)
 
-// 编辑表单
-const editForm = ref({
-  description: '',
-  priority: 'medium' as SkillPriority,
-  preferred_for_text: '',
-  content: ''
-})
+// Skills 数据
+const globalSkills = ref<SkillSummary[]>([])
+const selectedSkill = ref<SkillSummary | null>(null)
+const skillDetail = ref<SkillDetailResponse | null>(null)
 
-// 创建表单
-const createForm = ref({
-  name: '',
-  description: '',
-  priority: 'medium' as SkillPriority,
-  preferred_for_text: '',
-  content: ''
-})
+// Modal 状态
+const showUploadModal = ref(false)
+const uploadSkillName = ref('')
+const uploadFile = ref<File | null>(null)
+const fileInput = ref<HTMLInputElement | null>(null)
+
+// 文件查看 Modal 状态
+const showFileModal = ref(false)
+const fileLoading = ref(false)
+const currentFileType = ref<'scripts' | 'resources'>('scripts')
+const currentFileName = ref('')
+const fileContent = ref<SkillFileContentResponse | null>(null)
 
 // ==================== 计算属性 ====================
 
 const filteredSkills = computed(() => {
-  if (!searchQuery.value) return skills.value
+  if (!searchQuery.value) return globalSkills.value
   
   const query = searchQuery.value.toLowerCase()
-  return skills.value.filter(skill => 
+  return globalSkills.value.filter(skill => 
     skill.name.toLowerCase().includes(query) ||
-    skill.description.toLowerCase().includes(query) ||
-    skill.preferred_for.some(tag => tag.toLowerCase().includes(query))
+    skill.description.toLowerCase().includes(query)
   )
 })
 
 // ==================== 方法 ====================
 
-/**
- * 获取 Skills 列表
- */
-async function fetchSkills() {
+async function fetchGlobalSkills() {
   loading.value = true
   try {
-    skills.value = await skillsApi.getSkills()
+    globalSkills.value = await skillsApi.getGlobalSkills()
   } catch (error) {
-    console.error('获取 Skills 失败:', error)
+    console.error('获取全局 Skills 失败:', error)
   } finally {
     loading.value = false
   }
 }
 
-/**
- * 选择 Skill
- */
-function selectSkill(skill: Skill) {
+async function selectSkill(skill: SkillSummary) {
   selectedSkill.value = skill
-  isEditing.value = false
+  skillDetail.value = null
   
-  // 初始化编辑表单
-  editForm.value = {
-    description: skill.description,
-    priority: skill.priority,
-    preferred_for_text: skill.preferred_for.join(', '),
-    content: skill.content
-  }
-}
-
-/**
- * 获取优先级样式类
- */
-function getPriorityClass(priority: SkillPriority): string {
-  const classes: Record<SkillPriority, string> = {
-    high: 'bg-red-50 text-red-600 border-red-100',
-    medium: 'bg-yellow-50 text-yellow-600 border-yellow-100',
-    low: 'bg-green-50 text-green-600 border-green-100'
-  }
-  return classes[priority] || classes.medium
-}
-
-/**
- * 取消编辑
- */
-function cancelEdit() {
-  isEditing.value = false
-  if (selectedSkill.value) {
-    editForm.value = {
-      description: selectedSkill.value.description,
-      priority: selectedSkill.value.priority,
-      preferred_for_text: selectedSkill.value.preferred_for.join(', '),
-      content: selectedSkill.value.content
-    }
-  }
-}
-
-/**
- * 保存编辑
- */
-async function saveEdit() {
-  if (!selectedSkill.value) return
-  
+  // 获取详细信息
+  detailLoading.value = true
   try {
-    await skillsApi.updateSkill(selectedSkill.value.name, {
-      description: editForm.value.description,
-      priority: editForm.value.priority,
-      preferred_for: editForm.value.preferred_for_text.split(',').map(s => s.trim()).filter(Boolean),
-      content: editForm.value.content
-    })
-    
-    // 更新本地数据
-    const index = skills.value.findIndex(s => s.name === selectedSkill.value?.name)
-    if (index !== -1) {
-      skills.value[index] = {
-        ...skills.value[index],
-        description: editForm.value.description,
-        priority: editForm.value.priority,
-        preferred_for: editForm.value.preferred_for_text.split(',').map(s => s.trim()).filter(Boolean),
-        content: editForm.value.content
-      }
-      selectedSkill.value = skills.value[index]
-    }
-    
-    isEditing.value = false
-    alert('保存成功！')
+    skillDetail.value = await skillsApi.getSkillDetail(skill.name)
   } catch (error) {
-    console.error('保存失败:', error)
-    alert('保存失败，请重试')
+    console.error('获取 Skill 详情失败:', error)
+  } finally {
+    detailLoading.value = false
   }
 }
 
-/**
- * 创建 Skill
- */
-async function handleCreate() {
-  if (!createForm.value.name || !createForm.value.description) return
-  
-  try {
-    const newSkill = await skillsApi.createSkill({
-      name: createForm.value.name,
-      description: createForm.value.description,
-      priority: createForm.value.priority,
-      preferred_for: createForm.value.preferred_for_text.split(',').map(s => s.trim()).filter(Boolean),
-      content: createForm.value.content || `# ${createForm.value.name}\n\n${createForm.value.description}`
-    })
-    
-    skills.value.push(newSkill)
-    showCreateModal.value = false
-    
-    // 重置表单
-    createForm.value = {
-      name: '',
-      description: '',
-      priority: 'medium',
-      preferred_for_text: '',
-      content: ''
-    }
-    
-    alert('创建成功！')
-  } catch (error) {
-    console.error('创建失败:', error)
-    alert('创建失败，请重试')
-  }
-}
-
-/**
- * 删除 Skill
- */
 async function handleDelete() {
   if (!selectedSkill.value) return
   
-  if (!confirm(`确定要删除 "${selectedSkill.value.name}" 吗？此操作不可恢复。`)) return
+  if (!confirm(`确定要从全局库删除 "${selectedSkill.value.name}" 吗？\n已安装到实例的副本不会受影响。`)) return
+  
+  actionLoading.value = true
+  try {
+    // TODO: 调用删除全局 Skill 的 API
+    alert('删除功能开发中')
+  } catch (error: any) {
+    alert(error.response?.data?.detail?.message || '删除失败')
+  } finally {
+    actionLoading.value = false
+  }
+}
+
+function handleFileSelect(event: Event) {
+  const input = event.target as HTMLInputElement
+  if (input.files && input.files[0]) {
+    uploadFile.value = input.files[0]
+  }
+}
+
+function handleFileDrop(event: DragEvent) {
+  if (event.dataTransfer?.files && event.dataTransfer.files[0]) {
+    const file = event.dataTransfer.files[0]
+    if (file.name.endsWith('.zip')) {
+      uploadFile.value = file
+    } else {
+      alert('请上传 .zip 文件')
+    }
+  }
+}
+
+async function handleUpload() {
+  if (!uploadSkillName.value || !uploadFile.value) return
+  
+  actionLoading.value = true
+  try {
+    const result = await skillsApi.uploadSkill(uploadFile.value, uploadSkillName.value)
+    
+    alert(result.message)
+    showUploadModal.value = false
+    uploadSkillName.value = ''
+    uploadFile.value = null
+    await fetchGlobalSkills()
+  } catch (error: any) {
+    alert(error.response?.data?.detail?.message || '上传失败')
+  } finally {
+    actionLoading.value = false
+  }
+}
+
+async function viewFile(fileType: 'scripts' | 'resources', fileName: string) {
+  if (!selectedSkill.value) return
+  
+  currentFileType.value = fileType
+  currentFileName.value = fileName
+  fileContent.value = null
+  showFileModal.value = true
+  fileLoading.value = true
   
   try {
-    await skillsApi.deleteSkill(selectedSkill.value.name)
-    skills.value = skills.value.filter(s => s.name !== selectedSkill.value?.name)
-    selectedSkill.value = null
-    alert('删除成功！')
-  } catch (error) {
-    console.error('删除失败:', error)
-    alert('删除失败，请重试')
+    fileContent.value = await skillsApi.getSkillFileContent(
+      selectedSkill.value.name,
+      fileType,
+      fileName
+    )
+  } catch (error: any) {
+    console.error('获取文件内容失败:', error)
+    alert(error.response?.data?.detail?.message || '获取文件内容失败')
+    showFileModal.value = false
+  } finally {
+    fileLoading.value = false
   }
+}
+
+async function copyFileContent() {
+  if (!fileContent.value?.content) return
+  
+  try {
+    await navigator.clipboard.writeText(fileContent.value.content)
+    alert('已复制到剪贴板')
+  } catch (error) {
+    console.error('复制失败:', error)
+    alert('复制失败')
+  }
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 // ==================== 生命周期 ====================
 
-onMounted(() => {
-  fetchSkills()
+onMounted(async () => {
+  await fetchGlobalSkills()
 })
 </script>
 
@@ -578,7 +534,6 @@ onMounted(() => {
   overflow: hidden;
 }
 
-/* 滚动条优化 */
 .scrollbar-thin::-webkit-scrollbar {
   width: 6px;
   height: 6px;

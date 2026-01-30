@@ -55,7 +55,7 @@ class E2BSandboxProvider(SandboxProvider):
     - 连接池管理
     """
     
-    # 默认超时（30 分钟）
+    # 默认超时（临时改为 2 分钟，测试完成后改回 30 * 60）
     DEFAULT_TIMEOUT_SECONDS: int = 30 * 60
     
     def __init__(self, api_key: Optional[str] = None) -> None:
@@ -360,7 +360,14 @@ class E2BSandboxProvider(SandboxProvider):
             return False
     
     async def resume_sandbox(self, conversation_id: str) -> SandboxInfo:
-        """恢复沙盒"""
+        """
+        恢复沙盒
+        
+        恢复流程：
+        1. 重新连接到 E2B 沙盒
+        2. 确保项目目录存在
+        3. 检测项目类型并自动重启开发服务器
+        """
         async with AsyncSessionLocal() as session:
             db_sandbox = await crud.get_sandbox_by_conversation(
                 session, conversation_id
@@ -382,6 +389,9 @@ class E2BSandboxProvider(SandboxProvider):
             except Exception as init_err:
                 logger.warning(f"⚠️ 初始化项目目录失败: {init_err}")
             
+            # 🆕 检测项目类型并自动重启开发服务器
+            await self._auto_restart_dev_server(sandbox, conversation_id)
+            
             async with AsyncSessionLocal() as session:
                 await crud.update_sandbox_status(
                     session, conversation_id, "running"
@@ -391,6 +401,60 @@ class E2BSandboxProvider(SandboxProvider):
             return await self.get_sandbox(conversation_id)
         except Exception as e:
             raise SandboxError(f"恢复沙盒失败: {e}")
+    
+    async def _auto_restart_dev_server(
+        self, 
+        sandbox, 
+        conversation_id: str
+    ) -> None:
+        """
+        自动检测项目类型并重启开发服务器
+        
+        检测逻辑：
+        1. 检查 package.json 是否存在 → Node.js 项目
+        2. 根据 package.json 中的 scripts 决定启动命令
+        """
+        project_root = "/home/user/project"
+        
+        try:
+            # 检查 package.json 是否存在
+            result = await sandbox.commands.run(
+                f"test -f {project_root}/package.json && echo 'exists'",
+                timeout=10
+            )
+            
+            if result.stdout and "exists" in result.stdout:
+                # Node.js 项目，检查是否有 node_modules
+                modules_check = await sandbox.commands.run(
+                    f"test -d {project_root}/node_modules && echo 'installed'",
+                    timeout=10
+                )
+                
+                # 如果依赖已安装，直接启动；否则先安装依赖
+                if modules_check.stdout and "installed" in modules_check.stdout:
+                    start_cmd = "npm run dev"
+                else:
+                    start_cmd = "npm install && npm run dev"
+                
+                # 后台启动开发服务器
+                logger.info(f"🚀 沙盒恢复：自动启动开发服务器: {start_cmd}")
+                try:
+                    await sandbox.commands.run(
+                        f"cd {project_root} && {start_cmd} > /tmp/app.log 2>&1",
+                        background=True,
+                        timeout=10
+                    )
+                    logger.info(f"✅ 开发服务器已在后台启动: {conversation_id}")
+                except Exception as start_err:
+                    # 后台启动可能会超时，但这是正常的
+                    if "timeout" not in str(start_err).lower():
+                        logger.warning(f"⚠️ 启动开发服务器异常（可能正常）: {start_err}")
+            else:
+                logger.debug(f"ℹ️ 非 Node.js 项目，跳过自动启动: {conversation_id}")
+                
+        except Exception as e:
+            # 自动重启失败不影响沙盒恢复
+            logger.warning(f"⚠️ 自动重启开发服务器失败: {e}")
     
     async def destroy_sandbox(self, conversation_id: str) -> bool:
         """

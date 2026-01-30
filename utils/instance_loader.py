@@ -864,6 +864,18 @@ async def create_agent_from_instance(
     
     logger.info(f"✅ Agent 创建成功")
     
+    # 🆕 V9.0: 注入实例级 Skills（用于 Claude API 的 container.skills）
+    # 实例级 Skills 优先，仅当没有实例级 Skills 时才使用全局 Skills
+    if config.skills:
+        agent._instance_skills = config.skills
+        enabled_instance_skills = [s for s in config.skills if s.enabled and s.skill_id]
+        if enabled_instance_skills:
+            logger.info(f"   注入实例级 Skills: {len(enabled_instance_skills)} 个已注册")
+            for skill in enabled_instance_skills:
+                logger.debug(f"      • {skill.name} (skill_id={skill.skill_id[:20]}...)")
+    else:
+        agent._instance_skills = []
+    
     # 🆕 V6.0: 注入 Workers 配置（仅当 Multi-Agent 启用时）
     if config.multi_agent_enabled:
         agent.workers_config = config.workers

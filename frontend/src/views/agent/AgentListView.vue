@@ -1,8 +1,8 @@
 <template>
   <div class="h-full flex flex-col overflow-hidden bg-white">
     <!-- 顶部工具栏 -->
-    <div class="h-16 flex items-center justify-between px-8 border-b border-gray-100 bg-white sticky top-0 z-10">
-      <div class="flex items-center gap-6">
+    <div class="h-16 flex items-center justify-between px-6 border-b border-gray-100 bg-white sticky top-0 z-10 flex-shrink-0">
+      <div class="flex items-center gap-4">
         <h1 class="text-lg font-bold flex items-center gap-2 text-gray-800">
           <Bot class="w-6 h-6 text-blue-500" />
           智能体管理
@@ -38,7 +38,7 @@
     </div>
 
     <!-- 主内容区 -->
-    <div class="flex-1 overflow-y-auto p-8 scrollbar-thin bg-gray-50/30">
+    <div class="flex-1 overflow-y-auto p-6 scrollbar-thin bg-gray-50/30">
       <div v-if="loading" class="flex flex-col items-center justify-center h-[60vh] text-gray-400">
         <Loader2 class="w-10 h-10 animate-spin mb-4 text-gray-300" />
         <p class="text-sm font-medium">加载智能体列表...</p>

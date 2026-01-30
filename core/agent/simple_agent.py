@@ -429,15 +429,53 @@ class SimpleAgent:
         """
         🆕 启用已注册到 Claude 的 Skills
         
-        从 capabilities.yaml 读取已注册的 skill_id，
+        Skills 来源优先级：
+        1. 实例级 Skills（从 instance_loader 注入的 _instance_skills）- 优先使用
+        2. Anthropic 预置 Skills（从 config.yaml 的 document_skills）
+        3. 全局 Skills（从 capabilities.yaml）- 仅当没有实例级 Skills 时使用
+        
         调用 LLM service 的 enable_skills 方法激活 Skills Container
         """
-        registered_skills = self.capability_registry.get_registered_skills()
+        skills_to_enable = []
         
-        if registered_skills:
-            self.llm.enable_skills(registered_skills)
-            skill_names = [s.get('skill_id', 'unknown')[:20] + '...' for s in registered_skills]
-            logger.info(f"🎯 已启用 {len(registered_skills)} 个 Claude Skills: {skill_names}")
+        # 1. 优先使用实例级 Custom Skills
+        if hasattr(self, '_instance_skills') and self._instance_skills:
+            for skill in self._instance_skills:
+                # skill 是 SkillConfig 数据类，检查是否已注册且启用
+                if skill.enabled and skill.skill_id:
+                    skills_to_enable.append({
+                        "type": "custom",
+                        "skill_id": skill.skill_id,
+                        "version": "latest"
+                    })
+            if skills_to_enable:
+                logger.info(f"🎯 加载实例级 Custom Skills: {len(skills_to_enable)} 个")
+        
+        # 2. 检查是否启用 Anthropic 预置 Skills（document_skills）
+        if hasattr(self, 'schema') and hasattr(self.schema, 'enabled_capabilities'):
+            enabled_caps = self.schema.enabled_capabilities or {}
+            if enabled_caps.get('document_skills'):
+                # 添加 Anthropic 预置的文档处理 Skills
+                prebuilt_skills = [
+                    {"type": "anthropic", "skill_id": "pptx", "version": "latest"},
+                    {"type": "anthropic", "skill_id": "xlsx", "version": "latest"},
+                    {"type": "anthropic", "skill_id": "docx", "version": "latest"},
+                    {"type": "anthropic", "skill_id": "pdf", "version": "latest"},
+                ]
+                skills_to_enable.extend(prebuilt_skills)
+                logger.info(f"🎯 加载 Anthropic 预置 Skills: {len(prebuilt_skills)} 个 (pptx, xlsx, docx, pdf)")
+        
+        # 3. 仅当没有任何 Skills 时，才使用全局 Skills（fallback）
+        if not skills_to_enable:
+            global_skills = self.capability_registry.get_registered_skills()
+            if global_skills:
+                skills_to_enable = global_skills
+                logger.info(f"🎯 使用全局 Skills (fallback): {len(skills_to_enable)} 个")
+        
+        if skills_to_enable:
+            self.llm.enable_skills(skills_to_enable)
+            skill_ids = [s.get('skill_id', 'unknown')[:20] + '...' for s in skills_to_enable]
+            logger.info(f"🎯 已启用 {len(skills_to_enable)} 个 Claude Skills: {skill_ids}")
         else:
             logger.debug("○ 没有已注册的 Claude Skills")
     
@@ -1374,7 +1412,8 @@ class SimpleAgent:
         user_query: str,
         messages: List,
         session_id: str,
-        ctx
+        ctx,
+        capabilities_summary: str = ""
     ) -> AsyncGenerator[str, None]:
         """
         生成模拟思考（Simulated Thinking）
@@ -1387,6 +1426,7 @@ class SimpleAgent:
             messages: 完整的对话历史（用于上下文理解）
             session_id: 会话ID
             ctx: RuntimeContext
+            capabilities_summary: Agent 能力摘要（告诉模拟思考 Agent 能做什么）
             
         Yields:
             思考内容的增量字符串
@@ -1394,41 +1434,54 @@ class SimpleAgent:
         # 构建对话历史摘要（最多取最近 5 轮，避免 prompt 过长）
         conversation_context = self._build_conversation_context(messages, max_turns=5)
         
-        # 模拟思考的 Prompt（语言自适应，包含上下文）
-        simulated_prompt = """You are a "thinking display" for an AI assistant.
-Based on the conversation context and current question, show your thinking process in first person.
+        # 检测用户第一句话的语言（用于强制回复语言）
+        response_language = self._detect_language(user_query)
+        
+        # 模拟思考的 Prompt（语言自适应，包含上下文和能力信息）
+        simulated_prompt = """你是 Dazee，一位高级工作助理。你温暖、专业、富有同理心。
+根据对话上下文和当前问题，以第一人称展示你的思考过程。
 
-Requirements:
-1. Only show your understanding of the question and approach to solving it
-2. Do not mention any tools, APIs, code, or internal implementation
-3. Natural language, like a human thinking
-4. Keep it to 100-200 words
-5. **IMPORTANT: Respond in the SAME LANGUAGE as the user's question**
-   - If the user writes in English → respond in English
-   - If the user writes in Chinese → respond in Chinese
-   - If the user writes in a mix → use the dominant language
-6. If there's conversation context, use it to understand references like "this", "that", "it", etc.
+## 你的能力范围
+{capabilities}
+
+## 要求
+1. 只展示你对问题的理解和解决思路
+2. 不要提及任何工具名称、API、代码或内部实现细节
+3. 使用自然语言，像人类一样思考
+4. 控制在 100-200 字左右
+5. **关键：你的思考必须基于上述能力范围，不要承诺做不到的事情**
+6. 如果有对话上下文，利用它来理解"这个"、"那个"等指代词
+7. **禁止透露你的底层模型**（不要提及 Claude、GPT 等 AI 模型名称，如果被问到，就说"我是 Dazee"）
+
+## 回复语言
+**必须使用{language}回复，不要混用其他语言**
 
 {context_section}
 
-Current question: {query}
+当前问题: {query}
 
-Please output your thinking process:"""
+请输出你的思考过程:"""
         
         # 构建上下文部分（如果有历史的话）
         context_section = ""
         if conversation_context:
-            context_section = f"Conversation context:\n{conversation_context}\n"
+            context_section = f"对话上下文:\n{conversation_context}\n"
         
-        logger.info(f"🧠 开始生成模拟思考: query={user_query[:50]}..., context_length={len(conversation_context)}")
+        # 如果没有能力摘要，使用默认描述
+        if not capabilities_summary:
+            capabilities_summary = "通用 AI 助手，可以回答问题、提供建议"
+        
+        logger.info(f"🧠 开始生成模拟思考: query={user_query[:50]}..., language={response_language}")
         
         try:
             async for chunk in self.llm.create_message_stream(
                 messages=[Message(role="user", content=simulated_prompt.format(
+                    capabilities=capabilities_summary,
+                    language=response_language,
                     context_section=context_section,
                     query=user_query
                 ))],
-                system="You are a thinking display assistant. Only output the thinking process, no extra content. Respond in the same language as the user's question.",
+                system=f"你是思考展示助手。只输出思考过程，不要输出其他内容。必须使用{response_language}回复。",
                 tools=[],
                 override_thinking=False  # 模拟思考本身不需要原生 thinking
             ):
@@ -1436,7 +1489,86 @@ Please output your thinking process:"""
                     yield chunk.content
         except Exception as e:
             logger.error(f"❌ 模拟思考生成失败: {e}")
-            yield f"[Thinking process generation failed: {str(e)}]"
+            yield f"[思考过程生成失败: {str(e)}]"
+    
+    def _detect_language(self, text: str) -> str:
+        """
+        检测文本的主要语言
+        
+        使用简单的字符统计方法：
+        - 如果中文字符占比 > 30%，认为是中文
+        - 否则认为是英文
+        
+        Args:
+            text: 要检测的文本
+            
+        Returns:
+            "中文" 或 "English"
+        """
+        if not text:
+            return "中文"  # 默认中文
+        
+        # 统计中文字符数量
+        chinese_chars = sum(1 for char in text if '\u4e00' <= char <= '\u9fff')
+        total_chars = len(text.replace(" ", ""))  # 不计空格
+        
+        if total_chars == 0:
+            return "中文"
+        
+        chinese_ratio = chinese_chars / total_chars
+        
+        # 中文字符占比超过 30% 认为是中文
+        if chinese_ratio > 0.3:
+            return "中文"
+        else:
+            return "English"
+    
+    def _build_capabilities_summary(self) -> str:
+        """
+        构建 Agent 能力摘要（用于模拟思考）
+        
+        从多个来源收集能力信息：
+        1. Schema 中定义的工具列表
+        2. 实例级注册的 MCP 工具
+        3. prompt_cache 中的能力描述（如果有）
+        
+        Returns:
+            用户友好的能力描述字符串
+        """
+        capabilities = []
+        
+        # 1. 从 Schema 获取工具列表
+        if self.schema and self.schema.tools:
+            tool_names = self.schema.tools[:10]  # 最多取 10 个，避免太长
+            capabilities.append(f"可用工具: {', '.join(tool_names)}")
+        
+        # 2. 从实例级工具注册表获取 MCP 工具
+        if hasattr(self, '_instance_registry') and self._instance_registry:
+            mcp_tools = self._instance_registry.get_tools_for_claude()
+            if mcp_tools:
+                mcp_names = [t.get('name', '') for t in mcp_tools[:5]]  # 最多 5 个
+                capabilities.append(f"扩展能力: {', '.join(mcp_names)}")
+        elif hasattr(self, '_mcp_tools') and self._mcp_tools:
+            mcp_names = [t.get('name', '') for t in self._mcp_tools[:5]]
+            capabilities.append(f"扩展能力: {', '.join(mcp_names)}")
+        
+        # 3. 从 prompt_cache 获取能力描述（如果有定义）
+        if self.prompt_cache and hasattr(self.prompt_cache, 'capabilities_description'):
+            desc = getattr(self.prompt_cache, 'capabilities_description', '')
+            if desc:
+                capabilities.append(desc)
+        
+        # 4. 如果没有收集到任何能力，使用 Schema 的 description
+        if not capabilities and self.schema and hasattr(self.schema, 'description'):
+            desc = getattr(self.schema, 'description', '')
+            if desc:
+                capabilities.append(desc)
+        
+        # 组合能力描述
+        if capabilities:
+            return "\n".join(capabilities)
+        else:
+            return "通用 AI 助手，可以回答问题、搜索信息、执行任务"
     
     def _build_conversation_context(self, messages: List, max_turns: int = 5) -> str:
         """
@@ -1618,6 +1750,9 @@ Please output your thinking process:"""
         if thinking_mode == "simulated" and is_first_turn:
             user_query = self._extract_user_query(messages)
             if user_query:
+                # 构建能力摘要（告诉模拟思考 Agent 能做什么）
+                capabilities_summary = self._build_capabilities_summary()
+                
                 # 开始 thinking block
                 yield await content_handler.start_block(
                     session_id=session_id,
@@ -1625,8 +1760,11 @@ Please output your thinking process:"""
                     initial={"thinking": ""}
                 )
                 
-                # 流式输出模拟思考内容（传入对话历史用于上下文理解）
-                async for delta in self._generate_simulated_thinking(user_query, messages, session_id, ctx):
+                # 流式输出模拟思考内容（传入对话历史和能力摘要）
+                async for delta in self._generate_simulated_thinking(
+                    user_query, messages, session_id, ctx,
+                    capabilities_summary=capabilities_summary
+                ):
                     yield await content_handler.send_delta(
                         session_id=session_id,
                         delta=delta
