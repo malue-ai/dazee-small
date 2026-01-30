@@ -157,6 +157,7 @@ deploy 选项:
 
 rollback 选项:
   --to-version <tag>  回滚到指定镜像标签
+  --version-count <n> 显示最近 n 个版本（默认 30）
 
 logs 选项:
   --follow            实时跟踪日志
@@ -688,6 +689,7 @@ perform_health_check() {
 
 rollback_service() {
     local target_version=${1:-}
+    local version_count=${2:-30}  # 默认显示 30 个版本，可通过第二个参数调整
     
     log_step "回滚 Production 服务"
     
@@ -701,7 +703,7 @@ rollback_service() {
             --repository-name "$ecr_repo" \
             --region "$REGION" \
             --query 'imageDetails[*].{Tag:imageTags[0],PushedAt:imagePushedAt}' \
-            --output json 2>/dev/null | jq -r 'sort_by(.PushedAt) | reverse | .[0:10] | .[] | "\(.Tag) (\(.PushedAt))"' 2>/dev/null) || images=""
+            --output json 2>/dev/null | jq -r "sort_by(.PushedAt) | reverse | .[0:${version_count}] | .[] | \"\(.Tag) (\(.PushedAt))\"" 2>/dev/null) || images=""
         
         if [ -z "$images" ]; then
             log_error "无法获取镜像列表"
@@ -709,7 +711,7 @@ rollback_service() {
         fi
         
         echo ""
-        echo "最近 10 个版本:"
+        echo "最近 ${version_count} 个版本:"
         echo "$images" | nl
         echo ""
         read -p "请输入要回滚的版本标签: " target_version
@@ -933,6 +935,7 @@ main() {
     local follow=false
     local since="10m"
     local rollback_version=""
+    local version_count=30
     
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -945,6 +948,7 @@ main() {
             --follow) follow=true; shift ;;
             --since) since=$2; shift 2 ;;
             --to-version) rollback_version=$2; shift 2 ;;
+            --version-count) version_count=$2; shift 2 ;;
             --help) show_help ;;
             *) shift ;;
         esac
@@ -981,7 +985,7 @@ main() {
         rollback)
             [ "$skip_confirm" != "true" ] && confirm_production_action "rollback"
             check_dependencies
-            rollback_service "$rollback_version"
+            rollback_service "$rollback_version" "$version_count"
             ;;
             
         status)

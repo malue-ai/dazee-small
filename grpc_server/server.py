@@ -39,7 +39,7 @@ def get_grpc_server_options() -> List[Tuple[str, any]]:
     # 🔧 增加空闲超时到 30 分钟，适配长时间运行的任务（如 PPT 生成、视频处理）
     max_connection_idle = int(os.getenv("GRPC_MAX_CONNECTION_IDLE_MS", "1800000"))  # 30 分钟
     max_connection_age = int(os.getenv("GRPC_MAX_CONNECTION_AGE_MS", "3600000"))  # 1 小时
-    max_connection_age_grace = int(os.getenv("GRPC_MAX_CONNECTION_AGE_GRACE_MS", "60000"))  # 1 分钟
+    max_connection_age_grace = int(os.getenv("GRPC_MAX_CONNECTION_AGE_GRACE_MS", "600000"))  # 10 分钟
     
     return [
         # Keepalive 配置
