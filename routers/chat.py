@@ -27,7 +27,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 
 # ==================== 本地模块 ====================
-from logger import get_logger
+from logger import get_logger, set_request_context
 from models.api import APIResponse
 from models.chat import (
     ChatRequest,
@@ -411,12 +411,16 @@ async def chat(
     | 500 | INTERNAL_ERROR | 内部错误 |
     """
     try:
+        # 设置日志上下文（用于追踪）
+        set_request_context(
+            user_id=request.user_id,
+            conversation_id=request.conversation_id or '',
+            message_id=request.message_id or ''
+        )
+        
         # 记录请求信息
         logger.info(
             f"📨 收到{'流式' if request.stream else '同步'}聊天请求: "
-            f"user_id={request.user_id}, "
-            f"message_id={request.message_id}, "
-            f"conversation_id={request.conversation_id}, "
             f"agent_id={request.agent_id or '默认'}, "
             f"message={str(request.message)[:50]}..."
         )
@@ -855,7 +859,10 @@ async def get_user_sessions(user_id: str):
     }
     ```
     """
-    logger.info(f"📨 获取用户的活跃 Session: user_id={user_id}")
+    # 设置日志上下文
+    set_request_context(user_id=user_id)
+    
+    logger.info("📨 获取用户的活跃 Session")
     
     sessions = await session_service.get_user_sessions(user_id)
     

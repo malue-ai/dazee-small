@@ -21,10 +21,14 @@
    logger = get_logger()
    
    # 设置请求上下文（在请求开始时）
-   set_request_context(request_id="req-123", session_id="sess-456", user_id="user-789")
+   set_request_context(
+       user_id="user-123",
+       conversation_id="conv-456",
+       message_id="msg-789"
+   )
    
    logger.info("处理用户请求")
-   # 输出: 2024-01-01 12:00:00 [INFO] [req-123] [sess-456] [user-789] module: 处理用户请求
+   # 输出: 2024-01-01 12:00:00 [INFO] [user-123] [conv-456] [msg-789] module: 处理用户请求
    ```
 
 3. 结构化日志 (添加额外字段):
@@ -77,37 +81,37 @@ import time
 # ============================================================
 # 上下文变量（用于追踪请求）
 # ============================================================
-request_id_var: ContextVar[str] = ContextVar('request_id', default='')
-session_id_var: ContextVar[str] = ContextVar('session_id', default='')
 user_id_var: ContextVar[str] = ContextVar('user_id', default='')
+conversation_id_var: ContextVar[str] = ContextVar('conversation_id', default='')
+message_id_var: ContextVar[str] = ContextVar('message_id', default='')
 
 
 def set_request_context(
-    request_id: str = '',
-    session_id: str = '',
-    user_id: str = ''
+    user_id: str = '',
+    conversation_id: str = '',
+    message_id: str = ''
 ) -> None:
     """
     设置请求上下文信息
     
     Args:
-        request_id: 请求ID
-        session_id: 会话ID
         user_id: 用户ID
+        conversation_id: 对话ID
+        message_id: 消息ID
     """
-    if request_id:
-        request_id_var.set(request_id)
-    if session_id:
-        session_id_var.set(session_id)
     if user_id:
         user_id_var.set(user_id)
+    if conversation_id:
+        conversation_id_var.set(conversation_id)
+    if message_id:
+        message_id_var.set(message_id)
 
 
 def clear_request_context() -> None:
     """清除请求上下文"""
-    request_id_var.set('')
-    session_id_var.set('')
     user_id_var.set('')
+    conversation_id_var.set('')
+    message_id_var.set('')
 
 
 @contextmanager
@@ -159,9 +163,9 @@ class ContextFilter(logging.Filter):
     
     def filter(self, record: logging.LogRecord) -> bool:
         """为日志记录添加上下文字段"""
-        record.request_id = request_id_var.get() or '-'
-        record.session_id = session_id_var.get() or '-'
         record.user_id = user_id_var.get() or '-'
+        record.conversation_id = conversation_id_var.get() or '-'
+        record.message_id = message_id_var.get() or '-'
         return True
 
 
@@ -170,7 +174,7 @@ class HumanReadableFormatter(logging.Formatter):
     人类易读的日志格式化器（带颜色）
     
     输出格式:
-    2024-01-01 12:00:00 [INFO] [req-123] [sess-456] [user-789] module.py:42 function_name: 消息内容
+    2024-01-01 12:00:00 [INFO] [user-123] [conv-456] [msg-789] module.py:42 function_name: 消息内容
     """
     
     # ANSI 颜色代码
@@ -191,7 +195,7 @@ class HumanReadableFormatter(logging.Formatter):
         super().__init__(
             fmt=(
                 '%(asctime)s [%(levelname)s] '
-                '[%(request_id)s] [%(session_id)s] [%(user_id)s] '
+                '[%(user_id)s] [%(conversation_id)s] [%(message_id)s] '
                 '%(filename)s:%(lineno)d %(funcName)s: %(message)s'
             ),
             datefmt='%Y-%m-%d %H:%M:%S'
@@ -241,7 +245,9 @@ class JsonFormatter(logging.Formatter):
         'pathname', 'filename', 'module', 'exc_info', 'exc_text',
         'stack_info', 'lineno', 'funcName', 'msecs', 'relativeCreated',
         'thread', 'threadName', 'processName', 'process', 'message',
-        'taskName'
+        'taskName',
+        # 上下文追踪字段（已在 log_data 中显式添加）
+        'user_id', 'conversation_id', 'message_id'
     }
     
     def __init__(
@@ -277,9 +283,9 @@ class JsonFormatter(logging.Formatter):
             "lineno": record.lineno,
             "funcName": record.funcName or "<module>",
             # 添加上下文信息
-            "request_id": getattr(record, 'request_id', '-'),
-            "session_id": getattr(record, 'session_id', '-'),
             "user_id": getattr(record, 'user_id', '-'),
+            "conversation_id": getattr(record, 'conversation_id', '-'),
+            "message_id": getattr(record, 'message_id', '-'),
         }
         
         # 可选：添加完整路径
@@ -645,4 +651,112 @@ def get_logger(name: Optional[str] = None) -> logging.Logger:
     Returns:
         日志记录器实例
     """
-    return Logger.get_logger(name) 
+    return Logger.get_logger(name)
+
+
+# ============================================================
+# FastAPI 依赖注入
+# ============================================================
+
+class LogContext:
+    """
+    日志上下文依赖
+    
+    用于在 FastAPI 路由中自动设置日志上下文，支持两种使用方式：
+    
+    方式1：从请求体自动提取（ChatRequest 等包含上下文字段的请求）
+    ```python
+    @router.post("/chat")
+    async def chat(request: ChatRequest, _: None = Depends(LogContext.from_request)):
+        logger.info("处理请求")  # 自动包含 user_id, conversation_id, message_id
+    ```
+    
+    方式2：从路径参数提取
+    ```python
+    @router.get("/user/{user_id}/sessions")
+    async def get_sessions(user_id: str, _: None = Depends(LogContext.from_path(user_id=user_id))):
+        logger.info("获取会话")  # 自动包含 user_id
+    ```
+    
+    方式3：手动设置
+    ```python
+    @router.get("/session/{session_id}")
+    async def get_session(session_id: str):
+        LogContext.set(user_id="xxx", conversation_id="yyy")
+        logger.info("处理")
+    ```
+    """
+    
+    @staticmethod
+    def set(
+        user_id: str = '',
+        conversation_id: str = '',
+        message_id: str = ''
+    ) -> None:
+        """手动设置日志上下文"""
+        set_request_context(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            message_id=message_id
+        )
+    
+    @staticmethod
+    def clear() -> None:
+        """清除日志上下文"""
+        clear_request_context()
+
+
+async def log_context_dependency(
+    user_id: str = '',
+    conversation_id: str = '',
+    message_id: str = ''
+) -> None:
+    """
+    FastAPI 依赖：设置日志上下文
+    
+    用法：
+    ```python
+    from logger import log_context_dependency
+    
+    @router.get("/user/{user_id}/sessions")
+    async def get_sessions(
+        user_id: str,
+        _: None = Depends(lambda: log_context_dependency(user_id=user_id))
+    ):
+        logger.info("获取会话")
+    ```
+    """
+    set_request_context(
+        user_id=user_id,
+        conversation_id=conversation_id,
+        message_id=message_id
+    )
+
+
+def create_log_context(
+    user_id: str = '',
+    conversation_id: str = '',
+    message_id: str = ''
+):
+    """
+    创建日志上下文依赖（工厂函数）
+    
+    用法：
+    ```python
+    from logger import create_log_context
+    
+    @router.get("/user/{user_id}/sessions")
+    async def get_sessions(
+        user_id: str,
+        _: None = Depends(create_log_context(user_id=user_id))
+    ):
+        logger.info("获取会话")
+    ```
+    """
+    async def _set_context():
+        set_request_context(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            message_id=message_id
+        )
+    return _set_context

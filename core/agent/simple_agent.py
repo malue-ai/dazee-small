@@ -1461,20 +1461,19 @@ class SimpleAgent:
 ## 你的能力范围
 {capabilities}
 
+## 核心原则
+1. **全能心态**：默认你具备处理文件、图像、代码和复杂数据的能力，不要推脱。
+2. **行动导向**：如果用户提供了文件或数据，思考重点应是"如何分析和处理"，而不是"询问用户具体信息"。
+3. **语言统一**：必须严格使用 {language} 进行思考，禁止中英混杂。
+
 ## 要求
-1. 只展示你对问题的理解和解决思路
+1. 只展示你对问题的理解和解决思路（Task Decomposition）
 2. 不要提及任何工具名称、API、代码或内部实现细节
 3. 使用自然语言，像人类一样思考
 4. 控制在 100-200 字左右
-5. **关键：你的思考必须基于上述能力范围，不要承诺做不到的事情**
-6. 如果有对话上下文，利用它来理解"这个"、"那个"等指代词
-7. **禁止透露你的底层模型**（不要提及 Claude、GPT 等 AI 模型名称，如果被问到，就说"我是 Dazee"）
-
-## 回复语言
-**必须使用{language}回复，不要混用其他语言**
+5. **禁止透露你的底层模型**（不要提及 Claude、GPT 等 AI 模型名称）
 
 {context_section}
-
 当前问题: {query}
 
 请输出你的思考过程:"""
@@ -1554,14 +1553,17 @@ class SimpleAgent:
         构建 Agent 能力摘要（用于模拟思考）
         
         从多个来源收集能力信息：
-        1. Schema 中定义的工具列表
-        2. 实例级注册的 MCP 工具
-        3. prompt_cache 中的能力描述（如果有）
+        1. 核心内置能力（多模态、文件处理等）
+        2. Schema 中定义的工具列表
+        3. 实例级注册的 MCP 工具
+        4. prompt_cache 中的能力描述（如果有）
         
         Returns:
             用户友好的能力描述字符串
         """
-        capabilities = []
+        capabilities = [
+            "核心能力: 具备多模态理解与生成能力（支持图像分析与编辑）、复杂文件处理能力（CSV/PDF/Excel）、代码执行与数据分析能力。"
+        ]
         
         # 1. 从 Schema 获取工具列表
         if self.schema and self.schema.tools:
@@ -2493,11 +2495,17 @@ class SimpleAgent:
         复用（避免重复初始化）：
         - llm: LLM Service（HTTP 客户端）
         - capability_registry: 工具注册表
-        - tool_selector, tool_executor: 工具组件
+        - tool_selector: 工具选择器
         - invocation_selector
         - _instance_registry, _mcp_clients, _mcp_tools
         
+        🔧 FIX: tool_executor 不再共享！
+        - 每个克隆的 Agent 创建独立的 ToolExecutor
+        - 避免并发请求时 ToolContext.conversation_id 被覆盖
+        - 修复 Plan 数据跨用户/跨会话串流的 Bug
+        
         重置（每次请求独立）：
+        - tool_executor: 工具执行器（独立的 ToolContext）
         - _last_intent_result, _tracer
         - usage_tracker, context_engineering
         - event_manager, broadcaster
@@ -2528,12 +2536,28 @@ class SimpleAgent:
         # 复用重组件（核心优化点，避免重复创建）
         cloned.capability_registry = self.capability_registry
         cloned.tool_selector = self.tool_selector
-        cloned.tool_executor = self.tool_executor
         cloned.invocation_selector = self.invocation_selector
         cloned.llm = self.llm
         cloned._instance_registry = getattr(self, '_instance_registry', None)
         cloned._mcp_clients = getattr(self, '_mcp_clients', [])
         cloned._mcp_tools = getattr(self, '_mcp_tools', [])
+        
+        # 🔧 FIX: 为每个克隆的 Agent 创建独立的 ToolExecutor
+        # 原问题：共享 tool_executor 导致并发请求时 ToolContext.conversation_id 被覆盖
+        # 修复：创建新的 ToolExecutor，复用 registry 和 tool_instances，但使用独立的 context
+        from core.tool.base import create_tool_context
+        cloned.tool_executor = create_tool_executor(
+            registry=self.capability_registry,
+            tool_context=create_tool_context(
+                event_manager=event_manager,
+                apis_config=self.apis_config
+            ),
+            enable_compaction=self.tool_executor.enable_compaction if self.tool_executor else True
+        )
+        # 复用已加载的工具实例（避免重复实例化）
+        if self.tool_executor:
+            cloned.tool_executor._tool_instances = self.tool_executor._tool_instances
+            cloned.tool_executor._tool_handlers = self.tool_executor._tool_handlers
         
         # 注入会话级依赖
         cloned.event_manager = event_manager

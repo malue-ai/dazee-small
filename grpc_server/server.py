@@ -39,7 +39,7 @@ def get_grpc_server_options() -> List[Tuple[str, any]]:
     # 🔧 增加空闲超时到 30 分钟，适配长时间运行的任务（如 PPT 生成、视频处理）
     max_connection_idle = int(os.getenv("GRPC_MAX_CONNECTION_IDLE_MS", "1800000"))  # 30 分钟
     max_connection_age = int(os.getenv("GRPC_MAX_CONNECTION_AGE_MS", "3600000"))  # 1 小时
-    max_connection_age_grace = int(os.getenv("GRPC_MAX_CONNECTION_AGE_GRACE_MS", "60000"))  # 1 分钟
+    max_connection_age_grace = int(os.getenv("GRPC_MAX_CONNECTION_AGE_GRACE_MS", "600000"))  # 10 分钟
     
     return [
         # Keepalive 配置
@@ -82,6 +82,7 @@ from grpc_server.chat_servicer import ChatServicer
 from grpc_server.session_servicer import SessionServicer
 from grpc_server.health_servicer import HealthServicer
 from grpc_server.sandbox_servicer import SandboxServicer
+from grpc_server.confirmation_servicer import ConfirmationServicer
 
 logger = get_logger("grpc_server")
 
@@ -176,6 +177,11 @@ class GRPCServer:
                 SandboxServicer(), self.server
             )
             
+            logger.info("📋 注册 Confirmation 服务...")
+            tool_service_pb2_grpc.add_ConfirmationServiceServicer_to_server(
+                ConfirmationServicer(), self.server
+            )
+            
             # 启用 gRPC reflection（用于 grpcurl 等工具调试）
             if reflection is not None and tool_service_pb2 is not None:
                 SERVICE_NAMES = (
@@ -183,6 +189,7 @@ class GRPCServer:
                     tool_service_pb2.DESCRIPTOR.services_by_name['ChatService'].full_name,
                     tool_service_pb2.DESCRIPTOR.services_by_name['SessionService'].full_name,
                     tool_service_pb2.DESCRIPTOR.services_by_name['SandboxService'].full_name,
+                    tool_service_pb2.DESCRIPTOR.services_by_name['ConfirmationService'].full_name,
                     reflection.SERVICE_NAME,
                 )
                 reflection.enable_server_reflection(SERVICE_NAMES, self.server)
@@ -195,7 +202,7 @@ class GRPCServer:
             # 启动服务器
             await self.server.start()
             logger.info(f"✅ gRPC 服务器已启动: {address}")
-            logger.info("📡 可用服务: Health, ChatService, SessionService, SandboxService")
+            logger.info("📡 可用服务: Health, ChatService, SessionService, SandboxService, ConfirmationService")
             
         except Exception as e:
             logger.error(f"❌ gRPC 服务器启动失败: {str(e)}", exc_info=True)
@@ -255,7 +262,7 @@ if __name__ == "__main__":
     print("="*60)
     print(f"📍 监听地址: {host}:{port}")
     print(f"⚙️  最大并发: {workers_display}")
-    print(f"📡 可用服务: Health, ChatService, SessionService, SandboxService")
+    print(f"📡 可用服务: Health, ChatService, SessionService, SandboxService, ConfirmationService")
     print("="*60 + "\n")
     
     try:

@@ -533,3 +533,119 @@ class SandboxListFilesResponse(_message.Message):
     files: _containers.RepeatedCompositeFieldContainer[SandboxFileInfo]
     source: str
     def __init__(self, conversation_id: _Optional[str] = ..., files: _Optional[_Iterable[_Union[SandboxFileInfo, _Mapping]]] = ..., source: _Optional[str] = ...) -> None: ...
+
+class GetPendingRequestsRequest(_message.Message):
+    __slots__ = ("session_id",)
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    session_id: str
+    def __init__(self, session_id: _Optional[str] = ...) -> None: ...
+
+class ConfirmationRequestInfo(_message.Message):
+    __slots__ = ("request_id", "question", "options", "timeout", "confirmation_type", "session_id", "created_at", "metadata", "is_expired")
+    class MetadataEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
+    QUESTION_FIELD_NUMBER: _ClassVar[int]
+    OPTIONS_FIELD_NUMBER: _ClassVar[int]
+    TIMEOUT_FIELD_NUMBER: _ClassVar[int]
+    CONFIRMATION_TYPE_FIELD_NUMBER: _ClassVar[int]
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    CREATED_AT_FIELD_NUMBER: _ClassVar[int]
+    METADATA_FIELD_NUMBER: _ClassVar[int]
+    IS_EXPIRED_FIELD_NUMBER: _ClassVar[int]
+    request_id: str
+    question: str
+    options: _containers.RepeatedScalarFieldContainer[str]
+    timeout: int
+    confirmation_type: str
+    session_id: str
+    created_at: str
+    metadata: _containers.ScalarMap[str, str]
+    is_expired: bool
+    def __init__(self, request_id: _Optional[str] = ..., question: _Optional[str] = ..., options: _Optional[_Iterable[str]] = ..., timeout: _Optional[int] = ..., confirmation_type: _Optional[str] = ..., session_id: _Optional[str] = ..., created_at: _Optional[str] = ..., metadata: _Optional[_Mapping[str, str]] = ..., is_expired: bool = ...) -> None: ...
+
+class GetPendingRequestsResponse(_message.Message):
+    __slots__ = ("requests", "total")
+    REQUESTS_FIELD_NUMBER: _ClassVar[int]
+    TOTAL_FIELD_NUMBER: _ClassVar[int]
+    requests: _containers.RepeatedCompositeFieldContainer[ConfirmationRequestInfo]
+    total: int
+    def __init__(self, requests: _Optional[_Iterable[_Union[ConfirmationRequestInfo, _Mapping]]] = ..., total: _Optional[int] = ...) -> None: ...
+
+class SubmitConfirmationRequest(_message.Message):
+    __slots__ = ("request_id", "response", "metadata")
+    class MetadataEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
+    RESPONSE_FIELD_NUMBER: _ClassVar[int]
+    METADATA_FIELD_NUMBER: _ClassVar[int]
+    request_id: str
+    response: str
+    metadata: _containers.ScalarMap[str, str]
+    def __init__(self, request_id: _Optional[str] = ..., response: _Optional[str] = ..., metadata: _Optional[_Mapping[str, str]] = ...) -> None: ...
+
+class SubmitConfirmationResponse(_message.Message):
+    __slots__ = ("success", "request_id", "response", "error")
+    SUCCESS_FIELD_NUMBER: _ClassVar[int]
+    REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
+    RESPONSE_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    success: bool
+    request_id: str
+    response: str
+    error: str
+    def __init__(self, success: bool = ..., request_id: _Optional[str] = ..., response: _Optional[str] = ..., error: _Optional[str] = ...) -> None: ...
+
+class CancelConfirmationRequest(_message.Message):
+    __slots__ = ("request_id",)
+    REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
+    request_id: str
+    def __init__(self, request_id: _Optional[str] = ...) -> None: ...
+
+class CancelConfirmationResponse(_message.Message):
+    __slots__ = ("success", "error")
+    SUCCESS_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    success: bool
+    error: str
+    def __init__(self, success: bool = ..., error: _Optional[str] = ...) -> None: ...
+
+class ConfirmationStatsRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class ConfirmationStatsResponse(_message.Message):
+    __slots__ = ("pending_count", "history_count", "pending_sessions")
+    PENDING_COUNT_FIELD_NUMBER: _ClassVar[int]
+    HISTORY_COUNT_FIELD_NUMBER: _ClassVar[int]
+    PENDING_SESSIONS_FIELD_NUMBER: _ClassVar[int]
+    pending_count: int
+    history_count: int
+    pending_sessions: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, pending_count: _Optional[int] = ..., history_count: _Optional[int] = ..., pending_sessions: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class WatchConfirmationsRequest(_message.Message):
+    __slots__ = ("session_id",)
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    session_id: str
+    def __init__(self, session_id: _Optional[str] = ...) -> None: ...
+
+class ConfirmationEvent(_message.Message):
+    __slots__ = ("event_type", "request", "timestamp")
+    EVENT_TYPE_FIELD_NUMBER: _ClassVar[int]
+    REQUEST_FIELD_NUMBER: _ClassVar[int]
+    TIMESTAMP_FIELD_NUMBER: _ClassVar[int]
+    event_type: str
+    request: ConfirmationRequestInfo
+    timestamp: int
+    def __init__(self, event_type: _Optional[str] = ..., request: _Optional[_Union[ConfirmationRequestInfo, _Mapping]] = ..., timestamp: _Optional[int] = ...) -> None: ...

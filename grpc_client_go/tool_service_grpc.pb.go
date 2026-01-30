@@ -1099,3 +1099,743 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 	},
 	Metadata: "tool_service.proto",
 }
+
+const (
+	ConfirmationService_GetPendingRequests_FullMethodName = "/zenflux.ConfirmationService/GetPendingRequests"
+	ConfirmationService_SubmitResponse_FullMethodName     = "/zenflux.ConfirmationService/SubmitResponse"
+	ConfirmationService_CancelRequest_FullMethodName      = "/zenflux.ConfirmationService/CancelRequest"
+	ConfirmationService_GetStats_FullMethodName           = "/zenflux.ConfirmationService/GetStats"
+	ConfirmationService_WatchConfirmations_FullMethodName = "/zenflux.ConfirmationService/WatchConfirmations"
+)
+
+// ConfirmationServiceClient is the client API for ConfirmationService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// ==================== Confirmation 服务（HITL 确认） ====================
+type ConfirmationServiceClient interface {
+	// 获取待处理的确认请求
+	GetPendingRequests(ctx context.Context, in *GetPendingRequestsRequest, opts ...grpc.CallOption) (*GetPendingRequestsResponse, error)
+	// 提交确认响应
+	SubmitResponse(ctx context.Context, in *SubmitConfirmationRequest, opts ...grpc.CallOption) (*SubmitConfirmationResponse, error)
+	// 取消确认请求
+	CancelRequest(ctx context.Context, in *CancelConfirmationRequest, opts ...grpc.CallOption) (*CancelConfirmationResponse, error)
+	// 获取统计信息
+	GetStats(ctx context.Context, in *ConfirmationStatsRequest, opts ...grpc.CallOption) (*ConfirmationStatsResponse, error)
+	// 监听确认请求（流式，用于实时接收新的确认请求）
+	WatchConfirmations(ctx context.Context, in *WatchConfirmationsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ConfirmationEvent], error)
+}
+
+type confirmationServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewConfirmationServiceClient(cc grpc.ClientConnInterface) ConfirmationServiceClient {
+	return &confirmationServiceClient{cc}
+}
+
+func (c *confirmationServiceClient) GetPendingRequests(ctx context.Context, in *GetPendingRequestsRequest, opts ...grpc.CallOption) (*GetPendingRequestsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetPendingRequestsResponse)
+	err := c.cc.Invoke(ctx, ConfirmationService_GetPendingRequests_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *confirmationServiceClient) SubmitResponse(ctx context.Context, in *SubmitConfirmationRequest, opts ...grpc.CallOption) (*SubmitConfirmationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SubmitConfirmationResponse)
+	err := c.cc.Invoke(ctx, ConfirmationService_SubmitResponse_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *confirmationServiceClient) CancelRequest(ctx context.Context, in *CancelConfirmationRequest, opts ...grpc.CallOption) (*CancelConfirmationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CancelConfirmationResponse)
+	err := c.cc.Invoke(ctx, ConfirmationService_CancelRequest_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *confirmationServiceClient) GetStats(ctx context.Context, in *ConfirmationStatsRequest, opts ...grpc.CallOption) (*ConfirmationStatsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ConfirmationStatsResponse)
+	err := c.cc.Invoke(ctx, ConfirmationService_GetStats_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *confirmationServiceClient) WatchConfirmations(ctx context.Context, in *WatchConfirmationsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ConfirmationEvent], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &ConfirmationService_ServiceDesc.Streams[0], ConfirmationService_WatchConfirmations_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[WatchConfirmationsRequest, ConfirmationEvent]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ConfirmationService_WatchConfirmationsClient = grpc.ServerStreamingClient[ConfirmationEvent]
+
+// ConfirmationServiceServer is the server API for ConfirmationService service.
+// All implementations must embed UnimplementedConfirmationServiceServer
+// for forward compatibility.
+//
+// ==================== Confirmation 服务（HITL 确认） ====================
+type ConfirmationServiceServer interface {
+	// 获取待处理的确认请求
+	GetPendingRequests(context.Context, *GetPendingRequestsRequest) (*GetPendingRequestsResponse, error)
+	// 提交确认响应
+	SubmitResponse(context.Context, *SubmitConfirmationRequest) (*SubmitConfirmationResponse, error)
+	// 取消确认请求
+	CancelRequest(context.Context, *CancelConfirmationRequest) (*CancelConfirmationResponse, error)
+	// 获取统计信息
+	GetStats(context.Context, *ConfirmationStatsRequest) (*ConfirmationStatsResponse, error)
+	// 监听确认请求（流式，用于实时接收新的确认请求）
+	WatchConfirmations(*WatchConfirmationsRequest, grpc.ServerStreamingServer[ConfirmationEvent]) error
+	mustEmbedUnimplementedConfirmationServiceServer()
+}
+
+// UnimplementedConfirmationServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedConfirmationServiceServer struct{}
+
+func (UnimplementedConfirmationServiceServer) GetPendingRequests(context.Context, *GetPendingRequestsRequest) (*GetPendingRequestsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetPendingRequests not implemented")
+}
+func (UnimplementedConfirmationServiceServer) SubmitResponse(context.Context, *SubmitConfirmationRequest) (*SubmitConfirmationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SubmitResponse not implemented")
+}
+func (UnimplementedConfirmationServiceServer) CancelRequest(context.Context, *CancelConfirmationRequest) (*CancelConfirmationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CancelRequest not implemented")
+}
+func (UnimplementedConfirmationServiceServer) GetStats(context.Context, *ConfirmationStatsRequest) (*ConfirmationStatsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetStats not implemented")
+}
+func (UnimplementedConfirmationServiceServer) WatchConfirmations(*WatchConfirmationsRequest, grpc.ServerStreamingServer[ConfirmationEvent]) error {
+	return status.Error(codes.Unimplemented, "method WatchConfirmations not implemented")
+}
+func (UnimplementedConfirmationServiceServer) mustEmbedUnimplementedConfirmationServiceServer() {}
+func (UnimplementedConfirmationServiceServer) testEmbeddedByValue()                             {}
+
+// UnsafeConfirmationServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to ConfirmationServiceServer will
+// result in compilation errors.
+type UnsafeConfirmationServiceServer interface {
+	mustEmbedUnimplementedConfirmationServiceServer()
+}
+
+func RegisterConfirmationServiceServer(s grpc.ServiceRegistrar, srv ConfirmationServiceServer) {
+	// If the following call panics, it indicates UnimplementedConfirmationServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&ConfirmationService_ServiceDesc, srv)
+}
+
+func _ConfirmationService_GetPendingRequests_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetPendingRequestsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfirmationServiceServer).GetPendingRequests(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConfirmationService_GetPendingRequests_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfirmationServiceServer).GetPendingRequests(ctx, req.(*GetPendingRequestsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfirmationService_SubmitResponse_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SubmitConfirmationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfirmationServiceServer).SubmitResponse(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConfirmationService_SubmitResponse_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfirmationServiceServer).SubmitResponse(ctx, req.(*SubmitConfirmationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfirmationService_CancelRequest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CancelConfirmationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfirmationServiceServer).CancelRequest(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConfirmationService_CancelRequest_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfirmationServiceServer).CancelRequest(ctx, req.(*CancelConfirmationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfirmationService_GetStats_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ConfirmationStatsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfirmationServiceServer).GetStats(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConfirmationService_GetStats_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfirmationServiceServer).GetStats(ctx, req.(*ConfirmationStatsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfirmationService_WatchConfirmations_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(WatchConfirmationsRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(ConfirmationServiceServer).WatchConfirmations(m, &grpc.GenericServerStream[WatchConfirmationsRequest, ConfirmationEvent]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ConfirmationService_WatchConfirmationsServer = grpc.ServerStreamingServer[ConfirmationEvent]
+
+// ConfirmationService_ServiceDesc is the grpc.ServiceDesc for ConfirmationService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var ConfirmationService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "zenflux.ConfirmationService",
+	HandlerType: (*ConfirmationServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetPendingRequests",
+			Handler:    _ConfirmationService_GetPendingRequests_Handler,
+		},
+		{
+			MethodName: "SubmitResponse",
+			Handler:    _ConfirmationService_SubmitResponse_Handler,
+		},
+		{
+			MethodName: "CancelRequest",
+			Handler:    _ConfirmationService_CancelRequest_Handler,
+		},
+		{
+			MethodName: "GetStats",
+			Handler:    _ConfirmationService_GetStats_Handler,
+		},
+	},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "WatchConfirmations",
+			Handler:       _ConfirmationService_WatchConfirmations_Handler,
+			ServerStreams: true,
+		},
+	},
+	Metadata: "tool_service.proto",
+}
+
+const (
+	SandboxService_GetStatus_FullMethodName   = "/zenflux.SandboxService/GetStatus"
+	SandboxService_Init_FullMethodName        = "/zenflux.SandboxService/Init"
+	SandboxService_Pause_FullMethodName       = "/zenflux.SandboxService/Pause"
+	SandboxService_Resume_FullMethodName      = "/zenflux.SandboxService/Resume"
+	SandboxService_Kill_FullMethodName        = "/zenflux.SandboxService/Kill"
+	SandboxService_RunProject_FullMethodName  = "/zenflux.SandboxService/RunProject"
+	SandboxService_StopProject_FullMethodName = "/zenflux.SandboxService/StopProject"
+	SandboxService_GetLogs_FullMethodName     = "/zenflux.SandboxService/GetLogs"
+	SandboxService_RunCommand_FullMethodName  = "/zenflux.SandboxService/RunCommand"
+	SandboxService_ListFiles_FullMethodName   = "/zenflux.SandboxService/ListFiles"
+)
+
+// SandboxServiceClient is the client API for SandboxService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// ==================== Sandbox 服务（沙盒管理） ====================
+type SandboxServiceClient interface {
+	// 获取沙盒状态
+	GetStatus(ctx context.Context, in *SandboxStatusRequest, opts ...grpc.CallOption) (*SandboxStatusResponse, error)
+	// 初始化沙盒
+	Init(ctx context.Context, in *SandboxInitRequest, opts ...grpc.CallOption) (*SandboxStatusResponse, error)
+	// 暂停沙盒
+	Pause(ctx context.Context, in *SandboxPauseRequest, opts ...grpc.CallOption) (*SandboxOperationResponse, error)
+	// 恢复沙盒
+	Resume(ctx context.Context, in *SandboxResumeRequest, opts ...grpc.CallOption) (*SandboxStatusResponse, error)
+	// 终止沙盒
+	Kill(ctx context.Context, in *SandboxKillRequest, opts ...grpc.CallOption) (*SandboxOperationResponse, error)
+	// 运行项目
+	RunProject(ctx context.Context, in *SandboxRunProjectRequest, opts ...grpc.CallOption) (*SandboxRunProjectResponse, error)
+	// 停止项目
+	StopProject(ctx context.Context, in *SandboxStopProjectRequest, opts ...grpc.CallOption) (*SandboxOperationResponse, error)
+	// 获取项目日志
+	GetLogs(ctx context.Context, in *SandboxLogsRequest, opts ...grpc.CallOption) (*SandboxLogsResponse, error)
+	// 执行命令
+	RunCommand(ctx context.Context, in *SandboxCommandRequest, opts ...grpc.CallOption) (*SandboxCommandResponse, error)
+	// 获取文件列表
+	ListFiles(ctx context.Context, in *SandboxListFilesRequest, opts ...grpc.CallOption) (*SandboxListFilesResponse, error)
+}
+
+type sandboxServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewSandboxServiceClient(cc grpc.ClientConnInterface) SandboxServiceClient {
+	return &sandboxServiceClient{cc}
+}
+
+func (c *sandboxServiceClient) GetStatus(ctx context.Context, in *SandboxStatusRequest, opts ...grpc.CallOption) (*SandboxStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SandboxStatusResponse)
+	err := c.cc.Invoke(ctx, SandboxService_GetStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sandboxServiceClient) Init(ctx context.Context, in *SandboxInitRequest, opts ...grpc.CallOption) (*SandboxStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SandboxStatusResponse)
+	err := c.cc.Invoke(ctx, SandboxService_Init_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sandboxServiceClient) Pause(ctx context.Context, in *SandboxPauseRequest, opts ...grpc.CallOption) (*SandboxOperationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SandboxOperationResponse)
+	err := c.cc.Invoke(ctx, SandboxService_Pause_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sandboxServiceClient) Resume(ctx context.Context, in *SandboxResumeRequest, opts ...grpc.CallOption) (*SandboxStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SandboxStatusResponse)
+	err := c.cc.Invoke(ctx, SandboxService_Resume_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sandboxServiceClient) Kill(ctx context.Context, in *SandboxKillRequest, opts ...grpc.CallOption) (*SandboxOperationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SandboxOperationResponse)
+	err := c.cc.Invoke(ctx, SandboxService_Kill_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sandboxServiceClient) RunProject(ctx context.Context, in *SandboxRunProjectRequest, opts ...grpc.CallOption) (*SandboxRunProjectResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SandboxRunProjectResponse)
+	err := c.cc.Invoke(ctx, SandboxService_RunProject_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sandboxServiceClient) StopProject(ctx context.Context, in *SandboxStopProjectRequest, opts ...grpc.CallOption) (*SandboxOperationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SandboxOperationResponse)
+	err := c.cc.Invoke(ctx, SandboxService_StopProject_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sandboxServiceClient) GetLogs(ctx context.Context, in *SandboxLogsRequest, opts ...grpc.CallOption) (*SandboxLogsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SandboxLogsResponse)
+	err := c.cc.Invoke(ctx, SandboxService_GetLogs_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sandboxServiceClient) RunCommand(ctx context.Context, in *SandboxCommandRequest, opts ...grpc.CallOption) (*SandboxCommandResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SandboxCommandResponse)
+	err := c.cc.Invoke(ctx, SandboxService_RunCommand_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sandboxServiceClient) ListFiles(ctx context.Context, in *SandboxListFilesRequest, opts ...grpc.CallOption) (*SandboxListFilesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SandboxListFilesResponse)
+	err := c.cc.Invoke(ctx, SandboxService_ListFiles_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// SandboxServiceServer is the server API for SandboxService service.
+// All implementations must embed UnimplementedSandboxServiceServer
+// for forward compatibility.
+//
+// ==================== Sandbox 服务（沙盒管理） ====================
+type SandboxServiceServer interface {
+	// 获取沙盒状态
+	GetStatus(context.Context, *SandboxStatusRequest) (*SandboxStatusResponse, error)
+	// 初始化沙盒
+	Init(context.Context, *SandboxInitRequest) (*SandboxStatusResponse, error)
+	// 暂停沙盒
+	Pause(context.Context, *SandboxPauseRequest) (*SandboxOperationResponse, error)
+	// 恢复沙盒
+	Resume(context.Context, *SandboxResumeRequest) (*SandboxStatusResponse, error)
+	// 终止沙盒
+	Kill(context.Context, *SandboxKillRequest) (*SandboxOperationResponse, error)
+	// 运行项目
+	RunProject(context.Context, *SandboxRunProjectRequest) (*SandboxRunProjectResponse, error)
+	// 停止项目
+	StopProject(context.Context, *SandboxStopProjectRequest) (*SandboxOperationResponse, error)
+	// 获取项目日志
+	GetLogs(context.Context, *SandboxLogsRequest) (*SandboxLogsResponse, error)
+	// 执行命令
+	RunCommand(context.Context, *SandboxCommandRequest) (*SandboxCommandResponse, error)
+	// 获取文件列表
+	ListFiles(context.Context, *SandboxListFilesRequest) (*SandboxListFilesResponse, error)
+	mustEmbedUnimplementedSandboxServiceServer()
+}
+
+// UnimplementedSandboxServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedSandboxServiceServer struct{}
+
+func (UnimplementedSandboxServiceServer) GetStatus(context.Context, *SandboxStatusRequest) (*SandboxStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetStatus not implemented")
+}
+func (UnimplementedSandboxServiceServer) Init(context.Context, *SandboxInitRequest) (*SandboxStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Init not implemented")
+}
+func (UnimplementedSandboxServiceServer) Pause(context.Context, *SandboxPauseRequest) (*SandboxOperationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Pause not implemented")
+}
+func (UnimplementedSandboxServiceServer) Resume(context.Context, *SandboxResumeRequest) (*SandboxStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Resume not implemented")
+}
+func (UnimplementedSandboxServiceServer) Kill(context.Context, *SandboxKillRequest) (*SandboxOperationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Kill not implemented")
+}
+func (UnimplementedSandboxServiceServer) RunProject(context.Context, *SandboxRunProjectRequest) (*SandboxRunProjectResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RunProject not implemented")
+}
+func (UnimplementedSandboxServiceServer) StopProject(context.Context, *SandboxStopProjectRequest) (*SandboxOperationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method StopProject not implemented")
+}
+func (UnimplementedSandboxServiceServer) GetLogs(context.Context, *SandboxLogsRequest) (*SandboxLogsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetLogs not implemented")
+}
+func (UnimplementedSandboxServiceServer) RunCommand(context.Context, *SandboxCommandRequest) (*SandboxCommandResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RunCommand not implemented")
+}
+func (UnimplementedSandboxServiceServer) ListFiles(context.Context, *SandboxListFilesRequest) (*SandboxListFilesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListFiles not implemented")
+}
+func (UnimplementedSandboxServiceServer) mustEmbedUnimplementedSandboxServiceServer() {}
+func (UnimplementedSandboxServiceServer) testEmbeddedByValue()                        {}
+
+// UnsafeSandboxServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to SandboxServiceServer will
+// result in compilation errors.
+type UnsafeSandboxServiceServer interface {
+	mustEmbedUnimplementedSandboxServiceServer()
+}
+
+func RegisterSandboxServiceServer(s grpc.ServiceRegistrar, srv SandboxServiceServer) {
+	// If the following call panics, it indicates UnimplementedSandboxServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&SandboxService_ServiceDesc, srv)
+}
+
+func _SandboxService_GetStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SandboxStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SandboxServiceServer).GetStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SandboxService_GetStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SandboxServiceServer).GetStatus(ctx, req.(*SandboxStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SandboxService_Init_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SandboxInitRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SandboxServiceServer).Init(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SandboxService_Init_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SandboxServiceServer).Init(ctx, req.(*SandboxInitRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SandboxService_Pause_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SandboxPauseRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SandboxServiceServer).Pause(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SandboxService_Pause_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SandboxServiceServer).Pause(ctx, req.(*SandboxPauseRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SandboxService_Resume_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SandboxResumeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SandboxServiceServer).Resume(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SandboxService_Resume_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SandboxServiceServer).Resume(ctx, req.(*SandboxResumeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SandboxService_Kill_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SandboxKillRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SandboxServiceServer).Kill(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SandboxService_Kill_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SandboxServiceServer).Kill(ctx, req.(*SandboxKillRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SandboxService_RunProject_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SandboxRunProjectRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SandboxServiceServer).RunProject(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SandboxService_RunProject_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SandboxServiceServer).RunProject(ctx, req.(*SandboxRunProjectRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SandboxService_StopProject_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SandboxStopProjectRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SandboxServiceServer).StopProject(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SandboxService_StopProject_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SandboxServiceServer).StopProject(ctx, req.(*SandboxStopProjectRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SandboxService_GetLogs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SandboxLogsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SandboxServiceServer).GetLogs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SandboxService_GetLogs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SandboxServiceServer).GetLogs(ctx, req.(*SandboxLogsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SandboxService_RunCommand_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SandboxCommandRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SandboxServiceServer).RunCommand(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SandboxService_RunCommand_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SandboxServiceServer).RunCommand(ctx, req.(*SandboxCommandRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SandboxService_ListFiles_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SandboxListFilesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SandboxServiceServer).ListFiles(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SandboxService_ListFiles_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SandboxServiceServer).ListFiles(ctx, req.(*SandboxListFilesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// SandboxService_ServiceDesc is the grpc.ServiceDesc for SandboxService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var SandboxService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "zenflux.SandboxService",
+	HandlerType: (*SandboxServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetStatus",
+			Handler:    _SandboxService_GetStatus_Handler,
+		},
+		{
+			MethodName: "Init",
+			Handler:    _SandboxService_Init_Handler,
+		},
+		{
+			MethodName: "Pause",
+			Handler:    _SandboxService_Pause_Handler,
+		},
+		{
+			MethodName: "Resume",
+			Handler:    _SandboxService_Resume_Handler,
+		},
+		{
+			MethodName: "Kill",
+			Handler:    _SandboxService_Kill_Handler,
+		},
+		{
+			MethodName: "RunProject",
+			Handler:    _SandboxService_RunProject_Handler,
+		},
+		{
+			MethodName: "StopProject",
+			Handler:    _SandboxService_StopProject_Handler,
+		},
+		{
+			MethodName: "GetLogs",
+			Handler:    _SandboxService_GetLogs_Handler,
+		},
+		{
+			MethodName: "RunCommand",
+			Handler:    _SandboxService_RunCommand_Handler,
+		},
+		{
+			MethodName: "ListFiles",
+			Handler:    _SandboxService_ListFiles_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "tool_service.proto",
+}
