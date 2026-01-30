@@ -140,6 +140,10 @@ class NanoBananaImageTool(BaseTool):
             yield json.dumps({"success": False, "error": "缺少必需参数: prompt"})
             return
         
+        # 兼容性处理：如果 input_images 是字符串，转换为列表
+        if isinstance(input_images, str):
+            input_images = [input_images]
+        
         if resolution not in SUPPORTED_RESOLUTIONS:
             yield json.dumps({
                 "success": False,
@@ -183,10 +187,6 @@ class NanoBananaImageTool(BaseTool):
                 input_images=loaded_images,
                 resolution=actual_resolution
             )
-            
-            if not image_bytes:
-                yield json.dumps({"success": False, "error": "图像生成失败：API 未返回图像数据"})
-                return
             
             # --- 流式输出阶段 1: 立即输出 Base64 预览 ---
             b64_image = base64.b64encode(image_bytes).decode('utf-8')

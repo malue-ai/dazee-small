@@ -15,7 +15,7 @@
 core_tools:
   - plan_todo                   # 任务规划
   - api_calling                 # API 调用
-  - hitl                        # HITL (Human-in-the-Loop)
+  # - hitl                        # HITL (Human-in-the-Loop) - 移到实例级配置
   - sandbox_write_file          # 写入文件
   - sandbox_read_file           # 读取文件
   - sandbox_list_files          # 列出目录
@@ -24,7 +24,7 @@ core_tools:
   - sandbox_get_public_url      # 获取公开 URL
   - sandbox_upload_file         # 上传文件到 S3
   - sandbox_init_project        # 项目脚手架初始化
-  - nano_banana_image           # Nano Banana Pro 图像生成/编辑
+  # - nano_banana_image           # Nano Banana Pro 图像生成/编辑
 
 # ==================== 沙盒工具 ====================
 sandbox_tools:

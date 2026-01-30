@@ -390,13 +390,16 @@ class EventBroadcaster:
         """
         # 构建 HITL 表单请求数据
         hitl_request_data = {
-            "type": "form",  # 🆕 类型标识（前端用于区分不同的 HITL 交互类型）
-            "status": "pending",  # 标记为等待用户响应
+            "type": "form", 
+            "status": "pending",
             "title": tool_input.get("title", ""),
             "description": tool_input.get("description", ""),
             "questions": tool_input.get("questions", []),
-            "timeout": tool_input.get("timeout", 120),
         }
+        
+        # 🆕 timeout 字段保留但仅在 AI 明确传入时才输出
+        if "timeout" in tool_input:
+            hitl_request_data["timeout"] = tool_input["timeout"]
         
         # 发送 hitl 类型的 delta 事件
         msg_id = self._session_message_ids.get(session_id)

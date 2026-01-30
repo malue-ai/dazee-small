@@ -158,8 +158,10 @@ class HITLTool(BaseTool):
             return {"success": False, "error": "缺少必需参数: questions"}
         
         description = params.get("description", "")
-        timeout = params.get("timeout", FORM_TIMEOUT)
-        # 🆕 超时时是否使用默认值（默认 True）
+        # 🆕 AI 可以传 timeout 参数，但代码暂不启用超时逻辑
+        # timeout = params.get("timeout", FORM_TIMEOUT)
+        timeout = None  # 暂时禁用超时，无限等待用户响应
+        # 🆕 超时时是否使用默认值（默认 True）- 暂不使用
         use_default_on_timeout = params.get("use_default_on_timeout", True)
         
         # 从 context 获取 session_id

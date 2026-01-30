@@ -893,12 +893,11 @@ class E2BSandboxProvider(SandboxProvider):
                 # SVG 是文本格式
                 file_content = image_data.encode('utf-8')
             
-            # 上传到 S3
+            # 上传到 S3（使用预签名 URL 访问，无需 ACL）
             result = await uploader.upload_bytes(
                 file_content=file_content,
                 object_name=object_name,
-                content_type=content_type,
-                acl="public-read"  # 允许直接访问
+                content_type=content_type
             )
             
             # 生成预签名 URL（7天有效）

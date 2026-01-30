@@ -1124,6 +1124,8 @@ class SimpleAgent:
                             accumulator = self.broadcaster.get_accumulator(session_id)
                             if accumulator:
                                 client_tool_ids = {tc.get("id") for tc in client_tools}
+                                # 建立 ID -> Name 映射 (用于特殊工具处理)
+                                tool_id_to_name = {tc.get("id"): tc.get("name") for tc in client_tools}
                                 
                                 # 🆕 收集消息历史中已有的 tool_result IDs（用于去重）
                                 existing_tool_result_ids = set()
@@ -1143,6 +1145,21 @@ class SimpleAgent:
                                             continue
                                         # 移除 index 字段（Claude API 不接受）
                                         clean_block = {k: v for k, v in block.items() if k != "index"}
+                                        
+                                        # 🆕 V8.x: 针对图片生成工具的特殊优化 (移除 preview 字段以节省 Context)
+                                        # 前端已通过流式事件收到 preview，无需回传给 LLM
+                                        current_tool_name = tool_id_to_name.get(tool_use_id)
+                                        if current_tool_name == "nano_banana_image":
+                                            try:
+                                                content_str = clean_block.get("content", "")
+                                                data = json.loads(content_str)
+                                                if "preview" in data:
+                                                    del data["preview"]
+                                                    clean_block["content"] = json.dumps(data, ensure_ascii=False)
+                                                    logger.debug(f"🧹 已移除 nano_banana_image 的 preview 字段")
+                                            except Exception as e:
+                                                pass
+                                        
                                         tool_results.append(clean_block)
                         
                         # 更新消息（用于下一轮 LLM 调用）
@@ -1660,9 +1677,9 @@ class SimpleAgent:
             # 清理内容（移除系统注入的上下文信息，但保留摘要）
             clean_content = text_content
             
-            # [用户上下文] -> 删除
-            if "[用户上下文]" in clean_content:
-                idx = clean_content.find("[用户上下文]")
+            # [User Context] -> 删除
+            if "[User Context]" in clean_content:
+                idx = clean_content.find("[User Context]")
                 clean_content = clean_content[:idx].strip()
             
             # [提取的文档信息] -> 保留摘要
@@ -1742,9 +1759,9 @@ class SimpleAgent:
         # 过滤系统注入信息
         clean_content = raw_content
         
-        # 移除 [用户上下文]
-        if "[用户上下文]" in clean_content:
-            idx = clean_content.find("[用户上下文]")
+        # 移除 [User Context]
+        if "[User Context]" in clean_content:
+            idx = clean_content.find("[User Context]")
             clean_content = clean_content[:idx].strip()
         
         # 处理 [提取的文档信息] -> 转换为简短提示

@@ -1072,7 +1072,7 @@ capabilities:
   type: TOOL
   subtype: CUSTOM
   provider: user
-  level: 1
+  level: 2
   enabled: true  # 暂时禁用 HITL 工具
   implementation:
     module: tools.request_human_confirmation
@@ -1941,7 +1941,7 @@ capabilities:
     requires_api: false
   metadata:
     description: |
-      分析对话内容，生成后续操作建议（线索）。
+      提交后续操作建议（线索），工具负责验证和格式化。
       
       **何时使用此工具**：
       1. 完成用户的主要任务后，需要提供延伸操作建议时
@@ -1955,7 +1955,7 @@ capabilities:
       - 对话尚未完成，还在执行中
       - 用户明确表示不需要更多帮助
       
-      **生成的线索类型**：
+      **线索类型（act）**：
       - reply: 需要用户回复确认的问题
       - forward: 可以转发/分享的内容
       - confirm: 需要用户确认的操作
@@ -1977,11 +1977,31 @@ capabilities:
   input_schema:
     type: object
     properties:
-      user_message:
-        type: string
-        description: 用户消息内容（当前对话中用户发送的消息）
-      assistant_response:
-        type: string
-        description: 助手回复内容（当前对话中助手的回复，包含刚完成的任务结果）
+      tasks:
+        type: array
+        description: 线索列表，由 Agent 直接生成
+        items:
+          type: object
+          properties:
+            text:
+              type: string
+              description: 线索描述文本（不超过 30 字）
+            act:
+              type: string
+              description: 操作类型
+              enum:
+              - reply
+              - forward
+              - confirm
+              - upload
+              default: reply
+            id:
+              type: string
+              description: 线索 ID（可选，不提供则自动生成）
+            payload:
+              type: object
+              description: 附加数据（可选）
+          required:
+          - text
     required:
-    - assistant_response
+    - tasks

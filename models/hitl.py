@@ -58,16 +58,19 @@ class ConfirmationRequest:
         等待用户响应
         
         Args:
-            timeout: 超时时间（秒），None 使用默认超时
+            timeout: 超时时间（秒），None 表示无限等待
             
         Returns:
             用户响应
             
         Raises:
-            asyncio.TimeoutError: 超时
+            asyncio.TimeoutError: 超时（仅当 timeout > 0 时）
         """
-        wait_timeout = timeout or self.timeout
-        await asyncio.wait_for(self.event.wait(), timeout=wait_timeout)
+        if timeout is None or timeout <= 0:
+            # 🆕 无限等待模式（暂时禁用超时）
+            await self.event.wait()
+        else:
+            await asyncio.wait_for(self.event.wait(), timeout=timeout)
         return self.response
     
     def set_response(self, response: str, metadata: Optional[Dict[str, Any]] = None):

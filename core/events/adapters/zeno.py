@@ -95,7 +95,7 @@ class ZenOAdapter(EventAdapter):
     - content_delta (text) → message.assistant.delta (type: response)
     - message_delta (preface) → message.assistant.delta (type: preface)  # V7.8: 由 chat_service 独立发送
     - tool_result:plan_todo → message.assistant.delta (type: progress)  # 通过 enhance_tool_result 处理
-    - tool_result:hitl → message.assistant.delta (type: hitl)  # 🆕 人机交互表单响应
+    - tool_result:hitl → message.assistant.delta (type: hitl_data)  # 🆕 人机交互表单响应
     - tool_result:clue_generation → message.assistant.delta (type: clue)  # 🆕 操作线索
     - message_delta:recommended → message.assistant.delta (type: recommended)
     - message_stop → message.assistant.done
@@ -402,7 +402,7 @@ class ZenOAdapter(EventAdapter):
             "intent", "billing", "progress", "preface",  # 基础类型（V7.8: 添加 preface）
             "sql", "data", "chart", "report", "dashboard", "application", # 问数平台类型
             "mind", "interface", "sandbox", "files",  # 系统搭建/流程图/沙箱/文件类型
-            "hitl", "clue",  # 人机交互类型（HITL 表单、操作线索）
+            "hitl", "hitl_data", "clue",  # 人机交互类型（hitl: 表单请求, hitl_data: 用户响应, clue: 操作线索）
         ):
             zeno_delta_type = delta_type
             # 格式已符合 ZenO 规范，直接透传
@@ -985,11 +985,11 @@ class ZenOAdapter(EventAdapter):
             logger.info(f"🔧 [enhance_tool_result] clue_generation 生成了 {len(deltas)} 个 delta")
             return deltas
         
-        # hitl 工具的特殊处理（转换为 hitl 格式）
+        # hitl 工具的特殊处理（转换为 hitl_data 格式）
         if tool_name == "hitl":
-            logger.info(f"🔧 [enhance_tool_result] 识别到 hitl，生成 hitl delta")
-            deltas = self._generate_hitl_deltas(tool_input, result_content)
-            logger.info(f"🔧 [enhance_tool_result] hitl 生成了 {len(deltas)} 个 delta")
+            logger.info(f"🔧 [enhance_tool_result] 识别到 hitl，生成 hitl_data delta")
+            deltas = self._generate_hitl_data_deltas(tool_input, result_content)
+            logger.info(f"🔧 [enhance_tool_result] hitl 生成了 {len(deltas)} 个 hitl_data delta")
             return deltas
         
         # 沙盒工具：sandbox_get_public_url 的特殊处理（提取 url）
@@ -1002,7 +1002,9 @@ class ZenOAdapter(EventAdapter):
             try:
                 result = json.loads(result_content) if isinstance(result_content, str) else result_content
                 # 只有当结果包含 url 字段时才生成 delta
-                if result.get("url") and result.get("background"):
+                # 🔧 修复：background 是输入参数，不在返回结果里，改为检查 tool_input
+                background = tool_input.get("background", False)
+                if result.get("url") and background:
                     logger.debug(f"🔧 处理 sandbox_run_command 后台模式返回的 URL")
                     return self._generate_sandbox_deltas(result_content, tool_input, conversation_id)
             except (json.JSONDecodeError, TypeError):
@@ -1268,13 +1270,17 @@ class ZenOAdapter(EventAdapter):
         
         return deltas
     
-    def _generate_hitl_deltas(
+    def _generate_hitl_data_deltas(
         self,
         tool_input: Dict[str, Any],
         result_content: str
     ) -> List[Dict[str, Any]]:
         """
-        为 hitl 工具生成 hitl delta
+        为 hitl 工具生成 hitl_data delta（用户响应数据）
+        
+        注意：
+        - hitl（tool_use 阶段）：表单请求，由 broadcaster._emit_hitl_request_event 发送
+        - hitl_data（tool_result 阶段）：用户响应数据，由本方法生成
         
         hitl 工具输入格式：
         {
@@ -1300,14 +1306,14 @@ class ZenOAdapter(EventAdapter):
         }
         
         生成的 delta 类型：
-        - hitl: 人机交互请求/响应，供前端渲染表单或显示结果
+        - hitl_data: 人机交互响应数据，供前端更新表单状态
         
         Args:
             tool_input: hitl 工具的输入参数（包含表单定义）
             result_content: hitl 工具返回的 JSON 字符串（用户响应）
             
         Returns:
-            delta 列表（包含一个 hitl 类型的 delta）
+            delta 列表（包含一个 hitl_data 类型的 delta）
         """
         deltas = []
         
@@ -1318,22 +1324,34 @@ class ZenOAdapter(EventAdapter):
             else:
                 result = result_content
         except json.JSONDecodeError:
-            logger.warning(f"⚠️ hitl 结果解析失败: {str(result_content)[:100]}...")
+            logger.warning(f"⚠️ hitl_data 结果解析失败: {str(result_content)[:100]}...")
             return deltas
         
-        # 构建 hitl delta 数据
+        success = bool(result.get("success", False))
+        timed_out = bool(result.get("timed_out", False))
+        error_message = result.get("error") or result.get("message")
+        status = "completed" if success else "timeout" if timed_out else "failed"
+        
+        # 构建 hitl_data delta 数据
         hitl_data = {
             # 🆕 类型标识（前端用于区分不同的 HITL 交互类型）
             "type": "form",
+            # 响应状态（completed / timeout / failed）
+            "status": status,
             # 表单定义（来自工具输入）
             "title": tool_input.get("title", ""),
             "description": tool_input.get("description", ""),
             "questions": tool_input.get("questions", []),
             # 用户响应（来自工具输出）
-            "success": result.get("success", False),
-            "timed_out": result.get("timed_out", False),
+            "success": success,
+            "timed_out": timed_out,
+            "used_default": bool(result.get("used_default", False)),
             "response": result.get("response"),
         }
+        
+        # 添加可选字段
+        if error_message:
+            hitl_data["message"] = error_message
         
         # 添加可选的 metadata
         if result.get("metadata"):
@@ -1341,13 +1359,13 @@ class ZenOAdapter(EventAdapter):
         
         # 根据状态记录日志
         if result.get("timed_out"):
-            logger.info(f"⏱️ 生成 hitl delta: 用户响应超时")
+            logger.info(f"⏱️ 生成 hitl_data delta: 用户响应超时")
         elif result.get("success"):
-            logger.info(f"✅ 生成 hitl delta: 用户已响应, title={tool_input.get('title', '')[:30]}")
+            logger.info(f"✅ 生成 hitl_data delta: 用户已响应, title={tool_input.get('title', '')[:30]}")
         else:
-            logger.warning(f"⚠️ 生成 hitl delta: 请求失败, error={result.get('error')}")
+            logger.warning(f"⚠️ 生成 hitl_data delta: 请求失败, error={result.get('error')}")
         
-        deltas.append(self._create_delta("hitl", hitl_data))
+        deltas.append(self._create_delta("hitl_data", hitl_data))
         
         return deltas
     

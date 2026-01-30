@@ -705,14 +705,17 @@ class PromptManager:
         if not variables:
             return ""
         
-        lines = ["# 用户上下文（系统自动注入，帮助你理解用户环境）", ""]
+        lines = ["# User Context (auto-injected by system)", ""]
         
         for var_name, var_data in variables.items():
             if isinstance(var_data, dict):
                 value = var_data.get("value", "")
                 description = var_data.get("description", "")
                 if value:
-                    lines.append(f"- **{var_name}**: {value}（{description}）")
+                    if description:
+                        lines.append(f"- **{var_name}**: {value} ({description})")
+                    else:
+                        lines.append(f"- **{var_name}**: {value}")
             else:
                 lines.append(f"- **{var_name}**: {var_data}")
         

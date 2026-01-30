@@ -178,7 +178,9 @@ class ConfirmationManager:
             }
         
         except asyncio.TimeoutError:
-            logger.warning(f"确认请求超时: request_id={request_id}")
+            # 🆕 timeout=None 时不会触发此异常（无限等待模式）
+            actual_timeout = timeout if timeout else request.timeout
+            logger.warning(f"确认请求超时: request_id={request_id}, timeout={actual_timeout}s")
             
             # 记录历史
             self._log_history(request, "timeout", timed_out=True)
@@ -191,7 +193,7 @@ class ConfirmationManager:
                 "response": "timeout",
                 "metadata": {},
                 "timed_out": True,
-                "message": f"用户未在 {request.timeout} 秒内响应"
+                "message": f"用户未在 {actual_timeout} 秒内响应"
             }
     
     def set_response(

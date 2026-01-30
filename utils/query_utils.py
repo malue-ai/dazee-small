@@ -35,8 +35,8 @@ def format_variables(variables: Dict[str, Any]) -> str:
         格式化后的文本，空 variables 返回空字符串
         
     Examples:
-        >>> format_variables({"location": {"value": "北京"}})
-        '[用户上下文]\\n- location: 北京'
+        >>> format_variables({"location": {"value": "Beijing"}})
+        '[User Context]\\n- location: Beijing'
         
         >>> format_variables({})
         ''
@@ -44,7 +44,7 @@ def format_variables(variables: Dict[str, Any]) -> str:
     if not variables:
         return ""
     
-    lines = ["[用户上下文]"]
+    lines = ["[User Context]"]
     
     for var_name, var_data in variables.items():
         if isinstance(var_data, dict):
@@ -52,7 +52,7 @@ def format_variables(variables: Dict[str, Any]) -> str:
             description = var_data.get("description", "")
             if value:
                 if description:
-                    lines.append(f"- {var_name}: {value}（{description}）")
+                    lines.append(f"- {var_name}: {value} ({description})")
                 else:
                     lines.append(f"- {var_name}: {value}")
         else:

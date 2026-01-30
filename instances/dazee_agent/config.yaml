@@ -68,7 +68,7 @@ enabled_capabilities:
   slidespeak_render: 1   # SlideSpeak PPT 渲染工具
   
   # --- 图像生成类 ---
-  nano_banana_image: 1   # Nano Banana Pro 图像生成/编辑工具（Gemini 3 Pro Image）
+  nano_banana_image: 0   # Nano Banana Pro 图像生成/编辑工具（Gemini 3 Pro Image）
   
   # --- 代码沙盒类 ---
   sandbox_tools: 1           # 包含全部沙盒工具（含 sandbox_init_project 脚手架）
@@ -83,7 +83,7 @@ enabled_capabilities:
   send_files: 1              # 🆕 文件发送工具（发送文件信息到前端）
   
   # --- HITL（Human-in-the-Loop）---
-  hitl: 1                      # 🆕 启用人机交互确认工具
+  hitl: 0                      # 🆕 启用人机交互确认工具
   
   # --- 线索生成类 ---
   clue_generation: 1           # 🆕 线索生成工具（操作建议）
@@ -140,6 +140,15 @@ mcp_tools:
     auth_env: "DIFY_API_KEY"
     capability: "document_creation"
     description: "调用 Perplexity AI 进行深度研究，输出 DOCX 研究报告文档"
+
+  - name: nano_banana
+    server_url: "https://api.dify.ai/mcp/server/n7rhBjadwzy9bj90/mcp"
+    server_name: "dify"
+    auth_type: "bearer"
+    auth_env: "DIFY_API_KEY"
+    capability: "image_generation"
+    description: "使用 Nano Banana Pro 生成或编辑图像"
+
 # ==================== REST APIs 配置 ====================
 #
 # 📌 运营配置：只需填写 base_url + 认证

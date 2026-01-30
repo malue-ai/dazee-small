@@ -246,8 +246,9 @@ class S3Uploader:
             # 4. 确定内容类型
             content_type = self._get_content_type(filename)
             
-            # 5. 获取 ACL
-            acl = self.config["aws"]["s3"]["acl"].get(category, "private")
+            # 5. 获取 ACL（如果 bucket 禁用了 ACL，则不设置）
+            acl_config = self.config["aws"]["s3"].get("acl", {})
+            acl = acl_config.get(category) if acl_config else None
             
             # 6. 上传到 S3（异步读取文件内容）
             logger.info(f"📤 上传文件: {filename} → {s3_key}")
@@ -255,15 +256,19 @@ class S3Uploader:
             async with aiofiles.open(file_path, 'rb') as f:
                 file_content = await f.read()
             
+            # 构建 ExtraArgs（只有当 acl 有值时才包含）
+            extra_args = {
+                'ContentType': content_type,
+                'Metadata': file_metadata,
+            }
+            if acl:
+                extra_args['ACL'] = acl
+            
             self.s3_client.upload_fileobj(
                 io.BytesIO(file_content),
                 self.bucket_name,
                 s3_key,
-                ExtraArgs={
-                    'ContentType': content_type,
-                    'Metadata': file_metadata,
-                    'ACL': acl
-                }
+                ExtraArgs=extra_args
             )
             
             logger.info(f"✅ 上传成功: {s3_key}")
@@ -294,7 +299,7 @@ class S3Uploader:
         object_name: str,
         content_type: str = "application/octet-stream",
         metadata: Optional[Dict[str, str]] = None,
-        acl: str = "private"
+        acl: Optional[str] = None
     ) -> Dict[str, str]:
         """
         直接上传字节内容到 S3
@@ -304,7 +309,7 @@ class S3Uploader:
             object_name: S3 对象名称（完整路径）
             content_type: MIME 类型
             metadata: 自定义元数据（可选）
-            acl: 访问控制（private/public-read）
+            acl: 访问控制（private/public-read），None 表示不设置（适用于禁用 ACL 的 bucket）
             
         Returns:
             {
@@ -334,16 +339,20 @@ class S3Uploader:
             # 上传到 S3
             logger.info(f"📤 上传字节内容: {object_name} ({file_size} bytes)")
             
+            # 构建 ExtraArgs（只有当 acl 有值时才包含）
+            extra_args = {
+                'ContentType': content_type,
+                'Metadata': file_metadata,
+            }
+            if acl:
+                extra_args['ACL'] = acl
+            
             from io import BytesIO
             self.s3_client.upload_fileobj(
                 BytesIO(file_content),
                 self.bucket_name,
                 object_name,
-                ExtraArgs={
-                    'ContentType': content_type,
-                    'Metadata': file_metadata,
-                    'ACL': acl
-                }
+                ExtraArgs=extra_args
             )
             
             logger.info(f"✅ 上传成功: {object_name}")
