@@ -35,7 +35,7 @@ profiles:
       - provider: "claude"
         model: "claude-sonnet-4-5"
         api_key_env: "CLAUDE_API_KEY_VENDOR_B"
-        base_url: "https://api.anthropic.com"
+        base_url: "https://maas-openapi.wanjiedata.com"
     
     # 路由策略
     policy:

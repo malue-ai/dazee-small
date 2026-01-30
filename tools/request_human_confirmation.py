@@ -19,7 +19,20 @@ HITL 工具 (Human-in-the-Loop)
 questions 中的问题类型：
 - single_choice: 单选（包括 yes/no，options 文本可自定义）
 - multiple_choice: 多选
-- text_input: 文本输入
+# - text_input: 文本输入（暂未支持）
+
+SSE 输出的 content 结构：
+{
+  "type": "form",           # 🆕 HITL 类型（目前只有 form）
+  "status": "pending",      # pending（等待响应）或无此字段（已响应）
+  "title": "...",
+  "description": "...",
+  "questions": [...],
+  "timeout": 120,           # 仅 pending 状态有
+  "success": true/false,    # 仅响应后有
+  "timed_out": true/false,  # 仅响应后有
+  "response": {...}         # 仅响应后有
+}
 
 调用示例：
 hitl(
@@ -42,9 +55,9 @@ hitl(
     {"id": "style", "label": "选择风格", "type": "single_choice", 
      "options": ["商务专业", "科技未来感", "简约清新"], "default": "商务专业"},
     {"id": "focus", "label": "内容重点", "type": "multiple_choice", 
-     "options": ["政策法规", "产业动态", "技术突破"]},
-    {"id": "notes", "label": "补充说明", "type": "text_input", 
-     "hint": "可选", "required": false}
+     "options": ["政策法规", "产业动态", "技术突破"]}
+    # {"id": "notes", "label": "补充说明", "type": "text_input", 
+    #  "hint": "可选", "required": false}  # 暂未支持
   ]
 )
 
@@ -85,11 +98,11 @@ class QuestionType:
     
     - SINGLE_CHOICE: 单选题（包含 yes/no 确认场景）
     - MULTIPLE_CHOICE: 多选题
-    - TEXT_INPUT: 文本输入
+    # - TEXT_INPUT: 文本输入（暂未支持）
     """
     SINGLE_CHOICE = "single_choice"
     MULTIPLE_CHOICE = "multiple_choice"
-    TEXT_INPUT = "text_input"
+    # TEXT_INPUT = "text_input"  # 暂未支持
 
 
 # ==================== 工具类 ====================
@@ -101,7 +114,7 @@ class HITLTool(BaseTool):
     统一表单模式，通过 questions 数组支持：
     - single_choice: 单选（包括 yes/no，options 文本可自定义）
     - multiple_choice: 多选
-    - text_input: 文本输入
+    # - text_input: 文本输入（暂未支持）
     """
     
     name = "hitl"
@@ -121,11 +134,10 @@ class HITLTool(BaseTool):
                 - questions: 问题数组（必需），每个问题包含：
                     - id: 问题唯一标识
                     - label: 问题标签
-                    - type: single_choice / multiple_choice / text_input
+                    - type: single_choice / multiple_choice
                     - options: 选项列表（单选/多选时必需）
                     - default: 默认值
                     - required: 是否必填
-                    - hint: 输入提示
                 - timeout: 超时时间（秒），默认 120
             context: 工具执行上下文
             

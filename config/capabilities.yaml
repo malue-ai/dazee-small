@@ -1073,6 +1073,12 @@ capabilities:
   input_schema:
     type: object
     properties:
+      type:
+        type: string
+        enum:
+        - form
+        description: HITL 交互类型（目前仅支持 form）
+        default: form
       title:
         type: string
         description: 表单标题，简要说明本次交互的目的
@@ -1082,10 +1088,9 @@ capabilities:
       questions:
         type: array
         description: |
-          问题数组。支持三种问题类型：
+          问题数组。支持两种问题类型：
           - single_choice: 单选（包括 yes/no 确认，options 文本可自定义）
           - multiple_choice: 多选
-          - text_input: 文本输入
         items:
           type: object
           properties:
@@ -1100,7 +1105,7 @@ capabilities:
               enum:
               - single_choice
               - multiple_choice
-              - text_input
+              # - text_input  # 暂未支持
               description: 问题类型
             options:
               type: array
@@ -1114,9 +1119,9 @@ capabilities:
               type: boolean
               description: 是否必填
               default: true
-            hint:
-              type: string
-              description: 输入提示/占位符
+            # hint:  # 暂未支持
+            #   type: string
+            #   description: 输入提示/占位符（text_input 用）
           required:
           - id
           - label

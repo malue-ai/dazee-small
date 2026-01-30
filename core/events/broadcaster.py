@@ -373,6 +373,44 @@ class EventBroadcaster:
         self._tool_id_to_name.pop(tool_use_id, None)
         self._tool_id_to_input.pop(tool_use_id, None)
     
+    async def _emit_hitl_request_event(
+        self,
+        session_id: str,
+        tool_input: Dict[str, Any]
+    ) -> None:
+        """
+        发送 HITL 表单请求事件
+        
+        在 tool_use (hitl) 完成时调用，通知前端渲染表单界面。
+        前端收到此事件后会显示表单，用户提交后通过 HTTP POST 响应。
+        
+        Args:
+            session_id: Session ID
+            tool_input: hitl 工具的输入参数（包含表单定义）
+        """
+        # 构建 HITL 表单请求数据
+        hitl_request_data = {
+            "type": "form",  # 🆕 类型标识（前端用于区分不同的 HITL 交互类型）
+            "status": "pending",  # 标记为等待用户响应
+            "title": tool_input.get("title", ""),
+            "description": tool_input.get("description", ""),
+            "questions": tool_input.get("questions", []),
+            "timeout": tool_input.get("timeout", 120),
+        }
+        
+        # 发送 hitl 类型的 delta 事件
+        msg_id = self._session_message_ids.get(session_id)
+        await self.emit_message_delta(
+            session_id=session_id,
+            delta={
+                "type": "hitl",
+                "content": hitl_request_data
+            },
+            message_id=msg_id
+        )
+        
+        logger.info(f"🎯 [HITL] 已发送表单请求事件: title={tool_input.get('title', '')[:30]}..., questions={len(tool_input.get('questions', []))}")
+    
     async def emit_content_delta(
         self,
         session_id: str,
@@ -448,10 +486,17 @@ class EventBroadcaster:
             # content_stop 时 input 已完整，需要更新缓存供 tool_result 时使用
             if block_ctx and block_ctx.tool_use:
                 tool_id = block_ctx.tool_use.get("id", "")
+                tool_name = block_ctx.tool_use.get("name", "")
                 tool_input = block_ctx.tool_use.get("input", {})
                 if tool_id and tool_input:
                     self._tool_id_to_input[tool_id] = tool_input
                     logger.debug(f"🔧 更新 tool_input 缓存: tool_id={tool_id}, keys={list(tool_input.keys())}")
+                
+                # 🆕 HITL 工具特殊处理：在 tool_use 完成时发送表单请求事件
+                # 前端需要在工具执行前就收到表单信息，以便渲染表单界面
+                if tool_name == "hitl" and tool_input:
+                    logger.info(f"🎯 [HITL] 检测到 hitl 工具调用完成，发送表单请求事件")
+                    await self._emit_hitl_request_event(session_id, tool_input)
         
         # 通过 EventManager 发送事件
         result = await self.events.content.emit_content_stop(

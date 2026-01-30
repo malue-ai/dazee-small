@@ -112,7 +112,7 @@ const mainNavItems: NavItem[] = [
   { path: '/knowledge', icon: BookOpen, label: '知识库' },
   { path: '/agents', icon: Bot, label: '智能体' },
   { path: '/skills', icon: Puzzle, label: '技能' },
-  { path: '/docs', icon: FileText, label: '文档' }
+  { path: '/documentation', icon: FileText, label: '文档' }
 ]
 
 // ==================== 计算属性 ====================

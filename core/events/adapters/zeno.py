@@ -1323,6 +1323,8 @@ class ZenOAdapter(EventAdapter):
         
         # 构建 hitl delta 数据
         hitl_data = {
+            # 🆕 类型标识（前端用于区分不同的 HITL 交互类型）
+            "type": "form",
             # 表单定义（来自工具输入）
             "title": tool_input.get("title", ""),
             "description": tool_input.get("description", ""),

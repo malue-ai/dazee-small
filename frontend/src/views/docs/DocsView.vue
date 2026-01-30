@@ -245,7 +245,7 @@ async function selectDoc(docPath: string) {
     
     // 更新 URL
     const encodedPath = encodeURIComponent(docPath)
-    router.replace({ path: `/docs/${encodedPath}` })
+    router.replace({ path: `/documentation/${encodedPath}` })
     
     // 确保分类展开
     const category = docPath.split('/')[0]

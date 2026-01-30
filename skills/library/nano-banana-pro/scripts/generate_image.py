@@ -7,13 +7,13 @@
 # ]
 # ///
 """
-Generate images using Google's Nano Banana Pro (Gemini 3 Pro Image) API.
+使用 Google Nano Banana Pro (Gemini 3 Pro Image) API 生成图像。
 
-Usage:
-    uv run generate_image.py --prompt "your image description" --filename "output.png" [--resolution 1K|2K|4K] [--api-key KEY]
+用法：
+    uv run generate_image.py --prompt "你的图像描述" --filename "output.png" [--resolution 1K|2K|4K] [--api-key KEY]
 
-Multi-image editing (up to 14 images):
-    uv run generate_image.py --prompt "combine these images" --filename "output.png" -i img1.png -i img2.png -i img3.png
+多图编辑（最多 14 张图像）：
+    uv run generate_image.py --prompt "合成这些图像" --filename "output.png" -i img1.png -i img2.png -i img3.png
 """
 
 import argparse
@@ -23,7 +23,7 @@ from pathlib import Path
 
 
 def get_api_key(provided_key: str | None) -> str | None:
-    """Get API key from argument first, then environment."""
+    """获取 API 密钥，优先使用参数传入的值，其次使用环境变量。"""
     if provided_key:
         return provided_key
     return os.environ.get("GEMINI_API_KEY")
@@ -31,65 +31,65 @@ def get_api_key(provided_key: str | None) -> str | None:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate images using Nano Banana Pro (Gemini 3 Pro Image)"
+        description="使用 Nano Banana Pro (Gemini 3 Pro Image) 生成图像"
     )
     parser.add_argument(
         "--prompt", "-p",
         required=True,
-        help="Image description/prompt"
+        help="图像描述/提示词"
     )
     parser.add_argument(
         "--filename", "-f",
         required=True,
-        help="Output filename (e.g., sunset-mountains.png)"
+        help="输出文件名（例如：sunset-mountains.png）"
     )
     parser.add_argument(
         "--input-image", "-i",
         action="append",
         dest="input_images",
         metavar="IMAGE",
-        help="Input image path(s) for editing/composition. Can be specified multiple times (up to 14 images)."
+        help="用于编辑/合成的输入图像路径，可多次指定（最多 14 张图像）"
     )
     parser.add_argument(
         "--resolution", "-r",
         choices=["1K", "2K", "4K"],
         default="1K",
-        help="Output resolution: 1K (default), 2K, or 4K"
+        help="输出分辨率：1K（默认）、2K 或 4K"
     )
     parser.add_argument(
         "--api-key", "-k",
-        help="Gemini API key (overrides GEMINI_API_KEY env var)"
+        help="Gemini API 密钥（覆盖 GEMINI_API_KEY 环境变量）"
     )
 
     args = parser.parse_args()
 
-    # Get API key
+    # 获取 API 密钥
     api_key = get_api_key(args.api_key)
     if not api_key:
-        print("Error: No API key provided.", file=sys.stderr)
-        print("Please either:", file=sys.stderr)
-        print("  1. Provide --api-key argument", file=sys.stderr)
-        print("  2. Set GEMINI_API_KEY environment variable", file=sys.stderr)
+        print("错误：未提供 API 密钥。", file=sys.stderr)
+        print("请选择以下方式之一：", file=sys.stderr)
+        print("  1. 使用 --api-key 参数提供密钥", file=sys.stderr)
+        print("  2. 设置 GEMINI_API_KEY 环境变量", file=sys.stderr)
         sys.exit(1)
 
-    # Import here after checking API key to avoid slow import on error
+    # 在检查 API 密钥后再导入，避免出错时的慢导入
     from google import genai
     from google.genai import types
     from PIL import Image as PILImage
 
-    # Initialise client
+    # 初始化客户端
     client = genai.Client(api_key=api_key)
 
-    # Set up output path
+    # 设置输出路径
     output_path = Path(args.filename)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Load input images if provided (up to 14 supported by Nano Banana Pro)
+    # 加载输入图像（如果提供，Nano Banana Pro 最多支持 14 张）
     input_images = []
     output_resolution = args.resolution
     if args.input_images:
         if len(args.input_images) > 14:
-            print(f"Error: Too many input images ({len(args.input_images)}). Maximum is 14.", file=sys.stderr)
+            print(f"错误：输入图像过多（{len(args.input_images)} 张），最多支持 14 张。", file=sys.stderr)
             sys.exit(1)
 
         max_input_dim = 0
@@ -97,33 +97,33 @@ def main():
             try:
                 img = PILImage.open(img_path)
                 input_images.append(img)
-                print(f"Loaded input image: {img_path}")
+                print(f"已加载输入图像：{img_path}")
 
-                # Track largest dimension for auto-resolution
+                # 记录最大尺寸用于自动分辨率检测
                 width, height = img.size
                 max_input_dim = max(max_input_dim, width, height)
             except Exception as e:
-                print(f"Error loading input image '{img_path}': {e}", file=sys.stderr)
+                print(f"加载输入图像 '{img_path}' 时出错：{e}", file=sys.stderr)
                 sys.exit(1)
 
-        # Auto-detect resolution from largest input if not explicitly set
-        if args.resolution == "1K" and max_input_dim > 0:  # Default value
+        # 如果未明确指定分辨率，则根据最大输入尺寸自动检测
+        if args.resolution == "1K" and max_input_dim > 0:  # 默认值
             if max_input_dim >= 3000:
                 output_resolution = "4K"
             elif max_input_dim >= 1500:
                 output_resolution = "2K"
             else:
                 output_resolution = "1K"
-            print(f"Auto-detected resolution: {output_resolution} (from max input dimension {max_input_dim})")
+            print(f"自动检测分辨率：{output_resolution}（根据最大输入尺寸 {max_input_dim}）")
 
-    # Build contents (images first if editing, prompt only if generating)
+    # 构建请求内容（编辑时图像在前，纯生成时只有提示词）
     if input_images:
         contents = [*input_images, args.prompt]
         img_count = len(input_images)
-        print(f"Processing {img_count} image{'s' if img_count > 1 else ''} with resolution {output_resolution}...")
+        print(f"正在处理 {img_count} 张图像，输出分辨率 {output_resolution}...")
     else:
         contents = args.prompt
-        print(f"Generating image with resolution {output_resolution}...")
+        print(f"正在生成图像，输出分辨率 {output_resolution}...")
 
     try:
         response = client.models.generate_content(
@@ -137,25 +137,25 @@ def main():
             )
         )
 
-        # Process response and convert to PNG
+        # 处理响应并转换为 PNG
         image_saved = False
         for part in response.parts:
             if part.text is not None:
-                print(f"Model response: {part.text}")
+                print(f"模型响应：{part.text}")
             elif part.inline_data is not None:
-                # Convert inline data to PIL Image and save as PNG
+                # 将内联数据转换为 PIL 图像并保存为 PNG
                 from io import BytesIO
 
-                # inline_data.data is already bytes, not base64
+                # inline_data.data 已经是字节数据，不是 base64
                 image_data = part.inline_data.data
                 if isinstance(image_data, str):
-                    # If it's a string, it might be base64
+                    # 如果是字符串，可能是 base64 编码
                     import base64
                     image_data = base64.b64decode(image_data)
 
                 image = PILImage.open(BytesIO(image_data))
 
-                # Ensure RGB mode for PNG (convert RGBA to RGB with white background if needed)
+                # 确保 PNG 使用 RGB 模式（如需要，将 RGBA 转换为带白色背景的 RGB）
                 if image.mode == 'RGBA':
                     rgb_image = PILImage.new('RGB', image.size, (255, 255, 255))
                     rgb_image.paste(image, mask=image.split()[3])
@@ -168,15 +168,15 @@ def main():
 
         if image_saved:
             full_path = output_path.resolve()
-            print(f"\nImage saved: {full_path}")
-            # Moltbot parses MEDIA tokens and will attach the file on supported providers.
+            print(f"\n图像已保存：{full_path}")
+            # Moltbot 解析 MEDIA 标记并在支持的平台上自动附加文件
             print(f"MEDIA: {full_path}")
         else:
-            print("Error: No image was generated in the response.", file=sys.stderr)
+            print("错误：响应中未生成图像。", file=sys.stderr)
             sys.exit(1)
 
     except Exception as e:
-        print(f"Error generating image: {e}", file=sys.stderr)
+        print(f"生成图像时出错：{e}", file=sys.stderr)
         sys.exit(1)
 
 
