@@ -94,7 +94,38 @@ CLAUDE_PRICING: Dict[str, Dict[str, float]] = {
     #           对应国际部署模式，而非中国内地价格
     # ============================================================
     
-    # Qwen Max（旗舰模型，对标 claude-sonnet-4-5）
+    # Qwen3 Max（旗舰模型，对标 claude-sonnet-4-5）
+    # 国际价格（阶梯计价，使用第一档 0<Token≤32K 作为默认值）：
+    # - 0<Token≤32K：输入 ¥8.807/MTok, 输出 ¥44.035/MTok
+    # - 32K<Token≤128K：输入 ¥17.614/MTok, 输出 ¥88.071/MTok
+    # - 128K<Token≤252K：输入 ¥22.018/MTok, 输出 ¥110.089/MTok
+    # ⚠️ 注意：实际计费按阶梯计价，这里使用第一档作为默认值
+    "qwen3-max": {
+        "input": 1.223,    # ¥8.807 ÷ 7.2 ≈ $1.223/百万tokens（第一档）
+        "output": 6.116,   # ¥44.035 ÷ 7.2 ≈ $6.116/百万tokens（第一档）
+        "cache_write": 0.0,  # 千问支持上下文缓存，但暂不在此计费
+        "cache_read": 0.0
+    },
+    "qwen3-max-2025-09-23": {
+        "input": 1.223,    # 与 qwen3-max 稳定版相同
+        "output": 6.116,
+        "cache_write": 0.0,
+        "cache_read": 0.0
+    },
+    "qwen3-max-2026-01-23": {
+        "input": 1.223,    # 与 qwen3-max 稳定版相同
+        "output": 6.116,
+        "cache_write": 0.0,
+        "cache_read": 0.0
+    },
+    "qwen3-max-preview": {
+        "input": 1.223,    # 与 qwen3-max 稳定版相同
+        "output": 6.116,
+        "cache_write": 0.0,
+        "cache_read": 0.0
+    },
+    
+    # Qwen Max（旧版旗舰模型，对标 claude-sonnet-4-5）
     # 国际价格：输入 ¥11.743/MTok, 输出 ¥46.971/MTok
     "qwen-max": {
         "input": 1.63,     # ¥11.743 ÷ 7.2 ≈ $1.63/百万tokens

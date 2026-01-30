@@ -39,7 +39,7 @@ profiles:
         
        # Fallback 2: 跨厂商（千问兜底）
       - provider: "qwen"
-        model: "qwen-max"
+        model: "qwen3-max"
         api_key_env: "DASHSCOPE_API_KEY"
         base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
     # 路由策略
@@ -147,7 +147,7 @@ profiles:
       
       # Fallback 2: 跨厂商（千问兜底）
       - provider: "qwen"
-        model: "qwen-max"
+        model: "qwen3-max"
         api_key_env: "DASHSCOPE_API_KEY"
         base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
     
@@ -182,7 +182,7 @@ profiles:
       
       # Fallback 2: 跨厂商（千问兜底）
       - provider: "qwen"
-        model: "qwen-max"
+        model: "qwen3-max"
         api_key_env: "DASHSCOPE_API_KEY"
         base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
     
@@ -217,7 +217,7 @@ profiles:
       
       # Fallback 2: 跨厂商（千问兜底）
       - provider: "qwen"
-        model: "qwen-max"
+        model: "qwen3-max"
         api_key_env: "DASHSCOPE_API_KEY"
         base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
     
@@ -349,7 +349,7 @@ profiles:
     model: "claude-sonnet-4-5"
     api_key_env: "ANTHROPIC_API_KEY"
     base_url: "https://api.anthropic.com"
-    max_tokens: 8192
+    max_tokens: 65536
     temperature: 1.0
     enable_thinking: true
     thinking_budget: 5000
@@ -373,7 +373,7 @@ profiles:
       
       # Fallback 2: 跨厂商（千问兜底）
       - provider: "qwen"
-        model: "qwen-max"
+        model: "qwen3-max"
         api_key_env: "DASHSCOPE_API_KEY"
         base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
     
@@ -477,15 +477,14 @@ health_probe:
 qwen_max:
   description: "千问旗舰模型，对标 claude-sonnet-4-5"
   provider: "qwen"
-  model: "qwen-max"
+  model: "qwen3-max"
   api_key_env: "DASHSCOPE_API_KEY"
   region: "cn-beijing"  # cn-beijing, singapore, us-virginia, finance
   # base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"  # 自定义端点（可选，优先级高于 region）
-  max_tokens: 8192
+  max_tokens: 65536
   temperature: 0.7
   enable_thinking: true     # 深度思考模式
   thinking_budget: 5000     # 思考长度限制
-  enable_search: false      # 联网搜索
   enable_caching: false     # 千问暂不支持自动缓存
   timeout: 120.0
   max_retries: 3
@@ -494,7 +493,7 @@ qwen_max:
   fallbacks:
     # Fallback 0: 同模型，不同地域
     - provider: "qwen"
-      model: "qwen-max"
+      model: "qwen3-max"
       api_key_env: "DASHSCOPE_API_KEY"
       region: "singapore"
     
@@ -517,7 +516,6 @@ qwen_plus:
   temperature: 0.5
   enable_thinking: true
   thinking_budget: 3000
-  enable_search: false
   enable_caching: false
   timeout: 60.0
   max_retries: 3
@@ -539,34 +537,6 @@ qwen_plus:
     max_failures: 2
     cooldown_seconds: 600
 
-# ==================== 千问联网搜索配置示例 ====================
-
-qwen_search:
-  description: "千问联网搜索模式（适用于需要实时信息的场景）"
-  provider: "qwen"
-  model: "qwen-max"
-  api_key_env: "DASHSCOPE_API_KEY"
-  region: "cn-beijing"
-  max_tokens: 8192
-  temperature: 0.7
-  enable_thinking: false
-  enable_search: true           # 🔍 开启联网搜索
-  search_strategy: "turbo"      # turbo/max/agent/agent_max
-  forced_search: false          # 强制搜索
-  enable_search_extension: false # 垂域搜索
-  enable_caching: false
-  timeout: 120.0
-  max_retries: 3
-  
-  fallbacks:
-    - provider: "claude"
-      model: "claude-sonnet-4-5"
-      api_key_env: "ANTHROPIC_API_KEY"
-  
-  policy:
-    max_failures: 2
-    cooldown_seconds: 600
-
 # ==================== 千问视觉模型配置示例 ====================
 
 qwen_vision:
@@ -575,10 +545,9 @@ qwen_vision:
   model: "qwen-vl-max"
   api_key_env: "DASHSCOPE_API_KEY"
   region: "cn-beijing"
-  max_tokens: 8192
+  max_tokens: 65536
   temperature: 0.7
   enable_thinking: false
-  enable_search: false
   vl_high_resolution_images: true  # 高分辨率图像
   enable_caching: false
   timeout: 120.0

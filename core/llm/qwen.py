@@ -7,13 +7,12 @@
 - 基础对话（流式/非流式）
 - Function Calling（工具调用）
 - 深度思考模式（enable_thinking）
-- 联网搜索（enable_search）
 - 多模态输入（图像、视频、音频）
 - 显式缓存（cache_control）
 - 结构化输出（response_format）
 
 模型对应关系：
-- qwen-max ↔ claude-sonnet-4-5（旗舰模型）
+- qwen3-max ↔ claude-sonnet-4-5（旗舰模型）
 - qwen-plus ↔ claude-haiku-4-5（快速模型）
 
 参考文档：
@@ -52,7 +51,13 @@ LLM_DEBUG_VERBOSE = os.getenv("LLM_DEBUG_VERBOSE", "").lower() in ("1", "true", 
 # ============================================================
 
 # 千问 API 限制
-QWEN_MAX_TOKENS = 8192  # 千问模型的 max_tokens 上限
+# 参考官方文档（qwen官方定价.md）中 qwen3-max 在全球/国际部署模式下的配置：
+# - 上下文长度：262,144
+# - 最大输入：258,048
+# - 最大输出：65,536
+# 这里取「最大输出 65,536」作为通用的 max_tokens 上限，用于对调用参数进行硬性裁剪，
+# 以确保在将 qwen-max 升级为 qwen3-max 后也不会因为 max_tokens 超出官方限制而报错。
+QWEN_MAX_TOKENS = 65536  # 千问模型（按 qwen3-max）单次响应的 max_tokens 上限
 
 @dataclass
 class QwenConfig(LLMConfig):
@@ -68,13 +73,6 @@ class QwenConfig(LLMConfig):
     # 千问特有功能
     enable_thinking: bool = False      # 深度思考模式
     thinking_budget: Optional[int] = None  # 思考长度限制
-    
-    enable_search: bool = False        # 联网搜索
-    search_strategy: str = "turbo"     # 搜索策略（turbo/max/agent/agent_max）
-    forced_search: bool = False        # 强制搜索
-    enable_search_extension: bool = False  # 垂域搜索
-    
-    enable_code_interpreter: bool = False  # 代码解释器
     
     # 视觉模型参数
     vl_high_resolution_images: bool = False
@@ -175,14 +173,13 @@ class QwenLLMService(BaseLLMService):
     基于 OpenAI 兼容接口，保持与 Claude 服务相同的接口规范。
     
     模型对应关系：
-    - qwen-max: 对标 claude-sonnet-4-5（旗舰模型，适用于复杂推理）
+    - qwen3-max: 对标 claude-sonnet-4-5（旗舰模型，适用于复杂推理）
     - qwen-plus: 对标 claude-haiku-4-5（快速模型，适用于简单任务）
     
     支持的功能：
     - 基础对话（流式/非流式）
     - Function Calling（工具调用）
     - 深度思考模式（enable_thinking）
-    - 联网搜索（enable_search）
     - 多模态输入（图像、视频、音频）
     - 显式缓存（cache_control）
     - 结构化输出（response_format）
@@ -190,10 +187,9 @@ class QwenLLMService(BaseLLMService):
     使用示例：
     ```python
     config = QwenConfig(
-        model="qwen-max",  # 或 qwen-plus
+        model="qwen3-max",  # 或 qwen-plus
         api_key=os.getenv("DASHSCOPE_API_KEY"),
-        enable_thinking=True,
-        enable_search=False
+        enable_thinking=True
     )
     llm = QwenLLMService(config)
     
@@ -624,12 +620,9 @@ class QwenLLMService(BaseLLMService):
         # 千问特有参数（通过 extra_body 传递）
         # ⚠️ 注意：以下参数为 Qwen 非标准参数，需要放在 extra_body 中：
         # - enable_thinking: 思考模式
-        # - enable_search: 联网搜索
         # - top_k: 采样参数
         # - vl_high_resolution_images: 高分辨率图像处理
-        # - search_options: 联网搜索策略
         # - thinking_budget: 思考过程的最大 Token 数
-        # - enable_code_interpreter: 代码解释器功能
         extra_body = self._build_extra_body(override_thinking, kwargs)
         if extra_body:
             request_params["extra_body"] = extra_body
@@ -924,31 +917,6 @@ class QwenLLMService(BaseLLMService):
             thinking_budget = getattr(self.config, 'thinking_budget', None)
             if thinking_budget:
                 extra["thinking_budget"] = thinking_budget
-        
-        # 联网搜索
-        enable_search = getattr(self.config, 'enable_search', False) or kwargs.get("enable_search", False)
-        if enable_search:
-            extra["enable_search"] = True
-            search_options = {}
-            
-            search_strategy = getattr(self.config, 'search_strategy', 'turbo')
-            if search_strategy:
-                search_options["search_strategy"] = search_strategy
-            
-            forced_search = getattr(self.config, 'forced_search', False)
-            if forced_search:
-                search_options["forced_search"] = True
-            
-            enable_search_extension = getattr(self.config, 'enable_search_extension', False)
-            if enable_search_extension:
-                search_options["enable_search_extension"] = True
-            
-            if search_options:
-                extra["search_options"] = search_options
-        
-        # 代码解释器
-        if getattr(self.config, 'enable_code_interpreter', False):
-            extra["enable_code_interpreter"] = True
         
         # 视觉模型参数
         if QwenModelCapability.supports_vision(self.config.model):
@@ -1279,33 +1247,31 @@ class QwenLLMService(BaseLLMService):
 # ============================================================
 
 def create_qwen_service(
-    model: str = "qwen-max",
+    model: str = "qwen3-max",
     api_key: Optional[str] = None,
     region: str = "cn-beijing",
     base_url: Optional[str] = None,
     enable_thinking: bool = False,
-    enable_search: bool = False,
     **kwargs
 ) -> QwenLLMService:
     """
     创建千问服务的便捷函数
     
     Args:
-        model: 模型名称（qwen-max 或 qwen-plus）
+        model: 模型名称（qwen3-max 或 qwen-plus）
         api_key: API 密钥（默认从环境变量读取）
         region: 地域（cn-beijing, singapore, us-virginia, finance）
         base_url: 自定义 API 端点（优先级高于 region）
         enable_thinking: 启用深度思考
-        enable_search: 启用联网搜索
         **kwargs: 其他配置参数
         
     Returns:
         QwenLLMService 实例
         
     示例：
-        # qwen-max: 对标 claude-sonnet-4-5（旗舰模型）
+        # qwen3-max: 对标 claude-sonnet-4-5（旗舰模型）
         llm = create_qwen_service(
-            model="qwen-max",
+            model="qwen3-max",
             enable_thinking=True
         )
         
@@ -1317,7 +1283,7 @@ def create_qwen_service(
         
         # 自定义端点（使用代理）
         llm = create_qwen_service(
-            model="qwen-max",
+            model="qwen3-max",
             base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
         )
     """
@@ -1331,7 +1297,6 @@ def create_qwen_service(
         region=region,
         base_url=base_url,
         enable_thinking=enable_thinking,
-        enable_search=enable_search,
         **kwargs
     )
     

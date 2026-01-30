@@ -195,7 +195,7 @@ def create_llm_service(
         LLMProvider.CLAUDE: "claude-sonnet-4-5-20250929",
         LLMProvider.OPENAI: "gpt-4o",
         LLMProvider.GEMINI: "gemini-pro",
-        LLMProvider.QWEN: "qwen-max",  # 🆕 对标 claude-sonnet-4-5
+        LLMProvider.QWEN: "qwen3-max",  # 🆕 对标 claude-sonnet-4-5
     }
     
     if model is None:

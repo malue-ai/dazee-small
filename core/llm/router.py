@@ -209,7 +209,7 @@ class ModelRouter(BaseLLMService):
         获取当前实际使用的模型名称
         
         Returns:
-            模型名称（如 "qwen-max"）
+            模型名称（如 "qwen3-max"）
         """
         for target in self.targets:
             if target.name == self._last_selected:
