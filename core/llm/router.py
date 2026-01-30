@@ -157,9 +157,17 @@ class ModelRouter(BaseLLMService):
         
         # 探测请求的失败不记录 WARNING（已在 probe 方法中记录 INFO）
         if not is_probe:
+            # 🔍 DEBUG: 打印 API Key 信息（脱敏）
+            api_key = getattr(target.service, 'config', None)
+            api_key = getattr(api_key, 'api_key', None) if api_key else None
+            if api_key:
+                masked_key = f"{api_key[:8]}...{api_key[-4:]}" if len(api_key) > 12 else "***"
+            else:
+                masked_key = "未配置"
+            
             logger.warning(
                 f"⚠️ 模型调用失败: target={target.name}, "
-                f"failures={current_failures}, error={error}"
+                f"failures={current_failures}, api_key={masked_key}, error={error}"
             )
         
         # 🆕 检测是否刚达到熔断阈值

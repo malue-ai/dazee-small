@@ -55,12 +55,20 @@ def get_database_url() -> str:
 DATABASE_URL = get_database_url()
 
 # 创建异步引擎（PostgreSQL）
+# 连接池配置说明：
+# - pool_size: 常驻连接数
+# - max_overflow: 允许额外创建的连接数（高峰期使用）
+# - pool_pre_ping: 使用前检测连接是否存活
+# - pool_recycle: 强制回收连接时间（秒），防止被服务器端静默关闭
+# - pool_timeout: 获取连接超时时间（秒）
 engine = create_async_engine(
     DATABASE_URL,
     echo=os.getenv("DB_ECHO", "false").lower() == "true",
-    pool_size=5,
-    max_overflow=10,
+    pool_size=int(os.getenv("DB_POOL_SIZE", "5")),
+    max_overflow=int(os.getenv("DB_MAX_OVERFLOW", "10")),
     pool_pre_ping=True,  # 自动检测断开的连接
+    pool_recycle=int(os.getenv("DB_POOL_RECYCLE", "1800")),  # 30 分钟回收，防止服务器端关闭
+    pool_timeout=int(os.getenv("DB_POOL_TIMEOUT", "30")),  # 获取连接超时
 )
 
 # 异步会话工厂

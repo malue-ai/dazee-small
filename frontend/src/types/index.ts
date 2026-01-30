@@ -93,12 +93,18 @@ export { WORKSPACE_API_PATHS } from './workspace'
 // 从 skills.ts 导出 Skill 相关类型
 export type {
   SkillPriority,
+  SkillStatus,
   Skill,
+  SkillSummary,
   SkillListResponse,
   SkillCreateRequest,
   SkillUpdateRequest,
+  SkillUpdateContentRequest,
   SkillScript,
-  SkillResource
+  SkillResource,
+  SkillInstallRequest,
+  SkillUninstallRequest,
+  SkillToggleRequest
 } from './skills'
 
 // ==================== 兼容性类型别名 ====================

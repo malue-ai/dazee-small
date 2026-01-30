@@ -62,7 +62,7 @@
           <span class="text-sm font-medium">技能</span>
         </button>
         <button 
-          @click="emit('navigate', '/docs')" 
+          @click="emit('navigate', '/documentation')" 
           class="w-full flex items-center gap-3 px-3 py-2 text-gray-600 hover:bg-gray-200 hover:text-gray-900 rounded-lg transition-colors group"
         >
           <FileText class="w-4 h-4 text-gray-500 group-hover:text-gray-800" />

@@ -1,37 +1,45 @@
 <template>
-  <div class="h-full flex overflow-hidden bg-white">
-    <!-- 左侧文档目录 -->
-    <div class="w-[280px] flex-shrink-0 border-r border-gray-100 bg-gray-50 overflow-y-auto">
-      <!-- 头部 -->
-      <div class="p-4 border-b border-gray-100">
-        <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
-          <FileText class="w-6 h-6 text-blue-500" />
+  <div class="h-full flex flex-col overflow-hidden bg-white">
+    <!-- 顶部工具栏 (统一布局) -->
+    <div class="h-16 flex items-center justify-between px-6 border-b border-gray-100 bg-white sticky top-0 z-10 flex-shrink-0">
+      <div class="flex items-center gap-4">
+        <h1 class="text-lg font-bold flex items-center gap-2 text-gray-800">
+          <BookOpen class="w-6 h-6 text-blue-500" />
           项目文档
-        </h2>
-        <p class="text-xs text-gray-500 mt-1">共 {{ structure?.total_files || 0 }} 篇文档</p>
-      </div>
-
-      <!-- 搜索框 -->
-      <div class="p-3 border-b border-gray-100">
-        <div class="relative">
-          <Search class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input
-            v-model="searchQuery"
-            type="text"
-            placeholder="搜索文档..."
-            class="w-full pl-9 pr-3 py-2 text-sm bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-          />
+        </h1>
+        <div class="text-sm text-gray-500 bg-gray-50 px-2.5 py-1 rounded-md border border-gray-100">
+          共 {{ structure?.total_files || 0 }} 篇
         </div>
       </div>
+      <!-- 搜索框 (移到顶部，可选，或者保留在左侧) -->
+      <!-- 这里我们暂时保留左侧搜索，顶部只放操作 -->
+    </div>
 
-      <!-- 加载中 -->
-      <div v-if="loading" class="p-4 text-center text-gray-500 text-sm">
-        <Loader2 class="w-5 h-5 animate-spin mx-auto mb-2" />
-        加载文档目录...
-      </div>
+    <!-- 主体区域 -->
+    <div class="flex-1 flex overflow-hidden">
+      <!-- 左侧文档目录 -->
+      <div class="w-72 flex-shrink-0 border-r border-gray-100 bg-gray-50 overflow-y-auto flex flex-col">
+        <!-- 搜索框 -->
+        <div class="p-4 border-b border-gray-100 sticky top-0 bg-gray-50 z-10">
+          <div class="relative">
+            <Search class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              v-model="searchQuery"
+              type="text"
+              placeholder="搜索文档..."
+              class="w-full pl-9 pr-3 py-2 text-sm bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+            />
+          </div>
+        </div>
 
-      <!-- 文档列表 -->
-      <div v-else class="p-3">
+        <!-- 加载中 -->
+        <div v-if="loading" class="p-4 text-center text-gray-500 text-sm">
+          <Loader2 class="w-5 h-5 animate-spin mx-auto mb-2" />
+          加载目录...
+        </div>
+
+        <!-- 文档列表 -->
+        <div v-else class="p-3">
         <div
           v-for="category in filteredCategories"
           :key="category.id"
@@ -80,7 +88,7 @@
     <!-- 中间内容区 -->
     <div class="flex-1 flex flex-col overflow-hidden bg-white">
       <!-- 内容头部 -->
-      <div class="h-16 flex items-center justify-between px-8 border-b border-gray-100 bg-white sticky top-0 z-10">
+      <div class="h-14 flex items-center justify-between px-6 border-b border-gray-100 bg-white sticky top-0 z-10">
         <div v-if="currentDoc">
           <h1 class="text-lg font-bold text-gray-800">{{ currentDoc.title }}</h1>
           <p class="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
@@ -127,12 +135,13 @@
         </div>
 
         <!-- 文档内容 -->
-        <div v-else-if="currentDoc" class="max-w-4xl mx-auto p-8 pb-24">
-          <div class="bg-white rounded-2xl border border-gray-200 p-8 shadow-sm">
+        <div v-else-if="currentDoc" class="max-w-7xl mx-auto p-6 pb-12">
+          <div class="bg-white rounded-2xl border border-gray-200 p-6 md:p-8 shadow-sm">
             <MarkdownRenderer :content="currentDoc.content" />
           </div>
         </div>
       </div>
+    </div>
     </div>
   </div>
 </template>
@@ -236,7 +245,7 @@ async function selectDoc(docPath: string) {
     
     // 更新 URL
     const encodedPath = encodeURIComponent(docPath)
-    router.replace({ path: `/docs/${encodedPath}` })
+    router.replace({ path: `/documentation/${encodedPath}` })
     
     // 确保分类展开
     const category = docPath.split('/')[0]

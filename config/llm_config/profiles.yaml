@@ -35,14 +35,13 @@ profiles:
       - provider: "claude"
         model: "claude-sonnet-4-5"
         api_key_env: "CLAUDE_API_KEY_VENDOR_B"
-        base_url: "https://api.anthropic.com"
-      
-      # Fallback 2: 跨厂商（千问兜底）
+        base_url: "https://maas-openapi.wanjiedata.com"
+        
+       # Fallback 2: 跨厂商（千问兜底）
       - provider: "qwen"
         model: "qwen-max"
         api_key_env: "DASHSCOPE_API_KEY"
         base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-    
     # 路由策略
     policy:
       max_failures: 2          # 失败 2 次后进入熔断

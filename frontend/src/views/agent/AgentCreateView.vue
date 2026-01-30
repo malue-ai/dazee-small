@@ -134,9 +134,9 @@
 
           <div class="flex flex-col gap-3">
             <h3 class="text-sm font-medium text-gray-700">基础能力</h3>
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <label class="flex items-center gap-3 p-4 bg-white border border-gray-200 rounded-xl cursor-pointer hover:border-gray-300 hover:shadow-sm transition-all group">
-                <input type="checkbox" v-model="form.enabled_capabilities.web_search" class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                <input type="checkbox" v-model="form.enabled_capabilities.tavily_search" class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
                 <span class="text-sm font-medium text-gray-600 group-hover:text-gray-900 flex items-center gap-2">
                   <Globe class="w-4 h-4" /> 网络搜索
                 </span>
@@ -151,6 +151,12 @@
                 <input type="checkbox" v-model="form.enabled_capabilities.code_execution" class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
                 <span class="text-sm font-medium text-gray-600 group-hover:text-gray-900 flex items-center gap-2">
                   <Code2 class="w-4 h-4" /> 代码执行
+                </span>
+              </label>
+              <label class="flex items-center gap-3 p-4 bg-white border border-gray-200 rounded-xl cursor-pointer hover:border-gray-300 hover:shadow-sm transition-all group">
+                <input type="checkbox" v-model="form.enabled_capabilities.sandbox_tools" class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                <span class="text-sm font-medium text-gray-600 group-hover:text-gray-900 flex items-center gap-2">
+                  <Code2 class="w-4 h-4" /> 沙盒工具
                 </span>
               </label>
             </div>
@@ -273,9 +279,10 @@ const form = reactive({
   max_turns: 20,
   plan_manager_enabled: false,
   enabled_capabilities: {
-    web_search: false,
+    tavily_search: false,
     knowledge_search: true,
-    code_execution: false
+    code_execution: false,
+    sandbox_tools: false
   }
 })
 

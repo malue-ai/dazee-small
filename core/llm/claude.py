@@ -1588,6 +1588,14 @@ class ClaudeLLMService(BaseLLMService):
     # Skills API
     # ============================================================
     
+    # Anthropic 预置 Skills 列表
+    PREBUILT_SKILLS = {
+        "pptx": {"type": "anthropic", "skill_id": "pptx", "version": "latest"},
+        "xlsx": {"type": "anthropic", "skill_id": "xlsx", "version": "latest"},
+        "docx": {"type": "anthropic", "skill_id": "docx", "version": "latest"},
+        "pdf": {"type": "anthropic", "skill_id": "pdf", "version": "latest"},
+    }
+    
     def enable_skills(self, skills: List[Dict[str, Any]]) -> None:
         """
         启用 Skills 功能
@@ -1612,7 +1620,32 @@ class ClaudeLLMService(BaseLLMService):
         self._add_beta("skills-2025-10-02")
         self._add_beta("files-api-2025-04-14")
         
-        logger.info(f"✅ Skills 已启用: {len(skills)} 个技能")
+        # 日志：区分 custom 和 anthropic skills
+        custom_count = sum(1 for s in skills if s.get("type") == "custom")
+        prebuilt_count = sum(1 for s in skills if s.get("type") == "anthropic")
+        logger.info(f"✅ Skills 已启用: {len(skills)} 个技能 (custom: {custom_count}, prebuilt: {prebuilt_count})")
+    
+    def enable_prebuilt_skills(self, skill_names: List[str]) -> None:
+        """
+        启用 Anthropic 预置 Skills（便捷方法）
+        
+        Args:
+            skill_names: 预置 skill 名称列表，可选: "pptx", "xlsx", "docx", "pdf"
+            
+        示例：
+            llm.enable_prebuilt_skills(["pptx", "xlsx"])
+        """
+        skills = []
+        for name in skill_names:
+            if name in self.PREBUILT_SKILLS:
+                skills.append(self.PREBUILT_SKILLS[name].copy())
+            else:
+                logger.warning(f"⚠️ 未知的预置 Skill: {name}，可用选项: {list(self.PREBUILT_SKILLS.keys())}")
+        
+        if skills:
+            self.enable_skills(skills)
+        else:
+            logger.warning("⚠️ 没有有效的预置 Skills 可启用")
     
     def disable_skills(self) -> None:
         """禁用 Skills 功能"""
@@ -1646,9 +1679,11 @@ class ClaudeLLMService(BaseLLMService):
         try:
             from anthropic.lib import files_from_dir
             
+            # 🆕 添加必要的 betas 参数（官方 API 要求）
             skill = self.sync_client.beta.skills.create(
                 display_title=display_title,
-                files=files_from_dir(skill_path)
+                files=files_from_dir(skill_path),
+                betas=["skills-2025-10-02"]
             )
             
             logger.info(f"✅ Skill 创建成功: {skill.id}")
@@ -1673,7 +1708,10 @@ class ClaudeLLMService(BaseLLMService):
             SkillInfo 列表
         """
         try:
-            skills = self.sync_client.beta.skills.list()
+            # 🆕 添加必要的 betas 参数
+            skills = self.sync_client.beta.skills.list(
+                betas=["skills-2025-10-02"]
+            )
             return [
                 SkillInfo(
                     id=s.id,
@@ -1699,7 +1737,11 @@ class ClaudeLLMService(BaseLLMService):
             SkillInfo 或 None
         """
         try:
-            skill = self.sync_client.beta.skills.retrieve(skill_id)
+            # 🆕 添加必要的 betas 参数
+            skill = self.sync_client.beta.skills.retrieve(
+                skill_id,
+                betas=["skills-2025-10-02"]
+            )
             return SkillInfo(
                 id=skill.id,
                 display_title=skill.display_title,
@@ -1723,15 +1765,22 @@ class ClaudeLLMService(BaseLLMService):
         """
         try:
             # 先删除所有版本
-            versions = self.sync_client.beta.skills.versions.list(skill_id=skill_id)
+            versions = self.sync_client.beta.skills.versions.list(
+                skill_id=skill_id,
+                betas=["skills-2025-10-02"]
+            )
             for version in versions.data:
                 self.sync_client.beta.skills.versions.delete(
                     skill_id=skill_id,
-                    version=version.version
+                    version=version.version,
+                    betas=["skills-2025-10-02"]
                 )
             
             # 再删除 Skill
-            self.sync_client.beta.skills.delete(skill_id)
+            self.sync_client.beta.skills.delete(
+                skill_id,
+                betas=["skills-2025-10-02"]
+            )
             logger.info(f"✅ Skill 已删除: {skill_id}")
             return True
             

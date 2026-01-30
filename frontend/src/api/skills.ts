@@ -8,11 +8,169 @@ import type {
   Skill,
   SkillListResponse,
   SkillCreateRequest,
-  SkillUpdateRequest
+  SkillUpdateRequest,
+  SkillSummary,
+  SkillInstallRequest,
+  SkillUninstallRequest,
+  SkillToggleRequest,
+  SkillUpdateContentRequest
 } from '@/types'
 
+// ==================== 新版 API（全局/实例分离）====================
+
 /**
- * 获取所有 Skills
+ * 获取全局 Skills 列表
+ */
+export async function getGlobalSkills(): Promise<SkillSummary[]> {
+  try {
+    const response = await api.get<{ total: number; skills: SkillSummary[] }>('/v1/skills/global')
+    return response.data.skills || []
+  } catch (error) {
+    console.warn('全局 Skills API 不可用:', error)
+    return []
+  }
+}
+
+/**
+ * 获取实例已安装的 Skills
+ */
+export async function getInstanceSkills(agentId: string): Promise<SkillSummary[]> {
+  try {
+    const response = await api.get<{ total: number; skills: SkillSummary[] }>(`/v1/skills/instance/${agentId}`)
+    return response.data.skills || []
+  } catch (error) {
+    console.warn(`实例 ${agentId} Skills API 不可用:`, error)
+    return []
+  }
+}
+
+/**
+ * 安装 Skill 到实例
+ */
+export async function installSkill(data: SkillInstallRequest): Promise<{ success: boolean; skill_id?: string; message: string }> {
+  const response = await api.post<{ success: boolean; skill_id?: string; message: string }>('/v1/skills/install', data)
+  return response.data
+}
+
+/**
+ * 从实例卸载 Skill
+ */
+export async function uninstallSkill(data: SkillUninstallRequest): Promise<{ success: boolean; message: string }> {
+  const response = await api.post<{ success: boolean; message: string }>('/v1/skills/uninstall', data)
+  return response.data
+}
+
+/**
+ * 启用/禁用 Skill
+ */
+export async function toggleSkill(data: SkillToggleRequest): Promise<{ success: boolean; enabled: boolean; message: string }> {
+  const response = await api.post<{ success: boolean; enabled: boolean; message: string }>('/v1/skills/toggle', data)
+  return response.data
+}
+
+/**
+ * 更新 Skill 内容
+ */
+export async function updateSkillContent(data: SkillUpdateContentRequest): Promise<{ success: boolean; message: string }> {
+  const response = await api.post<{ success: boolean; message: string }>('/v1/skills/update_content', data)
+  return response.data
+}
+
+/**
+ * 文件内容响应
+ */
+export interface SkillFileContentResponse {
+  skill_name: string
+  file_type: string
+  file_name: string
+  content: string | null
+  is_binary: boolean
+  size: number
+  language?: string
+  message?: string
+}
+
+/**
+ * 获取 Skill 文件内容（脚本或资源）
+ */
+export async function getSkillFileContent(
+  skillName: string,
+  fileType: 'scripts' | 'resources',
+  fileName: string,
+  agentId?: string
+): Promise<SkillFileContentResponse> {
+  const params = agentId ? { agent_id: agentId } : {}
+  const response = await api.get<SkillFileContentResponse>(
+    `/v1/skills/file/${skillName}/${fileType}/${fileName}`,
+    { params }
+  )
+  return response.data
+}
+
+/**
+ * 注册 Skill 到 Claude API
+ */
+export async function registerSkill(skillName: string, agentId: string): Promise<{ success: boolean; skill_id?: string; message: string }> {
+  const response = await api.post<{ success: boolean; skill_id?: string; message: string }>(`/v1/skills/register?skill_name=${skillName}&agent_id=${agentId}`)
+  return response.data
+}
+
+/**
+ * Skill 详情类型
+ */
+export interface SkillDetailResponse {
+  name: string
+  description: string
+  priority: string
+  preferred_for: string[]
+  scripts: string[]
+  resources: string[]
+  content: string
+  agent_id: string
+  is_enabled: boolean
+  is_registered: boolean
+  skill_id: string | null
+  registered_at: string | null
+  created_at: string | null
+}
+
+/**
+ * 获取 Skill 详情
+ */
+export async function getSkillDetail(skillName: string, agentId?: string): Promise<SkillDetailResponse | null> {
+  try {
+    const params = agentId ? `?agent_id=${agentId}` : ''
+    const response = await api.get<SkillDetailResponse>(`/v1/skills/detail/${skillName}${params}`)
+    return response.data
+  } catch (error) {
+    console.warn('获取 Skill 详情失败:', error)
+    return null
+  }
+}
+
+/**
+ * 上传新 Skill 到全局库
+ */
+export async function uploadSkill(file: File, skillName: string): Promise<{ success: boolean; skill_name: string; message: string }> {
+  const formData = new FormData()
+  formData.append('file', file)
+  
+  const response = await api.post<{ success: boolean; skill_name: string; message: string }>(
+    `/v1/skills/upload?skill_name=${encodeURIComponent(skillName)}`,
+    formData,
+    {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    }
+  )
+  return response.data
+}
+
+// ==================== 旧版 API（兼容）====================
+
+/**
+ * 获取所有 Skills（旧版）
  */
 export async function getSkills(): Promise<Skill[]> {
   try {

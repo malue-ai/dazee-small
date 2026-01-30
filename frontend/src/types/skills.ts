@@ -8,7 +8,12 @@
 export type SkillPriority = 'high' | 'medium' | 'low'
 
 /**
- * Skill 基础信息
+ * Skill 状态
+ */
+export type SkillStatus = 'registered' | 'pending' | 'disabled'
+
+/**
+ * Skill 基础信息（旧版兼容）
  */
 export interface Skill {
   /** 唯一标识（目录名） */
@@ -29,6 +34,61 @@ export interface Skill {
   created_at?: string
   /** 更新时间 */
   updated_at?: string
+}
+
+/**
+ * Skill 摘要（新版 API 格式）
+ */
+export interface SkillSummary {
+  /** Skill 名称 */
+  name: string
+  /** 描述 */
+  description: string
+  /** 所属实例 ID（global 表示全局库） */
+  agent_id: string
+  /** 是否启用 */
+  is_enabled: boolean
+  /** 是否已注册到 Claude API */
+  is_registered: boolean
+  /** Claude API 的 skill_id */
+  skill_id: string | null
+  /** 创建时间 */
+  created_at: string
+}
+
+/**
+ * 安装 Skill 请求
+ */
+export interface SkillInstallRequest {
+  skill_name: string
+  agent_id: string
+  auto_register?: boolean
+}
+
+/**
+ * 卸载 Skill 请求
+ */
+export interface SkillUninstallRequest {
+  skill_name: string
+  agent_id: string
+}
+
+/**
+ * 切换 Skill 状态请求
+ */
+export interface SkillToggleRequest {
+  skill_name: string
+  agent_id: string
+  enabled: boolean
+}
+
+/**
+ * 更新 Skill 内容请求
+ */
+export interface SkillUpdateContentRequest {
+  skill_name: string
+  agent_id: string
+  content: string
 }
 
 /**

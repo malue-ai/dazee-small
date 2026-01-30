@@ -406,6 +406,8 @@ class S3Uploader:
         """
         根据文件扩展名确定 Content-Type
         
+        文本类型需要指定 charset=utf-8 避免中文乱码。
+        
         Args:
             filename: 文件名
             
@@ -420,10 +422,10 @@ class S3Uploader:
             '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
             '.xls': 'application/vnd.ms-excel',
             '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            '.txt': 'text/plain',
-            '.md': 'text/markdown',
-            '.json': 'application/json',
-            '.csv': 'text/csv',
+            '.txt': 'text/plain; charset=utf-8',
+            '.md': 'text/markdown; charset=utf-8',
+            '.json': 'application/json; charset=utf-8',
+            '.csv': 'text/csv; charset=utf-8',
             '.png': 'image/png',
             '.jpg': 'image/jpeg',
             '.jpeg': 'image/jpeg',
@@ -431,6 +433,9 @@ class S3Uploader:
             '.mp3': 'audio/mpeg',
             '.mp4': 'video/mp4',
             '.wav': 'audio/wav',
+            '.html': 'text/html; charset=utf-8',
+            '.xml': 'application/xml; charset=utf-8',
+            '.svg': 'image/svg+xml; charset=utf-8',
         }
         
         ext = Path(filename).suffix.lower()

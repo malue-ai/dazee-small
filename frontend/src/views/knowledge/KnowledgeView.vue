@@ -1,7 +1,33 @@
 <template>
-  <div class="h-full flex overflow-hidden bg-white">
+  <div class="h-full flex flex-col overflow-hidden bg-white">
+    <!-- 顶部工具栏 (统一布局) -->
+    <div class="h-16 flex items-center justify-between px-6 border-b border-gray-100 bg-white sticky top-0 z-10 flex-shrink-0">
+      <div class="flex items-center gap-4">
+        <h1 class="text-lg font-bold flex items-center gap-2 text-gray-800">
+          <Database class="w-6 h-6 text-blue-500" />
+          知识库管理
+        </h1>
+        <div class="text-sm text-gray-500 bg-gray-50 px-2.5 py-1 rounded-md border border-gray-100">
+          共 {{ stats?.total_documents || files.length }} 个文件
+        </div>
+      </div>
+      
+      <!-- 顶部操作区 -->
+      <div class="flex items-center gap-3">
+         <button 
+           @click="triggerFileInput"
+           class="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-xl hover:bg-gray-800 transition-all shadow-lg shadow-gray-900/10 active:scale-95"
+         >
+           <UploadCloud class="w-4 h-4" />
+           上传文件
+         </button>
+      </div>
+    </div>
+
+    <!-- 主体区域 -->
+    <div class="flex-1 flex overflow-hidden">
       <!-- 左侧侧边栏：上传和筛选 -->
-      <div class="w-72 border-r border-gray-100 bg-gray-50 overflow-y-auto p-4 flex flex-col gap-6">
+      <div class="w-72 border-r border-gray-100 bg-gray-50 overflow-y-auto p-4 flex flex-col gap-6 flex-shrink-0">
         <!-- 上传区域 -->
         <div class="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
           <h3 class="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
@@ -106,7 +132,7 @@
       <!-- 右侧主区域：文件列表 -->
       <div class="flex-1 flex flex-col overflow-hidden bg-white">
         <!-- 工具栏 -->
-        <div class="flex items-center justify-between gap-4 px-6 py-3 border-b border-gray-100 bg-white sticky top-0 z-10">
+        <div class="h-14 flex items-center justify-between gap-4 px-6 border-b border-gray-100 bg-white sticky top-0 z-10">
           <div class="flex-1 max-w-md relative group">
             <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 group-focus-within:text-gray-600 transition-colors" />
             <input
@@ -351,6 +377,7 @@
         </div>
       </transition>
     </div>
+  </div>
 </template>
 
 <script setup>
@@ -377,7 +404,8 @@ import {
   Image,
   Music,
   Video,
-  FileBox
+  FileBox,
+  Database
 } from 'lucide-vue-next'
 
 const router = useRouter()

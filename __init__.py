@@ -30,7 +30,6 @@ from core.memory import (
 from tools.plan_todo_tool import (
     PlanTodoTool,
     create_plan_todo_tool,
-    PLAN_TODO_TOOL_SCHEMA
 )
 
 __all__ = [
@@ -48,6 +47,5 @@ __all__ = [
     # Plan/Todo Tool (替代 PlanningManager)
     "PlanTodoTool",
     "create_plan_todo_tool",
-    "PLAN_TODO_TOOL_SCHEMA"
 ]
 

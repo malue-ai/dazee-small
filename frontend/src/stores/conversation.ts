@@ -366,26 +366,9 @@ export const useConversationStore = defineStore('conversation', () => {
     // 从 tool_result 更新状态
     for (const block of contentBlocks) {
       if (block.type === 'tool_result' && 'tool_use_id' in block && block.tool_use_id) {
-        let isError = block.is_error === true
-
-        // 额外检查 content 中是否包含错误
-        if (!isError && block.content) {
-          const contentStr = typeof block.content === 'string'
-            ? block.content
-            : JSON.stringify(block.content)
-          if (
-            contentStr.includes('"error"') ||
-            contentStr.includes('"Error"') ||
-            contentStr.includes('HTTP 4') ||
-            contentStr.includes('HTTP 5')
-          ) {
-            isError = true
-          }
-        }
-
         statuses[block.tool_use_id] = {
           pending: false,
-          success: !isError,
+          success: block.is_error !== true,
           result: block.content as string | object
         }
       }

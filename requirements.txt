@@ -69,4 +69,5 @@ apscheduler>=3.10.0
 # 测试工具
 pytest>=8.0.0             # 测试框架
 pytest-asyncio>=0.23.0    # 异步测试支持
+pytest-dotenv>=0.5.2      # 自动加载 .env 文件
 psutil

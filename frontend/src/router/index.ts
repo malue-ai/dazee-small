@@ -56,14 +56,14 @@ const routes = [
   },
   // ==================== 文档浏览 ====================
   {
-    path: '/docs',
-    name: 'docs',
+    path: '/documentation',
+    name: 'documentation',
     component: () => import('@/views/docs/DocsView.vue'),
     meta: { layout: 'dashboard' }
   },
   {
-    path: '/docs/:docPath(.*)',
-    name: 'docs-detail',
+    path: '/documentation/:docPath(.*)',
+    name: 'documentation-detail',
     component: () => import('@/views/docs/DocsView.vue'),
     meta: { layout: 'dashboard' }
   }

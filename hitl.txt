@@ -1,0 +1,451 @@
+data: {"type": "message.assistant.start", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "conversation_id": "9b3a3a00-a801-44d2-81e7-cc8f5a389bd3", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738813076, "seq": 1}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738814444, "delta": {"type": "preface", "content": "好"}, "seq": 2}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738814679, "delta": {"type": "preface", "content": "的，我来帮您"}, "seq": 3}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738814682, "delta": {"type": "preface", "content": "梳理管"}, "seq": 4}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738814687, "delta": {"type": "preface", "content": "理系统的流程图。"}, "seq": 5}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738814688, "delta": {"type": "preface", "content": "先"}, "seq": 6}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738814688, "delta": {"type": "preface", "content": "把"}, "seq": 7}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738814689, "delta": {"type": "preface", "content": "核"}, "seq": 8}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738814690, "delta": {"type": "preface", "content": "心流程可"}, "seq": 9}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738814691, "delta": {"type": "preface", "content": "视化，"}, "seq": 10}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738814697, "delta": {"type": "preface", "content": "确"}, "seq": 11}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738814723, "delta": {"type": "preface", "content": "认"}, "seq": 12}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738814748, "delta": {"type": "preface", "content": "无"}, "seq": 13}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738814785, "delta": {"type": "preface", "content": "误后"}, "seq": 14}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738814839, "delta": {"type": "preface", "content": "再开始开"}, "seq": 15}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738814839, "delta": {"type": "preface", "content": "发"}, "seq": 16}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738814874, "delta": {"type": "preface", "content": "，"}, "seq": 17}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738814911, "delta": {"type": "preface", "content": "这样能避"}, "seq": 18}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738814915, "delta": {"type": "preface", "content": "免后"}, "seq": 19}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738814931, "delta": {"type": "preface", "content": "期"}, "seq": 20}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738814962, "delta": {"type": "preface", "content": "修"}, "seq": 21}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738815089, "delta": {"type": "preface", "content": "改。"}, "seq": 22}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738815090, "delta": {"type": "preface", "content": "我"}, "seq": 23}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738815091, "delta": {"type": "preface", "content": "们"}, "seq": 24}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738815092, "delta": {"type": "preface", "content": "现"}, "seq": 25}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738815123, "delta": {"type": "preface", "content": "在开始"}, "seq": 26}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738815131, "delta": {"type": "preface", "content": "吧！"}, "seq": 27}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738819288, "delta": {"type": "thinking", "content": "好的，我理"}, "seq": 28}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738819289, "delta": {"type": "thinking", "content": "解您的"}, "seq": 29}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738819290, "delta": {"type": "thinking", "content": "需求。您"}, "seq": 30}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738819291, "delta": {"type": "thinking", "content": "想要开"}, "seq": 31}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738819305, "delta": {"type": "thinking", "content": "发一个管理系统，"}, "seq": 32}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738819357, "delta": {"type": "thinking", "content": "但"}, "seq": 33}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738819492, "delta": {"type": "thinking", "content": "希"}, "seq": 34}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738819493, "delta": {"type": "thinking", "content": "望先"}, "seq": 35}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738819509, "delta": {"type": "thinking", "content": "把"}, "seq": 36}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738819571, "delta": {"type": "thinking", "content": "流"}, "seq": 37}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738819616, "delta": {"type": "thinking", "content": "程图规"}, "seq": 38}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738819790, "delta": {"type": "thinking", "content": "划清"}, "seq": 39}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738819791, "delta": {"type": "thinking", "content": "楚，确认"}, "seq": 40}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738819854, "delta": {"type": "thinking", "content": "无误后再开始实"}, "seq": 41}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738819911, "delta": {"type": "thinking", "content": "际"}, "seq": 42}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738819962, "delta": {"type": "thinking", "content": "开"}, "seq": 43}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738820019, "delta": {"type": "thinking", "content": "发工"}, "seq": 44}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738820118, "delta": {"type": "thinking", "content": "作。\n\n我"}, "seq": 45}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738820146, "delta": {"type": "thinking", "content": "的"}, "seq": 46}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738820212, "delta": {"type": "thinking", "content": "思"}, "seq": 47}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738820336, "delta": {"type": "thinking", "content": "考是"}, "seq": 48}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738820338, "delta": {"type": "thinking", "content": "这"}, "seq": 49}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738820381, "delta": {"type": "thinking", "content": "样的：\n\n首"}, "seq": 50}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738820436, "delta": {"type": "thinking", "content": "先，我需要了解这"}, "seq": 51}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738820509, "delta": {"type": "thinking", "content": "个管理系统的具体"}, "seq": 52}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738820556, "delta": {"type": "thinking", "content": "类"}, "seq": 53}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738820657, "delta": {"type": "thinking", "content": "型和"}, "seq": 54}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738820670, "delta": {"type": "thinking", "content": "核"}, "seq": 55}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738820748, "delta": {"type": "thinking", "content": "心功能。比"}, "seq": 56}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738820838, "delta": {"type": "thinking", "content": "如是"}, "seq": 57}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738820853, "delta": {"type": "thinking", "content": "人"}, "seq": 58}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738820910, "delta": {"type": "thinking", "content": "员"}, "seq": 59}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738820993, "delta": {"type": "thinking", "content": "管理、"}, "seq": 60}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738821058, "delta": {"type": "thinking", "content": "库"}, "seq": 61}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738821092, "delta": {"type": "thinking", "content": "存管理、订"}, "seq": 62}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738821155, "delta": {"type": "thinking", "content": "单管理还"}, "seq": 63}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738821230, "delta": {"type": "thinking", "content": "是其他类"}, "seq": 64}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738821262, "delta": {"type": "thinking", "content": "型？然"}, "seq": 65}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738821362, "delta": {"type": "thinking", "content": "后"}, "seq": 66}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738821406, "delta": {"type": "thinking", "content": "梳理出关"}, "seq": 67}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738821463, "delta": {"type": "thinking", "content": "键的业"}, "seq": 68}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738821502, "delta": {"type": "thinking", "content": "务流程，"}, "seq": 69}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738821580, "delta": {"type": "thinking", "content": "包"}, "seq": 70}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738821673, "delta": {"type": "thinking", "content": "括用"}, "seq": 71}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738821683, "delta": {"type": "thinking", "content": "户角"}, "seq": 72}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738821737, "delta": {"type": "thinking", "content": "色、"}, "seq": 73}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738821781, "delta": {"type": "thinking", "content": "主"}, "seq": 74}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738821890, "delta": {"type": "thinking", "content": "要操"}, "seq": 75}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738821902, "delta": {"type": "thinking", "content": "作步"}, "seq": 76}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738821965, "delta": {"type": "thinking", "content": "骤、数据流转"}, "seq": 77}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738822051, "delta": {"type": "thinking", "content": "等。\n\n接下来，我"}, "seq": 78}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738822079, "delta": {"type": "thinking", "content": "可"}, "seq": 79}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738822138, "delta": {"type": "thinking", "content": "以"}, "seq": 80}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738822204, "delta": {"type": "thinking", "content": "帮您把"}, "seq": 81}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738822256, "delta": {"type": "thinking", "content": "这些流"}, "seq": 82}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738822411, "delta": {"type": "thinking", "content": "程用"}, "seq": 83}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738822412, "delta": {"type": "thinking", "content": "图"}, "seq": 84}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738822457, "delta": {"type": "thinking", "content": "表的"}, "seq": 85}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738822490, "delta": {"type": "thinking", "content": "形式"}, "seq": 86}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738822555, "delta": {"type": "thinking", "content": "呈现出来，让整"}, "seq": 87}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738822613, "delta": {"type": "thinking", "content": "个系"}, "seq": 88}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738822666, "delta": {"type": "thinking", "content": "统的"}, "seq": 89}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738822784, "delta": {"type": "thinking", "content": "逻辑一"}, "seq": 90}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738822938, "delta": {"type": "thinking", "content": "目了然。这"}, "seq": 91}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738822939, "delta": {"type": "thinking", "content": "样您"}, "seq": 92}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738822962, "delta": {"type": "thinking", "content": "可"}, "seq": 93}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738823019, "delta": {"type": "thinking", "content": "以直"}, "seq": 94}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738823082, "delta": {"type": "thinking", "content": "观地看到各"}, "seq": 95}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738823139, "delta": {"type": "thinking", "content": "个环节是"}, "seq": 96}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738823197, "delta": {"type": "thinking", "content": "否"}, "seq": 97}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738823273, "delta": {"type": "thinking", "content": "合"}, "seq": 98}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738823315, "delta": {"type": "thinking", "content": "理，有"}, "seq": 99}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738823482, "delta": {"type": "thinking", "content": "没有遗漏的地"}, "seq": 100}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738823483, "delta": {"type": "thinking", "content": "方。\n\n确"}, "seq": 101}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738823628, "delta": {"type": "thinking", "content": "认流"}, "seq": 102}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738823641, "delta": {"type": "thinking", "content": "程图没"}, "seq": 103}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738823673, "delta": {"type": "thinking", "content": "问题后，我们"}, "seq": 104}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738823688, "delta": {"type": "thinking", "content": "再"}, "seq": 105}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738823793, "delta": {"type": "thinking", "content": "讨论具体的开"}, "seq": 106}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738823848, "delta": {"type": "thinking", "content": "发细节。"}, "seq": 107}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738823981, "delta": {"type": "thinking", "content": "这"}, "seq": 108}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738823983, "delta": {"type": "thinking", "content": "种"}, "seq": 109}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738824023, "delta": {"type": "thinking", "content": "先"}, "seq": 110}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738824088, "delta": {"type": "thinking", "content": "规"}, "seq": 111}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738824140, "delta": {"type": "thinking", "content": "划后"}, "seq": 112}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738824203, "delta": {"type": "thinking", "content": "执"}, "seq": 113}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738824256, "delta": {"type": "thinking", "content": "行的方式确"}, "seq": 114}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738824313, "delta": {"type": "thinking", "content": "实"}, "seq": 115}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738824372, "delta": {"type": "thinking", "content": "更"}, "seq": 116}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738824509, "delta": {"type": "thinking", "content": "稳妥。"}, "seq": 117}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738824549, "delta": {"type": "thinking", "content": "\n\n您能"}, "seq": 118}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738824605, "delta": {"type": "thinking", "content": "先"}, "seq": 119}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738824668, "delta": {"type": "thinking", "content": "告诉我这"}, "seq": 120}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738824725, "delta": {"type": "thinking", "content": "个管理系统主"}, "seq": 121}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738824783, "delta": {"type": "thinking", "content": "要用"}, "seq": 122}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738824855, "delta": {"type": "thinking", "content": "于什么场景吗？"}, "seq": 123}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738824907, "delta": {"type": "thinking", "content": "需"}, "seq": 124}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738825036, "delta": {"type": "thinking", "content": "要包"}, "seq": 125}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738825037, "delta": {"type": "thinking", "content": "含哪些核"}, "seq": 126}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738825083, "delta": {"type": "thinking", "content": "心功能？"}, "seq": 127}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738828430, "delta": {"type": "response", "content": "\n\n为"}, "seq": 128}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738828539, "delta": {"type": "response", "content": "了帮您"}, "seq": 129}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738828561, "delta": {"type": "response", "content": "设"}, "seq": 130}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738828605, "delta": {"type": "response", "content": "计合"}, "seq": 131}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738828707, "delta": {"type": "response", "content": "适的管理系统流程"}, "seq": 132}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738828742, "delta": {"type": "response", "content": "图，我需要了"}, "seq": 133}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738828810, "delta": {"type": "response", "content": "解几个关键信"}, "seq": 134}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738828880, "delta": {"type": "response", "content": "息："}, "seq": 135}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738835881, "delta": {"type": "hitl", "content": {"status": "pending", "title": "管理系统需求确认", "description": "请告诉我您需要的管理系统类型和核心功能，我会为您绘制流程图", "questions": [{"id": "system_type", "label": "您需要哪种类型的管理系统？", "type": "single_choice", "options": ["招聘管理系统", "客户关系管理(CRM)", "库存管理系统", "学生管理系统", "订单管理系统", "员工管理系统", "其他（请在下方说明）"]}, {"id": "custom_type", "label": "如果选择了'其他'，请描述您需要的系统", "type": "text_input", "hint": "例如：项目管理系统、设备管理系统等", "required": false}, {"id": "core_functions", "label": "核心功能有哪些？（可多选）", "type": "multiple_choice", "options": ["数据录入与编辑", "数据查询与筛选", "审批流程", "统计报表", "权限管理", "消息通知", "文件上传", "导入导出"]}, {"id": "special_requirements", "label": "有什么特殊需求或业务流程吗？", "type": "text_input", "hint": "例如：需要多级审批、特定的业务规则等", "required": false}], "timeout": 120}}, "seq": 136}
+
+data: {"type": "ping", "timestamp": 1769738865882, "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9"}
+
+data: {"type": "ping", "timestamp": 1769738895882, "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9"}
+
+data: {"type": "ping", "timestamp": 1769738925882, "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9"}
+
+data: {"type": "ping", "timestamp": 1769738955882, "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9"}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738959723, "delta": {"type": "hitl", "content": {"title": "管理系统需求确认", "description": "请告诉我您需要的管理系统类型和核心功能，我会为您绘制流程图", "questions": [{"id": "system_type", "label": "您需要哪种类型的管理系统？", "type": "single_choice", "options": ["招聘管理系统", "客户关系管理(CRM)", "库存管理系统", "学生管理系统", "订单管理系统", "员工管理系统", "其他（请在下方说明）"]}, {"id": "custom_type", "label": "如果选择了'其他'，请描述您需要的系统", "type": "text_input", "hint": "例如：项目管理系统、设备管理系统等", "required": false}, {"id": "core_functions", "label": "核心功能有哪些？（可多选）", "type": "multiple_choice", "options": ["数据录入与编辑", "数据查询与筛选", "审批流程", "统计报表", "权限管理", "消息通知", "文件上传", "导入导出"]}, {"id": "special_requirements", "label": "有什么特殊需求或业务流程吗？", "type": "text_input", "hint": "例如：需要多级审批、特定的业务规则等", "required": false}], "success": false, "timed_out": true, "response": null}}, "seq": 137}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738968770, "delta": {"type": "response", "content": "\n\n"}, "seq": 138}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738968771, "delta": {"type": "response", "content": "看"}, "seq": 139}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738968796, "delta": {"type": "response", "content": "来您"}, "seq": 140}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738969058, "delta": {"type": "response", "content": "暂时还在"}, "seq": 141}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738969059, "delta": {"type": "response", "content": "考"}, "seq": 142}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738969100, "delta": {"type": "response", "content": "虑，没"}, "seq": 143}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738969101, "delta": {"type": "response", "content": "关"}, "seq": 144}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738969124, "delta": {"type": "response", "content": "系！我在"}, "seq": 145}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738969234, "delta": {"type": "response", "content": "这里随"}, "seq": 146}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738969235, "delta": {"type": "response", "content": "时等"}, "seq": 147}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738969312, "delta": {"type": "response", "content": "您"}, "seq": 148}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738969392, "delta": {"type": "response", "content": "。"}, "seq": 149}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738969458, "delta": {"type": "response", "content": "\n\n当"}, "seq": 150}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738969611, "delta": {"type": "response", "content": "您准备好告"}, "seq": 151}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738969622, "delta": {"type": "response", "content": "诉我以"}, "seq": 152}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738969814, "delta": {"type": "response", "content": "下信"}, "seq": 153}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738969819, "delta": {"type": "response", "content": "息时，我就"}, "seq": 154}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738969862, "delta": {"type": "response", "content": "能"}, "seq": 155}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738969867, "delta": {"type": "response", "content": "为您设计流"}, "seq": 156}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738969946, "delta": {"type": "response", "content": "程图：\n\n1. **系"}, "seq": 157}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738969984, "delta": {"type": "response", "content": "统类型**：比"}, "seq": 158}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738970014, "delta": {"type": "response", "content": "如招"}, "seq": 159}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738970028, "delta": {"type": "response", "content": "聘管理、"}, "seq": 160}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738970062, "delta": {"type": "response", "content": "客户管"}, "seq": 161}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738970121, "delta": {"type": "response", "content": "理、库"}, "seq": 162}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738970150, "delta": {"type": "response", "content": "存管理、"}, "seq": 163}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738970312, "delta": {"type": "response", "content": "订"}, "seq": 164}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738970313, "delta": {"type": "response", "content": "单管"}, "seq": 165}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738970324, "delta": {"type": "response", "content": "理等\n2. **核心"}, "seq": 166}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738970392, "delta": {"type": "response", "content": "功能**：比"}, "seq": 167}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738970493, "delta": {"type": "response", "content": "如需"}, "seq": 168}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738970566, "delta": {"type": "response", "content": "要"}, "seq": 169}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738970580, "delta": {"type": "response", "content": "数"}, "seq": 170}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738970636, "delta": {"type": "response", "content": "据录"}, "seq": 171}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738971056, "delta": {"type": "response", "content": "入、查"}, "seq": 172}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738971057, "delta": {"type": "response", "content": "询"}, "seq": 173}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738971058, "delta": {"type": "response", "content": "、审"}, "seq": 174}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738971059, "delta": {"type": "response", "content": "批流"}, "seq": 175}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738971059, "delta": {"type": "response", "content": "程、统"}, "seq": 176}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738971060, "delta": {"type": "response", "content": "计报表等"}, "seq": 177}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738971062, "delta": {"type": "response", "content": "\n3. **特殊需"}, "seq": 178}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738971109, "delta": {"type": "response", "content": "求**：比如多级"}, "seq": 179}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738971140, "delta": {"type": "response", "content": "审批、特"}, "seq": 180}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738971215, "delta": {"type": "response", "content": "定"}, "seq": 181}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738971312, "delta": {"type": "response", "content": "的"}, "seq": 182}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738971460, "delta": {"type": "response", "content": "业"}, "seq": 183}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738971489, "delta": {"type": "response", "content": "务规"}, "seq": 184}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738971515, "delta": {"type": "response", "content": "则等"}, "seq": 185}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738971562, "delta": {"type": "response", "content": "\n\n您"}, "seq": 186}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738971563, "delta": {"type": "response", "content": "可"}, "seq": 187}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738971602, "delta": {"type": "response", "content": "以直"}, "seq": 188}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738971672, "delta": {"type": "response", "content": "接告诉我，"}, "seq": 189}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738971733, "delta": {"type": "response", "content": "比"}, "seq": 190}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738971834, "delta": {"type": "response", "content": "如：\n- \""}, "seq": 191}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738971857, "delta": {"type": "response", "content": "我需要一个招"}, "seq": 192}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738971906, "delta": {"type": "response", "content": "聘管理系统，"}, "seq": 193}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738971966, "delta": {"type": "response", "content": "包"}, "seq": 194}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738972016, "delta": {"type": "response", "content": "含职位发"}, "seq": 195}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738972115, "delta": {"type": "response", "content": "布、简历"}, "seq": 196}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738972130, "delta": {"type": "response", "content": "筛选、面试安排功"}, "seq": 197}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738972191, "delta": {"type": "response", "content": "能\"\n- \"做"}, "seq": 198}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738972264, "delta": {"type": "response", "content": "一个库"}, "seq": 199}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738972376, "delta": {"type": "response", "content": "存管理系统，要"}, "seq": 200}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738972382, "delta": {"type": "response", "content": "能"}, "seq": 201}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738972431, "delta": {"type": "response", "content": "入"}, "seq": 202}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738972508, "delta": {"type": "response", "content": "库出"}, "seq": 203}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738972572, "delta": {"type": "response", "content": "库、"}, "seq": 204}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738972632, "delta": {"type": "response", "content": "库"}, "seq": 205}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738972717, "delta": {"type": "response", "content": "存预"}, "seq": 206}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738972739, "delta": {"type": "response", "content": "警、"}, "seq": 207}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738972895, "delta": {"type": "response", "content": "统"}, "seq": 208}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738972901, "delta": {"type": "response", "content": "计报"}, "seq": 209}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738972916, "delta": {"type": "response", "content": "表\"\n\n随"}, "seq": 210}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738973023, "delta": {"type": "response", "content": "时告诉我您"}, "seq": 211}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738973034, "delta": {"type": "response", "content": "的"}, "seq": 212}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738973105, "delta": {"type": "response", "content": "想"}, "seq": 213}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738973131, "delta": {"type": "response", "content": "法，我会立"}, "seq": 214}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738973195, "delta": {"type": "response", "content": "即为您绘制流程"}, "seq": 215}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738973257, "delta": {"type": "response", "content": "图！"}, "seq": 216}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738973313, "delta": {"type": "response", "content": " "}, "seq": 217}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738973415, "delta": {"type": "response", "content": "🎨"}, "seq": 218}
+
+data: {"type": "message.assistant.delta", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738977489, "delta": {"type": "billing", "content": {"prompt_tokens": 49396, "completion_tokens": 863, "thinking_tokens": 0, "cache_read_tokens": 46790, "cache_write_tokens": 0, "total_tokens": 50259, "prompt_price": 0.007242, "completion_price": 0.012305, "thinking_price": 0.0, "cache_read_price": 0.004678, "cache_write_price": 0.0, "total_price": 0.024225, "prompt_unit_price": 0.24, "completion_unit_price": 14.26, "currency": "USD", "latency": 0.0, "llm_calls": 3, "model": "claude-haiku-4-5-20251001", "cache_hit_rate": 0.9472, "cost_saved_by_cache": 0.135691, "llm_call_details": [{"call_id": "call_001", "message_id": null, "model": "claude-haiku-4-5-20251001", "purpose": "preface", "timestamp": "2026-01-30T10:06:55.185563", "input_tokens": 288, "output_tokens": 64, "thinking_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0, "input_unit_price": 1.0, "output_unit_price": 5.0, "cache_read_unit_price": 0.05, "cache_write_unit_price": 1.25, "input_total_price": 0.000288, "output_total_price": 0.00032, "thinking_total_price": 0.0, "cache_read_price": 0.0, "cache_write_price": 0.0, "total_price": 0.000608, "latency_ms": 0, "metadata": {}}, {"call_id": "call_002", "message_id": null, "model": "claude-sonnet-4.5", "purpose": "main_response", "timestamp": "2026-01-30T10:07:19.720018", "input_tokens": 587, "output_tokens": 543, "thinking_tokens": 0, "cache_read_tokens": 23395, "cache_write_tokens": 0, "input_unit_price": 3.0, "output_unit_price": 15.0, "cache_read_unit_price": 0.1, "cache_write_unit_price": 3.75, "input_total_price": 0.001761, "output_total_price": 0.008145, "thinking_total_price": 0.0, "cache_read_price": 0.002339, "cache_write_price": 0.0, "total_price": 0.012245, "latency_ms": 0, "metadata": {}}, {"call_id": "call_003", "message_id": null, "model": "claude-sonnet-4.5", "purpose": "main_response", "timestamp": "2026-01-30T10:09:35.712097", "input_tokens": 1731, "output_tokens": 256, "thinking_tokens": 0, "cache_read_tokens": 23395, "cache_write_tokens": 0, "input_unit_price": 3.0, "output_unit_price": 15.0, "cache_read_unit_price": 0.1, "cache_write_unit_price": 3.75, "input_total_price": 0.005193, "output_total_price": 0.00384, "thinking_total_price": 0.0, "cache_read_price": 0.002339, "cache_write_price": 0.0, "total_price": 0.011372, "latency_ms": 0, "metadata": {}}], "tool_call_details": [{"call_id": "tool_call_001", "count": 1, "tool_name": "hitl", "tool_price": 0.0, "total_price": 0.0}], "tool_total_price": 0.0, "llm_total_price": 0.024225}}, "seq": 219}
+
+data: {"type": "message.assistant.done", "message_id": "286d7acb-aad0-4fc4-b771-c717b5f77795", "session_id": "a2ddcf27-23df-4a80-aa7c-8511309516f9", "timestamp": 1769738982326, "data": {"content": "\n\n为了帮您设计合适的管理系统流程图，我需要了解几个关键信息：\n\n看来您暂时还在考虑，没关系！我在这里随时等您。\n\n当您准备好告诉我以下信息时，我就能为您设计流程图：\n\n1. **系统类型**：比如招聘管理、客户管理、库存管理、订单管理等\n2. **核心功能**：比如需要数据录入、查询、审批流程、统计报表等\n3. **特殊需求**：比如多级审批、特定的业务规则等\n\n您可以直接告诉我，比如：\n- \"我需要一个招聘管理系统，包含职位发布、简历筛选、面试安排功能\"\n- \"做一个库存管理系统，要能入库出库、库存预警、统计报表\"\n\n随时告诉我您的想法，我会立即为您绘制流程图！ 🎨"}, "seq": 220}
+
+event: done
+data: {}
+

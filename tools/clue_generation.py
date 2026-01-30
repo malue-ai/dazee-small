@@ -16,7 +16,6 @@
 - upload: 需要用户上传文件
 """
 
-import json
 from typing import Dict, Any, Optional, List
 
 from core.tool.base import BaseTool, ToolContext
@@ -68,7 +67,10 @@ class ClueGenerationTool(BaseTool):
     线索生成工具
     
     当 AI 判断当前对话需要给用户提供后续操作建议时调用。
-    分析对话内容，生成可操作的线索列表，通过 SSE 推送给前端。
+    分析对话内容，生成可操作的线索列表。
+    
+    注意：clue delta 由 ZenOAdapter.enhance_tool_result 统一生成和发送，
+    工具只负责返回结果数据。
     """
     
     name = "clue_generation"
@@ -120,22 +122,8 @@ class ClueGenerationTool(BaseTool):
             tasks = clue_data.get("tasks", [])
             logger.info(f"✅ 线索已生成: {len(tasks)} 个")
             
-            # 3. 通过 SSE 推送给前端
-            if context.session_id and context.event_manager:
-                clue_content = json.dumps(clue_data, ensure_ascii=False)
-                
-                await context.event_manager.message.emit_message_delta(
-                    session_id=context.session_id,
-                    conversation_id=context.conversation_id,
-                    delta={
-                        "type": "clue",
-                        "content": clue_content
-                    },
-                    message_id=context.get("message_id", ""),
-                    output_format=getattr(context.event_manager, 'output_format', 'zenflux'),
-                    adapter=getattr(context.event_manager, 'adapter', None)
-                )
-                logger.info(f"📤 线索已推送到前端: {len(tasks)} 个任务")
+            # 注意：clue delta 由 ZenOAdapter.enhance_tool_result 统一处理
+            # 不在工具内部直接发送，避免重复
             
             return {
                 "success": True,
