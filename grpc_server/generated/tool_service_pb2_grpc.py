@@ -977,6 +977,258 @@ class AgentService(object):
             _registered_method=True)
 
 
+class ConfirmationServiceStub(object):
+    """==================== Confirmation 服务（HITL 确认） ====================
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.GetPendingRequests = channel.unary_unary(
+                '/zenflux.ConfirmationService/GetPendingRequests',
+                request_serializer=tool__service__pb2.GetPendingRequestsRequest.SerializeToString,
+                response_deserializer=tool__service__pb2.GetPendingRequestsResponse.FromString,
+                _registered_method=True)
+        self.SubmitResponse = channel.unary_unary(
+                '/zenflux.ConfirmationService/SubmitResponse',
+                request_serializer=tool__service__pb2.SubmitConfirmationRequest.SerializeToString,
+                response_deserializer=tool__service__pb2.SubmitConfirmationResponse.FromString,
+                _registered_method=True)
+        self.CancelRequest = channel.unary_unary(
+                '/zenflux.ConfirmationService/CancelRequest',
+                request_serializer=tool__service__pb2.CancelConfirmationRequest.SerializeToString,
+                response_deserializer=tool__service__pb2.CancelConfirmationResponse.FromString,
+                _registered_method=True)
+        self.GetStats = channel.unary_unary(
+                '/zenflux.ConfirmationService/GetStats',
+                request_serializer=tool__service__pb2.ConfirmationStatsRequest.SerializeToString,
+                response_deserializer=tool__service__pb2.ConfirmationStatsResponse.FromString,
+                _registered_method=True)
+        self.WatchConfirmations = channel.unary_stream(
+                '/zenflux.ConfirmationService/WatchConfirmations',
+                request_serializer=tool__service__pb2.WatchConfirmationsRequest.SerializeToString,
+                response_deserializer=tool__service__pb2.ConfirmationEvent.FromString,
+                _registered_method=True)
+
+
+class ConfirmationServiceServicer(object):
+    """==================== Confirmation 服务（HITL 确认） ====================
+    """
+
+    def GetPendingRequests(self, request, context):
+        """获取待处理的确认请求
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def SubmitResponse(self, request, context):
+        """提交确认响应
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def CancelRequest(self, request, context):
+        """取消确认请求
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetStats(self, request, context):
+        """获取统计信息
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def WatchConfirmations(self, request, context):
+        """监听确认请求（流式，用于实时接收新的确认请求）
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_ConfirmationServiceServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'GetPendingRequests': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetPendingRequests,
+                    request_deserializer=tool__service__pb2.GetPendingRequestsRequest.FromString,
+                    response_serializer=tool__service__pb2.GetPendingRequestsResponse.SerializeToString,
+            ),
+            'SubmitResponse': grpc.unary_unary_rpc_method_handler(
+                    servicer.SubmitResponse,
+                    request_deserializer=tool__service__pb2.SubmitConfirmationRequest.FromString,
+                    response_serializer=tool__service__pb2.SubmitConfirmationResponse.SerializeToString,
+            ),
+            'CancelRequest': grpc.unary_unary_rpc_method_handler(
+                    servicer.CancelRequest,
+                    request_deserializer=tool__service__pb2.CancelConfirmationRequest.FromString,
+                    response_serializer=tool__service__pb2.CancelConfirmationResponse.SerializeToString,
+            ),
+            'GetStats': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetStats,
+                    request_deserializer=tool__service__pb2.ConfirmationStatsRequest.FromString,
+                    response_serializer=tool__service__pb2.ConfirmationStatsResponse.SerializeToString,
+            ),
+            'WatchConfirmations': grpc.unary_stream_rpc_method_handler(
+                    servicer.WatchConfirmations,
+                    request_deserializer=tool__service__pb2.WatchConfirmationsRequest.FromString,
+                    response_serializer=tool__service__pb2.ConfirmationEvent.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'zenflux.ConfirmationService', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('zenflux.ConfirmationService', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class ConfirmationService(object):
+    """==================== Confirmation 服务（HITL 确认） ====================
+    """
+
+    @staticmethod
+    def GetPendingRequests(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/zenflux.ConfirmationService/GetPendingRequests',
+            tool__service__pb2.GetPendingRequestsRequest.SerializeToString,
+            tool__service__pb2.GetPendingRequestsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SubmitResponse(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/zenflux.ConfirmationService/SubmitResponse',
+            tool__service__pb2.SubmitConfirmationRequest.SerializeToString,
+            tool__service__pb2.SubmitConfirmationResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CancelRequest(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/zenflux.ConfirmationService/CancelRequest',
+            tool__service__pb2.CancelConfirmationRequest.SerializeToString,
+            tool__service__pb2.CancelConfirmationResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetStats(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/zenflux.ConfirmationService/GetStats',
+            tool__service__pb2.ConfirmationStatsRequest.SerializeToString,
+            tool__service__pb2.ConfirmationStatsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def WatchConfirmations(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/zenflux.ConfirmationService/WatchConfirmations',
+            tool__service__pb2.WatchConfirmationsRequest.SerializeToString,
+            tool__service__pb2.ConfirmationEvent.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
 class SandboxServiceStub(object):
     """==================== Sandbox 服务（沙盒管理） ====================
     """

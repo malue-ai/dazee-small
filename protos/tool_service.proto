@@ -74,6 +74,24 @@ service AgentService {
   rpc GetAgentStatus(AgentStatusRequest) returns (AgentStatusResponse);
 }
 
+// ==================== Confirmation 服务（HITL 确认） ====================
+service ConfirmationService {
+  // 获取待处理的确认请求
+  rpc GetPendingRequests(GetPendingRequestsRequest) returns (GetPendingRequestsResponse);
+  
+  // 提交确认响应
+  rpc SubmitResponse(SubmitConfirmationRequest) returns (SubmitConfirmationResponse);
+  
+  // 取消确认请求
+  rpc CancelRequest(CancelConfirmationRequest) returns (CancelConfirmationResponse);
+  
+  // 获取统计信息
+  rpc GetStats(ConfirmationStatsRequest) returns (ConfirmationStatsResponse);
+  
+  // 监听确认请求（流式，用于实时接收新的确认请求）
+  rpc WatchConfirmations(WatchConfirmationsRequest) returns (stream ConfirmationEvent);
+}
+
 // ==================== Sandbox 服务（沙盒管理） ====================
 service SandboxService {
   // 获取沙盒状态
@@ -420,5 +438,70 @@ message SandboxListFilesResponse {
   string conversation_id = 1;
   repeated SandboxFileInfo files = 2;
   string source = 3;                   // sandbox
+}
+
+// ==================== Confirmation 服务消息定义 ====================
+
+message GetPendingRequestsRequest {
+  optional string session_id = 1;      // 可选，按会话 ID 过滤
+}
+
+message ConfirmationRequestInfo {
+  string request_id = 1;
+  string question = 2;
+  repeated string options = 3;
+  int32 timeout = 4;
+  string confirmation_type = 5;        // form / button / text
+  string session_id = 6;
+  string created_at = 7;
+  map<string, string> metadata = 8;
+  bool is_expired = 9;
+}
+
+message GetPendingRequestsResponse {
+  repeated ConfirmationRequestInfo requests = 1;
+  int32 total = 2;
+}
+
+message SubmitConfirmationRequest {
+  string request_id = 1;               // 请求 ID（即 session_id）
+  string response = 2;                 // 用户响应
+  map<string, string> metadata = 3;    // 额外元数据
+}
+
+message SubmitConfirmationResponse {
+  bool success = 1;
+  string request_id = 2;
+  string response = 3;
+  optional string error = 4;
+}
+
+message CancelConfirmationRequest {
+  string request_id = 1;
+}
+
+message CancelConfirmationResponse {
+  bool success = 1;
+  optional string error = 2;
+}
+
+message ConfirmationStatsRequest {
+  // 空请求
+}
+
+message ConfirmationStatsResponse {
+  int32 pending_count = 1;
+  int32 history_count = 2;
+  repeated string pending_sessions = 3;
+}
+
+message WatchConfirmationsRequest {
+  optional string session_id = 1;      // 可选，只监听特定会话
+}
+
+message ConfirmationEvent {
+  string event_type = 1;               // new / responded / cancelled / expired
+  ConfirmationRequestInfo request = 2;
+  int64 timestamp = 3;
 }
 
