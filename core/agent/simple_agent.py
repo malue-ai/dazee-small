@@ -1002,6 +1002,14 @@ class SimpleAgent:
                                 self._tracer.add_warning(f"Plan Creation 跳过: 第一个工具是 {first_tool_name}")
                     
                     # 处理工具调用
+                    # 支持多种 stop_reason 格式：
+                    # - Claude: "tool_use"
+                    # - OpenAI/Qwen: "tool_calls"
+                    # 🔍 调试日志
+                    logger.info(f"🔍 [DEBUG] stop_reason={response.stop_reason}, tool_calls={len(response.tool_calls) if response.tool_calls else 0}")
+                    if response.tool_calls:
+                        logger.info(f"🔍 [DEBUG] tool_calls 内容: {[{'type': tc.get('type'), 'name': tc.get('name') or tc.get('function', {}).get('name')} for tc in response.tool_calls[:3]]}")
+                    
                     if response.stop_reason == "tool_use" and response.tool_calls:
                         # 🆕 最后一轮检查：如果是最后一轮且有工具调用，强制生成文本回复
                         is_last_turn = (turn == self.max_turns - 1)
@@ -1046,10 +1054,15 @@ class SimpleAgent:
                             break
                         
                         # 🆕 区分客户端工具和服务端工具
-                        # - 客户端工具（tool_use）：需要我们执行并返回 tool_result
+                        # - 客户端工具（tool_use）：需要本地执行（统一格式）
                         # - 服务端工具（server_tool_use）：Anthropic 服务器已执行，结果在 raw_content 中
                         client_tools = [tc for tc in response.tool_calls if tc.get("type") == "tool_use"]
                         server_tools = [tc for tc in response.tool_calls if tc.get("type") == "server_tool_use"]
+                        
+                        # 🔍 调试日志
+                        logger.info(f"🔍 [DEBUG] 过滤后: client_tools={len(client_tools)}, server_tools={len(server_tools)}")
+                        if client_tools:
+                            logger.info(f"🔍 [DEBUG] client_tools 详情: {[{'type': tc.get('type'), 'name': tc.get('name') or tc.get('function', {}).get('name')} for tc in client_tools[:3]]}")
                         
                         if server_tools:
                             logger.info(f"🌐 服务端工具已执行: {[t.get('name') for t in server_tools]}")
@@ -1129,6 +1142,7 @@ class SimpleAgent:
                 )
                 
                 # 🔢 累积 usage 统计
+                # ✅ 使用 LLMResponse 中的 model 字段进行计费
                 self.usage_tracker.accumulate(response)
                 
                 if response.content:
@@ -1172,6 +1186,7 @@ class SimpleAgent:
                         system=system_prompt,
                         tools=[]  # 空 tools 列表，强制文本回复
                     )
+                    # ✅ 使用 LLMResponse 中的 model 字段进行计费
                     self.usage_tracker.accumulate(final_response)
                     if final_response.content:
                         yield {"type": "content", "data": {"text": final_response.content}}
@@ -1382,6 +1397,8 @@ class SimpleAgent:
         单独调用一次 LLM，生成用户友好的思考过程。
         不暴露项目内部逻辑、工具调用细节、技术架构等敏感信息。
         
+        ⚠️ 注意：这是一个独立的 LLM 调用，需要记录计费！
+        
         Args:
             user_query: 用户查询
             messages: 完整的对话历史（用于上下文理解）
@@ -1422,6 +1439,7 @@ Please output your thinking process:"""
         
         logger.info(f"🧠 开始生成模拟思考: query={user_query[:50]}..., context_length={len(conversation_context)}")
         
+        final_response = None  # 🔧 记录最终响应用于计费
         try:
             async for chunk in self.llm.create_message_stream(
                 messages=[Message(role="user", content=simulated_prompt.format(
@@ -1434,6 +1452,14 @@ Please output your thinking process:"""
             ):
                 if chunk.content and chunk.is_stream:
                     yield chunk.content
+                # 🔧 保存最终响应
+                if not chunk.is_stream:
+                    final_response = chunk
+            
+            # ✅ 记录模拟思考的计费信息（使用 LLMResponse 中的 model 字段）
+            if final_response:
+                self.usage_tracker.accumulate(final_response)
+                logger.info(f"💰 模拟思考计费已记录: model={final_response.model}, tokens={final_response.usage.get('total_tokens', 0) if final_response.usage else 0}")
         except Exception as e:
             logger.error(f"❌ 模拟思考生成失败: {e}")
             yield f"[Thinking process generation failed: {str(e)}]"
@@ -1715,6 +1741,7 @@ Please output your thinking process:"""
         # 保存最终响应到 ctx（供 RVR 循环使用）
         if final_response:
             # 🔢 累积 usage 统计
+            # ✅ 使用 LLMResponse 中的 model 字段进行计费
             self.usage_tracker.accumulate(final_response)
             # 存到 ctx，不再通过事件传递
             ctx.last_llm_response = final_response

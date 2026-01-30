@@ -27,6 +27,7 @@ class LLMProvider(Enum):
     CLAUDE = "claude"
     OPENAI = "openai"
     GEMINI = "gemini"
+    QWEN = "qwen"  # 🆕 通义千问（阿里云）
 
 
 class ToolType(Enum):
@@ -163,6 +164,7 @@ class LLMResponse:
         tool_calls: 工具调用列表
         stop_reason: 停止原因 (end_turn, tool_use, max_tokens, etc.)
         usage: Token 使用统计
+        model: 实际使用的模型名称（用于准确计费）🆕
         raw_content: 原始 content blocks（用于消息续传）
         is_stream: 是否为流式响应
         cache_read_tokens: 缓存读取 tokens（Claude 特有）
@@ -177,6 +179,9 @@ class LLMResponse:
     tool_calls: Optional[List[Dict[str, Any]]] = None
     stop_reason: str = "end_turn"
     usage: Optional[Dict[str, int]] = None
+    
+    # 🆕 实际使用的模型名称（用于准确计费，尤其在容灾切换时）
+    model: Optional[str] = None
     
     # 原始 content 块（用于 tool_use 响应的消息续传）
     raw_content: Optional[List[Any]] = None

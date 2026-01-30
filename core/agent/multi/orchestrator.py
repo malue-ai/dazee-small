@@ -878,12 +878,13 @@ class MultiAgentOrchestrator:
                 )
                 
                 # 🆕 V7.4: 累积每次 LLM 调用的 usage
+                # ✅ 使用 LLMResponse 中的 model 字段进行计费
                 self.usage_tracker.accumulate(llm_response)
                 
                 stop_reason = getattr(llm_response, 'stop_reason', 'end_turn')
                 logger.info(f"   📡 LLM stop_reason: {stop_reason}")
                 
-                # 检查是否有**客户端**工具调用
+                # 检查是否有**客户端**工具调用（统一格式）
                 if stop_reason == "tool_use" and hasattr(llm_response, 'tool_calls') and llm_response.tool_calls:
                     tool_calls = llm_response.tool_calls
                     logger.info(f"   🔧 LLM 请求调用 {len(tool_calls)} 个工具")
@@ -1503,7 +1504,7 @@ class MultiAgentOrchestrator:
                 stop_reason = getattr(llm_response, 'stop_reason', 'end_turn')
                 logger.info(f"   📡 LLM stop_reason: {stop_reason}")
                 
-                # 检查是否有工具调用
+                # 检查是否有工具调用（统一格式）
                 if stop_reason == "tool_use" and hasattr(llm_response, 'tool_calls') and llm_response.tool_calls:
                     tool_calls = llm_response.tool_calls
                     logger.info(f"   🔧 LLM 请求调用 {len(tool_calls)} 个工具")

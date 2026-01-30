@@ -7,6 +7,9 @@ pydantic>=2.5.3,<3.0.0
 anthropic>=0.40.0  # 更新最低版本要求
 mcp>=1.0.0       # MCP 1.x 版本
 
+# OpenAI SDK（用于千问等兼容接口）
+openai>=1.0.0      # 🆕 千问使用 OpenAI 兼容接口
+
 # 配置管理
 pyyaml>=6.0
 python-dotenv>=1.0.0

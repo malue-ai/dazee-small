@@ -357,9 +357,10 @@ class ChatService:
             
             # 记录 Token 使用（如果提供了 tracker）
             if tracker and final_response:
+                # ✅ 使用 LLMResponse 中的 model 字段进行计费
                 tracker.record_call(
                     llm_response=final_response,
-                    model="claude-haiku-4-5-20251001",
+                    model=final_response.model,
                     purpose="preface"
                 )
             

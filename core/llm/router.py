@@ -196,6 +196,19 @@ class ModelRouter(BaseLLMService):
             "base_url": base_url
         }
     
+    def get_current_model(self) -> str:
+        """
+        获取当前实际使用的模型名称
+        
+        Returns:
+            模型名称（如 "qwen-max"）
+        """
+        for target in self.targets:
+            if target.name == self._last_selected:
+                return target.model
+        # 如果找不到，返回 primary 的模型
+        return self.primary.model
+    
     def _select_targets(self) -> List[RouteTarget]:
         """
         选择可用目标
@@ -343,6 +356,10 @@ class ModelRouter(BaseLLMService):
                     self.health_monitor.record_success(target.name, latency_ms)
                 self._record_success(target)
                 self._last_selected = target.name
+                
+                # 🆕 覆盖 response.model 为实际使用的模型（用于准确计费）
+                response.model = target.service.config.model
+                
                 return response
             except Exception as e:
                 latency_ms = (time.time() - start_time) * 1000
@@ -384,6 +401,8 @@ class ModelRouter(BaseLLMService):
                     **kwargs
                 ):
                     yielded = True
+                    # 🆕 覆盖 chunk.model 为实际使用的模型（用于准确计费）
+                    chunk.model = target.service.config.model
                     yield chunk
                 latency_ms = (time.time() - start_time) * 1000
                 if self.health_monitor:

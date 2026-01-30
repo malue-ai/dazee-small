@@ -188,8 +188,23 @@ class HealthProbeService:
                 # 显示失败的密钥
                 if errors:
                     for err in errors:
+                        target_name = err.get("target", "未知")
                         api_key = err.get("api_key_env", "未知")
-                        logger.info(f"      - 密钥 {api_key}: ❌ 不可用")
+                        # 解析 fallback 级别（如 "primary:claude:..." -> "Primary"）
+                        if target_name.startswith("primary:"):
+                            level = "Primary"
+                        elif target_name.startswith("fallback_"):
+                            # 提取数字：fallback_0 -> Fallback 0
+                            parts = target_name.split(":")
+                            if parts[0].startswith("fallback_"):
+                                fb_num = parts[0].replace("fallback_", "")
+                                level = f"Fallback {fb_num}"
+                            else:
+                                level = parts[0].title()
+                        else:
+                            level = "未知"
+                        
+                        logger.info(f"      - [{level}] 密钥 {api_key}: ❌ 不可用")
                         
             except Exception as e:
                 error_msg = str(e)
@@ -258,11 +273,14 @@ class HealthProbeService:
             switched = result.get("switched", False)
             errors = result.get("errors", [])
             
-            status = "healthy"
-            if switched:
-                status = "degraded"  # 已切换到备选
-            if errors and len(errors) >= len(self.profiles):
-                status = "unhealthy"  # 所有模型都失败
+            # 🐛 修复：根据是否有可用 target 判断健康状态
+            # 之前错误地将单个 Profile 的 errors 数量与全局 profiles 列表长度比较
+            if not selected or not selected.get("name"):
+                status = "unhealthy"  # 没有任何可用的 target
+            elif switched:
+                status = "degraded"   # 已切换到 fallback（降级）
+            else:
+                status = "healthy"    # 使用 primary（健康）
             
             return {
                 "status": status,

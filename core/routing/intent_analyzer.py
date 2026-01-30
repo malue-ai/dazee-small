@@ -314,9 +314,10 @@ class IntentAnalyzer:
             
             # 🆕 共享 Tracker 方案：记录意图识别的 LLM 消耗
             if tracker:
+                # ✅ 使用 LLMResponse 中的 model 字段进行计费
                 tracker.record_call(
                     llm_response=response,
-                    model=self.llm.config.model,  # 🔧 修复：使用 config.model 而不是 llm.model
+                    model=response.model,  # 🔧 修复：使用 response.model（容灾切换时会自动更新）
                     purpose="intent_analysis"
                 )
                 logger.debug(f"💰 意图识别计费已记录到共享 Tracker: tracker_id={id(tracker)}")

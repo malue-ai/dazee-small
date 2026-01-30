@@ -8,6 +8,7 @@ LLM 服务模块
 - claude.py: Claude 实现
 - openai.py: OpenAI 实现（占位）
 - gemini.py: Gemini 实现（占位）
+- qwen.py: 千问实现  # 🆕
 
 使用示例：
 ```python
@@ -56,6 +57,13 @@ from .openai import OpenAILLMService
 
 # Gemini 实现（占位）
 from .gemini import GeminiLLMService
+
+# 🆕 千问实现
+from .qwen import (
+    QwenLLMService,
+    QwenConfig,
+    create_qwen_service,
+)
 
 # 格式适配器
 from .adaptor import (
@@ -128,6 +136,15 @@ def _create_single_llm_service(
         return OpenAILLMService(config)
     elif provider == LLMProvider.GEMINI:
         return GeminiLLMService(config)
+    elif provider == LLMProvider.QWEN:  # 🆕 千问
+        from .qwen import QwenLLMService, QwenConfig
+        qwen_config = QwenConfig(
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            **filtered_kwargs
+        )
+        return QwenLLMService(qwen_config)
     else:
         raise ValueError(f"Unknown provider: {provider}")
 
@@ -178,6 +195,7 @@ def create_llm_service(
         LLMProvider.CLAUDE: "claude-sonnet-4-5-20250929",
         LLMProvider.OPENAI: "gpt-4o",
         LLMProvider.GEMINI: "gemini-pro",
+        LLMProvider.QWEN: "qwen-max",  # 🆕 对标 claude-sonnet-4-5
     }
     
     if model is None:
@@ -193,6 +211,7 @@ def create_llm_service(
                 LLMProvider.CLAUDE: "ANTHROPIC_API_KEY",
                 LLMProvider.OPENAI: "OPENAI_API_KEY",
                 LLMProvider.GEMINI: "GOOGLE_API_KEY",
+                LLMProvider.QWEN: "DASHSCOPE_API_KEY",  # 🆕
             }
             api_key = os.getenv(env_keys.get(provider, "ANTHROPIC_API_KEY"))
     

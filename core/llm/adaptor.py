@@ -1039,7 +1039,7 @@ def get_adaptor(provider: str) -> BaseAdaptor:
     获取对应 Provider 的适配器
     
     Args:
-        provider: 提供商名称 (claude, openai, gemini)
+        provider: 提供商名称 (claude, openai, gemini, qwen)
         
     Returns:
         对应的适配器实例
@@ -1048,6 +1048,7 @@ def get_adaptor(provider: str) -> BaseAdaptor:
         "claude": ClaudeAdaptor,
         "openai": OpenAIAdaptor,
         "gemini": GeminiAdaptor,
+        "qwen": OpenAIAdaptor,  # 🆕 千问使用 OpenAI 兼容接口
     }
     
     adaptor_class = adaptors.get(provider.lower())

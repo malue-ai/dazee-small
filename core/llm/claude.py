@@ -1039,6 +1039,7 @@ class ClaudeLLMService(BaseLLMService):
                                     # 🆕 yield tool_use_start 事件
                                     yield LLMResponse(
                                         content="",
+                                        model=self.config.model,  # 🆕
                                         is_stream=True,
                                         tool_use_start={"id": tool_id, "name": tool_name, "type": "tool_use"}
                                     )
@@ -1056,6 +1057,7 @@ class ClaudeLLMService(BaseLLMService):
                                     # 🆕 yield tool_use_start 事件
                                     yield LLMResponse(
                                         content="",
+                                        model=self.config.model,  # 🆕
                                         is_stream=True,
                                         tool_use_start={"id": tool_id, "name": tool_name, "type": "server_tool_use"}
                                     )
@@ -1073,14 +1075,14 @@ class ClaudeLLMService(BaseLLMService):
                                     accumulated_thinking += text
                                     if on_thinking:
                                         on_thinking(text)
-                                    yield LLMResponse(content="", thinking=text, is_stream=True)
+                                    yield LLMResponse(content="", thinking=text, model=self.config.model, is_stream=True)
                                     
                                 elif delta.type == "text_delta":
                                     text = getattr(delta, 'text', '')
                                     accumulated_content += text
                                     if on_content:
                                         on_content(text)
-                                    yield LLMResponse(content=text, is_stream=True)
+                                    yield LLMResponse(content=text, model=self.config.model, is_stream=True)
                                     
                                 elif delta.type == "input_json_delta":
                                     partial_json = getattr(delta, 'partial_json', '')
@@ -1092,6 +1094,7 @@ class ClaudeLLMService(BaseLLMService):
                                     # 🆕 yield input_delta 事件
                                     yield LLMResponse(
                                         content="",
+                                        model=self.config.model,  # 🆕
                                         is_stream=True,
                                         input_delta=partial_json
                                     )
@@ -1182,6 +1185,7 @@ class ClaudeLLMService(BaseLLMService):
                     thinking=accumulated_thinking if accumulated_thinking else None,
                     tool_calls=tool_calls if tool_calls else None,
                     stop_reason="stream_error",
+                    model=self.config.model,  # 🆕
                     raw_content=raw_content,
                     is_stream=False
                 )
@@ -1236,6 +1240,7 @@ class ClaudeLLMService(BaseLLMService):
                 tool_calls=tool_calls if tool_calls else None,
                 stop_reason=stop_reason or "end_turn",
                 usage=usage if usage else None,  # 🔢 流式模式也返回 usage
+                model=self.config.model,  # 🆕 实际使用的模型名称
                 raw_content=raw_content,
                 is_stream=False
             )
@@ -1385,6 +1390,7 @@ class ClaudeLLMService(BaseLLMService):
             tool_calls=tool_calls if tool_calls else None,
             stop_reason=response.stop_reason,
             usage=usage,
+            model=self.config.model,  # 🆕 实际使用的模型名称
             raw_content=raw_content,
             cache_read_tokens=usage.get("cache_read_tokens", 0),
             cache_creation_tokens=usage.get("cache_creation_tokens", 0)

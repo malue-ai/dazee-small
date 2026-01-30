@@ -104,6 +104,13 @@ class APICallingTool(BaseTool):
                 - poll_config: 轮询配置
             context: 工具执行上下文
         """
+        # 🔧 V7.12: 如果 context 提供了 apis_config，使用它更新 self.apis_config
+        if context and hasattr(context, 'apis_config') and context.apis_config:
+            if isinstance(context.apis_config, list):
+                self.apis_config = {api["name"]: api for api in context.apis_config}
+            elif isinstance(context.apis_config, dict):
+                self.apis_config = context.apis_config
+        
         # 从 params 提取参数
         api_name = params.get("api_name")
         parameters = params.get("parameters")
@@ -552,19 +559,50 @@ class APICallingTool(BaseTool):
     
     async def execute_stream(
         self,
-        api_name: Optional[str] = None,
-        url: Optional[str] = None,
-        method: str = "POST",
-        headers: Optional[Dict[str, str]] = None,
-        body: Optional[Dict[str, Any]] = None,
-        mode: str = "stream",
-        parameters: Optional[Dict[str, Any]] = None,  # 🆕 支持简化调用
-        **kwargs
+        params: Dict[str, Any],
+        context: ToolContext
     ) -> AsyncGenerator[str, None]:
-        """流式执行 API 调用"""
+        """
+        流式执行 API 调用（BaseTool 标准接口）
+        
+        Args:
+            params: 工具参数字典，包含:
+                - api_name: API 配置名称
+                - url: 直接指定 URL（可选）
+                - method: HTTP 方法（默认 POST）
+                - headers: 请求头（可选）
+                - body: 请求体（可选）
+                - mode: 调用模式（默认 stream）
+                - parameters: 简化调用参数（可选）
+            context: 工具执行上下文
+        """
+        # 🔧 V7.12: 修改为 BaseTool 标准接口
+        # 如果 context 提供了 apis_config，使用它更新 self.apis_config
+        if context and hasattr(context, 'apis_config') and context.apis_config:
+            if isinstance(context.apis_config, list):
+                self.apis_config = {api["name"]: api for api in context.apis_config}
+            elif isinstance(context.apis_config, dict):
+                self.apis_config = context.apis_config
+        
+        # 提取参数
+        api_name = params.get("api_name")
+        url = params.get("url")
+        method = params.get("method", "POST")
+        headers = params.get("headers")
+        body = params.get("body")
+        mode = params.get("mode", "stream")
+        parameters = params.get("parameters")
+        
+        # 构建框架注入的上下文（用于占位符替换）
+        kwargs = {
+            "user_id": context.user_id,
+            "conversation_id": context.conversation_id,
+            "session_id": context.session_id
+        }
         
         # ===== 🆕 简化调用方式：api_name + parameters =====
         poll_config = None  # 初始化 poll_config
+        
         if api_name and parameters is not None and body is None:
             logger.info(f"📡 [流式简化调用] api_name={api_name}, parameters={list(parameters.keys())}")
             
@@ -577,6 +615,18 @@ class APICallingTool(BaseTool):
             mode = request_config["mode"]
             poll_config = request_config.get("poll_config")  # 🔧 修复：提取 poll_config
             body = request_config["body"]
+        elif api_name and body is not None:
+            # 🔧 V7.12: AI 使用了旧的 body 参数，从配置中提取 mode
+            logger.warning(f"⚠️ AI 使用了旧的 body 参数，api_name={api_name}")
+            api_config = self.apis_config.get(api_name, {})
+            # 如果 mode 是默认值 "stream"，但配置中有 default_mode，使用配置的值
+            if mode == "stream" and "default_mode" in api_config:
+                mode = api_config["default_mode"]
+            # 如果 method 是默认值 "POST"，但配置中有 default_method，使用配置的值
+            if method == "POST" and "default_method" in api_config:
+                method = api_config["default_method"]
+            poll_config = api_config.get("poll_config")
+            logger.info(f"   📋 从配置中提取: mode={mode}, method={method}, api={api_config.get('name')}")
         
         final_url, final_headers, error, _ = self._resolve_api_config(api_name, url, headers)
         
@@ -589,22 +639,19 @@ class APICallingTool(BaseTool):
             body = self._resolve_system_placeholders(body, kwargs)
         
         if mode != "stream":
-            # 🔧 过滤掉 AI 可能非法传入的参数（这些参数不在工具定义中，会与我们显式传入的参数冲突）
-            filtered_kwargs = {k: v for k, v in kwargs.items() 
-                              if k not in ('poll_config', 'mode', 'method', 'url', 'headers', 'body')}
-            
-            # 如果已经通过 parameters 构建了 body，则直接传 body + 原始 parameters + poll_config
-            # 这样 execute 中的 "parameters is None" 检查不会误报，且异步轮询能正常执行
+            # 🔧 V7.12: 使用 BaseTool 标准接口调用 execute
             result = await self.execute(
-                api_name=api_name,
-                url=url,
-                method=method,
-                headers=headers,
-                body=body,
-                mode=mode,
-                poll_config=poll_config,  # 🔧 使用配置中的 poll_config，忽略 AI 传入的
-                parameters=parameters,  # 始终传入，避免误报警告
-                **filtered_kwargs  # 🔧 使用过滤后的 kwargs
+                params={
+                    "api_name": api_name,
+                    "url": url,
+                    "method": method,
+                    "headers": headers,
+                    "body": body,
+                    "mode": mode,
+                    "poll_config": poll_config,
+                    "parameters": parameters
+                },
+                context=context
             )
             yield json.dumps(result, ensure_ascii=False)
             return

@@ -393,6 +393,8 @@ class MCPClientWrapper:
             output = "\n".join(content_parts)
             
             logger.info(f"✅ MCP 工具执行完成: {original_name}")
+            # 🔍 V7.11: 打印完整返回内容（用于调试）
+            logger.info(f"   📤 返回内容: {output}")
             
             
             return {
