@@ -1239,11 +1239,8 @@ class ChatService:
                         except Exception as e:
                             logger.error(f"❌ 中止时发送 billing 事件失败: {str(e)}", exc_info=True)
                         
-                        # 4. finalize 消息
-                        await agent.broadcaster.finalize_message(session_id)
-                        
-                        # 5. 发送 message_stop 事件（对应 ZenO 的 message.assistant.done）
-                        # 🔧 修复：中止时必须发送 done 来正确结束 SSE 流
+                        # 4. 发送 message_stop 事件（对应 ZenO 的 message.assistant.done）
+                        # 🔧 emit_message_stop 内部已包含 finalize 逻辑，无需额外调用
                         await agent.broadcaster.emit_message_stop(
                             session_id=session_id,
                             message_id=assistant_message_id

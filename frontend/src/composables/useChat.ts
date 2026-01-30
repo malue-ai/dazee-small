@@ -582,7 +582,12 @@ export function useChat() {
    */
   function handleContentStart(data: { index: number; content_block: ContentBlock }, msg: UIMessage): void {
     if (!data || typeof data.index !== 'number' || !data.content_block) return
-    const { index, content_block } = data
+    let { index, content_block } = data
+
+    // 支持 index=-1 (自动追加到末尾)
+    if (index === -1) {
+      index = msg.contentBlocks.length
+    }
 
     // 扩展 contentBlocks 数组
     while (msg.contentBlocks.length <= index) {

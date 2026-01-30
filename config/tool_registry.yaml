@@ -24,6 +24,7 @@ core_tools:
   - sandbox_get_public_url      # 获取公开 URL
   - sandbox_upload_file         # 上传文件到 S3
   - sandbox_init_project        # 项目脚手架初始化
+  - nano_banana_image           # Nano Banana Pro 图像生成/编辑
 
 # ==================== 沙盒工具 ====================
 sandbox_tools:

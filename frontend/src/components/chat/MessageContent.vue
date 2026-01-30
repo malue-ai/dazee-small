@@ -33,6 +33,7 @@
           :result="getToolResultContent(block.id)"
           :partial-result="getToolPartialResult(block.id)"
           :status="getToolStatus(block.id)"
+          :intermediate-content="getToolIntermediateContent(block.id)"
         />
       </template>
 
@@ -238,6 +239,24 @@ function getToolPartialResult(toolId) {
       return block.content || null
     }
   }
+  return null
+}
+
+// 获取工具中间内容 (从不完整的 JSON 中提取)
+function getToolIntermediateContent(toolId) {
+  // 尝试从流式结果中提取
+  const partialResult = getToolPartialResult(toolId)
+  if (partialResult) {
+    // 尝试正则匹配 "preview": "..."
+    const previewMatch = partialResult.match(/"preview"\s*:\s*"([^"]+)"/)
+    if (previewMatch && previewMatch[1]) {
+      return {
+        type: 'image',
+        data: previewMatch[1]
+      }
+    }
+  }
+  
   return null
 }
 

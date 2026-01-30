@@ -27,11 +27,17 @@
         <pre class="tool-code" :class="{ 'is-streaming': isStreaming }">{{ formatJson(displayInput) }}</pre>
       </div>
       <!-- 工具输出 -->
-      <div v-if="result || partialResult" class="tool-section">
+      <div v-if="result || partialResult || intermediateContent" class="tool-section">
         <div class="tool-section-label">
           <ArrowUpFromLine class="section-icon" /> 执行结果
         </div>
-        <pre class="tool-code" :class="{ 'is-error': isError, 'is-streaming': isResultStreaming }">{{ formatResult(displayResult) }}</pre>
+        
+        <!-- 中间内容展示 (如图片) -->
+        <div v-if="intermediateContent && intermediateContent.type === 'image'" class="intermediate-image">
+           <img :src="`data:image/png;base64,${intermediateContent.data}`" alt="Generated Image" />
+        </div>
+        
+        <pre v-if="displayResult" class="tool-code" :class="{ 'is-error': isError, 'is-streaming': isResultStreaming }">{{ formatResult(displayResult) }}</pre>
       </div>
     </div>
   </div>
@@ -260,7 +266,8 @@ const props = defineProps({
   status: {
     type: String, // 'pending', 'success', 'error'
     default: 'pending'
-  }
+  },
+  intermediateContent: Object // 中间内容
 })
 
 // 解析输入参数（支持字符串和对象）
@@ -487,6 +494,13 @@ function formatResult(data: any) {
 
 .tool-section:first-child {
   margin-top: 0;
+}
+
+.intermediate-image img {
+  max-width: 100%;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  margin-top: 4px;
 }
 
 .tool-section-label {

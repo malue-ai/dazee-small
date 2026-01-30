@@ -67,6 +67,9 @@ enabled_capabilities:
   # --- PPT 生成类 ---
   slidespeak_render: 1   # SlideSpeak PPT 渲染工具
   
+  # --- 图像生成类 ---
+  nano_banana_image: 1   # Nano Banana Pro 图像生成/编辑工具（Gemini 3 Pro Image）
+  
   # --- 代码沙盒类 ---
   sandbox_tools: 1           # 包含全部沙盒工具（含 sandbox_init_project 脚手架）
   
@@ -113,14 +116,6 @@ mcp_tools:
     capability: "document_creation"
     description: "第一阶段：从自然语言描述生成 Mermaid 流程图，识别核心实体、属性及关系"
     # App ID: a83e8b00-a94e-4cdf-b5f7-ef721e7238c1
-    
-  - name: nano_banana
-    server_url: "https://api.dify.ai/mcp/server/n7rhBjadwzy9bj90/mcp"
-    server_name: "dify"
-    auth_type: "bearer"
-    auth_env: "DIFY_API_KEY"
-    capability: "image_generation"
-    description: "根据文本描述生成图片的工具，调用后会返回一张真实生成的图片 URL"
 
   - name: chatDocuments
     server_url: "https://api.dify.ai/mcp/server/GYultzYga8PRayK5/mcp"

@@ -1638,25 +1638,54 @@ class SimpleAgent:
             if role in ('system', 'tool'):
                 continue
             
-            # 提取文本内容
+            # 提取文本内容和媒体标记
             text_content = ""
+            has_media = False
+            
             if isinstance(content, str):
                 text_content = content
             elif isinstance(content, list):
+                text_parts = []
                 for block in content:
-                    if isinstance(block, dict) and block.get('type') == 'text':
-                        text_content = block.get('text', '')
-                        break
+                    if isinstance(block, dict):
+                        if block.get('type') == 'text':
+                            text_parts.append(block.get('text', ''))
+                        elif block.get('type') == 'image_url':
+                            has_media = True
+                text_content = "".join(text_parts)
             
-            if not text_content:
+            if not text_content and not has_media:
                 continue
             
-            # 清理内容（移除系统注入的上下文信息）
+            # 清理内容（移除系统注入的上下文信息，但保留摘要）
             clean_content = text_content
-            for marker in ["[用户上下文]", "[提取的文档信息]", "[图片url列表信息]", "[文档url列表信息]"]:
+            
+            # [用户上下文] -> 删除
+            if "[用户上下文]" in clean_content:
+                idx = clean_content.find("[用户上下文]")
+                clean_content = clean_content[:idx].strip()
+            
+            # [提取的文档信息] -> 保留摘要
+            if "[提取的文档信息]" in clean_content:
+                idx = clean_content.find("[提取的文档信息]")
+                clean_content = clean_content[:idx].strip()
+                clean_content += " [附带文档]"
+            
+            # [图片url列表信息] -> 保留摘要
+            if "[图片url列表信息]" in clean_content:
+                idx = clean_content.find("[图片url列表信息]")
+                clean_content = clean_content[:idx].strip()
+                has_media = True
+            
+            # 移除其他标记
+            for marker in ["[文档url列表信息]"]:
                 if marker in clean_content:
                     idx = clean_content.find(marker)
                     clean_content = clean_content[:idx].strip()
+            
+            # 追加媒体标记
+            if has_media and "[附带图片]" not in clean_content:
+                clean_content += " [附带图片]"
             
             # 截断过长的内容
             if len(clean_content) > 200:
@@ -1684,60 +1713,63 @@ class SimpleAgent:
             用户查询字符串（限制 500 字符，不含系统注入的上下文信息）
         """
         raw_content = ""
+        has_image = False
         
         for msg in reversed(messages):
-            # 处理 Message 对象
-            if hasattr(msg, 'role') and msg.role == 'user':
-                content = msg.content
+            role = getattr(msg, 'role', None) or (msg.get('role') if isinstance(msg, dict) else None)
+            content = getattr(msg, 'content', None) or (msg.get('content') if isinstance(msg, dict) else None)
+            
+            if role == 'user':
                 if isinstance(content, str):
                     raw_content = content
                     break
                 elif isinstance(content, list):
+                    text_parts = []
                     for block in content:
-                        if isinstance(block, dict) and block.get('type') == 'text':
-                            raw_content = block.get('text', '')
-                            break
-                    if raw_content:
-                        break
-            # 处理字典格式
-            elif isinstance(msg, dict) and msg.get('role') == 'user':
-                content = msg.get('content', '')
-                if isinstance(content, str):
-                    raw_content = content
-                    break
-                elif isinstance(content, list):
-                    for block in content:
-                        if isinstance(block, dict) and block.get('type') == 'text':
-                            raw_content = block.get('text', '')
-                            break
-                    if raw_content:
+                        if isinstance(block, dict):
+                            if block.get('type') == 'text':
+                                text_parts.append(block.get('text', ''))
+                            elif block.get('type') == 'image_url':
+                                has_image = True
+                    
+                    if text_parts or has_image:
+                        raw_content = "".join(text_parts)
                         break
         
-        if not raw_content:
+        if not raw_content and not has_image:
             return ""
         
-        # 过滤掉系统注入的上下文信息（如 [用户上下文]、[提取的文档信息] 等）
-        # 这些信息不应该暴露给模拟思考，避免泄露 locale、timezone 等内部信息
+        # 过滤系统注入信息
         clean_content = raw_content
         
-        # 移除 [用户上下文] 部分
+        # 移除 [用户上下文]
         if "[用户上下文]" in clean_content:
-            # 找到 [用户上下文] 的位置，截取之前的内容
             idx = clean_content.find("[用户上下文]")
             clean_content = clean_content[:idx].strip()
         
-        # 移除 [提取的文档信息] 部分
+        # 处理 [提取的文档信息] -> 转换为简短提示
         if "[提取的文档信息]" in clean_content:
             idx = clean_content.find("[提取的文档信息]")
             clean_content = clean_content[:idx].strip()
-        
-        # 移除其他可能的系统注入标记
-        for marker in ["[图片url列表信息]", "[文档url列表信息]"]:
+            clean_content += " [用户上传了文档]"
+            
+        # 处理 [图片url列表信息] -> 转换为简短提示
+        if "[图片url列表信息]" in clean_content:
+            idx = clean_content.find("[图片url列表信息]")
+            clean_content = clean_content[:idx].strip()
+            has_image = True  # 标记为包含图片
+            
+        # 如果检测到图片 block 或图片 tag，追加提示
+        if has_image and "[用户上传了图片]" not in clean_content:
+            clean_content += " [用户上传了图片]"
+            
+        # 移除其他 tag
+        for marker in ["[文档url列表信息]"]:
             if marker in clean_content:
                 idx = clean_content.find(marker)
                 clean_content = clean_content[:idx].strip()
         
-        return clean_content[:500] if clean_content else ""
+        return clean_content[:500] if clean_content else ("[用户上传了图片]" if has_image else "")
     
     async def _process_stream(
         self,

@@ -66,6 +66,9 @@ unstructured-client>=0.30.6  # 非结构化数据处理客户端
 # 定时任务
 apscheduler>=3.10.0
 
+# Google Gemini API（图像生成）
+google-genai>=1.0.0       # Gemini 3 Pro Image API
+
 # 测试工具
 pytest>=8.0.0             # 测试框架
 pytest-asyncio>=0.23.0    # 异步测试支持

@@ -17,6 +17,7 @@
    - ❌ **禁止裸露 URL**：所有文件/链接必须通过 markdown 链接 `[标题](url)` 或 `send_files` 工具发送，**严禁直接输出 S3/Cloudfront 等原始存储链接**。
 3. **计划管理**（优先级规则）：
    - 非简单问答任务 → **优先** `plan_todo.create({task: "..."})`
+   - **内容规范**：Plan 描述必须使用**自然语言**（如"创建项目结构"），**❌ 严禁提及具体工具名**（如"调用 sandbox_init_project"）。
    - 例外：**可一次性完成的单轮问答** 或 **已有明确文件+问题的数据分析** 可跳过 Plan
    - **🚨 每完成一个步骤 → 必须调用 `plan_todo.update_todo()` 更新状态**
 
@@ -37,6 +38,18 @@
 - 用户要求"搭建系统/管理系统/业务系统" → **走 Ontology 路径**
 - 用户要求"做个小工具/写个页面/简单展示" → **走沙盒路径**
 - **❌ 禁止**：在 Ontology 路径中使用沙盒工具搭建同一个系统
+
+### ⚠️ 沙盒禁用场景（必须遵守）
+
+**沙盒工具仅用于**：轻量应用开发、代码执行、数据处理
+
+**❌ 禁止使用沙盒生成以下内容**：
+| 任务类型 | 禁止工具 | 正确工具 |
+|----------|----------|----------|
+| PPT/演示文稿 | `sandbox_execute_python` + python-pptx | `slidespeak_render`  |
+| 专业文档 | 沙盒 + python-docx | 专用文档工具 |
+
+**原因**：沙盒生成的文档质量低、排版差、不符合专业标准。
 
 ---
 
@@ -160,10 +173,21 @@ api_calling(api_name="wenshu_api", parameters={
 
 **触发条件**：用户需要生成文档、报告、PPT 等
 
+**🚨 PPT 生成（必须遵守）**：
+- **必须使用专用工具**：`slidespeak_render` 或 `ppt_generator`
+- **❌ 禁止使用沙盒生成 PPT**：不允许用 `sandbox_execute_python` + python-pptx 生成 PPT
+- 原因：沙盒生成的 PPT 质量低、排版差、不专业
+
 **执行流程**：
-- **PPT 生成**：使用 `slidespeak_render` 渲染高质量 PPT
+- **PPT 生成**：使用 `slidespeak_render`  渲染高质量 PPT
 - **文档解析**：使用 `document_partition_tool` 解析网络文档
 - **文件发送**：使用 `send_files` 发送最终产物给用户
+
+**PPT 工具选择**：
+| 场景 | 推荐工具 |
+|------|----------|
+| 快速生成、有明确大纲 | `slidespeak_render` |
+| 需要搜索素材、深度内容 | `ppt_generator`（含素材搜集） |
 
 ---
 

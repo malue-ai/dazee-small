@@ -682,21 +682,13 @@ class EventBroadcaster:
         """
         logger.info(f"🔧 [DB_DEBUG] emit_message_stop 开始: session_id={session_id}, message_id={message_id}")
         
-        # 🆕 DEFERRED 策略：先保存累积的 metadata
-        logger.debug(f"🔧 [DB_DEBUG] emit_message_stop: 步骤 1 - flush_pending_metadata")
-        await self._flush_pending_metadata(session_id)
-        
-        # Checkpoint 当前累积的内容（防止最后一段 delta 丢失）
-        # 无论 REALTIME 还是 DEFERRED 策略，message_stop 时都必须保存 content
-        logger.debug(f"🔧 [DB_DEBUG] emit_message_stop: 步骤 2 - checkpoint_message")
-        await self._checkpoint_message(session_id)
-        
-        # 更新状态为 completed
-        logger.debug(f"🔧 [DB_DEBUG] emit_message_stop: 步骤 3 - finalize_message")
-        await self._finalize_message(session_id)
+        # 🔧 优化：合并 3 次 DB 操作为 1 次
+        # 原来：flush_metadata → checkpoint → finalize（3 次 DB 调用）
+        # 现在：一次性保存 content + metadata + status="completed"
+        await self._finalize_message_all(session_id)
         
         # 通过 EventManager 发送事件
-        logger.debug(f"🔧 [DB_DEBUG] emit_message_stop: 步骤 4 - 发送 message_stop 事件")
+        logger.debug(f"🔧 [DB_DEBUG] emit_message_stop: 发送 message_stop 事件")
         result = await self.events.message.emit_message_stop(
             session_id=session_id,
             conversation_id=self.output_conversation_id,
@@ -897,39 +889,64 @@ class EventBroadcaster:
             logger.error(f"❌ 消息完成失败: {str(e)}", exc_info=True)
             logger.error(f"🔧 [DB_DEBUG] _finalize_message 异常: session_id={session_id}, message_id={message_id}, error={e}")
     
+    async def _finalize_message_all(self, session_id: str) -> None:
+        """
+        一次性完成消息（合并 3 次 DB 操作为 1 次）
+        
+        合并了原来的：
+        - _flush_pending_metadata: 保存累积的 metadata
+        - _checkpoint_message: 保存 content
+        - _finalize_message: 更新 status="completed"
+        
+        Args:
+            session_id: Session ID
+        """
+        if not self.conversation_service:
+            logger.warning(f"🔧 _finalize_message_all 跳过: conversation_service 为 None")
+            return
+        
+        message_id = self._session_message_ids.get(session_id)
+        if not message_id:
+            logger.warning(f"🔧 _finalize_message_all 跳过: message_id 为空")
+            return
+        
+        try:
+            # 1. 收集 metadata
+            pending_metadata = self._pending_metadata.get(session_id)
+            
+            # 2. 收集 content
+            content_json = None
+            accumulator = self._accumulators.get(session_id)
+            if accumulator:
+                content_blocks = accumulator.build_for_db()
+                if content_blocks:
+                    content_json = json.dumps(content_blocks, ensure_ascii=False)
+            
+            # 3. 一次性保存：content + metadata + status="completed"
+            await self.conversation_service.update_message(
+                message_id=message_id,
+                content=content_json,
+                status="completed",
+                metadata=pending_metadata
+            )
+            
+            logger.info(f"✅ 消息完成（合并保存）: message_id={message_id}")
+        except Exception as e:
+            logger.error(f"❌ 消息完成失败: {str(e)}", exc_info=True)
+    
     async def finalize_message(self, session_id: str) -> None:
         """
         强制完成消息（公开方法）
         
         用于在 Session 被停止时强制保存当前内容。
-        流程：
-        1. 保存累积的 metadata（DEFERRED 策略）
-        2. Checkpoint 当前累积的 content
-        3. 更新状态为 completed
         
         Args:
             session_id: Session ID
         """
-        logger.info(f"🔧 [DB_DEBUG] finalize_message（公开方法）开始: session_id={session_id}")
+        logger.info(f"🔧 finalize_message（公开方法）: session_id={session_id}")
         
-        # 🆕 先保存累积的 metadata（DEFERRED 策略）
-        logger.debug(f"🔧 [DB_DEBUG] finalize_message: 步骤 1 - flush_pending_metadata")
-        await self._flush_pending_metadata(session_id)
-        
-        # 保存当前累积的 content
-        accumulator = self._accumulators.get(session_id)
-        message_id = self._session_message_ids.get(session_id)
-        logger.debug(f"🔧 [DB_DEBUG] finalize_message: has_accumulator={accumulator is not None}, message_id={message_id}")
-        
-        if accumulator and message_id:
-            logger.debug(f"🔧 [DB_DEBUG] finalize_message: 步骤 2 - checkpoint_message")
-            await self._checkpoint_message(session_id)
-        else:
-            logger.warning(f"🔧 [DB_DEBUG] finalize_message: 跳过 checkpoint（accumulator 或 message_id 为空）")
-        
-        # 更新状态为 completed
-        logger.debug(f"🔧 [DB_DEBUG] finalize_message: 步骤 3 - _finalize_message")
-        await self._finalize_message(session_id)
+        # 🔧 优化：使用合并后的方法，1 次 DB 操作完成所有保存
+        await self._finalize_message_all(session_id)
         
         logger.info(f"🔧 [DB_DEBUG] finalize_message（公开方法）完成: session_id={session_id}")
     
