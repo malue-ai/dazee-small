@@ -119,25 +119,15 @@ class RVRBAgent(SimpleAgent, BacktrackMixin):
         conversation_service = None
     ) -> "RVRBAgent":
         """
-        从原型克隆 Agent 实例
+        🆕 V10.0: 从原型克隆 Agent 实例（委托给 AgentFactory）
         
-        重写以确保正确初始化回溯组件
+        克隆逻辑已移至 AgentFactory.clone_for_session()，
+        保持 Factory 作为唯一创建/克隆入口。
         """
-        # 调用父类克隆
-        clone = SimpleAgent.clone_for_session(
-            self,
+        from core.agent.factory import AgentFactory
+        return AgentFactory.clone_for_session(
+            prototype=self,
             event_manager=event_manager,
             workspace_dir=workspace_dir,
             conversation_service=conversation_service
         )
-        
-        # 转换类型
-        clone.__class__ = RVRBAgent
-        
-        # 初始化回溯组件
-        clone._max_backtracks = self._max_backtracks
-        clone._error_classifier = None
-        clone._backtrack_manager = None
-        clone._rvrb_states = {}
-        
-        return clone

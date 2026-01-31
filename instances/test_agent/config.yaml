@@ -20,8 +20,8 @@ instance:
 # ==================== Agent 配置覆盖 ====================
 
 agent:
-  # 使用 Claude Sonnet 模型（平衡能力和成本）
-  model: "claude-sonnet-4-5-20250929"
+  # 🆕 使用 Claude Haiku 4.5（最新版，支持 thinking，速度快）
+  model: "claude-haiku-4-5-20251001"
   
   # 最大对话轮数
   max_turns: 20
@@ -34,7 +34,7 @@ agent:
   
   # LLM 超参数
   llm:
-    # 启用深度思考（复杂推理任务）
+    # 🆕 Haiku 4.5 支持 thinking，用于复杂推理
     enable_thinking: true
     thinking_budget: 10000
     

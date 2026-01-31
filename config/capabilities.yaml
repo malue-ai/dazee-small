@@ -1,3 +1,33 @@
+# ==================== 工具选择配置 ====================
+#
+# 🆕 V10.0: 将硬编码的工具列表移至配置文件
+#
+# 📌 设计原则：
+#   1. 核心工具（core_tools）：始终加载，不受动态选择影响
+#   2. 原生工具（native_tools）：Claude 原生支持的工具
+#   3. 串行工具（serial_only_tools）：不支持并行执行的工具
+#
+tool_selection:
+  # 核心工具（Level 1）- 始终加载
+  # 这些工具是智能体的基础能力，不受任务类型影响
+  core_tools:
+    - plan_todo                      # 任务规划工具
+    - request_human_confirmation     # 人工确认工具
+  
+  # Claude 原生工具 - 直接使用字符串传递给 Claude API
+  # 支持的原生工具：bash, text_editor, web_search
+  # 注意：computer 和 memory 工具需要特殊 beta header，暂不包含
+  native_tools:
+    - bash
+    - text_editor
+    - web_search
+  
+  # 串行执行工具 - 不支持并行调用的工具
+  # 这些工具需要等待用户响应或有状态依赖
+  serial_only_tools:
+    - plan_todo
+    - request_human_confirmation
+
 # ==================== 任务类型 → 能力映射 ====================
 #
 # 📌 设计原则：
@@ -232,6 +262,32 @@ capability_categories:
   category_type: internal
   description: 代码沙箱执行（框架内部）
   internal: true
+
+# ========== Nodes 本地操作类别（V9.0 新增）==========
+# 借鉴 clawdbot 的 Nodes 架构
+
+- id: nodes_operation
+  category_type: internal
+  description: 节点操作（发现、管理、调用本地/远程节点）
+  internal: true
+  use_when: 需要与本地或远程节点交互
+
+- id: local_automation
+  category_type: business
+  description: 本地系统自动化（macOS/Windows/Linux）
+  use_when: 需要控制本地应用、文件系统、系统功能
+  examples:
+    - 打开应用程序
+    - 控制浏览器
+    - 执行 shell 命令
+    - 发送系统通知
+    - 截取屏幕截图
+
+- id: applescript_execution
+  category_type: internal
+  description: AppleScript 执行（macOS 专用）
+  internal: true
+  use_when: 需要通过 AppleScript 控制 macOS 应用
 
 - id: api_calling
   category_type: internal
@@ -1162,6 +1218,97 @@ capabilities:
     - 探索
     - 自定义
     - 动态
+
+# ==================== Nodes 工具（V9.0 新增）====================
+# 借鉴 clawdbot 的 nodes 工具设计
+
+- name: nodes
+  type: TOOL
+  subtype: CUSTOM
+  provider: user  # 自定义工具，需要通过 implementation 加载
+  level: 1  # 核心工具，始终加载
+  cache_stable: false
+  implementation:
+    module: tools.nodes_tool
+    class: NodesTool
+  capabilities:
+    - nodes_operation
+    - local_automation
+    - applescript_execution
+  priority: 95
+  cost:
+    time: fast
+    money: free
+  constraints:
+    requires_api: false
+    requires_local_node: true
+    os_restriction: [darwin, win32, linux]
+  metadata:
+    description: |
+      发现和操作本地/远程节点。借鉴 clawdbot Nodes 架构。
+      
+      核心能力：
+      - status: 列出所有节点状态
+      - describe: 获取节点详细信息
+      - run: 在节点上执行 shell 命令
+      - notify: 发送系统通知
+      - which: 检查可执行文件是否存在
+      
+      使用场景：
+      - 打开应用程序（open -a Safari）
+      - 执行 AppleScript（osascript）
+      - 文件系统操作
+      - 系统通知
+    preferred_for:
+      - 本地系统操作
+      - 应用控制
+      - shell 命令执行
+      - 系统通知
+    keywords:
+      - nodes
+      - 本地
+      - 系统
+      - 命令
+      - 执行
+      - shell
+      - applescript
+      - 通知
+  input_schema:
+    type: object
+    properties:
+      action:
+        type: string
+        enum: [status, describe, run, notify, which]
+        description: 操作类型
+      node:
+        type: string
+        description: 目标节点 ID（默认 "local"）
+        default: "local"
+      command:
+        type: array
+        items:
+          type: string
+        description: 要执行的命令（run action），如 ["open", "-a", "Safari"]
+      cwd:
+        type: string
+        description: 工作目录（run action）
+      env:
+        type: object
+        description: 环境变量（run action）
+      timeout_ms:
+        type: integer
+        description: 超时毫秒数
+        default: 30000
+      title:
+        type: string
+        description: 通知标题（notify action）
+      message:
+        type: string
+        description: 通知内容（notify action）
+      executable:
+        type: string
+        description: 可执行文件名（which action）
+    required: [action]
 # ==================== 沙盒工具（精简版 - Level 1 核心） ====================
 # 只保留 3 个核心工具，其他用 bash 命令替代
 - name: sandbox_write_file

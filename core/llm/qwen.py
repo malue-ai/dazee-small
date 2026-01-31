@@ -1,5 +1,7 @@
 """
 Qwen LLM 服务实现（DashScope SDK）
+
+🆕 V7.3: 支持网络重试机制（指数退避策略）
 """
 
 import asyncio
@@ -8,8 +10,10 @@ import threading
 from typing import Dict, Any, Optional, List, Union, AsyncIterator, Callable
 
 import dashscope
+import httpx
 
 from logger import get_logger
+from infra.resilience import with_retry
 from .base import (
     BaseLLMService,
     LLMConfig,
@@ -246,6 +250,20 @@ class QwenLLMService(BaseLLMService):
             raw_content=raw_content or None
         )
     
+    @with_retry(
+        max_retries=3,
+        base_delay=1.0,
+        retryable_errors=(
+            # DashScope 网络相关异常
+            ConnectionError,
+            TimeoutError,
+            asyncio.TimeoutError,
+            # httpx 底层异常
+            httpx.RemoteProtocolError,
+            httpx.ConnectError,
+            httpx.TimeoutException,
+        )
+    )
     async def create_message_async(
         self,
         messages: List[Message],
@@ -255,6 +273,11 @@ class QwenLLMService(BaseLLMService):
     ) -> LLMResponse:
         """
         创建消息（异步）
+        
+        🆕 V7.3: 自动网络重试（指数退避策略）
+        - 最大重试 3 次
+        - 基础延迟 1 秒（指数增长：1s → 2s → 4s）
+        - 自动处理：连接错误、超时、限流（429）
         """
         params = self._build_payload(messages, system, tools, **kwargs)
         

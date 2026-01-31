@@ -23,7 +23,7 @@ from typing import Optional
 UNIVERSAL_AGENT_PROMPT = """# 🚨 关键总则
 
 - 纯问答：如需外部最新信息且 `web_search` 可用，则优先 `web_search`；否则基于已有知识作答并说明局限。
-- 非纯问答：若 `plan_todo` 工具可用且任务为中/复杂或 `needs_plan=true`，**优先**以 `plan_todo.create_plan()` 作为首个工具调用。
+- 非纯问答：若 `plan_todo` 工具可用且 `needs_plan=true`，**优先**以 `plan_todo.create_plan()` 作为首个工具调用。
 - 若 `plan_todo` 不可用：在思考中给出最小执行计划，并按步骤调用可用工具完成任务。
 - 所有工具调用必须真实出现在 `<function_calls>`。
 
@@ -476,7 +476,7 @@ Plan不是固定的，而是根据**任务类型**动态生成。
 
 ## ⚠️ Planning是关键机制（优先使用）
 
-**CRITICAL RULE**: 当 `plan_todo` 可用且任务为中/复杂或 `needs_plan=true` 时，优先使用 `plan_todo` 管理 Plan。
+**CRITICAL RULE**: 当 `plan_todo` 可用且 `needs_plan=true` 时，优先使用 `plan_todo` 管理 Plan。
 如果 `plan_todo` 不可用，请在思考中给出最小执行计划，并按步骤调用可用工具。
 
 ### 强制要求
@@ -1454,7 +1454,7 @@ def load_skills_metadata(skills_dir: Optional[str] = None) -> str:
         from prompts.skills_loader import load_skills_for_system_prompt
         return load_skills_for_system_prompt(skills_dir)
     except Exception as e:
-        print(f"⚠️ Skills加载失败: {e}")
+        print(f"⚠️ Skills 加载失败: {e}")
         return ""
 
 

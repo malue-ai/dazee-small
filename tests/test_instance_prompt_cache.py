@@ -273,7 +273,7 @@ class TestE2EFlow:
     @pytest.mark.asyncio
     async def test_intent_analyzer_with_cache(self):
         """测试 IntentAnalyzer 使用缓存的提示词"""
-        from core.agent.intent_analyzer import create_intent_analyzer
+        from core.routing.intent_analyzer import create_intent_analyzer
         from core.llm import create_claude_service
         
         # 准备缓存

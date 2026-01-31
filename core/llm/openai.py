@@ -3,10 +3,13 @@ OpenAI 兼容 LLM 服务实现
 
 支持 OpenAI / OpenAI-Compatible 接口（用于 Qwen/DeepSeek 等兼容端点）
 
+🆕 V7.3: 支持网络重试机制（指数退避策略）
+
 参考：
 - https://platform.openai.com/docs/api-reference/chat
 """
 
+import asyncio
 from typing import Dict, Any, Optional, List, Union, AsyncIterator, Callable
 import json
 import os
@@ -15,6 +18,7 @@ import time
 import httpx
 
 from logger import get_logger
+from infra.resilience import with_retry
 from .base import (
     BaseLLMService,
     LLMConfig,
@@ -133,6 +137,20 @@ class OpenAILLMService(BaseLLMService):
             "input_schema": input_schema
         })
     
+    @with_retry(
+        max_retries=3,
+        base_delay=1.0,
+        retryable_errors=(
+            # OpenAI 网络相关异常
+            ConnectionError,
+            TimeoutError,
+            asyncio.TimeoutError,
+            # httpx 底层异常
+            httpx.RemoteProtocolError,
+            httpx.ConnectError,
+            httpx.TimeoutException,
+        )
+    )
     async def create_message_async(
         self,
         messages: List[Message],
@@ -142,6 +160,11 @@ class OpenAILLMService(BaseLLMService):
     ) -> LLMResponse:
         """
         创建消息（异步）
+        
+        🆕 V7.3: 自动网络重试（指数退避策略）
+        - 最大重试 3 次
+        - 基础延迟 1 秒（指数增长：1s → 2s → 4s）
+        - 自动处理：连接错误、超时、限流（429）
         
         Args:
             messages: 消息列表

@@ -1338,14 +1338,48 @@ class ClaudeLLMService(BaseLLMService):
                                         })
                         except Exception as e:
                             logger.warning(f"获取最终消息失败: {e}")
-        except (httpx.RemoteProtocolError, Exception) as stream_error:
+        except (httpx.RemoteProtocolError, httpx.ReadError, ConnectionResetError, Exception) as stream_error:
             # 🚨 流式传输中断：记录已接收的事件数和已累积的内容
             error_msg = str(stream_error)
+            is_connection_reset = (
+                "connection reset" in error_msg.lower() or
+                "read: connection reset by peer" in error_msg.lower() or
+                isinstance(stream_error, ConnectionResetError)
+            )
+            
             logger.error(f"❌ 流式传输中断: {error_msg}")
             logger.error(f"   已接收事件数: {event_count}")
             logger.error(f"   已累积 thinking: {len(accumulated_thinking)} chars")
             logger.error(f"   已累积 content: {len(accumulated_content)} chars")
             logger.error(f"   已解析 tool_calls: {len(tool_calls)}")
+            
+            # 🆕 重试逻辑：connection reset 且没有累积内容时自动重试
+            # 这种情况通常是 Claude 服务端因空字符串输出而崩溃
+            if is_connection_reset and not accumulated_content and not accumulated_thinking and not tool_calls:
+                retry_count = kwargs.get("_stream_retry_count", 0)
+                max_retries = 2  # 最多重试 2 次
+                
+                if retry_count < max_retries:
+                    import asyncio
+                    delay = (retry_count + 1) * 1.0  # 指数退避：1s, 2s
+                    logger.warning(f"🔄 Connection reset（无内容），第 {retry_count + 1}/{max_retries} 次重试，延迟 {delay}s...")
+                    await asyncio.sleep(delay)
+                    
+                    # 递归重试
+                    kwargs["_stream_retry_count"] = retry_count + 1
+                    async for event in self.create_message_stream(
+                        messages=messages,
+                        system=system,
+                        tools=tools,
+                        on_thinking=on_thinking,
+                        on_content=on_content,
+                        on_tool_call=on_tool_call,
+                        **kwargs
+                    ):
+                        yield event
+                    return
+                else:
+                    logger.error(f"❌ 重试 {max_retries} 次后仍失败")
             
             # 如果有部分内容，尝试返回（降级处理）
             if accumulated_content or accumulated_thinking or tool_calls:

@@ -2,16 +2,21 @@
 奖励归因模块
 
 V8.0 新增
+V9.4 增强：支持数据库持久化
 
 职责：
 - 细粒度步骤级奖励归因
 - 识别成功/失败的关键步骤
 - 为策略优化提供数据支持
+- 🆕 V9.4: 持久化存储支持
 
 设计原则：
 - 从会话级评估到步骤级评估
 - 支持多种归因策略
 - 可与人工评审结合
+
+持久化配置（V9.4）：
+    export REWARD_PERSIST_ENABLED=true  # 启用持久化
 """
 
 from dataclasses import dataclass, field
@@ -171,6 +176,7 @@ class RewardAttribution:
         self,
         llm_service: Any = None,
         default_method: AttributionMethod = AttributionMethod.DIRECT,
+        persist_enabled: bool = None,  # 🆕 V9.4: 持久化开关
     ):
         """
         初始化奖励归因器
@@ -178,16 +184,25 @@ class RewardAttribution:
         Args:
             llm_service: LLM 服务（用于自动评估）
             default_method: 默认归因方法
+            persist_enabled: 是否启用持久化（默认从环境变量读取）
         """
+        import os
+        
         self.llm_service = llm_service
         self.default_method = default_method
+        
+        # 🆕 V9.4: 持久化配置
+        if persist_enabled is None:
+            persist_enabled = os.getenv("REWARD_PERSIST_ENABLED", "false").lower() == "true"
+        self.persist_enabled = persist_enabled
         
         # 会话数据
         self._sessions: Dict[str, SessionReward] = {}
         self._step_buffer: Dict[str, List[Dict[str, Any]]] = {}
         
         logger.info(
-            f"✅ RewardAttribution 初始化: method={default_method.value}"
+            f"✅ RewardAttribution 初始化: method={default_method.value}, "
+            f"persist={persist_enabled}"
         )
     
     def start_session(
@@ -335,7 +350,102 @@ class RewardAttribution:
             f"steps={session.total_steps}"
         )
         
+        # 🆕 V9.4: 持久化存储
+        if self.persist_enabled:
+            try:
+                await self.persist_session(session)
+            except Exception as e:
+                logger.warning(f"⚠️ 会话奖励持久化失败: {e}")
+        
         return session
+    
+    async def persist_session(self, session: SessionReward) -> bool:
+        """
+        🆕 V9.4: 持久化会话奖励到数据库
+        
+        Args:
+            session: 会话奖励对象
+            
+        Returns:
+            是否成功
+        """
+        try:
+            from infra.database import AsyncSessionLocal
+            from infra.database.crud.continuous_learning import (
+                create_session_reward,
+                create_step_rewards_batch,
+            )
+            from infra.database.models.continuous_learning import (
+                AttributionMethod as DBAttributionMethod,
+            )
+            
+            async with AsyncSessionLocal() as db_session:
+                # 映射归因方法
+                method_mapping = {
+                    AttributionMethod.DIRECT: DBAttributionMethod.UNIFORM,
+                    AttributionMethod.TEMPORAL_DIFFERENCE: DBAttributionMethod.DECAY,
+                    AttributionMethod.MONTE_CARLO: DBAttributionMethod.LLM_JUDGE,
+                    AttributionMethod.ADVANTAGE: DBAttributionMethod.ADVANTAGE,
+                }
+                db_method = method_mapping.get(
+                    self.default_method, DBAttributionMethod.DECAY
+                )
+                
+                # 创建会话奖励记录
+                record = await create_session_reward(
+                    session=db_session,
+                    session_id=session.session_id,
+                    total_reward=session.total_reward,
+                    outcome_success=session.outcome_success,
+                    attribution_method=db_method,
+                    conversation_id=session.conversation_id,
+                    user_id=session.user_id,
+                    total_steps=session.total_steps,
+                    successful_steps=session.successful_steps,
+                    failed_steps=session.failed_steps,
+                    critical_steps=session.critical_steps,
+                    session_start=session.start_time,
+                    session_end=session.end_time,
+                    total_duration_ms=session.total_duration_ms,
+                    evaluated_by=session.evaluated_by,
+                    evaluator_notes=session.evaluator_notes,
+                )
+                
+                # 创建步骤奖励记录
+                if session.step_rewards:
+                    steps_data = []
+                    for step in session.step_rewards:
+                        steps_data.append({
+                            "step_index": step.step_index,
+                            "action_type": step.action_type,
+                            "action_name": step.action_name,
+                            "reward_value": step.reward_value,
+                            "success": step.success,
+                            "execution_time_ms": step.execution_time_ms,
+                            "error_message": step.error,
+                            "is_critical": step.is_critical,
+                            "impact_on_outcome": step.impact_on_outcome,
+                            "input_summary": step.input_summary,
+                            "output_summary": step.output_summary,
+                            "contribution_weight": step.contribution_weight,
+                            "confidence": step.confidence,
+                        })
+                    
+                    await create_step_rewards_batch(
+                        session=db_session,
+                        session_reward_id=record.id,
+                        steps=steps_data
+                    )
+                
+                logger.info(f"💾 会话奖励已持久化: {session.session_id}")
+                return True
+                
+        except ImportError as e:
+            logger.warning(f"⚠️ 数据库模块未安装: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"❌ 持久化失败: {e}", exc_info=True)
+            return False
     
     async def _compute_step_rewards(
         self,

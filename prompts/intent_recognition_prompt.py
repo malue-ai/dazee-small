@@ -3,12 +3,14 @@ Intent Recognition Prompt - 模块化版本
 
 🆕 V4.6.2: 重构为模块化结构，支持动态组装
 🆕 V6.1: 新增上下文感知模块（追问识别）
+🆕 V9.2: 新增 task_dependency_type 字段，优化 Multi-Agent 和 RVR-B 决策逻辑
 
 职责：
 - 快速分类任务类型和复杂度
 - 决定系统提示词级别
 - 判断是否需要 Mem0 记忆检索（基于 few-shot 示例）
 - 识别追问/新话题（上下文感知）
+- 判断任务依赖类型（并行/串行/混合）
 - 不分析所需能力（由 Sonnet 在 Plan 阶段完成）
 
 设计原则：
@@ -16,6 +18,7 @@ Intent Recognition Prompt - 模块化版本
 - Sonnet 做深度推理（强+准确）
 - 使用 few-shot 示例引导决策，而非硬编码规则
 - 运营人员配置 + 高质量默认模板 → 场景化意图识别提示词
+- LLM-First：语义驱动决策，而非硬编码数量阈值
 
 模块化设计：
 - INTENT_PROMPT_HEADER: 固定头部（输出格式定义）
@@ -49,6 +52,7 @@ Analyze the user query (considering conversation history if provided) and classi
   "needs_plan": true|false,
   "skip_memory_retrieval": true|false,
   "needs_multi_agent": true|false,
+  "task_dependency_type": "independent"|"sequential"|"mixed",
   "is_follow_up": true|false,
   "suggested_planning_depth": null|"none"|"minimal"|"full",
   "requires_deep_reasoning": true|false,
@@ -64,94 +68,123 @@ Analyze the user query (considering conversation history if provided) and classi
 INTENT_PROMPT_TASK_TYPES = """
 ## Classification Rules
 
-### Task Type
-- **information_query**: Search, lookup, Q&A
-  - Examples: "weather?", "search AI papers", "what is X?"
-  
-- **content_generation**: Create documents, presentations, reports
-  - Examples: "generate PPT", "write report", "create slides"
-  
-- **data_analysis**: Process data, statistics, analysis
-  - Examples: "analyze sales data", "chart from Excel", "calculate trends"
-  
-- **code_task**: Write, debug, or execute code
-  - Examples: "write Python script", "debug this code", "refactor function"
-  
-- **other**: Everything else
+### Task Type（按优先级判断）
+
+**优先级 1 - code_task**: 任何涉及编写、调试、重构代码的任务
+- 关键词：写代码、写函数、写脚本、开发、实现、编程、Python、JavaScript、排序算法、API、前端、后端
+- 中文示例：
+  - "帮我写一个 Python 排序函数" → code_task
+  - "帮我开发一个用户注册功能" → code_task
+  - "写一个爬虫脚本" → code_task
+  - "帮我实现快速排序算法" → code_task
+  - "帮我 write a Python function 来实现 quick sort" → code_task（中英混合也是代码任务）
+- 英文示例："write Python script", "debug this code", "refactor function", "implement sorting algorithm"
+
+**优先级 2 - data_analysis**: 分析数据、统计、对比研究
+- 关键词：分析、对比、调研、统计、趋势、报告（基于数据的）
+- 示例："analyze sales data", "chart from Excel", "calculate trends", "调研竞品"
+
+**优先级 3 - content_generation**: 创建文档、PPT、报告（非代码）
+- 关键词：生成PPT、写报告、写邮件、翻译、润色
+- 示例："generate PPT", "write report", "create slides", "翻译这段话"
+
+**优先级 4 - information_query**: 查询信息、问答
+- 关键词：查询、搜索、是什么、怎么样、天气、时间
+- 示例："weather?", "search AI papers", "what is X?", "今天天气怎么样"
+
+**优先级 5 - other**: 以上都不匹配时使用
+- 示例：闲聊、模糊请求（如"帮帮我"、"处理一下这个"）
 """
 
 INTENT_PROMPT_COMPLEXITY = """
 ### Complexity (Level)
 - **simple**: Single-step, direct answer
-  - 1 action, immediate result
-  - Examples: "weather?", "current time?", "what is Python?"
+  - 例: "weather?", "current time?", "what is Python?"
   
 - **medium**: 2-4 steps, straightforward workflow
-  - Examples: "search and summarize", "write function", "analyze data"
+  - 例: "search and summarize", "write function", "analyze data"
   
 - **complex**: 5+ steps, requires planning
-  - Examples: "create product PPT with research", "analyze market and write strategy"
+  - 例: "create product PPT with research", "analyze market and write strategy"
 
 ### Complexity Score (0-10)
 
-除了 complexity 等级，还需要输出一个精确的 **complexity_score** (0-10):
-
-| 分数范围 | 路由决策 | 典型场景 |
-|----------|----------|----------|
-| 0-3 | 单智能体 | 简单问答、信息查询、翻译 |
-| 3-5 | 单智能体（带 Plan） | 内容生成、数据分析、代码任务 |
-| 5-7 | 可选多智能体 | 较复杂任务，视情况决定 |
-| 7-10 | 多智能体 | 多实体并行研究、复杂工作流 |
-
-**评分维度（参考，非硬规则）**：
-- 任务步骤数：1步(+0) / 2-4步(+2) / 5+步(+4)
-- 工具依赖：无工具(+0) / 1-2工具(+1) / 3+工具(+3)
-- 并行子任务：无(+0) / 有(+3)
-- 上下文依赖：低(+0) / 中(+1) / 高(+2)
+根据 complexity 给出对应分数：
+- simple → 0-3
+- medium → 3-6
+- complex → 6-10
 
 ### Needs Plan
-- **true**: complexity is medium or complex
-- **false**: complexity is simple
+根据 complexity 判断：
+- simple → false
+- medium/complex → true
 
-### V7.8 LLM 语义建议（可选，用于运行时参数优化）
+### 字段一致性约束（必须遵守）
 
-这些字段帮助框架更精准地配置 Agent 运行时参数：
+以下字段必须逻辑一致，禁止矛盾组合：
 
-**suggested_planning_depth** (可选):
-- none: 不需要规划（直接回答）
-- minimal: 最小规划（3-5 步）
-- full: 完整规划（详细步骤 + 质量验证）
-- 不确定时填 null
+| complexity | needs_plan | suggested_planning_depth | execution_strategy |
+|------------|------------|--------------------------|-------------------|
+| simple | false | none 或 null | rvr |
+| medium | true | minimal | rvr 或 rvr-b |
+| complex | true | full | rvr-b |
+
+### 语义建议字段
+
+**suggested_planning_depth**:
+- **none**: 任务可直接回答，无需分步骤
+  - 例: "今天天气？", "Python 是什么？"
+- **minimal**: 任务需要 2-3 个简单步骤
+  - 例: "搜索并总结", "写个函数"
+- **full**: 任务需要完整规划（5+ 步骤，多工具协作）
+  - 例: "调研竞品并写分析报告", "重构整个模块"
+- **null**: 不确定时填 null
 
 **requires_deep_reasoning**:
-- true: 即使问题简短，也需要深度推理（如"解释量子纠缠"）
-- false: 任务复杂度与问题长度相符
-- 默认 false
+- **true**: 问题简短但需要深度思考
+  - 例: "解释量子纠缠", "证明哥德尔不完备定理"
+- **false**: 复杂度与问题长度相符（默认）
 
-**tool_usage_hint** (可选):
-- single: 只需 1 个工具调用
-- sequential: 多个工具串行调用（有依赖）
-- parallel: 多个工具可并行调用（无依赖）
-- 不确定时填 null
+**tool_usage_hint**:
+- **single**: 只需调用 1 个工具
+  - 例: "搜索 AI 论文", "查天气"
+- **sequential**: 多个工具按顺序调用（后者依赖前者结果）
+  - 例: "搜索数据 → 分析 → 生成图表"
+- **parallel**: 多个工具可同时调用（无依赖）
+  - 例: "同时搜索 A、B、C 三个竞品"
+- **null**: 不确定时填 null
 
-### V8.0 执行策略（单智能体路由）
+### execution_strategy (必填) - 语义驱动决策
 
-**execution_strategy** (必填):
-- **rvr**: 标准执行循环（React-Validate-Reflect）
-  - 适用：简单确定性任务、单步工具调用、直接问答
-  - 特点：轻量高效，无回溯开销
-  
-- **rvr-b**: 带回溯的执行循环（RVR + Backtrack）
-  - 适用：探索性任务、可能失败需重试、多步骤复杂任务
-  - 特点：工具失败可尝试替代方案，策略动态调整
+执行策略决定使用 SimpleAgent (rvr) 还是 RVRBAgent (rvr-b)。
 
-**判断依据**：
-- 任务是否可能失败并需要备选方案？→ rvr-b
-- 是否涉及多步骤且步骤间有依赖？→ rvr-b
-- 是否为探索性任务（结果不确定）？→ rvr-b
-- 简单问答、单一工具、确定性结果？→ rvr
+#### RVR-B 触发条件（满足任一即选 rvr-b）
 
-**默认值**: rvr（不确定时使用标准循环）
+1. **探索性任务**：结果不确定，可能需要多次尝试
+   - 例: "调研市场趋势", "探索可行方案"
+   
+2. **失败恢复需求**：工具调用可能失败，需要备选方案
+   - 例: "爬取网页数据", "调用第三方 API"
+   
+3. **多步骤依赖**：后续步骤依赖前序结果
+   - 例: "写代码 → 运行测试 → 修复 bug"
+   
+4. **代码开发任务**：需要编译/测试验证
+   - 例: "开发用户注册功能", "重构这个模块"
+
+#### RVR 触发条件（必须同时满足）
+
+1. **确定性任务**：结果可预测
+2. **单步或简单工具调用**
+3. **无失败恢复需求**
+
+**典型 rvr 场景**:
+- "查天气", "翻译这句话", "1+1=?", "Python 是什么?"
+
+**典型 rvr-b 场景**:
+- "调研并写报告", "开发一个功能", "分析多个数据源", "重构整个模块"
+
+**默认值**: rvr（不确定时选择简单模式）
 """
 
 INTENT_PROMPT_CONTEXT_AWARENESS = """
@@ -323,94 +356,201 @@ INTENT_PROMPT_MEMORY = """
 """
 
 INTENT_PROMPT_MULTI_AGENT = """
+### Task Dependency Type（任务依赖类型）- 🆕 V9.2
+
+**task_dependency_type** 是决定 Multi-Agent 和执行策略的核心字段。
+
+#### 三种依赖类型
+
+- **independent**: 子任务互不依赖，可完全并行
+  - 例: "同时查询北京、上海、广州天气"
+  - 例: "研究 AWS、Azure、GCP 三家公司"（每家公司的研究独立）
+  
+- **sequential**: 子任务有前后依赖，必须串行
+  - 例: "写代码 → 运行测试 → 修复 bug"
+  - 例: "分析数据 → 生成图表 → 写报告"
+  - 例: "开发前端 → 开发后端 → 集成测试"（后者依赖前者）
+  
+- **mixed**: 部分可并行，部分需串行
+  - 例: "分别调研 3 家公司（并行）→ 最后汇总对比（串行）"
+  - 例: "同时收集多个数据源（并行）→ 合并分析（串行）"
+
+#### 判断原则
+
+1. 是否有多个独立子任务？
+   - 有 → 考虑 independent 或 mixed
+   - 无 → sequential
+   
+2. 子任务之间是否有数据/结果依赖？
+   - 无依赖 → independent
+   - 有依赖 → sequential
+   - 前段无依赖，后段有依赖 → mixed
+
+**默认值**: sequential（不确定时选择保守的串行模式）
+
+---
+
 ### Needs Multi-Agent（单/多智能体选择）
 
 判断任务是否需要多智能体协作。这是路由决策的核心字段。
 
-#### 判断维度（系统化评估）
+#### 两层决策逻辑（语义驱动）
+
+**Layer 1: 任务性质判断**
+- 多实体研究/对比（>=3 个独立实体）→ 进入 Layer 2
+- 多源信息聚合（多个独立数据源）→ 进入 Layer 2
+- 其他 → 单智能体 (false)
+
+**Layer 2: 并行可行性判断**
+- task_dependency_type = "independent" → **多智能体** (true)
+- task_dependency_type = "mixed" → **多智能体** (true)，并行部分交给 workers
+- task_dependency_type = "sequential" → **单智能体** (false)
+
+#### 核心判断规则
+
+**needs_multi_agent=true 的条件（必须同时满足）**：
+1. 独立实体/数据源数量 **>= 3** 个
+2. task_dependency_type 为 **independent** 或 **mixed**
 
 | 维度 | 单智能体 (false) | 多智能体 (true) |
 |------|-----------------|-----------------|
-| 子任务数量 | 1 个主任务 | 3+ 个独立子任务 |
-| 子任务依赖 | 串行依赖/需协同 | 互相独立/可并行 |
-| 实体数量 | 单一对象 | 多个独立实体 |
-| 信息源 | 单一来源 | 多个独立来源 |
+| 实体数量 | 1-2 个实体 | 3+ 个独立实体 |
+| 依赖类型 | sequential | independent 或 mixed |
 | 处理模式 | 顺序处理 | 分治并行 |
+
+**特别注意**：
+- "对比 A 和 B" = 2 个实体 → **单智能体**
+- "对比 A、B、C" = 3 个实体 + independent → **多智能体**
+- "写代码 → 测试 → 部署" = sequential → **单智能体**（即使步骤多）
 
 #### 典型场景映射
 
 **单智能体 (false)**：
 - 简单问答：天气、翻译、概念解释
 - 单任务执行：写代码、生成文档、数据分析（单数据源）
-- 串行工作流：重构代码 → 写测试（有依赖）
+- 串行工作流：重构代码 → 写测试（sequential 依赖）
 - 交互对话：多轮问答、需求澄清
+- 2 实体对比：Python vs JavaScript
 
 **多智能体 (true)**：
-- 多实体研究：Top N 公司分析、竞品对比
+- 多实体研究：Top N 公司分析（N >= 3）
 - 多源信息聚合：多个 API/数据库并行查询
-- 分治任务：大文档拆分处理、多语言并行翻译
-- 对比分析：多个框架/产品/方案对比
+- 分治任务：多语言并行翻译（无上下文依赖）
+- 3+ 实体对比分析：AWS vs Azure vs GCP
 
 #### Few-Shot 示例
 
 <examples>
 <example>
 <query>研究 Top 5 云计算公司的 AI 战略，生成分析报告</query>
-<reasoning>5 个独立实体，每个公司的研究互不依赖，适合 Leader-Worker 并行处理</reasoning>
+<reasoning>5 个独立实体，每个公司的研究互不依赖，最后汇总</reasoning>
+<task_dependency_type>mixed</task_dependency_type>
 <needs_multi_agent>true</needs_multi_agent>
+<execution_strategy>rvr-b</execution_strategy>
 </example>
 
 <example>
 <query>帮我写一个 Python 排序算法并补充单元测试</query>
-<reasoning>虽有多步骤（写代码+测试），但测试依赖代码结果，需串行执行</reasoning>
+<reasoning>测试依赖代码结果，必须串行执行</reasoning>
+<task_dependency_type>sequential</task_dependency_type>
 <needs_multi_agent>false</needs_multi_agent>
+<execution_strategy>rvr-b</execution_strategy>
 </example>
 
 <example>
 <query>对比 AWS、Azure、GCP 三家云服务商的定价策略</query>
 <reasoning>3 个独立实体，信息收集可并行，最后汇总对比</reasoning>
+<task_dependency_type>mixed</task_dependency_type>
 <needs_multi_agent>true</needs_multi_agent>
+<execution_strategy>rvr-b</execution_strategy>
 </example>
 
 <example>
 <query>帮我生成一个产品介绍 PPT</query>
-<reasoning>单一文档生成任务，虽然有多个 slide，但内容有连贯性，不适合拆分</reasoning>
+<reasoning>单一文档生成，slide 之间有连贯性，必须串行</reasoning>
+<task_dependency_type>sequential</task_dependency_type>
 <needs_multi_agent>false</needs_multi_agent>
+<execution_strategy>rvr-b</execution_strategy>
 </example>
 
 <example>
 <query>调研 TensorFlow、PyTorch、Jax、PaddlePaddle 的性能对比</query>
-<reasoning>4 个独立框架，每个框架的调研可并行，最后汇总对比</reasoning>
+<reasoning>4 个独立框架，每个框架的调研可并行，最后汇总</reasoning>
+<task_dependency_type>mixed</task_dependency_type>
 <needs_multi_agent>true</needs_multi_agent>
+<execution_strategy>rvr-b</execution_strategy>
 </example>
 
 <example>
 <query>帮我把这篇 10 页的英文论文翻译成中文</query>
-<reasoning>虽然文档较长，但翻译需要保持上下文一致性，不适合拆分并行</reasoning>
+<reasoning>翻译需要保持上下文一致性，不适合拆分</reasoning>
+<task_dependency_type>sequential</task_dependency_type>
 <needs_multi_agent>false</needs_multi_agent>
+<execution_strategy>rvr</execution_strategy>
 </example>
 
 <example>
 <query>同时查询北京、上海、广州、深圳四个城市的天气</query>
-<reasoning>4 个独立查询，互不依赖，可并行执行</reasoning>
+<reasoning>4 个独立查询，完全无依赖，可完全并行</reasoning>
+<task_dependency_type>independent</task_dependency_type>
 <needs_multi_agent>true</needs_multi_agent>
+<execution_strategy>rvr</execution_strategy>
 </example>
 
 <example>
 <query>分析我们公司上季度的销售数据，找出增长点</query>
-<reasoning>单一数据源的分析任务，单智能体按步骤完成即可</reasoning>
+<reasoning>单一数据源，分析步骤有依赖</reasoning>
+<task_dependency_type>sequential</task_dependency_type>
 <needs_multi_agent>false</needs_multi_agent>
+<execution_strategy>rvr-b</execution_strategy>
+</example>
+
+<example>
+<query>对比 Python 和 JavaScript 的性能</query>
+<reasoning>只有 2 个实体，不满足 >=3 的条件</reasoning>
+<task_dependency_type>independent</task_dependency_type>
+<needs_multi_agent>false</needs_multi_agent>
+<execution_strategy>rvr</execution_strategy>
+</example>
+
+<example>
+<query>对比 React 和 Vue 的优缺点</query>
+<reasoning>只有 2 个框架，不满足多智能体条件</reasoning>
+<task_dependency_type>independent</task_dependency_type>
+<needs_multi_agent>false</needs_multi_agent>
+<execution_strategy>rvr</execution_strategy>
+</example>
+
+<example>
+<query>帮我开发一个用户注册功能，包括前后端和测试</query>
+<reasoning>前端→后端→测试有强依赖，必须串行执行</reasoning>
+<task_dependency_type>sequential</task_dependency_type>
+<needs_multi_agent>false</needs_multi_agent>
+<execution_strategy>rvr-b</execution_strategy>
+</example>
+
+<example>
+<query>分别调研 AWS、Azure、GCP 的定价，然后写对比报告</query>
+<reasoning>调研 3 家可并行，写报告依赖调研结果</reasoning>
+<task_dependency_type>mixed</task_dependency_type>
+<needs_multi_agent>true</needs_multi_agent>
+<execution_strategy>rvr-b</execution_strategy>
+</example>
+
+<example>
+<query>今天上海天气怎么样？</query>
+<reasoning>单一查询，无子任务</reasoning>
+<task_dependency_type>sequential</task_dependency_type>
+<needs_multi_agent>false</needs_multi_agent>
+<execution_strategy>rvr</execution_strategy>
 </example>
 </examples>
 
-#### 决策公式
+#### 判断原则总结
 
-```
-needs_multi_agent = (独立子任务数 >= 3) AND (子任务互不依赖) AND (可从并行中获益)
-```
-
-**默认值**: false（不确定时使用单智能体，避免不必要的复杂度和成本）
-**成本提示**: 多智能体消耗约 10-15× 单智能体的 token，谨慎使用
+1. **实体数量**：独立实体 >= 3 才考虑多智能体
+2. **依赖类型**：independent/mixed 才能多智能体，sequential 必须单智能体
+3. **默认值**：不确定时选择 needs_multi_agent=false（保守）
 """
 
 INTENT_PROMPT_FOOTER = """
@@ -420,6 +560,7 @@ INTENT_PROMPT_FOOTER = """
 - DO NOT create a plan (that's Sonnet's job)
 - ONLY classify the fields in the output format
 - Consider conversation history when determining is_follow_up and task_type
+- task_dependency_type 和 needs_multi_agent 必须逻辑一致
 
 ## Examples
 
@@ -434,6 +575,7 @@ Output:
   "needs_plan": true,
   "skip_memory_retrieval": false,
   "needs_multi_agent": false,
+  "task_dependency_type": "sequential",
   "is_follow_up": false,
   "suggested_planning_depth": "full",
   "requires_deep_reasoning": false,
@@ -453,6 +595,7 @@ Output:
   "needs_plan": false,
   "skip_memory_retrieval": true,
   "needs_multi_agent": false,
+  "task_dependency_type": "sequential",
   "is_follow_up": false,
   "suggested_planning_depth": "none",
   "requires_deep_reasoning": false,
@@ -472,6 +615,7 @@ Output:
   "needs_plan": true,
   "skip_memory_retrieval": false,
   "needs_multi_agent": true,
+  "task_dependency_type": "mixed",
   "is_follow_up": false,
   "suggested_planning_depth": "full",
   "requires_deep_reasoning": true,
@@ -491,11 +635,112 @@ Output:
   "needs_plan": false,
   "skip_memory_retrieval": true,
   "needs_multi_agent": false,
+  "task_dependency_type": "sequential",
   "is_follow_up": false,
   "suggested_planning_depth": "none",
   "requires_deep_reasoning": true,
   "tool_usage_hint": null,
   "execution_strategy": "rvr"
+}
+```
+
+Input: "帮我写一个 Python 快速排序函数"
+
+Output:
+```json
+{
+  "task_type": "code_task",
+  "complexity": "medium",
+  "complexity_score": 4.0,
+  "needs_plan": true,
+  "skip_memory_retrieval": false,
+  "needs_multi_agent": false,
+  "task_dependency_type": "sequential",
+  "is_follow_up": false,
+  "suggested_planning_depth": "minimal",
+  "requires_deep_reasoning": false,
+  "tool_usage_hint": "single",
+  "execution_strategy": "rvr"
+}
+```
+
+Input: "帮我开发一个用户注册功能，包括前后端"
+
+Output:
+```json
+{
+  "task_type": "code_task",
+  "complexity": "complex",
+  "complexity_score": 7.5,
+  "needs_plan": true,
+  "skip_memory_retrieval": false,
+  "needs_multi_agent": false,
+  "task_dependency_type": "sequential",
+  "is_follow_up": false,
+  "suggested_planning_depth": "full",
+  "requires_deep_reasoning": false,
+  "tool_usage_hint": "sequential",
+  "execution_strategy": "rvr-b"
+}
+```
+
+Input: "对比 Python 和 JavaScript 的性能"
+
+Output:
+```json
+{
+  "task_type": "data_analysis",
+  "complexity": "medium",
+  "complexity_score": 4.5,
+  "needs_plan": true,
+  "skip_memory_retrieval": true,
+  "needs_multi_agent": false,
+  "task_dependency_type": "independent",
+  "is_follow_up": false,
+  "suggested_planning_depth": "minimal",
+  "requires_deep_reasoning": false,
+  "tool_usage_hint": "sequential",
+  "execution_strategy": "rvr"
+}
+```
+
+Input: "同时查询北京、上海、广州、深圳四个城市的天气"
+
+Output:
+```json
+{
+  "task_type": "information_query",
+  "complexity": "simple",
+  "complexity_score": 2.5,
+  "needs_plan": false,
+  "skip_memory_retrieval": true,
+  "needs_multi_agent": true,
+  "task_dependency_type": "independent",
+  "is_follow_up": false,
+  "suggested_planning_depth": "none",
+  "requires_deep_reasoning": false,
+  "tool_usage_hint": "parallel",
+  "execution_strategy": "rvr"
+}
+```
+
+Input: "分别调研 AWS、Azure、GCP 的定价策略，然后写一份对比报告"
+
+Output:
+```json
+{
+  "task_type": "data_analysis",
+  "complexity": "complex",
+  "complexity_score": 7.5,
+  "needs_plan": true,
+  "skip_memory_retrieval": false,
+  "needs_multi_agent": true,
+  "task_dependency_type": "mixed",
+  "is_follow_up": false,
+  "suggested_planning_depth": "full",
+  "requires_deep_reasoning": false,
+  "tool_usage_hint": "parallel",
+  "execution_strategy": "rvr-b"
 }
 ```
 
@@ -570,6 +815,7 @@ __all__ = [
     "INTENT_PROMPT_COMPLEXITY",
     "INTENT_PROMPT_CONTEXT_AWARENESS",
     "INTENT_PROMPT_MEMORY",
+    "INTENT_PROMPT_MULTI_AGENT",
     "INTENT_PROMPT_FOOTER",
     "get_intent_recognition_prompt",
     "get_default_intent_prompt",

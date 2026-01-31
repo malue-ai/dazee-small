@@ -1,210 +1,316 @@
 ---
-description: "智能体设计理念：LLM-First、提示词驱动、语义优先"
+description: "智能体设计理念：LLM-First、提示词驱动、语义优先（强制性要求）"
 alwaysApply: true
 ---
 
-# 智能体设计理念
+# 智能体设计理念（强制性要求）
 
-## 核心原则：LLM-First
+## 核心原则：LLM-First（大模型优先）
 
-本项目采用 **大模型优先（LLM-First）** 的设计理念，充分信任和发挥大语言模型的深度语义理解与推理能力。
+本项目采用 **大模型优先（LLM-First）** 的设计理念，这是**强制性要求**，而非可选建议。
 
-### 1. 提示词驱动优先
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                                                                                  │
+│                      🧠 LLM-First 强制性设计原则                                 │
+│                                                                                  │
+│   ┌─────────────────────────────────────────────────────────────────────────┐   │
+│   │                                                                          │   │
+│   │   主流程：LLM 语义推断（强制）         补充流程：硬编码规则（仅限特定场景） │   │
+│   │   ────────────────────────────         ────────────────────────────────  │   │
+│   │                                                                          │   │
+│   │   • 意图识别                           • 格式验证（邮箱、URL）            │   │
+│   │   • 复杂度分析                         • 数值计算                         │   │
+│   │   • 能力推断                           • 安全边界检查                     │   │
+│   │   • 任务规划                           • 低延迟预过滤（<10ms 要求）       │   │
+│   │   • 回溯决策                                                             │   │
+│   │   • 工具选择                                                             │   │
+│   │                                                                          │   │
+│   │        ⬆️ 必须使用 LLM                      ⬆️ 仅限这些场景可用规则       │   │
+│   │                                                                          │   │
+│   └─────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                  │
+│   规则写在 Prompt 里，不写在代码里                                               │
+│   Few-Shot 示例教会 LLM 推理模式，代码只做调用和解析                             │
+│   充分信任大模型的深度语义理解与推理能力                                         │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
 
-**优先使用提示词工程解决问题，而非硬编码规则。**
+---
+
+## 禁止事项（必须遵守）
+
+### ❌ 禁止：使用关键词匹配进行语义判断
 
 ```python
-# ✅ 推荐：提示词驱动，让模型理解和推理
-async def classify_intent(user_input: str) -> str:
-    """使用 LLM 进行意图识别"""
-    prompt = """
-    分析用户输入的意图，从以下类别中选择最匹配的：
-    - query: 查询信息
-    - action: 执行操作
-    - clarification: 需要澄清
-    
-    用户输入：{user_input}
-    
-    请分析用户的真实意图，考虑上下文和隐含含义。
-    """
-    return await llm.generate(prompt.format(user_input=user_input))
-
-# ❌ 避免：硬编码关键词匹配
+# ❌ 严禁：关键词匹配判断意图
 def classify_intent(user_input: str) -> str:
-    """硬规则意图识别 - 难以覆盖所有情况"""
     if any(kw in user_input for kw in ["查询", "什么是", "告诉我"]):
         return "query"
     elif any(kw in user_input for kw in ["执行", "运行", "帮我"]):
         return "action"
     return "unknown"
+
+# ❌ 严禁：关键词匹配判断复杂度
+def get_complexity(query: str) -> str:
+    if any(kw in query for kw in ["系统", "架构", "设计"]):
+        return "complex"
+    return "simple"
+
+# ❌ 严禁：关键词匹配推断能力
+KEYWORD_CAPABILITY_MAP = {
+    "搜索": "web_search",
+    "PPT": "pptx_skill",
+    "Excel": "xlsx_skill",
+}
+def infer_capability(prompt_text: str) -> List[str]:
+    return [cap for kw, cap in KEYWORD_CAPABILITY_MAP.items() if kw in prompt_text]
 ```
 
-### 2. 语义理解优于模式匹配
+**为什么关键词不可行：**
 
-**信任模型的语义理解能力，避免脆弱的正则表达式和关键词匹配。**
+| 用户输入 | 关键词判断 | 实际语义 | LLM 判断 |
+|---------|-----------|---------|---------|
+| "构造CRM系统" | 匹配"系统"→complex | ✅ 确实复杂 | ✅ 正确 |
+| "系统怎么用?" | 匹配"系统"→complex | ❌ 只是询问用法，应为 simple | ✅ 正确 |
+| "不要做PPT" | 匹配"PPT"→启用 pptx | ❌ 用户明确拒绝 PPT | ✅ 理解否定语义 |
+| "做个简单的报告" | 无匹配→simple | ❌ 可能需要 medium | ✅ 理解修饰语 |
+| "请分析file这个变量" | 匹配"file"→文件操作 | ❌ 只是变量名讨论 | ✅ 理解上下文 |
 
-```python
-# ✅ 推荐：语义理解
-async def extract_entities(text: str) -> Dict[str, Any]:
-    """让 LLM 理解文本语义，提取实体"""
-    prompt = """
-    从以下文本中提取关键实体信息：
-    - 人名、组织、地点
-    - 时间、日期
-    - 数值、金额
-    
-    请理解文本语义，即使表达方式不同也要正确识别。
-    文本：{text}
-    """
-    return await llm.generate_structured(prompt.format(text=text))
-
-# ❌ 避免：正则表达式硬匹配
-def extract_entities(text: str) -> Dict[str, Any]:
-    """正则匹配 - 脆弱且难以维护"""
-    date_pattern = r"\d{4}[-/]\d{2}[-/]\d{2}"
-    # 无法处理 "下周三"、"明天" 等自然语言表达
-```
-
-### 3. 动态决策优于静态规则
-
-**让模型根据上下文动态决策，而非预设固定的决策树。**
+### ❌ 禁止：硬编码决策树进行路由
 
 ```python
-# ✅ 推荐：动态推理决策
-async def determine_next_action(
-    context: Context, 
-    history: List[Message]
-) -> Action:
-    """根据上下文让 LLM 推理下一步行动"""
-    prompt = """
-    当前上下文：{context}
-    对话历史：{history}
-    
-    分析当前情况，决定最合适的下一步行动：
-    1. 考虑用户的真实需求
-    2. 评估已有信息是否充分
-    3. 选择最有效的执行路径
-    """
-    return await llm.reason_and_decide(prompt)
-
-# ❌ 避免：硬编码决策树
-def determine_next_action(state: str) -> Action:
-    """固定状态机 - 无法处理复杂情况"""
+# ❌ 严禁：硬编码状态机
+def route_request(state: str) -> str:
     if state == "init":
-        return Action.GREET
+        return "greeting"
     elif state == "waiting":
-        return Action.PROMPT
+        return "prompt"
+    elif state == "complete":
+        return "summary"
     # 状态爆炸，难以维护
+
+# ❌ 严禁：硬编码阈值判断
+def select_agent(complexity_score: float) -> str:
+    if complexity_score > 0.8:
+        return "MultiAgent"
+    elif complexity_score > 0.5:
+        return "RVRBAgent"
+    return "SimpleAgent"
 ```
 
-### 4. 容错与自我修正
-
-**利用模型的自我反思能力，实现错误检测和自动修正。**
+### ❌ 禁止：正则表达式进行语义提取
 
 ```python
-# ✅ 推荐：让模型自我检查和修正
-async def execute_with_reflection(task: Task) -> Result:
-    """执行任务并自我反思"""
-    result = await execute_task(task)
+# ❌ 严禁：正则匹配提取语义信息
+def extract_date(text: str) -> str:
+    pattern = r"\d{4}[-/]\d{2}[-/]\d{2}"
+    # 无法处理 "下周三"、"明天"、"三天后" 等自然语言
+
+# ❌ 严禁：正则判断文件类型需求
+def needs_file_skill(text: str) -> bool:
+    return bool(re.search(r"(文件|file|path|路径)", text, re.I))
+```
+
+---
+
+## 强制要求（必须遵守）
+
+### ✅ 必须：使用 LLM 进行语义理解
+
+```python
+# ✅ 正确：LLM 语义理解意图
+async def classify_intent(user_input: str, context: Context) -> IntentResult:
+    """使用 LLM 进行深度意图分析"""
+    prompt = """
+    分析用户输入的意图，考虑：
+    1. 用户的真实需求（不仅是字面意思）
+    2. 对话上下文
+    3. 隐含意图和否定语义
     
-    # 让模型检查结果
-    reflection = await llm.reflect(
-        prompt="""
-        检查以下执行结果是否正确：
-        任务：{task}
-        结果：{result}
+    用户输入：{user_input}
+    对话历史：{history}
+    """
+    return await llm.analyze_intent(prompt)
+
+# ✅ 正确：LLM 语义推断能力
+async def infer_capabilities(prompt_text: str) -> List[str]:
+    """使用 LLM 从自然语言描述推断所需能力"""
+    prompt = """
+    分析以下智能体描述，推断需要哪些能力：
+    
+    描述：{prompt_text}
+    
+    请理解语义，考虑：
+    - 明确提到的能力
+    - 隐含需要的能力
+    - 否定语义（如"不需要搜索"）
+    """
+    return await llm.infer_capabilities(prompt)
+```
+
+### ✅ 必须：使用 Few-Shot 教会 LLM 推理模式
+
+```python
+# ✅ 正确：Few-Shot 驱动的复杂度推理
+COMPLEXITY_FEW_SHOT = """
+分析用户请求的复杂度。
+
+## 学习示例（理解语义，不是匹配关键词）
+
+### 示例 1
+用户: "构造CRM系统"
+分析: "构造"是 build 动作，"系统"表示完整架构，需要多轮设计
+输出: {"complexity": "complex", "reasoning": "系统构建需要完整规划"}
+
+### 示例 2
+用户: "这个系统怎么用？"
+分析: 虽然提到"系统"，但这是询问使用方法，不是构建
+输出: {"complexity": "simple", "reasoning": "询问用法，直接回答即可"}
+
+### 示例 3
+用户: "帮我做个简单的PPT"
+分析: "简单"限定了范围，虽涉及 PPT 但不需要深度规划
+输出: {"complexity": "medium", "reasoning": "PPT 生成但范围简单"}
+
+## 现在分析
+用户: "{query}"
+"""
+```
+
+### ✅ 必须：保守的 Fallback 策略
+
+```python
+# ✅ 正确：LLM 推断失败时使用保守默认值，不做关键词猜测
+CONSERVATIVE_DEFAULTS = {
+    "complexity": "medium",      # 不猜测，使用中等
+    "task_type": "other",        # 不猜测，使用通用
+    "capabilities": [],          # 不猜测，不启用额外能力
+}
+
+async def infer_with_fallback(query: str) -> InferenceResult:
+    try:
+        return await llm.infer(query)
+    except Exception as e:
+        logger.warning(f"LLM 推断失败: {e}，使用保守默认值")
+        # ✅ 正确：使用默认值，不做关键词猜测
+        return InferenceResult(**CONSERVATIVE_DEFAULTS, is_fallback=True)
         
-        如发现问题，提出修正建议。
-        """
-    )
-    
-    if reflection.needs_correction:
-        return await self.correct_and_retry(task, reflection.suggestions)
-    
-    return result
+        # ❌ 错误：失败时改用关键词匹配
+        # return keyword_based_inference(query)
 ```
 
-## 硬规则的适用场景
+---
 
-以下场景可以考虑使用硬编码规则：
+## 硬规则的适用场景（仅限以下场景）
 
-### 1. 简单确定性任务
+硬编码规则**仅**在以下场景允许使用：
+
+### 1. 简单确定性任务（规则明确，无需推理）
 
 ```python
-# ✅ 适合硬规则：格式验证
+# ✅ 允许：格式验证
 def is_valid_email(email: str) -> bool:
-    """邮箱格式验证 - 规则明确，无需推理"""
     return bool(re.match(r'^[\w\.-]+@[\w\.-]+\.\w+$', email))
 
-# ✅ 适合硬规则：数值计算
+# ✅ 允许：数值计算
 def calculate_total(items: List[Item]) -> float:
-    """金额计算 - 纯数学运算"""
     return sum(item.price * item.quantity for item in items)
 ```
 
-### 2. 低延迟要求场景
+### 2. 低延迟要求场景（需要 <10ms 响应）
 
 ```python
-# ✅ 适合硬规则：需要毫秒级响应
-def quick_filter(message: str) -> bool:
-    """快速过滤 - 延迟敏感，使用简单规则"""
-    blocked_keywords = ["spam", "广告"]
-    return not any(kw in message.lower() for kw in blocked_keywords)
-
-# 复杂判断交给异步 LLM 处理
-async def deep_analysis(message: str) -> AnalysisResult:
-    """深度分析 - 可接受较高延迟"""
-    return await llm.analyze(message)
-```
-
-### 3. 安全边界检查
-
-```python
-# ✅ 适合硬规则：安全边界必须确定性保证
-def validate_input_length(text: str, max_length: int = 10000) -> bool:
-    """输入长度限制 - 安全边界"""
+# ✅ 允许：快速预过滤（毫秒级）
+def quick_length_check(text: str, max_length: int = 10000) -> bool:
     return len(text) <= max_length
 
-def sanitize_path(path: str) -> str:
-    """路径净化 - 防止路径遍历攻击"""
-    return os.path.normpath(path).lstrip('/')
+# 但复杂判断必须交给 LLM
+async def deep_analysis(text: str) -> AnalysisResult:
+    return await llm.analyze(text)
 ```
+
+### 3. 安全边界检查（必须 100% 确定性）
+
+```python
+# ✅ 允许：安全边界
+def sanitize_path(path: str) -> str:
+    return os.path.normpath(path).lstrip('/')
+
+def validate_input_size(data: bytes, max_size: int) -> bool:
+    return len(data) <= max_size
+```
+
+---
 
 ## 决策指南
 
-在选择实现方式时，考虑以下因素：
+| 场景 | 必须使用 LLM | 允许使用规则 |
+|------|-------------|-------------|
+| 意图识别 | ✅ | ❌ |
+| 复杂度判断 | ✅ | ❌ |
+| 能力推断 | ✅ | ❌ |
+| 任务规划 | ✅ | ❌ |
+| 工具选择 | ✅ | ❌ |
+| 路由决策 | ✅ | ❌ |
+| 回溯决策 | ✅ | ❌ |
+| 格式验证 | ❌ | ✅ |
+| 数值计算 | ❌ | ✅ |
+| 长度检查 | ❌ | ✅ |
+| 安全边界 | ❌ | ✅ |
 
-| 因素 | 选择 LLM | 选择硬规则 |
-|------|---------|-----------|
-| 任务复杂度 | 语义理解、推理、判断 | 简单格式验证、计算 |
-| 输入多样性 | 自然语言、多种表达 | 固定格式、结构化 |
-| 延迟要求 | 可接受 100ms+ | 需要 <10ms |
-| 准确性要求 | 允许概率性输出 | 必须 100% 确定 |
-| 维护成本 | 提示词易于调整 | 规则简单明确 |
-| 边界情况 | 需要灵活处理 | 边界明确固定 |
+---
+
+## 混合架构模式（推荐）
+
+```python
+# ✅ 推荐：混合架构
+async def process_request(request: Request) -> Response:
+    """
+    混合处理策略：
+    1. 硬规则快速预检（毫秒级，仅限安全/格式）
+    2. LLM 深度理解和处理（语义推断）
+    """
+    # Phase 1: 快速预检（硬规则，允许）
+    if not validate_input_size(request.body):
+        return Response.invalid("输入过大")
+    if not is_valid_format(request.content_type):
+        return Response.invalid("格式错误")
+    
+    # Phase 2: 深度处理（LLM，强制）
+    intent = await llm.analyze_intent(request)
+    complexity = await llm.infer_complexity(request)
+    capabilities = await llm.infer_capabilities(request)
+    
+    # Phase 3: LLM 驱动的路由决策（强制）
+    agent = await llm.select_agent(intent, complexity)
+    result = await agent.execute(request)
+    
+    return Response.success(result)
+```
+
+---
+
+## 代码审查检查清单
+
+在代码审查时，检查以下违规模式：
+
+- [ ] 是否存在 `if "关键词" in text` 用于语义判断？
+- [ ] 是否存在 `KEYWORD_MAP` 或 `KEYWORD_CAPABILITY_MAP`？
+- [ ] 是否存在硬编码的 `complexity_score > 阈值` 判断？
+- [ ] 是否存在固定的状态机用于路由决策？
+- [ ] 是否在 LLM 失败时 fallback 到关键词匹配？
+- [ ] 正则表达式是否用于语义提取（而非格式验证）？
+
+**发现以上模式必须重构为 LLM 语义推断。**
+
+---
 
 ## 实践建议
 
 1. **默认选择 LLM**：遇到新问题时，先考虑能否用提示词解决
-2. **渐进式优化**：先用 LLM 验证可行性，再针对热点路径优化
-3. **混合架构**：快速预过滤（硬规则）+ 深度处理（LLM）
-4. **持续评估**：监控 LLM 调用的准确性和延迟，按需调整
-
-```python
-# ✅ 混合架构示例
-async def process_request(request: Request) -> Response:
-    """
-    混合处理策略：
-    1. 硬规则快速预检
-    2. LLM 深度理解和处理
-    """
-    # 快速预检（硬规则，毫秒级）
-    if not quick_validate(request):
-        return Response.invalid()
-    
-    # 深度处理（LLM，语义理解）
-    understanding = await llm.understand(request)
-    result = await llm.process(understanding)
-    
-    return Response.success(result)
-```
+2. **Few-Shot 优先**：用高质量示例教会 LLM 推理模式
+3. **保守 Fallback**：推断失败使用默认值，绝不用关键词猜测
+4. **规则仅限特定场景**：格式验证、数值计算、安全边界、低延迟预过滤
+5. **持续评估**：监控 LLM 调用的准确性和延迟，按需优化提示词

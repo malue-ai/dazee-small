@@ -1,8 +1,24 @@
 """
 Zenflux Agent - FastAPI 服务
 基于 Claude 的智能体 Web API
+
+🆕 V9.5 单实例部署模式：
+    每个 Agent 实例是独立的部署单元，启动时只加载指定实例。
+    
+    使用方式：
+        # 命令行参数
+        python main.py --instance=dazee_ppt
+        
+        # 环境变量
+        AGENT_INSTANCE=dazee_ppt python main.py
+        
+        # Docker
+        docker run -e AGENT_INSTANCE=dazee_ppt zenflux-agent
+        
+    不指定实例时，使用批量加载模式（开发/测试用）
 """
 
+import argparse
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,6 +31,33 @@ from dotenv import load_dotenv
 # 加载项目根目录的 .env 文件
 env_path = Path(__file__).parent / ".env"
 load_dotenv(dotenv_path=env_path, override=True)
+
+# 解析命令行参数（在模块级别解析，以便 lifespan 使用）
+def _parse_args():
+    parser = argparse.ArgumentParser(description="Zenflux Agent API")
+    parser.add_argument(
+        "--instance", "-i",
+        type=str,
+        default=None,
+        help="指定要加载的 Agent 实例名称（单实例部署模式）"
+    )
+    parser.add_argument(
+        "--port", "-p",
+        type=int,
+        default=8000,
+        help="API 服务端口（默认 8000）"
+    )
+    parser.add_argument(
+        "--host",
+        type=str,
+        default="0.0.0.0",
+        help="API 服务地址（默认 0.0.0.0）"
+    )
+    # 使用 parse_known_args 避免与 uvicorn 的参数冲突
+    args, _ = parser.parse_known_args()
+    return args
+
+_cli_args = _parse_args()
 
 from routers import chat_router, knowledge_router, files_router, tools_router, mem0_router, tasks_router
 from routers.human_confirmation import router as human_confirmation_router
@@ -54,22 +97,40 @@ async def lifespan(app: FastAPI):
     await init_database()
     print("✅ 数据库初始化完成")
     
-    # 🆕 预加载所有 Agent 实例
-    print("🤖 预加载 Agent 实例...")
+    # 🆕 V9.5: 按需加载模式
+    # 可选：启动时预加载指定实例（--instance 或 AGENT_INSTANCE）
+    # 如果不指定，则在首次请求时按需加载
     from services.agent_registry import get_agent_registry
+    from scripts.instance_loader import list_instances
+    
     agent_registry = get_agent_registry()
-    try:
-        loaded_count = await agent_registry.preload_all()
-        if loaded_count > 0:
-            print(f"✅ 已预加载 {loaded_count} 个 Agent 实例")
-            # 显示可用的 Agent 列表
-            agents = agent_registry.list_agents()
-            for agent in agents:
-                print(f"   • {agent['agent_id']}: {agent['description'] or '(无描述)'}")
+    instance_name = _cli_args.instance or os.getenv("AGENT_INSTANCE")
+    
+    if instance_name:
+        # 启动时预加载指定实例（推荐：更快的首次响应）
+        print(f"🎯 预加载 Agent 实例: '{instance_name}'...")
+        try:
+            success = await agent_registry.preload_instance(instance_name)
+            if success:
+                agent_info = agent_registry.list_agents()[0]
+                print(f"✅ Agent 加载成功: {instance_name}")
+                print(f"   描述: {agent_info.get('description') or '(无描述)'}")
+            else:
+                print(f"⚠️ Agent '{instance_name}' 加载失败，将在首次请求时重试")
+        except FileNotFoundError as e:
+            print(f"❌ 实例不存在: {e}")
+            raise SystemExit(1)
+        except Exception as e:
+            print(f"⚠️ Agent '{instance_name}' 预加载失败: {e}")
+            print("   将在首次请求时重试加载")
+    else:
+        # 按需加载模式
+        available = list_instances()
+        print("📦 按需加载模式: Agent 将在首次请求时加载")
+        if available:
+            print(f"   可用实例: {', '.join(available)}")
         else:
-            print("○ 没有发现 Agent 实例（instances/ 目录为空）")
-    except Exception as e:
-        print(f"⚠️ Agent 预加载失败: {e}")
+            print("   ⚠️ instances/ 目录下没有发现任何实例")
     
     # 启动 gRPC 服务器（如果启用）
     grpc_server = None
@@ -123,6 +184,20 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(f"⚠️ 定时任务调度器启动失败: {e}")
     
+    # 🆕 V7.10: 启动后台健康探测服务
+    health_probe_service = None
+    enable_health_probe = os.getenv("LLM_HEALTH_PROBE_ENABLED", "true").lower() in ("true", "1", "yes")
+    
+    if enable_health_probe:
+        try:
+            print("🩺 启动后台健康探测服务...")
+            from services.health_probe_service import start_health_probe_service
+            
+            health_probe_service = await start_health_probe_service()
+            print("✅ 后台健康探测服务已启动")
+        except Exception as e:
+            print(f"⚠️ 后台健康探测服务启动失败: {e}")
+    
     yield
     
     # 关闭时 - 清理所有资源
@@ -142,6 +217,15 @@ async def lifespan(app: FastAPI):
             print("✅ 定时任务调度器已关闭")
         except Exception as e:
             print(f"⚠️ 关闭定时任务调度器失败: {e}")
+    
+    # 0.2 🆕 V7.10: 关闭后台健康探测服务
+    if health_probe_service:
+        try:
+            from services.health_probe_service import stop_health_probe_service
+            await stop_health_probe_service()
+            print("✅ 后台健康探测服务已关闭")
+        except Exception as e:
+            print(f"⚠️ 关闭后台健康探测服务失败: {e}")
     
     # 1. 关闭 gRPC 服务器
     if grpc_server:
@@ -309,19 +393,29 @@ async def health():
 
 if __name__ == "__main__":
     import uvicorn
+    import os
+    
+    host = _cli_args.host
+    port = _cli_args.port
+    instance = _cli_args.instance or os.getenv("AGENT_INSTANCE")
     
     print("\n" + "="*60)
     print("🚀 启动 Zenflux Agent API")
     print("="*60)
-    print(f"📍 访问地址: http://localhost:8000")
-    print(f"📚 API 文档: http://localhost:8000/docs")
-    print(f"📖 ReDoc: http://localhost:8000/redoc")
+    
+    if instance:
+        print(f"🎯 预加载实例: {instance}")
+    else:
+        print("📦 按需加载模式（首次请求时加载）")
+        
+    print(f"📍 访问地址: http://localhost:{port}")
+    print(f"📚 API 文档: http://localhost:{port}/docs")
     print("="*60 + "\n")
     
     uvicorn.run(
         "main:app",
-        host="0.0.0.0",
-        port=8000,
+        host=host,
+        port=port,
         reload=True,
         log_level="info"
     )

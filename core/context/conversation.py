@@ -423,6 +423,13 @@ class Context:
                             filtered_content.append(block)
                         else:
                             logger.debug(f"🧹 移除未配对的 tool_result: {tool_use_id}")
+                    elif block_type == "text":
+                        # 🛡️ 过滤空的 text 块（Claude API 不接受空 content block）
+                        text_content = block.get("text", "")
+                        if text_content and (not isinstance(text_content, str) or text_content.strip()):
+                            filtered_content.append(block)
+                        else:
+                            logger.debug(f"🧹 移除空的 text 块（Claude API 不接受）")
                     else:
                         filtered_content.append(block)
                 
@@ -487,6 +494,13 @@ class Context:
             if block_type == "tool_use" and role != "assistant":
                 logger.warning(f"⚠️ 移除错误位置的 tool_use 块（应在 assistant 消息中）")
                 continue
+            
+            # 4. 🛡️ 过滤空的 text 块（Claude API 不接受空 content block）
+            if block_type == "text":
+                text_content = block.get("text", "")
+                if not text_content or (isinstance(text_content, str) and not text_content.strip()):
+                    logger.debug(f"🧹 移除空的 text 块（Claude API 不接受）")
+                    continue
             
             # 🆕 移除 index 字段（Claude API 不接受）
             clean_block = {k: v for k, v in block.items() if k != "index"}

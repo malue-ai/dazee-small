@@ -200,10 +200,10 @@ If you want to programmatically build configurations:
 
 ```bash
 # View full API schema
-cat /skills/library/slidespeak-generator/resources/api_schema.json
+cat /skills/library/library/slidespeak-generator/resources/api_schema.json
 
 # Use config builder (optional)
-cd /skills/library/slidespeak-generator
+cd /skills/library/library/slidespeak-generator
 python3 scripts/config_builder.py '{"topic": "Product Demo", "pages": 8}'
 ```
 

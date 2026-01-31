@@ -7,6 +7,9 @@ Tool 核心模块
 - ToolExecutor: 工具执行器（动态加载和执行工具）
 - ResultCompactor: 结果精简器（Context Engineering 优化）
 
+术语说明：
+- Skill: 本地工作流技能（skills/library/，对齐 clawdbot 机制）
+
 目录结构：
 - capability/: 能力管理子包
 - selector.py: 工具选择逻辑
@@ -55,7 +58,7 @@ from core.tool.capability import (
     InvocationType,
     InvocationStrategy,
     create_invocation_selector,
-    # Skill Loader
+    # Skill Loader（本地工作流技能）
     SkillLoader,
     SkillInfo,
     create_skill_loader,
@@ -112,6 +115,7 @@ __all__ = [
     "InvocationType",
     "InvocationStrategy",
     "create_invocation_selector",
+    # Skill Loader（本地工作流技能）
     "SkillLoader",
     "SkillInfo",
     "create_skill_loader",

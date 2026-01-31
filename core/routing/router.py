@@ -1,19 +1,19 @@
 """
 智能体路由器（Agent Router）
 
-🆕 V7.0: Prompt-First 重构 - 复杂度评分由 LLM 直接输出
+LLM-First 架构：所有判断完全由 LLM 语义推理驱动
 
 决策使用单智能体还是多智能体：
 1. 接收用户请求
-2. 调用 IntentAnalyzer 分析意图（包含 complexity_score）
-3. 基于 intent.complexity_score 进行路由决策
-4. 返回路由决策（包含意图和复杂度信息）
+2. 调用 IntentAnalyzer 分析意图
+3. 直接使用 LLM 输出的 intent 字段
+4. 返回路由决策
 
 架构原则：
-- 路由决策在服务层（ChatService）完成
-- SimpleAgent 和 MultiAgent 是平级的，都接收路由结果
-- 两个框架不互相调用
-- 🆕 V7.0: ComplexityScorer 保留向后兼容，但优先使用 LLM 输出的 complexity_score
+- 所有规则在 instance 系统提示词中用自然语言定义
+- LLM 通过语义理解和深度推理输出判断结果
+- 代码只负责传递 LLM 的判断，不做任何规则逻辑
+- 不同场景只需修改提示词，代码无需变动
 
 使用方式：
     router = AgentRouter(llm_service=claude, prompt_cache=cache)
@@ -34,9 +34,7 @@ import logging
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
 
-from core.agent.types import IntentResult
-# 🆕 V7.0: ComplexityScorer 保留向后兼容，但优先使用 LLM 输出的 complexity_score
-from core.routing.complexity_scorer import ComplexityScorer, ComplexityScore, ComplexityLevel
+from core.agent.types import IntentResult, Complexity
 
 logger = logging.getLogger(__name__)
 
@@ -46,22 +44,12 @@ class RoutingDecision:
     """
     路由决策结果
     
-    包含意图分析和复杂度评估的完整结果，
-    供单智能体或多智能体框架使用。
-    
-    Attributes:
-        agent_type: 推荐的智能体类型（"single" 或 "multi"）
-        execution_strategy: 🆕 V8.0 单智能体执行策略（"rvr" 或 "rvr-b"）
-        intent: 意图分析结果
-        complexity: 复杂度评分结果
-        user_query: 原始用户查询
-        conversation_history: 对话历史
-        context: 额外上下文
+    包含 LLM 意图分析结果，供单智能体或多智能体框架使用。
+    所有判断来自 LLM 语义推理，代码只传递结果。
     """
     agent_type: str = "single"
-    execution_strategy: str = "rvr"  # 🆕 V8.0: "rvr" | "rvr-b"
+    execution_strategy: str = "rvr"
     intent: Optional[IntentResult] = None
-    complexity: Optional[ComplexityScore] = None
     user_query: str = ""
     conversation_history: List[Dict[str, Any]] = field(default_factory=list)
     context: Dict[str, Any] = field(default_factory=dict)
@@ -70,9 +58,8 @@ class RoutingDecision:
         """转换为字典"""
         return {
             "agent_type": self.agent_type,
-            "execution_strategy": self.execution_strategy,  # 🆕 V8.0
-            "intent": self.intent.to_dict() if hasattr(self.intent, 'to_dict') else self._intent_to_dict(),
-            "complexity": self.complexity.to_dict() if self.complexity else None,
+            "execution_strategy": self.execution_strategy,
+            "intent": self._intent_to_dict(),
             "user_query": self.user_query,
             "has_history": len(self.conversation_history) > 0,
             "context": self.context,
@@ -82,26 +69,22 @@ class RoutingDecision:
         """将 IntentResult 转换为字典"""
         if not self.intent:
             return None
+        if hasattr(self.intent, 'to_dict'):
+            return self.intent.to_dict()
         return {
             "task_type": self.intent.task_type.value,
             "complexity": self.intent.complexity.value,
             "needs_plan": self.intent.needs_plan,
             "needs_multi_agent": self.intent.needs_multi_agent,
             "is_follow_up": self.intent.is_follow_up,
-            "skip_memory_retrieval": self.intent.skip_memory_retrieval,
         }
     
     def to_agent_context(self) -> Dict[str, Any]:
-        """
-        转换为智能体上下文
-        
-        用于传递给 SimpleAgent 或 MultiAgent
-        """
+        """转换为智能体上下文"""
         return {
             "user_query": self.user_query,
             "conversation_history": self.conversation_history,
             "intent_result": self.intent,
-            "complexity_score": self.complexity,
             "routing_context": self.context,
         }
 
@@ -127,8 +110,7 @@ class AgentRouter:
         self,
         llm_service=None,
         prompt_cache=None,
-        enable_llm: bool = True,
-        complexity_threshold: float = 5.0
+        enable_llm: bool = True
     ):
         """
         初始化路由器
@@ -137,15 +119,10 @@ class AgentRouter:
             llm_service: LLM 服务（用于意图分析）
             prompt_cache: InstancePromptCache（获取缓存的意图识别提示词）
             enable_llm: 是否启用 LLM 分析
-            complexity_threshold: 复杂度阈值（超过则使用多智能体）
         """
         self.llm_service = llm_service
         self.prompt_cache = prompt_cache
         self.enable_llm = enable_llm
-        self.complexity_threshold = complexity_threshold
-        
-        # 初始化复杂度评分器
-        self.complexity_scorer = ComplexityScorer()
         
         # 意图分析器（延迟初始化，避免循环依赖）
         self._intent_analyzer = None
@@ -176,10 +153,11 @@ class AgentRouter:
         """
         执行路由决策
         
-        🆕 V7.0: Prompt-First 重构
+        LLM-First：直接使用 LLM 语义判断，不做额外规则处理
+        
         流程：
-        1. 意图分析（IntentAnalyzer）- 包含 complexity_score
-        2. 优先使用 intent.complexity_score 进行路由决策
+        1. 意图分析（IntentAnalyzer）
+        2. 直接使用 intent.complexity 和 intent.needs_multi_agent
         3. 返回路由决策
         
         Args:
@@ -199,7 +177,7 @@ class AgentRouter:
         messages = conversation_history.copy()
         messages.append({"role": "user", "content": user_query})
         
-        # 2. 意图分析（🆕 V7.0: 包含 complexity_score）
+        # 2. 意图分析（LLM 语义推理，规则在提示词中定义）
         if previous_intent:
             intent = await self.intent_analyzer.analyze_with_context(
                 messages, previous_intent
@@ -207,39 +185,20 @@ class AgentRouter:
         else:
             intent = await self.intent_analyzer.analyze(messages)
         
-        # 3. 🆕 V7.0: 优先使用 LLM 输出的 complexity_score
-        # 如果 LLM 返回了有效的 complexity_score，直接使用
-        # 否则 fallback 到 ComplexityScorer（向后兼容）
+        logger.info(
+            f"📊 LLM 意图分析: complexity={intent.complexity.value}, "
+            f"needs_multi_agent={intent.needs_multi_agent}"
+        )
         
-        use_llm_score = hasattr(intent, 'complexity_score') and intent.complexity_score is not None
-        
-        if use_llm_score:
-            # 🆕 V7.0: 使用 LLM 直接输出的 complexity_score
-            score = intent.complexity_score
-            complexity = self._build_complexity_from_intent(intent)
-            logger.info(f"🆕 V7.0: 使用 LLM 输出的 complexity_score={score:.1f}")
-        else:
-            # Fallback: 使用 ComplexityScorer（向后兼容）
-            complexity = self.complexity_scorer.score(intent, conversation_history)
-            score = complexity.score
-            logger.info(f"⚠️ Fallback: 使用 ComplexityScorer score={score:.1f}")
-        
-        # 4. 路由决策
-        # 🆕 V8.0: 完全依赖 LLM 语义判断，移除硬编码阈值
-        # 决策逻辑：
-        # - intent.needs_multi_agent = true → 使用多智能体
-        # - intent.needs_multi_agent = false → 使用单智能体
-        # - 🆕 V7.1: 检查预算是否足够（可能降级）
-        
-        # 初步决策（完全基于 LLM 语义判断）
+        # 3. 路由决策：直接使用 LLM 输出
         if intent.needs_multi_agent:
             agent_type = "multi"
-            routing_reason = f"LLM 语义判断: 需要多智能体协作（score={score:.1f}）"
-            logger.info(f"🔀 路由决策: 多智能体（LLM 语义判断，score={score:.1f}）")
+            routing_reason = "LLM 语义判断: 需要多智能体协作"
+            logger.info("🔀 路由决策: 多智能体")
         else:
             agent_type = "single"
-            routing_reason = f"LLM 语义判断: 单智能体即可（score={score:.1f}）"
-            logger.info(f"🔀 路由决策: 单智能体（LLM 语义判断，score={score:.1f}）")
+            routing_reason = "LLM 语义判断: 单智能体即可"
+            logger.info("🔀 路由决策: 单智能体")
         
         # 🆕 V7.1: 如果选择多智能体，检查预算是否足够
         budget_check_passed = True
@@ -284,57 +243,24 @@ class AgentRouter:
                 logger.warning(f"💰 {budget_result.warning}")
                 budget_warning = budget_result.warning
         
-        # 🆕 V8.0: 从 intent 获取执行策略（由 LLM 语义判断）
+        # 从 intent 获取执行策略（由 LLM 语义判断）
         execution_strategy = getattr(intent, 'execution_strategy', 'rvr') if intent else 'rvr'
         
         decision = RoutingDecision(
             agent_type=agent_type,
-            execution_strategy=execution_strategy,  # 🆕 V8.0
+            execution_strategy=execution_strategy,
             intent=intent,
-            complexity=complexity,
             user_query=user_query,
             conversation_history=conversation_history,
             context={
                 "user_id": user_id,
                 "routing_reason": routing_reason,
-                "score_source": "llm" if use_llm_score else "complexity_scorer",  # 🆕 V7.0
-                "budget_check_passed": budget_check_passed,  # 🆕 V7.1: 预算检查结果
-                "budget_warning": budget_warning,  # 🆕 V7.1: 预算告警
+                "budget_check_passed": budget_check_passed,
+                "budget_warning": budget_warning,
             }
         )
         
         return decision
-    
-    def _build_complexity_from_intent(self, intent: IntentResult) -> ComplexityScore:
-        """
-        🆕 V7.0: 从 IntentResult 构建 ComplexityScore（用于向后兼容）
-        
-        Args:
-            intent: 意图分析结果
-            
-        Returns:
-            ComplexityScore: 复杂度评分结果
-        """
-        score = intent.complexity_score
-        
-        # 根据 score 确定 level
-        if score <= 3.0:
-            level = ComplexityLevel.SIMPLE
-            recommended = "single"
-        elif score <= 5.0:
-            level = ComplexityLevel.MEDIUM
-            recommended = "single"
-        else:
-            level = ComplexityLevel.COMPLEX
-            recommended = "multi"
-        
-        return ComplexityScore(
-            score=score,
-            level=level,
-            dimensions={"llm_score": score},
-            reasoning=f"LLM 直接输出 (score={score:.1f})",
-            recommended_agent=recommended,
-        )
     
     async def route_with_override(
         self,
@@ -363,24 +289,3 @@ class AgentRouter:
             logger.warning(f"⚠️ 路由决策被覆盖为: {force_agent_type}")
         
         return decision
-    
-    def should_use_multi_agent(
-        self,
-        intent: IntentResult,
-        complexity: Optional[ComplexityScore] = None
-    ) -> bool:
-        """
-        判断是否应该使用多智能体
-        
-        🆕 V8.0: 完全依赖 LLM 语义判断（intent.needs_multi_agent）
-        移除硬编码的 complexity_threshold 阈值
-        
-        Args:
-            intent: 意图分析结果
-            complexity: 复杂度评分（仅用于日志，不参与决策）
-            
-        Returns:
-            bool: 是否使用多智能体
-        """
-        # V8.0: 完全依赖 LLM 语义判断
-        return intent.needs_multi_agent

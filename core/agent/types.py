@@ -48,6 +48,7 @@ class IntentResult:
     🆕 V6.1: 新增 is_follow_up 字段，用于识别追问/上下文延续（避免误判为新话题）
     🆕 V7.0: 新增 complexity_score 字段，LLM 直接输出 0-10 评分（废弃 ComplexityScorer）
     🆕 V7.8: 新增 LLM 语义建议字段，供 AgentFactory 参数映射时使用
+    🆕 V9.2: 新增 task_dependency_type 字段，用于判断任务依赖类型（并行/串行/混合）
     """
     task_type: TaskType                          # 任务类型
     complexity: Complexity                       # 复杂度等级
@@ -57,9 +58,7 @@ class IntentResult:
     skip_memory_retrieval: bool = False          # 🆕 V4.6: 是否跳过 Mem0 记忆检索（默认不跳过）
     needs_multi_agent: bool = False              # 🆕 V6.0: 是否需要 Multi-Agent 协作（默认不需要）
     is_follow_up: bool = False                   # 🆕 V6.1: 是否为追问/上下文延续（默认否，视为新话题）
-    keywords: List[str] = field(default_factory=list)  # 提取的关键词
     confidence: float = 1.0                      # 置信度
-    raw_response: Optional[str] = None           # LLM 原始响应（用于调试）
     
     # ==================== V7.8 LLM 语义建议 ====================
     # 这些字段由 IntentAnalyzer 输出，供 AgentFactory 参数映射时优先使用
@@ -75,6 +74,13 @@ class IntentResult:
     # - rvr: 标准 RVR 循环（简单确定性任务）
     # - rvr-b: RVR + Backtrack（探索性任务、可能失败需重试、多步骤任务）
     
+    # ==================== V9.2 任务依赖类型 ====================
+    # 用于判断子任务之间的依赖关系，影响 Multi-Agent 和执行策略决策
+    task_dependency_type: Optional[str] = "sequential"  # 🆕 V9.2: "independent" | "sequential" | "mixed"
+    # - independent: 子任务互不依赖，可完全并行
+    # - sequential: 子任务有前后依赖，必须串行
+    # - mixed: 部分可并行，部分需串行
+    
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {
@@ -85,8 +91,8 @@ class IntentResult:
             "needs_persistence": self.needs_persistence,
             "skip_memory_retrieval": self.skip_memory_retrieval,
             "needs_multi_agent": self.needs_multi_agent,
+            "task_dependency_type": self.task_dependency_type,  # 🆕 V9.2
             "is_follow_up": self.is_follow_up,
-            "keywords": self.keywords,
             "confidence": self.confidence,
             # V7.8 LLM 语义建议
             "suggested_planning_depth": self.suggested_planning_depth,

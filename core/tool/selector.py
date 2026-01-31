@@ -65,6 +65,10 @@ class ToolSelector:
     - Level 1（核心工具）：始终加载，如 plan_todo
     - Level 2（动态工具）：按需加载，如 exa_search, e2b_python_sandbox
     
+    🆕 V10.0 配置化重构：
+    - 核心工具、原生工具列表从 capabilities.yaml 读取
+    - 代码中的列表仅作为 fallback 默认值
+    
     使用方式：
         selector = ToolSelector(registry)
         result = selector.select(
@@ -74,15 +78,13 @@ class ToolSelector:
         print(result.tool_names)  # ["plan_todo", "bash", "web_search", "slidespeak_render"]
     """
     
-    # 默认核心工具（作为 Level 1 的备用，实际从 capabilities.yaml 读取）
-    # 注意：bash 是 Claude 原生工具（NATIVE_TOOLS），不应在核心工具列表中
-    # 核心工具列表应与 capabilities.yaml 中 level:1 的定义一致
+    # 默认核心工具（作为配置文件不存在时的 fallback）
+    # 🆕 V10.0: 实际值从 capabilities.yaml 的 tool_selection.core_tools 读取
     DEFAULT_CORE_TOOLS = ["plan_todo", "request_human_confirmation"]
     
-    # Claude 原生工具（直接使用字符串）
-    # 注意：computer 和 memory 工具需要特殊 beta header，暂不包含在默认列表中
-    # 支持的原生工具：bash, text_editor, web_search
-    NATIVE_TOOLS = ["bash", "text_editor", "web_search"]
+    # 默认原生工具（作为配置文件不存在时的 fallback）
+    # 🆕 V10.0: 实际值从 capabilities.yaml 的 tool_selection.native_tools 读取
+    DEFAULT_NATIVE_TOOLS = ["bash", "text_editor", "web_search"]
     
     def __init__(
         self,
@@ -90,6 +92,8 @@ class ToolSelector:
     ):
         """
         初始化工具选择器
+        
+        🆕 V10.0: 从 capabilities.yaml 加载工具配置
         
         Args:
             registry: CapabilityRegistry 实例
@@ -102,14 +106,63 @@ class ToolSelector:
         
         # 🆕 缓存核心工具列表（Level 1）
         self._core_tools_cache: Optional[List[str]] = None
+        
+        # 🆕 V10.0: 从配置加载工具列表
+        tool_selection_config = self._load_tool_selection_config()
+        self.NATIVE_TOOLS = tool_selection_config.get("native_tools", self.DEFAULT_NATIVE_TOOLS)
+        self.SERIAL_ONLY_TOOLS = set(tool_selection_config.get("serial_only_tools", ["plan_todo", "request_human_confirmation"]))
+        self._config_core_tools = tool_selection_config.get("core_tools", self.DEFAULT_CORE_TOOLS)
+        
+        logger.debug(
+            f"📦 ToolSelector 初始化: "
+            f"core_tools={self._config_core_tools}, "
+            f"native_tools={self.NATIVE_TOOLS}"
+        )
+    
+    def _load_tool_selection_config(self) -> Dict[str, Any]:
+        """
+        从 capabilities.yaml 加载工具选择配置
+        
+        🆕 V10.0: 配置化工具列表
+        
+        Returns:
+            Dict: tool_selection 配置，如果加载失败返回空字典
+        """
+        import yaml
+        from pathlib import Path
+        
+        # 查找配置文件
+        config_paths = [
+            Path(__file__).parent.parent.parent / "config" / "capabilities.yaml",
+            Path("/Users/liuyi/Documents/langchain/CoT_agent/mvp/zenflux_agent/config/capabilities.yaml"),
+        ]
+        
+        for config_path in config_paths:
+            if config_path.exists():
+                try:
+                    with open(config_path, 'r', encoding='utf-8') as f:
+                        config = yaml.safe_load(f) or {}
+                    
+                    tool_selection = config.get("tool_selection", {})
+                    if tool_selection:
+                        logger.debug(f"✅ 从 {config_path} 加载工具选择配置")
+                        return tool_selection
+                except Exception as e:
+                    logger.warning(f"⚠️ 加载工具选择配置失败: {e}")
+        
+        logger.debug("📌 使用默认工具选择配置")
+        return {}
     
     def get_core_tools(self) -> List[str]:
         """
         获取核心工具名称列表（Level 1）
         
         核心工具始终加载，不受动态选择影响。
-        优先从 capabilities.yaml 读取 level=1 的工具，
-        如果没有则使用默认列表。
+        
+        🆕 V10.0: 优先级
+        1. 从 Registry 读取 level=1 的工具
+        2. 配置文件中的 tool_selection.core_tools
+        3. DEFAULT_CORE_TOOLS 硬编码默认值
         
         Returns:
             核心工具名称列表
@@ -122,11 +175,15 @@ class ToolSelector:
         
         if core_caps:
             self._core_tools_cache = [c.name for c in core_caps]
-            logger.debug(f"📌 核心工具 (Level 1): {self._core_tools_cache}")
+            logger.debug(f"📌 核心工具 (Level 1 from Registry): {self._core_tools_cache}")
+        elif self._config_core_tools:
+            # 🆕 V10.0: 使用配置文件中的核心工具
+            self._core_tools_cache = list(self._config_core_tools)
+            logger.debug(f"📌 核心工具 (from config): {self._core_tools_cache}")
         else:
-            # 备用：使用默认核心工具
+            # 备用：使用硬编码默认值
             self._core_tools_cache = self.DEFAULT_CORE_TOOLS.copy()
-            logger.debug(f"📌 使用默认核心工具: {self._core_tools_cache}")
+            logger.debug(f"📌 核心工具 (fallback default): {self._core_tools_cache}")
         
         return self._core_tools_cache
     
@@ -340,6 +397,93 @@ class ToolSelector:
         
         return tools_for_llm
     
+    def resolve_capabilities(
+        self,
+        schema_tools: Optional[List[str]] = None,
+        plan: Optional[Dict[str, Any]] = None,
+        intent_task_type: Optional[str] = None
+    ) -> tuple[List[str], str, List[str]]:
+        """
+        🆕 V10.0: 三级优先级能力解析
+        
+        优先级（合并策略）：
+        1. Schema 配置（schema.tools）- 运营显式配置，最高优先级
+        2. Plan 推荐（plan.required_capabilities）- 任务规划补充
+        3. Intent 推断（intent → task_type → capabilities）- 兜底
+        
+        将工具选择策略从 SimpleAgent 提取到 ToolSelector，
+        保持 SimpleAgent 作为纯 RVR 编排层。
+        
+        Args:
+            schema_tools: Schema 配置的工具列表（最高优先级）
+            plan: Plan 规划结果（包含 required_capabilities）
+            intent_task_type: 意图任务类型（用于推断能力）
+            
+        Returns:
+            tuple: (required_capabilities, selection_source, overridden_sources)
+            - required_capabilities: 解析后的能力列表
+            - selection_source: 选择来源标识（如 "schema+plan"）
+            - overridden_sources: 被覆盖的来源列表（用于日志）
+        """
+        required_capabilities = []
+        selection_sources = []
+        overridden_sources = []
+        
+        # 1. Schema 配置（最高优先级）
+        if schema_tools:
+            valid_tools = []
+            invalid_tools = []
+            for tool_name in schema_tools:
+                if self.registry.get(tool_name) or tool_name in self.NATIVE_TOOLS:
+                    valid_tools.append(tool_name)
+                else:
+                    invalid_tools.append(tool_name)
+            
+            if invalid_tools:
+                logger.warning(
+                    f"⚠️ Schema 配置了无效工具: {invalid_tools}，已自动过滤。"
+                    f"有效工具: {valid_tools}"
+                )
+            
+            required_capabilities.extend(valid_tools)
+            if valid_tools:
+                selection_sources.append("schema")
+        
+        # 2. Plan 推荐（补充，不覆盖已有的）
+        plan_capabilities = plan.get('required_capabilities', []) if plan else []
+        if plan_capabilities:
+            added_from_plan = []
+            for cap in plan_capabilities:
+                if cap not in required_capabilities:
+                    required_capabilities.append(cap)
+                    added_from_plan.append(cap)
+            if added_from_plan:
+                selection_sources.append("plan")
+                logger.debug(f"📋 Plan 补充能力: {added_from_plan}")
+            elif required_capabilities:
+                # 有 Schema 配置时，Plan 被覆盖
+                overridden_sources.append(f"plan({len(plan_capabilities)})")
+        
+        # 3. Intent 推断（兜底，仅当前面都为空时使用）
+        if not required_capabilities and intent_task_type:
+            intent_capabilities = self.registry.get_capabilities_for_task_type(intent_task_type)
+            if intent_capabilities:
+                required_capabilities = intent_capabilities
+                selection_sources.append("intent")
+        elif intent_task_type and required_capabilities:
+            # 有其他配置时，Intent 被覆盖
+            intent_caps = self.registry.get_capabilities_for_task_type(intent_task_type)
+            if intent_caps:
+                overridden_sources.append(f"intent({len(intent_caps)})")
+        
+        # 确定最终来源标识
+        selection_source = "+".join(selection_sources) if selection_sources else "intent"
+        
+        if len(selection_sources) > 1:
+            logger.info(f"📋 工具选择合并策略: {selection_source}, 能力: {required_capabilities[:5]}")
+        
+        return required_capabilities, selection_source, overridden_sources
+
     def get_available_apis(self, executor=None) -> List[str]:
         """
         自动发现可用的 API（从已加载的工具推断）

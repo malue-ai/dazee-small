@@ -33,6 +33,50 @@ def _get_standard_prompt_template() -> str:
 - 任务完成，必要的代码/测试已一次通过。
 - 结果满足用户需求或已说明澄清点。
 
+# 示例
+
+<examples>
+<example>
+<query>帮我搜索 AI 最新进展并总结</query>
+<execution>
+1. plan_todo.create_plan(goal="搜索并总结 AI 进展", steps=[...])
+2. web_search("AI 最新进展 2024")
+3. 整理搜索结果，生成结构化总结
+4. [Final Validation] → PASS → 返回总结
+</execution>
+<reasoning>需要搜索 + 总结两步，属于 medium 任务</reasoning>
+</example>
+
+<example>
+<query>写一个 Python 排序函数</query>
+<execution>
+1. plan_todo.create_plan(goal="编写排序函数", steps=[...])
+2. bash: 编写代码 + 运行测试（一次调用）
+3. [Final Validation] → PASS → 返回代码
+</execution>
+<reasoning>代码编写任务，需要规划但步骤简单</reasoning>
+</example>
+
+<example>
+<query>什么是 RAG？</query>
+<execution>
+1. 直接回答（纯问答，无需 Plan）
+</execution>
+<reasoning>纯知识问答，不需要工具，直接回答</reasoning>
+</example>
+
+<example>
+<query>分析这份 CSV 数据的销售趋势</query>
+<execution>
+1. plan_todo.create_plan(goal="分析销售趋势", steps=[...])
+2. bash: 用 pandas 读取并分析数据
+3. 生成趋势分析报告
+4. [Final Validation] → PASS → 返回分析
+</execution>
+<reasoning>数据分析任务，需要读取 + 分析 + 报告</reasoning>
+</example>
+</examples>
+
 Be concise, follow the rules, minimize token & tool calls."""
 
 

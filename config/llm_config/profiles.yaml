@@ -7,6 +7,34 @@
 #
 # ============================================================
 
+# ============================================================
+# 🆕 V7.10 健康探测配置
+# ============================================================
+#
+# 控制 LLM 健康探测行为，优化用户体验
+#
+health_probe:
+  # 请求链路探针（短期优化：默认禁用，避免阻塞用户请求）
+  request_probe:
+    enabled: false         # 生产环境推荐 false，调试时可设为 true
+    timeout_seconds: 5.0   # 探针超时时间（秒），避免长时间阻塞
+    max_retries: 1         # 最大重试次数，快速失败
+  
+  # 后台健康探测（长期优化：与用户请求解耦）
+  background_probe:
+    enabled: true          # 启用后台健康探测
+    interval_seconds: 120   # 探测间隔（秒）
+    timeout_seconds: 10    # 单次探测超时（秒）
+    # 要探测的 Profile 列表
+    profiles:
+      - main_agent
+      - intent_analyzer
+      - lead_agent
+      - worker_agent
+      - critic_agent
+
+# ============================================================
+
 # Qwen 扩展参数默认值建议（未设置时不透传，避免影响提示词驱动）
 # - enable_search: false
 # - search_options: {"search_mode": "auto"}  # enable_search=true 时
@@ -406,15 +434,15 @@ profiles:
 
   # ==================== 计划管理 ====================
   plan_manager:
-    description: "智能任务规划和管理，需要深度推理能力"
+    description: "智能任务规划，快速生成计划框架（深度推理留给主 Agent）"
     provider: "claude"
     model: "claude-sonnet-4-5-20250929"
-    max_tokens: 8192
-    temperature: 1.0
-    enable_thinking: true
-    thinking_budget: 5000
+    max_tokens: 4096
+    temperature: 0.7
+    enable_thinking: false  # 🆕 V9.3: 禁用 thinking，降低 plan_todo 延时
+    thinking_budget: 0
     enable_caching: false
-    timeout: 120.0
+    timeout: 30.0  # 🆕 缩短超时（无 thinking 后响应更快）
     max_retries: 2
     fallbacks:
       # 同模型多服务商：同一 provider + model，不同 base_url/api_key_env
@@ -422,23 +450,23 @@ profiles:
         model: "claude-sonnet-4-5-20250929"
         api_key_env: "CLAUDE_API_KEY_VENDOR_A"
         base_url: "https://api.anthropic.com"
-        max_tokens: 8192
-        temperature: 1.0
-        enable_thinking: true
-        thinking_budget: 5000
+        max_tokens: 4096
+        temperature: 0.7
+        enable_thinking: false
+        thinking_budget: 0
         enable_caching: false
-        timeout: 120.0
+        timeout: 30.0
         max_retries: 2
       - provider: "claude"
         model: "claude-sonnet-4-5-20250929"
         api_key_env: "CLAUDE_API_KEY_VENDOR_B"
         base_url: "https://anthropic-proxy-b.example.com/v1"
-        max_tokens: 8192
-        temperature: 1.0
-        enable_thinking: true
-        thinking_budget: 5000
+        max_tokens: 4096
+        temperature: 0.7
+        enable_thinking: false
+        thinking_budget: 0
         enable_caching: false
-        timeout: 120.0
+        timeout: 30.0
         max_retries: 2
       # 跨厂商主备：不同 provider
       - provider: "qwen"

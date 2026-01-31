@@ -157,6 +157,52 @@ def messages_to_dict_list(messages: List["Message"]) -> List[Dict[str, Any]]:
     return result
 
 
+def _filter_empty_text_blocks(content: Any) -> Any:
+    """
+    过滤空的 text 块
+    
+    🛡️ Claude API 不接受空的 content block，会导致异常退出。
+    此函数在发送给 Claude API 之前过滤掉空的 text 块。
+    
+    Args:
+        content: 内容（字符串或 content block 列表）
+        
+    Returns:
+        过滤后的内容
+    """
+    if not content:
+        return content
+    
+    # 字符串内容直接返回
+    if isinstance(content, str):
+        return content if content.strip() else None
+    
+    # 列表内容：过滤空 text 块
+    if isinstance(content, list):
+        filtered = []
+        for block in content:
+            if not isinstance(block, dict):
+                filtered.append(block)
+                continue
+            
+            block_type = block.get("type", "")
+            
+            # 过滤空的 text 块
+            if block_type == "text":
+                text_value = block.get("text", "")
+                if text_value and (not isinstance(text_value, str) or text_value.strip()):
+                    filtered.append(block)
+                else:
+                    logger.debug(f"🧹 _filter_empty_text_blocks: 移除空的 text 块")
+            else:
+                # 非 text 块直接保留
+                filtered.append(block)
+        
+        return filtered if filtered else None
+    
+    return content
+
+
 def append_assistant_message(
     messages: List["Message"],
     raw_content: Any
@@ -167,9 +213,19 @@ def append_assistant_message(
     Args:
         messages: Message 对象列表（会被修改）
         raw_content: 响应内容（通常是 response.raw_content）
+        
+    Note:
+        🛡️ 会自动过滤空的 text 块，防止 Claude API 报错
     """
     from core.llm import Message
-    messages.append(Message(role="assistant", content=raw_content))
+    
+    # 🛡️ 过滤空的 text 块（Claude API 不接受空 content block 会导致异常退出）
+    filtered_content = _filter_empty_text_blocks(raw_content)
+    
+    if filtered_content:
+        messages.append(Message(role="assistant", content=filtered_content))
+    else:
+        logger.warning("⚠️ append_assistant_message: raw_content 过滤后为空，跳过添加")
 
 
 def append_user_message(

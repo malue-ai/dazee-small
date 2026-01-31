@@ -2,9 +2,13 @@
 SimpleAgent RVR 循环模块
 
 职责：
-- RVR（Read-Reason-Act-Observe-Validate-Write-Repeat）主循环
+- RVR（React-Validate-Reflect-Repeat）主循环
 - 流式 LLM 响应处理
 - 消息构建和更新
+
+注意：
+- 本模块实现标准 RVR 循环
+- 如需回溯能力，请使用 RVRBAgent
 """
 
 import json
@@ -56,7 +60,7 @@ class RVRLoopMixin:
         """
         RVR 主循环
         
-        Read-Reason-Act-Observe-Validate-Write-Repeat
+        React-Validate-Reflect-Repeat
         
         Args:
             messages: 初始消息列表（dict 格式）

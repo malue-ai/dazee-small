@@ -58,9 +58,20 @@ from core.llm import create_llm_service, Message
 logger = logging.getLogger(__name__)
 
 
-# ===== Skill 发现模块 =====
+# ===== 能力发现模块 =====
+# Skills: 本地工作流接口（skills/library/）
+# Claude Skills: 上传到 Anthropic 服务器的技能（从 capabilities.yaml 读取 skill_id）
 SKILLS_LIBRARY_PATH = Path(__file__).parent.parent / "skills" / "library"
+# 向后兼容：如果 skills/library/ 不存在，使用 skills/library/
+LEGACY_SKILLS_PATH = Path(__file__).parent.parent / "skills" / "library"
 CAPABILITIES_FILE = Path(__file__).parent.parent / "config" / "capabilities.yaml"
+
+
+def _get_skills_path() -> Path:
+    """获取 Skills 目录路径（向后兼容）"""
+    if SKILLS_LIBRARY_PATH.exists():
+        return SKILLS_LIBRARY_PATH
+    return LEGACY_SKILLS_PATH
 
 
 def get_registered_skills_from_config() -> List[Dict[str, Any]]:
@@ -109,16 +120,20 @@ def get_registered_skills_from_config() -> List[Dict[str, Any]]:
 
 def discover_skills() -> List[Dict[str, Any]]:
     """
-    发现可用 Skills
+    发现可用能力（Claude Skills + Skills）
     
-    优先从 capabilities.yaml 读取已注册的 Skills（包含 skill_id），
-    如果没有注册信息，则扫描本地 skills/library/ 目录。
+    优先从 capabilities.yaml 读取已注册的 Claude Skills（包含 skill_id），
+    同时扫描本地 skills/library/ 目录发现 Skills。
+    
+    术语说明：
+    - Claude Skills: 有 skill_id，上传到 Anthropic 服务器执行
+    - Skills: 本地工作流接口，系统提示词注入
     
     Returns:
         [
             {
                 "name": "professional-ppt-generator",
-                "skill_id": "skill_abc123xyz",  # 如果已注册
+                "skill_id": "skill_abc123xyz",  # 如果是 Claude Skill
                 "description": "根据用户需求，智能生成专业级 PPT",
                 "version": "1.0.0",
                 "tags": ["ppt", "presentation", "slidespeak"],
@@ -128,14 +143,16 @@ def discover_skills() -> List[Dict[str, Any]]:
             ...
         ]
     """
-    # 1. 先从 capabilities.yaml 读取已注册的 Skills
+    # 1. 先从 capabilities.yaml 读取已注册的 Claude Skills
     registered_skills = get_registered_skills_from_config()
     registered_names = {s["name"] for s in registered_skills}
     
-    # 2. 构建返回列表（已注册的优先）
+    skills_path = _get_skills_path()
+    
+    # 2. 构建返回列表（已注册的 Claude Skills 优先）
     skills = []
     for cap in registered_skills:
-        skill_path = cap.get("skill_path") or str(SKILLS_LIBRARY_PATH / cap["name"])
+        skill_path = cap.get("skill_path") or cap.get("skill_path") or str(skills_path / cap["name"])
         skills.append({
             "name": cap["name"],
             "skill_id": cap.get("skill_id"),
@@ -146,9 +163,9 @@ def discover_skills() -> List[Dict[str, Any]]:
             "summary": cap.get("metadata", {}).get("description", "")[:200]
         })
     
-    # 3. 扫描本地目录，补充未注册的 Skills
-    if SKILLS_LIBRARY_PATH.exists():
-        for skill_dir in SKILLS_LIBRARY_PATH.iterdir():
+    # 3. 扫描本地 Skills 目录，补充未注册的
+    if skills_path.exists():
+        for skill_dir in skills_path.iterdir():
             if not skill_dir.is_dir() or skill_dir.name.startswith('_'):
                 continue
             
@@ -156,7 +173,11 @@ def discover_skills() -> List[Dict[str, Any]]:
             if skill_dir.name in registered_names:
                 continue
             
+            # 优先查找 SKILL.md，向后兼容 SKILL.md
             skill_md_path = skill_dir / "SKILL.md"
+            if not skill_md_path.exists():
+                skill_md_path = skill_dir / "SKILL.md"
+            
             if not skill_md_path.exists():
                 continue
             
@@ -164,19 +185,19 @@ def discover_skills() -> List[Dict[str, Any]]:
                 skill_info = _parse_skill_md(skill_md_path)
                 if skill_info:
                     skill_info["path"] = str(skill_dir)
-                    skill_info["skill_id"] = None  # 未注册
+                    skill_info["skill_id"] = None  # 本地 Skill，无 skill_id
                     skills.append(skill_info)
-                    logger.debug(f"⚠️ 发现未注册 Skill: {skill_info['name']}")
+                    logger.debug(f"📂 发现本地 Skill: {skill_info['name']}")
             except Exception as e:
                 logger.warning(f"⚠️ 解析 Skill 失败 {skill_dir.name}: {e}")
     
-    logger.info(f"📚 共发现 {len(skills)} 个 Skills（{len(registered_skills)} 个已注册）")
+    logger.info(f"📚 共发现 {len(skills)} 个能力（{len(registered_skills)} 个 Claude Skills）")
     return skills
 
 
 def _parse_skill_md(skill_md_path: Path) -> Optional[Dict[str, Any]]:
     """
-    解析 SKILL.md 文件，提取元数据
+    解析 SKILL.md（或 SKILL.md）文件，提取元数据
     """
     with open(skill_md_path, 'r', encoding='utf-8') as f:
         content = f.read()
@@ -543,7 +564,8 @@ class PlanTodoTool:
         self._llm = create_llm_service(**profile)
         
         persistence_status = "启用" if memory_manager else "禁用"
-        logger.info(f"✅ PlanTodoTool 初始化完成（智能版本，Extended Thinking，持久化: {persistence_status}）")
+        thinking_status = "启用" if profile.get("enable_thinking", False) else "禁用"
+        logger.info(f"✅ PlanTodoTool 初始化完成（智能版本，thinking: {thinking_status}，持久化: {persistence_status}）")
     
     def get_input_schema(self) -> Dict:
         """
@@ -867,7 +889,7 @@ class PlanTodoTool:
             skills_section=skills_section
         )
         
-        logger.info(f"🧠 调用 Claude + Extended Thinking 生成计划...")
+        logger.info(f"🧠 调用 Claude 生成计划...")
         logger.info(f"   用户需求: {user_query[:100]}...")
         if matched_skills:
             logger.info(f"   推荐 Skills: {[s['name'] for s in matched_skills]}")

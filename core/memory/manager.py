@@ -114,7 +114,7 @@ class MemoryManager:
     
     @property
     def skill(self) -> SkillMemory:
-        """获取 Skill 缓存（懒加载）"""
+        """获取 Skill 缓存（懒加载）- 本地工作流技能"""
         if self._skill is None:
             self._skill = create_skill_memory()
         return self._skill

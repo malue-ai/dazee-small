@@ -156,11 +156,11 @@ class AgentFactory:
         **kwargs
     ) -> "AgentProtocol":
         """
-        从路由决策创建 Agent（V7.8 统一入口）
+        从路由决策创建 Agent（V8.0 统一入口）
         
-        核心设计：
+        🆕 V8.0 设计原则：
         1. base_schema 来自实例配置（config.yaml + prompt.md）
-        2. 根据 complexity_score 微调运行时参数
+        2. 不根据 complexity_score 调整参数，Agent 自主决策
         3. 保留实例级配置（工具、技能、APIs、记忆等）
         
         Args:
@@ -223,23 +223,23 @@ class AgentFactory:
            - 中低（4-7）: RVRBAgent（RVR + Backtrack）
         """
         from core.agent.simple import SimpleAgent, RVRBAgent
+        from core.agent.types import Complexity
         
-        # 获取复杂度评分
+        # 🆕 V8.0: 直接使用 LLM 语义判断的复杂度等级，不再通过 score 计算
         intent = decision.intent
-        complexity_score = None
-        if hasattr(decision, 'complexity') and decision.complexity:
-            complexity_score = decision.complexity.score
-        if complexity_score is None and intent:
-            complexity_score = getattr(intent, 'complexity_score', None)
-        if complexity_score is None:
-            complexity_score = 5.0
         
-        # 确定复杂度层级
-        complexity_level = cls._score_to_level(complexity_score)
+        # 获取复杂度层级（优先使用 LLM 语义判断）
+        if intent and hasattr(intent, 'complexity') and intent.complexity:
+            complexity_level = intent.complexity.value  # LLM 直接输出的语义判断
+        else:
+            complexity_level = "medium"  # 默认中等
+        
+        # complexity_score 仅供日志参考
+        complexity_score = getattr(intent, 'complexity_score', 5.0) if intent else 5.0
         
         logger.info(
-            f"🏭 创建 SimpleAgent: complexity_score={complexity_score:.2f}, "
-            f"level={complexity_level}"
+            f"🏭 创建 SimpleAgent: complexity={complexity_level} (LLM语义), "
+            f"score={complexity_score:.2f} (仅参考)"
         )
         
         # 获取 intent
@@ -304,23 +304,6 @@ class AgentFactory:
         return agent
     
     @classmethod
-    def _score_to_level(cls, complexity_score: float) -> str:
-        """
-        将复杂度评分转换为层级
-        
-        对应 prompt.md 中的分层建议：
-        - simple: 直接回答，不强制计划
-        - medium: 保留最小计划（3-5步）
-        - complex: 完整计划与质量验证
-        """
-        if complexity_score <= 3.0:
-            return "simple"
-        elif complexity_score <= 6.0:
-            return "medium"
-        else:
-            return "complex"
-    
-    @classmethod
     def _adjust_schema_for_complexity(
         cls,
         base_schema: AgentSchema,
@@ -329,123 +312,96 @@ class AgentFactory:
         intent: "IntentResult" = None
     ) -> AgentSchema:
         """
-        在实例 Schema 基础上根据复杂度微调运行时参数
+        🆕 V8.0: 根据 LLM 语义判断调整 Schema
         
-        V7.8 核心设计：
-        1. 优先使用 LLM 语义建议（intent.suggested_*）
-        2. 回退到硬规则映射
-        3. 保留实例级配置（工具、技能、APIs、记忆等）
+        设计原则：
+        - 所有配置由 IntentResult 中的语义字段驱动
+        - plan_todo 工具始终加载（Level 1 核心工具）
+        - Agent 自主决定是否调用工具
+        - complexity_score 仅供参考（日志/监控）
+        
+        语义字段映射：
+        - intent.suggested_planning_depth → plan_manager 配置
+        - intent.tool_usage_hint → tool_selector 配置
+        - intent.complexity → 提示词分层
         
         Args:
             base_schema: 实例级 Schema
-            complexity_score: 复杂度评分
-            complexity_level: 复杂度层级 (simple/medium/complex)
-            intent: IntentResult（包含 LLM 语义建议）
+            complexity_score: 复杂度评分（仅供参考）
+            complexity_level: 复杂度层级（用于提示词分层）
+            intent: IntentResult（LLM 语义判断）
             
         Returns:
-            微调后的 Schema
+            调整后的 Schema
         """
-        from core.agent.types import IntentResult
         import copy
         
         adjusted = copy.deepcopy(base_schema)
         
         # ==================== max_turns ====================
-        # 使用硬规则设置安全阀（智能体自主决定何时退出，max_turns 只是防止死循环）
-        if complexity_level == "simple":
-            adjusted.max_turns = min(base_schema.max_turns, 8)
-        elif complexity_level == "medium":
-            adjusted.max_turns = min(base_schema.max_turns, 15)
-        else:  # complex
-            adjusted.max_turns = base_schema.max_turns  # 使用实例默认值
+        # 统一安全上限（默认 30），Agent 自主决定何时退出
+        # 不做调整，使用实例配置值
         
         # ==================== plan_manager ====================
-        if adjusted.plan_manager:
-            # 优先使用 LLM 建议的规划深度
-            if intent and intent.suggested_planning_depth:
-                depth = intent.suggested_planning_depth
-                if depth == "none":
-                    adjusted.plan_manager.enabled = False
-                elif depth == "minimal":
-                    adjusted.plan_manager.enabled = True
-                    adjusted.plan_manager.max_steps = 5
-                    adjusted.plan_manager.granularity = "coarse"
-                elif depth == "full":
-                    adjusted.plan_manager.enabled = True
-                    adjusted.plan_manager.granularity = "fine"
-                    adjusted.plan_manager.replan_enabled = True
-                logger.debug(f"   plan_manager: 使用 LLM 建议 → {depth}")
-            else:
-                # 回退到硬规则
-                if complexity_level == "simple":
-                    adjusted.plan_manager.enabled = False
-                elif complexity_level == "medium":
-                    adjusted.plan_manager.enabled = True
-                    adjusted.plan_manager.max_steps = min(
-                        adjusted.plan_manager.max_steps or 10, 5
-                    )
-                    adjusted.plan_manager.granularity = "coarse"
-                else:  # complex
-                    adjusted.plan_manager.enabled = True
-                    adjusted.plan_manager.granularity = "fine"
-                    adjusted.plan_manager.replan_enabled = True
-        
-        # ==================== tool_selector ====================
-        if adjusted.tool_selector:
-            # 优先使用 LLM 建议的工具使用模式
-            if intent and intent.tool_usage_hint:
-                hint = intent.tool_usage_hint
-                if hint == "single":
-                    adjusted.tool_selector.allow_parallel = False
-                    adjusted.tool_selector.max_parallel_tools = 1
-                elif hint == "sequential":
-                    adjusted.tool_selector.allow_parallel = False
-                    adjusted.tool_selector.max_parallel_tools = 1
-                elif hint == "parallel":
-                    adjusted.tool_selector.allow_parallel = True
-                    adjusted.tool_selector.max_parallel_tools = 5
-                logger.debug(f"   tool_selector: 使用 LLM 建议 → {hint}")
-            else:
-                # 回退到硬规则
-                if complexity_level == "simple":
-                    adjusted.tool_selector.allow_parallel = False
-                    adjusted.tool_selector.max_parallel_tools = 1
-                elif complexity_level == "medium":
-                    adjusted.tool_selector.allow_parallel = True
-                    adjusted.tool_selector.max_parallel_tools = 3
-                else:  # complex
-                    adjusted.tool_selector.allow_parallel = True
-                    adjusted.tool_selector.max_parallel_tools = 5
-        
-        # ==================== requires_deep_reasoning ====================
-        # 特殊处理：即使是简单问题，如果 LLM 认为需要深度推理，提升配置
-        if intent and intent.requires_deep_reasoning and complexity_level == "simple":
-            adjusted.max_turns = max(adjusted.max_turns, 12)
-            if adjusted.plan_manager:
+        # plan_todo 工具始终加载（Level 1），但可根据 LLM 语义建议配置参数
+        if adjusted.plan_manager and intent:
+            depth = intent.suggested_planning_depth
+            if depth == "none":
+                # LLM 判断不需要规划，但工具仍可用
+                adjusted.plan_manager.enabled = True  # 工具始终可用
+                adjusted.plan_manager.max_steps = 5   # 简化配置
+                logger.debug(f"   plan: LLM建议 none（工具可用，配置简化）")
+            elif depth == "minimal":
                 adjusted.plan_manager.enabled = True
                 adjusted.plan_manager.max_steps = 5
-            logger.debug(f"   requires_deep_reasoning: 提升简单任务配置")
+                adjusted.plan_manager.granularity = "coarse"
+                logger.debug(f"   plan: LLM建议 minimal")
+            elif depth == "full":
+                adjusted.plan_manager.enabled = True
+                adjusted.plan_manager.granularity = "fine"
+                adjusted.plan_manager.replan_enabled = True
+                logger.debug(f"   plan: LLM建议 full")
+            else:
+                # 无建议，使用默认配置
+                adjusted.plan_manager.enabled = True
+        elif adjusted.plan_manager:
+            adjusted.plan_manager.enabled = True
         
-        # 更新 reasoning
-        llm_hint = ""
+        # ==================== tool_selector ====================
+        # 根据 LLM 语义建议配置工具选择策略
+        if adjusted.tool_selector and intent:
+            hint = intent.tool_usage_hint
+            if hint == "single":
+                adjusted.tool_selector.allow_parallel = False
+                adjusted.tool_selector.max_parallel_tools = 1
+                logger.debug(f"   tools: LLM建议 single")
+            elif hint == "sequential":
+                adjusted.tool_selector.allow_parallel = False
+                logger.debug(f"   tools: LLM建议 sequential")
+            elif hint == "parallel":
+                adjusted.tool_selector.allow_parallel = True
+                adjusted.tool_selector.max_parallel_tools = 5
+                logger.debug(f"   tools: LLM建议 parallel")
+            # 无建议时使用默认配置
+        
+        # ==================== reasoning ====================
+        hints = []
         if intent:
-            hints = []
             if intent.suggested_planning_depth:
-                hints.append(f"planning={intent.suggested_planning_depth}")
+                hints.append(f"plan={intent.suggested_planning_depth}")
             if intent.tool_usage_hint:
                 hints.append(f"tools={intent.tool_usage_hint}")
             if intent.requires_deep_reasoning:
                 hints.append("deep_reasoning")
-            if hints:
-                llm_hint = f" [LLM建议: {', '.join(hints)}]"
         
+        hint_str = f" [LLM: {', '.join(hints)}]" if hints else ""
         adjusted.reasoning = (
             f"{base_schema.reasoning or ''} | "
-            f"运行时调整: {complexity_level} (score={complexity_score:.2f}){llm_hint}"
+            f"complexity={complexity_level}{hint_str}"
         )
         
         logger.debug(
-            f"   Schema 微调完成: max_turns {base_schema.max_turns} → {adjusted.max_turns}, "
+            f"   Schema 完成: max_turns={adjusted.max_turns}, "
             f"plan_enabled={adjusted.plan_manager.enabled if adjusted.plan_manager else 'N/A'}"
         )
         
@@ -503,109 +459,42 @@ class AgentFactory:
     @classmethod
     def _complexity_to_schema(cls, complexity_score: float) -> AgentSchema:
         """
-        根据复杂度评分生成差异化 Schema
+        生成默认 Schema（仅在无实例 Schema 时使用）
         
-        核心差异化配置：
-        1. max_turns: 控制最大轮数
-        2. memory_manager: 控制记忆策略
-        3. plan_manager: 控制规划粒度
-        4. tool_selector: 控制工具选择策略
-        5. output_formatter: 控制输出格式
+        🆕 V8.0 设计原则：
+        - max_turns 统一为 30（安全上限，Agent 自主决定何时退出）
+        - 其他配置使用合理默认值
+        - complexity_score 仅供参考，不影响配置
         
         注：Plan 是否启用由 Claude 自主决定（通过 plan_todo 工具）
         """
-        if complexity_score <= 3.0:
-            # ===== 简单任务：快速响应 =====
-            # 特点：无需规划，快速直达，限制轮数
-            return AgentSchema(
-                name="SimpleAgent",
-                description="简单任务快速响应",
-                intent_analyzer=IntentAnalyzerConfig(enabled=False),
-                tool_selector=ToolSelectorConfig(
-                    enabled=True,
-                    selection_strategy="priority_based",  # 优先级选择，快速
-                    allow_parallel=False,  # 禁止并行，简化执行
-                    max_parallel_tools=1,
-                ),
-                plan_manager=PlanManagerConfig(
-                    enabled=False,  # 简单任务不需要规划
-                ),
-                memory_manager=MemoryManagerConfig(
-                    working_memory_limit=10,  # 较小记忆窗口
-                    auto_compress=False,  # 无需压缩
-                ),
-                output_formatter=OutputFormatterConfig(
-                    default_format="text",  # 简洁文本输出
-                ),
-                max_turns=8,
-                reasoning=f"简单任务（score={complexity_score:.2f}）：快速响应，限制轮数"
-            )
-        
-        elif complexity_score <= 6.0:
-            # ===== 中等任务：平衡配置 =====
-            # 特点：适度规划，适中轮数，标准记忆
-            return AgentSchema(
-                name="MediumAgent",
-                description="中等复杂度任务",
-                intent_analyzer=IntentAnalyzerConfig(enabled=False),
-                tool_selector=ToolSelectorConfig(
-                    enabled=True,
-                    selection_strategy="capability_based",  # 能力匹配
-                    allow_parallel=True,  # 允许并行
-                    max_parallel_tools=3,
-                ),
-                plan_manager=PlanManagerConfig(
-                    enabled=True,
-                    max_steps=10,
-                    granularity="medium",  # 中等粒度
-                ),
-                memory_manager=MemoryManagerConfig(
-                    working_memory_limit=20,
-                    auto_compress=True,  # 自动压缩
-                ),
-                output_formatter=OutputFormatterConfig(
-                    default_format="markdown",
-                    code_highlighting=True,
-                ),
-                max_turns=15,
-                reasoning=f"中等任务（score={complexity_score:.2f}）：平衡配置"
-            )
-        
-        else:
-            # ===== 复杂任务：完整配置 =====
-            # 特点：精细规划，充足轮数，持久记忆，允许重规划
-            return AgentSchema(
-                name="ComplexAgent",
-                description="复杂任务完整配置",
-                intent_analyzer=IntentAnalyzerConfig(enabled=False),
-                tool_selector=ToolSelectorConfig(
-                    enabled=True,
-                    selection_strategy="capability_based",
-                    allow_parallel=True,
-                    max_parallel_tools=5,  # 更多并行
-                ),
-                plan_manager=PlanManagerConfig(
-                    enabled=True,
-                    max_steps=20,
-                    granularity="fine",  # 精细规划
-                    replan_enabled=True,  # 允许重规划
-                    max_replan_attempts=3,
-                    failure_threshold=0.2,  # 更低的失败阈值
-                ),
-                memory_manager=MemoryManagerConfig(
-                    retention_policy="session",
-                    working_memory_limit=30,
-                    episodic_memory=True,  # 启用情景记忆
-                    auto_compress=True,
-                ),
-                output_formatter=OutputFormatterConfig(
-                    default_format="markdown",
-                    code_highlighting=True,
-                    include_metadata=True,  # 包含元数据
-                ),
-                max_turns=25,
-                reasoning=f"复杂任务（score={complexity_score:.2f}）：精细规划，完整配置"
-            )
+        # 统一默认 Schema，不根据 complexity_score 差异化
+        return AgentSchema(
+            name="DefaultAgent",
+            description="默认配置（Agent 自主决策）",
+            intent_analyzer=IntentAnalyzerConfig(enabled=False),
+            tool_selector=ToolSelectorConfig(
+                enabled=True,
+                selection_strategy="capability_based",
+                allow_parallel=True,
+                max_parallel_tools=5,
+            ),
+            plan_manager=PlanManagerConfig(
+                enabled=True,  # 由 Agent 自行决定是否使用
+                max_steps=20,
+                granularity="medium",
+            ),
+            memory_manager=MemoryManagerConfig(
+                working_memory_limit=20,
+                auto_compress=True,
+            ),
+            output_formatter=OutputFormatterConfig(
+                default_format="markdown",
+                code_highlighting=True,
+            ),
+            max_turns=30,  # 🆕 统一安全上限，Agent 自主决定何时退出
+            reasoning=f"默认配置（complexity_score={complexity_score:.2f} 仅供参考）"
+        )
     
     # ==================== Schema 驱动创建 ====================
     
@@ -921,6 +810,214 @@ class AgentFactory:
         except Exception as e:
             logger.error(f"保存缓存失败: {e}")
             return False
+
+
+# ============================================================
+# Agent 克隆（V10.0 重构：从 SimpleAgent 移至 Factory）
+# ============================================================
+
+    @classmethod
+    def clone_for_session(
+        cls,
+        prototype: "AgentProtocol",
+        event_manager,
+        workspace_dir: str = None,
+        conversation_service = None
+    ) -> "AgentProtocol":
+        """
+        🆕 V10.0: 从原型克隆 Agent 实例（快速路径）
+        
+        从 SimpleAgent.clone_for_session 重构至此，
+        统一 Agent 克隆逻辑，保持 Factory 作为唯一创建入口。
+        
+        Args:
+            prototype: 原型 Agent 实例
+            event_manager: 事件管理器
+            workspace_dir: 工作目录
+            conversation_service: 会话服务
+            
+        Returns:
+            克隆的 Agent 实例
+        """
+        from core.agent.simple import SimpleAgent
+        from core.agent.simple.rvrb_agent import RVRBAgent
+        from core.agent.multi import MultiAgentOrchestrator
+        from core.events import EventBroadcaster
+        from models.usage import create_usage_tracker
+        
+        # 根据原型类型选择克隆策略
+        if isinstance(prototype, SimpleAgent):
+            return cls._clone_simple_agent(
+                prototype, event_manager, workspace_dir, conversation_service
+            )
+        elif isinstance(prototype, MultiAgentOrchestrator):
+            return cls._clone_multi_agent(
+                prototype, event_manager, workspace_dir, conversation_service
+            )
+        else:
+            raise TypeError(f"不支持克隆的 Agent 类型: {type(prototype)}")
+    
+    @classmethod
+    def _clone_simple_agent(
+        cls,
+        prototype,
+        event_manager,
+        workspace_dir: str = None,
+        conversation_service = None
+    ):
+        """克隆 SimpleAgent 实例"""
+        from core.agent.simple import SimpleAgent
+        from core.agent.simple.rvrb_agent import RVRBAgent
+        from core.events import EventBroadcaster
+        from models.usage import create_usage_tracker
+        
+        # 根据原型类型创建对应类的实例
+        agent_class = type(prototype)
+        clone = object.__new__(agent_class)
+        
+        # ========== 复用原型的重量级组件 ==========
+        clone.model = prototype.model
+        clone.max_turns = prototype.max_turns
+        clone.schema = prototype.schema
+        clone.system_prompt = prototype.system_prompt
+        clone.prompt_schema = getattr(prototype, 'prompt_schema', None)
+        clone.prompt_cache = getattr(prototype, 'prompt_cache', None)
+        clone.apis_config = getattr(prototype, 'apis_config', None)
+        clone.context_strategy = prototype.context_strategy
+        
+        # LLM Services
+        clone.llm = prototype.llm
+        
+        # 组件
+        clone.capability_registry = prototype.capability_registry
+        clone.tool_executor = prototype.tool_executor
+        clone.tool_selector = getattr(prototype, 'tool_selector', None)
+        clone.plan_todo_tool = getattr(prototype, 'plan_todo_tool', None)
+        clone.invocation_selector = prototype.invocation_selector
+        clone.context_engineering = getattr(prototype, 'context_engineering', None)
+        clone.unified_tool_caller = getattr(prototype, 'unified_tool_caller', None)
+        
+        # 工具配置
+        clone.allow_parallel_tools = getattr(prototype, 'allow_parallel_tools', True)
+        clone.max_parallel_tools = getattr(prototype, 'max_parallel_tools', 3)
+        clone._serial_only_tools = getattr(prototype, '_serial_only_tools', set())
+        
+        # 实例级工具注册表
+        clone._instance_registry = getattr(prototype, '_instance_registry', None)
+        
+        # MCP 相关
+        clone._mcp_clients = getattr(prototype, '_mcp_clients', [])
+        clone._mcp_tools = getattr(prototype, '_mcp_tools', [])
+        
+        # Workers 配置
+        clone.workers_config = getattr(prototype, 'workers_config', [])
+        
+        # ========== 设置会话级参数 ==========
+        clone.event_manager = event_manager
+        clone.workspace_dir = workspace_dir
+        clone.conversation_service = conversation_service
+        
+        # 更新工具执行器的上下文
+        if clone.tool_executor and hasattr(clone.tool_executor, 'update_context'):
+            clone.tool_executor.update_context({
+                "event_manager": event_manager,
+                "workspace_dir": workspace_dir,
+            })
+        
+        # 创建新的 EventBroadcaster
+        clone.broadcaster = EventBroadcaster(event_manager, conversation_service)
+        
+        # ========== 重置会话级状态 ==========
+        clone._plan_cache = {"plan": None, "todo": None, "tool_calls": []}
+        clone.invocation_stats = {"direct": 0, "code_execution": 0, "programmatic": 0, "streaming": 0}
+        clone._last_intent_result = None
+        clone._tracer = None
+        clone.enable_tracing = True
+        clone._current_message_id = None
+        clone._current_conversation_id = None
+        clone._current_user_id = None
+
+        # 失败经验总结（复用配置，生成器延迟初始化）
+        clone.failure_summary_config = getattr(prototype, 'failure_summary_config', None)
+        clone.failure_summary_generator = None
+        
+        # 创建新的 UsageTracker
+        clone.usage_tracker = create_usage_tracker()
+        
+        # 标记为非原型
+        clone._is_prototype = False
+        
+        # RVRBAgent 特有属性
+        if isinstance(prototype, RVRBAgent):
+            clone.max_backtracks = getattr(prototype, 'max_backtracks', 3)
+            clone._backtrack_history = []
+            clone._current_backtrack_count = 0
+        
+        logger.debug(f"🚀 Agent 克隆完成 (model={clone.model}, schema={clone.schema.name})")
+        
+        return clone
+    
+    @classmethod
+    def _clone_multi_agent(
+        cls,
+        prototype,
+        event_manager,
+        workspace_dir: str = None,
+        conversation_service = None
+    ):
+        """克隆 MultiAgentOrchestrator 实例"""
+        from core.agent.multi import MultiAgentOrchestrator
+        from models.usage import create_usage_tracker
+        
+        clone = object.__new__(MultiAgentOrchestrator)
+        
+        # ========== 复用原型的重量级组件 ==========
+        clone.config = prototype.config
+        clone.enable_checkpoints = getattr(prototype, 'enable_checkpoints', True)
+        clone.enable_lead_agent = getattr(prototype, 'enable_lead_agent', True)
+        clone.worker_model = getattr(prototype, 'worker_model', None)
+        clone.critic_config = getattr(prototype, 'critic_config', None)
+        
+        # 复用 LeadAgent（含 LLM Service，重量级）
+        clone.lead_agent = getattr(prototype, 'lead_agent', None)
+        
+        # 复用 CriticAgent（含 LLM Service，重量级）
+        clone.critic = getattr(prototype, 'critic', None)
+        
+        # 复用 CheckpointManager（可跨会话复用）
+        clone.checkpoint_manager = getattr(prototype, 'checkpoint_manager', None)
+        
+        # ========== 设置会话级参数 ==========
+        clone.workspace_dir = workspace_dir or './workspace'
+        
+        # ========== 重置会话级状态 ==========
+        clone._state = None
+        clone.plan = None
+        clone.plan_todo_tool = None
+        
+        # 工具和记忆系统（延迟初始化）
+        clone._tool_loader = None
+        clone.tool_executor = None
+        clone._working_memory = None
+        clone._mem0_client = None
+        
+        # 新建 Token 统计器
+        clone.usage_tracker = create_usage_tracker()
+        
+        # 清空追踪信息
+        clone._execution_trace = []
+        
+        # 标记为克隆实例
+        clone._is_prototype = False
+        
+        logger.debug(
+            f"🚀 MultiAgentOrchestrator 克隆完成: "
+            f"workspace_dir={workspace_dir}, "
+            f"lead_agent={'复用' if clone.lead_agent else '无'}, "
+            f"critic={'复用' if clone.critic else '无'}"
+        )
+        
+        return clone
 
 
 # ============================================================

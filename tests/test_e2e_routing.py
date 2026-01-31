@@ -25,7 +25,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 # 被测试模块
 from services.chat_service import ChatService
 from core.routing import AgentRouter, RoutingDecision, IntentResult
-from core.routing.complexity_scorer import ComplexityScore
 from core.agent import SimpleAgent
 from core.agent.multi import MultiAgentOrchestrator, ExecutionMode
 from core.planning import Plan, PlanStep
@@ -291,12 +290,10 @@ class TestE2ERouting:
         1. 用户请求 → ChatService
         2. 加载历史消息
         3. 调用 AgentRouter.route()
-        4. IntentAnalyzer 分析意图
-        5. ComplexityScorer 评分
-        6. 返回 RoutingDecision
+        4. IntentAnalyzer 分析意图（LLM 语义推理）
+        5. 返回 RoutingDecision
         """
         from core.routing import AgentRouter
-        from core.routing.complexity_scorer import ComplexityScorer
         
         # 创建路由器
         router = AgentRouter()
@@ -382,7 +379,6 @@ class TestE2ERouting:
         router = MagicMock()
         
         from core.agent.types import IntentResult, TaskType, Complexity
-        from core.routing.complexity_scorer import ComplexityScore, ComplexityLevel
         
         # 使用传入的 task_type 或默认值
         used_task_type = task_type if task_type else TaskType.INFORMATION_QUERY
@@ -390,23 +386,14 @@ class TestE2ERouting:
             task_type=used_task_type,
             complexity=Complexity.SIMPLE if complexity_score <= 5 else Complexity.COMPLEX,
             needs_plan=False,
+            needs_multi_agent=complexity_score > 5,
             confidence=0.85
         )
         
-        # 创建复杂度评分结果
-        mock_complexity = ComplexityScore(
-            score=complexity_score,
-            level=ComplexityLevel.SIMPLE if complexity_score <= 3 else (
-                ComplexityLevel.MEDIUM if complexity_score <= 6 else ComplexityLevel.COMPLEX
-            ),
-            reasoning=f"复杂度评分: {complexity_score}"
-        )
-        
-        # 使用正确的 RoutingDecision 参数
+        # 使用正确的 RoutingDecision 参数（LLM-First: 无 ComplexityScore）
         mock_decision = RoutingDecision(
             agent_type="single" if complexity_score <= 5 else "multi",
             intent=mock_intent,
-            complexity=mock_complexity,
             user_query="测试查询"
         )
         

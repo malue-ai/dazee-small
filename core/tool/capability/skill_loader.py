@@ -6,14 +6,16 @@ Skill 内容加载器
 2. 加载资源文件（Level 3）
 3. 获取脚本路径
 
-⚠️ 注意：
-- "Skill 发现"由 CapabilityRegistry 负责（Level 1）
-- SkillLoader 只负责"内容加载"（Level 2/3）
+术语说明：
+- Skill: 本地工作流技能（对齐 clawdbot 机制）
+- 目录：skills/library/
+- 机制：系统提示词注入，Agent 按需读取 SKILL.md
 
-设计原则：
+设计原则（借鉴 clawdbot）：
 - 渐进式加载：按需加载，减少启动时间
 - 缓存机制：避免重复加载
 - File is Everything：所有知识存储在文件中
+- Progressive Disclosure：metadata → SKILL.md body → scripts/resources
 """
 
 from typing import Dict, Optional, List
@@ -42,12 +44,17 @@ class SkillLoader:
     
     核心价值：渐进式加载（按需加载内容）
     
+    设计理念（对齐 clawdbot）：
+    - Level 1: Metadata（name + description）- 始终在 context 中
+    - Level 2: SKILL.md body - 当 skill 被触发时加载
+    - Level 3: scripts/resources - 按需加载
+    
     使用方式：
         loader = SkillLoader()
         
         # 从 Registry 获取 Skill 的路径
         skill_cap = registry.get("slidespeak-generator")
-        skill_path = skill_cap.metadata.get('skill_path')
+        skill_path = skill_cap.skill_path
         
         # 加载内容
         content = loader.load_skill_content(skill_path)
@@ -64,7 +71,7 @@ class SkillLoader:
         加载 SKILL.md 完整内容（Level 2）
         
         Args:
-            skill_path: Skill 目录路径（从 Capability.metadata 获取）
+            skill_path: Skill 目录路径（从 Capability.skill_path 获取）
             
         Returns:
             SKILL.md 的完整内容
@@ -77,8 +84,9 @@ class SkillLoader:
         
         # 加载内容
         skill_md = Path(skill_path) / "SKILL.md"
+        
         if not skill_md.exists():
-            print(f"⚠️ SKILL.md not found: {skill_md}")
+            print(f"⚠️ SKILL.md not found: {skill_path}")
             return None
         
         try:
@@ -103,6 +111,10 @@ class SkillLoader:
         """
         加载 Skill 资源文件（Level 3）
         
+        支持两个目录（对齐 clawdbot）：
+        - resources/: 兼容现有资源目录
+        - references/: clawdbot 风格的参考文档
+        
         Args:
             skill_path: Skill 目录路径
             
@@ -117,13 +129,24 @@ class SkillLoader:
         
         # 加载资源
         resources = {}
-        resources_dir = Path(skill_path) / "resources"
         
+        # 加载 resources/ 目录
+        resources_dir = Path(skill_path) / "resources"
         if resources_dir.exists():
             for file in resources_dir.iterdir():
                 if file.is_file():
                     try:
                         resources[file.name] = file.read_text(encoding='utf-8')
+                    except Exception as e:
+                        print(f"⚠️ Failed to read {file}: {e}")
+        
+        # 加载 references/ 目录（clawdbot 风格）
+        references_dir = Path(skill_path) / "references"
+        if references_dir.exists():
+            for file in references_dir.iterdir():
+                if file.is_file():
+                    try:
+                        resources[f"ref:{file.name}"] = file.read_text(encoding='utf-8')
                     except Exception as e:
                         print(f"⚠️ Failed to read {file}: {e}")
         
@@ -154,7 +177,7 @@ class SkillLoader:
         
         if scripts_dir.exists():
             for file in scripts_dir.iterdir():
-                if file.is_file() and file.suffix == '.py':
+                if file.is_file() and file.suffix in ('.py', '.sh'):
                     scripts[file.stem] = str(file)
         
         return scripts

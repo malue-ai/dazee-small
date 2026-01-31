@@ -1,11 +1,18 @@
 ---
-description: "Skills 技能模块开发规范：目录结构、文档格式、脚本开发"
+description: "Skills 本地工作流技能开发规范：目录结构、文档格式、脚本开发"
 globs:
   - "skills/**/*"
 alwaysApply: false
 ---
 
-# Skills 技能模块开发规范
+# Skills 本地工作流技能开发规范
+
+## 术语说明
+
+| 术语 | 说明 |
+|---|---|
+| **Skill** | 本地工作流技能，定义在 `skills/library/` 目录下 |
+| **Claude Skills** | 上传到 Anthropic 服务器的技能，完全独立的机制 |
 
 ## 技能目录结构
 
@@ -13,7 +20,7 @@ alwaysApply: false
 
 ```
 skills/library/skill-name/
-├── SKILL.md              # 技能说明文档（必需）
+├── SKILL.md          # 技能说明文档（必需）
 ├── __init__.py           # Python 包初始化（可选）
 ├── scripts/              # Python 脚本目录
 │   ├── __init__.py
@@ -28,6 +35,15 @@ skills/library/skill-name/
 每个技能必须包含完整的 SKILL.md 文档：
 
 ```markdown
+---
+name: skill-name
+description: 技能的功能描述（用于系统提示词注入）
+priority: medium
+preferred_for:
+  - 关键词1
+  - 关键词2
+---
+
 # 技能名称
 
 ## 功能描述
@@ -44,13 +60,12 @@ skills/library/skill-name/
 |--------|------|------|--------|------|
 | param1 | str  | 是   | -      | 参数1的详细说明 |
 | param2 | int  | 否   | 10     | 参数2的详细说明 |
-| param3 | list | 否   | []     | 参数3的详细说明 |
 
 ## 输出格式
 
 描述输出的数据结构和格式：
 
-```json
+\`\`\`json
 {
   "success": true,
   "result": {
@@ -59,31 +74,21 @@ skills/library/skill-name/
   },
   "message": "执行成功"
 }
-```
+\`\`\`
 
 ## 使用示例
 
 ### 示例 1：基础用法
-```python
+\`\`\`python
 result = await skill.execute({
     "param1": "value1",
     "param2": 20
 })
-```
-
-### 示例 2：高级用法
-```python
-result = await skill.execute({
-    "param1": "value1",
-    "param2": 20,
-    "param3": ["item1", "item2"]
-})
-```
+\`\`\`
 
 ## 依赖项
-- Python 3.8+
-- 第三方库1
-- 第三方库2
+- Python 3.12+
+- 第三方库列表
 
 ## 注意事项
 - 注意事项1
@@ -91,7 +96,6 @@ result = await skill.execute({
 
 ## 版本历史
 - v1.0.0 (2024-01-01): 初始版本
-- v1.1.0 (2024-02-01): 新增功能X
 ```
 
 ## 脚本开发规范
@@ -176,17 +180,11 @@ def validate_params(params: Dict[str, Any]) -> None:
     Raises:
         ValueError: 参数验证失败时
     """
-    # 验证必需参数
     if 'param1' not in params:
         raise ValueError("缺少必需参数: param1")
     
-    # 验证参数类型
     if not isinstance(params['param1'], str):
         raise ValueError("param1 必须是字符串类型")
-    
-    # 验证参数值
-    if len(params['param1']) < 1:
-        raise ValueError("param1 不能为空")
 
 
 async def perform_task(params: Dict[str, Any]) -> Any:
@@ -231,12 +229,7 @@ def load_resource(filename: str) -> Any:
 if __name__ == "__main__":
     import asyncio
     
-    # 测试参数
-    test_params = {
-        "param1": "test_value"
-    }
-    
-    # 运行测试
+    test_params = {"param1": "test_value"}
     result = asyncio.run(execute(test_params))
     print(f"执行结果: {result}")
 ```
@@ -280,9 +273,7 @@ class TestSkillName:
     
     async def test_execute_success(self):
         """测试成功执行"""
-        params = {
-            "param1": "test_value"
-        }
+        params = {"param1": "test_value"}
         result = await execute(params)
         
         assert result["success"] is True
@@ -334,3 +325,15 @@ async def execute_skill(skill_name: str, params: Dict) -> Dict:
     return await module.execute(params)
 ```
 
+## 系统提示词注入
+
+Skill 的元数据（name, description, priority, preferred_for）会自动注入到系统提示词中，
+帮助 Claude 了解可用的工作流技能。这与 Claude Skills 完全独立。
+
+```python
+# 加载 Skills 元数据到系统提示词
+from prompts.skills_loader import load_skills_for_system_prompt
+
+skills_section = load_skills_for_system_prompt("skills/library")
+system_prompt = BASE_PROMPT + "\n\n" + skills_section
+```

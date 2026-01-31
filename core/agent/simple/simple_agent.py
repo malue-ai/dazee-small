@@ -4,7 +4,7 @@ SimpleAgent - 精简版核心 Agent
 职责：
 - 只做编排（Orchestrator）
 - 协调各个独立模块完成任务
-- 实现 RVR（Read-Reason-Act-Observe-Validate-Write-Repeat）循环
+- 实现 RVR（React-Validation-Reflectio）循环
 
 设计原则：
 - 单一职责：只负责编排，不包含业务逻辑
@@ -39,7 +39,8 @@ from typing import Dict, Any, List, Optional, AsyncGenerator, TYPE_CHECKING
 # 2. 第三方库（无）
 
 # 3. 本地模块
-from core.agent.intent_analyzer import create_intent_analyzer
+# 🆕 V9.0: IntentAnalyzer 已移至路由层 (core/routing/intent_analyzer.py)
+# SimpleAgent 不再内部做意图识别，由 AgentRouter 统一处理
 from core.context.runtime import create_runtime_context
 from core.context.failure_summary import (
     FailureSummaryGenerator,
@@ -236,120 +237,27 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
         conversation_service = None
     ) -> "SimpleAgent":
         """
-        V7.1: 从原型克隆 Agent 实例（快速路径）
+        🆕 V10.0: 从原型克隆 Agent 实例（委托给 AgentFactory）
         
-        复用原型中的重量级组件，仅重置会话级状态
+        克隆逻辑已移至 AgentFactory.clone_for_session()，
+        保持 Factory 作为唯一创建/克隆入口。
         """
-        # 创建新实例（绕过 __init__）
-        clone = object.__new__(SimpleAgent)
-        
-        # ========== 复用原型的重量级组件 ==========
-        clone.model = self.model
-        clone.max_turns = self.max_turns
-        clone.schema = self.schema
-        clone.system_prompt = self.system_prompt
-        clone.prompt_schema = self.prompt_schema
-        clone.prompt_cache = self.prompt_cache
-        clone.apis_config = self.apis_config
-        clone.context_strategy = self.context_strategy
-        
-        # LLM Services
-        clone.llm = self.llm
-        clone.intent_llm = getattr(self, 'intent_llm', None)
-        
-        # 组件
-        clone.capability_registry = self.capability_registry
-        clone.tool_executor = self.tool_executor
-        clone.tool_selector = getattr(self, 'tool_selector', None)
-        clone.intent_analyzer = getattr(self, 'intent_analyzer', None)
-        clone.plan_todo_tool = getattr(self, 'plan_todo_tool', None)
-        clone.invocation_selector = self.invocation_selector
-        clone.context_engineering = self.context_engineering
-        
-        # 工具配置
-        clone.allow_parallel_tools = self.allow_parallel_tools
-        clone.max_parallel_tools = self.max_parallel_tools
-        clone._serial_only_tools = self._serial_only_tools
-        
-        # 实例级工具注册表
-        clone._instance_registry = getattr(self, '_instance_registry', None)
-        
-        # MCP 相关
-        clone._mcp_clients = getattr(self, '_mcp_clients', [])
-        clone._mcp_tools = getattr(self, '_mcp_tools', [])
-        
-        # Workers 配置
-        clone.workers_config = getattr(self, 'workers_config', [])
-        
-        # ========== 设置会话级参数 ==========
-        clone.event_manager = event_manager
-        clone.workspace_dir = workspace_dir
-        clone.conversation_service = conversation_service
-        
-        # 更新工具执行器的上下文
-        if clone.tool_executor and hasattr(clone.tool_executor, 'update_context'):
-            clone.tool_executor.update_context({
-                "event_manager": event_manager,
-                "workspace_dir": workspace_dir,
-            })
-        
-        # 创建新的 EventBroadcaster
-        clone.broadcaster = EventBroadcaster(event_manager, conversation_service)
-        
-        # ========== 重置会话级状态 ==========
-        clone._plan_cache = {"plan": None, "todo": None, "tool_calls": []}
-        clone.invocation_stats = {"direct": 0, "code_execution": 0, "programmatic": 0, "streaming": 0}
-        clone._last_intent_result = None
-        clone._tracer = None
-        clone.enable_tracing = True
-        clone._current_message_id = None
-        clone._current_conversation_id = None
-        clone._current_user_id = None
-
-        # 失败经验总结（复用配置，生成器延迟初始化）
-        clone.failure_summary_config = self.failure_summary_config
-        clone.failure_summary_generator = None
-        
-        # 创建新的 UsageTracker
-        clone.usage_tracker = create_usage_tracker()
-        
-        # 标记为非原型
-        clone._is_prototype = False
-        
-        logger.debug(f"🚀 Agent 克隆完成 (model={clone.model}, schema={clone.schema.name})")
-        
-        return clone
+        from core.agent.factory import AgentFactory
+        return AgentFactory.clone_for_session(
+            prototype=self,
+            event_manager=event_manager,
+            workspace_dir=workspace_dir,
+            conversation_service=conversation_service
+        )
     
     def _init_modules(self):
         """根据 Schema 动态初始化各独立模块"""
         # 1. 能力注册表
         self.capability_registry = create_capability_registry()
         
-        # 2. 意图分析器
-        if self.schema.intent_analyzer.enabled:
-            intent_config = self.schema.intent_analyzer
-            from config.llm_config import get_llm_profile
-            intent_profile = get_llm_profile("intent_analyzer")
-            profile_provider = str(intent_profile.get("provider", "claude")).lower()
-            if profile_provider == "claude":
-                intent_profile["model"] = intent_config.llm_model
-            intent_profile.update({
-                "enable_thinking": False,
-                "enable_caching": True,
-                "tools": [],
-                "max_tokens": 8192
-            })
-            self.intent_llm = create_llm_service(**intent_profile)
-            self.intent_analyzer = create_intent_analyzer(
-                llm_service=self.intent_llm,
-                enable_llm=intent_config.use_llm,
-                prompt_cache=self.prompt_cache
-            )
-            logger.debug(f"✓ IntentAnalyzer 已启用 (model={intent_config.llm_model})")
-        else:
-            self.intent_llm = None
-            self.intent_analyzer = None
-            logger.debug("○ IntentAnalyzer 未启用")
+        # 2. 🆕 V9.0: IntentAnalyzer 已移至路由层
+        # 意图识别由 AgentRouter 统一完成，结果通过 chat(intent=...) 传入
+        # 见 core/routing/intent_analyzer.py
         
         # 3. 工具选择器
         if self.schema.tool_selector.enabled:
@@ -418,14 +326,29 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
         if self.plan_todo_tool:
             self._register_tools_to_llm()
         
-        # 启用 Claude Skills
-        self._enable_registered_skills()
+        # 🔧 Skills 启用由 instance_loader 处理，SimpleAgent 不负责
         
         # 8. 并行工具执行配置
         self.allow_parallel_tools = self.schema.allow_parallel_tools
         self.max_parallel_tools = self.schema.tool_selector.max_parallel_tools
-        self._serial_only_tools = {"plan_todo", "request_human_confirmation"}
-        logger.debug(f"✓ 并行工具配置: allow={self.allow_parallel_tools}, max={self.max_parallel_tools}")
+        # 🆕 V10.0: 从 ToolSelector 获取串行工具列表（配置驱动）
+        self._serial_only_tools = getattr(self.tool_selector, 'SERIAL_ONLY_TOOLS', {"plan_todo", "request_human_confirmation"})
+        logger.debug(f"✓ 并行工具配置: allow={self.allow_parallel_tools}, max={self.max_parallel_tools}, serial_only={self._serial_only_tools}")
+        
+        # 🆕 V10.0: Session context 注入点（由 ChatService 设置）
+        self._injected_session_context = None
+    
+    def inject_session_context(self, session_context: Dict[str, Any]) -> None:
+        """
+        🆕 V10.0: 从 Service 层注入 session context
+        
+        分层解耦：Agent 层不应直接访问存储，由 Service 层获取后注入。
+        
+        Args:
+            session_context: 包含 conversation_id, user_id 等的上下文字典
+        """
+        self._injected_session_context = session_context
+        logger.debug(f"📦 Session context 已注入: {list(session_context.keys())}")
     
     def _register_tools_to_llm(self):
         """注册工具到 LLM Service"""
@@ -439,20 +362,6 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
                 description=schema['description'],
                 input_schema=schema['input_schema']
             )
-    
-    def _enable_registered_skills(self):
-        """启用已注册到 Claude 的 Skills"""
-        registered_skills = self.capability_registry.get_registered_skills()
-        
-        if registered_skills:
-            if hasattr(self.llm, "supports_skills") and self.llm.supports_skills():
-                self.llm.enable_skills(registered_skills)
-                skill_names = [s.get('skill_id', 'unknown')[:20] + '...' for s in registered_skills]
-                logger.info(f"🎯 已启用 {len(registered_skills)} 个 Claude Skills: {skill_names}")
-            else:
-                logger.info("ℹ️ 当前模型不支持 Claude Skills，已自动跳过 Skills 启用")
-        else:
-            logger.debug("○ 没有已注册的 Claude Skills")
     
     async def chat(
         self,
@@ -486,7 +395,16 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
             logger.warning(f"未提供 session_id，生成临时 ID: {session_id}")
         
         # ===== 阶段 1: 初始化会话上下文 =====
-        session_context = await self.event_manager.storage.get_session_context(session_id)
+        # 分层解耦：session_context 必须由 ChatService 注入
+        if not hasattr(self, '_injected_session_context') or self._injected_session_context is None:
+            raise ValueError(
+                "session_context 未注入。Agent 不应直接访问存储，"
+                "请通过 agent.inject_session_context() 注入会话上下文。"
+            )
+        
+        session_context = self._injected_session_context
+        self._injected_session_context = None  # 清理，避免跨调用污染
+        
         conversation_id = session_context.get("conversation_id", "default")
         user_id = session_context.get("user_id")
         self._current_conversation_id = conversation_id
@@ -507,7 +425,21 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
             self._tracer.set_user_query(user_query[:200])
         
         # ===== 阶段 2: Intent Analysis =====
-        intent = self._process_intent(intent, ctx)
+        # 🆕 V10.0: 简化意图处理，删除 _process_intent() 方法
+        # - 默认值创建保留在此（过渡期），后续由 ChatService 强制传入
+        # - 直接调用 _handle_intent_transition() 管理 plan_cache 状态
+        if intent is None:
+            logger.warning("⚠️ 未提供意图结果，使用默认配置（建议 ChatService 强制传入）")
+            from core.agent.types import IntentResult, TaskType, Complexity
+            intent = IntentResult(
+                task_type=TaskType.OTHER,
+                complexity=Complexity.MEDIUM,
+                needs_plan=self.schema.plan_manager.enabled,
+                confidence=1.0
+            )
+        else:
+            self._handle_intent_transition(intent)
+        
         yield await self.broadcaster.emit_message_delta(
             session_id=session_id,
             delta={
@@ -527,7 +459,10 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
         tools_for_llm, selection = await self._select_tools(intent, ctx)
         
         # ===== 阶段 3.5: 沙盒环境预创建 =====
-        await self._ensure_sandbox(selection.tool_names, conversation_id, user_id)
+        # 🆕 V10.0: 委托给 SandboxService（从 SimpleAgent 解耦）
+        from services.sandbox_service import get_sandbox_service
+        sandbox_service = get_sandbox_service()
+        await sandbox_service.ensure_for_tools(selection.tool_names, conversation_id, user_id)
         
         # ===== 阶段 4: System Prompt 组装 =====
         user_query = messages[-1]["content"] if messages else ""
@@ -600,51 +535,53 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
             message_id=self._current_message_id
         )
 
-        # 失败经验总结式上下文管理（MVP：仅 SimpleAgent）
-        await self._maybe_generate_failure_summary(
-            conversation_id=conversation_id,
-            stop_reason=ctx.stop_reason,
-            session_id=session_id,
-            user_id=user_id
-        )
+        # 🆕 V10.0: 失败经验总结（委托给 FailureSummaryManager）
+        if self.conversation_service and self.failure_summary_config.enabled:
+            from core.context.failure_summary import FailureSummaryManager
+            failure_manager = FailureSummaryManager(
+                conversation_service=self.conversation_service,
+                llm_service=self.llm,
+                config=self.failure_summary_config,
+                context_strategy=self.context_strategy
+            )
+            await failure_manager.maybe_generate(
+                conversation_id=conversation_id,
+                stop_reason=ctx.stop_reason,
+                session_id=session_id,
+                user_id=user_id,
+                message_id=self._current_message_id
+            )
 
         logger.info(f"✅ Agent 执行完成: turns={ctx.current_turn}")
     
-    def _process_intent(self, intent: Optional["IntentResult"], ctx) -> "IntentResult":
-        """处理意图分析结果"""
-        if intent is not None:
+    def _handle_intent_transition(self, new_intent: "IntentResult") -> None:
+        """
+        🆕 V9.0: 处理意图状态转换（轻量，< 0.1ms）
+        
+        追问：复用 plan_cache，继承 task_type
+        新意图：重置 plan_cache
+        
+        Args:
+            new_intent: 新的意图分析结果
+        """
+        previous_intent = self._last_intent_result
+        
+        if new_intent.is_follow_up and previous_intent is not None:
+            # 追问模式：保留 plan_cache，继承 task_type
             logger.info(
-                f"🔀 使用路由层意图结果: {intent.task_type.value}, "
-                f"complexity={intent.complexity.value}"
+                f"🔄 追问模式: 复用 plan_cache, "
+                f"继承 task_type={previous_intent.task_type.value}"
             )
-            self._last_intent_result = intent
-            
-            if self._tracer:
-                stage = self._tracer.create_stage("intent_analysis")
-                stage.start()
-                stage.complete({
-                    "task_type": intent.task_type.value,
-                    "complexity": intent.complexity.value,
-                    "needs_plan": intent.needs_plan,
-                    "source": "routing_layer"
-                })
-            return intent
+            new_intent.task_type = previous_intent.task_type
+            # plan_cache 保持不变，不重置
+        else:
+            # 新意图：重置状态
+            if self._plan_cache.get("plan") is not None:
+                logger.info("🆕 新意图: 重置 plan_cache")
+            self._plan_cache = {"plan": None, "todo": None, "tool_calls": []}
         
-        # 未提供 intent，使用默认配置
-        logger.warning("⚠️ 未提供意图结果，使用默认配置")
-        from core.agent.types import IntentResult, TaskType, Complexity
-        intent = IntentResult(
-            task_type=TaskType.OTHER,
-            complexity=Complexity.MEDIUM,
-            needs_plan=self.schema.plan_manager.enabled,
-            confidence=1.0
-        )
-        
-        if self._tracer:
-            stage = self._tracer.create_stage("intent_analysis")
-            stage.skip("未提供意图结果，使用默认配置")
-        
-        return intent
+        # 更新最后一次意图结果
+        self._last_intent_result = new_intent
 
     def _get_llm_config(self) -> Optional["LLMConfig"]:
         """
@@ -661,108 +598,6 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
                 return service.config
         return None
 
-    async def _maybe_generate_failure_summary(
-        self,
-        conversation_id: str,
-        stop_reason: Optional[str],
-        session_id: str,
-        user_id: Optional[str]
-    ) -> None:
-        """
-        在失败/中断时生成失败经验总结，并写入对话 metadata
-        
-        Args:
-            conversation_id: 对话 ID
-            stop_reason: 停止原因
-            session_id: 会话 ID
-            user_id: 用户 ID
-        """
-        config = self.failure_summary_config
-        if not config.enabled:
-            return
-        if not stop_reason or stop_reason not in config.trigger_on_stop_reasons:
-            return
-        if not self.conversation_service:
-            logger.warning("⚠️ 未提供 conversation_service，跳过失败总结")
-            return
-        if not conversation_id:
-            logger.warning("⚠️ 未提供 conversation_id，跳过失败总结")
-            return
-        
-        try:
-            result = await self.conversation_service.get_conversation_messages(
-                conversation_id=conversation_id,
-                limit=1000,
-                order="asc"
-            )
-            db_messages = result.get("messages", [])
-        except Exception as e:
-            logger.warning(f"⚠️ 获取对话消息失败，跳过失败总结: {e}")
-            return
-        
-        if not db_messages:
-            return
-        
-        keep_recent = config.keep_recent_messages or max(self.context_strategy.preserve_last_n * 2, 2)
-        if len(db_messages) <= keep_recent:
-            logger.info("📦 消息数量不足，跳过失败总结")
-            return
-        
-        early_messages = db_messages[:-keep_recent]
-        compress_from_message = db_messages[-(keep_recent + 1)]
-        from_message_id = compress_from_message.get("id") if isinstance(compress_from_message, dict) else None
-        if not from_message_id:
-            logger.warning("⚠️ 未找到压缩起点 message_id，跳过失败总结")
-            return
-        
-        if self.failure_summary_generator is None:
-            self.failure_summary_generator = FailureSummaryGenerator(self.llm, config)
-        
-        summary_result = await self.failure_summary_generator.generate(
-            messages=early_messages,
-            stop_reason=stop_reason
-        )
-        if not summary_result.summary_text:
-            logger.info("📦 失败总结为空，跳过写入")
-            return
-        
-        try:
-            conversation = await self.conversation_service.get_conversation(conversation_id)
-            existing_metadata = conversation.metadata if isinstance(conversation.metadata, dict) else {}
-            
-            compression_info = {
-                "compressed_at": summary_result.created_at or datetime.now().isoformat(),
-                "from_message_id": from_message_id,
-                "summary": summary_result.summary_text,
-                "type": "failure_summary",
-                "stop_reason": stop_reason,
-                "session_id": session_id,
-                "message_id": self._current_message_id,
-                "user_id": user_id,
-            }
-            
-            existing_metadata["compression"] = compression_info
-            existing_metadata["failure_summary"] = {
-                "created_at": summary_result.created_at or datetime.now().isoformat(),
-                "stop_reason": stop_reason,
-                "summary": summary_result.summary_text,
-                "raw": summary_result.raw_text,
-                "session_id": session_id,
-                "message_id": self._current_message_id,
-                "user_id": user_id,
-            }
-            
-            await self.conversation_service.update_conversation(
-                conversation_id=conversation_id,
-                metadata=existing_metadata
-            )
-            logger.info(
-                f"✅ 失败总结已写入 metadata: conversation_id={conversation_id}, "
-                f"stop_reason={stop_reason}"
-            )
-        except Exception as e:
-            logger.warning(f"⚠️ 写入失败总结失败: {e}")
-    
     async def _select_tools(self, intent: "IntentResult", ctx):
         """
         工具选择 - 三级优先级策略
@@ -791,22 +626,13 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
         logger.info("🔧 开始工具选择...")
         
         plan = self._plan_cache.get("plan")
-        selection_source = "intent"
         use_skill_path = False
         invocation_strategy = None
-        
-        # 🆕 V7.6: 收集各层建议用于透明化日志
-        plan_capabilities = plan.get('required_capabilities', []) if plan else []
-        intent_capabilities = self.capability_registry.get_capabilities_for_task_type(
-            intent.task_type.value
-        ) if intent else []
-        overridden_sources = []  # 记录被覆盖的来源
         
         # V4.4: Skill 路径（仅当当前 LLM 支持 Skills）
         if plan and plan.get('recommended_skill'):
             if hasattr(self.llm, "supports_skills") and self.llm.supports_skills():
                 use_skill_path = True
-                selection_source = "skill"
                 skill_info = plan.get('recommended_skill')
                 skill_name = skill_info.get('name', 'unknown') if isinstance(skill_info, dict) else skill_info
                 logger.info(f"🎯 V4.4 Skill 路径: 使用 Claude Skill '{skill_name}'")
@@ -819,54 +645,17 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
             else:
                 logger.info("ℹ️ 当前模型不支持 Claude Skills，忽略推荐 Skill 路径")
         
-        # 🆕 V7.7: 确定所需能力（Schema + Plan 合并策略，Intent 兜底）
-        # 改进：从互斥选择改为合并策略，避免 Schema 配置后 Plan 推荐被完全忽略
-        required_capabilities = []
-        selection_sources = []
+        # 🆕 V10.0: 使用 ToolSelector.resolve_capabilities() 处理三级优先级
+        # 将工具选择策略从 SimpleAgent 提取到 ToolSelector
+        required_capabilities, selection_source, overridden_sources = self.tool_selector.resolve_capabilities(
+            schema_tools=self.schema.tools if self.schema.tools else None,
+            plan=plan,
+            intent_task_type=intent.task_type.value if intent else None
+        )
         
-        # 1. Schema 配置（最高优先级，直接使用）
-        if self.schema.tools:
-            valid_tools = []
-            invalid_tools = []
-            for tool_name in self.schema.tools:
-                if self.capability_registry.get(tool_name) or tool_name in self.tool_selector.NATIVE_TOOLS:
-                    valid_tools.append(tool_name)
-                else:
-                    invalid_tools.append(tool_name)
-            
-            if invalid_tools:
-                logger.warning(
-                    f"⚠️ Schema 配置了无效工具: {invalid_tools}，已自动过滤。"
-                    f"有效工具: {valid_tools}"
-                )
-            
-            required_capabilities.extend(valid_tools)
-            if valid_tools:
-                selection_sources.append("schema")
-        
-        # 2. Plan 推荐（补充，不覆盖已有的）
-        if plan and plan.get('required_capabilities'):
-            plan_caps = plan['required_capabilities']
-            added_from_plan = []
-            for cap in plan_caps:
-                if cap not in required_capabilities:
-                    required_capabilities.append(cap)
-                    added_from_plan.append(cap)
-            if added_from_plan:
-                selection_sources.append("plan")
-                logger.debug(f"📋 Plan 补充能力: {added_from_plan}")
-        
-        # 3. Intent 推断（兜底，仅当前面都为空时使用）
-        if not required_capabilities:
-            required_capabilities = intent_capabilities
-            if intent_capabilities:
-                selection_sources.append("intent")
-        
-        # 确定最终来源标识
-        if not use_skill_path:
-            selection_source = "+".join(selection_sources) if selection_sources else "intent"
-            if len(selection_sources) > 1:
-                logger.info(f"📋 工具选择合并策略: {selection_source}, 能力: {required_capabilities[:5]}")
+        # Skill 路径时覆盖 selection_source
+        if use_skill_path:
+            selection_source = "skill"
 
         # 🆕 Skills 不可用时，尝试注入 fallback 工具
         if plan and plan.get('recommended_skill'):
@@ -929,18 +718,17 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
         if overridden_sources:
             logger.info(f"   └─ 覆盖了来源: {', '.join(overridden_sources)}")
         
-        # 🆕 V7.6: 增强的 Tracer 记录
+        # 🆕 V10.0: 简化的 Tracer 记录（三级策略已由 ToolSelector 处理）
         if self._tracer:
             tool_stage.set_input({
                 "schema_tools": self.schema.tools if self.schema.tools else [],
-                "plan_capabilities": plan_capabilities[:5] if plan_capabilities else [],
-                "intent_capabilities": intent_capabilities[:5] if intent_capabilities else [],
+                "required_capabilities": required_capabilities[:5] if required_capabilities else [],
                 "selection_source": selection_source,
                 "use_skill_path": use_skill_path
             })
             tool_stage.complete({
                 "tool_count": len(selection.tool_names),
-                "tools": selection.tool_names[:8],  # 显示更多工具
+                "tools": selection.tool_names[:8],
                 "base_tools": selection.base_tools,
                 "dynamic_tools": selection.dynamic_tools[:5],
                 "overridden_sources": overridden_sources,
@@ -949,25 +737,6 @@ class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
             })
         
         return tools_for_llm, selection
-    
-    async def _ensure_sandbox(self, tool_names: List[str], conversation_id: str, user_id: str):
-        """确保沙盒环境就绪"""
-        sandbox_tools = {"bash", "str_replace_based_edit_tool", "text_editor"}
-        sandbox_tools.update(t for t in tool_names if t.startswith("sandbox_"))
-        needs_sandbox = bool(sandbox_tools & set(tool_names))
-        
-        if needs_sandbox:
-            try:
-                from infra.sandbox import get_sandbox_provider
-                sandbox = get_sandbox_provider()
-                
-                if sandbox.is_available:
-                    await sandbox.ensure_sandbox(conversation_id, user_id)
-                    logger.info(f"🏖️ 沙盒环境已就绪: conversation_id={conversation_id}")
-                else:
-                    logger.warning("⚠️ 沙盒服务不可用，跳过预创建")
-            except Exception as e:
-                logger.warning(f"⚠️ 沙盒预创建失败: {e}")
     
     def _get_task_complexity(self, intent):
         """获取任务复杂度（委托给 context 模块）"""

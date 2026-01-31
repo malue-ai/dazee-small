@@ -1,28 +1,29 @@
 name: Dazee
-description: 温暖专业的高级工作助理，擅长复杂业务分析、系统设计和深度研究
+description: 高级工作小助理和生活搭子，温暖、专业且富有同理心，致力于理解并解决复杂的、开放式的业务挑战
 intent_analyzer:
   enabled: true
   complexity_levels:
-  - simple
+  - low
   - medium
-  - complex
+  - high
   task_types:
-  - system_design
-  - business_analysis
+  - question_answering
   - data_analysis
-  - research
-  - document_generation
-  - casual_chat
+  - content_generation
+  - code_execution
+  - web_search
+  - file_operation
   output_formats:
-  - markdown
+  - text
   - json
+  - markdown
   use_llm: true
   llm_model: claude-haiku-4-5-20251001
 plan_manager:
   enabled: true
-  trigger_condition: task_complexity in ['medium', 'complex']
-  max_steps: 15
-  granularity: fine
+  trigger_condition: complexity == 'high' or step_count > 3
+  max_steps: 10
+  granularity: medium
   allow_dynamic_adjustment: true
   validation_interval: 3
   replan_enabled: true
@@ -34,45 +35,60 @@ tool_selector:
   available_tools: []
   selection_strategy: capability_based
   allow_parallel: false
-  max_parallel_tools: 1
+  max_parallel_tools: 3
   base_tools:
-  - current_time
-  - timezone_conversion
+  - plan_todo
   tool_timeout: 300
 memory_manager:
   enabled: true
   retention_policy: session
-  episodic_memory: true
-  working_memory_limit: 30
+  episodic_memory: false
+  working_memory_limit: 20
   auto_compress: true
   compress_threshold: 15
 output_formatter:
   enabled: true
-  default_format: markdown
+  default_format: text
   supported_formats:
   - text
   - markdown
   - json
   - html
   code_highlighting: true
-  max_output_length: 5000
+  max_output_length: 50000
   json_model_name: null
   json_schema: null
   strict_json_validation: false
   json_ensure_ascii: false
   json_indent: 2
-  include_metadata: true
+  include_metadata: false
 skills:
 - type: custom
-  skill_id: xlsx
+  skill_id: pdf2markdown
   version: latest
   required: false
 - type: custom
-  skill_id: pptx
+  skill_id: text2flowchart
   version: latest
   required: false
 - type: custom
-  skill_id: pdf
+  skill_id: text2document
+  version: latest
+  required: false
+- type: custom
+  skill_id: ppt_create
+  version: latest
+  required: false
+- type: custom
+  skill_id: build_ontology
+  version: latest
+  required: false
+- type: custom
+  skill_id: nano_banana_omni
+  version: latest
+  required: false
+- type: custom
+  skill_id: timezone_conversion
   version: latest
   required: false
 tools:
@@ -80,49 +96,24 @@ tools:
 - exa_search
 - exa_contents
 - web_search
-- e2b_sandbox
 - current_time
-- timezone_conversion
-model: claude-sonnet-4-5-20250929
+model: claude-haiku-4-5-20251001
 max_turns: 20
 allow_parallel_tools: false
 context_limits:
   max_context_tokens: 200000
   warning_threshold: 0.8
   truncate_threshold: 0.9
-reasoning: '这是一个高度复杂的业务顾问 Agent，具有以下特点：
-
-
-  1. **多意图识别**：支持系统搭建、BI问数、综合咨询、追问等4种核心意图，需要强大的意图分析能力
-
-
-  2. **复杂规划能力**：涉及6-15步的多阶段任务执行，需要细粒度规划和动态调整能力，支持重规划机制应对失败场景
-
-
-  3. **丰富工具生态**：需要搜索、代码执行、时间处理等多种工具，采用基于能力的选择策略
-
-
-  4. **会话级记忆**：需要跨轮次追踪任务状态、工具调用历史和用户上下文，启用情景记忆和自动压缩
-
-
-  5. **结构化输出**：五段式输出格式（THINK/PREFACE/TOOL/RESPONSE/JSON）需要精细的格式化控制
-
-
-  6. **文档生成能力**：支持 Excel、PPT、PDF 等多种文档格式生成
-
-
-  7. **长对话支持**：max_turns=20 以支持复杂任务的多轮交互和追问场景
-
-
-  8. **质量保障**：通过 ReAct 验证循环、质量门槛检查、HITL 机制确保输出质量
-
-
-  关键设计决策：
-
-  - 禁用并行工具调用（allow_parallel=false）以确保严格的执行顺序和状态管理
-
-  - 使用 incremental 重规划策略保留已完成步骤，提高效率
-
-  - working_memory_limit=30 平衡上下文保留和 token 预算
-
-  - 启用 auto_compress 防止长对话中的 RemoteProtocolError'
+multi_agent: null
+temperature: null
+max_tokens: null
+enable_thinking: null
+enable_caching: null
+reasoning: "这是一个高度复杂的业务分析和系统设计助手，需要处理多种场景：\n\n1. **任务复杂度**：涉及系统搭建、BI分析、深度研究等多种复杂任务，需要结构化规划和迭代执行，因此启用plan_manager并设置较高的max_steps\n\
+  \n2. **工具需求**：\n   - 信息搜索：tavily_search、exa_search、exa_contents用于行业调研和资料收集\n   -\
+  \ 时间处理：current_time + timezone_conversion用于时效性信息\n   - 文档处理：pdf2markdown用于文档解析\n\
+  \   - 可视化：text2flowchart用于流程图生成\n   - 文档生成：text2document、ppt_create用于报告和演示文稿\n \
+  \  - 系统建模：build_ontology用于系统架构设计\n   - 图片生成：nano_banana_omni用于文生图\n\n3. **交互特点**：\n\
+  \   - 采用五段式输出（THINK/PREFACE/TOOL/RESPONSE/JSON）\n   - 需要持续的进度反馈和状态管理\n   - 支持HITL机制和追问场景\n\
+  \   - 强调温暖、专业的沟通风格\n\n4. **轮次设置**：考虑到复杂任务可能需要多次工具调用、验证和迭代，设置max_turns=25以确保有足够空间完成任务\n\
+  \n5. **特殊能力**：具备原生图片理解能力（vision），无需额外工具支持"

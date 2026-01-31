@@ -11,10 +11,13 @@ core/memory/
 │   ├── preference.py     # 用户偏好（预留）
 │   └── e2b.py            # E2B 沙箱记忆（用户的云端计算环境）
 ├── system/               # 系统级记忆
-│   ├── skill.py          # SkillMemory
+│   ├── skill.py          # SkillMemory（本地工作流技能缓存）
 │   └── cache.py          # 系统缓存（预留）
 └── manager.py            # MemoryManager
 ```
+
+术语说明：
+- Skill: 本地工作流技能（skills/library/，对齐 clawdbot 机制）
 
 层级说明：
 - 会话级（Session）：WorkingMemory - 当前会话的消息和工具调用
@@ -112,7 +115,7 @@ __all__ = [
     "E2BMemory",
     "create_e2b_memory",
     
-    # 系统级记忆
+    # 系统级记忆（Skill = 本地工作流技能）
     "SkillMemory",
     "create_skill_memory",
     "CacheMemory",

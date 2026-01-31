@@ -25,7 +25,7 @@ from core.llm import create_llm_service
 from core.context import Context
 from core.output import OutputFormatter, create_output_formatter  # 🆕 V6.3
 # 🆕 容错机制（基础设施层）
-from infra.resilience import with_timeout, with_retry, get_circuit_breaker
+from infra.resilience import with_timeout, with_retry, get_circuit_breaker, register_fallback, FallbackType
 # 🆕 上下文压缩（简化版，使用 Claude SDK 原生 compaction）
 from core.context.compaction import QoSLevel, get_compaction_threshold, get_context_awareness_prompt
 # 🆕 V7: 路由模块（单智能体/多智能体路由决策）
@@ -105,6 +105,19 @@ class ChatService:
         # 🆕 容错机制：熔断器
         self.agent_breaker = get_circuit_breaker("agent_execution")
         
+        # 🆕 V7.3: LLM 服务降级策略（最后防线）
+        # 当所有重试和主备切换都失败后，返回友好的降级响应
+        register_fallback(
+            "llm_service",
+            lambda *args, **kwargs: {
+                "success": False,
+                "content": "AI 服务暂时不可用，请稍后重试",
+                "error": "llm_service_unavailable",
+                "_fallback": True
+            },
+            FallbackType.DEFAULT_RESPONSE
+        )
+        
         # 🆕 上下文压缩（简化版）
         # 核心原则：使用 Claude SDK 原生 compaction，用户无感知
         # QoS 仅用于后端成本统计，不影响用户体验
@@ -131,13 +144,21 @@ class ChatService:
         """
         延迟初始化路由器
         
+        🆕 V9.3 优化：使用 instance_name 替代对象引用比较，避免不必要的重建
+        
         Returns:
             AgentRouter 实例
         """
-        if self._router is None or getattr(self._router, "prompt_cache", None) is not prompt_cache:
+        # 🆕 V9.3: 使用 instance_name 作为缓存 key，避免因对象引用不同导致重复创建
+        current_instance_name = getattr(prompt_cache, "instance_name", None) if prompt_cache else None
+        cached_instance_name = getattr(self._router, "_instance_name", None) if self._router else None
+        
+        if self._router is None or current_instance_name != cached_instance_name:
             from core.agent import AgentFactory
             self._router = AgentFactory.create_router(prompt_cache=prompt_cache)
-            logger.debug("🔀 AgentRouter 已初始化（统一走 AgentFactory）")
+            # 记录 instance_name 用于后续比较
+            self._router._instance_name = current_instance_name
+            logger.debug(f"🔀 AgentRouter 已初始化: instance={current_instance_name or 'default'}")
         return self._router
     
     def _get_multi_agent_orchestrator(self, workspace_dir: str) -> "MultiAgentOrchestrator":
@@ -412,7 +433,7 @@ class ChatService:
         
         # ========== 6. 执行 ==========
         if not stream:
-            # 同步模式：后台运行，立即返回
+            # 同步模式：后台运行，立即返回（🆕 使用 yield 以保持异步生成器语义）
             asyncio.create_task(self._run_agent(
                 session_id=session_id,
                 agent=agent,
@@ -424,74 +445,72 @@ class ChatService:
                 files_metadata=files_metadata,
                 variables=variables
             ))
-            return {
+            yield {
                 "task_id": session_id,
                 "conversation_id": conversation_id,
                 "message": "任务已启动，请轮询 /api/v1/session/{task_id} 查看结果",
                 "status": "running"
             }
+            return  # 立即结束生成器
         
-        # 流式模式：返回事件流
-        async def stream_events():
-            try:
-                redis = self.session_service.redis
-                events = self.session_service.events
-                
-                # 发送初始事件
-                await events.session.emit_session_start(
-                    session_id=session_id,
-                    user_id=user_id,
-                    conversation_id=conversation_id
-                )
-                
-                if is_new_conversation:
-                    await events.conversation.emit_conversation_start(
-                        session_id=session_id,
-                        conversation={
-                            "id": conversation_id,
-                            "title": "新对话",
-                            "created_at": datetime.now().isoformat(),
-                            "metadata": {}
-                        }
-                    )
-                
-                # 启动 Agent 任务
-                agent_task = asyncio.create_task(self._run_agent(
-                    session_id=session_id,
-                    agent=agent,
-                    message=normalized_message,
-                    user_id=user_id,
-                    conversation_id=conversation_id,
-                    is_new_conversation=is_new_conversation,
-                    background_tasks=background_tasks,
-                    files_metadata=files_metadata,
-                    variables=variables
-                ))
-                
-                # 订阅事件流
-                async for event in redis.subscribe_events(session_id=session_id, after_id=0, timeout=300):
-                    yield event
-                    if agent_task.done():
-                        break
-                
-                if not agent_task.done():
-                    await agent_task
-                
-                logger.info(f"✅ 流式对话完成: {session_id}")
-                    
-            except asyncio.CancelledError:
-                # SSE 断开，Agent 继续后台运行（agent_task 是独立任务，会自动继续）
-                logger.info(f"⚠️ SSE 断开，Agent 后台继续: {session_id}")
+        # 流式模式：内联 yield 事件流（🆕 修复异步生成器问题）
+        try:
+            redis = self.session_service.redis
+            events = self.session_service.events
             
-            except Exception as e:
-                logger.error(f"❌ 流式对话失败: {e}", exc_info=True)
-                try:
-                    await self.session_service.end_session(session_id, status="failed")
-                except:
-                    pass
-                raise AgentExecutionError(f"流式对话失败: {e}") from e
+            # 发送初始事件
+            await events.session.emit_session_start(
+                session_id=session_id,
+                user_id=user_id,
+                conversation_id=conversation_id
+            )
+            
+            if is_new_conversation:
+                await events.conversation.emit_conversation_start(
+                    session_id=session_id,
+                    conversation={
+                        "id": conversation_id,
+                        "title": "新对话",
+                        "created_at": datetime.now().isoformat(),
+                        "metadata": {}
+                    }
+                )
+            
+            # 启动 Agent 任务
+            agent_task = asyncio.create_task(self._run_agent(
+                session_id=session_id,
+                agent=agent,
+                message=normalized_message,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                is_new_conversation=is_new_conversation,
+                background_tasks=background_tasks,
+                files_metadata=files_metadata,
+                variables=variables
+            ))
+            
+            # 订阅事件流并 yield 给调用方
+            async for event in redis.subscribe_events(session_id=session_id, after_id=0, timeout=300):
+                yield event
+                if agent_task.done():
+                    break
+            
+            if not agent_task.done():
+                await agent_task
+            
+            logger.info(f"✅ 流式对话完成: {session_id}")
+                
+        except asyncio.CancelledError:
+            # SSE 断开，Agent 继续后台运行（agent_task 是独立任务，会自动继续）
+            logger.info(f"⚠️ SSE 断开，Agent 后台继续: {session_id}")
         
-        return stream_events()
+        except Exception as e:
+            logger.error(f"❌ 流式对话失败: {e}", exc_info=True)
+            try:
+                await self.session_service.end_session(session_id, status="failed")
+            except:
+                pass
+            raise AgentExecutionError(f"流式对话失败: {e}") from e
     
     async def _run_agent(
         self,
@@ -633,6 +652,30 @@ class ChatService:
             original_count = len(history_messages)
             logger.info(f"📚 历史消息已加载: {original_count} 条")
             
+            # 🆕 将当前用户消息追加到历史消息列表
+            # 原因：用户消息异步持久化到 Redis Streams，数据库可能还未同步
+            # 因此需要手动将当前轮次的用户消息追加到消息列表
+            # 
+            # message 格式说明：
+            # - 可能是字符串: "用一句话解释什么是 API"
+            # - 可能是内容块列表: [{"type": "text", "text": "..."}]
+            # 需要转换为 Claude API 期望的格式
+            if isinstance(message, str):
+                current_content = [{"type": "text", "text": message}]
+            elif isinstance(message, list):
+                # 已经是内容块列表格式
+                current_content = message
+            else:
+                # 其他情况，尝试转为字符串
+                current_content = [{"type": "text", "text": str(message)}]
+            
+            current_user_message = {
+                "role": "user",
+                "content": current_content
+            }
+            history_messages.append(current_user_message)
+            logger.debug(f"📝 已追加当前用户消息到历史列表")
+            
             # =====================================================================
             # 🎯 上下文管理策略（三层防护，用户无感知）
             # =====================================================================
@@ -719,6 +762,25 @@ class ChatService:
                     f"use_multi_agent={use_multi_agent}, "
                     f"intent={routing_intent.task_type.value if routing_intent else 'N/A'}"
                 )
+                
+                # 🆕 V9.3: 预算降级事件通知
+                context = routing_decision.context or {}
+                if not context.get("budget_check_passed", True):
+                    # 预算不足导致的降级，通知前端
+                    try:
+                        await events.emit_custom(
+                            session_id=session_id,
+                            event_type="budget_downgrade",
+                            event_data={
+                                "reason": context.get("routing_reason", "预算限制"),
+                                "original_agent_type": "multi",
+                                "downgraded_to": "single",
+                                "complexity_score": complexity_score,
+                            }
+                        )
+                        logger.info(f"📢 已发送预算降级事件: session_id={session_id}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ 发送预算降级事件失败: {e}")
             
             # 根据路由决策选择执行路径
             if use_multi_agent:
@@ -830,11 +892,22 @@ class ChatService:
                     logger.warning(f"⚠️ MultiAgent 失败总结生成失败: {e}", exc_info=True)
             else:
                 # 🎯 单智能体执行
+                # - session_context 由 Service 层注入，Agent 不直接访问存储
                 # - 意图分析：由路由层提供（enable_routing=True）或内部完成（默认）
                 # - 内容累积：broadcaster 自动处理 content_start/delta/stop
                 # - Checkpoint：broadcaster 在每个 content_stop 后自动保存
                 # - 最终保存：broadcaster 在 message_stop 时自动完成
                 # - variables：直接注入到 System Prompt（前端上下文）
+                
+                # 注入 session context（分层解耦：Agent 不直接访问存储）
+                session_context = {
+                    "conversation_id": conversation_id,
+                    "user_id": user_id,
+                    "session_id": session_id,
+                }
+                if hasattr(agent, 'inject_session_context'):
+                    agent.inject_session_context(session_context)
+                
                 await self._probe_llm_service(
                     agent.llm,
                     session_id=session_id,

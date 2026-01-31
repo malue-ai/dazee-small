@@ -263,7 +263,6 @@ async def test_intent_analyzer():
         print(f"     类型: {result.task_type.value}")
         print(f"     复杂度: {result.complexity.value}")
         print(f"     需要规划: {result.needs_plan}")
-        print(f"     关键词: {result.keywords}")
     
     print("\n  ✅ IntentAnalyzer 测试通过")
 

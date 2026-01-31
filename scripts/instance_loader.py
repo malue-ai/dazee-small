@@ -16,6 +16,7 @@
 """
 
 import os
+import platform
 import sys
 from pathlib import Path
 from typing import Optional, Dict, Any, List
@@ -96,6 +97,21 @@ class InstanceConfig:
     # Skills 配置（Claude Skills 官方 API）
     skills: List[SkillConfig] = field(default_factory=list)
     
+    # 🆕 Skill 模式配置（借鉴 clawdbot）
+    # - "api": 使用 Claude Skills API（container/skills 参数，受 8 个限制）
+    # - "prompt_injection": 在 system prompt 中注入 <available_skills>（无限制）
+    skill_mode: str = "api"
+    
+    # 🆕 V9.1: Skills 加载模式配置（混合方案）
+    # - "registry": 只从 skill_registry.yaml 读取（默认，最安全）
+    # - "auto": 自动扫描目录 + 依赖检查（开发友好）
+    # - "hybrid": 注册表优先 + 自动发现未注册的（推荐）
+    skill_discovery_mode: str = "registry"
+    
+    # 🆕 V9.1: enabled_skills 配置（从 config.yaml 读取）
+    # 用于 auto/hybrid 模式下的白名单控制
+    enabled_skills: Dict[str, bool] = field(default_factory=dict)
+    
     # APIs 配置（REST API 描述）
     apis: List[ApiConfig] = field(default_factory=list)
     
@@ -162,12 +178,23 @@ def list_instances() -> List[str]:
     return sorted(instances)
 
 
-def load_skill_registry(instance_name: str) -> List[SkillConfig]:
+def load_skill_registry(
+    instance_name: str,
+    discovery_mode: str = "registry",
+    enabled_skills: Optional[Dict[str, bool]] = None
+) -> List[SkillConfig]:
     """
-    加载实例的 Skills 注册表
+    加载实例的 Skills（支持混合模式）
+    
+    🆕 V9.1: 三种发现模式
+    - registry: 只从 skill_registry.yaml 读取（默认，最安全）
+    - auto: 自动扫描目录 + 依赖检查（开发友好）
+    - hybrid: 注册表优先 + 自动发现未注册的（推荐）
     
     Args:
         instance_name: 实例名称
+        discovery_mode: 发现模式（registry/auto/hybrid）
+        enabled_skills: 启用的 Skills 白名单（从 config.yaml 的 enabled_skills）
         
     Returns:
         SkillConfig 列表
@@ -175,6 +202,31 @@ def load_skill_registry(instance_name: str) -> List[SkillConfig]:
     import yaml
     
     skills_dir = get_instances_dir() / instance_name / "skills"
+    enabled_skills = enabled_skills or {}
+    
+    if discovery_mode == "registry":
+        # 模式 1: 只从 skill_registry.yaml 读取（原有逻辑）
+        return _load_from_registry(skills_dir)
+    
+    elif discovery_mode == "auto":
+        # 模式 2: 自动扫描目录 + 依赖检查
+        return _auto_discover_skills(skills_dir, enabled_skills)
+    
+    elif discovery_mode == "hybrid":
+        # 模式 3: 注册表优先 + 自动发现未注册的
+        return _hybrid_load_skills(skills_dir, enabled_skills)
+    
+    else:
+        logger.warning(f"⚠️ 未知的 skill_discovery_mode: {discovery_mode}，使用默认 registry 模式")
+        return _load_from_registry(skills_dir)
+
+
+def _load_from_registry(skills_dir: Path) -> List[SkillConfig]:
+    """
+    从 skill_registry.yaml 加载 Skills（原有逻辑）
+    """
+    import yaml
+    
     registry_path = skills_dir / "skill_registry.yaml"
     
     if not registry_path.exists():
@@ -218,6 +270,186 @@ def load_skill_registry(instance_name: str) -> List[SkillConfig]:
         ))
     
     return result
+
+
+def _auto_discover_skills(
+    skills_dir: Path,
+    enabled_skills: Dict[str, bool]
+) -> List[SkillConfig]:
+    """
+    自动扫描目录发现 Skills + 依赖检查
+    
+    逻辑：
+    1. 扫描 skills/ 目录下所有子目录
+    2. 检查是否有 SKILL.md
+    3. 解析 frontmatter 获取 metadata
+    4. 检查依赖（requires.bins/env/os）
+    5. 根据 enabled_skills 白名单决定是否启用
+    """
+    import yaml
+    import shutil
+    import os
+    import platform
+    
+    if not skills_dir.exists():
+        return []
+    
+    result = []
+    skipped_deps = []
+    skipped_disabled = []
+    
+    for skill_path in sorted(skills_dir.iterdir()):
+        if not skill_path.is_dir():
+            continue
+        
+        # 跳过特殊目录
+        if skill_path.name.startswith('_') or skill_path.name in ('__pycache__', 'README.md'):
+            continue
+        
+        skill_name = skill_path.name
+        skill_md = skill_path / "SKILL.md"
+        
+        if not skill_md.exists():
+            continue
+        
+        # 解析 SKILL.md frontmatter
+        metadata = _parse_skill_frontmatter(skill_md)
+        if not metadata:
+            continue
+        
+        # 检查 enabled_skills 白名单
+        if enabled_skills and skill_name not in enabled_skills:
+            skipped_disabled.append(skill_name)
+            continue
+        
+        if enabled_skills and not enabled_skills.get(skill_name, False):
+            skipped_disabled.append(skill_name)
+            continue
+        
+        # 检查依赖
+        moltbot_meta = metadata.get("metadata", {}).get("moltbot", {})
+        requires = moltbot_meta.get("requires", {})
+        
+        deps_ok, missing = _check_skill_requires(requires)
+        
+        if not deps_ok:
+            skipped_deps.append((skill_name, missing))
+            continue
+        
+        # 创建 SkillConfig
+        result.append(SkillConfig(
+            name=skill_name,
+            enabled=True,
+            description=metadata.get("description", ""),
+            skill_path=skill_path
+        ))
+    
+    # 日志输出
+    if result:
+        logger.info(f"   ✅ 自动发现 {len(result)} 个 Skills（满足依赖）")
+    
+    if skipped_deps:
+        logger.warning(f"   ⚠️ {len(skipped_deps)} 个 Skills 缺少依赖:")
+        for name, missing in skipped_deps[:5]:  # 只显示前 5 个
+            logger.warning(f"      - {name}: 缺少 {', '.join(missing)}")
+        if len(skipped_deps) > 5:
+            logger.warning(f"      ... 还有 {len(skipped_deps) - 5} 个")
+    
+    if skipped_disabled:
+        logger.debug(f"   ⏭️ {len(skipped_disabled)} 个 Skills 未在白名单中启用")
+    
+    return result
+
+
+def _hybrid_load_skills(
+    skills_dir: Path,
+    enabled_skills: Dict[str, bool]
+) -> List[SkillConfig]:
+    """
+    混合模式：注册表优先 + 自动发现
+    
+    逻辑：
+    1. 先从 skill_registry.yaml 加载（优先）
+    2. 再扫描目录发现未注册的 Skills
+    3. 根据 enabled_skills 决定是否启用发现的 Skills
+    """
+    # 1. 从注册表加载
+    registry_skills = _load_from_registry(skills_dir)
+    registered_names = {s.name for s in registry_skills}
+    
+    # 2. 自动发现未注册的
+    discovered = _auto_discover_skills(skills_dir, enabled_skills)
+    
+    # 3. 合并：注册表中的保持不变，发现的添加
+    new_discovered = []
+    for skill in discovered:
+        if skill.name not in registered_names:
+            new_discovered.append(skill)
+    
+    if new_discovered:
+        logger.info(f"   🆕 发现 {len(new_discovered)} 个新 Skills（未在注册表中）")
+        for s in new_discovered[:5]:
+            logger.info(f"      + {s.name}")
+        if len(new_discovered) > 5:
+            logger.info(f"      ... 还有 {len(new_discovered) - 5} 个")
+    
+    return registry_skills + new_discovered
+
+
+def _parse_skill_frontmatter(skill_md: Path) -> Optional[Dict]:
+    """解析 SKILL.md 的 YAML frontmatter"""
+    import yaml
+    
+    try:
+        content = skill_md.read_text(encoding='utf-8')
+        if not content.startswith('---'):
+            return None
+        
+        end_idx = content.index('---', 3)
+        frontmatter = content[3:end_idx].strip()
+        return yaml.safe_load(frontmatter)
+    except Exception as e:
+        logger.debug(f"解析 frontmatter 失败: {skill_md}: {e}")
+        return None
+
+
+def _check_skill_requires(requires: Dict) -> tuple[bool, List[str]]:
+    """
+    检查 Skill 依赖是否满足
+    
+    Args:
+        requires: frontmatter 中的 requires 配置
+        
+    Returns:
+        (是否满足, 缺失的依赖列表)
+    """
+    import shutil
+    import os
+    import platform
+    
+    missing = []
+    
+    # 检查必需的二进制文件
+    for bin_name in requires.get("bins", []):
+        if not shutil.which(bin_name):
+            missing.append(f"bin:{bin_name}")
+    
+    # 检查环境变量
+    for env_name in requires.get("env", []):
+        if not os.environ.get(env_name):
+            missing.append(f"env:{env_name}")
+    
+    # 检查操作系统
+    required_os = requires.get("os", [])
+    if required_os:
+        current_os = platform.system().lower()
+        os_map = {"darwin": "macos", "linux": "linux", "windows": "windows"}
+        current_os_name = os_map.get(current_os, current_os)
+        
+        if current_os_name not in [o.lower() for o in required_os]:
+            missing.append(f"os:{current_os_name}")
+    
+    return len(missing) == 0, missing
 
 
 def load_instance_config(instance_name: str) -> InstanceConfig:
@@ -266,8 +498,29 @@ def load_instance_config(instance_name: str) -> InstanceConfig:
         top_p=llm_config.get("top_p")
     )
     
-    # 加载 Skills 配置（Claude Skills 官方 API）
-    skills = load_skill_registry(instance_name)
+    # 🆕 V9.1: 解析 enabled_skills 配置（用于 auto/hybrid 模式）
+    enabled_skills_raw = raw_config.get("enabled_skills", {})
+    enabled_skills = {}
+    if isinstance(enabled_skills_raw, dict):
+        for skill_name, enabled in enabled_skills_raw.items():
+            if isinstance(enabled, bool):
+                enabled_skills[skill_name] = enabled
+            elif isinstance(enabled, int):
+                enabled_skills[skill_name] = bool(enabled)
+    
+    # 🆕 V9.1: 读取 skill_discovery_mode 配置
+    skill_loading_config = raw_config.get("skill_loading", {})
+    skill_discovery_mode = skill_loading_config.get("discovery_mode", "registry")
+    
+    # 加载 Skills 配置（支持混合模式）
+    skills = load_skill_registry(
+        instance_name,
+        discovery_mode=skill_discovery_mode,
+        enabled_skills=enabled_skills
+    )
+    
+    # 🆕 读取 skill_mode 配置（借鉴 clawdbot）
+    skill_mode = raw_config.get("skill_mode", "api")
     
     # 加载 APIs 配置（REST API 描述）
     apis = _load_apis_config(instance_name, raw_config.get("apis", []))
@@ -303,6 +556,9 @@ def load_instance_config(instance_name: str) -> InstanceConfig:
         llm_params=llm_params,
         mcp_tools=mcp_tools if isinstance(mcp_tools, list) else [],
         skills=skills,
+        skill_mode=skill_mode,  # 🆕 Skill 模式
+        skill_discovery_mode=skill_discovery_mode,  # 🆕 V9.1 发现模式
+        enabled_skills=enabled_skills,  # 🆕 V9.1 启用的 Skills
         apis=apis,
         enabled_capabilities=enabled_capabilities,
         # 高级配置（从 advanced 部分读取）
@@ -327,6 +583,48 @@ def load_instance_config(instance_name: str) -> InstanceConfig:
         workers=[],  # Workers 暂不解析，待扩展
         raw_config=raw_config
     )
+
+
+async def _check_skill_dependencies(instance_name: str, mode: str = "prompt"):
+    """
+    🆕 V6.2: 检查 Skill 依赖
+    
+    Args:
+        instance_name: 实例名称
+        mode: 检查模式（prompt/auto/interactive）
+    """
+    try:
+        from core.skill.dynamic_loader import DependencyChecker
+        
+        checker = DependencyChecker(instance_name)
+        results = checker.check_all_skills()
+        
+        if results['missing']:
+            missing_count = len(results['missing'])
+            enabled_count = results['stats']['enabled']
+            
+            if mode == "prompt":
+                logger.warning(f"⚠️ {missing_count} 个 Skills 缺少依赖，仅启用 {enabled_count} 个")
+                logger.info("💡 运行以下命令查看详情：")
+                logger.info(f"   python scripts/check_instance_dependencies.py {instance_name}")
+            
+            elif mode == "auto":
+                logger.info(f"📦 自动安装 {missing_count} 个 Skills 依赖...")
+                script = checker.generate_install_script(results)
+                # TODO: 实现异步安装
+                logger.warning("⚠️ 自动安装功能暂未实现，请手动安装")
+                logger.info(f"   python scripts/check_instance_dependencies.py {instance_name} --generate-install")
+            
+            elif mode == "interactive":
+                logger.info(f"📦 启动交互式依赖配置...")
+                checker.run_interactive(results)
+        else:
+            logger.info(f"✅ 所有 {results['stats']['total']} 个 Skills 依赖已满足")
+    
+    except ImportError:
+        logger.debug("DependencyChecker 未找到，跳过依赖检查")
+    except Exception as e:
+        logger.warning(f"依赖检查失败: {e}")
 
 
 def _load_apis_config(instance_name: str, apis_raw: List[Dict]) -> List[ApiConfig]:
@@ -496,8 +794,6 @@ def load_instance_env(instance_name: str) -> None:
     if env_path.exists():
         load_dotenv(env_path, override=True)
         logger.info(f"✅ 已加载环境变量: {env_path}")
-    else:
-        logger.warning(f"⚠️ .env 文件不存在: {env_path}")
 
 
 def _merge_config_to_schema(base_schema, config: InstanceConfig):
@@ -614,7 +910,10 @@ async def create_agent_from_instance(
     conversation_service = None,
     skip_mcp_registration: bool = False,
     skip_skills_registration: bool = False,
-    force_refresh: bool = False
+    force_refresh: bool = False,
+    # 🆕 V6.2: Skill 依赖检查参数
+    check_dependencies: bool = True,
+    dependency_mode: str = "prompt",  # prompt / auto / interactive / skip
 ):
     """
     从实例配置创建 Agent（核心方法）
@@ -633,14 +932,16 @@ async def create_agent_from_instance(
     
     流程：
     1. 加载环境变量
-    2. 加载实例配置（config.yaml）
-    3. 加载实例提示词（prompt.md）
-    4. 加载 InstancePromptCache（包含 LLM 推断的 Schema 和提示词版本）
-    5. 合并配置：config.yaml 覆盖 Schema 默认值
-    6. 调用 AgentFactory.from_schema() 创建 Agent
-    7. 注册 MCP 工具
-    8. 注册 Claude Skills
-    9. 保存工具推断缓存
+    2. 🆕 检查 Skill 依赖（可选）
+    3. 加载实例配置（config.yaml）
+    4. 加载实例提示词（prompt.md）
+    5. 🆕 构建 Skills Prompt（延迟加载模式）
+    6. 加载 InstancePromptCache（包含 LLM 推断的 Schema 和提示词版本）
+    7. 合并配置：config.yaml 覆盖 Schema 默认值
+    8. 调用 AgentFactory.from_schema() 创建 Agent
+    9. 注册 MCP 工具
+    10. 注册 Claude Skills
+    11. 保存工具推断缓存
     
     Args:
         instance_name: 实例名称
@@ -650,6 +951,8 @@ async def create_agent_from_instance(
         skip_mcp_registration: 是否跳过 MCP 工具注册
         skip_skills_registration: 是否跳过 Skills 注册
         force_refresh: 强制刷新缓存，重新生成 Schema 和推断工具
+        check_dependencies: 🆕 是否检查 Skill 依赖
+        dependency_mode: 🆕 依赖检查模式（prompt/auto/interactive/skip）
         
     Returns:
         配置好的 Agent 实例
@@ -676,6 +979,14 @@ async def create_agent_from_instance(
     logger.info(f"   描述: {config.description}")
     logger.info(f"   Skills: {len(config.skills)} 个")
     logger.info(f"   APIs: {len(config.apis)} 个")
+    
+    # 🆕 V6.2: Skill 依赖检查（配置化）
+    # 从 config.yaml 读取配置，覆盖函数参数
+    dep_check_config = config.raw_config.get("skill_dependency_check", {})
+    if dep_check_config.get("enabled", check_dependencies):
+        effective_mode = dep_check_config.get("mode", dependency_mode)
+        if effective_mode != "skip":
+            await _check_skill_dependencies(instance_name, effective_mode)
     
     # 🆕 V6.0 显示 Multi-Agent 配置
     # 注意：只有当 multi_agent_enabled=True 时才显示 Workers 信息
@@ -741,10 +1052,29 @@ async def create_agent_from_instance(
     apis_prompt = _build_apis_prompt_section(config.apis)
     framework_prompt = get_universal_agent_prompt()
     
+    # 🆕 V6.0: 根据实例配置决定是否检测环境信息
+    environment_prompt = ""
+    runtime_env_config = getattr(config, 'runtime_environment', None)
+    if runtime_env_config is None:
+        # 兼容旧配置：从 config.raw_config 读取
+        runtime_env_config = config.raw_config.get('runtime_environment', {})
+    
+    if isinstance(runtime_env_config, dict) and runtime_env_config.get('enabled', False):
+        from core.prompt.runtime_context_builder import detect_and_build_environment_context
+        environment_prompt = detect_and_build_environment_context(
+            detect_apps=runtime_env_config.get('detect_apps', True),
+            include_capabilities=runtime_env_config.get('include_capabilities', True),
+            language=runtime_env_config.get('language', 'zh'),
+        )
+        logger.info(f"   环境检测完成: {len(environment_prompt)} 字符 (language={runtime_env_config.get('language', 'zh')})")
+    else:
+        logger.info("   环境检测: 已禁用（云端实例或未配置）")
+    
     # 存储运行时上下文到 prompt_cache（供 Agent 动态追加）
     prompt_cache.runtime_context = {
         "apis_prompt": apis_prompt,
         "framework_prompt": framework_prompt,
+        "environment_prompt": environment_prompt,  # 🆕 自动检测的环境信息
     }
     
     # 🆕 V5.1: 仅在 fallback 时使用完整拼接版本
@@ -899,11 +1229,92 @@ async def create_agent_from_instance(
     if not skip_mcp_registration and config.mcp_tools:
         await _register_mcp_tools(agent, config.mcp_tools, instance_registry)
     
-    # 11. 注册 Claude Skills（如果配置了）
+    # 11. 处理 Skills（根据 skill_mode 选择不同策略）
+    # 🆕 如果使用 prompt_injection 模式，禁用全局 Claude Skills API（避免 8 个限制）
+    if config.skill_mode == "prompt_injection" and hasattr(agent, 'llm'):
+        # 禁用 Claude Skills API，只使用 prompt 注入
+        # 方法 1: 调用 router 的 disable_skills（会遍历所有 targets）
+        if hasattr(agent.llm, 'disable_skills'):
+            agent.llm.disable_skills()
+        
+        # 方法 2: 直接禁用所有可能的 LLM 实例（确保不遗漏）
+        # 处理 router 的 targets
+        if hasattr(agent.llm, 'targets'):
+            for target in agent.llm.targets:
+                if hasattr(target, 'service'):
+                    target.service._skills_enabled = False
+                    target.service._skills_container = {}
+        
+        # 处理 primary
+        if hasattr(agent.llm, 'primary'):
+            if hasattr(agent.llm.primary, 'service'):
+                agent.llm.primary.service._skills_enabled = False
+                agent.llm.primary.service._skills_container = {}
+        
+        # 直接设置（如果不是 router）
+        if hasattr(agent.llm, '_skills_enabled'):
+            agent.llm._skills_enabled = False
+            agent.llm._skills_container = {}
+        
+        logger.info("   🔧 已禁用 Claude Skills API (skill_mode=prompt_injection)")
+    
     if not skip_skills_registration and config.skills:
         enabled_skills = [s for s in config.skills if s.enabled]
         if enabled_skills:
-            await _register_skills(instance_name, enabled_skills)
+            if config.skill_mode == "prompt_injection":
+                # 🆕 借鉴 clawdbot：将 Skills 注入到 prompt 中
+                # 无需调用 Claude Skills API，无 8 个限制
+                
+                # 🆕 V6.2: 从配置读取加载模式和语言
+                skill_loading_config = config.raw_config.get("skill_loading", {})
+                loading_mode = skill_loading_config.get("mode", "lazy")
+                
+                runtime_env_config = config.raw_config.get("runtime_environment", {})
+                language = runtime_env_config.get("language", "en")
+                
+                skills_prompt = _format_skills_for_prompt(
+                    instance_name, 
+                    enabled_skills,
+                    loading_mode=loading_mode,
+                    language=language,
+                )
+                if skills_prompt and hasattr(agent, 'prompt_cache') and agent.prompt_cache:
+                    # 将 skills prompt 追加到 runtime_context（字典结构）
+                    if hasattr(agent.prompt_cache, 'runtime_context'):
+                        if isinstance(agent.prompt_cache.runtime_context, dict):
+                            # runtime_context 是字典，添加 skills_prompt 键
+                            agent.prompt_cache.runtime_context["skills_prompt"] = skills_prompt
+                        else:
+                            # 兼容旧格式（字符串）
+                            agent.prompt_cache.runtime_context = (
+                                (agent.prompt_cache.runtime_context or "") + "\n\n" + skills_prompt
+                            )
+                    # 统计实际注入的 skills 数量（从 XML 中计算）
+                    injected_count = skills_prompt.count('<skill name="')
+                    logger.info(f"   📝 Skills Prompt Injection: {injected_count} 个技能已注入到提示词")
+                else:
+                    logger.warning(f"   ⚠️ 无法注入 Skills Prompt（agent.prompt_cache 不可用）")
+            else:
+                # 原有逻辑：使用 Claude Skills API（受 8 个限制）
+                await _register_skills(instance_name, enabled_skills)
+                
+                # 🆕 重新加载 skill_registry.yaml 以获取更新后的 skill_id
+                updated_skills = load_skill_registry(instance_name)
+                
+                # 直接从 config.skills 获取 skill_id，调用 llm.enable_skills()
+                skills_to_enable = []
+                for skill in updated_skills:
+                    if skill.enabled and skill.skill_id:
+                        skills_to_enable.append({
+                            "type": "custom",
+                            "skill_id": skill.skill_id,
+                            "version": "latest"
+                        })
+                
+                if skills_to_enable and hasattr(agent, 'llm'):
+                    agent.llm.enable_skills(skills_to_enable)
+                    skill_names = [s['skill_id'][:25] + '...' for s in skills_to_enable]
+                    logger.info(f"   🎯 已启用 {len(skills_to_enable)} 个 Claude Skills: {skill_names}")
     
     # 🆕 V4.6: 保存工具推断缓存（包含新推断的工具）
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -1158,12 +1569,179 @@ def validate_skill_directory(skill_path: Path) -> Dict[str, Any]:
     return result
 
 
+def _check_skill_eligibility(skill: SkillConfig) -> bool:
+    """
+    🆕 借鉴 clawdbot：检查 Skill 资格（bins/env 依赖）
+    
+    参考：clawdbot/src/agents/skills/config.ts:shouldIncludeSkill
+    
+    Args:
+        skill: Skill 配置
+        
+    Returns:
+        是否满足资格
+    """
+    import shutil
+    
+    if not skill.skill_path or not skill.skill_path.exists():
+        return False
+    
+    skill_md_path = skill.skill_path / "SKILL.md"
+    if not skill_md_path.exists():
+        return False
+    
+    # 解析 SKILL.md frontmatter 获取 requires
+    try:
+        content = skill_md_path.read_text(encoding="utf-8")
+        
+        # 简单解析 YAML frontmatter
+        if content.startswith("---"):
+            end_idx = content.find("---", 3)
+            if end_idx > 0:
+                import yaml
+                frontmatter = yaml.safe_load(content[3:end_idx])
+                
+                # 获取 metadata.moltbot.requires
+                metadata = frontmatter.get("metadata", {})
+                if isinstance(metadata, str):
+                    import json
+                    try:
+                        metadata = json.loads(metadata)
+                    except:
+                        metadata = {}
+                
+                moltbot = metadata.get("moltbot", {})
+                requires = moltbot.get("requires", {})
+                
+                # 检查必需的二进制文件
+                required_bins = requires.get("bins", [])
+                for bin_name in required_bins:
+                    if shutil.which(bin_name) is None:
+                        logger.debug(f"   ⏭️ {skill.name}: 缺少依赖 bin={bin_name}")
+                        return False
+                
+                # 检查 anyBins（任一满足即可）
+                any_bins = requires.get("anyBins", [])
+                if any_bins:
+                    has_any = any(shutil.which(b) is not None for b in any_bins)
+                    if not has_any:
+                        logger.debug(f"   ⏭️ {skill.name}: 缺少所有 anyBins={any_bins}")
+                        return False
+                
+                # 检查必需的环境变量
+                required_env = requires.get("env", [])
+                for env_name in required_env:
+                    if not os.getenv(env_name):
+                        logger.debug(f"   ⏭️ {skill.name}: 缺少环境变量 {env_name}")
+                        return False
+                
+                # 检查 OS 兼容性
+                os_list = moltbot.get("os", [])
+                if os_list:
+                    import platform
+                    current_os = platform.system().lower()
+                    # platform.system() 返回: Darwin(macOS), Linux, Windows
+                    # clawdbot 使用: darwin, linux, win32
+                    # 同时支持 macos 作为 darwin 的别名
+                    os_mapping = {
+                        "darwin": "darwin",  # macOS
+                        "macos": "darwin",   # macOS 别名
+                        "linux": "linux",
+                        "windows": "win32",
+                    }
+                    normalized_os = os_mapping.get(current_os, current_os)
+                    # 检查 os_list 中是否包含当前系统（支持 darwin 或 macos）
+                    os_match = normalized_os in os_list or (
+                        normalized_os == "darwin" and "macos" in os_list
+                    )
+                    if not os_match:
+                        logger.debug(f"   ⏭️ {skill.name}: 不支持当前 OS={current_os}")
+                        return False
+    except Exception as e:
+        logger.debug(f"   ⚠️ {skill.name}: 资格检查异常: {e}")
+        # 解析失败时默认通过
+    
+    return True
+
+
+def _format_skills_for_prompt(
+    instance_name: str,
+    skills: List[SkillConfig],
+    loading_mode: str = "lazy",
+    language: str = "en",
+) -> str:
+    """
+    🆕 V6.2: 使用 SkillPromptBuilder 构建 Skills Prompt
+    
+    支持两种模式（配置化）：
+    - lazy（延迟加载）：仅注入 name + description + location，节省 90% Token
+    - eager（全量加载）：注入完整 SKILL.md 内容
+    
+    Args:
+        instance_name: 实例名称
+        skills: 启用的 Skills 配置列表
+        loading_mode: 加载模式（lazy/eager），从 config.yaml 读取
+        language: 语言（zh/en），从 runtime_environment.language 读取
+        
+    Returns:
+        Skills prompt
+    """
+    if not skills:
+        return ""
+    
+    # 过滤启用的且通过资格检查的 Skills
+    eligible_skills = []
+    for skill in skills:
+        if not skill.enabled:
+            continue
+        if _check_skill_eligibility(skill):
+            eligible_skills.append(skill)
+    
+    if not eligible_skills:
+        return ""
+    
+    logger.info(f"   📋 Skills 资格检查: {len(eligible_skills)}/{len(skills)} 个通过")
+    logger.info(f"   📋 Skills 加载模式: {loading_mode}")
+    
+    # 🆕 V6.2: 使用 SkillPromptBuilder 构建 Prompt（配置化）
+    from core.prompt.skill_prompt_builder import SkillPromptBuilder, SkillSummary
+    
+    if loading_mode == "lazy":
+        # 延迟加载：仅注入列表
+        summaries = []
+        for skill in eligible_skills:
+            skill_md_path = skill.skill_path / "SKILL.md"
+            summaries.append(SkillSummary(
+                name=skill.name,
+                description=skill.description or skill.name,
+                location=skill_md_path.absolute(),
+            ))
+        
+        skills_prompt = SkillPromptBuilder.build_lazy_prompt(summaries, language=language)
+        instructions = SkillPromptBuilder.build_lazy_instructions(language=language)
+        
+        return instructions + "\n\n" + skills_prompt
+    
+    else:
+        # 全量加载：注入完整内容
+        skills_content = []
+        for skill in eligible_skills:
+            skill_md_path = skill.skill_path / "SKILL.md"
+            try:
+                content = skill_md_path.read_text(encoding="utf-8")
+                skills_content.append((skill.name, content))
+            except Exception as e:
+                logger.warning(f"读取 {skill_md_path} 失败: {e}")
+        
+        return SkillPromptBuilder.build_eager_prompt(skills_content, language=language)
+
+
 async def _register_skills(
     instance_name: str,
     skills: List[SkillConfig]
 ) -> None:
     """
-    自动注册 Claude Skills
+    自动注册 Claude Skills（API 模式）
     
     流程：
     1. 验证 Skill 目录结构

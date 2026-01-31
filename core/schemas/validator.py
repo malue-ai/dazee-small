@@ -520,10 +520,10 @@ class AgentSchema(BaseModel):
     )
     
     max_turns: int = Field(
-        default=15,
+        default=30,  # 🆕 V8.0: 统一安全上限，Agent 自主决定何时退出
         ge=1,
-        le=50,
-        description="最大对话轮次"
+        le=100,
+        description="最大对话轮次（安全上限，防止死循环）"
     )
     
     allow_parallel_tools: bool = Field(
@@ -753,7 +753,7 @@ DEFAULT_AGENT_SCHEMA = AgentSchema(
     
     # 运行时参数
     model="claude-sonnet-4-5-20250929",  # 平衡能力和成本
-    max_turns=15,                        # 适中的对话长度
+    max_turns=30,                        # 🆕 V8.0: 安全上限，Agent 自主决定退出
     allow_parallel_tools=False,          # 默认串行（更稳定）
     skills=[],                           # 由 config.yaml 配置
     tools=[],                            # 由 config.yaml 配置

@@ -494,25 +494,55 @@ async def delete_skill(
 
 
 # ============================================================
-# Pre-built Skills
+# Pre-built Claude Skills（Anthropic 官方提供）
 # ============================================================
+
+# Pre-built Claude Skills（Anthropic 平台提供）与本地 Skills（skills/library/）独立
+# 参考：https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview
+PREBUILT_CLAUDE_SKILLS = [
+    {
+        "name": "pptx",
+        "description": "Create presentations, edit slides, analyze presentation content.",
+        "provider": "Anthropic",
+        "type": "claude-skill"
+    },
+    {
+        "name": "xlsx",
+        "description": "Create spreadsheets, analyze data, generate reports with charts.",
+        "provider": "Anthropic",
+        "type": "claude-skill"
+    },
+    {
+        "name": "docx",
+        "description": "Create documents, edit content, format text.",
+        "provider": "Anthropic",
+        "type": "claude-skill"
+    },
+    {
+        "name": "pdf",
+        "description": "Generate formatted PDF documents and reports.",
+        "provider": "Anthropic",
+        "type": "claude-skill"
+    }
+]
+
 
 @router.get(
     "/prebuilt/list",
     response_model=dict,
-    summary="列出 Pre-built Skills",
-    description="获取 Anthropic 提供的 Pre-built Skills 列表",
+    summary="列出 Pre-built Claude Skills",
+    description="获取 Anthropic 提供的 Pre-built Claude Skills 列表",
 )
 async def list_prebuilt_skills():
     """
-    列出 Pre-built Skills
+    列出 Pre-built Claude Skills
     
-    返回 Anthropic 官方提供的 Pre-built Skills
+    返回 Anthropic 官方提供的 Pre-built Claude Skills
+    
+    注意：这些是 Anthropic 平台的 Pre-built Claude Skills
     """
-    from prompts.skills_loader import PREBUILT_SKILLS
-    
     return {
-        "total": len(PREBUILT_SKILLS),
-        "skills": PREBUILT_SKILLS,
+        "total": len(PREBUILT_CLAUDE_SKILLS),
+        "skills": PREBUILT_CLAUDE_SKILLS,
     }
 

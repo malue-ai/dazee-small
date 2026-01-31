@@ -347,7 +347,7 @@ class ArchitectureVerifier:
         - task_type/complexity 输出
         - skip_memory_retrieval 判断
         """
-        from core.agent.intent_analyzer import IntentAnalyzer, create_intent_analyzer
+        from core.routing.intent_analyzer import IntentAnalyzer, create_intent_analyzer
         
         self._print_header("阶段 2: 意图分析验证")
         

@@ -5,12 +5,15 @@ ZenFlux Agent V4.2 Core Module
 - SimpleAgent: 主Agent类
 - CapabilityRegistry: 能力注册表
 - CapabilityRouter: 能力路由器
-- SkillLoader: Skills 内容加载器
+- SkillLoader: Skill 内容加载器（对齐 clawdbot 机制）
 - MemoryManager: 记忆管理
 - LLM Service: LLM统一封装
 - EventManager: 事件管理（SSE/WebSocket 通用协议）
 - Context: 上下文管理
 - Orchestration: Code-First + VM Scaffolding 编排模块（V4.2 新增）
+
+术语说明：
+- Skill: 本地工作流技能（skills/library/，对齐 clawdbot 机制）
 """
 
 # Agent（新架构）
@@ -26,7 +29,7 @@ from .tool.capability import (
     RoutingResult,
     create_capability_router,
     extract_keywords,
-    # Skills 加载器
+    # Skill 加载器（本地工作流技能）
     SkillLoader,
     SkillInfo,
     create_skill_loader
@@ -50,7 +53,7 @@ from .memory import (
     create_episodic_memory,
     PreferenceMemory,
     create_preference_memory,
-    # 系统级记忆
+    # 系统级记忆（Skill = 本地工作流技能）
     SkillMemory,
     create_skill_memory,
     CacheMemory,
@@ -134,7 +137,7 @@ __all__ = [
     "create_capability_router",
     "extract_keywords",
     
-    # Skills 加载器
+    # Skill 加载器（本地工作流技能）
     "SkillLoader",
     "SkillInfo",
     "create_skill_loader",
@@ -152,6 +155,7 @@ __all__ = [
     "create_episodic_memory",
     "PreferenceMemory",
     "create_preference_memory",
+    # 系统级记忆（Skill = 本地工作流技能）
     "SkillMemory",
     "create_skill_memory",
     "CacheMemory",

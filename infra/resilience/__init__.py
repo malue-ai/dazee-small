@@ -12,7 +12,12 @@ from infra.resilience.circuit_breaker import (
     get_circuit_breaker,
     get_all_circuit_breakers,
 )
-from infra.resilience.fallback import FallbackStrategy, register_fallback
+from infra.resilience.fallback import (
+    FallbackStrategy,
+    FallbackType,
+    register_fallback,
+    get_fallback_strategy,
+)
 
 __all__ = [
     "with_timeout",
@@ -24,5 +29,7 @@ __all__ = [
     "get_circuit_breaker",
     "get_all_circuit_breakers",
     "FallbackStrategy",
+    "FallbackType",
     "register_fallback",
+    "get_fallback_strategy",
 ]

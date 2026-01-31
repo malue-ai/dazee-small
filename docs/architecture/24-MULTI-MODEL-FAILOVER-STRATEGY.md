@@ -1458,16 +1458,6 @@ profiles:
 
 **优先级说明**：`fallbacks` 数组顺序即切换优先级，可自由调整满足不同需求。
 
-**环境变量配置**：
-
-```bash
-# Claude API Key
-export ANTHROPIC_API_KEY=sk-ant-api03-xxx
-
-# Qwen API Key
-export QWEN_API_KEY=sk-xxx
-export QWEN_BASE_URL=https://dashscope-intl.aliyuncs.com/compatible-mode/v1
-```
 
 ### 5.3 场景三：全局紧急切换到 Qwen
 

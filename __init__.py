@@ -4,9 +4,12 @@ Agent V3.6 - Prompt-Driven + Memory-First 架构
 基于Claude 4.5系列LLM的智能体架构，核心特点：
 - Extended Thinking - 深度推理
 - Memory-First Protocol - Plan/Todo 存储到 Short Memory（参考 Claude Platform Memory Tool）
-- Skills-First - 可复用的专业知识包  
+- Skills-First - 本地工作流技能（对齐 clawdbot 机制）
 - Code-First - 动态代码生成和验证
 - Native Tool Use - 原生工具调用
+
+术语说明：
+- Skill: 本地工作流技能（skills/library/，对齐 clawdbot 机制）
 
 架构特点：
 1. 无LangGraph依赖 - 直接使用Claude API
@@ -43,7 +46,7 @@ __all__ = [
     "MemoryManager",
     "WorkingMemory",
     "EpisodicMemory",
-    "SkillMemory",
+    "SkillMemory",  # 本地工作流技能缓存
     "create_memory_manager",
     
     # Plan/Todo Tool (替代 PlanningManager)

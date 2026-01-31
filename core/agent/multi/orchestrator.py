@@ -215,85 +215,18 @@ class MultiAgentOrchestrator:
         **kwargs
     ) -> "MultiAgentOrchestrator":
         """
-        V7.9: 从原型克隆 MultiAgentOrchestrator 实例（快速路径）
+        🆕 V10.0: 从原型克隆 Agent 实例（委托给 AgentFactory）
         
-        复用原型中的重量级组件，仅重置会话级状态。
-        性能：<10ms（vs 50-100ms 完整初始化）
-        
-        复用的重量级组件：
-        - config: 多智能体配置
-        - lead_agent: LeadAgent 实例（含 LLM Service）
-        - critic: CriticAgent 实例（含 LLM Service）
-        - worker_model: Worker 模型名称
-        - checkpoint_manager: 检查点管理器
-        
-        重置的会话级状态：
-        - _state: 编排状态
-        - plan: 当前计划
-        - workspace_dir: 工作目录
-        - usage_tracker: Token 统计
-        - _execution_trace: 执行追踪
-        
-        Args:
-            event_manager: 事件管理器（会话级）
-            workspace_dir: 工作目录（会话级）
-            conversation_service: 会话服务（会话级）
-            **kwargs: 其他参数
-            
-        Returns:
-            克隆后的 MultiAgentOrchestrator 实例
+        克隆逻辑已移至 AgentFactory.clone_for_session()，
+        保持 Factory 作为唯一创建/克隆入口。
         """
-        # 创建新实例（绕过 __init__）
-        clone = object.__new__(MultiAgentOrchestrator)
-        
-        # ========== 复用原型的重量级组件 ==========
-        clone.config = self.config
-        clone.enable_checkpoints = self.enable_checkpoints
-        clone.enable_lead_agent = self.enable_lead_agent
-        clone.worker_model = self.worker_model
-        clone.critic_config = self.critic_config
-        
-        # 复用 LeadAgent（含 LLM Service，重量级）
-        clone.lead_agent = self.lead_agent
-        
-        # 复用 CriticAgent（含 LLM Service，重量级）
-        clone.critic = self.critic
-        
-        # 复用 CheckpointManager（可跨会话复用）
-        clone.checkpoint_manager = self.checkpoint_manager
-        
-        # ========== 设置会话级参数 ==========
-        clone.workspace_dir = workspace_dir or './workspace'
-        
-        # ========== 重置会话级状态 ==========
-        clone._state = None
-        clone.plan = None
-        clone.plan_todo_tool = None
-        
-        # 工具和记忆系统（延迟初始化）
-        clone._tool_loader = None
-        clone.tool_executor = None
-        clone._working_memory = None
-        clone._mem0_client = None
-        
-        # 新建 Token 统计器
-        from utils.usage_tracker import create_usage_tracker
-        clone.usage_tracker = create_usage_tracker()
-        
-        # 清空追踪信息
-        clone._execution_trace = []
-        
-        # 标记为克隆实例
-        clone._is_prototype = False
-        
-        logger.debug(
-            f"🚀 MultiAgentOrchestrator 浅克隆完成: "
-            f"workspace_dir={workspace_dir}, "
-            f"lead_agent={'复用' if clone.lead_agent else '无'}, "
-            f"critic={'复用' if clone.critic else '无'}"
+        from core.agent.factory import AgentFactory
+        return AgentFactory.clone_for_session(
+            prototype=self,
+            event_manager=event_manager,
+            workspace_dir=workspace_dir,
+            conversation_service=conversation_service
         )
-        
-        return clone
     
     @property
     def usage_stats(self) -> Dict[str, int]:

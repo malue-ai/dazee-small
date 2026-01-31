@@ -385,6 +385,161 @@ def _fallback_summary(stop_reason: str, messages: List[Dict[str, Any]], max_char
     return _truncate_text("\n".join(lines), max_chars)
 
 
+class FailureSummaryManager:
+    """
+    🆕 V10.0: 失败总结管理器
+    
+    从 SimpleAgent._maybe_generate_failure_summary 提取，
+    使 SimpleAgent 保持纯 RVR 编排层。
+    
+    职责：
+    1. 根据配置和条件判断是否需要生成总结
+    2. 获取对话消息
+    3. 调用 FailureSummaryGenerator 生成总结
+    4. 写入 conversation metadata
+    """
+    
+    def __init__(
+        self,
+        conversation_service,
+        llm_service,
+        config: Optional[FailureSummaryConfig] = None,
+        context_strategy = None
+    ):
+        """
+        Args:
+            conversation_service: 对话服务（用于获取和更新对话）
+            llm_service: LLM 服务（用于生成总结）
+            config: 失败总结配置（可选）
+            context_strategy: 上下文策略（可选，用于确定保留消息数）
+        """
+        self.conversation_service = conversation_service
+        self.llm_service = llm_service
+        self.config = config or get_failure_summary_config()
+        self.context_strategy = context_strategy
+        self._generator: Optional[FailureSummaryGenerator] = None
+    
+    @property
+    def generator(self) -> FailureSummaryGenerator:
+        """懒加载生成器"""
+        if self._generator is None:
+            self._generator = FailureSummaryGenerator(self.llm_service, self.config)
+        return self._generator
+    
+    async def maybe_generate(
+        self,
+        conversation_id: str,
+        stop_reason: Optional[str],
+        session_id: str,
+        user_id: Optional[str],
+        message_id: Optional[str] = None
+    ) -> Optional[FailureSummaryResult]:
+        """
+        在失败/中断时生成失败经验总结，并写入对话 metadata
+        
+        Args:
+            conversation_id: 对话 ID
+            stop_reason: 停止原因
+            session_id: 会话 ID
+            user_id: 用户 ID
+            message_id: 消息 ID（可选）
+            
+        Returns:
+            FailureSummaryResult 或 None
+        """
+        if not self.config.enabled:
+            return None
+        if not stop_reason or stop_reason not in self.config.trigger_on_stop_reasons:
+            return None
+        if not self.conversation_service:
+            logger.warning("⚠️ 未提供 conversation_service，跳过失败总结")
+            return None
+        if not conversation_id:
+            logger.warning("⚠️ 未提供 conversation_id，跳过失败总结")
+            return None
+        
+        # 获取对话消息
+        try:
+            result = await self.conversation_service.get_conversation_messages(
+                conversation_id=conversation_id,
+                limit=1000,
+                order="asc"
+            )
+            db_messages = result.get("messages", [])
+        except Exception as e:
+            logger.warning(f"⚠️ 获取对话消息失败，跳过失败总结: {e}")
+            return None
+        
+        if not db_messages:
+            return None
+        
+        # 确定保留消息数
+        preserve_last_n = 2
+        if self.context_strategy and hasattr(self.context_strategy, 'preserve_last_n'):
+            preserve_last_n = self.context_strategy.preserve_last_n
+        keep_recent = self.config.keep_recent_messages or max(preserve_last_n * 2, 2)
+        
+        if len(db_messages) <= keep_recent:
+            logger.info("📦 消息数量不足，跳过失败总结")
+            return None
+        
+        early_messages = db_messages[:-keep_recent]
+        compress_from_message = db_messages[-(keep_recent + 1)]
+        from_message_id = compress_from_message.get("id") if isinstance(compress_from_message, dict) else None
+        if not from_message_id:
+            logger.warning("⚠️ 未找到压缩起点 message_id，跳过失败总结")
+            return None
+        
+        # 生成总结
+        summary_result = await self.generator.generate(
+            messages=early_messages,
+            stop_reason=stop_reason
+        )
+        if not summary_result.summary_text:
+            logger.info("📦 失败总结为空，跳过写入")
+            return None
+        
+        # 写入 metadata
+        try:
+            conversation = await self.conversation_service.get_conversation(conversation_id)
+            existing_metadata = conversation.metadata if isinstance(conversation.metadata, dict) else {}
+            
+            compression_info = {
+                "compressed_at": summary_result.created_at or datetime.now().isoformat(),
+                "from_message_id": from_message_id,
+                "summary": summary_result.summary_text,
+                "type": "failure_summary",
+                "stop_reason": stop_reason,
+                "session_id": session_id,
+                "message_id": message_id,
+                "user_id": user_id,
+            }
+            
+            existing_metadata["compression"] = compression_info
+            existing_metadata["failure_summary"] = {
+                "created_at": summary_result.created_at or datetime.now().isoformat(),
+                "stop_reason": stop_reason,
+                "summary": summary_result.summary_text,
+                "raw": summary_result.raw_text,
+                "session_id": session_id,
+                "message_id": message_id,
+                "user_id": user_id,
+            }
+            
+            await self.conversation_service.update_conversation(
+                conversation_id=conversation_id,
+                metadata=existing_metadata
+            )
+            logger.info(
+                f"✅ 失败总结已写入 metadata: conversation_id={conversation_id}, "
+                f"stop_reason={stop_reason}"
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ 写入失败总结失败: {e}")
+        
+        return summary_result
+
+
 async def generate_failure_summary_for_multiagent(
     orchestrator_state: Any,
     messages: List[Dict[str, Any]],

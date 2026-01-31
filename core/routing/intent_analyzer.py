@@ -2,23 +2,32 @@
 V5.0 IntentAnalyzer - 意图分析器
 
 🆕 V6.1: 新增上下文感知（追问识别）
+🆕 V9.2: 新增 task_dependency_type 解析（任务依赖类型）
+🆕 V9.3: 新增语义缓存支持（减少 LLM 调用，降低延迟和成本）
 
 核心理念：
 - 意图分析通过 LLM 语义理解完成
 - 不使用关键词匹配规则
 - 保守的 fallback（OTHER），不做关键词猜测
 - 识别追问/新话题，避免上下文脱节
+- 语义驱动的 Multi-Agent 和执行策略决策
 
 设计原则：
 - 运营无需配置任何关键词规则
 - LLM 学习 Few-Shot 示例进行语义泛化推理
 - 代码只做调用和解析，不做规则判断
 - 运营配置提示词 + 高质量默认模板 → 场景化意图识别
+
+🆕 V9.3 语义缓存策略：
+- L1: 精确匹配（hash）< 0.1ms
+- L2: 语义匹配（embedding）< 60ms
+- 阈值 >= 0.92 时直接返回缓存结果
 """
 
 # 1. 标准库
+import asyncio
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, TYPE_CHECKING
 
 # 3. 本地模块
 from utils.json_utils import extract_json
@@ -27,6 +36,9 @@ from core.agent.types import (
     TaskType,
     Complexity,
 )
+
+if TYPE_CHECKING:
+    from core.routing.intent_cache import IntentSemanticCache
 
 logger = logging.getLogger(__name__)
 
@@ -40,17 +52,27 @@ class IntentAnalyzer:
     - 不使用关键词匹配
     - 保守的 fallback（OTHER）
     
+    🆕 V9.0: 用户问题聚焦型过滤
+    - 意图识别只关注用户 query，过滤智能体回复和工具调用
+    - 时延约束 < 200ms，过滤逻辑 < 0.1ms（纯 CPU）
+    
     使用方式：
         analyzer = IntentAnalyzer(llm_service)
         result = await analyzer.analyze([{"role": "user", "content": "..."}])
         print(result.task_type)
     """
     
+    # 🆕 V9.0: 意图识别上下文过滤配置
+    MAX_USER_MESSAGES_FOR_INTENT = 5   # 最多保留 5 条用户消息
+    LAST_ASSISTANT_TRUNCATE = 100      # 最后一条 assistant 截断长度
+    
     def __init__(
         self,
         llm_service=None,
         enable_llm: bool = True,
-        prompt_cache=None  # InstancePromptCache
+        prompt_cache=None,  # InstancePromptCache
+        semantic_cache: Optional["IntentSemanticCache"] = None,  # 🆕 V9.3
+        enable_semantic_cache: bool = True  # 🆕 V9.3
     ):
         """
         初始化意图分析器
@@ -59,10 +81,37 @@ class IntentAnalyzer:
             llm_service: LLM 服务（用于意图分析）
             enable_llm: 是否启用 LLM 分析（False 则使用保守默认值）
             prompt_cache: InstancePromptCache（获取缓存的意图识别提示词）
+            semantic_cache: 语义缓存实例（可选，不提供则自动获取单例）
+            enable_semantic_cache: 是否启用语义缓存（默认 True）
         """
         self.llm = llm_service
         self.enable_llm = enable_llm and llm_service is not None
         self._prompt_cache = prompt_cache
+        
+        # 🆕 V9.3: 语义缓存
+        self._enable_semantic_cache = enable_semantic_cache
+        self._semantic_cache = semantic_cache  # 延迟初始化
+    
+    def _get_semantic_cache(self) -> Optional["IntentSemanticCache"]:
+        """
+        获取语义缓存实例（延迟初始化）
+        
+        Returns:
+            IntentSemanticCache 实例，禁用时返回 None
+        """
+        if not self._enable_semantic_cache:
+            return None
+        
+        if self._semantic_cache is None:
+            try:
+                from core.routing.intent_cache import get_intent_cache
+                self._semantic_cache = get_intent_cache()
+            except Exception as e:
+                logger.warning(f"⚠️ 语义缓存初始化失败: {e}")
+                self._enable_semantic_cache = False
+                return None
+        
+        return self._semantic_cache
     
     async def analyze(
         self,
@@ -72,6 +121,7 @@ class IntentAnalyzer:
         分析用户意图
         
         V5.0 策略：LLM-First，无关键词匹配
+        🆕 V9.3: 语义缓存优先，减少 LLM 调用
         
         Args:
             messages: 完整的消息列表（包含上下文）
@@ -79,12 +129,36 @@ class IntentAnalyzer:
         Returns:
             IntentResult 意图分析结果
         """
-        if self.enable_llm:
-            # 使用 LLM 进行分析
-            result = await self._analyze_with_llm(messages)
-        else:
-            # 使用保守默认值（不做关键词匹配）
-            result = self._get_conservative_default()
+        # 🆕 V9.3: 提取查询文本（用于缓存 key）
+        query_text = self._extract_query_for_cache(messages)
+        cache_hit = False
+        cache_score = 0.0
+        
+        # 🆕 V9.3: 先查询语义缓存
+        semantic_cache = self._get_semantic_cache()
+        if semantic_cache and query_text:
+            try:
+                cached_result, cache_score = await semantic_cache.lookup(query_text)
+                if cached_result and cache_score >= semantic_cache.config.threshold:
+                    cache_hit = True
+                    result = cached_result
+                    logger.info(
+                        f"✅ 语义缓存命中: score={cache_score:.4f}, "
+                        f"type={result.task_type.value}"
+                    )
+            except Exception as e:
+                logger.warning(f"⚠️ 语义缓存查询失败: {e}")
+        
+        # 缓存未命中，使用 LLM 分析
+        if not cache_hit:
+            if self.enable_llm:
+                result = await self._analyze_with_llm(messages)
+            else:
+                result = self._get_conservative_default()
+            
+            # 🆕 V9.3: 异步写入缓存（不阻塞主流程）
+            if semantic_cache and query_text:
+                asyncio.create_task(self._store_to_cache(semantic_cache, query_text, result))
         
         # 自动计算是否需要持久化
         result.needs_persistence = self._should_persist(result)
@@ -93,15 +167,50 @@ class IntentAnalyzer:
             f"🎯 意图分析结果: "
             f"type={result.task_type.value}, "
             f"complexity={result.complexity.value}, "
-            f"score={result.complexity_score:.1f}, "  # 🆕 V7.0
+            f"score={result.complexity_score:.1f}, "
             f"needs_plan={result.needs_plan}, "
             f"needs_persistence={result.needs_persistence}, "
             f"skip_memory={result.skip_memory_retrieval}, "
             f"needs_multi_agent={result.needs_multi_agent}, "
-            f"is_follow_up={result.is_follow_up}"
+            f"dependency_type={result.task_dependency_type}, "
+            f"is_follow_up={result.is_follow_up}, "
+            f"cache_hit={cache_hit}"  # 🆕 V9.3
         )
         
         return result
+    
+    def _extract_query_for_cache(self, messages: List[Dict[str, Any]]) -> str:
+        """
+        🆕 V9.3: 提取用于缓存的查询文本
+        
+        策略：使用最后一条用户消息作为缓存 key
+        
+        Args:
+            messages: 消息列表
+            
+        Returns:
+            查询文本
+        """
+        return self._extract_last_user_text(messages)
+    
+    async def _store_to_cache(
+        self,
+        cache: "IntentSemanticCache",
+        query: str,
+        result: IntentResult
+    ) -> None:
+        """
+        🆕 V9.3: 异步存储到语义缓存
+        
+        Args:
+            cache: 语义缓存实例
+            query: 查询文本
+            result: 意图分析结果
+        """
+        try:
+            await cache.store(query, result)
+        except Exception as e:
+            logger.warning(f"⚠️ 语义缓存存储失败: {e}")
     
     async def analyze_with_context(
         self,
@@ -176,6 +285,78 @@ class IntentAnalyzer:
         
         return False
     
+    def _filter_for_intent(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        🆕 V9.1: 为意图识别过滤消息（保留对话顺序，支持追问识别）
+        
+        规则：
+        1. 保留最近 N 轮对话（user + assistant 为一轮）
+        2. assistant 消息截断为摘要（避免过长）
+        3. 直接丢弃 tool_use/tool_result 内容
+        4. **保持对话的自然顺序**（关键！追问识别依赖此顺序）
+        
+        设计原则：
+        - 追问识别需要完整的上下文顺序
+        - 工具调用结果会污染上下文，影响意图准确率
+        - 时延约束 < 200ms，过滤逻辑必须轻量
+        
+        Args:
+            messages: 完整的消息列表
+            
+        Returns:
+            过滤后的消息列表（用于意图分析）
+        """
+        result = []
+        user_count = 0
+        
+        # 正向遍历，保持原始顺序
+        for msg in messages:
+            role = msg.get("role")
+            content = msg.get("content", "")
+            
+            # 跳过工具调用相关消息
+            if isinstance(content, list):
+                # 检查是否包含 tool_use 或 tool_result
+                has_tool = any(
+                    isinstance(block, dict) and block.get("type") in ("tool_use", "tool_result")
+                    for block in content
+                )
+                if has_tool:
+                    continue
+            
+            if role == "user":
+                user_count += 1
+                # 提取用户消息文本（处理 Claude API 格式）
+                text = self._extract_text(content)
+                if text:
+                    result.append({"role": "user", "content": text})
+                        
+            elif role == "assistant":
+                # 截断 assistant 消息
+                text = self._extract_text(content)
+                if text:
+                    truncated = text[:self.LAST_ASSISTANT_TRUNCATE]
+                    if len(text) > self.LAST_ASSISTANT_TRUNCATE:
+                        truncated += "..."
+                    result.append({"role": "assistant", "content": truncated})
+        
+        # 如果消息过多，只保留最近的 N 条用户消息相关的上下文
+        if user_count > self.MAX_USER_MESSAGES_FOR_INTENT:
+            # 从后往前保留，确保包含最近的对话轮次
+            kept_user_count = 0
+            filtered_result = []
+            for msg in reversed(result):
+                if msg["role"] == "user":
+                    kept_user_count += 1
+                if kept_user_count <= self.MAX_USER_MESSAGES_FOR_INTENT:
+                    filtered_result.insert(0, msg)
+                elif msg["role"] == "assistant" and kept_user_count == self.MAX_USER_MESSAGES_FOR_INTENT + 1:
+                    # 保留上一轮的 assistant（作为上下文）
+                    filtered_result.insert(0, msg)
+            result = filtered_result
+        
+        return result
+    
     def _extract_last_user_text(self, messages: List[Dict[str, Any]]) -> str:
         """从消息列表中提取最后一条 user 消息的文本"""
         for msg in reversed(messages):
@@ -244,19 +425,21 @@ class IntentAnalyzer:
         from core.llm import Message
         
         try:
-            # 截断消息，保留最近的
-            max_messages_for_intent = 30
-            truncated_messages = messages[-max_messages_for_intent:] if len(messages) > max_messages_for_intent else messages
+            # 🆕 V9.0: 用户问题聚焦型过滤（替代简单截断）
+            # 规则：只保留用户消息 + 最后一条 assistant 摘要
+            # 时延：< 0.1ms（纯 CPU）
+            intent_messages = self._filter_for_intent(messages)
             
-            if len(truncated_messages) < len(messages):
+            if len(intent_messages) < len(messages):
                 logger.info(
-                    f"📝 意图分析: 截断消息 {len(messages)} → {len(truncated_messages)} 条"
+                    f"📝 意图分析: 过滤 {len(messages)} → {len(intent_messages)} 条 "
+                    f"(user={sum(1 for m in intent_messages if m['role']=='user')})"
                 )
             
             # 转换消息格式
             llm_messages = [
                 Message(role=msg["role"], content=msg["content"])
-                for msg in truncated_messages
+                for msg in intent_messages
             ]
             
             # 🆕 V6.3: 使用多层缓存格式（意图识别提示词缓存，Claude 固定 5 分钟）
@@ -317,12 +500,16 @@ class IntentAnalyzer:
         needs_plan = True
         skip_memory_retrieval = False
         needs_multi_agent = False  # 🆕 V6.0: 默认不需要 Multi-Agent
+        task_dependency_type = "sequential"  # 🆕 V9.2: 默认串行依赖
         is_follow_up = False       # 🆕 V6.1: 默认不是追问（视为新话题）
         
         # 🆕 V7.8: LLM 语义建议字段
         suggested_planning_depth = None
         requires_deep_reasoning = False
         tool_usage_hint = None
+        
+        # 🆕 V8.0: 执行策略
+        execution_strategy = "rvr"  # 默认标准执行循环
         
         # 使用 JSON 提取器解析 LLM 响应
         parsed = extract_json(content)
@@ -365,6 +552,13 @@ class IntentAnalyzer:
             # 🆕 V6.0: 解析 needs_multi_agent
             needs_multi_agent = parsed.get("needs_multi_agent", False)
             
+            # 🆕 V9.2: 解析 task_dependency_type（任务依赖类型）
+            raw_dependency_type = parsed.get("task_dependency_type", "sequential")
+            if raw_dependency_type in ("independent", "sequential", "mixed"):
+                task_dependency_type = raw_dependency_type
+            else:
+                task_dependency_type = "sequential"  # 保守默认值
+            
             # 🆕 V6.1: 解析 is_follow_up（上下文追问识别）
             is_follow_up = parsed.get("is_follow_up", False)
             
@@ -384,10 +578,18 @@ class IntentAnalyzer:
             if raw_tool_hint in ("single", "sequential", "parallel"):
                 tool_usage_hint = raw_tool_hint
             
+            # 🆕 V8.0: execution_strategy（必填）
+            raw_strategy = parsed.get("execution_strategy", "rvr")
+            if raw_strategy in ("rvr", "rvr-b"):
+                execution_strategy = raw_strategy
+            else:
+                execution_strategy = "rvr"  # 默认值
+            
             logger.debug(
                 f"   V7.8 语义建议: planning={suggested_planning_depth}, "
                 f"deep_reasoning={requires_deep_reasoning}, "
-                f"tools={tool_usage_hint}"
+                f"tools={tool_usage_hint}, "
+                f"strategy={execution_strategy}"
             )
         else:
             logger.warning(f"无法从 LLM 响应中提取 JSON: {content[:100]}...")
@@ -399,13 +601,14 @@ class IntentAnalyzer:
             needs_plan=needs_plan,
             skip_memory_retrieval=skip_memory_retrieval,
             needs_multi_agent=needs_multi_agent,
+            task_dependency_type=task_dependency_type,  # 🆕 V9.2
             is_follow_up=is_follow_up,
-            keywords=[],  # V5.0: 不再提取关键词
-            raw_response=content,
             # 🆕 V7.8: LLM 语义建议
             suggested_planning_depth=suggested_planning_depth,
             requires_deep_reasoning=requires_deep_reasoning,
             tool_usage_hint=tool_usage_hint,
+            # 🆕 V8.0: 执行策略
+            execution_strategy=execution_strategy,
         )
     
     def _infer_score_from_complexity(self, complexity: Complexity) -> float:
@@ -433,6 +636,7 @@ class IntentAnalyzer:
         🆕 V6.0: 默认不需要 Multi-Agent
         🆕 V6.1: 默认不是追问（视为新话题）
         🆕 V7.0: 默认复杂度评分 5.0
+        🆕 V9.2: 默认任务依赖类型为 sequential
         
         Returns:
             IntentResult（保守默认值）
@@ -445,6 +649,7 @@ class IntentAnalyzer:
             needs_plan=True,
             skip_memory_retrieval=False,
             needs_multi_agent=False,  # 🆕 V6.0: 默认不需要
+            task_dependency_type="sequential",  # 🆕 V9.2: 默认串行
             is_follow_up=False,       # 🆕 V6.1: 默认不是追问
             keywords=[],
             confidence=0.3  # 低置信度，标记这是默认值
@@ -454,7 +659,9 @@ class IntentAnalyzer:
 def create_intent_analyzer(
     llm_service=None,
     enable_llm: bool = True,
-    prompt_cache=None  # InstancePromptCache
+    prompt_cache=None,  # InstancePromptCache
+    semantic_cache=None,  # IntentSemanticCache
+    enable_semantic_cache: bool = True  # 🆕 V9.3
 ) -> IntentAnalyzer:
     """
     创建意图分析器
@@ -463,6 +670,8 @@ def create_intent_analyzer(
         llm_service: LLM 服务
         enable_llm: 是否启用 LLM 分析
         prompt_cache: InstancePromptCache（获取缓存的意图识别提示词）
+        semantic_cache: IntentSemanticCache（语义缓存，可选）
+        enable_semantic_cache: 是否启用语义缓存（默认 True）
         
     Returns:
         IntentAnalyzer 实例
@@ -470,5 +679,7 @@ def create_intent_analyzer(
     return IntentAnalyzer(
         llm_service=llm_service,
         enable_llm=enable_llm,
-        prompt_cache=prompt_cache
+        prompt_cache=prompt_cache,
+        semantic_cache=semantic_cache,
+        enable_semantic_cache=enable_semantic_cache
     )

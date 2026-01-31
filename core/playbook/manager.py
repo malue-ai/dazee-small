@@ -2,6 +2,7 @@
 PlaybookManager - 策略库管理器
 
 V8.0 新增
+V9.4 增强：支持数据库存储后端
 
 职责：
 - 从成功会话中提取策略模式
@@ -12,10 +13,18 @@ V8.0 新增
 1. 自动提取：从 RewardAttribution 高分会话中提取
 2. 人工创建：运营人员手动添加
 3. 导入：从外部系统导入
+
+存储后端（V9.4）：
+- file: 文件存储（默认，向后兼容）
+- database: 数据库存储（PostgreSQL/SQLite）
+
+配置方式：
+    export PLAYBOOK_STORAGE_BACKEND=database  # 启用数据库存储
 """
 
 import json
 import hashlib
+import os
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from enum import Enum
@@ -179,38 +188,57 @@ class PlaybookManager:
         storage_path: str = "./workspace/playbooks",
         auto_save: bool = True,
         min_reward_threshold: float = 0.7,
-        llm_service = None
+        llm_service = None,
+        storage_backend: str = None  # 🆕 V9.4: "file" | "database"
     ):
         """
         初始化策略库管理器
         
         Args:
-            storage_path: 存储路径
+            storage_path: 存储路径（文件模式）
             auto_save: 是否自动保存
             min_reward_threshold: 最低奖励阈值（用于自动提取）
             llm_service: LLM 服务（用于策略提取）
+            storage_backend: 存储后端类型（file/database），默认从环境变量读取
         """
         self.storage_path = Path(storage_path)
-        self.storage_path.mkdir(parents=True, exist_ok=True)
-        
         self.auto_save = auto_save
         self.min_reward_threshold = min_reward_threshold
         self.llm = llm_service
         
+        # 🆕 V9.4: 存储后端
+        self._storage_backend = storage_backend or os.getenv("PLAYBOOK_STORAGE_BACKEND", "file")
+        self._storage = None  # 延迟初始化
+        
         # 内存缓存
         self._entries: Dict[str, PlaybookEntry] = {}
+        self._loaded = False
         
-        # 加载已有策略
-        self._load_all()
+        # 文件模式需要创建目录
+        if self._storage_backend == "file":
+            self.storage_path.mkdir(parents=True, exist_ok=True)
         
         logger.info(
             f"✅ PlaybookManager 初始化: "
-            f"storage={storage_path}, "
-            f"entries={len(self._entries)}"
+            f"backend={self._storage_backend}, "
+            f"storage={storage_path if self._storage_backend == 'file' else 'database'}"
         )
     
+    def _get_storage(self):
+        """获取存储后端（延迟初始化）"""
+        if self._storage is None:
+            from core.playbook.storage import create_storage_backend
+            self._storage = create_storage_backend(
+                backend_type=self._storage_backend,
+                storage_path=str(self.storage_path)
+            )
+        return self._storage
+    
     def _load_all(self):
-        """加载所有策略"""
+        """加载所有策略（同步版本，仅文件模式）"""
+        if self._storage_backend != "file":
+            return  # 数据库模式使用异步加载
+        
         index_file = self.storage_path / "index.json"
         if not index_file.exists():
             return
@@ -226,14 +254,41 @@ class PlaybookManager:
                         data = json.load(f)
                     self._entries[entry_id] = PlaybookEntry.from_dict(data)
             
+            self._loaded = True
             logger.info(f"📚 加载 {len(self._entries)} 个策略条目")
         except Exception as e:
             logger.error(f"❌ 加载策略库失败: {e}")
     
+    async def load_all_async(self):
+        """
+        🆕 V9.4: 异步加载所有策略（支持数据库模式）
+        
+        使用方式：
+            await manager.load_all_async()
+        """
+        if self._loaded:
+            return
+        
+        try:
+            storage = self._get_storage()
+            entries_data = await storage.list_all()
+            
+            for data in entries_data:
+                entry = PlaybookEntry.from_dict(data)
+                self._entries[entry.id] = entry
+            
+            self._loaded = True
+            logger.info(f"📚 异步加载 {len(self._entries)} 个策略条目 (backend={self._storage_backend})")
+        except Exception as e:
+            logger.error(f"❌ 异步加载策略库失败: {e}")
+    
     def _save_entry(self, entry: PlaybookEntry):
-        """保存单个策略"""
+        """保存单个策略（同步版本，仅文件模式）"""
         if not self.auto_save:
             return
+        
+        if self._storage_backend != "file":
+            return  # 数据库模式使用异步保存
         
         entry_file = self.storage_path / f"{entry.id}.json"
         with open(entry_file, "w", encoding="utf-8") as f:
@@ -242,8 +297,25 @@ class PlaybookManager:
         # 更新索引
         self._save_index()
     
+    async def _save_entry_async(self, entry: PlaybookEntry):
+        """
+        🆕 V9.4: 异步保存策略（支持数据库模式）
+        """
+        if not self.auto_save:
+            return
+        
+        try:
+            storage = self._get_storage()
+            await storage.save(entry.id, entry.to_dict())
+            await self._save_index_async()
+        except Exception as e:
+            logger.error(f"❌ 异步保存策略失败: {e}")
+    
     def _save_index(self):
-        """保存索引"""
+        """保存索引（同步版本，仅文件模式）"""
+        if self._storage_backend != "file":
+            return
+        
         index_file = self.storage_path / "index.json"
         index = {
             "entries": list(self._entries.keys()),
@@ -262,6 +334,29 @@ class PlaybookManager:
         }
         with open(index_file, "w", encoding="utf-8") as f:
             json.dump(index, f, ensure_ascii=False, indent=2)
+    
+    async def _save_index_async(self):
+        """🆕 V9.4: 异步保存索引"""
+        try:
+            storage = self._get_storage()
+            index = {
+                "entries": list(self._entries.keys()),
+                "updated_at": datetime.now().isoformat(),
+                "stats": {
+                    "total": len(self._entries),
+                    "approved": sum(
+                        1 for e in self._entries.values()
+                        if e.status == PlaybookStatus.APPROVED
+                    ),
+                    "pending": sum(
+                        1 for e in self._entries.values()
+                        if e.status == PlaybookStatus.PENDING_REVIEW
+                    ),
+                }
+            }
+            await storage.save_index(index)
+        except Exception as e:
+            logger.warning(f"⚠️ 异步保存索引失败: {e}")
     
     def _generate_id(self, name: str, session_id: str = None) -> str:
         """生成策略 ID"""
@@ -641,11 +736,32 @@ class PlaybookManager:
 def create_playbook_manager(
     storage_path: str = "./workspace/playbooks",
     llm_service = None,
+    storage_backend: str = None,
     **kwargs
 ) -> PlaybookManager:
-    """创建策略库管理器"""
+    """
+    创建策略库管理器
+    
+    Args:
+        storage_path: 存储路径（文件模式）
+        llm_service: LLM 服务
+        storage_backend: 存储后端类型（file/database）
+        **kwargs: 其他参数
+        
+    Returns:
+        PlaybookManager 实例
+        
+    使用示例：
+        # 文件存储（默认）
+        manager = create_playbook_manager()
+        
+        # 数据库存储
+        manager = create_playbook_manager(storage_backend="database")
+        await manager.load_all_async()  # 异步加载
+    """
     return PlaybookManager(
         storage_path=storage_path,
         llm_service=llm_service,
+        storage_backend=storage_backend,
         **kwargs
     )

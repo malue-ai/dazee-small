@@ -12,6 +12,7 @@ from .token_budget import (
     MultiAgentTokenBudget,
     BudgetCheckResult,
     create_token_budget,
+    get_token_budget,
 )
 
 from .token_audit import (
@@ -27,6 +28,7 @@ __all__ = [
     "MultiAgentTokenBudget",
     "BudgetCheckResult",
     "create_token_budget",
+    "get_token_budget",
     # Token Audit
     "TokenAuditor",
     "get_token_auditor",

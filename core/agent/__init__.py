@@ -77,11 +77,8 @@ from core.agent.factory import (
     create_schema_from_dict
 )
 
-# 意图分析器
-from core.agent.intent_analyzer import (
-    IntentAnalyzer,
-    create_intent_analyzer
-)
+# 🆕 V9.0: IntentAnalyzer 已移至 core/routing/intent_analyzer.py
+# 意图识别由路由层统一处理，SimpleAgent 不再内部做意图分析
 
 # Schema（强类型配置）
 from core.schemas import (
@@ -145,9 +142,6 @@ __all__ = [
     "OutputFormatterConfig",
     "SkillConfig",
     "ContextLimitsConfig",
-    
-    # 意图分析
-    "IntentAnalyzer",
-    "create_intent_analyzer",
+    # 🆕 V9.0: IntentAnalyzer 已移至 core/routing，从 core.routing 导入
 ]
 
