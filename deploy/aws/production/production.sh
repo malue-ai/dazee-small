@@ -777,28 +777,42 @@ rollback_service() {
     
     # 创建新的任务定义
     local new_task_def=""
+    # 临时文件用于存储错误日志
+    local describe_error_log=$(mktemp)
+    
     new_task_def=$(aws ecs describe-task-definition \
         --task-definition "$current_task_def" \
         --region "$REGION" \
-        --query 'taskDefinition' 2>/dev/null | \
-        jq --arg IMAGE "$ecr_uri" '.containerDefinitions[0].image = $IMAGE | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' 2>/dev/null) || new_task_def=""
+        --query 'taskDefinition' 2> "$describe_error_log" | \
+        jq --arg IMAGE "$ecr_uri" '.containerDefinitions[0].image = $IMAGE | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' 2>> "$describe_error_log") || new_task_def=""
     
     if [ -z "$new_task_def" ] || [ "$new_task_def" = "null" ]; then
         log_error "无法创建新任务定义"
+        log_error "错误详情:"
+        cat "$describe_error_log"
+        rm -f "$describe_error_log"
         exit 1
     fi
+    rm -f "$describe_error_log"
     
     local new_task_def_arn=""
+    # 临时文件用于存储错误日志
+    local error_log=$(mktemp)
+    
     new_task_def_arn=$(echo "$new_task_def" | aws ecs register-task-definition \
         --region "$REGION" \
         --cli-input-json file:///dev/stdin \
         --query 'taskDefinition.taskDefinitionArn' \
-        --output text 2>/dev/null) || new_task_def_arn=""
+        --output text 2> "$error_log") || new_task_def_arn=""
     
     if [ -z "$new_task_def_arn" ] || [ "$new_task_def_arn" = "None" ]; then
         log_error "无法注册新任务定义"
+        log_error "AWS CLI 错误信息:"
+        cat "$error_log"
+        rm -f "$error_log"
         exit 1
     fi
+    rm -f "$error_log"
     
     log_info "新任务定义: $new_task_def_arn"
     

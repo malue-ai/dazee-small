@@ -51,6 +51,8 @@ class ConfirmationRequest:
     
     def is_expired(self) -> bool:
         """检查请求是否已过期"""
+        if self.timeout is None or self.timeout <= 0:
+            return False
         return datetime.now() > self.created_at + timedelta(seconds=self.timeout)
     
     async def wait(self, timeout: Optional[float] = None) -> str:

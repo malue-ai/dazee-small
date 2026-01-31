@@ -160,7 +160,7 @@ class HITLTool(BaseTool):
         description = params.get("description", "")
         # 🆕 AI 可以传 timeout 参数，但代码暂不启用超时逻辑
         # timeout = params.get("timeout", FORM_TIMEOUT)
-        timeout = None  # 暂时禁用超时，无限等待用户响应
+        timeout = 0  # 暂时禁用超时，无限等待用户响应 (0 = 无限)
         # 🆕 超时时是否使用默认值（默认 True）- 暂不使用
         use_default_on_timeout = params.get("use_default_on_timeout", True)
         

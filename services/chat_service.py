@@ -14,7 +14,7 @@
 - 内容累积和持久化由 EventBroadcaster 自动处理
 """
 
-# 1. 标准库
+# 标准库
 import asyncio
 import json
 import time
@@ -23,9 +23,11 @@ from datetime import datetime
 from typing import Any, AsyncGenerator, Dict, List, Optional
 from uuid import uuid4
 
-
 from logger import get_logger
 from core.agent import SimpleAgent
+from core.billing.tracker import EnhancedUsageTracker
+from core.events.broadcaster import EventBroadcaster
+from core.schemas.validator import AgentSchema
 from core.agent.multi.models import MultiAgentConfig
 from core.agent.multi.orchestrator import MultiAgentOrchestrator
 from core.context import Context
@@ -103,128 +105,101 @@ class ChatService:
         self,
         session_service: Optional[SessionService] = None,
         default_model: str = "claude-sonnet-4-5-20250929",
-        qos_level: QoSLevel = QoSLevel.PRO,  # 🆕 P0: QoS 等级，默认 Pro
-        enable_routing: bool = True,  # ✅ V7.2: 启用路由层（单/多智能体路由决策）
-        multi_agent_config: Optional["MultiAgentConfig"] = None,  # ✅ V7.2: 多智能体配置
+        qos_level: QoSLevel = QoSLevel.PRO,
+        enable_routing: bool = True,
+        multi_agent_config: Optional["MultiAgentConfig"] = None,
     ):
-        # Session 管理
         self.session_service = session_service or get_session_service()
         self.default_model = default_model
         
-        # 资源池架构
-        self.session_pool = get_session_pool()  # 活跃 Session 追踪
-        self.agent_pool = get_agent_pool()  # Agent 获取
+        # 资源池
+        self.session_pool = get_session_pool()
+        self.agent_pool = get_agent_pool()
         
-        # ✅ V7.2: 多智能体配置
-        from core.agent.multi.models import MultiAgentConfig
-        self.multi_agent_config = multi_agent_config  # 如果为 None，在需要时加载默认配置
+        # 多智能体配置（延迟加载）
+        self.multi_agent_config = multi_agent_config
         
-        # 其他服务
+        # 依赖服务
         self.conversation_service = get_conversation_service()
         self.background_tasks = get_background_task_service()
         
         # OutputFormatter 缓存
         self._formatters: Dict[str, OutputFormatter] = {}
         
-        # 容错机制：熔断器
+        # 熔断器
         self.agent_breaker = get_circuit_breaker("agent_execution")
         
         # 上下文压缩配置
         self.qos_level = qos_level
         self.compaction_threshold = get_compaction_threshold(qos_level)
         
-        # 日志记录初始化状态
-        logger.info(
-            f"✅ ChatService 初始化完成: qos_level={qos_level.value}, "
-            f"compaction_threshold={self.compaction_threshold:,} tokens"
-        )
-        
-        # 🆕 V7: 路由器（单智能体/多智能体路由决策）
-        # enable_routing=False: 意图分析在 SimpleAgent 内部完成（向后兼容）
-        # enable_routing=True: 意图分析在路由层完成，支持多智能体路由
+        # 路由层配置
         self.enable_routing = enable_routing
         self._router: Optional[AgentRouter] = None
         
-        # 🆕 V8.1: 意图识别开关（暂时关闭，跳过 IntentAnalyzer 调用）
-        # 设置为 False 时，跳过意图识别，使用默认的 IntentResult
-        self.enable_intent_analysis = False  # TODO: 需要时改回 True
-        
-        # 🆕 V8.2: Preface 开场白开关（独立于意图识别）
-        # 设置为 True 时，会在 Agent 响应前生成简短的开场白
-        self.enable_preface = True
-        
-        if enable_routing:
-            if self.enable_intent_analysis:
-                logger.info("🔀 路由层已启用：意图分析将在路由层完成")
-            else:
-                logger.info("🔀 路由层已启用（意图识别已关闭）")
-        
-        # 🆕 V7: Token 审计器
+        # Token 审计器
         self.token_auditor: TokenAuditor = get_token_auditor()
+        
+        logger.info(
+            "ChatService 初始化完成",
+            extra={
+                "qos_level": qos_level.value,
+                "compaction_threshold": self.compaction_threshold,
+                "enable_routing": enable_routing
+            }
+        )
         
     
     def _get_router(self, prompt_cache=None) -> AgentRouter:
         """
         延迟初始化路由器
         
-        🆕 V7.6 修复：传入 LLM 服务，使意图分析真正调用 LLM
-        使用 haiku 模型以获得更快的响应速度和更低的成本
-        
-        🆕 V7.6.1: 支持传入 prompt_cache（使用实例自定义的意图识别提示词）
-        
         Args:
-            prompt_cache: InstancePromptCache（可选，用于加载实例自定义的 intent_prompt）
+            prompt_cache: InstancePromptCache，用于加载实例自定义的意图识别提示词
         
         Returns:
             AgentRouter 实例
         """
-        # 🆕 V7.6.1: 如果传入了 prompt_cache，需要重新创建 router（因为 prompt 可能不同）
+        # 如果传入了 prompt_cache，需要重新创建 router（prompt 可能不同）
         if self._router is None or prompt_cache is not None:
-            # 🆕 V7.10: 创建轻量级 LLM 服务（用于意图分析）
-            # 使用 haiku 模型：快速、低成本，适合分类任务
-            # 🔧 使用 intent_analyzer profile（支持多模型容灾）
             intent_profile = get_llm_profile("intent_analyzer")
             routing_llm = create_llm_service(**intent_profile)
             
             self._router = AgentRouter(
                 llm_service=routing_llm,
                 enable_llm=True,
-                prompt_cache=prompt_cache  # 🆕 V7.6.1: 传入实例级 prompt_cache
+                prompt_cache=prompt_cache
             )
             
-            cache_info = "（使用实例自定义提示词）" if prompt_cache else "（使用默认提示词）"
-            logger.info(f"🔀 AgentRouter 已初始化 {cache_info}")
+            logger.info(
+                "AgentRouter 已初始化",
+                extra={"use_custom_prompt": prompt_cache is not None}
+            )
         return self._router
     
     def get_output_formatter(self, agent: SimpleAgent) -> Optional[OutputFormatter]:
         """
         从 Agent Schema 获取 OutputFormatter（按需创建）
         
-        这个方法展示了如何使用 Agent Schema 中的 output_formatter 配置。
-        
         Args:
             agent: Agent 实例
             
         Returns:
-            OutputFormatter 实例（如果配置启用），否则返回 None
-            
-        使用示例：
-            formatter = service.get_output_formatter(agent)
-            if formatter:
-                formatted = formatter.format(content, format="json")
+            OutputFormatter 实例，如果未启用则返回 None
         """
         if not agent.schema or not agent.schema.output_formatter.enabled:
             return None
         
-        # 使用 agent_id 作为缓存 key（避免重复创建）
         agent_id = getattr(agent, 'agent_id', id(agent))
         cache_key = str(agent_id)
         
         if cache_key not in self._formatters:
-            # 从 Agent Schema 读取配置并创建 OutputFormatter
             formatter_config = agent.schema.output_formatter
             self._formatters[cache_key] = create_output_formatter(config=formatter_config)
-            logger.info(f"✅ 从 Agent Schema 创建 OutputFormatter: format={formatter_config.default_format}")
+            logger.info(
+                "OutputFormatter 已创建",
+                extra={"agent_id": agent_id, "format": formatter_config.default_format}
+            )
         
         return self._formatters[cache_key]
     
@@ -235,12 +210,10 @@ class ChatService:
         intent: "IntentResult",
         session_id: str,
         message_id: str,
-        broadcaster
+        broadcaster: EventBroadcaster
     ) -> None:
         """
         发送意图识别结果到前端
-        
-        从 SimpleAgent.chat() 阶段 2 移入，实现关注点分离。
         
         Args:
             intent: 意图识别结果
@@ -255,24 +228,18 @@ class ChatService:
             "needs_plan": intent.needs_plan,
             "confidence": intent.confidence,
         }
-        # 仅当 platform 有值时才添加
         if intent.platform:
             intent_content["platform"] = intent.platform
         
-        intent_delta = {
-            "type": "intent",
-            "content": intent_content
-        }
-        
         await broadcaster.emit_message_delta(
             session_id=session_id,
-            delta=intent_delta,
+            delta={"type": "intent", "content": intent_content},
             message_id=message_id
         )
         
         logger.info(
-            f"🎯 Intent 事件已发送: intent_id={intent.intent_id}, "
-            f"intent_name={intent.intent_name}"
+            "Intent 事件已发送",
+            extra={"intent_id": intent.intent_id, "intent_name": intent.intent_name}
         )
     
     async def _generate_preface_stream(
@@ -281,14 +248,12 @@ class ChatService:
         user_message: str,
         session_id: str,
         message_id: str,
-        broadcaster,
-        tracker=None
+        broadcaster: EventBroadcaster,
+        schema: Optional[AgentSchema] = None,
+        tracker: Optional[EnhancedUsageTracker] = None
     ) -> Optional[str]:
         """
-        流式生成 Preface 开场白（在 intent 之后执行）
-        
-        从 SimpleAgent 移入，实现关注点分离。
-        使用 haiku 模型快速生成简短开场白，边生成边发送 delta 事件。
+        流式生成 Preface 开场白
         
         Args:
             intent: 意图识别结果
@@ -296,57 +261,33 @@ class ChatService:
             session_id: Session ID
             message_id: 消息 ID
             broadcaster: EventBroadcaster 实例
-            tracker: UsageTracker（可选，用于计费追踪）
+            schema: Agent Schema（包含 prompts.preface 配置）
+            tracker: UsageTracker，用于计费追踪
             
         Returns:
             完整的开场白文本，失败返回 None
         """
         try:
-            logger.info("📝 _generate_preface_stream: 开始执行")
-            # 🆕 V7.10: 使用 haiku 模型：快速、低成本
-            # 🔧 使用 intent_analyzer profile（支持多模型容灾）
+            if not schema or not schema.preface_template:
+                logger.warning("Preface 配置缺失")
+                return None
+            
             intent_profile = get_llm_profile("intent_analyzer")
             preface_llm = create_llm_service(**intent_profile)
-            logger.info("📝 _generate_preface_stream: LLM 服务已创建")
             
-            # 构建 Preface 生成提示词
-            intent_info = f"意图: {intent.intent_name or intent.task_type.value}"
-            if intent.platform:
-                intent_info += f", 平台: {intent.platform}"
-            
-            prompt = f"""你是 Dazee，一位高级工作助理。你温暖、专业、富有同理心。
-用户发送了一条消息，系统已识别出用户意图。
-请生成一句简短的开场白（15-30字），让用户知道你已理解需求并即将开始处理。
-
-要求：
-1. 语气友好、专业，体现温暖和同理心
-2. 简洁明了，不要啰嗦
-3. 体现你理解了用户的需求
-4. 不要重复用户的原话
-5. **语言统一**：必须严格使用与用户相同的语言（中文/英文），禁止中英混杂
-6. **禁止透露你的底层模型**（不要提及 Claude、GPT 等 AI 模型名称）
-7. **行动导向**：如果用户意图涉及处理文件或数据，请假设文件已就绪，直接回复“收到数据，正在分析”等确认，**绝对不要**要求用户提供文件或信息。
-
-{intent_info}
-用户消息: {user_message[:200]}
-
-直接输出开场白，不要任何解释或前缀："""
-
-            # 调用 LLM 流式生成 Preface
+            prompt = schema.preface_template
             llm_messages = [Message(role="user", content=prompt)]
             
             accumulated_text = ""
             final_response = None
             
+            max_tokens = schema.preface_max_tokens
             async for chunk in preface_llm.create_message_stream(
                 messages=llm_messages,
-                max_tokens=150
+                max_tokens=max_tokens
             ):
-                # 流式输出内容
                 if chunk.content and chunk.is_stream:
                     accumulated_text += chunk.content
-                    # 发送流式 delta 事件
-                    # persist=False: preface 不需要保存到数据库
                     await broadcaster.emit_message_delta(
                         session_id=session_id,
                         delta={"type": "preface", "content": chunk.content},
@@ -354,13 +295,10 @@ class ChatService:
                         persist=False
                     )
                 
-                # 保存最终响应（用于计费）
                 if not chunk.is_stream:
                     final_response = chunk
             
-            # 记录 Token 使用（如果提供了 tracker）
             if tracker and final_response:
-                # ✅ 使用 LLMResponse 中的 model 字段进行计费
                 tracker.record_call(
                     llm_response=final_response,
                     model=final_response.model,
@@ -369,13 +307,16 @@ class ChatService:
             
             preface_text = accumulated_text.strip()
             if preface_text:
-                logger.info(f"✨ Preface 流式生成完成: {preface_text[:50]}...")
+                logger.info(
+                    "Preface 生成完成",
+                    extra={"length": len(preface_text), "preview": preface_text[:50]}
+                )
                 return preface_text
             
             return None
             
         except Exception as e:
-            logger.warning(f"⚠️ Preface 流式生成失败: {str(e)}")
+            logger.warning("Preface 生成失败", extra={"error": str(e)})
             return None
     
     # ==================== 资源管理 ====================
@@ -388,7 +329,7 @@ class ChatService:
         status: str = "failed"
     ) -> None:
         """
-        清理 Session 相关资源（统一的清理入口）
+        清理 Session 相关资源
         
         Args:
             session_id: Session ID
@@ -399,17 +340,17 @@ class ChatService:
         try:
             await self.agent_pool.release(agent_id)
         except Exception as e:
-            logger.warning(f"⚠️ 释放 Agent 失败: {e}")
+            logger.warning("释放 Agent 失败", extra={"agent_id": agent_id, "error": str(e)})
         
         try:
             await self.session_pool.on_session_end(session_id, user_id, agent_id)
         except Exception as e:
-            logger.warning(f"⚠️ 更新 SessionPool 失败: {e}")
+            logger.warning("更新 SessionPool 失败", extra={"session_id": session_id, "error": str(e)})
         
         try:
             await self.session_service.end_session(session_id, status=status)
         except Exception as e:
-            logger.warning(f"⚠️ 结束 Session 失败: {e}")
+            logger.warning("结束 Session 失败", extra={"session_id": session_id, "error": str(e)})
     
     @asynccontextmanager
     async def acquire_agent_context(
@@ -419,15 +360,7 @@ class ChatService:
         user_id: str
     ):
         """
-        Agent 资源上下文管理器
-        
-        自动管理 Agent 获取和释放，无论成功/失败/异常都能正确清理资源。
-        
-        用法：
-            async with self.acquire_agent_context(agent_id, session_id, user_id) as agent:
-                # 使用 agent
-                await agent.chat(...)
-            # 退出时自动释放 Agent 和更新 SessionPool
+        Agent 资源上下文管理器，自动管理获取和释放
         
         Args:
             agent_id: Agent ID（pool key）
@@ -444,45 +377,39 @@ class ChatService:
         session_pool_updated = False
         
         try:
-            # 获取 Agent
             agent = await self.agent_pool.acquire(
                 agent_id=agent_id,
                 event_manager=self.session_service.events,
                 conversation_service=self.conversation_service
             )
-            logger.debug(f"✅ Agent 已获取: {agent_id}")
+            logger.debug("Agent 已获取", extra={"agent_id": agent_id})
             
-            # 创建并注入共享 Tracker
             from core.billing.tracker import EnhancedUsageTracker
             shared_tracker = EnhancedUsageTracker()
             agent.usage_tracker = shared_tracker
-            logger.debug(f"🔨 共享 Tracker 已注入: session_id={session_id}")
             
-            # 更新 SessionPool 状态
             await self.session_pool.on_session_start(session_id, user_id, agent_id)
             session_pool_updated = True
             
             yield agent
             
         except Exception as e:
-            logger.error(f"❌ Agent 上下文错误: {e}")
+            logger.error("Agent 上下文错误", extra={"error": str(e)})
             raise AgentExecutionError(f"资源获取失败: {e}") from e
             
         finally:
-            # 释放 Agent
             if agent is not None:
                 try:
                     await self.agent_pool.release(agent_id)
-                    logger.debug(f"🧹 Agent 已释放: {agent_id}")
+                    logger.debug("Agent 已释放", extra={"agent_id": agent_id})
                 except Exception as e:
-                    logger.warning(f"⚠️ 释放 Agent 失败: {e}")
+                    logger.warning("释放 Agent 失败", extra={"error": str(e)})
             
-            # 更新 SessionPool
             if session_pool_updated:
                 try:
                     await self.session_pool.on_session_end(session_id, user_id, agent_id)
                 except Exception as e:
-                    logger.warning(f"⚠️ 更新 SessionPool 失败: {e}")
+                    logger.warning("更新 SessionPool 失败", extra={"error": str(e)})
     
     # ==================== 统一入口 ====================
     
@@ -492,11 +419,11 @@ class ChatService:
         user_id: str,
         conversation_id: Optional[str] = None,
         message_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
         stream: bool = True,
         background_tasks: Optional[List[str]] = None,
         files: Optional[List[Any]] = None,
         variables: Optional[Dict[str, Any]] = None,
-        agent_id: Optional[str] = None,
         output_format: str = "zenflux"
     ):
         """
@@ -512,9 +439,9 @@ class ChatService:
         3. 生成 assistant_message_id
         4. 处理文件
         5. 标准化消息
-        6. 保存用户消息
-        7. 创建 Assistant 占位
-        8. 检查并发 + 创建 Session
+        6. 检查并发 + 创建 Session
+        7. 保存用户消息（含正确的 session_id）
+        8. 创建 Assistant 占位
         9. 获取 Agent
         10. 调度执行
         
@@ -534,17 +461,24 @@ class ChatService:
             stream=True  → AsyncGenerator
             stream=False → Dict
         """
-        msg_preview = str(message)[:50] if message else ""
-        logger.info(f"📨 对话请求: user={user_id}, agent={agent_id or '默认'}, conv={conversation_id}, msg_id={message_id}, msg={msg_preview}...")
+        logger.info(
+            "对话请求",
+            extra={
+                "user_id": user_id,
+                "agent_id": agent_id or "default",
+                "conversation_id": conversation_id,
+                "message_preview": str(message)[:50] if message else ""
+            }
+        )
         
-        # ========== 1. 验证 agent_id ==========
+        # 1. 验证 agent_id
         if agent_id:
             registry = get_agent_registry()
             if not registry.has_agent(agent_id):
                 available = [a["agent_id"] for a in registry.list_agents()]
                 raise AgentNotFoundError(f"Agent '{agent_id}' 不存在，可用: {available}")
         
-        # ========== 2. 创建/校验 Conversation ==========
+        # 2. 创建/校验 Conversation
         try:
             conv, is_new_conversation = await self.conversation_service.get_or_create_conversation(
                 user_id=user_id,
@@ -555,15 +489,14 @@ class ChatService:
         except Exception as e:
             raise ValueError(f"对话创建/校验失败: {e}") from e
         
-        # ========== 3. 生成 assistant_message_id ==========
+        # 3. 生成 assistant_message_id
         assistant_message_id = str(uuid4())
         
-        # ========== 4. 处理文件 ==========
+        # 4. 处理文件
         files_metadata = None
-        raw_message = message  # 保存原始消息
+        raw_message = message
         if files:
             processor = get_file_processor()
-            # 统一转换为字典列表
             files_data = [
                 f.model_dump() if hasattr(f, "model_dump") else f
                 for f in files if isinstance(f, (dict,)) or hasattr(f, "model_dump")
@@ -571,35 +504,42 @@ class ChatService:
             if files_data:
                 processed_files = await processor.process_files(files_data)
                 if processed_files:
-                    # 提取文件元数据
                     files_metadata = [
                         {"file_url": pf.file_url, "file_name": pf.filename, 
                          "file_type": pf.mime_type, "file_size": pf.file_size}
                         for pf in processed_files
                     ]
-                    # 获取原始消息文本
                     original_text = raw_message if isinstance(raw_message, str) else str(raw_message)
                     if isinstance(raw_message, list):
                         original_text = "".join(
                             b.get("text", "") for b in raw_message 
                             if isinstance(b, dict) and b.get("type") == "text"
                         )
-                    # 构建 content blocks
                     raw_message = processor.build_message_content(processed_files, original_text)
-                    logger.info(f"📎 文件处理完成: {len(files_metadata)} 个文件")
+                    logger.info("文件处理完成", extra={"file_count": len(files_metadata)})
         
-        # ========== 5. 标准化消息 ==========
+        # 5. 标准化消息
         normalized_message = normalize_message_format(raw_message)
         
-        # ========== 6. 保存用户消息 + 7. 创建 Assistant 占位 ==========
+        # 6. 检查并发 + 创建 Session（移到消息保存之前，避免额外的 UPDATE 操作）
+        await self.session_pool.check_can_create_session(user_id)
+        
+        session_id = await self.session_service.create_session(
+            user_id=user_id,
+            message=message,
+            conversation_id=conversation_id,
+            message_id=message_id,
+        )
+        logger.info("Session 已创建", extra={"session_id": session_id})
+        
+        # 7. 保存用户消息 + 8. 创建 Assistant 占位
         content_json = json.dumps(normalized_message, ensure_ascii=False)
         user_message_id = None
         
         try:
             async with AsyncSessionLocal() as session:
-                # 6. 保存用户消息（含文件元数据）
                 user_metadata = {
-                    "session_id": None,  # Session 尚未创建，后续可更新
+                    "session_id": session_id,  # 现在可以使用正确的 session_id
                     "model": self.default_model
                 }
                 if files_metadata:
@@ -613,9 +553,16 @@ class ChatService:
                     metadata=user_metadata
                 )
                 user_message_id = user_msg.id
-                logger.info(f"💾 用户消息已保存: conversation_id={conversation_id}, message_id={user_message_id}, files={len(files_metadata) if files_metadata else 0}")
+                logger.info(
+                    "用户消息已保存",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "message_id": user_message_id,
+                        "session_id": session_id,
+                        "file_count": len(files_metadata) if files_metadata else 0
+                    }
+                )
                 
-                # 7. 创建 Assistant 占位
                 await crud.create_message(
                     session=session,
                     conversation_id=conversation_id,
@@ -623,36 +570,19 @@ class ChatService:
                     content="[]",
                     message_id=assistant_message_id,
                     status="processing",
-                    metadata={
-                        "model": self.default_model,
-                    }
+                    metadata={"session_id": session_id, "model": self.default_model}
                 )
-                logger.info(f"✅ Assistant 占位已创建: id={assistant_message_id}")
+                logger.debug("Assistant 占位已创建", extra={"message_id": assistant_message_id})
         except Exception as e:
-            logger.error(f"❌ 消息保存失败: {e}")
+            logger.error("消息保存失败", extra={"error": str(e)}, exc_info=True)
+            # 消息保存失败时需要清理已创建的 Session
+            try:
+                await self.session_service.end_session(session_id, status="failed")
+            except Exception as cleanup_err:
+                logger.warning("清理 Session 失败", extra={"error": str(cleanup_err)})
             raise ValueError(f"消息保存失败: {e}") from e
         
-        # ========== 8. 检查并发 + 创建 Session ==========
-        await self.session_pool.check_can_create_session(user_id)
-        
-        session_id = await self.session_service.create_session(
-            user_id=user_id,
-            message=message,
-            conversation_id=conversation_id,
-            message_id=message_id,
-        )
-        logger.info(f"✅ Session: {session_id}")
-        
-        # 更新用户消息的 session_id（可选，用于追踪）
-        try:
-            await self.conversation_service.update_message(
-                message_id=user_message_id,
-                metadata={"session_id": session_id}
-            )
-        except Exception as e:
-            logger.warning(f"⚠️ 更新用户消息 session_id 失败: {e}")
-        
-        # ========== 9. 获取 Agent ==========
+        # 9. 获取 Agent
         pool_key = agent_id or self.DEFAULT_AGENT_KEY
         agent = None
         agent_acquired = False
@@ -665,38 +595,33 @@ class ChatService:
                 conversation_service=self.conversation_service
             )
             agent_acquired = True
-            logger.debug(f"✅ Agent 就绪: {pool_key}")
+            logger.debug("Agent 就绪", extra={"agent_id": pool_key})
             
-            # 创建共享 Tracker 并注入到 Agent
             from core.billing.tracker import EnhancedUsageTracker
             shared_tracker = EnhancedUsageTracker()
             agent.usage_tracker = shared_tracker
-            logger.debug(f"🔨 共享 Tracker 已注入: session_id={session_id}")
             
-            # 更新 SessionPool 状态
             await self.session_pool.on_session_start(session_id, user_id, pool_key)
             session_pool_updated = True
             
         except Exception as e:
-            logger.error(f"❌ 资源获取失败: {e}")
-            # 更新 Assistant 占位状态为 failed
+            logger.error("资源获取失败", extra={"error": str(e)}, exc_info=True)
             try:
                 await self.conversation_service.update_message(
                     message_id=assistant_message_id,
                     status="failed"
                 )
             except Exception as update_err:
-                logger.warning(f"⚠️ 更新 Assistant 状态失败: {update_err}")
-            # 清理 Session
+                logger.warning("更新 Assistant 状态失败", extra={"error": str(update_err)})
             try:
                 if agent_acquired:
                     await self.agent_pool.release(pool_key)
                 await self.session_service.end_session(session_id, status="failed")
             except Exception as cleanup_error:
-                logger.warning(f"⚠️ 清理失败: {cleanup_error}")
+                logger.warning("清理失败", extra={"error": str(cleanup_error)})
             raise AgentExecutionError(f"资源获取失败: {e}") from e
         
-        # ========== 10. 调度执行 ==========
+        # 10. 调度执行
         if not stream:
             # 同步模式：后台运行，立即返回
             asyncio.create_task(self._run_agent(
@@ -821,14 +746,13 @@ class ChatService:
             if not agent_task.done():
                 await agent_task
             
-            logger.info(f"✅ 流式对话完成: {session_id}")
+            logger.info("流式对话完成", extra={"session_id": session_id})
                 
         except asyncio.CancelledError:
-            # SSE 断开，Agent 继续后台运行
-            logger.info(f"⚠️ SSE 断开，Agent 后台继续: {session_id}")
+            logger.info("SSE 断开，Agent 后台继续", extra={"session_id": session_id})
         
         except Exception as e:
-            logger.error(f"❌ 流式对话失败: {e}", exc_info=True)
+            logger.error("流式对话失败", extra={"session_id": session_id, "error": str(e)}, exc_info=True)
             await self._cleanup_session_resources(
                 session_id=session_id,
                 user_id=user_id,
@@ -836,6 +760,67 @@ class ChatService:
                 status="failed"
             )
             raise AgentExecutionError(f"流式对话失败: {e}") from e
+    
+    async def _dispatch_background_tasks(
+        self,
+        background_tasks: List[str],
+        session_id: str,
+        conversation_id: str,
+        user_id: str,
+        message_id: str,
+        message: Any,
+        is_new_conversation: bool,
+        events: Any,
+        broadcaster: EventBroadcaster,
+        routing_intent: Optional[IntentResult] = None
+    ) -> str:
+        """
+        执行后台任务（如标题生成）
+        
+        Args:
+            background_tasks: 待执行的后台任务列表
+            session_id: 会话 ID
+            conversation_id: 对话 ID
+            user_id: 用户 ID
+            message_id: Assistant 消息 ID
+            message: 用户消息
+            is_new_conversation: 是否新对话
+            events: EventManager 实例
+            broadcaster: EventBroadcaster 实例
+            routing_intent: 路由意图结果
+        
+        Returns:
+            assistant_text: 从 accumulator 获取的 AI 回复文本
+        """
+        if not background_tasks:
+            return ""
+        
+        # 从 accumulator 获取 assistant 回复
+        assistant_text = ""
+        accumulator = broadcaster.get_accumulator(session_id)
+        if accumulator:
+            assistant_text = extract_text_from_message(accumulator.build_for_db())
+        
+        user_text = extract_text_from_message(message)
+        task_context = TaskContext(
+            session_id=session_id,
+            conversation_id=conversation_id,
+            user_id=user_id,
+            message_id=message_id,
+            user_message=user_text,
+            assistant_response=assistant_text,
+            is_new_conversation=is_new_conversation,
+            event_manager=events,
+            conversation_service=self.conversation_service,
+            metadata={"intent_id": routing_intent.intent_id if routing_intent else None}
+        )
+        
+        await self.background_tasks.dispatch_tasks(
+            task_names=background_tasks,
+            context=task_context
+        )
+        
+        return assistant_text
     
     async def _run_agent(
         self,
@@ -887,6 +872,9 @@ class ChatService:
         start_time = time.time()
         background_tasks = background_tasks or []
         
+        # 跟踪执行状态，用于 finally 块的资源清理
+        execution_status = "completed"
+        
         # 将 events 和 redis 提前初始化，确保 except 块可以访问
         redis = self.session_service.redis
         events = self.session_service.events
@@ -895,11 +883,9 @@ class ChatService:
         events.set_output_format(output_format, conversation_id)
         
         try:
-            logger.info(f"🚀 Agent 开始执行: session_id={session_id}")
+            logger.info("Agent 开始执行", extra={"session_id": session_id})
             
-            # =================================================================
             # 阶段 1: 数据准备
-            # =================================================================
             
             # 1.1 加载历史消息
             history_messages = []
@@ -911,50 +897,45 @@ class ChatService:
                     order="asc"
                 )
                 
-                # 转换为 Agent 格式（使用 ClaudeAdaptor 统一处理）
                 from core.llm.adaptor import ClaudeAdaptor
                 
                 raw_messages = []
                 for db_msg in db_messages:
-                    # 跳过 Assistant 占位消息
                     if db_msg.role == "assistant" and db_msg.status == "processing":
                         continue
                     
                     content = db_msg.content
                     try:
-                        # PostgreSQL JSONB 已自动反序列化，只对字符串类型解析
                         if isinstance(content, str):
                             content = json.loads(content) if content else []
                         elif content is None:
                             content = []
                     except json.JSONDecodeError:
-                        logger.warning(f"JSON 解析失败: message_id={db_msg.id}")
+                        logger.warning("JSON 解析失败", extra={"message_id": db_msg.id})
                     
                     raw_messages.append({
                         "role": db_msg.role,
                         "content": content
                     })
                 
-                # 使用 adaptor 清理和分离消息（处理 thinking/index/tool_result）
                 history_messages = ClaudeAdaptor.prepare_messages_from_db(raw_messages)
                 
-                logger.info(f"📚 历史消息已加载: conversation_id={conversation_id}, count={len(history_messages)} 条")
+                logger.info(
+                    "历史消息已加载",
+                    extra={"conversation_id": conversation_id, "count": len(history_messages)}
+                )
             
-            # 1.2 注入前端变量到最新的用户消息（传给 LLM，但不保存到数据库）
-            # 原因：前端上下文（时区、timestamp等）对 LLM 有用，但不应污染历史记录
+            # 1.2 注入前端变量到最新用户消息（传给 LLM，不保存到数据库）
             if variables and history_messages:
-                # 获取最后一条用户消息（就是刚才保存的）
                 last_message = history_messages[-1]
                 if last_message.get("role") == "user":
                     context_text = format_variables(variables)
                     if append_text_to_last_block(last_message["content"], context_text):
-                        logger.info(f"🌐 前端变量已注入到 LLM 消息: {list(variables.keys())}")
+                        logger.debug("前端变量已注入", extra={"keys": list(variables.keys())})
             
-            # =================================================================
             # 阶段 2: 执行 Agent
-            # =================================================================
             
-            # 2.1 发送 message_start 事件（通知前端开始生成）
+            # 2.1 发送 message_start 事件
             await events.message.emit_message_start(
                 session_id=session_id,
                 conversation_id=conversation_id,
@@ -964,26 +945,7 @@ class ChatService:
                 adapter=events.adapter
             )
             
-            # 2.2 上下文管理（裁剪历史消息）
-            # 三层防护策略：L1 Memory Tool / L2 智能裁剪 / L3 Token 预警
-            original_count = len(history_messages)
-            
-            # =====================================================================
-            # 🎯 上下文管理策略（三层防护，用户无感知）
-            # =====================================================================
-            # 
-            # L1. Memory Tool 状态保存（在 System Prompt 中指导 Claude）
-            # L2. 历史消息智能裁剪（服务层自动执行）
-            # L3. QoS 成本控制（后端日志警告，用户无感知）
-            # 
-            # 核心原则：
-            # 1. 静默处理，用户完全无感知
-            # 2. 不警告用户，不建议开启新会话
-            # 3. 优先保证问答效果，其次控制成本
-            # =====================================================================
-            
-            # 🆕 L2 策略：纯 token 驱动的上下文裁剪
-            # 基于 token 预算而非消息数量，更精确地控制上下文长度
+            # 2.2 上下文管理（基于 token 预算裁剪历史消息）
             context_strategy = get_context_strategy(self.qos_level)
             token_budget = int(context_strategy.token_budget * context_strategy.trim_threshold)
             
@@ -997,78 +959,70 @@ class ChatService:
             
             if trim_stats.trimmed_count < trim_stats.original_count:
                 logger.info(
-                    f"✂️ 历史裁剪: {trim_stats.original_count} → {trim_stats.trimmed_count} 条"
+                    "历史裁剪",
+                    extra={
+                        "original": trim_stats.original_count,
+                        "trimmed": trim_stats.trimmed_count
+                    }
                 )
             
-            # L3: 后端 token 预警（用户无感知）
             if trim_stats.should_warn:
                 logger.warning(
-                    f"⚠️ Token 预警: {trim_stats.estimated_tokens:,} / {context_strategy.token_budget:,}"
+                    "Token 预警",
+                    extra={
+                        "estimated": trim_stats.estimated_tokens,
+                        "budget": context_strategy.token_budget
+                    }
                 )
             
-            # =====================================================================
-            # 🆕 共享 Tracker 方案：使用 Agent 已注入的共享 Tracker（避免重复创建）
-            # =====================================================================
-            # shared_tracker 已在 chat() 方法中创建并注入到 agent.usage_tracker
+            # 使用 Agent 已注入的共享 Tracker
             shared_tracker = agent.usage_tracker
-            logger.debug(f"✅ 使用 Agent 的共享 Tracker: session_id={session_id}, tracker_id={id(shared_tracker)}")
-            
-            # =====================================================================
-            # 🎯 V7 路由层：决定使用 SimpleAgent 还是 MultiAgentOrchestrator
-            # =====================================================================
-            # 
-            # enable_routing=False（默认）:
-            #   - 向后兼容模式
-            #   - 意图分析在 SimpleAgent 内部完成
-            #   - 直接调用 SimpleAgent.chat()
-            # 
-            # enable_routing=True:
-            #   - 路由层模式
-            #   - 意图分析在路由层完成（AgentRouter）
-            #   - 根据复杂度决定使用 SimpleAgent 或 MultiAgentOrchestrator
-            # =====================================================================
             
             # 初始化 broadcaster 的消息累积
             agent.broadcaster.start_message(session_id, assistant_message_id)
             
-            # 路由决策（仅当启用路由时）
+            # 路由决策
             use_multi_agent = False
             routing_intent = None
+            enable_intent = agent.schema.is_intent_analysis_enabled if agent.schema else False
+            enable_preface = agent.schema.is_preface_enabled if agent.schema else False
             
-            if self.enable_routing and self.enable_intent_analysis:
-                # 🆕 V7.6.1: 传入 agent 的 prompt_cache（使用实例自定义的 intent_prompt）
+            if self.enable_routing and enable_intent:
                 agent_prompt_cache = getattr(agent, 'prompt_cache', None)
                 router = self._get_router(prompt_cache=agent_prompt_cache)
                 routing_decision = await router.route(
                     user_query=message,
                     conversation_history=history_messages,
-                    tracker=shared_tracker  # 🆕 传递共享 Tracker 用于意图识别计费
+                    tracker=shared_tracker
                 )
                 use_multi_agent = routing_decision.agent_type == "multi"
                 routing_intent = routing_decision.intent
                 
-                # 获取复杂度评分
                 complexity_score = routing_decision.complexity.score if routing_decision.complexity else 0.0
                 
                 logger.info(
-                    f"🔀 路由决策: complexity={complexity_score:.2f}, "
-                    f"use_multi_agent={use_multi_agent}, "
-                    f"intent={routing_intent.task_type.value if routing_intent else 'N/A'}"
+                    "路由决策",
+                    extra={
+                        "complexity": complexity_score,
+                        "use_multi_agent": use_multi_agent,
+                        "intent": routing_intent.task_type.value if routing_intent else None
+                    }
                 )
                 
-                # 🔧 DEBUG: 打印完整的 intent 结果
                 if routing_intent:
-                    logger.info(
-                        f"🎯 Intent 详情: "
-                        f"intent_id={routing_intent.intent_id}, "
-                        f"intent_name={routing_intent.intent_name}, "
-                        f"task_type={routing_intent.task_type.value}, "
-                        f"complexity={routing_intent.complexity.value}, "
-                        f"needs_plan={routing_intent.needs_plan}, "
-                        f"confidence={routing_intent.confidence}"
+                    logger.debug(
+                        "Intent 详情",
+                        extra={
+                            "intent_id": routing_intent.intent_id,
+                            "intent_name": routing_intent.intent_name,
+                            "task_type": routing_intent.task_type.value,
+                            "complexity": routing_intent.complexity.value,
+                            "needs_plan": routing_intent.needs_plan,
+                            "confidence": routing_intent.confidence
+                        }
                     )
-            elif self.enable_routing and not self.enable_intent_analysis:
-                # 🆕 V8.1: 意图识别已关闭，使用默认 IntentResult（跳过 LLM 调用）
+            elif self.enable_routing and not enable_intent:
+                # 意图识别已关闭，使用默认 IntentResult
                 from core.agent.types import IntentResult, TaskType, Complexity
                 routing_intent = IntentResult(
                     task_type=TaskType.OTHER,
@@ -1078,13 +1032,10 @@ class ChatService:
                     intent_name="综合咨询",
                     confidence=1.0
                 )
-                logger.info("⏭️ 意图识别已跳过，使用默认 IntentResult")
-            
-            # 🆕 V8.2: 已移除 intent 事件发送（不再向前端发送意图识别结果）
-            # routing_intent 仅用于内部逻辑（preface、后台任务等）
+                logger.debug("意图识别已跳过，使用默认 IntentResult")
                 
-            # 生成 Preface 开场白（独立于意图识别）
-            if self.enable_preface and routing_intent:
+            # 生成 Preface 开场白
+            if enable_preface and routing_intent:
                 user_text = extract_text_from_message(message)
                 preface_text = await self._generate_preface_stream(
                     intent=routing_intent,
@@ -1092,107 +1043,80 @@ class ChatService:
                     session_id=session_id,
                     message_id=assistant_message_id,
                     broadcaster=agent.broadcaster,
+                    schema=agent.schema,
                     tracker=shared_tracker
                 )
                 
-                # 3. 将 preface 添加到消息历史（避免 Agent 重复生成）
                 if preface_text:
                     history_messages.append({
                         "role": "assistant",
                         "content": [{"type": "text", "text": preface_text}]
                     })
-                    logger.info(f"✨ Preface 已添加到上下文: len={len(preface_text)}")
+                    logger.debug("Preface 已添加到上下文", extra={"length": len(preface_text)})
             
-            # 🆕 设置 Agent 的输出格式（EventBroadcaster 会使用）
+            # 设置输出格式
             if hasattr(agent, 'broadcaster') and agent.broadcaster:
                 agent.broadcaster.set_output_format(output_format, conversation_id)
             
-            # 🔧 更新 Session context，增加 assistant_message_id
-            # 工具（如 api_calling）可以通过 agent.event_manager.storage.get_session_context(session_id) 获取
+            # 更新 Session context
             await redis.set_session_context(
                 session_id=session_id,
                 conversation_id=conversation_id,
                 user_id=user_id,
-                message_id=assistant_message_id  # 🆕 存储 assistant_message_id
+                message_id=assistant_message_id
             )
-            logger.debug(f"🔑 Session context 已就绪: session_id={session_id}, conversation_id={conversation_id}, user_id={user_id}, message_id={assistant_message_id}")
             
-            # 🔧 用于保存 assistant_text（在 message_stop 清理 accumulator 前获取）
             _assistant_text_for_tasks = ""
             
             # 根据路由决策选择执行路径
             if use_multi_agent:
-                # ✅ V7.2: 多智能体执行
-                logger.info(f"🚀 启用多智能体模式: session_id={session_id}")
+                # 多智能体执行
+                logger.info("启用多智能体模式", extra={"session_id": session_id})
                 
-                # 加载多智能体配置
                 if self.multi_agent_config is None:
                     from core.agent.multi.models import load_multi_agent_config
                     self.multi_agent_config = await load_multi_agent_config()
                 
-                # 创建 MultiAgentOrchestrator
                 orchestrator = MultiAgentOrchestrator(
                     config=self.multi_agent_config,
                     enable_checkpoints=True,
                     enable_lead_agent=True,
                 )
                 
-                # 执行多智能体协作
                 async for event in orchestrator.execute(
                     intent=routing_intent,
                     messages=[{"role": "user", "content": extract_text_from_message(message)}],
                     session_id=session_id,
                     message_id=assistant_message_id,
                 ):
-                    # 转发事件到 EventBroadcaster
-                    # 多智能体事件类型：orchestrator_start, task_decomposition, 
-                    # agent_start, agent_end, orchestrator_summary, orchestrator_end
                     await agent.broadcaster.emit_raw_event(session_id, event)
                 
-                # 🔧 在 message_stop 前执行后台任务（保证 recommended 在 done 之前）
+                # 在 message_stop 前执行后台任务
                 if background_tasks:
-                    accumulator = agent.broadcaster.get_accumulator(session_id)
-                    if accumulator:
-                        _assistant_text_for_tasks = extract_text_from_message(
-                            accumulator.build_for_db()
-                        )
-                    
-                    # 执行后台任务
-                    user_text = extract_text_from_message(message)
-                    task_context = TaskContext(
+                    _assistant_text_for_tasks = await self._dispatch_background_tasks(
+                        background_tasks=background_tasks,
                         session_id=session_id,
                         conversation_id=conversation_id,
                         user_id=user_id,
                         message_id=assistant_message_id,
-                        user_message=user_text,
-                        assistant_response=_assistant_text_for_tasks,
+                        message=message,
                         is_new_conversation=is_new_conversation,
-                        event_manager=events,
-                        conversation_service=self.conversation_service,
-                        # 🆕 V7.7: 传递 intent_id 到后台任务（用于 clue_generation 判断）
-                        metadata={"intent_id": routing_intent.intent_id if routing_intent else None}
+                        events=events,
+                        broadcaster=agent.broadcaster,
+                        routing_intent=routing_intent
                     )
-                    await self.background_tasks.dispatch_tasks(
-                        task_names=background_tasks,
-                        context=task_context
-                    )
-                    # 标记已执行，阶段 3 不再重复执行
                     background_tasks = []
                 
-                # 🆕 修复：多智能体分支结束后，需要触发 message_stop 和最终持久化
-                # 否则 assistant 占位会一直停在 processing，历史里看不到最终内容
                 await agent.broadcaster.emit_message_stop(
                     session_id=session_id,
                     message_id=assistant_message_id
                 )
-                logger.info(f"✅ 多智能体执行完成，已触发 message_stop: {session_id}")
+                logger.info("多智能体执行完成", extra={"session_id": session_id})
             else:
-                # 🎯 单智能体执行
-                # 🆕 V8.0: 意图事件和 Preface 已在服务层完成
-                # - 内容累积：broadcaster 自动处理 content_start/delta/stop
-                # - Checkpoint：broadcaster 在每个 content_stop 后自动保存
-                # - 最终保存：broadcaster 在 message_stop 时自动完成
-                # - variables：直接注入到 System Prompt（前端上下文）
+                # 单智能体执行
+                # 优化：使用计数器减少 Redis 查询频率（每 10 个事件检查一次）
+                stop_check_interval = 10
+                event_counter = 0
                 
                 async for event in agent.chat(
                     messages=history_messages,
@@ -1202,24 +1126,23 @@ class ChatService:
                     enable_stream=True,
                     variables=variables
                 ):
-                    # 跳过被过滤的事件（ZenO 适配器返回 None）
                     if event is None:
                         continue
                     
-                    # 检查停止标志（异步）
-                    if await redis.is_stopped(session_id):
-                        logger.warning(f"🛑 检测到停止标志: session_id={session_id}")
+                    event_counter += 1
+                    
+                    # 优化：每 N 个事件检查一次停止标志，减少 Redis 查询
+                    if event_counter % stop_check_interval == 0 and await redis.is_stopped(session_id):
+                        logger.warning("检测到停止标志", extra={"session_id": session_id})
                         
-                        # 发送 billing 事件（使用 Agent 的 Tracker，已经是共享的）
+                        # 发送 billing 事件
                         try:
-                            # 1. 生成 UsageResponse（Agent 的 Tracker 已经是共享的）
                             usage_response = UsageResponse.from_usage_tracker(
-                                tracker=agent.usage_tracker,  # 使用 Agent 的 Tracker（已注入共享 Tracker）
+                                tracker=agent.usage_tracker,
                                 model=agent.model,
                                 latency=int((time.time() - start_time) * 1000)
                             )
                             
-                            # 2. 发送 billing 事件到前端
                             await agent.broadcaster.emit_message_delta(
                                 session_id=session_id,
                                 delta={
@@ -1229,25 +1152,24 @@ class ChatService:
                                 message_id=assistant_message_id,
                                 persist=False
                             )
-                            logger.info(f"📊 中止时已发送 billing 事件: total_price=${usage_response.total_price:.6f}")
+                            logger.info(
+                                "中止时已发送 billing 事件",
+                                extra={"total_price": usage_response.total_price}
+                            )
                             
-                            # 3. 保存 usage 到数据库
                             await agent.broadcaster.accumulate_usage(
                                 session_id=session_id,
                                 usage=usage_response.model_dump(mode='json')
                             )
                         except Exception as e:
-                            logger.error(f"❌ 中止时发送 billing 事件失败: {str(e)}", exc_info=True)
+                            logger.error("中止时发送 billing 事件失败", extra={"error": str(e)}, exc_info=True)
                         
-                        # 4. 发送 message_stop 事件（对应 ZenO 的 message.assistant.done）
-                        # 🔧 emit_message_stop 内部已包含 finalize 逻辑，无需额外调用
                         await agent.broadcaster.emit_message_stop(
                             session_id=session_id,
                             message_id=assistant_message_id
                         )
-                        logger.info(f"✅ 中止时已发送 message_stop (done) 事件")
+                        logger.debug("中止时已发送 message_stop 事件")
                         
-                        # 6. 发送 session_stopped 事件（在 done 之后）
                         await events.session.emit_session_stopped(
                             session_id=session_id,
                             conversation_id=conversation_id,
@@ -1256,96 +1178,63 @@ class ChatService:
                             adapter=events.adapter
                         )
                         
-                        # 7. 结束 session
                         await self.session_service.end_session(session_id, status="stopped")
                         break
                     
-                    # 🎯 只处理需要额外逻辑的事件
                     event_type = event.get("type", "")
                     
-                    # 🔧 在收到 billing 事件时执行后台任务（在 message_stop 前）
-                    # 事件顺序：... → billing → [recommended] → message_stop → session_end
-                    # 这样 recommended 会在 message.assistant.done 之前发送
+                    # 在收到 billing 事件时执行后台任务
                     if event_type in ("message_delta", "message.assistant.delta") and background_tasks:
                         delta = event.get("data", {}).get("delta", {})
-                        # 兼容 ZenO 格式（delta 直接在 event 中）
                         if not delta:
                             delta = event.get("delta", {})
                         if delta.get("type") == "billing":
-                            # 1. 保存 assistant_text
-                            accumulator = agent.broadcaster.get_accumulator(session_id)
-                            if accumulator:
-                                _assistant_text_for_tasks = extract_text_from_message(
-                                    accumulator.build_for_db()
-                                )
-                                logger.debug(f"🔧 已保存 assistant_text: {len(_assistant_text_for_tasks)} 字符")
-                            
-                            # 2. 执行后台任务（在 message_stop 之前）
-                            user_text = extract_text_from_message(message)
-                            task_context = TaskContext(
+                            _assistant_text_for_tasks = await self._dispatch_background_tasks(
+                                background_tasks=background_tasks,
                                 session_id=session_id,
                                 conversation_id=conversation_id,
                                 user_id=user_id,
                                 message_id=assistant_message_id,
-                                user_message=user_text,
-                                assistant_response=_assistant_text_for_tasks,
+                                message=message,
                                 is_new_conversation=is_new_conversation,
-                                event_manager=events,
-                                conversation_service=self.conversation_service,
-                                # 🆕 V7.7: 传递 intent_id 到后台任务（用于 clue_generation 判断）
-                                metadata={"intent_id": routing_intent.intent_id if routing_intent else None}
+                                events=events,
+                                broadcaster=agent.broadcaster,
+                                routing_intent=routing_intent
                             )
-                            await self.background_tasks.dispatch_tasks(
-                                task_names=background_tasks,
-                                context=task_context
-                            )
-                            # 标记已执行，阶段 3 不再重复执行
                             background_tasks = []
                     
                     if event_type == "conversation_delta":
-                        # conversation 更新同步到数据库
                         await apply_conversation_delta(self.conversation_service, event, conversation_id)
             
-            # =================================================================
             # 阶段 3: 完成处理
-            # =================================================================
-            
             duration_ms = int((time.time() - start_time) * 1000)
             
-            # 🔧 使用事件循环中保存的 assistant_text（在 message_stop 清理 accumulator 前获取）
+            # 统一从 accumulator 获取 assistant_text，避免为空的问题
+            if not _assistant_text_for_tasks:
+                accumulator = agent.broadcaster.get_accumulator(session_id)
+                if accumulator:
+                    _assistant_text_for_tasks = extract_text_from_message(accumulator.build_for_db())
             assistant_text = _assistant_text_for_tasks
             
-            # 3.1 检查最终状态
             final_status = await redis.get_session_status(session_id)
             status = final_status.get("status") if final_status else "completed"
             
             if status != "stopped":
-                # 3.2 执行后台任务（回退机制）
-                # 注意：正常情况下后台任务已在 billing 事件时执行（message_stop 之前）
-                # 这里作为回退，防止 billing 事件未触发的情况
+                # 后台任务回退机制
                 if background_tasks:
-                    user_text = extract_text_from_message(message)
-                    
-                    task_context = TaskContext(
+                    await self._dispatch_background_tasks(
+                        background_tasks=background_tasks,
                         session_id=session_id,
                         conversation_id=conversation_id,
                         user_id=user_id,
                         message_id=assistant_message_id,
-                        user_message=user_text,
-                        assistant_response=assistant_text,  # 使用提前获取的 assistant_text
+                        message=message,
                         is_new_conversation=is_new_conversation,
-                        event_manager=events,
-                        conversation_service=self.conversation_service,
-                        # 🆕 V7.7: 传递 intent_id 到后台任务（用于 clue_generation 判断）
-                        metadata={"intent_id": routing_intent.intent_id if routing_intent else None}
-                    )
-                    
-                    await self.background_tasks.dispatch_tasks(
-                        task_names=background_tasks,
-                        context=task_context
+                        events=events,
+                        broadcaster=agent.broadcaster,
+                        routing_intent=routing_intent
                     )
                 
-                # 3.3 发送完成事件（在后台任务之后，确保推荐问题等已发送）
                 await events.session.emit_session_end(
                     session_id=session_id,
                     conversation_id=conversation_id,
@@ -1356,23 +1245,21 @@ class ChatService:
                 )
                 await self.session_service.end_session(session_id, status="completed")
             
-            # 🆕 V7.4: 生成 UsageResponse（计费信息）
+            # 生成 UsageResponse 并记录审计
             usage_response = None
             try:
                 usage_stats = agent.usage_tracker.get_stats()
                 
-                # 🆕 使用 UsageResponse 统一模型
                 usage_response = UsageResponse.from_usage_tracker(
                     tracker=agent.usage_tracker,
                     model=self.default_model,
-                    latency=duration_ms / 1000.0  # 毫秒转秒
+                    latency=duration_ms / 1000.0
                 )
                 
-                # Token 审计记录（兼容旧逻辑）
                 token_usage = TokenUsage(
                     input_tokens=usage_stats.get("total_input_tokens", 0),
                     output_tokens=usage_stats.get("total_output_tokens", 0),
-                    thinking_tokens=usage_stats.get("total_thinking_tokens", 0),  # 🆕 使用实际值
+                    thinking_tokens=usage_stats.get("total_thinking_tokens", 0),
                     cache_read_tokens=usage_stats.get("total_cache_read_tokens", 0),
                     cache_write_tokens=usage_stats.get("total_cache_creation_tokens", 0)
                 )
@@ -1389,50 +1276,54 @@ class ChatService:
                 )
                 
                 logger.info(
-                    f"📊 Token 审计: input={token_usage.input_tokens:,}, "
-                    f"output={token_usage.output_tokens:,}, "
-                    f"thinking={token_usage.thinking_tokens:,}, "
-                    f"cache_read={token_usage.cache_read_tokens:,}, "
-                    f"total_price=${usage_response.total_price:.6f}"
+                    "Token 审计",
+                    extra={
+                        "input_tokens": token_usage.input_tokens,
+                        "output_tokens": token_usage.output_tokens,
+                        "thinking_tokens": token_usage.thinking_tokens,
+                        "cache_read_tokens": token_usage.cache_read_tokens,
+                        "total_price": usage_response.total_price
+                    }
                 )
                 
-                # ✅ 补充更新：将完整的 usage（包含 latency）更新到消息
-                # 注意：Agent 已经发送了 message_stop 并保存了基础数据（latency=0）
-                # 这里更新消息的 metadata.usage 字段
                 try:
                     await self.conversation_service.update_message(
                         message_id=assistant_message_id,
                         metadata={"usage": usage_response.model_dump(mode='json')}
                     )
-                    logger.debug(f"✅ 完整 Usage 数据已补充更新 (latency={duration_ms / 1000.0:.2f}s)")
                 except Exception as update_err:
-                    logger.warning(f"⚠️ 更新 Usage 数据失败: {update_err}")
+                    logger.warning("更新 Usage 数据失败", extra={"error": str(update_err)})
                 
             except Exception as audit_err:
-                logger.warning(f"⚠️ Token 审计失败: {audit_err}")
+                logger.warning("Token 审计失败", extra={"error": str(audit_err)})
             
-            logger.info(f"✅ Agent 执行完成: session_id={session_id}, duration={duration_ms}ms")
+            logger.info(
+                "Agent 执行完成",
+                extra={"session_id": session_id, "duration_ms": duration_ms}
+            )
+        
+        except asyncio.CancelledError:
+            execution_status = "stopped"
+            logger.warning("Agent 任务被取消", extra={"session_id": session_id})
         
         except Exception as e:
-            logger.error(f"❌ Agent 执行失败: {str(e)}", exc_info=True)
+            execution_status = "failed"
+            logger.error("Agent 执行失败", extra={"error": str(e)}, exc_info=True)
             duration_ms = int((time.time() - start_time) * 1000)
             
-            # 🆕 修复：更新 assistant 消息状态（避免 DB 留下 processing 占位）
             if assistant_message_id:
                 try:
                     await self.conversation_service.update_message(
                         message_id=assistant_message_id,
                         status="failed"
                     )
-                    logger.debug(f"📝 Assistant 消息状态已更新为 failed: {assistant_message_id}")
                 except Exception as update_err:
-                    logger.warning(f"⚠️ 更新消息状态失败: {update_err}")
+                    logger.warning("更新消息状态失败", extra={"error": str(update_err)})
             
-            # 分类错误类型，提供更友好的错误信息
+            # 分类错误类型
             error_type = "unknown_error"
             user_message = "执行失败，请稍后重试"
             
-            # 🎯 识别常见错误类型
             error_str = str(e)
             if "PermissionDeniedError" in str(type(e)) or "403" in error_str:
                 error_type = "permission_denied"
@@ -1450,7 +1341,6 @@ class ChatService:
                 error_type = "connection_error"
                 user_message = "网络连接失败，请检查网络"
             
-            # 🎯 发送详细的错误事件到前端（使用正确的输出格式）
             try:
                 await events.system.emit_error(
                     session_id=session_id,
@@ -1465,9 +1355,8 @@ class ChatService:
                     adapter=events.adapter
                 )
             except Exception as ex:
-                logger.warning(f"⚠️ 发送错误事件失败: {str(ex)}")
+                logger.warning("发送错误事件失败", extra={"error": str(ex)})
             
-            # 🎯 发送 session_end 事件（使用正确的输出格式）
             try:
                 await events.session.emit_session_end(
                     session_id=session_id,
@@ -1478,73 +1367,28 @@ class ChatService:
                     adapter=events.adapter
                 )
             except Exception as ex:
-                logger.warning(f"⚠️ 发送 session_end 失败: {str(ex)}")
+                logger.warning("发送 session_end 失败", extra={"error": str(ex)})
             
-            # 注：Session 状态将在 finally 块中清理
-            
-            # ⚠️ 不要 raise，避免 "Task exception was never retrieved"
-            # 异常已经通过事件和日志记录，不需要传播
+            # 不要 raise，避免 "Task exception was never retrieved"
         
         finally:
-            # 🆕 修复：确保资源始终释放（成功/失败/停止都执行）
-            # 无论正常完成、异常失败还是被停止，都需要释放 Agent 和更新 SessionPool
+            # 确保资源始终释放，使用跟踪的执行状态
             try:
                 await self._cleanup_session_resources(
                     session_id=session_id,
                     user_id=user_id,
                     agent_id=agent_id,
-                    status="completed"  # 这里的 status 只影响 Session，不影响 Message
+                    status=execution_status
                 )
-                logger.debug(f"🧹 资源已释放: session_id={session_id}, agent_id={agent_id}")
+                logger.debug(
+                    "资源已释放",
+                    extra={"session_id": session_id, "agent_id": agent_id, "status": execution_status}
+                )
             except Exception as cleanup_err:
-                logger.error(f"❌ 资源清理失败: {cleanup_err}", exc_info=True)
+                logger.error("资源清理失败", extra={"error": str(cleanup_err)}, exc_info=True)
     
-    # =========================================================================
-    # 【待扩展】Multi-Agent 执行方法（已注释）
-    # 
-    # 如需启用 Multi-Agent 功能，取消注释以下方法，并：
-    # 1. 取消注释顶部的 from core.multi_agent import ... 
-    # 2. 取消注释 __init__ 中的 multi_agent_config 参数
-    # 3. 取消注释 _run_agent 中的 Multi-Agent 路由逻辑
-    # =========================================================================
-    #
-    # async def _execute_multi_agent(
-    #     self,
-    #     user_query: str,
-    #     session_id: str,
-    #     assistant_message_id: str,
-    #     agent: SimpleAgent,
-    #     context: Dict[str, Any] = None
-    # ):
-    #     """
-    #     使用 MultiAgentOrchestrator 执行任务
-    #     
-    #     流程：
-    #     1. 创建 MultiAgentOrchestrator
-    #     2. 调用 orchestrator.execute()
-    #     3. 转换事件并通过 EventBroadcaster 发送
-    #     4. 将最终结果保存到数据库
-    #     """
-    #     orchestrator = MultiAgentOrchestrator(
-    #         event_manager=agent.event_manager,
-    #         memory_manager=agent.memory,
-    #         llm_service=agent.llm,
-    #         config=None,
-    #         prompt_cache=agent.prompt_cache,
-    #         workers_config=getattr(agent, 'workers_config', [])
-    #     )
-    #     
-    #     async for ma_event in orchestrator.execute(
-    #         user_query=user_query,
-    #         session_id=session_id,
-    #         context=context
-    #     ):
-    #         # 转换 Multi-Agent 事件为标准事件格式
-    #         pass
-    # =========================================================================
+    # ==================== LLM 探测 ====================
     
-# ==================== 便捷函数 ====================
-
     async def _emit_llm_switch_event(
         self,
         session_id: str,
@@ -1585,8 +1429,8 @@ class ChatService:
             )
         except Exception as e:
             logger.warning(
-                f"发送 LLM 切换事件失败: {e}",
-                extra={"session_id": session_id},
+                "发送 LLM 切换事件失败",
+                extra={"session_id": session_id, "error": str(e)},
                 exc_info=True
             )
     
@@ -1597,42 +1441,36 @@ class ChatService:
         role: str = "simple_agent"
     ) -> Optional[dict]:
         """
-        请求级 LLM 探针（条件探测策略）
-        
-        仅在后台健康探测不健康时执行，避免阻塞用户请求
+        请求级 LLM 探针，仅在后台健康探测不健康时执行
         
         Args:
-            llm_service: LLM 服务实例（可能是 ModelRouter）
+            llm_service: LLM 服务实例
             session_id: 会话 ID
             role: Agent 角色
         
         Returns:
             探测结果字典，如果跳过探测则返回 None
         """
-        # 检查是否是 ModelRouter
         from core.llm.router import ModelRouter
         if not isinstance(llm_service, ModelRouter):
             return None
         
-        # V7.11 条件探测策略：检查后台健康状态
         from services.health_probe_service import get_health_probe_service
         health_service = get_health_probe_service()
         
         if health_service and health_service.is_healthy(role):
-            # 后台健康，跳过请求级探测
             logger.debug(
                 "后台健康探测正常，跳过请求级探测",
                 extra={"session_id": session_id, "role": role}
             )
             return None
         
-        # 后台不健康，执行请求级探测确认
         try:
             import os
             timeout = float(os.getenv("LLM_PROBE_TIMEOUT", "5.0"))
             
             logger.info(
-                "后台健康探测异常，执行请求级探测确认",
+                "执行请求级探测",
                 extra={"session_id": session_id, "role": role, "timeout": timeout}
             )
             
@@ -1641,7 +1479,6 @@ class ChatService:
                 timeout=timeout
             )
             
-            # 如果发生切换，发送事件
             if probe_result.get("switched"):
                 await self._emit_llm_switch_event(
                     session_id=session_id,
@@ -1653,14 +1490,14 @@ class ChatService:
             
         except asyncio.TimeoutError:
             logger.warning(
-                f"请求级探测超时 ({timeout}s)",
-                extra={"session_id": session_id, "role": role}
+                "请求级探测超时",
+                extra={"session_id": session_id, "role": role, "timeout": timeout}
             )
             return None
         except Exception as e:
             logger.error(
-                f"请求级探测失败: {e}",
-                extra={"session_id": session_id, "role": role},
+                "请求级探测失败",
+                extra={"session_id": session_id, "role": role, "error": str(e)},
                 exc_info=True
             )
             return None

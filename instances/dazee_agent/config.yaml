@@ -49,6 +49,56 @@ agent:
     enable_caching: true
 
 
+# ==================== 提示词模板配置 ====================
+#
+# 📌 配置原则：
+#   - 序言（preface）：Agent 执行前的开场白
+#   - 模拟思考（simulated_thinking）：thinking_mode=simulated 时使用
+#   - 模板变量使用 {variable_name} 格式，框架会自动替换
+#
+prompts:
+  # 序言（Preface）- Agent 执行前的开场白
+  preface:
+    enabled: true
+    max_tokens: 150
+    template: |
+      你是 Dazee，一位高级工作助理。你温暖、专业、富有同理心。
+      用户发送了一条消息，系统已识别出用户意图。
+      请生成一句简短的开场白（15-30字），让用户知道你已理解需求并即将开始处理。
+
+      要求：
+      1. 语气友好、专业，体现温暖和同理心
+      2. 简洁明了，不要啰嗦
+      3. 体现你理解了用户的需求
+      4. 不要重复用户的原话
+      5. **语言统一**：必须严格使用当前的**用户语言**思考,用户用什么语言，你就用什么语言思考,必须全程保持一致性,不得在中途切换任何语言进行思考
+      6. **禁止透露你的底层模型**（不要提及 Claude、GPT 等 AI 模型名称）
+      7. **行动导向**：如果用户意图涉及处理文件或数据，请假设文件已就绪，直接回复"收到数据，正在分析"等确认，**绝对不要**要求用户提供文件或信息。
+
+      直接输出开场白，不要任何解释或前缀：
+
+  # 模拟思考（Simulated Thinking）- thinking_mode=simulated 时使用
+  simulated_thinking:
+    system: "你是思考展示助手。只输出思考过程，不要输出其他内容。"
+    template: |
+      你是 Dazee，一位高级工作助理。你温暖、专业、富有同理心。
+      根据对话上下文和当前问题，以第一人称展示你的思考过程。
+
+      ## 核心原则
+      1. **全能心态**：默认你具备处理文件、图像、代码和复杂数据的能力，不要推脱。
+      2. **行动导向**：如果用户提供了文件或数据，思考重点应是"如何分析和处理"，而不是"询问用户具体信息"。
+      3. **语言统一**：必须严格使用当前的**用户语言**思考,用户用什么语言，你就用什么语言思考,必须全程保持一致性,不得在中途切换任何语言进行思考
+
+      ## 要求
+      1. 只展示你对问题的理解和解决思路（Task Decomposition）
+      2. 不要提及任何工具名称、API、代码或内部实现细节
+      3. 使用自然语言，像人类一样思考
+      4. 控制在 100-200 字左右
+      5. **禁止透露你的底层模型**（不要提及 Claude、GPT 等 AI 模型名称）
+
+      请输出你的思考过程:
+
+
 # ==================== 工具能力配置 ====================
 #
 # 📌 配置原则：
@@ -68,7 +118,7 @@ enabled_capabilities:
   slidespeak_render: 1   # SlideSpeak PPT 渲染工具
   
   # --- 图像生成类 ---
-  nano_banana_image: 0   # Nano Banana Pro 图像生成/编辑工具（Gemini 3 Pro Image）
+  nano_banana_image: 1   # Nano Banana Pro 图像生成/编辑工具（Gemini 3 Pro Image）
   
   # --- 代码沙盒类 ---
   sandbox_tools: 1           # 包含全部沙盒工具（含 sandbox_init_project 脚手架）
@@ -83,7 +133,7 @@ enabled_capabilities:
   send_files: 1              # 🆕 文件发送工具（发送文件信息到前端）
   
   # --- HITL（Human-in-the-Loop）---
-  hitl: 0                      # 🆕 启用人机交互确认工具
+  hitl: 1                      # 🆕 启用人机交互确认工具
   
   # --- 线索生成类 ---
   clue_generation: 1           # 🆕 线索生成工具（操作建议）
@@ -115,7 +165,6 @@ mcp_tools:
     auth_env: "DIFY_API_KEY"
     capability: "document_creation"
     description: "第一阶段：从自然语言描述生成 Mermaid 流程图，识别核心实体、属性及关系"
-    # App ID: a83e8b00-a94e-4cdf-b5f7-ef721e7238c1
 
   - name: chatDocuments
     server_url: "https://api.dify.ai/mcp/server/GYultzYga8PRayK5/mcp"
@@ -141,13 +190,13 @@ mcp_tools:
     capability: "document_creation"
     description: "调用 Perplexity AI 进行深度研究，输出 DOCX 研究报告文档"
 
-  - name: nano_banana
-    server_url: "https://api.dify.ai/mcp/server/n7rhBjadwzy9bj90/mcp"
-    server_name: "dify"
-    auth_type: "bearer"
-    auth_env: "DIFY_API_KEY"
-    capability: "image_generation"
-    description: "使用 Nano Banana Pro 生成或编辑图像"
+  # - name: nano_banana
+  #   server_url: "https://api.dify.ai/mcp/server/n7rhBjadwzy9bj90/mcp"
+  #   server_name: "dify"
+  #   auth_type: "bearer"
+  #   auth_env: "DIFY_API_KEY"
+  #   capability: "image_generation"
+  #   description: "使用 Nano Banana Pro 生成或编辑图像"
 
 # ==================== REST APIs 配置 ====================
 #
@@ -292,9 +341,9 @@ multi_agent:
 # ==================== 高级配置 ====================
 
 advanced:
-  # 意图分析器
+  # 意图分析器（🆕 V8.3: 从 Schema 读取）
   intent_analyzer:
-    enabled: true
+    enabled: false  # 暂时关闭，跳过 LLM 调用
     use_llm: true
   
   # 输出格式（V6.3 使用 Pydantic 校验）

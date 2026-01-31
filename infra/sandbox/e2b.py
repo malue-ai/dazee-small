@@ -1254,8 +1254,18 @@ class E2BSandboxProvider(SandboxProvider):
         
         try:
             sandbox = await self._get_sandbox_obj(conversation_id)
-            host = sandbox.get_host(port)
-            preview_url = f"https://{host}"
+            host = None
+            if hasattr(sandbox, "get_host"):
+                host = sandbox.get_host(port)
+            elif hasattr(sandbox, "pty") and hasattr(sandbox.pty, "get_hostname"):
+                host = sandbox.pty.get_hostname(port)
+            
+            if host:
+                preview_url = f"https://{host}"
+            else:
+                host = f"{port}-{sandbox.sandbox_id}.e2b.dev"
+                preview_url = f"https://{host}"
+                logger.warning(f"⚠️ 无法找到 get_host 方法，使用默认构造 URL: {preview_url}")
             
             logger.info(f"🔗 获取预览 URL: {preview_url}")
             return preview_url

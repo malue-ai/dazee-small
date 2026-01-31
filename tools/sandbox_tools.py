@@ -363,12 +363,29 @@ class SandboxRunCommand(BaseTool):
                 # 获取公开 URL
                 if port:
                     try:
-                        host = sandbox.get_host(port)
-                        url = f"https://{host}"
-                        cmd_result["url"] = url
-                        cmd_result["port"] = port
-                        urls[name] = url
-                        logger.info(f"🌐 服务 URL [{name}]: {url}")
+                        # 兼容不同版本的 E2B SDK
+                        host = None
+                        if hasattr(sandbox, "get_host"):
+                            host = sandbox.get_host(port)
+                        elif hasattr(sandbox, "pty") and hasattr(sandbox.pty, "get_hostname"):
+                            # 旧版本兼容
+                            host = sandbox.pty.get_hostname(port)
+                        
+                        if host:
+                            url = f"https://{host}"
+                            cmd_result["url"] = url
+                            cmd_result["port"] = port
+                            urls[name] = url
+                            logger.info(f"🌐 服务 URL [{name}]: {url}")
+                        else:
+                             # 尝试直接构造（兜底）
+                            host = f"{port}-{sandbox.sandbox_id}.e2b.dev"
+                            url = f"https://{host}"
+                            cmd_result["url"] = url
+                            cmd_result["port"] = port
+                            urls[name] = url
+                            logger.warning(f"⚠️ 无法找到 get_host 方法，使用默认构造 URL: {url}")
+
                     except Exception as e:
                         logger.warning(f"⚠️ 获取 URL 失败 [{name}]: {e}")
                         cmd_result["url_error"] = str(e)
@@ -451,12 +468,27 @@ class SandboxRunCommand(BaseTool):
                 # 如果指定了端口，自动返回公开 URL
                 if port:
                     try:
-                        host = sandbox.get_host(port)
-                        url = f"https://{host}"
-                        result["url"] = url
-                        result["port"] = port
-                        logger.info(f"🌐 服务 URL: {url}")
+                        # 兼容不同版本的 E2B SDK
+                        host = None
+                        if hasattr(sandbox, "get_host"):
+                            host = sandbox.get_host(port)
+                        elif hasattr(sandbox, "pty") and hasattr(sandbox.pty, "get_hostname"):
+                            # 旧版本兼容
+                            host = sandbox.pty.get_hostname(port)
                         
+                        if host:
+                            url = f"https://{host}"
+                            result["url"] = url
+                            result["port"] = port
+                            logger.info(f"🌐 服务 URL: {url}")
+                        else:
+                            # 尝试直接构造（兜底）
+                            host = f"{port}-{sandbox.sandbox_id}.e2b.dev"
+                            url = f"https://{host}"
+                            result["url"] = url
+                            result["port"] = port
+                            logger.warning(f"⚠️ 无法找到 get_host 方法，使用默认构造 URL: {url}")
+
                         # 添加过期时间信息
                         try:
                             async with AsyncSessionLocal() as session:
@@ -563,8 +595,18 @@ class SandboxGetPublicUrl(BaseTool):
             provider = get_sandbox_provider()
             sandbox = await provider._get_sandbox_obj(conversation_id)
             
-            host = sandbox.get_host(port)
-            url = f"https://{host}"
+            host = None
+            if hasattr(sandbox, "get_host"):
+                host = sandbox.get_host(port)
+            elif hasattr(sandbox, "pty") and hasattr(sandbox.pty, "get_hostname"):
+                host = sandbox.pty.get_hostname(port)
+            
+            if host:
+                url = f"https://{host}"
+            else:
+                host = f"{port}-{sandbox.sandbox_id}.e2b.dev"
+                url = f"https://{host}"
+                logger.warning(f"⚠️ 无法找到 get_host 方法，使用默认构造 URL: {url}")
             
             # 计算过期时间
             expires_at = None

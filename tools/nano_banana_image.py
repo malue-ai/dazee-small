@@ -127,7 +127,6 @@ class NanoBananaImageTool(BaseTool):
             JSON 字符串片段
         """
         import json
-        import base64
         
         # 提取参数
         prompt = params.get("prompt", "").strip()
@@ -188,15 +187,6 @@ class NanoBananaImageTool(BaseTool):
                 resolution=actual_resolution
             )
             
-            # --- 流式输出阶段 1: 立即输出 Base64 预览 ---
-            b64_image = base64.b64encode(image_bytes).decode('utf-8')
-            
-            # 手动构建 JSON 的前半部分
-            # 注意：这里我们构造一个不完整的 JSON，包含 preview 字段
-            # 前端可以通过正则提取 preview，或者等待完整 JSON
-            json_part1 = f'{{\n  "success": true,\n  "preview": "{b64_image}",\n'
-            yield json_part1
-            
             # 3. 上传到 S3
             upload_result = await self._upload_to_s3(
                 image_bytes=image_bytes,
@@ -207,9 +197,9 @@ class NanoBananaImageTool(BaseTool):
             
             logger.info(f"✅ 图像生成并上传成功: {upload_result.get('s3_key')}")
             
-            # --- 流式输出阶段 2: 输出剩余字段 ---
-            # 构建剩余部分的 JSON 对象
-            remaining_data = {
+            # 直接返回链接，不返回 base64
+            result = {
+                "success": True,
                 "s3_url": upload_result.get("s3_url"),
                 "presigned_url": upload_result.get("presigned_url"),
                 "s3_key": upload_result.get("s3_key"),
@@ -219,13 +209,7 @@ class NanoBananaImageTool(BaseTool):
                 "filename": filename
             }
             
-            # 将剩余数据转换为 JSON 字符串，去掉开头的 '{'，拼接到前面的逗号后
-            json_part2 = json.dumps(remaining_data, ensure_ascii=False)
-            # json_part2 类似于 '{"key": "value"}'
-            # 我们需要去掉开头的 '{'，保留结尾的 '}'
-            json_part2_content = json_part2[1:] 
-            
-            yield f'  {json_part2_content}'
+            yield json.dumps(result, ensure_ascii=False)
             
         except ValueError as e:
             logger.error(f"❌ 参数错误: {str(e)}")
