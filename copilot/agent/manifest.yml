@@ -12,7 +12,7 @@ type: Load Balanced Web Service
 # 使用 location 指定 ECR 镜像地址（由部署脚本自动更新）
 # ============================================================
 image:
-  location: 308470327605.dkr.ecr.ap-southeast-1.amazonaws.com/zen0-backend/agent:20260130-215109
+  location: 308470327605.dkr.ecr.ap-southeast-1.amazonaws.com/zen0-backend/agent:20260131-114902
   port: 80  # Nginx 监听端口
 
 # ============================================================
@@ -168,6 +168,11 @@ environments:
       UNSTRUCTURED_API_URL: /copilot/zen0-backend/staging/secrets/UNSTRUCTURED_API_URL
       # 千问 API（Fallback 兜底）
       DASHSCOPE_API_KEY: /copilot/zen0-backend/staging/secrets/DASHSCOPE_API_KEY
+      # Gemini API
+      GEMINI_API_KEY: /copilot/zen0-backend/staging/secrets/GEMINI_API_KEY
+      # Claude 多供应商容灾
+      CLAUDE_API_KEY_VENDOR_A: /copilot/zen0-backend/staging/secrets/CLAUDE_API_KEY_VENDOR_A
+      CLAUDE_API_KEY_VENDOR_B: /copilot/zen0-backend/staging/secrets/CLAUDE_API_KEY_VENDOR_B
 
   # ============================================================
   # Production 环境配置
@@ -253,6 +258,18 @@ environments:
       DIFY_API_KEY: /copilot/zen0-backend/production/secrets/DIFY_API_KEY
       COZE_API_KEY: /copilot/zen0-backend/production/secrets/COZE_API_KEY
       QDRANT_API_KEY: /copilot/zen0-backend/production/secrets/QDRANT_API_KEY
+      TENCENT_VDB_API_KEY: /copilot/zen0-backend/production/secrets/TENCENT_VDB_API_KEY
+      # 外部 API（问数）
+      WENSHU_API_KEY: /copilot/zen0-backend/production/secrets/WENSHU_API_KEY
+      WENSHU_API_BASE_URL: /copilot/zen0-backend/production/secrets/WENSHU_API_BASE_URL
+      # 文档解析
+      UNSTRUCTURED_API_KEY: /copilot/zen0-backend/production/secrets/UNSTRUCTURED_API_KEY
+      UNSTRUCTURED_API_URL: /copilot/zen0-backend/production/secrets/UNSTRUCTURED_API_URL
       # 千问 API（Fallback 兜底）
       DASHSCOPE_API_KEY: /copilot/zen0-backend/production/secrets/DASHSCOPE_API_KEY
+      # Gemini API
+      GEMINI_API_KEY: /copilot/zen0-backend/production/secrets/GEMINI_API_KEY
+      # Claude 多供应商容灾
+      CLAUDE_API_KEY_VENDOR_A: /copilot/zen0-backend/production/secrets/CLAUDE_API_KEY_VENDOR_A
+      CLAUDE_API_KEY_VENDOR_B: /copilot/zen0-backend/production/secrets/CLAUDE_API_KEY_VENDOR_B
 

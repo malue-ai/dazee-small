@@ -23,7 +23,7 @@ from datetime import datetime
 from typing import Any, AsyncGenerator, Dict, List, Optional
 from uuid import uuid4
 
-from logger import get_logger
+from logger import get_logger, log_execution_time
 from core.agent import SimpleAgent
 from core.billing.tracker import EnhancedUsageTracker
 from core.events.broadcaster import EventBroadcaster
@@ -135,7 +135,9 @@ class ChatService:
         
         # 路由层配置
         self.enable_routing = enable_routing
-        self._router: Optional[AgentRouter] = None
+        # 使用字典缓存不同实例的 Router，避免频繁重新创建
+        self._routers: Dict[str, AgentRouter] = {}
+        self._default_router: Optional[AgentRouter] = None
         
         # Token 审计器
         self.token_auditor: TokenAuditor = get_token_auditor()
@@ -152,7 +154,7 @@ class ChatService:
     
     def _get_router(self, prompt_cache=None) -> AgentRouter:
         """
-        延迟初始化路由器
+        延迟初始化路由器（支持按实例缓存）
         
         Args:
             prompt_cache: InstancePromptCache，用于加载实例自定义的意图识别提示词
@@ -160,22 +162,33 @@ class ChatService:
         Returns:
             AgentRouter 实例
         """
-        # 如果传入了 prompt_cache，需要重新创建 router（prompt 可能不同）
-        if self._router is None or prompt_cache is not None:
-            intent_profile = get_llm_profile("intent_analyzer")
-            routing_llm = create_llm_service(**intent_profile)
-            
-            self._router = AgentRouter(
-                llm_service=routing_llm,
-                enable_llm=True,
-                prompt_cache=prompt_cache
-            )
-            
-            logger.info(
-                "AgentRouter 已初始化",
-                extra={"use_custom_prompt": prompt_cache is not None}
-            )
-        return self._router
+        # 获取缓存键：使用 instance_name 作为标识，无 prompt_cache 时用 "__default__"
+        cache_key = getattr(prompt_cache, 'instance_name', None) or "__default__"
+        
+        # 优先使用缓存的 Router
+        if cache_key in self._routers:
+            return self._routers[cache_key]
+        
+        # 创建新的 Router 并缓存
+        intent_profile = get_llm_profile("intent_analyzer")
+        routing_llm = create_llm_service(**intent_profile)
+        
+        router = AgentRouter(
+            llm_service=routing_llm,
+            enable_llm=True,
+            prompt_cache=prompt_cache
+        )
+        
+        self._routers[cache_key] = router
+        
+        logger.info(
+            "AgentRouter 已初始化",
+            extra={
+                "cache_key": cache_key,
+                "use_custom_prompt": prompt_cache is not None
+            }
+        )
+        return router
     
     def get_output_formatter(self, agent: SimpleAgent) -> Optional[OutputFormatter]:
         """
@@ -496,27 +509,28 @@ class ChatService:
         files_metadata = None
         raw_message = message
         if files:
-            processor = get_file_processor()
-            files_data = [
-                f.model_dump() if hasattr(f, "model_dump") else f
-                for f in files if isinstance(f, (dict,)) or hasattr(f, "model_dump")
-            ]
-            if files_data:
-                processed_files = await processor.process_files(files_data)
-                if processed_files:
-                    files_metadata = [
-                        {"file_url": pf.file_url, "file_name": pf.filename, 
-                         "file_type": pf.mime_type, "file_size": pf.file_size}
-                        for pf in processed_files
-                    ]
-                    original_text = raw_message if isinstance(raw_message, str) else str(raw_message)
-                    if isinstance(raw_message, list):
-                        original_text = "".join(
-                            b.get("text", "") for b in raw_message 
-                            if isinstance(b, dict) and b.get("type") == "text"
-                        )
-                    raw_message = processor.build_message_content(processed_files, original_text)
-                    logger.info("文件处理完成", extra={"file_count": len(files_metadata)})
+            with log_execution_time("文件处理", logger):
+                processor = get_file_processor()
+                files_data = [
+                    f.model_dump() if hasattr(f, "model_dump") else f
+                    for f in files if isinstance(f, (dict,)) or hasattr(f, "model_dump")
+                ]
+                if files_data:
+                    processed_files = await processor.process_files(files_data)
+                    if processed_files:
+                        files_metadata = [
+                            {"file_url": pf.file_url, "file_name": pf.filename, 
+                             "file_type": pf.mime_type, "file_size": pf.file_size}
+                            for pf in processed_files
+                        ]
+                        original_text = raw_message if isinstance(raw_message, str) else str(raw_message)
+                        if isinstance(raw_message, list):
+                            original_text = "".join(
+                                b.get("text", "") for b in raw_message 
+                                if isinstance(b, dict) and b.get("type") == "text"
+                            )
+                        raw_message = processor.build_message_content(processed_files, original_text)
+                        logger.info("文件处理完成", extra={"file_count": len(files_metadata)})
         
         # 5. 标准化消息
         normalized_message = normalize_message_format(raw_message)
@@ -537,42 +551,43 @@ class ChatService:
         user_message_id = None
         
         try:
-            async with AsyncSessionLocal() as session:
-                user_metadata = {
-                    "session_id": session_id,  # 现在可以使用正确的 session_id
-                    "model": self.default_model
-                }
-                if files_metadata:
-                    user_metadata["files"] = files_metadata
-                
-                user_msg = await crud.create_message(
-                    session=session,
-                    conversation_id=conversation_id,
-                    role="user",
-                    content=content_json,
-                    metadata=user_metadata
-                )
-                user_message_id = user_msg.id
-                logger.info(
-                    "用户消息已保存",
-                    extra={
-                        "conversation_id": conversation_id,
-                        "message_id": user_message_id,
-                        "session_id": session_id,
-                        "file_count": len(files_metadata) if files_metadata else 0
+            with log_execution_time("保存消息", logger):
+                async with AsyncSessionLocal() as session:
+                    user_metadata = {
+                        "session_id": session_id,  # 现在可以使用正确的 session_id
+                        "model": self.default_model
                     }
-                )
-                
-                await crud.create_message(
-                    session=session,
-                    conversation_id=conversation_id,
-                    role="assistant",
-                    content="[]",
-                    message_id=assistant_message_id,
-                    status="processing",
-                    metadata={"session_id": session_id, "model": self.default_model}
-                )
-                logger.debug("Assistant 占位已创建", extra={"message_id": assistant_message_id})
+                    if files_metadata:
+                        user_metadata["files"] = files_metadata
+                    
+                    user_msg = await crud.create_message(
+                        session=session,
+                        conversation_id=conversation_id,
+                        role="user",
+                        content=content_json,
+                        metadata=user_metadata
+                    )
+                    user_message_id = user_msg.id
+                    logger.info(
+                        "用户消息已保存",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "message_id": user_message_id,
+                            "session_id": session_id,
+                            "file_count": len(files_metadata) if files_metadata else 0
+                        }
+                    )
+                    
+                    await crud.create_message(
+                        session=session,
+                        conversation_id=conversation_id,
+                        role="assistant",
+                        content="[]",
+                        message_id=assistant_message_id,
+                        status="processing",
+                        metadata={"session_id": session_id, "model": self.default_model}
+                    )
+                    logger.debug("Assistant 占位已创建", extra={"message_id": assistant_message_id})
         except Exception as e:
             logger.error("消息保存失败", extra={"error": str(e)}, exc_info=True)
             # 消息保存失败时需要清理已创建的 Session
@@ -614,6 +629,9 @@ class ChatService:
             except Exception as update_err:
                 logger.warning("更新 Assistant 状态失败", extra={"error": str(update_err)})
             try:
+                # 按获取顺序的逆序释放资源
+                if session_pool_updated:
+                    await self.session_pool.on_session_end(session_id, user_id, pool_key)
                 if agent_acquired:
                     await self.agent_pool.release(pool_key)
                 await self.session_service.end_session(session_id, status="failed")
@@ -689,6 +707,8 @@ class ChatService:
             variables: 前端上下文变量
             output_format: 输出事件格式
         """
+        agent_task = None  # 提前声明，避免 except 块中 NameError
+        
         try:
             redis = self.session_service.redis
             
@@ -753,12 +773,16 @@ class ChatService:
         
         except Exception as e:
             logger.error("流式对话失败", extra={"session_id": session_id, "error": str(e)}, exc_info=True)
-            await self._cleanup_session_resources(
-                session_id=session_id,
-                user_id=user_id,
-                agent_id=agent_id,
-                status="failed"
-            )
+            # 资源清理策略：
+            # - 如果 agent_task 已启动，由其 finally 块统一处理，避免双重清理
+            # - 如果 agent_task 未启动（异常发生在 create_task 之前），需要手动清理
+            if agent_task is None:
+                await self._cleanup_session_resources(
+                    session_id=session_id,
+                    user_id=user_id,
+                    agent_id=agent_id,
+                    status="failed"
+                )
             raise AgentExecutionError(f"流式对话失败: {e}") from e
     
     async def _dispatch_background_tasks(
@@ -889,41 +913,42 @@ class ChatService:
             
             # 1.1 加载历史消息
             history_messages = []
-            async with AsyncSessionLocal() as session:
-                db_messages = await crud.list_messages(
-                    session=session,
-                    conversation_id=conversation_id,
-                    limit=1000,
-                    order="asc"
-                )
-                
-                from core.llm.adaptor import ClaudeAdaptor
-                
-                raw_messages = []
-                for db_msg in db_messages:
-                    if db_msg.role == "assistant" and db_msg.status == "processing":
-                        continue
+            with log_execution_time("加载历史消息", logger):
+                async with AsyncSessionLocal() as session:
+                    db_messages = await crud.list_messages(
+                        session=session,
+                        conversation_id=conversation_id,
+                        limit=1000,
+                        order="asc"
+                    )
                     
-                    content = db_msg.content
-                    try:
-                        if isinstance(content, str):
-                            content = json.loads(content) if content else []
-                        elif content is None:
-                            content = []
-                    except json.JSONDecodeError:
-                        logger.warning("JSON 解析失败", extra={"message_id": db_msg.id})
+                    from core.llm.adaptor import ClaudeAdaptor
                     
-                    raw_messages.append({
-                        "role": db_msg.role,
-                        "content": content
-                    })
-                
-                history_messages = ClaudeAdaptor.prepare_messages_from_db(raw_messages)
-                
-                logger.info(
-                    "历史消息已加载",
-                    extra={"conversation_id": conversation_id, "count": len(history_messages)}
-                )
+                    raw_messages = []
+                    for db_msg in db_messages:
+                        if db_msg.role == "assistant" and db_msg.status == "processing":
+                            continue
+                        
+                        content = db_msg.content
+                        try:
+                            if isinstance(content, str):
+                                content = json.loads(content) if content else []
+                            elif content is None:
+                                content = []
+                        except json.JSONDecodeError:
+                            logger.warning("JSON 解析失败", extra={"message_id": db_msg.id})
+                        
+                        raw_messages.append({
+                            "role": db_msg.role,
+                            "content": content
+                        })
+                    
+                    history_messages = ClaudeAdaptor.prepare_messages_from_db(raw_messages)
+                    
+                    logger.info(
+                        "历史消息已加载",
+                        extra={"conversation_id": conversation_id, "count": len(history_messages)}
+                    )
             
             # 1.2 注入前端变量到最新用户消息（传给 LLM，不保存到数据库）
             if variables and history_messages:
@@ -946,16 +971,17 @@ class ChatService:
             )
             
             # 2.2 上下文管理（基于 token 预算裁剪历史消息）
-            context_strategy = get_context_strategy(self.qos_level)
-            token_budget = int(context_strategy.token_budget * context_strategy.trim_threshold)
-            
-            history_messages, trim_stats = trim_by_token_budget(
-                messages=history_messages,
-                token_budget=token_budget,
-                preserve_first_messages=context_strategy.preserve_first_messages,
-                preserve_last_messages=context_strategy.preserve_last_messages,
-                preserve_tool_results=context_strategy.preserve_tool_results
-            )
+            with log_execution_time("上下文裁剪", logger):
+                context_strategy = get_context_strategy(self.qos_level)
+                token_budget = int(context_strategy.token_budget * context_strategy.trim_threshold)
+                
+                history_messages, trim_stats = trim_by_token_budget(
+                    messages=history_messages,
+                    token_budget=token_budget,
+                    preserve_first_messages=context_strategy.preserve_first_messages,
+                    preserve_last_messages=context_strategy.preserve_last_messages,
+                    preserve_tool_results=context_strategy.preserve_tool_results
+                )
             
             if trim_stats.trimmed_count < trim_stats.original_count:
                 logger.info(
@@ -988,15 +1014,16 @@ class ChatService:
             enable_preface = agent.schema.is_preface_enabled if agent.schema else False
             
             if self.enable_routing and enable_intent:
-                agent_prompt_cache = getattr(agent, 'prompt_cache', None)
-                router = self._get_router(prompt_cache=agent_prompt_cache)
-                routing_decision = await router.route(
-                    user_query=message,
-                    conversation_history=history_messages,
-                    tracker=shared_tracker
-                )
-                use_multi_agent = routing_decision.agent_type == "multi"
-                routing_intent = routing_decision.intent
+                with log_execution_time("路由决策", logger):
+                    agent_prompt_cache = getattr(agent, 'prompt_cache', None)
+                    router = self._get_router(prompt_cache=agent_prompt_cache)
+                    routing_decision = await router.route(
+                        user_query=message,
+                        conversation_history=history_messages,
+                        tracker=shared_tracker
+                    )
+                    use_multi_agent = routing_decision.agent_type == "multi"
+                    routing_intent = routing_decision.intent
                 
                 complexity_score = routing_decision.complexity.score if routing_decision.complexity else 0.0
                 
@@ -1036,16 +1063,17 @@ class ChatService:
                 
             # 生成 Preface 开场白
             if enable_preface and routing_intent:
-                user_text = extract_text_from_message(message)
-                preface_text = await self._generate_preface_stream(
-                    intent=routing_intent,
-                    user_message=user_text,
-                    session_id=session_id,
-                    message_id=assistant_message_id,
-                    broadcaster=agent.broadcaster,
-                    schema=agent.schema,
-                    tracker=shared_tracker
-                )
+                with log_execution_time("Preface 生成", logger):
+                    user_text = extract_text_from_message(message)
+                    preface_text = await self._generate_preface_stream(
+                        intent=routing_intent,
+                        user_message=user_text,
+                        session_id=session_id,
+                        message_id=assistant_message_id,
+                        broadcaster=agent.broadcaster,
+                        schema=agent.schema,
+                        tracker=shared_tracker
+                    )
                 
                 if preface_text:
                     history_messages.append({
@@ -1071,6 +1099,7 @@ class ChatService:
             # 根据路由决策选择执行路径
             if use_multi_agent:
                 # 多智能体执行
+                multi_agent_start = time.time()
                 logger.info("启用多智能体模式", extra={"session_id": session_id})
                 
                 if self.multi_agent_config is None:
@@ -1090,6 +1119,12 @@ class ChatService:
                     message_id=assistant_message_id,
                 ):
                     await agent.broadcaster.emit_raw_event(session_id, event)
+                
+                multi_agent_duration = (time.time() - multi_agent_start) * 1000
+                logger.info(
+                    "多智能体执行 完成",
+                    extra={"operation": "多智能体执行", "duration_ms": round(multi_agent_duration, 2)}
+                )
                 
                 # 在 message_stop 前执行后台任务
                 if background_tasks:
@@ -1111,9 +1146,9 @@ class ChatService:
                     session_id=session_id,
                     message_id=assistant_message_id
                 )
-                logger.info("多智能体执行完成", extra={"session_id": session_id})
             else:
                 # 单智能体执行
+                single_agent_start = time.time()
                 # 优化：使用计数器减少 Redis 查询频率（每 10 个事件检查一次）
                 stop_check_interval = 10
                 event_counter = 0
@@ -1205,6 +1240,12 @@ class ChatService:
                     
                     if event_type == "conversation_delta":
                         await apply_conversation_delta(self.conversation_service, event, conversation_id)
+                
+                single_agent_duration = (time.time() - single_agent_start) * 1000
+                logger.info(
+                    "单智能体执行 完成",
+                    extra={"operation": "单智能体执行", "duration_ms": round(single_agent_duration, 2)}
+                )
             
             # 阶段 3: 完成处理
             duration_ms = int((time.time() - start_time) * 1000)
@@ -1248,32 +1289,33 @@ class ChatService:
             # 生成 UsageResponse 并记录审计
             usage_response = None
             try:
-                usage_stats = agent.usage_tracker.get_stats()
-                
-                usage_response = UsageResponse.from_usage_tracker(
-                    tracker=agent.usage_tracker,
-                    model=self.default_model,
-                    latency=duration_ms / 1000.0
-                )
-                
-                token_usage = TokenUsage(
-                    input_tokens=usage_stats.get("total_input_tokens", 0),
-                    output_tokens=usage_stats.get("total_output_tokens", 0),
-                    thinking_tokens=usage_stats.get("total_thinking_tokens", 0),
-                    cache_read_tokens=usage_stats.get("total_cache_read_tokens", 0),
-                    cache_write_tokens=usage_stats.get("total_cache_creation_tokens", 0)
-                )
-                
-                await self.token_auditor.record(
-                    session_id=session_id,
-                    usage=token_usage,
-                    conversation_id=conversation_id,
-                    user_id=user_id,
-                    agent_id=getattr(agent, 'agent_id', None),
-                    model=self.default_model,
-                    duration_ms=duration_ms,
-                    query_length=len(str(message))
-                )
+                with log_execution_time("Token 审计", logger):
+                    usage_stats = agent.usage_tracker.get_stats()
+                    
+                    usage_response = UsageResponse.from_usage_tracker(
+                        tracker=agent.usage_tracker,
+                        model=self.default_model,
+                        latency=duration_ms / 1000.0
+                    )
+                    
+                    token_usage = TokenUsage(
+                        input_tokens=usage_stats.get("total_input_tokens", 0),
+                        output_tokens=usage_stats.get("total_output_tokens", 0),
+                        thinking_tokens=usage_stats.get("total_thinking_tokens", 0),
+                        cache_read_tokens=usage_stats.get("total_cache_read_tokens", 0),
+                        cache_write_tokens=usage_stats.get("total_cache_creation_tokens", 0)
+                    )
+                    
+                    await self.token_auditor.record(
+                        session_id=session_id,
+                        usage=token_usage,
+                        conversation_id=conversation_id,
+                        user_id=user_id,
+                        agent_id=getattr(agent, 'agent_id', None),
+                        model=self.default_model,
+                        duration_ms=duration_ms,
+                        query_length=len(str(message))
+                    )
                 
                 logger.info(
                     "Token 审计",
@@ -1474,9 +1516,15 @@ class ChatService:
                 extra={"session_id": session_id, "role": role, "timeout": timeout}
             )
             
+            probe_start = time.time()
             probe_result = await asyncio.wait_for(
                 llm_service.probe(max_retries=0),
                 timeout=timeout
+            )
+            probe_duration = (time.time() - probe_start) * 1000
+            logger.info(
+                "LLM 探测 完成",
+                extra={"operation": "LLM 探测", "duration_ms": round(probe_duration, 2), "role": role}
             )
             
             if probe_result.get("switched"):

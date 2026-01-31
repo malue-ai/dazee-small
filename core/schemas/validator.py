@@ -10,7 +10,7 @@ Schema 验证器 - 定义 Agent 配置的强类型规范
 """
 
 from typing import Dict, Any, List, Optional, Literal, TYPE_CHECKING
-from pydantic import BaseModel, Field, validator, root_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from enum import Enum
 
 from logger import get_logger
@@ -187,14 +187,16 @@ class PlanManagerConfig(ComponentConfig):
         description="步骤失败率阈值，超过时 Claude 应考虑 replan"
     )
     
-    @validator("granularity")
+    @field_validator("granularity")
+    @classmethod
     def validate_granularity(cls, v):
         valid = ["fine", "medium", "coarse"]
         if v not in valid:
             raise ValueError(f"granularity 必须是 {valid} 之一")
         return v
     
-    @validator("replan_strategy")
+    @field_validator("replan_strategy")
+    @classmethod
     def validate_replan_strategy(cls, v):
         valid = ["full", "incremental"]
         if v not in valid:
@@ -248,7 +250,8 @@ class ToolSelectorConfig(ComponentConfig):
         description="单个工具执行超时时间（秒）"
     )
     
-    @validator("selection_strategy")
+    @field_validator("selection_strategy")
+    @classmethod
     def validate_strategy(cls, v):
         valid = ["capability_based", "priority_based", "all"]
         if v not in valid:
@@ -295,7 +298,8 @@ class MemoryManagerConfig(ComponentConfig):
         description="触发压缩的消息数阈值"
     )
     
-    @validator("retention_policy")
+    @field_validator("retention_policy")
+    @classmethod
     def validate_policy(cls, v):
         valid = ["session", "user", "persistent"]
         if v not in valid:
@@ -373,7 +377,8 @@ class OutputFormatterConfig(ComponentConfig):
         description="是否在输出中包含元数据"
     )
     
-    @validator("default_format")
+    @field_validator("default_format")
+    @classmethod
     def validate_format(cls, v):
         valid = ["text", "markdown", "json", "html"]
         if v not in valid:
@@ -411,7 +416,8 @@ class SkillConfig(BaseModel):
         description="是否为必需 Skill"
     )
     
-    @validator("type")
+    @field_validator("type")
+    @classmethod
     def validate_type(cls, v):
         valid = ["anthropic", "custom", "mcp"]
         if v not in valid:
@@ -442,6 +448,52 @@ class ContextLimitsConfig(BaseModel):
         ge=0.7,
         le=0.99,
         description="自动截断阈值"
+    )
+
+
+# ============================================================
+# 提示词模板配置（V8.0）
+# ============================================================
+
+class PrefaceConfig(BaseModel):
+    """序言（Preface）配置 - Agent 执行前的开场白"""
+    enabled: bool = Field(
+        default=True,
+        description="是否启用序言"
+    )
+    max_tokens: int = Field(
+        default=150,
+        ge=50,
+        le=500,
+        description="序言最大 token 数"
+    )
+    template: str = Field(
+        ...,  # 必填
+        description="序言模板，支持变量: {intent_info}, {user_message}"
+    )
+
+
+class SimulatedThinkingConfig(BaseModel):
+    """模拟思考配置 - thinking_mode=simulated 时使用"""
+    system: str = Field(
+        ...,  # 必填
+        description="模拟思考的 system prompt"
+    )
+    template: str = Field(
+        ...,  # 必填
+        description="模拟思考模板，支持变量: {capabilities}, {context_section}, {query}"
+    )
+
+
+class PromptsConfig(BaseModel):
+    """提示词模板配置"""
+    preface: Optional[PrefaceConfig] = Field(
+        default=None,
+        description="序言配置，启用时必须配置"
+    )
+    simulated_thinking: Optional[SimulatedThinkingConfig] = Field(
+        default=None,
+        description="模拟思考配置，thinking_mode=simulated 时必须配置"
     )
 
 
@@ -582,6 +634,15 @@ class AgentSchema(BaseModel):
     )
     
     # ============================================================
+    # 提示词模板（V8.0）
+    # ============================================================
+    
+    prompts: Optional[PromptsConfig] = Field(
+        default=None,
+        description="提示词模板配置（preface, simulated_thinking）"
+    )
+    
+    # ============================================================
     # 可解释性
     # ============================================================
     
@@ -594,7 +655,8 @@ class AgentSchema(BaseModel):
     # 验证器
     # ============================================================
     
-    @root_validator(pre=True)
+    @model_validator(mode='before')
+    @classmethod
     def handle_legacy_format(cls, values):
         """
         处理旧格式兼容性
@@ -602,6 +664,9 @@ class AgentSchema(BaseModel):
         旧格式使用 components: Dict[str, Any]
         新格式使用独立的强类型字段
         """
+        if not isinstance(values, dict):
+            return values
+        
         # 如果有旧格式的 components 字段，转换为新格式
         if "components" in values and isinstance(values["components"], dict):
             components = values.pop("components")
@@ -613,13 +678,78 @@ class AgentSchema(BaseModel):
         
         return values
     
-    @validator("model")
+    @field_validator("model")
+    @classmethod
     def validate_model(cls, v):
         """验证模型名称"""
-        valid_prefixes = ["claude-", "gpt-", "gemini-"]
+        valid_prefixes = ["claude-", "gpt-", "gemini-", "qwen"]
         if not any(v.startswith(p) for p in valid_prefixes):
-            logger.warning(f"⚠️ 未知模型: {v}，可能不受支持")
+            logger.warning("未知模型，可能不受支持", extra={"model": v})
         return v
+    
+    @model_validator(mode='after')
+    def validate_prompts_config(self):
+        """
+        验证提示词配置
+        
+        - thinking_mode=simulated 时，必须配置 prompts.simulated_thinking
+        """
+        # 检查 simulated thinking 配置
+        if self.thinking_mode == "simulated":
+            if self.prompts is None or self.prompts.simulated_thinking is None:
+                raise ValueError(
+                    f"thinking_mode='{self.thinking_mode}' 需要配置 prompts.simulated_thinking，"
+                    "请在实例 config.yaml 中添加模拟思考模板"
+                )
+        
+        return self
+    
+    # ============================================================
+    # 便捷属性（V8.0）- 统一管理所有开关
+    # ============================================================
+    
+    @property
+    def is_intent_analysis_enabled(self) -> bool:
+        """意图识别是否启用"""
+        return self.intent_analyzer.enabled
+    
+    @property
+    def is_preface_enabled(self) -> bool:
+        """开场白是否启用"""
+        return bool(self.prompts and self.prompts.preface and self.prompts.preface.enabled)
+    
+    @property
+    def is_simulated_thinking_enabled(self) -> bool:
+        """模拟思考是否启用"""
+        return self.thinking_mode == "simulated"
+    
+    @property
+    def preface_template(self) -> Optional[str]:
+        """获取开场白模板"""
+        if self.prompts and self.prompts.preface:
+            return self.prompts.preface.template
+        return None
+    
+    @property
+    def preface_max_tokens(self) -> int:
+        """获取开场白最大 token 数"""
+        if self.prompts and self.prompts.preface:
+            return self.prompts.preface.max_tokens
+        return 150  # 默认值
+    
+    @property
+    def simulated_thinking_template(self) -> Optional[str]:
+        """获取模拟思考模板"""
+        if self.prompts and self.prompts.simulated_thinking:
+            return self.prompts.simulated_thinking.template
+        return None
+    
+    @property
+    def simulated_thinking_system(self) -> Optional[str]:
+        """获取模拟思考 system prompt"""
+        if self.prompts and self.prompts.simulated_thinking:
+            return self.prompts.simulated_thinking.system
+        return None
     
     # ============================================================
     # 转换方法
@@ -665,6 +795,10 @@ class AgentSchema(BaseModel):
         
         # 🆕 V7.10: thinking_mode 始终包含（有默认值）
         result["thinking_mode"] = self.thinking_mode
+        
+        # 🆕 V8.0: 提示词模板配置
+        if self.prompts is not None:
+            result["prompts"] = self.prompts.dict(exclude_none=True)
         
         return result
     

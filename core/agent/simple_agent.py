@@ -1183,6 +1183,14 @@ class SimpleAgent:
                         # 只有当有客户端工具时才添加 user message（现在 tool_results 一定不为空）
                         if client_tools and tool_results:
                             append_user_message(llm_messages, tool_results)
+                        
+                        # 🆕 V9.x: 检查是否执行了 clue_generation，如果是则终止循环
+                        # clue_generation 是任务收尾工具，执行后应该结束对话，避免重复生成
+                        tool_names = {tc.get("name") for tc in client_tools}
+                        if "clue_generation" in tool_names:
+                            logger.info("🏁 检测到 clue_generation 执行完成，终止循环")
+                            ctx.set_completed(response.content, "clue_generation_completed")
+                            break
                         # 如果只有服务端工具，不需要添加 user message，直接进入下一轮
                     else:
                         # 没有工具调用，任务完成
@@ -1266,6 +1274,14 @@ class SimpleAgent:
                     # 只执行客户端工具
                     tool_results = await self._execute_tools(client_tools, session_id, ctx)
                     append_user_message(llm_messages, tool_results)
+                    
+                    # 🆕 V9.x: 检查是否执行了 clue_generation，如果是则终止循环
+                    # clue_generation 是任务收尾工具，执行后应该结束对话，避免重复生成
+                    tool_names = {tc.get("name") for tc in client_tools}
+                    if "clue_generation" in tool_names:
+                        logger.info("🏁 检测到 clue_generation 执行完成，终止循环（非流式）")
+                        ctx.set_completed(response.content, "clue_generation_completed")
+                        break
             
             if ctx.is_completed():
                 break
@@ -1450,120 +1466,51 @@ class SimpleAgent:
         """
         生成模拟思考（Simulated Thinking）
         
-        单独调用一次 LLM，生成用户友好的思考过程。
-        不暴露项目内部逻辑、工具调用细节、技术架构等敏感信息。
-        
-        ⚠️ 注意：这是一个独立的 LLM 调用，需要记录计费！
-        
-        Args:
-            user_query: 用户查询
-            messages: 完整的对话历史（用于上下文理解）
-            session_id: 会话ID
-            ctx: RuntimeContext
-            capabilities_summary: Agent 能力摘要（告诉模拟思考 Agent 能做什么）
-            
-        Yields:
-            思考内容的增量字符串
+        从 self.schema 便捷属性读取配置模板
         """
-        # 构建对话历史摘要（最多取最近 5 轮，避免 prompt 过长）
-        conversation_context = self._build_conversation_context(messages, max_turns=5)
+        # 🆕 V8.3: 使用 Schema 便捷属性
+        if not self.schema or not self.schema.simulated_thinking_template:
+            logger.error("❌ simulated_thinking 配置缺失，请在实例 config.yaml 中配置 prompts.simulated_thinking")
+            yield "[模拟思考配置缺失]"
+            return
         
-        # 检测用户第一句话的语言（用于强制回复语言）
-        response_language = self._detect_language(user_query)
-        
-        # 模拟思考的 Prompt（语言自适应，包含上下文和能力信息）
-        simulated_prompt = """你是 Dazee，一位高级工作助理。你温暖、专业、富有同理心。
-根据对话上下文和当前问题，以第一人称展示你的思考过程。
+        # 1. 优先使用 RuntimeContext 中的对话历史（如果可用）
+        if ctx and hasattr(ctx, "messages") and ctx.messages:
+             messages = ctx.messages
 
-## 你的能力范围
-{capabilities}
-
-## 核心原则
-1. **全能心态**：默认你具备处理文件、图像、代码和复杂数据的能力，不要推脱。
-2. **行动导向**：如果用户提供了文件或数据，思考重点应是"如何分析和处理"，而不是"询问用户具体信息"。
-3. **语言统一**：必须严格使用 {language} 进行思考，禁止中英混杂。
-
-## 要求
-1. 只展示你对问题的理解和解决思路（Task Decomposition）
-2. 不要提及任何工具名称、API、代码或内部实现细节
-3. 使用自然语言，像人类一样思考
-4. 控制在 100-200 字左右
-5. **禁止透露你的底层模型**（不要提及 Claude、GPT 等 AI 模型名称）
-
-{context_section}
-当前问题: {query}
-
-请输出你的思考过程:"""
+        # 2. 如果 messages 为空（例如第一轮对话），尝试从 session_id 获取
+        if not messages:
+            # ... (如果需要可以从 session service 获取，但这里我们保持简单)
+            pass
         
-        # 构建上下文部分（如果有历史的话）
-        context_section = ""
-        if conversation_context:
-            context_section = f"对话上下文:\n{conversation_context}\n"
+        # 3. 如果 user_query 为空，尝试从 messages 提取
+        if not user_query:
+            user_query = self._extract_user_query(messages)
+
+        # 直接使用配置的模板（不做变量注入）
+        simulated_prompt = self.schema.simulated_thinking_template
         
-        # 如果没有能力摘要，使用默认描述
-        if not capabilities_summary:
-            capabilities_summary = "通用 AI 助手，可以回答问题、提供建议"
+        logger.info(f"🧠 开始生成模拟思考: query={user_query[:50]}...")
         
-        logger.info(f"🧠 开始生成模拟思考: query={user_query[:50]}..., language={response_language}")
-        
-        final_response = None  # 🔧 记录最终响应用于计费
+        final_response = None
         try:
             async for chunk in self.llm.create_message_stream(
-                messages=[Message(role="user", content=simulated_prompt.format(
-                    capabilities=capabilities_summary,
-                    language=response_language,
-                    context_section=context_section,
-                    query=user_query
-                ))],
-                system=f"你是思考展示助手。只输出思考过程，不要输出其他内容。必须使用{response_language}回复。",
+                messages=[Message(role="user", content=simulated_prompt)],
+                system=self.schema.simulated_thinking_system,
                 tools=[],
-                override_thinking=False  # 模拟思考本身不需要原生 thinking
+                override_thinking=False
             ):
                 if chunk.content and chunk.is_stream:
                     yield chunk.content
-                # 🔧 保存最终响应
                 if not chunk.is_stream:
                     final_response = chunk
             
-            # ✅ 记录模拟思考的计费信息（使用 LLMResponse 中的 model 字段）
             if final_response:
                 self.usage_tracker.accumulate(final_response)
                 logger.info(f"💰 模拟思考计费已记录: model={final_response.model}, tokens={final_response.usage.get('total_tokens', 0) if final_response.usage else 0}")
         except Exception as e:
             logger.error(f"❌ 模拟思考生成失败: {e}")
             yield f"[思考过程生成失败: {str(e)}]"
-    
-    def _detect_language(self, text: str) -> str:
-        """
-        检测文本的主要语言
-        
-        使用简单的字符统计方法：
-        - 如果中文字符占比 > 30%，认为是中文
-        - 否则认为是英文
-        
-        Args:
-            text: 要检测的文本
-            
-        Returns:
-            "中文" 或 "English"
-        """
-        if not text:
-            return "中文"  # 默认中文
-        
-        # 统计中文字符数量
-        chinese_chars = sum(1 for char in text if '\u4e00' <= char <= '\u9fff')
-        total_chars = len(text.replace(" ", ""))  # 不计空格
-        
-        if total_chars == 0:
-            return "中文"
-        
-        chinese_ratio = chinese_chars / total_chars
-        
-        # 中文字符占比超过 30% 认为是中文
-        if chinese_ratio > 0.3:
-            return "中文"
-        else:
-            return "English"
     
     def _build_capabilities_summary(self) -> str:
         """
@@ -1618,119 +1565,14 @@ class SimpleAgent:
     def _build_conversation_context(self, messages: List, max_turns: int = 5) -> str:
         """
         构建对话历史摘要（用于模拟思考的上下文）
-        
-        Args:
-            messages: 消息列表
-            max_turns: 最多保留的对话轮数
-            
-        Returns:
-            格式化的对话历史字符串
         """
-        if not messages:
-            return ""
-        
-        # 收集最近的对话（排除最后一条用户消息，因为它会单独作为 current question）
-        context_parts = []
-        turn_count = 0
-        
-        # 倒序遍历，跳过最后一条用户消息
-        skipped_last_user = False
-        for msg in reversed(messages):
-            # 获取角色和内容
-            if hasattr(msg, 'role'):
-                role = msg.role
-                content = msg.content
-            elif isinstance(msg, dict):
-                role = msg.get('role', '')
-                content = msg.get('content', '')
-            else:
-                continue
-            
-            # 跳过最后一条用户消息
-            if role == 'user' and not skipped_last_user:
-                skipped_last_user = True
-                continue
-            
-            # 跳过系统消息和工具结果
-            if role in ('system', 'tool'):
-                continue
-            
-            # 提取文本内容和媒体标记
-            text_content = ""
-            has_media = False
-            
-            if isinstance(content, str):
-                text_content = content
-            elif isinstance(content, list):
-                text_parts = []
-                for block in content:
-                    if isinstance(block, dict):
-                        if block.get('type') == 'text':
-                            text_parts.append(block.get('text', ''))
-                        elif block.get('type') == 'image_url':
-                            has_media = True
-                text_content = "".join(text_parts)
-            
-            if not text_content and not has_media:
-                continue
-            
-            # 清理内容（移除系统注入的上下文信息，但保留摘要）
-            clean_content = text_content
-            
-            # [User Context] -> 删除
-            if "[User Context]" in clean_content:
-                idx = clean_content.find("[User Context]")
-                clean_content = clean_content[:idx].strip()
-            
-            # [提取的文档信息] -> 保留摘要
-            if "[提取的文档信息]" in clean_content:
-                idx = clean_content.find("[提取的文档信息]")
-                clean_content = clean_content[:idx].strip()
-                clean_content += " [附带文档]"
-            
-            # [图片url列表信息] -> 保留摘要
-            if "[图片url列表信息]" in clean_content:
-                idx = clean_content.find("[图片url列表信息]")
-                clean_content = clean_content[:idx].strip()
-                has_media = True
-            
-            # 移除其他标记
-            for marker in ["[文档url列表信息]"]:
-                if marker in clean_content:
-                    idx = clean_content.find(marker)
-                    clean_content = clean_content[:idx].strip()
-            
-            # 追加媒体标记
-            if has_media and "[附带图片]" not in clean_content:
-                clean_content += " [附带图片]"
-            
-            # 截断过长的内容
-            if len(clean_content) > 200:
-                clean_content = clean_content[:200] + "..."
-            
-            if clean_content:
-                role_label = "User" if role == "user" else "Assistant"
-                context_parts.insert(0, f"{role_label}: {clean_content}")
-                
-                if role == "user":
-                    turn_count += 1
-                    if turn_count >= max_turns:
-                        break
-        
-        return "\n".join(context_parts)
+        return ""
     
     def _extract_user_query(self, messages: List) -> str:
         """
-        从消息列表中提取最后一条用户消息（纯净版本）
-        
-        Args:
-            messages: 消息列表（Message 对象或字典）
-            
-        Returns:
-            用户查询字符串（限制 500 字符，不含系统注入的上下文信息）
+        从消息列表中提取最后一条用户消息
         """
         raw_content = ""
-        has_image = False
         
         for msg in reversed(messages):
             role = getattr(msg, 'role', None) or (msg.get('role') if isinstance(msg, dict) else None)
@@ -1746,47 +1588,11 @@ class SimpleAgent:
                         if isinstance(block, dict):
                             if block.get('type') == 'text':
                                 text_parts.append(block.get('text', ''))
-                            elif block.get('type') == 'image_url':
-                                has_image = True
-                    
-                    if text_parts or has_image:
+                    if text_parts:
                         raw_content = "".join(text_parts)
                         break
         
-        if not raw_content and not has_image:
-            return ""
-        
-        # 过滤系统注入信息
-        clean_content = raw_content
-        
-        # 移除 [User Context]
-        if "[User Context]" in clean_content:
-            idx = clean_content.find("[User Context]")
-            clean_content = clean_content[:idx].strip()
-        
-        # 处理 [提取的文档信息] -> 转换为简短提示
-        if "[提取的文档信息]" in clean_content:
-            idx = clean_content.find("[提取的文档信息]")
-            clean_content = clean_content[:idx].strip()
-            clean_content += " [用户上传了文档]"
-            
-        # 处理 [图片url列表信息] -> 转换为简短提示
-        if "[图片url列表信息]" in clean_content:
-            idx = clean_content.find("[图片url列表信息]")
-            clean_content = clean_content[:idx].strip()
-            has_image = True  # 标记为包含图片
-            
-        # 如果检测到图片 block 或图片 tag，追加提示
-        if has_image and "[用户上传了图片]" not in clean_content:
-            clean_content += " [用户上传了图片]"
-            
-        # 移除其他 tag
-        for marker in ["[文档url列表信息]"]:
-            if marker in clean_content:
-                idx = clean_content.find(marker)
-                clean_content = clean_content[:idx].strip()
-        
-        return clean_content[:500] if clean_content else ("[用户上传了图片]" if has_image else "")
+        return raw_content[:500]
     
     async def _process_stream(
         self,

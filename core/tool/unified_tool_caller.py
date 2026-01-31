@@ -6,10 +6,10 @@ UnifiedToolCaller - 统一工具调用协调器
 
 from typing import Any, Dict, List, Optional
 
-from logger import Logger
+from logger import get_logger
 from core.tool.capability import CapabilityRegistry
 
-logger = Logger.get_logger(__name__)
+logger = get_logger(__name__)
 
 
 class UnifiedToolCaller:

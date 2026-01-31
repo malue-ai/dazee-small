@@ -1072,8 +1072,7 @@ capabilities:
   type: TOOL
   subtype: CUSTOM
   provider: user
-  level: 2
-  enabled: true  # 暂时禁用 HITL 工具
+  level: 1
   implementation:
     module: tools.request_human_confirmation
     class: HITLTool
@@ -1924,7 +1923,7 @@ capabilities:
   subtype: CUSTOM
   provider: user
   invocation_hint: DIRECT
-  level: 2
+  level: 1
   cache_stable: false
   implementation:
     module: tools.clue_generation

@@ -31,7 +31,7 @@ agent:
   plan_manager_enabled: true
   
   # 允许并行工具调用（提高效率）
-  allow_parallel_tools: false
+  allow_parallel_tools: true
   
   # LLM 超参数
   llm:

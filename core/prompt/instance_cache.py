@@ -1110,10 +1110,41 @@ class InstancePromptCache:
             if "plan_manager_enabled" in agent_config:
                 self.agent_schema.plan_manager.enabled = agent_config["plan_manager_enabled"]
         
-        # 合并 LLM 超参数
+        # 合并 prompts 配置（必须在 thinking_mode 之前，验证器依赖它）
+        prompts_config = config.get("prompts", {})
+        logger.debug(f"📋 config keys: {list(config.keys())}, prompts_config: {bool(prompts_config)}")
+        if prompts_config:
+            from core.schemas.validator import PromptsConfig, PrefaceConfig, SimulatedThinkingConfig
+            
+            # 构建 PromptsConfig
+            preface_cfg = prompts_config.get("preface")
+            simulated_thinking_cfg = prompts_config.get("simulated_thinking")
+            
+            preface = None
+            if preface_cfg:
+                preface = PrefaceConfig(
+                    enabled=preface_cfg.get("enabled", True),
+                    max_tokens=preface_cfg.get("max_tokens", 150),
+                    template=preface_cfg.get("template", "")
+                )
+            
+            simulated_thinking = None
+            if simulated_thinking_cfg:
+                simulated_thinking = SimulatedThinkingConfig(
+                    system=simulated_thinking_cfg.get("system", ""),
+                    template=simulated_thinking_cfg.get("template", "")
+                )
+            
+            self.agent_schema.prompts = PromptsConfig(
+                preface=preface,
+                simulated_thinking=simulated_thinking
+            )
+            logger.info("📝 prompts 配置已应用")
+        
+        # 合并 LLM 超参数（thinking_mode 必须在 prompts 之后）
         llm_config = agent_config.get("llm", {})
         if llm_config:
-            # 🆕 V7.10: 处理 thinking_mode（直接在 AgentSchema 上）
+            # 处理 thinking_mode（直接在 AgentSchema 上）
             if "thinking_mode" in llm_config:
                 self.agent_schema.thinking_mode = llm_config["thinking_mode"]
                 logger.info(f"🧠 thinking_mode 配置已应用: {llm_config['thinking_mode']}")

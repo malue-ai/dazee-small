@@ -91,8 +91,9 @@ class ClueGenerationTool(BaseTool):
             
             return {
                 "success": True,
-                "message": f"成功处理 {len(valid_tasks)} 个操作建议",
-                "tasks": valid_tasks
+                "message": f"✅ 成功将 {len(valid_tasks)} 个线索发送到前端。",
+                "tasks": valid_tasks,
+                "completed": True  # 明确标记任务完成
             }
         
         except Exception as e:

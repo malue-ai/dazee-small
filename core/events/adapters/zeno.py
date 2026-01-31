@@ -40,10 +40,6 @@ TOOL_TO_DELTA_TYPE: Dict[str, str] = {
     
     # 沙盒工具 - 获取公开 URL 时生成 sandbox delta
     "sandbox_get_public_url": "sandbox",
-    
-    # 代码执行（可选，看前端是否需要特殊 UI）
-    # "bash": "code",
-    # "e2b_python_sandbox": "code",
 }
 
 # 问数平台工具 → 多个 Delta 类型映射
@@ -53,7 +49,6 @@ WENSHU_ANALYTICS_DELTA_FIELDS = {
     "data": "data",        # 查询结果数据
     "chart": "chart",      # 图表配置
     "report": "report",    # 分析报告
-    "intent": "intent",    # 意图识别（可选）
 }
 
 # 需要拆分响应的分析类 API（通过 api_name 识别）
@@ -95,8 +90,8 @@ class ZenOAdapter(EventAdapter):
     - content_delta (text) → message.assistant.delta (type: response)
     - message_delta (preface) → message.assistant.delta (type: preface)  # V7.8: 由 chat_service 独立发送
     - tool_result:plan_todo → message.assistant.delta (type: progress)  # 通过 enhance_tool_result 处理
-    - tool_result:hitl → message.assistant.delta (type: hitl_data)  # 🆕 人机交互表单响应
-    - tool_result:clue_generation → message.assistant.delta (type: clue)  # 🆕 操作线索
+    - tool_result:hitl → message.assistant.delta (type: hitl_data)
+    - tool_result:clue_generation → message.assistant.delta (type: clue)
     - message_delta:recommended → message.assistant.delta (type: recommended)
     - message_stop → message.assistant.done
     - error → message.assistant.error
@@ -997,15 +992,13 @@ class ZenOAdapter(EventAdapter):
             logger.debug(f"🔧 处理 sandbox_get_public_url 工具结果")
             return self._generate_sandbox_deltas(result_content, tool_input, conversation_id)
         
-        # 沙盒工具：sandbox_run_command 后台模式返回 URL 时也生成 sandbox delta
+        # 沙盒工具：sandbox_run_command 返回 URL 时生成 sandbox delta
+        # 注意：只有后台模式（background=True + port）才会返回 url，所以只需检查 url 即可
         if tool_name == "sandbox_run_command":
             try:
                 result = json.loads(result_content) if isinstance(result_content, str) else result_content
-                # 只有当结果包含 url 字段时才生成 delta
-                # 🔧 修复：background 是输入参数，不在返回结果里，改为检查 tool_input
-                background = tool_input.get("background", False)
-                if result.get("url") and background:
-                    logger.debug(f"🔧 处理 sandbox_run_command 后台模式返回的 URL")
+                if result.get("url"):
+                    logger.debug(f"🔧 处理 sandbox_run_command 返回的 URL: {result.get('url')}")
                     return self._generate_sandbox_deltas(result_content, tool_input, conversation_id)
             except (json.JSONDecodeError, TypeError):
                 pass
