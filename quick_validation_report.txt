@@ -1,0 +1,34 @@
+Zenflux Agent 快速验证报告
+生成时间: 2026-01-27 23:50:31
+
+通过: 12, 失败: 1, 跳过: 0
+
+
+【环境】
+  PASS: ANTHROPIC_API_KEY
+  PASS: OPENAI_API_KEY
+  PASS: DATABASE_URL
+
+【框架】
+  PASS: PipelineQualityTracer
+  PASS: AnswerQualityEvaluator
+  PASS: 测试场景定义
+
+【意图识别】
+  PASS: 单次识别
+
+【管道追踪】
+  FAIL: 六环节追踪
+
+【质量归因】
+  PASS: 达标场景
+  PASS: 不达标场景
+
+【质量评估】
+  PASS: 六维度评估
+
+【场景覆盖】
+  PASS: 意图覆盖
+
+【端到端】
+  PASS: 完整数据流
