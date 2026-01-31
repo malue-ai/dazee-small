@@ -94,10 +94,6 @@ EXISTING_ALB_ARN="arn:aws:elasticloadbalancing:ap-southeast-1:308470327605:loadb
 REDIS_HOST="zen0-backend-staging-redis.w9tdej.0001.apse1.cache.amazonaws.com"
 REDIS_PORT="6379"
 
-# 实例配置（支持实例级 .env）
-INSTANCE_NAME=""  # 通过 --instance 参数指定
-INSTANCES_DIR="${PROJECT_ROOT}/instances"
-
 # 颜色输出
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -347,107 +343,25 @@ cleanup_failed_resources() {
 setup_env_variables() {
     log_step "配置环境变量"
     
-    # 使用临时文件合并所有 .env（兼容 Bash 3.x）
-    local merged_env=$(mktemp)
-    local total_files=0
-    
-    # 1. 读取项目根目录 .env（基础配置）
-    if [ -f ".env" ]; then
-        log_info "📄 项目级 .env"
-        _load_env_file ".env" "$merged_env"
-        ((total_files++))
-    else
-        log_warning "⚠️ 项目级 .env 不存在"
-    fi
-    
-    # 2. 扫描 instances/ 下所有实例的 .env
-    local instances_dir="${PROJECT_ROOT}/instances"
-    if [ -d "$instances_dir" ]; then
-        log_info "📂 扫描实例目录: $instances_dir"
-        for instance_dir in "$instances_dir"/*/; do
-            # 跳过 _template 目录
-            local instance_name=$(basename "$instance_dir")
-            if [[ "$instance_name" == "_template" ]]; then
-                continue
-            fi
-            
-            local instance_env="${instance_dir}.env"
-            if [ -f "$instance_env" ]; then
-                log_info "📄 实例 ${instance_name}/.env"
-                _load_env_file "$instance_env" "$merged_env"
-                ((total_files++))
-            fi
-        done
-    fi
-    
-    # 检查是否有 .env 文件
-    if [ $total_files -eq 0 ]; then
-        log_error "未找到任何 .env 文件"
-        log_info "请创建以下任一文件："
-        log_info "  1. 项目级: ${PROJECT_ROOT}/.env"
-        log_info "  2. 实例级: ${instances_dir}/<实例名>/.env"
-        rm -f "$merged_env"
+    if [ ! -f ".env" ]; then
+        log_error ".env 文件不存在"
         exit 1
     fi
     
-    # 添加 Redis 配置（如果不存在）
-    if ! grep -q "^REDIS_HOST=" "$merged_env"; then
-        echo "REDIS_HOST=${REDIS_HOST}" >> "$merged_env"
-        echo "REDIS_PORT=${REDIS_PORT}" >> "$merged_env"
-        log_info "   添加 Redis 配置"
+    log_info "从 .env 文件读取配置"
+    
+    # 添加 Redis 配置到 .env（如果不存在）
+    if ! grep -q "REDIS_HOST" .env; then
+        log_info "添加 Redis 配置到 .env"
+        echo "" >> .env
+        echo "# Redis 配置（复用 zen0-backend）" >> .env
+        echo "REDIS_HOST=${REDIS_HOST}" >> .env
+        echo "REDIS_PORT=${REDIS_PORT}" >> .env
     fi
     
-    # 去重（保留最后出现的值）并统计
-    # 兼容 macOS：用 tail -r 替代 tac，或纯 awk 实现
-    local unique_env=$(mktemp)
-    # 方法：反向读取文件，取每个 key 第一次出现的，再反向输出
-    if command -v tac &>/dev/null; then
-        # Linux: 有 tac
-        tac "$merged_env" | awk -F= '!seen[$1]++' | tac > "$unique_env"
-    elif command -v tail &>/dev/null && tail -r /dev/null &>/dev/null 2>&1; then
-        # macOS: 用 tail -r
-        tail -r "$merged_env" | awk -F= '!seen[$1]++' | tail -r > "$unique_env"
-    else
-        # 纯 awk 实现（最后出现的值覆盖之前的）
-        awk -F= '{key=$1; val=$0; if(key!="") lines[key]=val} END {for(k in lines) print lines[k]}' "$merged_env" > "$unique_env"
-    fi
-    local var_count=$(wc -l < "$unique_env" | tr -d ' ')
+    log_info "上传环境变量到 SSM Parameter Store..."
     
-    log_info "📤 上传 ${var_count} 个环境变量到 SSM Parameter Store..."
-    
-    # 上传所有合并后的环境变量
-    local success_count=0
-    while IFS='=' read -r key value || [ -n "$key" ]; do
-        [ -z "$key" ] && continue
-        
-        local param_name="/copilot/${APP_NAME}/${ENV_NAME}/secrets/${key}"
-        
-        if aws ssm put-parameter \
-            --name "$param_name" \
-            --value "$value" \
-            --type "SecureString" \
-            --overwrite \
-            --region "$REGION" &> /dev/null; then
-            log_info "  ✓ $key"
-            ((success_count++))
-        else
-            log_warning "  ✗ $key (可能已存在或权限不足)"
-        fi
-    done < "$unique_env"
-    
-    # 清理临时文件
-    rm -f "$merged_env" "$unique_env"
-    
-    log_success "环境变量上传完成（${success_count}/${var_count} 个成功）"
-}
-
-# 辅助函数：加载单个 .env 文件到临时文件
-# 用法: _load_env_file <源文件> <目标临时文件>
-_load_env_file() {
-    local env_file=$1
-    local output_file=$2
-    local count=0
-    
+    # 读取 .env 文件并上传到 SSM
     while IFS='=' read -r key value || [ -n "$key" ]; do
         # 跳过注释和空行
         [[ "$key" =~ ^#.*$ ]] && continue
@@ -462,12 +376,22 @@ _load_env_file() {
             continue
         fi
         
-        # 追加到临时文件
-        echo "${key}=${value}" >> "$output_file"
-        ((count++))
-    done < "$env_file"
+        # 上传到 SSM（敏感信息）
+        local param_name="/copilot/${APP_NAME}/${ENV_NAME}/secrets/${key}"
+        
+        if aws ssm put-parameter \
+            --name "$param_name" \
+            --value "$value" \
+            --type "SecureString" \
+            --overwrite \
+            --region "$REGION" &> /dev/null; then
+            log_info "  ✓ $key"
+        else
+            log_warning "  ✗ $key (可能已存在或权限不足)"
+        fi
+    done < .env
     
-    log_info "   已加载 ${count} 个变量"
+    log_success "环境变量上传完成"
 }
 
 # ============================================================
@@ -651,16 +575,9 @@ deploy_service() {
     
     cleanup_review_stacks
     
-    # ECR 仓库配置
-    local ECR_REGISTRY="308470327605.dkr.ecr.${REGION}.amazonaws.com"
-    local ECR_REPO="${ECR_REGISTRY}/${APP_NAME}/${SERVICE_NAME}"
-    local IMAGE_TAG=$(date +%Y%m%d-%H%M%S)
-    local FULL_IMAGE="${ECR_REPO}:${IMAGE_TAG}"
-    
     log_info "应用: $APP_NAME"
     log_info "环境: $ENV_NAME"
     log_info "服务: $SERVICE_NAME"
-    log_info "镜像: $FULL_IMAGE"
     log_warning "预计时间: 10-15 分钟"
     echo ""
     
@@ -683,36 +600,8 @@ deploy_service() {
         log_success "服务初始化成功"
     fi
     
-    # 手动构建并推送镜像（解决 Copilot 跨项目目录部署时的 bug）
-    log_step "构建并推送 Docker 镜像"
-    
-    log_info "登录 ECR..."
-    aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
-    
-    log_info "构建镜像: $FULL_IMAGE (平台: linux/amd64)"
-    # 指定 linux/amd64 平台，确保与 ECS Fargate 兼容
-    if ! docker build --platform linux/amd64 -f Dockerfile.production -t "$FULL_IMAGE" -t "${ECR_REPO}:latest" .; then
-        log_error "镜像构建失败"
-        exit 1
-    fi
-    
-    log_info "推送镜像..."
-    if ! docker push "$FULL_IMAGE"; then
-        log_error "镜像推送失败"
-        exit 1
-    fi
-    docker push "${ECR_REPO}:latest"
-    
-    log_success "镜像推送完成: $FULL_IMAGE"
-    
-    # 更新 manifest 中的镜像位置
-    log_info "更新 manifest 镜像位置..."
-    sed -i.bak "s|location:.*|location: ${FULL_IMAGE}|" copilot/${SERVICE_NAME}/manifest.yml
-    rm -f copilot/${SERVICE_NAME}/manifest.yml.bak
-    
     START_TIME=$(date +%s)
     
-    # 使用 --no-rollback 避免自动回滚，便于调试
     if $COPILOT svc deploy --name "$SERVICE_NAME" --env "$ENV_NAME"; then
         END_TIME=$(date +%s)
         DURATION=$((END_TIME - START_TIME))

@@ -125,6 +125,7 @@ class EventAdapter(ABC):
         
         可以配置订阅特定的 delta 类型，如：
         - "message_delta:confirmation_request"
+        - "message_delta:plan"
         - "message_delta:recommended"
         
         Args:
@@ -147,35 +148,4 @@ class EventAdapter(ABC):
                 return extended_type in self.supported_events
         
         return False
-    
-    async def enhance_tool_result(
-        self,
-        tool_name: str,
-        tool_input: Dict[str, Any],
-        tool_result: Dict[str, Any],
-        conversation_id: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
-        """
-        增强 tool_result，返回额外的 delta 列表（可选实现）
-        
-        子类可以覆盖此方法，根据工具类型生成额外的 message_delta 事件。
-        例如 ZenOAdapter 会将分析类 API 的结果拆分为 sql/data/chart 等多个 delta。
-        
-        Args:
-            tool_name: 工具名称（如 "api_calling"）
-            tool_input: 工具输入参数（包含 api_name 等）
-            tool_result: 工具返回结果（content_block 格式）
-                {
-                    "type": "tool_result",
-                    "tool_use_id": "...",
-                    "content": "...",
-                    "is_error": False
-                }
-            conversation_id: 实际的对话 ID（用于 sandbox 等工具的 delta 生成）
-            
-        Returns:
-            delta 列表，每个元素是 {"type": "xxx", "content": "..."}
-            默认返回空列表（不增强）
-        """
-        return []
 

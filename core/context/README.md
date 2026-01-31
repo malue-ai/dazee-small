@@ -24,7 +24,6 @@ core/context/
 ├── runtime.py             # ✅ 运行时状态（SSE 流式处理）
 ├── conversation.py        # ✅ 对话历史（消息加载、Token 压缩）
 ├── prompt_manager.py      # ✅ Prompt 追加（事件驱动）
-├── metadata_provider.py   # ✅ 通用元数据获取器（plan、compression 等）
 └── context_engineering.py # ⚠️ 上下文优化（需要精简）
 ```
 
@@ -35,7 +34,6 @@ core/context/
 | `runtime.py` | SSE 块状态、Content 累积、Turn 管理 | 不处理 Prompt、不访问数据库 |
 | `conversation.py` | 从 DB 加载历史消息、Token 压缩 | 不处理流式响应、不构建 Prompt |
 | `prompt_manager.py` | 事件驱动的 Prompt 片段追加 | 不处理消息格式转换 |
-| `metadata_provider.py` | 从 conversation.metadata 获取各种数据 | 不处理具体业务逻辑 |
 | `context_engineering.py` | 6 大优化策略的实现 | 不做 Prompt 片段管理 |
 
 ## 🏗️ 架构图
@@ -136,33 +134,7 @@ if prompt_mgr.has_fragment(ctx, "sandbox_context"):
     print("已追加沙盒上下文")
 ```
 
-### 4. MetadataProvider - 通用元数据获取
-
-```python
-from core.context.metadata_provider import (
-    ConversationMetadataProvider,
-    load_plan_for_context,
-    load_context_metadata
-)
-
-# 方式1：使用 Provider 类（推荐，支持缓存）
-provider = ConversationMetadataProvider("conv_123")
-plan = await provider.get_plan()
-compression = await provider.get_compression_info()
-
-# 方式2：批量获取（一次数据库查询）
-data = await provider.get_context_data(["plan", "compression"])
-plan = data.get("plan")
-
-# 方式3：便捷函数
-plan = await load_plan_for_context("conv_123")
-context = await load_context_metadata("conv_123", ["plan", "compression"])
-
-# 扩展新字段：只需在 FIELD_CONFIGS 中添加配置
-# 然后添加对应的 get_xxx() 方法
-```
-
-### 5. ContextEngineeringManager - 上下文优化
+### 4. ContextEngineeringManager - 上下文优化
 
 ```python
 from core.context import create_context_engineering_manager

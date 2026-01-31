@@ -1,119 +1,74 @@
-/**
- * 类型定义入口文件
- * 从各模块重新导出所有类型
- */
+// API 响应类型
+export interface ApiResponse<T> {
+  code: number
+  message: string
+  data: T
+}
 
-// 从 api.ts 导出 API 相关类型
-export type {
-  ApiResponse,
-  PaginationParams,
-  PaginatedResponse,
-  LoginRequest,
-  LoginResponse,
-  User,
-  Conversation,
-  ConversationListResponse,
-  Message,
-  MessageMetadata,
-  MessageListResponse,
-  SessionStatus,
-  SessionStatusResponse,
-  SessionEvent,
-  ActiveSession,
-  UserSessionsResponse,
-  Agent,
-  AgentListResponse,
-  DocumentStatus,
-  KnowledgeDocument,
-  DocumentListResponse,
-  RetrievalResult,
-  RetrievalResponse,
-  KnowledgeStats,
-  FileUploadResponse,
-  ChatRequest,
-  ChatResponse,
-  HITLSubmitRequest,
-  HITLSubmitResponse
-} from './api'
+// 用户类型
+export interface User {
+  id: string
+  username: string
+  created_at?: string
+}
 
-// 从 chat.ts 导出聊天相关类型
-export type {
-  SSEEventType,
-  SSEEvent,
-  ConversationStartData,
-  ContentStartData,
-  ContentDeltaData,
-  ContentStopData,
-  MessageDeltaData,
-  ReconnectInfoData,
-  ContentBlockType,
-  BaseContentBlock,
-  TextContentBlock,
-  ThinkingContentBlock,
-  ToolUseContentBlock,
-  ToolResultContentBlock,
-  ImageContentBlock,
-  FileContentBlock,
-  ContentBlock,
-  ToolStatus,
-  ToolStatusMap,
-  AttachedFile,
-  PlanStep,
-  PlanData,
-  UIMessage,
-  HITLConfirmationType,
-  HITLFormQuestion,
-  HITLConfirmRequest,
-  HITLResponse,
-  SendMessageOptions,
-  ActiveSessionInfo,
-  ActiveSessionsMap
-} from './chat'
+// 认证类型
+export interface LoginRequest {
+  username: string
+  password: string
+}
 
-// 从 workspace.ts 导出工作区相关类型
-export type {
-  FileType,
-  FileItem,
-  FileContentResponse,
-  SandboxStatus,
-  SandboxStack,
-  SandboxInfo,
-  SandboxStatusResponse,
-  CommandResult,
-  ProjectInfo,
-  ProjectRunResult,
-  TerminalLogType,
-  TerminalLogItem,
-  CodeLanguage,
-  LivePreviewState
-} from './workspace'
+export interface LoginResponse {
+  token: string
+  user: User
+}
 
-export { WORKSPACE_API_PATHS } from './workspace'
+// 对话类型
+export interface Conversation {
+  id: string
+  title: string
+  user_id: string
+  created_at: string
+  updated_at: string
+}
 
-// 从 skills.ts 导出 Skill 相关类型
-export type {
-  SkillPriority,
-  SkillStatus,
-  Skill,
-  SkillSummary,
-  SkillListResponse,
-  SkillCreateRequest,
-  SkillUpdateRequest,
-  SkillUpdateContentRequest,
-  SkillScript,
-  SkillResource,
-  SkillInstallRequest,
-  SkillUninstallRequest,
-  SkillToggleRequest
-} from './skills'
+// 消息类型
+export interface Message {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  conversation_id: string
+  created_at: string
+  metadata?: Record<string, unknown>
+}
 
-// ==================== 兼容性类型别名 ====================
-// 保持向后兼容，旧代码可以继续使用这些名称
+// 消息内容块类型
+export interface ContentBlock {
+  type: 'text' | 'thinking' | 'tool_use' | 'tool_result'
+  text?: string
+  thinking?: string
+  id?: string
+  name?: string
+  input?: Record<string, unknown>
+  tool_use_id?: string
+  content?: string
+  is_error?: boolean
+  partialInput?: string
+  _blockType?: string
+}
 
-/**
- * @deprecated 请使用 KnowledgeDocument
- */
-export type Knowledge = {
+// Agent 类型
+export interface Agent {
+  id: string
+  name: string
+  description?: string
+  config?: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+// 知识库类型
+export interface Knowledge {
   id: string
   name: string
   description?: string
@@ -121,14 +76,51 @@ export type Knowledge = {
   created_at: string
 }
 
-/**
- * @deprecated 请使用 AttachedFile
- */
-export type UploadedFile = {
+// 文件类型
+export interface UploadedFile {
   file_id: string
   filename: string
   mime_type: string
   file_size?: number
   preview_url?: string
+}
+
+// SSE 事件类型
+export interface SSEEvent {
+  type: string
+  data: Record<string, unknown>
+  session_id?: string
+}
+
+// UI 消息类型（前端展示用）
+export interface UIMessage {
+  id: number | string
+  role: 'user' | 'assistant'
+  content: string
+  thinking?: string
+  contentBlocks: ContentBlock[]
+  toolStatuses: Record<string, ToolStatus>
+  files?: UploadedFile[]
+  recommendedQuestions?: string[]
+  planResult?: PlanData | null
+  timestamp: Date
+}
+
+export interface ToolStatus {
+  pending?: boolean
+  success?: boolean
+  result?: string
+}
+
+export interface PlanData {
+  goal?: string
+  steps?: PlanStep[]
+}
+
+export interface PlanStep {
+  id: string
+  title: string
+  status: 'pending' | 'in_progress' | 'completed' | 'failed'
+  description?: string
 }
 

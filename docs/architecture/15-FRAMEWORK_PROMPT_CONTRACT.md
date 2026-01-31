@@ -1493,7 +1493,7 @@ class IntentAnalysisPrompt:
 ### 3. 框架执行引擎
 
 ```python
-# core/agent/simple_agent.py
+# core/agent/simple/simple_agent.py
 
 class SimpleAgent:
     """

@@ -1,0 +1,246 @@
+{
+  "timestamp": "2026-01-26T19:19:25.186663",
+  "provider": "claude",
+  "model": null,
+  "total_cases": 46,
+  "passed_cases": 37,
+  "failed_cases": 9,
+  "pass_rate": 0.8043478260869565,
+  "consistency_errors": 1,
+  "avg_latency_ms": 3000.8159565407805,
+  "stability_score": 1.0,
+  "by_category": {
+    "simple_single_turn": {
+      "total": 1,
+      "passed": 1,
+      "latency_sum": 3126.2545420322567,
+      "pass_rate": 1.0
+    },
+    "general": {
+      "total": 36,
+      "passed": 29,
+      "latency_sum": 108145.03145881463,
+      "pass_rate": 0.8055555555555556
+    },
+    "medium_task": {
+      "total": 1,
+      "passed": 0,
+      "latency_sum": 2995.3517080284655,
+      "pass_rate": 0.0
+    },
+    "complex_task": {
+      "total": 1,
+      "passed": 1,
+      "latency_sum": 2932.3413329548202,
+      "pass_rate": 1.0
+    },
+    "vague_query": {
+      "total": 1,
+      "passed": 0,
+      "latency_sum": 2944.9905839865096,
+      "pass_rate": 0.0
+    },
+    "followup": {
+      "total": 1,
+      "passed": 1,
+      "latency_sum": 2969.80312501546,
+      "pass_rate": 1.0
+    },
+    "multi_agent": {
+      "total": 1,
+      "passed": 1,
+      "latency_sum": 3031.513417023234,
+      "pass_rate": 1.0
+    },
+    "consistency": {
+      "total": 1,
+      "passed": 1,
+      "latency_sum": 3152.646374946926,
+      "pass_rate": 1.0
+    },
+    "memory": {
+      "total": 1,
+      "passed": 1,
+      "latency_sum": 2749.590417020954,
+      "pass_rate": 1.0
+    },
+    "execution_strategy": {
+      "total": 1,
+      "passed": 1,
+      "latency_sum": 2787.0667910319753,
+      "pass_rate": 1.0
+    },
+    "edge_case": {
+      "total": 1,
+      "passed": 1,
+      "latency_sum": 3202.944250020664,
+      "pass_rate": 1.0
+    }
+  },
+  "failures": [
+    {
+      "test_id": "medium_code_function",
+      "description": "中等 - 写一个函数",
+      "category": "medium_task",
+      "pass_rate": 0.0,
+      "trials": [
+        {
+          "mismatches": [
+            {
+              "field": "task_type",
+              "expected": "code_task",
+              "actual": "other"
+            }
+          ],
+          "violations": []
+        }
+      ]
+    },
+    {
+      "test_id": "medium_ppt_simple",
+      "description": "中等 - 简单 PPT",
+      "category": "general",
+      "pass_rate": 0.0,
+      "trials": [
+        {
+          "mismatches": [
+            {
+              "field": "needs_plan",
+              "expected": true,
+              "actual": false
+            }
+          ],
+          "violations": [
+            "simple complexity should have execution_strategy=rvr, got rvr-b"
+          ]
+        }
+      ]
+    },
+    {
+      "test_id": "complex_system_design",
+      "description": "复杂 - 系统设计",
+      "category": "general",
+      "pass_rate": 0.0,
+      "trials": [
+        {
+          "mismatches": [
+            {
+              "field": "task_type",
+              "expected": "one of ['code_task', 'content_generation']",
+              "actual": "other"
+            }
+          ],
+          "violations": []
+        }
+      ]
+    },
+    {
+      "test_id": "complex_full_stack",
+      "description": "复杂 - 全栈开发",
+      "category": "general",
+      "pass_rate": 0.0,
+      "trials": [
+        {
+          "mismatches": [
+            {
+              "field": "task_type",
+              "expected": "code_task",
+              "actual": "other"
+            }
+          ],
+          "violations": []
+        }
+      ]
+    },
+    {
+      "test_id": "vague_process",
+      "description": "模糊请求 - 处理",
+      "category": "vague_query",
+      "pass_rate": 0.0,
+      "trials": [
+        {
+          "mismatches": [
+            {
+              "field": "needs_plan",
+              "expected": true,
+              "actual": false
+            }
+          ],
+          "violations": []
+        }
+      ]
+    },
+    {
+      "test_id": "followup_pronoun",
+      "description": "追问 - 代词引用",
+      "category": "general",
+      "pass_rate": 0.0,
+      "trials": [
+        {
+          "mismatches": [
+            {
+              "field": "task_type",
+              "expected": "code_task",
+              "actual": "other"
+            }
+          ],
+          "violations": []
+        }
+      ]
+    },
+    {
+      "test_id": "followup_topic_switch",
+      "description": "话题切换（非追问）",
+      "category": "general",
+      "pass_rate": 0.0,
+      "trials": [
+        {
+          "mismatches": [
+            {
+              "field": "task_type",
+              "expected": "information_query",
+              "actual": "content_generation"
+            }
+          ],
+          "violations": []
+        }
+      ]
+    },
+    {
+      "test_id": "multi_agent_boundary_2",
+      "description": "边界情况 - 2个实体（不应多智能体）",
+      "category": "general",
+      "pass_rate": 0.0,
+      "trials": [
+        {
+          "mismatches": [
+            {
+              "field": "needs_multi_agent",
+              "expected": false,
+              "actual": true
+            }
+          ],
+          "violations": []
+        }
+      ]
+    },
+    {
+      "test_id": "edge_mixed_lang",
+      "description": "边缘 - 中英混合",
+      "category": "general",
+      "pass_rate": 0.0,
+      "trials": [
+        {
+          "mismatches": [
+            {
+              "field": "task_type",
+              "expected": "code_task",
+              "actual": "other"
+            }
+          ],
+          "violations": []
+        }
+      ]
+    }
+  ]
+}

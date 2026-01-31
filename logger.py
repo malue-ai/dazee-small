@@ -1,334 +1,328 @@
 """
 日志管理模块
+提供日志初始化和管理功能
 
-提供统一的日志接口，支持上下文追踪和性能监控。
-
-快速开始:
+使用指南:
 =========
 
-```python
-from logger import get_logger, set_request_context, log_execution_time
+1. 基本使用 (推荐方式):
+   ```python
+   from logger import get_logger
+   
+   logger = get_logger()  # 自动获取当前模块名
+   logger.info("处理开始")
+   logger.error("发生错误", exc_info=True)
+   ```
 
-logger = get_logger()
+2. 指定模块名:
+   ```python
+   from logger import get_logger
+   
+   logger = get_logger("audio")  # 明确指定模块名
+   logger.debug("音频处理中...")
+   ```
 
-# 设置请求上下文（在请求入口处调用一次）
-set_request_context(user_id="u-123", conversation_id="conv-456")
+3. 使用装饰器 (函数级别):
+   ```python
+   from logger import with_logger
+   
+   @with_logger
+   def process_data(data, logger=None):
+       logger.info(f"处理数据: {len(data)} 条记录")
+       # ... 处理逻辑
+   ```
 
-# 记录日志（自动包含上下文信息）
-logger.info("处理请求")
-logger.error("发生错误", exc_info=True)
+4. 结构化日志 (JSON格式):
+   ```python
+   logger.info("用户登录", extra={
+       "user_id": "12345",
+       "action": "login",
+       "ip_address": "192.168.1.1"
+   })
+   ```
 
-# 性能监控
-with log_execution_time("数据库查询", logger):
-    results = await db.query(...)
-```
+5. 性能监控:
+   ```python
+   import time
+   start_time = time.time()
+   # ... 业务逻辑
+   logger.info("操作完成", extra={
+       "duration": time.time() - start_time,
+       "operation": "data_processing"
+   })
+   ```
 
-日志输出:
-========
-- 控制台：彩色易读格式（开发环境）
-- 文件：JSON 格式，便于 AWS CloudWatch 分析和快速定位
+最佳实践:
+=========
+- 使用 get_logger() 而不是直接使用 logging.getLogger()
+- 避免使用 print() 语句，统一使用日志系统
+- 在异常处理中使用 exc_info=True 记录完整异常信息
+- 使用结构化日志字段便于后续分析和监控
+- 根据环境调整日志级别 (开发: DEBUG, 生产: INFO/WARNING)
+
+日志级别使用建议:
+===============
+- DEBUG: 详细的调试信息，仅在开发环境使用
+- INFO: 一般信息，记录程序的正常运行过程
+- WARNING: 警告信息，程序仍能正常运行但需要注意
+- ERROR: 错误信息，程序遇到错误但仍能继续运行
+- CRITICAL: 严重错误，程序可能无法继续运行
 """
-import asyncio
-import functools
-import inspect
-import json
 import logging
 import logging.config
-import sys
-import time
-import traceback
-from contextlib import contextmanager
-from contextvars import ContextVar
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Optional, TypeVar
+from typing import Optional, Dict, Any
+import sys
+import os
+import functools
+import inspect
+
 
 # ============================================================
-# 配置
+# 日志配置（直接在代码中定义）
 # ============================================================
 LOG_CONFIG = {
-    "level": "INFO",
-    "console_enabled": True,
-    "file_enabled": True,
-    "file": "logs/app.log",
-    "error_file": "logs/error.log",
-    "max_size": 50 * 1024 * 1024,  # 50MB
-    "backup_count": 10,
+    "level": "INFO",  # 日志级别: DEBUG, INFO, WARNING, ERROR, CRITICAL
+    "console_enabled": True,  # 是否输出到控制台
+    "file_enabled": True,  # 是否输出到文件
+    "file": "logs/app.log",  # 日志文件路径
+    "max_size": 10 * 1024 * 1024,  # 单个日志文件最大大小 (10MB)
+    "backup_count": 5,  # 保留的日志文件数量
+    "json_format": False,  # 是否使用JSON格式
 }
 
-# ============================================================
-# 上下文变量（用于追踪请求）
-# ============================================================
-_user_id: ContextVar[str] = ContextVar('user_id', default='')
-_conversation_id: ContextVar[str] = ContextVar('conversation_id', default='')
-_message_id: ContextVar[str] = ContextVar('message_id', default='')
 
-
-def set_request_context(
-    user_id: str = '',
-    conversation_id: str = '',
-    message_id: str = ''
-) -> None:
-    """
-    设置请求上下文（在请求入口处调用）
-    
-    Args:
-        user_id: 用户ID
-        conversation_id: 对话ID
-        message_id: 消息ID
-    """
-    if user_id:
-        _user_id.set(user_id)
-    if conversation_id:
-        _conversation_id.set(conversation_id)
-    if message_id:
-        _message_id.set(message_id)
-
-
-def clear_request_context() -> None:
-    """清除请求上下文（在请求结束时调用）"""
-    _user_id.set('')
-    _conversation_id.set('')
-    _message_id.set('')
-
-
-@contextmanager
-def log_execution_time(operation: str, logger: Optional[logging.Logger] = None):
-    """
-    记录操作执行时间
-    
-    Args:
-        operation: 操作名称
-        logger: 日志记录器（可选）
-    
-    Usage:
-        with log_execution_time("数据库查询", logger):
-            results = await db.query(...)
-    """
-    if logger is None:
-        logger = logging.getLogger("zenflux")
-    
-    start = time.perf_counter()
-    try:
-        yield
-    finally:
-        duration_ms = (time.perf_counter() - start) * 1000
-        logger.info(f"{operation} 完成", extra={
-            "operation": operation,
-            "duration_ms": round(duration_ms, 2)
-        })
-
-
-# ============================================================
-# 格式化器
-# ============================================================
-
-class _ContextFilter(logging.Filter):
-    """添加上下文信息到日志记录"""
-    
-    def filter(self, record: logging.LogRecord) -> bool:
-        record.user_id = _user_id.get() or '-'
-        record.conversation_id = _conversation_id.get() or '-'
-        record.message_id = _message_id.get() or '-'
-        return True
-
-
-class _ConsoleFormatter(logging.Formatter):
-    """控制台格式化器（彩色易读）"""
-    
-    COLORS = {
-        'DEBUG': '\033[36m',     # 青色
-        'INFO': '\033[32m',      # 绿色
-        'WARNING': '\033[33m',   # 黄色
-        'ERROR': '\033[31m',     # 红色
-        'CRITICAL': '\033[35m',  # 紫色
-    }
-    RESET = '\033[0m'
-    
-    def __init__(self):
-        super().__init__(
-            fmt='%(asctime)s [%(levelname)s] [%(user_id)s:%(conversation_id)s] %(name)s: %(message)s',
-            datefmt='%H:%M:%S'
-        )
-        self.use_colors = sys.stdout.isatty()
-    
-    def format(self, record: logging.LogRecord) -> str:
-        if self.use_colors:
-            record = logging.makeLogRecord(record.__dict__)
-            color = self.COLORS.get(record.levelname, '')
-            record.levelname = f"{color}{record.levelname}{self.RESET}"
-        return super().format(record)
-
-
-class _JsonFormatter(logging.Formatter):
-    """
-    JSON 格式化器（用于文件输出和 AWS CloudWatch）
-    
-    输出示例:
-    {"ts":"2024-01-01T12:00:00.123Z","level":"INFO","user":"u-123","conv":"c-456","logger":"chat_service","msg":"处理请求","duration_ms":45.2}
-    """
-    
-    # 排除的内置属性
-    _RESERVED = {
-        'name', 'msg', 'args', 'created', 'levelname', 'levelno',
-        'pathname', 'filename', 'module', 'exc_info', 'exc_text',
-        'stack_info', 'lineno', 'funcName', 'msecs', 'relativeCreated',
-        'thread', 'threadName', 'processName', 'process', 'message',
-        'taskName', 'user_id', 'conversation_id', 'message_id'
-    }
-    
-    def format(self, record: logging.LogRecord) -> str:
-        log = {
-            "ts": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(timespec='milliseconds'),
-            "level": record.levelname,
-            "user": getattr(record, 'user_id', '-'),
-            "conv": getattr(record, 'conversation_id', '-'),
-            "msg_id": getattr(record, 'message_id', '-'),
-            "logger": record.name.replace('zenflux.', ''),
-            "file": f"{record.filename}:{record.lineno}",
-            "func": record.funcName or "-",
-            "msg": record.getMessage(),
-        }
-        
-        # 添加异常信息
-        if record.exc_info:
-            log["error"] = {
-                "type": record.exc_info[0].__name__ if record.exc_info[0] else None,
-                "msg": str(record.exc_info[1]) if record.exc_info[1] else None,
-                "trace": ''.join(traceback.format_exception(*record.exc_info)).strip()
-            }
-        
-        # 添加 extra 字段
-        for key, value in record.__dict__.items():
-            if key not in self._RESERVED:
-                try:
-                    json.dumps(value)
-                    log[key] = value
-                except (TypeError, ValueError):
-                    log[key] = str(value)
-        
-        return json.dumps(log, ensure_ascii=False, default=str)
-
-
-# ============================================================
-# Logger 管理
-# ============================================================
-
-class _LoggerManager:
-    """日志管理器（单例）"""
+class Logger:
+    """日志管理类"""
     
     _initialized = False
-    _loggers: dict[str, logging.Logger] = {}
+    _loggers: Dict[str, logging.Logger] = {}
     
     @classmethod
     def setup(cls) -> None:
         """初始化日志系统"""
         if cls._initialized:
             return
-        
-        # 创建日志目录
-        Path(LOG_CONFIG["file"]).parent.mkdir(parents=True, exist_ok=True)
-        Path(LOG_CONFIG["error_file"]).parent.mkdir(parents=True, exist_ok=True)
-        
-        # 配置 root logger
-        root = logging.getLogger("zenflux")
-        root.setLevel(LOG_CONFIG["level"])
-        root.handlers.clear()
-        
-        context_filter = _ContextFilter()
-        
-        # 控制台处理器
-        if LOG_CONFIG["console_enabled"]:
-            console = logging.StreamHandler(sys.stdout)
-            console.setLevel(LOG_CONFIG["level"])
-            console.setFormatter(_ConsoleFormatter())
-            console.addFilter(context_filter)
-            root.addHandler(console)
-        
-        # 主日志文件（JSON 格式）
-        if LOG_CONFIG["file_enabled"]:
-            from logging.handlers import RotatingFileHandler
-            
-            file_handler = RotatingFileHandler(
-                LOG_CONFIG["file"],
-                maxBytes=LOG_CONFIG["max_size"],
-                backupCount=LOG_CONFIG["backup_count"],
-                encoding="utf-8"
-            )
-            file_handler.setLevel(LOG_CONFIG["level"])
-            file_handler.setFormatter(_JsonFormatter())
-            file_handler.addFilter(context_filter)
-            root.addHandler(file_handler)
-            
-            # 错误日志文件
-            error_handler = RotatingFileHandler(
-                LOG_CONFIG["error_file"],
-                maxBytes=LOG_CONFIG["max_size"],
-                backupCount=LOG_CONFIG["backup_count"],
-                encoding="utf-8"
-            )
-            error_handler.setLevel(logging.ERROR)
-            error_handler.setFormatter(_JsonFormatter())
-            error_handler.addFilter(context_filter)
-            root.addHandler(error_handler)
-        
+
+        # 获取并应用日志配置字典
+        config_dict = cls.get_logger_config()
+        logging.config.dictConfig(config_dict)
+
         cls._initialized = True
+        logging.info("日志系统已初始化")
     
     @classmethod
-    def get(cls, name: Optional[str] = None) -> logging.Logger:
+    def get_logger_config(cls) -> Dict[str, Any]:
+        """获取日志配置"""
+        log_config = LOG_CONFIG
+        
+        # 构建 formatters 字典
+        formatters = {
+            "standard": {
+                "format": "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+            }
+        }
+        if log_config["json_format"]:
+            formatters["json"] = {
+                "format": "%(asctime)s %(levelname)s %(name)s %(message)s %(pathname)s %(lineno)d",
+                "class": "pythonjsonlogger.jsonlogger.JsonFormatter"
+            }
+        
+        # 构建日志配置字典
+        config = {
+            "version": 1,
+            "disable_existing_loggers": False,
+            "formatters": formatters,
+            "handlers": {},
+            "loggers": {
+                "zenflux": {
+                    "level": log_config["level"],
+                    "handlers": [],
+                    "propagate": False
+                }
+            },
+            "root": {
+                "level": "INFO",
+                "handlers": []
+            }
+        }
+        
+        # 添加控制台处理器
+        if log_config["console_enabled"]:
+            config["handlers"]["console"] = {
+                "class": "logging.StreamHandler",
+                "level": log_config["level"],
+                "formatter": "json" if log_config["json_format"] else "standard",
+                "stream": "ext://sys.stdout"
+            }
+            config["loggers"]["zenflux"]["handlers"].append("console")
+            config["root"]["handlers"].append("console")
+        
+        # 添加文件处理器
+        if log_config["file_enabled"]:
+            # 确保日志目录存在
+            log_file_path = Path(log_config["file"])
+            log_file_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            config["handlers"]["file"] = {
+                "class": "logging.handlers.RotatingFileHandler",
+                "level": log_config["level"],
+                "formatter": "json" if log_config["json_format"] else "standard",
+                "filename": log_config["file"],
+                "maxBytes": log_config["max_size"],
+                "backupCount": log_config["backup_count"],
+                "encoding": "utf8"
+            }
+            config["loggers"]["zenflux"]["handlers"].append("file")
+            config["root"]["handlers"].append("file")
+        
+        return config
+    
+    @classmethod
+    def get_logger(cls, name: Optional[str] = None) -> logging.Logger:
         """
         获取日志记录器
         
         Args:
-            name: 日志记录器名称（不提供则自动获取调用模块名）
+            name: 日志记录器名称，如果不提供则自动获取调用模块名称
+            
+        Returns:
+            日志记录器实例
         """
         if not cls._initialized:
             cls.setup()
         
+        # 如果没有提供name，自动获取调用者的模块名
         if name is None:
             frame = inspect.currentframe()
             try:
-                caller = frame.f_back.f_back  # 跳过 get_logger -> get
-                module = caller.f_globals.get('__name__', 'unknown')
-                name = module.split('.')[-1] if '.' in module else module
+                # 获取调用者的frame
+                caller_frame = frame.f_back
+                if caller_frame:
+                    caller_module = caller_frame.f_globals.get('__name__', 'unknown')
+                    # 移除模块前缀以简化名称
+                    if '.' in caller_module:
+                        name = caller_module.split('.')[-1]
+                    else:
+                        name = caller_module
+                else:
+                    name = 'root'
             finally:
                 del frame
         
-        full_name = f"zenflux.{name}" if name != 'zenflux' else "zenflux"
+        # 缓存日志记录器以提高性能
+        full_name = f"zenflux.{name}" if name != 'root' else "zenflux"
         if full_name not in cls._loggers:
             cls._loggers[full_name] = logging.getLogger(full_name)
-        
+            
         return cls._loggers[full_name]
+    
+    @classmethod
+    def set_level(cls, level: str, logger_name: Optional[str] = None) -> None:
+        """
+        设置日志级别
+        
+        Args:
+            level: 日志级别 ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')
+            logger_name: 要设置的日志记录器名称，如果为None则设置所有记录器
+        """
+        if not cls._initialized:
+            cls.setup()
+        
+        level_upper = level.upper()
+        
+        # 更新全局配置
+        LOG_CONFIG["level"] = level_upper
+        
+        # 设置指定日志记录器的级别
+        if logger_name:
+            full_name = f"zenflux.{logger_name}" if logger_name != "root" else None
+            logging.getLogger(full_name).setLevel(level_upper)
+        else:
+            # 设置所有日志记录器的级别
+            logging.getLogger("zenflux").setLevel(level_upper)
+            for logger in cls._loggers.values():
+                logger.setLevel(level_upper)
+    
+    @staticmethod
+    def get_all_loggers() -> Dict[str, logging.Logger]:
+        """
+        获取所有已创建的日志记录器
+        
+        Returns:
+            日志记录器字典 {名称: 记录器实例}
+        """
+        return {name: logging.getLogger(name) for name in logging.root.manager.loggerDict}
+    
+    @classmethod
+    def reload_config(cls) -> None:
+        """
+        重新加载日志配置（性能优化版本）
+        """
+        config_dict = cls.get_logger_config()
+        logging.config.dictConfig(config_dict)
+    
+    @classmethod
+    def enable_console_logging(cls, enable: bool = True) -> None:
+        """
+        启用或禁用控制台日志
+        
+        Args:
+            enable: 是否启用控制台日志
+        """
+        LOG_CONFIG["console_enabled"] = enable
+        # 优化：只重新加载配置，不重置初始化状态
+        cls.reload_config()
+    
+    @classmethod
+    def enable_file_logging(cls, enable: bool = True, file_path: Optional[str] = None) -> None:
+        """
+        启用或禁用文件日志
+        
+        Args:
+            enable: 是否启用文件日志
+            file_path: 日志文件路径（可选）
+        """
+        LOG_CONFIG["file_enabled"] = enable
+        if file_path:
+            LOG_CONFIG["file"] = file_path
+        # 优化：只重新加载配置，不重置初始化状态
+        cls.reload_config()
 
 
-# ============================================================
-# 公开接口
-# ============================================================
+# 装饰器：自动注入logger
+def with_logger(func):
+    """
+    装饰器：为函数自动注入logger参数
+    
+    Usage:
+        @with_logger
+        def my_function(arg1, arg2, logger=None):
+            logger.info("Function called")
+    """
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        if 'logger' not in kwargs or kwargs['logger'] is None:
+            # 获取被装饰函数所在模块的logger
+            module_name = func.__module__
+            if '.' in module_name:
+                logger_name = module_name.split('.')[-1]
+            else:
+                logger_name = module_name
+            kwargs['logger'] = Logger.get_logger(logger_name)
+        return func(*args, **kwargs)
+    return wrapper
 
+
+# 获取日志记录器的快捷函数
 def get_logger(name: Optional[str] = None) -> logging.Logger:
     """
     获取日志记录器
     
     Args:
-        name: 日志记录器名称（不提供则自动获取调用模块名）
-    
+        name: 日志记录器名称，如果不提供则自动获取调用模块名称
+        
     Returns:
         日志记录器实例
-    
-    Usage:
-        logger = get_logger()
-        logger.info("处理开始")
-        logger.error("发生错误", exc_info=True)
     """
-    return _LoggerManager.get(name)
-
-
-def set_level(level: str) -> None:
-    """
-    设置日志级别
-    
-    Args:
-        level: 日志级别 ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')
-    """
-    LOG_CONFIG["level"] = level.upper()
-    logging.getLogger("zenflux").setLevel(level.upper())
+    return Logger.get_logger(name) 

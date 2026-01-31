@@ -1,98 +1,72 @@
 <template>
-  <div class="flex flex-col h-full bg-white overflow-hidden">
+  <div class="file-preview">
     <!-- 头部 -->
-    <div class="flex items-center justify-between px-4 py-2.5 border-b border-gray-100 bg-gray-50">
-      <div class="flex items-center gap-2 min-w-0 flex-1">
-        <component :is="getFileIcon()" class="w-4 h-4 flex-shrink-0" :class="getIconClass()" />
-        <span class="text-xs font-semibold text-gray-700 truncate">{{ fileName }}</span>
+    <div class="preview-header">
+      <div class="file-info">
+        <span class="file-icon">{{ getFileIcon() }}</span>
+        <span class="file-name">{{ fileName }}</span>
       </div>
-      <div class="flex gap-1.5 items-center flex-shrink-0">
+      <div class="preview-actions">
         <button 
           v-if="canPreviewInBrowser" 
           @click="openInNewTab" 
-          class="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium text-gray-500 bg-white border border-gray-200 rounded-md hover:bg-gray-50 hover:text-gray-700 transition-colors"
+          class="action-btn"
           title="在新标签页打开"
         >
-          <ExternalLink class="w-3 h-3" />
-          新窗口
+          🔗 新窗口
         </button>
-        <button 
-          @click="downloadFile" 
-          class="flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-medium text-gray-500 bg-white border border-gray-200 rounded-md hover:bg-gray-50 hover:text-gray-700 transition-colors" 
-          title="下载"
-        >
-          <Download class="w-3 h-3" />
-          下载
+        <button @click="downloadFile" class="action-btn" title="下载">
+          ⬇️ 下载
         </button>
-        <button 
-          @click="$emit('close')" 
-          class="w-7 h-7 flex items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors" 
-          title="关闭"
-        >
-          <X class="w-4 h-4" />
+        <button @click="$emit('close')" class="close-btn" title="关闭">
+          ✕
         </button>
       </div>
     </div>
 
     <!-- 预览区域 -->
-    <div class="flex-1 overflow-hidden relative bg-gray-50">
+    <div class="preview-content">
       <!-- 加载状态 -->
-      <div v-if="isLoading" class="flex flex-col items-center justify-center h-full text-gray-400 gap-2">
-        <Loader2 class="w-6 h-6 animate-spin" />
-        <span class="text-xs">加载中...</span>
+      <div v-if="isLoading" class="loading-state">
+        <div class="loading-spinner"></div>
+        <span>加载中...</span>
       </div>
 
       <!-- HTML 预览（iframe） -->
       <iframe 
         v-else-if="isHtml"
         :srcdoc="htmlContent"
-        class="w-full h-full border-none bg-white"
+        class="html-preview"
         sandbox="allow-scripts allow-same-origin"
         @load="onIframeLoad"
       ></iframe>
 
       <!-- 代码预览 -->
-      <div v-else-if="isCode" class="h-full overflow-auto p-4 bg-gray-900">
-        <pre class="m-0 font-mono text-xs leading-relaxed"><code class="text-gray-300 whitespace-pre-wrap break-all">{{ fileContent }}</code></pre>
+      <div v-else-if="isCode" class="code-preview">
+        <pre><code>{{ fileContent }}</code></pre>
       </div>
 
       <!-- 图片预览 -->
-      <div v-else-if="isImage" class="flex items-center justify-center h-full p-6 bg-gray-100">
-        <img :src="imageUrl" :alt="fileName" class="max-w-full max-h-full object-contain rounded-lg shadow-lg" />
+      <div v-else-if="isImage" class="image-preview">
+        <img :src="imageUrl" :alt="fileName" />
       </div>
 
       <!-- 不支持预览 -->
-      <div v-else class="flex flex-col items-center justify-center h-full text-gray-400 text-center p-8">
-        <File class="w-12 h-12 mb-3 opacity-40" />
-        <p class="text-sm font-medium">此文件类型暂不支持预览</p>
-        <p class="text-xs text-gray-400 mt-1 mb-4">{{ fileExtension.toUpperCase() }} 文件</p>
-        <button 
-          @click="downloadFile" 
-          class="flex items-center gap-2 px-5 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors shadow-sm"
-        >
-          <Download class="w-4 h-4" />
-          下载文件
+      <div v-else class="unsupported-preview">
+        <div class="unsupported-icon">📄</div>
+        <p>此文件类型暂不支持预览</p>
+        <p class="file-type">{{ fileExtension.toUpperCase() }} 文件</p>
+        <button @click="downloadFile" class="download-btn">
+          ⬇️ 下载文件
         </button>
       </div>
     </div>
   </div>
 </template>
 
-<script setup lang="ts">
+<script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { useWorkspaceStore } from '@/stores/workspace'
-import { 
-  FileText, 
-  FileCode, 
-  FileJson, 
-  Image, 
-  File, 
-  Globe,
-  Download, 
-  ExternalLink, 
-  X, 
-  Loader2 
-} from 'lucide-vue-next'
 
 // Props
 const props = defineProps({
@@ -151,64 +125,29 @@ const canPreviewInBrowser = computed(() => {
   return isHtml.value
 })
 
-// 获取文件图标组件
+// 获取文件图标
 function getFileIcon() {
   const ext = fileExtension.value
-  const iconMap: Record<string, any> = {
-    'html': Globe,
-    'htm': Globe,
-    'js': FileCode,
-    'ts': FileCode,
-    'jsx': FileCode,
-    'tsx': FileCode,
-    'vue': FileCode,
-    'py': FileCode,
-    'css': FileCode,
-    'scss': FileCode,
-    'json': FileJson,
-    'yaml': FileJson,
-    'yml': FileJson,
-    'md': FileText,
-    'png': Image,
-    'jpg': Image,
-    'jpeg': Image,
-    'gif': Image,
-    'svg': Image
+  const iconMap = {
+    'html': '🌐',
+    'htm': '🌐',
+    'js': '📜',
+    'ts': '📘',
+    'jsx': '⚛️',
+    'tsx': '⚛️',
+    'vue': '💚',
+    'py': '🐍',
+    'css': '🎨',
+    'scss': '🎨',
+    'json': '📋',
+    'md': '📝',
+    'png': '🖼️',
+    'jpg': '🖼️',
+    'jpeg': '🖼️',
+    'gif': '🖼️',
+    'svg': '🎭'
   }
-  return iconMap[ext] || File
-}
-
-// 获取图标颜色类
-function getIconClass() {
-  const ext = fileExtension.value
-  const colorMap: Record<string, string> = {
-    'html': 'text-orange-500',
-    'htm': 'text-orange-500',
-    'js': 'text-yellow-500',
-    'ts': 'text-blue-600',
-    'jsx': 'text-cyan-500',
-    'tsx': 'text-cyan-600',
-    'vue': 'text-green-500',
-    'py': 'text-blue-500',
-    'css': 'text-pink-500',
-    'scss': 'text-pink-600',
-    'json': 'text-gray-500',
-    'md': 'text-gray-600',
-    'png': 'text-purple-500',
-    'jpg': 'text-purple-500',
-    'jpeg': 'text-purple-500',
-    'gif': 'text-purple-500',
-    'svg': 'text-orange-400'
-  }
-  return colorMap[ext] || 'text-gray-400'
-}
-
-/**
- * 规范化文件路径用于 URL
- */
-function normalizePathForUrl(path: string): string {
-  const cleanPath = path.startsWith('/') ? path.slice(1) : path
-  return cleanPath.split('/').map(encodeURIComponent).join('/')
+  return iconMap[ext] || '📄'
 }
 
 // 加载文件内容
@@ -218,7 +157,7 @@ async function loadFile() {
   try {
     if (isImage.value) {
       // 图片使用 URL
-      imageUrl.value = `/api/v1/workspace/${props.conversationId}/files/${normalizePathForUrl(props.filePath)}?download=true`
+      imageUrl.value = `/api/v1/workspace/${props.conversationId}/files/${props.filePath}?download=true`
     } else {
       // 文本文件获取内容
       const content = await workspaceStore.getFileContent(props.conversationId, props.filePath)
@@ -229,7 +168,7 @@ async function loadFile() {
         fileContent.value = content
       }
     }
-  } catch (error: any) {
+  } catch (error) {
     console.error('加载文件失败:', error)
     fileContent.value = `加载失败: ${error.message}`
   } finally {
@@ -255,7 +194,7 @@ function downloadFile() {
 
 // iframe 加载完成
 function onIframeLoad() {
-  // HTML 预览加载完成
+  console.log('HTML 预览加载完成')
 }
 
 // 监听文件路径变化
@@ -270,19 +209,232 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* 代码区域滚动条样式 */
-.overflow-auto::-webkit-scrollbar {
+.file-preview {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+}
+
+/* 头部 */
+.preview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid #2d2d44;
+}
+
+.file-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.file-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.file-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e5e5e5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.action-btn {
+  padding: 5px 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  color: #a0a0b0;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.action-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: #e5e5e5;
+}
+
+.close-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.15);
+  border-radius: 6px;
+  color: #ef4444;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.close-btn:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+/* 预览区域 */
+.preview-content {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+  background: #0a0a12;
+}
+
+/* 加载状态 */
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #666;
+  gap: 10px;
+}
+
+.loading-spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid rgba(102, 126, 234, 0.2);
+  border-top-color: #667eea;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* HTML 预览 */
+.html-preview {
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: white;
+}
+
+/* 代码预览 */
+.code-preview {
+  height: 100%;
+  overflow: auto;
+  padding: 14px 16px;
+  background: #0a0a12;
+}
+
+.code-preview pre {
+  margin: 0;
+  font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Monaco', monospace;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.code-preview code {
+  color: #c9d1d9;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* 图片预览 */
+.image-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 20px;
+  background: #0a0a12;
+}
+
+.image-preview img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+/* 不支持预览 */
+.unsupported-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #666;
+  text-align: center;
+  padding: 32px;
+}
+
+.unsupported-icon {
+  font-size: 48px;
+  margin-bottom: 12px;
+  opacity: 0.4;
+}
+
+.unsupported-preview p {
+  margin: 6px 0;
+  font-size: 13px;
+}
+
+.file-type {
+  font-size: 11px;
+  opacity: 0.5;
+  margin-bottom: 16px !important;
+}
+
+.download-btn {
+  padding: 10px 20px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.download-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.35);
+}
+
+/* 滚动条样式 */
+.code-preview::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
-.overflow-auto::-webkit-scrollbar-track {
+
+.code-preview::-webkit-scrollbar-track {
   background: transparent;
 }
-.overflow-auto::-webkit-scrollbar-thumb {
-  background-color: rgba(156, 163, 175, 0.3);
+
+.code-preview::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
   border-radius: 3px;
 }
-.overflow-auto::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(156, 163, 175, 0.5);
+
+.code-preview::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
 }
 </style>
+

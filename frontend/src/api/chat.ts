@@ -61,8 +61,8 @@ export async function getConversationMessages(
   limit = 50,
   offset = 0,
   order: 'asc' | 'desc' = 'asc'
-): Promise<{ messages: Message[]; conversation_metadata?: Record<string, unknown> }> {
-  const response = await api.get<ApiResponse<{ messages: Message[]; conversation_metadata?: Record<string, unknown> }>>(
+): Promise<{ messages: Message[] }> {
+  const response = await api.get<ApiResponse<{ messages: Message[] }>>(
     `/v1/conversations/${conversationId}/messages`,
     { params: { limit, offset, order } }
   )

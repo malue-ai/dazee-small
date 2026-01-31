@@ -18,13 +18,13 @@ Dify Workflow 配置：
 """
 
 import os
-from logger import get_logger
+import logging
 import asyncio
 from typing import Dict, Any, Optional
 from dataclasses import dataclass
 from enum import Enum
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 # 脚本元数据
 SKILL_NAME = "ontology_builder"

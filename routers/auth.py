@@ -93,7 +93,7 @@ async def login(request: LoginRequest):
     验证统一密码，返回 JWT Token
     """
     try:
-        result = await auth_service.authenticate(request.username, request.password)
+        result = auth_service.authenticate(request.username, request.password)
         return LoginResponse(**result)
     except InvalidCredentialsError as e:
         raise HTTPException(status_code=401, detail=str(e))

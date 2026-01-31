@@ -7,9 +7,10 @@
 
 ## 概述
 
-项目使用 **SQLAlchemy ORM** 作为数据库层，统一使用 **PostgreSQL** 作为数据库：
-- **开发环境**: 本地 PostgreSQL（Docker 或原生安装）
-- **生产环境**: AWS RDS PostgreSQL
+项目使用 **SQLAlchemy ORM** 作为数据库层，支持多种数据库：
+- **SQLite**: 开发环境默认
+- **PostgreSQL**: 生产环境推荐
+- **MySQL**: 生产环境可选
 
 ### 核心特性
 ✅ 异步数据库操作（`asyncio` + `SQLAlchemy 2.0`）  
@@ -115,14 +116,13 @@ class Sandbox(Base):
 
 ```bash
 # .env 文件
+DATABASE_URL=sqlite+aiosqlite:///./workspace/database/zenflux.db
 
-# PostgreSQL (开发和生产环境)
-# 开发环境：使用本地 PostgreSQL
-DATABASE_URL=postgresql+asyncpg://postgres:password@localhost:5432/zenflux
+# PostgreSQL (生产环境)
+# DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/zenflux
 
-# 生产环境：使用 AWS RDS PostgreSQL (通过 SSM Parameter Store 管理)
-# 在 AWS 环境中，DATABASE_URL 通过 SSM Parameter Store 自动注入
-# 配置路径: /copilot/zen0-backend/staging/secrets/DATABASE_URL
+# MySQL (生产环境)
+# DATABASE_URL=mysql+aiomysql://user:pass@localhost:3306/zenflux
 ```
 
 ### 2. 初始化数据库
@@ -140,27 +140,13 @@ async def lifespan(app: FastAPI):
     yield
 ```
 
-### 3. 数据库配置说明
+### 3. 数据库文件位置
 
-#### 开发环境
-- 使用本地 PostgreSQL（推荐使用 Docker 部署）
-- 配置方式：在 `.env` 文件中设置 `DATABASE_URL`
-
-**快速启动 PostgreSQL（Docker）：**
-```bash
-docker run -d \
-  --name zenflux-postgres \
-  -e POSTGRES_PASSWORD=password \
-  -e POSTGRES_DB=zenflux \
-  -p 5432:5432 \
-  postgres:15
 ```
-
-#### 生产环境（staging）
-- 使用 AWS RDS PostgreSQL
-- 数据库凭证通过 AWS SSM Parameter Store 管理
-- 配置路径: `/copilot/zen0-backend/staging/secrets/DATABASE_URL`
-- 部署时自动注入到容器环境变量
+workspace/
+└── database/
+    └── zenflux.db       # SQLite 数据库文件
+```
 
 ---
 
@@ -547,7 +533,7 @@ messages = await MessageCRUD.get_conversation_messages(
 ### 问题 1: 数据库锁定
 
 ```python
-# PostgreSQL 支持高并发读写
+# SQLite 并发写入可能导致锁定
 # 解决方案：使用 PostgreSQL（生产环境）
 DATABASE_URL=postgresql+asyncpg://...
 ```
@@ -564,21 +550,16 @@ async with get_async_session() as session:
 ### 问题 3: 迁移冲突
 
 ```bash
-# PostgreSQL 环境下重建数据库（开发环境）
-# 方法1：使用 psql
-psql -U postgres -c "DROP DATABASE zenflux;"
-psql -U postgres -c "CREATE DATABASE zenflux;"
-
-# 方法2：使用 Python 脚本
-python -c "from infra.database import init_database; import asyncio; asyncio.run(init_database())"
+# 删除旧数据库重新初始化（开发环境）
+rm workspace/database/zenflux.db
+python main.py  # 自动创建表
 ```
 
 ---
 
 ## 相关文档
 
-- 📖 [数据存储架构](../architecture/08-DATA_STORAGE_ARCHITECTURE.md)
-- 📖 [PostgreSQL 消息存储方案](../architecture/20-POSTGRESQL_MESSAGE_SCHEMA_DESIGN.md)
+- 📖 [数据存储架构](./08-DATA_STORAGE_ARCHITECTURE.md)
 - 📖 [SQLAlchemy 官方文档](https://docs.sqlalchemy.org/)
+- 📖 [aiosqlite 文档](https://aiosqlite.omnilib.dev/)
 - 📖 [asyncpg 文档](https://magicstack.github.io/asyncpg/)
-- 📖 [PostgreSQL 官方文档](https://www.postgresql.org/docs/)

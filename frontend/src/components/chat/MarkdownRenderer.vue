@@ -30,22 +30,17 @@ mermaid.initialize({
 // 自定义 marked renderer 处理 mermaid 代码块
 const renderer = new marked.Renderer()
 
-// marked v5+ 使用对象参数 { text, lang }，旧版本使用 (code, language)
-renderer.code = function(codeOrObj, language) {
-  // 兼容新旧版本的 marked
-  const code = typeof codeOrObj === 'object' ? codeOrObj.text : codeOrObj
-  const lang = typeof codeOrObj === 'object' ? codeOrObj.lang : language
-  
-  if (lang === 'mermaid') {
+renderer.code = function(code, language) {
+  if (language === 'mermaid') {
     // 返回一个带有特殊类的 div，稍后会被 mermaid 渲染
     const id = 'mermaid-' + Math.random().toString(36).substr(2, 9)
     return `<div class="mermaid-container"><pre class="mermaid" id="${id}">${code}</pre></div>`
   }
   
   // 普通代码高亮
-  if (lang && hljs.getLanguage(lang)) {
+  if (language && hljs.getLanguage(language)) {
     try {
-      return `<pre><code class="hljs language-${lang}">${hljs.highlight(code, { language: lang }).value}</code></pre>`
+      return `<pre><code class="hljs language-${language}">${hljs.highlight(code, { language }).value}</code></pre>`
     } catch (err) {}
   }
   return `<pre><code class="hljs">${hljs.highlightAuto(code).value}</code></pre>`
@@ -134,9 +129,6 @@ onMounted(async () => {
   line-height: 1.6;
   color: #374151;
   font-size: 15px;
-  max-width: 100%;
-  overflow-wrap: break-word;
-  word-break: break-word;
 }
 
 .markdown-body h1,
@@ -180,15 +172,13 @@ onMounted(async () => {
 
 .markdown-body pre {
   padding: 16px;
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: auto;
   font-size: 85%;
   line-height: 1.45;
   background-color: #f9fafb;
   border-radius: 8px;
   border: 1px solid #e5e7eb;
   margin-bottom: 16px;
-  max-width: 100%;
 }
 
 .markdown-body pre code {
@@ -244,19 +234,10 @@ onMounted(async () => {
 .markdown-body a {
   color: #2563eb;
   text-decoration: none;
-  word-break: break-all;
 }
 
 .markdown-body a:hover {
   text-decoration: underline;
-}
-
-/* 长文本/URL 强制换行 */
-.markdown-body p,
-.markdown-body li,
-.markdown-body td {
-  word-break: break-word;
-  overflow-wrap: anywhere;
 }
 
 .markdown-body img {

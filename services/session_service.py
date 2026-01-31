@@ -22,6 +22,7 @@ from uuid import uuid4
 
 from logger import get_logger
 from core.events import create_event_manager
+from core.workspace_manager import WorkspaceManager
 from services.redis_manager import get_redis_manager
 
 logger = get_logger("session_service")
@@ -63,10 +64,19 @@ class SessionService:
     注意：不负责 Agent 创建和管理
     """
     
-    def __init__(self):
+    def __init__(
+        self,
+        default_workspace: str = "./workspace"
+    ):
         """
         初始化 Session 服务
+        
+        Args:
+            default_workspace: 默认工作目录
         """
+        self.default_workspace = default_workspace
+        self.workspace_manager = WorkspaceManager(base_dir=default_workspace)
+        
         # Redis 管理器
         self.redis = get_redis_manager()
         
@@ -74,6 +84,11 @@ class SessionService:
         self.events = create_event_manager(self.redis)
     
     # ==================== Session 生命周期 ====================
+    
+    def _generate_session_id(self) -> str:
+        """生成运行会话ID"""
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        return f"sess_{ts}_{uuid4().hex[:8]}"
     
     async def create_session(
         self,
@@ -95,7 +110,7 @@ class SessionService:
             session_id: 会话 ID
         """
         # 1️⃣ 生成 session_id
-        session_id = str(uuid4())
+        session_id = self._generate_session_id()
         
         logger.info(f"🔨 创建新的 Session: session_id={session_id}, conversation_id={conversation_id}")
         
@@ -144,16 +159,6 @@ class SessionService:
         """
         停止正在运行的 Session（用户主动中断）
         
-        流程：
-        1. 设置 Redis 停止标志
-        2. chat_service 事件循环检测到标志后会：
-           - 发送 billing 事件（message_delta type=billing）
-           - 发送 message_stop 事件（对应 ZenO 的 message.assistant.done）
-           - 发送 session_stopped 事件
-        
-        注意：此方法只设置停止标志，不发送事件。
-        所有事件（billing、message_stop、session_stopped）由 chat_service 统一发送，确保正确的事件顺序。
-        
         Args:
             session_id: Session ID
             
@@ -168,21 +173,27 @@ class SessionService:
         if not status:
             raise SessionNotFoundError(f"Session 不存在或已过期: session_id={session_id}")
         
-        # 设置停止标志（chat_service 事件循环会检测并发送 billing 和 session_stopped 事件）
+        # 设置停止标志（Agent 会检测并停止执行）
         await self.redis.set_stop_flag(session_id)
         
-        # 注意：不在这里更新状态和发送事件
-        # chat_service 检测到停止标志后会：
-        # 1. 发送 billing 事件
-        # 2. 发送 message_stop 事件（对应 ZenO 的 message.assistant.done）
-        # 3. 发送 session_stopped 事件
-        # 4. 调用 end_session() 更新状态
+        # 更新 Session 状态为 stopped
+        await self.redis.update_session_status(
+            session_id,
+            status="stopped",
+            last_heartbeat=datetime.now().isoformat()
+        )
         
-        logger.info(f"🛑 已设置停止标志: session_id={session_id}")
+        # 发送停止事件（通知前端）
+        await self.events.session.emit_session_stopped(
+            session_id=session_id,
+            reason="user_requested"
+        )
+        
+        logger.info(f"🛑 Session 已停止: session_id={session_id}")
         
         return {
             "session_id": session_id,
-            "status": "stopping",  # 标记为 stopping，实际 stopped 由 chat_service 设置
+            "status": "stopped",
             "stopped_at": datetime.now().isoformat()
         }
     
@@ -332,9 +343,13 @@ class SessionService:
 _default_service: Optional[SessionService] = None
 
 
-def get_session_service() -> SessionService:
+def get_session_service(
+    default_workspace: str = "./workspace"
+) -> SessionService:
     """获取默认 Session 服务单例"""
     global _default_service
     if _default_service is None:
-        _default_service = SessionService()
+        _default_service = SessionService(
+            default_workspace=default_workspace
+        )
     return _default_service

@@ -229,7 +229,7 @@ async def sandbox_delete_file(
 
 async def sandbox_list_dir(
     conversation_id: str,
-    path: str = "/home/user/project"
+    path: str = "/home/user"
 ):
     """
     列出沙盒目录内容

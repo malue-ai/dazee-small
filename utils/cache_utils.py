@@ -11,13 +11,10 @@
 - 使用 SHA256 hash 检测文件变更
 - 缓存结构清晰：schema.json + tools_inference.json + cache_metadata.json
 - 支持增量更新：只重新分析变更的部分
-- 所有文件 I/O 操作使用异步方法
 """
 
 import json
 import hashlib
-import aiofiles
-import asyncio
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Set
 from datetime import datetime
@@ -34,9 +31,9 @@ CACHE_VERSION = "1.0"
 # 文件 Hash 计算
 # ============================================================
 
-async def compute_file_hash(filepath: Path) -> str:
+def compute_file_hash(filepath: Path) -> str:
     """
-    异步计算文件内容的 SHA256 hash
+    计算文件内容的 SHA256 hash
     
     Args:
         filepath: 文件路径
@@ -49,12 +46,9 @@ async def compute_file_hash(filepath: Path) -> str:
     
     try:
         hasher = hashlib.sha256()
-        async with aiofiles.open(filepath, 'rb') as f:
+        with open(filepath, 'rb') as f:
             # 分块读取，避免大文件内存问题
-            while True:
-                chunk = await f.read(8192)
-                if not chunk:
-                    break
+            for chunk in iter(lambda: f.read(8192), b''):
                 hasher.update(chunk)
         return f"sha256:{hasher.hexdigest()}"
     except Exception as e:
@@ -62,9 +56,9 @@ async def compute_file_hash(filepath: Path) -> str:
         return "sha256:error"
 
 
-async def compute_dir_hash(dirpath: Path, pattern: str = "*.md") -> Dict[str, str]:
+def compute_dir_hash(dirpath: Path, pattern: str = "*.md") -> Dict[str, str]:
     """
-    异步计算目录下匹配文件的 hash 字典
+    计算目录下匹配文件的 hash 字典
     
     Args:
         dirpath: 目录路径
@@ -77,19 +71,10 @@ async def compute_dir_hash(dirpath: Path, pattern: str = "*.md") -> Dict[str, st
         return {}
     
     hashes = {}
-    tasks = []
-    filepaths = []
-    
     for filepath in dirpath.rglob(pattern):
         if filepath.is_file():
-            filepaths.append(filepath)
-            tasks.append(compute_file_hash(filepath))
-    
-    if tasks:
-        results = await asyncio.gather(*tasks)
-        for filepath, hash_val in zip(filepaths, results):
             relative_path = str(filepath.relative_to(dirpath))
-            hashes[relative_path] = hash_val
+            hashes[relative_path] = compute_file_hash(filepath)
     
     return hashes
 
@@ -114,9 +99,9 @@ def compute_tool_hash(tool_name: str, tool_description: str) -> str:
 # 缓存元数据管理
 # ============================================================
 
-async def get_source_files_hashes(instance_path: Path) -> Dict[str, str]:
+def get_source_files_hashes(instance_path: Path) -> Dict[str, str]:
     """
-    异步获取实例所有源文件的 hash
+    获取实例所有源文件的 hash
     
     监控的文件：
     - prompt.md
@@ -135,33 +120,33 @@ async def get_source_files_hashes(instance_path: Path) -> Dict[str, str]:
     # 1. prompt.md
     prompt_file = instance_path / "prompt.md"
     if prompt_file.exists():
-        hashes["prompt.md"] = await compute_file_hash(prompt_file)
+        hashes["prompt.md"] = compute_file_hash(prompt_file)
     
     # 2. config.yaml
     config_file = instance_path / "config.yaml"
     if config_file.exists():
-        hashes["config.yaml"] = await compute_file_hash(config_file)
+        hashes["config.yaml"] = compute_file_hash(config_file)
     
     # 3. api_desc/*.md
     api_desc_dir = instance_path / "api_desc"
     if api_desc_dir.exists():
-        api_hashes = await compute_dir_hash(api_desc_dir, "*.md")
+        api_hashes = compute_dir_hash(api_desc_dir, "*.md")
         for rel_path, hash_val in api_hashes.items():
             hashes[f"api_desc/{rel_path}"] = hash_val
     
     # 4. skills/*/SKILL.md
     skills_dir = instance_path / "skills"
     if skills_dir.exists():
-        skill_hashes = await compute_dir_hash(skills_dir, "SKILL.md")
+        skill_hashes = compute_dir_hash(skills_dir, "SKILL.md")
         for rel_path, hash_val in skill_hashes.items():
             hashes[f"skills/{rel_path}"] = hash_val
     
     return hashes
 
 
-async def create_cache_metadata(instance_path: Path) -> Dict[str, Any]:
+def create_cache_metadata(instance_path: Path) -> Dict[str, Any]:
     """
-    异步创建缓存元数据
+    创建缓存元数据
     
     Args:
         instance_path: 实例目录路径
@@ -172,7 +157,7 @@ async def create_cache_metadata(instance_path: Path) -> Dict[str, Any]:
     return {
         "version": CACHE_VERSION,
         "created_at": datetime.now().isoformat(),
-        "source_hashes": await get_source_files_hashes(instance_path)
+        "source_hashes": get_source_files_hashes(instance_path)
     }
 
 
@@ -180,9 +165,9 @@ async def create_cache_metadata(instance_path: Path) -> Dict[str, Any]:
 # 缓存有效性检查
 # ============================================================
 
-async def is_cache_valid(cache_dir: Path, instance_path: Path) -> bool:
+def is_cache_valid(cache_dir: Path, instance_path: Path) -> bool:
     """
-    异步检查缓存是否有效
+    检查缓存是否有效
     
     策略：
     1. 检查缓存文件是否存在
@@ -207,9 +192,8 @@ async def is_cache_valid(cache_dir: Path, instance_path: Path) -> bool:
     
     # 2. 加载并检查元数据
     try:
-        async with aiofiles.open(metadata_file, 'r', encoding='utf-8') as f:
-            content = await f.read()
-            metadata = json.loads(content)
+        with open(metadata_file, 'r', encoding='utf-8') as f:
+            metadata = json.load(f)
     except Exception as e:
         logger.warning(f"读取缓存元数据失败: {str(e)}")
         return False
@@ -221,7 +205,7 @@ async def is_cache_valid(cache_dir: Path, instance_path: Path) -> bool:
     
     # 4. 对比源文件 hash
     cached_hashes = metadata.get("source_hashes", {})
-    current_hashes = await get_source_files_hashes(instance_path)
+    current_hashes = get_source_files_hashes(instance_path)
     
     # 检查是否有文件变更或新增
     for filepath, current_hash in current_hashes.items():
@@ -246,9 +230,9 @@ async def is_cache_valid(cache_dir: Path, instance_path: Path) -> bool:
 # 缓存加载
 # ============================================================
 
-async def load_schema_cache(cache_dir: Path) -> Optional[Dict[str, Any]]:
+def load_schema_cache(cache_dir: Path) -> Optional[Dict[str, Any]]:
     """
-    异步加载 Schema 缓存
+    加载 Schema 缓存
     
     Args:
         cache_dir: 缓存目录
@@ -262,9 +246,8 @@ async def load_schema_cache(cache_dir: Path) -> Optional[Dict[str, Any]]:
         return None
     
     try:
-        async with aiofiles.open(schema_file, 'r', encoding='utf-8') as f:
-            content = await f.read()
-            schema_data = json.loads(content)
+        with open(schema_file, 'r', encoding='utf-8') as f:
+            schema_data = json.load(f)
         logger.info(f"✅ 加载 Schema 缓存成功: {schema_data.get('name', 'Unknown')}")
         return schema_data
     except Exception as e:
@@ -272,9 +255,9 @@ async def load_schema_cache(cache_dir: Path) -> Optional[Dict[str, Any]]:
         return None
 
 
-async def load_tools_inference_cache(cache_dir: Path) -> Dict[str, List[str]]:
+def load_tools_inference_cache(cache_dir: Path) -> Dict[str, List[str]]:
     """
-    异步加载工具推断缓存
+    加载工具推断缓存
     
     Args:
         cache_dir: 缓存目录
@@ -288,9 +271,8 @@ async def load_tools_inference_cache(cache_dir: Path) -> Dict[str, List[str]]:
         return {}
     
     try:
-        async with aiofiles.open(tools_file, 'r', encoding='utf-8') as f:
-            content = await f.read()
-            tools_cache = json.loads(content)
+        with open(tools_file, 'r', encoding='utf-8') as f:
+            tools_cache = json.load(f)
         logger.info(f"✅ 加载工具推断缓存成功，包含 {len(tools_cache)} 个工具")
         return tools_cache
     except Exception as e:
@@ -302,9 +284,9 @@ async def load_tools_inference_cache(cache_dir: Path) -> Dict[str, List[str]]:
 # 缓存保存
 # ============================================================
 
-async def save_schema_cache(cache_dir: Path, schema_data: Dict[str, Any]) -> bool:
+def save_schema_cache(cache_dir: Path, schema_data: Dict[str, Any]) -> bool:
     """
-    异步保存 Schema 缓存
+    保存 Schema 缓存
     
     Args:
         cache_dir: 缓存目录
@@ -319,8 +301,8 @@ async def save_schema_cache(cache_dir: Path, schema_data: Dict[str, Any]) -> boo
     schema_file = cache_dir / "schema.json"
     
     try:
-        async with aiofiles.open(schema_file, 'w', encoding='utf-8') as f:
-            await f.write(json.dumps(schema_data, indent=2, ensure_ascii=False))
+        with open(schema_file, 'w', encoding='utf-8') as f:
+            json.dump(schema_data, f, indent=2, ensure_ascii=False)
         logger.info(f"✅ 保存 Schema 缓存: {schema_file}")
         return True
     except Exception as e:
@@ -328,9 +310,9 @@ async def save_schema_cache(cache_dir: Path, schema_data: Dict[str, Any]) -> boo
         return False
 
 
-async def save_tools_inference_cache(cache_dir: Path, tools_cache: Dict[str, List[str]]) -> bool:
+def save_tools_inference_cache(cache_dir: Path, tools_cache: Dict[str, List[str]]) -> bool:
     """
-    异步保存工具推断缓存
+    保存工具推断缓存
     
     Args:
         cache_dir: 缓存目录
@@ -345,8 +327,8 @@ async def save_tools_inference_cache(cache_dir: Path, tools_cache: Dict[str, Lis
     tools_file = cache_dir / "tools_inference.json"
     
     try:
-        async with aiofiles.open(tools_file, 'w', encoding='utf-8') as f:
-            await f.write(json.dumps(tools_cache, indent=2, ensure_ascii=False))
+        with open(tools_file, 'w', encoding='utf-8') as f:
+            json.dump(tools_cache, f, indent=2, ensure_ascii=False)
         logger.info(f"✅ 保存工具推断缓存: {len(tools_cache)} 个工具")
         return True
     except Exception as e:
@@ -354,9 +336,9 @@ async def save_tools_inference_cache(cache_dir: Path, tools_cache: Dict[str, Lis
         return False
 
 
-async def save_cache_metadata(cache_dir: Path, instance_path: Path) -> bool:
+def save_cache_metadata(cache_dir: Path, instance_path: Path) -> bool:
     """
-    异步保存缓存元数据
+    保存缓存元数据
     
     Args:
         cache_dir: 缓存目录
@@ -369,11 +351,11 @@ async def save_cache_metadata(cache_dir: Path, instance_path: Path) -> bool:
     cache_dir.mkdir(parents=True, exist_ok=True)
     
     metadata_file = cache_dir / "cache_metadata.json"
-    metadata = await create_cache_metadata(instance_path)
+    metadata = create_cache_metadata(instance_path)
     
     try:
-        async with aiofiles.open(metadata_file, 'w', encoding='utf-8') as f:
-            await f.write(json.dumps(metadata, indent=2, ensure_ascii=False))
+        with open(metadata_file, 'w', encoding='utf-8') as f:
+            json.dump(metadata, f, indent=2, ensure_ascii=False)
         logger.info(f"✅ 保存缓存元数据: {metadata_file}")
         return True
     except Exception as e:
@@ -381,14 +363,14 @@ async def save_cache_metadata(cache_dir: Path, instance_path: Path) -> bool:
         return False
 
 
-async def save_all_cache(
+def save_all_cache(
     cache_dir: Path,
     instance_path: Path,
     schema_data: Dict[str, Any],
     tools_cache: Dict[str, List[str]]
 ) -> bool:
     """
-    异步保存所有缓存（Schema + 工具推断 + 元数据）
+    保存所有缓存（Schema + 工具推断 + 元数据）
     
     Args:
         cache_dir: 缓存目录
@@ -399,14 +381,10 @@ async def save_all_cache(
     Returns:
         成功返回 True
     """
-    # 并行保存所有缓存
-    results = await asyncio.gather(
-        save_schema_cache(cache_dir, schema_data),
-        save_tools_inference_cache(cache_dir, tools_cache),
-        save_cache_metadata(cache_dir, instance_path)
-    )
-    
-    success = all(results)
+    success = True
+    success &= save_schema_cache(cache_dir, schema_data)
+    success &= save_tools_inference_cache(cache_dir, tools_cache)
+    success &= save_cache_metadata(cache_dir, instance_path)
     
     if success:
         logger.info(f"✅ 缓存保存完成: {cache_dir}")
@@ -420,9 +398,9 @@ async def save_all_cache(
 # 缓存清理
 # ============================================================
 
-async def clear_cache(cache_dir: Path) -> bool:
+def clear_cache(cache_dir: Path) -> bool:
     """
-    异步清除缓存目录
+    清除缓存目录
     
     Args:
         cache_dir: 缓存目录
@@ -436,7 +414,7 @@ async def clear_cache(cache_dir: Path) -> bool:
     
     try:
         import shutil
-        await asyncio.to_thread(shutil.rmtree, cache_dir)
+        shutil.rmtree(cache_dir)
         logger.info(f"✅ 清除缓存: {cache_dir}")
         return True
     except Exception as e:

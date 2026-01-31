@@ -15,6 +15,11 @@ from infra.database.models import File
 from infra.database.crud.base import get_by_id
 
 
+def generate_file_id() -> str:
+    """生成文件 ID"""
+    return f"file_{uuid4().hex[:24]}"
+
+
 async def create_file(
     session: AsyncSession,
     user_id: str,
@@ -38,7 +43,7 @@ async def create_file(
         File 对象
     """
     file = File(
-        id=str(uuid4()),
+        id=generate_file_id(),
         user_id=user_id,
         filename=filename,
         file_size=file_size,
@@ -135,3 +140,4 @@ async def delete_file(
     await session.delete(file)
     await session.commit()
     return True
+

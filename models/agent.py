@@ -133,9 +133,8 @@ class AgentCreateRequest(BaseModel):
                     "model": "claude-sonnet-4-5-20250929",
                     "max_turns": 20,
                     "enabled_capabilities": {
-                        "tavily_search": True,
-                        "knowledge_search": True,
-                        "sandbox_tools": True
+                        "web_search": True,
+                        "knowledge_search": True
                     },
                     "mcp_tools": [
                         {
@@ -182,28 +181,6 @@ class AgentSummary(BaseModel):
     last_used_at: Optional[datetime] = Field(None, description="最后使用时间")
 
 
-class MCPToolDetail(BaseModel):
-    """MCP 工具详情（用于 AgentDetail 响应）"""
-    name: str = Field(..., description="工具名称")
-    server_url: str = Field("", description="MCP 服务器 URL")
-    server_name: str = Field("", description="服务器名称")
-    auth_type: str = Field("none", description="认证类型")
-    auth_env: Optional[str] = Field(None, description="认证密钥的环境变量名")
-    capability: Optional[str] = Field(None, description="工具能力分类")
-    description: str = Field("", description="工具描述")
-
-
-class APIDetail(BaseModel):
-    """API 详情（用于 AgentDetail 响应）"""
-    name: str = Field(..., description="API 名称")
-    base_url: str = Field("", description="API 基础 URL")
-    auth_type: str = Field("none", description="认证类型")
-    auth_env: Optional[str] = Field(None, description="认证密钥的环境变量名")
-    doc: Optional[str] = Field(None, description="API 文档名称")
-    capability: Optional[str] = Field(None, description="API 能力分类")
-    description: str = Field("", description="API 描述")
-
-
 class AgentDetail(BaseModel):
     """Agent 详情"""
     agent_id: str = Field(..., description="Agent ID")
@@ -215,13 +192,9 @@ class AgentDetail(BaseModel):
     # 配置
     model: Optional[str] = Field(None, description="使用的模型")
     max_turns: Optional[int] = Field(None, description="最大对话轮数")
-    plan_manager_enabled: bool = Field(False, description="是否启用计划管理器")
-    enabled_capabilities: Dict[str, bool] = Field(
-        default_factory=dict, 
-        description="启用的工具能力，如 {'tavily_search': True, 'knowledge_search': True, 'sandbox_tools': False}"
-    )
-    mcp_tools: List[MCPToolDetail] = Field(default_factory=list, description="MCP 工具配置列表")
-    apis: List[APIDetail] = Field(default_factory=list, description="API 配置列表")
+    enabled_capabilities: List[str] = Field(default_factory=list, description="启用的能力列表")
+    mcp_tools: List[str] = Field(default_factory=list, description="MCP 工具名称列表")
+    apis: List[str] = Field(default_factory=list, description="API 名称列表")
     skills: List[str] = Field(default_factory=list, description="Skill 名称列表")
     
     # 统计
@@ -230,11 +203,10 @@ class AgentDetail(BaseModel):
     failed_calls: int = Field(0, description="失败调用次数")
     
     # 时间戳
-    created_at: Optional[datetime] = Field(None, description="创建时间")
-    updated_at: Optional[datetime] = Field(None, description="更新时间")
+    created_at: datetime = Field(..., description="创建时间")
+    updated_at: datetime = Field(..., description="更新时间")
     last_used_at: Optional[datetime] = Field(None, description="最后使用时间")
-    loaded_at: Optional[str] = Field(None, description="最后加载时间（ISO 格式字符串）")
-    load_time_ms: Optional[float] = Field(None, description="加载耗时（毫秒）")
+    loaded_at: Optional[datetime] = Field(None, description="最后加载时间")
 
 
 class AgentListResponse(BaseModel):
@@ -295,20 +267,17 @@ class SkillSummary(BaseModel):
 
 
 class SkillDetail(BaseModel):
-    """Skill 详情（完整信息）"""
+    """Skill 详情"""
     name: str = Field(..., description="Skill 名称")
     description: str = Field("", description="描述")
-    priority: str = Field("medium", description="优先级: high/medium/low")
-    preferred_for: List[str] = Field(default_factory=list, description="适用场景")
-    scripts: List[str] = Field(default_factory=list, description="脚本文件列表")
-    resources: List[str] = Field(default_factory=list, description="资源文件列表")
-    content: str = Field("", description="SKILL.md 完整内容")
-    agent_id: str = Field(..., description="所属 Agent ID（global 表示全局库）")
+    agent_id: str = Field(..., description="所属 Agent ID")
     is_enabled: bool = Field(True, description="是否启用")
     is_registered: bool = Field(False, description="是否已注册到 Claude API")
     skill_id: Optional[str] = Field(None, description="Claude API 的 skill_id")
-    registered_at: Optional[str] = Field(None, description="注册时间")
-    created_at: Optional[datetime] = Field(None, description="创建时间")
+    skill_path: Optional[str] = Field(None, description="Skill 目录路径")
+    created_at: datetime = Field(..., description="创建时间")
+    registered_at: Optional[datetime] = Field(None, description="注册时间")
+    updated_at: datetime = Field(..., description="更新时间")
 
 
 class SkillListResponse(BaseModel):
@@ -323,54 +292,4 @@ class SkillSyncResponse(BaseModel):
     success: bool = Field(..., description="是否成功")
     skill_id: Optional[str] = Field(None, description="Claude API 的 skill_id")
     message: str = Field("", description="消息")
-
-
-class SkillInstallRequest(BaseModel):
-    """安装 Skill 到实例请求"""
-    skill_name: str = Field(..., description="Skill 名称（全局库中的 Skill）")
-    agent_id: str = Field(..., description="目标实例 ID")
-    auto_register: bool = Field(True, description="是否自动注册到 Claude API")
-    
-    model_config = {
-        "json_schema_extra": {
-            "examples": [
-                {
-                    "skill_name": "ontology-builder",
-                    "agent_id": "dazee_agent",
-                    "auto_register": True
-                }
-            ]
-        }
-    }
-
-
-class SkillUninstallRequest(BaseModel):
-    """从实例卸载 Skill 请求"""
-    skill_name: str = Field(..., description="Skill 名称")
-    agent_id: str = Field(..., description="实例 ID")
-    
-    model_config = {
-        "json_schema_extra": {
-            "examples": [
-                {
-                    "skill_name": "ontology-builder",
-                    "agent_id": "dazee_agent"
-                }
-            ]
-        }
-    }
-
-
-class SkillToggleRequest(BaseModel):
-    """启用/禁用 Skill 请求"""
-    skill_name: str = Field(..., description="Skill 名称")
-    agent_id: str = Field(..., description="实例 ID")
-    enabled: bool = Field(..., description="是否启用")
-
-
-class SkillUpdateContentRequest(BaseModel):
-    """更新 Skill 内容请求"""
-    skill_name: str = Field(..., description="Skill 名称")
-    agent_id: str = Field(..., description="实例 ID")
-    content: str = Field(..., description="新的 SKILL.md 内容")
 

@@ -222,22 +222,12 @@ class KnowledgeStore:
         self.store.update(_mutate)
 
 
-def create_knowledge_store(data_dir: str = None) -> KnowledgeStore:
+def create_knowledge_store(workspace_dir: str) -> KnowledgeStore:
     """
-    创建 KnowledgeStore（使用系统临时目录或指定目录）。
-    
-    Args:
-        data_dir: 数据目录（可选），默认使用系统临时目录
+    创建 KnowledgeStore（落盘路径固定在 workspace 目录内）。
     """
-    import tempfile
-    if data_dir is None:
-        base = Path(tempfile.gettempdir()) / "zenflux_knowledge"
-    else:
-        base = Path(data_dir)
-    
-    path = base / "knowledge_store.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    
+    base = Path(workspace_dir)
+    path = base / "knowledge" / "knowledge_store.json"
     return KnowledgeStore(
         store=JsonFileStore(
             path=path,
@@ -251,10 +241,10 @@ def create_knowledge_store(data_dir: str = None) -> KnowledgeStore:
 _default_store: Optional[KnowledgeStore] = None
 
 
-def get_knowledge_store() -> KnowledgeStore:
+def get_knowledge_store(workspace_dir: str = "./workspace") -> KnowledgeStore:
     """获取默认 KnowledgeStore 单例"""
     global _default_store
     if _default_store is None:
-        _default_store = create_knowledge_store()
+        _default_store = create_knowledge_store(workspace_dir)
     return _default_store
 

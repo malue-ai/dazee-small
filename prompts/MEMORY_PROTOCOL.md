@@ -38,7 +38,7 @@ NEVER trust your thinking memory - ALWAYS read from plan_todo.get_plan()
 │    └─ 决定 status: completed|failed|retry               │
 │                                                         │
 │ 5️⃣ [Update] 写回 Memory                                 │
-│    ├─ MANDATORY: 调用 plan_todo.update_todo()          │
+│    ├─ MANDATORY: 调用 plan_todo.update_step()          │
 │    ├─ 更新步骤状态和结果                                  │
 │    └─ 写入 Short Memory                                 │
 │                                                         │
@@ -86,7 +86,7 @@ NEVER trust your thinking memory - ALWAYS read from plan_todo.get_plan()
   - 质量评分: 8/10
   → Decision: PASS
 
-[Act] 调用 plan_todo.update_todo({  ← 强制写回
+[Act] 调用 plan_todo.update_step({  ← 强制写回
   "step_index": 0,
   "status": "completed",
   "result": "找到5篇行业报告，包含市场规模、增长率数据"
@@ -108,7 +108,7 @@ NEVER trust your thinking memory - ALWAYS read from plan_todo.get_plan()
 [Act] 调用 web_search("AI 技术趋势 2024")
 [Observe] ...
 [Validate] ...
-[Act] 调用 plan_todo.update_todo(...)  ← 写回
+[Act] 调用 plan_todo.update_step(...)  ← 写回
 ```
 
 ## 为什么必须这样做？
@@ -138,7 +138,7 @@ Turn 2:
   [Reason] 根据 Memory 中的状态，当前执行第 1 步
   [Act] 调用 web_search(...)
   [Observe] ...
-  [Act] 调用 plan_todo.update_todo(...)  ← 写回最新状态
+  [Act] 调用 plan_todo.update_step(...)  ← 写回最新状态
 
 优势：
 - 状态始终同步
@@ -152,7 +152,7 @@ Turn 2:
 | Claude Platform | 我们的实现 | 说明 |
 |----------------|----------|------|
 | `memory.view()` | `plan_todo.get_plan()` | 读取当前状态 |
-| `memory.write()` | `plan_todo.update_todo()` | 写入进度 |
+| `memory.write()` | `plan_todo.update_step()` | 写入进度 |
 | `memory.json` | `plan.json` | 结构化状态数据 |
 | `memory.txt` | `todo.md` | 用户可读的进度 |
 | Context reset resilient | Short Memory 存储 | 状态持久化 |

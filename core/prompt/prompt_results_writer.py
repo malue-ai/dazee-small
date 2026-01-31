@@ -25,15 +25,12 @@ instances/{instance_name}/
 
 import hashlib
 import json
-import asyncio
-import shutil
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Any, List
 
 import yaml
-import aiofiles
 
 from logger import get_logger
 
@@ -101,6 +98,10 @@ class PromptResults:
 README_TEMPLATE = """# 生成的系统提示词
 
 本目录包含由 LLM 根据 `prompt.md` 自动生成的场景化系统提示词。
+
+## 长度对比
+
+{length_summary}
 
 ## 文件说明
 
@@ -173,9 +174,9 @@ class PromptResultsWriter:
     # 公共方法
     # ============================================================
     
-    async def write_all(self, results: PromptResults) -> bool:
+    def write_all(self, results: PromptResults) -> bool:
         """
-        异步写入所有生成结果
+        写入所有生成结果
         
         Args:
             results: 生成的提示词结果
@@ -188,7 +189,7 @@ class PromptResultsWriter:
             self.results_dir.mkdir(parents=True, exist_ok=True)
             
             # 加载现有元数据（用于检测手动编辑）
-            existing_metadata = await self._load_metadata_async()
+            existing_metadata = self._load_metadata()
             manually_edited = existing_metadata.manually_edited if existing_metadata else []
             
             # 写入各文件
@@ -203,8 +204,7 @@ class PromptResultsWriter:
                     allow_unicode=True,
                     sort_keys=False
                 )
-                async with aiofiles.open(schema_path, 'w', encoding='utf-8') as f:
-                    await f.write(schema_content)
+                schema_path.write_text(schema_content, encoding="utf-8")
                 result_hashes["agent_schema"] = self._compute_hash(schema_content)
                 logger.info(f"   📄 写入 {self.RESULT_FILES['agent_schema']}")
             else:
@@ -221,8 +221,7 @@ class PromptResultsWriter:
             for field_name, content in prompt_fields:
                 if field_name not in manually_edited:
                     file_path = self.results_dir / self.RESULT_FILES[field_name]
-                    async with aiofiles.open(file_path, 'w', encoding='utf-8') as f:
-                        await f.write(content)
+                    file_path.write_text(content, encoding="utf-8")
                     result_hashes[field_name] = self._compute_hash(content)
                     logger.info(f"   📄 写入 {self.RESULT_FILES[field_name]}")
                 else:
@@ -230,24 +229,25 @@ class PromptResultsWriter:
             
             # 3. 写入 README
             readme_path = self.results_dir / "README.md"
+            length_summary = self._build_length_summary(results)
             readme_content = README_TEMPLATE.format(
-                generated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                generated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                length_summary=length_summary
             )
-            async with aiofiles.open(readme_path, 'w', encoding='utf-8') as f:
-                await f.write(readme_content)
+            readme_path.write_text(readme_content, encoding="utf-8")
             
             # 4. 写入元数据
             metadata = PromptResultsMetadata(
                 version="1.0",
                 generated_at=datetime.now().isoformat(),
                 source_hashes={
-                    "prompt.md": await self._get_source_hash_async(self.prompt_path),
-                    "config.yaml": await self._get_source_hash_async(self.config_path),
+                    "prompt.md": self._get_source_hash(self.prompt_path),
+                    "config.yaml": self._get_source_hash(self.config_path),
                 },
                 result_hashes=result_hashes,
                 manually_edited=manually_edited,
             )
-            await self._save_metadata_async(metadata)
+            self._save_metadata(metadata)
             
             logger.info(f"✅ 已写入 prompt_results/ 目录: {self.results_dir}")
             return True
@@ -255,10 +255,31 @@ class PromptResultsWriter:
         except Exception as e:
             logger.error(f"❌ 写入 prompt_results 失败: {e}")
             return False
+
+    @staticmethod
+    def _build_length_summary(results: PromptResults) -> str:
+        """生成提示词长度对比表"""
+        entries = [
+            ("intent_prompt.md", results.intent_prompt),
+            ("simple_prompt.md", results.simple_prompt),
+            ("medium_prompt.md", results.medium_prompt),
+            ("complex_prompt.md", results.complex_prompt),
+        ]
+        base_len = len(results.complex_prompt) or max(len(content) for _, content in entries) or 1
+
+        lines = [
+            "| 文件 | 字符数 | 相对复杂版 |",
+            "|---|---:|---:|",
+        ]
+        for filename, content in entries:
+            length = len(content)
+            ratio = f"{length / base_len * 100:.1f}%"
+            lines.append(f"| {filename} | {length} | {ratio} |")
+        return "\n".join(lines)
     
-    async def should_regenerate(self) -> Dict[str, bool]:
+    def should_regenerate(self) -> Dict[str, bool]:
         """
-        异步检查哪些文件需要重新生成
+        检查哪些文件需要重新生成
         
         Returns:
             字典，键为文件名，值为是否需要重新生成
@@ -277,14 +298,14 @@ class PromptResultsWriter:
             return result
         
         # 加载元数据
-        metadata = await self._load_metadata_async()
+        metadata = self._load_metadata()
         if not metadata:
             logger.info("   📋 元数据不存在，需要全部生成")
             return result
         
         # 检查源文件是否变化
-        current_prompt_hash = await self._get_source_hash_async(self.prompt_path)
-        current_config_hash = await self._get_source_hash_async(self.config_path)
+        current_prompt_hash = self._get_source_hash(self.prompt_path)
+        current_config_hash = self._get_source_hash(self.config_path)
         
         prompt_changed = current_prompt_hash != metadata.source_hashes.get("prompt.md")
         config_changed = current_config_hash != metadata.source_hashes.get("config.yaml")
@@ -295,7 +316,7 @@ class PromptResultsWriter:
             logger.info("   🔄 config.yaml 已变化，需要重新生成 agent_schema")
         
         # 检测运营手动编辑
-        await self._detect_manual_edits_async(metadata)
+        self._detect_manual_edits(metadata)
         
         # 根据变化情况决定哪些需要重新生成
         for file_key in result.keys():
@@ -312,9 +333,9 @@ class PromptResultsWriter:
         
         return result
     
-    async def load_existing(self) -> Optional[PromptResults]:
+    def load_existing(self) -> Optional[PromptResults]:
         """
-        异步加载现有结果（优先使用运营手动编辑的版本）
+        加载现有结果（优先使用运营手动编辑的版本）
         
         Returns:
             已存在的结果，如果不存在返回 None
@@ -328,16 +349,15 @@ class PromptResultsWriter:
             # 加载 AgentSchema
             schema_path = self.results_dir / self.RESULT_FILES["agent_schema"]
             if schema_path.exists():
-                async with aiofiles.open(schema_path, 'r', encoding='utf-8') as f:
-                    content = await f.read()
-                    results.agent_schema = yaml.safe_load(content) or {}
+                results.agent_schema = yaml.safe_load(
+                    schema_path.read_text(encoding="utf-8")
+                ) or {}
             
             # 加载场景化提示词
             for field_name in ["intent_prompt", "simple_prompt", "medium_prompt", "complex_prompt"]:
                 file_path = self.results_dir / self.RESULT_FILES[field_name]
                 if file_path.exists():
-                    async with aiofiles.open(file_path, 'r', encoding='utf-8') as f:
-                        setattr(results, field_name, await f.read())
+                    setattr(results, field_name, file_path.read_text(encoding="utf-8"))
             
             return results
             
@@ -361,26 +381,28 @@ class PromptResultsWriter:
         
         return True
     
-    async def get_manually_edited_files(self) -> List[str]:
+    def get_manually_edited_files(self) -> List[str]:
         """
-        异步获取被运营手动编辑的文件列表
+        获取被运营手动编辑的文件列表
         
         Returns:
             文件键名列表
         """
-        metadata = await self._load_metadata_async()
+        metadata = self._load_metadata()
         return metadata.manually_edited if metadata else []
     
-    async def clear(self) -> bool:
+    def clear(self) -> bool:
         """
-        异步清除所有生成结果
+        清除所有生成结果
         
         Returns:
             是否成功
         """
+        import shutil
+        
         if self.results_dir.exists():
             try:
-                await asyncio.to_thread(shutil.rmtree, self.results_dir)
+                shutil.rmtree(self.results_dir)
                 logger.info(f"🗑️ 已清除 prompt_results/ 目录")
                 return True
             except Exception as e:
@@ -396,41 +418,39 @@ class PromptResultsWriter:
         """计算内容的哈希值"""
         return hashlib.md5(content.encode("utf-8")).hexdigest()
     
-    async def _get_source_hash_async(self, path: Path) -> str:
-        """异步获取源文件的哈希值"""
+    def _get_source_hash(self, path: Path) -> str:
+        """获取源文件的哈希值"""
         if not path.exists():
             return ""
-        async with aiofiles.open(path, 'r', encoding='utf-8') as f:
-            content = await f.read()
-        return self._compute_hash(content)
+        return self._compute_hash(path.read_text(encoding="utf-8"))
     
-    async def _load_metadata_async(self) -> Optional[PromptResultsMetadata]:
-        """异步加载元数据"""
+    def _load_metadata(self) -> Optional[PromptResultsMetadata]:
+        """加载元数据"""
         if not self.metadata_path.exists():
             return None
         
         try:
-            async with aiofiles.open(self.metadata_path, 'r', encoding='utf-8') as f:
-                content = await f.read()
-                data = json.loads(content)
+            data = json.loads(self.metadata_path.read_text(encoding="utf-8"))
             return PromptResultsMetadata.from_dict(data)
         except Exception as e:
             logger.warning(f"⚠️ 加载元数据失败: {e}")
             return None
     
-    async def _save_metadata_async(self, metadata: PromptResultsMetadata) -> bool:
-        """异步保存元数据"""
+    def _save_metadata(self, metadata: PromptResultsMetadata) -> bool:
+        """保存元数据"""
         try:
-            async with aiofiles.open(self.metadata_path, 'w', encoding='utf-8') as f:
-                await f.write(json.dumps(metadata.to_dict(), indent=2, ensure_ascii=False))
+            self.metadata_path.write_text(
+                json.dumps(metadata.to_dict(), indent=2, ensure_ascii=False),
+                encoding="utf-8"
+            )
             return True
         except Exception as e:
             logger.error(f"❌ 保存元数据失败: {e}")
             return False
     
-    async def _detect_manual_edits_async(self, metadata: PromptResultsMetadata) -> None:
+    def _detect_manual_edits(self, metadata: PromptResultsMetadata) -> None:
         """
-        异步检测运营手动编辑
+        检测运营手动编辑
         
         如果文件内容与记录的哈希不一致，说明被手动编辑了
         """
@@ -445,8 +465,7 @@ class PromptResultsWriter:
                 continue
             
             # 计算当前哈希
-            async with aiofiles.open(file_path, 'r', encoding='utf-8') as f:
-                current_content = await f.read()
+            current_content = file_path.read_text(encoding="utf-8")
             current_hash = self._compute_hash(current_content)
             
             # 与记录的哈希比较
@@ -458,7 +477,7 @@ class PromptResultsWriter:
                 logger.info(f"   ✏️ 检测到 {file_name} 被运营手动编辑")
                 
                 # 更新元数据
-                await self._save_metadata_async(metadata)
+                self._save_metadata(metadata)
 
 
 # ============================================================

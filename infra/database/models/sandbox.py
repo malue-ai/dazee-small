@@ -64,16 +64,6 @@ class Sandbox(Base):
         nullable=True
     )
     
-    # 当前运行的项目信息（用于暂停/恢复时自动管理项目）
-    active_project_path: Mapped[Optional[str]] = mapped_column(
-        String(256),
-        nullable=True
-    )
-    active_project_stack: Mapped[Optional[str]] = mapped_column(
-        String(32),
-        nullable=True
-    )
-    
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
@@ -126,8 +116,6 @@ class Sandbox(Base):
             "status": self.status,
             "stack": self.stack,
             "preview_url": self.preview_url,
-            "active_project_path": self.active_project_path,
-            "active_project_stack": self.active_project_stack,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "last_active_at": self.last_active_at.isoformat() if self.last_active_at else None,

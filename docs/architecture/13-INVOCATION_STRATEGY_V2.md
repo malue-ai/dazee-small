@@ -84,7 +84,7 @@ class InvocationSelector:
 │                                                                              │
 │  Level 1            Native Claude                Direct Tool Call           │
 │  (Core Tools)       ✅ 标准 Function Call        • plan_todo                │
-│                     ✅ 快速响应 <1s              • sandbox_read_file        │
+│                     ✅ 快速响应 <1s              • file_read                │
 │                     ✅ Schema-safe               • web_search               │
 │                                                  • basic bash               │
 │                                                                              │
@@ -1786,7 +1786,7 @@ SKILLS_GUIDANCE_PROMPT_COMPACT = """
 ### 外层代码简化（去除决策逻辑）
 
 ```python
-# core/agent/simple_agent.py (简化版)
+# core/agent/simple/simple_agent.py (简化版)
 
 class SimpleAgent:
     """

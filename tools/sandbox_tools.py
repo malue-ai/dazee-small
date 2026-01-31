@@ -1,152 +1,358 @@
 """
-沙盒工具 - E2B 沙盒操作
+沙盒工具 - E2B 沙盒操作（精简版）
 
-设计原则：
-1. 贴近 E2B 原生 API
-2. 原子化：每个工具只做一件事
-3. 灵活性：让 Agent 自己决定如何组合
-
-标准工具（6 个）：
-- sandbox_write_file: 写入文件
-- sandbox_read_file: 读取文件
-- sandbox_list_files: 列出目录
-- sandbox_run_command: 执行命令（支持 background 参数）
-- sandbox_execute_python: 执行 Python 代码（Code Interpreter）
-- sandbox_get_public_url: 获取公开 URL
-
-典型工作流：
-1. sandbox_write_file("package.json", content)
-2. sandbox_write_file("index.js", content)
-3. sandbox_run_command("npm install")
-4. sandbox_run_command("npm start", background=True)
-5. sandbox_get_public_url(port=3000)
+核心工具（4 个）：
+- sandbox_write_file: 写文件
+- sandbox_run_command: 执行命令（读/列/删 用 bash）
+- sandbox_create_project: 创建项目骨架
+- sandbox_run_project: 运行项目，获取预览 URL
 """
 
-import asyncio
-import time
-from datetime import datetime
-from typing import Dict, Any, Optional
+import re
+from typing import Dict, Any, List, Optional
 
 from logger import get_logger
-from core.tool.base import BaseTool, ToolContext
+from tools.base import BaseTool
 from services.sandbox_service import (
     get_sandbox_service,
     SandboxServiceError,
     SandboxNotFoundError
 )
-from infra.sandbox import get_sandbox_provider
-from infra.database import AsyncSessionLocal, crud
 
 logger = get_logger("sandbox_tools")
 
-
-# ==================== 后台沙盒创建任务跟踪 ====================
-
-# 存储进行中的沙盒创建任务: conversation_id -> Task
-_sandbox_creation_tasks: Dict[str, asyncio.Task] = {}
+PROJECT_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
 
 
-def start_sandbox_creation_background(conversation_id: str, user_id: str = "default_user") -> None:
+def _normalize_project_path(project_path: str) -> str:
     """
-    后台启动沙盒创建（不阻塞调用方）
-    
-    Args:
-        conversation_id: 对话 ID
-        user_id: 用户 ID
-    """
-    # 如果已有进行中的任务，跳过
-    if conversation_id in _sandbox_creation_tasks:
-        task = _sandbox_creation_tasks[conversation_id]
-        if not task.done():
-            logger.debug(f"⏳ 沙盒创建任务已在进行中: {conversation_id}")
-            return
-    
-    async def _create_sandbox():
-        """后台创建沙盒的协程"""
-        try:
-            service = get_sandbox_service()
-            await service.get_or_create_sandbox(conversation_id, user_id)
-            logger.info(f"🏖️ 后台沙盒创建完成: {conversation_id}")
-        except Exception as e:
-            logger.warning(f"⚠️ 后台沙盒创建失败: {conversation_id}, {e}")
-        finally:
-            # 清理任务引用
-            _sandbox_creation_tasks.pop(conversation_id, None)
-    
-    # 创建后台任务
-    task = asyncio.create_task(_create_sandbox())
-    _sandbox_creation_tasks[conversation_id] = task
-    logger.info(f"🚀 已启动后台沙盒创建: {conversation_id}")
-
-
-async def wait_for_sandbox_creation(conversation_id: str, timeout: float = 60.0) -> bool:
-    """
-    等待后台沙盒创建完成（如果有进行中的任务）
-    
-    Args:
-        conversation_id: 对话 ID
-        timeout: 最大等待时间（秒）
-        
-    Returns:
-        True 如果沙盒已就绪，False 如果超时或失败
-    """
-    task = _sandbox_creation_tasks.get(conversation_id)
-    if task is None or task.done():
-        return True
-    
-    try:
-        logger.debug(f"⏳ 等待后台沙盒创建完成: {conversation_id}")
-        await asyncio.wait_for(task, timeout=timeout)
-        return True
-    except asyncio.TimeoutError:
-        logger.warning(f"⚠️ 等待后台沙盒创建超时: {conversation_id}")
-        return False
-    except Exception as e:
-        logger.warning(f"⚠️ 后台沙盒创建任务异常: {conversation_id}, {e}")
-        return False
-
-
-# 沙盒默认项目目录（所有操作的根目录）
-SANDBOX_PROJECT_ROOT = "/home/user/project"
-
-
-def _normalize_path(path: str) -> str:
-    """
-    标准化路径为沙盒绝对路径。
-    
-    所有相对路径都基于 /home/user/project 目录。
-    Agent 只需传相对路径（如 src/index.js），工具会自动处理。
+    标准化项目路径为沙盒绝对路径。
 
     Args:
-        path: 路径（相对路径或绝对路径）
-              - 空/None → /home/user/project
-              - src/index.js → /home/user/project/src/index.js
-              - /home/user/xxx → /home/user/xxx（保持原样）
+        project_path: 项目路径（支持 /home/user/xxx 或 xxx）
 
     Returns:
         标准化后的绝对路径
     """
-    if not path:
-        return SANDBOX_PROJECT_ROOT
+    if not project_path:
+        return "/home/user"
 
-    # 绝对路径保持原样
-    if path.startswith("/"):
-        return path
+    if project_path.startswith("/"):
+        return project_path
 
-    # 相对路径基于项目根目录
-    return f"{SANDBOX_PROJECT_ROOT}/{path}".replace("//", "/")
+    return f"/home/user/{project_path}".replace("//", "/")
+
+
+def _validate_project_name(project_name: str) -> Optional[str]:
+    """
+    校验项目名称，防止路径穿越等问题。
+
+    Args:
+        project_name: 项目名称
+
+    Returns:
+        错误信息（合法则返回 None）
+    """
+    if not project_name:
+        return "project_name 不能为空"
+
+    if "/" in project_name or "\\" in project_name:
+        return "project_name 不能包含路径分隔符"
+
+    if ".." in project_name:
+        return "project_name 不能包含 .."
+
+    if not PROJECT_NAME_PATTERN.match(project_name):
+        return "project_name 只允许字母数字、_、-，且长度 1-64"
+
+    return None
+
+
+def _get_project_scaffold(stack: str, project_name: str) -> Dict[str, str]:
+    """
+    获取项目骨架文件集合（相对项目目录的路径 -> 内容）。
+
+    Args:
+        stack: 技术栈
+        project_name: 项目名称
+
+    Returns:
+        文件映射
+
+    Raises:
+        ValueError: 不支持的技术栈
+    """
+    stack = (stack or "").lower()
+
+    if stack == "streamlit":
+        return {
+            "requirements.txt": "streamlit>=1.33.0\n",
+            "app.py": (
+                "import streamlit as st\n\n\n"
+                "def main() -> None:\n"
+                "    \"\"\"Streamlit 入口\"\"\"\n"
+                "    st.set_page_config(page_title='ZenFlux', page_icon='🧪')\n"
+                "    st.title('Hello from Streamlit')\n"
+                "    st.write('项目初始化完成，可以开始写代码了。')\n\n\n"
+                "if __name__ == '__main__':\n"
+                "    main()\n"
+            ),
+        }
+
+    if stack == "gradio":
+        return {
+            "requirements.txt": "gradio>=4.0.0\n",
+            "app.py": (
+                "import gradio as gr\n\n\n"
+                "def echo(text: str) -> str:\n"
+                "    \"\"\"简单回声函数\"\"\"\n"
+                "    return f'你输入了: {text}'\n\n\n"
+                "def main() -> None:\n"
+                "    \"\"\"Gradio 入口\"\"\"\n"
+                "    demo = gr.Interface(fn=echo, inputs='text', outputs='text', title='ZenFlux')\n"
+                "    demo.launch(server_name='0.0.0.0', server_port=7860)\n\n\n"
+                "if __name__ == '__main__':\n"
+                "    main()\n"
+            ),
+        }
+
+    if stack == "flask":
+        return {
+            "requirements.txt": "flask>=3.0.0\n",
+            "app.py": (
+                "from flask import Flask\n\n"
+                "app = Flask(__name__)\n\n\n"
+                "@app.get('/')\n"
+                "def index() -> str:\n"
+                "    \"\"\"首页\"\"\"\n"
+                "    return 'Hello from Flask'\n\n\n"
+                "if __name__ == '__main__':\n"
+                "    app.run(host='0.0.0.0', port=5000)\n"
+            ),
+        }
+
+    if stack == "fastapi":
+        return {
+            "requirements.txt": "fastapi>=0.110.0\nuvicorn>=0.27.0\n",
+            "main.py": (
+                "from fastapi import FastAPI\n\n"
+                "app = FastAPI(title='ZenFlux')\n\n\n"
+                "@app.get('/')\n"
+                "async def index() -> dict:\n"
+                "    \"\"\"首页\"\"\"\n"
+                "    return {'message': 'Hello from FastAPI'}\n"
+            ),
+        }
+
+    if stack == "python":
+        return {
+            "requirements.txt": "",
+            "main.py": (
+                "def main() -> None:\n"
+                "    \"\"\"主函数\"\"\"\n"
+                "    print('Hello from Python')\n\n\n"
+                "if __name__ == '__main__':\n"
+                "    main()\n"
+            ),
+        }
+
+    if stack == "vue":
+        return {
+            "package.json": (
+                "{\n"
+                f"  \"name\": \"{project_name}\",\n"
+                "  \"private\": true,\n"
+                "  \"type\": \"module\",\n"
+                "  \"scripts\": {\n"
+                "    \"dev\": \"vite --host 0.0.0.0 --port 5173 --strictPort\",\n"
+                "    \"build\": \"vite build\",\n"
+                "    \"preview\": \"vite preview --host 0.0.0.0 --port 5173 --strictPort\"\n"
+                "  },\n"
+                "  \"dependencies\": {\n"
+                "    \"vue\": \"^3.4.0\"\n"
+                "  },\n"
+                "  \"devDependencies\": {\n"
+                "    \"vite\": \"^5.0.0\",\n"
+                "    \"@vitejs/plugin-vue\": \"^5.0.0\"\n"
+                "  }\n"
+                "}\n"
+            ),
+            "index.html": (
+                "<!doctype html>\n"
+                "<html lang=\"zh-CN\">\n"
+                "  <head>\n"
+                "    <meta charset=\"UTF-8\" />\n"
+                "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n"
+                f"    <title>{project_name}</title>\n"
+                "  </head>\n"
+                "  <body>\n"
+                "    <div id=\"app\"></div>\n"
+                "    <script type=\"module\" src=\"/src/main.js\"></script>\n"
+                "  </body>\n"
+                "</html>\n"
+            ),
+            "vite.config.js": (
+                "import { defineConfig } from 'vite'\n"
+                "import vue from '@vitejs/plugin-vue'\n\n"
+                "export default defineConfig({\n"
+                "  plugins: [vue()],\n"
+                "  server: {\n"
+                "    host: true,\n"
+                "    allowedHosts: true,\n"
+                "    port: 5173,\n"
+                "    strictPort: true,\n"
+                "  },\n"
+                "})\n"
+            ),
+            "src/main.js": (
+                "import { createApp } from 'vue'\n"
+                "import App from './App.vue'\n\n"
+                "createApp(App).mount('#app')\n"
+            ),
+            "src/App.vue": (
+                "<template>\n"
+                "  <main style=\"font-family: ui-sans-serif, system-ui; padding: 24px;\">\n"
+                "    <h1>Vue 项目已初始化</h1>\n"
+                "    <p>你可以开始 vibe coding 了。</p>\n"
+                "  </main>\n"
+                "</template>\n"
+            ),
+        }
+
+    if stack == "react":
+        return {
+            "package.json": (
+                "{\n"
+                f"  \"name\": \"{project_name}\",\n"
+                "  \"private\": true,\n"
+                "  \"type\": \"module\",\n"
+                "  \"scripts\": {\n"
+                "    \"dev\": \"vite --host 0.0.0.0 --port 5173 --strictPort\",\n"
+                "    \"build\": \"vite build\",\n"
+                "    \"preview\": \"vite preview --host 0.0.0.0 --port 5173 --strictPort\"\n"
+                "  },\n"
+                "  \"dependencies\": {\n"
+                "    \"react\": \"^18.2.0\",\n"
+                "    \"react-dom\": \"^18.2.0\"\n"
+                "  },\n"
+                "  \"devDependencies\": {\n"
+                "    \"vite\": \"^5.0.0\",\n"
+                "    \"@vitejs/plugin-react\": \"^4.2.0\"\n"
+                "  }\n"
+                "}\n"
+            ),
+            "index.html": (
+                "<!doctype html>\n"
+                "<html lang=\"zh-CN\">\n"
+                "  <head>\n"
+                "    <meta charset=\"UTF-8\" />\n"
+                "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n"
+                f"    <title>{project_name}</title>\n"
+                "  </head>\n"
+                "  <body>\n"
+                "    <div id=\"root\"></div>\n"
+                "    <script type=\"module\" src=\"/src/main.jsx\"></script>\n"
+                "  </body>\n"
+                "</html>\n"
+            ),
+            "vite.config.js": (
+                "import { defineConfig } from 'vite'\n"
+                "import react from '@vitejs/plugin-react'\n\n"
+                "export default defineConfig({\n"
+                "  plugins: [react()],\n"
+                "  server: {\n"
+                "    host: true,\n"
+                "    allowedHosts: true,\n"
+                "    port: 5173,\n"
+                "    strictPort: true,\n"
+                "  },\n"
+                "})\n"
+            ),
+            "src/main.jsx": (
+                "import React from 'react'\n"
+                "import ReactDOM from 'react-dom/client'\n"
+                "import App from './App.jsx'\n\n"
+                "ReactDOM.createRoot(document.getElementById('root')).render(\n"
+                "  <React.StrictMode>\n"
+                "    <App />\n"
+                "  </React.StrictMode>\n"
+                ")\n"
+            ),
+            "src/App.jsx": (
+                "export default function App() {\n"
+                "  return (\n"
+                "    <main style={{ fontFamily: 'ui-sans-serif, system-ui', padding: 24 }}>\n"
+                "      <h1>React 项目已初始化</h1>\n"
+                "      <p>你可以开始 vibe coding 了。</p>\n"
+                "    </main>\n"
+                "  )\n"
+                "}\n"
+            ),
+        }
+
+    if stack == "nextjs":
+        return {
+            "package.json": (
+                "{\n"
+                f"  \"name\": \"{project_name}\",\n"
+                "  \"private\": true,\n"
+                "  \"scripts\": {\n"
+                "    \"dev\": \"next dev -p 3000 -H 0.0.0.0\",\n"
+                "    \"build\": \"next build\",\n"
+                "    \"start\": \"next start -p 3000 -H 0.0.0.0\"\n"
+                "  },\n"
+                "  \"dependencies\": {\n"
+                "    \"next\": \"^14.2.0\",\n"
+                "    \"react\": \"^18.2.0\",\n"
+                "    \"react-dom\": \"^18.2.0\"\n"
+                "  }\n"
+                "}\n"
+            ),
+            "pages/index.js": (
+                "export default function Home() {\n"
+                "  return (\n"
+                "    <main style={{ fontFamily: 'ui-sans-serif, system-ui', padding: 24 }}>\n"
+                "      <h1>Next.js 项目已初始化</h1>\n"
+                "      <p>你可以开始 vibe coding 了。</p>\n"
+                "    </main>\n"
+                "  )\n"
+                "}\n"
+            ),
+        }
+
+    if stack == "nodejs":
+        return {
+            "package.json": (
+                "{\n"
+                f"  \"name\": \"{project_name}\",\n"
+                "  \"private\": true,\n"
+                "  \"type\": \"module\",\n"
+                "  \"scripts\": {\n"
+                "    \"start\": \"node server.js\"\n"
+                "  },\n"
+                "  \"dependencies\": {\n"
+                "    \"express\": \"^4.19.2\"\n"
+                "  }\n"
+                "}\n"
+            ),
+            "server.js": (
+                "import express from 'express'\n\n"
+                "const app = express()\n"
+                "const port = process.env.PORT ? Number(process.env.PORT) : 3000\n\n"
+                "app.get('/', (_req, res) => {\n"
+                "  res.send('Hello from Node.js')\n"
+                "})\n\n"
+                "app.listen(port, '0.0.0.0', () => {\n"
+                "  console.log(`listening on ${port}`)\n"
+                "})\n"
+            ),
+        }
+
+    raise ValueError(f"不支持的 stack: {stack}")
 
 
 async def ensure_sandbox(conversation_id: str, user_id: str = "default_user") -> bool:
-    """
-    确保沙盒存在
-    
-    如果有后台创建任务正在进行，会先等待其完成
-    """
-    # 1. 先等待后台任务完成（如果有）
-    await wait_for_sandbox_creation(conversation_id, timeout=60.0)
-    
-    # 2. 检查沙盒状态并按需创建
+    """确保沙盒存在"""
     service = get_sandbox_service()
     try:
         status = await service.get_sandbox_status(conversation_id)
@@ -165,816 +371,223 @@ async def ensure_sandbox(conversation_id: str, user_id: str = "default_user") ->
         raise
 
 
-# ==================== 工具 1: 写文件 ====================
-
 class SandboxWriteFile(BaseTool):
-    """写文件到沙盒（input_schema 由 capabilities.yaml 定义）"""
+    """写文件到沙盒"""
     
-    name = "sandbox_write_file"
+    @property
+    def name(self) -> str:
+        return "sandbox_write_file"
     
-    async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
-        """执行写文件操作"""
-        # 始终使用 context.conversation_id（由系统注入，可信）
-        # 忽略 Agent 传入的 conversation_id，避免写入错误的沙盒
-        conversation_id = context.conversation_id
-        path = params.get("path", "")
-        content = params.get("content", "")
-        user_id = params.get("user_id") or context.user_id or "default_user"
-        
+    @property
+    def description(self) -> str:
+        return "在沙盒中写入文件。目录不存在会自动创建。"
+    
+    @property
+    def parameters(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "conversation_id": {"type": "string", "description": "对话 ID"},
+                "path": {"type": "string", "description": "文件路径"},
+                "content": {"type": "string", "description": "文件内容"}
+            },
+            "required": ["conversation_id", "path", "content"]
+        }
+    
+    async def execute(self, conversation_id: str, path: str, content: str, **kwargs) -> Dict[str, Any]:
         try:
-            await ensure_sandbox(conversation_id, user_id)
+            await ensure_sandbox(conversation_id, kwargs.get("user_id", "default_user"))
             service = get_sandbox_service()
-            
-            normalized_path = _normalize_path(path)
-            result = await service.write_file(conversation_id, normalized_path, content)
-            
-            return {
-                "success": True,
-                "path": normalized_path,
-                "size": result["size"]
-            }
+            result = await service.write_file(conversation_id, path, content)
+            return {"success": True, "path": path, "size": result["size"]}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-
-# ==================== 工具 2: 读取文件 ====================
-
-class SandboxReadFile(BaseTool):
-    """从沙盒读取文件（input_schema 由 capabilities.yaml 定义）"""
-    
-    name = "sandbox_read_file"
-    
-    async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
-        """执行读文件操作"""
-        # 始终使用 context.conversation_id（由系统注入，可信）
-        conversation_id = context.conversation_id
-        path = params.get("path", "")
-        user_id = params.get("user_id") or context.user_id or "default_user"
-        
-        try:
-            await ensure_sandbox(conversation_id, user_id)
-            
-            provider = get_sandbox_provider()
-            normalized_path = _normalize_path(path)
-            content = await provider.read_file(conversation_id, normalized_path)
-            
-            return {
-                "success": True,
-                "path": normalized_path,
-                "content": content
-            }
-        except FileNotFoundError:
-            return {"success": False, "error": f"文件不存在: {path}"}
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-
-
-# ==================== 工具 3: 列出目录 ====================
-
-class SandboxListFiles(BaseTool):
-    """列出沙盒中的目录内容（input_schema 由 capabilities.yaml 定义）"""
-    
-    name = "sandbox_list_files"
-    
-    async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
-        """执行列出目录操作"""
-        # 始终使用 context.conversation_id（由系统注入，可信）
-        conversation_id = context.conversation_id
-        path = params.get("path")
-        user_id = params.get("user_id") or context.user_id or "default_user"
-        
-        try:
-            await ensure_sandbox(conversation_id, user_id)
-            
-            provider = get_sandbox_provider()
-            normalized_path = _normalize_path(path) if path else SANDBOX_PROJECT_ROOT
-            entries = await provider.list_dir(conversation_id, normalized_path)
-            
-            # 转换为简单的列表格式
-            files = [
-                {
-                    "name": entry.name,
-                    "type": entry.type,
-                    "size": entry.size
-                }
-                for entry in entries
-            ]
-            
-            return {
-                "success": True,
-                "path": normalized_path,
-                "files": files
-            }
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-
-
-# ==================== 工具 4: 执行命令 ====================
 
 class SandboxRunCommand(BaseTool):
-    """在沙盒中执行命令（input_schema 由 capabilities.yaml 定义）"""
+    """在沙盒中执行命令"""
     
-    name = "sandbox_run_command"
+    @property
+    def name(self) -> str:
+        return "sandbox_run_command"
     
-    async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
-        """执行命令（支持单命令或多命令批量执行）"""
-        conversation_id = context.conversation_id
-        user_id = params.get("user_id") or context.user_id or "default_user"
-        
-        # 检查是否使用多命令模式
-        commands = params.get("commands")
-        if commands and isinstance(commands, list) and len(commands) > 0:
-            return await self._execute_multiple(commands, conversation_id, user_id)
-        
-        # 单命令模式（向后兼容）
-        command = params.get("command", "")
-        background = params.get("background", False)
-        port = params.get("port")
-        cwd = params.get("cwd")
-        timeout = params.get("timeout", 120)
-        
-        return await self._execute_single(
-            command=command,
-            background=background,
-            port=port,
-            cwd=cwd,
-            timeout=timeout,
-            conversation_id=conversation_id,
-            user_id=user_id
+    @property
+    def description(self) -> str:
+        return """执行命令。常用：
+- cat file.txt (读文件)
+- ls -la (列目录)  
+- pip install xxx
+- npm install
+- rm -rf path (删除)"""
+    
+    @property
+    def parameters(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "conversation_id": {"type": "string", "description": "对话 ID"},
+                "command": {"type": "string", "description": "命令"},
+                "timeout": {"type": "integer", "description": "超时秒数", "default": 60}
+            },
+            "required": ["conversation_id", "command"]
+        }
+    
+    async def execute(self, conversation_id: str, command: str, timeout: int = 60, **kwargs) -> Dict[str, Any]:
+        try:
+            await ensure_sandbox(conversation_id, kwargs.get("user_id", "default_user"))
+            service = get_sandbox_service()
+            return await service.run_command(conversation_id, command, timeout)
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+
+class SandboxCreateProject(BaseTool):
+    """在沙盒中初始化项目骨架"""
+
+    SUPPORTED_STACKS = [
+        "streamlit",
+        "gradio",
+        "flask",
+        "fastapi",
+        "python",
+        "vue",
+        "react",
+        "nextjs",
+        "nodejs",
+    ]
+
+    @property
+    def name(self) -> str:
+        return "sandbox_create_project"
+
+    @property
+    def description(self) -> str:
+        return (
+            "在沙盒中初始化项目骨架（Initialize project）。\n"
+            "项目将创建在 /home/user/<project_name>/ 下。\n"
+            "注意：该工具只创建文件，不会自动安装依赖。"
         )
-    
-    async def _execute_multiple(
-        self, 
-        commands: list, 
-        conversation_id: str, 
-        user_id: str
-    ) -> Dict[str, Any]:
-        """
-        批量执行多个后台命令（一键启动前后端）
-        
-        Args:
-            commands: 命令配置列表，每项包含 command, port, cwd, name(可选)
-        """
-        try:
-            await ensure_sandbox(conversation_id, user_id)
-            
-            provider = get_sandbox_provider()
-            sandbox = await provider._get_sandbox_obj(conversation_id)
-            
-            results = []
-            urls = {}
-            
-            for idx, cmd_config in enumerate(commands):
-                cmd = cmd_config.get("command", "")
-                port = cmd_config.get("port")
-                cwd = cmd_config.get("cwd")
-                name = cmd_config.get("name", f"service_{idx + 1}")
-                
-                if not cmd:
-                    results.append({
-                        "name": name,
-                        "success": False,
-                        "error": "命令不能为空"
-                    })
-                    continue
-                
-                # 标准化工作目录
-                normalized_cwd = _normalize_path(cwd) if cwd else SANDBOX_PROJECT_ROOT
-                full_command = f"cd {normalized_cwd} && {cmd}"
-                
-                # 后台启动
-                logger.info(f"🚀 后台执行命令 [{name}]: {cmd}")
-                try:
-                    await sandbox.commands.run(
-                        f"{full_command} > /tmp/{name}.log 2>&1",
-                        background=True,
-                        timeout=10
-                    )
-                except Exception as e:
-                    if "timeout" not in str(e).lower():
-                        logger.warning(f"⚠️ 后台命令异常（可能正常）[{name}]: {e}")
-                
-                cmd_result = {
-                    "name": name,
-                    "success": True,
-                    "command": cmd
-                }
-                
-                # 获取公开 URL
-                if port:
-                    try:
-                        # 兼容不同版本的 E2B SDK
-                        host = None
-                        if hasattr(sandbox, "get_host"):
-                            host = sandbox.get_host(port)
-                        elif hasattr(sandbox, "pty") and hasattr(sandbox.pty, "get_hostname"):
-                            # 旧版本兼容
-                            host = sandbox.pty.get_hostname(port)
-                        
-                        if host:
-                            url = f"https://{host}"
-                            cmd_result["url"] = url
-                            cmd_result["port"] = port
-                            urls[name] = url
-                            logger.info(f"🌐 服务 URL [{name}]: {url}")
-                        else:
-                             # 尝试直接构造（兜底）
-                            host = f"{port}-{sandbox.sandbox_id}.e2b.dev"
-                            url = f"https://{host}"
-                            cmd_result["url"] = url
-                            cmd_result["port"] = port
-                            urls[name] = url
-                            logger.warning(f"⚠️ 无法找到 get_host 方法，使用默认构造 URL: {url}")
 
-                    except Exception as e:
-                        logger.warning(f"⚠️ 获取 URL 失败 [{name}]: {e}")
-                        cmd_result["url_error"] = str(e)
-                
-                results.append(cmd_result)
-            
-            # 获取过期时间（只查一次）
-            expires_info = {}
-            try:
-                async with AsyncSessionLocal() as session:
-                    db_sandbox = await crud.get_sandbox_by_conversation(
-                        session, conversation_id
-                    )
-                    if db_sandbox and db_sandbox.last_active_at:
-                        default_timeout = provider.DEFAULT_TIMEOUT_SECONDS
-                        last_active_ts = db_sandbox.last_active_at.timestamp()
-                        expires_ts = last_active_ts + default_timeout
-                        expires_info["expires_at"] = int(expires_ts * 1000)
-                        expires_info["timeout_seconds"] = max(0, int(expires_ts - time.time()))
-            except Exception as e:
-                logger.warning(f"⚠️ 获取沙盒过期时间失败: {e}", exc_info=True)
-            
-            return {
-                "success": all(r.get("success") for r in results),
-                "mode": "multiple",
-                "services": results,
-                "urls": urls,
-                "sandbox_id": sandbox.sandbox_id,
-                **expires_info
-            }
-            
-        except Exception as e:
-            logger.error(f"❌ 批量执行命令失败: {e}", exc_info=True)
-            return {"success": False, "error": str(e)}
-    
-    async def _execute_single(
-        self,
-        command: str,
-        background: bool,
-        port: Optional[int],
-        cwd: Optional[str],
-        timeout: int,
-        conversation_id: str,
-        user_id: str
-    ) -> Dict[str, Any]:
-        """执行单个命令"""
-        try:
-            await ensure_sandbox(conversation_id, user_id)
-            
-            provider = get_sandbox_provider()
-            sandbox = await provider._get_sandbox_obj(conversation_id)
-            
-            # 标准化工作目录
-            normalized_cwd = _normalize_path(cwd) if cwd else SANDBOX_PROJECT_ROOT
-            
-            # 构建完整命令
-            full_command = f"cd {normalized_cwd} && {command}"
-            
-            if background:
-                # 后台模式：立即返回，不等待结果
-                logger.info(f"🚀 后台执行命令: {command}")
-                try:
-                    await sandbox.commands.run(
-                        f"{full_command} > /tmp/app.log 2>&1",
-                        background=True,
-                        timeout=10
-                    )
-                except Exception as e:
-                    # 后台启动可能会超时，但这是正常的
-                    if "timeout" not in str(e).lower():
-                        logger.warning(f"⚠️ 后台命令异常（可能正常）: {e}")
-                
-                result = {
-                    "success": True,
-                    "background": True,
-                    "message": f"命令已在后台启动: {command}",
-                    "sandbox_id": sandbox.sandbox_id,
-                }
-                
-                # 如果指定了端口，自动返回公开 URL
-                if port:
-                    try:
-                        # 兼容不同版本的 E2B SDK
-                        host = None
-                        if hasattr(sandbox, "get_host"):
-                            host = sandbox.get_host(port)
-                        elif hasattr(sandbox, "pty") and hasattr(sandbox.pty, "get_hostname"):
-                            # 旧版本兼容
-                            host = sandbox.pty.get_hostname(port)
-                        
-                        if host:
-                            url = f"https://{host}"
-                            result["url"] = url
-                            result["port"] = port
-                            logger.info(f"🌐 服务 URL: {url}")
-                        else:
-                            # 尝试直接构造（兜底）
-                            host = f"{port}-{sandbox.sandbox_id}.e2b.dev"
-                            url = f"https://{host}"
-                            result["url"] = url
-                            result["port"] = port
-                            logger.warning(f"⚠️ 无法找到 get_host 方法，使用默认构造 URL: {url}")
-
-                        # 添加过期时间信息
-                        try:
-                            async with AsyncSessionLocal() as session:
-                                db_sandbox = await crud.get_sandbox_by_conversation(
-                                    session, conversation_id
-                                )
-                                
-                                logger.debug(
-                                    f"📊 查询沙盒记录: conversation_id={conversation_id}, "
-                                    f"db_sandbox={db_sandbox is not None}, "
-                                    f"last_active_at={db_sandbox.last_active_at if db_sandbox else 'N/A'}"
-                                )
-                                
-                                if db_sandbox and db_sandbox.last_active_at:
-                                    default_timeout = provider.DEFAULT_TIMEOUT_SECONDS
-                                    last_active_ts = db_sandbox.last_active_at.timestamp()
-                                    expires_ts = last_active_ts + default_timeout
-                                    result["expires_at"] = int(expires_ts * 1000)
-                                    result["timeout_seconds"] = max(0, int(expires_ts - time.time()))
-                                    logger.info(
-                                        f"📅 沙盒过期时间: expires_at={result['expires_at']}, "
-                                        f"timeout_seconds={result['timeout_seconds']}"
-                                    )
-                                else:
-                                    logger.warning(
-                                        f"⚠️ 无法计算过期时间: db_sandbox存在={db_sandbox is not None}, "
-                                        f"last_active_at={getattr(db_sandbox, 'last_active_at', 'N/A')}"
-                                    )
-                        except Exception as e:
-                            logger.warning(f"⚠️ 获取沙盒过期时间失败: {e}", exc_info=True)
-                    except Exception as e:
-                        logger.warning(f"⚠️ 获取 URL 失败: {e}")
-                        result["url_error"] = str(e)
-                
-                return result
-            else:
-                # 同步模式：等待结果
-                result = await sandbox.commands.run(full_command, timeout=timeout)
-                
-                return {
-                    "success": result.exit_code == 0,
-                    "output": result.stdout or "",
-                    "error": result.stderr if result.exit_code != 0 else None,
-                    "exit_code": result.exit_code
-                }
-                
-        except Exception as e:
-            logger.error(f"❌ 执行命令失败: {e}", exc_info=True)
-            return {"success": False, "error": str(e)}
-
-
-# ==================== 工具 5: 执行 Python 代码 ====================
-
-class SandboxExecutePython(BaseTool):
-    """在沙盒中执行 Python 代码（input_schema 由 capabilities.yaml 定义）"""
-    
-    name = "sandbox_execute_python"
-    
-    async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
-        """执行 Python 代码"""
-        # 始终使用 context.conversation_id（由系统注入，可信）
-        conversation_id = context.conversation_id
-        code = params.get("code", "")
-        timeout = params.get("timeout", 300)
-        user_id = params.get("user_id") or context.user_id or "default_user"
-        
-        try:
-            await ensure_sandbox(conversation_id, user_id)
-            
-            provider = get_sandbox_provider()
-            result = await provider.run_code(conversation_id, code, timeout=timeout)
-            
-            return {
-                "success": result.success,
-                "stdout": result.stdout,
-                "stderr": result.stderr,
-                "error": result.error,
-                "execution_time": result.execution_time,
-                "artifacts": result.artifacts  # 图表等
-            }
-            
-        except Exception as e:
-            logger.error(f"❌ 执行 Python 代码失败: {e}", exc_info=True)
-            return {"success": False, "error": str(e)}
-
-
-# ==================== 工具 6: 获取公开 URL ====================
-
-class SandboxGetPublicUrl(BaseTool):
-    """获取沙盒服务的公开 URL（input_schema 由 capabilities.yaml 定义）"""
-    
-    name = "sandbox_get_public_url"
-    
-    async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
-        """获取公开 URL"""
-        # 始终使用 context.conversation_id（由系统注入，可信）
-        conversation_id = context.conversation_id
-        port = params.get("port", 3000)
-        user_id = params.get("user_id") or context.user_id or "default_user"
-        
-        try:
-            await ensure_sandbox(conversation_id, user_id)
-            
-            provider = get_sandbox_provider()
-            sandbox = await provider._get_sandbox_obj(conversation_id)
-            
-            host = None
-            if hasattr(sandbox, "get_host"):
-                host = sandbox.get_host(port)
-            elif hasattr(sandbox, "pty") and hasattr(sandbox.pty, "get_hostname"):
-                host = sandbox.pty.get_hostname(port)
-            
-            if host:
-                url = f"https://{host}"
-            else:
-                host = f"{port}-{sandbox.sandbox_id}.e2b.dev"
-                url = f"https://{host}"
-                logger.warning(f"⚠️ 无法找到 get_host 方法，使用默认构造 URL: {url}")
-            
-            # 计算过期时间
-            expires_at = None
-            timeout_seconds = None
-            
-            try:
-                # 从数据库获取沙盒的最后活跃时间
-                async with AsyncSessionLocal() as session:
-                    db_sandbox = await crud.get_sandbox_by_conversation(
-                        session, conversation_id
-                    )
-                    
-                    logger.debug(
-                        f"📊 查询沙盒记录: conversation_id={conversation_id}, "
-                        f"db_sandbox={db_sandbox is not None}, "
-                        f"last_active_at={db_sandbox.last_active_at if db_sandbox else 'N/A'}"
-                    )
-                    
-                    if db_sandbox and db_sandbox.last_active_at:
-                        # E2B 默认超时时间（30 分钟）
-                        default_timeout = provider.DEFAULT_TIMEOUT_SECONDS
-                        
-                        # 计算过期时间戳（毫秒）
-                        last_active_ts = db_sandbox.last_active_at.timestamp()
-                        expires_ts = last_active_ts + default_timeout
-                        expires_at = int(expires_ts * 1000)  # 转换为毫秒
-                        
-                        # 计算剩余秒数
-                        now_ts = time.time()
-                        timeout_seconds = max(0, int(expires_ts - now_ts))
-                        
-                        logger.info(
-                            f"📅 沙盒过期时间: expires_at={expires_at}, "
-                            f"timeout_seconds={timeout_seconds}"
-                        )
-                    else:
-                        logger.warning(
-                            f"⚠️ 无法计算过期时间: db_sandbox存在={db_sandbox is not None}, "
-                            f"last_active_at={getattr(db_sandbox, 'last_active_at', 'N/A')}"
-                        )
-            except Exception as e:
-                # 获取过期时间失败不影响主功能
-                logger.warning(f"⚠️ 获取沙盒过期时间失败: {e}", exc_info=True)
-            
-            result = {
-                "success": True,
-                "url": url,
-                "port": port,
-                "sandbox_id": sandbox.sandbox_id  # E2B 实际沙箱 ID
-            }
-            
-            # 添加过期时间信息（如果获取成功）
-            if expires_at is not None:
-                result["expires_at"] = expires_at
-            if timeout_seconds is not None:
-                result["timeout_seconds"] = timeout_seconds
-            
-            return result
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-
-
-# ==================== 工具 7: 上传文件到 S3 ====================
-
-class SandboxUploadFile(BaseTool):
-    """
-    将沙盒中的文件上传到 S3 并返回下载链接（input_schema 由 capabilities.yaml 定义）
-    
-    工作流程：
-    1. 从沙盒读取文件（使用 format="bytes" 支持二进制文件）
-    2. 上传到 S3
-    3. 返回预签名 URL（24小时有效）
-    """
-    
-    name = "sandbox_upload_file"
-    
-    # 文件类型到 Content-Type 的映射
-    # 文本类型需要指定 charset=utf-8 避免中文乱码
-    CONTENT_TYPES = {
-        '.pdf': 'application/pdf',
-        '.doc': 'application/msword',
-        '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        '.ppt': 'application/vnd.ms-powerpoint',
-        '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-        '.xls': 'application/vnd.ms-excel',
-        '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        '.txt': 'text/plain; charset=utf-8',
-        '.md': 'text/markdown; charset=utf-8',
-        '.json': 'application/json; charset=utf-8',
-        '.csv': 'text/csv; charset=utf-8',
-        '.png': 'image/png',
-        '.jpg': 'image/jpeg',
-        '.jpeg': 'image/jpeg',
-        '.gif': 'image/gif',
-        '.webp': 'image/webp',
-        '.svg': 'image/svg+xml; charset=utf-8',
-        '.mp3': 'audio/mpeg',
-        '.mp4': 'video/mp4',
-        '.wav': 'audio/wav',
-        '.zip': 'application/zip',
-        '.rar': 'application/x-rar-compressed',
-        '.html': 'text/html; charset=utf-8',
-    }
-    
-    async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
-        """
-        执行文件上传
-        
-        Args:
-            params: 工具参数
-                - path: 沙盒中的文件路径
-                - filename: 下载时显示的文件名（可选）
-            context: 工具执行上下文
-            
-        Returns:
-            {
-                "success": bool,
-                "url": str,          # 预签名下载链接
-                "filename": str,     # 文件名
-                "size": int,         # 文件大小（字节）
-                "s3_key": str        # S3 对象键
-            }
-        """
-        import hashlib
-        from pathlib import Path
-        
-        # 始终使用 context.conversation_id（由系统注入，可信）
-        conversation_id = context.conversation_id
-        path = params.get("path", "")
-        filename = params.get("filename")
-        user_id = params.get("user_id") or context.user_id or "default_user"
-        
-        try:
-            await ensure_sandbox(conversation_id, user_id)
-            
-            # 标准化路径
-            normalized_path = _normalize_path(path)
-            
-            # 确定文件名
-            if not filename:
-                filename = Path(normalized_path).name
-            
-            # 1. 从沙盒读取文件（二进制模式）
-            provider = get_sandbox_provider()
-            file_content = await provider.read_file_binary(conversation_id, normalized_path)
-            file_size = len(file_content)
-            
-            logger.info(f"📖 从沙盒读取文件: {normalized_path} ({file_size} bytes)")
-            
-            # 2. 生成 S3 key
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            file_hash = hashlib.md5(f"{filename}{timestamp}".encode()).hexdigest()[:8]
-            file_ext = Path(filename).suffix
-            unique_filename = f"{Path(filename).stem}_{file_hash}{file_ext}"
-            s3_key = f"outputs/sandbox/{conversation_id}/{unique_filename}"
-            
-            # 3. 确定 Content-Type
-            content_type = self.CONTENT_TYPES.get(
-                file_ext.lower(),
-                'application/octet-stream'
-            )
-            
-            # 4. 上传到 S3
-            from utils.s3_uploader import get_s3_uploader
-            
-            s3_uploader = get_s3_uploader()
-            await s3_uploader.initialize()
-            
-            await s3_uploader.upload_bytes(
-                file_content=file_content,
-                object_name=s3_key,
-                content_type=content_type,
-                metadata={
-                    "conversation_id": conversation_id,
-                    "original_filename": filename,
-                    "sandbox_path": normalized_path
+    @property
+    def parameters(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "conversation_id": {"type": "string", "description": "对话 ID"},
+                "project_name": {"type": "string", "description": "项目名称（目录名）"},
+                "stack": {
+                    "type": "string",
+                    "description": "技术栈",
+                    "enum": self.SUPPORTED_STACKS,
                 },
-                acl="private"
-            )
-            
-            # 5. 生成预签名 URL（24小时有效）
-            presigned_url = s3_uploader.get_presigned_url(s3_key, expires_in=86400)
-            
-            logger.info(f"✅ 沙盒文件已上传 S3: {filename} → {s3_key}")
-            
-            return {
-                "success": True,
-                "url": presigned_url,
-                "filename": filename,
-                "size": file_size,
-                "s3_key": s3_key
-            }
-            
-        except FileNotFoundError:
-            return {"success": False, "error": f"文件不存在: {path}"}
-        except Exception as e:
-            logger.error(f"❌ 沙盒文件上传失败: {e}", exc_info=True)
-            return {"success": False, "error": str(e)}
+                "overwrite": {"type": "boolean", "description": "是否覆盖写入（默认 false）"},
+            },
+            "required": ["conversation_id", "project_name", "stack"],
+        }
 
-
-# ==================== 工具 8: 初始化项目模板 ====================
-
-class SandboxInitProject(BaseTool):
-    """
-    使用预置模板初始化项目（input_schema 由 capabilities.yaml 定义）
-    
-    优势：
-    1. 一键生成完整项目结构（前端+后端）
-    2. 避免 Agent 逐个写文件时的遗漏或错误
-    3. 模板文件存储在 templates/ 目录，方便维护
-    4. 并发写入文件，性能优化
-    """
-    
-    name = "sandbox_init_project"
-    
-    # 并发写入的最大并发数（避免过多并发导致 E2B 限流）
-    MAX_CONCURRENT_WRITES = 10
-    
-    async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
-        """执行项目初始化"""
-        from tools.project_templates import (
-            get_template_files, 
-            list_templates, 
-            get_template_startup_command,
-            get_template_ports
-        )
-        
-        # 始终使用 context.conversation_id（由系统注入，可信）
-        # 忽略 Agent 传入的 conversation_id，避免写入错误的沙盒
-        conversation_id = context.conversation_id
-        template_name = params.get("template", "react_fullstack")  # 默认使用 React 模板
-        user_id = params.get("user_id") or context.user_id or "default_user"
-        
+    async def execute(
+        self,
+        conversation_id: str,
+        project_name: str,
+        stack: str,
+        overwrite: bool = False,
+        **kwargs,
+    ) -> Dict[str, Any]:
         try:
-            await ensure_sandbox(conversation_id, user_id)
-            
-            # 获取模板文件（从文件系统读取）
-            files = get_template_files(template_name)
-            if not files:
-                available = list_templates()
+            err = _validate_project_name(project_name)
+            if err:
+                return {"success": False, "error": err}
+
+            await ensure_sandbox(conversation_id, kwargs.get("user_id", "default_user"))
+            service = get_sandbox_service()
+
+            project_dir = _normalize_project_path(project_name)
+
+            # 如果目录已存在，且不允许覆盖，则返回错误
+            if await service.file_exists(conversation_id, project_dir) and not overwrite:
                 return {
                     "success": False,
-                    "error": f"模板 '{template_name}' 不存在。可用模板: {list(available.keys())}"
+                    "error": f"项目目录已存在: {project_dir}（如需覆盖请传 overwrite=true）",
                 }
-            
-            # 并发批量写入文件
-            created_files = await self._write_files_concurrent(
-                conversation_id, files
-            )
-            
-            logger.info(f"🚀 项目模板 '{template_name}' 初始化完成，共 {len(created_files)} 个文件")
-            
-            # 获取启动命令和端口信息
-            startup_command = get_template_startup_command(template_name)
-            ports = get_template_ports(template_name)
-            
+
+            files = _get_project_scaffold(stack, project_name=project_name)
+            written_files: List[str] = []
+
+            for rel_path, content in files.items():
+                full_path = f"{project_dir}/{rel_path}".replace("//", "/")
+                await service.write_file(conversation_id, full_path, content)
+                written_files.append(full_path)
+
             return {
                 "success": True,
-                "message": f"项目已基于模板 '{template_name}' 初始化成功。",
-                "template": template_name,
-                "created_files": created_files,
-                "file_count": len(created_files),
-                "ports": ports,
-                "startup_hint": startup_command,
-                "next_step": "请查看 IDEAS.md 了解项目结构，然后根据业务需求修改代码。"
+                "project_name": project_name,
+                "project_path": project_dir,
+                "stack": stack,
+                "files_written": written_files,
             }
-            
         except Exception as e:
-            logger.error(f"❌ 初始化项目失败: {e}", exc_info=True)
+            logger.error(f"❌ 创建项目失败: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
-    
-    async def _write_files_concurrent(
+
+
+class SandboxRunProject(BaseTool):
+    """运行沙盒中的项目并返回预览 URL"""
+
+    @property
+    def name(self) -> str:
+        return "sandbox_run_project"
+
+    @property
+    def description(self) -> str:
+        return "运行项目并返回 E2B 预览 URL（推荐方式）。"
+
+    @property
+    def parameters(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "conversation_id": {"type": "string", "description": "对话 ID"},
+                "project_path": {"type": "string", "description": "项目路径（如 /home/user/my_app）"},
+                "stack": {
+                    "type": "string",
+                    "description": "技术栈",
+                    "enum": ["vue", "react", "nextjs", "nodejs", "streamlit", "gradio", "flask", "fastapi", "python"],
+                },
+            },
+            "required": ["conversation_id", "project_path", "stack"],
+        }
+
+    async def execute(
         self,
         conversation_id: str,
-        files: Dict[str, str]
-    ) -> list[str]:
-        """
-        并发批量写入文件到沙盒
-        
-        优化策略：
-        1. 先收集并一次性创建所有需要的目录
-        2. 然后使用 asyncio.gather() 并发写入所有文件
-        3. 使用 Semaphore 限制最大并发数，避免 E2B 限流
-        
-        Args:
-            conversation_id: 对话 ID
-            files: 文件路径 -> 内容的字典
-            
-        Returns:
-            成功写入的文件路径列表
-        """
-        provider = get_sandbox_provider()
-        sandbox = await provider._get_sandbox_obj(conversation_id)
-        
-        # 1. 收集所有需要创建的目录（去重）
-        dirs_to_create = set()
-        normalized_files: Dict[str, str] = {}
-        
-        for file_path, content in files.items():
-            normalized_path = _normalize_path(file_path)
-            normalized_files[normalized_path] = content
-            
-            # 提取目录路径
-            dir_path = "/".join(normalized_path.split("/")[:-1])
-            if dir_path:
-                dirs_to_create.add(dir_path)
-        
-        # 2. 一条命令创建所有目录（大幅减少网络请求）
-        if dirs_to_create:
-            dirs_list = " ".join(sorted(dirs_to_create))
-            try:
-                await sandbox.commands.run(f"mkdir -p {dirs_list}", timeout=30)
-                logger.debug(f"📁 批量创建目录完成: {len(dirs_to_create)} 个目录")
-            except Exception as e:
-                logger.warning(f"⚠️ 批量创建目录失败，将逐个创建: {e}")
-        
-        # 3. 使用 Semaphore 限制并发数，并发写入所有文件
-        semaphore = asyncio.Semaphore(self.MAX_CONCURRENT_WRITES)
-        created_files: list[str] = []
-        
-        async def write_single_file(path: str, content: str) -> Optional[str]:
-            """写入单个文件（带并发限制）"""
-            async with semaphore:
-                try:
-                    await sandbox.files.write(path, content)
-                    return path
-                except Exception as e:
-                    logger.warning(f"⚠️ 写入文件失败: {path} - {e}")
-                    return None
-        
-        # 创建所有写入任务
-        tasks = [
-            write_single_file(path, content)
-            for path, content in normalized_files.items()
-        ]
-        
-        # 并发执行所有任务
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # 收集成功写入的文件
-        for result in results:
-            if isinstance(result, str):
-                # 转换回相对路径用于返回
-                relative_path = result.replace(f"{SANDBOX_PROJECT_ROOT}/", "")
-                created_files.append(relative_path)
-            elif isinstance(result, Exception):
-                logger.warning(f"⚠️ 文件写入异常: {result}")
-        
-        logger.info(f"📝 并发写入完成: {len(created_files)}/{len(files)} 个文件")
-        
-        return created_files
+        project_path: str,
+        stack: str,
+        **kwargs,
+    ) -> Dict[str, Any]:
+        try:
+            await ensure_sandbox(conversation_id, kwargs.get("user_id", "default_user"))
+            service = get_sandbox_service()
+
+            normalized_path = _normalize_project_path(project_path)
+            result = await service.run_project(conversation_id, normalized_path, stack)
+            return {
+                "success": result.success,
+                "preview_url": result.preview_url,
+                "message": result.message,
+                "error": result.error,
+            }
+        except Exception as e:
+            logger.error(f"❌ 运行项目失败: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
 
 
-# ==================== 工具注册 ====================
-
-# 8 个标准工具（贴近 E2B 原生 API + 模板增强）
+# 工具注册（4 个核心工具）
 SANDBOX_TOOLS = [
-    SandboxWriteFile,       # 写入文件
-    SandboxReadFile,        # 读取文件
-    SandboxListFiles,       # 列出目录
-    SandboxRunCommand,      # 执行命令（支持 background）
-    SandboxExecutePython,   # 执行 Python 代码
-    SandboxGetPublicUrl,    # 获取公开 URL
-    SandboxUploadFile,      # 上传文件到 S3
-    SandboxInitProject,     # 初始化项目模板
+    SandboxWriteFile,
+    SandboxRunCommand,
+    SandboxCreateProject,
+    SandboxRunProject,
 ]
 
-
-def get_sandbox_tools() -> list[BaseTool]:
-    """获取所有沙盒工具实例"""
+def get_sandbox_tools() -> List[BaseTool]:
     return [t() for t in SANDBOX_TOOLS]

@@ -15,14 +15,11 @@ AWS S3 上传工具 - S3 Uploader
 """
 
 import os
-import io
 import boto3
 import hashlib
-import aiofiles
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 from pathlib import Path
-from urllib.parse import quote, unquote
 from botocore.exceptions import ClientError, NoCredentialsError
 import yaml
 
@@ -46,34 +43,6 @@ class S3UploadError(S3UploaderError):
     pass
 
 
-def _sanitize_metadata(metadata: Dict[str, str]) -> Dict[str, str]:
-    """
-    清理 metadata，将非 ASCII 字符进行 URL 编码
-    
-    S3 metadata 只能包含 ASCII 字符，中文等 Unicode 字符需要编码。
-    使用 URL 编码（percent-encoding）来处理，便于后续解码还原。
-    
-    Args:
-        metadata: 原始 metadata 字典
-        
-    Returns:
-        编码后的 metadata 字典（所有值都是 ASCII 安全的）
-    """
-    sanitized = {}
-    for key, value in metadata.items():
-        if value is None:
-            continue
-        # 检查是否包含非 ASCII 字符
-        try:
-            value.encode('ascii')
-            # 纯 ASCII，直接使用
-            sanitized[key] = value
-        except UnicodeEncodeError:
-            # 包含非 ASCII 字符，进行 URL 编码
-            sanitized[key] = quote(value, safe='')
-    return sanitized
-
-
 class S3Uploader:
     """
     AWS S3 上传工具
@@ -83,10 +52,6 @@ class S3Uploader:
     - 预签名 URL 生成
     - 文件删除
     - 批量操作
-    
-    使用方式：
-        uploader = S3Uploader()
-        await uploader.initialize()  # 必须调用以加载配置
     """
     
     def __init__(self, config_path: str = "config/storage.yaml"):
@@ -96,35 +61,18 @@ class S3Uploader:
         Args:
             config_path: 配置文件路径
         """
-        self._config_path = config_path
-        self.config: Dict[str, Any] = {}
+        self.config = self._load_config(config_path)
         self.s3_client = None
-        self.bucket_name = ""
-        self._initialized: bool = False
-    
-    async def initialize(self) -> None:
-        """
-        异步初始化：加载配置并创建 S3 客户端
-        
-        使用方式：
-            uploader = S3Uploader()
-            await uploader.initialize()
-        """
-        if self._initialized:
-            return
-        
-        self.config = await self._load_config_async(self._config_path)
         self.bucket_name = self.config["aws"]["s3"]["bucket_name"]
         
         # 初始化 boto3 客户端
         self._init_s3_client()
         
-        self._initialized = True
         logger.info(f"✅ S3 Uploader 初始化完成: bucket={self.bucket_name}")
     
-    async def _load_config_async(self, config_path: str) -> Dict[str, Any]:
+    def _load_config(self, config_path: str) -> Dict[str, Any]:
         """
-        异步加载配置文件
+        加载配置文件
         
         Args:
             config_path: 配置文件路径
@@ -133,9 +81,8 @@ class S3Uploader:
             配置字典
         """
         try:
-            async with aiofiles.open(config_path, 'r', encoding='utf-8') as f:
-                content = await f.read()
-                config = yaml.safe_load(content)
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f)
             
             # 替换环境变量
             aws_config = config.get("aws", {})
@@ -233,7 +180,7 @@ class S3Uploader:
                 conversation_id=conversation_id
             )
             
-            # 3. 准备元数据（对非 ASCII 字符进行 URL 编码）
+            # 3. 准备元数据
             file_metadata = metadata or {}
             file_metadata.update({
                 "uploaded_at": datetime.now().isoformat(),
@@ -241,35 +188,27 @@ class S3Uploader:
                 "user_id": user_id or "unknown",
                 "category": category
             })
-            file_metadata = _sanitize_metadata(file_metadata)
             
             # 4. 确定内容类型
             content_type = self._get_content_type(filename)
             
-            # 5. 获取 ACL（如果 bucket 禁用了 ACL，则不设置）
-            acl_config = self.config["aws"]["s3"].get("acl", {})
-            acl = acl_config.get(category) if acl_config else None
+            # 5. 获取 ACL
+            acl = self.config["aws"]["s3"]["acl"].get(category, "private")
             
-            # 6. 上传到 S3（异步读取文件内容）
+            # 6. 上传到 S3
             logger.info(f"📤 上传文件: {filename} → {s3_key}")
             
-            async with aiofiles.open(file_path, 'rb') as f:
-                file_content = await f.read()
-            
-            # 构建 ExtraArgs（只有当 acl 有值时才包含）
-            extra_args = {
-                'ContentType': content_type,
-                'Metadata': file_metadata,
-            }
-            if acl:
-                extra_args['ACL'] = acl
-            
-            self.s3_client.upload_fileobj(
-                io.BytesIO(file_content),
-                self.bucket_name,
-                s3_key,
-                ExtraArgs=extra_args
-            )
+            with open(file_path, 'rb') as f:
+                self.s3_client.upload_fileobj(
+                    f,
+                    self.bucket_name,
+                    s3_key,
+                    ExtraArgs={
+                        'ContentType': content_type,
+                        'Metadata': file_metadata,
+                        'ACL': acl
+                    }
+                )
             
             logger.info(f"✅ 上传成功: {s3_key}")
             
@@ -299,7 +238,7 @@ class S3Uploader:
         object_name: str,
         content_type: str = "application/octet-stream",
         metadata: Optional[Dict[str, str]] = None,
-        acl: Optional[str] = None
+        acl: str = "private"
     ) -> Dict[str, str]:
         """
         直接上传字节内容到 S3
@@ -309,7 +248,7 @@ class S3Uploader:
             object_name: S3 对象名称（完整路径）
             content_type: MIME 类型
             metadata: 自定义元数据（可选）
-            acl: 访问控制（private/public-read），None 表示不设置（适用于禁用 ACL 的 bucket）
+            acl: 访问控制（private/public-read）
             
         Returns:
             {
@@ -329,30 +268,25 @@ class S3Uploader:
             if file_size > max_size:
                 raise S3UploadError(f"文件过大: {file_size} bytes > {max_size} bytes")
             
-            # 准备元数据（对非 ASCII 字符进行 URL 编码）
+            # 准备元数据
             file_metadata = metadata or {}
             file_metadata.update({
                 "uploaded_at": datetime.now().isoformat(),
             })
-            file_metadata = _sanitize_metadata(file_metadata)
             
             # 上传到 S3
             logger.info(f"📤 上传字节内容: {object_name} ({file_size} bytes)")
-            
-            # 构建 ExtraArgs（只有当 acl 有值时才包含）
-            extra_args = {
-                'ContentType': content_type,
-                'Metadata': file_metadata,
-            }
-            if acl:
-                extra_args['ACL'] = acl
             
             from io import BytesIO
             self.s3_client.upload_fileobj(
                 BytesIO(file_content),
                 self.bucket_name,
                 object_name,
-                ExtraArgs=extra_args
+                ExtraArgs={
+                    'ContentType': content_type,
+                    'Metadata': file_metadata,
+                    'ACL': acl
+                }
             )
             
             logger.info(f"✅ 上传成功: {object_name}")
@@ -415,8 +349,6 @@ class S3Uploader:
         """
         根据文件扩展名确定 Content-Type
         
-        文本类型需要指定 charset=utf-8 避免中文乱码。
-        
         Args:
             filename: 文件名
             
@@ -431,10 +363,10 @@ class S3Uploader:
             '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
             '.xls': 'application/vnd.ms-excel',
             '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            '.txt': 'text/plain; charset=utf-8',
-            '.md': 'text/markdown; charset=utf-8',
-            '.json': 'application/json; charset=utf-8',
-            '.csv': 'text/csv; charset=utf-8',
+            '.txt': 'text/plain',
+            '.md': 'text/markdown',
+            '.json': 'application/json',
+            '.csv': 'text/csv',
             '.png': 'image/png',
             '.jpg': 'image/jpeg',
             '.jpeg': 'image/jpeg',
@@ -442,9 +374,6 @@ class S3Uploader:
             '.mp3': 'audio/mpeg',
             '.mp4': 'video/mp4',
             '.wav': 'audio/wav',
-            '.html': 'text/html; charset=utf-8',
-            '.xml': 'application/xml; charset=utf-8',
-            '.svg': 'image/svg+xml; charset=utf-8',
         }
         
         ext = Path(filename).suffix.lower()

@@ -1,5 +1,5 @@
 """
-多智能体编排器（V7.1 - Anthropic 启发版）
+多智能体编排器（V7.9 - Agent 选择三级优化）
 
 负责协调多个 Agent 的执行，支持串行、并行、层级三种模式。
 
@@ -17,41 +17,55 @@ V7.1 新增特性（基于 Anthropic Multi-Agent System）：
 V7.2 新增特性：
 - ✅ Critic Agent：评估执行质量，支持 pass/retry/replan/fail 决策
 - ✅ Plan-Execute-Critique 循环：智能质量保证和计划调整
+
+V7.7 新增特性：
+- ✅ DAGScheduler 集成：真正的依赖感知并行执行
+- ✅ 依赖结果自动注入
+- ✅ 分层并行执行（组内并行，组间串行）
+
+V7.8 新增特性：
+- ✅ 数据结构统一：SubTask → PlanStep，移除冗余转换层
+- ✅ DAG-Critic 协同：REPLAN 后自动重算并行组
+- ✅ 死代码清理：删除 _spawn_subagent、_planstep_to_subtask、_subtask_to_plan_step
+
+V7.9 新增特性（借鉴工具选择三级优化 V7.6）：
+- ✅ Agent 选择三级优先级：Config > Task > Capability
+- ✅ 有效性验证：自动检测无效 Agent 配置
+- ✅ 覆盖透明化：记录选择来源和被覆盖候选
+- ✅ Tracer 增强追踪：完整记录 Agent 选择决策过程
 """
 
-# 1. 标准库
 import asyncio
+import logging
 import time
 from datetime import datetime
 from typing import Any, AsyncGenerator, Dict, List, Optional
 from uuid import uuid4
 
-# 2. 第三方库（无）
-
-# 3. 本地模块
-from core.billing.tracker import create_enhanced_usage_tracker
 from core.agent.multi.models import (
     ExecutionMode,
     AgentConfig,
+    AgentRole,  # V7.7: 用于步骤到 Agent 的映射
     MultiAgentConfig,
     TaskAssignment,
     AgentResult,
-    SubagentResult,
+    # SubagentResult,  # V7.8: 已废弃，_spawn_subagent 已删除
     OrchestratorState,
     CriticConfig,
     CriticAction,
     CriticConfidence,
     CriticResult,
-    PlanAdjustmentHint,  # 🆕 V7.2: 计划调整建议
+    PlanAdjustmentHint,  # V7.2: 计划调整建议
+    AgentSelectionResult,  # V7.9: Agent 选择结果
 )
 from core.agent.multi.checkpoint import CheckpointManager, Checkpoint
-from core.agent.multi.lead_agent import LeadAgent, TaskDecompositionPlan, SubTask
+from core.agent.multi.lead_agent import LeadAgent, TaskDecompositionPlan
 from core.agent.multi.critic import CriticAgent
 from core.planning.protocol import Plan, PlanStep, StepStatus
+from core.planning.dag_scheduler import DAGScheduler, DAGExecutionResult, StepResult
 from core.routing import IntentResult
-from logger import get_logger
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class MultiAgentOrchestrator:
@@ -103,7 +117,7 @@ class MultiAgentOrchestrator:
                 ))
             
             self.config = MultiAgentConfig(
-                config_id=f"config_{uuid4()}",
+                config_id=f"config_{uuid4().hex[:8]}",
                 mode=mode,
                 agents=agent_configs,
             )
@@ -134,10 +148,12 @@ class MultiAgentOrchestrator:
         # V7.1: 传递配置给 LeadAgent
         if enable_lead_agent:
             if self.config.orchestrator_config:
+                profile_name = self.config.orchestrator_config.llm_profile_name or "lead_agent"
                 self.lead_agent = LeadAgent(
                     model=orchestrator_model,
                     thinking_budget=self.config.orchestrator_config.thinking_budget,
                     max_tokens=self.config.orchestrator_config.max_tokens,
+                    llm_profile_name=profile_name,
                 )
             else:
                 self.lead_agent = LeadAgent(model=orchestrator_model)
@@ -148,10 +164,12 @@ class MultiAgentOrchestrator:
         # V7.2: Critic Agent（评估执行质量）
         critic_config = self.config.critic_config
         if critic_config and critic_config.enabled:
+            critic_profile = critic_config.llm_profile_name or "critic_agent"
             self.critic = CriticAgent(
                 model=critic_config.model,
                 enable_thinking=critic_config.enable_thinking,
                 config=critic_config,
+                llm_profile_name=critic_profile,
             )
             self.critic_config = critic_config
             logger.info(
@@ -173,33 +191,42 @@ class MultiAgentOrchestrator:
         self.tool_executor = None  # 🆕 V7.3: 工具执行器（用于 RVR 循环）
         self._working_memory = None  # 工作记忆
         self._mem0_client = None  # Mem0 客户端
+        self.workspace_dir = './workspace'  # 默认工作目录
         
         # 🆕 V7.4: Token 使用统计
-        self.usage_tracker = create_enhanced_usage_tracker()
+        from utils.usage_tracker import create_usage_tracker
+        self.usage_tracker = create_usage_tracker()
         
         # 追踪信息（用于监控和调试）
         self._execution_trace = []
         
-        # 初始化标记
-        self._initialized: bool = False
+        logger.info(
+            f"✅ MultiAgentOrchestrator 初始化: mode={self.config.mode.value}, "
+            f"agents={len(self.config.agents)}, checkpoints={enable_checkpoints}, "
+            f"lead_agent={enable_lead_agent}, "
+            f"orchestrator_model={orchestrator_model}, worker_model={worker_model}"
+        )
     
-    async def initialize(self) -> None:
+    def clone_for_session(
+        self,
+        event_manager=None,
+        workspace_dir: str = None,
+        conversation_service=None,
+        **kwargs
+    ) -> "MultiAgentOrchestrator":
         """
-        异步初始化：加载需要异步初始化的组件
+        🆕 V10.0: 从原型克隆 Agent 实例（委托给 AgentFactory）
         
-        使用方式：
-            orchestrator = MultiAgentOrchestrator(...)
-            await orchestrator.initialize()
+        克隆逻辑已移至 AgentFactory.clone_for_session()，
+        保持 Factory 作为唯一创建/克隆入口。
         """
-        if self._initialized:
-            return
-        
-        # 初始化 Critic Agent
-        if self.critic:
-            await self.critic.initialize()
-        
-        self._initialized = True
-        logger.debug("[MultiAgentOrchestrator] 初始化完成")
+        from core.agent.factory import AgentFactory
+        return AgentFactory.clone_for_session(
+            prototype=self,
+            event_manager=event_manager,
+            workspace_dir=workspace_dir,
+            conversation_service=conversation_service
+        )
     
     @property
     def usage_stats(self) -> Dict[str, int]:
@@ -231,6 +258,49 @@ class MultiAgentOrchestrator:
                 f"input={sub_stats.get('total_input_tokens', 0)}, "
                 f"output={sub_stats.get('total_output_tokens', 0)}"
             )
+
+    async def _probe_worker_llm(
+        self,
+        llm_service: Any,
+        agent_id: str,
+        role: str,
+        step_id: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Worker LLM 存活探针（执行前）
+        
+        Args:
+            llm_service: LLM 服务实例
+            agent_id: 子智能体 ID
+            role: 子智能体角色
+            step_id: 步骤 ID（可选）
+        
+        Returns:
+            探针结果（包含是否切换）
+        """
+        if not llm_service or not hasattr(llm_service, "probe"):
+            return None
+        
+        result = await llm_service.probe(
+            max_retries=3,
+            include_unhealthy=True
+        )
+        if result and result.get("switched"):
+            trace_data = {
+                "agent_id": agent_id,
+                "role": role,
+                "from": result.get("primary"),
+                "to": result.get("selected"),
+                "errors": result.get("errors", [])
+            }
+            if step_id:
+                trace_data["step_id"] = step_id
+            self._trace("llm_switch", trace_data)
+            logger.warning(
+                f"🔁 Subagent 模型切换: agent_id={agent_id}, role={role}, "
+                f"from={result.get('primary')}, to={result.get('selected')}"
+            )
+        return result
     
     async def execute(
         self,
@@ -285,7 +355,7 @@ class MultiAgentOrchestrator:
         # 初始化状态（如果没有恢复）
         if not self._state:
             self._state = OrchestratorState(
-                state_id=f"orch_{uuid4()}",
+                state_id=f"orch_{uuid4().hex[:8]}",
                 session_id=session_id,
                 config_id=self.config.config_id,
                 mode=self.config.mode,
@@ -356,10 +426,18 @@ class MultiAgentOrchestrator:
                     yield event
             
             elif self.config.mode == ExecutionMode.PARALLEL:
-                async for event in self._execute_parallel(
-                    messages, session_id, message_id, decomposition_plan
-                ):
-                    yield event
+                # V7.7: 优先使用 DAGScheduler（真正的依赖感知并行执行）
+                if decomposition_plan and len(decomposition_plan.subtasks) > 0:
+                    async for event in self._execute_with_dag_scheduler(
+                        decomposition_plan, messages, session_id, message_id
+                    ):
+                        yield event
+                else:
+                    # 降级到原有逻辑
+                    async for event in self._execute_parallel(
+                        messages, session_id, message_id, decomposition_plan
+                    ):
+                        yield event
             
             elif self.config.mode == ExecutionMode.HIERARCHICAL:
                 async for event in self._execute_hierarchical(
@@ -492,28 +570,29 @@ class MultiAgentOrchestrator:
             
             self._state.current_agent = agent_id
             
-            # 从分解计划中获取子任务信息（如果有）
-            subtask = None
+            # V7.8: 从分解计划中获取步骤信息（如果有）
+            plan_step = None
             if decomposition_plan:
-                subtask = next(
-                    (st for st in decomposition_plan.subtasks if st.subtask_id == agent_id),
+                plan_step = next(
+                    (st for st in decomposition_plan.subtasks if st.id == agent_id),
                     None
                 )
             
             # 发送 Agent 开始事件
+            step_title = plan_step.metadata.get("title") if plan_step else None
             yield {
                 "type": "agent_start",
                 "session_id": session_id,
                 "agent_id": agent_id,
                 "role": agent_config.role.value,
-                "subtask_title": subtask.title if subtask else None,
+                "step_title": step_title,
             }
             
             # 创建任务分配
             task = TaskAssignment(
-                task_id=f"task_{uuid4()}",
+                task_id=f"task_{uuid4().hex[:8]}",
                 agent_id=agent_id,
-                instruction=subtask.description if subtask else f"执行 {agent_config.role.value} 任务",
+                instruction=plan_step.description if plan_step else f"执行 {agent_config.role.value} 任务",
                 source_agent=self._state.completed_agents[-1] if self._state.completed_agents else None,
                 source_output=previous_output,
             )
@@ -522,14 +601,14 @@ class MultiAgentOrchestrator:
             self._trace("agent_execution_start", {
                 "agent_id": agent_id,
                 "role": agent_config.role.value,
-                "has_subtask": subtask is not None,
+                "has_plan_step": plan_step is not None,
             })
             
             # V7.2: 执行 Agent（带 Critic 评估，内部已包含重试逻辑）
             try:
                 result = await self._execute_step_with_critique(
                     agent_config,
-                    subtask,
+                    plan_step,
                     current_input,
                     previous_output,
                     session_id,
@@ -538,7 +617,7 @@ class MultiAgentOrchestrator:
                 logger.error(f"❌ Agent {agent_id} 执行异常: {e}", exc_info=True)
                 # 创建失败结果
                 result = AgentResult(
-                    result_id=f"result_{uuid4()}",
+                    result_id=f"result_{uuid4().hex[:8]}",
                     agent_id=agent_config.agent_id,
                     success=False,
                     error=str(e),
@@ -604,14 +683,13 @@ class MultiAgentOrchestrator:
         
         所有 Agent 同时执行，失败时自动重试
         """
-        # 创建所有 Agent 的任务（V7.2: 带 Critic 评估）
-        async def execute_with_critique(agent_config, subtask=None):
+        # V7.8: 创建所有 Agent 的任务（带 Critic 评估）
+        async def execute_with_critique(agent_config, plan_step=None):
             """并行执行单个 Agent（带 Critic 评估）"""
             try:
-                # V7.2: 使用带 Critic 的执行方法
                 result = await self._execute_step_with_critique(
                     agent_config=agent_config,
-                    subtask=subtask,
+                    plan_step=plan_step,
                     messages=messages,
                     previous_output=None,
                     session_id=session_id,
@@ -620,7 +698,7 @@ class MultiAgentOrchestrator:
             except Exception as e:
                 logger.error(f"❌ Agent {agent_config.agent_id} 执行异常: {e}", exc_info=True)
                 return AgentResult(
-                    result_id=f"result_{uuid4()}",
+                    result_id=f"result_{uuid4().hex[:8]}",
                     agent_id=agent_config.agent_id,
                     success=False,
                     error=str(e),
@@ -633,12 +711,12 @@ class MultiAgentOrchestrator:
         # 创建所有任务
         tasks = []
         for i, agent_config in enumerate(self.config.agents):
-            # 从分解计划获取子任务
-            subtask = None
+            # V7.8: 从分解计划获取步骤
+            plan_step = None
             if decomposition_plan and i < len(decomposition_plan.subtasks):
-                subtask = decomposition_plan.subtasks[i]
+                plan_step = decomposition_plan.subtasks[i]
             
-            task = asyncio.create_task(execute_with_critique(agent_config, subtask))
+            task = asyncio.create_task(execute_with_critique(agent_config, plan_step))
             tasks.append((agent_config, task))
         
         # 发送并行开始事件
@@ -657,7 +735,7 @@ class MultiAgentOrchestrator:
                 )
             except asyncio.TimeoutError:
                 result = AgentResult(
-                    result_id=f"result_{uuid4()}",
+                    result_id=f"result_{uuid4().hex[:8]}",
                     agent_id=agent_config.agent_id,
                     success=False,
                     error="执行超时",
@@ -674,6 +752,408 @@ class MultiAgentOrchestrator:
             }
         
         self._state.pending_agents = []
+    
+    # ===================
+    # V7.7: DAGScheduler 集成
+    # ===================
+    
+    async def _execute_with_dag_scheduler(
+        self,
+        decomposition_plan: TaskDecompositionPlan,
+        messages: List[Dict[str, str]],
+        session_id: str,
+        message_id: Optional[str] = None,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        使用 DAGScheduler 执行 Plan（V7.7 新增，V7.8 增强 REPLAN 支持）
+        
+        真正的依赖感知并行执行：
+        1. 将 TaskDecompositionPlan 转换为 Plan 对象
+        2. 使用 DAGScheduler 计算并行组
+        3. 分层执行（组内并行，组间串行）
+        4. 依赖结果自动注入
+        5. 🆕 V7.8: 支持 REPLAN 后重新计算并行组
+        
+        Args:
+            decomposition_plan: LeadAgent 产出的任务分解计划
+            messages: 消息历史
+            session_id: 会话 ID
+            message_id: 消息 ID
+        """
+        # 1. 转换为 Plan 对象
+        plan = Plan.from_decomposition(decomposition_plan)
+        self.plan = plan  # 🆕 V7.8: 保存到实例，供 _trigger_replan 使用
+        
+        # 🆕 V7.8: REPLAN 重试循环
+        max_replan_attempts = 2  # 最多重规划 2 次
+        replan_attempt = 0
+        needs_replan = False
+        
+        self._trace("dag_scheduler_start", {
+            "plan_id": plan.plan_id,
+            "total_steps": len(plan.steps),
+            "execution_mode": plan.execution_mode,
+        })
+        
+        # 2. 创建 DAGScheduler
+        scheduler = DAGScheduler(
+            max_concurrency=len(self.config.agents) if self.config.agents else 5,
+            enable_retry=self.config.retry_on_failure,
+            max_retries=self.config.max_retries,
+        )
+        
+        # 3. 计算并行组
+        groups = scheduler.compute_parallel_groups(plan)
+        
+        yield {
+            "type": "dag_execution_start",
+            "session_id": session_id,
+            "plan_id": plan.plan_id,
+            "total_groups": len(groups),
+            "total_steps": len(plan.steps),
+            "groups_distribution": [len(g) for g in groups],
+        }
+        
+        # 🆕 V7.8: REPLAN 标记（用于跨步骤通信）
+        replan_triggered = False
+        replan_step_id = None
+        
+        # 4. 定义步骤执行器
+        async def step_executor(step: PlanStep, dep_results: Dict[str, StepResult]) -> StepResult:
+            """单个步骤执行器"""
+            nonlocal replan_triggered, replan_step_id
+            
+            start_time = time.time()
+            
+            try:
+                # V7.9: 选择 Agent 配置（三级优先级策略）
+                selection_result = self._select_agent_for_step(step)
+                agent_config = selection_result.selected_agent
+                
+                # 执行（V7.8: 直接传递 PlanStep，移除冗余转换）
+                result = await self._execute_step_with_critique(
+                    agent_config=agent_config,
+                    plan_step=step,
+                    messages=messages,
+                    previous_output=step.injected_context,
+                    session_id=session_id,
+                )
+                
+                duration_ms = int((time.time() - start_time) * 1000)
+                
+                # 🆕 V7.8: 检测 REPLAN 标志
+                if result.metadata and result.metadata.get("needs_replan"):
+                    replan_triggered = True
+                    replan_step_id = step.id
+                    logger.info(f"🔄 检测到 REPLAN 请求: step_id={step.id}")
+                
+                return StepResult(
+                    step_id=step.id,
+                    success=result.success,
+                    output=result.output,
+                    error=result.error,
+                    duration_ms=duration_ms,
+                )
+                
+            except Exception as e:
+                logger.error(f"❌ 步骤 {step.id} 执行异常: {e}", exc_info=True)
+                return StepResult(
+                    step_id=step.id,
+                    success=False,
+                    error=str(e),
+                    duration_ms=int((time.time() - start_time) * 1000),
+                )
+        
+        # 5. 定义回调
+        def on_step_start(step: PlanStep):
+            self._trace("dag_step_start", {"step_id": step.id, "description": step.description[:50]})
+        
+        def on_step_end(step: PlanStep, result: StepResult):
+            self._trace("dag_step_end", {
+                "step_id": step.id,
+                "success": result.success,
+                "duration_ms": result.duration_ms,
+            })
+            
+            # 记录到 agent_results 以便后续汇总
+            self._state.agent_results.append(AgentResult(
+                result_id=f"result_{step.id}",
+                agent_id=step.assigned_agent or f"agent_{step.id}",
+                success=result.success,
+                output=result.output,
+                error=result.error,
+                turns_used=1,
+                duration_ms=result.duration_ms,
+                started_at=step.started_at or datetime.now(),
+                completed_at=step.completed_at or datetime.now(),
+            ))
+        
+        def on_group_start(group_idx: int, steps: List[PlanStep]):
+            yield_event = {
+                "type": "dag_group_start",
+                "session_id": session_id,
+                "group_index": group_idx,
+                "step_ids": [s.id for s in steps],
+            }
+            self._trace("dag_group_start", {"group_index": group_idx, "step_count": len(steps)})
+        
+        def on_group_end(group_idx: int, steps: List[PlanStep], results: List[StepResult]):
+            success_count = sum(1 for r in results if r.success)
+            self._trace("dag_group_end", {
+                "group_index": group_idx,
+                "success_count": success_count,
+                "total_count": len(steps),
+            })
+        
+        # 6. 执行 DAG（🆕 V7.8: 带 REPLAN 重试循环）
+        while replan_attempt <= max_replan_attempts:
+            # 重置 REPLAN 标记
+            replan_triggered = False
+            replan_step_id = None
+            
+            # 重新计算并行组（首次或 REPLAN 后）
+            if replan_attempt > 0:
+                groups = scheduler.compute_parallel_groups(plan)
+                logger.info(
+                    f"🔄 REPLAN 后重新计算并行组: attempt={replan_attempt}, "
+                    f"groups={len(groups)}"
+                )
+                
+                yield {
+                    "type": "dag_replan_start",
+                    "session_id": session_id,
+                    "plan_id": plan.plan_id,
+                    "replan_attempt": replan_attempt,
+                    "new_groups": len(groups),
+                }
+            
+            dag_result = await scheduler.execute(
+                plan=plan,
+                executor=step_executor,
+                on_step_start=on_step_start,
+                on_step_end=on_step_end,
+            )
+            
+            # 🆕 V7.8: 检查是否需要 REPLAN
+            if replan_triggered and replan_attempt < max_replan_attempts:
+                replan_attempt += 1
+                logger.info(
+                    f"🔄 触发 REPLAN 重试: step_id={replan_step_id}, "
+                    f"attempt={replan_attempt}/{max_replan_attempts}"
+                )
+                
+                # 重置未完成步骤的状态
+                for step in plan.steps:
+                    if step.status not in (StepStatus.COMPLETED,):
+                        step.status = StepStatus.PENDING
+                        step.retry_count = 0
+                
+                continue  # 重新执行
+            
+            break  # 正常完成或达到最大重试次数
+        
+        # 7. 发送执行完成事件
+        yield {
+            "type": "dag_execution_end",
+            "session_id": session_id,
+            "plan_id": plan.plan_id,
+            "success": dag_result.success,
+            "completed_steps": dag_result.completed_steps,
+            "failed_steps": dag_result.failed_steps,
+            "skipped_steps": dag_result.skipped_steps,
+            "total_duration_ms": dag_result.total_duration_ms,
+            "execution_groups": dag_result.execution_groups,
+            "replan_attempts": replan_attempt,  # 🆕 V7.8: 记录重规划次数
+        }
+        
+        self._trace("dag_scheduler_complete", {
+            **dag_result.to_dict(),
+            "replan_attempts": replan_attempt,
+        })
+        
+        logger.info(
+            f"✅ DAG 执行完成: plan_id={plan.plan_id}, "
+            f"success={dag_result.success}, "
+            f"steps={dag_result.completed_steps}/{dag_result.total_steps}, "
+            f"replan_attempts={replan_attempt}"
+        )
+    
+    def _select_agent_for_step(self, step: PlanStep) -> AgentSelectionResult:
+        """
+        V7.9: Agent 选择 - 三级优先级策略
+        
+        优先级（互斥选择）:
+        1. Config（显式指定）: step.assigned_agent - 最高优先级
+        2. Task（角色匹配）: step.assigned_agent_role
+        3. Capability（能力匹配）: step.tools_required
+        4. Default: 第一个可用 Agent 或自动创建
+        
+        借鉴工具选择三级优化（V7.6）:
+        - 有效性验证：检测无效 Agent 配置
+        - 覆盖透明化：记录选择来源和被覆盖候选
+        - Tracer 追踪：完整记录决策过程
+        
+        Args:
+            step: 执行步骤
+            
+        Returns:
+            AgentSelectionResult: 包含选择结果和决策链路
+        """
+        selection_source = "default"
+        overridden_sources: List[str] = []
+        
+        # 三层候选者
+        config_candidate: Optional[AgentConfig] = None
+        task_candidate: Optional[AgentConfig] = None
+        capability_candidate: Optional[AgentConfig] = None
+        
+        # ===== Layer 3: Capability 匹配（最低优先级）=====
+        if step.tools_required:
+            for agent in self.config.agents:
+                matching_tools = [t for t in step.tools_required if t in agent.tools]
+                if matching_tools:
+                    capability_candidate = agent
+                    logger.debug(
+                        f"  └─ Capability 匹配: {agent.agent_id} "
+                        f"(工具: {matching_tools[:3]})"
+                    )
+                    break
+        
+        # ===== Layer 2: Task 匹配（角色）=====
+        if step.assigned_agent_role:
+            for agent in self.config.agents:
+                if agent.role.value == step.assigned_agent_role:
+                    task_candidate = agent
+                    logger.debug(
+                        f"  └─ Task 匹配: {agent.agent_id} "
+                        f"(角色: {step.assigned_agent_role})"
+                    )
+                    break
+        
+        # ===== Layer 1: Config 显式指定（最高优先级）=====
+        if step.assigned_agent:
+            for agent in self.config.agents:
+                if agent.agent_id == step.assigned_agent:
+                    config_candidate = agent
+                    logger.debug(f"  └─ Config 匹配: {agent.agent_id}")
+                    break
+            
+            # V7.9: 有效性验证 - 检查显式指定的 Agent 是否存在
+            if not config_candidate:
+                available_ids = [a.agent_id for a in self.config.agents]
+                logger.warning(
+                    f"⚠️ Step '{step.id}' 指定的 Agent '{step.assigned_agent}' 不存在，"
+                    f"可用 Agent: {available_ids}"
+                )
+        
+        # ===== 按优先级选择，记录覆盖 =====
+        if config_candidate:
+            selected = config_candidate
+            selection_source = "config"
+            # 记录被覆盖的候选
+            if task_candidate and task_candidate.agent_id != selected.agent_id:
+                overridden_sources.append(f"task:{task_candidate.agent_id}")
+            if capability_candidate and capability_candidate.agent_id != selected.agent_id:
+                overridden_sources.append(f"capability:{capability_candidate.agent_id}")
+                
+        elif task_candidate:
+            selected = task_candidate
+            selection_source = "task"
+            # 记录被覆盖的候选
+            if capability_candidate and capability_candidate.agent_id != selected.agent_id:
+                overridden_sources.append(f"capability:{capability_candidate.agent_id}")
+                
+        elif capability_candidate:
+            selected = capability_candidate
+            selection_source = "capability"
+            
+        elif self.config.agents:
+            selected = self.config.agents[0]
+            selection_source = "default"
+            logger.debug(f"  └─ 使用默认 Agent: {selected.agent_id}")
+            
+        else:
+            # 自动创建 Agent 配置
+            selected = AgentConfig(
+                agent_id=f"auto_agent_{step.id}",
+                role=AgentRole.EXECUTOR,
+                model=self.worker_model,
+                tools=step.tools_required or [],
+            )
+            selection_source = "auto_created"
+            logger.info(f"🆕 自动创建 Agent: {selected.agent_id}")
+        
+        # ===== V7.9: 有效性验证 =====
+        validation_passed, validation_issues = self._validate_agent_for_step(
+            selected, step
+        )
+        
+        # ===== V7.9: 覆盖透明化日志 =====
+        if overridden_sources:
+            logger.info(
+                f"📋 Agent 选择 [{selection_source}]: {selected.agent_id}，"
+                f"覆盖了 {overridden_sources}"
+            )
+        else:
+            logger.info(f"✅ Agent 选择 [{selection_source}]: {selected.agent_id}")
+        
+        if not validation_passed:
+            logger.warning(f"   └─ 验证问题: {validation_issues}")
+        
+        # 构建选择结果
+        result = AgentSelectionResult(
+            selected_agent=selected,
+            selection_source=selection_source,
+            overridden_sources=overridden_sources,
+            validation_passed=validation_passed,
+            validation_issues=validation_issues,
+            config_candidate=config_candidate.agent_id if config_candidate else None,
+            task_candidate=task_candidate.agent_id if task_candidate else None,
+            capability_candidate=capability_candidate.agent_id if capability_candidate else None,
+        )
+        
+        # ===== V7.9: Tracer 增强追踪 =====
+        self._trace("agent_selection", {
+            "step_id": step.id,
+            "step_description": step.description[:50] if step.description else "",
+            **result.to_trace_dict(),
+        })
+        
+        return result
+    
+    def _validate_agent_for_step(
+        self, agent: AgentConfig, step: PlanStep
+    ) -> tuple:
+        """
+        V7.9: 验证 Agent 配置对步骤的适配性
+        
+        检查项:
+        1. 工具覆盖：Agent 是否具备步骤所需的工具
+        2. 角色匹配：Agent 角色是否与步骤要求一致
+        
+        Args:
+            agent: 选中的 Agent 配置
+            step: 执行步骤
+            
+        Returns:
+            (is_valid, issues): 验证结果和问题列表
+        """
+        issues: List[str] = []
+        
+        # 检查工具覆盖
+        if step.tools_required:
+            missing_tools = [t for t in step.tools_required if t not in agent.tools]
+            if missing_tools:
+                issues.append(f"Agent 缺少工具: {missing_tools}")
+        
+        # 检查角色匹配（仅当步骤明确指定角色时）
+        if step.assigned_agent_role and agent.role.value != step.assigned_agent_role:
+            issues.append(
+                f"角色不匹配: 需要 {step.assigned_agent_role}, "
+                f"实际 {agent.role.value}"
+            )
+        
+        return len(issues) == 0, issues
     
     async def _execute_hierarchical(
         self,
@@ -752,85 +1232,105 @@ class MultiAgentOrchestrator:
         messages: List[Dict[str, str]],
         previous_output: Optional[str],
         session_id: str,
-        subtask: Optional[SubTask] = None,
+        plan_step: Optional[PlanStep] = None,
     ) -> AgentResult:
         """
         执行单个 Agent（真实实现）
         
         V7.1 改进：
-        - 支持子任务定义（来自 Lead Agent 的分解）
+        - 支持步骤定义（来自 Lead Agent 的分解）
         - 动态注入 Subagent 系统提示词（8 个核心要素）
         - 上下文隔离：只传递必要的摘要
+        
+        V7.8 重构：
+        - 统一使用 PlanStep，移除 SubTask 冗余层
         
         Args:
             config: Agent 配置
             messages: 消息历史
             previous_output: 前一个 Agent 的输出（串行模式）
             session_id: 会话 ID
-            subtask: 子任务定义（来自 Lead Agent）
+            plan_step: 步骤定义（来自 Lead Agent 或 DAGScheduler）
             
         Returns:
             AgentResult 执行结果
         """
         start_time = time.time()
         
-        task_description = subtask.description if subtask else f"执行 {config.role.value} 任务"
+        task_description = plan_step.description if plan_step else f"执行 {config.role.value} 任务"
         
         logger.info(
             f"🤖 执行 Subagent: {config.agent_id} ({config.role.value}), "
             f"model={config.model}, task={task_description[:50]}..."
         )
         
-        # 如果有子任务定义，使用更详细的日志
-        if subtask:
+        # 如果有步骤定义，使用更详细的日志
+        if plan_step:
             logger.debug(
-                f"   📋 子任务详情:\n"
-                f"      - 期望输出: {subtask.expected_output}\n"
-                f"      - 成功标准: {subtask.success_criteria}\n"
-                f"      - 需要工具: {subtask.tools_required}\n"
-                f"      - 约束条件: {subtask.constraints}"
+                f"   📋 步骤详情:\n"
+                f"      - 期望输出: {plan_step.expected_output}\n"
+                f"      - 成功标准: {plan_step.success_criteria}\n"
+                f"      - 需要工具: {plan_step.tools_required}\n"
+                f"      - 约束条件: {plan_step.constraints}"
             )
         
         try:
             # 1. 构建 Subagent 系统提示词（核心！）
             system_prompt = self._build_subagent_system_prompt(
                 config=config,
-                subtask=subtask,
+                plan_step=plan_step,
                 orchestrator_context=self._build_orchestrator_summary()
             )
             
             # 2. 创建独立的 LLM 服务（上下文隔离）
             # V7.1: 使用配置的 Worker 模型（强弱配对）
             from core.llm import create_llm_service
+            from config.llm_config import get_llm_profile
             
-            worker_model = self.worker_model if hasattr(self, 'worker_model') else config.model
+            worker_model = self.worker_model if hasattr(self, "worker_model") else config.model
+            profile_name = (
+                self.config.worker_config.llm_profile_name
+                if self.config.worker_config else None
+            ) or "worker_agent"
             
+            worker_profile = get_llm_profile(profile_name)
+            profile_provider = str(worker_profile.get("provider", "claude")).lower()
+            if profile_provider == "claude":
+                worker_profile["model"] = worker_model
             if self.config.worker_config:
-                llm = create_llm_service(
-                    provider="claude",  # 🆕 V7.10
-                    model=worker_model,
-                    enable_thinking=self.config.worker_config.enable_thinking,
-                    max_tokens=self.config.worker_config.max_tokens,
-                    thinking_budget=self.config.worker_config.thinking_budget,
-                )
+                worker_profile.update({
+                    "enable_thinking": self.config.worker_config.enable_thinking,
+                    "max_tokens": self.config.worker_config.max_tokens,
+                    "thinking_budget": self.config.worker_config.thinking_budget,
+                })
             else:
-                llm = create_llm_service(
-                    provider="claude",  # 🆕 V7.10
-                    model=worker_model,
-                    enable_thinking=True,
-                    max_tokens=8192,
-                    thinking_budget=5000,  # 默认值，确保小于 max_tokens
-                )
+                worker_profile.update({
+                    "enable_thinking": True,
+                    "max_tokens": 8192,
+                    "thinking_budget": 5000,
+                })
+            
+            llm = create_llm_service(**worker_profile)
+            
+            # 🆕 Worker 探针：执行前做存活检查（失败自动切换）
+            role_name = config.role.value if hasattr(config.role, "value") else str(config.role)
+            await self._probe_worker_llm(
+                llm_service=llm,
+                agent_id=config.agent_id,
+                role=role_name,
+                step_id=plan_step.id if plan_step else None
+            )
             
             # 3. 构建用户消息（只传递必要信息）
             user_message_parts = []
             
             # 添加任务描述
-            if subtask:
-                user_message_parts.append(f"任务：{subtask.title}")
-                user_message_parts.append(f"描述：{subtask.description}")
-                if subtask.context:
-                    user_message_parts.append(f"\n背景信息：\n{subtask.context}")
+            if plan_step:
+                step_title = plan_step.metadata.get("title", plan_step.description[:50])
+                user_message_parts.append(f"任务：{step_title}")
+                user_message_parts.append(f"描述：{plan_step.description}")
+                if plan_step.context:
+                    user_message_parts.append(f"\n背景信息：\n{plan_step.context}")
             else:
                 user_message_parts.append(f"任务：{task_description}")
             
@@ -846,8 +1346,8 @@ class MultiAgentOrchestrator:
             
             user_message = "\n\n".join(user_message_parts)
             
-            # 4. 🆕 动态加载工具（根据 SubTask 需求）
-            tools = await self._load_subagent_tools(config, subtask)
+            # 4. 🆕 动态加载工具（根据 PlanStep 需求）
+            tools = await self._load_subagent_tools(config, plan_step)
             
             # 5. 调用 LLM 执行
             from core.llm.base import Message
@@ -878,13 +1378,12 @@ class MultiAgentOrchestrator:
                 )
                 
                 # 🆕 V7.4: 累积每次 LLM 调用的 usage
-                # ✅ 使用 LLMResponse 中的 model 字段进行计费
                 self.usage_tracker.accumulate(llm_response)
                 
                 stop_reason = getattr(llm_response, 'stop_reason', 'end_turn')
                 logger.info(f"   📡 LLM stop_reason: {stop_reason}")
                 
-                # 检查是否有**客户端**工具调用（统一格式）
+                # 检查是否有**客户端**工具调用
                 if stop_reason == "tool_use" and hasattr(llm_response, 'tool_calls') and llm_response.tool_calls:
                     tool_calls = llm_response.tool_calls
                     logger.info(f"   🔧 LLM 请求调用 {len(tool_calls)} 个工具")
@@ -906,16 +1405,6 @@ class MultiAgentOrchestrator:
                             tool_id = tc.get('id', '')
                             
                             logger.info(f"   🔨 执行客户端工具: {tool_name}")
-                            
-                            # 🆕 V7.10: 为 api_calling 工具注入上下文（用于替换 body 中的占位符）
-                            if tool_name == "api_calling":
-                                tool_input["user_id"] = getattr(self, '_current_user_id', None)
-                                tool_input["session_id"] = getattr(self, '_current_session_id', None) or session_id
-                                tool_input["conversation_id"] = getattr(self, '_current_session_id', None) or session_id
-                                logger.info(
-                                    f"   🔑 [api_calling 上下文注入] user_id={tool_input.get('user_id')}, "
-                                    f"session_id={tool_input.get('session_id')}, conversation_id={tool_input.get('conversation_id')}"
-                                )
                             
                             try:
                                 result = await self.tool_executor.execute(tool_name, tool_input)
@@ -968,7 +1457,7 @@ class MultiAgentOrchestrator:
             logger.info(f"✅ Subagent 执行完成: {config.agent_id}, 耗时 {duration_ms}ms")
             
             return AgentResult(
-                result_id=f"result_{uuid4()}",
+                result_id=f"result_{uuid4().hex[:8]}",
                 agent_id=config.agent_id,
                 success=True,
                 output=response,
@@ -979,8 +1468,8 @@ class MultiAgentOrchestrator:
                 metadata={
                     "model": config.model,
                     "previous_output_length": len(previous_output) if previous_output else 0,
-                    "has_subtask": subtask is not None,
-                    "subtask_title": subtask.title if subtask else None,
+                    "has_plan_step": plan_step is not None,
+                    "step_title": plan_step.metadata.get("title") if plan_step else None,
                     "system_prompt_length": len(system_prompt),
                     "user_message_length": len(user_message),
                     "tool_calls_count": len(all_tool_results),  # 🆕 工具调用统计
@@ -994,7 +1483,7 @@ class MultiAgentOrchestrator:
             duration_ms = int((time.time() - start_time) * 1000)
             
             return AgentResult(
-                result_id=f"result_{uuid4()}",
+                result_id=f"result_{uuid4().hex[:8]}",
                 agent_id=config.agent_id,
                 success=False,
                 output="",
@@ -1005,14 +1494,14 @@ class MultiAgentOrchestrator:
                 completed_at=datetime.now(),
                 metadata={
                     "model": config.model,
-                    "has_subtask": subtask is not None,
+                    "has_plan_step": plan_step is not None,
                 }
             )
     
     def _build_subagent_system_prompt(
         self,
         config: AgentConfig,
-        subtask: Optional[SubTask] = None,
+        plan_step: Optional[PlanStep] = None,
         orchestrator_context: Optional[str] = None,
     ) -> str:
         """
@@ -1022,25 +1511,28 @@ class MultiAgentOrchestrator:
         "Each subagent needs an objective, an output format, guidance on the tools 
         and sources to use, and clear task boundaries."
         
+        V7.8 重构：统一使用 PlanStep，移除 SubTask 冗余层
+        
         Args:
             config: Agent 配置
-            subtask: 子任务定义
+            plan_step: 步骤定义
             orchestrator_context: Orchestrator 提供的上下文摘要
             
         Returns:
             str: 完整的系统提示词
         """
         # 1. 明确的目标（Objective）
-        if subtask:
-            objective = f"**你的目标**：{subtask.title}\n{subtask.description}"
+        if plan_step:
+            title = plan_step.metadata.get("title", plan_step.description[:50])
+            objective = f"**你的目标**：{title}\n{plan_step.description}"
         else:
             objective = f"**你的目标**：执行 {config.role.value} 任务"
         
         # 2. 期望输出格式（Output Format）
-        if subtask and subtask.expected_output:
+        if plan_step and plan_step.expected_output:
             output_format = f"""
 **输出格式要求**：
-{subtask.expected_output}
+{plan_step.expected_output}
 
 请严格遵循以上格式，使用结构化的 JSON 或 Markdown。
 """
@@ -1053,14 +1545,14 @@ class MultiAgentOrchestrator:
 """
         
         # 3. 可用工具指导（Tools Guidance）- V7.2 强化工具使用
-        if subtask and subtask.tools_required:
+        if plan_step and plan_step.tools_required:
             tools_guidance = f"""
 **可用工具**：
-{chr(10).join(f"- {tool}" for tool in subtask.tools_required)}
+{chr(10).join(f"- {tool}" for tool in plan_step.tools_required)}
 
 **⚠️ 重要：你必须主动使用工具获取信息！**
 - 不要仅凭已有知识回答，必须调用工具搜索最新信息
-- 每个子任务至少调用 1-2 次工具
+- 每个步骤至少调用 1-2 次工具
 - 如果任务涉及"研究"、"分析"、"搜索"，你**必须**使用 web_search 或相关工具
 
 **工具选择启发式规则**：
@@ -1086,10 +1578,10 @@ class MultiAgentOrchestrator:
             tools_guidance = "**可用工具**：无特定工具要求，使用你的知识和推理能力完成任务。"
         
         # 4. 任务边界（Task Boundaries）
-        if subtask and subtask.constraints:
+        if plan_step and plan_step.constraints:
             boundaries = f"""
 **任务边界与约束**：
-{chr(10).join(f"- {constraint}" for constraint in subtask.constraints)}
+{chr(10).join(f"- {constraint}" for constraint in plan_step.constraints)}
 
 **不要**：
 - 超出以上范围工作
@@ -1105,10 +1597,10 @@ class MultiAgentOrchestrator:
 """
         
         # 5. 成功标准（Success Criteria）
-        if subtask and subtask.success_criteria:
+        if plan_step and plan_step.success_criteria:
             success_criteria = f"""
 **成功标准**：
-{chr(10).join(f"- {criterion}" for criterion in subtask.success_criteria)}
+{chr(10).join(f"- {criterion}" for criterion in plan_step.success_criteria)}
 
 完成任务后，请自我检查是否满足以上所有标准。
 """
@@ -1251,10 +1743,6 @@ class MultiAgentOrchestrator:
             user_id: 用户 ID（可选）
             tool_names: 需要加载的工具列表（可选，默认加载核心工具）
         """
-        # 🆕 V7.10: 保存上下文信息，供工具执行时注入使用
-        self._current_session_id = session_id
-        self._current_user_id = user_id
-        
         # 1. 初始化工具加载器
         if self._tool_loader is None:
             from core.tool.loader import ToolLoader
@@ -1265,15 +1753,16 @@ class MultiAgentOrchestrator:
             )
             logger.info("✅ 工具加载器已初始化")
         
-        # 初始化工具执行器（用于 Subagent RVR 循环）
+        # 🆕 V7.3: 初始化工具执行器（用于 Subagent RVR 循环）
         if self.tool_executor is None:
             from core.tool.executor import ToolExecutor
-            from core.tool.base import create_tool_context
             from core.tool.capability.registry import CapabilityRegistry
             
             self.tool_executor = ToolExecutor(
                 registry=CapabilityRegistry(),
-                tool_context=create_tool_context(),
+                tool_context={
+                    "workspace_dir": None,  # 多智能体不需要特定工作目录
+                },
                 enable_compaction=True
             )
             logger.info("✅ 工具执行器已初始化")
@@ -1299,7 +1788,7 @@ class MultiAgentOrchestrator:
     async def _load_subagent_tools(
         self,
         config: AgentConfig,
-        subtask: Optional[SubTask] = None,
+        plan_step: Optional[PlanStep] = None,
     ) -> List[Dict[str, Any]]:
         """
         🆕 V7.2: 动态加载 Subagent 工具（参考 V4 工具分层设计）
@@ -1308,9 +1797,11 @@ class MultiAgentOrchestrator:
         - Level 1: 核心工具 - 始终加载（plan_todo 等）
         - Level 2: 动态工具 - 按需加载（web_search, exa_search 等）
         
+        V7.8 重构：统一使用 PlanStep，移除 SubTask 冗余层
+        
         Args:
             config: Agent 配置
-            subtask: 子任务定义（包含 tools_required）
+            plan_step: 步骤定义（包含 tools_required）
             
         Returns:
             List[Dict]: Anthropic 格式的工具定义列表
@@ -1323,14 +1814,13 @@ class MultiAgentOrchestrator:
         # Level 1: 核心工具（始终加载）
         core_tools = ["plan_todo"]
         
-        # Level 2: 动态工具（根据 SubTask 或默认配置）
-        if subtask and subtask.tools_required:
-            dynamic_tools = subtask.tools_required
-            logger.debug(f"📋 SubTask 指定工具: {dynamic_tools}")
+        # Level 2: 动态工具（根据 PlanStep 或默认配置）
+        if plan_step and plan_step.tools_required:
+            dynamic_tools = plan_step.tools_required
+            logger.debug(f"📋 PlanStep 指定工具: {dynamic_tools}")
         else:
             # 默认研究工具
-            # 🆕 web_search 已移除，改用 tavily_search
-            dynamic_tools = ["tavily_search", "exa_search", "wikipedia"]
+            dynamic_tools = ["web_search", "exa_search", "wikipedia"]
             logger.debug(f"📋 使用默认工具: {dynamic_tools}")
         
         # 合并所有需要的工具
@@ -1380,284 +1870,7 @@ class MultiAgentOrchestrator:
             # 返回空列表但不应该阻止 Agent 执行
             return []
     
-    async def _spawn_subagent(
-        self,
-        config: AgentConfig,
-        subtask: SubTask,
-        orchestrator_summary: str,
-        previous_output_summary: Optional[str] = None,
-    ) -> SubagentResult:
-        """
-        生成并执行 Subagent（上下文隔离版本）
-        
-        V7.1 核心特性：
-        - Subagent 在独立的上下文中执行
-        - 只接收压缩的摘要（< 500 tokens）
-        - 返回压缩的摘要给 Orchestrator
-        
-        参考 Anthropic Multi-Agent System：
-        "The orchestrator maintains a clean context with summaries, 
-        while subagents work in isolation."
-        
-        Args:
-            config: Agent 配置
-            subtask: 子任务定义
-            orchestrator_summary: Orchestrator 提供的摘要
-            previous_output_summary: 前置输出摘要（如果有）
-            
-        Returns:
-            SubagentResult: 执行结果（包含摘要）
-        """
-        start_time = time.time()
-        
-        logger.info(f"🚀 Spawn Subagent: {config.agent_id} for task '{subtask.title}'")
-        
-        try:
-            # 1. 构建系统提示词
-            system_prompt = self._build_subagent_system_prompt(
-                config=config,
-                subtask=subtask,
-                orchestrator_context=orchestrator_summary
-            )
-            
-            # 2. 创建独立的 LLM 服务
-            # V7.1: 使用配置的 Worker 模型（强弱配对）
-            from core.llm import create_llm_service
-            
-            worker_model = self.worker_model if hasattr(self, 'worker_model') else config.model
-            
-            if self.config.worker_config:
-                llm = create_llm_service(
-                    provider="claude",  # 🆕 V7.10
-                    model=worker_model,
-                    enable_thinking=self.config.worker_config.enable_thinking,
-                    max_tokens=self.config.worker_config.max_tokens,
-                    thinking_budget=self.config.worker_config.thinking_budget,
-                )
-            else:
-                llm = create_llm_service(
-                    provider="claude",  # 🆕 V7.10
-                    model=worker_model,
-                    enable_thinking=True,
-                    max_tokens=8192,
-                    thinking_budget=5000,  # 默认值，确保小于 max_tokens
-                )
-            
-            # 3. 构建用户消息（只传递摘要，不传完整历史）
-            user_message_parts = [
-                f"**任务**：{subtask.title}",
-                f"**描述**：{subtask.description}",
-            ]
-            
-            if subtask.context:
-                user_message_parts.append(f"\n**背景信息**：\n{subtask.context}")
-            
-            if previous_output_summary:
-                user_message_parts.append(f"\n**前置任务输出摘要**：\n{previous_output_summary}")
-            
-            user_message = "\n\n".join(user_message_parts)
-            
-            # 4. 🆕 动态加载工具
-            tools = await self._load_subagent_tools(config, subtask)
-            
-            # 5. 执行 Subagent
-            context_length = len(system_prompt) + len(user_message)
-            
-            logger.info(
-                f"📊 Subagent 上下文: system={len(system_prompt)}, "
-                f"user={len(user_message)}, total={context_length}, tools={len(tools)}"
-            )
-            
-            # V7.2 调试：显示第一个工具的完整结构
-            if tools:
-                first_tool = tools[0]
-                logger.info(
-                    f"   🔧 第一个工具示例: name={first_tool.get('name')}, "
-                    f"has_schema={bool(first_tool.get('input_schema'))}, "
-                    f"schema_type={first_tool.get('input_schema', {}).get('type')}"
-                )
-            
-            from core.llm.base import Message
-            import json
-            
-            # 🆕 V7.3: 实现完整的 RVR 工具执行循环
-            # 参考 SimpleAgent 的工具调用逻辑 + V4-ARCHITECTURE-HISTORY 分层设计
-            
-            messages = [Message(role="user", content=user_message)]
-            max_tool_turns = 5  # 最大工具调用轮次（防止无限循环）
-            turns_used = 0
-            all_tool_results = []  # 收集所有工具执行结果
-            final_response = ""
-            
-            for turn in range(max_tool_turns):
-                turns_used += 1
-                
-                logger.info(f"   🔄 Subagent Turn {turn + 1}/{max_tool_turns}")
-                
-                llm_response = await llm.create_message_async(
-                    messages=messages,
-                    system=system_prompt,
-                    temperature=0.5,
-                    tools=tools,
-                )
-                
-                stop_reason = getattr(llm_response, 'stop_reason', 'end_turn')
-                logger.info(f"   📡 LLM stop_reason: {stop_reason}")
-                
-                # 检查是否有工具调用（统一格式）
-                if stop_reason == "tool_use" and hasattr(llm_response, 'tool_calls') and llm_response.tool_calls:
-                    tool_calls = llm_response.tool_calls
-                    logger.info(f"   🔧 LLM 请求调用 {len(tool_calls)} 个工具")
-                    
-                    # 🆕 V7.3: 区分客户端工具和服务端工具（参考 SimpleAgent）
-                    # - 客户端工具（tool_use）：需要我们执行并返回 tool_result
-                    # - 服务端工具（server_tool_use）：Anthropic 服务器已执行，结果在 raw_content 中
-                    client_tools = [tc for tc in tool_calls if tc.get("type") == "tool_use"]
-                    server_tools = [tc for tc in tool_calls if tc.get("type") == "server_tool_use"]
-                    
-                    if server_tools:
-                        server_tool_names = [t.get('name') for t in server_tools]
-                        logger.info(f"   🌐 服务端工具已执行: {server_tool_names}")
-                        # 记录服务端工具调用
-                        for st in server_tools:
-                            all_tool_results.append({
-                                "tool": st.get('name'),
-                                "input": st.get('input', {}),
-                                "result": {"handled_by": "anthropic_server"}
-                            })
-                    
-                    # 添加 assistant 消息（包含 tool_use 和 server_tool_use）
-                    messages.append(Message(role="assistant", content=llm_response.raw_content))
-                    
-                    # 只有客户端工具需要我们执行
-                    if client_tools:
-                        tool_results = []
-                        for tc in client_tools:
-                            tool_name = tc.get('name', '')
-                            tool_input = tc.get('input', {})
-                            tool_id = tc.get('id', '')
-                            
-                            logger.info(f"   🔨 执行客户端工具: {tool_name}")
-                            
-                            # 🆕 V7.10: 为 api_calling 工具注入上下文（用于替换 body 中的占位符）
-                            if tool_name == "api_calling":
-                                tool_input["user_id"] = getattr(self, '_current_user_id', None)
-                                tool_input["session_id"] = getattr(self, '_current_session_id', None)
-                                tool_input["conversation_id"] = getattr(self, '_current_session_id', None)
-                                logger.info(
-                                    f"   🔑 [api_calling 上下文注入] user_id={tool_input.get('user_id')}, "
-                                    f"session_id={tool_input.get('session_id')}, conversation_id={tool_input.get('conversation_id')}"
-                                )
-                            
-                            try:
-                                # 使用 ToolExecutor 执行工具
-                                result = await self.tool_executor.execute(tool_name, tool_input)
-                                all_tool_results.append({
-                                    "tool": tool_name,
-                                    "input": tool_input,
-                                    "result": result
-                                })
-                                
-                                tool_results.append({
-                                    "type": "tool_result",
-                                    "tool_use_id": tool_id,
-                                    "content": json.dumps(result, ensure_ascii=False)
-                                })
-                                
-                                logger.info(f"   ✅ 工具 {tool_name} 执行完成: success={result.get('success', 'N/A')}")
-                                
-                            except Exception as e:
-                                logger.error(f"   ❌ 工具 {tool_name} 执行失败: {e}")
-                                tool_results.append({
-                                    "type": "tool_result",
-                                    "tool_use_id": tool_id,
-                                    "content": json.dumps({"error": str(e), "success": False}),
-                                    "is_error": True
-                                })
-                        
-                        # 只有客户端工具需要添加 tool_result 到 user message
-                        if tool_results:
-                            messages.append(Message(role="user", content=tool_results))
-                    # 如果只有服务端工具，不需要添加 user message，直接进入下一轮
-                    
-                    # 继续下一轮
-                    continue
-                
-                # 没有工具调用，提取最终响应
-                final_response = llm_response.content if hasattr(llm_response, 'content') else str(llm_response)
-                
-                # 如果是文本响应，跳出循环
-                if stop_reason in ('end_turn', 'stop', 'max_tokens'):
-                    logger.info(f"   ✅ Subagent 完成（{turns_used} 轮），stop_reason={stop_reason}")
-                    break
-            else:
-                # 达到最大轮次
-                logger.warning(f"   ⚠️ Subagent 达到最大工具调用轮次 ({max_tool_turns})")
-                if not final_response:
-                    final_response = llm_response.content if hasattr(llm_response, 'content') else "达到最大执行轮次"
-            
-            # 使用最终响应
-            response = final_response
-            
-            # 6. 生成摘要（压缩输出）
-            summary = await self._compress_subagent_output(response)
-            
-            compression_ratio = len(summary) / len(response) if len(response) > 0 else 1.0
-            
-            duration_ms = int((time.time() - start_time) * 1000)
-            
-            logger.info(
-                f"✅ Subagent 完成: {config.agent_id}, "
-                f"耗时 {duration_ms}ms, 压缩比 {compression_ratio:.2f}"
-            )
-            
-            return SubagentResult(
-                result_id=f"subresult_{uuid4()}",
-                agent_id=config.agent_id,
-                subtask_id=subtask.subtask_id,
-                success=True,
-                summary=summary,
-                full_output=response,
-                turns_used=turns_used,  # 🆕 记录实际轮次
-                duration_ms=duration_ms,
-                context_length=context_length,
-                summary_compression_ratio=compression_ratio,
-                started_at=datetime.now(),
-                completed_at=datetime.now(),
-                metadata={
-                    "model": config.model,
-                    "subtask_title": subtask.title,
-                    "system_prompt_length": len(system_prompt),
-                    "user_message_length": len(user_message),
-                    "full_output_length": len(response),
-                    "summary_length": len(summary),
-                    "tool_calls_count": len(all_tool_results),  # 🆕 工具调用统计
-                    "tool_results": all_tool_results[:5] if all_tool_results else [],  # 🆕 保留前5个工具结果摘要
-                }
-            )
-            
-        except Exception as e:
-            logger.error(f"❌ Subagent 执行失败: {config.agent_id}, error={e}", exc_info=True)
-            
-            duration_ms = int((time.time() - start_time) * 1000)
-            
-            return SubagentResult(
-                result_id=f"subresult_{uuid4()}",
-                agent_id=config.agent_id,
-                subtask_id=subtask.subtask_id,
-                success=False,
-                summary=f"执行失败: {str(e)}",
-                full_output="",
-                error=str(e),
-                turns_used=0,
-                duration_ms=duration_ms,
-                started_at=datetime.now(),
-                completed_at=datetime.now(),
-                metadata={
-                    "model": config.model,
-                    "subtask_title": subtask.title,
-                }
-            )
+    # V7.8: 删除 _spawn_subagent（死代码，功能已被 _execute_single_agent 替代）
     
     async def _compress_subagent_output(self, output: str, max_length: int = 500) -> str:
         """
@@ -1757,35 +1970,10 @@ class MultiAgentOrchestrator:
     # V7.2: Critic 集成
     # ===================
     
-    def _subtask_to_plan_step(self, subtask: SubTask, step_id: str) -> PlanStep:
-        """
-        将 SubTask 转换为 PlanStep（用于 Critic 评估）
-        
-        Args:
-            subtask: 子任务定义
-            step_id: 步骤 ID
-            
-        Returns:
-            PlanStep: Plan 步骤
-        """
-        return PlanStep(
-            id=step_id,
-            description=subtask.description,
-            status=StepStatus.IN_PROGRESS,
-            metadata={
-                "subtask_id": subtask.subtask_id,
-                "title": subtask.title,
-                "expected_output": subtask.expected_output,
-                "success_criteria": subtask.success_criteria,
-                "tools_required": subtask.tools_required,
-                "constraints": subtask.constraints,
-            }
-        )
-    
     async def _execute_step_with_critique(
         self,
         agent_config: AgentConfig,
-        subtask: Optional[SubTask],
+        plan_step: Optional[PlanStep],
         messages: List[Dict[str, str]],
         previous_output: Optional[str],
         session_id: str,
@@ -1794,10 +1982,11 @@ class MultiAgentOrchestrator:
         执行步骤（带 Critic 评估）
         
         V7.2 新增：在执行后自动调用 Critic 评估，根据结果决定下一步
+        V7.8 重构：统一使用 PlanStep，移除 SubTask 冗余层
         
         Args:
             agent_config: Agent 配置
-            subtask: 子任务定义
+            plan_step: 步骤定义
             messages: 消息历史
             previous_output: 前一个 Agent 的输出
             session_id: 会话 ID
@@ -1808,16 +1997,18 @@ class MultiAgentOrchestrator:
         # 如果未启用 Critic，直接执行
         if not self.critic or not self.critic_config:
             return await self._execute_single_agent(
-                agent_config, messages, previous_output, session_id, subtask
+                agent_config, messages, previous_output, session_id, plan_step
             )
         
-        # 创建 PlanStep（用于 Critic）
-        step_id = subtask.subtask_id if subtask else f"step_{agent_config.agent_id}"
-        plan_step = self._subtask_to_plan_step(subtask, step_id) if subtask else PlanStep(
-            id=step_id,
-            description=f"执行 {agent_config.role.value} 任务",
-            status=StepStatus.IN_PROGRESS,
-        )
+        # 使用传入的 PlanStep 或创建临时的
+        if plan_step is None:
+            plan_step = PlanStep(
+                id=f"step_{agent_config.agent_id}",
+                description=f"执行 {agent_config.role.value} 任务",
+                status=StepStatus.IN_PROGRESS,
+            )
+        else:
+            plan_step.status = StepStatus.IN_PROGRESS
         
         max_retries = self.critic_config.max_retries
         retry_count = 0
@@ -1825,7 +2016,7 @@ class MultiAgentOrchestrator:
         while retry_count <= max_retries:
             # 1. Execute
             result = await self._execute_single_agent(
-                agent_config, messages, previous_output, session_id, subtask
+                agent_config, messages, previous_output, session_id, plan_step
             )
             
             # 如果执行失败，直接返回
@@ -1834,11 +2025,7 @@ class MultiAgentOrchestrator:
                 return result
             
             # 2. Critique
-            success_criteria = (
-                subtask.success_criteria 
-                if subtask and subtask.success_criteria 
-                else plan_step.metadata.get("success_criteria", [])
-            )
+            success_criteria = plan_step.success_criteria or []
             
             critic_result = await self.critic.critique(
                 executor_output=result.output,
@@ -1904,14 +2091,14 @@ class MultiAgentOrchestrator:
                 )
                 
                 # 将改进建议注入到下一次执行的上下文中
-                if subtask:
-                    subtask.context = (
-                        f"{subtask.context}\n\n"
+                if plan_step:
+                    plan_step.context = (
+                        f"{plan_step.context}\n\n"
                         f"【改进建议（重试 {retry_count}/{max_retries}）】\n"
                         + "\n".join(f"- {s}" for s in critic_result.suggestions)
                     )
                 else:
-                    # 如果没有 subtask，将建议添加到消息中
+                    # 如果没有 plan_step，将建议添加到消息中
                     messages.append({
                         "role": "system",
                         "content": f"改进建议：\n" + "\n".join(f"- {s}" for s in critic_result.suggestions)
@@ -1931,7 +2118,7 @@ class MultiAgentOrchestrator:
                 
                 plan_step.fail("需要调整计划")
                 return AgentResult(
-                    result_id=f"result_{uuid4()}",
+                    result_id=f"result_{uuid4().hex[:8]}",
                     agent_id=agent_config.agent_id,
                     success=False,
                     output=result.output,
@@ -1942,7 +2129,7 @@ class MultiAgentOrchestrator:
         # 超过最大重试次数
         plan_step.fail(f"超过最大重试次数 ({max_retries})")
         return AgentResult(
-            result_id=f"result_{uuid4()}",
+            result_id=f"result_{uuid4().hex[:8]}",
             agent_id=agent_config.agent_id,
             success=False,
             output=result.output if 'result' in locals() else "",

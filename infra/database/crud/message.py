@@ -1,105 +1,45 @@
 """
 Message 表 CRUD 操作
-
-支持 PostgreSQL JSONB 类型：
-- content: List[Dict] 或 JSON 字符串
-- metadata: Dict 或 JSON 字符串
 """
 
-from typing import Optional, List, Dict, Any, Union
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 from uuid import uuid4
-import json
 
-from sqlalchemy import select 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm.attributes import flag_modified
 
-from infra.database.models import Message, Conversation
+from infra.database.models import Message
 from infra.database.crud.base import get_by_id
 
 
-def _parse_content(content: Union[str, List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
-    """
-    解析 content 为 list 格式
-    
-    Args:
-        content: JSON 字符串或 list
-        
-    Returns:
-        content blocks 列表
-    """
-    if isinstance(content, list):
-        return content
-    if isinstance(content, str):
-        try:
-            parsed = json.loads(content)
-            return parsed if isinstance(parsed, list) else [{"type": "text", "text": content}]
-        except json.JSONDecodeError:
-            return [{"type": "text", "text": content}]
-    return []
-
-
-def _parse_metadata(metadata: Union[str, Dict[str, Any], None]) -> Dict[str, Any]:
-    """
-    解析 metadata 为 dict 格式
-    
-    Args:
-        metadata: JSON 字符串或 dict
-        
-    Returns:
-        metadata 字典
-    """
-    if metadata is None:
-        return {}
-    if isinstance(metadata, dict):
-        return metadata
-    if isinstance(metadata, str):
-        try:
-            return json.loads(metadata)
-        except json.JSONDecodeError:
-            return {}
-    return {}
+def generate_message_id() -> str:
+    """生成消息 ID"""
+    return f"msg_{uuid4().hex[:24]}"
 
 
 async def create_message(
     session: AsyncSession,
     conversation_id: str,
     role: str,
-    content: Union[str, List[Dict[str, Any]]],
+    content: str,
     message_id: Optional[str] = None,
     status: Optional[str] = None,
-    metadata: Optional[Union[str, Dict[str, Any]]] = None
+    metadata: Optional[Dict[str, Any]] = None
 ) -> Message:
-    """
-    创建消息
-    
-    Args:
-        session: 数据库会话
-        conversation_id: 对话 ID
-        role: 角色（user/assistant/system）
-        content: 消息内容（JSON 字符串或 list）
-        message_id: 消息 ID（可选）
-        status: 状态（可选）
-        metadata: 元数据（JSON 字符串或 dict）
-    """
+    """创建消息"""
     msg = Message(
-        id=message_id or str(uuid4()),
+        id=message_id or generate_message_id(),
         conversation_id=conversation_id,
         role=role,
-        content=_parse_content(content),
+        content=content,
         status=status,
         created_at=datetime.now(),
-        extra_data=_parse_metadata(metadata)
     )
+    if metadata:
+        msg._metadata = metadata
     
     session.add(msg)
-    
-    # 同步更新对话的 updated_at（保证活跃对话在列表中上浮）
-    conv = await session.get(Conversation, conversation_id)
-    if conv:
-        conv.updated_at = datetime.now()
-    
     await session.commit()
     await session.refresh(msg)
     return msg
@@ -116,56 +56,48 @@ async def get_message(
 async def update_message(
     session: AsyncSession,
     message_id: str,
-    content: Optional[Union[str, List[Dict[str, Any]]]] = None,
+    content: Optional[str] = None,
     status: Optional[str] = None,
-    metadata: Optional[Union[str, Dict[str, Any]]] = None
+    metadata: Optional[Dict[str, Any]] = None
 ) -> Optional[Message]:
-    """
-    更新消息
-    
-    Args:
-        session: 数据库会话
-        message_id: 消息 ID
-        content: 消息内容（JSON 字符串或 list）
-        status: 状态
-        metadata: 元数据（增量合并）
-    """
+    """更新消息"""
     msg = await get_message(session, message_id)
     if not msg:
         return None
     
     if content is not None:
-        msg.content = _parse_content(content)
-        # ⚠️ 标记 JSONB 字段为已修改
-        flag_modified(msg, 'content')
+        msg.content = content
     if status is not None:
         msg.status = status
     if metadata is not None:
-        # 深度合并 extra_data（PostgreSQL JSONB 支持直接操作）
-        existing = _parse_metadata(msg.extra_data) if msg.extra_data else {}
-        new_metadata = _parse_metadata(metadata)
-        
-        # 深度合并：对于嵌套的 dict，递归合并
-        for key, value in new_metadata.items():
-            if key in existing and isinstance(existing[key], dict) and isinstance(value, dict):
-                existing[key].update(value)
-            else:
-                existing[key] = value
-        
-        msg.extra_data = existing
-        
-        # ⚠️ 重要：标记 JSONB 字段为已修改（否则 SQLAlchemy 不会将更改写入数据库）
-        flag_modified(msg, 'extra_data')
-    
-    # 同步更新对话的 updated_at（保证活跃对话在列表中上浮）
-    conv = await session.get(Conversation, msg.conversation_id)
-    if conv:
-        conv.updated_at = datetime.now()
+        # 深度合并 metadata（对齐文档规范）
+        existing = msg._metadata or {}
+        merged = _deep_merge_metadata(existing, metadata)
+        msg._metadata = merged
     
     await session.commit()
     await session.refresh(msg)
-    
     return msg
+
+
+def _deep_merge_metadata(existing: dict, new: dict) -> dict:
+    """
+    深度合并 metadata（对齐文档规范）
+    
+    Args:
+        existing: 现有 metadata
+        new: 新 metadata
+        
+    Returns:
+        合并后的 metadata
+    """
+    result = existing.copy()
+    for key, value in new.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge_metadata(result[key], value)
+        else:
+            result[key] = value
+    return result
 
 
 async def list_messages(
@@ -183,6 +115,49 @@ async def list_messages(
         query = query.order_by(Message.created_at.asc())
     
     query = query.limit(limit)
+    
+    result = await session.execute(query)
+    return list(result.scalars().all())
+
+
+async def list_messages_before_cursor(
+    session: AsyncSession,
+    conversation_id: str,
+    cursor_message_id: str,
+    limit: int = 50
+) -> List[Message]:
+    """
+    基于游标的分页查询（对齐文档规范）
+    
+    获取指定消息 ID 之前的 N 条消息（用于向上滚动加载）
+    
+    Args:
+        session: 数据库会话
+        conversation_id: 对话 ID
+        cursor_message_id: 游标消息 ID（获取此消息之前的消息）
+        limit: 返回数量
+        
+    Returns:
+        消息列表（按创建时间倒序，从新到旧）
+    """
+    # 先获取游标消息的创建时间
+    cursor_msg = await get_message(session, cursor_message_id)
+    if not cursor_msg:
+        # 游标消息不存在，返回空列表
+        return []
+    
+    cursor_time = cursor_msg.created_at
+    
+    # 查询创建时间早于游标消息的消息
+    query = (
+        select(Message)
+        .where(
+            Message.conversation_id == conversation_id,
+            Message.created_at < cursor_time
+        )
+        .order_by(Message.created_at.desc())  # 从新到旧
+        .limit(limit)
+    )
     
     result = await session.execute(query)
     return list(result.scalars().all())

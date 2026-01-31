@@ -19,7 +19,6 @@ from typing import List, Optional, Dict, Any, Tuple
 from dataclasses import dataclass
 from pathlib import Path
 import yaml
-import aiofiles
 
 from .registry import CapabilityRegistry
 from .types import Capability, CapabilityType
@@ -40,10 +39,6 @@ class CapabilityRouter:
     
     智能选择最合适的能力执行用户请求
     专注于评分和推荐算法
-    
-    使用方式：
-        router = CapabilityRouter(registry)
-        await router.initialize()  # 必须调用以加载规则
     """
     
     def __init__(
@@ -60,8 +55,7 @@ class CapabilityRouter:
         """
         self.registry = registry
         self._rules_path = rules_path or self._default_rules_path()
-        self.rules: Dict[str, Any] = {}
-        self._initialized: bool = False
+        self._load_rules()
         
         # 默认类型权重
         self.type_weights = {
@@ -80,26 +74,12 @@ class CapabilityRouter:
             "DYNAMIC": 3
         }
     
-    async def initialize(self) -> None:
-        """
-        异步初始化：加载路由规则
-        
-        使用方式：
-            router = CapabilityRouter(registry)
-            await router.initialize()
-        """
-        if self._initialized:
-            return
-        
-        await self._load_rules_async()
-        self._initialized = True
-    
     def _default_rules_path(self) -> str:
         """获取默认规则文件路径"""
         return str(Path(__file__).parent.parent.parent.parent / "config" / "routing_rules.yaml")
     
-    async def _load_rules_async(self) -> None:
-        """异步加载路由规则配置"""
+    def _load_rules(self):
+        """加载路由规则配置"""
         rules_path = Path(self._rules_path)
         
         if not rules_path.exists():
@@ -107,9 +87,8 @@ class CapabilityRouter:
             return
         
         try:
-            async with aiofiles.open(rules_path, 'r', encoding='utf-8') as f:
-                content = await f.read()
-                self.rules = yaml.safe_load(content) or {}
+            with open(rules_path, 'r', encoding='utf-8') as f:
+                self.rules = yaml.safe_load(f) or {}
         except Exception as e:
             print(f"⚠️ Warning: Failed to load routing rules: {e}")
             self.rules = {}
@@ -197,13 +176,10 @@ class CapabilityRouter:
         Score = base_priority           # 基础优先级 (0-100)
               + type_weight × 5         # 类型权重
               + subtype_weight × 5      # 子类型权重
-              + keyword_hint × 0.5      # 关键词提示（辅助参考）
+              + keyword_match × 2       # 关键词匹配
               + quality_match × 20      # 质量要求匹配
               + context_bonus           # 上下文加分
               - cost_penalty            # 成本惩罚
-        
-        注：关键词匹配权重较低，主要作为辅助排序依据。
-        最终能力选择建议结合 LLM 语义理解进行。
         """
         score = float(cap.priority)
         
@@ -215,9 +191,9 @@ class CapabilityRouter:
         subtype_weight = self.subtype_weights.get(cap.subtype, 0)
         score += subtype_weight * 5
         
-        # 关键词提示（辅助参考，权重较低）
+        # 关键词匹配
         keyword_score = cap.matches_keywords(keywords)
-        score += keyword_score * 0.5
+        score += keyword_score * 2
         
         # 质量要求匹配
         score += self._quality_match_score(cap, quality_requirement)

@@ -115,11 +115,13 @@ class EmbedderConfig:
     api_key: Optional[str] = field(default=None)
     base_url: Optional[str] = field(default=None)  # 用于 Ollama 等本地服务
     
-    def __post_init__(self) -> None:
+    def __post_init__(self):
         """初始化后处理：根据 provider 设置 api_key"""
         if self.api_key is None:
             if self.provider == "openai":
                 self.api_key = os.getenv("OPENAI_API_KEY")
+                if not self.base_url:
+                    self.base_url = os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE")
             elif self.provider == "google":
                 self.api_key = os.getenv("GOOGLE_API_KEY")
             elif self.provider == "huggingface":
@@ -161,13 +163,15 @@ class LLMConfig:
     api_key: Optional[str] = field(default=None)
     base_url: Optional[str] = field(default=None)
     
-    def __post_init__(self) -> None:
+    def __post_init__(self):
         """初始化后处理：根据 provider 设置 api_key"""
         if self.api_key is None:
             if self.provider == "anthropic":
                 self.api_key = os.getenv("ANTHROPIC_API_KEY")
             elif self.provider == "openai":
                 self.api_key = os.getenv("OPENAI_API_KEY")
+                if not self.base_url:
+                    self.base_url = os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE")
             elif self.provider == "google":
                 self.api_key = os.getenv("GOOGLE_API_KEY")
             elif self.provider == "ollama":

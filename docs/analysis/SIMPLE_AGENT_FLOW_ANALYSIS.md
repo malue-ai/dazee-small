@@ -308,9 +308,9 @@ async def analyze(
 class IntentResult:
     task_type: TaskType                 # GENERAL / CODING / DATA_ANALYSIS / CREATIVE / RESEARCH
     complexity: Complexity              # SIMPLE / MEDIUM / COMPLEX
-    complexity_score: float             # 0-1 (LLM 输出的精确分数)
+    complexity_score: float             # 0-10 (LLM 输出的精确分数)
     needs_plan: bool                    # 是否需要 Plan (复杂任务)
-    confidence: float                   # 0-1 (LLM 置信度)
+    confidence: float                   # 置信度
     is_follow_up: bool                  # 是否追问
     needs_multi_agent: bool             # 是否需要多智能体
     skip_memory_retrieval: bool         # 是否跳过 Mem0 检索

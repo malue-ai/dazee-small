@@ -11,10 +11,13 @@ core/memory/
 │   ├── preference.py     # 用户偏好（预留）
 │   └── e2b.py            # E2B 沙箱记忆（用户的云端计算环境）
 ├── system/               # 系统级记忆
-│   ├── skill.py          # SkillMemory
+│   ├── skill.py          # SkillMemory（本地工作流技能缓存）
 │   └── cache.py          # 系统缓存（预留）
 └── manager.py            # MemoryManager
 ```
+
+术语说明：
+- Skill: 本地工作流技能（skills/library/，对齐 clawdbot 机制）
 
 层级说明：
 - 会话级（Session）：WorkingMemory - 当前会话的消息和工具调用
@@ -37,20 +40,12 @@ memory.e2b.set_session(sandbox_session)
 memory.e2b.add_execution(code, result, duration)
 memory.e2b.add_persistent_sandbox(session, name="数据分析环境")
 
-# 用户级记忆（需要先初始化）
-episodic = memory.episodic
-await episodic.initialize()
-await episodic.add_episode(task_id, user_intent, result)
+# 用户级记忆
+memory.episodic.add_episode(task_id, user_intent, result)
+memory.preference.set_preference("theme", "dark")
 
-preference = memory.preference
-await preference.initialize()
-await preference.set_preference("theme", "dark")
-
-# 系统级记忆（需要先初始化）
-skill = memory.skill
-await skill.initialize()
-await skill.register_skill("ppt_gen", "/path/to/skill")
-
+# 系统级记忆
+memory.skill.register_skill("ppt_gen", "/path/to/skill")
 memory.cache.set("key", value, ttl_seconds=3600)
 ```
 """
@@ -75,10 +70,8 @@ from .working import (
 from .user import (
     EpisodicMemory,
     create_episodic_memory,
-    create_episodic_memory_async,
     PreferenceMemory,
     create_preference_memory,
-    create_preference_memory_async,
     E2BSandboxSession,
     E2BMemory,
     create_e2b_memory,
@@ -88,7 +81,6 @@ from .user import (
 from .system import (
     SkillMemory,
     create_skill_memory,
-    create_skill_memory_async,
     CacheMemory,
     create_cache_memory,
 )
@@ -117,18 +109,15 @@ __all__ = [
     # 用户级记忆
     "EpisodicMemory",
     "create_episodic_memory",
-    "create_episodic_memory_async",
     "PreferenceMemory",
     "create_preference_memory",
-    "create_preference_memory_async",
     "E2BSandboxSession",
     "E2BMemory",
     "create_e2b_memory",
     
-    # 系统级记忆
+    # 系统级记忆（Skill = 本地工作流技能）
     "SkillMemory",
     "create_skill_memory",
-    "create_skill_memory_async",
     "CacheMemory",
     "create_cache_memory",
     

@@ -42,10 +42,8 @@
     └── _metadata.json      # 元数据
 """
 
-# 1. 标准库
 import asyncio
 import hashlib
-import json
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, asdict
@@ -53,27 +51,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Any, Protocol, List
 
-# 2. 第三方库
-import aiofiles
+import json
 
-# 3. 本地模块
-# 注意：为避免循环导入，AgentFactory 延迟导入
-from config.llm_config import get_llm_profile
-from core.llm import create_llm_service
-from core.llm.base import Message
-from core.prompt.framework_rules import (
-    get_merge_prompts,
-    get_intent_prompt_template,
-    get_simple_prompt_template,
-    get_medium_prompt_template,
-    get_complex_prompt_template,
-)
-from core.prompt.intent_prompt_generator import IntentPromptGenerator
-from core.prompt.prompt_layer import PromptParser, PromptSchema, TaskComplexity, generate_prompt
-from core.prompt.prompt_results_writer import PromptResultsWriter, PromptResults
-from core.schemas import AgentSchema, DEFAULT_AGENT_SCHEMA
 from logger import get_logger
-from prompts.intent_recognition_prompt import get_intent_recognition_prompt
 
 logger = get_logger("instance_cache")
 
@@ -84,7 +64,7 @@ logger = get_logger("instance_cache")
 
 class CacheStorageBackend(ABC):
     """
-    缓存存储后端抽象接口（异步）
+    缓存存储后端抽象接口
     
     🆕 V5.0: 预留云端同步扩展点
     当前实现：LocalFileBackend
@@ -92,13 +72,13 @@ class CacheStorageBackend(ABC):
     """
     
     @abstractmethod
-    async def save(self, key: str, data: Dict[str, Any]) -> bool:
-        """保存缓存数据（异步）"""
+    def save(self, key: str, data: Dict[str, Any]) -> bool:
+        """保存缓存数据"""
         pass
     
     @abstractmethod
-    async def load(self, key: str) -> Optional[Dict[str, Any]]:
-        """加载缓存数据（异步）"""
+    def load(self, key: str) -> Optional[Dict[str, Any]]:
+        """加载缓存数据"""
         pass
     
     @abstractmethod
@@ -107,14 +87,14 @@ class CacheStorageBackend(ABC):
         pass
     
     @abstractmethod
-    async def delete(self, key: str) -> bool:
-        """删除缓存（异步）"""
+    def delete(self, key: str) -> bool:
+        """删除缓存"""
         pass
 
 
 class LocalFileBackend(CacheStorageBackend):
     """
-    本地文件存储后端（异步）
+    本地文件存储后端
     
     存储位置：instances/xxx/.cache/
     """
@@ -127,28 +107,26 @@ class LocalFileBackend(CacheStorageBackend):
         """获取缓存文件路径"""
         return self.cache_dir / f"{key}.json"
     
-    async def save(self, key: str, data: Dict[str, Any]) -> bool:
-        """保存到本地 JSON 文件（异步）"""
+    def save(self, key: str, data: Dict[str, Any]) -> bool:
+        """保存到本地 JSON 文件"""
         try:
             path = self._get_path(key)
-            content = json.dumps(data, ensure_ascii=False, indent=2)
-            async with aiofiles.open(path, 'w', encoding='utf-8') as f:
-                await f.write(content)
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
             logger.debug(f"💾 已保存缓存: {path}")
             return True
         except Exception as e:
             logger.error(f"❌ 保存缓存失败: {e}")
             return False
     
-    async def load(self, key: str) -> Optional[Dict[str, Any]]:
-        """从本地 JSON 文件加载（异步）"""
+    def load(self, key: str) -> Optional[Dict[str, Any]]:
+        """从本地 JSON 文件加载"""
         try:
             path = self._get_path(key)
             if not path.exists():
                 return None
-            async with aiofiles.open(path, 'r', encoding='utf-8') as f:
-                content = await f.read()
-                return json.loads(content)
+            with open(path, 'r', encoding='utf-8') as f:
+                return json.load(f)
         except Exception as e:
             logger.error(f"❌ 加载缓存失败: {e}")
             return None
@@ -157,7 +135,7 @@ class LocalFileBackend(CacheStorageBackend):
         """检查本地文件是否存在"""
         return self._get_path(key).exists()
     
-    async def delete(self, key: str) -> bool:
+    def delete(self, key: str) -> bool:
         """删除本地缓存文件"""
         try:
             path = self._get_path(key)
@@ -312,6 +290,7 @@ class InstancePromptCache:
         # 🆕 V5.5: 从 .cache 目录推断实例路径并初始化 PromptResultsWriter
         self._instance_path = self._cache_dir.parent
         
+        from core.prompt.prompt_results_writer import PromptResultsWriter
         self._prompt_results_writer = PromptResultsWriter(self._instance_path)
         
         logger.debug(f"📁 设置缓存目录: {cache_dir}")
@@ -387,16 +366,11 @@ class InstancePromptCache:
             # 🆕 V5.5: 优先从 prompt_results/ 加载（运营可编辑版本）
             if not force_refresh and self._prompt_results_writer:
                 disk_start = time.time()
-                if await self._try_load_from_prompt_results():
+                if self._try_load_from_prompt_results():
                     self.metrics.disk_hits += 1
                     self.metrics.disk_load_time_ms = (time.time() - disk_start) * 1000
                     self.metrics.load_time_ms = (time.time() - start_time) * 1000
                     self.is_loaded = True
-                    
-                    # 🆕 V7.10: 从磁盘加载后也要应用 config.yaml 的覆盖配置
-                    # 确保 thinking_mode 等运行时配置生效
-                    if config:
-                        self._merge_config_overrides(config)
                     
                     logger.info(f"✅ 从 prompt_results/ 加载: {self.instance_name}")
                     logger.info(f"   加载耗时: {self.metrics.disk_load_time_ms:.0f}ms")
@@ -408,7 +382,7 @@ class InstancePromptCache:
             # 🆕 V5.0: 尝试从 .cache/ 磁盘加载缓存（fallback）
             if not force_refresh and self._storage_backend:
                 disk_start = time.time()
-                if await self._try_load_from_disk(combined_hash):
+                if self._try_load_from_disk(combined_hash):
                     self.metrics.disk_hits += 1
                     self.metrics.disk_load_time_ms = (time.time() - disk_start) * 1000
                     self.metrics.load_time_ms = (time.time() - start_time) * 1000
@@ -440,7 +414,7 @@ class InstancePromptCache:
                 
                 # 🆕 V5.0: 同时写入 .cache/ 磁盘缓存
                 if self._storage_backend:
-                    await self._save_to_disk(combined_hash)
+                    self._save_to_disk(combined_hash)
                 
                 logger.info(f"✅ InstancePromptCache 加载完成: {self.instance_name}")
                 logger.info(f"   LLM 分解生成: {self.metrics.llm_analysis_time_ms:.0f}ms")
@@ -458,9 +432,9 @@ class InstancePromptCache:
     # 🆕 V5.5: prompt_results/ 目录加载和保存
     # ============================================================
     
-    async def _try_load_from_prompt_results(self) -> bool:
+    def _try_load_from_prompt_results(self) -> bool:
         """
-        🆕 V5.5: 尝试从 prompt_results/ 加载（异步版本）
+        🆕 V5.5: 尝试从 prompt_results/ 加载
         
         优先使用运营手动编辑的版本
         
@@ -471,12 +445,12 @@ class InstancePromptCache:
             return False
         
         try:
-            # 检查是否需要重新生成（异步调用）
-            regen_flags = await self._prompt_results_writer.should_regenerate()
+            # 检查是否需要重新生成
+            regen_flags = self._prompt_results_writer.should_regenerate()
             
             # 如果所有文件都不需要重新生成，直接加载
             if not any(regen_flags.values()):
-                existing = await self._prompt_results_writer.load_existing()
+                existing = self._prompt_results_writer.load_existing()
                 if existing:
                     self._load_from_prompt_results(existing)
                     logger.debug(f"📂 从 prompt_results/ 加载完成（无需更新）")
@@ -484,7 +458,7 @@ class InstancePromptCache:
             
             # 如果部分文件需要重新生成，先加载现有的（保护手动编辑的）
             if self._prompt_results_writer.is_valid():
-                existing = await self._prompt_results_writer.load_existing()
+                existing = self._prompt_results_writer.load_existing()
                 if existing:
                     # 只加载不需要重新生成的部分
                     self._load_partial_from_prompt_results(existing, regen_flags)
@@ -500,12 +474,16 @@ class InstancePromptCache:
     
     def _load_from_prompt_results(self, results) -> None:
         """从 PromptResults 加载到内存"""
+        from core.prompt.prompt_results_writer import PromptResults
+        
         # 加载 AgentSchema
         if results.agent_schema:
+            from core.schemas import AgentSchema
             try:
                 self.agent_schema = AgentSchema(**results.agent_schema)
             except Exception as e:
                 logger.warning(f"⚠️ AgentSchema 加载失败: {e}，使用默认")
+                from core.schemas import DEFAULT_AGENT_SCHEMA
                 self.agent_schema = DEFAULT_AGENT_SCHEMA
         
         # 加载场景化提示词
@@ -515,12 +493,16 @@ class InstancePromptCache:
         self.system_prompt_complex = results.complex_prompt
         
         # 创建简单的 PromptSchema
+        from core.prompt import PromptSchema
         self.prompt_schema = PromptSchema(raw_prompt=self._raw_prompt)
     
     def _load_partial_from_prompt_results(self, results, regen_flags: Dict[str, bool]) -> None:
         """部分加载（保护手动编辑的文件）"""
+        from core.prompt.prompt_results_writer import PromptResults
+        
         # 加载 AgentSchema（如果不需要重新生成）
         if not regen_flags.get("agent_schema", True) and results.agent_schema:
+            from core.schemas import AgentSchema
             try:
                 self.agent_schema = AgentSchema(**results.agent_schema)
             except Exception:
@@ -591,6 +573,13 @@ class InstancePromptCache:
         
         每个任务独立执行，避免单次任务过重导致超时
         """
+        from core.prompt.framework_rules import (
+            get_intent_prompt_template,
+            get_simple_prompt_template,
+            get_medium_prompt_template,
+            get_complex_prompt_template,
+        )
+        
         logger.info("   📋 开始分解 LLM 任务...")
         
         # 检查哪些需要重新生成
@@ -598,7 +587,7 @@ class InstancePromptCache:
                        "simple_prompt": True, "medium_prompt": True, "complex_prompt": True}
         
         if self._prompt_results_writer:
-            regen_flags = await self._prompt_results_writer.should_regenerate()
+            regen_flags = self._prompt_results_writer.should_regenerate()
         
         # Task 1: 生成 AgentSchema
         if regen_flags.get("agent_schema", True) or not self.agent_schema:
@@ -641,6 +630,7 @@ class InstancePromptCache:
             logger.info("   Task 5/5: 复杂任务提示词（已存在，跳过）")
         
         # 创建 PromptSchema
+        from core.prompt import PromptSchema
         self.prompt_schema = PromptSchema(raw_prompt=raw_prompt)
         
         logger.info("   ✅ 所有分解任务完成")
@@ -651,6 +641,11 @@ class InstancePromptCache:
         
         🆕 V6.1: 如果 AgentSchema 已生成，注入能力摘要确保意图分类与 Agent 能力一致
         """
+        from core.prompt.framework_rules import get_intent_prompt_template
+        from core.llm import create_llm_service
+        from core.llm.base import Message
+        from config.llm_config import get_llm_profile
+        
         try:
             # 获取 LLM Profile
             try:
@@ -733,6 +728,11 @@ class InstancePromptCache:
     
     async def _generate_simple_prompt_decomposed(self, raw_prompt: str):
         """生成简单任务提示词（分解任务）"""
+        from core.prompt.framework_rules import get_simple_prompt_template
+        from core.llm import create_llm_service
+        from core.llm.base import Message
+        from config.llm_config import get_llm_profile
+        
         try:
             try:
                 profile = get_llm_profile("prompt_decomposer")
@@ -762,6 +762,11 @@ class InstancePromptCache:
     
     async def _generate_medium_prompt_decomposed(self, raw_prompt: str):
         """生成中等任务提示词（分解任务）"""
+        from core.prompt.framework_rules import get_medium_prompt_template
+        from core.llm import create_llm_service
+        from core.llm.base import Message
+        from config.llm_config import get_llm_profile
+        
         try:
             try:
                 profile = get_llm_profile("prompt_decomposer")
@@ -789,6 +794,11 @@ class InstancePromptCache:
     
     async def _generate_complex_prompt_decomposed(self, raw_prompt: str):
         """生成复杂任务提示词（分解任务）"""
+        from core.prompt.framework_rules import get_complex_prompt_template
+        from core.llm import create_llm_service
+        from core.llm.base import Message
+        from config.llm_config import get_llm_profile
+        
         try:
             try:
                 profile = get_llm_profile("prompt_decomposer")
@@ -818,9 +828,9 @@ class InstancePromptCache:
     # 🆕 V5.0: 磁盘持久化方法
     # ============================================================
     
-    async def _try_load_from_disk(self, expected_hash: str) -> bool:
+    def _try_load_from_disk(self, expected_hash: str) -> bool:
         """
-        尝试从磁盘加载缓存（异步）
+        尝试从磁盘加载缓存
         
         Args:
             expected_hash: 期望的内容哈希（用于验证缓存有效性）
@@ -833,7 +843,7 @@ class InstancePromptCache:
         
         try:
             # 1. 加载并验证缓存元数据
-            meta_data = await self._storage_backend.load(self.CACHE_KEY_META)
+            meta_data = self._storage_backend.load(self.CACHE_KEY_META)
             if not meta_data:
                 logger.debug("📁 缓存元数据不存在")
                 return False
@@ -851,7 +861,7 @@ class InstancePromptCache:
                 return False
             
             # 2. 加载提示词缓存
-            prompt_data = await self._storage_backend.load(self.CACHE_KEY_PROMPTS)
+            prompt_data = self._storage_backend.load(self.CACHE_KEY_PROMPTS)
             if not prompt_data:
                 logger.debug("📁 提示词缓存不存在")
                 return False
@@ -862,7 +872,7 @@ class InstancePromptCache:
             self.intent_prompt = prompt_data.get("intent_prompt")
             
             # 3. 加载 AgentSchema 缓存
-            schema_data = await self._storage_backend.load(self.CACHE_KEY_SCHEMA)
+            schema_data = self._storage_backend.load(self.CACHE_KEY_SCHEMA)
             if schema_data:
                 from core.schemas import AgentSchema
                 try:
@@ -883,9 +893,9 @@ class InstancePromptCache:
             logger.warning(f"⚠️ 从磁盘加载缓存失败: {e}")
             return False
     
-    async def _save_to_disk(self, combined_hash: str) -> bool:
+    def _save_to_disk(self, combined_hash: str) -> bool:
         """
-        保存缓存到磁盘（异步）
+        保存缓存到磁盘
         
         Args:
             combined_hash: 内容组合哈希
@@ -905,7 +915,7 @@ class InstancePromptCache:
                 created_at=datetime.now().isoformat(),
                 version="5.0",
             )
-            await self._storage_backend.save(self.CACHE_KEY_META, meta.to_dict())
+            self._storage_backend.save(self.CACHE_KEY_META, meta.to_dict())
             
             # 2. 保存提示词缓存
             prompt_data = {
@@ -914,14 +924,14 @@ class InstancePromptCache:
                 "system_prompt_complex": self.system_prompt_complex,
                 "intent_prompt": self.intent_prompt,
             }
-            await self._storage_backend.save(self.CACHE_KEY_PROMPTS, prompt_data)
+            self._storage_backend.save(self.CACHE_KEY_PROMPTS, prompt_data)
             
             # 3. 保存 AgentSchema 缓存
             if self.agent_schema:
                 try:
                     # AgentSchema 是 dataclass，需要转换为 dict
                     schema_dict = self._agent_schema_to_dict(self.agent_schema)
-                    await self._storage_backend.save(self.CACHE_KEY_SCHEMA, schema_dict)
+                    self._storage_backend.save(self.CACHE_KEY_SCHEMA, schema_dict)
                 except Exception as e:
                     logger.warning(f"⚠️ AgentSchema 序列化失败: {e}")
             
@@ -987,9 +997,9 @@ class InstancePromptCache:
                 "model": getattr(schema, 'model', None),
             }
     
-    async def clear_disk_cache(self) -> bool:
+    def clear_disk_cache(self) -> bool:
         """
-        清除磁盘缓存（异步）
+        清除磁盘缓存
         
         Returns:
             是否成功清除
@@ -998,9 +1008,9 @@ class InstancePromptCache:
             return False
         
         try:
-            await self._storage_backend.delete(self.CACHE_KEY_META)
-            await self._storage_backend.delete(self.CACHE_KEY_PROMPTS)
-            await self._storage_backend.delete(self.CACHE_KEY_SCHEMA)
+            self._storage_backend.delete(self.CACHE_KEY_META)
+            self._storage_backend.delete(self.CACHE_KEY_PROMPTS)
+            self._storage_backend.delete(self.CACHE_KEY_SCHEMA)
             logger.info(f"🧹 已清除磁盘缓存: {self.instance_name}")
             return True
         except Exception as e:
@@ -1049,6 +1059,7 @@ class InstancePromptCache:
         logger.info(f"   ✅ 提示词长度: {len(merged_prompt):,} 字符")
         
         # Step 2: 解析 PromptSchema（使用合并后的提示词）
+        from core.prompt.prompt_layer import PromptParser
         logger.info("   Step 2: 解析 PromptSchema...")
         self.prompt_schema = await PromptParser.parse_async(merged_prompt, use_llm=True)
         logger.info(f"   PromptSchema: {self.prompt_schema.agent_name} ({len(self.prompt_schema.modules)} 模块)")
@@ -1069,15 +1080,15 @@ class InstancePromptCache:
         
         核心哲学：规则写在高质量 Prompt 里，不写在代码里
         """
+        from core.agent.factory import AgentFactory
+        from core.schemas import DEFAULT_AGENT_SCHEMA
+        
         # 🆕 V5.0: 应用级重试配置
         max_retries = 2
         retry_delay = 1.0  # 秒
         
         for attempt in range(max_retries + 1):
             try:
-                # 延迟导入 AgentFactory，避免循环依赖
-                from core.agent.factory import AgentFactory
-                
                 # 调用 LLM 生成 Schema（使用高质量 Prompt + few-shot）
                 self.agent_schema = await AgentFactory._generate_schema(raw_prompt)
                 
@@ -1110,50 +1121,12 @@ class InstancePromptCache:
             if "plan_manager_enabled" in agent_config:
                 self.agent_schema.plan_manager.enabled = agent_config["plan_manager_enabled"]
         
-        # 合并 prompts 配置（必须在 thinking_mode 之前，验证器依赖它）
-        prompts_config = config.get("prompts", {})
-        logger.debug(f"📋 config keys: {list(config.keys())}, prompts_config: {bool(prompts_config)}")
-        if prompts_config:
-            from core.schemas.validator import PromptsConfig, PrefaceConfig, SimulatedThinkingConfig
-            
-            # 构建 PromptsConfig
-            preface_cfg = prompts_config.get("preface")
-            simulated_thinking_cfg = prompts_config.get("simulated_thinking")
-            
-            preface = None
-            if preface_cfg:
-                preface = PrefaceConfig(
-                    enabled=preface_cfg.get("enabled", True),
-                    max_tokens=preface_cfg.get("max_tokens", 150),
-                    template=preface_cfg.get("template", "")
-                )
-            
-            simulated_thinking = None
-            if simulated_thinking_cfg:
-                simulated_thinking = SimulatedThinkingConfig(
-                    system=simulated_thinking_cfg.get("system", ""),
-                    template=simulated_thinking_cfg.get("template", "")
-                )
-            
-            self.agent_schema.prompts = PromptsConfig(
-                preface=preface,
-                simulated_thinking=simulated_thinking
-            )
-            logger.info("📝 prompts 配置已应用")
-        
-        # 合并 LLM 超参数（thinking_mode 必须在 prompts 之后）
+        # 合并 LLM 超参数
         llm_config = agent_config.get("llm", {})
-        if llm_config:
-            # 处理 thinking_mode（直接在 AgentSchema 上）
-            if "thinking_mode" in llm_config:
-                self.agent_schema.thinking_mode = llm_config["thinking_mode"]
-                logger.info(f"🧠 thinking_mode 配置已应用: {llm_config['thinking_mode']}")
-            
-            # 处理其他 LLM 配置（如果有 llm_config 属性）
-            if hasattr(self.agent_schema, 'llm_config'):
-                for key, value in llm_config.items():
-                    if key != "thinking_mode" and hasattr(self.agent_schema.llm_config, key):
-                        setattr(self.agent_schema.llm_config, key, value)
+        if llm_config and hasattr(self.agent_schema, 'llm_config'):
+            for key, value in llm_config.items():
+                if hasattr(self.agent_schema.llm_config, key):
+                    setattr(self.agent_schema.llm_config, key, value)
     
     async def _generate_all_prompts(self):
         """
@@ -1161,6 +1134,8 @@ class InstancePromptCache:
         
         基于 LLM 智能合并后的提示词，按复杂度裁剪生成三个版本
         """
+        from core.prompt import generate_prompt, TaskComplexity
+        
         if not self.prompt_schema:
             logger.warning("⚠️ PromptSchema 未加载，跳过提示词生成")
             return
@@ -1199,6 +1174,8 @@ class InstancePromptCache:
     
     async def _generate_intent_prompt(self):
         """生成意图识别提示词"""
+        from core.prompt.intent_prompt_generator import IntentPromptGenerator
+        
         if self.prompt_schema:
             # 从 PromptSchema 动态生成（用户配置优先）
             self.intent_prompt = IntentPromptGenerator.generate(self.prompt_schema)
@@ -1214,6 +1191,10 @@ class InstancePromptCache:
         
         🆕 V5.1: 即使 fallback 也要生成合理大小的提示词版本
         """
+        from core.prompt import PromptSchema
+        from core.schemas import DEFAULT_AGENT_SCHEMA
+        from prompts.intent_recognition_prompt import get_intent_recognition_prompt
+        
         logger.warning("⚠️ 使用 fallback 加载")
         
         # 使用最简单的配置
@@ -1332,6 +1313,8 @@ class InstancePromptCache:
         Returns:
             对应版本的系统提示词
         """
+        from core.prompt import TaskComplexity
+        
         if not self.is_loaded:
             logger.warning("⚠️ 缓存未加载，返回空字符串")
             return ""
@@ -1371,9 +1354,14 @@ class InstancePromptCache:
         # 3. 追加运行时上下文
         apis_prompt = self.runtime_context.get("apis_prompt", "")
         framework_prompt = self.runtime_context.get("framework_prompt", "")
+        environment_prompt = self.runtime_context.get("environment_prompt", "")  # 🆕 V6.0
         
         # 组装完整提示词
         parts = [base_prompt]
+        
+        # 🆕 V6.0: 环境信息优先注入（让 Agent 了解运行环境）
+        if environment_prompt:
+            parts.append(f"\n\n---\n\n{environment_prompt}")
         
         if apis_prompt:
             parts.append(f"\n\n---\n\n{apis_prompt}")
@@ -1383,7 +1371,8 @@ class InstancePromptCache:
         
         full_prompt = "".join(parts)
         
-        logger.debug(f"✅ 组装完整系统提示词: 缓存={len(base_prompt)} + 运行时={len(apis_prompt) + len(framework_prompt)} = {len(full_prompt)} 字符")
+        runtime_len = len(apis_prompt) + len(framework_prompt) + len(environment_prompt)
+        logger.debug(f"✅ 组装完整系统提示词: 缓存={len(base_prompt)} + 运行时={runtime_len} = {len(full_prompt)} 字符")
         
         return full_prompt
     
@@ -1398,6 +1387,7 @@ class InstancePromptCache:
             return self.intent_prompt
         
         # fallback 到默认
+        from prompts.intent_recognition_prompt import get_intent_recognition_prompt
         return get_intent_recognition_prompt()
     
     def get_cached_system_blocks(
@@ -1455,7 +1445,7 @@ class InstancePromptCache:
             })
             logger.debug(f"📦 Layer 2 (实例提示词): {len(instance_prompt)} 字符")
         
-        # Layer 3: Skills + 工具定义
+        # Layer 3: APIs + 工具定义
         # 工具更新 → 重启 → 运行期稳定
         # 优先使用传入的 tools_context，否则使用 runtime_context 中的 apis_prompt
         tools_text = tools_context or self.runtime_context.get("apis_prompt", "")
@@ -1465,7 +1455,18 @@ class InstancePromptCache:
                 "text": tools_text
                 # 🔧 不在这里添加 cache_control，统一在最后一个 block 添加
             })
-            logger.debug(f"📦 Layer 3 (Skills+工具): {len(tools_text)} 字符")
+            logger.debug(f"📦 Layer 3 (APIs+工具): {len(tools_text)} 字符")
+        
+        # 🆕 Layer 3.5: Skills Prompt（借鉴 clawdbot 的 prompt_injection 机制）
+        # 将 <available_skills> XML 注入到提示词，Agent 通过 read 工具读取 SKILL.md
+        skills_prompt = self.runtime_context.get("skills_prompt", "")
+        if skills_prompt:
+            system_blocks.append({
+                "type": "text",
+                "text": skills_prompt
+                # 🔧 不在这里添加 cache_control，统一在最后一个 block 添加
+            })
+            logger.debug(f"📦 Layer 3.5 (Skills Prompt): {len(skills_prompt)} 字符")
         
         # Layer 4: Mem0 用户画像（不缓存）
         # 基于语义检索，每次 query 不同 → 结果不同 → 不能缓存

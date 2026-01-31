@@ -262,7 +262,7 @@ curl http://localhost:8000/metrics
 
 - [ ] 已阅读对应的部署文档
 - [ ] API Keys 已准备并验证
-- [ ] 数据库方案已选择（推荐 PostgreSQL）
+- [ ] 数据库方案已选择（SQLite/PostgreSQL）
 - [ ] Redis 已配置
 - [ ] 存储方案已确定（本地/S3/OSS）
 - [ ] 日志收集已配置

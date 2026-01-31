@@ -83,7 +83,8 @@ slidespeak_render: 1 # SlideSpeak 渲染
 # 核心工具（建议始终启用）
 plan_todo: 1                    # 任务规划
 api_calling: 1                  # API 调用
-hitl: 1                         # HITL (Human-in-the-Loop)
+request_human_confirmation: 1   # 人工确认
+file_read: 1                    # 文件读取
 code_execution: 1               # 代码执行
 ```
 
@@ -185,7 +186,7 @@ instance:
 
 enabled_capabilities:
   plan_todo: 1
-  hitl: 1
+  request_human_confirmation: 1
   web_search: 1
   knowledge_search: 1
   # 其他工具全部禁用（不列出）
@@ -212,7 +213,7 @@ enabled_capabilities:
   
   # 核心工具
   plan_todo: 1
-  # file_read 已删除，请使用 sandbox_read_file
+  file_read: 1
   
   # 信息获取
   web_search: 1
@@ -331,7 +332,7 @@ def filter_by_enabled(
 enabled_capabilities:
   web_search: 1
   plan_todo: 1
-  # file_read 已删除，请使用 sandbox_read_file
+  file_read: 1
 
 # ❌ 不推荐：启用所有工具
 enabled_capabilities:
@@ -348,8 +349,8 @@ enabled_capabilities:
 ```yaml
 enabled_capabilities:
   plan_todo: 1                    # 任务规划
-  hitl: 1                         # HITL (Human-in-the-Loop)
-  # file_read 已删除，请使用 sandbox_read_file
+  request_human_confirmation: 1   # 人工确认
+  file_read: 1                    # 文件读取
 ```
 
 ### 3. 根据场景分组
@@ -381,11 +382,11 @@ cp instances/_template/config.yaml instances/my-agent/config.yaml
 
 ```
 🔧 开始加载工具...
-   📋 已启用 2 个通用工具
-   启用: web_search, plan_todo
+   📋 已启用 3 个通用工具
+   启用: web_search, plan_todo, file_read
 📊 工具加载摘要
-  通用工具: 2 个
-    启用: web_search, plan_todo
+  通用工具: 3 个
+    启用: web_search, plan_todo, file_read
   MCP 工具: 1 个
     列表: dify_flowchart
   Claude Skills: 0 个

@@ -66,7 +66,7 @@
 ```python
 # ❌ 问题 1：工具返回完整内容
 # tools/file_operations.py
-async def sandbox_read_file(path: str) -> dict:
+async def file_read(path: str) -> dict:
     content = read_file(path)
     return {
         "success": True,
@@ -157,8 +157,8 @@ class ResultCompactor:
                 result_type="file",
                 strategy=CompactionStrategy.REFERENCE
             ),
-            "sandbox_read_file": CompactionRule(
-                tool_name="sandbox_read_file",
+            "file_read": CompactionRule(
+                tool_name="file_read",
                 result_type="file",
                 strategy=CompactionStrategy.TRUNCATE,
                 max_size=5000  # 只保留前 5000 字符
@@ -356,7 +356,7 @@ class ResultCompactor:
     ) -> str:
         """生成访问提示"""
         if tool_name == "file_write" and "path" in result:
-            return f"Use sandbox_read_file('{result['path']}') to access full content if needed"
+            return f"Use file_read('{result['path']}') to access full content if needed"
         elif tool_name == "browser_navigate" and "url" in result:
             return f"Revisit {result['url']} if needed"
         return "Content available on request"
@@ -449,13 +449,13 @@ Turn 1:
       "key_metrics": {"avg_sales": 12345}  # 只保留关键指标
     },
     "reference": "file:///data/sales_analysis.json",
-    "access_hint": "Use sandbox_read_file('/data/sales_analysis.json') for full stats"
+    "access_hint": "Use file_read('/data/sales_analysis.json') for full stats"
   }  # 只占用 500 bytes
 
 Turn 2:
   User: "生成可视化图表"
   # Context 清爽，LLM 专注于当前任务
-  # 需要完整数据时会主动调用 sandbox_read_file
+  # 需要完整数据时会主动调用 file_read
 ```
 
 ### 搜索工具专项优化：Exa/Tavily
@@ -839,7 +839,7 @@ class MultiAgentCoordinator:
 │  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │
 │  • 标准 Claude Tool Use                                                     │
 │  • Schema-safe，类型检查                                                    │
-│  • 高频使用（plan_todo, sandbox_read_file, web_search）                    │
+│  • 高频使用（plan_todo, file_read, web_search）                            │
 │  • ⚠️ 问题：每次修改都会破坏 cache                                          │
 │  • ⚠️ 问题：工具太多会导致 confusion                                        │
 │                                                                              │
@@ -969,7 +969,7 @@ You have access to tools at different abstraction levels. Choose wisely:
 
 ### Level 1: Direct Function Calls（优先使用）
 - Use for: Single, well-defined operations
-- Examples: `plan_todo.create_plan()`, `sandbox_read_file()`, `web_search()`
+- Examples: `plan_todo.create_plan()`, `file_read()`, `web_search()`
 - Advantage: Fast, schema-safe, immediate feedback
 
 ### Level 2: Shell Utilities（数据处理）

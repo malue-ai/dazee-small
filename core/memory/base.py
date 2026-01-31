@@ -66,7 +66,7 @@ class BaseMemory(ABC):
     所有 Memory 实现都应该继承此类
     """
     
-    def __init__(self, config: Optional[MemoryConfig] = None) -> None:
+    def __init__(self, config: Optional[MemoryConfig] = None):
         self.config = config or MemoryConfig()
         self._created_at = datetime.now()
     
@@ -81,7 +81,7 @@ class BaseMemory(ABC):
         return self.config.backend
     
     @abstractmethod
-    def clear(self) -> None:
+    def clear(self):
         """清空记忆"""
         pass
     

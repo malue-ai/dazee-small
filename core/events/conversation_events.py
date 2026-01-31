@@ -13,9 +13,7 @@ conversation_delta 统一结构：
 - metadata   : 元数据   {"metadata": {...}}
 - compressed : 压缩通知 {"compressed": {...}}
 
-注意：
-- 快捷方法在 broadcaster 中，这里只提供核心 3 个事件
-- 序号（seq）由 EventBroadcaster 层统一生成
+注意：快捷方法在 broadcaster 中，这里只提供核心 3 个事件
 """
 
 from typing import Dict, Any, Optional
@@ -29,34 +27,22 @@ class ConversationEventManager(BaseEventManager):
     
     核心 3 个事件：start / delta / stop
     快捷方法（emit_title_update, emit_plan_update 等）在 broadcaster 中
-    
-    注意：推荐通过 EventBroadcaster 调用，由其统一生成 seq
     """
     
     async def emit_conversation_start(
         self,
         session_id: str,
-        conversation_id: str,
-        conversation: Dict[str, Any],
-        seq: Optional[int] = None,
-        event_uuid: Optional[str] = None,
-        output_format: str = "zenflux",
-        adapter: Any = None
-    ) -> Optional[Dict[str, Any]]:
+        conversation: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """
         发送 conversation_start 事件
         
         Args:
             session_id: Session ID
-            conversation_id: 对话 ID（必填）
             conversation: Conversation 完整数据
-            seq: 事件序号（可选，来自 EventBroadcaster）
-            event_uuid: 事件 UUID（可选）
-            output_format: 输出格式（zenflux/zeno），默认 zenflux
-            adapter: 格式转换适配器（可选）
             
         Returns:
-            事件对象，如果被过滤则返回 None
+            事件对象
         """
         event = self._create_event(
             event_type="conversation_start",
@@ -69,23 +55,14 @@ class ConversationEventManager(BaseEventManager):
             }
         )
         
-        return await self._send_event(
-            session_id, event,
-            conversation_id=conversation_id,
-            seq=seq, event_uuid=event_uuid,
-            output_format=output_format, adapter=adapter
-        )
+        return await self._send_event(session_id, event)
     
     async def emit_conversation_delta(
         self,
         session_id: str,
         conversation_id: str,
-        delta: Dict[str, Any],
-        seq: Optional[int] = None,
-        event_uuid: Optional[str] = None,
-        output_format: str = "zenflux",
-        adapter: Any = None
-    ) -> Optional[Dict[str, Any]]:
+        delta: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """
         发送 conversation_delta 事件
         
@@ -93,13 +70,9 @@ class ConversationEventManager(BaseEventManager):
             session_id: Session ID
             conversation_id: 对话ID
             delta: 增量更新数据，直接用字段名作为 key
-            seq: 事件序号（可选）
-            event_uuid: 事件 UUID（可选）
-            output_format: 输出格式（zenflux/zeno），默认 zenflux
-            adapter: 格式转换适配器（可选）
             
         Returns:
-            事件对象，如果被过滤则返回 None
+            事件对象
             
         事件结构：
             {
@@ -124,39 +97,26 @@ class ConversationEventManager(BaseEventManager):
             data=data
         )
         
-        return await self._send_event(
-            session_id, event,
-            conversation_id=conversation_id,
-            seq=seq, event_uuid=event_uuid,
-            output_format=output_format, adapter=adapter
-        )
+        return await self._send_event(session_id, event)
     
     async def emit_conversation_stop(
         self,
         session_id: str,
         conversation_id: str,
         final_status: str,
-        summary: Optional[Dict[str, Any]] = None,
-        seq: Optional[int] = None,
-        event_uuid: Optional[str] = None,
-        output_format: str = "zenflux",
-        adapter: Any = None
-    ) -> Optional[Dict[str, Any]]:
+        summary: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         """
         发送 conversation_stop 事件
         
         Args:
             session_id: Session ID
-            conversation_id: 对话 ID（必填）
+            conversation_id: 对话ID
             final_status: 最终状态（completed/stopped/failed）
             summary: 会话摘要（可选）
-            seq: 事件序号（可选）
-            event_uuid: 事件 UUID（可选）
-            output_format: 输出格式（zenflux/zeno），默认 zenflux
-            adapter: 格式转换适配器（可选）
             
         Returns:
-            事件对象，如果被过滤则返回 None
+            事件对象
         """
         event = self._create_event(
             event_type="conversation_stop",
@@ -167,9 +127,4 @@ class ConversationEventManager(BaseEventManager):
             }
         )
         
-        return await self._send_event(
-            session_id, event,
-            conversation_id=conversation_id,
-            seq=seq, event_uuid=event_uuid,
-            output_format=output_format, adapter=adapter
-        )
+        return await self._send_event(session_id, event)

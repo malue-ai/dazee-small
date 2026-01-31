@@ -111,7 +111,7 @@ class E2BMemory:
     ```
     """
     
-    def __init__(self, user_id: Optional[str] = None) -> None:
+    def __init__(self, user_id: Optional[str] = None):
         """
         初始化 E2B 记忆
         
@@ -131,7 +131,7 @@ class E2BMemory:
     
     # ==================== 临时沙箱（会话级） ====================
     
-    def set_session(self, session: E2BSandboxSession) -> None:
+    def set_session(self, session: E2BSandboxSession):
         """设置临时 E2B 沙箱会话"""
         session.persistent = False
         self._temporary_session = session
@@ -148,7 +148,7 @@ class E2BMemory:
             self._temporary_session.status == "active"
         )
     
-    def update_session(self, **kwargs) -> None:
+    def update_session(self, **kwargs):
         """更新临时 E2B 会话信息"""
         if self._temporary_session:
             for key, value in kwargs.items():
@@ -156,7 +156,7 @@ class E2BMemory:
                     setattr(self._temporary_session, key, value)
             self._temporary_session.last_used = datetime.now()
     
-    def clear_session(self) -> None:
+    def clear_session(self):
         """清除临时 E2B 会话（终止沙箱）"""
         if self._temporary_session:
             logger.info(f"[E2BMemory] 临时会话已清除: {self._temporary_session.sandbox_id}")
@@ -331,13 +331,13 @@ class E2BMemory:
     
     # ==================== 清理 ====================
     
-    def clear_temporary(self) -> None:
+    def clear_temporary(self):
         """清空临时沙箱和执行历史"""
         self.clear_session()
         self.execution_history.clear()
         logger.debug("[E2BMemory] 临时数据已清空")
     
-    def clear_all(self) -> None:
+    def clear_all(self):
         """清空所有 E2B 记忆（包括持久沙箱）"""
         self.clear_session()
         self._persistent_sandboxes.clear()

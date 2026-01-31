@@ -15,13 +15,12 @@ ResultCompactor - 工具结果精简器
 """
 
 import json
+import logging
 from typing import Dict, Any, Optional, Callable, List
 from dataclasses import dataclass
 from enum import Enum
 
-from logger import get_logger
-
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class CompactionStrategy(Enum):
@@ -454,7 +453,7 @@ class ResultCompactor:
     ) -> str:
         """生成访问提示"""
         if tool_name == "file_write" and "path" in result:
-            return f"Use sandbox_read_file('{result['path']}') to access full content if needed"
+            return f"Use file_read('{result['path']}') to access full content if needed"
         elif tool_name == "browser_navigate" and "url" in result:
             return f"Revisit {result['url']} if needed"
         return "Content available on request"

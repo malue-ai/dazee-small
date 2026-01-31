@@ -1,3 +1,33 @@
+# ==================== 工具选择配置 ====================
+#
+# 🆕 V10.0: 将硬编码的工具列表移至配置文件
+#
+# 📌 设计原则：
+#   1. 核心工具（core_tools）：始终加载，不受动态选择影响
+#   2. 原生工具（native_tools）：Claude 原生支持的工具
+#   3. 串行工具（serial_only_tools）：不支持并行执行的工具
+#
+tool_selection:
+  # 核心工具（Level 1）- 始终加载
+  # 这些工具是智能体的基础能力，不受任务类型影响
+  core_tools:
+    - plan_todo                      # 任务规划工具
+    - request_human_confirmation     # 人工确认工具
+  
+  # Claude 原生工具 - 直接使用字符串传递给 Claude API
+  # 支持的原生工具：bash, text_editor, web_search
+  # 注意：computer 和 memory 工具需要特殊 beta header，暂不包含
+  native_tools:
+    - bash
+    - text_editor
+    - web_search
+  
+  # 串行执行工具 - 不支持并行调用的工具
+  # 这些工具需要等待用户响应或有状态依赖
+  serial_only_tools:
+    - plan_todo
+    - request_human_confirmation
+
 # ==================== 任务类型 → 能力映射 ====================
 #
 # 📌 设计原则：
@@ -16,7 +46,6 @@ task_type_mappings:
     - news_search          # 新闻搜索
     - academic_search      # 学术搜索
     - market_data          # 市场数据
-    - knowledge_base       # 个人知识库检索
 
   # 内容生成类任务
   content_generation:
@@ -234,6 +263,32 @@ capability_categories:
   description: 代码沙箱执行（框架内部）
   internal: true
 
+# ========== Nodes 本地操作类别（V9.0 新增）==========
+# 借鉴 clawdbot 的 Nodes 架构
+
+- id: nodes_operation
+  category_type: internal
+  description: 节点操作（发现、管理、调用本地/远程节点）
+  internal: true
+  use_when: 需要与本地或远程节点交互
+
+- id: local_automation
+  category_type: business
+  description: 本地系统自动化（macOS/Windows/Linux）
+  use_when: 需要控制本地应用、文件系统、系统功能
+  examples:
+    - 打开应用程序
+    - 控制浏览器
+    - 执行 shell 命令
+    - 发送系统通知
+    - 截取屏幕截图
+
+- id: applescript_execution
+  category_type: internal
+  description: AppleScript 执行（macOS 专用）
+  internal: true
+  use_when: 需要通过 AppleScript 控制 macOS 应用
+
 - id: api_calling
   category_type: internal
   description: API 调用（框架内部通用实现）
@@ -401,32 +456,12 @@ capabilities:
     api_name: ragie
     user_isolation: true
   metadata:
-    description: |
-      🔍 从用户的个人知识库中检索相关信息（专业 RAG 检索）
-      
-      **适用场景**：
-      - 用户询问「我的文档中...」
-      - 需要基于用户上传的资料回答问题
-      - 引用用户的专业文档、笔记、报告等
-      
-      **返回格式**：
-      - 按相关性评分排序的文档片段
-      - 每个片段包含来源文档名称
-      - 自动生成引用标记 [1], [2], [3]
-      - 包含可直接使用的摘要文本
-      
-      **重要提示**：
-      - ✅ 必须基于检索结果回答，禁止编造内容
-      - ✅ 回答时需包含引用标记（如：根据文档[1]...）
-      - ✅ 如果未找到相关内容，明确告知用户
-      
-      每个用户有独立的知识空间，只能检索自己的内容。
+    description: 从用户的个人知识库中检索相关信息（基于 Ragie）
     preferred_for:
     - 查找用户上传的文档
     - 检索个人笔记和资料
     - 搜索历史上传的内容
     - 个人知识回忆
-    - 基于文档回答问题
     keywords:
     - 知识库
     - 个人文档
@@ -434,19 +469,26 @@ capabilities:
     - 搜索
     - 我的文档
     - 上传的资料
-    - RAG
-    note: |
-      特性：
+    note: '特性：
+
       - 每个用户有独立的知识空间（Partition）
+
       - 自动从 WorkingMemory 获取 user_id
+
       - 支持语义搜索和元数据过滤
+
       - 返回格式化的摘要供 LLM 使用
-      - 自动生成引用标记，便于追溯来源
-      
+
+
       使用场景：
+
       - "帮我找一下之前上传的产品文档"
+
       - "我记得有份关于XX的资料"
+
       - "查一下我的笔记里有没有XX"
+
+      '
 - name: api_calling
   type: TOOL
   subtype: CUSTOM
@@ -541,11 +583,33 @@ capabilities:
         type: object
         description: 轮询配置（仅 mode=async_poll 时有效）
     required: []  # api_name 或 url 至少一个，在代码中校验
-- name: tavily_search
+- name: file_read
   type: TOOL
-  subtype: CUSTOM
-  provider: user
-  invocation_hint: DIRECT
+  subtype: NATIVE
+  provider: system
+  capabilities:
+  - file_operations
+  - content_reading
+  priority: 90
+  cost:
+    time: fast
+    money: free
+  constraints:
+    requires_api: false
+  metadata:
+    description: Read file contents from the file system
+  input_schema:
+    type: object
+    properties:
+      path:
+        type: string
+        description: The file path to read
+    required:
+    - path
+- name: web_search
+  type: TOOL
+  subtype: NATIVE
+  provider: system
   level: 2
   cache_stable: true
   compaction:
@@ -554,15 +618,9 @@ capabilities:
     max_size: 3000
     summary_chars: 200
     max_items: 10
-  implementation:
-    module: tools.tavily_search
-    class: TavilySearchTool
   capabilities:
   - information_retrieval
   - web_search
-  - news_search
-  - academic_search
-  - market_data
   priority: 85
   cost:
     time: medium
@@ -570,73 +628,14 @@ capabilities:
   constraints:
     requires_api: true
     requires_network: true
-    api_name: tavily
-    api_key_env: TAVILY_API_KEY
   metadata:
-    description: |
-      使用 Tavily API 进行通用网络搜索。
-      
-      特点：
-      - 通用搜索：快速获取互联网信息
-      - AI 摘要：自动生成搜索结果的智能摘要
-      - 深度搜索：basic（快速）或 advanced（深入）
-      - 域名过滤：可指定包含或排除的域名
-      
-      适用场景：
-      - 快速查询事实信息
-      - 获取最新新闻动态
-      - 搜索产品/公司信息
-      - 通用知识检索
-    preferred_for:
-    - 快速搜索信息
-    - 获取最新新闻
-    - 通用知识检索
-    - 事实查询
-    keywords:
-    - 搜索
-    - search
-    - 查询
-    - 新闻
-    - 信息
-    note: 与 exa_search 互补：tavily_search 适合快速通用搜索，exa_search 适合语义搜索和高质量资源定位
+    description: Search the web for information
   input_schema:
     type: object
     properties:
       query:
         type: string
-        description: 搜索查询（支持自然语言）
-      search_depth:
-        type: string
-        description: 搜索深度：basic（快速）或 advanced（深入，更多结果）
-        enum: [basic, advanced]
-        default: basic
-      max_results:
-        type: integer
-        description: 返回结果数量（默认5，最大20）
-        default: 5
-      include_answer:
-        type: boolean
-        description: 是否包含 AI 生成的摘要答案（默认true）
-        default: true
-      include_raw_content:
-        type: boolean
-        description: 是否包含网页原始内容（默认false，会增加响应大小）
-        default: false
-      include_domains:
-        type: array
-        items:
-          type: string
-        description: 只搜索这些域名（可选），如 ['github.com', 'stackoverflow.com']
-      exclude_domains:
-        type: array
-        items:
-          type: string
-        description: 排除这些域名（可选），如 ['pinterest.com']
-      topic:
-        type: string
-        description: 搜索主题类型：general（通用）或 news（新闻）
-        enum: [general, news]
-        default: general
+        description: The search query string
     required:
     - query
 - name: exa_search
@@ -667,25 +666,7 @@ capabilities:
     requires_network: true
     api_name: exa
   metadata:
-    description: |
-      使用 Exa API 进行高质量的语义搜索。
-      
-      特点：
-      - 语义理解：理解查询意图，返回最相关内容
-      - 网页内容提取：自动提取网页正文内容
-      - 时间过滤：支持按发布时间过滤结果
-      - 分类搜索：支持按类别过滤（papers, news, github等）
-      
-      适用场景：
-      - 学术论文搜索
-      - 深度研究和调研
-      - 高质量资源定位
-      - 语义相关内容发现
-    preferred_for:
-    - 学术论文搜索
-    - 深度研究
-    - 高质量资源定位
-    - 语义搜索
+    description: High-quality semantic search using Exa API with content extraction
     keywords:
     - search
     - research
@@ -694,10 +675,7 @@ capabilities:
     - papers
     - news
     - articles
-    - 搜索
-    - 研究
-    - 语义
-    note: 与 tavily_search 互补：exa_search 适合语义搜索和高质量资源定位，tavily_search 适合快速通用搜索
+    note: 比web_search更强大，支持语义理解和内容提取
   input_schema:
     type: object
     properties:
@@ -706,11 +684,11 @@ capabilities:
         description: 搜索查询（支持自然语言）
       num_results:
         type: integer
-        description: 返回结果数量（默认10，最大10）
+        description: 返回结果数量（1-10，默认10）
         default: 10
       category:
         type: string
-        description: 内容分类（papers/news/github/company/personal_site/pdf/tweet）
+        description: 内容分类过滤
         enum:
         - papers
         - news
@@ -721,7 +699,7 @@ capabilities:
         - tweet
       include_text:
         type: boolean
-        description: 是否包含网页正文内容（默认true）
+        description: 是否包含网页正文内容
         default: true
       start_published_date:
         type: string
@@ -854,7 +832,6 @@ capabilities:
   type: TOOL
   subtype: CUSTOM
   provider: user
-  level: 1  # 🆕 设为核心工具，始终加载
   implementation:
     module: tools.slidespeak
     class: SlideSpeakTool
@@ -870,30 +847,15 @@ capabilities:
     requires_api: true
     api_name: slidespeak
   metadata:
-    description: |
-      使用 SlideSpeak API 渲染高质量 PPT。
-      
-      支持：
-      - 复杂布局（ITEMS, COMPARISON, TIMELINE, BIG_NUMBER, CHART, TABLE, SWOT等）
-      - 自动图片获取
-      - 专业模板应用
-      - 高质量渲染
-      
-      输入：SlideSpeak 配置（包含 slides 数组）
-      输出：PPT 文件下载链接
-    note: 🎨 底层渲染工具，通常由 ppt_generator 内部调用，也可直接使用
-    used_by: ppt_generator
-    preferred_for:
-    - 直接渲染 PPT
-    - 自定义 SlideSpeak 配置
-    - 专业布局控制
+    description: SlideSpeak API rendering tool for professional PPT generation
+    note: 🎨 Generates high-quality presentations with professional layouts and designs
+    used_by: slidespeak-generator
     keywords:
     - ppt
     - presentation
     - slidespeak
     - professional
     - 专业
-    - 渲染
   input_schema:
     type: object
     properties:
@@ -996,86 +958,14 @@ capabilities:
         description: 保存PPT文件的目录路径（可选，默认./workspace/outputs/ppt）
     required:
     - config
-
-- name: nano_banana_image
+- name: request_human_confirmation
   type: TOOL
   subtype: CUSTOM
   provider: user
-  level: 1
-  enabled: true
-  implementation:
-    module: tools.nano_banana_image
-    class: NanoBananaImageTool
-  capabilities:
-  - image_generation
-  - image_editing
-  - image_composition
-  priority: 60
-  cost:
-    time: medium
-    money: low
-  constraints:
-    requires_api: true
-    requires_network: true
-    api_name: gemini
-  metadata:
-    description: |
-      使用 Nano Banana Pro (Gemini 3 Pro Image) 生成或编辑图像。
-      
-      功能：
-      - 纯文本生成：根据提示词生成新图像
-      - 图像编辑：基于现有图像进行修改
-      - 多图合成：最多支持 14 张图像的合成
-      
-      生成后自动上传到 S3，返回预签名 URL。
-    note: 🍌 需要配置 GEMINI_API_KEY 环境变量
-    preferred_for:
-    - AI 图像生成
-    - 图像编辑和修改
-    - 多图合成
-    keywords:
-    - 图像
-    - 图片
-    - 生成
-    - 编辑
-    - 合成
-    - nano banana
-    - gemini
-    - AI
-    - image
-  input_schema:
-    type: object
-    properties:
-      prompt:
-        type: string
-        description: 图像生成/编辑的提示词描述（必需）
-      input_images:
-        type: array
-        items:
-          type: string
-        description: 输入图像的 URL 或本地路径列表（可选，用于编辑/合成，最多 14 张）
-      resolution:
-        type: string
-        enum:
-        - 1K
-        - 2K
-        - 4K
-        default: 1K
-        description: 输出分辨率，默认 1K
-      filename:
-        type: string
-        description: 输出文件名（可选，默认自动生成时间戳格式）
-    required:
-    - prompt
-
-- name: hitl
-  type: TOOL
-  subtype: CUSTOM
-  provider: user
-  level: 1
+  level: 1  # 核心工具，始终启用
   implementation:
     module: tools.request_human_confirmation
-    class: HITLTool
+    class: RequestHumanConfirmationTool
   capabilities:
   - human_interaction
   - confirmation
@@ -1144,71 +1034,40 @@ capabilities:
   input_schema:
     type: object
     properties:
-      type:
+      question:
         type: string
-        enum:
-        - form
-        description: HITL 交互类型（目前仅支持 form）
-        default: form
-      title:
-        type: string
-        description: 表单标题，简要说明本次交互的目的
-      description:
-        type: string
-        description: 表单描述，补充说明或上下文信息
-      questions:
+        description: 要询问用户的问题，应该清晰描述操作内容和影响
+      options:
         type: array
-        description: |
-          问题数组。支持两种问题类型：
-          - single_choice: 单选（包括 yes/no 确认，options 文本可自定义）
-          - multiple_choice: 多选
         items:
-          type: object
-          properties:
-            id:
-              type: string
-              description: 问题唯一标识，用于返回结果的 key
-            label:
-              type: string
-              description: 问题标签/显示文本
-            type:
-              type: string
-              enum:
-              - single_choice
-              - multiple_choice
-              # - text_input  # 暂未支持
-              description: 问题类型
-            options:
-              type: array
-              items:
-                type: string
-              description: 选项列表（single_choice/multiple_choice 必需），文本可自定义如 ["确认删除", "取消操作"]
-            default:
-              type: string
-              description: 默认选中值
-            required:
-              type: boolean
-              description: 是否必填
-              default: true
-            # hint:  # 暂未支持
-            #   type: string
-            #   description: 输入提示/占位符（text_input 用）
-          required:
-          - id
-          - label
-          - type
+          type: string
+        description: 可选项列表，默认 ['confirm', 'cancel']。可以自定义选项如 ['商务风格', '学术风格', '创意风格']
+        default:
+        - confirm
+        - cancel
       timeout:
         type: integer
-        description: 超时时间（秒），默认 120 秒
-        default: 120
+        description: 超时时间（秒），默认 60 秒
+        default: 60
+      confirmation_type:
+        type: string
+        enum:
+        - yes_no
+        - single_choice
+        - multiple_choice
+        - text_input
+        description: 确认类型，默认 yes_no
+        default: yes_no
+      metadata:
+        type: object
+        description: 额外信息，用于前端展示（如操作详情、影响范围等）
     required:
-    - title
-    - questions
+    - question
 - name: plan_todo
   type: TOOL
   subtype: SESSION
-  provider: user
-  invocation_hint: DIRECT
+  provider: system
+  invocation_hint: DIRECT  # 🆕 V4.4: 标准 tool_use，核心规划工具
   level: 1
   cache_stable: true
   implementation:
@@ -1217,35 +1076,71 @@ capabilities:
   capabilities:
   - task_planning
   - progress_tracking
+  - session_memory
   - plan_crud
   - todo_crud
+  - replan
+  - adaptive_planning
   priority: 95
   cost:
-    time: fast
+    time: instant
     money: free
   constraints:
     requires_api: false
     session_scoped: true
   metadata:
-    description: |
-      任务规划工具（纯存储版本）
-      
-      核心操作：
-      - create: 创建计划（传入主模型生成的完整 plan 数据）
-      - update_todo: 更新步骤状态
-      - get: 获取当前计划
-      - add_todo: 动态添加步骤
-      
-      设计原则：
-      - 纯 CRUD 工具，不调用 LLM
-      - plan 内容由主模型直接生成并传入
-      - 本工具只负责存储、查询、更新
+    description: '任务规划工具（智能版本）- 内部调用 Claude + Extended Thinking
+
+
+      核心能力：
+
+      - create_plan: 智能生成任务计划（调用 Claude + Extended Thinking）
+
+      - update_step: 更新步骤状态
+
+      - add_step: 动态添加步骤
+
+      - replan: 🆕 重新生成计划（保留已完成步骤或全量重规划）
+
+      - get_plan: 获取当前计划状态
+
+
+      重新规划（replan）触发场景：
+
+      - 多个步骤连续失败
+
+      - 发现原计划遗漏关键信息
+
+      - 用户需求发生变化
+
+      - 执行过程中发现更优方案
+
+
+      策略选项：
+
+      - incremental: 保留已完成步骤，只重新生成剩余步骤（默认）
+
+      - full: 全量重新生成计划
+
+      '
     keywords:
     - plan
     - todo
     - 计划
     - 任务
     - 进度
+    - replan
+    - 重新规划
+    - 自适应
+    note: 'V4.2.1 新增 replan 能力：
+
+      - Claude 可在 RVR 循环中自主决定是否调用 replan
+
+      - 支持 incremental（增量）和 full（全量）两种重规划策略
+
+      - 最大重规划次数限制：3 次
+
+      '
   input_schema:
     type: object
     properties:
@@ -1253,90 +1148,31 @@ capabilities:
         type: string
         description: 操作类型
         enum:
-        - create
-        - update_todo
-        - get
-        - add_todo
+        - create_plan
+        - update_step
+        - get_plan
+        - add_step
+        - replan
+        - clear
       data:
         type: object
-        description: 操作数据（根据 operation 不同而不同）
+        description: 操作数据
         properties:
-          # create 操作的字段（推荐使用 plan 对象）
-          plan:
-            type: object
-            description: 计划数据（create 时必需）
-            properties:
-              name:
-                type: string
-                description: 计划名称
-              overview:
-                type: string
-                description: 一句话概述
-              detailed_plan:
-                type: string
-                description: 详细 Markdown 文档
-              todos:
-                type: array
-                description: 步骤列表
-                items:
-                  type: object
-                  properties:
-                    id:
-                      type: string
-                      description: 步骤 ID，如 "1", "2"
-                    content:
-                      type: string
-                      description: 步骤描述
-                    status:
-                      type: string
-                      description: 状态（pending/in_progress/completed/failed）
-                      default: pending
-                      enum:
-                      - pending
-                      - in_progress
-                      - completed
-                      - failed
-                    result:
-                      type: string
-                      description: 完成结果说明
-          # 兼容：create 操作的字段（直接传入完整 plan）
-          name:
+          user_query:
             type: string
-            description: 计划名称（create 时必需）
-          overview:
+            description: 用户原始需求（create_plan 时必需）
+          goal:
             type: string
-            description: 一句话概述（create 时可选）
-          detailed_plan:
-            type: string
-            description: 详细 Markdown 文档（create 时可选）
-          todos:
+            description: 任务目标（create_plan 可选，会自动生成）
+          steps:
             type: array
-            description: 步骤列表（create 时必需）
-            items:
-              type: object
-              properties:
-                id:
-                  type: string
-                  description: 步骤 ID，如 "1", "2"
-                content:
-                  type: string
-                  description: 步骤描述
-                status:
-                  type: string
-                  description: 状态（pending/in_progress/completed/failed）
-                  default: pending
-                  enum:
-                  - pending
-                  - in_progress
-                  - completed
-                  - failed
-          # update_todo 操作的字段
-          id:
-            type: string
-            description: todo ID，如 "1"（update_todo 时必需）
+            description: 步骤列表（create_plan 可选，会自动生成）
+          step_index:
+            type: integer
+            description: 步骤索引（update_step 时必需）
           status:
             type: string
-            description: 新状态（update_todo 时必需）
+            description: 步骤状态（update_step 时必需）
             enum:
             - pending
             - in_progress
@@ -1344,79 +1180,19 @@ capabilities:
             - failed
           result:
             type: string
-            description: 完成结果说明（update_todo 时可选）
-          # add_todo 操作的字段
-          content:
+            description: 步骤结果（update_step 时可选）
+          reason:
             type: string
-            description: todo 内容（add_todo 时必需）
-          after:
+            description: 重新规划原因（replan 时必需）
+          strategy:
             type: string
-            description: 插入到哪个 todo 之后（add_todo 时可选）
+            description: 重规划策略（replan 时可选）
+            enum:
+            - full
+            - incremental
+            default: incremental
     required:
     - operation
-- name: send_files
-  type: TOOL
-  subtype: CUSTOM
-  provider: system
-  invocation_hint: DIRECT
-  level: 1  # 核心工具，始终加载
-  cache_stable: false
-  implementation:
-    module: tools.send_files
-    class: SendFilesTool
-  capabilities:
-  - file_sharing
-  - response_enhancement
-  priority: 90
-  cost:
-    time: instant
-    money: free
-  constraints:
-    requires_api: false
-  metadata:
-    description: 发送文件信息到前端，用于展示可下载的文件列表。当工具调用返回了文件URL时使用此工具。
-    preferred_for:
-    - 返回文件下载链接
-    - 展示生成的文件
-    - 文件列表展示
-    keywords:
-    - 文件
-    - 下载
-    - file
-    - download
-  input_schema:
-    type: object
-    properties:
-      files:
-        type: array
-        description: 文件列表
-        items:
-          type: object
-          properties:
-            name:
-              type: string
-              description: 文件名（包含扩展名）
-            type:
-              type: string
-              description: 文件类型/扩展名（如 pptx, docx, xlsx, pdf, png）
-            url:
-              type: string
-              description: 文件下载链接（必须是真实可访问的URL）
-            size:
-              type: integer
-              description: 文件大小（字节，可选）
-            thumbnail:
-              type: string
-              description: 文件预览缩略图URL（可选）
-            description:
-              type: string
-              description: 文件描述（可选）
-          required:
-          - name
-          - type
-          - url
-    required:
-    - files
 - name: code_execution
   type: CODE
   subtype: DYNAMIC
@@ -1442,6 +1218,99 @@ capabilities:
     - 探索
     - 自定义
     - 动态
+
+# ==================== Nodes 工具（V9.0 新增）====================
+# 借鉴 clawdbot 的 nodes 工具设计
+
+- name: nodes
+  type: TOOL
+  subtype: CUSTOM
+  provider: user  # 自定义工具，需要通过 implementation 加载
+  level: 1  # 核心工具，始终加载
+  cache_stable: false
+  implementation:
+    module: tools.nodes_tool
+    class: NodesTool
+  capabilities:
+    - nodes_operation
+    - local_automation
+    - applescript_execution
+  priority: 95
+  cost:
+    time: fast
+    money: free
+  constraints:
+    requires_api: false
+    requires_local_node: true
+    os_restriction: [darwin, win32, linux]
+  metadata:
+    description: |
+      发现和操作本地/远程节点。借鉴 clawdbot Nodes 架构。
+      
+      核心能力：
+      - status: 列出所有节点状态
+      - describe: 获取节点详细信息
+      - run: 在节点上执行 shell 命令
+      - notify: 发送系统通知
+      - which: 检查可执行文件是否存在
+      
+      使用场景：
+      - 打开应用程序（open -a Safari）
+      - 执行 AppleScript（osascript）
+      - 文件系统操作
+      - 系统通知
+    preferred_for:
+      - 本地系统操作
+      - 应用控制
+      - shell 命令执行
+      - 系统通知
+    keywords:
+      - nodes
+      - 本地
+      - 系统
+      - 命令
+      - 执行
+      - shell
+      - applescript
+      - 通知
+  input_schema:
+    type: object
+    properties:
+      action:
+        type: string
+        enum: [status, describe, run, notify, which]
+        description: 操作类型
+      node:
+        type: string
+        description: 目标节点 ID（默认 "local"）
+        default: "local"
+      command:
+        type: array
+        items:
+          type: string
+        description: 要执行的命令（run action），如 ["open", "-a", "Safari"]
+      cwd:
+        type: string
+        description: 工作目录（run action）
+      env:
+        type: object
+        description: 环境变量（run action）
+      timeout_ms:
+        type: integer
+        description: 超时毫秒数
+        default: 30000
+      title:
+        type: string
+        description: 通知标题（notify action）
+      message:
+        type: string
+        description: 通知内容（notify action）
+      executable:
+        type: string
+        description: 可执行文件名（which action）
+    required: [action]
+# ==================== 沙盒工具（精简版 - Level 1 核心） ====================
+# 只保留 3 个核心工具，其他用 bash 命令替代
 - name: sandbox_write_file
   type: TOOL
   subtype: CUSTOM
@@ -1452,10 +1321,7 @@ capabilities:
     class: SandboxWriteFile
   capabilities:
   - sandbox_file_operations
-  - app_generation
-  - app_generation
   - content_writing
-  - app_generation
   priority: 90
   cost:
     time: fast
@@ -1465,34 +1331,15 @@ capabilities:
     api_name: e2b
     session_scoped: true
   metadata:
-    description: |
-      写入沙盒文件（目录自动创建）。
-      
-      【核心原则】用户是非技术人员，最终交付物必须是可直接使用的界面。
-      
-      【最佳实践】
-      1. 任何"系统/管理/平台"类项目必须包含前端界面（index.html 或 Vue/React）
-      2. 纯展示/小游戏用单文件 index.html（内嵌 CSS/JS）
-      3. 需要数据存储的系统必须同时创建：前端界面 + 后端 API
-      
-      【典型工作流 - 招聘系统】
-      1. sandbox_write_file("backend/main.py", FastAPI 后端代码)
-      2. sandbox_write_file("frontend/index.html", 完整的管理界面)  ← 用户能看到的界面！
-      3. sandbox_run_command 启动后端 (background=true, port=8000)
-      4. sandbox_run_command 启动前端 (background=true, port=3000)
-      5. 告知用户"系统已启动"，系统自动发送前端链接
-      
-      【关键检查】
-      任务完成前问自己：用户点击链接后能看到可操作的界面吗？
-      - 如果只有后端 API → 任务未完成，必须补充前端界面
-      - 如果用户需要懂代码才能用 → 任务失败
+    description: 写入沙盒文件（目录自动创建）
     keywords: [sandbox, 沙盒, 写入, 文件]
   input_schema:
     type: object
     properties:
+      conversation_id: {type: string, description: 对话 ID}
       path: {type: string, description: 文件路径}
       content: {type: string, description: 文件内容}
-    required: [path, content]
+    required: [conversation_id, path, content]
 - name: sandbox_run_command
   type: TOOL
   subtype: CUSTOM
@@ -1503,10 +1350,8 @@ capabilities:
     class: SandboxRunCommand
   capabilities:
   - sandbox_file_operations
-  - app_generation
   - code_execution
   - command_execution
-  - app_generation
   priority: 90
   cost:
     time: fast
@@ -1516,491 +1361,165 @@ capabilities:
     api_name: e2b
     session_scoped: true
   metadata:
-    description: |
-      执行终端命令。支持单命令或多命令批量执行，可一键启动前后端服务。
-      
-      【核心原则】用户是非技术人员，他们需要可点击访问的链接，而不是命令行输出。
-      
-      【模式一：单命令】使用 command 参数
-      
-      sandbox_run_command(
-        command="npm run dev -- --host 0.0.0.0",
-        background=true,
-        port=5173
-      )
-      
-      【模式二：多命令批量启动】使用 commands 参数（推荐）
-      
-      一次调用同时启动前端和后端：
-      sandbox_run_command(commands=[
-        { "name": "backend", "command": "npm run server", "port": 3000 },
-        { "name": "frontend", "command": "npm run dev", "port": 5173 }
-      ])
-      
-      返回值包含所有服务的 URL：
-      {
-        "success": true,
-        "urls": { "backend": "https://xxx.e2b.dev", "frontend": "https://yyy.e2b.dev" },
-        "services": [...]
-      }
-      
-      【常用命令示例】
-      - 静态 HTML：python3 -m http.server 8000
-      - React/Vue：npm run dev -- --host 0.0.0.0
-      - FastAPI：uvicorn main:app --host 0.0.0.0 --port 8000
-      - Express：node server.js
-      
-      【注意事项】
-      - 服务必须监听 0.0.0.0（不是 127.0.0.1 或 localhost）
-      - 启动前确保已执行 npm install 安装依赖
-      - 使用 port 参数获取公开 URL，localhost 用户无法访问
-    keywords: [sandbox, 沙盒, 命令, bash, shell, 启动服务器]
+    description: 执行命令。读文件用cat，列目录用ls，删除用rm
+    keywords: [sandbox, 沙盒, 命令, bash, shell]
   input_schema:
     type: object
     properties:
-      command:
+      conversation_id: {type: string, description: 对话 ID}
+      command: {type: string, description: 命令}
+      timeout: {type: integer, description: 超时秒数, default: 60}
+    required: [conversation_id, command]
+
+- name: sandbox_create_project
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  level: 1
+  implementation:
+    module: tools.sandbox_tools
+    class: SandboxCreateProject
+  capabilities:
+  - sandbox_file_operations
+  - app_generation
+  priority: 92
+  cost:
+    time: fast
+    money: free
+  constraints:
+    requires_api: true
+    api_name: e2b
+    session_scoped: true
+  metadata:
+    description: 初始化项目骨架（Initialize project）
+    preferred_for: [初始化项目, 创建项目, 快速开始]
+    keywords: [sandbox, 沙盒, 项目, 初始化, scaffold, streamlit, gradio, flask, fastapi, vue, react, nextjs]
+  input_schema:
+    type: object
+    properties:
+      conversation_id: {type: string, description: 对话 ID}
+      project_name: {type: string, description: 项目名称（目录名）}
+      stack:
         type: string
-        description: 单命令模式 - 要执行的命令
-      commands:
-        type: array
-        description: 多命令模式 - 批量启动多个服务（优先于 command）
-        items:
-          type: object
-          properties:
-            name:
-              type: string
-              description: 服务名称（如 backend、frontend）
-            command:
-              type: string
-              description: 要执行的命令
-            port:
-              type: integer
-              description: 服务端口
-            cwd:
-              type: string
-              description: 工作目录
-          required: [command]
-      background:
-        type: boolean
-        description: 是否后台运行（单命令模式，启动服务器时使用）
-        default: false
-      port:
-        type: integer
-        description: 服务端口（单命令模式，自动返回公开 URL）
-      cwd:
-        type: string
-        description: 工作目录
-      timeout:
-        type: integer
-        description: 超时秒数（单命令同步模式）
-        default: 120
-    required: []
-- name: sandbox_read_file
+        description: 技术栈
+        enum: [streamlit, gradio, flask, fastapi, python, vue, react, nextjs, nodejs]
+      overwrite: {type: boolean, description: 是否覆盖写入, default: false}
+    required: [conversation_id, project_name, stack]
+
+- name: sandbox_run_project
   type: TOOL
   subtype: CUSTOM
   provider: user
   level: 1
   implementation:
     module: tools.sandbox_tools
-    class: SandboxReadFile
+    class: SandboxRunProject
   capabilities:
   - sandbox_file_operations
-  priority: 88
-  cost:
-    time: instant
-    money: free
-  constraints:
-    requires_api: true
-    api_name: e2b
-    session_scoped: true
-  metadata:
-    description: 读取沙盒中的文件内容
-    keywords: [sandbox, 沙盒, 读取, 文件, read]
-  input_schema:
-    type: object
-    properties:
-      path: {type: string, description: 文件路径}
-    required: [path]
-- name: sandbox_list_files
-  type: TOOL
-  subtype: CUSTOM
-  provider: user
-  level: 1
-  implementation:
-    module: tools.sandbox_tools
-    class: SandboxListFiles
-  capabilities:
-  - sandbox_file_operations
-  priority: 87
-  cost:
-    time: instant
-    money: free
-  constraints:
-    requires_api: true
-    api_name: e2b
-    session_scoped: true
-  metadata:
-    description: 列出沙盒中指定目录的文件和子目录
-    keywords: [sandbox, 沙盒, 列表, 目录, list, ls]
-  input_schema:
-    type: object
-    properties:
-      path: {type: string, description: 目录路径（默认 /home/user/project）}
-    required: []
-- name: sandbox_execute_python
-  type: TOOL
-  subtype: CUSTOM
-  provider: user
-  level: 1
-  implementation:
-    module: tools.sandbox_tools
-    class: SandboxExecutePython
-  capabilities:
-  - sandbox_file_operations
-  - code_execution
-  - data_analysis
-  - app_generation
-  priority: 91
-  cost:
-    time: medium
-    money: low
-  constraints:
-    requires_api: true
-    api_name: e2b
-    session_scoped: true
-  metadata:
-    description: |
-      执行 Python 代码（Code Interpreter）。
-      
-      特性：
-      - 上下文共享：多次执行间变量、导入、函数定义会保留
-      - 图表支持：matplotlib 等图表会自动捕获并返回
-      - 预装包：pandas、numpy、matplotlib 等无需手动安装
-    preferred_for: [数据分析, Python代码, 可视化, 图表]
-    keywords: [sandbox, 沙盒, python, 代码, 执行, 数据分析, 图表]
-  input_schema:
-    type: object
-    properties:
-      code: {type: string, description: Python 代码}
-      timeout: {type: integer, description: 超时秒数, default: 300}
-    required: [code]
-- name: sandbox_get_public_url
-  type: TOOL
-  subtype: CUSTOM
-  provider: user
-  level: 1
-  implementation:
-    module: tools.sandbox_tools
-    class: SandboxGetPublicUrl
-  capabilities:
-  - sandbox_file_operations
-  priority: 90
-  cost:
-    time: instant
-    money: free
-  constraints:
-    requires_api: true
-    api_name: e2b
-    session_scoped: true
-  metadata:
-    description: |
-      获取沙盒中运行服务的公开 URL。
-      
-      【说明】
-      使用 sandbox_run_command(background=true, port=xxx) 时会自动返回公开 URL，
-      通常不需要单独调用此工具。
-      
-      【最佳实践】
-      - 优先在 sandbox_run_command 中指定 port 参数，直接获取 URL
-      - 此工具用于：之前启动了服务但忘记指定 port、需要再次获取 URL
-      
-      【常用端口】
-      - 静态 HTML (python -m http.server): 8000
-      - Vite (React/Vue): 5173
-      - Next.js / Node.js / Express: 3000
-      - FastAPI / Flask: 8000 / 5000
-      
-      【注意】用户是非技术人员，获取 URL 后系统会自动发送给前端，
-      只需告知用户"系统已启动"即可，无需在回复中展示技术细节。
-    preferred_for: [获取URL, 预览链接, 公开URL]
-    keywords: [sandbox, 沙盒, url, 预览, public]
-  input_schema:
-    type: object
-    properties:
-      port: {type: integer, description: 服务端口, default: 3000}
-    required: []
-- name: sandbox_upload_file
-  type: TOOL
-  subtype: CUSTOM
-  provider: user
-  level: 1
-  implementation:
-    module: tools.sandbox_tools
-    class: SandboxUploadFile
-  capabilities:
-  - sandbox_file_operations
-  - file_upload
-  - s3_storage
-  - app_generation
-  priority: 90
-  cost:
-    time: medium
-    money: low
-  constraints:
-    requires_api: true
-    api_name: e2b
-    session_scoped: true
-  metadata:
-    description: |
-      将沙盒中的文件上传到 S3 并返回下载链接。
-      
-      用途：
-      - 将沙盒中生成的文件（Excel、PDF、图片等）持久化存储
-      - 让前端用户可以下载沙盒中生成的文件
-      
-      典型工作流：
-      1. sandbox_execute_python 生成文件
-      2. sandbox_upload_file 上传到 S3 获取 URL
-      3. send_files 发送下载链接给前端
-    preferred_for: [文件上传, S3存储, 下载链接]
-    keywords: [sandbox, 沙盒, upload, 上传, s3, 下载]
-  input_schema:
-    type: object
-    properties:
-      path: {type: string, description: 沙盒中的文件路径}
-      filename: {type: string, description: 下载时显示的文件名（可选）}
-    required: [path]
-- name: sandbox_init_project
-  type: TOOL
-  subtype: CUSTOM
-  provider: user
-  level: 1
-  implementation:
-    module: tools.sandbox_tools
-    class: SandboxInitProject
-  capabilities:
-  - sandbox_file_operations
-  - content_writing
-  - app_generation
+  - project_execution
   priority: 95
   cost:
-    time: fast
-    money: free
+    time: medium
+    money: low
   constraints:
     requires_api: true
     api_name: e2b
     session_scoped: true
+    supports_preview: true
   metadata:
-    description: |
-      一键初始化项目脚手架，自动生成完整目录结构和配置文件。
-      
-      【支持的模板】
-      
-      1. react_fullstack（推荐，默认）
-         - 技术栈：Vite + React + TypeScript + TailwindCSS + Express
-         - 前端端口：5173，后端端口：3000
-         - 包含：components/、pages/、hooks/、lib/、IDEAS.md
-         - 启动：npm install && npm run dev
-         - 适用：需要完整前后端分离的 Web 应用
-         
-      【返回值说明】
-      - created_files: 创建的文件列表
-      - ports: { frontend: 5173, backend: 3000 }
-      - startup_hint: 启动命令提示
-    keywords: [sandbox, 沙盒, 初始化, 模板, 脚手架, react, node, html]
+    description: 运行项目并返回预览 URL（推荐方式）
+    preferred_for: [运行项目, 预览项目, 获取预览URL]
+    keywords: [sandbox, 沙盒, 运行, 项目, preview_url, streamlit, gradio, flask, fastapi, vue, react, nextjs, nodejs]
   input_schema:
     type: object
     properties:
-      template:
-        type: string
-        description: 模板名称
-        enum: [react_fullstack]
-        default: react_fullstack
-    required: []
-- name: document_partition_tool
+      conversation_id: {type: string, description: 对话 ID}
+      project_path: {type: string, description: 项目路径（如 /home/user/my_app）}
+      stack: {type: string, description: 技术栈, enum: [vue, react, nextjs, nodejs, streamlit, gradio, flask, fastapi]}
+    required: [conversation_id, project_path, stack]
+- name: wenshu_analytics
   type: TOOL
   subtype: CUSTOM
   provider: user
   invocation_hint: DIRECT
-  level: 1
-  cache_stable: true  # 相同文档的解析结果可以缓存
+  level: 2
+  cache_stable: false
   implementation:
-    module: tools.partition
-    class: DocumentPartitionTool
+    module: tools.wenshu_analytics_tool
+    class: WenshuAnalyticsTool
   capabilities:
-  - document_creation
-  - file_conversion
-  - document_parsing
-  - content_extraction
-  priority: 75
+  - data_analysis
+  - data_visualization
+  - data_query
+  - bi_analytics
+  priority: 85
   cost:
     time: medium
-    money: paid  # 调用外部 API，需要付费
+    money: low
   constraints:
     requires_api: true
     requires_network: true
-    api_name: unstructured
-    api_key_env: UNSTRUCTURED_API_KEY
+    api_name: wenshu
+    session_scoped: true
   metadata:
-    description: '文档解析工具 - 将网络文档转为结构化数据（基于 Unstructured Partition API）
+    description: '问数平台数据分析工具 - 自然语言查询数据、生成报告和图表
 
       核心功能：
-      • ✅ 解析多种格式：PDF、Word(.docx)、PowerPoint(.pptx)、Excel(.xlsx)、文本等
-      • ✅ 仅支持 URL 输入（不支持本地文件路径）
-      • ✅ 智能解析策略（auto/fast/hi_res）
-      • ✅ 自动缓存解析结果（可配置）
-      • ✅ 提取文字、表格、标题等结构化元素
+      • ✅ 自动创建/复用数据分析会话
+      • ✅ 上传和追加数据文件（Excel、CSV）
+      • ✅ 自然语言数据查询
+      • ✅ 返回 SQL、图表、分析报告
       
-      解析策略：
-      • auto：自动选择最佳策略（推荐）
-      • fast：快速提取纯文本（适合简单文档）
-      • hi_res：高精度解析（适合复杂文档，含表格、图表）
-      
-      输出格式：
-      • json：结构化 JSON 格式（包含元素类型、文本、元数据）
-      • text：纯文本拼接（适合直接阅读）
-      
-      环境变量配置：
-      • UNSTRUCTURED_API_KEY：必需，API 密钥
-      • UNSTRUCTURED_API_URL：可选，API 地址
-      • PARTITION_CACHE_ENABLED：可选，是否启用缓存（true/false）
-      • PARTITION_CACHE_DIR：可选，缓存目录路径
+      参数注入：
+      • conversation_id → 问数平台 task_id（框架自动注入）
+      • user_id → 问数平台 user_id（框架自动注入）
       '
     preferred_for:
-    - 解析文档内容
-    - 提取 PDF 文字
-    - 分析 Word 文档
-    - 提取 PPT 内容
-    - 文档格式转换
-    - 批量文档处理
+    - 数据分析查询
+    - 销售数据分析
+    - 数据可视化
+    - BI 报表
     keywords:
-    - 文档
-    - 解析
-    - PDF
-    - Word
-    - PPT
-    - docx
-    - pptx
-    - 提取
-    - 分析
-    - Partition
-    note: '使用 Unstructured Partition API，需要配置 UNSTRUCTURED_API_KEY。仅支持 URL 输入，不支持本地文件路径。支持缓存以节省 API 调用。'
+    - 问数
+    - 数据分析
+    - 销售额
+    - 数据查询
+    - 图表
+    - 报表
+    - SQL
+    note: '环境变量配置：WENSHU_API_BASE_URL（默认 http://localhost:8080）'
   input_schema:
     type: object
     properties:
-      source:
+      question:
         type: string
-        description: 文档URL（必需），如 'https://example.com/doc.pdf'。仅支持HTTP/HTTPS协议，不支持本地文件路径
-      strategy:
-        type: string
-        description: 解析策略
-        enum:
-        - auto
-        - fast
-        - hi_res
-        default: auto
-      use_cache:
-        type: boolean
-        description: 是否使用缓存（重复解析相同文档时可加速）
-        default: true
-      output_format:
-        type: string
-        description: 输出格式
-        enum:
-        - json
-        - text
-        default: json
-    required:
-    - source
-  result_compaction:
-    enabled: true
-    strategy: summarize
-    max_length: 2000
-    trigger_condition:
-      element_count_gt: 100  # 超过 100 个元素时精简
-- name: clue_generation
-  type: TOOL
-  subtype: CUSTOM
-  provider: user
-  invocation_hint: DIRECT
-  level: 1
-  cache_stable: false
-  implementation:
-    module: tools.clue_generation
-    class: ClueGenerationTool
-  capabilities:
-  - user_guidance
-  - task_suggestion
-  - conversation_analysis
-  priority: 80
-  cost:
-    time: fast
-    money: low
-  constraints:
-    requires_api: false
-  metadata:
-    description: |
-      提交后续操作建议（线索），工具负责验证和格式化。
-      
-      **何时使用此工具**：
-      1. 完成用户的主要任务后，需要提供延伸操作建议时
-      2. 助手给出了可转发/分享的内容（如报告、方案、总结）
-      3. 对话中存在需要用户确认或做出选择的情况
-      4. 用户的问题需要后续跟进操作
-      5. 生成了文件、报告等交付物，需要引导用户下一步操作
-      
-      **不要使用的情况**：
-      - 简单的问答对话（用户只是咨询问题）
-      - 对话尚未完成，还在执行中
-      - 用户明确表示不需要更多帮助
-      
-      **线索类型（act）**：
-      - reply: 需要用户回复确认的问题
-      - forward: 可以转发/分享的内容
-      - confirm: 需要用户确认的操作
-      - upload: 需要用户上传文件
-    preferred_for:
-    - 任务完成后的延伸建议
-    - 引导用户下一步操作
-    - 生成可操作的建议列表
-    keywords:
-    - 线索
-    - 建议
-    - 操作
-    - 后续
-    - clue
-    - suggestion
-    note: |
-      工具会自动通过 SSE 将线索推送到前端，前端会渲染为可点击的操作按钮。
-      每次最多生成 4 个线索，每个线索文本不超过 30 字。
-  input_schema:
-    type: object
-    properties:
-      tasks:
+        description: 用户的数据分析问题，如 '2024年销售额是多少？'
+      files:
         type: array
-        description: 线索列表，由 Agent 直接生成
+        description: 要分析的文件列表（可选）
         items:
           type: object
           properties:
-            text:
+            file_name:
               type: string
-              description: 线索描述文本（不超过 30 字）
-            act:
+              description: 文件名，如 '2024年销售数据.xlsx'
+            file_url:
               type: string
-              description: 操作类型
-              enum:
-              - reply
-              - forward
-              - confirm
-              - upload
-              default: reply
-            id:
-              type: string
-              description: 线索 ID（可选，不提供则自动生成）
-            payload:
-              type: object
-              description: 附加数据（可选）
+              description: 文件 URL
           required:
-          - text
+          - file_name
+          - file_url
+      lg_code:
+        type: string
+        description: 语言代码（默认 zh-CN）
+        default: zh-CN
+      conversation_id:
+        type: string
+        description: 对话 ID（框架自动注入，作为问数平台的 task_id）
+      user_id:
+        type: string
+        description: 用户 ID（框架自动注入）
     required:
-    - tasks
+    - question
+    - conversation_id
+    - user_id

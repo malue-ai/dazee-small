@@ -8,12 +8,12 @@
 """
 import asyncio
 from typing import List, Dict, Any, Optional
+import logging
 
 from core.context.provider import ContextProvider, ContextType
 from core.context.providers import KnowledgeProvider, MemoryProvider
-from logger import get_logger
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class ContextRetriever:
@@ -29,7 +29,7 @@ class ContextRetriever:
     注意：历史对话不在这里管理，由 ChatService 直接处理
     """
     
-    def __init__(self) -> None:
+    def __init__(self):
         # 注册所有 Provider（仅需要检索的数据源）
         self.providers: Dict[ContextType, ContextProvider] = {
             ContextType.KNOWLEDGE: KnowledgeProvider(),

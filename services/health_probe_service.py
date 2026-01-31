@@ -158,9 +158,6 @@ class HealthProbeService:
         """
         results = {}
         
-        logger.info("=" * 60)
-        logger.info("🩺 开始健康探测...")
-        
         for profile_name in self.profiles:
             try:
                 result = await self._probe_profile(profile_name)
@@ -168,55 +165,16 @@ class HealthProbeService:
                 self._probe_results[profile_name] = result
                 self._last_probe_time[profile_name] = time.time()
                 self._probe_errors.pop(profile_name, None)
-                
-                # 显示每个 Profile 的探测结果
-                status = result.get("status", "unknown")
-                selected = result.get("selected", {})
-                switched = result.get("switched", False)
-                errors = result.get("errors", [])
-                
-                if status == "healthy":
-                    if switched:
-                        logger.info(f"   [{profile_name}] ✅ 健康 (已切换到备用: {selected.get('name', '未知')})")
-                    else:
-                        logger.info(f"   [{profile_name}] ✅ 健康 (主密钥: {selected.get('name', '未知')})")
-                elif status == "degraded":
-                    logger.info(f"   [{profile_name}] ⚠️ 降级 (备用密钥: {selected.get('name', '未知')})")
-                else:
-                    logger.info(f"   [{profile_name}] ❌ 不健康")
-                
-                # 显示失败的密钥
-                if errors:
-                    for err in errors:
-                        target_name = err.get("target", "未知")
-                        api_key = err.get("api_key_env", "未知")
-                        # 解析 fallback 级别（如 "primary:claude:..." -> "Primary"）
-                        if target_name.startswith("primary:"):
-                            level = "Primary"
-                        elif target_name.startswith("fallback_"):
-                            # 提取数字：fallback_0 -> Fallback 0
-                            parts = target_name.split(":")
-                            if parts[0].startswith("fallback_"):
-                                fb_num = parts[0].replace("fallback_", "")
-                                level = f"Fallback {fb_num}"
-                            else:
-                                level = parts[0].title()
-                        else:
-                            level = "未知"
-                        
-                        logger.info(f"      - [{level}] 密钥 {api_key}: ❌ 不可用")
-                        
             except Exception as e:
                 error_msg = str(e)
                 self._probe_errors[profile_name] = error_msg
                 results[profile_name] = {"status": "error", "error": error_msg}
-                logger.info(f"   [{profile_name}] ❌ 探测异常: {error_msg}")
+                logger.warning(f"⚠️ 后台探测失败: profile={profile_name}, error={e}")
         
         # 汇总日志
-        healthy_count = sum(1 for r in results.values() if r.get("status") in ("healthy", "degraded"))
+        healthy_count = sum(1 for r in results.values() if r.get("status") == "healthy")
         total_count = len(results)
-        logger.info(f"🩺 探测完成: {healthy_count}/{total_count} 可用")
-        logger.info("=" * 60)
+        logger.info(f"🩺 后台探测完成: {healthy_count}/{total_count} 健康")
         
         return results
     
@@ -242,15 +200,10 @@ class HealthProbeService:
             }
         
         # 执行探测（带超时）
-        # 🆕 V7.11: 使用轻量级探针（max_tokens=1, enable_thinking=False）
         try:
             if hasattr(llm, "probe"):
                 result = await asyncio.wait_for(
-                    llm.probe(
-                        max_retries=0,           # 探针不重试，快速失败
-                        message="health_check",  # 简短消息
-                        include_unhealthy=True   # 包含不健康目标
-                    ),
+                    llm.probe(max_retries=1, include_unhealthy=True),
                     timeout=self.timeout
                 )
             else:
@@ -273,14 +226,11 @@ class HealthProbeService:
             switched = result.get("switched", False)
             errors = result.get("errors", [])
             
-            # 🐛 修复：根据是否有可用 target 判断健康状态
-            # 之前错误地将单个 Profile 的 errors 数量与全局 profiles 列表长度比较
-            if not selected or not selected.get("name"):
-                status = "unhealthy"  # 没有任何可用的 target
-            elif switched:
-                status = "degraded"   # 已切换到 fallback（降级）
-            else:
-                status = "healthy"    # 使用 primary（健康）
+            status = "healthy"
+            if switched:
+                status = "degraded"  # 已切换到备选
+            if errors and len(errors) >= len(self.profiles):
+                status = "unhealthy"  # 所有模型都失败
             
             return {
                 "status": status,

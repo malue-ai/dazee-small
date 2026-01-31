@@ -7,6 +7,12 @@ Capability 类型定义
 - Capability (数据类)
 
 这些类型被 Registry、Router、Selector、Executor 共享使用。
+
+术语说明（对齐 clawdbot）：
+- SKILL: 本地工作流技能（skills/library/，系统提示词注入）
+- TOOL: 预定义函数工具
+- MCP: MCP 服务器工具
+- CODE: 动态代码执行
 """
 
 from enum import Enum
@@ -16,15 +22,15 @@ from typing import List, Dict, Any, Optional
 
 class CapabilityType(Enum):
     """能力类型"""
-    SKILL = "SKILL"    # 领域知识包（SKILL.md + scripts）
-    TOOL = "TOOL"      # 预定义函数
-    MCP = "MCP"        # MCP 服务器
-    CODE = "CODE"      # 动态代码执行
+    SKILL = "SKILL"          # 本地工作流技能（对齐 clawdbot）
+    TOOL = "TOOL"            # 预定义函数
+    MCP = "MCP"              # MCP 服务器
+    CODE = "CODE"            # 动态代码执行
 
 
 class CapabilitySubtype(Enum):
     """能力子类型"""
-    PREBUILT = "PREBUILT"    # Anthropic 预置
+    PREBUILT = "PREBUILT"    # 预置/内置
     CUSTOM = "CUSTOM"        # 用户自定义
     NATIVE = "NATIVE"        # 系统原生
     EXTERNAL = "EXTERNAL"    # 外部服务
@@ -48,9 +54,10 @@ class Capability:
     constraints: Dict[str, Any]  # 约束条件
     metadata: Dict[str, Any]     # 扩展信息（description, keywords, preferred_for 等）
     input_schema: Optional[Dict] = None  # 工具输入 Schema（用于 Claude API）
-    fallback_tool: Optional[str] = None  # 替代工具（SKILL 无法执行时使用的 TOOL）
-    skill_id: Optional[str] = None       # 🆕 Claude Skill ID（注册后由 Claude 返回）
-    skill_path: Optional[str] = None     # 🆕 Skill 本地路径（用于注册）
+    fallback_tool: Optional[str] = None  # 替代工具（Skill 无法执行时使用的 TOOL）
+    
+    # Skill 相关（本地工作流技能）
+    skill_path: Optional[str] = None     # Skill 本地路径（skills/library/下）
     
     # 🆕 工具分层配置（V4.2.4）
     level: int = 2                       # 工具层级：1=核心（始终加载）, 2=动态（按需加载）
@@ -60,16 +67,11 @@ class Capability:
         """
         计算关键词匹配度
         
-        用法说明：
-        - 关键词匹配作为辅助排序依据，权重较低
-        - 建议结合 LLM 语义理解进行最终决策
-        - 匹配分数供参考，不作为唯一判断标准
-        
         Args:
             keywords: 待匹配的关键词列表
             
         Returns:
-            匹配分数
+            匹配分数（越高越匹配）
         """
         if not keywords:
             return 0
@@ -82,15 +84,15 @@ class Capability:
         for kw in keywords:
             kw_lower = kw.lower()
             
-            # 能力标签匹配
+            # 能力标签匹配（权重最高）
             if any(kw_lower in str(c).lower() for c in self.capabilities):
                 score += 15
             
-            # preferred_for 匹配
+            # preferred_for 匹配（权重高）
             if any(kw_lower in str(p).lower() for p in preferred_for):
                 score += 10
             
-            # keywords 匹配
+            # keywords 匹配（权重中）
             if any(kw_lower in str(k).lower() for k in cap_keywords):
                 score += 5
             
@@ -154,4 +156,3 @@ class Capability:
             "description": self.metadata.get('description', self.name),
             "input_schema": self.input_schema
         }
-

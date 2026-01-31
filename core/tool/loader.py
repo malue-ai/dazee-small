@@ -1,49 +1,94 @@
 """
-工具加载器 - 统一管理工具的加载逻辑
+工具加载器 - 统一管理三类工具的加载逻辑
 
 职责：
 1. 加载通用工具（从 capabilities.yaml，根据 enabled_capabilities 过滤）
-2. 加载 MCP 工具（从配置文件）
-3. 加载 Claude Skills
+2. 加载 MCP 工具（从 config.yaml 的 mcp_tools 配置）
+3. 加载 Claude Skills（从 skills/skill_registry.yaml）
 4. 提供统一的工具列表给 Agent
 
 设计原则：
 - 封装复杂性：对外提供简单的加载接口
 - 统一管理：三类工具统一加载和注册
-- 类别化配置：支持工具组配置（如 sandbox_tools、document_skills）
-- 核心工具自动启用：Level 1 工具始终可用
+- 可扩展性：易于添加新的工具类型
+- 🆕 类别化配置：支持工具组配置（如 sandbox_tools、document_skills）
+- 🆕 核心工具自动启用：Level 1 工具始终可用，无需用户配置
 """
 
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
+from pathlib import Path
+import logging
 
 from .capability.registry import CapabilityRegistry
 from .capability.types import Capability
-from logger import get_logger
-from core.tool.registry_config import get_core_tools, get_tool_categories
+from .instance_registry import InstanceToolRegistry
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
-# 工具类别定义（从配置文件读取）
-TOOL_CATEGORIES = get_tool_categories()
+# ==================== 工具类别定义 ====================
+# 类别化配置：用户配置一个类别，自动展开为多个工具
 
-# 核心工具（Level 1）- 始终启用
-CORE_TOOLS = get_core_tools()
+TOOL_CATEGORIES = {
+    # 文档生成类（Claude Skills）
+    "document_skills": [
+        "pptx",
+        "xlsx", 
+        "docx",
+        "pdf",
+    ],
+    
+    # 代码沙盒类（E2B 沙盒工具 - 4 个核心）
+    "sandbox_tools": [
+        "sandbox_write_file",       # 写文件
+        "sandbox_run_command",      # 执行命令（读/列/删 用 bash）
+        "sandbox_create_project",   # 初始化项目
+        "sandbox_run_project",      # 运行项目（返回预览 URL）
+    ],
+    
+    # PPT 生成类（可选扩展）
+    "ppt_tools": [
+        "ppt_generator",
+        "slidespeak_render",
+    ],
+}
+
+# 核心工具（Level 1）- 始终启用，不暴露给用户配置
+# 注意：此列表必须与 capabilities.yaml 中 level:1 的工具保持一致
+CORE_TOOLS = [
+    "plan_todo",                    # 任务规划
+    "api_calling",                  # API 调用
+    "request_human_confirmation",   # 人工确认
+    # 沙盒工具（Vibe Coding 核心 - 4 个）
+    "sandbox_write_file",           # 写文件
+    "sandbox_run_command",          # 执行命令
+    "sandbox_create_project",       # 初始化项目
+    "sandbox_run_project",          # 运行项目
+]
 
 
 @dataclass
 class ToolLoadResult:
     """工具加载结果"""
-    generic_tools: List[Capability]     # 通用工具（从 capabilities.yaml）
+    # 通用工具（从 capabilities.yaml）
+    generic_tools: List[Capability]
     generic_count: int
-    mcp_tools: List[Dict[str, Any]]     # MCP 工具（动态注册）
+    
+    # MCP 工具（动态注册）
+    mcp_tools: List[Dict[str, Any]]
     mcp_count: int
-    skills: List[Dict[str, Any]]        # Claude Skills
+    
+    # Claude Skills（官方 API）
+    skills: List[Dict[str, Any]]
     skills_count: int
+    
+    # 总计
     total_count: int
-    enabled_tools: List[str]            # 启用的工具名称列表
-    disabled_tools: List[str]           # 未启用的工具名称列表
+    
+    # 加载统计
+    enabled_tools: List[str]  # 启用的工具名称列表
+    disabled_tools: List[str]  # 未启用的工具名称列表
 
 
 class ToolLoader:
@@ -55,18 +100,18 @@ class ToolLoader:
     2. MCP 工具 - 运行时连接 MCP Server
     3. Claude Skills - 从 skill_registry.yaml
     
-    特性：
+    🆕 V5.1 特性：
     - 类别化配置：document_skills、sandbox_tools 等自动展开
     - 核心工具自动启用：Level 1 工具无需用户配置
     
     示例:
-        loader = ToolLoader(global_registry)
-        result = loader.load_tools(
-            enabled_capabilities={"web_search": True, "sandbox_tools": True},
-            mcp_tools=[{"name": "dify", ...}],
-            skills=[SkillConfig(...)]
-        )
-        print(f"加载了 {result.total_count} 个工具")
+        >>> loader = ToolLoader(global_registry)
+        >>> result = loader.load_tools(
+        ...     enabled_capabilities={"web_search": True, "sandbox_tools": True},
+        ...     mcp_tools=[{"name": "dify", ...}],
+        ...     skills=[SkillConfig(...)]
+        ... )
+        >>> print(f"加载了 {result.total_count} 个工具")
     """
     
     def __init__(self, global_registry: CapabilityRegistry):
@@ -78,7 +123,6 @@ class ToolLoader:
         """
         self.global_registry = global_registry
         self._all_tool_names = set(global_registry.capabilities.keys())
-        logger.info(f"ToolLoader 初始化: 注册表中有 {len(self._all_tool_names)} 个工具")
     
     def _expand_category_config(
         self,
@@ -88,6 +132,13 @@ class ToolLoader:
         展开类别配置为具体工具配置
         
         将类别配置（如 sandbox_tools: 1）展开为具体工具配置
+        （如 sandbox_list_dir: 1, sandbox_read_file: 1, ...）
+        
+        Args:
+            enabled_capabilities: 原始配置（可能包含类别）
+            
+        Returns:
+            展开后的配置（只包含具体工具）
         """
         expanded = {}
         
@@ -97,14 +148,16 @@ class ToolLoader:
                 category_tools = TOOL_CATEGORIES[key]
                 is_enabled = bool(value)
                 
-                logger.debug(f"展开类别 {key} → {len(category_tools)} 个工具")
+                logger.debug(f"   展开类别 {key} → {len(category_tools)} 个工具")
                 
                 for tool_name in category_tools:
+                    # 只有工具存在于注册表中才添加
                     if tool_name in self._all_tool_names:
                         expanded[tool_name] = is_enabled
                     else:
-                        logger.warning(f"工具 {tool_name} 不在注册表中，跳过（类别: {key}）")
+                        logger.debug(f"   ⚠️ 工具 {tool_name} 不在注册表中，跳过")
             else:
+                # 普通工具配置，直接添加
                 expanded[key] = bool(value)
         
         return expanded
@@ -115,6 +168,12 @@ class ToolLoader:
     ) -> Dict[str, bool]:
         """
         自动添加核心工具（Level 1 工具始终启用）
+        
+        Args:
+            enabled_map: 当前启用配置
+            
+        Returns:
+            添加核心工具后的配置
         """
         result = enabled_map.copy()
         
@@ -126,7 +185,7 @@ class ToolLoader:
                     added_core_tools.append(tool_name)
         
         if added_core_tools:
-            logger.info(f"自动启用核心工具: {', '.join(added_core_tools)}")
+            logger.info(f"   🔧 自动启用核心工具: {', '.join(added_core_tools)}")
         
         return result
     
@@ -147,7 +206,7 @@ class ToolLoader:
         Returns:
             ToolLoadResult 包含加载结果和统计信息
         """
-        logger.info("开始加载工具...")
+        logger.info("🔧 开始加载工具...")
         
         # 1. 加载通用工具（过滤）
         generic_tools, enabled_names, disabled_names = self._load_generic_tools(
@@ -176,7 +235,9 @@ class ToolLoader:
             disabled_tools=disabled_names,
         )
         
+        # 5. 打印加载结果
         self._print_load_summary(result)
+        
         return result
     
     def _load_generic_tools(
@@ -186,7 +247,7 @@ class ToolLoader:
         """
         加载通用工具（从 capabilities.yaml，根据配置过滤）
         
-        特性：
+        🆕 V5.1 特性：
         - 自动展开类别配置（如 sandbox_tools → 多个沙盒工具）
         - 自动启用核心工具（Level 1）
         
@@ -197,7 +258,7 @@ class ToolLoader:
             (工具列表, 启用的工具名列表, 未启用的工具名列表)
         """
         if not enabled_capabilities:
-            logger.info("未配置工具过滤，使用全部通用工具")
+            logger.info("   📋 未配置工具过滤，使用全部通用工具")
             all_tools = list(self.global_registry.capabilities.values())
             all_names = list(self.global_registry.capabilities.keys())
             return all_tools, all_names, []
@@ -220,16 +281,16 @@ class ToolLoader:
             else:
                 disabled_names.append(name)
         
-        logger.info(f"已启用 {len(enabled_tools)} 个通用工具")
-        logger.debug(f"启用: {', '.join(enabled_names)}")
-        logger.debug(f"禁用: {', '.join(disabled_names)}")
+        logger.info(f"   📋 已启用 {len(enabled_tools)} 个通用工具")
+        logger.debug(f"   启用: {', '.join(enabled_names)}")
+        logger.debug(f"   禁用: {', '.join(disabled_names)}")
         
         return enabled_tools, enabled_names, disabled_names
     
     def _print_load_summary(self, result: ToolLoadResult):
         """打印加载摘要"""
         logger.info("=" * 60)
-        logger.info("工具加载摘要")
+        logger.info("📊 工具加载摘要")
         logger.info("=" * 60)
         logger.info(f"  通用工具: {result.generic_count} 个")
         if result.enabled_tools:
@@ -255,9 +316,9 @@ class ToolLoader:
         """
         创建过滤后的工具注册表
         
-        用于在 Agent 初始化时创建过滤后的注册表。
+        这是一个便捷方法，用于在 Agent 初始化时创建过滤后的注册表。
         
-        特性：
+        🆕 V5.1 特性：
         - 自动展开类别配置
         - 自动启用核心工具
         
@@ -268,7 +329,7 @@ class ToolLoader:
             过滤后的 CapabilityRegistry 实例
         """
         if not enabled_capabilities:
-            logger.info("未配置工具过滤，返回全局注册表")
+            logger.info("📋 未配置工具过滤，返回全局注册表")
             return self.global_registry
         
         # 1. 展开类别配置
@@ -279,7 +340,7 @@ class ToolLoader:
         
         # 3. 创建过滤后的注册表
         filtered_registry = self.global_registry.filter_by_enabled(final_config)
-        logger.info(f"已创建过滤后的注册表，包含 {len(filtered_registry.capabilities)} 个工具")
+        logger.info(f"📋 已创建过滤后的注册表，包含 {len(filtered_registry.capabilities)} 个工具")
         
         return filtered_registry
     
@@ -309,7 +370,7 @@ class ToolLoader:
 
 def create_tool_loader(global_registry: Optional[CapabilityRegistry] = None) -> ToolLoader:
     """
-    创建工具加载器
+    创建工具加载器（工厂函数）
     
     Args:
         global_registry: 全局注册表（可选，默认使用单例）

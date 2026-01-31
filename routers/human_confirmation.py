@@ -7,7 +7,7 @@
 - 异常转换为 HTTP 异常
 
 工作流程：
-1. Agent 调用 hitl 工具
+1. Agent 调用 request_human_confirmation 工具
 2. 工具通过 SSE 发送确认请求到前端
 3. 前端显示确认对话框
 4. 用户点击确认/取消 → 调用此接口提交响应
@@ -50,7 +50,7 @@ class ConfirmationResponseBody(BaseModel):
     """确认响应请求体"""
     response: Union[str, List[str], Dict[str, Any]] = Field(
         ...,
-        description="用户响应：字符串（text_input）或对象（form）"
+        description="用户响应：字符串（yes_no/single_choice/text_input）、数组（multiple_choice）、或对象（form）"
     )
     metadata: Optional[Dict[str, Any]] = Field(
         default=None,
@@ -124,20 +124,20 @@ async def get_stats():
 # ==================== 动态路径接口（必须放在固定路径之后）====================
 
 @router.post(
-    "/{session_id}",
+    "/{request_id}",
     response_model=ConfirmationSubmitResponse,
     summary="提交确认响应",
     description="用户提交对确认请求的响应，唤醒等待的工具"
 )
 async def submit_confirmation(
-    session_id: str,
+    request_id: str,
     body: ConfirmationResponseBody
 ):
     """
     提交用户确认响应
     
     Args:
-        session_id: 会话ID（前端已知，同时也是确认请求的唯一标识）
+        request_id: 确认请求ID（从 SSE 事件中获取）
         body: 响应内容
         
     Returns:
@@ -150,7 +150,7 @@ async def submit_confirmation(
     """
     try:
         result = confirmation_service.submit_response(
-            session_id,
+            request_id,
             body.response,
             body.metadata
         )
@@ -164,12 +164,12 @@ async def submit_confirmation(
     except ConfirmationNotFoundError:
         raise HTTPException(
             status_code=404,
-            detail=f"确认请求（session_id={session_id}）不存在或已过期"
+            detail=f"确认请求 {request_id} 不存在或已过期"
         )
     except ConfirmationExpiredError:
         raise HTTPException(
             status_code=410,  # Gone
-            detail=f"确认请求（session_id={session_id}）已过期"
+            detail=f"确认请求 {request_id} 已过期"
         )
     except ConfirmationResponseError:
         raise HTTPException(

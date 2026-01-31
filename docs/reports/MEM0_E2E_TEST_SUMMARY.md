@@ -76,12 +76,13 @@ Retrying request to /chat/completions in 0.441511 seconds
 - 添加记忆失败（需要 LLM 提取结构化记忆）
 - 搜索记忆失败（需要 Embedding 向量化查询）
 
-**根本原因**:
-- OpenAI API 网络连接问题（可能是国内网络限制）
-- 重试 2 次后仍然超时
+**根本原因（复核）**:
+- 已复测 OpenAI 接口返回 `200 OK`，网络并非必然失败
+- 可能原因包括：代理/网关地址未被正确传入（`OPENAI_BASE_URL` / `OPENAI_API_BASE` 未生效）、短时网络抖动、或上游限流导致的超时
+- 需要通过预检和日志区分“网络不可达 / 代理失效 / 限流 / 超时”
 
 **解决方案**:
-1. **短期**: 配置代理或使用国内 API 网关
+1. **短期**: 配置代理或使用国内 API 网关（已在配置层支持读取 `OPENAI_BASE_URL` / `OPENAI_API_BASE`）
 2. **长期**: 考虑替换为本地 Embedding 模型（如 sentence-transformers）
 
 ```python

@@ -5,7 +5,6 @@
 """
 
 import yaml
-import aiofiles
 from pathlib import Path
 from typing import Optional
 
@@ -17,9 +16,9 @@ from infra.resilience.circuit_breaker import CircuitBreakerConfig, get_circuit_b
 logger = get_logger(__name__)
 
 
-async def load_resilience_config(config_path: Optional[Path] = None) -> dict:
+def load_resilience_config(config_path: Optional[Path] = None) -> dict:
     """
-    异步加载容错配置
+    加载容错配置
     
     Args:
         config_path: 配置文件路径，默认为 config/resilience.yaml
@@ -38,9 +37,8 @@ async def load_resilience_config(config_path: Optional[Path] = None) -> dict:
         return {}
     
     try:
-        async with aiofiles.open(config_path, 'r', encoding='utf-8') as f:
-            content = await f.read()
-            config = yaml.safe_load(content)
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
         
         logger.info(f"✅ 容错配置已加载: {config_path}")
         return config or {}
@@ -50,15 +48,15 @@ async def load_resilience_config(config_path: Optional[Path] = None) -> dict:
         return {}
 
 
-async def apply_resilience_config(config: Optional[dict] = None):
+def apply_resilience_config(config: Optional[dict] = None):
     """
-    异步应用容错配置到全局实例
+    应用容错配置到全局实例
     
     Args:
         config: 配置字典，如果为 None 则从文件加载
     """
     if config is None:
-        config = await load_resilience_config()
+        config = load_resilience_config()
     
     # 1. 应用超时配置
     if "timeout" in config:
@@ -99,7 +97,7 @@ async def apply_resilience_config(config: Optional[dict] = None):
     
     # 4. 注册降级策略
     if "fallback" in config:
-        from infra.resilience.fallback import (
+        from core.resilience.fallback import (
             register_fallback,
             FallbackType,
             default_llm_fallback,

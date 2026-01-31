@@ -7,59 +7,38 @@ Lead Agent (Planner) - 主控智能体
 - 与 Worker Agents (Sonnet) 协作
 
 设计原则：
-1. 明确的任务分解：每个子任务有清晰的目标、输出格式、工具、边界
+1. 明确的任务分解：每个步骤有清晰的目标、输出格式、工具、边界
 2. 上下文管理：为每个 Worker 提供必要的上下文
 3. 结果综合：整合所有 Worker 的输出
+
+V7.8 重构：
+- SubTask 类已废弃，统一使用 PlanStep
+- TaskDecompositionPlan.subtasks 返回 List[PlanStep]
 """
 
-# 1. 标准库
 import asyncio
-import json
+import logging
 from datetime import datetime
 from typing import Any, AsyncGenerator, Dict, List, Optional
 from uuid import uuid4
 
-# 2. 第三方库
 from pydantic import BaseModel, Field
 
-# 3. 本地模块
 from core.agent.multi.models import (
     AgentConfig,
     AgentRole,
     ExecutionMode,
     TaskAssignment,
 )
+from core.planning.protocol import PlanStep, StepStatus
 from core.llm import create_llm_service
-from core.llm.base import Message
-from logger import get_logger
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
-class SubTask(BaseModel):
-    """子任务定义"""
-    subtask_id: str = Field(..., description="子任务 ID")
-    title: str = Field(..., description="子任务标题")
-    description: str = Field(..., description="详细描述")
-    
-    # 执行参数
-    assigned_agent_role: AgentRole = Field(AgentRole.EXECUTOR, description="分配的角色")
-    tools_required: List[str] = Field(default_factory=list, description="需要的工具")
-    
-    # 输出要求
-    expected_output: str = Field("", description="期望的输出格式")
-    success_criteria: List[str] = Field(default_factory=list, description="成功标准")
-    
-    # 依赖关系
-    depends_on: List[str] = Field(default_factory=list, description="依赖的子任务 ID")
-    priority: int = Field(0, description="优先级")
-    
-    # 上下文
-    context: str = Field("", description="执行上下文")
-    
-    # 约束
-    constraints: List[str] = Field(default_factory=list, description="约束条件")
-    max_time_seconds: int = Field(60, description="最大执行时间")
+# V7.8: SubTask 已废弃，统一使用 PlanStep
+# 保留别名以便迁移期间兼容
+SubTask = PlanStep
 
 
 class TaskDecompositionPlan(BaseModel):
@@ -70,8 +49,8 @@ class TaskDecompositionPlan(BaseModel):
     original_query: str = Field(..., description="原始用户查询")
     decomposed_goal: str = Field(..., description="分解后的目标描述")
     
-    # 子任务
-    subtasks: List[SubTask] = Field(default_factory=list, description="子任务列表")
+    # 步骤（V7.8: 统一使用 PlanStep）
+    subtasks: List[PlanStep] = Field(default_factory=list, description="步骤列表")
     
     # 执行模式
     execution_mode: ExecutionMode = Field(ExecutionMode.PARALLEL, description="建议的执行模式")
@@ -112,6 +91,7 @@ class LeadAgent:
         enable_thinking: bool = True,
         thinking_budget: int = 10000,
         max_tokens: int = 16384,
+        llm_profile_name: str = "lead_agent",
     ):
         """
         初始化 Lead Agent
@@ -131,14 +111,18 @@ class LeadAgent:
             max_tokens = thinking_budget + 1000
             logger.warning(f"⚠️ max_tokens ({max_tokens}) 必须大于 thinking_budget ({thinking_budget})，已自动调整")
         
-        # 创建 LLM 服务
-        self.llm = create_llm_service(
-            provider="claude",  # 🆕 V7.10
-            model=model,
-            enable_thinking=enable_thinking,
-            max_tokens=max_tokens,
-            thinking_budget=thinking_budget,
-        )
+        # 创建 LLM 服务（支持主备路由）
+        from config.llm_config import get_llm_profile
+        profile = get_llm_profile(llm_profile_name)
+        profile_provider = str(profile.get("provider", "claude")).lower()
+        if profile_provider == "claude":
+            profile["model"] = model
+        profile.update({
+            "enable_thinking": enable_thinking,
+            "max_tokens": max_tokens,
+            "thinking_budget": thinking_budget,
+        })
+        self.llm = create_llm_service(**profile)
         
         logger.info(f"✅ LeadAgent 初始化: model={model}, max_tokens={max_tokens}, thinking_budget={thinking_budget}")
         
@@ -183,6 +167,8 @@ class LeadAgent:
         )
         
         # 调用 LLM 进行分解
+        from core.llm.base import Message
+        
         messages = [Message(role="user", content=user_message)]
         
         llm_response = await self.llm.create_message_async(
@@ -364,6 +350,8 @@ class LeadAgent:
         original_query: str
     ) -> TaskDecompositionPlan:
         """解析 LLM 的分解响应"""
+        import json
+        
         try:
             # 尝试从响应中提取 JSON
             # 可能包含在代码块中
@@ -380,28 +368,33 @@ class LeadAgent:
             
             data = json.loads(json_text)
             
-            # 构建 SubTask 对象
+            # V7.8: 构建 PlanStep 对象（替代 SubTask）
             subtasks = []
             for st_data in data.get("subtasks", []):
-                subtask = SubTask(
-                    subtask_id=st_data.get("subtask_id", f"task_{len(subtasks)+1}"),
-                    title=st_data.get("title", ""),
+                step_id = st_data.get("subtask_id", f"task_{len(subtasks)+1}")
+                step = PlanStep(
+                    id=step_id,
                     description=st_data.get("description", ""),
-                    assigned_agent_role=AgentRole(st_data.get("assigned_agent_role", "executor")),
+                    status=StepStatus.PENDING,
+                    dependencies=st_data.get("depends_on", []),
+                    assigned_agent_role=st_data.get("assigned_agent_role", "executor"),
                     tools_required=st_data.get("tools_required", []),
                     expected_output=st_data.get("expected_output", ""),
                     success_criteria=st_data.get("success_criteria", []),
-                    depends_on=st_data.get("depends_on", []),
-                    priority=st_data.get("priority", 0),
-                    context=st_data.get("context", ""),
                     constraints=st_data.get("constraints", []),
                     max_time_seconds=st_data.get("max_time_seconds", 60),
+                    priority=st_data.get("priority", 0),
+                    context=st_data.get("context", ""),
+                    metadata={
+                        "title": st_data.get("title", ""),
+                        "subtask_id": step_id,  # 兼容性字段
+                    }
                 )
-                subtasks.append(subtask)
+                subtasks.append(step)
             
             # 构建 Plan
             plan = TaskDecompositionPlan(
-                plan_id=str(uuid4()),
+                plan_id=f"plan_{uuid4().hex[:8]}",
                 original_query=original_query,
                 decomposed_goal=data.get("decomposed_goal", original_query),
                 subtasks=subtasks,
@@ -489,20 +482,21 @@ class LeadAgent:
         user_query: str
     ) -> TaskDecompositionPlan:
         """创建降级计划（当分解失败时）"""
-        logger.warning("⚠️ 使用降级计划：创建单个子任务")
+        logger.warning("⚠️ 使用降级计划：创建单个步骤")
         
         return TaskDecompositionPlan(
-            plan_id=str(uuid4()),
+            plan_id=f"plan_fallback_{uuid4().hex[:8]}",
             original_query=user_query,
             decomposed_goal=user_query,
             subtasks=[
-                SubTask(
-                    subtask_id="task_fallback",
-                    title="执行原始任务",
+                PlanStep(
+                    id="task_fallback",
                     description=user_query,
-                    assigned_agent_role=AgentRole.EXECUTOR,
+                    status=StepStatus.PENDING,
+                    assigned_agent_role="executor",
                     expected_output="任务执行结果",
                     context=user_query,
+                    metadata={"title": "执行原始任务"},
                 )
             ],
             execution_mode=ExecutionMode.SEQUENTIAL,
@@ -544,6 +538,8 @@ class LeadAgent:
         )
         
         # 调用 LLM 进行综合
+        from core.llm.base import Message
+        
         messages = [Message(role="user", content=user_message)]
         
         llm_response = await self.llm.create_message_async(
@@ -672,6 +668,8 @@ class LeadAgent:
 
 请评估这个结果的质量。"""
         
+        from core.llm.base import Message
+        
         messages = [Message(role="user", content=user_message)]
         
         llm_response = await self.llm.create_message_async(
@@ -686,6 +684,7 @@ class LeadAgent:
         response = llm_response.content if hasattr(llm_response, 'content') else str(llm_response)
         
         # 解析 JSON
+        import json
         try:
             if "```json" in response:
                 start = response.index("```json") + 7

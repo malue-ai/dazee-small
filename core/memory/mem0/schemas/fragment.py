@@ -5,9 +5,34 @@
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Optional, List
+from datetime import datetime, timedelta
+from typing import Optional, List, Dict, Any
 from enum import Enum
+
+
+class MemoryType(str, Enum):
+    """记忆类型枚举"""
+    EXPLICIT = "explicit"      # 显式记忆：用户主动上传的记忆卡片
+    IMPLICIT = "implicit"      # 隐式记忆：从对话中自动提取
+    BEHAVIOR = "behavior"      # 行为模式：5W1H 分析结果
+    EMOTION = "emotion"        # 情绪状态
+    PREFERENCE = "preference"  # 用户偏好
+
+
+class MemorySource(str, Enum):
+    """记忆来源枚举"""
+    USER_CARD = "user_card"           # 用户记忆卡片
+    CONVERSATION = "conversation"     # 对话提取
+    BEHAVIOR_ANALYSIS = "behavior_analysis"  # 行为分析
+    EMOTION_ANALYSIS = "emotion_analysis"    # 情绪分析
+    SYSTEM_INFERENCE = "system_inference"    # 系统推断
+
+
+class MemoryVisibility(str, Enum):
+    """记忆可见性枚举"""
+    PUBLIC = "public"       # 完全可见（用于 Prompt 注入）
+    PRIVATE = "private"     # 私有（不注入 Prompt，仅存储）
+    FILTERED = "filtered"   # 过滤后可见（敏感信息已处理）
 
 
 class TimeSlot(str, Enum):
@@ -70,6 +95,53 @@ class TodoHint:
 
 
 @dataclass
+class PreferenceHint:
+    """偏好线索（新增）"""
+    response_format: Optional[str] = None  # 响应格式偏好：structured/concise/detailed
+    communication_style: Optional[str] = None  # 沟通风格：formal/casual/professional
+    preferred_tools: List[str] = field(default_factory=list)  # 偏好的工具/平台
+    work_preferences: Dict[str, Any] = field(default_factory=dict)  # 其他工作偏好
+    confidence: float = 0.0
+
+
+@dataclass
+class TopicHint:
+    """主题与项目线索（新增）"""
+    topics: List[str] = field(default_factory=list)  # 讨论的主题
+    projects: List[str] = field(default_factory=list)  # 涉及的项目
+    keywords: List[str] = field(default_factory=list)  # 关键词
+    confidence: float = 0.0
+
+
+@dataclass
+class ConstraintHint:
+    """约束与禁忌线索（新增）"""
+    constraints: List[str] = field(default_factory=list)  # 约束条件（如：不能使用某个工具）
+    taboos: List[str] = field(default_factory=list)  # 禁忌事项（如：不要提及某个话题）
+    limitations: List[str] = field(default_factory=list)  # 限制条件
+    confidence: float = 0.0
+
+
+@dataclass
+class ToolHint:
+    """工具与平台线索（新增）"""
+    tools_mentioned: List[str] = field(default_factory=list)  # 提到的工具
+    platforms_mentioned: List[str] = field(default_factory=list)  # 提到的平台
+    preferred_workflow: Optional[str] = None  # 偏好的工作流程
+    confidence: float = 0.0
+
+
+@dataclass
+class GoalHint:
+    """目标与风险信号线索（新增）"""
+    goals: List[str] = field(default_factory=list)  # 提到的目标
+    risks: List[str] = field(default_factory=list)  # 风险信号
+    blockers: List[str] = field(default_factory=list)  # 阻碍因素
+    achievements: List[str] = field(default_factory=list)  # 成就/成果
+    confidence: float = 0.0
+
+
+@dataclass
 class FragmentMemory:
     """
     碎片记忆
@@ -93,9 +165,35 @@ class FragmentMemory:
     relation_hint: Optional[RelationHint] = None
     todo_hint: Optional[TodoHint] = None
     
-    # 元数据
+    # 新增线索维度
+    preference_hint: Optional[PreferenceHint] = None
+    topic_hint: Optional[TopicHint] = None
+    constraint_hint: Optional[ConstraintHint] = None
+    tool_hint: Optional[ToolHint] = None
+    goal_hint: Optional[GoalHint] = None
+    
+    # 记忆元数据（新增）
+    memory_type: MemoryType = MemoryType.IMPLICIT  # 记忆类型
+    source: MemorySource = MemorySource.CONVERSATION  # 记忆来源
     confidence: float = 0.0  # 整体提取置信度
+    visibility: MemoryVisibility = MemoryVisibility.PUBLIC  # 可见性
+    ttl_minutes: Optional[int] = None  # 过期时间（分钟），None 表示永不过期
+    metadata: Dict[str, Any] = field(default_factory=dict)  # 额外元数据
+    
+    # 时间戳
     created_at: datetime = field(default_factory=datetime.now)
+    expires_at: Optional[datetime] = None  # 过期时间（自动计算）
+    
+    def __post_init__(self):
+        """初始化后处理：计算过期时间"""
+        if self.ttl_minutes is not None and self.ttl_minutes > 0:
+            self.expires_at = self.created_at + timedelta(minutes=self.ttl_minutes)
+    
+    def is_expired(self) -> bool:
+        """检查是否过期"""
+        if self.expires_at is None:
+            return False
+        return datetime.now() > self.expires_at
     
     def to_dict(self) -> dict:
         """转换为字典格式"""
@@ -132,6 +230,46 @@ class FragmentMemory:
                 "priority": self.todo_hint.priority,
                 "confidence": self.todo_hint.confidence
             } if self.todo_hint else None,
+            "preference_hint": {
+                "response_format": self.preference_hint.response_format,
+                "communication_style": self.preference_hint.communication_style,
+                "preferred_tools": self.preference_hint.preferred_tools,
+                "work_preferences": self.preference_hint.work_preferences,
+                "confidence": self.preference_hint.confidence
+            } if self.preference_hint else None,
+            "topic_hint": {
+                "topics": self.topic_hint.topics,
+                "projects": self.topic_hint.projects,
+                "keywords": self.topic_hint.keywords,
+                "confidence": self.topic_hint.confidence
+            } if self.topic_hint else None,
+            "constraint_hint": {
+                "constraints": self.constraint_hint.constraints,
+                "taboos": self.constraint_hint.taboos,
+                "limitations": self.constraint_hint.limitations,
+                "confidence": self.constraint_hint.confidence
+            } if self.constraint_hint else None,
+            "tool_hint": {
+                "tools_mentioned": self.tool_hint.tools_mentioned,
+                "platforms_mentioned": self.tool_hint.platforms_mentioned,
+                "preferred_workflow": self.tool_hint.preferred_workflow,
+                "confidence": self.tool_hint.confidence
+            } if self.tool_hint else None,
+            "goal_hint": {
+                "goals": self.goal_hint.goals,
+                "risks": self.goal_hint.risks,
+                "blockers": self.goal_hint.blockers,
+                "achievements": self.goal_hint.achievements,
+                "confidence": self.goal_hint.confidence
+            } if self.goal_hint else None,
+            # 记忆元数据
+            "memory_type": self.memory_type.value,
+            "source": self.source.value,
             "confidence": self.confidence,
-            "created_at": self.created_at.isoformat()
+            "visibility": self.visibility.value,
+            "ttl_minutes": self.ttl_minutes,
+            "metadata": self.metadata,
+            # 时间戳
+            "created_at": self.created_at.isoformat(),
+            "expires_at": self.expires_at.isoformat() if self.expires_at else None
         }

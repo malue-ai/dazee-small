@@ -7,12 +7,12 @@ Plan 验证器（Validators）
 3. 执行顺序验证（拓扑排序可行）
 """
 
-from logger import get_logger
+import logging
 from typing import Dict, List, Optional, Set, Tuple
 
 from core.planning.protocol import Plan, PlanStep
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class PlanValidationError(Exception):

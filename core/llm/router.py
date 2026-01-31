@@ -92,9 +92,6 @@ class ModelRouter(BaseLLMService):
         self.policy = _resolve_policy(policy)
         self.health_monitor = health_monitor or get_llm_health_monitor()
         
-        # 🆕 V7.10: 暴露 Primary 的 config，供上层兼容性检查（如 prompt caching）
-        self.config = getattr(self.primary.service, 'config', None)
-        
         # 失败统计
         self._failure_counts: Dict[str, int] = {t.name: 0 for t in self.targets}
         self._last_failure_ts: Dict[str, float] = {t.name: 0.0 for t in self.targets}
@@ -117,22 +114,13 @@ class ModelRouter(BaseLLMService):
         if failures < self.policy.max_failures:
             return True
         
-        # 已达到熔断阈值，检查冷却时间
         last_ts = self._last_failure_ts.get(target.name, 0.0)
-        elapsed = time.time() - last_ts
-        cooldown_passed = elapsed >= self.policy.cooldown_seconds
-        
+        cooldown_passed = (time.time() - last_ts) >= self.policy.cooldown_seconds
         if cooldown_passed:
-            # 🆕 冷却时间已过，尝试恢复
-            logger.info(
-                f"🔄 尝试恢复熔断目标: target={target.name}, "
-                f"冷却时间已过={int(elapsed)}秒"
-            )
             return True
-        
         return False
     
-    def _record_failure(self, target: RouteTarget, error: Exception, force_down: bool = False, is_probe: bool = False) -> None:
+    def _record_failure(self, target: RouteTarget, error: Exception, force_down: bool = False) -> None:
         """
         记录失败
         
@@ -140,43 +128,19 @@ class ModelRouter(BaseLLMService):
             target: 目标
             error: 异常
             force_down: 是否强制标记为不可用
-            is_probe: 是否为探测请求（探测失败不记录 WARNING）
         """
-        previous_failures = self._failure_counts.get(target.name, 0)
-        
         if force_down:
             self._failure_counts[target.name] = max(
-                previous_failures,
+                self._failure_counts.get(target.name, 0),
                 self.policy.max_failures
             )
         else:
-            self._failure_counts[target.name] = previous_failures + 1
-        
-        current_failures = self._failure_counts[target.name]
+            self._failure_counts[target.name] = self._failure_counts.get(target.name, 0) + 1
         self._last_failure_ts[target.name] = time.time()
-        
-        # 探测请求的失败不记录 WARNING（已在 probe 方法中记录 INFO）
-        if not is_probe:
-            # 🔍 DEBUG: 打印 API Key 信息（脱敏）
-            api_key = getattr(target.service, 'config', None)
-            api_key = getattr(api_key, 'api_key', None) if api_key else None
-            if api_key:
-                masked_key = f"{api_key[:8]}...{api_key[-4:]}" if len(api_key) > 12 else "***"
-            else:
-                masked_key = "未配置"
-            
-            logger.warning(
-                f"⚠️ 模型调用失败: target={target.name}, "
-                f"failures={current_failures}, api_key={masked_key}, error={error}"
-            )
-        
-        # 🆕 检测是否刚达到熔断阈值
-        if previous_failures < self.policy.max_failures <= current_failures:
-            logger.warning(
-                f"🔒 模型已熔断: target={target.name}, "
-                f"failures={current_failures}/{self.policy.max_failures}, "
-                f"冷却时间={self.policy.cooldown_seconds}秒"
-            )
+        logger.warning(
+            f"⚠️ 模型调用失败: target={target.name}, "
+            f"failures={self._failure_counts[target.name]}, error={error}"
+        )
     
     def _record_success(self, target: RouteTarget) -> None:
         """
@@ -203,19 +167,6 @@ class ModelRouter(BaseLLMService):
             "model": target.model,
             "base_url": base_url
         }
-    
-    def get_current_model(self) -> str:
-        """
-        获取当前实际使用的模型名称
-        
-        Returns:
-            模型名称（如 "qwen3-max"）
-        """
-        for target in self.targets:
-            if target.name == self._last_selected:
-                return target.model
-        # 如果找不到，返回 primary 的模型
-        return self.primary.model
     
     def _select_targets(self) -> List[RouteTarget]:
         """
@@ -282,11 +233,10 @@ class ModelRouter(BaseLLMService):
                     messages=[Message(role="user", content=message)],
                     system=None,
                     tools=None,
-                    max_tokens=100,  # 轻量级探针
+                    max_tokens=1,
                     temperature=0.0,
-                    override_thinking=False,  # 禁用 thinking（避免 budget_tokens 冲突）
+                    enable_thinking=False,
                     enable_caching=False,
-                    is_probe=True,  # 标记为探测请求，避免 ERROR 日志
                 )
             
             try:
@@ -300,10 +250,6 @@ class ModelRouter(BaseLLMService):
                     self.health_monitor.record_success(target.name, latency_ms)
                 self._record_success(target)
                 self._last_selected = target.name
-                
-                # 探测成功时记录 INFO 日志
-                logger.info(f"✅ 探测成功: {target.name} ({latency_ms:.0f}ms)")
-                
                 return {
                     "primary": self._format_target(self.primary),
                     "selected": self._format_target(target),
@@ -314,24 +260,13 @@ class ModelRouter(BaseLLMService):
                 latency_ms = (time.time() - start_time) * 1000
                 if self.health_monitor:
                     self.health_monitor.record_failure(target.name, latency_ms, e)
-                
-                # 提取 API key 环境变量名（用于日志展示）
-                api_key_env = "未知"
-                if hasattr(target.service, 'config') and hasattr(target.service.config, 'api_key_env'):
-                    api_key_env = target.service.config.api_key_env
-                
                 errors.append({
                     "target": target.name,
                     "provider": target.provider.value,
                     "model": target.model,
-                    "api_key_env": api_key_env,
                     "error": str(e)
                 })
-                
-                # 探测失败时记录 INFO 日志（非 ERROR）
-                logger.info(f"❌ 探测失败: {target.name} (密钥: {api_key_env}) - {str(e)[:100]}")
-                
-                self._record_failure(target, e, force_down=True, is_probe=True)
+                self._record_failure(target, e, force_down=True)
                 last_error = e
                 continue
         
@@ -364,10 +299,6 @@ class ModelRouter(BaseLLMService):
                     self.health_monitor.record_success(target.name, latency_ms)
                 self._record_success(target)
                 self._last_selected = target.name
-                
-                # 🆕 覆盖 response.model 为实际使用的模型（用于准确计费）
-                response.model = target.service.config.model
-                
                 return response
             except Exception as e:
                 latency_ms = (time.time() - start_time) * 1000
@@ -409,8 +340,6 @@ class ModelRouter(BaseLLMService):
                     **kwargs
                 ):
                     yielded = True
-                    # 🆕 覆盖 chunk.model 为实际使用的模型（用于准确计费）
-                    chunk.model = target.service.config.model
                     yield chunk
                 latency_ms = (time.time() - start_time) * 1000
                 if self.health_monitor:

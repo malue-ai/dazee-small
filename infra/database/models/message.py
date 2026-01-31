@@ -1,36 +1,31 @@
 """
 消息模型
-
-使用 PostgreSQL JSONB 类型存储 content 和 metadata
 """
 
 from datetime import datetime
-from typing import Optional, List, Dict, Any, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
+import json
 
-from sqlalchemy import String, DateTime, ForeignKey, Index
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import String, DateTime, Text, Float, ForeignKey, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.dialects.postgresql import JSONB
 
 from infra.database.base import Base
-from infra.database.models.conversation import Conversation
+from infra.database.engine import IS_SQLITE
+
+if TYPE_CHECKING:
+    from infra.database.models.conversation import Conversation
 
 
 class Message(Base):
     """
-    消息表（PostgreSQL JSONB 版本）
+    消息表
     
     存储对话中的消息（用户消息和 AI 回复）
     
     content 格式（Claude API 标准）：
     - 用户消息: [{"type": "text", "text": "..."}]
     - AI 回复: [{"type": "thinking", ...}, {"type": "text", "text": "..."}, {"type": "tool_use", ...}]
-    
-    metadata 存储：
-    - session_id: 会话 ID
-    - model: 使用的模型
-    - usage: token 使用量和计费信息
-    - files: 附件文件信息
-    - plan: Agent 规划信息
     """
     __tablename__ = "messages"
     
@@ -51,42 +46,67 @@ class Message(Base):
         nullable=False
     )  # user, assistant, system
     
-    # ✅ 使用 JSONB 存储 content blocks（直接存取 list）
-    content: Mapped[List[Dict[str, Any]]] = mapped_column(
-        JSONB,
-        nullable=False,
-        default=list
-    )
+    content: Mapped[str] = mapped_column(
+        Text,
+        nullable=False
+    )  # JSON 格式的 content blocks
     
     # 状态（用于流式更新）
     status: Mapped[Optional[str]] = mapped_column(
-        String(32),
-        nullable=True,
-        index=True  # 添加索引，便于查询 streaming 状态的消息
-    )  # processing/completed/stopped/failed
+        Text,
+        nullable=True
+    )  # 字符串: processing/completed/stopped/failed
+    
+    # 评分（用于用户反馈）
+    score: Mapped[Optional[float]] = mapped_column(
+        Float,
+        nullable=True
+    )
     
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=datetime.now,
-        nullable=False
+        nullable=False,
+        index=True
     )
     
-    # ✅ 使用 JSONB 存储 extra_data（数据库列名: metadata）
-    extra_data: Mapped[Dict[str, Any]] = mapped_column(
-        "metadata",
-        JSONB,
-        nullable=False,
-        default=dict
+    # 元数据（使用 JSONB 类型，PostgreSQL 自动优化）
+    # 注意：SQLAlchemy 的 metadata 是保留字，使用 _metadata 作为字段名
+    # 应用层通过 extra_data 属性访问（直接读写 dict，无需序列化）
+    _metadata: Mapped[dict] = mapped_column(
+        "metadata",  # 数据库字段名仍然是 metadata
+        JSONB if not IS_SQLITE else JSON,  # PostgreSQL 使用 JSONB，SQLite 使用 JSON
+        default={},
+        nullable=False
     )
     
     # 关系
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")
     
-    # 复合索引：conversation_id + created_at（常用查询模式）
-    __table_args__ = (
-        Index('idx_messages_conv_created', 'conversation_id', 'created_at'),
-    )
+    @property
+    def extra_data(self) -> dict:
+        """获取元数据（直接返回 dict，无需序列化）"""
+        return self._metadata if isinstance(self._metadata, dict) else {}
+    
+    @extra_data.setter
+    def extra_data(self, value: dict):
+        """设置元数据（直接设置 dict，自动序列化为 JSONB）"""
+        self._metadata = value if isinstance(value, dict) else {}
+    
+    @property
+    def content_blocks(self) -> list:
+        """获取 content blocks（自动解析 JSON）"""
+        try:
+            return json.loads(self.content) if self.content else []
+        except json.JSONDecodeError:
+            # 兼容旧格式（纯文本）
+            return [{"type": "text", "text": self.content}]
+    
+    @content_blocks.setter
+    def content_blocks(self, value: list):
+        """设置 content blocks（自动序列化为 JSON）"""
+        self.content = json.dumps(value, ensure_ascii=False)
     
     def get_text_content(self) -> str:
         """
@@ -94,7 +114,7 @@ class Message(Base):
         
         从 content blocks 中提取所有 text 类型的内容
         """
-        blocks = self.content or []
+        blocks = self.content_blocks
         text_parts = [
             block.get("text", "")
             for block in blocks

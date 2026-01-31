@@ -85,7 +85,7 @@ class PipelineStage:
     # 元数据
     metadata: Dict[str, Any] = field(default_factory=dict)
     
-    def start(self) -> None:
+    def start(self):
         """开始执行"""
         self.status = StageStatus.RUNNING
         self.start_time = time.time()
@@ -93,27 +93,27 @@ class PipelineStage:
         if self.description:
             logger.info(f"   描述: {self.description}")
     
-    def log(self, message: str) -> None:
+    def log(self, message: str):
         """记录处理过程"""
         timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
         log_entry = f"[{timestamp}] {message}"
         self.process_logs.append(log_entry)
         logger.debug(f"   [{self.name}] {message}")
     
-    def set_input(self, data: Dict[str, Any]) -> None:
+    def set_input(self, data: Dict[str, Any]):
         """设置输入数据"""
         self.input_data = data
         # 打印简化的输入日志
         input_preview = self._preview_data(data)
         logger.info(f"   📥 输入: {input_preview}")
     
-    def set_output(self, data: Dict[str, Any]) -> None:
+    def set_output(self, data: Dict[str, Any]):
         """设置输出数据"""
         self.output_data = data
         output_preview = self._preview_data(data)
         logger.info(f"   📤 输出: {output_preview}")
     
-    def complete(self, output: Dict[str, Any] = None) -> None:
+    def complete(self, output: Dict[str, Any] = None):
         """完成执行"""
         self.status = StageStatus.COMPLETED
         self.end_time = time.time()
@@ -124,7 +124,7 @@ class PipelineStage:
         
         logger.info(f"✅ [{self.name}] 完成 (耗时: {self.duration_ms:.1f}ms)")
     
-    def fail(self, error: Exception) -> None:
+    def fail(self, error: Exception):
         """标记失败"""
         self.status = StageStatus.FAILED
         self.end_time = time.time()
@@ -135,7 +135,7 @@ class PipelineStage:
         logger.error(f"❌ [{self.name}] 失败: {error}")
         logger.debug(f"   Traceback: {self.error_traceback}")
     
-    def skip(self, reason: str = "") -> None:
+    def skip(self, reason: str = ""):
         """跳过执行"""
         self.status = StageStatus.SKIPPED
         self.metadata["skip_reason"] = reason
@@ -243,14 +243,14 @@ class E2EPipelineTracer:
         logger.info(f"   Conversation: {conversation_id or 'N/A'}")
         logger.info(f"{'='*70}")
     
-    def set_user_query(self, query: str) -> None:
+    def set_user_query(self, query: str):
         """设置用户查询"""
         self.user_query = query
         logger.info(f"\n📝 用户 Query:")
         logger.info(f"   \"{query[:200]}{'...' if len(query) > 200 else ''}\"")
     
     @contextmanager
-    def stage(self, stage_name: str, description: str = None) -> Any:
+    def stage(self, stage_name: str, description: str = None):
         """
         阶段上下文管理器
         
@@ -311,30 +311,30 @@ class E2EPipelineTracer:
         
         return stage
     
-    def complete_stage(self, stage_name: str, output: Dict[str, Any] = None) -> None:
+    def complete_stage(self, stage_name: str, output: Dict[str, Any] = None):
         """手动完成阶段"""
         if stage_name in self.stages:
             stage = self.stages[stage_name]
             stage.complete(output)
             self.stats["completed_stages"] += 1
     
-    def fail_stage(self, stage_name: str, error: Exception) -> None:
+    def fail_stage(self, stage_name: str, error: Exception):
         """手动标记阶段失败"""
         if stage_name in self.stages:
             stage = self.stages[stage_name]
             stage.fail(error)
             self.stats["failed_stages"] += 1
     
-    def log_code_execution(self) -> None:
+    def log_code_execution(self):
         """记录一次代码执行"""
         self.stats["code_executions"] += 1
     
-    def log_tool_call(self, tool_name: str) -> None:
+    def log_tool_call(self, tool_name: str):
         """记录一次工具调用"""
         self.stats["tool_calls"] += 1
         logger.debug(f"📊 [Tracer] 工具调用 #{self.stats['tool_calls']}: {tool_name}")
     
-    def add_warning(self, warning: str) -> None:
+    def add_warning(self, warning: str):
         """
         添加警告信息
         
@@ -349,11 +349,11 @@ class E2EPipelineTracer:
         self.warnings.append(warning)
         logger.warning(f"⚠️ [Tracer] {warning}")
     
-    def set_final_response(self, response: str) -> None:
+    def set_final_response(self, response: str):
         """设置最终响应"""
         self.final_response = response
     
-    def finish(self) -> None:
+    def finish(self):
         """结束追踪"""
         self.end_time = time.time()
         self.stats["total_duration_ms"] = (self.end_time - self.start_time) * 1000
@@ -361,7 +361,7 @@ class E2EPipelineTracer:
         # 打印执行摘要
         self._print_summary()
     
-    def _print_summary(self) -> None:
+    def _print_summary(self):
         """打印执行摘要"""
         logger.info(f"\n{'='*70}")
         logger.info(f"📊 E2E Pipeline 执行摘要")

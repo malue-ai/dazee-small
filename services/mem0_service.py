@@ -55,7 +55,7 @@ class Mem0Service:
     
     _instance: Optional["Mem0Service"] = None
     
-    def __init__(self) -> None:
+    def __init__(self):
         self._pool = None
         self._background_service = None
     
@@ -66,7 +66,7 @@ class Mem0Service:
             cls._instance = cls()
         return cls._instance
     
-    def _get_pool(self) -> Any:
+    def _get_pool(self):
         """获取 Mem0 Pool（懒加载）"""
         if self._pool is None:
             try:
@@ -82,14 +82,6 @@ class Mem0Service:
             from utils.background_tasks import get_background_task_service
             self._background_service = get_background_task_service()
         return self._background_service
-    
-    def _get_mem0_task_functions(self):
-        """获取 Mem0 任务函数（懒加载）"""
-        from utils.background_tasks.tasks.mem0_update import (
-            batch_update_all_memories,
-            update_user_memories,
-        )
-        return batch_update_all_memories, update_user_memories
     
     # ==================== 搜索 ====================
     
@@ -183,7 +175,7 @@ class Mem0Service:
                 return []
             
             # 2. LLM 重排序
-            from core.memory.mem0.reranker import get_reranker
+            from core.memory.mem0.retrieval.reranker import get_reranker
             reranker = get_reranker()
             reranked = await reranker.rerank(
                 query=query,
@@ -360,7 +352,7 @@ class Mem0Service:
         """
         批量更新所有用户记忆
         
-        直接调用 tasks/mem0_update.py 中的函数
+        复用 BackgroundTaskService 实现
         
         Args:
             since_hours: 处理过去多少小时的会话
@@ -370,17 +362,15 @@ class Mem0Service:
             批量更新结果
         """
         try:
-            batch_update_all_memories, _ = self._get_mem0_task_functions()
             service = self._get_background_service()
             
             logger.info(
                 f"🚀 触发批量更新: since={since_hours}h, max_concurrent={max_concurrent}"
             )
             
-            result = await batch_update_all_memories(
+            result = await service.batch_update_all_memories(
                 since_hours=since_hours,
-                max_concurrent=max_concurrent,
-                service=service
+                max_concurrent=max_concurrent
             )
             
             return BatchUpdateResult(
@@ -412,8 +402,6 @@ class Mem0Service:
         """
         更新单个用户的记忆
         
-        直接调用 tasks/mem0_update.py 中的函数
-        
         Args:
             user_id: 用户 ID
             since_hours: 处理过去多少小时的会话
@@ -422,13 +410,11 @@ class Mem0Service:
             更新结果
         """
         try:
-            _, update_user_memories = self._get_mem0_task_functions()
             service = self._get_background_service()
             
-            result = await update_user_memories(
+            result = await service.update_user_memories(
                 user_id=user_id,
-                since_hours=since_hours,
-                service=service
+                since_hours=since_hours
             )
             
             return UpdateResult(

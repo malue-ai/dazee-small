@@ -73,7 +73,7 @@ infra/
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                           外部存储系统                                   │
-│     PostgreSQL     │ Redis │ 文件系统/S3 │ Milvus │ Neo4j              │
+│  SQLite/PostgreSQL │ Redis │ 文件系统/S3 │ Milvus │ Neo4j              │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -82,11 +82,11 @@ infra/
 ### Database (必需)
 
 ```bash
-# PostgreSQL（必须配置）
-DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/zenflux
+# SQLite (开发环境)
+DATABASE_URL=sqlite+aiosqlite:///./data/zenflux.db
 
-# Docker Compose 本地开发
-DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/zenflux
+# PostgreSQL (生产环境)
+DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/zenflux
 ```
 
 ### Cache (可选)
@@ -303,7 +303,7 @@ class Task(Base):
 
 | 模块 | 状态 | 后端支持 |
 |------|------|----------|
-| database | ✅ 已实现 | PostgreSQL |
+| database | ✅ 已实现 | SQLite, PostgreSQL |
 | cache | ✅ 已实现 | Redis |
 | storage | ✅ 部分实现 | Local |
 | vector | 🔲 预留 | Milvus, Qdrant, Pinecone |

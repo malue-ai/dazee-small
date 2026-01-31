@@ -8,11 +8,9 @@
 4. 统计分析
 """
 
-import asyncio
 import json
 import os
-import aiofiles
-from logger import get_logger
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -20,7 +18,7 @@ from dataclasses import asdict
 
 from core.monitoring.failure_detector import FailureCase, FailureType, FailureSeverity
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class FailureCaseDB:
@@ -51,8 +49,6 @@ class FailureCaseDB:
         Args:
             storage_path: 存储路径
             retention_days: 保留天数
-        
-        注意：需要调用 await initialize() 完成异步初始化
         """
         self.storage_path = Path(storage_path)
         self.retention_days = retention_days
@@ -63,30 +59,16 @@ class FailureCaseDB:
         # 内存缓存
         self._cache: Dict[str, FailureCase] = {}
         
-        # 初始化标记
-        self._initialized: bool = False
-    
-    async def initialize(self) -> None:
-        """
-        异步初始化：加载现有案例
-        
-        使用方式：
-            db = FailureCaseDB()
-            await db.initialize()
-        """
-        if self._initialized:
-            return
-        
-        await self._load_all_async()
-        self._initialized = True
+        # 加载现有案例
+        self._load_all()
     
     # ===================
     # 存储操作
     # ===================
     
-    async def save(self, case: FailureCase) -> None:
+    def save(self, case: FailureCase) -> None:
         """
-        保存失败案例（异步）
+        保存失败案例
         
         Args:
             case: 失败案例
@@ -94,12 +76,11 @@ class FailureCaseDB:
         # 保存到内存缓存
         self._cache[case.id] = case
         
-        # 持久化到文件（异步）
+        # 持久化到文件
         file_path = self._get_file_path(case.id)
-        content = json.dumps(case.to_dict(), ensure_ascii=False, indent=2)
         
-        async with aiofiles.open(file_path, "w", encoding="utf-8") as f:
-            await f.write(content)
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(case.to_dict(), f, ensure_ascii=False, indent=2)
         
         logger.debug(f"💾 保存失败案例: {case.id}")
     
@@ -138,14 +119,14 @@ class FailureCaseDB:
         """
         return self._cache.get(case_id)
     
-    async def update(self, case: FailureCase) -> None:
+    def update(self, case: FailureCase) -> None:
         """
-        更新失败案例（异步）
+        更新失败案例
         
         Args:
             case: 失败案例
         """
-        await self.save(case)
+        self.save(case)
     
     # ===================
     # 查询操作
@@ -356,14 +337,14 @@ class FailureCaseDB:
         
         return graders
     
-    async def export_to_yaml_file(
+    def export_to_yaml_file(
         self,
         output_path: str,
         case_ids: Optional[List[str]] = None,
         failure_types: Optional[List[FailureType]] = None
     ) -> str:
         """
-        导出为YAML文件（异步）
+        导出为YAML文件
         
         Args:
             output_path: 输出文件路径
@@ -397,9 +378,8 @@ class FailureCaseDB:
         output_file = Path(output_path)
         output_file.parent.mkdir(parents=True, exist_ok=True)
         
-        content = yaml.dump(suite, allow_unicode=True, default_flow_style=False)
-        async with aiofiles.open(output_file, "w", encoding="utf-8") as f:
-            await f.write(content)
+        with open(output_file, "w", encoding="utf-8") as f:
+            yaml.dump(suite, f, allow_unicode=True, default_flow_style=False)
         
         logger.info(f"📄 导出回归测试套件: {output_path} ({len(tasks)} 个任务)")
         
@@ -484,15 +464,12 @@ class FailureCaseDB:
         """获取案例文件路径"""
         return self.storage_path / f"{case_id}.json"
     
-    async def _load_all_async(self) -> None:
-        """异步加载所有案例到内存"""
-        # 使用 asyncio.to_thread 包装同步的 glob 操作
-        file_paths = await asyncio.to_thread(list, self.storage_path.glob("*.json"))
-        for file_path in file_paths:
+    def _load_all(self) -> None:
+        """加载所有案例到内存"""
+        for file_path in self.storage_path.glob("*.json"):
             try:
-                async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
-                    content = await f.read()
-                    data = json.loads(content)
+                with open(file_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
                 
                 case = self._dict_to_case(data)
                 self._cache[case.id] = case

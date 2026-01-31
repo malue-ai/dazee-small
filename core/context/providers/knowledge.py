@@ -6,12 +6,12 @@
 - 个人知识库（用户上传的文档）
 """
 from typing import List, Dict, Any
+import logging
 
 from core.context.provider import ContextProvider, ContextType
-from logger import get_logger
 # from services.ragie_service import get_ragie_service  # TODO: 实现 Ragie 服务
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class KnowledgeProvider(ContextProvider):
@@ -24,7 +24,7 @@ class KnowledgeProvider(ContextProvider):
     - 支持分区（多租户）
     """
     
-    def __init__(self) -> None:
+    def __init__(self):
         # self.ragie = get_ragie_service()  # TODO: 初始化 Ragie
         logger.info("KnowledgeProvider initialized")
     

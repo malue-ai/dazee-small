@@ -215,7 +215,7 @@ agent = create_simple_agent(
 
 ### 阶段 2: Intent Analysis ✅ 良好
 
-**实现位置**: `core/agent/simple_agent.py` L305-353
+**实现位置**: `core/agent/simple/simple_agent.py` L305-353
 
 **符合度**: 90% ✅
 
@@ -243,7 +243,7 @@ if self.schema.intent_analyzer.enabled and self.intent_analyzer:
 
 ### 阶段 3: Tool Selection ✅ 优秀
 
-**实现位置**: `core/agent/simple_agent.py` L392-489
+**实现位置**: `core/agent/simple/simple_agent.py` L392-489
 
 **符合度**: 95% ✅
 
@@ -276,7 +276,7 @@ if not use_skill_path and len(selection.tool_names) > 0:
 
 ### 阶段 4: System Prompt 组装 + LLM 调用准备 ⚠️ 需改进
 
-**实现位置**: `core/agent/simple_agent.py` L355-513
+**实现位置**: `core/agent/simple/simple_agent.py` L355-513
 
 **符合度**: 70% ⚠️
 
@@ -387,7 +387,7 @@ plan_todo 工具内部流程（封装闭环）：
 
 ### 阶段 6: RVR Loop ✅ 良好
 
-**实现位置**: `core/agent/simple_agent.py` L515-613
+**实现位置**: `core/agent/simple/simple_agent.py` L515-613
 
 **符合度**: 90% ✅
 
@@ -442,7 +442,7 @@ for turn in range(self.max_turns):
 
 ### 阶段 7: Final Output & Tracing Report ✅ 良好
 
-**实现位置**: `core/agent/simple_agent.py` L615-639
+**实现位置**: `core/agent/simple/simple_agent.py` L615-639
 
 **符合度**: 85% ✅
 
@@ -537,7 +537,7 @@ if self.context_engineering and self._plan_cache.get("plan"):
 
 **修复方案**:
 ```python
-# core/agent/simple_agent.py - chat() 方法
+# core/agent/simple/simple_agent.py - chat() 方法
 
 async def chat(...):
     """7 阶段完整流程（参考 docs/00-ARCHITECTURE-V4.md L1693-1979）"""

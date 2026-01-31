@@ -13,8 +13,7 @@ Token 审计模块
 """
 
 import json
-import aiofiles
-from logger import get_logger
+import logging
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -22,10 +21,93 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 from evaluation.models import TokenUsage
-# 使用统一的定价数据源
-from core.billing.pricing_data import CLAUDE_PRICING, get_model_pricing
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# 计费价格表（2026-01 Claude 4.5 定价，$/百万tokens）
+# ============================================================
+
+CLAUDE_PRICING = {
+    # model_name -> {input, output, cache_write, cache_read}
+    # Opus 系列
+    "claude-opus-4.5": {
+        "input": 5.0,
+        "output": 25.0,
+        "cache_write": 6.25,   # 5m cache: 25% 加价
+        "cache_read": 0.5      # cache hit: 90% 折扣
+    },
+    "claude-opus-4.1": {
+        "input": 15.0,
+        "output": 75.0,
+        "cache_write": 18.75,
+        "cache_read": 1.5
+    },
+    "claude-opus-4": {
+        "input": 15.0,
+        "output": 75.0,
+        "cache_write": 18.75,
+        "cache_read": 1.5
+    },
+    "claude-opus-3": {  # deprecated
+        "input": 15.0,
+        "output": 75.0,
+        "cache_write": 18.75,
+        "cache_read": 1.5
+    },
+    # Sonnet 系列
+    "claude-sonnet-4.5": {
+        "input": 3.0,
+        "output": 15.0,
+        "cache_write": 3.75,
+        "cache_read": 0.3
+    },
+    "claude-sonnet-4-5-20250929": {  # 完整模型名
+        "input": 3.0,
+        "output": 15.0,
+        "cache_write": 3.75,
+        "cache_read": 0.3
+    },
+    "claude-sonnet-4": {
+        "input": 3.0,
+        "output": 15.0,
+        "cache_write": 3.75,
+        "cache_read": 0.3
+    },
+    "claude-sonnet-3.7": {  # deprecated
+        "input": 3.0,
+        "output": 15.0,
+        "cache_write": 3.75,
+        "cache_read": 0.3
+    },
+    # Haiku 系列
+    "claude-haiku-4.5": {
+        "input": 1.0,
+        "output": 5.0,
+        "cache_write": 1.25,
+        "cache_read": 0.1
+    },
+    "claude-haiku-3.5": {
+        "input": 0.8,
+        "output": 4.0,
+        "cache_write": 1.0,
+        "cache_read": 0.08
+    },
+    "claude-haiku-3": {
+        "input": 0.25,
+        "output": 1.25,
+        "cache_write": 0.3,
+        "cache_read": 0.03
+    },
+    # 默认使用 Sonnet 价格
+    "default": {
+        "input": 3.0,
+        "output": 15.0,
+        "cache_write": 3.75,
+        "cache_read": 0.3
+    }
+}
 
 
 class AuditLevel(str, Enum):
@@ -161,7 +243,7 @@ class TokenAuditor:
             f"billing_log={'enabled' if enable_billing_log else 'disabled'}"
         )
     
-    async def record(
+    def record(
         self,
         session_id: str,
         usage: TokenUsage,
@@ -252,9 +334,9 @@ class TokenAuditor:
             f"thinking={usage.thinking_tokens:,}, cache_read={usage.cache_read_tokens:,}"
         )
         
-        # 写入计费日志（异步）
+        # 写入计费日志
         if self.enable_billing_log:
-            await self._write_to_log(record)
+            self._write_to_log(record)
         
         return record
     
@@ -478,9 +560,9 @@ class TokenAuditor:
             "total": round(total_cost, 6)
         }
     
-    async def _write_to_log(self, record: TokenAuditRecord):
+    def _write_to_log(self, record: TokenAuditRecord):
         """
-        写入计费日志（JSON Lines 格式，异步）
+        写入计费日志（JSON Lines 格式）
         
         日志文件结构：
         logs/tokens/
@@ -528,9 +610,9 @@ class TokenAuditor:
                 "anomaly_reason": record.anomaly_reason
             }
             
-            # 异步追加写入
-            async with aiofiles.open(log_file, "a", encoding="utf-8") as f:
-                await f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+            # 追加写入
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
             
             logger.debug(f"💰 计费日志: user={user_id}, cost=${cost['total']:.4f}")
             

@@ -10,14 +10,14 @@
 
 import asyncio
 import time
-from logger import get_logger
+import logging
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional
 from dataclasses import dataclass, field
 from enum import Enum
 from collections import deque
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class MetricType(str, Enum):

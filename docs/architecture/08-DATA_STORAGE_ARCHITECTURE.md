@@ -382,7 +382,7 @@ workspace/
 │   ├── templates/              # PPT/文档模板
 │   ├── assets/                 # 静态资源
 │   └── cache/                  # 本地缓存
-├── database/                    # 数据库相关（已迁移至 PostgreSQL）
+├── database/                    # SQLite 数据库
 │   └── zenflux.db
 └── knowledge/                   # 知识库文件
     └── documents/

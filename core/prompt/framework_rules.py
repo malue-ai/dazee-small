@@ -1,6 +1,7 @@
 """
 🆕 V5.3 框架默认规则 - 泛化的 Agent 核心能力框架
 🆕 V6.1 新增系统提示词边界定义（模块保留/移除列表）
+🆕 V7.0 提示词模板外部化：从 prompts/templates/ 加载
 
 设计哲学（基于 15-FRAMEWORK_PROMPT_CONTRACT.md）：
 ┌─────────────────────────────────────────────────────────────────┐
@@ -28,7 +29,36 @@
 参考：docs/architecture/15-FRAMEWORK_PROMPT_CONTRACT.md
 """
 
+import logging
+from pathlib import Path
 from typing import Dict, List
+
+logger = logging.getLogger(__name__)
+
+# ============================================================
+# 模板文件路径
+# ============================================================
+
+TEMPLATES_DIR = Path(__file__).parent.parent.parent / "prompts" / "templates"
+
+
+def _load_template(filename: str) -> str:
+    """
+    从 prompts/templates/ 目录加载模板文件
+    
+    Args:
+        filename: 模板文件名（如 intent_prompt_generation.md）
+        
+    Returns:
+        模板内容字符串
+    """
+    template_path = TEMPLATES_DIR / filename
+    if template_path.exists():
+        with open(template_path, "r", encoding="utf-8") as f:
+            return f.read()
+    else:
+        logger.warning(f"模板文件不存在: {template_path}")
+        return ""
 
 
 # ============================================================
@@ -682,37 +712,70 @@ COMPLEX_PROMPT_GENERATION_TEMPLATE = '''你是一个专业的 AI Agent 系统提
 # 便捷函数（场景化提示词生成）
 # ============================================================
 
+# 模板缓存（避免重复读取文件）
+_template_cache: Dict[str, str] = {}
+
+
+def _get_cached_template(filename: str) -> str:
+    """获取缓存的模板内容"""
+    if filename not in _template_cache:
+        _template_cache[filename] = _load_template(filename)
+    return _template_cache[filename]
+
+
 def get_intent_prompt_template(user_prompt: str, schema_summary: str = "") -> str:
     """
     获取意图识别提示词生成的模板
     
-    🆕 V6.1: 支持注入 AgentSchema 能力摘要，确保意图识别与 Agent 能力一致
+    🆕 V7.0: 从 prompts/templates/intent_prompt_generation.md 加载
     
     Args:
         user_prompt: 运营配置的完整系统提示词（需要完整分析提取意图定义）
-        schema_summary: 🆕 AgentSchema 能力摘要（可选，用于确保意图分类与 Agent 能力一致）
+        schema_summary: AgentSchema 能力摘要（可选，用于确保意图分类与 Agent 能力一致）
     """
+    template = _get_cached_template("intent_prompt_generation.md")
+    if not template:
+        # 回退到硬编码模板（兼容性）
+        template = INTENT_PROMPT_GENERATION_TEMPLATE
+    
     # 意图识别需要完整分析原始提示词，提取意图定义
-    # 因此不应该截断，但为防止超长，限制在 60000 字符
     # 使用 replace 而非 format，避免用户 prompt 中的 {} 被误解析
-    result = INTENT_PROMPT_GENERATION_TEMPLATE.replace(
-        "{user_prompt_summary}", user_prompt[:60000]
-    )
-    # 🆕 V6.1: 注入 Schema 能力摘要
+    result = template.replace("{user_prompt_summary}", user_prompt[:60000])
     result = result.replace("{schema_summary}", schema_summary)
     return result
 
 
 def get_simple_prompt_template(user_prompt: str) -> str:
-    """获取简单任务提示词生成的模板"""
-    return SIMPLE_PROMPT_GENERATION_TEMPLATE.replace("{user_prompt}", user_prompt)
+    """
+    获取简单任务提示词生成的模板
+    
+    🆕 V7.0: 从 prompts/templates/simple_prompt_generation.md 加载
+    """
+    template = _get_cached_template("simple_prompt_generation.md")
+    if not template:
+        template = SIMPLE_PROMPT_GENERATION_TEMPLATE
+    return template.replace("{user_prompt}", user_prompt)
 
 
 def get_medium_prompt_template(user_prompt: str) -> str:
-    """获取中等任务提示词生成的模板"""
-    return MEDIUM_PROMPT_GENERATION_TEMPLATE.replace("{user_prompt}", user_prompt)
+    """
+    获取中等任务提示词生成的模板
+    
+    🆕 V7.0: 从 prompts/templates/medium_prompt_generation.md 加载
+    """
+    template = _get_cached_template("medium_prompt_generation.md")
+    if not template:
+        template = MEDIUM_PROMPT_GENERATION_TEMPLATE
+    return template.replace("{user_prompt}", user_prompt)
 
 
 def get_complex_prompt_template(user_prompt: str) -> str:
-    """获取复杂任务提示词生成的模板"""
-    return COMPLEX_PROMPT_GENERATION_TEMPLATE.replace("{user_prompt}", user_prompt)
+    """
+    获取复杂任务提示词生成的模板
+    
+    🆕 V7.0: 从 prompts/templates/complex_prompt_generation.md 加载
+    """
+    template = _get_cached_template("complex_prompt_generation.md")
+    if not template:
+        template = COMPLEX_PROMPT_GENERATION_TEMPLATE
+    return template.replace("{user_prompt}", user_prompt)

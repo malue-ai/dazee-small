@@ -81,7 +81,7 @@ def _parse_response(self, response, invocation_type=None) -> LLMResponse:
 ### 2. Agent 累积 Usage
 
 ```python
-# core/agent/simple_agent.py
+# core/agent/simple/simple_agent.py
 
 async def _process_stream(...):
     # ... 流式处理 ...

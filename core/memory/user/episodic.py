@@ -13,7 +13,6 @@ Episodic Memory - 用户历史经验
 """
 
 import json
-import aiofiles
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from pathlib import Path
@@ -32,10 +31,6 @@ class EpisodicMemory(BaseScopedMemory):
     - 历史会话记录
     - 成功/失败的经验
     - 质量评估数据
-    
-    使用方式：
-        memory = EpisodicMemory(user_id="user_123", storage_path="data/episodes.json")
-        await memory.initialize()  # 必须调用以加载数据
     
     Args:
         user_id: 用户 ID（用于隔离数据）
@@ -57,26 +52,12 @@ class EpisodicMemory(BaseScopedMemory):
         self.user_id = user_id
         self.storage_path = Path(storage_path) if storage_path else None
         self.episodes: List[Dict[str, Any]] = []
-        self._initialized: bool = False
-    
-    async def initialize(self) -> None:
-        """
-        异步初始化：加载持久化数据
         
-        使用方式：
-            memory = EpisodicMemory(...)
-            await memory.initialize()
-        """
-        if self._initialized:
-            return
-        
+        # 如果有存储路径，加载历史
         if self.storage_path and self.storage_path.exists():
-            await self._load_async()
-        
-        self._initialized = True
-        logger.debug(f"[EpisodicMemory] 初始化完成: user_id={self.user_id}")
+            self._load()
     
-    async def add_episode(
+    def add_episode(
         self,
         task_id: str,
         user_intent: str,
@@ -85,7 +66,7 @@ class EpisodicMemory(BaseScopedMemory):
         metadata: Optional[Dict[str, Any]] = None
     ):
         """
-        添加一个历史情节（异步版本）
+        添加一个历史情节
         
         Args:
             task_id: 任务 ID（原 session_id）
@@ -107,7 +88,7 @@ class EpisodicMemory(BaseScopedMemory):
         
         # 自动持久化
         if self.storage_path:
-            await self._save()
+            self._save()
         
         logger.debug(f"[EpisodicMemory] 添加情节: task_id={task_id}, user_id={self.user_id}")
     
@@ -181,30 +162,29 @@ class EpisodicMemory(BaseScopedMemory):
             if e.get("metadata", {}).get(key) == value
         ]
     
-    async def clear(self) -> None:
-        """清空所有情节（异步版本）"""
+    def clear(self):
+        """清空所有情节"""
         self.episodes.clear()
         if self.storage_path:
-            await self._save()
+            self._save()
     
-    async def _save(self) -> None:
-        """异步持久化到文件"""
+    def _save(self):
+        """持久化到文件"""
         if not self.storage_path:
             return
         
         self.storage_path.parent.mkdir(parents=True, exist_ok=True)
-        async with aiofiles.open(self.storage_path, 'w', encoding='utf-8') as f:
-            await f.write(json.dumps(self.episodes, ensure_ascii=False, indent=2))
+        with open(self.storage_path, 'w', encoding='utf-8') as f:
+            json.dump(self.episodes, f, ensure_ascii=False, indent=2)
     
-    async def _load_async(self) -> None:
-        """异步从文件加载"""
+    def _load(self):
+        """从文件加载"""
         if not self.storage_path or not self.storage_path.exists():
             return
         
         try:
-            async with aiofiles.open(self.storage_path, 'r', encoding='utf-8') as f:
-                content = await f.read()
-                self.episodes = json.loads(content)
+            with open(self.storage_path, 'r', encoding='utf-8') as f:
+                self.episodes = json.load(f)
         except Exception as e:
             logger.warning(f"[EpisodicMemory] 加载失败: {e}")
             self.episodes = []
@@ -227,14 +207,9 @@ def create_episodic_memory(
     """
     创建 EpisodicMemory 实例
     
-    注意：创建后需要调用 await memory.initialize() 完成异步初始化
-    
     Args:
         user_id: 用户 ID（用于隔离数据）
         storage_dir: 存储目录（自动生成文件名）
-        
-    Returns:
-        EpisodicMemory 实例（需要调用 initialize() 加载数据）
     """
     storage_path = None
     if storage_dir:
@@ -244,23 +219,4 @@ def create_episodic_memory(
             storage_path = str(Path(storage_dir) / "episodic.json")
     
     return EpisodicMemory(user_id=user_id, storage_path=storage_path)
-
-
-async def create_episodic_memory_async(
-    user_id: Optional[str] = None,
-    storage_dir: Optional[str] = None
-) -> EpisodicMemory:
-    """
-    创建并初始化 EpisodicMemory 实例（异步版本）
-    
-    Args:
-        user_id: 用户 ID（用于隔离数据）
-        storage_dir: 存储目录（自动生成文件名）
-        
-    Returns:
-        已初始化的 EpisodicMemory 实例
-    """
-    memory = create_episodic_memory(user_id=user_id, storage_dir=storage_dir)
-    await memory.initialize()
-    return memory
 

@@ -53,7 +53,7 @@
 │  └──────────────────────────────────────────────┘  │
 │                                                     │
 │  持久化存储 (EFS):                                  │
-│  ├─ /app/workspace  (应用文件、临时数据)            │
+│  ├─ /app/workspace  (SQLite 数据库、文件)          │
 │  ├─ /app/logs       (应用日志)                     │
 │  └─ /app/config     (配置文件)                     │
 └─────────────────────────────────────────────────────┘
@@ -103,7 +103,7 @@ cd /Users/kaneki/Python/zenflux_agent
 | **VPC** | vpc-0c7d3d0bd0b1dcdce (复用) |
 | **ALB** | zen0-b-Publi-NMnJaDU9XzTR (复用) |
 | **Redis** | zen0-backend-staging-redis (复用) |
-| **数据库** | AWS RDS PostgreSQL |
+| **数据库** | SQLite on EFS |
 
 ---
 
@@ -123,7 +123,7 @@ cd /Users/kaneki/Python/zenflux_agent
 
 3. **持久化存储**
    - EFS 挂载（workspace, logs, config）
-   - AWS RDS PostgreSQL 数据库
+   - SQLite 数据库
    - 自动备份支持
 
 4. **环境变量管理**

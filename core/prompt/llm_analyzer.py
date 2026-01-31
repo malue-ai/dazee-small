@@ -21,17 +21,12 @@
 └─────────────────────────────────────────────────────────────┘
 """
 
-# 1. 标准库
-import asyncio
 import json
+import asyncio
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import Dict, List, Optional, Any, Set
+from enum import Enum
 
-# 2. 第三方库（无）
-
-# 3. 本地模块
-from core.llm import Message
 from logger import get_logger
 
 logger = get_logger("llm_prompt_analyzer")
@@ -189,7 +184,6 @@ class LLMPromptAnalyzer:
             from config.llm_config import get_llm_profile
             
             # 🆕 V5.3: 从配置文件获取 LLM Profile（优先使用 Claude Sonnet 4.5）
-            # 🆕 V7.10: 使用 create_llm_service 支持多模型容灾
             profile = get_llm_profile("llm_analyzer")
             logger.info(f"📦 使用 LLM Profile: llm_analyzer, model={profile.get('model')}")
             
@@ -452,7 +446,6 @@ async def merge_with_framework_rules(user_prompt: str) -> str:
     from config.llm_config import get_llm_profile
     
     # 🆕 V5.3: 从配置文件获取 LLM Profile（优先使用 Claude Sonnet 4.5）
-    # 🆕 V7.10: 使用 create_llm_service 支持多模型容灾
     profile = get_llm_profile("prompt_merger")
     logger.info(f"📦 使用 LLM Profile: prompt_merger, model={profile.get('model')}")
     
@@ -460,9 +453,9 @@ async def merge_with_framework_rules(user_prompt: str) -> str:
     system_prompt, user_message = get_merge_prompts(user_prompt)
 
     try:
-        # 使用 create_llm_service（支持多模型容灾）
         llm_service = create_llm_service(**profile)
         
+        from core.llm import Message
         response = await llm_service.create_message_async(
             system=system_prompt,
             messages=[Message(role="user", content=user_message)],

@@ -1,15 +1,15 @@
 """
-文件处理器 - File Processor（纯 URL 模式，无数据库）
+文件处理器 - File Processor
 
 职责：
-1. 根据 file_url 处理文件
+1. 根据 file_id 或 file_url 获取文件
 2. 根据 MIME 类型分类处理
 3. 生成 LLM 可用的 content blocks
 
 处理策略：
-- 图片 (image/*) → 直接使用 URL → ImageBlock
+- 图片 (image/*) → 下载 → base64 → ImageBlock
 - 纯文本 (text/plain, text/markdown) → 下载 → 读取内容 → 拼进消息
-- 复杂文件 (PDF 等) → 直接使用 URL → 拼进消息，让 Agent 决定
+- 复杂文件 (PDF 等) → 生成预签名 URL → 拼进消息，让 Agent 决定
 """
 
 import base64
@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from enum import Enum
 
 from logger import get_logger
+from infra.database import AsyncSessionLocal, crud
+from utils.s3_uploader import get_s3_uploader, S3UploaderError
 
 logger = get_logger("file_processor")
 
@@ -27,7 +29,7 @@ class FileCategory(Enum):
     """文件分类"""
     IMAGE = "image"           # 图片：直接传给 LLM
     TEXT = "text"             # 纯文本：读取内容拼进消息
-    DOCUMENT = "document"     # 复杂文档：提供 URL，让 Agent 决定
+    DOCUMENT = "document"     # 复杂文档：生成 URL，让 Agent 决定
 
 
 @dataclass
@@ -39,8 +41,9 @@ class ProcessedFile:
     # 根据 category 不同，以下字段有不同含义
     content_block: Optional[Dict[str, Any]] = None  # category=IMAGE 时使用
     text_content: Optional[str] = None              # category=TEXT 时使用
-    file_url: Optional[str] = None                  # 文件 URL
+    file_url: Optional[str] = None                  # category=DOCUMENT 时使用
     file_size: Optional[int] = None                 # 文件大小（字节）
+    file_id: Optional[str] = None                   # 文件 ID（如果是从数据库获取的）
 
 
 class FileProcessorError(Exception):
@@ -48,14 +51,19 @@ class FileProcessorError(Exception):
     pass
 
 
+class FileNotFoundError(FileProcessorError):
+    """文件不存在"""
+    pass
+
+
 class FileProcessor:
     """
-    文件处理器（纯 URL 模式）
+    文件处理器
     
     使用方法：
         processor = FileProcessor()
         processed_files = await processor.process_files(files)
-        content_blocks = processor.build_message_content(processed_files, user_message)
+        content_blocks, attachment_text = processor.build_message_content(processed_files)
     """
     
     # 图片 MIME 类型
@@ -69,11 +77,14 @@ class FileProcessor:
         "application/json", "application/xml"
     }
     
-    # 最大文本大小（50KB）
-    MAX_TEXT_SIZE = 50 * 1024
+    # 最大图片大小（20MB）
+    MAX_IMAGE_SIZE = 20 * 1024 * 1024
     
-    # 预览文本最大字符数
-    MAX_PREVIEW_CHARS = 200
+    # 最大文本大小（1MB）
+    MAX_TEXT_SIZE = 1 * 1024 * 1024
+    
+    def __init__(self):
+        self.s3_uploader = get_s3_uploader()
     
     async def process_files(
         self,
@@ -83,7 +94,7 @@ class FileProcessor:
         处理文件列表
         
         Args:
-            files: 文件引用列表，每个元素包含 file_url + 元数据
+            files: 文件引用列表，每个元素包含 file_id 或 file_url
             
         Returns:
             处理后的文件列表
@@ -92,23 +103,16 @@ class FileProcessor:
         
         for file_ref in files:
             try:
+                file_id = file_ref.get("file_id")
                 file_url = file_ref.get("file_url")
                 
-                if not file_url:
-                    logger.warning("文件引用无效：缺少 file_url")
+                if file_id:
+                    result = await self._process_by_file_id(file_id)
+                elif file_url:
+                    result = await self._process_by_url(file_url)
+                else:
+                    logger.warning("文件引用无效：缺少 file_id 和 file_url")
                     continue
-                
-                # 从文件引用中获取元数据（前端已传递）
-                file_name = file_ref.get("file_name") or file_ref.get("filename")
-                file_type = file_ref.get("file_type") or file_ref.get("mime_type")
-                file_size = file_ref.get("file_size")
-                
-                result = await self._process_by_url(
-                    url=file_url,
-                    filename=file_name,
-                    mime_type=file_type,
-                    file_size=file_size
-                )
                 
                 if result:
                     processed.append(result)
@@ -120,39 +124,104 @@ class FileProcessor:
         
         return processed
     
-    async def _process_by_url(
-        self,
-        url: str,
-        filename: Optional[str] = None,
-        mime_type: Optional[str] = None,
-        file_size: Optional[int] = None
-    ) -> Optional[ProcessedFile]:
+    async def _process_by_file_id(self, file_id: str) -> Optional[ProcessedFile]:
         """
-        通过 URL 处理文件
+        通过 file_id 处理文件
         
-        如果提供了元数据（filename, mime_type, file_size），直接使用
-        否则发送 HEAD 请求获取
-        
-        Args:
-            url: 文件 URL
-            filename: 文件名（可选，前端传递）
-            mime_type: MIME 类型（可选，前端传递）
-            file_size: 文件大小（可选，前端传递）
+        1. 查数据库获取文件信息
+        2. 根据 MIME 类型分类
+        3. 从 S3 下载内容或生成预签名 URL
         """
-        # 如果没有元数据，发送 HEAD 请求获取
-        if not mime_type or not filename:
-            detected_mime, detected_size, detected_name = await self._get_url_file_info(url)
-            mime_type = mime_type or detected_mime
-            file_size = file_size or detected_size
-            filename = filename or detected_name
+        # 1. 查数据库
+        async with AsyncSessionLocal() as session:
+            file_record = await crud.get_file(session, file_id)
         
-        logger.info(f"📎 处理 URL 文件: {filename}, MIME={mime_type}, size={file_size}")
+        if not file_record:
+            raise FileNotFoundError(f"文件不存在: {file_id}")
         
-        # 分类处理
+        filename = file_record.filename
+        mime_type = file_record.mime_type
+        storage_path = file_record.storage_path
+        file_size = file_record.file_size
+        
+        logger.info(f"📎 处理文件: {filename}, MIME={mime_type}, size={file_size}")
+        
+        # 2. 分类处理
         category = self._categorize_mime_type(mime_type)
         
         if category == FileCategory.IMAGE:
-            # 图片：直接使用 URL（Claude 支持 URL 方式）
+            # 图片：直接使用预签名 URL（Claude 支持 URL 方式）
+            presigned_url = self.s3_uploader.get_presigned_url(
+                s3_key=storage_path,
+                expires_in=3600  # 1小时有效
+            )
+            content_block = {
+                "type": "image",
+                "source": {
+                    "type": "url",
+                    "url": presigned_url
+                }
+            }
+            logger.info(f"🖼️ 图片使用 URL 方式: {filename}")
+            return ProcessedFile(
+                category=category,
+                filename=filename,
+                mime_type=mime_type,
+                content_block=content_block,
+                file_size=file_size,
+                file_id=file_id,
+                file_url=presigned_url
+            )
+        
+        if category == FileCategory.TEXT:
+            # 纯文本：下载 → 读取内容
+            if file_size > self.MAX_TEXT_SIZE:
+                logger.warning(f"文本过大，降级为文档处理: {file_size} bytes")
+                category = FileCategory.DOCUMENT
+            else:
+                content = await self._download_from_s3(storage_path)
+                text_content = content.decode("utf-8", errors="replace")
+                return ProcessedFile(
+                    category=category,
+                    filename=filename,
+                    mime_type=mime_type,
+                    text_content=text_content,
+                    file_size=file_size,
+                    file_id=file_id
+                )
+        
+        # 复杂文档：生成预签名 URL
+        presigned_url = self.s3_uploader.get_presigned_url(
+            s3_key=storage_path,
+            expires_in=3600  # 1小时有效
+        )
+        return ProcessedFile(
+            category=FileCategory.DOCUMENT,
+            filename=filename,
+            mime_type=mime_type,
+            file_url=presigned_url,
+            file_size=file_size,
+            file_id=file_id
+        )
+    
+    async def _process_by_url(self, url: str) -> Optional[ProcessedFile]:
+        """
+        通过 URL 处理文件
+        
+        1. 发送 HEAD 请求获取 MIME 类型和大小
+        2. 根据 MIME 类型分类
+        3. 下载内容或直接使用 URL
+        """
+        # 1. 获取文件信息
+        mime_type, file_size, filename = await self._get_url_file_info(url)
+        
+        logger.info(f"📎 处理 URL 文件: {filename}, MIME={mime_type}, size={file_size}")
+        
+        # 2. 分类处理
+        category = self._categorize_mime_type(mime_type)
+        
+        if category == FileCategory.IMAGE:
+            # 图片：直接使用 URL（Claude 支持 URL 方式，无需下载转 base64）
             content_block = {
                 "type": "image",
                 "source": {
@@ -176,31 +245,15 @@ class FileProcessor:
                 logger.warning(f"文本过大，降级为文档处理: {file_size} bytes")
                 category = FileCategory.DOCUMENT
             else:
-                try:
-                    content = await self._download_from_url(url)
-                    # 尝试多种编码格式
-                    try:
-                        # 优先尝试 utf-8-sig (可以处理带 BOM 的 utf-8)
-                        text_content = content.decode("utf-8-sig")
-                    except UnicodeDecodeError:
-                        try:
-                            # 尝试中文编码
-                            text_content = content.decode("gb18030")
-                        except UnicodeDecodeError:
-                            # 最后回退到 utf-8 replace
-                            text_content = content.decode("utf-8", errors="replace")
-
-                    return ProcessedFile(
-                        category=category,
-                        filename=filename,
-                        mime_type=mime_type,
-                        text_content=text_content,
-                        file_size=file_size,
-                        file_url=url
-                    )
-                except Exception as e:
-                    logger.warning(f"下载文本失败，降级为文档处理: {str(e)}")
-                    category = FileCategory.DOCUMENT
+                content = await self._download_from_url(url)
+                text_content = content.decode("utf-8", errors="replace")
+                return ProcessedFile(
+                    category=category,
+                    filename=filename,
+                    mime_type=mime_type,
+                    text_content=text_content,
+                    file_size=file_size
+                )
         
         # 复杂文档：直接使用 URL
         return ProcessedFile(
@@ -220,6 +273,25 @@ class FileProcessor:
         # 其他都当作复杂文档
         return FileCategory.DOCUMENT
     
+    async def _download_from_s3(self, storage_path: str) -> bytes:
+        """从 S3 下载文件内容"""
+        try:
+            s3_client = self.s3_uploader.s3_client
+            bucket_name = self.s3_uploader.bucket_name
+            
+            response = s3_client.get_object(
+                Bucket=bucket_name,
+                Key=storage_path
+            )
+            content = response['Body'].read()
+            
+            logger.debug(f"从 S3 下载: {storage_path}, {len(content)} bytes")
+            return content
+            
+        except Exception as e:
+            logger.error(f"S3 下载失败: {str(e)}")
+            raise FileProcessorError(f"下载文件失败: {str(e)}") from e
+    
     async def _download_from_url(self, url: str) -> bytes:
         """从 URL 下载文件内容"""
         try:
@@ -228,7 +300,7 @@ class FileProcessor:
                 response.raise_for_status()
                 content = response.content
                 
-                logger.debug(f"从 URL 下载: {len(content)} bytes")
+                logger.debug(f"从 URL 下载: {url}, {len(content)} bytes")
                 return content
                 
         except httpx.HTTPError as e:
@@ -289,24 +361,17 @@ class FileProcessor:
         ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
         return ext_to_mime.get(ext, "application/octet-stream")
     
-    def _format_file_size(self, size_bytes: int) -> str:
-        """
-        格式化文件大小为可读字符串
-        
-        Args:
-            size_bytes: 文件大小（字节）
-            
-        Returns:
-            格式化后的字符串，如 "1.5 KB", "2.3 MB"
-        """
-        if size_bytes < 1024:
-            return f"{size_bytes} B"
-        elif size_bytes < 1024 * 1024:
-            return f"{size_bytes / 1024:.1f} KB"
-        elif size_bytes < 1024 * 1024 * 1024:
-            return f"{size_bytes / (1024 * 1024):.1f} MB"
-        else:
-            return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
+    def _build_image_block(self, content: bytes, mime_type: str) -> Dict[str, Any]:
+        """构建图片 content block（Claude 格式）"""
+        b64_data = base64.b64encode(content).decode("utf-8")
+        return {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": mime_type,
+                "data": b64_data
+            }
+        }
     
     def build_message_content(
         self,
@@ -333,30 +398,11 @@ class FileProcessor:
                     content_blocks.append(pf.content_block)
             
             elif pf.category == FileCategory.TEXT:
-                # 纯文本：拼进附件说明，同时保留原始元数据
+                # 纯文本：拼进附件说明
                 if pf.text_content:
-                    # 构建元数据行（文件名 | MIME类型 | 大小）
-                    meta_parts = [pf.filename]
-                    if pf.mime_type:
-                        meta_parts.append(pf.mime_type)
-                    if pf.file_size:
-                        # 格式化文件大小
-                        size_str = self._format_file_size(pf.file_size)
-                        meta_parts.append(size_str)
-                    meta_line = " | ".join(meta_parts)
-                    
-                    # 构建附件文本
-                    content_preview = pf.text_content
-                    if len(content_preview) > self.MAX_PREVIEW_CHARS:
-                        content_preview = content_preview[:self.MAX_PREVIEW_CHARS] + "\n... (内容过长已截断)"
-
-                    attachment_text = f"📄 {meta_line}:\n```\n{content_preview}\n```"
-                    
-                    # 保留原始 URL（如果有）
-                    if pf.file_url:
-                        attachment_text += f"\n   原始文件: {pf.file_url}"
-                    
-                    attachment_texts.append(attachment_text)
+                    attachment_texts.append(
+                        f"📄 {pf.filename}:\n```\n{pf.text_content}\n```"
+                    )
             
             elif pf.category == FileCategory.DOCUMENT:
                 # 复杂文档：提供 URL，让 Agent 决定
@@ -391,3 +437,4 @@ def get_file_processor() -> FileProcessor:
     if _default_processor is None:
         _default_processor = FileProcessor()
     return _default_processor
+

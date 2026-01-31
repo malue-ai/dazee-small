@@ -7,12 +7,12 @@
 - 个性化信息（用户画像）
 """
 from typing import List, Dict, Any
+import logging
 
 from core.context.provider import ContextProvider, ContextType
-from logger import get_logger
 # from services.mem0_service import get_mem0_service  # TODO: 导入 Mem0 服务
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class MemoryProvider(ContextProvider):
@@ -25,7 +25,7 @@ class MemoryProvider(ContextProvider):
     - 用户个性化
     """
     
-    def __init__(self) -> None:
+    def __init__(self):
         # self.mem0 = get_mem0_service()  # TODO: 初始化 Mem0
         logger.info("MemoryProvider initialized")
     

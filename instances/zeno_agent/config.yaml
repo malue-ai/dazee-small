@@ -1,0 +1,220 @@
+# ============================================================
+# test_agent 实例配置
+# ============================================================
+# 
+# 这是一个完整的测试实例，演示如何配置：
+# - MCP 工具（Dify 工作流）
+# - 记忆功能
+# - Agent 参数覆盖
+#
+# ============================================================
+
+# ==================== 基础信息 ====================
+
+instance:
+  name: "test_agent"
+  description: "测试智能体 - 支持搜索、数据分析和 Dify 工作流"
+  version: "1.0.0"
+
+# ==================== 全局 LLM 一键切换 ====================
+#
+# Claude 不可用时，全局切换到 Qwen
+#
+llm_global:
+  enabled: false
+  provider: "qwen"
+  base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+  api_key_env: "QWEN_API_KEY"
+  compat: "qwen"
+  model_map:
+    intent_analyzer: "qwen-plus"
+    default: "qwen-max"
+
+
+# ==================== Agent 配置覆盖 ====================
+
+agent:
+  # 使用 Claude Sonnet 模型（平衡能力和成本）
+  model: "claude-sonnet-4-5-20250929"
+  
+  # 最大对话轮数
+  max_turns: 20
+  
+  # 启用计划管理器（处理复杂任务）
+  plan_manager_enabled: true
+  
+  # 允许并行工具调用（提高效率）
+  allow_parallel_tools: false
+  
+  # LLM 超参数
+  llm:
+    # 启用深度思考（复杂推理任务）
+    enable_thinking: true
+    thinking_budget: 10000
+    
+    # 最大输出 token 数
+    max_tokens: 16384
+    
+    # 启用缓存（节省 API 成本）
+    enable_caching: true
+
+
+# ==================== 工具能力配置 ====================
+#
+# 📌 配置原则：
+#   - 按功能类别启用/禁用工具（1=启用，0=禁用）
+#   - 核心工具（plan_todo, api_calling 等）自动启用，无需配置
+#
+enabled_capabilities:
+  # --- 信息获取类 ---
+  web_search: 1              # 互联网搜索
+  exa_search: 0              # Exa 语义搜索（暂不启用）
+  knowledge_search: 1        # 个人知识库检索
+  
+  # --- 文档生成类（Claude Skills）---
+  document_skills: 0         # 包含：pptx, xlsx, docx, pdf
+  
+  # --- PPT 生成类 ---
+  ppt_generator: 0           # 闭环 PPT 生成工具
+  
+  # --- 代码沙盒类 ---
+  sandbox_tools: 0           # 包含全部沙盒工具
+  
+  # --- 动态代码执行 ---
+  code_execution: 0
+
+
+# ==================== MCP 工具声明 ====================
+#
+# 📚 capability 说明：指定工具满足的用户意图类别
+#   - document_creation: 文档/图表创建（flowchart 属于此类）
+#   - web_search: 信息搜索
+#   - data_analysis: 数据分析
+#   - ppt_generation: 演示文稿生成
+#   - 更多选项见 _template/config.yaml
+#
+mcp_tools:
+  # ==================== Ontology Builder 三阶段工作流 ====================
+  # 
+  # 📌 系统配置构建 Skill（三阶段原子操作）
+  # 完整流程：text2flowchart → part1 → part2
+  # 预计耗时：约 3-5 分钟
+  #
+  
+  # 阶段 1：自然语言 → Mermaid 流程图
+  - name: text2flowchart
+    server_url: "https://api.dify.ai/mcp/server/APXev1xgCP4n5XMn/mcp"
+    server_name: "dify"
+    auth_type: "bearer"
+    auth_env: "DIFY_API_KEY"
+    capability: "document_creation"
+    description: "第一阶段：从自然语言描述生成 Mermaid 流程图，识别核心实体、属性及关系"
+    # App ID: a83e8b00-a94e-4cdf-b5f7-ef721e7238c1
+  - name: nano_banana
+    server_url: "https://api.dify.ai/mcp/server/n7rhBjadwzy9bj90/mcp"
+    server_name: "dify"
+    auth_type: "bearer"
+    auth_env: "DIFY_API_KEY"
+    capability: "document_creation"
+    description: "这是一个根据文本描述生成图片的工具，调用后会返回一张真实生成的图片URL"
+
+  - name: chatDocuments
+    server_url: "https://api.dify.ai/mcp/server/GYultzYga8PRayK5/mcp"
+    server_name: "dify"
+    auth_type: "bearer"
+    auth_env: "DIFY_API_KEY"
+    capability: "document_creation"
+    description: "支持上传urls的知识问答"
+
+  - name: text2document
+    server_url: "https://api.dify.ai/mcp/server/1lbiTqViu7byguhp/mcp"
+    server_name: "dify"
+    auth_type: "bearer"
+    auth_env: "DIFY_API_KEY"
+    capability: "document_creation"
+    description: "输入的title参数的值只能是英文，输入的文本格式转化为格式化文档，并提供下载url： 1、markdown格式转换为docx 2、csv格式转换为xlsx。"
+
+  - name: perplxity
+    server_url: "https://api.dify.ai/mcp/server/WH0QvCw9dlNfhqEC/mcp"
+    server_name: "dify"
+    auth_type: "bearer"
+    auth_env: "DIFY_API_KEY"
+    capability: "document_creation"
+    description: "调用 Perplexity AI 进行研究，输出 DOCX 文档"
+# ==================== REST APIs 配置 ====================
+#
+# 📌 运营配置：只需填写 base_url + 认证
+# 📄 API 用法：写在 api_desc/{doc}.md 中
+# 📚 capability：指定 API 满足的用户意图类别
+#
+apis:
+  # Dify API（通过 REST API 调用，作为 MCP 的补充）
+  - name: dify_api
+    base_url: "https://api.dify.ai/v1"
+    auth:
+      type: bearer
+      header: Authorization
+      env: DIFY_API_KEY
+    doc: dify-api
+    capability: "document_creation"  # 🆕 指定能力类别
+    description: "Dify API - 工作流执行和对话"
+
+  # Coze API（Ontology Builder 工作流）
+  - name: coze_api
+    base_url: "https://api.coze.cn/v1"
+    auth:
+      type: bearer
+      header: Authorization
+      env: COZE_API_KEY
+    doc: coze-api
+    capability: "document_creation"
+    description: "Coze API - 工作流执行（Ontology Builder）"
+
+
+# ==================== 记忆配置（V4.6）====================
+
+memory:
+  # 启用 Mem0 用户记忆
+  mem0_enabled: true
+  
+  # 启用智能记忆检索（根据意图分析决定）
+  smart_retrieval: true
+  
+  # 记忆保留策略
+  retention_policy: "user"
+
+
+# ==================== Multi-Agent 配置（V7.8 极简版）====================
+#
+# 📌 运营只需配置 mode，其他由框架智能处理
+#
+multi_agent:
+  # mode 选项：
+  #   - disabled: 禁用，始终使用单智能体（默认）
+  #   - auto: 自动判断（复杂度评分 > 7 时启用）
+  #   - enabled: 始终使用多智能体
+  mode: "disabled"  # 暂时禁用，待充分验证后再启用
+
+
+# ==================== 高级配置 ====================
+
+advanced:
+  # 意图分析器
+  intent_analyzer:
+    enabled: true
+    use_llm: true
+  
+  # 输出格式（V6.3 使用 Pydantic 校验）
+  output_formatter:
+    enabled: true
+    default_format: "text"           # 默认文本格式（最简单）
+    code_highlighting: true
+    # JSON 输出配置（仅当 default_format="json" 时生效）
+    # json_model_name: "SimpleResponse"  # 使用内置 Pydantic 模型
+    # json_schema:                        # 或使用动态 Schema 定义
+    #   status: {type: "str", required: true}
+    #   message: {type: "str", default: ""}
+    #   data: {type: "any", default: null}
+    # strict_json_validation: false       # true=校验不通过则报错
+    json_ensure_ascii: false
+    json_indent: 2

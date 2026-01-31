@@ -16,6 +16,11 @@ from infra.database.models.sandbox import Sandbox
 from infra.database.crud.base import get_by_id, delete_by_id
 
 
+def generate_sandbox_id() -> str:
+    """生成沙盒记录 ID"""
+    return f"sbx_{uuid4().hex[:24]}"
+
+
 async def create_sandbox(
     session: AsyncSession,
     conversation_id: str,
@@ -43,7 +48,7 @@ async def create_sandbox(
         创建的沙盒记录
     """
     sandbox = Sandbox(
-        id=str(uuid4()),
+        id=generate_sandbox_id(),
         conversation_id=conversation_id,
         user_id=user_id,
         e2b_sandbox_id=e2b_sandbox_id,
@@ -260,46 +265,6 @@ async def update_sandbox_activity(
     
     sandbox.last_active_at = datetime.now()
     sandbox.updated_at = datetime.now()
-    
-    await session.commit()
-    await session.refresh(sandbox)
-    return sandbox
-
-
-async def update_sandbox_project(
-    session: AsyncSession,
-    conversation_id: str,
-    project_path: Optional[str],
-    project_stack: Optional[str],
-    preview_url: Optional[str] = None
-) -> Optional[Sandbox]:
-    """
-    更新沙盒的当前运行项目信息
-    
-    用于记录/清除当前沙盒中运行的项目，
-    在暂停/恢复时自动管理项目生命周期
-    
-    Args:
-        session: 数据库会话
-        conversation_id: 对话 ID
-        project_path: 项目路径（传 None 表示清除）
-        project_stack: 项目技术栈（传 None 表示清除）
-        preview_url: 预览 URL（可选）
-        
-    Returns:
-        更新后的沙盒记录
-    """
-    sandbox = await get_sandbox_by_conversation(session, conversation_id)
-    if not sandbox:
-        return None
-    
-    sandbox.active_project_path = project_path
-    sandbox.active_project_stack = project_stack
-    sandbox.updated_at = datetime.now()
-    sandbox.last_active_at = datetime.now()
-    
-    if preview_url is not None:
-        sandbox.preview_url = preview_url
     
     await session.commit()
     await session.refresh(sandbox)

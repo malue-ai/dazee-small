@@ -7,7 +7,6 @@ Agent 管理路由
 from typing import Optional
 from datetime import datetime
 
-import yaml
 from fastapi import APIRouter, HTTPException, status, Query, Body
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -51,139 +50,6 @@ class AgentMCPUpdateRequest(BaseModel):
     auth_env: Optional[str] = Field(None, description="认证环境变量名")
     is_active: Optional[bool] = Field(None, description="是否启用")
     metadata: Optional[dict] = Field(None, description="元数据")
-
-
-class ValidationError(BaseModel):
-    """校验错误"""
-    field: str = Field(..., description="错误字段")
-    message: str = Field(..., description="错误消息")
-    code: str = Field("VALIDATION_ERROR", description="错误代码")
-
-
-class ValidationWarning(BaseModel):
-    """校验警告"""
-    field: str = Field(..., description="警告字段")
-    message: str = Field(..., description="警告消息")
-
-
-class AgentValidationResponse(BaseModel):
-    """Agent 配置校验响应"""
-    valid: bool = Field(..., description="是否通过校验")
-    errors: list[ValidationError] = Field(default_factory=list, description="校验错误列表")
-    warnings: list[ValidationWarning] = Field(default_factory=list, description="校验警告列表")
-
-
-class AgentTemplate(BaseModel):
-    """Agent 模板"""
-    id: str = Field(..., description="模板 ID")
-    name: str = Field(..., description="模板名称")
-    description: str = Field(..., description="模板描述")
-    icon: str = Field("🤖", description="模板图标")
-    config: dict = Field(..., description="模板配置")
-
-
-class AgentTemplateListResponse(BaseModel):
-    """Agent 模板列表响应"""
-    total: int = Field(..., description="模板总数")
-    templates: list[AgentTemplate] = Field(..., description="模板列表")
-
-
-class AgentPreviewResponse(BaseModel):
-    """Agent 配置预览响应"""
-    config_yaml: str = Field(..., description="生成的 config.yaml 内容")
-    prompt_md: str = Field(..., description="生成的 prompt.md 内容")
-
-
-# ============================================================
-# 预定义模板
-# ============================================================
-
-AGENT_TEMPLATES = [
-    AgentTemplate(
-        id="minimal",
-        name="最小配置",
-        description="仅包含搜索能力的轻量级 Agent，适合简单问答场景",
-        icon="🔍",
-        config={
-            "model": "claude-sonnet-4-5-20250929",
-            "max_turns": 10,
-            "plan_manager_enabled": False,
-            "enabled_capabilities": {
-                "tavily_search": True,
-                "knowledge_search": False,
-                "sandbox_tools": False,
-                "code_execution": False,
-            },
-            "llm": {
-                "enable_thinking": False,
-                "max_tokens": 8192,
-                "enable_caching": True,
-            },
-            "memory": {
-                "mem0_enabled": True,
-                "smart_retrieval": True,
-                "retention_policy": "session",
-            },
-        },
-    ),
-    AgentTemplate(
-        id="standard",
-        name="标准配置",
-        description="搜索 + 知识库 + 代码沙盒，适合大多数业务场景",
-        icon="⚡",
-        config={
-            "model": "claude-sonnet-4-5-20250929",
-            "max_turns": 20,
-            "plan_manager_enabled": True,
-            "enabled_capabilities": {
-                "tavily_search": True,
-                "knowledge_search": True,
-                "sandbox_tools": True,
-                "code_execution": False,
-            },
-            "llm": {
-                "enable_thinking": True,
-                "thinking_budget": 8000,
-                "max_tokens": 16384,
-                "enable_caching": True,
-            },
-            "memory": {
-                "mem0_enabled": True,
-                "smart_retrieval": True,
-                "retention_policy": "user",
-            },
-        },
-    ),
-    AgentTemplate(
-        id="advanced",
-        name="高级配置",
-        description="全部功能 + Extended Thinking，适合复杂推理任务",
-        icon="🚀",
-        config={
-            "model": "claude-sonnet-4-5-20250929",
-            "max_turns": 30,
-            "plan_manager_enabled": True,
-            "enabled_capabilities": {
-                "tavily_search": True,
-                "knowledge_search": True,
-                "sandbox_tools": True,
-                "code_execution": True,
-                "document_skills": True,
-            },
-            "llm": {
-                "enable_thinking": True,
-                "thinking_budget": 16000,
-                "max_tokens": 32768,
-                "enable_caching": True,
-            },
-            "memory": {
-                "mem0_enabled": True,
-                "smart_retrieval": True,
-                "retention_policy": "user",
-            },
-        },
-    ),
-]
 
 
 # ============================================================
@@ -233,321 +99,6 @@ async def list_agents(
         agents=agents,
     )
 
-
-# ============================================================
-# 模板、校验和预览（必须在 /{agent_id} 之前定义）
-# ============================================================
-
-@router.get(
-    "/templates",
-    response_model=AgentTemplateListResponse,
-    summary="获取 Agent 模板列表",
-    description="获取预定义的 Agent 配置模板",
-)
-async def list_agent_templates():
-    """
-    获取 Agent 模板列表
-    
-    返回预定义的配置模板，包含最小、标准、高级三种配置
-    """
-    return AgentTemplateListResponse(
-        total=len(AGENT_TEMPLATES),
-        templates=AGENT_TEMPLATES,
-    )
-
-
-@router.post(
-    "/validate",
-    response_model=AgentValidationResponse,
-    summary="校验 Agent 配置",
-    description="校验 Agent 配置是否有效（不创建）",
-)
-async def validate_agent_config(request: AgentCreateRequest):
-    """
-    校验 Agent 配置
-    
-    对配置进行校验，返回错误和警告信息，但不实际创建 Agent
-    """
-    errors: list[ValidationError] = []
-    warnings: list[ValidationWarning] = []
-    
-    # 1. 校验 agent_id 格式
-    if not request.agent_id:
-        errors.append(ValidationError(
-            field="agent_id",
-            message="Agent ID 不能为空",
-            code="REQUIRED_FIELD",
-        ))
-    elif not request.agent_id.replace("_", "").replace("-", "").isalnum():
-        errors.append(ValidationError(
-            field="agent_id",
-            message="Agent ID 只能包含字母、数字、下划线和连字符",
-            code="INVALID_FORMAT",
-        ))
-    elif len(request.agent_id) > 64:
-        errors.append(ValidationError(
-            field="agent_id",
-            message="Agent ID 长度不能超过 64 个字符",
-            code="MAX_LENGTH_EXCEEDED",
-        ))
-    
-    # 2. 检查 agent_id 是否已存在
-    registry = get_agent_registry()
-    if request.agent_id and registry.has_agent(request.agent_id):
-        errors.append(ValidationError(
-            field="agent_id",
-            message=f"Agent '{request.agent_id}' 已存在",
-            code="ALREADY_EXISTS",
-        ))
-    
-    # 3. 校验 prompt
-    if not request.prompt:
-        errors.append(ValidationError(
-            field="prompt",
-            message="系统提示词不能为空",
-            code="REQUIRED_FIELD",
-        ))
-    elif len(request.prompt) < 50:
-        warnings.append(ValidationWarning(
-            field="prompt",
-            message="系统提示词过短（建议至少 50 个字符），可能影响 Agent 表现",
-        ))
-    
-    # 4. 校验模型
-    valid_model_prefixes = ["claude-", "gpt-", "gemini-", "qwen"]
-    if request.model and not any(request.model.startswith(p) for p in valid_model_prefixes):
-        warnings.append(ValidationWarning(
-            field="model",
-            message=f"未知模型 '{request.model}'，可能不受支持",
-        ))
-    
-    # 5. 校验 max_turns
-    if request.max_turns < 1:
-        errors.append(ValidationError(
-            field="max_turns",
-            message="最大对话轮数必须大于 0",
-            code="INVALID_VALUE",
-        ))
-    elif request.max_turns > 100:
-        warnings.append(ValidationWarning(
-            field="max_turns",
-            message="最大对话轮数过大（>100），可能导致性能问题",
-        ))
-    
-    # 6. 校验 LLM 配置
-    if request.llm:
-        if request.llm.thinking_budget and request.llm.thinking_budget > 32000:
-            warnings.append(ValidationWarning(
-                field="llm.thinking_budget",
-                message="思考预算过大（>32000），可能导致响应缓慢",
-            ))
-        if request.llm.max_tokens and request.llm.max_tokens > 64000:
-            warnings.append(ValidationWarning(
-                field="llm.max_tokens",
-                message="最大输出 token 过大（>64000），可能超出模型限制",
-            ))
-    
-    # 7. 校验 MCP 工具
-    if request.mcp_tools:
-        for i, tool in enumerate(request.mcp_tools):
-            if not tool.name:
-                errors.append(ValidationError(
-                    field=f"mcp_tools[{i}].name",
-                    message="MCP 工具名称不能为空",
-                    code="REQUIRED_FIELD",
-                ))
-            if not tool.server_url:
-                errors.append(ValidationError(
-                    field=f"mcp_tools[{i}].server_url",
-                    message="MCP 服务器 URL 不能为空",
-                    code="REQUIRED_FIELD",
-                ))
-            if tool.auth_type not in ["none", "bearer", "api_key"]:
-                errors.append(ValidationError(
-                    field=f"mcp_tools[{i}].auth_type",
-                    message=f"无效的认证类型 '{tool.auth_type}'",
-                    code="INVALID_VALUE",
-                ))
-    
-    # 8. 校验 REST APIs
-    if request.apis:
-        for i, api in enumerate(request.apis):
-            if not api.name:
-                errors.append(ValidationError(
-                    field=f"apis[{i}].name",
-                    message="API 名称不能为空",
-                    code="REQUIRED_FIELD",
-                ))
-            if not api.base_url:
-                errors.append(ValidationError(
-                    field=f"apis[{i}].base_url",
-                    message="API URL 不能为空",
-                    code="REQUIRED_FIELD",
-                ))
-    
-    return AgentValidationResponse(
-        valid=len(errors) == 0,
-        errors=errors,
-        warnings=warnings,
-    )
-
-
-@router.post(
-    "/preview",
-    response_model=AgentPreviewResponse,
-    summary="预览 Agent 配置",
-    description="预览最终生成的配置文件内容",
-)
-async def preview_agent_config(request: AgentCreateRequest):
-    """
-    预览 Agent 配置
-    
-    根据请求数据生成配置文件预览（config.yaml 和 prompt.md）
-    """
-    # 构建 config.yaml 内容
-    config_data = {
-        "instance": {
-            "name": request.agent_id,
-            "description": request.description or f"{request.agent_id} 智能助手",
-            "version": "1.0.0",
-        },
-        "agent": {
-            "model": request.model,
-            "max_turns": request.max_turns,
-            "plan_manager_enabled": request.plan_manager_enabled,
-            "allow_parallel_tools": False,
-        },
-    }
-    
-    # 添加 LLM 配置
-    if request.llm:
-        llm_config = {}
-        if request.llm.enable_thinking is not None:
-            llm_config["enable_thinking"] = request.llm.enable_thinking
-        if request.llm.thinking_budget is not None:
-            llm_config["thinking_budget"] = request.llm.thinking_budget
-        if request.llm.max_tokens is not None:
-            llm_config["max_tokens"] = request.llm.max_tokens
-        if request.llm.enable_caching is not None:
-            llm_config["enable_caching"] = request.llm.enable_caching
-        if request.llm.temperature is not None:
-            llm_config["temperature"] = request.llm.temperature
-        if request.llm.top_p is not None:
-            llm_config["top_p"] = request.llm.top_p
-        if llm_config:
-            config_data["agent"]["llm"] = llm_config
-    
-    # 添加 enabled_capabilities
-    if request.enabled_capabilities:
-        config_data["enabled_capabilities"] = {
-            k: (1 if v else 0) for k, v in request.enabled_capabilities.items()
-        }
-    
-    # 添加 MCP 工具
-    if request.mcp_tools:
-        config_data["mcp_tools"] = [
-            {
-                "name": tool.name,
-                "server_url": tool.server_url,
-                "server_name": tool.server_name or tool.name,
-                "auth_type": tool.auth_type,
-                "auth_env": tool.auth_env,
-                "capability": tool.capability,
-                "description": tool.description,
-            }
-            for tool in request.mcp_tools
-        ]
-    
-    # 添加 APIs
-    if request.apis:
-        config_data["apis"] = [
-            {
-                "name": api.name,
-                "base_url": api.base_url,
-                "auth": {
-                    "type": api.auth.type,
-                    "header": api.auth.header,
-                    "env": api.auth.env,
-                },
-                "doc": api.doc,
-                "capability": api.capability,
-                "description": api.description,
-            }
-            for api in request.apis
-        ]
-    
-    # 添加 Memory 配置
-    if request.memory:
-        config_data["memory"] = {
-            "mem0_enabled": request.memory.mem0_enabled,
-            "smart_retrieval": request.memory.smart_retrieval,
-            "retention_policy": request.memory.retention_policy,
-        }
-    
-    # 生成 YAML
-    config_yaml = yaml.dump(
-        config_data,
-        allow_unicode=True,
-        default_flow_style=False,
-        sort_keys=False,
-        indent=2,
-    )
-    
-    # 添加注释头
-    config_yaml = f"""# ============================================================
-# {request.agent_id} 实例配置
-# ============================================================
-# 
-# {request.description or '智能助手'}
-#
-# ============================================================
-
-{config_yaml}"""
-    
-    return AgentPreviewResponse(
-        config_yaml=config_yaml,
-        prompt_md=request.prompt,
-    )
-
-
-@router.post(
-    "/reload",
-    response_model=dict,
-    summary="热重载所有 Agent",
-    description="重新加载所有 Agent 配置",
-)
-async def reload_all_agents():
-    """
-    热重载所有 Agent
-    
-    重新从 instances/ 目录加载所有 Agent 配置
-    """
-    registry = get_agent_registry()
-    
-    try:
-        result = await registry.reload_agent(agent_id=None)
-        
-        logger.info("🔄 热重载所有 Agent 完成")
-        
-        return {
-            "success": True,
-            **result,
-        }
-        
-    except Exception as e:
-        logger.error(f"热重载失败: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={
-                "code": "INTERNAL_ERROR",
-                "message": f"热重载失败: {str(e)}",
-            }
-        )
-
-
-# ============================================================
-# 单个 Agent 查询（动态路由，必须在静态路由之后）
-# ============================================================
 
 @router.get(
     "/{agent_id}",
@@ -614,7 +165,7 @@ async def get_agent_prompt(agent_id: str):
     registry = get_agent_registry()
     
     try:
-        prompt_content = await registry.get_agent_prompt(agent_id)
+        prompt_content = registry.get_agent_prompt(agent_id)
         return {
             "agent_id": agent_id,
             "prompt": prompt_content,
@@ -847,8 +398,43 @@ async def delete_agent(
 
 
 # ============================================================
-# 单个 Agent 热重载
+# 热重载
 # ============================================================
+
+@router.post(
+    "/reload",
+    response_model=dict,
+    summary="热重载所有 Agent",
+    description="重新加载所有 Agent 配置",
+)
+async def reload_all_agents():
+    """
+    热重载所有 Agent
+    
+    重新从 instances/ 目录加载所有 Agent 配置
+    """
+    registry = get_agent_registry()
+    
+    try:
+        result = await registry.reload_agent(agent_id=None)
+        
+        logger.info(f"🔄 热重载所有 Agent 完成")
+        
+        return {
+            "success": True,
+            **result,
+        }
+        
+    except Exception as e:
+        logger.error(f"热重载失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "code": "INTERNAL_ERROR",
+                "message": f"热重载失败: {str(e)}",
+            }
+        )
+
 
 @router.post(
     "/{agent_id}/reload",

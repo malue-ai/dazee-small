@@ -15,24 +15,16 @@
 - 先进 Agent 上下文管理最佳实践
 """
 
-# 1. 标准库
-import hashlib
 import json
 import random
-import re
+import hashlib
+from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Dict, Any, List, Optional, Tuple
+import logging
 
-# 2. 第三方库（无）
-
-# 3. 本地模块
-from tools.plan_todo_tool import format_plan_for_prompt
-from utils.message_utils import append_text_to_last_block
-from logger import get_logger
-
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 # ===== 1. KV-Cache 优化 =====
@@ -97,6 +89,7 @@ class CacheOptimizer:
         Returns:
             (不含时间戳的内容, 提取的时间戳)
         """
+        import re
         # 匹配常见时间戳格式
         timestamp_patterns = [
             r'\[(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)\]',
@@ -170,25 +163,24 @@ class TodoRewriter:
         if not plan:
             return messages
         
-        # 生成 Plan 上下文（使用新的格式化函数）
-        plan_context = format_plan_for_prompt(plan)
+        # 生成 Plan 上下文（精简格式）
+        from tools.plan_todo_tool import PlanTodoTool
+        plan_context = PlanTodoTool.get_context_for_llm(plan)
         
-        if not plan_context:
+        if not plan_context or plan_context == "[Plan] No active plan":
             return messages
         
         # 深拷贝避免修改原列表
         result = [msg.copy() for msg in messages]
         
         if position == "end" and result:
-            # 找到最后一条用户消息，使用通用方法追加
+            # 找到最后一条用户消息
             for i in range(len(result) - 1, -1, -1):
                 if result[i].get("role") == "user":
                     content = result[i].get("content", "")
                     if isinstance(content, str):
+                        # 注入到用户消息末尾
                         result[i]["content"] = f"{content}\n\n---\n📋 {plan_context}"
-                    elif isinstance(content, list):
-                        # content_blocks 格式，使用通用方法
-                        append_text_to_last_block(content, f"\n\n---\n📋 {plan_context}")
                     break
         
         elif position == "user_prefix" and result:
@@ -198,12 +190,6 @@ class TodoRewriter:
                     content = result[i].get("content", "")
                     if isinstance(content, str):
                         result[i]["content"] = f"📋 {plan_context}\n\n---\n{content}"
-                    elif isinstance(content, list):
-                        # content_blocks 格式，在第一个 text block 前添加
-                        for block in content:
-                            if isinstance(block, dict) and block.get("type") == "text":
-                                block["text"] = f"📋 {plan_context}\n\n---\n{block['text']}"
-                                break
                     break
         
         return result
@@ -214,7 +200,7 @@ class TodoRewriter:
         生成 Todo 提醒文本（用于注入末尾）
         
         Args:
-            plan: 当前计划（新格式：name, overview, todos）
+            plan: 当前计划
             
         Returns:
             Todo 提醒文本
@@ -222,23 +208,16 @@ class TodoRewriter:
         if not plan:
             return ""
         
-        # 新格式：name, todos
-        goal = plan.get("name", "")
-        todos = plan.get("todos", [])
-        total_steps = len(todos)
-        completed = sum(1 for t in todos if t.get("status") == "completed")
-        in_progress_todos = [t for t in todos if t.get("status") == "in_progress"]
-        pending_todos = [t for t in todos if t.get("status") == "pending"]
+        goal = plan.get("goal", "")
+        current_step = plan.get("current_step", 0)
+        total_steps = plan.get("total_steps", 0)
+        completed = plan.get("completed_steps", 0)
+        status = plan.get("status", "executing")
         
-        # 确定当前步骤
-        current_step = completed
+        steps = plan.get("steps", [])
         current_action = ""
-        if in_progress_todos:
-            current_action = in_progress_todos[0].get("content", "")
-        elif pending_todos:
-            current_action = pending_todos[0].get("content", "")
-        
-        status = "completed" if completed == total_steps else "executing"
+        if 0 <= current_step < len(steps):
+            current_action = steps[current_step].get("action", "")
         
         lines = [
             f"🎯 **当前目标**: {goal}",
@@ -273,12 +252,11 @@ class AgentState(Enum):
 class ToolMaskConfig:
     """工具遮蔽配置"""
     # 状态 → 允许的工具前缀
-    # 🆕 bash/text_editor 已移除，改用 sandbox_* 工具
     state_tool_prefixes: Dict[AgentState, List[str]] = field(default_factory=lambda: {
-        AgentState.IDLE: ["plan_", "web_", "file_", "sandbox_"],
+        AgentState.IDLE: ["plan_", "web_", "file_", "bash"],
         AgentState.PLANNING: ["plan_"],
         AgentState.BROWSING: ["web_", "browser_", "exa_"],
-        AgentState.CODING: ["sandbox_", "e2b_", "code_"],
+        AgentState.CODING: ["bash", "text_editor", "e2b_", "code_"],
         AgentState.SEARCHING: ["web_", "exa_", "knowledge_"],
         AgentState.EXECUTING: ["*"],  # 允许所有
         AgentState.VALIDATING: ["plan_", "file_"],
@@ -297,7 +275,7 @@ class ToolMasker:
     - ZenFlux 实现：在工具选择阶段过滤
     """
     
-    def __init__(self, config: Optional[ToolMaskConfig] = None) -> None:
+    def __init__(self, config: Optional[ToolMaskConfig] = None):
         self.config = config or ToolMaskConfig()
         self._current_state = AgentState.IDLE
         self._state_history: List[Tuple[datetime, AgentState]] = []
@@ -405,7 +383,7 @@ class ToolMasker:
                 return AgentState.PLANNING
             elif tool_name.startswith(("web_", "exa_", "browser_")):
                 return AgentState.BROWSING
-            elif tool_name.startswith(("sandbox_", "e2b_", "code_")):
+            elif tool_name.startswith(("bash", "e2b_", "code_")):
                 return AgentState.CODING
         
         if any(kw in action_lower for kw in ["搜索", "查找", "search", "find"]):
@@ -443,7 +421,7 @@ class RecoverableCompressor:
     需要时可按需读取特定页面
     """
     
-    def __init__(self, max_summary_chars: int = 300) -> None:
+    def __init__(self, max_summary_chars: int = 300):
         self.max_summary_chars = max_summary_chars
         self._reference_store: Dict[str, CompressedReference] = {}
     
@@ -483,7 +461,7 @@ class RecoverableCompressor:
         
         self._reference_store[ref_id] = ref
         
-        compressed_text = f"[FILE:{ref_id}] {file_path}\n📝 摘要: {summary}\n💾 可通过 sandbox_read_file 恢复完整内容"
+        compressed_text = f"[FILE:{ref_id}] {file_path}\n📝 摘要: {summary}\n💾 可通过 file_read 恢复完整内容"
         
         return compressed_text, ref
     
@@ -736,7 +714,7 @@ class StructuralVariation:
         
         return "\n".join(result)
     
-    def adjust_variation_level(self, context_length: int, repetition_count: int = 0) -> None:
+    def adjust_variation_level(self, context_length: int, repetition_count: int = 0):
         """
         动态调整变异等级
         
@@ -781,7 +759,7 @@ class ErrorRetention:
     效果：模型能看到「刚才这个关键词没找到结果」，下一步自然会换个方向
     """
     
-    def __init__(self, max_errors: int = 10) -> None:
+    def __init__(self, max_errors: int = 10):
         self.max_errors = max_errors
         self._errors: List[ErrorRecord] = []
     
@@ -823,7 +801,7 @@ class ErrorRetention:
         
         return record
     
-    def record_recovery(self, error_record: ErrorRecord, recovery_action: str) -> None:
+    def record_recovery(self, error_record: ErrorRecord, recovery_action: str):
         """
         记录恢复动作
         
@@ -863,7 +841,7 @@ class ErrorRetention:
         """获取最近的错误"""
         return self._errors[-count:]
     
-    def clear(self) -> None:
+    def clear(self):
         """清除错误记录"""
         self._errors.clear()
 
@@ -883,7 +861,7 @@ class ContextEngineeringManager:
     - 错误保留
     """
     
-    def __init__(self) -> None:
+    def __init__(self):
         self.cache_optimizer = CacheOptimizer()
         self.todo_rewriter = TodoRewriter()
         self.tool_masker = ToolMasker()
@@ -942,7 +920,7 @@ class ContextEngineeringManager:
         """获取当前状态下允许的工具"""
         return self.tool_masker.get_allowed_tools(all_tools)
     
-    def transition_state(self, new_state: AgentState) -> None:
+    def transition_state(self, new_state: AgentState):
         """转换 Agent 状态"""
         self.tool_masker.transition_to(new_state)
     

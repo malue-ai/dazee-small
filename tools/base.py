@@ -70,7 +70,7 @@ class ToolManager:
     后续版本：将支持MCP协议和动态工具加载
     """
     
-    def __init__(self) -> None:
+    def __init__(self):
         """初始化工具管理器"""
         self._tools: Dict[str, BaseTool] = {}
     

@@ -31,7 +31,7 @@ class OutputData:
     与 Mem0 的 VectorStore 接口兼容
     """
     
-    def __init__(self, id: str, score: float, payload: Dict) -> None:
+    def __init__(self, id: str, score: float, payload: Dict):
         self.id = id
         self.score = score
         self.payload = payload or {}
@@ -83,7 +83,7 @@ class TencentVectorDB(VectorStoreBase):
         self._init_database()
         self._init_collection()
     
-    def _init_client(self) -> None:
+    def _init_client(self):
         """初始化客户端连接"""
         try:
             self.client = tcvectordb.RPCVectorDBClient(
@@ -98,7 +98,7 @@ class TencentVectorDB(VectorStoreBase):
             logger.error(f"[TencentVectorDB] 客户端创建失败: {e}")
             raise
     
-    def _init_database(self) -> None:
+    def _init_database(self):
         """初始化数据库"""
         try:
             dbs = self.client.list_databases()
@@ -114,7 +114,7 @@ class TencentVectorDB(VectorStoreBase):
             logger.error(f"[TencentVectorDB] 数据库初始化失败: {e}")
             raise
     
-    def _init_collection(self) -> None:
+    def _init_collection(self):
         """初始化集合"""
         try:
             collections = self.db.list_collections()
@@ -136,7 +136,7 @@ class TencentVectorDB(VectorStoreBase):
     
     # ==================== Mem0 VectorStoreBase 接口实现 ====================
     
-    def create_col(self, name: str, vector_size: int, distance: str) -> None:
+    def create_col(self, name: str, vector_size: int, distance: str):
         """
         创建集合
         
@@ -290,7 +290,7 @@ class TencentVectorDB(VectorStoreBase):
             logger.error(f"[TencentVectorDB] 搜索失败: {e}")
             raise
     
-    def delete(self, vector_id: str) -> None:
+    def delete(self, vector_id: str):
         """
         删除向量
         
@@ -433,7 +433,7 @@ class TencentVectorDB(VectorStoreBase):
             logger.error(f"[TencentVectorDB] 列出集合失败: {e}")
             return []
     
-    def delete_col(self) -> None:
+    def delete_col(self):
         """删除当前集合"""
         try:
             self.db.drop_collection(self.collection_name)
@@ -472,7 +472,7 @@ class TencentVectorDB(VectorStoreBase):
             logger.error(f"[TencentVectorDB] 获取文档数量失败: {e}")
             return 0
     
-    def truncate(self) -> None:
+    def truncate(self):
         """清空集合（保留结构，删除所有数据）"""
         try:
             self.db.truncate_collection(self.collection_name)
@@ -481,7 +481,7 @@ class TencentVectorDB(VectorStoreBase):
             logger.error(f"[TencentVectorDB] 清空集合失败: {e}")
             raise
     
-    def reset(self) -> None:
+    def reset(self):
         """重置集合（删除后重建）"""
         try:
             logger.info(f"[TencentVectorDB] 重置集合: {self.collection_name}")

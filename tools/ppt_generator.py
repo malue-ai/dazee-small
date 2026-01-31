@@ -9,9 +9,10 @@
 5. 质量检查 - 验证内容完整性
 6. 交付 - 返回文件路径
 
-配置说明：
-- input_schema 在 config/capabilities.yaml 中定义
-- 运营可直接修改 YAML 调整参数，无需改代码
+设计原则：
+- E2B 沙箱执行（支持网络访问、第三方包）
+- 闭环思维（自动搜索、规划、渲染、检查）
+- 质量优先（多重验证机制）
 """
 
 import os
@@ -21,20 +22,13 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime
 from pathlib import Path
 
-from core.tool.base import BaseTool, ToolContext
-from logger import get_logger
 
-logger = get_logger(__name__)
-
-
-class PPTGeneratorTool(BaseTool):
+class PPTGeneratorTool:
     """
-    高质量闭环 PPT 生成工具（input_schema 由 capabilities.yaml 定义）
+    高质量闭环 PPT 生成工具
     
     整合素材搜索、内容规划、PPT渲染的完整流程。
     """
-    
-    name = "ppt_generator"
     
     def __init__(self):
         """初始化工具"""
@@ -45,18 +39,126 @@ class PPTGeneratorTool(BaseTool):
         self._slidespeak_tool = None
         self._exa_tool = None
     
+    @property
+    def name(self) -> str:
+        return "ppt_generator"
+    
+    @property
+    def description(self) -> str:
+        return """高质量闭环PPT生成工具。
+
+🎯 核心能力：
+- 自动搜索相关素材（可选）
+- 智能内容规划
+- 专业PPT渲染（SlideSpeak API）
+- 多重质量检查
+
+📋 使用场景：
+- 基于主题快速生成专业PPT
+- 需要搜索最新资料的报告
+- 高质量演示文稿
+
+⚡ 特点：
+- 闭环流程，一次调用完成
+- 自动时效性处理（搜索最新资料）
+- 质量检查和错误处理"""
+    
+    @property
+    def parameters(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "topic": {
+                    "type": "string",
+                    "description": "PPT主题/标题（必需）"
+                },
+                "description": {
+                    "type": "string",
+                    "description": "详细需求描述，包括受众、目的、重点内容等"
+                },
+                "search_queries": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "搜索查询列表（可选）。提供后会自动搜索素材"
+                },
+                "style": {
+                    "type": "string",
+                    "enum": ["professional", "academic", "creative", "minimal", "corporate"],
+                    "description": "PPT风格。默认：professional",
+                    "default": "professional"
+                },
+                "slide_count": {
+                    "type": "integer",
+                    "description": "期望的幻灯片数量（不含封面和结尾）。默认：8-12",
+                    "minimum": 5,
+                    "maximum": 30
+                },
+                "language": {
+                    "type": "string",
+                    "enum": ["CHINESE", "ENGLISH", "ORIGINAL"],
+                    "description": "PPT语言。默认：根据内容自动判断",
+                    "default": "ORIGINAL"
+                },
+                "time_context": {
+                    "type": "string",
+                    "description": "时间上下文，如'2024年'、'最近一年'。影响搜索时效性"
+                },
+                "audience": {
+                    "type": "string",
+                    "description": "目标受众，如'技术团队'、'管理层'、'投资人'"
+                },
+                "custom_outline": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "自定义大纲（可选）。提供后将按此结构生成"
+                },
+                "include_charts": {
+                    "type": "boolean",
+                    "description": "是否包含图表。默认：true",
+                    "default": True
+                },
+                "include_images": {
+                    "type": "boolean",
+                    "description": "是否包含图片。默认：true",
+                    "default": True
+                },
+                "materials": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                            "content": {"type": "string"},
+                            "source": {"type": "string"},
+                            "date": {"type": "string"}
+                        }
+                    },
+                    "description": "预提供的素材（可选）。如已有搜索结果，可直接传入"
+                }
+            },
+            "required": ["topic"]
+        }
+    
     async def execute(
         self,
-        params: Dict[str, Any],
-        context: ToolContext
+        topic: str,
+        description: Optional[str] = None,
+        search_queries: Optional[List[str]] = None,
+        style: str = "professional",
+        slide_count: Optional[int] = None,
+        language: str = "ORIGINAL",
+        time_context: Optional[str] = None,
+        audience: Optional[str] = None,
+        custom_outline: Optional[List[str]] = None,
+        include_charts: bool = True,
+        include_images: bool = True,
+        materials: Optional[List[Dict[str, Any]]] = None,
+        conversation_id: Optional[str] = None,
+        **kwargs
     ) -> Dict[str, Any]:
         """
         执行高质量PPT生成
         
-        Args:
-            params: 工具输入参数（由 capabilities.yaml 定义）
-            context: 工具执行上下文
-            
         完整流程：
         1. 需求分析
         2. 素材搜集（如果提供search_queries）
@@ -65,26 +167,6 @@ class PPTGeneratorTool(BaseTool):
         5. 质量检查
         6. 交付
         """
-        # 从 params 提取参数
-        topic = params.get("topic", "")
-        if not topic:
-            return {"success": False, "error": "缺少必需参数: topic"}
-        
-        description = params.get("description")
-        search_queries = params.get("search_queries")
-        style = params.get("style", "professional")
-        slide_count = params.get("slide_count")
-        language = params.get("language", "ORIGINAL")
-        time_context = params.get("time_context")
-        audience = params.get("audience")
-        custom_outline = params.get("custom_outline")
-        include_charts = params.get("include_charts", True)
-        include_images = params.get("include_images", True)
-        materials = params.get("materials")
-        
-        # 从 context 获取 conversation_id
-        conversation_id = context.conversation_id
-        
         result = {
             "status": "pending",
             "topic": topic,
@@ -292,8 +374,6 @@ class PPTGeneratorTool(BaseTool):
                 return materials
         
         # 为每个查询添加时间上下文
-        from core.tool.base import create_tool_context
-        
         for query in queries[:5]:  # 最多5个查询
             search_query = query
             if time_context:
@@ -301,11 +381,12 @@ class PPTGeneratorTool(BaseTool):
             
             try:
                 result = await self._exa_tool.execute(
-                    params={"query": search_query, "num_results": 5, "include_text": True},
-                    context=create_tool_context()
+                    query=search_query,
+                    num_results=5,
+                    include_text=True
                 )
                 
-                if result.get("success"):
+                if result.get("status") == "success":
                     for item in result.get("results", [])[:3]:
                         materials.append({
                             "title": item.get("title", ""),
@@ -522,10 +603,9 @@ class PPTGeneratorTool(BaseTool):
                 return {"success": False, "error": f"SlideSpeak工具初始化失败: {str(e)}"}
         
         try:
-            from core.tool.base import create_tool_context
             result = await self._slidespeak_tool.execute(
-                params={"config": config},
-                context=create_tool_context(conversation_id=conversation_id)
+                config=config,
+                conversation_id=conversation_id
             )
             return result
         except Exception as e:

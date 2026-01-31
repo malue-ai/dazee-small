@@ -5,7 +5,11 @@ Capability 能力管理子包
 - Registry: 能力发现 + 元数据管理
 - Router: 智能评分 + 最佳推荐
 - InvocationSelector: 调用策略选择
-- SkillLoader: Skills 内容加载
+- SkillLoader: Skill 内容加载（对齐 clawdbot 机制）
+
+术语说明：
+- Skill: 本地工作流技能（skills/library/，对齐 clawdbot）
+- 通过 SKILL.md 文件声明，系统提示词注入
 
 使用方式：
     # 方式1: 从子包导入
@@ -55,7 +59,7 @@ from .invocation import (
     create_invocation_selector
 )
 
-# Skill Loader
+# Skill Loader（本地工作流技能加载）
 from .skill_loader import (
     SkillLoader,
     SkillInfo,
@@ -86,7 +90,7 @@ __all__ = [
     "ToolCharacteristics",
     "create_invocation_selector",
     
-    # Skill Loader
+    # Skill Loader（本地工作流技能）
     "SkillLoader",
     "SkillInfo",
     "create_skill_loader",

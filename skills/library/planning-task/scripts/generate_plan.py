@@ -6,7 +6,7 @@
 
 from typing import List, Dict, Any
 from datetime import datetime
-from uuid import uuid4
+import uuid
 
 
 def generate_task_plan(
@@ -33,7 +33,7 @@ def generate_task_plan(
         plan = generate_task_plan("制作PPT", tasks)
     """
     if not plan_id:
-        plan_id = str(uuid4())
+        plan_id = f"plan_{uuid.uuid4().hex[:8]}"
     
     # 验证任务结构
     task_dict = {}

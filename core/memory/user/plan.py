@@ -18,9 +18,7 @@ Plan Memory - 任务计划持久化记忆
 - autonomous-coding 示例: feature_list.json + claude-progress.txt
 """
 
-import asyncio
 import json
-import aiofiles
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from pathlib import Path
@@ -108,7 +106,7 @@ class PlanMemory(BaseScopedMemory):
     
     # ==================== 核心 CRUD 操作 ====================
     
-    async def save_plan(
+    def save_plan(
         self,
         task_id: str,
         goal: str,
@@ -117,7 +115,7 @@ class PlanMemory(BaseScopedMemory):
         metadata: Optional[Dict] = None
     ) -> bool:
         """
-        保存新计划（首次 Session 调用）（异步版本）
+        保存新计划（首次 Session 调用）
         
         Args:
             task_id: 任务 ID
@@ -149,14 +147,14 @@ class PlanMemory(BaseScopedMemory):
         
         # 持久化到文件
         if self.plans_dir:
-            await self._save_to_file(task_id, plan_data)
+            self._save_to_file(task_id, plan_data)
         
         logger.info(f"[PlanMemory] 保存计划: task_id={task_id}, goal={goal[:50]}...")
         return True
     
-    async def load_plan(self, task_id: str) -> Optional[Dict]:
+    def load_plan(self, task_id: str) -> Optional[Dict]:
         """
-        加载计划（后续 Session 恢复时调用）（异步版本）
+        加载计划（后续 Session 恢复时调用）
         
         Args:
             task_id: 任务 ID
@@ -170,14 +168,14 @@ class PlanMemory(BaseScopedMemory):
         
         # 从文件读取
         if self.plans_dir:
-            plan_data = await self._load_from_file(task_id)
+            plan_data = self._load_from_file(task_id)
             if plan_data:
                 self._plans_cache[task_id] = plan_data
                 return plan_data
         
         return None
     
-    async def update_step_status(
+    def update_step_status(
         self,
         task_id: str,
         step_index: int,
@@ -185,7 +183,7 @@ class PlanMemory(BaseScopedMemory):
         result: Optional[str] = None
     ) -> bool:
         """
-        更新步骤状态（只能标记 passes: true，永不删除）（异步版本）
+        更新步骤状态（只能标记 passes: true，永不删除）
         
         借鉴 autonomous-coding 的核心规则：
         - 步骤只能标记 passes: true
@@ -201,7 +199,7 @@ class PlanMemory(BaseScopedMemory):
         Returns:
             是否更新成功
         """
-        plan_data = await self.load_plan(task_id)
+        plan_data = self.load_plan(task_id)
         if not plan_data:
             logger.warning(f"[PlanMemory] 更新步骤失败: 计划不存在 task_id={task_id}")
             return False
@@ -228,19 +226,19 @@ class PlanMemory(BaseScopedMemory):
         # 保存
         self._plans_cache[task_id] = plan_data
         if self.plans_dir:
-            await self._save_to_file(task_id, plan_data)
+            self._save_to_file(task_id, plan_data)
         
         logger.debug(f"[PlanMemory] 更新步骤: task_id={task_id}, step={step_index}, passes={passes}")
         return True
     
-    async def add_session_summary(
+    def add_session_summary(
         self,
         task_id: str,
         completed_steps: List[str],
         next_step_hint: str = ""
     ) -> bool:
         """
-        添加 Session 进度摘要（每个 Session 结束时调用）（异步版本）
+        添加 Session 进度摘要（每个 Session 结束时调用）
         
         Args:
             task_id: 任务 ID
@@ -250,7 +248,7 @@ class PlanMemory(BaseScopedMemory):
         Returns:
             是否添加成功
         """
-        plan_data = await self.load_plan(task_id)
+        plan_data = self.load_plan(task_id)
         if not plan_data:
             return False
         
@@ -270,16 +268,16 @@ class PlanMemory(BaseScopedMemory):
         # 保存
         self._plans_cache[task_id] = plan_data
         if self.plans_dir:
-            await self._save_to_file(task_id, plan_data)
+            self._save_to_file(task_id, plan_data)
         
         logger.info(f"[PlanMemory] 添加 Session 摘要: task_id={task_id}, session={session_num}")
         return True
     
     # ==================== 进度摘要生成（用于 Prompt 注入）====================
     
-    async def get_session_summary(self, task_id: str) -> str:
+    def get_session_summary(self, task_id: str) -> str:
         """
-        生成 Session 进度摘要（用于注入到 System Prompt）（异步版本）
+        生成 Session 进度摘要（用于注入到 System Prompt）
         
         这是框架自动处理的核心功能，用户无感知。
         
@@ -289,7 +287,7 @@ class PlanMemory(BaseScopedMemory):
         Returns:
             格式化的进度摘要（Markdown 格式）
         """
-        plan_data = await self.load_plan(task_id)
+        plan_data = self.load_plan(task_id)
         if not plan_data:
             return ""
         
@@ -363,9 +361,9 @@ class PlanMemory(BaseScopedMemory):
         
         return False
     
-    async def get_incomplete_steps(self, task_id: str) -> List[Dict]:
+    def get_incomplete_steps(self, task_id: str) -> List[Dict]:
         """
-        获取未完成的步骤（异步版本）
+        获取未完成的步骤
         
         Args:
             task_id: 任务 ID
@@ -373,7 +371,7 @@ class PlanMemory(BaseScopedMemory):
         Returns:
             未完成步骤列表
         """
-        plan_data = await self.load_plan(task_id)
+        plan_data = self.load_plan(task_id)
         if not plan_data:
             return []
         
@@ -382,9 +380,9 @@ class PlanMemory(BaseScopedMemory):
             if not step.get("passes")
         ]
     
-    async def get_next_step(self, task_id: str) -> Optional[Dict]:
+    def get_next_step(self, task_id: str) -> Optional[Dict]:
         """
-        获取下一个待执行步骤（异步版本）
+        获取下一个待执行步骤
         
         Args:
             task_id: 任务 ID
@@ -392,12 +390,12 @@ class PlanMemory(BaseScopedMemory):
         Returns:
             下一个待执行步骤，无则返回 None
         """
-        incomplete = await self.get_incomplete_steps(task_id)
+        incomplete = self.get_incomplete_steps(task_id)
         return incomplete[0] if incomplete else None
     
-    async def list_plans(self, limit: int = 10) -> List[Dict]:
+    def list_plans(self, limit: int = 10) -> List[Dict]:
         """
-        列出所有计划（按更新时间倒序）（异步版本）
+        列出所有计划（按更新时间倒序）
         
         Args:
             limit: 返回数量限制
@@ -409,13 +407,10 @@ class PlanMemory(BaseScopedMemory):
         
         # 从文件读取
         if self.plans_dir and self.plans_dir.exists():
-            # 使用 asyncio.to_thread 包装同步的 glob 操作
-            file_paths = await asyncio.to_thread(list, self.plans_dir.glob("*.json"))
-            for file_path in file_paths:
+            for file_path in self.plans_dir.glob("*.json"):
                 try:
-                    async with aiofiles.open(file_path, 'r', encoding='utf-8') as f:
-                        content = await f.read()
-                        plan_data = json.loads(content)
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        plan_data = json.load(f)
                         plans.append({
                             "task_id": plan_data.get("task_id"),
                             "goal": plan_data.get("goal"),
@@ -431,24 +426,22 @@ class PlanMemory(BaseScopedMemory):
     
     # ==================== 清理方法 ====================
     
-    async def clear(self) -> None:
-        """清空所有计划（异步版本）"""
+    def clear(self):
+        """清空所有计划"""
         self._plans_cache.clear()
         
         if self.plans_dir and self.plans_dir.exists():
-            # 使用 asyncio.to_thread 包装同步的 glob 操作
-            file_paths = await asyncio.to_thread(list, self.plans_dir.glob("*.json"))
-            for file_path in file_paths:
+            for file_path in self.plans_dir.glob("*.json"):
                 try:
-                    await asyncio.to_thread(file_path.unlink)
+                    file_path.unlink()
                 except Exception as e:
                     logger.warning(f"[PlanMemory] 删除文件失败: {file_path}, error={e}")
         
         logger.info("[PlanMemory] 清空所有计划")
     
-    async def delete_plan(self, task_id: str) -> bool:
+    def delete_plan(self, task_id: str) -> bool:
         """
-        删除指定计划（异步版本）
+        删除指定计划
         
         Args:
             task_id: 任务 ID
@@ -464,7 +457,7 @@ class PlanMemory(BaseScopedMemory):
             file_path = self.plans_dir / f"{task_id}.json"
             if file_path.exists():
                 try:
-                    await asyncio.to_thread(file_path.unlink)
+                    file_path.unlink()
                     logger.info(f"[PlanMemory] 删除计划: task_id={task_id}")
                     return True
                 except Exception as e:
@@ -502,21 +495,20 @@ class PlanMemory(BaseScopedMemory):
         completed = sum(1 for s in steps if s.get("passes"))
         return f"{completed}/{len(steps)}"
     
-    async def _save_to_file(self, task_id: str, plan_data: Dict) -> None:
-        """异步保存到文件"""
+    def _save_to_file(self, task_id: str, plan_data: Dict):
+        """保存到文件"""
         if not self.plans_dir:
             return
         
         file_path = self.plans_dir / f"{task_id}.json"
         try:
-            file_path.parent.mkdir(parents=True, exist_ok=True)
-            async with aiofiles.open(file_path, 'w', encoding='utf-8') as f:
-                await f.write(json.dumps(plan_data, ensure_ascii=False, indent=2))
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(plan_data, f, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.error(f"[PlanMemory] 保存文件失败: {e}")
     
-    async def _load_from_file(self, task_id: str) -> Optional[Dict]:
-        """异步从文件加载"""
+    def _load_from_file(self, task_id: str) -> Optional[Dict]:
+        """从文件加载"""
         if not self.plans_dir:
             return None
         
@@ -525,9 +517,8 @@ class PlanMemory(BaseScopedMemory):
             return None
         
         try:
-            async with aiofiles.open(file_path, 'r', encoding='utf-8') as f:
-                content = await f.read()
-                return json.loads(content)
+            with open(file_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
         except Exception as e:
             logger.error(f"[PlanMemory] 加载文件失败: {e}")
             return None

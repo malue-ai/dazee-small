@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from evaluation.models import (
+    Checkpoint,
     EvaluationReport,
     EvaluationSuite,
     GradeResult,
@@ -149,6 +150,19 @@ class EvaluationHarness:
             )
             graders.append(grader)
         
+        # 解析中间检查点
+        checkpoints = []
+        for cp_data in data.get("checkpoints", []):
+            checkpoint = Checkpoint(
+                name=cp_data.get("name", ""),
+                check=cp_data.get("check", ""),
+                description=cp_data.get("description"),
+            )
+            checkpoints.append(checkpoint)
+        
+        # 解析推荐答案
+        reference_answer = data.get("reference_answer")
+        
         return Task(
             id=data.get("id", str(uuid.uuid4())[:8]),
             description=data.get("description", ""),
@@ -159,6 +173,8 @@ class EvaluationHarness:
             timeout_seconds=data.get("timeout_seconds", 60),
             tags=data.get("tags", []),
             metadata=data.get("metadata", {}),
+            checkpoints=checkpoints,
+            reference_answer=reference_answer,
         )
     
     def load_all_suites(self) -> List[EvaluationSuite]:
@@ -325,15 +341,21 @@ class EvaluationHarness:
             trial.transcript = transcript
             trial.outcome = outcome
             
-            # 2. 运行评分器
+            # 2. 检查中间检查点（新增）
+            if task.checkpoints:
+                checkpoint_results = await self._check_checkpoints(task, transcript)
+                # 将检查点结果添加到 grade_results
+                trial.grade_results.extend(checkpoint_results)
+            
+            # 3. 运行评分器
             grade_results = await self._run_graders(
                 task=task,
                 transcript=transcript,
                 outcome=outcome,
             )
-            trial.grade_results = grade_results
+            trial.grade_results.extend(grade_results)
             
-            # 3. 更新状态
+            # 4. 更新状态
             trial.status = TrialStatus.COMPLETED
             trial.completed_at = datetime.now()
             
@@ -446,6 +468,43 @@ class EvaluationHarness:
         outcome = Outcome()
         
         return transcript, outcome
+    
+    async def _check_checkpoints(
+        self,
+        task: Task,
+        transcript: Transcript
+    ) -> List[GradeResult]:
+        """
+        检查中间结果检查点
+        
+        Args:
+            task: 评估任务
+            transcript: 转录记录
+            
+        Returns:
+            List[GradeResult]: 检查点结果
+        """
+        results = []
+        
+        for checkpoint in task.checkpoints:
+            try:
+                # 使用 CodeBasedGraders 的 check_checkpoint 方法
+                result = self.code_graders.check_checkpoint(
+                    transcript=transcript,
+                    checkpoint_name=checkpoint.name,
+                    check_expression=checkpoint.check,
+                )
+                results.append(result)
+            except Exception as e:
+                results.append(GradeResult(
+                    grader_type=GraderType.CODE,
+                    grader_name=f"checkpoint_{checkpoint.name}",
+                    passed=False,
+                    score=0.0,
+                    explanation=f"检查点验证失败: {str(e)}",
+                ))
+        
+        return results
     
     async def _run_graders(
         self,
@@ -612,6 +671,31 @@ class EvaluationHarness:
                 agent_response=transcript.get_final_response() or "",
             )
         
+        elif rubric == "grade_intermediate_output":
+            # 需要从 task 或 transcript 中提取中间输出
+            intermediate_output = transcript.metadata.get("intermediate_output", "")
+            step_description = task.description
+            success_criteria = task.metadata.get("success_criteria", [])
+            result = await self.model_graders.grade_intermediate_output(
+                intermediate_output=intermediate_output,
+                step_description=step_description,
+                success_criteria=success_criteria,
+            )
+        
+        elif rubric == "grade_multi_agent_coordination":
+            subtask_results = transcript.metadata.get("subtask_results", [])
+            result = await self.model_graders.grade_multi_agent_coordination(
+                transcript=transcript,
+                subtask_results=subtask_results,
+            )
+        
+        elif rubric == "grade_against_reference":
+            reference_answer = task.reference_answer or ""
+            result = await self.model_graders.grade_against_reference(
+                agent_response=transcript.get_final_response() or "",
+                reference_answer=reference_answer,
+            )
+        
         else:
             # 自定义Rubric
             result = await self.model_graders.grade_with_custom_rubric(
@@ -732,3 +816,39 @@ class EvaluationHarness:
             json.dump(report.model_dump(), f, ensure_ascii=False, indent=2, default=str)
         
         return str(md_file)
+    
+    @staticmethod
+    def load_report(report_path: Path) -> EvaluationReport:
+        """
+        加载评估报告
+        
+        Args:
+            report_path: 报告文件路径（JSON格式）
+            
+        Returns:
+            EvaluationReport: 评估报告对象
+        """
+        import json
+        
+        with open(report_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        
+        # 处理 datetime 字符串
+        def parse_datetime(obj):
+            if isinstance(obj, dict):
+                for key, value in obj.items():
+                    if key in ["created_at", "timestamp"] and isinstance(value, str):
+                        try:
+                            obj[key] = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                        except:
+                            pass
+                    elif isinstance(value, (dict, list)):
+                        parse_datetime(value)
+            elif isinstance(obj, list):
+                for item in obj:
+                    parse_datetime(item)
+            return obj
+        
+        data = parse_datetime(data)
+        
+        return EvaluationReport(**data)

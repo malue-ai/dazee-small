@@ -23,11 +23,11 @@ agent:
 enabled_capabilities:
   # 核心工具（必需）
   plan_todo: 1
-  hitl: 1
-  # 文件读取请使用 sandbox_read_file
+  request_human_confirmation: 1
+  file_read: 1
   
   # 信息获取（可选）
-  tavily_search: 1           # 通用网络搜索（Tavily API）
+  web_search: 1
   knowledge_search: 1
   
   # 其他工具全部禁用
@@ -39,13 +39,9 @@ enabled_capabilities:
   ppt_generator: 0
   slidespeak_render: 0
   code_execution: 0
-  # 沙盒工具（默认禁用）
-  sandbox_write_file: 0
-  sandbox_read_file: 0
-  sandbox_list_files: 0
-  sandbox_run_command: 0
-  sandbox_execute_python: 0
-  sandbox_get_public_url: 0
+  sandbox_run_code: 0
+  sandbox_create_project: 0
+  sandbox_run_project: 0
 
 # ==================== MCP 工具配置 ====================
 mcp_tools: []

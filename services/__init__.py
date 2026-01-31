@@ -38,6 +38,7 @@ from .file_service import (
     FileService,
     get_file_service,
     FileServiceError,
+    FileNotFoundError as FileNotFoundErr,
 )
 
 from .tool_service import (
@@ -47,9 +48,11 @@ from .tool_service import (
     ToolNotFoundError,
     ToolAlreadyExistsError,
     ToolExecutionError,
+    MCPConnectionError,
     ToolRegistrationError,
     # 工具处理器
     ToolHandler,
+    MCPClient,
     # 装饰器
     tool,
 )
@@ -124,6 +127,7 @@ __all__ = [
     "FileService",
     "get_file_service",
     "FileServiceError",
+    "FileNotFoundErr",
     # Tool Service
     "ToolService",
     "get_tool_service",
@@ -131,8 +135,10 @@ __all__ = [
     "ToolNotFoundError",
     "ToolAlreadyExistsError",
     "ToolExecutionError",
+    "MCPConnectionError",
     "ToolRegistrationError",
     "ToolHandler",
+    "MCPClient",
     "tool",
     # Task Service
     "TaskService",

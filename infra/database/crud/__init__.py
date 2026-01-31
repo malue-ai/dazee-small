@@ -14,12 +14,13 @@ from infra.database.crud.base import (
 
 # 各表操作
 from infra.database.crud.user import (
+    generate_user_id,
     get_or_create_user,
 )
 from infra.database.crud.conversation import (
+    generate_conversation_id,
     create_conversation,
     get_conversation,
-    get_or_create_conversation,
     update_conversation,
     list_conversations,
     count_conversations,
@@ -27,16 +28,18 @@ from infra.database.crud.conversation import (
     get_conversation_summary,
     delete_conversation,
     count_messages_in_conversation,
-    get_conversations_since,
+    get_conversations_since,  # 🆕 Mem0 增量更新
 )
 from infra.database.crud.message import (
+    generate_message_id,
     create_message,
     get_message,
     update_message,
     list_messages,
-    get_messages_by_conversation,
+    get_messages_by_conversation,  # 🆕 Mem0 增量更新
 )
 from infra.database.crud.file import (
+    generate_file_id,
     create_file,
     get_file,
     update_file,
@@ -45,6 +48,7 @@ from infra.database.crud.file import (
     delete_file,
 )
 from infra.database.crud.knowledge import (
+    generate_knowledge_id,
     create_knowledge,
     get_knowledge,
     update_knowledge,
@@ -56,6 +60,7 @@ from infra.database.crud.knowledge import (
     bulk_update_status,
 )
 from infra.database.crud.sandbox import (
+    generate_sandbox_id,
     create_sandbox,
     get_sandbox,
     get_sandbox_by_conversation,
@@ -97,12 +102,13 @@ __all__ = [
     "delete_by_id",
     
     # User
+    "generate_user_id",
     "get_or_create_user",
     
     # Conversation
+    "generate_conversation_id",
     "create_conversation",
     "get_conversation",
-    "get_or_create_conversation",
     "update_conversation",
     "list_conversations",
     "count_conversations",
@@ -110,16 +116,18 @@ __all__ = [
     "get_conversation_summary",
     "delete_conversation",
     "count_messages_in_conversation",
-    "get_conversations_since",
+    "get_conversations_since",  # 🆕 Mem0 增量更新
     
     # Message
+    "generate_message_id",
     "create_message",
     "get_message",
     "update_message",
     "list_messages",
-    "get_messages_by_conversation",
+    "get_messages_by_conversation",  # 🆕 Mem0 增量更新
     
     # File
+    "generate_file_id",
     "create_file",
     "get_file",
     "update_file",
@@ -128,6 +136,7 @@ __all__ = [
     "delete_file",
     
     # Knowledge
+    "generate_knowledge_id",
     "create_knowledge",
     "get_knowledge",
     "update_knowledge",
@@ -139,6 +148,7 @@ __all__ = [
     "bulk_update_status",
     
     # Sandbox
+    "generate_sandbox_id",
     "create_sandbox",
     "get_sandbox",
     "get_sandbox_by_conversation",

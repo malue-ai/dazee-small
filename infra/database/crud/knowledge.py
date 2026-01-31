@@ -14,6 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from infra.database.models.knowledge import Knowledge, KnowledgeType, KnowledgeStatus
 
 
+def generate_knowledge_id() -> str:
+    """生成知识库条目 ID"""
+    return f"kb_{uuid4().hex[:24]}"
+
+
 async def create_knowledge(
     session: AsyncSession,
     user_id: str,
@@ -48,8 +53,10 @@ async def create_knowledge(
     Returns:
         创建的 Knowledge 对象
     """
+    kb_id = knowledge_id or generate_knowledge_id()
+    
     knowledge = Knowledge(
-        id=knowledge_id or str(uuid4()),
+        id=kb_id,
         user_id=user_id,
         title=title,
         content=content,

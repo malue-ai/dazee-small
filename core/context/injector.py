@@ -7,11 +7,11 @@
 3. 控制 Token 预算
 """
 from typing import List, Dict, Any
+import logging
 
 from core.context.provider import ContextType
-from logger import get_logger
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class ContextInjector:
@@ -23,7 +23,7 @@ class ContextInjector:
     - narrative: 叙述格式（自然语言）
     """
     
-    def __init__(self, max_tokens: int = 2000) -> None:
+    def __init__(self, max_tokens: int = 2000):
         """
         Args:
             max_tokens: 上下文最大 Token 数量（预算控制）

@@ -7,10 +7,9 @@
 - Agent 应使用 EventBroadcaster，不直接使用 EventManager
 - Service 层可以直接使用 EventManager
 - EventManager 是纯粹的事件发送层，无增强逻辑
-- 支持设置全局 output_format，所有子管理器共享
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 from core.events.base import EventStorage  # ← 导入 Protocol
 from core.events.session_events import SessionEventManager
@@ -34,9 +33,6 @@ class EventManager:
     
     使用示例：
         events = EventManager(redis)
-        
-        # 设置输出格式（可选）
-        events.set_output_format("zeno", conversation_id)
         
         # Session 级事件
         await events.session.emit_session_start(...)
@@ -67,11 +63,6 @@ class EventManager:
         # 保留 storage 引用（供 Agent 等模块获取 session context 使用）
         self.storage = storage
         
-        # 输出格式配置
-        self._output_format: str = "zenflux"
-        self._conversation_id: Optional[str] = None
-        self._adapter = None
-        
         # 初始化各层级事件管理器（storage 传递给它们）
         self.session = SessionEventManager(storage)
         self.user = UserEventManager(storage)
@@ -80,46 +71,50 @@ class EventManager:
         self.content = ContentEventManager(storage)
         self.system = SystemEventManager(storage)
     
-    def set_output_format(self, format: str, conversation_id: str = None) -> None:
-        """
-        设置输出格式（全局配置）
-        
-        设置后，所有通过 EventManager 发送的事件都会使用此格式
-        
-        Args:
-            format: 输出事件格式（zeno/zenflux）
-            conversation_id: 对话 ID（用于 ZenO 格式）
-        """
-        self._output_format = format
-        if conversation_id:
-            self._conversation_id = conversation_id
-        # 重置适配器，下次使用时会重新创建
-        self._adapter = None
+    # ==================== 便捷方法（保持向后兼容） ====================
     
-    def _get_adapter(self):
-        """
-        获取格式转换适配器（延迟初始化）
-        
-        Returns:
-            适配器实例，如果不需要转换则返回 None
-        """
-        if self._output_format != "zeno":
-            return None
-        
-        if self._adapter is None:
-            from core.events.adapters.zeno import ZenOAdapter
-            self._adapter = ZenOAdapter(conversation_id=self._conversation_id)
-        return self._adapter
+    async def emit_conversation_start(
+        self,
+        session_id: str,
+        conversation: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """便捷方法：发送 conversation_start 事件"""
+        return await self.conversation.emit_conversation_start(session_id, conversation)
     
-    @property
-    def output_format(self) -> str:
-        """获取当前输出格式"""
-        return self._output_format
+    async def emit_message_start(
+        self,
+        session_id: str,
+        message_id: str,
+        model: str
+    ) -> Dict[str, Any]:
+        """便捷方法：发送 message_start 事件"""
+        return await self.message.emit_message_start(session_id, message_id, model)
     
-    @property
-    def adapter(self):
-        """获取当前适配器"""
-        return self._get_adapter()
+    async def emit_message_stop(
+        self,
+        session_id: str,
+        message_id: str = None
+    ) -> Dict[str, Any]:
+        """便捷方法：发送 message_stop 事件"""
+        return await self.message.emit_message_stop(session_id, message_id)
+    
+    async def emit_error(
+        self,
+        session_id: str,
+        error_type: str,
+        error_message: str
+    ) -> Dict[str, Any]:
+        """便捷方法：发送 error 事件"""
+        return await self.system.emit_error(session_id, error_type, error_message)
+    
+    async def emit_custom(
+        self,
+        session_id: str,
+        event_type: str,
+        event_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """便捷方法：发送自定义事件"""
+        return await self.system.emit_custom(session_id, event_type, event_data)
 
 
 def create_event_manager(storage: EventStorage) -> EventManager:

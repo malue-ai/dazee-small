@@ -47,7 +47,7 @@ docker compose up -d
 
 - **backend**: FastAPI 后端 (端口 8010)
 - **redis**: Redis 缓存 (端口 6379)
-- **数据库**: PostgreSQL (Docker Compose 自动启动)
+- **数据库**: SQLite (存储在 `workspace/database/`)
 
 ### 环境变量 (.env)
 
@@ -134,7 +134,7 @@ vim .env  # 填入 API Keys
 - ✅ 使用阿里云镜像（国内快）
 - ✅ 使用清华 pip 源（依赖安装快）
 - ✅ Python 3.11（稳定可靠）
-- ✅ PostgreSQL 数据库（Docker Compose 自动配置）
+- ✅ SQLite 数据库（无需额外配置）
 - ✅ 监听 0.0.0.0（外网可访问）
 
 ## 技术支持

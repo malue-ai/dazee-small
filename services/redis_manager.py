@@ -48,7 +48,7 @@ class RedisSessionManager:
     
     async def _get_client(self) -> redis.Redis:
         """
-        获取或创建 Redis 客户端（懒加载，带重试）
+        获取或创建 Redis 客户端（懒加载）
         """
         if self._client is None:
             self._client = redis.Redis(
@@ -56,51 +56,15 @@ class RedisSessionManager:
                 port=self.redis_port,
                 db=self.redis_db,
                 password=self.redis_password,
-                decode_responses=True,  # 自动解码为字符串
-                socket_connect_timeout=5.0,  # 连接超时 5 秒
-                socket_timeout=5.0,  # 操作超时 5 秒
-                retry_on_timeout=True,  # 超时自动重试
-            )
-        
-        # 简单重试逻辑：最多尝试 3 次
-        max_retries = 3
-        last_error = None
-        
-        for attempt in range(1, max_retries + 1):
-            try:
-                await asyncio.wait_for(
-                    self._client.ping(),
-                    timeout=3.0  # 每次 ping 最多等 3 秒
-                )
-                if attempt > 1:
-                    logger.info(f"✅ Redis 重连成功 (尝试 {attempt}/{max_retries})")
-                return self._client
-            except asyncio.TimeoutError as e:
-                last_error = e
-                logger.warning(
-                    f"⚠️ Redis ping 超时 (尝试 {attempt}/{max_retries}): "
-                    f"{self.redis_host}:{self.redis_port}"
-                )
-                if attempt < max_retries:
-                    await asyncio.sleep(0.5 * attempt)  # 递增延迟
-            except Exception as e:
-                last_error = e
-                logger.warning(
-                    f"⚠️ Redis 连接失败 (尝试 {attempt}/{max_retries}): {str(e)}"
-                )
-                if attempt < max_retries:
-                    await asyncio.sleep(0.5 * attempt)
-        
-        # 所有重试都失败
-        logger.error(
-            f"❌ Redis 连接失败（已尝试 {max_retries} 次）: "
-            f"{self.redis_host}:{self.redis_port}, "
-            f"最后错误: {str(last_error)}"
+            decode_responses=True  # 自动解码为字符串
         )
-        self._client = None
-        raise ConnectionError(
-            f"无法连接到 Redis {self.redis_host}:{self.redis_port}"
-        ) from last_error
+        try:
+            await self._client.ping()
+        except Exception as e:
+            logger.error(f"❌ Redis 连接失败: {str(e)}")
+            self._client = None
+            raise
+        return self._client
     
     @property
     def client(self) -> redis.Redis:
@@ -358,41 +322,9 @@ class RedisSessionManager:
             return {}
         
         return {
-            "message_id": status_data.get("message_id"),
             "conversation_id": status_data.get("conversation_id"),
             "user_id": status_data.get("user_id")
         }
-    
-    async def set_session_context(
-        self,
-        session_id: str,
-        conversation_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        message_id: Optional[str] = None
-    ) -> None:
-        """
-        设置 session 上下文信息
-        
-        用于在 Agent 执行前同步 session context，确保工具（如 api_calling）
-        可以正确获取 conversation_id、message_id 等信息。
-        
-        Args:
-            session_id: Session ID
-            conversation_id: 对话 ID（可选）
-            user_id: 用户 ID（可选）
-            message_id: Assistant 消息 ID（可选，在 _run_agent 开始时设置）
-        """
-        fields = {}
-        if conversation_id is not None:
-            fields["conversation_id"] = conversation_id
-        if user_id is not None:
-            fields["user_id"] = user_id
-        if message_id is not None:
-            fields["message_id"] = message_id
-        
-        if fields:
-            await self.update_session_status(session_id, **fields)
-            logger.debug(f"🔑 已设置 session context: session_id={session_id}, {fields}")
     
     async def buffer_event(
         self,
@@ -400,18 +332,10 @@ class RedisSessionManager:
         event_data: Dict[str, Any] = None,
         event_id: int = None,
         event_type: str = None,
-        timestamp: str = None,
-        output_format: str = "zenflux",
-        adapter=None
-    ) -> Dict[str, Any]:
+        timestamp: str = None
+    ) -> None:
         """
-        缓冲事件到 Redis 并通过 Pub/Sub 发布（统一入口）
-        
-        处理流程：
-        1. 格式转换（如果 output_format != "zenflux"）
-        2. 生成 seq（Redis INCR，原子操作）
-        3. 存入 Redis List
-        4. 通过 Pub/Sub 发布
+        缓冲事件到 Redis 并通过 Pub/Sub 发布
         
         Args:
             session_id: Session ID
@@ -419,17 +343,12 @@ class RedisSessionManager:
             event_id: 事件 ID（可选，向后兼容）
             event_type: 事件类型（可选）
             timestamp: 时间戳（可选）
-            output_format: 输出格式（zenflux/zeno），默认 zenflux
-            adapter: 格式转换适配器（可选，用于 zeno 格式）
-            
-        Returns:
-            添加了 seq 的完整事件
         """
         client = await self._get_client()
         
-        # 方式1：传入完整事件字典
-        if event_data is not None and isinstance(event_data, dict):
-            event = event_data.copy()  # 不修改原对象
+        # 方式1：传入完整事件字典（包含 event_uuid、id 或 seq）
+        if event_data is not None and ("event_uuid" in event_data or "id" in event_data or "seq" in event_data):
+            event = event_data
         # 方式2：分别传入字段（向后兼容）
         else:
             event = {
@@ -439,27 +358,6 @@ class RedisSessionManager:
                 "timestamp": timestamp
             }
         
-        # 1. 格式转换（如果需要）
-        if output_format == "zeno" and adapter is not None:
-            transformed = adapter.transform(event)
-            if transformed is None:
-                # 事件被适配器过滤，不需要存储
-                return None
-            event = transformed
-        
-        # 2. 生成 seq（Redis INCR，原子操作）
-        # 只有当事件没有 seq 时才生成
-        if "seq" not in event or event.get("seq") is None:
-            seq_key = f"session:{session_id}:seq"
-            seq = await client.incr(seq_key)
-            
-            # 首次创建设置 TTL（1小时）
-            if seq == 1:
-                await client.expire(seq_key, 3600)
-            
-            event["seq"] = seq
-        
-        # 3. 存入 Redis
         event_json = json.dumps(event, ensure_ascii=False)
         
         # 左进（LPUSH），保持最新的在前面
@@ -476,14 +374,15 @@ class RedisSessionManager:
             logger.warning(f"⚠️ 事件数量超过阈值: session_id={session_id}, count={events_count}")
             await client.ltrim(f"session:{session_id}:events", 0, 9999)
         
-        # 4. 通过 Pub/Sub 发布事件（实时推送）
+        # 🎯 通过 Pub/Sub 发布事件（实时推送）
         channel = f"session:{session_id}:stream"
         await client.publish(channel, event_json)
         
         # 更新 last_event_seq
-        await self.update_session_status(session_id, last_event_seq=event["seq"])
-        
-        return event
+        if "seq" in event:
+            await self.update_session_status(session_id, last_event_seq=event["seq"])
+        elif "id" in event and event["id"] is not None:
+            await self.update_session_status(session_id, last_event_seq=event["id"])
     
     async def get_events(
         self,
@@ -592,7 +491,7 @@ class RedisSessionManager:
         self,
         session_id: str,
         after_id: Optional[int] = None,
-        timeout: int = 1800
+        timeout: int = 300
     ):
         """
         使用 Pub/Sub 订阅实时事件流（推荐）
@@ -631,8 +530,6 @@ class RedisSessionManager:
         
         try:
             start_time = datetime.now()
-            last_event_time = datetime.now()  # 🆕 跟踪最后发送事件的时间
-            ping_interval = 30  # 🆕 30 秒无事件则发送 ping
             
             while True:
                 # 检查超时
@@ -659,21 +556,8 @@ class RedisSessionManager:
                         if event_seq > last_id:
                             yield event
                             last_id = event_seq
-                            last_event_time = datetime.now()  # 🆕 更新最后事件时间
                     except json.JSONDecodeError:
                         logger.warning(f"⚠️ 无法解析 Pub/Sub 消息: {message['data']}")
-                
-                # 🆕 心跳机制：超过 30 秒无事件则发送 ping，保持连接活跃
-                idle_seconds = (datetime.now() - last_event_time).total_seconds()
-                if idle_seconds >= ping_interval:
-                    ping_event = {
-                        "type": "ping",
-                        "timestamp": int(datetime.now().timestamp() * 1000),
-                        "session_id": session_id
-                    }
-                    yield ping_event
-                    last_event_time = datetime.now()
-                    logger.debug(f"💓 发送 ping 心跳: session_id={session_id}, idle={idle_seconds:.0f}s")
                 
                 # 检查 session 是否结束
                 session_data = await self.get_session_status(session_id)
@@ -689,7 +573,7 @@ class RedisSessionManager:
                     try:
                         heartbeat_time = datetime.fromisoformat(last_heartbeat)
                         heartbeat_age = (datetime.now() - heartbeat_time).total_seconds()
-                        if heartbeat_age > 1200:  # 20 分钟超时
+                        if heartbeat_age > 120:  # 2 分钟超时
                             logger.warning(
                                 f"⚠️ Session 心跳超时 ({heartbeat_age:.0f}s)，视为已结束: "
                                 f"session_id={session_id}"
@@ -715,7 +599,7 @@ class RedisSessionManager:
             # 清理订阅（在 CancelledError 时也要尽量清理）
             try:
                 await pubsub.unsubscribe(channel)
-                await pubsub.aclose()
+                await pubsub.close()
             except asyncio.CancelledError:
                 # 连接已取消，忽略清理错误
                 logger.debug(f"🔌 Pub/Sub 清理被取消: session_id={session_id}")

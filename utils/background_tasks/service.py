@@ -3,30 +3,26 @@
 
 职责：
 - 统一调度后台任务
-- 提供共享资源（LLM、Mem0 Pool）
+- 提供 LLM 服务（标题生成、推荐问题等）
+- 提供 Mem0 服务
 
 设计原则：
 - 任务自动注册，无需手动维护 TASK_REGISTRY
 - 任务实现在 tasks/ 目录下，使用 @background_task 装饰器
-- Service 只负责调度和资源管理，不包含具体业务逻辑
 """
 
-# 1. 标准库
 import asyncio
-from datetime import datetime
-from typing import Optional, Dict, Any, List, TYPE_CHECKING
+from datetime import datetime, timedelta
+from typing import Optional, Dict, Any, List
 
-# 2. 第三方库（无）
-
-# 3. 本地模块
 from logger import get_logger
+from core.llm import create_llm_service
+from core.llm.base import Message
+from core.events.manager import EventManager
+from utils.json_utils import extract_json_list
 
-from .context import TaskContext
+from .context import TaskContext, Mem0UpdateResult, Mem0BatchUpdateResult
 from .registry import get_task_registry, get_registered_task_names
-
-if TYPE_CHECKING:
-    from core.llm import create_llm_service
-    from core.llm.base import Message
 
 logger = get_logger("background_tasks.service")
 
@@ -49,13 +45,12 @@ class BackgroundTaskService:
     2. 使用 @background_task("task_name") 装饰器
     """
     
-    def __init__(self) -> None:
+    def __init__(self):
         """初始化后台任务服务"""
         # 使用 Haiku（快速、便宜，适合简单任务）
-        self._llm = None  # 延迟初始化，避免启动时加载
+        self.llm = None  # 延迟初始化，避免启动时加载
         self._mem0_pool = None  # Mem0 Pool 延迟初始化
         
-        # Prompt 模板（供 tasks 使用）
         self.title_generation_prompt = """请为以下对话内容生成一个简短的中文标题。
 
 要求：
@@ -69,78 +64,39 @@ class BackgroundTaskService:
 
 标题："""
 
-        self.recommended_questions_prompt = """基于以下对话内容，生成3个用户可能想要继续问的后续问题。
-
-重要规则：
-- 如果助手已经完成了任务（如生成了图片、完成了查询等），问题应该是**后续延伸类**，引导用户探索更多可能性
-- 绝对不要生成"事后诸葛亮"式的问题（如任务完成后再问"你想要什么风格"这类本该事前问的问题）
-- 问题应该面向未来，而不是回溯过去
-
-好的后续问题示例（任务完成后）：
-- "帮我再生成一张不同风格的"
-- "可以把背景换成xxx吗"
-- "你还能生成什么卡通人物"
-- "把这张图片发给我的好友"
-
-不好的问题示例（任务完成后不应再问）：
-- "你想要什么风格的图片"（应该事前问，不是事后问）
-- "背景应该包含什么元素"（任务都完成了再问没意义）
+        self.recommended_questions_prompt = """基于以下对话内容，生成3个用户可能想要继续问的相关问题。
 
 要求：
 - 生成3个问题
 - 每个问题不超过25个字
-- 问题要引导用户继续探索和使用
+- 问题要与对话主题相关且有价值
+- 问题要能引导深入探讨
 - 使用中文
-- 只返回 JSON，不要其他内容
+- 返回 JSON 格式
 
 对话内容：
 用户：{user_message}
 助手：{assistant_response}
 
-返回格式：
+请返回以下 JSON 格式：
+```json
 {{"questions": ["问题1", "问题2", "问题3"]}}
-"""
+```"""
     
-    # ==================== 共享资源管理 ====================
-    
-    def get_llm(self) -> Any:
-        """
-        获取 LLM 服务（懒加载）
-        
-        供 tasks 使用，避免重复创建 LLM 实例
-        """
-        if self._llm is None:
+    def _get_llm(self):
+        """懒加载 LLM 服务"""
+        if self.llm is None:
             from config.llm_config import get_llm_profile
-            from core.llm import create_llm_service  # 延迟导入，避免循环依赖
             profile = get_llm_profile("background_task")
-            self._llm = create_llm_service(**profile)
-        return self._llm
-    
-    def get_mem0_pool(self) -> Optional[Any]:
-        """
-        获取 Mem0 Pool（懒加载）
-        
-        供 tasks 使用，避免重复创建 Pool 实例
-        
-        Returns:
-            Mem0 Pool 实例，如果模块未安装则返回 None
-        """
-        if self._mem0_pool is None:
-            try:
-                from core.memory.mem0 import get_mem0_pool
-                self._mem0_pool = get_mem0_pool()
-            except ImportError:
-                logger.warning("⚠️ mem0 模块未安装，Mem0 功能不可用")
-                return None
-        return self._mem0_pool
+            self.llm = create_llm_service(**profile)
+        return self.llm
     
     # ==================== 统一调度入口 ====================
     
     async def dispatch_tasks(
         self,
         task_names: List[str],
-        context: TaskContext,
-        wait: bool = True
+        context: TaskContext
     ) -> Dict[str, bool]:
         """
         统一后台任务调度入口 ⭐
@@ -150,15 +106,12 @@ class BackgroundTaskService:
         Args:
             task_names: 要执行的任务名列表，如 ["title_generation", "recommended_questions"]
             context: 任务上下文，包含所有任务可能需要的参数
-            wait: 是否等待任务完成（默认 True，确保 SSE 事件在流关闭前发送）
             
         Returns:
-            Dict[str, bool]: 各任务是否成功执行/启动
+            Dict[str, bool]: 各任务是否成功启动
         """
         results = {}
         registry = get_task_registry()
-        tasks = []
-        task_name_map = {}  # task -> task_name 映射
         
         for task_name in task_names:
             if task_name not in registry:
@@ -169,40 +122,682 @@ class BackgroundTaskService:
             task_func = registry[task_name]
             
             try:
-                # 创建任务
-                task = asyncio.create_task(task_func(context, self))
-                tasks.append(task)
-                task_name_map[id(task)] = task_name
-                results[task_name] = True  # 先标记为启动成功
+                # 启动后台任务（不等待完成）
+                asyncio.create_task(task_func(context, self))
+                results[task_name] = True
                 logger.info(f"🚀 后台任务已启动: {task_name}")
             except Exception as e:
                 logger.warning(f"⚠️ 启动后台任务失败: {task_name}, error={e}")
                 results[task_name] = False
         
-        if wait and tasks:
-            # 等待所有任务完成（确保 SSE 事件在流关闭前发送）
-            logger.debug(f"⏳ 等待 {len(tasks)} 个后台任务完成...")
-            done, _ = await asyncio.wait(tasks, return_when=asyncio.ALL_COMPLETED)
-            
-            # 检查任务执行结果
-            for task in done:
-                task_name = task_name_map.get(id(task), "unknown")
-                if task.exception():
-                    logger.warning(f"⚠️ 后台任务执行失败: {task_name}, error={task.exception()}")
-                    results[task_name] = False
-                else:
-                    logger.debug(f"✅ 后台任务执行完成: {task_name}")
-            
-            logger.info(f"✅ 所有后台任务已完成")
-        
         return results
     
-    # ==================== 工具方法 ====================
+    # ==================== 对话标题生成 ====================
     
-    @staticmethod
-    def calc_duration_ms(start_time: datetime) -> int:
+    async def generate_conversation_title(
+        self,
+        conversation_id: str,
+        first_message: str,
+        session_id: Optional[str] = None,
+        event_manager: Optional[EventManager] = None,
+        conversation_service = None
+    ) -> Optional[str]:
+        """
+        生成对话标题（后台任务）
+        
+        流程：
+        1. 使用 LLM 生成标题
+        2. 更新数据库（ConversationService）
+        3. 通过 SSE 推送给前端（EventManager）
+        """
+        try:
+            logger.info(f"🏷️ 开始生成对话标题: conversation_id={conversation_id}")
+            
+            # 1. 截取消息前 200 字符
+            message_preview = first_message[:200] if len(first_message) > 200 else first_message
+            
+            # 2. 使用 core/llm 生成标题
+            title = await self._generate_title_with_llm(message_preview)
+            
+            if not title:
+                logger.warning(f"⚠️ LLM 返回空标题")
+                return None
+            
+            # 3. 清理标题（去除引号、标点等）
+            title = self._clean_title(title)
+            
+            logger.info(f"✅ 标题已生成: {title}")
+            
+            # 4. 更新数据库
+            if conversation_service:
+                await conversation_service.update_conversation(
+                    conversation_id=conversation_id,
+                    title=title
+                )
+                logger.info(f"💾 数据库已更新")
+            
+            # 5. 通过 SSE 推送给前端
+            if session_id and event_manager:
+                await event_manager.conversation.emit_conversation_delta(
+                    session_id=session_id,
+                    conversation_id=conversation_id,
+                    delta={"title": title}
+                )
+                logger.info(f"📤 标题更新事件已推送到前端: {title}")
+            
+            return title
+        
+        except Exception as e:
+            logger.warning(f"⚠️ 生成对话标题失败: {str(e)}")
+            return None
+    
+    async def _generate_title_with_llm(self, message: str) -> Optional[str]:
+        """使用 LLM 生成标题"""
+        try:
+            llm = self._get_llm()
+            prompt = self.title_generation_prompt.format(message=message)
+            
+            response = await llm.create_message_async(
+                messages=[Message(role="user", content=prompt)],
+            )
+            
+            if response and response.content:
+                return response.content.strip()
+            
+            return None
+        
+        except Exception as e:
+            logger.error(f"❌ LLM 生成标题失败: {str(e)}", exc_info=True)
+            return None
+    
+    def _clean_title(self, title: str) -> str:
+        """清理标题（去除引号、标点等）"""
+        title = title.strip('"\'「」『』【】《》""''')
+        if len(title) > 20:
+            title = title[:17] + "..."
+        return title
+    
+    # ==================== 推荐问题生成 ====================
+    
+    async def generate_recommended_questions(
+        self,
+        session_id: str,
+        message_id: str,
+        user_message: str,
+        assistant_response: str,
+        event_manager: Optional[EventManager] = None
+    ) -> Optional[List[str]]:
+        """
+        生成推荐问题（后台任务）
+        
+        根据对话内容生成用户可能感兴趣的后续问题，
+        通过 SSE 推送到前端显示在消息底部
+        """
+        try:
+            logger.info(f"💡 开始生成推荐问题: session_id={session_id}, message_id={message_id}")
+            
+            # 1. 截取内容（避免过长）
+            user_preview = user_message[:300] if len(user_message) > 300 else user_message
+            assistant_preview = assistant_response[:500] if len(assistant_response) > 500 else assistant_response
+            
+            # 2. 使用 LLM 生成推荐问题
+            questions = await self._generate_questions_with_llm(user_preview, assistant_preview)
+            
+            if not questions:
+                logger.warning("⚠️ LLM 返回空的推荐问题")
+                return None
+            
+            logger.info(f"✅ 推荐问题已生成: {len(questions)} 个")
+            
+            # 3. 通过 SSE 推送给前端
+            if session_id and event_manager:
+                import json
+                await event_manager.message.emit_message_delta(
+                    session_id=session_id,
+                    message_id=message_id,
+                    delta={
+                        "type": "recommended",
+                        "content": json.dumps({"questions": questions}, ensure_ascii=False)
+                    }
+                )
+                logger.info(f"📤 推荐问题已推送到前端")
+            
+            return questions
+        
+        except Exception as e:
+            logger.warning(f"⚠️ 生成推荐问题失败: {str(e)}")
+            return None
+    
+    async def _generate_questions_with_llm(
+        self,
+        user_message: str,
+        assistant_response: str
+    ) -> Optional[List[str]]:
+        """使用 LLM 生成推荐问题"""
+        try:
+            llm = self._get_llm()
+            
+            prompt = self.recommended_questions_prompt.format(
+                user_message=user_message,
+                assistant_response=assistant_response
+            )
+            
+            response = await llm.create_message_async(
+                messages=[Message(role="user", content=prompt)],
+            )
+            
+            if response and hasattr(response, 'content') and response.content:
+                for block in response.content:
+                    if hasattr(block, 'text'):
+                        raw_text = block.text.strip()
+                        
+                        # 使用 JSON 提取器
+                        questions = extract_json_list(raw_text, key="questions")
+                        
+                        if questions:
+                            cleaned = []
+                            for q in questions[:3]:
+                                q = q.strip().strip('"\'「」『』')
+                                if len(q) > 30:
+                                    q = q[:27] + "..."
+                                if q:
+                                    cleaned.append(q)
+                            return cleaned
+                        
+                        # JSON 提取失败，回退到逐行解析
+                        logger.debug("JSON 提取失败，回退到逐行解析")
+                        return self._parse_questions_fallback(raw_text)
+            
+            return None
+        
+        except Exception as e:
+            logger.error(f"❌ LLM 生成推荐问题失败: {str(e)}", exc_info=True)
+            return None
+    
+    def _parse_questions_fallback(self, raw_text: str) -> List[str]:
+        """回退方案：逐行解析 LLM 返回的问题文本"""
+        import re
+        questions = []
+        
+        for line in raw_text.split('\n'):
+            line = line.strip()
+            
+            if not line:
+                continue
+            
+            line = re.sub(r'^[\d]+[.、)\]]\s*', '', line)
+            line = re.sub(r'^[-•·]\s*', '', line)
+            line = line.strip().strip('"\'「」『』')
+            
+            if len(line) > 30:
+                line = line[:27] + "..."
+            
+            if line and not line.startswith('{') and not line.startswith('['):
+                questions.append(line)
+        
+        return questions[:3]
+    
+    # ==================== Mem0 记忆更新 ====================
+    
+    def _get_mem0_pool(self):
+        """懒加载 Mem0 Pool"""
+        if self._mem0_pool is None:
+            try:
+                from core.memory.mem0 import get_mem0_pool
+                self._mem0_pool = get_mem0_pool()
+            except ImportError:
+                logger.warning("⚠️ mem0 模块未安装，Mem0 功能不可用")
+                return None
+        return self._mem0_pool
+    
+    async def update_user_memories(
+        self,
+        user_id: str,
+        since_hours: int = 24,
+        session_id: Optional[str] = None,
+        event_manager: Optional[EventManager] = None
+    ) -> Mem0UpdateResult:
+        """
+        更新单个用户的 Mem0 记忆（后台任务）
+        
+        从数据库获取用户在指定时间范围内的会话，提取记忆并更新
+        """
+        start_time = datetime.now()
+        
+        try:
+            logger.info(f"🧠 开始更新用户记忆: user_id={user_id}, since={since_hours}h")
+            
+            pool = self._get_mem0_pool()
+            if not pool:
+                return Mem0UpdateResult(
+                    user_id=user_id,
+                    success=False,
+                    error="mem0 模块未安装",
+                    duration_ms=self._calc_duration_ms(start_time)
+                )
+            
+            # 获取用户会话
+            since = datetime.now() - timedelta(hours=since_hours)
+            conversations = await self._fetch_user_conversations(user_id, since)
+            
+            if not conversations:
+                logger.info(f"○ 用户 {user_id} 无需更新（无符合条件的会话）")
+                return Mem0UpdateResult(
+                    user_id=user_id,
+                    success=True,
+                    memories_added=0,
+                    conversations_processed=0,
+                    duration_ms=self._calc_duration_ms(start_time)
+                )
+            
+            # 提取所有消息
+            all_messages = []
+            for conv in conversations:
+                all_messages.extend(conv.get("messages", []))
+            
+            if not all_messages:
+                return Mem0UpdateResult(
+                    user_id=user_id,
+                    success=True,
+                    memories_added=0,
+                    conversations_processed=len(conversations),
+                    duration_ms=self._calc_duration_ms(start_time)
+                )
+            
+            # 调用 Mem0 添加记忆（在线程池中执行）
+            result = await asyncio.to_thread(
+                pool.add,
+                user_id=user_id,
+                messages=all_messages
+            )
+            
+            memories_added = len(result.get("results", []))
+            
+            logger.info(
+                f"✅ 用户 {user_id} 记忆更新完成: "
+                f"会话数={len(conversations)}, 消息数={len(all_messages)}, "
+                f"新增记忆={memories_added}"
+            )
+            
+            # 通过 SSE 推送进度（可选）
+            if session_id and event_manager:
+                import json
+                await event_manager.message.emit_message_delta(
+                    session_id=session_id,
+                    message_id=f"mem0_update_{user_id}",
+                    delta={
+                        "type": "mem0_update",
+                        "content": json.dumps({
+                            "user_id": user_id,
+                            "memories_added": memories_added,
+                            "conversations_processed": len(conversations)
+                        }, ensure_ascii=False)
+                    }
+                )
+            
+            return Mem0UpdateResult(
+                user_id=user_id,
+                success=True,
+                memories_added=memories_added,
+                conversations_processed=len(conversations),
+                duration_ms=self._calc_duration_ms(start_time)
+            )
+            
+        except Exception as e:
+            logger.warning(f"⚠️ 更新用户记忆失败: user_id={user_id}, error={str(e)}")
+            return Mem0UpdateResult(
+                user_id=user_id,
+                success=False,
+                error=str(e),
+                duration_ms=self._calc_duration_ms(start_time)
+            )
+    
+    async def batch_update_all_memories(
+        self,
+        since_hours: int = 24,
+        max_concurrent: int = 5
+    ) -> Mem0BatchUpdateResult:
+        """
+        批量更新所有用户的 Mem0 记忆（后台任务）
+        
+        典型用途：定时任务（如凌晨批量处理当天会话）
+        """
+        batch_result = Mem0BatchUpdateResult(
+            total_users=0,
+            successful=0,
+            failed=0,
+            start_time=datetime.now()
+        )
+        
+        try:
+            logger.info(f"🚀 开始批量更新用户记忆: since={since_hours}h, max_concurrent={max_concurrent}")
+            
+            pool = self._get_mem0_pool()
+            if not pool:
+                batch_result.failed = 1
+                batch_result.end_time = datetime.now()
+                batch_result.results.append(Mem0UpdateResult(
+                    user_id="batch",
+                    success=False,
+                    error="mem0 模块未安装"
+                ))
+                return batch_result
+            
+            # 获取所有用户的会话
+            since = datetime.now() - timedelta(hours=since_hours)
+            user_conversations = await self._fetch_all_user_conversations(since)
+            
+            if not user_conversations:
+                logger.info(f"○ 无需更新（无符合条件的会话）")
+                batch_result.end_time = datetime.now()
+                return batch_result
+            
+            batch_result.total_users = len(user_conversations)
+            
+            # 使用信号量控制并发
+            semaphore = asyncio.Semaphore(max_concurrent)
+            
+            async def update_with_limit(user_id: str, convs: List[Dict]):
+                async with semaphore:
+                    return await self._update_user_memories_internal(user_id, convs)
+            
+            # 并发执行
+            tasks = [
+                update_with_limit(user_id, convs)
+                for user_id, convs in user_conversations.items()
+            ]
+            
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            for result in results:
+                if isinstance(result, Exception):
+                    batch_result.failed += 1
+                    batch_result.results.append(Mem0UpdateResult(
+                        user_id="unknown",
+                        success=False,
+                        error=str(result)
+                    ))
+                elif isinstance(result, Mem0UpdateResult):
+                    batch_result.results.append(result)
+                    if result.success:
+                        batch_result.successful += 1
+                        batch_result.total_memories_added += result.memories_added
+                    else:
+                        batch_result.failed += 1
+            
+            batch_result.end_time = datetime.now()
+            
+            logger.info(
+                f"✅ 批量更新完成: "
+                f"总数={batch_result.total_users}, "
+                f"成功={batch_result.successful}, "
+                f"失败={batch_result.failed}, "
+                f"新增记忆={batch_result.total_memories_added}, "
+                f"耗时={batch_result.duration_seconds:.2f}s"
+            )
+            
+            # 🆕 情绪聚合：为成功更新的用户生成周汇总
+            await self._aggregate_weekly_summaries(
+                user_ids=[r.user_id for r in batch_result.results if r.success],
+                pool=pool
+            )
+            
+            return batch_result
+            
+        except Exception as e:
+            logger.warning(f"⚠️ 批量更新失败: {str(e)}")
+            batch_result.failed = 1
+            batch_result.end_time = datetime.now()
+            batch_result.results.append(Mem0UpdateResult(
+                user_id="batch",
+                success=False,
+                error=str(e)
+            ))
+            return batch_result
+    
+    async def _update_user_memories_internal(
+        self,
+        user_id: str,
+        conversations: List[Dict[str, Any]]
+    ) -> Mem0UpdateResult:
+        """内部方法：更新单用户记忆（已有会话数据）"""
+        start_time = datetime.now()
+        
+        try:
+            pool = self._get_mem0_pool()
+            if not pool:
+                return Mem0UpdateResult(
+                    user_id=user_id,
+                    success=False,
+                    error="mem0 模块未安装",
+                    duration_ms=self._calc_duration_ms(start_time)
+                )
+            
+            all_messages = []
+            for conv in conversations:
+                all_messages.extend(conv.get("messages", []))
+            
+            if not all_messages:
+                return Mem0UpdateResult(
+                    user_id=user_id,
+                    success=True,
+                    memories_added=0,
+                    conversations_processed=len(conversations),
+                    duration_ms=self._calc_duration_ms(start_time)
+                )
+            
+            result = await asyncio.to_thread(
+                pool.add,
+                user_id=user_id,
+                messages=all_messages
+            )
+            
+            memories_added = len(result.get("results", []))
+            
+            return Mem0UpdateResult(
+                user_id=user_id,
+                success=True,
+                memories_added=memories_added,
+                conversations_processed=len(conversations),
+                duration_ms=self._calc_duration_ms(start_time)
+            )
+            
+        except Exception as e:
+            return Mem0UpdateResult(
+                user_id=user_id,
+                success=False,
+                error=str(e),
+                duration_ms=self._calc_duration_ms(start_time)
+            )
+    
+    async def _fetch_user_conversations(
+        self,
+        user_id: str,
+        since: datetime
+    ) -> List[Dict[str, Any]]:
+        """从数据库获取单个用户的会话"""
+        try:
+            from infra.database import AsyncSessionLocal, crud
+            
+            async with AsyncSessionLocal() as session:
+                conversations = await crud.get_conversations_since(
+                    session,
+                    since=since,
+                    user_id=user_id
+                )
+                
+                result = []
+                for conv in conversations:
+                    messages = await crud.get_messages_by_conversation(
+                        session,
+                        conversation_id=conv.id
+                    )
+                    result.append({
+                        "id": conv.id,
+                        "created_at": conv.created_at.isoformat() if conv.created_at else None,
+                        "messages": [
+                            {"role": msg.role, "content": msg.content}
+                            for msg in messages
+                        ]
+                    })
+                
+                return result
+                
+        except ImportError:
+            logger.warning("⚠️ 数据库模块不可用")
+            return []
+        except Exception as e:
+            logger.warning(f"⚠️ 获取用户会话失败: {e}")
+            return []
+    
+    async def _fetch_all_user_conversations(
+        self,
+        since: datetime
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """从数据库获取所有用户的会话（按用户分组）"""
+        try:
+            from infra.database import AsyncSessionLocal, crud
+            
+            async with AsyncSessionLocal() as session:
+                conversations = await crud.get_conversations_since(
+                    session,
+                    since=since
+                )
+                
+                user_conversations: Dict[str, List[Dict[str, Any]]] = {}
+                
+                for conv in conversations:
+                    user_id = conv.user_id
+                    if not user_id:
+                        continue
+                    
+                    messages = await crud.get_messages_by_conversation(
+                        session,
+                        conversation_id=conv.id
+                    )
+                    
+                    conv_data = {
+                        "id": conv.id,
+                        "created_at": conv.created_at.isoformat() if conv.created_at else None,
+                        "messages": [
+                            {"role": msg.role, "content": msg.content}
+                            for msg in messages
+                        ]
+                    }
+                    
+                    if user_id not in user_conversations:
+                        user_conversations[user_id] = []
+                    user_conversations[user_id].append(conv_data)
+                
+                return user_conversations
+                
+        except ImportError:
+            logger.warning("⚠️ 数据库模块不可用")
+            return {}
+        except Exception as e:
+            logger.warning(f"⚠️ 获取所有用户会话失败: {e}")
+            return {}
+    
+    def _calc_duration_ms(self, start_time: datetime) -> int:
         """计算耗时（毫秒）"""
         return int((datetime.now() - start_time).total_seconds() * 1000)
+    
+    async def _aggregate_weekly_summaries(
+        self,
+        user_ids: List[str],
+        pool
+    ) -> None:
+        """
+        为用户生成周汇总（情绪 + 工作重点）
+        
+        在批量更新后调用，将聚合结果存入 Mem0
+        
+        Args:
+            user_ids: 需要聚合的用户 ID 列表
+            pool: Mem0 Pool 实例
+        """
+        if not user_ids:
+            return
+        
+        try:
+            from core.memory.mem0.update.aggregator import (
+                aggregate_user_emotion,
+                aggregate_work_summary,
+            )
+            
+            # 计算本周时间窗口
+            today = datetime.now()
+            start_of_week = today - timedelta(days=today.weekday())
+            start_of_week = start_of_week.replace(hour=0, minute=0, second=0, microsecond=0)
+            
+            logger.info(f"📊 开始情绪聚合: {len(user_ids)} 个用户")
+            
+            for user_id in user_ids:
+                try:
+                    # 检索用户记忆
+                    memories = pool.get_all(user_id=user_id, limit=100)
+                    
+                    if not memories:
+                        continue
+                    
+                    # 聚合情绪
+                    emotion_result = await aggregate_user_emotion(
+                        user_id=user_id,
+                        start_date=start_of_week,
+                        end_date=today,
+                        memories=memories
+                    )
+                    
+                    # 聚合工作重点
+                    work_result = await aggregate_work_summary(
+                        user_id=user_id,
+                        start_date=start_of_week,
+                        end_date=today,
+                        memories=memories
+                    )
+                    
+                    # 存储情绪摘要
+                    if emotion_result.get("summary") and emotion_result.get("dominant") != "neutral":
+                        pool.add(
+                            user_id=user_id,
+                            messages=[{
+                                "role": "user",
+                                "content": f"[情绪摘要] {emotion_result['summary']}"
+                            }],
+                            metadata={
+                                "type": "emotion_weekly",
+                                "time_window": emotion_result.get("time_window"),
+                                "dominant": emotion_result.get("dominant")
+                            }
+                        )
+                    
+                    # 存储工作摘要
+                    if work_result.get("summary") and work_result.get("highlights"):
+                        pool.add(
+                            user_id=user_id,
+                            messages=[{
+                                "role": "user",
+                                "content": f"[工作摘要] {work_result['summary']}"
+                            }],
+                            metadata={
+                                "type": "work_weekly",
+                                "time_window": work_result.get("time_window"),
+                                "next_steps": work_result.get("next_steps", [])
+                            }
+                        )
+                    
+                    logger.debug(f"  ✓ 用户 {user_id} 聚合完成")
+                    
+                except Exception as e:
+                    logger.warning(f"  ⚠️ 用户 {user_id} 聚合失败: {e}")
+                    continue
+            
+            logger.info(f"✅ 情绪聚合完成")
+            
+        except ImportError:
+            logger.debug("情绪聚合模块未加载，跳过")
+        except Exception as e:
+            logger.warning(f"⚠️ 情绪聚合失败: {e}")
 
 
 # ==================== 便捷函数 ====================
@@ -216,3 +811,4 @@ def get_background_task_service() -> BackgroundTaskService:
     if _default_service is None:
         _default_service = BackgroundTaskService()
     return _default_service
+

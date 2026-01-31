@@ -281,54 +281,6 @@ class RedisClient:
 _redis_client: Optional[RedisClient] = None
 
 
-def _build_redis_url() -> Optional[str]:
-    """
-    从环境变量构建 Redis URL
-    
-    支持两种配置方式：
-    1. 直接配置 REDIS_URL
-    2. 分开配置 REDIS_HOST, REDIS_PORT, REDIS_PASSWORD, REDIS_USER
-    
-    对于 AWS MemoryDB，自动使用 TLS 连接 (rediss://)
-    
-    Returns:
-        Redis URL 或 None
-    """
-    # 方式1：直接使用 REDIS_URL
-    redis_url = os.getenv("REDIS_URL")
-    if redis_url:
-        return redis_url
-    
-    # 方式2：从分开的环境变量构建
-    host = os.getenv("REDIS_HOST")
-    if not host:
-        return None
-    
-    port = os.getenv("REDIS_PORT", "6379")
-    password = os.getenv("REDIS_PASSWORD")
-    user = os.getenv("REDIS_USER", "default")
-    
-    # 检测是否需要 TLS（AWS MemoryDB/ElastiCache 需要）
-    # MemoryDB 的 host 通常包含 "memorydb" 或 "clustercfg"
-    use_tls = (
-        os.getenv("REDIS_TLS", "").lower() == "true" or
-        "memorydb" in host.lower() or
-        "clustercfg" in host.lower()
-    )
-    
-    protocol = "rediss" if use_tls else "redis"
-    
-    # 构建 URL
-    if password:
-        # 带认证的 URL: rediss://user:password@host:port
-        redis_url = f"{protocol}://{user}:{password}@{host}:{port}"
-    else:
-        # 无认证的 URL: redis://host:port
-        redis_url = f"{protocol}://{host}:{port}"
-    
-    return redis_url
-
-
 async def create_redis_client(redis_url: str = None) -> RedisClient:
     """
     创建 Redis 客户端
@@ -339,51 +291,51 @@ async def create_redis_client(redis_url: str = None) -> RedisClient:
     Returns:
         RedisClient 实例
     """
-    redis_url = redis_url or _build_redis_url()
+    redis_url = redis_url or os.getenv("REDIS_URL")
     
     if not redis_url:
-        logger.warning("⚠️ 未配置 Redis 连接信息（REDIS_URL 或 REDIS_HOST），Redis 功能不可用")
+        logger.warning("⚠️ 未配置 REDIS_URL，Redis 功能不可用")
         return RedisClient(None)
-    
-    # 日志中隐藏密码
-    log_url = redis_url
-    if "@" in redis_url:
-        # rediss://user:password@host:port -> rediss://user:***@host:port
-        parts = redis_url.split("@")
-        auth_part = parts[0]
-        if ":" in auth_part.split("//")[-1]:
-            protocol_user = auth_part.rsplit(":", 1)[0]
-            log_url = f"{protocol_user}:***@{parts[1]}"
     
     try:
         import redis.asyncio as aioredis
         
-        # 对于 TLS 连接，需要额外配置
-        if redis_url.startswith("rediss://"):
-            import ssl
-            ssl_context = ssl.create_default_context()
-            # MemoryDB 使用 AWS 颁发的证书，通常不需要自签名验证
-            ssl_context.check_hostname = True
-            ssl_context.verify_mode = ssl.CERT_REQUIRED
-            client = aioredis.from_url(
-                redis_url, 
-                decode_responses=False,
-                ssl=ssl_context
-            )
-        else:
-            client = aioredis.from_url(redis_url, decode_responses=False)
+        # 检测是否使用 TLS（rediss:// 前缀）
+        use_ssl = redis_url.startswith("rediss://")
         
+        # 构建连接参数
+        # 根据 AWS MemoryDB 文档：https://docs.aws.amazon.com/memorydb/latest/devguide/getting-started.html#connect-tls
+        # 必须明确启用 TLS（对应 redis-cli 的 --tls 参数）
+        connection_kwargs = {
+            "decode_responses": False,
+            "socket_connect_timeout": 30,  # 增加超时时间（秒），TLS 握手可能需要更长时间
+            "socket_timeout": 30,
+        }
+        
+        if use_ssl:
+            # TLS 连接配置（根据 AWS MemoryDB 文档要求）
+            # redis-py 7.x 的 from_url 会自动识别 rediss:// 并启用 TLS
+            # 不需要显式设置 ssl=True（会导致错误）
+            import ssl
+            # MemoryDB 使用 AWS 管理的证书，但可能需要跳过主机名验证
+            # 根据文档，应该验证证书，但可以先尝试 CERT_NONE 以排除证书问题
+            connection_kwargs["ssl_cert_reqs"] = ssl.CERT_NONE  # 临时使用，生产环境应改为 CERT_REQUIRED
+            connection_kwargs["ssl_check_hostname"] = False
+            logger.debug("🔒 Redis TLS 连接已启用（AWS MemoryDB，rediss:// 自动启用 TLS）")
+        
+        # from_url 会自动识别 rediss://，但我们需要明确设置 ssl=True
+        client = aioredis.from_url(redis_url, **connection_kwargs)
         # 测试连接
         await client.ping()
         
-        logger.info(f"✅ Redis 客户端已连接: {log_url}")
+        logger.info(f"✅ Redis 客户端已连接: {redis_url[:50]}... (TLS={'启用' if use_ssl else '禁用'})")
         return RedisClient(client)
         
     except ImportError:
         logger.warning("⚠️ redis 包未安装，Redis 功能不可用")
         return RedisClient(None)
     except Exception as e:
-        logger.warning(f"⚠️ Redis 连接失败: {log_url}, error={str(e)}")
+        logger.warning(f"⚠️ Redis 连接失败: {str(e)}")
         return RedisClient(None)
 
 

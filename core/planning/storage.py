@@ -12,17 +12,15 @@ Plan 存储层（Storage）
 - 按 user_id 查询
 """
 
-import asyncio
 import json
-import aiofiles
-from logger import get_logger
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
 
 from core.planning.protocol import Plan, PlanStatus
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class PlanStorage:
@@ -53,8 +51,6 @@ class PlanStorage:
         Args:
             storage_path: 持久化存储路径
             retention_days: 数据保留天数
-        
-        注意：需要调用 await initialize() 完成异步初始化
         """
         self.storage_path = Path(storage_path)
         self.retention_days = retention_days
@@ -69,22 +65,8 @@ class PlanStorage:
         self._conversation_index: Dict[str, List[str]] = {}  # conversation_id -> [plan_id]
         self._user_index: Dict[str, List[str]] = {}          # user_id -> [plan_id]
         
-        # 初始化标记
-        self._initialized: bool = False
-    
-    async def initialize(self) -> None:
-        """
-        异步初始化：加载现有数据
-        
-        使用方式：
-            storage = PlanStorage()
-            await storage.initialize()
-        """
-        if self._initialized:
-            return
-        
-        await self._load_all_async()
-        self._initialized = True
+        # 加载现有数据
+        self._load_all()
     
     # ===================
     # 基本操作
@@ -309,24 +291,20 @@ class PlanStorage:
         return self.storage_path / f"{plan_id}.json"
     
     async def _persist(self, plan: Plan) -> None:
-        """持久化 Plan 到文件（异步）"""
+        """持久化 Plan 到文件"""
         file_path = self._get_file_path(plan.plan_id)
         
         data = plan.model_dump(mode="json")
-        content = json.dumps(data, ensure_ascii=False, indent=2, default=str)
         
-        async with aiofiles.open(file_path, "w", encoding="utf-8") as f:
-            await f.write(content)
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2, default=str)
     
-    async def _load_all_async(self) -> None:
-        """异步加载所有 Plan 到内存"""
-        # 使用 asyncio.to_thread 包装同步的 glob 操作
-        file_paths = await asyncio.to_thread(list, self.storage_path.glob("*.json"))
-        for file_path in file_paths:
+    def _load_all(self) -> None:
+        """加载所有 Plan 到内存"""
+        for file_path in self.storage_path.glob("*.json"):
             try:
-                async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
-                    content = await f.read()
-                    data = json.loads(content)
+                with open(file_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
                 
                 plan = Plan(**data)
                 self._cache[plan.plan_id] = plan

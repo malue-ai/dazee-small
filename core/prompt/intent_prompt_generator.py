@@ -10,19 +10,25 @@
 
 生成的提示词用于 IntentAnalyzer (Haiku 4.5):
 - 任务类型分类
-- 复杂度判断
+- 复杂度判断 + complexity_score
 - 是否需要规划
 - 是否跳过记忆检索
+- 是否需要多智能体
+- 是否为追问
 """
 
-# 1. 标准库
 from typing import Optional, List, Dict, Any
 
-# 2. 第三方库（无）
-
-# 3. 本地模块
-from core.prompt.prompt_layer import TaskComplexity
 from logger import get_logger
+from prompts.intent_recognition_prompt import (
+    INTENT_PROMPT_HEADER,
+    INTENT_PROMPT_TASK_TYPES,
+    INTENT_PROMPT_COMPLEXITY,
+    INTENT_PROMPT_CONTEXT_AWARENESS,
+    INTENT_PROMPT_MEMORY,
+    INTENT_PROMPT_MULTI_AGENT,
+    INTENT_PROMPT_FOOTER,
+)
 
 logger = get_logger("intent_prompt_generator")
 
@@ -31,158 +37,12 @@ logger = get_logger("intent_prompt_generator")
 # 高质量默认提示词组件
 # ============================================================
 
-INTENT_PROMPT_HEADER = """You are a fast intent classifier. Your job is SIMPLE CLASSIFICATION ONLY.
-
-## Task
-
-Analyze the user query and classify it into one of these categories:
-
-### Output Format (JSON)
-
-```json
-{
-  "task_type": "information_query|content_generation|data_analysis|code_task|other",
-  "complexity": "simple|medium|complex",
-  "needs_plan": true|false,
-  "skip_memory_retrieval": true|false
-}
-```
-
-**ALL FOUR FIELDS ARE REQUIRED** — 不要省略任何字段。即使不确定也要给出最接近的分类。
-"""
-
-# 默认的任务类型定义
-DEFAULT_TASK_TYPES = """
-## Classification Rules
-
-### Task Type
-- **information_query**: Search, lookup, Q&A
-  - Examples: "weather?", "search AI papers", "what is X?"
-  
-- **content_generation**: Create documents, presentations, reports
-  - Examples: "generate PPT", "write report", "create slides"
-  
-- **data_analysis**: Process data, statistics, analysis
-  - Examples: "analyze sales data", "chart from Excel", "calculate trends"
-  
-- **code_task**: Write, debug, or execute code
-  - Examples: "write Python script", "debug this code", "refactor function"
-  
-- **other**: Everything else
-"""
-
-# 默认的复杂度规则
-DEFAULT_COMPLEXITY_RULES = """
-### Complexity
-- **simple**: Single-step, direct answer
-  - 1 action, immediate result
-  - Examples: "weather?", "current time?", "what is Python?"
-  
-- **medium**: 2-4 steps, straightforward workflow
-  - Examples: "search and summarize", "write function", "analyze data"
-  
-- **complex**: 5+ steps, requires planning
-  - Examples: "create product PPT with research", "analyze market and write strategy"
-
-### Needs Plan
-- **true**: complexity is medium or complex
-- **false**: complexity is simple
-"""
-
-# 默认的记忆检索规则（few-shot 示例驱动）
-DEFAULT_MEMORY_RULES = """
-### Skip Memory Retrieval
-
-判断是否跳过用户记忆检索。根据以下示例的思路自行推理：
-
-<examples>
-<example>
-<query>今天上海天气怎么样？</query>
-<reasoning>纯粹的实时信息查询，与用户个人历史无关</reasoning>
-<skip_memory_retrieval>true</skip_memory_retrieval>
-</example>
-
-<example>
-<query>帮我生成一个产品介绍PPT</query>
-<reasoning>用户可能有PPT风格偏好、常用配色等历史记录</reasoning>
-<skip_memory_retrieval>false</skip_memory_retrieval>
-</example>
-
-<example>
-<query>Python的列表推导式怎么用？</query>
-<reasoning>通用技术问题，不涉及用户个人偏好</reasoning>
-<skip_memory_retrieval>true</skip_memory_retrieval>
-</example>
-
-<example>
-<query>帮我推荐一家餐厅</query>
-<reasoning>推荐需要了解用户的口味偏好、饮食限制等</reasoning>
-<skip_memory_retrieval>false</skip_memory_retrieval>
-</example>
-
-<example>
-<query>把这段话翻译成英文</query>
-<reasoning>简单翻译任务，无需个性化</reasoning>
-<skip_memory_retrieval>true</skip_memory_retrieval>
-</example>
-
-<example>
-<query>帮我写一段Python代码实现排序</query>
-<reasoning>用户可能有编码风格偏好、常用框架等</reasoning>
-<skip_memory_retrieval>false</skip_memory_retrieval>
-</example>
-
-<example>
-<query>1美元等于多少人民币？</query>
-<reasoning>汇率查询是客观事实，无需个性化</reasoning>
-<skip_memory_retrieval>true</skip_memory_retrieval>
-</example>
-
-<example>
-<query>按照我之前说的风格，帮我写个邮件</query>
-<reasoning>明确引用了历史偏好</reasoning>
-<skip_memory_retrieval>false</skip_memory_retrieval>
-</example>
-
-<example>
-<query>帮我做一个数据分析报告</query>
-<reasoning>用户可能有报告格式、图表风格等偏好</reasoning>
-<skip_memory_retrieval>false</skip_memory_retrieval>
-</example>
-
-<example>
-<query>什么是机器学习？</query>
-<reasoning>百科知识问答，无需个性化</reasoning>
-<skip_memory_retrieval>true</skip_memory_retrieval>
-</example>
-</examples>
-
-**默认值**: false（不跳过，即默认检索记忆）
-**原则**: 不确定时选择 false，宁可多检索也不漏掉个性化
-"""
-
-INTENT_PROMPT_FOOTER = """
-## Important
-
-- DO NOT analyze what tools/capabilities are needed (that's Sonnet's job)
-- DO NOT create a plan (that's Sonnet's job)
-- ONLY classify: task_type, complexity, needs_plan, skip_memory_retrieval
-
-## Example
-
-Input: "Create a professional product presentation with market data"
-
-Output:
-```json
-{
-  "task_type": "content_generation",
-  "complexity": "complex",
-  "needs_plan": true,
-  "skip_memory_retrieval": false
-}
-```
-
-Now classify the user's query. Output ONLY the JSON, nothing else."""
+# 默认规则直接复用统一定义，避免版本不一致
+DEFAULT_TASK_TYPES = INTENT_PROMPT_TASK_TYPES
+DEFAULT_COMPLEXITY_RULES = INTENT_PROMPT_COMPLEXITY
+DEFAULT_CONTEXT_RULES = INTENT_PROMPT_CONTEXT_AWARENESS
+DEFAULT_MEMORY_RULES = INTENT_PROMPT_MEMORY
+DEFAULT_MULTI_AGENT_RULES = INTENT_PROMPT_MULTI_AGENT
 
 
 # ============================================================
@@ -231,11 +91,19 @@ class IntentPromptGenerator:
         complexity_section = cls._generate_complexity_rules(schema)
         parts.append(complexity_section)
         
-        # 3. 记忆检索规则
+        # 3. 上下文感知规则
+        context_section = cls._generate_context_rules(schema)
+        parts.append(context_section)
+        
+        # 4. 记忆检索规则
         memory_section = cls._generate_memory_rules(schema)
         parts.append(memory_section)
         
-        # 4. 尾部
+        # 5. 多智能体判断规则
+        multi_agent_section = cls._generate_multi_agent_rules(schema)
+        parts.append(multi_agent_section)
+        
+        # 6. 尾部
         parts.append(INTENT_PROMPT_FOOTER)
         
         result = "\n".join(parts)
@@ -284,6 +152,8 @@ class IntentPromptGenerator:
         
         优先使用用户定义的复杂度关键词
         """
+        from core.prompt import TaskComplexity
+        
         if not schema or not schema.complexity_keywords:
             return DEFAULT_COMPLEXITY_RULES
         
@@ -330,6 +200,24 @@ class IntentPromptGenerator:
         # 目前使用默认的 few-shot 示例
         # 未来可以根据 schema 中的配置扩展
         return DEFAULT_MEMORY_RULES
+
+    @classmethod
+    def _generate_context_rules(cls, schema) -> str:
+        """
+        生成上下文感知规则（追问识别）
+        
+        目前使用默认规则，后续可由 schema 扩展
+        """
+        return DEFAULT_CONTEXT_RULES
+
+    @classmethod
+    def _generate_multi_agent_rules(cls, schema) -> str:
+        """
+        生成多智能体判断规则
+        
+        目前使用默认规则，后续可由 schema 扩展
+        """
+        return DEFAULT_MULTI_AGENT_RULES
     
     @classmethod
     def get_default(cls) -> str:
@@ -342,7 +230,9 @@ class IntentPromptGenerator:
             INTENT_PROMPT_HEADER,
             DEFAULT_TASK_TYPES,
             DEFAULT_COMPLEXITY_RULES,
+            DEFAULT_CONTEXT_RULES,
             DEFAULT_MEMORY_RULES,
+            DEFAULT_MULTI_AGENT_RULES,
             INTENT_PROMPT_FOOTER,
         ])
 

@@ -1,16 +1,22 @@
 """
 Agent 注册服务 - Agent Registry Service
 
+🆕 V9.5 单实例部署模式：
+    每个 Agent 实例是独立的部署单元，启动时只加载指定实例。
+
 职责：
-1. 启动时预加载所有 instances/ 目录下的 Agent 配置
-2. 提供 get_agent(agent_id) 获取 Agent 实例（工厂模式）
-3. 提供 list_agents() 列出所有可用 Agent
-4. 管理 Agent 生命周期
+1. 启动时加载指定的 Agent 实例（preload_instance）
+2. 提供 get_agent(agent_id) 获取 Agent 实例（原型浅拷贝）
+3. 管理 Agent 生命周期
 
 设计原则：
-- 工厂模式：每次请求创建新的 Agent 实例，共享配置但独立状态
-- 预加载配置：启动时加载所有实例的 InstancePromptCache，避免运行时 LLM 分析
-- 单例模式：AgentRegistry 全局唯一
+- 单实例部署：每个进程只加载一个 Agent 实例
+- 原型复用：clone_for_session() 浅拷贝，共享重量级组件
+- 独立部署：实例之间完全解耦，适合容器化部署
+
+使用方式：
+    python main.py --instance=dazee_ppt
+    AGENT_INSTANCE=dazee_ppt python main.py
 """
 
 import asyncio
@@ -22,7 +28,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-import aiofiles
 import yaml
 
 from logger import get_logger
@@ -31,7 +36,7 @@ from core.events import create_event_manager, get_memory_storage
 from core.prompt import load_instance_cache
 from core.tool import InstanceToolRegistry, get_capability_registry, create_tool_loader
 from prompts.universal_agent_prompt import get_universal_agent_prompt
-from utils.instance_loader import (
+from scripts.instance_loader import (
     list_instances,
     load_instance_config,
     load_instance_prompt,
@@ -40,7 +45,7 @@ from utils.instance_loader import (
     _build_apis_prompt_section,
     get_instances_dir,
 )
-from infra.pools import get_mcp_pool
+from services.mcp_client import get_mcp_client, create_mcp_tool_definition
 
 logger = get_logger("agent_registry")
 
@@ -76,29 +81,32 @@ class AgentRegistry:
     """
     Agent 注册表（单例）
     
+    🆕 V9.5 单实例部署模式：
+        每个 Agent 实例是独立的部署单元，启动时只加载指定实例。
+    
     使用方法：
         registry = get_agent_registry()
         
-        # 启动时预加载所有 Agent
-        await registry.preload_all()
+        # 启动时加载指定实例（推荐）
+        await registry.preload_instance("dazee_ppt")
         
-        # 获取 Agent 实例（每次调用创建新实例）
-        agent = await registry.get_agent("test_agent", event_manager, ...)
+        # 获取 Agent 实例（从原型浅拷贝）
+        agent = await registry.get_agent("dazee_ppt", event_manager, ...)
         
-        # 列出所有可用 Agent
+        # 获取当前实例信息
         agents = registry.list_agents()
     """
     
-    def __init__(self) -> None:
+    def __init__(self):
         # Agent 配置缓存（name -> AgentConfig）
         self._configs: Dict[str, AgentConfig] = {}
         
-        # 🆕 V7.1: Agent 原型缓存（预创建的 Agent 实例，运行时复用）
+        # Agent 原型缓存（预创建的 Agent 实例，运行时复用）
         # 原型包含：LLM Service、工具注册表、MCP 客户端等重量级组件
         # 运行时通过 clone_for_session() 浅克隆并重置会话状态
         self._agent_prototypes: Dict[str, Any] = {}  # name -> SimpleAgent
         
-        # 🆕 V7.1: 共享组件（跨 Agent 复用）
+        # 共享组件（跨 Agent 复用）
         self._shared_event_manager = None  # 共享的事件管理器（原型创建时使用）
         
         # 加载状态
@@ -106,146 +114,101 @@ class AgentRegistry:
         self._loading = False
         self._load_lock = asyncio.Lock()
     
-    # ==================== 预加载 ====================
+    # ==================== 单实例加载 ====================
     
-    async def preload_all(self, force_refresh: bool = False) -> int:
+    async def preload_instance(self, instance_name: str, force_refresh: bool = False) -> bool:
         """
-        预加载所有 instances/ 目录下的 Agent 配置
+        🆕 V9.5: 单实例加载模式（推荐的生产部署方式）
+        
+        每个实例是独立的部署单元，启动时只加载指定的实例。
+        
+        优势：
+        - 启动更快：只加载一个实例
+        - 隔离性好：实例之间完全解耦
+        - 容器友好：适合 K8s 单 Pod 部署
+        - 错误隔离：一个实例配置错误不影响其他实例
         
         Args:
+            instance_name: 实例名称（instances/ 目录下的文件夹名）
             force_refresh: 是否强制刷新缓存
             
         Returns:
-            成功加载的 Agent 数量
+            是否加载成功
+            
+        Raises:
+            FileNotFoundError: 实例目录不存在
+            
+        使用方式：
+            # 方式 1：命令行参数
+            python main.py --instance=dazee_ppt
+            
+            # 方式 2：环境变量
+            AGENT_INSTANCE=dazee_ppt python main.py
+            
+            # 方式 3：Docker
+            docker run -e AGENT_INSTANCE=dazee_ppt zenflux-agent
         """
         async with self._load_lock:
-            if self._loaded and not force_refresh:
-                logger.info("✅ Agent 配置已加载，跳过重复加载")
-                return len(self._configs)
-            
-            self._loading = True
             start_time = datetime.now()
             
+            # 验证实例是否存在
+            instances_dir = get_instances_dir()
+            instance_path = instances_dir / instance_name
+            
+            if not instance_path.exists():
+                available = list_instances()
+                raise FileNotFoundError(
+                    f"实例 '{instance_name}' 不存在。\n"
+                    f"可用实例: {available}\n"
+                    f"实例目录: {instances_dir}"
+                )
+            
+            logger.info(f"🚀 单实例模式: 加载 '{instance_name}'...")
+            
             try:
-                instances = list_instances()
-                logger.info(f"🔍 发现 {len(instances)} 个 Agent 实例")
+                # 1. 加载实例配置
+                await self._load_single_agent(instance_name, force_refresh=force_refresh)
                 
-                loaded_count = 0
-                
-                for instance_name in instances:
-                    try:
-                        instance_start = datetime.now()
-                        logger.info(f"📦 预加载 Agent: {instance_name}")
-                        
-                        # 1. 加载环境变量
-                        load_instance_env(instance_name)
-                        
-                        # 2. 加载实例配置
-                        config = load_instance_config(instance_name)
-                        
-                        # 3. 加载实例提示词
-                        instance_prompt = load_instance_prompt(instance_name)
-                        
-                        # 4. 加载 InstancePromptCache（核心：包含 AgentSchema、系统提示词等）
-                        instance_path = get_instances_dir() / instance_name
-                        cache_dir = instance_path / ".cache"
-                        
-                        prompt_cache = await load_instance_cache(
-                            instance_name=instance_name,
-                            raw_prompt=instance_prompt,
-                            config=config.raw_config,
-                            cache_dir=str(cache_dir),
-                            force_refresh=force_refresh
-                        )
-                        
-                        # 5. 准备 APIs 运行时参数
-                        if config.apis:
-                            config.apis = _prepare_apis(config.apis)
-                        
-                        # 6. 合并完整提示词
-                        framework_prompt = get_universal_agent_prompt()
-                        apis_prompt = _build_apis_prompt_section(config.apis)
-                        
-                        full_prompt = f"""# 实例配置
-
-{instance_prompt}
-
----
-
-{apis_prompt}
-
----
-
-# 框架能力协议
-
-{framework_prompt}
-"""
-                        
-                        # 7. 创建 AgentConfig
-                        load_time_ms = (datetime.now() - instance_start).total_seconds() * 1000
-                        
-                        agent_config = AgentConfig(
-                            name=instance_name,
-                            description=config.description,
-                            version=config.version,
-                            instance_config=config,
-                            prompt_cache=prompt_cache,
-                            full_prompt=full_prompt,
-                            load_time_ms=load_time_ms
-                        )
-                        
-                        self._configs[instance_name] = agent_config
-                        loaded_count += 1
-                        
-                        logger.info(
-                            f"   ✅ {instance_name} 配置加载完成 "
-                            f"(耗时 {load_time_ms:.0f}ms)"
-                        )
-                        
-                    except Exception as e:
-                        logger.error(f"   ❌ {instance_name} 加载失败: {str(e)}", exc_info=True)
-                
-                # 🆕 V7.1: 预创建 Agent 原型（核心优化）
-                prototype_count = 0
-                logger.info(f"🔧 开始预创建 Agent 原型...")
-                
-                # 创建共享的事件管理器（用于原型初始化）
+                # 2. 创建 Agent 原型
                 if self._shared_event_manager is None:
                     storage = get_memory_storage()
                     self._shared_event_manager = create_event_manager(storage)
                 
-                for instance_name, agent_config in self._configs.items():
-                    try:
-                        prototype_start = datetime.now()
-                        
-                        # 创建 Agent 原型
-                        prototype = await self._create_agent_prototype(
-                            agent_config, 
-                            self._shared_event_manager
-                        )
-                        
-                        if prototype:
-                            self._agent_prototypes[instance_name] = prototype
-                            prototype_count += 1
-                            
-                            prototype_time_ms = (datetime.now() - prototype_start).total_seconds() * 1000
-                            logger.info(f"   🤖 {instance_name} 原型创建完成 ({prototype_time_ms:.0f}ms)")
-                        
-                    except Exception as e:
-                        logger.warning(f"   ⚠️ {instance_name} 原型创建失败，将使用按需创建: {str(e)}")
-                
-                total_time_ms = (datetime.now() - start_time).total_seconds() * 1000
-                self._loaded = True
-                
-                logger.info(
-                    f"🎉 Agent 预加载完成: {loaded_count}/{len(instances)} 配置, "
-                    f"{prototype_count} 原型 (总耗时 {total_time_ms:.0f}ms)"
+                agent_config = self._configs[instance_name]
+                prototype = await self._create_agent_prototype(
+                    agent_config,
+                    self._shared_event_manager
                 )
                 
-                return loaded_count
-                
-            finally:
-                self._loading = False
+                if prototype:
+                    self._agent_prototypes[instance_name] = prototype
+                    
+                    total_time_ms = (datetime.now() - start_time).total_seconds() * 1000
+                    self._loaded = True
+                    
+                    logger.info(
+                        f"✅ 单实例加载完成: {instance_name} "
+                        f"(配置 {agent_config.load_time_ms:.0f}ms + 原型 {total_time_ms - agent_config.load_time_ms:.0f}ms = 总计 {total_time_ms:.0f}ms)"
+                    )
+                    return True
+                else:
+                    logger.warning(f"⚠️ 实例 '{instance_name}' 原型创建失败")
+                    return False
+                    
+            except Exception as e:
+                logger.error(f"❌ 单实例加载失败: {instance_name} - {str(e)}", exc_info=True)
+                raise
+    
+    def get_current_instance(self) -> Optional[str]:
+        """
+        获取当前加载的实例名称（单实例模式下使用）
+        
+        Returns:
+            当前实例名称，如果是多实例模式或未加载则返回 None
+        """
+        if len(self._configs) == 1:
+            return list(self._configs.keys())[0]
+        return None
     
     # ==================== 获取 Agent ====================
     
@@ -253,32 +216,39 @@ class AgentRegistry:
         self,
         agent_id: str,
         event_manager=None,
+        workspace_dir: str = None,
         conversation_service=None
     ):
         """
-        获取 Agent 实例（🆕 V7.1: 原型复用模式）
+        获取 Agent 实例（按需加载 + 原型复用）
         
         优化流程：
-        1. 优先从 _agent_prototypes 获取预创建的原型
-        2. 调用 clone_for_session() 浅克隆并重置会话状态
-        3. 如果原型不存在，回退到按需创建
+        1. 如果实例未加载，尝试按需加载（preload_instance）
+        2. 从 _agent_prototypes 获取原型
+        3. 调用 clone_for_session() 浅克隆并重置会话状态
         
         Args:
             agent_id: Agent ID（instances/ 目录名）
             event_manager: 事件管理器
+            workspace_dir: 工作目录
             conversation_service: 会话服务
             
         Returns:
             就绪的 Agent 实例
             
         Raises:
-            AgentNotFoundError: agent_id 不存在
+            AgentNotFoundError: agent_id 在 instances/ 目录中不存在
         """
+        # 🆕 V9.5: 按需加载 - 如果实例未加载，尝试加载它
         if agent_id not in self._configs:
-            available = list(self._configs.keys())
-            raise AgentNotFoundError(
-                f"Agent '{agent_id}' 不存在，可用的 Agent: {available}"
-            )
+            logger.info(f"📦 Agent '{agent_id}' 未加载，尝试按需加载...")
+            try:
+                await self.preload_instance(agent_id)
+            except FileNotFoundError:
+                available = list_instances()
+                raise AgentNotFoundError(
+                    f"Agent '{agent_id}' 不存在。可用实例: {available}"
+                )
         
         config = self._configs[agent_id]
         
@@ -294,6 +264,7 @@ class AgentRegistry:
             # 浅克隆并重置会话状态
             agent = prototype.clone_for_session(
                 event_manager=event_manager,
+                workspace_dir=workspace_dir,
                 conversation_service=conversation_service
             )
             
@@ -303,7 +274,7 @@ class AgentRegistry:
         # 🔄 Fallback: 按需创建（首次或原型不存在）
         logger.info(f"⚠️ Agent '{agent_id}' 原型不存在，按需创建")
         
-        # 准备 apis_config（用于 api_calling 自动注入认证和请求体模板）
+        # 准备 apis_config（用于 api_calling 自动注入认证）
         apis_config = None
         if config.instance_config and config.instance_config.apis:
             apis_config = [
@@ -312,17 +283,6 @@ class AgentRegistry:
                     "base_url": api.base_url,
                     "headers": api.headers or {},
                     "description": api.description,
-                    # 🔐 认证配置（用于 api_calling 动态注入）
-                    "auth": {
-                        "type": api.auth_type,
-                        "header": api.auth_header,
-                        "env": api.auth_env,
-                    } if api.auth_env else None,
-                    # 请求体配置（用于 api_calling 自动合成请求）
-                    "request_body": api.request_body,
-                    "default_method": api.default_method,
-                    "default_mode": api.default_mode,
-                    "poll_config": api.poll_config,
                 }
                 for api in config.instance_config.apis
             ]
@@ -334,6 +294,7 @@ class AgentRegistry:
                 schema=config.prompt_cache.agent_schema,
                 system_prompt=config.full_prompt,
                 event_manager=event_manager,
+                workspace_dir=workspace_dir,
                 conversation_service=conversation_service,
                 prompt_cache=config.prompt_cache,
                 apis_config=apis_config,
@@ -344,6 +305,7 @@ class AgentRegistry:
             agent = await AgentFactory.from_prompt(
                 system_prompt=config.full_prompt,
                 event_manager=event_manager,
+                workspace_dir=workspace_dir,
                 conversation_service=conversation_service,
                 use_default_if_failed=True,
             )
@@ -387,7 +349,7 @@ class AgentRegistry:
         Returns:
             SimpleAgent 或 MultiAgentOrchestrator 原型实例
         """
-        # 准备 apis_config（用于 api_calling 自动注入认证和请求体模板）
+        # 准备 apis_config
         apis_config = None
         if config.instance_config and config.instance_config.apis:
             apis_config = [
@@ -396,17 +358,6 @@ class AgentRegistry:
                     "base_url": api.base_url,
                     "headers": api.headers or {},
                     "description": api.description,
-                    # 🔐 认证配置（用于 api_calling 动态注入）
-                    "auth": {
-                        "type": api.auth_type,
-                        "header": api.auth_header,
-                        "env": api.auth_env,
-                    } if api.auth_env else None,
-                    # 请求体配置（用于 api_calling 自动合成请求）
-                    "request_body": api.request_body,
-                    "default_method": api.default_method,
-                    "default_mode": api.default_mode,
-                    "poll_config": api.poll_config,
                 }
                 for api in config.instance_config.apis
             ]
@@ -421,6 +372,7 @@ class AgentRegistry:
             schema=config.prompt_cache.agent_schema,
             system_prompt=config.full_prompt,
             event_manager=event_manager,
+            workspace_dir=None,  # 原型不绑定工作目录
             conversation_service=None,  # 原型不绑定会话服务
             prompt_cache=config.prompt_cache,
             apis_config=apis_config,
@@ -476,22 +428,6 @@ class AgentRegistry:
             instance_config.enabled_capabilities
         )
         
-        # 🔧 V7.7 修复：更新 agent.capability_registry 为过滤后的版本
-        # 确保 _register_tools_to_llm 使用正确的工具列表
-        agent.capability_registry = filtered_registry
-        
-        # 🔧 V7.7: 同时更新 tool_executor.registry（确保工具执行使用正确的注册表）
-        if hasattr(agent, 'tool_executor') and agent.tool_executor:
-            agent.tool_executor.registry = filtered_registry
-            # 重新加载工具实例
-            agent.tool_executor._load_tools()
-            logger.debug(f"   🔧 已更新 tool_executor 注册表并重新加载工具")
-        
-        # 🔧 V7.7: 重新注册工具到 LLM（使用过滤后的注册表）
-        if hasattr(agent, '_register_tools_to_llm'):
-            agent._register_tools_to_llm()
-            logger.debug(f"   🔧 已重新注册工具到 LLM（过滤后）")
-        
         # 使用过滤后的 registry 创建实例级注册表
         instance_registry = InstanceToolRegistry(global_registry=filtered_registry)
         agent._instance_registry = instance_registry
@@ -509,161 +445,103 @@ class AgentRegistry:
         """
         注册 MCP 工具
         
-        🔧 V7.6 修复：改为**同步发现模式**，启动时连接 MCP 服务器并获取真实的 input_schema
-        这样 LLM 才能知道每个工具需要什么参数
-        
         Args:
             agent: Agent 实例
             mcp_tools: MCP 工具配置列表
             instance_registry: 实例级工具注册表
         """
-        logger.info(f"📦 注册 MCP 工具（同步发现模式）: {len(mcp_tools)} 个配置")
+        mcp_tool_definitions = []
         
-        # 按 server_url 分组，避免重复连接同一服务器
-        servers: Dict[str, Dict[str, Any]] = {}
         for tool_config in mcp_tools:
-            server_url = tool_config.get("server_url")
-            if not server_url:
-                continue
-            
-            if server_url not in servers:
-                servers[server_url] = {
-                    "server_name": tool_config.get("server_name", "unknown"),
-                    "auth_type": tool_config.get("auth_type", "none"),
-                    "auth_env": tool_config.get("auth_env"),
-                    "capability": tool_config.get("capability"),
-                }
-        
-        # 连接每个 MCP 服务器并发现工具
-        pool = get_mcp_pool()
-        
-        for server_url, server_config in servers.items():
-            server_name = server_config["server_name"]
-            auth_type = server_config["auth_type"]
-            auth_env = server_config["auth_env"]
-            capability = server_config["capability"]
-            
+            name = tool_config.get("name", "unknown")
             try:
+                server_url = tool_config.get("server_url")
+                server_name = tool_config.get("server_name", name)
+                auth_type = tool_config.get("auth_type", "none")
+                auth_env = tool_config.get("auth_env")
+                
+                if not server_url:
+                    continue
+                
                 # 获取认证令牌
                 auth_token = None
                 if auth_type in ("bearer", "api_key") and auth_env:
                     auth_token = os.getenv(auth_env)
                     if not auth_token:
-                        logger.warning(f"⚠️ MCP 服务器 {server_name} 的密钥环境变量 {auth_env} 未设置，跳过")
+                        logger.warning(f"⚠️ MCP 工具 {name} 的密钥环境变量 {auth_env} 未设置")
                         continue
                 
-                # 🔧 将 MCP 连接操作隔离到独立 task 中，避免 anyio cancel scope 污染主流程
-                async def _isolated_mcp_connect(_pool, _server_url, _server_name, _auth_token):
-                    """在独立 task 中连接 MCP，隔离 cancel scope"""
-                    try:
-                        client = await _pool.get_client(
-                            server_url=_server_url,
-                            server_name=_server_name,
-                            auth_token=_auth_token
-                        )
-                        if client:
-                            tools = await client.discover_tools()
-                            return client, tools
-                        return None, []
-                    except asyncio.CancelledError:
-                        logger.warning(f"   ⚠️ MCP 连接被取消（隔离）: {_server_name}")
-                        return None, []
-                    except Exception as e:
-                        logger.warning(f"   ⚠️ MCP 连接异常（隔离）: {_server_name}: {e}")
-                        return None, []
-                
-                logger.info(f"   🔌 连接 MCP 服务器: {server_name}")
-                
-                # 在独立 task 中执行 MCP 连接，隔离 anyio cancel scope
-                connect_task = asyncio.create_task(
-                    _isolated_mcp_connect(pool, server_url, server_name, auth_token)
+                # 获取 MCP 客户端
+                client = await get_mcp_client(
+                    server_url=server_url,
+                    server_name=server_name,
+                    auth_token=auth_token
                 )
-                client, tools = await connect_task
                 
-                # 短暂等待让事件循环处理残留的 cancel scope
-                await asyncio.sleep(0)
-                
-                if not client:
-                    logger.warning(f"   ❌ MCP 服务器 {server_name} 连接失败，跳过")
+                # 🆕 处理连接失败的情况
+                if client is None:
+                    logger.warning(f"⚠️ MCP 客户端连接失败，跳过工具 {name}")
                     continue
                 
-                logger.info(f"   ✅ {server_name}: 发现 {len(tools)} 个工具")
-                
-                # 注册每个发现的工具
-                for tool_info in tools:
-                    tool_name = tool_info.get("name")  # 已经带 server_name 前缀
-                    original_name = tool_info.get("original_name", tool_name)
-                    description = tool_info.get("description", "")
-                    input_schema = tool_info.get("input_schema", {})
+                if client._connected:
+                    tools = client._tools
+                    if not tools:
+                        tools_list = await client.discover_tools()
+                        tools = {t['name']: t for t in tools_list}
                     
-                    # 🆕 检查配置文件中是否有该工具的自定义描述（覆盖 MCP 服务器的描述）
-                    config_description = None
-                    for tool_config in mcp_tools:
-                        if tool_config.get("name") == original_name and tool_config.get("server_url") == server_url:
-                            config_description = tool_config.get("description")
-                            if config_description:
-                                logger.info(f"      ✏️ 使用配置文件中的自定义描述覆盖 MCP 描述")
-                                description = config_description
-                                # 同时更新 tool_info 中的 description
-                                tool_info["description"] = config_description
-                            break
+                    for tool_name, tool_info in tools.items():
+                        tool_def = create_mcp_tool_definition(tool_info, client)
+                        mcp_tool_definitions.append(tool_def)
+                        
+                        # 注册到 InstanceToolRegistry
+                        capability = tool_config.get("capability")
+                        original_name = tool_info.get("original_name", tool_name)
+                        
+                        async def make_handler(_client, _orig_name):
+                            async def handler(tool_input: Dict[str, Any]):
+                                return await _client.call_tool(_orig_name, tool_input)
+                            return handler
+                        
+                        handler = await make_handler(client, original_name)
+                        
+                        await instance_registry.register_mcp_tool(
+                            name=tool_name,
+                            server_url=server_url,
+                            server_name=server_name,
+                            tool_info=tool_info,
+                            mcp_client=client,
+                            handler=handler,
+                            capability=capability
+                        )
                     
-                    # 🔍 显示工具的参数信息
-                    schema_props = input_schema.get("properties", {}) if isinstance(input_schema, dict) else {}
-                    param_info = f"参数: {list(schema_props.keys())}" if schema_props else "无参数"
-                    logger.info(f"      • {tool_name} ({param_info})")
-                    
-                    # 创建工具处理器（闭包捕获变量）
-                    async def make_handler(_server_url, _server_name, _auth_token, _orig_name):
-                        async def handler(tool_input: Dict[str, Any], context=None):
-                            # 获取/重连 MCP 客户端
-                            current_client = await pool.get_client(
-                                server_url=_server_url,
-                                server_name=_server_name,
-                                auth_token=_auth_token
-                            )
-                            
-                            if not current_client:
-                                return {"success": False, "error": "MCP 服务器连接失败"}
-                            
-                            # 调用工具
-                            result = await current_client.call_tool(_orig_name, tool_input)
-                            
-                            # 如果需要重连，自动重试一次
-                            if result.get("_need_reconnect"):
-                                logger.info(f"🔄 MCP 连接断开，自动重连: {_server_name}")
-                                current_client = await pool.get_client(
-                                    server_url=_server_url,
-                                    server_name=_server_name,
-                                    auth_token=_auth_token,
-                                    force_reconnect=True
-                                )
-                                if not current_client:
-                                    return {"success": False, "error": "MCP 服务器重连失败"}
-                                result = await current_client.call_tool(_orig_name, tool_input)
-                            
-                            return result
-                        return handler
-                    
-                    handler = await make_handler(server_url, server_name, auth_token, original_name)
-                    
-                    # 🔧 注册到 InstanceToolRegistry，传入真实的 tool_info（包含 input_schema）
-                    await instance_registry.register_mcp_tool(
-                        name=tool_name,
-                        server_url=server_url,
-                        server_name=server_name,
-                        tool_info=tool_info,  # 包含真实的 input_schema！
-                        mcp_client=client,
-                        handler=handler,
-                        capability=capability
-                    )
-                    
-                    # 同时注册到 Agent 的 tool_executor
-                    if hasattr(agent, 'tool_executor') and agent.tool_executor:
-                        agent.tool_executor.register_handler(tool_name, handler)
-                
+                    # 保存客户端引用
+                    if hasattr(agent, '_mcp_clients'):
+                        if client not in agent._mcp_clients:
+                            agent._mcp_clients.append(client)
+                    else:
+                        agent._mcp_clients = [client]
+                        
             except Exception as e:
-                logger.warning(f"⚠️ 注册 MCP 服务器 {server_name} 的工具失败: {str(e)}")
+                logger.warning(f"⚠️ 注册 MCP 工具 {name} 失败: {str(e)}")
+        
+        # 将 MCP 工具定义注入到 Agent
+        if mcp_tool_definitions:
+            if hasattr(agent, '_mcp_tools'):
+                agent._mcp_tools.extend(mcp_tool_definitions)
+            else:
+                agent._mcp_tools = mcp_tool_definitions
+            
+            # 注册到 tool_executor
+            if hasattr(agent, 'tool_executor'):
+                for tool_def in mcp_tool_definitions:
+                    tool_name = tool_def['name']
+                    client = tool_def['_mcp_client']
+                    original_name = tool_def['_original_name']
+                    
+                    async def mcp_handler(tool_input: Dict[str, Any], _client=client, _orig_name=original_name):
+                        return await _client.call_tool(_orig_name, tool_input)
+                    
+                    agent.tool_executor.register_handler(tool_name, mcp_handler)
     
     # ==================== 查询方法 ====================
     
@@ -803,13 +681,12 @@ class AgentRegistry:
                     "retention_policy": "user",
                 }
             
-            # 写入 config.yaml（异步）
+            # 写入 config.yaml
             config_path = agent_dir / "config.yaml"
-            config_content = yaml.dump(config_data, allow_unicode=True, default_flow_style=False, sort_keys=False)
-            async with aiofiles.open(config_path, "w", encoding="utf-8") as f:
-                await f.write(config_content)
+            with open(config_path, "w", encoding="utf-8") as f:
+                yaml.dump(config_data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
             
-            # 写入 prompt.md（异步）
+            # 写入 prompt.md
             prompt_path = agent_dir / "prompt.md"
             prompt_content = prompt if prompt else f"""# {agent_id}
 
@@ -821,8 +698,8 @@ class AgentRegistry:
 
 请根据用户需求提供帮助。
 """
-            async with aiofiles.open(prompt_path, "w", encoding="utf-8") as f:
-                await f.write(prompt_content)
+            with open(prompt_path, "w", encoding="utf-8") as f:
+                f.write(prompt_content)
             
             # 预加载新创建的 Agent
             await self._load_single_agent(agent_id)
@@ -836,9 +713,10 @@ class AgentRegistry:
             }
             
         except Exception as e:
-            # 回滚：删除已创建的目录（异步）
+            # 回滚：删除已创建的目录
+            import shutil
             if agent_dir.exists():
-                await asyncio.to_thread(shutil.rmtree, agent_dir)
+                shutil.rmtree(agent_dir)
             raise
     
     async def update_agent(
@@ -874,10 +752,9 @@ class AgentRegistry:
         config_path = agent_dir / "config.yaml"
         prompt_path = agent_dir / "prompt.md"
         
-        # 读取现有配置（异步）
-        async with aiofiles.open(config_path, "r", encoding="utf-8") as f:
-            content = await f.read()
-            config_data = yaml.safe_load(content)
+        # 读取现有配置
+        with open(config_path, "r", encoding="utf-8") as f:
+            config_data = yaml.safe_load(f)
         
         # 更新配置
         updated_fields = []
@@ -920,15 +797,14 @@ class AgentRegistry:
             config_data["memory"] = memory
             updated_fields.append("memory")
         
-        # 写入更新后的配置（异步）
-        config_content = yaml.dump(config_data, allow_unicode=True, default_flow_style=False, sort_keys=False)
-        async with aiofiles.open(config_path, "w", encoding="utf-8") as f:
-            await f.write(config_content)
+        # 写入更新后的配置
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.dump(config_data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
         
-        # 更新 prompt.md（异步）
+        # 更新 prompt.md
         if prompt is not None:
-            async with aiofiles.open(prompt_path, "w", encoding="utf-8") as f:
-                await f.write(prompt)
+            with open(prompt_path, "w", encoding="utf-8") as f:
+                f.write(prompt)
             updated_fields.append("prompt")
         
         # 重新加载 Agent 配置
@@ -964,9 +840,9 @@ class AgentRegistry:
         agent_dir = instances_dir / agent_id
         
         try:
-            # 删除文件系统（异步）
+            # 删除文件系统
             if agent_dir.exists():
-                await asyncio.to_thread(shutil.rmtree, agent_dir)
+                shutil.rmtree(agent_dir)
                 logger.info(f"🗑️ 已删除目录: {agent_dir}")
         except Exception as e:
             if not force:
@@ -983,40 +859,49 @@ class AgentRegistry:
             "message": f"Agent '{agent_id}' 已删除",
         }
     
-    async def reload_agent(self, agent_id: str = None) -> Dict[str, Any]:
+    async def reload_agent(self, agent_id: str) -> Dict[str, Any]:
         """
         重新加载 Agent 配置
         
         Args:
-            agent_id: Agent ID，如果为 None 则重载所有
+            agent_id: Agent ID（必填）
             
         Returns:
             重载结果
-        """
-        if agent_id:
-            if agent_id not in self._configs:
-                # 可能是新创建的，尝试加载
-                try:
-                    await self._load_single_agent(agent_id)
-                    return {
-                        "agent_id": agent_id,
-                        "message": f"Agent '{agent_id}' 加载成功",
-                    }
-                except Exception as e:
-                    raise AgentNotFoundError(f"Agent '{agent_id}' 不存在: {e}")
             
-            await self._load_single_agent(agent_id, force_refresh=True)
-            return {
-                "agent_id": agent_id,
-                "message": f"Agent '{agent_id}' 重新加载成功",
-            }
-        else:
-            # 重载所有
-            count = await self.preload_all(force_refresh=True)
-            return {
-                "reloaded_count": count,
-                "message": f"已重新加载 {count} 个 Agent",
-            }
+        Raises:
+            AgentNotFoundError: Agent 不存在
+        """
+        if not agent_id:
+            raise ValueError("agent_id 是必填参数")
+        
+        if agent_id not in self._configs:
+            # 可能是新创建的，尝试加载
+            try:
+                await self.preload_instance(agent_id)
+                return {
+                    "agent_id": agent_id,
+                    "message": f"Agent '{agent_id}' 加载成功",
+                }
+            except Exception as e:
+                raise AgentNotFoundError(f"Agent '{agent_id}' 不存在: {e}")
+        
+        # 重新加载（强制刷新）
+        await self.preload_instance(agent_id, force_refresh=True)
+        return {
+            "agent_id": agent_id,
+            "message": f"Agent '{agent_id}' 重新加载成功",
+        }
+
+    def get_router(self, agent_id: str):
+        """
+        获取路由器（统一走 AgentFactory.create_route）
+        """
+        if agent_id not in self._configs:
+            raise AgentNotFoundError(f"Agent '{agent_id}' 不存在")
+        
+        config = self._configs[agent_id]
+        return AgentFactory.create_route(prompt_cache=config.prompt_cache)
     
     async def _load_single_agent(self, agent_id: str, force_refresh: bool = False):
         """
@@ -1162,9 +1047,9 @@ class AgentRegistry:
         
         return detail
     
-    async def get_agent_prompt(self, agent_id: str) -> str:
+    def get_agent_prompt(self, agent_id: str) -> str:
         """
-        获取 Agent 的原始 prompt.md 内容（异步）
+        获取 Agent 的原始 prompt.md 内容
         
         Args:
             agent_id: Agent ID
@@ -1181,8 +1066,8 @@ class AgentRegistry:
         if not prompt_path.exists():
             return ""
         
-        async with aiofiles.open(prompt_path, "r", encoding="utf-8") as f:
-            return await f.read()
+        with open(prompt_path, "r", encoding="utf-8") as f:
+            return f.read()
     
     # ==================== 清理 ====================
     
