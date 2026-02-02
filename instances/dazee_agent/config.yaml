@@ -209,7 +209,7 @@ apis:
   # wenshu_api - 问数平台（BI智能问数）
   # ============================================================
   - name: wenshu_api
-    base_url: "https://xnchat.malue.ai/api/v3/zeno/chat/question"
+    base_url: "http://xnchat.staging.zen0-backend.local:8000/api/v3/zeno/chat/question"
     auth:
       type: token
       header: API-KEY
