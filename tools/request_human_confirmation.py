@@ -3,6 +3,12 @@ HITL 工具 (Human-in-the-Loop)
 
 用于在 Agent 执行过程中请求用户输入或收集偏好。
 
+🎯 最佳实践：
+- 当需要用户做选择时，立即调用此工具，而不是在回复中询问用户
+- 例如："画一张图"、"做个思维导图"等模糊需求，应该先用 HITL 收集具体要求
+- ❌ 错误：在回复中问"您想要什么风格？1. 商务 2. 科技"
+- ✅ 正确：调用 hitl 工具让用户通过表单选择
+
 ═══════════════════════════════════════════════════════════════════════════════
                               表单模式 (form)
 ═══════════════════════════════════════════════════════════════════════════════
@@ -21,7 +27,10 @@ questions 中的问题类型：
 - multiple_choice: 多选
 # - text_input: 文本输入（暂未支持）
 
-⚠️ 限制：每个问题的选项数量不能超过 3 个
+⚠️ 限制：
+- 每个问题的 label（问题文本）不能超过 20 字
+- 每个问题的选项数量不能超过 3 个
+- 每个选项的文本不能超过 10 字
 
 SSE 输出的 content 结构：
 {
@@ -36,30 +45,63 @@ SSE 输出的 content 结构：
   "response": {...}         # 仅响应后有
 }
 
-调用示例：
+典型场景示例：
+
+📝 description（副标题）使用指南：
+- 复杂操作、危险操作 → 添加 description 说明背景或警告
+- 简单选择、清晰问题 → 省略 description 保持简洁
+
+场景1：用户说"画一张图"（需求不明确，添加 description 说明目的）
 hitl(
-  title="确认操作",
-  description="请确认以下操作",
+  title="图片生成配置",
+  description="请告诉我您想要的图片类型和风格",
   questions=[
-    {
-      "id": "confirm", 
-      "label": "确定要删除这些文件吗？", 
-      "type": "single_choice", 
-      "options": ["是的，删除", "不，取消"]
-    }
+    {"id": "type", "label": "图片类型", "type": "single_choice", 
+     "options": ["风景照片", "数据图表", "流程示意图"]},
+    {"id": "style", "label": "风格偏好", "type": "single_choice", 
+     "options": ["写实风格", "卡通风格", "抽象艺术"], "default": "写实风格"}
   ]
 )
 
+场景2：用户说"做个思维导图"
 hitl(
-  title="收集用户偏好",
-  description="请选择您的偏好以生成更符合需求的内容",
+  title="思维导图需求确认",
+  description="请选择您需要的功能",
   questions=[
-    {"id": "style", "label": "选择风格", "type": "single_choice", 
-     "options": ["商务专业", "科技未来感", "简约清新"], "default": "商务专业"},
-    {"id": "focus", "label": "内容重点", "type": "multiple_choice", 
-     "options": ["政策法规", "产业动态", "技术突破"]}
-    # {"id": "notes", "label": "补充说明", "type": "text_input", 
-    #  "hint": "可选", "required": false}  # 暂未支持
+    {"id": "action", "label": "具体需求", "type": "single_choice", 
+     "options": ["创建编辑工具", "生成特定主题", "其他需求"]}
+  ]
+)
+
+场景3：危险操作确认
+hitl(
+  title="确认删除操作",
+  description="即将删除所有日志文件，此操作不可撤销",
+  questions=[
+    {"id": "confirm", "label": "确定要删除吗？", "type": "single_choice", 
+     "options": ["是的，删除", "取消操作"]}
+  ]
+)
+
+场景4：收集多个配置参数
+hitl(
+  title="PPT 生成配置",
+  description="请配置 PPT 的基本信息",
+  questions=[
+    {"id": "theme", "label": "选择主题", "type": "single_choice", 
+     "options": ["商务专业", "科技未来", "简约清新"], "default": "商务专业"},
+    {"id": "language", "label": "语言", "type": "single_choice", 
+     "options": ["中文", "英文", "双语"], "default": "中文"}
+  ]
+)
+
+场景5：简单选择（问题清晰，省略 description）
+hitl(
+  title="选择主题",
+  # 不需要 description，问题已经很清楚
+  questions=[
+    {"id": "theme", "label": "选择界面主题", "type": "single_choice", 
+     "options": ["浅色", "深色", "自动"]}
   ]
 )
 

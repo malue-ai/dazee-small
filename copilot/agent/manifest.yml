@@ -12,7 +12,7 @@ type: Load Balanced Web Service
 # 使用 location 指定 ECR 镜像地址（由部署脚本自动更新）
 # ============================================================
 image:
-  location: 308470327605.dkr.ecr.ap-southeast-1.amazonaws.com/zen0-backend/agent:20260202-131901
+  location: 308470327605.dkr.ecr.ap-southeast-1.amazonaws.com/zen0-backend/agent:20260202-145637
   port: 80  # Nginx 监听端口
 
 # ============================================================
