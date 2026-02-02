@@ -1140,6 +1140,13 @@ capabilities:
 
       4. 工具获取响应后返回给 LLM
 
+
+      ⚠️ 重要限制：
+
+      - 每个问题的选项数量不能超过 3 个
+
+      - 如需更多选项，请分多个问题或精简选项文字
+
       '
   input_schema:
     type: object
@@ -1162,6 +1169,8 @@ capabilities:
           问题数组。支持两种问题类型：
           - single_choice: 单选（包括 yes/no 确认，options 文本可自定义）
           - multiple_choice: 多选
+          
+          ⚠️ 重要限制：每个问题的选项数量不能超过 3 个，请精简选项。
         items:
           type: object
           properties:
@@ -1182,7 +1191,8 @@ capabilities:
               type: array
               items:
                 type: string
-              description: 选项列表（single_choice/multiple_choice 必需），文本可自定义如 ["确认删除", "取消操作"]
+              maxItems: 3
+              description: 选项列表（single_choice/multiple_choice 必需），文本可自定义如 ["确认删除", "取消操作"]。⚠️ 每个问题最多 3 个选项
             default:
               type: string
               description: 默认选中值

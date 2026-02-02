@@ -21,6 +21,8 @@ questions 中的问题类型：
 - multiple_choice: 多选
 # - text_input: 文本输入（暂未支持）
 
+⚠️ 限制：每个问题的选项数量不能超过 3 个
+
 SSE 输出的 content 结构：
 {
   "type": "form",           # 🆕 HITL 类型（目前只有 form）
