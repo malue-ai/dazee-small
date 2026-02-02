@@ -71,9 +71,9 @@ profiles:
       
       # Fallback 1: 同模型，不同 Provider (Vendor B)
       - provider: "claude"
-        model: "claude-haiku-4-5"
+        model: "claude-haiku-4-5-20251001"
         api_key_env: "CLAUDE_API_KEY_VENDOR_B"
-        base_url: "https://api.anthropic.com"
+        base_url: "https://maas-openapi.wanjiedata.com/api/anthropic"
       
       # Fallback 2: 跨厂商（千问兜底）
       - provider: "qwen"
@@ -106,9 +106,9 @@ profiles:
       
       # Fallback 1: 同模型，不同 Provider (Vendor B)
       - provider: "claude"
-        model: "claude-haiku-4-5"
+        model: "claude-haiku-4-5-20251001"
         api_key_env: "CLAUDE_API_KEY_VENDOR_B"
-        base_url: "https://api.anthropic.com"
+        base_url: "https://maas-openapi.wanjiedata.com/api/anthropic"
       
       # Fallback 2: 跨厂商（千问兜底）
       - provider: "qwen"
@@ -141,9 +141,9 @@ profiles:
       
       # Fallback 1: 同模型，不同 Provider (Vendor B)
       - provider: "claude"
-        model: "claude-sonnet-4-5"
+        model: "claude-sonnet-4-5-20250929"
         api_key_env: "CLAUDE_API_KEY_VENDOR_B"
-        base_url: "https://api.anthropic.com"
+        base_url: "https://maas-openapi.wanjiedata.com/api/anthropic"
       
       # Fallback 2: 跨厂商（千问兜底）
       - provider: "qwen"
@@ -176,9 +176,9 @@ profiles:
       
       # Fallback 1: 同模型，不同 Provider (Vendor B)
       - provider: "claude"
-        model: "claude-sonnet-4-5"
+        model: "claude-sonnet-4-5-20250929"
         api_key_env: "CLAUDE_API_KEY_VENDOR_B"
-        base_url: "https://api.anthropic.com"
+        base_url: "https://maas-openapi.wanjiedata.com/api/anthropic"
       
       # Fallback 2: 跨厂商（千问兜底）
       - provider: "qwen"
@@ -211,9 +211,9 @@ profiles:
       
       # Fallback 1: 同模型，不同 Provider (Vendor B)
       - provider: "claude"
-        model: "claude-sonnet-4-5"
+        model: "claude-sonnet-4-5-20250929"
         api_key_env: "CLAUDE_API_KEY_VENDOR_B"
-        base_url: "https://api.anthropic.com"
+        base_url: "https://maas-openapi.wanjiedata.com/api/anthropic"
       
       # Fallback 2: 跨厂商（千问兜底）
       - provider: "qwen"
@@ -268,9 +268,9 @@ profiles:
       
       # Fallback 1: 同模型，不同 Provider (Vendor B)
       - provider: "claude"
-        model: "claude-haiku-4-5"
+        model: "claude-haiku-4-5-20251001"
         api_key_env: "CLAUDE_API_KEY_VENDOR_B"
-        base_url: "https://api.anthropic.com"
+        base_url: "https://maas-openapi.wanjiedata.com/api/anthropic"
       
       # Fallback 2: 跨厂商（千问兜底）
       - provider: "qwen"
@@ -306,9 +306,9 @@ profiles:
       
       # Fallback 1: 同模型，不同 Provider (Vendor B)
       - provider: "claude"
-        model: "claude-3-5-haiku-latest"
+        model: "claude-haiku-4-5-20251001"
         api_key_env: "CLAUDE_API_KEY_VENDOR_B"
-        base_url: "https://api.anthropic.com"
+        base_url: "https://maas-openapi.wanjiedata.com/api/anthropic"
       
       # Fallback 2: 跨厂商（千问兜底）
       - provider: "qwen"
@@ -367,9 +367,9 @@ profiles:
       
       # Fallback 1: 同模型，不同 Provider (Vendor B)
       - provider: "claude"
-        model: "claude-sonnet-4-5"
+        model: "claude-sonnet-4-5-20250929"
         api_key_env: "CLAUDE_API_KEY_VENDOR_B"
-        base_url: "https://api.anthropic.com"
+        base_url: "https://maas-openapi.wanjiedata.com/api/anthropic"
       
       # Fallback 2: 跨厂商（千问兜底）
       - provider: "qwen"
@@ -499,7 +499,7 @@ qwen_max:
     
     # Fallback 1: 降级到 Claude Sonnet
     - provider: "claude"
-      model: "claude-sonnet-4-5"
+      model: "claude-sonnet-4-5-20250929"
       api_key_env: "ANTHROPIC_API_KEY"
   
   policy:
@@ -530,7 +530,7 @@ qwen_plus:
     
     # Fallback 1: 降级到 Claude Haiku
     - provider: "claude"
-      model: "claude-haiku-4-5"
+      model: "claude-haiku-4-5-20251001"
       api_key_env: "ANTHROPIC_API_KEY"
   
   policy:
