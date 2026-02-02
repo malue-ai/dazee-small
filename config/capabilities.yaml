@@ -1204,6 +1204,7 @@ capabilities:
     required:
     - title
     - questions
+
 - name: plan_todo
   type: TOOL
   subtype: SESSION
@@ -1799,22 +1800,31 @@ capabilities:
       1. react_fullstack（推荐，默认）
          - 技术栈：Vite + React + TypeScript + TailwindCSS + Express
          - 前端端口：5173，后端端口：3000
-         - 包含：components/、pages/、hooks/、lib/、IDEAS.md
+         - 包含：components/、pages/、hooks/、README.md
          - 启动：npm install && npm run dev
          - 适用：需要完整前后端分离的 Web 应用
+         - 初始化后：先阅读 README.md 了解项目结构
+      
+      2. remotion（视频创作）
+         - 技术栈：Remotion + React + TypeScript
+         - 用途：编程视频生成（React 代码 → MP4）
+         - 包含：src/Root.tsx、src/Composition.tsx、rules/、src/examples/
+         - 渲染：npm install && npx remotion render src/Root.tsx MyVideo out/video.mp4
+         - 适用：视频动画、数据可视化动画、宣传片
+         - 初始化后：先阅读 README.md 了解核心规则和示例代码
          
       【返回值说明】
       - created_files: 创建的文件列表
-      - ports: { frontend: 5173, backend: 3000 }
+      - ports: { frontend: 5173, backend: 3000 } 或 { studio: 3000 }
       - startup_hint: 启动命令提示
-    keywords: [sandbox, 沙盒, 初始化, 模板, 脚手架, react, node, html]
+    keywords: [sandbox, 沙盒, 初始化, 模板, 脚手架, react, node, html, remotion, video, 视频]
   input_schema:
     type: object
     properties:
       template:
         type: string
         description: 模板名称
-        enum: [react_fullstack]
+        enum: [react_fullstack, remotion]
         default: react_fullstack
     required: []
 - name: document_partition_tool

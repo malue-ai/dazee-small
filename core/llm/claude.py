@@ -723,6 +723,20 @@ class ClaudeLLMService(BaseLLMService):
         if self._context_editing_enabled:
             request_params["context_management"] = self._context_editing_config
         
+        # 🆕 Skills Container（如果启用）
+        # 根据 Claude Skills 官方标准：Skills 模式下 tools 只能是 code_execution
+        if self._skills_enabled and self._skills_container:
+            request_params["betas"] = list(self._betas)
+            request_params["container"] = self._skills_container
+            
+            # Skills 模式：tools 只能包含 code_execution（官方标准）
+            request_params["tools"] = [
+                {"type": "code_execution_20250825", "name": "code_execution"}
+            ]
+            
+            logger.info(f"🎯 [Async] Skills 模式激活: {len(self._skills_container.get('skills', []))} 个技能")
+            logger.info("   tools 已替换为 [code_execution]（Skills 标准要求）")
+        
         # 调试日志
         logger.debug(f"📤 LLM 请求: model={self.config.model}, messages={len(messages)}")
         

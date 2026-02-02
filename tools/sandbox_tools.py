@@ -871,7 +871,7 @@ class SandboxInitProject(BaseTool):
                 "file_count": len(created_files),
                 "ports": ports,
                 "startup_hint": startup_command,
-                "next_step": "请查看 IDEAS.md 了解项目结构，然后根据业务需求修改代码。"
+                "next_step": "请查看 README.md 了解项目结构和开发规范，然后根据业务需求修改代码。"
             }
             
         except Exception as e:

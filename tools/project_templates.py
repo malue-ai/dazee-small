@@ -4,6 +4,7 @@
 从 templates/ 目录读取预置的项目脚手架，支持：
 - node_fullstack: 简单的 Node.js Express 全栈模板
 - react_fullstack: 现代化 Vite + React + TypeScript 模板
+- remotion: Remotion 视频创作模板
 
 模板存放在项目根目录的 templates/ 文件夹中，方便维护和更新。
 """
@@ -20,6 +21,7 @@ AVAILABLE_TEMPLATES = {
     "node_fullstack": "简单的 Node.js Express 全栈模板",
     "react_fullstack": "现代化 Vite + React + TypeScript 模板（推荐）",
     "static_html": "简单的静态 HTML 页面",
+    "remotion": "Remotion 视频创作模板（编程视频生成）",
 }
 
 
@@ -84,6 +86,11 @@ def get_template_startup_command(template_name: str) -> Optional[str]:
             "cd /home/user/project && npm install && npm run dev"
         ),
         "static_html": "cd /home/user/project && python3 -m http.server 8000",
+        "remotion": (
+            "sudo apt-get update && sudo apt-get install -y libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libasound2 libpangocairo-1.0-0 libgtk-3-0 && "
+            "cd /home/user/project && npm install && "
+            "npx remotion render src/Root.tsx MyVideo out/video.mp4"
+        ),
     }
     return commands.get(template_name)
 
@@ -99,5 +106,6 @@ def get_template_ports(template_name: str) -> Dict[str, int]:
         "node_fullstack": {"main": 3000},
         "react_fullstack": {"frontend": 5173, "backend": 3000},
         "static_html": {"main": 8000},
+        "remotion": {"studio": 3000},  # Remotion Studio 预览端口
     }
     return ports.get(template_name, {"main": 3000})

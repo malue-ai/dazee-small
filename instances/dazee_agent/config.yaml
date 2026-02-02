@@ -133,7 +133,7 @@ enabled_capabilities:
   send_files: 1              # 🆕 文件发送工具（发送文件信息到前端）
   
   # --- HITL（Human-in-the-Loop）---
-  hitl: 1                      # 🆕 启用人机交互确认工具
+  hitl: 0                      # 🆕 启用人机交互确认工具
   
   # --- 线索生成类 ---
   clue_generation: 1           # 🆕 线索生成工具（操作建议）

@@ -876,6 +876,12 @@ async def create_agent_from_instance(
     else:
         agent._instance_skills = []
     
+    # 🔧 FIX: 在设置 _instance_skills 之后，重新调用 _enable_registered_skills()
+    # 因为 SimpleAgent.__init__ 中的调用时机早于 _instance_skills 注入
+    if hasattr(agent, '_enable_registered_skills'):
+        agent._enable_registered_skills()
+        logger.info("   ✅ 已重新启用实例级 Skills")
+    
     # 🆕 V6.0: 注入 Workers 配置（仅当 Multi-Agent 启用时）
     if config.multi_agent_enabled:
         agent.workers_config = config.workers
@@ -906,6 +912,30 @@ async def create_agent_from_instance(
     # 使用过滤后的 registry 创建实例级注册表
     instance_registry = InstanceToolRegistry(global_registry=filtered_registry)
     agent._instance_registry = instance_registry  # 注入到 Agent
+    
+    # 🔧 FIX: 更新 capability_registry、tool_executor、tool_selector 使用 filtered_registry
+    # 原问题：tool_executor 使用全局 Registry，导致被过滤掉的工具（如 hitl）找不到
+    # 修复：重新创建 tool_executor 和 tool_selector，使用 filtered_registry
+    from core.tool import create_tool_executor, create_tool_selector
+    from core.tool.base import create_tool_context
+    
+    agent.capability_registry = filtered_registry
+    
+    # 重新创建 tool_executor
+    agent.tool_executor = create_tool_executor(
+        registry=filtered_registry,
+        tool_context=create_tool_context(
+            event_manager=agent.event_manager,
+            apis_config=getattr(agent, 'apis_config', None)
+        ),
+        enable_compaction=getattr(agent.tool_executor, 'enable_compaction', True) if agent.tool_executor else True
+    )
+    
+    # 重新创建 tool_selector（如果存在）
+    if hasattr(agent, 'tool_selector') and agent.tool_selector is not None:
+        agent.tool_selector = create_tool_selector(registry=filtered_registry)
+    
+    logger.info(f"   ✅ ToolExecutor/ToolSelector 已更新，使用过滤后的 Registry ({len(filtered_registry.capabilities)} 个工具)")
     
     # 🆕 V4.6: 加载工具推断缓存（用于增量推断）
     tools_cache_file = cache_dir / "tools_inference.json"
