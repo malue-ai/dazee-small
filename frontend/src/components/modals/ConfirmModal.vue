@@ -261,7 +261,15 @@ function initializeResponse(request: HITLConfirmRequest): void {
         if (q.default !== undefined) {
           data[q.id] = q.default
         } else {
-          data[q.id] = q.type === 'multiple_choice' ? [] : ''
+          // 如果没有设置 default
+          if (q.type === 'multiple_choice') {
+            data[q.id] = []
+          } else if (q.type === 'single_choice' && q.options && q.options.length > 0) {
+            // single_choice 默认选中第一个选项
+            data[q.id] = q.options[0]
+          } else {
+            data[q.id] = ''
+          }
         }
       })
     }

@@ -29,8 +29,10 @@ questions 中的问题类型：
 
 ⚠️ 限制：
 - 每个问题的 label（问题文本）不能超过 20 字
+- 每个问题的 hint（副标题）不能超过 20 字（可选）
 - 每个问题的选项数量不能超过 3 个
 - 每个选项的文本不能超过 10 字
+- 未设置 default 时，会默认选中第一个选项
 
 SSE 输出的 content 结构：
 {
@@ -56,8 +58,9 @@ hitl(
   title="图片生成配置",
   description="请告诉我您想要的图片类型和风格",
   questions=[
-    {"id": "type", "label": "图片类型", "type": "single_choice", 
-     "options": ["风景照片", "数据图表", "流程示意图"]},
+    {"id": "type", "label": "图片类型", "type": "single_choice",
+     "hint": "请选择最符合您需求的类型",  # 问题副标题（可选）
+     "options": ["风景照片", "数据图表", "流程示意图"]},  # 未设置 default，会默认选中"风景照片"
     {"id": "style", "label": "风格偏好", "type": "single_choice", 
      "options": ["写实风格", "卡通风格", "抽象艺术"], "default": "写实风格"}
   ]
