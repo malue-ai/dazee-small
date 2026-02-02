@@ -47,43 +47,26 @@ class IntentResult:
     🆕 V6.0: 新增 needs_multi_agent 字段，用于智能决定是否需要 Multi-Agent 协作（Prompt-First）
     🆕 V6.1: 新增 is_follow_up 字段，用于识别追问/上下文延续（避免误判为新话题）
     🆕 V7.0: 新增 complexity_score 字段，LLM 直接输出 0-10 评分（废弃 ComplexityScorer）
-    🆕 V7.8: 新增 LLM 语义建议字段，供 AgentFactory 参数映射时使用
-    🆕 V9.2: 新增 task_dependency_type 字段，用于判断任务依赖类型（并行/串行/混合）
+    🆕 V7.5: 新增 intent_id/intent_name/platform 字段，支持用户自定义意图分类
     """
-    task_type: TaskType                          # 任务类型
+    task_type: TaskType                          # 任务类型（框架内部使用，由 intent_id 映射）
     complexity: Complexity                       # 复杂度等级
     needs_plan: bool                             # 是否需要规划
+    intent_id: Optional[int] = None              # 🆕 V7.5: 意图 ID（1=系统搭建, 2=BI智能问数, 3=综合咨询）
+    intent_name: Optional[str] = None            # 🆕 V7.5: 意图名称
+    platform: Optional[str] = None               # 🆕 V7.5: 平台标识（ontology/analytics，可选）
     complexity_score: float = 5.0                # 🆕 V7.0: 复杂度评分 0-10，由 LLM 直接输出
     needs_persistence: bool = False              # 🆕 V4.3: 是否需要跨 Session 持久化
     skip_memory_retrieval: bool = False          # 🆕 V4.6: 是否跳过 Mem0 记忆检索（默认不跳过）
     needs_multi_agent: bool = False              # 🆕 V6.0: 是否需要 Multi-Agent 协作（默认不需要）
     is_follow_up: bool = False                   # 🆕 V6.1: 是否为追问/上下文延续（默认否，视为新话题）
+    keywords: List[str] = field(default_factory=list)  # 提取的关键词
     confidence: float = 1.0                      # 置信度
-    
-    # ==================== V7.8 LLM 语义建议 ====================
-    # 这些字段由 IntentAnalyzer 输出，供 AgentFactory 参数映射时优先使用
-    # 相比硬规则，LLM 能更好地理解"虽然问题简短但需要深度分析"等边界情况
-    
-    suggested_planning_depth: Optional[str] = None  # 🆕 V7.8: none / minimal / full
-    requires_deep_reasoning: bool = False        # 🆕 V7.8: 是否需要深度推理（即使问题简短）
-    tool_usage_hint: Optional[str] = None        # 🆕 V7.8: single / sequential / parallel
-    
-    # ==================== V8.0 执行策略 ====================
-    # 由 LLM 语义判断，决定使用 SimpleAgent 还是 RVRBAgent
-    execution_strategy: str = "rvr"  # 🆕 V8.0: "rvr" | "rvr-b"
-    # - rvr: 标准 RVR 循环（简单确定性任务）
-    # - rvr-b: RVR + Backtrack（探索性任务、可能失败需重试、多步骤任务）
-    
-    # ==================== V9.2 任务依赖类型 ====================
-    # 用于判断子任务之间的依赖关系，影响 Multi-Agent 和执行策略决策
-    task_dependency_type: Optional[str] = "sequential"  # 🆕 V9.2: "independent" | "sequential" | "mixed"
-    # - independent: 子任务互不依赖，可完全并行
-    # - sequential: 子任务有前后依赖，必须串行
-    # - mixed: 部分可并行，部分需串行
+    raw_response: Optional[str] = None           # LLM 原始响应（用于调试）
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
-        return {
+        result = {
             "task_type": self.task_type.value,
             "complexity": self.complexity.value,
             "complexity_score": self.complexity_score,
@@ -91,14 +74,16 @@ class IntentResult:
             "needs_persistence": self.needs_persistence,
             "skip_memory_retrieval": self.skip_memory_retrieval,
             "needs_multi_agent": self.needs_multi_agent,
-            "task_dependency_type": self.task_dependency_type,  # 🆕 V9.2
             "is_follow_up": self.is_follow_up,
-            "confidence": self.confidence,
-            # V7.8 LLM 语义建议
-            "suggested_planning_depth": self.suggested_planning_depth,
-            "requires_deep_reasoning": self.requires_deep_reasoning,
-            "tool_usage_hint": self.tool_usage_hint,
-            # V8.0 执行策略
-            "execution_strategy": self.execution_strategy,
+            "keywords": self.keywords,
+            "confidence": self.confidence
         }
+        # 🆕 V7.5: 添加 intent_id/intent_name/platform（仅当有值时）
+        if self.intent_id is not None:
+            result["intent_id"] = self.intent_id
+        if self.intent_name is not None:
+            result["intent_name"] = self.intent_name
+        if self.platform is not None:
+            result["platform"] = self.platform
+        return result
 

@@ -28,6 +28,10 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 import yaml
+
+# 添加项目根目录到 path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from core.tool.registry_config import get_core_tools, get_tool_categories
 import re
 
 # 项目根目录
@@ -40,44 +44,53 @@ INSTANCES_DIR = PROJECT_ROOT / "instances"
 
 
 # ==================== 工具分类映射 ====================
-# 与 core/tool/loader.py 中的 TOOL_CATEGORIES 保持一致
+# 🆕 从 config/tool_registry.yaml 统一配置读取
+# 额外的 description/comment 用于生成配置注释
 
-TOOL_CATEGORIES = {
-    "document_skills": {
-        "tools": ["pptx", "xlsx", "docx", "pdf"],
-        "description": "文档生成技能包 (Claude Skills)",
-        "comment": "包含：pptx, xlsx, docx, pdf",
-    },
-    "sandbox_tools": {
-        "tools": [
-            "sandbox_write_file", "sandbox_run_command",
-            "sandbox_create_project", "sandbox_run_project",
-        ],
-        "description": "代码沙盒核心工具 (E2B)",
-        "comment": "4 个核心：写文件、执行命令、创建项目、运行项目",
-    },
-    "ppt_tools": {
-        "tools": ["ppt_generator", "slidespeak_render"],
-        "description": "PPT 生成工具",
-        "comment": "闭环 PPT 生成",
-    },
-}
+def _build_tool_categories() -> Dict[str, Dict]:
+    """构建工具分类（从统一配置 + 额外描述）"""
+    base_categories = get_tool_categories()
+    
+    # 添加描述信息
+    descriptions = {
+        "document_skills": {
+            "description": "文档生成技能包 (Claude Skills)",
+            "comment": "包含：pptx, xlsx, docx, pdf",
+        },
+        "sandbox_tools": {
+            "description": "代码沙盒核心工具 (E2B)",
+            "comment": "4 个核心：写文件、执行命令、创建项目、运行项目",
+        },
+        "ppt_tools": {
+            "description": "PPT 生成工具",
+            "comment": "闭环 PPT 生成",
+        },
+    }
+    
+    result = {}
+    for cat_name, tools in base_categories.items():
+        desc = descriptions.get(cat_name, {"description": cat_name, "comment": ""})
+        result[cat_name] = {
+            "tools": tools,
+            "description": desc.get("description", cat_name),
+            "comment": desc.get("comment", ""),
+        }
+    
+    return result
+
+TOOL_CATEGORIES = _build_tool_categories()
 
 # 核心工具（不暴露给用户配置）
-CORE_TOOLS = [
-    "plan_todo",
-    "api_calling", 
-    "request_human_confirmation",
-    "file_read",
-]
+# 🆕 从 config/tool_registry.yaml 统一配置读取
+CORE_TOOLS = get_core_tools()
 
 # 工具分组（用于生成配置时的注释分组）
 TOOL_GROUPS = {
     "信息获取类": {
-        "tools": ["web_search", "exa_search", "knowledge_search"],
-        "defaults": {"web_search": 1, "exa_search": 0, "knowledge_search": 1},
+        "tools": ["tavily_search", "exa_search", "knowledge_search"],
+        "defaults": {"tavily_search": 1, "exa_search": 0, "knowledge_search": 1},
         "comments": {
-            "web_search": "互联网搜索（Tavily）",
+            "tavily_search": "通用网络搜索（Tavily API）",
             "exa_search": "Exa 语义搜索（需 API Key）",
             "knowledge_search": "个人知识库检索",
         }

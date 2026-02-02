@@ -891,7 +891,7 @@ class ContextManager:
 ### 3.1 在 SimpleAgent 中使用
 
 ```python
-# core/agent/simple/simple_agent.py
+# core/agent/simple_agent.py
 from core.context.manager import ContextManager
 
 class SimpleAgent:

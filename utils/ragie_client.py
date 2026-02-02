@@ -12,6 +12,7 @@ Ragie API 客户端 - 知识库管理
 
 import os
 import aiohttp
+import aiofiles
 import asyncio
 from typing import Dict, Any, Optional, List
 from pathlib import Path
@@ -77,9 +78,9 @@ class RagieClient:
         if not file_path_obj.exists():
             raise FileNotFoundError(f"文件不存在: {file_path}")
         
-        # 先读取文件内容到内存（避免文件在发送前关闭）
-        with open(file_path, 'rb') as f:
-            file_content = f.read()
+        # 异步读取文件内容到内存（避免文件在发送前关闭）
+        async with aiofiles.open(file_path, 'rb') as f:
+            file_content = await f.read()
         
         async with aiohttp.ClientSession() as session:
             # 构建 multipart form data

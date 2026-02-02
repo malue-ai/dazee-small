@@ -45,6 +45,7 @@ aws:
         avatar: "avatars/{user_id}/"  # 用户头像
         attachment: "attachments/{user_id}/{conversation_id}/"  # 聊天附件
         temp: "temp/{user_id}/"  # 临时文件
+        generated_images: "generated_images/{user_id}/{conversation_id}/"  # AI 生成的图像
     
     # 访问控制
     acl:
@@ -52,6 +53,7 @@ aws:
       avatar: "public-read"  # 头像公开可读
       attachment: "private"  # 附件私有
       temp: "private"  # 临时文件私有
+      generated_images: "private"  # AI 生成图像私有（通过预签名 URL 访问）
     
     # 生命周期策略
     lifecycle:

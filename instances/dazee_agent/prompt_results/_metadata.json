@@ -1,16 +1,20 @@
 {
   "version": "1.0",
-  "generated_at": "2026-01-22T16:01:15.236101",
+  "generated_at": "2026-01-16T20:02:55.747602",
   "source_hashes": {
-    "prompt.md": "a20c12f4a525bed59f4bd1ffc7edc84b",
-    "config.yaml": "21ceefa16b8af67f4e3fcebe286d3a48"
+    "prompt.md": "ca69f68d5c23a43ab64a853556fda11a",
+    "config.yaml": "0e5de3838978e6e5c167a569cc66d3bc"
   },
   "result_hashes": {
-    "agent_schema": "f84cbb67c07a80c405c61e0a2c0c2a27",
-    "intent_prompt": "c737c8dd8564f31e68009537cf0472d8",
-    "simple_prompt": "f446dabf57bd57fbdb9868349775aef5",
-    "medium_prompt": "c82a2eff42f0e24ebf44f2c116ee23db",
-    "complex_prompt": "01f955a3c5f06c420248473b04a02257"
+    "simple_prompt": "d9b729ca01e2f49d30a479c37d622d77",
+    "medium_prompt": "50145013be5ff77efddfcfe5a553082d",
+    "complex_prompt": "bdd943ead5938d6c0f4f4dac3d78a23c"
   },
-  "manually_edited": []
+  "manually_edited": [
+    "agent_schema",
+    "intent_prompt",
+    "simple_prompt",
+    "medium_prompt",
+    "complex_prompt"
+  ]
 }

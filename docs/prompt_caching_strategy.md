@@ -242,7 +242,7 @@ async def analyze(self, messages: List[ChatMessage]) -> IntentResult:
 #### 路径 B：主对话调用（SimpleAgent）
 
 ```python
-# core/agent/simple/simple_agent.py
+# core/agent/simple_agent.py
 
 def _build_cached_system_prompt(
     self, 
@@ -329,7 +329,7 @@ def _build_cached_system_prompt(
 ### 2. SimpleAgent 运行时组装（修正版）
 
 ```python
-# core/agent/simple/simple_agent.py
+# core/agent/simple_agent.py
 
 def _build_cached_system_prompt(
     self, 

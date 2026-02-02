@@ -43,6 +43,12 @@ from .context import (
     Mem0BatchUpdateResult,
 )
 
+# 导出任务函数（供外部直接调用）
+from .tasks.mem0_update import (
+    update_user_memories,
+    batch_update_all_memories,
+)
+
 from .service import (
     BackgroundTaskService,
     get_background_task_service,
@@ -74,5 +80,9 @@ __all__ = [
     "TaskScheduler",
     "get_scheduler",
     "ScheduledTaskConfig",
+    
+    # Task Functions（直接调用）
+    "update_user_memories",
+    "batch_update_all_memories",
 ]
 

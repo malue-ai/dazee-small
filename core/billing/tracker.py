@@ -8,14 +8,16 @@ Enhanced Usage Tracker
 2. 支持多模型混合调用
 3. 自动计算价格明细
 4. 基于 Message ID 去重（遵循 Claude SDK 最佳实践）
+5. 🆕 V7.5.1: 工具调用计费（按工具聚合）
 """
 
-import logging
-from typing import List, Optional, Set
-from core.billing.models import LLMCallRecord
+from logger import get_logger
+from typing import List, Optional, Set, Dict, Any
+from core.billing.models import LLMCallRecord, ToolCallRecord
 from core.billing.pricing import get_pricing_for_model, calculate_cost
+from core.billing.tool_pricing import get_tool_pricing, calculate_tool_cost
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class EnhancedUsageTracker:
@@ -49,9 +51,14 @@ class EnhancedUsageTracker:
     """
     
     def __init__(self):
+        # LLM 调用记录
         self.calls: List[LLMCallRecord] = []  # 所有调用记录
         self._call_counter = 0
         self._seen_message_ids: Set[str] = set()  # 已处理的 Message ID（去重）
+        
+        # 🆕 V7.5.1: 工具调用记录（按工具聚合）
+        self.tool_calls: Dict[str, ToolCallRecord] = {}  # key: tool_name, value: ToolCallRecord
+        self._tool_call_counter = 0
     
     def record_call(
         self,
@@ -148,6 +155,96 @@ class EnhancedUsageTracker:
         
         return record
     
+    def record_tool_call(
+        self,
+        tool_name: str,
+        success: bool = True,
+        params: Optional[Dict[str, Any]] = None
+    ) -> Optional[ToolCallRecord]:
+        """
+        记录工具调用（按工具聚合）
+        
+        设计原则：
+        - 按工具聚合：同一工具只有一个 call_id，count 累加
+        - 调用成功后记录：失败不计费
+        - 免费工具也记录：tool_price = 0.0
+        - 支持通用工具：api_calling 等通过 params 识别实际服务
+        
+        Args:
+            tool_name: 工具名称
+            success: 是否成功（失败不计费）
+            params: 工具参数（可选，用于 api_calling 等通用工具的价格查询和聚合）
+            
+        Returns:
+            ToolCallRecord 对象，如果失败则返回 None
+            
+        示例：
+            # 普通工具调用
+            tracker.record_tool_call("web_search", success=True)
+            tracker.record_tool_call("web_search", success=True)  # count 累加
+            
+            # api_calling 工具调用（按 api_name 聚合）
+            tracker.record_tool_call("api_calling", success=True, params={"api_name": "wenshu_api"})
+            tracker.record_tool_call("api_calling", success=True, params={"api_name": "wenshu_api"})  # 按 wenshu_api 聚合
+            
+            # 工具调用失败（不计费）
+            tracker.record_tool_call("web_search", success=False)  # 返回 None
+        """
+        # 失败不计费
+        if not success:
+            logger.debug(f"⚠️ 工具调用失败，不计费: tool_name={tool_name}")
+            return None
+        
+        # 🔧 获取工具价格（传递 params 用于价格查询）
+        tool_price = get_tool_pricing(tool_name, params=params)
+        
+        # 🔑 生成 billing_key（用于聚合）
+        # 对于 api_calling，使用 api_name 作为聚合键
+        billing_key = tool_name
+        display_name = tool_name
+        
+        if tool_name == "api_calling" and params and params.get("api_name"):
+            api_name = params["api_name"]
+            billing_key = api_name  # 使用 api_name 作为聚合键
+            display_name = api_name  # 显示名称也用 api_name
+            logger.debug(
+                f"🔑 api_calling 计费聚合: tool_name={tool_name}, "
+                f"api_name={api_name}, billing_key={billing_key}"
+            )
+        
+        # 检查是否已记录过该工具（使用 billing_key）
+        if billing_key in self.tool_calls:
+            # 已存在：累加 count 和 total_price
+            record = self.tool_calls[billing_key]
+            record.count += 1
+            record.total_price = calculate_tool_cost(tool_name, record.count, params=params)
+            
+            logger.debug(
+                f"📊 工具调用累加: billing_key={billing_key}, count={record.count}, "
+                f"total_price=${record.total_price:.6f}"
+            )
+        else:
+            # 新工具：创建记录
+            self._tool_call_counter += 1
+            call_id = f"tool_call_{self._tool_call_counter:03d}"
+            
+            record = ToolCallRecord(
+                call_id=call_id,
+                count=1,
+                tool_name=display_name,  # 使用 display_name（可能是 api_name）
+                tool_price=tool_price,
+                total_price=tool_price
+            )
+            
+            self.tool_calls[billing_key] = record
+            
+            logger.debug(
+                f"📊 记录工具调用: billing_key={billing_key}, "
+                f"display_name={display_name}, price=${tool_price:.6f}"
+            )
+        
+        return record
+    
     def get_summary(self) -> dict:
         """
         获取累积汇总（向后兼容）
@@ -194,9 +291,12 @@ class EnhancedUsageTracker:
         self.calls.clear()
         self._seen_message_ids.clear()
         self._call_counter = 0
+        # 🆕 V7.5.1: 清空工具调用记录
+        self.tool_calls.clear()
+        self._tool_call_counter = 0
         logger.debug("🔄 UsageTracker 已重置")
     
-    # ========== 便捷方法 ==========
+    # ========== 向后兼容方法（兼容旧版 UsageTracker 接口）==========
     
     def accumulate(
         self, 
@@ -205,8 +305,9 @@ class EnhancedUsageTracker:
         purpose: str = "main_response"
     ) -> None:
         """
-        累积 LLM 响应的 usage 统计
+        向后兼容：累积 LLM 响应的 usage 统计
         
+        这是旧版 UsageTracker.accumulate() 的兼容接口。
         内部调用 record_call() 实现完整功能。
         
         Args:
@@ -234,7 +335,7 @@ class EnhancedUsageTracker:
     
     def accumulate_from_dict(self, usage_dict: dict, model: str = "claude-sonnet-4.5") -> None:
         """
-        从字典累积 usage
+        向后兼容：从字典累积 usage
         
         Args:
             usage_dict: usage 字典，包含 input_tokens, output_tokens 等
@@ -255,23 +356,28 @@ class EnhancedUsageTracker:
     
     def get_stats(self) -> dict:
         """
-        获取当前统计数据
+        向后兼容：获取当前统计数据（与旧版 UsageTracker.get_stats() 格式兼容）
         
         Returns:
-            统计字典
+            统计字典（与旧版格式完全一致 + 🆕 V7.5.1 工具调用统计）
         """
         return {
+            # LLM 统计
             "total_input_tokens": sum(c.input_tokens for c in self.calls),
             "total_output_tokens": sum(c.output_tokens for c in self.calls),
             "total_thinking_tokens": sum(c.thinking_tokens for c in self.calls),
             "total_cache_read_tokens": sum(c.cache_read_tokens for c in self.calls),
-            "total_cache_creation_tokens": sum(c.cache_write_tokens for c in self.calls),
-            "llm_calls": len(self.calls)
+            "total_cache_creation_tokens": sum(c.cache_write_tokens for c in self.calls),  # 注意：旧版用 creation
+            "llm_calls": len(self.calls),
+            # 🆕 V7.5.1: 工具调用统计
+            "tool_calls": len(self.tool_calls),
+            "total_tool_count": sum(record.count for record in self.tool_calls.values()),
+            "tool_total_price": sum(record.total_price for record in self.tool_calls.values())
         }
     
     def get_total_tokens(self) -> int:
         """
-        获取总 token 数
+        向后兼容：获取总 token 数
         
         Returns:
             总 token 数（input + output + thinking）
@@ -281,9 +387,17 @@ class EnhancedUsageTracker:
             for c in self.calls
         )
     
-    def get_cost_estimate(self) -> float:
+    def get_cost_estimate(
+        self,
+        input_price_per_mtok: float = None,  # 忽略，使用实际定价
+        output_price_per_mtok: float = None,
+        cache_read_price_per_mtok: float = None,
+        cache_creation_price_per_mtok: float = None
+    ) -> float:
         """
-        获取成本估算
+        向后兼容：估算成本
+        
+        注意：此方法忽略传入的价格参数，使用实际的模型定价。
         
         Returns:
             总成本（USD）
@@ -292,7 +406,7 @@ class EnhancedUsageTracker:
     
     def snapshot(self) -> dict:
         """
-        创建当前统计的快照
+        向后兼容：创建当前统计的快照
         
         Returns:
             包含统计和计算信息的字典

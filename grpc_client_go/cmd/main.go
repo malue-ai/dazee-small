@@ -45,7 +45,9 @@ func main() {
 	log.Println("-------------------------------------------")
 
 	// 调用流式接口
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	// 🔧 增加超时时间到 30 分钟，避免长时间任务被提前取消
+	// 对于 PPT 生成、视频处理等耗时任务，可能需要更长时间
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
 	stream, err := client.ChatStream(ctx, req)

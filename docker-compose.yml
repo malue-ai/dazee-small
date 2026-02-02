@@ -7,7 +7,7 @@ version: '3.8'
 
 services:
   # ============================================================
-  # 后端服务 - FastAPI（使用 SQLite）
+  # 后端服务 - FastAPI（使用 PostgreSQL）
   # ============================================================
   backend:
     image: zenflux-backend:latest
@@ -24,8 +24,8 @@ services:
       - E2B_API_KEY=${E2B_API_KEY}
       - RAGIE_API_KEY=${RAGIE_API_KEY:-}
       
-      # 使用 SQLite（无需外部数据库）
-      - DATABASE_URL=sqlite+aiosqlite:///./workspace/database/zenflux.db
+      # PostgreSQL 数据库配置
+      - DATABASE_URL=postgresql+asyncpg://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/zenflux
       
       # Redis 配置（SSE 支持）
       - REDIS_HOST=redis
@@ -45,7 +45,10 @@ services:
       - ./logs:/app/logs
       - ./config:/app/config
     depends_on:
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - zenflux-network
     healthcheck:
@@ -54,6 +57,29 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+
+  # ============================================================
+  # PostgreSQL - 数据库服务
+  # ============================================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: zenflux-postgres
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5432:5432"  # 仅本地访问
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=zenflux
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - zenflux-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # ============================================================
   # Redis - 官方镜像
@@ -83,6 +109,8 @@ services:
 # 数据卷
 # ============================================================
 volumes:
+  postgres-data:
+    driver: local
   redis-data:
     driver: local
 
@@ -92,4 +120,3 @@ volumes:
 networks:
   zenflux-network:
     driver: bridge
-

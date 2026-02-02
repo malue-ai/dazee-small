@@ -10,7 +10,8 @@
 这是 Swiss Cheese Model 的关键环节，确保从真实失败中学习。
 """
 
-import logging
+import aiofiles
+from logger import get_logger
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -18,7 +19,7 @@ from typing import Any, Dict, List, Optional
 from core.monitoring.failure_detector import FailureCase, FailureType, FailureSeverity
 from core.monitoring.failure_case_db import FailureCaseDB
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class CaseConverter:
@@ -243,14 +244,14 @@ class CaseConverter:
     # 批量转换
     # ===================
     
-    def generate_regression_suite(
+    async def generate_regression_suite(
         self,
         failure_types: Optional[List[FailureType]] = None,
         max_cases: int = 100,
         output_filename: Optional[str] = None
     ) -> Optional[str]:
         """
-        生成回归测试套件
+        生成回归测试套件（异步）
         
         Args:
             failure_types: 失败类型筛选
@@ -288,20 +289,21 @@ class CaseConverter:
             "tasks": tasks,
         }
         
-        # 保存到文件
+        # 保存到文件（异步）
         if output_filename is None:
             output_filename = f"regression_{datetime.now().strftime('%Y%m%d')}.yaml"
         
         output_path = self.eval_suites_dir / output_filename
         
         import yaml
-        with open(output_path, "w", encoding="utf-8") as f:
-            yaml.dump(suite, f, allow_unicode=True, default_flow_style=False)
+        content = yaml.dump(suite, allow_unicode=True, default_flow_style=False)
+        async with aiofiles.open(output_path, "w", encoding="utf-8") as f:
+            await f.write(content)
         
-        # 更新案例状态
+        # 更新案例状态（异步）
         for case in cases:
             case.status = "converted"
-            self.failure_db.update(case)
+            await self.failure_db.update(case)
         
         logger.info(f"📋 生成回归测试套件: {output_path} ({len(tasks)} 个任务)")
         

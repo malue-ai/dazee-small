@@ -6,8 +6,11 @@
 
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
+import yaml
+import aiofiles
 
 
 class ExecutionMode(str, Enum):
@@ -28,11 +31,7 @@ class AgentRole(str, Enum):
 
 
 class AgentConfig(BaseModel):
-    """
-    单个智能体配置
-    
-    V7.7 更新：移除 depends_on 字段，依赖关系统一由 PlanStep.dependencies 管理
-    """
+    """单个智能体配置"""
     agent_id: str = Field(..., description="智能体唯一标识")
     role: AgentRole = Field(AgentRole.EXECUTOR, description="智能体角色")
     model: str = Field("claude-sonnet-4-5-20250929", description="使用的模型")
@@ -48,6 +47,9 @@ class AgentConfig(BaseModel):
     # 执行参数
     timeout_seconds: int = Field(60, description="执行超时")
     priority: int = Field(0, description="执行优先级（越大越优先）")
+    
+    # 依赖关系（用于串行/层级模式）
+    depends_on: List[str] = Field(default_factory=list, description="依赖的其他 Agent")
     
     # 元数据
     metadata: Dict[str, Any] = Field(default_factory=dict)
@@ -65,7 +67,6 @@ class OrchestratorConfig(BaseModel):
     max_tokens: int = Field(16384, description="最大 token 数（必须大于 thinking_budget）")
     thinking_budget: int = Field(10000, description="Thinking token 预算（必须小于 max_tokens）")
     temperature: float = Field(0.3, description="温度参数")
-    llm_profile_name: Optional[str] = Field(None, description="LLM Profile 名称（可选）")
 
 
 class WorkerConfig(BaseModel):
@@ -80,7 +81,6 @@ class WorkerConfig(BaseModel):
     max_tokens: int = Field(8192, description="最大 token 数（必须大于 thinking_budget）")
     thinking_budget: int = Field(5000, description="Thinking token 预算（必须小于 max_tokens）")
     temperature: float = Field(0.5, description="温度参数")
-    llm_profile_name: Optional[str] = Field(None, description="LLM Profile 名称（可选）")
 
 
 class MultiAgentConfig(BaseModel):
@@ -258,6 +258,10 @@ class CriticConfidence(str, Enum):
     LOW = "low"             # 缺乏判断依据，必须人工介入
 
 
+# 向后兼容的别名
+CriticVerdict = CriticAction
+
+
 class PlanAdjustmentHint(BaseModel):
     """
     Plan 调整建议
@@ -296,6 +300,17 @@ class CriticResult(BaseModel):
     
     # 计划调整（当 recommended_action=replan 时）
     plan_adjustment: Optional[PlanAdjustmentHint] = Field(None, description="计划调整建议")
+    
+    # 向后兼容
+    @property
+    def verdict(self) -> CriticAction:
+        """向后兼容的 verdict 属性"""
+        return self.recommended_action
+    
+    @property
+    def improvement_hints(self) -> List[str]:
+        """向后兼容的 improvement_hints 属性"""
+        return self.suggestions
 
 
 class CriticConfig(BaseModel):
@@ -308,7 +323,6 @@ class CriticConfig(BaseModel):
     model: str = Field("claude-sonnet-4-5-20250929", description="Critic 使用的模型")
     enable_thinking: bool = Field(True, description="是否启用扩展思考")
     max_retries: int = Field(2, description="最大重试次数")
-    llm_profile_name: Optional[str] = Field(None, description="LLM Profile 名称（可选）")
     
     # 人机协同配置
     auto_pass_on_high_confidence: bool = Field(True, description="高信心时自动通过")
@@ -316,64 +330,13 @@ class CriticConfig(BaseModel):
     default_action_on_timeout: CriticAction = Field(CriticAction.ASK_HUMAN, description="超时时的默认行动")
 
 
-class AgentSelectionResult(BaseModel):
-    """
-    Agent 选择结果
-    
-    V7.9 新增：借鉴工具选择三级优化（V7.6）
-    
-    封装 Agent 选择的完整决策过程，包括：
-    - 三层候选记录（Config/Task/Capability）
-    - 最终选择和来源
-    - 覆盖关系记录
-    - 有效性验证结果
-    """
-    # 最终选择
-    selected_agent: AgentConfig = Field(..., description="选中的 Agent 配置")
-    selection_source: str = Field(
-        ..., 
-        description="选择来源: config/task/capability/default/auto_created"
-    )
-    
-    # 覆盖记录（透明化）
-    overridden_sources: List[str] = Field(
-        default_factory=list, 
-        description="被覆盖的候选来源，格式: 'layer:agent_id'"
-    )
-    
-    # 有效性验证
-    validation_passed: bool = Field(True, description="验证是否通过")
-    validation_issues: List[str] = Field(
-        default_factory=list, 
-        description="验证问题列表"
-    )
-    
-    # 三层候选记录（用于 Tracer 追踪）
-    config_candidate: Optional[str] = Field(None, description="Config 层候选 Agent ID")
-    task_candidate: Optional[str] = Field(None, description="Task 层候选 Agent ID")
-    capability_candidate: Optional[str] = Field(None, description="Capability 层候选 Agent ID")
-    
-    def to_trace_dict(self) -> Dict[str, Any]:
-        """转换为 Tracer 记录格式"""
-        return {
-            "selected_agent": self.selected_agent.agent_id,
-            "selection_source": self.selection_source,
-            "overridden_sources": self.overridden_sources,
-            "validation_passed": self.validation_passed,
-            "validation_issues": self.validation_issues,
-            "config_candidate": self.config_candidate,
-            "task_candidate": self.task_candidate,
-            "capability_candidate": self.capability_candidate,
-        }
-
-
 # 解析前向引用（Pydantic V2 需要）
 MultiAgentConfig.model_rebuild()
 
 
-def load_multi_agent_config(config_path: str = "config/multi_agent_config.yaml") -> MultiAgentConfig:
+async def load_multi_agent_config(config_path: str = "config/multi_agent_config.yaml") -> MultiAgentConfig:
     """
-    ✅ V7.2: 加载多智能体配置
+    ✅ V7.2: 异步加载多智能体配置
     
     从 YAML 文件加载配置，如果文件不存在则使用默认配置
     
@@ -383,8 +346,6 @@ def load_multi_agent_config(config_path: str = "config/multi_agent_config.yaml")
     Returns:
         MultiAgentConfig: 多智能体配置对象
     """
-    import yaml
-    from pathlib import Path
     from logger import get_logger
     
     logger = get_logger("multi_agent.config")
@@ -393,8 +354,9 @@ def load_multi_agent_config(config_path: str = "config/multi_agent_config.yaml")
     
     if config_file.exists():
         try:
-            with open(config_file, 'r', encoding='utf-8') as f:
-                config_data = yaml.safe_load(f)
+            async with aiofiles.open(config_file, 'r', encoding='utf-8') as f:
+                content = await f.read()
+                config_data = yaml.safe_load(content)
             
             logger.info(f"✅ 已加载多智能体配置: {config_path}")
             
@@ -414,19 +376,19 @@ def load_multi_agent_config(config_path: str = "config/multi_agent_config.yaml")
                         agent_id="researcher_1",
                         role=AgentRole.RESEARCHER,
                         model=worker_config.model,
-                        tools=["web_search", "exa_search", "wikipedia"],
+                        tools=["tavily_search", "exa_search", "wikipedia"],
                     ),
                     AgentConfig(
                         agent_id="researcher_2",
                         role=AgentRole.RESEARCHER,
                         model=worker_config.model,
-                        tools=["web_search", "exa_search", "wikipedia"],
+                        tools=["tavily_search", "exa_search", "wikipedia"],
                     ),
                     AgentConfig(
                         agent_id="researcher_3",
                         role=AgentRole.RESEARCHER,
                         model=worker_config.model,
-                        tools=["web_search", "exa_search", "wikipedia"],
+                        tools=["tavily_search", "exa_search", "wikipedia"],
                     ),
                 ]
             
@@ -452,19 +414,19 @@ def load_multi_agent_config(config_path: str = "config/multi_agent_config.yaml")
                 agent_id="researcher_1",
                 role=AgentRole.RESEARCHER,
                 model="claude-sonnet-4-5-20250929",
-                tools=["web_search", "exa_search", "wikipedia"],
+                tools=["tavily_search", "exa_search", "wikipedia"],
             ),
             AgentConfig(
                 agent_id="researcher_2",
                 role=AgentRole.RESEARCHER,
                 model="claude-sonnet-4-5-20250929",
-                tools=["web_search", "exa_search", "wikipedia"],
+                tools=["tavily_search", "exa_search", "wikipedia"],
             ),
             AgentConfig(
                 agent_id="researcher_3",
                 role=AgentRole.RESEARCHER,
                 model="claude-sonnet-4-5-20250929",
-                tools=["web_search", "exa_search", "wikipedia"],
+                tools=["tavily_search", "exa_search", "wikipedia"],
             ),
         ],
         orchestrator_config=OrchestratorConfig(),

@@ -19,123 +19,51 @@ from pydantic import BaseModel, Field
 # 重导出 UsageResponse（统一使用 core/billing 版本）
 from core.billing.models import UsageResponse, LLMCallRecord
 
+# 从独立的定价数据模块导入（避免循环导入）
+from core.billing.pricing_data import CLAUDE_PRICING, get_model_pricing
+
 if TYPE_CHECKING:
-    from utils.usage_tracker import UsageTracker
+    from core.billing.tracker import EnhancedUsageTracker
 
 
 # ============================================================
-# 计费价格表（2026-01 Claude 4.5 定价，$/百万tokens）
-# 与 core/monitoring/token_audit.py 保持一致
+# 重导出定价数据（向后兼容）
 # ============================================================
-
-CLAUDE_PRICING = {
-    # Opus 系列
-    "claude-opus-4.5": {
-        "input": 5.0,
-        "output": 25.0,
-        "cache_write": 6.25,
-        "cache_read": 0.5
-    },
-    "claude-opus-4-5-20251101": {  # 完整模型名
-        "input": 5.0,
-        "output": 25.0,
-        "cache_write": 6.25,
-        "cache_read": 0.5
-    },
-    "claude-opus-4.1": {
-        "input": 15.0,
-        "output": 75.0,
-        "cache_write": 18.75,
-        "cache_read": 1.5
-    },
-    "claude-opus-4": {
-        "input": 15.0,
-        "output": 75.0,
-        "cache_write": 18.75,
-        "cache_read": 1.5
-    },
-    "claude-opus-3": {  # deprecated
-        "input": 15.0,
-        "output": 75.0,
-        "cache_write": 18.75,
-        "cache_read": 1.5
-    },
-    # Sonnet 系列
-    "claude-sonnet-4.5": {
-        "input": 3.0,
-        "output": 15.0,
-        "cache_write": 3.75,
-        "cache_read": 0.3
-    },
-    "claude-sonnet-4-5-20250929": {  # 完整模型名
-        "input": 3.0,
-        "output": 15.0,
-        "cache_write": 3.75,
-        "cache_read": 0.3
-    },
-    "claude-sonnet-4": {
-        "input": 3.0,
-        "output": 15.0,
-        "cache_write": 3.75,
-        "cache_read": 0.3
-    },
-    "claude-sonnet-3.7": {  # deprecated
-        "input": 3.0,
-        "output": 15.0,
-        "cache_write": 3.75,
-        "cache_read": 0.3
-    },
-    # Haiku 系列
-    "claude-haiku-4.5": {
-        "input": 1.0,
-        "output": 5.0,
-        "cache_write": 1.25,
-        "cache_read": 0.1
-    },
-    "claude-haiku-3.5": {
-        "input": 0.8,
-        "output": 4.0,
-        "cache_write": 1.0,
-        "cache_read": 0.08
-    },
-    "claude-haiku-3": {
-        "input": 0.25,
-        "output": 1.25,
-        "cache_write": 0.3,
-        "cache_read": 0.03
-    },
-    # 默认（Sonnet）
-    "default": {
-        "input": 3.0,
-        "output": 15.0,
-        "cache_write": 3.75,
-        "cache_read": 0.3
-    }
-}
+__all__ = [
+    "UsageResponse",
+    "LLMCallRecord",
+    "UsageSummary",
+    "CLAUDE_PRICING",
+    "get_model_pricing",
+    "from_usage_tracker_helper",
+]
 
 
-def get_model_pricing(model: str) -> Dict[str, float]:
+# ========== 便捷方法（向后兼容）==========
+
+def from_usage_tracker_helper(
+    tracker: 'EnhancedUsageTracker',
+    model: str = "claude-sonnet-4",
+    latency: Optional[float] = None,
+) -> UsageResponse:
     """
-    获取模型定价
+    从 EnhancedUsageTracker 创建 UsageResponse（便捷方法）
+    
+    内部调用 UsageResponse.from_tracker()，统一使用新版实现
     
     Args:
-        model: 模型名称
+        tracker: EnhancedUsageTracker 实例
+        model: 模型名称（用于设置主模型，如果 tracker 为空）
+        latency: 总延迟（秒）
         
     Returns:
-        定价字典 {input, output, cache_write, cache_read}
+        UsageResponse 实例
     """
-    # 尝试精确匹配
-    if model in CLAUDE_PRICING:
-        return CLAUDE_PRICING[model]
-    
-    # 尝试模糊匹配
-    model_lower = model.lower()
-    for key, pricing in CLAUDE_PRICING.items():
-        if key in model_lower or model_lower in key:
-            return pricing
-    
-    # 返回默认价格
-    return CLAUDE_PRICING["default"]
+    return UsageResponse.from_tracker(tracker, latency=latency or 0.0)
+
+
+# 添加到 UsageResponse 类的静态方法（向后兼容）
+UsageResponse.from_usage_tracker = staticmethod(from_usage_tracker_helper)
 
 
 class UsageSummary(BaseModel):

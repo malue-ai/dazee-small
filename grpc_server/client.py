@@ -6,7 +6,7 @@ gRPC 客户端封装
 
 import grpc
 import json
-from typing import Optional, Dict, Any, List, AsyncIterator
+from typing import Optional, Dict, Any, List, AsyncIterator, Tuple
 from logger import get_logger
 
 # 导入生成的 protobuf 代码
@@ -18,6 +18,30 @@ except ImportError:
     tool_service_pb2_grpc = None
 
 logger = get_logger("grpc_client")
+
+
+def get_grpc_client_options() -> List[Tuple[str, any]]:
+    """
+    获取 gRPC 客户端配置选项
+    
+    Keepalive 配置说明：
+    - 客户端的 keepalive 配置应与服务端兼容
+    - 避免发送 ping 过于频繁导致 "Too many pings" 错误
+    
+    Returns:
+        gRPC 客户端配置选项列表
+    """
+    return [
+        # Keepalive 配置（与服务端协调）
+        ("grpc.keepalive_time_ms", 30000),  # 30 秒（空闲后发送 keepalive ping）
+        ("grpc.keepalive_timeout_ms", 10000),  # 10 秒（等待响应超时）
+        ("grpc.keepalive_permit_without_calls", True),  # 无 RPC 时也允许 keepalive
+        ("grpc.http2.max_pings_without_data", 0),  # 无限制
+        
+        # 消息大小限制（与服务端匹配）
+        ("grpc.max_receive_message_length", 50 * 1024 * 1024),  # 50 MB
+        ("grpc.max_send_message_length", 50 * 1024 * 1024),  # 50 MB
+    ]
 
 
 class ZenfluxGRPCClient:
@@ -42,7 +66,7 @@ class ZenfluxGRPCClient:
                 print(event)
     """
     
-    def __init__(self, server_address: str = "localhost:50051", timeout: int = 300):
+    def __init__(self, server_address: str = "localhost:50051", timeout: int = 1800):
         """
         初始化 gRPC 客户端
         
@@ -67,7 +91,14 @@ class ZenfluxGRPCClient:
         try:
             logger.info(f"📡 连接到 gRPC 服务器: {self.server_address}")
             
-            self.channel = grpc.aio.insecure_channel(self.server_address)
+            # 🆕 使用 keepalive 配置选项，防止 "Too many pings" 错误
+            channel_options = get_grpc_client_options()
+            logger.debug(f"🔧 gRPC 客户端选项: {channel_options}")
+            
+            self.channel = grpc.aio.insecure_channel(
+                self.server_address,
+                options=channel_options
+            )
             self.chat_stub = tool_service_pb2_grpc.ChatServiceStub(self.channel)
             self.session_stub = tool_service_pb2_grpc.SessionServiceStub(self.channel)
             
@@ -94,10 +125,24 @@ class ZenfluxGRPCClient:
         message_id: Optional[str] = None,
         background_tasks: Optional[List[str]] = None,
         files: Optional[List[Dict[str, str]]] = None,
-        variables: Optional[Dict[str, str]] = None
+        variables: Optional[Dict[str, str]] = None,
+        agent_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         聊天接口（同步模式）
+        
+        Args:
+            message: 用户消息
+            user_id: 用户 ID
+            conversation_id: 对话 ID（可选）
+            message_id: 消息 ID（可选）
+            background_tasks: 后台任务列表（可选）
+            files: 文件引用列表（可选）
+            variables: 前端上下文变量（可选）
+            agent_id: Agent 实例 ID（可选，对应 instances/ 目录名）
+            
+        Returns:
+            聊天响应字典
         """
         if not self.chat_stub:
             raise RuntimeError("gRPC 客户端未连接，请先调用 connect()")
@@ -122,7 +167,8 @@ class ZenfluxGRPCClient:
                 stream=False,
                 background_tasks=background_tasks or [],
                 files=file_refs,
-                variables=variables or {}
+                variables=variables or {},
+                agent_id=agent_id or ""
             )
             
             response = await self.chat_stub.Chat(request, timeout=self.timeout)
@@ -148,10 +194,24 @@ class ZenfluxGRPCClient:
         message_id: Optional[str] = None,
         background_tasks: Optional[List[str]] = None,
         files: Optional[List[Dict[str, str]]] = None,
-        variables: Optional[Dict[str, str]] = None
+        variables: Optional[Dict[str, str]] = None,
+        agent_id: Optional[str] = None
     ) -> AsyncIterator[Dict[str, Any]]:
         """
         聊天接口（流式模式）
+        
+        Args:
+            message: 用户消息
+            user_id: 用户 ID
+            conversation_id: 对话 ID（可选）
+            message_id: 消息 ID（可选）
+            background_tasks: 后台任务列表（可选）
+            files: 文件引用列表（可选）
+            variables: 前端上下文变量（可选）
+            agent_id: Agent 实例 ID（可选，对应 instances/ 目录名）
+            
+        Yields:
+            ZenO 格式的事件字典
         """
         if not self.chat_stub:
             raise RuntimeError("gRPC 客户端未连接，请先调用 connect()")
@@ -176,7 +236,8 @@ class ZenfluxGRPCClient:
                 stream=True,
                 background_tasks=background_tasks or [],
                 files=file_refs,
-                variables=variables or {}
+                variables=variables or {},
+                agent_id=agent_id or ""
             )
             
             async for event in self.chat_stub.ChatStream(request, timeout=self.timeout):

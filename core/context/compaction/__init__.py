@@ -29,8 +29,29 @@
 """
 
 from enum import Enum
-from typing import Dict, Any, List, Optional
-from dataclasses import dataclass
+from typing import Dict, Any, List, Optional, Tuple
+from dataclasses import dataclass, field
+
+import tiktoken
+
+from logger import get_logger
+
+logger = get_logger("context.compaction")
+
+# 全局 tokenizer 缓存（延迟初始化）
+_tokenizer = None
+
+
+def _get_tokenizer():
+    """获取 tokenizer（延迟初始化，全局缓存）"""
+    global _tokenizer
+    if _tokenizer is None:
+        try:
+            _tokenizer = tiktoken.get_encoding("cl100k_base")
+            logger.debug("✅ tiktoken tokenizer 初始化成功")
+        except Exception as e:
+            logger.warning(f"⚠️ 无法加载 tiktoken: {e}，将使用字符数估算")
+    return _tokenizer
 
 
 class QoSLevel(str, Enum):
@@ -60,7 +81,7 @@ class ContextStrategy:
     上下文管理策略配置
     
     L1: Memory Tool 指导（通过 System Prompt）
-    L2: 历史消息裁剪（服务层自动执行）
+    L2: 历史消息裁剪（纯 token 驱动，服务层自动执行）
     L3: QoS 成本控制（后端静默）
     
     配置来源优先级：
@@ -71,18 +92,32 @@ class ContextStrategy:
     # 可在实例 config.yaml 中配置：context_management.enable_memory_guidance
     enable_memory_guidance: bool = True  # 是否在 Prompt 中添加 Memory 使用指导
     
-    # L2: 历史消息裁剪
+    # L2: 历史消息裁剪（纯 token 驱动）
     # 可在实例 config.yaml 中配置：context_management.enable_history_trimming
-    enable_history_trimming: bool = True  # 是否启用历史消息裁剪
-    max_history_messages: int = 50       # 最大保留消息数
-    preserve_first_n: int = 2            # 始终保留前 N 轮（建立上下文）
-    preserve_last_n: int = 10            # 始终保留最近 N 轮（当前上下文）
-    preserve_tool_results: bool = True   # 保留关键 tool_result（含文件/数据）
+    enable_history_trimming: bool = True     # 是否启用历史消息裁剪
+    preserve_first_messages: int = 4         # 始终保留开头 N 条消息（任务上下文）
+    preserve_last_messages: int = 20         # 尽量保留最近 N 条消息（当前上下文）
+    preserve_tool_results: bool = True       # 保留中间的 tool_result（含重要数据）
+    trim_threshold: float = 0.8              # token 使用率超过此阈值时触发裁剪
     
     # L3: QoS 成本控制
     qos_level: QoSLevel = QoSLevel.PRO
     token_budget: int = 200_000
-    warning_threshold: float = 0.8       # 80% 时后端日志警告（用户无感知）
+    warning_threshold: float = 0.8           # 80% 时后端日志警告（用户无感知）
+
+
+@dataclass
+class TrimStats:
+    """
+    历史消息裁剪统计信息
+    
+    用于单次遍历同时完成裁剪和 token 估算，避免重复遍历。
+    """
+    original_count: int = 0              # 原始消息数量
+    trimmed_count: int = 0               # 裁剪后消息数量
+    estimated_tokens: int = 0            # 估算的 token 数
+    exceeded_budget: bool = False        # 是否超过预算阈值
+    should_warn: bool = False            # 是否应该后端警告
 
 
 def get_context_strategy(qos_level: QoSLevel = QoSLevel.PRO) -> ContextStrategy:
@@ -143,18 +178,222 @@ For complex or multi-step tasks:
    - Progress markers for multi-file operations"""
 
 
+def _estimate_message_tokens(msg: Dict[str, Any], tokenizer) -> int:
+    """
+    估算单条消息的 token 数
+    
+    Args:
+        msg: 消息字典
+        tokenizer: tiktoken tokenizer 实例
+        
+    Returns:
+        token 数量
+    """
+    def _extract_text(content: Any) -> str:
+        """递归提取所有文本内容"""
+        if isinstance(content, str):
+            return content
+        elif isinstance(content, list):
+            return " ".join(_extract_text(item) for item in content)
+        elif isinstance(content, dict):
+            block_type = content.get("type", "")
+            if block_type == "text":
+                return content.get("text", "")
+            elif block_type == "tool_result":
+                return _extract_text(content.get("content", ""))
+            elif block_type == "tool_use":
+                tool_name = content.get("name", "")
+                tool_input = content.get("input", {})
+                return f"{tool_name}: {str(tool_input)}"
+            elif block_type == "thinking":
+                return content.get("thinking", "")
+            else:
+                return str(content.get("text", "") or content.get("content", ""))
+        return str(content)
+    
+    role = msg.get("role", "")
+    content = msg.get("content", "")
+    text = f"{role}: {_extract_text(content)}"
+    
+    if tokenizer:
+        try:
+            return len(tokenizer.encode(text))
+        except Exception:
+            pass
+    
+    # Fallback：字符估算
+    return len(text) // 2
+
+
+def _has_tool_result(msg: Dict[str, Any]) -> bool:
+    """
+    检查消息是否包含 tool_result
+    
+    Args:
+        msg: 消息字典
+        
+    Returns:
+        是否包含 tool_result
+    """
+    content = msg.get("content", "")
+    if isinstance(content, list):
+        return any(
+            isinstance(block, dict) and block.get("type") == "tool_result"
+            for block in content
+        )
+    return False
+
+
+def trim_by_token_budget(
+    messages: List[Dict[str, Any]],
+    token_budget: int,
+    preserve_first_messages: int = 4,
+    preserve_last_messages: int = 20,
+    preserve_tool_results: bool = True,
+    system_prompt: str = ""
+) -> Tuple[List[Dict[str, Any]], TrimStats]:
+    """
+    基于 token 预算裁剪消息（纯 token 驱动，L2 策略核心实现）
+    
+    裁剪逻辑：
+    1. 估算总 token 数，如果未超预算则直接返回
+    2. 始终保留开头 N 条消息（任务上下文）
+    3. 从最近消息向前累计 token，找到预算分割点
+    4. 中间部分可选保留 tool_result 消息（含重要数据）
+    
+    Args:
+        messages: 消息列表
+        token_budget: token 预算上限
+        preserve_first_messages: 始终保留开头 N 条消息
+        preserve_last_messages: 尽量保留最近 N 条消息
+        preserve_tool_results: 是否保留中间的 tool_result 消息
+        system_prompt: 系统提示词（计入 token）
+    
+    Returns:
+        (裁剪后的消息, 统计信息)
+    """
+    original_count = len(messages)
+    tokenizer = _get_tokenizer()
+    
+    # 边界情况：消息数很少，无需裁剪
+    min_preserve = preserve_first_messages + preserve_last_messages
+    if original_count <= min_preserve:
+        estimated_tokens = estimate_tokens(messages, system_prompt)
+        return messages, TrimStats(
+            original_count=original_count,
+            trimmed_count=original_count,
+            estimated_tokens=estimated_tokens,
+            exceeded_budget=estimated_tokens >= token_budget,
+            should_warn=estimated_tokens >= token_budget * 0.8
+        )
+    
+    # 1. 计算 system_prompt 的 token 数（基础开销）
+    base_tokens = 0
+    if system_prompt:
+        if tokenizer:
+            try:
+                base_tokens = len(tokenizer.encode(system_prompt))
+            except Exception:
+                base_tokens = len(system_prompt) // 2
+        else:
+            base_tokens = len(system_prompt) // 2
+    
+    # 2. 计算每条消息的 token 数
+    message_tokens = [_estimate_message_tokens(msg, tokenizer) for msg in messages]
+    total_tokens = base_tokens + sum(message_tokens)
+    
+    # 3. 如果未超预算，直接返回
+    if total_tokens <= token_budget:
+        return messages, TrimStats(
+            original_count=original_count,
+            trimmed_count=original_count,
+            estimated_tokens=total_tokens,
+            exceeded_budget=False,
+            should_warn=total_tokens >= token_budget * 0.8
+        )
+    
+    logger.info(
+        f"⚠️ Token 超预算: {total_tokens:,} > {token_budget:,}，开始裁剪..."
+    )
+    
+    # 4. 保留开头 N 条消息（任务上下文）
+    first_part = messages[:preserve_first_messages]
+    first_tokens = sum(message_tokens[:preserve_first_messages])
+    
+    # 5. 从最近消息向前累计，找到能放进预算的最大范围
+    # 剩余预算 = token_budget - base_tokens - first_tokens - 缓冲区
+    buffer_tokens = 5000  # 留出缓冲区给后续工具调用
+    remaining_budget = token_budget - base_tokens - first_tokens - buffer_tokens
+    
+    # 从后向前累计 token
+    last_part = []
+    last_tokens = 0
+    last_start_idx = original_count  # 从后向前的起始索引
+    
+    for i in range(original_count - 1, preserve_first_messages - 1, -1):
+        msg_token = message_tokens[i]
+        if last_tokens + msg_token <= remaining_budget:
+            last_tokens += msg_token
+            last_start_idx = i
+        else:
+            break
+    
+    # 确保至少保留 preserve_last_messages 条最近消息（如果有的话）
+    min_last_idx = max(preserve_first_messages, original_count - preserve_last_messages)
+    if last_start_idx > min_last_idx:
+        # 强制保留最近 N 条，即使超预算
+        last_start_idx = min_last_idx
+        last_tokens = sum(message_tokens[last_start_idx:])
+    
+    last_part = messages[last_start_idx:]
+    
+    # 6. 中间部分：可选保留 tool_result 消息
+    middle_part = []
+    middle_tokens = 0
+    
+    if preserve_tool_results and last_start_idx > preserve_first_messages:
+        middle_budget = remaining_budget - last_tokens
+        
+        for i in range(preserve_first_messages, last_start_idx):
+            msg = messages[i]
+            if _has_tool_result(msg):
+                msg_token = message_tokens[i]
+                if middle_tokens + msg_token <= middle_budget:
+                    middle_part.append(msg)
+                    middle_tokens += msg_token
+    
+    # 7. 组合结果
+    result = first_part + middle_part + last_part
+    trimmed_count = len(result)
+    estimated_tokens = base_tokens + first_tokens + middle_tokens + last_tokens
+    
+    logger.info(
+        f"✂️ 裁剪完成: {original_count} → {trimmed_count} 条消息, "
+        f"token: {total_tokens:,} → {estimated_tokens:,} "
+        f"(first={len(first_part)}, middle={len(middle_part)}, last={len(last_part)})"
+    )
+    
+    return result, TrimStats(
+        original_count=original_count,
+        trimmed_count=trimmed_count,
+        estimated_tokens=estimated_tokens,
+        exceeded_budget=estimated_tokens >= token_budget,
+        should_warn=estimated_tokens >= token_budget * 0.8
+    )
+
+
 def trim_history_messages(
     messages: List[Dict[str, Any]],
     strategy: ContextStrategy
 ) -> List[Dict[str, Any]]:
     """
-    智能裁剪历史消息（L2 策略）
+    智能裁剪历史消息（L2 策略，纯 token 驱动）
     
     裁剪逻辑：
-    1. 始终保留前 N 轮（建立任务上下文）
-    2. 始终保留最近 N 轮（当前工作上下文）
-    3. 中间轮次：保留 tool_result（含重要数据），丢弃纯文本
-    4. 总数超限时，从中间开始丢弃
+    1. 估算总 token 数，如果未超预算则直接返回
+    2. 始终保留开头 N 条消息（任务上下文）
+    3. 从最近消息向前累计 token，找到预算分割点
+    4. 中间部分可选保留 tool_result 消息（含重要数据）
     
     Args:
         messages: 完整消息历史
@@ -163,81 +402,120 @@ def trim_history_messages(
     Returns:
         裁剪后的消息列表
     """
-    if len(messages) <= strategy.max_history_messages:
-        return messages
+    # 计算 token 预算
+    token_budget = int(strategy.token_budget * strategy.trim_threshold)
     
-    # 计算各部分
-    first_part = messages[:strategy.preserve_first_n * 2]  # *2 因为 user+assistant
-    last_part = messages[-strategy.preserve_last_n * 2:]
-    middle_part = messages[strategy.preserve_first_n * 2:-strategy.preserve_last_n * 2]
+    # 调用新的 token 驱动裁剪函数
+    trimmed_messages, _ = trim_by_token_budget(
+        messages=messages,
+        token_budget=token_budget,
+        preserve_first_messages=strategy.preserve_first_messages,
+        preserve_last_messages=strategy.preserve_last_messages,
+        preserve_tool_results=strategy.preserve_tool_results
+    )
     
-    # 中间部分：只保留含 tool_result 的消息（客观判断）
-    # 🔑 原则：使用客观特征（tool_result 类型），不使用关键词匹配
-    if strategy.preserve_tool_results:
-        important_middle = []
-        for msg in middle_part:
-            content = msg.get("content", "")
-            # 检查是否包含 tool_result（客观特征）
-            if isinstance(content, list):
-                has_tool_result = any(
-                    block.get("type") == "tool_result" 
-                    for block in content 
-                    if isinstance(block, dict)
-                )
-                if has_tool_result:
-                    important_middle.append(msg)
-            # 注意：不再使用关键词匹配判断重要性
-            # LLM 会通过 tool_result 保留关键信息
-    else:
-        important_middle = []
+    return trimmed_messages
+
+
+def trim_history_messages_with_stats(
+    messages: List[Dict[str, Any]],
+    strategy: ContextStrategy,
+    system_prompt: str = ""
+) -> Tuple[List[Dict[str, Any]], TrimStats]:
+    """
+    智能裁剪历史消息并返回统计信息（纯 token 驱动）
     
-    # 组合结果
-    result = first_part + important_middle + last_part
+    相比 trim_history_messages + estimate_tokens 分开调用：
+    - 单次遍历完成裁剪 + token 估算
+    - 避免对大消息列表的重复遍历
+    - 返回完整的统计信息
     
-    # 如果仍然超限，进一步裁剪中间部分
-    if len(result) > strategy.max_history_messages:
-        excess = len(result) - strategy.max_history_messages
-        # 从 important_middle 中移除最旧的
-        keep_middle = len(important_middle) - excess
-        if keep_middle > 0:
-            important_middle = important_middle[-keep_middle:]
-        else:
-            important_middle = []
-        result = first_part + important_middle + last_part
+    Args:
+        messages: 完整消息历史
+        strategy: 上下文策略
+        system_prompt: 系统提示词（用于 token 估算）
+        
+    Returns:
+        (trimmed_messages, stats) - 裁剪后的消息列表和统计信息
+    """
+    # 计算 token 预算
+    token_budget = int(strategy.token_budget * strategy.trim_threshold)
     
-    return result
+    # 调用新的 token 驱动裁剪函数（已包含统计信息）
+    return trim_by_token_budget(
+        messages=messages,
+        token_budget=token_budget,
+        preserve_first_messages=strategy.preserve_first_messages,
+        preserve_last_messages=strategy.preserve_last_messages,
+        preserve_tool_results=strategy.preserve_tool_results,
+        system_prompt=system_prompt
+    )
 
 
 def estimate_tokens(messages: List[Dict[str, Any]], system_prompt: str = "") -> int:
     """
-    估算消息列表的 token 数
+    计算消息列表的 token 数
     
-    简化估算：1 个中文字符 ≈ 1.5 tokens，1 个英文单词 ≈ 1.3 tokens
-    这是一个粗略估算，实际 token 数可能有 ±20% 误差
+    使用 tiktoken（cl100k_base 编码）进行精确计算。
+    如果 tiktoken 不可用，则使用字符估算（1 字符 ≈ 0.5 tokens）。
     
     Args:
         messages: 消息列表
         system_prompt: 系统提示词
         
     Returns:
-        估算的 token 数
+        token 数量
     """
-    total_chars = len(system_prompt)
+    tokenizer = _get_tokenizer()
+    
+    def _extract_text(content: Any) -> str:
+        """递归提取所有文本内容"""
+        if isinstance(content, str):
+            return content
+        elif isinstance(content, list):
+            texts = []
+            for item in content:
+                texts.append(_extract_text(item))
+            return " ".join(texts)
+        elif isinstance(content, dict):
+            block_type = content.get("type", "")
+            if block_type == "text":
+                return content.get("text", "")
+            elif block_type == "tool_result":
+                result_content = content.get("content", "")
+                return _extract_text(result_content)
+            elif block_type == "tool_use":
+                # 工具名称 + 参数
+                tool_name = content.get("name", "")
+                tool_input = content.get("input", {})
+                return f"{tool_name}: {str(tool_input)}"
+            elif block_type == "thinking":
+                return content.get("thinking", "")
+            else:
+                # 其他类型，尝试提取常见字段
+                return str(content.get("text", "") or content.get("content", ""))
+        else:
+            return str(content)
+    
+    # 收集所有文本
+    all_text = system_prompt or ""
     
     for msg in messages:
+        role = msg.get("role", "")
         content = msg.get("content", "")
-        if isinstance(content, str):
-            total_chars += len(content)
-        elif isinstance(content, list):
-            for block in content:
-                if isinstance(block, dict):
-                    if block.get("type") == "text":
-                        total_chars += len(block.get("text", ""))
-                    elif block.get("type") == "tool_result":
-                        total_chars += len(str(block.get("content", "")))
+        msg_text = f"{role}: {_extract_text(content)}"
+        all_text += "\n" + msg_text
     
-    # 粗略估算：平均 1 字符 ≈ 0.5 tokens（中英文混合）
-    return int(total_chars * 0.5)
+    # 使用 tiktoken 精确计算
+    if tokenizer:
+        try:
+            tokens = len(tokenizer.encode(all_text))
+            return tokens
+        except Exception as e:
+            logger.warning(f"tiktoken 编码失败: {e}，使用字符估算")
+    
+    # Fallback：字符估算（1 token ≈ 2 字符，对中英文混合较准确）
+    return len(all_text) // 2
 
 
 def should_warn_backend(
@@ -289,11 +567,14 @@ __all__ = [
     "QoSLevel",
     "QOS_TOKEN_BUDGETS",
     "ContextStrategy",
+    "TrimStats",
     "get_context_strategy",
     "get_memory_guidance_prompt",
     "get_context_awareness_prompt",  # 别名
     "get_compaction_threshold",      # 别名
-    "trim_history_messages",
+    "trim_by_token_budget",          # 🆕 纯 token 驱动裁剪（推荐使用）
+    "trim_history_messages",         # 向后兼容
+    "trim_history_messages_with_stats",  # 向后兼容
     "estimate_tokens",
     "should_warn_backend",
 ]

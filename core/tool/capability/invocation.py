@@ -22,6 +22,9 @@ from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 from enum import Enum
 
+# 🆕 从统一配置读取工具分类
+from core.tool.registry_config import get_frequent_tools
+
 
 class InvocationType(Enum):
     """调用方式类型"""
@@ -65,28 +68,13 @@ class InvocationSelector:
     
     根据任务类型、工具特性、参数大小等因素，
     选择最合适的调用方式。
-    
-    🆕 V4.7 更新：
-    - 增加 E2B Sandbox 工具识别
-    - E2B 工具使用 DIRECT 调用，避免被 CODE_EXECUTION 覆盖
     """
     
     # Claude Server 内置工具（无需客户端实现）
+    # 🆕 仅保留 code_execution 用于 Skills 功能
+    # web_search/web_fetch/memory 已移除，改用客户端工具
     SERVER_TOOLS = {
-        "web_search", "web_search_20250305",
-        "web_fetch",
-        "code_execution",
-        "memory"
-    }
-    
-    # E2B Sandbox 工具（需要网络/包/持久化的场景）
-    # 这些工具必须走 DIRECT 调用，不能被 CODE_EXECUTION 替代
-    E2B_SANDBOX_TOOLS = {
-        "sandbox_write_file",
-        "sandbox_run_command",
-        "sandbox_create_project",
-        "sandbox_run_project",
-        "e2b_python_sandbox",  # 旧版兼容
+        "code_execution"
     }
     
     # 大参数阈值 (10KB)
@@ -176,20 +164,6 @@ class InvocationSelector:
         # 如果 Plan 匹配到 Skill，使用 Skill 路径，跳过 InvocationSelector
         if plan_result and plan_result.get("recommended_skill"):
             return None  # 由 Skill 机制处理（container.skills）
-        
-        # ============ 🆕 V4.7: E2B Sandbox 工具优先判断 ============
-        # E2B 工具需要完整网络/包/持久化能力，必须走 DIRECT 调用
-        # 不能被 CODE_EXECUTION 替代（Anthropic code_execution 无网络/包受限）
-        e2b_tools_in_selection = [t for t in selected_tools if t in self.E2B_SANDBOX_TOOLS]
-        if e2b_tools_in_selection:
-            return InvocationStrategy(
-                type=InvocationType.DIRECT,
-                reason=f"E2B Sandbox 工具 ({', '.join(e2b_tools_in_selection)}) 需要网络/包/持久化能力，使用 DIRECT 调用",
-                config={
-                    "environment": "e2b",
-                    "e2b_tools": e2b_tools_in_selection
-                }
-            )
         
         # ============ 规则1: Tool Search ============
         # 如果工具数量超过阈值，先使用 Tool Search 发现工具
@@ -334,7 +308,8 @@ class InvocationSelector:
         3. 添加 tool_search_tool
         """
         # 常用工具（不延迟加载）
-        frequent_tools = {"bash", "web_search", "plan_todo", "str_replace_based_edit_tool"}
+        # 🆕 从 config/tool_registry.yaml 统一配置读取
+        frequent_tools = set(get_frequent_tools())
         
         configured_tools = []
         

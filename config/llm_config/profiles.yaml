@@ -7,52 +7,14 @@
 #
 # ============================================================
 
-# ============================================================
-# 🆕 V7.10 健康探测配置
-# ============================================================
-#
-# 控制 LLM 健康探测行为，优化用户体验
-#
-health_probe:
-  # 请求链路探针（短期优化：默认禁用，避免阻塞用户请求）
-  request_probe:
-    enabled: false         # 生产环境推荐 false，调试时可设为 true
-    timeout_seconds: 5.0   # 探针超时时间（秒），避免长时间阻塞
-    max_retries: 1         # 最大重试次数，快速失败
-  
-  # 后台健康探测（长期优化：与用户请求解耦）
-  background_probe:
-    enabled: true          # 启用后台健康探测
-    interval_seconds: 120   # 探测间隔（秒）
-    timeout_seconds: 10    # 单次探测超时（秒）
-    # 要探测的 Profile 列表
-    profiles:
-      - main_agent
-      - intent_analyzer
-      - lead_agent
-      - worker_agent
-      - critic_agent
-
-# ============================================================
-
-# Qwen 扩展参数默认值建议（未设置时不透传，避免影响提示词驱动）
-# - enable_search: false
-# - search_options: {"search_mode": "auto"}  # enable_search=true 时
-# - incremental_output: true  # stream=true 时推荐
-# - n: 1  # tools 时固定
-# - response_format: {"type": "text"}  # JSON 输出场景再设置
-# - logprobs/top_logprobs: false/0
-# - top_k/seed/stop: 默认不设
-# - vl_high_resolution_images/vl_enable_image_hw_output: false
-# - enable_code_interpreter: false（仅 qwen3-max-preview 思考模式）
-# 详细说明见 config/llm_config/qwen_recommended_configs.md
-
 profiles:
   # ==================== 主 Agent 对话 ====================
   main_agent:
     description: "主 Agent 对话处理，需要最强推理能力和大输出窗口"
-    provider: "claude"
-    model: "claude-sonnet-4-5-20250929"
+    provider: "claude"                       # 提供商
+    model: "claude-sonnet-4-5"
+    api_key_env: "ANTHROPIC_API_KEY"        # 主 API Key
+    base_url: "https://api.anthropic.com"   # Base URL（可选，默认官方地址）
     max_tokens: 64000
     temperature: 1.0
     enable_thinking: true
@@ -60,316 +22,213 @@ profiles:
     enable_caching: true  # 启用多层 Prompt Caching（节省 88% 成本）
     timeout: 120.0
     max_retries: 3
+    
+    # 🆕 V7.10 多模型容灾配置
     fallbacks:
-      # 同模型多服务商：同一 provider + model，不同 base_url/api_key_env
+      # Fallback 0: 同模型，不同 Provider (Vendor A)
       - provider: "claude"
-        model: "claude-sonnet-4-5-20250929"
+        model: "claude-sonnet-4-5"
         api_key_env: "CLAUDE_API_KEY_VENDOR_A"
         base_url: "https://api.anthropic.com"
-        max_tokens: 64000
-        temperature: 1.0
-        enable_thinking: true
-        thinking_budget: 10000
-        enable_caching: true
-        timeout: 120.0
-        max_retries: 3
+      
+      # Fallback 1: 同模型，不同 Provider (Vendor B)
       - provider: "claude"
-        model: "claude-sonnet-4-5-20250929"
+        model: "claude-sonnet-4-5"
         api_key_env: "CLAUDE_API_KEY_VENDOR_B"
-        base_url: "https://anthropic-proxy-b.example.com/v1"
-        max_tokens: 64000
-        temperature: 1.0
-        enable_thinking: true
-        thinking_budget: 10000
-        enable_caching: true
-        timeout: 120.0
-        max_retries: 3
-      # 跨厂商主备：不同 provider
-      # Qwen-Max: 最强国产模型，作为SimpleAgent备选（稳定工具调用、指令遵循）
-      # 注意：复杂推理和工具调用可能不如Claude，需要充分测试
+        base_url: "https://maas-openapi.wanjiedata.com"
+        
+       # Fallback 2: 跨厂商（千问兜底）
       - provider: "qwen"
-        model: "qwen-max"
-        api_key_env: "QWEN_API_KEY"
+        model: "qwen3-max"
+        api_key_env: "DASHSCOPE_API_KEY"
         base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-        temperature: 0.8  # 略低于Claude，在创造性和稳定性间平衡
-        top_p: 0.9
-        max_tokens: 32000  # Qwen-Max最大输出可能小于Claude，根据实际调整
-        result_format: "message"
-        # 工具调用优化（如果支持）
-        # tool_choice: "auto"
-        # parallel_tool_calls: true
-        repetition_penalty: 1.05  # 降低重复
-      - provider: "openai"
-        model: "deepseek-chat"
-        api_key_env: "DEEPSEEK_API_KEY"
-        base_url: "https://api.deepseek.com/v1"
+    # 路由策略
     policy:
-      max_failures: 2
-      cooldown_seconds: 120
+      max_failures: 2          # 失败 2 次后进入熔断
+      cooldown_seconds: 600    # 熔断冷却时间 10 分钟
 
   # ==================== 意图分析 ====================
   intent_analyzer:
     description: "分析用户意图，需要快速响应，使用轻量模型"
     provider: "claude"
-    model: "claude-haiku-4-5-20251001"
+    model: "claude-haiku-4-5"
+    api_key_env: "ANTHROPIC_API_KEY"
+    base_url: "https://api.anthropic.com"
     max_tokens: 2048
     temperature: 0
     enable_thinking: false
     enable_caching: true  # 启用 Prompt Caching（意图识别提示词 1h 缓存）
     timeout: 60.0
     max_retries: 2
+    
+    # 🆕 V7.10 多模型容灾配置
     fallbacks:
-      # 同模型多服务商：同一 provider + model，不同 base_url/api_key_env
+      # Fallback 0: 同模型，不同 Provider (Vendor A)
       - provider: "claude"
-        model: "claude-haiku-4-5-20251001"
+        model: "claude-haiku-4-5"
         api_key_env: "CLAUDE_API_KEY_VENDOR_A"
         base_url: "https://api.anthropic.com"
-        max_tokens: 2048
-        temperature: 0
-        enable_thinking: false
-        enable_caching: true
-        timeout: 60.0
-        max_retries: 2
+      
+      # Fallback 1: 同模型，不同 Provider (Vendor B)
       - provider: "claude"
-        model: "claude-haiku-4-5-20251001"
+        model: "claude-haiku-4-5"
         api_key_env: "CLAUDE_API_KEY_VENDOR_B"
-        base_url: "https://anthropic-proxy-b.example.com/v1"
-        max_tokens: 2048
-        temperature: 0
-        enable_thinking: false
-        enable_caching: true
-        timeout: 60.0
-        max_retries: 2
-      # 跨厂商主备：不同 provider
-      # Qwen-Plus: 高性价比，适合意图分析（低延迟、准确意图理解）
+        base_url: "https://api.anthropic.com"
+      
+      # Fallback 2: 跨厂商（千问兜底）
       - provider: "qwen"
         model: "qwen-plus"
-        api_key_env: "QWEN_API_KEY"
+        api_key_env: "DASHSCOPE_API_KEY"
         base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-        temperature: 0  # 确定性输出，保证意图识别准确性
-        top_p: 0.9
-        max_tokens: 2048
-        result_format: "message"
+    
     policy:
-      max_failures: 2
-      cooldown_seconds: 120
-
-  # ==================== 多智能体 Lead ====================
-  lead_agent:
-    description: "多智能体 LeadAgent 任务分解与汇总"
-    provider: "claude"
-    model: "claude-opus-4-5-20251101"
-    max_tokens: 16384
-    temperature: 0.3
-    enable_thinking: true
-    thinking_budget: 10000
-    enable_caching: false
-    timeout: 120.0
-    max_retries: 2
-    fallbacks:
-      # 同模型多服务商：同一 provider + model，不同 base_url/api_key_env
-      - provider: "claude"
-        model: "claude-opus-4-5-20251101"
-        api_key_env: "CLAUDE_API_KEY_VENDOR_A"
-        base_url: "https://api.anthropic.com"
-        max_tokens: 16384
-        temperature: 0.3
-        enable_thinking: true
-        thinking_budget: 10000
-        enable_caching: false
-        timeout: 120.0
-        max_retries: 2
-      - provider: "claude"
-        model: "claude-opus-4-5-20251101"
-        api_key_env: "CLAUDE_API_KEY_VENDOR_B"
-        base_url: "https://anthropic-proxy-b.example.com/v1"
-        max_tokens: 16384
-        temperature: 0.3
-        enable_thinking: true
-        thinking_budget: 10000
-        enable_caching: false
-        timeout: 120.0
-        max_retries: 2
-      # 跨厂商主备：不同 provider
-      # Qwen-Max: 最强国产模型，强推理能力、任务分解能力，良好长上下文支持
-      - provider: "qwen"
-        model: "qwen-max"
-        api_key_env: "QWEN_API_KEY"
-        base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-        temperature: 0.3  # 与主模型保持一致，保证任务分解的准确性
-        top_p: 0.9
-        max_tokens: 16384
-        result_format: "message"
-        # 注意：Qwen3系列支持enable_thinking，但当前使用qwen-max，暂不启用
-        # enable_thinking: true
-        # thinking_budget: 8000  # 略低于Claude，考虑性能差距
-      - provider: "openai"
-        model: "deepseek-reasoner"
-        api_key_env: "DEEPSEEK_API_KEY"
-        base_url: "https://api.deepseek.com/v1"
-    policy:
-      max_failures: 2
-      cooldown_seconds: 180
-
-  # ==================== 多智能体 Worker ====================
-  worker_agent:
-    description: "多智能体 Worker 执行任务"
-    provider: "claude"
-    model: "claude-sonnet-4-5-20250929"
-    max_tokens: 8192
-    temperature: 0.5
-    enable_thinking: true
-    thinking_budget: 5000
-    enable_caching: false
-    timeout: 90.0
-    max_retries: 2
-    fallbacks:
-      # 同模型多服务商：同一 provider + model，不同 base_url/api_key_env
-      - provider: "claude"
-        model: "claude-sonnet-4-5-20250929"
-        api_key_env: "CLAUDE_API_KEY_VENDOR_A"
-        base_url: "https://api.anthropic.com"
-        max_tokens: 8192
-        temperature: 0.5
-        enable_thinking: true
-        thinking_budget: 5000
-        enable_caching: false
-        timeout: 90.0
-        max_retries: 2
-      - provider: "claude"
-        model: "claude-sonnet-4-5-20250929"
-        api_key_env: "CLAUDE_API_KEY_VENDOR_B"
-        base_url: "https://anthropic-proxy-b.example.com/v1"
-        max_tokens: 8192
-        temperature: 0.5
-        enable_thinking: true
-        thinking_budget: 5000
-        enable_caching: false
-        timeout: 90.0
-        max_retries: 2
-      # 跨厂商主备：不同 provider
-      # Qwen-Max: 能力最接近Claude Sonnet，稳定执行、工具调用
-      # 注意：工具调用格式可能不同，需要适配
-      - provider: "qwen"
-        model: "qwen-max"
-        api_key_env: "QWEN_API_KEY"
-        base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-        temperature: 0.5  # 与主模型保持一致
-        top_p: 0.9
-        max_tokens: 8192
-        result_format: "message"
-        # 工具调用优化参数（如果支持）
-        # tool_choice: "auto"  # 自动选择工具
-        # parallel_tool_calls: true  # 并行工具调用提升效率
-        repetition_penalty: 1.05  # 降低重复，提升执行质量
-      - provider: "openai"
-        model: "deepseek-chat"
-        api_key_env: "DEEPSEEK_API_KEY"
-        base_url: "https://api.deepseek.com/v1"
-    policy:
-      max_failures: 2
-      cooldown_seconds: 120
-
-  # ==================== 多智能体 Critic ====================
-  critic_agent:
-    description: "多智能体 Critic 质量评估"
-    provider: "claude"
-    model: "claude-sonnet-4-5-20250929"
-    max_tokens: 4096
-    temperature: 0.3
-    enable_thinking: true
-    thinking_budget: 4000
-    enable_caching: false
-    timeout: 90.0
-    max_retries: 2
-    fallbacks:
-      # 同模型多服务商：同一 provider + model，不同 base_url/api_key_env
-      - provider: "claude"
-        model: "claude-sonnet-4-5-20250929"
-        api_key_env: "CLAUDE_API_KEY_VENDOR_A"
-        base_url: "https://api.anthropic.com"
-        max_tokens: 4096
-        temperature: 0.3
-        enable_thinking: true
-        thinking_budget: 4000
-        enable_caching: false
-        timeout: 90.0
-        max_retries: 2
-      - provider: "claude"
-        model: "claude-sonnet-4-5-20250929"
-        api_key_env: "CLAUDE_API_KEY_VENDOR_B"
-        base_url: "https://anthropic-proxy-b.example.com/v1"
-        max_tokens: 4096
-        temperature: 0.3
-        enable_thinking: true
-        thinking_budget: 4000
-        enable_caching: false
-        timeout: 90.0
-        max_retries: 2
-      # 跨厂商主备：不同 provider
-      # Qwen-Max: 强评审能力，低幻觉率（相比Claude可能略高，但已是最佳选择）
-      - provider: "qwen"
-        model: "qwen-max"
-        api_key_env: "QWEN_API_KEY"
-        base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-        temperature: 0.2  # 更低温度，降低幻觉，提升评审准确性
-        top_p: 0.9
-        max_tokens: 4096
-        result_format: "message"
-        repetition_penalty: 1.05  # 降低重复
-        presence_penalty: 0.3  # 轻微降低内容重复度
-    policy:
-      max_failures: 2
-      cooldown_seconds: 120
+      max_failures: 3          # 轻量模型更稳定，提高阈值
+      cooldown_seconds: 300    # 冷却时间 5 分钟
 
   # ==================== 语义推理 ====================
   semantic_inference:
     description: "工具调用时机判断，需要确定性输出"
-    model: "claude-haiku-4-5-20251001"
+    model: "claude-haiku-4-5"
     max_tokens: 500
     temperature: 0
     enable_thinking: false
     enable_caching: false
     timeout: 30.0
     max_retries: 2
+    
+    # 🆕 V7.10: 多模型容灾配置
+    fallbacks:
+      # Fallback 0: 同模型，不同 Provider (Vendor A)
+      - provider: "claude"
+        model: "claude-haiku-4-5"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_A"
+        base_url: "https://api.anthropic.com"
+      
+      # Fallback 1: 同模型，不同 Provider (Vendor B)
+      - provider: "claude"
+        model: "claude-haiku-4-5"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_B"
+        base_url: "https://api.anthropic.com"
+      
+      # Fallback 2: 跨厂商（千问兜底）
+      - provider: "qwen"
+        model: "qwen-plus"
+        api_key_env: "DASHSCOPE_API_KEY"
+        base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    
+    policy:
+      max_failures: 2
+      cooldown_seconds: 600
 
   # ==================== 提示词分析 ====================
   llm_analyzer:
     description: "分析运营写的原始提示词，生成结构化 Schema（支持超长 prompt）"
-    model: "claude-sonnet-4-5-20250929"
+    model: "claude-sonnet-4-5"
     max_tokens: 64000
     temperature: 0
     enable_thinking: false
     enable_caching: false
     timeout: 600.0  # 10 分钟，支持超长 prompt 分析
     max_retries: 3
+    
+    # 🆕 V7.10: 多模型容灾配置
+    fallbacks:
+      # Fallback 0: 同模型，不同 Provider (Vendor A)
+      - provider: "claude"
+        model: "claude-sonnet-4-5"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_A"
+        base_url: "https://api.anthropic.com"
+      
+      # Fallback 1: 同模型，不同 Provider (Vendor B)
+      - provider: "claude"
+        model: "claude-sonnet-4-5"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_B"
+        base_url: "https://api.anthropic.com"
+      
+      # Fallback 2: 跨厂商（千问兜底）
+      - provider: "qwen"
+        model: "qwen3-max"
+        api_key_env: "DASHSCOPE_API_KEY"
+        base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    
+    policy:
+      max_failures: 2
+      cooldown_seconds: 600
 
   # ==================== Schema 生成 ====================
   schema_generator:
     description: "根据 Prompt 动态生成 Agent Schema"
-    model: "claude-sonnet-4-5-20250929"
+    model: "claude-sonnet-4-5"
     max_tokens: 4096
     temperature: 0
     enable_thinking: false
     enable_caching: false
     timeout: 90.0
     max_retries: 2
+    
+    # 🆕 V7.10: 多模型容灾配置
+    fallbacks:
+      # Fallback 0: 同模型，不同 Provider (Vendor A)
+      - provider: "claude"
+        model: "claude-sonnet-4-5"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_A"
+        base_url: "https://api.anthropic.com"
+      
+      # Fallback 1: 同模型，不同 Provider (Vendor B)
+      - provider: "claude"
+        model: "claude-sonnet-4-5"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_B"
+        base_url: "https://api.anthropic.com"
+      
+      # Fallback 2: 跨厂商（千问兜底）
+      - provider: "qwen"
+        model: "qwen3-max"
+        api_key_env: "DASHSCOPE_API_KEY"
+        base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    
+    policy:
+      max_failures: 2
+      cooldown_seconds: 600
 
   # ==================== 提示词智能合并 ====================
   prompt_merger:
     description: "智能合并框架规则与运营 prompt（支持超长 prompt）"
-    model: "claude-sonnet-4-5-20250929"
+    model: "claude-sonnet-4-5"
     max_tokens: 64000
     temperature: 0
     enable_thinking: false
     enable_caching: false
     timeout: 600.0  # 10 分钟，支持超长 prompt 合并
     max_retries: 3
+    
+    # 🆕 V7.10: 多模型容灾配置
+    fallbacks:
+      # Fallback 0: 同模型，不同 Provider (Vendor A)
+      - provider: "claude"
+        model: "claude-sonnet-4-5"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_A"
+        base_url: "https://api.anthropic.com"
+      
+      # Fallback 1: 同模型，不同 Provider (Vendor B)
+      - provider: "claude"
+        model: "claude-sonnet-4-5"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_B"
+        base_url: "https://api.anthropic.com"
+      
+      # Fallback 2: 跨厂商（千问兜底）
+      - provider: "qwen"
+        model: "qwen3-max"
+        api_key_env: "DASHSCOPE_API_KEY"
+        base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    
+    policy:
+      max_failures: 2
+      cooldown_seconds: 600
 
   # ==================== 🆕 V5.5 场景化提示词分解 ====================
   prompt_decomposer:
     description: "将运营 prompt 分解为场景化提示词（意图/简单/中等/复杂）"
-    model: "claude-sonnet-4-5-20250929"
+    model: "claude-sonnet-4-5"
     max_tokens: 60000  # Claude Sonnet 4.5 max output = 64000
     temperature: 0
     enable_thinking: false
@@ -380,7 +239,7 @@ profiles:
   # ==================== 工具能力推断 ====================
   tool_capability_inference:
     description: "推断工具的业务能力分类，用于智能工具选择"
-    model: "claude-haiku-4-5-20251001"
+    model: "claude-haiku-4-5"
     max_tokens: 100
     temperature: 0.3
     enable_thinking: false
@@ -391,18 +250,80 @@ profiles:
   # ==================== 后台任务 ====================
   background_task:
     description: "后台任务（如对话标题生成），使用轻量模型"
-    model: "claude-haiku-4-5-20251001"
+    model: "claude-haiku-4-5"
     max_tokens: 100
     temperature: 0.7
     enable_thinking: false
     enable_caching: false
     timeout: 30.0
     max_retries: 1
+    
+    # 🆕 V7.10: 多模型容灾配置
+    fallbacks:
+      # Fallback 0: 同模型，不同 Provider (Vendor A)
+      - provider: "claude"
+        model: "claude-haiku-4-5"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_A"
+        base_url: "https://api.anthropic.com"
+      
+      # Fallback 1: 同模型，不同 Provider (Vendor B)
+      - provider: "claude"
+        model: "claude-haiku-4-5"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_B"
+        base_url: "https://api.anthropic.com"
+      
+      # Fallback 2: 跨厂商（千问兜底）
+      - provider: "qwen"
+        model: "qwen-plus"
+        api_key_env: "DASHSCOPE_API_KEY"
+        base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    
+    policy:
+      max_failures: 2          # 失败 2 次后熔断
+      cooldown_seconds: 600    # 熔断冷却时间 10 分钟
+
+  # ==================== 计划生成 ====================
+  plan_generator:
+    description: "plan_todo 工具内部生成计划，使用轻量模型快速生成"
+    provider: "claude"
+    model: "claude-3-5-haiku-latest"
+    api_key_env: "ANTHROPIC_API_KEY"
+    base_url: "https://api.anthropic.com"
+    max_tokens: 4096
+    temperature: 0
+    enable_thinking: false
+    enable_caching: false
+    timeout: 60.0
+    max_retries: 2
+    
+    # 🆕 V7.10: 多模型容灾配置
+    fallbacks:
+      # Fallback 0: 同模型，不同 Provider (Vendor A)
+      - provider: "claude"
+        model: "claude-3-5-haiku-latest"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_A"
+        base_url: "https://api.anthropic.com"
+      
+      # Fallback 1: 同模型，不同 Provider (Vendor B)
+      - provider: "claude"
+        model: "claude-3-5-haiku-latest"
+        api_key_env: "CLAUDE_API_KEY_VENDOR_B"
+        base_url: "https://api.anthropic.com"
+      
+      # Fallback 2: 跨厂商（千问兜底）
+      - provider: "qwen"
+        model: "qwen-plus"
+        api_key_env: "DASHSCOPE_API_KEY"
+        base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    
+    policy:
+      max_failures: 2          # 失败 2 次后熔断
+      cooldown_seconds: 600    # 熔断冷却时间 10 分钟
 
   # ==================== Dazee 碎片记忆提取 ====================
   fragment_extractor:
     description: "从对话中提取隐性信息（任务、情绪、待办等），使用轻量模型快速推理"
-    model: "claude-haiku-4-5-20251001"
+    model: "claude-haiku-4-5"
     max_tokens: 1024
     temperature: 0
     enable_thinking: false
@@ -413,7 +334,7 @@ profiles:
   # ==================== Dazee 行为分析 ====================
   behavior_analyzer:
     description: "分析用户工作规律和 5W1H 行为模式，需要深度推理"
-    model: "claude-haiku-4-5-20251001"
+    model: "claude-haiku-4-5"
     max_tokens: 2048
     temperature: 0.3
     enable_thinking: false
@@ -421,58 +342,79 @@ profiles:
     timeout: 60.0
     max_retries: 2
 
-  # ==================== 记忆更新阶段 ====================
-  memory_update:
-    description: "记忆更新阶段（过滤/冲突/更新决策），使用语义理解"
-    model: "claude-haiku-4-5-20251001"
-    max_tokens: 1024
-    temperature: 0
-    enable_thinking: false
-    enable_caching: false
-    timeout: 30.0
-    max_retries: 2
-
   # ==================== 计划管理 ====================
   plan_manager:
-    description: "智能任务规划，快速生成计划框架（深度推理留给主 Agent）"
+    description: "智能任务规划和管理，需要深度推理能力"
     provider: "claude"
-    model: "claude-sonnet-4-5-20250929"
-    max_tokens: 4096
-    temperature: 0.7
-    enable_thinking: false  # 🆕 V9.3: 禁用 thinking，降低 plan_todo 延时
-    thinking_budget: 0
+    model: "claude-sonnet-4-5"
+    api_key_env: "ANTHROPIC_API_KEY"
+    base_url: "https://api.anthropic.com"
+    max_tokens: 65536
+    temperature: 1.0
+    enable_thinking: true
+    thinking_budget: 5000
     enable_caching: false
-    timeout: 30.0  # 🆕 缩短超时（无 thinking 后响应更快）
+    timeout: 120.0
     max_retries: 2
+    
+    # 🆕 V7.10 多模型容灾配置
     fallbacks:
-      # 同模型多服务商：同一 provider + model，不同 base_url/api_key_env
+      # Fallback 0: 同模型，不同 Provider (Vendor A)
       - provider: "claude"
-        model: "claude-sonnet-4-5-20250929"
+        model: "claude-sonnet-4-5"
         api_key_env: "CLAUDE_API_KEY_VENDOR_A"
         base_url: "https://api.anthropic.com"
-        max_tokens: 4096
-        temperature: 0.7
-        enable_thinking: false
-        thinking_budget: 0
-        enable_caching: false
-        timeout: 30.0
-        max_retries: 2
+      
+      # Fallback 1: 同模型，不同 Provider (Vendor B)
       - provider: "claude"
-        model: "claude-sonnet-4-5-20250929"
+        model: "claude-sonnet-4-5"
         api_key_env: "CLAUDE_API_KEY_VENDOR_B"
-        base_url: "https://anthropic-proxy-b.example.com/v1"
-        max_tokens: 4096
-        temperature: 0.7
-        enable_thinking: false
-        thinking_budget: 0
-        enable_caching: false
-        timeout: 30.0
-        max_retries: 2
-      # 跨厂商主备：不同 provider
+        base_url: "https://api.anthropic.com"
+      
+      # Fallback 2: 跨厂商（千问兜底）
       - provider: "qwen"
-        model: "qwen-max"
-        api_key_env: "QWEN_API_KEY"
+        model: "qwen3-max"
+        api_key_env: "DASHSCOPE_API_KEY"
         base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    
+    policy:
+      max_failures: 2          # 失败 2 次后进入熔断
+      cooldown_seconds: 600    # 熔断冷却时间 10 分钟
+
+# ============================================================
+# 多模型容灾配置（🆕 V7.10+）
+# ============================================================
+#
+# fallbacks: 备选模型列表（按优先级排序）
+#   示例：主模型故障时自动切换到备选模型
+#   - provider: "claude"
+#     model: "claude-sonnet-4-5-20250929"
+#     api_key_env: "CLAUDE_API_KEY_VENDOR_A"
+#
+# policy: 路由策略配置
+#   - max_failures: 最大失败次数（超过进入冷却）
+#   - cooldown_seconds: 冷却时间（默认 600 秒）
+#
+# health_probe: 健康探测配置
+#   - request_probe: 请求级探测（条件探测，后台不健康时执行）
+#   - background_probe: 后台异步探测（与用户请求解耦）
+#
+
+# ==================== 健康探测全局配置 ====================
+health_probe:
+  # 条件探测（V7.11：后台健康则跳过，不健康则确认）
+  request_probe:
+    timeout_seconds: 5.0
+    max_retries: 1
+  
+  # 后台健康探测（定期探测所有模型）
+  background_probe:
+    enabled: true
+    interval_seconds: 120  # 2 分钟探测一次
+    timeout_seconds: 10
+    profiles:
+      - main_agent
+      - intent_analyzer
 
 # ============================================================
 # 配置说明
@@ -480,8 +422,8 @@ profiles:
 #
 # 参数说明：
 # - model: 模型名称
-#   - claude-sonnet-4-5-20250929: 最强推理能力，适合复杂任务
-#   - claude-haiku-4-5-20251001: 轻量快速，适合简单任务
+#   - claude-sonnet-4-5: 最强推理能力，适合复杂任务
+#   - claude-haiku-4-5: 轻量快速，适合简单任务
 #
 # - max_tokens: 最大输出 token 数
 #   - 根据任务复杂度调整：简单任务 100-500，复杂任务 2048-64000
@@ -508,4 +450,114 @@ profiles:
 # - max_retries: 最大重试次数
 #   - 推荐值：1-3
 #
+# - api_key_env: API Key 环境变量名称
+#   - 从环境变量读取 API Key（推荐）
+#
+# - base_url: API Base URL（可选）
+#   - 默认：官方 API 地址
+#   - 自定义：代理商 API 地址
+#
+# - provider: 提供商（🆕 V7.10）
+#   - claude: Claude AI
+#   - openai: OpenAI（待实现）
+#   - qwen: 通义千问（待实现）
+#
+# - fallbacks: 备选模型列表（🆕 V7.10）
+#   - 主模型故障时自动切换到备选模型
+#   - 优先级：fallbacks[0] > fallbacks[1] > ...
+#
+# - policy: 路由策略（🆕 V7.10）
+#   - max_failures: 熔断阈值（默认 2）
+#   - cooldown_seconds: 冷却时间（默认 600s）
+#
 # ============================================================
+
+# ==================== 千问模型配置 ====================
+
+qwen_max:
+  description: "千问旗舰模型，对标 claude-sonnet-4-5"
+  provider: "qwen"
+  model: "qwen3-max"
+  api_key_env: "DASHSCOPE_API_KEY"
+  region: "cn-beijing"  # cn-beijing, singapore, us-virginia, finance
+  # base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"  # 自定义端点（可选，优先级高于 region）
+  max_tokens: 65536
+  temperature: 0.7
+  enable_thinking: true     # 深度思考模式
+  thinking_budget: 5000     # 思考长度限制
+  enable_caching: false     # 千问暂不支持自动缓存
+  timeout: 120.0
+  max_retries: 3
+  
+  # 🆕 多模型容灾配置（千问 → Claude）
+  fallbacks:
+    # Fallback 0: 同模型，不同地域
+    - provider: "qwen"
+      model: "qwen3-max"
+      api_key_env: "DASHSCOPE_API_KEY"
+      region: "singapore"
+    
+    # Fallback 1: 降级到 Claude Sonnet
+    - provider: "claude"
+      model: "claude-sonnet-4-5"
+      api_key_env: "ANTHROPIC_API_KEY"
+  
+  policy:
+    max_failures: 2
+    cooldown_seconds: 600
+
+qwen_plus:
+  description: "千问快速模型，对标 claude-haiku-4-5"
+  provider: "qwen"
+  model: "qwen-plus"
+  api_key_env: "DASHSCOPE_API_KEY"
+  region: "cn-beijing"
+  max_tokens: 4096
+  temperature: 0.5
+  enable_thinking: true
+  thinking_budget: 3000
+  enable_caching: false
+  timeout: 60.0
+  max_retries: 3
+  
+  # 🆕 多模型容灾配置（千问 → Claude）
+  fallbacks:
+    # Fallback 0: 同模型，不同地域
+    - provider: "qwen"
+      model: "qwen-plus"
+      api_key_env: "DASHSCOPE_API_KEY"
+      region: "singapore"
+    
+    # Fallback 1: 降级到 Claude Haiku
+    - provider: "claude"
+      model: "claude-haiku-4-5"
+      api_key_env: "ANTHROPIC_API_KEY"
+  
+  policy:
+    max_failures: 2
+    cooldown_seconds: 600
+
+# ==================== 千问视觉模型配置示例 ====================
+
+qwen_vision:
+  description: "千问视觉模型（用于图像理解）"
+  provider: "qwen"
+  model: "qwen-vl-max"
+  api_key_env: "DASHSCOPE_API_KEY"
+  region: "cn-beijing"
+  max_tokens: 65536
+  temperature: 0.7
+  enable_thinking: false
+  vl_high_resolution_images: true  # 高分辨率图像
+  enable_caching: false
+  timeout: 120.0
+  max_retries: 3
+  
+  fallbacks:
+    - provider: "claude"
+      model: "claude-sonnet-4-5"
+      api_key_env: "ANTHROPIC_API_KEY"
+  
+  policy:
+    max_failures: 2
+    cooldown_seconds: 600

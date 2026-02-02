@@ -17,14 +17,14 @@
     )
 """
 from typing import List, Dict, Any, Optional
-import logging
 
 from core.context.retriever import ContextRetriever
 from core.context.fusion import FusionEngine
 from core.context.injector import ContextInjector
 from core.context.provider import ContextType
+from logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ContextManager:
@@ -232,7 +232,7 @@ class ContextManager:
         )
         return health_status
     
-    def set_fusion_weights(self, weights: Dict[ContextType, float]):
+    def set_fusion_weights(self, weights: Dict[ContextType, float]) -> None:
         """
         设置融合引擎的数据源权重
         

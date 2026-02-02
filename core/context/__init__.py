@@ -33,12 +33,21 @@ from .manager import ContextManager, get_context_manager
 from .retriever import ContextRetriever
 from .fusion import FusionEngine
 from .injector import ContextInjector
+from .conversation import Context, create_context
+from .runtime import RuntimeContext, create_runtime_context
 
 # 会话上下文管理
 from .conversation import Context, create_context
 
 # 运行时上下文
 from .runtime import RuntimeContext, create_runtime_context
+
+# 元数据获取器
+from .metadata_provider import (
+    ConversationMetadataProvider,
+    load_plan_for_context,
+    load_context_metadata,
+)
 
 __all__ = [
     # 主入口
@@ -54,11 +63,16 @@ __all__ = [
     "FusionEngine",
     "ContextInjector",
     
-    # 会话上下文
+    # 对话上下文
     "Context",
     "create_context",
     
     # 运行时上下文
     "RuntimeContext",
     "create_runtime_context",
+    
+    # 元数据获取器
+    "ConversationMetadataProvider",
+    "load_plan_for_context",
+    "load_context_metadata",
 ]

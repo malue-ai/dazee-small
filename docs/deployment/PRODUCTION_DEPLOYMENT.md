@@ -372,19 +372,9 @@ docker compose up -d
 
 ### 3.1 数据库选型
 
-#### SQLite (开发/小规模)
-```yaml
-# 适用场景: 
-- 开发环境
-- 单机部署
-- QPS < 100
+项目统一使用 **PostgreSQL** 作为数据库，支持开发和生产环境。
 
-# 配置:
-DATABASE_TYPE: sqlite
-DATABASE_PATH: ./workspace/database/zenflux.db
-```
-
-#### PostgreSQL (生产环境)
+#### PostgreSQL (推荐)
 ```yaml
 # 适用场景:
 - 生产环境
@@ -551,8 +541,9 @@ ANTHROPIC_API_KEY=sk-ant-xxxxx    # Claude API Key (必需)
 E2B_API_KEY=e2b_xxxxx              # E2B Sandbox (必需)
 
 # ===== 数据库配置 =====
-DATABASE_TYPE=sqlite               # 或 postgresql
-DATABASE_PATH=./workspace/database/zenflux.db
+# 开发环境：使用本地 PostgreSQL
+DATABASE_URL=postgresql+asyncpg://postgres:password@localhost:5432/zenflux
+# 生产环境：使用 AWS RDS（通过 SSM Parameter Store 管理）
 
 # ===== Redis 配置 =====
 REDIS_HOST=redis
@@ -2130,9 +2121,7 @@ cat logs/tokens/*/*.jsonl | jq '.tokens.total' | \
 
 | 变量名 | 必需 | 默认值 | 说明 |
 |--------|-----|-------|------|
-| `DATABASE_TYPE` | ❌ | `sqlite` | 数据库类型 (sqlite/postgresql) |
-| `DATABASE_URL` | ✅ (PG) | - | PostgreSQL 连接字符串 |
-| `DATABASE_PATH` | ✅ (SQLite) | `./workspace/database/zenflux.db` | SQLite 数据库路径 |
+| `DATABASE_URL` | ✅ | - | PostgreSQL 连接字符串（格式：`postgresql+asyncpg://user:pass@host:5432/db`）|
 | `DB_POOL_SIZE` | ❌ | `20` | 数据库连接池大小 |
 | `DB_MAX_OVERFLOW` | ❌ | `40` | 最大溢出连接数 |
 
@@ -2300,7 +2289,7 @@ cat logs/tokens/*/*.jsonl | jq '.tokens.total' | \
 | CloudWatch Logs | 5GB/月 | $3 |
 | CloudWatch Metrics | 标准指标 | $0 |
 | **合计（标准）** | | **~$71/月** |
-| **合计（优化）** | | **~$31/月**（使用 Spot + SQLite + 停用非工作时间） |
+| **合计（优化）** | | **~$31/月**（使用 Spot 实例 + 停用非工作时间） |
 
 #### Kubernetes 方案
 

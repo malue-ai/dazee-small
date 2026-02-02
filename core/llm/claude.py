@@ -30,10 +30,12 @@ from dataclasses import dataclass, field
 
 import anthropic
 import httpx
+import aiofiles
 
 from logger import get_logger
 from utils.message_utils import messages_to_dict_list
 from infra.resilience import with_retry  # 🆕 V7.3: 使用统一的重试机制
+from core.tool.registry_config import get_frequent_tools  # 🆕 从统一配置读取
 from .base import (
     BaseLLMService,
     LLMConfig,
@@ -42,6 +44,7 @@ from .base import (
     ToolType,
     LLMProvider
 )
+from .adaptor import ClaudeAdaptor
 
 
 # ============================================================
@@ -71,18 +74,6 @@ logger = get_logger("llm.claude")
 
 # 详细日志开关：设置 LLM_DEBUG_VERBOSE=1 可打印完整请求/响应
 LLM_DEBUG_VERBOSE = os.getenv("LLM_DEBUG_VERBOSE", "").lower() in ("1", "true", "yes")
-
-# Context Editing 触发阈值（默认比例）
-DEFAULT_CONTEXT_WINDOW_TOKENS = 200_000
-DEFAULT_CONTEXT_TRIGGER_RATIO = 0.7
-MODEL_CONTEXT_WINDOWS = {
-    "claude-opus-4-5": 200_000,
-    "claude-opus-4-1": 200_000,
-    "claude-opus-4": 200_000,
-    "claude-sonnet-4-5": 200_000,
-    "claude-sonnet-4": 200_000,
-    "claude-haiku-4-5": 200_000,
-}
 
 
 class ClaudeLLMService(BaseLLMService):
@@ -115,18 +106,19 @@ class ClaudeLLMService(BaseLLMService):
     """
     
     # Claude 原生工具的 API 格式映射
+    # 🆕 移除 web_search/web_fetch/memory，改用客户端工具
+    # 这样在切换模型时仍然可用
+    # 🆕 移除 bash/text_editor，统一使用自定义沙盒工具（sandbox_run_command, sandbox_write_file）
+    # 这样可以支持多模型（GPT-4, Qwen, DeepSeek 等）
     NATIVE_TOOLS = {
-        # Server-side Tools
-        "web_search": {"type": "web_search_20250305", "name": "web_search"},
-        "web_fetch": {"type": "web_fetch", "name": "web_fetch"},
+        # Server-side Tools（仅保留 code_execution 用于 Skills）
         "code_execution": {"type": "code_execution", "name": "code_execution"},
-        "memory": {"type": "memory_20250818", "name": "memory"},
         "tool_search_bm25": {"type": "tool_search_tool_bm25_20251119", "name": "tool_search_tool"},
         "tool_search_regex": {"type": "tool_search_tool_regex_20251119", "name": "tool_search_tool"},
         
-        # Client-side Tools
-        "bash": {"type": "bash_20250124", "name": "bash"},
-        "text_editor": {"type": "text_editor_20250728", "name": "str_replace_based_edit_tool"},
+        # Client-side Tools（已移除 bash/text_editor，改用自定义沙盒工具）
+        # "bash": {"type": "bash_20250124", "name": "bash"},
+        # "text_editor": {"type": "text_editor_20250728", "name": "str_replace_based_edit_tool"},
         "computer": {"type": "computer_20250124", "name": "computer", "display_width_px": 1024, "display_height_px": 768},
     }
     
@@ -138,6 +130,9 @@ class ClaudeLLMService(BaseLLMService):
             config: LLM 配置
         """
         self.config = config
+        
+        # 消息适配器（统一处理消息格式转换）
+        self._adaptor = ClaudeAdaptor()
         
         # 🆕 V5.0: 使用配置中的超时和重试设置
         timeout = getattr(config, 'timeout', 120.0)
@@ -151,20 +146,49 @@ class ClaudeLLMService(BaseLLMService):
         else:
             logger.warning("⚠️ Claude API Key 为空！")
         
+        # 🆕 支持自定义 API 端点（如万界方舟）
+        # 优先级：config.base_url > ANTHROPIC_BASE_URL 环境变量 > 默认官方端点
+        base_url = getattr(config, 'base_url', None) or os.getenv("ANTHROPIC_BASE_URL")
+        
+        # 🔧 万界方舟需要 Authorization: Bearer 认证，而不是 x-api-key
+        # 检测是否使用万界方舟端点
+        is_wanjie = base_url and "wanjiedata.com" in base_url
+        
+        if base_url:
+            logger.info(f"🌐 使用自定义 API 端点: {base_url}")
+            if is_wanjie:
+                logger.info("🔑 检测到万界方舟，使用 Bearer Token 认证")
+        
         # 异步客户端（增加 timeout 和重试配置）
         # 注意：对于流式响应，timeout 是首个响应的超时，不是整体超时
-        self.async_client = anthropic.AsyncAnthropic(
-            api_key=config.api_key,
-            timeout=timeout,
-            max_retries=max_retries
-        )
-        
-        # 同步客户端（用于 Skills/Files API）
-        self.sync_client = anthropic.Anthropic(
-            api_key=config.api_key,
-            timeout=timeout,
-            max_retries=max_retries
-        )
+        if is_wanjie:
+            # 万界方舟：使用 auth_token（Bearer 认证）
+            self.async_client = anthropic.AsyncAnthropic(
+                auth_token=config.api_key,
+                base_url=base_url,
+                timeout=timeout,
+                max_retries=max_retries
+            )
+            self.sync_client = anthropic.Anthropic(
+                auth_token=config.api_key,
+                base_url=base_url,
+                timeout=timeout,
+                max_retries=max_retries
+            )
+        else:
+            # 官方 API：使用 api_key（x-api-key 认证）
+            self.async_client = anthropic.AsyncAnthropic(
+                api_key=config.api_key,
+                base_url=base_url,
+                timeout=timeout,
+                max_retries=max_retries
+            )
+            self.sync_client = anthropic.Anthropic(
+                api_key=config.api_key,
+                base_url=base_url,
+                timeout=timeout,
+                max_retries=max_retries
+            )
         
         # Beta 功能配置
         self._betas: List[str] = []
@@ -175,21 +199,9 @@ class ClaudeLLMService(BaseLLMService):
         self._tool_search_type = "bm25"
         self._code_execution_mode = False
         
-        # Memory Tool 配置
-        self._memory_enabled = False
-        self._memory_base_path = "./memory_storage"
-        
         # Context Editing 配置
         self._context_editing_enabled = False
         self._context_editing_config: Dict[str, Any] = {}
-        self._context_editing_policy: Dict[str, Any] = {
-            "adaptive": True,
-            "adaptive_trigger_tokens": 0,
-            "early_trigger_tokens": 0,
-            "min_turns": 30,
-            "tool_result_count_threshold": 8,
-            "tool_result_tokens_threshold": 5000,
-        }
         
         # 工具注册表（用于自定义工具）
         self._tool_registry: Dict[str, Dict[str, Any]] = {}
@@ -208,330 +220,49 @@ class ClaudeLLMService(BaseLLMService):
     # Beta Headers 管理
     # ============================================================
     
-    def _add_beta(self, beta_header: str):
+    def _add_beta(self, beta_header: str) -> None:
         """添加 Beta Header"""
         if beta_header not in self._betas:
             self._betas.append(beta_header)
     
-    def _remove_beta(self, beta_header: str):
+    def _remove_beta(self, beta_header: str) -> None:
         """移除 Beta Header"""
         if beta_header in self._betas:
             self._betas.remove(beta_header)
-
-    def _get_model_context_window(self) -> int:
-        """
-        获取模型上下文窗口（用于自适应触发阈值）
-        
-        Returns:
-            上下文窗口 token 数
-        """
-        model_name = (self.config.model or "").lower()
-        for key, window in MODEL_CONTEXT_WINDOWS.items():
-            if key in model_name:
-                return window
-        return DEFAULT_CONTEXT_WINDOW_TOKENS
     
     # ============================================================
     # 功能开关
     # ============================================================
     
-    def enable_memory_tool(self, base_path: str = "./memory_storage"):
-        """
-        启用 Memory Tool
-        
-        Args:
-            base_path: 记忆文件存储路径
-        """
-        self._memory_enabled = True
-        self._memory_base_path = base_path
-        self._add_beta("context-management-2025-06-27")
-    
-    def disable_memory_tool(self):
-        """禁用 Memory Tool"""
-        self._memory_enabled = False
-        if not self._context_editing_enabled:
-            self._remove_beta("context-management-2025-06-27")
-    
     def enable_context_editing(
         self,
-        clear_tool_uses: bool = True,
-        clear_thinking: bool = False,
-        trigger_threshold: Optional[int] = None,  # input_tokens
-        keep_tool_uses: int = 10,
-        clear_at_least: Optional[int] = None,  # input_tokens，None 则自动计算
-        exclude_tools: Optional[List[str]] = None,
-        keep_all_thinking: bool = False  # 🆕 保留所有 thinking blocks（最大化缓存命中）
+        mode: str = "progressive",
+        clear_threshold: int = 150000,
+        retain_tool_uses: int = 10
     ):
         """
-        启用 Context Editing（服务端自动清理）
-        
-        根据 Claude Platform 官方文档：
-        https://platform.claude.com/docs/en/build-with-claude/context-editing
-        
-        **最佳实践**：
-        - 如果启用 Prompt Caching，`clear_at_least` 应该设置得更大（如 10000-15000），
-          以抵消缓存失效的成本
-        - 如果启用 Extended Thinking 和 Prompt Caching，建议设置 `keep_all_thinking=True`
-          以最大化缓存命中率
-        - 默认排除服务端工具（如 `web_search`），因为它们的结果通常很重要
-        - 自适应触发以**上下文长度**为主，当长度接近阈值时，
-          轮次/工具结果作为**提前触发**的辅助信号
+        启用 Context Editing
         
         Args:
-            clear_tool_uses: 是否清理工具结果（clear_tool_uses_20250919）
-            clear_thinking: 是否清理 thinking blocks（clear_thinking_20251015）
-            trigger_threshold: 触发清理的 token 阈值（input_tokens）
-                - None: 按模型上下文窗口比例自动计算（默认 70%）
-            keep_tool_uses: 保留最近 N 个工具调用
-            clear_at_least: 每次至少清理的 token 数（input_tokens）
-                - None: 根据 Prompt Caching 状态自动计算
-                - 启用缓存时：max(10000, trigger_threshold // 3)
-                - 未启用缓存时：max(3000, trigger_threshold // 6)
-            exclude_tools: 排除的工具列表（不清理这些工具的结果）
-                - None: 默认排除服务端工具（web_search, web_fetch）
-            keep_all_thinking: 是否保留所有 thinking blocks（最大化缓存命中率）
-                - True: keep: "all"（保留所有 thinking blocks）
-                - False: keep: {type: "thinking_turns", value: 1}（只保留最后一轮）
+            mode: 清理模式 ("progressive" | "aggressive")
+            clear_threshold: 触发清理的 token 阈值
+            retain_tool_uses: 保留最近 N 个工具调用
         """
         self._context_editing_enabled = True
-        
-        edits = []
-        
-        # 🆕 触发阈值自动计算（按上下文窗口比例）
-        if trigger_threshold is None:
-            context_window = self._get_model_context_window()
-            trigger_threshold = int(context_window * DEFAULT_CONTEXT_TRIGGER_RATIO)
-            logger.debug(
-                f"🔧 trigger_threshold 自动计算: {trigger_threshold} "
-                f"(context_window={context_window}, ratio={DEFAULT_CONTEXT_TRIGGER_RATIO})"
-            )
-
-        # 🆕 自适应触发策略（上下文长度为主，轮次/工具结果为辅）
-        adaptive_trigger_tokens = max(0, int(trigger_threshold))
-        early_trigger_tokens = int(adaptive_trigger_tokens * 0.6)
-        self._context_editing_policy = {
-            "adaptive": True,
-            "adaptive_trigger_tokens": adaptive_trigger_tokens,
-            "early_trigger_tokens": early_trigger_tokens,
-            "min_turns": 30,
-            "tool_result_count_threshold": 8,
-            "tool_result_tokens_threshold": 5000,
-        }
-        
-        logger.debug(
-            "🧭 Context Editing 自适应策略: "
-            f"adaptive=True, trigger_tokens={adaptive_trigger_tokens}, "
-            f"early_trigger_tokens={early_trigger_tokens}, "
-            "min_turns=30, tool_result_count>=8, tool_result_tokens>=5000"
-        )
-        
-        # 🆕 自动计算 clear_at_least（根据文档建议）
-        if clear_at_least is None:
-            if self.config.enable_caching:
-                # 启用缓存时，需要清理更多 tokens 以抵消缓存失效成本
-                # 文档建议：确保清理足够的 tokens 才值得
-                clear_at_least = max(10000, trigger_threshold // 3)
-                logger.debug(f"🔧 clear_at_least 自动计算（启用缓存）: {clear_at_least}")
-            else:
-                # 未启用缓存时，可以使用较小的值
-                clear_at_least = max(3000, trigger_threshold // 6)
-                logger.debug(f"🔧 clear_at_least 自动计算（未启用缓存）: {clear_at_least}")
-        
-        # 🆕 默认排除服务端工具（根据文档建议）
-        default_exclude = ["web_search", "web_fetch"]
-        if exclude_tools is None:
-            exclude_tools = default_exclude
-        else:
-            # 合并用户指定的排除工具
-            exclude_tools = list(set(exclude_tools + default_exclude))
-        
-        # Tool result clearing
-        if clear_tool_uses:
-            tool_edit: Dict[str, Any] = {
-                "type": "clear_tool_uses_20250919",
-                "trigger": {
-                    "type": "input_tokens",
-                    "value": trigger_threshold
-                },
-                "keep": {
-                    "type": "tool_uses",
-                    "value": keep_tool_uses
-                },
-                "clear_at_least": {
-                    "type": "input_tokens",
-                    "value": clear_at_least
-                }
-            }
-            if exclude_tools:
-                tool_edit["exclude_tools"] = exclude_tools
-            edits.append(tool_edit)
-            logger.debug(f"🔧 Tool result clearing: trigger={trigger_threshold}, keep={keep_tool_uses}, clear_at_least={clear_at_least}, exclude={exclude_tools}")
-        
-        # Thinking block clearing
-        if clear_thinking:
-            if keep_all_thinking:
-                # 🆕 最大化缓存命中：保留所有 thinking blocks
-                edits.append({
-                    "type": "clear_thinking_20251015",
-                    "keep": "all"
-                })
-                logger.debug("🔧 Thinking block clearing: keep=all (最大化缓存命中)")
-            else:
-                # 默认：只保留最后一轮的 thinking
-                edits.append({
-                    "type": "clear_thinking_20251015",
-                    "keep": {
-                        "type": "thinking_turns",
-                        "value": 1
-                    }
-                })
-                logger.debug("🔧 Thinking block clearing: keep=last_turn")
-        
         self._context_editing_config = {
-            "edits": edits
+            "mode": mode,
+            "clear_threshold": clear_threshold,
+            "retain_tool_uses": retain_tool_uses
         }
-        
         self._add_beta("context-management-2025-06-27")
-        logger.info(f"✅ Context Editing 已启用: {len(edits)} 个策略 (trigger={trigger_threshold}, clear_at_least={clear_at_least})")
     
-    def disable_context_editing(self):
+    def disable_context_editing(self) -> None:
         """禁用 Context Editing"""
         self._context_editing_enabled = False
         self._context_editing_config = {}
-        if not self._memory_enabled:
-            self._remove_beta("context-management-2025-06-27")
-
-    def _estimate_block_tokens(self, block: Any) -> int:
-        """
-        估算单个 content block 的 token 数
-        
-        Args:
-            block: content block
-            
-        Returns:
-            估算 token 数
-        """
-        if isinstance(block, dict):
-            block_type = block.get("type", "")
-            if block_type == "text":
-                return self.count_tokens(str(block.get("text", "")))
-            if block_type in ("thinking", "redacted_thinking"):
-                return self.count_tokens(str(block.get("thinking", "")))
-            if block_type in ("tool_use", "server_tool_use"):
-                return self.count_tokens(self._safe_json_dumps(block.get("input", {})))
-            if block_type == "tool_result" or str(block_type).endswith("_tool_result"):
-                return self.count_tokens(self._safe_json_dumps(block.get("content", "")))
-            
-            return self.count_tokens(self._safe_json_dumps(block))
-        
-        return self.count_tokens(str(block))
-
-    def _analyze_context_for_editing(self, messages: List[Dict[str, Any]]) -> Dict[str, int]:
-        """
-        分析上下文状态（用于自适应触发）
-        
-        Args:
-            messages: 格式化后的消息列表
-            
-        Returns:
-            上下文统计信息
-        """
-        total_tokens = 0
-        turns = 0
-        tool_result_count = 0
-        tool_result_tokens = 0
-        
-        for msg in messages:
-            if msg.get("role") == "user":
-                turns += 1
-            
-            content = msg.get("content", "")
-            if isinstance(content, list):
-                for block in content:
-                    tokens = self._estimate_block_tokens(block)
-                    total_tokens += tokens
-                    
-                    if isinstance(block, dict):
-                        block_type = block.get("type", "")
-                        if block_type == "tool_result" or str(block_type).endswith("_tool_result"):
-                            tool_result_count += 1
-                            tool_result_tokens += tokens
-            else:
-                total_tokens += self.count_tokens(str(content))
-        
-        return {
-            "turns": turns,
-            "estimated_tokens": total_tokens,
-            "tool_result_count": tool_result_count,
-            "tool_result_tokens": tool_result_tokens,
-        }
-
-    def _should_apply_context_editing(self, messages: List[Dict[str, Any]]) -> bool:
-        """
-        判断是否附加 context_management（自适应触发）
-        
-        Args:
-            messages: 格式化后的消息列表
-            
-        Returns:
-            是否需要附加 context_management
-        """
-        if not self._context_editing_enabled:
-            return False
-        
-        if not self._context_editing_config.get("edits"):
-            return False
-        
-        policy = self._context_editing_policy or {}
-        if not policy.get("adaptive", True):
-            return True
-        
-        stats = self._analyze_context_for_editing(messages)
-        trigger_tokens = policy.get("adaptive_trigger_tokens", 0)
-        early_trigger_tokens = policy.get("early_trigger_tokens", 0)
-        min_turns = policy.get("min_turns", 0)
-        tool_result_count_threshold = policy.get("tool_result_count_threshold", 0)
-        tool_result_tokens_threshold = policy.get("tool_result_tokens_threshold", 0)
-        
-        if trigger_tokens and stats["estimated_tokens"] >= trigger_tokens:
-            logger.debug(
-                f"🧠 Context Editing 触发: tokens={stats['estimated_tokens']}, "
-                f"threshold={trigger_tokens}"
-            )
-            return True
-
-        # 仅在上下文接近阈值时，允许辅助信号提前触发
-        if early_trigger_tokens and stats["estimated_tokens"] >= early_trigger_tokens:
-            if min_turns and stats["turns"] >= min_turns:
-                logger.debug(
-                    f"🧠 Context Editing 触发: turns={stats['turns']}, "
-                    f"threshold={min_turns} (early_trigger_tokens={early_trigger_tokens})"
-                )
-                return True
-            
-            if (
-                tool_result_count_threshold
-                and stats["tool_result_count"] >= tool_result_count_threshold
-            ):
-                logger.debug(
-                    f"🧠 Context Editing 触发: tool_results={stats['tool_result_count']}, "
-                    f"threshold={tool_result_count_threshold} (early_trigger_tokens={early_trigger_tokens})"
-                )
-                return True
-            
-            if (
-                tool_result_tokens_threshold
-                and stats["tool_result_tokens"] >= tool_result_tokens_threshold
-            ):
-                logger.debug(
-                    f"🧠 Context Editing 触发: tool_result_tokens={stats['tool_result_tokens']}, "
-                    f"threshold={tool_result_tokens_threshold} (early_trigger_tokens={early_trigger_tokens})"
-                )
-                return True
-        
-        return False
+        self._remove_beta("context-management-2025-06-27")
     
-    def enable_tool_search(self, search_type: str = "bm25"):
+    def enable_tool_search(self, search_type: str = "bm25") -> None:
         """
         启用 Tool Search 模式
         
@@ -542,25 +273,25 @@ class ClaudeLLMService(BaseLLMService):
         self._tool_search_type = search_type
         self._add_beta("advanced-tool-use-2025-11-20")
     
-    def disable_tool_search(self):
+    def disable_tool_search(self) -> None:
         """禁用 Tool Search 模式"""
         self._tool_search_mode = False
         self._remove_beta("advanced-tool-use-2025-11-20")
     
-    def enable_programmatic_tool_calling(self):
+    def enable_programmatic_tool_calling(self) -> None:
         """启用 Programmatic Tool Calling 模式"""
         self._programmatic_mode = True
         self._code_execution_mode = True
     
-    def disable_programmatic_tool_calling(self):
+    def disable_programmatic_tool_calling(self) -> None:
         """禁用 Programmatic Tool Calling 模式"""
         self._programmatic_mode = False
     
-    def enable_code_execution(self):
+    def enable_code_execution(self) -> None:
         """启用 Code Execution 模式"""
         self._code_execution_mode = True
     
-    def disable_code_execution(self):
+    def disable_code_execution(self) -> None:
         """禁用 Code Execution 模式"""
         self._code_execution_mode = False
     
@@ -756,7 +487,8 @@ class ClaudeLLMService(BaseLLMService):
             配置好的工具列表
         """
         if frequent_tools is None:
-            frequent_tools = ["bash", "web_search", "plan_todo"]
+            # 🆕 从 config/tool_registry.yaml 统一配置读取
+            frequent_tools = get_frequent_tools()
         
         configured = []
         
@@ -821,7 +553,7 @@ class ClaudeLLMService(BaseLLMService):
         
         return formatted
     
-    def _validate_tool_dict(self, tool_dict: Dict[str, Any], index: int):
+    def _validate_tool_dict(self, tool_dict: Dict[str, Any], index: int) -> None:
         """验证工具字典是否包含不可序列化的对象"""
         for key, value in tool_dict.items():
             if isinstance(value, ToolType):
@@ -863,6 +595,8 @@ class ClaudeLLMService(BaseLLMService):
         system: Optional[Union[str, List[Dict[str, Any]]]] = None,
         tools: Optional[List[Union[ToolType, str, Dict]]] = None,
         invocation_type: Optional[str] = None,
+        override_thinking: Optional[bool] = None,
+        is_probe: bool = False,
         **kwargs
     ) -> LLMResponse:
         """
@@ -880,6 +614,7 @@ class ClaudeLLMService(BaseLLMService):
                 - List[Dict]: 多层缓存（支持自定义 TTL，如 1h）
             tools: 工具列表
             invocation_type: 调用方式
+            is_probe: 是否为探测请求（探测失败不记录 ERROR）
             **kwargs: 其他参数（支持 max_tokens, temperature 覆盖）
             
         Returns:
@@ -898,7 +633,9 @@ class ClaudeLLMService(BaseLLMService):
             response = await llm.create_message_async(messages, system=system_blocks)
         """
         # 构建请求参数（支持 kwargs 覆盖）
-        formatted_messages = messages_to_dict_list(messages)
+        # 使用 adaptor 转换消息（自动处理 tool_result 分离等）
+        converted = self._adaptor.convert_messages_to_provider(messages)
+        formatted_messages = converted["messages"]
         request_params = {
             "model": self.config.model,
             "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
@@ -933,16 +670,17 @@ class ClaudeLLMService(BaseLLMService):
                 # 字符串格式 + 禁用缓存：直接使用
                 request_params["system"] = system
         
-        # Extended Thinking（支持覆盖 enable_thinking）
-        enable_thinking = kwargs.get("enable_thinking", self.config.enable_thinking)
-        if enable_thinking:
+        # Extended Thinking（支持动态覆盖）
+        # override_thinking 优先级高于配置：None=使用配置, True/False=强制开启/关闭
+        effective_thinking = override_thinking if override_thinking is not None else self.config.enable_thinking
+        if effective_thinking:
             request_params["thinking"] = {
                 "type": "enabled",
                 "budget_tokens": self.config.thinking_budget
             }
             request_params["temperature"] = 1.0  # Required for thinking
         else:
-            request_params["temperature"] = kwargs.get("temperature", self.config.temperature)
+            request_params["temperature"] = self.config.temperature
         
         # Tools
         all_tools = []
@@ -981,12 +719,50 @@ class ClaudeLLMService(BaseLLMService):
             # 调试日志
             logger.debug(f"Tools: {[t.get('name', 'unknown') for t in all_tools]}")
         
-        # Context Editing（自适应触发）
-        if self._should_apply_context_editing(formatted_messages):
+        # Context Editing
+        if self._context_editing_enabled:
             request_params["context_management"] = self._context_editing_config
         
         # 调试日志
         logger.debug(f"📤 LLM 请求: model={self.config.model}, messages={len(messages)}")
+        
+        # 🚨 调试日志：打印完整 messages（用于排查 403 错误）
+        logger.info("=" * 80)
+        logger.info("🔍 [DEBUG-ASYNC] 完整 request_params:")
+        logger.info(f"   model: {request_params.get('model')}")
+        logger.info(f"   max_tokens: {request_params.get('max_tokens')}")
+        if "system" in request_params:
+            system_val = request_params.get("system")
+            if isinstance(system_val, list):
+                logger.info(f"   system: (list, {len(system_val)} blocks)")
+            else:
+                logger.info(f"   system: {str(system_val)[:200]}...")
+        logger.info(f"   messages ({len(request_params.get('messages', []))}):")
+        for i, msg in enumerate(request_params.get('messages', [])):
+            logger.info(f"   ── Message [{i}] ──")
+            logger.info(f"      role: {msg.get('role')}")
+            content = msg.get('content')
+            if isinstance(content, list):
+                logger.info(f"      content: (list, {len(content)} blocks)")
+                for j, block in enumerate(content):
+                    if isinstance(block, dict):
+                        block_type = block.get('type', 'unknown')
+                        if block_type == 'text':
+                            text_preview = str(block.get('text', ''))[:300]
+                            logger.info(f"         [{j}] type=text, text={text_preview}...")
+                        elif block_type == 'tool_use':
+                            logger.info(f"         [{j}] type=tool_use, id={block.get('id')}, name={block.get('name')}")
+                        elif block_type == 'tool_result':
+                            logger.info(f"         [{j}] type=tool_result, tool_use_id={block.get('tool_use_id')}")
+                        else:
+                            logger.info(f"         [{j}] type={block_type}")
+                    else:
+                        logger.info(f"         [{j}] (non-dict): {str(block)[:100]}...")
+            elif isinstance(content, str):
+                logger.info(f"      content: {content[:300]}...")
+            else:
+                logger.info(f"      content: (type={type(content).__name__})")
+        logger.info("=" * 80)
         
         # API 调用
         try:
@@ -998,7 +774,9 @@ class ClaudeLLMService(BaseLLMService):
             else:
                 response = await self.async_client.messages.create(**request_params)
         except Exception as e:
-            logger.error(f"Claude API 调用失败: {e}")
+            # 探测请求失败时不记录 ERROR（在 router.probe 中已记录 INFO）
+            if not is_probe:
+                logger.error(f"Claude API 调用失败: {e}")
             raise
         
         # 调试日志
@@ -1014,6 +792,7 @@ class ClaudeLLMService(BaseLLMService):
         on_thinking: Optional[Callable[[str], None]] = None,
         on_content: Optional[Callable[[str], None]] = None,
         on_tool_call: Optional[Callable[[Dict], None]] = None,
+        override_thinking: Optional[bool] = None,
         **kwargs
     ) -> AsyncIterator[LLMResponse]:
         """
@@ -1028,13 +807,16 @@ class ClaudeLLMService(BaseLLMService):
             on_thinking: thinking 回调
             on_content: content 回调
             on_tool_call: tool_call 回调
+            override_thinking: 动态覆盖 thinking 配置（None 使用默认配置，True/False 强制开启/关闭）
             **kwargs: 其他参数（支持 max_tokens 覆盖）
             
         Yields:
             LLMResponse 片段
         """
         # 构建请求参数（支持 kwargs 覆盖）
-        formatted_messages = messages_to_dict_list(messages)
+        # 使用 adaptor 转换消息（自动处理 tool_result 分离等）
+        converted = self._adaptor.convert_messages_to_provider(messages)
+        formatted_messages = converted["messages"]
         request_params = {
             "model": self.config.model,
             "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
@@ -1068,16 +850,15 @@ class ClaudeLLMService(BaseLLMService):
                 # 字符串格式 + 禁用缓存：直接使用
                 request_params["system"] = system
         
-        # Extended Thinking（支持覆盖 enable_thinking）
-        enable_thinking = kwargs.get("enable_thinking", self.config.enable_thinking)
-        if enable_thinking:
+        # Extended Thinking（支持动态覆盖）
+        # override_thinking 优先级高于配置：None=使用配置, True/False=强制开启/关闭
+        effective_thinking = override_thinking if override_thinking is not None else self.config.enable_thinking
+        if effective_thinking:
             request_params["thinking"] = {
                 "type": "enabled",
                 "budget_tokens": self.config.thinking_budget
             }
             request_params["temperature"] = 1.0
-        else:
-            request_params["temperature"] = kwargs.get("temperature", self.config.temperature)
         
         # Tools
         all_tools = []
@@ -1107,10 +888,6 @@ class ClaudeLLMService(BaseLLMService):
                 all_tools[-1]["cache_control"] = {"type": "ephemeral", "ttl": "1h"}
             
             request_params["tools"] = all_tools
-
-        # Context Editing（流式模式，自适应触发）
-        if self._should_apply_context_editing(formatted_messages):
-            request_params["context_management"] = self._context_editing_config
         
         # 🆕 Skills Container（如果启用）
         # 根据 Claude Skills 官方标准：Skills 模式下 tools 只能是 code_execution
@@ -1128,6 +905,59 @@ class ClaudeLLMService(BaseLLMService):
         
         # 请求日志（INFO 级别）
         logger.info(f"📤 Claude 请求: model={self.config.model}, tools={len(all_tools)}, messages={len(formatted_messages)}")
+        
+        # 🚨 调试日志：打印完整 messages（用于排查 403 错误）
+        logger.info("=" * 80)
+        logger.info("🔍 [DEBUG] 完整 request_params:")
+        logger.info(f"   model: {request_params.get('model')}")
+        logger.info(f"   max_tokens: {request_params.get('max_tokens')}")
+        if "thinking" in request_params:
+            logger.info(f"   thinking: {request_params.get('thinking')}")
+        if "system" in request_params:
+            system_val = request_params.get("system")
+            if isinstance(system_val, list):
+                logger.info(f"   system: (list, {len(system_val)} blocks)")
+                for idx, block in enumerate(system_val):
+                    if isinstance(block, dict):
+                        text_preview = str(block.get('text', ''))[:200]
+                        logger.info(f"      [{idx}] type={block.get('type')}, text={text_preview}...")
+            else:
+                logger.info(f"   system: {str(system_val)[:200]}...")
+        logger.info(f"   messages ({len(request_params.get('messages', []))}):")
+        for i, msg in enumerate(request_params.get('messages', [])):
+            logger.info(f"   ── Message [{i}] ──")
+            logger.info(f"      role: {msg.get('role')}")
+            content = msg.get('content')
+            if isinstance(content, list):
+                logger.info(f"      content: (list, {len(content)} blocks)")
+                for j, block in enumerate(content):
+                    if isinstance(block, dict):
+                        block_type = block.get('type', 'unknown')
+                        if block_type == 'text':
+                            text_preview = str(block.get('text', ''))[:300]
+                            logger.info(f"         [{j}] type=text, text={text_preview}...")
+                        elif block_type == 'tool_use':
+                            logger.info(f"         [{j}] type=tool_use, id={block.get('id')}, name={block.get('name')}")
+                        elif block_type == 'tool_result':
+                            logger.info(f"         [{j}] type=tool_result, tool_use_id={block.get('tool_use_id')}")
+                            result_content = block.get('content', '')
+                            if isinstance(result_content, str):
+                                logger.info(f"            content: {result_content[:200]}...")
+                            elif isinstance(result_content, list):
+                                logger.info(f"            content: (list, {len(result_content)} items)")
+                        else:
+                            logger.info(f"         [{j}] type={block_type}, keys={list(block.keys())}")
+                    else:
+                        logger.info(f"         [{j}] (non-dict): {str(block)[:100]}...")
+            elif isinstance(content, str):
+                logger.info(f"      content: {content[:300]}...")
+            else:
+                logger.info(f"      content: (type={type(content).__name__}) {str(content)[:200]}...")
+        if "tools" in request_params:
+            logger.info(f"   tools ({len(request_params['tools'])}):")
+            for tool in request_params['tools']:
+                logger.info(f"      - {tool.get('name', 'unknown')}")
+        logger.info("=" * 80)
         
         # 详细日志：完整请求参数
         if LLM_DEBUG_VERBOSE:
@@ -1175,12 +1005,6 @@ class ClaudeLLMService(BaseLLMService):
             if self._skills_enabled and "betas" in request_params:
                 # 使用 beta API（支持 Skills Container）
                 stream_ctx = self.async_client.beta.messages.stream(**request_params)
-            elif self._betas:
-                # 使用 beta API（支持 Context Editing / Memory / Tool Search 等）
-                stream_ctx = self.async_client.beta.messages.stream(
-                    betas=self._betas,
-                    **request_params
-                )
             else:
                 # 使用标准 API
                 stream_ctx = self.async_client.messages.stream(**request_params)
@@ -1215,6 +1039,7 @@ class ClaudeLLMService(BaseLLMService):
                                     # 🆕 yield tool_use_start 事件
                                     yield LLMResponse(
                                         content="",
+                                        model=self.config.model,  # 🆕
                                         is_stream=True,
                                         tool_use_start={"id": tool_id, "name": tool_name, "type": "tool_use"}
                                     )
@@ -1232,6 +1057,7 @@ class ClaudeLLMService(BaseLLMService):
                                     # 🆕 yield tool_use_start 事件
                                     yield LLMResponse(
                                         content="",
+                                        model=self.config.model,  # 🆕
                                         is_stream=True,
                                         tool_use_start={"id": tool_id, "name": tool_name, "type": "server_tool_use"}
                                     )
@@ -1249,14 +1075,14 @@ class ClaudeLLMService(BaseLLMService):
                                     accumulated_thinking += text
                                     if on_thinking:
                                         on_thinking(text)
-                                    yield LLMResponse(content="", thinking=text, is_stream=True)
+                                    yield LLMResponse(content="", thinking=text, model=self.config.model, is_stream=True)
                                     
                                 elif delta.type == "text_delta":
                                     text = getattr(delta, 'text', '')
                                     accumulated_content += text
                                     if on_content:
                                         on_content(text)
-                                    yield LLMResponse(content=text, is_stream=True)
+                                    yield LLMResponse(content=text, model=self.config.model, is_stream=True)
                                     
                                 elif delta.type == "input_json_delta":
                                     partial_json = getattr(delta, 'partial_json', '')
@@ -1268,6 +1094,7 @@ class ClaudeLLMService(BaseLLMService):
                                     # 🆕 yield input_delta 事件
                                     yield LLMResponse(
                                         content="",
+                                        model=self.config.model,  # 🆕
                                         is_stream=True,
                                         input_delta=partial_json
                                     )
@@ -1338,48 +1165,14 @@ class ClaudeLLMService(BaseLLMService):
                                         })
                         except Exception as e:
                             logger.warning(f"获取最终消息失败: {e}")
-        except (httpx.RemoteProtocolError, httpx.ReadError, ConnectionResetError, Exception) as stream_error:
+        except (httpx.RemoteProtocolError, Exception) as stream_error:
             # 🚨 流式传输中断：记录已接收的事件数和已累积的内容
             error_msg = str(stream_error)
-            is_connection_reset = (
-                "connection reset" in error_msg.lower() or
-                "read: connection reset by peer" in error_msg.lower() or
-                isinstance(stream_error, ConnectionResetError)
-            )
-            
             logger.error(f"❌ 流式传输中断: {error_msg}")
             logger.error(f"   已接收事件数: {event_count}")
             logger.error(f"   已累积 thinking: {len(accumulated_thinking)} chars")
             logger.error(f"   已累积 content: {len(accumulated_content)} chars")
             logger.error(f"   已解析 tool_calls: {len(tool_calls)}")
-            
-            # 🆕 重试逻辑：connection reset 且没有累积内容时自动重试
-            # 这种情况通常是 Claude 服务端因空字符串输出而崩溃
-            if is_connection_reset and not accumulated_content and not accumulated_thinking and not tool_calls:
-                retry_count = kwargs.get("_stream_retry_count", 0)
-                max_retries = 2  # 最多重试 2 次
-                
-                if retry_count < max_retries:
-                    import asyncio
-                    delay = (retry_count + 1) * 1.0  # 指数退避：1s, 2s
-                    logger.warning(f"🔄 Connection reset（无内容），第 {retry_count + 1}/{max_retries} 次重试，延迟 {delay}s...")
-                    await asyncio.sleep(delay)
-                    
-                    # 递归重试
-                    kwargs["_stream_retry_count"] = retry_count + 1
-                    async for event in self.create_message_stream(
-                        messages=messages,
-                        system=system,
-                        tools=tools,
-                        on_thinking=on_thinking,
-                        on_content=on_content,
-                        on_tool_call=on_tool_call,
-                        **kwargs
-                    ):
-                        yield event
-                    return
-                else:
-                    logger.error(f"❌ 重试 {max_retries} 次后仍失败")
             
             # 如果有部分内容，尝试返回（降级处理）
             if accumulated_content or accumulated_thinking or tool_calls:
@@ -1392,6 +1185,7 @@ class ClaudeLLMService(BaseLLMService):
                     thinking=accumulated_thinking if accumulated_thinking else None,
                     tool_calls=tool_calls if tool_calls else None,
                     stop_reason="stream_error",
+                    model=self.config.model,  # 🆕
                     raw_content=raw_content,
                     is_stream=False
                 )
@@ -1446,6 +1240,7 @@ class ClaudeLLMService(BaseLLMService):
                 tool_calls=tool_calls if tool_calls else None,
                 stop_reason=stop_reason or "end_turn",
                 usage=usage if usage else None,  # 🔢 流式模式也返回 usage
+                model=self.config.model,  # 🆕 实际使用的模型名称
                 raw_content=raw_content,
                 is_stream=False
             )
@@ -1461,7 +1256,7 @@ class ClaudeLLMService(BaseLLMService):
         Returns:
             JSON 字符串
         """
-        def default_handler(o):
+        def default_handler(o) -> Any:
             """自定义序列化处理器"""
             if hasattr(o, 'model_dump'):
                 # Pydantic v2 对象
@@ -1595,6 +1390,7 @@ class ClaudeLLMService(BaseLLMService):
             tool_calls=tool_calls if tool_calls else None,
             stop_reason=response.stop_reason,
             usage=usage,
+            model=self.config.model,  # 🆕 实际使用的模型名称
             raw_content=raw_content,
             cache_read_tokens=usage.get("cache_read_tokens", 0),
             cache_creation_tokens=usage.get("cache_creation_tokens", 0)
@@ -1788,29 +1584,19 @@ class ClaudeLLMService(BaseLLMService):
         
         return cleaned_messages
 
-    def supports_native_tools(self) -> bool:
-        """
-        Claude 支持原生工具
-        
-        Returns:
-            是否支持原生工具
-        """
-        return True
-
-    def supports_skills(self) -> bool:
-        """
-        Claude 支持 Skills 容器
-        
-        Returns:
-            是否支持 Skills
-        """
-        return True
-
     # ============================================================
     # Skills API
     # ============================================================
     
-    def enable_skills(self, skills: List[Dict[str, Any]]):
+    # Anthropic 预置 Skills 列表
+    PREBUILT_SKILLS = {
+        "pptx": {"type": "anthropic", "skill_id": "pptx", "version": "latest"},
+        "xlsx": {"type": "anthropic", "skill_id": "xlsx", "version": "latest"},
+        "docx": {"type": "anthropic", "skill_id": "docx", "version": "latest"},
+        "pdf": {"type": "anthropic", "skill_id": "pdf", "version": "latest"},
+    }
+    
+    def enable_skills(self, skills: List[Dict[str, Any]]) -> None:
         """
         启用 Skills 功能
         
@@ -1834,9 +1620,34 @@ class ClaudeLLMService(BaseLLMService):
         self._add_beta("skills-2025-10-02")
         self._add_beta("files-api-2025-04-14")
         
-        logger.info(f"✅ Skills 已启用: {len(skills)} 个技能")
+        # 日志：区分 custom 和 anthropic skills
+        custom_count = sum(1 for s in skills if s.get("type") == "custom")
+        prebuilt_count = sum(1 for s in skills if s.get("type") == "anthropic")
+        logger.info(f"✅ Skills 已启用: {len(skills)} 个技能 (custom: {custom_count}, prebuilt: {prebuilt_count})")
     
-    def disable_skills(self):
+    def enable_prebuilt_skills(self, skill_names: List[str]) -> None:
+        """
+        启用 Anthropic 预置 Skills（便捷方法）
+        
+        Args:
+            skill_names: 预置 skill 名称列表，可选: "pptx", "xlsx", "docx", "pdf"
+            
+        示例：
+            llm.enable_prebuilt_skills(["pptx", "xlsx"])
+        """
+        skills = []
+        for name in skill_names:
+            if name in self.PREBUILT_SKILLS:
+                skills.append(self.PREBUILT_SKILLS[name].copy())
+            else:
+                logger.warning(f"⚠️ 未知的预置 Skill: {name}，可用选项: {list(self.PREBUILT_SKILLS.keys())}")
+        
+        if skills:
+            self.enable_skills(skills)
+        else:
+            logger.warning("⚠️ 没有有效的预置 Skills 可启用")
+    
+    def disable_skills(self) -> None:
         """禁用 Skills 功能"""
         self._skills_enabled = False
         self._skills_container = {}
@@ -1868,9 +1679,11 @@ class ClaudeLLMService(BaseLLMService):
         try:
             from anthropic.lib import files_from_dir
             
+            # 🆕 添加必要的 betas 参数（官方 API 要求）
             skill = self.sync_client.beta.skills.create(
                 display_title=display_title,
-                files=files_from_dir(skill_path)
+                files=files_from_dir(skill_path),
+                betas=["skills-2025-10-02"]
             )
             
             logger.info(f"✅ Skill 创建成功: {skill.id}")
@@ -1895,7 +1708,10 @@ class ClaudeLLMService(BaseLLMService):
             SkillInfo 列表
         """
         try:
-            skills = self.sync_client.beta.skills.list()
+            # 🆕 添加必要的 betas 参数
+            skills = self.sync_client.beta.skills.list(
+                betas=["skills-2025-10-02"]
+            )
             return [
                 SkillInfo(
                     id=s.id,
@@ -1921,7 +1737,11 @@ class ClaudeLLMService(BaseLLMService):
             SkillInfo 或 None
         """
         try:
-            skill = self.sync_client.beta.skills.retrieve(skill_id)
+            # 🆕 添加必要的 betas 参数
+            skill = self.sync_client.beta.skills.retrieve(
+                skill_id,
+                betas=["skills-2025-10-02"]
+            )
             return SkillInfo(
                 id=skill.id,
                 display_title=skill.display_title,
@@ -1945,15 +1765,22 @@ class ClaudeLLMService(BaseLLMService):
         """
         try:
             # 先删除所有版本
-            versions = self.sync_client.beta.skills.versions.list(skill_id=skill_id)
+            versions = self.sync_client.beta.skills.versions.list(
+                skill_id=skill_id,
+                betas=["skills-2025-10-02"]
+            )
             for version in versions.data:
                 self.sync_client.beta.skills.versions.delete(
                     skill_id=skill_id,
-                    version=version.version
+                    version=version.version,
+                    betas=["skills-2025-10-02"]
                 )
             
             # 再删除 Skill
-            self.sync_client.beta.skills.delete(skill_id)
+            self.sync_client.beta.skills.delete(
+                skill_id,
+                betas=["skills-2025-10-02"]
+            )
             logger.info(f"✅ Skill 已删除: {skill_id}")
             return True
             
@@ -1988,7 +1815,9 @@ class ClaudeLLMService(BaseLLMService):
                 ]
             )
         """
-        formatted_messages = messages_to_dict_list(messages)
+        # 使用 adaptor 转换消息（自动处理 tool_result 分离等）
+        converted = self._adaptor.convert_messages_to_provider(messages)
+        formatted_messages = converted["messages"]
         
         request_params = {
             "model": self.config.model,
@@ -2013,14 +1842,14 @@ class ClaudeLLMService(BaseLLMService):
     # Files API
     # ============================================================
     
-    def download_file(
+    async def download_file(
         self,
         file_id: str,
         output_path: str,
         overwrite: bool = True
     ) -> Optional[FileInfo]:
         """
-        下载文件
+        下载文件（异步版本）
         
         Args:
             file_id: 文件 ID
@@ -2047,8 +1876,9 @@ class ClaudeLLMService(BaseLLMService):
             # 下载文件
             file_content = self.sync_client.beta.files.download(file_id=file_id)
             
-            with open(output_path, 'wb') as f:
-                f.write(file_content.read())
+            # 异步写入文件
+            async with aiofiles.open(output_path, 'wb') as f:
+                await f.write(file_content.read())
             
             logger.info(f"✅ 文件已下载: {output_path} ({metadata.size_bytes} bytes)")
             
@@ -2125,7 +1955,7 @@ class ClaudeLLMService(BaseLLMService):
         """
         file_ids = []
         
-        def find_file_ids(obj, depth=0):
+        def find_file_ids(obj, depth=0) -> None:
             """递归查找 file_id"""
             if depth > 10:
                 return
@@ -2159,12 +1989,12 @@ class ClaudeLLMService(BaseLLMService):
     # Citations (引用)
     # ============================================================
     
-    def enable_citations(self):
+    def enable_citations(self) -> None:
         """启用 Citations 功能"""
         self._citations_enabled = True
         logger.info("✅ Citations 已启用")
     
-    def disable_citations(self):
+    def disable_citations(self) -> None:
         """禁用 Citations 功能"""
         self._citations_enabled = False
     
@@ -2285,8 +2115,6 @@ def create_claude_service(
     api_key: Optional[str] = None,
     enable_thinking: bool = True,
     enable_caching: bool = False,
-    enable_context_editing: Optional[bool] = None,
-    context_editing: Optional[Dict[str, Any]] = None,
     **kwargs
 ) -> ClaudeLLMService:
     """
@@ -2297,8 +2125,6 @@ def create_claude_service(
         api_key: API 密钥（默认从环境变量读取）
         enable_thinking: 启用 Extended Thinking
         enable_caching: 启用 Prompt Caching
-        enable_context_editing: 是否启用 Context Editing（None 则读取环境变量）
-        context_editing: Context Editing 参数配置（可选）
         **kwargs: 其他配置参数
         
     Returns:
@@ -2306,18 +2132,6 @@ def create_claude_service(
     """
     if api_key is None:
         api_key = os.getenv("ANTHROPIC_API_KEY")
-
-    # 🆕 Context Editing 开关（统一入口）
-    if enable_context_editing is None:
-        enable_context_editing = os.getenv("ENABLE_CONTEXT_EDITING", "").lower() in ("1", "true", "yes")
-    elif isinstance(enable_context_editing, str):
-        enable_context_editing = enable_context_editing.lower() in ("1", "true", "yes")
-    
-    # 兼容从 kwargs 传入（避免误传到 LLMConfig）
-    if "context_editing" in kwargs:
-        context_editing = kwargs.pop("context_editing")
-    if "enable_context_editing" in kwargs:
-        enable_context_editing = kwargs.pop("enable_context_editing")
     
     config = LLMConfig(
         provider=LLMProvider.CLAUDE,
@@ -2325,18 +2139,8 @@ def create_claude_service(
         api_key=api_key,
         enable_thinking=enable_thinking,
         enable_caching=enable_caching,
-        enable_context_editing=bool(enable_context_editing),
         **kwargs
     )
     
-    llm_service = ClaudeLLMService(config)
-    
-    # 🆕 自动启用 Context Editing（全局统一入口）
-    if enable_context_editing:
-        if isinstance(context_editing, dict):
-            llm_service.enable_context_editing(**context_editing)
-        else:
-            llm_service.enable_context_editing()
-    
-    return llm_service
+    return ClaudeLLMService(config)
 

@@ -9,11 +9,6 @@ Plan 数据协议（Protocol）
 - 数据结构共享，执行逻辑分离
 - 支持依赖关系表达（DAG）
 - 向下兼容简单线性执行
-
-V7.7 更新：
-- PlanStep 扩展，合并 SubTask 字段
-- 新增 Plan.from_decomposition() 转换方法
-- 支持多智能体 DAG 调度
 """
 
 import uuid
@@ -45,8 +40,6 @@ class PlanStep(BaseModel):
     """
     Plan 步骤（单智能体和多智能体共享数据结构）
     
-    V7.7 增强：合并 SubTask 字段，支持多智能体 DAG 调度
-    
     支持：
     - 线性执行：dependencies 为空或仅依赖前一步
     - DAG执行：dependencies 可指向多个前置步骤
@@ -57,52 +50,23 @@ class PlanStep(BaseModel):
         status: 步骤状态
         dependencies: 依赖的步骤ID列表（支持DAG）
         assigned_agent: 分配的智能体ID（多智能体场景）
-        assigned_agent_role: 分配的智能体角色（planner/researcher/executor/reviewer）
-        tools_required: 需要的工具列表（从 SubTask 迁移）
-        expected_output: 期望的输出格式（从 SubTask 迁移）
-        success_criteria: 成功标准列表（从 SubTask 迁移）
-        constraints: 约束条件列表（从 SubTask 迁移）
-        max_time_seconds: 最大执行时间（从 SubTask 迁移）
-        priority: 执行优先级（从 SubTask 迁移）
-        context: 执行上下文（从 SubTask 迁移）
-        injected_context: 运行时注入的依赖结果上下文
+        tool_hint: 建议使用的工具
         result: 执行结果
         error: 错误信息
-        retry_count: 重试次数
         started_at: 开始时间
         completed_at: 完成时间
         metadata: 额外元数据
     """
-    # 基本信息
     id: str = Field(..., description="步骤唯一标识")
     description: str = Field(..., description="步骤描述")
     status: StepStatus = Field(default=StepStatus.PENDING, description="步骤状态")
-    
-    # 依赖关系（统一命名为 dependencies）
     dependencies: List[str] = Field(default_factory=list, description="依赖的步骤ID列表")
-    
-    # 执行参数（从 SubTask 迁移）
     assigned_agent: Optional[str] = Field(None, description="分配的智能体ID")
-    assigned_agent_role: Optional[str] = Field(None, description="分配的智能体角色")
-    tools_required: List[str] = Field(default_factory=list, description="需要的工具列表")
-    expected_output: Optional[str] = Field(None, description="期望的输出格式")
-    success_criteria: List[str] = Field(default_factory=list, description="成功标准列表")
-    constraints: List[str] = Field(default_factory=list, description="约束条件列表")
-    max_time_seconds: int = Field(300, description="最大执行时间（秒）")
-    priority: int = Field(0, description="执行优先级（越大越优先）")
-    
-    # 上下文
-    context: str = Field("", description="执行上下文")
-    injected_context: Optional[str] = Field(None, description="运行时注入的依赖结果上下文")
-    
-    # 执行结果
+    tool_hint: Optional[str] = Field(None, description="建议使用的工具")
     result: Optional[str] = Field(None, description="执行结果")
     error: Optional[str] = Field(None, description="错误信息")
-    retry_count: int = Field(0, description="重试次数")
     started_at: Optional[datetime] = Field(None, description="开始时间")
     completed_at: Optional[datetime] = Field(None, description="完成时间")
-    
-    # 元数据
     metadata: Dict[str, Any] = Field(default_factory=dict, description="额外元数据")
     
     def is_ready(self, completed_steps: set) -> bool:
@@ -137,24 +101,6 @@ class PlanStep(BaseModel):
         self.status = StepStatus.FAILED
         self.error = error
         self.completed_at = datetime.now()
-    
-    def skip(self, reason: str = "依赖失败") -> None:
-        """跳过步骤（级联失败时使用）"""
-        self.status = StepStatus.SKIPPED
-        self.error = reason
-        self.completed_at = datetime.now()
-    
-    def increment_retry(self) -> int:
-        """增加重试计数并返回当前次数"""
-        self.retry_count += 1
-        return self.retry_count
-    
-    def reset_for_retry(self) -> None:
-        """重置步骤状态以便重试"""
-        self.status = StepStatus.PENDING
-        self.error = None
-        self.started_at = None
-        self.completed_at = None
 
 
 class Plan(BaseModel):
@@ -175,7 +121,7 @@ class Plan(BaseModel):
         updated_at: 更新时间
         metadata: 额外元数据
     """
-    plan_id: str = Field(default_factory=lambda: f"plan_{uuid.uuid4().hex[:12]}")
+    plan_id: str = Field(default_factory=lambda: f"plan_{uuid.uuid4()}")
     goal: str = Field(..., description="目标描述")
     steps: List[PlanStep] = Field(default_factory=list, description="步骤列表")
     execution_mode: Literal["linear", "dag"] = Field(default="linear", description="执行模式")
@@ -252,7 +198,8 @@ class Plan(BaseModel):
     def add_step(
         self,
         description: str,
-        dependencies: Optional[List[str]] = None
+        dependencies: Optional[List[str]] = None,
+        tool_hint: Optional[str] = None
     ) -> PlanStep:
         """
         添加新步骤
@@ -260,6 +207,7 @@ class Plan(BaseModel):
         Args:
             description: 步骤描述
             dependencies: 依赖的步骤ID列表
+            tool_hint: 建议使用的工具
             
         Returns:
             PlanStep: 新创建的步骤
@@ -269,6 +217,7 @@ class Plan(BaseModel):
             id=step_id,
             description=description,
             dependencies=dependencies or [],
+            tool_hint=tool_hint,
         )
         self.steps.append(step)
         self.updated_at = datetime.now()
@@ -347,68 +296,3 @@ class Plan(BaseModel):
             lines.append(f"   {status_icon} [{step.id}] {step.description}")
         
         return "\n".join(lines)
-    
-    # ===================
-    # V7.7: 从 TaskDecompositionPlan 转换
-    # ===================
-    
-    @classmethod
-    def from_decomposition(cls, decomposition: Any) -> "Plan":
-        """
-        从 LeadAgent 的 TaskDecompositionPlan 转换为 Plan 对象
-        
-        V7.7 新增：统一数据结构，消除 SubTask/PlanStep 冗余
-        
-        Args:
-            decomposition: TaskDecompositionPlan 对象（来自 LeadAgent）
-            
-        Returns:
-            Plan: 转换后的 Plan 对象
-        """
-        from core.agent.multi.lead_agent import TaskDecompositionPlan, SubTask
-        
-        if not isinstance(decomposition, TaskDecompositionPlan):
-            raise TypeError(f"期望 TaskDecompositionPlan，实际 {type(decomposition)}")
-        
-        # 转换 SubTask 列表为 PlanStep 列表
-        steps = []
-        for st in decomposition.subtasks:
-            step = PlanStep(
-                id=st.subtask_id,
-                description=st.description,
-                dependencies=st.depends_on,  # 字段名映射：depends_on -> dependencies
-                assigned_agent_role=st.assigned_agent_role.value if st.assigned_agent_role else None,
-                tools_required=st.tools_required,
-                expected_output=st.expected_output,
-                success_criteria=st.success_criteria,
-                constraints=st.constraints,
-                max_time_seconds=st.max_time_seconds,
-                priority=st.priority,
-                context=st.context,
-                metadata={"title": st.title} if st.title else {},
-            )
-            steps.append(step)
-        
-        # 确定执行模式
-        execution_mode = "dag"
-        if hasattr(decomposition.execution_mode, 'value'):
-            mode_value = decomposition.execution_mode.value
-        else:
-            mode_value = str(decomposition.execution_mode)
-        
-        if mode_value == "sequential":
-            execution_mode = "linear"
-        
-        # 创建 Plan 对象
-        return cls(
-            plan_id=decomposition.plan_id,
-            goal=decomposition.decomposed_goal,
-            steps=steps,
-            execution_mode=execution_mode,
-            metadata={
-                "original_query": decomposition.original_query,
-                "synthesis_strategy": decomposition.synthesis_strategy,
-                "reasoning": decomposition.reasoning,
-                "estimated_time_seconds": decomposition.estimated_time_seconds,
-            }
-        )

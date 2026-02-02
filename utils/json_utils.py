@@ -79,7 +79,8 @@ class JSONExtractor:
         if result is not None:
             logger.debug("✅ 修复后解析成功")
         else:
-            logger.warning("❌ 所有 JSON 解析尝试均失败")
+            # 降级为 DEBUG：JSON 解析失败是预期场景，调用方会处理 None 返回值
+            logger.debug("JSON 解析失败，返回 None（调用方会处理）")
         return result
         
     @staticmethod
@@ -99,13 +100,14 @@ class JSONExtractor:
             提取的 JSON 字符串
         """
         # 1. 优先匹配 ```json ... ``` 格式
-        triple_pattern = re.compile(r'```json\s*([\{\[].*?[\}\]])\s*```', re.DOTALL)
+        # 使用贪婪匹配 .* 确保提取完整的 JSON（包含嵌套的 [] 和 {}）
+        triple_pattern = re.compile(r'```json\s*([\{\[].*[\}\]])\s*```', re.DOTALL)
         m = triple_pattern.search(text)
         if m:
             return m.group(1).strip()
         
         # 2. 匹配 ``` ... ``` 格式（不带 json 标记）
-        generic_pattern = re.compile(r'```\s*([\{\[].*?[\}\]])\s*```', re.DOTALL)
+        generic_pattern = re.compile(r'```\s*([\{\[].*[\}\]])\s*```', re.DOTALL)
         m = generic_pattern.search(text)
         if m:
             return m.group(1).strip()

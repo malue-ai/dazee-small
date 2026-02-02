@@ -8,8 +8,8 @@ User Memory 模块 - 用户级记忆
 - PlanMemory: 任务计划持久化（🆕 V4.3 长时运行支持）
 """
 
-from .episodic import EpisodicMemory, create_episodic_memory
-from .preference import PreferenceMemory, create_preference_memory
+from .episodic import EpisodicMemory, create_episodic_memory, create_episodic_memory_async
+from .preference import PreferenceMemory, create_preference_memory, create_preference_memory_async
 from .e2b import E2BSandboxSession, E2BMemory, create_e2b_memory
 from .plan import PlanMemory, create_plan_memory
 
@@ -17,9 +17,11 @@ __all__ = [
     # 历史经验
     "EpisodicMemory",
     "create_episodic_memory",
+    "create_episodic_memory_async",
     # 用户偏好
     "PreferenceMemory",
     "create_preference_memory",
+    "create_preference_memory_async",
     # E2B 沙箱
     "E2BSandboxSession",
     "E2BMemory",

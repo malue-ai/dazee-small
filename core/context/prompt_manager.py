@@ -1,10 +1,13 @@
 """
-PromptManager - 事件驱动的 Prompt 追加管理
+PromptManager - 事件驱动的用户消息上下文追加管理
+
+🆕 V8.0: 所有追加内容都追加到用户消息（而非 System Prompt）
 
 核心思想：
 - 与 RuntimeContext 高度耦合，在 Agent 运行时动态追加
-- 事件触发 Prompt 追加（不是写死的规则）
+- 事件触发上下文追加（不是写死的规则）
 - 防止重复追加（同一 fragment_id 只追加一次）
+- 追加位置：messages 中最后一条 user 消息的 text block 后面
 
 使用场景：
 - 第 1 轮：session_start → 追加 sandbox_context
@@ -23,19 +26,27 @@ PromptManager - 事件驱动的 Prompt 追加管理
     # 工具执行后（如 RAG）
     prompt_mgr.on_tool_result(ctx, tool_name="rag_search", result=rag_result)
     
-    # 获取当前 System Prompt（包含所有追加）
-    system_prompt = prompt_mgr.build_system_prompt(ctx, base_prompt="...")
+    # 获取用户消息追加内容（用于追加到最后一条 user message）
+    user_context = prompt_mgr.build_user_context(ctx)
 """
 
-import logging
-from typing import Dict, Any, List, Optional, Callable, TYPE_CHECKING
+# 1. 标准库
+import asyncio
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Dict, Any, List, Optional, Callable, TYPE_CHECKING
+
+# 2. 第三方库
+import aiofiles
+
+# 3. 本地模块
+from logger import get_logger
 
 if TYPE_CHECKING:
     from .runtime import RuntimeContext
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ===== 追加规则定义 =====
@@ -64,10 +75,15 @@ class PromptState:
     Prompt 追加状态（存储在 RuntimeContext 中）
     
     每个 RuntimeContext 独立维护，追加是累积的
+    
+    🆕 V8.0: 所有追加内容都追加到用户消息（而非 System Prompt）
+    追加位置: messages 中最后一条 user 消息的 {type: "text", text: "..."} 后面
     """
     conversation_id: Optional[str] = None
     user_id: Optional[str] = None
     appended_fragments: Dict[str, AppendedFragment] = field(default_factory=dict)
+    # 🆕 V8.0: 跟踪已追加到用户消息的片段 ID（防止重复追加）
+    synced_to_message: set = field(default_factory=set)
     
     def append(
         self,
@@ -121,6 +137,40 @@ class PromptState:
         )
         return "\n\n---\n\n".join(f.content for f in sorted_fragments)
     
+    def get_unsynced_content(self) -> str:
+        """
+        🆕 V8.0: 获取尚未同步到用户消息的新片段内容
+        
+        Returns:
+            新片段的组装内容（空字符串表示无新内容）
+        """
+        unsynced = {
+            fid: frag for fid, frag in self.appended_fragments.items()
+            if fid not in self.synced_to_message
+        }
+        
+        if not unsynced:
+            return ""
+        
+        sorted_fragments = sorted(
+            unsynced.values(),
+            key=lambda f: f.priority,
+            reverse=True
+        )
+        return "\n\n---\n\n".join(f.content for f in sorted_fragments)
+    
+    def mark_synced(self, fragment_ids: List[str] = None) -> None:
+        """
+        🆕 V8.0: 标记片段已同步到用户消息
+        
+        Args:
+            fragment_ids: 要标记的片段 ID 列表（None 表示标记所有）
+        """
+        if fragment_ids is None:
+            self.synced_to_message = set(self.appended_fragments.keys())
+        else:
+            self.synced_to_message.update(fragment_ids)
+    
     def has_fragment(self, fragment_id: str) -> bool:
         """检查是否已追加某片段"""
         return fragment_id in self.appended_fragments
@@ -137,7 +187,7 @@ class PromptState:
             return True
         return False
     
-    def clear(self):
+    def clear(self) -> None:
         """清空所有追加"""
         self.appended_fragments.clear()
         logger.debug("🗑️ 清空所有 Prompt 追加")
@@ -154,7 +204,7 @@ class PromptManager:
     
     使用方式：
         ctx = RuntimeContext(session_id="sess_123")
-        prompt_mgr = PromptManager()
+        prompt_mgr = await PromptManager.get_instance_async()  # 异步获取单例
         
         # 会话开始
         prompt_mgr.on_session_start(ctx, conversation_id="conv_456")
@@ -171,33 +221,65 @@ class PromptManager:
     # RuntimeContext 中存储 PromptState 的属性名
     PROMPT_STATE_ATTR = "_prompt_state"
     
-    def __init__(self, fragments_dir: str = "prompts/fragments"):
+    def __init__(self, fragments_dir: str = "prompts/fragments") -> None:
         # 片段目录
         self._fragments_dir = Path(fragments_dir)
         
-        # 片段缓存（启动时加载）
+        # 片段缓存（初始化后异步加载）
         self._fragment_cache: Dict[str, str] = {}
+        self._initialized: bool = False
+    
+    async def initialize(self) -> None:
+        """
+        异步初始化：加载片段文件
         
-        # 加载片段
-        self._load_fragments()
+        使用方式：
+            prompt_mgr = PromptManager()
+            await prompt_mgr.initialize()
+        """
+        if self._initialized:
+            return
+        
+        await self._load_fragments_async()
+        self._initialized = True
+        logger.debug("[PromptManager] 初始化完成")
     
     @classmethod
     def get_instance(cls, fragments_dir: str = "prompts/fragments") -> "PromptManager":
-        """获取单例实例"""
+        """
+        获取单例实例（同步版本，需要额外调用 initialize()）
+        
+        注意：返回的实例需要调用 await initialize() 完成初始化
+        """
         if cls._instance is None:
             cls._instance = cls(fragments_dir)
         return cls._instance
     
-    def _load_fragments(self):
-        """加载所有片段文件到缓存"""
+    @classmethod
+    async def get_instance_async(cls, fragments_dir: str = "prompts/fragments") -> "PromptManager":
+        """
+        获取已初始化的单例实例（异步版本）
+        
+        推荐使用此方法获取实例
+        """
+        instance = cls.get_instance(fragments_dir)
+        await instance.initialize()
+        return instance
+    
+    async def _load_fragments_async(self) -> None:
+        """异步加载所有片段文件到缓存"""
         if not self._fragments_dir.exists():
             logger.warning(f"片段目录不存在: {self._fragments_dir}")
             return
         
-        for file_path in self._fragments_dir.glob("*.md"):
+        # 使用 asyncio.to_thread 包装同步的 glob 操作
+        file_paths = await asyncio.to_thread(list, self._fragments_dir.glob("*.md"))
+        
+        for file_path in file_paths:
             fragment_id = file_path.stem  # 文件名（不含扩展名）
             try:
-                self._fragment_cache[fragment_id] = file_path.read_text(encoding="utf-8")
+                async with aiofiles.open(file_path, 'r', encoding='utf-8') as f:
+                    self._fragment_cache[fragment_id] = await f.read()
                 logger.debug(f"📄 加载片段: {fragment_id}")
             except Exception as e:
                 logger.error(f"加载片段失败 {fragment_id}: {e}")
@@ -225,7 +307,7 @@ class PromptManager:
         user_id: Optional[str] = None
     ) -> bool:
         """
-        会话开始时调用 → 追加 sandbox_context
+        会话开始时调用
         
         Args:
             ctx: RuntimeContext 实例
@@ -233,23 +315,12 @@ class PromptManager:
             user_id: 用户 ID（可选）
             
         Returns:
-            是否成功追加
+            是否成功
         """
         state = self._get_or_create_state(ctx)
         state.conversation_id = conversation_id
         state.user_id = user_id
-        
-        # 构建沙盒上下文
-        content = self._build_sandbox_context(state)
-        if not content:
-            return False
-        
-        return state.append(
-            fragment_id="sandbox_context",
-            content=content,
-            priority=100,
-            event_type="session_start"
-        )
+        return True
     
     def on_tool_result(
         self,
@@ -279,7 +350,7 @@ class PromptManager:
             return self._append_rag_context(state, result)
         
         # 文件相关工具 → 追加文件上下文
-        if tool_name in ("file_upload", "file_read"):
+        if tool_name in ("file_upload", "sandbox_read_file"):
             return self._append_file_context(state, result)
         
         # E2B 沙盒工具 → 追加 E2B 规范（如果还没追加）
@@ -494,14 +565,14 @@ class PromptManager:
         """
         return list(self._fragment_cache.keys())
     
-    def reload_fragments(self):
+    async def reload_fragments(self) -> None:
         """
-        重新加载所有片段（热更新）
+        重新加载所有片段（异步热更新）
         
         适用于修改了 prompts/fragments/ 下的文件后，不重启服务即可生效
         """
         self._fragment_cache.clear()
-        self._load_fragments()
+        await self._load_fragments_async()
         logger.info(f"🔄 重新加载片段，共 {len(self._fragment_cache)} 个")
     
     # ===== 内部追加方法 =====
@@ -608,9 +679,7 @@ class PromptManager:
         Returns:
             渲染后的字符串
         """
-        import re
-        
-        def replace_var(match):
+        def replace_var(match) -> str:
             var_name = match.group(1).strip()
             value = variables.get(var_name)
             if value is not None:
@@ -622,48 +691,6 @@ class PromptManager:
         return re.sub(r'\{\{(\w+)\}\}', replace_var, template)
     
     # ===== 动态内容生成 =====
-    
-    def _build_sandbox_context(self, state: PromptState) -> str:
-        """
-        构建沙盒上下文
-        
-        Args:
-            state: PromptState 实例
-            
-        Returns:
-            沙盒上下文内容
-        """
-        conversation_id = state.conversation_id
-        user_id = state.user_id
-        
-        if not conversation_id:
-            return ""
-        
-        content = f"""
-# 📌 当前会话上下文（CRITICAL）
-
-**必须使用以下参数调用 sandbox_* 工具：**
-
-- **conversation_id**: `{conversation_id}`
-"""
-        
-        if user_id:
-            content += f"- **user_id**: `{user_id}`\n"
-        
-        content += f"""
-## 沙盒工具使用示例
-
-```json
-{{
-    "conversation_id": "{conversation_id}",
-    "path": "/home/user/app/index.html",
-    "content": "..."
-}}
-```
-
-⚠️ **注意**：调用 sandbox_* 工具时必须使用上面的 conversation_id，否则会失败。
-"""
-        return content.strip()
     
     def _build_user_context(self, variables: Dict[str, Any]) -> str:
         """
@@ -678,14 +705,17 @@ class PromptManager:
         if not variables:
             return ""
         
-        lines = ["# 用户上下文（系统自动注入，帮助你理解用户环境）", ""]
+        lines = ["# User Context (auto-injected by system)", ""]
         
         for var_name, var_data in variables.items():
             if isinstance(var_data, dict):
                 value = var_data.get("value", "")
                 description = var_data.get("description", "")
                 if value:
-                    lines.append(f"- **{var_name}**: {value}（{description}）")
+                    if description:
+                        lines.append(f"- **{var_name}**: {value} ({description})")
+                    else:
+                        lines.append(f"- **{var_name}**: {value}")
             else:
                 lines.append(f"- **{var_name}**: {var_data}")
         
@@ -742,34 +772,128 @@ class PromptManager:
         
         return "\n".join(lines)
     
-    # ===== System Prompt 构建 =====
+    # ===== 用户消息上下文构建 =====
     
+    def build_user_context(self, ctx: "RuntimeContext") -> str:
+        """
+        构建用户消息追加内容
+        
+        🆕 V8.0: 用于追加到用户消息（而非 System Prompt）
+        
+        Args:
+            ctx: RuntimeContext 实例
+            
+        Returns:
+            追加内容（空字符串表示无追加）
+        """
+        state = self._get_or_create_state(ctx)
+        return state.get_sorted_content()
+    
+    def append_to_user_message(
+        self,
+        ctx: "RuntimeContext",
+        messages: List[Dict[str, Any]]
+    ) -> bool:
+        """
+        将新的追加内容附加到消息列表中最后一条 user 消息
+        
+        🆕 V8.0: 核心方法，在 Agent 的 RVR 循环中调用
+        只追加尚未同步的新内容，防止重复追加
+        
+        追加位置：最后一条 user 消息的 content 中，最后一个 text block 的 text 字段后面
+        
+        Args:
+            ctx: RuntimeContext 实例
+            messages: 消息列表（会被原地修改）
+            
+        Returns:
+            是否成功追加
+            
+        示例：
+            # 原始消息
+            messages = [
+                {"role": "user", "content": [{"type": "text", "text": "帮我查询..."}]}
+            ]
+            
+            # 追加后
+            messages = [
+                {"role": "user", "content": [
+                    {"type": "text", "text": "帮我查询...\\n\\n---\\n\\n# 📚 相关知识\\n..."}
+                ]}
+            ]
+        """
+        state = self._get_or_create_state(ctx)
+        
+        # 🆕 V8.0: 只获取尚未同步到用户消息的新片段
+        appended_content = state.get_unsynced_content()
+        if not appended_content:
+            return False
+        
+        # 找到最后一条 user 消息
+        last_user_msg = None
+        for msg in reversed(messages):
+            if msg.get("role") == "user":
+                last_user_msg = msg
+                break
+        
+        if not last_user_msg:
+            logger.warning("⚠️ 未找到 user 消息，无法追加上下文")
+            return False
+        
+        content = last_user_msg.get("content")
+        
+        # 处理 content 是字符串的情况
+        if isinstance(content, str):
+            last_user_msg["content"] = f"{content}\n\n---\n\n{appended_content}"
+            state.mark_synced()  # 标记所有片段为已同步
+            logger.info(f"📝 已追加上下文到 user 消息（字符串格式）")
+            return True
+        
+        # 处理 content 是 list 的情况（content blocks）
+        if isinstance(content, list):
+            # 找到最后一个 text block
+            for block in reversed(content):
+                if isinstance(block, dict) and block.get("type") == "text":
+                    original_text = block.get("text", "")
+                    block["text"] = f"{original_text}\n\n---\n\n{appended_content}"
+                    state.mark_synced()  # 标记所有片段为已同步
+                    logger.info(f"📝 已追加上下文到 user 消息（content blocks 格式）")
+                    return True
+            
+            # 没有 text block，添加一个新的
+            content.append({
+                "type": "text",
+                "text": f"\n\n---\n\n{appended_content}"
+            })
+            state.mark_synced()  # 标记所有片段为已同步
+            logger.info(f"📝 已追加上下文到 user 消息（新增 text block）")
+            return True
+        
+        logger.warning(f"⚠️ 无法识别的 content 格式: {type(content)}")
+        return False
+    
+    # 🆕 向后兼容：保留 build_system_prompt 但标记为 deprecated
     def build_system_prompt(
         self,
         ctx: "RuntimeContext",
         base_prompt: Optional[str] = None
     ) -> str:
         """
-        构建最终 System Prompt
+        (deprecated) 构建 System Prompt
+        
+        🆕 V8.0: 此方法已废弃，请使用 build_user_context() 或 append_to_user_message()
+        保留此方法仅为向后兼容
         
         Args:
             ctx: RuntimeContext 实例
-            base_prompt: 基础 Prompt（可选，如果不传则只返回追加内容）
+            base_prompt: 基础 Prompt（可选）
             
         Returns:
-            完整的 System Prompt
+            base_prompt（不再追加内容）
         """
-        state = self._get_or_create_state(ctx)
-        
-        # 获取所有追加内容
-        appended_content = state.get_sorted_content()
-        
-        if base_prompt:
-            if appended_content:
-                return f"{base_prompt}\n\n---\n\n{appended_content}"
-            return base_prompt
-        
-        return appended_content
+        logger.warning("⚠️ build_system_prompt 已废弃，请使用 build_user_context() 或 append_to_user_message()")
+        # 不再追加内容到 system prompt，直接返回 base_prompt
+        return base_prompt or ""
     
     def get_appended_fragments(self, ctx: "RuntimeContext") -> List[str]:
         """
@@ -798,7 +922,7 @@ class PromptManager:
         state = self._get_or_create_state(ctx)
         return state.has_fragment(fragment_id)
     
-    def clear_prompts(self, ctx: "RuntimeContext"):
+    def clear_prompts(self, ctx: "RuntimeContext") -> None:
         """
         清空当前上下文的所有追加
         
@@ -838,10 +962,24 @@ def create_prompt_manager(fragments_dir: str = "prompts/fragments") -> PromptMan
 
 def get_prompt_manager() -> PromptManager:
     """
-    获取 PromptManager 单例
+    获取 PromptManager 单例（同步版本）
+    
+    注意：返回的实例可能未初始化，需要调用 await initialize()
     
     Returns:
-        PromptManager 单例实例
+        PromptManager 单例实例（可能未初始化）
     """
     return PromptManager.get_instance()
+
+
+async def get_prompt_manager_async() -> PromptManager:
+    """
+    获取已初始化的 PromptManager 单例（异步版本）
+    
+    推荐使用此函数获取 PromptManager
+    
+    Returns:
+        已初始化的 PromptManager 单例实例
+    """
+    return await PromptManager.get_instance_async()
 

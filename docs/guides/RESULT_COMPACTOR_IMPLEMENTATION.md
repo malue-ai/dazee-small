@@ -265,7 +265,7 @@ result = await executor.execute(
 
 | 工具 | 策略 | 最大大小 |
 |------|------|---------|
-| `file_read` | TRUNCATE | 5000 字符 |
+| `sandbox_read_file` | TRUNCATE | 5000 字符 |
 | `file_write` | REFERENCE | - |
 | `exa_crawl` | TRUNCATE | 8000 字符 |
 

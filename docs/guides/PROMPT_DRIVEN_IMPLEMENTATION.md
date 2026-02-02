@@ -44,7 +44,7 @@ Agent 根据 System Prompt 规则处理 User Query
 
 ### 1. `SimpleAgent.__init__` - 接收 Schema 和 System Prompt
 
-**位置**: `core/agent/simple/simple_agent.py:60-103`
+**位置**: `core/agent/simple_agent.py:60-103`
 
 **修改内容**:
 ```python
@@ -75,7 +75,7 @@ def __init__(
 
 ### 2. `SimpleAgent._init_modules()` - 根据 Schema 动态创建组件
 
-**位置**: `core/agent/simple/simple_agent.py:139-197`
+**位置**: `core/agent/simple_agent.py:139-197`
 
 **修改内容**:
 ```python
@@ -107,7 +107,7 @@ def _init_modules(self):
 
 ### 3. `SimpleAgent.chat()` - 使用传入的 System Prompt
 
-**位置**: `core/agent/simple/simple_agent.py:245-276`
+**位置**: `core/agent/simple_agent.py:245-276`
 
 **修改内容**:
 ```python

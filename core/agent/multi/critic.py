@@ -10,11 +10,16 @@ V7.2 新增：负责评估执行结果并提供改进建议
 4. **承认不确定性**：无法判断时主动请求人工介入
 """
 
+# 1. 标准库
 import json
-import logging
+import re
 from pathlib import Path
 from typing import List, Optional
 
+# 2. 第三方库
+import aiofiles
+
+# 3. 本地模块
 from core.agent.multi.models import (
     CriticResult,
     CriticAction,
@@ -24,8 +29,9 @@ from core.agent.multi.models import (
 )
 from core.planning.protocol import PlanStep
 from core.llm import create_llm_service, Message
+from logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class CriticAgent:
@@ -43,6 +49,10 @@ class CriticAgent:
     - 你是顾问，不是裁判
     - 提供建议，不做决策
     - 承认不确定性
+    
+    使用方式：
+        critic = CriticAgent(model="claude-sonnet-4-5-20250929")
+        await critic.initialize()  # 必须调用以加载提示词
     """
     
     def __init__(
@@ -50,7 +60,6 @@ class CriticAgent:
         model: str = "claude-sonnet-4-5-20250929",
         enable_thinking: bool = True,
         config: Optional[CriticConfig] = None,
-        llm_profile_name: str = "critic_agent",
     ):
         """
         初始化 Critic Agent
@@ -64,28 +73,39 @@ class CriticAgent:
         self.enable_thinking = enable_thinking
         self.config = config or CriticConfig()
         
-        # 创建 LLM 服务（支持主备路由）
-        from config.llm_config import get_llm_profile
-        profile = get_llm_profile(llm_profile_name)
-        profile_provider = str(profile.get("provider", "claude")).lower()
-        if profile_provider == "claude":
-            profile["model"] = model
-        profile.update({
-            "enable_thinking": enable_thinking,
-        })
-        self.llm = create_llm_service(**profile)
+        # 创建 LLM 服务
+        self.llm = create_llm_service(
+            provider="claude",  # 🆕 V7.10
+            model=model,
+            enable_thinking=enable_thinking,
+        )
         
-        # 加载系统提示词
-        self.system_prompt = self._load_system_prompt()
+        # 系统提示词（需要调用 initialize() 加载）
+        self.system_prompt: str = self._get_default_prompt()
+        self._initialized: bool = False
+    
+    async def initialize(self) -> None:
+        """
+        异步初始化：加载系统提示词
+        
+        使用方式：
+            critic = CriticAgent(...)
+            await critic.initialize()
+        """
+        if self._initialized:
+            return
+        
+        self.system_prompt = await self._load_system_prompt_async()
+        self._initialized = True
         
         logger.info(
-            f"✅ CriticAgent 初始化: model={model}, "
-            f"enable_thinking={enable_thinking}, "
+            f"✅ CriticAgent 初始化完成: model={self.model}, "
+            f"enable_thinking={self.enable_thinking}, "
             f"max_retries={self.config.max_retries}"
         )
     
-    def _load_system_prompt(self) -> str:
-        """加载系统提示词"""
+    async def _load_system_prompt_async(self) -> str:
+        """异步加载系统提示词"""
         prompt_path = Path(__file__).parent.parent.parent.parent / "prompts" / "multi_agent" / "critic_prompt.md"
         
         if not prompt_path.exists():
@@ -93,8 +113,8 @@ class CriticAgent:
             return self._get_default_prompt()
         
         try:
-            with open(prompt_path, "r", encoding="utf-8") as f:
-                return f.read()
+            async with aiofiles.open(prompt_path, "r", encoding="utf-8") as f:
+                return await f.read()
         except Exception as e:
             logger.error(f"❌ 加载提示词失败: {e}，使用默认提示词")
             return self._get_default_prompt()
@@ -243,8 +263,6 @@ class CriticAgent:
     
     def _parse_critique_response(self, response_text: str) -> CriticResult:
         """解析 LLM 响应为 CriticResult（健壮版本）"""
-        import re
-        
         # 尝试多种方式提取 JSON
         json_text = response_text.strip()
         

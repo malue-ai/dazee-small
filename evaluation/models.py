@@ -146,9 +146,6 @@ class GradeResult(BaseModel):
     explanation: Optional[str] = Field(None, description="评分说明")
     details: Dict[str, Any] = Field(default_factory=dict, description="详细信息")
     timestamp: datetime = Field(default_factory=datetime.now)
-    # 新增：置信度机制
-    confidence: Optional[float] = Field(None, description="置信度（0-1），低于0.7时触发人工复核")
-    needs_human_review: bool = Field(False, description="是否需要人工复核")
 
 
 class GraderConfig(BaseModel):
@@ -178,13 +175,6 @@ class ExpectedOutcome(BaseModel):
     custom_checks: Dict[str, Any] = Field(default_factory=dict, description="自定义检查")
 
 
-class Checkpoint(BaseModel):
-    """中间结果检查点"""
-    name: str = Field(..., description="检查点名称")
-    check: str = Field(..., description="检查表达式，如 'plan_step_count >= 1'")
-    description: Optional[str] = Field(None, description="检查点说明")
-
-
 class Task(BaseModel):
     """
     评估任务（Task）
@@ -194,7 +184,6 @@ class Task(BaseModel):
     - 预期结果（expected_outcome）
     - 评分器配置（graders）
     - 试验次数（trials）
-    - 中间检查点（checkpoints）
     """
     id: str = Field(..., description="任务唯一标识")
     description: str = Field(..., description="任务描述")
@@ -206,10 +195,6 @@ class Task(BaseModel):
     timeout_seconds: int = Field(60, description="超时时间")
     tags: List[str] = Field(default_factory=list, description="标签")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="元数据")
-    # 新增：中间结果检查点
-    checkpoints: List[Checkpoint] = Field(default_factory=list, description="中间结果检查点")
-    # 新增：推荐答案（用于人工对比和LLM Judge参考）
-    reference_answer: Optional[str] = Field(None, description="推荐答案（用于对比评估）")
 
 
 class Trial(BaseModel):

@@ -1,29 +1,48 @@
 """
-Exa搜索工具 - 高质量语义搜索
+Exa 搜索工具 - 高质量语义搜索
 
-使用Exa API进行高质量的语义搜索，获取网页内容
+使用 Exa API 进行高质量的语义搜索，获取网页内容
 参考: https://dashboard.exa.ai/playground/search
+
+配置说明：
+- input_schema 在 config/capabilities.yaml 中定义
+- 运营可直接修改 YAML 调整参数，无需改代码
 """
 
 import os
 import aiohttp
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+
+from core.tool.base import BaseTool, ToolContext
+from logger import get_logger
+
+logger = get_logger(__name__)
 
 
-class ExaSearchTool:
+class ExaSearchTool(BaseTool):
     """
-    Exa搜索工具
+    Exa 搜索工具
     
-    使用Exa API进行语义搜索，返回高质量的网页内容
+    使用 Exa API 进行语义搜索，返回高质量的网页内容。
+    
+    特点：
+    - 语义理解：理解查询意图，返回最相关内容
+    - 网页内容提取：自动提取网页正文内容
+    - 时间过滤：支持按发布时间过滤结果
+    - 分类搜索：支持按类别过滤（papers, news, github 等）
+    
+    注意：input_schema 由 capabilities.yaml 定义，此处不重复
     """
+    
+    # 工具名称（用于匹配 capabilities.yaml 配置）
+    name = "exa_search"
     
     def __init__(self, api_key: Optional[str] = None):
         """
-        初始化Exa搜索工具
+        初始化 Exa 搜索工具
         
         Args:
-            api_key: Exa API密钥，如果为None则从环境变量读取
+            api_key: Exa API 密钥，如果为 None 则从环境变量读取
         """
         self.api_key = api_key or os.getenv("EXA_API_KEY")
         if not self.api_key:
@@ -32,79 +51,36 @@ class ExaSearchTool:
         self.base_url = "https://api.exa.ai"
         self.timeout = 30  # 30秒超时
     
-    @property
-    def name(self) -> str:
-        return "exa_search"
-    
-    @property
-    def description(self) -> str:
-        return """使用Exa API进行高质量的语义搜索。
-
-特点：
-- 语义理解：理解查询意图，返回最相关内容
-- 网页内容提取：自动提取网页正文内容
-- 时间过滤：支持按发布时间过滤结果
-- 分类搜索：支持按类别过滤（papers, news, github等）
-
-输入：搜索查询和可选的过滤条件
-输出：搜索结果列表，包含标题、URL、内容摘要、发布时间等"""
-    
-    @property
-    def parameters(self) -> Dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "搜索查询（支持自然语言）"
-                },
-                "num_results": {
-                    "type": "integer",
-                    "description": "返回结果数量（默认10，最大10）",
-                    "default": 10
-                },
-                "category": {
-                    "type": "string",
-                    "description": "内容分类（papers/news/github/company/personal_site/pdf等）",
-                    "enum": ["papers", "news", "github", "company", "personal_site", "pdf", "tweet"],
-                    "default": None
-                },
-                "include_text": {
-                    "type": "boolean",
-                    "description": "是否包含网页正文内容（默认true）",
-                    "default": True
-                },
-                "start_published_date": {
-                    "type": "string",
-                    "description": "开始发布日期（ISO格式，如'2024-01-01'）",
-                    "default": None
-                }
-            },
-            "required": ["query"]
-        }
-    
     async def execute(
         self,
-        query: str,
-        num_results: int = 10,
-        category: Optional[str] = None,
-        include_text: bool = True,
-        start_published_date: Optional[str] = None,
-        **kwargs
+        params: Dict[str, Any],
+        context: ToolContext
     ) -> Dict[str, Any]:
         """
-        执行Exa搜索
+        执行 Exa 搜索
         
         Args:
-            query: 搜索查询
-            num_results: 返回结果数量
-            category: 内容分类
-            include_text: 是否包含正文
-            start_published_date: 开始发布日期
+            params: 工具输入参数（由 Claude 根据 capabilities.yaml 的 input_schema 传入）
+                - query: 搜索查询
+                - num_results: 返回结果数量
+                - category: 内容分类
+                - include_text: 是否包含正文
+                - start_published_date: 开始发布日期
+            context: 工具执行上下文
             
         Returns:
             包含搜索结果的字典
         """
+        # 从 params 提取参数
+        query = params.get("query")
+        if not query:
+            return {"success": False, "error": "缺少必需参数: query"}
+        
+        num_results = params.get("num_results", 10)
+        category = params.get("category")
+        include_text = params.get("include_text", True)
+        start_published_date = params.get("start_published_date")
+        
         try:
             # 构建请求参数
             payload = {
@@ -123,11 +99,13 @@ class ExaSearchTool:
             if start_published_date:
                 payload["startPublishedDate"] = start_published_date
             
-            # 调用Exa API
+            # 调用 Exa API
             headers = {
                 "x-api-key": self.api_key,
                 "Content-Type": "application/json"
             }
+            
+            logger.info(f"🔍 Exa 搜索: query={query[:50]}...")
             
             async with aiohttp.ClientSession() as session:
                 async with session.post(
@@ -138,9 +116,10 @@ class ExaSearchTool:
                 ) as response:
                     if response.status != 200:
                         error_text = await response.text()
+                        logger.error(f"Exa API 错误: status={response.status}, error={error_text}")
                         return {
-                            "status": "error",
-                            "message": f"Exa API error (status {response.status}): {error_text}"
+                            "success": False,
+                            "error": f"Exa API error (status {response.status}): {error_text}"
                         }
                     
                     data = await response.json()
@@ -148,8 +127,10 @@ class ExaSearchTool:
             # 格式化搜索结果
             results = self._format_results(data)
             
+            logger.info(f"✅ Exa 搜索完成: query={query[:30]}..., results={len(results)}")
+            
             return {
-                "status": "success",
+                "success": True,
                 "query": query,
                 "num_results": len(results),
                 "results": results,
@@ -160,14 +141,16 @@ class ExaSearchTool:
             }
         
         except aiohttp.ClientError as e:
+            logger.error(f"Exa 网络错误: {str(e)}")
             return {
-                "status": "error",
-                "message": f"Network error: {str(e)}"
+                "success": False,
+                "error": f"Network error: {str(e)}"
             }
         except Exception as e:
+            logger.error(f"Exa 意外错误: {str(e)}", exc_info=True)
             return {
-                "status": "error",
-                "message": f"Unexpected error: {str(e)}"
+                "success": False,
+                "error": f"Unexpected error: {str(e)}"
             }
     
     def _format_results(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -175,7 +158,7 @@ class ExaSearchTool:
         格式化搜索结果
         
         Args:
-            data: Exa API返回的原始数据
+            data: Exa API 返回的原始数据
             
         Returns:
             格式化后的结果列表
@@ -207,25 +190,3 @@ class ExaSearchTool:
             results.append(result)
         
         return results
-    
-    async def search_and_get_contents(
-        self,
-        query: str,
-        num_results: int = 5
-    ) -> Dict[str, Any]:
-        """
-        简化的搜索接口，直接获取内容
-        
-        Args:
-            query: 搜索查询
-            num_results: 结果数量
-            
-        Returns:
-            搜索结果
-        """
-        return await self.execute(
-            query=query,
-            num_results=num_results,
-            include_text=True
-        )
-

@@ -143,7 +143,7 @@ core/
 
 **示例**：
 ```python
-# core/agent/simple/simple_agent.py
+# core/agent/simple_agent.py
 class SimpleAgent:
     """Agent 核心逻辑，不依赖外部基础设施"""
     
@@ -380,7 +380,7 @@ class ChatService:
 # infra/database/crud.py
 from services.chat_service import ChatService  # ❌ infra 不能调用 service
 
-# core/agent/simple/simple_agent.py
+# core/agent/simple_agent.py
 from services.session_service import SessionService  # ❌ core 不能调用 service
 ```
 
@@ -448,7 +448,7 @@ async with AsyncSessionLocal() as session:
 **A**: 通过依赖注入，由上层传入。
 
 ```python
-# core/agent/simple/simple_agent.py
+# core/agent/simple_agent.py
 class SimpleAgent:
     def __init__(self, memory_repository):
         self.memory_repo = memory_repository  # 抽象依赖

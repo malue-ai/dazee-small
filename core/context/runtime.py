@@ -30,7 +30,8 @@ from typing import Dict, Any, List, Optional
 
 # 2. 第三方库（无）
 
-# 3. 本地模块（延迟导入，避免循环依赖）
+# 3. 本地模块
+from core.llm import Message
 
 
 @dataclass
@@ -152,8 +153,8 @@ class ContentAccumulator:
         accumulator = ContentAccumulator()
         
         # 并行处理多个 block
-        accumulator.on_content_start({"type": "tool_use", "id": "t1", "name": "bash"}, index=0)
-        accumulator.on_content_start({"type": "tool_use", "id": "t2", "name": "write_file"}, index=1)
+        accumulator.on_content_start({"type": "tool_use", "id": "t1", "name": "sandbox_run_command"}, index=0)
+        accumulator.on_content_start({"type": "tool_use", "id": "t2", "name": "sandbox_write_file"}, index=1)
         accumulator.on_content_delta('{"command": "ls"}', index=0)
         accumulator.on_content_delta('{"path": "/app"}', index=1)
         accumulator.on_content_stop(index=0)  # 保存第一个工具
@@ -510,55 +511,51 @@ class RuntimeContext:
     # === 时间戳 ===
     start_time: Optional[datetime] = None    # 开始时间
     
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """初始化后处理"""
         if self.start_time is None:
             self.start_time = datetime.now()
     
     # === 消息管理方法 ===
     
-    def add_history_messages(self, history: List[Dict[str, str]]):
+    def add_history_messages(self, history: List[Dict[str, str]]) -> None:
         """
         添加历史消息
         
         Args:
             history: 历史消息列表 [{"role": "user", "content": "..."}, ...]
         """
-        from core.llm import Message
         for msg in history:
             self.messages.append(Message(
                 role=msg["role"],
                 content=msg["content"]
             ))
     
-    def add_user_message(self, content: Any):
+    def add_user_message(self, content: Any) -> None:
         """
         添加用户消息
         
         Args:
             content: 消息内容（字符串或 Claude API 格式）
         """
-        from core.llm import Message
         self.messages.append(Message(role="user", content=content))
     
-    def add_assistant_message(self, content: Any):
+    def add_assistant_message(self, content: Any) -> None:
         """
         添加 assistant 消息
         
         Args:
             content: 消息内容（content_blocks 数组）
         """
-        from core.llm import Message
         self.messages.append(Message(role="assistant", content=content))
     
-    def add_tool_result(self, tool_results: List[Dict]):
+    def add_tool_result(self, tool_results: List[Dict]) -> None:
         """
         添加工具结果（作为 user 消息）
         
         Args:
             tool_results: 工具执行结果列表
         """
-        from core.llm import Message
         self.messages.append(Message(role="user", content=tool_results))
     
     def get_messages(self) -> List[Any]:
@@ -594,7 +591,7 @@ class RuntimeContext:
     
     # === 状态重置方法 ===
     
-    def reset_for_turn(self):
+    def reset_for_turn(self) -> None:
         """
         重置用于新的 turn
         
@@ -604,7 +601,7 @@ class RuntimeContext:
         """
         pass  # 目前不需要额外操作
     
-    def reset_for_new_chat(self):
+    def reset_for_new_chat(self) -> None:
         """
         完全重置（新的 chat 调用）
         """
@@ -619,7 +616,7 @@ class RuntimeContext:
     
     # === 完成状态方法 ===
     
-    def set_completed(self, result: str, reason: str = "end_turn"):
+    def set_completed(self, result: str, reason: str = "end_turn") -> None:
         """
         设置完成状态
         

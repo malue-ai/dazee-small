@@ -17,9 +17,14 @@
     "timestamp": str,         # ISO 时间戳
     "data": dict              # 事件数据
 }
+
+架构说明（重构后）：
+- 序号（seq）在 storage.buffer_event 中由 Redis INCR 统一生成
+- EventBroadcaster 是事件发送的统一入口
+- 格式转换在 buffer_event 中完成
 """
 
-from typing import Dict, Any, Protocol
+from typing import Dict, Any, Protocol, Optional, TYPE_CHECKING
 from datetime import datetime
 from uuid import uuid4
 from logger import get_logger
@@ -32,18 +37,43 @@ class EventStorage(Protocol):
     事件存储协议（抽象接口）
     
     所有方法都是异步的，支持异步 Redis 客户端
+    
+    生产环境实现：RedisSessionManager（services/redis_manager.py）
+    开发环境实现：InMemoryEventStorage（core/events/storage.py）
     """
     
     async def generate_session_seq(self, session_id: str) -> int:
-        """生成 session 内的事件序号（从 1 开始）"""
+        """
+        生成 session 内的事件序号（从 1 开始）
+        
+        注意：新架构中 seq 在 buffer_event 中由 Redis INCR 生成
+        此方法保留以向后兼容
+        """
         ...
     
     async def get_session_context(self, session_id: str) -> Dict[str, Any]:
         """获取 session 上下文（conversation_id 等）"""
         ...
     
-    async def buffer_event(self, session_id: str, event_data: Dict[str, Any]) -> None:
-        """缓冲事件"""
+    async def buffer_event(
+        self,
+        session_id: str,
+        event_data: Dict[str, Any],
+        output_format: str = "zenflux",
+        adapter: Any = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        缓冲事件
+        
+        Args:
+            session_id: Session ID
+            event_data: 事件数据
+            output_format: 输出格式（zenflux/zeno），默认 zenflux
+            adapter: 格式转换适配器（可选，用于 zeno 格式）
+            
+        Returns:
+            添加了 seq 的事件，如果被过滤则返回 None
+        """
         ...
     
     async def update_heartbeat(self, session_id: str) -> None:
@@ -60,6 +90,10 @@ class BaseEventManager:
     - 通过 EventStorage 协议处理存储（解耦具体实现）
     
     所有具体的事件管理器都继承此类
+    
+    注意：
+    - 推荐通过 EventBroadcaster 发送事件（统一生成 seq）
+    - 直接调用子管理器时，可以传入已生成的 seq 和 event_uuid
     """
     
     def __init__(self, storage: EventStorage):
@@ -76,42 +110,48 @@ class BaseEventManager:
         session_id: str,
         event: Dict[str, Any],
         conversation_id: str = None,
-        message_id: str = None
-    ) -> Dict[str, Any]:
+        message_id: str = None,
+        seq: Optional[int] = None,
+        event_uuid: Optional[str] = None,
+        output_format: str = "zenflux",
+        adapter: Any = None
+    ) -> Optional[Dict[str, Any]]:
         """
         发送事件（内部方法）
         
-        自动处理：
-        - 生成 UUID（全局唯一事件标识符）
-        - 生成 session 内序号 seq（从 1 开始递增）
+        处理逻辑：
+        - 如果提供了 seq 和 event_uuid，直接使用（来自 EventBroadcaster）
+        - 如果未提供，则自动生成（向后兼容）
         - 添加通用上下文字段
-        - 委托给 storage 处理存储和心跳
+        - 委托给 storage 处理存储、格式转换和心跳
         
         Args:
             session_id: Session ID
             event: 事件对象（必须包含 type 和 data）
             conversation_id: Conversation ID（可选，会从 storage 获取）
             message_id: Message ID（可选）
+            seq: 事件序号（可选，新架构中由 buffer_event 生成）
+            event_uuid: 事件 UUID（可选，来自上层）
+            output_format: 输出格式（zenflux/zeno），默认 zenflux
+            adapter: 格式转换适配器（可选，用于 zeno 格式）
             
         Returns:
-            完整的事件对象
+            完整的事件对象，如果被过滤则返回 None
         """
-        # 1. 生成全局唯一 UUID
-        event_uuid = str(uuid4())
+        # 1. 使用提供的 UUID 或生成新的
+        if event_uuid is None:
+            event_uuid = str(uuid4())
+
         
-        # 2. 生成 session 内序号（从 1 开始）- 异步
-        seq = await self.storage.generate_session_seq(session_id)
-        
-        # 3. 获取上下文信息（如果没有提供）- 异步
+        # 2. 获取上下文信息（如果没有提供）- 异步
         if not conversation_id:
             session_context = await self.storage.get_session_context(session_id)
-            conversation_id = conversation_id or session_context.get("conversation_id")
+            conversation_id = session_context.get("conversation_id")
         
-        # 4. 构建统一格式的事件
+        # 3. 构建统一格式的事件（不在这里设置 seq，由 buffer_event 生成）
         complete_event = {
             # 事件标识
             "event_uuid": event_uuid,
-            "seq": seq,
             "type": event["type"],
             
             # 通用上下文字段
@@ -127,21 +167,31 @@ class BaseEventManager:
         if message_id:
             complete_event["message_id"] = message_id
         
-        # 5. 委托给 storage 处理存储 - 异步
-        await self.storage.buffer_event(
+        # 如果提供了 seq，使用它（向后兼容）
+        if seq is not None:
+            complete_event["seq"] = seq
+        
+        # 4. 委托给 storage 处理存储（包括格式转换和 seq 生成）
+        result = await self.storage.buffer_event(
             session_id=session_id,
-            event_data=complete_event
+            event_data=complete_event,
+            output_format=output_format,
+            adapter=adapter
         )
         
-        # 6. 委托给 storage 更新心跳 - 异步
+        # 如果事件被过滤（如 ZenO 适配器过滤某些事件），返回 None
+        if result is None:
+            return None
+        
+        # 5. 委托给 storage 更新心跳 - 异步
         await self.storage.update_heartbeat(session_id)
         
         logger.debug(
-            f"📤 已发送事件: type={complete_event['type']}, "
-            f"seq={seq}, session_id={session_id}"
+            f"📤 已发送事件: type={result.get('type', 'unknown')}, "
+            f"seq={result.get('seq')}, session_id={session_id}"
         )
         
-        return complete_event
+        return result
     
     def _create_event(
         self,

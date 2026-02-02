@@ -1,73 +1,39 @@
 """
 Agent 模块
 
-V7.8 架构重构：
-
-核心组件：
-- AgentProtocol: 统一接口协议（SimpleAgent 和 MultiAgent 共同实现）
-- AgentCoordinator: 协调器（整合路由和工厂，单一执行入口）
-- AgentFactory: 创建工厂（无路由逻辑，统一创建入口）
-- SimpleAgent: 单智能体编排器（RVR 循环）
-- MultiAgentOrchestrator: 多智能体编排器（Leader-Worker + DAGScheduler）
-
-设计原则：
-1. 路由逻辑集中在 AgentRouter（不在 Factory）
-2. AgentCoordinator.route_and_execute() 是推荐的单一入口
-3. 所有 Agent 实现 AgentProtocol，上层调用无需类型判断
+提供 Agent 核心功能：
+- SimpleAgent: 核心编排器（精简版）
+- ContentHandler: 统一的 Content Block 处理器
+- AgentFactory: Prompt 驱动的动态初始化
+- IntentAnalyzer: 意图分析器（🆕 V7.0: 已移至 core.routing 共享层）
+- 类型定义: IntentResult, TaskType, Complexity 等
+- Schema: 强类型配置定义
 
 目录结构：
-- protocol.py: Agent 统一接口
-- coordinator.py: Agent 协调器
-- factory.py: Agent 工厂
-- simple/: Simple Agent 模块
-- multi/: Multi Agent 模块
-- content_handler.py: Content Block 处理器
+- simple_agent.py: 核心 Agent（只做编排）
+- content_handler.py: 统一的 Content Block 处理器
+- factory.py: Agent 工厂（动态初始化）
 - types.py: 类型定义
 """
 
-# 类型定义
 from core.agent.types import (
     TaskType,
     Complexity,
     IntentResult,
 )
-
-# 🆕 V7.8: Protocol 和 Coordinator
-from core.agent.protocol import (
-    AgentProtocol,
-    is_agent,
-    get_agent_type,
+# 🆕 V7.0: IntentAnalyzer 已移至 core.routing 共享层
+from core.routing.intent_analyzer import (
+    IntentAnalyzer,
+    create_intent_analyzer
 )
-from core.agent.coordinator import (
-    AgentCoordinator,
-    get_agent_coordinator,
-    create_agent_coordinator,
-)
-
-# Simple Agent
-from core.agent.simple import (
+from core.agent.simple_agent import (
     SimpleAgent,
-    RVRBAgent,
     create_simple_agent
 )
-
-# Multi Agent
-from core.agent.multi import (
-    MultiAgentOrchestrator,
-    LeadAgent,
-    CheckpointManager,
-    ExecutionMode,
-    AgentRole,
-    MultiAgentConfig,
-)
-
-# ContentHandler
 from core.agent.content_handler import (
     ContentHandler,
     create_content_handler
 )
-
-# Factory
 from core.agent.factory import (
     AgentFactory,
     AgentPresets,
@@ -76,11 +42,7 @@ from core.agent.factory import (
     create_agent_from_preset,
     create_schema_from_dict
 )
-
-# 🆕 V9.0: IntentAnalyzer 已移至 core/routing/intent_analyzer.py
-# 意图识别由路由层统一处理，SimpleAgent 不再内部做意图分析
-
-# Schema（强类型配置）
+# 从 schemas 模块导入强类型定义
 from core.schemas import (
     AgentSchema,
     DEFAULT_AGENT_SCHEMA,
@@ -94,45 +56,24 @@ from core.schemas import (
 )
 
 __all__ = [
-    # 🆕 V7.8: Protocol 和 Coordinator
-    "AgentProtocol",
-    "is_agent",
-    "get_agent_type",
-    "AgentCoordinator",
-    "get_agent_coordinator",
-    "create_agent_coordinator",
-    
     # 类型
     "TaskType",
     "Complexity",
     "IntentResult",
-    
-    # Simple Agent
+    # Agent
     "SimpleAgent",
-    "RVRBAgent",
     "create_simple_agent",
-    
-    # Multi Agent
-    "MultiAgentOrchestrator",
-    "LeadAgent",
-    "CheckpointManager",
-    "ExecutionMode",
-    "AgentRole",
-    "MultiAgentConfig",
-    
     # ContentHandler
     "ContentHandler",
     "create_content_handler",
-    
-    # Factory
+    # Factory（Prompt 驱动）
     "AgentFactory",
     "AgentPresets",
     "ComponentType",
     "create_agent_from_prompt",
     "create_agent_from_preset",
     "create_schema_from_dict",
-    
-    # Schema
+    # Schema（强类型配置）
     "AgentSchema",
     "DEFAULT_AGENT_SCHEMA",
     "IntentAnalyzerConfig",
@@ -142,6 +83,8 @@ __all__ = [
     "OutputFormatterConfig",
     "SkillConfig",
     "ContextLimitsConfig",
-    # 🆕 V9.0: IntentAnalyzer 已移至 core/routing，从 core.routing 导入
+    # 意图分析
+    "IntentAnalyzer",
+    "create_intent_analyzer",
 ]
 

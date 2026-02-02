@@ -590,7 +590,7 @@ class KnowledgeManager:
 
 **Where - 影响模块**  
 - Agent 核心：`core/agent/`
-- 新增：`core/agent/multi/` 多智能体框架
+- 新增：`core/multi_agent/` 多智能体框架
 - 协调器：`core/orchestrator/`
 
 **How - 实施步骤**
@@ -957,7 +957,7 @@ RVR 循环（单 Agent）                    多智能体扩展
 - **时间**: 2 周
 
 **Where - 影响模块**  
-- Agent 核心：`core/agent/simple/simple_agent.py`
+- Agent 核心：`core/agent/simple_agent.py`
 - 新增：`core/agent/validator.py`
 - 新增：`core/agent/reflector.py`
 
@@ -968,7 +968,7 @@ RVR 循环（单 Agent）                    多智能体扩展
 **现有 RVR 循环**：
 
 ```python
-# core/agent/simple/simple_agent.py (当前)
+# core/agent/simple_agent.py (当前)
 async def chat(self, messages, session_id):
     while True:
         # R - Read
@@ -1007,7 +1007,7 @@ async def chat(self, messages, session_id):
 **新架构：RVR+ (React + Validation + Reflection)**
 
 ```python
-# core/agent/simple/simple_agent.py (优化后)
+# core/agent/simple_agent.py (优化后)
 async def chat(self, messages, session_id):
     """
     RVR+ 循环：

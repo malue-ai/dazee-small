@@ -1,17 +1,6 @@
-# 实例级 Skills 配置指南
+# Claude Skills 配置指南
 
-本目录存放该智能体实例的自定义 Skills。
-
-## 两级加载机制
-
-zenflux agent 采用两级 Skill 加载机制：
-
-| 优先级 | 来源 | 说明 |
-|--------|------|------|
-| 1（低）| `skills/library/` | 系统级内置技能（所有实例共享） |
-| 2（高）| `instances/{agent_id}/skills/` | 实例级自定义技能（运营人员配置） |
-
-**实例级技能会覆盖同名的系统级技能**，这允许运营人员针对特定场景定制技能行为。
+本目录存放该智能体实例的 Claude Skills 配置。
 
 ## 目录结构
 
@@ -23,7 +12,7 @@ skills/
 │   └── SKILL.md
 └── [your-skill-name]/         # 自定义 Skill 目录
     ├── SKILL.md              # 必需：Skill 入口文件
-    ├── references/           # 可选：参考资料
+    ├── reference/            # 可选：参考资料
     │   └── *.md
     └── scripts/              # 可选：Python 脚本
         └── *.py
@@ -40,27 +29,7 @@ cp -r _template my-skill-name
 
 ### Step 2: 编辑 SKILL.md
 
-按照模板格式填写 `my-skill-name/SKILL.md`：
-
-```yaml
----
-name: my-skill-name
-description: "技能描述（用于系统提示词注入）"
-metadata:
-  priority: high
-  preferred_for: ["关键词1", "关键词2"]
----
-
-# My Skill Name
-
-## 使用场景
-当用户需要...
-
-## 工作流程
-1. 分析需求
-2. 执行操作
-3. 返回结果
-```
+按照模板格式填写 `my-skill-name/SKILL.md`。
 
 ### Step 3: 在注册表中声明
 
@@ -75,16 +44,24 @@ skills:
 
 ### Step 4: 启动实例
 
-Skills 会在实例启动时自动加载到系统提示词中。
+Skills 会在实例启动时自动注册到 Claude 服务器。
 
-## 与系统级 Skills 的关系
+```bash
+python scripts/run_instance.py --instance <your-instance>
+```
 
-- 如果实例级定义了与系统级同名的 Skill，实例级会覆盖系统级
-- 这允许运营人员定制特定场景的技能行为
-- 例如：实例级的 `ontology-builder` 可以覆盖系统级的通用版本
+## 生命周期管理
+
+| 阶段 | 操作 | 执行者 |
+|------|------|--------|
+| 创建 | 创建 Skill 目录 + SKILL.md | 运营/开发 |
+| 声明 | 在 skill_registry.yaml 中添加 | 运营 |
+| 注册 | 启动时自动调用 Anthropic API | instance_loader.py |
+| 交互 | Agent 运行时通过 skill_id 调用 | SimpleAgent |
+| 注销 | 停止实例时自动注销（可选） | instance_loader.py |
 
 ## 注意事项
 
-1. **SKILL.md 必需**：每个 Skill 目录必须包含 `SKILL.md` 文件
-2. **YAML Frontmatter**：`SKILL.md` 必须以 `---` 开头的 YAML frontmatter
-3. **name 和 description**：frontmatter 中必须包含这两个字段
+1. **skill_id 自动管理**：注册成功后，skill_id 会自动回写到 `skill_registry.yaml`
+2. **启用/禁用**：设置 `enabled: false` 可临时禁用 Skill，无需删除
+3. **版本控制**：修改 SKILL.md 后会自动检测变更并更新注册

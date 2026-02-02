@@ -7,30 +7,8 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
-class HealthCheckRequest(_message.Message):
-    __slots__ = ("service",)
-    SERVICE_FIELD_NUMBER: _ClassVar[int]
-    service: str
-    def __init__(self, service: _Optional[str] = ...) -> None: ...
-
-class HealthCheckResponse(_message.Message):
-    __slots__ = ("status",)
-    class ServingStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
-        __slots__ = ()
-        UNKNOWN: _ClassVar[HealthCheckResponse.ServingStatus]
-        SERVING: _ClassVar[HealthCheckResponse.ServingStatus]
-        NOT_SERVING: _ClassVar[HealthCheckResponse.ServingStatus]
-        SERVICE_UNKNOWN: _ClassVar[HealthCheckResponse.ServingStatus]
-    UNKNOWN: HealthCheckResponse.ServingStatus
-    SERVING: HealthCheckResponse.ServingStatus
-    NOT_SERVING: HealthCheckResponse.ServingStatus
-    SERVICE_UNKNOWN: HealthCheckResponse.ServingStatus
-    STATUS_FIELD_NUMBER: _ClassVar[int]
-    status: HealthCheckResponse.ServingStatus
-    def __init__(self, status: _Optional[_Union[HealthCheckResponse.ServingStatus, str]] = ...) -> None: ...
-
 class ChatRequest(_message.Message):
-    __slots__ = ("message", "user_id", "conversation_id", "message_id", "stream", "background_tasks", "files", "variables")
+    __slots__ = ("message", "user_id", "conversation_id", "message_id", "stream", "background_tasks", "files", "variables", "agent_id")
     class VariablesEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -46,6 +24,7 @@ class ChatRequest(_message.Message):
     BACKGROUND_TASKS_FIELD_NUMBER: _ClassVar[int]
     FILES_FIELD_NUMBER: _ClassVar[int]
     VARIABLES_FIELD_NUMBER: _ClassVar[int]
+    AGENT_ID_FIELD_NUMBER: _ClassVar[int]
     message: str
     user_id: str
     conversation_id: str
@@ -54,7 +33,8 @@ class ChatRequest(_message.Message):
     background_tasks: _containers.RepeatedScalarFieldContainer[str]
     files: _containers.RepeatedCompositeFieldContainer[FileReference]
     variables: _containers.ScalarMap[str, str]
-    def __init__(self, message: _Optional[str] = ..., user_id: _Optional[str] = ..., conversation_id: _Optional[str] = ..., message_id: _Optional[str] = ..., stream: bool = ..., background_tasks: _Optional[_Iterable[str]] = ..., files: _Optional[_Iterable[_Union[FileReference, _Mapping]]] = ..., variables: _Optional[_Mapping[str, str]] = ...) -> None: ...
+    agent_id: str
+    def __init__(self, message: _Optional[str] = ..., user_id: _Optional[str] = ..., conversation_id: _Optional[str] = ..., message_id: _Optional[str] = ..., stream: bool = ..., background_tasks: _Optional[_Iterable[str]] = ..., files: _Optional[_Iterable[_Union[FileReference, _Mapping]]] = ..., variables: _Optional[_Mapping[str, str]] = ..., agent_id: _Optional[str] = ...) -> None: ...
 
 class FileReference(_message.Message):
     __slots__ = ("file_id", "file_url", "file_name")
@@ -103,6 +83,36 @@ class ReconnectRequest(_message.Message):
     session_id: str
     after_seq: int
     def __init__(self, session_id: _Optional[str] = ..., after_seq: _Optional[int] = ...) -> None: ...
+
+class ChatMockRequest(_message.Message):
+    __slots__ = ("scenario", "delay_ms")
+    SCENARIO_FIELD_NUMBER: _ClassVar[int]
+    DELAY_MS_FIELD_NUMBER: _ClassVar[int]
+    scenario: str
+    delay_ms: int
+    def __init__(self, scenario: _Optional[str] = ..., delay_ms: _Optional[int] = ...) -> None: ...
+
+class HealthCheckRequest(_message.Message):
+    __slots__ = ("service",)
+    SERVICE_FIELD_NUMBER: _ClassVar[int]
+    service: str
+    def __init__(self, service: _Optional[str] = ...) -> None: ...
+
+class HealthCheckResponse(_message.Message):
+    __slots__ = ("status",)
+    class ServingStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+        __slots__ = ()
+        UNKNOWN: _ClassVar[HealthCheckResponse.ServingStatus]
+        SERVING: _ClassVar[HealthCheckResponse.ServingStatus]
+        NOT_SERVING: _ClassVar[HealthCheckResponse.ServingStatus]
+        SERVICE_UNKNOWN: _ClassVar[HealthCheckResponse.ServingStatus]
+    UNKNOWN: HealthCheckResponse.ServingStatus
+    SERVING: HealthCheckResponse.ServingStatus
+    NOT_SERVING: HealthCheckResponse.ServingStatus
+    SERVICE_UNKNOWN: HealthCheckResponse.ServingStatus
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    status: HealthCheckResponse.ServingStatus
+    def __init__(self, status: _Optional[_Union[HealthCheckResponse.ServingStatus, str]] = ...) -> None: ...
 
 class SessionStatusRequest(_message.Message):
     __slots__ = ("session_id",)
@@ -355,3 +365,287 @@ class AgentStatusResponse(_message.Message):
     progress: int
     active_tools: _containers.RepeatedScalarFieldContainer[str]
     def __init__(self, status: _Optional[str] = ..., current_step: _Optional[str] = ..., progress: _Optional[int] = ..., active_tools: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class SandboxStatusRequest(_message.Message):
+    __slots__ = ("conversation_id",)
+    CONVERSATION_ID_FIELD_NUMBER: _ClassVar[int]
+    conversation_id: str
+    def __init__(self, conversation_id: _Optional[str] = ...) -> None: ...
+
+class SandboxStatusResponse(_message.Message):
+    __slots__ = ("conversation_id", "sandbox_id", "e2b_sandbox_id", "status", "stack", "preview_url", "active_project_path", "active_project_stack", "created_at", "last_active_at")
+    CONVERSATION_ID_FIELD_NUMBER: _ClassVar[int]
+    SANDBOX_ID_FIELD_NUMBER: _ClassVar[int]
+    E2B_SANDBOX_ID_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    STACK_FIELD_NUMBER: _ClassVar[int]
+    PREVIEW_URL_FIELD_NUMBER: _ClassVar[int]
+    ACTIVE_PROJECT_PATH_FIELD_NUMBER: _ClassVar[int]
+    ACTIVE_PROJECT_STACK_FIELD_NUMBER: _ClassVar[int]
+    CREATED_AT_FIELD_NUMBER: _ClassVar[int]
+    LAST_ACTIVE_AT_FIELD_NUMBER: _ClassVar[int]
+    conversation_id: str
+    sandbox_id: str
+    e2b_sandbox_id: str
+    status: str
+    stack: str
+    preview_url: str
+    active_project_path: str
+    active_project_stack: str
+    created_at: str
+    last_active_at: str
+    def __init__(self, conversation_id: _Optional[str] = ..., sandbox_id: _Optional[str] = ..., e2b_sandbox_id: _Optional[str] = ..., status: _Optional[str] = ..., stack: _Optional[str] = ..., preview_url: _Optional[str] = ..., active_project_path: _Optional[str] = ..., active_project_stack: _Optional[str] = ..., created_at: _Optional[str] = ..., last_active_at: _Optional[str] = ...) -> None: ...
+
+class SandboxInitRequest(_message.Message):
+    __slots__ = ("conversation_id", "user_id", "stack")
+    CONVERSATION_ID_FIELD_NUMBER: _ClassVar[int]
+    USER_ID_FIELD_NUMBER: _ClassVar[int]
+    STACK_FIELD_NUMBER: _ClassVar[int]
+    conversation_id: str
+    user_id: str
+    stack: str
+    def __init__(self, conversation_id: _Optional[str] = ..., user_id: _Optional[str] = ..., stack: _Optional[str] = ...) -> None: ...
+
+class SandboxPauseRequest(_message.Message):
+    __slots__ = ("conversation_id",)
+    CONVERSATION_ID_FIELD_NUMBER: _ClassVar[int]
+    conversation_id: str
+    def __init__(self, conversation_id: _Optional[str] = ...) -> None: ...
+
+class SandboxResumeRequest(_message.Message):
+    __slots__ = ("conversation_id",)
+    CONVERSATION_ID_FIELD_NUMBER: _ClassVar[int]
+    conversation_id: str
+    def __init__(self, conversation_id: _Optional[str] = ...) -> None: ...
+
+class SandboxKillRequest(_message.Message):
+    __slots__ = ("conversation_id",)
+    CONVERSATION_ID_FIELD_NUMBER: _ClassVar[int]
+    conversation_id: str
+    def __init__(self, conversation_id: _Optional[str] = ...) -> None: ...
+
+class SandboxOperationResponse(_message.Message):
+    __slots__ = ("success", "message")
+    SUCCESS_FIELD_NUMBER: _ClassVar[int]
+    MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    success: bool
+    message: str
+    def __init__(self, success: bool = ..., message: _Optional[str] = ...) -> None: ...
+
+class SandboxRunProjectRequest(_message.Message):
+    __slots__ = ("conversation_id", "project_path", "stack")
+    CONVERSATION_ID_FIELD_NUMBER: _ClassVar[int]
+    PROJECT_PATH_FIELD_NUMBER: _ClassVar[int]
+    STACK_FIELD_NUMBER: _ClassVar[int]
+    conversation_id: str
+    project_path: str
+    stack: str
+    def __init__(self, conversation_id: _Optional[str] = ..., project_path: _Optional[str] = ..., stack: _Optional[str] = ...) -> None: ...
+
+class SandboxRunProjectResponse(_message.Message):
+    __slots__ = ("success", "preview_url", "message", "error")
+    SUCCESS_FIELD_NUMBER: _ClassVar[int]
+    PREVIEW_URL_FIELD_NUMBER: _ClassVar[int]
+    MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    success: bool
+    preview_url: str
+    message: str
+    error: str
+    def __init__(self, success: bool = ..., preview_url: _Optional[str] = ..., message: _Optional[str] = ..., error: _Optional[str] = ...) -> None: ...
+
+class SandboxStopProjectRequest(_message.Message):
+    __slots__ = ("conversation_id",)
+    CONVERSATION_ID_FIELD_NUMBER: _ClassVar[int]
+    conversation_id: str
+    def __init__(self, conversation_id: _Optional[str] = ...) -> None: ...
+
+class SandboxLogsRequest(_message.Message):
+    __slots__ = ("conversation_id", "lines")
+    CONVERSATION_ID_FIELD_NUMBER: _ClassVar[int]
+    LINES_FIELD_NUMBER: _ClassVar[int]
+    conversation_id: str
+    lines: int
+    def __init__(self, conversation_id: _Optional[str] = ..., lines: _Optional[int] = ...) -> None: ...
+
+class SandboxLogsResponse(_message.Message):
+    __slots__ = ("logs",)
+    LOGS_FIELD_NUMBER: _ClassVar[int]
+    logs: str
+    def __init__(self, logs: _Optional[str] = ...) -> None: ...
+
+class SandboxCommandRequest(_message.Message):
+    __slots__ = ("conversation_id", "command", "timeout")
+    CONVERSATION_ID_FIELD_NUMBER: _ClassVar[int]
+    COMMAND_FIELD_NUMBER: _ClassVar[int]
+    TIMEOUT_FIELD_NUMBER: _ClassVar[int]
+    conversation_id: str
+    command: str
+    timeout: int
+    def __init__(self, conversation_id: _Optional[str] = ..., command: _Optional[str] = ..., timeout: _Optional[int] = ...) -> None: ...
+
+class SandboxCommandResponse(_message.Message):
+    __slots__ = ("success", "exit_code", "stdout", "stderr", "error")
+    SUCCESS_FIELD_NUMBER: _ClassVar[int]
+    EXIT_CODE_FIELD_NUMBER: _ClassVar[int]
+    STDOUT_FIELD_NUMBER: _ClassVar[int]
+    STDERR_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    success: bool
+    exit_code: int
+    stdout: str
+    stderr: str
+    error: str
+    def __init__(self, success: bool = ..., exit_code: _Optional[int] = ..., stdout: _Optional[str] = ..., stderr: _Optional[str] = ..., error: _Optional[str] = ...) -> None: ...
+
+class SandboxListFilesRequest(_message.Message):
+    __slots__ = ("conversation_id", "path", "tree")
+    CONVERSATION_ID_FIELD_NUMBER: _ClassVar[int]
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    TREE_FIELD_NUMBER: _ClassVar[int]
+    conversation_id: str
+    path: str
+    tree: bool
+    def __init__(self, conversation_id: _Optional[str] = ..., path: _Optional[str] = ..., tree: bool = ...) -> None: ...
+
+class SandboxFileInfo(_message.Message):
+    __slots__ = ("path", "name", "type", "size", "modified_at", "children")
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    TYPE_FIELD_NUMBER: _ClassVar[int]
+    SIZE_FIELD_NUMBER: _ClassVar[int]
+    MODIFIED_AT_FIELD_NUMBER: _ClassVar[int]
+    CHILDREN_FIELD_NUMBER: _ClassVar[int]
+    path: str
+    name: str
+    type: str
+    size: int
+    modified_at: str
+    children: _containers.RepeatedCompositeFieldContainer[SandboxFileInfo]
+    def __init__(self, path: _Optional[str] = ..., name: _Optional[str] = ..., type: _Optional[str] = ..., size: _Optional[int] = ..., modified_at: _Optional[str] = ..., children: _Optional[_Iterable[_Union[SandboxFileInfo, _Mapping]]] = ...) -> None: ...
+
+class SandboxListFilesResponse(_message.Message):
+    __slots__ = ("conversation_id", "files", "source")
+    CONVERSATION_ID_FIELD_NUMBER: _ClassVar[int]
+    FILES_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_FIELD_NUMBER: _ClassVar[int]
+    conversation_id: str
+    files: _containers.RepeatedCompositeFieldContainer[SandboxFileInfo]
+    source: str
+    def __init__(self, conversation_id: _Optional[str] = ..., files: _Optional[_Iterable[_Union[SandboxFileInfo, _Mapping]]] = ..., source: _Optional[str] = ...) -> None: ...
+
+class GetPendingRequestsRequest(_message.Message):
+    __slots__ = ("session_id",)
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    session_id: str
+    def __init__(self, session_id: _Optional[str] = ...) -> None: ...
+
+class ConfirmationRequestInfo(_message.Message):
+    __slots__ = ("request_id", "question", "options", "timeout", "confirmation_type", "session_id", "created_at", "metadata", "is_expired")
+    class MetadataEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
+    QUESTION_FIELD_NUMBER: _ClassVar[int]
+    OPTIONS_FIELD_NUMBER: _ClassVar[int]
+    TIMEOUT_FIELD_NUMBER: _ClassVar[int]
+    CONFIRMATION_TYPE_FIELD_NUMBER: _ClassVar[int]
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    CREATED_AT_FIELD_NUMBER: _ClassVar[int]
+    METADATA_FIELD_NUMBER: _ClassVar[int]
+    IS_EXPIRED_FIELD_NUMBER: _ClassVar[int]
+    request_id: str
+    question: str
+    options: _containers.RepeatedScalarFieldContainer[str]
+    timeout: int
+    confirmation_type: str
+    session_id: str
+    created_at: str
+    metadata: _containers.ScalarMap[str, str]
+    is_expired: bool
+    def __init__(self, request_id: _Optional[str] = ..., question: _Optional[str] = ..., options: _Optional[_Iterable[str]] = ..., timeout: _Optional[int] = ..., confirmation_type: _Optional[str] = ..., session_id: _Optional[str] = ..., created_at: _Optional[str] = ..., metadata: _Optional[_Mapping[str, str]] = ..., is_expired: bool = ...) -> None: ...
+
+class GetPendingRequestsResponse(_message.Message):
+    __slots__ = ("requests", "total")
+    REQUESTS_FIELD_NUMBER: _ClassVar[int]
+    TOTAL_FIELD_NUMBER: _ClassVar[int]
+    requests: _containers.RepeatedCompositeFieldContainer[ConfirmationRequestInfo]
+    total: int
+    def __init__(self, requests: _Optional[_Iterable[_Union[ConfirmationRequestInfo, _Mapping]]] = ..., total: _Optional[int] = ...) -> None: ...
+
+class SubmitConfirmationRequest(_message.Message):
+    __slots__ = ("request_id", "response", "metadata")
+    class MetadataEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
+    RESPONSE_FIELD_NUMBER: _ClassVar[int]
+    METADATA_FIELD_NUMBER: _ClassVar[int]
+    request_id: str
+    response: str
+    metadata: _containers.ScalarMap[str, str]
+    def __init__(self, request_id: _Optional[str] = ..., response: _Optional[str] = ..., metadata: _Optional[_Mapping[str, str]] = ...) -> None: ...
+
+class SubmitConfirmationResponse(_message.Message):
+    __slots__ = ("success", "request_id", "response", "error")
+    SUCCESS_FIELD_NUMBER: _ClassVar[int]
+    REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
+    RESPONSE_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    success: bool
+    request_id: str
+    response: str
+    error: str
+    def __init__(self, success: bool = ..., request_id: _Optional[str] = ..., response: _Optional[str] = ..., error: _Optional[str] = ...) -> None: ...
+
+class CancelConfirmationRequest(_message.Message):
+    __slots__ = ("request_id",)
+    REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
+    request_id: str
+    def __init__(self, request_id: _Optional[str] = ...) -> None: ...
+
+class CancelConfirmationResponse(_message.Message):
+    __slots__ = ("success", "error")
+    SUCCESS_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    success: bool
+    error: str
+    def __init__(self, success: bool = ..., error: _Optional[str] = ...) -> None: ...
+
+class ConfirmationStatsRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class ConfirmationStatsResponse(_message.Message):
+    __slots__ = ("pending_count", "history_count", "pending_sessions")
+    PENDING_COUNT_FIELD_NUMBER: _ClassVar[int]
+    HISTORY_COUNT_FIELD_NUMBER: _ClassVar[int]
+    PENDING_SESSIONS_FIELD_NUMBER: _ClassVar[int]
+    pending_count: int
+    history_count: int
+    pending_sessions: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, pending_count: _Optional[int] = ..., history_count: _Optional[int] = ..., pending_sessions: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class WatchConfirmationsRequest(_message.Message):
+    __slots__ = ("session_id",)
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    session_id: str
+    def __init__(self, session_id: _Optional[str] = ...) -> None: ...
+
+class ConfirmationEvent(_message.Message):
+    __slots__ = ("event_type", "request", "timestamp")
+    EVENT_TYPE_FIELD_NUMBER: _ClassVar[int]
+    REQUEST_FIELD_NUMBER: _ClassVar[int]
+    TIMESTAMP_FIELD_NUMBER: _ClassVar[int]
+    event_type: str
+    request: ConfirmationRequestInfo
+    timestamp: int
+    def __init__(self, event_type: _Optional[str] = ..., request: _Optional[_Union[ConfirmationRequestInfo, _Mapping]] = ..., timestamp: _Optional[int] = ...) -> None: ...

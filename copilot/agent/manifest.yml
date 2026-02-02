@@ -9,9 +9,10 @@ type: Load Balanced Web Service
 
 # ============================================================
 # 镜像配置
+# 使用 location 指定 ECR 镜像地址（由部署脚本自动更新）
 # ============================================================
 image:
-  location: 308470327605.dkr.ecr.ap-southeast-1.amazonaws.com/zen0-backend/agent:latest
+  location: 308470327605.dkr.ecr.ap-southeast-1.amazonaws.com/zen0-backend/agent:20260131-114902
   port: 80  # Nginx 监听端口
 
 # ============================================================
@@ -23,10 +24,10 @@ http:
     path: '/health'
     success_codes: '200'
     healthy_threshold: 2
-    unhealthy_threshold: 3
+    unhealthy_threshold: 5    # 允许 5 次失败再标记不健康（避免因短暂负载导致重启）
     interval: 30s
-    timeout: 10s
-    grace_period: 120s  # 启动宽限期（2分钟）
+    timeout: 20s              # 增加超时时间（长任务执行期间 /health 响应可能较慢）
+    grace_period: 300s        # 启动宽限期（5分钟，PostgreSQL 初始化需要更长时间）
   deregistration_delay: 30s
 
 # ============================================================
@@ -43,8 +44,8 @@ nlb:
   healthcheck:
     port: 80
     healthy_threshold: 2
-    unhealthy_threshold: 2
-    interval: 10s
+    unhealthy_threshold: 5    # 允许 5 次失败再标记不健康
+    interval: 30s             # 延长检查间隔
 
 # ============================================================
 # 资源配置（默认/Staging）
@@ -126,9 +127,10 @@ environments:
       healthcheck:
         path: /health
         healthy_threshold: 2
-        unhealthy_threshold: 3
+        unhealthy_threshold: 5    # 允许 5 次失败再标记不健康
         interval: 30s
-        timeout: 10s
+        timeout: 20s              # 增加超时时间
+        grace_period: 300s        # 启动宽限期
       alias: agent.malue.ai
       hosted_zone: Z09256181GREC1AN4SOOS  # malue.ai 的托管区域 ID
     
@@ -139,14 +141,135 @@ environments:
       # CORS 配置：staging 环境限制允许的域名
       ALLOWED_ORIGINS: "https://agent.malue.ai,https://malue.ai,http://localhost:3000"
       # gRPC 配置继承自默认值（ENABLE_GRPC=true, GRPC_PORT=50051）
+
     
     # 从 SSM Parameter Store 获取敏感配置
     secrets:
+      DATABASE_URL: /copilot/zen0-backend/staging/secrets/DATABASE_URL
       ANTHROPIC_API_KEY: /copilot/zen0-backend/staging/secrets/ANTHROPIC_API_KEY
+      OPENAI_API_KEY: /copilot/zen0-backend/staging/secrets/OPENAI_API_KEY
+      TAVILY_API_KEY: /copilot/zen0-backend/staging/secrets/TAVILY_API_KEY
+      EXA_API_KEY: /copilot/zen0-backend/staging/secrets/EXA_API_KEY
+      SLIDESPEAK_API_KEY: /copilot/zen0-backend/staging/secrets/SLIDESPEAK_API_KEY
       E2B_API_KEY: /copilot/zen0-backend/staging/secrets/E2B_API_KEY
       RAGIE_API_KEY: /copilot/zen0-backend/staging/secrets/RAGIE_API_KEY
       AWS_ACCESS_KEY_ID: /copilot/zen0-backend/staging/secrets/AWS_ACCESS_KEY_ID
       AWS_SECRET_ACCESS_KEY: /copilot/zen0-backend/staging/secrets/AWS_SECRET_ACCESS_KEY
-      TAVILY_API_KEY: /copilot/zen0-backend/staging/secrets/TAVILY_API_KEY
-      EXA_API_KEY: /copilot/zen0-backend/staging/secrets/EXA_API_KEY
-      SLIDESPEAK_API_KEY: /copilot/zen0-backend/staging/secrets/SLIDESPEAK_API_KEY
+      # 向量数据库
+      QDRANT_API_KEY: /copilot/zen0-backend/staging/secrets/QDRANT_API_KEY
+      TENCENT_VDB_API_KEY: /copilot/zen0-backend/staging/secrets/TENCENT_VDB_API_KEY
+      # 外部 API（Dify/Coze/问数）
+      DIFY_API_KEY: /copilot/zen0-backend/staging/secrets/DIFY_API_KEY
+      COZE_API_KEY: /copilot/zen0-backend/staging/secrets/COZE_API_KEY
+      WENSHU_API_KEY: /copilot/zen0-backend/staging/secrets/WENSHU_API_KEY
+      WENSHU_API_BASE_URL: /copilot/zen0-backend/staging/secrets/WENSHU_API_BASE_URL
+      # 文档解析
+      UNSTRUCTURED_API_KEY: /copilot/zen0-backend/staging/secrets/UNSTRUCTURED_API_KEY
+      UNSTRUCTURED_API_URL: /copilot/zen0-backend/staging/secrets/UNSTRUCTURED_API_URL
+      # 千问 API（Fallback 兜底）
+      DASHSCOPE_API_KEY: /copilot/zen0-backend/staging/secrets/DASHSCOPE_API_KEY
+      # Gemini API
+      GEMINI_API_KEY: /copilot/zen0-backend/staging/secrets/GEMINI_API_KEY
+      # Claude 多供应商容灾
+      CLAUDE_API_KEY_VENDOR_A: /copilot/zen0-backend/staging/secrets/CLAUDE_API_KEY_VENDOR_A
+      CLAUDE_API_KEY_VENDOR_B: /copilot/zen0-backend/staging/secrets/CLAUDE_API_KEY_VENDOR_B
+
+  # ============================================================
+  # Production 环境配置
+  # Load Balanced Web Service：仅使用 NLB 提供内网 gRPC
+  # 禁用 HTTP/ALB，健康检查通过 NLB TCP 端口进行
+  # 其他服务通过 NLB 或 Service Connect 访问：
+  #   agent.production.zen0-backend.local:50051
+  # ============================================================
+  production:
+    # 资源配置（1 vCPU + 2GB）
+    cpu: 1024
+    memory: 2048
+    
+    # 副本配置（高可用）
+    count:
+      range: 2-10
+      cooldown:
+        in: 60s
+        out: 300s
+      cpu_percentage: 70
+      memory_percentage: 80
+    
+    # 禁用 HTTP/ALB（避免证书冲突）
+    http: false
+    
+    # NLB 健康检查（gRPC 端口，增加宽容度）
+    nlb:
+      port: 50051/tcp
+      target_port: 50051
+      healthcheck:
+        port: 50051  # 通过 gRPC 端口做 TCP 健康检查
+        healthy_threshold: 2
+        unhealthy_threshold: 5   # 允许 5 次失败再标记不健康
+        interval: 30s            # 30 秒检查一次，给 gRPC 更多启动时间
+    
+    # 网络配置
+    network:
+      connect: true  # 启用 Service Connect，内网 DNS: agent.production.zen0-backend.local
+      vpc:
+        placement: private
+    
+    # 环境变量
+    variables:
+      LOG_LEVEL: INFO
+      MAX_TOKENS: 8192
+      TEMPERATURE: "0.7"
+      AWS_DEFAULT_REGION: ap-southeast-1
+      AWS_S3_BUCKET: dify-storage-zenflux
+      # gRPC 配置
+      ENABLE_GRPC: "true"
+      GRPC_HOST: "0.0.0.0"
+      GRPC_PORT: "50051"
+      GRPC_MAX_WORKERS: "20"
+      # CORS 配置：Production 环境限制允许的域名
+      ALLOWED_ORIGINS: "https://api.dazee.ai,https://www.dazee.ai"
+
+    
+    # 从 SSM Parameter Store 获取敏感配置
+    # 复用 zen0-backend production 的 secrets
+    secrets:
+      # 数据库（PostgreSQL）
+      DATABASE_URL: /copilot/zen0-backend/production/secrets/DATABASE_URL
+      DB_DSN: /copilot/zen0-backend/production/secrets/DB_DSN
+      
+      # ElastiCache Redis（无密码认证）
+      REDIS_HOST: /copilot/zen0-backend/production/secrets/REDIS_HOST
+      REDIS_PORT: /copilot/zen0-backend/production/secrets/REDIS_PORT
+      
+      # AI 服务 API Keys
+      ANTHROPIC_API_KEY: /copilot/zen0-backend/production/secrets/ANTHROPIC_API_KEY
+      E2B_API_KEY: /copilot/zen0-backend/production/secrets/E2B_API_KEY
+      RAGIE_API_KEY: /copilot/zen0-backend/production/secrets/RAGIE_API_KEY
+      TAVILY_API_KEY: /copilot/zen0-backend/production/secrets/TAVILY_API_KEY
+      EXA_API_KEY: /copilot/zen0-backend/production/secrets/EXA_API_KEY
+      SLIDESPEAK_API_KEY: /copilot/zen0-backend/production/secrets/SLIDESPEAK_API_KEY
+      
+      # AWS 凭证（S3 访问）
+      AWS_ACCESS_KEY_ID: /copilot/zen0-backend/production/secrets/AWS_ACCESS_KEY_ID
+      AWS_SECRET_ACCESS_KEY: /copilot/zen0-backend/production/secrets/AWS_SECRET_ACCESS_KEY
+      
+      # 其他关键配置
+      OPENAI_API_KEY: /copilot/zen0-backend/production/secrets/OPENAI_API_KEY
+      DIFY_API_KEY: /copilot/zen0-backend/production/secrets/DIFY_API_KEY
+      COZE_API_KEY: /copilot/zen0-backend/production/secrets/COZE_API_KEY
+      QDRANT_API_KEY: /copilot/zen0-backend/production/secrets/QDRANT_API_KEY
+      TENCENT_VDB_API_KEY: /copilot/zen0-backend/production/secrets/TENCENT_VDB_API_KEY
+      # 外部 API（问数）
+      WENSHU_API_KEY: /copilot/zen0-backend/production/secrets/WENSHU_API_KEY
+      WENSHU_API_BASE_URL: /copilot/zen0-backend/production/secrets/WENSHU_API_BASE_URL
+      # 文档解析
+      UNSTRUCTURED_API_KEY: /copilot/zen0-backend/production/secrets/UNSTRUCTURED_API_KEY
+      UNSTRUCTURED_API_URL: /copilot/zen0-backend/production/secrets/UNSTRUCTURED_API_URL
+      # 千问 API（Fallback 兜底）
+      DASHSCOPE_API_KEY: /copilot/zen0-backend/production/secrets/DASHSCOPE_API_KEY
+      # Gemini API
+      GEMINI_API_KEY: /copilot/zen0-backend/production/secrets/GEMINI_API_KEY
+      # Claude 多供应商容灾
+      CLAUDE_API_KEY_VENDOR_A: /copilot/zen0-backend/production/secrets/CLAUDE_API_KEY_VENDOR_A
+      CLAUDE_API_KEY_VENDOR_B: /copilot/zen0-backend/production/secrets/CLAUDE_API_KEY_VENDOR_B
+

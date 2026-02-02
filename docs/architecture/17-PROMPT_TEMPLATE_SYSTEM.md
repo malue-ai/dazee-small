@@ -1494,7 +1494,7 @@ class EventBroadcaster:
 ### SimpleAgent 中使用
 
 ```python
-# core/agent/simple/simple_agent.py
+# core/agent/simple_agent.py
 
 class SimpleAgent:
     

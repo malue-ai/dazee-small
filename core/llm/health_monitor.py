@@ -94,7 +94,13 @@ class LLMHealthMonitor:
             "healthy" | "degraded" | "unhealthy"
         """
         stats = self.get_stats(target_key)
+        
+        # ⚠️ 样本不足时的特殊处理
         if stats["sample_count"] < self.policy.min_samples:
+            # 如果样本不足但有失败，直接返回 unhealthy
+            if stats["error_rate"] > 0:
+                return "unhealthy"
+            # 如果样本不足且全部成功，暂时认为健康（观察期）
             return "healthy"
         
         if stats["error_rate"] > self.policy.error_rate_threshold:

@@ -55,16 +55,18 @@ class ContentHandler:
     - 选择流式/非流式发送模式
     """
     
-    def __init__(self, broadcaster, block_state):
+    def __init__(self, broadcaster, block_state, message_id: str = None):
         """
         初始化 ContentHandler
         
         Args:
             broadcaster: EventBroadcaster 实例
             block_state: BlockState 实例（来自 RuntimeContext.block）
+            message_id: 消息 ID
         """
         self.broadcaster = broadcaster
         self.block_state = block_state
+        self.message_id = message_id
     
     # ==================== 非流式发送 ====================
     
@@ -95,7 +97,8 @@ class ContentHandler:
         if self.block_state.is_block_open():
             await self.broadcaster.emit_content_stop(
                 session_id=session_id,
-                index=self.block_state.current_index
+                index=self.block_state.current_index,
+                message_id=self.message_id
             )
             self.block_state.close_current_block()
         
@@ -107,13 +110,15 @@ class ContentHandler:
         await self.broadcaster.emit_content_start(
             session_id=session_id,
             index=index,
-            content_block=content_block
+            content_block=content_block,
+            message_id=self.message_id
         )
         
         # 发送 content_stop
         result = await self.broadcaster.emit_content_stop(
             session_id=session_id,
-            index=index
+            index=index,
+            message_id=self.message_id
         )
         
         self.block_state.close_current_block()
@@ -146,7 +151,8 @@ class ContentHandler:
         if self.block_state.is_block_open():
             yield await self.broadcaster.emit_content_stop(
                 session_id=session_id,
-                index=self.block_state.current_index
+                index=self.block_state.current_index,
+                message_id=self.message_id
             )
             self.block_state.close_current_block()
         
@@ -158,7 +164,8 @@ class ContentHandler:
         yield await self.broadcaster.emit_content_start(
             session_id=session_id,
             index=index,
-            content_block=content_block
+            content_block=content_block,
+            message_id=self.message_id
         )
         
         # 发送 content_delta（流式内容）
@@ -166,13 +173,15 @@ class ContentHandler:
             yield await self.broadcaster.emit_content_delta(
                 session_id=session_id,
                 index=index,
-                delta=delta
+                delta=delta,
+                message_id=self.message_id
             )
         
         # 发送 content_stop
         yield await self.broadcaster.emit_content_stop(
             session_id=session_id,
-            index=index
+            index=index,
+            message_id=self.message_id
         )
         
         self.block_state.close_current_block()
@@ -202,7 +211,8 @@ class ContentHandler:
         if self.block_state.is_block_open():
             await self.broadcaster.emit_content_stop(
                 session_id=session_id,
-                index=self.block_state.current_index
+                index=self.block_state.current_index,
+                message_id=self.message_id
             )
             self.block_state.close_current_block()
         
@@ -212,7 +222,8 @@ class ContentHandler:
         return await self.broadcaster.emit_content_start(
             session_id=session_id,
             index=index,
-            content_block=content_block
+            content_block=content_block,
+            message_id=self.message_id
         )
     
     async def send_delta(
@@ -237,7 +248,8 @@ class ContentHandler:
         return await self.broadcaster.emit_content_delta(
             session_id=session_id,
             index=self.block_state.current_index,
-            delta=delta
+            delta=delta,
+            message_id=self.message_id
         )
     
     async def stop_block(
@@ -262,7 +274,8 @@ class ContentHandler:
         result = await self.broadcaster.emit_content_stop(
             session_id=session_id,
             index=self.block_state.current_index,
-            signature=signature
+            signature=signature,
+            message_id=self.message_id
         )
         
         self.block_state.close_current_block()
@@ -358,16 +371,17 @@ class ContentHandler:
             return {"type": block_type, **content}
 
 
-def create_content_handler(broadcaster, block_state) -> ContentHandler:
+def create_content_handler(broadcaster, block_state, message_id: str = None) -> ContentHandler:
     """
     创建 ContentHandler 实例
     
     Args:
         broadcaster: EventBroadcaster 实例
+        message_id: 消息 ID
         block_state: BlockState 实例（来自 RuntimeContext.block）
         
     Returns:
         ContentHandler 实例
     """
-    return ContentHandler(broadcaster=broadcaster, block_state=block_state)
+    return ContentHandler(broadcaster=broadcaster, block_state=block_state, message_id=message_id)
 

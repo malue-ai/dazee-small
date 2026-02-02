@@ -6,7 +6,7 @@ Workspace API Router
 - GET  /workspace/{conv_id}/files/{path} - 获取/下载文件
 - POST /workspace/{conv_id}/files      - 上传文件
 - DELETE /workspace/{conv_id}/files/{path} - 删除文件
-- GET  /workspace/{conv_id}/projects   - 获取项目列表
+- GET  /workspace/{conv_id}/projects   - 获取项目列表（检测可运行的项目）
 
 沙盒管理接口：
 - GET  /workspace/{conv_id}/sandbox/status  - 获取沙盒状态
@@ -14,11 +14,9 @@ Workspace API Router
 - POST /workspace/{conv_id}/sandbox/pause   - 暂停沙盒
 - POST /workspace/{conv_id}/sandbox/resume  - 恢复沙盒
 - POST /workspace/{conv_id}/sandbox/kill    - 终止沙盒
-
-项目运行接口：
-- POST /workspace/{conv_id}/projects/{name}/run   - 运行项目
-- POST /workspace/{conv_id}/projects/{name}/stop  - 停止项目
-- GET  /workspace/{conv_id}/projects/{name}/logs  - 获取日志
+- POST /workspace/{conv_id}/sandbox/run     - 运行项目
+- POST /workspace/{conv_id}/sandbox/stop    - 停止项目
+- GET  /workspace/{conv_id}/sandbox/logs    - 获取项目日志
 """
 
 import os
@@ -87,22 +85,6 @@ class DeleteResponse(BaseModel):
     message: Optional[str] = None
 
 
-class ProjectInfo(BaseModel):
-    """项目信息"""
-    name: str
-    path: str
-    type: Optional[str] = None  # gradio / streamlit / nextjs / static
-    entry_file: Optional[str] = None
-    description: Optional[str] = None
-    has_requirements: bool = False
-
-
-class ProjectListResponse(BaseModel):
-    """项目列表响应"""
-    conversation_id: str
-    projects: List[ProjectInfo]
-
-
 class SandboxStatusResponse(BaseModel):
     """沙盒状态响应"""
     conversation_id: str
@@ -111,6 +93,8 @@ class SandboxStatusResponse(BaseModel):
     status: str  # creating/running/paused/killed/none
     stack: Optional[str] = None
     preview_url: Optional[str] = None
+    active_project_path: Optional[str] = None  # 当前运行的项目路径
+    active_project_stack: Optional[str] = None  # 当前运行的项目技术栈
     created_at: Optional[str] = None
     last_active_at: Optional[str] = None
 
@@ -119,19 +103,6 @@ class SandboxInitRequest(BaseModel):
     """沙盒初始化请求"""
     user_id: str
     stack: Optional[str] = None
-
-
-class ProjectRunRequest(BaseModel):
-    """项目运行请求"""
-    stack: str  # streamlit/gradio/python/flask/fastapi
-
-
-class ProjectRunResponse(BaseModel):
-    """项目运行响应"""
-    success: bool
-    preview_url: Optional[str] = None
-    message: Optional[str] = None
-    error: Optional[str] = None
 
 
 class CommandRequest(BaseModel):
@@ -147,6 +118,143 @@ class CommandResponse(BaseModel):
     stdout: Optional[str] = None
     stderr: Optional[str] = None
     error: Optional[str] = None
+
+
+class ProjectInfo(BaseModel):
+    """项目信息"""
+    name: str
+    path: str
+    type: str  # python, nodejs, react, vue, nextjs, flask, fastapi 等
+    entry_file: Optional[str] = None
+    port: Optional[int] = None
+    status: Optional[str] = "stopped"  # stopped, running, error
+
+
+class ProjectListResponse(BaseModel):
+    """项目列表响应"""
+    conversation_id: str
+    projects: List[ProjectInfo]
+
+
+# ==================== 项目检测 API ====================
+
+@router.get("/{conversation_id}/projects", response_model=ProjectListResponse)
+async def get_projects(conversation_id: str):
+    """
+    获取项目列表
+    
+    扫描沙盒中的项目目录，检测可运行的项目类型。
+    通过识别特征文件（package.json, requirements.txt 等）来判断项目类型。
+    
+    Args:
+        conversation_id: 对话 ID
+    """
+    try:
+        service = get_sandbox_service()
+        
+        # 检查沙盒是否存在
+        sandbox_info = await service.get_sandbox_status(conversation_id)
+        if not sandbox_info or sandbox_info.status == "none":
+            # 沙盒不存在时返回空列表
+            return ProjectListResponse(
+                conversation_id=conversation_id,
+                projects=[]
+            )
+        
+        projects: List[ProjectInfo] = []
+        project_root = "/home/user/project"
+        
+        # 使用命令检测项目类型
+        # 检查根目录下的特征文件
+        detect_cmd = f"""
+cd {project_root} 2>/dev/null || exit 0
+echo "=== ROOT ==="
+ls -la 2>/dev/null | head -30
+echo "=== PACKAGE_JSON ==="
+cat package.json 2>/dev/null | head -20 || echo "NOT_FOUND"
+echo "=== REQUIREMENTS ==="
+cat requirements.txt 2>/dev/null | head -10 || echo "NOT_FOUND"
+echo "=== PYPROJECT ==="
+cat pyproject.toml 2>/dev/null | head -20 || echo "NOT_FOUND"
+"""
+        result = await service.run_command(conversation_id, detect_cmd, timeout=15)
+        
+        if result.get("success") and result.get("stdout"):
+            output = result["stdout"]
+            
+            # 解析项目类型
+            project_type = None
+            entry_file = None
+            port = None
+            
+            # 检测 Node.js 项目
+            if "package.json" in output and "NOT_FOUND" not in output.split("=== PACKAGE_JSON ===")[1].split("===")[0]:
+                pkg_section = output.split("=== PACKAGE_JSON ===")[1].split("===")[0]
+                
+                # 判断具体框架
+                if '"next"' in pkg_section:
+                    project_type = "nextjs"
+                    port = 3000
+                elif '"vue"' in pkg_section:
+                    project_type = "vue"
+                    port = 5173
+                elif '"react"' in pkg_section:
+                    project_type = "react"
+                    port = 3000
+                else:
+                    project_type = "nodejs"
+                    port = 3000
+                
+                # 检测入口文件
+                if '"main"' in pkg_section:
+                    entry_file = "package.json"
+            
+            # 检测 Python 项目
+            elif "requirements.txt" in output or "pyproject.toml" in output:
+                req_section = output.split("=== REQUIREMENTS ===")[1].split("===")[0] if "=== REQUIREMENTS ===" in output else ""
+                pyproject_section = output.split("=== PYPROJECT ===")[1] if "=== PYPROJECT ===" in output else ""
+                
+                if "fastapi" in req_section.lower() or "fastapi" in pyproject_section.lower():
+                    project_type = "fastapi"
+                    entry_file = "main.py"
+                    port = 8000
+                elif "flask" in req_section.lower() or "flask" in pyproject_section.lower():
+                    project_type = "flask"
+                    entry_file = "app.py"
+                    port = 5000
+                elif "streamlit" in req_section.lower():
+                    project_type = "streamlit"
+                    entry_file = "app.py"
+                    port = 8501
+                else:
+                    project_type = "python"
+                    entry_file = "main.py"
+            
+            # 如果检测到项目类型，添加到列表
+            if project_type:
+                projects.append(ProjectInfo(
+                    name="project",
+                    path=project_root,
+                    type=project_type,
+                    entry_file=entry_file,
+                    port=port,
+                    status="stopped"
+                ))
+        
+        return ProjectListResponse(
+            conversation_id=conversation_id,
+            projects=projects
+        )
+    
+    except SandboxNotFoundError:
+        # 沙盒不存在时返回空列表
+        return ProjectListResponse(
+            conversation_id=conversation_id,
+            projects=[]
+        )
+    except Exception as e:
+        logger.error(f"获取项目列表失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="获取项目列表失败")
 
 
 # ==================== 沙盒管理 API ====================
@@ -176,6 +284,8 @@ async def get_sandbox_status(conversation_id: str):
             status=info.status,
             stack=info.stack,
             preview_url=info.preview_url,
+            active_project_path=info.active_project_path,
+            active_project_stack=info.active_project_stack,
             created_at=info.created_at,
             last_active_at=info.last_active_at
         )
@@ -214,6 +324,8 @@ async def init_sandbox(
             status=info.status,
             stack=info.stack,
             preview_url=info.preview_url,
+            active_project_path=info.active_project_path,
+            active_project_stack=info.active_project_stack,
             created_at=info.created_at,
             last_active_at=info.last_active_at
         )
@@ -273,6 +385,8 @@ async def resume_sandbox(conversation_id: str):
             status=info.status,
             stack=info.stack,
             preview_url=info.preview_url,
+            active_project_path=info.active_project_path,
+            active_project_stack=info.active_project_stack,
             created_at=info.created_at,
             last_active_at=info.last_active_at
         )
@@ -345,17 +459,20 @@ async def run_command(
 @router.get("/{conversation_id}/files", response_model=FileListResponse)
 async def list_files(
     conversation_id: str,
-    path: str = Query(default="/home/user", description="目录路径"),
-    tree: bool = Query(default=False, description="是否返回树形结构")
+    path: str = Query(default="/home/user/project", description="目录路径"),
+    tree: bool = Query(default=True, description="是否返回树形结构")
 ):
     """
     获取 workspace 文件列表（沙盒模式）
     
     Args:
         conversation_id: 对话 ID
-        path: 目录路径（从 /home/user 开始）
+        path: 目录路径，默认为项目目录 /home/user/project
         tree: 是否返回递归树形结构
     """
+    # 强制使用项目目录，忽略其他路径请求（不向后兼容）
+    path = "/home/user/project"
+    
     try:
         service = get_sandbox_service()
         
@@ -484,7 +601,7 @@ async def upload_file(
         service = get_sandbox_service()
         
         # 构造完整路径
-        full_path = save_path if save_path.startswith("/") else f"/home/user/{save_path}"
+        full_path = save_path if save_path.startswith("/") else f"/home/user/project/{save_path}"
         
         result = await service.write_file(conversation_id, full_path, content)
         
@@ -581,231 +698,3 @@ async def delete_file(
         logger.error(f"删除文件失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="删除文件失败")
 
-
-# ==================== 项目管理 API ====================
-
-@router.get("/{conversation_id}/projects", response_model=ProjectListResponse)
-async def list_projects(
-    conversation_id: str
-):
-    """
-    获取沙盒中的项目列表
-    
-    检测规则：
-    - 包含 requirements.txt / package.json / pyproject.toml 的目录
-    - 包含 app.py / main.py / index.html 等入口文件的目录
-    
-    Args:
-        conversation_id: 对话 ID
-    """
-    try:
-        service = get_sandbox_service()
-        
-        try:
-            files = await service.list_files(conversation_id, "/home/user")
-            
-            projects = []
-            for f in files:
-                if f.type == "directory":
-                    project_info = await _detect_sandbox_project(service, conversation_id, f.path, f.name)
-                    if project_info:
-                        projects.append(project_info)
-            
-            return ProjectListResponse(
-                conversation_id=conversation_id,
-                projects=projects
-            )
-        except SandboxNotFoundError:
-            # 沙盒不存在时返回空列表
-            logger.info(f"沙盒不存在，返回空项目列表: {conversation_id}")
-            return ProjectListResponse(
-                conversation_id=conversation_id,
-                projects=[]
-            )
-    
-    except SandboxServiceError as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        logger.error(f"获取项目列表失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="获取项目列表失败")
-
-
-@router.post("/{conversation_id}/projects/{project_name}/run", response_model=ProjectRunResponse)
-async def run_project(
-    conversation_id: str,
-    project_name: str,
-    request: ProjectRunRequest
-):
-    """
-    运行项目
-    
-    Args:
-        conversation_id: 对话 ID
-        project_name: 项目名称
-        request: 运行请求（指定技术栈）
-    """
-    try:
-        service = get_sandbox_service()
-        result = await service.run_project(
-            conversation_id=conversation_id,
-            project_path=project_name,
-            stack=request.stack
-        )
-        
-        return ProjectRunResponse(
-            success=result.success,
-            preview_url=result.preview_url,
-            message=result.message,
-            error=result.error
-        )
-    
-    except SandboxNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except SandboxServiceError as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        logger.error(f"运行项目失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="运行项目失败")
-
-
-@router.post("/{conversation_id}/projects/{project_name}/stop")
-async def stop_project(
-    conversation_id: str,
-    project_name: str
-):
-    """
-    停止项目
-    
-    Args:
-        conversation_id: 对话 ID
-        project_name: 项目名称
-    """
-    try:
-        service = get_sandbox_service()
-        success = await service.stop_project(conversation_id)
-        
-        return {"success": success, "message": "项目已停止"}
-    
-    except SandboxNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except SandboxServiceError as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        logger.error(f"停止项目失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="停止项目失败")
-
-
-@router.get("/{conversation_id}/projects/{project_name}/logs")
-async def get_project_logs(
-    conversation_id: str,
-    project_name: str,
-    lines: int = Query(default=100, description="日志行数")
-):
-    """
-    获取项目日志
-    
-    Args:
-        conversation_id: 对话 ID
-        project_name: 项目名称
-        lines: 日志行数
-    """
-    try:
-        service = get_sandbox_service()
-        logs = await service.get_logs(conversation_id, lines)
-        
-        return {
-            "project": project_name,
-            "logs": logs
-        }
-    
-    except SandboxNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except SandboxServiceError as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        logger.error(f"获取项目日志失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="获取项目日志失败")
-
-
-# ==================== 辅助函数 ====================
-
-async def _detect_sandbox_project(
-    service,
-    conversation_id: str,
-    dir_path: str,
-    dir_name: str
-) -> Optional[ProjectInfo]:
-    """
-    检测沙盒目录是否为项目
-    """
-    try:
-        files = await service.list_files(conversation_id, dir_path)
-        file_names = {f.name for f in files}
-        
-        project_type = None
-        entry_file = None
-        has_requirements = False
-        
-        # Python 项目检测
-        if "requirements.txt" in file_names:
-            has_requirements = True
-            
-            if "app.py" in file_names:
-                # 读取 requirements.txt 判断框架
-                try:
-                    req_content = await service.read_file(conversation_id, f"{dir_path}/requirements.txt")
-                    if "gradio" in req_content.lower():
-                        project_type = "gradio"
-                    elif "streamlit" in req_content.lower():
-                        project_type = "streamlit"
-                    elif "flask" in req_content.lower():
-                        project_type = "flask"
-                    elif "fastapi" in req_content.lower():
-                        project_type = "fastapi"
-                    else:
-                        project_type = "python"
-                except:
-                    project_type = "python"
-                entry_file = "app.py"
-            elif "main.py" in file_names:
-                entry_file = "main.py"
-                project_type = "python"
-        
-        # Node.js 项目检测
-        if "package.json" in file_names:
-            try:
-                import json
-                pkg_content = await service.read_file(conversation_id, f"{dir_path}/package.json")
-                pkg = json.loads(pkg_content)
-                deps = pkg.get("dependencies", {})
-                
-                if "next" in deps:
-                    project_type = "nextjs"
-                elif "vue" in deps:
-                    project_type = "vue"
-                elif "react" in deps:
-                    project_type = "react"
-                else:
-                    project_type = "nodejs"
-            except:
-                project_type = "nodejs"
-        
-        # 静态网页检测
-        if "index.html" in file_names and not project_type:
-            project_type = "static"
-            entry_file = "index.html"
-        
-        if not project_type and not entry_file and not has_requirements:
-            return None
-        
-        return ProjectInfo(
-            name=dir_name,
-            path=dir_name,
-            type=project_type,
-            entry_file=entry_file,
-            has_requirements=has_requirements
-        )
-        
-    except Exception as e:
-        logger.warning(f"检测项目失败: {dir_path} - {e}")
-        return None

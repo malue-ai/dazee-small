@@ -422,6 +422,6 @@ plan_todo_tool → Agent → emit_conversation_delta (conversation)
 
 - `core/events/conversation_events.py` - Conversation 事件管理器
 - `services/chat_event_handler.py` - 事件处理器（更新数据库）
-- `core/agent/simple/simple_agent.py` - Agent 发送事件
+- `core/agent/simple_agent.py` - Agent 发送事件
 - `tools/plan_todo_tool.py` - Plan/Todo 工具
 

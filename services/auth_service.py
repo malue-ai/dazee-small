@@ -4,7 +4,7 @@
 提供用户认证相关的业务逻辑：
 - Token 生成和验证
 - 密码验证
-- 用户信息管理
+- 用户信息管理（持久化到数据库）
 """
 
 import os
@@ -15,6 +15,8 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 
 from logger import get_logger
+from infra.database import AsyncSessionLocal
+from infra.database.crud.user import get_or_create_user_by_username
 
 logger = get_logger("auth_service")
 
@@ -71,7 +73,7 @@ class AuthService:
     - 用户信息管理
     """
     
-    def __init__(self):
+    def __init__(self) -> None:
         self._password = AUTH_PASSWORD
         self._secret = JWT_SECRET
         self._expire_hours = TOKEN_EXPIRE_HOURS
@@ -152,9 +154,12 @@ class AuthService:
             logger.warning(f"Token 验证失败: {e}")
             raise TokenInvalidError(f"Token 验证失败: {e}")
     
-    def authenticate(self, username: str, password: str) -> Dict[str, Any]:
+    async def authenticate(self, username: str, password: str) -> Dict[str, Any]:
         """
-        用户认证
+        用户认证（异步，使用数据库存储用户）
+        
+        - 同一个 username 登录会返回相同的 user_id
+        - 新 username 登录会创建新用户（UUID 作为 user_id）
         
         Args:
             username: 用户名
@@ -171,20 +176,26 @@ class AuthService:
             logger.warning(f"登录失败: 用户 {username} 密码错误")
             raise InvalidCredentialsError("密码错误")
         
-        # 生成用户 ID（基于用户名的哈希）
-        user_id = f"user_{hashlib.md5(username.encode()).hexdigest()[:8]}"
+        # 从数据库获取或创建用户
+        async with AsyncSessionLocal() as session:
+            user, is_new = await get_or_create_user_by_username(session, username)
+            user_id = user.id
+            created_at = user.created_at.isoformat() if user.created_at else datetime.utcnow().isoformat()
         
         # 创建 Token
         token = self.create_token(user_id, username)
         
-        logger.info(f"用户登录成功: {username} ({user_id})")
+        if is_new:
+            logger.info(f"新用户注册并登录: {username} ({user_id})")
+        else:
+            logger.info(f"用户登录成功: {username} ({user_id})")
         
         return {
             "token": token,
             "user": {
                 "id": user_id,
                 "username": username,
-                "created_at": datetime.utcnow().isoformat()
+                "created_at": created_at
             }
         }
     

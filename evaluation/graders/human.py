@@ -1,417 +1,559 @@
 """
 Human Graders（人工评分器）
 
-人工评估接口和工作流，特点：
-- 黄金标准：人工评分作为参考标准
-- 定期校准：用于校准 LLM Judge
-- 抽样评估：每周抽样 100 条进行评估
-- 复杂案例：处理 LLM 无法判断的复杂案例
+黄金标准评分器，用于：
+1. 定期抽样评估（每周100条）
+2. 校准LLM评分器（Model-based Graders）
+3. 处理复杂主观任务
+4. 建立评分基准
 
-工作流：
-1. 自动抽取需要人工复核的案例（低置信度、边界案例）
-2. 人工在 Web UI 中进行评分
-3. 对比人工评分 vs LLM 评分，计算一致性
-4. 调整 LLM Judge 的 Prompt 和阈值
+特点：
+- 最准确：人工判断是最终标准
+- 昂贵：需要人力投入
+- 缓慢：无法实时评估
+- 主观性：需要多人评分求共识
+
+使用策略：
+- 定期抽样（每周100条）进行人工评分
+- 与LLM评分对比，计算偏差
+- 根据偏差调整LLM评分器的rubric
 """
 
-import logging
+import random
+import statistics
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
-from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
 
 from evaluation.models import (
     GradeResult,
     GraderType,
-    Trial,
     Transcript,
+    Trial,
+    EvaluationReport,
 )
 
-logger = logging.getLogger(__name__)
 
-
-class HumanReviewStatus(str, Enum):
-    """人工复核状态"""
-    PENDING = "pending"           # 待复核
-    IN_PROGRESS = "in_progress"   # 复核中
-    COMPLETED = "completed"       # 已完成
-    SKIPPED = "skipped"           # 已跳过
-
-
-class HumanReviewRecord:
-    """人工复核记录"""
-    
-    def __init__(
-        self,
-        trial_id: str,
-        reviewer: str,
-        score: float,
-        passed: bool,
-        explanation: Optional[str] = None,
-        reviewed_at: Optional[datetime] = None
-    ):
-        self.trial_id = trial_id
-        self.reviewer = reviewer
-        self.score = score
-        self.passed = passed
-        self.explanation = explanation
-        self.reviewed_at = reviewed_at or datetime.now()
-    
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "trial_id": self.trial_id,
-            "reviewer": self.reviewer,
-            "score": self.score,
-            "passed": self.passed,
-            "explanation": self.explanation,
-            "reviewed_at": self.reviewed_at.isoformat(),
-        }
-
-
-class HumanGrader:
+class HumanGraders:
     """
-    人工评分器
+    人工评分器（用于校准LLM评分器）
     
     使用方式：
-        grader = HumanGrader()
+        graders = HumanGraders(model_grader=model_based_graders)
         
-        # 获取待复核案例
-        pending = grader.get_pending_reviews(limit=100)
+        # 每周校准
+        await graders.weekly_calibration(sample_size=100)
         
-        # 提交人工评分
-        grader.submit_review(
-            trial_id="trial_123",
-            reviewer="alice",
-            score=4.5,
-            passed=True,
-            explanation="回答准确完整"
-        )
-        
-        # 计算一致性
-        agreement = grader.calculate_agreement(trial_id="trial_123")
+        # 查看校准报告
+        report = graders.get_calibration_report()
     """
     
-    def __init__(self, storage_path: Optional[str] = None):
+    def __init__(self, model_grader=None, storage=None):
         """
         初始化人工评分器
         
         Args:
-            storage_path: 存储路径（用于持久化复核记录）
+            model_grader: 需要校准的LLM评分器
+            storage: 存储服务（用于保存/加载评分数据）
         """
-        self.storage_path = storage_path
-        self.reviews: Dict[str, HumanReviewRecord] = {}  # trial_id -> review
-        self._load_reviews()
-    
-    def _load_reviews(self) -> None:
-        """从存储加载复核记录"""
-        if not self.storage_path:
-            return
+        self.model_grader = model_grader
+        self.storage = storage
+        self.calibration_history: List[Dict[str, Any]] = []
+        self.pending_samples: List[Dict[str, Any]] = []
         
-        try:
-            import json
-            from pathlib import Path
-            
-            path = Path(self.storage_path)
-            if path.exists():
-                with open(path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    for record_data in data.get("reviews", []):
-                        record = HumanReviewRecord(
-                            trial_id=record_data["trial_id"],
-                            reviewer=record_data["reviewer"],
-                            score=record_data["score"],
-                            passed=record_data["passed"],
-                            explanation=record_data.get("explanation"),
-                            reviewed_at=datetime.fromisoformat(record_data["reviewed_at"]),
-                        )
-                        self.reviews[record.trial_id] = record
-        except Exception as e:
-            logger.warning(f"加载复核记录失败: {e}")
+    # ===================
+    # 抽样管理
+    # ===================
     
-    def _save_reviews(self) -> None:
-        """保存复核记录到存储"""
-        if not self.storage_path:
-            return
-        
-        try:
-            import json
-            from pathlib import Path
-            
-            path = Path(self.storage_path)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            
-            data = {
-                "reviews": [r.to_dict() for r in self.reviews.values()],
-                "updated_at": datetime.now().isoformat(),
-            }
-            
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            logger.error(f"保存复核记录失败: {e}")
-    
-    def get_pending_reviews(
+    async def sample_from_production(
         self,
-        trials: List[Trial],
-        limit: int = 100,
-        criteria: Optional[Dict[str, Any]] = None
-    ) -> List[Trial]:
+        sample_size: int = 100,
+        time_range_days: int = 7,
+        stratify_by: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """
-        获取待人工复核的案例
+        从生产环境随机抽样
         
         Args:
-            trials: 试验列表
-            limit: 返回数量限制
-            criteria: 筛选条件
-                - min_confidence: 最低置信度阈值（低于此值的需要复核）
-                - score_range: 分数范围（边界案例）
-                - random_sample: 随机抽样比例
+            sample_size: 抽样数量
+            time_range_days: 时间范围（天）
+            stratify_by: 分层抽样字段（如 "category", "qos_level"）
             
         Returns:
-            List[Trial]: 待复核的试验列表
+            List[Dict]: 抽样样本列表
         """
-        criteria = criteria or {}
-        min_confidence = criteria.get("min_confidence", 0.7)
-        score_range = criteria.get("score_range", (3.0, 4.0))  # 边界案例
-        random_sample = criteria.get("random_sample", 0.1)  # 10% 随机抽样
+        # 实际实现需要连接生产数据库
+        # 这里提供接口定义
         
-        pending = []
+        if self.storage is None:
+            # 模拟数据（用于测试）
+            return [
+                {
+                    "sample_id": f"sample_{i}",
+                    "user_query": f"测试问题 {i}",
+                    "agent_response": f"测试回答 {i}",
+                    "transcript": None,
+                    "category": random.choice(["conversation", "coding", "research"]),
+                    "timestamp": datetime.now() - timedelta(days=random.randint(0, time_range_days)),
+                }
+                for i in range(sample_size)
+            ]
         
-        for trial in trials:
-            # 跳过已复核的
-            if trial.trial_id in self.reviews:
-                continue
-            
-            # 检查是否需要复核
-            needs_review = False
-            
-            # 1. 低置信度案例
-            for gr in trial.grade_results:
-                if gr.confidence is not None and gr.confidence < min_confidence:
-                    needs_review = True
-                    break
-                if gr.needs_human_review:
-                    needs_review = True
-                    break
-            
-            # 2. 边界案例（分数在临界值附近）
-            if not needs_review:
-                avg_score = trial.average_score
-                if avg_score is not None:
-                    if score_range[0] <= avg_score * 5 <= score_range[1]:  # 转换为1-5分制
-                        needs_review = True
-            
-            # 3. 随机抽样
-            if not needs_review:
-                import random
-                if random.random() < random_sample:
-                    needs_review = True
-            
-            if needs_review:
-                pending.append(trial)
-        
-        # 限制数量
-        return pending[:limit]
-    
-    def submit_review(
-        self,
-        trial_id: str,
-        reviewer: str,
-        score: float,
-        passed: bool,
-        explanation: Optional[str] = None
-    ) -> HumanReviewRecord:
-        """
-        提交人工评分
-        
-        Args:
-            trial_id: 试验ID
-            reviewer: 复核人
-            score: 评分（0-1或1-5）
-            passed: 是否通过
-            explanation: 评分说明
-            
-        Returns:
-            HumanReviewRecord: 复核记录
-        """
-        # 标准化分数到 0-1
-        if score > 1.0:
-            score = score / 5.0
-        
-        record = HumanReviewRecord(
-            trial_id=trial_id,
-            reviewer=reviewer,
-            score=score,
-            passed=passed,
-            explanation=explanation,
+        # 从存储获取样本
+        samples = await self.storage.get_recent_conversations(
+            days=time_range_days,
+            limit=sample_size * 2  # 获取更多用于分层抽样
         )
         
-        self.reviews[trial_id] = record
-        self._save_reviews()
+        # 分层抽样
+        if stratify_by and samples:
+            strata = {}
+            for s in samples:
+                key = s.get(stratify_by, "unknown")
+                if key not in strata:
+                    strata[key] = []
+                strata[key].append(s)
+            
+            # 按比例抽样
+            result = []
+            for key, stratum in strata.items():
+                n = max(1, int(sample_size * len(stratum) / len(samples)))
+                result.extend(random.sample(stratum, min(n, len(stratum))))
+            
+            return result[:sample_size]
         
-        logger.info(f"✅ 人工复核完成: {trial_id} by {reviewer}, score={score:.2f}, passed={passed}")
+        return random.sample(samples, min(sample_size, len(samples)))
+    
+    def add_pending_sample(self, sample: Dict[str, Any]) -> None:
+        """
+        添加待评分样本
+        
+        Args:
+            sample: 样本数据
+        """
+        sample["added_at"] = datetime.now()
+        sample["status"] = "pending"
+        self.pending_samples.append(sample)
+    
+    def get_pending_samples(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """
+        获取待评分样本
+        
+        Args:
+            limit: 返回数量限制
+            
+        Returns:
+            List[Dict]: 待评分样本列表
+        """
+        pending = [s for s in self.pending_samples if s.get("status") == "pending"]
+        return pending[:limit]
+    
+    # ===================
+    # 人工评分记录
+    # ===================
+    
+    def record_human_score(
+        self,
+        sample_id: str,
+        rater_id: str,
+        scores: Dict[str, float],
+        comments: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        记录人工评分结果
+        
+        Args:
+            sample_id: 样本ID
+            rater_id: 评分员ID
+            scores: 评分字典（如 {"intent": 4, "quality": 5}）
+            comments: 评论（可选）
+            
+        Returns:
+            Dict: 评分记录
+        """
+        record = {
+            "sample_id": sample_id,
+            "rater_id": rater_id,
+            "scores": scores,
+            "comments": comments,
+            "timestamp": datetime.now().isoformat(),
+        }
+        
+        # 更新样本状态
+        for sample in self.pending_samples:
+            if sample.get("sample_id") == sample_id:
+                if "human_scores" not in sample:
+                    sample["human_scores"] = []
+                sample["human_scores"].append(record)
+                
+                # 如果有足够的评分员，标记为已完成
+                if len(sample["human_scores"]) >= 3:
+                    sample["status"] = "completed"
+                break
         
         return record
     
-    def get_review(self, trial_id: str) -> Optional[HumanReviewRecord]:
-        """获取复核记录"""
-        return self.reviews.get(trial_id)
+    # ===================
+    # 评分聚合
+    # ===================
     
-    def calculate_agreement(
-        self,
-        trial: Trial,
-        human_review: Optional[HumanReviewRecord] = None
+    @staticmethod
+    def aggregate_human_scores(
+        scores_list: List[Dict[str, float]]
     ) -> Dict[str, Any]:
         """
-        计算人工评分与 LLM 评分的一致性
+        聚合多个评分员的评分
         
         Args:
-            trial: 试验记录
-            human_review: 人工复核记录（如果为None，则从存储中查找）
+            scores_list: 评分列表（每个元素是一个评分员的评分）
             
         Returns:
-            Dict: 一致性分析结果
+            Dict: 聚合结果（平均分、标准差、一致性）
         """
-        if human_review is None:
-            human_review = self.get_review(trial.trial_id)
+        if not scores_list:
+            return {"average": {}, "std": {}, "agreement": 0.0}
         
-        if human_review is None:
-            return {
-                "error": "未找到人工复核记录",
-                "agreement": None,
-            }
+        # 获取所有评分维度
+        dimensions = set()
+        for scores in scores_list:
+            dimensions.update(scores.keys())
         
-        # 获取 LLM 评分
-        llm_scores = []
-        for gr in trial.grade_results:
-            if gr.grader_type == GraderType.MODEL and gr.score is not None:
-                llm_scores.append(gr.score)
+        # 计算每个维度的统计量
+        result = {"average": {}, "std": {}}
         
-        if not llm_scores:
-            return {
-                "error": "未找到 LLM 评分",
-                "agreement": None,
-            }
+        for dim in dimensions:
+            values = [s.get(dim) for s in scores_list if s.get(dim) is not None]
+            if values:
+                result["average"][dim] = statistics.mean(values)
+                result["std"][dim] = statistics.stdev(values) if len(values) > 1 else 0.0
         
-        # 计算平均 LLM 评分
-        avg_llm_score = sum(llm_scores) / len(llm_scores)
-        human_score = human_review.score
+        # 计算评分员间一致性（Inter-Rater Agreement）
+        # 使用简化的 Krippendorff's Alpha 近似
+        if len(scores_list) >= 2:
+            total_variance = []
+            for dim in dimensions:
+                values = [s.get(dim) for s in scores_list if s.get(dim) is not None]
+                if len(values) >= 2:
+                    total_variance.append(statistics.variance(values))
+            
+            if total_variance:
+                avg_variance = statistics.mean(total_variance)
+                # 假设最大方差为 4（5分制评分的最大方差）
+                result["agreement"] = max(0.0, 1.0 - avg_variance / 4.0)
+            else:
+                result["agreement"] = 1.0
+        else:
+            result["agreement"] = 1.0
         
-        # 计算一致性（使用 Cohen's Kappa 的简化版本）
-        # 对于连续分数，使用相关系数
-        score_diff = abs(avg_llm_score - human_score)
-        agreement = max(0.0, 1.0 - score_diff)  # 差异越小，一致性越高
-        
-        # 判断是否通过的一致性
-        llm_passed = any(gr.passed for gr in trial.grade_results if gr.grader_type == GraderType.MODEL)
-        passed_agreement = 1.0 if llm_passed == human_review.passed else 0.0
-        
-        return {
-            "human_score": human_score,
-            "llm_score": avg_llm_score,
-            "score_agreement": agreement,
-            "passed_agreement": passed_agreement,
-            "overall_agreement": (agreement + passed_agreement) / 2.0,
-            "score_diff": score_diff,
-        }
+        return result
     
-    def get_calibration_stats(
+    # ===================
+    # LLM评分器校准
+    # ===================
+    
+    async def collect_human_scores(
         self,
-        trials: List[Trial],
-        time_range_days: int = 7
+        samples: List[Dict[str, Any]],
+        num_raters: int = 3
+    ) -> List[Dict[str, Any]]:
+        """
+        收集人工评分（接口方法，实际评分通过UI或其他方式完成）
+        
+        Args:
+            samples: 待评分样本
+            num_raters: 每个样本需要的评分员数量
+            
+        Returns:
+            List[Dict]: 带人工评分的样本列表
+        """
+        # 将样本添加到待评分队列
+        for sample in samples:
+            self.add_pending_sample(sample)
+        
+        # 返回待评分样本（实际评分需要人工完成）
+        return self.pending_samples
+    
+    async def calibrate_with_llm(
+        self,
+        sample: Dict[str, Any],
+        human_scores: Dict[str, float]
     ) -> Dict[str, Any]:
         """
-        获取校准统计信息（用于调整 LLM Judge）
+        将人工评分与LLM评分对比
         
         Args:
-            trials: 试验列表
-            time_range_days: 时间范围（天）
+            sample: 样本数据
+            human_scores: 人工评分（聚合后）
             
         Returns:
-            Dict: 统计信息
+            Dict: 对比结果
         """
-        cutoff = datetime.now() - timedelta(days=time_range_days)
-        
-        agreements = []
-        score_diffs = []
-        
-        for trial in trials:
-            review = self.get_review(trial.trial_id)
-            if review and review.reviewed_at >= cutoff:
-                agreement = self.calculate_agreement(trial, review)
-                if "overall_agreement" in agreement:
-                    agreements.append(agreement["overall_agreement"])
-                    score_diffs.append(agreement["score_diff"])
-        
-        if not agreements:
+        if self.model_grader is None:
             return {
-                "total_reviews": 0,
-                "avg_agreement": None,
-                "avg_score_diff": None,
+                "sample_id": sample.get("sample_id"),
+                "human_scores": human_scores,
+                "llm_scores": {},
+                "bias": {},
+                "error": "LLM评分器未配置",
             }
         
+        # 获取LLM评分
+        llm_scores = {}
+        
+        # 意图理解评分
+        if "intent" in human_scores:
+            result = await self.model_grader.grade_intent_understanding(
+                user_query=sample.get("user_query", ""),
+                agent_response=sample.get("agent_response", ""),
+            )
+            llm_scores["intent"] = result.score * 5  # 转换为1-5分
+        
+        # 质量评分
+        if "quality" in human_scores:
+            result = await self.model_grader.grade_response_quality(
+                user_query=sample.get("user_query", ""),
+                agent_response=sample.get("agent_response", ""),
+            )
+            llm_scores["quality"] = result.details.get("weighted_score", 3.0)
+        
+        # 计算偏差
+        bias = {}
+        for dim in human_scores:
+            if dim in llm_scores:
+                bias[dim] = llm_scores[dim] - human_scores[dim]
+        
         return {
-            "total_reviews": len(agreements),
-            "avg_agreement": sum(agreements) / len(agreements),
-            "avg_score_diff": sum(score_diffs) / len(score_diffs),
-            "min_agreement": min(agreements),
-            "max_agreement": max(agreements),
+            "sample_id": sample.get("sample_id"),
+            "human_scores": human_scores,
+            "llm_scores": llm_scores,
+            "bias": bias,
         }
     
-    def generate_review_report(
+    def calculate_calibration_bias(
         self,
-        trials: List[Trial],
-        output_path: Optional[str] = None
-    ) -> str:
+        comparisons: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
         """
-        生成人工复核报告
+        计算校准偏差统计
         
         Args:
-            trials: 试验列表
-            output_path: 输出路径（可选）
+            comparisons: 对比结果列表
             
         Returns:
-            str: Markdown 格式的报告
+            Dict: 偏差统计
         """
-        lines = [
-            "# 人工复核报告",
-            f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-            "",
-            "## 统计摘要",
-            "",
+        if not comparisons:
+            return {"mean_bias": {}, "bias_std": {}, "mse": {}}
+        
+        # 收集每个维度的偏差
+        bias_by_dim: Dict[str, List[float]] = {}
+        
+        for comp in comparisons:
+            for dim, bias in comp.get("bias", {}).items():
+                if dim not in bias_by_dim:
+                    bias_by_dim[dim] = []
+                bias_by_dim[dim].append(bias)
+        
+        # 计算统计量
+        result = {"mean_bias": {}, "bias_std": {}, "mse": {}}
+        
+        for dim, biases in bias_by_dim.items():
+            if biases:
+                result["mean_bias"][dim] = statistics.mean(biases)
+                result["bias_std"][dim] = statistics.stdev(biases) if len(biases) > 1 else 0.0
+                result["mse"][dim] = statistics.mean([b ** 2 for b in biases])
+        
+        return result
+    
+    # ===================
+    # 每周校准流程
+    # ===================
+    
+    async def weekly_calibration(
+        self,
+        sample_size: int = 100
+    ) -> Dict[str, Any]:
+        """
+        每周校准流程（主入口）
+        
+        流程：
+        1. 从生产环境随机抽样
+        2. 人工评分（支持多个评分员，计算inter-rater agreement）
+        3. 对比LLM评分器的结果
+        4. 计算偏差，更新LLM评分器的rubric
+        
+        Args:
+            sample_size: 抽样数量
+            
+        Returns:
+            Dict: 校准报告
+        """
+        # 1. 抽样
+        samples = await self.sample_from_production(sample_size)
+        
+        # 2. 收集人工评分（实际操作中，这一步需要人工完成）
+        await self.collect_human_scores(samples, num_raters=3)
+        
+        # 3. 创建校准任务记录
+        calibration_task = {
+            "id": f"calibration_{datetime.now().strftime('%Y%m%d')}",
+            "sample_size": sample_size,
+            "samples": len(samples),
+            "started_at": datetime.now().isoformat(),
+            "status": "pending_human_scores",
+            "pending_samples": len(self.get_pending_samples()),
+        }
+        
+        self.calibration_history.append(calibration_task)
+        
+        return calibration_task
+    
+    async def complete_calibration(self) -> Dict[str, Any]:
+        """
+        完成校准流程（在人工评分完成后调用）
+        
+        Returns:
+            Dict: 校准结果报告
+        """
+        # 获取已完成评分的样本
+        completed_samples = [
+            s for s in self.pending_samples 
+            if s.get("status") == "completed"
         ]
         
-        stats = self.get_calibration_stats(trials)
-        lines.extend([
-            f"- 总复核数: {stats['total_reviews']}",
-            f"- 平均一致性: {stats['avg_agreement']:.2%}" if stats['avg_agreement'] else "- 平均一致性: N/A",
-            f"- 平均分数差异: {stats['avg_score_diff']:.3f}" if stats['avg_score_diff'] else "- 平均分数差异: N/A",
-            "",
-            "## 详细记录",
-            "",
-            "| 试验ID | 复核人 | 人工评分 | LLM评分 | 一致性 | 说明 |",
-            "|--------|--------|----------|---------|--------|------|",
-        ])
+        if not completed_samples:
+            return {"error": "没有已完成的人工评分样本"}
         
-        for trial in trials:
-            review = self.get_review(trial.trial_id)
-            if review:
-                agreement = self.calculate_agreement(trial, review)
-                llm_score = agreement.get("llm_score", "N/A")
-                overall_agreement = agreement.get("overall_agreement", "N/A")
-                
-                lines.append(
-                    f"| {trial.trial_id} | {review.reviewer} | {review.score:.2f} | "
-                    f"{llm_score:.2f if isinstance(llm_score, float) else llm_score} | "
-                    f"{overall_agreement:.2% if isinstance(overall_agreement, float) else overall_agreement} | "
-                    f"{review.explanation or ''} |"
-                )
+        # 聚合人工评分并与LLM对比
+        comparisons = []
         
-        report = "\n".join(lines)
+        for sample in completed_samples:
+            human_scores_list = [
+                r.get("scores", {}) 
+                for r in sample.get("human_scores", [])
+            ]
+            
+            # 聚合人工评分
+            aggregated = self.aggregate_human_scores(human_scores_list)
+            
+            # 与LLM对比
+            comparison = await self.calibrate_with_llm(
+                sample,
+                aggregated["average"]
+            )
+            comparison["inter_rater_agreement"] = aggregated["agreement"]
+            comparisons.append(comparison)
         
-        if output_path:
-            from pathlib import Path
-            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write(report)
+        # 计算总体偏差
+        bias_stats = self.calculate_calibration_bias(comparisons)
+        
+        # 生成校准报告
+        report = {
+            "id": f"calibration_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            "completed_at": datetime.now().isoformat(),
+            "total_samples": len(completed_samples),
+            "bias_statistics": bias_stats,
+            "recommendations": self._generate_recommendations(bias_stats),
+            "comparisons": comparisons,
+        }
+        
+        # 清理已完成的样本
+        self.pending_samples = [
+            s for s in self.pending_samples 
+            if s.get("status") != "completed"
+        ]
         
         return report
+    
+    def _generate_recommendations(
+        self,
+        bias_stats: Dict[str, Any]
+    ) -> List[str]:
+        """
+        根据偏差统计生成调整建议
+        
+        Args:
+            bias_stats: 偏差统计
+            
+        Returns:
+            List[str]: 调整建议列表
+        """
+        recommendations = []
+        
+        for dim, mean_bias in bias_stats.get("mean_bias", {}).items():
+            if abs(mean_bias) > 0.5:
+                direction = "偏高" if mean_bias > 0 else "偏低"
+                recommendations.append(
+                    f"LLM评分器在 '{dim}' 维度上{direction} {abs(mean_bias):.2f} 分，"
+                    f"建议调整评分标准（rubric）"
+                )
+        
+        for dim, mse in bias_stats.get("mse", {}).items():
+            if mse > 1.0:
+                recommendations.append(
+                    f"LLM评分器在 '{dim}' 维度上MSE较高 ({mse:.2f})，"
+                    f"建议增加评分示例或细化评分标准"
+                )
+        
+        if not recommendations:
+            recommendations.append("LLM评分器与人工评分一致性良好，无需调整")
+        
+        return recommendations
+    
+    # ===================
+    # 报告生成
+    # ===================
+    
+    def get_calibration_report(self) -> Dict[str, Any]:
+        """
+        获取最新的校准报告摘要
+        
+        Returns:
+            Dict: 校准报告摘要
+        """
+        return {
+            "total_calibrations": len(self.calibration_history),
+            "pending_samples": len(self.get_pending_samples()),
+            "recent_calibrations": self.calibration_history[-5:],
+        }
+    
+    def export_for_human_review(
+        self,
+        format: str = "json"
+    ) -> str:
+        """
+        导出待评分样本供人工审查
+        
+        Args:
+            format: 导出格式（json/csv）
+            
+        Returns:
+            str: 导出的数据
+        """
+        samples = self.get_pending_samples()
+        
+        if format == "json":
+            import json
+            return json.dumps(samples, ensure_ascii=False, indent=2, default=str)
+        
+        elif format == "csv":
+            import csv
+            import io
+            
+            output = io.StringIO()
+            if samples:
+                writer = csv.DictWriter(
+                    output, 
+                    fieldnames=["sample_id", "user_query", "agent_response", "category"]
+                )
+                writer.writeheader()
+                for s in samples:
+                    writer.writerow({
+                        "sample_id": s.get("sample_id"),
+                        "user_query": s.get("user_query", "")[:200],
+                        "agent_response": s.get("agent_response", "")[:200],
+                        "category": s.get("category", ""),
+                    })
+            
+            return output.getvalue()
+        
+        return ""

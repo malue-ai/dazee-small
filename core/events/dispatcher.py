@@ -1,9 +1,12 @@
 """
-事件分发器
+事件分发器 - 外部 Webhook 发送
 
-统一分发内部事件到：
-1. 内部通道（Redis Pub/Sub）
-2. 外部适配器（Webhook）
+职责：
+- 将事件发送到外部系统（Webhook、Slack、钉钉、飞书等）
+- 配置管理（从 YAML 加载）
+- 重试和错误处理
+
+注意：内部 Redis 广播由 RedisSessionManager.buffer_event 统一处理
 """
 
 import asyncio
@@ -11,6 +14,7 @@ from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 import httpx
 import yaml
+import aiofiles
 from pathlib import Path
 
 from core.events.adapters.base import EventAdapter, AdapterConfig
@@ -18,7 +22,6 @@ from core.events.adapters.webhook import WebhookAdapter
 from core.events.adapters.slack import SlackAdapter
 from core.events.adapters.dingtalk import DingTalkAdapter
 from core.events.adapters.feishu import FeishuAdapter
-from core.events.adapters.zeno import ZenOAdapter
 from logger import get_logger
 
 logger = get_logger("event_dispatcher")
@@ -30,36 +33,30 @@ ADAPTER_TYPES = {
     "slack": SlackAdapter,
     "dingtalk": DingTalkAdapter,
     "feishu": FeishuAdapter,
-    "zeno": ZenOAdapter,
 }
 
 
 class EventDispatcher:
     """
-    事件分发器
+    事件分发器（外部 Webhook）
     
     职责：
-    1. 将内部事件分发到 Redis（内部通道）
-    2. 将内部事件转换后发送到外部系统（Webhook）
+    - 将事件发送到外部系统（Webhook、Slack、钉钉、飞书等）
+    - 配置管理（从 YAML 加载）
+    - 重试和错误处理
     
     使用示例：
     ```python
-    dispatcher = EventDispatcher(redis_manager)
-    dispatcher.load_config("config/webhooks.yaml")
+    dispatcher = EventDispatcher()
+    await dispatcher.load_config("config/webhooks.yaml")
     
-    # 分发事件
-    await dispatcher.dispatch(session_id, event)
+    # 发送事件到外部
+    await dispatcher.send(event)
     ```
     """
     
-    def __init__(self, redis_manager=None):
-        """
-        初始化事件分发器
-        
-        Args:
-            redis_manager: Redis 管理器（用于内部广播）
-        """
-        self.redis = redis_manager
+    def __init__(self):
+        """初始化事件分发器"""
         self.adapters: List[AdapterConfig] = []
         self._http_client: Optional[httpx.AsyncClient] = None
     
@@ -75,9 +72,9 @@ class EventDispatcher:
             await self._http_client.aclose()
             self._http_client = None
     
-    def load_config(self, config_path: str) -> None:
+    async def load_config(self, config_path: str) -> None:
         """
-        从 YAML 配置文件加载适配器配置
+        异步从 YAML 配置文件加载适配器配置
         
         Args:
             config_path: 配置文件路径
@@ -88,8 +85,9 @@ class EventDispatcher:
             return
         
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                config = yaml.safe_load(f)
+            async with aiofiles.open(path, "r", encoding="utf-8") as f:
+                content = await f.read()
+                config = yaml.safe_load(content)
             
             subscriptions = config.get("subscriptions", [])
             
@@ -144,10 +142,6 @@ class EventDispatcher:
             at_users = config.get("at_users", [])
             adapter = adapter_class(at_users=at_users)
             adapter.supported_events = events
-        elif adapter_type == "zeno":
-            conversation_id = config.get("conversation_id")
-            adapter = adapter_class(conversation_id=conversation_id)
-            adapter.supported_events = events
         else:
             adapter = adapter_class()
             adapter.supported_events = events
@@ -177,51 +171,22 @@ class EventDispatcher:
         self.adapters.append(config)
         logger.info(f"添加适配器: {config.name}")
     
-    async def dispatch(
-        self,
-        session_id: str,
-        event: Dict[str, Any],
-        to_internal: bool = True,
-        to_external: bool = True
-    ) -> None:
+    async def send(self, event: Dict[str, Any]) -> None:
         """
-        分发事件
-        
-        Args:
-            session_id: Session ID
-            event: 事件数据
-            to_internal: 是否发送到内部通道（Redis）
-            to_external: 是否发送到外部适配器
-        """
-        # 1. 内部广播（Redis Pub/Sub）
-        if to_internal and self.redis:
-            try:
-                await self.redis.buffer_event(session_id, event)
-            except Exception as e:
-                logger.error(f"内部广播失败: {e}")
-        
-        # 2. 外部适配器（异步，不阻塞主流程）
-        if to_external and self.adapters:
-            for config in self.adapters:
-                if config.enabled and config.adapter.should_handle_extended(event):
-                    # 异步发送，不等待结果
-                    asyncio.create_task(
-                        self._send_to_external(config, event)
-                    )
-    
-    async def dispatch_to_external_only(
-        self,
-        event: Dict[str, Any]
-    ) -> None:
-        """
-        仅分发到外部适配器（不经过 Redis）
-        
-        用于特殊场景，如直接发送通知
+        发送事件到所有匹配的外部适配器
         
         Args:
             event: 事件数据
         """
-        await self.dispatch("", event, to_internal=False, to_external=True)
+        if not self.adapters:
+            return
+        
+        for config in self.adapters:
+            if config.enabled and config.adapter.should_handle_extended(event):
+                # 异步发送，不阻塞主流程
+                asyncio.create_task(
+                    self._send_to_external(config, event)
+                )
     
     async def _send_to_external(
         self,
@@ -233,7 +198,7 @@ class EventDispatcher:
         
         Args:
             config: 适配器配置
-            event: 原始事件
+            event: 事件数据
             
         Returns:
             是否成功
@@ -312,29 +277,26 @@ class EventDispatcher:
 
 # ==================== 工厂函数 ====================
 
-def create_event_dispatcher(
-    redis_manager=None,
+async def create_event_dispatcher(
     config_path: Optional[str] = None
 ) -> EventDispatcher:
     """
     创建事件分发器
     
     Args:
-        redis_manager: Redis 管理器
         config_path: 配置文件路径（可选）
         
     Returns:
         EventDispatcher 实例
     """
-    dispatcher = EventDispatcher(redis_manager)
+    dispatcher = EventDispatcher()
     
     if config_path:
-        dispatcher.load_config(config_path)
+        await dispatcher.load_config(config_path)
     else:
         # 默认配置路径
         default_path = Path("config/webhooks.yaml")
         if default_path.exists():
-            dispatcher.load_config(str(default_path))
+            await dispatcher.load_config(str(default_path))
     
     return dispatcher
-

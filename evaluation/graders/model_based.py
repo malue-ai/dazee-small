@@ -60,8 +60,7 @@ class ModelBasedGraders:
         self,
         system_prompt: str,
         user_prompt: str,
-        response_format: str = "json",
-        include_confidence: bool = True
+        response_format: str = "json"
     ) -> Dict[str, Any]:
         """
         调用LLM进行评分
@@ -70,10 +69,9 @@ class ModelBasedGraders:
             system_prompt: 系统提示词（定义评分标准）
             user_prompt: 用户提示词（待评估的内容）
             response_format: 响应格式
-            include_confidence: 是否要求返回置信度
             
         Returns:
-            Dict: 评分结果（包含 confidence 字段）
+            Dict: 评分结果
         """
         if self.llm is None:
             # 模拟模式（用于测试）
@@ -81,12 +79,7 @@ class ModelBasedGraders:
                 "score": 3,
                 "explanation": "LLM服务未配置，返回模拟评分",
                 "passed": True,
-                "confidence": 0.5,
             }
-        
-        # 如果要求置信度，在 system_prompt 中添加说明
-        if include_confidence and response_format == "json":
-            system_prompt += "\n\n请同时返回置信度（confidence，0-1之间的浮点数），表示你对这个评分的确信程度。"
         
         # 调用LLM
         messages = [
@@ -101,19 +94,10 @@ class ModelBasedGraders:
             if response_format == "json":
                 # 尝试解析JSON响应
                 result = json.loads(response)
-                # 确保有置信度字段
-                if include_confidence and "confidence" not in result:
-                    # 如果没有提供，根据分数估算（分数越极端，置信度越高）
-                    score = result.get("score", 3)
-                    if isinstance(score, (int, float)):
-                        # 分数接近中间值（3）时置信度低，接近极端值（1或5）时置信度高
-                        result["confidence"] = 1.0 - abs(score - 3) / 2.0
-                    else:
-                        result["confidence"] = 0.7
             else:
-                result = {"content": response, "score": None, "confidence": 0.7}
+                result = {"content": response, "score": None}
         except json.JSONDecodeError:
-            result = {"content": response, "score": None, "confidence": 0.5}
+            result = {"content": response, "score": None}
         
         return result
     
@@ -166,10 +150,9 @@ class ModelBasedGraders:
 
 请评估智能体是否正确理解了用户意图。"""
 
-        result = await self._call_judge(system_prompt, user_prompt, include_confidence=True)
+        result = await self._call_judge(system_prompt, user_prompt)
         
         score = result.get("score", 3)
-        confidence = result.get("confidence", 0.7)
         passed = score >= 4  # 4分以上算通过
         
         return GradeResult(
@@ -177,8 +160,6 @@ class ModelBasedGraders:
             grader_name="grade_intent_understanding",
             passed=passed,
             score=score / 5.0,  # 转换为0-1
-            confidence=confidence,
-            needs_human_review=confidence < 0.7,
             explanation=result.get("explanation"),
             details={
                 "raw_score": score,
@@ -261,10 +242,9 @@ Token消耗：
 
 请评估是否存在过度工程化问题。"""
 
-        result = await self._call_judge(system_prompt, user_prompt, include_confidence=True)
+        result = await self._call_judge(system_prompt, user_prompt)
         
         score = result.get("score", 3)
-        confidence = result.get("confidence", 0.7)
         passed = score >= 4  # 4分以上算通过（没有过度工程化）
         
         return GradeResult(
@@ -272,8 +252,6 @@ Token消耗：
             grader_name="grade_over_engineering",
             passed=passed,
             score=score / 5.0,
-            confidence=confidence,
-            needs_human_review=confidence < 0.7,
             explanation=result.get("explanation"),
             details={
                 "raw_score": score,
@@ -345,11 +323,10 @@ Token消耗：
 
 请综合评估回答质量。"""
 
-        result = await self._call_judge(system_prompt, user_prompt, include_confidence=True)
+        result = await self._call_judge(system_prompt, user_prompt)
         
         scores = result.get("scores", {})
         weighted_score = result.get("weighted_score", 3.0)
-        confidence = result.get("confidence", 0.7)
         passed = weighted_score >= 3.5  # 3.5分以上算通过
         
         return GradeResult(
@@ -357,8 +334,6 @@ Token消耗：
             grader_name="grade_response_quality",
             passed=passed,
             score=weighted_score / 5.0,
-            confidence=confidence,
-            needs_human_review=confidence < 0.7,
             explanation=result.get("explanation"),
             details={
                 "scores": scores,
@@ -429,10 +404,9 @@ Token消耗：
 
 请评估推理过程的逻辑连贯性。"""
 
-        result = await self._call_judge(system_prompt, user_prompt, include_confidence=True)
+        result = await self._call_judge(system_prompt, user_prompt)
         
         score = result.get("score", 3)
-        confidence = result.get("confidence", 0.7)
         passed = score >= 4
         
         return GradeResult(
@@ -440,8 +414,6 @@ Token消耗：
             grader_name="grade_logical_coherence",
             passed=passed,
             score=score / 5.0,
-            confidence=confidence,
-            needs_human_review=confidence < 0.7,
             explanation=result.get("explanation"),
             details={
                 "raw_score": score,
@@ -504,10 +476,9 @@ Token消耗：
 
 请进行安全合规检查。"""
 
-        result = await self._call_judge(system_prompt, user_prompt, include_confidence=True)
+        result = await self._call_judge(system_prompt, user_prompt)
         
         verdict = result.get("result", "WARNING")
-        confidence = result.get("confidence", 0.8)  # 安全评估通常置信度较高
         passed = verdict == "PASS"
         risk_level = result.get("risk_level", "medium")
         
@@ -518,355 +489,11 @@ Token消耗：
             grader_name="grade_safety_compliance",
             passed=passed,
             score=score_map.get(verdict, 0.5),
-            confidence=confidence,
-            needs_human_review=confidence < 0.7 or verdict != "PASS",
             explanation=result.get("explanation"),
             details={
                 "verdict": verdict,
                 "issues": result.get("issues", []),
                 "risk_level": risk_level,
-            },
-        )
-    
-    # ===================
-    # 多 Judge 投票机制
-    # ===================
-    
-    async def grade_with_ensemble(
-        self,
-        content: str,
-        rubric: str,
-        judges: int = 3,
-        agreement_threshold: float = 0.7,
-        context: Optional[Dict[str, Any]] = None
-    ) -> GradeResult:
-        """
-        使用多个 LLM 实例投票评分，提高可靠性
-        
-        Args:
-            content: 待评估内容
-            rubric: 评分标准
-            judges: Judge 数量（默认3个）
-            agreement_threshold: 一致性阈值（默认0.7）
-            context: 额外上下文（可选）
-            
-        Returns:
-            GradeResult: 评分结果（包含置信度和是否需要人工复核）
-        """
-        if self.llm is None:
-            # 模拟模式：返回单个评分
-            return await self.grade_with_custom_rubric(content, rubric, context)
-        
-        # 并行调用多个 Judge
-        import asyncio
-        
-        tasks = [
-            self._call_judge(
-                system_prompt=f"""你是一个专业的AI评估员，请按照以下评分标准进行评估：
-
-{rubric}
-
-请以JSON格式返回评分结果：
-{{
-    "score": <1-5的整数>,
-    "confidence": <0-1的浮点数>,
-    "explanation": "<评分理由>"
-}}""",
-                user_prompt=f"""待评估内容：
-{content}
-
-{f"上下文信息：{json.dumps(context, ensure_ascii=False)}" if context else ""}
-
-请按照评分标准进行评估。""",
-                response_format="json",
-                include_confidence=True
-            )
-            for _ in range(judges)
-        ]
-        
-        results = await asyncio.gather(*tasks)
-        
-        # 提取分数和置信度
-        scores = []
-        confidences = []
-        explanations = []
-        
-        for r in results:
-            score = r.get("score")
-            if score is not None:
-                scores.append(float(score))
-                confidences.append(r.get("confidence", 0.7))
-                explanations.append(r.get("explanation", ""))
-        
-        if not scores:
-            # 所有 Judge 都失败
-            return GradeResult(
-                grader_type=GraderType.MODEL,
-                grader_name="grade_with_ensemble",
-                passed=False,
-                score=0.0,
-                confidence=0.0,
-                needs_human_review=True,
-                explanation="所有 Judge 评分失败，需要人工复核",
-                details={"judges": judges, "results": results},
-            )
-        
-        # 计算一致性（标准差）
-        import statistics
-        if len(scores) > 1:
-            score_std = statistics.stdev(scores)
-            # 归一化到 0-1（假设最大标准差为 2）
-            agreement = max(0.0, 1.0 - score_std / 2.0)
-        else:
-            agreement = 1.0
-        
-        # 计算平均分数和置信度
-        avg_score = statistics.mean(scores)
-        avg_confidence = statistics.mean(confidences)
-        
-        # 判断是否需要人工复核
-        needs_review = agreement < agreement_threshold or avg_confidence < 0.7
-        
-        # 综合评分
-        passed = avg_score >= 4.0
-        
-        return GradeResult(
-            grader_type=GraderType.MODEL,
-            grader_name="grade_with_ensemble",
-            passed=passed,
-            score=avg_score / 5.0,
-            confidence=avg_confidence,
-            needs_human_review=needs_review,
-            explanation=f"多 Judge 投票结果（一致性: {agreement:.2f}）",
-            details={
-                "judges": judges,
-                "scores": scores,
-                "avg_score": avg_score,
-                "agreement": agreement,
-                "confidences": confidences,
-                "avg_confidence": avg_confidence,
-                "explanations": explanations,
-            },
-        )
-    
-    # ===================
-    # 新增评估方法
-    # ===================
-    
-    async def grade_intermediate_output(
-        self,
-        intermediate_output: str,
-        step_description: str,
-        success_criteria: List[str]
-    ) -> GradeResult:
-        """
-        评估中间步骤输出质量
-        
-        Args:
-            intermediate_output: 中间步骤的输出
-            step_description: 步骤描述
-            success_criteria: 成功标准列表
-            
-        Returns:
-            GradeResult: 评分结果
-        """
-        system_prompt = """你是一个专业的AI评估员，负责评估智能体中间步骤的输出质量。
-
-评估要点：
-1. 输出是否满足步骤要求
-2. 输出是否完整
-3. 输出是否准确
-4. 输出是否有助于后续步骤
-
-评分标准（1-5分）：
-- 5分：完全满足要求，输出完整准确
-- 4分：基本满足要求，有轻微不足
-- 3分：部分满足要求，有明显不足
-- 2分：未满足大部分要求
-- 1分：完全不符合要求
-
-请以JSON格式返回评分结果：
-{
-    "score": <1-5的整数>,
-    "confidence": <0-1的浮点数>,
-    "criteria_met": ["<满足的标准>"],
-    "criteria_missing": ["<未满足的标准>"],
-    "explanation": "<评分理由>"
-}"""
-
-        user_prompt = f"""步骤描述：
-{step_description}
-
-成功标准：
-{chr(10).join(f"- {c}" for c in success_criteria)}
-
-中间输出：
-{intermediate_output}
-
-请评估中间步骤的输出质量。"""
-
-        result = await self._call_judge(system_prompt, user_prompt, include_confidence=True)
-        
-        score = result.get("score", 3)
-        confidence = result.get("confidence", 0.7)
-        passed = score >= 4
-        
-        return GradeResult(
-            grader_type=GraderType.MODEL,
-            grader_name="grade_intermediate_output",
-            passed=passed,
-            score=score / 5.0,
-            confidence=confidence,
-            needs_human_review=confidence < 0.7,
-            explanation=result.get("explanation"),
-            details={
-                "raw_score": score,
-                "criteria_met": result.get("criteria_met", []),
-                "criteria_missing": result.get("criteria_missing", []),
-            },
-        )
-    
-    async def grade_multi_agent_coordination(
-        self,
-        transcript: Transcript,
-        subtask_results: List[Dict[str, Any]]
-    ) -> GradeResult:
-        """
-        评估多智能体协作质量
-        
-        Args:
-            transcript: 转录记录
-            subtask_results: 子任务结果列表
-            
-        Returns:
-            GradeResult: 评分结果
-        """
-        system_prompt = """你是一个专业的AI评估员，负责评估多智能体系统的协作质量。
-
-评估要点：
-1. 任务分解是否合理
-2. 子任务之间是否有重叠或遗漏
-3. 子任务执行是否高效
-4. 结果综合是否完整
-
-评分标准（1-5分）：
-- 5分：协作完美，任务分解合理，执行高效
-- 4分：协作良好，有轻微问题但不影响结果
-- 3分：协作一般，有明显问题但可接受
-- 2分：协作较差，影响最终结果
-- 1分：协作失败，严重影响结果
-
-请以JSON格式返回评分结果：
-{
-    "score": <1-5的整数>,
-    "confidence": <0-1的浮点数>,
-    "decomposition_quality": "<任务分解质量分析>",
-    "coordination_issues": ["<协作问题1>", "<协作问题2>"],
-    "explanation": "<评分理由>"
-}"""
-
-        subtasks_summary = "\n".join([
-            f"- 子任务 {i+1}: {r.get('description', 'N/A')} - 状态: {r.get('status', 'unknown')}"
-            for i, r in enumerate(subtask_results)
-        ])
-        
-        user_prompt = f"""多智能体执行记录：
-
-子任务结果（共{len(subtask_results)}个）：
-{subtasks_summary}
-
-工具调用序列：
-{" -> ".join(transcript.get_all_tool_names()[:20])}
-
-请评估多智能体协作质量。"""
-
-        result = await self._call_judge(system_prompt, user_prompt, include_confidence=True)
-        
-        score = result.get("score", 3)
-        confidence = result.get("confidence", 0.7)
-        passed = score >= 4
-        
-        return GradeResult(
-            grader_type=GraderType.MODEL,
-            grader_name="grade_multi_agent_coordination",
-            passed=passed,
-            score=score / 5.0,
-            confidence=confidence,
-            needs_human_review=confidence < 0.7,
-            explanation=result.get("explanation"),
-            details={
-                "raw_score": score,
-                "decomposition_quality": result.get("decomposition_quality"),
-                "coordination_issues": result.get("coordination_issues", []),
-            },
-        )
-    
-    async def grade_against_reference(
-        self,
-        agent_response: str,
-        reference_answer: str,
-        comparison_criteria: Optional[List[str]] = None
-    ) -> GradeResult:
-        """
-        与推荐答案对比评估
-        
-        Args:
-            agent_response: 智能体回复
-            reference_answer: 推荐答案
-            comparison_criteria: 对比标准（如：准确性、完整性、格式等）
-            
-        Returns:
-            GradeResult: 评分结果
-        """
-        criteria = comparison_criteria or ["准确性", "完整性", "格式规范"]
-        
-        system_prompt = f"""你是一个专业的AI评估员，负责对比智能体回复与推荐答案。
-
-对比标准：
-{chr(10).join(f"- {c}" for c in criteria)}
-
-评分标准（1-5分）：
-- 5分：与推荐答案高度一致，质量相当或更好
-- 4分：与推荐答案基本一致，有轻微差异
-- 3分：与推荐答案部分一致，有明显差异但不影响核心内容
-- 2分：与推荐答案差异较大
-- 1分：与推荐答案完全不同或质量明显更差
-
-请以JSON格式返回评分结果：
-{{
-    "score": <1-5的整数>,
-    "confidence": <0-1的浮点数>,
-    "similarity_analysis": "<相似度分析>",
-    "differences": ["<差异1>", "<差异2>"],
-    "explanation": "<评分理由>"
-}}"""
-
-        user_prompt = f"""智能体回复：
-{agent_response}
-
-推荐答案：
-{reference_answer}
-
-请对比评估。"""
-
-        result = await self._call_judge(system_prompt, user_prompt, include_confidence=True)
-        
-        score = result.get("score", 3)
-        confidence = result.get("confidence", 0.7)
-        passed = score >= 4
-        
-        return GradeResult(
-            grader_type=GraderType.MODEL,
-            grader_name="grade_against_reference",
-            passed=passed,
-            score=score / 5.0,
-            confidence=confidence,
-            needs_human_review=confidence < 0.7,
-            explanation=result.get("explanation"),
-            details={
-                "raw_score": score,
-                "similarity_analysis": result.get("similarity_analysis"),
-                "differences": result.get("differences", []),
             },
         )
     
@@ -910,10 +537,9 @@ Token消耗：
 
 请按照评分标准进行评估。"""
 
-        result = await self._call_judge(system_prompt, user_prompt, include_confidence=True)
+        result = await self._call_judge(system_prompt, user_prompt)
         
         score = result.get("score", 3)
-        confidence = result.get("confidence", 0.7)
         passed = result.get("passed", score >= 4)
         
         return GradeResult(
@@ -921,8 +547,6 @@ Token消耗：
             grader_name="grade_with_custom_rubric",
             passed=passed,
             score=score / 5.0,
-            confidence=confidence,
-            needs_human_review=confidence < 0.7,
             explanation=result.get("explanation"),
             details=result.get("details", {}),
         )

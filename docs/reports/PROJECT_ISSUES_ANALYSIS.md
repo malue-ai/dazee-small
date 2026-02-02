@@ -164,7 +164,7 @@ database/
 
 **示例：**
 ```python
-# core/agent/simple/simple_agent.py
+# core/agent/simple_agent.py
 # TODO: 后续可以使用 LLM 生成更智能的摘要
 
 # prompts/universal_agent_prompt.py

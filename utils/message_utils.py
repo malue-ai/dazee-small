@@ -157,52 +157,6 @@ def messages_to_dict_list(messages: List["Message"]) -> List[Dict[str, Any]]:
     return result
 
 
-def _filter_empty_text_blocks(content: Any) -> Any:
-    """
-    过滤空的 text 块
-    
-    🛡️ Claude API 不接受空的 content block，会导致异常退出。
-    此函数在发送给 Claude API 之前过滤掉空的 text 块。
-    
-    Args:
-        content: 内容（字符串或 content block 列表）
-        
-    Returns:
-        过滤后的内容
-    """
-    if not content:
-        return content
-    
-    # 字符串内容直接返回
-    if isinstance(content, str):
-        return content if content.strip() else None
-    
-    # 列表内容：过滤空 text 块
-    if isinstance(content, list):
-        filtered = []
-        for block in content:
-            if not isinstance(block, dict):
-                filtered.append(block)
-                continue
-            
-            block_type = block.get("type", "")
-            
-            # 过滤空的 text 块
-            if block_type == "text":
-                text_value = block.get("text", "")
-                if text_value and (not isinstance(text_value, str) or text_value.strip()):
-                    filtered.append(block)
-                else:
-                    logger.debug(f"🧹 _filter_empty_text_blocks: 移除空的 text 块")
-            else:
-                # 非 text 块直接保留
-                filtered.append(block)
-        
-        return filtered if filtered else None
-    
-    return content
-
-
 def append_assistant_message(
     messages: List["Message"],
     raw_content: Any
@@ -213,19 +167,9 @@ def append_assistant_message(
     Args:
         messages: Message 对象列表（会被修改）
         raw_content: 响应内容（通常是 response.raw_content）
-        
-    Note:
-        🛡️ 会自动过滤空的 text 块，防止 Claude API 报错
     """
     from core.llm import Message
-    
-    # 🛡️ 过滤空的 text 块（Claude API 不接受空 content block 会导致异常退出）
-    filtered_content = _filter_empty_text_blocks(raw_content)
-    
-    if filtered_content:
-        messages.append(Message(role="assistant", content=filtered_content))
-    else:
-        logger.warning("⚠️ append_assistant_message: raw_content 过滤后为空，跳过添加")
+    messages.append(Message(role="assistant", content=raw_content))
 
 
 def append_user_message(
@@ -241,4 +185,41 @@ def append_user_message(
     """
     from core.llm import Message
     messages.append(Message(role="user", content=content))
+
+
+def append_text_to_last_block(
+    content_blocks: List[Dict[str, Any]],
+    text: str
+) -> bool:
+    """
+    将文本追加到消息的最后一个 text block
+    
+    用于向用户消息中注入系统上下文（如前端变量、用户记忆等），
+    保持用户 query 在前，系统注入信息在后。
+    
+    Args:
+        content_blocks: 消息内容块列表（会被原地修改）
+        text: 要追加的文本
+        
+    Returns:
+        是否成功追加（找到 text block 并修改）
+        
+    Examples:
+        >>> blocks = [{"type": "text", "text": "帮我创建一个项目"}]
+        >>> append_text_to_last_block(blocks, "\\n---\\n[上下文]\\n- timezone: Asia/Shanghai")
+        True
+        >>> blocks[0]["text"]
+        '帮我创建一个项目\\n---\\n[上下文]\\n- timezone: Asia/Shanghai'
+    """
+    if not text:
+        return False
+    
+    # 从后往前找第一个 text block
+    for i in range(len(content_blocks) - 1, -1, -1):
+        block = content_blocks[i]
+        if isinstance(block, dict) and block.get("type") == "text":
+            block["text"] += text
+            return True
+    
+    return False
 

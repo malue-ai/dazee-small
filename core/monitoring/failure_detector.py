@@ -10,14 +10,14 @@
 6. 响应质量问题
 """
 
-import logging
+from logger import get_logger
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional
 from dataclasses import dataclass, field
 from enum import Enum
 from collections import defaultdict
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class FailureType(str, Enum):
@@ -31,9 +31,6 @@ class FailureType(str, Enum):
     RESPONSE_QUALITY = "response_quality"        # 响应质量问题
     SAFETY_VIOLATION = "safety_violation"        # 安全违规
     UNKNOWN_ERROR = "unknown_error"              # 未知错误
-    OVER_ENGINEERING = "over_engineering"        # 过度工程化 [新增]
-    LOGICAL_INCOHERENCE = "logical_incoherence"  # 逻辑不连贯 [新增]
-    USER_RETRY = "user_retry"                    # 用户重试（隐式不满） [新增]
 
 
 class FailureSeverity(str, Enum):
@@ -417,180 +414,6 @@ class FailureDetector:
         self._record_case(case)
         return case
     
-    async def detect_response_quality(
-        self,
-        conversation_id: str,
-        user_query: str,
-        agent_response: str,
-        transcript: Dict[str, Any],
-        llm_judge: Any,
-        user_id: Optional[str] = None
-    ) -> Optional[FailureCase]:
-        """
-        使用 LLM Judge 检测响应质量问题
-        
-        检测维度：
-        1. 回答质量（准确性、完整性、流畅性）
-        2. 过度工程化（工具调用过多、Plan 过于复杂）
-        3. 逻辑连贯性（推理过程是否合理）
-        
-        Args:
-            conversation_id: 会话ID
-            user_query: 用户查询
-            agent_response: 智能体回复
-            transcript: 转录记录（包含工具调用、消息历史等）
-            llm_judge: ModelBasedGraders 实例
-            user_id: 用户ID
-            
-        Returns:
-            FailureCase: 失败案例（如果检测到质量问题）
-        """
-        try:
-            # 构建 Transcript 对象（如果传入的是字典）
-            from evaluation.models import Transcript, Message, ToolCall, TokenUsage
-            
-            if isinstance(transcript, dict):
-                # 从字典构建 Transcript
-                messages = [
-                    Message(**msg) if isinstance(msg, dict) else msg
-                    for msg in transcript.get("messages", [])
-                ]
-                tool_calls = [
-                    ToolCall(**tc) if isinstance(tc, dict) else tc
-                    for tc in transcript.get("tool_calls", [])
-                ]
-                token_usage = TokenUsage(**transcript.get("token_usage", {}))
-                
-                transcript_obj = Transcript(
-                    messages=messages,
-                    tool_calls=tool_calls,
-                    token_usage=token_usage,
-                    duration_ms=transcript.get("duration_ms", 0),
-                    metadata=transcript.get("metadata", {}),
-                )
-            else:
-                transcript_obj = transcript
-            
-            # 调用 ModelBasedGraders 评估
-            quality_result = await llm_judge.grade_response_quality(
-                user_query=user_query,
-                agent_response=agent_response,
-            )
-            
-            over_eng_result = await llm_judge.grade_over_engineering(
-                user_query=user_query,
-                transcript=transcript_obj,
-            )
-            
-            # 判断是否失败
-            quality_failed = quality_result.score is not None and quality_result.score < 0.6
-            over_eng_failed = over_eng_result.score is not None and over_eng_result.score < 0.6
-            
-            if quality_failed or over_eng_failed:
-                failure_type = FailureType.OVER_ENGINEERING if over_eng_failed else FailureType.RESPONSE_QUALITY
-                
-                case = FailureCase(
-                    id=self._generate_id("quality"),
-                    failure_type=failure_type,
-                    severity=FailureSeverity.MEDIUM,
-                    conversation_id=conversation_id,
-                    user_id=user_id,
-                    user_query=user_query,
-                    agent_response=agent_response,
-                    error_message=f"响应质量问题: 质量评分={quality_result.score:.2f}, 过度工程化评分={over_eng_result.score:.2f}",
-                    tool_calls=[
-                        {
-                            "name": tc.name,
-                            "arguments": tc.arguments if hasattr(tc, 'arguments') else {},
-                        }
-                        for tc in transcript_obj.tool_calls
-                    ],
-                    context={
-                        "quality_score": quality_result.score,
-                        "over_engineering_score": over_eng_result.score,
-                        "quality_explanation": quality_result.explanation,
-                        "over_engineering_explanation": over_eng_result.explanation,
-                    },
-                )
-                
-                self._record_case(case)
-                return case
-            
-        except Exception as e:
-            logger.error(f"检测响应质量失败: {e}", exc_info=True)
-        
-        return None
-    
-    def detect_user_retry(
-        self,
-        conversation_id: str,
-        current_query: str,
-        previous_queries: List[str],
-        similarity_threshold: float = 0.85,
-        user_id: Optional[str] = None
-    ) -> Optional[FailureCase]:
-        """
-        检测用户重试（隐式不满）
-        
-        当用户重新提问相似问题时，说明之前的回答可能不满意
-        
-        Args:
-            conversation_id: 会话ID
-            current_query: 当前查询
-            previous_queries: 之前的查询列表（最近N条）
-            similarity_threshold: 相似度阈值（默认0.85）
-            user_id: 用户ID
-            
-        Returns:
-            FailureCase: 失败案例（如果检测到重试）
-        """
-        # 计算与之前问题的相似度
-        for prev_query in previous_queries[-3:]:  # 检查最近 3 条
-            similarity = self._compute_similarity(current_query, prev_query)
-            if similarity > similarity_threshold:
-                case = FailureCase(
-                    id=self._generate_id("retry"),
-                    failure_type=FailureType.USER_RETRY,
-                    severity=FailureSeverity.LOW,
-                    conversation_id=conversation_id,
-                    user_id=user_id,
-                    user_query=current_query,
-                    error_message=f"用户重试相似问题: 相似度={similarity:.2f}, 之前问题='{prev_query[:50]}...'",
-                    context={
-                        "previous_query": prev_query,
-                        "similarity": similarity,
-                        "similarity_threshold": similarity_threshold,
-                    },
-                )
-                
-                self._record_case(case)
-                return case
-        
-        return None
-    
-    def _compute_similarity(self, text1: str, text2: str) -> float:
-        """
-        计算两个文本的相似度（简化版，使用 Jaccard 相似度）
-        
-        Args:
-            text1: 文本1
-            text2: 文本2
-            
-        Returns:
-            float: 相似度（0-1）
-        """
-        # 简单的基于词汇的相似度
-        words1 = set(text1.lower().split())
-        words2 = set(text2.lower().split())
-        
-        if not words1 or not words2:
-            return 0.0
-        
-        intersection = len(words1 & words2)
-        union = len(words1 | words2)
-        
-        return intersection / union if union > 0 else 0.0
-    
     # ===================
     # 案例管理
     # ===================
@@ -598,7 +421,7 @@ class FailureDetector:
     def _generate_id(self, prefix: str) -> str:
         """生成唯一ID"""
         import uuid
-        return f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+        return f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4()}"
     
     def _record_case(self, case: FailureCase) -> None:
         """

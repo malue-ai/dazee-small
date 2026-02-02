@@ -20,8 +20,8 @@ logger = get_logger("run_agent")
 
 async def run_agent(instance_name: str, query: str = None, force_refresh: bool = False):
     """运行 Agent"""
-    from scripts.instance_loader import create_agent_from_instance
-    from services.mcp_client import clear_mcp_client_cache
+    from utils.instance_loader import create_agent_from_instance
+    from infra.pools import get_mcp_pool
     
     print(f"\n🚀 启动实例: {instance_name}")
     if force_refresh:
@@ -43,9 +43,10 @@ async def run_agent(instance_name: str, query: str = None, force_refresh: bool =
             await interactive_mode(agent)
     
     finally:
-        # 🆕 清理 MCP 客户端连接，避免异步上下文错误
+        # 🆕 清理 MCP 客户端连接，使用统一的 MCPPool
         try:
-            await clear_mcp_client_cache()
+            mcp_pool = get_mcp_pool()
+            await mcp_pool.cleanup()
         except Exception as e:
             logger.debug(f"清理 MCP 缓存时出错: {e}")
 

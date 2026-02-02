@@ -31,7 +31,7 @@ class WorkingMemory:
     注意：此类不再包含 plan_json/todo_md/session_id
     """
     
-    def __init__(self):
+    def __init__(self) -> None:
         self.messages: List[Dict[str, Any]] = []
         self.tool_calls: List[Dict[str, Any]] = []
         self.metadata: Dict[str, Any] = {}
@@ -39,7 +39,7 @@ class WorkingMemory:
     
     # ==================== 消息管理 ====================
     
-    def add_message(self, role: str, content: Any):
+    def add_message(self, role: str, content: Any) -> None:
         """
         添加消息
         
@@ -67,7 +67,7 @@ class WorkingMemory:
             return self.messages[-last_n:]
         return self.messages
     
-    def clear_messages(self):
+    def clear_messages(self) -> None:
         """清空消息历史"""
         self.messages.clear()
     
@@ -105,13 +105,13 @@ class WorkingMemory:
             return self.tool_calls[-last_n:]
         return self.tool_calls
     
-    def clear_tool_history(self):
+    def clear_tool_history(self) -> None:
         """清空工具调用历史"""
         self.tool_calls.clear()
     
     # ==================== 元数据管理 ====================
     
-    def update_metadata(self, key: str, value: Any):
+    def update_metadata(self, key: str, value: Any) -> None:
         """更新元数据"""
         self.metadata[key] = value
     
@@ -119,13 +119,13 @@ class WorkingMemory:
         """获取元数据"""
         return self.metadata.get(key, default)
     
-    def clear_metadata(self):
+    def clear_metadata(self) -> None:
         """清空元数据"""
         self.metadata.clear()
     
     # ==================== 通用操作 ====================
     
-    def clear(self):
+    def clear(self) -> None:
         """清空所有工作记忆"""
         self.messages.clear()
         self.tool_calls.clear()

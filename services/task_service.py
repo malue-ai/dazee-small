@@ -24,6 +24,7 @@ from utils.background_tasks import (
     get_task_registry,
     TaskContext,
 )
+from utils.background_tasks.tasks.mem0_update import batch_update_all_memories
 
 logger = get_logger("task_service")
 
@@ -128,7 +129,7 @@ class TaskService:
         result = await service.run_task("mem0_update", user_id="user_123")
     """
     
-    def __init__(self):
+    def __init__(self) -> None:
         self.background_service = get_background_task_service()
     
     def list_tasks(self, include_scheduled_only: bool = False) -> List[Dict[str, Any]]:
@@ -298,9 +299,10 @@ class TaskService:
         try:
             if task_name == "mem0_update":
                 # Mem0 批量更新
-                result = await self.background_service.batch_update_all_memories(
+                result = await batch_update_all_memories(
                     since_hours=params.get("since_hours", 24),
-                    max_concurrent=params.get("max_concurrent", 5)
+                    max_concurrent=params.get("max_concurrent", 5),
+                    service=self.background_service
                 )
                 
                 return TaskRunResult(

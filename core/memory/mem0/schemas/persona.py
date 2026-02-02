@@ -5,9 +5,8 @@
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from typing import List, Optional, Dict, Any
-from .fragment import MemoryType, MemorySource, MemoryVisibility
+from datetime import datetime
+from typing import List, Optional
 
 
 @dataclass
@@ -18,8 +17,6 @@ class PlanSummary:
     progress: float
     status: str  # active/at_risk/completed
     blockers: List[str] = field(default_factory=list)
-    check_results: List[str] = field(default_factory=list)
-    act_actions: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -73,30 +70,11 @@ class UserPersona:
     ])
     max_prompt_tokens: int = 500
     
-    # 记忆元数据（新增）
-    memory_type: MemoryType = MemoryType.BEHAVIOR  # 画像本身是行为模式的聚合
-    source: MemorySource = MemorySource.SYSTEM_INFERENCE  # 系统推断
-    confidence: float = 0.0  # 综合置信度
-    visibility: MemoryVisibility = MemoryVisibility.PUBLIC  # 可见性
-    metadata: Dict[str, Any] = field(default_factory=dict)  # 额外元数据
-    
     # 元数据
     source_fragments: int = 0  # 基于多少碎片
     last_behavior_analysis: Optional[datetime] = None
     last_emotion_analysis: Optional[datetime] = None
-    ttl_minutes: int = 60  # 缓存 TTL（分钟）
-    expires_at: Optional[datetime] = None  # 过期时间（自动计算）
-    
-    def __post_init__(self):
-        """初始化后处理：计算过期时间"""
-        if self.ttl_minutes is not None and self.ttl_minutes > 0:
-            self.expires_at = self.generated_at + timedelta(minutes=self.ttl_minutes)
-    
-    def is_expired(self) -> bool:
-        """检查是否过期"""
-        if self.expires_at is None:
-            return False
-        return datetime.now() > self.expires_at
+    ttl_minutes: int = 60  # 缓存 TTL
     
     def to_dict(self) -> dict:
         """转换为字典格式"""
@@ -125,9 +103,7 @@ class UserPersona:
                     "deadline": plan.deadline.isoformat() if plan.deadline else None,
                     "progress": plan.progress,
                     "status": plan.status,
-                    "blockers": plan.blockers,
-                    "check_results": plan.check_results,
-                    "act_actions": plan.act_actions
+                    "blockers": plan.blockers
                 }
                 for plan in self.active_plans
             ],
@@ -155,14 +131,7 @@ class UserPersona:
                 "last_behavior_analysis": self.last_behavior_analysis.isoformat() if self.last_behavior_analysis else None,
                 "last_emotion_analysis": self.last_emotion_analysis.isoformat() if self.last_emotion_analysis else None,
                 "ttl_minutes": self.ttl_minutes
-            },
-            # 记忆元数据
-            "memory_type": self.memory_type.value,
-            "source": self.source.value,
-            "confidence": self.confidence,
-            "visibility": self.visibility.value,
-            "metadata": self.metadata,
-            "expires_at": self.expires_at.isoformat() if self.expires_at else None
+            }
         }
     
     def to_prompt_text(self) -> str:
@@ -203,10 +172,6 @@ class UserPersona:
                 sections.append(f"- {plan.title}（{status_emoji} {deadline_str}，进度 {int(plan.progress * 100)}%）")
                 if plan.blockers:
                     sections.append(f"  - 阻碍: {plan.blockers[0]}")
-                if plan.check_results:
-                    sections.append(f"  - 检查: {plan.check_results[0]}")
-                if plan.act_actions:
-                    sections.append(f"  - 行动: {plan.act_actions[0]}")
             sections.append("")
         
         # 注意事项

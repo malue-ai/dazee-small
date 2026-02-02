@@ -499,7 +499,7 @@ class CapabilityRegistry:
 **Agent 中的使用**:
 
 ```python
-# core/agent/simple/simple_agent.py
+# core/agent/simple_agent.py
 
 async def chat(self, user_query: str):
     # Stage 1: 获取所有 Skills 的简短描述
@@ -819,7 +819,7 @@ class FilesAPIClient:
 **Agent 中集成**:
 
 ```python
-# core/agent/simple/simple_agent.py
+# core/agent/simple_agent.py
 
 class SimpleAgent:
     def __init__(self, ...):

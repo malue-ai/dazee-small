@@ -24,7 +24,7 @@
 
 ### ✅ 1. 统一代码注释为 7 阶段标准
 
-**修改文件**: `core/agent/simple/simple_agent.py`
+**修改文件**: `core/agent/simple_agent.py`
 
 **优化内容**:
 ```python
@@ -88,7 +88,7 @@ async def chat(...):
 **验证结果**: ✅ 所有 7 个阶段注释完整
 
 ```bash
-$ grep -n "阶段 [1-7]" core/agent/simple/simple_agent.py
+$ grep -n "阶段 [1-7]" core/agent/simple_agent.py
 268:        阶段 1: Session/Agent 初始化
 269:        阶段 2: Intent Analysis
 270:        阶段 3: Tool Selection
@@ -103,7 +103,7 @@ $ grep -n "阶段 [1-7]" core/agent/simple/simple_agent.py
 ### ✅ 2. 添加 Plan Creation 监控验证逻辑
 
 **修改文件**: 
-- `core/agent/simple/simple_agent.py`
+- `core/agent/simple_agent.py`
 - `core/orchestration/pipeline_tracer.py`
 
 **新增功能**:
@@ -479,7 +479,7 @@ if self.warnings:
 
 **检查方法**:
 ```bash
-$ grep -c "阶段" core/agent/simple/simple_agent.py
+$ grep -c "阶段" core/agent/simple_agent.py
 19  # 包含 docstring 和注释中的所有"阶段"提及
 ```
 
@@ -597,7 +597,7 @@ if turn == 0 and intent.needs_plan and response.tool_calls:
 
 | 文件 | 修改类型 | 修改内容 |
 |------|---------|---------|
-| `core/agent/simple/simple_agent.py` | 重构注释 | 统一为 7 阶段标准 + 添加 Plan 验证 |
+| `core/agent/simple_agent.py` | 重构注释 | 统一为 7 阶段标准 + 添加 Plan 验证 |
 | `core/orchestration/pipeline_tracer.py` | 新增功能 | add_warning() 方法 + warnings 字段 |
 | `services/session_service.py` | 优化注释 | 添加阶段 1 详细说明 |
 | `docs/00-ARCHITECTURE-V4.md` | 更新说明 | Plan Creation 触发机制 + 术语修正 |

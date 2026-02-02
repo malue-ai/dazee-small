@@ -1,35 +1,20 @@
-# ZenFlux Agent V9.0 架构文档
+# ZenFlux Agent V7 架构文档
 
-> **最后更新**: 2026-01-30  
+> **最后更新**: 2026-01-16  
+> **当前版本**: V7.5 - 多模型计费追踪 + Dify 兼容增强  
 > **历史版本**: 已归档至 [`archived/`](./archived/) 目录  
-> **架构状态**: Agent 引擎架构 V9.0（智能回溯 + 持续学习 + 自适应护栏 + Skills 延迟加载 + 意图优化）  
-> **代码验证**: 已与代码库同步验证 ✅
+> **架构状态**: 多智能体池化完成，Prompts Engineering 核心就绪，Critic Agent 集成完成，网络重试机制完善，**多模型计费系统生产就绪**
 
 ---
 
 ## 目录
 
-- [V9.0 架构概述](#v90-架构概述)
-  - [核心能力](#核心能力)
-  - [端到端调用链](#端到端调用链)
-  - [Agent 创建策略](#agent-创建策略)
-  - [已完成功能清单](#已完成功能清单)
-  - [版本演进时间线](#版本演进时间线)
-- [模块输入-输出规格](#模块输入-输出规格)
+- [版本概述](#版本概述)
 - [核心架构决策](#核心架构决策)
-  - [决策 1：单智能体与多智能体完全独立](#决策-1单智能体与多智能体完全独立)
-  - [决策 2：共享层剥离与路由决策依据](#决策-2共享层剥离与路由决策依据)
-  - [决策 3：三级配置优先级](#决策-3三级配置优先级)
-  - [决策 4：Prompt-First 原则](#决策-4prompt-first-原则)
 - [系统架构全景图](#系统架构全景图)
-  - [整体架构](#整体架构)
-  - [请求处理流程](#请求处理流程)
-  - [SimpleAgent 完整调用流程](#simpleagent-完整调用流程)
-  - [MultiAgentOrchestrator 完整调用流程](#multiagentorchestrator-完整调用流程)
 - [核心模块详解](#核心模块详解)
   - [共享路由层 (core/routing/)](#共享路由层-corerouting)
   - [共享 Plan 层 (core/planning/)](#共享-plan-层-coreplanning)
-  - [计费系统 (core/billing/)](#计费系统-corebilling)
   - [Agent 引擎 (core/agent/)](#agent-引擎-coreagent)
   - [上下文工程 (core/context/)](#上下文工程-corecontext)
   - [记忆系统 (core/memory/)](#记忆系统-corememory)
@@ -37,490 +22,432 @@
   - [LLM 适配层 (core/llm/)](#llm-适配层-corellm)
   - [事件系统 (core/events/)](#事件系统-coreevents)
   - [监控系统 (core/monitoring/)](#监控系统-coremonitoring)
-- [Skills 机制](#skills-机制)
-  - [V9.0 延迟加载机制](#v90-延迟加载机制)
-  - [Skills 目录结构](#skills-目录结构)
-  - [Skills 核心类](#skills-核心类)
-  - [Skills 加载与执行流程](#skills-加载与执行流程)
-  - [Skills 配置方式](#skills-配置方式v90-更新)
-- [Nodes 系统](#nodes-系统)
-  - [Nodes 目录结构](#nodes-目录结构)
-  - [Nodes 核心类与协议](#nodes-核心类与协议)
-  - [Nodes 执行流程](#nodes-执行流程)
-- [消息会话管理架构](#消息会话管理架构)
 - [服务层与 API 架构](#服务层与-api-架构)
-- [多模型容灾](#多模型容灾)
-- [提示词系统 (core/prompt/)](#提示词系统-coreprompt)
 - [启动与运行流程](#启动与运行流程)
 - [配置管理体系](#配置管理体系)
 - [目录结构](#目录结构)
 - [容错与弹性](#容错与弹性)
 - [评估体系](#评估体系)
-- [代码-架构一致性清单](#代码-架构一致性清单)
-- [架构设计目标](#架构设计目标)
-- [Anthropic 多智能体系统启发](#anthropic-多智能体系统启发)
-- [相关文档](#相关文档)
+- [版本演进](#版本演进)
 
 ---
 
-## V9.0 架构概述
+## 版本概述
 
-### 核心能力
+### V7.5 核心特性（当前版本）
 
-V9.0 在 V8.0 基础上完成 **Skills 延迟加载 + 依赖检查集成 + 运行时环境自动检测** 三大优化：
+V7.5 在 V7.4 基础上完成**多模型计费追踪**，实现 Dify 平台级别的计费透明度：
 
-#### 🚀 Skills 延迟加载机制（V9.0 新增）✅
+#### 💰 多模型计费系统（P0）✅
 
-**核心理念**：借鉴 clawdbot，只在系统 Prompt 中注入 Skills 列表（name + description + location），Agent 按需读取完整 SKILL.md
+1. **LLMCallRecord - 单次调用记录** ✅
+   - 记录每次 LLM 调用的完整信息（模型、tokens、价格、延迟）
+   - 支持多模型混合调用（Haiku + Sonnet）
+   - 精确到每次调用的 input_price, output_price, unit_price
+   - **实现位置**：`core/billing/models.py`
 
-| 指标 | 优化前（V8.0） | 优化后（V9.0） | 改进 |
-|------|---------------|---------------|------|
-| Skills Prompt 大小 | ~147K 字符 | ~15K 字符 | **↓ 90.2%** |
-| Token 使用量 | ~36,700 tokens | ~3,800 tokens | **↓ 90%** |
-| 年度成本（1000次/天） | ~$40,150 | ~$4,015 | **节省 $36,135** |
+2. **EnhancedUsageTracker - 多模型追踪** ✅
+   - 记录所有 LLM 调用到 `List[LLMCallRecord]`
+   - Message ID 去重（避免流式响应重复记录）
+   - 自动计算价格明细（调用 `calculate_detailed_cost()`）
+   - **实现位置**：`core/billing/tracker.py`
 
-**配置项（config.yaml）**：
-```yaml
-skill_loading:
-  mode: "lazy"           # lazy（延迟加载）/ eager（全量加载）
+3. **UsageResponse 增强** ✅
+   - 新增 `llm_call_details: List[LLMCallRecord]`（🔥 关键）
+   - 累积统计 + 单次调用明细
+   - 所有价格字段使用 **float** 类型（非字符串）
+   - 完全兼容 Dify 格式 + 多模型增强
+   - **实现位置**：`core/billing/models.py`
 
-skill_dependency_check:
-  enabled: true          # 是否启用启动时依赖检查
-  mode: "prompt"         # prompt / interactive / skip
+4. **统一定价表** ✅
+   - `pricing.py` 作为唯一定价来源
+   - `calculate_detailed_cost()` 提供价格明细
+   - 删除重复定义（旧 `models/usage.py`）
+   - **实现位置**：`core/billing/pricing.py`
+
+5. **E2E 测试验证** ✅
+   - 真实多模型场景（Haiku 意图识别 + Sonnet 主对话）
+   - 验证 Message ID 去重
+   - 验证价格计算准确性
+   - **实现位置**：`tests/test_billing_multi_model.py`
+
+#### 📊 Usage 响应示例（Dify 兼容 + 多模型增强）
+
+```json
+{
+  "prompt_tokens": 105,
+  "completion_tokens": 327,
+  "thinking_tokens": 77,
+  "cache_read_tokens": 0,
+  "cache_write_tokens": 0,
+  "total_tokens": 509,
+  "prompt_price": 0.000207,
+  "completion_price": 0.002865,
+  "thinking_price": 0.00057,
+  "cache_read_price": 0.0,
+  "cache_write_price": 0.0,
+  "total_price": 0.003637,
+  "prompt_unit_price": 1.97,
+  "completion_unit_price": 8.76,
+  "currency": "USD",
+  "latency": 8.64,
+  "llm_calls": 2,
+  "model": "claude-haiku-4.5",
+  "llm_call_details": [
+    {
+      "call_id": "call_001",
+      "model": "claude-haiku-4.5",
+      "purpose": "intent_analysis",
+      "input_tokens": 54,
+      "output_tokens": 204,
+      "thinking_tokens": 59,
+      "input_unit_price": 1.0,
+      "output_unit_price": 5.0,
+      "input_total_price": 0.000054,
+      "output_total_price": 0.00102,
+      "thinking_total_price": 0.000295,
+      "total_price": 0.001369,
+      "latency_ms": 2500
+    },
+    {
+      "call_id": "call_002",
+      "model": "claude-sonnet-4.5",
+      "purpose": "main_response",
+      "input_tokens": 51,
+      "output_tokens": 123,
+      "thinking_tokens": 18,
+      "input_unit_price": 3.0,
+      "output_unit_price": 15.0,
+      "input_total_price": 0.000153,
+      "output_total_price": 0.001845,
+      "thinking_total_price": 0.00027,
+      "total_price": 0.002268,
+      "latency_ms": 3500
+    }
+  ]
+}
 ```
 
-**关键文件**：
-- `core/prompt/skill_prompt_builder.py` - 延迟加载 Prompt 构建器
-- `core/skill/dynamic_loader.py` - 动态依赖检查
-- `scripts/check_instance_dependencies.py` - 部署检查脚本
-
-#### 🌍 运行时环境自动检测（V9.0 新增）✅
-
-**核心理念**：自动检测本地环境信息（平台、用户、目录、应用），动态注入到系统提示词
-
-**配置项（config.yaml）**：
-```yaml
-runtime_environment:
-  enabled: true           # 是否启用环境检测
-  detect_apps: true       # 是否检测已安装应用
-  include_capabilities: true  # 是否包含平台能力说明
-  language: "zh"          # 语言：zh / en
-```
-
-**关键文件**：
-- `core/prompt/runtime_context_builder.py` - 环境检测与上下文构建
+**关键改进（V7.5）**：
+- ✅ 所有价格字段为 **float** 类型（非字符串 `"$0.01"`）
+- ✅ `llm_call_details` 包含每次调用的完整明细
+- ✅ 支持多模型混合调用（Haiku + Sonnet）
+- ✅ `prompt_unit_price` 为加权平均（1.97 = 混合 Haiku $1 和 Sonnet $3）
 
 ---
 
-V8.0 完成**智能回溯 + 持续学习 + 自适应护栏**三大核心能力建设：
+### V7.4 核心特性
 
-#### 🧠 智能回溯系统（P0）✅
+V7.4 在 V7.3 基础上完成**统一计费系统**，提供基础的 Token 使用追踪和成本计算（V7.5 进一步增强为多模型支持）：
 
-**核心理念**：区分基础设施层错误（重试/降级）与业务逻辑层错误（回溯/重规划）
+#### 💰 基础计费系统（V7.4）
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          错误分层处理模型                                    │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│   Layer 1: 基础设施层                    Layer 2: 业务逻辑层                │
-│   ┌────────────────────────┐            ┌────────────────────────┐         │
-│   │ API 超时/Rate Limit    │            │ Plan 不合理            │         │
-│   │ 服务不可用              │            │ 工具选错               │         │
-│   │ 网络错误                │            │ 结果不满足需求          │         │
-│   └──────────┬─────────────┘            └──────────┬─────────────┘         │
-│              ↓                                      ↓                       │
-│   ┌────────────────────────┐            ┌────────────────────────┐         │
-│   │ 处理策略：              │            │ 处理策略：              │         │
-│   │ • 重试 (@with_retry)   │            │ • 状态重评估            │         │
-│   │ • 降级 (ModelRouter)   │            │ • 策略调整              │         │
-│   │ • 熔断 (CircuitBreaker)│            │ • 部分重规划            │         │
-│   │                         │            │ • 工具替换              │         │
-│   │ 处理者：infra/resilience│            │ 处理者：BacktrackManager│         │
-│   └────────────────────────┘            └────────────────────────┘         │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+1. **UsageResponse 统一模型** ✅
+   - 参考 Dify 平台计费响应格式
+   - 包含：prompt_tokens, completion_tokens, thinking_tokens, cache_read_tokens
+   - 成本信息：prompt_price, completion_price, total_price, 单价
+   - 性能指标：latency, llm_calls
+   - **实现位置**：`models/usage.py`（V7.5 移至 `core/billing/models.py`）
 
-| 组件 | 文件位置 | 职责 |
-|------|----------|------|
-| ErrorClassifier | `core/agent/backtrack/error_classifier.py` | 错误层级分类（Layer 1 vs Layer 2） |
-| BacktrackManager | `core/agent/backtrack/manager.py` | LLM 驱动的回溯决策与执行 |
-| BacktrackMixin | `core/agent/simple/mixins/backtrack_mixin.py` | RVR-B 循环的回溯能力混入 |
-| RVRBAgent | `core/agent/simple/rvrb_agent.py` | 带回溯能力的单智能体 |
+2. **UsageTracker 基础版** ✅
+   - 支持 thinking_tokens（Extended Thinking 追踪）
+   - 多次 LLM 调用累积统计
+   - **实现位置**：`utils/usage_tracker.py`（V7.5 增强为 `EnhancedUsageTracker`）
 
-#### 🔄 RVR-B 循环（RVR + Backtrack）
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           RVR-B 执行循环                                     │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│   ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────────────────────┐ │
-│   │  React  │───▶│ Validate│───▶│ Reflect │───▶│ Backtrack Decision      │ │
-│   │ (思考)  │    │ (工具)  │    │ (评估)  │    │ ┌───────────────────┐   │ │
-│   └─────────┘    └────┬────┘    └─────────┘    │ │ 继续？回溯？终止？  │   │ │
-│        ▲              │                         │ └─────────┬─────────┘   │ │
-│        │              ▼                         └───────────┼─────────────┘ │
-│        │         ┌─────────┐                                │               │
-│        │         │  Error? │                                ▼               │
-│        │         └────┬────┘                    ┌─────────────────────────┐ │
-│        │              │                         │ 回溯类型：               │ │
-│        │              ▼                         │ • PLAN_REPLAN           │ │
-│        │    ┌──────────────────┐               │ • TOOL_REPLACE          │ │
-│        │    │ ErrorClassifier   │               │ • PARAM_ADJUST          │ │
-│        │    │ Layer 1? → 重试   │               │ • INTENT_CLARIFY        │ │
-│        │    │ Layer 2? → 回溯 ──┼───────────────│ • CONTEXT_ENRICH        │ │
-│        │    └──────────────────┘               └─────────────────────────┘ │
-│        │                                                    │               │
-│        └────────────────────────────────────────────────────┘               │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-#### 🎯 LLM 驱动的语义路由
-
-**核心改进**：废弃硬编码阈值，所有决策由 LLM 语义判断驱动
-
-```python
-# 路由决策来源于 IntentResult（LLM 分析结果）
-IntentResult:
-  - needs_multi_agent: bool      # 语义判断：是否需要多智能体
-  - execution_strategy: str      # "rvr" | "rvr-b"
-  
-# AgentFactory 直接使用语义决策
-if intent.needs_multi_agent:
-    agent = MultiAgentOrchestrator(...)
-elif intent.execution_strategy == "rvr-b":
-    agent = RVRBAgent(...)        # 带回溯
-else:
-    agent = SimpleAgent(...)      # 标准 RVR
-```
-
-#### 📊 持续学习系统（P2）✅
-
-| 组件 | 文件位置 | 职责 |
-|------|----------|------|
-| RewardAttribution | `core/evaluation/reward_attribution.py` | 步骤级奖励归因 |
-| PlaybookManager | `core/playbook/manager.py` | 策略库管理与学习 |
-| ToolDescriptionEnhancer | `core/tool/llm_description.py` | LLM 友好的工具描述 |
-
-#### 🛡️ 自适应护栏（P2）✅
-
-```python
-# 根据任务复杂度和用户等级动态调整资源限制
-AdaptiveGuardrails:
-  - 复杂度调整: simple=0.5x, medium=1.0x, complex=1.5x
-  - 用户等级调整: FREE=0.5x, PRO=1.0x, ENTERPRISE=2.0x
-  
-# 示例：复杂任务 + PRO 用户
-max_turns: 10 * 1.5 * 1.0 = 15 turns
-max_tokens: 50000 * 1.5 * 1.0 = 75000 tokens
-```
-
-#### 🌐 多模型协作增强（P1）✅
-
-| 组件 | 文件位置 | 职责 |
-|------|----------|------|
-| AdaptiveMoARouter | `core/llm/moa/router.py` | 自适应 MoA 路由 |
-| MoAAggregator | `core/llm/moa/aggregator.py` | 多模型响应聚合 |
-
-#### 📂 V8.0+ 核心文件
-
-| 文件 | 说明 |
-|------|------|
-| `core/agent/backtrack/error_classifier.py` | 错误层级分类器 |
-| `core/agent/backtrack/manager.py` | 回溯决策管理器 |
-| `core/agent/simple/mixins/backtrack_mixin.py` | 回溯能力 Mixin |
-| `core/agent/simple/rvrb_agent.py` | RVR-B Agent |
-| `core/guardrails/adaptive.py` | 自适应护栏 |
-| `core/playbook/manager.py` | 策略库管理器 |
-| `core/evaluation/reward_attribution.py` | 奖励归因系统 |
-| `core/tool/llm_description.py` | LLM 友好工具描述 |
-| `core/llm/moa/router.py` | MoA 路由器 |
-| `core/llm/moa/aggregator.py` | MoA 聚合器 |
+3. **Billing 模块初始化** ✅
+   - 集中管理计费相关代码
+   - 统一导出接口
+   - **实现位置**：`core/billing/`
 
 ---
 
-### 端到端调用链
+### V7.3 核心特性
 
-#### 调用链全景图
+V7.3 在 V7.2 基础上完成**网络弹性增强**，确保生产环境的稳定性：
 
+#### 🔄 网络重试机制（P0）
 
+1. **统一重试基础设施** ✅
+   - 使用 `infra/resilience/retry.py` 的 `@with_retry` 装饰器
+   - 指数退避策略：1s → 2s → 4s（最大 60s）
+   - 自动处理：连接错误、超时、限流（429）
+   - **实现位置**：`core/llm/claude.py` - `create_message_async` 方法
 
+2. **Anthropic API 特定异常处理** ✅
+   - `anthropic.APIConnectionError`: 连接错误
+   - `anthropic.APITimeoutError`: 请求超时
+   - `anthropic.RateLimitError`: 限流（429）
+   - `httpx.RemoteProtocolError`: 服务器断开连接
+   - `httpx.ConnectError`: 连接失败
+   - `httpx.TimeoutException`: 超时异常
 
-#### 关键节点性能说明
-
-| 阶段 | 核心函数 | 职责 | 性能 |
-|------|----------|------|------|
-| **1. 入口** | `ChatService.chat()` | 请求验证、Session 创建 | ~5ms |
-| **2. 持久化** | `mq_client.push_create_event()` | 消息 → Redis Streams | ~2ms |
-| **3. 上下文** | `context.load_messages()` | 加载历史、裁剪 | ~10ms |
-| **4. 路由** | `AgentRouter.route()` | 意图分析 + 复杂度评估 | ~500-1000ms |
-| **5. 创建** | `clone_for_session()` | 浅 Clone Agent | ~2-5ms |
-| **5. 创建** | `create_from_decision()` | 完整创建（首次） | ~50-100ms |
-| **6. 执行** | `agent.chat()` / `.execute()` | 核心推理循环 | 按需 |
-| **7. 事件** | `EventBroadcaster.emit_*()` | SSE 事件推送 | ~1ms/事件 |
-
-#### 函数级调用链详解
-
-**1. 入口层：`ChatService.chat()`**
-
-```python
-# services/chat_service.py:351-513
-async def chat(message, user_id, conversation_id, stream=True, ...):
-    │
-    ├── 1. 验证 agent_id（如果提供）
-    │       └── registry.has_agent(agent_id)
-    │
-    ├── 2. 处理文件
-    │       └── _process_message_with_files(message, files)
-    │
-    ├── 3. 创建 Conversation（如果是新对话）
-    │       └── crud.create_conversation(session, user_id, title)
-    │
-    ├── 4. 创建 Session
-    │       └── session_service.create_session(user_id, message, conversation_id)
-    │
-    ├── 5. 获取 Agent
-    │       └── create_simple_agent() 或 get_agent_registry().get_agent()
-    │
-    └── 6. 执行
-            └── _run_agent(session_id, agent, message, ...)
-```
-
-**2. 路由层：`AgentRouter.route()`**
-
-```python
-# core/routing/router.py:169-320
-async def route(user_query, conversation_history, user_id, previous_intent):
-    │
-    ├── 1. 构建消息列表
-    │       messages = conversation_history + [{"role": "user", "content": user_query}]
-    │
-    ├── 2. 意图分析 ⭐
-    │       └── intent = intent_analyzer.analyze(messages)
-    │                   │
-    │                   ▼
-    │           IntentResult {
-    │               task_type: TaskType,
-    │               complexity_score: float,      # LLM 直接输出
-    │               needs_multi_agent: bool,
-    │               execution_strategy: str,      # "rvr" | "rvr-b"
-    │               ...
-    │           }
-    │
-    ├── 3. 路由决策（LLM 语义驱动 + 预算检查）
-    │       ├── LLM 一致性校验（V9.3）
-    │       └── 预算检查（V7.1）
-    │
-    └── 4. 返回 RoutingDecision
-            RoutingDecision {
-                agent_type: "single" | "multi",
-                execution_strategy: "rvr" | "rvr-b",
-                intent: IntentResult,
-                complexity: ComplexityScore,
-                context: { routing_reason, budget_check_passed, ... }
-            }
-```
-
-### Agent 创建策略
-
-AgentFactory 提供三种创建入口：
-
-| 入口方法 | 触发场景 | 输入 | 输出 |
-|----------|----------|------|------|
-| `create_from_decision()` | 运行时路由（推荐） | `RoutingDecision` | Agent |
-| `from_schema()` | 配置驱动 | `AgentSchema` | Agent |
-| `from_prompt()` | 实例初始化 | System Prompt | Agent |
-
-```python
-# core/agent/factory.py
-class AgentFactory:
-    @classmethod
-    async def create_from_decision(cls, decision, event_manager, base_schema, ...):
-        """从路由决策创建 Agent（V8.0 统一入口）"""
-        if decision.agent_type == "multi":
-            return await cls._create_multi_agent(...)
-        else:
-            return cls._create_simple_agent(...)
-    
-    @classmethod
-    def _create_simple_agent(cls, decision, ...):
-        """根据 execution_strategy 选择 Agent 类型"""
-        if decision.execution_strategy == "rvr-b":
-            return RVRBAgent(...)    # 带回溯
-        else:
-            return SimpleAgent(...)  # 标准 RVR
-```
-
-### 浅 Clone 机制（原型池优化）
-
-**核心设计**：复用重量级组件，重置会话级状态
-
-```python
-# core/agent/protocol.py:123-150
-def clone_for_session(
-    self,
-    event_manager: "EventBroadcaster",
-    workspace_dir: Optional[str] = None,
-    conversation_service: Optional[Any] = None,
-) -> "AgentProtocol":
-    """
-    V7.1 原型池优化的核心方法：
-    - 浅拷贝重量级组件（共享 LLM Services, ToolExecutor 等）
-    - 重置 Session 级状态（EventBroadcaster, UsageTracker 等）
-    
-    性能：
-    - 原型创建：50-100ms
-    - clone_for_session：<5ms（90%+ 提升）
-    """
-```
-
-**组件复用 vs 重置对照表**：
-
-| 组件类型 | 复用（浅拷贝）| 重置（新建）|
-|----------|--------------|-------------|
-| **LLM Service** | ✅ 共享 | - |
-| **ToolExecutor** | ✅ 共享 | - |
-| **CapabilityRegistry** | ✅ 共享 | - |
-| **MCP Clients** | ✅ 共享 | - |
-| **Schema** | ✅ 共享 | - |
-| **Prompt Cache** | ✅ 共享 | - |
-| **EventBroadcaster** | - | ✅ 新建 |
-| **UsageTracker** | - | ✅ 新建 |
-| **WorkingMemory** | - | ✅ 新建 |
-| **workspace_dir** | - | ✅ 设置 |
-| **AgentState** | - | ✅ 新建 |
-
-**原型池模式**（AgentCoordinator）：
-
-```python
-# core/agent/coordinator.py:208-274
-async def _get_or_create_agent(self, decision, event_manager, ...):
-    # 生成原型键（包含实例名和复杂度）
-    prototype_key = self._get_prototype_key(decision, base_schema)
-    # 例如: "DataAnalyst_single_medium"
-    
-    # 尝试从原型池获取
-    if prototype_key in self._prototype_pool:
-        prototype = self._prototype_pool[prototype_key]
-        # ⭐ 浅 Clone：复用重量级组件，重置会话状态
-        return prototype.clone_for_session(
-            event_manager=event_manager,
-            workspace_dir=workspace_dir,
-        )
-    
-    # 创建新 Agent 并缓存原型
-    agent = await AgentFactory.create_from_decision(decision, ...)
-    self._prototype_pool[prototype_key] = agent
-    return agent
-```
-
-#### 📂 新增文件
-
-| 文件 | 说明 |
-|------|------|
-| `core/agent/protocol.py` | AgentProtocol 统一接口（含 clone_for_session） |
-| `core/agent/coordinator.py` | AgentCoordinator 协调器（含原型池） |
-
-#### 📝 设计原则
-
-1. **路由逻辑集中**：所有路由决策由 AgentRouter 完成，Factory 不做路由
-2. **统一接口**：AgentProtocol 定义统一的 `execute()` 和 `clone_for_session()` 方法
-3. **单一入口**：AgentCoordinator.route_and_execute() 是推荐的执行入口
-4. **职责分离**：Router 路由、Factory 创建、Agent 执行
-5. **浅 Clone 优化**：通过原型池 + clone_for_session() 实现 90%+ 的初始化性能提升
+3. **架构分层改进** ✅
+   - ❌ 移除业务层（Orchestrator）的重复重试实现
+   - ✅ 在底层（LLM 调用层）统一处理
+   - ✅ 所有 LLM 调用自动受益
+   - **关注点分离**：每层专注自己的职责
 
 ---
 
-### 版本演进时间线
+### V7.2 核心特性
 
-| 版本 | 核心主题 | 关键改进 |
-|------|----------|----------|
-| **V9.0** | Skills 延迟加载 + 依赖管理 | SkillPromptBuilder、DynamicSkillLoader、RuntimeContextBuilder、90% Token 节省、依赖检查集成、配置化加载模式 |
-| **V8.0** | 智能回溯 + 持续学习 | RVR-B 循环、ErrorClassifier、BacktrackManager、AdaptiveGuardrails、PlaybookManager、RewardAttribution、MoA 多模型协作 |
-| **V7.9** | Agent 选择优化 | 三级优先级策略（Config > Task > Capability）、MultiAgentOrchestrator 浅克隆 |
-| **V7.8** | Agent 引擎重构 | AgentProtocol 统一接口、AgentCoordinator、AgentFactory 简化、路由逻辑集中化 |
-| **V7.7** | DAG 调度优化 | DAGScheduler 拓扑排序、asyncio 协程并发、Critic REPLAN 重算机制 |
-| **V7.6** | 工具选择优化 | Schema 工具有效性验证、覆盖透明化日志、Tracer 增强追踪、多模型容灾 |
-| **V7.5** | 多模型计费 | LLMCallRecord、EnhancedUsageTracker、llm_call_details 明细、缓存 Token 统计 |
-| **V7.4** | 统一计费系统 | UsageResponse 统一模型、Billing 模块集中管理 |
-| **V7.3** | 网络弹性增强 | 统一重试基础设施（@with_retry）、指数退避、Anthropic API 异常处理 |
-| **V7.2** | Critic 质量保证 | CriticAgent 集成、Plan-Execute-Critique 循环、工具动态加载、记忆系统集成 |
-| **V7.1** | 多智能体生产就绪 | 原型池化（90%+ 性能提升）、强弱配对策略、成本预算管理、检查点恢复 |
-| **V7.0** | 架构重构里程碑 | 单/多智能体独立、共享层剥离、统一路由决策、评估体系建立 |
+V7.2 在 V7.1 基础上完成**多智能体生产就绪的完整集成**：
 
-**架构演进路线**：
+#### 🎯 质量保证（P0）
+
+1. **Critic Agent 集成** ✅
+   - 评估 Executor 输出质量（0-10 分）
+   - 智能决策：pass / retry / replan / fail
+   - 提供具体改进建议（非空泛指导）
+   - **实现位置**：`core/agent/multi/critic.py`
+
+2. **Plan-Execute-Critique 循环** ✅
+   - 执行后自动评估
+   - 根据评估结果决定下一步（重试/调整计划/继续）
+   - 复用现有 `plan_todo_tool` 实现计划调整
+   - **实现位置**：`core/agent/multi/orchestrator.py:_execute_step_with_critique()`
+
+3. **提示词驱动设计** ✅
+   - 所有评估逻辑写在 Prompt 中
+   - 支持运营人员定制评估标准
+   - **实现位置**：`prompts/multi_agent/critic_prompt.md`
+
+#### 🔧 多智能体核心集成（P0）
+
+4. **工具动态加载** ✅ **新增**
+   - Subagent 根据 SubTask.tools_required 动态加载工具
+   - 集成 ToolLoader + CapabilityRegistry
+   - 支持工具过滤和 Anthropic 格式转换
+   - **实现位置**：`core/agent/multi/orchestrator.py:_load_subagent_tools()`
+
+5. **记忆系统集成** ✅ **新增**
+   - WorkingMemory（会话级）初始化
+   - Mem0 客户端（用户级长期记忆）集成
+   - 共享资源统一初始化
+   - **实现位置**：`core/agent/multi/orchestrator.py:_initialize_shared_resources()`
+
+6. **路由层激活** ✅ **新增**
+   - ChatService 默认启用 AgentRouter（`enable_routing=True`）
+   - 意图识别 + 复杂度评分 → 单/多智能体路由决策
+   - 多智能体框架完整接入 ChatService
+   - **实现位置**：`services/chat_service.py`
+
+7. **多智能体配置加载** ✅ **新增**
+   - 从 YAML 加载配置或使用默认配置
+   - 支持 Orchestrator/Worker/Critic 三层配置
+   - 动态 Agent 配置列表
+   - **实现位置**：`core/agent/multi/models.py:load_multi_agent_config()`
+
+### V7.1 核心特性
+
+V7.1 是 ZenFlux Agent 的**多智能体生产就绪版本**，参考 Anthropic Multi-Agent Research System 设计，完成以下核心优化：
+
+#### 🚀 性能优化（P0）
+
+1. **多智能体原型池化** ✅
+   - 单/多智能体统一池化机制
+   - `AgentRegistry` 预创建原型 → `clone_for_session()` 浅克隆
+   - **性能提升**：`get_agent()` 耗时从 50-100ms 降至 <5ms（**90%+ 提升**）
+   - **实现位置**：`services/agent_registry.py`, `core/agent/simple_agent.py`, `core/multi_agent/orchestrator.py`
+
+2. **Prompts Engineering 核心** ✅
+   - 8 个核心要素构建 Subagent 系统提示词
+   - Lead Agent 分解 Prompt 增强（扩展规则 + 复杂度驱动资源分配）
+   - Worker Agent 真实执行（替换占位实现）
+   - **实现位置**：`core/agent/multi/orchestrator.py:_build_subagent_system_prompt()`, `core/agent/multi/lead_agent.py`
+
+3. **上下文隔离优化** ✅
+   - Subagent 独立上下文执行
+   - 只传递 Orchestrator 摘要（< 500 tokens）
+   - **成本优化**：预计 Token 消耗降低 30-40%
+   - **实现位置**：`core/agent/multi/models.py:SubagentResult`, `orchestrator.py:_spawn_subagent()`
+
+#### 💰 成本控制（P0）
+
+4. **强弱配对策略** ✅
+   - Orchestrator 使用 **Claude Opus 4**（规划、分解、综合）
+   - Workers 使用 **Claude Sonnet 4.5**（具体执行）
+   - **成本优化**：30-40% 降低（相比全 Opus）
+   - **配置文件**：`config/multi_agent_config.yaml`
+
+5. **成本预算管理** ✅
+   - 多智能体 Token 预算（基于 Anthropic 数据：~15× 单智能体）
+   - 分层预算：FREE/BASIC/PRO/ENTERPRISE
+   - **自动降级**：预算不足时降级到单智能体
+   - **实现位置**：`core/monitoring/token_budget.py`, `core/routing/router.py`
+
+#### 🛡️ 容错增强（P0）
+
+6. **检查点恢复机制** ✅
+   - 关键阶段自动保存（任务分解、Worker 执行）
+   - 失败时从检查点恢复（不从头开始）
+   - **容错提升**：显著减少重试成本
+   - **实现位置**：`core/multi_agent/checkpoint.py`
+
+### V7.0 核心特性
+
+V7.0 是 ZenFlux Agent 的**架构重构里程碑版本**，核心变化：
+
+1. **单/多智能体完全独立**：SimpleAgent 和 MultiAgentOrchestrator 平级独立，不互相依赖
+2. **共享层剥离**：IntentAnalyzer、Plan 协议从 SimpleAgent 剥离到独立模块
+3. **统一路由决策**：AgentRouter 在服务层决策使用哪个执行框架
+4. **评估体系建立**：基于 Anthropic 方法论的三层评分器（Code + Model + Human）
+5. **生产监控闭环**：失败检测 → 案例库 → 评估任务 → 回归测试
+6. **上下文三层防护**：Memory Tool 指导 + 历史裁剪 + QoS 控制
+
+### V7 架构演进路线
 
 ```
-V5.0 → V6.x → V7.0 → V7.1 → V7.2 → V7.3 → V7.4 → V7.5 → V7.6 → V7.7 → V7.8 → V7.9 → V8.0 → V9.0
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-实例缓存    架构重构   生产就绪   Critic    网络弹性   计费     多模型    DAG      Agent     回溯      延迟加载
-LLM驱动    单/多独立  原型池化   质量保证  重试机制   追踪     容灾     调度     引擎重构   持续学习   Token节省
+V5.0 → V5.1 → V6.1 → V6.2 → V6.3 → V7.0 → V7.1 → V7.2
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+实例缓存  评估体系  场景化   配置优先级  上下文   架构重构  多智能体  Critic
+LLM驱动  共享层    提示词   Schema兜底  三层防护  单/多独立  生产就绪  质量保证
+         剥离     分解     配置合并              生产就绪  Anthropic启发  Plan联动
 ```
+
+### V7.2 功能地图
+
+**快速定位所有 V7.2 新功能**：
+
+```
+📁 ZenFlux Agent V7.2
+│
+├── 🎯 质量保证（V7.2 新增）
+│   ├── core/agent/multi/critic.py
+│   │   ├── CriticAgent                          # Critic 智能体
+│   │   ├── critique()                           # 评估方法
+│   │   └── _parse_critique_response()           # 解析 LLM 响应
+│   │
+│   ├── prompts/multi_agent/critic_prompt.md     # Critic 系统提示词
+│   │
+│   ├── core/agent/multi/orchestrator.py
+│   │   ├── _execute_step_with_critique()       # 带 Critic 的执行
+│   │   ├── _trigger_replan()                    # 触发计划调整
+│   │   └── _subtask_to_plan_step()              # SubTask → PlanStep
+│   │
+│   └── core/agent/multi/models.py
+│       ├── CriticVerdict                         # 决策枚举
+│       ├── CriticResult                         # 评估结果
+│       ├── PlanAdjustmentHint                    # Plan 调整建议
+│       └── CriticConfig                          # Critic 配置
+│
+└── 📋 配置更新
+    └── config/multi_agent_config.yaml
+        └── critic:                               # Critic 配置节
+            enabled: true
+            model: "claude-sonnet-4-5-20250929"
+            max_retries: 2
+            quality_threshold: 6.0
+```
+
+### V7.1 功能地图
+
+**快速定位所有 V7.1 新功能**：
+
+```
+📁 ZenFlux Agent V7.1
+│
+├── 🚀 性能优化
+│   ├── services/agent_registry.py
+│   │   ├── _agent_prototypes: Dict[str, Agent]          # 原型缓存
+│   │   ├── _create_agent_prototype()                     # 预创建原型
+│   │   └── get_agent() → prototype.clone_for_session()  # <5ms 克隆
+│   │
+│   ├── core/agent/simple_agent.py
+│   │   └── clone_for_session()                           # 单智能体浅克隆
+│   │
+│   └── core/multi_agent/orchestrator.py
+│       ├── clone_for_session()                           # 多智能体浅克隆
+│       ├── _build_subagent_system_prompt()               # 8 个核心要素
+│       ├── _execute_single_agent()                       # 真实执行
+│       └── _spawn_subagent()                             # 上下文隔离
+│
+├── 💰 成本控制
+│   ├── core/monitoring/token_budget.py
+│   │   ├── MultiAgentTokenBudget                         # 预算管理器
+│   │   ├── check_budget()                                # 预算检查
+│   │   └── record_usage()                                # 使用记录
+│   │
+│   ├── core/routing/router.py
+│   │   └── route() → budget check → auto downgrade       # 自动降级
+│   │
+│   └── config/multi_agent_config.yaml
+│       ├── orchestrator: model=opus                      # 强模型配置
+│       └── workers: model=sonnet                         # 弱模型配置
+│
+├── 🛡️ 容错增强
+│   └── core/multi_agent/checkpoint.py
+│       ├── CheckpointManager                             # 检查点管理器
+│       ├── save_checkpoint()                             # 保存检查点
+│       └── restore_from_checkpoint()                     # 恢复检查点
+│
+└── 📝 Prompts Engineering
+    ├── core/agent/multi/lead_agent.py
+    │   ├── _build_decomposition_prompt()                 # 扩展规则
+    │   └── _suggest_subagent_count()                     # 复杂度驱动
+    │
+    └── core/agent/multi/models.py
+        ├── SubagentResult                                # 上下文隔离结果
+        ├── OrchestratorConfig                            # Opus 配置
+        └── WorkerConfig                                  # Sonnet 配置
+```
+
+### V7.1 快速开始
+
+**使用多智能体功能的 3 个步骤**：
+
+1. **配置强弱配对**（`config/multi_agent_config.yaml`）
+   ```yaml
+   orchestrator:
+     model: "claude-opus-4"
+     enable_thinking: true
+   
+   workers:
+     model: "claude-sonnet-4-5-20250929"
+     enable_thinking: true
+   ```
+
+2. **设置成本预算**（`core/monitoring/token_budget.py`）
+   ```python
+   from core.monitoring import get_token_budget
+   
+   budget = get_token_budget()
+   budget.set_custom_budget("PRO", "multi", 1_000_000)  # 可选
+   ```
+
+3. **发起复杂查询**（complexity > 5.0 自动路由到多智能体）
+   ```python
+   # 系统会自动：
+   # 1. 检查预算（预算不足 → 降级到单智能体）
+   # 2. 从原型克隆 MultiAgentOrchestrator
+   # 3. Lead Agent 分解任务
+   # 4. Workers 并行执行
+   # 5. 保存检查点（可恢复）
+   # 6. 返回综合结果
+   ```
 
 ---
 
 ### 已完成功能清单
-
-#### V9.0 核心功能
-
-| 模块 | 状态 | 文件位置 | 说明 |
-|------|------|----------|------|
-| **🆕 V9.0: Skills 延迟加载** | ✅ | `core/prompt/skill_prompt_builder.py` | 仅注入列表，按需读取 SKILL.md，节省 90% Token |
-| **🆕 V9.0: 动态依赖加载器** | ✅ | `core/skill/dynamic_loader.py` | 运行时检查 Skills 依赖状态 |
-| **🆕 V9.0: 运行时环境检测** | ✅ | `core/prompt/runtime_context_builder.py` | 自动检测平台、用户、应用 |
-| **🆕 V9.0: 部署依赖检查** | ✅ | `scripts/check_instance_dependencies.py` | 部署前依赖检查 + 安装脚本生成 |
-| **🆕 V9.0: 配置化加载模式** | ✅ | `config.yaml: skill_loading.mode` | lazy/eager 模式可配置 |
-| **🆕 V9.0: 多语言支持** | ✅ | `config.yaml: runtime_environment.language` | zh/en 系统提示词语言 |
-
-**E2E 验证结果**（2026-01-30）：
-
-| 测试项 | 结果 |
-|--------|------|
-| 系统 Prompt 格式 | ✅ 包含 `<available_skills>` 延迟加载格式 |
-| Token 节省 | ✅ 90.2%（2,369 vs 24,182 字符） |
-| Skill location 有效 | ✅ 9/9 路径可读取 |
-| 配置集成 | ✅ `skill_loading.mode=lazy` 生效 |
-
-#### V8.0+ 核心功能
-
-| 模块 | 状态 | 文件位置 | 说明 |
-|------|------|----------|------|
-| **智能回溯系统** | ✅ | `core/agent/backtrack/` | 错误分层处理 + LLM 驱动回溯 |
-| **RVRBAgent** | ✅ | `core/agent/simple/rvrb_agent.py` | 带回溯能力的单智能体 |
-| **BacktrackMixin** | ✅ | `core/agent/simple/mixins/backtrack_mixin.py` | 回溯能力混入 |
-| **ErrorClassifier** | ✅ | `core/agent/backtrack/error_classifier.py` | 错误层级分类器 |
-| **BacktrackManager** | ✅ | `core/agent/backtrack/manager.py` | 回溯决策管理器 |
-| **AdaptiveGuardrails** | ✅ | `core/guardrails/adaptive.py` | 自适应资源护栏 |
-| **PlaybookManager** | ✅ | `core/playbook/manager.py` | 策略库管理（持续学习） |
-| **RewardAttribution** | ✅ | `core/evaluation/reward_attribution.py` | 步骤级奖励归因 |
-| **MoA 路由器** | ✅ | `core/llm/moa/router.py` | 多模型协作路由 |
-| **MoA 聚合器** | ✅ | `core/llm/moa/aggregator.py` | 多模型响应聚合 |
-| **AgentProtocol** | ✅ | `core/agent/protocol.py` | 统一 Agent 接口 |
-| **AgentCoordinator** | ✅ | `core/agent/coordinator.py` | Agent 协调器 |
-
-#### V7.x 核心功能
 
 | 模块 | 状态 | 文件位置 |
 |------|------|----------|
 | 共享路由层 | ✅ | `core/routing/` |
 | 共享 Plan 协议 | ✅ | `core/planning/` |
 | 多智能体框架独立 | ✅ | `core/agent/multi/` |
-| 多智能体原型池化 | ✅ | `services/agent_registry.py` |
-| Prompts Engineering (8 要素) | ✅ | `core/agent/multi/orchestrator.py` |
-| 上下文隔离 | ✅ | `core/agent/multi/models.py` |
-| 强弱配对策略 | ✅ | `config/multi_agent_config.yaml` |
-| 成本预算管理 | ✅ | `core/monitoring/token_budget.py` |
-| 检查点恢复机制 | ✅ | `core/agent/multi/checkpoint.py` |
-| Critic Agent | ✅ | `core/agent/multi/critic.py` |
-| Plan-Execute-Critique 循环 | ✅ | `core/agent/multi/orchestrator.py` |
-| 工具动态加载 | ✅ | `orchestrator.py:_load_subagent_tools()` |
-| 记忆系统集成 | ✅ | `orchestrator.py:_initialize_shared_resources()` |
-| 路由层激活 | ✅ | `services/chat_service.py (enable_routing=True)` |
-| 多智能体配置加载 | ✅ | `models.py:load_multi_agent_config()` |
-| ChatService 完整集成 | ✅ | `chat_service.py:_run_agent()` |
+| **🆕 多智能体原型池化** | ✅ | `services/agent_registry.py` |
+| **🆕 Prompts Engineering (8 要素)** | ✅ | `core/agent/multi/orchestrator.py` |
+| **🆕 上下文隔离** | ✅ | `core/agent/multi/models.py` |
+| **🆕 强弱配对策略** | ✅ | `config/multi_agent_config.yaml` |
+| **🆕 成本预算管理** | ✅ | `core/monitoring/token_budget.py` |
+| **🆕 检查点恢复机制** | ✅ | `core/multi_agent/checkpoint.py` |
+| **🆕 V7.2: Critic Agent** | ✅ | `core/agent/multi/critic.py` |
+| **🆕 V7.2: Plan-Execute-Critique 循环** | ✅ | `core/agent/multi/orchestrator.py` |
+| **🆕 V7.2: 工具动态加载** | ✅ | `orchestrator.py:_load_subagent_tools()` |
+| **🆕 V7.2: 记忆系统集成** | ✅ | `orchestrator.py:_initialize_shared_resources()` |
+| **🆕 V7.2: 路由层激活** | ✅ | `services/chat_service.py (enable_routing=True)` |
+| **🆕 V7.2: 多智能体配置加载** | ✅ | `models.py:load_multi_agent_config()` |
+| **🆕 V7.2: ChatService 完整集成** | ✅ | `chat_service.py:_run_agent()` |
 | 评估基础设施 (Promptfoo) | ✅ | `evaluation/` |
 | 生产监控 | ✅ | `core/monitoring/` |
 | QoS 评估集成 | ✅ | `evaluation/qos_config.py` |
@@ -529,268 +456,6 @@ LLM驱动    单/多独立  原型池化   质量保证  重试机制   追踪  
 | 健康检查 | ✅ | `routers/health.py` |
 | 场景化提示词分解 | ✅ | `core/prompt/` |
 | 三级配置优先级 | ✅ | `scripts/instance_loader.py` |
-| DAGScheduler | ✅ | `core/planning/dag_scheduler.py` |
-| 多模型容灾 | ✅ | `core/llm/router.py` |
-
----
-
-## 模块输入-输出规格
-
-本节明确每个核心模块的输入（入参、依赖）、输出（结果、价值）和调用关系。
-
-### 🔄 核心调用链总览
-
-```
-┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│                              V9.0 端到端调用链                                           │
-├─────────────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                          │
-│   用户请求                                                                               │
-│       │                                                                                  │
-│       ▼                                                                                  │
-│   ┌───────────────────────────────────────────────────────────────────────────────────┐ │
-│   │ ChatService.chat()                                                                 │ │
-│   │   输入: agent_id, user_id, message, files, session_id                             │ │
-│   │   输出: AsyncGenerator[SSE Events]                                                 │ │
-│   │   依赖: SessionService, AgentCoordinator, ConversationService                      │ │
-│   └───────────────────────────────────────────────────────────────────────────────────┘ │
-│       │                                                                                  │
-│       ▼                                                                                  │
-│   ┌───────────────────────────────────────────────────────────────────────────────────┐ │
-│   │ AgentRouter.route()                                                                │ │
-│   │   输入: user_query, context, schema                                                │ │
-│   │   输出: RoutingDecision(agent_type, execution_strategy, intent)                    │ │
-│   │   依赖: IntentAnalyzer, AdaptiveGuardrails                                         │ │
-│   └───────────────────────────────────────────────────────────────────────────────────┘ │
-│       │                                                                                  │
-│       ├──────────────────────────┬──────────────────────────┐                           │
-│       ▼                          ▼                          ▼                           │
-│   ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────────────────────────┐ │
-│   │ SimpleAgent     │    │ RVRBAgent       │    │ MultiAgentOrchestrator              │ │
-│   │   策略: rvr     │    │   策略: rvr-b   │    │   策略: dag/parallel/sequential     │ │
-│   │   回溯: 无      │    │   回溯: 有      │    │   回溯: DAG 部分重规划              │ │
-│   └─────────────────┘    └─────────────────┘    └─────────────────────────────────────┘ │
-│       │                          │                          │                           │
-│       └──────────────────────────┴──────────────────────────┘                           │
-│                                  │                                                       │
-│                                  ▼                                                       │
-│   ┌───────────────────────────────────────────────────────────────────────────────────┐ │
-│   │ 共享能力层                                                                         │ │
-│   │   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │ │
-│   │   │ ToolExecutor │  │ MemoryEngine │  │ LLM Adapter  │  │ AdaptiveGuardrails   │  │ │
-│   │   └──────────────┘  └──────────────┘  └──────────────┘  └──────────────────────┘  │ │
-│   └───────────────────────────────────────────────────────────────────────────────────┘ │
-│                                  │                                                       │
-│                                  ▼                                                       │
-│   ┌───────────────────────────────────────────────────────────────────────────────────┐ │
-│   │ 持续学习层                                                                         │ │
-│   │   ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐                │ │
-│   │   │ RewardAttribution│  │ PlaybookManager  │  │ ToolDescEnhancer │                │ │
-│   │   └──────────────────┘  └──────────────────┘  └──────────────────┘                │ │
-│   └───────────────────────────────────────────────────────────────────────────────────┘ │
-│                                                                                          │
-└─────────────────────────────────────────────────────────────────────────────────────────┘
-```
-
-### 📋 核心模块输入-输出规格表
-
-#### 1. 路由层 (core/routing/)
-
-| 模块 | 入参 | 依赖 | 输出 | 价值 |
-|------|------|------|------|------|
-| **IntentAnalyzer** | `query: str`<br>`history: List[Message]`<br>`tools: List[Tool]` | LLMClient<br>PromptCache | `IntentResult`<br>- task_type<br>- complexity<br>- needs_multi_agent<br>- execution_strategy | 语义理解与路由决策 |
-| **AgentRouter** | `user_query: str`<br>`context: RuntimeContext`<br>`schema: AgentSchema` | IntentAnalyzer<br>AdaptiveGuardrails | `RoutingDecision`<br>- agent_type<br>- execution_strategy<br>- guardrail_config | 统一路由入口 |
-
-#### 2. Agent 引擎 (core/agent/)
-
-| 模块 | 入参 | 依赖 | 输出 | 价值 |
-|------|------|------|------|------|
-| **SimpleAgent** | `messages: List[Dict]`<br>`session_id: str`<br>`intent: IntentResult` | ToolExecutor<br>MemoryEngine<br>LLMClient | `AsyncGenerator[SSE Event]`<br>- text<br>- tool_use<br>- thinking<br>- message_complete | 标准 RVR 循环执行 |
-| **RVRBAgent** | 同 SimpleAgent<br>+ `max_backtracks: int` | SimpleAgent (继承)<br>BacktrackMixin | 同 SimpleAgent<br>+ 回溯事件 | RVR + 智能回溯 |
-| **MultiAgentOrchestrator** | `messages: List[Dict]`<br>`session_id: str`<br>`plan: Plan` | LeadAgent<br>DAGScheduler<br>CriticAgent | `AsyncGenerator[SSE Event]`<br>+ 多步骤进度 | 多智能体协作 |
-| **AgentFactory** | `decision: RoutingDecision`<br>`base_schema: AgentSchema` | AgentRouter | `AgentProtocol` 实例 | Agent 创建工厂 |
-| **AgentCoordinator** | `messages: List`<br>`session_id: str` | AgentRouter<br>AgentFactory | `AsyncGenerator[SSE Event]` | 单一执行入口 |
-
-#### 3. 回溯系统 (core/agent/backtrack/)
-
-| 模块 | 入参 | 依赖 | 输出 | 价值 |
-|------|------|------|------|------|
-| **ErrorClassifier** | `error: Exception`<br>`tool_name: str`<br>`context: Dict` | 规则引擎<br>LLMClient (可选) | `ClassifiedError`<br>- layer (L1/L2)<br>- category<br>- backtrack_type<br>- is_retryable | 错误层级分类 |
-| **BacktrackManager** | `error: ClassifiedError`<br>`state: RVRBState` | LLMClient<br>ToolRegistry | `BacktrackResult`<br>- action<br>- alternative_tool<br>- adjusted_params | LLM 驱动回溯决策 |
-| **BacktrackMixin** | `error: Exception`<br>`tool_name: str`<br>`state: RVRBState` | ErrorClassifier<br>BacktrackManager | `tuple[result, should_continue, context]` | RVR-B 循环能力 |
-
-#### 4. 护栏系统 (core/guardrails/)
-
-| 模块 | 入参 | 依赖 | 输出 | 价值 |
-|------|------|------|------|------|
-| **AdaptiveGuardrails** | `complexity_level: str`<br>`user_tier: str` | GuardrailConfig | 动态限制:<br>- max_turns<br>- max_tokens<br>- max_tools | 自适应资源控制 |
-| **GuardrailConfig** | 配置字典 | - | 限制倍率映射 | 配置管理 |
-
-**复杂度倍率**:
-| 复杂度 | max_turns | max_tokens | max_tools |
-|--------|-----------|------------|-----------|
-| simple | 0.5x | 0.5x | 0.5x |
-| medium | 1.0x | 1.0x | 1.0x |
-| complex | 1.5x | 1.5x | 1.5x |
-
-**用户等级倍率**:
-| 用户等级 | 倍率 |
-|----------|------|
-| FREE | 0.5x |
-| PRO | 1.0x |
-| ENTERPRISE | 2.0x |
-
-#### 5. 持续学习 (core/evaluation/, core/playbook/)
-
-| 模块 | 入参 | 依赖 | 输出 | 价值 |
-|------|------|------|------|------|
-| **RewardAttribution** | `session_id: str`<br>`steps: List[StepRecord]`<br>`final_score: float` | LLMClient (可选)<br>🆕 Database (V9.4) | `SessionReward`<br>- step_rewards<br>- attribution_weights | 步骤级奖励归因 |
-| **PlaybookManager** | `session_data: Dict` | 🆕 存储后端 (V9.4)<br>- FileStorage<br>- DatabaseStorage | `PlaybookEntry`<br>- trigger<br>- strategy<br>- quality_metrics | 策略学习与匹配 |
-| **ToolDescriptionEnhancer** | `tool_name: str`<br>`capabilities.yaml` | - | `LLMToolDescription`<br>- use_when<br>- not_use_when<br>- examples | LLM 友好工具描述 |
-
-**🆕 V9.4 数据库存储支持**：
-
-```bash
-# 启用数据库存储
-export PLAYBOOK_STORAGE_BACKEND=database    # 策略库使用数据库
-export REWARD_PERSIST_ENABLED=true          # 奖励归因持久化
-```
-
-| 存储后端 | 配置 | 适用场景 |
-|---------|------|----------|
-| FileStorage | `PLAYBOOK_STORAGE_BACKEND=file` | 单实例、开发环境 |
-| DatabaseStorage | `PLAYBOOK_STORAGE_BACKEND=database` | 多实例、生产环境 |
-
-**数据库表结构**：
-
-| 表名 | 用途 | 主要字段 |
-|------|------|----------|
-| `session_rewards` | 会话奖励记录 | session_id, total_reward, outcome_success, task_type |
-| `step_rewards` | 步骤奖励记录 | action_type, action_name, reward_value, is_critical |
-| `playbooks` | 策略库 | name, trigger, strategy, tool_sequence, status |
-| `intent_cache` | 意图缓存持久化 | query_hash, embedding, intent_result, expires_at |
-
-#### 6. 工具层 (core/tool/)
-
-| 模块 | 入参 | 依赖 | 输出 | 价值 |
-|------|------|------|------|------|
-| **ToolSelector** | `intent: IntentResult`<br>`available_tools: List` | ToolRegistry<br>ToolDescriptionEnhancer | `List[SelectedTool]`<br>- 排序后的工具列表<br>- 匹配分数 | 三级工具选择 |
-| **ToolExecutor** | `tool_name: str`<br>`tool_input: Dict`<br>`context: RuntimeContext` | ToolRegistry<br>SandboxService | `ToolResult`<br>- success<br>- output<br>- error | 工具执行 |
-| **ToolLoader** | `config_path: str` | capabilities.yaml | `Dict[str, Tool]` | 工具加载 |
-
-#### 7. 记忆系统 (core/memory/)
-
-| 模块 | 入参 | 依赖 | 输出 | 价值 |
-|------|------|------|------|------|
-| **MemoryEngine** | `scope: Scope`<br>`user_id: str`<br>`query: str` | Mem0Client<br>VectorDB | `List[Memory]`<br>- 相关记忆<br>- 置信度 | 三层记忆管理 |
-| **WorkingMemory** | `session_id: str` | Redis | `Dict` 会话状态 | 会话级记忆 |
-| **Mem0Memory** | `user_id: str`<br>`content: str` | Mem0 API | 持久化结果 | 长期记忆 |
-
-#### 8. LLM 适配层 (core/llm/)
-
-| 模块 | 入参 | 依赖 | 输出 | 价值 |
-|------|------|------|------|------|
-| **LLMClient** | `messages: List`<br>`model: str`<br>`tools: List` | ModelRouter | `AsyncGenerator[Chunk]` | 统一 LLM 调用 |
-| **ModelRouter** | `model: str`<br>`fallback_chain: List` | 多个 Provider | 可用的 Provider | 主备容灾 |
-| **AdaptiveMoARouter** | `task: str`<br>`complexity: float` | 多个 LLMClient | `bool` (是否启用 MoA) | 多模型协作决策 |
-| **MoAAggregator** | `responses: List[str]` | LLMClient | `str` 聚合结果 | 多模型响应合成 |
-
-### 📊 数据流向图
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           请求处理数据流                                     │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│   [用户输入]                                                                 │
-│       │                                                                      │
-│       ▼                                                                      │
-│   ┌─────────────────────────────────────────────────────────────────────┐   │
-│   │ Phase 1: 路由决策                                                    │   │
-│   │                                                                      │   │
-│   │   user_query ──▶ IntentAnalyzer ──▶ IntentResult                    │   │
-│   │                        │                  │                          │   │
-│   │                        ▼                  ▼                          │   │
-│   │              ┌─────────────────────────────────────┐                 │   │
-│   │              │ IntentResult:                       │                 │   │
-│   │              │   task_type: "data_analysis"        │                 │   │
-│   │              │   complexity: MEDIUM                │                 │   │
-│   │              │   needs_multi_agent: false          │  ← 语义决策     │   │
-│   │              │   execution_strategy: "rvr-b"       │  ← 语义决策     │   │
-│   │              │   tools_suggested: ["analytics"]    │                 │   │
-│   │              └─────────────────────────────────────┘                 │   │
-│   │                                    │                                 │   │
-│   │                                    ▼                                 │   │
-│   │   IntentResult ──▶ AgentRouter ──▶ RoutingDecision                  │   │
-│   │                                        │                             │   │
-│   │                                        ▼                             │   │
-│   │              ┌─────────────────────────────────────┐                 │   │
-│   │              │ RoutingDecision:                    │                 │   │
-│   │              │   agent_type: "single"              │                 │   │
-│   │              │   execution_strategy: "rvr-b"       │                 │   │
-│   │              │   guardrail_config: {...}           │                 │   │
-│   │              └─────────────────────────────────────┘                 │   │
-│   └─────────────────────────────────────────────────────────────────────┘   │
-│                                    │                                         │
-│                                    ▼                                         │
-│   ┌─────────────────────────────────────────────────────────────────────┐   │
-│   │ Phase 2: Agent 创建与执行                                            │   │
-│   │                                                                      │   │
-│   │   RoutingDecision ──▶ AgentFactory ──▶ RVRBAgent                    │   │
-│   │                                              │                       │   │
-│   │                                              ▼                       │   │
-│   │                                    ┌─────────────────┐               │   │
-│   │                                    │ RVR-B Loop      │               │   │
-│   │                                    │  ┌───────────┐  │               │   │
-│   │                                    │  │ React     │──┼──▶ LLM       │   │
-│   │                                    │  └─────┬─────┘  │               │   │
-│   │                                    │        ▼        │               │   │
-│   │                                    │  ┌───────────┐  │               │   │
-│   │                                    │  │ Validate  │──┼──▶ Tool      │   │
-│   │                                    │  └─────┬─────┘  │               │   │
-│   │                                    │        ▼        │               │   │
-│   │                                    │  ┌───────────┐  │               │   │
-│   │                                    │  │ Reflect   │  │               │   │
-│   │                                    │  └─────┬─────┘  │               │   │
-│   │                                    │        ▼        │               │   │
-│   │                                    │  ┌───────────┐  │               │   │
-│   │                                    │  │ Backtrack │──┼──▶ 回溯/继续  │   │
-│   │                                    │  └───────────┘  │               │   │
-│   │                                    └─────────────────┘               │   │
-│   └─────────────────────────────────────────────────────────────────────┘   │
-│                                    │                                         │
-│                                    ▼                                         │
-│   ┌─────────────────────────────────────────────────────────────────────┐   │
-│   │ Phase 3: 持续学习                                                    │   │
-│   │                                                                      │   │
-│   │   session_data ──▶ RewardAttribution ──▶ step_rewards              │   │
-│   │                          │                                           │   │
-│   │                          ▼                                           │   │
-│   │   高质量会话 ──▶ PlaybookManager ──▶ 策略库更新                      │   │
-│   │                          │                                           │   │
-│   │                          ▼                                           │   │
-│   │   工具使用统计 ──▶ ToolDescriptionEnhancer ──▶ 工具描述优化          │   │
-│   │                                                                      │   │
-│   └─────────────────────────────────────────────────────────────────────┘   │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-### 🔗 模块依赖矩阵
-
-| 模块 | 被依赖于 | 依赖于 |
-|------|----------|--------|
-| **IntentAnalyzer** | AgentRouter | LLMClient, PromptCache |
-| **AgentRouter** | AgentCoordinator, ChatService | IntentAnalyzer, AdaptiveGuardrails |
-| **SimpleAgent** | AgentFactory, RVRBAgent | ToolExecutor, MemoryEngine, LLMClient |
-| **RVRBAgent** | AgentFactory | SimpleAgent, BacktrackMixin |
-| **BacktrackMixin** | RVRBAgent | ErrorClassifier, BacktrackManager |
-| **ErrorClassifier** | BacktrackMixin, BacktrackManager | 规则引擎 |
-| **BacktrackManager** | BacktrackMixin | LLMClient, ToolRegistry |
-| **AdaptiveGuardrails** | AgentRouter, Agent 执行层 | GuardrailConfig |
-| **RewardAttribution** | 会话结束后调用 | LLMClient (可选) |
-| **PlaybookManager** | 高质量会话后调用 | 存储后端 |
-| **ToolDescriptionEnhancer** | ToolSelector | capabilities.yaml |
 
 ---
 
@@ -850,10 +515,10 @@ export REWARD_PERSIST_ENABLED=true          # 奖励归因持久化
 │                                                                          │
 │  ┌─────────────────────────────────────────────────────────────────────┐│
 │  │                    core/routing/ (共享路由层)                        ││
-│  │  ┌─────────────────────────────┐ ┌─────────────────────────────┐   ││
-│  │  │ IntentAnalyzer              │ │ AgentRouter                 │   ││
-│  │  │ LLM 意图识别 + 复杂度判断   │ │ 路由决策（LLM-First）       │   ││
-│  │  └─────────────────────────────┘ └─────────────────────────────┘   ││
+│  │  ┌─────────────────┐ ┌─────────────────┐ ┌────────────────────┐    ││
+│  │  │ IntentAnalyzer  │ │ AgentRouter     │ │ ComplexityScorer   │    ││
+│  │  │ 意图识别        │ │ 路由决策        │ │ 复杂度评分         │    ││
+│  │  └─────────────────┘ └─────────────────┘ └────────────────────┘    ││
 │  └─────────────────────────────────────────────────────────────────────┘│
 │                                                                          │
 │  ┌─────────────────────────────────────────────────────────────────────┐│
@@ -870,23 +535,19 @@ export REWARD_PERSIST_ENABLED=true          # 奖励归因持久化
 
 #### 路由决策依据（单智能体 vs 多智能体）
 
-**决策流程（LLM-First 架构）**：
+**决策流程**：
 
 ```
-用户请求 → IntentAnalyzer（LLM 意图分析）→ AgentRouter（路由决策）
-                  ↓
-           IntentResult（LLM 语义判断，无代码规则）
-           • task_type              ← LLM 判断任务类型
-           • complexity             ← LLM 判断复杂度（SIMPLE/MEDIUM/COMPLEX）
-           • needs_plan             ← LLM 判断是否需要规划
-           • needs_multi_agent      ← LLM 判断是否需要多智能体（直接决定路由）
-           • is_follow_up           ← LLM 判断是否追问
-           • skip_memory_retrieval  ← LLM 判断是否跳过记忆检索
-           • needs_persistence      ← LLM 判断是否需要跨会话持久化
+用户请求 → IntentAnalyzer（意图分析）→ ComplexityScorer（复杂度评分）→ 路由决策
+                  ↓                              ↓
+           IntentResult                   ComplexityScore
+           • task_type                    • score (0-10)
+           • complexity                   • level
+           • needs_plan ← 是否需要规划    • dimensions
+           • needs_multi_agent            
+           • is_follow_up                 
+           • skip_memory_retrieval        
 ```
-
-> **LLM-First 原则**：所有判断来自 LLM 语义推理，代码不包含任何评分规则或硬编码阈值。
-> 规则通过 `instances/{name}/prompt.md` 的自然语言描述驱动 LLM 行为。
 
 **IntentResult 完整字段**：
 
@@ -904,138 +565,69 @@ export REWARD_PERSIST_ENABLED=true          # 奖励归因持久化
 
 | 优先级 | 条件 | 决策 | 说明 |
 |--------|------|------|------|
-| 1 | `intent.needs_multi_agent == true` | 多智能体 | LLM 语义判断需要多智能体协作 |
-| 2 | `intent.needs_multi_agent == false` | 单智能体 | 默认使用单智能体 |
-| 3 | 预算不足时 | 单智能体 | 自动降级（无论语义判断结果） |
+| 1 | `intent.needs_multi_agent == true` | 多智能体 | 意图分析明确需要多智能体协作 |
+| 2 | `complexity.score > 5.0` | 多智能体 | 复杂度评分超过阈值 |
+| 3 | 其他情况 | 单智能体 | 默认使用单智能体 |
 
 **注意**：`needs_plan` 不影响"单智能体 vs 多智能体"的选择，而是影响**单智能体内部是否启用 `plan_todo` 工具**进行任务规划。
 
-**多智能体 plan_todo 策略**：
-
-- 与 `needs_plan` 解耦：多智能体默认把 `plan_todo` 作为 Level 1 核心工具，随 Subagent 一并加载
-- 规划由子任务驱动：是否调用 `plan_todo` 由 Subagent 自主判断（非路由层硬开关）
-- 评审驱动 replan：Critic 给出 REPLAN 时，Orchestrator 直接复用 `PlanTodoTool` 的 replan 能力
-- 默认仅内存态：Orchestrator 内部 `Plan` 仅用于流程控制，是否持久化由上层决定
-
-**调用路径**：
-
-1. Subagent 自主规划（工具调用）
-   `用户请求 → AgentRouter → MultiAgentOrchestrator → _load_subagent_tools(包含 plan_todo) → Subagent LLM → ToolExecutor.execute("plan_todo", ...) → PlanTodoTool.execute`
-
-2. Critic 触发 replan（系统调用）
-   `Subagent 执行 → CriticAgent → _execute_step_with_critique → _trigger_replan → PlanTodoTool.replan → Plan/PlanStep 更新`
-
-**实现方式（LLM-First 原则，V9.0）**：
+**实现方式（Prompt-First 原则）**：
 
 | 组件 | 当前实现 | 说明 |
 |------|----------|------|
-| IntentAnalyzer | LLM 推理 → IntentResult（含 complexity） | ✅ 已完成 |
-| AgentRouter | 直接使用 intent.needs_multi_agent 路由 | ✅ 已完成 |
+| IntentAnalyzer | LLM 推理 → IntentResult + complexity_score | ✅ 已完成 |
+| ComplexityScorer | 保留向后兼容，优先使用 LLM 输出 | ✅ 已完成 |
 
-> **V9.0 变更**：移除 ComplexityScorer，复杂度判断完全由 LLM 通过 instance prompt.md 语义驱动。
+**V7 架构：LLM 直接输出 complexity_score**
 
-#### ⚠️ 设计原则：`complexity_score` 仅供参考
-
-> **重要**：`complexity_score` 是对用户 query 的复杂度估算，**不作为任何决策依据**。
-> 
-> 所有决策由 LLM 语义字段驱动：
-> - `needs_multi_agent` → 路由决策（单/多智能体）
-> - `execution_strategy` → Agent 类型（rvr/rvr-b）
-> - `suggested_planning_depth` → 规划深度
-> - `requires_deep_reasoning` → 是否启用 thinking
->
-> `complexity_score` 用途：日志记录、监控分析、参考展示
+> ✅ **已实现**：IntentAnalyzer 直接输出 complexity_score (0-10)，AgentRouter 优先使用
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                   V9.0: LLM-First 意图识别架构（当前实现）                │
+│                   V7: Prompt-First 意图识别架构（已实现）                 │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                          │
-│  ❌ 旧方式（V6-V7）: 代码包含评分规则                                    │
+│  ❌ 旧方式（V6）: 两步走                                                 │
 │     IntentAnalyzer (LLM) → IntentResult → ComplexityScorer (规则) → Score│
 │                                                                          │
-│  ✅ 当前方式（V9.0）: 纯 LLM 语义驱动                                    │
-│     IntentAnalyzer (LLM) → IntentResult                                  │
+│  ✅ 当前方式（V7）: LLM 一次性输出                                       │
+│     IntentAnalyzer (LLM) → IntentResult + complexity_score               │
 │                              ↓                                           │
-│     AgentRouter 直接使用 intent.needs_multi_agent 路由                   │
-│     （无代码规则，无 fallback，无评分阈值）                              │
+│     AgentRouter 优先使用 intent.complexity_score 进行路由决策            │
+│     (ComplexityScorer 保留向后兼容)                                      │
 │                                                                          │
-│  核心理念：代码不写任何规则，一切由系统提示词驱动 LLM 语义判断           │
-│  规则定义：instances/{name}/prompt.md 的「LLM 判断规则」区块             │
+│  核心理念：规则写在 Prompt 里，不写在代码里                              │
 │                                                                          │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-**V9.0 IntentResult 完整定义**：
+**V7 IntentResult 扩展字段**：
 
 ```python
-# core/agent/types.py - IntentResult 完整定义
+# 新增 complexity_score 字段，由 LLM 直接输出
 @dataclass
 class IntentResult:
-    # ==================== 核心字段 ====================
     task_type: TaskType
     complexity: Complexity           # SIMPLE/MEDIUM/COMPLEX
-    complexity_score: float = 5.0    # V7: 0-10 评分，LLM 直接输出
+    complexity_score: float = 5.0    # 🆕 V7: 0-10 评分，LLM 直接输出
     needs_plan: bool
-    needs_multi_agent: bool          # 语义驱动，非硬编码阈值
+    needs_multi_agent: bool
     is_follow_up: bool
     skip_memory_retrieval: bool
-    needs_persistence: bool = False
-    confidence: float = 1.0
-    
-    # ==================== V8.0 执行策略 ====================
-    execution_strategy: str = "rvr"  # "rvr" | "rvr-b"
-    
-    # ==================== V7.8 LLM 语义建议 ====================
-    suggested_planning_depth: Optional[str] = None  # none / minimal / full
-    requires_deep_reasoning: bool = False        # 即使问题简短也需要深度推理
-    tool_usage_hint: Optional[str] = None        # single / sequential / parallel
+    # ... 其他字段
 ```
 
-**V8.0+ 语义驱动字段**：
-
-| 字段 | 类型 | 说明 | 取值 |
-|------|------|------|------|
-| `execution_strategy` | `str` | 单智能体执行策略 | `"rvr"` (标准) / `"rvr-b"` (带回溯) |
-| `needs_multi_agent` | `bool` | 多智能体需求（语义驱动） | LLM 分析决定，非 complexity_score 阈值 |
-
-**V7.8 LLM 语义建议字段说明**：
-
-| 字段 | 类型 | 说明 | 示例 |
-|------|------|------|------|
-| `suggested_planning_depth` | `Optional[str]` | 规划深度建议 | "none", "minimal", "full" |
-| `requires_deep_reasoning` | `bool` | 即使问题简短也需要深度推理 | True（如"解释量子纠缠"） |
-| `tool_usage_hint` | `Optional[str]` | 工具使用模式建议 | "single", "sequential", "parallel" |
-
-**设计原则**：
-
-1. **max_turns vs max_steps 区别**：
-   | 参数 | 含义 | 默认值 | 决定因素 |
-   |------|------|--------|----------|
-   | `max_turns` | Agent 执行轮数（LLM 调用次数） | 30 | 固定安全上限 |
-   | `max_steps` | 规划步骤数（Plan 里的 TODO 数量） | 20 | LLM `suggested_planning_depth` |
-
-2. **max_turns 设计**：
-   - 统一默认为 30（由实例 config.yaml 配置）
-   - 智能体自主决定何时退出（LLM 返回 end_turn 或无工具调用时结束）
-   - `max_turns` 只是安全阀，防止死循环，**不根据 complexity_score 调整**
-
-3. **LLM 语义驱动**：
-   - 语义判断在 IntentAnalyzer 完成
-   - AgentFactory 直接使用 LLM 语义字段配置 Schema
-   - `complexity_score` 仅供日志/监控参考
-
-**V8 intent_prompt 核心字段**：
+**V7 intent_prompt.md 扩展（复杂度评分指导）**：
 
 ```markdown
 ### Complexity Score (0-10)
 
-⚠️ **重要**：complexity_score 仅用于日志/监控/参考，**不影响任何决策**。
+除了 complexity 等级，还需要输出一个精确的 complexity_score (0-10)：
 
-| 分数范围 | 典型场景 |
-|----------|----------|
-| 0-3 | 简单问答、信息查询、翻译 |
-| 3-5 | 内容生成、数据分析、代码任务 |
+| 分数范围 | 路由决策 | 典型场景 |
+|----------|----------|----------|
+| 0-3 | 单智能体 | 简单问答、信息查询、翻译 |
+| 3-5 | 单智能体（带 Plan） | 内容生成、数据分析、代码任务 |
 | 5-7 | 可选多智能体 | 较复杂任务，视情况决定 |
 | 7-10 | 多智能体 | 多实体并行研究、复杂工作流 |
 
@@ -1068,16 +660,16 @@ class IntentResult:
 
 **问题**：Intent 从 `SimpleAgent` 剥离到 `core/routing/` 后，如何确保运营配置和 Factory 初始化正确加载？
 
-**V7.9 初始化链路**：
+**V7 初始化链路**：
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                   V7.9 初始化链路（修正版）                              │
+│                   V7 初始化链路（Intent 剥离后）                         │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                          │
 │  1. 运营配置层（instances/{name}/）                                      │
 │     ├── prompt.md          ← 运营写的系统提示词                         │
-│     └── config.yaml        ← 可选：覆盖配置                             │
+│     └── config.yaml        ← 可选：覆盖意图识别行为                      │
 │                                                                          │
 │  2. LLM 分解层（首次启动）                                               │
 │     InstancePromptCache.load_once()                                      │
@@ -1085,33 +677,23 @@ class IntentResult:
 │     prompt_results/                                                      │
 │     ├── intent_prompt.md   ← 场景化意图识别提示词（含复杂度评分规则）    │
 │     ├── agent_schema.yaml  ← Agent 配置                                  │
-│     ├── simple/medium/complex_prompt.md                                  │
-│     └── README.md          ← 提示词长度对比（Simple/Medium/Complex）     │
+│     └── simple/medium/complex_prompt.md                                  │
 │                                                                          │
-│  3. Agent 创建层                                                         │
-│     AgentFactory.from_schema(schema, prompt_cache)                       │
+│  3. Factory 初始化层                                                     │
+│     AgentFactory.from_schema()                                           │
 │         ↓                                                                │
-│     创建 SimpleAgent 或 MultiAgentOrchestrator                          │
-│     （注意：此时不创建 AgentRouter，Router 在运行时延迟初始化）          │
+│     创建 AgentRouter（注入 prompt_cache）                                │
+│         ├── IntentAnalyzer(prompt_cache=cache)  ← 使用缓存的 intent_prompt│
+│         └── ComplexityScorer() → 🆕 V7: 废弃，合并到 IntentAnalyzer       │
 │                                                                          │
-│  4. 服务层使用（运行时）                                                 │
+│  4. 服务层使用                                                           │
 │     ChatService.chat()                                                   │
-│         ↓                                                                │
-│     ChatService._get_router(prompt_cache)  ← 延迟初始化                  │
-│         ↓                                                                │
-│     AgentFactory.create_router(prompt_cache)                             │
-│         ↓                                                                │
-│     AgentRouter(llm_service, prompt_cache)                               │
-│         └── IntentAnalyzer ← 内置 complexity_score 计算                  │
 │         ↓                                                                │
 │     AgentRouter.route(user_query)                                        │
 │         ↓                                                                │
-│     RoutingDecision(agent_type, intent)                                  │
-│                                                                          │
-│  📝 V9.0 说明：                                                          │
-│  - 已删除 ComplexityScorer（LLM-First 原则）                             │
-│  - 复杂度判断完全由 LLM 通过 prompt.md 语义驱动                          │
-│  - 路由决策直接使用 intent.needs_multi_agent 字段                        │
+│     IntentAnalyzer.analyze() ← 使用 intent_prompt.md                     │
+│         ↓                                                                │
+│     RoutingDecision(agent_type, intent, complexity_score)                │
 │                                                                          │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -1138,11 +720,18 @@ intent_analyzer:
     - **bi_analysis**: BI智能问数、数据分析
     - **consultation**: 综合咨询、市场研究
     
-  # V9.0: 复杂度规则在 prompt.md 的「LLM 判断规则」区块定义
-  # 不再使用代码层的评分阈值
+  # 自定义复杂度评分规则（覆盖默认）
+  custom_complexity_rules: |
+    ### Complexity Score
+    - 简单问答: 0-3
+    - 系统搭建: 7-10
+    - 数据分析: 3-6
+    
+  # 路由阈值
+  complexity_threshold: 5.0  # 超过此值使用多智能体
 ```
 
-**初始化代码示例（V7.9 修正版）**：
+**Factory 初始化代码示例**：
 
 ```python
 # scripts/instance_loader.py
@@ -1150,33 +739,29 @@ async def create_agent_from_instance(instance_name: str):
     # 1. 加载 InstancePromptCache（包含 intent_prompt.md）
     prompt_cache = await load_instance_cache(instance_name)
     
-    # 2. 创建 Agent（SimpleAgent 或 MultiAgentOrchestrator）
-    # 注意：此时不创建 AgentRouter
+    # 2. 创建 AgentRouter（注入 prompt_cache）
+    router = AgentRouter(
+        llm_service=haiku_service,
+        prompt_cache=prompt_cache,  # ← intent_prompt.md 在这里生效
+        complexity_threshold=config.get("complexity_threshold", 5.0)
+    )
+    
+    # 3. 创建 Agent（SimpleAgent 或 MultiAgentOrchestrator）
+    # Agent 不再包含 IntentAnalyzer，由 Router 负责
     agent = AgentFactory.from_schema(
         schema=merged_schema,
         prompt_cache=prompt_cache,
+        # ❌ 不再传入 intent_analyzer
     )
     
-    return agent  # Router 在 ChatService 中延迟初始化
-
-# services/chat_service.py
-class ChatService:
-    def _get_router(self, prompt_cache=None) -> AgentRouter:
-        """延迟初始化路由器"""
-        if self._router is None:
-            # AgentFactory.create_router() 创建 AgentRouter
-            self._router = AgentFactory.create_router(prompt_cache=prompt_cache)
-        return self._router
+    return router, agent
 ```
 
-**关键变化（V9.0）**：
+**关键变化**：
 1. **IntentAnalyzer 从 SimpleAgent 移到 AgentRouter**
-2. **AgentRouter 延迟初始化**：在 ChatService 首次调用时创建，而非 Factory 初始化时
-3. **intent_prompt.md 通过 prompt_cache 传递**
-4. **删除 ComplexityScorer**：复杂度判断完全由 LLM 语义驱动（LLM-First 原则）
-5. **中等版提示词自动移除工具清单**：仅保留工具选择策略，降低 token 压力
-6. **新增统一配置加载器**：`core/config/loader.py` 支持实例级配置覆盖
-7. **提示词模板外置**：`prompts/templates/` 目录存放可复用模板
+2. **intent_prompt.md 通过 prompt_cache 传递**
+3. **运营人员可通过 prompt.md 或 config.yaml 定制意图识别行为**
+4. **ComplexityScorer 废弃，规则合并到 intent_prompt.md**
 
 ### 决策 3：三级配置优先级
 
@@ -1217,13 +802,6 @@ class ChatService:
    • complex_prompt.md (复杂任务)
 ```
 
-**落地原则（新增）**：
-- **系统提示词为中心驱动**：行为策略、工具选择偏好、计划驱动优先由系统提示词与 Plan 注入决定。
-- **配置文件只提供推荐默认值**：`config/llm_config/profiles.yaml`、`instances/{name}/config.yaml`
-  可给出参数默认建议，但不应替代提示词规则。
-- **强制行为走参数开关**：如必须启用联网搜索/并行工具等，可通过 LLM 参数显式启用，
-  同时在提示词中说明约束。
-
 ---
 
 ## 系统架构全景图
@@ -1231,493 +809,546 @@ class ChatService:
 ### 整体架构
 
 ```
-┌──────────────────────────────────────────────────────────────────────────────────────┐
-│                              ZenFlux Agent V9.0                                       │
-├──────────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                       │
-│  ┌────────────────────────────────────────────────────────────────────────────────┐  │
-│  │                          协议入口层（平级）                                     │  │
-│  │  ┌──────────────────┐                     ┌──────────────────┐                 │  │
-│  │  │  routers/        │  HTTP/SSE           │  grpc_server/    │  gRPC           │  │
-│  │  │  (FastAPI)       │ ◄──────             │                  │ ◄──────         │  │
-│  │  │  • chat.py       │                     │  • server.py     │  (Go 调用)      │  │
-│  │  │  • agents.py     │                     │  • chat_servicer │                 │  │
-│  │  │  • tools.py      │                     │  • session_servicer │              │  │
-│  │  └────────┬─────────┘                     └────────┬─────────┘                 │  │
-│  │           └────────────────────┬────────────────────┘                           │  │
-│  └────────────────────────────────┼───────────────────────────────────────────────┘  │
-│                                   ↓                                                   │
-│  ┌────────────────────────────────────────────────────────────────────────────────┐  │
-│  │                         services/ 业务逻辑层                                    │  │
-│  │  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐                   │  │
-│  │  │ chat_service    │ │ sandbox_service │ │ mcp_service     │                   │  │
-│  │  │ • AgentRouter   │ │ • E2B 沙箱调用  │ │ • mcp_client    │                   │  │
-│  │  └─────────────────┘ └─────────────────┘ └─────────────────┘                   │  │
-│  │  ┌─────────────────┐ ┌──────────────────┐ ┌─────────────────┐                  │  │
-│  │  │ mem0_service    │ │ knowledge_service │ │ session_service │                  │  │
-│  │  │ • 长期记忆      │ │ • 知识库         │ │ • session_cache │                  │  │
-│  │  └─────────────────┘ └──────────────────┘ └─────────────────┘                  │  │
-│  └────────────────────────────────┬───────────────────────────────────────────────┘  │
-│                                   ↓                                                   │
-│  ┌────────────────────────────────────────────────────────────────────────────────┐  │
-│  │                      共享层 (V9.0 核心模块)                                     │  │
-│  │  ┌──────────────────────────┐  ┌──────────────────────────┐                    │  │
-│  │  │  core/routing/           │  │  core/planning/          │                    │  │
-│  │  │  • IntentAnalyzer        │  │  • Plan Protocol         │                    │  │
-│  │  │  • AgentRouter           │  │  • DAGScheduler          │                    │  │
-│  │  │  (V9.0 LLM-First)        │  │  • PlanStorage           │                    │  │
-│  │  └──────────────────────────┘  └──────────────────────────┘                    │  │
-│  │  ┌──────────────────────────┐  ┌──────────────────────────┐                    │  │
-│  │  │  core/agent/             │  │  core/guardrails/        │                    │  │
-│  │  │  • AgentProtocol         │  │  • AdaptiveGuardrails    │                    │  │
-│  │  │  • AgentCoordinator      │  │  • GuardrailConfig       │                    │  │
-│  │  │  • AgentFactory          │  │                          │                    │  │
-│  │  └──────────────────────────┘  └──────────────────────────┘                    │  │
-│  └────────────────────────────────┬───────────────────────────────────────────────┘  │
-│                                   ↓                                                   │
-│                    ┌──────────────────────────────┐                                   │
-│                    │        AgentRouter           │                                   │
-│                    │  ┌────────────────────────┐  │                                   │
-│                    │  │ 1. IntentAnalyzer      │  │                                   │
-│                    │  │    (含 execution_strategy)│ │  ← 语义驱动                       │
-│                    │  │ 2. route() → Decision  │  │                                   │
-│                    │  └────────────────────────┘  │                                   │
-│                    └──────────────┬───────────────┘                                   │
-│                                   ↓                                                   │
-│                    ┌──────────────────────────────┐                                   │
-│                    │ AgentFactory.from_decision() │                                   │
-│                    └──────────────┬───────────────┘                                   │
-│             ┌─────────────────────┼─────────────────────┐                             │
-│             ↓                     ↓                     ↓                             │
-│  ┌────────────────────┐ ┌────────────────────┐ ┌────────────────────────────┐        │
-│  │ SimpleAgent        │ │ RVRBAgent         │ │ MultiAgentOrchestrator     │        │
-│  │ (标准 RVR)         │ │ (RVR + Backtrack) │ │                            │        │
-│  │ • _run_rvr_loop    │ │ • BacktrackMixin   │ │ • Leader-Worker 模式       │        │
-│  │ • 5 个 Mixin       │ │ • ErrorClassifier │ │ • DAG 调度                 │        │
-│  │                    │ │ • BacktrackManager │ │ • Critic 评估              │        │
-│  │ strategy: "rvr"    │ │ strategy: "rvr-b"  │ │ • 部分重规划               │        │
-│  └────────────────────┘ └────────────────────┘ └────────────────────────────┘        │
-│             │                     │                     │                             │
-│             └─────────────────────┴─────────────────────┘                             │
-│                                   ↓                                                   │
-│  ┌────────────────────────────────────────────────────────────────────────────────┐  │
-│  │                       core/ 核心能力层                                          │  │
-│  │  ┌───────────────┐ ┌───────────────┐ ┌───────────────┐ ┌───────────────┐       │  │
-│  │  │ core/context/ │ │ core/memory/  │ │ core/tool/    │ │ core/llm/     │       │  │
-│  │  │ 上下文工程     │ │ 记忆系统      │ │ 工具能力      │ │ LLM 适配      │       │  │
-│  │  │ • Compaction  │ │ • Working     │ │ • Selector    │ │ • Claude      │       │  │
-│  │  │ • Retriever   │ │ • Mem0        │ │ • Executor    │ │ • ModelRouter │       │  │
-│  │  │               │ │               │ │ • LLMDesc     │ │ • MoA        │       │  │
-│  │  └───────────────┘ └───────────────┘ └───────────────┘ └───────────────┘       │  │
-│  │  ┌───────────────┐ ┌───────────────┐ ┌───────────────┐ ┌───────────────┐       │  │
-│  │  │ core/events/  │ │ core/monitoring│ │core/playbook/ │ │core/evaluation│       │  │
-│  │  │ 事件系统       │ │ 监控与预算     │ │ 策略库        │ │ 奖励归因      │       │  │
-│  │  │ • Dispatcher  │ │ • TokenAudit   │ │• PlaybookMgr  │ │• RewardAttrib │       │  │
-│  │  │ • Broadcaster │ │ • TokenBudget  │ │• 策略匹配     │ │• 步骤级归因   │       │  │
-│  │  └───────────────┘ └───────────────┘ └───────────────┘ └───────────────┘       │  │
-│  └────────────────────────────────────────────────────────────────────────────────┘  │
-│                                   │                                                   │
-│  ┌────────────────────────────────────────────────────────────────────────────────┐  │
-│  │                        infra/ 基础设施层                                        │  │
-│  │  ┌───────────────┐ ┌───────────────┐ ┌───────────────┐ ┌───────────────┐       │  │
-│  │  │ sandbox/      │ │ database/     │ │ cache/        │ │ resilience/   │       │  │
-│  │  │ 沙箱执行       │ │ 数据库        │ │ Redis 缓存    │ │ 容错层        │       │  │
-│  │  │ • e2b.py      │ │ • engine.py   │ │ • redis.py    │ │ • retry.py    │       │  │
-│  │  │               │ │               │ │               │ │ • circuit_breaker │   │  │
-│  │  └───────────────┘ └───────────────┘ └───────────────┘ └───────────────┘       │  │
-│  └────────────────────────────────────────────────────────────────────────────────┘  │
-│                                                                                       │
-└──────────────────────────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────────────────┐
+│                              ZenFlux Agent V7.0                                    │
+├───────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                    │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐  │
+│  │                           协议入口层（平级）                                 │  │
+│  │  ┌──────────────────┐                    ┌──────────────────┐               │  │
+│  │  │  routers/        │  HTTP/SSE          │  grpc_server/    │  gRPC         │  │
+│  │  │  (FastAPI)       │ ◄──────            │                  │ ◄──────       │  │
+│  │  └────────┬─────────┘                    └────────┬─────────┘               │  │
+│  │           └───────────────────┬───────────────────┘                          │  │
+│  └───────────────────────────────┼──────────────────────────────────────────────┘  │
+│                                  ↓                                                  │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐  │
+│  │                          services/ 业务逻辑层                                │  │
+│  │  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐                │  │
+│  │  │ chat_service    │ │ sandbox_service │ │ mcp_service     │                │  │
+│  │  │ • AgentRouter   │ │ • E2B 沙箱调用  │ │ • MCP 客户端    │                │  │
+│  │  └─────────────────┘ └─────────────────┘ └─────────────────┘                │  │
+│  │  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐                │  │
+│  │  │ mem0_service    │ │ file_service    │ │ knowledge_svc   │                │  │
+│  │  │ • 长期记忆      │ │ • 文件管理      │ │ • 知识库        │                │  │
+│  │  └─────────────────┘ └─────────────────┘ └─────────────────┘                │  │
+│  │  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐                │  │
+│  │  │ conversation    │ │ session_service │ │ agent_registry  │                │  │
+│  │  │ • 对话管理      │ │ • 会话管理      │ │ • 实例注册      │                │  │
+│  │  └─────────────────┘ └─────────────────┘ └─────────────────┘                │  │
+│  └─────────────────────────────────┬───────────────────────────────────────────┘  │
+│                                    ↓                                                │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐  │
+│  │                        共享层 (V7 核心重构)                                  │  │
+│  │  ┌────────────────────────────┐  ┌────────────────────────────┐             │  │
+│  │  │  core/routing/             │  │  core/planning/            │             │  │
+│  │  │  • IntentAnalyzer          │  │  • Plan Protocol           │             │  │
+│  │  │  • AgentRouter             │  │  • PlanStorage             │             │  │
+│  │  │  • ComplexityScorer        │  │  • PlanValidators          │             │  │
+│  │  └────────────────────────────┘  └────────────────────────────┘             │  │
+│  └─────────────────────────────────────────────────────────────────────────────┘  │
+│                                    │                                                │
+│                         ┌──────────┴──────────┐                                     │
+│                         ↓                     ↓                                     │
+│  ┌──────────────────────────────┐  ┌──────────────────────────────┐                │
+│  │   SimpleAgent (单智能体)      │  │  MultiAgentOrchestrator      │                │
+│  │   • RVR 循环执行              │  │  (多智能体)                   │                │
+│  │   • plan_todo 工具            │  │  • DAG 任务分解               │                │
+│  │   • 线性执行模式              │  │  • 并行/串行策略              │                │
+│  │   core/agent/simple_agent.py  │  │  core/agent/multi/           │                │
+│  └──────────────────────────────┘  └──────────────────────────────┘                │
+│                         │                     │                                     │
+│                         └──────────┬──────────┘                                     │
+│                                    ↓                                                │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐  │
+│  │                        core/ 核心能力层                                      │  │
+│  │  ┌───────────────┐ ┌───────────────┐ ┌───────────────┐ ┌───────────────┐    │  │
+│  │  │ core/context/ │ │ core/memory/  │ │ core/tool/    │ │ core/llm/     │    │  │
+│  │  │ 上下文工程     │ │ 记忆系统      │ │ 工具能力      │ │ LLM 适配      │    │  │
+│  │  │ • Compaction  │ │ • Working     │ │ • Executor    │ │ • Claude      │    │  │
+│  │  │ • PromptMgr   │ │ • Mem0        │ │ • Loader      │ │ • OpenAI      │    │  │
+│  │  │ • RAG         │ │ • User        │ │ • Capability  │ │ • Gemini      │    │  │
+│  │  └───────────────┘ └───────────────┘ └───────────────┘ └───────────────┘    │  │
+│  │  ┌───────────────┐ ┌───────────────┐ ┌───────────────┐ ┌───────────────┐    │  │
+│  │  │ core/events/  │ │ core/monitor/ │ │ core/prompt/  │ │ core/inference│    │  │
+│  │  │ 事件系统       │ │ 监控系统      │ │ 提示词管理    │ │ 语义推理      │    │  │
+│  │  │ • Dispatcher  │ │ • ProdMonitor │ │ • Cache       │ │ • Semantic    │    │  │
+│  │  │ • Adapters    │ │ • TokenAudit  │ │ • Writer      │ │   Inference   │    │  │
+│  │  └───────────────┘ └───────────────┘ └───────────────┘ └───────────────┘    │  │
+│  │  ┌───────────────┐ ┌───────────────┐                                        │  │
+│  │  │ core/orchestr │ │ core/output/  │                                        │  │
+│  │  │ 代码编排       │ │ 输出格式化    │                                        │  │
+│  │  │ • Orchestrator│ │ • Formatter   │                                        │  │
+│  │  │ • Validator   │ │               │                                        │  │
+│  │  └───────────────┘ └───────────────┘                                        │  │
+│  └─────────────────────────────────────────────────────────────────────────────┘  │
+│                                    │                                                │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐  │
+│  │                         infra/ 基础设施层                                    │  │
+│  │  ┌───────────────┐ ┌───────────────┐ ┌───────────────┐ ┌───────────────┐    │  │
+│  │  │ sandbox/      │ │ database/     │ │ cache/        │ │ vector/       │    │  │
+│  │  │ 沙箱执行       │ │ 数据库         │ │ Redis 缓存    │ │ 向量数据库    │    │  │
+│  │  │ • E2B         │ │ • Models      │ │ • redis.py    │ │ • factory.py  │    │  │
+│  │  │ • factory.py  │ │ • CRUD        │ │               │ │ • base.py     │    │  │
+│  │  └───────────────┘ └───────────────┘ └───────────────┘ └───────────────┘    │  │
+│  │  ┌───────────────┐ ┌───────────────┐ ┌───────────────┐                      │  │
+│  │  │ storage/      │ │ graph/        │ │ resilience/   │                      │  │
+│  │  │ 存储管理       │ │ 图数据库      │ │ 容错层        │                      │  │
+│  │  │ • local.py    │ │ • factory.py  │ │ • Breaker     │                      │  │
+│  │  │ • async_writer│ │ • base.py     │ │ • Retry       │                      │  │
+│  │  │ • batch_writer│ │               │ │ • Timeout     │                      │  │
+│  │  └───────────────┘ └───────────────┘ └───────────────┘                      │  │
+│  └─────────────────────────────────────────────────────────────────────────────┘  │
+│                                    │                                                │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐  │
+│  │                           外围支撑层                                         │  │
+│  │  ┌───────────────┐ ┌───────────────┐ ┌───────────────┐ ┌───────────────┐    │  │
+│  │  │ tools/        │ │ skills/       │ │ models/       │ │ utils/        │    │  │
+│  │  │ Built-in 工具 │ │ 技能库        │ │ API 模型      │ │ 工具函数      │    │  │
+│  │  │ • plan_todo   │ │ • library/    │ │ • chat.py     │ │ • json_utils  │    │  │
+│  │  │ • exa_search  │ │ • pptx        │ │ • usage.py🆕  │ │ • usage_track │    │  │
+│  │  │ • knowledge   │ │ • slidespeak  │ │ • api.py      │ │ • validators  │    │  │
+│  │  └───────────────┘ └───────────────┘ └───────────────┘ └───────────────┘    │  │
+│  │  ┌───────────────┐ ┌───────────────┐ ┌───────────────┐                      │  │
+│  │  │ prompts/      │ │ evaluation/   │ │ instances/    │                      │  │
+│  │  │ 提示词模板     │ │ 评估系统      │ │ 实例配置      │                      │  │
+│  │  │ • fragments/  │ │ • harness.py  │ │ • prompt.md   │                      │  │
+│  │  │ • templates/  │ │ • qos_config  │ │ • config.yaml │                      │  │
+│  │  └───────────────┘ └───────────────┘ └───────────────┘                      │  │
+│  └─────────────────────────────────────────────────────────────────────────────┘  │
+│                                                                                    │
+└───────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### V9.0 请求处理流程
+### 请求处理流程（V7.2 实际流程）
 
 ```
 用户请求
     │
-    ▼
+    ↓
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │ Phase 0: ChatService 入口                                                    │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│  chat() → 验证 agent_id → 创建 Session → 获取 schema/prompt_cache           │
+│  chat() → 验证 agent_id → 处理文件 → 创建 Conversation → 创建 Session       │
+│  → get_agent() from AgentRegistry                                            │
+│  → 启动 _run_agent()                                                         │
 └─────────────────────────────────────────────────────────────────────────────┘
     │
-    ▼
+    ↓
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ Phase 1: 语义路由决策 (V9.0)                                                 │
+│ Phase 1: 路由决策 (V7 统一路由层)                                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  if enable_routing (默认 True):                                              │
+│      AgentRouter.route()                                                     │
+│       ├─→ IntentAnalyzer.analyze() (使用 Haiku 快速分析)                     │
+│       │        ↓                                                             │
+│       │   IntentResult:                                                      │
+│       │     • task_type: content_generation                                 │
+│       │     • complexity: COMPLEX                                           │
+│       │     • complexity_score: 7.5 (0-10)                                  │
+│       │     • needs_plan: true                                              │
+│       │     • skip_memory_retrieval: false                                  │
+│       │                                                                      │
+│       ├─→ ComplexityScorer (优先使用 LLM 评分)                              │
+│       │                                                                      │
+│       └─→ RoutingDecision:                                                   │
+│              • use_multi_agent: bool                                         │
+│              • intent: IntentResult  (传递给 Agent)                          │
+│              • complexity_score: float                                       │
+│              • fallback_reason: Optional[str]  (Budget不足时降级)            │
+│                                                                              │
+│  ✅ V7架构：意图分析集中在路由层，SimpleAgent不再执行内部分析                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+    │
+    ↓ (根据 use_multi_agent 决策)
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Phase 2: Agent 执行 (🆕 完整集成)                                            │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
-│  IntentAnalyzer.analyze()                                                   │
-│    ↓                                                                        │
-│  IntentResult:                                                              │
-│    • task_type: "code_development"                                          │
-│    • complexity: MEDIUM                                                     │
-│    • needs_multi_agent: false     ← 🆕 语义驱动，非 complexity_score 阈值   │
-│    • execution_strategy: "rvr-b"  ← 🆕 LLM 直接输出执行策略                 │
-│    ↓                                                                        │
-│  AgentRouter.route()                                                        │
-│    ↓                                                                        │
-│  RoutingDecision:                                                           │
-│    • agent_type: "single"                                                   │
-│    • execution_strategy: "rvr-b"                                            │
-│    • guardrail_config: {...}      ← 🆕 自适应护栏配置                       │
+│  ┌─────────────────────────────────────┐                                    │
+│  │ if use_multi_agent:                 │                                    │
+│  │   ✅ MultiAgentOrchestrator         │                                    │
+│  │   ├─ 接收 intent (来自路由层)       │                                    │
+│  │   ├─ 初始化共享资源:                │                                    │
+│  │   │  • ToolLoader                   │                                    │
+│  │   │  • WorkingMemory                │                                    │
+│  │   │  • Mem0 客户端                  │                                    │
+│  │   ├─ Lead Agent 任务分解 (Sonnet)   │                                    │
+│  │   ├─ Worker Agents 并行/串行 (Haiku)│                                    │
+│  │   │  • 动态加载工具                 │                                    │
+│  │   │  • 工具调用 + LLM 推理          │                                    │
+│  │   ├─ Critic Agent 质量评估 (Sonnet) │                                    │
+│  │   │  • pass / retry / replan       │                                    │
+│  │   └─ Lead Agent 结果综合            │                                    │
+│  └─────────────────────────────────────┘                                    │
+│                                                                              │
+│  ┌─────────────────────────────────────┐                                    │
+│  │ else:                               │                                    │
+│  │   ✅ SimpleAgent (RVR 循环)         │                                    │
+│  │   ├─ 接收 intent (来自路由层) ✅    │                                    │
+│  │   ├─ Tool Selection (不再分析intent)│                                    │
+│  │   ├─ System Prompt 组装             │                                    │
+│  │   ├─ RVR Loop:                      │                                    │
+│  │   │  • React (LLM + Thinking)       │                                    │
+│  │   │  • Act (Tool Execution)         │                                    │
+│  │   │  • Validation                   │                                    │
+│  │   │  • Reflection                   │                                    │
+│  │   └─ Final Output                   │                                    │
+│  └─────────────────────────────────────┘                                    │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
     │
-    ▼
+    ↓
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ Phase 2: Agent 创建与执行                                                    │
+│ Phase 3: 流式响应                                                            │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  AgentFactory._create_simple_agent()                                        │
-│    │                                                                        │
-│    ├── execution_strategy == "rvr"   → SimpleAgent                          │
-│    │                                                                        │
-│    └── execution_strategy == "rvr-b" → RVRBAgent  ← 🆕 带回溯能力           │
-│                                                                              │
-│  RVRBAgent.execute()                                                        │
-│    │                                                                        │
-│    └── _run_rvr_loop_with_backtrack()                                       │
-│         │                                                                   │
-│         ├── React (思考)                                                    │
-│         │                                                                   │
-│         ├── Validate (工具调用)                                             │
-│         │     │                                                             │
-│         │     └── 工具失败 → ErrorClassifier.classify()                     │
-│         │           │                                                       │
-│         │           ├── Layer 1 (基础设施) → resilience 处理                │
-│         │           │                                                       │
-│         │           └── Layer 2 (业务逻辑) → BacktrackManager.evaluate()    │
-│         │                 │                                                 │
-│         │                 ├── CONTINUE → 使用替代工具/参数                  │
-│         │                 └── ABORT → 终止并报告                            │
-│         │                                                                   │
-│         ├── Reflect (评估)                                                  │
-│         │                                                                   │
-│         └── Backtrack Decision (🆕)                                         │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-    │
-    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ Phase 3: 持续学习                                                            │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  会话结束后:                                                                 │
-│    │                                                                        │
-│    ├── RewardAttribution.compute()  ← 步骤级奖励归因                        │
-│    │                                                                        │
-│    ├── PlaybookManager.extract_from_session()  ← 高质量策略提取             │
-│    │     │                                                                  │
-│    │     └── 人工审核 → 策略库更新                                          │
-│    │                                                                        │
-│    └── ToolDescriptionEnhancer.update_stats()  ← 工具使用统计更新           │
-│                                                                              │
+│  SSE Events:                                                                 │
+│    • SimpleAgent: message_start/content_delta/tool_use/message_end           │
+│    • MultiAgent: orchestrator_start/task_decomposition/agent_start/          │
+│                  agent_end/orchestrator_summary/orchestrator_end             │
+│    • 统一通过 EventBroadcaster 转发                                          │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### MultiAgentOrchestrator 完整调用流程 (V9.0)
-
-> **架构类型**：编排型多智能体（Orchestrator-Workers），非完全自主型（Agent-to-Agent）。
-> Worker 是轻量级智能体（独立 LLM + 8 要素系统提示词 + 工具 + 共享记忆），具备自主推理和工具调用能力。
-> **核心能力**：语义驱动路由、自适应护栏、策略库匹配、智能回溯、持续学习、意图状态管理。
+### SimpleAgent 完整调用流程
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    前置：语义路由决策（V9.0）                                 │
-├─────────────────────────────────────────────────────────────────────────────┤
-│  ChatService → AgentRouter.route()                                          │
-│    ↓                                                                         │
-│  IntentAnalyzer.analyze()                                                   │
-│    ↓                                                                         │
-│  IntentResult:                                                              │
-│    • task_type: "complex_research"                                          │
-│    • complexity: COMPLEX                                                    │
-│    • needs_multi_agent: true    ← 语义驱动（非阈值判断）                    │
-│    • execution_strategy: "multi-dag"                                        │
-│    ↓                                                                         │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │ 策略匹配                                                             │    │
-│  │   PlaybookManager.find_matching(context)                            │    │
-│  │     ↓                                                                │    │
-│  │   匹配结果:                                                          │    │
-│  │     • matched_playbook: "multi_agent_research_v2"                   │    │
-│  │     • tool_sequence: ["web_search", "doc_analysis", "report_gen"]   │    │
-│  │     • quality_score: 0.92                                            │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│    ↓                                                                         │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │ 自适应护栏创建                                                       │    │
-│  │   AdaptiveGuardrails.create(                                        │    │
-│  │     complexity_level="complex",                                     │    │
-│  │     user_tier="PRO"                                                  │    │
-│  │   )                                                                  │    │
-│  │     ↓                                                                │    │
-│  │   GuardrailConfig:                                                  │    │
-│  │     • max_turns: 15 × 1.5 × 1.0 = 22 轮                             │    │
-│  │     • max_tokens: 100k × 1.5 × 1.0 = 150k                           │    │
-│  │     • max_tool_calls: 50 × 1.5 × 1.0 = 75 次                        │    │
-│  │     • max_workers: 5                                                 │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│    ↓                                                                         │
-│  TokenBudget.check_budget() → allowed=true                                  │
-│    ↓                                                                         │
-│  RoutingDecision:                                                           │
-│    • agent_type: "multi"                                                    │
-│    • execution_strategy: "multi-dag"                                        │
-│    • guardrail_config: {...}  ← 🆕 护栏配置                                 │
-│    • matched_playbook: {...}  ← 🆕 策略库匹配                               │
-│    ↓                                                                         │
-│  _get_multi_agent_orchestrator(workspace_dir)                               │
-│    ├─ if _multi_agent_prototype is None: 创建原型（50-100ms）               │
-│    └─ else: prototype.clone_for_session()  ← <10ms 浅克隆                   │
-│    ↓                                                                         │
-│  调用 MultiAgentOrchestrator.execute()                                      │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                   │
-                                   ↓
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    Orchestrator 内部流程 (V9.0)                              │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │ 阶段 1: 初始化 + 护栏启动                                             │  │
-│  │   MultiAgentOrchestrator.execute(intent, messages, session_id)        │  │
-│  │     ↓                                                                  │  │
-│  │   ├── _initialize_shared_resources()                                  │  │
-│  │   │     ├── ToolLoader（工具加载）                                    │  │
-│  │   │     ├── ToolExecutor（工具执行）                                  │  │
-│  │   │     ├── WorkingMemory（会话级记忆）                               │  │
-│  │   │     └── Mem0 客户端（用户级长期记忆）                             │  │
-│  │   │                                                                    │  │
-│  │   ├── 🆕 AdaptiveGuardrails.start_session()  ← 护栏监控启动           │  │
-│  │   │     └── 初始化计数器: turns=0, tokens=0, tool_calls=0            │  │
-│  │   │                                                                    │  │
-│  │   └── CheckpointManager.load_latest()（可选，恢复检查点）             │  │
-│  └───────────────────────────────────────────────────────────────────────┘  │
-│                                   │                                          │
-│                                   ↓                                          │
-│  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │ 阶段 2: 任务分解 + 策略应用（LeadAgent）                              │  │
-│  │   LeadAgent.decompose_task(user_query, conversation_history)          │  │
-│  │     ↓                                                                  │  │
-│  │   ┌─────────────────────────────────────────────────────────────────┐ │  │
-│  │   │ 策略优先                                                         │ │  │
-│  │   │   if matched_playbook:                                          │ │  │
-│  │   │     # 使用已验证的策略作为分解参考                              │ │  │
-│  │   │     strategy = matched_playbook.strategy                        │ │  │
-│  │   │     tool_sequence = matched_playbook.tool_sequence              │ │  │
-│  │   │   else:                                                          │ │  │
-│  │   │     # LLM 分解                                                  │ │  │
-│  │   │     LLM.create_message_async() ← 任务分解 Prompt                │ │  │
-│  │   └─────────────────────────────────────────────────────────────────┘ │  │
-│  │     ↓                                                                  │  │
-│  │   TaskDecompositionPlan:                                              │  │
-│  │     ├── subtasks: List[PlanStep]                                      │  │
-│  │     │     • sub-1: "收集数据"                                         │  │
-│  │     │     • sub-2: "分析数据", dependencies: ["sub-1"]                │  │
-│  │     │     • sub-3: "生成图表", dependencies: ["sub-2"]                │  │
-│  │     ├── execution_mode: parallel | sequential | hierarchical          │  │
-│  │     ├── synthesis_strategy: 结果综合策略                              │  │
-│  │     └── 🆕 worker_execution_strategy: "rvr-b"  ← Worker 回溯策略      │  │
-│  │                                                                        │  │
-│  │   🆕 guardrails.record_tokens(decomposition_tokens)                   │  │
-│  │   emit task_decomposition event                                       │  │
-│  └───────────────────────────────────────────────────────────────────────┘  │
-│                                   │                                          │
-│                                   ↓                                          │
-│  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │ 阶段 3: 子任务执行（根据模式调度）+ 护栏监控                          │  │
-│  │                                                                        │  │
-│  │   ┌─────────────────────────────────────────────────────────────────┐ │  │
-│  │   │ 护栏前置检查                                                     │ │  │
-│  │   │   guardrails.check_all()                                        │ │  │
-│  │   │     ↓                                                            │ │  │
-│  │   │   if any(r.action == BLOCK for r in results):                   │ │  │
-│  │   │     → 触发部分重规划或优雅终止                                   │ │  │
-│  │   │   elif any(r.action == WARN):                                   │ │  │
-│  │   │     → 发送预警事件给用户                                         │ │  │
-│  │   └─────────────────────────────────────────────────────────────────┘ │  │
-│  │                                                                        │  │
-│  │   ├── SEQUENTIAL: _execute_sequential()                               │  │
-│  │   ├── PARALLEL:   _execute_with_dag_scheduler()（优先）               │  │
-│  │   │               或 _execute_parallel()（降级）                       │  │
-│  │   └── HIERARCHICAL: _execute_hierarchical()                           │  │
-│  │                                                                        │  │
-│  │   ┌─────────────────────────────────────────────────────────────────┐ │  │
-│  │   │ 每个子任务内部：_execute_step_with_critique()                    │ │  │
-│  │   │                                                                  │ │  │
-│  │   │   ┌─────────────────────────────────────────────────────────┐  │ │  │
-│  │   │   │ 1. _execute_single_agent() + 🆕 智能回溯               │  │ │  │
-│  │   │   │    ├── _build_subagent_system_prompt() ← 8 个核心要素   │  │ │  │
-│  │   │   │    │     • 目标（Objective）                            │  │ │  │
-│  │   │   │    │     • 输出格式（Output Format）                    │  │ │  │
-│  │   │   │    │     • 工具指导（Tools Guidance）                   │  │ │  │
-│  │   │   │    │     • 任务边界（Task Boundaries）                  │  │ │  │
-│  │   │   │    │     • 成功标准（Success Criteria）                 │  │ │  │
-│  │   │   │    │     • 上下文信息（Context）                        │  │ │  │
-│  │   │   │    │     • 搜索策略（Search Strategy）                  │  │ │  │
-│  │   │   │    │     • Thinking 指导（Thinking Guidance）           │  │ │  │
-│  │   │   │    ├── create_llm_service() ← Worker 模型（Sonnet）     │  │ │  │
-│  │   │   │    ├── _load_subagent_tools() ← 动态加载工具            │  │ │  │
-│  │   │   │    │                                                    │  │ │  │
-│  │   │   │    └── 🆕 mini-RVR-B 循环（最多 5 轮 + 回溯能力）       │  │ │  │
-│  │   │   │          │                                              │  │ │  │
-│  │   │   │          ├── React (思考)                               │  │ │  │
-│  │   │   │          │     └── guardrails.record_tokens()           │  │ │  │
-│  │   │   │          │                                              │  │ │  │
-│  │   │   │          ├── Validate (工具调用)                        │  │ │  │
-│  │   │   │          │     ├── guardrails.record_tool_call()        │  │ │  │
-│  │   │   │          │     │                                        │  │ │  │
-│  │   │   │          │     └── 🆕 工具失败 → ErrorClassifier        │  │ │  │
-│  │   │   │          │           │                                  │  │ │  │
-│  │   │   │          │           ├── Layer 1 → resilience 重试      │  │ │  │
-│  │   │   │          │           │                                  │  │ │  │
-│  │   │   │          │           └── Layer 2 → BacktrackManager     │  │ │  │
-│  │   │   │          │                 │                            │  │ │  │
-│  │   │   │          │                 ├── CONTINUE → 替代工具      │  │ │  │
-│  │   │   │          │                 ├── RETRY → 调整参数重试     │  │ │  │
-│  │   │   │          │                 └── ABORT → 报告 Leader      │  │ │  │
-│  │   │   │          │                                              │  │ │  │
-│  │   │   │          └── Reflect (评估)                             │  │ │  │
-│  │   │   │                                                         │  │ │  │
-│  │   │   └─────────────────────────────────────────────────────────┘  │ │  │
-│  │   │                          ↓                                      │ │  │
-│  │   │   ┌─────────────────────────────────────────────────────────┐  │ │  │
-│  │   │   │ 2. CriticAgent.critique()（如启用）                     │  │ │  │
-│  │   │   │    ├── 评估执行结果                                     │  │ │  │
-│  │   │   │    └── CriticResult:                                    │  │ │  │
-│  │   │   │          ├── recommended_action: pass/retry/ask_human   │  │ │  │
-│  │   │   │          ├── confidence: high/medium/low                │  │ │  │
-│  │   │   │          ├── suggestions: List[str]                     │  │ │  │
-│  │   │   │          └── 🆕 step_quality_score: 0-1  ← 用于奖励归因 │  │ │  │
-│  │   │   └─────────────────────────────────────────────────────────┘  │ │  │
-│  │   │                          ↓                                      │ │  │
-│  │   │   ┌─────────────────────────────────────────────────────────┐  │ │  │
-│  │   │   │ 3. 决策分支                                              │  │ │  │
-│  │   │   │    ├── PASS → 完成，保存检查点                          │  │ │  │
-│  │   │   │    │     └── 🆕 StepReward.record()  ← 记录步骤奖励     │  │ │  │
-│  │   │   │    │                                                    │  │ │  │
-│  │   │   │    ├── RETRY → 注入建议，重新执行（最多 max_retries）   │  │ │  │
-│  │   │   │    │     └── 🆕 guardrails.check_turns() 限制重试次数   │  │ │  │
-│  │   │   │    │                                                    │  │ │  │
-│  │   │   │    ├── 🆕 PARTIAL_REPLAN → 部分重规划                   │  │ │  │
-│  │   │   │    │     └── LeadAgent 重新规划后续步骤                 │  │ │  │
-│  │   │   │    │                                                    │  │ │  │
-│  │   │   │    └── ASK_HUMAN → 标记待审核，返回结果                 │  │ │  │
-│  │   │   └─────────────────────────────────────────────────────────┘  │ │  │
-│  │   └─────────────────────────────────────────────────────────────────┘ │  │
-│  │                                                                        │  │
-│  │   🆕 guardrails.record_turn()  ← 每个子任务记录一轮                   │  │
-│  │   emit agent_start / agent_end events                                 │  │
-│  └───────────────────────────────────────────────────────────────────────┘  │
-│                                   │                                          │
-│                                   ↓                                          │
-│  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │ 阶段 4: 结果聚合（LeadAgent）                                         │  │
-│  │   LeadAgent.synthesize_results(subtask_results, original_query)       │  │
-│  │     ↓                                                                  │  │
-│  │   ├── 合并所有子任务结果                                              │  │
-│  │   ├── 生成最终输出                                                    │  │
-│  │   ├── 计算统计信息: total_time, total_tokens, success_rate           │  │
-│  │   └── 🆕 guardrails.get_usage_stats()  ← 获取护栏使用统计             │  │
-│  │                                                                        │  │
-│  │   emit orchestrator_summary / orchestrator_end events                 │  │
-│  └───────────────────────────────────────────────────────────────────────┘  │
-│                                   │                                          │
-│                                   ↓                                          │
-│  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │ 阶段 5: 持续学习                                                       │  │
-│  │                                                                        │  │
-│  │   会话结束后异步执行：                                                 │  │
-│  │     │                                                                  │  │
-│  │     ├── RewardAttribution.compute()                                   │  │
-│  │     │     │                                                            │  │
-│  │     │     ├── 收集所有 StepReward 记录                                │  │
-│  │     │     ├── 计算步骤级贡献权重                                      │  │
-│  │     │     └── SessionReward:                                          │  │
-│  │     │           • final_score: 0.85                                   │  │
-│  │     │           • step_rewards: [{step_id, attributed_reward}, ...]   │  │
-│  │     │           • attribution_method: "decay"                         │  │
-│  │     │                                                                  │  │
-│  │     ├── PlaybookManager.extract_from_session()                        │  │
-│  │     │     │                                                            │  │
-│  │     │     └── if session_score > 0.8:  ← 高质量会话                   │  │
-│  │     │           ├── 提取策略模式                                      │  │
-│  │     │           ├── 创建 PlaybookEntry (status=PENDING_REVIEW)       │  │
-│  │     │           └── 提交人工审核队列                                  │  │
-│  │     │                                                                  │  │
-│  │     └── ToolDescriptionEnhancer.update_stats()                        │  │
-│  │           └── 更新工具使用成功率统计                                  │  │
-│  │                                                                        │  │
-│  └───────────────────────────────────────────────────────────────────────┘  │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                   │
-                                   ↓
-                            SSE Stream → 用户
+用户请求
+   │
+   ↓
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 阶段 0: 预处理（ChatService）                                                 │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  POST /chat (message, user_id, agent_id)                                     │
+│    ↓                                                                          │
+│  ChatService.chat()                                                           │
+│    ├─→ _process_message_with_files()  # 处理文件上传                         │
+│    ├─→ create_conversation()          # 创建/获取会话                         │
+│    └─→ create_session()                # 创建 Session                         │
+└──────────────────────────────────────────────────────────────────────────────┘
+   │
+   ↓
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 阶段 1: 路由决策（AgentRouter）                                               │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  ChatService → AgentRouter.route(user_query, history, user_id)               │
+│    ↓                                                                          │
+│  ┌────────────────────────────────────┐                                      │
+│  │ IntentAnalyzer.analyze()           │  ← 使用 Haiku 快速分析                │
+│  │   ↓                                │                                      │
+│  │ LLM.create_message_async(Haiku)    │                                      │
+│  │   ↓                                │                                      │
+│  │ 返回 IntentResult:                 │                                      │
+│  │   • task_type: str                 │                                      │
+│  │   • complexity: TaskComplexity     │                                      │
+│  │   • complexity_score: float        │                                      │
+│  │   • needs_plan: bool               │                                      │
+│  │   • skip_memory_retrieval: bool    │                                      │
+│  └────────────────────────────────────┘                                      │
+│    ↓                                                                          │
+│  ComplexityScorer.score() + Budget 检查                                       │
+│    ↓                                                                          │
+│  返回 RoutingDecision:                                                        │
+│    • use_multi_agent: bool            # single/multi 决策                    │
+│    • intent: IntentResult             # 传递给 Agent                         │
+│    • complexity_score: float                                                 │
+│    • fallback_reason: Optional[str]   # Budget 不足时降级                    │
+│                                                                               │
+│  ✅ V7架构：意图分析集中在路由层，SimpleAgent 不再执行内部分析                  │
+└──────────────────────────────────────────────────────────────────────────────┘
+   │
+   ↓
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 阶段 2: Agent 实例化（AgentRegistry）                                         │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  ChatService → AgentRegistry.get_agent(agent_id, event_manager, ...)         │
+│    ↓                                                                          │
+│  从 _agent_prototypes 获取原型                                                │
+│    ↓                                                                          │
+│  prototype.clone_for_session(event_manager, workspace_dir, ...)              │
+│    ├─→ 浅拷贝共享组件（LLM/Registry/Executor/PromptCache）                   │
+│    └─→ 重置 Session 级状态（EventBroadcaster/UsageTracker/_plan_cache）      │
+│    ↓                                                                          │
+│  返回新 SimpleAgent 实例                                                      │
+│                                                                               │
+│  ⚡ 性能优化：<5ms（原 50-100ms，提升 10-20x）                                 │
+└──────────────────────────────────────────────────────────────────────────────┘
+   │
+   ↓
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 阶段 3: Agent 执行（SimpleAgent）                                             │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  SimpleAgent.chat(messages, session_id, intent=intent)  ← 接收路由层 intent  │
+│                                                                               │
+│  ┌──────────────────────────────────────────────────────────────────────┐    │
+│  │ 阶段 3.1: 使用路由层 Intent（内部分析已移除）✅                        │    │
+│  │   if intent is not None:                                            │    │
+│  │       logger.info(f"使用路由层意图: {intent.task_type.value}")       │    │
+│  │   else:                                                             │    │
+│  │       logger.warning("未提供意图，使用默认配置")                      │    │
+│  │   ↓                                                                 │    │
+│  │   emit_message_delta(intent delta)  # 发送意图事件                  │    │
+│  └──────────────────────────────────────────────────────────────────────┘    │
+│                                                                               │
+│  ┌──────────────────────────────────────────────────────────────────────┐    │
+│  │ 阶段 3.2: Tool Selection                                            │    │
+│  │   ToolSelector.select()                                             │    │
+│  │     ├─→ 选择优先级: Schema > Plan > Intent                          │    │
+│  │     ├─→ InvocationSelector.select_strategy()                        │    │
+│  │     └─→ 添加实例级工具 (MCP/REST)                                   │    │
+│  └──────────────────────────────────────────────────────────────────────┘    │
+│                                                                               │
+│  ┌──────────────────────────────────────────────────────────────────────┐    │
+│  │ 阶段 3.3: System Prompt 组装                                        │    │
+│  │   _build_cached_system_prompt() / build_system_prompt()             │    │
+│  │     ├─→ L1 缓存: 核心规则（1h）                                     │    │
+│  │     ├─→ L2 缓存: 工具定义（1h）                                     │    │
+│  │     ├─→ L3 缓存: Memory Guidance（1h）                              │    │
+│  │     └─→ L4 动态: 会话上下文（不缓存）                              │    │
+│  └──────────────────────────────────────────────────────────────────────┘    │
+│                                                                               │
+│  ┌──────────────────────────────────────────────────────────────────────┐    │
+│  │ 阶段 3.4: RVR Loop（React + Validation + Reflection）               │    │
+│  │                                                                      │    │
+│  │  for turn in range(max_turns):                                      │    │
+│  │                                                                      │    │
+│  │    ┌─────────────────────────────────────────────────────────┐      │    │
+│  │    │ _process_stream(messages, system_prompt, tools)         │      │    │
+│  │    │   ↓                                                     │      │    │
+│  │    │ LLM.create_message_stream(Sonnet)                       │      │    │
+│  │    │   ↓ 流式响应                                            │      │    │
+│  │    │   ├─→ thinking_delta  → emit_message_delta(thinking)    │      │    │
+│  │    │   ├─→ content_delta   → emit_message_delta(text)        │      │    │
+│  │    │   └─→ tool_use_start  → emit_message_delta(tool_use)    │      │    │
+│  │    │   ↓                                                     │      │    │
+│  │    │ final_response (stop_reason)                            │      │    │
+│  │    └─────────────────────────────────────────────────────────┘      │    │
+│  │      ↓                                                               │    │
+│  │    if stop_reason == "tool_use":                                    │    │
+│  │      ┌───────────────────────────────────────────────────────┐      │    │
+│  │      │ _execute_tools_stream(tool_calls)                     │      │    │
+│  │      │   ↓                                                   │      │    │
+│  │      │ 并行执行工具（可选）:                                 │      │    │
+│  │      │   ├─→ ToolExecutor.execute(tool_1) ┐                 │      │    │
+│  │      │   └─→ ToolExecutor.execute(tool_2) ┴→ tool_results   │      │    │
+│  │      │   ↓                                                   │      │    │
+│  │      │ emit_message_delta(tool_result)                       │      │    │
+│  │      │   ↓                                                   │      │    │
+│  │      │ append tool_results to messages                       │      │    │
+│  │      │   ↓                                                   │      │    │
+│  │      │ continue loop (下一轮)                                │      │    │
+│  │      └───────────────────────────────────────────────────────┘      │    │
+│  │                                                                      │    │
+│  │    elif stop_reason == "end_turn" / "max_tokens":                   │    │
+│  │      ┌───────────────────────────────────────────────────────┐      │    │
+│  │      │ ctx.set_completed()                                   │      │    │
+│  │      │   ↓                                                   │      │    │
+│  │      │ break loop (退出循环)                                 │      │    │
+│  │      └───────────────────────────────────────────────────────┘      │    │
+│  │                                                                      │    │
+│  └──────────────────────────────────────────────────────────────────────┘    │
+│                                                                               │
+│  ┌──────────────────────────────────────────────────────────────────────┐    │
+│  │ 阶段 3.5: Final Output                                              │    │
+│  │   UsageTracker.get_usage_stats()                                    │    │
+│  │     ↓                                                               │    │
+│  │   emit_message_stop(usage stats)                                    │    │
+│  │     ↓                                                               │    │
+│  │   yield AsyncGenerator[events]                                      │    │
+│  └──────────────────────────────────────────────────────────────────────┘    │
+└──────────────────────────────────────────────────────────────────────────────┘
+   │
+   ↓
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 阶段 4: 后处理（ChatService）                                                 │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  ├─→ 更新 session status                                                     │
+│  ├─→ TokenAuditor.record() # 记录 Token 使用                                 │
+│  ├─→ dispatch_background_tasks() # Mem0 写入、日志记录等                     │
+│  └─→ 返回 AsyncGenerator[SSE events]                                         │
+└──────────────────────────────────────────────────────────────────────────────┘
+   │
+   ↓
+SSE Stream → 用户
 ```
 
-**V9.0 关键设计说明**：
+**关键决策点**：
 
-| 设计点 | V7.x 行为 | V8.0+ 增强 |
-|--------|----------|----------|
-| **路由决策** | `complexity_score ≥ 5.0` 阈值判断 | `needs_multi_agent: true` 语义驱动 |
-| **护栏机制** | 无 | AdaptiveGuardrails 全程监控 |
-| **策略匹配** | 无 | PlaybookManager 优先匹配已验证策略 |
-| **Worker 执行** | mini-RVR（5 轮） | mini-RVR-B（5 轮 + 智能回溯） |
-| **错误处理** | 简单重试 | ErrorClassifier 分层 + BacktrackManager 回溯 |
-| **质量归因** | 无 | RewardAttribution 步骤级奖励归因 |
-| **Critic 输出** | pass/retry/ask_human | 新增 step_quality_score + PARTIAL_REPLAN |
-| **持续学习** | 无 | 高质量会话提取 → 策略库更新 |
+| 决策点 | 位置 | 判断依据 | 影响 |
+|-------|------|---------|------|
+| **是否启用路由** | ChatService._run_agent() | enable_routing 配置（默认True） | 是否进行意图分析 |
+| **单/多智能体选择** | AgentRouter.route() | 复杂度评分 >= 阈值 | 执行框架选择 |
+| **工具选择策略** | SimpleAgent (阶段3.2) | Schema > Plan > Intent | LLM可用工具列表 |
+| **是否使用缓存** | SimpleAgent (阶段3.3) | LLM配置 + prompt_cache可用 | Token成本优化 |
+| **RVR循环退出** | SimpleAgent (阶段3.4) | stop_reason / max_turns | 执行完成 |
+
+### MultiAgentOrchestrator 完整调用流程
+
+```
+用户请求（复杂任务）
+   │
+   ↓
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 阶段 1: 路由决策（AgentRouter）                                               │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  ChatService → AgentRouter.route(messages, session_id)                       │
+│    ↓                                                                          │
+│  IntentAnalyzer.analyze() (使用 Haiku)                                        │
+│    ↓                                                                          │
+│  IntentResult(complexity_score=8.5)  # 高复杂度                               │
+│    ↓                                                                          │
+│  if complexity_score >= 7.0:                                                  │
+│    RoutingDecision(use_multi_agent=True)                                      │
+│  else:                                                                        │
+│    RoutingDecision(use_multi_agent=False) → SimpleAgent                       │
+└──────────────────────────────────────────────────────────────────────────────┘
+   │
+   ↓ (use_multi_agent=True)
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 阶段 2: 多智能体初始化（MultiAgentOrchestrator）                              │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  MultiAgentOrchestrator.execute(messages, session_id, intent)                │
+│    ↓                                                                          │
+│  ┌────────────────────────────────────────────┐                              │
+│  │ 检查检查点（可选）                          │                              │
+│  │   if checkpoint exists:                    │                              │
+│  │     CheckpointManager.load_latest()        │                              │
+│  │       ↓                                    │                              │
+│  │     恢复状态（已完成的子任务、中间结果）    │                              │
+│  └────────────────────────────────────────────┘                              │
+│    ↓                                                                          │
+│  ┌────────────────────────────────────────────┐                              │
+│  │ _initialize_shared_resources()             │                              │
+│  │   ├─→ ToolLoader (加载工具)                │                              │
+│  │   ├─→ WorkingMemory (会话级记忆)           │                              │
+│  │   ├─→ Mem0 客户端 (用户级长期记忆)         │                              │
+│  │   └─→ EventBroadcaster (事件管理)          │                              │
+│  └────────────────────────────────────────────┘                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+   │
+   ↓
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 阶段 3: 任务分解（LeadAgent - 使用 Sonnet）                                   │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  LeadAgent.plan_subtasks(task_description, context)                          │
+│    ↓                                                                          │
+│  LLM.generate(Sonnet) ← 使用任务分解 Prompt                                   │
+│    ↓                                                                          │
+│  TaskPlan:                                                                    │
+│    ├─→ subtasks: List[SubTask]                                               │
+│    │     • id: "sub-1", description: "收集数据"                               │
+│    │     • id: "sub-2", description: "分析数据", dependencies: ["sub-1"]      │
+│    │     • id: "sub-3", description: "生成图表", dependencies: ["sub-2"]      │
+│    │     • id: "sub-4", description: "撰写报告", dependencies: ["sub-3"]      │
+│    ├─→ execution_mode: "hybrid" | "parallel" | "sequential"                  │
+│    ├─→ dependencies: Dict[str, List[str]]  # DAG 依赖图                      │
+│    └─→ estimated_time: float                                                 │
+│                                                                               │
+│  emit orchestrator_start event                                               │
+└──────────────────────────────────────────────────────────────────────────────┘
+   │
+   ↓
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 阶段 4: 子任务执行（SubAgents - 使用 Haiku）                                  │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  根据 execution_mode 执行:                                                    │
+│                                                                               │
+│  ┌──────────────────────────────────────────────────────────────────────┐    │
+│  │ 并行模式（无依赖任务同时执行）                                       │    │
+│  │                                                                      │    │
+│  │   SubAgent-1 (sub-1: "收集数据")                                     │    │
+│  │     ├─→ 动态加载工具 (_load_subagent_tools)                          │    │
+│  │     ├─→ LLM.generate(Haiku)                                          │    │
+│  │     └─→ 返回 SubTaskResult                                           │    │
+│  │          ↓                                                           │    │
+│  │   ┌──────────────────────────────────────────────────┐              │    │
+│  │   │ 关键检查点（每个子任务完成后）                    │              │    │
+│  │   │   CheckpointManager.save_checkpoint({            │              │    │
+│  │   │     "completed_subtasks": ["sub-1"],             │              │    │
+│  │   │     "subtask_results": {...}                     │              │    │
+│  │   │   })                                             │              │    │
+│  │   └──────────────────────────────────────────────────┘              │    │
+│  │          ↓                                                           │    │
+│  │   SubAgent-2 (sub-2: "分析数据", depends on sub-1)                   │    │
+│  │     ├─→ 等待 sub-1 完成                                              │    │
+│  │     ├─→ 读取 sub-1 结果（从 shared_context）                         │    │
+│  │     ├─→ LLM.generate(Haiku)                                          │    │
+│  │     └─→ 返回 SubTaskResult                                           │    │
+│  │          ↓                                                           │    │
+│  │   ... 继续执行 sub-3, sub-4 ...                                      │    │
+│  │                                                                      │    │
+│  │   emit agent_start / agent_end events (每个子任务)                   │    │
+│  └──────────────────────────────────────────────────────────────────────┘    │
+│                                                                               │
+│  ⚡ 优化策略:                                                                  │
+│     • 并发限流: max_concurrent=3 (避免过载)                                   │
+│     • 渐进式超时: 根据任务类型动态计算                                        │
+│     • 智能重试: 指数退避 (RateLimitError/NetworkError)                        │
+└──────────────────────────────────────────────────────────────────────────────┘
+   │
+   ↓
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 阶段 5: 质量评审（CriticAgent - 使用 Sonnet）                                 │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  CriticAgent.review(task_description, results, quality_criteria)             │
+│    ↓                                                                          │
+│  LLM.generate(Sonnet) ← 使用 Critic Prompt                                    │
+│    ↓                                                                          │
+│  CriticReview:                                                                │
+│    ├─→ passed: bool                                                          │
+│    ├─→ overall_score: float  # 0-10                                          │
+│    ├─→ issues: List[str]     # 发现的问题                                    │
+│    ├─→ suggestions: List[str]  # 改进建议                                    │
+│    └─→ requires_rework: bool   # 是否需要返工                                │
+│          ↓                                                                    │
+│  ┌────────────────────────────────────────────┐                              │
+│  │ if requires_rework:                        │                              │
+│  │   ├─→ 获取需要重做的子任务 ID              │                              │
+│  │   ├─→ 生成改进提示                         │                              │
+│  │   ├─→ 重新执行问题子任务                   │                              │
+│  │   └─→ 再次评审 (最多 2 次返工)             │                              │
+│  │                                            │                              │
+│  │ else:                                      │                              │
+│  │   └─→ 通过，继续下一步                     │                              │
+│  └────────────────────────────────────────────┘                              │
+│                                                                               │
+│  emit critic_review event                                                    │
+└──────────────────────────────────────────────────────────────────────────────┘
+   │
+   ↓
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 阶段 6: 结果聚合（LeadAgent）                                                 │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  LeadAgent.aggregate_results(subtask_results)                                │
+│    ↓                                                                          │
+│  ├─→ 合并所有子任务结果                                                       │
+│  ├─→ 生成最终输出                                                             │
+│  └─→ 计算总体统计信息:                                                        │
+│        • total_time                                                          │
+│        • total_tokens                                                        │
+│        • success_rate                                                        │
+│          ↓                                                                    │
+│  emit orchestrator_summary / orchestrator_end events                         │
+└──────────────────────────────────────────────────────────────────────────────┘
+   │
+   ↓
+SSE Stream → 用户
+```
 
 **多智能体执行模式**：
 
-| 模式 | 调度方法 | 适用场景 | 优点 | 缺点 |
-|-----|---------|---------|------|------|
-| **SEQUENTIAL** | `_execute_sequential()` | 严格依赖关系 | 逻辑清晰、易调试 | 总耗时 = Σ(子任务耗时) |
-| **PARALLEL** | `_execute_with_dag_scheduler()` | 有依赖的并行任务 | 依赖感知、真正并行 | 需要 DAG 拓扑计算 |
-| **HIERARCHICAL** | `_execute_hierarchical()` | 主从协作/子任务分发 | 上下文隔离、可扩展 | 设计与调试更复杂 |
+| 模式 | 适用场景 | 优点 | 缺点 |
+|-----|---------|------|------|
+| **串行模式** | 严格依赖关系 | 逻辑清晰、易调试 | 总耗时 = Σ(子任务耗时) |
+| **并行模式** | 独立子任务 | 总耗时 ≈ max(子任务耗时) | Token消耗峰值高 |
+| **混合模式** | 部分并行/部分串行 | 兼顾性能和依赖 | 管理复杂度高 |
 
 **强弱配对策略**：
 
-| 角色 | 模型 | 职责 | V8.0+ 增强 |
-|------|------|------|-------------|
-| **LeadAgent** | Opus | 任务分解、结果聚合 | 策略匹配、部分重规划 |
-| **Workers** | Sonnet | 执行具体子任务 | RVR-B 回溯能力 |
-| **Critic** | Sonnet | 质量评审 | step_quality_score 输出 |
-| **🆕 Guardrails** | - | 资源控制 | 全程监控、预警、阻断 |
-
-**护栏监控点**：
-
-```
-Orchestrator 生命周期内的护栏检查点：
-
-1. 初始化时
-   └── guardrails.start_session()
-
-2. 任务分解后
-   └── guardrails.record_tokens(decomposition_tokens)
-
-3. 每个子任务执行前
-   └── guardrails.check_all() → 决定是否继续
-
-4. Worker 循环中
-   ├── React → guardrails.record_tokens()
-   └── Validate → guardrails.record_tool_call()
-
-5. 结果聚合后
-   └── guardrails.get_usage_stats() → 统计报告
-
-限制公式：
-  effective_limit = base_limit × complexity_multiplier × tier_multiplier
-  
-示例（complex + PRO）：
-  max_workers = 5 × 1.5 × 1.0 = 7 个并发 Worker
-  max_tool_calls = 50 × 1.5 × 1.0 = 75 次工具调用
-```
-
-**成本优化**：相对全 Opus 约 30-40%（视任务与并发而定）
+- **LeadAgent**: Sonnet (任务分解、结果聚合)
+- **SubAgents**: Haiku (执行具体子任务)
+- **Critic**: Sonnet (质量评审)
+- **成本优化**: 节省 39% (相比全Sonnet)
 
 ---
 
@@ -1727,10 +1358,9 @@ Orchestrator 生命周期内的护栏检查点：
 
 **职责**：在服务层完成意图识别和路由决策，为执行框架提供统一入口。
 
-**核心特性**：
+**架构演进（V7）**：
 - ✅ **意图分析集中化**: IntentAnalyzer 从 SimpleAgent 剥离到路由层
 - ✅ **单点分析**: 意图分析只在路由层执行一次，结果传递给 SimpleAgent/MultiAgent
-- ✅ **语义缓存**: L1 精确匹配 + L2 语义匹配，减少重复 LLM 调用
 - ✅ **内部分析移除**: SimpleAgent 不再执行内部意图分析，完全依赖路由层传入的 `intent` 参数
 
 **文件结构**：
@@ -1738,35 +1368,9 @@ Orchestrator 生命周期内的护栏检查点：
 core/routing/
 ├── __init__.py
 ├── intent_analyzer.py      # IntentAnalyzer (共享，使用 Haiku 快速分析)
-├── intent_cache.py         # IntentSemanticCache (语义缓存)
-└── router.py               # AgentRouter 路由决策器（V9.0: 纯 LLM-First）
-
-# V9.0 已删除：complexity_scorer.py（LLM-First 原则，不需要代码层评分）
+├── router.py               # AgentRouter 路由决策器
+└── complexity_scorer.py    # ComplexityScorer 复杂度评分
 ```
-
-**语义缓存机制 (IntentSemanticCache)**：
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    意图分析缓存流程                               │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  用户查询 ─────────────────────────────────────────────────────┐ │
-│       ↓                                                        │ │
-│  L1 精确匹配（hash）────── 命中 ────→ 返回缓存结果            │ │
-│       ↓ 未命中                                                 │ │
-│  L2 语义匹配（embedding）── 相似度 > 0.95 ──→ 返回缓存结果     │ │
-│       ↓ 未命中                                                 │ │
-│  调用 LLM 分析 ────→ 缓存结果 ────→ 返回分析结果              │ │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-| 缓存层级 | 匹配方式 | 命中条件 | 响应时间 |
-|----------|----------|----------|----------|
-| L1 | 精确哈希匹配 | 查询完全相同 | < 1ms |
-| L2 | 向量语义匹配 | 相似度 > 0.95 | < 10ms |
-| Miss | LLM 调用 | 无缓存命中 | 300-500ms |
 
 **核心接口**：
 
@@ -1795,11 +1399,7 @@ class IntentAnalyzer:
 
 # core/routing/router.py
 class AgentRouter:
-    """
-    智能体路由器（V9.0 LLM-First 架构）
-    
-    核心原则：代码不包含任何规则逻辑，所有判断来自 LLM 语义推理
-    """
+    """智能体路由器，决策使用单智能体还是多智能体"""
     
     async def route(
         self, 
@@ -1808,34 +1408,47 @@ class AgentRouter:
         user_id: Optional[str] = None
     ) -> RoutingDecision:
         """
-        路由决策流程（V9.0 LLM-First）：
+        路由决策流程（V7 架构）：
         1. 意图识别 (IntentAnalyzer + Haiku)
-        2. 路由决策 (直接使用 LLM 判断结果)
-        3. Budget检查 (多智能体场景)
+        2. 复杂度评分 (优先使用LLM评分)
+        3. 路由决策 (单/多智能体)
+        4. Budget检查 (多智能体场景)
         
         返回：RoutingDecision
-            - agent_type: str              # "single" 或 "multi"
+            - use_multi_agent: bool        # 是否使用多智能体
             - intent: IntentResult         # 意图结果（传递给Agent）
-            - context: dict                # 路由上下文
+            - complexity_score: float      # 复杂度评分 (0-10)
+            - reason: str                  # 决策理由
+            - fallback_reason: Optional[str]  # 降级原因
         """
-        # 1. 意图识别（LLM 语义分析）
+        # 1. 意图识别（使用 Haiku）
         intent = await self.intent_analyzer.analyze(user_query, conversation_history, user_id)
         
-        # 2. 路由决策（直接使用 LLM 判断，无代码规则）
-        if intent.needs_multi_agent:
-            # 3. Budget检查（多智能体场景）
+        # 2. 复杂度评分
+        complexity_score = intent.complexity_score or self.complexity_scorer.score(intent)
+        
+        # 3. 路由决策
+        if intent.needs_multi_agent or complexity_score >= self.complexity_threshold:
+            # 4. Budget检查（多智能体场景）
             if user_id and not await self.check_budget(user_id, "multi_agent"):
+                # 预算不足，降级为单智能体
                 return RoutingDecision(
-                    agent_type="single", 
-                    intent=intent,
-                    context={"fallback_reason": "预算不足"}
+                    use_multi_agent=False, 
+                    intent=intent, 
+                    complexity_score=complexity_score,
+                    fallback_reason="预算不足"
                 )
-            return RoutingDecision(agent_type="multi", intent=intent)
+            return RoutingDecision(use_multi_agent=True, intent=intent, complexity_score=complexity_score)
         else:
-            return RoutingDecision(agent_type="single", intent=intent)
+            return RoutingDecision(use_multi_agent=False, intent=intent, complexity_score=complexity_score)
 
-# V9.0: 已删除 ComplexityScorer
-# 复杂度判断完全由 LLM 通过 instances/{name}/prompt.md 的「LLM 判断规则」区块驱动
+# core/routing/complexity_scorer.py
+class ComplexityScorer:
+    """复杂度评分器"""
+    
+    def score(self, intent: IntentAnalysisResult, history: List[Message]) -> ComplexityScore:
+        """评分 1-10，决定路由到单智能体还是多智能体"""
+        pass
 ```
 
 ### 共享 Plan 层 (core/planning/)
@@ -1848,209 +1461,29 @@ core/planning/
 ├── __init__.py
 ├── protocol.py             # Plan 数据协议
 ├── storage.py              # Plan 持久化存储
-├── validators.py           # Plan 验证器
-└── dag_scheduler.py        # DAG 调度器
+└── validators.py           # Plan 验证器
 ```
 
-**核心数据结构（V7.7 增强）**：
+**核心数据结构**：
 
 ```python
 # core/planning/protocol.py
 class PlanStep(BaseModel):
-    """
-    Plan 步骤（V7.8：唯一的步骤数据结构，SubTask 已废弃）
-    
-    支持单智能体和多智能体共享，统一依赖关系表达
-    """
+    """Plan 步骤（单智能体和多智能体共享数据结构）"""
     id: str
     description: str
-    status: StepStatus = StepStatus.PENDING
-    
-    # 依赖关系
-    dependencies: List[str] = Field(default_factory=list)
-    
-    # 执行参数（V7.7 合并，V7.8 唯一使用）
-    assigned_agent: Optional[str] = None
-    assigned_agent_role: Optional[str] = None
-    tools_required: List[str] = Field(default_factory=list)
-    expected_output: Optional[str] = None
-    success_criteria: List[str] = Field(default_factory=list)
-    constraints: List[str] = Field(default_factory=list)
-    max_time_seconds: int = 300
-    priority: int = 0
-    
-    # 上下文
-    context: str = ""
-    injected_context: Optional[str] = None  # 运行时注入的依赖结果
-    
-    # 执行结果
+    status: Literal["pending", "in_progress", "completed", "failed"] = "pending"
+    dependencies: List[str] = Field(default_factory=list)  # 支持 DAG
     result: Optional[str] = None
     error: Optional[str] = None
-    retry_count: int = 0
 
 class Plan(BaseModel):
     """Plan 协议（统一数据结构）"""
     plan_id: str
     goal: str
     steps: List[PlanStep]
-    execution_mode: Literal["linear", "dag"] = "linear"
+    execution_mode: Literal["linear", "dag"] = "linear"  # 单智能体=linear，多智能体=dag
     metadata: Dict[str, Any] = Field(default_factory=dict)
-    
-    @classmethod
-    def from_decomposition(cls, decomposition: "TaskDecompositionPlan") -> "Plan":
-        """V7.7: 从 LeadAgent 的 TaskDecompositionPlan 转换"""
-        ...
-```
-
-#### DAGScheduler 调度器
-
-**职责**：独立的 DAG 调度器，支持依赖感知的并行执行。
-
-```python
-# core/planning/dag_scheduler.py
-class DAGScheduler:
-    """
-    DAG 调度器
-    
-    功能：
-    1. 依赖分析和并行组计算（拓扑分层）
-    2. 分层执行（每层可并行，层间串行）
-    3. 失败重试和级联失败处理
-    4. 依赖结果注入
-    """
-    
-    def __init__(
-        self,
-        max_concurrency: int = 5,
-        enable_retry: bool = True,
-        max_retries: int = 2,
-    ): ...
-    
-    def compute_parallel_groups(self, plan: Plan) -> List[List[PlanStep]]:
-        """计算可并行执行的步骤组（拓扑分层）"""
-        ...
-    
-    async def execute(
-        self,
-        plan: Plan,
-        executor: Callable[[PlanStep, Dict], Awaitable[StepResult]],
-        on_step_start: Optional[Callable] = None,
-        on_step_end: Optional[Callable] = None,
-    ) -> DAGExecutionResult:
-        """执行 Plan（分层并行）"""
-        ...
-    
-    def inject_dependency_context(
-        self,
-        step: PlanStep,
-        completed_results: Dict[str, StepResult],
-    ) -> PlanStep:
-        """将依赖步骤的结果注入到当前步骤的上下文"""
-        ...
-```
-
-**DAG 执行流程**：
-
-```mermaid
-flowchart TD
-    A["Plan 对象"] --> B["compute_parallel_groups()"]
-    B --> C["并行组列表"]
-    
-    subgraph GroupExecution [分层执行]
-        D["组 1: 无依赖步骤"]
-        E["组 2: 依赖组 1 的步骤"]
-        F["组 3: 依赖组 2 的步骤"]
-        D -->|"组内并行"| E
-        E -->|"组内并行"| F
-    end
-    
-    C --> D
-    F --> G["DAGExecutionResult"]
-```
-
-**与 Orchestrator 集成**：
-
-```python
-# core/agent/multi/orchestrator.py
-async def _execute_with_dag_scheduler(
-    self,
-    decomposition_plan: TaskDecompositionPlan,
-    messages: List[Dict],
-    session_id: str,
-) -> AsyncGenerator[Dict, None]:
-    """使用 DAGScheduler 执行 Plan（V7.7 新增）"""
-    
-    # 1. 转换为 Plan 对象
-    plan = Plan.from_decomposition(decomposition_plan)
-    
-    # 2. 创建调度器
-    scheduler = DAGScheduler(max_concurrency=len(self.config.agents))
-    
-    # 3. 执行 DAG
-    result = await scheduler.execute(plan, executor=step_executor)
-    
-    yield {"type": "dag_execution_end", "success": result.success}
-```
-
-### 计费系统 (core/billing/)
-
-**职责**：统一的 Token 计费管理，支持多模型调用追踪、缓存计费、成本分析。
-
-**文件结构**：
-```
-core/billing/
-├── __init__.py             # 统一导出接口
-├── models.py               # LLMCallRecord, UsageResponse
-├── tracker.py              # EnhancedUsageTracker（唯一实现）
-└── pricing.py              # 模型定价表和成本计算
-```
-
-**核心数据模型**：
-
-```python
-# core/billing/models.py
-class LLMCallRecord(BaseModel):
-    """单次 LLM 调用记录"""
-    call_id: str
-    model: str                      # claude-sonnet-4 / claude-haiku-3.5
-    purpose: str                    # intent_analysis / main_response
-    input_tokens: int
-    output_tokens: int
-    cache_read_tokens: int          # 缓存命中
-    cache_write_tokens: int         # 缓存写入
-    input_unit_price: float         # $/M tokens
-    output_unit_price: float
-    total_price: float              # 本次调用总价
-
-class UsageResponse(BaseModel):
-    """聚合响应（Dify 兼容）"""
-    prompt_tokens: int              # = input + cache_read + cache_write
-    completion_tokens: int
-    total_tokens: int
-    total_price: float
-    cache_hit_rate: float           # 缓存命中率
-    cost_saved_by_cache: float      # 缓存节省成本
-    llm_call_details: List[LLMCallRecord]  # 调用明细
-```
-
-**调用路径**：
-```
-SimpleAgent._chat_loop()
-  ↓
-usage_tracker.accumulate(response)  # 或 record_call()
-  ↓
-EnhancedUsageTracker 记录（自动计算价格）
-  ↓
-ChatService 调用 UsageResponse.from_tracker()
-  ↓
-SSE 事件 {"event": "usage", "data": {...}}
-```
-
-**统一别名**：
-```python
-# utils/usage_tracker.py
-from core.billing.tracker import EnhancedUsageTracker
-UsageTracker = EnhancedUsageTracker  # 统一使用
 ```
 
 ### Agent 引擎 (core/agent/)
@@ -2058,344 +1491,26 @@ UsageTracker = EnhancedUsageTracker  # 统一使用
 **文件结构**：
 ```
 core/agent/
-├── __init__.py             # 统一导出接口
-├── protocol.py             # V7.8: AgentProtocol 统一接口
-├── coordinator.py          # V7.8: AgentCoordinator 协调器
-├── factory.py              # Agent Factory（语义驱动路由）
-├── content_handler.py      # 内容处理器
-├── types.py                # Agent 类型定义（含 IntentResult, execution_strategy）
-│
-├── simple/                 # Simple Agent 模块
-│   ├── __init__.py
-│   ├── simple_agent.py     # 主入口 + RVR 循环
-│   ├── rvrb_agent.py       # RVR-B Agent（继承 SimpleAgent + BacktrackMixin）
-│   ├── simple_agent_context.py   # Prompt + Memory
-│   ├── simple_agent_tools.py     # 工具执行 + HITL
-│   ├── simple_agent_loop.py      # RVR 循环
-│   ├── simple_agent_errors.py    # 错误处理
-│   ├── mixins/             # Mixin 模块
-│   │   ├── __init__.py
-│   │   └── backtrack_mixin.py    # 回溯能力混入
-│   └── README.md
-│
-├── backtrack/              # 回溯系统
-│   ├── __init__.py
-│   ├── error_classifier.py # 错误层级分类器
-│   └── manager.py          # 回溯决策管理器
-│
-└── multi/                  # Multi Agent 模块
+├── __init__.py
+├── factory.py              # Agent Factory 统一入口
+├── simple_agent.py         # SimpleAgent (RVR 循环)
+├── intent_analyzer.py      # 兼容层（调用 core/routing/）
+├── content_handler.py      # 内容处理
+├── types.py                # Agent 类型定义
+└── multi/                  # 多智能体框架（独立）
     ├── __init__.py
     ├── orchestrator.py     # MultiAgentOrchestrator
-    ├── lead_agent.py       # LeadAgent 任务分解
-    ├── critic.py           # CriticAgent 质量评估
-    ├── checkpoint.py       # 检查点恢复机制
-    ├── models.py           # 多智能体数据模型
-    └── README.md
+    └── models.py           # 多智能体模型
 ```
 
-**设计理念**：
-- **统一接口**：AgentProtocol 定义统一的 `execute()` 方法
-- **语义驱动路由**：LLM 输出 `execution_strategy` 决定使用 SimpleAgent 还是 RVRBAgent
-- **Mixin 架构**：回溯能力通过 `BacktrackMixin` 混入，保持 SimpleAgent 精简
-- **错误分层**：Layer 1 (基础设施) 由 resilience 处理，Layer 2 (业务逻辑) 由 BacktrackManager 处理
-
-#### 单智能体继承关系
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          单智能体类继承关系                                  │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│   ┌─────────────────────┐                                                   │
-│   │   AgentProtocol     │  ← 接口定义                                       │
-│   │   (Protocol)        │                                                   │
-│   └──────────┬──────────┘                                                   │
-│              │                                                               │
-│              ▼                                                               │
-│   ┌─────────────────────┐     ┌─────────────────────┐                       │
-│   │   SimpleAgent       │     │   BacktrackMixin    │  ← 回溯能力           │
-│   │   (标准 RVR 循环)   │     │   (无状态 Mixin)    │                       │
-│   │   • _run_rvr_loop   │     │   • _evaluate_backtrack                     │
-│   │   • execute()       │     │   • _try_alternative_tool                   │
-│   │   • 5 个 Mixin      │     │   • _run_rvr_loop_with_backtrack            │
-│   └──────────┬──────────┘     └──────────┬──────────┘                       │
-│              │                            │                                  │
-│              └───────────┬────────────────┘                                  │
-│                          │                                                   │
-│                          ▼                                                   │
-│              ┌─────────────────────┐                                        │
-│              │   RVRBAgent         │  ← 带回溯的单智能体                    │
-│              │   (SimpleAgent +    │                                        │
-│              │    BacktrackMixin)  │                                        │
-│              │   • _run_rvr_loop   │  ← 覆盖，调用 _run_rvr_loop_with_backtrack │
-│              │   • STRATEGY_NAME   │  = "rvr-b"                             │
-│              └─────────────────────┘                                        │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-#### AgentFactory 语义驱动创建
-
-```python
-# core/agent/factory.py
-@classmethod
-def _create_simple_agent(cls, decision: RoutingDecision, ...) -> AgentProtocol:
-    """
-    根据语义决策创建单智能体
-    
-    决策来源：IntentResult.execution_strategy（LLM 分析结果）
-    """
-    # 获取执行策略（来自 IntentResult，非硬编码阈值）
-    execution_strategy = getattr(decision, 'execution_strategy', 'rvr')
-    use_rvrb = execution_strategy == "rvr-b"
-    
-    if use_rvrb:
-        return RVRBAgent(max_backtracks=3, **common_kwargs)
-    else:
-        return SimpleAgent(**common_kwargs)
-```
-
-**V8.0 路由决策流程**：
-
-```
-用户请求
-    │
-    ▼
-IntentAnalyzer.analyze()
-    │
-    ├── task_type: "code_development"
-    ├── complexity: MEDIUM
-    ├── needs_multi_agent: false        ← LLM 语义判断（非 complexity_score 阈值）
-    └── execution_strategy: "rvr-b"     ← LLM 语义判断
-    │
-    ▼
-AgentRouter.route()
-    │
-    └── RoutingDecision:
-        ├── agent_type: "single"        ← 由 needs_multi_agent 决定
-        └── execution_strategy: "rvr-b" ← 直接传递
-    │
-    ▼
-AgentFactory._create_simple_agent()
-    │
-    └── RVRBAgent(max_backtracks=3)     ← 由 execution_strategy 决定
-```
-
-#### AgentProtocol 统一接口
-
-`AgentProtocol` 使用 Python Protocol 实现结构化子类型，所有 Agent 实现都应符合此协议：
-
-```python
-# core/agent/protocol.py
-@runtime_checkable
-class AgentProtocol(Protocol):
-    """Agent 统一接口协议"""
-    
-    @property
-    def model(self) -> str:
-        """主模型名称"""
-        ...
-    
-    @property
-    def schema(self) -> "AgentSchema":
-        """Agent Schema 配置"""
-        ...
-    
-    @property
-    def usage_stats(self) -> Dict[str, int]:
-        """Token 使用统计"""
-        ...
-    
-    async def execute(
-        self,
-        messages: List[Dict[str, Any]],
-        session_id: str,
-        intent: Optional["IntentResult"] = None,
-        enable_stream: bool = True,
-        **kwargs
-    ) -> AsyncGenerator[Dict[str, Any], None]:
-        """统一执行入口"""
-        ...
-    
-    def clone_for_session(
-        self,
-        event_manager: "EventBroadcaster",
-        workspace_dir: Optional[str] = None,
-        **kwargs
-    ) -> "AgentProtocol":
-        """从原型克隆 Session 级实例"""
-        ...
-```
-
-**核心方法**：
-| 方法 | 说明 |
-|------|------|
-| `execute()` | 统一执行入口，替代 chat() 和 _execute_dag() |
-| `clone_for_session()` | 从原型克隆 Session 级实例，性能优化 |
-
-#### AgentCoordinator 协调器
-
-`AgentCoordinator` 整合路由和工厂，提供单一执行入口：
-
-```python
-# core/agent/coordinator.py
-class AgentCoordinator:
-    """
-    Agent 协调器
-    
-    架构位置：ChatService → AgentCoordinator → Agent
-    """
-    
-    def __init__(
-        self,
-        router: Optional[AgentRouter] = None,
-        prototype_pool: Optional[Dict[str, AgentProtocol]] = None,
-        enable_prototype_cache: bool = True,
-    ):
-        ...
-    
-    async def route_and_execute(
-        self,
-        messages: List[Dict[str, Any]],
-        session_id: str,
-        event_manager: "EventBroadcaster",
-        base_schema: Optional[AgentSchema] = None,
-        prompt_cache: Optional[InstancePromptCache] = None,
-        **kwargs
-    ) -> AsyncGenerator[Dict[str, Any], None]:
-        """
-        单一执行入口：路由 → 创建 → 执行
-        
-        流程：
-        1. AgentRouter.route() → RoutingDecision
-        2. AgentFactory.create_from_decision() → Agent
-        3. agent.execute() → SSE 事件流
-        """
-        decision = await self.router.route(user_query, ...)
-        agent = await self._get_or_create_agent(decision, base_schema, ...)
-        async for event in agent.execute(messages, session_id, ...):
-            yield event
-```
-
-**V7.8 调用链**：
-```
-ChatService.chat()
-    ↓
-AgentCoordinator.route_and_execute()
-    ├── 1. AgentRouter.route() → RoutingDecision
-    ├── 2. AgentFactory.create_from_decision(base_schema) → Agent
-    └── 3. agent.execute() → SSE 事件流（AgentProtocol 统一接口）
-```
-
-#### AgentFactory 简化
-
-`AgentFactory` 职责简化为只负责创建，不包含路由逻辑：
-
-```python
-# core/agent/factory.py
-class AgentFactory:
-    @classmethod
-    async def create_from_decision(
-        cls,
-        decision: "RoutingDecision",
-        event_manager,
-        base_schema: AgentSchema = None,  # 实例级 Schema
-        prompt_cache = None,              # 分层提示词
-        **kwargs
-    ) -> "AgentProtocol":
-        """
-        从路由决策创建 Agent（V7.8 统一入口）
-        
-        核心设计：
-        1. base_schema 来自实例配置（保留工具、技能等）
-        2. 根据 complexity_score 微调运行时参数
-        3. 使用 LLM 语义建议优先，硬规则回退
-        """
-        if decision.agent_type == "multi":
-            return await cls._create_multi_agent(decision, ...)
-        else:
-            return cls._create_simple_agent(decision, base_schema, ...)
-```
-
-**关键方法**：
-| 方法 | 说明 |
-|------|------|
-| `create_from_decision()` | V7.8 统一创建入口 |
-| `_adjust_schema_for_complexity()` | 在实例 Schema 基础上微调运行时参数 |
-| `from_prompt()` | 从 System Prompt 生成 Schema（实例初始化） |
-| `from_schema()` | 从 Schema 创建 Agent |
-
-#### LLM 语义驱动的配置
-
-⚠️ **设计原则**：`complexity_score` 仅供日志/监控参考，不影响任何配置决策。
-
-**真正决定配置的字段**：
-
-| LLM 语义字段 | 影响的配置 | 说明 |
-|--------------|-----------|------|
-| `complexity` | 系统提示词分层 | simple/medium/complex → 提示词复杂度 |
-| `needs_multi_agent` | 路由决策 | 单智能体 vs 多智能体 |
-| `execution_strategy` | Agent 类型 | rvr → SimpleAgent, rvr-b → RVRBAgent |
-| `suggested_planning_depth` | plan_manager 配置 | max_steps, granularity, replan_enabled |
-| `tool_usage_hint` | tool_selector 配置 | allow_parallel, max_parallel_tools |
-
-**max_steps vs max_turns 区别**：
-
-| 参数 | 含义 | 默认值 | 由谁决定 |
-|------|------|--------|----------|
-| `max_steps` | 规划步骤数（Plan 里的 TODO 数量） | 20 | LLM `suggested_planning_depth` |
-| `max_turns` | 执行轮数（LLM 调用次数） | 30 | 固定安全上限，Agent 自主退出 |
-
-```python
-# core/agent/factory.py
-@classmethod
-def _complexity_to_schema(cls, complexity_score: float) -> AgentSchema:
-    """
-    返回统一默认配置
-    
-    complexity_score 仅供参考，不影响配置
-    实际配置由 _adjust_schema_for_complexity() 根据 LLM 语义字段调整
-    """
-    return AgentSchema(
-        name="DefaultAgent",
-        max_turns=30,  # 统一安全上限
-        plan_manager=PlanManagerConfig(
-            enabled=True,  # 工具始终可用，Agent 自主决定是否调用
-            max_steps=20,
-        ),
-        reasoning=f"默认配置（complexity_score={complexity_score:.2f} 仅供参考）"
-    )
-```
-
-#### SimpleAgent（单智能体）
+#### SimpleAgent
 
 **职责**：单智能体执行框架，实现 RVR（React + Validation + Reflection）循环。
 
-**架构演进**：
-- ✅ **V7.0**: 意图分析外置化，依赖路由层传入 `intent`
-- ✅ **V7.1**: 原型池优化，`clone_for_session()` 性能提升10-20x
-- ✅ **V7.5**: Billing 系统集成，`EnhancedUsageTracker` 统一计费
-- ✅ **V7.6**: 模块化重构，拆分为 5 个文件（Mixin 模式）
-
-**模块组成**（`core/agent/simple/`）：
-
-| 文件 | 行数 | 职责 |
-|------|------|------|
-| `simple_agent.py` | 786 | 主入口 + 初始化 + 工具选择 |
-| `simple_agent_context.py` | 270 | Prompt 构建 + Memory 检索 |
-| `simple_agent_tools.py` | 621 | 工具执行 + Plan 特判 + HITL |
-| `simple_agent_loop.py` | 447 | RVR 主循环 + 流式处理 |
-| `simple_agent_errors.py` | 114 | 错误处理工具函数 |
-
-**继承关系（Mixin 模式）**：
-```python
-class SimpleAgent(ToolExecutionMixin, RVRLoopMixin):
-    """
-    使用 Mixin 模式实现职责分离：
-    - ToolExecutionMixin: 工具执行相关方法
-    - RVRLoopMixin: RVR 主循环相关方法
-    """
-```
+**架构演进（V7）**：
+- ✅ **意图分析外置化**: 不再执行内部意图分析，完全依赖路由层传入的 `intent` 参数
+- ✅ **原型池优化**: 通过 `clone_for_session()` 从原型池浅拷贝（<5ms），性能提升10-20x
+- ✅ **RVR循环**: React + Validation + Reflection 核心循环
 
 ```python
 class SimpleAgent:
@@ -2499,45 +1614,26 @@ class SimpleAgent:
         return cloned
 ```
 
-#### MultiAgentOrchestrator（多智能体）
+#### MultiAgentOrchestrator
 
-**职责**：多智能体执行框架，支持 Leader-Worker 模式和 DAG 任务编排。
+**职责**：多智能体执行框架，支持 DAG 任务分解和并行执行。
 
-**架构特点**：
-- ✅ **独立设计**：不继承 `SimpleAgent`，完全独立实现
-- ✅ **Leader-Worker 模式**：Lead Agent (Opus) + Worker Agents (Sonnet)
-- ✅ **检查点恢复**：长时间运行任务支持故障恢复
-- ✅ **上下文隔离**：Subagent 独立上下文，减少 token 消耗
-- ✅ **Critic 评估**：V7.2 新增质量评估和改进建议
-
-**模块组成**（`core/agent/multi/`）：
-
-| 文件 | 行数 | 职责 |
-|------|------|------|
-| `orchestrator.py` | 1969 | 编排器主逻辑 + 任务分配 |
-| `lead_agent.py` | 709 | 任务分解 + 结果综合 |
-| `critic.py` | 359 | 质量评估 + 改进建议 |
-| `checkpoint.py` | 407 | 检查点管理 + 故障恢复 |
-| `models.py` | 434 | 数据模型定义 |
-
-**执行模式**：
 ```python
 # core/agent/multi/orchestrator.py
 class MultiAgentOrchestrator:
     """
-    多智能体编排器（基于 Anthropic Multi-Agent System）
+    多智能体编排器（完全独立于 SimpleAgent）
     
     设计原则：
-    - Leader (Opus) 负责规划与综合
-    - Workers (Sonnet) 负责具体执行
-    - 上下文隔离（< 500 tokens 摘要传递）
-    - 支持检查点恢复（长时间运行任务）
+    - 不继承 SimpleAgent
+    - 不调用 SimpleAgent
+    - 共享 Plan 协议，但执行模式为 dag
     """
     
     async def execute(
         self,
         user_input: str,
-        intent_result: IntentResult,
+        intent_result: IntentAnalysisResult,
     ) -> AsyncGenerator[Dict, None]:
         """
         DAG 执行流程：
@@ -2598,42 +1694,6 @@ core/context/
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-#### 已实现功能（上下文压缩/Context Editing）
-
-> 目标：保持用户无感知的前提下，提高上下文稳定性与成本可控性。
-
-- **L2 裁剪改为 Token 预算驱动**：按模型上下文窗口比例裁剪，替代按消息条数
-- **中间段摘要回注**：被裁剪内容生成结构化摘要，插入历史以降低语义断层
-- **关键消息标记保留**：任务目标/约束/决策/关键 tool_result 优先保留
-- **大工具结果压缩**：对超大 tool_result 进行摘要/截断，保留关键信息
-- **Context Editing 触发观测**：记录触发次数与策略，便于线上调优
-
-#### 失败经验总结（Failure Summary）
-
-**目标**：当对话失败/中断时生成结构化总结，用于续聊恢复与上下文压缩。  
-**实现位置**：`core/context/failure_summary.py`  
-**配置位置**：`config/context_compaction.yaml` → `failure_summary`
-
-**触发条件**：
-- 停止原因命中配置（默认：`max_turns_reached`）
-
-**生成流程**：
-1. 截取会话消息（按 `keep_recent_messages` + 字符上限）
-2. LLM 生成结构化 JSON（目标/进度/失败原因/约束/下一步等）
-3. 写入 Session 元数据，并可用于后续上下文融合
-
-**配置示例**：
-```yaml
-failure_summary:
-  enabled: true
-  trigger_on_stop_reasons:
-    - "max_turns_reached"
-  keep_recent_messages: 20
-  max_input_chars: 12000
-  max_summary_chars: 1200
-  max_block_chars: 1000
-```
-
 ### 记忆系统 (core/memory/)
 
 **三层架构**：
@@ -2673,96 +1733,6 @@ failure_summary:
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-#### Mem0 引擎：在线检索 + 抽取/更新读写分离（核心）
-
-**目标**：严格区分在线检索（读）与抽取/更新（写），与 V4 的 “按需检索” 一致，
-避免每次请求都触发写入或重计算，保证低延迟 + 可控成本。
-
-**目录结构（V7.5）**：
-```
-core/memory/mem0/
-├── retrieval/   # 在线检索（读路径）
-├── extraction/  # 碎片抽取（写路径前置）
-└── update/      # 更新阶段（写路径）
-```
-
-**在线检索（Retrieval / Read Path）**：
-```
-用户 Query
-  → Intent 分析（LLM，输出 skip_memory_retrieval）
-  → 若 skip_memory_retrieval=false：
-      → Mem0 向量检索（pool.search，在线索引）
-      → Reranker 重排（retrieval/reranker.py）
-      → Formatter 结构化（retrieval/formatter.py）
-      → 注入 System Prompt（MemoryManager.get_context_for_llm）
-```
-
-**抽取/更新（Extraction + Update / Write Path）**：
-```
-会话消息（历史记录 / 显式记忆卡片）
-  → 抽取：FragmentExtractor（extraction/extractor.py）
-  → 更新：QualityController（update/quality_control.py，LLM 决策）
-  → 写入：Mem0 Pool（pool.add / update / delete）
-  → 聚合：BehaviorAnalyzer / PDCAManager / Reminder / Reporter / PersonaBuilder
-  → 批处理：background_tasks 触发周度聚合（update/aggregator.py）
-```
-
-**与 Zenflux Agent 的关系（读写分离）**：
-- **请求路径（读）**：路由层完成意图识别 → 决策是否检索 → Mem0 在线索引检索 → Prompt 注入
-- **更新路径（写）**：对话结束或后台任务触发抽取与更新 → Mem0 写入与聚合
-- **核心原则**：读路径只做检索与格式化，写路径只做抽取/更新与聚合，互不阻塞
-
-**按需检索（与 V4 一致）**：
-- 通用问答（天气/百科/汇率）→ `skip_memory_retrieval=true`
-- 需要个性化的任务（报告/邮件/推荐/风格延续）→ `skip_memory_retrieval=false`
-- 不确定时默认检索 → `skip_memory_retrieval=false`
-
-#### 近期结构与实现更新（记忆系统）
-
-- **目录重构**：`core/memory/mem0/` 拆分为 `extraction/`、`retrieval/`、`update/`，旧的单体模块文件移除
-- **显式记忆**：新增 `schemas/explicit_memory.py`，支持记忆卡片（用户主动上传）
-- **更新决策**：`update/quality_control.py` 采用 LLM 语义判断 `ADD/UPDATE/DELETE/NONE`
-- **画像增强**：`update/persona_builder.py` 与 `retrieval/formatter.py` 注入 PDCA 细节（检查结果/行动项）
-- **检索增强**：`retrieval/reranker.py` 支持二次重排（由 `Mem0Service.search_with_rerank()` 调用）
-- **配置增强**：`mem0/config.py` 支持 `OPENAI_BASE_URL / OPENAI_API_BASE` 代理透传
-- **MemoryManager 扩展**：显式记忆卡片 CRUD + 与 Update Stage 决策联动
-
-#### 相关结构变更（上下文与文档）
-
-- **失败经验总结**：新增 `core/context/failure_summary.py` 与测试 `tests/test_core/test_failure_summary.py`，配置落在 `config/context_compaction.yaml`
-- **文档收敛**：新增 `docs/architecture/23-MEMORY-ENHANCEMENT.md` 与 `docs/guides/MEM0_GUIDE.md`，旧 `MEM0_*_GUIDE` 文档已归档/移除
-- **SimpleAgent 模块化**：`core/agent/simple/` 拆分为 `simple_agent_context.py`/`simple_agent_loop.py`/`simple_agent_tools.py` 等
-
-#### 调用流程（Mem0 读写分离）
-
-**读路径（在线检索）**：
-```
-ChatService.chat()
-  → AgentRouter.route()  # 产出 skip_memory_retrieval
-  → MemoryManager.get_context_for_llm()
-    → Mem0Pool.search(user_id, query)
-    → RetrievalReranker.rerank() (可选)
-    → RetrievalFormatter.format_*()
-  → 注入 System Prompt
-```
-
-**写路径（抽取/更新）**：
-```
-对话结束或后台任务触发
-  → FragmentExtractor.extract(messages)
-  → QualityController.update_decision(ADD/UPDATE/DELETE/NONE)
-  → Mem0Pool.add/update/delete
-  → Aggregator/PersonaBuilder/Reporter
-```
-
-#### 关键问题与逻辑说明
-
-1. **读写严格隔离**：读路径只做检索与格式化，写路径只做抽取/更新/聚合，避免阻塞在线请求。  
-2. **按需检索开关**：`skip_memory_retrieval` 由意图分析产出，通用问答默认跳过以降低延迟。  
-3. **更新阶段 LLM 驱动**：敏感信息过滤、冲突处理与记忆合并统一交由 LLM 决策，避免硬编码规则。  
-4. **显式记忆优先**：用户上传的记忆卡片直接进入 Update Stage，确保“用户显式意图”优先级。  
-5. **PDCA 注入**：PersonaBuilder/Formatter 输出检查结果与行动项，提升面向任务场景的可执行性。  
-
 ### 工具能力层 (core/tool/)
 
 **文件结构**：
@@ -2780,11 +1750,11 @@ core/tool/
     ├── registry.py         # 能力注册表
     ├── router.py           # 能力路由
     ├── invocation.py       # 能力调用
-    ├── skill_loader.py         # Skill 内容加载器
+    ├── skill_loader.py     # 技能加载器
     └── types.py            # 能力类型
 ```
 
-**工具分类**（基于 Claude Platform 接口规范）：
+**工具分类**：
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -2794,477 +1764,20 @@ core/tool/
 │  ToolLoader（统一加载器）                                               │
 │  • 类别化配置展开（sandbox_tools → 9个具体工具）                        │
 │  • 核心工具自动启用（Level 1）                                          │
-│  • Server-side / Client-side 工具统一注册                              │
+│  • 三类工具统一注册                                                     │
 │                                                                         │
-│  ┌─────────────────────────────────────────────────────────────────┐  │
-│  │ Server-side Built-in Tools（Claude 原生支持）                   │  │
-│  ├─────────────────────────────────────────────────────────────────┤  │
-│  │                                                                 │  │
-│  │  • Memory            # 记忆管理                                 │  │
-│  │  • Text Editor       # 文本编辑                                 │  │
-│  │  • Tool Search       # 工具搜索                                 │  │
-│  │  • Web Fetch         # 网页抓取                                 │  │
-│  │  • Web Search        # 网络搜索                                 │  │
-│  │  • PDF Reading       # PDF 读取（原生支持）                      │  │
-│  │                                                                 │  │
-│  └─────────────────────────────────────────────────────────────────┘  │
-│                                                                         │
-│  ┌─────────────────────────────────────────────────────────────────┐  │
-│  │ Client-side Custom Tools（客户自定义）                           │  │
-│  ├─────────────────────────────────────────────────────────────────┤  │
-│  │                                                                 │  │
-│  │  ┌──────────────────────────────────────────────────────────┐  │  │
-│  │  │ Agent Skills（Claude Skills）                             │  │  │
-│  │  ├──────────────────────────────────────────────────────────┤  │  │
-│  │  │                                                           │  │  │
-│  │  │ Pre-built Skills（Server 端默认支持）                     │  │  │
-│  │  │  • Excel (xlsx)      # 表格生成与编辑                     │  │  │
-│  │  │  • PowerPoint (pptx) # 演示文稿生成                       │  │  │
-│  │  │  • PDF (pdf)         # PDF 文档生成                       │  │  │
-│  │  │  • Word (docx)       # Word 文档生成                      │  │  │
-│  │  │                                                           │  │  │
-│  │  │ Custom Skills（客户自定义）                                │  │  │
-│  │  │  • 自定义 SKILL.md   # 客户定义的技能包                    │  │  │
-│  │  │  • scripts/          # 自定义脚本                         │  │  │
-│  │  │  • resources/        # 自定义资源                         │  │  │
-│  │  │                                                           │  │  │
-│  │  └──────────────────────────────────────────────────────────┘  │  │
-│  │                                                                 │  │
-│  │  ┌──────────────────────────────────────────────────────────┐  │  │
-│  │  │ MCP Tools（MCP 协议工具）                                 │  │  │
-│  │  ├──────────────────────────────────────────────────────────┤  │  │
-│  │  │  • text2flow        # 文本转流程图                        │  │  │
-│  │  │  • workflow         # 工作流工具                          │  │  │
-│  │  │  • dify tools       # Dify 集成工具                       │  │  │
-│  │  └──────────────────────────────────────────────────────────┘  │  │
-│  │                                                                 │  │
-│  │  ┌──────────────────────────────────────────────────────────┐  │  │
-│  │  │ Framework Built-in Tools（框架内置工具）                  │  │  │
-│  │  ├──────────────────────────────────────────────────────────┤  │  │
-│  │  │  • plan_todo        # 任务规划工具                        │  │  │
-│  │  │  • exa_search       # Exa 搜索                           │  │  │
-│  │  │  • knowledge        # 知识库检索                         │  │  │
-│  │  └──────────────────────────────────────────────────────────┘  │  │
-│  │                                                                 │  │
-│  └─────────────────────────────────────────────────────────────────┘  │
+│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐                    │
+│  │ 通用工具      │ │ MCP 工具     │ │ Skills       │                    │
+│  │ (Built-in)   │ │              │ │ (SKILL.md)   │                    │
+│  │              │ │              │ │              │                    │
+│  │ • plan_todo  │ │ • text2flow  │ │ • pptx       │                    │
+│  │ • exa_search │ │ • workflow   │ │ • xlsx       │                    │
+│  │ • knowledge  │ │ • dify tools │ │ • docx       │                    │
+│  │ • memory     │ │              │ │              │                    │
+│  └──────────────┘ └──────────────┘ └──────────────┘                    │
 │                                                                         │
 └────────────────────────────────────────────────────────────────────────┘
 ```
-
-**工具分类说明**：
-
-#### 维度 1：Server-side vs Client-side（按提供方分类）
-
-| 分类维度 | Server-side Built-in | Client-side Custom |
-|---------|---------------------|-------------------|
-| **提供方** | Claude Platform 原生 | 客户/框架自定义 |
-| **配置方式** | 无需配置，自动可用 | 需要显式配置和注册 |
-| **典型工具** | Memory, Web Search, PDF Reading | Skills (xlsx/pptx/docx), MCP Tools, Framework Tools |
-| **扩展性** | 固定，由 Claude 提供 | 可自定义扩展 |
-| **使用场景** | 通用能力（记忆、搜索、文档读取） | 业务特定能力（文档生成、工作流、领域知识） |
-
-#### 维度 2：框架内置 vs 运营可配置（按配置方式分类）
-
-| 分类维度 | 框架内置通用工具 | 运营可配置工具 |
-|---------|----------------|---------------|
-| **配置位置** | `config.yaml` → `enabled_capabilities` | `instances/{name}/config.yaml` + 资源目录 |
-| **配置方式** | 启用/禁用开关（0/1） | 完整配置（URL、认证、文档） |
-| **典型工具** | plan_todo, exa_search, knowledge_search, sandbox_* | MCP Tools, REST APIs, Custom Skills |
-| **扩展性** | 框架提供，运营选择 | 运营自定义创建 |
-| **维护责任** | 框架维护 | 运营维护 |
-| **配置示例** | `enabled_capabilities: { plan_todo: 1 }` | `mcp_tools: [{ name: "...", server_url: "..." }]` |
-
-**框架内置通用工具**（`enabled_capabilities`）：
-- **内容生成类**：pptx, xlsx, docx, pdf（Claude Pre-built Skills）
-- **信息获取类**：web_search, exa_search, knowledge_search
-- **数据处理类**：sandbox_*（9个沙盒工具）
-- **核心工具**：plan_todo, api_calling, file_read, code_execution
-
-**运营可配置工具**（实例级配置）：
-- **MCP Tools**：通过 `mcp_tools` 配置，连接外部 MCP 服务器
-- **REST APIs**：通过 `apis` 配置 + `api_desc/` 文档，接入第三方 API
-- **Custom Skills**：在 `skills/` 目录创建，通过 `skill_registry.yaml` 注册
-
-**Skills 特别说明**：
-- **Pre-built Skills**：Claude 官方提供的预置 Skills（xlsx/pptx/docx/pdf），Server 端默认支持，无需上传 SKILL.md 即可使用
-- **Custom Skills**：客户自定义的 Skills，需要提供 SKILL.md 和相关资源文件，由客户维护
-- **Skills vs Tools**：Skills 是更高级的抽象，包含指令、代码和资源；Tools 是单一功能接口
-
----
-
-#### 工具选择三级优化
-
-**优化目标**：增强工具选择的**健壮性**、**可观测性**和**可调试性**。
-
-##### 1. Schema 工具有效性验证
-
-**问题**：Schema 配置的工具名称可能无效（拼写错误、工具不存在），导致运行时失败。
-
-**优化**：
-```python
-# core/agent/simple/simple_agent.py L806-819
-if self.schema.tools:
-    valid_tools = []
-    invalid_tools = []
-    for tool_name in self.schema.tools:
-        if self.capability_registry.get(tool_name) or tool_name in self.tool_selector.NATIVE_TOOLS:
-            valid_tools.append(tool_name)
-        else:
-            invalid_tools.append(tool_name)
-    
-    if invalid_tools:
-        logger.warning(
-            f"⚠️ Schema 配置了无效工具: {invalid_tools}，已自动过滤。"
-            f"有效工具: {valid_tools}"
-        )
-    required_capabilities = valid_tools
-```
-
-**效果**：
-- ✅ 自动过滤无效工具，避免运行时错误
-- ✅ 清晰的警告日志，方便运营排查配置问题
-- ✅ 显示可用工具列表，辅助运营修正配置
-
-##### 2. 覆盖透明化日志
-
-**问题**：当 Schema 覆盖 Plan/Intent 的工具建议时，缺乏可见性，难以判断是否需要调整配置。
-
-**优化**：
-```python
-# core/agent/simple/simple_agent.py L824-832
-if not use_skill_path:
-    selection_source = "schema"
-    # 记录被覆盖的内容
-    if plan_capabilities:
-        overridden_sources.append(f"plan:{plan_capabilities[:3]}")
-    if intent_capabilities:
-        overridden_sources.append(f"intent:{intent_capabilities[:3]}")
-    if overridden_sources:
-        logger.info(
-            f"📋 Schema 工具优先: {valid_tools}，覆盖了 {overridden_sources}"
-        )
-```
-
-**效果**：
-- ✅ 明确记录哪些建议被覆盖，增强决策透明度
-- ✅ 方便评估 Schema 配置是否合理
-- ✅ 辅助调试：当任务失败时，可快速定位是否因工具缺失
-
-**示例日志**：
-```
-📋 Schema 工具优先: ['web_search']，覆盖了 ["plan:['e2b_sandbox', 'ppt_generator']", "intent:['e2b_sandbox', 'ppt_generator']"]
-```
-
-##### 3. Tracer 增强追踪
-
-**问题**：E2E Pipeline Tracer 缺少工具选择的详细上下文，难以回溯决策过程。
-
-**优化**：
-```python
-# core/agent/simple/simple_agent.py L924-941
-if self._tracer:
-    tool_stage.set_input({
-        "schema_tools": self.schema.tools if self.schema.tools else [],
-        "plan_capabilities": plan_capabilities[:5] if plan_capabilities else [],
-        "intent_capabilities": intent_capabilities[:5] if intent_capabilities else [],
-        "selection_source": selection_source,
-        "use_skill_path": use_skill_path
-    })
-    tool_stage.complete({
-        "tool_count": len(selection.tool_names),
-        "tools": selection.tool_names[:8],
-        "base_tools": selection.base_tools,
-        "dynamic_tools": selection.dynamic_tools[:5],
-        "overridden_sources": overridden_sources,
-        "invocation_type": invocation_strategy.type.value if invocation_strategy else "skill",
-        "final_source": selection_source
-    })
-```
-
-**效果**：
-- ✅ 完整记录三层建议（Schema/Plan/Intent）
-- ✅ 记录最终选择来源和理由
-- ✅ 记录是否发生覆盖，以及覆盖的内容
-- ✅ 支持离线分析：导出 Tracer 数据后可批量分析工具选择模式
-
-##### 优化总结
-
-| 优化项 | 优化前 | 优化后 | 价值 |
-|--------|--------|--------|------|
-| **Schema 验证** | 无效工具导致运行时错误 | 自动过滤 + 警告日志 | 🔧 健壮性提升 |
-| **覆盖透明化** | 覆盖逻辑不可见 | 明确记录覆盖内容 | 👁️ 可观测性提升 |
-| **Tracer 增强** | 只记录最终结果 | 记录完整决策过程 | 🐛 可调试性提升 |
-
-**测试覆盖**：
-- ✅ `tests/test_v76_validation.py`：单元测试验证三项优化
-- ✅ 通过率：3/3 (100%)
-
----
-
-#### 🆕 工具系统完整调用链
-
-本节详细梳理工具系统的完整调用链，包括工具分类、加载流程、执行路径和待优化问题。
-
-##### 1. 工具分类体系（基于部署态配置）
-
-工具系统以 `instances/{agent_id}/config.yaml` 为核心配置文件，分为以下三类：
-
-```
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                          工具分类体系（基于部署态配置）                              │
-├─────────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                      │
-│  ╔═══════════════════════════════════════════════════════════════════════════════╗  │
-│  ║  1. Claude Skills（特殊机制，与普通工具完全不同）                              ║  │
-│  ╠═══════════════════════════════════════════════════════════════════════════════╣  │
-│  ║  配置段：skills（引用 skill_registry.yaml）                                    ║  │
-│  ║                                                                               ║  │
-│  ║  特殊性：                                                                      ║  │
-│  ║  • 走 container.skills 机制，不是普通 tools                                   ║  │
-│  ║  • Skills 模式下 tools 只能是 [code_execution]（官方标准）                    ║  │
-│  ║  • 需要 beta headers: skills-2025-10-02, files-api-2025-04-14                 ║  │
-│  ║  • 执行环境：Anthropic Skills Container（沙箱隔离）                           ║  │
-│  ║  • 🔴 与普通工具模式互斥，不能同时使用                                        ║  │
-│  ║                                                                               ║  │
-│  ║  来源：                                                                        ║  │
-│  ║  • Anthropic 预构建：pptx, xlsx, docx, pdf                                    ║  │
-│  ║  • 系统自定义：skills/custom_claude_skills/ → 注册到 Anthropic                ║  │
-│  ║  • 运营级：instances/xxx/skills/ → skill_registry.yaml                        ║  │
-│  ╚═══════════════════════════════════════════════════════════════════════════════╝  │
-│                                                                                      │
-│  ┌───────────────────────────────────────────────────────────────────────────────┐  │
-│  │  2. 系统默认工具（enabled_capabilities）                                       │  │
-│  ├───────────────────────────────────────────────────────────────────────────────┤  │
-│  │  配置段：enabled_capabilities: { tool_name: 1/0 }                              │  │
-│  │                                                                               │  │
-│  │  类型：                                                                        │  │
-│  │  • 核心工具（Level 1）：plan_todo, request_human_confirmation（自动启用）     │  │
-│  │  • 动态工具（Level 2）：web_search, exa_search, knowledge_search 等           │  │
-│  │  • 沙盒工具（sandbox_tools）：sandbox_write_file, sandbox_run_command 等      │  │
-│  │  • Claude 原生：bash, text_editor, web_search（NATIVE_TOOLS）                 │  │
-│  │                                                                               │  │
-│  │  来源：config/capabilities.yaml                                               │  │
-│  │  过滤：运营通过 enabled_capabilities 启用/禁用                                 │  │
-│  └───────────────────────────────────────────────────────────────────────────────┘  │
-│                                                                                      │
-│  ┌───────────────────────────────────────────────────────────────────────────────┐  │
-│  │  3. 运营个性化工具（mcp_tools + apis）                                         │  │
-│  ├───────────────────────────────────────────────────────────────────────────────┤  │
-│  │  配置段：mcp_tools, apis                                                       │  │
-│  │                                                                               │  │
-│  │  MCP 工具：                                                                    │  │
-│  │  • 连接外部 MCP 服务器（如 Dify、Coze）                                       │  │
-│  │  • 通过 mcp_client 调用                                                        │  │
-│  │  • 命名空间化：{server}_{toolname}                                            │  │
-│  │                                                                               │  │
-│  │  REST APIs：                                                                   │  │
-│  │  • 通过 api_calling 工具调用                                                   │  │
-│  │  • 配置：base_url + auth + doc                                                │  │
-│  │  • 文档：api_desc/{doc}.md                                                    │  │
-│  └───────────────────────────────────────────────────────────────────────────────┘  │
-│                                                                                      │
-└─────────────────────────────────────────────────────────────────────────────────────┘
-```
-
-##### 2. Claude Skills vs 普通工具（关键区分）
-
-**这是最重要的架构区分点**：
-
-| 维度 | 普通工具模式 | Skills 模式 |
-|------|-------------|-------------|
-| **API 参数** | `tools: [tool_1, tool_2, ...]` | `container: { skills: [...] }` + `tools: [code_execution]` |
-| **执行方式** | Claude 选择工具 → tool_use → 我们执行 → tool_result | Claude 使用 code_execution → Skills Container 内部执行 |
-| **交互模式** | 多轮往返 | 一次完成，流式输出 |
-| **适用场景** | 通用工具调用、需要精确控制 | 文档生成（pptx/xlsx/docx/pdf）、复杂工作流 |
-| **互斥性** | 🔴 两种模式互斥，不能同时使用 | |
-
-```python
-# 普通工具模式
-request_params = {
-    "tools": [
-        {"name": "web_search", ...},
-        {"name": "plan_todo", ...}
-    ]
-}
-
-# Skills 模式（core/llm/claude.py L1115-1127）
-if self._skills_enabled and self._skills_container:
-    request_params["container"] = self._skills_container
-    request_params["tools"] = [
-        {"type": "code_execution_20250825", "name": "code_execution"}
-    ]  # Skills 标准要求：tools 只能是 code_execution
-```
-
-##### 3. 工具加载流程（部署态配置驱动）
-
-```
-instance_loader.load_instance()
-       │
-       ├─→ load_instance_config()  ← instances/{agent_id}/config.yaml
-       │       │
-       │       ├─→ enabled_capabilities: { web_search: 1, exa_search: 0 }
-       │       ├─→ mcp_tools: [...]
-       │       ├─→ apis: [...]
-       │       └─→ skills: [...] (引用 skill_registry.yaml)
-       │
-       ├─→ tool_loader.load_tools(enabled_capabilities, mcp_tools, skills)
-       │       │
-       │       ├─→ 1. 加载 CORE_TOOLS（自动启用，无需配置）
-       │       ├─→ 2. 按 enabled_capabilities 过滤 capabilities.yaml
-       │       ├─→ 3. 加载 Skills 配置
-       │       └─→ 4. 返回 filtered_registry
-       │
-       ├─→ create_filtered_registry(enabled_capabilities)
-       │       └─→ 只包含启用的工具
-       │
-       ├─→ _register_mcp_tools(agent, mcp_tools, instance_registry)
-       │       └─→ 连接 MCP 服务器，注册到 InstanceToolRegistry
-       │
-       └─→ llm.enable_skills(skills_to_enable)
-               └─→ 启用 container.skills
-```
-
-##### 4. 工具执行流程
-
-```
-SimpleAgent._run_rvr_loop()
-       │
-       └─→ _handle_tool_calls(response)
-               │
-               ├─→ 分离 client_tools / server_tools
-               │
-               └─→ _execute_tools_stream(client_tools)
-                       │
-                       ├─→ 分离 stream_tools / normal_tools
-                       │
-                       ├─→ _execute_tools_core(normal_tools)  ⚡ 并行执行
-                       │       │
-                       │       ├─→ 分离 parallel / serial 工具
-                       │       │       • serial: plan_todo, request_human_confirmation
-                       │       │
-                       │       └─→ asyncio.gather(*[_execute_single_tool(...)])
-                       │
-                       └─→ _execute_single_tool(tool_call)
-                               │
-                               ├─→ tool_name == "plan_todo"?
-                               │       └─→ _execute_plan_todo()
-                               │
-                               ├─→ tool_name == "request_human_confirmation"?
-                               │       └─→ _handle_human_confirmation()
-                               │
-                               └─→ tool_executor.execute(tool_name, tool_input)
-                                       │
-                                       ├─→ CLAUDE_SERVER_TOOLS? (web_search, code_execution, memory)
-                                       │       └─→ 返回 handled_by: anthropic_server
-                                       │
-                                       ├─→ CLAUDE_CLIENT_TOOLS? (bash, text_editor)
-                                       │       └─→ _execute_client_tool() → E2B Sandbox
-                                       │
-                                       ├─→ _tool_handlers[name]?
-                                       │       └─→ handler(tool_input)
-                                       │
-                                       └─→ _tool_instances[name]?
-                                               └─→ instance.execute(**input)
-                                               └─→ _maybe_compact(result)  ← 结果精简
-```
-
-##### 5. InvocationSelector 与 E2B 沙箱的冲突
-
-**InvocationSelector** 定义了 5 种调用策略，但目前主要使用 DIRECT：
-
-| 策略 | 状态 | 说明 |
-|------|------|------|
-| **DIRECT** | ✅ 实际使用 | 标准工具调用 |
-| **CODE_EXECUTION** | ⚠️ 与 E2B 冲突 | Anthropic code_execution 无网络/包受限 |
-| **PROGRAMMATIC** | ⚠️ 与 E2B 冲突 | 依赖 code_execution |
-| **STREAMING** | ❌ 未实现执行路径 | 大参数流式传输 |
-| **TOOL_SEARCH** | ⚠️ 未完成集成 | 工具数量 >30 时动态发现 |
-
-**冲突原因**：
-
-| Anthropic code_execution | E2B Sandbox |
-|--------------------------|-------------|
-| Anthropic 托管沙箱 | 我们自建沙箱 |
-| ❌ 无网络访问 | ✅ 完整网络访问 |
-| ❌ 包安装受限 | ✅ 任意包安装 |
-| ❌ 无文件持久化 | ✅ 文件持久化 |
-| ❌ 执行时间受限 | ✅ 长时间执行 |
-
-**当前解决方案**（invocation.py L180-192）：
-```python
-# E2B 工具强制 DIRECT，不能被 CODE_EXECUTION 替代
-e2b_tools_in_selection = [t for t in selected_tools if t in self.E2B_SANDBOX_TOOLS]
-if e2b_tools_in_selection:
-    return InvocationStrategy(type=InvocationType.DIRECT, ...)
-```
-
-##### 6. TOOL_SEARCH 场景和价值
-
-**TOOL_SEARCH** 是 Anthropic 原生元工具，用于动态发现工具：
-
-| 场景 | 问题 | 解决方案 |
-|------|------|----------|
-| 工具数量 > 30 | 工具定义占用大量 context，成本高、响应慢 | defer_loading=true，仅加载常用工具 |
-| 动态工具库 | MCP 工具动态变化，无法预知全部工具 | 通过 tool_search 让 Claude 查找 |
-| 多租户隔离 | 不同用户有不同工具集 | 统一工具池 + tool_search 动态过滤 |
-
-**价值**：
-- 降低 token 成本：工具定义从 ~5KB/工具 → 仅加载常用 5-10 个
-- 提高响应速度：减少 context 大小
-- 提升准确性：Claude 主动搜索比被动匹配更精准
-
-**当前状态**：
-- ✅ ClaudeService 已实现 `enable_tool_search()` 方法
-- ✅ InvocationSelector 已定义 `TOOL_SEARCH_THRESHOLD = 30`
-- ⚠️ 实际执行路径未完成（select_strategy 后没有分发到 tool_search 模式）
-
-##### 7. UnifiedToolCaller 价值和优化方向
-
-**当前职责**：
-- `ensure_skill_fallback()`：当模型不支持 Skills 时，注入 fallback_tool
-- `get_fallback_tool_for_skill()`：获取 Skill 对应的降级工具
-
-**设计意图**：Skills 模式和普通工具模式互斥，但业务需求不应受此限制：
-- 用户请求"生成 PPT" → 首选 pptx Skill
-- 如果模型不支持 Skills → 自动降级到 slidespeak_render 工具
-
-**优化建议**：扩展职责，真正统一协调 Skills/Tools/MCP 的选择和执行：
-
-```python
-class UnifiedToolCaller:
-    """统一工具调用协调器"""
-    
-    def select_execution_mode(self, intent, plan) -> ExecutionMode:
-        """决定使用 Skills 模式还是 Tools 模式"""
-        if self._should_use_skills(intent, plan):
-            return ExecutionMode.SKILLS
-        else:
-            return ExecutionMode.TOOLS
-    
-    def prepare_tools_for_llm(self, mode, required_caps) -> List[Tool]:
-        """根据模式准备工具列表"""
-        if mode == ExecutionMode.SKILLS:
-            return [code_execution_tool]  # Skills 标准
-        else:
-            return self._select_tools(required_caps)
-    
-    def ensure_fallback(self, ...):
-        """现有的 fallback 逻辑"""
-        ...
-```
-
-##### 8. 待优化问题清单
-
-| 优先级 | 问题 | 现状 | 优化方向 |
-|--------|------|------|----------|
-| P0 | 部署态配置驱动工具选择 | ✅ 已实现 | - |
-| P1 | Skills/Tools 模式切换决策 | 分散在 SimpleAgent | 集中到 UnifiedToolCaller |
-| P1 | MCP 工具执行路径 | InstanceToolRegistry 注册后，ToolExecutor 需要能执行 | 扩展 ToolExecutor |
-| P2 | TOOL_SEARCH 执行路径 | 策略选择后无分发 | 完善执行路径 |
-| P2 | InvocationSelector 其他策略 | 受 E2B 冲突限制 | 明确边界，文档化 |
-| P3 | UnifiedToolCaller 职责扩展 | 仅做 fallback | 统一协调 Skills/Tools |
-
----
 
 ### LLM 适配层 (core/llm/)
 
@@ -3301,695 +1814,6 @@ prompt_decomposer:
   max_tokens: 60000
   temperature: 0
   timeout: 300.0
-
-# 记忆更新阶段（语义判断）
-memory_update:
-  model: "claude-haiku-4-5-20251001"
-  max_tokens: 1024
-  temperature: 0
-  enable_thinking: false
-  enable_caching: false
-  timeout: 30.0
-```
-
-#### Claude Context Editing（服务端自动清理）
-
-**目标**：在不影响用户体验的前提下，控制上下文规模并提升缓存命中率。  
-**实现位置**：`core/llm/claude.py` → `enable_context_editing()` / `create_message_stream()`
-
-**核心流程**：
-1. LLM 服务启用 `context_management`，由 Claude 服务端执行清理策略  
-2. 根据是否启用 Prompt Caching 自动计算 `clear_at_least`  
-3. 默认排除服务端工具结果（`web_search`, `web_fetch`）  
-4. 流式请求自动走 `beta.messages.stream` 以支持 Context Editing
-
-**策略配置（简化）**：
-```python
-llm.enable_context_editing(
-    clear_tool_uses=True,
-    clear_thinking=False,
-    trigger_threshold=None,  # 按模型上下文窗口比例自动计算（默认 70%）
-    keep_tool_uses=10,
-    clear_at_least=None,   # 自动计算
-    exclude_tools=["web_search", "web_fetch"],
-    keep_all_thinking=False
-)
-```
-
-### 回溯系统 (core/agent/backtrack/)
-
-**文件结构**：
-```
-core/agent/backtrack/
-├── __init__.py
-├── error_classifier.py     # 错误层级分类器
-└── manager.py              # 回溯决策管理器
-```
-
-**核心组件**：
-
-#### ErrorClassifier - 错误层级分类
-
-```python
-# core/agent/backtrack/error_classifier.py
-
-class ErrorLayer(Enum):
-    INFRASTRUCTURE = "infrastructure"  # Layer 1: 基础设施层
-    BUSINESS_LOGIC = "business_logic"  # Layer 2: 业务逻辑层
-    UNKNOWN = "unknown"
-
-class ErrorCategory(Enum):
-    # Layer 1: 基础设施层错误
-    API_TIMEOUT = "api_timeout"
-    RATE_LIMIT = "rate_limit"
-    SERVICE_UNAVAILABLE = "service_unavailable"
-    NETWORK_ERROR = "network_error"
-    
-    # Layer 2: 业务逻辑层错误
-    PLAN_INVALID = "plan_invalid"
-    TOOL_MISMATCH = "tool_mismatch"
-    RESULT_UNSATISFACTORY = "result_unsatisfactory"
-    PARAMETER_ERROR = "parameter_error"
-
-class BacktrackType(Enum):
-    PLAN_REPLAN = "plan_replan"       # Plan 重规划
-    TOOL_REPLACE = "tool_replace"     # 工具替换
-    PARAM_ADJUST = "param_adjust"     # 参数调整
-    INTENT_CLARIFY = "intent_clarify" # 意图澄清
-    NO_BACKTRACK = "no_backtrack"     # 不需要回溯
-
-@dataclass
-class ClassifiedError:
-    original_error: Exception
-    layer: ErrorLayer
-    category: ErrorCategory
-    backtrack_type: BacktrackType
-    is_retryable: bool
-    confidence: float
-    suggested_action: str
-```
-
-**分类规则**：
-
-| 错误特征 | Layer | Category | 处理策略 |
-|----------|-------|----------|----------|
-| API 超时/Rate Limit | L1 | api_timeout/rate_limit | 重试/降级 |
-| 服务不可用 | L1 | service_unavailable | 主备切换 |
-| "无法找到相关信息" | L2 | tool_mismatch | 工具替换 |
-| "参数不正确" | L2 | parameter_error | 参数调整 |
-| "结果不满足需求" | L2 | result_unsatisfactory | 重规划 |
-
-#### BacktrackManager - 回溯决策管理
-
-```python
-# core/agent/backtrack/manager.py
-
-@dataclass
-class BacktrackResult:
-    action: BacktrackAction      # CONTINUE / RETRY_ALTERNATIVE / ABORT
-    alternative_tool: Optional[str]
-    adjusted_params: Optional[Dict]
-    reasoning: str
-    confidence: float
-
-class BacktrackManager:
-    async def evaluate(
-        self,
-        error: ClassifiedError,
-        state: RVRBState,
-        available_tools: List[str]
-    ) -> BacktrackResult:
-        """LLM 驱动的回溯决策"""
-        ...
-```
-
-### 护栏系统 (core/guardrails/)
-
-**文件结构**：
-```
-core/guardrails/
-├── __init__.py
-└── adaptive.py             # 自适应护栏
-```
-
-**核心组件**：
-
-```python
-# core/guardrails/adaptive.py
-
-@dataclass
-class GuardrailConfig:
-    base_limits: Dict[str, int] = field(default_factory=lambda: {
-        "max_turns": 10,
-        "max_tokens": 50000,
-        "max_tool_calls": 30,
-        "max_time_seconds": 300,
-        "max_depth": 5
-    })
-    complexity_multipliers: Dict[str, float] = field(default_factory=lambda: {
-        "simple": 0.5, "medium": 1.0, "complex": 1.5
-    })
-    tier_multipliers: Dict[str, float] = field(default_factory=lambda: {
-        "FREE": 0.5, "PRO": 1.0, "ENTERPRISE": 2.0
-    })
-
-class AdaptiveGuardrails:
-    def __init__(self, config: GuardrailConfig = None):
-        self.config = config or GuardrailConfig()
-        
-    def set_context(self, complexity_level: str, user_tier: str):
-        """设置复杂度和用户等级"""
-        ...
-        
-    def check_turns(self) -> GuardrailCheckResult:
-        """检查轮数限制"""
-        ...
-        
-    def check_all(self) -> List[GuardrailCheckResult]:
-        """检查所有限制"""
-        ...
-        
-    def suggest_adjustments(self) -> Dict[str, Any]:
-        """建议资源调整"""
-        ...
-```
-
-**资源限制计算**：
-
-```
-effective_limit = base_limit × complexity_multiplier × tier_multiplier
-
-示例：复杂任务 + PRO 用户
-max_turns = 10 × 1.5 × 1.0 = 15 turns
-max_tokens = 50000 × 1.5 × 1.0 = 75000 tokens
-```
-
-#### 护栏机制的核心价值
-
-| 价值维度 | 说明 | 收益 |
-|----------|------|------|
-| **成本控制** | 根据用户等级动态限制资源使用 | 防止滥用，保护系统资源 |
-| **用户体验** | 避免死循环、无限递归等异常 | 快速失败，及时反馈 |
-| **公平性** | FREE/PRO/ENTERPRISE 差异化限制 | 商业模式支撑，促进付费转化 |
-| **自适应** | 根据任务复杂度自动调整 | 简单任务快速返回，复杂任务充分资源 |
-| **可观测性** | 实时监控资源使用趋势 | 提前预警，优化容量规划 |
-
-#### 与 ZenFlux 智能体的集成
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                     护栏系统集成架构（V8.0）                                 │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│   Phase 1: 路由阶段 - 护栏配置初始化                                         │
-│   ────────────────────────────────────────────────────────────────          │
-│                                                                              │
-│   IntentAnalyzer.analyze()                                                  │
-│       ↓                                                                     │
-│   IntentResult (complexity: MEDIUM, task_type: "data_analysis")             │
-│       ↓                                                                     │
-│   AgentRouter.route()                                                       │
-│       │                                                                     │
-│       ├─→ 获取 user_tier: "PRO"                                             │
-│       │                                                                     │
-│       └─→ create_adaptive_guardrails(                                       │
-│               complexity_level="medium",                                    │
-│               user_tier="PRO"                                               │
-│           )                                                                 │
-│           ↓                                                                 │
-│   ┌──────────────────────────────────────┐                                 │
-│   │ GuardrailConfig:                     │                                 │
-│   │   max_turns: 10 × 1.0 × 1.0 = 10     │                                 │
-│   │   max_tokens: 50000 × 1.0 × 1.0 = 50k│                                 │
-│   │   max_tool_calls: 30 × 1.0 × 1.0 = 30│                                 │
-│   └──────────────────────────────────────┘                                 │
-│       ↓                                                                     │
-│   RoutingDecision (包含 guardrail_config)                                   │
-│                                                                              │
-│   Phase 2: Agent 创建 - 护栏注入                                             │
-│   ────────────────────────────────────────────                              │
-│                                                                              │
-│   AgentFactory.create_from_decision(decision)                               │
-│       ↓                                                                     │
-│   SimpleAgent / RVRBAgent (                                                 │
-│       schema=...,                                                           │
-│       guardrails=decision.guardrail_config  ← 注入护栏配置                  │
-│   )                                                                         │
-│                                                                              │
-│   Phase 3: 执行阶段 - 护栏检查与执行                                         │
-│   ─────────────────────────────────────────────                             │
-│                                                                              │
-│   SimpleAgent._run_rvr_loop()                                               │
-│       │                                                                     │
-│       ├─ Turn 1                                                             │
-│       │   ├─→ guardrails.record_turn()                                     │
-│       │   ├─→ guardrails.check_turns()                                     │
-│       │   │      ↓                                                          │
-│       │   │   GuardrailCheckResult(                                         │
-│       │   │       action=ALLOW,                                             │
-│       │   │       current=1, limit=10                                       │
-│       │   │   )                                                             │
-│       │   ├─→ LLM.generate()                                                │
-│       │   │   ├─→ guardrails.record_tokens(input=1500, output=500)         │
-│       │   │   └─→ guardrails.check_tokens()  → ALLOW                       │
-│       │   └─→ Tool.execute()                                                │
-│       │       ├─→ guardrails.record_tool_call("web_search")                │
-│       │       └─→ guardrails.check_tool_calls()  → ALLOW                   │
-│       │                                                                     │
-│       ├─ Turn 2-9 (同上)                                                    │
-│       │                                                                     │
-│       └─ Turn 10                                                            │
-│           ├─→ guardrails.check_turns()                                     │
-│           │      ↓                                                          │
-│           │   GuardrailCheckResult(                                         │
-│           │       action=WARN,  ← 达到限制                                 │
-│           │       message="已达最大轮数限制"                                │
-│           │   )                                                             │
-│           └─→ 智能体主动终止并返回结果                                      │
-│                                                                              │
-│   Phase 4: 异常处理 - 护栏触发                                               │
-│   ──────────────────────────────────────                                    │
-│                                                                              │
-│   if guardrails.check_tokens().action == DENY:                              │
-│       ↓                                                                     │
-│   发出 SSE 事件:                                                            │
-│       event: "guardrail_triggered"                                          │
-│       data: {                                                               │
-│           limit_type: "max_tokens",                                         │
-│           current: 52000,                                                   │
-│           limit: 50000,                                                     │
-│           suggestion: "升级到 ENTERPRISE 以获得更高限制"                     │
-│       }                                                                     │
-│       ↓                                                                     │
-│   raise GuardrailException("Token 限制已达")                                │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-#### 调用关系详解
-
-**1. 初始化阶段**：
-
-```python
-# core/routing/router.py
-class AgentRouter:
-    async def route(self, user_query: str, context: RuntimeContext) -> RoutingDecision:
-        # 1. 意图分析
-        intent = await self.intent_analyzer.analyze(user_query, ...)
-        
-        # 2. 创建护栏配置
-        guardrails = create_adaptive_guardrails(
-            complexity_level=intent.complexity.value.lower(),  # "simple"/"medium"/"complex"
-            user_tier=context.user_tier  # "FREE"/"PRO"/"ENTERPRISE"
-        )
-        
-        # 3. 返回决策（包含护栏）
-        return RoutingDecision(
-            agent_type=...,
-            execution_strategy=...,
-            guardrail_config=guardrails  # ← 传递护栏配置
-        )
-```
-
-**2. Agent 创建阶段**：
-
-```python
-# core/agent/factory.py
-class AgentFactory:
-    @classmethod
-    def _create_simple_agent(cls, decision: RoutingDecision, ...) -> AgentProtocol:
-        # 从决策中获取护栏配置
-        guardrails = decision.guardrail_config
-        
-        # 注入到 Agent
-        if decision.execution_strategy == "rvr-b":
-            return RVRBAgent(
-                schema=schema,
-                guardrails=guardrails,  # ← 注入护栏
-                max_backtracks=3,
-                ...
-            )
-        else:
-            return SimpleAgent(
-                schema=schema,
-                guardrails=guardrails,  # ← 注入护栏
-                ...
-            )
-```
-
-**3. 执行阶段检查**：
-
-```python
-# core/agent/simple/simple_agent_loop.py
-class SimpleAgent:
-    async def _run_rvr_loop(self, ...) -> AsyncGenerator:
-        turn = 0
-        while turn < self.schema.max_turns:
-            # ✅ 检查轮数限制
-            check_result = self.guardrails.check_turns()
-            if check_result.action == GuardrailAction.DENY:
-                yield {
-                    "event": "guardrail_triggered",
-                    "data": {
-                        "limit_type": "max_turns",
-                        "current": turn,
-                        "limit": check_result.limit,
-                        "suggestion": check_result.suggestion
-                    }
-                }
-                break
-            
-            # ✅ 记录轮数
-            self.guardrails.record_turn()
-            
-            # LLM 调用
-            async for chunk in llm_client.create_stream(...):
-                if chunk.usage:
-                    # ✅ 记录 Token 使用
-                    self.guardrails.record_tokens(
-                        chunk.usage.input_tokens,
-                        chunk.usage.output_tokens
-                    )
-                    
-                    # ✅ 检查 Token 限制
-                    token_check = self.guardrails.check_tokens()
-                    if token_check.action == GuardrailAction.DENY:
-                        yield {"event": "guardrail_triggered", ...}
-                        break
-            
-            # 工具调用
-            if tool_name:
-                # ✅ 记录工具调用
-                self.guardrails.record_tool_call(tool_name)
-                
-                # ✅ 检查工具调用次数
-                tool_check = self.guardrails.check_tool_calls()
-                if tool_check.action == GuardrailAction.DENY:
-                    yield {"event": "guardrail_triggered", ...}
-                    break
-            
-            turn += 1
-```
-
-**4. 多智能体集成**：
-
-```python
-# core/agent/multi/orchestrator.py
-class MultiAgentOrchestrator:
-    async def execute(self, ...) -> AsyncGenerator:
-        # 1. 初始化全局护栏
-        self.guardrails.start_session()
-        
-        # 2. DAG 调度执行
-        async for step in dag_scheduler.execute(plan):
-            # ✅ 检查深度限制（防止递归过深）
-            depth_check = self.guardrails.check_depth()
-            if depth_check.action == GuardrailAction.DENY:
-                yield {"event": "guardrail_triggered", ...}
-                break
-            
-            # ✅ 记录深度
-            self.guardrails.record_depth(step.depth)
-            
-            # 执行子 Agent
-            result = await self._execute_single_step(step)
-            
-            # ✅ 累计 Token 使用
-            self.guardrails.record_tokens(
-                result.tokens_input,
-                result.tokens_output
-            )
-```
-
-#### 护栏触发示例
-
-**示例 1：FREE 用户达到轮数限制**
-
-```json
-{
-  "event": "guardrail_triggered",
-  "data": {
-    "limit_type": "max_turns",
-    "current": 5,
-    "limit": 5,
-    "suggestion": "升级到 PRO 用户以获得 10 轮对话限制",
-    "upgrade_url": "/pricing"
-  }
-}
-```
-
-**示例 2：复杂任务超出 Token 预算**
-
-```json
-{
-  "event": "guardrail_triggered",
-  "data": {
-    "limit_type": "max_tokens",
-    "current": 76000,
-    "limit": 75000,
-    "suggestion": "任务已接近完成，建议简化剩余步骤",
-    "usage_stats": {
-      "turns": 12,
-      "tool_calls": 18,
-      "tokens": 76000
-    }
-  }
-}
-```
-
-#### 运营可配置
-
-护栏配置支持运营侧动态调整：
-
-```yaml
-# config/guardrail_config.yaml
-base_limits:
-  max_turns: 10
-  max_tokens: 50000
-  max_tool_calls: 30
-  max_time_seconds: 300
-  max_depth: 5  # 多智能体递归深度
-
-complexity_multipliers:
-  simple: 0.5
-  medium: 1.0
-  complex: 1.5
-
-tier_multipliers:
-  FREE: 0.5
-  PRO: 1.0
-  ENTERPRISE: 2.0
-  
-# 特殊场景覆盖
-overrides:
-  - condition:
-      task_type: "code_development"
-      user_tier: "ENTERPRISE"
-    limits:
-      max_turns: 50  # 代码任务需要更多轮数
-```
-
----
-
-### 策略库 (core/playbook/)
-
-**文件结构**：
-```
-core/playbook/
-├── __init__.py
-└── manager.py              # 策略库管理器
-```
-
-**核心组件**：
-
-```python
-# core/playbook/manager.py
-
-class PlaybookStatus(Enum):
-    DRAFT = "draft"
-    PENDING_REVIEW = "pending_review"
-    APPROVED = "approved"
-    REJECTED = "rejected"
-    DEPRECATED = "deprecated"
-
-@dataclass
-class PlaybookEntry:
-    id: str
-    name: str
-    description: str
-    trigger: Dict[str, Any]        # 触发条件
-    strategy: Dict[str, Any]       # 执行策略
-    tool_sequence: List[str]       # 工具序列
-    quality_metrics: Dict          # 质量指标
-    status: PlaybookStatus
-    created_at: datetime
-    approved_by: Optional[str]
-
-class PlaybookManager:
-    def create(self, name, description, trigger, strategy) -> PlaybookEntry:
-        """创建新策略"""
-        ...
-        
-    def extract_from_session(self, session_data: Dict) -> Optional[PlaybookEntry]:
-        """从高质量会话中提取策略"""
-        ...
-        
-    def find_matching(self, context: Dict) -> List[PlaybookEntry]:
-        """查找匹配的策略"""
-        ...
-        
-    def submit_for_review(self, entry_id: str):
-        """提交人工审核"""
-        ...
-        
-    def approve(self, entry_id: str, reviewer: str):
-        """审核通过"""
-        ...
-```
-
-**策略触发匹配**：
-
-```python
-trigger = {
-    "task_types": ["data_analysis"],
-    "keywords": ["销售", "分析", "报表"],
-    "complexity_range": [4, 8],
-    "tools_required": ["wenshu_analytics"]
-}
-
-# 匹配分数计算
-score = (
-    task_type_match * 0.4 +
-    keyword_match * 0.3 +
-    complexity_in_range * 0.2 +
-    tool_overlap * 0.1
-)
-```
-
-### 奖励归因 (core/evaluation/)
-
-**文件结构**：
-```
-core/evaluation/
-├── __init__.py
-├── reward_attribution.py   # 奖励归因系统
-├── harness.py              # 评估框架
-└── graders/                # 评分器
-```
-
-**核心组件**：
-
-```python
-# core/evaluation/reward_attribution.py
-
-@dataclass
-class StepReward:
-    step_id: str
-    step_type: str              # "tool_call" | "llm_response" | "plan_step"
-    raw_reward: float           # 原始奖励 (0-1)
-    attributed_reward: float    # 归因后奖励
-    contribution_weight: float  # 贡献权重
-    metadata: Dict[str, Any]
-
-@dataclass
-class SessionReward:
-    session_id: str
-    final_score: float
-    step_rewards: List[StepReward]
-    attribution_method: str     # "uniform" | "decay" | "llm_judge"
-
-class RewardAttribution:
-    def compute_session_reward(
-        self,
-        session_id: str,
-        steps: List[StepRecord],
-        final_score: float,
-        method: str = "decay"
-    ) -> SessionReward:
-        """计算会话级奖励归因"""
-        ...
-        
-    def _decay_attribution(self, steps, final_score) -> List[float]:
-        """时间衰减归因：越靠近结果的步骤权重越高"""
-        ...
-        
-    def _llm_judge_attribution(self, steps, final_score) -> List[float]:
-        """LLM 评判归因：让 LLM 判断每步贡献"""
-        ...
-```
-
-**归因方法对比**：
-
-| 方法 | 优点 | 缺点 | 适用场景 |
-|------|------|------|----------|
-| uniform | 简单快速 | 不区分贡献 | 快速评估 |
-| decay | 考虑时序 | 可能忽略关键早期步骤 | 大多数场景 |
-| llm_judge | 最精确 | 成本高 | 高价值会话分析 |
-
-### LLM 友好工具描述 (core/tool/llm_description.py)
-
-**核心组件**：
-
-```python
-# core/tool/llm_description.py
-
-@dataclass
-class LLMToolDescription:
-    name: str
-    description: str
-    use_when: List[str]         # 适用场景
-    not_use_when: List[str]     # 不适用场景
-    examples: List[Dict]        # 使用示例
-    composition_hints: List[str] # 组合提示
-    common_errors: List[str]    # 常见错误
-    output_schema: Dict         # 输出格式
-    performance: Dict           # 性能特征
-
-    def to_llm_prompt(self) -> str:
-        """生成 LLM 友好的工具描述"""
-        return f"""
-## {self.name}
-{self.description}
-
-### 适用场景
-{chr(10).join(f'- {w}' for w in self.use_when)}
-
-### 不适用场景
-{chr(10).join(f'- {w}' for w in self.not_use_when)}
-
-### 示例
-{self._format_examples()}
-
-### 组合提示
-{chr(10).join(f'- {h}' for h in self.composition_hints)}
-"""
-```
-
-**与 capabilities.yaml 融合**：
-
-```yaml
-# config/capabilities.yaml
-tools:
-  web_search:
-    name: web_search
-    description: |
-      Search the web for real-time information using multiple search engines.
-      Returns summarized results with source URLs.
-    
-    # LLM 友好字段
-    use_when:
-      - Need current/recent information
-      - Fact-checking or verification
-      - Finding specific websites or resources
-    not_use_when:
-      - Query is about user's personal data (use memory instead)
-      - Static knowledge questions (use LLM directly)
-    examples:
-      - input: {"query": "latest AI news 2026"}
-        output: {"results": [...]}
-    composition_hints:
-      - Often followed by web_fetch for detailed content
-      - Combine with knowledge_search for comprehensive research
 ```
 
 ### 事件系统 (core/events/)
@@ -3998,18 +1822,18 @@ tools:
 ```
 core/events/
 ├── __init__.py
-├── broadcaster.py          # EventBroadcaster - 统一事件入口
 ├── manager.py              # 事件管理器
 ├── dispatcher.py           # 事件分发器
+├── broadcaster.py          # 消息广播
 ├── base.py                 # 事件基类
-├── storage.py              # 事件存储（Redis/内存）
+├── storage.py              # 事件存储
 ├── message_events.py       # 消息事件
 ├── content_events.py       # 内容事件
 ├── session_events.py       # 会话事件
 ├── user_events.py          # 用户事件
 ├── system_events.py        # 系统事件
 ├── conversation_events.py  # 对话事件
-├── context_events.py       # 上下文事件
+├── context_events.py       # 上下文事件 (V6.3)
 ├── progress_events.py      # 进度事件
 └── adapters/               # 平台适配器
     ├── __init__.py
@@ -4021,41 +1845,15 @@ core/events/
     └── webhook.py          # Webhook 适配
 ```
 
-**EventBroadcaster（统一事件入口）**：
-
-`EventBroadcaster` 是事件系统的核心组件，负责：
-- 内容累积：流式响应的 token 累积
-- 消息持久化：assistant 消息的存储
-- 事件广播：分发到各个适配器
-
-```python
-class EventBroadcaster:
-    async def emit_text(text: str)              # 发送文本内容
-    async def emit_tool_use(tool_name: str, tool_input: dict)  # 发送工具调用
-    async def emit_tool_result(tool_name: str, result: str)    # 发送工具结果
-    async def emit_thinking(text: str)          # 发送思考内容
-    async def finalize()                        # 完成并持久化消息
-```
-
 **事件类型**：
 
 | 事件类别 | 文件 | 说明 |
 |---------|------|------|
-| message_events | `message_events.py` | 消息相关事件（发送、接收、更新） |
-| content_events | `content_events.py` | 内容生成事件（文本、代码、图片） |
-| session_events | `session_events.py` | 会话管理事件（创建、结束、切换） |
-| context_events | `context_events.py` | 上下文管理事件（压缩、截断） |
-| progress_events | `progress_events.py` | 进度事件（工具执行、任务进度） |
-
-**适配器机制**：
-
-| 适配器 | 用途 | 配置方式 |
-|--------|------|----------|
-| `zeno.py` | ZenO 前端实时推送 | SSE 连接 |
-| `webhook.py` | 通用 Webhook 回调 | `config/webhooks.yaml` |
-| `slack.py` | Slack 消息推送 | OAuth Token |
-| `feishu.py` | 飞书消息推送 | App ID/Secret |
-| `dingtalk.py` | 钉钉消息推送 | Access Token |
+| message_events | `message_events.py` | 消息相关事件 |
+| content_events | `content_events.py` | 内容生成事件 |
+| session_events | `session_events.py` | 会话管理事件 |
+| context_events | `context_events.py` | 上下文管理事件 (V6.3) |
+| progress_events | `progress_events.py` | 进度事件 |
 
 ### 监控系统 (core/monitoring/)
 
@@ -4070,19 +1868,13 @@ core/monitoring/
 ├── failure_case_db.py       # 失败案例库
 └── case_converter.py        # 案例转化器
 
-# 统一计费模块
+# 🆕 V7.4: 统一计费模块
 core/billing/
 ├── __init__.py              # 统一导出接口
-├── models.py                # LLMCallRecord, UsageResponse
-├── tracker.py               # EnhancedUsageTracker（唯一实现）
-└── pricing.py               # 模型定价表和成本计算
-
-# 别名统一
-utils/usage_tracker.py       # UsageTracker = EnhancedUsageTracker
-models/usage.py              # 重导出 UsageResponse + CLAUDE_PRICING
+└── pricing.py               # 模型定价和成本计算
 ```
 
-#### 多智能体成本预算管理 (`token_budget.py`)
+#### 🆕 V7.1: 多智能体成本预算管理 (`token_budget.py`)
 
 **核心功能**：
 - 分层预算管理（FREE/BASIC/PRO/ENTERPRISE）
@@ -4117,12 +1909,12 @@ budget.record_usage("session-123", 50_000)
 
 ---
 
-#### 多模型计费系统 (`core/billing/`)
+#### 🆕 V7.5: 多模型计费系统 (`core/billing/`)
 
 **核心功能**：
 - `LLMCallRecord`: 单次 LLM 调用记录（模型、tokens、价格、延迟）
 - `EnhancedUsageTracker`: 多模型追踪器（Message ID 去重）
-- `UsageResponse`: 标准化响应（包含 `llm_call_details`）
+- `UsageResponse`: Dify 兼容响应（包含 `llm_call_details`）
 - `calculate_cost()`: 成本计算（返回 float）
 - `calculate_detailed_cost()`: 详细成本明细（包含单价）
 - `estimate_monthly_cost()`: 月度成本估算
@@ -4169,24 +1961,20 @@ event = {"event": "usage", "data": usage.model_dump()}
 metadata = {"usage": usage.model_dump()}
 ```
 
-**Token 类型支持（V7.5 符合 Claude Platform 规范）**：
-- `prompt_tokens`: = input_tokens + cache_read_tokens + cache_write_tokens
-- `completion_tokens`: 输出 tokens
-- `thinking_tokens`: Extended Thinking tokens
-- `cache_read_tokens`: 缓存命中 tokens
-- `cache_write_tokens`: 缓存写入 tokens
-- `total_tokens`: = prompt_tokens + completion_tokens + thinking_tokens
+**Token 类型支持**：
+- `prompt_tokens` (input_tokens): 输入 tokens
+- `completion_tokens` (output_tokens): 输出 tokens  
+- `thinking_tokens`: Extended Thinking tokens（V7.4 新增）
+- `cache_read_tokens`: 缓存读取 tokens
+- `cache_write_tokens`: 缓存创建 tokens
 
-**定价模型（Claude Platform 官方价格 2026-01）**：
+**定价模型（2026-01）**：
 
 | 模型 | Input ($/M) | Output ($/M) | Cache Read ($/M) | Cache Write ($/M) |
 |------|-------------|--------------|------------------|-------------------|
-| Claude Opus 4.1 | $15.0 | $75.0 | $1.5 | $18.75 |
-| Claude Opus 4 | $15.0 | $75.0 | $1.5 | $18.75 |
-| Claude Sonnet 4 | $3.0 | $15.0 | $0.3 | $3.75 |
-| Claude Sonnet 3.7 | $3.0 | $15.0 | $0.3 | $3.75 |
-| Claude Haiku 3.5 | $0.8 | $4.0 | $0.08 | $1.0 |
-| Claude Haiku 3 | $0.25 | $1.25 | $0.03 | $0.3 |
+| Claude Opus 4.5 | $5.0 | $25.0 | $0.5 | $6.25 |
+| Claude Sonnet 4.5 | $3.0 | $15.0 | $0.3 | $3.75 |
+| Claude Haiku 4.5 | $1.0 | $5.0 | $0.1 | $1.25 |
 
 ---
 
@@ -4211,566 +1999,6 @@ metadata = {"usage": usage.model_dump()}
 │                                                                          │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
-
----
-
-## Skills 机制
-
-> **参考实现**: clawdbot Agent Skills 机制  
-> **设计原则**: 延迟加载、LLM 自主判断、配置化部署  
-> **🆕 V9.0**: 实现延迟加载机制，Token 成本降低 90%
-
-Skills（技能）是一种声明式的知识封装机制，将领域专业知识、最佳实践和工作流程打包为 Agent 可读取和遵循的文档。
-
-### 🆕 V9.0: 延迟加载机制
-
-#### 设计原理
-
-**问题**：全量加载 52 个 Skills 到系统 Prompt 导致 Token 成本高昂。
-
-**解决方案**：借鉴 clawdbot，只在系统 Prompt 中注入 Skills 列表（name + description + location），Agent 按需通过 Read 工具读取完整 SKILL.md。
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          延迟加载 vs 全量加载对比                              │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│   全量加载（V8.0 及之前）                延迟加载（V9.0）                      │
-│   ┌────────────────────────┐            ┌────────────────────────┐          │
-│   │ System Prompt          │            │ System Prompt          │          │
-│   │ ┌──────────────────┐   │            │ ┌──────────────────┐   │          │
-│   │ │ Skill 1 完整内容  │   │            │ │ <available_skills>│   │          │
-│   │ │ Skill 2 完整内容  │   │            │ │   name + desc     │   │          │
-│   │ │ Skill 3 完整内容  │   │            │ │   + location      │   │          │
-│   │ │ ...              │   │            │ │ </available_skills│   │          │
-│   │ │ Skill N 完整内容  │   │            │ └──────────────────┘   │          │
-│   │ └──────────────────┘   │            │                        │          │
-│   │ ~147K 字符 / ~36K tokens│            │ ~15K 字符 / ~4K tokens │          │
-│   └────────────────────────┘            └────────────────────────┘          │
-│                                                   ↓                          │
-│                                         Agent 选择需要的 Skill               │
-│                                                   ↓                          │
-│                                         Read 工具读取 SKILL.md               │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-#### 注入的 Prompt 格式
-
-```xml
-<available_skills>
-  <skill name="github" location="/path/to/skills/github/SKILL.md">
-    <description>Interact with GitHub using the `gh` CLI</description>
-  </skill>
-  <skill name="slack" location="/path/to/skills/slack/SKILL.md">
-    <description>Send and receive Slack messages</description>
-  </skill>
-</available_skills>
-```
-
-#### 系统指令（引导 Agent 按需读取）
-
-```markdown
-## Skills（技能）
-
-扫描 `<available_skills>` 的 `<description>` 条目。
-- 恰好一个技能适用 → 读取其 SKILL.md 并遵循
-- 多个可能适用 → 选择最具体的
-- 没有适用的 → 不读取
-
-**重要：** 
-- 只在明确需要时才读取 SKILL.md
-- 不要在选择前读取多个 Skills
-- 使用 Read 工具读取 `location` 指定的路径
-```
-
-#### 配置项（config.yaml）
-
-```yaml
-# Skills 加载模式配置
-skill_loading:
-  mode: "lazy"           # lazy（延迟加载，节省 90% Token）/ eager（全量加载）
-
-# Skills 依赖检查配置
-skill_dependency_check:
-  enabled: true          # 是否启用启动时依赖检查
-  mode: "prompt"         # prompt（仅提示）/ interactive（交互式）/ skip（跳过）
-  fail_on_missing: false # 缺少依赖时是否阻止启动
-```
-
-#### 核心模块
-
-| 模块 | 文件 | 职责 |
-|------|------|------|
-| **SkillPromptBuilder** | `core/prompt/skill_prompt_builder.py` | 构建延迟/全量加载 Prompt |
-| **DynamicSkillLoader** | `core/skill/dynamic_loader.py` | 运行时依赖检查 |
-| **DependencyChecker** | `scripts/check_instance_dependencies.py` | 部署前检查脚本 |
-
-#### E2E 验证结果
-
-**测试日期**: 2026-01-30
-
-| 指标 | 结果 |
-|------|------|
-| 延迟加载 Prompt | 2,369 字符（~592 tokens） |
-| 全量加载 Prompt | 24,182 字符（~6,046 tokens） |
-| **Token 节省** | **90.2%** |
-| 有效 Skill 路径 | 9/9（100%） |
-| 年度成本节省（1000次/天） | $5,971.31 |
-
----
-
-### Skills 目录结构
-
-#### 两级部署架构
-
-```
-zenflux_agent/
-├── skills/
-│   └── library/                    # 系统级内置技能（所有实例共享）
-│       ├── planning-task/
-│       │   ├── SKILL.md           # 技能定义文件（必需）
-│       │   ├── scripts/           # Python/Shell 脚本
-│       │   └── resources/         # 资源文件（JSON Schema、模板等）
-│       └── ontology-builder/
-│
-└── instances/
-    └── {instance_id}/
-        └── skills/                 # 实例级自定义技能（运营人员配置）
-            ├── skill_registry.yaml # Skills 注册表
-            ├── weather/
-            │   └── SKILL.md
-            ├── github/
-            │   └── SKILL.md
-            └── ...
-```
-
-#### Skill 目录结构
-
-```
-skill-name/
-├── SKILL.md          # 技能定义文件（必需，包含 YAML frontmatter）
-├── scripts/          # 可执行脚本目录（可选）
-│   ├── __init__.py
-│   └── main.py
-├── resources/        # 资源文件目录（可选）
-│   ├── schema.json
-│   └── templates/
-└── references/       # 参考文档目录（可选）
-    └── api_docs.md
-```
-
-#### SKILL.md 格式
-
-```markdown
----
-name: skill-name                    # 技能名称（必需）
-description: 技能的功能描述          # 用于系统提示词注入（必需）
-metadata:
-  level: 1                          # L1 核心级 / L2 动态级
-  priority: medium                  # low/medium/high
-  preferred_for:                    # 适用场景关键词
-    - scenario1
-    - scenario2
----
-
-# 技能名称
-
-## 功能描述
-...
-
-## 使用场景
-...
-
-## 工作流程
-...
-```
-
-### Skills 核心类
-
-#### 🆕 V9.0: SkillPromptBuilder（延迟加载构建器）
-
-**位置**: `core/prompt/skill_prompt_builder.py`
-
-**职责**:
-- 构建延迟加载格式的 Skills Prompt（`<available_skills>` XML）
-- 支持 lazy/eager 两种模式
-- 多语言支持（zh/en）
-
-```python
-class SkillPromptBuilder:
-    @staticmethod
-    def build_lazy_prompt(skills: List[SkillSummary], language: str = "zh") -> str
-        # 仅注入 name + description + location
-    
-    @staticmethod
-    def build_eager_prompt(skills_content: List[tuple], language: str = "zh") -> str
-        # 注入完整 SKILL.md 内容
-    
-    @staticmethod
-    def build_lazy_instructions(language: str = "zh") -> str
-        # 生成延迟加载使用指令
-```
-
-#### 🆕 V9.0: DynamicSkillLoader（动态依赖加载器）
-
-**位置**: `core/skill/dynamic_loader.py`
-
-**职责**:
-- 运行时检查 Skill 依赖（bins/env/os）
-- 判断 Skill 是否满足依赖
-- 生成安装说明
-
-```python
-class DynamicSkillLoader:
-    def check_skill_dependency(skill_name: str) -> SkillDependency
-    def is_skill_eligible(skill_name: str) -> bool
-    def get_install_instructions(skill_name: str) -> str
-```
-
-#### CapabilityRegistry（能力注册表）
-
-**位置**: `core/tool/capability/registry.py`
-
-**职责**:
-- 扫描 Skills 目录（系统级 + 实例级）
-- 解析 SKILL.md 的 YAML frontmatter
-- 注册为 Capability 对象
-
-#### SkillLoader（内容加载器）
-
-**位置**: `core/tool/capability/skill_loader.py`
-
-**职责**:
-- 按需加载 SKILL.md 完整内容
-- 加载资源文件（scripts/resources）
-- 缓存机制
-
-### Skills 加载与执行流程
-
-#### 🆕 V9.0 启动时加载流程
-
-```
-1. Agent 启动
-   ↓
-2. instance_loader.py::create_agent_from_instance()
-   ↓
-3. load_instance_config(instance_name)
-   ├─→ 读取 config.yaml（包含 skill_loading.mode）
-   └─→ 返回 InstanceConfig（包含 skills 配置）
-   ↓
-4. 🆕 Skill 依赖检查（如果 skill_dependency_check.enabled=true）
-   ├─→ DependencyChecker.check_all_skills()
-   ├─→ 根据 mode 决定：prompt（提示）/ interactive（交互）/ skip
-   └─→ 过滤出满足依赖的 Skills
-   ↓
-5. 根据 skill_loading.mode 选择加载方式：
-   ├─→ "lazy" 模式：
-   │   └─→ SkillPromptBuilder.build_lazy_prompt()
-   │       └─→ 仅注入 <available_skills> 列表（name + desc + location）
-   └─→ "eager" 模式：
-       └─→ SkillPromptBuilder.build_eager_prompt()
-           └─→ 注入完整 SKILL.md 内容
-   ↓
-6. 根据 skill_mode 选择注册方式：
-   ├─→ "api" 模式：调用 Claude Skills API 注册（有 8 个限制）
-   └─→ "prompt_injection" 模式：注入到系统提示词（无限制）
-   ↓
-7. 生成系统提示词（包含 Skills Prompt + 环境上下文）
-```
-
-#### 🆕 V9.0 运行时执行流程（延迟加载）
-
-```
-1. Agent 收到用户请求
-   ↓
-2. LLM 分析用户意图
-   ├─→ 查看系统提示词中的 <available_skills>（仅 name + description）
-   └─→ 根据 description 语义匹配，判断是否需要某个 Skill
-   ↓
-3. 如果需要 Skill（LLM 自主判断）：
-   ├─→ 🆕 使用 Read 工具读取 location 指定的 SKILL.md
-   │   （这一步才加载完整内容，实现"按需加载"）
-   ├─→ 按需加载资源文件（scripts/resources）
-   └─→ 执行 Skill 指导的工作流
-   ↓
-4. 如果不需要 Skill：
-   └─→ 直接使用 Tools 执行任务
-
-注：延迟加载的关键在于 Agent 只在需要时才读取完整 SKILL.md，
-    避免了每次对话都传输所有 Skills 内容，显著降低 Token 成本。
-```
-
-### Skills 配置方式（V9.0 更新）
-
-#### config.yaml 配置（实例级）
-
-```yaml
-# 🆕 V9.0: Skills 加载模式
-skill_loading:
-  mode: "lazy"           # lazy（延迟加载，节省 90% Token）/ eager（全量加载）
-
-# 🆕 V9.0: Skills 依赖检查
-skill_dependency_check:
-  enabled: true          # 启动时检查依赖
-  mode: "prompt"         # prompt / interactive / skip
-  fail_on_missing: false
-
-# Skills 注册模式
-skill_mode: "prompt_injection"  # prompt_injection（推荐）/ api（有 8 个限制）
-
-# 启用的 Skills
-enabled_skills:
-  github: 1
-  slack: 1
-  peekaboo: 1
-```
-
-#### 三种配置模式对比
-
-| 模式 | 配置值 | Token 成本 | 限制 |
-|------|--------|-----------|------|
-| **延迟加载** | `skill_loading.mode: "lazy"` | **低（节省 90%）** | 需 Read 工具 |
-| **全量加载** | `skill_loading.mode: "eager"` | 高 | 无 |
-| **API 模式** | `skill_mode: "api"` | - | 8 个 Skills 限制 |
-
-#### Skills vs Tools 决策原则
-
-- **Skills** = 领域知识和最佳实践（文档，LLM 自主读取）
-- **Tools** = 可执行功能（代码/API，直接调用）
-
----
-
-## Nodes 系统
-
-> **参考实现**: clawdbot Nodes 机制  
-> **设计原则**: 平台抽象、安全隔离、可扩展性
-
-Nodes（节点）系统提供本地和远程设备的能力访问接口，支持 Shell 命令执行、系统通知、剪贴板操作等平台特定功能。
-
-### Nodes 目录结构
-
-```
-core/nodes/
-├── __init__.py                # 模块导出
-├── manager.py                 # 节点管理器（NodeManager）
-├── protocol.py                # 通信协议定义
-├── executors/                 # 执行器模块
-│   ├── __init__.py
-│   ├── base.py                # BaseExecutor 基类
-│   └── shell.py               # ShellExecutor 实现
-└── local/                     # 本地节点实现
-    ├── __init__.py
-    ├── base.py                # LocalNodeBase 基类
-    └── macos.py               # MacOSLocalNode 实现
-
-tools/
-└── nodes_tool.py              # NodesTool 工具接口
-```
-
-### Nodes 核心类与协议
-
-#### 协议层 (protocol.py)
-
-```python
-# 命令类型
-class NodeCommand(Enum):
-    SYSTEM_RUN = "system.run"          # 执行 shell 命令
-    SYSTEM_WHICH = "system.which"      # 检查可执行文件
-    SYSTEM_NOTIFY = "system.notify"    # 发送系统通知
-    CAMERA_SNAP = "camera.snap"        # 拍照（预留）
-    SCREEN_RECORD = "screen.record"    # 录屏（预留）
-    LOCATION_GET = "location.get"      # 获取位置（预留）
-
-# 节点状态
-class NodeStatus(Enum):
-    ONLINE = "online"
-    OFFLINE = "offline"
-    BUSY = "busy"
-    ERROR = "error"
-    UNKNOWN = "unknown"
-
-# 节点信息
-@dataclass
-class NodeInfo:
-    node_id: str
-    display_name: str
-    platform: str              # "darwin" | "windows" | "linux"
-    status: NodeStatus
-    capabilities: List[str]    # ["shell", "notify", "screenshot", ...]
-    last_seen: datetime
-
-# 请求/响应结构（对齐 clawdbot）
-@dataclass
-class NodeInvokeRequest:
-    command: NodeCommand
-    params: Dict[str, Any]
-    timeout_ms: int = 30000
-
-@dataclass
-class NodeInvokeResponse:
-    success: bool
-    payload: Dict[str, Any]
-    error: Optional[str]
-```
-
-#### 执行器层 (executors/)
-
-**ShellExecutor** (`shell.py`):
-- 安全：命令白名单、环境变量过滤、超时控制
-- 阻止危险环境变量：`NODE_OPTIONS`, `PYTHONHOME`, `LD_PRELOAD`, `DYLD_*`
-- 输出大小限制：最大 200KB
-
-```python
-class ShellExecutor:
-    async def execute(
-        command: List[str],
-        cwd: Optional[str] = None,
-        env: Optional[Dict[str, str]] = None,
-        timeout_ms: int = 30000
-    ) -> ShellResult
-
-    async def which(executable: str) -> Optional[str]
-```
-
-#### 节点实现层 (local/)
-
-**LocalNodeBase** (`base.py`):
-- 抽象方法：`platform`, `capabilities`
-- 核心方法：
-  - `initialize()`: 初始化节点
-  - `handle_invoke()`: 处理节点调用（路由到具体处理器）
-  - `get_info()`: 获取节点信息
-
-**MacOSLocalNode** (`macos.py`):
-- 平台标识：`platform = "darwin"`
-- 能力：`shell`, `applescript`, `notify`, `screenshot`, `clipboard`, `open_app`, `open_url`
-- 平台特定方法：
-  - `execute_applescript()`: 执行 AppleScript
-  - `open_app()` / `open_url()` / `open_path()`: 打开应用/URL/路径
-  - `screenshot()`: 屏幕截图
-  - `clipboard_get()` / `clipboard_set()`: 剪贴板操作
-  - `say()`: 文字转语音
-
-#### NodeManager（管理层）
-
-**位置**: `core/nodes/manager.py`
-
-**职责**:
-1. 节点注册/注销
-2. 节点发现（本地/远程）
-3. 命令路由
-4. 健康检查
-
-```python
-class NodeManager:
-    async def start()                                    # 启动管理器
-    async def stop()                                     # 停止管理器
-    async def get_status() -> Dict[str, NodeStatus]     # 获取所有节点状态
-    async def list_nodes() -> List[NodeInfo]            # 列出所有节点
-    async def invoke(node_id: str, request: NodeInvokeRequest) -> NodeInvokeResponse
-    async def run_command(command: List[str], node: str = "local") -> ShellResult
-    async def notify(title: str, message: str, node: str = "local") -> bool
-
-# 全局单例
-def get_node_manager() -> NodeManager
-async def init_node_manager(config: NodeConfig) -> NodeManager
-```
-
-#### NodesTool（工具接口）
-
-**位置**: `tools/nodes_tool.py`
-
-**Actions**:
-| Action | 说明 | 参数 |
-|--------|------|------|
-| `status` | 列出所有节点状态 | - |
-| `describe` | 获取节点详细信息 | `node` |
-| `run` | 执行 shell 命令 | `node`, `command` |
-| `notify` | 发送系统通知 | `node`, `title`, `message` |
-| `which` | 检查可执行文件 | `node`, `executable` |
-
-### Nodes 执行流程
-
-```
-用户请求（如："帮我列出当前目录的文件"）
-    ↓
-Agent 处理（SimpleAgent / MultiAgentOrchestrator）
-    ↓
-LLM 选择工具（nodes）
-    ↓
-ToolExecutor.execute("nodes", tool_input)
-    ↓
-NodesTool.execute(action="run", command=["ls", "-la"])
-    ↓
-NodeManager.run_command(command=["ls", "-la"])
-    ↓
-MacOSLocalNode.handle_invoke("system.run", params)
-    ↓
-ShellExecutor.execute(command=["ls", "-la"])
-    ↓
-返回 ShellResult（stdout, stderr, exit_code）
-    ↓
-Agent 继续处理或返回给用户
-```
-
-#### 安全机制
-
-| 机制 | 说明 |
-|------|------|
-| 命令白名单 | `allowlist` - 允许执行的命令列表 |
-| 安全可执行文件 | `safe_bins` - 默认安全的可执行文件 |
-| 环境变量过滤 | 阻止 `NODE_OPTIONS`, `LD_PRELOAD` 等危险变量 |
-| 超时控制 | 默认 30 秒超时 |
-| 输出大小限制 | 最大 200KB |
-
----
-
-## 消息会话管理架构
-
-> **详细文档**: [22-MESSAGE-SESSION-MANAGEMENT.md](./22-MESSAGE-SESSION-MANAGEMENT.md)
-
-消息会话管理是 ZenFlux Agent 的核心基础设施，提供完整的消息生命周期管理、流式消息处理、高性能读取和异步持久化能力。
-
-### 核心特性
-
-- ✅ **两阶段持久化**：占位消息 + 完整更新，保证流式消息可靠性
-- ✅ **异步写入**：Redis Streams 解耦，不阻塞 API 响应
-- ✅ **内存缓存**：SessionCacheService 实现纳秒级读取
-- ✅ **缓存预加载**：用户打开会话窗口时主动预热，提升首次响应速度
-- ✅ **游标分页**：支持长会话历史查询
-- ✅ **合并写入优化**：计费信息与最终消息合并，减少 50% 数据库操作
-
-### 架构组件
-
-```
-ChatService → EventBroadcaster → MessageQueueClient → Redis Streams
-     ↓              ↓                    ↓
-SessionCacheService (内存缓存)    InsertWorker/UpdateWorker → PostgreSQL
-```
-
-### 关键实现
-
-| 组件 | 职责 | 文件位置 |
-|------|------|----------|
-| **ChatService** | 消息发送入口，流式处理 | `services/chat_service.py` |
-| **EventBroadcaster** | 内容累积和持久化触发 | `core/events/broadcaster.py` |
-| **SessionCacheService** | 内存会话上下文缓存 | `services/session_cache_service.py` |
-| **MessageQueueClient** | Redis Streams 客户端 | `infra/message_queue/streams.py` |
-| **InsertWorker/UpdateWorker** | 后台消息处理 | `infra/message_queue/workers.py` |
-
-### 数据流程
-
-**写入流程**：
-1. 创建占位消息 → Redis Streams → InsertWorker → PostgreSQL
-2. 流式传输 → EventBroadcaster 累积 → SSE 发送
-3. 最终更新（合并 usage）→ Redis Streams → UpdateWorker → PostgreSQL
-
-**读取流程**：
-1. 优先从 SessionCacheService 内存缓存读取
-2. 缓存未命中时从数据库加载（冷启动）
-3. 分页加载使用游标（`before_cursor`）
-4. 预加载机制：用户打开会话窗口时主动预热缓存（`POST /conversations/{id}/preload`）
 
 ---
 
@@ -4811,212 +2039,6 @@ grpc_server/ (gRPC)          ↑
 
 ---
 
-## 多模型容灾与 Qwen 接入
-
-**定位**：Qwen 接入是重大更新，需确保“真实端到端流程可用 + 全局一键切换 + 主备容灾”。
-
-### 自顶向下调用流程（真实链路）
-
-```
-用户请求
-  ↓
-routers/chat.py 或 grpc_server/chat_servicer.py
-  ↓
-ChatService.chat()
-  ├─ AgentRegistry.get_agent()                 # 原型克隆（Simple/Multi）
-  ├─ AgentFactory.create_router(prompt_cache)  # 统一路由入口
-  │   └─ AgentRouter.route()
-  │       └─ IntentAnalyzer.analyze()
-  │           └─ create_llm_service(profile=intent_analyzer)
-  │               └─ ModelRouter (primary + fallbacks)
-  │                   └─ QwenLLMService / ClaudeLLMService
-  └─ RoutingDecision(agent_type)
-      ├─ SimpleAgent.chat()
-      │   └─ create_llm_service(profile=main_agent)
-      │       └─ ModelRouter (primary + fallbacks)
-      └─ MultiAgentOrchestrator.execute()
-          ├─ create_llm_service(profile=lead_agent)
-          ├─ create_llm_service(profile=worker_agent)
-          └─ create_llm_service(profile=critic_agent)
-```
-
-**探针与切换位置**：
-- `ChatService._probe_llm_service()`：执行前对 Lead/Critic/Single LLM 做探针（默认 3 次重试）。
-- `MultiAgentOrchestrator._probe_worker_llm()`：Worker 执行前探针，失败即切换并发出 `llm_switch` 事件。
-- `ModelRouter.probe()`：探针失败会强制标记目标为不可用并选择备选。
-
-### 配置项说明（全局/角色/环境变量）
-
-| 层级 | 位置 | 关键字段 | 作用 |
-|------|------|----------|------|
-| 角色级 | `config/llm_config/profiles.yaml` | `provider` / `model` / `fallbacks` / `policy` | 定义主模型与备选链路 |
-| 全局 | `instances/{name}/config.yaml` | `llm_global` | 一键覆盖所有 profile |
-| 环境 | `.env` | `QWEN_API_KEY` / `DASHSCOPE_API_KEY` | Qwen API Key |
-| 环境 | `.env` | `QWEN_BASE_URL` | Qwen 基础地址（新加坡：`https://dashscope-intl.aliyuncs.com/compatible-mode/v1`） |
-| 环境 | OS Env | `LLM_<PROFILE>_<PARAM>` | 单 profile 覆盖（如 `LLM_MAIN_AGENT_TEMPERATURE`） |
-| 环境 | OS Env | `LLM_GLOBAL_CONFIG_PATH` | 指定 `config.yaml` 绝对路径 |
-| 环境 | OS Env | `ZENFLUX_INSTANCE` / `INSTANCE_NAME` / `AGENT_INSTANCE` | 指定实例名称 |
-
-**备注**：
-- Qwen 使用 DashScope SDK；当配置 `compatible-mode/v1` 时会自动规范为 `/api/v1`。
-- 未设置 `QWEN_API_KEY` 时会回退读取 `DASHSCOPE_API_KEY`。
-
-**全局一键切换示例**：
-```yaml
-llm_global:
-  enabled: true
-  provider: "qwen"
-  base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-  api_key_env: "QWEN_API_KEY"
-  compat: "qwen"
-  model_map:
-    intent_analyzer: "qwen-plus"
-    default: "qwen-max"
-```
-
-### 主备策略与降级策略
-
-1. **主备链路来源**  
-   - 主模型来自 profile 的 `provider + model`。  
-   - **同模型多服务商**：`fallbacks[]` 中保持相同 `provider + model`，
-     仅用 `base_url + api_key_env` 区分不同服务商。  
-   - **跨厂商主备**：`fallbacks[]` 中使用不同 `provider`（如 Claude → Qwen → DeepSeek）。
-
-2. **切换触发**  
-   - 探针失败或调用异常 → `ModelRouter` 标记目标不可用。  
-   - 达到 `policy.max_failures` 后进入冷却，`policy.cooldown_seconds` 后再恢复。
-
-3. **工具/Skills 降级**  
-   - 自动化：非 Claude 模型会自动过滤非 dict 工具，并跳过 Claude Skills 容器。  
-   - 配置化：`capabilities.yaml` 配好 `fallback_tool` 后自动生效，无需每次手动切换。
-
-4. **优先级轮询与自动回切**  
-   - **触发机制**：服务层在请求前探针（`ChatService` 与 `MultiAgentOrchestrator`），
-     使用 `probe(include_unhealthy=True)` 轮询所有优先级目标（包括当前被标记不可用的高优先级服务）。  
-   - **优先级来源**：`profiles.yaml` 的 `primary → fallbacks[]` 顺序即优先级，
-     **先同模型多服务商（相同 `provider + model`，不同 `base_url + api_key_env`），再跨厂商主备（不同 `provider`）**。  
-   - **调用流程**：  
-     1) `AgentFactory/create_llm_service` 读取 profile 构建 `ModelRouter`；  
-     2) `probe(include_unhealthy=True)` 按优先级逐一 `ping`，失败记入熔断/冷却；  
-     3) 成功即更新 `last_selected`，返回 `selected` 与 `switched`；  
-     4) `switched=true` 时发送 `llm_switch` 事件并继续执行。  
-   - **回切机制**：高优先级恢复时，下一次探针命中即自动回切（`include_unhealthy=True` 确保每次探针都优先检查高优先级服务）。  
-   - **示例配置**（`profiles.yaml`）：
-     ```yaml
-     main_agent:
-       provider: "claude"
-       model: "claude-sonnet-4-5-20250929"
-       fallbacks:
-         # 同模型多服务商（优先级 1-2）
-         - provider: "claude"
-           model: "claude-sonnet-4-5-20250929"
-           api_key_env: "CLAUDE_API_KEY_VENDOR_A"
-           base_url: "https://api.anthropic.com"
-         - provider: "claude"
-           model: "claude-sonnet-4-5-20250929"
-           api_key_env: "CLAUDE_API_KEY_VENDOR_B"
-           base_url: "https://anthropic-proxy-b.example.com/v1"
-         # 跨厂商主备（优先级 3-4）
-         - provider: "qwen"
-           model: "qwen-max"
-           api_key_env: "QWEN_API_KEY"
-           base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-         - provider: "openai"
-           model: "deepseek-chat"
-           api_key_env: "DEEPSEEK_API_KEY"
-           base_url: "https://api.deepseek.com/v1"
-     ```
-
-5. **调用关系与验证**  
-   - **调用关系**：`AgentFactory` → `create_llm_service` → `ModelRouter` →
-     `ChatService/MultiAgentOrchestrator.probe` → `ModelRouter.create_message_*`。  
-   - **验证方式**：  
-     1) 配置同模型多服务商（不同 `base_url + api_key_env`）；  
-     2) 人为让主服务失败（无效 key/断网）触发 fallback；  
-     3) 观察 `llm_switch` 事件与日志 `selected` 目标；  
-     4) 恢复主服务后再次请求，确认自动回切。  
-   - **验证日志示例**（Claude 401 → Qwen 成功）：
-     ```
-     [ERROR] Claude API 调用失败: Error code: 401 - invalid x-api-key
-     [WARNING] 模型调用失败: target=claude:claude-haiku-4-5-20251001, failures=1
-     [INFO] LLM 健康状态变化: fallback_2:qwen:qwen-plus -> healthy
-     [INFO] 意图分析结果: type=information_query, complexity=simple, score=1.0
-     ```  
-   - **`llm_switch` 事件结构**：
-     ```json
-     {
-       "event_type": "llm_switch",
-       "reason": "probe_failed",
-       "role": "simple_agent",
-       "from": {
-         "name": "claude:claude-sonnet-4-5-20250929",
-         "provider": "claude",
-         "model": "claude-sonnet-4-5-20250929"
-       },
-       "to": {
-         "name": "fallback_2:qwen:qwen-max",
-         "provider": "qwen",
-         "model": "qwen-max",
-         "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-       },
-       "errors": [
-         {
-           "target": "claude:claude-sonnet-4-5-20250929",
-           "provider": "claude",
-           "model": "claude-sonnet-4-5-20250929",
-           "error": "Error code: 401 - invalid x-api-key"
-         }
-       ],
-       "timestamp": "2026-01-21T19:03:24.199Z"
-     }
-     ```
-
-### 新增功能与流程（工具兼容回归）
-
-- **tool_calls 统一规范化**：新增 `core/llm/tool_call_utils.py`，统一将入参归一为 `{id, name, input, type}`，并对非法 JSON 降级为空对象。  
-- **Qwen/OpenAI/Gemini 对齐**：  
-  - Qwen：解析响应后输出 `tool_calls` + `raw_content` 的 `tool_use` 块。  
-  - OpenAI/Gemini 适配器：补齐 `type=tool_use`，并处理非法 JSON 参数。  
-  - OpenAI 流式：最终 `tool_calls` 补齐 `type=tool_use`。  
-- **Router + Skills fallback**：当路由目标包含非 Skills 模型时，自动注入 `fallback_tool`，避免主备切换后能力缺失。
-
-**测试覆盖（新增）**：
-- `tests/test_tool_call_utils.py`（多种入参形态/非法 JSON/缺失 ID）  
-- `tests/test_tool_calls_compat.py`（OpenAI/Qwen tool_calls 解析）  
-- `tests/test_llm_router_tool_filter.py`（非 Claude 工具过滤含流式路径）  
-
-### 端到端真实流程验证（Qwen）
-
-**目标**：按真实用户请求链路验证路由 + LLM 选择 + plan_todo 执行。  
-**约束**：只允许 mock DB/MQ/Redis/SessionCache，LLM 调用必须真实。
-
-**验证步骤**：
-1. 准备环境变量（实例 `.env`）  
-   - `QWEN_API_KEY`（或 `DASHSCOPE_API_KEY`）  
-   - `QWEN_BASE_URL=https://dashscope-intl.aliyuncs.com/compatible-mode/v1`
-2. 启用全局切换（`instances/{name}/config.yaml`）  
-   - `llm_global.enabled=true`  
-   - `model_map.intent_analyzer=qwen-plus`  
-   - `model_map.default=qwen-max`
-3. 执行端到端测试（真实调用 Qwen）：  
-   - `python -m pytest -q tests/test_e2e_intent_single_agent.py`  
-   - `python -m pytest -q tests/test_plan_todo_qwen_e2e.py`  
-   - `python -m pytest -q tests/test_llm_profile_global_override.py`  
-   - `python -m pytest -q tests/test_e2e_fallback_claude_to_qwen.py`（新增：Claude 不可用→Qwen 回退）
-
-**最近一次验证结果（真实 Qwen）**：
-- 2026-01-21：以上 4 个用例全部通过（6 passed，68s）。  
-- **Claude→Qwen 回退验证**：主服务 401 失败后，自动切换至 Qwen 并成功完成意图识别与对话，`llm_switch` 事件正确记录切换信息。
-
-### 待解决项（必须跟踪）
-
-1. **计费覆盖**：`core/billing/pricing.py` 仍缺少 Qwen 定价模型。  
-2. **工具兼容回归**：已补齐 `tool_calls` 规范化与单测，仍需覆盖更多真实工具矩阵（含多智能体场景）。  
-3. **策略调优**：主备切换阈值（`max_failures/cooldown`）与告警策略需要生产数据校准。  
-4. **多智能体验证**：Qwen 在 `Lead/Worker/Critic` 组合下的稳定性与成本评估待补齐。
-
----
-
 ## 提示词缓存系统 (core/prompt/)
 
 ### InstancePromptCache
@@ -5024,11 +2046,6 @@ llm_global:
 **文件**：`core/prompt/instance_cache.py`
 
 **核心理念**：**用空间换时间 + LLM 语义理解 + 本地持久化**
-
-**核心原则**：
-- **意图识别输出统一为 7 字段**：`task_type / complexity / complexity_score / needs_plan / skip_memory_retrieval / needs_multi_agent / is_follow_up`  
-- **系统提示词以路由结果为准**：路由层已给出意图时，不再重复做完整意图分析  
-- **🆕 V9.0 Skills 延迟加载**：系统提示词仅注入 Skills 列表，完整内容按需读取
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -5221,11 +2238,12 @@ instances/my_agent/
             │
             ↓
 ┌───────────────────────────────────────────────────────────┐
-│ Phase 1: 路由决策（共享层，V9.0 LLM-First）                 │
+│ Phase 1: 路由决策（共享层）                                 │
 ├───────────────────────────────────────────────────────────┤
 │ ChatService → AgentRouter.route()                         │
-│   → IntentAnalyzer.analyze() (LLM 语义分析)               │
-│   → RoutingDecision(agent_type="single", intent=...)      │
+│   → IntentAnalyzer.analyze()                              │
+│   → ComplexityScorer.score()                              │
+│   → RoutingDecision(agent_type="single", complexity=6)    │
 └───────────────────────────────────────────────────────────┘
             │
             ↓
@@ -5279,16 +2297,8 @@ instances/my_agent/
 ```
 instances/my_agent/
 ├── prompt.md               # 运营写的系统提示词
-├── config.yaml             # 实例配置（框架内置工具 + 运营可配置工具）
-├── .env                    # 环境变量（API Keys）
-├── api_desc/               # REST API 文档（运营可配置工具）
-│   ├── coze-api.md
-│   └── dify-api.md
-├── skills/                 # Custom Skills（运营可配置工具）
-│   ├── skill_registry.yaml # Skills 注册表
-│   ├── _template/          # Skill 模板
-│   └── [custom-skill]/     # 自定义 Skill
-│       └── SKILL.md
+├── config.yaml             # 实例配置
+├── .env                    # 环境变量
 └── prompt_results/         # 自动生成的场景化提示词
     ├── _metadata.json
     ├── agent_schema.yaml
@@ -5297,15 +2307,6 @@ instances/my_agent/
     ├── medium_prompt.md
     └── complex_prompt.md
 ```
-
-**配置分类**：
-
-| 配置类型 | 配置位置 | 说明 | 示例 |
-|---------|---------|------|------|
-| **框架内置工具** | `config.yaml` → `enabled_capabilities` | 启用/禁用框架提供的工具 | `plan_todo: 1`, `exa_search: 1` |
-| **MCP Tools** | `config.yaml` → `mcp_tools` | 连接外部 MCP 服务器 | `{ name: "text2flow", server_url: "..." }` |
-| **REST APIs** | `config.yaml` → `apis` + `api_desc/*.md` | 接入第三方 REST API | `{ name: "weather_api", base_url: "..." }` |
-| **Custom Skills** | `skills/` 目录 + `skill_registry.yaml` | 自定义 Claude Skills | `skills/ontology-builder/SKILL.md` |
 
 ### config.yaml 示例
 
@@ -5346,132 +2347,7 @@ memory:
 # Multi-Agent 配置
 multi_agent:
   mode: "disabled"  # disabled / auto / enabled
-
-# ==================== 框架内置工具配置 ====================
-enabled_capabilities:
-  # 内容生成类（Claude Pre-built Skills）
-  pptx: 1                    # PPT 生成
-  xlsx: 1                    # Excel 表格操作
-  docx: 1                    # Word 文档生成
-  pdf: 1                     # PDF 生成
-  
-  # 信息获取类
-  web_search: 1              # 互联网搜索
-  exa_search: 1              # Exa 语义搜索
-  knowledge_search: 1        # 个人知识库检索
-  
-  # 核心工具
-  plan_todo: 1               # 任务规划工具
-  api_calling: 1             # 通用 API 调用
-
-# ==================== 运营可配置工具 ====================
-# MCP Tools（连接外部 MCP 服务器）
-mcp_tools:
-  - name: text2flowchart
-    server_url: "https://api.dify.ai/mcp/server/XXX/mcp"
-    server_name: "dify"
-    auth_type: "bearer"
-    auth_env: "DIFY_API_KEY"
-    capability: "document_creation"
-
-# REST APIs（接入第三方 API）
-apis:
-  - name: weather_api
-    base_url: "https://api.weather.com/v1"
-    auth:
-      type: api_key
-      header: X-API-Key
-      env: WEATHER_API_KEY
-    doc: weather              # 对应 api_desc/weather.md
-    capability: "web_search"
 ```
-
-### 运营可配置工具详解
-
-#### 1. MCP Tools 配置
-
-**配置位置**：`config.yaml` → `mcp_tools`
-
-**配置示例**：
-```yaml
-mcp_tools:
-  - name: text2flowchart
-    server_url: "https://api.dify.ai/mcp/server/XXX/mcp"
-    server_name: "dify"
-    auth_type: "bearer"        # bearer / api_key
-    auth_env: "DIFY_API_KEY"   # 环境变量名
-    capability: "document_creation"
-    description: "生成 flowchart 流程图"
-```
-
-**配置说明**：
-- `name`: 工具名称（在 Agent 中显示）
-- `server_url`: MCP 服务器地址
-- `auth_type`: 认证类型（bearer token 或 api_key）
-- `auth_env`: 认证信息的环境变量名（从 `.env` 读取）
-- `capability`: 工具能力分类（用于工具选择）
-
-#### 2. REST APIs 配置
-
-**配置位置**：
-- `config.yaml` → `apis`：API 连接配置
-- `api_desc/` 目录：API 文档（OpenAPI/Swagger 格式）
-
-**配置示例**：
-```yaml
-apis:
-  - name: weather_api
-    base_url: "https://api.weather.com/v1"
-    auth:
-      type: api_key
-      header: X-API-Key
-      env: WEATHER_API_KEY
-    doc: weather              # 对应 api_desc/weather.md
-    capability: "web_search"
-    description: "天气查询服务"
-```
-
-**API 文档位置**：`instances/{name}/api_desc/weather.md`
-
-**文档格式**：OpenAPI 3.0 或 Markdown 格式的 API 说明
-
-#### 3. Custom Skills 配置
-
-**配置位置**：
-- `skills/` 目录：Skill 文件结构
-- `skills/skill_registry.yaml`：Skills 注册表
-
-**目录结构**：
-```
-skills/
-├── skill_registry.yaml        # Skills 注册表
-├── _template/                 # Skill 模板
-│   └── SKILL.md
-└── ontology-builder/          # 自定义 Skill
-    ├── SKILL.md              # 必需：Skill 入口文件
-    ├── scripts/              # 可选：Python 脚本
-    └── resources/             # 可选：资源文件
-```
-
-**注册表示例**（`skill_registry.yaml`）：
-```yaml
-skills:
-  - name: ontology-builder
-    enabled: true
-    description: 系统配置构建（三阶段原子操作）
-    skill_id: skill_01XxNzzV4ehSgREZWUAkKgB1  # 注册后自动回写
-    registered_at: '2026-01-09T19:56:40.473873'
-```
-
-**配置流程**：
-1. 创建 Skill 目录：`cp -r _template my-skill-name`
-2. 编辑 `SKILL.md`：定义 Skill 的功能和使用说明
-3. 在 `skill_registry.yaml` 中声明：`{ name: "my-skill-name", enabled: true }`
-4. 启动实例：自动注册到 Claude 服务器
-
-**Skills vs 框架内置工具**：
-- **Pre-built Skills**（xlsx/pptx/docx/pdf）：在 `enabled_capabilities` 中启用，无需创建文件
-- **Custom Skills**：需要创建 `SKILL.md` 并在注册表中声明
 
 ### 全局配置 (config/)
 
@@ -5491,48 +2367,20 @@ skills:
 ```
 zenflux_agent/
 ├── core/                           # 核心组件
-│   ├── agent/                      # Agent 引擎（V8.0 模块化架构）
-│   │   ├── __init__.py             # 统一导出接口（Simple + Multi）
+│   ├── agent/                      # Agent 引擎
 │   │   ├── factory.py              # Agent Factory 统一入口
-│   │   ├── protocol.py             # AgentProtocol 统一接口
-│   │   ├── coordinator.py          # AgentCoordinator 协调器
-│   │   ├── content_handler.py      # 内容处理器
-│   │   ├── types.py                # Agent 类型定义
-│   │   │
-│   │   ├── backtrack/              # 回溯系统
-│   │   │   ├── __init__.py
-│   │   │   ├── error_classifier.py # 错误层级分类器
-│   │   │   └── manager.py          # BacktrackManager 回溯决策
-│   │   │
-│   │   ├── simple/                 # Simple Agent 模块（独立）
-│   │   │   ├── __init__.py         # 导出 SimpleAgent, RVRBAgent
-│   │   │   ├── simple_agent.py     # 主入口 + 初始化
-│   │   │   ├── simple_agent_context.py   # Prompt + Memory
-│   │   │   ├── simple_agent_tools.py     # 工具执行
-│   │   │   ├── simple_agent_loop.py      # RVR 循环
-│   │   │   ├── simple_agent_errors.py    # 错误处理
-│   │   │   ├── rvrb_agent.py       # RVR-B Agent（带回溯）
-│   │   │   ├── mixins/             # Mixin 模块
-│   │   │   │   ├── __init__.py
-│   │   │   │   ├── backtrack_mixin.py    # 回溯能力 Mixin
-│   │   │   │   ├── stream_mixin.py       # 流式处理 Mixin
-│   │   │   │   └── tool_mixin.py         # 工具执行 Mixin
-│   │   │   └── README.md           # Simple Agent 模块文档
-│   │   │
-│   │   └── multi/                  # Multi Agent 模块（独立）
-│   │       ├── __init__.py         # 导出 MultiAgentOrchestrator
+│   │   ├── simple_agent.py         # SimpleAgent (RVR 循环)
+│   │   ├── intent_analyzer.py      # 兼容层
+│   │   ├── content_handler.py      # 内容处理
+│   │   ├── types.py                # Agent 类型
+│   │   └── multi/                  # 多智能体框架（独立）
 │   │       ├── orchestrator.py     # MultiAgentOrchestrator
-│   │       ├── lead_agent.py       # LeadAgent 任务分解
-│   │       ├── critic.py           # CriticAgent 质量评估
-│   │       ├── checkpoint.py       # 检查点恢复
-│   │       ├── models.py           # 多智能体模型
-│   │       └── README.md           # Multi Agent 模块文档
+│   │       └── models.py           # 多智能体模型
 │   │
-│   ├── routing/                    # 共享路由层 (V9.0 LLM-First)
-│   │   ├── __init__.py             # 统一导出接口
-│   │   ├── intent_analyzer.py      # IntentAnalyzer (LLM 语义分析)
-│   │   ├── intent_cache.py         # IntentSemanticCache 语义缓存
-│   │   └── router.py               # AgentRouter (纯 LLM 路由)
+│   ├── routing/                    # 共享路由层 (V7 核心)
+│   │   ├── intent_analyzer.py      # IntentAnalyzer
+│   │   ├── router.py               # AgentRouter
+│   │   └── complexity_scorer.py    # ComplexityScorer
 │   │
 │   ├── planning/                   # 共享 Plan 层 (V7 核心)
 │   │   ├── protocol.py             # Plan 数据协议
@@ -5549,18 +2397,10 @@ zenflux_agent/
 │   │
 │   ├── prompt/                     # 提示词模块
 │   │   ├── instance_cache.py       # InstancePromptCache
-│   │   ├── skill_prompt_builder.py # 🆕 V9.0: 延迟加载 Prompt 构建
-│   │   ├── runtime_context_builder.py # 🆕 V9.0: 运行时环境检测
-│   │   ├── intent_prompt_generator.py # 意图提示词生成
 │   │   ├── prompt_results_writer.py# 结果输出
-│   │   ├── complexity_detector.py  # 复杂度检测
 │   │   ├── framework_rules.py      # 框架规则
 │   │   ├── prompt_layer.py         # 提示词分层
 │   │   └── llm_analyzer.py         # LLM 分析器
-│   │
-│   ├── skill/                      # 🆕 V9.0: Skill 动态加载
-│   │   ├── __init__.py
-│   │   └── dynamic_loader.py       # 动态依赖检查
 │   │
 │   ├── memory/                     # 记忆系统
 │   │   ├── working.py              # WorkingMemory
@@ -5573,65 +2413,18 @@ zenflux_agent/
 │   │   ├── executor.py             # 工具执行器
 │   │   ├── loader.py               # 工具加载器
 │   │   ├── selector.py             # 工具选择器
-│   │   ├── unified_tool_caller.py  # 统一工具调用器（Skills/Fallback）
-│   │   ├── validator.py            # 工具验证器
-│   │   ├── result_compactor.py    # 结果精简器
-│   │   ├── instance_registry.py   # 实例工具注册表
 │   │   └── capability/             # 能力系统
-│   │       ├── registry.py         # 能力注册表
-│   │       ├── router.py           # 能力路由
-│   │       ├── invocation.py       # 调用管理
-│   │       └── skill_loader.py         # Skill 内容加载器
-│   │       └── types.py            # 能力类型定义
 │   │
-│   ├── guardrails/                 # 自适应护栏系统
-│   │   ├── __init__.py
-│   │   └── adaptive.py             # AdaptiveGuardrails 自适应资源控制
-│   │
-│   ├── playbook/                   # 策略库（持续学习）
-│   │   ├── __init__.py
-│   │   ├── manager.py              # PlaybookManager 策略管理
-│   │   └── storage.py              # 🆕 V9.4: 存储后端抽象（File/Database）
-│   │
-│   ├── evaluation/                 # 评估系统
-│   │   ├── __init__.py
-│   │   ├── reward_attribution.py   # 奖励归因（步骤级评估）
-│   │   └── harness.py              # 评估框架
-│   │
-│   ├── llm/                        # LLM 适配层（多模型容灾）
-│   │   ├── __init__.py             # 统一导出（create_llm_service）
-│   │   ├── base.py                 # LLM 基类（LLMProvider, LLMConfig, BaseLLMService）
-│   │   ├── router.py               # ModelRouter（主备切换、优先级轮询）
-│   │   ├── health_monitor.py       # LLMHealthMonitor（健康监控）
-│   │   ├── tool_call_utils.py      # tool_calls 规范化工具
-│   │   ├── adaptor.py              # 消息/工具格式适配器（Claude/OpenAI/Gemini）
-│   │   ├── claude.py               # Claude 适配（Extended Thinking, Skills）
-│   │   ├── openai.py               # OpenAI 适配（兼容 Qwen/DeepSeek）
-│   │   ├── qwen.py                 # Qwen 适配（DashScope SDK）
-│   │   ├── gemini.py               # Gemini 适配
-│   │   └── moa/                    # 多模型协作（MoA）
-│   │       ├── __init__.py
-│   │       ├── router.py           # AdaptiveMoARouter 自适应路由
-│   │       └── aggregator.py       # MoAAggregator 响应聚合
-│   │
-│   ├── nodes/                      # 🆕 节点管理系统
-│   │   ├── __init__.py             # 模块导出
-│   │   ├── manager.py              # NodeManager 节点管理器
-│   │   ├── protocol.py             # 节点通信协议
-│   │   ├── executors/              # 执行器模块
-│   │   │   ├── base.py             # BaseExecutor 基类
-│   │   │   └── shell.py            # ShellExecutor 实现
-│   │   └── local/                  # 本地节点实现
-│   │       ├── base.py             # LocalNodeBase 基类
-│   │       └── macos.py            # MacOSLocalNode（macOS 专用）
+│   ├── llm/                        # LLM 适配层
+│   │   ├── base.py                 # LLM 基类
+│   │   ├── claude.py               # Claude 适配
+│   │   ├── openai.py               # OpenAI 适配
+│   │   └── gemini.py               # Gemini 适配
 │   │
 │   ├── events/                     # 事件系统
-│   │   ├── broadcaster.py          # EventBroadcaster 统一事件入口
 │   │   ├── manager.py              # 事件管理器
-│   │   ├── dispatcher.py           # 事件分发器
-│   │   ├── storage.py              # 事件存储（Redis/内存）
 │   │   ├── context_events.py       # 上下文事件
-│   │   └── adapters/               # 平台适配器（Zeno/Slack/飞书/钉钉）
+│   │   └── adapters/               # 平台适配器
 │   │
 │   ├── monitoring/                 # 监控系统
 │   │   ├── production_monitor.py   # 生产监控
@@ -5639,18 +2432,15 @@ zenflux_agent/
 │   │   ├── token_budget.py         # Token 预算管理
 │   │   └── token_audit.py          # Token 审计
 │   │
-│   ├── billing/                    # 统一计费模块
+│   ├── billing/                    # 🆕 V7.4: 统一计费模块
 │   │   ├── __init__.py             # 统一导出接口
-│   │   ├── models.py               # LLMCallRecord, UsageResponse
-│   │   ├── tracker.py              # EnhancedUsageTracker（唯一实现）
-│   │   └── pricing.py              # 模型定价表和成本计算
+│   │   └── pricing.py              # 定价和成本计算
 │   │
 │   ├── inference/                  # 语义推理
 │   │   └── semantic_inference.py   # 统一推理引擎
 │   │
 │   ├── orchestration/              # 代码编排
 │   │   ├── code_orchestrator.py    # 代码执行编排
-│   │   ├── pipeline_tracer.py      # E2E 流水线追踪
 │   │   └── code_validator.py       # 代码验证
 │   │
 │   └── schemas/                    # 数据模型
@@ -5681,15 +2471,7 @@ zenflux_agent/
 │   │   ├── timeout.py              # 超时控制
 │   │   ├── fallback.py             # 降级策略
 │   │   └── config.py               # 容错配置
-│   ├── database/                   # 🆕 V9.4: 数据库层
-│   │   ├── base.py                 # SQLAlchemy 基类
-│   │   ├── engine.py               # 数据库引擎
-│   │   ├── models/                 # ORM 模型
-│   │   │   ├── continuous_learning.py  # 🆕 持续学习模型
-│   │   │   └── ...                 # 其他模型
-│   │   └── crud/                   # CRUD 操作
-│   │       ├── continuous_learning.py  # 🆕 持续学习 CRUD
-│   │       └── ...                 # 其他 CRUD
+│   ├── database.py                 # 数据库
 │   └── cache.py                    # 缓存
 │
 ├── evaluation/                     # 评估系统
@@ -5698,65 +2480,14 @@ zenflux_agent/
 │   └── graders/                    # 评分器
 │
 ├── tools/                          # Built-in 工具
-│   ├── plan_todo_tool.py           # 计划管理工具
-│   └── nodes_tool.py               # 🆕 Nodes 工具（对齐 clawdbot）
-│
 ├── skills/                         # Skills 库
-│   └── library/                    # 系统级内置 Skills
-│       ├── planning-task/          # 任务规划 Skill
-│       ├── ontology-builder/       # 本体构建 Skill
-│       └── ...                     # 更多 Skills
-│
 ├── instances/                      # 实例配置
-│   ├── _template/                  # 模板配置
-│   │   ├── config.yaml             # 配置模板（含 llm_global）
-│   │   └── skills/                 # Skills 模板
-│   │       └── _template/
-│   │           └── SKILL.md
-│   └── {name}/                     # 实例目录
-│       ├── config.yaml             # 实例配置
-│       ├── prompt.md               # 系统提示词
-│       ├── prompt_results/         # 提示词生成结果
-│       │   ├── agent_schema.yaml
-│       │   ├── intent_prompt.md
-│       │   ├── simple_prompt.md
-│       │   ├── medium_prompt.md
-│       │   └── complex_prompt.md
-│       └── skills/                 # 实例级 Skills
-│           ├── skill_registry.yaml # Skills 注册表
-│           ├── github/             # GitHub Skill
-│           │   └── SKILL.md
-│           └── ...                 # 更多 Skills
-│
 ├── config/                         # 全局配置
-│   ├── llm_config/                 # LLM 配置管理
-│   │   ├── __init__.py             # 导出 get_llm_profile
-│   │   ├── loader.py               # 配置加载器（支持全局覆盖）
-│   │   ├── profiles.yaml           # 角色级 LLM 配置（含 fallbacks）
-│   │   ├── README.md               # 配置说明文档
-│   │   ├── qwen_fallback_optimization.md  # Qwen 回退优化指南
-│   │   └── qwen_recommended_configs.md    # Qwen 推荐配置
-│   ├── capabilities.yaml           # 工具能力定义（含 fallback_tool）
-│   └── context_compaction.yaml     # 上下文压缩配置
-│
 ├── scripts/                        # 脚本
 │   ├── instance_loader.py          # 实例加载器
-│   ├── check_instance_dependencies.py  # 🆕 V9.0: 部署依赖检查
 │   └── ...
-│
-├── tests/                          # 测试套件
-│   ├── test_skill_lazy_loading.py           # 🆕 V9.0: Skills 延迟加载单元测试
-│   ├── e2e_skill_lazy_loading.py            # 🆕 V9.0: Skills 延迟加载 E2E 验证
-│   ├── test_e2e_v9_intent_optimization.py   # 🆕 V9.0: 意图优化 E2E
-│   ├── test_e2e_v9_real_api.py              # 🆕 V9.0: 真实 API E2E
-│   ├── test_e2e_fallback_claude_to_qwen.py  # Claude→Qwen 回退 E2E
-│   ├── test_e2e_intent_single_agent.py      # 意图+单智能体 E2E
-│   ├── test_intent_semantic_cache.py        # 语义缓存测试
-│   └── ...                         # 其他测试文件
-│
 └── docs/                           # 文档
     └── architecture/               # 架构文档
-        └── 00-ARCHITECTURE-OVERVIEW.md  # 主架构文档
 ```
 
 ---
@@ -5800,69 +2531,18 @@ fallback:
     message: "AI 服务暂时不可用，请稍后重试"
 ```
 
-### 网络重试与容灾机制架构
-
-**多模型重试覆盖情况**：
-
-| 模型 | `@with_retry` 装饰器 | SDK 内置重试 | ModelRouter 主备切换 | 探针重试 |
-|------|---------------------|-------------|---------------------|----------|
-| **Claude** | ✅ `claude.py` L846 | ✅ Anthropic SDK `max_retries=3` | ✅ | ✅ |
-| **Qwen** | ❌ | ⚠️ DashScope SDK 未明确 | ✅ | ✅ `retry_async` |
-| **OpenAI** | ❌ | ❌ httpx 原生无重试 | ✅ | ✅ `retry_async` |
-| **Gemini** | ❌ 未实现 | — | — | — |
-
-**容灾层级**：
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    多模型容灾层级（自底向上）                                 │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  Layer 1: SDK 内置重试（仅 Claude）                                          │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  Anthropic SDK: max_retries=3                                       │    │
-│  │  - 自动处理 429/5xx 等临时错误                                       │    │
-│  │  - 指数退避策略                                                      │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                   ↑                                          │
-│  Layer 2: @with_retry 装饰器（仅 Claude）                                    │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  core/llm/claude.py: @with_retry(max_retries=3)                     │    │
-│  │  - APIConnectionError / APITimeoutError / RateLimitError            │    │
-│  │  - RemoteProtocolError / ConnectError                               │    │
-│  │  - 指数退避：1s → 2s → 4s + jitter                                   │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                   ↑                                          │
-│  Layer 3: 探针重试（所有模型）                                               │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  ModelRouter.probe() / BaseLLMService.probe()                       │    │
-│  │  - 非 Claude 模型使用 retry_async(max_retries=3)                    │    │
-│  │  - 探针失败 → 标记目标不可用                                         │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                   ↑                                          │
-│  Layer 4: ModelRouter 主备切换（所有模型）                                   │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  core/llm/router.py: ModelRouter                                    │    │
-│  │  - primary → fallbacks[] 顺序切换                                   │    │
-│  │  - policy.max_failures / policy.cooldown_seconds                    │    │
-│  │  - 高优先级自动回切（include_unhealthy=True）                        │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-**Claude 重试流程（最完整）**：
+### V7.3 网络重试机制架构
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                    Claude 网络重试机制（指数退避策略）                     │
+│                    网络重试机制（指数退避策略）                           │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                          │
 │  用户请求 → ChatService → SimpleAgent/MultiAgentOrchestrator            │
 │                                      ↓                                   │
 │                              core/llm/claude.py                          │
 │                           create_message_async()                         │
-│                        @with_retry(max_retries=3)                      │
+│                        @with_retry(max_retries=3)  ← 🆕 V7.3           │
 │                                      ↓                                   │
 │                         Anthropic API 调用                               │
 │                                      ↓                                   │
@@ -5906,50 +2586,6 @@ delay = min(base_delay × (exponential_base ^ attempt), max_delay) + jitter
 - 第 3 次重试：4.0s + jitter (~4.0-4.4s)
 ```
 
-**Qwen/OpenAI 容灾流程（依赖主备切换）**：
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    Qwen/OpenAI 容灾机制（主备切换）                        │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  用户请求 → ChatService → _probe_llm_service()                          │
-│                                      ↓                                   │
-│                         ModelRouter.probe(include_unhealthy=True)        │
-│                                      ↓                                   │
-│                         retry_async(max_retries=3)  ← 探针阶段有重试     │
-│                                      ↓                                   │
-│                         ┌────────────┴────────────┐                     │
-│                         │   探针成功？             │                     │
-│                         └────────────┬────────────┘                     │
-│                         ✅ 是         │         ❌ 否                    │
-│                         │            │                                  │
-│                    更新 last_selected │                                 │
-│                         │            ↓                                  │
-│                         │     尝试下一个 fallback                       │
-│                         │            ↓                                  │
-│                         │     全部失败 → 抛出异常                        │
-│                                      ↓                                   │
-│                         core/llm/qwen.py 或 openai.py                   │
-│                           create_message_async()                         │
-│                           ⚠️ 无 @with_retry（调用失败直接抛出）          │
-│                                      ↓                                   │
-│                         ┌────────────┴────────────┐                     │
-│                         │      成功？              │                     │
-│                         └────────────┬────────────┘                     │
-│                         ✅ 是         │         ❌ 否                    │
-│                         │            │                                  │
-│                    返回结果      _record_failure() → 下次自动切换        │
-│                                                                          │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-**✅ 已优化（V7.3.1）**：
-- ~~Qwen/OpenAI 的 `create_message_async` 缺少 `@with_retry` 装饰器~~ → **已添加**
-- Qwen (`core/llm/qwen.py:249`) 和 OpenAI (`core/llm/openai.py:136`) 已应用 `@with_retry` 装饰器
-- 与 Claude 保持一致的重试策略：最大 3 次重试，指数退避（1s → 2s → 4s）
-- 支持的异常类型：`ConnectionError`, `TimeoutError`, `httpx.RemoteProtocolError`, `httpx.ConnectError`, `httpx.TimeoutException`
-
 ### 架构分层改进（V7.3）
 
 **❌ 错误实现（已移除）**：
@@ -5959,15 +2595,9 @@ delay = min(base_delay × (exponential_base ^ attempt), max_delay) + jitter
 **✅ 正确实现（V7.3）**：
 - 在 `core/llm/claude.py` 的 `create_message_async` 方法上应用 `@with_retry`
 - **优势**：
-  - Claude 调用（SimpleAgent、MultiAgent、Critic）自动受益
+  - 所有 LLM 调用（SimpleAgent、MultiAgent、Critic）自动受益
   - 统一使用 `infra/resilience/retry.py` 的成熟实现
   - 关注点分离：业务层专注编排，基础设施层处理重试
-
-**✅ 已完善（V7.3.1）**：
-- ~~为 `core/llm/qwen.py` 和 `core/llm/openai.py` 添加 `@with_retry` 装饰器~~ → **已完成**
-- 所有模型（Claude/Qwen/OpenAI）已统一重试策略
-- 新增 LLM 服务降级策略注册（`services/chat_service.py`）
-- 端到端测试验证：`tests/test_e2e_resilience.py`（8 个测试用例）
 
 ### 熔断器状态
 
@@ -6046,52 +2676,29 @@ delay = min(base_delay × (exponential_base ^ attempt), max_delay) + jitter
 | InstancePromptCache 单例模式 | ✅ 一致 | `core/prompt/instance_cache.py` | `get_instance()` 实现单例 |
 | 启动时一次性加载 3 版本提示词 | ✅ 一致 | `instance_cache.py` | `_generate_all_prompts()` |
 | IntentAnalyzer 使用缓存 intent_prompt | ✅ 一致 | `core/routing/intent_analyzer.py` | `_get_intent_prompt()` 从缓存取 |
-| SimpleAgent 使用缓存 system_prompt | ✅ 一致 | `core/agent/simple/simple_agent.py` | `_prompt_cache.get_system_prompt()` |
+| SimpleAgent 使用缓存 system_prompt | ✅ 一致 | `core/agent/simple_agent.py` | `_prompt_cache.get_system_prompt()` |
 | LLM 语义分析生成 AgentSchema | ✅ 一致 | `core/agent/factory.py` | `_generate_schema_with_llm()` |
 | IntentPromptGenerator 动态生成 | ✅ 一致 | `core/prompt/intent_prompt_generator.py` | `generate()` 方法 |
 | 本地文件持久化 | ✅ 一致 | `core/prompt/instance_cache.py` | `_save_to_disk()` |
 | prompt_results 输出 | ✅ 一致 | `core/prompt/prompt_results_writer.py` | `write_all()` 方法 |
 | 缓存失效策略（哈希比对） | ✅ 一致 | `core/prompt/instance_cache.py` | `CacheMeta` |
 
-### 🆕 V9.0 Skills 机制一致性
-
-| 架构要求 | 代码实现状态 | 文件位置 | 说明 |
-|---------|-------------|---------|------|
-| SkillPromptBuilder 延迟加载 | ✅ 一致 | `core/prompt/skill_prompt_builder.py` | `build_lazy_prompt()` 方法 |
-| DynamicSkillLoader 依赖检查 | ✅ 一致 | `core/skill/dynamic_loader.py` | `is_skill_eligible()` 方法 |
-| RuntimeContextBuilder 环境检测 | ✅ 一致 | `core/prompt/runtime_context_builder.py` | `build()` 方法 |
-| skill_loading.mode 配置 | ✅ 一致 | `config.yaml` + `instance_loader.py` | lazy/eager 模式可配 |
-| skill_dependency_check 配置 | ✅ 一致 | `config.yaml` + `instance_loader.py` | 启动时依赖检查 |
-| 部署依赖检查脚本 | ✅ 一致 | `scripts/check_instance_dependencies.py` | CLI 工具 |
-
 ### 共享层一致性
 
 | 架构要求 | 代码实现状态 | 文件位置 | 说明 |
 |---------|-------------|---------|------|
 | IntentAnalyzer 从 SimpleAgent 剥离 | ✅ 一致 | `core/routing/intent_analyzer.py` | 独立模块 |
-| AgentRouter 路由决策 | ✅ 一致 | `core/routing/router.py` | `route()` 方法（V9.0 LLM-First） |
-| ConfigLoader 统一配置 | ✅ 一致 | `core/config/loader.py` | V9.0 新增，支持实例级覆盖 |
+| AgentRouter 路由决策 | ✅ 一致 | `core/routing/router.py` | `route()` 方法 |
+| ComplexityScorer 复杂度评分 | ✅ 一致 | `core/routing/complexity_scorer.py` | 向后兼容，优先用 LLM 评分 |
 | Plan Protocol 共享数据结构 | ✅ 一致 | `core/planning/protocol.py` | `Plan`, `PlanStep` |
 | PlanStorage 持久化 | ✅ 一致 | `core/planning/storage.py` | 存储接口 |
-| DAGScheduler 调度器 | ✅ 一致 | `core/planning/dag_scheduler.py` | V7.7 DAG 并行调度 |
 | MultiAgentOrchestrator 独立 | ✅ 一致 | `core/agent/multi/orchestrator.py` | 不继承 SimpleAgent |
-
-### Agent 引擎一致性
-
-| 架构要求 | 代码实现状态 | 文件位置 | 说明 |
-|---------|-------------|---------|------|
-| AgentProtocol 统一接口 | ✅ 一致 | `core/agent/protocol.py` | Python Protocol 实现 |
-| AgentCoordinator 协调器 | ✅ 一致 | `core/agent/coordinator.py` | 整合路由和创建 |
-| AgentFactory 无路由逻辑 | ✅ 一致 | `core/agent/factory.py` | `create_from_decision()` 统一入口 |
-| IntentResult V7.8 字段 | ✅ 一致 | `core/agent/types.py` | LLM 语义建议字段 |
-| 复杂度驱动 Schema 微调 | ✅ 一致 | `core/agent/factory.py` | `_adjust_schema_for_complexity()` |
-| 意图识别 Prompt V7.8 | ✅ 一致 | `prompts/intent_recognition_prompt.py` | 新增语义建议字段 |
 
 ### 服务层一致性
 
 | 架构要求 | 代码实现状态 | 文件位置 | 说明 |
 |---------|-------------|---------|------|
-| ChatService 集成 AgentCoordinator | ✅ 一致 | `services/chat_service.py` | V7.8 统一执行入口 |
+| ChatService 集成 AgentRouter | ✅ 一致 | `services/chat_service.py` | 路由决策在服务层 |
 | 三层架构（routers → services → core） | ✅ 一致 | 各层目录 | 职责分离 |
 | 健康检查端点 | ✅ 一致 | `routers/health.py` | `/health/live`, `/health/ready` |
 
@@ -6124,12 +2731,10 @@ delay = min(base_delay × (exponential_base ^ attempt), max_delay) + jitter
 | 架构要求 | 代码实现状态 | 说明 |
 |---------|-------------|------|
 | Agent Factory 规范化 | ✅ 已完成 | 详见下方清单 |
-| **V9.0** 删除 ComplexityScorer | ✅ 已完成 | LLM-First 原则，无代码层评分 |
-| IntentResult 完整字段 | ✅ 已完成 | `core/agent/types.py` 含 complexity 枚举 |
-| Instance prompt.md LLM 判断规则 | ✅ 已完成 | 自然语言驱动复杂度/路由判断 |
-| AgentRouter 纯 LLM 路由 | ✅ 已完成 | 直接使用 intent.needs_multi_agent |
-| ConfigLoader 统一配置 | ✅ 已完成 | `core/config/loader.py` 支持实例覆盖 |
-| 提示词模板外置 | ✅ 已完成 | `prompts/templates/` 目录 |
+| ComplexityScorer 合并到 IntentAnalyzer | ✅ 已完成 | LLM 一次性输出 complexity_score |
+| IntentResult 扩展 complexity_score 字段 | ✅ 已完成 | `core/agent/types.py` |
+| intent_prompt 复杂度评分指导 | ✅ 已完成 | `prompts/intent_recognition_prompt.py` |
+| AgentRouter 使用 intent.complexity_score | ✅ 已完成 | 优先 LLM 评分，兼容 ComplexityScorer |
 
 #### Agent Factory 初始化清单（规范化）
 
@@ -6228,197 +2833,152 @@ delay = min(base_delay × (exponential_base ^ attempt), max_delay) + jitter
 | AgentSchema 添加 multi_agent 字段 | ✅ 已完成 | `core/schemas/validator.py` |
 | AgentSchema 添加 LLM 超参数字段 | ✅ 已完成 | temperature/max_tokens/enable_thinking/enable_caching |
 | context_limits 配置生效 | ✅ 已完成 | `SimpleAgent.__init__` 读取并覆盖 context_strategy |
-| LLM 超参数传递链路 | ✅ 已完成 | `SimpleAgent._init_modules()` → create_llm_service() |
+| LLM 超参数传递链路 | ✅ 已完成 | `SimpleAgent._init_modules()` → create_claude_service() |
 | Schema to_dict() 包含 multi_agent | ✅ 已完成 | `validator.py to_dict()` |
 
 ---
 
 ### 端到端流程分析（部署态 vs 运行态）
 
-本章节描述 Agent 生命周期的两个关键阶段：**部署态**（启动时一次性加载）和**运行态**（每次请求快速响应）。
-
-🆕 **V9.0 架构变更**：`IntentAnalyzer` 已从 `SimpleAgent` 移至路由层 (`core/routing/`)，由 `AgentRouter` 统一调度。
-
-🆕 **V9.3 语义缓存**：意图识别增加两层缓存（L1 精确匹配 + L2 语义匹配），减少 LLM 调用。
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                       部署态（启动时一次性加载）                              │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  触发时机：应用启动时 → AgentRegistry.preload_all()                          │
-│                                                                              │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │ 1. 遍历 instances/ 目录                                             │    │
-│  │    for instance_name in list_instances():                           │    │
-│  │                                                                      │    │
-│  │ 2. 加载配置（一次性）                                                │    │
-│  │    ├── load_instance_env()        ← 环境变量                        │    │
-│  │    ├── load_instance_config()     ← config.yaml                     │    │
-│  │    ├── load_instance_prompt()     ← prompt.md                       │    │
-│  │    └── load_instance_cache()      ← prompt_results/（含 LLM 分解）   │    │
-│  │                                                                      │    │
-│  │ 3. 创建 Agent 原型（预创建）                                         │    │
-│  │    prototype = await _create_agent_prototype(config)                 │    │
-│  │    ├── AgentFactory.from_schema()                                    │    │
-│  │    ├── 初始化 LLM Services（重量级）                                 │    │
-│  │    ├── 初始化 ToolExecutor + CapabilityRegistry                     │    │
-│  │    ├── 初始化 MCP Clients（重量级）                                  │    │
-│  │    └── 标记 agent._is_prototype = True                               │    │
-│  │                                                                      │    │
-│  │ 4. 缓存原型                                                          │    │
-│  │    self._agent_prototypes[instance_name] = prototype                 │    │
-│  │                                                                      │    │
-│  │ ⚠️ 注意：部署态不创建以下组件（运行时延迟初始化）：                   │    │
-│  │    - AgentRouter（路由层）                                           │    │
-│  │    - IntentAnalyzer（意图识别）                                      │    │
-│  │    - IntentSemanticCache（语义缓存）                                 │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                              │
-│  📌 耗时：每个实例 50-200ms，启动时一次性完成                                │
-│  📌 缓存：_configs + _agent_prototypes                                      │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                   │
-                                   ↓
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                       运行态（每次请求快速响应）                              │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  触发时机：用户请求 → ChatService.chat()                                    │
-│                                                                              │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │ 1. 🆕 V9.3 路由层（延迟初始化）                                      │    │
-│  │    router = ChatService._get_router(prompt_cache)                    │    │
-│  │    ├── AgentRouter（首次调用时创建）                                 │    │
-│  │    │   └── IntentAnalyzer                                            │    │
-│  │    │       └── IntentSemanticCache（单例）                           │    │
-│  │    │           ├── L1: 精确匹配（hash）< 0.1ms                       │    │
-│  │    │           └── L2: 语义匹配（embedding）< 60ms                   │    │
-│  │    │                                                                 │    │
-│  │    └── decision = router.route(query) → RoutingDecision              │    │
-│  │                                                                      │    │
-│  │ 2. Agent 获取（原型复用）                                            │    │
-│  │    agent = AgentRegistry.get_agent(agent_id)                         │    │
-│  │                                                                      │    │
-│  │    if agent_id in _agent_prototypes:                                 │    │
-│  │        # 🚀 浅拷贝（<5ms）                                           │    │
-│  │        agent = prototype.clone_for_session(...)                      │    │
-│  │    else:                                                             │    │
-│  │        # ⚠️ 回退：按需创建（50-100ms）                               │    │
-│  │        agent = AgentFactory.from_schema(...)                         │    │
-│  │                                                                      │    │
-│  │ 3. 复用的重量级组件（不重新创建）：                                   │    │
-│  │    - LLM Services                                                    │    │
-│  │    - ToolExecutor / CapabilityRegistry                               │    │
-│  │    - MCP Clients                                                     │    │
-│  │    - Schema / Prompt Cache                                           │    │
-│  │                                                                      │    │
-│  │ 4. 重置的会话级状态：                                                 │    │
-│  │    - EventBroadcaster（新建）                                        │    │
-│  │    - _plan_cache（清空）                                             │    │
-│  │    - invocation_stats（清空）                                        │    │
-│  │    - workspace_dir（绑定）                                           │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                              │
-│  📌 耗时：路由 <100ms（缓存命中）/ <500ms（LLM）+ Agent <5ms（浅拷贝）      │
-│  📌 无 reload：不重新加载 config.yaml / prompt.md                           │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-#### 一、部署态详解
-
-| 步骤 | 操作 | 耗时 | 执行频率 |
-|------|------|------|----------|
-| 扫描实例 | `list_instances()` | < 10ms | 启动时 1 次 |
-| 加载配置 | `load_instance_config()` | < 50ms/实例 | 启动时 1 次 |
-| 加载缓存 | `load_instance_cache()` | < 100ms（命中）/ 2-3s（未命中） | 启动时 1 次 |
-| 创建原型 | `_create_agent_prototype()` | 50-200ms/实例 | 启动时 1 次 |
-
-**原型创建逻辑**：
-- `schema.multi_agent = None` → 创建 `SimpleAgent` 原型
-- `schema.multi_agent != None` → 创建 `MultiAgentOrchestrator` 原型
-
-#### 二、运行态详解
-
-**🆕 V9.3 路由层耗时预算**：
-
-| 场景 | 耗时 | 说明 |
-|------|------|------|
-| L1 精确匹配（hash） | < 0.1ms | 相同查询直接命中 |
-| L2 语义匹配（embedding） | < 60ms | Embedding 50ms + 相似度 5ms |
-| LLM 意图识别（Haiku） | 200-400ms | 缓存未命中时调用 |
-| **总预算** | **< 500ms** | 含语义缓存的意图识别 |
-
-**ChatService.chat() 执行流程**：
+#### 一、部署态流程（服务启动时一次性执行）
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                  ChatService.chat() 详细流程                             │
+│                    部署态：AgentRegistry.preload_all()                   │
+│                       （服务启动时执行，应 < 5秒）                        │
 ├─────────────────────────────────────────────────────────────────────────┤
-│  阶段 1: Router 初始化         延迟创建 AgentRouter                      │
-│  阶段 2: Intent Analysis       🆕 V9.3 语义缓存优先                      │
-│          ├── L1 精确匹配       hash 命中 → 直接返回                      │
-│          ├── L2 语义匹配       embedding + 相似度 → score >= 0.92 命中   │
-│          └── LLM Fallback      缓存未命中 → Haiku 分析                   │
-│  阶段 3: Agent 获取            原型浅拷贝（<5ms）                         │
-│  阶段 4: Tool Selection        Schema 驱动                               │
-│  阶段 5: System Prompt 组装    运行时上下文注入                          │
-│  阶段 6: Plan Creation         Claude 自主触发                           │
-│  阶段 7: RVR Loop              核心执行循环                              │
-│  阶段 8: Final Output          完成输出                                  │
+│  1. list_instances()           扫描 instances/ 目录                      │
+│  2. 对每个实例执行：                                                      │
+│     ├─ load_instance_env()     加载 .env                                 │
+│     ├─ load_instance_config()  加载 config.yaml                          │
+│     ├─ load_instance_prompt()  加载 prompt.md                            │
+│     ├─ load_instance_cache()   【核心】加载 InstancePromptCache          │
+│     │   ├─ 优先磁盘缓存（< 100ms）                                       │
+│     │   └─ 缓存失效时 LLM 分析（2-3秒）                                   │
+│     ├─ _prepare_apis()         准备 API 认证头                           │
+│     └─ 创建 AgentConfig        缓存到 _configs Dict                      │
+├─────────────────────────────────────────────────────────────────────────┤
+│  产出：_configs: Dict[str, AgentConfig]                                  │
+│       └─ AgentConfig: instance_config, prompt_cache, full_prompt        │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-#### 三、组件复用 vs 会话重置
+| 步骤 | 操作 | 耗时 | 执行频率 |
+|------|------|------|----------|
+| 扫描实例 | list_instances() | < 10ms | 启动时 1 次 |
+| 加载配置 | load_instance_config() | < 50ms/实例 | 启动时 1 次 |
+| 加载缓存 | load_instance_cache() | < 100ms（命中）/ 2-3s（未命中） | 启动时 1 次 |
+| 准备 API | _prepare_apis() | < 10ms/实例 | 启动时 1 次 |
 
-| 类别 | 组件 | 说明 |
-|------|------|------|
-| **复用（共享）** | LLM Services | HTTP 客户端、连接池 |
-| | ToolExecutor | 工具执行器 |
-| | CapabilityRegistry | 工具注册表 |
-| | MCP Clients | MCP 客户端连接 |
-| | Schema / Prompt Cache | 配置与提示词缓存 |
-| | 🆕 IntentSemanticCache | 语义缓存（单例，跨会话共享） |
-| **延迟初始化（服务级）** | AgentRouter | 首次路由时创建 |
-| | IntentAnalyzer | 路由器内置 |
-| | EmbeddingService | 语义缓存依赖 |
-| **重置（会话级）** | EventBroadcaster | 每会话新建 |
-| | `_plan_cache` | 清空 |
-| | `invocation_stats` | 清空 |
-| | `workspace_dir` | 绑定新路径 |
-| | `_last_intent_result` | 清空 |
-| | `_tracer` | 新建追踪器 |
+#### 二、运行态流程（每次用户请求）
 
-#### 四、历史问题与优化状态
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    运行态：ChatService.chat()                            │
+│                    （每次用户请求，目标 TTFB < 500ms）                    │
+├─────────────────────────────────────────────────────────────────────────┤
+│  1. 验证 agent_id              O(1) 哈希查找                             │
+│  2. 处理文件（可选）            文件解析、分类                            │
+│  3. 创建 Session               SessionService.create_session()           │
+│  4. 获取 Agent                 AgentRegistry.get_agent() ← 【关注点】    │
+│  5. 执行 Agent                 SimpleAgent.chat()                        │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│              AgentRegistry.get_agent() 详细流程（当前实现）              │
+├─────────────────────────────────────────────────────────────────────────┤
+│  1. 从 _configs 获取预加载的 AgentConfig           ✅ O(1) 快速          │
+│  2. AgentFactory.from_schema()                     ⚠️ 每次创建新实例     │
+│     └─ SimpleAgent.__init__()                                            │
+│         ├─ create_capability_registry()            ⚠️ 重复创建           │
+│         ├─ create_claude_service() × 2             ⚠️ LLM service        │
+│         ├─ create_intent_analyzer()                ⚠️ 重复创建           │
+│         ├─ create_tool_selector()                  ⚠️ 重复创建           │
+│         ├─ create_tool_executor()                  ⚠️ 重复创建           │
+│         ├─ create_plan_todo_tool()                 ⚠️ 重复创建           │
+│         └─ _register_tools_to_llm()                ⚠️ 重复注册           │
+│  3. _setup_instance_tools()                        ⚠️ 每次重新设置       │
+│     ├─ create_tool_loader()                                              │
+│     ├─ load_tools()                                                      │
+│     └─ create_filtered_registry()                                        │
+│  4. _register_mcp_tools()                          ⚠️ 每次重新注册       │
+│     └─ 遍历 MCP 工具，注册处理器                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                  SimpleAgent.chat() 详细流程                             │
+├─────────────────────────────────────────────────────────────────────────┤
+│  阶段 2: Intent Analysis       Haiku 快速分析（可从路由层跳过）          │
+│  阶段 3: Tool Selection        Schema 驱动                               │
+│  阶段 4: System Prompt 组装    运行时上下文注入                          │
+│  阶段 5: Plan Creation         Claude 自主触发                           │
+│  阶段 6: RVR Loop              核心执行循环                              │
+│  阶段 7: Final Output          完成输出                                  │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 三、发现的问题与优化状态
 
 | 问题 | 现状 | 影响 | 优化方案 | 状态 |
 |------|------|------|----------|------|
-| **Agent 实例每次创建** | `AgentFactory.from_schema()` 每次请求都创建新实例 | 增加 ~50-100ms 延迟 | Agent 原型池化 + `clone_for_session()` | ✅ 已实现 |
+| **Agent 实例每次创建** | `AgentFactory.from_schema()` 每次请求都创建新实例 | 增加 ~50-100ms 延迟 | Agent 原型池化 + clone_for_session() | ✅ 已实现 |
 | **LLM Service 重复创建** | `create_claude_service()` 每次请求创建 2 个 | HTTP 客户端初始化开销 | 原型复用（LLM Service 共享） | ✅ 已实现 |
 | **工具注册表重复创建** | `create_capability_registry()` 每次请求 | 遍历和注册开销 | 原型复用（工具注册表共享） | ✅ 已实现 |
 | **MCP 工具重复注册** | `_register_mcp_tools()` 每次请求 | 重复创建处理器闭包 | 原型预注册（MCP 客户端共享） | ✅ 已实现 |
 | **ToolLoader 重复加载** | `load_tools()` 每次请求 | 重复遍历和过滤 | 原型复用（工具加载结果共享） | ✅ 已实现 |
 
-#### 五、实现代码位置
+#### 四、已实现优化方案
+
+**已采用方案: Agent 原型池化 ✅（单/多智能体统一）**
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    优化后：部署态                                        │
+├─────────────────────────────────────────────────────────────────────────┤
+│  AgentRegistry.preload_all():                                            │
+│  1. 加载 AgentConfig（现有逻辑）                                         │
+│  2. ✅ 预创建 Agent 原型实例 → _create_agent_prototype()                 │
+│     ├─ AgentFactory.from_schema() 自动选择：                             │
+│     │  • schema.multi_agent = None → SimpleAgent 原型                    │
+│     │  • schema.multi_agent != None → MultiAgentOrchestrator 原型        │
+│     ├─ SimpleAgent: 缓存 LLM、工具注册表、MCP 客户端                     │
+│     └─ MultiAgent: 缓存 LLM、任务分解器、Worker 配置                     │
+│  3. ✅ Agent 原型存入 _agent_prototypes: Dict[str, Agent]                │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    优化后：运行态                                        │
+├─────────────────────────────────────────────────────────────────────────┤
+│  AgentRegistry.get_agent():                                              │
+│  1. 从 _agent_prototypes 获取原型                 O(1)                   │
+│  2. ✅ prototype.clone_for_session()              < 1ms                  │
+│     ├─ SimpleAgent 复用：                                                │
+│     │  • LLM Service、工具注册表、MCP 客户端                             │
+│     │  • 重置：_plan_cache、_last_intent_result、_tracer                 │
+│     ├─ MultiAgent 复用：                                                 │
+│     │  • LLM Service、任务分解器、结果聚合器、Worker 配置                │
+│     │  • 重置：FSM 引擎、Worker 调度器、容错层                           │
+│     └─ 统一接口：两者都实现 clone_for_session()                          │
+│  3. 返回就绪的 Agent 实例                                                │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**实现代码位置**
 
 | 组件 | 文件 | 说明 |
 |------|------|------|
-| `_agent_prototypes` | `services/agent_registry.py` | Agent 原型缓存（单智能体） |
-| `_multi_agent_prototype` | `services/chat_service.py` | 多智能体原型缓存 |
-| `_create_agent_prototype()` | `services/agent_registry.py` | 部署态预创建原型（单智能体） |
-| `AgentFactory.from_schema()` | `core/agent/factory.py` | 根据 multi_agent 自动选择 |
-| `SimpleAgent.clone_for_session()` | `core/agent/simple/simple_agent.py` | 单智能体浅克隆 |
-| `MultiAgentOrchestrator.clone_for_session()` | `core/agent/multi/orchestrator.py` | ✅ V7.9: 多智能体浅克隆 |
-| `ChatService._get_multi_agent_orchestrator()` | `services/chat_service.py` | 多智能体原型复用 |
+| `_agent_prototypes` | `services/agent_registry.py` | Agent 原型缓存（单/多智能体统一） |
+| `_create_agent_prototype()` | `services/agent_registry.py` | 部署态预创建原型（自动识别类型） |
+| `AgentFactory.from_schema()` | `core/agent/factory.py` | 🆕 V7.1: 根据 multi_agent 自动选择 |
+| `SimpleAgent.clone_for_session()` | `core/agent/simple_agent.py` | 单智能体浅克隆 |
+| `MultiAgentOrchestrator.clone_for_session()` | `core/multi_agent/orchestrator.py` | 🆕 V7.1: 多智能体浅克隆 |
 | `update_context()` | `core/tool/executor.py` | 更新工具上下文 |
 
-#### 六、优化效果
+#### 五、预期优化效果
 
 | 指标 | 优化前 | 优化后 | 提升 |
 |------|--------|--------|------|
-| `get_agent()` 耗时 | 50-100ms | < 5ms | 90%+ |
+| get_agent() 耗时 | 50-100ms | < 5ms | 90%+ |
 | 首字响应 (TTFB) | 500-800ms | 300-500ms | 30-40% |
 | 内存占用 | N × Agent 组件 | 1 × 共享组件 + N × 状态 | 显著降低 |
 | GC 压力 | 每请求创建大量对象 | 仅创建会话状态 | 显著降低 |
@@ -6522,72 +3082,6 @@ response = await claude.create_message(
 - 需要容错和恢复
 - 企业级应用
 
-#### 方案 C：Google A2A 真正多智能体框架（🔜 待定）
-
-**背景分析**：
-
-当前实现属于**"编排型"（Orchestrator-Workers）**多智能体模式：
-- LeadAgent 集中分解任务
-- Workers 执行具体任务（轻量级智能体：独立 LLM + 系统提示词 + 工具 + 共享记忆）
-- Critic 质量评审
-- 非"完全自主型"Agent-to-Agent 协作
-
-**Google A2A（Agent-to-Agent）核心特点**：
-
-| 维度 | 当前编排型 | Google A2A |
-|------|-----------|------------|
-| **通信模式** | 中央协调器分发任务 | Agent 之间直接通信（P2P） |
-| **Agent 发现** | 静态配置 Workers | 动态发现（Agent Card） |
-| **协议标准** | 自定义内部协议 | 开放标准（JSON-RPC 2.0） |
-| **身份与状态** | 无持久身份 | 独立身份、持久状态 |
-| **记忆隔离** | 共享 WorkingMemory | 独立记忆 + 选择性共享 |
-| **规划能力** | LeadAgent 统一规划 | 每个 Agent 自主规划 |
-| **任务委派** | Orchestrator → Worker | Agent → Agent（Task/Artifact） |
-
-**待实现功能**：
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    Google A2A 架构要点                                       │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  1. Agent Card（智能体身份卡）                                               │
-│     ├── name, description, url                                              │
-│     ├── capabilities（能力声明）                                            │
-│     ├── skills（可执行的技能）                                              │
-│     └── authentication（认证方式）                                          │
-│                                                                              │
-│  2. A2A Protocol（Agent 间通信协议）                                        │
-│     ├── tasks/send（发送任务）                                              │
-│     ├── tasks/get（获取任务状态）                                           │
-│     ├── tasks/cancel（取消任务）                                            │
-│     └── tasks/sendSubscribe（SSE 订阅）                                     │
-│                                                                              │
-│  3. Task & Artifact（任务与产物）                                           │
-│     ├── Task: id, state, messages, artifacts                                │
-│     ├── Artifact: 任务产出物（文件、数据等）                                │
-│     └── Message: 多模态消息（text, file, data）                             │
-│                                                                              │
-│  4. Agent Discovery（智能体发现）                                           │
-│     ├── 注册中心模式                                                        │
-│     └── 或 Well-known URL（/.well-known/agent.json）                        │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-**实现路径**（待定）：
-
-| 阶段 | 内容 | 优先级 |
-|------|------|--------|
-| Phase 1 | Agent Card 定义 + 能力声明 | P2 |
-| Phase 2 | A2A Protocol 实现（JSON-RPC 2.0） | P2 |
-| Phase 3 | Agent Discovery 机制 | P3 |
-| Phase 4 | 独立记忆 + 自主规划能力 | P3 |
-
-**参考资料**：
-- [Google A2A Protocol](https://github.com/google/a2a)
-- [Agent Card Specification](https://google.github.io/a2a/#/documentation?id=agent-card)
-
 ### 🎯 推荐策略：混合架构
 
 ```
@@ -6618,38 +3112,126 @@ response = await claude.create_message(
 
 ---
 
+## V7.2 关键改进总结 🎯
+
+### 问题发现：架构文档与实际代码不一致
+
+**发现的问题**：
+1. ❌ 架构文档声称"路由层默认启用"，实际代码 `enable_routing=False`
+2. ❌ 多智能体框架被注释掉，无法使用
+3. ❌ Subagent 工具未加载，导致执行失败
+4. ❌ 记忆系统未集成，无法访问上下文
+
+### V7.2 完整修复
+
+| 修复项 | 修改前 | 修改后 | 文件 |
+|-------|--------|--------|------|
+| **路由层激活** | `enable_routing=False` | `enable_routing=True` | `chat_service.py:81` |
+| **多智能体导入** | 被注释 | 完整导入 | `chat_service.py:36-37` |
+| **多智能体配置** | 被注释 | 启用并初始化 | `chat_service.py:88-91` |
+| **多智能体执行** | 降级为单智能体 | 完整实现 | `chat_service.py:513-542` |
+| **工具动态加载** | ❌ 缺失 | ✅ `_load_subagent_tools()` | `orchestrator.py:1077-1129` |
+| **记忆系统初始化** | ❌ 缺失 | ✅ `_initialize_shared_resources()` | `orchestrator.py:1031-1075` |
+| **工具注册到 LLM** | ❌ 缺失 `tools=` 参数 | ✅ 添加 `tools=tools` | `orchestrator.py:804,1222` |
+| **配置加载函数** | ❌ 不存在 | ✅ `load_multi_agent_config()` | `models.py:335-434` |
+
+### 现在的完整流程
+
+```
+用户请求
+    ↓
+ChatService.chat() (enable_routing=True)
+    ↓
+AgentRouter.route()
+    ├─ IntentAnalyzer.analyze() → complexity_score
+    └─ RoutingDecision(use_multi_agent: bool)
+    ↓
+┌──────────────────────────────────────┐
+│ if use_multi_agent:                  │
+│   ✅ MultiAgentOrchestrator.execute()│
+│   ├─ _initialize_shared_resources() │
+│   │  • ToolLoader                    │
+│   │  • WorkingMemory                 │
+│   │  • Mem0 客户端                   │
+│   ├─ Lead Agent 任务分解             │
+│   ├─ _execute_single_agent()         │
+│   │  ├─ _load_subagent_tools()      │
+│   │  └─ llm.create_message_async(   │
+│   │       tools=tools  ✅            │
+│   │     )                            │
+│   ├─ Critic Agent 评估              │
+│   └─ Lead Agent 综合                │
+│ else:                                │
+│   ✅ SimpleAgent.chat()              │
+└──────────────────────────────────────┘
+```
+
+### 验证方式
+
+运行端到端测试：
+```bash
+cd CoT_agent/mvp/zenflux_agent
+python tests/test_e2e_research_report.py
+```
+
+**预期结果**：
+- ✅ 路由层启用
+- ✅ 任务分解成功（4 个子任务）
+- ✅ Subagent 工具加载成功
+- ✅ 所有 Agent 执行成功（不再出现 `success: False`）
+- ✅ 最终报告生成
+
+---
+
+## 版本演进
+
+| 版本 | 日期 | 核心变化 |
+|------|------|---------|
+| **V7.5** | 2026-01-16 | **当前版本**：多模型计费追踪 + Dify 兼容增强 + E2E 验证完成 |
+| V7.4 | 2026-01-16 | 统一计费系统 + Token 使用追踪 |
+| V7.3 | 2026-01-16 | 网络弹性增强 + 统一重试机制 + 架构分层优化 |
+| V7.2 | 2026-01-15 | 多智能体完整集成 + Critic Agent 质量保证 + 工具/记忆系统 + 路由层激活 |
+| V7.1 | 2026-01-15 | 多智能体生产就绪 + Anthropic 启发优化（池化、Prompts Engineering、成本预算、检查点恢复） |
+| V7.0 | 2026-01-15 | 单/多智能体独立 + 共享层剥离 + 生产就绪 |
+| V6.3 | 2026-01-14 | 上下文压缩三层防护 + RVR 循环深化 |
+| V6.2 | 2026-01-13 | 三级配置优先级 + AgentSchema 智能兜底 |
+| V6.1 | 2026-01-13 | 场景化提示词分解 + prompt_results 输出 |
+| V5.1 | 2026-01-11 | 评估体系 + 共享层剥离 + Mem0 多层画像 |
+| V5.0 | 2026-01-09 | 实例级提示词缓存 + LLM 语义驱动 Schema |
+
+---
+
 ## 架构设计目标
 
-### 核心目标
+### V7.0 核心目标
 
-**架构原则**：
 - **单/多智能体独立**：执行框架平级独立，不互相调用
 - **共享层清晰**：IntentAnalyzer、Plan 协议独立为共享模块
 - **配置优先级**：config.yaml > LLM 推断 > DEFAULT_AGENT_SCHEMA
 - **高质量兜底**：即使运营配置不全/错误，Agent 也能高质量运行
-- **Prompt-First**：规则写在 Prompt 里，不写在代码里
-- **简洁清晰**：Service → AgentRouter → Agent 直接调用
-
-**运营支持**：
 - **Prompt-Driven**：运营 prompt.md → LLM 分解 → 场景化提示词
 - **运营可见可编辑**：prompt_results/ 目录，所有生成文件可直接修改
 - **智能更新**：检测源文件变更，保护手动编辑
+- **简洁清晰**：Service → AgentRouter → Agent 直接调用
+- **Prompt-First**：规则写在 Prompt 里，不写在代码里
+- **生产就绪**：容错、监控、评估体系完备
 
-**性能优化**：
-- **原型池化**：Agent 实例复用，`get_agent()` < 5ms
-- **上下文隔离**：Subagent 独立上下文，显著降低 token 消耗
-- **成本可控**：多智能体预算管理，自动降级策略
+### V7.1 新增目标
 
-**生产就绪**：
-- **容错增强**：检查点恢复，失败时不从头开始
-- **网络弹性**：统一重试机制，自动处理连接错误、超时、限流
-- **架构分层**：重试逻辑从业务层移至基础设施层，关注点分离
-- **指数退避**：1s → 2s → 4s，智能延迟策略
-- **监控评估**：容错、监控、评估体系完备
+- **🆕 原型池化**：Agent 实例复用，`get_agent()` < 5ms
+- **🆕 Prompts Engineering**：8 个核心要素构建 Subagent 系统提示词
+- **🆕 上下文隔离**：Subagent 独立上下文，显著降低 token 消耗
+- **🆕 成本可控**：多智能体预算管理，自动降级策略
+- **🆕 容错增强**：检查点恢复，失败时不从头开始
+- **🆕 Anthropic 对齐**：参考业界最佳实践，生产级多智能体系统
 
-**多智能体**：
-- **Prompts Engineering**：8 个核心要素构建 Subagent 系统提示词
-- **Anthropic 对齐**：参考业界最佳实践，生产级多智能体系统
+### V7.3 新增目标
+
+- **🔄 网络弹性**：统一重试机制，自动处理连接错误、超时、限流
+- **🏗️ 架构分层**：重试逻辑从业务层移至基础设施层，关注点分离
+- **📊 指数退避**：1s → 2s → 4s，智能延迟策略
+- **🎯 异常精准**：配置 Anthropic 特定异常类型，避免无效重试
+- **♻️ 代码复用**：所有 LLM 调用自动受益，无需重复实现
 
 ---
 
@@ -7028,9 +3610,9 @@ class HybridExecutionConfig(BaseModel):
 | **P2** | 混合执行模式 | 2-3 天 | 低（优化） |
 | **P2** | 单智能体 critic_tool（V7.2 待办） | 2-3 天 | 中（质量） |
 
-### 未来待办：单智能体 critic_tool
+### V7.2 未来待办：单智能体 critic_tool
 
-**背景**：多智能体已实现 Critic Agent，但单智能体场景目前没有质量评估机制。
+**背景**：V7.2 实现了多智能体的 Critic Agent，但单智能体场景目前没有质量评估机制。
 
 **设计思路**：类似 `plan_todo_tool`，实现一个 `critic_tool` 供 Claude 自主调用：
 
@@ -7150,16 +3732,15 @@ LeadAgent (使用 Claude Opus)
       ├── 准确性验证
       └── 改进建议
 
-PlanStep 数据结构（V7.8 统一，原 SubTask 已废弃）
-  ├── id: str                                  # 步骤 ID
+SubTask 数据结构（明确定义）
+  ├── title: str                               # 子任务标题
   ├── description: str                         # 详细描述
-  ├── assigned_agent_role: str                 # 分配角色
+  ├── assigned_agent_role: AgentRole           # 分配角色
   ├── tools_required: List[str]                # 需要的工具
   ├── expected_output: str                     # 期望输出格式
   ├── success_criteria: List[str]              # 成功标准
-  ├── dependencies: List[str]                  # 依赖关系
-  ├── constraints: List[str]                   # 约束条件
-  └── metadata: Dict                           # 扩展元数据（包含 title）
+  ├── depends_on: List[str]                    # 依赖关系
+  └── constraints: List[str]                   # 约束条件
 ```
 
 **对比传统方式**：
@@ -7253,10 +3834,10 @@ AgentRouter 决策规则（core/routing/router.py）
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 1. intent.needs_multi_agent == true  → 多智能体
-   （LLM 语义判断需要多智能体协作）
+   （意图分析明确需要）
 
-2. intent.needs_multi_agent = false → 单智能体
-   （默认或简单任务）
+2. complexity.score > 5.0           → 多智能体
+   （复杂度评分超过阈值）
 
 3. 其他情况                         → 单智能体
    （默认，成本低）
@@ -7291,11 +3872,11 @@ AgentRouter 决策规则（core/routing/router.py）
 
 ---
 
-### 架构演进对比
+### V7.1 架构对比
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│              架构演进：Anthropic 启发的改进                               │
+│              V7.0 vs V7.1: Anthropic 启发的改进                          │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                          │
 │  V7.0 (原始设计)                    V7.1 (Anthropic 启发)               │
@@ -7326,13 +3907,13 @@ AgentRouter 决策规则（core/routing/router.py）
 | **执行追踪** | ✅ 已实现 | `orchestrator._trace()` |
 | **Worker Agent 实现** | ✅ 已实现 | `orchestrator._execute_single_agent()` |
 | **Prompts Engineering** | ✅ 已实现 | `_build_subagent_system_prompt()` (8 个核心要素) |
-| **上下文隔离** | ✅ 已实现 | `_execute_single_agent()` + 摘要回传（V7.8 重构） |
+| **上下文隔离** | ✅ 已实现 | `SubagentResult` + `_spawn_subagent()` |
 | **强弱配对策略** | ✅ 已实现 | `OrchestratorConfig` + `WorkerConfig` |
 | **蓝绿部署** | ⏳ 待实现 | 需要基础设施 |
 
 ---
 
-## Prompts Engineering 核心
+## V7.1 实施总结：Prompts Engineering 核心
 
 ### 实施内容
 
@@ -7342,7 +3923,7 @@ AgentRouter 决策规则（core/routing/router.py）
 
 实现了 8 个核心要素（参考 Anthropic Multi-Agent System）：
 
-1. **明确的目标（Objective）** - 基于 PlanStep 定义（V7.8 统一）
+1. **明确的目标（Objective）** - 基于 SubTask 定义
 2. **期望输出格式（Output Format）** - 结构化 JSON/Markdown
 3. **可用工具指导（Tools Guidance）** - 工具选择启发式规则
 4. **任务边界（Task Boundaries）** - 明确约束和范围
@@ -7356,7 +3937,7 @@ AgentRouter 决策规则（core/routing/router.py）
 def _build_subagent_system_prompt(
     self,
     config: AgentConfig,
-    plan_step: Optional[PlanStep] = None,  # V7.8: 统一使用 PlanStep
+    subtask: Optional[SubTask] = None,
     orchestrator_context: Optional[str] = None,
 ) -> str:
     # 组装 8 个核心要素
@@ -7430,8 +4011,8 @@ class SubagentResult(BaseModel):
     summary_compression_ratio: float  # 摘要压缩比
 ```
 
-**核心方法**：
-- `_execute_single_agent()` - 执行 Subagent（V7.8 统一入口，替代原 `_spawn_subagent`）
+**新增方法**：
+- `_spawn_subagent()` - 生成并执行 Subagent（上下文隔离）
 - `_build_orchestrator_summary()` - 生成 Orchestrator 摘要（< 500 tokens）
 - `_compress_subagent_output()` - 压缩 Subagent 输出
 
@@ -7522,9 +4103,8 @@ class WorkerConfig(BaseModel):
    - 路由配置扩展（用户预算）
    - AgentRouter 增强（成本估算）
 
-3. **集成到 AgentRouter** ✅
-   - 完全依赖 LLM 语义判断 `needs_multi_agent`
-   - 移除硬编码的 complexity_threshold 阈值
+3. **集成到 AgentRouter** ⏳
+   - 当 `complexity.score > 5.0` 时路由到多智能体
    - 传递 intent 信息给 Lead Agent
 
 4. **评估与监控** ⏳
@@ -7538,20 +4118,20 @@ class WorkerConfig(BaseModel):
 
 | 文档 | 说明 |
 |------|------|
-| [00-ARCHITECTURE-OVERVIEW.md](./00-ARCHITECTURE-OVERVIEW.md) | V8.0 架构总览（本文档） |
+| [00-ARCHITECTURE-OVERVIEW.md](./00-ARCHITECTURE-OVERVIEW.md) | V7.5 架构总览（本文档） |
 | [01-MEMORY-PROTOCOL.md](./01-MEMORY-PROTOCOL.md) | Memory-First Protocol 详解 |
 | [03-EVENT-PROTOCOL.md](./03-EVENT-PROTOCOL.md) | SSE 事件协议 |
 | [15-FRAMEWORK_PROMPT_CONTRACT.md](./15-FRAMEWORK_PROMPT_CONTRACT.md) | Prompt-Driven 设计契约 |
-| [21-BILLING_V7.5_IMPLEMENTATION_SUMMARY.md](./21-BILLING_V7.5_IMPLEMENTATION_SUMMARY.md) | Token 计费系统完整文档（设计+实施） |
+| **✅ [21-BILLING_V7.5_IMPLEMENTATION_SUMMARY.md](./21-BILLING_V7.5_IMPLEMENTATION_SUMMARY.md)** | **Token 计费系统 V7.5 完整文档**（设计+实施） |
 | [tool_configuration_guide.md](../tool_configuration_guide.md) | 工具配置指南 |
 | **🆕 [multi_agent_config.yaml](../../config/multi_agent_config.yaml)** | 多智能体配置（强弱配对） |
 | **🆕 [token_budget.py](../../core/monitoring/token_budget.py)** | 成本预算管理 |
-| **🆕 [checkpoint.py](../../core/agent/multi/checkpoint.py)** | 检查点恢复机制 |
+| **🆕 [checkpoint.py](../../core/multi_agent/checkpoint.py)** | 检查点恢复机制 |
 | [archived/](./archived/) | 历史版本 |
 
 ---
 
-## 技术栈总结
+## V7.1 技术栈总结
 
 ### 核心技术
 
@@ -7566,15 +4146,15 @@ class WorkerConfig(BaseModel):
 
 ### 关键优化指标
 
-| 指标 | 优化前 | 当前 | 提升 |
-|------|--------|------|------|
-| `get_agent()` 耗时 | 50-100ms | < 5ms | **90%+** |
-| 首字响应 (TTFB) | 500-800ms | 300-500ms | **30-40%** |
-| 内存占用 | N × 完整组件 | 1 × 共享组件 | **显著降低** |
-| 多智能体成本 | 无预算控制 | 预算 + 自动降级 | **成本可控** |
-| 容错能力 | 从头重试 | 检查点恢复 | **显著提升** |
-| 工具加载 | 未实现 | 动态加载 | **100% 改进** |
-| 记忆集成 | 未实现 | 完全集成 | **100% 改进** |
+| 指标 | V7.0 | V7.1 | V7.2 | 提升 |
+|------|------|------|------|------|
+| `get_agent()` 耗时 | 50-100ms | < 5ms | < 5ms | **90%+** |
+| 首字响应 (TTFB) | 500-800ms | 300-500ms | 300-500ms | **30-40%** |
+| 内存占用 | N × 完整组件 | 1 × 共享组件 | 1 × 共享组件 | **显著降低** |
+| 多智能体成本 | 无预算控制 | 预算 + 自动降级 | 预算 + 自动降级 | **成本可控** |
+| 容错能力 | 从头重试 | 检查点恢复 | 检查点恢复 | **显著提升** |
+| **工具加载** | ❌ 未实现 | ❌ 未实现 | ✅ 动态加载 | **100% 改进** |
+| **记忆集成** | ❌ 未实现 | ❌ 未实现 | ✅ 完全集成 | **100% 改进** |
 
 ---
 
@@ -7586,6 +4166,6 @@ class WorkerConfig(BaseModel):
 
 ---
 
-**文档版本**: V7.5  
-**最后更新**: 2026-01-19  
+**文档版本**: V7.2  
+**最后更新**: 2026-01-15  
 **维护者**: ZenFlux Agent Team

@@ -2,18 +2,14 @@
 Skill 管理模块（预留）
 
 职责：
-- 未来可能用于 Skill 运行时管理扩展
-- 当前功能已由 core/tool/capability/skill_loader.py 实现
-
-术语说明（对齐 clawdbot）：
-- Skill: 本地工作流技能（skills/library/），通过系统提示词注入
-- 目录结构：skills/library/（内置）, skills/custom/（自定义）, skills/workspace/（工作区）
+- 未来可能用于 Skill 运行时管理
+- 当前功能已由 scripts/skill_cli.py 实现（开发时注册）
+- 运行时 Skill 信息从 capabilities.yaml 读取
 
 相关组件：
-- core/tool/capability/skill_loader.py: Skill 内容加载器
-- core/tool/capability/registry.py: Skill 发现和注册
-- prompts/skills_loader.py: 生成系统提示词中的 Skills 列表
-- config/capabilities.yaml: 统一能力配置
+- scripts/skill_cli.py: Skill 注册/注销 CLI 工具
+- core/tool/capability/skill_loader.py: Skills 内容加载器
+- config/capabilities.yaml: 统一能力配置（含 skill_id）
 """
 
 # 预留模块，暂无导出

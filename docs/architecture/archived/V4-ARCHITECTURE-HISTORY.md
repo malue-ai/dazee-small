@@ -2219,7 +2219,7 @@ def get_universal_agent_prompt(
             prompt += "\n\n---\n\n" + user_profile
     ...
 
-# core/agent/simple/simple_agent.py - 传递意图结果
+# core/agent/simple_agent.py - 传递意图结果
 skip_memory = getattr(intent, 'skip_memory_retrieval', False)
 system_prompt = get_universal_agent_prompt(
     user_id=user_id,
@@ -3076,7 +3076,8 @@ zenflux_agent/
 │
 └── docs/                           # 文档
     ├── 00-ARCHITECTURE-V4.md       # 本文档
-    ├── MEM0_GUIDE.md               # 🆕 Mem0 统一指南（V4.5）
+    ├── MEM0_SETUP_GUIDE.md         # 🆕 Mem0 设置指南（V4.5）
+    ├── MEM0_EMBEDDING_GUIDE.md     # 🆕 Mem0 Embedding 选择指南（V4.5）
     └── ...
 ```
 
@@ -3106,7 +3107,7 @@ core/prompt/__init__.py                 ← 导出 InstancePromptCache + IntentP
 core/agent/factory.py                   ← 🔥 删除 _infer_schema_from_prompt 硬编码规则
                                            新增 _generate_schema_with_llm（Few-shot 引导）
 prompts/intent_recognition_prompt.py    ← 🔄 重构为模块化结构（支持动态组装）
-core/agent/simple/simple_agent.py              ← 🔄 从缓存获取系统提示词（运行时零开销）
+core/agent/simple_agent.py              ← 🔄 从缓存获取系统提示词（运行时零开销）
 core/agent/intent_analyzer.py           ← 🔄 使用缓存的 intent_prompt
 scripts/instance_loader.py              ← 🔄 启动时调用 cache.load_once()
 
@@ -3135,10 +3136,11 @@ core/memory/mem0/tencent_vectordb.py ← 🆕 腾讯云VectorDB适配器
 utils/background_tasks.py          ← 🆕 V4.6 整合 Mem0 异步批量更新
 routers/mem0_router.py             ← REST API 端点（复用 BackgroundTaskService）
 prompts/universal_agent_prompt.py  ← 添加 _fetch_user_profile() + 自动注入
-core/agent/simple/simple_agent.py         ← Phase 4 用户画像注入（Agent透明）
+core/agent/simple_agent.py         ← Phase 4 用户画像注入（Agent透明）
 env.template                       ← 环境变量模板
 test_mem0_e2e.py                   ← 端对端测试脚本
-docs/MEM0_GUIDE.md                 ← 统一指南
+docs/MEM0_SETUP_GUIDE.md           ← 设置指南
+docs/MEM0_EMBEDDING_GUIDE.md       ← Embedding 选择指南
 
 收益：
 ✅ 跨 Session 用户画像与偏好记忆
@@ -3976,7 +3978,8 @@ from core.tool.capability import (
 | [08-DATA_STORAGE_ARCHITECTURE.md](./08-DATA_STORAGE_ARCHITECTURE.md) | 数据存储 | ✅ 有效 |
 | [12-CONTEXT_ENGINEERING_OPTIMIZATION.md](./12-CONTEXT_ENGINEERING_OPTIMIZATION.md) | Context Engineering 优化 | ✅ V4.4 |
 | [RESULT_COMPACTOR_IMPLEMENTATION.md](./RESULT_COMPACTOR_IMPLEMENTATION.md) | ResultCompactor 实施 | ✅ V4.1 |
-| [MEM0_GUIDE.md](./MEM0_GUIDE.md) | 🆕 Mem0 统一指南 | ✅ V4.5 |
+| [MEM0_SETUP_GUIDE.md](./MEM0_SETUP_GUIDE.md) | 🆕 Mem0 设置指南 | ✅ V4.5 |
+| [MEM0_EMBEDDING_GUIDE.md](./MEM0_EMBEDDING_GUIDE.md) | 🆕 Mem0 Embedding 选择指南 | ✅ V4.5 |
 
 ## 🔗 外部参考
 

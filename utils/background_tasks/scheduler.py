@@ -25,11 +25,13 @@ from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, field
 
 import yaml
+import aiofiles
 
 from logger import get_logger
 from .service import BackgroundTaskService, get_background_task_service
 from .context import TaskContext
 from .registry import get_task_registry, get_registered_task_names
+from .tasks.mem0_update import batch_update_all_memories
 
 logger = get_logger("background_tasks.scheduler")
 
@@ -78,8 +80,8 @@ class TaskScheduler:
         self._running = False
         self._tasks: Dict[str, ScheduledTaskConfig] = {}
     
-    def _load_config(self) -> List[ScheduledTaskConfig]:
-        """加载配置文件"""
+    async def _load_config_async(self) -> List[ScheduledTaskConfig]:
+        """异步加载配置文件"""
         config_path = Path(self.config_path)
         
         if not config_path.exists():
@@ -87,8 +89,9 @@ class TaskScheduler:
             return []
         
         try:
-            with open(config_path, 'r', encoding='utf-8') as f:
-                config = yaml.safe_load(f) or {}
+            async with aiofiles.open(config_path, 'r', encoding='utf-8') as f:
+                content = await f.read()
+                config = yaml.safe_load(content) or {}
             
             tasks = []
             for task_config in config.get("scheduled_tasks", []):
@@ -128,7 +131,7 @@ class TaskScheduler:
             return
         
         # 加载配置
-        task_configs = self._load_config()
+        task_configs = await self._load_config_async()
         
         if not task_configs:
             logger.info("○ 没有配置定时任务，调度器不启动")
@@ -198,9 +201,10 @@ class TaskScheduler:
             # 检查是否是批量任务
             if config.params.get("batch", False):
                 # 批量任务（如 mem0_update 批量更新所有用户）
-                result = await self.background_service.batch_update_all_memories(
+                result = await batch_update_all_memories(
                     since_hours=config.params.get("since_hours", 24),
-                    max_concurrent=config.params.get("max_concurrent", 5)
+                    max_concurrent=config.params.get("max_concurrent", 5),
+                    service=self.background_service
                 )
                 
                 duration_ms = int((datetime.now() - started_at).total_seconds() * 1000)

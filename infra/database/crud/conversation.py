@@ -9,7 +9,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from infra.database.models import Conversation
@@ -17,20 +17,28 @@ from infra.database.models.message import Message
 from infra.database.crud.base import get_by_id, delete_by_id
 
 
-def generate_conversation_id() -> str:
-    """生成对话 ID"""
-    return f"conv_{uuid4().hex[:24]}"
-
-
 async def create_conversation(
     session: AsyncSession,
     user_id: str,
     title: str = "新对话",
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = None,
+    conversation_id: Optional[str] = None
 ) -> Conversation:
-    """创建对话"""
+    """
+    创建对话
+    
+    Args:
+        session: 数据库会话
+        user_id: 用户 ID
+        title: 对话标题
+        metadata: 对话元数据
+        conversation_id: 可选的对话 ID（如果不提供则自动生成）
+    
+    Returns:
+        创建的对话对象
+    """
     conv = Conversation(
-        id=generate_conversation_id(),
+        id=conversation_id or str(uuid4()),
         user_id=user_id,
         title=title,
         created_at=datetime.now(),
@@ -51,6 +59,58 @@ async def get_conversation(
 ) -> Optional[Conversation]:
     """获取对话"""
     return await get_by_id(session, Conversation, conversation_id)
+
+
+async def get_or_create_conversation(
+    session: AsyncSession,
+    user_id: str,
+    conversation_id: Optional[str] = None,
+    title: str = "新对话",
+    metadata: Optional[Dict[str, Any]] = None
+) -> tuple[Conversation, bool]:
+    """
+    获取或创建对话（单次 DB 操作，优化性能）
+    
+    逻辑：
+    1. 如果 conversation_id 为空 → 创建新对话
+    2. 如果 conversation_id 存在 → 尝试获取
+    3. 如果对话不存在 → 使用该 ID 创建新对话
+    
+    Args:
+        session: 数据库会话
+        user_id: 用户 ID
+        conversation_id: 对话 ID（可选，不提供则自动生成）
+        title: 对话标题（仅在创建时使用）
+        metadata: 对话元数据（仅在创建时使用）
+        
+    Returns:
+        (Conversation, is_new) - 对话对象和是否新创建标志
+    """
+    # 如果没有指定 conversation_id，直接创建新对话
+    if not conversation_id:
+        conv = await create_conversation(
+            session=session,
+            user_id=user_id,
+            title=title,
+            metadata=metadata
+        )
+        return conv, True
+    
+    # 尝试获取已存在的对话
+    conv = await get_conversation(session, conversation_id)
+    
+    if conv:
+        return conv, False
+    
+    # 对话不存在，使用指定的 ID 创建新对话
+    conv = await create_conversation(
+        session=session,
+        user_id=user_id,
+        title=title,
+        metadata=metadata,
+        conversation_id=conversation_id
+    )
+    return conv, True
 
 
 async def update_conversation(
@@ -112,41 +172,84 @@ async def list_conversations_with_stats(
     """
     获取用户的对话列表（带消息统计）
     
+    使用子查询优化，避免 N+1 查询问题
+    
     返回字典列表，包含 message_count 和 last_message
     """
-    # 获取对话列表
-    convs = await list_conversations(session, user_id, limit, offset)
+    from sqlalchemy import literal_column
+    from sqlalchemy.orm import selectinload
     
-    result = []
-    for conv in convs:
-        # 获取消息数量
-        msg_count_result = await session.execute(
-            select(func.count(Message.id)).where(Message.conversation_id == conv.id)
+    # 子查询：每个对话的消息数量
+    msg_count_subq = (
+        select(
+            Message.conversation_id,
+            func.count(Message.id).label("message_count")
         )
-        message_count = msg_count_result.scalar() or 0
-        
-        # 获取最后一条消息
-        last_msg_result = await session.execute(
-            select(Message)
-            .where(Message.conversation_id == conv.id)
-            .order_by(Message.created_at.desc())
-            .limit(1)
-        )
-        last_msg = last_msg_result.scalar_one_or_none()
-        
-        result.append({
-            "id": conv.id,
-            "user_id": conv.user_id,
-            "title": conv.title,
-            "created_at": conv.created_at.isoformat() if conv.created_at else None,
-            "updated_at": conv.updated_at.isoformat() if conv.updated_at else None,
-            "metadata": conv.extra_data,
-            "message_count": message_count,
-            "last_message_at": last_msg.created_at.isoformat() if last_msg and last_msg.created_at else None,
-            "last_message": last_msg.content if last_msg else None
-        })
+        .group_by(Message.conversation_id)
+        .subquery()
+    )
     
-    return result
+    # 子查询：每个对话的最后一条消息（使用 DISTINCT ON 或 ROW_NUMBER）
+    # PostgreSQL 支持 DISTINCT ON，更简洁
+    last_msg_subq = (
+        select(
+            Message.conversation_id,
+            Message.content.label("last_content"),
+            Message.created_at.label("last_message_at")
+        )
+        .distinct(Message.conversation_id)
+        .order_by(Message.conversation_id, Message.created_at.desc())
+        .subquery()
+    )
+    
+    # 主查询：JOIN 对话表和子查询
+    query = (
+        select(
+            Conversation,
+            func.coalesce(msg_count_subq.c.message_count, 0).label("message_count"),
+            last_msg_subq.c.last_content,
+            last_msg_subq.c.last_message_at
+        )
+        .outerjoin(msg_count_subq, Conversation.id == msg_count_subq.c.conversation_id)
+        .outerjoin(last_msg_subq, Conversation.id == last_msg_subq.c.conversation_id)
+        .where(Conversation.user_id == user_id)
+        .order_by(Conversation.updated_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    
+    result = await session.execute(query)
+    rows = result.all()
+    
+    # 辅助函数：确保 metadata 是字典
+    def _ensure_dict(value):
+        if value is None:
+            return {}
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            try:
+                import json
+                return json.loads(value)
+            except json.JSONDecodeError:
+                return {}
+        return {}
+    
+    return [
+        {
+            "id": row.Conversation.id,
+            "user_id": row.Conversation.user_id,
+            "title": row.Conversation.title,
+            "status": row.Conversation.status,
+            "created_at": row.Conversation.created_at.isoformat() if row.Conversation.created_at else None,
+            "updated_at": row.Conversation.updated_at.isoformat() if row.Conversation.updated_at else None,
+            "metadata": _ensure_dict(row.Conversation.extra_data),
+            "message_count": row.message_count,
+            "last_message_at": row.last_message_at.isoformat() if row.last_message_at else None,
+            "last_message": row.last_content
+        }
+        for row in rows
+    ]
 
 
 async def get_conversation_summary(
@@ -231,7 +334,9 @@ async def get_conversations_since(
     limit: int = 1000
 ) -> List[Conversation]:
     """
-    获取指定时间之后的会话列表（用于 Mem0 增量更新）
+    获取指定时间之后有更新的会话列表（用于 Mem0 增量更新）
+    
+    包括：新创建的对话 OR 有新消息的对话（updated_at 更新）
     
     Args:
         session: 数据库会话
@@ -242,12 +347,19 @@ async def get_conversations_since(
     Returns:
         会话列表
     """
-    query = select(Conversation).where(Conversation.created_at >= since)
+    
+    # 同时检查 created_at 和 updated_at，捕获所有活跃对话
+    query = select(Conversation).where(
+        or_(
+            Conversation.created_at >= since,
+            Conversation.updated_at >= since
+        )
+    )
     
     if user_id:
         query = query.where(Conversation.user_id == user_id)
     
-    query = query.order_by(Conversation.created_at.asc()).limit(limit)
+    query = query.order_by(Conversation.updated_at.asc()).limit(limit)
     
     result = await session.execute(query)
     return list(result.scalars().all())

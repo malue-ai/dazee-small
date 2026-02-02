@@ -47,6 +47,8 @@ class SandboxInfo:
     status: SandboxStatus = SandboxStatus.CREATING
     stack: Optional[str] = None
     preview_url: Optional[str] = None
+    active_project_path: Optional[str] = None  # 当前运行的项目路径
+    active_project_stack: Optional[str] = None  # 当前运行的项目技术栈
     created_at: Optional[str] = None
     last_active_at: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -330,7 +332,7 @@ class SandboxProvider(ABC):
     async def list_dir(
         self,
         conversation_id: str,
-        path: str = "/home/user"
+        path: str = "/home/user/project"
     ) -> List[FileInfo]:
         """
         列出目录内容

@@ -34,7 +34,7 @@
                      │
                      ▼
 ┌─────────────────────────────────────────────────────────┐
-│  Agent 层（core/agent/simple/simple_agent.py）                  │
+│  Agent 层（core/agent/simple_agent.py）                  │
 │  • 流式输出 next token                                   │
 │  • 不做格式化/校验                                       │
 │  • 保持职责单一                                          │

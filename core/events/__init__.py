@@ -9,20 +9,15 @@ SSE 事件管理模块
     SimpleAgent
          │
          ▼
-    EventBroadcaster  ← Agent 统一入口，包含增强逻辑
+    EventBroadcaster  ← Agent 统一入口
          │
-         ▼
-    EventManager      ← 聚合所有层级管理器
+         │  1. 内部处理（累积、增强逻辑）
+         │  2. 调用 storage.buffer_event()
+         │     - 格式转换（如果需要）
+         │     - Redis INCR 生成 seq
+         │     - 存入 Redis + Pub/Sub
          │
-         ├── SessionEventManager
-         ├── UserEventManager
-         ├── ConversationEventManager
-         ├── MessageEventManager
-         ├── ContentEventManager
-         └── SystemEventManager
-                │
-                ▼
-         EventStorage (Redis/Memory)
+         └──→ EventDispatcher → 外部 Webhook（可选）
 
 事件层级：
 ====================
@@ -43,12 +38,13 @@ SSE 事件管理模块
 1. 每层只有 start/delta/stop 三个核心事件
 2. 所有扩展数据通过 delta 发送
 3. Agent 使用 EventBroadcaster，不直接使用 EventManager
-4. EventBroadcaster 负责增强逻辑（如特殊工具的 message_delta）
+4. seq 在进入 Redis 时由 buffer_event 统一生成（Redis INCR）
+5. 格式转换在进入 Redis 前完成
 
 使用示例：
 ====================
 
-    # Agent 中使用 Broadcaster
+    # Agent 中使用 Broadcaster（推荐）
     from core.events import create_broadcaster, create_event_manager
     
     events = create_event_manager(storage)
@@ -57,10 +53,6 @@ SSE 事件管理模块
     await broadcaster.emit_content_start(session_id, index, content_block)
     await broadcaster.emit_content_delta(session_id, index, delta)
     await broadcaster.emit_content_stop(session_id, index)
-    
-    # Service 中直接使用 EventManager
-    await events.session.emit_session_start(...)
-    await events.conversation.emit_conversation_delta(...)
 """
 
 from core.events.manager import EventManager, create_event_manager
@@ -73,9 +65,7 @@ from core.events.system_events import SystemEventManager
 from core.events.broadcaster import EventBroadcaster, create_broadcaster
 from core.events.dispatcher import EventDispatcher, create_event_dispatcher
 from core.events.storage import (
-    RedisEventStorage,
     InMemoryEventStorage,
-    create_event_storage,
     get_memory_storage,
 )
 
@@ -94,10 +84,8 @@ __all__ = [
     # Dispatcher（外部适配器）
     "EventDispatcher",
     "create_event_dispatcher",
-    # Storage
-    "RedisEventStorage",
+    # Storage（开发环境）
     "InMemoryEventStorage",
-    "create_event_storage",
     "get_memory_storage",
 ]
 
