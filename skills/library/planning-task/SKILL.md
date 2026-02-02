@@ -1,12 +1,14 @@
 ---
 name: planning-task
 description: Generates structured task plans and todo lists for complex multi-step projects. Use when the user needs to break down work into organized tasks with dependencies, or when creating project plans, checklists, or work breakdowns.
-priority: medium
-preferred_for:
-  - project planning
-  - task breakdown
-  - work organization
-  - multi-step tasks
+metadata:
+  level: 1                     # L1 核心级，框架自动启用，不暴露给运营配置
+  priority: medium
+  preferred_for:
+    - project planning
+    - task breakdown
+    - work organization
+    - multi-step tasks
 ---
 
 # Task Planning Skill
@@ -53,7 +55,7 @@ components = [
 Use the helper script to create plan.json:
 ```python
 # Load and execute the plan generator
-with open('skills/planning-task/scripts/generate_plan.py', 'r') as f:
+with open('skills/library/planning-task/scripts/generate_plan.py', 'r') as f:
     exec(f.read())
 
 plan = generate_task_plan(
@@ -76,7 +78,7 @@ with open('workspace/plan.json', 'w') as f:
 Create todo.md for user visibility:
 ```python
 # Load and execute the todo generator
-with open('skills/planning-task/scripts/generate_todo.py', 'r') as f:
+with open('skills/library/planning-task/scripts/generate_todo.py', 'r') as f:
     exec(f.read())
 
 todo_markdown = generate_todo_markdown(plan)

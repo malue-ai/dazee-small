@@ -12,6 +12,17 @@ from infra.database.models.knowledge import Knowledge
 from infra.database.models.sandbox import Sandbox
 from infra.database.models.agent import AgentInstance, SkillInstance, MCPServerInstance
 
+# 🆕 V9.4: 持续学习模型
+from infra.database.models.continuous_learning import (
+    SessionRewardRecord,
+    StepRewardRecord,
+    PlaybookRecord,
+    IntentCacheRecord,
+    PlaybookStatus,
+    RewardSignal,
+    AttributionMethod,
+)
+
 __all__ = [
     "User",
     "Conversation",
@@ -22,5 +33,13 @@ __all__ = [
     "AgentInstance",
     "SkillInstance",
     "MCPServerInstance",
+    # 🆕 V9.4: 持续学习
+    "SessionRewardRecord",
+    "StepRewardRecord",
+    "PlaybookRecord",
+    "IntentCacheRecord",
+    "PlaybookStatus",
+    "RewardSignal",
+    "AttributionMethod",
 ]
 

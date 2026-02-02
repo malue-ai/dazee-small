@@ -769,7 +769,7 @@ task_specific_rules:
 - [x] ✅ 创建routing_rules.yaml配置文件 (`config/routing_rules.yaml`)
 - [x] ✅ 实现配置加载器（内置在 Registry 和 Router 中）
 - [x] ✅ 集成到 ToolSelector (`core/tool/selector.py`)
-- [x] ✅ 集成到 SimpleAgent (`core/agent/simple_agent.py`)
+- [x] ✅ 集成到 SimpleAgent (`core/agent/simple/simple_agent.py`)
 - [ ] ⏳ 单元测试（部分完成）
 - [ ] ⏳ 集成测试（端到端测试通过）
 
@@ -780,7 +780,7 @@ task_specific_rules:
 ### 在 Agent 中的使用
 
 ```python
-# core/agent/simple_agent.py
+# core/agent/simple/simple_agent.py
 from core.tool.capability import CapabilityRegistry, CapabilityRouter
 from core.tool import ToolSelector, ToolExecutor
 

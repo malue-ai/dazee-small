@@ -1786,7 +1786,7 @@ SKILLS_GUIDANCE_PROMPT_COMPACT = """
 ### 外层代码简化（去除决策逻辑）
 
 ```python
-# core/agent/simple_agent.py (简化版)
+# core/agent/simple/simple_agent.py (简化版)
 
 class SimpleAgent:
     """

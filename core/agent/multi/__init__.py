@@ -39,6 +39,9 @@ from core.agent.multi.models import (
     CriticAction,
     CriticConfidence,
     CriticResult,
+    
+    # Agent 选择（V7.9）
+    AgentSelectionResult,
 )
 
 from core.agent.multi.orchestrator import MultiAgentOrchestrator
@@ -80,6 +83,9 @@ __all__ = [
     "CriticAction",
     "CriticConfidence",
     "CriticResult",
+    
+    # Agent 选择（V7.9）
+    "AgentSelectionResult",
     
     # 编排器
     "MultiAgentOrchestrator",

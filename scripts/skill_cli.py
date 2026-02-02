@@ -1,26 +1,39 @@
 #!/usr/bin/env python3
 """
-Skill 管理 CLI 工具
+Claude Skills 管理 CLI 工具
+
+管理范围：
+- 仅管理 skills/custom_claude_skills/ 下的系统级 Claude Skills
+- 实例级 Skills（instances/xxx/skills/）由 instance_loader.py 自动管理
+
+概念区分：
+- Claude Skills: 上传到 Anthropic 服务器执行，通过 container.skills 调用
+- Skill 自定义接口: skills/library/ 本地执行，无需上传（不在此管理）
 
 功能：
-- register: 注册 Skill 到 Claude 服务器，自动回写 skill_id 到 capabilities.yaml
-- unregister: 注销 Skill，自动从 capabilities.yaml 移除 skill_id
-- list: 列出所有已注册的 Skills
-- update: 更新 Skill 版本
-- sync: 同步 capabilities.yaml 与 Claude 服务器
+- register: 注册 Claude Skill 到 Anthropic 服务器，自动回写 skill_id 到 capabilities.yaml
+- unregister: 注销 Claude Skill，自动从 capabilities.yaml 移除 skill_id
+- list: 列出所有已注册的 Claude Skills
+- update: 更新 Claude Skill 版本（本地修改后同步到 Anthropic）
+- update-all: 批量更新所有已注册的 Claude Skills
+- versions: 查看 Claude Skill 版本历史
+- sync: 同步 capabilities.yaml 与 Anthropic 服务器
 
 使用示例：
     # 注册新 Skill
     python scripts/skill_cli.py register --skill professional-ppt-generator
     
+    # 本地修改后更新版本
+    python scripts/skill_cli.py update --skill professional-ppt-generator
+    
+    # 批量更新所有
+    python scripts/skill_cli.py update-all
+    
+    # 查看版本历史
+    python scripts/skill_cli.py versions --skill professional-ppt-generator
+    
     # 列出所有已注册的 Skills
     python scripts/skill_cli.py list
-    
-    # 注销 Skill
-    python scripts/skill_cli.py unregister --skill professional-ppt-generator
-    
-    # 同步状态
-    python scripts/skill_cli.py sync
 
 设计原则：
 - 开发人员一次性操作，运行时不需要注册
@@ -49,7 +62,9 @@ load_dotenv(PROJECT_ROOT / ".env")
 
 # 配置文件路径
 CAPABILITIES_FILE = PROJECT_ROOT / "config" / "capabilities.yaml"
-SKILLS_LIBRARY_PATH = PROJECT_ROOT / "skills" / "library"
+# Claude Skills 目录（需要上传到 Anthropic 服务器）
+# 注意：skills/library/ 是 Skill 自定义接口（本地执行），不在此管理
+CUSTOM_CLAUDE_SKILLS_PATH = PROJECT_ROOT / "skills" / "custom_claude_skills"
 
 
 class SkillCLI:
@@ -185,7 +200,7 @@ class SkillCLI:
         print("=" * 50)
         
         # 1. 验证 Skill 目录
-        skill_path = SKILLS_LIBRARY_PATH / skill_name
+        skill_path = CUSTOM_CLAUDE_SKILLS_PATH / skill_name
         if not skill_path.exists():
             print(f"❌ Skill 目录不存在: {skill_path}")
             return False
@@ -324,10 +339,10 @@ class SkillCLI:
             skill_id_display = skill_id[:20] + "..." if skill_id and len(skill_id) > 20 else (skill_id or "-")
             print(f"{name:<30} {status:<15} {skill_id_display:<25}")
         
-        # 4. 显示本地 skills/library/ 中未配置的 Skill
-        print(f"\n📁 本地 Skill 目录 ({SKILLS_LIBRARY_PATH}):")
-        if SKILLS_LIBRARY_PATH.exists():
-            for skill_dir in SKILLS_LIBRARY_PATH.iterdir():
+        # 4. 显示本地 skills/custom_claude_skills/ 中未配置的 Skill
+        print(f"\n📁 Claude Skills 目录 ({CUSTOM_CLAUDE_SKILLS_PATH}):")
+        if CUSTOM_CLAUDE_SKILLS_PATH.exists():
+            for skill_dir in CUSTOM_CLAUDE_SKILLS_PATH.iterdir():
                 if skill_dir.is_dir() and not skill_dir.name.startswith('_'):
                     skill_md = skill_dir / "SKILL.md"
                     if skill_md.exists():
@@ -382,7 +397,10 @@ class SkillCLI:
     
     def update(self, skill_name: str) -> bool:
         """
-        更新 Skill 版本
+        更新 Claude Skill 版本（本地修改后同步到 Anthropic 服务器）
+        
+        注意：此命令仅管理 skills/custom_claude_skills/ 下的系统级 Claude Skills
+              实例级 Skills 由 instance_loader.py 在实例启动时自动注册
         
         Args:
             skill_name: Skill 名称
@@ -390,7 +408,7 @@ class SkillCLI:
         Returns:
             是否成功
         """
-        print(f"\n🔄 更新 Skill: {skill_name}")
+        print(f"\n🔄 更新 Claude Skill: {skill_name}")
         print("=" * 50)
         
         # 1. 获取 skill_id
@@ -402,13 +420,22 @@ class SkillCLI:
             print(f"   请先运行: python scripts/skill_cli.py register --skill {skill_name}")
             return False
         
-        # 2. 验证本地目录
-        skill_path = SKILLS_LIBRARY_PATH / skill_name
-        if not skill_path.exists():
-            print(f"❌ Skill 目录不存在: {skill_path}")
+        # 2. 查找本地目录
+        skill_path = self._find_skill_path(skill_name)
+        if not skill_path:
+            print(f"❌ Skill 目录不存在: skills/custom_claude_skills/{skill_name}")
             return False
         
-        # 3. 创建新版本
+        print(f"📂 本地目录: {skill_path}")
+        
+        # 3. 获取当前版本信息
+        try:
+            current_skill = self.client.beta.skills.retrieve(skill_id)
+            print(f"📋 当前版本: {current_skill.latest_version}")
+        except Exception as e:
+            print(f"⚠️ 无法获取当前版本信息: {e}")
+        
+        # 4. 创建新版本
         print(f"📤 正在创建新版本...")
         try:
             version = self.client.beta.skills.versions.create(
@@ -417,8 +444,129 @@ class SkillCLI:
             )
             print(f"✅ 更新成功!")
             print(f"   新版本: {version.version}")
+            print(f"   提示: 使用 'latest' 版本会自动使用新版本")
         except Exception as e:
             print(f"❌ 更新失败: {e}")
+            return False
+        
+        return True
+    
+    def _find_skill_path(self, skill_name: str) -> Optional[Path]:
+        """
+        查找 Claude Skill 本地目录
+        
+        搜索位置：skills/custom_claude_skills/{skill_name}
+        
+        注意：实例级 Skills 由 instance_loader.py 管理，不在此处理
+        """
+        skill_path = CUSTOM_CLAUDE_SKILLS_PATH / skill_name
+        if skill_path.exists() and (skill_path / "SKILL.md").exists():
+            return skill_path
+        
+        return None
+    
+    def update_all(self) -> int:
+        """
+        批量更新所有已注册的系统级 Claude Skills
+        
+        注意：此命令仅管理 skills/custom_claude_skills/ 下的系统级 Claude Skills
+              实例级 Skills 由 instance_loader.py 管理
+            
+        Returns:
+            成功更新的数量
+        """
+        print(f"\n🔄 批量更新所有系统级 Claude Skills")
+        print("=" * 50)
+        print(f"📂 目录: {CUSTOM_CLAUDE_SKILLS_PATH}")
+        
+        updated_count = 0
+        failed_skills = []
+        
+        # 更新 capabilities.yaml 中的 Claude Skills
+        for cap in self.capabilities.get("capabilities", []):
+            if cap.get("type") == "SKILL" and cap.get("subtype") == "CUSTOM":
+                skill_name = cap.get("name")
+                skill_id = cap.get("skill_id")
+                
+                if not skill_id:
+                    continue
+                
+                skill_path = self._find_skill_path(skill_name)
+                if not skill_path:
+                    print(f"   ⚠️ {skill_name}: 本地目录不存在，跳过")
+                    continue
+                
+                print(f"\n   📦 更新: {skill_name}")
+                try:
+                    version = self.client.beta.skills.versions.create(
+                        skill_id=skill_id,
+                        files=files_from_dir(str(skill_path))
+                    )
+                    print(f"      ✅ 新版本: {version.version}")
+                    updated_count += 1
+                except Exception as e:
+                    print(f"      ❌ 失败: {e}")
+                    failed_skills.append(skill_name)
+        
+        # 汇总
+        print(f"\n{'=' * 50}")
+        print(f"✨ 批量更新完成!")
+        print(f"   成功: {updated_count} 个")
+        if failed_skills:
+            print(f"   失败: {len(failed_skills)} 个 ({', '.join(failed_skills)})")
+        
+        print(f"\n💡 提示: 实例级 Skills 请使用 instance_loader.py 管理")
+        
+        return updated_count
+    
+    def versions(self, skill_name: str) -> bool:
+        """
+        查看 Skill 的版本历史
+        
+        Args:
+            skill_name: Skill 名称
+            
+        Returns:
+            是否成功
+        """
+        print(f"\n📜 Skill 版本历史: {skill_name}")
+        print("=" * 50)
+        
+        # 1. 获取 skill_id
+        cap = self._find_capability(skill_name)
+        skill_id = cap.get("skill_id") if cap else None
+        
+        if not skill_id:
+            print(f"❌ Skill 未注册: {skill_name}")
+            return False
+        
+        # 2. 获取版本列表
+        try:
+            versions = self.client.beta.skills.versions.list(skill_id=skill_id)
+            
+            if not versions.data:
+                print("   (无版本记录)")
+                return True
+            
+            print(f"\n{'版本 ID':<25} {'创建时间':<25}")
+            print("-" * 50)
+            
+            for v in versions.data:
+                # 版本号是 epoch timestamp，转换为可读时间
+                try:
+                    from datetime import datetime
+                    ts = int(v.version) / 1000000  # 微秒转秒
+                    created = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    created = "未知"
+                
+                version_display = v.version[:20] + "..." if len(v.version) > 20 else v.version
+                print(f"{version_display:<25} {created:<25}")
+            
+            print(f"\n总计: {len(versions.data)} 个版本")
+            
+        except Exception as e:
+            print(f"❌ 获取版本失败: {e}")
             return False
         
         return True
@@ -426,9 +574,17 @@ class SkillCLI:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Skill 管理 CLI - 统一管理 Custom Skills 的注册/注销",
+        description="Claude Skills 管理 CLI - 管理 skills/custom_claude_skills/ 下的系统级 Claude Skills",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
+说明:
+  此工具仅管理系统级 Claude Skills（skills/custom_claude_skills/）
+  实例级 Skills（instances/xxx/skills/）由 instance_loader.py 自动管理
+
+  注意区分：
+  - Claude Skills: 上传到 Anthropic 服务器执行（本工具管理）
+  - Skill 自定义接口: skills/library/ 本地执行（无需上传）
+
 示例:
   # 注册 Skill（自动回写 skill_id 到 capabilities.yaml）
   python scripts/skill_cli.py register --skill professional-ppt-generator
@@ -439,8 +595,14 @@ def main():
   # 注销 Skill
   python scripts/skill_cli.py unregister --skill professional-ppt-generator
 
-  # 更新 Skill 版本
+  # 更新单个 Skill 版本（本地修改后同步到服务器）
   python scripts/skill_cli.py update --skill professional-ppt-generator
+
+  # 批量更新所有已注册的 Skills
+  python scripts/skill_cli.py update-all
+
+  # 查看 Skill 版本历史
+  python scripts/skill_cli.py versions --skill professional-ppt-generator
 
   # 同步本地配置与服务器
   python scripts/skill_cli.py sync
@@ -450,22 +612,29 @@ def main():
     subparsers = parser.add_subparsers(dest="command", help="命令")
     
     # register 命令
-    register_parser = subparsers.add_parser("register", help="注册 Skill 到 Claude 服务器")
-    register_parser.add_argument("--skill", "-s", required=True, help="Skill 目录名称")
+    register_parser = subparsers.add_parser("register", help="注册 Claude Skill 到 Anthropic 服务器")
+    register_parser.add_argument("--skill", "-s", required=True, help="Skill 目录名称（在 skills/custom_claude_skills/ 下）")
     
     # unregister 命令
-    unregister_parser = subparsers.add_parser("unregister", help="注销 Skill")
+    unregister_parser = subparsers.add_parser("unregister", help="注销 Claude Skill")
     unregister_parser.add_argument("--skill", "-s", required=True, help="Skill 名称")
     
     # list 命令
-    subparsers.add_parser("list", help="列出所有 Skills 状态")
+    subparsers.add_parser("list", help="列出所有 Claude Skills 状态")
     
     # update 命令
-    update_parser = subparsers.add_parser("update", help="更新 Skill 版本")
+    update_parser = subparsers.add_parser("update", help="更新 Claude Skill 版本（本地修改后同步到 Anthropic）")
     update_parser.add_argument("--skill", "-s", required=True, help="Skill 名称")
     
+    # update-all 命令
+    subparsers.add_parser("update-all", help="批量更新所有已注册的系统级 Claude Skills")
+    
+    # versions 命令
+    versions_parser = subparsers.add_parser("versions", help="查看 Claude Skill 版本历史")
+    versions_parser.add_argument("--skill", "-s", required=True, help="Skill 名称")
+    
     # sync 命令
-    subparsers.add_parser("sync", help="同步 capabilities.yaml 与 Claude 服务器")
+    subparsers.add_parser("sync", help="同步 capabilities.yaml 与 Anthropic 服务器")
     
     args = parser.parse_args()
     
@@ -484,6 +653,10 @@ def main():
             cli.list_skills()
         elif args.command == "update":
             cli.update(args.skill)
+        elif args.command == "update-all":
+            cli.update_all()
+        elif args.command == "versions":
+            cli.versions(args.skill)
         elif args.command == "sync":
             cli.sync()
             

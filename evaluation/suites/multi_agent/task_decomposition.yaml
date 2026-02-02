@@ -1,0 +1,212 @@
+# 多智能体任务分解评估套件
+# 
+# 测试多智能体系统的能力，包括：
+# - LeadAgent 任务分解质量
+# - SubAgent 协作效率
+# - CriticAgent 评估准确性
+# - 检查点恢复正确性
+
+id: multi_agent_task_decomposition
+name: 多智能体任务分解评估套件
+description: 评估多智能体系统的任务分解和协作能力
+category: multi_agent
+default_trials: 3
+
+metadata:
+  version: "1.0.0"
+  author: "ZenFlux Team"
+  created_at: "2026-01-20"
+  priority: P1
+  reference: "https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents"
+
+tasks:
+  # ==================
+  # 任务分解质量
+  # ==================
+  
+  - id: multi_agent_001
+    description: "多智能体 - 复杂研究任务分解"
+    category: multi_agent
+    input:
+      user_query: "研究人工智能在医疗领域的应用，包括诊断、药物研发和患者管理三个方面"
+      conversation_history: []
+      context:
+        scenario: "research"
+        complexity: "high"
+    
+    checkpoints:
+      - name: "plan_created"
+        check: "plan_step_count >= 1"
+        description: "验证任务分解计划已创建"
+      - name: "subtasks_defined"
+        check: "plan_step_count >= 3"
+        description: "验证至少定义了3个子任务"
+    
+    expected_outcome:
+      intent: "research"
+      tool_calls: ["web_search", "knowledge_query"]
+      response_contains: ["诊断", "药物研发", "患者管理"]
+    
+    graders:
+      - type: code
+        name: check_plan_schema
+        check: "check_plan_schema(['goal', 'steps'])"
+      - type: model
+        rubric: grade_multi_agent_coordination
+        min_score: 4
+      - type: model
+        rubric: grade_response_quality
+        min_score: 4
+    trials: 3
+    timeout_seconds: 120
+    tags: ["multi_agent", "task_decomposition", "research", "complex"]
+
+  - id: multi_agent_002
+    description: "多智能体 - 并行子任务执行"
+    category: multi_agent
+    input:
+      user_query: "同时研究区块链和人工智能的技术趋势，然后对比分析"
+      conversation_history: []
+      context:
+        scenario: "research"
+        complexity: "high"
+    
+    expected_outcome:
+      tool_calls: ["web_search"]
+      response_contains: ["区块链", "人工智能", "对比"]
+    
+    graders:
+      - type: model
+        rubric: grade_multi_agent_coordination
+        min_score: 4
+      - type: model
+        rubric: |
+          评估多智能体是否实现了并行执行：
+          - 两个研究任务应该并行执行
+          - 最终结果应该包含对比分析
+          
+          评分标准（1-5分）：
+          5分：完美并行执行，结果完整
+          4分：基本并行，结果良好
+          3分：部分并行，结果一般
+          2分：串行执行，效率低
+          1分：执行失败
+        min_score: 4
+    trials: 3
+    timeout_seconds: 120
+    tags: ["multi_agent", "parallel", "research", "complex"]
+
+  # ==================
+  # CriticAgent 评估
+  # ==================
+  
+  - id: multi_agent_003
+    description: "多智能体 - CriticAgent 质量评估"
+    category: multi_agent
+    input:
+      user_query: "分析三个竞品的定价策略和功能特点"
+      conversation_history: []
+      context:
+        scenario: "analysis"
+        complexity: "medium"
+    
+    expected_outcome:
+      response_contains: ["竞品", "定价", "功能"]
+    
+    graders:
+      - type: model
+        rubric: |
+          评估 CriticAgent 是否正常工作：
+          - 是否对子任务结果进行了评估
+          - 是否提供了改进建议
+          - 是否做出了正确的决策（pass/retry/replan）
+          
+          评分标准（1-5分）：
+          5分：Critic 评估准确，建议有用
+          4分：Critic 评估基本正确
+          3分：Critic 评估有偏差
+          2分：Critic 评估不准确
+          1分：Critic 未工作
+        min_score: 4
+    trials: 3
+    timeout_seconds: 90
+    tags: ["multi_agent", "critic", "quality", "medium"]
+
+  # ==================
+  # 检查点恢复
+  # ==================
+  
+  - id: multi_agent_004
+    description: "多智能体 - 检查点恢复测试"
+    category: multi_agent
+    input:
+      user_query: "生成一份包含10个章节的研究报告"
+      conversation_history: []
+      context:
+        scenario: "document_generation"
+        complexity: "high"
+        test_checkpoint_recovery: true
+    
+    expected_outcome:
+      response_contains: ["报告", "章节"]
+    
+    graders:
+      - type: code
+        name: check_checkpoint
+        check: "check_checkpoint('checkpoint_saved', 'has_checkpoint == true')"
+      - type: model
+        rubric: |
+          评估检查点恢复功能：
+          - 是否在子任务完成后保存检查点
+          - 失败后是否能从检查点恢复
+          - 恢复后是否能继续执行
+          
+          评分标准（1-5分）：
+          5分：检查点机制完美工作
+          4分：检查点基本正常
+          3分：检查点有问题但不影响结果
+          2分：检查点恢复失败
+          1分：检查点未工作
+        min_score: 4
+    trials: 2  # 检查点测试可以减少试验次数
+    timeout_seconds: 180
+    tags: ["multi_agent", "checkpoint", "recovery", "complex"]
+
+  # ==================
+  # 结果综合质量
+  # ==================
+  
+  - id: multi_agent_005
+    description: "多智能体 - LeadAgent 结果综合"
+    category: multi_agent
+    input:
+      user_query: "研究Python、Java和Go三种编程语言的优缺点，然后给出选择建议"
+      conversation_history: []
+      context:
+        scenario: "research"
+        complexity: "high"
+    
+    expected_outcome:
+      response_contains: ["Python", "Java", "Go", "建议"]
+    
+    graders:
+      - type: model
+        rubric: |
+          评估 LeadAgent 结果综合质量：
+          - 是否整合了所有子任务的结果
+          - 综合结果是否连贯完整
+          - 是否提供了有价值的建议
+          
+          评分标准（1-5分）：
+          5分：结果综合完美，建议有价值
+          4分：结果综合良好
+          3分：结果综合一般
+          2分：结果综合较差
+          1分：结果综合失败
+        min_score: 4
+      - type: model
+        rubric: grade_response_quality
+        min_score: 4
+    trials: 3
+    timeout_seconds: 120
+    tags: ["multi_agent", "synthesis", "research", "complex"]

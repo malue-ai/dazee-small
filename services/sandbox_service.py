@@ -126,6 +126,48 @@ class SandboxService:
     
     # ==================== 生命周期管理 ====================
     
+    # 🆕 V10.0: 需要沙盒的工具集合
+    SANDBOX_TOOLS = {"bash", "str_replace_based_edit_tool", "text_editor"}
+    
+    async def ensure_for_tools(
+        self,
+        tool_names: List[str],
+        conversation_id: str,
+        user_id: str
+    ) -> bool:
+        """
+        🆕 V10.0: 根据工具列表判断并预创建沙盒
+        
+        从 SimpleAgent._ensure_sandbox 提取，使 SimpleAgent 保持纯 RVR 编排层。
+        
+        Args:
+            tool_names: 选中的工具列表
+            conversation_id: 对话 ID
+            user_id: 用户 ID
+            
+        Returns:
+            bool: 是否成功（失败不阻断流程，仅警告）
+        """
+        # 判断是否需要沙盒
+        sandbox_tools = self.SANDBOX_TOOLS.copy()
+        sandbox_tools.update(t for t in tool_names if t.startswith("sandbox_"))
+        needs_sandbox = bool(sandbox_tools & set(tool_names))
+        
+        if not needs_sandbox:
+            return True
+        
+        try:
+            if not self.provider.is_available:
+                logger.warning("⚠️ 沙盒服务不可用，跳过预创建")
+                return False
+            
+            await self.provider.ensure_sandbox(conversation_id, user_id)
+            logger.info(f"🏖️ 沙盒环境已就绪: conversation_id={conversation_id}")
+            return True
+        except Exception as e:
+            logger.warning(f"⚠️ 沙盒预创建失败: {e}")
+            return False
+    
     async def get_or_create_sandbox(
         self,
         conversation_id: str,

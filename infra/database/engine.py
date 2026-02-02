@@ -19,7 +19,6 @@ from sqlalchemy.ext.asyncio import (
 
 from infra.database.base import Base
 
-
 def get_database_url() -> str:
     """
     获取数据库连接 URL（必须配置 DATABASE_URL 环境变量）

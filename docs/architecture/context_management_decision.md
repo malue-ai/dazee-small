@@ -131,7 +131,7 @@ export QOS_LEVEL=free        # 更严格的成本控制
 - [上下文压缩策略指南](../guides/context_compression_strategy.md)
 - [三层上下文管理实现](../../core/context/compaction/__init__.py)
 - [ChatService 集成](../../services/chat_service.py)
-- [SimpleAgent RVR 循环](../../core/agent/simple_agent.py)
+- [SimpleAgent RVR 循环](../../core/agent/simple/simple_agent.py)
 
 ## 决策人
 用户 + AI Assistant

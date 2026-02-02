@@ -1,0 +1,129 @@
+# ============================================================
+# Skills 注册表 - client_agent
+# ============================================================
+#
+# 声明本实例启用的 Claude Skills
+# 启动时 instance_loader.py 会自动注册 enabled: true 的 Skills
+#
+# ============================================================
+
+skills:
+  # ==================== macOS 核心自动化 ====================
+  
+  - name: peekaboo
+    enabled: true
+    description: "macOS UI 自动化 - 截图、点击、输入、窗口管理、应用控制"
+  
+  - name: apple-notes
+    enabled: true
+    description: "Apple Notes 管理 - 创建、搜索、编辑笔记"
+  
+  - name: apple-reminders
+    enabled: true
+    description: "Apple Reminders 管理 - 创建、查询、完成提醒事项"
+  
+  - name: things-mac
+    enabled: true
+    description: "Things 3 任务管理 - 创建、查询、更新任务"
+  
+  - name: bear-notes
+    enabled: true
+    description: "Bear Notes 管理 - 创建、搜索、标签管理"
+
+  # ==================== 消息通讯 ====================
+  
+  - name: imsg
+    enabled: true
+    description: "iMessage 消息发送 - 发送短信和 iMessage"
+  
+  - name: slack
+    enabled: true
+    description: "Slack 消息和频道管理"
+  
+  - name: discord
+    enabled: true
+    description: "Discord 集成 - 消息发送和频道管理"
+
+  # ==================== 开发者工具 ====================
+  
+  - name: github
+    enabled: true
+    description: "GitHub CLI 操作 - 仓库、Issue、PR 管理"
+  
+  - name: tmux
+    enabled: true
+    description: "Tmux 会话管理 - 创建、切换、管理终端会话"
+  
+  - name: coding-agent
+    enabled: true
+    description: "编码代理 - 代码生成和编辑辅助"
+
+  # ==================== 媒体工具 ====================
+  
+  - name: camsnap
+    enabled: true
+    description: "摄像头截图 - 使用摄像头拍照"
+  
+  - name: video-frames
+    enabled: true
+    description: "视频帧提取 - 从视频中提取帧"
+  
+  - name: openai-whisper
+    enabled: true
+    description: "本地语音转文字 - 使用 Whisper 进行语音识别"
+
+  # ==================== 生产力工具 ====================
+  
+  - name: 1password
+    enabled: true
+    description: "1Password CLI - 密码和敏感信息管理"
+  
+  - name: notion
+    enabled: true
+    description: "Notion 笔记 - 页面和数据库操作"
+  
+  - name: obsidian
+    enabled: true
+    description: "Obsidian 知识库 - 笔记和链接管理"
+  
+  - name: trello
+    enabled: true
+    description: "Trello 看板 - 卡片和列表管理"
+
+  # ==================== 智能家居 ====================
+  
+  - name: openhue
+    enabled: true
+    description: "Philips Hue 灯光控制 - 开关、亮度、颜色"
+  
+  - name: sonoscli
+    enabled: true
+    description: "Sonos 音响控制 - 播放、暂停、音量"
+
+  # ==================== 其他实用工具 ====================
+  
+  - name: weather
+    enabled: true
+    description: "天气查询 - 获取当前和预报天气"
+  
+  - name: summarize
+    enabled: true
+    description: "内容摘要生成 - 文章、网页、文档摘要"
+  
+  - name: nano-pdf
+    enabled: true
+    description: "PDF 处理 - 读取、提取、转换 PDF"
+
+
+# ==================== 配置说明 ====================
+#
+# 每个 Skill 条目支持以下字段：
+#
+# | 字段          | 必填 | 说明                                    |
+# |---------------|------|-----------------------------------------|
+# | name          | ✅   | Skill 目录名，需与 skills/ 下目录匹配   |
+# | enabled       | ✅   | true 启用，false 禁用                   |
+# | description   | ⬜   | 简短描述（供运营参考）                   |
+# | skill_id      | ❌   | 注册成功后自动回写，勿手动修改          |
+# | registered_at | ❌   | 注册时间戳，自动回写                    |
+#

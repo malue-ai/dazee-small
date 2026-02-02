@@ -291,36 +291,6 @@ class EnhancedChatRequest(BaseModel):
         description="聊天选项（可选，用于控制行为）"
     )
     
-    # 兼容旧版字段（逐步废弃）
-    stream: Optional[bool] = Field(None, description="⚠️ 已废弃：请使用 options.stream")
-    variables: Optional[Dict[str, Any]] = Field(None, description="⚠️ 已废弃：请使用 context")
-    background_tasks: Optional[List[str]] = Field(None, description="⚠️ 已废弃：请使用 options.background_tasks")
-    
-    @model_validator(mode='after')
-    def merge_deprecated_fields(self):
-        """合并已废弃的字段到新结构"""
-        # 合并 stream
-        if self.stream is not None:
-            if self.options is None:
-                self.options = ChatOptions()
-            self.options.stream = self.stream
-        
-        # 合并 variables 到 context
-        if self.variables is not None:
-            if self.context is None:
-                self.context = UserContext()
-            if self.context.custom_fields is None:
-                self.context.custom_fields = {}
-            self.context.custom_fields.update(self.variables)
-        
-        # 合并 background_tasks
-        if self.background_tasks is not None:
-            if self.options is None:
-                self.options = ChatOptions()
-            self.options.background_tasks = self.background_tasks
-        
-        return self
-    
     @field_validator('message')
     @classmethod
     def validate_message(cls, v):

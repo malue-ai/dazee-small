@@ -43,8 +43,8 @@ class Conversation(Base):
     # 基本信息
     title: Mapped[str] = mapped_column(String(255), default="新对话", nullable=False)
 
-    # 状态
-    status: Mapped[str] = mapped_column(String(32), default="active", nullable=False)
+    # 状态（添加索引，支持按状态查询）
+    status: Mapped[str] = mapped_column(String(32), default="active", nullable=False, index=True)
     
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(

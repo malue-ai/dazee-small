@@ -183,7 +183,7 @@ class Mem0Service:
                 return []
             
             # 2. LLM 重排序
-            from core.memory.mem0.reranker import get_reranker
+            from core.memory.mem0.retrieval.reranker import get_reranker
             reranker = get_reranker()
             reranked = await reranker.rerank(
                 query=query,

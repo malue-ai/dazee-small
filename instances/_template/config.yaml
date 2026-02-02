@@ -28,6 +28,22 @@ instance:
   # 版本号（可选）
   version: "1.0.0"
 
+# ==================== 全局 LLM 一键切换（可选）====================
+#
+# 说明：
+# - enabled=true 时，全局强制切换所有 LLM 到指定 Provider
+# - 适用于 Claude 不可用时，一键切换到 Qwen
+#
+llm_global:
+  enabled: false
+  provider: "qwen"
+  base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+  api_key_env: "QWEN_API_KEY"
+  compat: "qwen"
+  model_map:
+    intent_analyzer: "qwen-plus"
+    default: "qwen-max"
+
 
 # ==================== Agent 配置覆盖（可选）====================
 # 
@@ -158,54 +174,50 @@ memory:
   # retention_policy: "user"
 
 
-# ==================== Multi-Agent 配置（V6.0）====================
+# ==================== Multi-Agent 配置（V7.8 极简版）====================
 #
-# 📌 用途：启用多智能体协作模式
+# 📌 设计原则：运营只需配置 mode，其他由框架智能处理
 #
-# 💡 适用场景：
+# 💡 何时启用多智能体？
 #   - 可并行化的复杂任务（重构 + CSS 优化 + 测试）
 #   - 多实体研究任务（分析 10 家公司）
 #   - 多维度分析任务
 #
-# 📁 Workers 配置目录：
-#   instances/{instance}/workers/
-#   ├── worker_registry.yaml  # Workers 注册表
-#   ├── refactor/prompt.md    # 重构专家提示词
-#   ├── css/prompt.md         # CSS 专家提示词
-#   └── test/prompt.md        # 测试专家提示词
+# 🤖 自动化能力：
+#   - LeadAgent 自动分解任务并分配 Worker
+#   - DAGScheduler 自动调度依赖和并行执行
+#   - Critic Agent 自动评估和触发重试/重规划
 #
 multi_agent:
-  # 🆕 V6.0 mode 选项（替代旧的 enabled 字段）：
-  #   - disabled: 禁用 Multi-Agent，始终使用 SimpleAgent（默认）
-  #   - auto: 自动判断（基于任务复杂度和关键词）
-  #   - enabled: 始终使用 Multi-Agent
+  # mode 选项：
+  #   - disabled: 禁用，始终使用单智能体（默认）
+  #   - auto: 自动判断（复杂度评分 > 7 时启用）
+  #   - enabled: 始终使用多智能体
   mode: "disabled"
   
-  # 最大并发 Worker 数量（控制资源使用）
-  max_parallel_workers: 5
+  # 🔧 高级配置（通常无需修改，框架有合理默认值）
+  # max_parallel_workers: 5       # 最大并发 Worker 数（默认 5）
+
+
+# ==================== Skills 配置 ====================
+#
+# 📌 配置原则：
+#   - 1 = 启用，0 = 禁用
+#   - 实例自定义的 Skills（skills/ 目录）始终加载
+#
+# 💡 使用场景：
+#   - 禁用不需要的 Skill 以精简提示词
+#   - 针对特定场景定制 Skill 组合
+#
+enabled_skills:
+  # --- PPT 生成类 ---
+  slidespeak-generator: 1      # SlideSpeak PPT 生成（推荐）
+  slidespeak-editor: 0         # SlideSpeak PPT 编辑
+  slidespeak-slide-editor: 0   # 单页幻灯片编辑
+  ppt-generator: 0             # 通用 PPT 生成
   
-  # 执行策略
-  #   - auto: 自动选择（根据任务依赖关系）
-  #   - parallel: 强制并行（适合无依赖任务）
-  #   - sequential: 强制串行（适合有依赖任务）
-  # execution_strategy: "auto"
-  
-  # 容错配置
-  # enable_checkpointing: true
-  # max_retries: 3
-  
-  # 超时配置
-  # task_timeout_seconds: 3600       # 总任务超时（秒）
-  # worker_timeout_seconds: 600      # 单 Worker 超时（秒）
-  
-  # 自动触发配置（mode=auto 时生效）
-  # auto_trigger_keywords:
-  #   - "研究"
-  #   - "分析"
-  #   - "对比"
-  #   - "调研"
-  #   - "报告"
-  # auto_trigger_min_complexity: "complex"
+  # --- 知识构建类 ---
+  ontology-builder: 1          # 本体/分类体系构建（推荐）
 
 
 # ==================== 工具能力配置 ====================
@@ -235,6 +247,32 @@ enabled_capabilities:
   # --- 动态代码执行 ---
   code_execution: 0          # 本地代码执行（谨慎启用）
 
+
+# ==================== 全局配置覆盖（可选）====================
+#
+# 📌 支持覆盖全局配置文件中的值
+# 优先级：实例配置 > 全局配置 > 框架默认值
+#
+# 💡 使用场景：
+#   - 特定实例需要不同的提示词大小限制
+#   - 特定实例需要不同的模块复杂度映射
+#   - 特定实例需要不同的工具配置
+
+# 覆盖 config/prompt_config.yaml
+# prompt_config:
+#   size_limits:
+#     total:
+#       simple: 20000   # 比默认值更大
+#   llm_generation:
+#     simple_task:
+#       temperature: 0.3  # 更确定性的输出
+
+# 覆盖 config/capabilities.yaml
+# capabilities:
+#   tool_selection:
+#     serial_only_tools:
+#       - plan_todo
+#       - custom_blocking_tool
 
 # ==================== 高级配置（通常无需修改）====================
 

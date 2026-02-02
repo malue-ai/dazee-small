@@ -4,10 +4,10 @@
 
 from datetime import datetime
 from typing import Optional
-import json
 from enum import Enum
 
-from sqlalchemy import String, DateTime, Text, Integer, Float, ForeignKey, Enum as SQLEnum
+from sqlalchemy import String, DateTime, Text, Integer, Float, ForeignKey, Enum as SQLEnum, Index
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from infra.database.base import Base
@@ -62,11 +62,12 @@ class Knowledge(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
-    # 类型和状态
+    # 类型和状态（添加索引，支持按类型查询）
     type: Mapped[KnowledgeType] = mapped_column(
         SQLEnum(KnowledgeType),
         default=KnowledgeType.DOCUMENT,
-        nullable=False
+        nullable=False,
+        index=True
     )
     status: Mapped[KnowledgeStatus] = mapped_column(
         SQLEnum(KnowledgeStatus),
@@ -79,10 +80,10 @@ class Knowledge(Base):
     vector_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     embedding_model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     
-    # 分块信息
+    # 分块信息（parent_id 添加索引，支持查询子文档）
     chunk_index: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     chunk_total: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    parent_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)  # 原始文档 ID
+    parent_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)  # 原始文档 ID
     
     # 来源信息
     source_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
@@ -106,23 +107,19 @@ class Knowledge(Base):
     )
     indexed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     
-    # 元数据
-    _metadata: Mapped[str] = mapped_column(
+    # 元数据（JSONB 类型，PostgreSQL 原生支持）
+    extra_data: Mapped[dict] = mapped_column(
         "metadata",
-        Text,
-        default="{}",
+        JSONB,
+        default={},
         nullable=False
     )
     
-    @property
-    def extra_data(self) -> dict:
-        """获取元数据（自动解析 JSON）"""
-        return json.loads(self._metadata) if self._metadata else {}
-    
-    @extra_data.setter
-    def extra_data(self, value: dict):
-        """设置元数据（自动序列化为 JSON）"""
-        self._metadata = json.dumps(value, ensure_ascii=False)
+    # 复合索引：用户知识库过滤
+    __table_args__ = (
+        Index('idx_knowledge_user_status', 'user_id', 'status'),
+        Index('idx_knowledge_user_type', 'user_id', 'type'),
+    )
     
     def __repr__(self) -> str:
         return f"<Knowledge(id={self.id}, title={self.title}, status={self.status})>"

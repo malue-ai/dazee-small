@@ -1,0 +1,71 @@
+# 架构清理规范
+
+## 核心原则
+
+### 1. 及时清理冗余代码
+
+发现以下情况必须立即清理：
+- 重复文件（如重构后遗留的旧版本）
+- 被创建但从未调用的对象
+- 已迁移到其他模块的功能
+
+### 2. 意图识别架构（V9.0）
+
+**单一职责**：意图识别由路由层统一处理
+
+```
+正确架构：
+ChatService
+  → AgentRouter.route()
+    → core/routing/intent_analyzer.IntentAnalyzer  ← 唯一位置
+  → SimpleAgent.chat(intent=intent)  ← intent 从路由层传入
+
+错误做法：
+❌ SimpleAgent 内部再做意图分析
+❌ 多个位置存在 IntentAnalyzer 副本
+```
+
+**文件位置**：
+- `core/routing/intent_analyzer.py` - 唯一的 IntentAnalyzer 实现
+- `core/routing/__init__.py` - 导出 IntentAnalyzer
+
+### 3. 意图识别上下文过滤（V9.0）
+
+**时延约束**：意图识别总时延 < 200ms
+
+**过滤规则**（`_filter_for_intent` 方法）：
+- 只保留最近 5 条 `role=user` 消息
+- 最后 1 条 `role=assistant` 截断为 100 字符
+- 直接丢弃 tool_use/tool_result
+- 过滤逻辑 O(n)，< 0.1ms
+
+**禁止**：
+- ❌ 上下文压缩（需要 LLM 调用）
+- ❌ 复杂文本处理（正则、摘要生成）
+- ❌ 任何网络调用
+
+### 4. 意图状态转换
+
+**追问场景**（`is_follow_up=true`）：
+- 复用 `plan_cache`
+- 继承上轮 `task_type`
+
+**新意图场景**（`is_follow_up=false`）：
+- 重置 `plan_cache`
+- 清空 `tool_calls` 历史
+
+## 清理检查清单
+
+当发现可能的冗余代码时，执行以下检查：
+
+1. **grep 调用点**：确认代码是否被实际调用
+2. **分析架构**：确认功能是否已迁移到其他模块
+3. **直接删除**：不保留向后兼容层（代码未上线）
+4. **更新引用**：修复所有导入路径
+5. **更新 __all__**：从导出列表中移除
+
+## 已清理的冗余文件
+
+| 文件 | 删除原因 | 删除日期 |
+|------|----------|----------|
+| `core/agent/intent_analyzer.py` | IntentAnalyzer 已移至路由层，SimpleAgent 创建但从未调用 | 2026-01-24 |

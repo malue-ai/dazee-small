@@ -1371,9 +1371,14 @@ class InstancePromptCache:
         # 3. 追加运行时上下文
         apis_prompt = self.runtime_context.get("apis_prompt", "")
         framework_prompt = self.runtime_context.get("framework_prompt", "")
+        environment_prompt = self.runtime_context.get("environment_prompt", "")  # 🆕 V6.0
         
         # 组装完整提示词
         parts = [base_prompt]
+        
+        # 🆕 V6.0: 环境信息优先注入（让 Agent 了解运行环境）
+        if environment_prompt:
+            parts.append(f"\n\n---\n\n{environment_prompt}")
         
         if apis_prompt:
             parts.append(f"\n\n---\n\n{apis_prompt}")
@@ -1383,7 +1388,8 @@ class InstancePromptCache:
         
         full_prompt = "".join(parts)
         
-        logger.debug(f"✅ 组装完整系统提示词: 缓存={len(base_prompt)} + 运行时={len(apis_prompt) + len(framework_prompt)} = {len(full_prompt)} 字符")
+        runtime_len = len(apis_prompt) + len(framework_prompt) + len(environment_prompt)
+        logger.debug(f"✅ 组装完整系统提示词: 缓存={len(base_prompt)} + 运行时={runtime_len} = {len(full_prompt)} 字符")
         
         return full_prompt
     
@@ -1455,7 +1461,7 @@ class InstancePromptCache:
             })
             logger.debug(f"📦 Layer 2 (实例提示词): {len(instance_prompt)} 字符")
         
-        # Layer 3: Skills + 工具定义
+        # Layer 3: APIs + 工具定义
         # 工具更新 → 重启 → 运行期稳定
         # 优先使用传入的 tools_context，否则使用 runtime_context 中的 apis_prompt
         tools_text = tools_context or self.runtime_context.get("apis_prompt", "")
@@ -1465,7 +1471,18 @@ class InstancePromptCache:
                 "text": tools_text
                 # 🔧 不在这里添加 cache_control，统一在最后一个 block 添加
             })
-            logger.debug(f"📦 Layer 3 (Skills+工具): {len(tools_text)} 字符")
+            logger.debug(f"📦 Layer 3 (APIs+工具): {len(tools_text)} 字符")
+        
+        # 🆕 Layer 3.5: Skills Prompt（借鉴 clawdbot 的 prompt_injection 机制）
+        # 将 <available_skills> XML 注入到提示词，Agent 通过 read 工具读取 SKILL.md
+        skills_prompt = self.runtime_context.get("skills_prompt", "")
+        if skills_prompt:
+            system_blocks.append({
+                "type": "text",
+                "text": skills_prompt
+                # 🔧 不在这里添加 cache_control，统一在最后一个 block 添加
+            })
+            logger.debug(f"📦 Layer 3.5 (Skills Prompt): {len(skills_prompt)} 字符")
         
         # Layer 4: Mem0 用户画像（不缓存）
         # 基于语义检索，每次 query 不同 → 结果不同 → 不能缓存

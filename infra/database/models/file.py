@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Optional, TYPE_CHECKING
 from enum import Enum
 
-from sqlalchemy import String, DateTime, Integer, ForeignKey, Enum as SQLEnum
+from sqlalchemy import String, DateTime, Integer, ForeignKey, Enum as SQLEnum, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from infra.database.base import Base
@@ -33,6 +33,11 @@ class File(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, nullable=False)
     
     user: Mapped["User"] = relationship(back_populates="files")
+    
+    # 复合索引：user_id + created_at（用户文件列表按时间排序）
+    __table_args__ = (
+        Index('idx_files_user_created', 'user_id', 'created_at'),
+    )
     
     def __repr__(self) -> str:
         return f"<File({self.id}, {self.filename})>"

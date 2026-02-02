@@ -36,14 +36,13 @@ docs/
 │   ├── CONVERSATION_DELTA_PATTERN.md
 │   └── MULTI_AGENT_ROADMAP.md
 │
-├── guides/                          # 📖 使用指南 (10个)
+├── guides/                          # 📖 使用指南 (11个)
 │   ├── E2B_INTEGRATION.md           # E2B 集成指南
 │   ├── E2B_QUICKSTART.md            # E2B 快速开始
 │   ├── E2B_SANDBOX_LIFECYCLE_GUIDE.md
 │   ├── E2B_ARCHITECTURE_VALIDATION.md
 │   ├── E2B_CORE_CAPABILITIES_ANALYSIS.md
-│   ├── MEM0_EMBEDDING_GUIDE.md
-│   ├── MEM0_SETUP_GUIDE.md
+│   ├── MEM0_GUIDE.md                # Mem0 统一指南（配置/Embedding/Schema）
 │   ├── GRPC_INTEGRATION.md
 │   ├── PROMPT_DRIVEN_IMPLEMENTATION.md
 │   └── RESULT_COMPACTOR_IMPLEMENTATION.md
@@ -165,7 +164,7 @@ async for event in agent.chat(
 
 | 模块 | 位置 | 说明 |
 |------|------|------|
-| **Agent 编排** | `core/agent/simple_agent.py` | 核心编排器 |
+| **Agent 编排** | `core/agent/simple/simple_agent.py` | 核心编排器 |
 | **意图分析** | `core/agent/intent_analyzer.py` | 意图识别 |
 | **工具选择** | `core/tool/selector.py` | 工具选择器 |
 | **工具执行** | `core/tool/executor.py` | 工具执行器 |
@@ -218,7 +217,7 @@ async for event in agent.chat(
 
 | 文件 | 替代 |
 |------|------|
-| `core/agent.py` | `core/agent/simple_agent.py` |
+| `core/agent.py` | `core/agent/simple/simple_agent.py` |
 | `core/memory.py` | `core/memory/` 目录 |
 | `core/llm_service.py` | `core/llm/` 目录 |
 | `core/planning.py` | 已删除（使用 `plan_todo_tool`） |

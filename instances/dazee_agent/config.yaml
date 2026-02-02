@@ -289,53 +289,16 @@ memory:
   retention_policy: "user"
 
 
-# ==================== Multi-Agent 配置（V6.0）====================
+# ==================== Multi-Agent 配置（V7.8 极简版）====================
 #
-# 控制复杂任务的多 Agent 协作行为
+# 📌 运营只需配置 mode，其他由框架智能处理
 #
 multi_agent:
   # mode 选项：
-  #   - disabled: 禁用 Multi-Agent，始终使用 SimpleAgent
-  #   - auto: 自动判断（基于任务复杂度和关键词）
-  #   - enabled: 始终使用 Multi-Agent
-  mode: "disabled"  # 🆕 暂时禁用，待充分验证后再启用
-  
-  # 最大并行 Worker 数
-  max_parallel_workers: 5
-  
-  # 执行策略：auto | parallel | sequential
-  execution_strategy: "auto"
-  
-  # 容错配置
-  enable_checkpointing: true
-  max_retries: 3
-  
-  # 超时配置
-  task_timeout_seconds: 3600       # 总任务超时（秒）
-  worker_timeout_seconds: 600      # 单 Worker 超时（秒）
-  
-  # Worker 配置
-  workers:
-    research:
-      enabled: true
-      max_instances: 3
-    
-    document:
-      enabled: true
-      max_instances: 2
-    
-    data_analysis:
-      enabled: true
-      max_instances: 2
-  
-  # 自动触发配置（mode=auto 时生效）
-  auto_trigger_keywords:
-    - "研究"
-    - "分析"
-    - "对比"
-    - "调研"
-    - "报告"
-  auto_trigger_min_complexity: "complex"
+  #   - disabled: 禁用，始终使用单智能体（默认）
+  #   - auto: 自动判断（复杂度评分 > 7 时启用）
+  #   - enabled: 始终使用多智能体
+  mode: "disabled"  # 暂时禁用，待充分验证后再启用
 
 
 # ==================== 高级配置 ====================

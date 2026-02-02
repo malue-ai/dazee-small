@@ -26,10 +26,13 @@ from core.routing.intent_analyzer import (
     IntentAnalyzer,
     create_intent_analyzer
 )
+# 从旧版 simple_agent 导入（兼容当前分支）
 from core.agent.simple_agent import (
     SimpleAgent,
     create_simple_agent
 )
+# RVRBAgent 暂时作为 SimpleAgent 的别名（v7 新特性未完全合并）
+RVRBAgent = SimpleAgent
 from core.agent.content_handler import (
     ContentHandler,
     create_content_handler
@@ -62,6 +65,7 @@ __all__ = [
     "IntentResult",
     # Agent
     "SimpleAgent",
+    "RVRBAgent",
     "create_simple_agent",
     # ContentHandler
     "ContentHandler",

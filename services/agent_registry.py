@@ -1,16 +1,22 @@
 """
 Agent 注册服务 - Agent Registry Service
 
+🆕 V9.5 单实例部署模式：
+    每个 Agent 实例是独立的部署单元，启动时只加载指定实例。
+
 职责：
-1. 启动时预加载所有 instances/ 目录下的 Agent 配置
-2. 提供 get_agent(agent_id) 获取 Agent 实例（工厂模式）
-3. 提供 list_agents() 列出所有可用 Agent
-4. 管理 Agent 生命周期
+1. 启动时加载指定的 Agent 实例（preload_instance）
+2. 提供 get_agent(agent_id) 获取 Agent 实例（原型浅拷贝）
+3. 管理 Agent 生命周期
 
 设计原则：
-- 工厂模式：每次请求创建新的 Agent 实例，共享配置但独立状态
-- 预加载配置：启动时加载所有实例的 InstancePromptCache，避免运行时 LLM 分析
-- 单例模式：AgentRegistry 全局唯一
+- 单实例部署：每个进程只加载一个 Agent 实例
+- 原型复用：clone_for_session() 浅拷贝，共享重量级组件
+- 独立部署：实例之间完全解耦，适合容器化部署
+
+使用方式：
+    python main.py --instance=dazee_ppt
+    AGENT_INSTANCE=dazee_ppt python main.py
 """
 
 import asyncio
@@ -76,16 +82,19 @@ class AgentRegistry:
     """
     Agent 注册表（单例）
     
+    🆕 V9.5 单实例部署模式：
+        每个 Agent 实例是独立的部署单元，启动时只加载指定实例。
+    
     使用方法：
         registry = get_agent_registry()
         
-        # 启动时预加载所有 Agent
-        await registry.preload_all()
+        # 启动时加载指定实例（推荐）
+        await registry.preload_instance("dazee_ppt")
         
-        # 获取 Agent 实例（每次调用创建新实例）
-        agent = await registry.get_agent("test_agent", event_manager, ...)
+        # 获取 Agent 实例（从原型浅拷贝）
+        agent = await registry.get_agent("dazee_ppt", event_manager, ...)
         
-        # 列出所有可用 Agent
+        # 获取当前实例信息
         agents = registry.list_agents()
     """
     
@@ -93,12 +102,12 @@ class AgentRegistry:
         # Agent 配置缓存（name -> AgentConfig）
         self._configs: Dict[str, AgentConfig] = {}
         
-        # 🆕 V7.1: Agent 原型缓存（预创建的 Agent 实例，运行时复用）
+        # Agent 原型缓存（预创建的 Agent 实例，运行时复用）
         # 原型包含：LLM Service、工具注册表、MCP 客户端等重量级组件
         # 运行时通过 clone_for_session() 浅克隆并重置会话状态
         self._agent_prototypes: Dict[str, Any] = {}  # name -> SimpleAgent
         
-        # 🆕 V7.1: 共享组件（跨 Agent 复用）
+        # 共享组件（跨 Agent 复用）
         self._shared_event_manager = None  # 共享的事件管理器（原型创建时使用）
         
         # 加载状态
@@ -106,146 +115,101 @@ class AgentRegistry:
         self._loading = False
         self._load_lock = asyncio.Lock()
     
-    # ==================== 预加载 ====================
+    # ==================== 单实例加载 ====================
     
-    async def preload_all(self, force_refresh: bool = False) -> int:
+    async def preload_instance(self, instance_name: str, force_refresh: bool = False) -> bool:
         """
-        预加载所有 instances/ 目录下的 Agent 配置
+        🆕 V9.5: 单实例加载模式（推荐的生产部署方式）
+        
+        每个实例是独立的部署单元，启动时只加载指定的实例。
+        
+        优势：
+        - 启动更快：只加载一个实例
+        - 隔离性好：实例之间完全解耦
+        - 容器友好：适合 K8s 单 Pod 部署
+        - 错误隔离：一个实例配置错误不影响其他实例
         
         Args:
+            instance_name: 实例名称（instances/ 目录下的文件夹名）
             force_refresh: 是否强制刷新缓存
             
         Returns:
-            成功加载的 Agent 数量
+            是否加载成功
+            
+        Raises:
+            FileNotFoundError: 实例目录不存在
+            
+        使用方式：
+            # 方式 1：命令行参数
+            python main.py --instance=dazee_ppt
+            
+            # 方式 2：环境变量
+            AGENT_INSTANCE=dazee_ppt python main.py
+            
+            # 方式 3：Docker
+            docker run -e AGENT_INSTANCE=dazee_ppt zenflux-agent
         """
         async with self._load_lock:
-            if self._loaded and not force_refresh:
-                logger.info("✅ Agent 配置已加载，跳过重复加载")
-                return len(self._configs)
-            
-            self._loading = True
             start_time = datetime.now()
             
+            # 验证实例是否存在
+            instances_dir = get_instances_dir()
+            instance_path = instances_dir / instance_name
+            
+            if not instance_path.exists():
+                available = list_instances()
+                raise FileNotFoundError(
+                    f"实例 '{instance_name}' 不存在。\n"
+                    f"可用实例: {available}\n"
+                    f"实例目录: {instances_dir}"
+                )
+            
+            logger.info(f"🚀 单实例模式: 加载 '{instance_name}'...")
+            
             try:
-                instances = list_instances()
-                logger.info(f"🔍 发现 {len(instances)} 个 Agent 实例")
+                # 1. 加载实例配置
+                await self._load_single_agent(instance_name, force_refresh=force_refresh)
                 
-                loaded_count = 0
-                
-                for instance_name in instances:
-                    try:
-                        instance_start = datetime.now()
-                        logger.info(f"📦 预加载 Agent: {instance_name}")
-                        
-                        # 1. 加载环境变量
-                        load_instance_env(instance_name)
-                        
-                        # 2. 加载实例配置
-                        config = load_instance_config(instance_name)
-                        
-                        # 3. 加载实例提示词
-                        instance_prompt = load_instance_prompt(instance_name)
-                        
-                        # 4. 加载 InstancePromptCache（核心：包含 AgentSchema、系统提示词等）
-                        instance_path = get_instances_dir() / instance_name
-                        cache_dir = instance_path / ".cache"
-                        
-                        prompt_cache = await load_instance_cache(
-                            instance_name=instance_name,
-                            raw_prompt=instance_prompt,
-                            config=config.raw_config,
-                            cache_dir=str(cache_dir),
-                            force_refresh=force_refresh
-                        )
-                        
-                        # 5. 准备 APIs 运行时参数
-                        if config.apis:
-                            config.apis = _prepare_apis(config.apis)
-                        
-                        # 6. 合并完整提示词
-                        framework_prompt = get_universal_agent_prompt()
-                        apis_prompt = _build_apis_prompt_section(config.apis)
-                        
-                        full_prompt = f"""# 实例配置
-
-{instance_prompt}
-
----
-
-{apis_prompt}
-
----
-
-# 框架能力协议
-
-{framework_prompt}
-"""
-                        
-                        # 7. 创建 AgentConfig
-                        load_time_ms = (datetime.now() - instance_start).total_seconds() * 1000
-                        
-                        agent_config = AgentConfig(
-                            name=instance_name,
-                            description=config.description,
-                            version=config.version,
-                            instance_config=config,
-                            prompt_cache=prompt_cache,
-                            full_prompt=full_prompt,
-                            load_time_ms=load_time_ms
-                        )
-                        
-                        self._configs[instance_name] = agent_config
-                        loaded_count += 1
-                        
-                        logger.info(
-                            f"   ✅ {instance_name} 配置加载完成 "
-                            f"(耗时 {load_time_ms:.0f}ms)"
-                        )
-                        
-                    except Exception as e:
-                        logger.error(f"   ❌ {instance_name} 加载失败: {str(e)}", exc_info=True)
-                
-                # 🆕 V7.1: 预创建 Agent 原型（核心优化）
-                prototype_count = 0
-                logger.info(f"🔧 开始预创建 Agent 原型...")
-                
-                # 创建共享的事件管理器（用于原型初始化）
+                # 2. 创建 Agent 原型
                 if self._shared_event_manager is None:
                     storage = get_memory_storage()
                     self._shared_event_manager = create_event_manager(storage)
                 
-                for instance_name, agent_config in self._configs.items():
-                    try:
-                        prototype_start = datetime.now()
-                        
-                        # 创建 Agent 原型
-                        prototype = await self._create_agent_prototype(
-                            agent_config, 
-                            self._shared_event_manager
-                        )
-                        
-                        if prototype:
-                            self._agent_prototypes[instance_name] = prototype
-                            prototype_count += 1
-                            
-                            prototype_time_ms = (datetime.now() - prototype_start).total_seconds() * 1000
-                            logger.info(f"   🤖 {instance_name} 原型创建完成 ({prototype_time_ms:.0f}ms)")
-                        
-                    except Exception as e:
-                        logger.warning(f"   ⚠️ {instance_name} 原型创建失败，将使用按需创建: {str(e)}")
-                
-                total_time_ms = (datetime.now() - start_time).total_seconds() * 1000
-                self._loaded = True
-                
-                logger.info(
-                    f"🎉 Agent 预加载完成: {loaded_count}/{len(instances)} 配置, "
-                    f"{prototype_count} 原型 (总耗时 {total_time_ms:.0f}ms)"
+                agent_config = self._configs[instance_name]
+                prototype = await self._create_agent_prototype(
+                    agent_config,
+                    self._shared_event_manager
                 )
                 
-                return loaded_count
-                
-            finally:
-                self._loading = False
+                if prototype:
+                    self._agent_prototypes[instance_name] = prototype
+                    
+                    total_time_ms = (datetime.now() - start_time).total_seconds() * 1000
+                    self._loaded = True
+                    
+                    logger.info(
+                        f"✅ 单实例加载完成: {instance_name} "
+                        f"(配置 {agent_config.load_time_ms:.0f}ms + 原型 {total_time_ms - agent_config.load_time_ms:.0f}ms = 总计 {total_time_ms:.0f}ms)"
+                    )
+                    return True
+                else:
+                    logger.warning(f"⚠️ 实例 '{instance_name}' 原型创建失败")
+                    return False
+                    
+            except Exception as e:
+                logger.error(f"❌ 单实例加载失败: {instance_name} - {str(e)}", exc_info=True)
+                raise
+    
+    def get_current_instance(self) -> Optional[str]:
+        """
+        获取当前加载的实例名称（单实例模式下使用）
+        
+        Returns:
+            当前实例名称，如果是多实例模式或未加载则返回 None
+        """
+        if len(self._configs) == 1:
+            return list(self._configs.keys())[0]
+        return None
     
     # ==================== 获取 Agent ====================
     
@@ -256,12 +220,12 @@ class AgentRegistry:
         conversation_service=None
     ):
         """
-        获取 Agent 实例（🆕 V7.1: 原型复用模式）
+        获取 Agent 实例（按需加载 + 原型复用）
         
         优化流程：
-        1. 优先从 _agent_prototypes 获取预创建的原型
-        2. 调用 clone_for_session() 浅克隆并重置会话状态
-        3. 如果原型不存在，回退到按需创建
+        1. 如果实例未加载，尝试按需加载（preload_instance）
+        2. 从 _agent_prototypes 获取原型
+        3. 调用 clone_for_session() 浅克隆并重置会话状态
         
         Args:
             agent_id: Agent ID（instances/ 目录名）
@@ -272,13 +236,18 @@ class AgentRegistry:
             就绪的 Agent 实例
             
         Raises:
-            AgentNotFoundError: agent_id 不存在
+            AgentNotFoundError: agent_id 在 instances/ 目录中不存在
         """
+        # 🆕 V9.5: 按需加载 - 如果实例未加载，尝试加载它
         if agent_id not in self._configs:
-            available = list(self._configs.keys())
-            raise AgentNotFoundError(
-                f"Agent '{agent_id}' 不存在，可用的 Agent: {available}"
-            )
+            logger.info(f"📦 Agent '{agent_id}' 未加载，尝试按需加载...")
+            try:
+                await self.preload_instance(agent_id)
+            except FileNotFoundError:
+                available = list_instances()
+                raise AgentNotFoundError(
+                    f"Agent '{agent_id}' 不存在。可用实例: {available}"
+                )
         
         config = self._configs[agent_id]
         
@@ -983,40 +952,49 @@ class AgentRegistry:
             "message": f"Agent '{agent_id}' 已删除",
         }
     
-    async def reload_agent(self, agent_id: str = None) -> Dict[str, Any]:
+    async def reload_agent(self, agent_id: str) -> Dict[str, Any]:
         """
         重新加载 Agent 配置
         
         Args:
-            agent_id: Agent ID，如果为 None 则重载所有
+            agent_id: Agent ID（必填）
             
         Returns:
             重载结果
-        """
-        if agent_id:
-            if agent_id not in self._configs:
-                # 可能是新创建的，尝试加载
-                try:
-                    await self._load_single_agent(agent_id)
-                    return {
-                        "agent_id": agent_id,
-                        "message": f"Agent '{agent_id}' 加载成功",
-                    }
-                except Exception as e:
-                    raise AgentNotFoundError(f"Agent '{agent_id}' 不存在: {e}")
             
-            await self._load_single_agent(agent_id, force_refresh=True)
-            return {
-                "agent_id": agent_id,
-                "message": f"Agent '{agent_id}' 重新加载成功",
-            }
-        else:
-            # 重载所有
-            count = await self.preload_all(force_refresh=True)
-            return {
-                "reloaded_count": count,
-                "message": f"已重新加载 {count} 个 Agent",
-            }
+        Raises:
+            AgentNotFoundError: Agent 不存在
+        """
+        if not agent_id:
+            raise ValueError("agent_id 是必填参数")
+        
+        if agent_id not in self._configs:
+            # 可能是新创建的，尝试加载
+            try:
+                await self.preload_instance(agent_id)
+                return {
+                    "agent_id": agent_id,
+                    "message": f"Agent '{agent_id}' 加载成功",
+                }
+            except Exception as e:
+                raise AgentNotFoundError(f"Agent '{agent_id}' 不存在: {e}")
+        
+        # 重新加载（强制刷新）
+        await self.preload_instance(agent_id, force_refresh=True)
+        return {
+            "agent_id": agent_id,
+            "message": f"Agent '{agent_id}' 重新加载成功",
+        }
+
+    def get_router(self, agent_id: str):
+        """
+        获取路由器（统一走 AgentFactory.create_route）
+        """
+        if agent_id not in self._configs:
+            raise AgentNotFoundError(f"Agent '{agent_id}' 不存在")
+        
+        config = self._configs[agent_id]
+        return AgentFactory.create_route(prompt_cache=config.prompt_cache)
     
     async def _load_single_agent(self, agent_id: str, force_refresh: bool = False):
         """

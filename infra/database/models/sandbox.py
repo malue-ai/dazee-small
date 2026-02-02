@@ -7,9 +7,9 @@
 
 from datetime import datetime
 from typing import Optional, TYPE_CHECKING
-import json
 
-from sqlalchemy import String, DateTime, Text, Index
+from sqlalchemy import String, DateTime, Index
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from infra.database.base import Base
@@ -95,26 +95,21 @@ class Sandbox(Base):
         nullable=True
     )
     
-    # 元数据（JSON 存储）
-    _metadata: Mapped[str] = mapped_column(
+    # 元数据（JSONB 类型，PostgreSQL 原生支持）
+    extra_data: Mapped[dict] = mapped_column(
         "metadata",
-        Text,
-        default="{}",
+        JSONB,
+        default={},
         nullable=False
     )
     
-    @property
-    def extra_data(self) -> dict:
-        """获取元数据（自动解析 JSON）"""
-        return json.loads(self._metadata) if self._metadata else {}
-    
-    @extra_data.setter
-    def extra_data(self, value: dict):
-        """设置元数据（自动序列化为 JSON）"""
-        self._metadata = json.dumps(value, ensure_ascii=False)
-    
     def __repr__(self) -> str:
         return f"<Sandbox(id={self.id}, conversation_id={self.conversation_id}, status={self.status})>"
+    
+    # 复合索引：清理过期沙盒
+    __table_args__ = (
+        Index('idx_sandboxes_status_last_active', 'status', 'last_active_at'),
+    )
     
     def to_dict(self) -> dict:
         """转换为字典"""

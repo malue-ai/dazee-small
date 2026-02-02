@@ -9,7 +9,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func, or_, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from infra.database.models import Conversation
@@ -259,6 +259,8 @@ async def get_conversation_summary(
     """
     获取对话摘要（含消息统计）
     
+    优化：使用单次聚合查询代替 4 次独立查询
+    
     Returns:
         包含 message_count, user_message_count, assistant_message_count, last_message 的字典
     """
@@ -266,31 +268,17 @@ async def get_conversation_summary(
     if not conv:
         return None
     
-    # 总消息数
-    total_result = await session.execute(
-        select(func.count(Message.id)).where(Message.conversation_id == conversation_id)
-    )
-    total = total_result.scalar() or 0
+    # 单次聚合查询：获取消息统计
+    stats_query = select(
+        func.count(Message.id).label("total"),
+        func.count(case((Message.role == 'user', 1))).label("user_count"),
+        func.count(case((Message.role == 'assistant', 1))).label("assistant_count"),
+    ).where(Message.conversation_id == conversation_id)
     
-    # 用户消息数
-    user_result = await session.execute(
-        select(func.count(Message.id)).where(
-            Message.conversation_id == conversation_id,
-            Message.role == 'user'
-        )
-    )
-    user_count = user_result.scalar() or 0
+    stats_result = await session.execute(stats_query)
+    stats = stats_result.one()
     
-    # 助手消息数
-    assistant_result = await session.execute(
-        select(func.count(Message.id)).where(
-            Message.conversation_id == conversation_id,
-            Message.role == 'assistant'
-        )
-    )
-    assistant_count = assistant_result.scalar() or 0
-    
-    # 最后一条消息
+    # 获取最后一条消息（单独查询，但这是必要的）
     last_msg_result = await session.execute(
         select(Message)
         .where(Message.conversation_id == conversation_id)
@@ -310,9 +298,9 @@ async def get_conversation_summary(
     return {
         "conversation_id": conversation_id,
         "title": conv.title,
-        "message_count": total,
-        "user_message_count": user_count,
-        "assistant_message_count": assistant_count,
+        "message_count": stats.total or 0,
+        "user_message_count": stats.user_count or 0,
+        "assistant_message_count": stats.assistant_count or 0,
         "created_at": conv.created_at.isoformat() if conv.created_at else None,
         "updated_at": conv.updated_at.isoformat() if conv.updated_at else None,
         "last_message": last_message

@@ -1,0 +1,157 @@
+{
+  "timestamp": "2026-01-26T19:34:07.276272",
+  "provider": "claude",
+  "model": null,
+  "total_cases": 46,
+  "passed_cases": 42,
+  "failed_cases": 4,
+  "pass_rate": 0.9130434782608695,
+  "consistency_errors": 2,
+  "avg_latency_ms": 3429.2088532554612,
+  "stability_score": 1.0,
+  "by_category": {
+    "simple_single_turn": {
+      "total": 1,
+      "passed": 1,
+      "latency_sum": 3615.263750019949,
+      "pass_rate": 1.0
+    },
+    "general": {
+      "total": 36,
+      "passed": 33,
+      "latency_sum": 123594.90250080125,
+      "pass_rate": 0.9166666666666666
+    },
+    "medium_task": {
+      "total": 1,
+      "passed": 0,
+      "latency_sum": 3492.131040955428,
+      "pass_rate": 0.0
+    },
+    "complex_task": {
+      "total": 1,
+      "passed": 1,
+      "latency_sum": 3486.0807500081137,
+      "pass_rate": 1.0
+    },
+    "vague_query": {
+      "total": 1,
+      "passed": 1,
+      "latency_sum": 3210.2756669628434,
+      "pass_rate": 1.0
+    },
+    "followup": {
+      "total": 1,
+      "passed": 1,
+      "latency_sum": 3358.79833297804,
+      "pass_rate": 1.0
+    },
+    "multi_agent": {
+      "total": 1,
+      "passed": 1,
+      "latency_sum": 3583.4800410084426,
+      "pass_rate": 1.0
+    },
+    "consistency": {
+      "total": 1,
+      "passed": 1,
+      "latency_sum": 3248.2935420121066,
+      "pass_rate": 1.0
+    },
+    "memory": {
+      "total": 1,
+      "passed": 1,
+      "latency_sum": 3464.9024170357734,
+      "pass_rate": 1.0
+    },
+    "execution_strategy": {
+      "total": 1,
+      "passed": 1,
+      "latency_sum": 3380.9372499817982,
+      "pass_rate": 1.0
+    },
+    "edge_case": {
+      "total": 1,
+      "passed": 1,
+      "latency_sum": 3308.5419579874724,
+      "pass_rate": 1.0
+    }
+  },
+  "failures": [
+    {
+      "test_id": "medium_code_function",
+      "description": "中等 - 写一个函数",
+      "category": "medium_task",
+      "pass_rate": 0.0,
+      "trials": [
+        {
+          "mismatches": [
+            {
+              "field": "task_type",
+              "expected": "code_task",
+              "actual": "other"
+            }
+          ],
+          "violations": []
+        }
+      ]
+    },
+    {
+      "test_id": "medium_ppt_simple",
+      "description": "中等 - 简单 PPT",
+      "category": "general",
+      "pass_rate": 0.0,
+      "trials": [
+        {
+          "mismatches": [
+            {
+              "field": "needs_plan",
+              "expected": true,
+              "actual": false
+            }
+          ],
+          "violations": [
+            "simple complexity should have execution_strategy=rvr, got rvr-b"
+          ]
+        }
+      ]
+    },
+    {
+      "test_id": "followup_polish",
+      "description": "追问 - 润色",
+      "category": "general",
+      "pass_rate": 0.0,
+      "trials": [
+        {
+          "mismatches": [],
+          "violations": [
+            "simple complexity should have execution_strategy=rvr, got rvr-b"
+          ]
+        }
+      ]
+    },
+    {
+      "test_id": "edge_emoji",
+      "description": "边缘 - 纯 emoji",
+      "category": "general",
+      "pass_rate": 0.0,
+      "trials": [
+        {
+          "mismatches": [
+            {
+              "field": "complexity",
+              "expected": "simple",
+              "actual": "medium"
+            },
+            {
+              "field": "needs_plan",
+              "expected": false,
+              "actual": true
+            }
+          ],
+          "violations": []
+        }
+      ]
+    }
+  ]
+}

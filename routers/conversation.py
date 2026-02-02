@@ -25,6 +25,7 @@ from services.conversation_service import (
     ConversationService,
     ConversationNotFoundError
 )
+from services.session_cache_service import get_session_cache_service
 
 # 配置日志
 logger = get_logger("conversation_router")
@@ -299,17 +300,19 @@ async def delete_conversation(conversation_id: str):
 async def get_conversation_messages(
     conversation_id: str,
     limit: int = Query(50, description="每页数量", ge=1, le=200),
-    offset: int = Query(0, description="偏移量", ge=0),
-    order: str = Query("asc", description="排序方式（asc/desc）")
+    offset: int = Query(0, description="偏移量（当 before_cursor 为 None 时使用）", ge=0),
+    order: str = Query("asc", description="排序方式（asc/desc）"),
+    before_cursor: Optional[str] = Query(None, description="游标（message_id），用于分页加载更早的消息")
 ):
     """
-    获取对话的历史消息
+    获取对话的历史消息（支持基于游标的分页，对齐文档规范）
     
     ## 参数
     - **conversation_id**: 对话ID
     - **limit**: 每页数量（默认50，最大200）
-    - **offset**: 偏移量（默认0）
+    - **offset**: 偏移量（默认0，当 before_cursor 为 None 时使用）
     - **order**: 排序方式（asc=时间正序, desc=时间倒序）
+    - **before_cursor**: 游标（message_id），用于分页加载更早的消息（对齐文档规范）
     
     ## 返回
     ```json
@@ -324,19 +327,11 @@ async def get_conversation_messages(
         },
         "messages": [
           {
-            "id": 1,
+            "id": "msg_xxx",
             "conversation_id": "conv_abc123",
             "role": "user",
-            "content": "你好",
+            "content": [{"type": "text", "text": "你好"}],
             "created_at": "2024-01-01T12:00:00",
-            "metadata": {}
-          },
-          {
-            "id": 2,
-            "conversation_id": "conv_abc123",
-            "role": "assistant",
-            "content": "你好！有什么可以帮助你的吗？",
-            "created_at": "2024-01-01T12:00:05",
             "metadata": {}
           },
           ...
@@ -344,20 +339,21 @@ async def get_conversation_messages(
         "total": 100,
         "limit": 50,
         "offset": 0,
-        "has_more": true
+        "has_more": true,
+        "next_cursor": "msg_yyy"  // 用于下次分页（当使用 before_cursor 时）
       }
     }
     ```
     
     ## 使用场景
-    - 加载对话历史
-    - 实现分页加载
+    - **初始加载**：不传 before_cursor，使用 offset 分页
+    - **向上滚动加载**：传 before_cursor，获取更早的消息（对齐文档规范）
     - 搜索历史消息
     """
     try:
         logger.info(
             f"📨 获取对话历史: conversation_id={conversation_id}, "
-            f"limit={limit}, offset={offset}, order={order}"
+            f"limit={limit}, offset={offset}, order={order}, before_cursor={before_cursor}"
         )
         
         # 验证排序方式
@@ -371,10 +367,14 @@ async def get_conversation_messages(
             conversation_id=conversation_id,
             limit=limit,
             offset=offset,
-            order=order
+            order=order,
+            before_cursor=before_cursor
         )
         
-        logger.info(f"✅ 返回 {len(result['messages'])} 条消息")
+        logger.info(
+            f"✅ 返回 {len(result['messages'])} 条消息, "
+            f"has_more={result.get('has_more')}, next_cursor={result.get('next_cursor')}"
+        )
         
         return APIResponse(
             code=200,
@@ -393,6 +393,87 @@ async def get_conversation_messages(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取历史消息失败: {str(e)}"
+        )
+
+
+@router.post("/{conversation_id}/preload", response_model=APIResponse[dict])
+async def preload_conversation_context(
+    conversation_id: str,
+    limit: int = Query(50, description="预加载消息数量", ge=1, le=200),
+    force: bool = Query(False, description="是否强制刷新缓存")
+):
+    """
+    预加载会话上下文到内存缓存（用于用户打开会话窗口前）
+
+    ## 参数
+    - **conversation_id**: 对话ID
+    - **limit**: 预加载消息数量（默认50，最大200）
+    - **force**: 是否强制刷新缓存（默认False）
+
+    ## 返回
+    ```json
+    {
+      "code": 200,
+      "message": "success",
+      "data": {
+        "conversation_id": "conv_abc123",
+        "cache_hit": false,
+        "message_count": 50,
+        "oldest_cursor": "msg_0001",
+        "last_updated": "2024-01-01T12:00:00",
+        "effective_limit": 50
+      }
+    }
+    ```
+    """
+    try:
+        logger.info(
+            f"📨 预加载会话上下文: conversation_id={conversation_id}, "
+            f"limit={limit}, force={force}"
+        )
+
+        # 校验对话是否存在
+        await conversation_service.get_conversation(conversation_id)
+
+        session_cache = get_session_cache_service()
+        result = await session_cache.warmup_context(
+            conversation_id=conversation_id,
+            limit=limit,
+            force=force
+        )
+        context = result["context"]
+
+        data = {
+            "conversation_id": conversation_id,
+            "cache_hit": result["cache_hit"],
+            "message_count": len(context.messages),
+            "oldest_cursor": context.oldest_cursor,
+            "last_updated": context.last_updated.isoformat() if context.last_updated else None,
+            "effective_limit": result["effective_limit"]
+        }
+
+        logger.info(
+            f"✅ 会话上下文预加载完成: conversation_id={conversation_id}, "
+            f"message_count={data['message_count']}, cache_hit={data['cache_hit']}"
+        )
+
+        return APIResponse(
+            code=200,
+            message="success",
+            data=data
+        )
+
+    except ConversationNotFoundError as e:
+        logger.warning(f"⚠️ 对话不存在: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"❌ 预加载会话上下文失败: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"预加载会话上下文失败: {str(e)}"
         )
 
 

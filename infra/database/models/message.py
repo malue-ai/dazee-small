@@ -45,10 +45,11 @@ class Message(Base):
         index=True
     )
     
-    # 消息内容
+    # 消息内容（添加索引，支持按角色查询）
     role: Mapped[str] = mapped_column(
         String(20),
-        nullable=False
+        nullable=False,
+        index=True
     )  # user, assistant, system
     
     # ✅ 使用 JSONB 存储 content blocks（直接存取 list）
