@@ -33,9 +33,9 @@ profiles:
       
       # Fallback 1: 同模型，不同 Provider (Vendor B)
       - provider: "claude"
-        model: "claude-sonnet-4-5"
+        model: "claude-sonnet-4-5-20250929"
         api_key_env: "CLAUDE_API_KEY_VENDOR_B"
-        base_url: "https://maas-openapi.wanjiedata.com"
+        base_url: "https://maas-openapi.wanjiedata.com/api/anthropic"
         
        # Fallback 2: 跨厂商（千问兜底）
       - provider: "qwen"
