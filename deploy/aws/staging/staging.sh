@@ -355,7 +355,7 @@ setup_env_variables() {
     if [ -f ".env" ]; then
         log_info "📄 项目级 .env"
         _load_env_file ".env" "$merged_env"
-        ((total_files++))
+        total_files=$((total_files + 1))
     else
         log_warning "⚠️ 项目级 .env 不存在"
     fi
@@ -375,7 +375,7 @@ setup_env_variables() {
             if [ -f "$instance_env" ]; then
                 log_info "📄 实例 ${instance_name}/.env"
                 _load_env_file "$instance_env" "$merged_env"
-                ((total_files++))
+                total_files=$((total_files + 1))
             fi
         done
     fi
@@ -429,7 +429,7 @@ setup_env_variables() {
             --overwrite \
             --region "$REGION" &> /dev/null; then
             log_info "  ✓ $key"
-            ((success_count++))
+            success_count=$((success_count + 1))
         else
             log_warning "  ✗ $key (可能已存在或权限不足)"
         fi
@@ -464,7 +464,7 @@ _load_env_file() {
         
         # 追加到临时文件
         echo "${key}=${value}" >> "$output_file"
-        ((count++))
+        count=$((count + 1))
     done < "$env_file"
     
     log_info "   已加载 ${count} 个变量"

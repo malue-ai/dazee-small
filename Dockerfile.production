@@ -54,10 +54,14 @@ RUN if [ "$USE_CHINA_MIRROR" = "true" ]; then \
     sed -i 's|URIs: http://deb.debian.org|URIs: http://mirrors.ustc.edu.cn|g' /etc/apt/sources.list.d/debian.sources; \
     fi && \
     apt-get update && \
-    apt-get install -y --no-install-recommends \
-    nginx \
-    curl \
-    supervisor && \
+    # 添加重试逻辑，最多尝试 3 次
+    for i in 1 2 3; do \
+        apt-get install -y --no-install-recommends \
+            nginx \
+            curl \
+            supervisor && break || \
+        (echo "apt-get install failed, attempt $i/3" && sleep 5); \
+    done && \
     rm -rf /var/lib/apt/lists/*
 
 # 设置工作目录
