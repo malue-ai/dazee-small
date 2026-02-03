@@ -288,8 +288,11 @@ class ChatService:
             intent_profile = get_llm_profile("intent_analyzer")
             preface_llm = create_llm_service(**intent_profile)
             
-            prompt = schema.preface_template
-            llm_messages = [Message(role="user", content=prompt)]
+            # 将 preface_template 作为系统提示词，用户消息作为 user 角色传入
+            llm_messages = [
+                Message(role="system", content=schema.preface_template),
+                Message(role="user", content=user_message)
+            ]
             
             accumulated_text = ""
             final_response = None
