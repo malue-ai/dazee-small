@@ -29,7 +29,6 @@ questions 中的问题类型：
 
 ⚠️ 限制：
 - 每个问题的 label（问题文本）不能超过 20 字
-- 每个问题的 hint（副标题）不能超过 20 字（可选）
 - 每个问题的选项数量不能超过 3 个
 - 每个选项的文本不能超过 10 字
 - 未设置 default 时，会默认选中第一个选项
@@ -59,7 +58,6 @@ hitl(
   description="请告诉我您想要的图片类型和风格",
   questions=[
     {"id": "type", "label": "图片类型", "type": "single_choice",
-     "hint": "请选择最符合您需求的类型",  # 问题副标题（可选）
      "options": ["风景照片", "数据图表", "流程示意图"]},  # 未设置 default，会默认选中"风景照片"
     {"id": "style", "label": "风格偏好", "type": "single_choice", 
      "options": ["写实风格", "卡通风格", "抽象艺术"], "default": "写实风格"}
@@ -214,11 +212,17 @@ class HITLTool(BaseTool):
         # 从 context 获取 session_id
         session_id = context.session_id or ""
         
+        # 过滤掉 questions 中的 hint 字段（已废弃）
+        filtered_questions = []
+        for q in questions:
+            filtered_q = {k: v for k, v in q.items() if k != "hint"}
+            filtered_questions.append(filtered_q)
+        
         # 构建表单元数据
         form_metadata = {
             "type": "form",
             "description": description,
-            "questions": questions
+            "questions": filtered_questions
         }
         
         logger.info(f"HITL 表单请求: title={title[:50]}..., questions={len(questions)}")
@@ -244,8 +248,8 @@ class HITLTool(BaseTool):
         # 异步等待用户响应
         result = await manager.wait_for_response(request.request_id, timeout)
         
-        # 处理并返回结果
-        return self._process_response(result, timeout, questions, use_default_on_timeout)
+        # 处理并返回结果（使用过滤后的 questions）
+        return self._process_response(result, timeout, filtered_questions, use_default_on_timeout)
     
     # ==================== 私有方法 ====================
     

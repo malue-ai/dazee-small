@@ -1197,8 +1197,6 @@ capabilities:
 
       - 每个问题的 label（问题文本）不能超过 20 字
 
-      - 每个问题的 hint（副标题）不能超过 20 字（可选）
-
       - 每个问题的选项数量不能超过 3 个
 
       - 每个选项的文本不能超过 10 字
@@ -1243,7 +1241,6 @@ capabilities:
           
           ⚠️ 重要限制：
           - 每个问题的 label 不能超过 20 字（用户看到的问题文本）
-          - 每个问题的 hint（副标题）不能超过 20 字（可选，用于补充说明）
           - 每个问题的选项数量不能超过 3 个
           - 每个选项的文本不能超过 10 字，请保持简洁
           - 如果不设置 default，会默认选中第一个选项
@@ -1278,10 +1275,6 @@ capabilities:
               type: boolean
               description: 是否必填
               default: true
-            hint:
-              type: string
-              maxLength: 20
-              description: 问题的副标题/说明文字，显示在 label 下方（如"请选择最合适的标签"），不超过 20 字
           required:
           - id
           - label

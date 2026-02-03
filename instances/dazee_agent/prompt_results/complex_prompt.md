@@ -261,7 +261,7 @@ hitl(
   title="项目配置",
   description="请填写以下信息",
   questions=[
-    {"id": "name", "label": "项目名称", "type": "text_input", "hint": "例如：我的应用"},
+    {"id": "name", "label": "项目名称", "type": "text_input"},
     {"id": "modules", "label": "需要的功能模块", "type": "multiple_choice", "options": ["用户登录", "数据统计", "文件上传", "消息通知"]},
     {"id": "notes", "label": "其他需求", "type": "text_input", "required": false}
   ]
