@@ -1487,16 +1487,18 @@ class SimpleAgent:
         if not user_query:
             user_query = self._extract_user_query(messages)
 
-        # 直接使用配置的模板（不做变量注入）
-        simulated_prompt = self.schema.simulated_thinking_template
+        # 🆕 改进：将通用模板作为 system prompt，真实用户问题作为 user message
+        # 这样可以让模拟思考真正针对用户的具体问题生成内容
+        simulated_system = self.schema.simulated_thinking_template
+        simulated_user_message = user_query or "用户刚刚发送了一条消息，请展示你的思考过程。"
         
-        logger.info(f"🧠 开始生成模拟思考: query={user_query[:50]}...")
+        logger.info(f"🧠 开始生成模拟思考: query={user_query[:50] if user_query else '(空消息)'}...")
         
         final_response = None
         try:
             async for chunk in self.llm.create_message_stream(
-                messages=[Message(role="user", content=simulated_prompt)],
-                system=self.schema.simulated_thinking_system,
+                messages=[Message(role="user", content=simulated_user_message)],
+                system=simulated_system,
                 tools=[],
                 override_thinking=False
             ):

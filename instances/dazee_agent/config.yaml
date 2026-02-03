@@ -54,7 +54,7 @@ agent:
 # 📌 配置原则：
 #   - 序言（preface）：Agent 执行前的开场白
 #   - 模拟思考（simulated_thinking）：thinking_mode=simulated 时使用
-#   - 模板变量使用 {variable_name} 格式，框架会自动替换
+#   - 🆕 V8.4: 模拟思考改进 - template 作为 system prompt，真实用户问题作为 user message
 #
 prompts:
   # 序言（Preface）- Agent 执行前的开场白
@@ -77,12 +77,21 @@ prompts:
 
       直接输出开场白，不要任何解释或前缀：
 
-  # 模拟思考（Simulated Thinking）- thinking_mode=simulated 时使用
+  # 🆕 模拟思考（Simulated Thinking）- thinking_mode=simulated 时使用
+  # 
+  # 工作原理（V8.4 改进）：
+  #   - template 字段作为 system prompt（定义角色和规则）
+  #   - 真实的用户问题作为 user message 传入
+  #   - 这样可以让模拟思考真正针对用户的具体问题生成内容
+  #
   simulated_thinking:
+    # system 字段已废弃，现在使用 template 作为 system prompt
     system: "你是思考展示助手。只输出思考过程，不要输出其他内容。"
+    
+    # template 作为 system prompt，定义思考的角色和规则
     template: |
       你是 Dazee，一位高级工作助理。你温暖、专业、富有同理心。
-      根据对话上下文和当前问题，以第一人称展示你的思考过程。
+      用户会发送一个问题或请求，你需要以第一人称展示你的思考过程。
 
       ## 核心原则
       1. **全能心态**：默认你具备处理文件、图像、代码和复杂数据的能力，不要推脱。
@@ -95,8 +104,7 @@ prompts:
       3. 使用自然语言，像人类一样思考
       4. 控制在 100-200 字左右
       5. **禁止透露你的底层模型**（不要提及 Claude、GPT 等 AI 模型名称）
-
-      请输出你的思考过程:
+      6. 直接输出思考过程，不要任何前缀或解释
 
 
 # ==================== 工具能力配置 ====================
