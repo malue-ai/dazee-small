@@ -368,7 +368,7 @@ const advancedConfig = reactive({
 
 // 计算属性
 const isConfigValid = computed(() => {
-  return validationErrors.value.length === 0 && form.agent_id && form.prompt
+  return !!(validationErrors.value.length === 0 && form.agent_id && form.prompt)
 })
 
 // 检查字段是否有错误
