@@ -236,21 +236,37 @@ deploy_staging:
     - |
       # Get current task definition for potential rollback
       echo "Fetching current deployment info for rollback..."
-      CLUSTER_NAME="${APP_NAME}-${ENV_NAME}-Cluster"
       
-      CURRENT_IMAGE=$(aws ecs describe-services \
-        --cluster "$CLUSTER_NAME" \
-        --services "${APP_NAME}-${ENV_NAME}-${SERVICE_NAME}" \
-        --query 'services[0].taskDefinition' \
-        --output text 2>/dev/null | xargs -I {} aws ecs describe-task-definition \
-        --task-definition {} \
-        --query 'taskDefinition.containerDefinitions[0].image' \
-        --output text 2>/dev/null || echo "")
+      # 动态查找 ECS 集群（Copilot 创建的集群名称包含随机后缀）
+      CLUSTER_PREFIX="${APP_NAME}-${ENV_NAME}-Cluster"
+      CLUSTER_NAME=$(aws ecs list-clusters --query 'clusterArns[*]' --output text | tr '\t' '\n' | grep "$CLUSTER_PREFIX" | head -1 | awk -F/ '{print $NF}')
       
-      if [ -n "$CURRENT_IMAGE" ]; then
-        PREVIOUS_TAG=$(echo "$CURRENT_IMAGE" | awk -F: '{print $NF}')
-      else
+      if [ -z "$CLUSTER_NAME" ]; then
+        echo "Warning: Could not find ECS cluster, skipping rollback info"
         PREVIOUS_TAG=""
+      else
+        # 动态查找服务（Copilot 服务名称格式: ${APP_NAME}-${ENV_NAME}-${SERVICE_NAME}-Service-xxx）
+        SVC_NAME=$(aws ecs list-services --cluster "$CLUSTER_NAME" --query 'serviceArns[*]' --output text | tr '\t' '\n' | grep "${SERVICE_NAME}" | head -1 | awk -F/ '{print $NF}')
+        
+        if [ -z "$SVC_NAME" ]; then
+          echo "Warning: Could not find service, skipping rollback info"
+          PREVIOUS_TAG=""
+        else
+          CURRENT_IMAGE=$(aws ecs describe-services \
+            --cluster "$CLUSTER_NAME" \
+            --services "$SVC_NAME" \
+            --query 'services[0].taskDefinition' \
+            --output text 2>/dev/null | xargs -I {} aws ecs describe-task-definition \
+            --task-definition {} \
+            --query 'taskDefinition.containerDefinitions[0].image' \
+            --output text 2>/dev/null || echo "")
+          
+          if [ -n "$CURRENT_IMAGE" ]; then
+            PREVIOUS_TAG=$(echo "$CURRENT_IMAGE" | awk -F: '{print $NF}')
+          else
+            PREVIOUS_TAG=""
+          fi
+        fi
       fi
       
       echo "Previous tag: ${PREVIOUS_TAG:-none}"
@@ -300,21 +316,37 @@ deploy_production:
     - |
       # Get current task definition for potential rollback
       echo "Fetching current deployment info for rollback..."
-      CLUSTER_NAME="${APP_NAME}-${ENV_NAME}-Cluster"
       
-      CURRENT_IMAGE=$(aws ecs describe-services \
-        --cluster "$CLUSTER_NAME" \
-        --services "${APP_NAME}-${ENV_NAME}-${SERVICE_NAME}" \
-        --query 'services[0].taskDefinition' \
-        --output text 2>/dev/null | xargs -I {} aws ecs describe-task-definition \
-        --task-definition {} \
-        --query 'taskDefinition.containerDefinitions[0].image' \
-        --output text 2>/dev/null || echo "")
+      # 动态查找 ECS 集群（Copilot 创建的集群名称包含随机后缀）
+      CLUSTER_PREFIX="${APP_NAME}-${ENV_NAME}-Cluster"
+      CLUSTER_NAME=$(aws ecs list-clusters --query 'clusterArns[*]' --output text | tr '\t' '\n' | grep "$CLUSTER_PREFIX" | head -1 | awk -F/ '{print $NF}')
       
-      if [ -n "$CURRENT_IMAGE" ]; then
-        PREVIOUS_TAG=$(echo "$CURRENT_IMAGE" | awk -F: '{print $NF}')
-      else
+      if [ -z "$CLUSTER_NAME" ]; then
+        echo "Warning: Could not find ECS cluster, skipping rollback info"
         PREVIOUS_TAG=""
+      else
+        # 动态查找服务（Copilot 服务名称格式: ${APP_NAME}-${ENV_NAME}-${SERVICE_NAME}-Service-xxx）
+        SVC_NAME=$(aws ecs list-services --cluster "$CLUSTER_NAME" --query 'serviceArns[*]' --output text | tr '\t' '\n' | grep "${SERVICE_NAME}" | head -1 | awk -F/ '{print $NF}')
+        
+        if [ -z "$SVC_NAME" ]; then
+          echo "Warning: Could not find service, skipping rollback info"
+          PREVIOUS_TAG=""
+        else
+          CURRENT_IMAGE=$(aws ecs describe-services \
+            --cluster "$CLUSTER_NAME" \
+            --services "$SVC_NAME" \
+            --query 'services[0].taskDefinition' \
+            --output text 2>/dev/null | xargs -I {} aws ecs describe-task-definition \
+            --task-definition {} \
+            --query 'taskDefinition.containerDefinitions[0].image' \
+            --output text 2>/dev/null || echo "")
+          
+          if [ -n "$CURRENT_IMAGE" ]; then
+            PREVIOUS_TAG=$(echo "$CURRENT_IMAGE" | awk -F: '{print $NF}')
+          else
+            PREVIOUS_TAG=""
+          fi
+        fi
       fi
       
       echo "Previous tag: ${PREVIOUS_TAG:-none}"
@@ -391,32 +423,65 @@ verify_staging:
     - deploy_staging
 
 # Health check for Production
+# 注意：Production 环境 agent 服务禁用了 HTTP (http: false)，通过 NLB 提供 gRPC
+# 健康检查通过 ECS 服务状态验证，而非 HTTP 端点
 verify_production:
+  <<: *aws_template
   stage: verify
-  image: docker.1ms.run/library/alpine:latest
   variables:
-    HEALTH_URL: "https://api.dazee.ai/health"
+    ENV_NAME: production
     MAX_RETRIES: "30"
     RETRY_INTERVAL: "10"
   script:
-    - apk add --no-cache curl
     - |
-      echo "Waiting for service to be healthy..."
-      echo "Health URL: $HEALTH_URL"
+      echo "Verifying production deployment via ECS service status..."
       
+      # 动态查找 ECS 集群（Copilot 创建的集群名称包含随机后缀）
+      CLUSTER_PREFIX="${APP_NAME}-${ENV_NAME}-Cluster"
+      echo "Searching for cluster with prefix: $CLUSTER_PREFIX"
+      
+      CLUSTER_NAME=$(aws ecs list-clusters --query 'clusterArns[*]' --output text | tr '\t' '\n' | grep "$CLUSTER_PREFIX" | head -1 | awk -F/ '{print $NF}')
+      
+      if [ -z "$CLUSTER_NAME" ]; then
+        echo "Error: Could not find ECS cluster with prefix $CLUSTER_PREFIX"
+        exit 1
+      fi
+      echo "Found cluster: $CLUSTER_NAME"
+      
+      # 动态查找服务（Copilot 服务名称格式: ${APP_NAME}-${ENV_NAME}-${SERVICE_NAME}-Service-xxx）
+      echo "Searching for ${SERVICE_NAME} service..."
+      SVC_NAME=$(aws ecs list-services --cluster "$CLUSTER_NAME" --query 'serviceArns[*]' --output text | tr '\t' '\n' | grep "${SERVICE_NAME}" | head -1 | awk -F/ '{print $NF}')
+      
+      if [ -z "$SVC_NAME" ]; then
+        echo "Error: Could not find ${SERVICE_NAME} service in cluster $CLUSTER_NAME"
+        exit 1
+      fi
+      echo "Found service: $SVC_NAME"
+      
+      # 等待服务稳定
+      echo "Waiting for service to be stable..."
       for i in $(seq 1 $MAX_RETRIES); do
-        HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 "$HEALTH_URL" 2>/dev/null || echo "000")
+        SERVICE_INFO=$(aws ecs describe-services \
+          --cluster "$CLUSTER_NAME" \
+          --services "$SVC_NAME" \
+          --query 'services[0].{running:runningCount,desired:desiredCount,status:status}' \
+          --output json)
         
-        if [ "$HTTP_CODE" = "200" ]; then
-          echo "Health check passed on attempt $i (HTTP $HTTP_CODE)"
+        RUNNING=$(echo "$SERVICE_INFO" | jq -r '.running')
+        DESIRED=$(echo "$SERVICE_INFO" | jq -r '.desired')
+        STATUS=$(echo "$SERVICE_INFO" | jq -r '.status')
+        
+        echo "Attempt $i/$MAX_RETRIES: status=$STATUS, running=$RUNNING/$DESIRED"
+        
+        if [ "$STATUS" = "ACTIVE" ] && [ "$RUNNING" = "$DESIRED" ] && [ "$RUNNING" -gt 0 ]; then
+          echo "Service is healthy and stable!"
           exit 0
         fi
         
-        echo "Attempt $i/$MAX_RETRIES failed (HTTP $HTTP_CODE), waiting ${RETRY_INTERVAL}s..."
         sleep $RETRY_INTERVAL
       done
       
-      echo "Health check failed after $MAX_RETRIES attempts"
+      echo "Service verification failed after $MAX_RETRIES attempts"
       exit 1
   rules:
     - if: $CI_COMMIT_BRANCH == "production"
