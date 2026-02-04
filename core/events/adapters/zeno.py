@@ -993,13 +993,53 @@ class ZenOAdapter(EventAdapter):
             return self._generate_sandbox_deltas(result_content, tool_input, conversation_id)
         
         # 沙盒工具：sandbox_run_command 返回 URL 时生成 sandbox delta
-        # 注意：只有后台模式（background=True + port）才会返回 url，所以只需检查 url 即可
+        # 支持两种模式：
+        # 1. 单命令模式：返回 {"url": "..."}
+        # 2. 多命令模式：返回 {"urls": {"frontend": "...", "backend": "..."}, "services": [...]}
         if tool_name == "sandbox_run_command":
             try:
                 result = json.loads(result_content) if isinstance(result_content, str) else result_content
+                
+                # 单命令模式：直接有 url 字段
                 if result.get("url"):
                     logger.debug(f"🔧 处理 sandbox_run_command 返回的 URL: {result.get('url')}")
                     return self._generate_sandbox_deltas(result_content, tool_input, conversation_id)
+                
+                # 多命令模式：优先取前端服务（5173 端口）的 URL
+                if result.get("mode") == "multiple" and result.get("services"):
+                    # 前端常用端口（优先级从高到低）
+                    frontend_ports = {5173, 3000, 8080, 4200, 5000}
+                    
+                    # 优先找前端端口的服务
+                    target_service = None
+                    for service in result["services"]:
+                        if service.get("url") and service.get("port") in frontend_ports:
+                            target_service = service
+                            break
+                    
+                    # 如果没找到前端端口，取第一个有 URL 的服务
+                    if not target_service:
+                        for service in result["services"]:
+                            if service.get("url"):
+                                target_service = service
+                                break
+                    
+                    if target_service:
+                        # 构造单命令格式的结果，复用 _generate_sandbox_deltas
+                        single_result = {
+                            "success": target_service.get("success", True),
+                            "url": target_service["url"],
+                            "port": target_service.get("port"),
+                            "sandbox_id": result.get("sandbox_id", ""),
+                            "expires_at": result.get("expires_at"),
+                            "timeout_seconds": result.get("timeout_seconds"),
+                        }
+                        logger.debug(f"🔧 处理 sandbox_run_command 多命令模式，取服务 [{target_service.get('name')}] 的 URL: {target_service['url']}")
+                        return self._generate_sandbox_deltas(
+                            json.dumps(single_result), 
+                            tool_input, 
+                            conversation_id
+                        )
             except (json.JSONDecodeError, TypeError):
                 pass
         
