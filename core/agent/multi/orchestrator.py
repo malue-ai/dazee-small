@@ -110,6 +110,9 @@ class MultiAgentOrchestrator:
         
         self._state: Optional[OrchestratorState] = None
         
+        # 🆕 V7.x: 用于存储 sandbox delta 事件（工具执行时收集，在 generator 中 yield）
+        self._pending_sandbox_events: List[Dict[str, Any]] = []
+        
         # V7.1: 检查点管理器
         self.enable_checkpoints = enable_checkpoints
         self.checkpoint_manager = CheckpointManager() if enable_checkpoints else None
@@ -575,6 +578,13 @@ class MultiAgentOrchestrator:
                 except Exception as cp_err:
                     logger.error(f"保存检查点失败: {cp_err}")
             
+            # 🆕 V7.x: 发送收集的 sandbox delta events
+            if self._pending_sandbox_events:
+                for sandbox_event in self._pending_sandbox_events:
+                    logger.info(f"   🌐 发送 sandbox delta: {sandbox_event.get('delta', {}).get('content', {}).get('url', '')}")
+                    yield sandbox_event
+                self._pending_sandbox_events.clear()
+            
             # 发送 Agent 完成事件
             yield {
                 "type": "agent_end",
@@ -665,6 +675,13 @@ class MultiAgentOrchestrator:
             
             self._state.agent_results.append(result)
             self._state.completed_agents.append(agent_config.agent_id)
+            
+            # 🆕 V7.x: 发送收集的 sandbox delta events
+            if self._pending_sandbox_events:
+                for sandbox_event in self._pending_sandbox_events:
+                    logger.info(f"   🌐 发送 sandbox delta: {sandbox_event.get('delta', {}).get('content', {}).get('url', '')}")
+                    yield sandbox_event
+                self._pending_sandbox_events.clear()
             
             yield {
                 "type": "agent_end",
@@ -932,6 +949,41 @@ class MultiAgentOrchestrator:
                                 })
                                 
                                 logger.info(f"   ✅ 工具 {tool_name} 执行完成: success={result.get('success', 'N/A')}")
+                                
+                                # 🆕 V7.x: sandbox_run_command 特殊处理 - 收集 sandbox delta event
+                                if tool_name == "sandbox_run_command" and isinstance(result, dict):
+                                    sandbox_url = None
+                                    # 多命令模式：优先取前端端口的 URL
+                                    if result.get("mode") == "multiple" and result.get("services"):
+                                        frontend_ports = {5173, 3000, 8080, 4200, 5000}
+                                        for svc in result["services"]:
+                                            if svc.get("url") and svc.get("port") in frontend_ports:
+                                                sandbox_url = svc["url"]
+                                                break
+                                        # 没找到前端端口，取第一个有 URL 的
+                                        if not sandbox_url:
+                                            for svc in result["services"]:
+                                                if svc.get("url"):
+                                                    sandbox_url = svc["url"]
+                                                    break
+                                    # 单命令模式
+                                    elif result.get("url"):
+                                        sandbox_url = result["url"]
+                                    
+                                    if sandbox_url:
+                                        logger.info(f"   🌐 收集 sandbox delta: {sandbox_url}")
+                                        self._pending_sandbox_events.append({
+                                            "type": "message.assistant.delta",
+                                            "delta": {
+                                                "type": "sandbox",
+                                                "content": {
+                                                    "url": sandbox_url,
+                                                    "sandbox_id": result.get("sandbox_id", ""),
+                                                    "expires_at": result.get("expires_at"),
+                                                    "timeout_seconds": result.get("timeout_seconds"),
+                                                }
+                                            }
+                                        })
                                 
                             except Exception as e:
                                 logger.error(f"   ❌ 工具 {tool_name} 执行失败: {e}")
@@ -1565,6 +1617,41 @@ class MultiAgentOrchestrator:
                                 })
                                 
                                 logger.info(f"   ✅ 工具 {tool_name} 执行完成: success={result.get('success', 'N/A')}")
+                                
+                                # 🆕 V7.x: sandbox_run_command 特殊处理 - 收集 sandbox delta event
+                                if tool_name == "sandbox_run_command" and isinstance(result, dict):
+                                    sandbox_url = None
+                                    # 多命令模式：优先取前端端口的 URL
+                                    if result.get("mode") == "multiple" and result.get("services"):
+                                        frontend_ports = {5173, 3000, 8080, 4200, 5000}
+                                        for svc in result["services"]:
+                                            if svc.get("url") and svc.get("port") in frontend_ports:
+                                                sandbox_url = svc["url"]
+                                                break
+                                        # 没找到前端端口，取第一个有 URL 的
+                                        if not sandbox_url:
+                                            for svc in result["services"]:
+                                                if svc.get("url"):
+                                                    sandbox_url = svc["url"]
+                                                    break
+                                    # 单命令模式
+                                    elif result.get("url"):
+                                        sandbox_url = result["url"]
+                                    
+                                    if sandbox_url:
+                                        logger.info(f"   🌐 收集 sandbox delta: {sandbox_url}")
+                                        self._pending_sandbox_events.append({
+                                            "type": "message.assistant.delta",
+                                            "delta": {
+                                                "type": "sandbox",
+                                                "content": {
+                                                    "url": sandbox_url,
+                                                    "sandbox_id": result.get("sandbox_id", ""),
+                                                    "expires_at": result.get("expires_at"),
+                                                    "timeout_seconds": result.get("timeout_seconds"),
+                                                }
+                                            }
+                                        })
                                 
                             except Exception as e:
                                 logger.error(f"   ❌ 工具 {tool_name} 执行失败: {e}")

@@ -582,11 +582,14 @@ class SandboxGetPublicUrl(BaseTool):
     
     name = "sandbox_get_public_url"
     
+    # 前端常用端口（优先级从高到低）
+    FRONTEND_PORTS = [5173, 3000, 8080, 4200, 5000]
+    
     async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
         """获取公开 URL"""
         # 始终使用 context.conversation_id（由系统注入，可信）
         conversation_id = context.conversation_id
-        port = params.get("port", 3000)
+        port = params.get("port")  # 不设默认值，None 表示自动检测
         user_id = params.get("user_id") or context.user_id or "default_user"
         
         try:
@@ -594,6 +597,11 @@ class SandboxGetPublicUrl(BaseTool):
             
             provider = get_sandbox_provider()
             sandbox = await provider._get_sandbox_obj(conversation_id)
+            
+            # 🆕 如果没有指定端口，自动检测前端端口
+            if port is None:
+                port = await self._detect_frontend_port(sandbox)
+                logger.info(f"🔍 自动检测到前端端口: {port}")
             
             host = None
             if hasattr(sandbox, "get_host"):
@@ -667,6 +675,45 @@ class SandboxGetPublicUrl(BaseTool):
             return result
         except Exception as e:
             return {"success": False, "error": str(e)}
+    
+    async def _detect_frontend_port(self, sandbox) -> int:
+        """
+        自动检测前端端口
+        
+        检测逻辑：
+        1. 按前端常用端口优先级（5173, 3000, 8080, 4200, 5000）检测
+        2. 检查端口是否有进程在监听
+        3. 返回第一个可用的端口，如果都没有则默认返回 5173
+        """
+        try:
+            # 使用 ss 命令检测监听的端口
+            result = await sandbox.commands.run(
+                "ss -tlnp 2>/dev/null | grep LISTEN || netstat -tlnp 2>/dev/null | grep LISTEN || echo ''",
+                timeout=5
+            )
+            listening_output = result.stdout if hasattr(result, 'stdout') else str(result)
+            
+            # 解析监听的端口
+            listening_ports = set()
+            for line in listening_output.split('\n'):
+                for port in self.FRONTEND_PORTS:
+                    if f":{port}" in line:
+                        listening_ports.add(port)
+            
+            logger.debug(f"🔍 检测到监听的前端端口: {listening_ports}")
+            
+            # 按优先级返回第一个监听的端口
+            for port in self.FRONTEND_PORTS:
+                if port in listening_ports:
+                    return port
+            
+            # 如果没有检测到任何前端端口，默认返回 5173（Vite 默认端口）
+            logger.info("🔍 未检测到前端端口，使用默认端口 5173")
+            return 5173
+            
+        except Exception as e:
+            logger.warning(f"⚠️ 端口检测失败，使用默认端口 5173: {e}")
+            return 5173
 
 
 # ==================== 工具 7: 上传文件到 S3 ====================
