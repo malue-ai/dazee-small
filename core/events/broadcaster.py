@@ -388,13 +388,34 @@ class EventBroadcaster:
             session_id: Session ID
             tool_input: hitl 工具的输入参数（包含表单定义）
         """
+        # 🎯 为没有 default 的问题自动添加默认值
+        questions = tool_input.get("questions", [])
+        normalized_questions = []
+        
+        for q in questions:
+            q_copy = q.copy()
+            
+            # 如果没有设置 default，自动添加
+            if "default" not in q_copy:
+                q_type = q_copy.get("type")
+                options = q_copy.get("options", [])
+                
+                if q_type == "single_choice" and options:
+                    # 单选：默认选中第一个选项
+                    q_copy["default"] = options[0]
+                elif q_type == "multiple_choice":
+                    # 多选：默认为空数组
+                    q_copy["default"] = []
+            
+            normalized_questions.append(q_copy)
+        
         # 构建 HITL 表单请求数据
         hitl_request_data = {
             "type": "form", 
             "status": "pending",
             "title": tool_input.get("title", ""),
             "description": tool_input.get("description", ""),
-            "questions": tool_input.get("questions", []),
+            "questions": normalized_questions,
         }
         
         # 🆕 timeout 字段保留但仅在 AI 明确传入时才输出
