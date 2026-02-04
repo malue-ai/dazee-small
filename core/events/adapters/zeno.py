@@ -90,7 +90,7 @@ class ZenOAdapter(EventAdapter):
     - content_delta (text) → message.assistant.delta (type: response)
     - message_delta (preface) → message.assistant.delta (type: preface)  # V7.8: 由 chat_service 独立发送
     - tool_result:plan_todo → message.assistant.delta (type: progress)  # 通过 enhance_tool_result 处理
-    - tool_result:hitl → message.assistant.delta (type: hitl_data)
+    - tool_result:hitl → message.assistant.delta (type: hitl_data)  # 支持 pending/completed/timeout/failed 状态
     - tool_result:clue_generation → message.assistant.delta (type: clue)
     - message_delta:recommended → message.assistant.delta (type: recommended)
     - message_stop → message.assistant.done
@@ -1323,13 +1323,19 @@ class ZenOAdapter(EventAdapter):
         success = bool(result.get("success", False))
         timed_out = bool(result.get("timed_out", False))
         error_message = result.get("error") or result.get("message")
-        status = "completed" if success else "timeout" if timed_out else "failed"
+        
+        # 🆕 支持 pending 状态（HITL 异步模式）
+        result_status = result.get("status", "")
+        if result_status == "pending_user_input":
+            status = "pending"
+        else:
+            status = "completed" if success else "timeout" if timed_out else "failed"
         
         # 构建 hitl_data delta 数据
         hitl_data = {
             # 🆕 类型标识（前端用于区分不同的 HITL 交互类型）
             "type": "form",
-            # 响应状态（completed / timeout / failed）
+            # 响应状态（pending / completed / timeout / failed）
             "status": status,
             # 表单定义（来自工具输入）
             "title": tool_input.get("title", ""),
@@ -1351,7 +1357,9 @@ class ZenOAdapter(EventAdapter):
             hitl_data["metadata"] = result["metadata"]
         
         # 根据状态记录日志
-        if result.get("timed_out"):
+        if status == "pending":
+            logger.info(f"⏳ 生成 hitl_data delta: 等待用户响应, title={tool_input.get('title', '')[:30]}")
+        elif result.get("timed_out"):
             logger.info(f"⏱️ 生成 hitl_data delta: 用户响应超时")
         elif result.get("success"):
             logger.info(f"✅ 生成 hitl_data delta: 用户已响应, title={tool_input.get('title', '')[:30]}")

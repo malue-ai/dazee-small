@@ -242,21 +242,14 @@ class HITLTool(BaseTool):
         
         logger.info(f"输入请求已创建: request_id={request.request_id}")
         
-        # 🆕 HITL 异步模式：立即返回 pending 状态，不等待用户响应
-        logger.info(f"✅ HITL 异步模式: 立即返回 pending 状态")
+        # 前端会通过 tool_use 事件自动显示表单
+        logger.debug("等待用户通过前端界面响应...")
         
-        # 🔧 返回格式兼容 ZenO 适配器的 hitl_data delta 生成
-        return {
-            "type": "hitl_pending",
-            "success": True,  # 表示工具调用成功（只是还在等待用户响应）
-            "timed_out": False,
-            "status": "pending_user_input",  # ZenO 适配器会使用这个字段判断实际状态
-            "session_id": session_id,
-            "request_id": request.request_id,
-            "questions": filtered_questions,
-            "response": None,  # 还没有用户响应，设为 None
-            "message": "表单已发送到前端，等待用户响应。对话将在用户提交后自动继续。"
-        }
+        # 异步等待用户响应
+        result = await manager.wait_for_response(request.request_id, timeout)
+        
+        # 处理并返回结果（使用过滤后的 questions）
+        return self._process_response(result, timeout, filtered_questions, use_default_on_timeout)
     
     # ==================== 私有方法 ====================
     

@@ -87,6 +87,12 @@ export function useChat() {
     }
   )
 
+  // ==================== 初始化 ====================
+  
+  // 🆕 设置 HITL 的 SSE 事件处理器（在定义 handleStreamEvent 函数之后会被调用）
+  // 注意：这个设置需要在 handleStreamEvent 定义之后才能生效
+  // 所以我们在文件末尾再次设置
+
   // ==================== 方法 ====================
 
   /**
@@ -364,6 +370,28 @@ export function useChat() {
           }
         } catch {
           // 忽略解析错误
+        }
+      } else if (delta?.type === 'hitl_data') {
+        // 🆕 处理 hitl_data delta（HITL 异步模式）
+        try {
+          const hitlData = typeof delta.content === 'string' ? JSON.parse(delta.content) : delta.content
+          
+          if (hitlData && hitlData.status === 'pending') {
+            // HITL 请求 pending 状态，显示表单
+            console.log('🤝 收到 HITL pending 状态:', hitlData)
+            
+            // 构造 HITL 请求并显示弹窗
+            const request = normalizeHITLRequestFromHitlData(hitlData)
+            if (request && !hitl.showModal.value) {
+              hitl.show(request)
+            }
+          } else if (hitlData && hitlData.status === 'completed' && hitlData.success) {
+            // HITL 已完成（第二次对话时收到）
+            console.log('✅ HITL 已完成:', hitlData.response)
+            // 通常不需要特殊处理，因为 Agent 会继续执行
+          }
+        } catch (e) {
+          console.warn('⚠️ 解析 hitl_data 失败:', e)
         }
       }
     }
@@ -786,6 +814,9 @@ export function useChat() {
     }
   }
 
+  // 🆕 设置 HITL 的 SSE 事件处理器
+  hitl.setSSEEventHandler(handleStreamEvent)
+
   return {
     // 状态
     isLoading,
@@ -841,5 +872,21 @@ function normalizeHITLRequest(raw: any): HITLConfirmRequest | null {
     questions: raw.questions || raw.metadata?.questions,
     default_value: raw.default_value,
     metadata: raw.metadata
+  } as HITLConfirmRequest
+}
+
+/**
+ * 🆕 从 hitl_data 构造 HITL 请求（用于 ZenO 格式的 hitl_data delta）
+ */
+function normalizeHITLRequestFromHitlData(hitlData: any): HITLConfirmRequest | null {
+  if (!hitlData || !hitlData.questions) return null
+
+  // 从 hitl_data 格式转换为 HITLConfirmRequest 格式
+  return {
+    question: hitlData.title || '请选择',
+    confirmation_type: 'form',
+    description: hitlData.description,
+    questions: hitlData.questions,
+    metadata: hitlData
   } as HITLConfirmRequest
 }

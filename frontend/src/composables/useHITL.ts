@@ -5,14 +5,111 @@
 
 import { ref, computed } from 'vue'
 import { useSessionStore } from '@/stores/session'
-import * as sessionApi from '@/api/session'
-import type { HITLConfirmRequest, HITLResponse, HITLFormQuestion } from '@/types'
+import { useConversationStore } from '@/stores/conversation'
+import { useSSE } from './useSSE'
+import type { HITLConfirmRequest, HITLResponse, HITLFormQuestion, HITLConfirmationType } from '@/types'
+
+/**
+ * 格式化 HITL 响应为分号分隔的字符串（用于发送到后端）
+ * @param response - 用户响应
+ * @param type - 确认类型
+ * @returns 格式化后的字符串
+ */
+function formatHITLResponse(
+  response: HITLResponse | null,
+  type: HITLConfirmationType
+): string {
+  if (response === null || response === undefined) {
+    return ''
+  }
+
+  // 表单类型：将对象的值提取为数组，用分号连接
+  if (type === 'form' && typeof response === 'object' && !Array.isArray(response)) {
+    // 检查是否包含特殊字符（分号、换行等）
+    const hasSpecialChars = Object.values(response).some(v =>
+      String(v).includes(';') || String(v).includes('；') || String(v).includes('\n')
+    )
+    
+    if (hasSpecialChars) {
+      // 使用 JSON 格式（更可靠）
+      return JSON.stringify({ hitl_response: response })
+    } else {
+      // 使用分号分隔（更简洁）
+      const values = Object.values(response).map(v => {
+        if (Array.isArray(v)) {
+          return v.join(',') // 多选用逗号连接
+        }
+        return String(v)
+      })
+      return values.join(';') // 使用英文分号
+    }
+  }
+
+  // 多选类型（数组）
+  if (Array.isArray(response)) {
+    return response.join(',') // 多选用逗号连接
+  }
+
+  // 其他情况直接转字符串
+  return String(response)
+}
+
+/**
+ * 格式化 HITL 响应为可读的显示文本（用于界面显示）
+ * @param response - 用户响应
+ * @param type - 确认类型
+ * @returns 格式化后的显示文本
+ */
+function formatHITLResponseForDisplay(
+  response: HITLResponse | null,
+  type: HITLConfirmationType
+): string {
+  if (response === null || response === undefined) {
+    return '(未选择)'
+  }
+
+  // 表单类型：显示为 "问题: 答案" 格式
+  if (type === 'form' && typeof response === 'object' && !Array.isArray(response)) {
+    const items = Object.entries(response).map(([key, value]) => {
+      if (Array.isArray(value)) {
+        return `${key}: ${value.join(', ')}`
+      }
+      return `${key}: ${value || '(空)'}`
+    })
+    
+    // 如果只有一个值，简化显示
+    if (items.length === 1) {
+      const [_, value] = Object.entries(response)[0]
+      return String(value || '(空)')
+    }
+    
+    return items.join('\n')
+  }
+
+  // 单选/多选类型
+  if (type === 'yes_no' || type === 'single_choice' || type === 'multiple_choice') {
+    if (Array.isArray(response)) {
+      return response.join(', ')
+    }
+    return String(response)
+  }
+
+  // 文本输入类型
+  if (type === 'text_input') {
+    return String(response)
+  }
+
+  // 兜底：返回 JSON 字符串
+  return JSON.stringify(response, null, 2)
+}
 
 /**
  * HITL Composable
  */
 export function useHITL() {
   const sessionStore = useSessionStore()
+  const conversationStore = useConversationStore()
+  const sse = useSSE()
 
   // ==================== 状态 ====================
 
@@ -27,6 +124,9 @@ export function useHITL() {
 
   /** 是否正在提交 */
   const isSubmitting = ref(false)
+  
+  /** SSE 事件处理回调（由外部设置） */
+  const onSSEEvent = ref<((event: any, assistantMsg: any) => void) | null>(null)
 
   // ==================== 计算属性 ====================
 
@@ -140,14 +240,21 @@ export function useHITL() {
   }
 
   /**
-   * 提交响应
+   * 提交响应（新版本：通过 SSE 流式接口提交）
    */
   async function submit(): Promise<boolean> {
     if (!request.value || isSubmitting.value) return false
 
-    const sessionId = sessionStore.currentSessionId
-    if (!sessionId) {
-      console.error('❌ 无法提交 HITL 响应：session_id 不存在')
+    const conversationId = conversationStore.currentId
+    const userId = conversationStore.userId
+
+    if (!conversationId) {
+      console.error('❌ 无法提交 HITL 响应：conversation_id 不存在')
+      return false
+    }
+
+    if (!userId) {
+      console.error('❌ 无法提交 HITL 响应：user_id 不存在')
       return false
     }
 
@@ -160,32 +267,67 @@ export function useHITL() {
     isSubmitting.value = true
 
     try {
-      // form 类型：将对象序列化为 JSON 字符串
-      let submitResponse = response.value
-      if (confirmationType.value === 'form' && typeof response.value === 'object') {
-        submitResponse = JSON.stringify(response.value)
+      // 🆕 格式化用户响应为分号分隔的字符串（发送到后端）
+      const formattedMessage = formatHITLResponse(response.value, confirmationType.value)
+      
+      // 🆕 格式化用户响应为可读的显示文本（界面显示）
+      const displayMessage = formatHITLResponseForDisplay(response.value, confirmationType.value)
+      
+      console.log('📤 提交 HITL 响应:', formattedMessage)
+
+      // 🆕 在界面上显示用户的选择
+      conversationStore.addUserMessage(displayMessage)
+
+      // 🆕 添加空的助手消息（用于流式填充）
+      const assistantMsg = conversationStore.addAssistantMessage()
+
+      // 🆕 通过 SSE 流式接口发送消息
+      const requestBody = {
+        message: formattedMessage,
+        user_id: userId,
+        conversation_id: conversationId,
+        stream: true, // ✅ 启用流式响应
+        variables: {
+          hitlFlag: true // 🔑 标识这是 HITL 响应
+        }
       }
 
-      await sessionApi.submitHITLResponse(sessionId, submitResponse as string)
+      // 🔑 建立 SSE 连接（不 await，让它在后台运行）
+      sse.connect(requestBody, {
+        onEvent: (event) => {
+          // 如果外部设置了事件处理回调，则使用它
+          if (onSSEEvent.value) {
+            onSSEEvent.value(event, assistantMsg)
+          }
+        },
+        onConnected: () => {
+          console.log('✅ HITL 响应 SSE 已连接')
+          // 🆕 连接成功后立即关闭弹窗
+          hide()
+          isSubmitting.value = false
+        },
+        onDisconnected: () => {
+          console.log('✅ HITL 响应 SSE 已断开')
+        },
+        onError: (error) => {
+          console.error('❌ HITL 响应 SSE 错误:', error)
+          // 错误时也要重置状态
+          isSubmitting.value = false
+        }
+      }).catch((error) => {
+        // 捕获连接错误
+        console.error('❌ 提交 HITL 响应失败:', error)
+        isSubmitting.value = false
+      })
 
-      console.log('✅ HITL 响应已提交:', submitResponse)
-
-      // 关闭弹窗
-      hide()
+      console.log('📤 HITL 响应已发送，等待 SSE 连接建立...')
+      
+      // 不再等待 SSE 流结束，立即返回
       return true
     } catch (error: unknown) {
-      const err = error as { status?: number }
       console.error('❌ 提交 HITL 响应失败:', error)
-
-      // 404/410 表示请求已过期
-      if (err.status === 404 || err.status === 410) {
-        console.warn('⚠️ 确认请求已过期')
-        hide()
-      }
-
-      return false
-    } finally {
       isSubmitting.value = false
+      return false
     }
   }
 
@@ -195,7 +337,7 @@ export function useHITL() {
   async function cancel(): Promise<void> {
     if (request.value) {
       response.value = 'cancel'
-      await submit()
+      await submit() // 通过 chat 接口发送 "cancel"
     } else {
       hide()
     }
@@ -216,6 +358,14 @@ export function useHITL() {
   function reset(): void {
     hide()
     isSubmitting.value = false
+  }
+
+  /**
+   * 设置 SSE 事件处理回调（由 useChat 调用）
+   * @param handler - 事件处理函数
+   */
+  function setSSEEventHandler(handler: (event: any, assistantMsg: any) => void): void {
+    onSSEEvent.value = handler
   }
 
   return {
@@ -244,6 +394,7 @@ export function useHITL() {
     submit,
     cancel,
     hide,
-    reset
+    reset,
+    setSSEEventHandler // 🆕 新增方法
   }
 }

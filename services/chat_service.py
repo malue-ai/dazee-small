@@ -477,15 +477,31 @@ class ChatService:
             stream=True  → AsyncGenerator
             stream=False → Dict
         """
+        # 🆕 从 variables 中提取 hitlFlag
+        hitlFlag = variables.get("hitlFlag", False) if variables else False
+        
         logger.info(
             "对话请求",
             extra={
                 "user_id": user_id,
                 "agent_id": agent_id or "default",
                 "conversation_id": conversation_id,
-                "message_preview": str(message)[:50] if message else ""
+                "message_preview": str(message)[:50] if message else "",
+                "hitlFlag": hitlFlag
             }
         )
+        
+        # 🆕 HITL 响应模式：特殊处理流程
+        if hitlFlag:
+            logger.info(f"[HITL Response] 检测到 HITL 响应模式")
+            return await self._handle_hitl_response(
+                message=message,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                agent_id=agent_id,
+                stream=stream,
+                output_format=output_format
+            )
         
         # 1. 验证 agent_id
         if agent_id:
@@ -787,6 +803,669 @@ class ChatService:
                     status="failed"
                 )
             raise AgentExecutionError(f"流式对话失败: {e}") from e
+    
+    async def _handle_hitl_response(
+        self,
+        message: Any,
+        user_id: str,
+        conversation_id: Optional[str],
+        agent_id: Optional[str],
+        stream: bool,
+        output_format: str
+    ):
+        """
+        处理 HITL 响应（前端提交表单后触发）
+        
+        流程：
+        1. 解析 message 中的 hitl_response 数据
+        2. 加载历史消息
+        3. 动态替换 pending tool_result
+        4. 添加触发消息（"请继续"）
+        5. 调用 Agent 继续执行
+        
+        Args:
+            message: 包含 hitl_response 的消息数据
+            user_id: 用户 ID
+            conversation_id: 对话 ID
+            agent_id: Agent ID
+            stream: 是否流式返回
+            output_format: 输出格式
+        
+        Returns:
+            AsyncGenerator (stream=True) 或 Dict (stream=False)
+        """
+        logger.info(f"[HITL Response] 开始处理 HITL 响应")
+        
+        # 1. 解析 HITL 响应数据（支持分号分隔的字符串格式）
+        try:
+            hitl_response = {}
+            
+            if isinstance(message, str):
+                # 🆕 新格式：分号分隔的字符串 "写实风格；1024x1024" 或 "写实风格;1024x1024"
+                # 将其解析为字典格式传递给 LLM
+                # 兼容中英文分号
+                if "；" in message:
+                    parts = message.split("；")  # 中文分号
+                    logger.info(f"[HITL Response] 解析到中文分号分隔格式: {parts}")
+                elif ";" in message:
+                    parts = message.split(";")  # 英文分号
+                    logger.info(f"[HITL Response] 解析到英文分号分隔格式: {parts}")
+                else:
+                    parts = [message]
+                
+                # 简单将所有值合并为一个响应文本
+                hitl_response = {"response": message}
+            else:
+                # 兼容旧格式：JSON 对象
+                message_data = message
+                if isinstance(message_data, dict):
+                    hitl_response = message_data.get("hitl_response", {})
+                else:
+                    hitl_response = {"response": str(message_data)}
+            
+            logger.info(f"[HITL Response] 解析到响应数据: {hitl_response}")
+        except Exception as e:
+            logger.error(f"[HITL Response] 解析响应数据失败: {e}", exc_info=True)
+            raise ValueError(f"HITL 响应数据格式错误: {e}") from e
+        
+        # 2. 验证 conversation_id
+        if not conversation_id:
+            raise ValueError("HITL 响应必须提供 conversation_id")
+        
+        # 3. 验证 agent_id
+        if agent_id:
+            registry = get_agent_registry()
+            if not registry.has_agent(agent_id):
+                available = [a["agent_id"] for a in registry.list_agents()]
+                raise AgentNotFoundError(f"Agent '{agent_id}' 不存在，可用: {available}")
+        
+        # 4. 生成 assistant_message_id
+        assistant_message_id = str(uuid4())
+        
+        # 5. 创建/校验 Conversation
+        try:
+            conv, is_new_conversation = await self.conversation_service.get_or_create_conversation(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                title="继续对话"
+            )
+            conversation_id = conv.id
+        except Exception as e:
+            raise ValueError(f"对话校验失败: {e}") from e
+        
+        # 6. 创建 Session
+        session_id = await self.session_service.create_session(
+            user_id=user_id,
+            message="[HITL_CONTINUE]",
+            conversation_id=conversation_id,
+            message_id=None
+        )
+        logger.info(f"[HITL Response] Session 已创建: {session_id}")
+        
+        # 7. 加载历史消息
+        history_messages = []
+        with log_execution_time("加载历史消息", logger):
+            async with AsyncSessionLocal() as session:
+                db_messages = await crud.list_messages(
+                    session=session,
+                    conversation_id=conversation_id,
+                    limit=1000,
+                    order="asc"
+                )
+                
+                from core.llm.adaptor import ClaudeAdaptor
+                
+                raw_messages = []
+                for db_msg in db_messages:
+                    if db_msg.role == "assistant" and db_msg.status == "processing":
+                        continue
+                    
+                    content = db_msg.content
+                    try:
+                        if isinstance(content, str):
+                            content = json.loads(content) if content else []
+                        elif content is None:
+                            content = []
+                    except json.JSONDecodeError:
+                        logger.warning("JSON 解析失败", extra={"message_id": db_msg.id})
+                    
+                    raw_messages.append({
+                        "role": db_msg.role,
+                        "content": content
+                    })
+                
+                history_messages = ClaudeAdaptor.prepare_messages_from_db(raw_messages)
+                
+                logger.info(
+                    f"[HITL Response] 历史消息已加载",
+                    extra={"conversation_id": conversation_id, "count": len(history_messages)}
+                )
+        
+        # 8. 🆕 从历史消息中提取原始 questions，并重新解析用户响应
+        original_questions = self._extract_questions_from_history(history_messages)
+        if original_questions:
+            hitl_response = self._parse_hitl_response_with_questions(
+                message, 
+                original_questions, 
+                hitl_response
+            )
+            logger.info(f"[HITL Response] 重新解析后的响应: {hitl_response}")
+        
+        # 9. 动态替换 pending tool_result
+        history_messages = await self._replace_pending_hitl_with_response(
+            messages=history_messages,
+            hitl_response=hitl_response
+        )
+        
+        # 10. 添加触发消息
+        trigger_message = {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "用户已完成表单填写并提交了响应数据。请根据上述工具返回的信息继续执行原任务。"
+                }
+            ]
+        }
+        history_messages.append(trigger_message)
+        
+        logger.info(f"[HITL Response] 已添加触发消息，准备继续执行")
+        
+        # 10. 创建 Assistant 占位
+        try:
+            async with AsyncSessionLocal() as session:
+                await crud.create_message(
+                    session=session,
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content="[]",
+                    message_id=assistant_message_id,
+                    status="processing",
+                    metadata={"session_id": session_id, "model": self.default_model}
+                )
+                logger.debug(f"[HITL Response] Assistant 占位已创建: {assistant_message_id}")
+        except Exception as e:
+            logger.error(f"[HITL Response] 创建 Assistant 占位失败: {e}", exc_info=True)
+            try:
+                await self.session_service.end_session(session_id, status="failed")
+            except Exception as cleanup_err:
+                logger.warning(f"清理 Session 失败: {cleanup_err}")
+            raise ValueError(f"消息保存失败: {e}") from e
+        
+        # 11. 获取 Agent
+        pool_key = agent_id or self.DEFAULT_AGENT_KEY
+        agent = None
+        agent_acquired = False
+        session_pool_updated = False
+        
+        try:
+            agent = await self.agent_pool.acquire(
+                agent_id=pool_key,
+                event_manager=self.session_service.events,
+                conversation_service=self.conversation_service
+            )
+            agent_acquired = True
+            logger.debug(f"[HITL Response] Agent 就绪: {pool_key}")
+            
+            from core.billing.tracker import EnhancedUsageTracker
+            shared_tracker = EnhancedUsageTracker()
+            agent.usage_tracker = shared_tracker
+            
+            await self.session_pool.on_session_start(session_id, user_id, pool_key)
+            session_pool_updated = True
+            
+        except Exception as e:
+            logger.error(f"[HITL Response] 资源获取失败: {e}", exc_info=True)
+            try:
+                await self.conversation_service.update_message(
+                    message_id=assistant_message_id,
+                    status="failed"
+                )
+            except Exception as update_err:
+                logger.warning(f"更新 Assistant 状态失败: {update_err}")
+            try:
+                if session_pool_updated:
+                    await self.session_pool.on_session_end(session_id, user_id, pool_key)
+                if agent_acquired:
+                    await self.agent_pool.release(pool_key)
+                await self.session_service.end_session(session_id, status="failed")
+            except Exception as cleanup_error:
+                logger.warning(f"清理失败: {cleanup_error}")
+            raise AgentExecutionError(f"资源获取失败: {e}") from e
+        
+        # 12. 调度执行
+        if not stream:
+            # 同步模式：后台运行，立即返回
+            asyncio.create_task(self._run_agent_with_history(
+                session_id=session_id,
+                agent=agent,
+                agent_id=pool_key,
+                history_messages=history_messages,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                assistant_message_id=assistant_message_id,
+                output_format=output_format
+            ))
+            return {
+                "task_id": session_id,
+                "conversation_id": conversation_id,
+                "message": "HITL 响应已处理，任务继续执行中",
+                "status": "running"
+            }
+        
+        # 流式模式：返回事件流
+        return self._create_hitl_stream_generator(
+            session_id=session_id,
+            agent=agent,
+            agent_id=pool_key,
+            history_messages=history_messages,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            assistant_message_id=assistant_message_id,
+            output_format=output_format
+        )
+    
+    def _extract_questions_from_history(self, messages: List[Dict]) -> Optional[List[Dict]]:
+        """
+        从历史消息中提取原始的 HITL questions
+        
+        Args:
+            messages: 历史消息列表
+            
+        Returns:
+            questions 列表，如果未找到则返回 None
+        """
+        for msg in messages:
+            if msg.get("role") != "user":
+                continue
+            
+            content = msg.get("content", [])
+            if isinstance(content, str):
+                continue
+            
+            for block in content:
+                if block.get("type") != "tool_result":
+                    continue
+                
+                block_content = block.get("content", "")
+                try:
+                    if isinstance(block_content, str):
+                        block_data = json.loads(block_content)
+                    else:
+                        block_data = block_content
+                    
+                    if block_data.get("status") == "pending_user_input":
+                        questions = block_data.get("questions", [])
+                        if questions:
+                            logger.info(f"[HITL Response] 提取到原始 questions: {len(questions)} 个")
+                            return questions
+                except Exception as e:
+                    logger.warning(f"解析 tool_result 失败: {e}")
+                    continue
+        
+        return None
+    
+    def _parse_hitl_response_with_questions(
+        self, 
+        message: Any, 
+        questions: List[Dict],
+        fallback_response: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        根据原始 questions 解析用户响应
+        
+        Args:
+            message: 用户响应消息（分号分隔的字符串）
+            questions: 原始的 HITL questions
+            fallback_response: 如果解析失败，使用的兜底响应
+            
+        Returns:
+            解析后的响应字典
+        """
+        if not isinstance(message, str):
+            logger.warning("[HITL Response] 消息不是字符串，使用兜底响应")
+            return fallback_response
+        
+        # 分割响应（兼容中英文分号）
+        if "；" in message:
+            parts = message.split("；")
+        elif ";" in message:
+            parts = message.split(";")
+        else:
+            parts = [message]
+        
+        # 清理空白
+        parts = [p.strip() for p in parts if p.strip()]
+        
+        logger.info(f"[HITL Response] 分割后的响应parts: {parts}")
+        logger.info(f"[HITL Response] questions数量: {len(questions)}")
+        
+        # 按照 questions 的 id 顺序映射
+        parsed_response = {}
+        for i, question in enumerate(questions):
+            question_id = question.get("id", f"field_{i}")
+            if i < len(parts):
+                parsed_response[question_id] = parts[i]
+            else:
+                # 如果用户没有提供足够的值，使用空字符串
+                parsed_response[question_id] = ""
+        
+        logger.info(f"[HITL Response] 按 question id 映射后: {parsed_response}")
+        return parsed_response
+    
+    async def _replace_pending_hitl_with_response(
+        self,
+        messages: List[Dict],
+        hitl_response: Dict[str, Any]
+    ) -> List[Dict]:
+        """
+        动态替换 pending 状态的 tool_result
+        
+        Args:
+            messages: 历史消息列表
+            hitl_response: 用户提交的 HITL 响应数据
+            
+        Returns:
+            替换后的消息列表（仅在内存中替换，不修改数据库）
+        """
+        logger.info(f"[HITL Response] 开始替换 pending tool_result")
+        
+        replaced = False
+        
+        # 遍历消息，找到 pending 的 tool_result
+        for msg in messages:
+            if msg.get("role") != "user":
+                continue
+            
+            content = msg.get("content", [])
+            if isinstance(content, str):
+                continue
+            
+            for block in content:
+                if block.get("type") != "tool_result":
+                    continue
+                
+                # 检查是否是 pending 状态
+                block_content = block.get("content", "")
+                
+                # 尝试解析 JSON
+                try:
+                    if isinstance(block_content, str):
+                        block_data = json.loads(block_content)
+                    else:
+                        block_data = block_content
+                    
+                    # 检查状态
+                    if block_data.get("status") == "pending_user_input":
+                        # 🔧 动态替换
+                        new_content = {
+                            "success": True,
+                            "response": hitl_response
+                        }
+                        
+                        block["content"] = json.dumps(new_content, ensure_ascii=False)
+                        
+                        replaced = True
+                        
+                        logger.info(
+                            f"[HITL Response] ✅ 已替换 tool_result: "
+                            f"tool_use_id={block.get('tool_use_id')}"
+                        )
+                        
+                        # 只替换第一个 pending（假设同时只有一个 HITL）
+                        return messages
+                except (json.JSONDecodeError, TypeError):
+                    # 如果不是 JSON，尝试字符串匹配
+                    if isinstance(block_content, str) and "pending_user_input" in block_content:
+                        new_content = {
+                            "success": True,
+                            "response": hitl_response
+                        }
+                        
+                        block["content"] = json.dumps(new_content, ensure_ascii=False)
+                        
+                        replaced = True
+                        
+                        logger.info(
+                            f"[HITL Response] ✅ 已替换 tool_result (字符串匹配): "
+                            f"tool_use_id={block.get('tool_use_id')}"
+                        )
+                        
+                        return messages
+        
+        if not replaced:
+            logger.warning(f"[HITL Response] ⚠️ 未找到 pending 状态的 tool_result")
+        
+        return messages
+    
+    async def _create_hitl_stream_generator(
+        self,
+        session_id: str,
+        agent: SimpleAgent,
+        agent_id: str,
+        history_messages: List[Dict[str, Any]],
+        user_id: str,
+        conversation_id: str,
+        assistant_message_id: str,
+        output_format: str
+    ):
+        """
+        创建 HITL 响应的流式事件生成器
+        
+        Args:
+            session_id: Session ID
+            agent: Agent 实例
+            agent_id: Agent ID
+            history_messages: 已处理的历史消息（含替换后的 tool_result）
+            user_id: 用户 ID
+            conversation_id: 对话 ID
+            assistant_message_id: Assistant 消息 ID
+            output_format: 输出事件格式
+        """
+        agent_task = None
+        
+        try:
+            redis = self.session_service.redis
+            
+            # 设置输出格式
+            events = self.session_service.events
+            events.set_output_format(output_format, conversation_id)
+            if hasattr(agent, 'broadcaster') and agent.broadcaster:
+                agent.broadcaster.set_output_format(output_format, conversation_id)
+            
+            # 发送初始事件
+            await events.session.emit_session_start(
+                session_id=session_id,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                message_id=assistant_message_id,
+                output_format=events.output_format,
+                adapter=events.adapter
+            )
+            
+            # 启动 Agent 任务
+            agent_task = asyncio.create_task(self._run_agent_with_history(
+                session_id=session_id,
+                agent=agent,
+                agent_id=agent_id,
+                history_messages=history_messages,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                assistant_message_id=assistant_message_id,
+                output_format=output_format
+            ))
+            
+            # 订阅事件流
+            async for event in redis.subscribe_events(session_id=session_id, after_id=0, timeout=1800):
+                yield event
+                if agent_task.done():
+                    break
+            
+            if not agent_task.done():
+                await agent_task
+            
+            logger.info(f"[HITL Response] 流式对话完成: {session_id}")
+        
+        except asyncio.CancelledError:
+            logger.info(f"[HITL Response] SSE 断开，Agent 后台继续: {session_id}")
+        
+        except Exception as e:
+            logger.error(f"[HITL Response] 流式对话失败: {session_id}, {e}", exc_info=True)
+            if agent_task is None:
+                await self._cleanup_session_resources(
+                    session_id=session_id,
+                    user_id=user_id,
+                    agent_id=agent_id,
+                    status="failed"
+                )
+            raise AgentExecutionError(f"流式对话失败: {e}") from e
+    
+    async def _run_agent_with_history(
+        self,
+        session_id: str,
+        agent: SimpleAgent,
+        agent_id: str,
+        history_messages: List[Dict[str, Any]],
+        user_id: str,
+        conversation_id: str,
+        assistant_message_id: str,
+        output_format: str = "zenflux"
+    ):
+        """
+        使用已提供的历史消息执行 Agent（用于 HITL 继续模式）
+        
+        Args:
+            session_id: 会话 ID
+            agent: Agent 实例
+            agent_id: Agent ID
+            history_messages: 历史消息（已动态替换）
+            user_id: 用户 ID
+            conversation_id: 对话 ID
+            assistant_message_id: Assistant 消息 ID
+            output_format: 输出事件格式
+        """
+        start_time = time.time()
+        execution_status = "completed"
+        
+        redis = self.session_service.redis
+        events = self.session_service.events
+        events.set_output_format(output_format, conversation_id)
+        
+        try:
+            logger.info(f"[HITL Response] Agent 开始执行: {session_id}")
+            
+            # 发送 message_start 事件
+            await events.message.emit_message_start(
+                session_id=session_id,
+                conversation_id=conversation_id,
+                message_id=assistant_message_id,
+                model=self.default_model,
+                output_format=events.output_format,
+                adapter=events.adapter
+            )
+            
+            # 初始化 broadcaster 的消息累积
+            agent.broadcaster.start_message(session_id, assistant_message_id)
+            
+            # 设置输出格式
+            if hasattr(agent, 'broadcaster') and agent.broadcaster:
+                agent.broadcaster.set_output_format(output_format, conversation_id)
+            
+            # 更新 Session context
+            await redis.set_session_context(
+                session_id=session_id,
+                conversation_id=conversation_id,
+                user_id=user_id,
+                message_id=assistant_message_id
+            )
+            
+            # 执行 Agent
+            async for event in agent.chat(
+                messages=history_messages,
+                session_id=session_id,
+                conversation_id=conversation_id,
+                message_id=assistant_message_id,
+                enable_stream=True,
+                variables=None
+            ):
+                if event is None:
+                    continue
+                
+                event_type = event.get("type", "")
+                
+                # 检查停止标志
+                if await redis.is_stopped(session_id):
+                    logger.warning(f"[HITL Response] 检测到停止标志: {session_id}")
+                    await agent.broadcaster.emit_message_stop(
+                        session_id=session_id,
+                        message_id=assistant_message_id
+                    )
+                    await events.session.emit_session_stopped(
+                        session_id=session_id,
+                        conversation_id=conversation_id,
+                        reason="user_requested",
+                        output_format=events.output_format,
+                        adapter=events.adapter
+                    )
+                    await self.session_service.end_session(session_id, status="stopped")
+                    break
+            
+            # 完成处理
+            duration_ms = int((time.time() - start_time) * 1000)
+            
+            final_status = await redis.get_session_status(session_id)
+            status = final_status.get("status") if final_status else "completed"
+            
+            if status != "stopped":
+                await events.session.emit_session_end(
+                    session_id=session_id,
+                    conversation_id=conversation_id,
+                    status="completed",
+                    duration_ms=duration_ms,
+                    output_format=events.output_format,
+                    adapter=events.adapter
+                )
+                await self.session_service.end_session(session_id, status="completed")
+            
+            logger.info(f"[HITL Response] Agent 执行完成: {session_id}, 耗时: {duration_ms}ms")
+        
+        except Exception as e:
+            execution_status = "failed"
+            logger.error(f"[HITL Response] Agent 执行失败: {e}", exc_info=True)
+            duration_ms = int((time.time() - start_time) * 1000)
+            
+            if assistant_message_id:
+                try:
+                    await self.conversation_service.update_message(
+                        message_id=assistant_message_id,
+                        status="failed"
+                    )
+                except Exception as update_err:
+                    logger.warning(f"更新消息状态失败: {update_err}")
+            
+            try:
+                await events.session.emit_session_end(
+                    session_id=session_id,
+                    conversation_id=conversation_id,
+                    status="failed",
+                    duration_ms=duration_ms,
+                    output_format=events.output_format,
+                    adapter=events.adapter
+                )
+            except Exception as ex:
+                logger.warning(f"发送 session_end 失败: {ex}")
+        
+        finally:
+            try:
+                await self._cleanup_session_resources(
+                    session_id=session_id,
+                    user_id=user_id,
+                    agent_id=agent_id,
+                    status=execution_status
+                )
+                logger.debug(f"[HITL Response] 资源已释放: {session_id}")
+            except Exception as cleanup_err:
+                logger.error(f"资源清理失败: {cleanup_err}", exc_info=True)
     
     async def _dispatch_background_tasks(
         self,
