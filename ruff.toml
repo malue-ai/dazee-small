@@ -1,0 +1,75 @@
+# Ruff 配置文件
+# Python 代码质量检查工具配置
+# 文档: https://docs.astral.sh/ruff/configuration/
+
+# 目标 Python 版本
+target-version = "py312"
+
+# 行长度限制
+line-length = 100
+
+# 排除目录
+exclude = [
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".cache",
+    "build",
+    "dist",
+    "*.egg-info",
+    # 项目特定排除
+    "docs",
+    "tests",
+    "migrations",
+    "grpc_server/generated",
+    "frontend",
+    "workspace",
+    "instances",
+    "templates",
+    "skills/library",
+]
+
+[lint]
+# 启用的规则集
+select = [
+    "E",      # pycodestyle errors
+    "F",      # Pyflakes
+    "W",      # pycodestyle warnings
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+]
+
+# 忽略的规则
+ignore = [
+    "E501",   # 行长度（由 line-length 控制）
+    "B008",   # 函数调用作为默认参数（FastAPI Depends 需要）
+    "B904",   # raise without from（某些场景下不需要）
+    "UP007",  # Use X | Y for type union（保持兼容性）
+]
+
+# 每个 linter 的最大问题数
+# max-issues-per-linter = 50
+
+[lint.per-file-ignores]
+# 测试文件忽略某些规则
+"tests/**/*.py" = ["B", "E501"]
+# __init__.py 文件忽略未使用导入
+"**/__init__.py" = ["F401"]
+# 示例文件忽略更多规则
+"examples/**/*.py" = ["E", "F", "B"]
+
+[lint.isort]
+# isort 配置
+known-first-party = ["core", "infra", "models", "routers", "services", "tools", "utils"]
+force-single-line = false
+lines-after-imports = 2
+
+[format]
+# 格式化配置（可选，用于 ruff format）
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
