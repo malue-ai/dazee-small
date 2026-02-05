@@ -1371,7 +1371,16 @@ class ZenOAdapter(EventAdapter):
         else:
             status = "completed" if success else "timeout" if timed_out else "failed"
         
-        # 构建 hitl_data delta 数据
+        # 🔑 重要：pending 状态不生成 hitl_data delta
+        # 原因：前端需要通过是否收到 hitl_data 来区分用户行为：
+        # - 收到 hitl_data (completed) → 用户提交了表单
+        # - 没有收到 hitl_data → 用户点击"忽略"，直接输入
+        # 前端通过 tool_use 事件中的 tool_input 来渲染表单，不需要 pending 状态的 hitl_data
+        if status == "pending":
+            logger.info(f"⏸️ HITL pending 状态: 不生成 hitl_data delta，等待用户操作")
+            return deltas  # 返回空列表
+        
+        # 构建 hitl_data delta 数据（仅 completed/timeout/failed 状态）
         hitl_data = {
             # 🆕 类型标识（前端用于区分不同的 HITL 交互类型）
             "type": "form",
