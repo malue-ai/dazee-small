@@ -32,7 +32,6 @@ workflow:
 stages:
   - test
   - build
-  - push
   - deploy
   - verify
   - notify
@@ -139,7 +138,8 @@ lint:
 # Build Stage
 # ============================================================
 
-# Build Docker image - only on staging/production branches
+# Build and Push Docker image - only on staging/production branches
+# 直接推送到 ECR，避免 artifact 大小限制
 build:
   <<: *docker_template
   stage: build
@@ -149,11 +149,11 @@ build:
     BUILDKIT_PROGRESS: "plain"
   script:
     - echo "Building image with tag ${IMAGE_TAG}"
-    # 登录 ECR 以访问缓存
+    # 安装 AWS CLI 并登录 ECR
+    - apk add --no-cache aws-cli > /dev/null 2>&1 || true
     - |
       if [ -n "${AWS_ACCESS_KEY_ID}" ]; then
-        apk add --no-cache aws-cli > /dev/null 2>&1 || true
-        aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY} 2>/dev/null || true
+        aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
       fi
     # 使用 BuildKit 构建
     - |
@@ -170,56 +170,15 @@ build:
         -f Dockerfile.production \
         .
     - docker tag ${SERVICE_NAME}:${IMAGE_TAG} ${SERVICE_NAME}:latest
-    - docker save ${SERVICE_NAME}:${IMAGE_TAG} > image.tar
-  artifacts:
-    paths:
-      - image.tar
-    expire_in: 1 hour
-  rules:
-    - if: $CI_COMMIT_BRANCH == "staging"
-    - if: $CI_COMMIT_BRANCH == "production"
-  needs: []
-
-# ============================================================
-# Push Stage
-# ============================================================
-
-# Push to AWS ECR
-push_ecr:
-  <<: *docker_template
-  stage: push
-  variables:
-    IMAGE_TAG: ${CI_COMMIT_REF_SLUG}-${CI_COMMIT_SHORT_SHA}
-    DOCKER_HOST: unix:///var/run/docker.sock
-  before_script:
-    - docker info
-    - |
-      if [ -f image.tar ]; then
-        echo "Loading image from artifact..."
-        docker load < image.tar
-      else
-        echo "No artifact found, building image..."
-        docker build \
-          --build-arg REGISTRY=docker.1ms.run/library \
-          --build-arg USE_CHINA_MIRROR=true \
-          -t ${SERVICE_NAME}:${IMAGE_TAG} \
-          -f Dockerfile.production .
-      fi
-    - apk add --no-cache aws-cli > /dev/null 2>&1 || true
-    - aws --version
-  script:
-    - echo "Logging in to ECR..."
-    - aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
-    - echo "Tagging image for ECR..."
+    # 直接推送到 ECR
+    - echo "Pushing image to ECR..."
     - docker tag ${SERVICE_NAME}:${IMAGE_TAG} ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}
-    - echo "Pushing to ECR..."
     - docker push ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}
     - echo "Image pushed successfully - ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
   rules:
     - if: $CI_COMMIT_BRANCH == "staging"
     - if: $CI_COMMIT_BRANCH == "production"
-  needs:
-    - build
+  needs: []
 
 # ============================================================
 # Deploy Stage
@@ -303,7 +262,7 @@ deploy_staging:
   rules:
     - if: $CI_COMMIT_BRANCH == "staging"
   needs:
-    - push_ecr
+    - build
 
 # Deploy to AWS Production
 deploy_production:
@@ -383,7 +342,7 @@ deploy_production:
   rules:
     - if: $CI_COMMIT_BRANCH == "production"
   needs:
-    - push_ecr
+    - build
 
 # ============================================================
 # Verify Stage
