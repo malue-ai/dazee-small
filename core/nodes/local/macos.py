@@ -13,7 +13,7 @@ macOS 本地节点
 import asyncio
 import logging
 import os
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from core.nodes.local.base import LocalNodeBase
 
@@ -23,10 +23,10 @@ logger = logging.getLogger(__name__)
 class MacOSLocalNode(LocalNodeBase):
     """
     macOS 本地节点
-    
+
     对齐 clawdbot 的 MacNodeRuntime
     """
-    
+
     # macOS 默认安全 bins
     DEFAULT_SAFE_BINS = [
         "osascript",
@@ -42,7 +42,7 @@ class MacOSLocalNode(LocalNodeBase):
         "pwd",
         "date",
     ]
-    
+
     # macOS 默认命令白名单
     DEFAULT_ALLOWLIST = [
         "/usr/bin/osascript",
@@ -58,7 +58,7 @@ class MacOSLocalNode(LocalNodeBase):
         "/bin/pwd",
         "/bin/date",
     ]
-    
+
     def __init__(
         self,
         node_id: str = "local",
@@ -68,7 +68,7 @@ class MacOSLocalNode(LocalNodeBase):
     ):
         """
         初始化 macOS 本地节点
-        
+
         Args:
             node_id: 节点 ID
             display_name: 显示名称
@@ -81,11 +81,11 @@ class MacOSLocalNode(LocalNodeBase):
             allowlist=allowlist or self.DEFAULT_ALLOWLIST,
             safe_bins=safe_bins or self.DEFAULT_SAFE_BINS,
         )
-    
+
     @property
     def platform(self) -> str:
         return "darwin"
-    
+
     @property
     def capabilities(self) -> List[str]:
         return [
@@ -97,25 +97,25 @@ class MacOSLocalNode(LocalNodeBase):
             "open_app",
             "open_url",
         ]
-    
+
     async def _do_initialize(self) -> None:
         """macOS 特定初始化"""
         # 检查 osascript 是否可用
         result = await self.shell_executor.which("osascript")
         if not result:
             logger.warning("osascript 不可用，AppleScript 功能将受限")
-    
+
     async def _handle_system_notify(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         发送 macOS 系统通知
-        
+
         使用 osascript 调用 AppleScript
         """
         title = params.get("title", "通知")
         message = params.get("message", "")
         subtitle = params.get("subtitle", "")
         sound = params.get("sound", True)
-        
+
         # 构建 AppleScript
         script_parts = [f'display notification "{self._escape_applescript(message)}"']
         script_parts.append(f'with title "{self._escape_applescript(title)}"')
@@ -123,24 +123,24 @@ class MacOSLocalNode(LocalNodeBase):
             script_parts.append(f'subtitle "{self._escape_applescript(subtitle)}"')
         if sound:
             script_parts.append('sound name "default"')
-        
+
         script = " ".join(script_parts)
-        
+
         result = await self.execute_applescript(script)
         return {
             "sent": result.get("success", False),
             "title": title,
             "message": message,
         }
-    
+
     async def execute_applescript(self, script: str, timeout: float = 30.0) -> Dict[str, Any]:
         """
         执行 AppleScript
-        
+
         Args:
             script: AppleScript 脚本
             timeout: 超时时间（秒）
-            
+
         Returns:
             执行结果
         """
@@ -148,13 +148,13 @@ class MacOSLocalNode(LocalNodeBase):
             command=["osascript", "-e", script],
             timeout=timeout,
         )
-        
+
         return {
             "success": result.success,
             "output": result.stdout.strip() if result.stdout else "",
             "error": result.stderr.strip() if result.stderr else None,
         }
-    
+
     async def open_app(
         self,
         app_name: str,
@@ -163,7 +163,7 @@ class MacOSLocalNode(LocalNodeBase):
     ) -> Dict[str, Any]:
         """
         打开应用程序
-        
+
         Args:
             app_name: 应用名称
             url: 要打开的 URL（可选）
@@ -175,18 +175,18 @@ class MacOSLocalNode(LocalNodeBase):
         command.extend(["-a", app_name])
         if url:
             command.append(url)
-        
+
         result = await self.shell_executor.execute(command)
         return {
             "success": result.success,
             "app": app_name,
             "url": url,
         }
-    
+
     async def open_url(self, url: str) -> Dict[str, Any]:
         """
         打开 URL
-        
+
         Args:
             url: 要打开的 URL
         """
@@ -195,11 +195,11 @@ class MacOSLocalNode(LocalNodeBase):
             "success": result.success,
             "url": url,
         }
-    
+
     async def open_path(self, path: str) -> Dict[str, Any]:
         """
         在 Finder 中打开路径
-        
+
         Args:
             path: 文件或文件夹路径
         """
@@ -209,7 +209,7 @@ class MacOSLocalNode(LocalNodeBase):
             "success": result.success,
             "path": expanded_path,
         }
-    
+
     async def screenshot(
         self,
         output_path: Optional[str] = None,
@@ -219,7 +219,7 @@ class MacOSLocalNode(LocalNodeBase):
     ) -> Dict[str, Any]:
         """
         截取屏幕截图
-        
+
         Args:
             output_path: 输出路径（可选，默认剪贴板）
             region: 区域 {x, y, width, height}（可选）
@@ -227,26 +227,26 @@ class MacOSLocalNode(LocalNodeBase):
             interactive: 是否交互式选择
         """
         command = ["screencapture"]
-        
+
         if not output_path:
             command.append("-c")  # 复制到剪贴板
-        
+
         if window:
             command.append("-w")  # 截取窗口
         elif interactive:
             command.append("-i")  # 交互式选择
-        
+
         if output_path:
             expanded_path = os.path.expanduser(output_path)
             command.append(expanded_path)
-        
+
         result = await self.shell_executor.execute(command)
         return {
             "success": result.success,
             "output_path": output_path,
             "to_clipboard": not output_path,
         }
-    
+
     async def clipboard_get(self) -> Dict[str, Any]:
         """获取剪贴板内容"""
         result = await self.shell_executor.execute(["pbpaste"])
@@ -254,7 +254,7 @@ class MacOSLocalNode(LocalNodeBase):
             "success": result.success,
             "content": result.stdout if result.success else None,
         }
-    
+
     async def clipboard_set(self, content: str) -> Dict[str, Any]:
         """设置剪贴板内容"""
         # 通过 echo 和管道设置剪贴板
@@ -265,11 +265,11 @@ class MacOSLocalNode(LocalNodeBase):
             "success": result.success,
             "length": len(content),
         }
-    
+
     async def say(self, text: str, voice: Optional[str] = None) -> Dict[str, Any]:
         """
         文字转语音
-        
+
         Args:
             text: 要朗读的文字
             voice: 语音名称（可选）
@@ -278,18 +278,16 @@ class MacOSLocalNode(LocalNodeBase):
         if voice:
             command.extend(["-v", voice])
         command.append(text)
-        
+
         result = await self.shell_executor.execute(command)
         return {
             "success": result.success,
             "text": text,
             "voice": voice,
         }
-    
+
     async def _handle_platform_command(
-        self,
-        command: str,
-        params: Dict[str, Any]
+        self, command: str, params: Dict[str, Any]
     ) -> Dict[str, Any]:
         """处理 macOS 平台特定命令"""
         if command == "applescript":
@@ -297,7 +295,7 @@ class MacOSLocalNode(LocalNodeBase):
             if not script:
                 raise ValueError("缺少 script 参数")
             return await self.execute_applescript(script)
-        
+
         elif command == "open_app":
             app_name = params.get("app_name", "")
             if not app_name:
@@ -307,47 +305,47 @@ class MacOSLocalNode(LocalNodeBase):
                 url=params.get("url"),
                 wait=params.get("wait", False),
             )
-        
+
         elif command == "open_url":
             url = params.get("url", "")
             if not url:
                 raise ValueError("缺少 url 参数")
             return await self.open_url(url)
-        
+
         elif command == "open_path":
             path = params.get("path", "")
             if not path:
                 raise ValueError("缺少 path 参数")
             return await self.open_path(path)
-        
+
         elif command == "screenshot":
             return await self.screenshot(
                 output_path=params.get("output_path"),
                 window=params.get("window", False),
                 interactive=params.get("interactive", False),
             )
-        
+
         elif command == "clipboard.get":
             return await self.clipboard_get()
-        
+
         elif command == "clipboard.set":
             content = params.get("content", "")
             return await self.clipboard_set(content)
-        
+
         elif command == "say":
             text = params.get("text", "")
             if not text:
                 raise ValueError("缺少 text 参数")
             return await self.say(text, params.get("voice"))
-        
+
         else:
             return await super()._handle_platform_command(command, params)
-    
+
     @staticmethod
     def _escape_applescript(text: str) -> str:
         """转义 AppleScript 字符串"""
         return text.replace("\\", "\\\\").replace('"', '\\"')
-    
+
     @staticmethod
     def _shell_escape(text: str) -> str:
         """转义 shell 字符串"""

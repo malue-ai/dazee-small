@@ -14,6 +14,7 @@ https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview#how-s
 
 import os
 import yaml
+import aiofiles
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
@@ -57,7 +58,7 @@ PREBUILT_SKILLS = [
 ]
 
 
-def extract_skill_metadata(skill_md_path: str) -> Dict[str, str]:
+async def extract_skill_metadata(skill_md_path: str) -> Dict[str, str]:
     """
     从SKILL.md提取YAML frontmatter（包括priority和preferred_for）
     
@@ -72,8 +73,8 @@ def extract_skill_metadata(skill_md_path: str) -> Dict[str, str]:
             "preferred_for": ["keyword1", "keyword2", ...]
         }
     """
-    with open(skill_md_path, 'r', encoding='utf-8') as f:
-        content = f.read()
+    async with aiofiles.open(skill_md_path, 'r', encoding='utf-8') as f:
+        content = await f.read()
     
     # 检查是否有YAML frontmatter
     if not content.startswith('---'):
@@ -101,7 +102,7 @@ def extract_skill_metadata(skill_md_path: str) -> Dict[str, str]:
     }
 
 
-def scan_skills_directory(skills_dir: str, verbose: bool = True) -> List[Dict[str, Any]]:
+async def scan_skills_directory(skills_dir: str, verbose: bool = True) -> List[Dict[str, Any]]:
     """
     扫描skills目录，收集所有Skills的metadata
     
@@ -143,7 +144,7 @@ def scan_skills_directory(skills_dir: str, verbose: bool = True) -> List[Dict[st
             continue
         
         try:
-            metadata = extract_skill_metadata(str(skill_md_path))
+            metadata = await extract_skill_metadata(str(skill_md_path))
             
             skills_metadata.append({
                 "name": metadata["name"],
@@ -324,7 +325,7 @@ def generate_skills_section(
     return "\n".join(lines)
 
 
-def load_skills_for_system_prompt(
+async def load_skills_for_system_prompt(
     skills_dir: str,
     include_prebuilt: bool = True,
     use_cache: bool = True
@@ -341,7 +342,7 @@ def load_skills_for_system_prompt(
         完整的Skills部分，可直接注入系统提示词
         
     Example:
-        >>> skills_section = load_skills_for_system_prompt("/skills/library")
+        >>> skills_section = await load_skills_for_system_prompt("/skills/library")
         >>> full_system_prompt = BASE_PROMPT + "\n\n" + skills_section
     """
     global _SKILLS_CACHE, _SCAN_VERBOSE
@@ -360,7 +361,7 @@ def load_skills_for_system_prompt(
         print()
     
     # 扫描Custom Skills
-    custom_skills = scan_skills_directory(skills_dir, verbose=verbose)
+    custom_skills = await scan_skills_directory(skills_dir, verbose=verbose)
     
     if verbose:
         print()
@@ -388,37 +389,41 @@ def load_skills_for_system_prompt(
 # 使用示例
 if __name__ == "__main__":
     import sys
+    import asyncio
     
-    # 获取项目根目录
-    project_root = Path(__file__).parent.parent
-    skills_dir = project_root / "skills" / "library"
-    
-    print("=" * 60)
-    print("Skills Metadata Loader")
-    print("=" * 60)
-    print()
-    
-    try:
-        skills_section = load_skills_for_system_prompt(str(skills_dir))
+    async def main():
+        # 获取项目根目录
+        project_root = Path(__file__).parent.parent
+        skills_dir = project_root / "skills" / "library"
         
-        print()
         print("=" * 60)
-        print("Generated Skills Section Preview:")
+        print("Skills Metadata Loader")
         print("=" * 60)
         print()
-        print(skills_section[:1000] + "...")
         
-        # 保存到文件（可选）
-        output_file = project_root / "" / "prompts" / "skills_metadata.txt"
-        with open(output_file, 'w', encoding='utf-8') as f:
-            f.write(skills_section)
-        
-        print()
-        print(f"✅ Full output saved to: {output_file}")
-        
-    except Exception as e:
-        print(f"❌ Error: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
+        try:
+            skills_section = await load_skills_for_system_prompt(str(skills_dir))
+            
+            print()
+            print("=" * 60)
+            print("Generated Skills Section Preview:")
+            print("=" * 60)
+            print()
+            print(skills_section[:1000] + "...")
+            
+            # 保存到文件（可选）
+            output_file = project_root / "" / "prompts" / "skills_metadata.txt"
+            async with aiofiles.open(output_file, 'w', encoding='utf-8') as f:
+                await f.write(skills_section)
+            
+            print()
+            print(f"✅ Full output saved to: {output_file}")
+            
+        except Exception as e:
+            print(f"❌ Error: {e}")
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+    
+    asyncio.run(main())
 

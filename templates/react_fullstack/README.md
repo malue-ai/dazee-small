@@ -84,7 +84,7 @@ npm start
 | 图表 | recharts | 2 |
 | 动画 | framer-motion | 12 |
 | 后端框架 | Express | 4 |
-| 包管理器 | pnpm | 10 |
+| 包管理器 | npm | - |
 
 ## 开发指南
 
@@ -216,7 +216,10 @@ setTheme("dark");  // 切换到暗色主题
 使用 `client/src/hooks/useApi.ts` 中的 hook：
 
 ```tsx
-const { data, loading, error, refetch } = useApi("/api/items");
+import { api } from "@/lib/api";
+import { useApi } from "@/hooks/useApi";
+
+const { data, loading, error, refetch } = useApi(() => api.getItems());
 ```
 
 ### Q: 如何添加环境变量？

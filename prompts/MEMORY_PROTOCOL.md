@@ -6,9 +6,9 @@
 ⚠️ CRITICAL: ASSUME INTERRUPTION
 
 Your context window might reset at any moment.
-所有进度必须记录在 Short Memory (plan_todo) 中，否则会丢失。
+所有进度必须记录在 Plan（plan 工具 + 注入的 “## 当前任务计划”）中，否则会丢失。
 
-NEVER trust your thinking memory - ALWAYS read from plan_todo.get_plan()
+NEVER trust your thinking memory - ALWAYS read the injected "## 当前任务计划" at the end of the latest user message.
 ```
 
 ## 强制协议（MANDATORY）
@@ -23,8 +23,8 @@ NEVER trust your thinking memory - ALWAYS read from plan_todo.get_plan()
 ├─────────────────────────────────────────────────────────┤
 │                                                         │
 │ 1️⃣ [Reason] 准备执行步骤                                 │
-│    ├─ MANDATORY: 调用 plan_todo.get_plan()             │
-│    ├─ 读取 current_step, current_action                │
+│    ├─ MANDATORY: 阅读末尾注入的 “## 当前任务计划”        │
+│    ├─ 读取未完成步骤与当前进行中步骤                       │
 │    └─ 确认状态（避免重复执行已完成步骤）                    │
 │                                                         │
 │ 2️⃣ [Act] 执行工具调用                                    │
@@ -38,9 +38,9 @@ NEVER trust your thinking memory - ALWAYS read from plan_todo.get_plan()
 │    └─ 决定 status: completed|failed|retry               │
 │                                                         │
 │ 5️⃣ [Update] 写回 Memory                                 │
-│    ├─ MANDATORY: 调用 plan_todo.update_todo()          │
-│    ├─ 更新步骤状态和结果                                  │
-│    └─ 写入 Short Memory                                 │
+│    ├─ MANDATORY: 调用 plan(action="update")              │
+│    ├─ 更新步骤状态和结果（todo_id/status/result）          │
+│    └─ 写回 Plan（持久化到会话 metadata）                   │
 │                                                         │
 │ 6️⃣ [Next] 继续或结束                                    │
 │    ├─ 如果还有未完成步骤 → 下一轮                         │
@@ -54,15 +54,12 @@ NEVER trust your thinking memory - ALWAYS read from plan_todo.get_plan()
 
 ```
 [Reason] 任务复杂，需要多步骤，创建 Plan
-[Act] 调用 plan_todo.create_plan({
-  "goal": "生成AI市场分析报告",
-  "steps": [
-    {"action": "web_search", "purpose": "收集市场信息"},
-    {"action": "web_search", "purpose": "收集技术趋势"},
-    {"action": "bash", "purpose": "整合数据"},
-    {"action": "生成报告", "purpose": "撰写报告"}
-  ]
-})
+[Act] 调用 plan(action="create", name="生成AI市场分析报告", todos=[
+  {"id": "1", "content": "收集市场信息", "status": "pending"},
+  {"id": "2", "content": "收集技术趋势", "status": "pending"},
+  {"id": "3", "content": "整合数据", "status": "pending"},
+  {"id": "4", "content": "撰写报告", "status": "pending"}
+])
 [Observe] Plan 已创建，存入 Short Memory
 ```
 
@@ -70,14 +67,11 @@ NEVER trust your thinking memory - ALWAYS read from plan_todo.get_plan()
 
 ```
 [Reason] 准备执行第一步
-[Act] 调用 plan_todo.get_plan()  ← 强制读取
-[Observe] 返回:
-  {
-    "context": "[Plan Context]\nGoal: 生成AI市场分析报告\nStatus: executing | Step: 1/4\nCurrent: web_search → 收集市场信息"
-  }
+[Act] 阅读末尾注入的 “## 当前任务计划”  ← 强制读取
+[Observe] 看到当前步骤是：tavily_search → 收集市场信息（Step 1/4）
 
-[Reason] 当前步骤是 web_search - 收集市场信息
-[Act] 调用 web_search("AI 市场规模 2024")
+[Reason] 当前步骤是 tavily_search - 收集市场信息
+[Act] 调用 tavily_search("AI 市场规模 2024")
 [Observe] 找到 5 篇相关文章
 
 [Validate] 
@@ -86,11 +80,7 @@ NEVER trust your thinking memory - ALWAYS read from plan_todo.get_plan()
   - 质量评分: 8/10
   → Decision: PASS
 
-[Act] 调用 plan_todo.update_todo({  ← 强制写回
-  "step_index": 0,
-  "status": "completed",
-  "result": "找到5篇行业报告，包含市场规模、增长率数据"
-})
+[Act] 调用 plan(action="update", todo_id="1", status="completed", result="找到5篇行业报告，包含市场规模、增长率数据")  ← 强制写回
 [Observe] Short Memory 已更新，current_step: 1 → 2
 ```
 
@@ -98,17 +88,14 @@ NEVER trust your thinking memory - ALWAYS read from plan_todo.get_plan()
 
 ```
 [Reason] 继续执行
-[Act] 调用 plan_todo.get_plan()  ← 每次都要读取！
-[Observe] 返回:
-  {
-    "context": "[Plan Context]\nGoal: 生成AI市场分析报告\nStatus: executing | Step: 2/4\nCurrent: web_search → 收集技术趋势"
-  }
+[Act] 阅读末尾注入的 “## 当前任务计划”  ← 每次都要读取！
+[Observe] 看到当前步骤是：tavily_search → 收集技术趋势（Step 2/4）
 
-[Reason] 当前步骤是 web_search - 收集技术趋势（Step 1 已完成）
-[Act] 调用 web_search("AI 技术趋势 2024")
+[Reason] 当前步骤是 tavily_search - 收集技术趋势（Step 1 已完成）
+[Act] 调用 tavily_search("AI 技术趋势 2024")
 [Observe] ...
 [Validate] ...
-[Act] 调用 plan_todo.update_todo(...)  ← 写回
+[Act] 调用 plan(action="update", todo_id="2", status="completed", result="...")  ← 写回
 ```
 
 ## 为什么必须这样做？
@@ -119,7 +106,7 @@ NEVER trust your thinking memory - ALWAYS read from plan_todo.get_plan()
 ❌ 错误做法:
 Turn 2:
   [Reason] 我记得 Plan 有 4 个步骤，现在执行第 1 步
-  [Act] 调用 web_search(...)
+  [Act] 调用 tavily_search(...)
   [Observe] ...
 
 问题：
@@ -133,12 +120,12 @@ Turn 2:
 ```
 ✅ 正确做法:
 Turn 2:
-  [Act] 调用 plan_todo.get_plan()  ← 真实状态来源
-  [Observe] context = "Status: executing | Step: 1/4"
+  [Act] 阅读末尾注入的 “## 当前任务计划”  ← 真实状态来源
+  [Observe] 当前状态 = "Step: 1/4"
   [Reason] 根据 Memory 中的状态，当前执行第 1 步
-  [Act] 调用 web_search(...)
+  [Act] 调用 tavily_search(...)
   [Observe] ...
-  [Act] 调用 plan_todo.update_todo(...)  ← 写回最新状态
+  [Act] 调用 plan(action="update", todo_id="1", status="completed", result="...")  ← 写回最新状态
 
 优势：
 - 状态始终同步
@@ -151,8 +138,8 @@ Turn 2:
 
 | Claude Platform | 我们的实现 | 说明 |
 |----------------|----------|------|
-| `memory.view()` | `plan_todo.get_plan()` | 读取当前状态 |
-| `memory.write()` | `plan_todo.update_todo()` | 写入进度 |
+| `memory.view()` | 阅读 “## 当前任务计划”（注入） | 读取当前状态 |
+| `memory.write()` | `plan(action="update")` | 写入进度 |
 | `memory.json` | `plan.json` | 结构化状态数据 |
 | `memory.txt` | `todo.md` | 用户可读的进度 |
 | Context reset resilient | Short Memory 存储 | 状态持久化 |
@@ -164,10 +151,10 @@ Turn 2:
 - 跨会话共享
 - Git 版本控制
 
-### 我们的 plan_todo（Short Memory）
-- 存储在 WorkingMemory（RAM）
-- 会话级别，不持久化
-- 会话结束自动清除
+### 我们的 plan（Short Memory）
+- 存储在 Conversation.metadata.plan（会话级持久化）
+- 每轮会把摘要注入到用户消息末尾供你读取
+- 你必须用 plan(action="update") 写回最新状态
 
 **但核心机制相同：LLM 必须主动读写 Memory，不能依赖 thinking！**
 

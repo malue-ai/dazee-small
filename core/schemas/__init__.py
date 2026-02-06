@@ -7,45 +7,32 @@ Schema 模块 - 定义框架与 Prompt 之间的契约
 - 验证器: 确保 LLM 生成的配置符合规范
 """
 
-from core.schemas.validator import (
-    # 基础配置
+from core.schemas.validator import (  # 基础配置; 组件配置; 其他配置; 核心 Schema; 默认值
+    DEFAULT_AGENT_SCHEMA,
+    AgentSchema,
     ComponentConfig,
-    
-    # 组件配置
+    ContextLimitsConfig,
     IntentAnalyzerConfig,
-    PlanManagerConfig,
-    ToolSelectorConfig,
     MemoryManagerConfig,
     OutputFormatterConfig,
-    
-    # 其他配置
+    PlanManagerConfig,
     SkillConfig,
-    ContextLimitsConfig,
-    
-    # 核心 Schema
-    AgentSchema,
-    
-    # 默认值
-    DEFAULT_AGENT_SCHEMA,
+    ToolSelectorConfig,
 )
 
 __all__ = [
     # 基础
     "ComponentConfig",
-    
     # 组件配置
     "IntentAnalyzerConfig",
-    "PlanManagerConfig", 
+    "PlanManagerConfig",
     "ToolSelectorConfig",
     "MemoryManagerConfig",
     "OutputFormatterConfig",
-    
     # 其他
     "SkillConfig",
     "ContextLimitsConfig",
-    
     # 核心
     "AgentSchema",
     "DEFAULT_AGENT_SCHEMA",
 ]
-

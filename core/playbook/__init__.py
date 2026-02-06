@@ -22,8 +22,8 @@ V8.0 新增
 """
 
 from core.playbook.manager import (
-    PlaybookManager,
     PlaybookEntry,
+    PlaybookManager,
     PlaybookStatus,
     create_playbook_manager,
 )

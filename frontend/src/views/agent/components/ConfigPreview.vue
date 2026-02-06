@@ -56,7 +56,7 @@
       <Info class="w-4 h-4 flex-shrink-0 mt-0.5" />
       <div>
         <p>这是根据您的配置生成的文件预览。</p>
-        <p class="mt-1">创建 Agent 后，这些文件将保存在 <code class="bg-gray-200 px-1 rounded">instances/{{ agentId || 'your_agent' }}/</code> 目录下。</p>
+        <p class="mt-1">创建 Agent 后，这些文件将保存在 <code class="bg-gray-200 px-1 rounded">instances/&lt;auto-generated-uuid&gt;/</code> 目录下。</p>
       </div>
     </div>
   </div>
@@ -74,7 +74,7 @@ interface PreviewData {
 
 const props = defineProps<{
   formData: Record<string, any>
-  agentId?: string
+  agentName?: string
 }>()
 
 const activeTab = ref<'config' | 'prompt'>('config')
@@ -90,7 +90,7 @@ const displayContent = computed(() => {
 })
 
 const fetchPreview = async () => {
-  if (!props.formData.agent_id || !props.formData.prompt) {
+  if (!props.formData.name || !props.formData.prompt) {
     previewData.value = null
     return
   }

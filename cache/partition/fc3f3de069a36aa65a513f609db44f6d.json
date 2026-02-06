@@ -1,0 +1,49 @@
+{
+  "success": true,
+  "mode": "overview",
+  "warning": "✅ 已解析文档全部内容（共 0 个元素）",
+  "message": "文档概要已生成（已解析全部内容）",
+  "data": "文档内容为空",
+  "metadata": {
+    "source": "https://dify-storage-zenflux.s3.amazonaws.com/chat-attachments/user_1768475079723/20260205/3bff0ba1-f399-44d9-a225-0a797dcd1a44_%E4%BC%81%E4%B8%9A%E5%BE%AE%E4%BF%A1%E6%88%AA%E5%9B%BE_367e5338-5111-4084-8efd-765c3c5c5e0f.png?AWSAccessKeyId=AKIAUPUSDVE22NYLK4XE&Signature=OH%2B1zB3BF14Ulezmqd25JA%2FIxW0%3D&Expires=1770340125",
+    "total_pages": null,
+    "parsed_pages": "全部",
+    "parsed_page_count": 0,
+    "file_type": ".tmp",
+    "file_size": 366672,
+    "element_count": 0,
+    "strategy": "fast",
+    "batch_size": 5,
+    "total_batches": 1,
+    "success_batches": 0,
+    "failed_batches": 1,
+    "processing_details": [
+      {
+        "pages": "全部",
+        "status": "failed",
+        "error": "API错误 422: {\"detail\":\"The fast strategy is not available for image files\"}"
+      }
+    ],
+    "from_cache": false,
+    "full_document": true,
+    "processing_time": 9.306335926055908,
+    "actual_file_size_mb": 0.35,
+    "time_estimate": {
+      "estimated_total_seconds": 455,
+      "estimated_download_seconds": 5,
+      "estimated_processing_seconds": 450,
+      "estimated_total_minutes": 7.6,
+      "total_pages": null,
+      "estimated_pages": 3,
+      "batch_count": 1,
+      "strategy": "hi_res",
+      "time_per_page_seconds": 150,
+      "note": "页数未知，根据文件大小估算",
+      "breakdown": {
+        "下载文件": "5秒",
+        "解析文档": "450秒（估计3页 × 150秒/页）",
+        "分批处理": "无需分批"
+      }
+    }
+  }
+}

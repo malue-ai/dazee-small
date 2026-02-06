@@ -389,14 +389,21 @@
                   <select 
                     v-model="form.model"
                     class="w-full pl-4 pr-10 py-2.5 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 focus:border-gray-400 transition-all cursor-pointer appearance-none"
+                    :disabled="loadingModels"
                   >
-                    <option value="claude-sonnet-4-20250514">Claude Sonnet 4 (最新)</option>
-                    <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
-                    <option value="gpt-4o">GPT-4o</option>
-                    <option value="gpt-4o-mini">GPT-4o Mini</option>
-                    <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+                    <option v-if="loadingModels" disabled>加载中...</option>
+                    <option 
+                      v-for="model in availableModels" 
+                      :key="model.model_name" 
+                      :value="model.model_name"
+                    >
+                      {{ model.display_name }}
+                    </option>
                   </select>
-                  <ChevronDown class="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                  <div v-if="loadingModels" class="absolute right-3 top-1/2 -translate-y-1/2">
+                    <Loader2 class="w-4 h-4 animate-spin text-gray-400" />
+                  </div>
+                  <ChevronDown v-else class="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
                 </div>
               </div>
 
@@ -650,6 +657,7 @@
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import api from '@/api/index'
+import { modelApi } from '@/api/models'
 import * as skillsApi from '@/api/skills'
 import { 
   ArrowLeft, 
@@ -727,6 +735,8 @@ const skillActionLoading = ref(false)
 const detailLoading = ref(false)
 const showInstallSkillModal = ref(false)
 const isEditingContent = ref(false)
+const availableModels = ref([])
+const loadingModels = ref(false)
 
 // 标签页配置
 const tabs = [
@@ -758,11 +768,24 @@ const hasChanges = computed(() => {
   return JSON.stringify(form) !== JSON.stringify(originalData.value)
 })
 
+// 加载模型列表
+const fetchModels = async () => {
+  try {
+    loadingModels.value = true
+    const models = await modelApi.listModels()
+    availableModels.value = models
+  } catch (error) {
+    console.error('获取模型列表失败:', error)
+  } finally {
+    loadingModels.value = false
+  }
+}
+
 // 加载 Agent 详情
 const fetchAgent = async () => {
   try {
     loading.value = true
-    
+
     // 并行获取详情和 prompt
     const [detailResponse, promptResponse] = await Promise.all([
       api.get(`/v1/agents/${agentId.value}`),
@@ -1076,6 +1099,15 @@ onMounted(async () => {
   await fetchMcps()
   await fetchInstalledSkills()
   await fetchGlobalSkills()
+  // 预加载模型列表
+  fetchModels()
+})
+
+// 监听 activeTab 变化，懒加载模型列表
+watch(() => activeTab.value, (newTab) => {
+  if (newTab === 'model' && availableModels.value.length === 0) {
+    fetchModels()
+  }
 })
 
 // 监听路由变化

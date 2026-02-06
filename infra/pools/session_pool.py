@@ -390,14 +390,14 @@ class SessionPool:
         
         try:
             # 扫描所有用户的 sessions key
-            # 格式：zf:user:{user_id}:sessions
+            # 格式：user:{user_id}:sessions
             cursor = 0
             user_keys = []
             
             while True:
                 cursor, keys = await client.scan(
                     cursor=cursor,
-                    match="zf:user:*:sessions",
+                    match="user:*:sessions",
                     count=100
                 )
                 user_keys.extend(keys)
@@ -407,10 +407,10 @@ class SessionPool:
             # 对每个用户清理孤立 Session
             for key in user_keys:
                 # 从 key 中提取 user_id
-                # 格式：zf:user:{user_id}:sessions
+                # 格式：user:{user_id}:sessions
                 parts = key.split(":")
-                if len(parts) >= 4:
-                    user_id = parts[2]
+                if len(parts) >= 3:
+                    user_id = parts[1]
                     cleaned = await self.user_pool.remove_stale_sessions(
                         user_id, list(valid_sessions)
                     )

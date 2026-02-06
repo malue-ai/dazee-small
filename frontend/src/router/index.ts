@@ -66,6 +66,22 @@ const routes = [
     name: 'documentation-detail',
     component: () => import('@/views/docs/DocsView.vue'),
     meta: { layout: 'dashboard' }
+  },
+
+  // ==================== 实时语音 ====================
+  {
+    path: '/realtime',
+    name: 'realtime',
+    component: () => import('@/views/realtime/RealtimeView.vue'),
+    meta: { layout: 'none' }  // 独立布局
+  },
+
+  // ==================== Node Agent 客户端 ====================
+  {
+    path: '/node',
+    name: 'node-agent',
+    component: () => import('@/views/node/NodeAgentView.vue'),
+    meta: { layout: 'none' }  // 独立布局，用于 Tauri 客户端
   }
 ]
 

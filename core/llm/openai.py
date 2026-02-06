@@ -1,385 +1,622 @@
 """
-OpenAI 兼容 LLM 服务实现
+OpenAI LLM 服务实现
 
-支持 OpenAI / OpenAI-Compatible 接口（用于 Qwen/DeepSeek 等兼容端点）
+基于 OpenAI SDK 实现，支持 OpenAI 官方 API 及兼容接口。
 
-🆕 V7.3: 支持网络重试机制（指数退避策略）
+支持的功能：
+- 基础对话（流式/非流式）
+- Function Calling（工具调用）
+- 结构化输出（response_format）
 
-参考：
+参考文档：
 - https://platform.openai.com/docs/api-reference/chat
 """
 
-import asyncio
-from typing import Dict, Any, Optional, List, Union, AsyncIterator, Callable
 import json
 import os
-import time
+from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Union
 
 import httpx
+from openai import AsyncOpenAI
 
-from logger import get_logger
 from infra.resilience import with_retry
+from logger import get_logger
+
+from .adaptor import OpenAIAdaptor
 from .base import (
     BaseLLMService,
     LLMConfig,
     LLMResponse,
     Message,
-    LLMProvider,
-    ToolType
+    ToolType,
 )
-from .adaptor import OpenAIAdaptor
 
 logger = get_logger("llm.openai")
+
+# 详细日志开关
+LLM_DEBUG_VERBOSE = os.getenv("LLM_DEBUG_VERBOSE", "").lower() in ("1", "true", "yes")
+
+
+# ============================================================
+# OpenAI LLM 服务
+# ============================================================
 
 
 class OpenAILLMService(BaseLLMService):
     """
-    OpenAI 兼容 LLM 服务
-    
-    支持：
-    - Chat Completions
-    - Function Calling
-    - Streaming
+    OpenAI LLM 服务实现
+
+    支持 OpenAI 官方 API 及兼容接口（如 DeepSeek）。
+
+    使用示例：
+    ```python
+    config = LLMConfig(
+        provider=LLMProvider.OPENAI,
+        model="gpt-4o",
+        api_key=os.getenv("OPENAI_API_KEY"),
+    )
+    llm = OpenAILLMService(config)
+
+    response = await llm.create_message_async(
+        messages=[Message(role="user", content="你好")],
+        system="你是一个有帮助的助手"
+    )
+    ```
     """
-    
+
     def __init__(self, config: LLMConfig):
         """
         初始化 OpenAI 服务
-        
+
         Args:
             config: LLM 配置
         """
         self.config = config
-        self._adaptor = OpenAIAdaptor()
-        self._custom_tools: List[Dict[str, Any]] = []
-        
-        # 兼容端点（默认 OpenAI，可通过 compat/provider 调整）
-        base_url = config.base_url or self._get_default_base_url()
-        self.base_url = self._normalize_base_url(base_url)
-        
-        # HTTP 客户端
-        timeout = getattr(config, "timeout", 120.0)
-        self._client = httpx.AsyncClient(timeout=timeout)
 
-    def _get_default_base_url(self) -> str:
-        """
-        获取默认 base_url（支持 OpenAI-Compatible）
-        """
-        compat = (self.config.compat or "").lower()
-        provider = getattr(self.config, "provider", None)
-        
-        if compat == "qwen" or provider == LLMProvider.QWEN:
-            return os.getenv("QWEN_BASE_URL", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1")
-        
-        if compat == "deepseek":
-            return os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
-        
-        return os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
-    
-    def _normalize_base_url(self, base_url: str) -> str:
-        """
-        规范化 base_url，确保以 /v1 结尾
-        
-        Args:
-            base_url: 原始地址
-            
-        Returns:
-            规范化地址
-        """
-        if not base_url:
-            return "https://api.openai.com/v1"
-        base_url = base_url.rstrip("/")
-        if not base_url.endswith("/v1"):
-            base_url = f"{base_url}/v1"
-        return base_url
-    
-    def _build_headers(self) -> Dict[str, str]:
-        """
-        构建请求头
-        
-        Returns:
-            请求头
-        """
-        api_key = self.config.api_key or ""
-        headers = {
-            "Content-Type": "application/json"
-        }
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
-        return headers
-    
-    def _filter_tools(self, tools: Optional[List[Union[ToolType, str, Dict]]]) -> List[Dict[str, Any]]:
-        """
-        过滤工具列表，仅保留 dict 类型
-        
-        Args:
-            tools: 原始工具列表
-            
-        Returns:
-            过滤后的工具列表
-        """
-        if not tools:
-            return []
-        return [tool for tool in tools if isinstance(tool, dict)]
-    
+        # 消息适配器
+        self._adaptor = OpenAIAdaptor()
+
+        # API Key
+        api_key = self.config.api_key or os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError(
+                "OpenAI API Key 未设置。请设置 OPENAI_API_KEY 环境变量或传入 api_key 参数"
+            )
+
+        # API 端点
+        base_url = self.config.base_url or "https://api.openai.com/v1"
+
+        # 初始化 OpenAI 客户端
+        timeout = getattr(self.config, "timeout", 120.0)
+        max_retries = getattr(self.config, "max_retries", 3)
+
+        self.client = AsyncOpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            timeout=timeout,
+            max_retries=max_retries,
+        )
+
+        # 自定义工具存储
+        self._custom_tools: List[Dict[str, Any]] = []
+
+        logger.info(f"✅ OpenAI 服务初始化成功: model={self.config.model}, base_url={base_url}")
+
+    # ============================================================
+    # 自定义工具管理
+    # ============================================================
+
     def add_custom_tool(self, name: str, description: str, input_schema: Dict[str, Any]) -> None:
         """
-        注册自定义工具（OpenAI 兼容）
-        
+        添加自定义工具
+
         Args:
             name: 工具名称
             description: 工具描述
-            input_schema: 输入参数 Schema
+            input_schema: 输入参数 schema
         """
-        self._custom_tools.append({
-            "name": name,
-            "description": description,
-            "input_schema": input_schema
-        })
-    
+        for i, tool in enumerate(self._custom_tools):
+            if tool["name"] == name:
+                self._custom_tools[i] = {
+                    "name": name,
+                    "description": description,
+                    "input_schema": input_schema,
+                }
+                logger.debug(f"更新自定义工具: {name}")
+                return
+
+        self._custom_tools.append(
+            {"name": name, "description": description, "input_schema": input_schema}
+        )
+        logger.debug(f"注册自定义工具: {name}")
+
+    def remove_custom_tool(self, name: str) -> bool:
+        """移除自定义工具"""
+        for i, tool in enumerate(self._custom_tools):
+            if tool["name"] == name:
+                self._custom_tools.pop(i)
+                logger.debug(f"移除自定义工具: {name}")
+                return True
+        return False
+
+    def get_custom_tools(self) -> List[Dict[str, Any]]:
+        """获取所有自定义工具"""
+        return self._custom_tools.copy()
+
+    def clear_custom_tools(self) -> None:
+        """清空所有自定义工具"""
+        self._custom_tools.clear()
+        logger.debug("清空所有自定义工具")
+
+    def _format_tools(self, tools: List[Union[ToolType, str, Dict]]) -> List[Dict[str, Any]]:
+        """
+        格式化工具列表为 OpenAI 格式
+        """
+        formatted = []
+
+        for tool in tools:
+            if isinstance(tool, ToolType):
+                # OpenAI 没有原生工具，跳过
+                logger.warning(f"OpenAI 不支持 ToolType 枚举: {tool}，已跳过")
+                continue
+
+            elif isinstance(tool, str):
+                # 从自定义工具中查找
+                for custom_tool in self._custom_tools:
+                    if custom_tool.get("name") == tool:
+                        formatted.append(self._convert_tool_to_openai_format(custom_tool))
+                        break
+                else:
+                    logger.warning(f"未找到工具: {tool}")
+
+            elif isinstance(tool, dict):
+                formatted.append(self._convert_tool_to_openai_format(tool))
+
+        return formatted
+
+    def _convert_tool_to_openai_format(self, tool: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        转换工具为 OpenAI Function Calling 格式
+        """
+        if tool.get("type") == "function":
+            return tool
+
+        return {
+            "type": "function",
+            "function": {
+                "name": tool.get("name", ""),
+                "description": tool.get("description", ""),
+                "parameters": tool.get("input_schema", {}),
+            },
+        }
+
+    # ============================================================
+    # 核心 API 方法
+    # ============================================================
+
     @with_retry(
         max_retries=3,
         base_delay=1.0,
         retryable_errors=(
-            # OpenAI 网络相关异常
-            ConnectionError,
-            TimeoutError,
-            asyncio.TimeoutError,
-            # httpx 底层异常
             httpx.RemoteProtocolError,
             httpx.ConnectError,
             httpx.TimeoutException,
-        )
+        ),
     )
     async def create_message_async(
         self,
         messages: List[Message],
-        system: Optional[str] = None,
+        system: Optional[Union[str, List[Dict[str, Any]]]] = None,
         tools: Optional[List[Union[ToolType, str, Dict]]] = None,
-        **kwargs
+        is_probe: bool = False,
+        **kwargs,
     ) -> LLMResponse:
         """
         创建消息（异步）
-        
-        🆕 V7.3: 自动网络重试（指数退避策略）
-        - 最大重试 3 次
-        - 基础延迟 1 秒（指数增长：1s → 2s → 4s）
-        - 自动处理：连接错误、超时、限流（429）
-        
+
         Args:
             messages: 消息列表
             system: 系统提示词
             tools: 工具列表
+            is_probe: 是否为探测请求
             **kwargs: 其他参数
-            
+
         Returns:
-            LLMResponse
+            LLMResponse 响应对象
         """
-        payload = self._adaptor.convert_messages_to_provider(messages, system)
-        payload["model"] = self.config.model
-        payload["max_tokens"] = kwargs.get("max_tokens", self.config.max_tokens)
-        payload["temperature"] = kwargs.get("temperature", self.config.temperature)
-        top_p = kwargs.get("top_p", getattr(self.config, "top_p", None))
-        if top_p is not None:
-            payload["top_p"] = top_p
-        frequency_penalty = kwargs.get("frequency_penalty", getattr(self.config, "frequency_penalty", None))
-        if frequency_penalty is not None:
-            payload["frequency_penalty"] = frequency_penalty
-        presence_penalty = kwargs.get("presence_penalty", getattr(self.config, "presence_penalty", None))
-        if presence_penalty is not None:
-            payload["presence_penalty"] = presence_penalty
-        tool_choice = kwargs.get("tool_choice", getattr(self.config, "tool_choice", None))
-        if tool_choice is not None:
-            payload["tool_choice"] = tool_choice
-        parallel_tool_calls = kwargs.get("parallel_tool_calls", getattr(self.config, "parallel_tool_calls", None))
-        if parallel_tool_calls is not None:
-            payload["parallel_tool_calls"] = parallel_tool_calls
-        
-        merged_tools = self._filter_tools(tools) + self._custom_tools
-        if merged_tools:
-            payload["tools"] = self._adaptor.convert_tools_to_provider(merged_tools)
-        
-        # 透传部分参数
-        for key in ["tool_choice", "top_p", "frequency_penalty", "presence_penalty"]:
-            if key in kwargs:
-                payload[key] = kwargs[key]
-        
-        url = f"{self.base_url}/chat/completions"
-        headers = self._build_headers()
-        
-        response = await self._client.post(url, headers=headers, json=payload)
-        if response.status_code >= 400:
-            raise RuntimeError(f"OpenAI 调用失败: {response.status_code} {response.text}")
-        
-        return self._adaptor.convert_response_to_claude(response.json())
-    
+        # 使用 adaptor 转换消息
+        converted = self._adaptor.convert_messages_to_provider(messages)
+        openai_messages = converted["messages"]
+
+        # 构建请求参数
+        request_params = {
+            "model": self.config.model,
+            "messages": openai_messages,
+            "temperature": kwargs.get("temperature", self.config.temperature),
+            "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
+            "stream": False,
+        }
+
+        # System prompt
+        if system:
+            if isinstance(system, list):
+                # 列表格式，提取文本
+                system_text = "\n".join(
+                    block.get("text", "") for block in system if block.get("type") == "text"
+                )
+                request_params["messages"].insert(0, {"role": "system", "content": system_text})
+            elif isinstance(system, dict):
+                # dict 格式，提取 text
+                system_text = (
+                    system.get("text", "") if system.get("type") == "text" else str(system)
+                )
+                request_params["messages"].insert(0, {"role": "system", "content": system_text})
+            else:
+                # 字符串格式
+                request_params["messages"].insert(0, {"role": "system", "content": str(system)})
+
+        # Tools
+        all_tools = []
+        tool_names_seen = set()
+
+        if tools:
+            for tool in self._format_tools(tools):
+                tool_name = tool.get("function", {}).get("name", "")
+                if tool_name and tool_name not in tool_names_seen:
+                    all_tools.append(tool)
+                    tool_names_seen.add(tool_name)
+
+        for custom_tool in self._custom_tools:
+            tool_name = custom_tool.get("name", "")
+            if tool_name and tool_name not in tool_names_seen:
+                all_tools.append(self._convert_tool_to_openai_format(custom_tool))
+                tool_names_seen.add(tool_name)
+
+        if all_tools:
+            request_params["tools"] = all_tools
+            request_params["tool_choice"] = kwargs.get("tool_choice", "auto")
+
+        # 调试日志
+        logger.debug(f"📤 OpenAI 请求: model={self.config.model}, messages={len(openai_messages)}")
+
+        if LLM_DEBUG_VERBOSE:
+            logger.info("=" * 80)
+            logger.info("🔍 [DEBUG-ASYNC] 完整 request_params:")
+            logger.info(f"   model: {request_params.get('model')}")
+            logger.info(f"   messages: {len(request_params.get('messages', []))}")
+            logger.info("=" * 80)
+
+        # API 调用
+        try:
+            response = await self.client.chat.completions.create(**request_params)
+        except Exception as e:
+            if not is_probe:
+                logger.error(f"OpenAI API 调用失败: {e}")
+            raise
+
+        # 转换响应
+        return self._parse_response(response)
+
     async def create_message_stream(
         self,
         messages: List[Message],
-        system: Optional[str] = None,
+        system: Optional[Union[str, List[Dict[str, Any]]]] = None,
         tools: Optional[List[Union[ToolType, str, Dict]]] = None,
         on_thinking: Optional[Callable[[str], None]] = None,
         on_content: Optional[Callable[[str], None]] = None,
         on_tool_call: Optional[Callable[[Dict], None]] = None,
-        **kwargs
+        **kwargs,
     ) -> AsyncIterator[LLMResponse]:
         """
         创建消息（流式）
-        
+
         Args:
             messages: 消息列表
             system: 系统提示词
             tools: 工具列表
-            on_thinking: thinking 回调（不支持）
+            on_thinking: thinking 回调（OpenAI 不支持）
             on_content: content 回调
             on_tool_call: tool_call 回调
             **kwargs: 其他参数
-            
+
         Yields:
             LLMResponse 片段
         """
-        payload = self._adaptor.convert_messages_to_provider(messages, system)
-        payload["model"] = self.config.model
-        payload["max_tokens"] = kwargs.get("max_tokens", self.config.max_tokens)
-        payload["temperature"] = kwargs.get("temperature", self.config.temperature)
-        payload["stream"] = True
-        
-        merged_tools = self._filter_tools(tools) + self._custom_tools
-        if merged_tools:
-            payload["tools"] = self._adaptor.convert_tools_to_provider(merged_tools)
-        
-        url = f"{self.base_url}/chat/completions"
-        headers = self._build_headers()
-        
+        # 使用 adaptor 转换消息
+        converted = self._adaptor.convert_messages_to_provider(messages)
+        openai_messages = converted["messages"]
+
+        # 构建请求参数
+        request_params = {
+            "model": self.config.model,
+            "messages": openai_messages,
+            "temperature": kwargs.get("temperature", self.config.temperature),
+            "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+
+        # System prompt
+        if system:
+            if isinstance(system, list):
+                system_text = "\n".join(
+                    block.get("text", "") for block in system if block.get("type") == "text"
+                )
+                request_params["messages"].insert(0, {"role": "system", "content": system_text})
+            elif isinstance(system, dict):
+                # dict 格式，提取 text
+                system_text = (
+                    system.get("text", "") if system.get("type") == "text" else str(system)
+                )
+                request_params["messages"].insert(0, {"role": "system", "content": system_text})
+            else:
+                # 字符串格式
+                request_params["messages"].insert(0, {"role": "system", "content": str(system)})
+
+        # Tools
+        all_tools = []
+        tool_names_seen = set()
+
+        if tools:
+            for tool in self._format_tools(tools):
+                tool_name = tool.get("function", {}).get("name", "")
+                if tool_name and tool_name not in tool_names_seen:
+                    all_tools.append(tool)
+                    tool_names_seen.add(tool_name)
+
+        for custom_tool in self._custom_tools:
+            tool_name = custom_tool.get("name", "")
+            if tool_name and tool_name not in tool_names_seen:
+                all_tools.append(self._convert_tool_to_openai_format(custom_tool))
+                tool_names_seen.add(tool_name)
+
+        if all_tools:
+            request_params["tools"] = all_tools
+            request_params["tool_choice"] = kwargs.get("tool_choice", "auto")
+
+        logger.info(
+            f"📤 OpenAI 流式请求: model={self.config.model}, messages={len(openai_messages)}"
+        )
+
+        # 累积变量
         accumulated_content = ""
-        tool_call_buffers: Dict[int, Dict[str, Any]] = {}
-        tool_call_started: set = set()
-        finish_reason = None
-        
-        async with self._client.stream("POST", url, headers=headers, json=payload) as response:
-            if response.status_code >= 400:
-                text = await response.aread()
-                raise RuntimeError(f"OpenAI 流式调用失败: {response.status_code} {text.decode('utf-8')}")
-            
-            async for line in response.aiter_lines():
-                if not line or not line.startswith("data:"):
+        tool_calls = []
+        stop_reason = None
+        usage = {}
+
+        try:
+            stream = await self.client.chat.completions.create(**request_params)
+
+            async for chunk in stream:
+                if not chunk.choices:
+                    # 最后一个 chunk（包含 usage）
+                    if chunk.usage:
+                        usage = {
+                            "input_tokens": chunk.usage.prompt_tokens,
+                            "output_tokens": chunk.usage.completion_tokens,
+                        }
+                        logger.info(
+                            f"📊 Token 使用: input={usage['input_tokens']:,}, "
+                            f"output={usage['output_tokens']:,}"
+                        )
                     continue
-                
-                data = line.replace("data:", "", 1).strip()
-                if data == "[DONE]":
-                    break
-                
-                try:
-                    chunk = json.loads(data)
-                except json.JSONDecodeError:
-                    continue
-                
-                choice = (chunk.get("choices") or [{}])[0]
-                delta = choice.get("delta", {})
-                finish_reason = choice.get("finish_reason") or finish_reason
-                
-                # 内容增量
-                if "content" in delta and delta["content"]:
-                    text = delta["content"]
-                    accumulated_content += text
+
+                choice = chunk.choices[0]
+                delta = choice.delta
+
+                # 处理普通内容
+                if delta.content:
+                    accumulated_content += delta.content
                     if on_content:
-                        on_content(text)
-                    yield LLMResponse(content=text, is_stream=True)
-                
-                # 工具调用增量
-                tool_calls = delta.get("tool_calls") or []
-                for tc in tool_calls:
-                    index = tc.get("index", 0)
-                    buffer = tool_call_buffers.setdefault(index, {
-                        "id": tc.get("id", ""),
-                        "name": "",
-                        "arguments": ""
-                    })
-                    
-                    if tc.get("id"):
-                        buffer["id"] = tc.get("id")
-                    
-                    function = tc.get("function") or {}
-                    if function.get("name"):
-                        buffer["name"] = function.get("name")
-                    
-                    if buffer["id"] and buffer["name"] and buffer["id"] not in tool_call_started:
-                        tool_call_started.add(buffer["id"])
+                        on_content(delta.content)
+                    yield LLMResponse(
+                        content=delta.content, model=self.config.model, is_stream=True
+                    )
+
+                # 处理工具调用
+                if delta.tool_calls:
+                    for tool_call in delta.tool_calls:
+                        index = tool_call.index
+
+                        # 确保 tool_calls 列表足够长
+                        while len(tool_calls) <= index:
+                            tool_calls.append(
+                                {"id": "", "name": "", "arguments": "", "type": "function"}
+                            )
+
+                        # 累积字段
+                        if tool_call.id:
+                            tool_calls[index]["id"] = tool_call.id
+
+                            # 🆕 Tool Use Start 事件（流式）
+                            yield LLMResponse(
+                                content="",
+                                model=self.config.model,
+                                is_stream=True,
+                                tool_use_start={
+                                    "type": "tool_use",
+                                    "id": tool_call.id,
+                                    "name": tool_call.function.name if tool_call.function else "",
+                                },
+                            )
+
+                        if tool_call.function:
+                            if tool_call.function.name:
+                                tool_calls[index]["name"] = tool_call.function.name
+                            if tool_call.function.arguments:
+                                tool_calls[index]["arguments"] += tool_call.function.arguments
+
+                                # 🆕 Input Delta 事件（流式）
+                                yield LLMResponse(
+                                    content="",
+                                    model=self.config.model,
+                                    is_stream=True,
+                                    input_delta=tool_call.function.arguments,
+                                )
+
+                        # 回调
                         if on_tool_call:
-                            on_tool_call({"id": buffer["id"], "name": buffer["name"]})
-                        yield LLMResponse(
-                            content="",
-                            is_stream=True,
-                            tool_use_start={
-                                "id": buffer["id"],
-                                "name": buffer["name"],
-                                "type": "tool_use"
+                            on_tool_call(
+                                {
+                                    "id": tool_call.id,
+                                    "name": tool_call.function.name if tool_call.function else "",
+                                    "arguments": (
+                                        tool_call.function.arguments if tool_call.function else ""
+                                    ),
+                                }
+                            )
+
+                # 停止原因
+                if choice.finish_reason:
+                    stop_reason = choice.finish_reason
+
+            # 处理累积的工具调用
+            formatted_tool_calls = []
+            for tc in tool_calls:
+                if tc.get("name"):
+                    try:
+                        input_dict = (
+                            json.loads(tc["arguments"], strict=False) if tc["arguments"] else {}
+                        )
+                        formatted_tool_calls.append(
+                            {
+                                "id": tc["id"],
+                                "name": tc["name"],
+                                "input": input_dict,
+                                "type": "tool_use",
                             }
                         )
-                    
-                    if function.get("arguments"):
-                        buffer["arguments"] += function.get("arguments")
-                        yield LLMResponse(
-                            content="",
-                            is_stream=True,
-                            input_delta=function.get("arguments")
-                        )
-        
-        # 构建最终响应
-        tool_calls_payload = []
-        raw_content = []
-        
-        if accumulated_content:
-            raw_content.append({"type": "text", "text": accumulated_content})
-        
-        for buffer in tool_call_buffers.values():
-            tool_input = {}
-            if buffer.get("arguments"):
-                try:
-                    tool_input = json.loads(buffer["arguments"])
-                except json.JSONDecodeError:
-                    tool_input = {}
-            
-            tool_calls_payload.append({
-                "id": buffer.get("id", f"tool_{int(time.time())}"),
-                "name": buffer.get("name", ""),
-                "input": tool_input,
-                "type": "tool_use"
-            })
-            
-            raw_content.append({
-                "type": "tool_use",
-                "id": tool_calls_payload[-1]["id"],
-                "name": tool_calls_payload[-1]["name"],
-                "input": tool_input
-            })
-        
-        stop_reason_map = {
-            "stop": "end_turn",
-            "tool_calls": "tool_use",
-            "length": "max_tokens"
-        }
-        stop_reason = stop_reason_map.get(finish_reason, "end_turn")
-        
-        yield LLMResponse(
-            content=accumulated_content,
-            tool_calls=tool_calls_payload or None,
-            stop_reason=stop_reason,
-            raw_content=raw_content or None,
-            is_stream=False
-        )
-    
+                    except json.JSONDecodeError as e:
+                        logger.error(f"❌ 工具调用参数解析失败: {e}")
+
+            # 构建 raw_content
+            raw_content = []
+            if accumulated_content:
+                raw_content.append({"type": "text", "text": accumulated_content})
+            for tc in formatted_tool_calls:
+                raw_content.append(
+                    {"type": "tool_use", "id": tc["id"], "name": tc["name"], "input": tc["input"]}
+                )
+
+            logger.info(f"📥 OpenAI 响应: stop_reason={stop_reason or 'stop'}")
+
+            # 转换 stop_reason
+            if stop_reason == "tool_calls":
+                stop_reason = "tool_use"
+
+            # 返回最终响应
+            yield LLMResponse(
+                content=accumulated_content,
+                tool_calls=formatted_tool_calls if formatted_tool_calls else None,
+                stop_reason=stop_reason or "stop",
+                usage=usage if usage else None,
+                model=self.config.model,
+                raw_content=raw_content,
+                is_stream=False,
+            )
+
+        except Exception as e:
+            logger.error(f"OpenAI 流式传输错误: {e}")
+            raise
+
     def count_tokens(self, text: str) -> int:
         """
-        计算 token 数量（粗略估算）
-        
+        计算 token 数量
+
+        TODO: OpenAI 可以使用 tiktoken 精确计算（已在父类实现）
+        - tiktoken 是 OpenAI 官方的 tokenizer
+        - cl100k_base 适用于 GPT-4 系列
+
+        当前使用父类的 tiktoken 实现。
+
         Args:
-            text: 文本内容
-            
+            text: 要计算的文本
+
         Returns:
             token 数量
         """
-        if not text:
-            return 0
-        return max(1, len(text) // 4)
+        # OpenAI 直接使用 tiktoken（父类实现）即可
+        return super().count_tokens(text)
 
+    def _parse_response(self, response) -> LLMResponse:
+        """
+        解析 OpenAI 响应为统一格式
+        """
+        choice = response.choices[0]
+        message = choice.message
+
+        content_text = message.content or ""
+
+        # 提取工具调用
+        tool_calls = []
+        if message.tool_calls:
+            for tc in message.tool_calls:
+                input_dict = json.loads(tc.function.arguments) if tc.function.arguments else {}
+                tool_calls.append(
+                    {"id": tc.id, "name": tc.function.name, "input": input_dict, "type": "tool_use"}
+                )
+
+        # Usage 信息
+        usage = {}
+        if response.usage:
+            usage = {
+                "input_tokens": response.usage.prompt_tokens,
+                "output_tokens": response.usage.completion_tokens,
+            }
+            logger.info(
+                f"📊 Token 使用: input={usage['input_tokens']:,}, "
+                f"output={usage['output_tokens']:,}"
+            )
+
+        # 转换 stop_reason
+        stop_reason = choice.finish_reason
+        if stop_reason == "tool_calls":
+            stop_reason = "tool_use"
+
+        # 构建 raw_content
+        raw_content = []
+        if content_text:
+            raw_content.append({"type": "text", "text": content_text})
+        for tc in tool_calls:
+            raw_content.append(
+                {"type": "tool_use", "id": tc["id"], "name": tc["name"], "input": tc["input"]}
+            )
+
+        return LLMResponse(
+            content=content_text,
+            thinking=None,  # OpenAI 不支持 thinking
+            tool_calls=tool_calls if tool_calls else None,
+            stop_reason=stop_reason,
+            usage=usage,
+            model=self.config.model,
+            raw_content=raw_content,
+        )
+
+
+# ============================================================
+# 注册到 LLMRegistry
+# ============================================================
+
+
+def _register_openai():
+    """延迟注册 OpenAI Provider（避免循环导入）"""
+    from .registry import LLMRegistry
+
+    LLMRegistry.register(
+        name="openai",
+        service_class=OpenAILLMService,
+        adaptor_class=OpenAIAdaptor,
+        default_model="gpt-4o",
+        api_key_env="OPENAI_API_KEY",
+        display_name="OpenAI",
+        description="OpenAI GPT 系列模型",
+        supported_features=[
+            "streaming",
+            "tool_calling",
+            "function_calling",
+        ],
+    )
+
+
+# 模块加载时注册
+_register_openai()

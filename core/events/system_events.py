@@ -16,19 +16,20 @@ System 级事件管理 - SystemEventManager
 注意：序号（seq）由 EventBroadcaster 层统一生成
 """
 
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
+
 from core.events.base import BaseEventManager
 
 
 class SystemEventManager(BaseEventManager):
     """
     System 级事件管理器
-    
+
     负责系统相关的事件
-    
+
     注意：推荐通过 EventBroadcaster 调用，由其统一生成 seq
     """
-    
+
     async def emit_error(
         self,
         session_id: str,
@@ -39,11 +40,11 @@ class SystemEventManager(BaseEventManager):
         seq: Optional[int] = None,
         event_uuid: Optional[str] = None,
         output_format: str = "zenflux",
-        adapter: Any = None
+        adapter: Any = None,
     ) -> Optional[Dict[str, Any]]:
         """
         发送 error 事件
-        
+
         Args:
             session_id: Session ID
             conversation_id: 对话 ID（必填）
@@ -54,31 +55,28 @@ class SystemEventManager(BaseEventManager):
             event_uuid: 事件 UUID（可选）
             output_format: 输出格式（zenflux/zeno），默认 zenflux
             adapter: 格式转换适配器（可选）
-            
+
         Returns:
             事件对象，如果被过滤则返回 None
         """
-        error_data = {
-            "type": error_type,
-            "message": error_message
-        }
-        
+        error_data = {"type": error_type, "message": error_message}
+
         # 添加额外的详情
         if details:
             error_data.update(details)
-        
-        event = self._create_event(
-            event_type="error",
-            data={"error": error_data}
-        )
-        
+
+        event = self._create_event(event_type="error", data={"error": error_data})
+
         return await self._send_event(
-            session_id, event,
+            session_id,
+            event,
             conversation_id=conversation_id,
-            seq=seq, event_uuid=event_uuid,
-            output_format=output_format, adapter=adapter
+            seq=seq,
+            event_uuid=event_uuid,
+            output_format=output_format,
+            adapter=adapter,
         )
-    
+
     async def emit_done(
         self,
         session_id: str,
@@ -86,11 +84,11 @@ class SystemEventManager(BaseEventManager):
         seq: Optional[int] = None,
         event_uuid: Optional[str] = None,
         output_format: str = "zenflux",
-        adapter: Any = None
+        adapter: Any = None,
     ) -> Optional[Dict[str, Any]]:
         """
         发送 done 事件（流结束）
-        
+
         Args:
             session_id: Session ID
             conversation_id: 对话 ID（必填）
@@ -98,22 +96,22 @@ class SystemEventManager(BaseEventManager):
             event_uuid: 事件 UUID（可选）
             output_format: 输出格式（zenflux/zeno），默认 zenflux
             adapter: 格式转换适配器（可选）
-            
+
         Returns:
             事件对象，如果被过滤则返回 None
         """
-        event = self._create_event(
-            event_type="done",
-            data={"type": "done"}
-        )
-        
+        event = self._create_event(event_type="done", data={"type": "done"})
+
         return await self._send_event(
-            session_id, event,
+            session_id,
+            event,
             conversation_id=conversation_id,
-            seq=seq, event_uuid=event_uuid,
-            output_format=output_format, adapter=adapter
+            seq=seq,
+            event_uuid=event_uuid,
+            output_format=output_format,
+            adapter=adapter,
         )
-    
+
     async def emit_custom(
         self,
         session_id: str,
@@ -123,11 +121,11 @@ class SystemEventManager(BaseEventManager):
         seq: Optional[int] = None,
         event_uuid: Optional[str] = None,
         output_format: str = "zenflux",
-        adapter: Any = None
+        adapter: Any = None,
     ) -> Optional[Dict[str, Any]]:
         """
         发送自定义事件
-        
+
         Args:
             session_id: Session ID
             conversation_id: 对话 ID（必填）
@@ -137,19 +135,18 @@ class SystemEventManager(BaseEventManager):
             event_uuid: 事件 UUID（可选）
             output_format: 输出格式（zenflux/zeno），默认 zenflux
             adapter: 格式转换适配器（可选）
-            
+
         Returns:
             事件对象，如果被过滤则返回 None
         """
-        event = self._create_event(
-            event_type=event_type,
-            data=event_data
-        )
-        
-        return await self._send_event(
-            session_id, event,
-            conversation_id=conversation_id,
-            seq=seq, event_uuid=event_uuid,
-            output_format=output_format, adapter=adapter
-        )
+        event = self._create_event(event_type=event_type, data=event_data)
 
+        return await self._send_event(
+            session_id,
+            event,
+            conversation_id=conversation_id,
+            seq=seq,
+            event_uuid=event_uuid,
+            output_format=output_format,
+            adapter=adapter,
+        )

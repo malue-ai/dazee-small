@@ -17,9 +17,9 @@ Agent 直接传入已生成的线索列表，工具负责验证和格式化。
 - upload: 需要用户上传文件
 """
 
-from typing import Dict, Any, List
+from typing import Any, Dict, List
 
-from core.tool.base import BaseTool, ToolContext
+from core.tool.types import BaseTool, ToolContext
 from logger import get_logger
 
 logger = get_logger(__name__)
@@ -28,20 +28,20 @@ logger = get_logger(__name__)
 class ClueGenerationTool(BaseTool):
     """
     线索生成工具
-    
+
     Agent 直接传入已生成的线索列表，工具负责验证和格式化。
     不再内部调用 LLM，减少延迟和成本。
-    
+
     注意：clue delta 由 ZenOAdapter.enhance_tool_result 统一生成和发送，
     工具只负责返回结果数据。
     """
-    
+
     name = "clue_generation"
-    
+
     async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
         """
         执行线索格式化和验证
-        
+
         Args:
             params: 工具输入参数
                 - tasks: Agent 生成的线索列表，每个线索包含：
@@ -50,88 +50,70 @@ class ClueGenerationTool(BaseTool):
                     - id: 线索 ID（可选，自动生成）
                     - payload: 附加数据（可选）
             context: 工具执行上下文
-            
+
         Returns:
             验证后的线索数据
         """
         tasks = params.get("tasks", [])
-        
+
         if not tasks:
             logger.info("○ 未提供线索")
-            return {
-                "success": True,
-                "message": "无线索",
-                "tasks": []
-            }
-        
+            return {"success": True, "message": "无线索", "tasks": []}
+
         if not isinstance(tasks, list):
-            return {
-                "success": False,
-                "error": "tasks 必须是列表"
-            }
-        
+            return {"success": False, "error": "tasks 必须是列表"}
+
         logger.info(f"🔍 验证线索: session_id={context.session_id}, count={len(tasks)}")
-        
+
         try:
             # 验证和格式化线索
             valid_tasks = self._validate_tasks(tasks)
-            
+
             if not valid_tasks:
                 logger.info("○ 无有效线索")
-                return {
-                    "success": True,
-                    "message": "无有效线索",
-                    "tasks": []
-                }
-            
+                return {"success": True, "message": "无有效线索", "tasks": []}
+
             logger.info(f"✅ 线索验证完成: {len(valid_tasks)} 个")
-            
+
             # 注意：clue delta 由 ZenOAdapter.enhance_tool_result 统一处理
             # 不在工具内部直接发送，避免重复
-            
+
             return {
                 "success": True,
                 "message": f"✅ 成功将 {len(valid_tasks)} 个线索发送到前端。",
                 "tasks": valid_tasks,
-                "completed": True  # 明确标记任务完成
+                "completed": True,  # 明确标记任务完成
             }
-        
+
         except Exception as e:
             logger.warning(f"⚠️ 验证线索失败: {str(e)}", exc_info=True)
-            return {
-                "success": False,
-                "error": f"验证线索失败: {str(e)}"
-            }
-    
+            return {"success": False, "error": f"验证线索失败: {str(e)}"}
+
     def _validate_tasks(self, tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """验证和清理 tasks"""
         valid_tasks = []
         valid_acts = {"reply", "forward", "confirm", "upload"}
-        
+
         for i, task in enumerate(tasks[:4]):  # 最多 4 个
             if not isinstance(task, dict):
                 continue
-            
+
             text = task.get("text", "").strip()
             act = task.get("act", "reply")
-            
+
             if not text:
                 continue
-            
+
             # 验证 act 类型
             if act not in valid_acts:
                 act = "reply"  # 默认回退
-            
+
             # 截断过长的文本
             if len(text) > 30:
                 text = text[:27] + "..."
-            
-            valid_task = {
-                "id": task.get("id") or f"clue_{i + 1}",
-                "text": text,
-                "act": act
-            }
-            
+
+            valid_task = {"id": task.get("id") or f"clue_{i + 1}", "text": text, "act": act}
+
             # 添加可选字段
             if task.get("payload"):
                 valid_task["payload"] = task["payload"]
@@ -139,9 +121,9 @@ class ClueGenerationTool(BaseTool):
                 valid_task["status"] = task["status"]
             if task.get("metadata"):
                 valid_task["metadata"] = task["metadata"]
-            
+
             valid_tasks.append(valid_task)
-        
+
         return valid_tasks
 
 

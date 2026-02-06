@@ -15,7 +15,7 @@ profiles:
     model: "claude-sonnet-4-5"
     api_key_env: "ANTHROPIC_API_KEY"        # 主 API Key
     base_url: "https://api.anthropic.com"   # Base URL（可选，默认官方地址）
-    max_tokens: 64000
+    max_tokens: 32768
     temperature: 1.0
     enable_thinking: true
     thinking_budget: 10000
@@ -35,10 +35,10 @@ profiles:
       - provider: "claude"
         model: "claude-sonnet-4-5"
         api_key_env: "CLAUDE_API_KEY_VENDOR_B"
-        base_url: "https://maas-openapi.wanjiedata.com"
+        base_url: "https://maas-openapi.wanjiedata.com/api/anthropic"
         
-       # Fallback 2: 跨厂商（千问兜底）
-      - provider: "qwen"
+       # Fallback 2: 跨厂商（千问兜底，使用 OpenAI 兼容接口）
+      - provider: "openai"
         model: "qwen3-max"
         api_key_env: "DASHSCOPE_API_KEY"
         base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
@@ -75,8 +75,8 @@ profiles:
         api_key_env: "CLAUDE_API_KEY_VENDOR_B"
         base_url: "https://api.anthropic.com"
       
-      # Fallback 2: 跨厂商（千问兜底）
-      - provider: "qwen"
+      # Fallback 2: 跨厂商（千问兜底，使用 OpenAI 兼容接口）
+      - provider: "openai"
         model: "qwen-plus"
         api_key_env: "DASHSCOPE_API_KEY"
         base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
@@ -110,8 +110,8 @@ profiles:
         api_key_env: "CLAUDE_API_KEY_VENDOR_B"
         base_url: "https://api.anthropic.com"
       
-      # Fallback 2: 跨厂商（千问兜底）
-      - provider: "qwen"
+      # Fallback 2: 跨厂商（千问兜底，使用 OpenAI 兼容接口）
+      - provider: "openai"
         model: "qwen-plus"
         api_key_env: "DASHSCOPE_API_KEY"
         base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
@@ -124,7 +124,7 @@ profiles:
   llm_analyzer:
     description: "分析运营写的原始提示词，生成结构化 Schema（支持超长 prompt）"
     model: "claude-sonnet-4-5"
-    max_tokens: 64000
+    max_tokens: 32000  # 兼容多模型容灾
     temperature: 0
     enable_thinking: false
     enable_caching: false
@@ -145,8 +145,8 @@ profiles:
         api_key_env: "CLAUDE_API_KEY_VENDOR_B"
         base_url: "https://api.anthropic.com"
       
-      # Fallback 2: 跨厂商（千问兜底）
-      - provider: "qwen"
+      # Fallback 2: 跨厂商（千问兜底，使用 OpenAI 兼容接口）
+      - provider: "openai"
         model: "qwen3-max"
         api_key_env: "DASHSCOPE_API_KEY"
         base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
@@ -180,8 +180,8 @@ profiles:
         api_key_env: "CLAUDE_API_KEY_VENDOR_B"
         base_url: "https://api.anthropic.com"
       
-      # Fallback 2: 跨厂商（千问兜底）
-      - provider: "qwen"
+      # Fallback 2: 跨厂商（千问兜底，使用 OpenAI 兼容接口）
+      - provider: "openai"
         model: "qwen3-max"
         api_key_env: "DASHSCOPE_API_KEY"
         base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
@@ -194,7 +194,7 @@ profiles:
   prompt_merger:
     description: "智能合并框架规则与运营 prompt（支持超长 prompt）"
     model: "claude-sonnet-4-5"
-    max_tokens: 64000
+    max_tokens: 32000  # 兼容多模型容灾
     temperature: 0
     enable_thinking: false
     enable_caching: false
@@ -215,8 +215,8 @@ profiles:
         api_key_env: "CLAUDE_API_KEY_VENDOR_B"
         base_url: "https://api.anthropic.com"
       
-      # Fallback 2: 跨厂商（千问兜底）
-      - provider: "qwen"
+      # Fallback 2: 跨厂商（千问兜底，使用 OpenAI 兼容接口）
+      - provider: "openai"
         model: "qwen3-max"
         api_key_env: "DASHSCOPE_API_KEY"
         base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
@@ -229,7 +229,7 @@ profiles:
   prompt_decomposer:
     description: "将运营 prompt 分解为场景化提示词（意图/简单/中等/复杂）"
     model: "claude-sonnet-4-5"
-    max_tokens: 60000  # Claude Sonnet 4.5 max output = 64000
+    max_tokens: 32000  # 兼容多模型容灾
     temperature: 0
     enable_thinking: false
     enable_caching: false
@@ -272,8 +272,8 @@ profiles:
         api_key_env: "CLAUDE_API_KEY_VENDOR_B"
         base_url: "https://api.anthropic.com"
       
-      # Fallback 2: 跨厂商（千问兜底）
-      - provider: "qwen"
+      # Fallback 2: 跨厂商（千问兜底，使用 OpenAI 兼容接口）
+      - provider: "openai"
         model: "qwen-plus"
         api_key_env: "DASHSCOPE_API_KEY"
         base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
@@ -310,8 +310,8 @@ profiles:
         api_key_env: "CLAUDE_API_KEY_VENDOR_B"
         base_url: "https://api.anthropic.com"
       
-      # Fallback 2: 跨厂商（千问兜底）
-      - provider: "qwen"
+      # Fallback 2: 跨厂商（千问兜底，使用 OpenAI 兼容接口）
+      - provider: "openai"
         model: "qwen-plus"
         api_key_env: "DASHSCOPE_API_KEY"
         base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
@@ -371,8 +371,8 @@ profiles:
         api_key_env: "CLAUDE_API_KEY_VENDOR_B"
         base_url: "https://api.anthropic.com"
       
-      # Fallback 2: 跨厂商（千问兜底）
-      - provider: "qwen"
+      # Fallback 2: 跨厂商（千问兜底，使用 OpenAI 兼容接口）
+      - provider: "openai"
         model: "qwen3-max"
         api_key_env: "DASHSCOPE_API_KEY"
         base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
@@ -561,3 +561,75 @@ qwen_vision:
   policy:
     max_failures: 2
     cooldown_seconds: 600
+
+# ==================== 多智能体 Worker 配置 ====================
+
+multi_agent_worker:
+  description: "多智能体系统中的 Worker/Subagent，需要工具调用能力"
+  provider: "claude"
+  model: "claude-sonnet-4-5"
+  api_key_env: "ANTHROPIC_API_KEY"
+  base_url: "https://api.anthropic.com"
+  max_tokens: 8192
+  temperature: 0.5
+  enable_thinking: true
+  thinking_budget: 5000
+  enable_caching: false
+  timeout: 300.0  # 5 分钟超时
+  max_retries: 2
+  
+  # 🆕 多模型容灾配置
+  fallbacks:
+    # Fallback 0: 同模型，不同 Provider (Vendor A)
+    - provider: "claude"
+      model: "claude-sonnet-4-5"
+      api_key_env: "CLAUDE_API_KEY_VENDOR_A"
+      base_url: "https://api.anthropic.com"
+    
+    # Fallback 1: 同模型，不同 Provider (Vendor B)
+    - provider: "claude"
+      model: "claude-sonnet-4-5"
+      api_key_env: "CLAUDE_API_KEY_VENDOR_B"
+      base_url: "https://maas-openapi.wanjiedata.com/api/anthropic"
+    
+    # Fallback 2: 跨厂商（千问兜底，使用 OpenAI 兼容接口）
+    - provider: "openai"
+      model: "qwen3-max"
+      api_key_env: "DASHSCOPE_API_KEY"
+      base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+  
+  policy:
+    max_failures: 2
+    cooldown_seconds: 300  # 5 分钟冷却
+
+multi_agent_orchestrator:
+  description: "多智能体系统中的 Orchestrator/Lead Agent，需要强推理能力"
+  provider: "claude"
+  model: "claude-opus-4-5"
+  api_key_env: "ANTHROPIC_API_KEY"
+  base_url: "https://api.anthropic.com"
+  max_tokens: 16384
+  temperature: 0.3
+  enable_thinking: true
+  thinking_budget: 10000
+  enable_caching: false
+  timeout: 300.0
+  max_retries: 2
+  
+  # 🆕 多模型容灾配置
+  fallbacks:
+    # Fallback 0: 降级到 Sonnet
+    - provider: "claude"
+      model: "claude-sonnet-4-5"
+      api_key_env: "ANTHROPIC_API_KEY"
+      base_url: "https://api.anthropic.com"
+    
+    # Fallback 1: 跨厂商（千问兜底）
+    - provider: "openai"
+      model: "qwen3-max"
+      api_key_env: "DASHSCOPE_API_KEY"
+      base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+  
+  policy:
+    max_failures: 2
+    cooldown_seconds: 300

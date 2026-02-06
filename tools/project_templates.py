@@ -33,35 +33,35 @@ def list_templates() -> Dict[str, str]:
 def get_template_files(template_name: str) -> Dict[str, str]:
     """
     读取指定模板的所有文件内容
-    
+
     Args:
         template_name: 模板名称 (node_fullstack, react_fullstack, static_html)
-        
+
     Returns:
         Dict[相对路径, 文件内容]
-        
+
     Example:
         files = get_template_files("react_fullstack")
         # { "client/package.json": "...", "server/src/index.ts": "...", ... }
     """
     template_dir = TEMPLATES_DIR / template_name
-    
+
     if not template_dir.exists():
         return {}
-    
+
     files: Dict[str, str] = {}
-    
+
     # 遍历模板目录中的所有文件
     for file_path in template_dir.rglob("*"):
         # 跳过目录和隐藏文件（除了 .gitignore 等配置文件）
         if file_path.is_dir():
             continue
-        
+
         # 跳过 node_modules 等不需要的目录
         relative_path = file_path.relative_to(template_dir)
         if any(part.startswith("node_modules") for part in relative_path.parts):
             continue
-        
+
         try:
             # 读取文件内容
             content = file_path.read_text(encoding="utf-8")
@@ -69,22 +69,20 @@ def get_template_files(template_name: str) -> Dict[str, str]:
         except Exception:
             # 跳过无法读取的文件（如二进制文件）
             pass
-    
+
     return files
 
 
 def get_template_startup_command(template_name: str) -> Optional[str]:
     """
     获取模板的启动命令提示
-    
+
     Returns:
         启动命令字符串，用于 Agent 执行
     """
     commands = {
         "node_fullstack": "cd /home/user/project && npm install && npm start",
-        "react_fullstack": (
-            "cd /home/user/project && npm install && npm run dev"
-        ),
+        "react_fullstack": ("cd /home/user/project && npm install && npm run dev"),
         "static_html": "cd /home/user/project && python3 -m http.server 8000",
         "remotion": (
             "sudo apt-get update && sudo apt-get install -y libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libasound2 libpangocairo-1.0-0 libgtk-3-0 && "
@@ -98,7 +96,7 @@ def get_template_startup_command(template_name: str) -> Optional[str]:
 def get_template_ports(template_name: str) -> Dict[str, int]:
     """
     获取模板使用的端口
-    
+
     Returns:
         { "frontend": 5173, "backend": 3000 } 等
     """

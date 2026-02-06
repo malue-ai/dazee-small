@@ -27,27 +27,25 @@ def _parse_tool_input(raw_input: Any) -> Dict[str, Any]:
     return {}
 
 
-def normalize_tool_calls(tool_calls: Optional[List[Dict[str, Any]]]) -> Optional[List[Dict[str, Any]]]:
+def normalize_tool_calls(
+    tool_calls: Optional[List[Dict[str, Any]]],
+) -> Optional[List[Dict[str, Any]]]:
     """
     规范化工具调用格式为 Claude 内部格式
-    
+
     Returns:
         [{"id", "name", "input", "type"}]
     """
     if not tool_calls:
         return None
-    
+
     normalized: List[Dict[str, Any]] = []
     for idx, call in enumerate(tool_calls):
         if not isinstance(call, dict):
             continue
-        
-        raw_type = call.get("type")
-        if raw_type in ["tool_use", "server_tool_use"]:
-            call_type = raw_type
-        else:
-            call_type = "tool_use"
-        
+
+        call_type = "tool_use"
+
         call_id = call.get("id") or f"tool_{idx}"
         name = (
             call.get("name")
@@ -55,7 +53,7 @@ def normalize_tool_calls(tool_calls: Optional[List[Dict[str, Any]]]) -> Optional
             or call.get("tool_name")
             or "unknown_tool"
         )
-        
+
         input_payload = call.get("input")
         if input_payload is None:
             if "arguments" in call:
@@ -68,12 +66,7 @@ def normalize_tool_calls(tool_calls: Optional[List[Dict[str, Any]]]) -> Optional
                 input_payload = {}
         else:
             input_payload = _parse_tool_input(input_payload)
-        
-        normalized.append({
-            "id": call_id,
-            "name": name,
-            "input": input_payload,
-            "type": call_type
-        })
-    
+
+        normalized.append({"id": call_id, "name": name, "input": input_payload, "type": call_type})
+
     return normalized if normalized else None

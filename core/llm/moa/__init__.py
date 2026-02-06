@@ -13,19 +13,18 @@ V8.0 新增模块
 - 可观测：完整的调用链路追踪
 """
 
+from core.llm.moa.aggregator import (
+    AggregatedResponse,
+    AggregationStrategy,
+    MoAAggregator,
+    create_moa_aggregator,
+)
 from core.llm.moa.router import (
     AdaptiveMoARouter,
-    MoADecisionPoint,
     MoAConfig,
+    MoADecisionPoint,
     MoAResult,
     create_moa_router,
-)
-
-from core.llm.moa.aggregator import (
-    MoAAggregator,
-    AggregationStrategy,
-    AggregatedResponse,
-    create_moa_aggregator,
 )
 
 __all__ = [

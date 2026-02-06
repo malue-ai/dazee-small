@@ -30,36 +30,17 @@ prompt = generate_prompt(schema, complexity, agent_schema=agent_schema)
 ```
 """
 
-from .prompt_layer import (
-    TaskComplexity,
-    PromptModule,
-    PromptSchema,
-    PromptParser,
-    PromptGenerator,
-    parse_prompt,
-    generate_prompt,
-    get_prompt_for_complexity,
-)
-
 from .complexity_detector import (
     ComplexityDetector,
     detect_complexity,
-    detect_complexity_with_confidence,
     detect_complexity_async,
-)
-
-# 🆕 V4.6.1: LLM 驱动的提示词分析器
-from .llm_analyzer import (
-    LLMPromptAnalyzer,
-    LLMAnalysisResult,
-    analyze_prompt_with_llm,
-    analyze_prompt_with_llm_sync,
+    detect_complexity_with_confidence,
 )
 
 # 🆕 V4.6.2: 实例级提示词缓存
 from .instance_cache import (
-    InstancePromptCache,
     CacheMetrics,
+    InstancePromptCache,
     get_instance_cache,
     load_instance_cache,
 )
@@ -71,27 +52,45 @@ from .intent_prompt_generator import (
     get_default_intent_prompt,
 )
 
+# 🆕 V4.6.1: LLM 驱动的提示词分析器
+from .llm_analyzer import (
+    LLMAnalysisResult,
+    LLMPromptAnalyzer,
+    analyze_prompt_with_llm,
+)
+from .prompt_layer import (
+    PromptGenerator,
+    PromptModule,
+    PromptParser,
+    PromptSchema,
+    TaskComplexity,
+    generate_prompt,
+    get_prompt_for_complexity,
+    parse_prompt,
+)
+
 # 🆕 V5.5: 提示词结果输出管理器（面向运营）
 from .prompt_results_writer import (
-    PromptResultsWriter,
-    PromptResultsMetadata,
     PromptResults,
+    PromptResultsMetadata,
+    PromptResultsWriter,
     create_prompt_results_writer,
 )
 
-# 🆕 V6.0: 运行时上下文构建器（自动检测环境）
+# 🆕 V6.0: 运行时上下文构建器（自动检测环境，异步）
 from .runtime_context_builder import (
-    RuntimeEnvironment,
     RuntimeContextBuilder,
-    detect_and_build_environment_context,
+    RuntimeEnvironment,
+    detect_and_build_environment_context_async,
+    get_environment_async,
 )
 
 # 🆕 V6.2: Skill Prompt 构建器（延迟加载机制）
 from .skill_prompt_builder import (
     SkillPromptBuilder,
     SkillSummary,
-    build_skills_prompt,
     build_skills_instructions,
+    build_skills_prompt,
 )
 
 __all__ = [
@@ -99,48 +98,39 @@ __all__ = [
     "TaskComplexity",
     "PromptModule",
     "PromptSchema",
-    
     # 解析器和生成器
     "PromptParser",
     "PromptGenerator",
-    
     # 复杂度检测
     "ComplexityDetector",
-    
     # 🆕 LLM 分析器
     "LLMPromptAnalyzer",
     "LLMAnalysisResult",
     "analyze_prompt_with_llm",
-    "analyze_prompt_with_llm_sync",
-    
     # 🆕 V4.6.2: 实例级缓存
     "InstancePromptCache",
     "CacheMetrics",
     "get_instance_cache",
     "load_instance_cache",
-    
     # 🆕 V4.6.2: 意图识别提示词生成器
     "IntentPromptGenerator",
     "generate_intent_prompt",
     "get_default_intent_prompt",
-    
     # 🆕 V5.5: 提示词结果输出管理器
     "PromptResultsWriter",
     "PromptResultsMetadata",
     "PromptResults",
     "create_prompt_results_writer",
-    
-    # 🆕 V6.0: 运行时上下文构建器
+    # 🆕 V6.0: 运行时上下文构建器（异步）
     "RuntimeEnvironment",
     "RuntimeContextBuilder",
-    "detect_and_build_environment_context",
-    
+    "get_environment_async",
+    "detect_and_build_environment_context_async",
     # 🆕 V6.2: Skill Prompt 构建器
     "SkillPromptBuilder",
     "SkillSummary",
     "build_skills_prompt",
     "build_skills_instructions",
-    
     # 便捷函数
     "parse_prompt",
     "generate_prompt",

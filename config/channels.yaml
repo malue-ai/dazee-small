@@ -1,0 +1,99 @@
+# ==================== 渠道集成配置 ====================
+#
+# 配置各消息渠道（飞书、钉钉、Slack、Telegram 等）
+#
+# 支持的渠道：
+# - feishu: 飞书
+# - dingtalk: 钉钉（待实现）
+# - slack: Slack（待实现）
+# - telegram: Telegram（待实现）
+#
+# 权限策略：
+# - open: 允许所有人
+# - pairing: 需要配对验证
+# - allowlist: 白名单模式
+# - disabled: 禁用
+# ============================================================
+
+channels:
+  # ==================== 飞书配置 ====================
+  feishu:
+    enabled: true
+    
+    accounts:
+      # 默认账户
+      default:
+        # 应用凭证（从环境变量读取）
+        app_id: "${FEISHU_APP_ID}"
+        app_secret: "${FEISHU_APP_SECRET}"
+        verification_token: "${FEISHU_VERIFICATION_TOKEN}"
+        encrypt_key: "${FEISHU_ENCRYPT_KEY}"  # 可选，用于消息加密
+        
+        # 私聊策略
+        dm_policy: "open"  # open | pairing | disabled
+        allow_from: []     # 私聊白名单（open_id 列表）
+        
+        # 群聊策略
+        group_policy: "open"       # open | allowlist | disabled
+        group_allow_from: []       # 群聊白名单（群 ID 列表）
+        require_mention: true      # 群聊需要 @机器人
+        
+        # 群组特定配置
+        groups:
+          # 示例：特定群组配置
+          # "oc_xxxxx":
+          #   enabled: true
+          #   require_mention: false
+          #   allow_from: ["*"]  # 允许所有人
+        
+        # 高级配置
+        history_limit: 20          # 历史消息数限制
+        media_max_mb: 20           # 媒体大小限制（MB）
+        stream_mode: "edit"        # 流式模式：off | edit
+  
+  # ==================== 钉钉配置（待实现）====================
+  # dingtalk:
+  #   enabled: false
+  #   accounts:
+  #     default:
+  #       app_key: "${DINGTALK_APP_KEY}"
+  #       app_secret: "${DINGTALK_APP_SECRET}"
+  #       agent_id: "${DINGTALK_AGENT_ID}"
+  #       dm_policy: "open"
+  #       group_policy: "open"
+  
+  # ==================== Slack 配置（待实现）====================
+  # slack:
+  #   enabled: false
+  #   accounts:
+  #     default:
+  #       bot_token: "${SLACK_BOT_TOKEN}"
+  #       signing_secret: "${SLACK_SIGNING_SECRET}"
+  #       app_token: "${SLACK_APP_TOKEN}"
+  #       dm_policy: "open"
+  #       group_policy: "open"
+  
+  # ==================== Telegram 配置（待实现）====================
+  # telegram:
+  #   enabled: false
+  #   accounts:
+  #     default:
+  #       bot_token: "${TELEGRAM_BOT_TOKEN}"
+  #       dm_policy: "open"
+  #       group_policy: "open"
+  #       require_mention: true
+
+# ==================== 全局配置 ====================
+global:
+  # 默认 Agent ID（不指定时使用）
+  default_agent_id: null
+  
+  # 消息预处理
+  preprocessor:
+    debounce_ms: 500           # 防抖延迟
+    max_messages: 10           # 最大合并消息数
+    max_wait_ms: 3000          # 最大等待时间
+  
+  # 安全配置
+  security:
+    pairing_timeout_hours: 24  # 配对验证有效期

@@ -12,7 +12,6 @@ task_type_mappings:
 
   # 信息查询类任务
   information_query:
-    - web_search           # 互联网搜索
     - news_search          # 新闻搜索
     - academic_search      # 学术搜索
     - market_data          # 市场数据
@@ -42,8 +41,55 @@ task_type_mappings:
     - notification         # 消息通知
 
   # 通用/其他
-  other:
-    - web_search           # 默认可搜索
+  other: []
+
+# ==================== 工具分类配置（合并自 tool_registry.yaml）====================
+#
+# 📌 设计原则：
+#   1. 所有工具分类配置集中在此文件
+#   2. 各模块从此配置读取，避免分散定义
+#   3. 修改工具分类时只需编辑此文件
+#
+tool_classification:
+  # 常用工具（不延迟加载）
+  # 用于：Tool Search 模式下不延迟加载的工具
+  frequent_tools:
+    - sandbox_run_command
+    - sandbox_write_file
+    - tavily_search
+    - plan
+    - nodes
+  
+  # 工具类别（简写展开）
+  # 用户配置一个类别，自动展开为多个工具
+  categories:
+    # 文档生成类（Claude Skills）
+    document_skills:
+      - pptx
+      - xlsx
+      - docx
+      - pdf
+    
+    # 代码沙盒类（E2B 沙盒工具）
+    sandbox_tools:
+      - sandbox_write_file
+      - sandbox_read_file
+      - sandbox_list_files
+      - sandbox_run_command
+      - sandbox_execute_python
+      - sandbox_get_public_url
+      - sandbox_upload_file
+      - sandbox_init_project
+    
+    # PPT 生成类
+    ppt_tools:
+      - ppt_generator
+      - slidespeak_render
+    
+    # 文档解析类
+    document_partition:
+      - document_partition_tool
+
 # ==================== 能力类别定义 ====================
 #
 # 🆕 V4.6 分类体系：
@@ -105,14 +151,6 @@ capability_categories:
   - 创建教程视频
 
 # --- 信息获取类 ---
-- id: web_search
-  category_type: business
-  description: 互联网搜索
-  use_when: 需要搜索网页、获取公开信息
-  examples:
-  - 搜索公司信息
-  - 查找技术文档
-  - 获取产品资料
 
 - id: news_search
   category_type: business
@@ -224,10 +262,7 @@ capability_categories:
   - 保存结果
   - 文件管理
 
-- id: code_execution
-  category_type: internal
-  description: 执行代码和脚本（框架内部）
-  internal: true
+# 注：code_execution 服务器工具已移除，代码执行使用 E2B 沙盒
 
 - id: code_sandbox
   category_type: internal
@@ -238,12 +273,11 @@ capability_categories:
   category_type: internal
   description: API 调用（框架内部通用实现）
   internal: true
-# ==================== V4.4 能力分层说明 ====================
-# invocation_hint 字段说明（🆕 V4.4）：
+# ==================== 能力分层说明 ====================
+# invocation_hint 字段说明：
 # - SKILL_CONTAINER: Claude Skills 机制，通过 container.skills 配置
 # - DIRECT: 标准 tool_use 调用，由 Claude 自主推理选择
 # - PROGRAMMATIC: 程序化多工具调用（多工具编排场景）
-# - TOOL_SEARCH: 工具搜索（工具数量 > 30 时使用）
 # ===========================================================
 
 capabilities:
@@ -559,7 +593,6 @@ capabilities:
     class: TavilySearchTool
   capabilities:
   - information_retrieval
-  - web_search
   - news_search
   - academic_search
   - market_data
@@ -655,7 +688,6 @@ capabilities:
     class: ExaSearchTool
   capabilities:
   - information_retrieval
-  - web_search
   - semantic_search
   - research
   priority: 90
@@ -739,8 +771,8 @@ capabilities:
     module: tools.ppt_generator
     class: PPTGeneratorTool
   capabilities:
-  - ppt_generation       # 🆕 V4.4 修正：只声明能提供的能力
-  - content_generation   # web_search 是内部依赖，不是对外能力
+  - ppt_generation
+  - content_generation
   priority: 95
   cost:
     time: medium
@@ -1205,7 +1237,7 @@ capabilities:
     - title
     - questions
 
-- name: plan_todo
+- name: plan
   type: TOOL
   subtype: SESSION
   provider: user
@@ -1214,12 +1246,10 @@ capabilities:
   cache_stable: true
   implementation:
     module: tools.plan_todo_tool
-    class: PlanTodoTool
+    class: PlanTool
   capabilities:
   - task_planning
   - progress_tracking
-  - plan_crud
-  - todo_crud
   priority: 95
   cost:
     time: fast
@@ -1229,138 +1259,74 @@ capabilities:
     session_scoped: true
   metadata:
     description: |
-      任务规划工具（纯存储版本）
+      任务计划管理工具 v2
       
-      核心操作：
-      - create: 创建计划（传入主模型生成的完整 plan 数据）
-      - update_todo: 更新步骤状态
-      - get: 获取当前计划
-      - add_todo: 动态添加步骤
+      数据结构：
+      - 顶层：name, overview（一句话目标）, plan（详细计划文档）, todos
+      - todo：id, title（步骤标题）, content（详细描述）, status, result
       
-      设计原则：
-      - 纯 CRUD 工具，不调用 LLM
-      - plan 内容由主模型直接生成并传入
-      - 本工具只负责存储、查询、更新
+      action 说明：
+      - create: 创建新计划，需要 name + todos，可选 overview + plan
+      - update: 更新步骤状态，需要 todo_id + status，可选 result
+      - rewrite: 重写整个计划，需要 name + todos，可选 overview + plan
     keywords:
     - plan
-    - todo
     - 计划
     - 任务
     - 进度
   input_schema:
     type: object
     properties:
-      operation:
+      action:
         type: string
         description: 操作类型
-        enum:
-        - create
-        - update_todo
-        - get
-        - add_todo
-      data:
-        type: object
-        description: 操作数据（根据 operation 不同而不同）
-        properties:
-          # create 操作的字段（推荐使用 plan 对象）
-          plan:
-            type: object
-            description: 计划数据（create 时必需）
-            properties:
-              name:
-                type: string
-                description: 计划名称
-              overview:
-                type: string
-                description: 一句话概述
-              detailed_plan:
-                type: string
-                description: 详细 Markdown 文档
-              todos:
-                type: array
-                description: 步骤列表
-                items:
-                  type: object
-                  properties:
-                    id:
-                      type: string
-                      description: 步骤 ID，如 "1", "2"
-                    content:
-                      type: string
-                      description: 步骤描述
-                    status:
-                      type: string
-                      description: 状态（pending/in_progress/completed/failed）
-                      default: pending
-                      enum:
-                      - pending
-                      - in_progress
-                      - completed
-                      - failed
-                    result:
-                      type: string
-                      description: 完成结果说明
-          # 兼容：create 操作的字段（直接传入完整 plan）
-          name:
-            type: string
-            description: 计划名称（create 时必需）
-          overview:
-            type: string
-            description: 一句话概述（create 时可选）
-          detailed_plan:
-            type: string
-            description: 详细 Markdown 文档（create 时可选）
-          todos:
-            type: array
-            description: 步骤列表（create 时必需）
-            items:
-              type: object
-              properties:
-                id:
-                  type: string
-                  description: 步骤 ID，如 "1", "2"
-                content:
-                  type: string
-                  description: 步骤描述
-                status:
-                  type: string
-                  description: 状态（pending/in_progress/completed/failed）
-                  default: pending
-                  enum:
-                  - pending
-                  - in_progress
-                  - completed
-                  - failed
-          # update_todo 操作的字段
-          id:
-            type: string
-            description: todo ID，如 "1"（update_todo 时必需）
-          status:
-            type: string
-            description: 新状态（update_todo 时必需）
-            enum:
-            - pending
-            - in_progress
-            - completed
-            - failed
-          result:
-            type: string
-            description: 完成结果说明（update_todo 时可选）
-          # add_todo 操作的字段
-          content:
-            type: string
-            description: todo 内容（add_todo 时必需）
-          after:
-            type: string
-            description: 插入到哪个 todo 之后（add_todo 时可选）
-    required:
-    - operation
+        enum: [create, update, rewrite]
+      name:
+        type: string
+        description: 计划名称（create/rewrite 时必需）
+      overview:
+        type: string
+        description: 一句话目标摘要（create/rewrite 时可选，会注入 prompt）
+      plan:
+        type: string
+        description: 详细计划文档（create/rewrite 时可选，仅存储不注入 prompt）
+      todos:
+        type: array
+        description: 步骤列表（create/rewrite 时必需）
+        items:
+          type: object
+          properties:
+            id:
+              type: string
+              description: 步骤 ID
+            title:
+              type: string
+              description: 步骤标题（简短，会注入 prompt）
+            content:
+              type: string
+              description: 步骤详细描述（可选，仅存储不注入 prompt）
+            status:
+              type: string
+              default: pending
+              enum: [pending, in_progress, completed, failed]
+          required: [title]
+      todo_id:
+        type: string
+        description: 步骤 ID（update 时必需）
+      status:
+        type: string
+        description: 新状态（update 时必需）
+        enum: [pending, in_progress, completed, failed]
+      result:
+        type: string
+        description: 完成结果说明（update 时可选）
+    required: [action]
 - name: send_files
   type: TOOL
   subtype: CUSTOM
   provider: system
   invocation_hint: DIRECT
-  level: 1  # 核心工具，始终加载
+  level: 2  # 降级为动态工具，按需加载
   cache_stable: false
   implementation:
     module: tools.send_files
@@ -1933,7 +1899,7 @@ capabilities:
   subtype: CUSTOM
   provider: user
   invocation_hint: DIRECT
-  level: 1
+  level: 2  # 降级为动态工具，按需加载
   cache_stable: false
   implementation:
     module: tools.clue_generation
@@ -2014,3 +1980,90 @@ capabilities:
           - text
     required:
     - tasks
+
+# ==================== Nodes 工具 ====================
+- name: nodes
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  invocation_hint: DIRECT
+  level: 1  # 核心工具
+  cache_stable: true
+  implementation:
+    module: tools.nodes_tool
+    class: NodesTool
+  capabilities:
+  - system_control
+  - command_execution
+  - notification
+  priority: 80
+  cost:
+    time: fast
+    money: free
+  constraints:
+    requires_api: false
+  metadata:
+    description: |
+      发现和操作本地/远程节点。
+      
+      **Actions**:
+      - status: 列出所有节点状态
+      - describe: 获取节点详细信息
+      - run: 在节点上执行 shell 命令
+      - notify: 发送系统通知到节点
+      - which: 检查可执行文件是否存在
+      
+      **示例**:
+      - nodes status: 查看所有节点状态
+      - nodes run --command ["ls", "-la"]: 执行命令
+      - nodes notify --title "提醒" --message "任务完成"
+      - nodes which --executable "python3": 检查 python3 是否存在
+    preferred_for:
+    - 执行系统命令
+    - 发送系统通知
+    - 检查可执行文件
+  input_schema:
+    type: object
+    properties:
+      action:
+        type: string
+        enum:
+        - status
+        - describe
+        - run
+        - notify
+        - which
+        description: 操作类型
+      node:
+        type: string
+        description: 目标节点 ID（默认 'local'）
+        default: local
+      command:
+        type: array
+        items:
+          type: string
+        description: 要执行的命令（run action）
+      cwd:
+        type: string
+        description: 工作目录（run action）
+      env:
+        type: object
+        description: 环境变量（run action）
+      timeout_ms:
+        type: integer
+        description: 超时毫秒数
+        default: 30000
+      title:
+        type: string
+        description: 通知标题（notify action）
+      message:
+        type: string
+        description: 通知内容（notify action）
+      subtitle:
+        type: string
+        description: 通知副标题（notify action）
+      executable:
+        type: string
+        description: 可执行文件名（which action）
+    required:
+    - action

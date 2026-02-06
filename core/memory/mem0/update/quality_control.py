@@ -10,12 +10,13 @@
 
 import asyncio
 import json
-from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional, Tuple
+
 from logger import get_logger
 
-from ..schemas import MemoryType
 from ..pool import get_mem0_pool
+from ..schemas import MemoryType
 
 logger = get_logger("memory.mem0.quality_control")
 
@@ -218,24 +219,24 @@ Output:
 class QualityController:
     """
     记忆质量控制器
-    
+
     负责敏感信息过滤、冲突检测和质量评估
     """
-    
+
     def __init__(self):
         """初始化质量控制器"""
         self.pool = get_mem0_pool()
         logger.info("[QualityController] 初始化完成")
-    
+
     # ==================== 敏感信息过滤 ====================
-    
+
     def filter_sensitive_info(self, content: str) -> Tuple[str, List[str]]:
         """
         过滤敏感信息
-        
+
         Args:
             content: 原始内容
-            
+
         Returns:
             (过滤后的内容, 检测到的敏感信息类型列表)
         """
@@ -246,14 +247,14 @@ class QualityController:
                 "[QualityController] 更新阶段返回 NONE，跳过写入",
             )
         return content, []
-    
+
     def should_reject(self, content: str) -> Tuple[bool, str]:
         """
         判断是否应该拒绝记忆（敏感信息过多）
-        
+
         Args:
             content: 内容
-            
+
         Returns:
             (是否拒绝, 拒绝原因)
         """
@@ -266,9 +267,7 @@ class QualityController:
     # ==================== 更新阶段（LLM 驱动）====================
 
     def _run_update_stage(
-        self,
-        new_memory: str,
-        existing_memories: List[Dict[str, Any]]
+        self, new_memory: str, existing_memories: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """
         运行更新阶段（同步封装）
@@ -286,9 +285,7 @@ class QualityController:
                 if loop.is_running():
                     logger.warning("[QualityController] 事件循环运行中，更新阶段跳过")
                     return {"memory": [{"id": "0", "text": new_memory, "event": "ADD"}]}
-                return loop.run_until_complete(
-                    self.analyze_update(new_memory, existing_memories)
-                )
+                return loop.run_until_complete(self.analyze_update(new_memory, existing_memories))
             except RuntimeError:
                 return asyncio.run(self.analyze_update(new_memory, existing_memories))
         except Exception:
@@ -296,9 +293,7 @@ class QualityController:
             return {"memory": [{"id": "0", "text": new_memory, "event": "ADD"}]}
 
     async def analyze_update(
-        self,
-        new_memory: str,
-        existing_memories: List[Dict[str, Any]]
+        self, new_memory: str, existing_memories: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """
         通过 LLM 进行更新阶段决策（过滤/冲突/更新）
@@ -331,8 +326,7 @@ class QualityController:
             }
 
     def _format_existing_memories(
-        self,
-        existing_memories: List[Dict[str, Any]]
+        self, existing_memories: List[Dict[str, Any]]
     ) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
         """
         格式化已有记忆（对齐 mem0：id/text）
@@ -347,17 +341,12 @@ class QualityController:
             if not raw_id:
                 continue
             temp_id = str(idx)
-            formatted.append({
-                "id": temp_id,
-                "text": mem.get("memory", "")
-            })
+            formatted.append({"id": temp_id, "text": mem.get("memory", "")})
             id_mapping[temp_id] = raw_id
         return formatted, id_mapping
 
     def _build_update_prompt(
-        self,
-        existing_memories: List[Dict[str, Any]],
-        new_facts: List[str]
+        self, existing_memories: List[Dict[str, Any]], new_facts: List[str]
     ) -> str:
         """
         构建更新阶段提示词（对齐 mem0 原仓）
@@ -416,20 +405,22 @@ Follow the instruction mentioned below:
 Do not return anything except the JSON format.
 """
 
-    @property
-    def llm_service(self):
+    async def get_llm_service(self):
         """获取 LLM 服务（懒加载）"""
         if not hasattr(self, "_llm_service"):
             from config.llm_config import get_llm_profile
             from core.llm import create_llm_service
-            profile = get_llm_profile("memory_update")
+
+            profile = await get_llm_profile("memory_update")
             self._llm_service = create_llm_service(**profile)
         return self._llm_service
 
     async def _call_llm(self, prompt: str) -> str:
         """调用 LLM（更新阶段）"""
         from core.llm import Message
-        response = await self.llm_service.create_message_async(
+
+        llm_service = await self.get_llm_service()
+        response = await llm_service.create_message_async(
             messages=[Message(role="user", content=prompt)]
         )
         if hasattr(response, "text"):
@@ -487,23 +478,20 @@ Do not return anything except the JSON format.
                 actions["none"].append(payload)
         actions["id_mapping"] = id_mapping
         return actions
-    
+
     # ==================== 冲突检测 ====================
-    
+
     def detect_conflicts(
-        self,
-        user_id: str,
-        new_memory: str,
-        memory_type: MemoryType = MemoryType.EXPLICIT
+        self, user_id: str, new_memory: str, memory_type: MemoryType = MemoryType.EXPLICIT
     ) -> List[Dict[str, Any]]:
         """
         检测新记忆与现有记忆的冲突
-        
+
         Args:
             user_id: 用户 ID
             new_memory: 新记忆内容
             memory_type: 记忆类型
-            
+
         Returns:
             冲突列表，每个冲突包含：
             {
@@ -522,23 +510,27 @@ Do not return anything except the JSON format.
             actions = self.extract_update_actions(decision)
             conflicts = []
             for item in actions["update"]:
-                conflicts.append({
-                    "type": "preference_change",
-                    "existing_id": item.get("id"),
-                    "existing_content": item.get("old_memory", ""),
-                    "new_content": item.get("text", ""),
-                    "confidence": 0.6,
-                    "suggestion": "更新阶段建议更新旧记忆"
-                })
+                conflicts.append(
+                    {
+                        "type": "preference_change",
+                        "existing_id": item.get("id"),
+                        "existing_content": item.get("old_memory", ""),
+                        "new_content": item.get("text", ""),
+                        "confidence": 0.6,
+                        "suggestion": "更新阶段建议更新旧记忆",
+                    }
+                )
             for item in actions["delete"]:
-                conflicts.append({
-                    "type": "fact_contradiction",
-                    "existing_id": item.get("id"),
-                    "existing_content": item.get("text", ""),
-                    "new_content": new_memory,
-                    "confidence": 0.6,
-                    "suggestion": "更新阶段建议删除冲突记忆"
-                })
+                conflicts.append(
+                    {
+                        "type": "fact_contradiction",
+                        "existing_id": item.get("id"),
+                        "existing_content": item.get("text", ""),
+                        "new_content": new_memory,
+                        "confidence": 0.6,
+                        "suggestion": "更新阶段建议删除冲突记忆",
+                    }
+                )
 
             if conflicts:
                 logger.info(
@@ -551,18 +543,15 @@ Do not return anything except the JSON format.
         except Exception as e:
             logger.error("[QualityController] 冲突检测失败", exc_info=True)
             return []
-    
+
     # ==================== 显式记忆优先级 ====================
-    
+
     def resolve_conflict(
-        self,
-        user_id: str,
-        conflict: Dict[str, Any],
-        priority: str = "explicit_first"
+        self, user_id: str, conflict: Dict[str, Any], priority: str = "explicit_first"
     ) -> Dict[str, Any]:
         """
         解决冲突
-        
+
         Args:
             user_id: 用户 ID
             conflict: 冲突信息
@@ -571,16 +560,16 @@ Do not return anything except the JSON format.
                 - "newest_first": 最新记忆优先
                 - "keep_both": 保留两者
                 - "update_old": 更新旧记忆
-                
+
         Returns:
             处理结果
         """
         existing_id = conflict.get("existing_id")
         existing_content = conflict.get("existing_content")
         new_content = conflict.get("new_content")
-        
+
         pool = get_mem0_pool()
-        
+
         if priority == "explicit_first":
             # 显式记忆优先：删除旧记忆
             if existing_id:
@@ -589,9 +578,9 @@ Do not return anything except the JSON format.
                 return {
                     "action": "delete_old",
                     "deleted_id": existing_id,
-                    "kept_content": new_content
+                    "kept_content": new_content,
                 }
-        
+
         elif priority == "newest_first":
             # 最新记忆优先：更新旧记忆
             if existing_id:
@@ -600,68 +589,56 @@ Do not return anything except the JSON format.
                 return {
                     "action": "update_old",
                     "updated_id": existing_id,
-                    "new_content": new_content
+                    "new_content": new_content,
                 }
-        
+
         elif priority == "keep_both":
             # 保留两者：标记旧记忆为冲突
             logger.info(f"[QualityController] 冲突解决: 保留两者")
-            return {
-                "action": "keep_both",
-                "note": "两段记忆都保留，需要人工审核"
-            }
-        
+            return {"action": "keep_both", "note": "两段记忆都保留，需要人工审核"}
+
         elif priority == "update_old":
             # 更新旧记忆
             if existing_id:
                 pool.update(memory_id=existing_id, data=new_content, user_id=user_id)
-                return {
-                    "action": "update_old",
-                    "updated_id": existing_id
-                }
-        
+                return {"action": "update_old", "updated_id": existing_id}
+
         return {"action": "noop", "note": "未处理"}
-    
+
     # ==================== TTL 管理 ====================
-    
-    def clean_expired_memories(
-        self,
-        user_id: str,
-        memory_types: Optional[List[str]] = None
-    ) -> int:
+
+    def clean_expired_memories(self, user_id: str, memory_types: Optional[List[str]] = None) -> int:
         """
         清理过期记忆
-        
+
         Args:
             user_id: 用户 ID
             memory_types: 要清理的记忆类型列表（None 表示清理所有类型）
-            
+
         Returns:
             清理的记忆数量
         """
         cleaned_count = 0
-        
+
         try:
             pool = get_mem0_pool()
             all_memories = pool.get_all(user_id=user_id, limit=200)
-            
+
             for mem in all_memories:
                 metadata = mem.get("metadata", {})
                 memory_type = metadata.get("memory_type", "implicit")
-                
+
                 # 过滤记忆类型
                 if memory_types and memory_type not in memory_types:
                     continue
-                
+
                 # 检查过期时间
                 expires_at_str = metadata.get("expires_at")
                 if not expires_at_str:
                     continue
-                
+
                 try:
-                    expires_at = datetime.fromisoformat(
-                        expires_at_str.replace("Z", "+00:00")
-                    )
+                    expires_at = datetime.fromisoformat(expires_at_str.replace("Z", "+00:00"))
                     if datetime.now() > expires_at:
                         # 删除过期记忆
                         mem_id = mem.get("id", mem.get("memory_id", ""))
@@ -670,70 +647,65 @@ Do not return anything except the JSON format.
                             cleaned_count += 1
                 except Exception as e:
                     logger.warning(f"[QualityController] 解析过期时间失败: {e}")
-            
+
             if cleaned_count > 0:
                 logger.info(
                     f"[QualityController] 清理过期记忆: user={user_id}, "
                     f"count={cleaned_count}, types={memory_types}"
                 )
-            
+
             return cleaned_count
-            
+
         except Exception as e:
             logger.error(f"[QualityController] 清理过期记忆失败: {e}")
             return 0
-    
-    def get_memory_ttl_status(
-        self,
-        user_id: str
-    ) -> Dict[str, Any]:
+
+    def get_memory_ttl_status(self, user_id: str) -> Dict[str, Any]:
         """
         获取记忆 TTL 状态
-        
+
         Args:
             user_id: 用户 ID
-            
+
         Returns:
             TTL 状态信息
         """
         try:
             pool = get_mem0_pool()
             all_memories = pool.get_all(user_id=user_id, limit=200)
-            
+
             stats = {
                 "total": len(all_memories),
                 "with_ttl": 0,
                 "expired": 0,
                 "expiring_soon": 0,  # 7天内过期
-                "by_type": {}
+                "by_type": {},
             }
-            
+
             now = datetime.now()
             soon_cutoff = now + timedelta(days=7)
-            
+
             for mem in all_memories:
                 metadata = mem.get("metadata", {})
                 memory_type = metadata.get("memory_type", "implicit")
-                
+
                 if memory_type not in stats["by_type"]:
                     stats["by_type"][memory_type] = {
                         "total": 0,
                         "with_ttl": 0,
                         "expired": 0,
-                        "expiring_soon": 0
+                        "expiring_soon": 0,
                     }
-                
+
                 stats["by_type"][memory_type]["total"] += 1
-                
+
                 expires_at_str = metadata.get("expires_at")
                 if expires_at_str:
                     try:
-                        expires_at = datetime.fromisoformat(
-                            expires_at_str.replace("Z", "+00:00")
-                        )
+                        expires_at = datetime.fromisoformat(expires_at_str.replace("Z", "+00:00"))
                         stats["with_ttl"] += 1
                         stats["by_type"][memory_type]["with_ttl"] += 1
-                        
+
                         if now > expires_at:
                             stats["expired"] += 1
                             stats["by_type"][memory_type]["expired"] += 1
@@ -742,9 +714,9 @@ Do not return anything except the JSON format.
                             stats["by_type"][memory_type]["expiring_soon"] += 1
                     except Exception:
                         pass
-            
+
             return stats
-            
+
         except Exception as e:
             logger.error(f"[QualityController] 获取 TTL 状态失败: {e}")
             return {"error": str(e)}

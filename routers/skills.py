@@ -8,23 +8,24 @@ Skills 管理路由
 import asyncio
 import re
 import shutil
-from typing import Optional, List
 from datetime import datetime
 from pathlib import Path
+from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, status, Query, UploadFile
+import aiofiles
+from fastapi import APIRouter, HTTPException, Query, UploadFile, status
 
 from logger import get_logger
-from models.agent import (
+from models.skill import (
     SkillCreateRequest,
-    SkillUpdateRequest,
-    SkillSummary,
     SkillDetail,
-    SkillListResponse,
     SkillInstallRequest,
-    SkillUninstallRequest,
+    SkillListResponse,
+    SkillSummary,
     SkillToggleRequest,
+    SkillUninstallRequest,
     SkillUpdateContentRequest,
+    SkillUpdateRequest,
 )
 
 logger = get_logger("router.skills")
@@ -96,26 +97,26 @@ def _get_skill_dir(skill_name: str, agent_id: Optional[str]) -> Path:
 def _parse_skill_metadata(skill_md_path: Path) -> dict:
     """
     解析 SKILL.md 文件的 YAML frontmatter
-    
+
     Args:
         skill_md_path: SKILL.md 文件路径
-        
+
     Returns:
         解析后的元数据
     """
     import yaml
-    
+
     content = skill_md_path.read_text(encoding="utf-8")
-    
+
     # 检查是否有 YAML frontmatter
     if not content.startswith("---"):
         return {"name": skill_md_path.parent.name, "description": ""}
-    
+
     # 提取 frontmatter
     parts = content.split("---", 2)
     if len(parts) < 3:
         return {"name": skill_md_path.parent.name, "description": ""}
-    
+
     try:
         metadata = yaml.safe_load(parts[1])
         return metadata or {}
@@ -123,95 +124,58 @@ def _parse_skill_metadata(skill_md_path: Path) -> dict:
         return {"name": skill_md_path.parent.name, "description": ""}
 
 
-async def _sync_skill_to_claude_api(
-    skill_name: str,
-    skill_content: str,
-    agent_id: str = None
-) -> dict:
-    """
-    同步 Skill 到 Claude API（内部辅助函数）
-    
-    Args:
-        skill_name: Skill 名称
-        skill_content: SKILL.md 内容
-        agent_id: 所属 Agent ID
-        
-    Returns:
-        同步结果 {"success": bool, "skill_id": str, "message": str}
-    """
-    try:
-        # TODO: 实际调用 Claude Skills API 注册 Skill
-        # 这里先返回模拟结果
-        skill_id = f"skill_{skill_name}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
-        
-        logger.info(f"🔄 同步 Skill 到 Claude API: {skill_name}")
-        
-        return {
-            "success": True,
-            "skill_id": skill_id,
-            "message": f"已同步到 Claude API",
-        }
-        
-    except Exception as e:
-        logger.error(f"同步 Skill 失败: {e}", exc_info=True)
-        return {
-            "success": False,
-            "skill_id": None,
-            "message": f"同步失败: {str(e)}",
-        }
-
-
 def _scan_skills_in_dir(skills_dir: Path, agent_id: str = None) -> List[dict]:
     """
     扫描目录中的所有 Skills
-    
+
     Args:
         skills_dir: Skills 目录路径
         agent_id: 所属 Agent ID（可选）
-        
+
     Returns:
         Skills 列表
     """
     skills = []
-    
+
     if not skills_dir.exists():
         return skills
-    
+
     for skill_dir in skills_dir.iterdir():
         if not skill_dir.is_dir():
             continue
-        
+
         # 跳过特殊目录
         if skill_dir.name.startswith("_") or skill_dir.name == "__pycache__":
             continue
-        
+
         # 检查 SKILL.md
         skill_md_path = skill_dir / "SKILL.md"
         if not skill_md_path.exists():
             continue
-        
+
         try:
             metadata = _parse_skill_metadata(skill_md_path)
-            
-            skills.append({
-                "name": metadata.get("name", skill_dir.name),
-                "description": metadata.get("description", ""),
-                "agent_id": agent_id or "global",
-                "path": str(skill_dir),
-                "is_enabled": True,
-                "is_registered": False,  # TODO: 从数据库获取
-                "skill_id": None,
-                "created_at": datetime.fromtimestamp(skill_md_path.stat().st_mtime),
-            })
+
+            skills.append(
+                {
+                    "name": metadata.get("name", skill_dir.name),
+                    "description": metadata.get("description", ""),
+                    "agent_id": agent_id or "global",
+                    "path": str(skill_dir),
+                    "is_enabled": True,
+                    "created_at": datetime.fromtimestamp(skill_md_path.stat().st_mtime),
+                }
+            )
         except Exception as e:
             logger.warning(f"解析 Skill '{skill_dir.name}' 失败: {e}")
-    
+
     return skills
 
 
 # ============================================================
 # 列表和查询
 # ============================================================
+
 
 @router.get(
     "",
@@ -225,17 +189,17 @@ async def list_skills(
 ):
     """
     列出所有 Skills
-    
+
     返回全局 Skills 和/或指定 Agent 的 Skills
     """
     skills = []
-    
+
     # 全局 Skills
     if include_global and not agent_id:
         library_dir = _get_skills_library_dir()
         global_skills = _scan_skills_in_dir(library_dir)
         skills.extend(global_skills)
-    
+
     # Agent 特定 Skills
     if agent_id:
         _validate_name(agent_id, "agent_id")
@@ -245,11 +209,12 @@ async def list_skills(
     elif not include_global:
         # 列出所有 Agent 的 Skills
         from utils.instance_loader import list_instances
+
         for instance_name in list_instances():
             instance_skills_dir = _get_instance_skills_dir(instance_name)
             agent_skills = _scan_skills_in_dir(instance_skills_dir, instance_name)
             skills.extend(agent_skills)
-    
+
     # 转换为响应格式
     summaries = [
         SkillSummary(
@@ -257,13 +222,11 @@ async def list_skills(
             description=s["description"],
             agent_id=s["agent_id"],
             is_enabled=s["is_enabled"],
-            is_registered=s["is_registered"],
-            skill_id=s["skill_id"],
             created_at=s["created_at"],
         )
         for s in skills
     ]
-    
+
     return SkillListResponse(
         total=len(summaries),
         skills=summaries,
@@ -273,6 +236,7 @@ async def list_skills(
 # ============================================================
 # 创建和更新
 # ============================================================
+
 
 @router.post(
     "",
@@ -284,80 +248,70 @@ async def list_skills(
 async def create_skill(request: SkillCreateRequest):
     """
     创建 Skill
-    
+
     在 instances/{agent_id}/skills/ 目录下创建新的 Skill
     """
     # 验证 skill_name 格式
     _validate_name(request.name, "Skill 名称")
-    
+
     # 确定目标目录
     skill_dir = _get_skill_dir(request.name, request.agent_id)
-    
+
     if skill_dir.exists():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
                 "code": "SKILL_EXISTS",
                 "message": f"Skill '{request.name}' 已存在",
-            }
+            },
         )
-    
+
     try:
         # 创建目录结构
         skill_dir.mkdir(parents=True)
         (skill_dir / "scripts").mkdir(exist_ok=True)
         (skill_dir / "resources").mkdir(exist_ok=True)
-        
-        # 写入 SKILL.md
+
+        # 写入 SKILL.md（异步）
         skill_md_path = skill_dir / "SKILL.md"
-        skill_md_path.write_text(request.skill_content, encoding="utf-8")
-        
-        # 创建 __init__.py
-        (skill_dir / "__init__.py").write_text("", encoding="utf-8")
-        (skill_dir / "scripts" / "__init__.py").write_text("", encoding="utf-8")
-        
+        async with aiofiles.open(skill_md_path, "w", encoding="utf-8") as f:
+            await f.write(request.skill_content)
+
+        # 创建 __init__.py（异步）
+        async with aiofiles.open(skill_dir / "__init__.py", "w", encoding="utf-8") as f:
+            await f.write("")
+        async with aiofiles.open(skill_dir / "scripts" / "__init__.py", "w", encoding="utf-8") as f:
+            await f.write("")
+
         logger.info(f"✅ 创建 Skill: {request.name} (Agent: {request.agent_id})")
-        
-        # 自动同步到 Claude API（如果启用）
-        skill_id = None
-        sync_message = ""
-        if request.auto_register:
-            sync_result = await _sync_skill_to_claude_api(
-                skill_name=request.name,
-                skill_content=request.skill_content,
-                agent_id=request.agent_id
-            )
-            skill_id = sync_result.get("skill_id")
-            sync_message = sync_result.get("message", "")
-            logger.info(f"🔄 Skill '{request.name}' 已同步到 Claude API: {skill_id}")
-        
+
         return {
             "success": True,
             "name": request.name,
             "agent_id": request.agent_id,
             "path": str(skill_dir),
-            "skill_id": skill_id,
-            "message": f"Skill '{request.name}' 创建成功" + (f"，{sync_message}" if sync_message else ""),
+            "message": f"Skill '{request.name}' 创建成功",
         }
-        
+
     except Exception as e:
         # 回滚（异步删除）
         if skill_dir.exists():
             await asyncio.to_thread(shutil.rmtree, skill_dir)
-        
+
         logger.error(f"创建 Skill 失败: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 "code": "INTERNAL_ERROR",
                 "message": f"创建 Skill 失败: {str(e)}",
-            }
+            },
         )
 
 
 # ============================================================
 # 全局 Skills 管理
 # ============================================================
+
 
 @router.get(
     "/global",
@@ -368,25 +322,23 @@ async def create_skill(request: SkillCreateRequest):
 async def list_global_skills():
     """
     列出全局 Skills（skills/library/）
-    
+
     这些 Skills 可以被安装到任意实例
     """
     library_dir = _get_skills_library_dir()
     global_skills = _scan_skills_in_dir(library_dir)
-    
+
     summaries = [
         SkillSummary(
             name=s["name"],
             description=s["description"],
             agent_id="global",
             is_enabled=True,
-            is_registered=False,
-            skill_id=None,
             created_at=s["created_at"],
         )
         for s in global_skills
     ]
-    
+
     return SkillListResponse(
         total=len(summaries),
         skills=summaries,
@@ -402,32 +354,30 @@ async def list_global_skills():
 async def list_instance_skills(agent_id: str):
     """
     列出实例已安装的 Skills
-    
-    从 skill_registry.yaml 读取，包含注册状态和 skill_id
+
+    从 skill_registry.yaml 读取
     """
     _validate_name(agent_id, "agent_id")
-    
+
     from utils.instance_loader import load_skill_registry
-    
+
     try:
         skills = load_skill_registry(agent_id)
     except Exception as e:
         logger.warning(f"加载实例 {agent_id} 的 skill_registry 失败: {e}")
         skills = []
-    
+
     summaries = [
         SkillSummary(
             name=s.name,
             description=s.description,
             agent_id=agent_id,
             is_enabled=s.enabled,
-            is_registered=bool(s.skill_id),
-            skill_id=s.skill_id,
-            created_at=datetime.fromisoformat(s.registered_at) if s.registered_at else datetime.now(),
+            created_at=datetime.now(),
         )
         for s in skills
     ]
-    
+
     return SkillListResponse(
         total=len(summaries),
         skills=summaries,
@@ -446,7 +396,7 @@ async def get_skill_detail(
 ):
     """
     获取 Skill 详细信息
-    
+
     返回：
     - 元数据（name, description, priority, preferred_for）
     - SKILL.md 完整内容
@@ -455,23 +405,23 @@ async def get_skill_detail(
     - 注册状态（仅实例 Skill）
     """
     _validate_name(skill_name, "Skill 名称")
-    
+
     # 确定 Skill 目录
     if agent_id:
         _validate_name(agent_id, "agent_id")
         skill_dir = _get_instance_skills_dir(agent_id) / skill_name
     else:
         skill_dir = _get_skills_library_dir() / skill_name
-    
+
     if not skill_dir.exists():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
                 "code": "SKILL_NOT_FOUND",
                 "message": f"Skill '{skill_name}' 不存在",
-            }
+            },
         )
-    
+
     # 读取 SKILL.md
     skill_md_path = skill_dir / "SKILL.md"
     content = ""
@@ -479,7 +429,7 @@ async def get_skill_detail(
     if skill_md_path.exists():
         content = skill_md_path.read_text(encoding="utf-8")
         metadata = _parse_skill_metadata(skill_md_path)
-    
+
     # 扫描脚本文件
     scripts = []
     scripts_dir = skill_dir / "scripts"
@@ -487,7 +437,7 @@ async def get_skill_detail(
         for f in scripts_dir.iterdir():
             if f.is_file() and f.suffix == ".py" and not f.name.startswith("_"):
                 scripts.append(f.name)
-    
+
     # 扫描资源文件
     resources = []
     resources_dir = skill_dir / "resources"
@@ -495,27 +445,22 @@ async def get_skill_detail(
         for f in resources_dir.iterdir():
             if f.is_file() and not f.name.startswith("_"):
                 resources.append(f.name)
-    
-    # 获取注册状态（仅实例 Skill）
-    skill_id = None
+
+    # 获取启用状态（仅实例 Skill）
     is_enabled = True
-    is_registered = False
-    registered_at = None
-    
+
     if agent_id:
         from utils.instance_loader import load_skill_registry
+
         try:
             registry_skills = load_skill_registry(agent_id)
             for s in registry_skills:
                 if s.name == skill_name:
-                    skill_id = s.skill_id
                     is_enabled = s.enabled
-                    is_registered = bool(s.skill_id)
-                    registered_at = s.registered_at
                     break
         except Exception as e:
             logger.warning(f"加载 skill_registry 失败: {e}")
-    
+
     return SkillDetail(
         name=metadata.get("name", skill_name),
         description=metadata.get("description", ""),
@@ -526,10 +471,11 @@ async def get_skill_detail(
         content=content,
         agent_id=agent_id or "global",
         is_enabled=is_enabled,
-        is_registered=is_registered,
-        skill_id=skill_id,
-        registered_at=registered_at,
-        created_at=datetime.fromtimestamp(skill_md_path.stat().st_mtime) if skill_md_path.exists() else None,
+        created_at=(
+            datetime.fromtimestamp(skill_md_path.stat().st_mtime)
+            if skill_md_path.exists()
+            else None
+        ),
     )
 
 
@@ -547,46 +493,46 @@ async def get_skill_file_content(
 ):
     """
     获取 Skill 文件内容
-    
+
     Args:
         skill_name: Skill 名称
         file_type: 文件类型（scripts 或 resources）
         file_name: 文件名
         agent_id: 实例 ID（可选）
-        
+
     Returns:
         文件内容和元信息
     """
     _validate_name(skill_name, "Skill 名称")
-    
+
     if file_type not in ("scripts", "resources"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
                 "code": "INVALID_FILE_TYPE",
                 "message": f"文件类型必须是 scripts 或 resources，当前为: {file_type}",
-            }
+            },
         )
-    
+
     # 确定 Skill 目录
     if agent_id:
         _validate_name(agent_id, "agent_id")
         skill_dir = _get_instance_skills_dir(agent_id) / skill_name
     else:
         skill_dir = _get_skills_library_dir() / skill_name
-    
+
     if not skill_dir.exists():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
                 "code": "SKILL_NOT_FOUND",
                 "message": f"Skill '{skill_name}' 不存在",
-            }
+            },
         )
-    
+
     # 构建文件路径
     file_path = skill_dir / file_type / file_name
-    
+
     # 安全检查：防止路径遍历攻击
     try:
         file_path = file_path.resolve()
@@ -596,7 +542,7 @@ async def get_skill_file_content(
                 detail={
                     "code": "INVALID_PATH",
                     "message": "非法文件路径",
-                }
+                },
             )
     except Exception:
         raise HTTPException(
@@ -604,18 +550,18 @@ async def get_skill_file_content(
             detail={
                 "code": "INVALID_PATH",
                 "message": "非法文件路径",
-            }
+            },
         )
-    
+
     if not file_path.exists():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
                 "code": "FILE_NOT_FOUND",
                 "message": f"文件 '{file_name}' 不存在",
-            }
+            },
         )
-    
+
     # 读取文件内容
     try:
         content = file_path.read_text(encoding="utf-8")
@@ -637,9 +583,9 @@ async def get_skill_file_content(
             detail={
                 "code": "READ_ERROR",
                 "message": f"读取文件失败: {str(e)}",
-            }
+            },
         )
-    
+
     # 根据文件扩展名确定语言
     ext = file_path.suffix.lower()
     language_map = {
@@ -657,7 +603,7 @@ async def get_skill_file_content(
         ".css": "css",
     }
     language = language_map.get(ext, "text")
-    
+
     return {
         "skill_name": skill_name,
         "file_type": file_type,
@@ -673,6 +619,7 @@ async def get_skill_file_content(
 # 安装/卸载 Skills
 # ============================================================
 
+
 @router.post(
     "/install",
     response_model=dict,
@@ -682,16 +629,15 @@ async def get_skill_file_content(
 async def install_skill(request: SkillInstallRequest):
     """
     安装 Skill 到实例
-    
+
     流程：
     1. 从 skills/library/{skill_name}/ 复制到 instances/{agent_id}/skills/{skill_name}/
     2. 更新 skill_registry.yaml
-    3. 如果 auto_register=True，注册到 Claude API 并回写 skill_id
     """
-    
+
     _validate_name(request.skill_name, "Skill 名称")
     _validate_name(request.agent_id, "agent_id")
-    
+
     # 源目录（全局库）
     source_dir = _get_skills_library_dir() / request.skill_name
     if not source_dir.exists():
@@ -700,9 +646,9 @@ async def install_skill(request: SkillInstallRequest):
             detail={
                 "code": "SKILL_NOT_FOUND",
                 "message": f"全局库中不存在 Skill '{request.skill_name}'",
-            }
+            },
         )
-    
+
     # 目标目录（实例）
     target_dir = _get_instance_skills_dir(request.agent_id) / request.skill_name
     if target_dir.exists():
@@ -711,72 +657,52 @@ async def install_skill(request: SkillInstallRequest):
             detail={
                 "code": "SKILL_EXISTS",
                 "message": f"实例 '{request.agent_id}' 中已存在 Skill '{request.skill_name}'",
-            }
+            },
         )
-    
+
     try:
         # 1. 复制文件
         target_dir.parent.mkdir(parents=True, exist_ok=True)
         await asyncio.to_thread(shutil.copytree, source_dir, target_dir)
         logger.info(f"✅ 复制 Skill: {source_dir} -> {target_dir}")
-        
+
         # 2. 解析 SKILL.md 获取元数据
         skill_md_path = target_dir / "SKILL.md"
         metadata = _parse_skill_metadata(skill_md_path) if skill_md_path.exists() else {}
         description = metadata.get("description", "")
-        
+
         # 3. 更新 skill_registry.yaml
-        from utils.instance_loader import load_skill_registry, _update_skill_registry, SkillConfig
-        
+        from utils.instance_loader import SkillConfig, _update_skill_registry, load_skill_registry
+
         existing_skills = load_skill_registry(request.agent_id)
-        
+
         new_skill = SkillConfig(
-            name=request.skill_name,
-            enabled=True,
-            description=description,
-            skill_id=None,
-            registered_at=None,
-            skill_path=target_dir
+            name=request.skill_name, enabled=True, description=description, skill_path=target_dir
         )
         existing_skills.append(new_skill)
-        
+
         _update_skill_registry(request.agent_id, existing_skills)
         logger.info(f"✅ 更新 skill_registry.yaml: 添加 {request.skill_name}")
-        
-        # 4. 自动注册到 Claude API（如果启用）
-        skill_id = None
-        register_message = ""
-        if request.auto_register:
-            from utils.instance_loader import register_skill_to_claude
-            result = register_skill_to_claude(request.agent_id, request.skill_name)
-            skill_id = result.get("skill_id")
-            register_message = result.get("message", "")
-            if result.get("success"):
-                logger.info(f"✅ 注册到 Claude API: {skill_id}")
-            else:
-                logger.warning(f"⚠️ 注册到 Claude API 失败: {register_message}")
-        
+
         return {
             "success": True,
             "skill_name": request.skill_name,
             "agent_id": request.agent_id,
-            "skill_id": skill_id,
-            "message": f"Skill '{request.skill_name}' 已安装到实例 '{request.agent_id}'" + 
-                       (f"，{register_message}" if register_message else ""),
+            "message": f"Skill '{request.skill_name}' 已安装到实例 '{request.agent_id}'",
         }
-        
+
     except Exception as e:
         # 回滚
         if target_dir.exists():
             await asyncio.to_thread(shutil.rmtree, target_dir)
-        
+
         logger.error(f"安装 Skill 失败: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 "code": "INTERNAL_ERROR",
                 "message": f"安装 Skill 失败: {str(e)}",
-            }
+            },
         )
 
 
@@ -789,46 +715,47 @@ async def install_skill(request: SkillInstallRequest):
 async def uninstall_skill(request: SkillUninstallRequest):
     """
     从实例卸载 Skill
-    
+
     流程：
     1. 从 Claude API 注销（如果已注册）
     2. 从 skill_registry.yaml 移除
     3. 删除文件目录
     """
-    
+
     _validate_name(request.skill_name, "Skill 名称")
     _validate_name(request.agent_id, "agent_id")
-    
+
     skill_dir = _get_instance_skills_dir(request.agent_id) / request.skill_name
-    
+
     if not skill_dir.exists():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
                 "code": "SKILL_NOT_FOUND",
                 "message": f"实例 '{request.agent_id}' 中不存在 Skill '{request.skill_name}'",
-            }
+            },
         )
-    
+
     try:
         # 1. 从 Claude API 注销
         from utils.instance_loader import unregister_skill_from_claude
+
         unregister_result = unregister_skill_from_claude(request.agent_id, request.skill_name)
         logger.info(f"🔄 从 Claude API 注销: {unregister_result.get('message', '')}")
-        
+
         # 2. 从 skill_registry.yaml 移除（unregister_skill_from_claude 已处理）
-        
+
         # 3. 删除文件目录
         await asyncio.to_thread(shutil.rmtree, skill_dir)
         logger.info(f"🗑️ 删除 Skill 目录: {skill_dir}")
-        
+
         return {
             "success": True,
             "skill_name": request.skill_name,
             "agent_id": request.agent_id,
             "message": f"Skill '{request.skill_name}' 已从实例 '{request.agent_id}' 卸载",
         }
-        
+
     except Exception as e:
         logger.error(f"卸载 Skill 失败: {e}", exc_info=True)
         raise HTTPException(
@@ -836,7 +763,7 @@ async def uninstall_skill(request: SkillUninstallRequest):
             detail={
                 "code": "INTERNAL_ERROR",
                 "message": f"卸载 Skill 失败: {str(e)}",
-            }
+            },
         )
 
 
@@ -849,40 +776,40 @@ async def uninstall_skill(request: SkillUninstallRequest):
 async def toggle_skill(request: SkillToggleRequest):
     """
     启用/禁用 Skill
-    
+
     更新 skill_registry.yaml 中的 enabled 字段
     """
     _validate_name(request.skill_name, "Skill 名称")
     _validate_name(request.agent_id, "agent_id")
-    
-    from utils.instance_loader import load_skill_registry, _update_skill_registry
-    
+
+    from utils.instance_loader import _update_skill_registry, load_skill_registry
+
     try:
         skills = load_skill_registry(request.agent_id)
-        
+
         # 查找目标 Skill
         target_skill = None
         for skill in skills:
             if skill.name == request.skill_name:
                 target_skill = skill
                 break
-        
+
         if not target_skill:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={
                     "code": "SKILL_NOT_FOUND",
                     "message": f"实例 '{request.agent_id}' 中不存在 Skill '{request.skill_name}'",
-                }
+                },
             )
-        
+
         # 更新状态
         target_skill.enabled = request.enabled
         _update_skill_registry(request.agent_id, skills)
-        
+
         status_text = "启用" if request.enabled else "禁用"
         logger.info(f"✅ {status_text} Skill: {request.skill_name} (实例: {request.agent_id})")
-        
+
         return {
             "success": True,
             "skill_name": request.skill_name,
@@ -890,7 +817,7 @@ async def toggle_skill(request: SkillToggleRequest):
             "enabled": request.enabled,
             "message": f"Skill '{request.skill_name}' 已{status_text}",
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -900,7 +827,7 @@ async def toggle_skill(request: SkillToggleRequest):
             detail={
                 "code": "INTERNAL_ERROR",
                 "message": f"切换 Skill 状态失败: {str(e)}",
-            }
+            },
         )
 
 
@@ -916,46 +843,48 @@ async def update_skill_content(request: SkillUpdateContentRequest):
     """
     _validate_name(request.skill_name, "Skill 名称")
     _validate_name(request.agent_id, "agent_id")
-    
+
     skill_dir = _get_instance_skills_dir(request.agent_id) / request.skill_name
     skill_md_path = skill_dir / "SKILL.md"
-    
+
     if not skill_dir.exists():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
                 "code": "SKILL_NOT_FOUND",
                 "message": f"实例 '{request.agent_id}' 中不存在 Skill '{request.skill_name}'",
-            }
+            },
         )
-    
+
     try:
-        # 写入文件
-        skill_md_path.write_text(request.content, encoding="utf-8")
+        # 写入文件（异步）
+        async with aiofiles.open(skill_md_path, "w", encoding="utf-8") as f:
+            await f.write(request.content)
         logger.info(f"✅ 更新 Skill 内容: {request.skill_name} (实例: {request.agent_id})")
-        
+
         # 尝试解析元数据以确保格式正确（可选）
         try:
             metadata = _parse_skill_metadata(skill_md_path)
             # 可以在这里更新 registry 中的 description，如果需要的话
-            from utils.instance_loader import load_skill_registry, _update_skill_registry
+            from utils.instance_loader import _update_skill_registry, load_skill_registry
+
             skills = load_skill_registry(request.agent_id)
             for skill in skills:
                 if skill.name == request.skill_name:
                     skill.description = metadata.get("description", skill.description)
                     break
             _update_skill_registry(request.agent_id, skills)
-            
+
         except Exception as e:
             logger.warning(f"解析更新后的 SKILL.md 失败: {e}")
-        
+
         return {
             "success": True,
             "skill_name": request.skill_name,
             "agent_id": request.agent_id,
             "message": "Skill 内容已更新",
         }
-        
+
     except Exception as e:
         logger.error(f"更新 Skill 内容失败: {e}", exc_info=True)
         raise HTTPException(
@@ -963,50 +892,14 @@ async def update_skill_content(request: SkillUpdateContentRequest):
             detail={
                 "code": "INTERNAL_ERROR",
                 "message": f"更新 Skill 内容失败: {str(e)}",
-            }
-        )
-
-
-@router.post(
-    "/register",
-    response_model=dict,
-    summary="注册 Skill 到 Claude API",
-    description="将已安装的 Skill 注册到 Claude API",
-)
-async def register_skill(skill_name: str, agent_id: str):
-    """
-    注册 Skill 到 Claude API
-    
-    用于已安装但未注册的 Skill
-    """
-    _validate_name(skill_name, "Skill 名称")
-    _validate_name(agent_id, "agent_id")
-    
-    from utils.instance_loader import register_skill_to_claude
-    
-    result = register_skill_to_claude(agent_id, skill_name)
-    
-    if result.get("success"):
-        return {
-            "success": True,
-            "skill_name": skill_name,
-            "agent_id": agent_id,
-            "skill_id": result.get("skill_id"),
-            "message": result.get("message", "注册成功"),
-        }
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={
-                "code": "REGISTER_FAILED",
-                "message": result.get("message", "注册失败"),
-            }
+            },
         )
 
 
 # ============================================================
 # 上传 Skill
 # ============================================================
+
 
 @router.post(
     "/upload",
@@ -1020,7 +913,7 @@ async def upload_skill(
 ):
     """
     上传新 Skill 到全局库
-    
+
     流程：
     1. 验证 skill_name 格式
     2. 解压 zip 文件到临时目录
@@ -1030,9 +923,9 @@ async def upload_skill(
     """
     import tempfile
     import zipfile
-    
+
     _validate_name(skill_name, "Skill 名称")
-    
+
     # 检查目标目录是否已存在
     target_dir = _get_skills_library_dir() / skill_name
     if target_dir.exists():
@@ -1041,54 +934,55 @@ async def upload_skill(
             detail={
                 "code": "SKILL_EXISTS",
                 "message": f"全局库中已存在 Skill '{skill_name}'",
-            }
+            },
         )
-    
+
     # 验证文件类型
-    if not file.filename or not file.filename.endswith('.zip'):
+    if not file.filename or not file.filename.endswith(".zip"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
                 "code": "INVALID_FILE",
                 "message": "请上传 .zip 文件",
-            }
+            },
         )
-    
+
     temp_dir = None
     try:
         # 创建临时目录
         temp_dir = Path(tempfile.mkdtemp())
         zip_path = temp_dir / "skill.zip"
-        
+
         # 保存上传的文件
         content = await file.read()
         zip_path.write_bytes(content)
-        
+
         # 解压
         extract_dir = temp_dir / "extracted"
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        with zipfile.ZipFile(zip_path, "r") as zip_ref:
             zip_ref.extractall(extract_dir)
-        
+
         # 查找 SKILL.md（可能在根目录或子目录中）
         skill_md_path = None
         for p in extract_dir.rglob("SKILL.md"):
             skill_md_path = p
             break
-        
+
         if not skill_md_path:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
                     "code": "INVALID_STRUCTURE",
                     "message": "zip 文件中必须包含 SKILL.md",
-                }
+                },
             )
-        
+
         # 确定 Skill 根目录（SKILL.md 所在目录）
         skill_root = skill_md_path.parent
-        
+
         # 验证 SKILL.md 内容
         from utils.instance_loader import validate_skill_directory
+
         validation = validate_skill_directory(skill_root)
         if not validation["valid"]:
             raise HTTPException(
@@ -1096,18 +990,18 @@ async def upload_skill(
                 detail={
                     "code": "VALIDATION_FAILED",
                     "message": f"SKILL.md 验证失败: {'; '.join(validation['errors'])}",
-                }
+                },
             )
-        
+
         # 移动到全局库
         target_dir.parent.mkdir(parents=True, exist_ok=True)
         await asyncio.to_thread(shutil.copytree, skill_root, target_dir)
-        
+
         logger.info(f"✅ 上传 Skill 到全局库: {skill_name}")
-        
+
         # 获取元数据
         metadata = _parse_skill_metadata(target_dir / "SKILL.md")
-        
+
         return {
             "success": True,
             "skill_name": skill_name,
@@ -1115,7 +1009,7 @@ async def upload_skill(
             "path": str(target_dir),
             "message": f"Skill '{skill_name}' 已上传到全局库",
         }
-        
+
     except HTTPException:
         raise
     except zipfile.BadZipFile:
@@ -1124,7 +1018,7 @@ async def upload_skill(
             detail={
                 "code": "INVALID_ZIP",
                 "message": "无效的 zip 文件",
-            }
+            },
         )
     except Exception as e:
         logger.error(f"上传 Skill 失败: {e}", exc_info=True)
@@ -1136,7 +1030,7 @@ async def upload_skill(
             detail={
                 "code": "INTERNAL_ERROR",
                 "message": f"上传 Skill 失败: {str(e)}",
-            }
+            },
         )
     finally:
         # 清理临时目录
@@ -1155,26 +1049,26 @@ PREBUILT_CLAUDE_SKILLS = [
         "name": "pptx",
         "description": "Create presentations, edit slides, analyze presentation content.",
         "provider": "Anthropic",
-        "type": "claude-skill"
+        "type": "claude-skill",
     },
     {
         "name": "xlsx",
         "description": "Create spreadsheets, analyze data, generate reports with charts.",
         "provider": "Anthropic",
-        "type": "claude-skill"
+        "type": "claude-skill",
     },
     {
         "name": "docx",
         "description": "Create documents, edit content, format text.",
         "provider": "Anthropic",
-        "type": "claude-skill"
+        "type": "claude-skill",
     },
     {
         "name": "pdf",
         "description": "Generate formatted PDF documents and reports.",
         "provider": "Anthropic",
-        "type": "claude-skill"
-    }
+        "type": "claude-skill",
+    },
 ]
 
 
@@ -1187,9 +1081,9 @@ PREBUILT_CLAUDE_SKILLS = [
 async def list_prebuilt_skills():
     """
     列出 Pre-built Claude Skills
-    
+
     返回 Anthropic 官方提供的 Pre-built Claude Skills
-    
+
     注意：这些是 Anthropic 平台的 Pre-built Claude Skills
     """
     return {
@@ -1201,6 +1095,7 @@ async def list_prebuilt_skills():
 # ============================================================
 # 动态路由（放在最后以避免路径冲突）
 # ============================================================
+
 
 @router.get(
     "/{skill_name}",
@@ -1217,10 +1112,10 @@ async def get_skill_legacy(
     """
     skill_dir = _get_skill_dir(skill_name, agent_id)
     skill_md_path = skill_dir / "SKILL.md"
-    
+
     if skill_md_path.exists():
         metadata = _parse_skill_metadata(skill_md_path)
-        
+
         return SkillDetail(
             name=metadata.get("name", skill_name),
             description=metadata.get("description", ""),
@@ -1231,18 +1126,15 @@ async def get_skill_legacy(
             content="",
             agent_id=agent_id or "global",
             is_enabled=True,
-            is_registered=False,
-            skill_id=None,
-            registered_at=None,
             created_at=datetime.fromtimestamp(skill_md_path.stat().st_mtime),
         )
-    
+
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
         detail={
             "code": "SKILL_NOT_FOUND",
             "message": f"Skill '{skill_name}' 不存在",
-        }
+        },
     )
 
 
@@ -1262,35 +1154,36 @@ async def update_skill_legacy(
     """
     skill_dir = _get_skill_dir(skill_name, agent_id)
     skill_md_path = skill_dir / "SKILL.md"
-    
+
     if not skill_md_path.exists():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
                 "code": "SKILL_NOT_FOUND",
                 "message": f"Skill '{skill_name}' 不存在",
-            }
+            },
         )
-    
+
     try:
         updated_fields = []
-        
+
         if request.skill_content is not None:
-            skill_md_path.write_text(request.skill_content, encoding="utf-8")
+            async with aiofiles.open(skill_md_path, "w", encoding="utf-8") as f:
+                await f.write(request.skill_content)
             updated_fields.append("skill_content")
-        
+
         if request.enabled is not None:
             updated_fields.append("enabled")
-        
+
         logger.info(f"✅ 更新 Skill: {skill_name}")
-        
+
         return {
             "success": True,
             "name": skill_name,
             "updated_fields": updated_fields,
             "message": f"Skill '{skill_name}' 更新成功",
         }
-        
+
     except Exception as e:
         logger.error(f"更新 Skill 失败: {e}", exc_info=True)
         raise HTTPException(
@@ -1298,7 +1191,7 @@ async def update_skill_legacy(
             detail={
                 "code": "INTERNAL_ERROR",
                 "message": f"更新 Skill 失败: {str(e)}",
-            }
+            },
         )
 
 
@@ -1317,7 +1210,7 @@ async def delete_skill_legacy(
     删除 Skill（旧版兼容）
     """
     skill_dir = _get_skill_dir(skill_name, agent_id)
-    
+
     if not skill_dir.exists():
         if force:
             return {
@@ -1330,20 +1223,20 @@ async def delete_skill_legacy(
             detail={
                 "code": "SKILL_NOT_FOUND",
                 "message": f"Skill '{skill_name}' 不存在",
-            }
+            },
         )
-    
+
     try:
         await asyncio.to_thread(shutil.rmtree, skill_dir)
-        
+
         logger.info(f"🗑️ 删除 Skill: {skill_name}")
-        
+
         return {
             "success": True,
             "name": skill_name,
             "message": f"Skill '{skill_name}' 已删除",
         }
-        
+
     except Exception as e:
         if force:
             logger.warning(f"删除 Skill 失败但已忽略: {e}")
@@ -1358,5 +1251,5 @@ async def delete_skill_legacy(
             detail={
                 "code": "INTERNAL_ERROR",
                 "message": f"删除 Skill 失败: {str(e)}",
-            }
+            },
         )

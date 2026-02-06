@@ -2,144 +2,110 @@
 ZenFlux Agent V4.2 Core Module
 
 核心组件：
-- SimpleAgent: 主Agent类
+- Agent: 统一 Agent 类（执行策略通过 Executor 实现）
 - CapabilityRegistry: 能力注册表
-- CapabilityRouter: 能力路由器
-- SkillLoader: Skill 内容加载器（对齐 clawdbot 机制）
+- ToolSelector: 工具选择器
+- SkillLoader: Skill 内容加载器
 - MemoryManager: 记忆管理
-- LLM Service: LLM统一封装
+- LLM Service: LLM 统一封装
 - EventManager: 事件管理（SSE/WebSocket 通用协议）
 - Context: 上下文管理
-- Orchestration: Code-First + VM Scaffolding 编排模块（V4.2 新增）
-
-术语说明：
-- Skill: 本地工作流技能（skills/library/，对齐 clawdbot 机制）
+- Orchestration: Code-First + VM Scaffolding 编排模块
 """
 
-# Agent（新架构）
-from .agent import SimpleAgent, RVRBAgent, create_simple_agent
+# Agent
+from .agent import Agent, create_agent
 
-# 能力路由（从新路径导入）
-from .tool.capability import (
-    CapabilityRegistry,
-    Capability,
-    CapabilityType,
-    create_capability_registry,
-    CapabilityRouter,
-    RoutingResult,
-    create_capability_router,
-    extract_keywords,
-    # Skill 加载器（本地工作流技能）
-    SkillLoader,
-    SkillInfo,
-    create_skill_loader
-)
+# 上下文管理（新架构）
+from .context import RuntimeContext, create_runtime_context
 
-# 记忆管理（新架构 - 文件夹模块）
-from .memory import (
-    # 基础类型
-    MemoryScope,
-    StorageBackend,
-    MemoryConfig,
-    # 会话级记忆
-    WorkingMemory,
-    create_working_memory,
-    # E2B 记忆
-    E2BSandboxSession,
-    E2BMemory,
-    create_e2b_memory,
-    # 用户级记忆
-    EpisodicMemory,
-    create_episodic_memory,
-    PreferenceMemory,
-    create_preference_memory,
-    # 系统级记忆（Skill = 本地工作流技能）
-    SkillMemory,
-    create_skill_memory,
-    CacheMemory,
-    create_cache_memory,
-    # 统一管理器
-    MemoryManager,
-    create_memory_manager,
-    create_user_memory_manager,
+# 事件管理（SSE/WebSocket 通用协议）
+from .events import (  # 事件存储（内存，开发环境用）
+    ContentEventManager,
+    ConversationEventManager,
+    EventBroadcaster,
+    EventManager,
+    InMemoryEventStorage,
+    MessageEventManager,
+    SessionEventManager,
+    SystemEventManager,
+    UserEventManager,
+    create_broadcaster,
+    create_event_manager,
+    get_memory_storage,
 )
 
 # LLM Service（从 llm 模块导入）
 from .llm import (
     BaseLLMService,
     ClaudeLLMService,
+    InvocationType,
+    LLMConfig,
+    LLMProvider,
     LLMResponse,
     Message,
     ToolType,
-    LLMProvider,
-    InvocationType,
-    LLMConfig,
+    create_claude_service,
     create_llm_service,
-    create_claude_service
 )
 
-# 事件管理（SSE/WebSocket 通用协议）
-from .events import (
-    EventManager,
-    create_event_manager,
-    SessionEventManager,
-    UserEventManager,
-    ConversationEventManager,
-    MessageEventManager,
-    ContentEventManager,
-    SystemEventManager,
-    EventBroadcaster,
-    create_broadcaster,
-    # 事件存储（内存，开发环境用）
-    InMemoryEventStorage,
-    get_memory_storage,
-)
-
-# 上下文管理（新架构）
-from .context import (
-    Context,
-    create_context,
-    RuntimeContext,
-    create_runtime_context
+# 记忆管理（新架构 - 文件夹模块）
+from .memory import (  # 基础类型; 会话级记忆; E2B 记忆; 用户级记忆; 系统级记忆（Skill = 本地工作流技能）; 统一管理器
+    CacheMemory,
+    E2BMemory,
+    E2BSandboxSession,
+    EpisodicMemory,
+    MemoryConfig,
+    MemoryManager,
+    MemoryScope,
+    PreferenceMemory,
+    SkillMemory,
+    StorageBackend,
+    WorkingMemory,
+    create_cache_memory,
+    create_e2b_memory,
+    create_episodic_memory,
+    create_memory_manager,
+    create_preference_memory,
+    create_skill_memory,
+    create_user_memory_manager,
+    create_working_memory,
 )
 
 # Code-First + VM Scaffolding 编排模块（V4.2 新增）
-from .orchestration import (
-    # 管道追踪器
+from .orchestration import (  # 管道追踪器; 代码验证器; 代码编排器
+    CodeOrchestrator,
+    CodeValidator,
     E2EPipelineTracer,
     PipelineStage,
-    create_pipeline_tracer,
-    # 代码验证器
-    CodeValidator,
     ValidationResult,
-    create_code_validator,
-    # 代码编排器
-    CodeOrchestrator,
     create_code_orchestrator,
+    create_code_validator,
+    create_pipeline_tracer,
 )
+from .tool.capability import SkillInfo, SkillLoader, create_skill_loader
+from .tool.registry import CapabilityRegistry, create_capability_registry
+from .tool.selector import RoutingResult, ToolSelector, create_tool_selector
 
+# 工具系统
+from .tool.types import Capability, CapabilityType
 
 __all__ = [
     # Agent
-    "SimpleAgent",
-    "RVRBAgent",
-    "create_simple_agent",
-    
-    # 能力路由
+    "Agent",
+    "create_agent",
+    # 工具系统
     "CapabilityRegistry",
     "Capability",
     "CapabilityType",
     "create_capability_registry",
-    "CapabilityRouter",
+    "ToolSelector",
     "RoutingResult",
-    "create_capability_router",
-    "extract_keywords",
-    
-    # Skill 加载器（本地工作流技能）
+    "create_tool_selector",
+    # Skill 加载器
     "SkillLoader",
     "SkillInfo",
     "create_skill_loader",
-    
     # 记忆管理
     "MemoryScope",
     "StorageBackend",
@@ -161,7 +127,6 @@ __all__ = [
     "MemoryManager",
     "create_memory_manager",
     "create_user_memory_manager",
-    
     # LLM Service
     "BaseLLMService",
     "ClaudeLLMService",
@@ -173,7 +138,6 @@ __all__ = [
     "LLMConfig",
     "create_llm_service",
     "create_claude_service",
-    
     # 事件管理（SSE/WebSocket 通用协议）
     "EventManager",
     "create_event_manager",
@@ -188,13 +152,9 @@ __all__ = [
     # 事件存储（内存，开发环境用）
     "InMemoryEventStorage",
     "get_memory_storage",
-    
     # 上下文管理
-    "Context",
-    "create_context",
     "RuntimeContext",
     "create_runtime_context",
-    
     # Code-First + VM Scaffolding 编排模块（V4.2 新增）
     "E2EPipelineTracer",
     "PipelineStage",
@@ -205,4 +165,3 @@ __all__ = [
     "CodeOrchestrator",
     "create_code_orchestrator",
 ]
-

@@ -108,6 +108,41 @@ from .knowledge import (
 # Usage 模型（计费响应）
 from .usage import UsageResponse, UsageSummary
 
+# LLM 配置
+from .llm import LLMConfig
+
+# MCP 工具配置
+from .mcp import MCPToolConfig, MCPToolDetail
+
+# Skill 模型
+from .skill import (
+    SkillStatus,
+    SkillCreateRequest,
+    SkillUpdateRequest,
+    SkillSummary,
+    SkillDetail,
+    SkillListResponse,
+    SkillSyncResponse,
+    SkillInstallRequest,
+    SkillUninstallRequest,
+    SkillToggleRequest,
+    SkillUpdateContentRequest,
+)
+
+# Agent 模型
+from .agent import (
+    AgentStatus,
+    APIAuthConfig,
+    RESTAPIConfig,
+    APIDetail,
+    MemoryConfig,
+    AgentCreateRequest,
+    AgentUpdateRequest,
+    AgentSummary,
+    AgentDetail,
+    AgentListResponse,
+)
+
 __all__ = [
     # Content Block 模型
     "TextBlock",
@@ -202,4 +237,32 @@ __all__ = [
     # Usage 模型
     "UsageResponse",
     "UsageSummary",
+    # LLM 配置
+    "LLMConfig",
+    # MCP 工具配置
+    "MCPToolConfig",
+    "MCPToolDetail",
+    # Skill 模型
+    "SkillStatus",
+    "SkillCreateRequest",
+    "SkillUpdateRequest",
+    "SkillSummary",
+    "SkillDetail",
+    "SkillListResponse",
+    "SkillSyncResponse",
+    "SkillInstallRequest",
+    "SkillUninstallRequest",
+    "SkillToggleRequest",
+    "SkillUpdateContentRequest",
+    # Agent 模型
+    "AgentStatus",
+    "APIAuthConfig",
+    "RESTAPIConfig",
+    "APIDetail",
+    "MemoryConfig",
+    "AgentCreateRequest",
+    "AgentUpdateRequest",
+    "AgentSummary",
+    "AgentDetail",
+    "AgentListResponse",
 ]

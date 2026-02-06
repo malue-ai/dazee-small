@@ -93,7 +93,7 @@ class SkillInstance(Base):
     """
     Skill 实例表
     
-    记录 Skill 的注册状态和 Claude API 的 skill_id
+    记录实例安装的 Skill
     Skill 内容存储在 instances/{agent_id}/skills/{skill_name}/
     """
     __tablename__ = "skill_instances"
@@ -113,9 +113,7 @@ class SkillInstance(Base):
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[str] = mapped_column(Text, default="", nullable=False)
     
-    # Claude API 注册信息（添加索引，支持按 skill_id 和启用状态查询）
-    skill_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
-    is_registered: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # 状态
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
     
     # 时间戳
@@ -123,10 +121,6 @@ class SkillInstance(Base):
         DateTime,
         default=datetime.now,
         nullable=False
-    )
-    registered_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime,
-        nullable=True
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,

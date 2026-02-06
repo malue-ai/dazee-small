@@ -1,11 +1,11 @@
 # Zenflux Agent 系统架构
 
-> 版本: 7.1.0  
-> 更新时间: 2026-01-20
+> 版本: 10.3
+> 更新时间: 2026-02-06
 
 ## 一、系统整体架构
 
-### 1.1 V7 架构总览
+### 1.1 架构总览
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -24,43 +24,42 @@
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
+│                              渠道层 (Channels Layer) 🆕                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│   Gateway (网关)    │    Feishu / DingTalk    │   Adapters (协议适配)        │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
 │                              服务层 (Service Layer)                          │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │  ChatService     │  SessionService  │  AgentRegistry  │  ConversationService│
 ├─────────────────────────────────────────────────────────────────────────────┤
-│           Mem0Service  │  KnowledgeService  │  TaskService                  │
+│  KnowledgeService │  Mem0Service    │  TaskService    │  MCPService         │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                        🆕 V7 路由层 (Routing Layer)                          │
+│                              路由层 (Routing Layer)                          │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│   AgentRouter (路由决策)  │  IntentAnalyzer (意图分析)  │  ComplexityScorer   │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                         路由决策: complexity_score                           │
-│              ┌─────────────────┴─────────────────┐                          │
-│              ▼                                   ▼                          │
-│      < 0.6 (简单)                        >= 0.6 (复杂)                       │
-│      SimpleAgent                    MultiAgentOrchestrator                  │
+│     AgentRouter (路由决策)    │    IntentAnalyzer (意图分析)                 │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                              核心层 (Core Layer)                             │
+│                           执行核心层 (Execution Core) 🆕                     │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│    SimpleAgent    │    ClaudeService    │    ToolExecutor    │  EventManager │
-│   (单智能体引擎)    │    (LLM 调用)        │    (工具执行)       │   (事件分发)   │
+│   Execution Engine (执行引擎)  │      Context System (上下文系统)            │
+│  ┌─────────────────────────┐  │  ┌──────────────────────────────────────┐   │
+│  │     ExecutorProtocol    │  │  │         InjectionOrchestrator        │   │
+│  │ ┌──────┐ ┌──────┐ ┌─────┤  │  │ ┌─────────┐ ┌─────────┐ ┌──────────┐ │   │
+│  │ │ RVR  │ │ RVRB │ │Multi│  │  │ │ Phase 1 │ │ Phase 2 │ │ Phase 3  │ │   │
+│  │ └──────┘ └──────┘ └─────┘  │  │ └─────────┘ └─────────┘ └──────────┘ │   │
+│  └─────────────────────────┘  │  └──────────────────────────────────────┘   │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│ 🆕 MultiAgent    │  ToolSelector  │  PlanManager  │  ContextEngineering      │
-│   Orchestrator   │   (工具选择)     │   (计划管理)   │    (上下文工程)          │
-│  (多智能体编排)    │                │              │                         │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                        🆕 V7 监控层 (Monitoring Layer)                       │
-├─────────────────────────────────────────────────────────────────────────────┤
-│  TokenAuditor (审计) │ UsageTracker (用量) │ UsageResponse (计费) │ Billing  │
+│   Components (组件)            │      Tooling (工具系统) 🆕                  │
+│  LeadAgent | Critic | Manager  │   CapabilityRegistry (统一注册表)           │
+│                                │   InstanceRegistry (实例工具)               │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -75,7 +74,9 @@
 └──────────────────┴──────────────────┴──────────────────┴────────────────────┘
 ```
 
-### 1.2 V7 路由决策流程
+### 1.2 路由决策流程
+
+路由层采用统一语义的路由决策机制，直接将用户意图映射到具体的执行策略：
 
 ```
 用户请求
@@ -83,31 +84,123 @@
     ▼
 ┌──────────────────────────────────────┐
 │         AgentRouter (路由层)          │
-│  1. IntentAnalyzer: 分析用户意图       │
-│  2. ComplexityScorer: 评估任务复杂度   │
+│    core/routing/router.py            │
 └──────────────────────────────────────┘
     │
-    ├─── complexity < 0.6 ───► SimpleAgent (单智能体)
-    │                          快速响应，适合简单任务
+    │  1. IntentAnalyzer 分析意图与复杂度 (LLM-First)
+    │  2. 映射到执行策略 (agent_type)
     │
-    └─── complexity >= 0.6 ──► MultiAgentOrchestrator (多智能体)
-                               复杂任务分解，多角色协作
-                               │
-                               ├── Lead Agent (Opus) - 任务分解、结果综合
-                               ├── Worker Agents (Sonnet) - 执行具体任务
-                               └── Critic Agent (Sonnet) - 质量评审
+    ├─── "rvr" ───────► RVRExecutor (简单任务)
+    │                   无回溯，快速响应，低成本
+    │
+    ├─── "rvr-b" ─────► RVRBExecutor (中等任务)
+    │                   支持错误回溯 (Backtrack)，自动纠错
+    │
+    └─── "multi" ─────► MultiAgentExecutor (复杂任务)
+                        多智能体协作，Lead/Worker/Critic 模式
 ```
 
-### 1.3 V7 多智能体配置
+### 1.3 上下文管理系统 (Context System)
 
-| 配置模式 | Orchestrator | Worker | Critic | 适用场景 |
-|---------|-------------|--------|--------|---------|
-| `default` | Opus 4.5 | Sonnet 4.5 | Sonnet | 平衡质量和成本 |
-| `cost_optimized` | Sonnet | Haiku | 关闭 | 控制成本 |
-| `high_quality` | Opus | Opus | Opus | 追求最高质量 |
-| `prototype` | Sonnet | Sonnet | 关闭 | 快速原型 |
+核心层引入了强大的 `InjectionOrchestrator`，负责分阶段注入上下文，并与 LLM 的 `Prompt Caching` 机制深度集成。
 
-## 二、资源池架构详解
+**Context 注入阶段 (Phases):**
+
+| 阶段 | 目标位置 | 内容示例 | 缓存策略 |
+|------|---------|---------|---------|
+| **Phase 1: System** | `messages[0] (system)` | 系统角色、工具定义、框架规则 | **STABLE** (1h) |
+| **Phase 2: Context** | `messages[1] (user)` | 用户画像、长期记忆 (Mem0)、知识库 | **SESSION** (5min) |
+| **Phase 3: Runtime** | `messages[n] (user)` | 实时状态 (Todo)、页面内容、历史摘要 | **DYNAMIC** (不缓存) |
+
+## 二、渠道与网关层详解 (Channels & Gateway)
+
+独立的 **渠道层 (Channels Layer)**，负责处理多渠道接入、消息标准化和协议适配。
+
+### 2.1 渠道层架构
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              Gateway (网关)                                  │
+│  channels/gateway/                                                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  1. SecurityChecker: 签名验证、IP 白名单                                      │
+│  2. MessagePreprocessor:                                                    │
+│     ├── MessageDeduper (Redis Set): 消息去重 (10min)                        │
+│     ├── InboundDebouncer (Redis): 防抖动                                     │
+│     └── Merger (Text/Media): 消息合并                                        │
+└─────────────────────────────────────────────────────────────────────────────┘
+            │
+            ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           Channel Plugins (插件)                             │
+│  channels/{channel_id}/                                                     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  Each Plugin implements `ChannelPlugin` Protocol:                           │
+│                                                                             │
+│  ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐         │
+│  │ ConfigAdapter    │   │ GatewayAdapter   │   │ OutboundAdapter  │         │
+│  │ (配置管理)        │   │ (入站事件处理)    │   │ (出站消息发送)    │         │
+│  └──────────────────┘   └──────────────────┘   └──────────────────┘         │
+│                                                                             │
+│  ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐         │
+│  │ SecurityAdapter  │   │ ActionsAdapter   │   │ StreamingAdapter │         │
+│  │ (安全验证)        │   │ (卡片交互)        │   │ (流式响应)        │         │
+│  └──────────────────┘   └──────────────────┘   └──────────────────┘         │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 2.2 飞书渠道 (Feishu Channel) 实现细节
+
+以飞书渠道为例，展示了如何实现标准的 `ChannelPlugin` 协议：
+
+*   **GatewayAdapter (`channels/feishu/gateway.py`)**:
+    *   处理 URL 验证 (`url_verification`)。
+    *   处理 V2.0 事件格式 (`schema: "2.0"`).
+    *   将飞书特定事件 (`im.message.receive_v1`) 转换为通用 `InboundMessage`。
+    *   处理卡片交互 (`card.action.trigger`)。
+
+*   **消息转换**:
+    *   `FeishuMessage` -> `InboundMessage` (标准格式)。
+    *   提取 `mentions` 中的 `open_id`/`user_id`/`union_id`，供上层精准匹配。
+
+*   **安全机制**:
+    *   使用 `FeishuSecurityAdapter` 验证 `X-Lark-Signature`。
+    *   支持 `Encrypt Key` 解密。
+
+## 三、路由与工具系统详解 (Routing & Tooling)
+
+### 3.1 意图分析 (Intent Analyzer)
+
+`IntentAnalyzer` 是路由决策的核心，采用 **LLM-First** 的设计理念：
+
+*   **极简输出**: 只解析 3 个核心字段 `complexity`, `agent_type`, `skip_memory`，减少 LLM 幻觉。
+*   **语义驱动**: 通过 System Prompt (`prompts/intent_recognition_prompt.py`) 引导 LLM 理解用户意图。
+*   **Prompt Caching**: 意图识别的 Prompt 也被缓存，降低延迟和成本。
+
+**决策映射:**
+- `agent_type="rvr"` → 简单直给，无需规划。
+- `agent_type="rvr-b"` → 需要尝试和修正（如代码编写、复杂搜索）。
+- `agent_type="multi"` → 需要多角色协作（如深度研报、全栈开发）。
+
+### 3.2 统一工具注册表 (Capability Registry)
+
+统一的 `CapabilityRegistry` 管理所有类型的能力：
+
+1.  **CapabilityRegistry (全局单例)**:
+    -   从 `config/capabilities.yaml` 加载核心工具和 MCP 配置。
+    -   扫描 `skills/library/` 目录自动发现 Skill 能力。
+    -   支持按任务类型 (`task_type_mappings`) 推荐工具。
+
+2.  **InstanceRegistry (实例级)**:
+    -   管理 Agent 运行时动态添加的工具 (MCP, REST API)。
+    -   每个 Agent 实例独立，互不干扰。
+
+**工具分类体系:**
+- **Level 1 (Core)**: 核心工具，始终加载 (e.g. `memory_read`).
+- **Level 2 (Dynamic)**: 动态工具，按需加载 (e.g. `web_search`).
+- **Skill**: 复杂能力的封装集合 (e.g. `github-skill`).
+
+## 四、资源池架构详解
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -155,7 +248,7 @@
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 2.1 MCPPool 架构
+### 4.1 MCPPool 架构
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -186,7 +279,7 @@
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 2.2 MCPPool 启动流程
+### 4.2 MCPPool 启动流程
 
 ```
 应用启动 (main.py lifespan)
@@ -203,7 +296,7 @@
             └── 启动后台健康检查任务（30s 间隔）
 ```
 
-### 2.3 资源池职责
+### 4.3 资源池职责
 
 | 组件 | 职责 | 存储 |
 |---|------|------|
@@ -212,7 +305,7 @@
 | **SessionPool** | 追踪层：追踪活跃 Session 集合、提供统计视图、Session 校准 | Redis |
 | **🆕 MCPPool** | MCP 客户端连接复用、健康检查、自动重连、调用统计 | 本地内存 + Redis |
 
-## 三、系统详细架构
+## 五、系统详细架构
 
 ```mermaid
 flowchart TB
@@ -235,6 +328,10 @@ flowchart TB
             SESSION_SERVICER[SessionServicer]
             HEALTH_SERVICER[HealthServicer]
         end
+        subgraph channels [Channels - Port 8000]
+            FEISHU[Feishu Webhook]
+            DINGTALK[DingTalk Webhook]
+        end
     end
 
     subgraph service [服务层 - services/]
@@ -249,28 +346,44 @@ flowchart TB
     end
 
     subgraph core [核心层 - core/]
-        subgraph agent_module [agent/]
-            SA[SimpleAgent<br/>编排引擎]
-            IA[IntentAnalyzer<br/>意图分析]
-            FACTORY[AgentFactory<br/>Agent 工厂]
+        subgraph routing [routing/]
+            ROUTER[AgentRouter<br/>路由决策]
+            ANALYZER[IntentAnalyzer<br/>意图分析]
         end
-        subgraph llm_module [llm/]
-            CLAUDE[ClaudeService<br/>Claude API]
-            ADAPTOR[ClaudeAdaptor<br/>消息适配]
+        
+        subgraph agent_mod [agent/]
+            AGENT_BASE[Agent<br/>统一智能体]
+            FACTORY[AgentFactory<br/>创建入口]
         end
+
+        subgraph execution [agent/execution/]
+            PROTOCOL[ExecutorProtocol<br/>执行协议]
+            RVR[RVRExecutor<br/>简单执行]
+            RVRB[RVRBExecutor<br/>回溯执行]
+            MULTI[MultiAgentExecutor<br/>多智能体]
+            subgraph _multi [_multi/ 组合模块]
+                ORCH[Orchestrator<br/>编排器]
+                TD[TaskDecomposer]
+                WR[WorkerRunner]
+                CE[CriticEvaluator]
+                RA[ResultAggregator]
+            end
+        end
+        
+        subgraph context [context/]
+            INJECTOR[InjectionOrchestrator<br/>上下文注入]
+            STRATEGY[ContextStrategy<br/>上下文策略]
+        end
+
         subgraph tool_module [tool/]
+            REG[CapabilityRegistry<br/>能力注册]
             TE[ToolExecutor<br/>工具执行器]
             TS[ToolSelector<br/>工具选择器]
-            CR[CapabilityRegistry<br/>能力注册表]
         end
+        
         subgraph event_module [events/]
             EM[EventManager<br/>事件管理器]
             EB[EventBroadcaster<br/>事件广播器]
-            ADAPTER[ZenOAdapter<br/>格式适配器]
-        end
-        subgraph context_module [context/]
-            CE[ContextEngineering<br/>上下文工程]
-            COMPACT[Compaction<br/>上下文压缩]
         end
     end
 
@@ -279,6 +392,7 @@ flowchart TB
             SP[SessionPool<br/>活跃 Session 追踪]
             UP[UserPool<br/>用户追踪]
             AP[AgentPool<br/>实例管理]
+            MP[MCPPool<br/>MCP 连接池]
         end
         REDIS[(Redis<br/>事件流/缓存/池状态)]
         DB[(Database<br/>PostgreSQL)]
@@ -290,156 +404,226 @@ flowchart TB
     WEB --> CHAT_ROUTER
     MOBILE --> CHAT_SERVICER
     API_CLIENT --> CHAT_ROUTER
-    API_CLIENT --> CHAT_SERVICER
+    
+    %% 渠道接入
+    FEISHU --> CS
+    DINGTALK --> CS
 
     %% 入口到服务
     CHAT_ROUTER --> CS
     CHAT_SERVICER --> CS
-    CONV_ROUTER --> CONV_SVC
-    AGENT_ROUTER --> AR
-    FILES_ROUTER --> FILE_SVC
-
-    %% ChatService 到资源池
-    CS --> SS
-    CS --> SP
+    
+    %% 服务到核心路由
+    CS --> ROUTER
+    ROUTER --> ANALYZER
+    
+    %% 服务到执行核心
     CS --> AP
-    CS --> CONV_SVC
-    CS --> MEM0_SVC
-    CS --> TASK_SVC
-
-    %% 资源池内部关系
-    SP --> UP
-    SP --> AP
-    AP --> AR
-
-    %% AgentPool 到 Agent
-    AP --> SA
-    AR --> FACTORY
-    FACTORY --> SA
-
-    %% Agent 内部
-    SA --> IA
-    SA --> CLAUDE
-    SA --> TE
-    SA --> EM
-    SA --> CE
-
-    %% LLM 模块
-    CLAUDE --> ADAPTOR
-
+    AP --> PROTOCOL
+    
+    %% Agent 创建
+    CS --> FACTORY
+    FACTORY --> AGENT_BASE
+    
+    %% 执行器选择
+    ROUTER -.->|选择策略| PROTOCOL
+    PROTOCOL --> RVR
+    PROTOCOL --> RVRB
+    PROTOCOL --> MULTI
+    MULTI --> ORCH
+    ORCH --> TD
+    ORCH --> WR
+    ORCH --> CE
+    ORCH --> RA
+    WR -.->|复用| RVR
+    
+    %% 执行依赖
+    RVR --> TE
+    RVR --> EB
+    RVR --> INJECTOR
+    
     %% 工具模块
-    TE --> CR
+    TE --> REG
     TE --> TS
-
-    %% 事件模块
-    EM --> EB
-    EB --> ADAPTER
-
-    %% 基础设施连接
+    
+    %% 基础设施
+    CS --> SS
     SS --> REDIS
-    SP --> REDIS
-    UP --> REDIS
-    AP --> REDIS
-    EM --> REDIS
-    CONV_SVC --> DB
-    AR --> DB
-    SA --> MCP_SERVER
     TE --> E2B
-    MCP_SVC --> MCP_SERVER
+    TE --> MCP_SERVER
+    MP --> MCP_SERVER
 ```
 
-## 四、核心流程图
+## 六、核心流程图
 
-### 4.1 对话请求流程（含错误处理）
+### 6.1 核心执行流程 (Executor Protocol)
+
+统一的 `ExecutorProtocol`，所有执行策略（RVR/RVR-B/Multi）都遵循此协议。
 
 ```mermaid
 sequenceDiagram
-    participant C as Client
-    participant R as Router/gRPC
     participant CS as ChatService
-    participant SP as SessionPool
-    participant AP as AgentPool
-    participant SS as SessionService
-    participant SA as SimpleAgent
-    participant LLM as ClaudeService
-    participant Redis as Redis
+    participant Router as AgentRouter
+    participant Factory as AgentFactory
+    participant Agent as Agent
+    participant Executor as RVR/RVRB Executor
+    participant Context as ExecutionContext
+    participant LLM as LLM Service
+    participant Tools as ToolExecutor
 
-    C->>R: POST /api/v1/chat
-    R->>CS: chat(message, user_id, agent_id)
+    CS->>Router: route(message)
+    Router-->>CS: RoutingDecision(agent_type="rvr-b")
     
-    Note over CS: 1. 验证 agent_id
-    Note over CS: 2. 处理文件附件
-    Note over CS: 3. 创建/获取 Conversation
+    CS->>Factory: create_agent(decision)
+    Factory->>Factory: _get_executor_registry() -> RVRBExecutor
+    Factory-->>CS: Agent(executor=RVRBExecutor)
     
-    CS->>SP: check_can_create_session(user_id)
-    SP-->>CS: allowed
+    CS->>Agent: chat(message)
+    Agent->>Executor: execute(messages, context)
     
-    CS->>SS: create_session()
-    SS-->>CS: session_id
-    
-    CS->>AP: acquire(agent_id, event_manager, ...)
-    
-    alt agent_id 在原型池中（快路径）
-        AP->>AP: prototype.clone()
-        AP-->>CS: cloned_agent (< 1ms)
-    else 不在池中（慢路径 fallback）
-        AP->>AP: 记录 warning 日志
-        AP->>AP: Registry.get_agent()
-        AP-->>CS: new_agent (50-100ms)
-    end
-    
-    AP->>Redis: INCR instances count
-    
-    CS->>SP: on_session_start(session_id, user_id, agent_id)
-    SP->>Redis: SADD sessions:active session_id
-    SP->>Redis: HSET sessions:meta:{id} user_id, agent_id
-    
-    CS->>SA: agent.chat(messages, session_id)
-    
-    loop RVR 循环
-        SA->>LLM: create_message()
+    loop Execution Loop
+        Executor->>Context: 准备依赖 (LLM, Tools, etc.)
+        Executor->>LLM: create_message_stream()
         
-        alt LLM 调用成功
-            LLM-->>SA: response (text/tool_use)
-        else LLM 调用失败
-            LLM-->>SA: error
-            SA->>SA: 记录错误到 context_engineering
-            Note over SA: 错误保留，供下轮使用
-        end
-        
-        alt 有工具调用
-            SA->>SA: tool_executor.execute()
-            alt 工具执行失败
-                SA->>SA: 生成 is_error: true 的 tool_result
+        alt 文本响应
+            LLM-->>Executor: content_delta
+            Executor-->>Agent: yield event
+        else 工具调用
+            LLM-->>Executor: tool_use
+            Executor->>Tools: execute(tool)
+            
+            alt 执行成功
+                Tools-->>Executor: tool_result
+            else 执行失败 (RVR-B 特性)
+                Tools-->>Executor: error
+                Executor->>Executor: _evaluate_backtrack()
+                alt 需要回溯
+                    Executor->>Tools: 尝试替代工具/参数调整
+                else 无法回溯
+                    Executor-->>Agent: yield error
+                end
             end
-            SA->>LLM: 继续对话（包含工具结果）
         end
         
-        SA->>Redis: 发布事件
+        Executor->>Executor: 更新上下文 (Token 裁剪)
     end
     
-    alt 执行成功
-        SA-->>CS: 完成
-        CS->>AP: release(agent_id)
-        AP->>Redis: DECR instances count
-        CS->>SP: on_session_end(session_id, user_id, agent_id)
-        SP->>Redis: SREM sessions:active session_id
-        SP->>Redis: DEL sessions:meta:{id}
-        CS->>SS: end_session(session_id, status="completed")
-    else 执行失败
-        SA-->>CS: 异常
-        Note over CS: 确保资源释放
-        CS->>AP: release(agent_id)
-        CS->>SP: on_session_end(session_id, user_id, agent_id)
-        CS->>SS: end_session(session_id, status="failed")
-        CS->>CS: 发送 error 事件到客户端
-    end
-    
-    CS-->>R: SSE 事件流
-    R-->>C: 流式响应
+    Executor-->>Agent: ExecutionResult
+    Agent-->>CS: 完成
 ```
 
-### 4.2 资源池初始化流程
+### 6.2 多智能体执行流程 (Multi-Agent)
+
+V10.3 采用组合模式，MultiAgentOrchestrator 将职责委托给 5 个子模块：
+
+```mermaid
+sequenceDiagram
+    participant CS as ChatService
+    participant Factory as AgentFactory
+    participant Orch as MultiAgentOrchestrator
+    participant TD as TaskDecomposer
+    participant Lead as LeadAgent (Opus)
+    participant WR as WorkerRunner
+    participant RVR as RVRExecutor
+    participant CE as CriticEvaluator
+    participant Critic as CriticAgent
+    participant RA as ResultAggregator
+    participant EE as EventEmitter
+
+    CS->>Factory: create_multi_agent(schema, config)
+    Factory-->>CS: orchestrator
+
+    CS->>Orch: execute(messages, session_id, intent)
+
+    Note over Orch: Phase 1: 任务分解
+    Orch->>TD: decompose(user_query, messages, agents)
+    TD->>Lead: decompose_task()
+    Lead-->>TD: TaskDecompositionPlan (subtasks)
+    TD-->>Orch: plan
+    Orch->>EE: emit_decomposition(plan)
+
+    Note over Orch: Phase 2: Worker 执行
+    loop 每个 SubTask
+        Orch->>EE: emit_subtask_start(subtask)
+        Orch->>WR: execute_worker(config, messages, subtask)
+        WR->>RVR: execute(messages, context)
+        Note right of RVR: 复用统一 RVR 循环<br/>（LLM 调用、工具执行、流式处理）
+        RVR-->>WR: AgentResult
+
+        alt Critic 已启用
+            Orch->>CE: evaluate_and_retry(subtask, result)
+            CE->>Critic: critique(step, result)
+            Critic-->>CE: CriticResult
+            alt PASS
+                CE-->>Orch: result (通过)
+            else RETRY
+                CE->>WR: 重新执行 Worker
+                WR-->>CE: new result
+            else REPLAN
+                CE-->>Orch: 触发 LeadAgent 重新分解
+            end
+        end
+
+        Orch->>EE: emit_subtask_end(subtask, result)
+    end
+
+    Note over Orch: Phase 3: 结果聚合
+    Orch->>RA: synthesize_with_lead_agent(state)
+    RA->>Lead: synthesize_results()
+    Lead-->>RA: final_summary
+    RA-->>Orch: content_blocks
+
+    Orch->>EE: emit_orchestrator_end(summary)
+    Orch-->>CS: 完成
+```
+
+**组件职责：**
+
+| 子模块 | 职责 | 依赖组件 |
+|--------|------|----------|
+| TaskDecomposer | 复杂任务 → 子任务列表 | LeadAgent (Opus) |
+| WorkerRunner | 执行单个子任务 | RVRExecutor (Sonnet) |
+| CriticEvaluator | 质量评估 → pass/retry/replan | CriticAgent |
+| ResultAggregator | 多结果 → 最终摘要 | LeadAgent (Opus) |
+| EventEmitter | SSE 事件格式化和发送 | EventBroadcaster |
+
+**强弱模型配对策略：**
+- **Lead Agent / Critic Agent**: 使用 Opus（强模型，负责决策和评估）
+- **Worker Agent**: 使用 Sonnet（快速模型，负责执行）
+
+### 6.3 上下文注入流程 (Context Injection)
+
+```mermaid
+sequenceDiagram
+    participant Agent
+    participant Orch as InjectionOrchestrator
+    participant P1 as Phase 1 Injectors
+    participant P2 as Phase 2 Injectors
+    participant P3 as Phase 3 Injectors
+    
+    Agent->>Orch: build_messages(context)
+    
+    par Phase 1 (System)
+        Orch->>P1: inject(SystemRole, ToolDef)
+        P1-->>Orch: Result(STABLE)
+    and Phase 2 (User Context)
+        Orch->>P2: inject(UserMemory, Knowledge)
+        P2-->>Orch: Result(SESSION)
+    and Phase 3 (Runtime)
+        Orch->>P3: inject(GTD, PageContent)
+        P3-->>Orch: Result(DYNAMIC)
+    end
+    
+    Orch->>Orch: Assemble Messages
+    Note right of Orch: 1. System Prompt (Cache: Stable)
+    Note right of Orch: 2. User Context (Cache: Session)
+    Note right of Orch: 3. History Messages
+    Note right of Orch: 4. User Query + Runtime (No Cache)
+    
+    Orch-->>Agent: final_messages
+```
+
+### 6.4 资源池初始化流程
 
 ```mermaid
 flowchart TB
@@ -482,11 +666,11 @@ flowchart TB
     startup --> runtime
 ```
 
-### 4.3 事件流转流程
+### 6.5 事件流转流程
 
 ```mermaid
 flowchart LR
-    subgraph agent [SimpleAgent]
+    subgraph agent [Agent / Executor]
         A1[LLM 响应] --> A2[生成事件]
     end
 
@@ -512,19 +696,19 @@ flowchart LR
     S4 --> C2
 ```
 
-### 4.3.1 🆕 V7.2 事件系统架构（重构后）
+### 6.5.1 事件系统架构
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                              事件流程（简化版）                               │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│    SimpleAgent / ChatService                                                │
+│    Agent (Executor) / ChatService                                           │
 │         │                                                                   │
 │         ▼                                                                   │
 │    EventBroadcaster / EventManager  ← 统一事件入口                           │
 │         │                                                                   │
-│         │  Agent 使用 EventBroadcaster（含累积、持久化等增强功能）            │
+│         │  Agent/Executor 使用 EventBroadcaster（含累积、持久化等增强功能）   │
 │         │  Service 使用 EventManager（纯粹的事件发送）                       │
 │         │                                                                   │
 │         ▼                                                                   │
@@ -541,7 +725,7 @@ flowchart LR
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**V7.2 事件系统设计原则：**
+**事件系统设计原则：**
 
 | 原则 | 说明 |
 |------|------|
@@ -557,42 +741,24 @@ session:{session_id}:events   → List: 事件缓冲列表
 session:{session_id}:stream   → Pub/Sub: 实时事件通道
 ```
 
-### 4.4 AgentPool 获取流程（含 fallback）
-
-```mermaid
-flowchart TB
-    A[AgentPool.acquire] --> B{已初始化?}
-    B -->|否| C[preload_all]
-    C --> D{检查实例数限制}
-    B -->|是| D
-    
-    D -->|超限| E[记录 warning]
-    D -->|未超限| F{agent_id 在原型池?}
-    E --> F
-    
-    F -->|是| G[快路径]
-    G --> H[prototype.clone]
-    H --> I[注入 event_manager]
-    
-    F -->|否| J[慢路径 fallback]
-    J --> K[记录 warning 日志]
-    K --> L{是默认 Agent?}
-    L -->|是| M[create_simple_agent]
-    L -->|否| N[Registry.get_agent]
-    M --> I
-    N --> I
-    
-    I --> O[INCR instances count]
-    O --> P[increment_stat total_acquires]
-    P --> Q[返回 Agent 实例]
-```
-
-## 五、目录结构
+## 七、目录结构
 
 ```
 zenflux_agent/
 ├── main.py                          # 应用入口，lifespan 管理
 ├── logger.py                        # 日志配置
+│
+├── channels/                        # 🆕 渠道层 (Channels Layer)
+│   ├── __init__.py
+│   ├── base/                        # 基础适配器与插件定义
+│   │   ├── adapters.py
+│   │   └── plugin.py
+│   ├── feishu/                      # 飞书渠道实现
+│   │   ├── gateway.py               # 飞书网关
+│   │   └── cards.py                 # 卡片消息构建
+│   ├── gateway/                     # 统一网关入口
+│   │   └── preprocessor.py          # 消息预处理
+│   └── registry.py                  # 渠道插件注册
 │
 ├── routers/                         # HTTP 路由层
 │   ├── chat.py                      # 聊天接口
@@ -605,148 +771,80 @@ zenflux_agent/
 ├── grpc_server/                     # gRPC 服务
 │   ├── server.py                    # gRPC 服务器
 │   ├── chat_servicer.py             # Chat 服务实现
-│   ├── session_servicer.py          # Session 服务实现
 │   └── ...
 │
 ├── services/                        # 服务层（业务逻辑）
-│   ├── chat_service.py              # 核心对话服务（🆕 含路由层集成）
+│   ├── chat_service.py              # 核心对话服务
 │   ├── session_service.py           # Session 生命周期管理
 │   ├── agent_registry.py            # Agent 配置注册表
-│   ├── conversation_service.py      # 对话持久化
-│   ├── redis_manager.py             # Redis 连接管理
-│   ├── mem0_service.py              # 用户记忆
-│   ├── mcp_client.py                # MCP 客户端
+│   ├── knowledge_service.py         # 知识库服务
+│   ├── mcp_service.py               # MCP 服务
 │   └── ...
 │
 ├── core/                            # 核心模块
-│   ├── agent/                       # Agent 实现
-│   │   ├── simple_agent.py          # 单智能体编排引擎
-│   │   ├── factory.py               # Agent 工厂
-│   │   ├── types.py                 # 类型定义（IntentResult 等）
-│   │   └── multi/                   # 🆕 V7: 多智能体系统
-│   │       ├── __init__.py          # 模块导出
-│   │       ├── orchestrator.py      # 多智能体编排器
-│   │       ├── lead_agent.py        # 主控智能体
-│   │       ├── critic.py            # 评审智能体
-│   │       ├── checkpoint.py        # 检查点管理
-│   │       └── models.py            # 数据模型
+│   ├── agent/                       # Agent 核心
+│   │   ├── base.py                  # Agent 统一实现类
+│   │   ├── factory.py               # AgentFactory（创建入口）
+│   │   ├── models.py                # 数据模型（AgentConfig, CriticResult...）
+│   │   ├── errors.py                # 统一错误定义
+│   │   │
+│   │   ├── execution/               # 执行策略 (Executor Layer)
+│   │   │   ├── protocol.py          # ExecutorProtocol + BaseExecutor
+│   │   │   ├── rvr.py               # RVR 策略
+│   │   │   ├── rvrb.py              # RVR-B 回溯策略
+│   │   │   ├── multi.py             # 多智能体适配器
+│   │   │   └── _multi/              # 多智能体内部实现（V10.3 组合模式）
+│   │   │       ├── orchestrator.py  #   编排器核心
+│   │   │       ├── task_decomposer.py  # TaskDecomposer
+│   │   │       ├── worker_runner.py    # WorkerRunner（复用 RVRExecutor）
+│   │   │       ├── critic_evaluator.py # CriticEvaluator
+│   │   │       ├── result_aggregator.py # ResultAggregator
+│   │   │       └── events.py        #   EventEmitter
+│   │   │
+│   │   ├── components/              # 多智能体共享组件
+│   │   │   ├── lead_agent.py        # 主控 Agent（任务分解 + 结果综合）
+│   │   │   ├── critic.py            # 评审 Agent
+│   │   │   └── checkpoint.py        # 检查点管理
+│   │   │
+│   │   ├── context/                 # Prompt 构建
+│   │   │   └── prompt_builder.py    # System Prompt 构建器
+│   │   │
+│   │   └── tools/                   # Agent 工具执行流
+│   │       ├── flow.py              # ToolExecutionFlow
+│   │       └── special.py           # 特殊工具 Handler
 │   │
-│   ├── routing/                     # 🆕 V7: 路由层
-│   │   ├── __init__.py              # 模块导出
+│   ├── context/                     # 上下文系统
+│   │   ├── injectors/               # 🆕 注入器编排 (Phase 1-3)
+│   │   │   ├── orchestrator.py      # 注入编排器
+│   │   │   ├── phase1/              # System Phase
+│   │   │   ├── phase2/              # Context Phase
+│   │   │   └── phase3/              # Runtime Phase
+│   │   └── compaction/              # 上下文压缩
+│   │
+│   ├── routing/                     # 路由层
 │   │   ├── router.py                # AgentRouter 路由决策器
-│   │   ├── intent_analyzer.py       # IntentAnalyzer 意图分析
-│   │   └── complexity_scorer.py     # ComplexityScorer 复杂度评分
-│   │
-│   ├── monitoring/                  # 🆕 V7: 监控系统
-│   │   ├── __init__.py              # 模块导出
-│   │   ├── token_audit.py           # Token 审计
-│   │   ├── token_budget.py          # Token 预算管理
-│   │   ├── production_monitor.py    # 生产监控
-│   │   ├── failure_detector.py      # 失败检测
-│   │   └── failure_case_db.py       # 失败案例数据库
-│   │
-│   ├── billing/                     # 🆕 V7: 计费系统
-│   │   ├── __init__.py              # 模块导出
-│   │   ├── pricing.py               # 多模型定价
-│   │   ├── tracker.py               # 费用追踪
-│   │   └── models.py                # 计费数据模型
-│   │
-│   ├── planning/                    # 🆕 V7: 计划层
-│   │   ├── __init__.py              # 模块导出
-│   │   ├── protocol.py              # 计划协议
-│   │   ├── storage.py               # 计划存储
-│   │   └── validators.py            # 计划验证器
+│   │   └── intent_analyzer.py       # IntentAnalyzer 意图分析
 │   │
 │   ├── llm/                         # LLM 服务
-│   │   ├── claude.py                # Claude API 封装
-│   │   ├── adaptor.py               # 消息格式适配器
-│   │   └── base.py                  # 基础类型定义
-│   │
-│   ├── tool/                        # 工具系统
-│   │   ├── executor.py              # 工具执行器
-│   │   ├── selector.py              # 工具选择器
-│   │   └── capability.py            # 能力注册表
-│   │
-│   ├── events/                      # 事件系统（🆕 V7.1 重构）
-│   │   ├── manager.py               # 事件管理器（聚合各层 EventManager）
-│   │   ├── broadcaster.py           # 事件广播器（Agent 统一入口）
-│   │   ├── base.py                  # 基类和 EventStorage Protocol
-│   │   ├── storage.py               # InMemoryEventStorage（开发环境）
-│   │   ├── dispatcher.py            # 外部 Webhook 发送器
-│   │   ├── *_events.py              # 各层事件管理器（session/message/content 等）
-│   │   └── adapters/                # 格式适配器（ZenO 等）
-│   │
-│   └── context/                     # 上下文管理
-│       ├── compaction/              # 上下文压缩
-│       ├── runtime.py               # 运行时上下文
-│       └── rag_optimization.py      # 🆕 V7: RAG 优化
-│
-├── models/                          # 数据模型
-│   ├── __init__.py                  # 模块导出
-│   ├── usage.py                     # 🆕 V7: UsageResponse 计费响应模型
-│   └── ...
-│
-├── evaluation/                      # 🆕 V7: 评估框架
-│   ├── __init__.py                  # 模块导出
-│   ├── harness.py                   # 测试框架
-│   ├── models.py                    # 评估数据模型
-│   ├── qos_config.py                # QoS 配置
-│   ├── graders/                     # 评分器
-│   │   ├── code_based.py            # 代码评测
-│   │   ├── model_based.py           # 模型评测
-│   │   └── human.py                 # 人工评测
-│   └── config/                      # 评估配置
-│       └── settings.yaml
-│
-├── tools/                           # 内置工具
-│   ├── web_search.py                # 网页搜索
-│   ├── api_calling.py               # API 调用
-│   └── ...
-│
-├── utils/                           # 工具函数
-│   ├── usage_tracker.py             # Token 用量追踪（与 UsageResponse 关联）
-│   └── ...
+│   ├── tool/                        # 工具系统 🆕
+│   │   ├── registry.py              # CapabilityRegistry
+│   │   ├── selector.py              # ToolSelector
+│   │   └── executor.py              # ToolExecutor
+│   ├── events/                      # 事件系统
+│   └── monitoring/                  # 监控系统
 │
 ├── infra/                           # 基础设施
-│   ├── pools/                       # 资源池（追踪活跃资源）
-│   │   ├── __init__.py              # 导出
-│   │   ├── user_pool.py             # 用户池（用户活跃 Session 追踪）
-│   │   ├── agent_pool.py            # Agent 池（原型缓存+实例管理）
-│   │   ├── session_pool.py          # Session 池（活跃 Session 追踪+统计）
-│   │   └── mcp_pool.py              # 🆕 MCP 池（连接复用+健康检查+自动重连）
+│   ├── pools/                       # 资源池
 │   ├── database/                    # 数据库
-│   │   ├── __init__.py              # 连接管理
-│   │   ├── crud.py                  # CRUD 操作
-│   │   └── models.py                # ORM 模型
 │   └── resilience/                  # 容错机制
-│       ├── circuit_breaker.py       # 熔断器
-│       └── retry.py                 # 重试（🆕 V7: with_retry 统一重试）
-│
-├── config/                          # 全局配置
-│   ├── llm_config.py                # LLM 配置
-│   ├── capabilities.yaml            # 工具能力配置
-│   ├── multi_agent_config.yaml      # 🆕 V7: 多智能体配置
-│   └── ...
-│
-├── instances/                       # Agent 实例配置
-│   ├── _template/                   # 模板
-│   ├── test_agent/                  # 测试 Agent
-│   │   ├── config.yaml              # 配置
-│   │   ├── prompt.md                # 提示词
-│   │   └── .cache/                  # 缓存
-│   └── ...
 │
 └── docs/                            # 文档
-    ├── architecture/                # 架构文档
-    │   └── SYSTEM_ARCHITECTURE.md   # 本文件
-    └── analysis/                    # 🆕 V7: 流程分析
-        ├── SIMPLE_AGENT_FLOW_ANALYSIS.md
-        └── MULTI_AGENT_FLOW_ANALYSIS.md
+    └── architecture/                # 架构文档
 ```
 
-## 六、关键设计决策
+## 八、关键设计决策
 
-### 6.1 资源池架构
+### 8.1 资源池架构
 
 **问题**: 
 - 每次请求创建 Agent 实例耗时 50-100ms
@@ -783,7 +881,7 @@ zf:agent:{agent_id}:stats       # Hash: Agent 统计
 - 移除没有对应元数据的孤立 Session
 - 确保计数准确性
 
-### 6.2 AgentRegistry vs AgentPool
+### 8.2 AgentRegistry vs AgentPool
 
 | | AgentRegistry | AgentPool |
 |--|---------------|-----------|
@@ -804,7 +902,7 @@ acquire(agent_id) →
     记录 warning 日志
 ```
 
-### 6.3 依赖注入支持
+### 8.3 依赖注入支持
 
 为了便于测试，所有单例函数都支持依赖注入：
 
@@ -823,7 +921,7 @@ session_pool = get_session_pool(
 reset_session_pool()
 ```
 
-### 6.4 双协议支持
+### 8.4 双协议支持
 
 **HTTP (FastAPI)**:
 - RESTful API，适合 Web 应用
@@ -837,7 +935,7 @@ reset_session_pool()
 
 两者共享 `ChatService` 单例，保证业务逻辑一致。
 
-### 6.5 事件驱动架构（🆕 V7.2 重构）
+### 8.5 事件驱动架构
 
 **核心设计：**
 - Agent 执行过程产生事件流（Zenflux 内部格式）
@@ -862,7 +960,7 @@ reset_session_pool()
 | `EventDispatcher` | 外部 Webhook 发送（可选） |
 | `ZenOAdapter` | Zenflux → ZenO 格式转换 |
 
-### 6.6 实例化配置
+### 8.6 实例化配置
 
 每个 Agent 实例独立配置：
 - `config.yaml`: 模型、工具、API 等配置
@@ -871,9 +969,9 @@ reset_session_pool()
 
 支持热更新：修改配置后调用 reload 接口即可生效。
 
-## 七、错误处理策略
+## 九、错误处理策略
 
-### 7.1 资源释放保证
+### 9.1 资源释放保证
 
 无论执行成功或失败，都确保资源释放：
 
@@ -887,7 +985,7 @@ finally:
     await session_pool.on_session_end(...)
 ```
 
-### 7.2 错误分类和用户提示
+### 9.2 错误分类和用户提示
 
 | 错误类型 | 错误码 | 用户提示 |
 |---------|-------|---------|
@@ -898,85 +996,27 @@ finally:
 | ConnectionError | connection_error | 网络连接失败，请检查网络 |
 | 其他 | unknown_error | 执行失败，请稍后重试 |
 
-### 7.3 工具执行失败
+### 9.3 工具执行失败
 
 工具执行失败时：
 1. 生成 `is_error: true` 的 `tool_result`
 2. 记录错误到 `context_engineering`（错误保留）
 3. 让 Agent 在下轮决定如何处理
 
-## 八、V7 新增功能
+## 十、版本演进
 
-### 8.1 路由层 (core/routing/)
+| 版本 | 核心变更 |
+|------|----------|
+| V7.x | 路由层（AgentRouter, IntentAnalyzer）、多智能体（Lead/Critic）、监控计费 |
+| V9.0 | LLM-First 架构、意图识别极简化、上下文注入器 |
+| V10.0 | Agent 统一化（Strategy 模式）、Executor 体系、工具注册表统一 |
+| V10.3 | Orchestrator 组合模式拆分、Worker 复用 RVRExecutor |
+| V10.4 | 依赖注入（inject_dependencies）、Prompt 异步化 |
 
-| 组件 | 职责 |
-|------|------|
-| `AgentRouter` | 路由决策器，决定使用单智能体还是多智能体 |
-| `IntentAnalyzer` | 意图分析器，从 SimpleAgent 剥离成为共享模块 |
-| `ComplexityScorer` | 复杂度评分器，评估任务难度 |
+## 十一、后续优化方向
 
-### 8.2 多智能体系统 (core/agent/multi/)
-
-| 组件 | 职责 |
-|------|------|
-| `MultiAgentOrchestrator` | 多智能体编排器，协调多个智能体协作 |
-| `LeadAgent` | 主控智能体（Opus），负责任务分解和结果综合 |
-| `Critic` | 评审智能体，负责质量评估和计划调整 |
-| `CheckpointManager` | 检查点管理，支持长时间任务的断点续传 |
-
-### 8.3 监控与计费
-
-| 组件 | 职责 |
-|------|------|
-| `TokenAuditor` | Token 审计，记录每次请求的 Token 消耗 |
-| `UsageTracker` | 用量追踪，累积多次 LLM 调用的统计 |
-| `UsageResponse` | 计费响应模型，标准化的 API 响应格式 |
-| `TokenBudget` | Token 预算管理 |
-
-### 8.4 数据流变化
-
-**V6 流程:**
-```
-用户消息 → ChatService → SimpleAgent → LLM → 响应
-                            ↓
-                      (内部意图分析)
-```
-
-**V7 流程:**
-```
-用户消息 → ChatService → AgentRouter → 路由决策
-                              ↓
-              ┌───────────────┴───────────────┐
-              ↓                               ↓
-        SimpleAgent                   MultiAgentOrchestrator
-        (简单任务)                     (复杂任务)
-              ↓                               ↓
-            LLM                    Lead → Workers → Critic
-              ↓                               ↓
-        ┌─────┴─────────────────────────────┘
-        ↓
-    TokenAuditor (审计记录)
-        ↓
-    UsageResponse (计费信息)
-        ↓
-    SSE: usage 事件 → 前端
-```
-
-## 九、后续优化方向
-
-### 已完成
-1. ✅ **资源池架构** - UserPool、AgentPool、SessionPool、MCPPool 已实现
-2. ✅ **可靠计数** - 使用 Set 存储 + 校准机制
-3. ✅ **依赖注入** - 支持测试时注入 mock
-4. ✅ **Multi-Agent 支持** - V7 多智能体编排系统
-5. ✅ **路由层** - V7 单智能体/多智能体路由决策
-6. ✅ **Token 审计** - V7 TokenAuditor + UsageResponse
-7. ✅ **计费系统** - V7 多模型定价和成本计算
-8. ✅ **MCP 客户端池化** - MCPPool 连接复用 + 健康检查 + 自动重连
-9. ✅ **事件系统重构** - V7.1 统一 seq 生成、单一入口、格式转换前置
-
-### 待优化
-1. **LLM Service 池化** - 复用 HTTP 客户端
-2. **上下文压缩优化** - 更智能的历史裁剪策略
-3. **UserPool 限流** - 基于 Redis 的滑动窗口限流
-4. **评估框架完善** - 自动化测试套件
+1. **Executor 状态机文档**: 详细描述 RVR/RVRB 内部状态流转
+2. **渠道层接入指南**: 补充新渠道开发的 step-by-step 指南
+3. **测试框架重建**: 旧测试已清理，需要建立新的自动化测试套件
+4. **Realtime 语音架构**: 补充 OpenAI Realtime API 集成的架构文档
+5. **Tauri 桌面端架构**: 补充前端 Tauri 集成的架构说明

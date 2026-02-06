@@ -13,8 +13,8 @@ Sandbox 服务层 - 沙盒业务封装（简化版）
 """
 
 import asyncio
-from typing import Optional, Dict, Any, List, Callable
 from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Optional
 
 from logger import get_logger
 
@@ -22,28 +22,35 @@ logger = get_logger("sandbox_service")
 
 # ==================== 直接使用 infra 层类型 ====================
 from infra.sandbox import (
-    get_sandbox_provider,
-    SandboxProvider,
-    SandboxInfo as InfraSandboxInfo,
-    FileInfo,
-    CommandResult,
     CodeResult,
+    CommandResult,
+    FileInfo,
+)
+from infra.sandbox import SandboxConnectionError as InfraSandboxConnectionError
+from infra.sandbox import (
     SandboxError,
-    SandboxNotFoundError as InfraSandboxNotFoundError,
-    SandboxConnectionError as InfraSandboxConnectionError,
+)
+from infra.sandbox import SandboxInfo as InfraSandboxInfo
+from infra.sandbox import (
     SandboxNotAvailableError,
 )
-
+from infra.sandbox import SandboxNotFoundError as InfraSandboxNotFoundError
+from infra.sandbox import (
+    SandboxProvider,
+    get_sandbox_provider,
+)
 
 # ==================== 服务层特有类型 ====================
+
 
 @dataclass
 class SandboxInfo:
     """
     沙盒信息（服务层视图）
-    
+
     与 infra 层的区别：使用 e2b_sandbox_id 而非 provider_sandbox_id
     """
+
     id: str
     conversation_id: str
     user_id: str
@@ -59,22 +66,27 @@ class SandboxInfo:
 
 # ==================== 异常类 ====================
 
+
 class SandboxServiceError(Exception):
     """沙盒服务异常基类"""
+
     pass
 
 
 class SandboxNotFoundError(SandboxServiceError):
     """沙盒不存在"""
+
     pass
 
 
 class SandboxConnectionError(SandboxServiceError):
     """沙盒连接失败"""
+
     pass
 
 
 # ==================== 类型转换 ====================
+
 
 def _convert_sandbox_info(info: InfraSandboxInfo) -> SandboxInfo:
     """将 infra 层 SandboxInfo 转换为服务层视图"""
@@ -83,68 +95,66 @@ def _convert_sandbox_info(info: InfraSandboxInfo) -> SandboxInfo:
         conversation_id=info.conversation_id,
         user_id=info.user_id,
         e2b_sandbox_id=info.provider_sandbox_id,
-        status=info.status.value if hasattr(info.status, 'value') else str(info.status),
+        status=info.status.value if hasattr(info.status, "value") else str(info.status),
         stack=info.stack,
         preview_url=info.preview_url,
         active_project_path=info.active_project_path,
         active_project_stack=info.active_project_stack,
         created_at=info.created_at,
-        last_active_at=info.last_active_at
+        last_active_at=info.last_active_at,
     )
 
 
 # ==================== SandboxService ====================
 
+
 class SandboxService:
     """
     沙盒服务（业务层封装 - 简化版）
-    
+
     职责：
     1. 路径标准化：相对路径 -> 绝对路径
     2. 异常转换：infra 层异常 -> 服务层异常
     3. 核心功能：文件操作、命令执行、代码执行
-    
+
     注意：
     - 数据类型直接使用 infra/sandbox 层定义（FileInfo, CommandResult, CodeResult）
     - 连接池由 infra 层统一管理
     """
-    
+
     # E2B 沙盒的工作目录
     SANDBOX_HOME = "/home/user"
-    
+
     def __init__(self) -> None:
         """初始化沙盒服务"""
         self._provider: Optional[SandboxProvider] = None
         logger.info("✅ SandboxService 初始化完成")
-    
+
     @property
     def provider(self) -> SandboxProvider:
         """获取 infra 层的沙盒提供者"""
         if self._provider is None:
             self._provider = get_sandbox_provider()
         return self._provider
-    
+
     # ==================== 生命周期管理 ====================
-    
+
     # 🆕 V10.0: 需要沙盒的工具集合
     SANDBOX_TOOLS = {"bash", "str_replace_based_edit_tool", "text_editor"}
-    
+
     async def ensure_for_tools(
-        self,
-        tool_names: List[str],
-        conversation_id: str,
-        user_id: str
+        self, tool_names: List[str], conversation_id: str, user_id: str
     ) -> bool:
         """
         🆕 V10.0: 根据工具列表判断并预创建沙盒
-        
+
         从 SimpleAgent._ensure_sandbox 提取，使 SimpleAgent 保持纯 RVR 编排层。
-        
+
         Args:
             tool_names: 选中的工具列表
             conversation_id: 对话 ID
             user_id: 用户 ID
-            
+
         Returns:
             bool: 是否成功（失败不阻断流程，仅警告）
         """
@@ -152,36 +162,33 @@ class SandboxService:
         sandbox_tools = self.SANDBOX_TOOLS.copy()
         sandbox_tools.update(t for t in tool_names if t.startswith("sandbox_"))
         needs_sandbox = bool(sandbox_tools & set(tool_names))
-        
+
         if not needs_sandbox:
             return True
-        
+
         try:
             if not self.provider.is_available:
                 logger.warning("⚠️ 沙盒服务不可用，跳过预创建")
                 return False
-            
+
             await self.provider.ensure_sandbox(conversation_id, user_id)
             logger.info(f"🏖️ 沙盒环境已就绪: conversation_id={conversation_id}")
             return True
         except Exception as e:
             logger.warning(f"⚠️ 沙盒预创建失败: {e}")
             return False
-    
+
     async def get_or_create_sandbox(
-        self,
-        conversation_id: str,
-        user_id: str,
-        stack: Optional[str] = None
+        self, conversation_id: str, user_id: str, stack: Optional[str] = None
     ) -> SandboxInfo:
         """
         获取或创建沙盒
-        
+
         Args:
             conversation_id: 对话 ID
             user_id: 用户 ID
             stack: 技术栈（可选）
-            
+
         Returns:
             沙盒信息
         """
@@ -193,7 +200,7 @@ class SandboxService:
         except Exception as e:
             logger.error(f"❌ 获取或创建沙盒失败: {e}", exc_info=True)
             raise SandboxServiceError(f"沙盒操作失败: {e}")
-    
+
     async def pause_sandbox(self, conversation_id: str) -> bool:
         """暂停沙盒"""
         try:
@@ -201,7 +208,7 @@ class SandboxService:
         except Exception as e:
             logger.error(f"❌ 暂停沙盒失败: {e}", exc_info=True)
             return False
-    
+
     async def resume_sandbox(self, conversation_id: str) -> SandboxInfo:
         """恢复沙盒"""
         try:
@@ -212,7 +219,7 @@ class SandboxService:
         except Exception as e:
             logger.error(f"❌ 恢复沙盒失败: {e}", exc_info=True)
             raise SandboxServiceError(f"恢复沙盒失败: {e}")
-    
+
     async def kill_sandbox(self, conversation_id: str) -> bool:
         """终止沙盒"""
         try:
@@ -220,7 +227,7 @@ class SandboxService:
         except Exception as e:
             logger.error(f"❌ 终止沙盒失败: {e}", exc_info=True)
             return False
-    
+
     async def get_sandbox_status(self, conversation_id: str) -> Optional[SandboxInfo]:
         """获取沙盒状态"""
         try:
@@ -231,13 +238,13 @@ class SandboxService:
         except Exception as e:
             logger.error(f"❌ 获取沙盒状态失败: {e}", exc_info=True)
             return None
-    
+
     # ==================== 路径处理 ====================
-    
+
     def _normalize_path(self, path: str) -> str:
         """
         标准化路径，确保是绝对路径
-        
+
         支持的输入格式：
         - /home/user/xxx -> /home/user/xxx（已经是绝对路径）
         - home/user/xxx -> /home/user/xxx（URL 传输时去掉了开头的 /）
@@ -246,25 +253,23 @@ class SandboxService:
         """
         if not path or path == ".":
             return self.SANDBOX_HOME
-        
+
         if path.startswith("/"):
             return path
-        
+
         if path.startswith("home/user"):
             return f"/{path}"
-        
+
         return f"{self.SANDBOX_HOME}/{path}".replace("//", "/")
-    
+
     # ==================== 文件操作 ====================
-    
+
     async def list_files(
-        self,
-        conversation_id: str,
-        path: str = "/home/user/project"
+        self, conversation_id: str, path: str = "/home/user/project"
     ) -> List[FileInfo]:
         """列出沙盒目录内容"""
         abs_path = self._normalize_path(path)
-        
+
         try:
             return await self.provider.list_dir(conversation_id, abs_path)
         except InfraSandboxNotFoundError as e:
@@ -276,85 +281,74 @@ class SandboxService:
                 return []
             logger.error(f"❌ 列出目录失败: {abs_path} - {e}", exc_info=True)
             raise SandboxServiceError(f"列出目录失败: {e}")
-    
+
     async def list_files_tree(
-        self,
-        conversation_id: str,
-        path: str = "/home/user/project",
-        max_depth: int = 5
+        self, conversation_id: str, path: str = "/home/user/project", max_depth: int = 5
     ) -> List[FileInfo]:
         """
         递归列出沙盒目录内容（树形结构）
-        
+
         使用 find 命令一次性获取整个目录树，性能更好。
         如果目录不存在会自动创建。
         """
         abs_path = self._normalize_path(path)
-        
+
         try:
             # 确保目录存在
-            await self.provider.run_command(
-                conversation_id, 
-                f"mkdir -p {abs_path}", 
-                timeout=10
-            )
-            
+            await self.provider.run_command(conversation_id, f"mkdir -p {abs_path}", timeout=10)
+
             # 获取目录树（按路径排序，确保父目录在子文件前面）
             # 排除 node_modules、.git、__pycache__ 等大型/无用目录
             prune_expr = "-name node_modules -o -name .git -o -name __pycache__ -o -name .venv -o -name venv -o -name .next -o -name dist -o -name build -o -name .cache"
             cmd = f"find {abs_path} -maxdepth {max_depth} \\( {prune_expr} \\) -prune -o -printf '%y|%p\\n' 2>/dev/null | sort -t'|' -k2 || true"
             result = await self.provider.run_command(conversation_id, cmd, timeout=30)
-            
+
             if not result.success or not result.output or not result.output.strip():
                 return []
-            
-            lines = result.output.strip().split('\n')
+
+            lines = result.output.strip().split("\n")
             path_map: dict[str, FileInfo] = {}
             root_files: List[FileInfo] = []
-            
+
             # 第一遍：创建所有 FileInfo 节点
             for line in lines:
-                if '|' not in line:
+                if "|" not in line:
                     continue
-                file_type, file_path = line.split('|', 1)
+                file_type, file_path = line.split("|", 1)
                 if file_path == abs_path:
                     continue
-                
-                name = file_path.split('/')[-1]
-                is_dir = file_type == 'd'
-                
+
+                name = file_path.split("/")[-1]
+                is_dir = file_type == "d"
+
                 info = FileInfo(
                     name=name,
                     path=file_path,
                     type="directory" if is_dir else "file",
                     size=None,
-                    children=[] if is_dir else None
+                    children=[] if is_dir else None,
                 )
                 path_map[file_path] = info
-            
+
             # 第二遍：建立父子关系
             for file_path, info in path_map.items():
-                parent_path = '/'.join(file_path.split('/')[:-1])
+                parent_path = "/".join(file_path.split("/")[:-1])
                 if parent_path == abs_path:
                     root_files.append(info)
                 elif parent_path in path_map and path_map[parent_path].children is not None:
                     path_map[parent_path].children.append(info)
-            
+
             return root_files
         except InfraSandboxNotFoundError as e:
             raise SandboxNotFoundError(str(e))
         except Exception as e:
             logger.warning(f"⚠️ 目录树获取失败: {e}")
             return []
-    
-    async def read_file(
-        self,
-        conversation_id: str,
-        path: str
-    ) -> str:
+
+    async def read_file(self, conversation_id: str, path: str) -> str:
         """读取沙盒文件内容"""
         abs_path = self._normalize_path(path)
-        
+
         try:
             return await self.provider.read_file(conversation_id, abs_path)
         except InfraSandboxNotFoundError as e:
@@ -364,27 +358,23 @@ class SandboxService:
         except Exception as e:
             logger.error(f"❌ 读取文件失败: {abs_path} - {e}", exc_info=True)
             raise SandboxServiceError(f"读取文件失败: {e}")
-    
-    async def read_file_bytes(
-        self,
-        conversation_id: str,
-        path: str
-    ) -> bytes:
+
+    async def read_file_bytes(self, conversation_id: str, path: str) -> bytes:
         """
         读取沙盒文件内容（二进制）
-        
+
         用于读取非文本文件（如 Excel、PDF、图片等），
         使用 E2B SDK 的 format="bytes" 直接读取原始字节。
-        
+
         Args:
             conversation_id: 对话 ID
             path: 文件路径（支持相对路径，会自动转换为绝对路径）
-            
+
         Returns:
             文件的二进制内容（bytes）
         """
         abs_path = self._normalize_path(path)
-        
+
         try:
             return await self.provider.read_file_binary(conversation_id, abs_path)
         except InfraSandboxNotFoundError as e:
@@ -394,44 +384,33 @@ class SandboxService:
         except Exception as e:
             logger.error(f"❌ 读取二进制文件失败: {abs_path} - {e}", exc_info=True)
             raise SandboxServiceError(f"读取二进制文件失败: {e}")
-    
+
     async def write_file(
-        self,
-        conversation_id: str,
-        path: str,
-        content: str | bytes
+        self, conversation_id: str, path: str, content: str | bytes
     ) -> Dict[str, Any]:
         """写入沙盒文件"""
         abs_path = self._normalize_path(path)
-        
+
         if isinstance(content, bytes):
-            content = content.decode('utf-8')
-        
+            content = content.decode("utf-8")
+
         try:
             success = await self.provider.write_file(conversation_id, abs_path, content)
-            
+
             if success:
                 logger.info(f"✅ 文件已写入: {abs_path}")
-            
-            return {
-                "success": success,
-                "path": abs_path,
-                "size": len(content) if content else 0
-            }
+
+            return {"success": success, "path": abs_path, "size": len(content) if content else 0}
         except InfraSandboxNotFoundError as e:
             raise SandboxNotFoundError(str(e))
         except Exception as e:
             logger.error(f"❌ 写入文件失败: {abs_path} - {e}", exc_info=True)
             raise SandboxServiceError(f"写入文件失败: {e}")
-    
-    async def delete_file(
-        self,
-        conversation_id: str,
-        path: str
-    ) -> bool:
+
+    async def delete_file(self, conversation_id: str, path: str) -> bool:
         """删除沙盒文件"""
         abs_path = self._normalize_path(path)
-        
+
         try:
             success = await self.provider.delete_file(conversation_id, abs_path)
             if success:
@@ -442,87 +421,70 @@ class SandboxService:
         except Exception as e:
             logger.error(f"❌ 删除文件失败: {abs_path} - {e}", exc_info=True)
             raise SandboxServiceError(f"删除文件失败: {e}")
-    
-    async def file_exists(
-        self,
-        conversation_id: str,
-        path: str
-    ) -> bool:
+
+    async def file_exists(self, conversation_id: str, path: str) -> bool:
         """检查文件是否存在"""
         abs_path = self._normalize_path(path)
-        
+
         try:
             return await self.provider.file_exists(conversation_id, abs_path)
         except Exception as e:
             logger.error(f"❌ 检查文件失败: {abs_path} - {e}", exc_info=True)
             return False
-    
+
     # ==================== 命令执行 ====================
-    
+
     async def run_command(
-        self,
-        conversation_id: str,
-        command: str,
-        timeout: int = 60
+        self, conversation_id: str, command: str, timeout: int = 60
     ) -> Dict[str, Any]:
         """在沙盒中执行命令"""
         try:
-            result = await self.provider.run_command(
-                conversation_id, command, timeout
-            )
-            
+            result = await self.provider.run_command(conversation_id, command, timeout)
+
             return {
                 "success": result.success,
                 "exit_code": result.exit_code,
                 "stdout": result.output,
-                "stderr": result.error or ""
+                "stderr": result.error or "",
             }
         except InfraSandboxNotFoundError as e:
             raise SandboxNotFoundError(str(e))
         except Exception as e:
             logger.error(f"❌ 执行命令失败: {e}", exc_info=True)
-            return {
-                "success": False,
-                "error": str(e)
-            }
-    
+            return {"success": False, "error": str(e)}
+
     # ==================== 代码执行 ====================
-    
+
     async def run_code(
         self,
         conversation_id: str,
         code: str,
         timeout: int = 300,
         on_stdout: Optional[Callable[[str], None]] = None,
-        on_stderr: Optional[Callable[[str], None]] = None
+        on_stderr: Optional[Callable[[str], None]] = None,
     ) -> CodeResult:
         """
         执行代码（Code Interpreter）
-        
+
         注意：流式回调在 infra 层不直接支持，此处简化处理
         """
         try:
-            result = await self.provider.run_code(
-                conversation_id, code, "python", timeout
-            )
-            
+            result = await self.provider.run_code(conversation_id, code, "python", timeout)
+
             if on_stdout and result.stdout:
-                for line in result.stdout.split('\n'):
+                for line in result.stdout.split("\n"):
                     on_stdout(line)
             if on_stderr and result.stderr:
-                for line in result.stderr.split('\n'):
+                for line in result.stderr.split("\n"):
                     on_stderr(line)
-            
+
             return result
-            
+
         except InfraSandboxNotFoundError as e:
             raise SandboxNotFoundError(str(e))
         except Exception as e:
             logger.error(f"❌ 代码执行失败: {e}", exc_info=True)
-            return CodeResult(
-                success=False,
-                error=str(e)
-            )
+            return CodeResult(success=False, error=str(e))
 
 
 # ==================== 便捷函数 ====================
@@ -533,7 +495,7 @@ _default_sandbox_service: Optional[SandboxService] = None
 def get_sandbox_service() -> SandboxService:
     """
     获取默认的 SandboxService 实例（单例）
-    
+
     Returns:
         SandboxService 实例
     """

@@ -1,199 +1,175 @@
 # Core Tool 模块
 
-工具管理的核心模块，负责能力注册、路由选择、工具执行等功能。
+工具管理和执行的核心模块，提供统一的能力抽象、工具选择和执行。
 
-## 📁 目录结构
+## 架构概述
 
 ```
 core/tool/
-├── README.md              # 本文档
-├── __init__.py            # 模块导出
-├── selector.py            # 工具选择器
-├── executor.py            # 工具执行器
-└── capability/            # 能力管理子包
-    ├── __init__.py        # 子包导出
-    ├── types.py           # 类型定义
-    ├── registry.py        # 能力注册表
-    ├── router.py          # 能力路由器
-    ├── invocation.py      # 调用策略选择器
-    └── skill_loader.py    # Skill 内容加载器
+├── types.py              # 统一类型定义（Capability, ToolContext, BaseTool 等）
+├── registry.py           # 统一注册表（CapabilityRegistry, InstanceRegistry）
+├── selector.py           # 工具选择器（含路由和 Skill Fallback）
+├── executor.py           # 工具执行器（含调用策略选择）
+├── loader.py             # 工具加载器（便利层）
+├── registry_config.py    # 配置加载器
+├── validator.py          # 安全验证
+├── llm_description.py    # LLM 描述生成
+├── capability/           # 能力子包
+│   └── skill_loader.py   # Skill 内容加载器
+└── __init__.py           # 模块导出
 ```
 
-## 🧩 模块职责
+## 核心概念
 
-### 1. `capability/` 子包 - 能力管理
+### 术语定义
 
-#### `types.py` - 类型定义
-```python
-- CapabilityType      # 能力类型枚举 (SKILL/TOOL/MCP/CODE)
-- CapabilitySubtype   # 能力子类型枚举
-- Capability          # 统一能力数据类
-```
+| 术语 | 说明 | 示例 |
+|-----|------|-----|
+| **Capability** | 抽象能力描述（包含能力标签、优先级、约束等） | `ppt_generation` |
+| **Tool** | 具体的可调用实现（`type=TOOL`） | `api_calling`, `exa_search` |
+| **Skill** | Claude Skills 或本地工作流（`type=SKILL`） | `pptx`, `xlsx` |
 
-#### `registry.py` - 能力注册表
-```python
-- CapabilityRegistry  # 统一管理所有能力
-  - 从 config/capabilities.yaml 加载 Tools/MCP 配置
-  - 自动扫描 skills/library/ 发现 Skills
-  - 提供查询接口 (get, find_by_type, find_by_capability_tag)
-  - 支持动态注册
-```
+### 工具分层
 
-#### `router.py` - 能力路由器
-```python
-- CapabilityRouter    # 智能选择最合适的能力
-  - 基于关键词匹配、优先级、成本等因素评分
-  - 返回最佳能力及备选方案
-- extract_keywords()  # 从文本提取关键词
-```
+| 层级 | 说明 | 配置 |
+|-----|------|-----|
+| Level 1 | 核心工具，始终加载 | `level: 1` |
+| Level 2 | 动态工具，按需加载 | `level: 2`（默认）|
 
-#### `invocation.py` - 调用策略选择器
-```python
-- InvocationSelector  # 根据任务特性选择调用方式
-  - Direct Tool Call     # 标准工具调用
-  - Code Execution       # 代码执行
-  - Programmatic         # 程序化工具调用
-  - Streaming            # 细粒度流式
-  - Tool Search          # 工具搜索（>30个工具时）
-```
+## 快速开始
 
-#### `skill_loader.py` - Skill 内容加载器
-```python
-- SkillLoader         # 渐进式加载 Skill 内容
-  - Level 1: 元数据（由 Registry 负责）
-  - Level 2: SKILL.md 完整内容
-  - Level 3: 资源文件
-```
-
-### 2. `selector.py` - 工具选择器
+### 基本使用
 
 ```python
-- ToolSelector        # 根据能力需求选择具体工具
-  - select()               # 根据能力标签选择工具
-  - select_for_task_type() # 根据任务类型选择
-  - get_tools_for_llm()    # 转换为 LLM API 格式
-```
-
-**核心功能**：将抽象的能力需求映射到具体的工具列表
-
-```python
-# 示例
-selector = ToolSelector(registry)
-result = selector.select(["web_search", "ppt_generation"])
-# result.tool_names = ["plan_todo", "bash", "exa_search", "slidespeak_render", ...]
-```
-
-### 3. `executor.py` - 工具执行器
-
-```python
-- ToolExecutor        # 执行工具调用
-  - 工具实例管理
-  - 参数验证
-  - 执行结果处理
-```
-
-## 🔄 模块关系
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        Agent                                 │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                     ToolSelector                             │
-│  • 输入: 能力需求 ["web_search", "ppt_generation"]           │
-│  • 输出: 工具列表 + Claude API 格式                          │
-└─────────────────────────────────────────────────────────────┘
-                              │
-              ┌───────────────┼───────────────┐
-              ▼               ▼               ▼
-┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
-│CapabilityRegistry│  │CapabilityRouter │  │InvocationSelector│
-│  • 能力存储      │  │  • 智能评分     │  │  • 调用策略     │
-│  • Skills 发现   │  │  • 最佳推荐     │  │  • 批量/流式    │
-└─────────────────┘  └─────────────────┘  └─────────────────┘
-              │
-              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                     ToolExecutor                             │
-│  • 工具实例化                                                │
-│  • 参数处理                                                  │
-│  • 执行调用                                                  │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## 📝 使用示例
-
-### 基础用法
-
-```python
-from core.tool.capability import (
-    CapabilityRegistry,
-    CapabilityRouter,
-    create_capability_registry
+from core.tool import (
+    get_capability_registry,
+    ToolSelector,
+    ToolExecutor,
+    create_tool_context
 )
-from core.tool.selector import ToolSelector
 
-# 1. 创建 Registry（自动加载配置和扫描 Skills）
-registry = create_capability_registry()
+# 1. 获取注册表（单例）
+registry = get_capability_registry()
+await registry.initialize()
 
-# 2. 创建 Selector
+# 2. 创建选择器和执行器
 selector = ToolSelector(registry)
+executor = ToolExecutor(registry)
 
-# 3. 根据能力需求选择工具
+# 3. 选择工具
 result = selector.select(
     required_capabilities=["web_search", "ppt_generation"],
-    context={"available_apis": ["slidespeak"]}
+    context={"task_type": "content_generation"}
 )
 
-print(result.tool_names)      # ["plan_todo", "bash", "exa_search", ...]
-print(result.base_tools)      # ["plan_todo", "bash"]
-print(result.dynamic_tools)   # ["exa_search", "slidespeak_render"]
+# 4. 执行工具
+ctx = create_tool_context(session_id="xxx", user_id="user123")
+result = await executor.execute("api_calling", {"url": "..."}, ctx)
 ```
 
-### 加载 Skill 内容
+### 智能路由
 
 ```python
-from core.tool.capability import SkillLoader
-
-loader = SkillLoader()
-
-# 获取 Skill 路径（从 Registry）
-skill = registry.get("slidespeak-generator")
-skill_path = skill.metadata.get('skill_path')
-
-# 加载完整内容
-content = loader.load_skill_content(skill_path)
-resources = loader.load_skill_resources(skill_path)
-scripts = loader.get_skill_scripts(skill_path)
+# 智能推荐最佳能力
+routing = selector.route(
+    keywords=["PPT", "演示"],
+    task_type="ppt_generation"
+)
+print(f"推荐: {routing.capability.name}, 评分: {routing.score}")
 ```
 
-## ⚠️ 迁移说明
-
-以下模块已迁移到此目录，旧路径已废弃：
-
-| 旧路径 | 新路径 | 状态 |
-|--------|--------|------|
-| `core/capability_registry.py` | `core/tool/capability/registry.py` | ✅ 可删除 |
-| `core/capability_router.py` | `core/tool/capability/router.py` | ✅ 可删除 |
-| `core/skills_manager.py` | `core/tool/capability/skill_loader.py` | ✅ 可删除 |
-| `core/invocation_selector.py` | `core/tool/capability/invocation.py` | ✅ 可删除 |
-
-**推荐导入方式**：
+### 流式执行
 
 ```python
-# ✅ 推荐
-from core.tool.capability import CapabilityRegistry, CapabilityRouter
-from core.tool.selector import ToolSelector
-
-# ❌ 已废弃（仍可用但会有警告）
-from core.capability_registry import CapabilityRegistry
+async for chunk in executor.execute_stream("api_calling", params):
+    print(chunk)
 ```
 
-## 📚 相关文档
+### 调用策略选择
 
-- `docs/CAPABILITY_REFACTOR_PLAN.md` - 能力重构计划
-- `docs/v3/02-CAPABILITY-ROUTING.md` - 能力路由设计
-- `config/capabilities.yaml` - 能力配置文件
+```python
+strategy = executor.select_invocation_strategy(
+    task_type="multi_tool",
+    selected_tools=["tool1", "tool2", "tool3"]
+)
+# InvocationStrategy(type=PROGRAMMATIC, ...)
+```
 
+## 模块职责
+
+### types.py
+
+统一类型定义，合并自 `base.py` 和 `capability/types.py`：
+
+| 类型 | 说明 |
+|-----|------|
+| `CapabilityType` | 能力类型枚举（SKILL/TOOL/MCP/CODE）|
+| `CapabilitySubtype` | 子类型枚举（PREBUILT/CUSTOM/...）|
+| `Capability` | 统一能力定义 |
+| `ToolContext` | 工具执行上下文（显式依赖注入）|
+| `ToolResult` | 标准化执行结果 |
+| `BaseTool` | 工具基类 |
+| `LegacyToolAdapter` | 旧工具适配器 |
+| `InvocationType` | 调用方式枚举 |
+| `InvocationStrategy` | 调用策略 |
+
+### registry.py
+
+统一注册表，合并自 `capability/registry.py` 和 `instance_registry.py`：
+
+| 类 | 说明 |
+|---|------|
+| `CapabilityRegistry` | 全局能力注册表（单例）|
+| `InstanceRegistry` | 实例级工具注册表（MCP/REST API）|
+
+### selector.py
+
+工具选择器，合并自 `selector.py`、`capability/router.py`、`unified_tool_caller.py`：
+
+| 方法 | 说明 |
+|-----|------|
+| `select()` | 根据能力需求选择工具 |
+| `select_for_task_type()` | 根据任务类型选择 |
+| `resolve_capabilities()` | 三级优先级能力解析 |
+| `route()` | 智能路由推荐（原 CapabilityRouter）|
+| `route_multiple()` | 返回前 K 个最佳能力 |
+| `ensure_skill_fallback()` | Skill fallback 处理（原 UnifiedToolCaller）|
+
+### executor.py
+
+工具执行器，合并自 `executor.py` 和 `capability/invocation.py`：
+
+| 方法 | 说明 |
+|-----|------|
+| `execute()` | 执行工具 |
+| `execute_stream()` | 流式执行 |
+| `select_invocation_strategy()` | 选择调用策略（原 InvocationSelector）|
+| `get_tools_config_for_strategy()` | 根据策略配置工具 |
+
+## 配置文件
+
+### capabilities.yaml
+
+主配置文件，包含：
+
+- `task_type_mappings`: 任务类型 → 能力映射
+- `capability_categories`: 能力分类定义
+- `tool_classification`: 工具分类（常用工具、类别展开）
+- `capabilities`: 所有能力详细配置
+
+## 设计原则
+
+1. **LLM-First**: 关键词匹配仅作为辅助排序，最终决策交给 LLM
+2. **显式依赖**: 通过 `ToolContext` 传递依赖，不使用反射魔法
+3. **配置驱动**: 所有能力从 YAML 配置加载
+4. **单一职责**: 每个模块职责清晰
+
+## 功能特性
+
+| 特性 | 支持 | 说明 |
+|-----|------|-----|
+| 流式输出 | ✅ | `executor.execute_stream()` |
+| 并行调用 | ✅ | 在 Agent 层实现（`ToolExecutionMixin`）|
+| 结果精简 | ✅ | `ResultCompactor` |
+| Skill Fallback | ✅ | `selector.ensure_skill_fallback()` |
+| 调用策略 | ✅ | Direct/Programmatic/Streaming |

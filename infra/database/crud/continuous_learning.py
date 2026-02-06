@@ -210,6 +210,8 @@ async def create_step_rewards_batch(
     """
     批量创建步骤奖励记录
     
+    优化：使用 add_all() 批量添加，避免逐个 add 和 refresh
+    
     Args:
         session: 数据库会话
         session_reward_id: 会话奖励 ID
@@ -218,20 +220,22 @@ async def create_step_rewards_batch(
     Returns:
         StepRewardRecord 列表
     """
-    records = []
-    for step in steps:
-        record = StepRewardRecord(
+    if not steps:
+        return []
+    
+    # 批量创建记录对象
+    records = [
+        StepRewardRecord(
             id=generate_id(),
             session_reward_id=session_reward_id,
             **step
         )
-        records.append(record)
-        session.add(record)
+        for step in steps
+    ]
     
+    # 批量添加（一次性操作）
+    session.add_all(records)
     await session.commit()
-    
-    for record in records:
-        await session.refresh(record)
     
     logger.debug(f"📊 批量创建 {len(records)} 条步骤奖励记录")
     return records
@@ -643,44 +647,53 @@ async def get_learning_stats(
     """
     获取持续学习统计信息
     
+    优化：使用单次聚合查询代替循环查询
+    
     Returns:
         统计信息字典
     """
-    # 会话奖励统计
-    session_count = await session.execute(
-        select(func.count(SessionRewardRecord.id))
-    )
-    session_total = session_count.scalar_one()
-    
-    avg_reward = await session.execute(
-        select(func.avg(SessionRewardRecord.total_reward))
-    )
-    avg_reward_value = avg_reward.scalar_one() or 0.0
-    
-    # 策略统计
-    playbook_stats = {}
-    for status in PlaybookStatus:
-        count = await session.execute(
-            select(func.count(PlaybookRecord.id))
-            .where(PlaybookRecord.status == status)
+    # 会话奖励统计（单次查询）
+    session_stats = await session.execute(
+        select(
+            func.count(SessionRewardRecord.id).label("total"),
+            func.avg(SessionRewardRecord.total_reward).label("avg_reward")
         )
-        playbook_stats[status.value] = count.scalar_one()
-    
-    # 意图缓存统计
-    cache_count = await session.execute(
-        select(func.count(IntentCacheRecord.id))
     )
-    cache_total = cache_count.scalar_one()
+    session_row = session_stats.one()
+    session_total = session_row.total or 0
+    avg_reward_value = session_row.avg_reward or 0.0
     
-    total_hits = await session.execute(
-        select(func.sum(IntentCacheRecord.hit_count))
+    # 策略统计（单次 GROUP BY 查询，代替循环）
+    playbook_count_query = await session.execute(
+        select(
+            PlaybookRecord.status,
+            func.count(PlaybookRecord.id).label("count")
+        ).group_by(PlaybookRecord.status)
     )
-    total_hits_value = total_hits.scalar_one() or 0
+    playbook_rows = playbook_count_query.all()
+    
+    # 初始化所有状态为 0
+    playbook_stats = {status.value: 0 for status in PlaybookStatus}
+    # 填入实际统计值
+    for row in playbook_rows:
+        if row.status:
+            playbook_stats[row.status.value] = row.count
+    
+    # 意图缓存统计（单次查询）
+    cache_stats = await session.execute(
+        select(
+            func.count(IntentCacheRecord.id).label("total"),
+            func.coalesce(func.sum(IntentCacheRecord.hit_count), 0).label("total_hits")
+        )
+    )
+    cache_row = cache_stats.one()
+    cache_total = cache_row.total or 0
+    total_hits_value = cache_row.total_hits or 0
     
     return {
         "session_rewards": {
             "total": session_total,
-            "avg_reward": round(avg_reward_value, 4),
+            "avg_reward": round(float(avg_reward_value), 4),
         },
         "playbooks": playbook_stats,
         "intent_cache": {

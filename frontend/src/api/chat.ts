@@ -23,7 +23,12 @@ export async function getConversationList(
     '/v1/conversations',
     { params: { user_id: userId, limit, offset } }
   )
-  return response.data.data
+  // 防御性处理：确保返回值始终包含 conversations 数组
+  const data = response.data?.data
+  return {
+    conversations: data?.conversations ?? [],
+    total: data?.total ?? 0
+  }
 }
 
 /**
@@ -53,20 +58,48 @@ export async function deleteConversation(conversationId: string): Promise<void> 
   await api.delete(`/v1/conversations/${conversationId}`)
 }
 
+/** 消息列表响应类型 */
+export interface MessagesResponse {
+  messages: Message[]
+  conversation_metadata?: Record<string, unknown>
+  total: number
+  has_more: boolean
+  next_cursor: string | null
+}
+
 /**
- * 获取对话消息列表
+ * 获取对话消息列表（支持游标分页）
+ * @param conversationId - 对话 ID
+ * @param limit - 返回数量
+ * @param offset - 偏移量（初始加载时使用）
+ * @param order - 排序方式
+ * @param beforeCursor - 游标（加载更早消息时使用）
  */
 export async function getConversationMessages(
   conversationId: string,
   limit = 50,
   offset = 0,
-  order: 'asc' | 'desc' = 'asc'
-): Promise<{ messages: Message[]; conversation_metadata?: Record<string, unknown> }> {
-  const response = await api.get<ApiResponse<{ messages: Message[]; conversation_metadata?: Record<string, unknown> }>>(
+  order: 'asc' | 'desc' = 'asc',
+  beforeCursor?: string
+): Promise<MessagesResponse> {
+  const params: Record<string, unknown> = { limit, offset, order }
+  if (beforeCursor) {
+    params.before_cursor = beforeCursor
+  }
+  
+  const response = await api.get<ApiResponse<MessagesResponse>>(
     `/v1/conversations/${conversationId}/messages`,
-    { params: { limit, offset, order } }
+    { params }
   )
-  return response.data.data
+  // 防御性处理：确保返回值包含必要字段
+  const data = response.data?.data
+  return {
+    messages: data?.messages ?? [],
+    conversation_metadata: data?.conversation_metadata,
+    total: data?.total ?? 0,
+    has_more: data?.has_more ?? false,
+    next_cursor: data?.next_cursor ?? null
+  }
 }
 
 /**

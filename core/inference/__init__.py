@@ -9,13 +9,13 @@ V5.0 统一语义推理模块
 """
 
 from .semantic_inference import (
-    SemanticInference,
-    InferenceType,
     InferenceResult,
+    InferenceType,
+    SemanticInference,
     get_semantic_inference,
+    infer_capability,
     infer_complexity,
     infer_intent,
-    infer_capability,
 )
 
 __all__ = [

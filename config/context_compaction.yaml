@@ -15,12 +15,39 @@ qos_token_budgets:
   pro: 200000        # 专业版（默认）
   enterprise: 1000000  # 企业版
 
-# L2 策略：历史消息裁剪配置（纯 token 驱动）
-history_trimming:
+# L2 策略：历史消息压缩配置
+message_compression:
+  enabled: true                # 是否启用消息压缩
   preserve_first_messages: 4   # 始终保留开头 N 条消息（任务上下文）
   preserve_last_messages: 20   # 尽量保留最近 N 条消息（当前上下文）
   preserve_tool_results: true  # 保留中间的 tool_result（含重要数据）
-  trim_threshold: 0.8          # token 使用率超过此阈值时触发裁剪
+  
+  # 🆕 双阈值压缩机制
+  thresholds:
+    pre_run: 0.80              # 80% 阈值 - 运行前预检查（Agent 启动前）
+    runtime: 0.92              # 92% 阈值 - 运行中实时检查（Agent 执行中）
+  
+  # LLM 摘要配置
+  summary:
+    enabled: false              # 是否使用 LLM 生成摘要（否则用简单截取）
+    model: "claude-3-haiku"     # 摘要生成模型（推荐使用轻量模型）
+    max_tokens: 500             # 摘要最大 token 数
+    persist_to_db: true         # 是否持久化摘要到数据库
+
+# 🆕 工具结果压缩配置
+tool_result_compression:
+  enabled: true                 # 是否启用工具结果压缩
+  threshold_chars: 2000         # 超过此字符数自动压缩
+  store_full_content: true      # 是否存储完整内容以便恢复
+  persist_to_redis: false       # 是否持久化引用到 Redis
+  redis_ttl_hours: 24           # Redis 过期时间（小时）
+  
+  # 跳过压缩的工具（这些工具的结果需要完整保留）
+  skip_tools:
+    - plan_todo
+    - memory
+    - ask_user
+    - human_confirmation
 
 # L3 策略：后端预警配置
 backend_warning:

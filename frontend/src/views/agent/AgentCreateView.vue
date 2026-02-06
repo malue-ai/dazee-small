@@ -52,17 +52,17 @@
         <div v-if="currentStep === 1" class="flex flex-col gap-6 flex-1 animate-in fade-in slide-in-from-right-4 duration-300">
           <div class="flex flex-col gap-2">
             <label class="text-sm font-medium text-gray-700">
-              Agent ID <span class="text-red-500">*</span>
+              名称 <span class="text-red-500">*</span>
             </label>
             <input 
-              v-model="form.agent_id" 
+              v-model="form.name" 
               type="text" 
-              placeholder="例如: coding_assistant"
+              placeholder="例如: 编程助手、数据分析师"
               class="w-full px-4 py-2.5 bg-white border rounded-lg text-sm transition-all focus:outline-none focus:ring-2 focus:ring-gray-200 focus:border-gray-400"
-              :class="hasFieldError('agent_id') ? 'border-red-300 bg-red-50/50' : 'border-gray-200'"
+              :class="hasFieldError('name') ? 'border-red-300 bg-red-50/50' : 'border-gray-200'"
               @input="debouncedValidate"
             >
-            <span class="text-xs text-gray-400 ml-1">唯一标识符，仅支持小写字母、数字和下划线</span>
+            <span class="text-xs text-gray-400 ml-1">智能体的显示名称</span>
           </div>
 
           <div class="flex flex-col gap-2">
@@ -98,13 +98,21 @@
               <select 
                 v-model="form.model"
                 class="w-full pl-4 pr-10 py-2.5 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 focus:border-gray-400 transition-all cursor-pointer appearance-none"
+                :disabled="loadingModels"
               >
-                <option value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5 (推荐)</option>
-                <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
-                <option value="gpt-4o">GPT-4o</option>
-                <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+                <option v-if="loadingModels" disabled>加载中...</option>
+                <option 
+                  v-for="model in availableModels" 
+                  :key="model.model_name" 
+                  :value="model.model_name"
+                >
+                  {{ model.display_name }}
+                </option>
               </select>
-              <ChevronDown class="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+              <div v-if="loadingModels" class="absolute right-3 top-1/2 -translate-y-1/2">
+                <Loader2 class="w-4 h-4 animate-spin text-gray-400" />
+              </div>
+              <ChevronDown v-else class="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
             </div>
           </div>
 
@@ -156,6 +164,42 @@
                 <input type="checkbox" v-model="form.enabled_capabilities.sandbox_tools" class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
                 <span class="text-sm font-medium text-gray-600 group-hover:text-gray-900 flex items-center gap-2">
                   <Terminal class="w-4 h-4" /> 沙盒工具
+                </span>
+              </label>
+              <label class="flex items-center gap-3 p-4 bg-white border border-gray-200 rounded-xl cursor-pointer hover:border-gray-300 hover:shadow-sm transition-all group">
+                <input type="checkbox" v-model="form.enabled_capabilities.slidespeak_render" class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                <span class="text-sm font-medium text-gray-600 group-hover:text-gray-900 flex items-center gap-2">
+                  <Monitor class="w-4 h-4" /> PPT 生成
+                </span>
+              </label>
+              <label class="flex items-center gap-3 p-4 bg-white border border-gray-200 rounded-xl cursor-pointer hover:border-gray-300 hover:shadow-sm transition-all group">
+                <input type="checkbox" v-model="form.enabled_capabilities.nano_banana_image" class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                <span class="text-sm font-medium text-gray-600 group-hover:text-gray-900 flex items-center gap-2">
+                  <Image class="w-4 h-4" /> 图像生成
+                </span>
+              </label>
+              <label class="flex items-center gap-3 p-4 bg-white border border-gray-200 rounded-xl cursor-pointer hover:border-gray-300 hover:shadow-sm transition-all group">
+                <input type="checkbox" v-model="form.enabled_capabilities.slidespeak_render" class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                <span class="text-sm font-medium text-gray-600 group-hover:text-gray-900 flex items-center gap-2">
+                  <Monitor class="w-4 h-4" /> PPT 生成
+                </span>
+              </label>
+              <label class="flex items-center gap-3 p-4 bg-white border border-gray-200 rounded-xl cursor-pointer hover:border-gray-300 hover:shadow-sm transition-all group">
+                <input type="checkbox" v-model="form.enabled_capabilities.nano_banana_image" class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                <span class="text-sm font-medium text-gray-600 group-hover:text-gray-900 flex items-center gap-2">
+                  <Image class="w-4 h-4" /> 图像生成
+                </span>
+              </label>
+              <label class="flex items-center gap-3 p-4 bg-white border border-gray-200 rounded-xl cursor-pointer hover:border-gray-300 hover:shadow-sm transition-all group">
+                <input type="checkbox" v-model="form.enabled_capabilities.slidespeak_render" class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                <span class="text-sm font-medium text-gray-600 group-hover:text-gray-900 flex items-center gap-2">
+                  <Monitor class="w-4 h-4" /> PPT 生成
+                </span>
+              </label>
+              <label class="flex items-center gap-3 p-4 bg-white border border-gray-200 rounded-xl cursor-pointer hover:border-gray-300 hover:shadow-sm transition-all group">
+                <input type="checkbox" v-model="form.enabled_capabilities.nano_banana_image" class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                <span class="text-sm font-medium text-gray-600 group-hover:text-gray-900 flex items-center gap-2">
+                  <Image class="w-4 h-4" /> 图像生成
                 </span>
               </label>
             </div>
@@ -234,7 +278,7 @@
             </h3>
             <p class="text-xs text-gray-500 mt-1 pl-6">确认配置无误后点击创建</p>
           </div>
-          <ConfigPreview :form-data="getFormDataForPreview()" :agent-id="form.agent_id" />
+          <ConfigPreview :form-data="getFormDataForPreview()" :agent-name="form.name" />
         </div>
 
         <!-- 底部按钮 -->
@@ -277,6 +321,7 @@
 import { ref, reactive, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/api/index'
+import { modelApi, type ModelInfo } from '@/api/models'
 import { 
   Check, 
   ChevronDown, 
@@ -288,6 +333,8 @@ import {
   Loader2,
   Settings,
   Eye,
+  Image,
+  Monitor,
 } from 'lucide-vue-next'
 import TemplateSelector from './components/TemplateSelector.vue'
 import AdvancedConfigForm from './components/AdvancedConfigForm.vue'
@@ -330,6 +377,8 @@ const submitting = ref(false)
 const validating = ref(false)
 const loadingMcps = ref(false)
 const availableMcps = ref<any[]>([])
+const loadingModels = ref(false)
+const availableModels = ref<ModelInfo[]>([])
 const selectedMcps = ref<string[]>([])
 const mcpAuthConfigs = reactive<Record<string, string>>({})
 const validationErrors = ref<ValidationError[]>([])
@@ -337,7 +386,7 @@ const validationWarnings = ref<ValidationWarning[]>([])
 
 // 表单数据
 const form = reactive({
-  agent_id: '',
+  name: '',  // 用户可读的显示名称
   description: '',
   prompt: '',
   model: 'claude-sonnet-4-5-20250929',
@@ -348,8 +397,13 @@ const form = reactive({
     knowledge_search: true,
     code_execution: false,
     sandbox_tools: false,
+    slidespeak_render: false,
+    nano_banana_image: false,
   } as Record<string, boolean>,
 })
+
+// 创建成功后返回的 agent_id（UUID）
+const createdAgentId = ref('')
 
 // 高级配置
 const advancedConfig = reactive({
@@ -368,7 +422,7 @@ const advancedConfig = reactive({
 
 // 计算属性
 const isConfigValid = computed(() => {
-  return validationErrors.value.length === 0 && form.agent_id && form.prompt
+  return validationErrors.value.length === 0 && !!form.name && !!form.prompt
 })
 
 // 检查字段是否有错误
@@ -446,7 +500,7 @@ const applyTemplate = (template: AgentTemplate | null) => {
 // 获取预览数据
 const getFormDataForPreview = () => {
   return {
-    agent_id: form.agent_id,
+    name: form.name,  // 用户可读的显示名称
     description: form.description,
     prompt: form.prompt,
     model: form.model,
@@ -471,7 +525,7 @@ const getFormDataForPreview = () => {
 
 // 验证配置
 const validateConfig = async () => {
-  if (!form.agent_id && !form.prompt) {
+  if (!form.name && !form.prompt) {
     validationErrors.value = []
     validationWarnings.value = []
     return
@@ -509,22 +563,42 @@ const fetchMcps = async () => {
   }
 }
 
+// 加载模型列表
+const fetchModels = async () => {
+  try {
+    loadingModels.value = true
+    const response = await modelApi.listModels()
+    availableModels.value = response.data
+  } catch (error) {
+    console.error('获取模型列表失败:', error)
+  } finally {
+    loadingModels.value = false
+  }
+}
+
 // 下一步
 const nextStep = () => {
   if (currentStep.value === 1) {
     // 验证基础信息
-    if (!form.agent_id || !form.prompt) {
+    if (!form.name || !form.prompt) {
       validateConfig()
       return
     }
-    // 验证 ID 格式
-    if (!/^[a-z0-9_-]+$/.test(form.agent_id)) {
+    // 验证名称长度
+    if (form.name.length > 100) {
       validationErrors.value = [{
-        field: 'agent_id',
-        message: 'Agent ID 只能包含小写字母、数字、下划线和连字符',
-        code: 'INVALID_FORMAT',
+        field: 'name',
+        message: '名称长度不能超过 100 个字符',
+        code: 'MAX_LENGTH_EXCEEDED',
       }]
       return
+    }
+  }
+  
+  if (currentStep.value === 1) {
+    // 进入能力配置步骤前加载模型列表
+    if (availableModels.value.length === 0) {
+      fetchModels()
     }
   }
   
@@ -543,10 +617,10 @@ const submitForm = async () => {
   try {
     submitting.value = true
     
-    // 构建请求数据
+    // 构建请求数据（agent_id 由后端自动生成 UUID）
     const agentData = {
-      agent_id: form.agent_id,
-      description: form.description || `${form.agent_id} 智能助手`,
+      name: form.name,  // 用户可读的显示名称
+      description: form.description || `${form.name} 智能助手`,
       prompt: form.prompt,
       model: form.model,
       max_turns: form.max_turns,
@@ -556,14 +630,18 @@ const submitForm = async () => {
       memory: advancedConfig.memory,
     }
     
-    await api.post('/v1/agents', agentData)
+    const response = await api.post('/v1/agents', agentData)
+    
+    // 获取后端返回的 agent_id（UUID）
+    const agentId = response.data.agent_id
+    createdAgentId.value = agentId
     
     // 关联选中的 MCP
     if (selectedMcps.value.length > 0) {
       for (const serverName of selectedMcps.value) {
         try {
           const authEnv = mcpAuthConfigs[serverName]
-          await api.post(`/v1/agents/${form.agent_id}/mcp/${serverName}`, {
+          await api.post(`/v1/agents/${agentId}/mcp/${serverName}`, {
             auth_env: authEnv || undefined
           })
         } catch (mcpError) {
@@ -573,7 +651,7 @@ const submitForm = async () => {
     }
     
     // 跳转到详情页
-    router.push(`/agents/${form.agent_id}`)
+    router.push(`/agents/${agentId}`)
     
   } catch (error: any) {
     console.error('创建 Agent 失败:', error)
@@ -586,7 +664,7 @@ const submitForm = async () => {
 
 // 监听表单变化，触发验证
 watch(
-  () => [form.agent_id, form.prompt],
+  () => [form.name, form.prompt],
   () => {
     if (currentStep.value >= 1) {
       debouncedValidate()

@@ -8,18 +8,17 @@ Backtrack 回溯模块
 """
 
 from core.agent.backtrack.error_classifier import (
+    BacktrackType,
+    ClassifiedError,
+    ErrorCategory,
     ErrorClassifier,
     ErrorLayer,
-    ErrorCategory,
-    ClassifiedError,
-    BacktrackType,
     get_error_classifier,
 )
-
 from core.agent.backtrack.manager import (
-    BacktrackManager,
     BacktrackContext,
     BacktrackDecision,
+    BacktrackManager,
     BacktrackResult,
     get_backtrack_manager,
 )

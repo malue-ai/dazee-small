@@ -172,10 +172,34 @@ async def list_messages(
     session: AsyncSession,
     conversation_id: str,
     limit: int = 1000,
-    order: str = "asc"
+    offset: int = 0,
+    order: str = "asc",
+    before_cursor: Optional[str] = None
 ) -> List[Message]:
-    """获取对话的消息列表"""
+    """
+    获取对话的消息列表
+    
+    Args:
+        session: 数据库会话
+        conversation_id: 对话 ID
+        limit: 返回数量
+        offset: 偏移量（当 before_cursor 为 None 时使用）
+        order: 排序方式（asc/desc）
+        before_cursor: 游标（message_id），获取此消息之前的消息
+        
+    Returns:
+        消息列表
+    """
     query = select(Message).where(Message.conversation_id == conversation_id)
+    
+    # 游标分页：获取指定消息之前的消息
+    if before_cursor:
+        # 先获取游标消息的创建时间
+        cursor_msg = await session.get(Message, before_cursor)
+        if cursor_msg:
+            query = query.where(Message.created_at < cursor_msg.created_at)
+    elif offset > 0:
+        query = query.offset(offset)
     
     if order == "desc":
         query = query.order_by(Message.created_at.desc())

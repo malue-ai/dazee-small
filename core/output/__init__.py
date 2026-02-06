@@ -8,15 +8,10 @@ Output 模块 - 输出格式化
 """
 
 from core.output.formatter import (
-    OutputFormatter,
-    OutputFormatError,
     JSONValidationError,
-    create_output_formatter
+    OutputFormatError,
+    OutputFormatter,
+    create_output_formatter,
 )
 
-__all__ = [
-    "OutputFormatter",
-    "OutputFormatError",
-    "JSONValidationError",
-    "create_output_formatter"
-]
+__all__ = ["OutputFormatter", "OutputFormatError", "JSONValidationError", "create_output_formatter"]

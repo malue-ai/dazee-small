@@ -1,6 +1,6 @@
 # Context 模块 - 上下文管理
 
-> 核心模块：管理 Agent 运行时的上下文状态、消息历史、Prompt 追加
+> 核心模块：管理 Agent 运行时的上下文状态、消息历史
 
 ## 🎯 设计理念
 
@@ -8,7 +8,7 @@
 
 | # | 策略 | 目的 | 实现状态 |
 |---|------|------|---------|
-| 1 | **KV-Cache 优化** | 保持前缀稳定，最大化缓存命中率 | 🟡 待集成 |
+| 1 | **KV-Cache 优化** | 保持前缀稳定，最大化缓存命中率 | ✅ 已集成 |
 | 2 | **Todo 重写** | 任务目标注入末尾，对抗 Lost-in-the-Middle | ✅ 已实现 |
 | 3 | **工具遮蔽** | 状态机驱动的工具可见性控制 | 🟡 待集成 |
 | 4 | **可恢复压缩** | 保留引用丢弃内容，按需恢复 | 🟡 待集成 |
@@ -19,23 +19,24 @@
 
 ```
 core/context/
-├── README.md              # 本文档（必读！）
+├── README.md              # 本文档
 ├── __init__.py            # 统一导出
 ├── runtime.py             # ✅ 运行时状态（SSE 流式处理）
-├── conversation.py        # ✅ 对话历史（消息加载、Token 压缩）
-├── prompt_manager.py      # ✅ Prompt 追加（事件驱动）
-├── metadata_provider.py   # ✅ 通用元数据获取器（plan、compression 等）
-└── context_engineering.py # ⚠️ 上下文优化（需要精简）
+├── injectors/             # ✅ Phase-based Injector 系统（V9.0+）
+│   ├── phase1/            # System Message 注入
+│   ├── phase2/            # User Context 注入
+│   └── phase3/            # Runtime 注入
+├── providers/             # ✅ 上下文数据提供器
+└── context_engineering.py # ✅ 上下文优化策略
 ```
 
 ### 各文件职责边界
 
-| 文件 | 职责 | 不该做的事 |
-|------|------|-----------|
+| 文件/目录 | 职责 | 不该做的事 |
+|-----------|------|-----------|
 | `runtime.py` | SSE 块状态、Content 累积、Turn 管理 | 不处理 Prompt、不访问数据库 |
-| `conversation.py` | 从 DB 加载历史消息、Token 压缩 | 不处理流式响应、不构建 Prompt |
-| `prompt_manager.py` | 事件驱动的 Prompt 片段追加 | 不处理消息格式转换 |
-| `metadata_provider.py` | 从 conversation.metadata 获取各种数据 | 不处理具体业务逻辑 |
+| `injectors/` | Phase-based 上下文注入 | 不直接调用 LLM |
+| `providers/` | 从 DB/缓存 获取上下文数据 | 不处理消息格式转换 |
 | `context_engineering.py` | 6 大优化策略的实现 | 不做 Prompt 片段管理 |
 
 ## 🏗️ 架构图
@@ -49,23 +50,13 @@ core/context/
         │                           │                           │
         ▼                           ▼                           ▼
 ┌───────────────────┐   ┌───────────────────┐   ┌───────────────────┐
-│   RuntimeContext  │   │    Context        │   │  PromptManager    │
-│   (runtime.py)    │   │ (conversation.py) │   │(prompt_manager.py)│
+│   RuntimeContext  │   │  Injectors        │   │ContextEngineering │
+│   (runtime.py)    │   │  (injectors/)     │   │     Manager       │
 │                   │   │                   │   │                   │
-│ • SSE 块状态      │   │ • 加载历史消息    │   │ • 事件触发追加    │
-│ • Content 累积    │   │ • Token 压缩      │   │ • 片段去重        │
-│ • Turn 计数       │   │ • 格式转换        │   │ • 构建最终 Prompt │
+│ • SSE 块状态      │   │ • Phase 1: System │   │ • KV-Cache 优化   │
+│ • Content 累积    │   │ • Phase 2: User   │   │ • Todo 重写       │
+│ • Turn 计数       │   │ • Phase 3: Runtime│   │ • 错误保留        │
 └───────────────────┘   └───────────────────┘   └───────────────────┘
-                                    │
-                                    ▼
-                        ┌───────────────────┐
-                        │ContextEngineering │
-                        │     Manager       │
-                        │                   │
-                        │ • Todo 重写       │
-                        │ • 错误保留        │
-                        │ • (其他策略待实现)│
-                        └───────────────────┘
 ```
 
 ## 📖 使用规范
@@ -92,54 +83,36 @@ if ctx.is_max_turns_reached():
     break
 ```
 
-### 2. Context - 对话历史管理
+### 2. Injectors - Phase-based 上下文注入（推荐）
 
 ```python
-from core.context import Context, create_context
-
-# 创建并加载历史（会自动压缩）
-context = await create_context(
-    conversation_id="conv_123",
-    conversation_service=conversation_service
+from core.context.injectors import (
+    InjectionOrchestrator,
+    InjectionContext,
+    create_default_orchestrator,
 )
 
-# 获取用于 LLM 的消息
-messages = context.get_messages_for_llm()
+# 创建编排器
+orchestrator = create_default_orchestrator()
 
-# 检查 Token 使用
-is_over, current, threshold = context.check_threshold(0.8)
+# 构建上下文
+context = InjectionContext(
+    user_id="user_123",
+    user_query="帮我写一段代码",
+    prompt_cache=prompt_cache,
+)
 
-# 手动压缩
-await context.compress_if_needed()
+# Phase 1: System Message（带缓存元数据）
+system_blocks = await orchestrator.build_system_blocks(context)
+
+# Phase 2 & 3: User Messages
+messages = await orchestrator.build_messages(context)
 ```
 
-### 3. PromptManager - Prompt 追加
+### 3. MetadataProvider - 通用元数据获取
 
 ```python
-from core.context import get_prompt_manager
-
-prompt_mgr = get_prompt_manager()
-
-# 事件触发追加
-prompt_mgr.on_session_start(ctx, conversation_id="conv_123")
-prompt_mgr.on_tool_result(ctx, tool_name="rag_search", result={...})
-prompt_mgr.on_task_detected(ctx, task_type="ppt_generation")
-
-# 追加自定义片段
-prompt_mgr.append_fragment(ctx, "e2b_rules", priority=60)
-
-# 构建最终 Prompt
-system_prompt = prompt_mgr.build_system_prompt(ctx, base_prompt="...")
-
-# 检查已追加的片段
-if prompt_mgr.has_fragment(ctx, "sandbox_context"):
-    print("已追加沙盒上下文")
-```
-
-### 4. MetadataProvider - 通用元数据获取
-
-```python
-from core.context.metadata_provider import (
+from core.context.providers import (
     ConversationMetadataProvider,
     load_plan_for_context,
     load_context_metadata
@@ -193,8 +166,9 @@ ce_mgr.record_error(
 
 判断流程：
 ├── 处理 SSE 流式响应？ → runtime.py
-├── 处理数据库消息？ → conversation.py
-├── 追加 Prompt 片段？ → prompt_manager.py
+├── 注入上下文到 System Message？ → injectors/phase1/
+├── 注入上下文到 User Message？ → injectors/phase2/
+├── 运行时追加上下文？ → injectors/phase3/
 └── 优化上下文策略？ → context_engineering.py
 ```
 
@@ -206,15 +180,10 @@ class RuntimeContext:
     async def load_from_db(self):  # ❌ 不要这样做！
         ...
 
-# ❌ 禁止在 conversation.py 中处理 SSE
-class Context:
-    def on_content_delta(self):  # ❌ 不要这样做！
-        ...
-
-# ❌ 禁止在 prompt_manager.py 中直接操作消息列表
-class PromptManager:
-    def modify_messages(self, messages):  # ❌ 不要这样做！
-        ...
+# ❌ 禁止在 Injector 中直接调用 LLM
+class MyInjector(BaseInjector):
+    async def inject(self, ctx):
+        await llm.create_message()  # ❌ 不要这样做！
 
 # ❌ 禁止创建新的上下文类
 class MyNewContext:  # ❌ 不要新建，扩展现有类！
@@ -224,22 +193,23 @@ class MyNewContext:  # ❌ 不要新建，扩展现有类！
 ### 3. 扩展方式
 
 ```python
+# ✅ 正确：创建新的 Injector
+from core.context.injectors import BaseInjector, InjectionPhase
+
+class MyNewInjector(BaseInjector):
+    @property
+    def phase(self) -> InjectionPhase:
+        return InjectionPhase.USER_CONTEXT  # Phase 2
+    
+    async def inject(self, context) -> InjectionResult:
+        # 获取数据并返回
+        return InjectionResult(content="...")
+
 # ✅ 正确：在 context_engineering.py 中添加新策略
 class ContextEngineeringManager:
     def __init__(self):
-        # 现有
         self.error_retention = ErrorRetention()
-        # 新增策略
         self.my_new_strategy = MyNewStrategy()  # ✅ 这样添加
-
-# ✅ 正确：在 prompt_manager.py 中添加新事件
-class PromptManager:
-    def on_my_new_event(self, ctx, **kwargs):  # ✅ 这样添加
-        ...
-
-# ✅ 正确：添加新的 Prompt 片段
-# 1. 在 prompts/fragments/ 创建 my_fragment.md
-# 2. 调用 prompt_mgr.append_fragment(ctx, "my_fragment")
 ```
 
 ### 4. 函数签名规范
@@ -262,9 +232,10 @@ def count_tokens(self, messages: List[Dict]) -> int:
 
 ### 需要实现的功能
 
-1. **KV-Cache 优化**
-   - [ ] 实现消息前缀稳定性检测
-   - [ ] 添加缓存命中率监控
+1. **KV-Cache 优化** ✅ 已完成
+   - [x] `stable_json_dumps` 稳定序列化函数
+   - [x] 集成到工具结果序列化流程
+   - [ ] 添加缓存命中率监控（可选）
 
 2. **工具遮蔽**
    - [ ] 实现状态机
@@ -302,26 +273,18 @@ def count_tokens(self, messages: List[Dict]) -> int:
    - [ ] 集成 `ToolMasker` 到 Agent 主循环
    - [ ] 集成 `RecoverableCompressor` 到工具结果处理
 
-2. **prompt_manager.py**
-   - [ ] 删除未使用的 `on_task_detected`（或使用它）
-   - [ ] 删除未使用的 `on_files_uploaded`（或使用它）
-   - [ ] 精简重复代码
-
 ## 📊 指标
 
-| 文件 | 当前行数 | 目标行数 | 状态 |
-|------|---------|---------|------|
+| 文件/目录 | 当前行数 | 目标行数 | 状态 |
+|-----------|---------|---------|------|
 | runtime.py | 672 | 600 | 🟡 可优化 |
-| conversation.py | 758 | 500 | 🟡 可优化 |
-| prompt_manager.py | 848 | 400 | 🔴 需精简 |
-| context_engineering.py | 961 | 300 | 🔴 需大幅精简 |
-| **总计** | **3239** | **1800** | **目标减少 44%** |
+| injectors/ | ~500 | 500 | ✅ 合理 |
+| context_engineering.py | 961 | 500 | 🟡 可优化 |
 
 ---
 
 **维护者**: ZenFlux Team  
-**最后更新**: 2026-01-11  
+**最后更新**: 2026-02-03  
 **相关文档**: 
-- [V4 架构总览](../../docs/architecture/00-ARCHITECTURE-V4.md)
-- [Memory Protocol](../../docs/architecture/01-MEMORY-PROTOCOL.md)
+- [架构总览](../../docs/architecture/00-ARCHITECTURE-OVERVIEW.md)
 

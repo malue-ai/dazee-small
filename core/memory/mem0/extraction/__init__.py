@@ -9,4 +9,3 @@ __all__ = [
     "get_fragment_extractor",
     "reset_fragment_extractor",
 ]
-

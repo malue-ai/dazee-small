@@ -271,7 +271,9 @@ class E2BSandboxProvider(SandboxProvider):
         try:
             await sandbox.commands.run("echo 'connected'", timeout=15)
         except Exception as e:
-            raise SandboxConnectionError(f"沙盒连接验证失败: {e}")
+            # 🔧 优化错误信息：包含异常类型，便于上层判断是否需要重建
+            error_detail = str(e) if str(e) else type(e).__name__
+            raise SandboxConnectionError(f"沙盒连接验证失败: {error_detail}")
         
         logger.info(f"🔗 连接沙盒成功: {e2b_sandbox_id}")
         return sandbox
@@ -559,9 +561,25 @@ class E2BSandboxProvider(SandboxProvider):
                 return sandbox
             except Exception as e:
                 error_str = str(e).lower()
-                if "not found" in error_str:
+                error_type = type(e).__name__.lower()
+                
+                # 🔧 修复：连接错误也视为沙盒可能已过期，需要重建
+                # E2B 沙盒有生命周期限制，超时后会被自动回收
+                # 触发重建的条件：
+                # 1. 明确的 "not found" 错误
+                # 2. 连接验证失败（SandboxConnectionError）
+                # 3. 网络连接错误（ConnectError, ConnectionError 等）
+                should_recreate = (
+                    "not found" in error_str or
+                    "沙盒连接验证失败" in error_str or
+                    "connecterror" in error_type or
+                    "connectionerror" in error_type or
+                    "timeout" in error_str
+                )
+                
+                if should_recreate:
                     logger.warning(
-                        f"⚠️ 沙盒已被删除，将自动重建: {db_sandbox.e2b_sandbox_id}"
+                        f"⚠️ 沙盒不可用（{type(e).__name__}），将自动重建: {db_sandbox.e2b_sandbox_id}"
                     )
                     async with AsyncSessionLocal() as session:
                         await crud.update_sandbox_e2b_id(
@@ -901,7 +919,7 @@ class E2BSandboxProvider(SandboxProvider):
             )
             
             # 生成预签名 URL（7天有效）
-            url = uploader.get_presigned_url(result["key"], expires_in=7 * 24 * 3600)
+            url = await uploader.get_presigned_url(result["key"], expires_in=7 * 24 * 3600)
             
             logger.info(f"📤 沙盒图片已上传到 S3: {filename}, size={len(file_content)}")
             return url

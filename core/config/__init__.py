@@ -15,8 +15,8 @@
 from core.config.loader import (
     ConfigLoader,
     get_config_loader,
-    load_prompt_config,
     load_capabilities_config,
+    load_prompt_config,
 )
 
 __all__ = [

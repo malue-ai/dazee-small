@@ -40,7 +40,12 @@ async function startServer() {
 
   // 健康检查
   app.get("/api/health", (_req: Request, res: Response) => {
-    res.json({ status: "ok", timestamp: new Date().toISOString() });
+    res.json({
+      data: {
+        status: "ok",
+        timestamp: new Date().toISOString(),
+      },
+    });
   });
 
   // 示例：认证路由

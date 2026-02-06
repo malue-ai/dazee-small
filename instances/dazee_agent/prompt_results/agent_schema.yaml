@@ -43,12 +43,16 @@ tool_selector:
   - api_calling
   - plan_todo
   - hitl
+  - send_files
+  - clue_generation
   selection_strategy: capability_based
   allow_parallel: false
   max_parallel_tools: 1
   base_tools:
   - plan_todo
   - hitl
+  - send_files
+  - clue_generation
   tool_timeout: 300
 memory_manager:
   enabled: true

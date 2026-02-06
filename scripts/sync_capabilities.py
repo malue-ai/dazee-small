@@ -33,6 +33,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from core.tool.registry_config import get_core_tools, get_tool_categories
 import re
+import asyncio
 
 # 项目根目录
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -47,9 +48,9 @@ INSTANCES_DIR = PROJECT_ROOT / "instances"
 # 🆕 从 config/tool_registry.yaml 统一配置读取
 # 额外的 description/comment 用于生成配置注释
 
-def _build_tool_categories() -> Dict[str, Dict]:
-    """构建工具分类（从统一配置 + 额外描述）"""
-    base_categories = get_tool_categories()
+async def _build_tool_categories_async() -> Dict[str, Dict]:
+    """构建工具分类（从统一配置 + 额外描述）（异步）"""
+    base_categories = await get_tool_categories()
     
     # 添加描述信息
     descriptions = {
@@ -78,11 +79,16 @@ def _build_tool_categories() -> Dict[str, Dict]:
     
     return result
 
-TOOL_CATEGORIES = _build_tool_categories()
+# 工具分类和核心工具（运行时异步加载）
+TOOL_CATEGORIES: Dict[str, Dict] = {}
+CORE_TOOLS: List[str] = []
 
-# 核心工具（不暴露给用户配置）
-# 🆕 从 config/tool_registry.yaml 统一配置读取
-CORE_TOOLS = get_core_tools()
+
+async def _init_tool_config():
+    """初始化工具配置（异步）"""
+    global TOOL_CATEGORIES, CORE_TOOLS
+    TOOL_CATEGORIES = await _build_tool_categories_async()
+    CORE_TOOLS = await get_core_tools()
 
 # 工具分组（用于生成配置时的注释分组）
 TOOL_GROUPS = {
@@ -378,7 +384,10 @@ class CapabilitiesSync:
         return "\n".join(lines)
 
 
-def main():
+async def main():
+    # 初始化工具配置（异步加载）
+    await _init_tool_config()
+    
     parser = argparse.ArgumentParser(
         description="工具配置同步脚本 - 从 capabilities.yaml 同步到实例配置"
     )
@@ -425,10 +434,11 @@ def main():
         doc = sync.generate_tool_reference()
         doc_path = PROJECT_ROOT / "docs" / "tool_reference.md"
         doc_path.parent.mkdir(exist_ok=True)
-        with open(doc_path, 'w', encoding='utf-8') as f:
-            f.write(doc)
+        import aiofiles
+        async with aiofiles.open(doc_path, 'w', encoding='utf-8') as f:
+            await f.write(doc)
         print(f"✅ 已生成工具参考文档：{doc_path}")
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

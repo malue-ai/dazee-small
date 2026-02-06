@@ -278,9 +278,16 @@ enabled_capabilities:
 
 advanced:
   # 意图分析器配置
+  # 用于分析用户意图、判断任务复杂度
   intent_analyzer:
-    enabled: true
-    use_llm: true
+    enabled: true       # 是否启用意图识别
+    use_llm: true       # 是否使用 LLM 进行分析（false 则使用规则）
+  
+  # 开场白配置（Preface）
+  # Agent 执行前的简短开场白，告知用户正在处理
+  preface:
+    enabled: false      # 是否启用开场白（默认关闭）
+    max_tokens: 150     # 开场白最大 token 数（50-500）
   
   # 输出格式配置
   output_formatter:

@@ -15,14 +15,15 @@ Mem0 数据聚合器
 # 1. 标准库
 import json
 from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
+
+# 3. 本地模块
+from core.llm import Message, create_llm_service
+from core.memory.mem0.pool import get_mem0_pool
+from logger import get_logger
 
 # 2. 第三方库（无）
 
-# 3. 本地模块
-from core.llm import create_llm_service, Message
-from core.memory.mem0.pool import get_mem0_pool
-from logger import get_logger
 
 logger = get_logger("memory.mem0.aggregator")
 
@@ -35,10 +36,10 @@ WEEKDAYS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"
 def format_date_with_weekday(dt: datetime) -> str:
     """
     格式化日期：X月X日(星期几)
-    
+
     Args:
         dt: datetime 对象
-        
+
     Returns:
         格式化字符串，如 "1月6日(周一)"
     """
@@ -48,11 +49,11 @@ def format_date_with_weekday(dt: datetime) -> str:
 def format_time_window(start: datetime, end: datetime) -> Dict[str, str]:
     """
     格式化时间窗口
-    
+
     Args:
         start: 开始日期
         end: 结束日期
-        
+
     Returns:
         时间窗口字典
     """
@@ -61,7 +62,7 @@ def format_time_window(start: datetime, end: datetime) -> Dict[str, str]:
         "end": end.strftime("%Y-%m-%d"),
         "start_weekday": WEEKDAYS[start.weekday()],
         "end_weekday": WEEKDAYS[end.weekday()],
-        "display": f"{format_date_with_weekday(start)} - {format_date_with_weekday(end)}"
+        "display": f"{format_date_with_weekday(start)} - {format_date_with_weekday(end)}",
     }
 
 
@@ -95,19 +96,19 @@ async def aggregate_user_emotion(
     user_id: str,
     start_date: datetime,
     end_date: datetime,
-    memories: Optional[List[Dict[str, Any]]] = None
+    memories: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """
     聚合用户指定时间段的情绪轨迹
-    
+
     关键要求：时间窗口必须明确，禁止使用模糊词
-    
+
     Args:
         user_id: 用户 ID
         start_date: 开始日期
         end_date: 结束日期
         memories: 可选，已检索的记忆列表（如果不提供则自动检索）
-        
+
     Returns:
         {
             "time_window": {
@@ -121,11 +122,12 @@ async def aggregate_user_emotion(
         }
     """
     time_window = format_time_window(start_date, end_date)
-    
+
     # 如果没有提供记忆，则检索
     if memories is None:
         try:
             from core.memory.mem0.pool import get_mem0_pool
+
             pool = get_mem0_pool()
             # 检索该时间段的所有记忆
             memories = pool.get_all(user_id=user_id, limit=100)
@@ -133,69 +135,68 @@ async def aggregate_user_emotion(
         except Exception as e:
             logger.error(f"[Aggregator] 检索记忆失败: {e}")
             memories = []
-    
+
     if not memories:
         return {
             "time_window": time_window,
             "trajectory": [],
             "summary": f"{time_window['display']}期间无记录",
-            "dominant": "neutral"
+            "dominant": "neutral",
         }
-    
+
     # 格式化记忆
     memory_texts = []
     for mem in memories:
         content = mem.get("memory", "")
         if content:
             memory_texts.append(f"- {content}")
-    
+
     if not memory_texts:
         return {
             "time_window": time_window,
             "trajectory": [],
             "summary": f"{time_window['display']}期间无有效记录",
-            "dominant": "neutral"
+            "dominant": "neutral",
         }
-    
+
     try:
         # 构建 Prompt
         prompt = EMOTION_AGGREGATION_PROMPT.format(
-            time_window=time_window["display"],
-            memories="\n".join(memory_texts)
+            time_window=time_window["display"], memories="\n".join(memory_texts)
         )
-        
+
         # 调用 LLM
         llm = create_llm_service(model="claude-haiku-4-5-20251001")
         response = await llm.create_message_async(
             messages=[Message(role="user", content=prompt)],
-            system="你是情绪分析专家，只输出 JSON 格式结果。"
+            system="你是情绪分析专家，只输出 JSON 格式结果。",
         )
-        
+
         # 解析响应
         result_text = response.content.strip()
-        
+
         # 提取 JSON
         if "```json" in result_text:
             result_text = result_text.split("```json")[1].split("```")[0].strip()
         elif "```" in result_text:
             result_text = result_text.split("```")[1].split("```")[0].strip()
-        
+
         result = json.loads(result_text)
         result["time_window"] = time_window
-        
+
         logger.info(
             f"[Aggregator] 情绪聚合完成: user={user_id}, "
             f"时间={time_window['display']}, 主导情绪={result.get('dominant', 'unknown')}"
         )
         return result
-        
+
     except json.JSONDecodeError as e:
         logger.warning(f"[Aggregator] JSON 解析失败: {e}")
         return {
             "time_window": time_window,
             "trajectory": [],
             "summary": f"{time_window['display']}期间情绪分析失败",
-            "dominant": "unknown"
+            "dominant": "unknown",
         }
     except Exception as e:
         logger.error(f"[Aggregator] 情绪聚合失败: {e}")
@@ -203,7 +204,7 @@ async def aggregate_user_emotion(
             "time_window": time_window,
             "trajectory": [],
             "summary": f"{time_window['display']}期间情绪分析失败",
-            "dominant": "unknown"
+            "dominant": "unknown",
         }
 
 
@@ -236,102 +237,103 @@ async def aggregate_work_summary(
     user_id: str,
     start_date: datetime,
     end_date: datetime,
-    memories: Optional[List[Dict[str, Any]]] = None
+    memories: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """
     聚合用户指定时间段的工作重点
-    
+
     Args:
         user_id: 用户 ID
         start_date: 开始日期
         end_date: 结束日期
         memories: 可选，已检索的记忆列表
-        
+
     Returns:
         工作重点摘要
     """
     time_window = format_time_window(start_date, end_date)
-    
+
     # 如果没有提供记忆，则检索
     if memories is None:
         try:
             from core.memory.mem0.pool import get_mem0_pool
+
             pool = get_mem0_pool()
             memories = pool.get_all(user_id=user_id, limit=100)
         except Exception as e:
             logger.error(f"[Aggregator] 检索记忆失败: {e}")
             memories = []
-    
+
     if not memories:
         return {
             "time_window": time_window,
             "highlights": [],
             "summary": f"{time_window['display']}期间无工作记录",
-            "next_steps": []
+            "next_steps": [],
         }
-    
+
     # 格式化记忆
     memory_texts = [f"- {m.get('memory', '')}" for m in memories if m.get("memory")]
-    
+
     if not memory_texts:
         return {
             "time_window": time_window,
             "highlights": [],
             "summary": f"{time_window['display']}期间无有效工作记录",
-            "next_steps": []
+            "next_steps": [],
         }
-    
+
     try:
         # 构建 Prompt
         prompt = WORK_SUMMARY_PROMPT.format(
-            time_window=time_window["display"],
-            memories="\n".join(memory_texts)
+            time_window=time_window["display"], memories="\n".join(memory_texts)
         )
-        
+
         # 调用 LLM
         llm = create_llm_service(model="claude-haiku-4-5-20251001")
         response = await llm.create_message_async(
             messages=[Message(role="user", content=prompt)],
-            system="你是工作总结专家，只输出 JSON 格式结果。"
+            system="你是工作总结专家，只输出 JSON 格式结果。",
         )
-        
+
         # 解析响应
         result_text = response.content.strip()
-        
+
         # 提取 JSON
         if "```json" in result_text:
             result_text = result_text.split("```json")[1].split("```")[0].strip()
         elif "```" in result_text:
             result_text = result_text.split("```")[1].split("```")[0].strip()
-        
+
         result = json.loads(result_text)
         result["time_window"] = time_window
-        
+
         logger.info(
             f"[Aggregator] 工作摘要完成: user={user_id}, "
             f"时间={time_window['display']}, 重点事项={len(result.get('highlights', []))}"
         )
         return result
-        
+
     except Exception as e:
         logger.error(f"[Aggregator] 工作摘要失败: {e}")
         return {
             "time_window": time_window,
             "highlights": [],
             "summary": f"{time_window['display']}期间工作摘要生成失败",
-            "next_steps": []
+            "next_steps": [],
         }
 
 
 # ==================== 便捷函数 ====================
 
+
 async def aggregate_weekly_summary(user_id: str) -> Dict[str, Any]:
     """
     生成用户本周摘要（情绪 + 工作）
-    
+
     Args:
         user_id: 用户 ID
-        
+
     Returns:
         包含情绪和工作摘要的综合报告
     """
@@ -340,7 +342,7 @@ async def aggregate_weekly_summary(user_id: str) -> Dict[str, Any]:
     # 本周一
     start_of_week = today - timedelta(days=today.weekday())
     start_of_week = start_of_week.replace(hour=0, minute=0, second=0, microsecond=0)
-    
+
     # 检索记忆
     try:
         pool = get_mem0_pool()
@@ -348,16 +350,17 @@ async def aggregate_weekly_summary(user_id: str) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"[Aggregator] 检索记忆失败: {e}")
         memories = []
-    
+
     # 并行聚合
     import asyncio
+
     emotion_task = aggregate_user_emotion(user_id, start_of_week, today, memories)
     work_task = aggregate_work_summary(user_id, start_of_week, today, memories)
-    
+
     emotion_result, work_result = await asyncio.gather(emotion_task, work_task)
-    
+
     return {
         "time_window": format_time_window(start_of_week, today),
         "emotion": emotion_result,
-        "work": work_result
+        "work": work_result,
     }

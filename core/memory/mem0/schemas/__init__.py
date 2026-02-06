@@ -4,69 +4,26 @@ Dazee Mem0 增强数据结构
 导出所有 Schema 定义，支持碎片记忆、行为模式、PDCA 计划、情绪状态和用户画像
 """
 
-# 碎片记忆
-from .fragment import (
-    FragmentMemory,
-    TaskHint,
-    TimeHint,
-    EmotionHint,
-    RelationHint,
-    TodoHint,
-    PreferenceHint,
-    TopicHint,
-    ConstraintHint,
-    ToolHint,
-    GoalHint,
-    TimeSlot,
-    DayOfWeek,
-    MemoryType,
-    MemorySource,
-    MemoryVisibility,
-)
-
 # 行为模式（5W1H）
 from .behavior import (
     BehaviorPattern,
+    Collaborator,
+    ConflictDetection,
     DateRange,
+    Motivation,
+    PeriodicityAnalysis,
+    PreferenceStability,
     RoutineTask,
     TimePattern,
     WorkContext,
-    Collaborator,
-    Motivation,
     WorkStyle,
-    PreferenceStability,
-    PeriodicityAnalysis,
-    ConflictDetection,
-)
-
-# PDCA 工作计划
-from .plan import (
-    WorkPlan,
-    TodoItem,
-    Checkpoint,
-    Blocker,
-    ReminderItem,
-    ReminderType,
-    CheckResult,
-    ActionItem,
-    Priority,
-    TodoStatus,
-    PlanStatus,
-    PDCAPhase,
 )
 
 # 情绪状态
 from .emotion import (
-    EmotionState,
     EmotionSignal,
+    EmotionState,
     EmotionTrend,
-)
-
-# 用户画像
-from .persona import (
-    UserPersona,
-    PlanSummary,
-    ReminderSummary,
 )
 
 # 显式记忆
@@ -75,6 +32,48 @@ from .explicit_memory import (
     MemoryCardCategory,
 )
 
+# 碎片记忆
+from .fragment import (
+    ConstraintHint,
+    DayOfWeek,
+    EmotionHint,
+    FragmentMemory,
+    GoalHint,
+    MemorySource,
+    MemoryType,
+    MemoryVisibility,
+    PreferenceHint,
+    RelationHint,
+    TaskHint,
+    TimeHint,
+    TimeSlot,
+    TodoHint,
+    ToolHint,
+    TopicHint,
+)
+
+# 用户画像
+from .persona import (
+    PlanSummary,
+    ReminderSummary,
+    UserPersona,
+)
+
+# PDCA 工作计划
+from .plan import (
+    ActionItem,
+    Blocker,
+    Checkpoint,
+    CheckResult,
+    PDCAPhase,
+    PlanStatus,
+    Priority,
+    ReminderItem,
+    ReminderType,
+    TodoItem,
+    TodoStatus,
+    WorkPlan,
+)
 
 __all__ = [
     # Fragment

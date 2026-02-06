@@ -43,8 +43,11 @@
           :messages="conversationStore.messages"
           :loading="chat.isLoading.value"
           :generating="chat.isGenerating.value"
+          :loading-more="conversationStore.loadingMore"
+          :has-more="conversationStore.hasMore"
           @suggestion-click="handleSuggestionClick"
           @file-preview="handleFilePreview"
+          @load-more="handleLoadMore"
         />
 
         <!-- 输入框区域 -->
@@ -269,7 +272,7 @@ onMounted(async () => {
   // 初始化
   conversationStore.initUserId()
   
-  // 并行加载
+    // 并行加载（获取最近 50 个对话，不含具体消息）
   await Promise.all([
     conversationStore.fetchList(),
     loadAgentList()
@@ -344,7 +347,7 @@ async function handleSelectConversation(id: string): Promise<void> {
 async function handleCreateConversation(): Promise<void> {
   conversationStore.reset()
   router.push({ name: 'chat' })
-  await conversationStore.fetchList()
+  await conversationStore.fetchList(50)
 }
 
 /** 删除会话 */
@@ -394,8 +397,12 @@ async function handleSendMessage(): Promise<void> {
     agentId: selectedAgentId.value
   })
 
-  // 刷新会话列表
-  await conversationStore.fetchList()
+  // 刷新会话列表（保持 50 条，失败不影响用户体验）
+  try {
+    await conversationStore.fetchList(50)
+  } catch (e) {
+    console.warn('⚠️ 刷新会话列表失败:', e)
+  }
 
   // 滚动到底部
   messageListRef.value?.scrollToBottom()
@@ -433,6 +440,20 @@ function handleFilePreview(file: AttachedFile): void {
 /** 文件预览（工作区） */
 function handleFilePreviewSelect(file: FileItem): void {
   previewFile.value = file
+}
+
+/** 加载更多历史消息 */
+async function handleLoadMore(): Promise<void> {
+  // 记录当前滚动高度
+  const previousHeight = messageListRef.value?.getScrollHeight() || 0
+  
+  // 加载更多
+  const loaded = await conversationStore.loadMore()
+  
+  // 保持滚动位置
+  if (loaded && messageListRef.value) {
+    messageListRef.value.maintainScrollPosition(previousHeight)
+  }
 }
 
 /** 运行项目 */

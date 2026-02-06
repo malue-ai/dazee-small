@@ -22,7 +22,7 @@ Agent V3.6 - Prompt-Driven + Memory-First 架构
 
 __version__ = "3.6.0"
 
-from core.agent import SimpleAgent, RVRBAgent, create_simple_agent
+from core.agent import Agent, create_agent
 from core.memory import (
     MemoryManager,
     WorkingMemory,
@@ -37,9 +37,8 @@ from tools.plan_todo_tool import (
 
 __all__ = [
     # Core Agent
-    "SimpleAgent",
-    "RVRBAgent",
-    "create_simple_agent",
+    "Agent",
+    "create_agent",
     
     # Memory Layer
     "MemoryManager",

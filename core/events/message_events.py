@@ -28,24 +28,25 @@ message_delta 统一结构：
 - 序号（seq）由 EventBroadcaster 层统一生成
 """
 
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
+
 from core.events.base import BaseEventManager
 
 
 class MessageEventManager(BaseEventManager):
     """
     Message 级事件管理器
-    
+
     负责消息轮次相关的事件：
     - message_start: 消息开始
     - message_delta: 消息增量（通用，支持多种 delta 类型）
     - message_stop: 消息结束
-    
+
     注意：
     - Tool 事件通过 Content 级事件发送
     - 推荐通过 EventBroadcaster 调用，由其统一生成 seq
     """
-    
+
     async def emit_message_start(
         self,
         session_id: str,
@@ -55,11 +56,11 @@ class MessageEventManager(BaseEventManager):
         seq: Optional[int] = None,
         event_uuid: Optional[str] = None,
         output_format: str = "zenflux",
-        adapter: Any = None
+        adapter: Any = None,
     ) -> Optional[Dict[str, Any]]:
         """
         发送 message_start 事件
-        
+
         Args:
             session_id: Session ID
             conversation_id: 对话 ID（必填）
@@ -69,7 +70,7 @@ class MessageEventManager(BaseEventManager):
             event_uuid: 事件 UUID（可选）
             output_format: 输出格式（zenflux/zeno），默认 zenflux
             adapter: 格式转换适配器（可选）
-            
+
         Returns:
             事件对象，如果被过滤则返回 None
         """
@@ -83,21 +84,22 @@ class MessageEventManager(BaseEventManager):
                 "model": model,
                 "stop_reason": None,
                 "stop_sequence": None,
-                "usage": {
-                    "input_tokens": 0,
-                    "output_tokens": 0
-                }
+                "usage": {"input_tokens": 0, "output_tokens": 0},
             },
-            "timestamp": self._get_timestamp()
+            "timestamp": self._get_timestamp(),
         }
-        
+
         return await self._send_event(
-            session_id, event,
+            session_id,
+            event,
             conversation_id=conversation_id,
-            message_id=message_id, seq=seq, event_uuid=event_uuid,
-            output_format=output_format, adapter=adapter
+            message_id=message_id,
+            seq=seq,
+            event_uuid=event_uuid,
+            output_format=output_format,
+            adapter=adapter,
         )
-    
+
     async def emit_message_delta(
         self,
         session_id: str,
@@ -107,11 +109,11 @@ class MessageEventManager(BaseEventManager):
         seq: Optional[int] = None,
         event_uuid: Optional[str] = None,
         output_format: str = "zenflux",
-        adapter: Any = None
+        adapter: Any = None,
     ) -> Optional[Dict[str, Any]]:
         """
         发送 message_delta 事件
-        
+
         Args:
             session_id: Session ID
             conversation_id: 对话 ID（必填）
@@ -121,10 +123,10 @@ class MessageEventManager(BaseEventManager):
             event_uuid: 事件 UUID（可选）
             output_format: 输出格式（zenflux/zeno），默认 zenflux
             adapter: 格式转换适配器（可选）
-            
+
         Returns:
             事件对象，如果被过滤则返回 None
-            
+
         事件结构（简化后）：
             {
                 "type": "message_delta",
@@ -133,24 +135,25 @@ class MessageEventManager(BaseEventManager):
                     "content": {...}         # delta 内容
                 }
             }
-            
+
         Examples:
             delta = {"type": "intent", "content": {...}}
             delta = {"type": "recommended", "content": "[...]"}
         """
         # delta 直接作为 data（不再包裹）
-        event = self._create_event(
-            event_type="message_delta",
-            data=delta
-        )
-        
+        event = self._create_event(event_type="message_delta", data=delta)
+
         return await self._send_event(
-            session_id, event,
+            session_id,
+            event,
             conversation_id=conversation_id,
-            message_id=message_id, seq=seq, event_uuid=event_uuid,
-            output_format=output_format, adapter=adapter
+            message_id=message_id,
+            seq=seq,
+            event_uuid=event_uuid,
+            output_format=output_format,
+            adapter=adapter,
         )
-    
+
     async def emit_message_stop(
         self,
         session_id: str,
@@ -159,11 +162,11 @@ class MessageEventManager(BaseEventManager):
         seq: Optional[int] = None,
         event_uuid: Optional[str] = None,
         output_format: str = "zenflux",
-        adapter: Any = None
+        adapter: Any = None,
     ) -> Optional[Dict[str, Any]]:
         """
         发送 message_stop 事件
-        
+
         Args:
             session_id: Session ID
             conversation_id: 对话 ID（必填）
@@ -172,24 +175,25 @@ class MessageEventManager(BaseEventManager):
             event_uuid: 事件 UUID（可选）
             output_format: 输出格式（zenflux/zeno），默认 zenflux
             adapter: 格式转换适配器（可选）
-            
+
         Returns:
             事件对象，如果被过滤则返回 None
         """
-        event = self._create_event(
-            event_type="message_stop",
-            data={}
-        )
-        
+        event = self._create_event(event_type="message_stop", data={})
+
         return await self._send_event(
-            session_id, event,
+            session_id,
+            event,
             conversation_id=conversation_id,
-            message_id=message_id, seq=seq, event_uuid=event_uuid,
-            output_format=output_format, adapter=adapter
+            message_id=message_id,
+            seq=seq,
+            event_uuid=event_uuid,
+            output_format=output_format,
+            adapter=adapter,
         )
-    
+
     def _get_timestamp(self) -> str:
         """获取当前时间戳（ISO格式）"""
         from datetime import datetime
-        return datetime.now().isoformat()
 
+        return datetime.now().isoformat()

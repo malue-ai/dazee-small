@@ -12,5 +12,7 @@
     "medium_prompt": "f18c5a169df48e8bc5d9e5e33da50c0a",
     "complex_prompt": "e0c7503ffb4425ff9f010183cd450183"
   },
-  "manually_edited": []
+  "manually_edited": [
+    "intent_prompt"
+  ]
 }

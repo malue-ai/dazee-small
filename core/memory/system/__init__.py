@@ -9,8 +9,8 @@ System Memory 模块 - 系统级记忆
 - Skill: 本地工作流技能（skills/library/，对齐 clawdbot 机制）
 """
 
-from .skill import SkillMemory, create_skill_memory, create_skill_memory_async
 from .cache import CacheMemory, create_cache_memory
+from .skill import SkillMemory, create_skill_memory, create_skill_memory_async
 
 __all__ = [
     "SkillMemory",
@@ -19,4 +19,3 @@ __all__ = [
     "CacheMemory",
     "create_cache_memory",
 ]
-

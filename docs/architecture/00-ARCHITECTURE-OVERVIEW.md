@@ -4701,7 +4701,7 @@ LLM 选择工具（nodes）
     ↓
 ToolExecutor.execute("nodes", tool_input)
     ↓
-NodesTool.execute(action="run", command=["ls", "-la"])
+NodesTool.execute({"action": "run", "command": ["ls", "-la"]})
     ↓
 NodeManager.run_command(command=["ls", "-la"])
     ↓
@@ -7374,16 +7374,7 @@ def _build_subagent_system_prompt(
 - **Rule 3**: 避免无意义的并行化
 - **Rule 4**: 工具选择启发式（根据子任务类型选择工具）
 
-**新增方法**：
-```python
-def _suggest_subagent_count(
-    self,
-    user_query: str,
-    intent_info: Optional[Dict[str, Any]] = None
-) -> int:
-    # 根据查询长度、关键词、意图复杂度评分
-    # 返回建议的 Subagent 数量（1-5）
-```
+**设计决策**：Subagent 数量由 LLM 在 `decompose_task()` 中自行决定，遵循 **LLM-First** 原则，不使用关键词匹配进行启发式评估。
 
 #### 3. **真实 Subagent 执行** ✅
 

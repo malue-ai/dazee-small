@@ -32,16 +32,18 @@ from routers import (
     human_confirmation_router,
     knowledge_router,
     mem0_router,
+    realtime_router,
     skills_router,
     tasks_router,
     tools_router,
     workspace_router,
+    models_router,
 )
 from grpc_server.server import GRPCServer
 from infra.pools import get_session_pool, get_agent_pool, get_mcp_pool
 from infra.database import init_database
 from infra.resilience.config import apply_resilience_config
-from core.tool.capability import get_capability_registry
+from core.tool.registry import get_capability_registry
 from utils import get_s3_uploader
 
 # ==================== 常量定义 ====================
@@ -216,6 +218,35 @@ async def _start_scheduler() -> Optional[Any]:
     return None
 
 
+async def _init_chat_service() -> None:
+    """
+    预初始化 ChatService（避免首次请求冷启动）
+    
+    预热关键组件：
+    - ChatService 单例
+    - Intent LLM 连接（路由 + 开场白共用，带主备切换）
+    - 文件处理器
+    - Agent 注册表
+    """
+    print("💬 预热 ChatService...")
+    try:
+        from services.chat_service import get_chat_service
+        from core.llm.router import ModelRouter
+        
+        service = get_chat_service()
+        
+        # 预热 Intent LLM（路由 + 开场白共用，避免首次请求延迟）
+        intent_llm = await service.get_intent_llm()
+        is_router = isinstance(intent_llm, ModelRouter)
+        
+        _ = service.file_processor
+        _ = service.agent_registry
+        
+        print(f"✅ ChatService 预热完成 (intent_llm_router: {is_router})")
+    except Exception as e:
+        print(f"⚠️ ChatService 预热失败: {e}")
+
+
 async def _start_health_probe_service() -> Optional[Any]:
     """
     启动健康探测服务（🆕 V7.10）
@@ -363,9 +394,12 @@ async def _init_pools() -> None:
         session_pool = get_session_pool()
         
         # 4. 校准活跃 Session 数据（清理服务重启前的孤立记录）
-        calibration_result = await session_pool.calibrate()
-        if calibration_result.get("orphaned_removed", 0) > 0:
-            print(f"   ✓ SessionPool: 校准完成，清理 {calibration_result['orphaned_removed']} 个孤立 Session")
+        # 使用深度校准，同时清理用户级别的孤立 Session
+        calibration_result = await session_pool.calibrate(deep=True)
+        orphaned = calibration_result.get("orphaned_removed", 0)
+        user_cleaned = calibration_result.get("user_sessions_cleaned", 0)
+        if orphaned > 0 or user_cleaned > 0:
+            print(f"   ✓ SessionPool: 校准完成，清理 {orphaned} 个孤立 Session，{user_cleaned} 个用户级孤立记录")
         else:
             print(f"   ✓ SessionPool: 已就绪")
         
@@ -433,6 +467,7 @@ async def lifespan(app: FastAPI):
     await _preload_capability_registry()  # 🆕 加载工具注册表（必须在 Agent 之前）
     await _preload_agent_registry()  # 加载 Agent 配置
     await _init_pools()  # 初始化资源池（含 Agent 原型创建和 Session 校准）
+    await _init_chat_service()  # 预热 ChatService（避免首次请求冷启动）
     grpc_server = await _start_grpc_server()
     scheduler = await _start_scheduler()
     health_probe_service = await _start_health_probe_service()  # 🆕 V7.10: 启动健康探测
@@ -506,6 +541,10 @@ app.include_router(tasks_router)
 app.include_router(agents_router)
 app.include_router(skills_router)
 app.include_router(docs_router)
+app.include_router(models_router)
+
+# 实时通信（WebSocket）
+app.include_router(realtime_router)
 
 
 # ==================== 基础路由 ====================
@@ -540,7 +579,10 @@ async def root() -> Dict[str, Any]:
             "sessions": "/api/v1/sessions",
             "human_confirmation": "/api/v1/human-confirmation/{request_id}",
             "agents": "/api/v1/agents",
-            "skills": "/api/v1/skills"
+            "skills": "/api/v1/skills",
+            "models": "/api/v1/models",
+            "realtime_ws": "ws://host/api/v1/realtime/ws",
+            "realtime_sessions": "/api/v1/realtime/sessions"
         },
         "github": "https://github.com/your-repo/zenflux-agent"
     }

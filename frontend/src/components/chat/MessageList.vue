@@ -1,7 +1,26 @@
 <template>
-  <div class="flex-1 overflow-y-auto overflow-x-hidden scroll-smooth p-6 md:p-8 scrollbar-thin" ref="containerRef">
+  <div 
+    class="flex-1 overflow-y-auto overflow-x-hidden scroll-smooth p-6 md:p-8 scrollbar-thin" 
+    ref="containerRef"
+    @scroll="handleScroll"
+  >
+    <!-- 加载更多历史消息 -->
+    <div v-if="hasMore || loadingMore" class="flex justify-center py-4">
+      <button 
+        v-if="hasMore && !loadingMore"
+        @click="emit('load-more')"
+        class="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+      >
+        加载更早的消息
+      </button>
+      <div v-if="loadingMore" class="flex items-center gap-2 text-sm text-gray-400">
+        <span class="w-4 h-4 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin"></span>
+        加载中...
+      </div>
+    </div>
+
     <!-- 欢迎页 -->
-    <div v-if="messages.length === 0" class="h-full flex flex-col items-center justify-center text-center -mt-10">
+    <div v-if="messages.length === 0 && !loadingMore" class="h-full flex flex-col items-center justify-center text-center -mt-10">
       <div class="w-20 h-20 bg-white rounded-3xl shadow-lg border border-gray-100 flex items-center justify-center mb-8 transform hover:scale-105 transition-transform duration-300">
         <Sparkles class="w-10 h-10 text-blue-500" />
       </div>
@@ -145,11 +164,17 @@ interface Props {
   loading?: boolean
   /** 是否正在生成 */
   generating?: boolean
+  /** 是否正在加载更多历史消息 */
+  loadingMore?: boolean
+  /** 是否有更多历史消息 */
+  hasMore?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   loading: false,
-  generating: false
+  generating: false,
+  loadingMore: false,
+  hasMore: false
 })
 
 // ==================== Emits ====================
@@ -161,6 +186,8 @@ const emit = defineEmits<{
   (e: 'file-preview', file: AttachedFile): void
   /** 检测到 Mermaid 图表 */
   (e: 'mermaid-detected', charts: string[]): void
+  /** 加载更多历史消息 */
+  (e: 'load-more'): void
 }>()
 
 // ==================== State ====================
@@ -255,6 +282,40 @@ function scrollToBottom(): void {
   })
 }
 
+/**
+ * 处理滚动事件（滚动到顶部时加载更多）
+ */
+function handleScroll(): void {
+  if (!containerRef.value || props.loadingMore || !props.hasMore) return
+  
+  // 当滚动到距离顶部 100px 内时触发加载
+  if (containerRef.value.scrollTop < 100) {
+    emit('load-more')
+  }
+}
+
+/**
+ * 保持滚动位置（加载更多后使用）
+ * @param previousHeight - 加载前的滚动高度
+ */
+function maintainScrollPosition(previousHeight: number): void {
+  if (!containerRef.value) return
+  
+  nextTick(() => {
+    if (containerRef.value) {
+      const newHeight = containerRef.value.scrollHeight
+      containerRef.value.scrollTop = newHeight - previousHeight
+    }
+  })
+}
+
+/**
+ * 获取当前滚动高度
+ */
+function getScrollHeight(): number {
+  return containerRef.value?.scrollHeight || 0
+}
+
 // ==================== Watchers ====================
 
 // 监听消息变化，自动滚动
@@ -277,7 +338,9 @@ watch(
 // ==================== Expose ====================
 
 defineExpose({
-  scrollToBottom
+  scrollToBottom,
+  maintainScrollPosition,
+  getScrollHeight
 })
 </script>
 

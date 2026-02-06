@@ -243,8 +243,12 @@ export function useChat() {
         }
       })
 
-      // 刷新会话列表
-      await conversationStore.fetchList()
+      // 刷新会话列表（失败不应中断发送流程）
+      try {
+        await conversationStore.fetchList()
+      } catch (e) {
+        console.warn('⚠️ 发送后刷新会话列表失败:', e)
+      }
 
       return result
     } catch (error) {
@@ -311,7 +315,9 @@ export function useChat() {
     if (type === 'conversation_start' && data.conversation_id) {
       if (!conversationStore.currentId) {
         conversationStore.currentId = data.conversation_id
-        conversationStore.fetchList()
+        conversationStore.fetchList().catch(e => {
+          console.warn('⚠️ conversation_start 后刷新会话列表失败:', e)
+        })
       }
     }
 

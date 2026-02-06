@@ -2,7 +2,7 @@
 Prompt 选择器
 
 职责：根据意图分析结果返回合适的系统提示词
-- 需要 Plan（needs_plan=True 或 complex）→ full prompt（含 plan_todo 规则）
+- 需要 Plan（needs_plan=True 或 complex）→ full prompt（含 plan 规则）
 - 否则按 simple / standard 分层以节省 token
 
 这段逻辑放在 prompts 层，保持 Agent 框架的通用性。
@@ -37,7 +37,7 @@ def select_prompt(
             "level": "simple|standard|full"
         }
     """
-    # 需要 Plan → 强制 full prompt（含 plan_todo 规则）
+    # 需要 Plan → 强制 full prompt（含 plan 规则）
     if needs_plan or prompt_level == "full" or complexity == "complex":
         return {
             "system_prompt": build_full_prompt(),

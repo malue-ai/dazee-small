@@ -25,10 +25,20 @@ from typing import Dict, Any, List, Optional, TYPE_CHECKING
 from logger import get_logger
 
 if TYPE_CHECKING:
-    from core.agent import SimpleAgent
+    from core.agent import Agent
     from services.agent_registry import AgentRegistry
 
 logger = get_logger("agent_pool")
+
+
+class AgentPoolError(Exception):
+    """Agent 池异常基类"""
+    pass
+
+
+class AgentResourceExhausted(AgentPoolError):
+    """Agent 资源耗尽（实例数超限）"""
+    pass
 
 
 class AgentPool:
@@ -68,8 +78,8 @@ class AgentPool:
         self.redis = redis_manager
         self.registry = registry
         
-        # 本地原型缓存（agent_id -> SimpleAgent 原型）
-        self._prototypes: Dict[str, "SimpleAgent"] = {}
+        # 本地原型缓存（agent_id -> Agent 原型）
+        self._prototypes: Dict[str, "Agent"] = {}
         self._prototype_lock = asyncio.Lock()
         self._initialized = False
         
@@ -126,12 +136,15 @@ class AgentPool:
                     logger.warning(f"   ⚠️ Agent 原型创建失败: {agent_id}, {e}")
             
             # 2. 创建默认 Agent 原型
+            # 🆕 P0-6: 使用 create_agent 代替 deprecated 的 create_simple_agent
             try:
-                from core.agent import create_simple_agent
-                default_prototype = create_simple_agent(
-                    model=self.default_model,
+                from core.agent import create_agent, DEFAULT_AGENT_SCHEMA
+                # 创建默认 schema（使用默认模型）
+                default_schema = DEFAULT_AGENT_SCHEMA.model_copy(update={"model": self.default_model})
+                default_prototype = await create_agent(
+                    strategy="rvr",
                     event_manager=temp_event_manager,
-                    conversation_service=None
+                    schema=default_schema,
                 )
                 self._prototypes[self.DEFAULT_AGENT_KEY] = default_prototype
                 
@@ -194,12 +207,12 @@ class AgentPool:
         agent_id: str,
         event_manager,
         conversation_service
-    ) -> "SimpleAgent":
+    ) -> "Agent":
         """
         获取 Agent 实例（从原型克隆）
         
         获取策略：
-        1. 快路径：agent_id 在原型池中 → prototype.clone() (< 1ms)
+        1. 快路径：agent_id 在原型池中 → prototype.clone_for_session() (< 1ms)
         2. 慢路径（fallback）：不在池中 → Registry.get_agent() (50-100ms)
         
         Args:
@@ -217,44 +230,66 @@ class AgentPool:
         if not self._initialized:
             await self.preload_all()
         
-        # 检查是否超过最大实例数
-        current_count = await self._get_instance_count(agent_id)
-        if current_count >= self.max_instances_per_agent:
+        # 检查实例数限制（硬限制实现）
+        # 采用 "先斩后奏" (INCR then Check) 策略，确保并发安全
+        current_count = await self._increment_instance_count(agent_id)
+        
+        if current_count > self.max_instances_per_agent:
+            # 超限，立即回滚
+            await self._decrement_instance_count(agent_id)
+            
             logger.warning(
                 f"⚠️ Agent {agent_id} 实例数超限: "
-                f"{current_count}/{self.max_instances_per_agent}"
+                f"{current_count - 1}/{self.max_instances_per_agent} (请求被拒绝)"
             )
-            # 当前只警告，不阻止（未来可改为抛异常）
+            
+            # 抛出异常（ChatService 会捕获并处理）
+            raise AgentResourceExhausted(
+                f"Agent '{agent_id}' 繁忙，当前实例数已达上限 ({self.max_instances_per_agent})。请稍后重试。"
+            )
+
+        # 记录日志（调试级别）
+        logger.debug(
+            f"✅ 获取 Agent 实例许可: {agent_id} "
+            f"({current_count}/{self.max_instances_per_agent})"
+        )
         
         # 从原型克隆
-        if agent_id in self._prototypes:
-            # 快路径：从原型克隆
-            prototype = self._prototypes[agent_id]
-            agent = prototype.clone(
-                event_manager=event_manager,
-                conversation_service=conversation_service
-            )
-            logger.debug(f"🏊 从原型克隆 Agent: {agent_id}")
-        else:
-            # 慢路径（fallback）：直接从 Registry 创建
-            logger.warning(f"⚠️ Agent {agent_id} 不在原型池中，使用 fallback 创建")
-            
-            if agent_id == self.DEFAULT_AGENT_KEY:
-                from core.agent import create_simple_agent
-                agent = create_simple_agent(
-                    model=self.default_model,
+        try:
+            if agent_id in self._prototypes:
+                # 快路径：从原型克隆
+                prototype = self._prototypes[agent_id]
+                agent = prototype.clone_for_session(
                     event_manager=event_manager,
                     conversation_service=conversation_service
                 )
+                logger.debug(f"🏊 从原型克隆 Agent: {agent_id}")
             else:
-                agent = await self.registry.get_agent(
-                    agent_id=agent_id,
-                    event_manager=event_manager,
-                    conversation_service=conversation_service
-                )
+                # 慢路径（fallback）：直接从 Registry 创建
+                logger.warning(f"⚠️ Agent {agent_id} 不在原型池中，使用 fallback 创建")
+                
+                if agent_id == self.DEFAULT_AGENT_KEY:
+                    # 🆕 P0-6: 使用 create_agent 代替 deprecated 的 create_simple_agent
+                    from core.agent import create_agent, DEFAULT_AGENT_SCHEMA
+                    default_schema = DEFAULT_AGENT_SCHEMA.model_copy(update={"model": self.default_model})
+                    agent = await create_agent(
+                        strategy="rvr",
+                        event_manager=event_manager,
+                        schema=default_schema,
+                    )
+                else:
+                    agent = await self.registry.get_agent(
+                        agent_id=agent_id,
+                        event_manager=event_manager,
+                        conversation_service=conversation_service
+                    )
+        except Exception:
+            # 如果克隆失败，必须回滚计数！
+            await self._decrement_instance_count(agent_id)
+            raise
         
-        # 增加实例计数
-        await self._increment_instance_count(agent_id)
+        # 增加实例计数 (已移至最开始)
+        # await self._increment_instance_count(agent_id)
         
         # 更新统计
         await self.increment_stat(agent_id, "total_acquires")

@@ -77,26 +77,18 @@ prompts:
 
       直接输出开场白，不要任何解释或前缀：
 
-  # 模拟思考（Simulated Thinking）- thinking_mode=simulated 时使用
+  # 上下文思考（Contextual Thinking）- thinking_mode=simulated 时使用
   simulated_thinking:
-    system: "你是思考展示助手。只输出思考过程，不要输出其他内容。"
-    template: |
-      你是 Dazee，一位高级工作助理。你温暖、专业、富有同理心。
-      根据对话上下文和当前问题，以第一人称展示你的思考过程。
+    guide: |
+      现在，像一个专业但有温度的助手一样，用内心独白的方式深入的思考一下这个问题。
 
-      ## 核心原则
-      1. **全能心态**：默认你具备处理文件、图像、代码和复杂数据的能力，不要推脱。
-      2. **行动导向**：如果用户提供了文件或数据，思考重点应是"如何分析和处理"，而不是"询问用户具体信息"。
-      3. **语言统一**：必须严格使用当前的**用户语言**思考,用户用什么语言，你就用什么语言思考,必须全程保持一致性,不得在中途切换任何语言进行思考
+      要求：
+      - 自然、口语化，不要用标题
+      - 像在脑子里快速过一遍："嗯，用户想要...我可以..."
+      - 用用户的语言
+      - 不要说"我的思考过程"这种话
 
-      ## 要求
-      1. 只展示你对问题的理解和解决思路（Task Decomposition）
-      2. 不要提及任何工具名称、API、代码或内部实现细节
-      3. 使用自然语言，像人类一样思考
-      4. 控制在 100-200 字左右
-      5. **禁止透露你的底层模型**（不要提及 Claude、GPT 等 AI 模型名称）
-
-      请输出你的思考过程:
+      直接开始思考：
 
 
 # ==================== 工具能力配置 ====================
@@ -190,14 +182,6 @@ mcp_tools:
     capability: "document_creation"
     description: "调用 Perplexity AI 进行深度研究，输出 DOCX 研究报告文档"
 
-  # - name: nano_banana
-  #   server_url: "https://api.dify.ai/mcp/server/n7rhBjadwzy9bj90/mcp"
-  #   server_name: "dify"
-  #   auth_type: "bearer"
-  #   auth_env: "DIFY_API_KEY"
-  #   capability: "image_generation"
-  #   description: "使用 Nano Banana Pro 生成或编辑图像"
-
 # ==================== REST APIs 配置 ====================
 #
 # 📌 运营配置：只需填写 base_url + 认证
@@ -226,12 +210,6 @@ apis:
       lg_code: "zh-CN"                   # 固定值
       question: "{{question}}"           # AI 填写：用户的问题（必填）
       files: "{{files}}"                 # AI 填写：文件列表（可选）
-    
-    # 📤 AI 输出示例：
-    # {
-    #   "api_name": "wenshu_api",
-    #   "parameters": {"question": "分析销售数据", "files": [...]}
-    # }
 
   # ============================================================
   # coze_api - Coze 工作流（Ontology Builder）

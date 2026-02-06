@@ -107,28 +107,17 @@ export type {
   SkillToggleRequest
 } from './skills'
 
-// ==================== 兼容性类型别名 ====================
-// 保持向后兼容，旧代码可以继续使用这些名称
-
-/**
- * @deprecated 请使用 KnowledgeDocument
- */
-export type Knowledge = {
-  id: string
-  name: string
-  description?: string
-  file_count: number
-  created_at: string
-}
-
-/**
- * @deprecated 请使用 AttachedFile
- */
-export type UploadedFile = {
-  file_id: string
-  filename: string
-  mime_type: string
-  file_size?: number
-  preview_url?: string
-}
-
+// 从 realtime.ts 导出实时语音相关类型
+export type {
+  RealtimeStatus,
+  RealtimeSession,
+  RealtimeEventType,
+  RealtimeEvent,
+  SessionCreatedEvent,
+  AudioDeltaEvent,
+  TextDeltaEvent,
+  TranscriptDeltaEvent,
+  ErrorEvent,
+  RealtimeMessage,
+  RealtimeOptions
+} from './realtime'

@@ -8,7 +8,7 @@ from typing import Optional, List
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import select, func, and_, or_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from infra.database.models.knowledge import Knowledge, KnowledgeType, KnowledgeStatus
@@ -318,6 +318,8 @@ async def bulk_update_status(
     """
     批量更新知识库状态
     
+    优化：使用直接 UPDATE 代替 SELECT + 循环更新
+    
     Args:
         session: 数据库会话
         knowledge_ids: 知识库 ID 列表
@@ -329,17 +331,26 @@ async def bulk_update_status(
     if not knowledge_ids:
         return 0
     
-    query = select(Knowledge).where(Knowledge.id.in_(knowledge_ids))
-    result = await session.execute(query)
-    knowledge_list = list(result.scalars().all())
+    now = datetime.now()
     
-    for knowledge in knowledge_list:
-        knowledge.status = status
-        knowledge.updated_at = datetime.now()
-        if status == KnowledgeStatus.READY:
-            knowledge.indexed_at = datetime.now()
+    # 构建更新字段
+    update_values = {
+        "status": status,
+        "updated_at": now,
+    }
     
+    # 如果状态为 READY，同时更新 indexed_at
+    if status == KnowledgeStatus.READY:
+        update_values["indexed_at"] = now
+    
+    # 直接执行批量 UPDATE（无需先 SELECT）
+    stmt = (
+        update(Knowledge)
+        .where(Knowledge.id.in_(knowledge_ids))
+        .values(**update_values)
+    )
+    result = await session.execute(stmt)
     await session.commit()
     
-    return len(knowledge_list)
+    return result.rowcount
 

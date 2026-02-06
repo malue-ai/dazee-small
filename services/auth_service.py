@@ -7,16 +7,16 @@
 - 用户信息管理（持久化到数据库）
 """
 
-import os
 import base64
 import hashlib
+import os
 import secrets
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
-from logger import get_logger
 from infra.database import AsyncSessionLocal
 from infra.database.crud.user import get_or_create_user_by_username
+from logger import get_logger
 
 logger = get_logger("auth_service")
 
@@ -39,23 +39,28 @@ TOKEN_EXPIRE_HOURS = int(os.getenv("TOKEN_EXPIRE_HOURS", "24"))
 # 异常定义
 # ============================================================
 
+
 class AuthServiceError(Exception):
     """认证服务基础异常"""
+
     pass
 
 
 class InvalidCredentialsError(AuthServiceError):
     """凭证无效"""
+
     pass
 
 
 class TokenExpiredError(AuthServiceError):
     """Token 已过期"""
+
     pass
 
 
 class TokenInvalidError(AuthServiceError):
     """Token 无效"""
+
     pass
 
 
@@ -63,57 +68,56 @@ class TokenInvalidError(AuthServiceError):
 # 认证服务
 # ============================================================
 
+
 class AuthService:
     """
     认证服务
-    
+
     职责：
     - Token 创建和验证
     - 密码验证
     - 用户信息管理
     """
-    
+
     def __init__(self) -> None:
         self._password = AUTH_PASSWORD
         self._secret = JWT_SECRET
         self._expire_hours = TOKEN_EXPIRE_HOURS
-    
+
     def create_token(self, user_id: str, username: str) -> str:
         """
         创建认证 Token
-        
+
         Args:
             user_id: 用户 ID
             username: 用户名
-            
+
         Returns:
             Token 字符串
         """
         timestamp = datetime.utcnow().isoformat()
         payload = f"{user_id}:{username}:{timestamp}"
-        
+
         # 创建签名
-        signature = hashlib.sha256(
-            f"{payload}:{self._secret}".encode()
-        ).hexdigest()[:16]
-        
+        signature = hashlib.sha256(f"{payload}:{self._secret}".encode()).hexdigest()[:16]
+
         # 组合并编码
         token_data = f"{payload}:{signature}"
         token = base64.urlsafe_b64encode(token_data.encode()).decode()
-        
+
         logger.debug(f"Token 已创建: user_id={user_id}")
         return token
-    
+
     def verify_token(self, token: str) -> Dict[str, Any]:
         """
         验证 Token
-        
+
         Args:
             token: Token 字符串
-            
+
         Returns:
             用户信息字典
-            
+
         Raises:
             TokenInvalidError: Token 无效
             TokenExpiredError: Token 已过期
@@ -122,52 +126,48 @@ class AuthService:
             # 解码
             token_data = base64.urlsafe_b64decode(token.encode()).decode()
             parts = token_data.rsplit(":", 3)
-            
+
             if len(parts) != 4:
                 raise TokenInvalidError("Token 格式无效")
-            
+
             user_id, username, timestamp, signature = parts
-            
+
             # 验证签名
             payload = f"{user_id}:{username}:{timestamp}"
-            expected_signature = hashlib.sha256(
-                f"{payload}:{self._secret}".encode()
-            ).hexdigest()[:16]
-            
+            expected_signature = hashlib.sha256(f"{payload}:{self._secret}".encode()).hexdigest()[
+                :16
+            ]
+
             if signature != expected_signature:
                 raise TokenInvalidError("Token 签名无效")
-            
+
             # 验证过期时间
             token_time = datetime.fromisoformat(timestamp)
             if datetime.utcnow() - token_time > timedelta(hours=self._expire_hours):
                 raise TokenExpiredError("Token 已过期")
-            
-            return {
-                "id": user_id,
-                "username": username,
-                "created_at": timestamp
-            }
-            
+
+            return {"id": user_id, "username": username, "created_at": timestamp}
+
         except (TokenInvalidError, TokenExpiredError):
             raise
         except Exception as e:
             logger.warning(f"Token 验证失败: {e}")
             raise TokenInvalidError(f"Token 验证失败: {e}")
-    
+
     async def authenticate(self, username: str, password: str) -> Dict[str, Any]:
         """
         用户认证（异步，使用数据库存储用户）
-        
+
         - 同一个 username 登录会返回相同的 user_id
         - 新 username 登录会创建新用户（UUID 作为 user_id）
-        
+
         Args:
             username: 用户名
             password: 密码
-            
+
         Returns:
             包含 token 和用户信息的字典
-            
+
         Raises:
             InvalidCredentialsError: 凭证无效
         """
@@ -175,34 +175,32 @@ class AuthService:
         if password != self._password:
             logger.warning(f"登录失败: 用户 {username} 密码错误")
             raise InvalidCredentialsError("密码错误")
-        
+
         # 从数据库获取或创建用户
         async with AsyncSessionLocal() as session:
             user, is_new = await get_or_create_user_by_username(session, username)
             user_id = user.id
-            created_at = user.created_at.isoformat() if user.created_at else datetime.utcnow().isoformat()
-        
+            created_at = (
+                user.created_at.isoformat() if user.created_at else datetime.utcnow().isoformat()
+            )
+
         # 创建 Token
         token = self.create_token(user_id, username)
-        
+
         if is_new:
             logger.info(f"新用户注册并登录: {username} ({user_id})")
         else:
             logger.info(f"用户登录成功: {username} ({user_id})")
-        
+
         return {
             "token": token,
-            "user": {
-                "id": user_id,
-                "username": username,
-                "created_at": created_at
-            }
+            "user": {"id": user_id, "username": username, "created_at": created_at},
         }
-    
+
     def logout(self, user_id: str, username: str) -> None:
         """
         用户登出
-        
+
         Args:
             user_id: 用户 ID
             username: 用户名
@@ -224,4 +222,3 @@ def get_auth_service() -> AuthService:
     if _auth_service is None:
         _auth_service = AuthService()
     return _auth_service
-

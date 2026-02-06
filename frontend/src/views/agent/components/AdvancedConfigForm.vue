@@ -35,22 +35,39 @@
         </label>
       </div>
 
-      <!-- Thinking Budget -->
-      <div v-if="localConfig.llm.enable_thinking" class="mt-4 animate-in slide-in-from-top-2">
-        <div class="flex flex-col gap-2">
-          <label class="text-sm font-medium text-gray-700">思考 Token 预算</label>
-          <div class="flex items-center gap-4">
-            <input 
-              type="range"
-              v-model.number="localConfig.llm.thinking_budget"
-              min="1000"
-              max="32000"
-              step="1000"
-              class="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
-            >
-            <span class="text-sm font-mono text-gray-600 w-20 text-right">{{ localConfig.llm.thinking_budget?.toLocaleString() }}</span>
+      <!-- Thinking Budget & Mode -->
+      <div v-if="localConfig.llm.enable_thinking" class="mt-4 animate-in slide-in-from-top-2 p-4 bg-gray-50 rounded-lg border border-gray-100">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div class="flex flex-col gap-2">
+            <label class="text-sm font-medium text-gray-700">思考模式</label>
+            <div class="relative">
+              <select 
+                v-model="localConfig.llm.thinking_mode"
+                class="w-full pl-4 pr-10 py-2 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 focus:border-gray-400 transition-all cursor-pointer appearance-none"
+              >
+                <option value="simulated">模拟 (Simulated) - 推荐</option>
+                <option value="native">原生 (Native) - 仅支持特定模型</option>
+              </select>
+              <ChevronDown class="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+            </div>
+            <span class="text-xs text-gray-400">模拟模式通用性更强，原生模式仅限支持思考的模型</span>
           </div>
-          <span class="text-xs text-gray-400">建议值：简单任务 4000-8000，复杂任务 10000-16000</span>
+
+          <div class="flex flex-col gap-2">
+            <label class="text-sm font-medium text-gray-700">思考 Token 预算</label>
+            <div class="flex items-center gap-4">
+              <input 
+                type="range"
+                v-model.number="localConfig.llm.thinking_budget"
+                min="1000"
+                max="32000"
+                step="1000"
+                class="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+              >
+              <span class="text-sm font-mono text-gray-600 w-16 text-right">{{ localConfig.llm.thinking_budget?.toLocaleString() }}</span>
+            </div>
+            <span class="text-xs text-gray-400">建议值：简单 4k-8k，复杂 10k-16k</span>
+          </div>
         </div>
       </div>
 
@@ -145,6 +162,7 @@ import { Brain, Database, ChevronDown } from 'lucide-vue-next'
 interface LLMConfig {
   enable_thinking?: boolean
   thinking_budget?: number
+  thinking_mode?: string
   max_tokens?: number
   enable_caching?: boolean
   temperature?: number
@@ -174,6 +192,7 @@ const localConfig = reactive<AdvancedConfig>({
   llm: {
     enable_thinking: props.modelValue.llm?.enable_thinking ?? false,
     thinking_budget: props.modelValue.llm?.thinking_budget ?? 8000,
+    thinking_mode: props.modelValue.llm?.thinking_mode ?? 'simulated',
     max_tokens: props.modelValue.llm?.max_tokens ?? 16384,
     enable_caching: props.modelValue.llm?.enable_caching ?? true,
   },

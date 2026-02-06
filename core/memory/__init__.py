@@ -60,40 +60,12 @@ memory.cache.set("key", value, ttl_seconds=3600)
 
 # 基础类型
 from .base import (
-    MemoryScope,
-    StorageBackend,
-    MemoryConfig,
     BaseMemory,
     BaseScopedMemory,
+    MemoryConfig,
     MemoryEntry,
-)
-
-# 会话级记忆
-from .working import (
-    WorkingMemory,
-    create_working_memory,
-)
-
-# 用户级记忆（包括 E2B）
-from .user import (
-    EpisodicMemory,
-    create_episodic_memory,
-    create_episodic_memory_async,
-    PreferenceMemory,
-    create_preference_memory,
-    create_preference_memory_async,
-    E2BSandboxSession,
-    E2BMemory,
-    create_e2b_memory,
-)
-
-# 系统级记忆
-from .system import (
-    SkillMemory,
-    create_skill_memory,
-    create_skill_memory_async,
-    CacheMemory,
-    create_cache_memory,
+    MemoryScope,
+    StorageBackend,
 )
 
 # 统一管理器
@@ -103,6 +75,33 @@ from .manager import (
     create_user_memory_manager,
 )
 
+# 系统级记忆
+from .system import (
+    CacheMemory,
+    SkillMemory,
+    create_cache_memory,
+    create_skill_memory,
+    create_skill_memory_async,
+)
+
+# 用户级记忆（包括 E2B）
+from .user import (
+    E2BMemory,
+    E2BSandboxSession,
+    EpisodicMemory,
+    PreferenceMemory,
+    create_e2b_memory,
+    create_episodic_memory,
+    create_episodic_memory_async,
+    create_preference_memory,
+    create_preference_memory_async,
+)
+
+# 会话级记忆
+from .working import (
+    WorkingMemory,
+    create_working_memory,
+)
 
 __all__ = [
     # 基础类型
@@ -112,11 +111,9 @@ __all__ = [
     "BaseMemory",
     "BaseScopedMemory",
     "MemoryEntry",
-    
     # 会话级记忆
     "WorkingMemory",
     "create_working_memory",
-    
     # 用户级记忆
     "EpisodicMemory",
     "create_episodic_memory",
@@ -127,14 +124,12 @@ __all__ = [
     "E2BSandboxSession",
     "E2BMemory",
     "create_e2b_memory",
-    
     # 系统级记忆（Skill = 本地工作流技能）
     "SkillMemory",
     "create_skill_memory",
     "create_skill_memory_async",
     "CacheMemory",
     "create_cache_memory",
-    
     # 统一管理器
     "MemoryManager",
     "create_memory_manager",

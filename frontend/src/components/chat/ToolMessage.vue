@@ -24,7 +24,7 @@
         <div class="tool-section-label">
           <ArrowDownToLine class="section-icon" /> 输入参数
         </div>
-        <pre class="tool-code" :class="{ 'is-streaming': isStreaming }">{{ formatJson(displayInput) }}</pre>
+        <pre class="tool-code" :class="{ 'is-streaming': isStreaming }">{{ formatJson(sanitizedDisplayInput) }}</pre>
       </div>
       <!-- 工具输出 -->
       <div v-if="result || partialResult || intermediateContent" class="tool-section">
@@ -309,6 +309,33 @@ const displayInput = computed(() => {
     return props.partialInput
   }
   return props.input || {}
+})
+
+function sanitizeToolInput(input: any): any {
+  if (!input || typeof input !== 'object') return input
+  if (Array.isArray(input)) return input
+
+  const cloned = { ...(input as Record<string, any>) }
+  delete cloned.session_id
+  delete cloned.user_id
+  delete cloned.conversation_id
+  return cloned
+}
+
+const sanitizedDisplayInput = computed(() => {
+  const raw = displayInput.value
+
+  // 字符串：尝试解析为 JSON 后再过滤（用于历史消息/兼容形态）
+  if (typeof raw === 'string') {
+    try {
+      return sanitizeToolInput(JSON.parse(raw))
+    } catch {
+      return raw
+    }
+  }
+
+  // 对象：浅拷贝过滤，避免影响原始响应式数据
+  return sanitizeToolInput(raw)
 })
 
 // 获取工具配置

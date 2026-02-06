@@ -46,28 +46,28 @@ SSE 事件管理模块
 
     # Agent 中使用 Broadcaster（推荐）
     from core.events import create_broadcaster, create_event_manager
-    
+
     events = create_event_manager(storage)
     broadcaster = create_broadcaster(events)
-    
+
     await broadcaster.emit_content_start(session_id, index, content_block)
     await broadcaster.emit_content_delta(session_id, index, delta)
     await broadcaster.emit_content_stop(session_id, index)
 """
 
-from core.events.manager import EventManager, create_event_manager
-from core.events.session_events import SessionEventManager
-from core.events.user_events import UserEventManager
-from core.events.conversation_events import ConversationEventManager
-from core.events.message_events import MessageEventManager
-from core.events.content_events import ContentEventManager
-from core.events.system_events import SystemEventManager
 from core.events.broadcaster import EventBroadcaster, create_broadcaster
+from core.events.content_events import ContentEventManager
+from core.events.conversation_events import ConversationEventManager
 from core.events.dispatcher import EventDispatcher, create_event_dispatcher
+from core.events.manager import EventManager, create_event_manager
+from core.events.message_events import MessageEventManager
+from core.events.session_events import SessionEventManager
 from core.events.storage import (
     InMemoryEventStorage,
     get_memory_storage,
 )
+from core.events.system_events import SystemEventManager
+from core.events.user_events import UserEventManager
 
 __all__ = [
     "EventManager",
@@ -88,4 +88,3 @@ __all__ = [
     "InMemoryEventStorage",
     "get_memory_storage",
 ]
-

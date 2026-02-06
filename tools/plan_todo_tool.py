@@ -1,5 +1,5 @@
 """
-Plan/Todo Tool - 任务规划工具（纯存储版本）
+Plan Tool - 任务计划管理工具 v2
 
 设计原则：
 1. 纯 CRUD 工具：只负责存储和管理，不调用 LLM
@@ -9,303 +9,241 @@ Plan/Todo Tool - 任务规划工具（纯存储版本）
 存储位置：
 - Conversation.metadata.plan（JSONB）
 
-Plan 数据结构：
+Plan 数据结构 v2：
 {
     "name": "计划名称",
-    "overview": "一句话概述",
-    "detailed_plan": "详细 Markdown 文档（问题分析、流程图、方案等）",
+    "overview": "一句话目标摘要（注入 prompt 用）",
+    "plan": "超详细计划文档（存储用，不注入 prompt）",
     "todos": [
-        {"id": "1", "content": "步骤描述", "status": "pending", "result": "完成结果"},
+        {
+            "id": "1",
+            "title": "步骤标题（注入 prompt 用）",
+            "content": "详细描述（存储用，不注入 prompt）",
+            "status": "pending",
+            "result": "完成结果"
+        },
         ...
     ],
-    "created_at": "2026-01-28T10:00:00"
+    "created_at": "2026-01-28T10:00:00",
+    "updated_at": "2026-01-28T11:00:00",
+    "completed_at": "2026-01-28T12:00:00"
 }
 
-使用方式：
-- 主模型分析用户任务，生成完整的 plan 数据
-- 调用 plan_todo(operation="create", data={...plan数据...}) 存储
-- 执行过程中调用 update_todo 更新状态
+操作：
+- create: 创建新计划
+- update: 更新步骤状态
+- rewrite: 重写整个计划
 """
 
 from datetime import datetime
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, Optional
 
-from core.tool.base import BaseTool, ToolContext
+from core.tool.types import BaseTool, ToolContext
 from logger import get_logger
 
 logger = get_logger(__name__)
 
 
-class PlanTodoTool(BaseTool):
+class PlanTool(BaseTool):
     """
-    任务规划工具（纯存储版本）
-    
-    设计原则：
-    - 纯 CRUD 工具，不调用 LLM
-    - plan 内容由主模型直接生成并传入
-    - 本工具只负责存储、查询、更新
-    
-    支持操作：
-    - create: 创建计划（直接保存主模型生成的完整 plan 数据）
-    - update_todo: 更新单个 todo 的状态
-    - get: 获取当前计划
-    - add_todo: 动态添加新 todo
+    任务计划管理工具 v2
+
+    action:
+    - create: 创建新计划，需要 name + todos，可选 overview + plan
+    - update: 更新步骤状态，需要 todo_id + status
+    - rewrite: 重写整个计划，需要 name + todos，可选 overview + plan
+
+    数据结构：
+    - 顶层：name, overview, plan, todos, created_at, updated_at, completed_at
+    - todo：id, title, content, status, result
     """
-    
-    name = "plan_todo"
-    
+
+    name = "plan"
+
     def __init__(self):
-        """初始化工具"""
         self._conversation_service = None
-    
-    async def _get_conversation_service(self):
-        """延迟加载 ConversationService"""
+
+    async def _get_service(self):
         if self._conversation_service is None:
             from services.conversation_service import ConversationService
+
             self._conversation_service = ConversationService()
         return self._conversation_service
-    
+
     async def execute(self, params: Dict[str, Any], context: ToolContext) -> Dict[str, Any]:
-        """
-        执行计划操作
-        
-        Args:
-            params: 操作参数
-                - operation: 操作类型 (create/update_todo/get/add_todo)
-                - data: 操作数据
-            context: 工具上下文（包含 conversation_id）
-        
-        Returns:
-            操作结果
-        """
-        operation = params.get("operation", "get")
-        data = params.get("data", {})
-        
-        logger.info(f"📋 Plan 操作: {operation}, conversation_id={context.conversation_id}")
-        
-        if operation == "create":
-            return await self._create(data, context)
-        elif operation == "update_todo":
-            return await self._update_todo(data, context)
-        elif operation == "get":
-            return await self._get(context)
-        elif operation == "add_todo":
-            return await self._add_todo(data, context)
+        action = params.get("action")
+
+        # 检查 conversation_id（框架注入）
+        if not context.conversation_id:
+            return {"success": False, "error": "缺少 conversation_id，无法存储计划"}
+
+        if action == "create":
+            return await self._create(params, context)
+        elif action == "update":
+            return await self._update(params, context)
+        elif action == "rewrite":
+            return await self._rewrite(params, context)
         else:
-            return {"success": False, "error": f"未知操作: {operation}"}
-    
-    async def _create(self, data: Dict, context: ToolContext) -> Dict[str, Any]:
-        """
-        创建计划（直接存储主模型生成的 plan 数据）
-        
-        Args:
-            data: 计划数据，支持两种形式：
-                1) 直接传 plan 字段（name/overview/detailed_plan/todos）
-                2) 传入 { "plan": { ... } }
-        
-        Returns:
-            {"success": True, "plan": plan} 或 {"success": False, "error": "..."}
-        """
-        if data is None:
-            return {"success": False, "error": "缺少计划数据 (plan)"}
-        
-        plan_data = data.get("plan") if isinstance(data, dict) and "plan" in data else data
-        if not isinstance(plan_data, dict):
-            return {"success": False, "error": "计划数据格式不正确 (plan 需为对象)"}
-        
-        # 校验必需字段
-        name = plan_data.get("name")
-        todos = plan_data.get("todos", [])
-        
+            return {"success": False, "error": f"未知操作: {action}"}
+
+    async def _create(self, params: Dict, context: ToolContext) -> Dict[str, Any]:
+        """创建新计划"""
+        name = params.get("name")
+        todos = params.get("todos", [])
+        overview = params.get("overview")
+        plan_doc = params.get("plan")
+
         if not name:
-            return {"success": False, "error": "缺少计划名称 (name)"}
-        if not isinstance(todos, list) or len(todos) == 0:
-            return {"success": False, "error": "缺少步骤列表 (todos)"}
-        
-        try:
-            # 构建 plan 数据（保留扩展字段）
-            plan = dict(plan_data)
-            plan.setdefault("overview", "")
-            plan.setdefault("detailed_plan", "")
-            plan.setdefault("created_at", datetime.now().isoformat())
-            plan["todos"] = []
-            
-            # 处理 todos，确保每个 todo 有正确的结构
-            for i, todo in enumerate(todos):
-                if isinstance(todo, dict):
-                    todo_data = todo
-                else:
-                    todo_data = {"content": str(todo)}
-                
-                processed_todo = {
-                    "id": str(todo_data.get("id", str(i + 1))),
-                    "content": todo_data.get("content", ""),
-                    "status": todo_data.get("status", "pending")
-                }
-                if todo_data.get("result"):
-                    processed_todo["result"] = todo_data["result"]
-                plan["todos"].append(processed_todo)
-            
-            # 存储到数据库
-            await self._save_plan(plan, context.conversation_id)
-            
-            logger.info(f"✅ 计划已创建: {plan.get('name')}, 共 {len(plan['todos'])} 个步骤")
-            return {"success": True, "plan": plan}
-            
-        except Exception as e:
-            logger.error(f"❌ 创建计划失败: {e}", exc_info=True)
-            return {"success": False, "error": str(e)}
-    
-    
-    async def _update_todo(self, data: Dict, context: ToolContext) -> Dict[str, Any]:
-        """
-        更新 todo 状态
-        
-        Args:
-            data:
-                - id: todo ID (如 "1")
-                - status: 新状态 (pending/in_progress/completed)
-                - result: 可选，完成结果说明
-        """
-        plan = await self._load_plan(context.conversation_id)
+            return {"success": False, "error": "缺少 name"}
+        if not todos:
+            return {"success": False, "error": "缺少 todos"}
+
+        # 检查是否已有计划
+        existing = await self._load(context.conversation_id)
+        if existing:
+            return {"success": False, "error": "计划已存在，如需替换请使用 rewrite"}
+
+        plan = self._build_plan(name, todos, overview, plan_doc)
+        plan["created_at"] = datetime.now().isoformat()
+
+        await self._save(plan, context.conversation_id)
+        logger.info(f"✅ 计划已创建: {name}, 共 {len(plan['todos'])} 个步骤")
+
+        return {"success": True, "plan": plan}
+
+    async def _update(self, params: Dict, context: ToolContext) -> Dict[str, Any]:
+        """更新步骤状态"""
+        plan = await self._load(context.conversation_id)
         if not plan:
             return {"success": False, "error": "计划不存在"}
-        
-        todo_id = data.get("id")
-        new_status = data.get("status")
-        result = data.get("result")
-        
-        # 查找并更新 todo
+
+        todo_id = params.get("todo_id")
+        status = params.get("status")
+        result = params.get("result")
+
+        if not todo_id:
+            return {"success": False, "error": "缺少 todo_id"}
+        if not status:
+            return {"success": False, "error": "缺少 status"}
+
+        # 查找并更新
         updated = False
         for todo in plan.get("todos", []):
             if todo["id"] == todo_id:
-                todo["status"] = new_status
+                todo["status"] = status
                 if result:
                     todo["result"] = result
                 updated = True
-                logger.info(f"📝 Todo 更新: {todo_id} -> {new_status}")
                 break
-        
+
         if not updated:
-            return {"success": False, "error": f"未找到 todo: {todo_id}"}
-        
+            return {"success": False, "error": f"未找到步骤: {todo_id}"}
+
         # 检查是否全部完成
-        all_completed = all(t["status"] == "completed" for t in plan.get("todos", []))
-        
-        if all_completed:
-            # 标记计划已完成（但不删除）
+        all_done = all(t["status"] == "completed" for t in plan["todos"])
+        if all_done:
             plan["completed_at"] = datetime.now().isoformat()
-            await self._save_plan(plan, context.conversation_id)
-            logger.info(f"🎉 所有任务完成")
-            return {"success": True, "completed": True, "message": "所有任务完成", "plan": plan}
-        else:
-            await self._save_plan(plan, context.conversation_id)
-            return {"success": True, "plan": plan}
-    
-    async def _get(self, context: ToolContext) -> Dict[str, Any]:
-        """获取当前计划"""
-        plan = await self._load_plan(context.conversation_id)
-        if not plan:
-            return {"success": True, "plan": None, "message": "当前没有活动计划"}
-        
-        # 计算进度
-        todos = plan.get("todos", [])
-        total = len(todos)
-        completed = sum(1 for t in todos if t.get("status") == "completed")
-        progress = completed / total if total > 0 else 0
-        
-        return {
-            "success": True,
-            "plan": plan,
-            "progress": {
-                "total": total,
-                "completed": completed,
-                "percentage": round(progress * 100, 1)
-            }
-        }
-    
-    async def _add_todo(self, data: Dict, context: ToolContext) -> Dict[str, Any]:
+
+        # 更新 updated_at
+        plan["updated_at"] = datetime.now().isoformat()
+
+        await self._save(plan, context.conversation_id)
+        logger.info(f"📝 步骤更新: {todo_id} -> {status}")
+
+        return {"success": True, "plan": plan, "all_completed": all_done}
+
+    async def _rewrite(self, params: Dict, context: ToolContext) -> Dict[str, Any]:
+        """重写整个计划"""
+        name = params.get("name")
+        todos = params.get("todos", [])
+        overview = params.get("overview")
+        plan_doc = params.get("plan")
+
+        if not name:
+            return {"success": False, "error": "缺少 name"}
+        if not todos:
+            return {"success": False, "error": "缺少 todos"}
+
+        existing = await self._load(context.conversation_id)
+
+        plan = self._build_plan(name, todos, overview, plan_doc)
+        plan["created_at"] = existing.get("created_at") if existing else datetime.now().isoformat()
+        plan["updated_at"] = datetime.now().isoformat()
+
+        await self._save(plan, context.conversation_id)
+        logger.info(f"✅ 计划已重写: {name}, 共 {len(plan['todos'])} 个步骤")
+
+        return {"success": True, "plan": plan}
+
+    def _build_plan(
+        self, name: str, todos: list, overview: Optional[str] = None, plan_doc: Optional[str] = None
+    ) -> Dict:
         """
-        动态添加新 todo
-        
+        构建标准 plan 数据结构 v2
+
         Args:
-            data:
-                - content: todo 内容
-                - after: 可选，插入到哪个 todo 之后 (id)
+            name: 计划名称
+            todos: 步骤列表
+            overview: 一句话目标摘要（可选）
+            plan_doc: 详细计划文档（可选）
+
+        Returns:
+            plan 数据结构
         """
-        plan = await self._load_plan(context.conversation_id)
-        if not plan:
-            return {"success": False, "error": "计划不存在，请先创建计划"}
-        
-        content = data.get("content")
-        if not content:
-            return {"success": False, "error": "缺少 todo 内容"}
-        
-        # 生成新 ID
-        todos = plan.get("todos", [])
-        existing_ids = [t["id"] for t in todos]
-        new_id = str(len(existing_ids) + 1)
-        
-        new_todo = {"id": new_id, "content": content, "status": "pending"}
-        
-        # 确定插入位置
-        after_id = data.get("after")
-        if after_id:
-            for i, todo in enumerate(todos):
-                if todo["id"] == after_id:
-                    todos.insert(i + 1, new_todo)
-                    break
+        plan = {"name": name, "todos": []}
+
+        # 可选顶层字段
+        if overview:
+            plan["overview"] = overview
+        if plan_doc:
+            plan["plan"] = plan_doc
+
+        # 构建 todos
+        for i, todo in enumerate(todos):
+            if isinstance(todo, dict):
+                item = {
+                    "id": str(todo.get("id", i + 1)),
+                    "title": todo.get("title", ""),
+                    "status": todo.get("status", "pending"),
+                }
+                # 可选字段
+                if todo.get("content"):
+                    item["content"] = todo["content"]
+                if todo.get("result"):
+                    item["result"] = todo["result"]
             else:
-                todos.append(new_todo)
-        else:
-            todos.append(new_todo)
-        
-        plan["todos"] = todos
-        await self._save_plan(plan, context.conversation_id)
-        
-        logger.info(f"➕ 添加新 todo: {new_id} - {content}")
-        return {"success": True, "plan": plan, "added_todo": new_todo}
-    
-    async def _load_plan(self, conversation_id: str) -> Optional[Dict]:
-        """从数据库加载计划"""
+                # 字符串直接作为 title
+                item = {"id": str(i + 1), "title": str(todo), "status": "pending"}
+            plan["todos"].append(item)
+
+        return plan
+
+    async def _load(self, conversation_id: str) -> Optional[Dict]:
+        """加载计划"""
         if not conversation_id:
             return None
-        
         try:
-            service = await self._get_conversation_service()
-            conversation = await service.get_conversation(conversation_id)
-            if conversation and conversation.metadata:
-                return conversation.metadata.get("plan")
+            service = await self._get_service()
+            conv = await service.get_conversation(conversation_id)
+            if conv and conv.metadata:
+                return conv.metadata.get("plan")
         except Exception as e:
             logger.error(f"加载计划失败: {e}", exc_info=True)
-        
         return None
-    
-    async def _save_plan(self, plan: Dict, conversation_id: str) -> None:
-        """将计划保存到数据库"""
+
+    async def _save(self, plan: Dict, conversation_id: str) -> None:
+        """保存计划"""
         if not conversation_id:
-            logger.warning("⚠️ 无法保存计划：缺少 conversation_id")
-            return
-        
+            raise ValueError("conversation_id 不能为空")
         try:
-            service = await self._get_conversation_service()
-            
-            # 获取现有 metadata
-            conversation = await service.get_conversation(conversation_id)
-            existing_metadata = conversation.metadata if conversation else {}
-            if not isinstance(existing_metadata, dict):
-                existing_metadata = {}
-            
-            # 更新 plan 字段
-            existing_metadata["plan"] = plan
-            
-            # 保存
-            await service.update_conversation(
-                conversation_id=conversation_id,
-                metadata=existing_metadata
-            )
-            
-            logger.debug(f"💾 计划已保存到数据库: {conversation_id}")
+            service = await self._get_service()
+            conv = await service.get_conversation(conversation_id)
+            metadata = conv.metadata if conv else {}
+            if not isinstance(metadata, dict):
+                metadata = {}
+            metadata["plan"] = plan
+            await service.update_conversation(conversation_id=conversation_id, metadata=metadata)
+            logger.debug(f"💾 计划已保存: conversation_id={conversation_id}")
         except Exception as e:
             logger.error(f"保存计划失败: {e}", exc_info=True)
             raise
@@ -313,73 +251,83 @@ class PlanTodoTool(BaseTool):
 
 # ===== 辅助函数 =====
 
+
 async def load_plan_for_session(conversation_id: str) -> Optional[Dict]:
-    """
-    会话开始时加载现有计划
-    
-    Args:
-        conversation_id: 对话 ID
-        
-    Returns:
-        计划数据，如果不存在则返回 None
-    """
+    """会话开始时加载现有计划"""
     if not conversation_id:
         return None
-    
     try:
-        from services.conversation_service import ConversationService
-        service = ConversationService()
-        conversation = await service.get_conversation(conversation_id)
-        if conversation and conversation.metadata:
-            plan = conversation.metadata.get("plan")
-            if plan:
-                logger.info(f"📋 已加载现有计划: {plan.get('name', 'Unknown')}, conversation_id={conversation_id}")
-                return plan
+        tool = PlanTool()
+        plan = await tool._load(conversation_id)
+        if plan:
+            logger.info(f"📋 已加载计划: {plan.get('name')}")
+        return plan
     except Exception as e:
         logger.error(f"加载计划失败: {e}", exc_info=True)
-    
     return None
 
 
 def format_plan_for_prompt(plan: Dict) -> str:
     """
-    将计划格式化为可注入 prompt 的文本
-    
-    Args:
-        plan: 计划数据
-        
-    Returns:
-        格式化的文本
+    将计划格式化为 prompt 文本
+
+    注入策略（存得细，注入精简）：
+    - 注入：name, overview, todos[].title
+    - 不注入：plan（详细文档太长）, todos[].content（详细描述太长）
     """
     if not plan:
         return ""
-    
+
     todos = plan.get("todos", [])
     total = len(todos)
     completed = sum(1 for t in todos if t.get("status") == "completed")
     in_progress = sum(1 for t in todos if t.get("status") == "in_progress")
-    
-    # 构建进度文本
-    progress_lines = []
+
+    lines = []
     for t in todos:
-        status_icon = "✅" if t["status"] == "completed" else ("🔄" if t["status"] == "in_progress" else "⏳")
-        result_text = f" - {t['result']}" if t.get("result") else ""
-        progress_lines.append(f"  {status_icon} {t['content']}{result_text}")
-    
-    return f"""
-## 当前任务计划
+        status = t.get("status", "pending")
+        if status == "completed":
+            icon = "✅"
+            suffix = " - 已完成"
+        elif status == "in_progress":
+            icon = "🔄"
+            suffix = ""
+        elif status == "failed":
+            icon = "❌"
+            suffix = " - 失败"
+        else:
+            icon = "⏳"
+            suffix = ""
 
-**目标**: {plan.get('name', '任务计划')}
-**进度**: {completed}/{total} 完成, {in_progress} 进行中
+        # 使用 title 而不是 content
+        title = t.get("title", "")
+        result_text = f" ({t['result']})" if t.get("result") else ""
+        lines.append(f"  {icon} {t['id']}. {title}{suffix}{result_text}")
 
-**步骤**:
-{chr(10).join(progress_lines)}
+    # 构建输出
+    output_lines = ["## 当前任务计划", ""]
+    output_lines.append(f"**目标**: {plan.get('name')}")
 
-请继续执行未完成的步骤。完成一个步骤后，使用 plan_todo 工具更新状态。
-"""
+    # 如果有 overview，展示它
+    overview = plan.get("overview")
+    if overview:
+        output_lines.append(f"**概要**: {overview}")
+
+    output_lines.append(f"**进度**: {completed}/{total} 完成, {in_progress} 进行中")
+    output_lines.append("")
+    output_lines.append("**步骤**:")
+    output_lines.extend(lines)
+    output_lines.append("")
+    output_lines.append("请继续执行未完成的步骤。完成后使用 plan 工具更新状态。")
+
+    return "\n".join(output_lines)
 
 
 # 工厂函数
-def create_plan_todo_tool(**kwargs) -> PlanTodoTool:
-    """创建 PlanTodoTool 实例"""
-    return PlanTodoTool()
+def create_plan_tool(**kwargs) -> PlanTool:
+    return PlanTool()
+
+
+# ===== 别名（保持导入兼容）=====
+PlanTodoTool = PlanTool
+create_plan_todo_tool = create_plan_tool

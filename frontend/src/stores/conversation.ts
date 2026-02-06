@@ -32,6 +32,15 @@ export const useConversationStore = defineStore('conversation', () => {
   /** 消息加载状态 */
   const loadingMessages = ref(false)
 
+  /** 加载更多消息状态 */
+  const loadingMore = ref(false)
+
+  /** 是否有更多历史消息 */
+  const hasMore = ref(false)
+
+  /** 下一个游标（最早消息的 ID，用于加载更早消息） */
+  const nextCursor = ref<string | null>(null)
+
   // ==================== 计算属性 ====================
 
   /** 当前会话信息 */
@@ -67,13 +76,19 @@ export const useConversationStore = defineStore('conversation', () => {
    * @param offset - 偏移量
    */
   async function fetchList(limit = 20, offset = 0): Promise<Conversation[]> {
+    // 防止重复请求
+    if (loading.value) {
+      console.log('🔄 会话列表正在加载中，跳过重复请求')
+      return conversations.value
+    }
+
     const uid = initUserId()
     loading.value = true
 
     try {
       const result = await chatApi.getConversationList(uid, limit, offset)
-      conversations.value = result.conversations
-      return result.conversations
+      conversations.value = result?.conversations ?? []
+      return conversations.value
     } catch (error) {
       console.error('❌ 获取会话列表失败:', error)
       throw error
@@ -113,10 +128,16 @@ export const useConversationStore = defineStore('conversation', () => {
     currentId.value = conversationId
     loadingMessages.value = true
     conversationPlan.value = null  // 重置 plan
+    hasMore.value = false
+    nextCursor.value = null
 
     try {
       const result = await chatApi.getConversationMessages(conversationId, 100, 0, 'asc')
       messages.value = result.messages.map(processHistoryMessage)
+      
+      // 保存分页信息
+      hasMore.value = result.has_more
+      nextCursor.value = result.next_cursor
       
       // 从 conversation_metadata 中提取 plan
       if (result.conversation_metadata?.plan) {
@@ -124,12 +145,54 @@ export const useConversationStore = defineStore('conversation', () => {
         console.log('📋 从会话元数据加载 Plan:', conversationPlan.value?.name)
       }
       
-      console.log('✅ 历史消息已加载:', messages.value.length, '条')
+      console.log('✅ 历史消息已加载:', messages.value.length, '条, has_more:', hasMore.value)
     } catch (error) {
       console.error('❌ 加载消息失败:', error)
       throw error
     } finally {
       loadingMessages.value = false
+    }
+  }
+
+  /**
+   * 加载更多历史消息（向上滚动时调用）
+   * @returns 是否成功加载了更多消息
+   */
+  async function loadMore(): Promise<boolean> {
+    if (!currentId.value || !hasMore.value || !nextCursor.value || loadingMore.value) {
+      return false
+    }
+
+    loadingMore.value = true
+
+    try {
+      const result = await chatApi.getConversationMessages(
+        currentId.value,
+        50,
+        0,
+        'asc',
+        nextCursor.value
+      )
+
+      if (result.messages.length > 0) {
+        // 将新消息插入到列表开头
+        const newMessages = result.messages.map(processHistoryMessage)
+        messages.value = [...newMessages, ...messages.value]
+        
+        // 更新分页信息
+        hasMore.value = result.has_more
+        nextCursor.value = result.next_cursor
+        
+        console.log('✅ 加载更多消息:', newMessages.length, '条, has_more:', hasMore.value)
+        return true
+      }
+      
+      return false
+    } catch (error) {
+      console.error('❌ 加载更多消息失败:', error)
+      return false
+    } finally {
+      loadingMore.value = false
     }
   }
 
@@ -238,6 +301,8 @@ export const useConversationStore = defineStore('conversation', () => {
     currentId.value = null
     messages.value = []
     conversationPlan.value = null
+    hasMore.value = false
+    nextCursor.value = null
   }
 
   /**
@@ -386,6 +451,9 @@ export const useConversationStore = defineStore('conversation', () => {
     userId,
     loading,
     loadingMessages,
+    loadingMore,
+    hasMore,
+    nextCursor,
     
     // 计算属性
     currentConversation,
@@ -397,6 +465,7 @@ export const useConversationStore = defineStore('conversation', () => {
     fetchList,
     create,
     load,
+    loadMore,
     updateTitle,
     remove,
     addUserMessage,

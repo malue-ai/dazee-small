@@ -15,9 +15,11 @@ V8.0 新增
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, Any, List, Optional
-import yaml
 from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import aiofiles
+import yaml
 
 from logger import get_logger
 
@@ -28,7 +30,7 @@ logger = get_logger(__name__)
 class LLMToolDescription:
     """
     LLM 友好的工具描述
-    
+
     相比传统的 tool description，增加了：
     - use_when: 何时应该使用
     - not_use_when: 何时不应该使用
@@ -36,11 +38,11 @@ class LLMToolDescription:
     - composition_hints: 与其他工具的组合建议
     - common_errors: 常见错误和解决方案
     """
-    
+
     # 基础信息
     name: str
-    description: str                        # 基础描述
-    
+    description: str  # 基础描述
+
     # LLM 决策增强
     use_when: List[str] = field(default_factory=list)
     # [
@@ -48,14 +50,14 @@ class LLMToolDescription:
     #   "需要获取最新新闻",
     #   "用户问题涉及当前事件"
     # ]
-    
+
     not_use_when: List[str] = field(default_factory=list)
     # [
     #   "查询用户个人数据（使用 memory 代替）",
     #   "静态知识问题（直接回答）",
     #   "需要用户上传的文档（使用 knowledge_search）"
     # ]
-    
+
     # 示例
     examples: List[Dict[str, Any]] = field(default_factory=list)
     # [
@@ -65,7 +67,7 @@ class LLMToolDescription:
     #     "explanation": "搜索最新AI趋势信息"
     #   }
     # ]
-    
+
     # 组合建议
     composition_hints: List[Dict[str, Any]] = field(default_factory=list)
     # [
@@ -75,7 +77,7 @@ class LLMToolDescription:
     #     "when": "需要先搜索信息再进行分析"
     #   }
     # ]
-    
+
     # 常见错误
     common_errors: List[Dict[str, str]] = field(default_factory=list)
     # [
@@ -85,14 +87,14 @@ class LLMToolDescription:
     #     "solution": "调整查询关键词"
     #   }
     # ]
-    
+
     # 输出格式说明
     output_schema: Dict[str, Any] = field(default_factory=dict)
     # {
     #   "results": "list[{title, snippet, url}]",
     #   "total": "int"
     # }
-    
+
     # 性能特征
     performance: Dict[str, Any] = field(default_factory=dict)
     # {
@@ -100,40 +102,40 @@ class LLMToolDescription:
     #   "cost": "free|low|medium|high",
     #   "reliability": "high|medium|low"
     # }
-    
+
     def to_llm_prompt(self) -> str:
         """
         生成 LLM 可读的工具描述
-        
+
         Returns:
             格式化的描述文本
         """
         parts = [f"**{self.name}**", f"{self.description}"]
-        
+
         if self.use_when:
             parts.append("\n**适用场景:**")
             for item in self.use_when:
                 parts.append(f"  - {item}")
-        
+
         if self.not_use_when:
             parts.append("\n**不适用场景:**")
             for item in self.not_use_when:
                 parts.append(f"  - {item}")
-        
+
         if self.examples:
             parts.append("\n**示例:**")
             for i, ex in enumerate(self.examples[:2], 1):
                 parts.append(f"  {i}. 输入: {ex.get('input', {})}")
                 if "explanation" in ex:
                     parts.append(f"     说明: {ex['explanation']}")
-        
+
         if self.composition_hints:
             parts.append("\n**组合建议:**")
             for hint in self.composition_hints[:2]:
                 parts.append(f"  - {hint.get('when', '')}: {' → '.join(hint.get('sequence', []))}")
-        
+
         return "\n".join(parts)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {
@@ -147,7 +149,7 @@ class LLMToolDescription:
             "output_schema": self.output_schema,
             "performance": self.performance,
         }
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "LLMToolDescription":
         """从字典创建"""
@@ -162,32 +164,32 @@ class LLMToolDescription:
             output_schema=data.get("output_schema", {}),
             performance=data.get("performance", {}),
         )
-    
+
     @classmethod
     def from_capability(cls, capability: Dict[str, Any]) -> "LLMToolDescription":
         """
         从 capabilities.yaml 的工具定义创建
-        
+
         兼容现有格式，自动提取增强字段
         """
         name = capability.get("name", "")
         metadata = capability.get("metadata", {})
-        
+
         # 基础描述
         description = metadata.get("description", capability.get("description", ""))
-        
+
         # 从 metadata 提取增强信息
         use_when = []
         if "preferred_for" in metadata:
             use_when = metadata["preferred_for"]
         if "use_when" in capability:
             use_when.append(capability["use_when"])
-        
+
         # 从 keywords 生成使用场景
         keywords = metadata.get("keywords", [])
         if keywords and not use_when:
             use_when = [f"涉及 {', '.join(keywords[:3])} 相关任务"]
-        
+
         # 示例
         examples = []
         if "input_schema" in capability:
@@ -199,14 +201,14 @@ class LLMToolDescription:
                         example_input[prop] = f"<{prop}>"
             if example_input:
                 examples.append({"input": example_input})
-        
+
         # 性能特征
         performance = {}
         if "cost" in capability:
             cost = capability["cost"]
             performance["latency"] = cost.get("time", "medium")
             performance["cost"] = cost.get("money", "low")
-        
+
         return cls(
             name=name,
             description=description,
@@ -223,63 +225,65 @@ class LLMToolDescription:
 class ToolDescriptionEnhancer:
     """
     工具描述增强器
-    
+
     职责：
     - 加载和管理 LLM 友好的工具描述
     - 为工具选择提供增强信息
     - 生成工具组合建议
     """
-    
-    def __init__(
-        self,
-        capabilities_path: str = None,
-        llm_descriptions_path: str = None
-    ):
+
+    def __init__(self):
+        """初始化"""
+        self._descriptions: Dict[str, LLMToolDescription] = {}
+        self._loaded = False
+
+    async def load(self, capabilities_path: str = None, llm_descriptions_path: str = None):
         """
-        初始化
-        
+        加载工具描述
+
         Args:
             capabilities_path: capabilities.yaml 路径
             llm_descriptions_path: LLM 描述文件路径（可选，覆盖/扩展）
         """
-        self._descriptions: Dict[str, LLMToolDescription] = {}
-        
         # 从 capabilities.yaml 加载基础信息
         if capabilities_path:
-            self._load_from_capabilities(capabilities_path)
-        
+            await self._load_from_capabilities(capabilities_path)
+
         # 从专用文件加载增强信息（覆盖）
         if llm_descriptions_path:
-            self._load_llm_descriptions(llm_descriptions_path)
-        
+            await self._load_llm_descriptions(llm_descriptions_path)
+
+        self._loaded = True
         logger.info(f"✅ ToolDescriptionEnhancer: {len(self._descriptions)} 个工具")
-    
-    def _load_from_capabilities(self, path: str):
+
+    async def _load_from_capabilities(self, path: str):
         """从 capabilities.yaml 加载"""
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = yaml.safe_load(f)
-            
+            async with aiofiles.open(path, "r", encoding="utf-8") as f:
+                content = await f.read()
+                data = yaml.safe_load(content)
+
             for cap in data.get("capabilities", []):
                 name = cap.get("name", "")
                 if name:
                     self._descriptions[name] = LLMToolDescription.from_capability(cap)
-            
+
             logger.debug(f"从 capabilities.yaml 加载 {len(self._descriptions)} 个工具描述")
         except Exception as e:
             logger.warning(f"加载 capabilities.yaml 失败: {e}")
-    
-    def _load_llm_descriptions(self, path: str):
+
+    async def _load_llm_descriptions(self, path: str):
         """从 LLM 描述文件加载（YAML 格式）"""
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = yaml.safe_load(f)
-            
+            async with aiofiles.open(path, "r", encoding="utf-8") as f:
+                content = await f.read()
+                data = yaml.safe_load(content)
+
             for tool_data in data.get("tools", []):
                 name = tool_data.get("name", "")
                 if name:
                     desc = LLMToolDescription.from_dict(tool_data)
-                    
+
                     # 合并而非覆盖
                     if name in self._descriptions:
                         existing = self._descriptions[name]
@@ -287,92 +291,86 @@ class ToolDescriptionEnhancer:
                             desc.description = existing.description
                         desc.use_when = desc.use_when or existing.use_when
                         desc.not_use_when = desc.not_use_when or existing.not_use_when
-                    
+
                     self._descriptions[name] = desc
-            
+
             logger.debug(f"从 LLM 描述文件加载/更新 {len(data.get('tools', []))} 个工具")
         except Exception as e:
             logger.warning(f"加载 LLM 描述文件失败: {e}")
-    
+
     def get(self, tool_name: str) -> Optional[LLMToolDescription]:
         """获取工具描述"""
         return self._descriptions.get(tool_name)
-    
+
     def get_all(self) -> Dict[str, LLMToolDescription]:
         """获取所有工具描述"""
         return self._descriptions.copy()
-    
+
     def generate_tool_context(
-        self,
-        tool_names: List[str],
-        include_examples: bool = True,
-        include_hints: bool = True
+        self, tool_names: List[str], include_examples: bool = True, include_hints: bool = True
     ) -> str:
         """
         为指定工具生成上下文描述
-        
+
         Args:
             tool_names: 工具名称列表
             include_examples: 是否包含示例
             include_hints: 是否包含组合建议
-            
+
         Returns:
             格式化的上下文文本
         """
         parts = ["## 可用工具说明\n"]
-        
+
         for name in tool_names:
             desc = self._descriptions.get(name)
             if desc:
                 parts.append(desc.to_llm_prompt())
                 parts.append("")
-        
+
         return "\n".join(parts)
-    
+
     def suggest_tools(
-        self,
-        query: str,
-        task_type: str = None,
-        available_tools: List[str] = None
+        self, query: str, task_type: str = None, available_tools: List[str] = None
     ) -> List[tuple[str, float, str]]:
         """
         根据查询建议工具
-        
+
         Args:
             query: 用户查询
             task_type: 任务类型
             available_tools: 可用工具列表
-            
+
         Returns:
             [(工具名, 匹配分数, 匹配原因), ...]
         """
         suggestions = []
         query_lower = query.lower()
-        
+
         tools_to_check = available_tools or list(self._descriptions.keys())
-        
+
         for tool_name in tools_to_check:
             desc = self._descriptions.get(tool_name)
             if not desc:
                 continue
-            
+
             score = 0.0
             reasons = []
-            
+
             # 检查 use_when
             for condition in desc.use_when:
                 if any(kw.lower() in query_lower for kw in condition.split()):
                     score += 0.3
                     reasons.append(f"匹配使用场景: {condition}")
                     break
-            
+
             # 检查 not_use_when（负分）
             for condition in desc.not_use_when:
                 if any(kw.lower() in query_lower for kw in condition.split()):
                     score -= 0.5
                     reasons.append(f"不适用: {condition}")
                     break
-            
+
             # 关键词匹配
             if desc.description:
                 desc_words = desc.description.lower().split()
@@ -381,34 +379,29 @@ class ToolDescriptionEnhancer:
                 if overlap > 0:
                     score += min(overlap * 0.1, 0.3)
                     reasons.append(f"描述关键词匹配: {overlap}")
-            
+
             if score > 0:
-                suggestions.append((
-                    tool_name,
-                    score,
-                    "; ".join(reasons) if reasons else "基础匹配"
-                ))
-        
+                suggestions.append(
+                    (tool_name, score, "; ".join(reasons) if reasons else "基础匹配")
+                )
+
         suggestions.sort(key=lambda x: x[1], reverse=True)
         return suggestions
-    
-    def get_composition_hints(
-        self,
-        primary_tool: str
-    ) -> List[Dict[str, Any]]:
+
+    def get_composition_hints(self, primary_tool: str) -> List[Dict[str, Any]]:
         """
         获取工具组合建议
-        
+
         Args:
             primary_tool: 主工具名称
-            
+
         Returns:
             组合建议列表
         """
         desc = self._descriptions.get(primary_tool)
         if not desc:
             return []
-        
+
         return desc.composition_hints
 
 
@@ -497,30 +490,31 @@ tools:
 """
 
 
-def create_tool_description_enhancer(
-    capabilities_path: str = None,
-    use_defaults: bool = True
+async def create_tool_description_enhancer(
+    capabilities_path: str = None, use_defaults: bool = True
 ) -> ToolDescriptionEnhancer:
     """
     创建工具描述增强器
-    
+
     Args:
         capabilities_path: capabilities.yaml 路径
         use_defaults: 是否使用默认 LLM 描述
-        
+
     Returns:
         ToolDescriptionEnhancer
     """
-    enhancer = ToolDescriptionEnhancer(capabilities_path=capabilities_path)
-    
+    enhancer = ToolDescriptionEnhancer()
+    await enhancer.load(capabilities_path=capabilities_path)
+
     if use_defaults:
         # 加载默认描述
         import io
+
         data = yaml.safe_load(io.StringIO(DEFAULT_LLM_DESCRIPTIONS))
         for tool_data in data.get("tools", []):
             name = tool_data.get("name", "")
             if name:
                 desc = LLMToolDescription.from_dict(tool_data)
                 enhancer._descriptions[name] = desc
-    
+
     return enhancer

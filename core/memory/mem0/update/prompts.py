@@ -11,7 +11,6 @@ Mem0 自定义 Prompt 模板
 - 时间信息具体化
 """
 
-
 # ==================== Fact Extraction Prompt ====================
 
 CUSTOM_FACT_EXTRACTION_PROMPT = """

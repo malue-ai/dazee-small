@@ -3,19 +3,40 @@ LLM 服务模块
 
 提供统一的 LLM 服务接口，支持多种 LLM 提供商。
 
+双层注册架构：
+- LLMRegistry（Provider 层）: 定义"如何调用"（服务类 + 适配器）
+- ModelRegistry（Model 层）: 定义"具体配置"（endpoint、能力、类型）
+
 模块结构：
+- registry.py: Provider 注册中心
+- model_registry.py: Model 注册中心（新增）
 - base.py: 基础类和数据模型
+- adaptor.py: 格式适配器
 - claude.py: Claude 实现
-- openai.py: OpenAI 实现（占位）
-- gemini.py: Gemini 实现（占位）
-- qwen.py: 千问实现  # 🆕
+- openai.py: OpenAI 实现
+- gemini.py: Gemini 实现
+- qwen.py: 千问实现
 
 使用示例：
 ```python
-from core.llm import create_llm_service, LLMProvider, Message
+from core.llm import (
+    create_llm_service, LLMProvider, Message,
+    LLMRegistry, ModelRegistry, ModelType
+)
 
-# 创建 Claude 服务
+# 方式 1：通过 ModelRegistry 创建（推荐）
+llm = ModelRegistry.create_service("gpt-4o")
+embedder = ModelRegistry.create_service("bge-m3")
+
+# 方式 2：通过 LLMRegistry 创建
+llm = LLMRegistry.create_service("claude", model="claude-sonnet-4-5")
+
+# 方式 3：使用工厂函数
 llm = create_llm_service(provider=LLMProvider.CLAUDE)
+
+# 查询可用模型
+llm_models = ModelRegistry.list_models(model_type=ModelType.LLM)
+embedding_models = ModelRegistry.list_models(model_type=ModelType.EMBEDDING)
 
 # 异步调用
 response = await llm.create_message_async(
@@ -32,18 +53,29 @@ async for chunk in llm.create_message_stream(messages, system):
 import os
 from typing import Optional, Union
 
+# 格式适配器
+from .adaptor import (
+    BaseAdaptor,
+    ClaudeAdaptor,
+    GeminiAdaptor,
+    OpenAIAdaptor,
+    get_adaptor,
+)
+
 # 基础类和数据模型
-from .base import (
-    # 枚举
-    LLMProvider,
-    ToolType,
+from .base import (  # 枚举; 数据类; 抽象基类; Token 计算
+    BaseLLMService,
     InvocationType,
-    # 数据类
     LLMConfig,
+    LLMProvider,
     LLMResponse,
     Message,
-    # 抽象基类
-    BaseLLMService,
+    ToolType,
+    count_message_tokens,
+    count_messages_tokens,
+    count_request_tokens,
+    count_tokens,
+    count_tools_tokens,
 )
 
 # Claude 实现
@@ -52,112 +84,96 @@ from .claude import (
     create_claude_service,
 )
 
-# OpenAI 实现（占位）
-from .openai import OpenAILLMService
-
 # Gemini 实现（占位）
 from .gemini import GeminiLLMService
 
+# 健康监控器（🆕 V7.10）
+from .health_monitor import (
+    HealthPolicy,
+    LLMHealthMonitor,
+    get_llm_health_monitor,
+)
+
+# Model 注册中心（新增）
+from .model_registry import (
+    AdapterType,
+    ModelCapabilities,
+    ModelConfig,
+    ModelRegistry,
+    ModelType,
+)
+
+# OpenAI 实现（占位）
+from .openai import OpenAILLMService
+
 # 🆕 千问实现
 from .qwen import (
-    QwenLLMService,
     QwenConfig,
+    QwenLLMService,
     create_qwen_service,
 )
 
-# 格式适配器
-from .adaptor import (
-    BaseAdaptor,
-    ClaudeAdaptor,
-    OpenAIAdaptor,
-    GeminiAdaptor,
-    get_adaptor,
-)
+# Provider 注册中心
+from .registry import LLMRegistry
 
 # 多模型路由器（🆕 V7.10）
 from .router import (
     ModelRouter,
-    RouteTarget,
     RouterPolicy,
-)
-
-# 健康监控器（🆕 V7.10）
-from .health_monitor import (
-    LLMHealthMonitor,
-    HealthPolicy,
-    get_llm_health_monitor,
+    RouteTarget,
 )
 
 # 工具调用工具（🆕 V7.10）
 from .tool_call_utils import normalize_tool_calls
 
-
 # ============================================================
 # 工厂函数
 # ============================================================
 
+
 def _create_single_llm_service(
-    provider: Union[LLMProvider, str],
-    model: str,
-    api_key: Optional[str] = None,
-    **kwargs
+    provider: Union[LLMProvider, str], model: str, api_key: Optional[str] = None, **kwargs
 ) -> BaseLLMService:
     """
     创建单个 LLM 服务（内部函数）
-    
+
+    通过 LLMRegistry 动态创建，无需硬编码 if-elif 链。
+    添加新 Provider 只需：
+    1. 创建 XxxLLMService 类
+    2. 在文件末尾调用 LLMRegistry.register()
+    3. 在配置中使用 provider: "xxx"
+
     Args:
-        provider: LLM 提供商
+        provider: LLM 提供商（字符串或枚举）
         model: 模型名称
         api_key: API 密钥
         **kwargs: 其他配置参数
-        
+
     Returns:
         LLM 服务实例
     """
-    # 字符串转枚举
-    if isinstance(provider, str):
-        provider = LLMProvider(provider)
-    
-    # 创建配置（过滤掉 ModelRouter 专有参数）
+    # 统一转为字符串（LLMRegistry 使用字符串作为 key）
+    provider_str = provider.value if isinstance(provider, LLMProvider) else provider
+
+    # 过滤掉 ModelRouter 专有参数
     router_keys = {"fallbacks", "policy", "api_key_env"}
     filtered_kwargs = {k: v for k, v in kwargs.items() if k not in router_keys}
-    
-    config = LLMConfig(
-        provider=provider,
-        model=model,
-        api_key=api_key,
-        **filtered_kwargs
+
+    # 🆕 使用 LLMRegistry 动态创建服务（自动处理 config_class）
+    return LLMRegistry.create_service(
+        provider=provider_str, model=model, api_key=api_key, **filtered_kwargs
     )
-    
-    # 根据 provider 创建服务
-    if provider == LLMProvider.CLAUDE:
-        return ClaudeLLMService(config)
-    elif provider == LLMProvider.OPENAI:
-        return OpenAILLMService(config)
-    elif provider == LLMProvider.GEMINI:
-        return GeminiLLMService(config)
-    elif provider == LLMProvider.QWEN:  # 🆕 千问
-        from .qwen import QwenLLMService, QwenConfig
-        qwen_config = QwenConfig(
-            provider=provider,
-            model=model,
-            api_key=api_key,
-            **filtered_kwargs
-        )
-        return QwenLLMService(qwen_config)
-    else:
-        raise ValueError(f"Unknown provider: {provider}")
 
 
 def create_llm_service(
     provider: Union[LLMProvider, str] = LLMProvider.CLAUDE,
     model: Optional[str] = None,
     api_key: Optional[str] = None,
-    **kwargs
+    **kwargs,
 ) -> BaseLLMService:
     """
     工厂函数：创建 LLM 服务（支持多模型容灾）
-    
+
     Args:
         provider: LLM 提供商 (claude, openai, gemini)
         model: 模型名称（默认根据 provider 选择）
@@ -166,15 +182,15 @@ def create_llm_service(
             - fallbacks: 备选模型列表（🆕 V7.10）
             - policy: 路由策略（🆕 V7.10）
             - api_key_env: API Key 环境变量名（🆕 V7.10）
-        
+
     Returns:
         LLM 服务实例（可能是 ModelRouter 或单个 LLM Service）
-        
+
     Example:
     ```python
     # 单个模型（无容灾）
     llm = create_llm_service(provider="claude", model="claude-sonnet-4-5")
-    
+
     # 多模型容灾（自动包装为 ModelRouter）
     llm = create_llm_service(
         provider="claude",
@@ -189,7 +205,7 @@ def create_llm_service(
     # 字符串转枚举
     if isinstance(provider, str):
         provider = LLMProvider(provider)
-    
+
     # 默认模型
     default_models = {
         LLMProvider.CLAUDE: "claude-sonnet-4-5-20250929",
@@ -197,10 +213,10 @@ def create_llm_service(
         LLMProvider.GEMINI: "gemini-pro",
         LLMProvider.QWEN: "qwen3-max",  # 🆕 对标 claude-sonnet-4-5
     }
-    
+
     if model is None:
         model = default_models.get(provider, "claude-sonnet-4-5-20250929")
-    
+
     # 从环境变量读取 API Key（支持 api_key_env 参数）
     api_key_env = kwargs.pop("api_key_env", None)
     if api_key is None:
@@ -214,28 +230,29 @@ def create_llm_service(
                 LLMProvider.QWEN: "DASHSCOPE_API_KEY",  # 🆕
             }
             api_key = os.getenv(env_keys.get(provider, "ANTHROPIC_API_KEY"))
-    
+
     # 检查是否有 fallbacks 配置（🆕 V7.10）
     fallbacks_config = kwargs.pop("fallbacks", None)
     policy_config = kwargs.pop("policy", None)
-    
+
     if not fallbacks_config:
         # 无 fallbacks，创建单个 LLM 服务
         return _create_single_llm_service(provider, model, api_key, **kwargs)
-    
+
     # 有 fallbacks，创建 ModelRouter（🆕 V7.10）
     from logger import get_logger
+
     logger = get_logger("llm.factory")
-    
+
     # 创建 primary target
     primary_service = _create_single_llm_service(provider, model, api_key, **kwargs)
     primary = RouteTarget(
         service=primary_service,
         provider=provider,
         model=model,
-        name=f"primary:{provider.value}:{model}"
+        name=f"primary:{provider.value}:{model}",
     )
-    
+
     # 创建 fallback targets
     fallbacks = []
     for idx, fb_config in enumerate(fallbacks_config):
@@ -243,33 +260,47 @@ def create_llm_service(
         fb_model = fb_config.get("model", model)
         fb_api_key_env = fb_config.get("api_key_env")
         fb_api_key = os.getenv(fb_api_key_env) if fb_api_key_env else None
-        
+
         # 合并配置（fallback 继承 primary 的配置，但可覆盖）
         fb_kwargs = kwargs.copy()
-        for key in ["base_url", "max_tokens", "temperature", "enable_thinking", 
-                    "thinking_budget", "enable_caching", "timeout", "max_retries"]:
+        for key in [
+            "base_url",
+            "max_tokens",
+            "temperature",
+            "enable_thinking",
+            "thinking_budget",
+            "enable_caching",
+            "timeout",
+            "max_retries",
+        ]:
             if key in fb_config:
                 fb_kwargs[key] = fb_config[key]
-        
+
         fb_service = _create_single_llm_service(fb_provider, fb_model, fb_api_key, **fb_kwargs)
-        fallbacks.append(RouteTarget(
-            service=fb_service,
-            provider=fb_provider if isinstance(fb_provider, LLMProvider) else LLMProvider(fb_provider),
-            model=fb_model,
-            name=f"fallback_{idx}:{fb_provider}:{fb_model}"
-        ))
-    
+        fallbacks.append(
+            RouteTarget(
+                service=fb_service,
+                provider=(
+                    fb_provider
+                    if isinstance(fb_provider, LLMProvider)
+                    else LLMProvider(fb_provider)
+                ),
+                model=fb_model,
+                name=f"fallback_{idx}:{fb_provider}:{fb_model}",
+            )
+        )
+
     # 创建 ModelRouter
     logger.info(
         f"🔀 创建 ModelRouter: primary={primary.name}, "
         f"fallbacks=[{', '.join(f.name for f in fallbacks)}]"
     )
-    
+
     return ModelRouter(
         primary=primary,
         fallbacks=fallbacks,
         policy=policy_config,
-        health_monitor=get_llm_health_monitor()
+        health_monitor=get_llm_health_monitor(),
     )
 
 
@@ -278,46 +309,55 @@ def create_llm_service(
 # ============================================================
 
 __all__ = [
-    # 枚举
+    # ========== 注册中心 ==========
+    # Provider 注册中心
+    "LLMRegistry",
+    # Model 注册中心
+    "ModelRegistry",
+    "ModelType",
+    "AdapterType",
+    "ModelConfig",
+    "ModelCapabilities",
+    # ========== 枚举 ==========
     "LLMProvider",
     "ToolType",
     "InvocationType",
-    
-    # 数据类
+    # ========== 数据类 ==========
     "LLMConfig",
     "LLMResponse",
     "Message",
-    
-    # 基类
+    # ========== 基类 ==========
     "BaseLLMService",
-    
-    # 实现类
+    # ========== Token 计算 ==========
+    "count_tokens",
+    "count_message_tokens",
+    "count_messages_tokens",
+    "count_tools_tokens",
+    "count_request_tokens",
+    # ========== 实现类 ==========
     "ClaudeLLMService",
     "OpenAILLMService",
     "GeminiLLMService",
-    
-    # 适配器
+    "QwenLLMService",
+    "QwenConfig",
+    # ========== 适配器 ==========
     "BaseAdaptor",
     "ClaudeAdaptor",
     "OpenAIAdaptor",
     "GeminiAdaptor",
     "get_adaptor",
-    
-    # 多模型路由器（🆕 V7.10）
+    # ========== 路由器（容灾）==========
     "ModelRouter",
     "RouteTarget",
     "RouterPolicy",
-    
-    # 健康监控器（🆕 V7.10）
+    # ========== 健康监控器 ==========
     "LLMHealthMonitor",
     "HealthPolicy",
     "get_llm_health_monitor",
-    
-    # 工具调用工具（🆕 V7.10）
+    # ========== 工具 ==========
     "normalize_tool_calls",
-    
-    # 工厂函数
+    # ========== 工厂函数 ==========
     "create_llm_service",
     "create_claude_service",
+    "create_qwen_service",
 ]
-

@@ -14,19 +14,22 @@
 # 1. 标准库
 import asyncio
 from datetime import datetime
-from typing import Optional, Dict, Any, List, TYPE_CHECKING
-
-# 2. 第三方库（无）
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 # 3. 本地模块
 from logger import get_logger
 
 from .context import TaskContext
-from .registry import get_task_registry, get_registered_task_names
+from .registry import get_registered_task_names, get_task_registry
+
+# 2. 第三方库（无）
+
 
 if TYPE_CHECKING:
-    from core.llm import create_llm_service
     from core.llm.base import Message
+
+# 注意：create_llm_service 延迟导入以避免循环依赖
+# core.llm → utils → background_tasks → core.llm
 
 logger = get_logger("background_tasks.service")
 
@@ -34,27 +37,27 @@ logger = get_logger("background_tasks.service")
 class BackgroundTaskService:
     """
     后台任务服务
-    
+
     统一管理所有后台任务，提供可扩展的任务接口
-    
+
     使用方式：
         # 统一调度
         await service.dispatch_tasks(
             task_names=["title_generation", "recommended_questions"],
             context=TaskContext(...)
         )
-    
+
     新增任务只需：
     1. 在 tasks/ 目录下创建新文件
     2. 使用 @background_task("task_name") 装饰器
     """
-    
+
     def __init__(self) -> None:
         """初始化后台任务服务"""
         # 使用 Haiku（快速、便宜，适合简单任务）
         self._llm = None  # 延迟初始化，避免启动时加载
         self._mem0_pool = None  # Mem0 Pool 延迟初始化
-        
+
         # Prompt 模板（供 tasks 使用）
         self.title_generation_prompt = """请为以下对话内容生成一个简短的中文标题。
 
@@ -100,58 +103,57 @@ class BackgroundTaskService:
 返回格式：
 {{"questions": ["问题1", "问题2", "问题3"]}}
 """
-    
+
     # ==================== 共享资源管理 ====================
-    
-    def get_llm(self) -> Any:
+
+    async def get_llm(self) -> Any:
         """
         获取 LLM 服务（懒加载）
-        
+
         供 tasks 使用，避免重复创建 LLM 实例
         """
         if self._llm is None:
             from config.llm_config import get_llm_profile
-            from core.llm import create_llm_service  # 延迟导入，避免循环依赖
-            profile = get_llm_profile("background_task")
+            from core.llm import create_llm_service  # 延迟导入避免循环依赖
+
+            profile = await get_llm_profile("background_task")
             self._llm = create_llm_service(**profile)
         return self._llm
-    
+
     def get_mem0_pool(self) -> Optional[Any]:
         """
         获取 Mem0 Pool（懒加载）
-        
+
         供 tasks 使用，避免重复创建 Pool 实例
-        
+
         Returns:
             Mem0 Pool 实例，如果模块未安装则返回 None
         """
         if self._mem0_pool is None:
             try:
                 from core.memory.mem0 import get_mem0_pool
+
                 self._mem0_pool = get_mem0_pool()
             except ImportError:
                 logger.warning("⚠️ mem0 模块未安装，Mem0 功能不可用")
                 return None
         return self._mem0_pool
-    
+
     # ==================== 统一调度入口 ====================
-    
+
     async def dispatch_tasks(
-        self,
-        task_names: List[str],
-        context: TaskContext,
-        wait: bool = True
+        self, task_names: List[str], context: TaskContext, wait: bool = True
     ) -> Dict[str, bool]:
         """
         统一后台任务调度入口 ⭐
-        
+
         任务自动注册，只需在 tasks/ 目录下创建文件并使用 @background_task 装饰器
-        
+
         Args:
             task_names: 要执行的任务名列表，如 ["title_generation", "recommended_questions"]
             context: 任务上下文，包含所有任务可能需要的参数
             wait: 是否等待任务完成（默认 True，确保 SSE 事件在流关闭前发送）
-            
+
         Returns:
             Dict[str, bool]: 各任务是否成功执行/启动
         """
@@ -159,15 +161,17 @@ class BackgroundTaskService:
         registry = get_task_registry()
         tasks = []
         task_name_map = {}  # task -> task_name 映射
-        
+
         for task_name in task_names:
             if task_name not in registry:
-                logger.warning(f"⚠️ 未知的后台任务: {task_name}，已注册的任务: {get_registered_task_names()}")
+                logger.warning(
+                    f"⚠️ 未知的后台任务: {task_name}，已注册的任务: {get_registered_task_names()}"
+                )
                 results[task_name] = False
                 continue
-            
+
             task_func = registry[task_name]
-            
+
             try:
                 # 创建任务
                 task = asyncio.create_task(task_func(context, self))
@@ -178,12 +182,12 @@ class BackgroundTaskService:
             except Exception as e:
                 logger.warning(f"⚠️ 启动后台任务失败: {task_name}, error={e}")
                 results[task_name] = False
-        
+
         if wait and tasks:
             # 等待所有任务完成（确保 SSE 事件在流关闭前发送）
             logger.debug(f"⏳ 等待 {len(tasks)} 个后台任务完成...")
             done, _ = await asyncio.wait(tasks, return_when=asyncio.ALL_COMPLETED)
-            
+
             # 检查任务执行结果
             for task in done:
                 task_name = task_name_map.get(id(task), "unknown")
@@ -192,13 +196,13 @@ class BackgroundTaskService:
                     results[task_name] = False
                 else:
                     logger.debug(f"✅ 后台任务执行完成: {task_name}")
-            
+
             logger.info(f"✅ 所有后台任务已完成")
-        
+
         return results
-    
+
     # ==================== 工具方法 ====================
-    
+
     @staticmethod
     def calc_duration_ms(start_time: datetime) -> int:
         """计算耗时（毫秒）"""

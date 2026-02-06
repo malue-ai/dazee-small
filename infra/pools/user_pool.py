@@ -12,9 +12,9 @@
 - 可扩展：预留 check_rate_limit 接口，方便未来加入限流
 
 Redis Key 设计：
-- zf:user:{user_id}:sessions    # Set: 用户活跃 Session 列表
-- zf:user:{user_id}:stats       # Hash: 用户统计
-- zf:user:{user_id}:context     # Hash: 用户上下文缓存
+- user:{user_id}:sessions    # Set: 用户活跃 Session 列表
+- user:{user_id}:stats       # Hash: 用户统计
+- user:{user_id}:context     # Hash: 用户上下文缓存
 """
 
 import os
@@ -45,7 +45,7 @@ class UserPool:
     """
     
     # Redis Key 前缀
-    KEY_PREFIX = "zf:user"
+    KEY_PREFIX = "user"
     
     def __init__(self, redis_manager):
         """
