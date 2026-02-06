@@ -241,9 +241,6 @@ enabled_capabilities:
   # --- PPT 生成类 ---
   ppt_generator: 0           # 闭环 PPT 生成（SlideSpeak）
 
-  # --- 代码沙盒类（整体启用） ---
-  sandbox_tools: 0           # 包含：文件操作、代码执行、项目运行等全部沙盒工具
-
   # --- 动态代码执行 ---
   code_execution: 0          # 本地代码执行（谨慎启用）
 

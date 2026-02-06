@@ -12,18 +12,29 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 # ==================== 第三方库 ====================
-from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-# 加载项目根目录的 .env 文件（必须在导入本地模块之前）
-_env_path = Path(__file__).parent / ".env"
-load_dotenv(dotenv_path=_env_path, override=True)
+# 加载配置（优先从 config.yaml，兼容 .env）
+from utils.app_paths import get_user_config_path, is_frozen
+
+_config_path = get_user_config_path()
+if _config_path.exists():
+    # 桌面应用模式：从 config.yaml 加载配置到 os.environ
+    from services.settings_service import load_config_to_env
+    load_config_to_env()
+else:
+    # 开发模式：从 .env 文件加载
+    try:
+        from dotenv import load_dotenv
+        _env_path = Path(__file__).parent / ".env"
+        load_dotenv(dotenv_path=_env_path, override=True)
+    except ImportError:
+        pass  # dotenv 不是必需依赖
 
 # ==================== 本地模块 ====================
 from routers import (
     agents_router,
-    auth_router,
     chat_router,
     conversation_router,
     docs_router,
@@ -33,18 +44,15 @@ from routers import (
     knowledge_router,
     mem0_router,
     realtime_router,
+    settings_router,
     skills_router,
     tasks_router,
     tools_router,
-    workspace_router,
     models_router,
 )
-from grpc_server.server import GRPCServer
-from infra.pools import get_session_pool, get_agent_pool, get_mcp_pool
-from infra.database import init_database
 from infra.resilience.config import apply_resilience_config
 from core.tool.registry import get_capability_registry
-from utils import get_s3_uploader
+from infra.local_store import close_all_workspaces
 
 # ==================== 常量定义 ====================
 
@@ -94,17 +102,6 @@ def _setup_asyncio_exception_handler() -> None:
 
 # ==================== 启动辅助函数 ====================
 
-async def _init_s3_uploader() -> None:
-    """初始化 S3 上传器"""
-    print("☁️ 初始化 S3 上传器...")
-    try:
-        s3_uploader = get_s3_uploader()
-        await s3_uploader.initialize()
-        print("✅ S3 上传器初始化完成")
-    except Exception as e:
-        print(f"⚠️ S3 上传器初始化失败（文件上传功能可能不可用）: {e}")
-
-
 async def _init_resilience_config() -> None:
     """加载容错配置"""
     print("🛡️ 加载容错配置...")
@@ -115,11 +112,12 @@ async def _init_resilience_config() -> None:
         print(f"⚠️ 容错配置加载失败: {e}")
 
 
-async def _init_database() -> None:
-    """初始化数据库"""
-    print("💾 初始化数据库...")
-    await init_database()
-    print("✅ 数据库初始化完成")
+async def _init_local_store() -> None:
+    """初始化本地存储（SQLite）"""
+    print("💾 初始化本地存储...")
+    from infra.local_store import get_workspace
+    # Workspace 在首次 get_workspace() 调用时懒初始化
+    print("✅ 本地存储就绪（懒初始化模式）")
 
 
 async def _preload_capability_registry() -> None:
@@ -161,60 +159,40 @@ async def _preload_agent_registry() -> int:
         return 0
 
 
-async def _start_grpc_server() -> Optional[Any]:
-    """启动 gRPC 服务器"""
-    enable_grpc = os.getenv("ENABLE_GRPC", "false").lower() == "true"
-    if not enable_grpc:
-        return None
-    
-    try:
-        print("📡 启动 gRPC 服务器...")        
-        grpc_host = os.getenv("GRPC_HOST", "0.0.0.0")
-        grpc_port = int(os.getenv("GRPC_PORT", "50051"))
-        grpc_workers_env = os.getenv("GRPC_MAX_WORKERS", "0")
-        grpc_workers = int(grpc_workers_env) if grpc_workers_env else None
-        if grpc_workers == 0:
-            grpc_workers = None
-        
-        grpc_server = GRPCServer(grpc_host, grpc_port, grpc_workers)
-        asyncio.create_task(grpc_server.start())
-        
-        print(f"✅ gRPC 服务器已启动: {grpc_host}:{grpc_port}")
-        print(f"📡 内部服务可通过 gRPC 调用: ChatService, SessionService")
-        return grpc_server
-    
-    except ImportError:
-        print("⚠️ gRPC 依赖未安装或代码未生成，跳过 gRPC 服务器启动")
-        print("   安装: pip install grpcio grpcio-tools")
-        print("   生成代码: bash scripts/generate_grpc.sh")
-    except Exception as e:
-        print(f"⚠️ gRPC 服务器启动失败: {e}")
-    
-    return None
-
-
 async def _start_scheduler() -> Optional[Any]:
-    """启动定时任务调度器"""
+    """启动定时任务调度器（系统级）"""
     enable_scheduler = os.getenv("ENABLE_SCHEDULER", "true").lower() == "true"
     if not enable_scheduler:
         return None
-    
+
     try:
-        print("📅 启动定时任务调度器...")
         from utils.background_tasks import get_scheduler
-        
+
         scheduler = get_scheduler()
         await scheduler.start()
-        
-        if scheduler.is_running():
-            print("✅ 定时任务调度器已启动")
-        else:
-            print("○ 没有配置定时任务，调度器未启动")
-        return scheduler   
-    
+        return scheduler
+
     except Exception as e:
-        print(f"⚠️ 定时任务调度器启动失败: {e}")
-    
+        print(f"⚠️ 系统定时任务调度器启动失败: {e}")
+
+    return None
+
+
+async def _start_user_task_scheduler() -> Optional[Any]:
+    """启动用户定时任务调度器"""
+    enable_scheduler = os.getenv("ENABLE_USER_TASK_SCHEDULER", "true").lower() == "true"
+    if not enable_scheduler:
+        return None
+
+    try:
+        from services.user_task_scheduler import start_user_task_scheduler
+
+        scheduler = await start_user_task_scheduler()
+        return scheduler
+
+    except Exception as e:
+        print(f"⚠️ 用户任务调度器启动失败: {e}")
+
     return None
 
 
@@ -249,27 +227,10 @@ async def _init_chat_service() -> None:
 
 async def _start_health_probe_service() -> Optional[Any]:
     """
-    启动健康探测服务（🆕 V7.10）
-    
-    后台异步探测所有 LLM 模型健康状态，与用户请求完全解耦
+    启动健康探测服务（已禁用 - 桌面版不需要主备切换）
     """
-    try:
-        print("🩺 启动健康探测服务...")
-        from services.health_probe_service import start_health_probe_service
-        
-        service = await start_health_probe_service()
-        
-        if service._running:
-            print(f"✅ 健康探测服务已启动: "
-                  f"interval={service.interval}s, profiles={service.profiles}")
-        else:
-            print("○ 健康探测服务已禁用 (LLM_HEALTH_PROBE_ENABLED=false)")
-        
-        return service
-    
-    except Exception as e:
-        print(f"⚠️ 健康探测服务启动失败: {e}")
-        return None
+    # 桌面版场景下，健康探测和主备模型切换没有意义，直接跳过
+    return None
 
 
 # ==================== 关闭辅助函数 ====================
@@ -286,168 +247,28 @@ async def _cleanup_agent_registry() -> None:
 
 
 async def _stop_scheduler(scheduler: Optional[Any]) -> None:
-    """关闭定时任务调度器"""
+    """关闭定时任务调度器（系统级）"""
     if scheduler and scheduler.is_running():
         try:
             await scheduler.shutdown()
-            print("✅ 定时任务调度器已关闭")
         except Exception as e:
-            print(f"⚠️ 关闭定时任务调度器失败: {e}")
+            print(f"⚠️ 关闭系统定时任务调度器失败: {e}")
+
+
+async def _stop_user_task_scheduler(scheduler: Optional[Any]) -> None:
+    """关闭用户任务调度器"""
+    if scheduler and scheduler.is_running():
+        try:
+            await scheduler.shutdown()
+        except Exception as e:
+            print(f"⚠️ 关闭用户任务调度器失败: {e}")
 
 
 async def _stop_health_probe_service(service: Optional[Any]) -> None:
     """
-    停止健康探测服务（🆕 V7.10）
+    停止健康探测服务（已禁用 - 桌面版不需要）
     """
-    if service:
-        try:
-            from services.health_probe_service import stop_health_probe_service
-            await stop_health_probe_service()
-            print("✅ 健康探测服务已关闭")
-        except Exception as e:
-            print(f"⚠️ 关闭健康探测服务失败: {e}")
-
-
-async def _stop_grpc_server(grpc_server: Optional[Any]) -> None:
-    """关闭 gRPC 服务器"""
-    if grpc_server:
-        try:
-            # 🆕 使用 gRPC 服务器实例配置的 grace_period（默认 30 秒）
-            await grpc_server.stop()
-            print("✅ gRPC 服务器已关闭")
-        except Exception as e:
-            print(f"⚠️ 关闭 gRPC 服务器失败: {e}")
-
-
-async def _close_redis() -> None:
-    """关闭 Redis 连接"""
-    try:
-        from services.redis_manager import get_redis_manager
-        redis_manager = get_redis_manager()
-        await redis_manager.close()
-        print("✅ Redis 连接已关闭")
-    except Exception as e:
-        print(f"⚠️ 关闭 Redis 连接失败: {e}")
-
-
-async def _mcp_preconnect_background(mcp_pool) -> None:
-    """
-    后台 MCP 预连接任务
-    
-    在独立的 asyncio Task 中执行预连接，避免 anyio cancel scope 污染事件循环。
-    预连接失败不会影响应用启动，工具仍可在首次调用时按需连接。
-    """
-    try:
-        results = await mcp_pool.preconnect_all()
-        connected = sum(1 for v in results.values() if v)
-        total = len(results)
-        if total > 0:
-            print(f"   ✓ MCP 后台预连接完成: {connected}/{total} 个服务器")
-    except Exception as e:
-        print(f"   ⚠️ MCP 后台预连接失败（工具将按需连接）: {e}")
-
-
-async def _init_pools() -> None:
-    """
-    初始化资源池和协调器
-    
-    初始化顺序：
-    1. AgentRegistry 加载配置（已在 _preload_agent_registry 中完成）
-    2. MCPPool 初始化（后台预连接所有 MCP 服务器）
-    3. AgentPool 创建原型（使用 MCPPool 中的连接）
-    4. SessionPool 初始化（追踪活跃 Session）
-    5. 校准活跃 Session 数据（清理可能的孤立记录）
-    6. 启动 MCP 健康检查
-    """
-    try:
-        print("🏊 初始化资源池...")
-        
-        # 1. 获取 MCPPool
-        mcp_pool = get_mcp_pool()
-        
-        # 2. 获取 AgentPool 并预加载原型
-        # 🔧 将预加载放在独立 task 中，隔离 MCP 的 anyio cancel scope
-        # 避免 MCP 连接失败时的 cancel scope 污染后续的 Redis 操作
-        agent_pool = get_agent_pool()
-        
-        async def _isolated_preload():
-            """隔离 MCP cancel scope 的预加载包装"""
-            try:
-                return await agent_pool.preload_all()
-            except asyncio.CancelledError:
-                print("   ⚠️ AgentPool 预加载被取消")
-                return 0
-            except Exception as e:
-                print(f"   ⚠️ AgentPool 预加载出错: {e}")
-                return 0
-        
-        # 在独立 task 中运行，确保 cancel scope 不泄漏到主流程
-        preload_task = asyncio.create_task(_isolated_preload())
-        loaded_count = await preload_task
-        
-        # 短暂等待让事件循环处理任何残留的 cancel scope
-        await asyncio.sleep(0.01)
-        
-        print(f"   ✓ AgentPool: {loaded_count} 个原型已缓存")
-        
-        # 3. 获取 SessionPool
-        session_pool = get_session_pool()
-        
-        # 4. 校准活跃 Session 数据（清理服务重启前的孤立记录）
-        # 使用深度校准，同时清理用户级别的孤立 Session
-        calibration_result = await session_pool.calibrate(deep=True)
-        orphaned = calibration_result.get("orphaned_removed", 0)
-        user_cleaned = calibration_result.get("user_sessions_cleaned", 0)
-        if orphaned > 0 or user_cleaned > 0:
-            print(f"   ✓ SessionPool: 校准完成，清理 {orphaned} 个孤立 Session，{user_cleaned} 个用户级孤立记录")
-        else:
-            print(f"   ✓ SessionPool: 已就绪")
-        
-        # 5. 启动 MCP 后台预连接任务（不阻塞主启动流程）
-        # 使用 asyncio.create_task 在独立任务中执行，避免 anyio cancel scope 问题
-        enable_mcp_preconnect = os.getenv("MCP_ENABLE_PRECONNECT", "true").lower() == "true"
-        if enable_mcp_preconnect:
-            print(f"   ✓ MCPPool: 启动后台预连接...")
-            asyncio.create_task(_mcp_preconnect_background(mcp_pool))
-        else:
-            print(f"   ✓ MCPPool: 已就绪（按需连接模式）")
-        
-        # 6. 启动 MCP 健康检查
-        try:
-            mcp_pool.start_health_check()
-            print(f"   ✓ MCP 健康检查: 已启动")
-        except Exception:
-            print(f"   ⚠️ MCP 健康检查启动跳过")
-        
-        print(f"✅ 资源池初始化完成")
-    except Exception as e:
-        print(f"⚠️ 资源池初始化失败: {e}")
-
-
-async def _cleanup_pools() -> None:
-    """清理资源池"""
-    try:
-        # 1. 清理 MCPPool（停止健康检查，断开连接）
-        mcp_pool = get_mcp_pool()
-        await mcp_pool.cleanup()
-        
-        # 2. 清理 SessionPool
-        session_pool = get_session_pool()
-        await session_pool.cleanup()
-        
-        print("✅ 资源池已清理")
-    except Exception as e:
-        print(f"⚠️ 清理资源池失败: {e}")
-
-
-async def _close_database() -> None:
-    """关闭数据库连接池"""
-    try:
-        from infra.database import engine
-        await engine.dispose()
-        print("✅ 数据库连接已关闭")
-    except Exception as e:
-        print(f"⚠️ 关闭数据库连接失败: {e}")
+    pass
 
 
 # ==================== 生命周期管理 ====================
@@ -462,14 +283,12 @@ async def lifespan(app: FastAPI):
     _setup_asyncio_exception_handler()
     
     await _init_resilience_config()
-    await _init_database()
-    await _init_s3_uploader()
+    await _init_local_store()
     await _preload_capability_registry()  # 🆕 加载工具注册表（必须在 Agent 之前）
     await _preload_agent_registry()  # 加载 Agent 配置
-    await _init_pools()  # 初始化资源池（含 Agent 原型创建和 Session 校准）
     await _init_chat_service()  # 预热 ChatService（避免首次请求冷启动）
-    grpc_server = await _start_grpc_server()
     scheduler = await _start_scheduler()
+    user_task_scheduler = await _start_user_task_scheduler()  # 🆕 用户定时任务调度器
     health_probe_service = await _start_health_probe_service()  # 🆕 V7.10: 启动健康探测
     
     yield
@@ -477,13 +296,11 @@ async def lifespan(app: FastAPI):
     # ===== 关闭阶段 =====
     print("🛑 正在关闭服务...")
     
-    await _cleanup_pools()  # 清理资源池
     await _cleanup_agent_registry()
     await _stop_health_probe_service(health_probe_service)  # 🆕 V7.10: 停止健康探测
+    await _stop_user_task_scheduler(user_task_scheduler)  # 🆕 停止用户任务调度器
     await _stop_scheduler(scheduler)
-    await _stop_grpc_server(grpc_server)
-    await _close_redis()
-    await _close_database()
+    await close_all_workspaces()
     
     print("👋 Zenflux Agent API 已关闭")
 
@@ -520,8 +337,7 @@ app.add_middleware(
 
 # ==================== 路由注册 ====================
 
-# 认证相关
-app.include_router(auth_router)
+# 健康检查
 app.include_router(health_router)
 
 # 核心功能
@@ -532,7 +348,6 @@ app.include_router(human_confirmation_router)
 # 资源管理
 app.include_router(knowledge_router)
 app.include_router(files_router)
-app.include_router(workspace_router)
 app.include_router(tools_router)
 
 # 扩展功能
@@ -542,6 +357,7 @@ app.include_router(agents_router)
 app.include_router(skills_router)
 app.include_router(docs_router)
 app.include_router(models_router)
+app.include_router(settings_router)
 
 # 实时通信（WebSocket）
 app.include_router(realtime_router)
@@ -556,9 +372,6 @@ async def root() -> Dict[str, Any]:
     
     返回 API 基本信息和可用端点
     """
-    enable_grpc = os.getenv("ENABLE_GRPC", "false").lower() == "true"
-    grpc_port = os.getenv("GRPC_PORT", "50051")
-    
     response: Dict[str, Any] = {
         "name": APP_NAME,
         "version": APP_VERSION,
@@ -587,18 +400,6 @@ async def root() -> Dict[str, Any]:
         "github": "https://github.com/your-repo/zenflux-agent"
     }
     
-    # gRPC 信息（如果启用）
-    if enable_grpc:
-        response["protocols"]["grpc"] = {
-            "enabled": True,
-            "port": int(grpc_port),
-            "services": ["ChatService", "SessionService", "ToolService", "AgentService"],
-            "client_example": (
-                f"from services.grpc.client import ZenfluxGRPCClient\n"
-                f"client = ZenfluxGRPCClient('localhost:{grpc_port}')"
-            )
-        }
-    
     return response
 
 
@@ -606,19 +407,23 @@ async def root() -> Dict[str, Any]:
 
 if __name__ == "__main__":
     import uvicorn
+    from utils.app_paths import get_cli_port, is_frozen
+    
+    port = get_cli_port() if is_frozen() else 8000
+    host = "127.0.0.1" if is_frozen() else "0.0.0.0"
     
     print("\n" + "=" * 60)
     print(f"🚀 启动 {APP_NAME}")
     print("=" * 60)
-    print("📍 访问地址: http://localhost:8000")
-    print("📚 API 文档: http://localhost:8000/docs")
-    print("📖 ReDoc: http://localhost:8000/redoc")
+    print(f"📍 访问地址: http://localhost:{port}")
+    print(f"📚 API 文档: http://localhost:{port}/docs")
+    print(f"📖 ReDoc: http://localhost:{port}/redoc")
     print("=" * 60 + "\n")
     
     uvicorn.run(
         "main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
-        log_level="info"
+        host=host,
+        port=port,
+        reload=not is_frozen(),
+        log_level="info",
     )

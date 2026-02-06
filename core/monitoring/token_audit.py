@@ -21,8 +21,6 @@ from typing import Any, Dict, List, Optional
 import aiofiles
 from pydantic import BaseModel, Field
 
-# 使用统一的定价数据源
-from core.billing.pricing_data import CLAUDE_PRICING, get_model_pricing
 from evaluation.models import TokenUsage
 from logger import get_logger
 
@@ -456,110 +454,7 @@ class TokenAuditor:
         # 同样处理其他索引...
         logger.info(f"🧹 清理旧审计记录: 移除 {len(removed)} 条")
 
-    # ============================================================
-    # 计费日志方法
-    # ============================================================
-
-    def _calculate_cost(self, record: TokenAuditRecord) -> Dict[str, float]:
-        """
-        计算单次调用成本（美元）
-
-        Args:
-            record: Token 审计记录
-
-        Returns:
-            成本明细字典
-        """
-        # 获取模型价格
-        model = record.model or "default"
-        # 尝试匹配模型名（支持部分匹配）
-        price = CLAUDE_PRICING.get("default")
-        for key in CLAUDE_PRICING:
-            if key in model.lower() or model.lower() in key:
-                price = CLAUDE_PRICING[key]
-                break
-
-        usage = record.usage
-
-        # 计算各项成本
-        input_cost = (usage.input_tokens / 1_000_000) * price["input"]
-        output_cost = (usage.output_tokens / 1_000_000) * price["output"]
-        thinking_cost = (usage.thinking_tokens / 1_000_000) * price[
-            "output"
-        ]  # thinking 按 output 计费
-        cache_write_cost = (usage.cache_write_tokens / 1_000_000) * price["cache_write"]
-        cache_read_cost = (usage.cache_read_tokens / 1_000_000) * price["cache_read"]
-
-        total_cost = input_cost + output_cost + thinking_cost + cache_write_cost + cache_read_cost
-
-        return {
-            "input": round(input_cost, 6),
-            "output": round(output_cost, 6),
-            "thinking": round(thinking_cost, 6),
-            "cache_write": round(cache_write_cost, 6),
-            "cache_read": round(cache_read_cost, 6),
-            "total": round(total_cost, 6),
-        }
-
-    async def _write_to_log(self, record: TokenAuditRecord):
-        """
-        写入计费日志（JSON Lines 格式，异步）
-
-        日志文件结构：
-        logs/tokens/
-        ├── {user_id}/
-        │   ├── 2026-01-15.jsonl
-        │   └── 2026-01-16.jsonl
-
-        Args:
-            record: Token 审计记录
-        """
-        try:
-            # 计算成本
-            cost = self._calculate_cost(record)
-
-            # 用户目录
-            user_id = record.user_id or "unknown"
-            user_dir = self.log_dir / user_id
-            user_dir.mkdir(exist_ok=True)
-
-            # 日期文件
-            today = datetime.now().strftime("%Y-%m-%d")
-            log_file = user_dir / f"{today}.jsonl"
-
-            # 构建日志记录
-            log_entry = {
-                "timestamp": record.timestamp.isoformat(),
-                "record_id": record.record_id,
-                "session_id": record.session_id,
-                "conversation_id": record.conversation_id,
-                "user_id": record.user_id,
-                "agent_id": record.agent_id,
-                "model": record.model,
-                "turn_number": record.turn_number,
-                "tokens": {
-                    "input": record.usage.input_tokens,
-                    "output": record.usage.output_tokens,
-                    "thinking": record.usage.thinking_tokens,
-                    "cache_read": record.usage.cache_read_tokens,
-                    "cache_write": record.usage.cache_write_tokens,
-                    "total": record.usage.total_tokens,
-                },
-                "cost_usd": cost,
-                "duration_ms": record.duration_ms,
-                "is_anomaly": record.is_anomaly,
-                "anomaly_reason": record.anomaly_reason,
-            }
-
-            # 异步追加写入
-            async with aiofiles.open(log_file, "a", encoding="utf-8") as f:
-                await f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
-
-            logger.debug(f"💰 计费日志: user={user_id}, cost=${cost['total']:.4f}")
-
-        except Exception as e:
-            logger.error(f"❌ 写入计费日志失败: {e}")
-
+ 
 
 # ============================================================
 # 全局实例（单例模式）

@@ -89,7 +89,7 @@ class ToolSelector:
 
     工具分层设计：
     - Level 1（核心工具）：始终加载，如 plan_todo
-    - Level 2（动态工具）：按需加载，如 exa_search, sandbox_run_command
+    - Level 2（动态工具）：按需加载，如 exa_search
 
     使用方式:
         selector = ToolSelector(registry)

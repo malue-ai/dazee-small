@@ -351,57 +351,6 @@ class ContextLimitsConfig(BaseModel):
 
 
 # ============================================================
-# 提示词模板配置（V8.0）
-# ============================================================
-
-
-class PrefaceConfig(BaseModel):
-    """序言（Preface）配置 - Agent 执行前的开场白"""
-
-    enabled: bool = Field(default=True, description="是否启用序言")
-    max_tokens: int = Field(default=150, ge=50, le=500, description="序言最大 token 数")
-    template: str = Field(
-        ..., description="序言模板，支持变量: {intent_info}, {user_message}"  # 必填
-    )
-
-
-DEFAULT_THINKING_GUIDE = """现在，像一个专业但有温度的助手一样，用内心独白的方式简短思考一下这个问题。
-
-要求：
-- 自然、口语化，不要用标题或列表
-- 像在脑子里快速过一遍："嗯，用户想要...我可以..."
-- 100字左右就够了
-- 用用户的语言
-- 不要说"我的思考过程"这种话
-
-直接开始思考："""
-
-
-class SimulatedThinkingConfig(BaseModel):
-    """模拟思考配置 - thinking_mode=simulated 时使用
-
-    V9.1 改进：使用完整上下文的真实思考
-    - 不再使用独立的 system prompt
-    - guide 追加到现有 messages，使用完整的 agent system prompt
-    - 生成的思考基于真实上下文，对后续执行有帮助
-    """
-
-    guide: str = Field(
-        default=DEFAULT_THINKING_GUIDE,
-        description="思考引导 prompt，追加到完整上下文后引导 LLM 输出思考过程",
-    )
-
-
-class PromptsConfig(BaseModel):
-    """提示词模板配置"""
-
-    preface: Optional[PrefaceConfig] = Field(default=None, description="序言配置，启用时必须配置")
-    simulated_thinking: Optional[SimulatedThinkingConfig] = Field(
-        default=None, description="模拟思考配置，thinking_mode=simulated 时必须配置"
-    )
-
-
-# ============================================================
 # Agent Schema - 核心定义
 # ============================================================
 
@@ -497,21 +446,8 @@ class AgentSchema(BaseModel):
         default=None, description="是否启用 Extended Thinking（None 使用默认值）"
     )
 
-    thinking_mode: Literal["native", "simulated", "none"] = Field(
-        default="native",
-        description="思考模式: native=原生Extended Thinking, simulated=模拟思考（单独调用LLM生成用户友好的思考过程）, none=不展示思考",
-    )
-
     enable_caching: Optional[bool] = Field(
         default=None, description="是否启用 Prompt Caching（None 使用默认值）"
-    )
-
-    # ============================================================
-    # 提示词模板（V8.0）
-    # ============================================================
-
-    prompts: Optional[PromptsConfig] = Field(
-        default=None, description="提示词模板配置（preface, simulated_thinking）"
     )
 
     # ============================================================
@@ -561,65 +497,14 @@ class AgentSchema(BaseModel):
             logger.warning("未知模型，可能不受支持", extra={"model": v})
         return v
 
-    @model_validator(mode="after")
-    def validate_prompts_config(self):
-        """
-        验证提示词配置
-
-        - thinking_mode=simulated 时，自动创建默认的 simulated_thinking 配置
-        """
-        # 检查 simulated thinking 配置，自动使用默认值
-        if self.thinking_mode == "simulated":
-            if self.prompts is None:
-                self.prompts = PromptsConfig(simulated_thinking=SimulatedThinkingConfig())
-            elif self.prompts.simulated_thinking is None:
-                self.prompts.simulated_thinking = SimulatedThinkingConfig()
-
-        return self
-
     # ============================================================
-    # 便捷属性（V8.0）- 统一管理所有开关
+    # 便捷属性
     # ============================================================
 
     @property
     def is_intent_analysis_enabled(self) -> bool:
         """意图识别是否启用"""
         return self.intent_analyzer.enabled
-
-    @property
-    def is_preface_enabled(self) -> bool:
-        """开场白是否启用"""
-        return bool(self.prompts and self.prompts.preface and self.prompts.preface.enabled)
-
-    @property
-    def is_simulated_thinking_enabled(self) -> bool:
-        """模拟思考是否启用"""
-        return self.thinking_mode == "simulated"
-
-    @property
-    def preface_template(self) -> Optional[str]:
-        """获取开场白模板"""
-        if self.prompts and self.prompts.preface:
-            return self.prompts.preface.template
-        return None
-
-    @property
-    def preface_max_tokens(self) -> int:
-        """获取开场白最大 token 数"""
-        if self.prompts and self.prompts.preface:
-            return self.prompts.preface.max_tokens
-        return 150  # 默认值
-
-    @property
-    def simulated_thinking_guide(self) -> str:
-        """获取模拟思考引导 prompt
-
-        V9.1: 改为单一的 guide 字段，追加到完整上下文后
-        如果未配置则返回默认值
-        """
-        if self.prompts and self.prompts.simulated_thinking:
-            return self.prompts.simulated_thinking.guide
-        return DEFAULT_THINKING_GUIDE
 
     # ============================================================
     # 转换方法
@@ -662,13 +547,6 @@ class AgentSchema(BaseModel):
             result["enable_thinking"] = self.enable_thinking
         if self.enable_caching is not None:
             result["enable_caching"] = self.enable_caching
-
-        # 🆕 V7.10: thinking_mode 始终包含（有默认值）
-        result["thinking_mode"] = self.thinking_mode
-
-        # 🆕 V8.0: 提示词模板配置
-        if self.prompts is not None:
-            result["prompts"] = self.prompts.dict(exclude_none=True)
 
         return result
 

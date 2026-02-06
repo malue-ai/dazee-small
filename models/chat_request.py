@@ -197,9 +197,9 @@ class ChatOptions(BaseModel):
     """聊天请求选项"""
     # 响应格式
     stream: bool = Field(True, description="是否使用流式输出")
-    event_format: Literal["zeno", "zenflux"] = Field(
-        "zeno",
-        description="事件格式：zeno（ZenO SSE规范）或 zenflux（原始格式）"
+    event_format: Literal["zenflux"] = Field(
+        "zenflux",
+        description="事件格式，默认 zenflux"
     )
     
     # LLM 参数
@@ -243,7 +243,7 @@ class EnhancedChatRequest(BaseModel):
     message: Union[str, Message] = Field(..., description="用户消息（字符串或Message对象）")
     
     # 用户标识
-    user_id: str = Field(..., alias="userId", description="用户ID（必填）")
+    user_id: str = Field("local", alias="userId", description="用户ID（桌面端默认 local）")
     
     # 会话标识
     conversation_id: Optional[str] = Field(
@@ -381,7 +381,7 @@ class EnhancedChatRequest(BaseModel):
                     },
                     "options": {
                         "stream": True,
-                        "event_format": "zeno",
+                        "event_format": "zenflux",
                         "temperature": 0.7,
                         "enable_thinking": True,
                         "enable_memory": True,

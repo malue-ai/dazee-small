@@ -191,7 +191,7 @@ class ToolType(Enum):
     自定义工具:
     - CUSTOM: 用户自定义工具
 
-    注：所有服务器工具已移除，代码执行使用 E2B 沙盒，搜索使用 tavily_search/exa_search
+    注：所有服务器工具已移除，搜索使用 tavily_search/exa_search
     """
 
     # Client Tools

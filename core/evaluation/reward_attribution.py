@@ -374,14 +374,19 @@ class RewardAttribution:
             是否成功
         """
         try:
-            from infra.database import AsyncSessionLocal
-            from infra.database.crud.continuous_learning import (
-                create_session_reward,
-                create_step_rewards_batch,
-            )
-            from infra.database.models.continuous_learning import (
-                AttributionMethod as DBAttributionMethod,
-            )
+            try:
+                from infra.database import AsyncSessionLocal
+                from infra.database.crud.continuous_learning import (
+                    create_session_reward,
+                    create_step_rewards_batch,
+                )
+                from infra.database.models.continuous_learning import (
+                    AttributionMethod as DBAttributionMethod,
+                )
+            except ImportError:
+                # TODO: 迁移到 local_store
+                logger.warning("⚠️ 数据库模块已删除，持久化功能已禁用")
+                return False
 
             async with AsyncSessionLocal() as db_session:
                 # 映射归因方法

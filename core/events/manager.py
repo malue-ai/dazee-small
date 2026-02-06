@@ -33,10 +33,7 @@ class EventManager:
     5. Content 级：内容块（thinking, text, tool_use）
 
     使用示例：
-        events = EventManager(redis)
-
-        # 设置输出格式（可选）
-        events.set_output_format("zeno", conversation_id)
+        events = EventManager(storage)
 
         # Session 级事件
         await events.session.emit_session_start(...)
@@ -87,30 +84,14 @@ class EventManager:
         设置后，所有通过 EventManager 发送的事件都会使用此格式
 
         Args:
-            format: 输出事件格式（zeno/zenflux）
-            conversation_id: 对话 ID（用于 ZenO 格式）
+            format: 输出事件格式
+            conversation_id: 对话 ID
         """
         self._output_format = format
         if conversation_id:
             self._conversation_id = conversation_id
         # 重置适配器，下次使用时会重新创建
         self._adapter = None
-
-    def _get_adapter(self):
-        """
-        获取格式转换适配器（延迟初始化）
-
-        Returns:
-            适配器实例，如果不需要转换则返回 None
-        """
-        if self._output_format != "zeno":
-            return None
-
-        if self._adapter is None:
-            from core.events.adapters.zeno import ZenOAdapter
-
-            self._adapter = ZenOAdapter(conversation_id=self._conversation_id)
-        return self._adapter
 
     @property
     def output_format(self) -> str:
@@ -120,7 +101,7 @@ class EventManager:
     @property
     def adapter(self):
         """获取当前适配器"""
-        return self._get_adapter()
+        return self._adapter
 
 
 def create_event_manager(storage: EventStorage) -> EventManager:
@@ -128,7 +109,7 @@ def create_event_manager(storage: EventStorage) -> EventManager:
     创建 EventManager 实例
 
     Args:
-        storage: 事件存储实现（可以是 Redis、内存、WebSocket 等）
+        storage: 事件存储实现（实现 EventStorage 协议）
 
     Returns:
         EventManager 实例

@@ -1,7 +1,7 @@
 <template>
   <div class="flex flex-col h-full bg-white overflow-hidden">
     <!-- 头部 -->
-    <div class="flex items-center justify-between px-4 py-2.5 border-b border-gray-100 bg-gray-50">
+    <div class="flex items-center justify-between px-4 py-2.5 border-b border-border bg-white">
       <div class="flex items-center gap-2 min-w-0 flex-1">
         <component :is="getFileIcon()" class="w-4 h-4 flex-shrink-0" :class="getIconClass()" />
         <span class="text-xs font-semibold text-gray-700 truncate">{{ fileName }}</span>
@@ -26,7 +26,7 @@
         </button>
         <button 
           @click="$emit('close')" 
-          class="w-7 h-7 flex items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors" 
+          class="w-7 h-7 flex items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors" 
           title="关闭"
         >
           <X class="w-4 h-4" />
@@ -269,20 +269,3 @@ onMounted(() => {
 })
 </script>
 
-<style scoped>
-/* 代码区域滚动条样式 */
-.overflow-auto::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-.overflow-auto::-webkit-scrollbar-track {
-  background: transparent;
-}
-.overflow-auto::-webkit-scrollbar-thumb {
-  background-color: rgba(156, 163, 175, 0.3);
-  border-radius: 3px;
-}
-.overflow-auto::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(156, 163, 175, 0.5);
-}
-</style>

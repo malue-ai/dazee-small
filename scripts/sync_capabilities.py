@@ -58,10 +58,6 @@ async def _build_tool_categories_async() -> Dict[str, Dict]:
             "description": "文档生成技能包 (Claude Skills)",
             "comment": "包含：pptx, xlsx, docx, pdf",
         },
-        "sandbox_tools": {
-            "description": "代码沙盒核心工具 (E2B)",
-            "comment": "4 个核心：写文件、执行命令、创建项目、运行项目",
-        },
         "ppt_tools": {
             "description": "PPT 生成工具",
             "comment": "闭环 PPT 生成",
@@ -113,13 +109,6 @@ TOOL_GROUPS = {
         "defaults": {"ppt_generator": 0},
         "comments": {
             "ppt_generator": "闭环 PPT 生成（SlideSpeak）",
-        }
-    },
-    "代码沙盒类（整体启用）": {
-        "tools": ["sandbox_tools"],
-        "defaults": {"sandbox_tools": 0},
-        "comments": {
-            "sandbox_tools": "包含：文件操作、代码执行、项目运行等全部沙盒工具",
         }
     },
     "动态代码执行": {

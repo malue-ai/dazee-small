@@ -9,7 +9,6 @@ Monitoring - 监控和审计模块
 """
 
 from .token_audit import (
-    CLAUDE_PRICING,
     AuditLevel,
     TokenAuditor,
     TokenAuditRecord,
@@ -33,5 +32,4 @@ __all__ = [
     "get_token_auditor",
     "TokenAuditRecord",
     "AuditLevel",
-    "CLAUDE_PRICING",
 ]

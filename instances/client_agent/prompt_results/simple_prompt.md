@@ -36,7 +36,7 @@
   - `nodes notify`: 发送系统通知
   - `nodes status`: 列出节点状态
   - `nodes which`: 检查可执行文件
-- **sandbox_run_command**: 沙盒中运行 Python/Shell 脚本
+- **run_command**: 运行 Python/Shell 脚本
 - **web_search**: 搜索互联网
 
 ---

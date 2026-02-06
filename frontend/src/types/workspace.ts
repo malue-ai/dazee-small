@@ -31,44 +31,6 @@ export interface FileContentResponse {
   encoding?: string
 }
 
-// ==================== 沙盒类型 ====================
-
-/**
- * 沙盒状态
- */
-export type SandboxStatus = 'none' | 'creating' | 'running' | 'paused' | 'killed'
-
-/**
- * 沙盒技术栈
- */
-export type SandboxStack = 'python' | 'nodejs' | 'react' | 'vue' | 'nextjs' | 'flask' | 'fastapi' | string
-
-/**
- * 沙盒信息
- */
-export interface SandboxInfo {
-  id: string | null
-  e2bSandboxId: string | null
-  status: SandboxStatus
-  stack: SandboxStack | null
-  previewUrl: string | null
-  createdAt: string | null
-  lastActiveAt: string | null
-}
-
-/**
- * 沙盒状态响应
- */
-export interface SandboxStatusResponse {
-  sandbox_id: string
-  e2b_sandbox_id: string
-  status: SandboxStatus
-  stack: SandboxStack | null
-  preview_url: string | null
-  created_at: string
-  last_active_at: string
-}
-
 /**
  * 命令执行结果
  */
@@ -87,7 +49,7 @@ export interface CommandResult {
 export interface ProjectInfo {
   name: string
   path: string
-  type: SandboxStack
+  type: string
   entry_file?: string
   port?: number
   status?: 'stopped' | 'running' | 'error'
@@ -169,12 +131,6 @@ export const WORKSPACE_API_PATHS = {
   PROJECTS: (conversationId: string) => `/v1/workspace/${conversationId}/projects`,
   FILE: (conversationId: string, path: string) => 
     `/v1/workspace/${conversationId}/file?path=${encodeURIComponent(path)}`,
-  SANDBOX_STATUS: (conversationId: string) => `/v1/workspace/${conversationId}/sandbox/status`,
-  SANDBOX_INIT: (conversationId: string) => `/v1/workspace/${conversationId}/sandbox/init`,
-  SANDBOX_PAUSE: (conversationId: string) => `/v1/workspace/${conversationId}/sandbox/pause`,
-  SANDBOX_RESUME: (conversationId: string) => `/v1/workspace/${conversationId}/sandbox/resume`,
-  SANDBOX_KILL: (conversationId: string) => `/v1/workspace/${conversationId}/sandbox/kill`,
-  SANDBOX_COMMAND: (conversationId: string) => `/v1/workspace/${conversationId}/sandbox/command`,
   RUN_PROJECT: (conversationId: string, projectName: string) => 
     `/v1/workspace/${conversationId}/projects/${projectName}/run`,
   STOP_PROJECT: (conversationId: string, projectName: string) => 

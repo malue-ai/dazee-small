@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 import aiofiles
 
 from logger import get_logger
+from utils.app_paths import get_playbooks_dir
 
 logger = get_logger("playbook_storage")
 
@@ -69,8 +70,8 @@ class FileStorage(PlaybookStorageBackend):
       - {id}.json
     """
 
-    def __init__(self, storage_path: str = "./workspace/playbooks"):
-        self.storage_path = Path(storage_path)
+    def __init__(self, storage_path: str = ""):
+        self.storage_path = Path(storage_path) if storage_path else get_playbooks_dir()
         self.storage_path.mkdir(parents=True, exist_ok=True)
         logger.info(f"📁 FileStorage 初始化: path={storage_path}")
 
@@ -141,16 +142,24 @@ class DatabaseStorage(PlaybookStorageBackend):
     async def _get_session(self):
         """获取数据库会话"""
         if self._session_factory is None:
-            from infra.database import AsyncSessionLocal
+            try:
+                from infra.database import AsyncSessionLocal
 
-            self._session_factory = AsyncSessionLocal
+                self._session_factory = AsyncSessionLocal
+            except ImportError:
+                # TODO: 迁移到 local_store
+                raise NotImplementedError("数据库模块已删除，DatabaseStorage 功能已禁用")
 
         return self._session_factory()
 
     async def save(self, entry_id: str, data: Dict[str, Any]) -> None:
         """保存策略到数据库"""
-        from infra.database.crud.continuous_learning import create_playbook, get_playbook
-        from infra.database.models.continuous_learning import PlaybookStatus
+        try:
+            from infra.database.crud.continuous_learning import create_playbook, get_playbook
+            from infra.database.models.continuous_learning import PlaybookStatus
+        except ImportError:
+            # TODO: 迁移到 local_store
+            raise NotImplementedError("数据库模块已删除，DatabaseStorage.save() 功能已禁用")
 
         async with await self._get_session() as session:
             # 检查是否存在
@@ -185,7 +194,11 @@ class DatabaseStorage(PlaybookStorageBackend):
 
     async def load(self, entry_id: str) -> Optional[Dict[str, Any]]:
         """从数据库加载策略"""
-        from infra.database.crud.continuous_learning import get_playbook
+        try:
+            from infra.database.crud.continuous_learning import get_playbook
+        except ImportError:
+            # TODO: 迁移到 local_store
+            raise NotImplementedError("数据库模块已删除，DatabaseStorage.load() 功能已禁用")
 
         async with await self._get_session() as session:
             record = await get_playbook(session, entry_id)
@@ -212,14 +225,22 @@ class DatabaseStorage(PlaybookStorageBackend):
 
     async def delete(self, entry_id: str) -> bool:
         """从数据库删除策略"""
-        from infra.database.crud.continuous_learning import delete_playbook
+        try:
+            from infra.database.crud.continuous_learning import delete_playbook
+        except ImportError:
+            # TODO: 迁移到 local_store
+            raise NotImplementedError("数据库模块已删除，DatabaseStorage.delete() 功能已禁用")
 
         async with await self._get_session() as session:
             return await delete_playbook(session, entry_id)
 
     async def list_all(self) -> List[Dict[str, Any]]:
         """列出所有策略"""
-        from infra.database.crud.continuous_learning import list_playbooks
+        try:
+            from infra.database.crud.continuous_learning import list_playbooks
+        except ImportError:
+            # TODO: 迁移到 local_store
+            raise NotImplementedError("数据库模块已删除，DatabaseStorage.list_all() 功能已禁用")
 
         async with await self._get_session() as session:
             records = await list_playbooks(session)
@@ -247,8 +268,12 @@ class DatabaseStorage(PlaybookStorageBackend):
 
     async def load_index(self) -> Dict[str, Any]:
         """数据库模式从表中动态生成索引"""
-        from infra.database.crud.continuous_learning import get_learning_stats
-        from infra.database.models.continuous_learning import PlaybookStatus
+        try:
+            from infra.database.crud.continuous_learning import get_learning_stats
+            from infra.database.models.continuous_learning import PlaybookStatus
+        except ImportError:
+            # TODO: 迁移到 local_store
+            raise NotImplementedError("数据库模块已删除，DatabaseStorage.load_index() 功能已禁用")
 
         async with await self._get_session() as session:
             stats = await get_learning_stats(session)
@@ -261,7 +286,7 @@ class DatabaseStorage(PlaybookStorageBackend):
 
 
 def create_storage_backend(
-    backend_type: str = None, storage_path: str = "./workspace/playbooks"
+    backend_type: str = None, storage_path: str = ""
 ) -> PlaybookStorageBackend:
     """
     创建存储后端

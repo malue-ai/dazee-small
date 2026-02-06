@@ -120,8 +120,7 @@ AGENT_TEMPLATES = [
             "plan_manager_enabled": False,
             "enabled_capabilities": {
                 "tavily_search": True,
-                "knowledge_search": False,
-                "sandbox_tools": False,
+                "knowledge_search": False,                
                 "code_execution": False,
             },
             "llm": {
@@ -139,7 +138,7 @@ AGENT_TEMPLATES = [
     AgentTemplate(
         id="standard",
         name="标准配置",
-        description="搜索 + 知识库 + 代码沙盒，适合大多数业务场景",
+        description="搜索 + 知识库，适合大多数业务场景",
         icon="⚡",
         config={
             "model": "claude-sonnet-4-5-20250929",
@@ -148,7 +147,6 @@ AGENT_TEMPLATES = [
             "enabled_capabilities": {
                 "tavily_search": True,
                 "knowledge_search": True,
-                "sandbox_tools": True,
                 "code_execution": False,
             },
             "llm": {
@@ -176,7 +174,6 @@ AGENT_TEMPLATES = [
             "enabled_capabilities": {
                 "tavily_search": True,
                 "knowledge_search": True,
-                "sandbox_tools": True,
                 "code_execution": True,
                 "document_skills": True,
             },

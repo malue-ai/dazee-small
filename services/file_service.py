@@ -19,7 +19,8 @@ from typing import Any, Dict, Optional
 import filetype
 
 from logger import get_logger
-from utils import get_s3_uploader
+# TODO: 迁移到 local_store
+# from utils import get_s3_uploader
 
 logger = get_logger("file_service")
 
@@ -93,7 +94,9 @@ class FileService:
 
     def __init__(self) -> None:
         """初始化文件服务"""
-        self.s3_uploader = get_s3_uploader()
+        # TODO: 迁移到 local_store
+        # self.s3_uploader = get_s3_uploader()
+        self.s3_uploader = None  # Stub
 
     async def upload_file(
         self, file_content: bytes, filename: str, mime_type: str, user_id: str
@@ -123,15 +126,17 @@ class FileService:
         storage_path = f"chat-attachments/{user_id}/{date_str}/{unique_id}_{safe_filename}"
 
         try:
+            # TODO: 迁移到 local_store
             # 上传到 S3（使用检测到的 MIME 类型）
-            await self.s3_uploader.upload_bytes(
-                file_content=file_content, object_name=storage_path, content_type=detected_mime
-            )
-
-            # 生成预签名 URL（24小时有效，足够完成对话）
-            file_url = await self.s3_uploader.get_presigned_url(
-                s3_key=storage_path, expires_in=86400  # 24小时
-            )
+            # await self.s3_uploader.upload_bytes(
+            #     file_content=file_content, object_name=storage_path, content_type=detected_mime
+            # )
+            #
+            # # 生成预签名 URL（24小时有效，足够完成对话）
+            # file_url = await self.s3_uploader.get_presigned_url(
+            #     s3_key=storage_path, expires_in=86400  # 24小时
+            # )
+            file_url = f"file://{storage_path}"  # Stub
 
             logger.info(f"✅ 上传成功: {filename}, {file_size}B, {detected_mime}")
 

@@ -10,14 +10,6 @@ from .agent_registry import (
     AgentRegistry,
     get_agent_registry,
 )
-from .auth_service import (
-    AuthService,
-    AuthServiceError,
-    InvalidCredentialsError,
-    TokenExpiredError,
-    TokenInvalidError,
-    get_auth_service,
-)
 from .chat_service import (
     AgentExecutionError,
     ChatService,
@@ -86,6 +78,12 @@ from .tool_service import (  # 工具处理器; 装饰器
     get_tool_service,
     tool,
 )
+from .user_task_scheduler import (
+    UserTaskScheduler,
+    get_user_task_scheduler,
+    start_user_task_scheduler,
+    stop_user_task_scheduler,
+)
 
 __all__ = [
     # Knowledge Service
@@ -143,13 +141,6 @@ __all__ = [
     "MCPNotFoundError",
     "MCPAlreadyExistsError",
     "MCPServiceConnectionError",
-    # Auth Service
-    "AuthService",
-    "get_auth_service",
-    "AuthServiceError",
-    "InvalidCredentialsError",
-    "TokenExpiredError",
-    "TokenInvalidError",
     # Confirmation Service
     "ConfirmationService",
     "get_confirmation_service",
@@ -157,4 +148,9 @@ __all__ = [
     "ConfirmationNotFoundError",
     "ConfirmationExpiredError",
     "ConfirmationResponseError",
+    # User Task Scheduler
+    "UserTaskScheduler",
+    "get_user_task_scheduler",
+    "start_user_task_scheduler",
+    "stop_user_task_scheduler",
 ]

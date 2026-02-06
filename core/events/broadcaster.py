@@ -16,15 +16,15 @@
                               └──→ storage.buffer_event()
                                     │
                                     ├──→ 格式转换（如果需要）
-                                    ├──→ Redis INCR 生成 seq
-                                    └──→ 存入 Redis + Pub/Sub
+                                    ├──→ 自增生成 seq
+                                    └──→ 存入内存 + 通知订阅者
 
 设计说明：
 - 所有事件通过 EventManager 发送（统一入口）
-- seq 在 buffer_event 中统一生成（Redis INCR）
+- seq 在 buffer_event 中统一自增生成
 - 格式转换在 buffer_event 中完成
 - Broadcaster 只负责内部逻辑（累积、持久化）
-- 特殊工具的业务增强由 Adapter 实现（如 ZenOAdapter.enhance_tool_result）
+- 特殊工具的业务增强由 Adapter 实现
 
 使用示例：
     broadcaster = EventBroadcaster(event_manager, conversation_service)
@@ -89,7 +89,7 @@ class EventBroadcaster:
     核心职责：
     - 内容累积（ContentAccumulator）
     - 消息持久化（checkpoint + 最终保存）
-    - 调用 Adapter 的增强方法（如 ZenOAdapter.enhance_tool_result）
+    - 调用 Adapter 的增强方法
 
     支持的事件类型：
     - content_start: 开始一个内容块（text/thinking/tool_use/tool_result）
@@ -104,8 +104,8 @@ class EventBroadcaster:
 
     注意：
     - 所有事件通过 EventManager 发送（统一入口）
-    - seq 在 storage.buffer_event 中统一生成（Redis INCR）
-    - 特殊工具的业务增强由 Adapter 实现（如 ZenOAdapter）
+    - seq 在 storage.buffer_event 中统一自增生成
+    - 特殊工具的业务增强由 Adapter 实现
     """
 
     def __init__(
@@ -122,8 +122,8 @@ class EventBroadcaster:
         Args:
             event_manager: EventManager 实例
             conversation_service: ConversationService 实例（用于持久化）
-            output_format: 输出事件格式（zeno/zenflux），默认 zenflux
-            conversation_id: 对话 ID（用于 ZenO 格式）
+            output_format: 输出事件格式，默认 zenflux
+            conversation_id: 对话 ID
             persistence_strategy: 持久化策略
                 - "realtime": 实时存储，每个 content_stop 都 checkpoint（默认，断点恢复能力强）
                 - "deferred": 延迟存储，只在 message_stop 时保存（减少 DB 写入）
@@ -137,9 +137,6 @@ class EventBroadcaster:
 
         # 🆕 持久化策略
         self.persistence_strategy = PersistenceStrategy(persistence_strategy)
-
-        # ZenO 适配器（延迟初始化）
-        self._zeno_adapter = None
 
         # tool_id -> tool_name 缓存（用于 tool_result 时查找工具名）
         self._tool_id_to_name: Dict[str, str] = {}
@@ -158,35 +155,17 @@ class EventBroadcaster:
 
         logger.debug(f"EventBroadcaster 初始化: persistence_strategy={persistence_strategy}")
 
-    def _get_adapter(self):
-        """
-        获取格式转换适配器（延迟初始化）
-
-        Returns:
-            适配器实例，如果不需要转换则返回 None
-        """
-        if self.output_format != "zeno":
-            return None
-
-        if self._zeno_adapter is None:
-            from core.events.adapters.zeno import ZenOAdapter
-
-            self._zeno_adapter = ZenOAdapter(conversation_id=self.output_conversation_id)
-        return self._zeno_adapter
-
     def set_output_format(self, format: str, conversation_id: str = None) -> None:
         """
         设置输出格式（运行时动态配置）
 
         Args:
-            format: 输出事件格式（zeno/zenflux）
-            conversation_id: 对话 ID（用于 ZenO 格式）
+            format: 输出事件格式
+            conversation_id: 对话 ID
         """
         self.output_format = format
         if conversation_id:
             self.output_conversation_id = conversation_id
-            # 重置适配器以使用新的 conversation_id
-            self._zeno_adapter = None
 
     def set_persistence_strategy(self, strategy: PersistenceStrategyType) -> None:
         """
@@ -293,75 +272,10 @@ class EventBroadcaster:
             content_block=content_block,
             message_id=message_id,
             output_format=self.output_format,
-            adapter=self._get_adapter(),
+            adapter=None,
         )
-
-        # 🆕 V7.7: tool_result 增强处理
-        # - 完整模式（content 有值）：在 content_start 时立即处理
-        # - 流式模式（content 为空）：在 content_stop 时处理
-        if content_block.get("type") == "tool_result":
-            initial_content = content_block.get("content", "")
-            tool_use_id = content_block.get("tool_use_id", "")
-            tool_name = self._tool_id_to_name.get(tool_use_id, "unknown")
-            logger.info(
-                f"🔧 [tool_result] tool_use_id={tool_use_id}, tool_name={tool_name}, has_content={bool(initial_content)}, content_len={len(initial_content) if initial_content else 0}"
-            )
-            if initial_content:
-                # 完整模式：立即调用增强方法
-                tool_result_block = {
-                    "type": "tool_result",
-                    "tool_use_id": tool_use_id,
-                    "content": initial_content,
-                    "is_error": content_block.get("is_error", False),
-                }
-                logger.info(
-                    f"🔧 [tool_result] 完整模式，调用 enhance_tool_result: tool_name={tool_name}"
-                )
-                await self._emit_adapter_enhanced_deltas(session_id, tool_result_block)
-            else:
-                logger.info(f"🔧 [tool_result] 流式模式，等待 content_stop 处理")
 
         return result
-
-    async def _emit_adapter_enhanced_deltas(
-        self, session_id: str, tool_result_block: Dict[str, Any]
-    ) -> None:
-        """
-        调用 adapter 的增强方法，发送额外的 delta 事件
-
-        Args:
-            session_id: Session ID
-            tool_result_block: tool_result 内容块
-        """
-        adapter = self._get_adapter()
-        if not adapter:
-            logger.warning("🔧 [_emit_adapter_enhanced_deltas] adapter 为空，跳过增强")
-            return
-
-        tool_use_id = tool_result_block.get("tool_use_id", "")
-        tool_name = self._tool_id_to_name.get(tool_use_id, "")
-        tool_input = self._tool_id_to_input.get(tool_use_id, {})
-
-        logger.info(
-            f"🔧 [_emit_adapter_enhanced_deltas] tool_use_id={tool_use_id}, tool_name={tool_name}, adapter={adapter.name if hasattr(adapter, 'name') else type(adapter)}"
-        )
-
-        # 调用 adapter 的增强方法（异步），传递实际的 conversation_id
-        deltas = await adapter.enhance_tool_result(
-            tool_name=tool_name,
-            tool_input=tool_input,
-            tool_result=tool_result_block,
-            conversation_id=self.output_conversation_id,
-        )
-
-        # 发送生成的 delta 事件
-        msg_id = self._session_message_ids.get(session_id)
-        for delta in deltas:
-            await self.emit_message_delta(session_id=session_id, delta=delta, message_id=msg_id)
-
-        # 清理工具缓存
-        self._tool_id_to_name.pop(tool_use_id, None)
-        self._tool_id_to_input.pop(tool_use_id, None)
 
     async def _emit_hitl_request_event(self, session_id: str, tool_input: Dict[str, Any]) -> None:
         """
@@ -430,7 +344,7 @@ class EventBroadcaster:
             delta=delta,
             message_id=message_id,
             output_format=self.output_format,
-            adapter=self._get_adapter(),
+            adapter=None,
         )
 
     async def emit_content_stop(
@@ -487,18 +401,8 @@ class EventBroadcaster:
             index=index,
             message_id=message_id,
             output_format=self.output_format,
-            adapter=self._get_adapter(),
+            adapter=None,
         )
-
-        # 🆕 V7.6: tool_result 时调用 adapter 的增强方法生成额外 delta
-        # 必须在 content_stop 时调用，因为 content_start 时 content 是空的
-        if block_ctx and block_ctx.block_type == "tool_result" and block_ctx.tool_result:
-            # 构建完整的 tool_result_block
-            tool_result_block = {
-                **block_ctx.tool_result,
-                "content": block_ctx.tool_result_buffer,  # 使用累积的完整内容
-            }
-            await self._emit_adapter_enhanced_deltas(session_id, tool_result_block)
 
         # 🆕 根据策略决定是否 checkpoint
         # REALTIME: 每个 content_stop 都保存（断点恢复能力强）
@@ -529,7 +433,7 @@ class EventBroadcaster:
             message_id=message_id,
             model=model,
             output_format=self.output_format,
-            adapter=self._get_adapter(),
+            adapter=None,
         )
 
     async def emit_message_delta(
@@ -560,7 +464,7 @@ class EventBroadcaster:
             delta=delta,
             message_id=message_id,
             output_format=self.output_format,
-            adapter=self._get_adapter(),
+            adapter=None,
         )
 
         # 2. 保存到数据库 metadata（增量合并/替换）
@@ -670,7 +574,7 @@ class EventBroadcaster:
             conversation_id=self.output_conversation_id,
             message_id=message_id,
             output_format=self.output_format,
-            adapter=self._get_adapter(),
+            adapter=None,
         )
 
         # 清理 session 状态
@@ -727,7 +631,7 @@ class EventBroadcaster:
             conversation_id=self.output_conversation_id,
             conversation=conversation,
             output_format=self.output_format,
-            adapter=self._get_adapter(),
+            adapter=None,
         )
 
     async def _emit_conversation_delta(
@@ -739,7 +643,7 @@ class EventBroadcaster:
             conversation_id=conversation_id,
             delta=delta,
             output_format=self.output_format,
-            adapter=self._get_adapter(),
+            adapter=None,
         )
 
     async def _emit_error(
@@ -752,7 +656,7 @@ class EventBroadcaster:
             error_type=error_type,
             error_message=error_message,
             output_format=self.output_format,
-            adapter=self._get_adapter(),
+            adapter=None,
         )
 
     async def _emit_custom(
@@ -765,7 +669,7 @@ class EventBroadcaster:
             event_type=event_type,
             event_data=event_data,
             output_format=self.output_format,
-            adapter=self._get_adapter(),
+            adapter=None,
         )
 
     # ===========================================================================
@@ -967,7 +871,7 @@ class EventBroadcaster:
             event_type=event_type,
             event_data=event_data,
             output_format=self.output_format,
-            adapter=self._get_adapter(),
+            adapter=None,
         )
 
 
@@ -983,8 +887,8 @@ def create_broadcaster(
     Args:
         event_manager: EventManager 实例
         conversation_service: ConversationService 实例（用于持久化）
-        output_format: 输出格式（zenflux/zeno），默认 zenflux
-        conversation_id: 对话 ID（用于 ZenO 格式）
+        output_format: 输出格式，默认 zenflux
+        conversation_id: 对话 ID
 
     Returns:
         EventBroadcaster 实例

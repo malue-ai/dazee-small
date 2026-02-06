@@ -76,7 +76,7 @@ class ExecutionContext:
     # 核心依赖
     llm: "BaseLLMService"
     session_id: str
-    conversation_id: str = ""  # 🆕 对话 ID（用于沙盒等需要关联对话的场景）
+    conversation_id: str = ""  # 对话 ID
 
     # 工具相关
     tool_executor: Optional["ToolExecutor"] = None

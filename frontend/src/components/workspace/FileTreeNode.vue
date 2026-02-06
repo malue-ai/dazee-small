@@ -5,15 +5,15 @@
       class="flex items-center gap-1.5 py-1.5 pr-2 cursor-pointer transition-colors group border-l-2"
       :class="[
         isSelected 
-          ? 'bg-blue-50 border-blue-500 text-blue-700' 
-          : 'border-transparent hover:bg-gray-100 text-gray-600',
+          ? 'bg-accent border-primary text-accent-foreground' 
+          : 'border-transparent hover:bg-muted text-muted-foreground',
         isDirectory ? 'font-medium' : ''
       ]"
       :style="{ paddingLeft: (depth * 12 + 12) + 'px' }"
       @click="handleClick"
     >
       <!-- 展开/收起图标 -->
-      <span v-if="isDirectory" class="w-3 h-3 flex items-center justify-center text-gray-400 flex-shrink-0">
+      <span v-if="isDirectory" class="w-3 h-3 flex items-center justify-center text-muted-foreground/50 flex-shrink-0">
         <ChevronDown v-if="isExpanded" class="w-3 h-3" />
         <ChevronRight v-else class="w-3 h-3" />
       </span>
@@ -31,7 +31,7 @@
       </span>
       
       <!-- 文件大小（仅文件） -->
-      <span v-if="!isDirectory && item.size" class="text-[10px] text-gray-400 flex-shrink-0">
+      <span v-if="!isDirectory && item.size" class="text-[10px] text-muted-foreground/50 flex-shrink-0">
         {{ formatSize(item.size) }}
       </span>
       
@@ -39,7 +39,7 @@
       <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
         <button 
           v-if="!isDirectory" 
-          class="p-1 rounded text-gray-400 hover:bg-gray-200 hover:text-gray-600 transition-colors"
+          class="p-1 rounded text-muted-foreground/50 hover:bg-muted hover:text-foreground transition-colors"
           @click.stop="$emit('download', item)"
           title="下载"
         >
@@ -166,7 +166,7 @@ function getIcon() {
 // 获取图标颜色类
 function getIconClass() {
   if (isDirectory.value) {
-    return 'text-blue-500'
+    return 'text-primary'
   }
   
   const ext = fileName.value.split('.').pop()?.toLowerCase()
@@ -191,10 +191,10 @@ function getIconClass() {
     'svg': 'text-orange-400',
     'pdf': 'text-red-500',
     'env': 'text-yellow-600',
-    'lock': 'text-gray-400'
+    'lock': 'text-muted-foreground/50'
   }
   
-  return colorMap[ext || ''] || 'text-gray-400'
+  return colorMap[ext || ''] || 'text-muted-foreground/50'
 }
 
 // 格式化文件大小

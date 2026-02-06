@@ -1,17 +1,17 @@
 <template>
   <div class="px-6 pb-6 pt-2 bg-transparent pointer-events-none sticky bottom-0 z-30">
-    <div class="pointer-events-auto max-w-4xl mx-auto bg-white border border-gray-200 rounded-2xl p-3 shadow-lg transition-all duration-300 focus-within:shadow-xl focus-within:border-gray-300">
+    <div class="pointer-events-auto max-w-4xl mx-auto bg-white border border-border rounded-2xl p-3 shadow-lg transition-all duration-300 focus-within:shadow-xl focus-within:border-primary/30">
       <!-- 已选文件预览 -->
-      <div v-if="selectedFiles.length > 0" class="flex flex-wrap gap-2 px-2 pb-3 border-b border-gray-100 mb-2">
+      <div v-if="selectedFiles.length > 0" class="flex flex-wrap gap-2 px-2 pb-3 border-b border-border mb-2">
         <div 
           v-for="(file, index) in selectedFiles" 
           :key="index" 
-          class="flex items-center gap-2 pl-3 pr-2 py-1.5 bg-gray-50 rounded-lg text-xs font-medium text-gray-700 border border-gray-100 group"
+          class="flex items-center gap-2 pl-3 pr-2 py-1.5 bg-muted rounded-lg text-xs font-medium text-foreground border border-border group"
         >
-          <FileText class="w-4 h-4 text-gray-400" />
+          <FileText class="w-4 h-4 text-muted-foreground/50" />
           <span class="max-w-[150px] truncate">{{ file.file_name }}</span>
           <button 
-            class="p-0.5 rounded-md hover:bg-gray-200 text-gray-400 hover:text-red-500 transition-colors" 
+            class="p-0.5 rounded-md hover:bg-muted text-muted-foreground/50 hover:text-destructive transition-colors" 
             @click="emit('remove-file', index)"
           >
             <X class="w-3.5 h-3.5" />
@@ -22,7 +22,7 @@
       <div class="flex items-end gap-2">
         <!-- 文件上传按钮 -->
         <button 
-          class="p-3 rounded-xl text-gray-400 hover:bg-gray-100 hover:text-gray-900 transition-colors flex-shrink-0" 
+          class="p-3 rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground transition-colors flex-shrink-0" 
           @click="emit('upload-click')"
           :disabled="disabled || uploading"
           title="上传文件"
@@ -42,14 +42,14 @@
           placeholder="输入消息..."
           :disabled="disabled"
           rows="1"
-          class="flex-1 max-h-[200px] py-3 bg-transparent border-none outline-none text-base text-gray-800 placeholder:text-gray-400 resize-none leading-relaxed"
+          class="flex-1 max-h-[200px] py-3 bg-transparent border-none outline-none text-base text-foreground placeholder:text-muted-foreground/50 resize-none leading-relaxed"
         ></textarea>
         
         <div class="pb-1">
           <!-- 停止按钮 -->
           <button 
             v-if="loading" 
-            class="p-3 rounded-xl bg-red-50 text-red-500 hover:bg-red-100 transition-all shadow-sm" 
+            class="p-3 rounded-xl bg-destructive/10 text-destructive hover:bg-destructive/20 transition-all shadow-sm" 
             @click="emit('stop')"
             :disabled="stopping"
           >
@@ -59,7 +59,7 @@
           <button 
             v-else 
             class="p-3 rounded-xl transition-all shadow-sm flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none" 
-            :class="canSend ? 'bg-gray-900 text-white hover:bg-gray-800 hover:shadow-lg' : 'bg-gray-100 text-gray-400 cursor-not-allowed'"
+            :class="canSend ? 'bg-primary text-white hover:bg-primary-hover hover:shadow-lg shadow-primary/20' : 'bg-muted text-muted-foreground/40 cursor-not-allowed'"
             @click="handleSend"
             :disabled="!canSend"
           >
@@ -69,7 +69,7 @@
       </div>
     </div>
     <div class="text-center mt-2">
-      <p class="text-[10px] text-gray-400">AI 可能生成错误信息，请核对重要事实。</p>
+      <p class="text-[10px] text-muted-foreground/50">AI 可能生成错误信息，请核对重要事实。</p>
     </div>
   </div>
 </template>

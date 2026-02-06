@@ -35,7 +35,7 @@ class TrustLevel(str, Enum):
 
     L1_BUILTIN = "L1"  # 内置工具，完全信任
     L2_REVIEWED = "L2"  # 审核过的工具，高信任
-    L3_SANDBOX = "L3"  # 沙箱执行，中等信任
+    L3_RESTRICTED = "L3"  # 受限执行，中等信任
     L4_MCP = "L4"  # MCP 远程调用，外部信任
 
 
@@ -43,7 +43,7 @@ class ExecutionMode(str, Enum):
     """执行模式"""
 
     DIRECT = "direct"  # 直接执行（仅限 L1/L2）
-    SANDBOX = "sandbox"  # E2B 沙箱执行
+    RESTRICTED = "restricted"  # 受限环境执行
     THREAD_POOL = "thread_pool"  # 线程池（同步代码包装）
     MCP = "mcp"  # MCP 远程调用
 
@@ -58,8 +58,8 @@ class ValidationResult:
     """验证结果"""
 
     valid: bool
-    trust_level: TrustLevel = TrustLevel.L3_SANDBOX
-    execution_mode: ExecutionMode = ExecutionMode.SANDBOX
+    trust_level: TrustLevel = TrustLevel.L3_RESTRICTED
+    execution_mode: ExecutionMode = ExecutionMode.RESTRICTED
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
 
@@ -365,7 +365,7 @@ class ToolValidator:
         return len(errors) == 0, errors
 
     def validate_code(
-        self, code: str, trust_level: TrustLevel = TrustLevel.L3_SANDBOX
+        self, code: str, trust_level: TrustLevel = TrustLevel.L3_RESTRICTED
     ) -> ValidationResult:
         """
         验证工具代码
@@ -452,7 +452,7 @@ class ToolValidator:
 
                 # 未知模块
                 else:
-                    result.add_warning(f"未知模块: {module}（将在沙箱中验证）")
+                    result.add_warning(f"未知模块: {module}（将在受限环境中验证）")
 
     def _determine_execution_mode(self, result: ValidationResult) -> ExecutionMode:
         """确定执行模式"""
@@ -464,8 +464,8 @@ class ToolValidator:
         if result.trust_level == TrustLevel.L4_MCP:
             return ExecutionMode.MCP
 
-        # L3 在沙箱执行
-        return ExecutionMode.SANDBOX
+        # L3 在受限环境执行
+        return ExecutionMode.RESTRICTED
 
     def validate_function(self, func: Callable) -> ValidationResult:
         """

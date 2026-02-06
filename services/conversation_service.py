@@ -7,17 +7,17 @@ Conversation 服务层 - 对话管理业务逻辑
 3. 返回 Pydantic 模型
 
 设计原则：
-- Service 层只调用 crud.xxx() 函数
-- 不直接写 SQLAlchemy 查询
-- 不直接导入数据库模型
+- Service 层只调用 local_store.crud.xxx() 函数
+- 使用 SQLite 本地存储
 """
 
 import json
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from infra.database import AsyncSessionLocal, crud
+from infra.local_store import get_workspace, crud as local_crud
+from infra.local_store.engine import get_local_session_factory
 from logger import get_logger
 from models.database import Conversation, Message
 
@@ -42,16 +42,16 @@ class ConversationService:
 
     提供对话和消息的完整生命周期管理
 
-    注意：所有数据库操作都通过 crud 层完成
+    注意：所有数据库操作都通过 local_store.crud 层完成
     """
 
     @staticmethod
     def _parse_metadata(metadata: Any) -> dict:
         """
-        解析 metadata 为字典（从 JSONB 字段）
+        解析 metadata 为字典
 
         Args:
-            metadata: JSONB 字段（可能是 dict 或 JSON 字符串）
+            metadata: 可能是 dict 或 JSON 字符串
 
         Returns:
             字典对象
@@ -83,16 +83,14 @@ class ConversationService:
             user_id: 用户ID
             title: 对话标题
             metadata: 对话元数据
-            conversation_id: 可选的对话 ID（如果不提供则自动生成，
-                           用于前端传入的 conversation_id 不存在时保持 ID 一致）
+            conversation_id: 可选的对话 ID
 
         Returns:
             创建的对话对象（Pydantic 模型）
         """
-        async with AsyncSessionLocal() as session:
-            # 确保用户存在
-            await crud.get_or_create_user(session, user_id=user_id)
-            db_conv = await crud.create_conversation(
+        factory = await get_local_session_factory()
+        async with factory() as session:
+            db_conv = await local_crud.create_conversation(
                 session=session,
                 user_id=user_id,
                 title=title,
@@ -102,26 +100,14 @@ class ConversationService:
 
             logger.info(f"✅ 对话创建成功: id={db_conv.id}, user_id={user_id}")
 
-            # 处理 extra_data 可能是 JSON 字符串的情况
-            metadata = db_conv.extra_data
-            if isinstance(metadata, str):
-                try:
-                    metadata = json.loads(metadata) if metadata else {}
-                except json.JSONDecodeError:
-                    logger.warning(f"对话 {db_conv.id} 的 metadata 解析失败，使用空字典")
-                    metadata = {}
-            elif metadata is None:
-                metadata = {}
-
-            # 转换为 Pydantic 模型
             return Conversation(
                 id=db_conv.id,
                 user_id=db_conv.user_id,
                 title=db_conv.title,
-                status=db_conv.status,
+                status=db_conv.status or "active",
                 created_at=db_conv.created_at,
                 updated_at=db_conv.updated_at,
-                metadata=metadata,
+                metadata=self._parse_metadata(db_conv.metadata_json),
             )
 
     async def get_conversation(self, conversation_id: str) -> Conversation:
@@ -137,31 +123,21 @@ class ConversationService:
         Raises:
             ConversationNotFoundError: 对话不存在
         """
-        async with AsyncSessionLocal() as session:
-            db_conv = await crud.get_conversation(session, conversation_id)
+        factory = await get_local_session_factory()
+        async with factory() as session:
+            db_conv = await local_crud.get_conversation(session, conversation_id)
 
         if not db_conv:
             raise ConversationNotFoundError(f"对话不存在: {conversation_id}")
-
-        # 处理 extra_data 可能是 JSON 字符串的情况
-        metadata = db_conv.extra_data
-        if isinstance(metadata, str):
-            try:
-                metadata = json.loads(metadata) if metadata else {}
-            except json.JSONDecodeError:
-                logger.warning(f"对话 {conversation_id} 的 metadata 解析失败，使用空字典")
-                metadata = {}
-        elif metadata is None:
-            metadata = {}
 
         return Conversation(
             id=db_conv.id,
             user_id=db_conv.user_id,
             title=db_conv.title,
-            status=db_conv.status,
+            status=db_conv.status or "active",
             created_at=db_conv.created_at,
             updated_at=db_conv.updated_at,
-            metadata=metadata,
+            metadata=self._parse_metadata(db_conv.metadata_json),
         )
 
     async def get_or_create_conversation(
@@ -172,23 +148,20 @@ class ConversationService:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> tuple[Conversation, bool]:
         """
-        获取或创建对话（单次 DB 操作，优化性能）
+        获取或创建对话
 
         Args:
-            user_id: 用户 ID
-            conversation_id: 对话 ID（可选，不提供则自动生成）
-            title: 对话标题（仅在创建时使用）
-            metadata: 对话元数据（仅在创建时使用）
+            user_id: 用户ID
+            conversation_id: 对话ID（可选）
+            title: 标题（仅创建时使用）
+            metadata: 元数据（仅创建时使用）
 
         Returns:
-            (Conversation, is_new) - 对话对象和是否新创建标志
+            (对话对象, 是否新创建)
         """
-        async with AsyncSessionLocal() as session:
-            # 确保用户存在
-            await crud.get_or_create_user(session, user_id=user_id)
-
-            # 调用 crud 层函数
-            db_conv, is_new = await crud.get_or_create_conversation(
+        factory = await get_local_session_factory()
+        async with factory() as session:
+            db_conv, is_new = await local_crud.get_or_create_conversation(
                 session=session,
                 user_id=user_id,
                 conversation_id=conversation_id,
@@ -197,47 +170,28 @@ class ConversationService:
             )
 
             if is_new:
-                logger.info(f"✅ 新对话已创建: id={db_conv.id}, user_id={user_id}")
+                logger.info(f"✅ 对话创建成功: id={db_conv.id}, user_id={user_id}")
             else:
-                logger.debug(f"✅ 对话已存在: id={db_conv.id}")
+                logger.debug(f"📂 使用已有对话: id={db_conv.id}")
 
-            return self._db_to_model(db_conv), is_new
-
-    def _db_to_model(self, db_conv) -> Conversation:
-        """
-        将数据库对象转换为 Pydantic 模型（内部工具方法）
-
-        Args:
-            db_conv: 数据库对话对象
-
-        Returns:
-            Conversation Pydantic 模型
-        """
-        metadata = db_conv.extra_data
-        if isinstance(metadata, str):
-            try:
-                metadata = json.loads(metadata) if metadata else {}
-            except json.JSONDecodeError:
-                logger.warning(f"对话 {db_conv.id} 的 metadata 解析失败，使用空字典")
-                metadata = {}
-        elif metadata is None:
-            metadata = {}
-
-        return Conversation(
-            id=db_conv.id,
-            user_id=db_conv.user_id,
-            title=db_conv.title,
-            status=db_conv.status,
-            created_at=db_conv.created_at,
-            updated_at=db_conv.updated_at,
-            metadata=metadata,
-        )
+            return Conversation(
+                id=db_conv.id,
+                user_id=db_conv.user_id,
+                title=db_conv.title,
+                status=db_conv.status or "active",
+                created_at=db_conv.created_at,
+                updated_at=db_conv.updated_at,
+                metadata=self._parse_metadata(db_conv.metadata_json),
+            ), is_new
 
     async def list_conversations(
-        self, user_id: str, limit: int = 20, offset: int = 0
+        self,
+        user_id: str,
+        limit: int = 20,
+        offset: int = 0,
     ) -> Dict[str, Any]:
         """
-        获取用户的对话列表（带统计信息）
+        获取对话列表
 
         Args:
             user_id: 用户ID
@@ -245,106 +199,269 @@ class ConversationService:
             offset: 偏移量
 
         Returns:
-            {"conversations": [...], "total": int, "limit": int, "offset": int}
+            包含 conversations, total, limit, offset 的字典
         """
-        async with AsyncSessionLocal() as session:
-            # 获取总数
-            total = await crud.count_conversations(session, user_id)
-
-            # 获取对话列表（带统计）
-            conversations = await crud.list_conversations_with_stats(
-                session=session, user_id=user_id, limit=limit, offset=offset
+        factory = await get_local_session_factory()
+        async with factory() as session:
+            total = await local_crud.count_conversations(session, user_id)
+            conversations = await local_crud.list_conversations(
+                session=session,
+                user_id=user_id,
+                limit=limit,
+                offset=offset,
             )
 
-        logger.info(
-            f"✅ 获取对话列表: user_id={user_id}, total={total}, returned={len(conversations)}"
-        )
+            items = [
+                Conversation(
+                    id=conv.id,
+                    user_id=conv.user_id,
+                    title=conv.title,
+                    status=conv.status or "active",
+                    created_at=conv.created_at,
+                    updated_at=conv.updated_at,
+                    metadata=self._parse_metadata(conv.metadata_json),
+                )
+                for conv in conversations
+            ]
 
-        return {"conversations": conversations, "total": total, "limit": limit, "offset": offset}
+            return {
+                "conversations": items,
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            }
 
     async def update_conversation(
         self,
         conversation_id: str,
         title: Optional[str] = None,
+        status: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Conversation:
         """
-        更新对话信息
+        更新对话
 
         Args:
             conversation_id: 对话ID
-            title: 新标题（可选）
-            metadata: 新元数据（可选）
+            title: 新标题
+            status: 新状态
+            metadata: 新元数据
 
         Returns:
             更新后的对话对象
-
-        Raises:
-            ConversationNotFoundError: 对话不存在
         """
-        async with AsyncSessionLocal() as session:
-            db_conv = await crud.update_conversation(
-                session=session, conversation_id=conversation_id, title=title, metadata=metadata
-            )
-
-            if not db_conv:
-                raise ConversationNotFoundError(f"对话不存在: {conversation_id}")
-
-            logger.info(f"✅ 对话更新成功: id={conversation_id}")
-
-            # 处理 extra_data 可能是 JSON 字符串的情况
-            metadata = db_conv.extra_data
-            if isinstance(metadata, str):
-                try:
-                    metadata = json.loads(metadata) if metadata else {}
-                except json.JSONDecodeError:
-                    logger.warning(f"对话 {conversation_id} 的 metadata 解析失败，使用空字典")
-                    metadata = {}
-            elif metadata is None:
-                metadata = {}
-
-            return Conversation(
-                id=db_conv.id,
-                user_id=db_conv.user_id,
-                title=db_conv.title,
-                status=db_conv.status,
-                created_at=db_conv.created_at,
-                updated_at=db_conv.updated_at,
+        factory = await get_local_session_factory()
+        async with factory() as session:
+            db_conv = await local_crud.update_conversation(
+                session=session,
+                conversation_id=conversation_id,
+                title=title,
+                status=status,
                 metadata=metadata,
             )
 
-    async def delete_conversation(self, conversation_id: str) -> Dict[str, Any]:
+        if not db_conv:
+            raise ConversationNotFoundError(f"对话不存在: {conversation_id}")
+
+        logger.info(f"✅ 对话更新成功: id={conversation_id}")
+
+        return Conversation(
+            id=db_conv.id,
+            user_id=db_conv.user_id,
+            title=db_conv.title,
+            status=db_conv.status or "active",
+            created_at=db_conv.created_at,
+            updated_at=db_conv.updated_at,
+            metadata=self._parse_metadata(db_conv.metadata_json),
+        )
+
+    async def delete_conversation(self, conversation_id: str) -> bool:
         """
-        删除对话（同时删除所有消息）
+        删除对话
 
         Args:
             conversation_id: 对话ID
 
         Returns:
-            {"conversation_id": str, "deleted": bool, "deleted_messages": int}
-
-        Raises:
-            ConversationNotFoundError: 对话不存在
+            是否删除成功
         """
-        # 先检查对话是否存在
-        await self.get_conversation(conversation_id)
+        factory = await get_local_session_factory()
+        async with factory() as session:
+            success = await local_crud.delete_conversation(session, conversation_id)
 
-        async with AsyncSessionLocal() as session:
-            # 统计消息数量
-            message_count = await crud.count_messages_in_conversation(session, conversation_id)
+        if success:
+            logger.info(f"✅ 对话删除成功: id={conversation_id}")
+        else:
+            logger.warning(f"⚠️ 对话删除失败或不存在: id={conversation_id}")
 
-            # 删除对话（消息会被级联删除）
-            success = await crud.delete_conversation(session, conversation_id)
+        return success
 
-        logger.info(f"✅ 对话删除成功: id={conversation_id}, deleted_messages={message_count}")
+    # ==================== 消息 CRUD ====================
 
-        return {
-            "conversation_id": conversation_id,
-            "deleted": success,
-            "deleted_messages": message_count,
-        }
+    async def list_messages(
+        self,
+        conversation_id: str,
+        limit: int = 100,
+        offset: int = 0,
+        order: str = "asc",
+    ) -> Dict[str, Any]:
+        """
+        获取消息列表
 
-    # ==================== 历史消息查询 ====================
+        Args:
+            conversation_id: 对话ID
+            limit: 每页数量
+            offset: 偏移量
+            order: 排序方式 (asc/desc)
+
+        Returns:
+            包含 items, total, limit, offset 的字典
+        """
+        factory = await get_local_session_factory()
+        async with factory() as session:
+            messages = await local_crud.list_messages(
+                session=session,
+                conversation_id=conversation_id,
+                limit=limit,
+                offset=offset,
+                order=order,
+            )
+
+            items = []
+            for msg in messages:
+                # content_json 是 DB 中的原始 JSON 字符串，Message.content 类型为 str
+                # 注意：msg.content 是 @property 会解析为 list，不能直接用
+                items.append(Message(
+                    id=msg.id,
+                    conversation_id=msg.conversation_id,
+                    role=msg.role,
+                    content=msg.content_json or "[]",
+                    status=msg.status or "completed",
+                    created_at=msg.created_at,
+                    metadata=self._parse_metadata(msg.metadata_json),
+                ))
+
+            return {
+                "items": items,
+                "total": len(items),
+                "limit": limit,
+                "offset": offset,
+            }
+
+    async def create_message(
+        self,
+        conversation_id: str,
+        role: str,
+        content: Any,
+        message_id: Optional[str] = None,
+        status: str = "completed",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Message:
+        """
+        创建消息
+
+        Args:
+            conversation_id: 对话ID
+            role: 角色 (user/assistant)
+            content: 消息内容
+            message_id: 可选的消息ID
+            status: 消息状态
+            metadata: 元数据
+
+        Returns:
+            创建的消息对象
+        """
+        # 序列化 content
+        if isinstance(content, (list, dict)):
+            content_str = json.dumps(content, ensure_ascii=False)
+        else:
+            content_str = str(content) if content else ""
+
+        factory = await get_local_session_factory()
+        async with factory() as session:
+            db_msg = await local_crud.create_message(
+                session=session,
+                conversation_id=conversation_id,
+                role=role,
+                content=content_str,
+                message_id=message_id,
+                status=status,
+                metadata=metadata,
+            )
+
+            # 更新对话的 updated_at
+            await local_crud.update_conversation(
+                session=session,
+                conversation_id=conversation_id,
+            )
+
+            logger.debug(f"✅ 消息创建成功: id={db_msg.id}, role={role}")
+
+            # content_str 已序列化为 JSON 字符串，Message.content 类型为 str
+            return Message(
+                id=db_msg.id,
+                conversation_id=db_msg.conversation_id,
+                role=db_msg.role,
+                content=content_str or "[]",
+                status=db_msg.status or "completed",
+                created_at=db_msg.created_at,
+                metadata=self._parse_metadata(db_msg.metadata_json),
+            )
+
+    async def update_message(
+        self,
+        message_id: str,
+        content: Optional[Any] = None,
+        status: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Message]:
+        """
+        更新消息
+
+        Args:
+            message_id: 消息ID
+            content: 新内容
+            status: 新状态
+            metadata: 新元数据
+
+        Returns:
+            更新后的消息对象，如果不存在返回 None
+        """
+        # 序列化 content
+        content_str = None
+        if content is not None:
+            if isinstance(content, (list, dict)):
+                content_str = json.dumps(content, ensure_ascii=False)
+            else:
+                content_str = str(content)
+
+        factory = await get_local_session_factory()
+        async with factory() as session:
+            db_msg = await local_crud.update_message(
+                session=session,
+                message_id=message_id,
+                content=content_str,
+                status=status,
+                metadata=metadata,
+            )
+
+        if not db_msg:
+            logger.warning(f"⚠️ 消息不存在: id={message_id}")
+            return None
+
+        logger.debug(f"✅ 消息更新成功: id={message_id}")
+
+        # content_json 是 DB 中的原始 JSON 字符串，Message.content 类型为 str
+        # 注意：db_msg.content 是 @property 会解析为 list，不能直接用
+        return Message(
+            id=db_msg.id,
+            conversation_id=db_msg.conversation_id,
+            role=db_msg.role,
+            content=db_msg.content_json or "[]",
+            status=db_msg.status or "completed",
+            created_at=db_msg.created_at,
+            metadata=self._parse_metadata(db_msg.metadata_json),
+        )
 
     async def get_conversation_messages(
         self,
@@ -355,274 +472,179 @@ class ConversationService:
         before_cursor: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        获取对话的历史消息（支持游标分页）
+        获取对话历史消息（支持游标分页）
 
         Args:
             conversation_id: 对话ID
             limit: 每页数量
-            offset: 偏移量（当 before_cursor 为 None 时使用）
-            order: 排序方式（asc/desc）
+            offset: 偏移量
+            order: 排序方式 (asc/desc)
             before_cursor: 游标（message_id），获取此消息之前的消息
 
         Returns:
-            {"conversation_id": str, "conversation_metadata": dict, "messages": [...], "total": int, ...}
-
-        Raises:
-            ConversationNotFoundError: 对话不存在
+            包含 messages, conversation_metadata, total, has_more, next_cursor 的字典
         """
-        # 获取对话信息（同时验证对话是否存在）
-        conversation = await self.get_conversation(conversation_id)
+        factory = await get_local_session_factory()
+        async with factory() as session:
+            # 获取对话信息（同时验证对话是否存在）
+            conv = await local_crud.get_conversation(session, conversation_id)
+            if not conv:
+                raise ConversationNotFoundError(f"对话不存在: {conversation_id}")
 
-        async with AsyncSessionLocal() as session:
-            # 获取总数
-            total = await crud.count_messages_in_conversation(session, conversation_id)
-
-            # 获取消息列表（支持游标分页）
-            db_messages = await crud.list_messages(
+            # 多取 1 条用于判断 has_more
+            messages = await local_crud.list_messages(
                 session=session,
                 conversation_id=conversation_id,
-                limit=limit,
+                limit=limit + 1,
                 offset=offset,
                 order=order,
                 before_cursor=before_cursor,
             )
 
-            # 转换为字典列表
-            messages = []
-            for db_msg in db_messages:
-                # content 是 JSONB 类型，ORM 返回 list，无需 json.loads
-                content = db_msg.content if db_msg.content else []
+            has_more = len(messages) > limit
+            if has_more:
+                messages = messages[:limit]
 
-                # 处理 extra_data 可能是 JSON 字符串的情况
-                metadata = db_msg.extra_data
-                if isinstance(metadata, str):
-                    try:
-                        metadata = json.loads(metadata) if metadata else {}
-                    except json.JSONDecodeError:
-                        logger.warning(f"消息 {db_msg.id} 的 metadata 解析失败，使用空字典")
-                        metadata = {}
-                elif metadata is None:
-                    metadata = {}
-
-                messages.append(
-                    {
-                        "id": db_msg.id,
-                        "conversation_id": db_msg.conversation_id,
-                        "role": db_msg.role,
-                        "content": content,
-                        "status": db_msg.status,
-                        "created_at": db_msg.created_at.isoformat() if db_msg.created_at else None,
-                        "metadata": metadata,
-                    }
+            items = [
+                Message(
+                    id=msg.id,
+                    conversation_id=msg.conversation_id,
+                    role=msg.role,
+                    content=msg.content_json or "[]",
+                    status=msg.status or "completed",
+                    created_at=msg.created_at,
+                    metadata=self._parse_metadata(msg.metadata_json),
                 )
+                for msg in messages
+            ]
 
-        # 计算是否有更多消息
-        if before_cursor:
-            # 游标分页：如果返回的消息数量等于 limit，可能还有更多
-            has_more = len(messages) == limit
-        else:
-            # offset 分页
-            has_more = (offset + len(messages)) < total
+            # 计算 next_cursor（最早消息的 ID，用于下次加载更早的消息）
+            next_cursor = items[0].id if has_more and items else None
 
-        # 计算下一个游标（最早的消息 ID）
-        next_cursor = messages[0]["id"] if messages and len(messages) == limit else None
+            # 构建 conversation_metadata
+            conv_metadata = self._parse_metadata(conv.metadata_json)
 
-        logger.info(
-            f"✅ 获取历史消息: conversation_id={conversation_id}, "
-            f"total={total}, returned={len(messages)}, has_more={has_more}, "
-            f"before_cursor={before_cursor}, next_cursor={next_cursor}"
-        )
+            return {
+                "conversation_id": conversation_id,
+                "conversation_metadata": conv_metadata,
+                "messages": items,
+                "total": len(items),
+                "limit": limit,
+                "offset": offset,
+                "has_more": has_more,
+                "next_cursor": next_cursor,
+            }
 
-        return {
-            "conversation_id": conversation_id,
-            "conversation_metadata": conversation.metadata,
-            "messages": messages,
-            "total": total,
-            "limit": limit,
-            "offset": offset,
-            "has_more": has_more,
-            "next_cursor": next_cursor,
-        }
-
-    async def add_message(
+    async def search_conversations(
         self,
-        conversation_id: str,
-        role: str,
-        content: str,
-        status: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        message_id: Optional[str] = None,
-    ) -> Message:
+        user_id: str,
+        query: str,
+        limit: int = 20,
+    ) -> Dict[str, Any]:
         """
-        添加消息到对话
+        搜索对话（标题匹配 + 消息全文搜索）
+
+        同时搜索对话标题和消息内容，合并去重后返回。
 
         Args:
-            conversation_id: 对话ID
-            role: 角色（user/assistant/system）
-            content: 消息内容（JSON 数组格式）
-            status: 消息状态
-            metadata: 消息元数据
-            message_id: 消息ID（可选）
+            user_id: 用户ID
+            query: 搜索关键词
+            limit: 返回数量
 
         Returns:
-            创建的消息对象
+            包含 conversations 和 total 的字典
         """
-        msg_id = message_id or str(uuid4())
-        now = datetime.now()
+        if not query or not query.strip():
+            return {"conversations": [], "total": 0}
 
-        async with AsyncSessionLocal() as session:
-            await crud.create_message(
-                session=session,
-                conversation_id=conversation_id,
-                role=role,
-                content=content,
-                message_id=msg_id,
-                status=status,
-                metadata=metadata,
+        factory = await get_local_session_factory()
+        async with factory() as session:
+            from sqlalchemy import select
+            from infra.local_store.models import LocalConversation
+            from infra.local_store.fts import search_messages
+
+            # 1. 标题模糊搜索
+            keyword = f"%{query.strip()}%"
+            title_result = await session.execute(
+                select(LocalConversation)
+                .where(
+                    LocalConversation.user_id == user_id,
+                    LocalConversation.title.ilike(keyword),
+                )
+                .order_by(LocalConversation.updated_at.desc())
+                .limit(limit)
+            )
+            title_matches = list(title_result.scalars().all())
+
+            # 2. 消息内容全文搜索（FTS5）
+            fts_results = await search_messages(
+                session, query.strip(), limit=limit * 2
             )
 
-            # 更新对话的 updated_at
-            await crud.update_conversation(session=session, conversation_id=conversation_id)
+            # 按 conversation_id 分组，取每个对话最相关的片段
+            fts_conv_map: Dict[str, str] = {}
+            for r in fts_results:
+                if r.conversation_id not in fts_conv_map:
+                    # 截取片段（最多 80 字符）
+                    snippet = r.text_content[:80].replace("\n", " ")
+                    fts_conv_map[r.conversation_id] = snippet
 
-        # 日志
-        status_info = f", status={status}" if status else ""
-
-        logger.info(
-            f"✅ 消息添加成功: id={msg_id}, conversation_id={conversation_id}, "
-            f"role={role}{status_info}"
-        )
-
-        return Message(
-            id=msg_id,
-            conversation_id=conversation_id,
-            role=role,
-            content=content,
-            status=status,
-            created_at=now,
-            metadata=metadata or {},
-        )
-
-    async def update_message(
-        self,
-        message_id: str,
-        content: Optional[str] = None,
-        status: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> Message:
-        """
-        更新消息内容
-
-        Args:
-            message_id: 消息ID
-            content: 消息内容
-            status: 消息状态
-            metadata: 元数据（合并更新）
-
-        Returns:
-            更新后的消息对象
-        """
-        logger.debug(
-            f"🔧 [DB_DEBUG] update_message 开始: message_id={message_id}, has_content={content is not None}, status={status}, metadata_keys={list(metadata.keys()) if metadata else None}"
-        )
-
-        async with AsyncSessionLocal() as session:
-            logger.debug(f"🔧 [DB_DEBUG] 获取数据库会话成功")
-
-            # 先获取现有消息
-            db_msg = await crud.get_message(session, message_id)
-            logger.debug(
-                f"🔧 [DB_DEBUG] 查询消息: message_id={message_id}, found={db_msg is not None}"
-            )
-
-            if not db_msg:
-                logger.error(f"❌ [DB_DEBUG] 消息不存在: message_id={message_id}")
-                raise ValueError(f"消息不存在: id={message_id}")
-
-            # 🔥 修复：确保 existing_metadata 是字典（从数据库读取可能是字符串）
-            import json
-
-            existing_metadata = db_msg.extra_data or {}
-            if isinstance(existing_metadata, str):
-                try:
-                    existing_metadata = json.loads(existing_metadata)
-                except json.JSONDecodeError:
-                    existing_metadata = {}
-            elif not isinstance(existing_metadata, dict):
-                existing_metadata = {}
-
-            # 合并 metadata
-            if metadata:
-                existing_metadata.update(metadata)
-                logger.debug(
-                    f"🔧 [DB_DEBUG] metadata 合并后: keys={list(existing_metadata.keys())}"
-                )
-
-            # 更新消息
-            logger.debug(
-                f"🔧 [DB_DEBUG] 准备调用 crud.update_message: message_id={message_id}, has_content={content is not None}, status={status}"
-            )
-            try:
-                updated_msg = await crud.update_message(
-                    session=session,
-                    message_id=message_id,
-                    content=content,
-                    status=status,
-                    metadata=existing_metadata,
-                )
-                logger.debug(
-                    f"🔧 [DB_DEBUG] crud.update_message 返回: updated_msg={updated_msg is not None}"
-                )
-                if updated_msg:
-                    logger.debug(
-                        f"🔧 [DB_DEBUG] 更新后消息详情: id={updated_msg.id}, role={updated_msg.role}, status={updated_msg.status}, content_type={type(updated_msg.content).__name__}"
+            # 查询 FTS 命中的对话（只取属于该用户的）
+            fts_conv_ids = list(fts_conv_map.keys())
+            content_matches = []
+            if fts_conv_ids:
+                content_result = await session.execute(
+                    select(LocalConversation)
+                    .where(
+                        LocalConversation.id.in_(fts_conv_ids),
+                        LocalConversation.user_id == user_id,
                     )
-            except Exception as db_err:
-                logger.error(
-                    f"❌ [DB_DEBUG] crud.update_message 失败: message_id={message_id}, error={db_err}",
-                    exc_info=True,
+                    .order_by(LocalConversation.updated_at.desc())
                 )
-                raise
+                content_matches = list(content_result.scalars().all())
 
-        # 日志
-        status_info = f", status={status}" if status else ""
+            # 3. 合并去重（标题匹配优先）
+            seen_ids = set()
+            merged = []
 
-        logger.info(f"✅ 消息更新成功: id={message_id}{status_info}")
+            for conv in title_matches:
+                if conv.id not in seen_ids:
+                    seen_ids.add(conv.id)
+                    merged.append({
+                        "conversation": Conversation(
+                            id=conv.id,
+                            user_id=conv.user_id,
+                            title=conv.title,
+                            status=conv.status or "active",
+                            created_at=conv.created_at,
+                            updated_at=conv.updated_at,
+                            metadata=self._parse_metadata(conv.metadata_json),
+                        ),
+                        "match_type": "title",
+                        "snippet": None,
+                    })
 
-        # 🔥 修复：确保返回的 metadata 是字典
-        final_metadata = updated_msg.extra_data or {}
-        if isinstance(final_metadata, str):
-            try:
-                final_metadata = json.loads(final_metadata)
-            except json.JSONDecodeError:
-                final_metadata = {}
-        elif not isinstance(final_metadata, dict):
-            final_metadata = {}
+            for conv in content_matches:
+                if conv.id not in seen_ids:
+                    seen_ids.add(conv.id)
+                    merged.append({
+                        "conversation": Conversation(
+                            id=conv.id,
+                            user_id=conv.user_id,
+                            title=conv.title,
+                            status=conv.status or "active",
+                            created_at=conv.created_at,
+                            updated_at=conv.updated_at,
+                            metadata=self._parse_metadata(conv.metadata_json),
+                        ),
+                        "match_type": "content",
+                        "snippet": fts_conv_map.get(conv.id),
+                    })
 
-        # content 是 JSONB（list），需要转换为 JSON 字符串给 Pydantic 模型
-        final_content = content if content is not None else updated_msg.content
-        if isinstance(final_content, list):
-            final_content = json.dumps(final_content, ensure_ascii=False)
-
-        # 处理 extra_data 可能是 JSON 字符串的情况
-        final_metadata = existing_metadata
-        if isinstance(final_metadata, str):
-            try:
-                final_metadata = json.loads(final_metadata) if final_metadata else {}
-            except json.JSONDecodeError:
-                logger.warning(f"消息 {message_id} 的 metadata 解析失败，使用空字典")
-                final_metadata = {}
-        elif final_metadata is None:
-            final_metadata = {}
-
-        return Message(
-            id=updated_msg.id,
-            conversation_id=updated_msg.conversation_id,
-            role=updated_msg.role,
-            content=final_content,
-            status=status if status is not None else updated_msg.status,
-            created_at=updated_msg.created_at,
-            metadata=final_metadata,
-        )
+            return {
+                "conversations": merged[:limit],
+                "total": len(merged),
+            }
 
     async def get_conversation_summary(self, conversation_id: str) -> Dict[str, Any]:
         """
@@ -633,36 +655,37 @@ class ConversationService:
 
         Returns:
             对话摘要信息
-
-        Raises:
-            ConversationNotFoundError: 对话不存在
         """
-        async with AsyncSessionLocal() as session:
-            summary = await crud.get_conversation_summary(session, conversation_id)
+        factory = await get_local_session_factory()
+        async with factory() as session:
+            conv = await local_crud.get_conversation(session, conversation_id)
+            if not conv:
+                raise ConversationNotFoundError(f"对话不存在: {conversation_id}")
 
-        if not summary:
-            raise ConversationNotFoundError(f"对话不存在: {conversation_id}")
+            messages = await local_crud.list_messages(
+                session=session,
+                conversation_id=conversation_id,
+                limit=1000,
+                order="asc",
+            )
 
-        logger.info(
-            f"✅ 对话摘要: conversation_id={conversation_id}, message_count={summary['message_count']}"
-        )
+            return {
+                "conversation_id": conversation_id,
+                "title": conv.title,
+                "message_count": len(messages),
+                "created_at": conv.created_at.isoformat() if conv.created_at else None,
+                "updated_at": conv.updated_at.isoformat() if conv.updated_at else None,
+            }
 
-        return summary
 
+# ==================== 单例 ====================
 
-# ==================== 便捷函数 ====================
-
-_default_conversation_service: Optional[ConversationService] = None
+_conversation_service: Optional[ConversationService] = None
 
 
 def get_conversation_service() -> ConversationService:
-    """
-    获取默认的 Conversation Service 实例（单例）
-
-    Returns:
-        ConversationService 实例
-    """
-    global _default_conversation_service
-    if _default_conversation_service is None:
-        _default_conversation_service = ConversationService()
-    return _default_conversation_service
+    """获取对话服务单例"""
+    global _conversation_service
+    if _conversation_service is None:
+        _conversation_service = ConversationService()
+    return _conversation_service

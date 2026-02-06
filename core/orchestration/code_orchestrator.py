@@ -5,17 +5,14 @@ CodeOrchestrator - 代码生成、验证、执行编排器
 - 统一管理代码生成 → 验证 → 执行 → 结果验证的完整流程
 - 自动错误恢复：执行失败时自动分析错误并重试
 - 状态追踪：记录每次执行的详细信息
-- E2B 集成：与 E2B 沙箱深度集成
 
-设计原则（参考先进 Agent 架构 + Claude Code）：
+设计原则：
 - Code-First: 将代码生成和执行作为核心能力
-- VM Scaffolding: E2B 沙箱作为安全的执行环境
 - 验证闭环: 执行前验证 + 执行后验证
 - 自动恢复: 错误自动分析和重试
 
 使用方式：
     orchestrator = create_code_orchestrator(
-        e2b_sandbox=sandbox,
         validator=validator,
         tracer=tracer
     )
@@ -141,14 +138,13 @@ class CodeOrchestrator:
 
     管理代码执行的完整生命周期：
     1. 代码验证（语法 + 依赖 + 安全）
-    2. 代码执行（通过 E2B 沙箱）
+    2. 代码执行
     3. 结果验证
     4. 错误恢复（自动重试）
     """
 
     def __init__(
         self,
-        e2b_sandbox=None,
         validator: CodeValidator = None,
         tracer: E2EPipelineTracer = None,
         max_retries: int = 3,
@@ -158,13 +154,11 @@ class CodeOrchestrator:
         初始化编排器
 
         Args:
-            e2b_sandbox: E2B 沙箱实例（如果不提供，执行时会创建）
             validator: 代码验证器
             tracer: 管道追踪器
             max_retries: 最大重试次数
             auto_fix_enabled: 是否启用自动修复
         """
-        self.e2b_sandbox = e2b_sandbox
         self.validator = validator or create_code_validator()
         self.tracer = tracer
         self.max_retries = max_retries
@@ -283,12 +277,12 @@ class CodeOrchestrator:
                 record.status = ExecutionStatus.EXECUTING
 
                 if self.tracer:
-                    with self.tracer.stage("code_execution", "E2B 沙箱执行") as stage:
+                    with self.tracer.stage("code_execution", "代码执行") as stage:
                         stage.set_input(
                             {"conversation_id": conversation_id, "return_files": return_files}
                         )
 
-                        exec_result = await self._execute_in_sandbox(
+                        exec_result = await self._execute_code(
                             code=current_code,
                             conversation_id=conversation_id,
                             session_id=session_id,
@@ -304,7 +298,7 @@ class CodeOrchestrator:
                             }
                         )
                 else:
-                    exec_result = await self._execute_in_sandbox(
+                    exec_result = await self._execute_code(
                         code=current_code,
                         conversation_id=conversation_id,
                         session_id=session_id,
@@ -422,7 +416,7 @@ class CodeOrchestrator:
         installed = self._installed_packages.get(conversation_id, set())
         return self.validator.validate_all(code, installed)
 
-    async def _execute_in_sandbox(
+    async def _execute_code(
         self,
         code: str,
         conversation_id: str,
@@ -431,20 +425,8 @@ class CodeOrchestrator:
         save_to: str = "",
         timeout: int = 300,
     ) -> Dict[str, Any]:
-        """在 E2B 沙箱中执行代码"""
-        if self.e2b_sandbox is None:
-            raise RuntimeError("E2B 沙箱未初始化")
-
-        return await self.e2b_sandbox.execute(
-            session_id=session_id,
-            code=code,
-            conversation_id=conversation_id,
-            return_files=return_files or [],
-            save_to=save_to,
-            timeout=timeout,
-            auto_install=True,
-            enable_stream=False,
-        )
+        """执行代码（需要子类实现具体执行逻辑）"""
+        raise NotImplementedError("代码执行后端未配置")
 
     def _analyze_execution_error(self, error: str) -> Dict[str, Any]:
         """分析执行错误"""
@@ -538,7 +520,7 @@ class CodeOrchestrator:
         error_type = error_analysis.get("type")
 
         if error_type == "missing_module":
-            # 对于缺失模块，E2B 会自动安装，这里不需要修改代码
+            # 对于缺失模块，可能需要安装依赖
             return code
 
         # TODO: 更多自动修复逻辑
@@ -552,7 +534,6 @@ class CodeOrchestrator:
 
 
 def create_code_orchestrator(
-    e2b_sandbox=None,
     validator: CodeValidator = None,
     tracer: E2EPipelineTracer = None,
     max_retries: int = 3,
@@ -562,7 +543,6 @@ def create_code_orchestrator(
     创建代码编排器
 
     Args:
-        e2b_sandbox: E2B 沙箱实例
         validator: 代码验证器
         tracer: 管道追踪器
         max_retries: 最大重试次数
@@ -572,7 +552,6 @@ def create_code_orchestrator(
         CodeOrchestrator 实例
     """
     return CodeOrchestrator(
-        e2b_sandbox=e2b_sandbox,
         validator=validator,
         tracer=tracer,
         max_retries=max_retries,

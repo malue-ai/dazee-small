@@ -161,10 +161,10 @@ class ContentAccumulator:
         accumulator = ContentAccumulator()
 
         # 并行处理多个 block
-        accumulator.on_content_start({"type": "tool_use", "id": "t1", "name": "sandbox_run_command"}, index=0)
-        accumulator.on_content_start({"type": "tool_use", "id": "t2", "name": "sandbox_write_file"}, index=1)
-        accumulator.on_content_delta('{"command": "ls"}', index=0)
-        accumulator.on_content_delta('{"path": "/app"}', index=1)
+        accumulator.on_content_start({"type": "tool_use", "id": "t1", "name": "tavily_search"}, index=0)
+        accumulator.on_content_start({"type": "tool_use", "id": "t2", "name": "api_calling"}, index=1)
+        accumulator.on_content_delta('{"query": "AI news"}', index=0)
+        accumulator.on_content_delta('{"api_name": "weather"}', index=1)
         accumulator.on_content_stop(index=0)  # 保存第一个工具
         accumulator.on_content_stop(index=1)  # 保存第二个工具
 

@@ -31,33 +31,6 @@ export interface PaginatedResponse<T> {
   offset: number
 }
 
-// ==================== 认证相关 ====================
-
-/**
- * 登录请求
- */
-export interface LoginRequest {
-  username: string
-  password: string
-}
-
-/**
- * 登录响应
- */
-export interface LoginResponse {
-  token: string
-  user: User
-}
-
-/**
- * 用户信息
- */
-export interface User {
-  id: string
-  username: string
-  created_at?: string
-}
-
 // ==================== 对话相关 ====================
 
 /**
@@ -158,31 +131,6 @@ export interface ActiveSession {
  */
 export interface UserSessionsResponse {
   sessions: ActiveSession[]
-}
-
-// ==================== Agent 相关 ====================
-
-/**
- * Agent 信息
- */
-export interface Agent {
-  agent_id: string | null
-  name: string
-  description?: string
-  model?: string
-  is_active?: boolean
-  version?: string
-  config?: Record<string, unknown>
-  created_at?: string
-  updated_at?: string
-}
-
-/**
- * Agent 列表响应
- */
-export interface AgentListResponse {
-  agents: Agent[]
-  total: number
 }
 
 // ==================== 知识库相关 ====================

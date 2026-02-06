@@ -21,12 +21,10 @@ from logger import get_logger
 from .mem0 import get_mem0_pool
 from .mem0.schemas import MemoryCard, MemoryCardCategory
 from .system import CacheMemory, SkillMemory, create_cache_memory, create_skill_memory
-from .user import (  # E2B 现在是用户级记忆; 🆕 任务计划持久化
-    E2BMemory,
+from .user import (  # 🆕 任务计划持久化
     EpisodicMemory,
     PlanMemory,
     PreferenceMemory,
-    create_e2b_memory,
     create_episodic_memory,
     create_plan_memory,
     create_preference_memory,
@@ -58,9 +56,6 @@ class MemoryManager:
         self.working = create_working_memory()
 
         # === 用户级记忆 ===
-        # E2B 沙箱记忆（用户的云端计算环境）
-        self.e2b = create_e2b_memory(user_id=user_id)
-
         # 用户经验和偏好（按需创建）
         self._episodic: Optional[EpisodicMemory] = None
         self._preference: Optional[PreferenceMemory] = None
@@ -169,14 +164,12 @@ class MemoryManager:
         logger.debug(f"[MemoryManager] 结束任务: task_id={task_id}")
 
     def clear_session(self) -> None:
-        """清空会话级记忆（保留持久沙箱）"""
+        """清空会话级记忆"""
         self.working.clear()
-        self.e2b.clear_temporary()  # 只清除临时沙箱
 
     async def clear_all(self) -> None:
         """清空所有记忆（异步版本，慎用）"""
         self.working.clear()
-        self.e2b.clear_all()  # 清除所有沙箱（包括持久）
 
         if self._episodic:
             await self._episodic.clear()
@@ -213,11 +206,6 @@ class MemoryManager:
             "tool_history": self.working.get_tool_history(),
             "metadata": self.working.metadata,
         }
-
-        # E2B 上下文
-        e2b_context = self.e2b.get_context_for_llm()
-        if e2b_context:
-            context["e2b_context"] = e2b_context
 
         # 历史经验
         if include_episodic:
@@ -760,7 +748,6 @@ class MemoryManager:
             f"MemoryManager("
             f"user_id={self.user_id}, "
             f"working={self.working.summary()}, "
-            f"e2b={'active' if self.e2b.has_active_session() else 'none'}, "
             f"episodic={'loaded' if self._episodic else 'not_loaded'}, "
             f"plan={'loaded' if self._plan else 'not_loaded'}, "
             f"skill={'loaded' if self._skill else 'not_loaded'})"
@@ -772,7 +759,6 @@ class MemoryManager:
             "user_id": self.user_id,
             "storage_dir": self.storage_dir,
             "working": self.working.to_dict(),
-            "e2b": self.e2b.to_dict(),
             "episodic_loaded": self._episodic is not None,
             "preference_loaded": self._preference is not None,
             "plan_loaded": self._plan is not None,  # 🆕

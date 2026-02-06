@@ -18,7 +18,6 @@
     await scheduler.shutdown()
 """
 
-import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -87,7 +86,7 @@ class TaskScheduler:
         config_path = Path(self.config_path)
 
         if not config_path.exists():
-            logger.warning(f"⚠️ 定时任务配置文件不存在: {self.config_path}，将使用空配置")
+            logger.debug(f"定时任务配置文件不存在: {self.config_path}")
             return []
 
         try:
@@ -109,64 +108,55 @@ class TaskScheduler:
                     )
                 )
 
-            logger.info(f"✅ 已加载 {len(tasks)} 个定时任务配置")
             return tasks
 
         except Exception as e:
-            logger.error(f"❌ 加载定时任务配置失败: {e}", exc_info=True)
+            logger.error(f"加载定时任务配置失败: {e}", exc_info=True)
             return []
 
     async def start(self):
         """启动调度器"""
         if self._running:
-            logger.warning("⚠️ 调度器已在运行")
+            logger.warning("调度器已在运行")
             return
 
         try:
-            # 尝试导入 APScheduler
             from apscheduler.schedulers.asyncio import AsyncIOScheduler
             from apscheduler.triggers.cron import CronTrigger
             from apscheduler.triggers.interval import IntervalTrigger
         except ImportError:
             logger.warning(
-                "⚠️ APScheduler 未安装，定时任务功能不可用\n" "   安装: pip install apscheduler"
+                "APScheduler 未安装，定时任务功能不可用。"
+                "安装: pip install apscheduler"
             )
             return
 
         # 加载配置
         task_configs = await self._load_config_async()
+        enabled_configs = [c for c in task_configs if c.enabled]
 
-        if not task_configs:
-            logger.info("○ 没有配置定时任务，调度器不启动")
+        if not enabled_configs:
+            logger.info(f"系统定时任务调度器未启动（{len(task_configs)} 个配置均已禁用）")
             return
 
         # 创建调度器
         self._scheduler = AsyncIOScheduler()
-
-        # 注册已注册的任务
         registered_names = get_registered_task_names()
 
-        for config in task_configs:
-            if not config.enabled:
-                logger.info(f"○ 跳过禁用的定时任务: {config.task_name}")
-                continue
-
+        for config in enabled_configs:
             if config.task_name not in registered_names:
-                logger.warning(f"⚠️ 定时任务未注册: {config.task_name}，跳过")
+                logger.warning(f"定时任务未注册: {config.task_name}，跳过")
                 continue
 
             # 创建触发器
             if config.trigger_type == "cron" and config.cron:
                 trigger = CronTrigger.from_crontab(config.cron)
-                trigger_desc = f"cron({config.cron})"
             elif config.trigger_type == "interval" and config.interval_seconds:
                 trigger = IntervalTrigger(seconds=config.interval_seconds)
-                trigger_desc = f"interval({config.interval_seconds}s)"
             else:
-                logger.warning(f"⚠️ 定时任务配置无效: {config.task_name}，跳过")
+                logger.warning(f"定时任务配置无效: {config.task_name}，跳过")
                 continue
 
-            # 添加任务
             self._scheduler.add_job(
                 self._run_scheduled_task,
                 trigger=trigger,
@@ -175,30 +165,29 @@ class TaskScheduler:
                 name=config.description or config.task_name,
                 replace_existing=True,
             )
-
             self._tasks[config.task_name] = config
-            logger.info(f"📅 已注册定时任务: {config.task_name} [{trigger_desc}]")
 
         if self._tasks:
             self._scheduler.start()
             self._running = True
-            logger.info(f"🚀 定时任务调度器已启动，共 {len(self._tasks)} 个任务")
+            task_names = ", ".join(self._tasks.keys())
+            logger.info(f"系统定时任务调度器已启动（{len(self._tasks)} 个任务: {task_names}）")
         else:
-            logger.info("○ 没有有效的定时任务，调度器不启动")
+            logger.info("系统定时任务调度器未启动（无有效任务）")
 
     async def shutdown(self, wait: bool = True):
         """关闭调度器"""
         if self._scheduler and self._running:
             self._scheduler.shutdown(wait=wait)
             self._running = False
-            logger.info("🛑 定时任务调度器已关闭")
+            logger.info("系统定时任务调度器已关闭")
 
     async def _run_scheduled_task(self, config: ScheduledTaskConfig):
         """执行定时任务"""
         task_name = config.task_name
         started_at = datetime.now()
 
-        logger.info(f"⏰ 定时任务开始执行: {task_name}")
+        logger.info(f"执行系统定时任务: {task_name}")
 
         try:
             # 检查是否是批量任务
@@ -212,7 +201,7 @@ class TaskScheduler:
 
                 duration_ms = int((datetime.now() - started_at).total_seconds() * 1000)
                 logger.info(
-                    f"✅ 定时任务完成: {task_name}, "
+                    f"系统定时任务完成: {task_name}, "
                     f"耗时={duration_ms}ms, "
                     f"成功={result.successful}, 失败={result.failed}"
                 )
@@ -238,10 +227,10 @@ class TaskScheduler:
                 await task_func(context, self.background_service)
 
                 duration_ms = int((datetime.now() - started_at).total_seconds() * 1000)
-                logger.info(f"✅ 定时任务完成: {task_name}, 耗时={duration_ms}ms")
+                logger.info(f"系统定时任务完成: {task_name}, 耗时={duration_ms}ms")
 
         except Exception as e:
-            logger.error(f"❌ 定时任务失败: {task_name}, error={e}", exc_info=True)
+            logger.error(f"系统定时任务失败: {task_name}, error={e}", exc_info=True)
 
     def get_jobs(self) -> List[Dict[str, Any]]:
         """获取所有定时任务"""

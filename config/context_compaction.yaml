@@ -39,8 +39,6 @@ tool_result_compression:
   enabled: true                 # 是否启用工具结果压缩
   threshold_chars: 2000         # 超过此字符数自动压缩
   store_full_content: true      # 是否存储完整内容以便恢复
-  persist_to_redis: false       # 是否持久化引用到 Redis
-  redis_ttl_hours: 24           # Redis 过期时间（小时）
   
   # 跳过压缩的工具（这些工具的结果需要完整保留）
   skip_tools:

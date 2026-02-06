@@ -321,20 +321,20 @@ async function testCommand() {
 </script>
 
 <template>
-  <div class="min-h-screen bg-gray-50 dark:bg-gray-900">
+  <div class="min-h-screen bg-muted">
     <!-- 加载状态 -->
     <div v-if="isLoading" class="flex items-center justify-center min-h-screen">
-      <Loader2 class="w-8 h-8 animate-spin text-blue-500" />
+      <Loader2 class="w-8 h-8 animate-spin text-primary" />
     </div>
     
     <!-- 主内容 -->
     <div v-else class="container mx-auto px-4 py-8 max-w-4xl">
       <!-- 标题 -->
       <div class="text-center mb-8">
-        <h1 class="text-3xl font-bold text-gray-900 dark:text-white mb-2">
+        <h1 class="text-3xl font-bold text-foreground mb-2">
           ZenFlux Agent
         </h1>
-        <p class="text-gray-500 dark:text-gray-400">
+        <p class="text-muted-foreground">
           {{ isTauri ? '本地客户端' : '浏览器模式（功能受限）' }}
         </p>
       </div>
@@ -345,21 +345,21 @@ async function testCommand() {
           <div class="flex items-center gap-3">
             <div :class="[
               'w-12 h-12 rounded-full flex items-center justify-center',
-              isConnected ? 'bg-green-100 dark:bg-green-900' : 'bg-gray-100 dark:bg-gray-700'
+              isConnected ? 'bg-success/10' : 'bg-muted'
             ]">
               <component 
                 :is="isConnected ? Wifi : WifiOff" 
                 :class="[
                   'w-6 h-6',
-                  isConnected ? 'text-green-600 dark:text-green-400' : 'text-gray-400'
+                  isConnected ? 'text-success' : 'text-muted-foreground/50'
                 ]" 
               />
             </div>
             <div>
-              <h2 class="text-xl font-semibold text-gray-900 dark:text-white">
+              <h2 class="text-xl font-semibold text-foreground">
                 {{ isConnected ? '已连接到服务器' : '未连接' }}
               </h2>
-              <p v-if="isConnected" class="text-sm text-gray-500 dark:text-gray-400">
+              <p v-if="isConnected" class="text-sm text-muted-foreground">
                 延迟: {{ latencyMs ?? '-' }}ms • 在线: {{ formatOnlineTime(onlineTime) }}
               </p>
               <p v-else-if="connectionError" class="text-sm text-red-500">
@@ -371,14 +371,14 @@ async function testCommand() {
           <button
             v-if="!isConnected"
             @click="connect"
-            class="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
+            class="px-6 py-2 bg-primary hover:bg-primary-hover text-white rounded-lg font-medium transition-colors"
           >
             连接服务器
           </button>
           <button
             v-else
             @click="disconnect"
-            class="px-6 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-lg font-medium transition-colors"
+            class="px-6 py-2 bg-muted hover:bg-muted/80 text-foreground rounded-lg font-medium transition-colors"
           >
             断开连接
           </button>
@@ -393,39 +393,39 @@ async function testCommand() {
             v-model="serverUrl"
             type="text"
             :disabled="isConnected"
-            class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white disabled:opacity-50"
+            class="w-full px-4 py-2 border border-border rounded-lg bg-white text-foreground disabled:opacity-50"
             placeholder="wss://api.zenflux.ai/ws/node"
           />
         </div>
       </div>
       
       <!-- 设备信息 -->
-      <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 mb-6">
-        <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+      <div class="bg-white rounded-2xl shadow-lg p-6 mb-6">
+        <h3 class="text-lg font-semibold text-foreground mb-4">
           设备信息
         </h3>
         <div class="grid grid-cols-2 gap-4 text-sm">
           <div>
-            <span class="text-gray-500 dark:text-gray-400">设备名称</span>
-            <p class="text-gray-900 dark:text-white font-medium">
+            <span class="text-muted-foreground">设备名称</span>
+            <p class="text-foreground font-medium">
               {{ nodeInfo?.display_name ?? '-' }}
             </p>
           </div>
           <div>
-            <span class="text-gray-500 dark:text-gray-400">设备 ID</span>
-            <p class="text-gray-900 dark:text-white font-mono text-xs">
+            <span class="text-muted-foreground">设备 ID</span>
+            <p class="text-foreground font-mono text-xs">
               {{ nodeInfo?.node_id ?? '-' }}
             </p>
           </div>
           <div>
-            <span class="text-gray-500 dark:text-gray-400">平台</span>
-            <p class="text-gray-900 dark:text-white font-medium">
+            <span class="text-muted-foreground">平台</span>
+            <p class="text-foreground font-medium">
               {{ nodeInfo?.platform ?? '-' }}
             </p>
           </div>
           <div>
-            <span class="text-gray-500 dark:text-gray-400">版本</span>
-            <p class="text-gray-900 dark:text-white font-medium">
+            <span class="text-muted-foreground">版本</span>
+            <p class="text-foreground font-medium">
               {{ nodeInfo?.version ?? '-' }}
             </p>
           </div>
@@ -433,8 +433,8 @@ async function testCommand() {
       </div>
       
       <!-- 已授权能力 -->
-      <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 mb-6">
-        <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+      <div class="bg-white rounded-2xl shadow-lg p-6 mb-6">
+        <h3 class="text-lg font-semibold text-foreground mb-4">
           已授权能力
         </h3>
         <div class="space-y-3">
@@ -444,13 +444,13 @@ async function testCommand() {
             class="flex items-center justify-between py-2"
           >
             <div class="flex items-center gap-3">
-              <component :is="cap.icon" class="w-5 h-5 text-gray-400" />
-              <span class="text-gray-900 dark:text-white">{{ cap.name }}</span>
+              <component :is="cap.icon" class="w-5 h-5 text-muted-foreground/50" />
+              <span class="text-foreground">{{ cap.name }}</span>
             </div>
             <div class="flex items-center gap-2">
               <span 
                 v-if="cap.needsAuth && !cap.enabled"
-                class="text-xs text-amber-500"
+                class="text-xs text-primary"
               >
                 需要授权
               </span>
@@ -458,7 +458,7 @@ async function testCommand() {
                 :is="cap.enabled ? CheckCircle : XCircle"
                 :class="[
                   'w-5 h-5',
-                  cap.enabled ? 'text-green-500' : 'text-gray-300 dark:text-gray-600'
+                  cap.enabled ? 'text-success' : 'text-muted-foreground/30'
                 ]"
               />
             </div>
@@ -469,19 +469,19 @@ async function testCommand() {
         <button
           v-if="isTauri"
           @click="testCommand"
-          class="mt-4 w-full py-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-lg font-medium transition-colors"
+          class="mt-4 w-full py-2 bg-muted hover:bg-muted/80 text-foreground rounded-lg font-medium transition-colors"
         >
           测试系统命令
         </button>
       </div>
       
       <!-- 执行日志 -->
-      <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6">
-        <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+      <div class="bg-white rounded-2xl shadow-lg p-6">
+        <h3 class="text-lg font-semibold text-foreground mb-4">
           最近执行
         </h3>
         
-        <div v-if="executionLogs.length === 0" class="text-center py-8 text-gray-400">
+        <div v-if="executionLogs.length === 0" class="text-center py-8 text-muted-foreground/50">
           暂无执行记录
         </div>
         
@@ -489,29 +489,29 @@ async function testCommand() {
           <div
             v-for="log in executionLogs"
             :key="log.id"
-            class="flex items-center justify-between py-2 px-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg"
+            class="flex items-center justify-between py-2 px-3 bg-muted rounded-lg"
           >
             <div class="flex items-center gap-3">
-              <Clock class="w-4 h-4 text-gray-400" />
-              <span class="text-sm text-gray-500 dark:text-gray-400">
+              <Clock class="w-4 h-4 text-muted-foreground/50" />
+              <span class="text-sm text-muted-foreground">
                 {{ formatTime(log.timestamp) }}
               </span>
-              <span class="text-sm font-mono text-gray-900 dark:text-white">
+              <span class="text-sm font-mono text-foreground">
                 {{ log.command }}
               </span>
-              <span class="text-xs text-gray-400 truncate max-w-32">
+              <span class="text-xs text-muted-foreground/50 truncate max-w-32">
                 {{ log.params }}
               </span>
             </div>
             <div class="flex items-center gap-2">
-              <span class="text-xs text-gray-400">
+              <span class="text-xs text-muted-foreground/50">
                 {{ log.elapsed_ms }}ms
               </span>
               <component
                 :is="log.success ? CheckCircle : XCircle"
                 :class="[
                   'w-4 h-4',
-                  log.success ? 'text-green-500' : 'text-red-500'
+                  log.success ? 'text-success' : 'text-destructive'
                 ]"
               />
             </div>
@@ -522,13 +522,13 @@ async function testCommand() {
       <!-- 底部操作 -->
       <div class="flex justify-center gap-4 mt-8">
         <button
-          class="flex items-center gap-2 px-4 py-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+          class="flex items-center gap-2 px-4 py-2 text-muted-foreground hover:text-foreground transition-colors"
         >
           <Settings class="w-4 h-4" />
           设置
         </button>
         <button
-          class="flex items-center gap-2 px-4 py-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+          class="flex items-center gap-2 px-4 py-2 text-muted-foreground hover:text-foreground transition-colors"
         >
           <RefreshCw class="w-4 h-4" />
           刷新状态

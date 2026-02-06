@@ -26,7 +26,6 @@ from services.conversation_service import (
     ConversationService,
     get_conversation_service,
 )
-from services.session_cache_service import get_session_cache_service
 
 # 配置日志
 logger = get_logger("conversation_router")
@@ -40,6 +39,62 @@ router = APIRouter(
 
 # 获取服务实例
 conversation_service = get_conversation_service()
+
+
+# ==================== 搜索 ====================
+
+
+@router.get("/search", response_model=APIResponse[dict])
+async def search_conversations(
+    user_id: str = Query(..., description="用户ID"),
+    q: str = Query(..., description="搜索关键词"),
+    limit: int = Query(20, description="返回数量", ge=1, le=50),
+):
+    """
+    搜索对话（标题 + 消息内容全文搜索）
+
+    ## 参数
+    - **user_id**: 用户ID（必填）
+    - **q**: 搜索关键词（必填）
+    - **limit**: 返回数量（默认20，最大50）
+
+    ## 返回
+    ```json
+    {
+      "code": 200,
+      "message": "success",
+      "data": {
+        "conversations": [
+          {
+            "conversation": { "id": "conv_xxx", "title": "..." },
+            "match_type": "title|content",
+            "snippet": "匹配的消息片段..."
+          }
+        ],
+        "total": 5
+      }
+    }
+    ```
+    """
+    try:
+        logger.info(f"📨 搜索对话: user_id={user_id}, q={q}, limit={limit}")
+
+        result = await conversation_service.search_conversations(
+            user_id=user_id,
+            query=q,
+            limit=limit,
+        )
+
+        logger.info(f"✅ 搜索完成，返回 {result['total']} 条结果")
+
+        return APIResponse(code=200, message="success", data=result)
+
+    except Exception as e:
+        logger.error(f"❌ 搜索对话失败: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"搜索对话失败: {str(e)}",
+        )
 
 
 # ==================== 对话 CRUD ====================
@@ -286,7 +341,6 @@ async def get_conversation_messages(
       "data": {
         "conversation_id": "conv_abc123",
         "conversation_metadata": {
-          "sandbox_type": "e2b",
           "project_type": "react_fullstack"
         },
         "messages": [

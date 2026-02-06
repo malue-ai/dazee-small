@@ -24,7 +24,7 @@ export const useConversationStore = defineStore('conversation', () => {
   const conversationPlan = ref<PlanData | null>(null)
 
   /** 用户 ID */
-  const userId = ref<string>('')
+  const userId = ref<string>('local')
 
   /** 加载状态 */
   const loading = ref(false)
@@ -63,10 +63,7 @@ export const useConversationStore = defineStore('conversation', () => {
    * 初始化用户 ID
    */
   function initUserId(): string {
-    if (!userId.value) {
-      userId.value = localStorage.getItem('userId') || 'user_' + Date.now()
-      localStorage.setItem('userId', userId.value)
-    }
+    userId.value = 'local'
     return userId.value
   }
 

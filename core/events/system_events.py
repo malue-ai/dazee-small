@@ -53,7 +53,7 @@ class SystemEventManager(BaseEventManager):
             details: 额外的错误详情（可选）
             seq: 事件序号（可选，来自 EventBroadcaster）
             event_uuid: 事件 UUID（可选）
-            output_format: 输出格式（zenflux/zeno），默认 zenflux
+            output_format: 输出格式，默认 zenflux
             adapter: 格式转换适配器（可选）
 
         Returns:
@@ -94,7 +94,7 @@ class SystemEventManager(BaseEventManager):
             conversation_id: 对话 ID（必填）
             seq: 事件序号（可选）
             event_uuid: 事件 UUID（可选）
-            output_format: 输出格式（zenflux/zeno），默认 zenflux
+            output_format: 输出格式，默认 zenflux
             adapter: 格式转换适配器（可选）
 
         Returns:
@@ -133,7 +133,7 @@ class SystemEventManager(BaseEventManager):
             event_data: 事件数据
             seq: 事件序号（可选）
             event_uuid: 事件 UUID（可选）
-            output_format: 输出格式（zenflux/zeno），默认 zenflux
+            output_format: 输出格式，默认 zenflux
             adapter: 格式转换适配器（可选）
 
         Returns:

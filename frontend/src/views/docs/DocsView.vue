@@ -1,13 +1,13 @@
 <template>
   <div class="h-full flex flex-col overflow-hidden bg-white">
     <!-- 顶部工具栏 (统一布局) -->
-    <div class="h-16 flex items-center justify-between px-6 border-b border-gray-100 bg-white sticky top-0 z-10 flex-shrink-0">
+    <div class="h-16 flex items-center justify-between px-6 border-b border-border bg-white sticky top-0 z-10 flex-shrink-0">
       <div class="flex items-center gap-4">
-        <h1 class="text-lg font-bold flex items-center gap-2 text-gray-800">
-          <BookOpen class="w-6 h-6 text-blue-500" />
+        <h1 class="text-lg font-bold flex items-center gap-2 text-foreground">
+          <BookOpen class="w-6 h-6 text-primary" />
           项目文档
         </h1>
-        <div class="text-sm text-gray-500 bg-gray-50 px-2.5 py-1 rounded-md border border-gray-100">
+        <div class="text-sm text-muted-foreground bg-muted px-2.5 py-1 rounded-md border border-border">
           共 {{ structure?.total_files || 0 }} 篇
         </div>
       </div>
@@ -18,22 +18,22 @@
     <!-- 主体区域 -->
     <div class="flex-1 flex overflow-hidden">
       <!-- 左侧文档目录 -->
-      <div class="w-72 flex-shrink-0 border-r border-gray-100 bg-gray-50 overflow-y-auto flex flex-col">
+      <div class="w-72 flex-shrink-0 border-r border-border bg-muted overflow-y-auto flex flex-col">
         <!-- 搜索框 -->
-        <div class="p-4 border-b border-gray-100 sticky top-0 bg-gray-50 z-10">
+        <div class="p-4 border-b border-border sticky top-0 bg-muted z-10">
           <div class="relative">
-            <Search class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <Search class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground/50" />
             <input
               v-model="searchQuery"
               type="text"
               placeholder="搜索文档..."
-              class="w-full pl-9 pr-3 py-2 text-sm bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+              class="w-full pl-9 pr-3 py-2 text-sm bg-white border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
             />
           </div>
         </div>
 
         <!-- 加载中 -->
-        <div v-if="loading" class="p-4 text-center text-gray-500 text-sm">
+        <div v-if="loading" class="p-4 text-center text-muted-foreground text-sm">
           <Loader2 class="w-5 h-5 animate-spin mx-auto mb-2" />
           加载目录...
         </div>
@@ -50,11 +50,11 @@
             class="flex items-center gap-2 px-3 py-2 text-sm font-semibold text-gray-700 cursor-pointer hover:bg-white rounded-lg transition-colors"
             @click="toggleCategory(category.id)"
           >
-            <span class="text-lg">{{ category.icon }}</span>
+            <component :is="getCategoryIcon(category.id)" class="w-4 h-4 text-muted-foreground" />
             <span class="flex-1">{{ category.name }}</span>
-            <span class="text-xs text-gray-400">{{ category.files.length }}</span>
-            <ChevronDown v-if="expandedCategories.includes(category.id)" class="w-3 h-3 text-gray-400" />
-            <ChevronRight v-else class="w-3 h-3 text-gray-400" />
+            <span class="text-xs text-muted-foreground/50">{{ category.files.length }}</span>
+            <ChevronDown v-if="expandedCategories.includes(category.id)" class="w-3 h-3 text-muted-foreground/50" />
+            <ChevronRight v-else class="w-3 h-3 text-muted-foreground/50" />
           </div>
 
           <!-- 文件列表 -->
@@ -68,17 +68,17 @@
               @click="selectDoc(file.path)"
               class="flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-all text-sm"
               :class="currentDocPath === file.path 
-                ? 'bg-white shadow-sm text-blue-600 font-medium border border-gray-100' 
-                : 'text-gray-600 hover:bg-white hover:text-gray-900'"
+                ? 'bg-white shadow-sm text-primary font-medium border border-border' 
+                : 'text-muted-foreground hover:bg-white hover:text-foreground'"
             >
-              <FileText class="w-4 h-4 flex-shrink-0" :class="currentDocPath === file.path ? 'text-blue-500' : 'text-gray-400'" />
+              <FileText class="w-4 h-4 flex-shrink-0" :class="currentDocPath === file.path ? 'text-primary' : 'text-muted-foreground/50'" />
               <span class="flex-1 truncate">{{ file.title }}</span>
             </div>
           </div>
         </div>
 
         <!-- 无结果 -->
-        <div v-if="filteredCategories.length === 0 && searchQuery" class="text-center text-gray-500 text-sm py-8">
+        <div v-if="filteredCategories.length === 0 && searchQuery" class="text-center text-muted-foreground text-sm py-8">
           <Search class="w-8 h-8 mx-auto mb-2 text-gray-300" />
           未找到匹配的文档
         </div>
@@ -88,21 +88,21 @@
     <!-- 中间内容区 -->
     <div class="flex-1 flex flex-col overflow-hidden bg-white">
       <!-- 内容头部 -->
-      <div class="h-14 flex items-center justify-between px-6 border-b border-gray-100 bg-white sticky top-0 z-10">
+      <div class="h-14 flex items-center justify-between px-6 border-b border-border bg-white sticky top-0 z-10">
         <div v-if="currentDoc">
-          <h1 class="text-lg font-bold text-gray-800">{{ currentDoc.title }}</h1>
-          <p class="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
+          <h1 class="text-lg font-bold text-foreground">{{ currentDoc.title }}</h1>
+          <p class="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
             <Folder class="w-3 h-3" /> {{ getCategoryName(currentDoc.category) }}
           </p>
         </div>
-        <div v-else class="text-gray-400 text-sm">
+        <div v-else class="text-muted-foreground/50 text-sm">
           选择一个文档开始阅读
         </div>
 
         <div v-if="currentDoc" class="flex items-center gap-2">
           <button 
             @click="copyDocPath"
-            class="px-3 py-1.5 rounded-lg text-sm text-gray-500 hover:bg-gray-100 transition-colors flex items-center gap-1"
+            class="px-3 py-1.5 rounded-lg text-sm text-muted-foreground hover:bg-gray-100 transition-colors flex items-center gap-1"
           >
             <Copy class="w-4 h-4" /> 复制路径
           </button>
@@ -110,34 +110,34 @@
       </div>
 
       <!-- 文档内容 -->
-      <div class="flex-1 overflow-y-auto bg-gray-50/30">
+      <div class="flex-1 overflow-y-auto bg-muted/30">
         <!-- 未选择文档 -->
-        <div v-if="!currentDoc && !loadingContent" class="h-full flex flex-col items-center justify-center text-gray-400 p-8">
-          <div class="w-24 h-24 bg-gray-50 rounded-3xl flex items-center justify-center mb-6 border border-gray-100">
+        <div v-if="!currentDoc && !loadingContent" class="h-full flex flex-col items-center justify-center text-muted-foreground/50 p-8">
+          <div class="w-24 h-24 bg-muted rounded-3xl flex items-center justify-center mb-6 border border-border">
             <BookOpen class="w-10 h-10 text-gray-300" />
           </div>
           <h2 class="text-xl font-bold text-gray-700 mb-2">项目文档中心</h2>
-          <p class="text-sm text-center max-w-md mb-8 text-gray-500 leading-relaxed">
+          <p class="text-sm text-center max-w-md mb-8 text-muted-foreground leading-relaxed">
             浏览架构设计、API 文档、使用指南和部署文档，深入了解 ZenFlux Agent 系统。
           </p>
           <button 
             v-if="structure?.categories[0]?.files[0]"
             @click="selectDoc(structure.categories[0].files[0].path)"
-            class="px-8 py-3 bg-gray-900 text-white rounded-xl font-medium hover:bg-gray-800 transition-all shadow-lg shadow-gray-900/10 active:scale-95"
+            class="px-8 py-3 bg-primary text-white rounded-xl font-medium hover:bg-primary-hover transition-all shadow-lg shadow-primary/20 active:scale-95"
           >
-            📖 开始阅读
+            <BookOpen class="w-4 h-4 mr-2" /> 开始阅读
           </button>
         </div>
 
         <!-- 加载内容中 -->
         <div v-else-if="loadingContent" class="h-full flex items-center justify-center">
-          <Loader2 class="w-8 h-8 animate-spin text-gray-400" />
+          <Loader2 class="w-8 h-8 animate-spin text-muted-foreground/50" />
         </div>
 
         <!-- 文档内容 -->
         <div v-else-if="currentDoc" class="max-w-7xl mx-auto p-6 pb-12">
-          <div class="bg-white rounded-2xl border border-gray-200 p-6 md:p-8 shadow-sm">
-            <MarkdownRenderer :content="currentDoc.content" />
+          <div class="bg-white rounded-2xl border border-border p-6 md:p-8 shadow-sm">
+            <MarkdownRenderer :content="currentDoc.content" :final="true" />
           </div>
         </div>
       </div>
@@ -159,7 +159,16 @@ import {
   Loader2,
   BookOpen,
   Folder,
-  Copy
+  Copy,
+  LayoutTemplate,
+  Server,
+  Rocket,
+  ClipboardList,
+  BarChart3,
+  Wrench,
+  Lock,
+  Library,
+  HelpCircle
 } from 'lucide-vue-next'
 
 const route = useRoute()
@@ -266,6 +275,25 @@ async function selectDoc(docPath: string) {
 function getCategoryName(categoryId: string): string {
   const category = structure.value?.categories.find(c => c.id === categoryId)
   return category?.name || categoryId
+}
+
+/**
+ * 获取分类图标
+ */
+function getCategoryIcon(categoryId: string) {
+  const iconMap: Record<string, any> = {
+    'architecture': LayoutTemplate,
+    'api': Server,
+    'guides': BookOpen,
+    'deployment': Rocket,
+    'specs': ClipboardList,
+    'reports': BarChart3,
+    'analysis': Search,
+    'troubleshooting': Wrench,
+    'internal': Lock,
+    'root': Library
+  }
+  return iconMap[categoryId] || HelpCircle
 }
 
 /**

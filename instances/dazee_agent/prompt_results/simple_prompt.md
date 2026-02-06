@@ -18,9 +18,8 @@
 
 ---
 
-## 沙盒任务（如果有）
+## 开发任务（如果有）
 
 **执行铁律**：
-- **🚨 必须先用脚手架**：调用 `sandbox_init_project(template='react_fullstack')`。
-- **禁止从零写代码**：不要自己写 index.html，在脚手架基础上修改。
+- **禁止从零写代码**：不要自己写 index.html，在现有项目基础上修改。
 - **启动服务**：`npm install && npm run dev`，使用 `background=true, port=5173`。

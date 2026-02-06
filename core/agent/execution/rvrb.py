@@ -397,7 +397,7 @@ class RVRBExecutor(RVRExecutor):
         broadcaster = context.broadcaster
         ctx = context.runtime_ctx
         session_id = context.session_id
-        conversation_id = context.conversation_id  # 🆕 用于沙盒关联
+        conversation_id = context.conversation_id
         system_prompt = context.system_prompt
         tools_for_llm = context.tools_for_llm
         intent = context.intent
@@ -417,9 +417,9 @@ class RVRBExecutor(RVRExecutor):
         # 获取额外依赖（V10.2 ToolExecutionFlow 需要）
         usage_tracker = context.extra.get("usage_tracker")
         if not usage_tracker:
-            from core.billing.tracker import create_enhanced_usage_tracker
+            from models.usage import UsageTracker
 
-            usage_tracker = create_enhanced_usage_tracker(session_id)
+            usage_tracker = UsageTracker()
 
         context_engineering = context.extra.get("context_engineering")
         plan_todo_tool = context.extra.get("plan_todo_tool")
@@ -596,7 +596,7 @@ class RVRBExecutor(RVRExecutor):
         response,
         llm_messages: List,
         session_id: str,
-        conversation_id: str,  # 🆕 用于沙盒关联
+        conversation_id: str,
         ctx: "RuntimeContext",
         state: RVRBState,
         llm,
@@ -697,7 +697,7 @@ class RVRBExecutor(RVRExecutor):
         response,
         llm_messages: List,
         session_id: str,
-        conversation_id: str,  # 🆕 用于沙盒关联
+        conversation_id: str,
         ctx: "RuntimeContext",
         state: RVRBState,
         llm,

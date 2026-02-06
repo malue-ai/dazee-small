@@ -276,8 +276,13 @@ async def _update_user_memories_internal(
 async def _fetch_user_conversations(user_id: str, since: datetime) -> List[Dict[str, Any]]:
     """从数据库获取单个用户的会话"""
     try:
+        # TODO: 迁移到 local_store
         from infra.database import AsyncSessionLocal, crud
+    except ImportError:
+        logger.warning("⚠️ 数据库模块已删除，无法获取用户会话")
+        return []
 
+    try:
         async with AsyncSessionLocal() as session:
             conversations = await crud.get_conversations_since(
                 session, since=since, user_id=user_id
@@ -298,9 +303,6 @@ async def _fetch_user_conversations(user_id: str, since: datetime) -> List[Dict[
 
             return result
 
-    except ImportError:
-        logger.warning("⚠️ 数据库模块不可用")
-        return []
     except Exception as e:
         logger.warning(f"⚠️ 获取用户会话失败: {e}")
         return []
@@ -309,8 +311,13 @@ async def _fetch_user_conversations(user_id: str, since: datetime) -> List[Dict[
 async def _fetch_all_user_conversations(since: datetime) -> Dict[str, List[Dict[str, Any]]]:
     """从数据库获取所有用户的会话（按用户分组）"""
     try:
+        # TODO: 迁移到 local_store
         from infra.database import AsyncSessionLocal, crud
+    except ImportError:
+        logger.warning("⚠️ 数据库模块已删除，无法获取所有用户会话")
+        return {}
 
+    try:
         async with AsyncSessionLocal() as session:
             conversations = await crud.get_conversations_since(session, since=since)
 
@@ -335,9 +342,6 @@ async def _fetch_all_user_conversations(since: datetime) -> Dict[str, List[Dict[
 
             return user_conversations
 
-    except ImportError:
-        logger.warning("⚠️ 数据库模块不可用")
-        return {}
     except Exception as e:
         logger.warning(f"⚠️ 获取所有用户会话失败: {e}")
         return {}

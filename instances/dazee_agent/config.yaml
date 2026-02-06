@@ -112,9 +112,6 @@ enabled_capabilities:
   # --- 图像生成类 ---
   nano_banana_image: 1   # Nano Banana Pro 图像生成/编辑工具（Gemini 3 Pro Image）
   
-  # --- 代码沙盒类 ---
-  sandbox_tools: 1           # 包含全部沙盒工具（含 sandbox_init_project 脚手架）
-  
   # --- 动态代码执行 ---
   code_execution: 0
   

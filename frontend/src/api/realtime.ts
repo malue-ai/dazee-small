@@ -4,13 +4,27 @@
  * 实时语音通信 WebSocket 端点
  */
 
+import { isTauriEnv } from './tauri'
+import { getApiBaseUrl } from '.'
+
 const API_BASE = '/api/v1'
 
 /**
  * 获取 WebSocket URL
- * 自动处理 http/https 到 ws/wss 的转换
+ * 
+ * Tauri 模式：ws://localhost:18900/api/v1/...
+ * 浏览器模式：自动从 window.location 推导
  */
 function getWsUrl(path: string): string {
+  if (isTauriEnv()) {
+    // Tauri 模式：直接使用后端地址
+    const baseUrl = getApiBaseUrl()
+    const wsBase = baseUrl.replace(/^http/, 'ws')
+    // path 已包含 /v1/... 前缀，baseUrl 是 /api，所以直接拼接 /v1 部分
+    const relativePath = path.replace(/^\/api/, '')
+    return `${wsBase}${relativePath}`
+  }
+  // 浏览器模式：从 window.location 推导
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const host = window.location.host
   return `${protocol}//${host}${path}`

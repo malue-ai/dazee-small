@@ -19,7 +19,7 @@
 }
 
 架构说明（重构后）：
-- 序号（seq）在 storage.buffer_event 中由 Redis INCR 统一生成
+- 序号（seq）在 storage.buffer_event 中统一自增生成
 - EventBroadcaster 是事件发送的统一入口
 - 格式转换在 buffer_event 中完成
 """
@@ -37,10 +37,11 @@ class EventStorage(Protocol):
     """
     事件存储协议（抽象接口）
 
-    所有方法都是异步的，支持异步 Redis 客户端
+    所有方法都是异步的。
 
-    生产环境实现：RedisSessionManager（services/redis_manager.py）
-    开发环境实现：InMemoryEventStorage（core/events/storage.py）
+    当前实现：
+    - LocalSessionStore（infra/local_store/session_store.py）
+    - InMemoryEventStorage（core/events/storage.py）
     """
 
     async def get_session_context(self, session_id: str) -> Dict[str, Any]:
@@ -60,8 +61,8 @@ class EventStorage(Protocol):
         Args:
             session_id: Session ID
             event_data: 事件数据
-            output_format: 输出格式（zenflux/zeno），默认 zenflux
-            adapter: 格式转换适配器（可选，用于 zeno 格式）
+            output_format: 输出格式，默认 zenflux
+            adapter: 格式转换适配器（可选）
 
         Returns:
             添加了 seq 的事件，如果被过滤则返回 None
@@ -93,7 +94,7 @@ class BaseEventManager:
         初始化基类
 
         Args:
-            storage: 事件存储实现（可以是 Redis、内存、文件等）
+            storage: 事件存储实现（实现 EventStorage 协议）
         """
         self.storage = storage
 
@@ -123,8 +124,8 @@ class BaseEventManager:
             message_id: Message ID（可选）
             seq: 事件序号（可选，新架构中由 buffer_event 生成）
             event_uuid: 事件 UUID（可选，来自上层）
-            output_format: 输出格式（zenflux/zeno），默认 zenflux
-            adapter: 格式转换适配器（可选，用于 zeno 格式）
+            output_format: 输出格式，默认 zenflux
+            adapter: 格式转换适配器（可选）
 
         Returns:
             完整的事件对象，如果被过滤则返回 None
@@ -167,7 +168,7 @@ class BaseEventManager:
             adapter=adapter,
         )
 
-        # 如果事件被过滤（如 ZenO 适配器过滤某些事件），返回 None
+        # 如果事件被过滤（如适配器过滤某些事件），返回 None
         if result is None:
             return None
 

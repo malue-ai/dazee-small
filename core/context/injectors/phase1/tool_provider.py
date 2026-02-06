@@ -37,8 +37,8 @@ class ToolSystemRoleProvider(BaseInjector):
     搜索互联网获取最新信息
     </tool>
 
-    <tool name="sandbox_execute">
-    在沙盒中执行代码
+    <tool name="code_execute">
+    执行代码
     </tool>
     ```
     """

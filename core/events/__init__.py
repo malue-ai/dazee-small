@@ -14,8 +14,8 @@ SSE 事件管理模块
          │  1. 内部处理（累积、增强逻辑）
          │  2. 调用 storage.buffer_event()
          │     - 格式转换（如果需要）
-         │     - Redis INCR 生成 seq
-         │     - 存入 Redis + Pub/Sub
+         │     - 自增生成 seq
+         │     - 存入内存 + 通知订阅者
          │
          └──→ EventDispatcher → 外部 Webhook（可选）
 
@@ -38,8 +38,8 @@ SSE 事件管理模块
 1. 每层只有 start/delta/stop 三个核心事件
 2. 所有扩展数据通过 delta 发送
 3. Agent 使用 EventBroadcaster，不直接使用 EventManager
-4. seq 在进入 Redis 时由 buffer_event 统一生成（Redis INCR）
-5. 格式转换在进入 Redis 前完成
+4. seq 由 buffer_event 统一自增生成
+5. 格式转换在 buffer_event 中完成
 
 使用示例：
 ====================

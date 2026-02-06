@@ -1,7 +1,7 @@
 <template>
-  <div class="h-full flex flex-col bg-gray-50 overflow-hidden">
+  <div class="h-full flex flex-col bg-muted overflow-hidden">
     <!-- 头部 -->
-    <div class="flex items-center justify-between px-3 py-2.5 border-b border-gray-100 bg-white">
+    <div class="flex items-center justify-between px-3 py-2.5 border-b border-border bg-white">
       <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1.5">
         <Folder class="w-3.5 h-3.5" />
         工作区文件
@@ -9,7 +9,7 @@
       <div class="flex gap-1">
         <button 
           @click="refreshFiles" 
-          class="p-1.5 rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors disabled:opacity-40" 
+          class="p-1.5 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-40" 
           :disabled="isLoading" 
           title="刷新"
         >
@@ -17,7 +17,7 @@
         </button>
         <button 
           @click="toggleExpandAll" 
-          class="p-1.5 rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors" 
+          class="p-1.5 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors" 
           title="展开/收起全部"
         >
           <FolderOpen v-if="isAllExpanded" class="w-3.5 h-3.5" />
@@ -26,28 +26,21 @@
       </div>
     </div>
     
-    <!-- 沙盒准备中 -->
-    <div v-if="isPreparingSandbox" class="flex-1 flex flex-col items-center justify-center text-gray-400 gap-2">
-      <Loader2 class="w-5 h-5 animate-spin" />
-      <span class="text-xs">沙盒启动中...</span>
-      <span class="text-[10px] text-gray-300">首次加载可能需要几秒钟</span>
-    </div>
-    
     <!-- 加载状态 -->
-    <div v-else-if="isLoading" class="flex-1 flex flex-col items-center justify-center text-gray-400 gap-2">
+    <div v-if="isLoading" class="flex-1 flex flex-col items-center justify-center text-muted-foreground/50 gap-2">
       <Loader2 class="w-5 h-5 animate-spin" />
       <span class="text-xs">加载中...</span>
     </div>
     
     <!-- 错误状态 -->
-    <div v-else-if="sandboxError" class="flex-1 flex flex-col items-center justify-center text-red-400 gap-2 p-4">
+    <div v-else-if="loadError" class="flex-1 flex flex-col items-center justify-center text-red-400 gap-2 p-4">
       <AlertCircle class="w-6 h-6" />
-      <span class="text-xs text-center">{{ sandboxError }}</span>
-      <button @click="loadFiles" class="text-xs text-blue-500 hover:underline mt-1">重试</button>
+      <span class="text-xs text-center">{{ loadError }}</span>
+      <button @click="loadFiles" class="text-xs text-primary hover:underline mt-1">重试</button>
     </div>
     
     <!-- 空状态 -->
-    <div v-else-if="!hasFiles" class="flex-1 flex flex-col items-center justify-center text-gray-400 p-4 text-center">
+    <div v-else-if="!hasFiles" class="flex-1 flex flex-col items-center justify-center text-muted-foreground/50 p-4 text-center">
       <FolderOpen class="w-8 h-8 mb-2 opacity-50" />
       <p class="text-xs font-medium">暂无文件</p>
       <p class="text-[10px] opacity-70 mt-1">AI 创建的文件将显示在这里</p>
@@ -67,8 +60,8 @@
     </div>
     
     <!-- 项目卡片区域 -->
-    <div v-if="hasProjects" class="border-t border-gray-100 bg-white p-3">
-      <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-2 flex items-center gap-1">
+    <div v-if="hasProjects" class="border-t border-border bg-white p-3">
+      <h4 class="text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wide mb-2 flex items-center gap-1">
         <Play class="w-3 h-3" />
         可运行项目
       </h4>
@@ -84,10 +77,10 @@
           </div>
           <div class="flex-1 min-w-0">
             <div class="text-xs font-medium text-gray-800 truncate">{{ project.name }}</div>
-            <div class="text-[10px] text-gray-400 uppercase">{{ project.type || 'unknown' }}</div>
+            <div class="text-[10px] text-muted-foreground/50 uppercase">{{ project.type || 'unknown' }}</div>
           </div>
           <button 
-            class="flex items-center gap-1 px-2 py-1 bg-green-500 hover:bg-green-600 text-white text-[10px] font-medium rounded-md transition-colors" 
+            class="flex items-center gap-1 px-2 py-1 bg-success hover:bg-success/90 text-white text-[10px] font-medium rounded-md transition-colors" 
             @click.stop="$emit('run-project', project)"
           >
             <Play class="w-3 h-3" />
@@ -98,7 +91,7 @@
     </div>
     
     <!-- 底部统计 -->
-    <div class="flex items-center justify-between px-3 py-2 bg-white border-t border-gray-100 text-[10px] text-gray-400" v-if="hasFiles">
+    <div class="flex items-center justify-between px-3 py-2 bg-white border-t border-border text-[10px] text-muted-foreground/50" v-if="hasFiles">
       <span>{{ fileCount }} 个文件</span>
       <span>{{ formattedTotalSize }}</span>
     </div>
@@ -127,8 +120,7 @@ const workspaceStore = useWorkspaceStore()
 
 // 状态
 const isAllExpanded = ref(false)
-const isPreparingSandbox = ref(false)
-const sandboxError = ref<string | null>(null)
+const loadError = ref<string | null>(null)
 
 // 计算属性
 const isLoading = computed(() => workspaceStore.isLoadingFiles)
@@ -154,32 +146,14 @@ const fileCount = computed(() => {
   return countFiles(files.value)
 })
 
-// 加载文件（先检查沙盒状态）
+// 加载文件
 async function loadFiles() {
   if (!props.conversationId) return
   
-  sandboxError.value = null
+  loadError.value = null
   
   try {
-    // 1. 先获取沙盒状态
-    isPreparingSandbox.value = true
-    const status = await workspaceStore.fetchSandboxStatus(props.conversationId)
-    
-    // 2. 根据状态决定操作
-    if (status.status === 'none' || status.status === 'killed') {
-      // 沙盒不存在，需要初始化
-      console.log('沙盒不存在，正在初始化...')
-      await workspaceStore.initSandbox(props.conversationId, 'default_user')
-    } else if (status.status === 'paused') {
-      // 沙盒已暂停，需要恢复
-      console.log('沙盒已暂停，正在恢复...')
-      await workspaceStore.resumeSandbox(props.conversationId)
-    }
-    // status === 'running' 或 'creating' 时直接继续
-    
-    isPreparingSandbox.value = false
-    
-    // 3. 获取文件列表
+    // 获取文件列表
     await Promise.all([
       workspaceStore.fetchFiles(props.conversationId, { path: '/home/user/project', tree: true }),
       workspaceStore.fetchProjects(props.conversationId)
@@ -188,8 +162,7 @@ async function loadFiles() {
     workspaceStore.expandAll()
     isAllExpanded.value = true
   } catch (error: any) {
-    isPreparingSandbox.value = false
-    sandboxError.value = error.message || '加载失败'
+    loadError.value = error.message || '加载失败'
     console.error('加载文件失败:', error)
   }
 }
@@ -251,19 +224,3 @@ watch(() => props.conversationId, (newId) => {
 }, { immediate: true })
 </script>
 
-<style scoped>
-/* 滚动条样式 */
-.scrollbar-thin::-webkit-scrollbar {
-  width: 4px;
-}
-.scrollbar-thin::-webkit-scrollbar-track {
-  background: transparent;
-}
-.scrollbar-thin::-webkit-scrollbar-thumb {
-  background-color: rgba(156, 163, 175, 0.3);
-  border-radius: 2px;
-}
-.scrollbar-thin::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(156, 163, 175, 0.5);
-}
-</style>

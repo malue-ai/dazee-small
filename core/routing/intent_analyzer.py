@@ -62,7 +62,7 @@ class IntentAnalyzer:
 
         Args:
             messages: 完整的消息列表（包含上下文）
-            tracker: EnhancedUsageTracker 实例（可选，用于计费追踪）
+            tracker: UsageTracker 实例（可选）
 
         Returns:
             IntentResult 意图分析结果（3 个核心字段 + 推断属性）
@@ -102,7 +102,7 @@ class IntentAnalyzer:
 
         Args:
             messages: 完整的消息列表
-            tracker: EnhancedUsageTracker 实例（可选）
+            tracker: UsageTracker 实例（可选）
 
         Returns:
             IntentResult

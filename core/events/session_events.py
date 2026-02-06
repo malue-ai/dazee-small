@@ -41,7 +41,7 @@ class SessionEventManager(BaseEventManager):
             user_id: 用户ID
             conversation_id: 对话ID
             message_id: 消息ID（可选，zenflux 格式中使用）
-            output_format: 输出格式（zenflux/zeno），默认 zenflux
+            output_format: 输出格式，默认 zenflux
             adapter: 格式转换适配器（可选）
 
         Returns:
@@ -78,7 +78,7 @@ class SessionEventManager(BaseEventManager):
         return await self._send_event(
             session_id,
             event,
-            conversation_id=conversation_id,  # 🔧 显式传递，避免从 Redis 重复获取
+            conversation_id=conversation_id,  # 显式传递
             message_id=message_id,
             output_format=output_format,
             adapter=adapter,
@@ -99,7 +99,7 @@ class SessionEventManager(BaseEventManager):
             session_id: Session ID
             conversation_id: 对话 ID（必填）
             reason: 停止原因（user_requested/timeout/error）
-            output_format: 输出格式（zenflux/zeno），默认 zenflux
+            output_format: 输出格式，默认 zenflux
             adapter: 格式转换适配器（可选）
 
         Returns:
@@ -139,7 +139,7 @@ class SessionEventManager(BaseEventManager):
             conversation_id: 对话 ID（必填）
             status: 会话状态（completed/failed/cancelled）
             duration_ms: 会话持续时间（毫秒）
-            output_format: 输出格式（zenflux/zeno），默认 zenflux
+            output_format: 输出格式，默认 zenflux
             adapter: 格式转换适配器（可选）
 
         Returns:
@@ -171,7 +171,7 @@ class SessionEventManager(BaseEventManager):
         Args:
             session_id: Session ID
             conversation_id: 对话 ID（必填）
-            output_format: 输出格式（zenflux/zeno），默认 zenflux
+            output_format: 输出格式，默认 zenflux
             adapter: 格式转换适配器（可选）
 
         Returns:

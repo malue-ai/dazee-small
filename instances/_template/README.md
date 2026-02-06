@@ -93,11 +93,11 @@ LLM 语义分析:
 ├─ 角色: 数据分析师
 ├─ 能力1: "处理 Excel" → 需要 Excel 读写能力
 ├─ 能力2: "数据可视化" → 需要图表生成能力
-├─ 隐含需求: 可能需要代码沙箱执行分析
+├─ 隐含需求: 可能需要代码执行分析
 │
 自动推断结果:
 ├─ xlsx: true
-├─ sandbox_tools: true
+├─ code_execution: true
 └─ plan_manager: true (数据分析通常需要多步骤)
 ```
 

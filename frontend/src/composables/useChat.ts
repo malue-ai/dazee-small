@@ -16,7 +16,6 @@ import type {
   SendMessageOptions,
   ContentBlock,
   PlanData,
-  Agent,
   HITLConfirmRequest
 } from '@/types'
 import { FILE_WRITE_TOOLS, TERMINAL_TOOLS, BACKGROUND_TASKS } from '@/utils'
@@ -43,9 +42,6 @@ export function useChat() {
 
   /** 是否正在停止 */
   const isStopping = ref(false)
-
-  /** 当前选择的 Agent */
-  const selectedAgent = ref<Agent | null>(null)
 
   /** 当前内容块类型（用于 delta 处理） */
   let currentBlockType: string | null = null
@@ -98,38 +94,20 @@ export function useChat() {
     // 加载会话列表
     await conversationStore.fetchList()
 
-    // 启动活跃会话轮询
-    const userId = conversationStore.userId
-    if (userId) {
-      sessionStore.startPolling(userId)
-    }
-
-    // 检查活跃会话（页面刷新重连）
-    const reconnected = await checkActiveSessions()
-
-    // 如果没有重连，根据路由加载会话
+    // 根据路由加载会话
     const routeConvId = route.params.conversationId
-    if (!reconnected && routeConvId && typeof routeConvId === 'string') {
+    if (routeConvId && typeof routeConvId === 'string') {
       await loadConversation(routeConvId)
     }
 
-    return reconnected
+    return false
   }
 
   /**
    * 清理
    */
   function cleanup(): void {
-    sessionStore.stopPolling()
     sse.disconnect()
-  }
-
-  /**
-   * 设置选中的 Agent
-   */
-  function setSelectedAgent(agent: Agent | null): void {
-    selectedAgent.value = agent
-    console.log('🤖 已选择 Agent:', agent?.name || '默认')
   }
 
   /**
@@ -203,7 +181,7 @@ export function useChat() {
         user_id: conversationStore.userId,
         conversation_id: conversationStore.currentId || undefined,
         stream: true,
-        agent_id: selectedAgent.value?.agent_id || options.agentId || undefined,
+        agent_id: options.agentId || undefined,
         background_tasks: options.backgroundTasks || [
           BACKGROUND_TASKS.TITLE_GENERATION,
           BACKGROUND_TASKS.RECOMMENDED_QUESTIONS
@@ -226,11 +204,6 @@ export function useChat() {
         onEvent: (event) => handleStreamEvent(event, assistantMsg),
         onConnected: () => {
           console.log('✅ SSE 已连接')
-          // 启动活跃会话轮询（如果之前因为没有活跃会话而停止了）
-          const userId = conversationStore.userId
-          if (userId) {
-            sessionStore.startPolling(userId)
-          }
         },
         onDisconnected: () => {
           console.log('✅ SSE 已断开')
@@ -279,7 +252,7 @@ export function useChat() {
 
     try {
       // 只发送停止请求，不立即断开 SSE
-      // SSE 会在收到 message.assistant.done 或 session_stopped 事件后由事件处理器断开
+      // SSE 会在收到 message_stop 或 session_stopped 事件后由事件处理器断开
       await sessionStore.stop(sessionId)
       // 🔧 修复：不在这里 disconnect，让事件处理器在收到 done 后断开
       // sse.disconnect()
@@ -354,32 +327,6 @@ export function useChat() {
       handleContentStop(data, msg)
     }
 
-    // 兼容 ZenO 格式（message.assistant.*）
-    if (type === 'message.assistant.delta') {
-      const delta = (event as any).delta
-      if (delta?.type === 'thinking') {
-        msg.thinking = (msg.thinking || '') + (delta.content || '')
-      } else if (delta?.type === 'response') {
-        msg.content += (delta.content || '')
-      } else if (delta?.type === 'clue') {
-        try {
-          const raw = typeof delta.content === 'string' ? JSON.parse(delta.content) : delta.content
-          const request = normalizeHITLRequest(raw)
-          if (request && !hitl.showModal.value) {
-            hitl.show(request)
-          }
-        } catch {
-          // 忽略解析错误
-        }
-      }
-    }
-
-    if (type === 'message.assistant.error') {
-      const error = (event as any).error
-      if (error?.message) {
-        msg.content += `\n❌ ${error.message}`
-      }
-    }
   }
 
   /**
@@ -768,36 +715,11 @@ export function useChat() {
     }
   }
 
-  /**
-   * 检查活跃会话（页面刷新重连）
-   */
-  async function checkActiveSessions(): Promise<boolean> {
-    try {
-      const userId = conversationStore.userId
-      if (!userId) return false
-
-      const sessions = await sessionStore.getActiveSessions(userId)
-
-      if (sessions && sessions.length > 0) {
-        console.log(`🔄 发现 ${sessions.length} 个活跃 Session`)
-        // TODO: 实现重连逻辑
-        // await reconnectToSession(sessions[0])
-        return false // 暂时返回 false，不自动重连
-      }
-
-      return false
-    } catch (error) {
-      console.log('ℹ️ 无活跃 Session 或检查失败')
-      return false
-    }
-  }
-
   return {
     // 状态
     isLoading,
     isGenerating,
     isStopping,
-    selectedAgent,
     hitl,
 
     // 计算属性
@@ -810,7 +732,6 @@ export function useChat() {
     // 方法
     initialize,
     cleanup,
-    setSelectedAgent,
     createNewConversation,
     loadConversation,
     sendMessage,

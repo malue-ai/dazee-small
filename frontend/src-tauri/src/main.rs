@@ -4,7 +4,18 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::process::Command as SysCommand;
-use std::time::Instant;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+use tauri::Manager;
+
+// ============================================================================
+// 常量
+// ============================================================================
+
+const BACKEND_PORT: u16 = 18900;
+const BACKEND_HEALTH_URL: &str = "http://localhost:18900/health";
+const BACKEND_STARTUP_TIMEOUT_SECS: u64 = 60;
+const BACKEND_HEALTH_POLL_MS: u64 = 500;
 
 // ============================================================================
 // 数据结构定义
@@ -29,10 +40,140 @@ pub struct ShellResult {
     pub timed_out: bool,
 }
 
+/// Sidecar 进程状态
+struct SidecarState {
+    child: Option<std::process::Child>,
+}
+
+// ============================================================================
+// Sidecar 管理
+// ============================================================================
+
+/// 获取应用数据目录（平台标准路径）
+fn get_app_data_dir(app: &tauri::AppHandle) -> String {
+    app.path()
+        .app_data_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .to_string_lossy()
+        .to_string()
+}
+
+/// 启动 Python 后端 sidecar 进程
+fn start_sidecar(app: &tauri::AppHandle) -> Option<std::process::Child> {
+    let data_dir = get_app_data_dir(app);
+
+    // 解析 sidecar 二进制路径
+    let sidecar_path = app
+        .path()
+        .resource_dir()
+        .ok()
+        .map(|dir| {
+            let binary_name = if cfg!(target_os = "windows") {
+                "zenflux-backend.exe"
+            } else {
+                "zenflux-backend"
+            };
+            dir.join("binaries").join(binary_name)
+        });
+
+    let sidecar_path = match sidecar_path {
+        Some(p) if p.exists() => p,
+        _ => {
+            eprintln!("[sidecar] 二进制文件不存在，跳过 sidecar 启动（开发模式）");
+            return None;
+        }
+    };
+
+    eprintln!(
+        "[sidecar] 启动后端: {} --port {} --data-dir {}",
+        sidecar_path.display(),
+        BACKEND_PORT,
+        data_dir
+    );
+
+    // 确保数据目录存在
+    let _ = std::fs::create_dir_all(&data_dir);
+
+    match SysCommand::new(&sidecar_path)
+        .args([
+            "--port",
+            &BACKEND_PORT.to_string(),
+            "--data-dir",
+            &data_dir,
+        ])
+        .spawn()
+    {
+        Ok(child) => {
+            eprintln!("[sidecar] 进程已启动, PID: {}", child.id());
+            Some(child)
+        }
+        Err(e) => {
+            eprintln!("[sidecar] 启动失败: {}", e);
+            None
+        }
+    }
+}
+
+/// 等待后端健康检查通过
+fn wait_for_backend_ready() -> bool {
+    let start = Instant::now();
+    let timeout = Duration::from_secs(BACKEND_STARTUP_TIMEOUT_SECS);
+    let poll_interval = Duration::from_millis(BACKEND_HEALTH_POLL_MS);
+
+    eprintln!("[sidecar] 等待后端就绪...");
+
+    loop {
+        if start.elapsed() > timeout {
+            eprintln!("[sidecar] 后端启动超时 ({}s)", BACKEND_STARTUP_TIMEOUT_SECS);
+            return false;
+        }
+
+        // 尝试 HTTP 健康检查
+        match ureq::get(BACKEND_HEALTH_URL)
+            .timeout(Duration::from_secs(2))
+            .call()
+        {
+            Ok(resp) if resp.status() == 200 => {
+                let elapsed_ms = start.elapsed().as_millis();
+                eprintln!("[sidecar] 后端就绪 ({}ms)", elapsed_ms);
+                return true;
+            }
+            _ => {
+                std::thread::sleep(poll_interval);
+            }
+        }
+    }
+}
+
 // ============================================================================
 // Tauri 命令
 // ============================================================================
 
+/// 获取后端 API 基础 URL
+#[tauri::command]
+async fn get_backend_url() -> Result<String, String> {
+    Ok(format!("http://localhost:{}/api", BACKEND_PORT))
+}
+
+/// 获取后端 WebSocket URL
+#[tauri::command]
+async fn get_backend_ws_url() -> Result<String, String> {
+    Ok(format!("ws://localhost:{}/api", BACKEND_PORT))
+}
+
+/// 检查后端是否就绪
+#[tauri::command]
+async fn is_backend_ready() -> Result<bool, String> {
+    match ureq::get(BACKEND_HEALTH_URL)
+        .timeout(Duration::from_secs(2))
+        .call()
+    {
+        Ok(resp) if resp.status() == 200 => Ok(true),
+        _ => Ok(false),
+    }
+}
+
+/// 执行 Shell 命令
 #[tauri::command]
 async fn run_command(
     command: Vec<String>,
@@ -97,7 +238,8 @@ async fn run_command(
 
 #[tauri::command]
 async fn which_command(executable: String) -> Result<Option<String>, String> {
-    let result = run_command(vec!["which".to_string(), executable], None, None, Some(5000)).await?;
+    let result =
+        run_command(vec!["which".to_string(), executable], None, None, Some(5000)).await?;
     if result.success {
         Ok(Some(result.stdout.trim().to_string()))
     } else {
@@ -149,10 +291,18 @@ async fn open_system_preferences(pane: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         let url = match pane.as_str() {
-            "camera" => "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera",
-            "screen" => "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
-            "location" => "x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices",
-            "accessibility" => "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+            "camera" => {
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera"
+            }
+            "screen" => {
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+            }
+            "location" => {
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices"
+            }
+            "accessibility" => {
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+            }
             _ => return Err(format!("Unknown preference pane: {}", pane)),
         };
 
@@ -200,7 +350,53 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
+        .manage(Mutex::new(SidecarState { child: None }))
+        .setup(|app| {
+            let handle = app.handle().clone();
+
+            // 在后台线程启动 sidecar（避免阻塞 UI）
+            std::thread::spawn(move || {
+                if let Some(child) = start_sidecar(&handle) {
+                    // 保存进程句柄
+                    let state = handle.state::<Mutex<SidecarState>>();
+                    if let Ok(mut guard) = state.lock() {
+                        guard.child = Some(child);
+                    }
+
+                    // 等待后端就绪
+                    let ready = wait_for_backend_ready();
+                    if !ready {
+                        eprintln!("[sidecar] 警告: 后端未在预期时间内就绪");
+                    }
+
+                    // 通知前端后端已就绪
+                    let _ = handle.emit("backend-ready", ready);
+                } else {
+                    // 开发模式：假设后端已手动启动
+                    let _ = handle.emit("backend-ready", true);
+                }
+            });
+
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            // 应用关闭时终止 sidecar
+            if let tauri::WindowEvent::Destroyed = event {
+                let state = window.app_handle().state::<Mutex<SidecarState>>();
+                if let Ok(mut guard) = state.lock() {
+                    if let Some(ref mut child) = guard.child {
+                        eprintln!("[sidecar] 正在终止后端进程...");
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        eprintln!("[sidecar] 后端进程已终止");
+                    }
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
+            get_backend_url,
+            get_backend_ws_url,
+            is_backend_ready,
             run_command,
             which_command,
             get_node_info,

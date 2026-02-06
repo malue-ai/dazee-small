@@ -21,7 +21,7 @@ from .chat import (
     RefineRequest,
 )
 from .api import APIResponse
-from .database import User, Conversation, Message
+from .database import Conversation, Message
 
 # 工具模型
 from .tool import (
@@ -161,7 +161,6 @@ __all__ = [
     # API 模型
     "APIResponse",
     # Database 模型
-    "User",
     "Conversation",
     "Message",
     # Tool 模型 - 枚举

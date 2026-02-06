@@ -424,7 +424,9 @@ class ClaudeAdaptor(BaseAdaptor):
         """
         Message → Claude API 格式
 
-        兜底检查：确保 tool_result 在 user 消息中
+        兜底检查：
+        1. 确保 tool_result 在 user 消息中
+        2. 过滤无效的 thinking 块（无 signature 会导致 API 400 错误）
         """
         converted_messages = []
 
@@ -442,8 +444,24 @@ class ClaudeAdaptor(BaseAdaptor):
                 tool_result_blocks = []
 
                 for block in content:
-                    if isinstance(block, dict) and block.get("type") == "tool_result":
+                    if not isinstance(block, dict):
+                        assistant_blocks.append(block)
+                        continue
+
+                    block_type = block.get("type", "")
+
+                    if block_type == "tool_result":
                         tool_result_blocks.append(block)
+                    elif block_type in ("thinking", "redacted_thinking"):
+                        # 只保留有有效 signature 的 thinking 块
+                        # 无 signature 的 thinking 块会导致 Claude API 400 错误：
+                        # "messages.X.content.Y.thinking.signature: Field required"
+                        if block.get("signature"):
+                            assistant_blocks.append(block)
+                        else:
+                            logger.debug(
+                                f"🧹 过滤无 signature 的 {block_type} 块"
+                            )
                     else:
                         assistant_blocks.append(block)
 

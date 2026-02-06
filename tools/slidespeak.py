@@ -137,7 +137,11 @@ class SlideSpeakTool(BaseTool):
         """
         import time
 
-        from utils.s3_uploader import get_s3_uploader
+        try:
+            # TODO: 迁移到 local_store
+            from utils.s3_uploader import get_s3_uploader
+        except ImportError:
+            raise NotImplementedError("S3 上传模块已删除，upload_to_s3 功能已禁用")
 
         # 1. 下载 PPT 内容到内存
         async with aiohttp.ClientSession() as session:

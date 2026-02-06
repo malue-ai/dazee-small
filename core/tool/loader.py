@@ -10,7 +10,7 @@
 设计原则：
 - 封装复杂性：对外提供简单的加载接口
 - 统一管理：三类工具统一加载和注册
-- 类别化配置：支持工具组配置（如 sandbox_tools、document_skills）
+- 类别化配置：支持工具组配置（如 document_skills）
 - 核心工具自动启用：Level 1 工具始终可用
 - 完全异步化：所有配置加载都是异步的
 """
@@ -73,13 +73,13 @@ class ToolLoader:
     3. Claude Skills - 从 skill_registry.yaml
 
     特性：
-    - 类别化配置：document_skills、sandbox_tools 等自动展开
+    - 类别化配置：document_skills 等自动展开
     - 核心工具自动启用：Level 1 工具无需用户配置
 
     示例:
         loader = ToolLoader(global_registry)
         result = loader.load_tools(
-            enabled_capabilities={"web_search": True, "sandbox_tools": True},
+            enabled_capabilities={"web_search": True, "document_skills": True},
             mcp_tools=[{"name": "dify", ...}],
             skills=[SkillConfig(...)]
         )
@@ -103,7 +103,7 @@ class ToolLoader:
         """
         展开类别配置为具体工具配置（异步）
 
-        将类别配置（如 sandbox_tools: 1）展开为具体工具配置
+        将类别配置展开为具体工具配置
         """
         expanded = {}
         tool_categories = await get_tool_categories_cached()
@@ -201,7 +201,7 @@ class ToolLoader:
         加载通用工具（从 capabilities.yaml，根据配置过滤）（异步）
 
         特性：
-        - 自动展开类别配置（如 sandbox_tools → 多个沙盒工具）
+        - 自动展开类别配置
         - 自动启用核心工具（Level 1）
 
         Args:

@@ -1,5 +1,5 @@
 """
-Code-First + VM Scaffolding 核心编排模块
+Code-First 核心编排模块
 
 设计哲学：
 - E2EPipelineTracer: 端到端管道追踪器，记录每个环节的输入-处理-输出

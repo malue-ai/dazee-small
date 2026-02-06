@@ -102,6 +102,38 @@ export async function getConversationMessages(
   }
 }
 
+/** 搜索结果项 */
+export interface SearchConversationItem {
+  conversation: Conversation
+  match_type: 'title' | 'content'
+  snippet: string | null
+}
+
+/** 搜索结果响应 */
+export interface SearchConversationsResponse {
+  conversations: SearchConversationItem[]
+  total: number
+}
+
+/**
+ * 搜索对话（标题 + 消息内容全文搜索）
+ */
+export async function searchConversations(
+  userId: string,
+  query: string,
+  limit = 20
+): Promise<SearchConversationsResponse> {
+  const response = await api.get<ApiResponse<SearchConversationsResponse>>(
+    '/v1/conversations/search',
+    { params: { user_id: userId, q: query, limit } }
+  )
+  const data = response.data?.data
+  return {
+    conversations: data?.conversations ?? [],
+    total: data?.total ?? 0
+  }
+}
+
 /**
  * 获取会话状态
  */

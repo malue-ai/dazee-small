@@ -89,7 +89,6 @@ async def _generate_recommended_questions(
         # 3. 通过 SSE 推送给前端
         if session_id and event_manager:
             # 🆕 使用 event_manager 已配置的 output_format 和 adapter
-            # 确保 Zeno 格式时能正确转换
             await event_manager.message.emit_message_delta(
                 session_id=session_id,
                 conversation_id=conversation_id,

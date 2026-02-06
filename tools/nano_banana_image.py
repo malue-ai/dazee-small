@@ -29,9 +29,16 @@ import httpx
 
 from core.tool.types import BaseTool, ToolContext
 from logger import get_logger
-from utils.s3_uploader import S3UploadError, get_s3_uploader
 
 logger = get_logger(__name__)
+
+# S3 上传器延迟导入（模块可能已删除）
+try:
+    from utils.s3_uploader import S3UploadError, get_s3_uploader
+except ImportError:
+    # TODO: 迁移到 local_store
+    S3UploadError = Exception
+    get_s3_uploader = None
 
 # 支持的分辨率
 SUPPORTED_RESOLUTIONS = ["1K", "2K", "4K"]
@@ -102,6 +109,8 @@ class NanoBananaImageTool(BaseTool):
         Returns:
             S3Uploader 实例
         """
+        if get_s3_uploader is None:
+            raise NotImplementedError("S3 上传模块已删除，功能已禁用")
         if self._s3_uploader is None:
             self._s3_uploader = get_s3_uploader()
             await self._s3_uploader.initialize()

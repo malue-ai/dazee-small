@@ -31,7 +31,7 @@ bash command:"codex exec 'Your prompt'"
 | `workdir` | string | Working directory (agent sees only this folder's context) |
 | `background` | boolean | Run in background, returns sessionId for monitoring |
 | `timeout` | number | Timeout in seconds (kills process on expiry) |
-| `elevated` | boolean | Run on host instead of sandbox (if allowed) |
+| `elevated` | boolean | Run with elevated privileges (if allowed) |
 
 ### Process Tool Actions (for background sessions)
 
@@ -102,8 +102,8 @@ process action:kill sessionId:XXX
 | Flag | Effect |
 |------|--------|
 | `exec "prompt"` | One-shot execution, exits when done |
-| `--full-auto` | Sandboxed but auto-approves in workspace |
-| `--yolo` | NO sandbox, NO approvals (fastest, most dangerous) |
+| `--full-auto` | Auto-approves in workspace |
+| `--yolo` | NO approvals (fastest, most dangerous) |
 
 ### Building/Creating
 ```bash

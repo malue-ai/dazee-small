@@ -28,7 +28,6 @@ from config.llm_config.loader import get_llm_profile
 from core.agent import Agent
 from core.agent.errors import ErrorClassifier
 from core.agent.models import MultiAgentConfig, load_multi_agent_config
-from core.billing.tracker import EnhancedUsageTracker
 from core.context.compaction import (  # 🆕 带摘要的智能压缩（双阈值机制）
     CompressionPhase,
     QoSLevel,
@@ -47,22 +46,20 @@ from core.monitoring import TokenAuditor, get_token_auditor
 from core.output import OutputFormatter, create_output_formatter
 from core.routing import AgentRouter, IntentResult, RoutingDecision
 
-# V10.1: MultiAgentOrchestrator 通过 Factory 创建，不直接 import
-# from core.agent.orchestrator import MultiAgentOrchestrator
 from core.routing.types import Complexity
 from core.schemas.validator import AgentSchema
 from evaluation.models import TokenUsage
-from infra.database import AsyncSessionLocal, crud
-from infra.pools import get_agent_pool, get_session_pool
+from infra.local_store import crud as local_crud
+from infra.local_store.engine import get_local_session_factory
+from infra.local_store.pools import get_local_agent_pool, get_local_session_pool
 from infra.resilience import get_circuit_breaker, with_retry, with_timeout
 from logger import clear_request_context, get_logger, log_execution_time, set_request_context
-from models.usage import UsageResponse
+from models.usage import UsageResponse, UsageTracker
 from services.agent_registry import AgentNotFoundError, get_agent_registry
 from services.conversation_service import (
     ConversationNotFoundError,
     get_conversation_service,
 )
-from services.sandbox_service import get_sandbox_service
 from services.session_service import (
     SessionNotFoundError,
     SessionService,
@@ -91,16 +88,14 @@ class PreprocessingResult:
 
     intent: Optional["IntentResult"]
     use_multi_agent: bool
-    preface_text: Optional[str] = None
 
 
 class PreprocessingHandler:
     """
-    前置处理器：意图识别 + Preface 生成
+    前置处理器：意图识别
 
     职责：
     1. 意图识别（路由决策）
-    2. Preface 开场白生成（流式）
 
     使用示例：
         handler = PreprocessingHandler(intent_llm=self.intent_llm)
@@ -109,12 +104,10 @@ class PreprocessingHandler:
             history_messages=history_messages,
             session_id=session_id,
             message_id=assistant_message_id,
-            agent_schema=agent.schema,
             broadcaster=agent.broadcaster,
             tracker=shared_tracker,
             router=router,
             enable_intent=True,
-            enable_preface=True
         )
     """
 
@@ -123,7 +116,7 @@ class PreprocessingHandler:
         初始化前置处理器
 
         Args:
-            intent_llm: 意图分析 LLM 服务（用于 Preface 生成）
+            intent_llm: 意图分析 LLM 服务
         """
         self.intent_llm = intent_llm
 
@@ -135,10 +128,9 @@ class PreprocessingHandler:
         message_id: str,
         agent_schema: Optional["AgentSchema"],
         broadcaster: "EventBroadcaster",
-        tracker: Optional["EnhancedUsageTracker"],
+        tracker: Optional["UsageTracker"],
         router: Optional["AgentRouter"],
         enable_intent: bool = True,
-        enable_preface: bool = True,
     ) -> PreprocessingResult:
         """
         执行前置处理
@@ -147,22 +139,20 @@ class PreprocessingHandler:
             user_message: 用户消息（支持 str 或多模态 list）
             history_messages: 历史消息列表
             session_id: Session ID
-            message_id: Assistant 消息 IDbuild_content_blocks
+            message_id: Assistant 消息 ID
             agent_schema: Agent Schema 配置
             broadcaster: EventBroadcaster 实例
             tracker: UsageTracker 实例
             router: AgentRouter 实例
             enable_intent: 是否启用意图识别
-            enable_preface: 是否启用 Preface 生成
 
         Returns:
-            PreprocessingResult 包含 intent、use_multi_agent、preface_text
+            PreprocessingResult 包含 intent、use_multi_agent
         """
         use_multi_agent = False
         routing_intent = None
-        preface_text = None
 
-        # 1. 意图识别
+        # 意图识别
         if enable_intent and router:
             history_for_intent = history_messages[:-1] if history_messages else []
 
@@ -179,20 +169,8 @@ class PreprocessingHandler:
             )
             logger.debug("意图识别已跳过，使用默认 IntentResult")
 
-        # 2. Preface 生成
-        if enable_preface and routing_intent and agent_schema:
-            preface_text = await self._generate_preface(
-                intent=routing_intent,
-                user_message=user_message,
-                session_id=session_id,
-                message_id=message_id,
-                broadcaster=broadcaster,
-                schema=agent_schema,
-                tracker=tracker,
-            )
-
         return PreprocessingResult(
-            intent=routing_intent, use_multi_agent=use_multi_agent, preface_text=preface_text
+            intent=routing_intent, use_multi_agent=use_multi_agent,
         )
 
     async def _analyze_intent(
@@ -200,7 +178,7 @@ class PreprocessingHandler:
         user_message: Any,
         history_messages: List[Dict[str, Any]],
         router: "AgentRouter",
-        tracker: Optional["EnhancedUsageTracker"],
+        tracker: Optional["UsageTracker"],
     ) -> tuple[Optional["IntentResult"], bool]:
         """
         执行意图识别
@@ -241,70 +219,6 @@ class PreprocessingHandler:
 
         return routing_intent, use_multi_agent
 
-    async def _generate_preface(
-        self,
-        intent: "IntentResult",
-        user_message: Any,
-        session_id: str,
-        message_id: str,
-        broadcaster: "EventBroadcaster",
-        schema: "AgentSchema",
-        tracker: Optional["EnhancedUsageTracker"],
-    ) -> Optional[str]:
-        """
-        流式生成 Preface 开场白
-
-        Returns:
-            完整的开场白文本，失败返回 None
-        """
-        try:
-            if not schema.preface_template:
-                logger.warning("Preface 配置缺失")
-                return None
-
-            prompt = schema.preface_template
-            llm_messages = [Message(role="user", content=prompt)]
-
-            accumulated_text = ""
-            final_response = None
-
-            max_tokens = schema.preface_max_tokens
-            with log_execution_time("Preface 生成", logger):
-                async for chunk in self.intent_llm.create_message_stream(
-                    messages=llm_messages, max_tokens=max_tokens
-                ):
-                    if chunk.content and chunk.is_stream:
-                        accumulated_text += chunk.content
-                        await broadcaster.emit_message_delta(
-                            session_id=session_id,
-                            delta={"type": "preface", "content": chunk.content},
-                            message_id=message_id,
-                            persist=False,
-                        )
-
-                    if not chunk.is_stream:
-                        final_response = chunk
-
-            if tracker and final_response:
-                tracker.record_call(
-                    llm_response=final_response, model=final_response.model, purpose="preface"
-                )
-
-            preface_text = accumulated_text.strip()
-            if preface_text:
-                logger.info(
-                    "Preface 生成完成",
-                    extra={"length": len(preface_text), "preview": preface_text[:50]},
-                )
-                return preface_text
-
-            return None
-
-        except Exception as e:
-            logger.warning("Preface 生成失败", extra={"error": str(e)})
-            return None
-
-
 # ==================== 异常定义 ====================
 
 
@@ -336,7 +250,7 @@ class ChatService:
     """
 
     # 默认 Agent 标识
-    DEFAULT_AGENT_KEY = "__default__"
+    DEFAULT_AGENT_KEY = "client_agent"
 
     def __init__(
         self,
@@ -347,9 +261,9 @@ class ChatService:
     ):
         self.session_service = session_service or get_session_service()
 
-        # 资源池
-        self.session_pool = get_session_pool()
-        self.agent_pool = get_agent_pool()
+        # 资源池（本地轻量实现）
+        self.session_pool = get_local_session_pool()
+        self.agent_pool = get_local_agent_pool()
 
         # 多智能体配置（延迟加载）
         self.multi_agent_config = multi_agent_config
@@ -558,7 +472,7 @@ class ChatService:
             )
             logger.debug("Agent 已获取", extra={"agent_id": agent_id})
 
-            shared_tracker = EnhancedUsageTracker()
+            shared_tracker = UsageTracker()
             agent._usage_tracker = shared_tracker
 
             await self.session_pool.on_session_start(session_id, user_id, agent_id)
@@ -621,7 +535,7 @@ class ChatService:
             files: 文件引用列表（FileReference 对象或字典）
             variables: 前端上下文变量（可选），如位置、时区等
             agent_id: Agent 实例 ID（可选，不提供则使用默认 Agent）
-            output_format: 输出事件格式（zeno/zenflux），默认 zenflux
+            output_format: 输出事件格式，默认 zenflux
 
         Returns:
             stream=True  → AsyncGenerator
@@ -727,9 +641,10 @@ class ChatService:
 
         try:
             with log_execution_time("查询历史+保存消息", logger):
-                async with AsyncSessionLocal() as db_session:
+                factory = await get_local_session_factory()
+                async with factory() as db_session:
                     # 7.1 先查询历史消息（不包含当前这条）
-                    db_messages = await crud.list_messages(
+                    db_messages = await local_crud.list_messages(
                         session=db_session, conversation_id=conversation_id, limit=1000, order="asc"
                     )
 
@@ -753,19 +668,20 @@ class ChatService:
                         if isinstance(content, dict):
                             content = [content]
 
-                        # 简单处理：按 index 排序并移除 index 字段
+                        # 按 index 排序，移除 index 字段，过滤 thinking 块
+                        # thinking/redacted_thinking 块不保留在历史中：
+                        # - 无 signature 会导致 Claude API 400 错误
+                        # - 官方文档允许省略: "You may omit thinking blocks from previous assistant turns"
                         if isinstance(content, list):
                             content = sorted(
                                 content,
                                 key=lambda b: b.get("index", 999) if isinstance(b, dict) else 999,
                             )
                             content = [
-                                (
-                                    {k: v for k, v in b.items() if k != "index"}
-                                    if isinstance(b, dict)
-                                    else b
-                                )
+                                {k: v for k, v in b.items() if k != "index"}
                                 for b in content
+                                if isinstance(b, dict)
+                                and b.get("type") not in ("thinking", "redacted_thinking")
                             ]
 
                         history_messages.append({"role": db_msg.role, "content": content})
@@ -780,7 +696,7 @@ class ChatService:
                     if files_metadata:
                         user_metadata["files"] = files_metadata
 
-                    user_msg = await crud.create_message(
+                    user_msg = await local_crud.create_message(
                         session=db_session,
                         conversation_id=conversation_id,
                         role="user",
@@ -799,7 +715,7 @@ class ChatService:
                     )
 
                     # 7.3 创建 Assistant 占位
-                    await crud.create_message(
+                    await local_crud.create_message(
                         session=db_session,
                         conversation_id=conversation_id,
                         role="assistant",
@@ -835,7 +751,7 @@ class ChatService:
             agent_acquired = True
             logger.debug("Agent 就绪", extra={"agent_id": pool_key})
 
-            shared_tracker = EnhancedUsageTracker()
+            shared_tracker = UsageTracker()
             agent._usage_tracker = shared_tracker
 
             await self.session_pool.on_session_start(session_id, user_id, pool_key)
@@ -937,7 +853,7 @@ class ChatService:
         agent_task = None  # 提前声明，避免 except 块中 NameError
 
         try:
-            redis = self.session_service.redis
+            store = self.session_service.store
 
             # 设置输出格式（EventManager 和 EventBroadcaster 都会使用）
             events = self.session_service.events
@@ -987,7 +903,7 @@ class ChatService:
             )
 
             # 订阅事件流
-            async for event in redis.subscribe_events(
+            async for event in store.subscribe_events(
                 session_id=session_id, after_id=0, timeout=1800
             ):
                 yield event
@@ -1128,8 +1044,8 @@ class ChatService:
         # 跟踪执行状态，用于 finally 块的资源清理
         execution_status = "completed"
 
-        # 将 events 和 redis 提前初始化，确保 except 块可以访问
-        redis = self.session_service.redis
+        # 将 events 和 store 提前初始化，确保 except 块可以访问
+        store = self.session_service.store
         events = self.session_service.events
 
         # 提前设置 output_format，确保 error 事件也使用正确的格式
@@ -1251,9 +1167,8 @@ class ChatService:
                 }
             )
 
-            # 前置处理：意图识别 + Preface 生成
+            # 前置处理：意图识别
             enable_intent = agent.schema.is_intent_analysis_enabled if agent.schema else False
-            enable_preface = agent.schema.is_preface_enabled if agent.schema else False
 
             # 获取 Router（如果启用意图识别）
             router = None
@@ -1273,7 +1188,6 @@ class ChatService:
                 tracker=shared_tracker,
                 router=router,
                 enable_intent=self.enable_routing and enable_intent,
-                enable_preface=enable_preface,
             )
 
             routing_intent = preprocessing_result.intent
@@ -1290,38 +1204,12 @@ class ChatService:
                     confidence=1.0,
                 )
 
-            # 如果生成了 Preface，添加到历史消息
-            if preprocessing_result.preface_text:
-                history_messages.append(
-                    {
-                        "role": "assistant",
-                        "content": [{"type": "text", "text": preprocessing_result.preface_text}],
-                    }
-                )
-                logger.debug(
-                    "Preface 已添加到上下文",
-                    extra={"length": len(preprocessing_result.preface_text)},
-                )
-
-            # 🆕 V10.0: 沙盒环境预创建（基于 Agent 配置）
-            # 如果 Agent 配置了沙盒工具，提前预热环境
-            if agent.schema and agent.schema.tools:
-                try:
-                    sandbox_service = get_sandbox_service()
-                    # 传入所有配置的工具，sandbox_service 会自动过滤需要沙盒的工具
-                    await sandbox_service.ensure_for_tools(
-                        agent.schema.tools, conversation_id, user_id
-                    )
-                    logger.info("沙盒环境已就绪", extra={"conversation_id": conversation_id})
-                except Exception as sb_err:
-                    logger.warning("沙盒预创建失败", extra={"error": str(sb_err)})
-
             # 设置输出格式
             if hasattr(agent, "broadcaster") and agent.broadcaster:
                 agent.broadcaster.set_output_format(output_format, conversation_id)
 
             # 更新 Session context
-            await redis.set_session_context(
+            await store.set_session_context(
                 session_id=session_id,
                 conversation_id=conversation_id,
                 user_id=user_id,
@@ -1459,7 +1347,7 @@ class ChatService:
 
                         # 发送 billing 事件
                         try:
-                            usage_response = UsageResponse.from_usage_tracker(
+                            usage_response = UsageResponse.from_tracker(
                                 tracker=agent.usage_tracker,
                                 model=agent.model,
                                 latency=int((time.time() - start_time) * 1000),
@@ -1510,7 +1398,7 @@ class ChatService:
 
                     # 在收到 billing 事件时执行后台任务
                     if (
-                        event_type in ("message_delta", "message.assistant.delta")
+                        event_type == "message_delta"
                         and background_tasks
                     ):
                         delta = event.get("data", {}).get("delta", {})
@@ -1557,7 +1445,7 @@ class ChatService:
                     )
             assistant_text = _assistant_text_for_tasks
 
-            final_status = await redis.get_session_status(session_id)
+            final_status = await store.get_session_status(session_id)
             status = final_status.get("status") if final_status else "completed"
 
             if status != "stopped":
@@ -1592,7 +1480,7 @@ class ChatService:
                 with log_execution_time("Token 审计", logger):
                     usage_stats = agent.usage_tracker.get_stats()
 
-                    usage_response = UsageResponse.from_usage_tracker(
+                    usage_response = UsageResponse.from_tracker(
                         tracker=agent.usage_tracker, model=agent.model, latency=duration_ms / 1000.0
                     )
 
@@ -1760,6 +1648,95 @@ class ChatService:
 
             # 🆕 清理日志上下文
             clear_request_context()
+
+    async def process_scheduled_task(
+        self,
+        user_id: str,
+        conversation_id: str,
+        prompt: str,
+        task_id: str,
+    ) -> Dict[str, Any]:
+        """
+        处理定时任务的 Agent 执行
+
+        用于 UserTaskScheduler 调用，执行用户设定的定时 Agent 任务。
+        与普通 chat() 的区别：
+        - 不走 SSE 流
+        - 简化的执行流程
+        - 结果直接返回
+
+        Args:
+            user_id: 用户 ID
+            conversation_id: 会话 ID
+            prompt: 任务提示词
+            task_id: 定时任务 ID
+
+        Returns:
+            执行结果
+        """
+        logger.info(
+            f"🤖 执行定时 Agent 任务: task_id={task_id}, prompt={prompt[:50]}..."
+        )
+
+        try:
+            # 获取默认 Agent
+            agent_id = "xiaodazi"  # 使用默认 Agent
+            agent_config = await self.agent_registry.get_agent(agent_id)
+
+            if not agent_config:
+                return {
+                    "success": False,
+                    "error": f"Agent 不存在: {agent_id}",
+                    "task_id": task_id,
+                }
+
+            # 创建 Agent 实例
+            agent = await self._create_agent(
+                agent_config=agent_config,
+                session_id=f"scheduled_{task_id}",
+                conversation_id=conversation_id,
+                user_id=user_id,
+            )
+
+            # 构造消息
+            messages = [Message(role="user", content=prompt)]
+
+            # 执行 Agent（非流式）
+            response = await agent.chat(messages=messages)
+
+            # 提取响应文本
+            response_text = ""
+            if hasattr(response, "content"):
+                for block in response.content:
+                    if hasattr(block, "text"):
+                        response_text += block.text
+
+            # 存储响应到会话
+            await self.conversation_service.create_message(
+                conversation_id=conversation_id,
+                role="assistant",
+                content=[{"type": "text", "text": response_text}],
+                metadata={
+                    "type": "scheduled_task_response",
+                    "task_id": task_id,
+                },
+            )
+
+            logger.info(f"✅ 定时 Agent 任务完成: task_id={task_id}")
+
+            return {
+                "success": True,
+                "task_id": task_id,
+                "response": response_text[:500],  # 截断长响应
+            }
+
+        except Exception as e:
+            logger.error(f"❌ 定时 Agent 任务失败: task_id={task_id}, error={e}", exc_info=True)
+            return {
+                "success": False,
+                "error": str(e),
+                "task_id": task_id,
+            }
 
 
 _default_service: Optional[ChatService] = None

@@ -54,8 +54,6 @@ tool_classification:
   # 常用工具（不延迟加载）
   # 用于：Tool Search 模式下不延迟加载的工具
   frequent_tools:
-    - sandbox_run_command
-    - sandbox_write_file
     - tavily_search
     - plan
     - nodes
@@ -69,17 +67,6 @@ tool_classification:
       - xlsx
       - docx
       - pdf
-    
-    # 代码沙盒类（E2B 沙盒工具）
-    sandbox_tools:
-      - sandbox_write_file
-      - sandbox_read_file
-      - sandbox_list_files
-      - sandbox_run_command
-      - sandbox_execute_python
-      - sandbox_get_public_url
-      - sandbox_upload_file
-      - sandbox_init_project
     
     # PPT 生成类
     ppt_tools:
@@ -262,13 +249,6 @@ capability_categories:
   - 保存结果
   - 文件管理
 
-# 注：code_execution 服务器工具已移除，代码执行使用 E2B 沙盒
-
-- id: code_sandbox
-  category_type: internal
-  description: 代码沙箱执行（框架内部）
-  internal: true
-
 - id: api_calling
   category_type: internal
   description: API 调用（框架内部通用实现）
@@ -314,7 +294,6 @@ capabilities:
   subtype: PREBUILT
   provider: anthropic
   invocation_hint: SKILL_CONTAINER  # 🆕 V4.4: Claude Skills 机制
-  fallback_tool: e2b_python_sandbox
   capabilities:
   - data_analysis
   - spreadsheet_creation
@@ -337,13 +316,11 @@ capabilities:
     - Excel
     - 数据分析
     - 表格
-    fallback_note: 使用 E2B Sandbox + pandas/openpyxl 实现 Excel 操作
 - name: docx
   type: SKILL
   subtype: PREBUILT
   provider: anthropic
   invocation_hint: SKILL_CONTAINER  # 🆕 V4.4: Claude Skills 机制
-  fallback_tool: e2b_python_sandbox
   capabilities:
   - document_creation
   - text_editing
@@ -366,13 +343,11 @@ capabilities:
     - Word
     - 文档
     - 编辑
-    fallback_note: 使用 E2B Sandbox + python-docx 实现 Word 文档操作
 - name: pdf
   type: SKILL
   subtype: PREBUILT
   provider: anthropic
   invocation_hint: SKILL_CONTAINER  # 🆕 V4.4: Claude Skills 机制
-  fallback_tool: e2b_python_sandbox
   capabilities:
   - pdf_generation
   - document_creation
@@ -394,7 +369,6 @@ capabilities:
     - PDF
     - 打印
     - 交付
-    fallback_note: 使用 E2B Sandbox + reportlab/fpdf 实现 PDF 生成
 - name: knowledge_search
   type: TOOL
   subtype: CUSTOM
@@ -1409,390 +1383,6 @@ capabilities:
     - 探索
     - 自定义
     - 动态
-- name: sandbox_write_file
-  type: TOOL
-  subtype: CUSTOM
-  provider: user
-  level: 1
-  implementation:
-    module: tools.sandbox_tools
-    class: SandboxWriteFile
-  capabilities:
-  - sandbox_file_operations
-  - app_generation
-  - app_generation
-  - content_writing
-  - app_generation
-  priority: 90
-  cost:
-    time: fast
-    money: free
-  constraints:
-    requires_api: true
-    api_name: e2b
-    session_scoped: true
-  metadata:
-    description: |
-      写入沙盒文件（目录自动创建）。
-      
-      【核心原则】用户是非技术人员，最终交付物必须是可直接使用的界面。
-      
-      【最佳实践】
-      1. 任何"系统/管理/平台"类项目必须包含前端界面（index.html 或 Vue/React）
-      2. 纯展示/小游戏用单文件 index.html（内嵌 CSS/JS）
-      3. 需要数据存储的系统必须同时创建：前端界面 + 后端 API
-      
-      【典型工作流 - 招聘系统】
-      1. sandbox_write_file("backend/main.py", FastAPI 后端代码)
-      2. sandbox_write_file("frontend/index.html", 完整的管理界面)  ← 用户能看到的界面！
-      3. sandbox_run_command 启动后端 (background=true, port=8000)
-      4. sandbox_run_command 启动前端 (background=true, port=3000)
-      5. 告知用户"系统已启动"，系统自动发送前端链接
-      
-      【关键检查】
-      任务完成前问自己：用户点击链接后能看到可操作的界面吗？
-      - 如果只有后端 API → 任务未完成，必须补充前端界面
-      - 如果用户需要懂代码才能用 → 任务失败
-    keywords: [sandbox, 沙盒, 写入, 文件]
-  input_schema:
-    type: object
-    properties:
-      path: {type: string, description: 文件路径}
-      content: {type: string, description: 文件内容}
-    required: [path, content]
-- name: sandbox_run_command
-  type: TOOL
-  subtype: CUSTOM
-  provider: user
-  level: 1
-  implementation:
-    module: tools.sandbox_tools
-    class: SandboxRunCommand
-  capabilities:
-  - sandbox_file_operations
-  - app_generation
-  - code_execution
-  - command_execution
-  - app_generation
-  priority: 90
-  cost:
-    time: fast
-    money: low
-  constraints:
-    requires_api: true
-    api_name: e2b
-    session_scoped: true
-  metadata:
-    description: |
-      执行终端命令。支持单命令或多命令批量执行，可一键启动前后端服务。
-      
-      【核心原则】用户是非技术人员，他们需要可点击访问的链接，而不是命令行输出。
-      
-      【模式一：单命令】使用 command 参数
-      
-      sandbox_run_command(
-        command="npm run dev -- --host 0.0.0.0",
-        background=true,
-        port=5173
-      )
-      
-      【模式二：多命令批量启动】使用 commands 参数（推荐）
-      
-      一次调用同时启动前端和后端：
-      sandbox_run_command(commands=[
-        { "name": "backend", "command": "npm run server", "port": 3000 },
-        { "name": "frontend", "command": "npm run dev", "port": 5173 }
-      ])
-      
-      返回值包含所有服务的 URL：
-      {
-        "success": true,
-        "urls": { "backend": "https://xxx.e2b.dev", "frontend": "https://yyy.e2b.dev" },
-        "services": [...]
-      }
-      
-      【常用命令示例】
-      - 静态 HTML：python3 -m http.server 8000
-      - React/Vue：npm run dev -- --host 0.0.0.0
-      - FastAPI：uvicorn main:app --host 0.0.0.0 --port 8000
-      - Express：node server.js
-      
-      【注意事项】
-      - 服务必须监听 0.0.0.0（不是 127.0.0.1 或 localhost）
-      - 启动前确保已执行 npm install 安装依赖
-      - 使用 port 参数获取公开 URL，localhost 用户无法访问
-    keywords: [sandbox, 沙盒, 命令, bash, shell, 启动服务器]
-  input_schema:
-    type: object
-    properties:
-      command:
-        type: string
-        description: 单命令模式 - 要执行的命令
-      commands:
-        type: array
-        description: 多命令模式 - 批量启动多个服务（优先于 command）
-        items:
-          type: object
-          properties:
-            name:
-              type: string
-              description: 服务名称（如 backend、frontend）
-            command:
-              type: string
-              description: 要执行的命令
-            port:
-              type: integer
-              description: 服务端口
-            cwd:
-              type: string
-              description: 工作目录
-          required: [command]
-      background:
-        type: boolean
-        description: 是否后台运行（单命令模式，启动服务器时使用）
-        default: false
-      port:
-        type: integer
-        description: 服务端口（单命令模式，自动返回公开 URL）
-      cwd:
-        type: string
-        description: 工作目录
-      timeout:
-        type: integer
-        description: 超时秒数（单命令同步模式）
-        default: 120
-    required: []
-- name: sandbox_read_file
-  type: TOOL
-  subtype: CUSTOM
-  provider: user
-  level: 1
-  implementation:
-    module: tools.sandbox_tools
-    class: SandboxReadFile
-  capabilities:
-  - sandbox_file_operations
-  priority: 88
-  cost:
-    time: instant
-    money: free
-  constraints:
-    requires_api: true
-    api_name: e2b
-    session_scoped: true
-  metadata:
-    description: 读取沙盒中的文件内容
-    keywords: [sandbox, 沙盒, 读取, 文件, read]
-  input_schema:
-    type: object
-    properties:
-      path: {type: string, description: 文件路径}
-    required: [path]
-- name: sandbox_list_files
-  type: TOOL
-  subtype: CUSTOM
-  provider: user
-  level: 1
-  implementation:
-    module: tools.sandbox_tools
-    class: SandboxListFiles
-  capabilities:
-  - sandbox_file_operations
-  priority: 87
-  cost:
-    time: instant
-    money: free
-  constraints:
-    requires_api: true
-    api_name: e2b
-    session_scoped: true
-  metadata:
-    description: 列出沙盒中指定目录的文件和子目录
-    keywords: [sandbox, 沙盒, 列表, 目录, list, ls]
-  input_schema:
-    type: object
-    properties:
-      path: {type: string, description: 目录路径（默认 /home/user/project）}
-    required: []
-- name: sandbox_execute_python
-  type: TOOL
-  subtype: CUSTOM
-  provider: user
-  level: 1
-  implementation:
-    module: tools.sandbox_tools
-    class: SandboxExecutePython
-  capabilities:
-  - sandbox_file_operations
-  - code_execution
-  - data_analysis
-  - app_generation
-  priority: 91
-  cost:
-    time: medium
-    money: low
-  constraints:
-    requires_api: true
-    api_name: e2b
-    session_scoped: true
-  metadata:
-    description: |
-      执行 Python 代码（Code Interpreter）。
-      
-      特性：
-      - 上下文共享：多次执行间变量、导入、函数定义会保留
-      - 图表支持：matplotlib 等图表会自动捕获并返回
-      - 预装包：pandas、numpy、matplotlib 等无需手动安装
-    preferred_for: [数据分析, Python代码, 可视化, 图表]
-    keywords: [sandbox, 沙盒, python, 代码, 执行, 数据分析, 图表]
-  input_schema:
-    type: object
-    properties:
-      code: {type: string, description: Python 代码}
-      timeout: {type: integer, description: 超时秒数, default: 300}
-    required: [code]
-- name: sandbox_get_public_url
-  type: TOOL
-  subtype: CUSTOM
-  provider: user
-  level: 1
-  implementation:
-    module: tools.sandbox_tools
-    class: SandboxGetPublicUrl
-  capabilities:
-  - sandbox_file_operations
-  priority: 90
-  cost:
-    time: instant
-    money: free
-  constraints:
-    requires_api: true
-    api_name: e2b
-    session_scoped: true
-  metadata:
-    description: |
-      获取沙盒中运行服务的公开 URL。
-      
-      【说明】
-      使用 sandbox_run_command(background=true, port=xxx) 时会自动返回公开 URL，
-      通常不需要单独调用此工具。
-      
-      【最佳实践】
-      - 优先在 sandbox_run_command 中指定 port 参数，直接获取 URL
-      - 此工具用于：之前启动了服务但忘记指定 port、需要再次获取 URL
-      
-      【常用端口】
-      - 静态 HTML (python -m http.server): 8000
-      - Vite (React/Vue): 5173
-      - Next.js / Node.js / Express: 3000
-      - FastAPI / Flask: 8000 / 5000
-      
-      【注意】用户是非技术人员，获取 URL 后系统会自动发送给前端，
-      只需告知用户"系统已启动"即可，无需在回复中展示技术细节。
-    preferred_for: [获取URL, 预览链接, 公开URL]
-    keywords: [sandbox, 沙盒, url, 预览, public]
-  input_schema:
-    type: object
-    properties:
-      port: {type: integer, description: 服务端口, default: 3000}
-    required: []
-- name: sandbox_upload_file
-  type: TOOL
-  subtype: CUSTOM
-  provider: user
-  level: 1
-  implementation:
-    module: tools.sandbox_tools
-    class: SandboxUploadFile
-  capabilities:
-  - sandbox_file_operations
-  - file_upload
-  - s3_storage
-  - app_generation
-  priority: 90
-  cost:
-    time: medium
-    money: low
-  constraints:
-    requires_api: true
-    api_name: e2b
-    session_scoped: true
-  metadata:
-    description: |
-      将沙盒中的文件上传到 S3 并返回下载链接。
-      
-      用途：
-      - 将沙盒中生成的文件（Excel、PDF、图片等）持久化存储
-      - 让前端用户可以下载沙盒中生成的文件
-      
-      典型工作流：
-      1. sandbox_execute_python 生成文件
-      2. sandbox_upload_file 上传到 S3 获取 URL
-      3. send_files 发送下载链接给前端
-    preferred_for: [文件上传, S3存储, 下载链接]
-    keywords: [sandbox, 沙盒, upload, 上传, s3, 下载]
-  input_schema:
-    type: object
-    properties:
-      path: {type: string, description: 沙盒中的文件路径}
-      filename: {type: string, description: 下载时显示的文件名（可选）}
-    required: [path]
-- name: sandbox_init_project
-  type: TOOL
-  subtype: CUSTOM
-  provider: user
-  level: 1
-  implementation:
-    module: tools.sandbox_tools
-    class: SandboxInitProject
-  capabilities:
-  - sandbox_file_operations
-  - content_writing
-  - app_generation
-  priority: 95
-  cost:
-    time: fast
-    money: free
-  constraints:
-    requires_api: true
-    api_name: e2b
-    session_scoped: true
-  metadata:
-    description: |
-      一键初始化项目脚手架，自动生成完整目录结构和配置文件。
-      
-      【支持的模板】
-      
-      1. react_fullstack（推荐，默认）
-         - 技术栈：Vite + React + TypeScript + TailwindCSS + Express
-         - 前端端口：5173，后端端口：3000
-         - 包含：components/、pages/、hooks/、README.md
-         - 启动：npm install && npm run dev
-         - 适用：需要完整前后端分离的 Web 应用
-         - 初始化后：先阅读 README.md 了解项目结构
-      
-      2. remotion（视频创作）
-         - 技术栈：Remotion + React + TypeScript
-         - 用途：编程视频生成（React 代码 → MP4）
-         - 包含：src/Root.tsx、src/Composition.tsx、rules/、src/examples/
-         - 渲染：npm install && npx remotion render src/Root.tsx MyVideo out/video.mp4
-         - 适用：视频动画、数据可视化动画、宣传片
-         - 初始化后：先阅读 README.md 了解核心规则和示例代码
-         
-      【返回值说明】
-      - created_files: 创建的文件列表
-      - ports: { frontend: 5173, backend: 3000 } 或 { studio: 3000 }
-      - startup_hint: 启动命令提示
-    keywords: [sandbox, 沙盒, 初始化, 模板, 脚手架, react, node, html, remotion, video, 视频]
-  input_schema:
-    type: object
-    properties:
-      template:
-        type: string
-        description: 模板名称
-        enum: [react_fullstack, remotion]
-        default: react_fullstack
-    required: []
 - name: document_partition_tool
   type: TOOL
   subtype: CUSTOM
@@ -2067,3 +1657,102 @@ capabilities:
         description: 可执行文件名（which action）
     required:
     - action
+
+# ==================== 定时任务工具 ====================
+- name: scheduled_task
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  invocation_hint: DIRECT
+  level: 1  # 核心工具，始终可用
+  cache_stable: false
+  implementation:
+    module: tools.scheduled_task_tool
+    class: ScheduledTaskTool
+  capabilities:
+  - task_scheduling
+  - reminder
+  - automation
+  priority: 90
+  cost:
+    time: fast
+    money: low
+  constraints:
+    requires_api: false
+  metadata:
+    description: |
+      定时任务管理工具，支持创建、查看、取消定时任务。
+      
+      **支持的触发类型**：
+      - once: 单次执行（指定具体时间）
+      - cron: Cron 表达式（如 "0 9 * * *" 表示每天 9 点）
+      - interval: 固定间隔（如每 3600 秒）
+      
+      **支持的动作类型**：
+      - send_message: 发送提醒消息
+      - agent_task: 让 AI 执行任务
+      
+      **使用示例**：
+      - "每天早上 9 点提醒我开会" → trigger_type=cron, cron="0 9 * * *"
+      - "明天下午 3 点提醒我打电话" → trigger_type=once
+      - "每隔 2 小时提醒我喝水" → trigger_type=interval, interval_seconds=7200
+    preferred_for:
+    - 设置提醒
+    - 定时任务
+    - 周期性任务
+    - 自动化执行
+  input_schema:
+    type: object
+    properties:
+      operation:
+        type: string
+        enum:
+        - create
+        - list
+        - cancel
+        - update
+        description: 操作类型
+      task_id:
+        type: string
+        description: 任务 ID（更新/取消时必填）
+      title:
+        type: string
+        description: 任务标题
+      trigger_type:
+        type: string
+        enum:
+        - once
+        - cron
+        - interval
+        description: 触发类型
+      trigger_config:
+        type: object
+        description: 触发配置
+        properties:
+          run_at:
+            type: string
+            description: 执行时间（ISO 格式），trigger_type=once 时使用
+          cron:
+            type: string
+            description: Cron 表达式，trigger_type=cron 时使用
+          interval_seconds:
+            type: integer
+            description: 间隔秒数，trigger_type=interval 时使用
+      action:
+        type: object
+        description: 执行动作配置
+        properties:
+          type:
+            type: string
+            enum:
+            - send_message
+            - agent_task
+            description: 动作类型
+          content:
+            type: string
+            description: 提醒内容（send_message 时使用）
+          prompt:
+            type: string
+            description: 任务描述（agent_task 时使用）
+    required:
+    - operation

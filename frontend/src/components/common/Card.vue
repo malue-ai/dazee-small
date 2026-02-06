@@ -1,5 +1,5 @@
 <template>
-  <div :class="['card', variant]" :style="customStyle">
+  <div :class="['card-base', 'card-hover', 'card-component', variant]" :style="customStyle">
     <div v-if="$slots.header || title" class="card-header">
       <slot name="header">
         <h3 class="card-title">{{ title }}</h3>
@@ -41,46 +41,34 @@ const customStyle = computed(() => ({
 </script>
 
 <style scoped>
-.card {
-  background: white;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  overflow: hidden;
-  transition: all 0.3s ease;
+/* 变体样式：左侧边框 */
+.card-component.primary {
+  border-left: 4px solid var(--color-primary);
 }
 
-.card:hover {
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
-  transform: translateY(-2px);
+.card-component.success {
+  border-left: 4px solid var(--color-success);
 }
 
-.card.primary {
-  border-left: 4px solid #667eea;
+.card-component.warning {
+  border-left: 4px solid var(--color-primary);
 }
 
-.card.success {
-  border-left: 4px solid #48bb78;
-}
-
-.card.warning {
-  border-left: 4px solid #ed8936;
-}
-
-.card.error {
-  border-left: 4px solid #f56565;
+.card-component.error {
+  border-left: 4px solid var(--color-destructive);
 }
 
 .card-header {
   padding: var(--card-padding);
-  border-bottom: 1px solid #e5e7eb;
-  background: #f9fafb;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-muted);
 }
 
 .card-title {
   margin: 0;
   font-size: 18px;
   font-weight: 600;
-  color: #2c3e50;
+  color: var(--color-foreground);
 }
 
 .card-body {
@@ -89,8 +77,8 @@ const customStyle = computed(() => ({
 
 .card-footer {
   padding: var(--card-padding);
-  border-top: 1px solid #e5e7eb;
-  background: #f9fafb;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-muted);
 }
 </style>
 

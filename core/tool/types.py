@@ -90,7 +90,7 @@ class ToolContext:
 
     Attributes:
         session_id: 会话 ID
-        conversation_id: 对话 ID（用于沙盒工具等需要关联对话的场景）
+        conversation_id: 对话 ID
         user_id: 用户 ID
         memory: 工作记忆实例（可选）
         event_manager: 事件管理器实例（可选）

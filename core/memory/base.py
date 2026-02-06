@@ -34,14 +34,12 @@ class StorageBackend(Enum):
 
     - MEMORY: 内存存储（默认，会话结束即清除）
     - FILE: 文件存储（JSON 文件）
-    - DATABASE: 数据库存储（预留）
-    - REDIS: Redis 存储（预留）
+    - DATABASE: 数据库存储（SQLite）
     """
 
     MEMORY = "memory"
     FILE = "file"
-    DATABASE = "database"  # 预留
-    REDIS = "redis"  # 预留
+    DATABASE = "database"
 
 
 @dataclass

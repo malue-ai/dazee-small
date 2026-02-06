@@ -68,7 +68,7 @@ class MessageEventManager(BaseEventManager):
             model: 模型名称
             seq: 事件序号（可选，来自 EventBroadcaster）
             event_uuid: 事件 UUID（可选）
-            output_format: 输出格式（zenflux/zeno），默认 zenflux
+            output_format: 输出格式，默认 zenflux
             adapter: 格式转换适配器（可选）
 
         Returns:
@@ -121,7 +121,7 @@ class MessageEventManager(BaseEventManager):
             message_id: 消息 ID（可选）
             seq: 事件序号（可选）
             event_uuid: 事件 UUID（可选）
-            output_format: 输出格式（zenflux/zeno），默认 zenflux
+            output_format: 输出格式，默认 zenflux
             adapter: 格式转换适配器（可选）
 
         Returns:
@@ -173,7 +173,7 @@ class MessageEventManager(BaseEventManager):
             message_id: Message ID（可选）
             seq: 事件序号（可选）
             event_uuid: 事件 UUID（可选）
-            output_format: 输出格式（zenflux/zeno），默认 zenflux
+            output_format: 输出格式，默认 zenflux
             adapter: 格式转换适配器（可选）
 
         Returns:

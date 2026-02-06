@@ -179,27 +179,14 @@ def create_llm_service(
         model: 模型名称（默认根据 provider 选择）
         api_key: API 密钥（默认从环境变量读取）
         **kwargs: 其他配置参数
-            - fallbacks: 备选模型列表（🆕 V7.10）
-            - policy: 路由策略（🆕 V7.10）
-            - api_key_env: API Key 环境变量名（🆕 V7.10）
+            - api_key_env: API Key 环境变量名
 
     Returns:
-        LLM 服务实例（可能是 ModelRouter 或单个 LLM Service）
+        LLM 服务实例
 
     Example:
     ```python
-    # 单个模型（无容灾）
     llm = create_llm_service(provider="claude", model="claude-sonnet-4-5")
-
-    # 多模型容灾（自动包装为 ModelRouter）
-    llm = create_llm_service(
-        provider="claude",
-        model="claude-sonnet-4-5",
-        fallbacks=[
-            {"provider": "claude", "model": "claude-sonnet-4-5", "api_key_env": "CLAUDE_API_KEY_VENDOR_A"}
-        ],
-        policy={"max_failures": 2, "cooldown_seconds": 600}
-    )
     ```
     """
     # 字符串转枚举
@@ -211,7 +198,7 @@ def create_llm_service(
         LLMProvider.CLAUDE: "claude-sonnet-4-5-20250929",
         LLMProvider.OPENAI: "gpt-4o",
         LLMProvider.GEMINI: "gemini-pro",
-        LLMProvider.QWEN: "qwen3-max",  # 🆕 对标 claude-sonnet-4-5
+        LLMProvider.QWEN: "qwen3-max",
     }
 
     if model is None:
@@ -227,81 +214,16 @@ def create_llm_service(
                 LLMProvider.CLAUDE: "ANTHROPIC_API_KEY",
                 LLMProvider.OPENAI: "OPENAI_API_KEY",
                 LLMProvider.GEMINI: "GOOGLE_API_KEY",
-                LLMProvider.QWEN: "DASHSCOPE_API_KEY",  # 🆕
+                LLMProvider.QWEN: "DASHSCOPE_API_KEY",
             }
             api_key = os.getenv(env_keys.get(provider, "ANTHROPIC_API_KEY"))
 
-    # 检查是否有 fallbacks 配置（🆕 V7.10）
-    fallbacks_config = kwargs.pop("fallbacks", None)
-    policy_config = kwargs.pop("policy", None)
+    # 桌面版简化：移除 fallbacks/ModelRouter，直接创建单个 LLM 服务
+    # 忽略 fallbacks 和 policy 参数（兼容旧配置）
+    kwargs.pop("fallbacks", None)
+    kwargs.pop("policy", None)
 
-    if not fallbacks_config:
-        # 无 fallbacks，创建单个 LLM 服务
-        return _create_single_llm_service(provider, model, api_key, **kwargs)
-
-    # 有 fallbacks，创建 ModelRouter（🆕 V7.10）
-    from logger import get_logger
-
-    logger = get_logger("llm.factory")
-
-    # 创建 primary target
-    primary_service = _create_single_llm_service(provider, model, api_key, **kwargs)
-    primary = RouteTarget(
-        service=primary_service,
-        provider=provider,
-        model=model,
-        name=f"primary:{provider.value}:{model}",
-    )
-
-    # 创建 fallback targets
-    fallbacks = []
-    for idx, fb_config in enumerate(fallbacks_config):
-        fb_provider = fb_config.get("provider", provider)
-        fb_model = fb_config.get("model", model)
-        fb_api_key_env = fb_config.get("api_key_env")
-        fb_api_key = os.getenv(fb_api_key_env) if fb_api_key_env else None
-
-        # 合并配置（fallback 继承 primary 的配置，但可覆盖）
-        fb_kwargs = kwargs.copy()
-        for key in [
-            "base_url",
-            "max_tokens",
-            "temperature",
-            "enable_thinking",
-            "thinking_budget",
-            "enable_caching",
-            "timeout",
-            "max_retries",
-        ]:
-            if key in fb_config:
-                fb_kwargs[key] = fb_config[key]
-
-        fb_service = _create_single_llm_service(fb_provider, fb_model, fb_api_key, **fb_kwargs)
-        fallbacks.append(
-            RouteTarget(
-                service=fb_service,
-                provider=(
-                    fb_provider
-                    if isinstance(fb_provider, LLMProvider)
-                    else LLMProvider(fb_provider)
-                ),
-                model=fb_model,
-                name=f"fallback_{idx}:{fb_provider}:{fb_model}",
-            )
-        )
-
-    # 创建 ModelRouter
-    logger.info(
-        f"🔀 创建 ModelRouter: primary={primary.name}, "
-        f"fallbacks=[{', '.join(f.name for f in fallbacks)}]"
-    )
-
-    return ModelRouter(
-        primary=primary,
-        fallbacks=fallbacks,
-        policy=policy_config,
-        health_monitor=get_llm_health_monitor(),
-    )
+    return _create_single_llm_service(provider, model, api_key, **kwargs)
 
 
 # ============================================================

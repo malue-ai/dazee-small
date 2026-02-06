@@ -20,11 +20,11 @@
 {
   "name": "DataAnalyst",
   "description": "专业数据分析助手",
-  "tools": ["e2b_sandbox"],
+  "tools": [],
   "skills": [{"name": "excel-generator", "enabled": true}],
   "plan_manager": {"enabled": true, "max_steps": 15},
   "max_turns": 15,
-  "reasoning": "涉及数据处理、代码执行和报表生成，需要沙箱环境和 Excel 能力"
+  "reasoning": "涉及数据处理、代码执行和报表生成，需要 Excel 能力"
 }
 </schema>
 </example>
@@ -72,7 +72,7 @@
 {
   "name": "ReportGenerator",
   "description": "多格式报告生成专家",
-  "tools": ["e2b_sandbox"],
+  "tools": [],
   "skills": [
     {"name": "excel-generator", "enabled": true},
     {"name": "ppt-generator", "enabled": true},
@@ -94,7 +94,7 @@
 {
   "name": "CodeAssistant",
   "description": "编程助手",
-  "tools": ["e2b_sandbox"],
+  "tools": [],
   "skills": [],
   "plan_manager": {"enabled": true, "max_steps": 10},
   "output_formatter": {"default_format": "markdown", "code_highlighting": true},
@@ -159,7 +159,7 @@
   "memory_manager": {"enabled": true, "retention_policy": "session", ...},
   "output_formatter": {"enabled": true, "default_format": "markdown", ...},
   "skills": [{"name": "excel-generator", "enabled": true}],
-  "tools": ["e2b_sandbox", "web_search"],
+  "tools": ["web_search"],
   "model": "claude-sonnet-4-5-20250929",
   "max_turns": 15,
   "allow_parallel_tools": false,

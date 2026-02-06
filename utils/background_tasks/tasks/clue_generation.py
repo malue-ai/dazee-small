@@ -32,17 +32,6 @@
     }
 }
 
-或 Zeno 格式：
-{
-    "type": "message.assistant.delta",
-    "message_id": "msg_123",
-    "timestamp": 1735000000000,
-    "delta": {
-        "type": "clue",
-        "content": "{\"tasks\":[...]}"
-    }
-}
-
 ClueData 结构：
 {
     "tasks": [

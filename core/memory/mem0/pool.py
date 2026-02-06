@@ -10,6 +10,7 @@ Mem0 全局缓存池
 - 单例模式：全局唯一的缓存池
 - 懒加载：按需创建 Memory 实例
 - 线程安全：支持并发访问
+- 100% 本地：使用 sqlite-vec，零外部服务依赖
 """
 
 import threading
@@ -84,129 +85,112 @@ class Mem0MemoryPool:
 
     def _create_memory(self) -> Any:
         """
-        创建 Mem0 Memory 实例
+        创建 Mem0 Memory 实例（使用 sqlite-vec 本地向量存储）
 
         Returns:
             配置好的 Memory 实例
         """
         try:
             from mem0 import Memory
+            from mem0.configs.base import MemoryConfig as Mem0MemoryConfig
+            from mem0.embeddings.configs import EmbedderConfig
+            from mem0.llms.configs import LlmConfig
+            from mem0.memory.storage import SQLiteManager
+            from mem0.utils.factory import EmbedderFactory, LlmFactory
+            from mem0.vector_stores.configs import VectorStoreConfig
 
-            # 检查是否使用腾讯云VectorDB
-            if self.config.vector_store_provider == "tencent":
-                logger.info("[Mem0Pool] 使用腾讯云VectorDB - 手动创建组件")
+            from core.memory.mem0.sqlite_vec_store import SqliteVecVectorStore
 
-                # 手动创建所有组件（绕过Mem0的Factory验证）
-                from mem0.memory.storage import SQLiteManager
-                from mem0.utils.factory import EmbedderFactory, LlmFactory
+            logger.info("[Mem0Pool] 使用 sqlite-vec 本地向量存储")
 
-                from core.memory.mem0.tencent_vectordb import TencentVectorDB
+            # 1. 创建 sqlite-vec 向量存储
+            collection_name = self.config.collection_name
+            vector_store = SqliteVecVectorStore(
+                collection_name=collection_name,
+                embedding_model_dims=self.config.embedding_model_dims,
+            )
 
-                # 1. 创建腾讯云VectorDB
-                tencent_config = self.config.tencent.to_dict()
-                vector_store = TencentVectorDB(**tencent_config)
+            # 2. 创建 Embedder
+            embedding_config = self.config.embedder.to_dict()
+            embedding_model = EmbedderFactory.create(
+                self.config.embedder.provider,
+                embedding_config,
+                # 传递 vector_store config（EmbedderFactory 需要）
+                {"collection_name": collection_name,
+                 "embedding_model_dims": self.config.embedding_model_dims},
+            )
 
-                # 2. 创建 Embedder
-                embedding_model = EmbedderFactory.create(
-                    self.config.embedder.provider,
-                    self.config.embedder.to_dict(),
-                    tencent_config,  # 传递vector_store config
-                )
+            # 3. 创建 LLM
+            llm = LlmFactory.create(
+                self.config.llm.provider, self.config.llm.to_dict()
+            )
 
-                # 3. 创建 LLM
-                llm = LlmFactory.create(self.config.llm.provider, self.config.llm.to_dict())
+            # 4. 创建 SQLite 历史管理器
+            db = SQLiteManager("mem0_history.db")
 
-                # 4. 创建 SQLite历史管理器
-                db = SQLiteManager("mem0_history.db")
+            # 5. 创建最小配置对象（供 Memory 内部方法访问）
+            #
+            # 注意：Mem0 的 MemoryConfig 只支持预定义的 provider（如 "qdrant"），
+            # 不支持 "sqlite_vec"。因此使用 qdrant 结构占位，
+            # 实际 vector_store 会被替换为 SqliteVecVectorStore 实例。
+            minimal_config = Mem0MemoryConfig(
+                version=self.config.version,
+                vector_store=VectorStoreConfig(
+                    provider="qdrant",
+                    config={
+                        "collection_name": collection_name,
+                        "embedding_model_dims": self.config.embedding_model_dims,
+                        "path": ":memory:",  # 占位，不会实际使用
+                    },
+                ),
+                embedder=EmbedderConfig(
+                    provider=self.config.embedder.provider,
+                    config=embedding_config,
+                ),
+                llm=LlmConfig(
+                    provider=self.config.llm.provider,
+                    config=self.config.llm.to_dict(),
+                ),
+            )
 
-                # 5. 创建最小配置对象（用于MemoryConfig结构，供Memory内部方法访问）
-                #
-                # 注意：Mem0的MemoryConfig只支持预定义的provider（如"qdrant"），不支持"tencent"
-                # 因此我们使用Qdrant配置结构，但实际vector_store会被替换为TencentVectorDB实例
-                # 这个配置仅用于满足MemoryConfig的验证要求，不会被实际使用
-                #
-                from mem0.configs.base import MemoryConfig as Mem0MemoryConfig
-                from mem0.embeddings.configs import EmbedderConfig
-                from mem0.llms.configs import LlmConfig
-                from mem0.vector_stores.configs import VectorStoreConfig
+            # 6. 手动构造 Memory 实例
+            #
+            # 使用 __new__ 绕过 __init__，手动设置所有属性，
+            # 这样可以注入 SqliteVecVectorStore 替代 Qdrant。
+            from core.memory.mem0.update.prompts import (
+                CUSTOM_FACT_EXTRACTION_PROMPT,
+                CUSTOM_UPDATE_MEMORY_PROMPT,
+            )
 
-                # 使用腾讯云的真实配置值（虽然不会真正连接Qdrant）
-                # 这样配置更清晰，且collection_name和embedding_model_dims是实际需要的
-                qdrant_config_dict = {
-                    "url": tencent_config["url"],  # 使用腾讯云URL（虽然不会连接）
-                    "api_key": tencent_config["api_key"],  # 使用腾讯云API Key（虽然不会使用）
-                    "collection_name": tencent_config["collection_name"],  # ✅ 实际使用
-                    "embedding_model_dims": tencent_config["embedding_model_dims"],  # ✅ 实际使用
-                }
+            memory = Memory.__new__(Memory)
+            memory.config = minimal_config
+            memory.custom_fact_extraction_prompt = CUSTOM_FACT_EXTRACTION_PROMPT
+            memory.custom_update_memory_prompt = CUSTOM_UPDATE_MEMORY_PROMPT
+            memory.embedding_model = embedding_model
+            memory.vector_store = vector_store  # 关键：使用 sqlite-vec
+            memory.llm = llm
+            memory.db = db
+            memory.collection_name = collection_name
+            memory.api_version = self.config.version
+            memory.reranker = None
+            memory.enable_graph = False
+            memory.graph = None
 
-                minimal_config = Mem0MemoryConfig(
-                    version=self.config.version,
-                    vector_store=VectorStoreConfig(provider="qdrant", config=qdrant_config_dict),
-                    embedder=EmbedderConfig(
-                        provider=self.config.embedder.provider,
-                        config=self.config.embedder.to_dict(),
-                    ),
-                    llm=LlmConfig(
-                        provider=self.config.llm.provider, config=self.config.llm.to_dict()
-                    ),
-                )
-
-                # 6. 手动构造 Memory 实例
-                #
-                # 关键：使用 __new__ 绕过 __init__，然后手动设置所有属性
-                # 这样我们可以：
-                # 1. 使用腾讯云VectorDB（而不是Qdrant）
-                # 2. 保留MemoryConfig结构（供内部方法使用，如_build_filters_and_metadata）
-                # 3. 实际使用我们创建的TencentVectorDB实例
-                #
-                # 导入自定义 Prompt（强调数字/金额/时间细节）
-                from core.memory.mem0.update.prompts import (
-                    CUSTOM_FACT_EXTRACTION_PROMPT,
-                    CUSTOM_UPDATE_MEMORY_PROMPT,
-                )
-
-                memory = Memory.__new__(Memory)
-                memory.config = minimal_config  # 保留配置结构（供内部方法使用）
-                memory.custom_fact_extraction_prompt = CUSTOM_FACT_EXTRACTION_PROMPT
-                memory.custom_update_memory_prompt = CUSTOM_UPDATE_MEMORY_PROMPT
-                memory.embedding_model = embedding_model  # ✅ 实际使用
-                memory.vector_store = vector_store  # ✅ 关键：使用腾讯云VectorDB实例
-                memory.llm = llm  # ✅ 实际使用
-                memory.db = db  # ✅ 实际使用
-                memory.collection_name = tencent_config["collection_name"]  # ✅ 实际使用
-                memory.api_version = self.config.version
-                memory.reranker = None
-                memory.enable_graph = False
-                memory.graph = None
-
-                logger.info(f"[Mem0Pool] Memory实例创建成功（腾讯云VectorDB）")
-                return memory
-            else:
-                # 使用标准配置（Qdrant等）
-                # 导入自定义 Prompt（强调数字/金额/时间细节）
-                from core.memory.mem0.update.prompts import (
-                    CUSTOM_FACT_EXTRACTION_PROMPT,
-                    CUSTOM_UPDATE_MEMORY_PROMPT,
-                )
-
-                mem0_config = self.config.to_mem0_config()
-                memory = Memory.from_config(config_dict=mem0_config)
-
-                # 设置自定义 Prompt
-                memory.custom_fact_extraction_prompt = CUSTOM_FACT_EXTRACTION_PROMPT
-                memory.custom_update_memory_prompt = CUSTOM_UPDATE_MEMORY_PROMPT
-
-                logger.info(f"[Mem0Pool] Memory实例创建成功（{self.config.vector_store_provider}）")
-                return memory
+            logger.info("[Mem0Pool] Memory 实例创建成功（sqlite-vec）")
+            return memory
 
         except ImportError as e:
             logger.error(f"[Mem0Pool] 依赖模块未安装: {e}")
-            raise RuntimeError("依赖模块未安装，请运行: pip install mem0ai tcvectordb") from e
+            raise RuntimeError(
+                "依赖模块未安装，请运行: pip install mem0ai sqlite-vec"
+            ) from e
         except Exception as e:
-            logger.error(f"[Mem0Pool] Memory创建失败: {e}")
+            logger.error(f"[Mem0Pool] Memory 创建失败: {e}")
             raise
 
-    def search(self, user_id: str, query: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    def search(
+        self, user_id: str, query: str, limit: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
         """
         搜索用户相关记忆
 
@@ -231,7 +215,9 @@ class Mem0MemoryPool:
         try:
             search_limit = limit or self.config.default_search_limit
 
-            result = self.memory.search(query=query, user_id=user_id, limit=search_limit)
+            result = self.memory.search(
+                query=query, user_id=user_id, limit=search_limit
+            )
 
             # 处理返回格式（Mem0 返回 {"results": [...]} 或直接列表）
             if isinstance(result, dict) and "results" in result:
@@ -297,7 +283,9 @@ class Mem0MemoryPool:
                     datetime.now() + timedelta(minutes=ttl_minutes)
                 ).isoformat()
 
-            result = self.memory.add(messages=messages, user_id=user_id, metadata=enhanced_metadata)
+            result = self.memory.add(
+                messages=messages, user_id=user_id, metadata=enhanced_metadata
+            )
 
             results_count = len(result.get("results", []))
             logger.info(
@@ -311,7 +299,9 @@ class Mem0MemoryPool:
             logger.error(f"[Mem0Pool] 添加记忆失败: {e}")
             return {"results": [], "error": str(e)}
 
-    def get_all(self, user_id: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    def get_all(
+        self, user_id: str, limit: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
         """
         获取用户所有记忆
 
@@ -335,14 +325,18 @@ class Mem0MemoryPool:
             else:
                 memories = []
 
-            logger.info(f"[Mem0Pool] 获取所有记忆: user_id={user_id}, 数量={len(memories)}")
+            logger.info(
+                f"[Mem0Pool] 获取所有记忆: user_id={user_id}, 数量={len(memories)}"
+            )
             return memories
 
         except Exception as e:
             logger.error(f"[Mem0Pool] 获取所有记忆失败: {e}")
             return []
 
-    def update(self, memory_id: str, data: str, user_id: Optional[str] = None) -> Dict[str, Any]:
+    def update(
+        self, memory_id: str, data: str, user_id: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         更新单条记忆
 
@@ -356,7 +350,9 @@ class Mem0MemoryPool:
         """
         try:
             result = self.memory.update(memory_id=memory_id, data=data)
-            logger.info(f"[Mem0Pool] 更新记忆: memory_id={memory_id}, user_id={user_id}")
+            logger.info(
+                f"[Mem0Pool] 更新记忆: memory_id={memory_id}, user_id={user_id}"
+            )
             return result
         except Exception as e:
             logger.error(f"[Mem0Pool] 更新记忆失败: {e}")
@@ -375,7 +371,9 @@ class Mem0MemoryPool:
         """
         try:
             self.memory.delete(memory_id=memory_id)
-            logger.info(f"[Mem0Pool] 删除记忆: memory_id={memory_id}, user_id={user_id}")
+            logger.info(
+                f"[Mem0Pool] 删除记忆: memory_id={memory_id}, user_id={user_id}"
+            )
             return True
         except Exception as e:
             logger.error(f"[Mem0Pool] 删除记忆失败: {e}")
@@ -392,8 +390,6 @@ class Mem0MemoryPool:
             是否成功
         """
         try:
-            self.memory.reset()  # 注意：Mem0 的 reset 是全局的
-            # 如果需要只重置特定用户，需要使用 delete_all
             self.memory.delete_all(user_id=user_id)
             logger.info(f"[Mem0Pool] 重置用户记忆: user_id={user_id}")
             return True
@@ -409,12 +405,11 @@ class Mem0MemoryPool:
             健康状态信息
         """
         try:
-            # 尝试访问 memory 实例
             _ = self.memory
             return {
                 "status": "healthy",
-                "vector_store": "qdrant",
-                "collection": self.config.qdrant.collection_name,
+                "vector_store": "sqlite-vec",
+                "collection": self.config.collection_name,
             }
         except Exception as e:
             return {"status": "unhealthy", "error": str(e)}

@@ -191,7 +191,7 @@ class E2EPipelineTracer:
         "code_generation": "代码生成",
         "code_validation": "代码语法验证",
         "tool_execution": "工具执行",
-        "code_execution": "代码执行（E2B）",
+        "code_execution": "代码执行",
         "result_validation": "执行结果验证",
         "response_generation": "响应生成",
         "error_recovery": "错误恢复",

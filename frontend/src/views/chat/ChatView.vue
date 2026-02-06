@@ -1,20 +1,18 @@
 <template>
-  <div class="h-screen w-full flex bg-white relative overflow-hidden text-gray-900 font-sans">
+  <div class="h-screen w-full flex bg-background relative overflow-hidden text-foreground font-sans">
     <!-- 左侧侧边栏：历史对话 -->
     <ConversationSidebar
       :conversations="conversationStore.conversations"
       :current-id="conversationStore.currentId"
       :collapsed="sidebarCollapsed"
       :loading="conversationStore.loading"
+      :user-id="conversationStore.userId"
       :is-running="sessionStore.isConversationRunning"
-      :username="authStore.username"
-      :is-authenticated="authStore.isAuthenticated"
       @select="handleSelectConversation"
       @create="handleCreateConversation"
       @delete="handleDeleteConversation"
       @toggle-collapse="sidebarCollapsed = !sidebarCollapsed"
       @navigate="handleNavigate"
-      @logout="handleLogout"
     />
 
     <!-- 右侧主区域 -->
@@ -27,13 +25,8 @@
         <!-- 顶部导航栏 -->
         <ChatHeader
           :title="conversationStore.currentTitle"
-          :agents="agents"
-          :selected-agent-id="selectedAgentId"
-          :disabled="chat.isLoading.value"
-          :loading-agents="loadingAgents"
           :show-workspace-button="!!conversationStore.currentId"
           :sidebar-active="showRightSidebar"
-          @select-agent="handleSelectAgent"
           @toggle-sidebar="showRightSidebar = !showRightSidebar"
         />
 
@@ -70,14 +63,14 @@
       <Transition name="slide-right">
         <div 
           v-if="showRightSidebar"
-          class="w-1/2 flex-shrink-0 bg-white flex flex-col overflow-hidden my-4 mr-4 ml-3 rounded-2xl shadow-xl border border-gray-100"
+          class="w-1/2 flex-shrink-0 bg-white flex flex-col overflow-hidden my-4 mr-4 ml-3 rounded-2xl shadow-xl border border-border"
         >
             <!-- 顶部 Tab 栏 -->
-            <div class="h-14 flex items-center justify-between px-4 border-b border-gray-100 flex-shrink-0">
-              <div class="flex gap-1 p-1 bg-gray-100 rounded-lg">
+            <div class="h-14 flex items-center justify-between px-4 border-b border-border flex-shrink-0">
+              <div class="flex gap-1 p-1 bg-muted rounded-lg">
           <button 
                   class="px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5" 
-                  :class="rightSidebarTab === 'plan' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900'"
+                  :class="rightSidebarTab === 'plan' ? 'bg-white text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
             @click="rightSidebarTab = 'plan'"
           >
                   <ClipboardList class="w-3.5 h-3.5" />
@@ -86,7 +79,7 @@
           <button 
                   v-if="conversationStore.currentId"
                   class="px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5" 
-                  :class="rightSidebarTab === 'workspace' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900'"
+                  :class="rightSidebarTab === 'workspace' ? 'bg-white text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
                   @click="rightSidebarTab = 'workspace'"
                 >
                   <FileText class="w-3.5 h-3.5" />
@@ -95,7 +88,7 @@
         </div>
               <button 
                 @click="showRightSidebar = false" 
-                class="w-7 h-7 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500 transition-colors"
+                class="w-7 h-7 flex items-center justify-center rounded-full bg-muted hover:bg-muted/80 text-muted-foreground transition-colors"
               >
                 <X class="w-4 h-4" />
               </button>
@@ -104,9 +97,9 @@
         <!-- 任务看板 -->
             <div v-if="rightSidebarTab === 'plan'" class="flex-1 overflow-y-auto p-4 scrollbar-thin">
           <PlanWidget v-if="currentPlan" :plan="currentPlan" />
-          <div v-else class="h-full flex flex-col items-center justify-center text-gray-400 opacity-60">
-                  <div class="w-16 h-16 bg-gray-50 rounded-2xl flex items-center justify-center mb-4 border border-gray-100">
-                    <ClipboardList class="w-8 h-8 text-gray-400" />
+          <div v-else class="h-full flex flex-col items-center justify-center text-muted-foreground/40 opacity-60">
+                  <div class="w-16 h-16 bg-muted rounded-2xl flex items-center justify-center mb-4 border border-border">
+                    <ClipboardList class="w-8 h-8 text-muted-foreground/50" />
             </div>
             <p class="text-sm font-medium">暂无任务计划</p>
             <p class="text-xs mt-1">AI 生成计划后将显示在这里</p>
@@ -116,7 +109,7 @@
             <!-- 工作区 -->
             <div v-else-if="rightSidebarTab === 'workspace'" class="flex-1 flex overflow-hidden">
               <!-- 文件浏览器 -->
-              <div class="w-[220px] min-w-[220px] border-r border-gray-100 bg-gray-50 overflow-y-auto">
+              <div class="w-[220px] min-w-[220px] border-r border-border bg-muted overflow-y-auto">
              <FileExplorer 
                   v-if="conversationStore.currentId"
                   :conversation-id="conversationStore.currentId"
@@ -132,9 +125,9 @@
                 :file-path="previewFile.path"
                 @close="previewFile = null"
              />
-                <div v-else class="h-full flex flex-col items-center justify-center text-gray-400 bg-gray-50/50">
-                  <div class="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mb-4 border border-gray-100">
-                    <FileText class="w-8 h-8 text-gray-400" />
+                <div v-else class="h-full flex flex-col items-center justify-center text-muted-foreground/60 bg-muted/50">
+                  <div class="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mb-4 border border-border">
+                    <FileText class="w-8 h-8 text-muted-foreground/60" />
              </div>
              <p class="text-sm font-medium">选择文件查看内容</p>
           </div>
@@ -180,7 +173,6 @@ import { useRouter, useRoute } from 'vue-router'
 import { useConversationStore } from '@/stores/conversation'
 import { useSessionStore } from '@/stores/session'
 import { useWorkspaceStore } from '@/stores/workspace'
-import { useAuthStore } from '@/stores/auth'
 
 // Composables
 import { useChat } from '@/composables/useChat'
@@ -199,7 +191,7 @@ import AttachmentPreview from '@/components/modals/AttachmentPreview.vue'
 import ConfirmModal from '@/components/modals/ConfirmModal.vue'
 
 // Types
-import type { Conversation, Agent, AttachedFile, PlanData, HITLResponse, FileItem } from '@/types'
+import type { Conversation, AttachedFile, PlanData, HITLResponse, FileItem } from '@/types'
 
 // ==================== Stores & Composables ====================
 
@@ -208,8 +200,6 @@ const route = useRoute()
 const conversationStore = useConversationStore()
 const sessionStore = useSessionStore()
 const workspaceStore = useWorkspaceStore()
-const authStore = useAuthStore()
-
 const chat = useChat()
 const fileUpload = useFileUpload()
 const hitl = chat.hitl
@@ -223,11 +213,6 @@ const rightSidebarTab = ref<'plan' | 'workspace'>('plan')
 
 // 输入
 const inputMessage = ref('')
-
-// Agent
-const agents = ref<Agent[]>([])
-const loadingAgents = ref(false)
-const selectedAgentId = ref<string | null>(null)
 
 // 预览
 const previewFile = ref<FileItem | null>(null)
@@ -272,16 +257,10 @@ onMounted(async () => {
   // 初始化
   conversationStore.initUserId()
   
-    // 并行加载（获取最近 50 个对话，不含具体消息）
-  await Promise.all([
-    conversationStore.fetchList(),
-    loadAgentList()
-  ])
+    // 加载对话列表（获取最近 50 个对话，不含具体消息）
+  await conversationStore.fetchList()
   
-  // 启动活跃会话轮询
-  sessionStore.startPolling(conversationStore.userId)
-  
-  // 根据路由加载会话（只在 onMounted 中加载一次）
+  // 根据路由加载会话
   const conversationId = route.params.conversationId
   if (conversationId && typeof conversationId === 'string') {
     await conversationStore.load(conversationId)
@@ -292,50 +271,11 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  sessionStore.stopPolling()
+  // cleanup
 })
 
 
 // ==================== Methods ====================
-
-/** 加载 Agent 列表 */
-async function loadAgentList(): Promise<void> {
-  loadingAgents.value = true
-  try {
-    const response = await fetch('/api/v1/agents')
-    if (!response.ok) throw new Error(`HTTP ${response.status}`)
-    
-    const result = await response.json()
-    const agentsList = result.agents || []
-    
-    // 添加默认 Agent
-    agents.value = [
-      {
-        agent_id: null,
-        name: '默认智能体',
-        description: '通用对话助手 (base_agent)',
-        is_active: true
-      },
-      ...agentsList
-    ]
-    
-    // 默认选择 dazee_agent
-    if (!selectedAgentId.value) {
-      const dazeeAgent = agents.value.find(a => a.agent_id === 'dazee_agent')
-      selectedAgentId.value = dazeeAgent?.agent_id || null
-    }
-  } catch (error) {
-    console.error('❌ 加载 Agent 列表失败:', error)
-    agents.value = [{ agent_id: null, name: '默认智能体', description: '通用对话助手' }]
-  } finally {
-    loadingAgents.value = false
-  }
-}
-
-/** 选择 Agent */
-function handleSelectAgent(agent: Agent): void {
-  selectedAgentId.value = agent.agent_id
-}
 
 /** 选择会话 */
 async function handleSelectConversation(id: string): Promise<void> {
@@ -365,14 +305,6 @@ function handleNavigate(path: string): void {
   router.push(path)
 }
 
-/** 登出 */
-function handleLogout(): void {
-  if (confirm('确定要退出登录吗？')) {
-    authStore.logout()
-    router.push('/login')
-  }
-}
-
 /** 点击建议 */
 function handleSuggestionClick(text: string): void {
   inputMessage.value = text
@@ -393,9 +325,7 @@ async function handleSendMessage(): Promise<void> {
   fileUpload.clearFiles()
 
   // 发送
-  await chat.sendMessage(content, files, {
-    agentId: selectedAgentId.value
-  })
+  await chat.sendMessage(content, files)
 
   // 刷新会话列表（保持 50 条，失败不影响用户体验）
   try {
@@ -497,27 +427,6 @@ async function handleHITLCancel(): Promise<void> {
 </script>
 
 <style scoped>
-/* 滚动条美化 - 默认透明，hover 时显示 */
-.scrollbar-thin::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-.scrollbar-thin::-webkit-scrollbar-track {
-  background: transparent;
-}
-.scrollbar-thin::-webkit-scrollbar-thumb {
-  background-color: transparent;
-  border-radius: 3px;
-}
-/* 鼠标悬停在容器上时显示滚动条 */
-.scrollbar-thin:hover::-webkit-scrollbar-thumb {
-  background-color: rgba(156, 163, 175, 0.3);
-}
-.scrollbar-thin::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(156, 163, 175, 0.5);
-}
-
-/* 右侧面板过渡动画 - 使用 width 和 margin 实现平滑推开效果 */
 .slide-right-enter-active,
 .slide-right-leave-active {
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -531,5 +440,4 @@ async function handleHITLCancel(): Promise<void> {
   opacity: 0;
   overflow: hidden;
 }
-
 </style>

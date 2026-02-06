@@ -6,7 +6,7 @@
 - 配置管理（从 YAML 加载）
 - 重试和错误处理
 
-注意：内部 Redis 广播由 RedisSessionManager.buffer_event 统一处理
+注意：内部事件广播由 storage.buffer_event 统一处理
 """
 
 import asyncio

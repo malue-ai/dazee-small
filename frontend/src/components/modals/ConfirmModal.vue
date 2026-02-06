@@ -2,17 +2,18 @@
   <Teleport to="body">
     <div 
       v-if="show"
-      class="fixed inset-0 bg-gray-900/60 backdrop-blur-md z-50 flex items-center justify-center p-6 animate-in fade-in duration-300" 
+      class="fixed inset-0 bg-foreground/50 backdrop-blur-md z-50 flex items-center justify-center p-6 animate-in fade-in duration-300" 
       @click.self="emit('cancel')"
     >
       <div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-hidden animate-in slide-in-from-bottom-8 duration-300 ring-1 ring-white/20 flex flex-col">
         <!-- 头部 -->
-        <div class="flex items-center justify-between px-8 py-5 border-b border-gray-100 bg-gray-50/50 flex-shrink-0">
-          <span class="text-lg font-bold text-gray-900 flex items-center gap-2">
-            <span class="text-2xl">🤝</span> 需要您的确认
+        <div class="flex items-center justify-between px-8 py-5 border-b border-border bg-muted/50 flex-shrink-0">
+          <span class="text-lg font-bold text-foreground flex items-center gap-2">
+            <Handshake class="w-6 h-6 text-primary" />
+            需要您的确认
           </span>
           <button 
-            class="p-2 rounded-full text-gray-400 hover:bg-gray-200 hover:text-gray-900 transition-colors" 
+            class="p-2 rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors" 
             @click="emit('cancel')"
           >
             ✕
@@ -22,14 +23,14 @@
         <!-- 内容区 -->
         <div class="p-8 space-y-6 overflow-y-auto flex-1">
           <!-- 问题内容 -->
-          <div class="text-lg text-gray-800 font-medium leading-relaxed whitespace-pre-wrap">
+          <div class="text-lg text-foreground font-medium leading-relaxed whitespace-pre-wrap">
             {{ request?.question }}
           </div>
           
           <!-- 描述 -->
           <div 
             v-if="request?.description" 
-            class="text-sm text-gray-600 bg-blue-50 p-4 rounded-xl border border-blue-100 leading-relaxed"
+            class="text-sm text-muted-foreground bg-accent p-4 rounded-xl border border-primary/30 leading-relaxed"
           >
             {{ request.description }}
           </div>
@@ -39,18 +40,24 @@
             <label 
               v-for="option in request?.options" 
               :key="option" 
-              class="flex items-center p-4 rounded-xl border-2 cursor-pointer transition-all hover:bg-gray-50"
-              :class="selectedValue === option ? 'border-blue-500 bg-blue-50/50 ring-1 ring-blue-500/20' : 'border-gray-100'"
+              class="flex items-center p-4 rounded-xl border-2 cursor-pointer transition-all hover:bg-muted"
+              :class="selectedValue === option ? 'border-primary bg-accent ring-1 ring-primary/20' : 'border-border'"
             >
               <input 
                 type="radio" 
                 :value="option" 
                 v-model="selectedValue"
                 name="hitl-option"
-                class="mr-4 accent-blue-600 w-5 h-5"
+                class="mr-4 accent-amber-500 w-5 h-5"
               />
-              <span class="text-base font-medium text-gray-800">
-                {{ option === 'confirm' ? '✅ 确认' : option === 'cancel' ? '❌ 取消' : option }}
+              <span class="text-base font-medium text-foreground flex items-center gap-2">
+                <template v-if="option === 'confirm'">
+                  <CheckCircle2 class="w-4 h-4 text-success" /> 确认
+                </template>
+                <template v-else-if="option === 'cancel'">
+                  <XCircle class="w-4 h-4 text-destructive" /> 取消
+                </template>
+                <span v-else>{{ option }}</span>
               </span>
             </label>
           </div>
@@ -60,16 +67,16 @@
             <label 
               v-for="option in request?.options" 
               :key="option" 
-              class="flex items-center p-4 rounded-xl border-2 cursor-pointer transition-all hover:bg-gray-50"
-              :class="selectedValues.includes(option) ? 'border-blue-500 bg-blue-50/50 ring-1 ring-blue-500/20' : 'border-gray-100'"
+              class="flex items-center p-4 rounded-xl border-2 cursor-pointer transition-all hover:bg-muted"
+              :class="selectedValues.includes(option) ? 'border-primary bg-accent ring-1 ring-primary/20' : 'border-border'"
             >
               <input 
                 type="checkbox" 
                 :value="option" 
                 v-model="selectedValues"
-                class="mr-4 accent-blue-600 w-5 h-5 rounded"
+                class="mr-4 accent-amber-500 w-5 h-5 rounded"
               />
-              <span class="text-base font-medium text-gray-800">{{ option }}</span>
+              <span class="text-base font-medium text-foreground">{{ option }}</span>
             </label>
           </div>
           
@@ -79,7 +86,7 @@
               v-model="textValue" 
               placeholder="请输入您的回复..."
               rows="4"
-              class="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all resize-none text-gray-800"
+              class="w-full px-4 py-3 bg-muted border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all resize-none text-foreground"
             ></textarea>
           </div>
           
@@ -87,13 +94,13 @@
           <div v-if="isForm" class="space-y-5">
             <div v-for="question in request?.questions" :key="question.id" class="space-y-2">
               <!-- 问题标签 -->
-              <label class="block text-sm font-medium text-gray-700">
+              <label class="block text-sm font-medium text-foreground">
                 {{ question.label }}
-                <span v-if="question.required !== false" class="text-red-500">*</span>
+                <span v-if="question.required !== false" class="text-destructive">*</span>
               </label>
               
               <!-- 提示文字 -->
-              <div v-if="question.hint" class="text-xs text-gray-500 mb-2">
+              <div v-if="question.hint" class="text-xs text-muted-foreground mb-2">
                 {{ question.hint }}
               </div>
               
@@ -102,17 +109,17 @@
                 <label 
                   v-for="option in question.options" 
                   :key="option" 
-                  class="flex items-center p-3 rounded-lg border cursor-pointer transition-all hover:bg-gray-50"
-                  :class="formData[question.id] === option ? 'border-blue-500 bg-blue-50/50' : 'border-gray-200'"
+                  class="flex items-center p-3 rounded-lg border cursor-pointer transition-all hover:bg-muted"
+                  :class="formData[question.id] === option ? 'border-primary bg-accent' : 'border-border'"
                 >
                   <input 
                     type="radio" 
                     :value="option" 
                     v-model="formData[question.id]"
                     :name="`form-${question.id}`"
-                    class="mr-3 accent-blue-600"
+                    class="mr-3 accent-amber-500"
                   />
-                  <span class="text-sm text-gray-800">{{ option }}</span>
+                  <span class="text-sm text-foreground">{{ option }}</span>
                 </label>
               </div>
               
@@ -121,16 +128,16 @@
                 <label 
                   v-for="option in question.options" 
                   :key="option" 
-                  class="flex items-center p-3 rounded-lg border cursor-pointer transition-all hover:bg-gray-50"
-                  :class="(formData[question.id] as string[] || []).includes(option) ? 'border-blue-500 bg-blue-50/50' : 'border-gray-200'"
+                  class="flex items-center p-3 rounded-lg border cursor-pointer transition-all hover:bg-muted"
+                  :class="(formData[question.id] as string[] || []).includes(option) ? 'border-primary bg-accent' : 'border-border'"
                 >
                   <input 
                     type="checkbox" 
                     :value="option" 
                     v-model="formData[question.id]"
-                    class="mr-3 accent-blue-600 rounded"
+                    class="mr-3 accent-amber-500 rounded"
                   />
-                  <span class="text-sm text-gray-800">{{ option }}</span>
+                  <span class="text-sm text-foreground">{{ option }}</span>
                 </label>
               </div>
               
@@ -139,7 +146,7 @@
                 <input 
                   v-model="formData[question.id]" 
                   :placeholder="question.hint || '请输入...'"
-                  class="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-sm text-gray-800"
+                  class="w-full px-4 py-2.5 bg-muted border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all text-sm text-foreground"
                 />
               </div>
             </div>
@@ -147,16 +154,16 @@
         </div>
         
         <!-- 底部按钮 -->
-        <div class="flex items-center justify-end gap-4 px-8 py-5 bg-gray-50/50 border-t border-gray-100 flex-shrink-0">
+        <div class="flex items-center justify-end gap-4 px-8 py-5 bg-muted/50 border-t border-border flex-shrink-0">
           <button 
-            class="px-6 py-2.5 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-200 transition-colors" 
+            class="px-6 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:bg-muted transition-colors" 
             @click="emit('cancel')" 
             :disabled="submitting"
           >
             取消
           </button>
           <button 
-            class="px-6 py-2.5 rounded-xl text-sm font-medium bg-gray-900 text-white hover:bg-gray-800 transition-all shadow-lg shadow-gray-900/10 transform active:scale-95 disabled:opacity-50" 
+            class="px-6 py-2.5 rounded-xl text-sm font-medium bg-primary text-white hover:bg-primary-hover transition-all shadow-lg shadow-primary/20 transform active:scale-95 disabled:opacity-50" 
             @click="handleSubmit" 
             :disabled="submitting"
           >
@@ -170,6 +177,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { Handshake, CheckCircle2, XCircle } from 'lucide-vue-next'
 import type { HITLConfirmRequest, HITLFormQuestion, HITLResponse } from '@/types'
 
 // ==================== Props ====================

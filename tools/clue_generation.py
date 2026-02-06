@@ -32,7 +32,6 @@ class ClueGenerationTool(BaseTool):
     Agent 直接传入已生成的线索列表，工具负责验证和格式化。
     不再内部调用 LLM，减少延迟和成本。
 
-    注意：clue delta 由 ZenOAdapter.enhance_tool_result 统一生成和发送，
     工具只负责返回结果数据。
     """
 
@@ -74,9 +73,6 @@ class ClueGenerationTool(BaseTool):
                 return {"success": True, "message": "无有效线索", "tasks": []}
 
             logger.info(f"✅ 线索验证完成: {len(valid_tasks)} 个")
-
-            # 注意：clue delta 由 ZenOAdapter.enhance_tool_result 统一处理
-            # 不在工具内部直接发送，避免重复
 
             return {
                 "success": True,

@@ -95,7 +95,7 @@ export function useFileUpload() {
   async function uploadFile(file: File): Promise<AttachedFile | null> {
     const formData = new FormData()
     formData.append('file', file)
-    formData.append('user_id', localStorage.getItem('userId') || '')
+    formData.append('user_id', 'local')
 
     try {
       const response = await fetch('/api/v1/files/upload', {

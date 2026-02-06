@@ -35,7 +35,8 @@ from core.agent import AgentFactory
 from core.events import create_event_manager, get_memory_storage
 from core.prompt import load_instance_cache
 from core.tool import InstanceRegistry, create_tool_loader, get_capability_registry
-from infra.pools import get_mcp_pool
+# TODO: 迁移到 local_store
+# from infra.pools import get_mcp_pool
 from logger import get_logger
 from prompts.universal_agent_prompt import get_universal_agent_prompt
 from utils.instance_loader import (
@@ -536,7 +537,9 @@ class AgentRegistry:
                 }
 
         # 连接每个 MCP 服务器并发现工具
-        pool = get_mcp_pool()
+        # TODO: 迁移到 local_store
+        # pool = get_mcp_pool()
+        pool = None  # Stub
 
         for server_url, server_config in servers.items():
             server_name = server_config["server_name"]
@@ -575,11 +578,13 @@ class AgentRegistry:
 
                 logger.info(f"   🔌 连接 MCP 服务器: {server_name}")
 
+                # TODO: 迁移到 local_store
                 # 在独立 task 中执行 MCP 连接，隔离 anyio cancel scope
-                connect_task = asyncio.create_task(
-                    _isolated_mcp_connect(pool, server_url, server_name, auth_token)
-                )
-                client, tools = await connect_task
+                # connect_task = asyncio.create_task(
+                #     _isolated_mcp_connect(pool, server_url, server_name, auth_token)
+                # )
+                # client, tools = await connect_task
+                client, tools = None, []  # Stub
 
                 # 短暂等待让事件循环处理残留的 cancel scope
                 await asyncio.sleep(0)
@@ -622,34 +627,8 @@ class AgentRegistry:
                     # 创建工具处理器（闭包捕获变量）
                     async def make_handler(_server_url, _server_name, _auth_token, _orig_name):
                         async def handler(tool_input: Dict[str, Any], context=None):
-                            # 获取/重连 MCP 客户端
-                            current_client = await pool.get_client(
-                                server_url=_server_url,
-                                server_name=_server_name,
-                                auth_token=_auth_token,
-                            )
-
-                            if not current_client:
-                                return {"success": False, "error": "MCP 服务器连接失败"}
-
-                            # 调用工具
-                            result = await current_client.call_tool(_orig_name, tool_input)
-
-                            # 如果需要重连，自动重试一次
-                            if result.get("_need_reconnect"):
-                                logger.info(f"🔄 MCP 连接断开，自动重连: {_server_name}")
-                                current_client = await pool.get_client(
-                                    server_url=_server_url,
-                                    server_name=_server_name,
-                                    auth_token=_auth_token,
-                                    force_reconnect=True,
-                                )
-                                if not current_client:
-                                    return {"success": False, "error": "MCP 服务器重连失败"}
-                                result = await current_client.call_tool(_orig_name, tool_input)
-
-                            return result
-
+                            # TODO: 迁移到 local_store
+                            return {"success": False, "error": "MCP pool not available - TODO: 迁移到 local_store"}
                         return handler
 
                     handler = await make_handler(server_url, server_name, auth_token, original_name)

@@ -107,7 +107,7 @@ python -m evaluation.ci_integration \
 
 - **basic_code_generation**: 基础代码生成
 - **file_operations**: 文件操作
-- **sandbox_execution**: 沙盒执行
+- **code_execution**: 代码执行
 
 #### 多智能体 (multi_agent/)
 

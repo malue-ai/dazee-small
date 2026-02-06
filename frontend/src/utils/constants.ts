@@ -7,7 +7,6 @@
  */
 export const FILE_WRITE_TOOLS = [
   'write_file',
-  'sandbox_write_file',
   'str_replace_editor',
   'create_file'
 ] as const
@@ -16,7 +15,6 @@ export const FILE_WRITE_TOOLS = [
  * 终端命令工具列表
  */
 export const TERMINAL_TOOLS = [
-  'sandbox_run_command',
   'run_project'
 ] as const
 
@@ -24,14 +22,7 @@ export const TERMINAL_TOOLS = [
  * 工具名称中文映射表
  */
 export const TOOL_NAME_MAP: Record<string, string> = {
-  // 沙盒工具（E2B）
-  'sandbox_write_file': '写入文件',
-  'sandbox_read_file': '读取文件',
-  'sandbox_list_files': '列出目录',
-  'sandbox_run_command': '执行命令',
-  'sandbox_execute_python': '执行代码',
-  'sandbox_get_public_url': '获取URL',
-  // 其他文件操作
+  // 文件操作
   'write_file': '写入文件',
   'read_file': '读取文件',
   'str_replace_editor': '编辑文件',
@@ -116,54 +107,9 @@ export const SESSION_STATUS = {
 } as const
 
 /**
- * 沙盒状态
- */
-export const SANDBOX_STATUS = {
-  NONE: 'none',
-  CREATING: 'creating',
-  RUNNING: 'running',
-  PAUSED: 'paused',
-  KILLED: 'killed'
-} as const
-
-/**
- * 沙盒状态文字映射
- */
-export const SANDBOX_STATUS_TEXT: Record<string, string> = {
-  'none': '未创建',
-  'creating': '创建中...',
-  'running': '运行中',
-  'paused': '已暂停',
-  'killed': '已终止'
-}
-
-/**
- * 沙盒状态颜色映射
- */
-export const SANDBOX_STATUS_COLOR: Record<string, string> = {
-  'none': '#6b7280',
-  'creating': '#f59e0b',
-  'running': '#10b981',
-  'paused': '#3b82f6',
-  'killed': '#ef4444'
-}
-
-/**
  * 默认配置
  */
 export const DEFAULT_CONFIG = {
-  /** SSE 重连最大次数 */
-  MAX_RECONNECT_ATTEMPTS: 3,
-  
-  /** SSE 重连基础延迟（毫秒） */
-  RECONNECT_BASE_DELAY: 1000,
-  
-  /** SSE 重连最大延迟（毫秒） */
-  RECONNECT_MAX_DELAY: 10000,
-  
-  /** 活跃会话轮询间隔（毫秒） */
-  POLLING_INTERVAL: 20000,
-  
   /** 默认分页大小 */
   PAGE_SIZE: 20,
   
@@ -186,7 +132,6 @@ export const BACKGROUND_TASKS = {
  * 本地存储键名
  */
 export const STORAGE_KEYS = {
-  TOKEN: 'token',
   USER: 'user',
   USER_ID: 'userId',
   THEME: 'theme',

@@ -1,13 +1,13 @@
 <template>
   <div class="h-full flex flex-col overflow-hidden bg-white">
     <!-- 顶部工具栏 (统一布局) -->
-    <div class="h-16 flex items-center justify-between px-6 border-b border-gray-100 bg-white sticky top-0 z-10 flex-shrink-0">
+    <div class="h-16 flex items-center justify-between px-6 border-b border-border bg-white sticky top-0 z-10 flex-shrink-0">
       <div class="flex items-center gap-4">
-        <h1 class="text-lg font-bold flex items-center gap-2 text-gray-800">
-          <Database class="w-6 h-6 text-blue-500" />
+        <h1 class="text-lg font-bold flex items-center gap-2 text-foreground">
+          <Database class="w-6 h-6 text-primary" />
           知识库管理
         </h1>
-        <div class="text-sm text-gray-500 bg-gray-50 px-2.5 py-1 rounded-md border border-gray-100">
+        <div class="text-sm text-muted-foreground bg-muted px-2.5 py-1 rounded-md border border-border">
           共 {{ stats?.total_documents || files.length }} 个文件
         </div>
       </div>
@@ -16,7 +16,7 @@
       <div class="flex items-center gap-3">
          <button 
            @click="triggerFileInput"
-           class="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-xl hover:bg-gray-800 transition-all shadow-lg shadow-gray-900/10 active:scale-95"
+           class="flex items-center gap-2 px-4 py-2 bg-primary text-white text-sm font-medium rounded-xl hover:bg-primary-hover transition-all shadow-lg shadow-primary/20 active:scale-95"
          >
            <UploadCloud class="w-4 h-4" />
            上传文件
@@ -27,16 +27,16 @@
     <!-- 主体区域 -->
     <div class="flex-1 flex overflow-hidden">
       <!-- 左侧侧边栏：上传和筛选 -->
-      <div class="w-72 border-r border-gray-100 bg-gray-50 overflow-y-auto p-4 flex flex-col gap-6 flex-shrink-0">
+      <div class="w-72 border-r border-border bg-muted overflow-y-auto p-4 flex flex-col gap-6 flex-shrink-0">
         <!-- 上传区域 -->
-        <div class="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
-          <h3 class="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
-            <UploadCloud class="w-4 h-4 text-blue-500" />
+        <div class="bg-white border border-border rounded-xl p-4 shadow-sm">
+          <h3 class="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+            <UploadCloud class="w-4 h-4 text-primary" />
             上传文件
           </h3>
           <div
             class="border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-all duration-200"
-            :class="isDragOver ? 'border-blue-400 bg-blue-50/50' : 'border-gray-200 hover:border-blue-400 hover:bg-gray-50'"
+            :class="isDragOver ? 'border-primary bg-accent' : 'border-border hover:border-primary hover:bg-muted'"
             @drop.prevent="handleDrop"
             @dragover.prevent="isDragOver = true"
             @dragleave.prevent="isDragOver = false"
@@ -51,29 +51,29 @@
               multiple
             />
             <div class="flex justify-center mb-2">
-              <Upload class="w-8 h-8 text-gray-300 group-hover:text-blue-400 transition-colors" />
+              <Upload class="w-8 h-8 text-muted-foreground/30 group-hover:text-primary transition-colors" />
             </div>
-            <p class="text-sm font-medium text-gray-700 mb-1">点击或拖拽上传</p>
-            <p class="text-xs text-gray-400">支持 PDF, Word, 图片等</p>
+            <p class="text-sm font-medium text-foreground mb-1">点击或拖拽上传</p>
+            <p class="text-xs text-muted-foreground/50">支持 PDF, Word, 图片等</p>
           </div>
 
           <!-- 上传队列 -->
           <div v-if="uploadQueue.length > 0" class="mt-4 space-y-2">
             <div class="flex items-center justify-between text-xs">
-              <span class="font-medium text-gray-500">队列 ({{ uploadQueue.length }})</span>
-              <button @click="clearQueue" class="text-red-500 hover:text-red-600">清空</button>
+              <span class="font-medium text-muted-foreground">队列 ({{ uploadQueue.length }})</span>
+              <button @click="clearQueue" class="text-destructive hover:text-destructive">清空</button>
             </div>
             <div class="space-y-2 max-h-32 overflow-y-auto pr-1 scrollbar-thin">
               <div
                 v-for="item in uploadQueue"
                 :key="item.id"
-                class="flex items-center justify-between p-2 bg-gray-50 rounded border border-gray-100 text-xs"
+                class="flex items-center justify-between p-2 bg-muted rounded border border-border text-xs"
               >
                 <div class="flex-1 truncate mr-2">
-                  <div class="font-medium text-gray-700 truncate">{{ item.file.name }}</div>
-                  <div class="text-gray-400 text-[10px]">{{ formatFileSize(item.file.size) }}</div>
+                  <div class="font-medium text-foreground truncate">{{ item.file.name }}</div>
+                  <div class="text-muted-foreground/50 text-[10px]">{{ formatFileSize(item.file.size) }}</div>
                 </div>
-                <span :class="['px-1.5 py-0.5 rounded text-[10px] font-medium', item.status === 'success' ? 'bg-green-100 text-green-700' : item.status === 'error' ? 'bg-red-100 text-red-700' : 'bg-gray-200 text-gray-600']">
+                <span :class="['px-1.5 py-0.5 rounded text-[10px] font-medium', item.status === 'success' ? 'bg-success/10 text-success' : item.status === 'error' ? 'bg-destructive/10 text-destructive' : 'bg-muted-foreground/20 text-muted-foreground']">
                   {{ item.statusText }}
                 </span>
               </div>
@@ -81,7 +81,7 @@
             <button
               @click="startUpload"
               :disabled="isUploading"
-              class="w-full py-2 bg-gray-900 text-white text-xs font-medium rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              class="w-full py-2 bg-primary text-white text-xs font-medium rounded-lg hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {{ isUploading ? '上传中...' : '开始上传' }}
             </button>
@@ -90,40 +90,40 @@
 
         <!-- 分类过滤 -->
         <div class="space-y-1">
-          <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider px-2 mb-2">分类</h3>
+          <h3 class="text-xs font-bold text-muted-foreground/50 uppercase tracking-wider px-2 mb-2">分类</h3>
           <div class="space-y-0.5">
             <button
               v-for="cat in categories"
               :key="cat.value"
               class="w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors"
-              :class="selectedCategory === cat.value ? 'bg-white shadow-sm text-gray-900 font-medium' : 'text-gray-600 hover:bg-gray-200/50 hover:text-gray-900'"
+              :class="selectedCategory === cat.value ? 'bg-white shadow-sm text-foreground font-medium' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'"
               @click="selectedCategory = cat.value"
             >
               <div class="flex items-center gap-2">
-                <component :is="cat.icon" class="w-4 h-4" :class="selectedCategory === cat.value ? 'text-gray-800' : 'text-gray-400'" />
+                <component :is="cat.icon" class="w-4 h-4" :class="selectedCategory === cat.value ? 'text-foreground' : 'text-muted-foreground/50'" />
                 <span>{{ cat.label }}</span>
               </div>
-              <span class="text-xs text-gray-400">{{ getCategoryCount(cat.value) }}</span>
+              <span class="text-xs text-muted-foreground/50">{{ getCategoryCount(cat.value) }}</span>
             </button>
           </div>
         </div>
 
         <!-- 状态过滤 -->
         <div class="space-y-1">
-          <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider px-2 mb-2">状态</h3>
+          <h3 class="text-xs font-bold text-muted-foreground/50 uppercase tracking-wider px-2 mb-2">状态</h3>
           <div class="space-y-0.5">
             <button
               v-for="stat in statuses"
               :key="stat.value"
               class="w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors"
-              :class="selectedStatus === stat.value ? 'bg-white shadow-sm text-gray-900 font-medium' : 'text-gray-600 hover:bg-gray-200/50 hover:text-gray-900'"
+              :class="selectedStatus === stat.value ? 'bg-white shadow-sm text-foreground font-medium' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'"
               @click="selectedStatus = stat.value"
             >
               <div class="flex items-center gap-2">
-                <span :class="['w-1.5 h-1.5 rounded-full', stat.value === 'ready' ? 'bg-green-500' : stat.value === 'processing' ? 'bg-yellow-500' : 'bg-gray-300']"></span>
+                <span :class="['w-1.5 h-1.5 rounded-full', stat.value === 'ready' ? 'bg-success' : stat.value === 'processing' ? 'bg-primary' : 'bg-muted-foreground/30']"></span>
                 <span>{{ stat.label }}</span>
               </div>
-              <span class="text-xs text-gray-400">{{ getStatusCount(stat.value) }}</span>
+              <span class="text-xs text-muted-foreground/50">{{ getStatusCount(stat.value) }}</span>
             </button>
           </div>
         </div>
@@ -132,41 +132,41 @@
       <!-- 右侧主区域：文件列表 -->
       <div class="flex-1 flex flex-col overflow-hidden bg-white">
         <!-- 工具栏 -->
-        <div class="h-14 flex items-center justify-between gap-4 px-6 border-b border-gray-100 bg-white sticky top-0 z-10">
+        <div class="h-14 flex items-center justify-between gap-4 px-6 border-b border-border bg-white sticky top-0 z-10">
           <div class="flex-1 max-w-md relative group">
-            <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 group-focus-within:text-gray-600 transition-colors" />
+            <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground/50 group-focus-within:text-muted-foreground transition-colors" />
             <input
               v-model="searchQuery"
               type="text"
               placeholder="搜索文件名..."
-              class="w-full pl-9 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 focus:border-gray-300 transition-all placeholder-gray-400 text-gray-800"
+              class="w-full pl-9 pr-4 py-2 bg-muted border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all placeholder-gray-400 text-foreground"
             />
           </div>
           <div class="flex items-center gap-2">
             <div class="relative">
               <select 
                 v-model="sortBy" 
-                class="appearance-none pl-3 pr-8 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 cursor-pointer text-gray-600 font-medium hover:bg-gray-100 transition-colors"
+                class="appearance-none pl-3 pr-8 py-2 bg-muted border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer text-muted-foreground font-medium hover:bg-muted transition-colors"
               >
                 <option value="created_at">最新上传</option>
                 <option value="filename">文件名</option>
                 <option value="file_size">文件大小</option>
               </select>
-              <ChevronDown class="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+              <ChevronDown class="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50 pointer-events-none" />
             </div>
             
-            <div class="flex bg-gray-50 rounded-lg p-0.5 border border-gray-200">
+            <div class="flex bg-muted rounded-lg p-0.5 border border-border">
               <button 
                 @click="viewMode = 'grid'" 
                 class="p-1.5 rounded-md transition-all"
-                :class="viewMode === 'grid' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'"
+                :class="viewMode === 'grid' ? 'bg-white shadow-sm text-foreground' : 'text-muted-foreground/50 hover:text-muted-foreground'"
               >
                 <LayoutGrid class="w-4 h-4" />
               </button>
               <button 
                 @click="viewMode = 'list'" 
                 class="p-1.5 rounded-md transition-all"
-                :class="viewMode === 'list' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'"
+                :class="viewMode === 'list' ? 'bg-white shadow-sm text-foreground' : 'text-muted-foreground/50 hover:text-muted-foreground'"
               >
                 <List class="w-4 h-4" />
               </button>
@@ -174,7 +174,7 @@
 
             <button 
               @click="refreshFiles" 
-              class="p-2 bg-gray-50 border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-800 transition-all"
+              class="p-2 bg-muted border border-border rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-all"
             >
               <RefreshCw class="w-4 h-4 transition-transform group-hover:rotate-180" />
             </button>
@@ -183,16 +183,16 @@
 
         <!-- 文件列表 -->
         <div class="flex-1 overflow-y-auto p-6 scrollbar-thin">
-          <div v-if="loading" class="flex flex-col items-center justify-center h-64 text-gray-400">
+          <div v-if="loading" class="flex flex-col items-center justify-center h-64 text-muted-foreground/50">
             <Loader2 class="w-8 h-8 animate-spin mb-2" />
             <p class="text-xs">加载文件中...</p>
           </div>
 
-          <div v-else-if="filteredFiles.length === 0" class="flex flex-col items-center justify-center h-64 text-gray-400">
-            <div class="w-16 h-16 bg-gray-50 rounded-2xl flex items-center justify-center mb-4 border border-gray-100">
+          <div v-else-if="filteredFiles.length === 0" class="flex flex-col items-center justify-center h-64 text-muted-foreground/50">
+            <div class="w-16 h-16 bg-muted rounded-2xl flex items-center justify-center mb-4 border border-border">
               <FolderOpen class="w-8 h-8 opacity-30" />
             </div>
-            <p class="text-sm font-medium text-gray-600 mb-1">暂无文件</p>
+            <p class="text-sm font-medium text-muted-foreground mb-1">暂无文件</p>
             <p class="text-xs">点击左侧上传区域添加文件</p>
           </div>
 
@@ -202,36 +202,36 @@
               <div
                 v-for="file in filteredFiles"
                 :key="file.document_id"
-                class="group relative bg-white border border-gray-200 rounded-xl p-4 cursor-pointer transition-all duration-200 hover:shadow-md hover:border-gray-300"
-                :class="selectedFile?.document_id === file.document_id ? 'ring-2 ring-blue-500/50 border-blue-500' : ''"
+                class="group relative bg-white border border-border rounded-xl p-4 cursor-pointer transition-all duration-200 hover:shadow-md hover:border-border"
+                :class="selectedFile?.document_id === file.document_id ? 'ring-2 ring-primary/50 border-primary' : ''"
                 @click="selectFile(file)"
               >
                 <div class="flex justify-center py-4 mb-2">
-                  <FileText class="w-12 h-12 text-gray-300 group-hover:text-blue-400 transition-colors" />
+                  <FileText class="w-12 h-12 text-muted-foreground/30 group-hover:text-primary transition-colors" />
                 </div>
                 
                 <div class="space-y-1.5">
-                  <div class="font-medium text-gray-800 text-sm truncate" :title="file.filename">{{ file.filename }}</div>
+                  <div class="font-medium text-foreground text-sm truncate" :title="file.filename">{{ file.filename }}</div>
                   
-                  <div class="flex items-center justify-between text-[10px] text-gray-400">
+                  <div class="flex items-center justify-between text-[10px] text-muted-foreground/50">
                     <span>{{ formatDate(file.created_at) }}</span>
-                    <span :class="['px-1.5 py-0.5 rounded font-medium', file.status === 'ready' ? 'bg-green-50 text-green-600' : 'bg-yellow-50 text-yellow-600']">
+                    <span :class="['px-1.5 py-0.5 rounded font-medium', file.status === 'ready' ? 'bg-success/10 text-success' : 'bg-accent text-accent-foreground']">
                       {{ getStatusText(file.status) }}
                     </span>
                   </div>
                 </div>
 
                 <!-- 悬浮操作栏 -->
-                <div class="absolute inset-x-2 bottom-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-all duration-200 translate-y-1 group-hover:translate-y-0 bg-white p-1 rounded-lg border border-gray-100 shadow-sm">
+                <div class="absolute inset-x-2 bottom-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-all duration-200 translate-y-1 group-hover:translate-y-0 bg-white p-1 rounded-lg border border-border shadow-sm">
                   <button
                     @click.stop="downloadFile(file)"
-                    class="flex-1 py-1.5 bg-gray-100 rounded text-[10px] font-medium text-gray-600 hover:bg-gray-200 transition-colors"
+                    class="flex-1 py-1.5 bg-muted rounded text-[10px] font-medium text-muted-foreground hover:bg-muted transition-colors"
                   >
                     下载
                   </button>
                   <button
                     @click.stop="deleteFile(file)"
-                    class="flex-1 py-1.5 bg-red-50 text-red-500 rounded text-[10px] font-medium hover:bg-red-100 transition-colors"
+                    class="flex-1 py-1.5 bg-destructive/10 text-destructive rounded text-[10px] font-medium hover:bg-destructive/20 transition-colors"
                   >
                     删除
                   </button>
@@ -244,18 +244,18 @@
               <div
                 v-for="file in filteredFiles"
                 :key="file.document_id"
-                class="group flex items-center gap-4 p-3 bg-white border border-gray-100 rounded-lg cursor-pointer transition-colors hover:bg-gray-50 hover:border-gray-200"
-                :class="selectedFile?.document_id === file.document_id ? 'bg-blue-50/30 border-blue-200' : ''"
+                class="group flex items-center gap-4 p-3 bg-white border border-border rounded-lg cursor-pointer transition-colors hover:bg-muted hover:border-border"
+                :class="selectedFile?.document_id === file.document_id ? 'bg-accent/30 border-primary/30' : ''"
                 @click="selectFile(file)"
               >
-                <FileText class="w-8 h-8 text-gray-400" />
+                <FileText class="w-8 h-8 text-muted-foreground/50" />
                 
                 <div class="flex-1 min-w-0 grid grid-cols-12 gap-4 items-center">
-                  <div class="col-span-5 font-medium text-gray-800 text-sm truncate" :title="file.filename">{{ file.filename }}</div>
-                  <div class="col-span-3 text-xs text-gray-500">{{ formatDate(file.created_at) }}</div>
-                  <div class="col-span-2 text-xs text-gray-500 font-mono">{{ formatFileSize(file.metadata?.file_size || 0) }}</div>
+                  <div class="col-span-5 font-medium text-foreground text-sm truncate" :title="file.filename">{{ file.filename }}</div>
+                  <div class="col-span-3 text-xs text-muted-foreground">{{ formatDate(file.created_at) }}</div>
+                  <div class="col-span-2 text-xs text-muted-foreground font-mono">{{ formatFileSize(file.metadata?.file_size || 0) }}</div>
                   <div class="col-span-2 text-right">
-                    <span :class="['px-2 py-0.5 rounded text-[10px] font-medium', file.status === 'ready' ? 'bg-green-50 text-green-600' : 'bg-yellow-50 text-yellow-600']">
+                    <span :class="['px-2 py-0.5 rounded text-[10px] font-medium', file.status === 'ready' ? 'bg-success/10 text-success' : 'bg-accent text-accent-foreground']">
                       {{ getStatusText(file.status) }}
                     </span>
                   </div>
@@ -264,14 +264,14 @@
                 <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button
                     @click.stop="downloadFile(file)"
-                    class="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-200 rounded transition-colors"
+                    class="p-1.5 text-muted-foreground/50 hover:text-foreground hover:bg-muted rounded transition-colors"
                     title="下载"
                   >
                     <Download class="w-4 h-4" />
                   </button>
                   <button
                     @click.stop="deleteFile(file)"
-                    class="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+                    class="p-1.5 text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 rounded transition-colors"
                     title="删除"
                   >
                     <Trash2 class="w-4 h-4" />
@@ -285,17 +285,17 @@
               <button
                 @click="currentPage--"
                 :disabled="currentPage === 1"
-                class="px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
+                class="px-3 py-1.5 bg-white border border-border rounded-lg text-xs font-medium text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
               >
                 上一页
               </button>
-              <span class="text-xs font-medium text-gray-500">
+              <span class="text-xs font-medium text-muted-foreground">
                 {{ currentPage }} / {{ totalPages }}
               </span>
               <button
                 @click="currentPage++"
                 :disabled="currentPage === totalPages"
-                class="px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
+                class="px-3 py-1.5 bg-white border border-border rounded-lg text-xs font-medium text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
               >
                 下一页
               </button>
@@ -311,50 +311,50 @@
         enter-from-class="translate-x-full"
         leave-to-class="translate-x-full"
       >
-        <div v-if="selectedFile" class="w-[360px] border-l border-gray-200 bg-white flex flex-col shadow-xl z-20">
-          <div class="h-14 flex items-center justify-between px-5 border-b border-gray-100">
-            <h3 class="font-semibold text-gray-800 text-sm">文件详情</h3>
-            <button @click="selectedFile = null" class="p-1.5 rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-900 transition-colors">
+        <div v-if="selectedFile" class="w-[360px] border-l border-border bg-white flex flex-col shadow-xl z-20">
+          <div class="h-14 flex items-center justify-between px-5 border-b border-border">
+            <h3 class="font-semibold text-foreground text-sm">文件详情</h3>
+            <button @click="selectedFile = null" class="p-1.5 rounded-md text-muted-foreground/50 hover:bg-muted hover:text-foreground transition-colors">
               <X class="w-4 h-4" />
             </button>
           </div>
 
           <div class="flex-1 overflow-y-auto p-5 space-y-6">
             <!-- 文件预览 -->
-            <div class="flex flex-col items-center py-6 bg-gray-50 rounded-xl border border-gray-100">
+            <div class="flex flex-col items-center py-6 bg-muted rounded-xl border border-border">
               <FileText class="w-16 h-16 text-gray-300 mb-3" />
-              <div class="text-center font-semibold text-gray-800 px-4 break-words leading-snug text-sm">{{ selectedFile.filename }}</div>
+              <div class="text-center font-semibold text-foreground px-4 break-words leading-snug text-sm">{{ selectedFile.filename }}</div>
             </div>
 
             <!-- 基本信息 -->
             <div class="space-y-3">
-              <h4 class="font-semibold text-gray-900 text-xs uppercase tracking-wide mb-2">基本信息</h4>
+              <h4 class="font-semibold text-foreground text-xs uppercase tracking-wide mb-2">基本信息</h4>
               <div class="flex justify-between items-center text-xs">
-                <span class="text-gray-500">文档 ID</span>
-                <span class="font-mono bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">{{ selectedFile.document_id.substring(0, 8) }}...</span>
+                <span class="text-muted-foreground">文档 ID</span>
+                <span class="font-mono bg-muted px-1.5 py-0.5 rounded text-muted-foreground">{{ selectedFile.document_id.substring(0, 8) }}...</span>
               </div>
               <div class="flex justify-between items-center text-xs">
-                <span class="text-gray-500">上传时间</span>
-                <span class="text-gray-700">{{ formatDate(selectedFile.created_at) }}</span>
+                <span class="text-muted-foreground">上传时间</span>
+                <span class="text-foreground">{{ formatDate(selectedFile.created_at) }}</span>
               </div>
               <div class="flex justify-between items-center text-xs">
-                <span class="text-gray-500">状态</span>
-                <span :class="['px-1.5 py-0.5 rounded font-medium', selectedFile.status === 'ready' ? 'bg-green-50 text-green-600' : 'bg-yellow-50 text-yellow-600']">
+                <span class="text-muted-foreground">状态</span>
+                <span :class="['px-1.5 py-0.5 rounded font-medium', selectedFile.status === 'ready' ? 'bg-success/10 text-success' : 'bg-accent text-accent-foreground']">
                   {{ getStatusText(selectedFile.status) }}
                 </span>
               </div>
               <div v-if="selectedFile.category" class="flex justify-between items-center text-xs">
-                <span class="text-gray-500">分类</span>
-                <span class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded font-medium">{{ getCategoryLabel(selectedFile.category) }}</span>
+                <span class="text-muted-foreground">分类</span>
+                <span class="bg-muted text-muted-foreground px-1.5 py-0.5 rounded font-medium">{{ getCategoryLabel(selectedFile.category) }}</span>
               </div>
             </div>
 
             <!-- 元数据 -->
-            <div v-if="selectedFile.metadata" class="space-y-3 pt-4 border-t border-gray-100">
-              <h4 class="font-semibold text-gray-900 text-xs uppercase tracking-wide mb-2">元数据</h4>
+            <div v-if="selectedFile.metadata" class="space-y-3 pt-4 border-t border-border">
+              <h4 class="font-semibold text-foreground text-xs uppercase tracking-wide mb-2">元数据</h4>
               <div v-for="(value, key) in selectedFile.metadata" :key="key" class="flex justify-between items-center text-xs">
-                <span class="text-gray-500">{{ key }}</span>
-                <span class="font-mono text-gray-700 truncate max-w-[150px]" :title="value">{{ value }}</span>
+                <span class="text-muted-foreground">{{ key }}</span>
+                <span class="font-mono text-foreground truncate max-w-[150px]" :title="value">{{ value }}</span>
               </div>
             </div>
 
@@ -362,13 +362,13 @@
             <div class="flex flex-col gap-2 pt-6 mt-auto">
               <button
                 @click="downloadFile(selectedFile)"
-                class="w-full py-2 bg-gray-900 text-white rounded-lg text-xs font-medium hover:bg-gray-800 transition-all shadow-sm"
+                class="w-full py-2 bg-primary text-white rounded-lg text-xs font-medium hover:bg-primary-hover transition-all shadow-sm"
               >
                 下载文件
               </button>
               <button
                 @click="deleteFile(selectedFile)"
-                class="w-full py-2 bg-white border border-red-200 text-red-500 rounded-lg text-xs font-medium hover:bg-red-50 transition-all"
+                class="w-full py-2 bg-white border border-destructive/30 text-destructive rounded-lg text-xs font-medium hover:bg-destructive/10 transition-all"
               >
                 删除文件
               </button>
@@ -384,7 +384,6 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useKnowledgeStore } from '@/stores/knowledge'
-import { useAuthStore } from '@/stores/auth'
 import axios from '@/api/index'
 import { 
   UploadCloud, 
@@ -410,12 +409,8 @@ import {
 
 const router = useRouter()
 const knowledgeStore = useKnowledgeStore()
-const authStore = useAuthStore()
 
-// 获取当前用户 ID（优先使用登录用户 ID）
-const getCurrentUserId = () => {
-  return authStore.user?.id || authStore.initUserId()
-}
+const getCurrentUserId = () => 'local'
 
 // 数据状态
 const files = ref([])
@@ -721,21 +716,3 @@ watch([searchQuery, selectedCategory, selectedStatus], () => {
   currentPage.value = 1
 })
 </script>
-
-<style scoped>
-/* 滚动条优化 */
-.scrollbar-thin::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
-}
-.scrollbar-thin::-webkit-scrollbar-track {
-  background: transparent;
-}
-.scrollbar-thin::-webkit-scrollbar-thumb {
-  background-color: transparent;
-  border-radius: 4px;
-}
-.scrollbar-thin:hover::-webkit-scrollbar-thumb {
-  background-color: rgba(156, 163, 175, 0.5);
-}
-</style>

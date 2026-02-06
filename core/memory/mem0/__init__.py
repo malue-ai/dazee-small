@@ -62,7 +62,6 @@ from .config import (
     EmbedderConfig,
     LLMConfig,
     Mem0Config,
-    QdrantConfig,
     get_mem0_config,
     set_mem0_config,
 )
@@ -168,7 +167,6 @@ from .update import (
 __all__ = [
     # 配置
     "Mem0Config",
-    "QdrantConfig",
     "EmbedderConfig",
     "LLMConfig",
     "get_mem0_config",

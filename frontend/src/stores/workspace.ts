@@ -1,6 +1,6 @@
 /**
  * 工作区 Store
- * 负责管理文件系统、沙盒、项目运行等
+ * 负责管理文件系统、项目运行等
  */
 
 import { defineStore } from 'pinia'
@@ -8,9 +8,6 @@ import { ref, computed } from 'vue'
 import * as workspaceApi from '@/api/workspace'
 import type {
   FileItem,
-  SandboxInfo,
-  SandboxStatus,
-  SandboxStack,
   ProjectInfo,
   TerminalLogItem,
   TerminalLogType,
@@ -42,20 +39,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   /** 展开的目录 */
   const expandedDirs = ref<Set<string>>(new Set())
-
-  /** 沙盒状态 */
-  const sandbox = ref<SandboxInfo>({
-    id: null,
-    e2bSandboxId: null,
-    status: 'none',
-    stack: null,
-    previewUrl: null,
-    createdAt: null,
-    lastActiveAt: null
-  })
-
-  /** 沙盒加载状态 */
-  const isLoadingSandbox = ref(false)
 
   /** 当前选中的文件 */
   const selectedFile = ref<FileItem | null>(null)
@@ -96,41 +79,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   /** 是否有项目 */
   const hasProjects = computed(() => projects.value.length > 0)
-
-  /** 沙盒是否正在运行 */
-  const isSandboxRunning = computed(() => sandbox.value.status === 'running')
-
-  /** 沙盒是否可用 */
-  const isSandboxAvailable = computed(() =>
-    ['running', 'paused'].includes(sandbox.value.status)
-  )
-
-  /** 是否有预览 URL */
-  const hasPreviewUrl = computed(() => !!sandbox.value.previewUrl)
-
-  /** 沙盒状态文字 */
-  const sandboxStatusText = computed(() => {
-    const statusMap: Record<SandboxStatus, string> = {
-      none: '未创建',
-      creating: '创建中...',
-      running: '运行中',
-      paused: '已暂停',
-      killed: '已终止'
-    }
-    return statusMap[sandbox.value.status] || sandbox.value.status
-  })
-
-  /** 沙盒状态颜色 */
-  const sandboxStatusColor = computed(() => {
-    const colorMap: Record<SandboxStatus, string> = {
-      none: '#6b7280',
-      creating: '#f59e0b',
-      running: '#10b981',
-      paused: '#3b82f6',
-      killed: '#ef4444'
-    }
-    return colorMap[sandbox.value.status] || '#6b7280'
-  })
 
   /** 是否正在实时预览 */
   const isLivePreviewing = computed(() => livePreview.value.isActive)
@@ -329,14 +277,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   async function runProject(
     convId: string,
     projectName: string,
-    stack: SandboxStack
+    stack: string
   ) {
     try {
       const result = await workspaceApi.runProject(convId, projectName, stack)
 
       if (result.success) {
-        sandbox.value.previewUrl = result.preview_url || null
-        sandbox.value.stack = stack
         showPreview.value = true
         console.log('✅ 项目启动成功:', result.preview_url)
       }
@@ -376,136 +322,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return projectLogs.value
     } catch (error) {
       console.error('❌ 获取日志失败:', error)
-      throw error
-    }
-  }
-
-  // ==================== 沙盒操作方法 ====================
-
-  /**
-   * 获取沙盒状态
-   */
-  async function fetchSandboxStatus(convId: string): Promise<SandboxInfo> {
-    conversationId.value = convId
-    isLoadingSandbox.value = true
-
-    try {
-      const data = await workspaceApi.getSandboxStatus(convId)
-      sandbox.value = {
-        id: data.sandbox_id,
-        e2bSandboxId: data.e2b_sandbox_id,
-        status: data.status,
-        stack: data.stack,
-        previewUrl: data.preview_url,
-        createdAt: data.created_at,
-        lastActiveAt: data.last_active_at
-      }
-      console.log('✅ 沙盒状态获取成功:', sandbox.value.status)
-      return sandbox.value
-    } catch (error) {
-      console.error('❌ 获取沙盒状态失败:', error)
-      throw error
-    } finally {
-      isLoadingSandbox.value = false
-    }
-  }
-
-  /**
-   * 初始化沙盒
-   */
-  async function initSandbox(
-    convId: string,
-    userId: string,
-    stack?: SandboxStack
-  ): Promise<SandboxInfo> {
-    conversationId.value = convId
-    isLoadingSandbox.value = true
-
-    try {
-      const data = await workspaceApi.initSandbox(convId, userId, stack)
-      sandbox.value = {
-        id: data.sandbox_id,
-        e2bSandboxId: data.e2b_sandbox_id,
-        status: data.status,
-        stack: data.stack,
-        previewUrl: data.preview_url,
-        createdAt: data.created_at,
-        lastActiveAt: data.last_active_at
-      }
-      console.log('✅ 沙盒初始化成功:', sandbox.value.e2bSandboxId)
-      return sandbox.value
-    } catch (error) {
-      console.error('❌ 初始化沙盒失败:', error)
-      throw error
-    } finally {
-      isLoadingSandbox.value = false
-    }
-  }
-
-  /**
-   * 暂停沙盒
-   */
-  async function pauseSandbox(convId: string): Promise<void> {
-    try {
-      await workspaceApi.pauseSandbox(convId)
-      sandbox.value.status = 'paused'
-      console.log('✅ 沙盒已暂停')
-    } catch (error) {
-      console.error('❌ 暂停沙盒失败:', error)
-      throw error
-    }
-  }
-
-  /**
-   * 恢复沙盒
-   */
-  async function resumeSandbox(convId: string): Promise<SandboxInfo> {
-    isLoadingSandbox.value = true
-
-    try {
-      const data = await workspaceApi.resumeSandbox(convId)
-      sandbox.value = {
-        id: data.sandbox_id,
-        e2bSandboxId: data.e2b_sandbox_id,
-        status: data.status,
-        stack: data.stack,
-        previewUrl: data.preview_url,
-        createdAt: data.created_at,
-        lastActiveAt: data.last_active_at
-      }
-      console.log('✅ 沙盒已恢复')
-      return sandbox.value
-    } catch (error) {
-      console.error('❌ 恢复沙盒失败:', error)
-      throw error
-    } finally {
-      isLoadingSandbox.value = false
-    }
-  }
-
-  /**
-   * 终止沙盒
-   */
-  async function killSandbox(convId: string): Promise<void> {
-    try {
-      await workspaceApi.killSandbox(convId)
-      sandbox.value.status = 'killed'
-      sandbox.value.previewUrl = null
-      console.log('✅ 沙盒已终止')
-    } catch (error) {
-      console.error('❌ 终止沙盒失败:', error)
-      throw error
-    }
-  }
-
-  /**
-   * 执行命令
-   */
-  async function runCommand(convId: string, command: string, timeout = 60) {
-    try {
-      return await workspaceApi.runCommand(convId, command, timeout)
-    } catch (error) {
-      console.error('❌ 执行命令失败:', error)
       throw error
     }
   }
@@ -666,15 +482,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     projects.value = []
     totalSize.value = 0
     expandedDirs.value.clear()
-    sandbox.value = {
-      id: null,
-      e2bSandboxId: null,
-      status: 'none',
-      stack: null,
-      previewUrl: null,
-      createdAt: null,
-      lastActiveAt: null
-    }
     selectedFile.value = null
     fileContent.value = ''
     showPreview.value = false
@@ -701,8 +508,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     isLoadingFiles,
     isLoadingProjects,
     expandedDirs,
-    sandbox,
-    isLoadingSandbox,
     selectedFile,
     fileContent,
     showPreview,
@@ -715,11 +520,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     formattedTotalSize,
     hasFiles,
     hasProjects,
-    isSandboxRunning,
-    isSandboxAvailable,
-    hasPreviewUrl,
-    sandboxStatusText,
-    sandboxStatusColor,
     isLivePreviewing,
     livePreviewContent,
     livePreviewPath,
@@ -744,14 +544,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     runProject,
     stopProject,
     fetchProjectLogs,
-
-    // 沙盒方法
-    fetchSandboxStatus,
-    initSandbox,
-    pauseSandbox,
-    resumeSandbox,
-    killSandbox,
-    runCommand,
 
     // 终端方法
     addTerminalLog,

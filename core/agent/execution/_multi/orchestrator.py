@@ -66,7 +66,6 @@ from core.agent.models import (
 )
 
 # 3. 本地模块
-from core.billing.tracker import create_enhanced_usage_tracker
 from core.planning.protocol import Plan, PlanStep, StepStatus
 from core.routing import IntentResult
 from logger import get_logger
@@ -215,8 +214,10 @@ class MultiAgentOrchestrator:
         self._working_memory = None  # 工作记忆
         self._mem0_client = None  # Mem0 客户端
 
-        # 🆕 V7.4: Token 使用统计（使用基类的 _usage_tracker）
-        self._usage_tracker = create_enhanced_usage_tracker()
+        # 🆕 V7.4: Token 使用统计
+        from models.usage import UsageTracker
+
+        self._usage_tracker = UsageTracker()
 
         # 追踪信息（用于监控和调试）
         self._execution_trace = []

@@ -22,7 +22,6 @@ from logger import get_logger
 if TYPE_CHECKING:
     from core.agent.components.lead_agent import SubTask
     from core.agent.models import MultiAgentConfig, OrchestratorState
-    from core.billing.tracker import EnhancedUsageTracker
     from core.events.broadcaster import EventBroadcaster
     from core.tool.executor import ToolExecutor
 
@@ -49,7 +48,7 @@ class WorkerRunner:
         self,
         worker_model: str = "claude-sonnet-4-5-20250929",
         config: Optional["MultiAgentConfig"] = None,
-        usage_tracker: Optional["EnhancedUsageTracker"] = None,
+        usage_tracker=None,
         prompt_builder=None,
     ):
         self.worker_model = worker_model

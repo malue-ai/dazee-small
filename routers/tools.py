@@ -436,21 +436,28 @@ async def list_mcp_servers(
         # 从数据库查询
         mcp_servers = await mcp_service.list_global_mcps(include_inactive=include_inactive)
 
+        # TODO: MCP 池功能已移除，连接状态信息暂时不可用
         # 从 MCPPool 补充运行时连接状态
-        from infra.pools import get_mcp_pool
+        # try:
+        #     from infra.pools import get_mcp_pool
+        #     mcp_pool = get_mcp_pool()
+        #     pool_clients = mcp_pool.get_all_clients()
+        #     for server in mcp_servers:
+        #         server_url = server.get("server_url", "")
+        #         if server_url in pool_clients:
+        #             client = pool_clients[server_url]
+        #             server["is_connected"] = getattr(client, "_connected", False)
+        #             server["connected_tools_count"] = len(getattr(client, "_tools", {}))
+        #         else:
+        #             server["is_connected"] = False
+        #             server["connected_tools_count"] = 0
+        # except Exception:
+        #     pass
 
-        mcp_pool = get_mcp_pool()
-        pool_clients = mcp_pool.get_all_clients()
-
+        # 设置默认值
         for server in mcp_servers:
-            server_url = server.get("server_url", "")
-            if server_url in pool_clients:
-                client = pool_clients[server_url]
-                server["is_connected"] = getattr(client, "_connected", False)
-                server["connected_tools_count"] = len(getattr(client, "_tools", {}))
-            else:
-                server["is_connected"] = False
-                server["connected_tools_count"] = 0
+            server["is_connected"] = False
+            server["connected_tools_count"] = 0
 
         return JSONResponse(
             content={
@@ -481,22 +488,29 @@ async def get_mcp_server_detail(server_name: str):
         # 从数据库获取
         mcp_data = await mcp_service.get_global_mcp(server_name)
 
+        # TODO: MCP 池功能已移除，连接状态信息暂时不可用
         # 从 MCPPool 补充运行时连接状态
-        from infra.pools import get_mcp_pool
+        # try:
+        #     from infra.pools import get_mcp_pool
+        #     mcp_pool = get_mcp_pool()
+        #     server_url = mcp_data.get("server_url", "")
+        #     pool_clients = mcp_pool.get_all_clients()
+        #     if server_url in pool_clients:
+        #         client = pool_clients[server_url]
+        #         mcp_data["is_connected"] = getattr(client, "_connected", False)
+        #         mcp_data["connected_tools"] = list(getattr(client, "_tools", {}).keys())
+        #         mcp_data["connected_tools_count"] = len(getattr(client, "_tools", {}))
+        #     else:
+        #         mcp_data["is_connected"] = False
+        #         mcp_data["connected_tools"] = []
+        #         mcp_data["connected_tools_count"] = 0
+        # except Exception:
+        #     pass
 
-        mcp_pool = get_mcp_pool()
-        server_url = mcp_data.get("server_url", "")
-        pool_clients = mcp_pool.get_all_clients()
-
-        if server_url in pool_clients:
-            client = pool_clients[server_url]
-            mcp_data["is_connected"] = getattr(client, "_connected", False)
-            mcp_data["connected_tools"] = list(getattr(client, "_tools", {}).keys())
-            mcp_data["connected_tools_count"] = len(getattr(client, "_tools", {}))
-        else:
-            mcp_data["is_connected"] = False
-            mcp_data["connected_tools"] = []
-            mcp_data["connected_tools_count"] = 0
+        # 设置默认值
+        mcp_data["is_connected"] = False
+        mcp_data["connected_tools"] = []
+        mcp_data["connected_tools_count"] = 0
 
         return JSONResponse(content=mcp_data)
 
@@ -926,11 +940,16 @@ async def health_check():
     try:
         tools = tool_service.list_tools()
 
+        # TODO: MCP 池功能已移除，连接数暂时不可用
         # 从 MCPPool 获取连接数
-        from infra.pools import get_mcp_pool
+        # try:
+        #     from infra.pools import get_mcp_pool
+        #     mcp_pool = get_mcp_pool()
+        #     mcp_clients = len(mcp_pool.get_all_clients())
+        # except Exception:
+        #     mcp_clients = 0
 
-        mcp_pool = get_mcp_pool()
-        mcp_clients = len(mcp_pool.get_all_clients())
+        mcp_clients = 0
 
         return JSONResponse(
             content={

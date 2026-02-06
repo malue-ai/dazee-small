@@ -9,36 +9,36 @@
       <button 
         v-if="hasMore && !loadingMore"
         @click="emit('load-more')"
-        class="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+        class="px-4 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
       >
         加载更早的消息
       </button>
-      <div v-if="loadingMore" class="flex items-center gap-2 text-sm text-gray-400">
-        <span class="w-4 h-4 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin"></span>
+      <div v-if="loadingMore" class="flex items-center gap-2 text-sm text-muted-foreground/50">
+        <Loader2 class="w-4 h-4 animate-spin" />
         加载中...
       </div>
     </div>
 
     <!-- 欢迎页 -->
     <div v-if="messages.length === 0 && !loadingMore" class="h-full flex flex-col items-center justify-center text-center -mt-10">
-      <div class="w-20 h-20 bg-white rounded-3xl shadow-lg border border-gray-100 flex items-center justify-center mb-8 transform hover:scale-105 transition-transform duration-300">
-        <Sparkles class="w-10 h-10 text-blue-500" />
+      <div class="w-20 h-20 bg-white rounded-3xl shadow-lg border border-border flex items-center justify-center mb-8 transform hover:scale-105 transition-transform duration-300">
+        <Sparkles class="w-10 h-10 text-primary" />
       </div>
-      <h1 class="text-3xl font-bold mb-4 text-gray-900">有什么我可以帮你的？</h1>
-      <p class="text-gray-500 mb-10 max-w-md">我是你的 AI 助手，可以协助你完成编码、写作、分析等各种任务。</p>
+      <h1 class="text-3xl font-bold mb-4 text-foreground">有什么我可以帮你的？</h1>
+      <p class="text-muted-foreground mb-10 max-w-md">我是你的 AI 助手，可以协助你完成编码、写作、分析等各种任务。</p>
       
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4 w-full max-w-3xl px-4">
         <div 
           v-for="(suggestion, index) in suggestions"
           :key="index"
-          class="p-5 rounded-2xl bg-white border border-gray-200 hover:border-blue-300 hover:shadow-lg cursor-pointer transition-all duration-300 group" 
+          class="p-5 rounded-2xl bg-white border border-border hover:border-primary/50 hover:shadow-lg cursor-pointer transition-all duration-300 group" 
           @click="emit('suggestion-click', suggestion.text)"
         >
-          <div class="w-10 h-10 rounded-xl bg-gray-50 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
-            <component :is="suggestion.icon" class="w-5 h-5 text-gray-600" />
+          <div class="w-10 h-10 rounded-xl bg-muted flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+            <component :is="suggestion.icon" class="w-5 h-5 text-muted-foreground" />
           </div>
-          <h3 class="font-semibold text-gray-800 mb-1">{{ suggestion.title }}</h3>
-          <p class="text-xs text-gray-400">{{ suggestion.description }}</p>
+          <h3 class="font-semibold text-foreground mb-1">{{ suggestion.title }}</h3>
+          <p class="text-xs text-muted-foreground/50">{{ suggestion.description }}</p>
         </div>
       </div>
     </div>
@@ -56,7 +56,7 @@
           class="w-10 h-10 flex items-center justify-center flex-shrink-0 mt-1"
           :class="message.role === 'assistant' ? '' : 'order-2 hidden'"
         >
-          <Bot class="w-6 h-6 text-gray-600" />
+          <Bot class="w-6 h-6 text-muted-foreground" />
         </div>
         
         <div 
@@ -70,32 +70,31 @@
               <div 
                 v-for="(file, idx) in message.files" 
                 :key="idx" 
-                class="flex items-center gap-3 p-3 bg-white rounded-xl border border-gray-200 cursor-pointer hover:bg-gray-50 transition-colors shadow-sm"
+                class="flex items-center gap-3 p-3 bg-white rounded-xl border border-border cursor-pointer hover:bg-muted transition-colors shadow-sm"
                 @click="emit('file-preview', file)"
               >
-                <FileText class="w-5 h-5 text-gray-400" />
+                <FileText class="w-5 h-5 text-muted-foreground/50" />
                 <div class="flex flex-col text-left">
-                  <span class="text-sm font-medium text-gray-800 truncate max-w-[12rem]">{{ file.file_name }}</span>
-                  <span class="text-xs text-gray-500">{{ getFileTypeLabel(file.file_type) }}</span>
+                  <span class="text-sm font-medium text-foreground truncate max-w-[12rem]">{{ file.file_name }}</span>
+                  <span class="text-xs text-muted-foreground">{{ getFileTypeLabel(file.file_type) }}</span>
                 </div>
               </div>
             </div>
             <!-- 文字内容 -->
-            <div v-if="message.content" class="bg-gray-100 text-gray-900 px-5 py-3 rounded-2xl rounded-tr-sm text-sm leading-relaxed break-words max-w-full">
+            <div v-if="message.content" class="bg-accent text-foreground px-5 py-3 rounded-2xl rounded-tr-sm text-sm leading-relaxed break-words max-w-full">
               {{ message.content }}
             </div>
           </div>
           
           <!-- 助手消息 -->
           <div v-else class="flex flex-col gap-3 overflow-hidden">
-            <div class="text-sm leading-relaxed text-gray-800 px-1 overflow-x-auto">
+            <div class="text-sm leading-relaxed text-foreground px-1 overflow-x-auto">
               <!-- 有内容块时使用 MessageContent -->
               <MessageContent 
                 v-if="message.contentBlocks && message.contentBlocks.length > 0"
                 :content="message.contentBlocks"
                 :tool-statuses="message.toolStatuses || {}"
                 :is-streaming="isMessageStreaming(message)"
-                @mermaid-detected="(charts: string[]) => emit('mermaid-detected', charts)"
               />
               <!-- 无内容块时 -->
               <template v-else>
@@ -116,14 +115,14 @@
                 <!-- 有文本内容 -->
                 <MarkdownRenderer 
                   v-if="message.content"
-                  :content="message.content" 
-                  @mermaid-detected="(charts: string[]) => emit('mermaid-detected', charts)" 
+                  :content="message.content"
+                  :final="!isMessageStreaming(message)"
                 />
                 <!-- 空消息且正在加载（仅最后一条消息显示） -->
-                <div v-else-if="loading && isLastMessage(message)" class="flex items-center gap-1.5 py-2 text-gray-400">
-                  <span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0ms"></span>
-                  <span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 150ms"></span>
-                  <span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 300ms"></span>
+                <div v-else-if="loading && isLastMessage(message)" class="flex items-center gap-1.5 py-2 text-muted-foreground/50">
+                  <span class="w-2 h-2 bg-primary rounded-full animate-bounce" style="animation-delay: 0ms"></span>
+                  <span class="w-2 h-2 bg-primary rounded-full animate-bounce" style="animation-delay: 150ms"></span>
+                  <span class="w-2 h-2 bg-primary rounded-full animate-bounce" style="animation-delay: 300ms"></span>
                 </div>
               </template>
             </div>
@@ -133,7 +132,7 @@
               <button 
                 v-for="(q, idx) in message.recommendedQuestions" 
                 :key="idx" 
-                class="px-4 py-2 bg-white border border-gray-200 rounded-full text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm"
+                class="px-4 py-2 bg-white border border-border rounded-full text-xs text-muted-foreground hover:text-foreground hover:bg-muted hover:border-muted-foreground/30 transition-all shadow-sm"
                 @click="emit('suggestion-click', q)"
               >
                 {{ q }}
@@ -153,7 +152,7 @@ import type { UIMessage, AttachedFile } from '@/types'
 import { getFileTypeLabel as getLabel } from '@/utils'
 import MarkdownRenderer from './MarkdownRenderer.vue'
 import MessageContent from './MessageContent.vue'
-import { Sparkles, Bot, FileText, Gamepad2, BarChart3, Search } from 'lucide-vue-next'
+import { Sparkles, Bot, FileText, Gamepad2, BarChart3, Search, Loader2 } from 'lucide-vue-next'
 
 // ==================== Props ====================
 
@@ -184,8 +183,6 @@ const emit = defineEmits<{
   (e: 'suggestion-click', text: string): void
   /** 文件预览 */
   (e: 'file-preview', file: AttachedFile): void
-  /** 检测到 Mermaid 图表 */
-  (e: 'mermaid-detected', charts: string[]): void
   /** 加载更多历史消息 */
   (e: 'load-more'): void
 }>()
@@ -345,38 +342,6 @@ defineExpose({
 </script>
 
 <style scoped>
-/* 滚动条美化 - 默认透明，hover 时显示 */
-.scrollbar-thin::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-.scrollbar-thin::-webkit-scrollbar-track {
-  background: transparent;
-}
-.scrollbar-thin::-webkit-scrollbar-thumb {
-  background-color: transparent;
-  border-radius: 3px;
-}
-.scrollbar-thin:hover::-webkit-scrollbar-thumb {
-  background-color: rgba(156, 163, 175, 0.3);
-}
-.scrollbar-thin::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(156, 163, 175, 0.5);
-}
-
-/* Loading Dots 动画 */
-.typing-dots span {
-  animation: blink 1.4s infinite both;
-}
-.typing-dots span:nth-child(2) { animation-delay: 0.2s; }
-.typing-dots span:nth-child(3) { animation-delay: 0.4s; }
-
-@keyframes blink {
-  0% { opacity: 0.2; }
-  20% { opacity: 1; }
-  100% { opacity: 0.2; }
-}
-
 /* 消息内容中的 Markdown 样式修正 */
 :deep(.prose) {
   max-width: none;
@@ -384,8 +349,8 @@ defineExpose({
   word-break: break-word;
 }
 :deep(.prose pre) {
-  background-color: #f3f4f6;
-  border: 1px solid #e5e7eb;
+  background-color: var(--color-muted);
+  border: 1px solid var(--color-border);
   border-radius: 0.5rem;
   overflow-x: auto;
   max-width: 100%;
@@ -394,11 +359,11 @@ defineExpose({
   word-break: break-all;
 }
 
-/* 内联思考过程 - 简洁风格 */
+/* 内联思考过程 */
 .thinking-inline {
   margin-bottom: 12px;
-  background: #f8f9fa;
-  border-radius: 10px;
+  background: var(--color-muted);
+  border-radius: 12px;
   overflow: hidden;
 }
 
@@ -412,7 +377,7 @@ defineExpose({
 }
 
 .thinking-inline-header:hover {
-  background: #f1f3f4;
+  background: rgba(0, 0, 0, 0.03);
 }
 
 .thinking-inline-left {
@@ -421,69 +386,56 @@ defineExpose({
   gap: 8px;
   font-size: 13px;
   font-weight: 500;
-  color: #5f6368;
+  color: var(--color-muted-foreground);
 }
 
 .thinking-inline-dot {
   width: 6px;
   height: 6px;
-  background: #9aa0a6;
+  background: var(--color-muted-foreground);
   border-radius: 50%;
   transition: all 0.3s ease;
 }
 
-/* 流式输出时的脉冲动画 */
 .thinking-inline-dot.is-active {
-  background: #4285f4;
+  background: var(--color-primary);
   animation: pulse 1.5s infinite ease-in-out;
 }
 
 @keyframes pulse {
-  0%, 100% {
-    transform: scale(1);
-    opacity: 1;
-  }
-  50% {
-    transform: scale(1.3);
-    opacity: 0.7;
-  }
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.3); opacity: 0.7; }
 }
 
 .thinking-inline-toggle {
   font-size: 12px;
-  color: #9aa0a6;
+  color: var(--color-muted-foreground);
 }
 
 .thinking-inline-body {
   padding: 0 14px 12px;
   font-size: 13px;
-  color: #5f6368;
+  color: var(--color-muted-foreground);
   line-height: 1.6;
   white-space: pre-wrap;
 }
 
-/* 打字机光标效果 */
 .typing-cursor {
   display: inline-block;
   width: 2px;
   height: 1em;
-  background-color: #4285f4;
+  background-color: var(--color-primary);
   margin-left: 2px;
   vertical-align: text-bottom;
   animation: blink-cursor 0.8s infinite;
 }
 
 @keyframes blink-cursor {
-  0%, 50% {
-    opacity: 1;
-  }
-  51%, 100% {
-    opacity: 0;
-  }
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
 }
 
-/* 流式输出时的卡片边框效果 */
 .thinking-inline.is-streaming {
-  border-left: 2px solid #4285f4;
+  border-left: 2px solid var(--color-primary);
 }
 </style>

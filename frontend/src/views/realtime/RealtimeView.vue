@@ -1,16 +1,16 @@
 <template>
   <div class="h-screen w-full flex bg-white">
     <!-- 左侧边栏 -->
-    <div class="w-72 bg-gray-50 border-r border-gray-200 flex flex-col">
+    <div class="w-72 bg-gray-50 border-r border-border flex flex-col">
       <!-- Logo -->
-      <div class="h-16 flex items-center px-6 border-b border-gray-200">
+      <div class="h-16 flex items-center px-6 border-b border-border">
         <div class="flex items-center gap-3">
-          <div class="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl flex items-center justify-center">
+          <div class="w-10 h-10 bg-gradient-to-br from-primary to-amber-600 rounded-xl flex items-center justify-center">
             <Headphones class="w-5 h-5 text-white" />
           </div>
           <div>
             <h1 class="font-bold text-gray-900">实时语音</h1>
-            <p class="text-xs text-gray-500">Realtime Voice</p>
+            <p class="text-xs text-muted-foreground">Realtime Voice</p>
           </div>
         </div>
       </div>
@@ -19,44 +19,44 @@
       <div class="flex-1 p-6 space-y-6 overflow-y-auto">
         <!-- 系统指令 -->
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-2">
+          <label class="block text-sm font-medium text-foreground mb-2">
             系统指令
           </label>
           <textarea
             v-model="instructions"
             rows="4"
             placeholder="设置 AI 助手的行为和角色..."
-            class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+            class="w-full px-3 py-2 border border-border rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary"
           />
         </div>
 
         <!-- 预设场景 -->
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-2">
+          <label class="block text-sm font-medium text-foreground mb-2">
             预设场景
           </label>
           <div class="space-y-2">
             <button
               v-for="preset in presets"
               :key="preset.id"
-              class="w-full p-3 text-left border border-gray-200 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-colors"
-              :class="selectedPreset === preset.id ? 'border-blue-500 bg-blue-50' : ''"
+              class="w-full p-3 text-left border border-border rounded-lg hover:border-primary hover:bg-accent transition-colors"
+              :class="selectedPreset === preset.id ? 'border-primary bg-accent' : ''"
               @click="selectPreset(preset)"
             >
               <div class="flex items-center gap-2">
-                <component :is="preset.icon" class="w-4 h-4 text-gray-500" />
+                <component :is="preset.icon" class="w-4 h-4 text-muted-foreground" />
                 <span class="text-sm font-medium text-gray-900">{{ preset.name }}</span>
               </div>
-              <p class="text-xs text-gray-500 mt-1">{{ preset.description }}</p>
+              <p class="text-xs text-muted-foreground mt-1">{{ preset.description }}</p>
             </button>
           </div>
         </div>
       </div>
 
       <!-- 底部导航 -->
-      <div class="p-4 border-t border-gray-200">
+      <div class="p-4 border-t border-border">
         <button
-          class="w-full flex items-center gap-2 px-4 py-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+          class="w-full flex items-center gap-2 px-4 py-2 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
           @click="goBack"
         >
           <ArrowLeft class="w-4 h-4" />

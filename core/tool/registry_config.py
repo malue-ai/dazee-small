@@ -7,13 +7,11 @@
 使用方式：
     from core.tool.registry_config import (
         get_core_tools,
-        get_sandbox_tools,
         get_frequent_tools,
         get_tool_categories,
     )
 
     core_tools = get_core_tools()
-    sandbox_tools = get_sandbox_tools()
 """
 
 from pathlib import Path
@@ -23,13 +21,13 @@ import aiofiles
 import yaml
 
 from logger import get_logger
+from utils.app_paths import get_config_dir
 
 logger = get_logger("core.tool.registry_config")
 
-# 配置文件路径
-_PROJECT_ROOT = Path(__file__).parent.parent.parent
-_CAPABILITIES_PATH = _PROJECT_ROOT / "config" / "capabilities.yaml"
-_LEGACY_CONFIG_PATH = _PROJECT_ROOT / "config" / "tool_registry.yaml"
+# 配置文件路径（使用统一路径管理器）
+_CAPABILITIES_PATH = get_config_dir() / "capabilities.yaml"
+_LEGACY_CONFIG_PATH = get_config_dir() / "tool_registry.yaml"
 
 # 缓存配置（避免重复读取文件）
 _config_cache: Dict = None
@@ -62,9 +60,6 @@ async def _load_config() -> Dict:
                 # 转换格式以保持兼容
                 _config_cache = {
                     "core_tools": _extract_core_tools_from_capabilities(caps_config),
-                    "sandbox_tools": tool_classification.get("categories", {}).get(
-                        "sandbox_tools", []
-                    ),
                     "frequent_tools": tool_classification.get("frequent_tools", []),
                     "tool_categories": tool_classification.get("categories", {}),
                 }
@@ -129,17 +124,6 @@ async def get_core_tools() -> List[str]:
     return config.get("core_tools", []).copy()
 
 
-async def get_sandbox_tools() -> Set[str]:
-    """
-    获取沙盒工具集合（需要注入 conversation_id）
-
-    Returns:
-        沙盒工具名称集合
-    """
-    config = await _load_config()
-    return set(config.get("sandbox_tools", []))
-
-
 async def get_frequent_tools() -> List[str]:
     """
     获取常用工具列表（不延迟加载）
@@ -165,7 +149,6 @@ async def get_tool_categories() -> Dict[str, List[str]]:
 # 导出列表
 __all__ = [
     "get_core_tools",
-    "get_sandbox_tools",
     "get_frequent_tools",
     "get_tool_categories",
     "reload_config",

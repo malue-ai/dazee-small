@@ -1,20 +1,20 @@
 <template>
-  <div class="realtime-voice flex flex-col h-full bg-gradient-to-b from-gray-50 to-white">
+  <div class="realtime-voice flex flex-col h-full bg-gradient-to-b from-muted to-white">
     <!-- 顶部状态栏 -->
-    <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+    <div class="flex items-center justify-between px-6 py-4 border-b border-border">
       <div class="flex items-center gap-3">
         <div 
           class="w-3 h-3 rounded-full transition-colors"
           :class="statusColor"
         />
-        <span class="text-sm font-medium text-gray-600">{{ statusText }}</span>
+        <span class="text-sm font-medium text-muted-foreground">{{ statusText }}</span>
       </div>
       
       <!-- 语音选择 -->
       <select 
         v-model="selectedVoice"
         :disabled="isConnected"
-        class="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+        class="text-sm border border-border rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
       >
         <option v-for="voice in voiceOptions" :key="voice.value" :value="voice.value">
           {{ voice.label }}
@@ -25,7 +25,7 @@
     <!-- 消息列表 -->
     <div ref="messagesContainer" class="flex-1 overflow-y-auto p-6 space-y-4">
       <!-- 空状态 -->
-      <div v-if="messages.length === 0" class="h-full flex flex-col items-center justify-center text-gray-400">
+      <div v-if="messages.length === 0" class="h-full flex flex-col items-center justify-center text-muted-foreground/50">
         <Mic class="w-16 h-16 mb-4 opacity-50" />
         <p class="text-lg font-medium">实时语音对话</p>
         <p class="text-sm mt-1">点击下方按钮开始对话</p>
@@ -41,8 +41,8 @@
         <div 
           class="max-w-[80%] px-4 py-3 rounded-2xl"
           :class="msg.role === 'user' 
-            ? 'bg-blue-500 text-white rounded-br-md' 
-            : 'bg-white shadow-sm border border-gray-100 rounded-bl-md'"
+            ? 'bg-primary text-white rounded-br-md' 
+            : 'bg-white shadow-sm border border-border rounded-bl-md'"
         >
           <div class="flex items-start gap-2">
             <Volume2 v-if="msg.isAudio" class="w-4 h-4 mt-0.5 flex-shrink-0 opacity-60" />
@@ -59,14 +59,14 @@
 
       <!-- 实时转录 -->
       <div v-if="currentTranscript" class="flex justify-start">
-        <div class="max-w-[80%] px-4 py-3 rounded-2xl bg-gray-100 rounded-bl-md">
-          <p class="text-sm text-gray-600 italic">{{ currentTranscript }}...</p>
+        <div class="max-w-[80%] px-4 py-3 rounded-2xl bg-muted rounded-bl-md">
+          <p class="text-sm text-muted-foreground italic">{{ currentTranscript }}...</p>
         </div>
       </div>
     </div>
 
     <!-- 输入区域 -->
-    <div class="p-6 border-t border-gray-100 bg-white">
+    <div class="p-6 border-t border-border bg-white">
       <!-- 文本输入 -->
       <div class="flex gap-3 mb-4">
         <input
@@ -74,12 +74,12 @@
           type="text"
           placeholder="输入文字消息..."
           :disabled="!isConnected"
-          class="flex-1 px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:bg-gray-50"
+          class="flex-1 px-4 py-3 border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50 disabled:bg-muted"
           @keyup.enter="handleSendText"
         />
         <button
           :disabled="!isConnected || !textInput.trim()"
-          class="px-6 py-3 bg-blue-500 text-white rounded-xl font-medium hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          class="px-6 py-3 bg-primary text-white rounded-xl font-medium hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           @click="handleSendText"
         >
           <Send class="w-5 h-5" />
@@ -92,7 +92,7 @@
         <button
           v-if="!isConnected"
           :disabled="status === 'connecting'"
-          class="flex items-center gap-2 px-6 py-3 bg-green-500 text-white rounded-xl font-medium hover:bg-green-600 disabled:opacity-50 transition-all"
+          class="flex items-center gap-2 px-6 py-3 bg-success text-white rounded-xl font-medium hover:bg-green-600 disabled:opacity-50 transition-all"
           @click="handleConnect"
         >
           <Loader2 v-if="status === 'connecting'" class="w-5 h-5 animate-spin" />
@@ -107,7 +107,7 @@
               'relative w-20 h-20 rounded-full font-medium transition-all shadow-lg',
               isRecording 
                 ? 'bg-red-500 hover:bg-red-600 scale-110' 
-                : 'bg-blue-500 hover:bg-blue-600'
+                : 'bg-primary hover:bg-primary-hover'
             ]"
             @mousedown="handleStartRecording"
             @mouseup="handleStopRecording"
@@ -125,7 +125,7 @@
 
           <!-- 断开连接 -->
           <button
-            class="flex items-center gap-2 px-6 py-3 bg-gray-100 text-gray-700 rounded-xl font-medium hover:bg-gray-200 transition-colors"
+            class="flex items-center gap-2 px-6 py-3 bg-muted text-foreground rounded-xl font-medium hover:bg-muted/80 transition-colors"
             @click="handleDisconnect"
           >
             <PhoneOff class="w-5 h-5" />
@@ -135,19 +135,19 @@
       </div>
 
       <!-- 提示文字 -->
-      <p v-if="isConnected" class="text-center text-sm text-gray-400 mt-4">
+      <p v-if="isConnected" class="text-center text-sm text-muted-foreground/50 mt-4">
         {{ isRecording ? '松开发送语音' : '按住说话，松开发送' }}
       </p>
 
       <!-- 说话检测指示 -->
       <div v-if="isSpeaking" class="flex items-center justify-center gap-2 mt-3">
-        <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-        <span class="text-sm text-green-600">检测到语音...</span>
+        <div class="w-2 h-2 bg-success rounded-full animate-pulse" />
+        <span class="text-sm text-success">检测到语音...</span>
       </div>
 
       <!-- 错误提示 -->
-      <div v-if="error" class="mt-4 p-3 bg-red-50 border border-red-200 rounded-xl">
-        <p class="text-sm text-red-600">{{ error }}</p>
+      <div v-if="error" class="mt-4 p-3 bg-destructive/10 border border-destructive/30 rounded-xl">
+        <p class="text-sm text-destructive">{{ error }}</p>
       </div>
     </div>
   </div>
@@ -201,7 +201,7 @@ const voiceOptions = VOICE_OPTIONS
 
 const statusColor = computed(() => {
   switch (status.value) {
-    case 'connected': return 'bg-green-500'
+    case 'connected': return 'bg-success'
     case 'connecting': return 'bg-yellow-500 animate-pulse'
     case 'error': return 'bg-red-500'
     default: return 'bg-gray-300'

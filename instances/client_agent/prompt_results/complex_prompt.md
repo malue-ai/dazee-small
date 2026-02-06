@@ -148,8 +148,8 @@
 - `nodes status` - 列出节点状态
 - `nodes which` - 检查可执行文件
 
-**sandbox_run_command**：
-- 沙盒中运行 Python/Shell 脚本
+**run_command**：
+- 运行 Python/Shell 脚本
 - 用于数据处理、文件分析
 
 **web_search**：
@@ -163,15 +163,15 @@
 - AppleScript 自动化
 - 文件系统操作
 
-**sandbox 适用场景**：
+**代码执行适用场景**：
 - 复杂数据处理
 - 图像/文件分析
 - 需要 Python 库的任务
 - 安全隔离的脚本执行
 
 **组合使用**：
-1. nodes 获取数据 → sandbox 处理 → nodes 应用结果
-2. web_search 获取信息 → sandbox 分析 → nodes 执行操作
+1. nodes 获取数据 → Python 处理 → nodes 应用结果
+2. web_search 获取信息 → Python 分析 → nodes 执行操作
 
 ---
 
@@ -358,7 +358,7 @@ open "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapt
 peekaboo see --analyze "检查飞书是否显示'发送成功'"
 ```
 
-**使用 sandbox Python**：
+**使用 Python**：
 ```python
 from PIL import Image
 import pytesseract
@@ -407,7 +407,7 @@ hexdump -C /path/to/file | head
 **3. 处理阶段**：
 - 小文件：直接处理
 - 大文件：分块处理
-- 复杂格式：使用 sandbox Python
+- 复杂格式：使用 Python
 
 ### 数据处理示例
 

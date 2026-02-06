@@ -8,8 +8,7 @@ core/memory/
 ├── working.py            # WorkingMemory（会话级短期记忆）
 ├── user/                 # 用户级记忆
 │   ├── episodic.py       # 用户历史经验
-│   ├── preference.py     # 用户偏好（预留）
-│   └── e2b.py            # E2B 沙箱记忆（用户的云端计算环境）
+│   └── preference.py     # 用户偏好（预留）
 ├── system/               # 系统级记忆
 │   ├── skill.py          # SkillMemory（本地工作流技能缓存）
 │   └── cache.py          # 系统缓存（预留）
@@ -21,7 +20,7 @@ core/memory/
 
 层级说明：
 - 会话级（Session）：WorkingMemory - 当前会话的消息和工具调用
-- 用户级（User）：EpisodicMemory, PreferenceMemory, E2BMemory - 跨会话保留
+- 用户级（User）：EpisodicMemory, PreferenceMemory - 跨会话保留
 - 系统级（System）：SkillMemory, CacheMemory - 全局共享
 
 使用示例：
@@ -34,11 +33,6 @@ memory = create_memory_manager(user_id="user_123", storage_dir="./data")
 # 会话级记忆
 memory.working.add_message("user", "Hello")
 memory.working.add_tool_call("web_search", {"query": "AI"})
-
-# E2B 沙箱记忆（用户级）
-memory.e2b.set_session(sandbox_session)
-memory.e2b.add_execution(code, result, duration)
-memory.e2b.add_persistent_sandbox(session, name="数据分析环境")
 
 # 用户级记忆（需要先初始化）
 episodic = memory.episodic
@@ -84,17 +78,16 @@ from .system import (
     create_skill_memory_async,
 )
 
-# 用户级记忆（包括 E2B）
+# 用户级记忆
 from .user import (
-    E2BMemory,
-    E2BSandboxSession,
     EpisodicMemory,
     PreferenceMemory,
-    create_e2b_memory,
+    PlanMemory,
     create_episodic_memory,
     create_episodic_memory_async,
     create_preference_memory,
     create_preference_memory_async,
+    create_plan_memory,
 )
 
 # 会话级记忆
@@ -121,9 +114,6 @@ __all__ = [
     "PreferenceMemory",
     "create_preference_memory",
     "create_preference_memory_async",
-    "E2BSandboxSession",
-    "E2BMemory",
-    "create_e2b_memory",
     # 系统级记忆（Skill = 本地工作流技能）
     "SkillMemory",
     "create_skill_memory",

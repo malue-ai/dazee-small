@@ -74,44 +74,7 @@ import {
 
 // 工具配置：图标组件、名称、描述模板
 const TOOL_CONFIG: Record<string, { icon: Component; name: string; descTemplate?: (input: any) => string }> = {
-  // 沙盒文件操作
-  'sandbox_write_file': {
-    icon: FileEdit,
-    name: '写入文件',
-    descTemplate: (input) => input?.path ? `写入 ${getFileName(input.path)}` : '写入文件'
-  },
-  'sandbox_read_file': {
-    icon: FileText,
-    name: '读取文件',
-    descTemplate: (input) => input?.path ? `读取 ${getFileName(input.path)}` : '读取文件'
-  },
-  'sandbox_list_files': {
-    icon: FolderOpen,
-    name: '列出目录',
-    descTemplate: (input) => input?.path ? `浏览 ${input.path}` : '列出目录'
-  },
-  'sandbox_run_command': {
-    icon: Terminal,
-    name: '执行命令',
-    descTemplate: (input) => input?.command ? `执行 ${truncate(input.command, 40)}` : '执行命令'
-  },
-  'sandbox_execute_python': {
-    icon: Code,
-    name: '执行 Python',
-    descTemplate: () => '执行 Python 代码'
-  },
-  'sandbox_get_public_url': {
-    icon: Link,
-    name: '获取 URL',
-    descTemplate: (input) => input?.port ? `获取端口 ${input.port} 的公开链接` : '获取公开链接'
-  },
-  'sandbox_upload_file': {
-    icon: Upload,
-    name: '上传文件',
-    descTemplate: (input) => input?.path ? `上传 ${getFileName(input.path)}` : '上传文件'
-  },
-  
-  // 其他文件操作
+  // 文件操作
   'write_file': {
     icon: FileEdit,
     name: '写入文件',
@@ -415,11 +378,10 @@ function formatResult(data: any) {
 </script>
 
 <style scoped>
-/* 工具卡片 - 简洁风格 */
 .tool-card {
   margin: 8px 0;
-  background: #f8f9fa;
-  border-radius: 10px;
+  background: var(--color-muted);
+  border-radius: 12px;
   overflow: hidden;
 }
 
@@ -433,7 +395,7 @@ function formatResult(data: any) {
 }
 
 .tool-header:hover {
-  background: #f1f3f4;
+  background: rgba(0, 0, 0, 0.03);
 }
 
 .tool-left {
@@ -448,7 +410,7 @@ function formatResult(data: any) {
   width: 16px;
   height: 16px;
   flex-shrink: 0;
-  color: #5f6368;
+  color: var(--color-muted-foreground);
 }
 
 .tool-info {
@@ -462,7 +424,7 @@ function formatResult(data: any) {
 .tool-title {
   font-size: 13px;
   font-weight: 500;
-  color: #3c4043;
+  color: var(--color-foreground);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -470,20 +432,20 @@ function formatResult(data: any) {
 
 .tool-status {
   font-size: 12px;
-  color: #9aa0a6;
+  color: var(--color-muted-foreground);
   flex-shrink: 0;
 }
 
 .tool-status.pending {
-  color: #fbbc04;
+  color: var(--color-primary);
 }
 
 .tool-status.success {
-  color: #34a853;
+  color: var(--color-success);
 }
 
 .tool-status.error {
-  color: #ea4335;
+  color: var(--color-destructive);
 }
 
 .tool-right {
@@ -497,18 +459,18 @@ function formatResult(data: any) {
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 10px;
-  background: #e6f4ea;
-  color: #137333;
+  background: var(--color-accent);
+  color: var(--color-accent-foreground);
 }
 
 .result-badge.is-error {
-  background: #fce8e6;
-  color: #c5221f;
+  background: rgba(239, 68, 68, 0.08);
+  color: var(--color-destructive);
 }
 
 .tool-toggle {
   font-size: 12px;
-  color: #9aa0a6;
+  color: var(--color-muted-foreground);
 }
 
 .tool-body {
@@ -525,8 +487,8 @@ function formatResult(data: any) {
 
 .intermediate-image img {
   max-width: 100%;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
   margin-top: 4px;
 }
 
@@ -536,7 +498,7 @@ function formatResult(data: any) {
   gap: 4px;
   font-size: 11px;
   font-weight: 500;
-  color: #9aa0a6;
+  color: var(--color-muted-foreground);
   margin-bottom: 6px;
 }
 
@@ -548,11 +510,11 @@ function formatResult(data: any) {
 .tool-code {
   margin: 0;
   padding: 10px 12px;
-  background: #ffffff;
+  background: var(--color-background);
   border-radius: 8px;
   font-family: 'SF Mono', Monaco, Consolas, monospace;
   font-size: 12px;
-  color: #5f6368;
+  color: var(--color-muted-foreground);
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-all;
@@ -561,12 +523,12 @@ function formatResult(data: any) {
 }
 
 .tool-code.is-error {
-  background: #fce8e6;
-  color: #c5221f;
+  background: rgba(239, 68, 68, 0.05);
+  color: var(--color-destructive);
 }
 
 .tool-code.is-streaming {
-  background: linear-gradient(90deg, #fff 0%, #e8f5e9 50%, #fff 100%);
+  background: linear-gradient(90deg, var(--color-background) 0%, var(--color-accent) 50%, var(--color-background) 100%);
   background-size: 200% 100%;
   animation: shimmer 1.5s ease-in-out infinite;
 }
@@ -574,15 +536,5 @@ function formatResult(data: any) {
 @keyframes shimmer {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
-}
-
-/* 滚动条 */
-.tool-code::-webkit-scrollbar {
-  width: 4px;
-}
-
-.tool-code::-webkit-scrollbar-thumb {
-  background: #dadce0;
-  border-radius: 2px;
 }
 </style>

@@ -20,7 +20,8 @@ from utils.message_utils import (
     extract_text_from_message,
     normalize_message_format,
 )
-from utils.s3_uploader import S3Uploader, get_s3_uploader
+# S3 上传模块已删除，不再导出
+# TODO: 迁移到 local_store
 
 __all__ = [
     # 后台任务
@@ -29,9 +30,6 @@ __all__ = [
     # 消息工具
     "normalize_message_format",
     "extract_text_from_message",
-    # S3 上传
-    "S3Uploader",
-    "get_s3_uploader",
     # JSON 工具
     "JSONExtractor",
     "extract_json",

@@ -53,7 +53,7 @@ class ConversationEventManager(BaseEventManager):
             conversation: Conversation 完整数据
             seq: 事件序号（可选，来自 EventBroadcaster）
             event_uuid: 事件 UUID（可选）
-            output_format: 输出格式（zenflux/zeno），默认 zenflux
+            output_format: 输出格式，默认 zenflux
             adapter: 格式转换适配器（可选）
 
         Returns:
@@ -99,7 +99,7 @@ class ConversationEventManager(BaseEventManager):
             delta: 增量更新数据，直接用字段名作为 key
             seq: 事件序号（可选）
             event_uuid: 事件 UUID（可选）
-            output_format: 输出格式（zenflux/zeno），默认 zenflux
+            output_format: 输出格式，默认 zenflux
             adapter: 格式转换适配器（可选）
 
         Returns:
@@ -156,7 +156,7 @@ class ConversationEventManager(BaseEventManager):
             summary: 会话摘要（可选）
             seq: 事件序号（可选）
             event_uuid: 事件 UUID（可选）
-            output_format: 输出格式（zenflux/zeno），默认 zenflux
+            output_format: 输出格式，默认 zenflux
             adapter: 格式转换适配器（可选）
 
         Returns:

@@ -329,9 +329,14 @@ class VectorDBBackend(IntentCacheBackend):
     async def _get_vector_store(self):
         """延迟初始化向量库"""
         if self._vector_store is None:
-            from infra.vector.factory import get_vector_store
+            try:
+                from infra.vector.factory import get_vector_store
 
-            self._vector_store = await get_vector_store()
+                self._vector_store = await get_vector_store()
+            except ImportError:
+                # TODO: 迁移到 local_store
+                logger.warning("⚠️ 向量库模块不可用，VectorDBBackend 功能已禁用")
+                raise NotImplementedError("向量库模块已删除，请使用 InMemoryBackend")
         return self._vector_store
 
     async def search(self, embedding: np.ndarray) -> Tuple[Optional[CachedIntentResult], float]:

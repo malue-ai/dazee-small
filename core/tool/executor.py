@@ -69,15 +69,6 @@ class ToolExecutor:
         )
     """
 
-    # E2B Sandbox 工具（需要特殊处理）
-    E2B_SANDBOX_TOOLS = {
-        "sandbox_write_file",
-        "sandbox_run_command",
-        "sandbox_create_project",
-        "sandbox_run_project",
-        "e2b_python_sandbox",
-    }
-
     # 大参数阈值 (10KB)
     LARGE_INPUT_THRESHOLD = 10 * 1024
 
@@ -509,15 +500,6 @@ class ToolExecutor:
         # Skill 跳过逻辑
         if plan_result and plan_result.get("recommended_skill"):
             return None
-
-        # E2B Sandbox 工具优先判断
-        e2b_tools_in_selection = [t for t in selected_tools if t in self.E2B_SANDBOX_TOOLS]
-        if e2b_tools_in_selection:
-            return InvocationStrategy(
-                type=InvocationType.DIRECT,
-                reason=f"E2B Sandbox 工具 ({', '.join(e2b_tools_in_selection)}) 使用 DIRECT 调用",
-                config={"environment": "e2b", "e2b_tools": e2b_tools_in_selection},
-            )
 
         # Fine-grained Streaming（大参数输入）
         if self.enable_streaming and estimated_input_size > self.LARGE_INPUT_THRESHOLD:

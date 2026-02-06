@@ -1,16 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { setupRouterGuards } from './guards'
 
 // 路由配置
 const routes = [
-  // ==================== 认证页面 ====================
-  {
-    path: '/login',
-    name: 'login',
-    component: () => import('@/views/auth/LoginView.vue'),
-    meta: { layout: 'auth' }
-  },
-
   // ==================== 聊天页面（默认布局） ====================
   {
     path: '/',
@@ -28,24 +19,6 @@ const routes = [
     path: '/knowledge',
     name: 'knowledge',
     component: () => import('@/views/knowledge/KnowledgeView.vue'),
-    meta: { layout: 'dashboard' }
-  },
-  {
-    path: '/agents',
-    name: 'agents',
-    component: () => import('@/views/agent/AgentListView.vue'),
-    meta: { layout: 'dashboard' }
-  },
-  {
-    path: '/agents/create',
-    name: 'agent-create',
-    component: () => import('@/views/agent/AgentCreateView.vue'),
-    meta: { layout: 'dashboard' }
-  },
-  {
-    path: '/agents/:agentId',
-    name: 'agent-detail',
-    component: () => import('@/views/agent/AgentDetailView.vue'),
     meta: { layout: 'dashboard' }
   },
   {
@@ -76,6 +49,14 @@ const routes = [
     meta: { layout: 'none' }  // 独立布局
   },
 
+  // ==================== 设置页面 ====================
+  {
+    path: '/settings',
+    name: 'settings',
+    component: () => import('@/views/settings/SettingsView.vue'),
+    meta: { layout: 'none' }
+  },
+
   // ==================== Node Agent 客户端 ====================
   {
     path: '/node',
@@ -89,9 +70,6 @@ const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes
 })
-
-// 注册路由守卫
-setupRouterGuards(router)
 
 export default router
 

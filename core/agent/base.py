@@ -42,18 +42,17 @@ from typing import (
 )
 
 from core.agent.execution.protocol import ExecutionContext, ExecutorConfig
-from core.billing.tracker import create_enhanced_usage_tracker
 from core.context import stable_json_dumps
-from core.tool.registry_config import get_sandbox_tools
+from models.usage import UsageResponse, create_usage_tracker
 from logger import get_logger
 
 if TYPE_CHECKING:
     from core.agent.execution.protocol import ExecutorProtocol
-    from core.billing.tracker import EnhancedUsageTracker
     from core.events.broadcaster import EventBroadcaster
     from core.llm.base import BaseLLMService, LLMResponse
     from core.routing.types import IntentResult
     from core.tool.executor import ToolExecutor
+    from models.usage import UsageTracker
 
 logger = get_logger(__name__)
 
@@ -130,7 +129,7 @@ class Agent:
         self._max_steps = max_steps
 
         # Usage 统计
-        self._usage_tracker = create_enhanced_usage_tracker()
+        self._usage_tracker = create_usage_tracker()
 
         # 上下文
         self._current_session_id: Optional[str] = None
@@ -218,7 +217,7 @@ class Agent:
         return self._context_strategy
 
     @property
-    def usage_tracker(self) -> "EnhancedUsageTracker":
+    def usage_tracker(self) -> "UsageTracker":
         return self._usage_tracker
 
     @property
@@ -372,7 +371,7 @@ class Agent:
         execution_context = ExecutionContext(
             llm=self._llm,
             session_id=session_id,
-            conversation_id=conversation_id,  # 🆕 传递 conversation_id 用于沙盒关联
+            conversation_id=conversation_id,
             tool_executor=self._tool_executor,
             tools_for_llm=tools_for_llm,
             broadcaster=self._broadcaster,
@@ -391,16 +390,6 @@ class Agent:
         # 委托给 Executor 执行
         if self._executor is None:
             raise ValueError("executor 未初始化，无法执行。请通过 Factory 创建 Agent。")
-
-        # 🆕 V10.3: 模拟思考（thinking_mode=simulated）
-        # 在 executor 执行前生成用户友好的思考过程，适用于所有 Agent/Executor
-        if self._schema and self._schema.is_simulated_thinking_enabled:
-            async for event in self._generate_simulated_thinking(
-                messages=messages,
-                session_id=session_id,
-                system_prompt=system_prompt,
-            ):
-                yield event
 
         async for event in self._executor.execute(
             messages=messages,
@@ -429,9 +418,7 @@ class Agent:
             },
         )
 
-        # Billing
-        from models.usage import UsageResponse
-
+        # Usage
         usage_response = UsageResponse.from_tracker(tracker=self._usage_tracker, latency=0)
 
         yield {
@@ -445,121 +432,6 @@ class Agent:
         )
 
         logger.info(f"✅ Agent 执行完成: executor={self._executor.name}")
-
-    # ==================== 模拟思考 ====================
-
-    async def _generate_simulated_thinking(
-        self,
-        messages: List[Dict[str, Any]],
-        session_id: str,
-        system_prompt: Any,
-    ) -> AsyncGenerator[Dict[str, Any], None]:
-        """
-        生成模拟思考（thinking_mode=simulated）
-
-        V10.3: 为不支持原生 Extended Thinking 的模型提供用户友好的思考展示。
-
-        ⚠️ 架构设计原则：
-
-        1. 【互斥性】模拟思考和原生思考必须互斥
-           - thinking_mode=native  → 使用 LLM 原生 thinking，禁用模拟思考
-           - thinking_mode=simulated → 禁用原生 thinking，启用模拟思考
-           - 互斥性通过 factory 配置 enable_thinking 保证
-
-        2. 【时机】模拟思考在主循环第一次 LLM 调用之前
-           - 位于 Agent.execute() 中，executor.execute() 之前
-           - 确保用户先看到思考过程，再看到执行结果
-
-        3. 【模型一致性】必须使用主模型（self._llm）
-           - 不能用小模型思考 + 大模型执行，那样会拖累质量
-           - 模拟思考和后续执行使用相同的主模型
-
-        4. 【稳定性】不依赖 LLM 特定参数
-           - 不使用 override_thinking 等 Claude 特有参数
-           - 换任何模型都能正常工作
-
-        Args:
-            messages: 消息列表
-            session_id: Session ID
-            system_prompt: 系统提示词
-
-        Yields:
-            thinking 类型的 SSE 事件（将 LLM content 作为 thinking 展示）
-        """
-        from core.agent.content_handler import create_content_handler
-        from core.llm.base import Message
-
-        try:
-            # 获取思考引导 prompt
-            thinking_guide = self._schema.simulated_thinking_guide
-            if not thinking_guide:
-                logger.debug("模拟思考: guide 为空，跳过")
-                return
-
-            logger.info("🧠 开始生成模拟思考...")
-
-            # 构建消息：完整上下文 + 思考引导
-            # 复制原始 messages，追加思考引导
-            thinking_messages = []
-            for msg in messages:
-                thinking_messages.append(
-                    Message(role=msg.get("role", "user"), content=msg.get("content", ""))
-                )
-
-            # 追加思考引导作为 user 消息
-            thinking_messages.append(Message(role="user", content=thinking_guide))
-
-            # 创建 ContentHandler 用于流式输出
-            from core.context.runtime import create_runtime_context
-
-            ctx = create_runtime_context(session_id=session_id, max_turns=1)
-            content_handler = create_content_handler(
-                self._broadcaster, ctx.block, session_id=session_id
-            )
-
-            accumulated_thinking = ""
-
-            # ⚠️ 使用主模型（self._llm）生成思考，绝不能换成小模型！
-            # 原因：小模型的思考无法有效引导大模型，反而会降低质量
-            #
-            # 互斥性保证：
-            # - thinking_mode=simulated 时，factory 已设置 enable_thinking=False
-            # - 所以 self._llm 不会产生原生 thinking，只会返回普通 content
-            # - 我们将 content 作为 thinking 事件发送给前端
-            # - 不依赖任何 LLM 特定参数，换模型也能正常工作
-            async for chunk in self._llm.create_message_stream(
-                messages=thinking_messages,
-                system=system_prompt,
-                tools=[],  # 不提供工具
-                max_tokens=1000,  # 思考不需要太长
-            ):
-                if chunk.content and chunk.is_stream:
-                    accumulated_thinking += chunk.content
-                    # 输出为 thinking 类型事件
-                    await content_handler.handle_thinking(chunk.content)
-                    yield {"type": "thinking_delta", "data": {"thinking": chunk.content}}
-
-                # 记录 usage
-                if not chunk.is_stream and self._usage_tracker:
-                    self._usage_tracker.record_call(
-                        llm_response=chunk, model=chunk.model, purpose="simulated_thinking"
-                    )
-
-            # 关闭 thinking block
-            await content_handler.stop_block(session_id)
-
-            if accumulated_thinking:
-                logger.info(
-                    "🧠 模拟思考完成",
-                    extra={
-                        "length": len(accumulated_thinking),
-                        "preview": accumulated_thinking[:100],
-                    },
-                )
-
-        except Exception as e:
-            logger.warning(f"模拟思考生成失败: {e}", exc_info=True)
-            # 失败不阻塞主流程
 
     # ==================== chat() 兼容方法 ====================
 
@@ -660,8 +532,7 @@ class Agent:
                 conversation_id=conversation_id,
             )
 
-        sandbox_tools = get_sandbox_tools()
-        if tool_name in sandbox_tools or tool_name in CONTEXT_INJECTION_TOOLS:
+        if tool_name in CONTEXT_INJECTION_TOOLS:
             tool_input.pop("session_id", None)
             tool_input.pop("user_id", None)
             tool_input.pop("conversation_id", None)

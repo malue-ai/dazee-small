@@ -155,7 +155,7 @@ class AgentRouter:
             user_query: 用户查询（支持 str 或多模态 list）
             conversation_history: 对话历史
             user_id: 用户ID
-            tracker: EnhancedUsageTracker 实例（可选）
+            tracker: UsageTracker 实例（可选）
 
         Returns:
             RoutingDecision: 路由决策

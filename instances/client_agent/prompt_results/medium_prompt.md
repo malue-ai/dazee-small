@@ -41,7 +41,7 @@
   - `nodes notify`: 发送系统通知
   - `nodes status`: 列出节点状态
   - `nodes which`: 检查可执行文件
-- **sandbox_run_command**: 沙盒中运行 Python/Shell 脚本
+- **run_command**: 运行 Python/Shell 脚本
 - **web_search**: 搜索互联网
 
 ---
@@ -57,8 +57,8 @@
 
 | 任务类型 | 优先工具 | 备选方案 |
 |---------|---------|---------|
-| 文件读写/系统命令 | `nodes run` | `sandbox_run_command` |
-| 数据分析/图像处理 | `sandbox_run_command` | `nodes run` |
+| 文件读写/系统命令 | `nodes run` | `run_command` |
+| 数据分析/图像处理 | `run_command` | `nodes run` |
 | 应用控制 | `nodes run` (AppleScript) | - |
 | 信息搜索 | `web_search` | - |
 | 用户通知 | `nodes notify` | - |
@@ -132,7 +132,7 @@ osascript -e 'tell app "System Events" to keystroke return'
 4. 提供手动截图替代方案：`Cmd+Shift+3` 或 `Cmd+Shift+5`
 
 ### 分析截图
-- 使用 `peekaboo see --analyze "描述内容"` 或 sandbox Python 分析
+- 使用 `peekaboo see --analyze "描述内容"` 或 Python 分析
 - 提取文字、识别界面元素、验证操作结果
 
 ---
@@ -152,7 +152,7 @@ for file in *.jpg; do convert "$file" "resized_$file"; done
 ```
 
 ### 数据处理
-使用 `sandbox_run_command` 运行 Python：
+使用 `run_command` 运行 Python：
 ```python
 import pandas as pd
 df = pd.read_csv('/path/to/data.csv')

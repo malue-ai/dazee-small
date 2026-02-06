@@ -40,12 +40,12 @@ from utils.message_utils import (
 )
 
 if TYPE_CHECKING:
-    from core.billing.tracker import EnhancedUsageTracker
     from core.context.runtime import RuntimeContext
     from core.events.broadcaster import EventBroadcaster
     from core.llm.base import BaseLLMService, LLMResponse
     from core.routing.types import IntentResult
     from core.tool.executor import ToolExecutor
+    from models.usage import UsageTracker
 
 logger = get_logger(__name__)
 
@@ -188,7 +188,7 @@ class RVRExecutor(BaseExecutor):
         ctx: "RuntimeContext",
         session_id: str,
         broadcaster: "EventBroadcaster",
-        usage_tracker: "EnhancedUsageTracker",
+        usage_tracker: "UsageTracker",
         is_first_turn: bool = False,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
@@ -271,7 +271,7 @@ class RVRExecutor(BaseExecutor):
         response: "LLMResponse",
         llm_messages: List,
         session_id: str,
-        conversation_id: str,  # 🆕 用于沙盒关联
+        conversation_id: str,
         ctx: "RuntimeContext",
         tool_executor: "ToolExecutor",
         broadcaster: "EventBroadcaster",
@@ -287,7 +287,7 @@ class RVRExecutor(BaseExecutor):
             response: LLM 响应
             llm_messages: 消息列表（会被修改）
             session_id: Session ID
-            conversation_id: Conversation ID（用于沙盒关联）
+            conversation_id: Conversation ID
             ctx: RuntimeContext
             tool_executor: 工具执行器
             broadcaster: 事件广播器
@@ -399,11 +399,11 @@ class RVRExecutor(BaseExecutor):
         system_prompt,
         ctx: "RuntimeContext",
         session_id: str,
-        conversation_id: str,  # 🆕 用于沙盒关联
+        conversation_id: str,
         llm: "BaseLLMService",
         tool_executor: "ToolExecutor",
         broadcaster: "EventBroadcaster",
-        usage_tracker: "EnhancedUsageTracker",
+        usage_tracker: "UsageTracker",
         context_engineering=None,
         plan_cache: Dict = None,
         plan_todo_tool=None,
@@ -479,7 +479,7 @@ class RVRExecutor(BaseExecutor):
         broadcaster = context.broadcaster
         ctx = context.runtime_ctx
         session_id = context.session_id
-        conversation_id = context.conversation_id  # 🆕 用于沙盒关联
+        conversation_id = context.conversation_id
         system_prompt = context.system_prompt
         tools_for_llm = context.tools_for_llm
         intent = context.intent
@@ -499,9 +499,9 @@ class RVRExecutor(BaseExecutor):
         # 获取额外依赖（从 context.extra）
         usage_tracker = context.extra.get("usage_tracker")
         if not usage_tracker:
-            from core.billing.tracker import create_enhanced_usage_tracker
+            from models.usage import UsageTracker
 
-            usage_tracker = create_enhanced_usage_tracker(session_id)
+            usage_tracker = UsageTracker()
 
         context_engineering = context.extra.get("context_engineering")
         plan_todo_tool = context.extra.get("plan_todo_tool")

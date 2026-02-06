@@ -10,7 +10,7 @@ const API_BASE = '/api/v1'
 /**
  * Workspace API 端点
  * 
- * 用于文件管理、沙盒管理和项目运行
+ * 用于文件管理和项目运行
  */
 export const WORKSPACE_API = {
   // === 文件管理 ===
@@ -23,26 +23,6 @@ export const WORKSPACE_API = {
   
   /** 获取项目列表 */
   PROJECTS: (conversationId: string) => `${API_BASE}/workspace/${conversationId}/projects`,
-  
-  // === 沙盒管理 ===
-  
-  /** 获取沙盒状态 */
-  SANDBOX_STATUS: (conversationId: string) => `${API_BASE}/workspace/${conversationId}/sandbox/status`,
-  
-  /** 初始化沙盒 */
-  SANDBOX_INIT: (conversationId: string) => `${API_BASE}/workspace/${conversationId}/sandbox/init`,
-  
-  /** 暂停沙盒 */
-  SANDBOX_PAUSE: (conversationId: string) => `${API_BASE}/workspace/${conversationId}/sandbox/pause`,
-  
-  /** 恢复沙盒 */
-  SANDBOX_RESUME: (conversationId: string) => `${API_BASE}/workspace/${conversationId}/sandbox/resume`,
-  
-  /** 终止沙盒 */
-  SANDBOX_KILL: (conversationId: string) => `${API_BASE}/workspace/${conversationId}/sandbox/kill`,
-  
-  /** 执行沙盒命令 */
-  SANDBOX_COMMAND: (conversationId: string) => `${API_BASE}/workspace/${conversationId}/sandbox/command`,
   
   // === 项目运行 ===
   

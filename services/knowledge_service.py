@@ -26,7 +26,8 @@ from models.ragie import (
 )
 from utils.knowledge_store import KnowledgeStore, get_knowledge_store
 from utils.ragie_client import RagieClient, get_ragie_client
-from utils.s3_uploader import get_s3_uploader
+# TODO: 迁移到 local_store
+# from utils.s3_uploader import get_s3_uploader (removed - module deleted)
 
 logger = get_logger("knowledge_service")
 
@@ -505,7 +506,9 @@ class KnowledgeService:
         has_processing = any(doc.get("status") in PROCESSING_STATUSES for doc in all_documents)
 
         # 转换为 DocumentInfo 模型，并为有 S3 文件的文档生成预签名 URL
-        s3_uploader = get_s3_uploader()
+        # TODO: 迁移到 local_store
+        # s3_uploader = get_s3_uploader()
+        s3_uploader = None  # Stub
 
         document_infos = []
         for doc in documents:
@@ -513,16 +516,18 @@ class KnowledgeService:
 
             # 如果有 s3_key，生成预签名 URL（异步调用）
             if "s3_key" in metadata:
-                try:
-                    # 从数据库的永久 s3_key 生成临时预签名 URL
-                    presigned_url = await s3_uploader.get_presigned_url(
-                        metadata["s3_key"], expires_in=3600  # 1小时有效期
-                    )
-                    # 将预签名 URL 添加到 metadata，前端可直接使用
-                    metadata["s3_presigned_url"] = presigned_url
-                    logger.debug(f"✅ 已生成 S3 预签名 URL: {doc.get('document_id')}")
-                except Exception as e:
-                    logger.warning(f"⚠️ 生成 S3 预签名 URL 失败: {str(e)}")
+                # TODO: 迁移到 local_store
+                # try:
+                #     # 从数据库的永久 s3_key 生成临时预签名 URL
+                #     presigned_url = await s3_uploader.get_presigned_url(
+                #         metadata["s3_key"], expires_in=3600  # 1小时有效期
+                #     )
+                #     # 将预签名 URL 添加到 metadata，前端可直接使用
+                #     metadata["s3_presigned_url"] = presigned_url
+                #     logger.debug(f"✅ 已生成 S3 预签名 URL: {doc.get('document_id')}")
+                # except Exception as e:
+                #     logger.warning(f"⚠️ 生成 S3 预签名 URL 失败: {str(e)}")
+                pass  # Stub
 
             document_infos.append(
                 DocumentInfo(
@@ -685,12 +690,14 @@ class KnowledgeService:
 
             # 3. 从 S3 删除（如果有）
             if s3_key:
-                try:
-                    s3_uploader = get_s3_uploader()
-                    await s3_uploader.delete_file(s3_key)
-                    logger.info(f"✅ 已从 S3 删除: s3_key={s3_key}")
-                except Exception as e:
-                    logger.warning(f"⚠️ 从 S3 删除失败: {str(e)}")
+                # TODO: 迁移到 local_store
+                # try:
+                #     s3_uploader = get_s3_uploader()
+                #     await s3_uploader.delete_file(s3_key)
+                #     logger.info(f"✅ 已从 S3 删除: s3_key={s3_key}")
+                # except Exception as e:
+                #     logger.warning(f"⚠️ 从 S3 删除失败: {str(e)}")
+                pass  # Stub
 
             # 4. 从本地缓存删除
             await self.knowledge_store.delete_document(user_id, document_id)
@@ -812,7 +819,8 @@ class KnowledgeService:
         Raises:
             DocumentNotFoundError: 文档不存在
         """
-        from utils import get_s3_uploader
+        # TODO: 迁移到 local_store
+        # from utils import get_s3_uploader
 
         try:
             logger.info(f"🔗 生成 S3 下载链接: user_id={user_id}, document_id={document_id}")
@@ -828,8 +836,10 @@ class KnowledgeService:
             s3_key = doc_info.metadata["s3_key"]  # 从数据库获取永久的 s3_key
 
             # 生成预签名 URL（异步调用）
-            s3_uploader = get_s3_uploader()
-            presigned_url = await s3_uploader.get_presigned_url(s3_key, expires_in=expiration)
+            # TODO: 迁移到 local_store
+            # s3_uploader = get_s3_uploader()
+            # presigned_url = await s3_uploader.get_presigned_url(s3_key, expires_in=expiration)
+            presigned_url = None  # Stub
 
             logger.info(f"✅ S3 链接已生成: document_id={document_id}, expires_in={expiration}s")
             logger.debug(f"   URL 预览: {presigned_url[:100]}...")

@@ -45,7 +45,6 @@ from services import (
     UserNotFoundError,
     get_knowledge_service,
 )
-from utils import get_s3_uploader
 
 # 配置日志
 logger = get_logger("knowledge_router")
@@ -59,7 +58,8 @@ router = APIRouter(
 
 # 获取服务实例
 knowledge_service = get_knowledge_service()
-s3_uploader = get_s3_uploader()
+# TODO: S3 上传功能已移除，需要使用本地存储替代
+# s3_uploader = get_s3_uploader()
 
 
 # ==================== 文档上传接口 ====================
@@ -114,35 +114,33 @@ async def upload_document(
                 tmp_file_path = tmp_file.name
 
             try:
-                # 2. 上传到 S3
+                # 2. TODO: S3 上传功能已移除，需要使用本地存储替代
                 doc_metadata = {**common_metadata}
-                try:
-                    logger.info(f"☁️ 上传文件到 S3: {file.filename}")
-                    s3_result = await s3_uploader.upload_file(
-                        file_path=tmp_file_path,
-                        category="knowledge",
-                        user_id=user_id,
-                        filename=file.filename,
-                        metadata={
-                            "original_filename": file.filename,
-                            "content_type": file.content_type,
-                            "upload_mode": mode,
-                        },
-                    )
-
-                    doc_metadata.update(
-                        {
-                            "s3_key": s3_result["s3_key"],
-                            "s3_url": s3_result["s3_url"],
-                            "file_size": s3_result["file_size"],
-                            "storage": "s3",
-                        }
-                    )
-
-                    logger.info(f"✅ S3 上传成功: {s3_result['s3_key']}")
-                except Exception as e:
-                    logger.warning(f"⚠️ S3 上传失败（继续处理）: {str(e)}")
-                    doc_metadata["storage"] = "local"
+                # try:
+                #     logger.info(f"☁️ 上传文件到 S3: {file.filename}")
+                #     s3_result = await s3_uploader.upload_file(
+                #         file_path=tmp_file_path,
+                #         category="knowledge",
+                #         user_id=user_id,
+                #         filename=file.filename,
+                #         metadata={
+                #             "original_filename": file.filename,
+                #             "content_type": file.content_type,
+                #             "upload_mode": mode,
+                #         },
+                #     )
+                #     doc_metadata.update(
+                #         {
+                #             "s3_key": s3_result["s3_key"],
+                #             "s3_url": s3_result["s3_url"],
+                #             "file_size": s3_result["file_size"],
+                #             "storage": "s3",
+                #         }
+                #     )
+                #     logger.info(f"✅ S3 上传成功: {s3_result['s3_key']}")
+                # except Exception as e:
+                #     logger.warning(f"⚠️ S3 上传失败（继续处理）: {str(e)}")
+                doc_metadata["storage"] = "local"
 
                 # 3. 上传到 Ragie
                 result = await knowledge_service.upload_document_from_file(
@@ -197,33 +195,32 @@ async def upload_document(
                         tmp_file_path = tmp_file.name
 
                     try:
-                        # 2. 上传到 S3
+                        # 2. TODO: S3 上传功能已移除，需要使用本地存储替代
                         doc_metadata = {**common_metadata}
-                        try:
-                            s3_result = await s3_uploader.upload_file(
-                                file_path=tmp_file_path,
-                                category="knowledge",
-                                user_id=user_id,
-                                filename=file.filename,
-                                metadata={
-                                    "original_filename": file.filename,
-                                    "content_type": file.content_type,
-                                    "upload_mode": mode,
-                                    "batch_index": index,
-                                },
-                            )
-
-                            doc_metadata.update(
-                                {
-                                    "s3_key": s3_result["s3_key"],
-                                    "s3_url": s3_result["s3_url"],
-                                    "file_size": s3_result["file_size"],
-                                    "storage": "s3",
-                                }
-                            )
-                        except Exception as e:
-                            logger.warning(f"⚠️ [{index+1}] S3 上传失败: {str(e)}")
-                            doc_metadata["storage"] = "local"
+                        # try:
+                        #     s3_result = await s3_uploader.upload_file(
+                        #         file_path=tmp_file_path,
+                        #         category="knowledge",
+                        #         user_id=user_id,
+                        #         filename=file.filename,
+                        #         metadata={
+                        #             "original_filename": file.filename,
+                        #             "content_type": file.content_type,
+                        #             "upload_mode": mode,
+                        #             "batch_index": index,
+                        #         },
+                        #     )
+                        #     doc_metadata.update(
+                        #         {
+                        #             "s3_key": s3_result["s3_key"],
+                        #             "s3_url": s3_result["s3_url"],
+                        #             "file_size": s3_result["file_size"],
+                        #             "storage": "s3",
+                        #         }
+                        #     )
+                        # except Exception as e:
+                        #     logger.warning(f"⚠️ [{index+1}] S3 上传失败: {str(e)}")
+                        doc_metadata["storage"] = "local"
 
                         # 3. 上传到 Ragie
                         result = await knowledge_service.upload_document_from_file(
@@ -506,42 +503,37 @@ async def import_from_files(
                 if not s3_key:
                     raise ValueError(f"文件缺少 S3 key: {file_id}")
 
-                # 3. 生成预签名 URL
-                s3_url = await s3_uploader.get_presigned_url(s3_key, expiration=3600)
-
-                # 4. 准备元数据
-                doc_metadata = {**common_metadata}
-                doc_metadata.update(
-                    {
-                        "imported_from_file_id": file_id,
-                        "s3_key": s3_key,
-                        "s3_url": s3_url,
-                        "file_size": file_record.get("file_size"),
-                        "storage": "s3",
-                        "original_filename": file_record.get("filename"),
-                    }
-                )
-
-                # 5. 通过 URL 上传到 Ragie（使用 S3 预签名 URL）
-                result = await knowledge_service.upload_document_from_url(
-                    url=s3_url,
-                    user_id=user_id,
-                    name=file_record.get("filename"),
-                    metadata=doc_metadata,
-                    mode=mode,
-                )
-
-                logger.info(
-                    f"✅ [{index+1}/{len(file_id_list)}] {file_record.get('filename')} 导入成功"
-                )
+                # 3. TODO: S3 预签名 URL 功能已移除，需要使用本地存储替代
+                # s3_url = await s3_uploader.get_presigned_url(s3_key, expiration=3600)
+                # 临时处理：跳过从 S3 URL 导入，因为预签名 URL 功能不可用
+                # 返回错误响应，提示使用本地文件上传接口
                 return {
-                    "success": True,
+                    "success": False,
                     "filename": file_record.get("filename"),
-                    "document_id": result["document_id"],
-                    "status": result["status"],
-                    "user_id": result["user_id"],
-                    "partition_id": result.get("partition_id"),
+                    "error": f"S3 预签名 URL 功能已移除，无法从 S3 导入文件。请使用本地文件上传接口替代: file_id={file_id}",
                 }
+
+                # 4. 准备元数据（已注释，因为 S3 URL 功能不可用）
+                # doc_metadata = {**common_metadata}
+                # doc_metadata.update(
+                #     {
+                #         "imported_from_file_id": file_id,
+                #         "s3_key": s3_key,
+                #         "s3_url": s3_url,
+                #         "file_size": file_record.get("file_size"),
+                #         "storage": "s3",
+                #         "original_filename": file_record.get("filename"),
+                #     }
+                # )
+
+                # 5. 通过 URL 上传到 Ragie（使用 S3 预签名 URL）- 已注释
+                # result = await knowledge_service.upload_document_from_url(
+                #     url=s3_url,
+                #     user_id=user_id,
+                #     name=file_record.get("filename"),
+                #     metadata=doc_metadata,
+                #     mode=mode,
+                # )
 
             except Exception as e:
                 logger.error(

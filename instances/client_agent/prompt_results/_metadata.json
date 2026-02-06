@@ -13,6 +13,9 @@
     "complex_prompt": "e0c7503ffb4425ff9f010183cd450183"
   },
   "manually_edited": [
-    "intent_prompt"
+    "intent_prompt",
+    "simple_prompt",
+    "medium_prompt",
+    "complex_prompt"
   ]
 }

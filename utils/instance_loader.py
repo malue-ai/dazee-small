@@ -23,8 +23,10 @@ from typing import Any, Dict, List, Optional
 
 import aiofiles
 
-# 添加项目根目录到路径
-PROJECT_ROOT = Path(__file__).parent.parent
+from utils.app_paths import get_bundle_dir, get_instances_dir as _get_instances_dir
+
+# 添加项目根目录到路径（兼容开发模式）
+PROJECT_ROOT = get_bundle_dir()
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from logger import get_logger
@@ -152,7 +154,7 @@ class InstanceConfig:
 
 def get_instances_dir() -> Path:
     """获取 instances 目录路径"""
-    return PROJECT_ROOT / "instances"
+    return _get_instances_dir()
 
 
 def list_instances() -> List[str]:
@@ -1059,7 +1061,13 @@ async def _register_mcp_tools(
     Returns:
         已连接的 MCP 客户端列表
     """
-    from infra.pools import get_mcp_pool
+    try:
+        # TODO: 迁移到 local_store
+        from infra.pools import get_mcp_pool
+    except ImportError:
+        logger.warning("⚠️ MCP 池模块已删除，MCP 工具注册功能已禁用")
+        return []
+
     from services.mcp_client import create_mcp_tool_definition
 
     connected_clients = []
@@ -1233,9 +1241,14 @@ async def _register_mcp_tools(
                 _token=auth_token_for_handler,
                 _orig_name=original_name,
             ):
-                from infra.pools import get_mcp_pool
+                try:
+                    # TODO: 迁移到 local_store
+                    from infra.pools import get_mcp_pool
 
-                pool = get_mcp_pool()
+                    pool = get_mcp_pool()
+                except ImportError:
+                    return {"success": False, "error": "MCP 池模块已删除"}
+
                 current_client = await pool.get_client(
                     server_url=_url, server_name=_name, auth_token=_token
                 )

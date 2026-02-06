@@ -161,7 +161,6 @@ class EventAdapter(ABC):
         增强 tool_result，返回额外的 delta 列表（可选实现）
 
         子类可以覆盖此方法，根据工具类型生成额外的 message_delta 事件。
-        例如 ZenOAdapter 会将分析类 API 的结果拆分为 sql/data/chart 等多个 delta。
 
         Args:
             tool_name: 工具名称（如 "api_calling"）
@@ -173,7 +172,7 @@ class EventAdapter(ABC):
                     "content": "...",
                     "is_error": False
                 }
-            conversation_id: 实际的对话 ID（用于 sandbox 等工具的 delta 生成）
+            conversation_id: 实际的对话 ID
 
         Returns:
             delta 列表，每个元素是 {"type": "xxx", "content": "..."}

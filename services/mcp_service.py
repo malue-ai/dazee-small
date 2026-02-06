@@ -15,8 +15,9 @@ MCP 服务层 - MCP Server Management Service
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from infra.database import AsyncSessionLocal, crud
-from infra.database.models.agent import MCPServerInstance
+# TODO: 迁移到 local_store
+# from infra.database import AsyncSessionLocal, crud
+# from infra.database.models.agent import MCPServerInstance
 from logger import get_logger
 from models.tool import MCPServerRegistration
 
@@ -84,27 +85,29 @@ class MCPService:
         Raises:
             MCPAlreadyExistsError: MCP 已存在
         """
-        async with AsyncSessionLocal() as session:
-            # 检查是否已存在
-            exists = await crud.check_mcp_exists(session, server_name)
-            if exists:
-                raise MCPAlreadyExistsError(f"全局 MCP '{server_name}' 已存在")
-
-            # 创建记录
-            db_mcp = await crud.create_global_mcp(
-                session=session,
-                server_name=server_name,
-                server_url=server_url,
-                auth_type=auth_type,
-                auth_env=auth_env,
-                capability=capability,
-                description=description,
-                metadata=metadata,
-            )
-
-            logger.info(f"✅ 全局 MCP 注册成功: {server_name}")
-
-            return self._mcp_to_dict(db_mcp)
+        # TODO: 迁移到 local_store
+        # async with AsyncSessionLocal() as session:
+        #     # 检查是否已存在
+        #     exists = await crud.check_mcp_exists(session, server_name)
+        #     if exists:
+        #         raise MCPAlreadyExistsError(f"全局 MCP '{server_name}' 已存在")
+        #
+        #     # 创建记录
+        #     db_mcp = await crud.create_global_mcp(
+        #         session=session,
+        #         server_name=server_name,
+        #         server_url=server_url,
+        #         auth_type=auth_type,
+        #         auth_env=auth_env,
+        #         capability=capability,
+        #         description=description,
+        #         metadata=metadata,
+        #     )
+        #
+        #     logger.info(f"✅ 全局 MCP 注册成功: {server_name}")
+        #
+        #     return self._mcp_to_dict(db_mcp)
+        raise NotImplementedError("MCP service not available - TODO: 迁移到 local_store")
 
     async def list_global_mcps(self, include_inactive: bool = False) -> List[Dict[str, Any]]:
         """
@@ -116,10 +119,12 @@ class MCPService:
         Returns:
             MCP 列表
         """
-        async with AsyncSessionLocal() as session:
-            mcps = await crud.list_global_mcps(session=session, include_inactive=include_inactive)
-
-            return [self._mcp_to_dict(mcp) for mcp in mcps]
+        # TODO: 迁移到 local_store
+        # async with AsyncSessionLocal() as session:
+        #     mcps = await crud.list_global_mcps(session=session, include_inactive=include_inactive)
+        #
+        #     return [self._mcp_to_dict(mcp) for mcp in mcps]
+        return []  # Stub
 
     async def get_global_mcp(self, server_name: str) -> Dict[str, Any]:
         """
@@ -134,13 +139,15 @@ class MCPService:
         Raises:
             MCPNotFoundError: MCP 不存在
         """
-        async with AsyncSessionLocal() as session:
-            db_mcp = await crud.get_global_mcp_by_name(session, server_name)
-
-            if not db_mcp:
-                raise MCPNotFoundError(f"全局 MCP '{server_name}' 不存在")
-
-            return self._mcp_to_dict(db_mcp)
+        # TODO: 迁移到 local_store
+        # async with AsyncSessionLocal() as session:
+        #     db_mcp = await crud.get_global_mcp_by_name(session, server_name)
+        #
+        #     if not db_mcp:
+        #         raise MCPNotFoundError(f"全局 MCP '{server_name}' 不存在")
+        #
+        #     return self._mcp_to_dict(db_mcp)
+        raise MCPNotFoundError(f"全局 MCP '{server_name}' 不存在 - TODO: 迁移到 local_store")
 
     async def update_global_mcp(
         self,
@@ -166,40 +173,42 @@ class MCPService:
         Raises:
             MCPNotFoundError: MCP 不存在
         """
-        async with AsyncSessionLocal() as session:
-            # 检查是否存在
-            existing = await crud.get_global_mcp_by_name(session, server_name)
-            if not existing:
-                raise MCPNotFoundError(f"全局 MCP '{server_name}' 不存在")
-
-            # 构建更新数据
-            update_data = {}
-            if server_url is not None:
-                update_data["server_url"] = server_url
-            if auth_type is not None:
-                update_data["auth_type"] = auth_type
-            if auth_env is not None:
-                update_data["auth_env"] = auth_env
-            if capability is not None:
-                update_data["capability"] = capability
-            if description is not None:
-                update_data["description"] = description
-            if is_active is not None:
-                update_data["is_active"] = is_active
-
-            db_mcp = await crud.update_global_mcp(
-                session=session, server_name=server_name, **update_data
-            )
-
-            # 单独处理 metadata
-            if metadata is not None and db_mcp:
-                db_mcp.extra_data = metadata
-                await session.commit()
-                await session.refresh(db_mcp)
-
-            logger.info(f"✅ 全局 MCP 更新成功: {server_name}")
-
-            return self._mcp_to_dict(db_mcp)
+        # TODO: 迁移到 local_store
+        # async with AsyncSessionLocal() as session:
+        #     # 检查是否存在
+        #     existing = await crud.get_global_mcp_by_name(session, server_name)
+        #     if not existing:
+        #         raise MCPNotFoundError(f"全局 MCP '{server_name}' 不存在")
+        #
+        #     # 构建更新数据
+        #     update_data = {}
+        #     if server_url is not None:
+        #         update_data["server_url"] = server_url
+        #     if auth_type is not None:
+        #         update_data["auth_type"] = auth_type
+        #     if auth_env is not None:
+        #         update_data["auth_env"] = auth_env
+        #     if capability is not None:
+        #         update_data["capability"] = capability
+        #     if description is not None:
+        #         update_data["description"] = description
+        #     if is_active is not None:
+        #         update_data["is_active"] = is_active
+        #
+        #     db_mcp = await crud.update_global_mcp(
+        #         session=session, server_name=server_name, **update_data
+        #     )
+        #
+        #     # 单独处理 metadata
+        #     if metadata is not None and db_mcp:
+        #         db_mcp.extra_data = metadata
+        #         await session.commit()
+        #         await session.refresh(db_mcp)
+        #
+        #     logger.info(f"✅ 全局 MCP 更新成功: {server_name}")
+        #
+        #     return self._mcp_to_dict(db_mcp)
+        raise NotImplementedError("MCP service not available - TODO: 迁移到 local_store")
 
     async def delete_global_mcp(self, server_name: str) -> bool:
         """
@@ -214,18 +223,20 @@ class MCPService:
         Raises:
             MCPNotFoundError: MCP 不存在
         """
-        async with AsyncSessionLocal() as session:
-            # 检查是否存在
-            existing = await crud.get_global_mcp_by_name(session, server_name)
-            if not existing:
-                raise MCPNotFoundError(f"全局 MCP '{server_name}' 不存在")
-
-            success = await crud.delete_global_mcp(session, server_name)
-
-            if success:
-                logger.info(f"✅ 全局 MCP 删除成功: {server_name}")
-
-            return success
+        # TODO: 迁移到 local_store
+        # async with AsyncSessionLocal() as session:
+        #     # 检查是否存在
+        #     existing = await crud.get_global_mcp_by_name(session, server_name)
+        #     if not existing:
+        #         raise MCPNotFoundError(f"全局 MCP '{server_name}' 不存在")
+        #
+        #     success = await crud.delete_global_mcp(session, server_name)
+        #
+        #     if success:
+        #         logger.info(f"✅ 全局 MCP 删除成功: {server_name}")
+        #
+        #     return success
+        raise NotImplementedError("MCP service not available - TODO: 迁移到 local_store")
 
     # ==================== Agent 实例化 MCP 管理 ====================
 
@@ -254,33 +265,35 @@ class MCPService:
             MCPNotFoundError: 全局 MCP 不存在
             MCPAlreadyExistsError: Agent 已启用该 MCP
         """
-        async with AsyncSessionLocal() as session:
-            # 检查全局模板是否存在
-            global_mcp = await crud.get_global_mcp_by_name(session, server_name)
-            if not global_mcp:
-                raise MCPNotFoundError(f"全局 MCP '{server_name}' 不存在")
-
-            # 检查 Agent 是否已启用
-            existing = await crud.get_agent_mcp(session, agent_id, server_name)
-            if existing:
-                raise MCPAlreadyExistsError(f"Agent '{agent_id}' 已启用 MCP '{server_name}'")
-
-            # 从全局模板复制，允许覆盖认证信息
-            db_mcp = await crud.create_agent_mcp(
-                session=session,
-                agent_id=agent_id,
-                server_name=server_name,
-                server_url=global_mcp.server_url,
-                auth_type=global_mcp.auth_type,
-                auth_env=auth_env or global_mcp.auth_env,
-                capability=global_mcp.capability,
-                description=global_mcp.description,
-                metadata=metadata or global_mcp.extra_data,
-            )
-
-            logger.info(f"✅ Agent MCP 启用成功: agent={agent_id}, mcp={server_name}")
-
-            return self._mcp_to_dict(db_mcp, original_name=server_name)
+        # TODO: 迁移到 local_store
+        # async with AsyncSessionLocal() as session:
+        #     # 检查全局模板是否存在
+        #     global_mcp = await crud.get_global_mcp_by_name(session, server_name)
+        #     if not global_mcp:
+        #         raise MCPNotFoundError(f"全局 MCP '{server_name}' 不存在")
+        #
+        #     # 检查 Agent 是否已启用
+        #     existing = await crud.get_agent_mcp(session, agent_id, server_name)
+        #     if existing:
+        #         raise MCPAlreadyExistsError(f"Agent '{agent_id}' 已启用 MCP '{server_name}'")
+        #
+        #     # 从全局模板复制，允许覆盖认证信息
+        #     db_mcp = await crud.create_agent_mcp(
+        #         session=session,
+        #         agent_id=agent_id,
+        #         server_name=server_name,
+        #         server_url=global_mcp.server_url,
+        #         auth_type=global_mcp.auth_type,
+        #         auth_env=auth_env or global_mcp.auth_env,
+        #         capability=global_mcp.capability,
+        #         description=global_mcp.description,
+        #         metadata=metadata or global_mcp.extra_data,
+        #     )
+        #
+        #     logger.info(f"✅ Agent MCP 启用成功: agent={agent_id}, mcp={server_name}")
+        #
+        #     return self._mcp_to_dict(db_mcp, original_name=server_name)
+        raise NotImplementedError("MCP service not available - TODO: 迁移到 local_store")
 
     async def list_agent_mcps(
         self, agent_id: str, include_inactive: bool = False
@@ -295,17 +308,19 @@ class MCPService:
         Returns:
             Agent 的 MCP 列表
         """
-        async with AsyncSessionLocal() as session:
-            mcps = await crud.list_agent_mcps(
-                session=session, agent_id=agent_id, include_inactive=include_inactive
-            )
-
-            return [
-                self._mcp_to_dict(
-                    mcp, original_name=self._extract_original_name(mcp.server_name, agent_id)
-                )
-                for mcp in mcps
-            ]
+        # TODO: 迁移到 local_store
+        # async with AsyncSessionLocal() as session:
+        #     mcps = await crud.list_agent_mcps(
+        #         session=session, agent_id=agent_id, include_inactive=include_inactive
+        #     )
+        #
+        #     return [
+        #         self._mcp_to_dict(
+        #             mcp, original_name=self._extract_original_name(mcp.server_name, agent_id)
+        #         )
+        #         for mcp in mcps
+        #     ]
+        return []  # Stub
 
     async def get_agent_mcp(self, agent_id: str, server_name: str) -> Dict[str, Any]:
         """
@@ -321,13 +336,15 @@ class MCPService:
         Raises:
             MCPNotFoundError: MCP 不存在
         """
-        async with AsyncSessionLocal() as session:
-            db_mcp = await crud.get_agent_mcp(session, agent_id, server_name)
-
-            if not db_mcp:
-                raise MCPNotFoundError(f"Agent '{agent_id}' 未启用 MCP '{server_name}'")
-
-            return self._mcp_to_dict(db_mcp, original_name=server_name)
+        # TODO: 迁移到 local_store
+        # async with AsyncSessionLocal() as session:
+        #     db_mcp = await crud.get_agent_mcp(session, agent_id, server_name)
+        #
+        #     if not db_mcp:
+        #         raise MCPNotFoundError(f"Agent '{agent_id}' 未启用 MCP '{server_name}'")
+        #
+        #     return self._mcp_to_dict(db_mcp, original_name=server_name)
+        raise MCPNotFoundError(f"Agent '{agent_id}' 未启用 MCP '{server_name}' - TODO: 迁移到 local_store")
 
     async def update_agent_mcp_config(
         self,
@@ -353,32 +370,34 @@ class MCPService:
         Raises:
             MCPNotFoundError: MCP 不存在
         """
-        async with AsyncSessionLocal() as session:
-            # 检查是否存在
-            existing = await crud.get_agent_mcp(session, agent_id, server_name)
-            if not existing:
-                raise MCPNotFoundError(f"Agent '{agent_id}' 未启用 MCP '{server_name}'")
-
-            # 构建更新数据
-            update_data = {}
-            if auth_env is not None:
-                update_data["auth_env"] = auth_env
-            if is_active is not None:
-                update_data["is_active"] = is_active
-
-            db_mcp = await crud.update_agent_mcp(
-                session=session, agent_id=agent_id, server_name=server_name, **update_data
-            )
-
-            # 单独处理 metadata
-            if metadata is not None and db_mcp:
-                db_mcp.extra_data = metadata
-                await session.commit()
-                await session.refresh(db_mcp)
-
-            logger.info(f"✅ Agent MCP 更新成功: agent={agent_id}, mcp={server_name}")
-
-            return self._mcp_to_dict(db_mcp, original_name=server_name)
+        # TODO: 迁移到 local_store
+        # async with AsyncSessionLocal() as session:
+        #     # 检查是否存在
+        #     existing = await crud.get_agent_mcp(session, agent_id, server_name)
+        #     if not existing:
+        #         raise MCPNotFoundError(f"Agent '{agent_id}' 未启用 MCP '{server_name}'")
+        #
+        #     # 构建更新数据
+        #     update_data = {}
+        #     if auth_env is not None:
+        #         update_data["auth_env"] = auth_env
+        #     if is_active is not None:
+        #         update_data["is_active"] = is_active
+        #
+        #     db_mcp = await crud.update_agent_mcp(
+        #         session=session, agent_id=agent_id, server_name=server_name, **update_data
+        #     )
+        #
+        #     # 单独处理 metadata
+        #     if metadata is not None and db_mcp:
+        #         db_mcp.extra_data = metadata
+        #         await session.commit()
+        #         await session.refresh(db_mcp)
+        #
+        #     logger.info(f"✅ Agent MCP 更新成功: agent={agent_id}, mcp={server_name}")
+        #
+        #     return self._mcp_to_dict(db_mcp, original_name=server_name)
+        raise NotImplementedError("MCP service not available - TODO: 迁移到 local_store")
 
     async def disable_mcp_for_agent(self, agent_id: str, server_name: str) -> bool:
         """
@@ -394,18 +413,20 @@ class MCPService:
         Raises:
             MCPNotFoundError: MCP 不存在
         """
-        async with AsyncSessionLocal() as session:
-            # 检查是否存在
-            existing = await crud.get_agent_mcp(session, agent_id, server_name)
-            if not existing:
-                raise MCPNotFoundError(f"Agent '{agent_id}' 未启用 MCP '{server_name}'")
-
-            success = await crud.delete_agent_mcp(session, agent_id, server_name)
-
-            if success:
-                logger.info(f"✅ Agent MCP 禁用成功: agent={agent_id}, mcp={server_name}")
-
-            return success
+        # TODO: 迁移到 local_store
+        # async with AsyncSessionLocal() as session:
+        #     # 检查是否存在
+        #     existing = await crud.get_agent_mcp(session, agent_id, server_name)
+        #     if not existing:
+        #         raise MCPNotFoundError(f"Agent '{agent_id}' 未启用 MCP '{server_name}'")
+        #
+        #     success = await crud.delete_agent_mcp(session, agent_id, server_name)
+        #
+        #     if success:
+        #         logger.info(f"✅ Agent MCP 禁用成功: agent={agent_id}, mcp={server_name}")
+        #
+        #     return success
+        raise NotImplementedError("MCP service not available - TODO: 迁移到 local_store")
 
     # ==================== 工具注册相关 ====================
 
@@ -420,15 +441,17 @@ class MCPService:
         Returns:
             更新后的 MCP 详情
         """
-        async with AsyncSessionLocal() as session:
-            db_mcp = await crud.update_mcp_registered_tools(
-                session=session, mcp_id=mcp_id, tools=tools
-            )
-
-            if not db_mcp:
-                raise MCPNotFoundError(f"MCP ID={mcp_id} 不存在")
-
-            return self._mcp_to_dict(db_mcp)
+        # TODO: 迁移到 local_store
+        # async with AsyncSessionLocal() as session:
+        #     db_mcp = await crud.update_mcp_registered_tools(
+        #         session=session, mcp_id=mcp_id, tools=tools
+        #     )
+        #
+        #     if not db_mcp:
+        #         raise MCPNotFoundError(f"MCP ID={mcp_id} 不存在")
+        #
+        #     return self._mcp_to_dict(db_mcp)
+        raise NotImplementedError("MCP service not available - TODO: 迁移到 local_store")
 
     async def get_mcp_by_id(self, mcp_id: int) -> Dict[str, Any]:
         """
@@ -440,18 +463,20 @@ class MCPService:
         Returns:
             MCP 详情
         """
-        async with AsyncSessionLocal() as session:
-            db_mcp = await crud.get_mcp_by_id(session, mcp_id)
-
-            if not db_mcp:
-                raise MCPNotFoundError(f"MCP ID={mcp_id} 不存在")
-
-            return self._mcp_to_dict(db_mcp)
+        # TODO: 迁移到 local_store
+        # async with AsyncSessionLocal() as session:
+        #     db_mcp = await crud.get_mcp_by_id(session, mcp_id)
+        #
+        #     if not db_mcp:
+        #         raise MCPNotFoundError(f"MCP ID={mcp_id} 不存在")
+        #
+        #     return self._mcp_to_dict(db_mcp)
+        raise MCPNotFoundError(f"MCP ID={mcp_id} 不存在 - TODO: 迁移到 local_store")
 
     # ==================== 辅助方法 ====================
 
     def _mcp_to_dict(
-        self, mcp: MCPServerInstance, original_name: Optional[str] = None
+        self, mcp: Any, original_name: Optional[str] = None  # TODO: 迁移到 local_store - was MCPServerInstance
     ) -> Dict[str, Any]:
         """将数据库模型转换为字典"""
         return {

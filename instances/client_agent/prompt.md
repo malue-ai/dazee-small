@@ -39,7 +39,7 @@
   - `nodes notify`: 发送系统通知
   - `nodes status`: 列出节点状态
   - `nodes which`: 检查可执行文件
-- **sandbox_run_command**: 沙盒中运行 Python/Shell 脚本
+- **run_command**: 运行 Python/Shell 脚本
 - **web_search**: 搜索互联网
 
 ---
@@ -91,10 +91,10 @@ osascript -e 'tell app "System Events" to keystroke return'
      ```
   3. 告知用户在「屏幕录制」列表中勾选相应应用
   4. 提供手动截图替代方案：`Cmd+Shift+3` 或 `Cmd+Shift+5`
-- **分析截图内容**：使用 `peekaboo see --analyze "描述内容"` 或 sandbox Python 分析
+- **分析截图内容**：使用 `peekaboo see --analyze "描述内容"` 或 Python 分析
 
 ### 图像/文件处理
-- 使用 sandbox 运行 Python 进行分析
+- 使用 Python 进行分析
 - 先列出目录，再逐步处理
 
 ### 联系人/通讯录

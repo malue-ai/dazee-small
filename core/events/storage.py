@@ -1,14 +1,12 @@
 """
 事件存储 - EventStorage
 
-提供事件存储的内存实现，用于开发/测试环境。
-
-生产环境使用 RedisSessionManager（services/redis_manager.py）
+提供事件存储的内存实现。
 
 设计说明：
-- 生产环境：RedisSessionManager 实现 EventStorage 协议
-- 开发环境：InMemoryEventStorage 作为内存降级方案
-- seq 生成统一在 buffer_event 时通过 Redis INCR 完成
+- InMemoryEventStorage 作为轻量内存实现
+- seq 生成统一在 buffer_event 时完成
+- 桌面端主要使用 LocalSessionStore（infra/local_store/session_store.py）
 """
 
 # 1. 标准库
@@ -27,14 +25,10 @@ logger = get_logger("events.storage")
 
 class InMemoryEventStorage:
     """
-    内存事件存储（无 Redis 时的降级方案）
+    内存事件存储
 
-    实现 EventStorage 协议，使用内存存储
-
-    注意：
-    - 不支持跨进程/跨实例
-    - 不支持持久化
-    - 适用于单实例开发环境
+    实现 EventStorage 协议，使用内存存储。
+    适用于单实例环境。
     """
 
     def __init__(self, max_events: int = 1000):
@@ -83,8 +77,8 @@ class InMemoryEventStorage:
         Args:
             session_id: Session ID
             event_data: 事件数据
-            output_format: 输出格式（兼容 Redis 版本）
-            adapter: 适配器（兼容 Redis 版本）
+            output_format: 输出格式
+            adapter: 适配器（可选）
 
         Returns:
             添加了 seq 的事件
@@ -92,7 +86,7 @@ class InMemoryEventStorage:
         event = event_data.copy() if event_data else {}
 
         # 格式转换（如果需要）
-        if output_format == "zeno" and adapter is not None:
+        if adapter is not None:
             transformed = adapter.transform(event)
             if transformed is None:
                 return None
@@ -150,8 +144,6 @@ _default_storage: Optional[InMemoryEventStorage] = None
 def get_memory_storage() -> InMemoryEventStorage:
     """
     获取内存存储实例（单例）
-
-    用于开发/测试环境，生产环境使用 RedisSessionManager
 
     Returns:
         InMemoryEventStorage 实例

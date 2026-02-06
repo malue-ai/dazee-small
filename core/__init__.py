@@ -10,7 +10,7 @@ ZenFlux Agent V4.2 Core Module
 - LLM Service: LLM 统一封装
 - EventManager: 事件管理（SSE/WebSocket 通用协议）
 - Context: 上下文管理
-- Orchestration: Code-First + VM Scaffolding 编排模块
+- Orchestration: Code-First 编排模块
 """
 
 # Agent
@@ -50,29 +50,28 @@ from .llm import (
 )
 
 # 记忆管理（新架构 - 文件夹模块）
-from .memory import (  # 基础类型; 会话级记忆; E2B 记忆; 用户级记忆; 系统级记忆（Skill = 本地工作流技能）; 统一管理器
+from .memory import (  # 基础类型; 会话级记忆; 用户级记忆; 系统级记忆（Skill = 本地工作流技能）; 统一管理器
     CacheMemory,
-    E2BMemory,
-    E2BSandboxSession,
     EpisodicMemory,
     MemoryConfig,
     MemoryManager,
     MemoryScope,
     PreferenceMemory,
+    PlanMemory,
     SkillMemory,
     StorageBackend,
     WorkingMemory,
     create_cache_memory,
-    create_e2b_memory,
     create_episodic_memory,
     create_memory_manager,
     create_preference_memory,
+    create_plan_memory,
     create_skill_memory,
     create_user_memory_manager,
     create_working_memory,
 )
 
-# Code-First + VM Scaffolding 编排模块（V4.2 新增）
+# Code-First 编排模块（V4.2 新增）
 from .orchestration import (  # 管道追踪器; 代码验证器; 代码编排器
     CodeOrchestrator,
     CodeValidator,
@@ -112,13 +111,12 @@ __all__ = [
     "MemoryConfig",
     "WorkingMemory",
     "create_working_memory",
-    "E2BSandboxSession",
-    "E2BMemory",
-    "create_e2b_memory",
     "EpisodicMemory",
     "create_episodic_memory",
     "PreferenceMemory",
     "create_preference_memory",
+    "PlanMemory",
+    "create_plan_memory",
     # 系统级记忆（Skill = 本地工作流技能）
     "SkillMemory",
     "create_skill_memory",
@@ -155,7 +153,7 @@ __all__ = [
     # 上下文管理
     "RuntimeContext",
     "create_runtime_context",
-    # Code-First + VM Scaffolding 编排模块（V4.2 新增）
+    # Code-First 编排模块（V4.2 新增）
     "E2EPipelineTracer",
     "PipelineStage",
     "create_pipeline_tracer",

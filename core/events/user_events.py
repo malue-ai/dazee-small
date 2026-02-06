@@ -39,7 +39,7 @@ class UserEventManager(BaseEventManager):
             user_id: 用户ID
             action: 行为类型（如 login, logout, send_message）
             action_data: 行为数据
-            output_format: 输出格式（zenflux/zeno），默认 zenflux
+            output_format: 输出格式，默认 zenflux
             adapter: 格式转换适配器（可选）
 
         Returns:
@@ -75,7 +75,7 @@ class UserEventManager(BaseEventManager):
             conversation_id: 对话 ID（必填）
             user_id: 用户ID
             preferences: 用户偏好设置
-            output_format: 输出格式（zenflux/zeno），默认 zenflux
+            output_format: 输出格式，默认 zenflux
             adapter: 格式转换适配器（可选）
 
         Returns:

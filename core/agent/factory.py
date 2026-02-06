@@ -149,7 +149,7 @@ class AgentFactory:
         agent = await AgentFactory.from_prompt(system_prompt, event_manager)
 
         # 方式 2: 从 Schema 创建（精确控制）
-        schema = AgentSchema(name="DataAgent", tools=["e2b_sandbox"], ...)
+        schema = AgentSchema(name="DataAgent", tools=["tavily_search"], ...)
         agent = AgentFactory.from_schema(schema, system_prompt, event_manager)
 
         # 方式 3: 使用默认配置
@@ -845,13 +845,13 @@ class AgentPresets:
             name="DataAnalysisAgent",
             description="专业数据分析助手，擅长处理 CSV/Excel 数据并生成报表",
             skills=[SkillConfig(name="excel-generator")],
-            tools=["e2b_sandbox"],
+            tools=[],
             max_turns=15,
             plan_manager=PlanManagerConfig(enabled=True, max_steps=10, granularity="medium"),
             output_formatter=OutputFormatterConfig(
                 default_format="markdown", code_highlighting=True
             ),
-            reasoning="数据分析任务需要 E2B 沙箱执行 pandas 代码，xlsx 生成报表",
+            reasoning="数据分析任务需要执行 pandas 代码，xlsx 生成报表",
         )
 
     @staticmethod
@@ -879,7 +879,7 @@ class AgentPresets:
                 SkillConfig(name="ppt-generator"),
                 SkillConfig(name="pdf-generator"),
             ],
-            tools=["e2b_sandbox", "tavily_search"],
+            tools=["tavily_search"],
             max_turns=15,
             plan_manager=PlanManagerConfig(enabled=True, max_steps=12),
             output_formatter=OutputFormatterConfig(
