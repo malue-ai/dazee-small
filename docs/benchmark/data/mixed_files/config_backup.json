@@ -1,0 +1,10 @@
+{
+  "type": "config",
+  "version": "2.1",
+  "created": "2024-01-19",
+  "settings": {
+    "key1": "value_b",
+    "key2": 61,
+    "enabled": false
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "type": "profile",
+  "version": "1.9",
+  "created": "2024-12-04",
+  "settings": {
+    "key1": "value_a",
+    "key2": 81,
+    "enabled": true
+  }
+}

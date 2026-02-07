@@ -1,0 +1,10 @@
+{
+  "type": "settings",
+  "version": "3.2",
+  "created": "2024-05-02",
+  "settings": {
+    "key1": "value_a",
+    "key2": 71,
+    "enabled": false
+  }
+}
