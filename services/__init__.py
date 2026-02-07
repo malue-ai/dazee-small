@@ -35,7 +35,6 @@ from .file_service import (
     FileServiceError,
     get_file_service,
 )
-# V11.0: 移除 KnowledgeService（云端 Ragie 已删除）
 from .mcp_service import (
     MCPAlreadyExistsError,
 )

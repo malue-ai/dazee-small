@@ -66,6 +66,34 @@ class PlanGranularity(str, Enum):
 
 
 # ============================================================
+# Prompt 相关配置类
+# ============================================================
+
+
+class PrefaceConfig(BaseModel):
+    """前言配置（在回复前插入简短引导语）"""
+
+    enabled: bool = Field(default=True, description="是否启用前言")
+    max_tokens: int = Field(default=150, description="前言最大 token 数")
+    template: str = Field(default="", description="前言模板")
+
+
+class SimulatedThinkingConfig(BaseModel):
+    """模拟思考配置（Agent 生成的思考过程展示）"""
+
+    guide: str = Field(default="", description="模拟思考引导提示词")
+
+
+class PromptsConfig(BaseModel):
+    """提示词配置"""
+
+    preface: Optional[PrefaceConfig] = Field(default=None, description="前言配置")
+    simulated_thinking: Optional[SimulatedThinkingConfig] = Field(
+        default=None, description="模拟思考配置"
+    )
+
+
+# ============================================================
 # 组件配置类
 # ============================================================
 
@@ -446,6 +474,17 @@ class AgentSchema(BaseModel):
 
     enable_caching: Optional[bool] = Field(
         default=None, description="是否启用 Prompt Caching（None 使用默认值）"
+    )
+
+    # 🆕 V10.3: thinking_mode 控制思考展示方式
+    thinking_mode: Optional[str] = Field(
+        default=None,
+        description="思考模式: native (LLM 原生 Extended Thinking), simulated (模拟思考), none (不展示思考)"
+    )
+
+    # 🆕 prompts 配置
+    prompts: Optional["PromptsConfig"] = Field(
+        default=None, description="提示词配置（preface、simulated_thinking 等）"
     )
 
     # ============================================================

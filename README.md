@@ -121,50 +121,212 @@ zenflux_agent/
         └── xiaodazi-desktop.md  # 桌面版详细架构设计
 ```
 
-## 快速开始
+## 快速开始（开发者指南）
 
-### 安装依赖
+### 前置要求
+
+| 工具 | 最低版本 | 推荐版本 | 说明 |
+|---|---|---|---|
+| Python | 3.10+ | 3.12 | 后端服务 |
+| Node.js | 18+ | 20 LTS | 前端构建 |
+| Rust | 1.70+ | latest stable | Tauri 桌面壳（可选） |
+| pnpm / npm | - | pnpm | 前端包管理 |
+
+### 第一步：安装 Python 环境
 
 ```bash
+# macOS（Homebrew）
+brew install python@3.12
+
+# Ubuntu / Debian
+sudo apt update && sudo apt install python3.12 python3.12-venv python3-pip
+
+# Windows（winget）
+winget install Python.Python.3.12
+
+# 验证
+python3 --version  # Python 3.12.x
+```
+
+### 第二步：创建 Python 虚拟环境并安装依赖
+
+```bash
+# 进入项目根目录
+cd zenflux_agent
+
+# 创建虚拟环境
+python3 -m venv .venv
+
+# 激活虚拟环境
+# macOS / Linux:
+source .venv/bin/activate
+# Windows:
+.venv\Scripts\activate
+
+# 安装依赖
 pip install -r requirements.txt
 ```
 
-### 配置环境变量
+### 第三步：配置环境变量
 
 ```bash
-cp env.template .env
-# 编辑 .env 设置 ANTHROPIC_API_KEY 等
+# 复制模板
+cp .env.example .env
+
+# 编辑 .env，至少填写一个大模型 API Key
+# 最简配置：只需一个 ANTHROPIC_API_KEY
 ```
 
-### 启动服务
+`.env` 必填项：
 
 ```bash
+# 至少配置一个大模型（推荐 Claude）
+ANTHROPIC_API_KEY=sk-ant-api03-your-key-here
+```
+
+可选配置见 `.env.example` 中的完整说明。
+
+### 第四步：启动后端服务
+
+```bash
+# 确保虚拟环境已激活
+source .venv/bin/activate
+
+# 启动开发服务器（默认 http://localhost:8000）
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### 使用本地存储（桌面版）
+验证服务：
 
-```python
-from infra.local_store import get_workspace
+```bash
+curl http://localhost:8000/health
+```
 
-# 初始化 Workspace（自动建库 + FTS5 + 可选 sqlite-vec）
-workspace = await get_workspace(
-    instance_id="xiaodazi",
-    skills_dir="instances/xiaodazi/skills"
-)
+### 第五步：安装 Node.js 和前端依赖
 
-# 会话 & 消息
-conv = await workspace.create_conversation(user_id="user_1")
-msg = await workspace.create_message(conv.id, "user", "帮我分析这份数据")
+```bash
+# macOS（Homebrew）
+brew install node
 
-# 全文搜索
-results = await workspace.search("数据分析")
+# Ubuntu / Debian（通过 NodeSource）
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs
 
-# Skills 延迟加载缓存
-skill = await workspace.get_skill("excel-analyzer")
+# Windows（winget）
+winget install OpenJS.NodeJS.LTS
 
-# 向量搜索（需要 sqlite-vec 扩展，不可用时优雅降级）
-vec_results = await workspace.vector_search(embedding_vector)
+# 验证
+node --version   # v20.x.x
+npm --version    # 10.x.x
+```
+
+安装前端依赖：
+
+```bash
+cd frontend
+npm install
+```
+
+### 第六步：启动前端开发服务器
+
+```bash
+# 在 frontend/ 目录下
+npm run dev
+
+# 前端开发服务器默认运行在 http://localhost:5174
+```
+
+### 第七步（可选）：Tauri 桌面应用开发
+
+如需开发 Tauri 桌面应用，还需安装 Rust 工具链：
+
+```bash
+# 安装 Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# macOS 额外依赖
+xcode-select --install
+
+# Ubuntu / Debian 额外依赖
+sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
+  libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+# 验证
+rustc --version  # rustc 1.70+
+```
+
+启动 Tauri 开发模式（同时启动前端 + 后端 + 桌面壳）：
+
+```bash
+cd frontend
+npm run tauri:dev
+```
+
+构建桌面应用：
+
+```bash
+cd frontend
+npm run tauri:build
+```
+
+### 常用开发命令速查
+
+```bash
+# ---- 后端 ----
+source .venv/bin/activate            # 激活虚拟环境
+uvicorn main:app --reload            # 启动后端（开发模式）
+pytest tests/unit/ -v                # 运行单元测试
+pytest tests/integration/ -v         # 运行集成测试
+
+# ---- 前端 ----
+cd frontend
+npm run dev                          # 启动前端开发服务器
+npm run build                        # 构建前端生产包
+npm run type-check                   # TypeScript 类型检查
+npm run lint                         # ESLint 代码检查
+
+# ---- 桌面应用 ----
+cd frontend
+npm run tauri:dev                    # Tauri 开发模式
+npm run tauri:build                  # Tauri 生产构建
+```
+
+### 常见问题
+
+**Q: `pip install` 报错找不到某些系统依赖？**
+
+部分 Python 包（如 `Pillow`、`sqlite-vec`）需要系统级依赖：
+
+```bash
+# macOS
+brew install libjpeg libpng
+
+# Ubuntu / Debian
+sudo apt install libjpeg-dev libpng-dev
+```
+
+**Q: 前端启动后页面空白？**
+
+确认后端服务已启动并运行在 `http://localhost:8000`。前端需要后端 API 才能正常工作。
+
+**Q: Tauri 构建失败？**
+
+确保 Rust 工具链是最新的：
+
+```bash
+rustup update
+```
+
+**Q: 端口冲突？**
+
+后端默认使用 `8000` 端口，前端默认使用 `5174` 端口。如需修改：
+
+```bash
+# 后端换端口
+uvicorn main:app --port 9000 --reload
+
+# 前端换端口（修改 vite.config.ts 或使用 --port 参数）
+npm run dev -- --port 3000
 ```
 
 ## 核心机制
@@ -287,9 +449,20 @@ LLM 自主终止（任务完成自评）
 ### 运行测试
 
 ```bash
+# 确保虚拟环境已激活
+source .venv/bin/activate
+
+# 单元测试
 pytest tests/unit/ -v
+
+# 集成测试
 pytest tests/integration/ -v
+
+# 端到端测试
 pytest tests/e2e/ -v
+
+# 运行全部测试
+pytest -v
 ```
 
 ## 许可证

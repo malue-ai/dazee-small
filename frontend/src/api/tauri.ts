@@ -41,9 +41,25 @@ export interface ConnectionStatus {
 
 /**
  * 检测是否在 Tauri 环境中运行
+ * 
+ * 三重检测策略：
+ * 1. tauri: 自定义协议（生产打包最可靠的检测方式）
+ * 2. __TAURI_INTERNALS__（Tauri v2 IPC 桥接）
+ * 3. __TAURI__（需要 withGlobalTauri: true）
  */
 export function isTauriEnv(): boolean {
-  return typeof window !== 'undefined' && '__TAURI__' in window
+  if (typeof window === 'undefined') return false
+
+  // 方式 1: 生产打包使用 tauri:// 自定义协议（最可靠）
+  if (window.location.protocol === 'tauri:') return true
+
+  // 方式 2: Tauri v2 内部 IPC 桥接
+  if ('__TAURI_INTERNALS__' in window) return true
+
+  // 方式 3: withGlobalTauri 暴露的全局对象
+  if ('__TAURI__' in window) return true
+
+  return false
 }
 
 // ============================================================================

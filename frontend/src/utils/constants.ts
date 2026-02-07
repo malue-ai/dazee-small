@@ -38,7 +38,6 @@ export const TOOL_NAME_MAP: Record<string, string> = {
   'perplxity': '联网搜索',
 
   // 知识库
-  'ragie_retrieve': '知识检索',
   'knowledge_search': '知识检索',
   'chatDocuments': '文档问答',
 

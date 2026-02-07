@@ -21,7 +21,7 @@ python-dotenv>=1.0.0
 python-multipart>=0.0.6
 aiofiles>=24.1.0          # 异步文件操作
 aiohttp>=3.9.0            # 异步 HTTP 客户端
-httpx>=0.27.0     # HTTP 客户端（用于 MCP、测试）
+httpx>=0.27.0             # HTTP 客户端（用于 MCP、测试）
 filetype>=1.2.0           # 文件类型检测（纯 Python，无需系统依赖）
 
 # 本地数据库（SQLite）
@@ -31,6 +31,9 @@ sqlalchemy[asyncio]>=2.0.0
 
 # Token 计数
 tiktoken>=0.5.0
+
+# 向量计算（意图缓存余弦相似度）
+numpy>=1.26.0
 
 # JSON 解析（宽松模式）
 json5>=0.9.0

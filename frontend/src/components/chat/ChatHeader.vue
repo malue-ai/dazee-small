@@ -1,5 +1,5 @@
 <template>
-  <div class="h-16 flex items-center justify-between px-8 glass-header sticky top-0 z-20">
+  <div class="h-16 flex items-center justify-between px-8 bg-background/80 backdrop-blur-sm sticky top-0 z-20 border-b border-border/40 transition-all duration-200">
     <div class="flex items-center gap-3">
       <span class="py-2 text-foreground text-base font-semibold">{{ title }}</span>
     </div>

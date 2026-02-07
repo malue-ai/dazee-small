@@ -22,13 +22,13 @@
         class="flex flex-col min-w-0 overflow-hidden transition-all duration-300"
         :class="showRightSidebar ? 'w-1/2' : 'flex-1'"
       >
-        <!-- 顶部导航栏 -->
-        <ChatHeader
+        <!-- 顶部导航栏 (已移除) -->
+        <!-- <ChatHeader
           :title="conversationStore.currentTitle"
           :show-workspace-button="!!conversationStore.currentId"
           :sidebar-active="showRightSidebar"
           @toggle-sidebar="showRightSidebar = !showRightSidebar"
-        />
+        /> -->
 
         <!-- 消息列表区域 -->
         <MessageList
@@ -42,6 +42,24 @@
           @file-preview="handleFilePreview"
           @load-more="handleLoadMore"
         />
+
+        <!-- WebSocket 连接状态提示 -->
+        <Transition name="fade">
+          <div
+            v-if="chat.connectionStatus.value === 'reconnecting'"
+            class="flex items-center justify-center gap-2 py-1.5 text-xs text-muted-foreground bg-muted/50"
+          >
+            <Loader2 class="w-3 h-3 animate-spin" />
+            <span>连接已断开，正在重连...</span>
+          </div>
+          <div
+            v-else-if="chat.connectionStatus.value === 'connecting'"
+            class="flex items-center justify-center gap-2 py-1.5 text-xs text-muted-foreground bg-muted/50"
+          >
+            <Loader2 class="w-3 h-3 animate-spin" />
+            <span>正在连接...</span>
+          </div>
+        </Transition>
 
         <!-- 输入框区域 -->
         <ChatInputArea
@@ -195,7 +213,7 @@ import { useWorkspaceStore } from '@/stores/workspace'
 // Composables
 import { useChat } from '@/composables/useChat'
 import { useFileUpload } from '@/composables/useFileUpload'
-import { ClipboardList, FileText, X } from 'lucide-vue-next'
+import { ClipboardList, FileText, Loader2, X } from 'lucide-vue-next'
 
 // Components
 import ConversationSidebar from '@/components/chat/ConversationSidebar.vue'
@@ -459,5 +477,15 @@ async function handleHITLCancel(): Promise<void> {
   margin-right: 0 !important;
   opacity: 0;
   overflow: hidden;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>

@@ -7,8 +7,6 @@
 
 注意：历史对话不在这里，由 ChatService 直接管理
 原因：当前会话历史已在 messages 中，跨会话检索太慢
-
-V11.0: 移除 KnowledgeProvider（云端 Ragie），本地知识检索由后续模块实现
 """
 
 from .memory import MemoryProvider

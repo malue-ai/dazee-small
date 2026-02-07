@@ -6,6 +6,7 @@
 import { ref } from 'vue'
 import { useSessionStore } from '@/stores/session'
 import { getFullApiUrl } from '@/api'
+import { sseLog } from '@/utils/logger'
 import type { SSEEvent, ChatRequest } from '@/types'
 
 export type SSEEventHandler = (event: SSEEvent) => void
@@ -38,7 +39,16 @@ export function useSSE() {
     abortController = new AbortController()
 
     try {
-      const response = await fetch(getFullApiUrl('/v1/chat?format=zenflux'), {
+      const url = getFullApiUrl('/v1/chat?format=zenflux')
+      sseLog.info(`→ 建立 SSE 连接: ${url}`, {
+        user_id: requestBody.user_id,
+        conversation_id: requestBody.conversation_id,
+        message_preview: typeof requestBody.message === 'string'
+          ? requestBody.message.slice(0, 80)
+          : '(非文本)',
+      })
+
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Accept': 'text/event-stream',
@@ -49,21 +59,25 @@ export function useSSE() {
       })
 
       if (!response.ok) {
+        sseLog.error(`SSE HTTP 错误: ${response.status} ${response.statusText}`)
         throw new Error(`HTTP ${response.status}: ${response.statusText}`)
       }
 
       if (!response.body) {
+        sseLog.error('SSE 响应体为空')
         throw new Error('响应体为空')
       }
 
       isConnected.value = true
       sessionStore.setConnected(true)
+      sseLog.info('SSE 连接已建立')
       onConnected?.()
 
       const fullResponse = await readSSEStream(response.body, onEvent)
 
       isConnected.value = false
       sessionStore.setConnected(false)
+      sseLog.info('SSE 流结束', { responseLength: fullResponse.length })
       onDisconnected?.()
 
       return fullResponse
@@ -72,11 +86,12 @@ export function useSSE() {
       sessionStore.setConnected(false)
 
       if ((error as Error).name === 'AbortError') {
+        sseLog.warn('SSE 连接被中断 (AbortError)')
         onDisconnected?.()
         return ''
       }
 
-      console.error('SSE 连接错误:', error)
+      sseLog.error('SSE 连接错误', error)
       onError?.(error as Error)
       throw error
     }
@@ -151,6 +166,11 @@ export function useSSE() {
                   sessionStore.setLastEventId(lastEventId.value)
                 }
 
+                // 记录非 content_delta 事件（content_delta 太频繁，只记录关键事件）
+                if (eventType !== 'content_delta') {
+                  sseLog.debug(`← 事件: ${eventType}`, data.data)
+                }
+
                 onEvent(data)
 
                 if (eventType === 'content_delta' && data.data?.delta) {
@@ -174,7 +194,7 @@ export function useSSE() {
                   return fullResponse
                 }
               } catch (e) {
-                console.error('解析 SSE 数据失败:', e, currentEvent.data)
+                sseLog.error('解析 SSE 数据失败', { error: e, raw: currentEvent.data })
               }
             }
 
@@ -194,7 +214,7 @@ export function useSSE() {
       }
     } catch (error) {
       if ((error as Error).name !== 'AbortError') {
-        console.error('SSE 读取错误:', error)
+        sseLog.error('SSE 读取错误', error)
         throw error
       }
     }

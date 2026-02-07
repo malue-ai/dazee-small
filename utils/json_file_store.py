@@ -117,5 +117,4 @@ def create_default_knowledge_store_dict() -> Dict[str, Any]:
         "version": 1,
         "users": {},  # user_id -> {created_at, metadata...}
         "conversations": {},  # conversation_id -> {user_id, created_at, last_seen_at, session_id?}
-        # V11.0: ragie 已移除，本地知识检索由 core/knowledge/ 提供
     }

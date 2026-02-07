@@ -12,8 +12,7 @@ from .settings import router as settings_router
 from .skills import router as skills_router
 from .tasks import router as tasks_router
 from .tools import router as tools_router
-
-# V11.0: 移除 knowledge_router（云端 Ragie 已删除）
+from .websocket import router as websocket_router
 
 __all__ = [
     "chat_router",
@@ -30,4 +29,5 @@ __all__ = [
     "realtime_router",
     "models_router",
     "settings_router",
+    "websocket_router",
 ]

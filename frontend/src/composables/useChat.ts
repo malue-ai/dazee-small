@@ -1,6 +1,6 @@
 /**
  * 聊天核心 Composable
- * 负责发送消息、处理 SSE 事件、更新消息
+ * 负责发送消息、处理流式事件、更新消息
  */
 
 import { ref, computed, watch } from 'vue'
@@ -8,7 +8,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useConversationStore } from '@/stores/conversation'
 import { useSessionStore } from '@/stores/session'
 import { useWorkspaceStore } from '@/stores/workspace'
-import { useSSE, type SSEEventHandler } from './useSSE'
+import { useWebSocketChat } from './useWebSocketChat'
 import { useHITL } from './useHITL'
 import type {
   UIMessage,
@@ -31,7 +31,7 @@ export function useChat() {
   const sessionStore = useSessionStore()
   const workspaceStore = useWorkspaceStore()
   const hitl = useHITL()
-  const sse = useSSE()
+  const ws = useWebSocketChat()
 
   // ==================== 状态 ====================
 
@@ -119,19 +119,19 @@ export function useChat() {
   }
 
   /**
-   * 清理
+   * 清理（关闭 WebSocket 连接）
    */
   function cleanup(): void {
-    sse.disconnect()
+    ws.close()
   }
 
   /**
    * 创建新会话
    */
   async function createNewConversation(): Promise<void> {
-    // 断开现有 SSE 连接
-    if (sse.isConnected.value) {
-      sse.disconnect()
+    // 中断当前流
+    if (ws.isConnected.value) {
+      ws.disconnect()
     }
     
     // 重置所有加载状态
@@ -148,8 +148,8 @@ export function useChat() {
    * 加载会话
    */
   async function loadConversation(convId: string): Promise<void> {
-    if (sse.isConnected.value) {
-      sse.disconnect()
+    if (ws.isConnected.value) {
+      ws.disconnect()
     }
 
     // 重置所有加载状态（确保切换会话时状态正确）
@@ -214,19 +214,19 @@ export function useChat() {
         }
       }
 
-      // 连接 SSE
-      const result = await sse.connect(requestBody, {
+      // 通过 WebSocket 发送消息
+      const result = await ws.connect(requestBody, {
         onEvent: (event) => handleStreamEvent(event, assistantMsg),
         onConnected: () => {
-          console.log('✅ SSE 已连接')
+          console.log('✅ WebSocket 流开始')
         },
         onDisconnected: () => {
-          console.log('✅ SSE 已断开')
-          // 🔧 重置停止状态（用户主动停止时，SSE 会在收到 done 后断开）
+          console.log('✅ WebSocket 流结束')
+          // 重置停止状态
           isStopping.value = false
         },
         onError: (error) => {
-          console.error('❌ SSE 错误:', error)
+          console.error('❌ WebSocket 错误:', error)
           assistantMsg.content += `\n❌ 发送失败: ${error.message}`
         }
       })
@@ -251,7 +251,7 @@ export function useChat() {
   /**
    * 停止生成
    * 
-   * 注意：不立即断开 SSE，等待后端发送 done 事件后由事件处理器断开
+   * 注意：不立即断开流，等待后端发送 done 事件后由事件处理器断开
    * 事件顺序：billing → message_stop (done) → session_stopped
    */
   async function stopGeneration(): Promise<void> {
@@ -266,15 +266,14 @@ export function useChat() {
     isStopping.value = true
 
     try {
-      // 只发送停止请求，不立即断开 SSE
-      // SSE 会在收到 message_stop 或 session_stopped 事件后由事件处理器断开
+      // 只发送停止请求，不立即断开流
+      // 后端会在收到停止请求后发送 message_stop / session_stopped 事件
       await sessionStore.stop(sessionId)
-      // 🔧 修复：不在这里 disconnect，让事件处理器在收到 done 后断开
-      // sse.disconnect()
+      // 不在这里 disconnect，让事件处理器在收到 done 后断开
     } catch (error) {
-      // 停止请求失败时才强制断开
+      // 停止请求失败时才中断流
       console.error('❌ 停止请求失败:', error)
-      sse.disconnect()
+      ws.disconnect()
       isStopping.value = false
       isLoading.value = false
       isGenerating.value = false
@@ -849,6 +848,9 @@ export function useChat() {
     longRunConfirmData,
     confirmLongRunContinue,
     dismissLongRunConfirm,
+
+    // WebSocket 连接状态
+    connectionStatus: ws.connectionStatus,
 
     // 计算属性
     messages,

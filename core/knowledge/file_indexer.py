@@ -1,14 +1,14 @@
 """
 文件索引器 - FileIndexer
 
-将用户本地文件（txt/md/pdf/docx）分块索引到 FTS5，
+将用户本地文件（txt/md/pdf/docx）分块索引到 FTS5 + sqlite-vec，
 支持增量索引（hash check）。
 
 使用示例：
     from core.knowledge.file_indexer import FileIndexer
     from core.knowledge.local_search import LocalKnowledgeManager
 
-    km = LocalKnowledgeManager()
+    km = LocalKnowledgeManager(semantic_enabled=True)
     indexer = FileIndexer(km)
 
     count = await indexer.index_directory(Path("~/Documents"), extensions=[".md", ".txt"])
@@ -37,7 +37,7 @@ class FileIndexer:
     """
     文件索引器
 
-    读取文件 -> 分块 -> 写入 LocalKnowledgeManager 的 FTS5 索引。
+    读取文件 -> 分块 -> 生成 embedding -> 写入 FTS5 + sqlite-vec 索引。
     支持增量索引（通过 file hash 跳过未变更文件）。
     """
 
@@ -50,7 +50,7 @@ class FileIndexer:
     ):
         """
         Args:
-            knowledge_manager: 知识管理器（FTS5 索引入口）
+            knowledge_manager: 知识管理器（FTS5 + 向量索引入口）
             index_dir: 索引元数据存储目录
             chunk_size: 分块大小（字符）
             chunk_overlap: 分块重叠（字符）
@@ -61,6 +61,7 @@ class FileIndexer:
         self._index_dir = index_dir
         self._chunk_size = chunk_size
         self._chunk_overlap = chunk_overlap
+        self._embedding_service = None
         # 内存缓存已索引文件的 hash（轻量级增量索引）
         self._indexed_hashes: Dict[str, str] = {}
 
@@ -104,9 +105,13 @@ class FileIndexer:
         # 先清除该文件的旧索引
         await self._km.remove_by_file_path(str(path))
 
+        # 如果启用语义搜索，批量生成 embedding
+        embeddings = await self._batch_embed(chunks)
+
         # 写入每个块
         for i, chunk in enumerate(chunks):
             doc_id = f"{path}:{i}"
+            embedding = embeddings[i] if embeddings else None
             await self._km.add_document(
                 doc_id=doc_id,
                 title=title,
@@ -114,6 +119,7 @@ class FileIndexer:
                 file_path=str(path),
                 file_type=path.suffix.lower(),
                 chunk_index=i,
+                embedding=embedding,
             )
 
         # 更新 hash 缓存
@@ -121,7 +127,8 @@ class FileIndexer:
 
         logger.info(
             f"已索引: {path.name} ({len(chunks)} 块, "
-            f"{len(content)} 字符)"
+            f"{len(content)} 字符, "
+            f"向量: {'是' if embeddings else '否'})"
         )
         return True
 
@@ -304,6 +311,52 @@ class FileIndexer:
             start = end - self._chunk_overlap
 
         return [c for c in chunks if c]
+
+    # ==================== 向量嵌入 ====================
+
+    def _get_embedding_service(self):
+        """获取 embedding 服务（懒初始化）"""
+        if self._embedding_service is None:
+            from core.routing.intent_cache import EmbeddingService
+            self._embedding_service = EmbeddingService()
+        return self._embedding_service
+
+    async def _batch_embed(
+        self, chunks: List[str]
+    ) -> Optional[List[List[float]]]:
+        """
+        批量生成文本块的 embedding
+
+        如果知识管理器未启用语义搜索，返回 None。
+        单个块 embedding 失败时使用空向量占位。
+
+        Args:
+            chunks: 文本块列表
+
+        Returns:
+            向量列表，或 None（未启用语义搜索）
+        """
+        if not self._km._semantic_enabled or not self._km._vec_initialized:
+            return None
+
+        try:
+            service = self._get_embedding_service()
+            embeddings: List[List[float]] = []
+
+            for chunk in chunks:
+                try:
+                    vec = await service.embed(chunk)
+                    embeddings.append(vec.tolist())
+                except Exception as e:
+                    logger.warning(
+                        f"块 embedding 生成失败，跳过: {e}"
+                    )
+                    embeddings.append([])
+
+            return embeddings
+        except Exception as e:
+            logger.warning(f"批量 embedding 失败: {e}")
+            return None
 
     # ==================== 增量索引 ====================
 

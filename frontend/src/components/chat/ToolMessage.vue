@@ -119,11 +119,6 @@ const TOOL_CONFIG: Record<string, { icon: Component; name: string; descTemplate?
     name: '知识检索',
     descTemplate: (input) => input?.query ? `检索「${truncate(input.query, 30)}」` : '知识库检索'
   },
-  'ragie_retrieve': {
-    icon: BookOpen,
-    name: '知识检索',
-    descTemplate: (input) => input?.query ? `检索「${truncate(input.query, 30)}」` : '知识库检索'
-  },
   
   // 计划与任务
   'plan_todo': {
@@ -381,6 +376,7 @@ function formatResult(data: any) {
 .tool-card {
   margin: 8px 0;
   background: var(--color-muted);
+  border: 1px solid var(--color-border);
   border-radius: 12px;
   overflow: hidden;
 }

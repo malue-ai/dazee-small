@@ -48,6 +48,7 @@ from routers import (
     tasks_router,
     tools_router,
     models_router,
+    websocket_router,
 )
 from infra.resilience.config import apply_resilience_config
 from core.tool.registry import get_capability_registry
@@ -342,6 +343,7 @@ app.include_router(settings_router)
 
 # 实时通信（WebSocket）
 app.include_router(realtime_router)
+app.include_router(websocket_router)
 
 
 # ==================== 基础路由 ====================
@@ -376,7 +378,8 @@ async def root() -> Dict[str, Any]:
             "skills": "/api/v1/skills",
             "models": "/api/v1/models",
             "realtime_ws": "ws://host/api/v1/realtime/ws",
-            "realtime_sessions": "/api/v1/realtime/sessions"
+            "realtime_sessions": "/api/v1/realtime/sessions",
+            "chat_ws": "ws://host/api/v1/ws/chat"
         },
         "github": "https://github.com/your-repo/zenflux-agent"
     }
@@ -401,10 +404,21 @@ if __name__ == "__main__":
     print(f"📖 ReDoc: http://localhost:{port}/redoc")
     print("=" * 60 + "\n")
     
-    uvicorn.run(
-        "main:app",
-        host=host,
-        port=port,
-        reload=not is_frozen(),
-        log_level="info",
-    )
+    if is_frozen():
+        # PyInstaller 打包模式：必须直接传 app 对象
+        # 字符串导入 "main:app" 在 PyInstaller 中会导致 ModuleNotFoundError
+        uvicorn.run(
+            app,
+            host=host,
+            port=port,
+            log_level="info",
+        )
+    else:
+        # 开发模式：使用字符串导入 + 热重载
+        uvicorn.run(
+            "main:app",
+            host=host,
+            port=port,
+            reload=True,
+            log_level="info",
+        )

@@ -670,7 +670,7 @@ class InstancePromptCache:
             schema_summary = self._build_schema_summary()
 
             # 构建提示词（传入完整 prompt 用于提取意图定义，模板内部会限制长度）
-            prompt_template = get_intent_prompt_template(raw_prompt, schema_summary)
+            prompt_template = await get_intent_prompt_template(raw_prompt, schema_summary)
 
             # 调用 LLM（使用 Message 对象而非字典）
             response = await llm_service.create_message_async(
@@ -749,7 +749,7 @@ class InstancePromptCache:
             llm_service = create_llm_service(**profile)
 
             # 构建提示词（传入完整的 raw_prompt）
-            prompt_template = get_simple_prompt_template(raw_prompt)
+            prompt_template = await get_simple_prompt_template(raw_prompt)
 
             response = await llm_service.create_message_async(
                 messages=[Message(role="user", content=prompt_template)],
@@ -775,7 +775,7 @@ class InstancePromptCache:
 
             llm_service = create_llm_service(**profile)
 
-            prompt_template = get_medium_prompt_template(raw_prompt)
+            prompt_template = await get_medium_prompt_template(raw_prompt)
 
             response = await llm_service.create_message_async(
                 messages=[Message(role="user", content=prompt_template)],
@@ -802,7 +802,7 @@ class InstancePromptCache:
 
             llm_service = create_llm_service(**profile)
 
-            prompt_template = get_complex_prompt_template(raw_prompt)
+            prompt_template = await get_complex_prompt_template(raw_prompt)
 
             response = await llm_service.create_message_async(
                 messages=[Message(role="user", content=prompt_template)],

@@ -27,7 +27,7 @@ withDefaults(defineProps<{
 <style>
 .markdown-body {
   line-height: 1.6;
-  color: #374151;
+  color: var(--color-foreground);
   font-size: 15px;
   max-width: 100%;
   overflow-wrap: break-word;
@@ -44,18 +44,18 @@ withDefaults(defineProps<{
   margin-bottom: 16px;
   font-weight: 600;
   line-height: 1.25;
-  color: #111827;
+  color: var(--color-foreground);
 }
 
 .markdown-body h1 {
   font-size: 1.8em;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--color-border);
   padding-bottom: 0.3em;
 }
 
 .markdown-body h2 {
   font-size: 1.4em;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--color-border);
   padding-bottom: 0.3em;
 }
 
@@ -75,8 +75,8 @@ withDefaults(defineProps<{
 
 .markdown-body blockquote {
   padding: 0 1em;
-  color: #6b7280;
-  border-left: 0.25em solid #e5e7eb;
+  color: var(--color-muted-foreground);
+  border-left: 0.25em solid var(--color-border);
   margin: 0 0 16px 0;
 }
 
@@ -90,26 +90,27 @@ withDefaults(defineProps<{
 .markdown-body table th,
 .markdown-body table td {
   padding: 6px 13px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--color-border);
 }
 
 .markdown-body table tr {
-  background-color: #fff;
-  border-top: 1px solid #e5e7eb;
+  background-color: transparent;
+  border-top: 1px solid var(--color-border);
 }
 
 .markdown-body table tr:nth-child(2n) {
-  background-color: #f9fafb;
+  background-color: var(--color-muted);
 }
 
 .markdown-body a {
-  color: #2563eb;
+  color: var(--color-primary);
   text-decoration: none;
   word-break: break-all;
 }
 
 .markdown-body a:hover {
   text-decoration: underline;
+  color: var(--color-primary-hover);
 }
 
 /* 长文本/URL 强制换行 */

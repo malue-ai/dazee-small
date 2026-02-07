@@ -35,9 +35,6 @@ context_manager:
 
 # ==================== 数据源配置 ====================
 
-# V11.0: 知识库提供者已迁移至本地知识检索（core/knowledge/）
-# 云端 Ragie 已移除，由 LocalKnowledgeManager（SQLite FTS5）替代
-
 # 用户记忆提供者（Mem0）
 memory_provider:
   enabled: true

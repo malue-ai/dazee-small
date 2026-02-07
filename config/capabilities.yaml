@@ -369,7 +369,6 @@ capabilities:
     - PDF
     - 打印
     - 交付
-# V11.0: knowledge_search 已移除（云端 Ragie），本地知识检索由 core/knowledge/ 提供
 - name: api_calling
   type: TOOL
   subtype: CUSTOM

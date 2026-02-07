@@ -10,6 +10,7 @@
     "devUrl": "http://localhost:5174"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "title": "ZenFlux Agent",
@@ -25,7 +26,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://localhost:* https://* wss://* ws://localhost:*; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-eval'; connect-src 'self' http://localhost:* http://127.0.0.1:* https://* wss://* ws://localhost:* ws://127.0.0.1:*; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'"
     }
   },
   "bundle": {

@@ -39,7 +39,6 @@ class ContextRetriever:
 
     def __init__(self) -> None:
         # 注册所有 Provider（仅需要检索的数据源）
-        # V11.0: 移除 KnowledgeProvider（云端 Ragie），本地知识检索由后续模块实现
         self.providers: Dict[ContextType, ContextProvider] = {
             ContextType.MEMORY: MemoryProvider(),
         }

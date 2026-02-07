@@ -82,7 +82,7 @@
             </div>
             <!-- 文字内容 -->
             <div v-if="message.content" class="bg-accent text-foreground px-5 py-3 rounded-2xl rounded-tr-sm text-sm leading-relaxed break-words max-w-full">
-              {{ message.content }}
+              <MarkdownRenderer :content="parseUserMessage(message.content)" />
             </div>
           </div>
           
@@ -102,13 +102,17 @@
                 <div v-if="message.thinking" class="thinking-inline" :class="{ 'is-streaming': isMessageStreaming(message) }">
                   <div class="thinking-inline-header" @click="toggleThinking(String(message.id))">
                     <div class="thinking-inline-left">
-                      <span class="thinking-inline-dot" :class="{ 'is-active': isMessageStreaming(message) }"></span>
-                      <span>{{ isMessageStreaming(message) ? '正在思考...' : '思考过程' }}</span>
+                      <span v-if="!isThinkingExpandedInline(message)" class="thinking-inline-dot" :class="{ 'is-active': isMessageStreaming(message) }"></span>
+                      <span class="toggle-icon">
+                        <svg v-if="isThinkingExpandedInline(message)" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>
+                        <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                      </span>
+                      <span v-if="isMessageStreaming(message)">思考中...</span>
+                      <span v-else>已思考 {{ formatDuration(String(message.id)) }}</span>
                     </div>
-                    <span class="thinking-inline-toggle">{{ isThinkingExpandedInline(message) ? '收起' : '展开' }}</span>
                   </div>
                   <div v-show="isThinkingExpandedInline(message)" class="thinking-inline-body">
-                    <span>{{ message.thinking }}</span>
+                    <MarkdownRenderer :content="message.thinking || ''" />
                     <span v-if="isMessageStreaming(message)" class="typing-cursor"></span>
                   </div>
                 </div>
@@ -189,6 +193,48 @@ const emit = defineEmits<{
 
 // ==================== State ====================
 
+// 思考计时器
+const thinkingDurations = ref<Record<string, number>>({})
+const thinkingTimers = ref<Record<string, any>>({})
+
+/** 开始计时 */
+function startThinkingTimer(messageId: string) {
+  if (thinkingTimers.value[messageId]) return
+  
+  const startTime = Date.now()
+  thinkingTimers.value[messageId] = setInterval(() => {
+    thinkingDurations.value[messageId] = (Date.now() - startTime) / 1000
+  }, 100)
+}
+
+/** 停止计时 */
+function stopThinkingTimer(messageId: string) {
+  if (thinkingTimers.value[messageId]) {
+    clearInterval(thinkingTimers.value[messageId])
+    delete thinkingTimers.value[messageId]
+  }
+}
+
+/** 格式化持续时间 */
+function formatDuration(id: string): string {
+  const duration = thinkingDurations.value[id]
+  if (!duration || duration < 1) return ''
+  return `${duration.toFixed(1)}s`
+}
+
+/** 监听流式状态来控制计时器 */
+watch(() => props.generating, (generating) => {
+  const lastMsg = props.messages[props.messages.length - 1]
+  if (!lastMsg || lastMsg.role !== 'assistant') return
+  
+  const id = String(lastMsg.id)
+  if (generating && lastMsg.thinking) {
+    startThinkingTimer(id)
+  } else {
+    stopThinkingTimer(id)
+  }
+}, { immediate: true })
+
 /** 容器引用 */
 const containerRef = ref<HTMLElement | null>(null)
 
@@ -243,6 +289,33 @@ const suggestions = [
 ]
 
 // ==================== Methods ====================
+
+/**
+ * 解析用户消息内容（处理 JSON 格式）
+ */
+function parseUserMessage(content: string): string {
+  if (!content) return ''
+  try {
+    // 尝试判断是否为 JSON 数组格式
+    if (content.trim().startsWith('[') && content.trim().endsWith(']')) {
+      const parsed = JSON.parse(content)
+      if (Array.isArray(parsed)) {
+        // 提取所有 text 类型的块
+        const textParts = parsed
+          .filter((block: any) => block && block.type === 'text' && typeof block.text === 'string')
+          .map((block: any) => block.text)
+        
+        // 如果提取到了文本，则返回连接后的文本
+        if (textParts.length > 0) {
+          return textParts.join('\n\n')
+        }
+      }
+    }
+  } catch (e) {
+    // 解析失败，说明不是 JSON 或格式不对，按原始文本处理
+  }
+  return content
+}
 
 /**
  * 获取文件类型标签
@@ -361,40 +434,52 @@ defineExpose({
 
 /* 内联思考过程 */
 .thinking-inline {
-  margin-bottom: 12px;
-  background: var(--color-muted);
-  border-radius: 12px;
+  margin-bottom: 2px; /* 极小间距 */
+  /* 移除背景和边框 */
+  background: transparent;
+  border-radius: 0;
   overflow: hidden;
 }
 
 .thinking-inline-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px;
+  /* 减小内边距 */
+  padding: 4px 0;
   cursor: pointer;
-  transition: background 0.15s;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+  user-select: none;
 }
 
 .thinking-inline-header:hover {
-  background: rgba(0, 0, 0, 0.03);
+  opacity: 1;
+  background: transparent;
 }
 
 .thinking-inline-left {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 13px;
+  gap: 6px;
+  font-size: 12px; /* 更小的字体 */
   font-weight: 500;
   color: var(--color-muted-foreground);
 }
 
+.toggle-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+}
+
 .thinking-inline-dot {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   background: var(--color-muted-foreground);
   border-radius: 50%;
-  transition: all 0.3s ease;
+  margin-right: 2px;
 }
 
 .thinking-inline-dot.is-active {
@@ -402,22 +487,29 @@ defineExpose({
   animation: pulse 1.5s infinite ease-in-out;
 }
 
-@keyframes pulse {
-  0%, 100% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.3); opacity: 0.7; }
-}
-
+/* 移除之前的 toggle 文本样式 */
 .thinking-inline-toggle {
-  font-size: 12px;
-  color: var(--color-muted-foreground);
+  display: none; 
 }
 
 .thinking-inline-body {
-  padding: 0 14px 12px;
-  font-size: 13px;
+  /* 左侧边框缩进 */
+  margin-left: 6px;
+  padding-left: 10px;
+  border-left: 2px solid var(--color-border);
+  font-size: 12px;
   color: var(--color-muted-foreground);
+  opacity: 0.7; /* 降低不透明度，匹配头部视觉 */
   line-height: 1.6;
-  white-space: pre-wrap;
+}
+
+/* 覆盖 Markdown 样式，使其更紧凑 */
+.thinking-inline-body :deep(.prose) {
+  font-size: 12px;
+  line-height: 1.5;
+}
+.thinking-inline-body :deep(.prose p) {
+  margin-bottom: 0.5em;
 }
 
 .typing-cursor {
@@ -436,6 +528,7 @@ defineExpose({
 }
 
 .thinking-inline.is-streaming {
-  border-left: 2px solid var(--color-primary);
+  /* 移除左侧高亮边框 */
+  border-left: none;
 }
 </style>

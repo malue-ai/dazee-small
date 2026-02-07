@@ -51,8 +51,6 @@ from .tool import (
     ToolDetailResponse,
 )
 
-# V11.0: 移除 Ragie 和 Knowledge 模型（云端 RAG 已删除）
-
 # Usage 模型（计费响应）
 from .usage import UsageResponse, UsageSummary
 

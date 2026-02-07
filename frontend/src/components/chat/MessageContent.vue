@@ -5,20 +5,19 @@
       <!-- 跳过 null/undefined 块 -->
       <template v-if="block">
       <!-- 思考过程 -->
-      <div v-if="block.type === 'thinking'" class="thinking-card" :class="{ 'is-streaming': isStreaming }">
-        <div class="thinking-header" @click="toggleBlock(index)">
-          <div class="thinking-label">
-            <span class="thinking-dot" :class="{ 'is-active': isStreaming }"></span>
-            <span>{{ isStreaming ? '正在思考...' : '思考过程' }}</span>
-          </div>
-          <div class="thinking-toggle">
-            <ChevronUp v-if="isThinkingExpanded(index)" class="w-4 h-4" />
-            <ChevronDown v-else class="w-4 h-4" />
+      <div v-if="block.type === 'thinking'" class="thinking-block mb-1" :class="{ 'is-streaming': isStreaming }">
+        <div class="flex items-center gap-2 py-1 cursor-pointer select-none opacity-70 hover:opacity-100 transition-opacity" @click="toggleBlock(index)">
+          <div class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+            <span v-if="!isThinkingExpanded(index)" class="w-1.5 h-1.5 rounded-full bg-muted-foreground transition-all" :class="{ 'bg-primary animate-pulse': isStreaming }"></span>
+            <ChevronUp v-if="isThinkingExpanded(index)" class="w-3 h-3" />
+            <ChevronDown v-else class="w-3 h-3" />
+            <span v-if="isStreaming">思考中...</span>
+            <span v-else>已思考 {{ formattedDuration || '' }}</span>
           </div>
         </div>
-        <div v-show="isThinkingExpanded(index)" class="thinking-body">
+        <div v-show="isThinkingExpanded(index)" class="pl-3 border-l-2 border-muted-foreground/15 ml-1.5 mt-0.5 mb-2 text-[13px] text-muted-foreground leading-relaxed">
           <MarkdownRenderer :content="block.thinking || ''" :final="!isStreaming" />
-          <span v-if="isStreaming" class="typing-cursor"></span>
+          <span v-if="isStreaming" class="inline-block w-0.5 h-3 ml-0.5 bg-primary align-middle animate-pulse"></span>
         </div>
       </div>
 
@@ -27,16 +26,12 @@
         <MarkdownRenderer :content="block.text" :final="!isStreaming" />
       </div>
 
-      <!-- 工具调用 (合并 Tool Use 和 Tool Result) -->
+      <!-- 工具调用 -->
       <template v-else-if="block.type === 'tool_use' || block.type === 'server_tool_use'">
-        <ToolMessage 
-          :name="block.name"
-          :input="block.input"
-          :partial-input="block.partialInput"
-          :result="getToolResultContent(block.id)"
-          :partial-result="getToolPartialResult(block.id)"
-          :status="getToolStatus(block.id)"
-          :intermediate-content="getToolIntermediateContent(block.id)"
+        <ToolBlock
+          :block="block"
+          :tool-statuses="toolStatuses"
+          :content-blocks="contentBlocks"
         />
       </template>
 
@@ -89,23 +84,21 @@
     </template>
 
     <!-- 如果没有内容块，显示纯文本 -->
-    <div v-if="contentBlocks.length === 0 && content" class="content-block text-block">
+    <div v-if="contentBlocks.length === 0 && content" class="content-block text-block !mt-0">
       <MarkdownRenderer :content="content" :final="!isStreaming" />
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, reactive, watch } from 'vue'
+import { ref, computed, reactive, watch, onMounted, onUnmounted } from 'vue'
 import MarkdownRenderer from './MarkdownRenderer.vue'
-import ToolMessage from './ToolMessage.vue'
+import ToolBlock from './ToolBlock.vue'
 import { 
   CheckCircle2, 
   XCircle, 
   FileText, 
   Package, 
-  Image as ImageIcon,
-  Download,
   ChevronDown,
   ChevronUp
 } from 'lucide-vue-next'
@@ -128,26 +121,49 @@ const props = defineProps({
   }
 })
 
+// 思考时间计时器
+const thinkingDuration = ref(0)
+const startTime = ref(null)
+let timer = null
+
 // 展开/收起状态
 const expandedBlocks = reactive({})
 
 // 用户手动操作过的块（记录用户是否手动展开/收起过）
 const userToggledBlocks = reactive({})
 
-// 监听 isStreaming 变化，流式输出时自动展开 thinking，结束后自动折叠
-watch(
-  () => props.isStreaming,
-  (streaming, wasStreaming) => {
-    // 流式结束时，自动折叠所有用户没有手动操作过的 thinking 块
-    if (wasStreaming && !streaming) {
-      contentBlocks.value.forEach((block, index) => {
-        if (block.type === 'thinking' && !userToggledBlocks[index]) {
-          expandedBlocks[index] = false
-        }
-      })
-    }
+// 切换块的展开/收起（用户手动操作）
+function toggleBlock(index) {
+  // 记录用户手动操作过
+  userToggledBlocks[index] = true
+  // 切换展开/收起状态
+  const currentState = isThinkingExpanded(index)
+  // 强制更新
+  expandedBlocks[index] = !currentState
+}
+
+// 格式化时间
+const formattedDuration = computed(() => {
+  if (thinkingDuration.value < 1) return ''
+  return `${thinkingDuration.value.toFixed(1)}s`
+})
+
+// 开始计时
+function startTimer() {
+  if (timer) return
+  startTime.value = Date.now()
+  timer = setInterval(() => {
+    thinkingDuration.value = (Date.now() - startTime.value) / 1000
+  }, 100)
+}
+
+// 停止计时
+function stopTimer() {
+  if (timer) {
+    clearInterval(timer)
+    timer = null
   }
-)
+}
 
 // 计算属性：判断某个 thinking 块是否应该展开
 const isThinkingExpanded = (index) => {
@@ -197,14 +213,37 @@ const contentBlocks = computed(() => {
   return []
 })
 
-// 切换块的展开/收起（用户手动操作）
-function toggleBlock(index) {
-  // 记录用户手动操作过
-  userToggledBlocks[index] = true
-  // 切换展开/收起状态
-  const currentState = isThinkingExpanded(index)
-  expandedBlocks[index] = !currentState
-}
+// 监听流式状态来控制计时器
+watch(() => props.isStreaming, (streaming) => {
+  // 检查是否有正在生成的 thinking 块
+  // 确保 contentBlocks 不为空且有有效值
+  const hasThinking = contentBlocks.value && contentBlocks.value.some(b => b && b.type === 'thinking')
+  
+  if (streaming && hasThinking) {
+    startTimer()
+  } else {
+    stopTimer()
+  }
+}, { immediate: true })
+
+onUnmounted(() => {
+  stopTimer()
+})
+
+// 监听 isStreaming 变化，流式输出时自动展开 thinking，结束后自动折叠
+watch(
+  () => props.isStreaming,
+  (streaming, wasStreaming) => {
+    // 流式结束时，自动折叠所有用户没有手动操作过的 thinking 块
+    if (wasStreaming && !streaming) {
+      contentBlocks.value.forEach((block, index) => {
+        if (block && block.type === 'thinking' && !userToggledBlocks[index]) {
+          expandedBlocks[index] = false
+        }
+      })
+    }
+  }
+)
 
 // 格式化工具结果
 function formatToolResult(content) {
@@ -221,53 +260,6 @@ function formatToolResult(content) {
   }
   
   return JSON.stringify(content, null, 2)
-}
-
-// 获取工具状态
-function getToolStatus(toolId) {
-  const status = props.toolStatuses[toolId]
-  if (!status) return 'pending'
-  // 检查 pending 标志（工具正在执行中）
-  if (status.pending) return 'pending'
-  return status.success ? 'success' : 'error'
-}
-
-// 获取工具结果内容（完整）
-function getToolResultContent(toolId) {
-  const status = props.toolStatuses[toolId]
-  if (!status || !status.result) return null
-  // 只有当不再 pending 时才返回完整结果
-  if (status.pending) return null
-  return status.result
-}
-
-// 获取工具流式结果（部分）
-function getToolPartialResult(toolId) {
-  // 从 contentBlocks 中查找对应的 tool_result 块
-  for (const block of contentBlocks.value) {
-    if (block && block.type === 'tool_result' && block.tool_use_id === toolId) {
-      return block.content || null
-    }
-  }
-  return null
-}
-
-// 获取工具中间内容 (从不完整的 JSON 中提取)
-function getToolIntermediateContent(toolId) {
-  // 尝试从流式结果中提取
-  const partialResult = getToolPartialResult(toolId)
-  if (partialResult) {
-    // 尝试正则匹配 "preview": "..."
-    const previewMatch = partialResult.match(/"preview"\s*:\s*"([^"]+)"/)
-    if (previewMatch && previewMatch[1]) {
-      return {
-        type: 'image',
-        data: previewMatch[1]
-      }
-    }
-  }
-  
-  return null
 }
 
 // 检查是否有配对的 Tool Use
@@ -299,7 +291,7 @@ function formatFileSize(bytes) {
 .message-content {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 2px; /* 极小间距 */
   max-width: 100%;
   overflow-wrap: break-word;
   word-break: break-word;
@@ -309,102 +301,15 @@ function formatFileSize(bytes) {
   border-radius: 8px;
 }
 
-/* 思考过程 */
-.thinking-card {
-  background: var(--color-muted);
-  border-radius: 12px;
-  overflow: hidden;
+/* 文本块不需要顶部 margin，因为它已经在 flex gap 中了 */
+.text-block {
+  margin-top: 0;
 }
 
-.thinking-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
 
-.thinking-header:hover {
-  background: rgba(0, 0, 0, 0.03);
-}
-
-.thinking-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--color-muted-foreground);
-}
-
-.thinking-dot {
-  width: 6px;
-  height: 6px;
-  background: var(--color-muted-foreground);
-  border-radius: 50%;
-  transition: all 0.3s ease;
-}
-
-.thinking-dot.is-active {
-  background: var(--color-primary);
-  animation: pulse 1.5s infinite ease-in-out;
-}
-
-@keyframes pulse {
-  0%, 100% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.3); opacity: 0.7; }
-}
-
-.thinking-toggle {
-  font-size: 12px;
-  color: var(--color-muted-foreground);
-}
-
-.thinking-body {
-  padding: 0 14px 12px;
-  font-size: 13px;
-  color: var(--color-muted-foreground);
-  line-height: 1.6;
-}
-
-.thinking-body :deep(.markdown-body) {
-  font-size: 13px;
-  color: var(--color-muted-foreground);
-}
-
-.thinking-body :deep(.markdown-body p) {
-  margin-bottom: 8px;
-}
-
-.thinking-body :deep(.markdown-body pre) {
-  background: rgba(0, 0, 0, 0.03);
-  border: 1px solid var(--color-border);
-}
-
-.typing-cursor {
-  display: inline-block;
-  width: 2px;
-  height: 1em;
-  background-color: var(--color-primary);
-  margin-left: 2px;
-  vertical-align: text-bottom;
-  animation: blink-cursor 0.8s infinite;
-}
-
-@keyframes blink-cursor {
-  0%, 50% { opacity: 1; }
-  51%, 100% { opacity: 0; }
-}
-
-.thinking-card.is-streaming {
-  border-left: 2px solid var(--color-primary);
-}
-
-/* 工具结果（未合并） */
 .tool-result-block {
-  background: var(--color-accent);
-  border: 1px solid var(--color-primary);
+  background: var(--color-muted);
+  border: 1px solid var(--color-border);
   padding: 12px;
   border-radius: 12px;
 }

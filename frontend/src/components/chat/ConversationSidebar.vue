@@ -72,7 +72,7 @@
 
       <!-- 库 -->
       <div v-if="!isSearching" class="flex flex-col gap-1">
-        <div class="px-3 text-xs font-medium text-muted-foreground/60 mb-1">库</div>
+        <div class="px-3 text-xs font-medium text-muted-foreground/60 mb-1">项目</div>
         <button 
           @click="emit('navigate', '/knowledge')" 
           class="w-full flex items-center gap-3 px-3 py-2 text-muted-foreground hover:bg-muted hover:text-foreground rounded-lg transition-colors group"
@@ -154,7 +154,7 @@
       <!-- 对话列表（非搜索状态） -->
       <div v-if="!isSearching" class="flex flex-col gap-1 flex-1 min-h-0">
         <div class="px-3 flex items-center justify-between group cursor-pointer mb-1">
-          <span class="text-xs font-medium text-muted-foreground/60">最近对话</span>
+          <span class="text-xs font-medium text-muted-foreground/60">对话记录</span>
         </div>
         
         <!-- 加载中 -->

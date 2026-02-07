@@ -12,22 +12,22 @@ const API_BASE = '/api/v1'
 /**
  * 获取 WebSocket URL
  * 
- * Tauri 模式：ws://localhost:18900/api/v1/...
+ * Tauri 模式：ws://127.0.0.1:{port}/api/v1/...（port 从 get_backend_url 动态获取）
  * 浏览器模式：自动从 window.location 推导
  */
 function getWsUrl(path: string): string {
-  if (isTauriEnv()) {
-    // Tauri 模式：直接使用后端地址
-    const baseUrl = getApiBaseUrl()
+  const baseUrl = getApiBaseUrl()
+
+  if (baseUrl.startsWith('http')) {
+    // 绝对地址（Tauri 模式）：http → ws
     const wsBase = baseUrl.replace(/^http/, 'ws')
-    // path 已包含 /v1/... 前缀，baseUrl 是 /api，所以直接拼接 /v1 部分
     const relativePath = path.replace(/^\/api/, '')
     return `${wsBase}${relativePath}`
   }
-  // 浏览器模式：从 window.location 推导
+
+  // 相对地址（浏览器开发模式）：用当前页面地址构造
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const host = window.location.host
-  return `${protocol}//${host}${path}`
+  return `${protocol}//${window.location.host}${path}`
 }
 
 /**

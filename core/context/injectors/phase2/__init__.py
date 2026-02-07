@@ -8,8 +8,6 @@ Phase 2 Injectors - User Context
 
 缓存策略：
 - UserMemoryInjector: SESSION（5min 缓存）
-
-V11.0: 移除 KnowledgeInjector（云端 Ragie），本地知识检索由后续模块实现
 """
 
 from .user_memory import UserMemoryInjector
