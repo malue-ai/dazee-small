@@ -12,7 +12,7 @@ alwaysApply: true
 - 优先函数式编程，避免不必要的类
 - 使用有意义的变量名（`is_active`, `has_permission`）
 - 文件/目录用 `snake_case`
-- 所有注释和文档使用**中文**
+- 所有代码注释和 docstring 使用**英文**
 
 ## Python/FastAPI
 - 纯函数用 `def`，异步用 `async def`
@@ -59,7 +59,7 @@ alwaysApply: true
 ## 代码风格
 - 4 空格缩进，每行 ≤ 100 字符
 - 导入顺序：标准库 → 第三方库 → 本地模块
-- Google 风格 docstring（中文）
+- Google 风格 docstring（英文）
 
 ## 禁止事项
 - ❌ 阻塞 I/O

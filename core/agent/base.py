@@ -358,11 +358,28 @@ class Agent:
             available_tools=tools_for_llm,
         )
 
+        # 策略路由：根据 LLM 意图识别的 complexity 选择执行器
+        # complexity 由 IntentAnalyzer（LLM）语义判断，此处仅做确定性映射
+        executor = self._executor
+        if intent and hasattr(intent, "complexity"):
+            complexity = getattr(intent, "complexity", "medium")
+            if complexity == "simple" and not executor.supports_backtrack():
+                # 已经是 RVR，无需切换
+                pass
+            elif complexity == "simple" and executor.supports_backtrack():
+                # 简单任务不需要回溯开销，降级到 RVR
+                from core.agent.execution import RVRExecutor
+
+                executor = RVRExecutor()
+                logger.debug(
+                    f"策略路由: complexity={complexity} → RVR（跳过回溯）"
+                )
+
         # 执行配置
         executor_config = ExecutorConfig(
             max_turns=self._max_steps,
             enable_stream=enable_stream,
-            enable_backtrack=self._executor.supports_backtrack(),
+            enable_backtrack=executor.supports_backtrack(),
             terminator=self._terminator,
         )
 
@@ -400,8 +417,8 @@ class Agent:
             },
         )
 
-        # 委托给 Executor 执行
-        if self._executor is None:
+        # 委托给 Executor 执行（使用策略路由后的 executor）
+        if executor is None:
             raise ValueError("executor 未初始化，无法执行。请通过 Factory 创建 Agent。")
 
         # V11: 状态一致性（可选）
@@ -436,7 +453,7 @@ class Agent:
 
         execution_error = None
         try:
-            async for event in self._executor.execute(
+            async for event in executor.execute(
                 messages=messages,
                 context=execution_context,
                 config=executor_config,
@@ -570,7 +587,7 @@ class Agent:
             session_id=session_id, message_id=message_id
         )
 
-        logger.info(f"✅ Agent 执行完成: executor={self._executor.name}")
+        logger.info(f"✅ Agent 执行完成: executor={executor.name}")
 
     def get_rollback_options(self, task_id: str) -> List[Dict[str, Any]]:
         """

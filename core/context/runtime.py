@@ -516,6 +516,12 @@ class RuntimeContext:
     # === 自适应终止（V11）===
     consecutive_failures: int = 0  # 连续失败次数（工具错误/超时等）
 
+    # === 回溯状态（V12 回溯↔终止联动）===
+    total_backtracks: int = 0  # 累计回溯次数
+    backtracks_exhausted: bool = False  # 回溯是否已耗尽
+    backtrack_escalation: Optional[str] = None  # 升级请求 ("intent_clarify"/"escalate")
+    total_backtrack_tokens: int = 0  # 回溯累计消耗的 token
+
     # === 结果状态 ===
     final_result: Optional[str] = None  # 最终结果
     stop_reason: Optional[str] = None  # 停止原因
@@ -642,6 +648,11 @@ class RuntimeContext:
         self.step_index = 0
         self.current_turn = 0
         self.consecutive_failures = 0
+        # V12 回溯状态重置
+        self.total_backtracks = 0
+        self.backtracks_exhausted = False
+        self.backtrack_escalation = None
+        self.total_backtrack_tokens = 0
         self.final_result = None
         self.stop_reason = None
         now = datetime.now()

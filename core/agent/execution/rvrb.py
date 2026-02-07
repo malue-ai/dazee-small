@@ -56,11 +56,10 @@ logger = get_logger(__name__)
 
 @dataclass
 class RVRBState:
-    """RVR-B 循环状态"""
+    """RVR-B 循环状态（V12: 移除冗余 max_turns，统一由 ExecutorConfig 管理）"""
 
     session_id: str
     turn: int = 0
-    max_turns: int = 10
     backtrack_count: int = 0
     max_backtracks: int = 3
 
@@ -108,12 +107,14 @@ class RVRBState:
         """是否还可以回溯"""
         return self.backtrack_count < self.max_backtracks
 
-    def to_backtrack_context(self, error: ClassifiedError) -> BacktrackContext:
-        """转换为 BacktrackContext"""
+    def to_backtrack_context(
+        self, error: ClassifiedError, max_turns: int = 30
+    ) -> BacktrackContext:
+        """转换为 BacktrackContext（V12: max_turns 从外部传入）"""
         return BacktrackContext(
             session_id=self.session_id,
             turn=self.turn,
-            max_turns=self.max_turns,
+            max_turns=max_turns,
             error=error,
             execution_history=self.execution_history,
             backtrack_count=self.backtrack_count,
@@ -184,12 +185,11 @@ class RVRBExecutor(RVRExecutor):
             self._backtrack_manager = get_backtrack_manager(llm)
         return self._backtrack_manager
 
-    def _get_rvrb_state(self, session_id: str, max_turns: int = 10) -> RVRBState:
-        """获取或创建 RVR-B 状态"""
+    def _get_rvrb_state(self, session_id: str) -> RVRBState:
+        """获取或创建 RVR-B 状态（V12: 移除 max_turns，统一由 ExecutorConfig 管理）"""
         if session_id not in self._rvrb_states:
             self._rvrb_states[session_id] = RVRBState(
                 session_id=session_id,
-                max_turns=max_turns,
                 max_backtracks=self.config.max_backtrack_attempts if self.config else 3,
             )
         return self._rvrb_states[session_id]
@@ -269,9 +269,15 @@ class RVRBExecutor(RVRExecutor):
         tool_executor,
         context_engineering=None,
         tool_selector=None,
+        runtime_ctx=None,
     ) -> tuple[str, bool, Optional[Dict]]:
         """
-        带回溯的工具错误处理（V10.1 解耦）
+        带回溯的工具错误处理（V12 回溯↔终止联动）
+
+        V12 改动：
+        - 新增 runtime_ctx 参数，用于将回溯状态同步到 RuntimeContext
+        - FAIL_GRACEFULLY / ESCALATE 时设置 ctx.backtracks_exhausted
+        - INTENT_CLARIFY 时设置 ctx.backtrack_escalation
 
         Args:
             error: 异常对象
@@ -283,6 +289,7 @@ class RVRBExecutor(RVRExecutor):
             tool_executor: 工具执行器
             context_engineering: 上下文工程（可选）
             tool_selector: 工具选择器（可选）
+            runtime_ctx: RuntimeContext（V12，用于回溯↔终止联动）
 
         Returns:
             (result_content, is_error, backtrack_event)
@@ -297,8 +304,21 @@ class RVRBExecutor(RVRExecutor):
         if backtrack_result.decision == BacktrackDecision.BACKTRACK:
             logger.info(f"🔄 触发回溯: {backtrack_result.backtrack_type.value}")
 
-            # 生成回溯事件
-            backtrack_event = {"type": "backtrack", "data": backtrack_result.to_dict()}
+            # 生成回溯事件（V12: 附带累计信息）
+            backtrack_event = {
+                "type": "backtrack",
+                "data": {
+                    **backtrack_result.to_dict(),
+                    "attempt": f"{state.backtrack_count}/{state.max_backtracks}",
+                    "cumulative_backtrack_tokens": state.total_backtrack_tokens
+                    if hasattr(state, "total_backtrack_tokens")
+                    else 0,
+                },
+            }
+
+            # V12: 同步回溯计数到 RuntimeContext
+            if runtime_ctx:
+                runtime_ctx.total_backtracks = state.backtrack_count
 
             # 根据回溯类型处理
             if backtrack_result.backtrack_type == BacktrackType.TOOL_REPLACE:
@@ -315,7 +335,56 @@ class RVRBExecutor(RVRExecutor):
             )
             return result_content, True, backtrack_event
 
-        # 不需要回溯，正常记录错误
+        elif backtrack_result.decision in (
+            BacktrackDecision.FAIL_GRACEFULLY,
+            BacktrackDecision.ESCALATE,
+        ):
+            # V12 关键改动：回溯耗尽 / 升级 → 同步状态到 RuntimeContext
+            # 这样 AdaptiveTerminator 在本轮末尾能感知到，触发 HITL 三选一
+            logger.warning(
+                f"⚠️ 回溯升级: decision={backtrack_result.decision.value}, "
+                f"backtracks={state.backtrack_count}/{state.max_backtracks}"
+            )
+
+            if runtime_ctx:
+                runtime_ctx.backtracks_exhausted = True
+                runtime_ctx.total_backtracks = state.backtrack_count
+
+                if backtrack_result.backtrack_type == BacktrackType.INTENT_CLARIFY:
+                    runtime_ctx.backtrack_escalation = "intent_clarify"
+                else:
+                    runtime_ctx.backtrack_escalation = "escalate"
+
+            # 生成回溯耗尽事件
+            backtrack_event = {
+                "type": "backtrack_exhausted",
+                "data": {
+                    "decision": backtrack_result.decision.value,
+                    "total_attempts": state.backtrack_count,
+                    "failed_tools": state.failed_tools,
+                    "last_error": str(error)[:200],
+                    "escalation": runtime_ctx.backtrack_escalation
+                    if runtime_ctx
+                    else None,
+                },
+            }
+
+            # 构建包含回溯历史的错误摘要（帮助 LLM 理解状况）
+            result_content = stable_json_dumps(
+                {
+                    "error": str(error),
+                    "backtrack_exhausted": True,
+                    "attempts": state.backtrack_count,
+                    "failed_tools": state.failed_tools,
+                    "message": f"已尝试 {state.backtrack_count} 种不同方法均失败，等待用户决定",
+                }
+            )
+            state.record_execution(
+                f"backtrack_exhausted:{tool_name}", False, error=error
+            )
+            return result_content, True, backtrack_event
+
+        # CONTINUE: 不需要回溯，正常记录错误
         if context_engineering:
             record_tool_error(context_engineering, tool_name, error, tool_input)
 
@@ -369,6 +438,101 @@ class RVRBExecutor(RVRExecutor):
                 continue
 
         return None
+
+    # ==================== Context Pollution 清理 ====================
+
+    def _clean_backtrack_results(
+        self,
+        tool_results: List[Dict[str, Any]],
+        state: "RVRBState",
+    ) -> List[Dict[str, Any]]:
+        """
+        Context Pollution 清理 + 回溯消息压缩
+
+        回溯发生后，将失败的 tool_result 替换为简洁的回溯摘要，
+        避免错误信息污染后续 LLM 推理上下文。
+
+        2025 研究表明：context pollution（错误信息残留）是 Agent 回溯后
+        性能下降的主要原因。清理污染上下文可显著提升重试成功率。
+
+        策略：
+        - 成功的 tool_result：保留原样
+        - 失败的 tool_result：替换为简洁摘要 + 反思建议
+        - 多次失败：压缩为一条汇总（节省 token）
+
+        Args:
+            tool_results: 原始 tool_result 列表
+            state: RVR-B 状态（含失败历史）
+
+        Returns:
+            清理后的 tool_result 列表
+        """
+        if not state.backtrack_count:
+            # 未发生回溯，原样返回
+            return tool_results
+
+        cleaned = []
+        failed_summaries = []
+
+        for result in tool_results:
+            if not result.get("is_error"):
+                # 成功的结果保留
+                cleaned.append(result)
+            else:
+                # 失败的结果收集摘要
+                content = result.get("content", "")
+                # 截取错误核心信息（不超过 100 字符）
+                error_brief = content[:100] if isinstance(content, str) else str(content)[:100]
+                failed_summaries.append(error_brief)
+
+        if failed_summaries:
+            # 将多条失败压缩为一条简洁的回溯摘要 + 反思
+            reflection = self._build_reflection_summary(failed_summaries, state)
+            cleaned.append({
+                "type": "tool_result",
+                "tool_use_id": "backtrack_summary",
+                "content": reflection,
+                "is_error": False,  # 标记为非错误，让 LLM 视为参考信息
+            })
+
+        return cleaned if cleaned else tool_results
+
+    def _build_reflection_summary(
+        self,
+        failed_summaries: List[str],
+        state: "RVRBState",
+    ) -> str:
+        """
+        构建 Contrastive Reflection 反思摘要
+
+        在重试前告诉 LLM"发生了什么 + 为什么失败 + 怎么避免"，
+        引导 LLM 用不同策略重试而非重复犯错。
+
+        Args:
+            failed_summaries: 失败错误摘要列表
+            state: RVR-B 状态
+
+        Returns:
+            反思摘要文本
+        """
+        # 收集失败的工具名
+        failed_tools = list(state.failed_tools) if hasattr(state, "failed_tools") else []
+
+        parts = [
+            f"[回溯反思] 已尝试 {state.backtrack_count} 次回溯。",
+        ]
+
+        if failed_tools:
+            parts.append(f"失败的方法: {', '.join(failed_tools)}。")
+
+        if len(failed_summaries) == 1:
+            parts.append(f"失败原因: {failed_summaries[0]}")
+        else:
+            parts.append(f"失败原因汇总: {'; '.join(failed_summaries[:3])}")
+
+        parts.append("请使用完全不同的策略或工具重试，避免重复以上方法。")
+
+        return " ".join(parts)
 
     async def execute(
         self,
@@ -433,7 +597,7 @@ class RVRBExecutor(RVRExecutor):
         )
 
         # 初始化 RVR-B 状态
-        state = self._get_rvrb_state(session_id, cfg.max_turns)
+        state = self._get_rvrb_state(session_id)
         state.current_plan = plan_cache.get("plan")
 
         # 转换消息
@@ -656,29 +820,39 @@ class RVRBExecutor(RVRExecutor):
             if ctx.is_completed():
                 break
 
-            # V11: 终止策略
+            # V12: 终止策略（回溯↔终止联动）
             if cfg.terminator and not ctx.is_completed():
                 try:
-                    from core.termination.protocol import TerminationAction
+                    from core.termination.protocol import (
+                        FinishReason,
+                        TerminationAction,
+                    )
 
                     last_reason = (
                         getattr(ctx.last_llm_response, "stop_reason", None)
                         if ctx.last_llm_response
                         else None
                     )
-                    # V11: 传入 stop_requested（外部停止信号）
                     _stop_requested = (
                         context.stop_event.is_set() if context.stop_event else False
                     )
+
+                    # V12.1: 从 UsageTracker 估算费用（基于 ModelRegistry 真实定价）
+                    _current_cost = None
+                    if usage_tracker:
+                        _current_cost = usage_tracker.estimate_cost()
+
                     decision = cfg.terminator.evaluate(
                         ctx,
                         last_stop_reason=last_reason,
                         stop_requested=_stop_requested,
                         pending_tool_names=None,
+                        current_cost_usd=_current_cost,
                     )
+
                     if decision.should_stop:
                         ctx.stop_reason = decision.reason or "terminator"
-                        # V11: ROLLBACK_OPTIONS — yield 回滚选项事件
+                        # ROLLBACK_OPTIONS — yield 回滚选项事件
                         if decision.action == TerminationAction.ROLLBACK_OPTIONS:
                             yield {
                                 "type": "rollback_options_hint",
@@ -688,11 +862,160 @@ class RVRBExecutor(RVRExecutor):
                                 },
                             }
                         break
+
+                    # === V12 新增：回溯耗尽 → HITL 三选一 ===
+                    if (
+                        decision.action == TerminationAction.ASK_USER
+                        and decision.finish_reason == FinishReason.BACKTRACK_EXHAUSTED
+                    ):
+                        total_bt = getattr(ctx, "total_backtracks", 0)
+                        yield {
+                            "type": "backtrack_exhausted_confirm",
+                            "data": {
+                                "turn": ctx.current_turn,
+                                "total_backtracks": total_bt,
+                                "message": (
+                                    f"小搭子已经尝试了 {total_bt} 种"
+                                    f"不同的方法，但都没成功。您希望怎么做？"
+                                ),
+                                "options": [
+                                    {"id": "retry", "label": "换个思路再试试"},
+                                    {"id": "rollback", "label": "撤销已做的操作"},
+                                    {"id": "stop", "label": "就这样吧，先不做了"},
+                                ],
+                            },
+                        }
+                        wait_fn = (context.extra or {}).get(
+                            "wait_backtrack_confirm_async"
+                        )
+                        if callable(wait_fn):
+                            user_choice = await wait_fn()
+                            if user_choice == "rollback":
+                                yield {
+                                    "type": "rollback_options_hint",
+                                    "data": {"reason": "用户选择回滚"},
+                                }
+                                ctx.stop_reason = "user_rollback_after_backtrack"
+                                break
+                            elif user_choice == "stop":
+                                ctx.stop_reason = "user_stop_after_backtrack"
+                                break
+                            else:
+                                # retry: 重置回溯计数，允许新一轮回溯
+                                state.backtrack_count = 0
+                                ctx.backtracks_exhausted = False
+                                ctx.backtrack_escalation = None
+                                ctx.consecutive_failures = 0
+                                logger.info("🔄 用户选择重试，回溯计数已重置")
+                        else:
+                            # 无等待函数：降级为停止
+                            ctx.stop_reason = "backtrack_exhausted_no_confirm"
+                            break
+
+                    # === V12 新增：意图澄清 → HITL 询问 ===
+                    elif (
+                        decision.action == TerminationAction.ASK_USER
+                        and decision.finish_reason == FinishReason.INTENT_CLARIFY
+                    ):
+                        yield {
+                            "type": "intent_clarify_request",
+                            "data": {
+                                "message": "小搭子不太确定您的具体需求，能再描述一下吗？",
+                                "context": str(state.last_error)[:200]
+                                if state.last_error
+                                else "",
+                            },
+                        }
+                        wait_fn = (context.extra or {}).get(
+                            "wait_intent_clarify_async"
+                        )
+                        if callable(wait_fn):
+                            clarification = await wait_fn()
+                            append_user_message(
+                                llm_messages,
+                                [{"type": "text", "text": clarification}],
+                            )
+                            ctx.backtrack_escalation = None
+                            ctx.backtracks_exhausted = False
+                            logger.info("📝 用户澄清意图，继续执行")
+                        else:
+                            ctx.stop_reason = "intent_clarify_no_confirm"
+                            break
+
+                    # === V12.1 重构：费用确认 → HITL 阶梯式提醒 ===
+                    # 所有阶梯都是 HITL 询问，智能体不会主动替用户终止任务
+                    elif (
+                        decision.action == TerminationAction.ASK_USER
+                        and decision.finish_reason == FinishReason.COST_LIMIT
+                    ):
+                        cost_display = (
+                            f"${_current_cost:.4f}" if _current_cost else "未知"
+                        )
+                        # 判断是否为紧急级别
+                        is_urgent = decision.reason.startswith("cost_urgent:")
+                        event_type = (
+                            "cost_urgent_confirm" if is_urgent else "cost_limit_confirm"
+                        )
+                        message = (
+                            f"费用提醒：本次任务费用已达 {cost_display}，"
+                            f"{'费用较高，请确认' if is_urgent else '是否继续？'}"
+                        )
+                        yield {
+                            "type": event_type,
+                            "data": {
+                                "turn": ctx.current_turn,
+                                "current_cost": cost_display,
+                                "is_urgent": is_urgent,
+                                "message": message,
+                                "options": [
+                                    {"id": "continue", "label": "继续执行"},
+                                    {"id": "stop", "label": "停止任务"},
+                                ],
+                            },
+                        }
+                        wait_fn = (context.extra or {}).get(
+                            "wait_cost_confirm_async"
+                        )
+                        if callable(wait_fn):
+                            user_choice = await wait_fn()
+                            if user_choice == "stop":
+                                ctx.stop_reason = "user_stop_cost_limit"
+                                break
+                            # continue: 标记已确认，不再重复询问
+                            level = "urgent" if is_urgent else "confirm"
+                            cfg.terminator.confirm_cost_continue(level=level)
+                            logger.info(f"用户确认继续（费用{level}级别）")
+                        else:
+                            ctx.stop_reason = "cost_limit_no_confirm"
+                            break
+
+                    # === V12.1: 费用预警（非阻塞，仅通知前端）===
+                    # 当 terminator 标记 _cost_warned 且 decision 正常继续时，发送提示
+                    if (
+                        _current_cost is not None
+                        and hasattr(cfg.terminator, "_cost_warned")
+                        and cfg.terminator._cost_warned
+                        and not decision.should_stop
+                        and decision.finish_reason != FinishReason.COST_LIMIT
+                    ):
+                        cost_display = f"${_current_cost:.4f}"
+                        yield {
+                            "type": "cost_warn",
+                            "data": {
+                                "turn": ctx.current_turn,
+                                "current_cost": cost_display,
+                                "message": f"本次任务费用已达 {cost_display}",
+                            },
+                        }
+
+                    # 长任务确认（保持原有逻辑）
                     if (
                         decision.action == TerminationAction.ASK_USER
                         and decision.reason == "long_running_confirm"
                     ):
-                        wait_fn = (context.extra or {}).get("wait_long_run_confirm_async")
+                        wait_fn = (context.extra or {}).get(
+                            "wait_long_run_confirm_async"
+                        )
                         if callable(wait_fn):
                             yield {
                                 "type": "long_running_confirm",
@@ -778,7 +1101,7 @@ class RVRBExecutor(RVRExecutor):
             except Exception as e:
                 logger.error(f"❌ 工具执行失败: {tool_name} - {e}")
 
-                # 带回溯的错误处理
+                # 带回溯的错误处理（V12: 传入 runtime_ctx 用于回溯↔终止联动）
                 result_content, is_error, backtrack_event = (
                     await self._handle_tool_error_with_backtrack(
                         error=e,
@@ -789,6 +1112,7 @@ class RVRBExecutor(RVRExecutor):
                         llm=llm,
                         tool_executor=tool_executor,
                         context_engineering=context_engineering,
+                        runtime_ctx=ctx,
                     )
                 )
 
@@ -814,7 +1138,11 @@ class RVRBExecutor(RVRExecutor):
         append_assistant_message(llm_messages, response.raw_content)
 
         if tool_results:
-            append_user_message(llm_messages, tool_results)
+            # Context Pollution 清理：回溯成功后（替代工具返回了正确结果），
+            # 将失败的 tool_result 替换为简洁摘要，避免错误信息污染后续 LLM 推理。
+            # 参考 2025 研究：context pollution 是 Agent 回溯后性能下降的主要原因。
+            cleaned_results = self._clean_backtrack_results(tool_results, state)
+            append_user_message(llm_messages, cleaned_results)
 
         # 更新连续失败计数（供终止策略与自动回滚使用）
         if any(r.get("is_error") for r in tool_results):
@@ -888,6 +1216,7 @@ class RVRBExecutor(RVRExecutor):
             except Exception as e:
                 logger.error(f"❌ 工具执行失败: {tool_name} - {e}")
 
+                # V12: 传入 runtime_ctx 用于回溯↔终止联动
                 result_content, is_error, _ = await self._handle_tool_error_with_backtrack(
                     error=e,
                     tool_name=tool_name,
@@ -897,6 +1226,7 @@ class RVRBExecutor(RVRExecutor):
                     llm=llm,
                     tool_executor=tool_executor,
                     context_engineering=context_engineering,
+                    runtime_ctx=ctx,
                 )
 
             tool_results.append(

@@ -463,7 +463,7 @@ instances/
 | Skills 二维分类 | 3.1.1 | 80% | 框架完成，具体 Skills 待创建 |
 | 自适应终止策略 | 3.4 | 95% | 已完成 |
 | 状态一致性管理 | 3.3 | 90% | 已完成 |
-| Agent 引擎层 | — | 95% | RVR-B 引擎完整 |
+| Agent 引擎层 | — | 95% | RVR + RVR-B 双引擎，complexity 策略路由 |
 | 意图识别简化 | 3.7.1 | 90% | 已完成 |
 | 进度转换器 | 3.7.2 | 85% | 已完成 |
 | 本地知识检索 | 3.8 | 80% | FTS5 已完成，语义搜索待实现 |
@@ -525,29 +525,56 @@ instances/
 
 ---
 
-### 2.3 自适应终止策略（3.4）
+### 2.3 自适应终止策略（3.4）— V12 回溯↔终止联动重构
 
-**设计需求**：五维度终止判断 — LLM 自主 / HITL 干预 / 用户停止 / 安全兜底 / 长任务确认
+**设计需求**：八维度终止判断（V12 从五维度扩展为八维度）
 
 | 文件 | 行数 | 状态 | 说明 |
 |------|------|------|------|
-| `core/termination/protocol.py` | 58 | 已完成 | `BaseTerminator` / `TerminationDecision` / `TerminationAction` |
-| `core/termination/adaptive.py` | 237 | 已完成 | `AdaptiveTerminator` 含 HITL 检查 + 长任务确认 + 安全兜底 |
-| `core/agent/execution/rvrb.py` | 939 | 已完成 | 多处集成 `cfg.terminator.evaluate()` |
-| `core/agent/execution/rvr.py` | — | 已完成 | 同上 |
+| `core/termination/protocol.py` | 90+ | 已完成 | V12: 新增 `FinishReason` 枚举（13 个终止原因） |
+| `core/termination/adaptive.py` | 320+ | 已完成 | V12.1: 八维度终止 + 回溯感知 + 智能费用感知 |
+| `core/agent/execution/rvrb.py` | 1100+ | 已完成 | V12.1: 回溯↔终止联动 + HITL 三选一 + 阶梯式费用提醒 |
+| `core/agent/execution/rvr.py` | 817 | 已完成 | 同上（基础 RVR 未改动） |
+| `core/context/runtime.py` | 716 | 已完成 | V12: 新增回溯状态字段（信息共享层） |
 
-**已完成的设计要求**：
+**V12 新增的设计要求**：
+- 回溯感知维度（6.5）：回溯耗尽时 → `backtrack_exhausted_confirm` HITL 三选一（重试/回滚/放弃）
+- 意图澄清维度（6.5）：`INTENT_CLARIFY` 回溯类型 → `intent_clarify_request` HITL 询问用户
+- 回溯↔终止信息共享：`RuntimeContext.total_backtracks` / `backtracks_exhausted` / `backtrack_escalation`
+- `FinishReason` 枚举：13 个结构化终止原因，统一散落的字符串（借鉴 LobeHub）
+- `max_turns` 语义统一：`AdaptiveTerminatorConfig.max_turns` 对齐为 30（与 `ExecutorConfig` 一致）
+- `RVRBState.max_turns` 字段移除（冗余，统一由 `ExecutorConfig` 管理）
+- 回溯事件附带累计信息（`attempt`、`cumulative_backtrack_tokens`）
+
+**V12.1 费用感知重构**：
+- 移除 `max_cost_usd` / `on_cost_exceeded` 用户配置，改为智能体自主阶梯式 HITL 提醒
+- 新增 `ModelPricing` 定价数据（`core/llm/model_registry.py`），各模型注册时声明真实价格
+- 新增 `UsageTracker.estimate_cost()` 方法，按模型实际定价计算费用（支持混合模型调用）
+- 新增 `CostAlertConfig` 阶梯阈值：`warn_threshold`($0.50) → `confirm_threshold`($2.00) → `urgent_threshold`($10.00)
+- 阶梯 1（预警）：`cost_warn` SSE 事件，非阻塞提示前端
+- 阶梯 2（确认）：`cost_limit_confirm` HITL 暂停询问，用户选择继续/停止
+- 阶梯 3（紧急）：`cost_urgent_confirm` HITL 再次询问，决定权在用户（不强制终止）
+- **原则：所有阶梯都是 HITL 询问，智能体不会主动替用户终止任务**
+- 私有化部署（pricing 未知）自动跳过费用检查
+
+**已完成的设计要求（V11 + V12 + V12.1）**：
 - LLM 自主终止（`stop_reason == "end_turn"`）
 - HITL 危险操作确认（`HITLConfig.require_confirmation` 列表）
 - 用户主动停止（`stop_requested` 参数）
 - 安全兜底（`max_turns` / `max_duration` / `idle_timeout` / `consecutive_failures`）
-- 长任务确认（`long_running_confirm_after_turns`，含 `confirm_long_running()` 避免重复询问）
+- 智能费用感知（`CostAlertConfig` 阶梯式 HITL 提醒，V12.1 重构）
+- 长任务确认（`long_running_confirm_after_turns`）
 - 连续失败时提供回滚选项（`ROLLBACK_OPTIONS` 动作）
+- 回溯耗尽时 HITL 三选一（`backtrack_exhausted_confirm`，V12 新增）
+- 意图澄清请求（`intent_clarify_request`，V12 新增）
+- 费用超限确认（`cost_limit_confirm`，V12.1 阶梯式）
 - terminator 调用包裹 `try-except`（不阻断执行）
 
 **遗留**：
 - 用户停止关键词检测（"停止"/"算了"/"取消"）未在 terminator 内实现（由上层处理）
-- `on_rejection` 策略（stop/rollback/ask_rollback）的完整流程未串联到前端
+- `on_rejection` 策略的完整前端 UI 交互未实现
+- 前端 `backtrack_exhausted_confirm` / `intent_clarify_request` / `cost_limit_confirm` / `cost_warn` SSE 事件渲染待实现
+- `wait_backtrack_confirm_async` / `wait_intent_clarify_async` / `wait_cost_confirm_async` 回调函数待上层注入
 
 ---
 
@@ -578,7 +605,73 @@ instances/
 
 ---
 
-### 2.5 本地知识检索（3.8）
+### 2.5 Agent 引擎层（策略路由）
+
+**设计**：双执行器 + 基于 LLM 意图识别的策略路由。
+
+| 执行器 | 文件 | 行数 | 特性 |
+|--------|------|------|------|
+| `RVRExecutor` | `core/agent/execution/rvr.py` | 817 | 标准循环，无回溯开销 |
+| `RVRBExecutor` | `core/agent/execution/rvrb.py` | 939 | 带回溯，错误分类 + 候选方案重试 |
+
+**策略路由**（`core/agent/base.py` execute 方法中）：
+
+```
+IntentAnalyzer（LLM 语义判断）
+        |
+        v
+  complexity == "simple"  → RVR   （天气/翻译/查询，1-2 轮完成）
+  complexity == "medium"  → RVR-B （搜索+总结，可能需回溯）
+  complexity == "complex" → RVR-B （调研报告，多步骤+回溯保障）
+```
+
+**设计原则**：
+- complexity 由 LLM 语义判断（LLM-First），不做关键词匹配
+- 策略映射是确定性规则（simple -> RVR，其他 -> RVR-B），符合规范允许的场景
+- 默认 RVR-B（未知 complexity 时保守选择）
+
+#### RVR-B 回溯机制（Backtrack）
+
+**核心架构**：
+
+| 组件 | 文件 | 职责 |
+|------|------|------|
+| `ErrorClassifier` | `core/agent/backtrack/error_classifier.py` | 两层错误分类（基础设施 vs 业务逻辑） |
+| `BacktrackManager` | `core/agent/backtrack/manager.py` | LLM 驱动的回溯决策 + 规则回退 |
+| `RVRBState` | `core/agent/execution/rvrb.py` | 回溯状态（计数/失败历史/检查点） |
+
+**回溯流程**：
+```
+工具执行失败
+    |
+    v
+ErrorClassifier 分类
+    ├─ 基础设施层错误（API超时/Rate Limit）→ 由 resilience 机制处理，不回溯
+    └─ 业务逻辑层错误（工具选错/参数错/结果不满足）
+        |
+        v
+BacktrackManager 决策（LLM 驱动）
+    ├─ TOOL_REPLACE → 尝试替代工具
+    ├─ PARAM_ADJUST → 参数调整
+    ├─ PLAN_REPLAN → 重新规划
+    ├─ CONTEXT_ENRICH → 补充上下文
+    └─ INTENT_CLARIFY → 澄清意图
+
+渐进式升级：PARAM_ADJUST → TOOL_REPLACE → PLAN_REPLAN → INTENT_CLARIFY
+```
+
+**2025 最新优化（已实现）**：
+
+| 优化项 | 方法 | 原理 |
+|--------|------|------|
+| Context Pollution 清理 | `_clean_backtrack_results()` | 回溯后移除失败的 tool_result，替换为简洁摘要，避免错误信息污染 LLM 后续推理 |
+| Contrastive Reflection | `_build_reflection_summary()` | 在重试前注入"发生了什么 + 失败的方法 + 请用不同策略"，引导 LLM 避免重复犯错 |
+| 回溯消息压缩 | 同上 | 多次失败压缩为一条汇总（节省 token 预算） |
+| 策略路由 | `base.py` execute | 简单任务跳过回溯开销，直接用 RVR |
+
+---
+
+### 2.6 本地知识检索（3.8）
 
 **设计需求**：以文件为中心，Level 1 FTS5 零配置 / Level 2 语义搜索可选
 
@@ -608,7 +701,7 @@ instances/
 
 ---
 
-### 2.6 记忆系统（3.13）
+### 2.7 记忆系统（3.13）
 
 **设计需求**：三层架构 — 文件层（MEMORY.md）/ 索引层（FTS5）/ 智能层（Mem0）
 
@@ -638,7 +731,7 @@ instances/
 
 ---
 
-### 2.7 进度转换器（3.7.2）
+### 2.8 进度转换器（3.7.2）
 
 | 文件 | 行数 | 状态 | 说明 |
 |------|------|------|------|
@@ -651,7 +744,7 @@ instances/
 
 ---
 
-### 2.8 意图识别简化（3.7.1）
+### 2.9 意图识别简化（3.7.1）
 
 | 文件 | 行数 | 状态 | 说明 |
 |------|------|------|------|

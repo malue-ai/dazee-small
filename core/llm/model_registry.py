@@ -74,6 +74,56 @@ class AdapterType(Enum):
 
 
 @dataclass
+class ModelPricing:
+    """
+    模型定价信息（美元 / 百万 token）
+
+    用于实时费用估算和 HITL 费用预警。
+    None 表示免费或未知（如私有化部署）。
+    """
+
+    input_per_million: Optional[float] = None  # 输入 $/M tokens
+    output_per_million: Optional[float] = None  # 输出 $/M tokens
+    cache_read_per_million: Optional[float] = None  # 缓存读取 $/M tokens
+    cache_write_per_million: Optional[float] = None  # 缓存写入 $/M tokens
+
+    @property
+    def is_free(self) -> bool:
+        """Whether pricing is zero or unknown (private deployment)."""
+        return (
+            not self.input_per_million
+            and not self.output_per_million
+        )
+
+    def estimate_cost(
+        self,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        cache_read_tokens: int = 0,
+        cache_write_tokens: int = 0,
+    ) -> Optional[float]:
+        """
+        Estimate cost in USD based on token counts.
+
+        Returns:
+            Estimated cost in USD, or None if pricing is unknown.
+        """
+        if self.is_free:
+            return None
+
+        cost = 0.0
+        if self.input_per_million:
+            cost += input_tokens * self.input_per_million / 1_000_000
+        if self.output_per_million:
+            cost += output_tokens * self.output_per_million / 1_000_000
+        if self.cache_read_per_million:
+            cost += cache_read_tokens * self.cache_read_per_million / 1_000_000
+        if self.cache_write_per_million:
+            cost += cache_write_tokens * self.cache_write_per_million / 1_000_000
+        return cost
+
+
+@dataclass
 class ModelCapabilities:
     """
     模型能力配置
@@ -119,6 +169,7 @@ class ModelConfig:
     display_name: Optional[str] = None
     description: Optional[str] = None
     capabilities: ModelCapabilities = field(default_factory=ModelCapabilities)
+    pricing: ModelPricing = field(default_factory=ModelPricing)
     extra_config: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -325,6 +376,13 @@ class ModelRegistry:
                 "max_tokens": config.capabilities.max_tokens,
                 "max_input_tokens": config.capabilities.max_input_tokens,
             },
+            "pricing": {
+                "input_per_million": config.pricing.input_per_million,
+                "output_per_million": config.pricing.output_per_million,
+                "cache_read_per_million": config.pricing.cache_read_per_million,
+                "cache_write_per_million": config.pricing.cache_write_per_million,
+                "is_free": config.pricing.is_free,
+            },
         }
 
     @classmethod
@@ -380,6 +438,10 @@ def _register_preset_models() -> None:
                 max_tokens=16384,
                 max_input_tokens=128000,
             ),
+            pricing=ModelPricing(
+                input_per_million=2.5,
+                output_per_million=10.0,
+            ),
         )
     )
 
@@ -400,6 +462,10 @@ def _register_preset_models() -> None:
                 max_tokens=16384,
                 max_input_tokens=128000,
             ),
+            pricing=ModelPricing(
+                input_per_million=0.15,
+                output_per_million=0.60,
+            ),
         )
     )
 
@@ -419,6 +485,10 @@ def _register_preset_models() -> None:
                 supports_thinking=False,
                 max_tokens=4096,
                 max_input_tokens=128000,
+            ),
+            pricing=ModelPricing(
+                input_per_million=10.0,
+                output_per_million=30.0,
             ),
         )
     )
@@ -442,6 +512,12 @@ def _register_preset_models() -> None:
                 max_tokens=64000,
                 max_input_tokens=200000,
             ),
+            pricing=ModelPricing(
+                input_per_million=3.0,
+                output_per_million=15.0,
+                cache_read_per_million=0.30,
+                cache_write_per_million=3.75,
+            ),
         )
     )
 
@@ -462,6 +538,12 @@ def _register_preset_models() -> None:
                 max_tokens=64000,
                 max_input_tokens=200000,
             ),
+            pricing=ModelPricing(
+                input_per_million=15.0,
+                output_per_million=75.0,
+                cache_read_per_million=1.50,
+                cache_write_per_million=18.75,
+            ),
         )
     )
 
@@ -481,6 +563,12 @@ def _register_preset_models() -> None:
                 supports_thinking=False,
                 max_tokens=8192,
                 max_input_tokens=200000,
+            ),
+            pricing=ModelPricing(
+                input_per_million=0.80,
+                output_per_million=4.0,
+                cache_read_per_million=0.08,
+                cache_write_per_million=1.0,
             ),
         )
     )
@@ -504,6 +592,11 @@ def _register_preset_models() -> None:
                 max_tokens=65536,
                 max_input_tokens=258048,
             ),
+            # Qwen3-Max: ¥2/M input, ¥8/M output → ~$0.28/$1.10 per M
+            pricing=ModelPricing(
+                input_per_million=0.28,
+                output_per_million=1.10,
+            ),
         )
     )
 
@@ -524,6 +617,11 @@ def _register_preset_models() -> None:
                 max_tokens=32768,
                 max_input_tokens=131072,
             ),
+            # Qwen-Plus: ¥0.8/M input, ¥2/M output → ~$0.11/$0.28 per M
+            pricing=ModelPricing(
+                input_per_million=0.11,
+                output_per_million=0.28,
+            ),
         )
     )
 
@@ -542,6 +640,11 @@ def _register_preset_models() -> None:
                 supports_vision=True,
                 supports_thinking=False,
                 max_tokens=32768,
+            ),
+            # Qwen-VL-Max: ¥3/M input, ¥8/M output → ~$0.41/$1.10 per M
+            pricing=ModelPricing(
+                input_per_million=0.41,
+                output_per_million=1.10,
             ),
         )
     )
@@ -565,6 +668,11 @@ def _register_preset_models() -> None:
                 max_tokens=8192,
                 max_input_tokens=64000,
             ),
+            pricing=ModelPricing(
+                input_per_million=0.27,
+                output_per_million=1.10,
+                cache_read_per_million=0.07,
+            ),
         )
     )
 
@@ -584,6 +692,11 @@ def _register_preset_models() -> None:
                 supports_thinking=True,
                 max_tokens=8192,
                 max_input_tokens=64000,
+            ),
+            pricing=ModelPricing(
+                input_per_million=0.55,
+                output_per_million=2.19,
+                cache_read_per_million=0.14,
             ),
         )
     )

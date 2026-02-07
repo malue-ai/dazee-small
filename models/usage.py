@@ -248,6 +248,39 @@ class UsageTracker:
         """获取总 token 数"""
         return sum(c.input_tokens + c.output_tokens + c.thinking_tokens for c in self.calls)
 
+    def estimate_cost(self) -> Optional[float]:
+        """
+        Estimate cumulative cost in USD based on actual model pricing.
+
+        Resolves pricing from ModelRegistry per-model (supports mixed-model
+        calls within one query). Returns None if all models have unknown pricing
+        (e.g. private deployments).
+        """
+        if not self.calls:
+            return None
+
+        from core.llm.model_registry import ModelRegistry
+
+        total_cost = 0.0
+        has_pricing = False
+
+        for call in self.calls:
+            config = ModelRegistry.get(call.model)
+            if not config or config.pricing.is_free:
+                continue
+
+            call_cost = config.pricing.estimate_cost(
+                input_tokens=call.input_tokens,
+                output_tokens=call.output_tokens,
+                cache_read_tokens=call.cache_read_tokens,
+                cache_write_tokens=call.cache_write_tokens,
+            )
+            if call_cost is not None:
+                total_cost += call_cost
+                has_pricing = True
+
+        return total_cost if has_pricing else None
+
     def reset(self):
         """重置 tracker"""
         self.calls.clear()
