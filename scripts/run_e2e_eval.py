@@ -252,7 +252,10 @@ async def run_case(
             files=files_refs if files_refs else None,
         )
 
-    harness.agent_factory = lambda: PreloadedAgent(result)
+    async def _create_preloaded_agent():
+        return PreloadedAgent(result)
+
+    harness.agent_factory = _create_preloaded_agent
     trial = await harness.run_trial(task, trial_number=1)
 
     from evaluation.models import TaskResult as TR

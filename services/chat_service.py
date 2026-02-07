@@ -1247,6 +1247,11 @@ class ChatService:
                 lambda s=session_id: self.session_service.wait_long_run_confirm(s)
             )
 
+            # V11.1: HITL 危险操作确认等待（执行器 yield hitl_confirm 后 await 此函数）
+            agent._wait_hitl_confirm_async = (
+                lambda s=session_id: self.session_service.wait_hitl_confirm(s)
+            )
+
             async for event in agent.chat(
                 messages=history_messages,
                 session_id=session_id,

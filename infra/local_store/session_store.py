@@ -55,7 +55,7 @@ class LocalSessionStore:
             "conversation_id": conversation_id,
             "message_id": message_id,
             "message_preview": message_preview,
-            "status": "active",
+            "status": "running",
             "created_at": datetime.now().isoformat(),
             "updated_at": datetime.now().isoformat(),
         }
@@ -217,9 +217,11 @@ class LocalSessionStore:
     async def cleanup_with_lock(self) -> int:
         """清理不活跃 Session（内存版本，无需分布式锁）"""
         cleaned = 0
+        # Keep sessions that are actively running
+        active_statuses = {"active", "running"}
         expired_ids = [
             sid for sid, info in self._sessions.items()
-            if info.get("status") != "active"
+            if info.get("status") not in active_statuses
         ]
         for sid in expired_ids:
             await self._cleanup_session(sid)

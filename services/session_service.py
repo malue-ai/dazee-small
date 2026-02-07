@@ -85,6 +85,10 @@ class SessionService:
         # V11: 长任务确认（用户点击「继续」后 set，执行器 await）
         self._long_run_confirm_events: Dict[str, asyncio.Event] = {}
 
+        # V11.1: HITL 危险操作确认（用户 approve/reject 后 set，执行器 await）
+        self._hitl_confirm_events: Dict[str, asyncio.Event] = {}
+        self._hitl_confirm_results: Dict[str, str] = {}  # "approve" / "reject"
+
     # ==================== Session 生命周期 ====================
 
     async def create_session(
@@ -244,6 +248,56 @@ class SessionService:
         finally:
             ev.clear()
             self._long_run_confirm_events.pop(session_id, None)
+
+    # ==================== HITL 危险操作确认（V11.1）====================
+
+    def get_hitl_confirm_event(self, session_id: str) -> asyncio.Event:
+        """获取或创建 HITL 确认事件"""
+        if session_id not in self._hitl_confirm_events:
+            self._hitl_confirm_events[session_id] = asyncio.Event()
+        return self._hitl_confirm_events[session_id]
+
+    def submit_hitl_confirm(self, session_id: str, approved: bool) -> None:
+        """
+        用户提交 HITL 确认结果（前端调用后 set 事件，执行器继续）
+
+        Args:
+            session_id: Session ID
+            approved: True=批准执行 / False=拒绝执行
+        """
+        self._hitl_confirm_results[session_id] = "approve" if approved else "reject"
+        ev = self._hitl_confirm_events.get(session_id)
+        if ev:
+            ev.set()
+            logger.info(
+                f"HITL 确认已提交: session_id={session_id}, "
+                f"approved={approved}"
+            )
+
+    async def wait_hitl_confirm(
+        self, session_id: str, timeout: float = 300.0
+    ) -> str:
+        """
+        等待用户 HITL 确认（执行器在 yield hitl_confirm 后调用）
+
+        Args:
+            session_id: Session ID
+            timeout: 超时秒数（默认 5 分钟）
+
+        Returns:
+            "approve" 表示用户批准执行，"reject" 表示拒绝
+        """
+        ev = self.get_hitl_confirm_event(session_id)
+        try:
+            await asyncio.wait_for(ev.wait(), timeout=timeout)
+            return self._hitl_confirm_results.get(session_id, "reject")
+        except asyncio.TimeoutError:
+            logger.warning(f"HITL 确认超时（默认拒绝）: session_id={session_id}")
+            return "reject"
+        finally:
+            ev.clear()
+            self._hitl_confirm_events.pop(session_id, None)
+            self._hitl_confirm_results.pop(session_id, None)
 
     async def stop_session(self, session_id: str) -> Dict[str, Any]:
         """

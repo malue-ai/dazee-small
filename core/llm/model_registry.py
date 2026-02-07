@@ -497,19 +497,19 @@ def _register_preset_models() -> None:
 
     ModelRegistry.register(
         ModelConfig(
-            model_name="claude-sonnet-4-5-20250514",
+            model_name="claude-sonnet-4-5-20250929",
             model_type=ModelType.VLM,
             adapter=AdapterType.CLAUDE,
             base_url="https://api.anthropic.com",
             api_key_env="ANTHROPIC_API_KEY",
             provider="claude",
             display_name="Claude Sonnet 4.5",
-            description="Anthropic 最新旗舰模型",
+            description="Anthropic 最强智能体与编码模型",
             capabilities=ModelCapabilities(
                 supports_tools=True,
                 supports_vision=True,
                 supports_thinking=True,
-                max_tokens=64000,
+                max_tokens=128000,
                 max_input_tokens=200000,
             ),
             pricing=ModelPricing(

@@ -27,6 +27,21 @@ export async function submitHITLResponse(
 }
 
 /**
+ * HITL 危险操作确认（V11.1）
+ * 执行器检测到危险工具调用并发出 hitl_confirm 后，用户确认/拒绝时调用
+ * - approved=true: 批准执行危险操作
+ * - approved=false: 拒绝执行，触发回退策略（回滚/停止/询问回滚）
+ */
+export async function submitHITLConfirm(
+  sessionId: string,
+  approved: boolean
+): Promise<void> {
+  await api.post(`/v1/session/${sessionId}/hitl_confirm`, null, {
+    params: { approved }
+  })
+}
+
+/**
  * 确认继续长任务（V11 终止策略）
  * 执行器发出 long_running_confirm 后，用户点击「继续」时调用
  */

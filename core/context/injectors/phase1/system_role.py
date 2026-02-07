@@ -67,6 +67,7 @@ class SystemRoleInjector(BaseInjector):
         1. 从 prompt_cache 获取对应复杂度的版本
         2. 追加框架规则（如果有）
         3. 追加环境信息（如果有）
+        4. 追加用户个性化配置（如果有）
         """
         parts = []
 
@@ -98,7 +99,8 @@ class SystemRoleInjector(BaseInjector):
         """
         从 prompt_cache 获取角色定义
 
-        根据 task_complexity 选择对应版本
+        根据 task_complexity 选择对应版本。
+        complex 任务额外追加桌面操作协议（prompt_desktop.md）。
         """
         if not context.has_prompt_cache:
             logger.debug("无 prompt_cache，跳过角色定义")
@@ -120,9 +122,50 @@ class SystemRoleInjector(BaseInjector):
         # 获取对应版本的提示词
         role_prompt = prompt_cache.get_system_prompt(complexity_enum)
 
+        # complex 任务追加桌面操作协议（仅当文件存在时）
+        if complexity == "complex":
+            desktop_protocol = self._load_desktop_protocol(prompt_cache)
+            if desktop_protocol:
+                role_prompt = f"{role_prompt}\n\n{desktop_protocol}"
+                logger.debug(f"追加桌面操作协议: {len(desktop_protocol)} 字符")
+
         logger.debug(f"获取角色定义: complexity={complexity}, {len(role_prompt)} 字符")
 
         return role_prompt
+
+    @staticmethod
+    def _load_desktop_protocol(prompt_cache) -> str:
+        """
+        加载桌面操作协议（prompt_desktop.md）
+
+        仅 complex 任务注入，simple/medium 不注入（节省 token）。
+        文件从实例目录加载，缓存在 runtime_context 中避免重复读取。
+        """
+        # 先检查 runtime_context 缓存
+        if prompt_cache.runtime_context:
+            cached = prompt_cache.runtime_context.get("_desktop_protocol_cache")
+            if cached is not None:
+                return cached
+
+        # 从实例目录加载
+        try:
+            if prompt_cache._instance_path:
+                from pathlib import Path
+
+                desktop_path = Path(prompt_cache._instance_path) / "prompt_desktop.md"
+                if desktop_path.exists():
+                    content = desktop_path.read_text(encoding="utf-8")
+                    # 缓存到 runtime_context
+                    if prompt_cache.runtime_context is not None:
+                        prompt_cache.runtime_context["_desktop_protocol_cache"] = content
+                    return content
+        except Exception as e:
+            logger.debug(f"加载桌面操作协议失败: {e}")
+
+        # 缓存空字符串避免重复尝试
+        if prompt_cache.runtime_context is not None:
+            prompt_cache.runtime_context["_desktop_protocol_cache"] = ""
+        return ""
 
     async def _get_framework_prompt(self, context: InjectionContext) -> str:
         """
@@ -151,3 +194,6 @@ class SystemRoleInjector(BaseInjector):
             return ""
 
         return prompt_cache.runtime_context.get("environment_prompt", "")
+
+    # persona 和 user_prompt 已在启动时合并到实例提示词（Layer 2 STABLE 缓存）
+    # 不再需要每次请求动态追加，见 instance_loader.create_agent_from_instance()

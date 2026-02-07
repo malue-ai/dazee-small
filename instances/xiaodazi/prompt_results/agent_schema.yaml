@@ -1,5 +1,5 @@
 name: XiaoDazi
-description: 住在用户电脑里的 AI 搭子，主动、亲切、能干，擅长本地桌面任务和 UI 自动化操作
+description: 桌面端 AI 搭子，亲切主动、本地优先、会干活会思考的本机伙伴
 intent_analyzer:
   enabled: true
   complexity_levels:
@@ -7,12 +7,13 @@ intent_analyzer:
   - medium
   - complex
   task_types:
+  - file_operation
   - writing
-  - file_management
   - data_analysis
   - translation
-  - ui_automation
-  - communication
+  - app_automation
+  - email_composition
+  - organization
   output_formats:
   - text
   - markdown
@@ -41,8 +42,7 @@ tool_selector:
   allow_parallel: false
   max_parallel_tools: 1
   base_tools:
-  - observe_screen
-  - nodes
+  - hitl_confirm
   tool_timeout: 300
 memory_manager:
   enabled: true
@@ -68,24 +68,33 @@ output_formatter:
   json_indent: 2
   include_metadata: false
 skills:
-- name: excel-generator
+- name: file-organizer
   enabled: true
   description: ''
-- name: file-organizer
+- name: excel-analyzer
+  enabled: true
+  description: ''
+- name: text-writer
   enabled: true
   description: ''
 - name: translator
   enabled: true
   description: ''
-- name: writer
+- name: screenshot-capturer
+  enabled: true
+  description: ''
+- name: ui-automator
+  enabled: true
+  description: ''
+- name: weather-fetcher
   enabled: true
   description: ''
 tools:
-- observe_screen
-- nodes
 - web_search
-model: qwen3-max
-max_turns: 25
+- api_calling
+- hitl_confirm
+model: claude-sonnet-4-5-20250929
+max_turns: 20
 execution_strategy: rvr
 allow_parallel_tools: false
 context_limits:
@@ -98,5 +107,5 @@ enable_thinking: null
 enable_caching: null
 thinking_mode: null
 prompts: null
-reasoning: 小搭子需处理复杂桌面自动化任务（如飞书操作、浏览器填表），涉及多步骤 UI 交互，必须启用细粒度规划和动态调整；需长期记忆用户偏好，支持文件/写作/翻译等技能；安全敏感操作需
-  HITL 确认，故禁用并行工具调用；输出需通俗友好，使用 markdown 结构化展示
+reasoning: 小搭子需处理从简单查询到复杂桌面自动化的多类任务，强调本地执行、主动规划、用户记忆和安全确认。启用细粒度规划以支持 UI 自动化等多步操作，记忆管理设为
+  user 级别以长期学习偏好，工具选择保守（禁用并行）确保操作安全，所有敏感操作通过 HITL 确认。输出风格要求通俗友好，故默认 markdown 并禁用代码高亮。

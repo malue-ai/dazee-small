@@ -377,7 +377,6 @@ class Agent:
 
         # 执行配置
         executor_config = ExecutorConfig(
-            max_turns=self._max_steps,
             enable_stream=enable_stream,
             enable_backtrack=executor.supports_backtrack(),
             terminator=self._terminator,
@@ -412,6 +411,9 @@ class Agent:
                 "tracer": self._tracer,
                 "wait_long_run_confirm_async": getattr(
                     self, "_wait_long_run_confirm_async", None
+                ),
+                "wait_hitl_confirm_async": getattr(
+                    self, "_wait_hitl_confirm_async", None
                 ),
                 "state_manager": state_mgr_ref,
             },

@@ -545,6 +545,60 @@ def _build_apis_prompt_section(apis: List[ApiConfig]) -> str:
     return "\n".join(sections)
 
 
+def _build_persona_prompt(persona: dict) -> str:
+    """
+    将用户个性化配置（persona）转换为提示词片段
+
+    所有字段可选，空值跳过。只构建用户实际填写的部分。
+    注入到 runtime_context["persona_prompt"]，在 system prompt 动态层使用。
+
+    Args:
+        persona: config.yaml 中的 persona 字段
+
+    Returns:
+        个性化提示词片段，空配置返回空字符串
+    """
+    if not persona or not isinstance(persona, dict):
+        return ""
+
+    parts = []
+
+    nickname = (persona.get("nickname") or "").strip()
+    if nickname:
+        parts.append(f"- 称呼用户为「{nickname}」")
+
+    tone = (persona.get("tone") or "").strip()
+    if tone:
+        parts.append(f"- 说话风格：{tone}")
+
+    language = (persona.get("language") or "").strip()
+    if language and language != "中文":
+        parts.append(f"- 回复语言：{language}")
+
+    detail_level = (persona.get("detail_level") or "").strip()
+    if detail_level and detail_level != "适中":
+        detail_map = {"简洁": "尽量简短，要点即可", "详细": "给出详细解释和步骤"}
+        if detail_level in detail_map:
+            parts.append(f"- 回答详细度：{detail_map[detail_level]}")
+
+    work_dirs = persona.get("work_dirs") or []
+    if work_dirs and isinstance(work_dirs, list):
+        dirs_str = "、".join(str(d) for d in work_dirs[:5])
+        parts.append(f"- 用户常用工作目录：{dirs_str}（优先在这些目录查找文件）")
+
+    custom_rules = persona.get("custom_rules") or []
+    if custom_rules and isinstance(custom_rules, list):
+        for rule in custom_rules[:10]:
+            rule_str = str(rule).strip()
+            if rule_str:
+                parts.append(f"- {rule_str}")
+
+    if not parts:
+        return ""
+
+    return "<user_preferences>\n" + "\n".join(parts) + "\n</user_preferences>"
+
+
 async def load_instance_prompt(instance_name: str) -> str:
     """
     加载实例提示词
@@ -875,6 +929,22 @@ async def create_agent_from_instance(
 
     # 3. 加载实例提示词
     instance_prompt = await load_instance_prompt(instance_name)
+
+    # 合并用户个性化配置（persona + user_prompt）到实例提示词
+    # 启动时一次性合并，走 Prompt Caching STABLE 层（Layer 2）
+    persona_prompt = _build_persona_prompt(config.raw_config.get("persona", {}))
+    user_prompt = (config.raw_config.get("user_prompt") or "").strip()
+
+    user_config_parts = []
+    if persona_prompt:
+        user_config_parts.append(persona_prompt)
+    if user_prompt:
+        user_config_parts.append(f"<user_instructions>\n{user_prompt}\n</user_instructions>")
+
+    if user_config_parts:
+        instance_prompt = instance_prompt + "\n\n" + "\n\n".join(user_config_parts)
+        logger.info(f"   用户配置已合并: persona={bool(persona_prompt)}, user_prompt={bool(user_prompt)}")
+
     logger.info(f"   提示词长度: {len(instance_prompt)} 字符")
 
     # 🆕 V5.0: 一次性加载 InstancePromptCache（核心改动）

@@ -632,6 +632,24 @@ async def confirm_continue_session(session_id: str):
     return APIResponse(code=200, message="已确认继续", data={"session_id": session_id})
 
 
+@router.post("/session/{session_id}/hitl_confirm", response_model=APIResponse[Dict])
+@handle_exceptions("HITL 危险操作确认")
+async def submit_hitl_confirm(session_id: str, approved: bool = True):
+    """
+    用户确认/拒绝危险操作（V11.1 HITL 安全保障）
+
+    当执行器检测到危险工具调用（如 delete、overwrite）并发出 hitl_confirm 事件后，
+    前端调用此接口提交用户的确认/拒绝决策。
+
+    - approved=True: 用户批准执行危险操作
+    - approved=False: 用户拒绝，触发 on_rejection 策略（回滚/停止/询问回滚）
+    """
+    logger.info(f"📨 HITL 确认: session_id={session_id}, approved={approved}")
+    session_service.submit_hitl_confirm(session_id, approved)
+    action = "已批准执行" if approved else "已拒绝，触发回退策略"
+    return APIResponse(code=200, message=action, data={"session_id": session_id, "approved": approved})
+
+
 @router.post("/session/{session_id}/rollback", response_model=APIResponse[Dict])
 @handle_exceptions("回滚会话状态")
 async def rollback_session(session_id: str):

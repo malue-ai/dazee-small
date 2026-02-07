@@ -70,6 +70,9 @@ class RVRBState:
     failed_tools: List[str] = field(default_factory=list)
     failed_strategies: List[str] = field(default_factory=list)
 
+    # 失败路径记忆（记录"工具+参数→失败原因"，引导 LLM 避免重复犯错）
+    failed_approaches: List[Dict[str, str]] = field(default_factory=list)
+
     # Plan 相关
     current_plan: Optional[Dict[str, Any]] = None
     current_step_index: int = 0
@@ -98,6 +101,25 @@ class RVRBState:
         """记录工具失败"""
         if tool_name not in self.failed_tools:
             self.failed_tools.append(tool_name)
+
+    def record_failed_approach(self, tool_name: str, approach: str, reason: str):
+        """
+        记录失败的方法路径
+
+        用于在回溯反思中注入，引导 LLM 避免重复犯错。
+
+        Args:
+            tool_name: 工具名
+            approach: 简要描述尝试的方法
+            reason: 失败原因
+        """
+        entry = {"tool": tool_name, "approach": approach, "reason": reason}
+        # 避免完全重复
+        if entry not in self.failed_approaches:
+            self.failed_approaches.append(entry)
+        # 只保留最近 10 条
+        if len(self.failed_approaches) > 10:
+            self.failed_approaches = self.failed_approaches[-10:]
 
     def increment_backtrack(self):
         """增加回溯计数"""
@@ -225,6 +247,14 @@ class RVRBExecutor(RVRExecutor):
 
         state.last_error = classified_error
         state.record_tool_failure(tool_name)
+
+        # 记录失败路径（用于回溯反思注入）
+        approach_desc = str(tool_input)[:100] if tool_input else "default"
+        state.record_failed_approach(
+            tool_name=tool_name,
+            approach=approach_desc,
+            reason=classified_error.message[:100] if classified_error.message else str(error)[:100],
+        )
 
         # 基础设施层错误不需要回溯
         if classified_error.is_infrastructure_error():
@@ -508,14 +538,8 @@ class RVRBExecutor(RVRExecutor):
         在重试前告诉 LLM"发生了什么 + 为什么失败 + 怎么避免"，
         引导 LLM 用不同策略重试而非重复犯错。
 
-        Args:
-            failed_summaries: 失败错误摘要列表
-            state: RVR-B 状态
-
-        Returns:
-            反思摘要文本
+        包含 failed_approaches 路径记忆，明确列出已尝试过的方法。
         """
-        # 收集失败的工具名
         failed_tools = list(state.failed_tools) if hasattr(state, "failed_tools") else []
 
         parts = [
@@ -523,16 +547,24 @@ class RVRBExecutor(RVRExecutor):
         ]
 
         if failed_tools:
-            parts.append(f"失败的方法: {', '.join(failed_tools)}。")
+            parts.append(f"失败的工具: {', '.join(failed_tools)}。")
 
         if len(failed_summaries) == 1:
             parts.append(f"失败原因: {failed_summaries[0]}")
-        else:
+        elif failed_summaries:
             parts.append(f"失败原因汇总: {'; '.join(failed_summaries[:3])}")
 
-        parts.append("请使用完全不同的策略或工具重试，避免重复以上方法。")
+        # 注入失败路径记忆（让 LLM 明确知道哪些方法已试过）
+        if state.failed_approaches:
+            parts.append("已尝试过的方法（不要重复）:")
+            for i, fa in enumerate(state.failed_approaches[-5:], 1):
+                parts.append(
+                    f"  {i}. {fa['tool']}: {fa['approach']} → 失败: {fa['reason']}"
+                )
 
-        return " ".join(parts)
+        parts.append("请使用完全不同的策略或工具重试。")
+
+        return "\n".join(parts)
 
     async def execute(
         self,
@@ -591,8 +623,7 @@ class RVRBExecutor(RVRExecutor):
         state_manager = context.extra.get("state_manager")
 
         logger.info(
-            f"🚀 RVRBExecutor 开始执行: "
-            f"max_turns={cfg.max_turns}, "
+            f"🚀 RVRBExecutor 开始执行 (signal-driven termination): "
             f"max_backtrack={cfg.max_backtrack_attempts}"
         )
 
@@ -615,7 +646,8 @@ class RVRBExecutor(RVRExecutor):
             )
             return dict_list_to_messages(prepared_messages)
 
-        for turn in range(cfg.max_turns):
+        turn = 0
+        while True:
             # 每轮调用 LLM 前刷新 Plan 注入（Plan 可能在上一轮工具调用中被更新）
             llm_messages = _refresh_plan_injection(llm_messages, inject_errors=(turn == 0))
 
@@ -625,7 +657,7 @@ class RVRBExecutor(RVRExecutor):
 
             logger.info(f"{'='*60}")
             logger.info(
-                f"🔄 RVR-B Turn {turn + 1}/{cfg.max_turns} (backtracks: {state.backtrack_count}/{state.max_backtracks})"
+                f"🔄 RVR-B Turn {turn + 1} (backtracks: {state.backtrack_count}/{state.max_backtracks})"
             )
             logger.info(f"{'='*60}")
 
@@ -646,7 +678,8 @@ class RVRBExecutor(RVRExecutor):
                 response = ctx.last_llm_response
                 if response:
                     if response.stop_reason == "tool_use" and response.tool_calls:
-                        # V11: HITL 危险操作确认
+                        # V11.1: HITL 危险操作确认（执行前拦截，等待用户决策）
+                        hitl_rejected = False
                         if cfg.terminator:
                             try:
                                 pending_names = [
@@ -663,6 +696,7 @@ class RVRBExecutor(RVRExecutor):
                                     hitl_decision.action == TerminationAction.ASK_USER
                                     and "hitl_confirm" in (hitl_decision.reason or "")
                                 ):
+                                    # 通知前端显示确认弹窗
                                     yield {
                                         "type": "hitl_confirm",
                                         "data": {
@@ -671,33 +705,47 @@ class RVRBExecutor(RVRExecutor):
                                             "message": "危险操作需用户确认",
                                         },
                                     }
-                                    ctx.stop_reason = hitl_decision.reason or "hitl_confirm"
-                                    break
+
+                                    # 等待用户决策（approve / reject）
+                                    wait_fn = (context.extra or {}).get(
+                                        "wait_hitl_confirm_async"
+                                    )
+                                    if callable(wait_fn):
+                                        user_choice = await wait_fn()
+                                        if user_choice == "approve":
+                                            logger.info(
+                                                f"HITL 已批准: {pending_names}"
+                                            )
+                                            # 用户批准 → 继续执行工具
+                                        else:
+                                            # 用户拒绝 → 执行 on_rejection 策略
+                                            logger.info(
+                                                f"HITL 已拒绝: {pending_names}，"
+                                                f"执行回退策略"
+                                            )
+                                            hitl_rejected = True
+                                            async for evt in self._handle_hitl_rejection(
+                                                context, ctx, cfg
+                                            ):
+                                                yield evt
+                                            break
+                                    else:
+                                        # 无等待函数，保守停止（不执行危险操作）
+                                        logger.warning(
+                                            "HITL 确认: 无 wait 函数，"
+                                            "保守停止（不执行危险操作）"
+                                        )
+                                        ctx.stop_reason = (
+                                            hitl_decision.reason or "hitl_confirm"
+                                        )
+                                        break
                             except Exception as e:
                                 logger.warning(
                                     f"HITL 检查异常，继续执行: {e}",
                                     exc_info=True,
                                 )
 
-                        is_last_turn = turn == cfg.max_turns - 1
-                        if is_last_turn:
-                            async for event in self._handle_last_turn_tools(
-                                response,
-                                llm_messages,
-                                system_prompt,
-                                ctx,
-                                session_id,
-                                llm,
-                                tool_executor,
-                                broadcaster,
-                                usage_tracker,
-                                context_engineering=context_engineering,
-                                plan_cache=plan_cache,
-                                plan_todo_tool=plan_todo_tool,
-                                event_manager=event_manager,
-                                state_manager=state_manager,
-                            ):
-                                yield event
+                        if hitl_rejected:
                             break
 
                         # 处理工具调用（带回溯，V10.2 使用 ToolExecutionFlow）
@@ -739,7 +787,8 @@ class RVRBExecutor(RVRExecutor):
                     state.record_execution("complete", True, response.content)
                     break
 
-                # V11: HITL 危险操作确认（非流式）
+                # V11.1: HITL 危险操作确认（非流式，等待用户决策）
+                hitl_rejected_ns = False
                 if cfg.terminator and response.tool_calls:
                     try:
                         pending_names = [
@@ -764,39 +813,32 @@ class RVRBExecutor(RVRExecutor):
                                     "message": "危险操作需用户确认",
                                 },
                             }
-                            ctx.stop_reason = hitl_decision.reason or "hitl_confirm"
-                            break
+                            wait_fn = (context.extra or {}).get(
+                                "wait_hitl_confirm_async"
+                            )
+                            if callable(wait_fn):
+                                user_choice = await wait_fn()
+                                if user_choice == "approve":
+                                    logger.info(f"HITL 已批准（非流式）: {pending_names}")
+                                else:
+                                    logger.info(
+                                        f"HITL 已拒绝（非流式）: {pending_names}"
+                                    )
+                                    hitl_rejected_ns = True
+                                    async for evt in self._handle_hitl_rejection(
+                                        context, ctx, cfg
+                                    ):
+                                        yield evt
+                                    break
+                            else:
+                                ctx.stop_reason = (
+                                    hitl_decision.reason or "hitl_confirm"
+                                )
+                                break
                     except Exception as e:
                         logger.warning(f"HITL 检查异常，继续执行: {e}", exc_info=True)
 
-                is_last_turn = turn == cfg.max_turns - 1
-                if is_last_turn:
-                    # 非流式最后一轮
-                    async for event in self._handle_tool_calls(
-                        response,
-                        llm_messages,
-                        session_id,
-                        conversation_id,
-                        ctx,
-                        tool_executor,
-                        broadcaster,
-                        context_engineering=context_engineering,
-                        plan_cache=plan_cache,
-                        plan_todo_tool=plan_todo_tool,
-                        event_manager=event_manager,
-                        state_manager=state_manager,
-                    ):
-                        yield event
-
-                    final_response = await llm.create_message_async(
-                        messages=llm_messages, system=system_prompt, tools=[]
-                    )
-                    usage_tracker.accumulate(final_response)
-
-                    if final_response.content:
-                        yield {"type": "content", "data": {"text": final_response.content}}
-
-                    ctx.set_completed(final_response.content, final_response.stop_reason)
+                if hitl_rejected_ns:
                     break
 
                 await self._handle_tool_calls_with_backtrack_non_stream(
@@ -817,10 +859,12 @@ class RVRBExecutor(RVRExecutor):
                     state_manager=state_manager,
                 )
 
+            turn += 1
+
             if ctx.is_completed():
                 break
 
-            # V12: 终止策略（回溯↔终止联动）
+            # V12: 终止策略（回溯↔终止联动，信号驱动，无硬性 max_turns）
             if cfg.terminator and not ctx.is_completed():
                 try:
                     from core.termination.protocol import (
@@ -852,13 +896,20 @@ class RVRBExecutor(RVRExecutor):
 
                     if decision.should_stop:
                         ctx.stop_reason = decision.reason or "terminator"
-                        # ROLLBACK_OPTIONS — yield 回滚选项事件
+                        # V11.1: 连续失败 → 推送回滚选项（事件类型对齐前端）
                         if decision.action == TerminationAction.ROLLBACK_OPTIONS:
+                            _state_mgr = (context.extra or {}).get("state_manager")
+                            _options = (
+                                _state_mgr.get_rollback_options(session_id)
+                                if _state_mgr
+                                else []
+                            )
                             yield {
-                                "type": "rollback_options_hint",
+                                "type": "rollback_options",
                                 "data": {
+                                    "task_id": session_id,
+                                    "options": _options,
                                     "reason": decision.reason,
-                                    "message": "连续失败，建议回滚",
                                 },
                             }
                         break
@@ -891,9 +942,21 @@ class RVRBExecutor(RVRExecutor):
                         if callable(wait_fn):
                             user_choice = await wait_fn()
                             if user_choice == "rollback":
+                                _state_mgr = (context.extra or {}).get(
+                                    "state_manager"
+                                )
+                                _options = (
+                                    _state_mgr.get_rollback_options(session_id)
+                                    if _state_mgr
+                                    else []
+                                )
                                 yield {
-                                    "type": "rollback_options_hint",
-                                    "data": {"reason": "用户选择回滚"},
+                                    "type": "rollback_options",
+                                    "data": {
+                                        "task_id": session_id,
+                                        "options": _options,
+                                        "reason": "用户选择回滚",
+                                    },
                                 }
                                 ctx.stop_reason = "user_rollback_after_backtrack"
                                 break

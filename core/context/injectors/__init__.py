@@ -55,6 +55,7 @@ from .orchestrator import (
 # Phase 1 Injectors
 from .phase1 import (
     HistorySummaryProvider,
+    SkillFocusHintInjector,
     SystemRoleInjector,
     ToolSystemRoleProvider,
     get_phase1_injectors,
@@ -112,6 +113,7 @@ __all__ = [
     # Phase 1 Injectors
     "SystemRoleInjector",
     "ToolSystemRoleProvider",
+    "SkillFocusHintInjector",
     "HistorySummaryProvider",
     "get_phase1_injectors",
     # Phase 2 Injectors
