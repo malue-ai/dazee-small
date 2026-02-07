@@ -1,5 +1,5 @@
-name: 小搭子
-description: 桌面端 AI 搭子，亲切可靠，擅长本地文件处理、写作、翻译等日常任务
+name: XiaoDazi
+description: 住在用户电脑里的 AI 搭子，主动、亲切、能干，擅长本地桌面任务和 UI 自动化操作
 intent_analyzer:
   enabled: true
   complexity_levels:
@@ -11,11 +11,12 @@ intent_analyzer:
   - file_management
   - data_analysis
   - translation
-  - screenshot
+  - ui_automation
+  - communication
   output_formats:
   - text
   - markdown
-  - list
+  - structured_list
   - table
   use_llm: true
   llm_model: claude-haiku-4-5-20251001
@@ -25,14 +26,14 @@ intent_analyzer:
 plan_manager:
   enabled: true
   trigger_condition: complexity == 'high' or step_count > 3
-  max_steps: 12
-  granularity: medium
+  max_steps: 20
+  granularity: fine
   allow_dynamic_adjustment: true
   validation_interval: 3
   replan_enabled: true
   max_replan_attempts: 2
   replan_strategy: incremental
-  failure_threshold: 0.3
+  failure_threshold: 0.4
 tool_selector:
   enabled: true
   available_tools: []
@@ -40,13 +41,14 @@ tool_selector:
   allow_parallel: false
   max_parallel_tools: 1
   base_tools:
-  - hitl-confirm
+  - observe_screen
+  - nodes
   tool_timeout: 300
 memory_manager:
   enabled: true
   retention_policy: user
   episodic_memory: true
-  working_memory_limit: 40
+  working_memory_limit: 50
   auto_compress: true
   compress_threshold: 15
 output_formatter:
@@ -66,28 +68,24 @@ output_formatter:
   json_indent: 2
   include_metadata: false
 skills:
-- name: writing-assistant
+- name: excel-generator
   enabled: true
   description: ''
 - name: file-organizer
   enabled: true
   description: ''
-- name: excel-analyzer
-  enabled: true
-  description: ''
 - name: translator
   enabled: true
   description: ''
-- name: screenshot-processor
-  enabled: true
-  description: ''
-- name: weather-checker
+- name: writer
   enabled: true
   description: ''
 tools:
-- hitl-confirm
+- observe_screen
+- nodes
+- web_search
 model: qwen3-max
-max_turns: 18
+max_turns: 25
 execution_strategy: rvr
 allow_parallel_tools: false
 context_limits:
@@ -100,5 +98,5 @@ enable_thinking: null
 enable_caching: null
 thinking_mode: null
 prompts: null
-reasoning: 作为桌面 AI 搭子，需支持多类本地任务（写作、文件整理、表格、翻译等），具备中等复杂度规划能力；强调用户习惯记忆（user-level retention）、操作安全（HITL
-  确认）、通俗输出；不涉及并行工具调用，优先单步稳妥执行
+reasoning: 小搭子需处理复杂桌面自动化任务（如飞书操作、浏览器填表），涉及多步骤 UI 交互，必须启用细粒度规划和动态调整；需长期记忆用户偏好，支持文件/写作/翻译等技能；安全敏感操作需
+  HITL 确认，故禁用并行工具调用；输出需通俗友好，使用 markdown 结构化展示

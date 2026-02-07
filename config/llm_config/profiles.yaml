@@ -15,7 +15,7 @@ profiles:
     model: "qwen3-max"
     api_key_env: "DASHSCOPE_API_KEY"
     region: "singapore"
-    max_tokens: 32768
+    max_tokens: 262144  # 256K context window
     temperature: 0.7
     enable_thinking: true
     thinking_budget: 10000
@@ -30,7 +30,7 @@ profiles:
     model: "qwen-plus"
     api_key_env: "DASHSCOPE_API_KEY"
     region: "singapore"
-    max_tokens: 2048
+    max_tokens: 65536
     temperature: 0
     enable_thinking: false
     enable_caching: false
@@ -44,7 +44,7 @@ profiles:
     model: "qwen-plus"
     api_key_env: "DASHSCOPE_API_KEY"
     region: "singapore"
-    max_tokens: 500
+    max_tokens: 65536
     temperature: 0
     enable_thinking: false
     enable_caching: false
