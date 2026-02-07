@@ -1,9 +1,7 @@
 """
 Agent 执行策略模块
 
-V10.0 统一执行器架构：
-- 单智能体：RVRExecutor, RVRBExecutor
-- 多智能体：MultiAgentExecutor (Sequential/Parallel/Hierarchical)
+V11.0 小搭子架构：固定使用 RVR-B 执行策略
 
 扩展点：新增策略只需：
 1. 新增 execution/*.py 实现 ExecutorProtocol
@@ -12,16 +10,9 @@ V10.0 统一执行器架构：
 目录结构：
 - protocol.py: 执行器协议定义
 - rvr.py: 标准 RVR 执行策略
-- rvrb.py: 带回溯的 RVR-B 执行策略
-- multi.py: 多智能体执行策略适配器
+- rvrb.py: 带回溯的 RVR-B 执行策略（默认）
 """
 
-from core.agent.execution.multi import (
-    HierarchicalMultiExecutor,
-    MultiAgentExecutor,
-    ParallelMultiExecutor,
-    SequentialMultiExecutor,
-)
 from core.agent.execution.protocol import (
     BaseExecutor,
     ExecutionContext,
@@ -46,16 +37,11 @@ __all__ = [
     "ExecutionContext",
     "ExecutionResult",
     "BaseExecutor",
-    # RVR (单智能体)
+    # RVR（RVR-B 的基类）
     "RVRExecutor",
     "create_rvr_executor",
-    # RVR-B (单智能体 + 回溯)
+    # RVR-B（默认执行策略）
     "RVRBExecutor",
     "RVRBState",
     "create_rvrb_executor",
-    # Multi-Agent (多智能体)
-    "MultiAgentExecutor",
-    "SequentialMultiExecutor",
-    "ParallelMultiExecutor",
-    "HierarchicalMultiExecutor",
 ]

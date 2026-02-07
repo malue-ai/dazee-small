@@ -103,16 +103,16 @@ class ToolExecuteRequest(BaseModel):
 class BaseToolRegistrationRequest(BaseModel):
     """BaseTool 类注册请求"""
 
-    module_path: str = Field(..., description="模块路径，如 'tools.exa_search'")
-    class_name: str = Field(..., description="类名，如 'ExaSearchTool'")
+    module_path: str = Field(..., description="模块路径，如 'tools.plan_todo_tool'")
+    class_name: str = Field(..., description="类名，如 'PlanTodoTool'")
     replace_existing: bool = Field(False, description="是否替换已存在的工具")
 
     model_config = {
         "json_schema_extra": {
             "examples": [
                 {
-                    "module_path": "tools.exa_search",
-                    "class_name": "ExaSearchTool",
+                    "module_path": "tools.plan_todo_tool",
+                    "class_name": "PlanTodoTool",
                     "replace_existing": False,
                 }
             ]

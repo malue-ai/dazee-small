@@ -15,10 +15,7 @@ V10.0 破坏性重构：
 │  ┌─────────────────────────────────┐    │
 │  │     Executor (Strategy)          │    │
 │  │  - RVRExecutor                   │    │
-│  │  - RVRBExecutor                  │    │
-│  │  - SequentialExecutor            │    │
-│  │  - ParallelExecutor              │    │
-│  │  - HierarchicalExecutor          │    │
+│  │  - RVRBExecutor（默认）           │    │
 │  └─────────────────────────────────┘    │
 └─────────────────────────────────────────┘
 
@@ -51,6 +48,7 @@ if TYPE_CHECKING:
     from core.events.broadcaster import EventBroadcaster
     from core.llm.base import BaseLLMService, LLMResponse
     from core.routing.types import IntentResult
+    from core.termination.protocol import BaseTerminator
     from core.tool.executor import ToolExecutor
     from models.usage import UsageTracker
 
@@ -76,10 +74,7 @@ class Agent:
 
     通过注入 Executor 实现不同的执行策略：
     - RVRExecutor: 标准 RVR 循环
-    - RVRBExecutor: 带回溯的 RVR-B 循环
-    - SequentialExecutor: 多智能体顺序执行
-    - ParallelExecutor: 多智能体并行执行
-    - HierarchicalExecutor: 多智能体层级执行
+    - RVRBExecutor: 带回溯的 RVR-B 循环（小搭子默认）
 
     使用方式（由 Factory 创建）：
         agent = AgentFactory.create(
@@ -102,6 +97,7 @@ class Agent:
         prompt_cache=None,
         context_strategy=None,
         max_steps: int = 30,
+        terminator: Optional["BaseTerminator"] = None,
     ):
         """
         初始化 Agent
@@ -115,9 +111,11 @@ class Agent:
             prompt_cache: PromptCache 实例
             context_strategy: 上下文策略
             max_steps: 最大执行步数
+            terminator: 可选终止策略（V11 自适应终止）
         """
         # 核心依赖（允许 None，支持子类延迟初始化）
         self._executor = executor
+        self._terminator = terminator
         self._llm = llm
         self._tool_executor = tool_executor
         self._broadcaster = broadcaster
@@ -365,7 +363,17 @@ class Agent:
             max_turns=self._max_steps,
             enable_stream=enable_stream,
             enable_backtrack=self._executor.supports_backtrack(),
+            terminator=self._terminator,
         )
+
+        # V11: 创建外部停止信号
+        import asyncio
+
+        stop_event = asyncio.Event()
+        self._stop_event = stop_event  # 暴露给外部（如 Service 层）调用 set()
+
+        # V11: 状态一致性管理器引用（传给 Executor，供工具执行时记录操作）
+        state_mgr_ref = getattr(self, "_state_consistency_manager", None)
 
         # 执行上下文（V10.1: 传递所有依赖，不再依赖 agent 引用）
         execution_context = ExecutionContext(
@@ -380,10 +388,15 @@ class Agent:
             runtime_ctx=ctx,
             context_strategy=self._context_strategy,
             plan_cache=self._plan_cache,
+            stop_event=stop_event,
             extra={
                 "usage_tracker": self.usage_tracker,
                 "context_engineering": getattr(self, "context_engineering", None),
                 "tracer": self._tracer,
+                "wait_long_run_confirm_async": getattr(
+                    self, "_wait_long_run_confirm_async", None
+                ),
+                "state_manager": state_mgr_ref,
             },
         )
 
@@ -391,12 +404,85 @@ class Agent:
         if self._executor is None:
             raise ValueError("executor 未初始化，无法执行。请通过 Factory 创建 Agent。")
 
-        async for event in self._executor.execute(
-            messages=messages,
-            context=execution_context,
-            config=executor_config,
-        ):
-            yield event
+        # V11: 状态一致性（可选）
+        state_mgr = getattr(self, "_state_consistency_manager", None)
+        state_enabled = getattr(self, "_state_consistency_enabled", False)
+        snapshot_id = None
+
+        if state_enabled and state_mgr:
+            # --- 前置一致性检查 ---
+            try:
+                pre_check = state_mgr.pre_task_check(affected_files=[])
+                if not pre_check.passed:
+                    logger.warning(f"前置一致性检查未通过: {pre_check.issues}")
+                    # 不阻断执行，但记录警告
+                    yield {
+                        "type": "warning",
+                        "data": {
+                            "message": "环境检查发现问题",
+                            "issues": pre_check.issues,
+                        },
+                    }
+            except Exception as e:
+                logger.warning(f"前置一致性检查异常（不阻断执行）: {e}", exc_info=True)
+
+            # --- 创建快照 ---
+            try:
+                snapshot_id = state_mgr.create_snapshot(
+                    task_id=session_id, affected_files=[]
+                )
+            except Exception as e:
+                logger.warning(f"状态快照创建失败（不阻断执行）: {e}", exc_info=True)
+
+        execution_error = None
+        try:
+            async for event in self._executor.execute(
+                messages=messages,
+                context=execution_context,
+                config=executor_config,
+            ):
+                yield event
+        except Exception as exc:
+            execution_error = exc
+            # --- 异常时自动回滚判断 ---
+            if state_enabled and state_mgr and snapshot_id:
+                try:
+                    consecutive_failures = getattr(ctx, "consecutive_failures", 0)
+                    is_critical = isinstance(exc, (SystemExit, KeyboardInterrupt, MemoryError))
+
+                    # 尝试自动回滚
+                    rollback_msgs = state_mgr.auto_rollback_if_needed(
+                        task_id=session_id,
+                        consecutive_failures=consecutive_failures,
+                        is_critical=is_critical,
+                    )
+
+                    if rollback_msgs is not None:
+                        # 自动回滚已执行
+                        logger.info(f"自动回滚已执行: {rollback_msgs}")
+                        yield {
+                            "type": "rollback_completed",
+                            "data": {
+                                "task_id": session_id,
+                                "messages": rollback_msgs,
+                                "trigger": "auto",
+                            },
+                        }
+                    else:
+                        # 未触发自动回滚，推送回滚选项给前端
+                        options = state_mgr.get_rollback_options(session_id)
+                        if options:
+                            yield {
+                                "type": "rollback_options",
+                                "data": {
+                                    "task_id": session_id,
+                                    "options": options,
+                                    "error": str(exc),
+                                },
+                            }
+                except Exception as re:
+                    logger.warning(f"异常处理中回滚逻辑失败: {re}", exc_info=True)
+            raise
 
         # Final Output
         if self._tracer:
@@ -405,6 +491,59 @@ class Agent:
             )
             self._tracer.set_final_response(final_response[:500] if final_response else "")
             self._tracer.finish()
+
+        # V11: 状态一致性 — 完成路径（正常退出，无异常）
+        if state_enabled and state_mgr and snapshot_id and execution_error is None:
+            try:
+                # 检查是否因连续失败等原因退出（终止策略触发的非正常完成）
+                failure_stop_reasons = {"consecutive_failures", "max_turns", "max_duration", "idle_timeout"}
+                stop_reason = getattr(ctx, "stop_reason", None) or ""
+
+                if stop_reason in failure_stop_reasons:
+                    # --- 非正常完成：触发自动回滚判断 ---
+                    consecutive_failures = getattr(ctx, "consecutive_failures", 0)
+                    rollback_msgs = state_mgr.auto_rollback_if_needed(
+                        task_id=session_id,
+                        consecutive_failures=consecutive_failures,
+                        is_critical=False,
+                    )
+                    if rollback_msgs is not None:
+                        logger.info(f"终止策略触发自动回滚: reason={stop_reason}")
+                        yield {
+                            "type": "rollback_completed",
+                            "data": {
+                                "task_id": session_id,
+                                "messages": rollback_msgs,
+                                "trigger": "terminator",
+                                "reason": stop_reason,
+                            },
+                        }
+                    else:
+                        # 未达到自动回滚阈值，推送回滚选项
+                        options = state_mgr.get_rollback_options(session_id)
+                        if options:
+                            yield {
+                                "type": "rollback_options",
+                                "data": {
+                                    "task_id": session_id,
+                                    "options": options,
+                                    "reason": stop_reason,
+                                },
+                            }
+                        # 仍需提交（保持当前状态）
+                        state_mgr.commit(session_id)
+                else:
+                    # --- 正常完成：后置检查 + 提交 ---
+                    post_check = state_mgr.post_task_check(task_id=session_id)
+                    if not post_check.passed:
+                        logger.warning(
+                            f"后置一致性检查未通过: "
+                            f"missing={post_check.missing_files}, "
+                            f"errors={post_check.integrity_errors}"
+                        )
+                    state_mgr.commit(session_id)
+            except Exception as e:
+                logger.warning(f"状态一致性完成路径异常: {e}", exc_info=True)
 
         # Usage
         stats = self.usage_stats
@@ -432,6 +571,21 @@ class Agent:
         )
 
         logger.info(f"✅ Agent 执行完成: executor={self._executor.name}")
+
+    def get_rollback_options(self, task_id: str) -> List[Dict[str, Any]]:
+        """
+        V11: 获取该任务的回滚选项（供异常时 HITL 展示）
+
+        Args:
+            task_id: 任务/会话 ID
+
+        Returns:
+            回滚选项列表 [{"id", "action", "target"}, ...]
+        """
+        state_mgr = getattr(self, "_state_consistency_manager", None)
+        if not state_mgr:
+            return []
+        return state_mgr.get_rollback_options(task_id)
 
     # ==================== chat() 兼容方法 ====================
 
@@ -474,7 +628,7 @@ class Agent:
             await self.tool_selector.resolve_capabilities(
                 schema_tools=self._schema.tools if self._schema and self._schema.tools else None,
                 plan=plan,
-                intent_task_type=intent.agent_type if intent else None,
+                intent_task_type=None,  # V11: 固定 RVR-B，无需按 agent_type 选能力
             )
         )
 
@@ -483,7 +637,7 @@ class Agent:
             required_capabilities=required_capabilities,
             context={
                 "plan": plan,
-                "agent_type": intent.agent_type if intent else None,
+                "agent_type": "rvr-b",
                 "available_apis": available_apis,
             },
             allowed_tools=allowed_tools,

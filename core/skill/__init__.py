@@ -1,20 +1,47 @@
 """
-Skill 管理模块（预留）
+Skill 管理模块
 
 职责：
-- 未来可能用于 Skill 运行时管理扩展
-- 当前功能已由 core/tool/capability/skill_loader.py 实现
+- Skills-First 统一加载器（SkillsLoader）
+- OS 维度的 Skill 合并与兼容性检查
+- 动态依赖检查与加载（DynamicSkillLoader）
+- 统一数据模型（SkillEntry、BackendType 等）
 
-术语说明（对齐 clawdbot）：
-- Skill: 本地工作流技能（skills/library/），通过系统提示词注入
-- 目录结构：skills/library/（内置）, skills/custom/（自定义）, skills/workspace/（工作区）
+架构说明（V11 Skills-First）：
+- SkillsLoader: 核心加载器，解析 config.yaml → SkillEntry 列表
+- SkillEntry: Agent 看到的唯一能力单元
+- BackendType: Skill 执行后端（local/tool/mcp/api），Agent 不感知
 
 相关组件：
-- core/tool/capability/skill_loader.py: Skill 内容加载器
-- core/tool/capability/registry.py: Skill 发现和注册
+- core/tool/capability/skill_loader.py: Skill 内容加载器（SKILL.md 渐进式加载）
 - prompts/skills_loader.py: 生成系统提示词中的 Skills 列表
-- config/capabilities.yaml: 统一能力配置
 """
 
-# 预留模块，暂无导出
-__all__ = []
+from core.skill.dynamic_loader import DynamicSkillLoader, SkillDependency, check_and_report_skills
+from core.skill.loader import SkillsLoader, create_skills_loader
+from core.skill.models import BackendType, DependencyLevel, SkillEntry, SkillStatus
+from core.skill.os_compatibility import (
+    CompatibilityResult,
+    CompatibilityStatus,
+    OSCompatibilityChecker,
+)
+from core.skill.os_skill_merger import OSSkillMerger
+
+__all__ = [
+    # V11 Skills-First 核心
+    "SkillsLoader",
+    "create_skills_loader",
+    "SkillEntry",
+    "BackendType",
+    "DependencyLevel",
+    "SkillStatus",
+    # OS 兼容性
+    "OSSkillMerger",
+    "OSCompatibilityChecker",
+    "CompatibilityResult",
+    "CompatibilityStatus",
+    # 动态加载
+    "DynamicSkillLoader",
+    "SkillDependency",
+    "check_and_report_skills",
+]

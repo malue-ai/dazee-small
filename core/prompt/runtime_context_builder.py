@@ -419,6 +419,73 @@ class RuntimeContextBuilder:
         lines.append("")
         return "\n".join(lines)
 
+    @classmethod
+    def build_skill_status_prompt(
+        cls,
+        enabled_skills: List[str],
+        unavailable_skills: Optional[List[str]] = None,
+        ineligible_skills: Optional[List[str]] = None,
+        language: str = "zh",
+    ) -> str:
+        """
+        V11: 构建 Skill 状态提示词片段
+
+        将当前平台可用/不可用的 Skill 信息注入系统提示词，
+        帮助 LLM 了解自己可以使用哪些能力。
+
+        Args:
+            enabled_skills: 当前已启用的 Skill 名称列表
+            unavailable_skills: 因 OS 限制不可用的 Skill 列表
+            ineligible_skills: 因依赖缺失不可用的 Skill 列表
+            language: 语言代码（zh/en）
+
+        Returns:
+            可直接注入到提示词的 Markdown 文本
+        """
+        if language == "en":
+            lines = ["## Available Skills", ""]
+            if enabled_skills:
+                lines.append("**Enabled**:")
+                for name in enabled_skills:
+                    lines.append(f"- {name}")
+            else:
+                lines.append("No skills currently enabled.")
+
+            if ineligible_skills:
+                lines.append("")
+                lines.append("**Unavailable (missing dependencies)**:")
+                for name in ineligible_skills:
+                    lines.append(f"- {name} (dependency not met)")
+
+            if unavailable_skills:
+                lines.append("")
+                lines.append("**Not supported on this OS**:")
+                for name in unavailable_skills:
+                    lines.append(f"- {name}")
+        else:
+            lines = ["## 可用 Skills", ""]
+            if enabled_skills:
+                lines.append("**已启用**:")
+                for name in enabled_skills:
+                    lines.append(f"- {name}")
+            else:
+                lines.append("当前无已启用的 Skills。")
+
+            if ineligible_skills:
+                lines.append("")
+                lines.append("**不可用（依赖缺失）**:")
+                for name in ineligible_skills:
+                    lines.append(f"- {name}（依赖未满足）")
+
+            if unavailable_skills:
+                lines.append("")
+                lines.append("**当前 OS 不支持**:")
+                for name in unavailable_skills:
+                    lines.append(f"- {name}")
+
+        lines.append("")
+        return "\n".join(lines)
+
 
 # 异步获取环境信息（带缓存）
 async def get_environment_async(

@@ -17,7 +17,7 @@ Injector 基类和枚举定义
 │  ├── UserMemoryInjector     # 用户记忆                       │
 │  ├── GroupContextInjector   # 群组上下文                     │
 │  ├── GTDPlanInjector        # GTD 计划                       │
-│  └── KnowledgeInjector      # 知识库                         │
+│  └── (本地知识检索 - 待实现)                                  │
 ├─────────────────────────────────────────────────────────────┤
 │  Phase 3: Runtime Injection (追加到最后一条消息)              │
 │  ├── PageEditorContextInjector  # 页面编辑器上下文           │

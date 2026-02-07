@@ -1,7 +1,7 @@
 """
 上下文提供者接口
 
-定义所有数据源（Ragie/Mem0/History）的统一接口
+定义数据源的统一接口
 """
 
 from abc import ABC, abstractmethod
@@ -18,18 +18,18 @@ class ContextType(str, Enum):
     - 原因：当前会话历史已在 messages 中，跨会话检索太慢
     """
 
-    KNOWLEDGE = "knowledge"  # 知识（Ragie）- 需要检索
-    MEMORY = "memory"  # 记忆（Mem0）- 需要检索
+    KNOWLEDGE = "knowledge"  # 知识检索（本地知识检索，后续实现）
+    MEMORY = "memory"  # 记忆检索
 
 
 class ContextProvider(ABC):
     """
     上下文提供者接口
 
-    所有数据源（Ragie/Mem0/History）都实现此接口，提供统一的检索和更新方法。
+    所有数据源（Knowledge/Mem0/History）都实现此接口，提供统一的检索和更新方法。
 
     核心理念：
-    - Ragie、Mem0、History 本质相同：都是为 LLM 提供上下文的数据源
+    - Knowledge、Mem0、History 本质相同：都是为 LLM 提供上下文的数据源
     - 统一接口使得系统易于扩展和测试
     - 检索结果格式统一，便于融合和排序
     """
@@ -67,7 +67,7 @@ class ContextProvider(ABC):
                     "score": 0.95,         # 相关性评分 (0-1)
                     "metadata": {...},      # 元数据
                     "source": "knowledge",  # 来源类型
-                    "provider": "ragie"     # 提供者名称
+                    "provider": "local"     # 提供者名称
                 }
             ]
         """

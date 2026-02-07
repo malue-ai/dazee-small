@@ -726,81 +726,8 @@ Token消耗：
             },
         )
     
-    async def grade_multi_agent_coordination(
-        self,
-        transcript: Transcript,
-        subtask_results: List[Dict[str, Any]]
-    ) -> GradeResult:
-        """
-        评估多智能体协作质量
-        
-        Args:
-            transcript: 转录记录
-            subtask_results: 子任务结果列表
-            
-        Returns:
-            GradeResult: 评分结果
-        """
-        system_prompt = """你是一个专业的AI评估员，负责评估多智能体系统的协作质量。
+    # V11.0: grade_multi_agent_coordination 已移除（不再支持多智能体）
 
-评估要点：
-1. 任务分解是否合理
-2. 子任务之间是否有重叠或遗漏
-3. 子任务执行是否高效
-4. 结果综合是否完整
-
-评分标准（1-5分）：
-- 5分：协作完美，任务分解合理，执行高效
-- 4分：协作良好，有轻微问题但不影响结果
-- 3分：协作一般，有明显问题但可接受
-- 2分：协作较差，影响最终结果
-- 1分：协作失败，严重影响结果
-
-请以JSON格式返回评分结果：
-{
-    "score": <1-5的整数>,
-    "confidence": <0-1的浮点数>,
-    "decomposition_quality": "<任务分解质量分析>",
-    "coordination_issues": ["<协作问题1>", "<协作问题2>"],
-    "explanation": "<评分理由>"
-}"""
-
-        subtasks_summary = "\n".join([
-            f"- 子任务 {i+1}: {r.get('description', 'N/A')} - 状态: {r.get('status', 'unknown')}"
-            for i, r in enumerate(subtask_results)
-        ])
-        
-        user_prompt = f"""多智能体执行记录：
-
-子任务结果（共{len(subtask_results)}个）：
-{subtasks_summary}
-
-工具调用序列：
-{" -> ".join(transcript.get_all_tool_names()[:20])}
-
-请评估多智能体协作质量。"""
-
-        result = await self._call_judge(system_prompt, user_prompt, include_confidence=True)
-        
-        score = result.get("score", 3)
-        confidence = result.get("confidence", 0.7)
-        passed = score >= 4
-        
-        return GradeResult(
-            grader_type=GraderType.MODEL,
-            grader_name="grade_multi_agent_coordination",
-            passed=passed,
-            score=score / 5.0,
-            confidence=confidence,
-            needs_human_review=confidence < 0.7,
-            explanation=result.get("explanation"),
-            details={
-                "raw_score": score,
-                "decomposition_quality": result.get("decomposition_quality"),
-                "coordination_issues": result.get("coordination_issues", []),
-            },
-        )
-    
     async def grade_against_reference(
         self,
         agent_response: str,

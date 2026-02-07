@@ -88,27 +88,13 @@ async def _init_tool_config():
 
 # 工具分组（用于生成配置时的注释分组）
 TOOL_GROUPS = {
-    "信息获取类": {
-        "tools": ["tavily_search", "exa_search", "knowledge_search"],
-        "defaults": {"tavily_search": 1, "exa_search": 0, "knowledge_search": 1},
-        "comments": {
-            "tavily_search": "通用网络搜索（Tavily API）",
-            "exa_search": "Exa 语义搜索（需 API Key）",
-            "knowledge_search": "个人知识库检索",
-        }
-    },
+    # V11.0: 移除已删除的云端工具组（tavily_search, exa_search, knowledge_search, ppt_generator）
+    # 工具通过 Skills-First 架构提供
     "文档生成类（Claude Skills，整体启用）": {
         "tools": ["document_skills"],
         "defaults": {"document_skills": 0},
         "comments": {
             "document_skills": "包含：pptx, xlsx, docx, pdf",
-        }
-    },
-    "PPT 生成类": {
-        "tools": ["ppt_generator"],
-        "defaults": {"ppt_generator": 0},
-        "comments": {
-            "ppt_generator": "闭环 PPT 生成（SlideSpeak）",
         }
     },
     "动态代码执行": {

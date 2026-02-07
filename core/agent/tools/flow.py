@@ -56,6 +56,9 @@ class ToolExecutionContext:
     allow_parallel: bool = True
     max_parallel: int = 5
 
+    # V11: 状态一致性（用于文件操作记录）
+    state_manager: Any = None  # Optional[StateConsistencyManager]
+
     # 扩展
     extra: Dict[str, Any] = field(default_factory=dict)
 
@@ -187,7 +190,13 @@ class ToolExecutionFlow:
             if not context.tool_executor:
                 raise ValueError("tool_executor 未配置")
 
+            # V11: 文件操作前置捕获 — 提取 tool_input 中的文件路径，备份到快照
+            _pre_capture_files(context, tool_input)
+
             result = await context.tool_executor.execute(tool_name, tool_input)
+
+            # V11: 文件操作后置记录 — 记录到操作日志（支持回滚）
+            _post_record_operation(context, tool_name, tool_input, result)
 
             return ToolExecutionResult(
                 tool_id=tool_id,
@@ -415,3 +424,80 @@ def create_tool_execution_flow() -> ToolExecutionFlow:
     flow.register_handler(HumanConfirmationHandler())
 
     return flow
+
+
+# ==================== V11: 状态一致性钩子 ====================
+
+
+def _extract_file_paths(tool_input: Dict[str, Any]) -> List[str]:
+    """
+    从工具输入中提取文件路径。
+
+    仅提取已存在的绝对路径或以 ~ 开头的路径（安全边界检查，非语义判断）。
+    """
+    import os
+
+    paths: List[str] = []
+    for value in tool_input.values():
+        if not isinstance(value, str):
+            continue
+        # 绝对路径或 Home 路径
+        if value.startswith("/") or value.startswith("~"):
+            expanded = os.path.expanduser(value)
+            if os.path.isfile(expanded):
+                paths.append(expanded)
+    return paths
+
+
+def _pre_capture_files(
+    context: ToolExecutionContext,
+    tool_input: Dict[str, Any],
+) -> None:
+    """
+    工具执行前：提取 tool_input 中的文件路径，备份到状态快照。
+    """
+    state_mgr = context.state_manager
+    if not state_mgr:
+        return
+
+    file_paths = _extract_file_paths(tool_input)
+    for fp in file_paths:
+        try:
+            state_mgr.ensure_file_captured(context.session_id, fp)
+        except Exception as e:
+            logger.debug(f"文件前置捕获跳过 {fp}: {e}")
+
+
+def _post_record_operation(
+    context: ToolExecutionContext,
+    tool_name: str,
+    tool_input: Dict[str, Any],
+    result: Any,
+) -> None:
+    """
+    工具执行后：将文件操作记录到操作日志。
+
+    通过检查 tool_input 中的文件路径判断是否涉及文件操作。
+    """
+    state_mgr = context.state_manager
+    if not state_mgr:
+        return
+
+    file_paths = _extract_file_paths(tool_input)
+    if not file_paths:
+        return
+
+    from core.state.operation_log import OperationRecord
+
+    for fp in file_paths:
+        try:
+            record = OperationRecord(
+                operation_id=f"op_{tool_name}_{id(result)}",
+                action="file_write",
+                target=fp,
+                before_state=None,  # 已在 pre_capture 中备份到快照
+                after_state=None,
+            )
+            state_mgr.record_operation(context.session_id, record)
+        except Exception as e:
+            logger.debug(f"操作记录跳过 {fp}: {e}")

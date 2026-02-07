@@ -13,8 +13,7 @@ V10.0 更新：统一 Agent 架构，执行策略通过 Executor 实现
 架构：
 - AgentProtocol: 接口定义（Protocol）
 - Agent: 统一实现类（core/agent/base.py），实现 AgentProtocol
-- Executor: 执行策略（RVRExecutor, RVRBExecutor, MultiAgentExecutor 等）
-- MultiAgentOrchestrator: 多智能体编排器（内部实现，通过 MultiAgentExecutor 适配）
+- Executor: 执行策略（RVRExecutor, RVRBExecutor）
 
 核心方法：
 - execute(): 统一执行入口（替代 chat() 和 _execute_dag()）
@@ -122,7 +121,7 @@ class AgentProtocol(Protocol):
             }
 
         实现说明：
-        - Agent 类委托给 Executor 执行（RVRExecutor, RVRBExecutor, MultiAgentExecutor 等）
+        - Agent 类委托给 Executor 执行（RVRExecutor, RVRBExecutor）
         - 执行策略由 Agent.schema.execution_strategy 决定，Factory 负责注入对应的 Executor
         """
         ...

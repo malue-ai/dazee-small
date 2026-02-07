@@ -369,9 +369,7 @@ class AgentRegistry:
         """
         🆕 V7.1: 创建 Agent 原型（部署态预创建）
 
-        根据 schema.multi_agent 自动创建：
-        - SimpleAgent：单智能体原型（含 LLM、工具注册表、MCP 客户端）
-        - MultiAgentOrchestrator：多智能体原型（含 LLM、任务分解器、Worker 配置）
+        创建 Agent 原型（含 LLM、工具注册表、MCP 客户端）
 
         运行时通过 clone_for_session() 复用这些组件，仅重置会话状态
 
@@ -380,7 +378,7 @@ class AgentRegistry:
             event_manager: 共享的事件管理器（用于原型初始化）
 
         Returns:
-            SimpleAgent 或 MultiAgentOrchestrator 原型实例
+            Agent 原型实例
         """
         # 准备 apis_config（用于 api_calling 自动注入认证和请求体模板）
         apis_config = None
@@ -419,7 +417,7 @@ class AgentRegistry:
             logger.warning(f"⚠️ Agent {config.name} 的 PromptCache 未加载，跳过原型创建")
             return None
 
-        # 🆕 V7.1: AgentFactory.from_schema() 会自动根据 schema.multi_agent 创建对应类型
+        # AgentFactory.from_schema() 创建 RVR-B Agent
         agent = await AgentFactory.from_schema(
             schema=config.prompt_cache.agent_schema,
             system_prompt=config.full_prompt,
@@ -437,19 +435,14 @@ class AgentRegistry:
             if instance_config.max_turns:
                 agent._max_steps = instance_config.max_turns
 
-        # 🆕 V7.1: 仅 SimpleAgent 需要设置实例级工具
-        # MultiAgentOrchestrator 的 Worker 使用自己的工具配置
-        if hasattr(agent, "_setup_instance_tools") or type(agent).__name__ == "SimpleAgent":
+        # 设置实例级工具
+        if hasattr(agent, "_setup_instance_tools"):
             await self._setup_instance_tools(agent, config)
 
         # 标记为原型（用于 clone_for_session 判断）
         agent._is_prototype = True
 
-        agent_type = (
-            "MultiAgent"
-            if hasattr(agent.schema, "multi_agent") and agent.schema.multi_agent
-            else "SimpleAgent"
-        )
+        agent_type = "Agent"
         logger.debug(f"   原型类型: {agent_type}")
 
         return agent

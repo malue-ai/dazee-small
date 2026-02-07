@@ -40,17 +40,25 @@ from infra.local_store.engine import (
 from infra.local_store.models import (
     LocalBase,
     LocalConversation,
+    LocalIndexedFile,
     LocalMessage,
     LocalScheduledTask,
     LocalSkillCache,
 )
 
-# FTS5 全文搜索
+# FTS5 全文搜索（消息专用）
 from infra.local_store.fts import (
     FTSResult,
     rebuild_fts_index,
     search_messages,
     search_messages_count,
+)
+
+# 通用 FTS5 引擎（知识检索 + 记忆索引）
+from infra.local_store.generic_fts import (
+    FTS5Hit,
+    FTS5TableConfig,
+    GenericFTS5,
 )
 
 # 向量搜索（可选）
@@ -87,11 +95,16 @@ __all__ = [
     "LocalMessage",
     "LocalScheduledTask",
     "LocalSkillCache",
-    # FTS5
+    "LocalIndexedFile",
+    # FTS5（消息专用）
     "FTSResult",
     "search_messages",
     "search_messages_count",
     "rebuild_fts_index",
+    # 通用 FTS5（知识检索 + 记忆索引）
+    "GenericFTS5",
+    "FTS5TableConfig",
+    "FTS5Hit",
     # 向量
     "VectorSearchResult",
     "create_vector_table",

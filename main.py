@@ -41,7 +41,6 @@ from routers import (
     files_router,
     health_router,
     human_confirmation_router,
-    knowledge_router,
     mem0_router,
     realtime_router,
     settings_router,
@@ -225,14 +224,6 @@ async def _init_chat_service() -> None:
         print(f"⚠️ ChatService 预热失败: {e}")
 
 
-async def _start_health_probe_service() -> Optional[Any]:
-    """
-    启动健康探测服务（已禁用 - 桌面版不需要主备切换）
-    """
-    # 桌面版场景下，健康探测和主备模型切换没有意义，直接跳过
-    return None
-
-
 # ==================== 关闭辅助函数 ====================
 
 async def _cleanup_agent_registry() -> None:
@@ -264,13 +255,6 @@ async def _stop_user_task_scheduler(scheduler: Optional[Any]) -> None:
             print(f"⚠️ 关闭用户任务调度器失败: {e}")
 
 
-async def _stop_health_probe_service(service: Optional[Any]) -> None:
-    """
-    停止健康探测服务（已禁用 - 桌面版不需要）
-    """
-    pass
-
-
 # ==================== 生命周期管理 ====================
 
 @asynccontextmanager
@@ -289,7 +273,6 @@ async def lifespan(app: FastAPI):
     await _init_chat_service()  # 预热 ChatService（避免首次请求冷启动）
     scheduler = await _start_scheduler()
     user_task_scheduler = await _start_user_task_scheduler()  # 🆕 用户定时任务调度器
-    health_probe_service = await _start_health_probe_service()  # 🆕 V7.10: 启动健康探测
     
     yield
     
@@ -297,7 +280,6 @@ async def lifespan(app: FastAPI):
     print("🛑 正在关闭服务...")
     
     await _cleanup_agent_registry()
-    await _stop_health_probe_service(health_probe_service)  # 🆕 V7.10: 停止健康探测
     await _stop_user_task_scheduler(user_task_scheduler)  # 🆕 停止用户任务调度器
     await _stop_scheduler(scheduler)
     await close_all_workspaces()
@@ -346,7 +328,6 @@ app.include_router(conversation_router)
 app.include_router(human_confirmation_router)
 
 # 资源管理
-app.include_router(knowledge_router)
 app.include_router(files_router)
 app.include_router(tools_router)
 

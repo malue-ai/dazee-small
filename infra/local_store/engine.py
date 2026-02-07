@@ -77,14 +77,17 @@ def create_local_engine(
     )
 
     # SQLite 连接初始化：启用 WAL、外键、性能参数
+    # 参考 SQLite 官方最佳实践 https://www.sqlite.org/pragma.html
     @event.listens_for(engine.sync_engine, "connect")
     def _set_sqlite_pragma(dbapi_conn, connection_record):
         cursor = dbapi_conn.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL")
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.execute("PRAGMA synchronous=NORMAL")
-        cursor.execute("PRAGMA cache_size=-64000")  # 64MB
-        cursor.execute("PRAGMA busy_timeout=5000")  # 5 秒
+        cursor.execute("PRAGMA journal_mode=WAL")          # WAL 模式：支持并发读写
+        cursor.execute("PRAGMA foreign_keys=ON")            # 启用外键约束
+        cursor.execute("PRAGMA synchronous=NORMAL")         # WAL 模式下 NORMAL 即安全
+        cursor.execute("PRAGMA cache_size=-64000")          # 64MB 页缓存
+        cursor.execute("PRAGMA busy_timeout=5000")          # 5 秒忙等待（避免 SQLITE_BUSY）
+        cursor.execute("PRAGMA temp_store=MEMORY")          # 临时表/索引放内存（桌面端内存充足）
+        cursor.execute("PRAGMA mmap_size=268435456")        # 256MB 内存映射 I/O（提升读取性能）
         cursor.close()
 
     logger.info(f"SQLite 引擎已创建: {db_path}")

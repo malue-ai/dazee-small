@@ -127,8 +127,7 @@ QOS_EVAL_CONFIGS: Dict[QoSLevel, QoSEvalConfig] = {
             "reasoning/multi_step",
             "reasoning/complex_analysis",      # 复杂分析
             "format/output_structure",
-            "multi_agent/task_decomposition", # 多智能体任务分解
-            "multi_agent/coordination",       # 多智能体协作
+            # V11.0: 移除多智能体评估维度
             "security/input_validation",       # 输入验证
             "security/output_filtering",       # 输出过滤
         ],

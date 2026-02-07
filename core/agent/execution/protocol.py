@@ -19,6 +19,7 @@ ExecutorProtocol - 统一执行协议
         yield event
 """
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import (
     TYPE_CHECKING,
@@ -37,6 +38,7 @@ if TYPE_CHECKING:
     from core.events.broadcaster import EventBroadcaster
     from core.llm.base import BaseLLMService
     from core.routing.types import IntentResult
+    from core.termination.protocol import BaseTerminator
     from core.tool.executor import ToolExecutor
 
 
@@ -60,6 +62,9 @@ class ExecutorConfig:
     # 回溯配置（RVR-B）
     enable_backtrack: bool = False
     max_backtrack_attempts: int = 3
+
+    # V11: 终止策略（有值时替代简单 max_turns 判断）
+    terminator: Optional["BaseTerminator"] = None
 
     # 扩展配置
     extra: Dict[str, Any] = field(default_factory=dict)
@@ -93,6 +98,9 @@ class ExecutionContext:
 
     # 状态
     plan_cache: Dict[str, Any] = field(default_factory=dict)
+
+    # V11: 外部停止信号（用户主动停止）
+    stop_event: Optional[asyncio.Event] = None
 
     # 扩展
     # V10.1: 可包含 usage_tracker, context_engineering, tracer 等

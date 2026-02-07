@@ -19,6 +19,7 @@ import type {
   HITLConfirmRequest
 } from '@/types'
 import { FILE_WRITE_TOOLS, TERMINAL_TOOLS, BACKGROUND_TASKS } from '@/utils'
+import * as sessionApi from '@/api/session'
 
 /**
  * 聊天核心 Composable
@@ -48,6 +49,20 @@ export function useChat() {
 
   /** 待处理的工具调用 */
   const pendingToolCalls = ref<Record<string, { name: string; input: string; id: string }>>({})
+
+  /** V11: 回滚选项弹窗 */
+  const showRollbackModal = ref(false)
+  const rollbackData = ref<{
+    task_id: string
+    options: { id: string; action: string; target: string }[]
+    error?: string
+    reason?: string
+  } | null>(null)
+  const rollbackLoading = ref(false)
+
+  /** V11: 长任务确认弹窗 */
+  const showLongRunConfirmModal = ref(false)
+  const longRunConfirmData = ref<{ turn: number; message: string } | null>(null)
 
   // ==================== 计算属性 ====================
 
@@ -268,6 +283,79 @@ export function useChat() {
   }
 
   /**
+   * V11: 确认回滚（调用后端回滚 API）
+   */
+  async function confirmRollback(): Promise<void> {
+    const sessionId =
+      sessionStore.currentSessionId ||
+      sessionStore.getSessionIdByConversation(conversationStore.currentId) ||
+      rollbackData.value?.task_id
+    if (!sessionId) {
+      console.warn('⚠️ 无法回滚：session_id 不存在')
+      return
+    }
+    rollbackLoading.value = true
+    try {
+      await sessionApi.rollbackSession(sessionId)
+      showRollbackModal.value = false
+      rollbackData.value = null
+    } catch (e) {
+      console.error('❌ 回滚失败:', e)
+      if (rollbackData.value) {
+        rollbackData.value = {
+          ...rollbackData.value,
+          error: (e as Error).message || '回滚请求失败'
+        }
+      }
+    } finally {
+      rollbackLoading.value = false
+    }
+  }
+
+  /**
+   * V11: 关闭回滚弹窗（保持当前状态）
+   */
+  function dismissRollback(): void {
+    showRollbackModal.value = false
+    rollbackData.value = null
+  }
+
+  /**
+   * V11: 用户确认继续长任务（调用后端后关闭弹窗，执行器会继续）
+   */
+  async function confirmLongRunContinue(): Promise<void> {
+    const sessionId =
+      sessionStore.currentSessionId ||
+      sessionStore.getSessionIdByConversation(conversationStore.currentId)
+    if (!sessionId) return
+    try {
+      await sessionApi.confirmContinueSession(sessionId)
+      showLongRunConfirmModal.value = false
+      longRunConfirmData.value = null
+    } catch (e) {
+      console.error('❌ 确认继续失败:', e)
+    }
+  }
+
+  /**
+   * V11: 关闭长任务确认弹窗（用户选择停止则停止会话）
+   */
+  async function dismissLongRunConfirm(): Promise<void> {
+    showLongRunConfirmModal.value = false
+    longRunConfirmData.value = null
+    const sessionId =
+      sessionStore.currentSessionId ||
+      sessionStore.getSessionIdByConversation(conversationStore.currentId)
+    if (sessionId) {
+      try {
+        await sessionApi.stopSession(sessionId)
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  /**
    * 处理流事件
    */
   function handleStreamEvent(event: { type: string; data: any }, msg: UIMessage): void {
@@ -327,6 +415,33 @@ export function useChat() {
       handleContentStop(data, msg)
     }
 
+    // V11: 回滚选项（异常或终止策略触发）
+    if (type === 'rollback_options') {
+      const taskId = data?.task_id || sessionStore.currentSessionId
+      const options = Array.isArray(data?.options) ? data.options : []
+      rollbackData.value = {
+        task_id: taskId || '',
+        options,
+        error: data?.error,
+        reason: data?.reason
+      }
+      showRollbackModal.value = true
+    }
+
+    // V11: 回滚已完成（自动回滚或用户确认回滚后）
+    if (type === 'rollback_completed') {
+      showRollbackModal.value = false
+      rollbackData.value = null
+    }
+
+    // V11: 长任务确认（是否继续执行）
+    if (type === 'long_running_confirm') {
+      longRunConfirmData.value = {
+        turn: data?.turn ?? 0,
+        message: data?.message ?? '任务已执行较多轮次，是否继续？'
+      }
+      showLongRunConfirmModal.value = true
+    }
   }
 
   /**
@@ -721,6 +836,19 @@ export function useChat() {
     isGenerating,
     isStopping,
     hitl,
+
+    // V11: 回滚
+    showRollbackModal,
+    rollbackData,
+    rollbackLoading,
+    confirmRollback,
+    dismissRollback,
+
+    // V11: 长任务确认
+    showLongRunConfirmModal,
+    longRunConfirmData,
+    confirmLongRunContinue,
+    dismissLongRunConfirm,
 
     // 计算属性
     messages,

@@ -35,27 +35,8 @@ context_manager:
 
 # ==================== 数据源配置 ====================
 
-# 知识库提供者（Ragie）
-knowledge_provider:
-  enabled: true
-  name: "ragie"
-  
-  # 检索配置
-  retrieval:
-    top_k: 5  # 每次检索返回的结果数量
-    min_score: 0.7  # 最小相关性评分（低于此值的结果会被过滤）
-  
-  # Ragie 特定配置（TODO: 根据实际 Ragie SDK 调整）
-  ragie:
-    api_key: "${RAGIE_API_KEY}"  # 从环境变量读取
-    endpoint: "https://api.ragie.ai"
-    partition_prefix: "user_"  # 用户分区前缀
-  
-  # 缓存配置（未来优化）
-  cache:
-    enabled: false
-    ttl_seconds: 3600  # 缓存有效期（1小时）
-    max_size: 1000  # 最大缓存条目数
+# V11.0: 知识库提供者已迁移至本地知识检索（core/knowledge/）
+# 云端 Ragie 已移除，由 LocalKnowledgeManager（SQLite FTS5）替代
 
 # 用户记忆提供者（Mem0）
 memory_provider:

@@ -44,7 +44,7 @@
 import json
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Dict, Literal, Optional, Set
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Set
 from uuid import uuid4
 
 from logger import get_logger
@@ -846,9 +846,7 @@ class EventBroadcaster:
         """
         发送原始事件（多智能体场景）
 
-        用于 MultiAgentOrchestrator 产生的特殊事件类型：
-        - orchestrator_start: 协调器开始
-        - task_decomposition: 任务分解
+        用于发送自定义事件类型
         - agent_start: 子 Agent 开始
         - agent_end: 子 Agent 结束
         - orchestrator_summary: 协调器总结
@@ -872,6 +870,129 @@ class EventBroadcaster:
             event_data=event_data,
             output_format=self.output_format,
             adapter=None,
+        )
+
+    # ===========================================================================
+    # V11: 状态一致性 + 进度事件
+    # ===========================================================================
+
+    async def emit_rollback_options(
+        self,
+        session_id: str,
+        task_id: str,
+        options: List[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """
+        V11: 推送回滚选项事件（供前端 HITL 展示）
+
+        Args:
+            session_id: Session ID
+            task_id: 任务/会话 ID
+            options: 回滚选项列表 [{"id", "action", "target"}, ...]
+        """
+        return await self.events.system.emit_custom(
+            session_id=session_id,
+            conversation_id=self.output_conversation_id,
+            event_type="rollback_options",
+            event_data={
+                "task_id": task_id,
+                "options": options,
+            },
+            output_format=self.output_format,
+        )
+
+    async def emit_rollback_result(
+        self,
+        session_id: str,
+        task_id: str,
+        success: bool,
+        message: str = "",
+    ) -> Optional[Dict[str, Any]]:
+        """
+        V11: 推送回滚结果通知
+
+        Args:
+            session_id: Session ID
+            task_id: 任务/会话 ID
+            success: 回滚是否成功
+            message: 结果描述
+        """
+        return await self.events.system.emit_custom(
+            session_id=session_id,
+            conversation_id=self.output_conversation_id,
+            event_type="rollback_result",
+            event_data={
+                "task_id": task_id,
+                "success": success,
+                "message": message,
+            },
+            output_format=self.output_format,
+        )
+
+    async def emit_progress_update(
+        self,
+        session_id: str,
+        step_id: str,
+        message: str,
+        percent: Optional[float] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        V11: 推送用户友好进度更新事件
+
+        Args:
+            session_id: Session ID
+            step_id: 步骤 ID
+            message: 用户友好进度消息
+            percent: 可选完成百分比 (0.0 ~ 1.0)
+        """
+        data: Dict[str, Any] = {
+            "step_id": step_id,
+            "message": message,
+        }
+        if percent is not None:
+            data["percent"] = percent
+
+        return await self.events.system.emit_custom(
+            session_id=session_id,
+            conversation_id=self.output_conversation_id,
+            event_type="progress_update",
+            event_data=data,
+            output_format=self.output_format,
+        )
+
+
+    async def emit_playbook_suggestion(
+        self,
+        session_id: str,
+        playbook_id: str,
+        name: str,
+        description: str,
+        strategy_summary: str,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        V11: 推送 Playbook 策略建议事件（供前端 HITL 确认）
+
+        任务完成后 LLM 初筛生成候选策略，推送给用户确认：
+        "小搭子学到了一个新技巧，要记住吗？"
+
+        Args:
+            session_id: Session ID
+            playbook_id: 候选策略 ID
+            name: 策略名称
+            description: 策略描述
+            strategy_summary: 策略摘要（展示给用户）
+        """
+        return await self.events.system.emit_custom(
+            session_id=session_id,
+            conversation_id=self.output_conversation_id,
+            event_type="playbook_suggestion",
+            event_data={
+                "playbook_id": playbook_id,
+                "name": name,
+                "description": description,
+                "strategy_summary": strategy_summary,
+            },
+            output_format=self.output_format,
         )
 
 

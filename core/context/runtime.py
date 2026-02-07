@@ -161,7 +161,7 @@ class ContentAccumulator:
         accumulator = ContentAccumulator()
 
         # 并行处理多个 block
-        accumulator.on_content_start({"type": "tool_use", "id": "t1", "name": "tavily_search"}, index=0)
+        accumulator.on_content_start({"type": "tool_use", "id": "t1", "name": "plan"}, index=0)
         accumulator.on_content_start({"type": "tool_use", "id": "t2", "name": "api_calling"}, index=1)
         accumulator.on_content_delta('{"query": "AI news"}', index=0)
         accumulator.on_content_delta('{"api_name": "weather"}', index=1)
@@ -513,6 +513,9 @@ class RuntimeContext:
     current_turn: int = 0  # 当前 turn
     max_turns: int = 20  # 最大 turn 数
 
+    # === 自适应终止（V11）===
+    consecutive_failures: int = 0  # 连续失败次数（工具错误/超时等）
+
     # === 结果状态 ===
     final_result: Optional[str] = None  # 最终结果
     stop_reason: Optional[str] = None  # 停止原因
@@ -520,11 +523,14 @@ class RuntimeContext:
 
     # === 时间戳 ===
     start_time: Optional[datetime] = None  # 开始时间
+    last_activity_time: Optional[datetime] = None  # 最后活动时间（用于 idle 检测）
 
     def __post_init__(self) -> None:
         """初始化后处理"""
         if self.start_time is None:
             self.start_time = datetime.now()
+        if self.last_activity_time is None:
+            self.last_activity_time = self.start_time
 
     # === 消息管理方法 ===
 
@@ -596,6 +602,24 @@ class RuntimeContext:
         """检查是否达到最大 turn 数"""
         return self.current_turn >= self.max_turns
 
+    @property
+    def duration_seconds(self) -> float:
+        """已执行时长（秒）"""
+        if not self.start_time:
+            return 0.0
+        return (datetime.now() - self.start_time).total_seconds()
+
+    @property
+    def idle_seconds(self) -> float:
+        """距上次活动的空闲时长（秒）"""
+        if not self.last_activity_time:
+            return 0.0
+        return (datetime.now() - self.last_activity_time).total_seconds()
+
+    def touch_activity(self) -> None:
+        """更新最后活动时间（每次 LLM 响应或工具调用时调用）"""
+        self.last_activity_time = datetime.now()
+
     # === 状态重置方法 ===
 
     def reset_for_turn(self) -> None:
@@ -617,9 +641,12 @@ class RuntimeContext:
         self.accumulator = ContentAccumulator()
         self.step_index = 0
         self.current_turn = 0
+        self.consecutive_failures = 0
         self.final_result = None
         self.stop_reason = None
-        self.start_time = datetime.now()
+        now = datetime.now()
+        self.start_time = now
+        self.last_activity_time = now
 
     # === 完成状态方法 ===
 

@@ -27,11 +27,23 @@ INTENT_RECOGNITION_PROMPT = """# 意图分类器
 {
   "complexity": "simple|medium|complex",
   "agent_type": "rvr|rvr-b|multi",
-  "skip_memory": true|false
+  "skip_memory": true|false,
+  "wants_to_stop": true|false
 }
 ```
 
 **所有字段必填**，不要省略。
+
+---
+
+## wants_to_stop（用户是否希望停止/取消）
+
+- **true**: 用户明确或隐含表示要停止、取消、不做了、算了、别继续了等
+  - 例: "算了不做了"、"取消吧"、"别继续了"、"就到这里"、"停止"
+  - 例: "不用了谢谢"、"先这样"（在任务进行中时）
+- **false**: 用户在进行正常任务请求或追问
+
+**默认: false**（不确定时视为不停止）
 
 ---
 
@@ -80,12 +92,12 @@ INTENT_RECOGNITION_PROMPT = """# 意图分类器
 
 <example>
 <query>今天上海天气怎么样？</query>
-<output>{"complexity": "simple", "agent_type": "rvr", "skip_memory": true}</output>
+<output>{"complexity": "simple", "agent_type": "rvr", "skip_memory": true, "wants_to_stop": false}</output>
 </example>
 
 <example>
 <query>帮我写一个 Python 快速排序函数</query>
-<output>{"complexity": "medium", "agent_type": "rvr", "skip_memory": false}</output>
+<output>{"complexity": "medium", "agent_type": "rvr", "skip_memory": false, "wants_to_stop": false}</output>
 </example>
 
 <example>
@@ -125,7 +137,17 @@ INTENT_RECOGNITION_PROMPT = """# 意图分类器
 
 <example>
 <query>帮我写一份竞品分析报告</query>
-<output>{"complexity": "complex", "agent_type": "rvr-b", "skip_memory": false}</output>
+<output>{"complexity": "complex", "agent_type": "rvr-b", "skip_memory": false, "wants_to_stop": false}</output>
+</example>
+
+<example>
+<query>算了不做了</query>
+<output>{"complexity": "simple", "agent_type": "rvr", "skip_memory": true, "wants_to_stop": true}</output>
+</example>
+
+<example>
+<query>取消吧，别继续了</query>
+<output>{"complexity": "simple", "agent_type": "rvr", "skip_memory": true, "wants_to_stop": true}</output>
 </example>
 
 ---

@@ -10,7 +10,7 @@ Prompt Builder - System Blocks 构建器
 架构位置：
 - 这是 agent 内部的 Builder 层
 - 组合 core/context/injectors 的能力
-- 供 Agent/MultiAgentOrchestrator 调用
+- 供 Agent 调用
 
 调用链：
     Agent._build_system_message()

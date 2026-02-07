@@ -619,6 +619,61 @@ async def stop_session(session_id: str):
     return APIResponse(code=200, message="Session 已停止", data=result)
 
 
+@router.post("/session/{session_id}/confirm_continue", response_model=APIResponse[Dict])
+@handle_exceptions("确认继续长任务")
+async def confirm_continue_session(session_id: str):
+    """
+    用户确认继续长任务（V11 终止策略）
+
+    当执行器发出 long_running_confirm 事件后，前端调用此接口表示用户点击「继续」。
+    """
+    logger.info(f"📨 长任务确认继续: session_id={session_id}")
+    session_service.confirm_long_running(session_id)
+    return APIResponse(code=200, message="已确认继续", data={"session_id": session_id})
+
+
+@router.post("/session/{session_id}/rollback", response_model=APIResponse[Dict])
+@handle_exceptions("回滚会话状态")
+async def rollback_session(session_id: str):
+    """
+    执行状态回滚（V11 状态一致性）
+
+    当任务异常或用户选择回滚时，将文件与环境恢复到任务开始前的快照。
+
+    ## 参数
+    - **session_id**: 会话 ID（与 execute 时使用的 session_id 一致）
+
+    ## 返回
+    - **messages**: 回滚结果消息列表（如 "已恢复: /path/to/file"）
+    """
+    logger.info(f"📨 回滚请求: session_id={session_id}")
+
+    state_mgr = session_service.get_state_manager(session_id)
+    if not state_mgr:
+        raise HTTPException(
+            status_code=404,
+            detail="无可用快照或会话已结束，无法回滚",
+        )
+
+    snapshot_id = state_mgr.get_snapshot_for_task(session_id)
+    if not snapshot_id:
+        raise HTTPException(
+            status_code=404,
+            detail="未找到该任务对应的快照",
+        )
+
+    messages = state_mgr.rollback(snapshot_id)
+    session_service.unregister_state_manager(session_id)
+
+    logger.info(f"✅ 回滚完成: session_id={session_id}, 结果数={len(messages)}")
+
+    return APIResponse(
+        code=200,
+        message="回滚完成",
+        data={"session_id": session_id, "messages": messages},
+    )
+
+
 # ==================== Session 管理接口 ====================
 
 

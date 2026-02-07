@@ -308,7 +308,7 @@ class ToolMaskConfig:
             AgentState.PLANNING: ["plan_"],
             AgentState.BROWSING: ["web_", "browser_", "exa_"],
             AgentState.CODING: ["code_"],
-            AgentState.SEARCHING: ["web_", "exa_", "knowledge_"],
+            AgentState.SEARCHING: ["web_", "exa_"],
             AgentState.EXECUTING: ["*"],  # 允许所有
             AgentState.VALIDATING: ["plan_", "file_"],
         }

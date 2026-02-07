@@ -91,7 +91,7 @@ class AgentCreateRequest(BaseModel):
     # 工具能力
     enabled_capabilities: Dict[str, bool] = Field(
         default_factory=dict,
-        description="启用的工具能力，如 {'web_search': True, 'knowledge_search': False}"
+        description="启用的工具能力，如 {'code_execution': True, 'document_skills': False}"
     )
     
     # MCP 工具
@@ -113,8 +113,7 @@ class AgentCreateRequest(BaseModel):
                     "model": "claude-sonnet-4-5-20250929",
                     "max_turns": 20,
                     "enabled_capabilities": {
-                        "tavily_search": True,
-                        "knowledge_search": True
+                        "code_execution": False,
                     },
                     "mcp_tools": [
                         {
@@ -175,7 +174,7 @@ class AgentDetail(BaseModel):
     plan_manager_enabled: bool = Field(False, description="是否启用计划管理器")
     enabled_capabilities: Dict[str, bool] = Field(
         default_factory=dict, 
-        description="启用的工具能力，如 {'tavily_search': True, 'knowledge_search': True}"
+        description="启用的工具能力，如 {'code_execution': True, 'document_skills': False}"
     )
     mcp_tools: List[MCPToolDetail] = Field(default_factory=list, description="MCP 工具配置列表")
     apis: List[APIDetail] = Field(default_factory=list, description="API 配置列表")

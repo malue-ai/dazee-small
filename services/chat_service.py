@@ -27,7 +27,6 @@ from uuid import uuid4
 from config.llm_config.loader import get_llm_profile
 from core.agent import Agent
 from core.agent.errors import ErrorClassifier
-from core.agent.models import MultiAgentConfig, load_multi_agent_config
 from core.context.compaction import (  # 🆕 带摘要的智能压缩（双阈值机制）
     CompressionPhase,
     QoSLevel,
@@ -87,7 +86,6 @@ class PreprocessingResult:
     """前置处理结果"""
 
     intent: Optional["IntentResult"]
-    use_multi_agent: bool
 
 
 class PreprocessingHandler:
@@ -147,16 +145,15 @@ class PreprocessingHandler:
             enable_intent: 是否启用意图识别
 
         Returns:
-            PreprocessingResult 包含 intent、use_multi_agent
+            PreprocessingResult 包含 intent
         """
-        use_multi_agent = False
         routing_intent = None
 
         # 意图识别
         if enable_intent and router:
             history_for_intent = history_messages[:-1] if history_messages else []
 
-            routing_intent, use_multi_agent = await self._analyze_intent(
+            routing_intent = await self._analyze_intent(
                 user_message=user_message,
                 history_messages=history_for_intent,
                 router=router,
@@ -165,13 +162,11 @@ class PreprocessingHandler:
         elif not enable_intent:
             # 意图识别已关闭，使用默认 IntentResult
             routing_intent = IntentResult(
-                complexity=Complexity.MEDIUM, agent_type="rvr", skip_memory=False, confidence=1.0
+                complexity=Complexity.MEDIUM, skip_memory=False, confidence=1.0
             )
             logger.debug("意图识别已跳过，使用默认 IntentResult")
 
-        return PreprocessingResult(
-            intent=routing_intent, use_multi_agent=use_multi_agent,
-        )
+        return PreprocessingResult(intent=routing_intent)
 
     async def _analyze_intent(
         self,
@@ -179,7 +174,7 @@ class PreprocessingHandler:
         history_messages: List[Dict[str, Any]],
         router: "AgentRouter",
         tracker: Optional["UsageTracker"],
-    ) -> tuple[Optional["IntentResult"], bool]:
+    ) -> Optional["IntentResult"]:
         """
         执行意图识别
 
@@ -187,21 +182,18 @@ class PreprocessingHandler:
             user_message: 用户消息（支持 str 或多模态 list）
 
         Returns:
-            (routing_intent, use_multi_agent)
+            routing_intent: 意图分析结果
         """
         with log_execution_time("路由决策", logger):
             routing_decision = await router.route(
                 user_query=user_message, conversation_history=history_messages, tracker=tracker
             )
-            use_multi_agent = routing_decision.is_multi_agent
             routing_intent = routing_decision.intent
 
         logger.info(
             "路由决策",
             extra={
                 "complexity": routing_intent.complexity.value if routing_intent else "medium",
-                "agent_type": routing_intent.agent_type if routing_intent else "rvr",
-                "use_multi_agent": use_multi_agent,
             },
         )
 
@@ -210,14 +202,13 @@ class PreprocessingHandler:
                 "Intent 详情",
                 extra={
                     "complexity": routing_intent.complexity.value,
-                    "agent_type": routing_intent.agent_type,
                     "skip_memory": routing_intent.skip_memory,
                     "needs_plan": routing_intent.needs_plan,
                     "confidence": routing_intent.confidence,
                 },
             )
 
-        return routing_intent, use_multi_agent
+        return routing_intent
 
 # ==================== 异常定义 ====================
 
@@ -257,16 +248,12 @@ class ChatService:
         session_service: Optional[SessionService] = None,
         qos_level: QoSLevel = QoSLevel.PRO,
         enable_routing: bool = True,
-        multi_agent_config: Optional["MultiAgentConfig"] = None,
     ):
         self.session_service = session_service or get_session_service()
 
         # 资源池（本地轻量实现）
         self.session_pool = get_local_session_pool()
         self.agent_pool = get_local_agent_pool()
-
-        # 多智能体配置（延迟加载）
-        self.multi_agent_config = multi_agent_config
 
         # 依赖服务
         self.conversation_service = get_conversation_service()
@@ -371,10 +358,19 @@ class ChatService:
 
         # 创建新的 Router（共用 intent_llm，避免重复创建 LLM 服务）
         intent_llm = await self.get_intent_llm()
+        # 从实例 Schema 注入意图分析器扩展配置（fast_mode / semantic_cache_threshold / simplified_output）
+        intent_kw = {}
+        if prompt_cache and getattr(prompt_cache, "agent_schema", None) and prompt_cache.agent_schema:
+            ia = getattr(prompt_cache.agent_schema, "intent_analyzer", None)
+            if ia is not None:
+                intent_kw["fast_mode"] = getattr(ia, "fast_mode", False)
+                intent_kw["semantic_cache_threshold"] = getattr(ia, "semantic_cache_threshold", None)
+                intent_kw["simplified_output"] = getattr(ia, "simplified_output", True)
         router = AgentRouter(
-            llm_service=intent_llm,  # 使用统一的 Intent LLM（带主备切换）
+            llm_service=intent_llm,
             enable_llm=True,
             prompt_cache=prompt_cache,
+            **intent_kw,
         )
 
         self._routers[cache_key] = router
@@ -444,6 +440,9 @@ class ChatService:
 
         # 清理停止事件（内存级）
         self.session_service.clear_stop_event(session_id)
+
+        # V11: 注销状态一致性管理器
+        self.session_service.unregister_state_manager(session_id)
 
     @asynccontextmanager
     async def acquire_agent_context(self, agent_id: str, session_id: str, user_id: str):
@@ -982,7 +981,7 @@ class ChatService:
             is_new_conversation=is_new_conversation,
             event_manager=events,
             conversation_service=self.conversation_service,
-            metadata={"agent_type": routing_intent.agent_type if routing_intent else None},
+            metadata={},
         )
 
         await self.background_tasks.dispatch_tasks(
@@ -1191,7 +1190,6 @@ class ChatService:
             )
 
             routing_intent = preprocessing_result.intent
-            use_multi_agent = preprocessing_result.use_multi_agent
 
             # 确保 intent 不为 None（Agent 要求必须传入）
             if routing_intent is None:
@@ -1199,10 +1197,14 @@ class ChatService:
 
                 routing_intent = IntentResult(
                     complexity=Complexity.MEDIUM,
-                    agent_type="rvr",
                     skip_memory=False,
                     confidence=1.0,
                 )
+
+            # V11: 用户停止信号语义识别（LLM 推断 wants_to_stop 时，设置停止事件）
+            if getattr(routing_intent, "wants_to_stop", False):
+                logger.info("意图分析: 用户希望停止/取消，设置停止标志")
+                self.session_service.get_stop_event(session_id).set()
 
             # 设置输出格式
             if hasattr(agent, "broadcaster") and agent.broadcaster:
@@ -1218,126 +1220,26 @@ class ChatService:
 
             _assistant_text_for_tasks = ""
 
-            # 根据路由决策选择执行路径
-            if use_multi_agent:
-                # 多智能体执行
-                multi_agent_start = time.time()
-                logger.info("启用多智能体模式", extra={"session_id": session_id})
+            # 单智能体执行（RVR-B 策略）
+            single_agent_start = time.time()
 
-                if self.multi_agent_config is None:
-                    self.multi_agent_config = await load_multi_agent_config()
+            # V11: 注册状态一致性管理器，供回滚 API 使用
+            state_mgr = getattr(agent, "_state_consistency_manager", None)
+            if state_mgr and getattr(agent, "_state_consistency_enabled", False):
+                self.session_service.register_state_manager(session_id, state_mgr)
 
-                # 🆕 V10.1: 通过 Factory 创建多智能体（不直接 new）
-                from core.agent.factory import AgentFactory
+            # V11: 长任务确认等待（执行器 yield long_running_confirm 后 await 此函数）
+            agent._wait_long_run_confirm_async = (
+                lambda s=session_id: self.session_service.wait_long_run_confirm(s)
+            )
 
-                # 构建 RoutingDecision（用于 Factory）
-                multi_decision = RoutingDecision(
-                    agent_type="multi",
-                    intent=routing_intent,
-                    user_query=current_message,
-                    conversation_history=history_messages,
-                )
-
-                orchestrator = AgentFactory.create_multi_agent(
-                    schema=agent.schema,
-                    event_manager=(
-                        agent.broadcaster.event_manager
-                        if hasattr(agent.broadcaster, "event_manager")
-                        else None
-                    ),
-                    conversation_service=self.conversation_service,
-                    prompt_cache=agent.prompt_cache if hasattr(agent, "prompt_cache") else None,
-                    system_prompt=agent.system_prompt if hasattr(agent, "system_prompt") else None,
-                    multi_agent_config=self.multi_agent_config,
-                    broadcaster=agent.broadcaster,
-                )
-
-                # 设置上下文（用于工具执行时的上下文注入）
-                orchestrator.set_context(
-                    session_id=session_id, user_id=user_id, conversation_id=conversation_id
-                )
-
-                # 🆕 V10.1: 执行多智能体（事件通过 broadcaster 内部发送到 content_* 通道）
-                # Orchestrator 内部直接调用 broadcaster.emit_content_*，无需在此处理事件
-                # ContentAccumulator 自动累积，emit_message_stop 时自动存储
-                async for _ in orchestrator.execute(
-                    messages=history_messages,
-                    session_id=session_id,
-                    intent=routing_intent,
-                    enable_stream=True,
-                    message_id=assistant_message_id,
-                ):
-                    # V10.1: 事件已通过 content_* 通道直接发送，这里无需处理
-                    # execute() 仍是 AsyncGenerator 以支持未来扩展（如恢复信号）
-                    pass
-
-                # 累积 orchestrator 的 usage 到共享 tracker
-                if orchestrator.usage_stats:
-                    shared_tracker.accumulate_from_dict(
-                        {
-                            "input_tokens": orchestrator.usage_stats.get("total_input_tokens", 0),
-                            "output_tokens": orchestrator.usage_stats.get("total_output_tokens", 0),
-                            "thinking_tokens": orchestrator.usage_stats.get(
-                                "total_thinking_tokens", 0
-                            ),
-                            "cache_read_tokens": orchestrator.usage_stats.get(
-                                "total_cache_read_tokens", 0
-                            ),
-                            "cache_creation_tokens": orchestrator.usage_stats.get(
-                                "total_cache_creation_tokens", 0
-                            ),
-                        }
-                    )
-
-                multi_agent_duration = (time.time() - multi_agent_start) * 1000
-                logger.info(
-                    "多智能体执行完成",
-                    extra={
-                        "operation": "多智能体执行",
-                        "duration_ms": round(multi_agent_duration, 2),
-                    },
-                )
-
-                # 🆕 V10.1: metadata 通过 message_delta 发送（自动存储）
-                # ContentAccumulator 已累积所有 content_blocks，无需手动 build_content_blocks()
-                multi_agent_metadata = orchestrator.get_multi_agent_metadata()
-                await agent.broadcaster.emit_message_delta(
-                    session_id=session_id,
-                    delta=multi_agent_metadata,
-                    message_id=assistant_message_id,
-                    persist=True,
-                )
-
-                # 在 message_stop 前执行后台任务
-                if background_tasks:
-                    _assistant_text_for_tasks = await self._dispatch_background_tasks(
-                        background_tasks=background_tasks,
-                        session_id=session_id,
-                        conversation_id=conversation_id,
-                        user_id=user_id,
-                        message_id=assistant_message_id,
-                        message=current_message,
-                        is_new_conversation=is_new_conversation,
-                        events=events,
-                        broadcaster=agent.broadcaster,
-                        routing_intent=routing_intent,
-                    )
-                    background_tasks = []
-
-                await agent.broadcaster.emit_message_stop(
-                    session_id=session_id, message_id=assistant_message_id
-                )
-            else:
-                # 单智能体执行
-                single_agent_start = time.time()
-
-                async for event in agent.chat(
-                    messages=history_messages,
-                    session_id=session_id,
-                    message_id=assistant_message_id,
-                    enable_stream=True,
-                    intent=routing_intent,
-                ):
+            async for event in agent.chat(
+                messages=history_messages,
+                session_id=session_id,
+                message_id=assistant_message_id,
+                enable_stream=True,
+                intent=routing_intent,
+            ):
                     if event is None:
                         continue
 
@@ -1424,14 +1326,14 @@ class ChatService:
                             self.conversation_service, event, conversation_id
                         )
 
-                single_agent_duration = (time.time() - single_agent_start) * 1000
-                logger.info(
-                    "单智能体执行 完成",
-                    extra={
-                        "operation": "单智能体执行",
-                        "duration_ms": round(single_agent_duration, 2),
-                    },
-                )
+            single_agent_duration = (time.time() - single_agent_start) * 1000
+            logger.info(
+                "单智能体执行 完成",
+                extra={
+                    "operation": "单智能体执行",
+                    "duration_ms": round(single_agent_duration, 2),
+                },
+            )
 
             # 阶段 3: 完成处理
             duration_ms = int((time.time() - start_time) * 1000)

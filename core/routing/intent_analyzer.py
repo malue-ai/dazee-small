@@ -1,10 +1,11 @@
 """
-V10.0 IntentAnalyzer - 意图分析器（简化版）
+V11.0 IntentAnalyzer - 意图分析器（小搭子简化版）
 
 核心理念：
 - 意图分析通过 LLM 语义理解完成
-- 只输出 3 个核心字段：complexity, agent_type, skip_memory
-- 其他字段（needs_plan, execution_strategy）由代码推断
+- 只输出 3 个核心字段：complexity, skip_memory, is_follow_up
+- 其他字段（needs_plan）由代码推断
+- 不需要 agent_type（固定 RVR-B）
 
 设计原则：
 - LLM-First：语义驱动决策
@@ -31,19 +32,27 @@ logger = get_logger(__name__)
 
 class IntentAnalyzer:
     """
-    V10.0 意图分析器（简化版）
+    V11.0 意图分析器（小搭子简化版）
 
     策略：LLM-First 语义推理
-    - 只解析 3 个核心字段
-    - 其他字段通过 property 推断
+    - 只解析 complexity、skip_memory、is_follow_up
+    - 固定使用 RVR-B 执行策略，不需要 agent_type
 
     使用方式：
         analyzer = IntentAnalyzer(llm_service)
         result = await analyzer.analyze([{"role": "user", "content": "..."}])
-        print(result.complexity, result.agent_type)
+        print(result.complexity, result.skip_memory)
     """
 
-    def __init__(self, llm_service=None, enable_llm: bool = True, prompt_cache=None):
+    def __init__(
+        self,
+        llm_service=None,
+        enable_llm: bool = True,
+        prompt_cache=None,
+        fast_mode: bool = False,
+        semantic_cache_threshold: Optional[float] = None,
+        simplified_output: bool = True,
+    ):
         """
         初始化意图分析器
 
@@ -51,10 +60,16 @@ class IntentAnalyzer:
             llm_service: LLM 服务（用于意图分析）
             enable_llm: 是否启用 LLM 分析（False 则使用保守默认值）
             prompt_cache: InstancePromptCache（获取缓存的意图识别提示词）
+            fast_mode: 快速模式（可使用更快模型，由调用方选模型）
+            semantic_cache_threshold: 语义缓存命中阈值（0-1），None 则用缓存默认
+            simplified_output: 仅输出简化字段
         """
         self.llm = llm_service
         self.enable_llm = enable_llm and llm_service is not None
         self._prompt_cache = prompt_cache
+        self.fast_mode = fast_mode
+        self.semantic_cache_threshold = semantic_cache_threshold
+        self.simplified_output = simplified_output
 
     async def analyze(self, messages: List[Dict[str, Any]], tracker=None) -> IntentResult:
         """
@@ -65,7 +80,7 @@ class IntentAnalyzer:
             tracker: UsageTracker 实例（可选）
 
         Returns:
-            IntentResult 意图分析结果（3 个核心字段 + 推断属性）
+            IntentResult 意图分析结果
         """
         if self.enable_llm:
             result = await self._analyze_with_llm(messages, tracker=tracker)
@@ -75,8 +90,8 @@ class IntentAnalyzer:
         logger.info(
             f"意图分析结果: "
             f"complexity={result.complexity.value}, "
-            f"agent_type={result.agent_type}, "
             f"skip_memory={result.skip_memory}, "
+            f"is_follow_up={result.is_follow_up}, "
             f"needs_plan={result.needs_plan}"
         )
 
@@ -164,7 +179,7 @@ class IntentAnalyzer:
 
     def _parse_llm_response(self, content: str) -> IntentResult:
         """
-        解析 LLM 响应（只解析 3 个核心字段）
+        解析 LLM 响应（只解析核心字段，不包含 agent_type）
 
         Args:
             content: LLM 响应内容
@@ -182,23 +197,32 @@ class IntentAnalyzer:
             except ValueError:
                 complexity = Complexity.MEDIUM
 
-            # 解析 agent_type
-            agent_type = parsed.get("agent_type", "rvr")
-            if agent_type not in ("rvr", "rvr-b", "multi"):
-                agent_type = "rvr"
-
             # 解析 skip_memory
             skip_memory = parsed.get("skip_memory", False)
             if not isinstance(skip_memory, bool):
                 skip_memory = False
 
+            # 解析 is_follow_up
+            is_follow_up = parsed.get("is_follow_up", False)
+            if not isinstance(is_follow_up, bool):
+                is_follow_up = False
+
+            # 解析 wants_to_stop（用户停止/取消意图，LLM 语义推断）
+            wants_to_stop = parsed.get("wants_to_stop", False)
+            if not isinstance(wants_to_stop, bool):
+                wants_to_stop = False
+
             logger.debug(
                 f"解析成功: complexity={complexity.value}, "
-                f"agent_type={agent_type}, skip_memory={skip_memory}"
+                f"skip_memory={skip_memory}, is_follow_up={is_follow_up}, "
+                f"wants_to_stop={wants_to_stop}"
             )
 
             return IntentResult(
-                complexity=complexity, agent_type=agent_type, skip_memory=skip_memory
+                complexity=complexity,
+                skip_memory=skip_memory,
+                is_follow_up=is_follow_up,
+                wants_to_stop=wants_to_stop,
             )
         else:
             logger.warning(f"无法解析 JSON: {content[:100]}...")
@@ -208,16 +232,25 @@ class IntentAnalyzer:
         """
         获取保守默认值
 
-        策略：中等复杂度，单智能体，不跳过记忆
+        策略：中等复杂度，不跳过记忆，非追问
         """
         logger.info("使用保守默认值")
         return IntentResult(
-            complexity=Complexity.MEDIUM, agent_type="rvr", skip_memory=False, confidence=0.3
+            complexity=Complexity.MEDIUM,
+            skip_memory=False,
+            is_follow_up=False,
+            wants_to_stop=False,
+            confidence=0.3,
         )
 
 
 def create_intent_analyzer(
-    llm_service=None, enable_llm: bool = True, prompt_cache=None
+    llm_service=None,
+    enable_llm: bool = True,
+    prompt_cache=None,
+    fast_mode: bool = False,
+    semantic_cache_threshold: Optional[float] = None,
+    simplified_output: bool = True,
 ) -> IntentAnalyzer:
     """
     创建意图分析器
@@ -226,8 +259,18 @@ def create_intent_analyzer(
         llm_service: LLM 服务
         enable_llm: 是否启用 LLM 分析
         prompt_cache: InstancePromptCache
+        fast_mode: 快速模式
+        semantic_cache_threshold: 语义缓存命中阈值
+        simplified_output: 仅输出简化字段
 
     Returns:
         IntentAnalyzer 实例
     """
-    return IntentAnalyzer(llm_service=llm_service, enable_llm=enable_llm, prompt_cache=prompt_cache)
+    return IntentAnalyzer(
+        llm_service=llm_service,
+        enable_llm=enable_llm,
+        prompt_cache=prompt_cache,
+        fast_mode=fast_mode,
+        semantic_cache_threshold=semantic_cache_threshold,
+        simplified_output=simplified_output,
+    )

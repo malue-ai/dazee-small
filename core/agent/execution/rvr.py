@@ -261,6 +261,7 @@ class RVRExecutor(BaseExecutor):
         # 保存最终响应
         if final_response:
             ctx.last_llm_response = final_response
+            ctx.touch_activity()  # 更新活动时间（idle_timeout 检测）
             # 累积 usage
             usage_tracker.accumulate(final_response)
 
@@ -279,6 +280,7 @@ class RVRExecutor(BaseExecutor):
         plan_cache: Dict = None,
         plan_todo_tool=None,
         event_manager=None,
+        state_manager=None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         处理工具调用（流式，V10.2 使用 ToolExecutionFlow）
@@ -295,6 +297,7 @@ class RVRExecutor(BaseExecutor):
             plan_cache: Plan 缓存（可选）
             plan_todo_tool: Plan 工具（可选）
             event_manager: 事件管理器（可选）
+            state_manager: 状态一致性管理器（可选，V11）
 
         Yields:
             SSE 事件
@@ -314,13 +317,14 @@ class RVRExecutor(BaseExecutor):
         # 创建 ToolExecutionContext
         tool_context = ToolExecutionContext(
             session_id=session_id,
-            conversation_id=conversation_id,  # 🆕 传递 conversation_id
+            conversation_id=conversation_id,
             tool_executor=tool_executor,
             broadcaster=broadcaster,
             event_manager=event_manager,
             context_engineering=context_engineering,
             plan_cache=plan_cache or {},
             plan_todo_tool=plan_todo_tool,
+            state_manager=state_manager,
         )
 
         # 创建 ToolExecutionFlow（带特殊处理器）
@@ -392,6 +396,13 @@ class RVRExecutor(BaseExecutor):
         # 添加 user 消息（包含 tool_result）
         append_user_message(llm_messages, tool_results)
 
+        # 更新连续失败计数（供终止策略与自动回滚使用）
+        if any(r.get("is_error") for r in tool_results):
+            ctx.consecutive_failures += 1
+        else:
+            ctx.consecutive_failures = 0
+        ctx.touch_activity()  # 工具执行完成，更新活动时间（idle_timeout 检测）
+
     async def _handle_last_turn_tools(
         self,
         response: "LLMResponse",
@@ -408,6 +419,7 @@ class RVRExecutor(BaseExecutor):
         plan_cache: Dict = None,
         plan_todo_tool=None,
         event_manager=None,
+        state_manager=None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         处理最后一轮的工具调用
@@ -427,6 +439,7 @@ class RVRExecutor(BaseExecutor):
             plan_cache=plan_cache,
             plan_todo_tool=plan_todo_tool,
             event_manager=event_manager,
+            state_manager=state_manager,
         ):
             yield event
 
@@ -506,6 +519,7 @@ class RVRExecutor(BaseExecutor):
         context_engineering = context.extra.get("context_engineering")
         plan_todo_tool = context.extra.get("plan_todo_tool")
         event_manager = context.extra.get("event_manager")
+        state_manager = context.extra.get("state_manager")
 
         logger.info(f"🚀 RVRExecutor 开始执行: max_turns={cfg.max_turns}")
 
@@ -553,6 +567,7 @@ class RVRExecutor(BaseExecutor):
                 )
 
             ctx.next_turn()
+            ctx.touch_activity()  # 更新活动时间（用于 idle_timeout 检测）
             logger.info(f"{'='*60}")
             logger.info(f"🔄 Turn {turn + 1}/{cfg.max_turns}")
             logger.info(f"{'='*60}")
@@ -582,6 +597,39 @@ class RVRExecutor(BaseExecutor):
 
                     # 处理工具调用
                     if response.stop_reason == "tool_use" and response.tool_calls:
+                        # V11: HITL 危险操作确认（执行前检查待执行工具名）
+                        if cfg.terminator:
+                            try:
+                                pending_names = [
+                                    t.get("name") for t in response.tool_calls if t.get("name")
+                                ]
+                                from core.termination.protocol import TerminationAction
+
+                                hitl_decision = cfg.terminator.evaluate(
+                                    ctx,
+                                    last_stop_reason="tool_use",
+                                    pending_tool_names=pending_names,
+                                )
+                                if (
+                                    hitl_decision.action == TerminationAction.ASK_USER
+                                    and "hitl_confirm" in (hitl_decision.reason or "")
+                                ):
+                                    yield {
+                                        "type": "hitl_confirm",
+                                        "data": {
+                                            "reason": hitl_decision.reason,
+                                            "tools": pending_names,
+                                            "message": "危险操作需用户确认",
+                                        },
+                                    }
+                                    ctx.stop_reason = hitl_decision.reason or "hitl_confirm"
+                                    break
+                            except Exception as e:
+                                logger.warning(
+                                    f"HITL 检查异常，继续执行: {e}",
+                                    exc_info=True,
+                                )
+
                         is_last_turn = turn == cfg.max_turns - 1
                         if is_last_turn:
                             async for event in self._handle_last_turn_tools(
@@ -599,6 +647,7 @@ class RVRExecutor(BaseExecutor):
                                 plan_cache=plan_cache,
                                 plan_todo_tool=plan_todo_tool,
                                 event_manager=event_manager,
+                                state_manager=state_manager,
                             ):
                                 yield event
                             break
@@ -616,6 +665,7 @@ class RVRExecutor(BaseExecutor):
                             plan_cache=plan_cache,
                             plan_todo_tool=plan_todo_tool,
                             event_manager=event_manager,
+                            state_manager=state_manager,
                         ):
                             yield event
                     else:
@@ -652,6 +702,7 @@ class RVRExecutor(BaseExecutor):
                         plan_cache=plan_cache,
                         plan_todo_tool=plan_todo_tool,
                         event_manager=event_manager,
+                        state_manager=state_manager,
                     ):
                         yield event
 
@@ -680,11 +731,66 @@ class RVRExecutor(BaseExecutor):
                     plan_cache=plan_cache,
                     plan_todo_tool=plan_todo_tool,
                     event_manager=event_manager,
+                    state_manager=state_manager,
                 ):
                     pass  # 非流式不 yield 事件
 
             if ctx.is_completed():
                 break
+
+            # V11: 终止策略（有 terminator 时替代仅靠 max_turns 的简单判断）
+            if cfg.terminator and not ctx.is_completed():
+                try:
+                    from core.termination.protocol import TerminationAction
+
+                    last_reason = (
+                        getattr(ctx.last_llm_response, "stop_reason", None)
+                        if ctx.last_llm_response
+                        else None
+                    )
+                    # V11: 传入 stop_requested（外部停止信号）
+                    _stop_requested = (
+                        context.stop_event.is_set() if context.stop_event else False
+                    )
+                    decision = cfg.terminator.evaluate(
+                        ctx,
+                        last_stop_reason=last_reason,
+                        stop_requested=_stop_requested,
+                        pending_tool_names=None,
+                    )
+                    if decision.should_stop:
+                        ctx.stop_reason = decision.reason or "terminator"
+                        # V11: ROLLBACK_OPTIONS — yield 回滚选项事件
+                        if decision.action == TerminationAction.ROLLBACK_OPTIONS:
+                            yield {
+                                "type": "rollback_options_hint",
+                                "data": {
+                                    "reason": decision.reason,
+                                    "message": "连续失败，建议回滚",
+                                },
+                            }
+                        break
+                    # 长任务确认：yield 事件后等待用户点击「继续」
+                    if (
+                        decision.action == TerminationAction.ASK_USER
+                        and decision.reason == "long_running_confirm"
+                    ):
+                        wait_fn = (context.extra or {}).get("wait_long_run_confirm_async")
+                        if callable(wait_fn):
+                            yield {
+                                "type": "long_running_confirm",
+                                "data": {
+                                    "turn": ctx.current_turn,
+                                    "message": f"任务已执行 {ctx.current_turn} 轮，是否继续？",
+                                },
+                            }
+                            await wait_fn()
+                            cfg.terminator.confirm_long_running()
+                except Exception as e:
+                    logger.warning(
+                        f"terminator.evaluate() 异常，继续执行: {e}",
+                        exc_info=True,
+                    )
 
         logger.info(f"✅ RVRExecutor 执行完成: turns={ctx.current_turn}")
 

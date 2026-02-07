@@ -129,75 +129,6 @@ async def get_llm_profile(profile_name: str, **overrides) -> Dict[str, Any]:
     return profile
 
 
-async def get_health_probe_config() -> Dict[str, Any]:
-    """
-    获取健康探测配置
-    
-    配置优先级：环境变量 > profiles.yaml > 默认值
-    
-    Returns:
-        健康探测配置字典
-        
-    Example:
-        config = await get_health_probe_config()
-        # {
-        #     "request_probe": {"timeout_seconds": 5.0, "max_retries": 1},
-        #     "background_probe": {
-        #         "enabled": True,
-        #         "interval_seconds": 120,
-        #         "timeout_seconds": 10,
-        #         "profiles": ["main_agent", "intent_analyzer", ...]
-        #     }
-        # }
-    """
-    config = await _load_config()
-    
-    # 默认配置
-    default_config = {
-        "request_probe": {
-            "timeout_seconds": 5.0,
-            "max_retries": 1
-        },
-        "background_probe": {
-            "enabled": True,
-            "interval_seconds": 120,
-            "timeout_seconds": 10,
-            "profiles": ["main_agent", "intent_analyzer"]
-        }
-    }
-    
-    # 从 profiles.yaml 读取配置（如果存在）
-    health_probe_config = config.get("health_probe", default_config)
-    
-    # 环境变量覆盖
-    if os.getenv("LLM_PROBE_TIMEOUT"):
-        health_probe_config.setdefault("request_probe", {})
-        health_probe_config["request_probe"]["timeout_seconds"] = float(os.getenv("LLM_PROBE_TIMEOUT"))
-    
-    if os.getenv("LLM_HEALTH_PROBE_ENABLED"):
-        health_probe_config.setdefault("background_probe", {})
-        health_probe_config["background_probe"]["enabled"] = \
-            os.getenv("LLM_HEALTH_PROBE_ENABLED").lower() in ("true", "1", "yes")
-    
-    if os.getenv("LLM_HEALTH_PROBE_INTERVAL"):
-        health_probe_config.setdefault("background_probe", {})
-        health_probe_config["background_probe"]["interval_seconds"] = \
-            int(os.getenv("LLM_HEALTH_PROBE_INTERVAL"))
-    
-    if os.getenv("LLM_HEALTH_PROBE_TIMEOUT"):
-        health_probe_config.setdefault("background_probe", {})
-        health_probe_config["background_probe"]["timeout_seconds"] = \
-            float(os.getenv("LLM_HEALTH_PROBE_TIMEOUT"))
-    
-    if os.getenv("LLM_HEALTH_PROBE_PROFILES"):
-        health_probe_config.setdefault("background_probe", {})
-        profiles_str = os.getenv("LLM_HEALTH_PROBE_PROFILES")
-        health_probe_config["background_probe"]["profiles"] = \
-            [p.strip() for p in profiles_str.split(",")]
-    
-    return health_probe_config
-
-
 async def list_profiles() -> Dict[str, str]:
     """
     列出所有可用的 LLM Profile
@@ -312,5 +243,4 @@ __all__ = [
     "list_profiles",
     "reload_config",
     "get_llm_profile_from_env",
-    "get_health_probe_config",
 ]

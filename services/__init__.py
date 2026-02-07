@@ -35,14 +35,7 @@ from .file_service import (
     FileServiceError,
     get_file_service,
 )
-from .knowledge_service import (
-    DocumentNotFoundError,
-    DocumentProcessingError,
-    KnowledgeService,
-    KnowledgeServiceError,
-    UserNotFoundError,
-    get_knowledge_service,
-)
+# V11.0: 移除 KnowledgeService（云端 Ragie 已删除）
 from .mcp_service import (
     MCPAlreadyExistsError,
 )
@@ -86,13 +79,6 @@ from .user_task_scheduler import (
 )
 
 __all__ = [
-    # Knowledge Service
-    "KnowledgeService",
-    "get_knowledge_service",
-    "KnowledgeServiceError",
-    "DocumentNotFoundError",
-    "UserNotFoundError",
-    "DocumentProcessingError",
     # Session Service
     "SessionService",
     "get_session_service",

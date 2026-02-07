@@ -15,9 +15,10 @@
 - Skills 自动生命周期管理
 """
 
+import asyncio
 import os
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -120,6 +121,9 @@ class InstanceConfig:
     # 意图分析器配置
     intent_analyzer_enabled: Optional[bool] = None
     intent_analyzer_use_llm: Optional[bool] = None
+    intent_analyzer_fast_mode: Optional[bool] = None
+    intent_analyzer_semantic_cache_threshold: Optional[float] = None
+    intent_analyzer_simplified_output: Optional[bool] = None
 
     # 开场白配置（Preface）
     preface_enabled: Optional[bool] = None
@@ -143,10 +147,14 @@ class InstanceConfig:
     smart_retrieval: bool = True
     retention_policy: str = "user"
 
-    # Multi-Agent 配置（暂时禁用，作为待扩展功能）
-    multi_agent_enabled: bool = False
-    max_concurrent_workers: int = 5
-    workers: List[Any] = field(default_factory=list)
+    # ===== 小搭子扩展配置（V11）=====
+    # 未配置时为 None，由对应模块使用默认值
+    termination: Optional[Dict[str, Any]] = None  # 终止策略（adaptive 等）
+    skills_classification: Optional[Dict[str, Any]] = None  # Skills 二维分类 common/darwin/win32/linux
+    skills_first_config: Optional[Dict[str, Any]] = None  # V11 Skills-First 统一配置
+    knowledge: Optional[Dict[str, Any]] = None  # 本地知识检索
+    project: Optional[Dict[str, Any]] = None  # 项目管理
+    state_consistency: Optional[Dict[str, Any]] = None  # 状态一致性（快照、回滚）
 
     # 原始配置
     raw_config: Dict[str, Any] = field(default_factory=dict)
@@ -292,17 +300,43 @@ async def load_instance_config(instance_name: str) -> InstanceConfig:
     apis = await _load_apis_config(instance_name, raw_config.get("apis", []))
 
     # 解析通用工具启用配置
-    enabled_capabilities_raw = raw_config.get("enabled_capabilities", {})
-    enabled_capabilities = {}
-    if isinstance(enabled_capabilities_raw, dict):
-        # 将配置值转换为布尔值（1/True -> True, 0/False -> False）
-        for tool_name, enabled in enabled_capabilities_raw.items():
-            if isinstance(enabled, bool):
-                enabled_capabilities[tool_name] = enabled
-            elif isinstance(enabled, int):
-                enabled_capabilities[tool_name] = bool(enabled)
-            else:
-                logger.warning(f"⚠️ 工具 {tool_name} 的启用配置值无效: {enabled}，将被忽略")
+    # V11: 检测 Skills-First 新格式（skills 含 common/darwin 等 OS 键）
+    skills_raw = raw_config.get("skills", {})
+    skills_first_config = None
+
+    if isinstance(skills_raw, dict) and any(
+        k in skills_raw for k in ("common", "darwin", "win32", "linux")
+    ):
+        # Skills-First 新格式：从 SkillsLoader 派生 enabled_capabilities
+        skills_first_config = skills_raw
+        logger.info("   检测到 Skills-First 配置格式，使用 SkillsLoader")
+
+        from core.skill import create_skills_loader
+
+        _loader = create_skills_loader(
+            skills_config=skills_raw,
+            instance_skills_dir=instance_dir / "skills",
+        )
+        # 异步加载（load_instance_config 本身是 async）
+        _entries = await _loader.load()
+        enabled_capabilities = _loader.get_enabled_capabilities()
+
+        logger.info(
+            f"   Skills-First: {len(_entries)} 个 Skills, "
+            f"派生 {len(enabled_capabilities)} 个 enabled_capabilities"
+        )
+    else:
+        # 旧格式：直接从 enabled_capabilities 字段读取
+        enabled_capabilities_raw = raw_config.get("enabled_capabilities", {})
+        enabled_capabilities = {}
+        if isinstance(enabled_capabilities_raw, dict):
+            for tool_name, enabled in enabled_capabilities_raw.items():
+                if isinstance(enabled, bool):
+                    enabled_capabilities[tool_name] = enabled
+                elif isinstance(enabled, int):
+                    enabled_capabilities[tool_name] = bool(enabled)
+                else:
+                    logger.warning(f"⚠️ 工具 {tool_name} 的启用配置值无效: {enabled}，将被忽略")
 
     # 解析 advanced 配置（高级配置，可选）
     # 未配置时使用 DEFAULT_AGENT_SCHEMA 的高质量默认值兜底
@@ -328,6 +362,9 @@ async def load_instance_config(instance_name: str) -> InstanceConfig:
         # 高级配置（从 advanced 部分读取）
         intent_analyzer_enabled=intent_config.get("enabled"),
         intent_analyzer_use_llm=intent_config.get("use_llm"),
+        intent_analyzer_fast_mode=intent_config.get("fast_mode"),
+        intent_analyzer_semantic_cache_threshold=intent_config.get("semantic_cache_threshold"),
+        intent_analyzer_simplified_output=intent_config.get("simplified_output"),
         preface_enabled=preface_config.get("enabled"),
         preface_max_tokens=preface_config.get("max_tokens"),
         plan_manager_max_steps=plan_config.get("max_steps"),
@@ -343,10 +380,13 @@ async def load_instance_config(instance_name: str) -> InstanceConfig:
         mem0_enabled=memory_config.get("mem0_enabled", True),
         smart_retrieval=memory_config.get("smart_retrieval", True),
         retention_policy=memory_config.get("retention_policy", "user"),
-        # Multi-Agent 配置（暂时禁用）
-        multi_agent_enabled=raw_config.get("multi_agent", {}).get("mode", "disabled") != "disabled",
-        max_concurrent_workers=raw_config.get("multi_agent", {}).get("max_parallel_workers", 5),
-        workers=[],  # Workers 暂不解析，待扩展
+        # 小搭子扩展配置（V11）
+        termination=raw_config.get("termination") if isinstance(raw_config.get("termination"), dict) else None,
+        skills_classification=raw_config.get("skills_classification") if isinstance(raw_config.get("skills_classification"), dict) else None,
+        skills_first_config=skills_first_config,
+        knowledge=raw_config.get("knowledge") if isinstance(raw_config.get("knowledge"), dict) else None,
+        project=raw_config.get("project") if isinstance(raw_config.get("project"), dict) else None,
+        state_consistency=raw_config.get("state_consistency") if isinstance(raw_config.get("state_consistency"), dict) else None,
         raw_config=raw_config,
     )
 
@@ -597,6 +637,12 @@ def _merge_config_to_schema(base_schema, config: InstanceConfig):
         merged.intent_analyzer.enabled = config.intent_analyzer_enabled
     if config.intent_analyzer_use_llm is not None:
         merged.intent_analyzer.use_llm = config.intent_analyzer_use_llm
+    if config.intent_analyzer_fast_mode is not None:
+        merged.intent_analyzer.fast_mode = config.intent_analyzer_fast_mode
+    if config.intent_analyzer_semantic_cache_threshold is not None:
+        merged.intent_analyzer.semantic_cache_threshold = config.intent_analyzer_semantic_cache_threshold
+    if config.intent_analyzer_simplified_output is not None:
+        merged.intent_analyzer.simplified_output = config.intent_analyzer_simplified_output
 
     # === 开场白配置覆盖（Preface）===
     if config.preface_enabled is not None:
@@ -762,26 +808,46 @@ async def create_agent_from_instance(
     load_instance_env(instance_name)
 
     # 2. 加载实例配置
-    config = load_instance_config(instance_name)
+    config = await load_instance_config(instance_name)
     logger.info(f"   配置: {config.name} v{config.version}")
     logger.info(f"   描述: {config.description}")
+
+    # V11: Skills-First 加载器（统一处理 Skills 二维分类）
+    skills_loader = None
+    if config.skills_first_config:
+        from core.skill import create_skills_loader
+
+        skills_loader = create_skills_loader(
+            skills_config=config.skills_first_config,
+            instance_skills_dir=instance_path / "skills",
+        )
+        skill_entries = await skills_loader.load()
+        available_count = len(skills_loader.get_available_skills())
+        logger.info(
+            f"   Skills-First: {len(skill_entries)} 个 Skills, "
+            f"{available_count} 个可用"
+        )
+    elif config.skills_classification:
+        # 旧格式兼容
+        from core.skill import OSSkillMerger
+
+        merger = OSSkillMerger(config.skills_classification)
+        enabled_names = merger.get_enabled_skills()
+        if enabled_names:
+            config = replace(
+                config,
+                skills=[s for s in config.skills if s.name in enabled_names],
+            )
+            logger.info(f"   Skills（按 OS 过滤）: {len(config.skills)} 个")
+        unavailable = merger.get_unavailable_skills()
+        if unavailable:
+            logger.debug(f"   当前不可用（其他 OS）: {unavailable}")
+
     logger.info(f"   Skills: {len(config.skills)} 个")
     logger.info(f"   APIs: {len(config.apis)} 个")
 
-    # 🆕 V6.0 显示 Multi-Agent 配置
-    # 注意：只有当 multi_agent_enabled=True 时才显示 Workers 信息
-    if config.multi_agent_enabled:
-        enabled_workers = [w for w in config.workers if w.enabled]
-        logger.info(f"   Multi-Agent: 已启用 (最大并发: {config.max_concurrent_workers})")
-        if config.workers:
-            logger.info(f"   Workers: {len(config.workers)} 个 ({len(enabled_workers)} 启用)")
-            for worker in enabled_workers:
-                logger.info(f"      • {worker.name} ({worker.specialization})")
-    else:
-        logger.info(f"   Multi-Agent: 已禁用（使用 SimpleAgent）")
-
     # 3. 加载实例提示词
-    instance_prompt = load_instance_prompt(instance_name)
+    instance_prompt = await load_instance_prompt(instance_name)
     logger.info(f"   提示词长度: {len(instance_prompt)} 字符")
 
     # 🆕 V5.0: 一次性加载 InstancePromptCache（核心改动）
@@ -886,21 +952,39 @@ async def create_agent_from_instance(
         # 策略：config.yaml 显式配置覆盖 Schema，未配置则使用 Schema 默认值
         merged_schema = _merge_config_to_schema(base_schema, config)
 
-        # 注入 multi_agent 配置到合并后的 Schema
-        if config.multi_agent_enabled:
-            from core.multi_agent.config import MultiAgentConfig
-
-            multi_agent_config = MultiAgentConfig.from_dict(
-                config.raw_config.get("multi_agent", {})
-            )
-            merged_schema.multi_agent = multi_agent_config
-
-            logger.info(
-                f"✅ 注入 multi_agent 配置到 AgentSchema: mode={multi_agent_config.mode.value}"
-            )
-
         # 更新 prompt_cache 中的 agent_schema（供后续使用）
         prompt_cache.agent_schema = merged_schema
+
+        # V11: 终止策略（始终启用 adaptive，使用框架默认值，无需配置）
+        terminator = None
+        try:
+            from core.termination import AdaptiveTerminator, AdaptiveTerminatorConfig, HITLConfig
+
+            # 从 config 读取覆盖值，未配置则使用默认值
+            t = config.termination or {}
+            hitl_raw = t.get("hitl", {}) if isinstance(t, dict) else {}
+
+            terminator = AdaptiveTerminator(
+                AdaptiveTerminatorConfig(
+                    max_turns=t.get("max_turns", 100) if isinstance(t, dict) else 100,
+                    max_duration_seconds=t.get("max_duration_seconds", 1800) if isinstance(t, dict) else 1800,
+                    idle_timeout_seconds=t.get("idle_timeout_seconds", 120) if isinstance(t, dict) else 120,
+                    consecutive_failure_limit=t.get("consecutive_failure_limit", 5) if isinstance(t, dict) else 5,
+                    long_running_confirm_after_turns=t.get("long_running_confirm_after_turns", 20) if isinstance(t, dict) else 20,
+                    hitl=HITLConfig(
+                        enabled=hitl_raw.get("enabled", True),
+                        require_confirmation=hitl_raw.get("require_confirmation", [
+                            "delete", "overwrite", "send_email", "publish", "payment",
+                        ]),
+                        on_rejection=hitl_raw.get("on_rejection", "ask_rollback"),
+                        show_rollback_on_error=hitl_raw.get("show_rollback_on_error", True),
+                    ),
+                )
+            )
+            logger.info("   终止策略: adaptive（框架内置，始终启用）")
+        except ImportError:
+            logger.warning("   终止策略: 未安装 core.termination，使用框架默认")
+            terminator = None
 
         # 创建 Agent，使用合并后的 Schema
         # prompt_cache 包含：
@@ -912,7 +996,62 @@ async def create_agent_from_instance(
             event_manager=event_manager,
             conversation_service=conversation_service,
             prompt_cache=prompt_cache,
+            terminator=terminator,
         )
+
+        # V11: 状态一致性（仅当实例配置了 state_consistency 且 enabled 为 true 时启用）
+        try:
+            from core.state import (
+                ConsistencyCheckConfig,
+                RollbackConfig,
+                SnapshotConfig,
+                StateConsistencyConfig,
+                StateConsistencyManager,
+            )
+
+            sc_raw = config.state_consistency if isinstance(config.state_consistency, dict) else {}
+            enabled = bool(sc_raw and sc_raw.get("enabled", True))
+            snap_raw = sc_raw.get("snapshot") if isinstance(sc_raw.get("snapshot"), dict) else {}
+            rb_raw = sc_raw.get("rollback") if isinstance(sc_raw.get("rollback"), dict) else {}
+            cc_raw = sc_raw.get("consistency_check") if isinstance(sc_raw.get("consistency_check"), dict) else {}
+
+            sc_config = StateConsistencyConfig(
+                enabled=bool(enabled),
+                snapshot=SnapshotConfig(
+                    storage_path=snap_raw.get("storage_path", "~/.xiaodazi/snapshots"),
+                    retention_hours=int(snap_raw.get("retention_hours", 24)),
+                    max_size_mb=int(snap_raw.get("max_size_mb", 500)),
+                    capture_cwd=bool(snap_raw.get("capture_cwd", True)),
+                    capture_files=bool(snap_raw.get("capture_files", True)),
+                    capture_clipboard=bool(snap_raw.get("capture_clipboard", True)),
+                ),
+                rollback=RollbackConfig(
+                    auto_rollback_on_consecutive_failures=int(
+                        rb_raw.get("auto_rollback_on_consecutive_failures", 3)
+                    ),
+                    auto_rollback_on_critical_error=bool(
+                        rb_raw.get("auto_rollback_on_critical_error", True)
+                    ),
+                    rollback_timeout_seconds=int(rb_raw.get("rollback_timeout_seconds", 60)),
+                ),
+                consistency_check=ConsistencyCheckConfig(
+                    pre_task_disk_space_mb=int(cc_raw.get("pre_task_disk_space_mb", 100)),
+                    pre_task_check_permissions=bool(cc_raw.get("pre_task_check_permissions", True)),
+                    post_task_check_integrity=bool(cc_raw.get("post_task_check_integrity", True)),
+                ),
+            )
+            agent._state_consistency_manager = StateConsistencyManager(config=sc_config)
+            agent._state_consistency_enabled = sc_config.enabled
+            if sc_config.enabled:
+                logger.info(
+                    f"   状态一致性: 已启用（快照={sc_config.snapshot.storage_path}, "
+                    f"自动回滚={sc_config.rollback.auto_rollback_on_critical_error}）"
+                )
+            else:
+                logger.info("   状态一致性: 未启用")
+        except Exception as e:
+            logger.warning(f"状态一致性初始化失败（不阻断启动）: {e}", exc_info=True)
+
         logger.info("✅ Agent 创建成功（使用动态提示词路由）")
     else:
         # Fallback: 如果缓存加载失败，使用完整拼接版本
@@ -936,8 +1075,19 @@ async def create_agent_from_instance(
 
     logger.info(f"✅ Agent 创建成功")
 
-    # 🆕 V9.0: 注入实例级 Skills（本地 Skill 系统）
-    if config.skills:
+    # V11: 注入 SkillsLoader 和 Skills 提示词
+    if skills_loader:
+        agent._skills_loader = skills_loader
+        agent._instance_skills = []  # 新格式由 skills_loader 管理
+
+        # 构建 Skills 提示词并注入到运行时上下文
+        skills_prompt = await skills_loader.build_skills_prompt()
+        if skills_prompt and hasattr(prompt_cache, "runtime_context") and prompt_cache.runtime_context:
+            prompt_cache.runtime_context["skills_prompt"] = skills_prompt
+            logger.info(f"   Skills 提示词: {len(skills_prompt)} 字符已注入")
+    elif config.skills:
+        # 旧格式兼容
+        agent._skills_loader = None
         agent._instance_skills = config.skills
         enabled_instance_skills = [s for s in config.skills if s.enabled]
         if enabled_instance_skills:
@@ -945,16 +1095,8 @@ async def create_agent_from_instance(
             for skill in enabled_instance_skills:
                 logger.debug(f"      • {skill.name}")
     else:
+        agent._skills_loader = None
         agent._instance_skills = []
-
-    # 🆕 V6.0: 注入 Workers 配置（仅当 Multi-Agent 启用时）
-    if config.multi_agent_enabled:
-        agent.workers_config = config.workers
-        if config.workers:
-            enabled_workers = [w for w in config.workers if w.enabled]
-            logger.info(f"   注入 Workers 配置: {len(enabled_workers)} 个启用")
-    else:
-        agent.workers_config = []  # 禁用时清空 Workers 配置
 
     # 9. 🆕 创建实例级工具注册表
     from core.tool import InstanceRegistry, create_tool_loader, get_capability_registry
@@ -1661,7 +1803,7 @@ def print_available_instances():
     print(f"📦 可用实例 ({len(instances)} 个):")
     for name in instances:
         try:
-            config = load_instance_config(name)
+            config = asyncio.run(load_instance_config(name))
             print(f"   • {name}: {config.description or '(无描述)'}")
         except Exception as e:
             print(f"   • {name}: ⚠️ 配置加载失败 ({str(e)})")
@@ -1710,7 +1852,7 @@ if __name__ == "__main__":
 
         # ==================== 显示实例信息 ====================
         elif args.instance and args.info:
-            config = load_instance_config(args.instance)
+            config = asyncio.run(load_instance_config(args.instance))
             print(f"📋 实例信息: {args.instance}")
             print(f"   名称: {config.name}")
             print(f"   描述: {config.description}")
@@ -1750,31 +1892,6 @@ if __name__ == "__main__":
             for api in config.apis:
                 doc_status = f"文档: {api.doc}" if api.doc else "无文档"
                 print(f"      • {api.name}: {api.base_url} ({doc_status})")
-
-            # 🆕 V6.0 Multi-Agent 配置
-            ma_status = "启用" if config.multi_agent_enabled else "禁用"
-            print(f"   Multi-Agent: {ma_status}")
-
-            # 只有当 Multi-Agent 启用时才显示 Workers 信息
-            if config.multi_agent_enabled:
-                print(f"      最大并发 Workers: {config.max_concurrent_workers}")
-                enabled_workers = [w for w in config.workers if w.enabled]
-                print(f"      Workers: {len(config.workers)} 个 ({len(enabled_workers)} 启用)")
-                for worker in config.workers:
-                    status = "✅" if worker.enabled else "⬜"
-                    # 根据类型显示不同信息
-                    if worker.worker_type == "agent":
-                        prompt_len = len(worker.system_prompt) if worker.system_prompt else 0
-                        info = f"{prompt_len} 字符"
-                    elif worker.worker_type == "mcp":
-                        info = f"MCP → {worker.server_url or '未配置'}"
-                    elif worker.worker_type == "workflow":
-                        info = f"{worker.platform or 'custom'} → {worker.workflow_id or worker.workflow_url or '未配置'}"
-                    else:
-                        info = worker.worker_type
-                    print(
-                        f"         {status} {worker.name} [{worker.worker_type}] ({worker.specialization}): {info}"
-                    )
 
         else:
             parser.print_help()

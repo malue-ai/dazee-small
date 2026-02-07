@@ -73,7 +73,7 @@ class ClaudeLLMService(BaseLLMService):
     - Client Tools: computer_use
     - Context Editing: 自动清理长上下文
 
-    注：所有服务器工具已移除，搜索使用 tavily_search/exa_search
+    注：所有服务器工具已移除，搜索通过 Skills 提供
 
     使用示例：
     ```python
@@ -94,7 +94,7 @@ class ClaudeLLMService(BaseLLMService):
 
     # Claude 原生工具的 API 格式映射
     # 注：所有服务器工具已移除（web_search, code_execution, tool_search, memory）
-    # 搜索使用 tavily_search/exa_search
+    # 搜索通过 Skills 提供
     NATIVE_TOOLS = {
         # Client-side Tools
         "computer": {

@@ -682,12 +682,7 @@ class EvaluationHarness:
                 success_criteria=success_criteria,
             )
         
-        elif rubric == "grade_multi_agent_coordination":
-            subtask_results = transcript.metadata.get("subtask_results", [])
-            result = await self.model_graders.grade_multi_agent_coordination(
-                transcript=transcript,
-                subtask_results=subtask_results,
-            )
+        # V11.0: 移除 grade_multi_agent_coordination（不再支持多智能体）
         
         elif rubric == "grade_against_reference":
             reference_answer = task.reference_answer or ""

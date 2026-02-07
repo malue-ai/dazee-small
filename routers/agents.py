@@ -119,8 +119,6 @@ AGENT_TEMPLATES = [
             "max_turns": 10,
             "plan_manager_enabled": False,
             "enabled_capabilities": {
-                "tavily_search": True,
-                "knowledge_search": False,                
                 "code_execution": False,
             },
             "llm": {
@@ -145,8 +143,6 @@ AGENT_TEMPLATES = [
             "max_turns": 20,
             "plan_manager_enabled": True,
             "enabled_capabilities": {
-                "tavily_search": True,
-                "knowledge_search": True,
                 "code_execution": False,
             },
             "llm": {
@@ -172,8 +168,6 @@ AGENT_TEMPLATES = [
             "max_turns": 30,
             "plan_manager_enabled": True,
             "enabled_capabilities": {
-                "tavily_search": True,
-                "knowledge_search": True,
                 "code_execution": True,
                 "document_skills": True,
             },

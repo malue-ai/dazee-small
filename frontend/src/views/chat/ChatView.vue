@@ -162,6 +162,24 @@
       @submit="handleHITLSubmit"
       @cancel="handleHITLCancel"
     />
+
+    <!-- V11: 回滚选项模态框 -->
+    <RollbackOptionsModal
+      :show="chat.showRollbackModal.value"
+      :options="chat.rollbackData.value?.options"
+      :error="chat.rollbackData.value?.error"
+      :loading="chat.rollbackLoading.value"
+      @confirm="chat.confirmRollback"
+      @dismiss="chat.dismissRollback"
+    />
+
+    <!-- V11: 长任务确认模态框 -->
+    <LongRunConfirmModal
+      :show="chat.showLongRunConfirmModal.value"
+      :data="chat.longRunConfirmData.value"
+      @confirm="chat.confirmLongRunContinue"
+      @dismiss="chat.dismissLongRunConfirm"
+    />
   </div>
 </template>
 
@@ -189,6 +207,8 @@ import FileExplorer from '@/components/workspace/FileExplorer.vue'
 import FilePreview from '@/components/workspace/FilePreview.vue'
 import AttachmentPreview from '@/components/modals/AttachmentPreview.vue'
 import ConfirmModal from '@/components/modals/ConfirmModal.vue'
+import RollbackOptionsModal from '@/components/modals/RollbackOptionsModal.vue'
+import LongRunConfirmModal from '@/components/modals/LongRunConfirmModal.vue'
 
 // Types
 import type { Conversation, AttachedFile, PlanData, HITLResponse, FileItem } from '@/types'

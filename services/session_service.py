@@ -79,6 +79,12 @@ class SessionService:
         # 停止事件（内存级）
         self._stop_events: Dict[str, asyncio.Event] = {}
 
+        # V11: 状态一致性管理器（按 session_id 注册，供回滚 API 使用）
+        self._state_managers: Dict[str, Any] = {}
+
+        # V11: 长任务确认（用户点击「继续」后 set，执行器 await）
+        self._long_run_confirm_events: Dict[str, asyncio.Event] = {}
+
     # ==================== Session 生命周期 ====================
 
     async def create_session(
@@ -181,6 +187,63 @@ class SessionService:
             session_id: Session ID
         """
         self._stop_events.pop(session_id, None)
+
+    # ==================== 状态一致性（V11 回滚）====================
+
+    def register_state_manager(self, session_id: str, manager: Any) -> None:
+        """
+        注册 session 的状态一致性管理器（供回滚 API 使用）
+
+        Args:
+            session_id: Session ID
+            manager: StateConsistencyManager 实例
+        """
+        self._state_managers[session_id] = manager
+        logger.debug(f"已注册 state_manager: session_id={session_id}")
+
+    def get_state_manager(self, session_id: str) -> Optional[Any]:
+        """获取 session 的状态一致性管理器"""
+        return self._state_managers.get(session_id)
+
+    def unregister_state_manager(self, session_id: str) -> None:
+        """注销 session 的状态一致性管理器"""
+        self._state_managers.pop(session_id, None)
+        logger.debug(f"已注销 state_manager: session_id={session_id}")
+
+    # ==================== 长任务确认（V11）====================
+
+    def get_long_run_confirm_event(self, session_id: str) -> asyncio.Event:
+        """获取或创建长任务确认事件（执行器 await 此事件）"""
+        if session_id not in self._long_run_confirm_events:
+            self._long_run_confirm_events[session_id] = asyncio.Event()
+        return self._long_run_confirm_events[session_id]
+
+    def confirm_long_running(self, session_id: str) -> None:
+        """用户确认继续长任务（前端调用后 set 事件，执行器继续）"""
+        ev = self._long_run_confirm_events.get(session_id)
+        if ev:
+            ev.set()
+            logger.debug(f"长任务已确认继续: session_id={session_id}")
+
+    async def wait_long_run_confirm(
+        self, session_id: str, timeout: float = 300.0
+    ) -> bool:
+        """
+        等待用户确认继续长任务（执行器在 yield long_running_confirm 后调用）
+
+        Returns:
+            True 表示用户确认继续，False 表示超时
+        """
+        ev = self.get_long_run_confirm_event(session_id)
+        try:
+            await asyncio.wait_for(ev.wait(), timeout=timeout)
+            return True
+        except asyncio.TimeoutError:
+            logger.warning(f"长任务确认超时: session_id={session_id}")
+            return False
+        finally:
+            ev.clear()
+            self._long_run_confirm_events.pop(session_id, None)
 
     async def stop_session(self, session_id: str) -> Dict[str, Any]:
         """

@@ -26,7 +26,6 @@ from .loader import (
     list_profiles,
     reload_config,
     get_llm_profile_from_env,
-    get_health_probe_config,
 )
 
 __all__ = [
@@ -34,7 +33,6 @@ __all__ = [
     "list_profiles",
     "reload_config",
     "get_llm_profile_from_env",
-    "get_health_probe_config",
 ]
 
 __version__ = "1.0.0"

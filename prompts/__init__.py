@@ -6,8 +6,8 @@ Prompt 管理模块
 使用方式：
     from prompts import load_prompt
 
-    prompt = load_prompt("multi_agent/subagent")
-    prompt_with_vars = load_prompt("multi_agent/task_decomposition", max_subtasks=10)
+    prompt = load_prompt("agent/system")
+    prompt_with_vars = load_prompt("agent/task_planning", max_steps=10)
 """
 
 from pathlib import Path
@@ -20,7 +20,7 @@ def load_prompt(name: str, **variables) -> str:
     从 prompts/ 目录加载 .md 文件并注入变量
 
     Args:
-        name: Prompt 路径（如 "multi_agent/subagent"，不含 .md 后缀）
+        name: Prompt 路径（如 "agent/system"，不含 .md 后缀）
         **variables: 模板变量（对应 .md 文件中的 {variable_name} 占位符）
 
     Returns:
@@ -30,7 +30,7 @@ def load_prompt(name: str, **variables) -> str:
         FileNotFoundError: 如果 .md 文件不存在
 
     Example:
-        prompt = load_prompt("multi_agent/task_decomposition", max_subtasks=10)
+        prompt = load_prompt("agent/task_planning", max_steps=10)
     """
     path = PROMPTS_DIR / f"{name}.md"
     if not path.exists():

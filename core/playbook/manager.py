@@ -121,47 +121,42 @@ class PlaybookEntry:
             data["status"] = PlaybookStatus(data["status"])
         return cls(**data)
 
-    def matches(self, context: Dict[str, Any]) -> float:
+    def matches_task_type(self, task_type: str) -> bool:
         """
-        计算与给定上下文的匹配度
+        Layer 1 预筛：task_type 确定性匹配（<1ms）
+
+        仅用于快速过滤候选集，不做语义判断。
+        属于"简单确定性任务"（规则允许的场景）。
 
         Args:
-            context: 上下文信息
-                - task_type: 任务类型
-                - query: 用户查询
-                - complexity_score: 复杂度评分
+            task_type: 意图识别输出的任务类型
 
         Returns:
-            匹配度（0-1）
+            是否属于同类型任务
         """
-        score = 0.0
-        max_score = 0.0
-
-        # 任务类型匹配
         if "task_types" in self.trigger:
-            max_score += 1.0
-            task_type = context.get("task_type", "")
-            if task_type in self.trigger["task_types"]:
-                score += 1.0
+            return task_type in self.trigger["task_types"]
+        # 无 task_types 限制的策略对所有类型适用
+        return True
 
-        # 关键词匹配
-        if "keywords" in self.trigger:
-            max_score += 1.0
-            query = context.get("query", "").lower()
-            keywords = self.trigger["keywords"]
-            matched = sum(1 for kw in keywords if kw.lower() in query)
-            if keywords:
-                score += matched / len(keywords)
+    def get_searchable_text(self) -> str:
+        """
+        生成用于语义搜索的文本描述
 
-        # 复杂度范围匹配
-        if "complexity_range" in self.trigger:
-            max_score += 1.0
-            complexity = context.get("complexity_score", 5.0)
-            range_min, range_max = self.trigger["complexity_range"]
-            if range_min <= complexity <= range_max:
-                score += 1.0
+        将 Playbook 的名称、描述、工具序列合并为一段文本，
+        供 Mem0 向量搜索使用。
 
-        return score / max_score if max_score > 0 else 0.0
+        Returns:
+            可搜索的文本
+        """
+        parts = [self.name, self.description]
+        if self.tool_sequence:
+            tools = [
+                step.get("description", step.get("tool", ""))
+                for step in self.tool_sequence
+            ]
+            parts.append("步骤: " + " -> ".join(tools))
+        return " | ".join(filter(None, parts))
 
 
 class PlaybookManager:
@@ -654,20 +649,28 @@ class PlaybookManager:
 
         return "自动策略", "自动生成的策略"
 
-    # ==================== 策略匹配 ====================
+    # ==================== 策略匹配（LLM-First 语义匹配）====================
 
-    def find_matching(
+    async def find_matching_async(
         self,
-        context: Dict[str, Any],
+        query: str,
+        task_type: str = "",
+        user_id: str = "default",
         top_k: int = 3,
-        min_score: float = 0.5,
+        min_score: float = 0.3,
         only_approved: bool = True,
-    ) -> List[tuple[PlaybookEntry, float]]:
+    ) -> List[tuple["PlaybookEntry", float]]:
         """
-        查找匹配的策略
+        语义匹配策略（LLM-First 设计）
+
+        两层匹配：
+        1. Layer 1: task_type 预筛（确定性规则，<1ms）
+        2. Layer 2: Mem0 语义搜索（向量相似度，零额外 LLM 调用）
 
         Args:
-            context: 上下文信息
+            query: 用户查询（自然语言）
+            task_type: 意图识别输出的任务类型（可选）
+            user_id: 用户 ID（Mem0 隔离用）
             top_k: 返回前 k 个
             min_score: 最低匹配分数
             only_approved: 仅返回已审核通过的策略
@@ -675,19 +678,91 @@ class PlaybookManager:
         Returns:
             [(策略, 匹配分数), ...]
         """
+        # Layer 1: task_type 预筛
+        candidates = {
+            entry_id: entry
+            for entry_id, entry in self._entries.items()
+            if (not only_approved or entry.status == PlaybookStatus.APPROVED)
+            and entry.matches_task_type(task_type)
+        }
+
+        if not candidates:
+            return []
+
+        # 候选数量少（<=3）时直接全部返回，不需要语义排序
+        if len(candidates) <= top_k:
+            return [(entry, 1.0) for entry in candidates.values()]
+
+        # Layer 2: Mem0 语义搜索
+        try:
+            from core.memory.mem0 import get_mem0_pool
+
+            pool = get_mem0_pool()
+            # 用用户 query 在 Mem0 中搜索相关记忆
+            # Playbook 描述在 extract_from_session 时已写入 Mem0
+            search_results = pool.search(
+                user_id=user_id,
+                query=f"任务策略: {query}",
+                limit=top_k * 2,
+            )
+
+            # 匹配搜索结果和候选 Playbook
+            matched = []
+            for result in search_results:
+                metadata = result.get("metadata") or {}
+                playbook_id = metadata.get("playbook_id", "")
+                score = result.get("score", 0.0)
+
+                if playbook_id in candidates and score >= min_score:
+                    matched.append((candidates[playbook_id], score))
+
+            if matched:
+                matched.sort(key=lambda x: x[1], reverse=True)
+                return matched[:top_k]
+
+        except Exception as e:
+            logger.warning(f"Mem0 语义匹配失败，降级到全量返回: {e}")
+
+        # 降级：Mem0 不可用时返回全部候选（按使用次数排序）
+        fallback = sorted(
+            candidates.values(),
+            key=lambda e: e.usage_count,
+            reverse=True,
+        )
+        return [(entry, 0.5) for entry in fallback[:top_k]]
+
+    def find_matching(
+        self,
+        context: Dict[str, Any],
+        top_k: int = 3,
+        min_score: float = 0.5,
+        only_approved: bool = True,
+    ) -> List[tuple["PlaybookEntry", float]]:
+        """
+        同步匹配策略（兼容旧调用方，仅 task_type 预筛）
+
+        推荐使用 find_matching_async() 进行语义匹配。
+
+        Args:
+            context: 上下文信息（task_type, query, complexity_score）
+            top_k: 返回前 k 个
+            min_score: 最低匹配分数
+            only_approved: 仅返回已审核通过的策略
+
+        Returns:
+            [(策略, 匹配分数), ...]
+        """
+        task_type = context.get("task_type", "")
         candidates = []
 
         for entry in self._entries.values():
             if only_approved and entry.status != PlaybookStatus.APPROVED:
                 continue
+            if entry.matches_task_type(task_type):
+                candidates.append((entry, 1.0))
 
-            score = entry.matches(context)
-            if score >= min_score:
-                candidates.append((entry, score))
-
-        # 按分数排序
-        candidates.sort(key=lambda x: x[1], reverse=True)
-
+        # 按使用次数排序
+        candidates.sort(key=lambda x: x[0].usage_count, reverse=True)
         return candidates[:top_k]
 
     async def record_usage(self, entry_id: str):

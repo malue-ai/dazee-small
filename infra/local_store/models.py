@@ -308,3 +308,34 @@ class LocalSkillCache(LocalBase):
 
     def __repr__(self) -> str:
         return f"<LocalSkillCache(instance={self.instance_id}, skill={self.skill_name})>"
+
+
+# ==================== 文件索引元数据 ====================
+
+
+class LocalIndexedFile(LocalBase):
+    """
+    已索引文件元数据
+
+    用于增量索引：通过 file_hash 判断文件是否变更。
+    """
+
+    __tablename__ = "indexed_files"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    file_path: Mapped[str] = mapped_column(String(1024), nullable=False)
+    file_hash: Mapped[str] = mapped_column(String(64), nullable=False)  # SHA256
+    file_mtime: Mapped[float] = mapped_column(Float, nullable=False)
+    file_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    indexed_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.now, nullable=False
+    )
+
+    __table_args__ = (
+        Index("idx_indexed_files_path", "file_path", unique=True),
+        Index("idx_indexed_files_hash", "file_hash"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<LocalIndexedFile(path={self.file_path}, chunks={self.chunk_count})>"

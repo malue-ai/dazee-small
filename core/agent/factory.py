@@ -1,13 +1,13 @@
 """
 AgentFactory - Prompt 驱动的 Agent 动态初始化
 
-🆕 V6.1: Schema 生成 Few-shot 化（替代硬编码映射）
+V11.0: 固定使用 RVR-B 执行策略
 
 核心理念：
 - Prompt → LLM 生成 Schema → 动态初始化 Agent
 - 修改 Prompt 即可改变 Agent 行为
 - Prompt 是唯一的真相来源
-- 🆕 通过 Few-shot 示例引导 LLM 推断，而非关键词匹配
+- 通过 Few-shot 示例引导 LLM 推断，而非关键词匹配
 
 参考：docs/15-FRAMEWORK_PROMPT_CONTRACT.md
 """
@@ -38,15 +38,9 @@ from logger import get_logger
 
 # 2. 第三方库（无）
 
-# 注意：multi 模块延迟导入（避免循环依赖/降低启动成本）
-# from core.agent.orchestrator import MultiAgentOrchestrator
-# from core.agent.models import OrchestratorConfig
-
-
 # 🆕 V7: 类型检查导入（避免循环依赖）
 if TYPE_CHECKING:
     from core.agent.base import Agent
-    from core.agent.execution._multi import MultiAgentOrchestrator
     from core.agent.execution.protocol import ExecutorProtocol
     from core.routing import RoutingDecision
 
@@ -60,38 +54,26 @@ def _get_executor_registry() -> Dict[str, type]:
     """
     获取 Executor 注册表（延迟加载）
 
+    V11.0: 固定使用 RVR-B 执行策略
+
     扩展点：新增策略只需在这里注册
 
-    单智能体：
+    执行策略：
     - rvr: 标准 RVR 循环
-    - rvr-b: 带回溯的 RVR-B
-
-    多智能体：
-    - sequential: 串行执行
-    - parallel: 并行执行
-    - hierarchical: 层级执行
-    - multi: 通用多智能体（默认串行）
+    - rvr-b: 带回溯的 RVR-B（默认）
+    - rvrb: RVR-B 的别名
+    - simple: 映射到 RVR-B
     """
     from core.agent.execution import (
-        HierarchicalMultiExecutor,
-        MultiAgentExecutor,
-        ParallelMultiExecutor,
         RVRBExecutor,
         RVRExecutor,
-        SequentialMultiExecutor,
     )
 
     return {
-        # 单智能体
         "rvr": RVRExecutor,
         "rvr-b": RVRBExecutor,
         "rvrb": RVRBExecutor,
-        "simple": RVRExecutor,
-        # 多智能体
-        "sequential": SequentialMultiExecutor,
-        "parallel": ParallelMultiExecutor,
-        "hierarchical": HierarchicalMultiExecutor,
-        "multi": SequentialMultiExecutor,  # 默认串行
+        "simple": RVRBExecutor,  # V11.0: simple 映射到 RVR-B
     }
 
 
@@ -142,22 +124,22 @@ class AgentFactory:
     """
     Agent 工厂 - Prompt 驱动的动态初始化
 
-    🆕 V7: 支持路由层集成
+    V11.0: 固定使用 RVR-B 执行策略
 
     用法：
         # 方式 1: 从 Prompt 创建（推荐）
         agent = await AgentFactory.from_prompt(system_prompt, event_manager)
 
         # 方式 2: 从 Schema 创建（精确控制）
-        schema = AgentSchema(name="DataAgent", tools=["tavily_search"], ...)
+        schema = AgentSchema(name="DataAgent", tools=["plan"], ...)
         agent = AgentFactory.from_schema(schema, system_prompt, event_manager)
 
         # 方式 3: 使用默认配置
         agent = AgentFactory.create_default(event_manager)
 
-        # 🆕 方式 4: 从路由决策创建（V7 路由集成）
+        # 方式 4: 从路由决策创建（V11.0 路由集成）
         routing_decision = await router.route(message, history)
-        agent = await AgentFactory.from_routing_decision(
+        agent = await AgentFactory.create_from_decision(
             decision=routing_decision,
             event_manager=event_manager
         )
@@ -311,6 +293,7 @@ class AgentFactory:
         prompt_schema=None,  # 🆕 V4.6: PromptSchema（提示词分层）
         prompt_cache=None,  # 🆕 V4.6.2: InstancePromptCache（提示词缓存）
         apis_config=None,  # 🆕 预配置的 APIs（用于 api_calling 自动注入）
+        terminator=None,  # V11: 可选终止策略（AdaptiveTerminator）
     ):
         """
         根据 Schema 创建 Agent（设计哲学：Schema 驱动）
@@ -321,10 +304,10 @@ class AgentFactory:
         1. Schema 定义组件启用状态和配置参数
         2. System Prompt 作为运行时指令传递给 Agent
         3. Agent 根据 Schema 动态初始化组件
-        4. 🆕 V4.6: PromptSchema 支持根据复杂度动态裁剪提示词
-        5. 🆕 V4.6.2: InstancePromptCache 提供预生成的提示词版本
-        6. 🆕 apis_config: 预配置的 APIs，用于 api_calling 工具自动注入认证
-        7. 🆕 V7.1: 支持多智能体（根据 schema.multi_agent 自动选择）
+        4. PromptSchema 支持根据复杂度动态裁剪提示词
+        5. InstancePromptCache 提供预生成的提示词版本
+        6. apis_config: 预配置的 APIs，用于 api_calling 工具自动注入认证
+        7. V11.0: 统一使用 RVR-B 执行策略
         """
         logger.info(f"🏗️ 根据 Schema 初始化 Agent: {schema.name}")
         logger.debug(f"   Model: {schema.model}")
@@ -353,36 +336,20 @@ class AgentFactory:
             prompt_cache.prompt_schema if prompt_cache else None
         )
 
-        # 🆕 V10.0: 统一使用 Agent + Executor 模式
-        # 多智能体暂时保留旧实现（后续迁移）
-        if schema.multi_agent is not None:
-            # 多智能体模式（保留旧实现）
-            logger.info(
-                f"   🤝 多智能体模式: {schema.multi_agent.mode if hasattr(schema.multi_agent, 'mode') else 'default'}"
-            )
-            return await cls._create_multi_agent(
-                schema=schema,
-                system_prompt=system_prompt,
-                event_manager=event_manager,
-                conversation_service=conversation_service,
-                prompt_schema=effective_prompt_schema,
-                prompt_cache=prompt_cache,
-                apis_config=apis_config,
-            )
-        else:
-            # 🆕 V10.0: 单智能体使用统一 Agent + Executor
-            return await cls._create_single_agent(
-                schema=schema,
-                system_prompt=system_prompt,
-                event_manager=event_manager,
-                conversation_service=conversation_service,
-                prompt_schema=effective_prompt_schema,
-                prompt_cache=prompt_cache,
-                apis_config=apis_config,
-                strategy=(
-                    schema.execution_strategy if hasattr(schema, "execution_strategy") else "rvr"
-                ),
-            )
+        # V11.0: 统一使用 RVR-B 执行策略
+        return await cls._create_single_agent(
+            schema=schema,
+            system_prompt=system_prompt,
+            event_manager=event_manager,
+            conversation_service=conversation_service,
+            prompt_schema=effective_prompt_schema,
+            prompt_cache=prompt_cache,
+            apis_config=apis_config,
+            strategy=(
+                schema.execution_strategy if hasattr(schema, "execution_strategy") else "rvr-b"
+            ),
+            terminator=terminator,
+        )
 
     @classmethod
     async def _create_single_agent(
@@ -394,10 +361,11 @@ class AgentFactory:
         prompt_schema,
         prompt_cache,
         apis_config,
-        strategy: str = "rvr",
+        strategy: str = "rvr-b",
+        terminator=None,
     ) -> "Agent":
         """
-        🆕 V10.0: 创建单智能体（统一 Agent + Executor）
+        V11.0: 创建 Agent（统一 Agent + Executor，固定 RVR-B）
 
         Args:
             schema: AgentSchema
@@ -407,7 +375,7 @@ class AgentFactory:
             prompt_schema: 提示词模式
             prompt_cache: 提示词缓存
             apis_config: API 配置
-            strategy: 执行策略 (rvr, rvr-b, ...)
+            strategy: 执行策略（默认 rvr-b）
 
         Returns:
             Agent 实例
@@ -420,15 +388,15 @@ class AgentFactory:
         from core.tool import create_tool_context, create_tool_executor, create_tool_selector
         from core.tool.registry import create_capability_registry
 
-        # 1. 获取 Executor
+        # 1. 获取 Executor（V11.0: 默认使用 RVR-B）
         registry = _get_executor_registry()
         strategy_key = strategy.lower().replace("-", "").replace("_", "")
 
         if strategy_key not in registry and strategy not in registry:
-            logger.warning(f"未知策略 '{strategy}'，使用默认 'rvr'")
-            strategy_key = "rvr"
+            logger.warning(f"未知策略 '{strategy}'，使用默认 'rvr-b'")
+            strategy_key = "rvrb"
 
-        executor_cls = registry.get(strategy_key) or registry.get(strategy) or registry["rvr"]
+        executor_cls = registry.get(strategy_key) or registry.get(strategy) or registry["rvr-b"]
         executor = executor_cls()
 
         # 2. 创建 LLM
@@ -511,6 +479,7 @@ class AgentFactory:
             prompt_cache=prompt_cache,
             context_strategy=context_strategy,
             max_steps=schema.max_turns,
+            terminator=terminator,
         )
 
         # 保存额外属性（用于克隆）
@@ -531,25 +500,6 @@ class AgentFactory:
 
         return agent
 
-    @classmethod
-    async def _create_multi_agent(
-        cls,
-        schema,
-        system_prompt: str,
-        event_manager,
-        conversation_service,
-        prompt_schema=None,
-        prompt_cache=None,
-        apis_config=None,
-    ):
-        """V7.1 遗留入口 — 委托给 create_multi_agent()"""
-        return cls.create_multi_agent(
-            schema=schema,
-            event_manager=event_manager,
-            conversation_service=conversation_service,
-            prompt_cache=prompt_cache,
-            system_prompt=system_prompt,
-        )
 
     @classmethod
     async def create_default(cls, event_manager, conversation_service=None):
@@ -596,12 +546,12 @@ class AgentFactory:
         **kwargs,
     ):
         """
-        根据路由决策创建 Agent（V7.8 新增）
+        根据路由决策创建 Agent（V11.0）
 
         流程：
-        1. 从 decision 获取 intent 和 agent_type
+        1. 从 decision 获取 intent
         2. 在 base_schema 基础上微调运行时参数
-        3. 创建对应类型的 Agent（single/multi）
+        3. 创建 RVR-B Agent
 
         Args:
             decision: RoutingDecision 路由决策
@@ -615,14 +565,12 @@ class AgentFactory:
             **kwargs: 其他参数
 
         Returns:
-            Agent 或 MultiAgentOrchestrator 实例
+            Agent 实例（RVR-B 执行策略）
         """
         intent = decision.intent
-        agent_type = decision.agent_type
 
         logger.info(
             f"🏗️ AgentFactory.create_from_decision: "
-            f"agent_type={agent_type}, "
             f"complexity={intent.complexity.value if intent else 'N/A'}"
         )
 
@@ -639,110 +587,18 @@ class AgentFactory:
             elif intent.complexity == Complexity.COMPLEX:
                 schema = schema.model_copy(update={"max_turns": max(schema.max_turns, 20)})
 
-        # 根据 agent_type 创建对应的 Agent
-        if agent_type == "multi":
-            # 多智能体：统一创建入口
-            return cls.create_multi_agent(
-                schema=schema,
-                event_manager=event_manager,
-                conversation_service=conversation_service,
-                prompt_cache=prompt_cache,
-                system_prompt=system_prompt,
-                multi_agent_config=kwargs.get("multi_agent_config"),
-                broadcaster=kwargs.get("broadcaster"),
-            )
-        else:
-            # 🆕 V10.0: 单智能体使用统一 Agent + Executor
-            strategy = "rvr-b" if agent_type == "rvr-b" else "rvr"
-            return await cls._create_single_agent(
-                schema=schema,
-                system_prompt=system_prompt or "",
-                event_manager=event_manager,
-                conversation_service=conversation_service,
-                prompt_schema=None,
-                prompt_cache=prompt_cache,
-                apis_config=apis_config,
-                strategy=strategy,
-            )
-
-    @classmethod
-    def create_multi_agent(
-        cls,
-        schema=None,
-        event_manager=None,
-        conversation_service=None,
-        prompt_cache=None,
-        system_prompt: str = None,
-        multi_agent_config=None,
-        broadcaster=None,
-    ) -> "MultiAgentOrchestrator":
-        """
-        统一的多智能体创建入口
-
-        V10.3: 合并原有的 3 条创建路径为 1 条公共方法。
-
-        Args:
-            schema: AgentSchema（可选）
-            event_manager: 事件管理器（可选）
-            conversation_service: 会话服务（可选）
-            prompt_cache: 提示词缓存（可选）
-            system_prompt: 系统提示词（可选）
-            multi_agent_config: MultiAgentConfig（可选，默认使用默认配置）
-            broadcaster: EventBroadcaster（可选，用于事件发送）
-
-        Returns:
-            MultiAgentOrchestrator 实例
-        """
-        from core.agent.execution._multi import MultiAgentOrchestrator
-        from core.agent.models import MultiAgentConfig
-
-        config = multi_agent_config or MultiAgentConfig()
-
-        orchestrator = MultiAgentOrchestrator(
-            config=config,
-            enable_checkpoints=True,
-            enable_lead_agent=True,
-        )
-
-        # V10.4: 正规依赖注入
-        if broadcaster:
-            orchestrator.inject_dependencies(broadcaster=broadcaster)
-
-        # 附加元数据
-        orchestrator.schema = schema
-        orchestrator.system_prompt = system_prompt
-        orchestrator.conversation_service = conversation_service
-        if schema:
-            orchestrator.model = schema.model
-            orchestrator.max_turns = schema.max_turns
-
-        logger.info("✅ MultiAgentOrchestrator 创建完成 (via Factory)")
-        return orchestrator
-
-    @classmethod
-    def _create_multi_agent_from_decision(
-        cls,
-        decision: "RoutingDecision" = None,
-        schema=None,
-        event_manager=None,
-        conversation_service=None,
-        prompt_cache=None,
-        system_prompt=None,
-        apis_config=None,
-        broadcaster=None,
-        multi_agent_config=None,
-        **kwargs,
-    ):
-        """从路由决策创建多智能体 — 委托给 create_multi_agent()"""
-        return cls.create_multi_agent(
+        # V11.0: 统一使用 RVR-B 执行策略
+        return await cls._create_single_agent(
             schema=schema,
+            system_prompt=system_prompt or "",
             event_manager=event_manager,
             conversation_service=conversation_service,
+            prompt_schema=None,
             prompt_cache=prompt_cache,
-            system_prompt=system_prompt,
-            multi_agent_config=multi_agent_config,
-            broadcaster=broadcaster,
+            apis_config=apis_config,
+            strategy="rvr-b",
         )
+
 
     @staticmethod
     def _extract_json(text: str) -> Dict[str, Any]:
@@ -861,7 +717,7 @@ class AgentPresets:
             name="ResearchAgent",
             description="深度研究助手，擅长搜索、分析和总结信息",
             skills=[],
-            tools=["tavily_search", "exa_search"],
+            tools=[],
             max_turns=20,
             plan_manager=PlanManagerConfig(enabled=True, max_steps=15, granularity="fine"),
             memory_manager=MemoryManagerConfig(retention_policy="session", working_memory_limit=30),
@@ -879,7 +735,7 @@ class AgentPresets:
                 SkillConfig(name="ppt-generator"),
                 SkillConfig(name="pdf-generator"),
             ],
-            tools=["tavily_search"],
+            tools=[],
             max_turns=15,
             plan_manager=PlanManagerConfig(enabled=True, max_steps=12),
             output_formatter=OutputFormatterConfig(

@@ -395,26 +395,7 @@ profiles:
 #   - max_failures: 最大失败次数（超过进入冷却）
 #   - cooldown_seconds: 冷却时间（默认 600 秒）
 #
-# health_probe: 健康探测配置
-#   - request_probe: 请求级探测（条件探测，后台不健康时执行）
-#   - background_probe: 后台异步探测（与用户请求解耦）
-#
-
-# ==================== 健康探测全局配置 ====================
-health_probe:
-  # 条件探测（V7.11：后台健康则跳过，不健康则确认）
-  request_probe:
-    timeout_seconds: 5.0
-    max_retries: 1
-  
-  # 后台健康探测（定期探测所有模型）
-  background_probe:
-    enabled: true
-    interval_seconds: 120  # 2 分钟探测一次
-    timeout_seconds: 10
-    profiles:
-      - main_agent
-      - intent_analyzer
+# V11.0: health_probe 已移除（云端健康探测不适用于桌面端）
 
 # ============================================================
 # 配置说明

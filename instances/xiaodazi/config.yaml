@@ -1,0 +1,184 @@
+# ============================================================
+# 小搭子实例配置
+# ============================================================
+#
+# 这个文件只管三件事：
+#   1. 小搭子用什么大脑（模型）
+#   2. 小搭子有哪些技能（Skills）
+#   3. 小搭子记忆和项目怎么管
+#
+
+# ==================== 基础信息 ====================
+
+instance:
+  name: "xiaodazi"
+  description: "养在电脑里的 AI 小搭子"
+  version: "1.0.0"
+
+# ==================== 大模型配置 ====================
+
+agent:
+  model: "claude-sonnet-4-5-20250929"
+
+  llm:
+    temperature: 0.7
+    max_tokens: 8192
+    enable_caching: true
+
+# ==================== 记忆配置 ====================
+
+memory:
+  enabled: true
+  smart_retrieval: true
+  retention_policy: "user"
+
+# ==================== Playbook 持续学习 ====================
+
+playbook:
+  enabled: true
+  auto_extract: true               # 任务完成后自动 LLM 初筛
+  min_reward_threshold: 0.7        # 初筛最低分
+  require_user_confirm: true       # 用户确认闸门（核心原则）
+  storage_backend: "file"
+  storage_path: "~/.xiaodazi/playbooks"
+  matching:
+    semantic_enabled: true          # Mem0 语义匹配（零额外 LLM 调用）
+    min_match_score: 0.3            # 匹配最低分
+    top_k: 3                        # 最多返回策略数
+
+# ==================== 项目管理 ====================
+
+project:
+  enabled: false
+  default_template: "default"
+
+# ==================== Skills 配置 ====================
+#
+# 按 OS × 复杂度 分类
+#
+# 复杂度：
+#   builtin     - 装好就能用
+#   lightweight - 首次用时自动装，或点一下授权
+#   external    - 需要你装一个软件
+#   cloud_api   - 需要填个 API Key
+#
+
+skills:
+  loading_mode: "lazy"
+  os_aware: true
+
+  # ==================== 全平台通用 ====================
+
+  common:
+    builtin:
+      # --- 框架核心 ---
+      - { name: plan-todo,           backend_type: tool, tool_name: plan_todo,  description: "任务规划与进度追踪" }
+      - { name: hitl,                backend_type: tool, tool_name: hitl,       description: "涉及敏感操作时请求用户确认" }
+      - { name: api-calling,         backend_type: tool, tool_name: api_calling, description: "通用 HTTP API 调用能力" }
+
+      # --- 写作 ---
+      - { name: writing-assistant,   backend_type: local, skill_source: instance, description: "写作辅助：润色、改写、扩写" }
+      - { name: translator,          backend_type: local, skill_source: instance, description: "多语言翻译" }
+      - { name: writing-analyzer,    backend_type: local, skill_source: instance, description: "写作风格分析" }
+      - { name: style-learner,       backend_type: local, skill_source: instance, description: "学习并记忆用户写作风格" }
+      - { name: content-reformatter, backend_type: local, skill_source: instance, description: "多平台格式转换（公众号/小红书/知乎等）" }
+
+      # --- 文件与搜索 ---
+      - { name: file-manager,        backend_type: local, skill_source: instance, description: "本地文件管理" }
+      - { name: local-search,        backend_type: local, skill_source: instance, description: "本地文件搜索（Spotlight + FTS5）" }
+
+      # --- 应用推荐 ---
+      - { name: app-recommender,     backend_type: local, skill_source: instance, description: "根据任务推荐最合适的应用" }
+
+      # --- 研究 ---
+      - { name: literature-reviewer, backend_type: local, skill_source: instance, description: "多文献对比分析与综述" }
+      - { name: paper-search,        backend_type: local, skill_source: instance, description: "学术论文搜索（Semantic Scholar）" }
+      - { name: arxiv-search,        backend_type: local, skill_source: instance, description: "arXiv 预印本论文搜索" }
+
+      # --- 生活 ---
+      - { name: nutrition-analyzer,  backend_type: local, skill_source: instance, description: "食物营养分析与饮食建议" }
+      - { name: medication-tracker,  backend_type: local, skill_source: instance, description: "用药管理与服药提醒" }
+      - { name: trend-spotter,       backend_type: local, skill_source: instance, description: "行业趋势与热点发现" }
+      - { name: competitive-intel,   backend_type: local, skill_source: instance, description: "竞品动态监控与分析" }
+      - { name: readwise-rival,      backend_type: local, skill_source: instance, description: "阅读高亮收集、复习与知识卡片" }
+
+      # --- 天气 ---
+      - { name: weather,             backend_type: local, skill_source: library,  description: "天气查询" }
+
+    lightweight:
+      - { name: nano-pdf,            backend_type: local, skill_source: library,  python_packages: ["pypdf"], auto_install: true, description: "PDF 文件读取与提取" }
+      - { name: excel-analyzer,      backend_type: local, skill_source: instance, python_packages: ["pandas", "openpyxl"], auto_install: true, description: "Excel / CSV 分析" }
+      - { name: excel-fixer,         backend_type: local, skill_source: instance, python_packages: ["pandas", "openpyxl"], auto_install: true, description: "Excel 格式自动修复" }
+      - { name: word-processor,      backend_type: local, skill_source: instance, python_packages: ["python-docx"], auto_install: true, description: "Word 文档创建与编辑" }
+
+    external:
+      - { name: summarize,           backend_type: local, skill_source: library, bins: ["summarize"], description: "URL / 视频 / 文档一键摘要" }
+      - { name: obsidian,            backend_type: local, skill_source: library, requires_app: "Obsidian", description: "Obsidian 笔记管理" }
+      - { name: openai-whisper,      backend_type: local, skill_source: library, bins: ["whisper"], description: "本地语音转文字（离线）" }
+      - { name: ppt-generator,       backend_type: local, skill_source: library, description: "PPT 演示文稿生成" }
+      - { name: gog,                 backend_type: local, skill_source: library, bins: ["gog"], description: "Google Docs / Sheets / Calendar" }
+      - { name: blogwatcher,         backend_type: local, skill_source: library, bins: ["blogwatcher"], description: "RSS 博客监控与摘要" }
+      - { name: 1password,           backend_type: local, skill_source: library, bins: ["op"], description: "1Password 密码管理" }
+      - { name: himalaya,            backend_type: local, skill_source: library, bins: ["himalaya"], description: "本地邮件收发（IMAP）" }
+      - { name: sherpa-onnx-tts,     backend_type: local, skill_source: library, bins: ["sherpa-onnx"], description: "本地语音合成（离线 TTS）" }
+      - { name: gifgrep,             backend_type: local, skill_source: library, bins: ["gifgrep"], description: "GIF 动图搜索" }
+      - { name: github,              backend_type: local, skill_source: library, bins: ["gh"], description: "GitHub 仓库与 Issue 管理" }
+
+    cloud_api:
+      - { name: notion,              backend_type: api,   skill_source: library, description: "Notion 笔记与数据库" }
+      - { name: trello,              backend_type: local, skill_source: library, description: "Trello 看板任务管理" }
+      - { name: nano-banana-pro,     backend_type: local, skill_source: library, description: "Gemini 图像生成" }
+      - { name: openai-image-gen,    backend_type: local, skill_source: library, description: "DALL·E 图像生成" }
+      - { name: openai-whisper-api,  backend_type: local, skill_source: library, description: "云端语音转文字" }
+      - { name: goplaces,            backend_type: local, skill_source: library, description: "周边地点搜索（Google Places）" }
+      - { name: discord,             backend_type: local, skill_source: library, description: "Discord 消息与频道管理" }
+
+  # ==================== macOS 专属 ====================
+
+  darwin:
+    builtin:
+      - { name: macos-screenshot,    backend_type: local, skill_source: instance, bins: ["screencapture"], description: "macOS 截图" }
+      - { name: macos-clipboard,     backend_type: local, skill_source: instance, bins: ["pbcopy", "pbpaste"], description: "macOS 剪贴板" }
+      - { name: macos-notification,  backend_type: local, skill_source: instance, bins: ["osascript"], description: "macOS 系统通知" }
+      - { name: macos-open,          backend_type: local, skill_source: instance, bins: ["open"], description: "打开文件、URL、应用" }
+      - { name: macos-finder,        backend_type: local, skill_source: instance, description: "Finder 操作：标签、预览、文件信息" }
+      - { name: applescript,         backend_type: local, skill_source: instance, bins: ["osascript"], description: "AppleScript / JXA 脚本执行" }
+      - { name: app-scanner,         backend_type: local, skill_source: instance, description: "发现已安装应用" }
+
+    lightweight:
+      - { name: apple-notes,         backend_type: local, skill_source: library, system_auth: "accessibility", description: "Apple 备忘录" }
+      - { name: apple-reminders,     backend_type: local, skill_source: library, system_auth: "reminders", description: "Apple 提醒事项" }
+      - { name: apple-calendar,      backend_type: local, skill_source: instance, system_auth: "calendar", description: "Apple 日历" }
+
+    external:
+      - { name: peekaboo,            backend_type: local, skill_source: library, bins: ["peekaboo"], description: "macOS UI 自动化" }
+      - { name: bear-notes,          backend_type: local, skill_source: library, requires_app: "Bear", description: "Bear 笔记" }
+      - { name: things-mac,          backend_type: local, skill_source: library, requires_app: "Things", description: "Things 待办管理" }
+      - { name: spotify-player,      backend_type: local, skill_source: library, description: "Spotify 音乐播放控制" }
+      - { name: openhue,             backend_type: local, skill_source: library, bins: ["openhue"], description: "Philips Hue 智能灯控" }
+
+  # ==================== Windows 专属 ====================
+
+  win32:
+    builtin:
+      - { name: windows-screenshot,   backend_type: local, skill_source: instance, description: "Windows 截图" }
+      - { name: windows-clipboard,    backend_type: local, skill_source: instance, description: "Windows 剪贴板" }
+      - { name: windows-notification, backend_type: local, skill_source: instance, description: "Windows 系统通知" }
+      - { name: powershell-basic,     backend_type: local, skill_source: instance, description: "PowerShell 系统操作" }
+
+    lightweight:
+      - { name: outlook-cli,          backend_type: local, skill_source: instance, requires_app: "Microsoft Outlook", description: "Outlook 邮件与日历" }
+      - { name: onenote,              backend_type: local, skill_source: instance, requires_app: "OneNote", description: "OneNote 笔记" }
+
+  # ==================== Linux 专属 ====================
+
+  linux:
+    builtin:
+      - { name: linux-screenshot,     backend_type: local, skill_source: instance, description: "Linux 截图" }
+      - { name: linux-clipboard,      backend_type: local, skill_source: instance, description: "Linux 剪贴板" }
+
+    lightweight:
+      - { name: linux-notification,   backend_type: local, skill_source: instance, bins: ["notify-send"], description: "Linux 桌面通知" }
+
+    external:
+      - { name: xdotool,              backend_type: local, skill_source: instance, bins: ["xdotool"], description: "Linux UI 自动化" }

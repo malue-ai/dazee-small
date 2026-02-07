@@ -10,15 +10,11 @@ Schema 验证器 - 定义 Agent 配置的强类型规范
 """
 
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from logger import get_logger
-
-# 🆕 V7: 延迟导入避免循环依赖
-if TYPE_CHECKING:
-    from core.multi_agent.config import MultiAgentConfig
 
 logger = get_logger(__name__)
 
@@ -121,6 +117,13 @@ class IntentAnalyzerConfig(ComponentConfig):
         default="claude-haiku-4-5-20251001",
         description="意图分析使用的 LLM 模型（Haiku 4.5 支持 64K output tokens）",
     )
+
+    # V11 小搭子：意图分析扩展配置
+    fast_mode: bool = Field(default=False, description="快速模式（使用更快模型减少延迟）")
+    semantic_cache_threshold: Optional[float] = Field(
+        default=None, description="语义缓存命中阈值（0-1），未设则用环境默认"
+    )
+    simplified_output: bool = Field(default=True, description="仅输出简化字段（complexity/skip_memory/is_follow_up）")
 
 
 class PlanManagerConfig(ComponentConfig):
@@ -423,12 +426,7 @@ class AgentSchema(BaseModel):
     )
 
     # ============================================================
-    # 🆕 V7: Multi-Agent 配置（可选）
-    # ============================================================
-
-    multi_agent: Optional[Any] = Field(
-        default=None, description="Multi-Agent 配置（MultiAgentConfig），None 表示使用 SimpleAgent"
-    )
+    # V11.0: 移除 multi_agent 配置（小搭子固定 RVR-B）
 
     # ============================================================
     # LLM 超参数配置（可选覆盖）
@@ -530,13 +528,6 @@ class AgentSchema(BaseModel):
             "context_limits": self.context_limits.dict(),
             "reasoning": self.reasoning,
         }
-
-        # 🆕 V7: 包含 multi_agent 配置（如果有）
-        if self.multi_agent is not None:
-            if hasattr(self.multi_agent, "to_dict"):
-                result["multi_agent"] = self.multi_agent.to_dict()
-            else:
-                result["multi_agent"] = self.multi_agent
 
         # 🆕 V7: 包含 LLM 超参数（仅非空值）
         if self.temperature is not None:

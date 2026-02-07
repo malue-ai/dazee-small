@@ -6,7 +6,6 @@
     推荐使用 core.context.injectors 模块的 Phase-based Injector 模式。
 
     新架构中，检索逻辑由各个 Phase 2 Injector 处理：
-    - KnowledgeInjector: 知识库检索
     - UserMemoryInjector: 用户记忆检索
 
 原职责（已由新 Injector 系统承担）：
@@ -19,7 +18,7 @@ import asyncio
 from typing import Any, Dict, List, Optional
 
 from core.context.provider import ContextProvider, ContextType
-from core.context.providers import KnowledgeProvider, MemoryProvider
+from core.context.providers import MemoryProvider
 from logger import get_logger
 
 logger = get_logger(__name__)
@@ -40,8 +39,8 @@ class ContextRetriever:
 
     def __init__(self) -> None:
         # 注册所有 Provider（仅需要检索的数据源）
+        # V11.0: 移除 KnowledgeProvider（云端 Ragie），本地知识检索由后续模块实现
         self.providers: Dict[ContextType, ContextProvider] = {
-            ContextType.KNOWLEDGE: KnowledgeProvider(),
             ContextType.MEMORY: MemoryProvider(),
         }
         logger.info(f"ContextRetriever initialized with {len(self.providers)} providers")
