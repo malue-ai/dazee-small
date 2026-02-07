@@ -19,7 +19,7 @@ description: 按本仓库 FastAPI 三层架构实现功能增量（routers/servi
   - HTTP 用 `httpx.AsyncClient`
   - 文件用 `aiofiles`
 - **日志规范**：使用项目统一日志模块（`get_logger`），禁止 `print()`
-- **敏感信息**：不要把 token/key 写进代码、提交或返回内容；不要改/创建 `.env`（除非用户明确要求）
+- **敏感信息**：不要把 token/key 写进代码、提交或返回内容；不要改/创建 `config.yaml`（除非用户明确要求）
 - **错误返回一致**：失败响应必须包含 `"error"` 字段（按项目既有约定）；参数校验优先用 Pydantic/HTTPException
 
 ## 输入信息（缺少就先补齐）

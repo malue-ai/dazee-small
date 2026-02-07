@@ -130,8 +130,13 @@ class ClaudeLLMService(BaseLLMService):
             logger.warning("⚠️ Claude API Key 为空！")
 
         # 🆕 支持自定义 API 端点（如万界方舟）
-        # 优先级：config.base_url > ANTHROPIC_BASE_URL 环境变量 > 默认官方端点
-        base_url = getattr(config, "base_url", None) or os.getenv("ANTHROPIC_BASE_URL")
+        # 优先级：config.base_url > ANTHROPIC_BASE_URL 环境变量 > None（使用官方默认）
+        base_url = getattr(config, "base_url", None) or os.getenv("ANTHROPIC_BASE_URL") or None
+
+        # 🔧 如果 base_url 是官方默认地址，将其设置为 None（让 SDK 使用默认值）
+        # 这样可以避免 SDK 的认证检查问题
+        if base_url == "https://api.anthropic.com":
+            base_url = None
 
         # 🔧 万界方舟需要 Authorization: Bearer 认证，而不是 x-api-key
         # 检测是否使用万界方舟端点
@@ -160,6 +165,7 @@ class ClaudeLLMService(BaseLLMService):
             )
         else:
             # 官方 API：使用 api_key（x-api-key 认证）
+            # 当 base_url 为 None 时，SDK 会使用默认的官方端点
             self.async_client = anthropic.AsyncAnthropic(
                 api_key=config.api_key, base_url=base_url, timeout=timeout, max_retries=max_retries
             )

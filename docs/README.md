@@ -169,22 +169,33 @@ pip install -r requirements.txt
 
 ### 第三步：配置环境变量
 
-```bash
-# 复制模板
-cp .env.example .env
-
-# 编辑 .env，至少填写一个大模型 API Key
-# 最简配置：只需一个 ANTHROPIC_API_KEY
-```
-
-`.env` 必填项：
+配置文件位于用户数据目录的 `config.yaml`，首次启动时会自动创建。
 
 ```bash
-# 至少配置一个大模型（推荐 Claude）
-ANTHROPIC_API_KEY=sk-ant-api03-your-key-here
+# macOS: ~/Library/Application Support/com.zenflux.agent/config.yaml
+# Linux: ~/.local/share/zenflux-agent/config.yaml
+# Windows: %APPDATA%\zenflux-agent\config.yaml
 ```
 
-可选配置见 `.env.example` 中的完整说明。
+**方式一：通过前端设置页面配置（推荐）**
+
+启动应用后，访问设置页面填写 API Key。
+
+**方式二：手动编辑 config.yaml**
+
+```yaml
+api_keys:
+  ANTHROPIC_API_KEY: sk-ant-api03-your-key-here  # 至少配置一个大模型（推荐 Claude）
+  # OPENAI_API_KEY: sk-xxx  # 可选
+  # DASHSCOPE_API_KEY: sk-xxx  # 可选（千问）
+
+llm:
+  COT_AGENT_MODEL: claude-sonnet-4-5-20250514  # 默认模型
+  QOS_LEVEL: PRO  # 服务等级
+
+app:
+  LOG_LEVEL: INFO  # 日志级别
+```
 
 ### 第四步：启动后端服务
 

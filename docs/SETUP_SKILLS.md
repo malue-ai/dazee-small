@@ -163,7 +163,7 @@ mas install 904280696           # Things 3
 
 ## 三、cloud_api（云服务 API Key）
 
-需要注册并获取 API Key，配置到 `.env` 文件中。
+需要注册并获取 API Key，配置到 `config.yaml` 文件中（或通过前端设置页面配置）。
 
 ### 必需
 

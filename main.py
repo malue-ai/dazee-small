@@ -151,7 +151,7 @@ async def _preload_agent_registry() -> int:
     
     if not instance_name:
         print("❌ 未指定 AGENT_INSTANCE 环境变量！")
-        print("   请在 .env 中添加: AGENT_INSTANCE=xiaodazi")
+        print("   请在 config.yaml 中添加: AGENT_INSTANCE: xiaodazi")
         print("   或启动时指定: AGENT_INSTANCE=xiaodazi uvicorn main:app --reload")
         return 0
     
