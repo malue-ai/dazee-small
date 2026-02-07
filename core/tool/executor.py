@@ -234,7 +234,7 @@ class ToolExecutor:
         context: Optional[ToolContext] = None,
         skip_compaction: bool = False,
         tool_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> Any:
         """
         执行工具
 
@@ -246,7 +246,7 @@ class ToolExecutor:
             tool_id: 工具调用 ID（用于压缩后的引用）
 
         Returns:
-            执行结果字典
+            执行结果（dict 或多模态 content blocks list）
         """
         ctx = context or self._context
         # 如果没有传入 tool_id，生成一个临时 ID
@@ -289,8 +289,8 @@ class ToolExecutor:
 
     async def _execute_tool(
         self, tool_name: str, tool_instance: Any, tool_input: Dict[str, Any], context: ToolContext
-    ) -> Dict[str, Any]:
-        """执行工具实例"""
+    ) -> Any:
+        """执行工具实例（返回 dict 或多模态 content blocks list）"""
         # 新式工具（BaseTool 子类）
         if isinstance(tool_instance, BaseTool):
             return await tool_instance.execute(tool_input, context)
@@ -366,8 +366,8 @@ class ToolExecutor:
         yield json.dumps(result, ensure_ascii=False)
 
     async def _maybe_compact(
-        self, tool_name: str, tool_id: str, result: Dict[str, Any], skip_compaction: bool = False
-    ) -> Dict[str, Any]:
+        self, tool_name: str, tool_id: str, result: Any, skip_compaction: bool = False
+    ) -> Any:
         """
         根据配置决定是否压缩结果
 
@@ -377,6 +377,14 @@ class ToolExecutor:
         - 返回压缩后的文本
         """
         if not self.enable_compaction or skip_compaction or not self.compressor:
+            return result
+
+        # 多模态内容块列表（如 observe_screen 返回的 [text, image]）不压缩
+        if isinstance(result, list):
+            return result
+
+        # 非 dict 结果不压缩
+        if not isinstance(result, dict):
             return result
 
         # 错误结果不压缩

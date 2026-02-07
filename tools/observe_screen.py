@@ -117,9 +117,17 @@ class ObserveScreenTool(BaseTool):
         fd, path = tempfile.mkstemp(suffix=".png", prefix="observe_screen_")
         os.close(fd)
         try:
+            # peekaboo window 模式必须指定 --app 或 --pid，否则回退
             use_peekaboo = bool(app or window_title or mode == "frontmost")
             if use_peekaboo:
-                peekaboo_mode = "frontmost" if mode == "frontmost" else "window"
+                if mode == "frontmost" or (not app and window_title):
+                    # frontmost 模式，或仅有 window_title 但无 app 时用 frontmost
+                    # （peekaboo window 模式要求 --app/--pid，缺失会报错）
+                    peekaboo_mode = "frontmost"
+                elif app:
+                    peekaboo_mode = "window"
+                else:
+                    peekaboo_mode = "frontmost"
                 cmd = [
                     "peekaboo",
                     "image",
@@ -144,6 +152,16 @@ class ObserveScreenTool(BaseTool):
 
             if not response.ok:
                 return {"success": False, "error": response.error or "截屏命令执行失败"}
+
+            # 检查命令 exit_code（run_command 即使 exit_code!=0 也可能返回 ok=True）
+            payload = response.payload or {}
+            exit_code = payload.get("exit_code", 0)
+            if exit_code != 0:
+                stderr = payload.get("stderr", "")
+                return {
+                    "success": False,
+                    "error": f"截屏命令失败 (exit_code={exit_code}): {stderr}".strip(),
+                }
 
             if not os.path.isfile(path) or os.path.getsize(path) == 0:
                 return {"success": False, "error": "截屏未生成有效文件"}
