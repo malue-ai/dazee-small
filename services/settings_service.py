@@ -1,7 +1,7 @@
 """
 设置服务 - Settings Service
 
-管理桌面应用的用户配置（替代 .env 文件）。
+统一管理应用配置，开发和生产环境均使用 config.yaml。
 配置存储在 {user_data_dir}/config.yaml。
 
 核心功能：
@@ -64,10 +64,20 @@ def load_config_to_env() -> None:
 
     这是启动时调用的核心函数，确保现有的 os.getenv() 调用
     无需任何修改即可正常工作。
+
+    如果 config.yaml 不存在，自动创建空配置文件（首次启动场景）。
     """
     config_path = get_user_config_path()
+
     if not config_path.exists():
-        logger.info("配置文件不存在，使用默认值")
+        # 首次启动：创建空配置文件，等待用户通过前端设置页面填写
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            "# ZenFlux Agent 配置文件\n"
+            "# 通过设置页面管理，或手动编辑\n",
+            encoding="utf-8",
+        )
+        logger.info(f"首次启动，已创建空配置文件: {config_path}")
         return
 
     try:

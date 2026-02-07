@@ -18,12 +18,26 @@ let _initialized = false
 
 // 后端就绪状态（供其他模块查询）
 let _backendReady = false
+let _backendReadyResolve: (() => void) | null = null
+const _backendReadyPromise = new Promise<void>((resolve) => {
+  _backendReadyResolve = resolve
+})
 
 /**
  * 查询后端是否就绪
  */
 export function isBackendReady(): boolean {
   return _backendReady
+}
+
+/**
+ * 等待后端就绪（返回 Promise）
+ * 
+ * - Tauri 模式：等待 sidecar 启动完成
+ * - 浏览器模式：立即 resolve
+ */
+export function waitForBackendReady(): Promise<void> {
+  return _backendReadyPromise
 }
 
 /**
@@ -40,12 +54,15 @@ function startBackendReadyWatcher(): void {
     if (resolved) return
     resolved = true
     _backendReady = true
+    _backendReadyResolve?.()
     tauriLog.info('后端已就绪，可以正常使用')
   }
 
   const onFailed = (reason: string) => {
     if (resolved) return
     resolved = true
+    // 即使失败也 resolve，让 UI 层自行处理
+    _backendReadyResolve?.()
     tauriLog.error(`后端启动失败: ${reason}`)
   }
 
@@ -54,7 +71,7 @@ function startBackendReadyWatcher(): void {
     if (event.payload) {
       onReady()
     } else {
-      onFailed('sidecar 进程异常退出')
+      onFailed('后端启动失败（可能端口被占用或进程崩溃），请关闭后重试')
     }
   }).catch((err) => {
     tauriLog.error('监听 backend-ready 事件失败', err)
@@ -123,6 +140,9 @@ export async function initApiBaseUrl(): Promise<string> {
   } else {
     _baseUrl = import.meta.env.VITE_API_BASE_URL || '/api'
     apiLog.info(`浏览器模式，后端地址: ${_baseUrl}`)
+    // 浏览器模式下后端已就绪（通过 Vite proxy 访问）
+    _backendReady = true
+    _backendReadyResolve?.()
   }
 
   // 更新 axios 实例

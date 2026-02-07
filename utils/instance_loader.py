@@ -558,42 +558,46 @@ async def load_instance_prompt(instance_name: str) -> str:
         return await f.read()
 
 
-def load_instance_env(instance_name: str) -> None:
+def load_instance_env_from_config(instance_name: str) -> None:
     """
-    加载实例环境变量
+    从实例 config.yaml 的 env_vars 段加载环境变量到 os.environ
+
+    config.yaml 示例:
+        env_vars:
+            COZE_API_KEY: "pat_xxx..."
+            WENSHU_API_KEY: "app-xxx..."
 
     Args:
         instance_name: 实例名称
     """
     import os
 
-    try:
-        from dotenv import load_dotenv
-    except ImportError:
-        logger.warning("❌ python-dotenv 未安装，跳过 .env 加载")
+    import yaml
+
+    config_path = get_instances_dir() / instance_name / "config.yaml"
+    if not config_path.exists():
+        logger.warning(f"实例配置文件不存在: {config_path}")
         return
 
-    env_path = get_instances_dir() / instance_name / ".env"
-    logger.info(f"🔍 检查实例 .env 文件: {env_path}")
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            raw_config = yaml.safe_load(f) or {}
+    except Exception as e:
+        logger.error(f"加载实例配置失败: {e}", exc_info=True)
+        return
 
-    if env_path.exists():
-        # 加载前检查关键环境变量
-        coze_before = os.getenv("COZE_API_KEY", "")
+    env_vars = raw_config.get("env_vars", {})
+    if not isinstance(env_vars, dict) or not env_vars:
+        return
 
-        result = load_dotenv(env_path, override=True)
+    injected_count = 0
+    for key, value in env_vars.items():
+        if value is not None and str(value).strip():
+            os.environ[key] = str(value).strip()
+            injected_count += 1
 
-        # 加载后检查
-        coze_after = os.getenv("COZE_API_KEY", "")
-
-        if coze_after and coze_after != coze_before:
-            masked = f"{coze_after[:10]}...{coze_after[-4:]}" if len(coze_after) > 14 else "***"
-            logger.info(f"✅ 已加载环境变量: {env_path} (COZE_API_KEY: {masked})")
-        elif coze_after:
-            logger.info(f"✅ 已加载环境变量: {env_path} (COZE_API_KEY 未变化)")
-        else:
-            logger.warning(f"⚠️ 已加载 .env 但 COZE_API_KEY 仍为空: {env_path}")
-    else:
-        logger.warning(f"⚠️ .env 文件不存在: {env_path}")
+    if injected_count > 0:
+        logger.info(f"从实例 {instance_name}/config.yaml 注入 {injected_count} 个环境变量")
 
 
 def _merge_config_to_schema(base_schema, config: InstanceConfig):
@@ -804,8 +808,8 @@ async def create_agent_from_instance(
     if force_refresh:
         logger.info("🔄 强制刷新缓存模式")
 
-    # 1. 加载环境变量
-    load_instance_env(instance_name)
+    # 1. 加载实例环境变量（从 config.yaml 的 env_vars 段）
+    load_instance_env_from_config(instance_name)
 
     # 2. 加载实例配置
     config = await load_instance_config(instance_name)

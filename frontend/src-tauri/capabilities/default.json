@@ -6,6 +6,7 @@
   "permissions": [
     "core:default",
     "notification:default",
+    "updater:default",
     {
       "identifier": "shell:allow-spawn",
       "allow": [

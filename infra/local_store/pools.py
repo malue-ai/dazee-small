@@ -23,13 +23,12 @@ class LocalSessionPool:
     本地会话池（内存级）
 
     跟踪活跃会话，限制单用户并发数。
-    桌面端默认允许 3 个并发会话。
+    桌面端默认允许 10 个并发会话。
     """
 
-    def __init__(self, max_concurrent: int = 3):
-        self._max_concurrent = max_concurrent
-        # user_id -> set of active session_ids
-        self._active_sessions: Dict[str, Set[str]] = {}
+    def __init__(self, max_concurrent: int = 10):
+       self._max_concurrent = max_concurrent
+       self._active_sessions: Dict[str, Set[str]] = {}
 
     async def check_can_create_session(self, user_id: str) -> None:
         """

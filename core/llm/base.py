@@ -29,10 +29,25 @@ _tiktoken_encoder = None
 
 
 def _get_tiktoken_encoder():
-    """获取 tiktoken encoder（延迟初始化，全局缓存）"""
+    """
+    获取 tiktoken encoder（延迟初始化，全局缓存）
+
+    PyInstaller 打包后 importlib.metadata.entry_points() 无法发现
+    tiktoken 的编码插件，需要手动导入并注册。
+    """
     global _tiktoken_encoder
     if _tiktoken_encoder is None:
-        _tiktoken_encoder = tiktoken.get_encoding("cl100k_base")
+        try:
+            _tiktoken_encoder = tiktoken.get_encoding("cl100k_base")
+        except ValueError:
+            # PyInstaller 打包环境：手动注册 tiktoken 编码插件
+            import importlib
+            mod = importlib.import_module("tiktoken_ext.openai_public")
+            constructors = mod.ENCODING_CONSTRUCTORS()
+            # 将编码构造器注册到 tiktoken 内部注册表
+            for enc_name, constructor_fn in constructors.items():
+                tiktoken.registry.ENCODING_CONSTRUCTORS[enc_name] = constructor_fn
+            _tiktoken_encoder = tiktoken.get_encoding("cl100k_base")
     return _tiktoken_encoder
 
 

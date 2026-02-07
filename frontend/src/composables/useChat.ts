@@ -8,7 +8,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useConversationStore } from '@/stores/conversation'
 import { useSessionStore } from '@/stores/session'
 import { useWorkspaceStore } from '@/stores/workspace'
-import { useWebSocketChat } from './useWebSocketChat'
+import { useConnectionStore } from '@/stores/connection'
 import { useHITL } from './useHITL'
 import type {
   UIMessage,
@@ -30,16 +30,13 @@ export function useChat() {
   const conversationStore = useConversationStore()
   const sessionStore = useSessionStore()
   const workspaceStore = useWorkspaceStore()
+  const connectionStore = useConnectionStore()
   const hitl = useHITL()
-  const ws = useWebSocketChat()
 
   // ==================== 状态 ====================
 
-  /** 是否正在加载 */
+  /** 是否正在加载 (请求发起但未收到响应) */
   const isLoading = ref(false)
-
-  /** 是否正在生成 */
-  const isGenerating = ref(false)
 
   /** 是否正在停止 */
   const isStopping = ref(false)
@@ -78,12 +75,20 @@ export function useChat() {
   /** 会话列表 */
   const conversations = computed(() => conversationStore.conversations)
 
-  /** 是否当前会话正在加载 */
+  /** 是否正在生成 (根据 Session 状态) */
+  const isGenerating = computed(() => {
+    return conversationId.value ? sessionStore.isConversationRunning(conversationId.value) : false
+  })
+
+  /** 是否当前会话正在加载/生成 */
   const isCurrentConversationLoading = computed(() => {
-    if (isLoading.value) return true
-    const convId = conversationStore.currentId
-    if (convId && sessionStore.isConversationRunning(convId)) return true
-    return false
+    return isLoading.value || isGenerating.value
+  })
+
+  /** 当前连接状态 */
+  const connectionStatus = computed(() => {
+    if (!conversationId.value) return 'disconnected'
+    return connectionStore.getConnection(conversationId.value).connectionStatus.value
   })
 
   // ==================== 路由监听 ====================
@@ -119,24 +124,18 @@ export function useChat() {
   }
 
   /**
-   * 清理（关闭 WebSocket 连接）
+   * 清理
    */
   function cleanup(): void {
-    ws.close()
+    // 不再主动关闭连接，交给 ConnectionStore 管理或在会话结束时关闭
   }
 
   /**
    * 创建新会话
    */
   async function createNewConversation(): Promise<void> {
-    // 中断当前流
-    if (ws.isConnected.value) {
-      ws.disconnect()
-    }
-    
     // 重置所有加载状态
     isLoading.value = false
-    isGenerating.value = false
     isStopping.value = false
     
     conversationStore.reset()
@@ -148,15 +147,11 @@ export function useChat() {
    * 加载会话
    */
   async function loadConversation(convId: string): Promise<void> {
-    if (ws.isConnected.value) {
-      ws.disconnect()
-    }
-
-    // 重置所有加载状态（确保切换会话时状态正确）
+    // 重置局部加载状态
     isLoading.value = false
-    isGenerating.value = false
     isStopping.value = false
     
+    // 如果该会话正在运行，load 方法会优先使用缓存
     await conversationStore.load(convId)
 
     // 更新路由
@@ -180,21 +175,44 @@ export function useChat() {
       return ''
     }
 
+    const currentConvId = conversationStore.currentId
+    // 如果没有会话 ID (新会话)，conversationStore.addUserMessage 会报错
+    // 应该先创建会话吗？通常 conversationStore.create() 会被调用
+    // 这里假设 conversationStore 已经处理好了 currentId，或者在第一次回复时创建
+    // 实际逻辑：如果 currentId 为空，addUserMessage 需要处理?
+    // conversationStore.addUserMessage 抛出错误 if no ID.
+    // 所以如果是新会话，MessageList 组件应该触发 create? 
+    // 不，通常 ChatView 会在 mount 时处理，或者 sendMessage 自动创建。
+    // 这里我们假设 conversationStore.currentId 已经由 create() 设置好了（在 ChatView 初始化时）
+    // 如果是 'chat' 路由，create() 会在 ChatView onMounted 中并未调用，而是等待?
+    // ChatView: onMounted -> if route has id -> load.
+    // handleCreateConversation -> create -> push router.
+    // HandleSendMessage -> if no currentId -> create? 
+    // 原逻辑：sendMessage 直接调用 conversationStore.addUserMessage
+    
+    if (!currentConvId) {
+       // 自动创建会话
+       const newConv = await conversationStore.create(content.slice(0, 20) || '新对话')
+       // create 会设置 currentId
+    }
+
+    const targetConvId = conversationStore.currentId!
+
     // 添加用户消息
-    conversationStore.addUserMessage(content, files)
+    conversationStore.addUserMessage(content, files, targetConvId)
 
     // 添加空的助手消息
-    const assistantMsg = conversationStore.addAssistantMessage()
+    const assistantMsg = conversationStore.addAssistantMessage(targetConvId)
 
     isLoading.value = true
-    isGenerating.value = false
+    // isGenerating 是 computed，依赖 sessionStore 状态
 
     try {
       // 构建请求体
       const requestBody = {
         message: content,
         user_id: conversationStore.userId,
-        conversation_id: conversationStore.currentId || undefined,
+        conversation_id: targetConvId,
         stream: true,
         agent_id: options.agentId || undefined,
         background_tasks: options.backgroundTasks || [
@@ -214,24 +232,30 @@ export function useChat() {
         }
       }
 
+      // 获取当前会话的 WebSocket 连接
+      const ws = connectionStore.getConnection(targetConvId)
+
       // 通过 WebSocket 发送消息
       const result = await ws.connect(requestBody, {
-        onEvent: (event) => handleStreamEvent(event, assistantMsg),
+        onEvent: (event) => handleStreamEvent(event, assistantMsg, targetConvId),
         onConnected: () => {
-          console.log('✅ WebSocket 流开始')
+          console.log(`✅ WebSocket 流开始 (${targetConvId})`)
         },
         onDisconnected: () => {
-          console.log('✅ WebSocket 流结束')
-          // 重置停止状态
-          isStopping.value = false
+          console.log(`✅ WebSocket 流结束 (${targetConvId})`)
+          // 重置停止状态 (如果是当前会话)
+          if (conversationStore.currentId === targetConvId) {
+            isStopping.value = false
+          }
         },
         onError: (error) => {
-          console.error('❌ WebSocket 错误:', error)
+          console.error(`❌ WebSocket 错误 (${targetConvId}):`, error)
           assistantMsg.content += `\n❌ 发送失败: ${error.message}`
+          sessionStore.markCompleted(targetConvId)
         }
       })
 
-      // 刷新会话列表（失败不应中断发送流程）
+      // 刷新会话列表
       try {
         await conversationStore.fetchList()
       } catch (e) {
@@ -241,22 +265,20 @@ export function useChat() {
       return result
     } catch (error) {
       assistantMsg.content += `\n❌ 发送失败: ${(error as Error).message}`
+      sessionStore.markCompleted(targetConvId)
       throw error
     } finally {
       isLoading.value = false
-      isGenerating.value = false
     }
   }
 
   /**
    * 停止生成
-   * 
-   * 注意：不立即断开流，等待后端发送 done 事件后由事件处理器断开
-   * 事件顺序：billing → message_stop (done) → session_stopped
    */
   async function stopGeneration(): Promise<void> {
+    const currentConvId = conversationStore.currentId
     const sessionId = sessionStore.currentSessionId ||
-      sessionStore.getSessionIdByConversation(conversationStore.currentId)
+      sessionStore.getSessionIdByConversation(currentConvId)
 
     if (!sessionId) {
       console.warn('⚠️ 无法停止：session_id 不存在')
@@ -266,33 +288,32 @@ export function useChat() {
     isStopping.value = true
 
     try {
-      // 只发送停止请求，不立即断开流
-      // 后端会在收到停止请求后发送 message_stop / session_stopped 事件
+      // 发送停止请求
       await sessionStore.stop(sessionId)
-      // 不在这里 disconnect，让事件处理器在收到 done 后断开
+      // 注意：流的断开由 handleStreamEvent 中的 message_stop/session_stopped 处理
     } catch (error) {
-      // 停止请求失败时才中断流
       console.error('❌ 停止请求失败:', error)
-      ws.disconnect()
+      // 如果请求失败，强制断开连接
+      if (currentConvId) {
+        const ws = connectionStore.getConnection(currentConvId)
+        ws.disconnect()
+        sessionStore.markCompleted(currentConvId)
+      }
       isStopping.value = false
       isLoading.value = false
-      isGenerating.value = false
     }
-    // 注意：isStopping、isLoading、isGenerating 状态会在收到 done 事件时由事件处理器重置
   }
 
   /**
-   * V11: 确认回滚（调用后端回滚 API）
+   * V11: 确认回滚
    */
   async function confirmRollback(): Promise<void> {
     const sessionId =
       sessionStore.currentSessionId ||
       sessionStore.getSessionIdByConversation(conversationStore.currentId) ||
       rollbackData.value?.task_id
-    if (!sessionId) {
-      console.warn('⚠️ 无法回滚：session_id 不存在')
-      return
-    }
+    if (!sessionId) return
+
     rollbackLoading.value = true
     try {
       await sessionApi.rollbackSession(sessionId)
@@ -301,10 +322,7 @@ export function useChat() {
     } catch (e) {
       console.error('❌ 回滚失败:', e)
       if (rollbackData.value) {
-        rollbackData.value = {
-          ...rollbackData.value,
-          error: (e as Error).message || '回滚请求失败'
-        }
+        rollbackData.value.error = (e as Error).message || '回滚请求失败'
       }
     } finally {
       rollbackLoading.value = false
@@ -312,7 +330,7 @@ export function useChat() {
   }
 
   /**
-   * V11: 关闭回滚弹窗（保持当前状态）
+   * V11: 关闭回滚弹窗
    */
   function dismissRollback(): void {
     showRollbackModal.value = false
@@ -320,7 +338,7 @@ export function useChat() {
   }
 
   /**
-   * V11: 用户确认继续长任务（调用后端后关闭弹窗，执行器会继续）
+   * V11: 确认继续长任务
    */
   async function confirmLongRunContinue(): Promise<void> {
     const sessionId =
@@ -337,7 +355,7 @@ export function useChat() {
   }
 
   /**
-   * V11: 关闭长任务确认弹窗（用户选择停止则停止会话）
+   * V11: 关闭长任务确认弹窗
    */
   async function dismissLongRunConfirm(): Promise<void> {
     showLongRunConfirmModal.value = false
@@ -357,27 +375,25 @@ export function useChat() {
   /**
    * 处理流事件
    */
-  function handleStreamEvent(event: { type: string; data: any }, msg: UIMessage): void {
+  function handleStreamEvent(event: { type: string; data: any }, msg: UIMessage, convId: string): void {
     const { type, data } = event
-
-    // 保存 session_id
-    if (data?.session_id) {
-      sessionStore.setCurrentSessionId(data.session_id)
-    }
 
     // 处理 session 开始事件
     if (type === 'session_start') {
       console.log('🚀 Session 开始:', data.session_id)
-      // session_start 主要用于保存 session_id，已在上面处理
+      if (data.session_id) {
+        sessionStore.setCurrentSessionId(data.session_id)
+        sessionStore.markRunning(convId, data.session_id)
+      }
     }
 
     // 处理会话开始事件
     if (type === 'conversation_start' && data.conversation_id) {
-      if (!conversationStore.currentId) {
-        conversationStore.currentId = data.conversation_id
-        conversationStore.fetchList().catch(e => {
-          console.warn('⚠️ conversation_start 后刷新会话列表失败:', e)
-        })
+      // 只有在新会话且 ID 匹配时才更新?
+      // 实际上 createNewConversation 时 conversationStore.currentId 已经有了
+      // 这里主要是确认 ID
+      if (conversationStore.currentId === data.conversation_id) {
+         // ok
       }
     }
 
@@ -385,22 +401,21 @@ export function useChat() {
     if (type === 'message_start') {
       const messageId = data.message_id || data.message?.id
       if (messageId) {
-        // 将占位消息的临时 ID 更新为后端返回的 message_id
         msg.id = messageId
-        console.log('📝 Message 开始，ID 已更新:', messageId)
+      }
+      // 确保标记为运行中
+      if (data.session_id) {
+         sessionStore.markRunning(convId, data.session_id)
       }
     }
 
-    // 处理消息增量事件（plan、recommended 等）
+    // 处理消息增量事件
     if (type === 'message_delta') {
       handleMessageDelta(data.delta, msg)
     }
 
     // 处理内容块开始事件
     if (type === 'content_start') {
-      if (!isGenerating.value) {
-        isGenerating.value = true
-      }
       handleContentStart(data, msg)
     }
 
@@ -413,8 +428,13 @@ export function useChat() {
     if (type === 'content_stop') {
       handleContentStop(data, msg)
     }
+    
+    // 处理流结束/消息结束
+    if (type === 'message_stop' || type === 'session_stopped' || type === 'error') {
+       sessionStore.markCompleted(convId)
+    }
 
-    // V11: 回滚选项（异常或终止策略触发）
+    // V11: 回滚选项
     if (type === 'rollback_options') {
       const taskId = data?.task_id || sessionStore.currentSessionId
       const options = Array.isArray(data?.options) ? data.options : []
@@ -427,13 +447,13 @@ export function useChat() {
       showRollbackModal.value = true
     }
 
-    // V11: 回滚已完成（自动回滚或用户确认回滚后）
+    // V11: 回滚已完成
     if (type === 'rollback_completed') {
       showRollbackModal.value = false
       rollbackData.value = null
     }
 
-    // V11: 长任务确认（是否继续执行）
+    // V11: 长任务确认
     if (type === 'long_running_confirm') {
       longRunConfirmData.value = {
         turn: data?.turn ?? 0,
@@ -481,39 +501,26 @@ export function useChat() {
   }
 
   /**
-   * 尝试从内容中解析并更新 Plan（支持流式解析）
-   * @param content - 工具返回的内容（可能是不完整的 JSON）
-   * @param msg - 当前消息
+   * 尝试从内容中解析并更新 Plan
    */
   function tryUpdatePlanFromContent(content: string, msg: UIMessage): void {
     if (!content) return
     
-    /**
-     * 同步更新消息级别和会话级别的 Plan
-     * 确保右侧任务进度面板实时更新
-     */
     const syncPlanUpdate = (planData: PlanData) => {
       msg.planResult = planData
-      // 🔧 同步更新会话级别的 conversationPlan，确保 PlanWidget 实时刷新
       conversationStore.updatePlan(planData)
-      console.log('📋 Plan 已同步更新:', planData?.name, `(${planData.todos?.filter(t => t.status === 'completed').length || 0}/${planData.todos?.length || 0} 完成)`)
     }
     
     try {
-      // 尝试解析完整 JSON
       const resultContent = JSON.parse(content)
       if (resultContent?.plan) {
         syncPlanUpdate(resultContent.plan as PlanData)
       }
     } catch {
-      // JSON 不完整，尝试提取部分 plan 数据（用于流式显示）
-      // 只在能找到 "plan": { 时尝试解析
       const planMatch = content.match(/"plan"\s*:\s*(\{[\s\S]*)/)?.[1]
       if (planMatch) {
         try {
-          // 尝试补全 JSON（简单处理）
           let planJson = planMatch
-          // 计算大括号平衡
           let depth = 0
           let endIndex = 0
           for (let i = 0; i < planJson.length; i++) {
@@ -533,43 +540,31 @@ export function useChat() {
             }
           }
         } catch {
-          // 忽略解析错误
+          // ignore
         }
       }
     }
   }
 
   /**
-   * 初始化内容块（统一处理所有类型）
-   * 确保每种类型的内容块都有正确的初始结构
+   * 初始化内容块
    */
   function initContentBlock(contentBlock: ContentBlock): ContentBlock {
     const block = { ...contentBlock, _blockType: contentBlock.type }
     
-    // 根据类型初始化字段
     switch (contentBlock.type) {
       case 'text':
-        if (!('text' in block)) {
-          (block as any).text = ''
-        }
+        if (!('text' in block)) (block as any).text = ''
         break
       case 'thinking':
-        if (!('thinking' in block)) {
-          (block as any).thinking = ''
-        }
+        if (!('thinking' in block)) (block as any).thinking = ''
         break
       case 'tool_use':
       case 'server_tool_use':
-        if (!('partialInput' in block)) {
-          (block as any).partialInput = ''
-        }
+        if (!('partialInput' in block)) (block as any).partialInput = ''
         break
       case 'tool_result':
-        // tool_result 的 content 可能在 content_start 时就完整发送
-        // 也可能通过 delta 流式发送
-        if (!('content' in block)) {
-          (block as any).content = ''
-        }
+        if (!('content' in block)) (block as any).content = ''
         break
     }
     
@@ -577,13 +572,11 @@ export function useChat() {
   }
 
   /**
-   * 更新内容块（统一处理流式增量）
-   * 通过替换数组元素来确保响应式更新
+   * 更新内容块
    */
   function updateContentBlock(msg: UIMessage, index: number, deltaText: string): void {
     const block = msg.contentBlocks[index]
     if (!block) {
-      // 容错：如果缺少 content_start，按文本块补齐
       const fallbackBlock = initContentBlock({ type: 'text', text: '' } as ContentBlock)
       msg.contentBlocks[index] = fallbackBlock
     }
@@ -596,13 +589,11 @@ export function useChat() {
     switch (blockType) {
       case 'text':
         msg.content += deltaText
-        // 直接修改现有对象属性（Vue 3 Proxy 会追踪）
         ;(current as any).text = ((current as any).text || '') + deltaText
         break
         
       case 'thinking':
         msg.thinking = (msg.thinking || '') + deltaText
-        // 直接修改现有对象属性
         ;(current as any).thinking = ((current as any).thinking || '') + deltaText
         break
         
@@ -610,30 +601,25 @@ export function useChat() {
       case 'server_tool_use':
         ;(current as any).partialInput = ((current as any).partialInput || '') + deltaText
         
-        // 更新 pending tool input
         const toolIds = Object.keys(pendingToolCalls.value)
         if (toolIds.length > 0) {
           const lastId = toolIds[toolIds.length - 1]
           pendingToolCalls.value[lastId].input += deltaText
         }
 
-        // 更新实时预览
         if (workspaceStore.isLivePreviewing && deltaText) {
           workspaceStore.updateLivePreview(deltaText)
         }
         break
         
       case 'tool_result':
-        // 流式累加工具结果内容
         ;(current as any).content = ((current as any).content || '') + deltaText
         
-        // 同步更新 toolStatuses 中的结果
         const toolUseId = (current as any).tool_use_id
         if (toolUseId && msg.toolStatuses[toolUseId]) {
           msg.toolStatuses[toolUseId].result = (current as any).content
         }
 
-        // plan_todo 工具：流式更新 Plan
         if (toolUseId) {
           const toolCall = pendingToolCalls.value[toolUseId]
           if (toolCall?.name === 'plan_todo') {
@@ -651,22 +637,18 @@ export function useChat() {
     if (!data || typeof data.index !== 'number' || !data.content_block) return
     let { index, content_block } = data
 
-    // 支持 index=-1 (自动追加到末尾)
     if (index === -1) {
       index = msg.contentBlocks.length
     }
 
-    // 扩展 contentBlocks 数组
     while (msg.contentBlocks.length <= index) {
       msg.contentBlocks.push(null as unknown as ContentBlock)
     }
 
-    // 初始化并存储内容块
     const initializedBlock = initContentBlock(content_block)
     msg.contentBlocks[index] = initializedBlock
     currentBlockType = content_block.type
 
-    // 类型特定处理
     if (content_block.type === 'thinking') {
       msg.thinking = ''
     }
@@ -677,21 +659,18 @@ export function useChat() {
 
       msg.toolStatuses[toolId] = { pending: true }
 
-      // 初始化 pending tool call
       pendingToolCalls.value[toolId] = {
         name: toolName,
         input: '',
         id: toolId
       }
 
-      // 文件写入工具 -> 启动实时预览
       if (FILE_WRITE_TOOLS.includes(toolName as any)) {
         const inputObj = (content_block as any).input
         const initialPath = inputObj?.path || inputObj?.file_path || null
         workspaceStore.startLivePreview(toolName, toolId, initialPath)
       }
 
-      // 终端命令工具 -> 标记终端运行中
       if (TERMINAL_TOOLS.includes(toolName as any)) {
         workspaceStore.setTerminalRunning(true)
       }
@@ -708,10 +687,8 @@ export function useChat() {
         result: content
       }
 
-      // 获取对应的工具调用信息
       const toolCall = pendingToolCalls.value[toolUseId]
 
-      // 处理终端输出
       if (toolCall && TERMINAL_TOOLS.includes(toolCall.name as any)) {
         let outputText = content
         try {
@@ -725,7 +702,7 @@ export function useChat() {
             outputText = jsonContent.message
           }
         } catch {
-          // 不是 JSON，直接显示
+          // ignore
         }
 
         workspaceStore.addTerminalLog(isError ? 'error' : 'output', outputText)
@@ -733,7 +710,6 @@ export function useChat() {
         delete pendingToolCalls.value[toolUseId]
       }
 
-      // plan_todo 工具：提取 Plan 数据（非流式情况，content_start 时已有完整数据）
       if (toolCall?.name === 'plan_todo' && content) {
         tryUpdatePlanFromContent(content, msg)
       }
@@ -747,14 +723,12 @@ export function useChat() {
     if (!data || typeof data.index !== 'number') return
     const { index, delta } = data
 
-    // 提取 delta 文本
     const deltaText = typeof delta === 'string'
       ? delta
       : ((delta as any).text || (delta as any).thinking || (delta as any).partial_json || '')
 
     if (!deltaText) return
 
-    // 统一更新内容块
     updateContentBlock(msg, index, deltaText)
   }
 
@@ -766,17 +740,15 @@ export function useChat() {
     const { index } = data
     const block = msg.contentBlocks[index]
 
-    // 解析完整的工具输入
     if (block && (block as any).partialInput) {
       try {
         (block as any).input = JSON.parse((block as any).partialInput)
         delete (block as any).partialInput
       } catch {
-        // 忽略解析错误
+        // ignore
       }
     }
 
-    // HITL：工具输入完整后弹窗
     if (block && (block as any).type === 'tool_use') {
       const toolName = (block as any).name as string
       if (toolName === 'hitl' || toolName === 'request_human_confirmation') {
@@ -788,11 +760,9 @@ export function useChat() {
       }
     }
 
-    // 结束实时预览
     if (currentBlockType === 'tool_use' && workspaceStore.isLivePreviewing) {
       workspaceStore.finishLivePreview()
 
-      // 处理终端命令输入完成
       const toolIds = Object.keys(pendingToolCalls.value)
       if (toolIds.length > 0) {
         const lastId = toolIds[toolIds.length - 1]
@@ -806,13 +776,12 @@ export function useChat() {
               workspaceStore.addTerminalLog('command', command)
             }
           } catch {
-            // 忽略解析错误
+            // ignore
           }
         }
       }
     }
 
-    // plan_todo 工具：tool_result 完整后最终确认 Plan 数据
     if (block && block.type === 'tool_result') {
       const toolUseId = (block as any).tool_use_id
       const toolCall = toolUseId ? pendingToolCalls.value[toolUseId] : null
@@ -821,9 +790,7 @@ export function useChat() {
         const content = (block as any).content
         if (content) {
           tryUpdatePlanFromContent(content, msg)
-          console.log('📋 Plan 数据已确认:', msg.planResult?.name)
         }
-        // 清理 pendingToolCalls
         delete pendingToolCalls.value[toolUseId]
       }
     }
@@ -849,8 +816,8 @@ export function useChat() {
     confirmLongRunContinue,
     dismissLongRunConfirm,
 
-    // WebSocket 连接状态
-    connectionStatus: ws.connectionStatus,
+    // 连接状态
+    connectionStatus,
 
     // 计算属性
     messages,
@@ -870,7 +837,7 @@ export function useChat() {
 }
 
 /**
- * 规范化 HITL 请求（兼容不同字段命名）
+ * 规范化 HITL 请求
  */
 function normalizeHITLRequest(raw: any): HITLConfirmRequest | null {
   if (!raw) return null

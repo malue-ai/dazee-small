@@ -46,12 +46,31 @@ from typing import Any, Callable, Optional, TypeVar
 # ============================================================
 # 配置
 # ============================================================
+
+
+def _get_log_dir() -> Path:
+    """获取日志目录（打包环境使用 Application Support，开发环境使用项目目录）"""
+    if getattr(sys, 'frozen', False):
+        # PyInstaller 打包环境：使用 Application Support 目录
+        import platform
+        if platform.system() == 'Darwin':
+            import os
+            home = os.environ.get('HOME', os.path.expanduser('~'))
+            return Path(home) / 'Library' / 'Application Support' / 'com.zenflux.agent' / 'logs'
+        # Windows/Linux 使用 exe 同级目录
+        return Path(sys.executable).parent / 'logs'
+    return Path('logs')
+
+
+_log_dir = _get_log_dir()
+
+
 LOG_CONFIG = {
     "level": "INFO",
     "console_enabled": True,
     "file_enabled": True,
-    "file": "logs/app.log",
-    "error_file": "logs/error.log",
+    "file": str(_log_dir / "app.log"),
+    "error_file": str(_log_dir / "error.log"),
     "max_size": 50 * 1024 * 1024,  # 50MB
     "backup_count": 10,
 }

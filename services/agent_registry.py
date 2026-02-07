@@ -45,7 +45,7 @@ from utils.instance_loader import (
     get_instances_dir,
     list_instances,
     load_instance_config,
-    load_instance_env,
+    load_instance_env_from_config,
     load_instance_prompt,
 )
 
@@ -1032,8 +1032,8 @@ class AgentRegistry:
         """
         instance_start = datetime.now()
 
-        # 1. 加载环境变量
-        load_instance_env(agent_id)
+        # 1. 加载实例环境变量（从 config.yaml 的 env_vars 段）
+        load_instance_env_from_config(agent_id)
 
         # 2. 加载实例配置
         config = await load_instance_config(agent_id)

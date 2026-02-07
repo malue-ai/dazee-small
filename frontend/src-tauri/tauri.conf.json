@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "ZenFlux Agent",
-  "version": "1.0.0",
+  "version": "0.7.5",
   "identifier": "com.zenflux.agent",
   "build": {
     "beforeBuildCommand": "npm run build",
@@ -29,6 +29,14 @@
       "csp": "default-src 'self'; script-src 'self' 'unsafe-eval'; connect-src 'self' http://localhost:* http://127.0.0.1:* https://* wss://* ws://localhost:* ws://127.0.0.1:*; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'"
     }
   },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/YOUR_ORG/zenflux-agent/releases/latest/download/latest.json"
+      ],
+      "pubkey": ""
+    }
+  },
   "bundle": {
     "active": true,
     "category": "DeveloperTool",
@@ -47,7 +55,7 @@
     "shortDescription": "ZenFlux Agent Desktop",
     "targets": "all",
     "macOS": {
-      "entitlements": null,
+      "entitlements": "entitlements.plist",
       "exceptionDomain": "",
       "frameworks": [],
       "providerShortName": null,

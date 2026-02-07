@@ -97,6 +97,7 @@ async def update_conversation(
     session: AsyncSession,
     conversation_id: str,
     title: Optional[str] = None,
+    status: Optional[str] = None,
     metadata: Optional[Dict[str, Any]] = None,
 ) -> Optional[LocalConversation]:
     """更新会话"""
@@ -106,6 +107,8 @@ async def update_conversation(
 
     if title is not None:
         conv.title = title
+    if status is not None:
+        conv.status = status
     if metadata is not None:
         conv.metadata_json = _to_json(metadata)
     conv.updated_at = datetime.now()

@@ -1,0 +1,891 @@
+{
+  "started_at": "2026-02-07T17:25:47.829534",
+  "finished_at": "2026-02-07T17:25:59.269106",
+  "base_url": "http://127.0.0.1:8000",
+  "total": 39,
+  "passed": 37,
+  "failed": 2,
+  "skipped": 0,
+  "pass_rate": 94.9,
+  "duration_s": 11.44,
+  "phases": [
+    {
+      "phase_id": "preflight",
+      "phase_name": "环境预检",
+      "total": 3,
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0,
+      "duration_ms": 0.0,
+      "checks": [
+        {
+          "case_id": "P01",
+          "phase": "preflight",
+          "name": "服务存活",
+          "passed": true,
+          "duration_ms": 9.7,
+          "status_code": 200,
+          "error": null,
+          "details": {
+            "response_json": {
+              "status": "ok",
+              "timestamp": 1770456347.838109
+            }
+          }
+        },
+        {
+          "case_id": "P02",
+          "phase": "preflight",
+          "name": "Liveness 探针",
+          "passed": true,
+          "duration_ms": 1.4,
+          "status_code": 200,
+          "error": null,
+          "details": {
+            "response_json": {
+              "status": "alive",
+              "timestamp": 1770456347.840232
+            }
+          }
+        },
+        {
+          "case_id": "P03",
+          "phase": "preflight",
+          "name": "Agent 注册表可用",
+          "passed": true,
+          "duration_ms": 2.0,
+          "status_code": 200,
+          "error": null,
+          "details": {
+            "response_json": {
+              "total": 3,
+              "agents": [
+                {
+                  "agent_id": "client_agent",
+                  "name": "client_agent",
+                  "description": "本地设备操作智能体 - 借鉴 clawdbot 设计",
+                  "version": "1.0.0",
+                  "is_active": true,
+                  "total_calls": 0,
+                  "created_at": "2026-02-07T17:17:54.976615",
+                  "last_used_at": null
+                },
+                {
+                  "agent_id": "dazee_agent",
+                  "name": "dazee_agent",
+                  "description": "Dazee 智能助手 - 支持数据分析、系统搭建和综合咨询",
+                  "version": "1.0.0",
+                  "is_active": true,
+                  "total_calls": 0,
+                  "created_at": "2026-02-07T17:17:55.139338",
+                  "last_used_at": null
+                },
+                {
+                  "agent_id": "xiaodazi",
+                  "name": "xiaodazi",
+                  "description": "养在电脑里的 AI 小搭子",
+                  "version": "1.0.0",
+                  "is_active": true,
+                  "total_calls": 0,
+                  "created_at": "2026-02-07T17:17:55.306775",
+                  "last_used_at": null
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "phase_id": "connectivity",
+      "phase_name": "API 连通性",
+      "total": 18,
+      "passed": 18,
+      "failed": 0,
+      "skipped": 0,
+      "duration_ms": 0.0,
+      "checks": [
+        {
+          "case_id": "C01",
+          "phase": "connectivity",
+          "name": "创建对话",
+          "passed": true,
+          "duration_ms": 22.3,
+          "status_code": 200,
+          "error": null,
+          "details": {
+            "response_json": {
+              "code": 200,
+              "message": "success",
+              "data": {
+                "id": "e9e913c1-b48d-43ec-9264-1275828a28ad",
+                "user_id": "eval_user_001",
+                "title": "eval_lifecycle_test",
+                "status": "active",
+                "created_at": "2026-02-07T17:25:47.881751",
+                "updated_at": "2026-02-07T17:25:47.881751",
+                "metadata": {}
+              }
+            }
+          }
+        },
+        {
+          "case_id": "C02",
+          "phase": "connectivity",
+          "name": "查询对话详情",
+          "passed": true,
+          "duration_ms": 2.6,
+          "status_code": 200,
+          "error": null,
+          "details": {
+            "response_json": {
+              "code": 200,
+              "message": "success",
+              "data": {
+                "id": "e9e913c1-b48d-43ec-9264-1275828a28ad",
+                "user_id": "eval_user_001",
+                "title": "eval_lifecycle_test",
+                "status": "active",
+                "created_at": "2026-02-07T17:25:47.881751",
+                "updated_at": "2026-02-07T17:25:47.881751",
+                "metadata": {}
+              }
+            }
+          }
+        },
+        {
+          "case_id": "C03",
+          "phase": "connectivity",
+          "name": "对话列表包含新对话",
+          "passed": true,
+          "duration_ms": 3.9,
+          "status_code": 200,
+          "error": null,
+          "details": {
+            "response_json": {
+              "code": 200,
+              "message": "success",
+              "data": {
+                "conversations": [
+                  {
+                    "id": "e9e913c1-b48d-43ec-9264-1275828a28ad",
+                    "user_id": "eval_user_001",
+                    "title": "eval_lifecycle_test",
+                    "status": "active",
+                    "created_at": "2026-02-07T17:25:47.881751",
+                    "updated_at": "2026-02-07T17:25:47.881751",
+                    "metadata": {}
+                  },
+                  {
+                    "id": "d73fc41b-644c-4627-8edd-bbc45e298d1a",
+                    "user_id": "eval_user_001",
+                    "title": "新对话",
+                    "status": "active",
+                    "created_at": "2026-02-07T16:38:05.784547",
+                    "updated_at": "2026-02-07T16:38:17.995185",
+                    "metadata": {}
+                  },
+                  {
+                    "id": "eval_conv_sync_001",
+                    "user_id": "eval_user_001",
+                    "title": "新对话",
+                    "status": "active",
+                    "created_at": "2026-02-07T16:32:16.831435",
+                    "updated_at": "2026-02-07T16:38:14.483123",
+                    "metadata": {}
+                  },
+                  {
+                    "id": "0866097f-04dd-4c14-bcaf-45abbb9d8284",
+                    "user_id": "eval_user_001",
+                    "title": "新对话",
+                    "status": "active",
+                    "created_at": "2026-02-07T16:38:04.049864",
+                    "updated_at": "2026-02-07T16:38:14.434377",
+                    "metadata": {}
+                  },
+                  {
+                    "id": "060945d4-4d0d-455f-9f17-00e52b821301",
+                    "user_id": "eval_user_001",
+                    "title": "新对话",
+                    "status": "active",
+                    "created_at": "2026-02-07T16:38:06.201668",
+                    "updated_at": "2026-02-07T16:38:06.201668",
+                    "metadata": {}
+                  },
+                  {
+                    "id": "0c06184b-1d31-4123-add0-27dd51d19bc0",
+                    "user_id": "eval_user_001",
+                    "title": "新对话",
+                    "status": "active",
+                    "created_at": "2026-02-07T16:38:06.170912",
+                    "updated_at": "2026-02-07T16:38:06.170912",
+                    "metadata": {}
+                  },
+                  {
+                    "id": "54b9475d-db50-4ad7-9fe9-d4d91c1bd1ca",
+                    "user_id": "eval_user_001",
+                    "title": "新对话",
+                    "status": "active",
+                    "created_at": "2026-02-07T16:38:06.137057",
+                    "updated_at": "2026-02-07T16:38:06.137057",
+                    "metadata": {}
+                  },
+                  {
+                    "id": "4a9fc943-a2dc-4886-8d43-d72d88e21e37",
+                    "user_id": "eval_user_001",
+                    "title": "新对话",
+                    "status": "active",
+                    "created_at": "2026-02-07T16:38:06.107365",
+                    "updated_at": "2026-02-07T16:38:06.107365",
+                    "metadata": {}
+                  },
+                  {
+                    "id": "e31b41c2-f04e-42f4-94cc-619f830f2f3c",
+                    "user_id": "eval_user_001",
+                    "title": "新对话",
+                    "status": "active",
+                    "created_at": "2026-02-07T16:38:06.077179",
+                    "updated_at": "2026-02-07T16:38:06.077179",
+                    "metadata": {}
+                  },
+                  {
+                    "id": "15ecafad-171c-46b1-815a-6673ea59fc24",
+                    "user_id": "eval_user_001",
+                    "title": "新对话",
+                    "status": "active",
+                    "created_at": "2026-02-07T16:38:06.018866",
+                    "updated_at": "2026-02-07T16:38:06.018866",
+                    "metadata": {}
+                  }
+                ],
+                "total": 29,
+                "limit": 10,
+                "offset": 0
+              }
+            }
+          }
+        },
+        {
+          "case_id": "C04",
+          "phase": "connectivity",
+          "name": "更新对话标题",
+          "passed": true,
+          "duration_ms": 3.7,
+          "status_code": 200,
+          "error": null,
+          "details": {
+            "response_json": {
+              "code": 200,
+              "message": "success",
+              "data": {
+                "id": "e9e913c1-b48d-43ec-9264-1275828a28ad",
+                "user_id": "eval_user_001",
+                "title": "updated_eval_title",
+                "status": "active",
+                "created_at": "2026-02-07T17:25:47.881751",
+                "updated_at": "2026-02-07T17:25:47.899725",
+                "metadata": {}
+              }
+            }
+          }
+        },
+        {
+          "case_id": "C05",
+          "phase": "connectivity",
+          "name": "获取对话摘要",
+          "passed": true,
+          "duration_ms": 3.2,
+          "status_code": 200,
+          "error": null,
+          "details": {
+            "response_json": {
+              "code": 200,
+              "message": "success",
+              "data": {
+                "conversation_id": "e9e913c1-b48d-43ec-9264-1275828a28ad",
+                "title": "updated_eval_title",
+                "message_count": 0,
+                "created_at": "2026-02-07T17:25:47.881751",
+                "updated_at": "2026-02-07T17:25:47.899725"
+              }
+            }
+          }
+        },
+        {
+          "case_id": "C06",
+          "phase": "connectivity",
+          "name": "获取历史消息（空对话）",
+          "passed": true,
+          "duration_ms": 2.7,
+          "status_code": 200,
+          "error": null,
+          "details": {
+            "response_json": {
+              "code": 200,
+              "message": "success",
+              "data": {
+                "conversation_id": "e9e913c1-b48d-43ec-9264-1275828a28ad",
+                "conversation_metadata": {},
+                "messages": [],
+                "total": 0,
+                "limit": 50,
+                "offset": 0,
+                "has_more": false,
+                "next_cursor": null
+              }
+            }
+          }
+        },
+        {
+          "case_id": "C07",
+          "phase": "connectivity",
+          "name": "搜索对话",
+          "passed": true,
+          "duration_ms": 2.4,
+          "status_code": 200,
+          "error": null,
+          "details": {
+            "response_json": {
+              "code": 200,
+              "message": "success",
+              "data": {
+                "conversations": [],
+                "total": 0
+              }
+            }
+          }
+        },
+        {
+          "case_id": "S01",
+          "phase": "connectivity",
+          "name": "Agent 列表",
+          "passed": true,
+          "duration_ms": 1.2,
+          "status_code": 200,
+          "error": null,
+          "details": {
+            "response_json": {
+              "total": 3,
+              "agents": [
+                {
+                  "agent_id": "client_agent",
+                  "name": "client_agent",
+                  "description": "本地设备操作智能体 - 借鉴 clawdbot 设计",
+                  "version": "1.0.0",
+                  "is_active": true,
+                  "total_calls": 0,
+                  "created_at": "2026-02-07T17:17:54.976615",
+                  "last_used_at": null
+                },
+                {
+                  "agent_id": "dazee_agent",
+                  "name": "dazee_agent",
+                  "description": "Dazee 智能助手 - 支持数据分析、系统搭建和综合咨询",
+                  "version": "1.0.0",
+                  "is_active": true,
+                  "total_calls": 0,
+                  "created_at": "2026-02-07T17:17:55.139338",
+                  "last_used_at": null
+                },
+                {
+                  "agent_id": "xiaodazi",
+                  "name": "xiaodazi",
+                  "description": "养在电脑里的 AI 小搭子",
+                  "version": "1.0.0",
+                  "is_active": true,
+                  "total_calls": 0,
+                  "created_at": "2026-02-07T17:17:55.306775",
+                  "last_used_at": null
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case_id": "S02",
+          "phase": "connectivity",
+          "name": "Agent 详情",
+          "passed": true,
+          "duration_ms": 1.1,
+          "status_code": 200,
+          "error": null,
+          "details": {
+            "response_json": {
+              "agent_id": "xiaodazi",
+              "name": "xiaodazi",
+              "description": "养在电脑里的 AI 小搭子",
+              "version": "1.0.0",
+              "is_active": true,
+              "model": "claude-sonnet-4-5-20250929",
+              "max_turns": null,
+              "plan_manager_enabled": null,
+              "enabled_capabilities": {
+                "plan_todo": true,
+                "hitl": true,
+                "api_calling": true
+              },
+              "mcp_tools": [],
+              "apis": [],
+              "skills": [
+                "writing-assistant",
+                "translator",
+                "writing-analyzer",
+                "style-learner",
+                "content-reformatter",
+                "file-manager",
+                "local-search",
+                "app-recommender",
+                "literature-reviewer",
+                "paper-search",
+                "arxiv-search",
+                "nutrition-analyzer",
+                "medication-tracker",
+                "trend-spotter",
+                "competitive-intel",
+                "readwise-rival",
+                "excel-analyzer",
+                "excel-fixer",
+                "word-processor",
+                "macos-screenshot",
+                "macos-clipboard",
+                "macos-notification",
+                "macos-open",
+                "macos-finder",
+                "applescript",
+                "app-scanner",
+                "apple-calendar",
+                "windows-screenshot",
+                "windows-clipboard",
+                "windows-notification",
+                "powershell-basic",
+                "outlook-cli",
+                "onenote",
+                "linux-screenshot",
+                "linux-clipboard",
+                "linux-notification",
+                "xdotool"
+              ],
+              "loaded_at": "2026-02-07T17:17:55.306775"
+            }
+          }
+        },
+        {
+          "case_id": "S03",
+          "phase": "connectivity",
+          "name": "Session 列表",
+          "passed": true,
+          "duration_ms": 1.2,
+          "status_code": 200,
+          "error": null,
+          "details": {
+            "response_json": {
+              "code": 200,
+              "message": "success",
+              "data": {
+                "total": 0,
+                "sessions": []
+              }
+            }
+          }
+        },
+        {
+          "case_id": "S04",
+          "phase": "connectivity",
+          "name": "不存在的 Session 返回 404",
+          "passed": true,
+          "duration_ms": 1.2,
+          "status_code": 404,
+          "error": null,
+          "details": {
+            "response_json": {
+              "detail": {
+                "code": "SESSION_NOT_FOUND",
+                "message": "Session 不存在或已过期",
+                "timestamp": "2026-02-07T17:25:47.918740"
+              }
+            }
+          }
+        },
+        {
+          "case_id": "S05",
+          "phase": "connectivity",
+          "name": "停止不存在的 Session 返回 404",
+          "passed": true,
+          "duration_ms": 1.2,
+          "status_code": 404,
+          "error": null,
+          "details": {
+            "response_json": {
+              "detail": {
+                "code": "SESSION_NOT_FOUND",
+                "message": "Session 不存在或已过期",
+                "timestamp": "2026-02-07T17:25:47.919958"
+              }
+            }
+          }
+        },
+        {
+          "case_id": "D01",
+          "phase": "connectivity",
+          "name": "同步聊天 — 简单问候",
+          "passed": true,
+          "duration_ms": 8.1,
+          "status_code": 200,
+          "error": null,
+          "details": {
+            "response_json": {
+              "code": 200,
+              "message": "任务已启动，请轮询 /api/v1/session/{task_id} 查看结果",
+              "data": {
+                "task_id": "c0f63d7c-1346-4dfb-9087-12468bc0a244",
+                "conversation_id": "1b3485f3-7114-4301-b2fc-6c8b000a48c9",
+                "message": "任务已启动，请轮询 /api/v1/session/{task_id} 查看结果",
+                "status": "running"
+              }
+            }
+          }
+        },
+        {
+          "case_id": "D02",
+          "phase": "connectivity",
+          "name": "同步聊天 — 缺少 userId (422)",
+          "passed": true,
+          "duration_ms": 76.4,
+          "status_code": 422,
+          "error": null,
+          "details": {
+            "response_json": {
+              "detail": [
+                {
+                  "type": "missing",
+                  "loc": [
+                    "body",
+                    "userId"
+                  ],
+                  "msg": "Field required",
+                  "input": {
+                    "message": "你好",
+                    "stream": false
+                  },
+                  "url": "https://errors.pydantic.dev/2.12/v/missing"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case_id": "D03",
+          "phase": "connectivity",
+          "name": "同步聊天 — 空消息 (422)",
+          "passed": true,
+          "duration_ms": 9.7,
+          "status_code": 422,
+          "error": null,
+          "details": {
+            "response_json": {
+              "detail": [
+                {
+                  "type": "string_too_short",
+                  "loc": [
+                    "body",
+                    "message"
+                  ],
+                  "msg": "String should have at least 1 character",
+                  "input": "",
+                  "ctx": {
+                    "min_length": 1
+                  },
+                  "url": "https://errors.pydantic.dev/2.12/v/string_too_short"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case_id": "D04",
+          "phase": "connectivity",
+          "name": "同步聊天 — 不存在的 Agent (400)",
+          "passed": true,
+          "duration_ms": 2.4,
+          "status_code": 400,
+          "error": null,
+          "details": {
+            "response_json": {
+              "detail": {
+                "code": "AGENT_NOT_FOUND",
+                "message": "Agent 'nonexistent_agent_999' 不存在，可用: ['client_agent', 'dazee_agent', 'xiaodazi']",
+                "timestamp": "2026-02-07T17:25:48.016543"
+              }
+            }
+          }
+        },
+        {
+          "case_id": "D05",
+          "phase": "connectivity",
+          "name": "同步聊天 — 带 variables",
+          "passed": true,
+          "duration_ms": 17.8,
+          "status_code": 200,
+          "error": null,
+          "details": {
+            "response_json": {
+              "code": 200,
+              "message": "任务已启动，请轮询 /api/v1/session/{task_id} 查看结果",
+              "data": {
+                "task_id": "1a32cc97-d08a-4aa6-8ab2-69e3d2ed863b",
+                "conversation_id": "5cc0c8aa-0a32-4e68-b336-524829f8cdfe",
+                "message": "任务已启动，请轮询 /api/v1/session/{task_id} 查看结果",
+                "status": "running"
+              }
+            }
+          }
+        },
+        {
+          "case_id": "D06",
+          "phase": "connectivity",
+          "name": "同步聊天 — 带 conversationId",
+          "passed": true,
+          "duration_ms": 7.9,
+          "status_code": 200,
+          "error": null,
+          "details": {
+            "response_json": {
+              "code": 200,
+              "message": "任务已启动，请轮询 /api/v1/session/{task_id} 查看结果",
+              "data": {
+                "task_id": "755ffa0c-35fd-4e43-b286-c2664bf920e6",
+                "conversation_id": "eval_conv_sync_001",
+                "message": "任务已启动，请轮询 /api/v1/session/{task_id} 查看结果",
+                "status": "running"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "phase_id": "sse_integration",
+      "phase_name": "SSE 流式集成",
+      "total": 10,
+      "passed": 8,
+      "failed": 2,
+      "skipped": 0,
+      "duration_ms": 0.0,
+      "checks": [
+        {
+          "case_id": "SSE01a",
+          "phase": "sse_integration",
+          "name": "HTTP 200 + event-stream content-type",
+          "passed": true,
+          "duration_ms": 10937.1,
+          "status_code": 200,
+          "error": null,
+          "details": {
+            "event_count": 74
+          }
+        },
+        {
+          "case_id": "SSE01b",
+          "phase": "sse_integration",
+          "name": "首事件为 message_start 且含 session_id",
+          "passed": false,
+          "duration_ms": 10937.1,
+          "status_code": 200,
+          "error": "first event type is 'session_start', expected 'message_start'",
+          "details": {
+            "event_count": 74
+          }
+        },
+        {
+          "case_id": "SSE01c",
+          "phase": "sse_integration",
+          "name": "存在 content_start (type=text)",
+          "passed": true,
+          "duration_ms": 10937.1,
+          "status_code": 200,
+          "error": null,
+          "details": {
+            "event_count": 74
+          }
+        },
+        {
+          "case_id": "SSE01d",
+          "phase": "sse_integration",
+          "name": "存在 content_delta 且文本非空",
+          "passed": false,
+          "duration_ms": 10937.1,
+          "status_code": 200,
+          "error": "no content_delta with non-empty text",
+          "details": {
+            "event_count": 74
+          }
+        },
+        {
+          "case_id": "SSE01e",
+          "phase": "sse_integration",
+          "name": "content_start / content_stop 数量配对",
+          "passed": true,
+          "duration_ms": 10937.1,
+          "status_code": 200,
+          "error": null,
+          "details": {
+            "event_count": 74
+          }
+        },
+        {
+          "case_id": "SSE01f",
+          "phase": "sse_integration",
+          "name": "seq 严格单调递增",
+          "passed": true,
+          "duration_ms": 10937.1,
+          "status_code": 200,
+          "error": null,
+          "details": {
+            "event_count": 74
+          }
+        },
+        {
+          "case_id": "SSE01g",
+          "phase": "sse_integration",
+          "name": "末尾有 message_stop",
+          "passed": true,
+          "duration_ms": 10937.1,
+          "status_code": 200,
+          "error": null,
+          "details": {
+            "event_count": 74
+          }
+        },
+        {
+          "case_id": "SSE01h",
+          "phase": "sse_integration",
+          "name": "事件顺序符合生命周期",
+          "passed": true,
+          "duration_ms": 10937.1,
+          "status_code": 200,
+          "error": null,
+          "details": {
+            "event_count": 74
+          }
+        },
+        {
+          "case_id": "SSE01i",
+          "phase": "sse_integration",
+          "name": "总事件数 >= 4",
+          "passed": true,
+          "duration_ms": 10937.1,
+          "status_code": 200,
+          "error": null,
+          "details": {
+            "event_count": 74
+          }
+        },
+        {
+          "case_id": "SSE02a",
+          "phase": "sse_integration",
+          "name": "收到 error 类型的 SSE 事件",
+          "passed": true,
+          "duration_ms": 41.3,
+          "status_code": 200,
+          "error": null,
+          "details": {
+            "event_count": 1
+          }
+        }
+      ]
+    },
+    {
+      "phase_id": "log_analysis",
+      "phase_name": "日志分析",
+      "total": 8,
+      "passed": 8,
+      "failed": 0,
+      "skipped": 0,
+      "duration_ms": 0.0,
+      "checks": [
+        {
+          "case_id": "L01",
+          "phase": "log_analysis",
+          "name": "app.log 文件存在",
+          "passed": true,
+          "duration_ms": 0.0,
+          "status_code": null,
+          "error": null,
+          "details": {}
+        },
+        {
+          "case_id": "L02",
+          "phase": "log_analysis",
+          "name": "error.log 文件存在",
+          "passed": true,
+          "duration_ms": 0.0,
+          "status_code": null,
+          "error": null,
+          "details": {}
+        },
+        {
+          "case_id": "L03",
+          "phase": "log_analysis",
+          "name": "增量日志 JSON 格式合法率 >= 95%",
+          "passed": true,
+          "duration_ms": 70.9,
+          "status_code": null,
+          "error": null,
+          "details": {}
+        },
+        {
+          "case_id": "L04",
+          "phase": "log_analysis",
+          "name": "增量日志包含评测用户上下文",
+          "passed": true,
+          "duration_ms": 43.8,
+          "status_code": null,
+          "error": null,
+          "details": {}
+        },
+        {
+          "case_id": "L05",
+          "phase": "log_analysis",
+          "name": "增量日志无 CRITICAL 级别",
+          "passed": true,
+          "duration_ms": 35.1,
+          "status_code": null,
+          "error": null,
+          "details": {}
+        },
+        {
+          "case_id": "L06",
+          "phase": "log_analysis",
+          "name": "增量日志时间戳单调递增",
+          "passed": true,
+          "duration_ms": 45.3,
+          "status_code": null,
+          "error": null,
+          "details": {}
+        },
+        {
+          "case_id": "L07",
+          "phase": "log_analysis",
+          "name": "增量日志无敏感信息泄漏",
+          "passed": true,
+          "duration_ms": 50.1,
+          "status_code": null,
+          "error": null,
+          "details": {}
+        },
+        {
+          "case_id": "L08",
+          "phase": "log_analysis",
+          "name": "错误日志无未捕获异常",
+          "passed": true,
+          "duration_ms": 2.2,
+          "status_code": null,
+          "error": null,
+          "details": {}
+        }
+      ]
+    }
+  ],
+  "aborted": false,
+  "abort_reason": ""
+}

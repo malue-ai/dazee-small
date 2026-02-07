@@ -57,12 +57,12 @@ const routes = [
     meta: { layout: 'none' }
   },
 
-  // ==================== Node Agent 客户端 ====================
+  // ==================== 引导页（首次使用） ====================
   {
-    path: '/node',
-    name: 'node-agent',
-    component: () => import('@/views/node/NodeAgentView.vue'),
-    meta: { layout: 'none' }  // 独立布局，用于 Tauri 客户端
+    path: '/onboarding',
+    name: 'onboarding',
+    component: () => import('@/views/onboarding/OnboardingView.vue'),
+    meta: { layout: 'none' }
   }
 ]
 

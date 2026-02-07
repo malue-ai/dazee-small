@@ -16,6 +16,12 @@ instance:
   description: "Dazee 智能助手 - 支持数据分析、系统搭建和综合咨询"
   version: "1.0.0"
 
+# ==================== 实例环境变量（覆盖全局配置）====================
+# 这些变量会注入 os.environ，优先级高于全局 config.yaml
+env_vars:
+  RAGIE_API_KEY: "tnt_ApbM30NCaqe_HcwqgbFj4n569wj4RAZHNJ10vGatBKGow7tUc0aPRBf"
+  DATABASE_URL: "postgresql+asyncpg://postgres:924Ff8O5kfEWOvzj3nN1ricrWVTIHSy8@zen0-backend-staging-postgresql.cz0gu26m8g6c.ap-southeast-1.rds.amazonaws.com:5432/zen0_staging_pg"
+
 
 # ==================== Agent 配置覆盖 ====================
 

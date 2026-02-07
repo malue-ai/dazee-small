@@ -17,8 +17,14 @@ export const useConversationStore = defineStore('conversation', () => {
   /** 当前会话 ID */
   const currentId = ref<string | null>(null)
 
+  /** 消息映射 (conversationId -> messages) */
+  const messagesMap = ref<Record<string, UIMessage[]>>({})
+
   /** 当前会话的消息列表 */
-  const messages = ref<UIMessage[]>([])
+  const messages = computed(() => {
+    if (!currentId.value) return []
+    return messagesMap.value[currentId.value] || []
+  })
 
   /** 当前会话的 Plan（从 conversation_metadata 加载） */
   const conversationPlan = ref<PlanData | null>(null)
@@ -120,17 +126,32 @@ export const useConversationStore = defineStore('conversation', () => {
   /**
    * 加载会话及其消息
    * @param conversationId - 会话 ID
+   * @param force - 是否强制刷新（默认 false，优先使用缓存）
    */
-  async function load(conversationId: string): Promise<void> {
+  async function load(conversationId: string, force = false): Promise<void> {
     currentId.value = conversationId
+    conversationPlan.value = null  // 重置 plan (后续可优化为缓存)
+    
+    // 如果有缓存且不强制刷新，使用缓存
+    if (!force && messagesMap.value[conversationId] && messagesMap.value[conversationId].length > 0) {
+      console.log('✅ 使用缓存消息:', conversationId)
+      // 恢复分页状态（这里简化处理，假设缓存是最新的）
+      // 如果需要精确的分页恢复，需要将 hasMore 等也存入 Map
+      return
+    }
+
     loadingMessages.value = true
-    conversationPlan.value = null  // 重置 plan
     hasMore.value = false
     nextCursor.value = null
+    
+    // 初始化 map
+    if (!messagesMap.value[conversationId]) {
+      messagesMap.value[conversationId] = []
+    }
 
     try {
       const result = await chatApi.getConversationMessages(conversationId, 100, 0, 'asc')
-      messages.value = result.messages.map(processHistoryMessage)
+      messagesMap.value[conversationId] = result.messages.map(processHistoryMessage)
       
       // 保存分页信息
       hasMore.value = result.has_more
@@ -142,7 +163,7 @@ export const useConversationStore = defineStore('conversation', () => {
         console.log('📋 从会话元数据加载 Plan:', conversationPlan.value?.name)
       }
       
-      console.log('✅ 历史消息已加载:', messages.value.length, '条, has_more:', hasMore.value)
+      console.log('✅ 历史消息已加载:', messagesMap.value[conversationId].length, '条, has_more:', hasMore.value)
     } catch (error) {
       console.error('❌ 加载消息失败:', error)
       throw error
@@ -174,7 +195,8 @@ export const useConversationStore = defineStore('conversation', () => {
       if (result.messages.length > 0) {
         // 将新消息插入到列表开头
         const newMessages = result.messages.map(processHistoryMessage)
-        messages.value = [...newMessages, ...messages.value]
+        const currentMsgs = messagesMap.value[currentId.value] || []
+        messagesMap.value[currentId.value] = [...newMessages, ...currentMsgs]
         
         // 更新分页信息
         hasMore.value = result.has_more
@@ -225,11 +247,11 @@ export const useConversationStore = defineStore('conversation', () => {
       
       // 从列表中移除
       conversations.value = conversations.value.filter(c => c.id !== conversationId)
+      delete messagesMap.value[conversationId]
       
       // 如果删除的是当前会话，清空状态
       if (currentId.value === conversationId) {
         currentId.value = null
-        messages.value = []
       }
       
       console.log('✅ 会话已删除')
@@ -243,8 +265,12 @@ export const useConversationStore = defineStore('conversation', () => {
    * 添加用户消息
    * @param content - 消息内容
    * @param files - 附件文件
+   * @param convId - 会话 ID（默认当前会话）
    */
-  function addUserMessage(content: string, files?: AttachedFile[]): UIMessage {
+  function addUserMessage(content: string, files?: AttachedFile[], convId?: string): UIMessage {
+    const targetId = convId || currentId.value
+    if (!targetId) throw new Error('No conversation ID')
+    
     const msg: UIMessage = {
       id: Date.now(),
       role: 'user',
@@ -254,15 +280,21 @@ export const useConversationStore = defineStore('conversation', () => {
       files: files || undefined,
       timestamp: new Date()
     }
-    messages.value.push(msg)
+    
+    if (!messagesMap.value[targetId]) messagesMap.value[targetId] = []
+    messagesMap.value[targetId].push(msg)
     return msg
   }
 
   /**
    * 添加助手消息（空消息，用于流式填充）
    * 注意：返回的是数组中的响应式对象，而不是原始对象
+   * @param convId - 会话 ID（默认当前会话）
    */
-  function addAssistantMessage(): UIMessage {
+  function addAssistantMessage(convId?: string): UIMessage {
+    const targetId = convId || currentId.value
+    if (!targetId) throw new Error('No conversation ID')
+
     const msg: UIMessage = {
       id: Date.now() + 1,
       role: 'assistant',
@@ -274,18 +306,24 @@ export const useConversationStore = defineStore('conversation', () => {
       recommendedQuestions: [],
       timestamp: new Date()
     }
-    messages.value.push(msg)
+    
+    if (!messagesMap.value[targetId]) messagesMap.value[targetId] = []
+    messagesMap.value[targetId].push(msg)
     // 返回数组中的最后一个元素（被 Vue Proxy 包装的响应式对象）
-    return messages.value[messages.value.length - 1]
+    return messagesMap.value[targetId][messagesMap.value[targetId].length - 1]
   }
 
   /**
    * 获取最后一条助手消息（响应式引用）
    */
-  function getLastAssistantMessage(): UIMessage | null {
-    for (let i = messages.value.length - 1; i >= 0; i--) {
-      if (messages.value[i].role === 'assistant') {
-        return messages.value[i]
+  function getLastAssistantMessage(convId?: string): UIMessage | null {
+    const targetId = convId || currentId.value
+    if (!targetId) return null
+    
+    const msgs = messagesMap.value[targetId] || []
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role === 'assistant') {
+        return msgs[i]
       }
     }
     return null
@@ -296,7 +334,7 @@ export const useConversationStore = defineStore('conversation', () => {
    */
   function reset(): void {
     currentId.value = null
-    messages.value = []
+    // messagesMap.value = {} // 不清空缓存，保留后台会话状态
     conversationPlan.value = null
     hasMore.value = false
     nextCursor.value = null
@@ -443,6 +481,7 @@ export const useConversationStore = defineStore('conversation', () => {
     // 状态
     conversations,
     currentId,
+    messagesMap,
     messages,
     conversationPlan,
     userId,

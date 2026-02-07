@@ -159,7 +159,7 @@ class DependencyChecker:
             "=" * 70,
             "",
             "1. 安装缺少的命令行工具后重启实例即可启用对应 Skills",
-            "2. 环境变量配置在: instances/{}/\\.env".format(self.instance_name),
+            "2. 环境变量配置在: instances/{}/config.yaml 的 env_vars 段".format(self.instance_name),
             "3. 可选：运行 --generate-install 生成自动安装脚本",
             "",
         ])
@@ -254,10 +254,10 @@ class DependencyChecker:
             env_vars.extend(skill.get('missing_env', []))
         
         if env_vars:
-            env_file = self.instance_dir / ".env"
+            config_file = self.instance_dir / "config.yaml"
             lines.extend([
                 "# 环境变量配置",
-                f"echo '📝 请在 {env_file} 中配置以下环境变量：'",
+                f"echo '📝 请在 {config_file} 的 env_vars 段中配置以下环境变量：'",
             ])
             for env_name in set(env_vars):
                 lines.append(f"echo '   - {env_name}'")
@@ -314,7 +314,7 @@ class DependencyChecker:
         print("💡 下一步")
         print("=" * 70)
         print("1. 运行 --generate-install 生成自动安装脚本")
-        print(f"2. 在 instances/{self.instance_name}/.env 中配置环境变量")
+        print(f"2. 在 instances/{self.instance_name}/config.yaml 的 env_vars 段中配置环境变量")
         print("3. 重启实例启用新的 Skills")
         print("")
 

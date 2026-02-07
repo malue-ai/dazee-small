@@ -8,29 +8,15 @@ Build: 2026-01-16 v2
 import os
 import asyncio
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any, Dict, Optional
 
 # ==================== 第三方库 ====================
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-# 加载配置（优先从 config.yaml，兼容 .env）
-from utils.app_paths import get_user_config_path, is_frozen
-
-_config_path = get_user_config_path()
-if _config_path.exists():
-    # 桌面应用模式：从 config.yaml 加载配置到 os.environ
-    from services.settings_service import load_config_to_env
-    load_config_to_env()
-else:
-    # 开发模式：从 .env 文件加载
-    try:
-        from dotenv import load_dotenv
-        _env_path = Path(__file__).parent / ".env"
-        load_dotenv(dotenv_path=_env_path, override=True)
-    except ImportError:
-        pass  # dotenv 不是必需依赖
+# 加载配置（统一从 config.yaml）
+from services.settings_service import load_config_to_env
+load_config_to_env()
 
 # ==================== 本地模块 ====================
 from routers import (
@@ -57,8 +43,20 @@ from infra.local_store import close_all_workspaces
 # ==================== 常量定义 ====================
 
 APP_NAME = "Zenflux Agent API"
-APP_VERSION = "0.7.5"
 APP_DESCRIPTION = "基于 Claude Sonnet 4.5 的智能体框架"
+
+
+def _read_version() -> str:
+    """Read version from VERSION file (single source of truth)."""
+    from utils.app_paths import get_bundle_dir
+    version_file = get_bundle_dir() / "VERSION"
+    try:
+        return version_file.read_text().strip()
+    except FileNotFoundError:
+        return "0.0.0-dev"
+
+
+APP_VERSION = _read_version()
 
 
 # ==================== 异步异常处理 ====================

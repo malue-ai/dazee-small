@@ -3,17 +3,40 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::io::Write;
 use std::process::Command as SysCommand;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager};
 
+/// 写入调试日志文件（用于诊断 open/Spotlight 启动问题）
+fn debug_log(msg: &str) {
+    eprintln!("{}", msg);
+    if let Ok(data_dir) = std::env::var("HOME") {
+        let log_path = format!(
+            "{}/Library/Application Support/com.zenflux.agent/sidecar-debug.log",
+            data_dir
+        );
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+        {
+            let now = chrono::Local::now().format("%H:%M:%S%.3f");
+            let _ = writeln!(f, "[{}] {}", now, msg);
+        }
+    }
+}
+
 // ============================================================================
 // 常量
 // ============================================================================
 
-/// 打包模式下 sidecar 使用的端口
+/// 打包模式下 sidecar 首选端口
 const SIDECAR_PORT: u16 = 18900;
+
+/// 端口搜索范围：如果首选端口被占用，依次尝试 +1, +2, ..., +RANGE
+const SIDECAR_PORT_RANGE: u16 = 10;
 
 /// 开发模式下后端默认端口
 const DEV_PORT: u16 = 8000;
@@ -57,6 +80,25 @@ struct BackendState {
     is_sidecar: bool,
 }
 
+/// 在指定范围内寻找可用端口
+///
+/// 从 preferred 端口开始，依次尝试绑定 preferred..preferred+range，
+/// 返回第一个可用的端口。如果全部被占用，返回 preferred（sidecar 启动时会报错）。
+fn find_available_port(preferred: u16, range: u16) -> u16 {
+    for port in preferred..preferred.saturating_add(range) {
+        if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
+            return port;
+        }
+    }
+    debug_log(&format!(
+        "[sidecar] 端口 {}..{} 全部被占用，使用默认端口 {}",
+        preferred,
+        preferred.saturating_add(range),
+        preferred
+    ));
+    preferred
+}
+
 // ============================================================================
 // Sidecar 管理
 // ============================================================================
@@ -75,7 +117,8 @@ fn health_url(port: u16) -> String {
     format!("http://127.0.0.1:{}/health", port)
 }
 
-/// 等待后端健康检查通过
+/// 等待后端健康检查通过（备用，首次启动向导等场景可能需要）
+#[allow(dead_code)]
 fn wait_for_backend_ready(port: u16) -> bool {
     let start = Instant::now();
     let timeout = Duration::from_secs(BACKEND_STARTUP_TIMEOUT_SECS);
@@ -307,6 +350,30 @@ fn is_blocked_env_key(key: &str) -> bool {
     false
 }
 
+/// 终止 sidecar 后端进程
+fn kill_sidecar(app_handle: &tauri::AppHandle) {
+    let state = app_handle.state::<Mutex<BackendState>>();
+    let mut guard = match state.lock() {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("[sidecar] 获取锁失败: {}", e);
+            return;
+        }
+    };
+
+    if guard.is_sidecar {
+        if let Some(child) = guard.child.take() {
+            eprintln!("[sidecar] 正在终止后端进程 (port={})...", guard.port);
+            match child.kill() {
+                Ok(_) => eprintln!("[sidecar] 后端进程已终止"),
+                Err(e) => {
+                    eprintln!("[sidecar] kill 失败: {}", e);
+                }
+            }
+        }
+    }
+}
+
 /// 判断当前是否为 release 构建（打包模式）
 fn is_release_build() -> bool {
     // cfg!(debug_assertions) 在 debug 构建（cargo run / tauri dev）时为 true
@@ -319,41 +386,49 @@ fn is_release_build() -> bool {
 // ============================================================================
 
 fn main() {
-    // 初始状态：dev 模式连 8000，release 模式连 18900
-    let initial_port = if is_release_build() { SIDECAR_PORT } else { DEV_PORT };
+    // 初始状态：dev 模式连 8000，release 模式动态分配端口
+    let initial_port = if is_release_build() {
+        find_available_port(SIDECAR_PORT, SIDECAR_PORT_RANGE)
+    } else {
+        DEV_PORT
+    };
 
-    eprintln!(
+    debug_log(&format!(
         "[app] 启动模式: {} (后端端口: {})",
         if is_release_build() { "release/打包" } else { "dev/开发" },
         initial_port
-    );
+    ));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Mutex::new(BackendState {
             child: None,
             port: initial_port,
             is_sidecar: false,
         }))
-        .setup(|app| {
+        .setup(move |app| {
             let handle = app.handle().clone();
 
             if is_release_build() {
                 // ============ 打包模式：启动 sidecar ============
                 let data_dir = get_app_data_dir(app.handle());
+                let actual_port = initial_port;
 
                 // 确保数据目录存在
                 let _ = std::fs::create_dir_all(&data_dir);
 
-                eprintln!(
+                debug_log(&format!(
                     "[sidecar] 启动后端 sidecar (port={}, data-dir={})",
-                    SIDECAR_PORT, data_dir
-                );
+                    actual_port, data_dir
+                ));
 
                 // 使用 Tauri shell plugin 的 sidecar API
                 use tauri_plugin_shell::ShellExt;
                 use tauri_plugin_shell::process::CommandEvent;
+                use std::sync::Arc;
+                use std::sync::atomic::{AtomicBool, Ordering};
 
                 let sidecar_result = app.handle()
                     .shell()
@@ -361,7 +436,7 @@ fn main() {
                     .map(|cmd| {
                         cmd.args([
                             "--port",
-                            &SIDECAR_PORT.to_string(),
+                            &actual_port.to_string(),
                             "--data-dir",
                             &data_dir,
                         ])
@@ -371,13 +446,18 @@ fn main() {
                     Ok(cmd) => {
                         match cmd.spawn() {
                             Ok((mut rx, child)) => {
-                                eprintln!("[sidecar] sidecar 进程已启动");
+                                debug_log("[sidecar] sidecar 进程已启动");
 
                                 // 保存进程句柄
                                 if let Ok(mut guard) = handle.state::<Mutex<BackendState>>().lock() {
                                     guard.child = Some(child);
                                     guard.is_sidecar = true;
                                 }
+
+                                // 共享标志：sidecar 是否已退出
+                                let sidecar_exited = Arc::new(AtomicBool::new(false));
+                                let sidecar_exited_for_log = sidecar_exited.clone();
+                                let sidecar_exited_for_health = sidecar_exited.clone();
 
                                 // 在后台线程读取 sidecar 输出
                                 let log_handle = handle.clone();
@@ -386,14 +466,21 @@ fn main() {
                                         match event {
                                             CommandEvent::Stdout(line) => {
                                                 let line = String::from_utf8_lossy(&line);
-                                                eprintln!("[sidecar:stdout] {}", line.trim());
+                                                let trimmed = line.trim();
+                                                eprintln!("[sidecar:stdout] {}", trimmed);
+                                                debug_log(&format!("[sidecar:stdout] {}", trimmed));
                                             }
                                             CommandEvent::Stderr(line) => {
                                                 let line = String::from_utf8_lossy(&line);
-                                                eprintln!("[sidecar:stderr] {}", line.trim());
+                                                let trimmed = line.trim();
+                                                eprintln!("[sidecar:stderr] {}", trimmed);
+                                                debug_log(&format!("[sidecar:stderr] {}", trimmed));
                                             }
                                             CommandEvent::Terminated(status) => {
-                                                eprintln!("[sidecar] 进程已退出: {:?}", status);
+                                                debug_log(&format!("[sidecar] 进程已退出: {:?}", status));
+                                                sidecar_exited_for_log.store(true, Ordering::SeqCst);
+                                                // 立即通知前端：sidecar 意外退出
+                                                let _ = log_handle.emit("backend-ready", false);
                                                 let _ = log_handle.emit("backend-stopped", true);
                                                 break;
                                             }
@@ -404,21 +491,69 @@ fn main() {
 
                                 // 在后台线程等待后端就绪
                                 std::thread::spawn(move || {
-                                    let ready = wait_for_backend_ready(SIDECAR_PORT);
-                                    if !ready {
-                                        eprintln!("[sidecar] 警告: 后端未在预期时间内就绪");
+                                    let start = Instant::now();
+                                    let timeout = Duration::from_secs(BACKEND_STARTUP_TIMEOUT_SECS);
+                                    let poll_interval = Duration::from_millis(BACKEND_HEALTH_POLL_MS);
+                                    let url = health_url(actual_port);
+
+                                    debug_log(&format!("[sidecar] 等待后端就绪 (port={})...", actual_port));
+
+                                    // 向前端发送启动进度
+                                    let _ = handle.emit("sidecar-status", "正在启动服务...");
+                                    let mut poll_count: u32 = 0;
+
+                                    loop {
+                                        // 如果 sidecar 已经退出，立即失败
+                                        if sidecar_exited_for_health.load(Ordering::SeqCst) {
+                                            debug_log("[sidecar] sidecar 进程已退出，停止健康检查");
+                                            let _ = handle.emit("sidecar-status", "服务启动失败");
+                                            // backend-ready(false) 已由日志线程发出
+                                            return;
+                                        }
+
+                                        if start.elapsed() > timeout {
+                                            debug_log(&format!("[sidecar] 后端启动超时 ({}s)", BACKEND_STARTUP_TIMEOUT_SECS));
+                                            let _ = handle.emit("sidecar-status", "启动超时，请重试");
+                                            let _ = handle.emit("backend-ready", false);
+                                            return;
+                                        }
+
+                                        // 根据等待时长更新进度提示
+                                        poll_count += 1;
+                                        if poll_count == 4 {
+                                            let _ = handle.emit("sidecar-status", "正在加载模块...");
+                                        } else if poll_count == 10 {
+                                            let _ = handle.emit("sidecar-status", "正在初始化数据...");
+                                        } else if poll_count == 20 {
+                                            let _ = handle.emit("sidecar-status", "即将就绪...");
+                                        }
+
+                                        match ureq::get(&url)
+                                            .timeout(Duration::from_secs(2))
+                                            .call()
+                                        {
+                                            Ok(resp) if resp.status() == 200 => {
+                                                let elapsed_ms = start.elapsed().as_millis();
+                                                debug_log(&format!("[sidecar] 后端就绪 ({}ms)", elapsed_ms));
+                                                let _ = handle.emit("sidecar-status", "准备就绪");
+                                                let _ = handle.emit("backend-ready", true);
+                                                return;
+                                            }
+                                            _ => {
+                                                std::thread::sleep(poll_interval);
+                                            }
+                                        }
                                     }
-                                    let _ = handle.emit("backend-ready", ready);
                                 });
                             }
                             Err(e) => {
-                                eprintln!("[sidecar] spawn 失败: {}", e);
+                                debug_log(&format!("[sidecar] spawn 失败: {}", e));
                                 let _ = handle.emit("backend-ready", false);
                             }
                         }
                     }
                     Err(e) => {
-                        eprintln!("[sidecar] sidecar 命令创建失败: {}", e);
+                        debug_log(&format!("[sidecar] sidecar 命令创建失败: {}", e));
                         let _ = handle.emit("backend-ready", false);
                     }
                 }
@@ -455,21 +590,9 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // 应用关闭时终止 sidecar
+            // 窗口关闭时终止 sidecar（第一层防护）
             if let tauri::WindowEvent::Destroyed = event {
-                let state = window.app_handle().state::<Mutex<BackendState>>();
-                let mut guard = match state.lock() {
-                    Ok(g) => g,
-                    Err(_) => return,
-                };
-                if guard.is_sidecar {
-                    if let Some(child) = guard.child.take() {
-                        eprintln!("[sidecar] 正在终止后端进程...");
-                        let _ = child.kill();
-                        eprintln!("[sidecar] 后端进程已终止");
-                    }
-                }
-                drop(guard);
+                kill_sidecar(window.app_handle());
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -481,6 +604,13 @@ fn main() {
             get_node_info,
             open_system_preferences,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // 应用退出时终止 sidecar（第二层防护，最可靠）
+            if let tauri::RunEvent::Exit = event {
+                eprintln!("[app] 应用退出，执行清理...");
+                kill_sidecar(app_handle);
+            }
+        });
 }

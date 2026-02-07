@@ -27,11 +27,13 @@ cp -r _template my_agent
 
 ### Step 3: 配置密钥
 
-```bash
-# 复制环境变量模板
-cp env.example .env
+全局 API Key 已在项目根目录 `config.yaml` 中管理。
+如果实例需要额外的环境变量，在 `config.yaml` 的 `env_vars` 段添加：
 
-# 编辑 .env，填入实际的 API 密钥
+```yaml
+# config.yaml
+env_vars:
+  CUSTOM_API_KEY: "xxx..."
 ```
 
 ## 启动智能体
@@ -48,8 +50,7 @@ python scripts/instance_loader.py --instance my_agent
 ```
 my_agent/
 ├── prompt.md              # 运营编写的原始提示词
-├── config.yaml            # 配置文件
-├── .env                   # API 密钥
+├── config.yaml            # 配置文件（含 env_vars 环境变量段）
 └── prompt_results/        # 🆕 框架自动生成
     ├── README.md          # 使用说明
     ├── _metadata.json     # 元数据（哈希、时间戳）
@@ -124,10 +125,11 @@ mcp_tools:
     auth_env: "DIFY_API_KEY"
 ```
 
-然后在 `.env` 中配置密钥：
+实例独有的密钥在 `config.yaml` 的 `env_vars` 段配置：
 
-```bash
-DIFY_API_KEY=app-xxx
+```yaml
+env_vars:
+  DIFY_API_KEY: "app-xxx"
 ```
 
 ## 目录结构
@@ -135,9 +137,7 @@ DIFY_API_KEY=app-xxx
 ```
 my_agent/
 ├── prompt.md              # 核心！智能体定义（运营填写）
-├── config.yaml            # 配置覆盖和 MCP 工具声明
-├── .env                   # API 密钥（不提交到代码库）
-├── env.example            # 环境变量模板
+├── config.yaml            # 配置覆盖、MCP 工具声明和环境变量
 ├── prompt_results/        # 🆕 框架自动生成的优化提示词
 │   ├── README.md          # 使用说明
 │   ├── agent_schema.yaml  # Agent 配置
@@ -190,7 +190,7 @@ multi_agent:
 ### Q: MCP 工具连接失败？
 
 1. 检查 `config.yaml` 中的 `server_url` 是否正确
-2. 检查 `.env` 中的密钥是否配置
+2. 检查 `config.yaml` 的 `env_vars` 段中密钥是否配置
 3. 检查网络连接
 
 ### Q: 如何强制重新生成 prompt_results？

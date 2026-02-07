@@ -1,6 +1,6 @@
 {
   "name": "zenflux-agent-frontend",
-  "version": "0.1.0",
+  "version": "0.7.5",
   "private": true,
   "type": "module",
   "scripts": {
@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-updater": "^2.10.0",
     "@vueuse/core": "^14.1.0",
     "axios": "^1.6.0",
     "class-variance-authority": "^0.7.1",

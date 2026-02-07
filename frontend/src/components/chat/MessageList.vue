@@ -193,6 +193,9 @@ const emit = defineEmits<{
 
 // ==================== State ====================
 
+/** 用户是否手动滚动过 */
+const userHasScrolled = ref(false)
+
 // 思考计时器
 const thinkingDurations = ref<Record<string, number>>({})
 const thinkingTimers = ref<Record<string, any>>({})
@@ -341,8 +344,12 @@ function isMessageStreaming(message: UIMessage): boolean {
 
 /**
  * 滚动到底部
+ * @param force - 强制滚动（忽略用户手动滚动状态）
  */
-function scrollToBottom(): void {
+function scrollToBottom(force = false): void {
+  // 如果用户手动向上滚动了，且不是强制滚动，则不自动滚动
+  if (!force && userHasScrolled.value) return
+
   if (!containerRef.value) return
   
   nextTick(() => {
@@ -356,10 +363,28 @@ function scrollToBottom(): void {
  * 处理滚动事件（滚动到顶部时加载更多）
  */
 function handleScroll(): void {
-  if (!containerRef.value || props.loadingMore || !props.hasMore) return
+  if (!containerRef.value) return
+
+  const { scrollTop, scrollHeight, clientHeight } = containerRef.value
+  
+  // 判断是否在底部（允许 100px 的误差）
+  const isAtBottom = scrollHeight - scrollTop - clientHeight < 100
+
+  if (isAtBottom) {
+    // 如果在底部，重置滚动状态
+    userHasScrolled.value = false
+  } else if (scrollTop < scrollHeight - clientHeight - 100) {
+    // 如果不在底部（且不是刚加载完更多消息导致的位置变化），标记为已手动滚动
+    // 注意：加载更多消息时也会触发 scroll 事件，需要通过 loadingMore 排除
+    if (!props.loadingMore) {
+      userHasScrolled.value = true
+    }
+  }
+  
+  if (props.loadingMore || !props.hasMore) return
   
   // 当滚动到距离顶部 100px 内时触发加载
-  if (containerRef.value.scrollTop < 100) {
+  if (scrollTop < 100) {
     emit('load-more')
   }
 }
@@ -391,8 +416,18 @@ function getScrollHeight(): number {
 // 监听消息变化，自动滚动
 watch(
   () => props.messages.length,
-  () => {
-    scrollToBottom()
+  (newLen, oldLen) => {
+    // 如果是新消息（长度增加），强制滚动
+    // 如果是加载更多历史消息（长度增加但 scrollTop 位置不变），不强制滚动
+    // 这里简单判断：如果是加载更多，loadingMore 会为 true（但 watch 触发时 loadingMore 可能已经变了）
+    // 通常发送新消息时我们需要强制滚动
+    
+    // 简单的策略：只要长度变化，尝试滚动（scrollToBottom 内部会检查 userHasScrolled）
+    // 如果是用户发送的消息（最后一条是 user），强制滚动
+    const lastMsg = props.messages[props.messages.length - 1]
+    const isUserMsg = lastMsg?.role === 'user'
+    
+    scrollToBottom(isUserMsg)
   }
 )
 
@@ -408,7 +443,7 @@ watch(
 // ==================== Expose ====================
 
 defineExpose({
-  scrollToBottom,
+  scrollToBottom: (force = false) => scrollToBottom(force),
   maintainScrollPosition,
   getScrollHeight
 })
