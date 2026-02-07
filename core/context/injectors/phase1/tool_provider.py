@@ -177,14 +177,45 @@ class ToolSystemRoleProvider(BaseInjector):
 
     async def _get_skills_prompt(self, context: InjectionContext) -> str:
         """
-        从 prompt_cache.runtime_context 获取 Skills 文档
+        动态生成 Skills 提示词（V12.0: 意图驱动按需注入）
+
+        优先级链：
+        1. intent.relevant_skill_groups 有值 -> 按分组过滤注入
+        2. intent.relevant_skill_groups 为 None -> Fallback 全量注入（保守）
+        3. 无 intent -> 使用缓存的静态 skills_prompt
         """
-        if not context.has_prompt_cache:
-            return ""
+        # 尝试动态生成（需要 skills_loader 和 intent）
+        if context.has_prompt_cache and context.prompt_cache.runtime_context:
+            skills_loader = context.prompt_cache.runtime_context.get("_skills_loader")
+            skill_groups_config = context.prompt_cache.runtime_context.get(
+                "_skill_groups_config"
+            )
 
-        prompt_cache = context.prompt_cache
+            if skills_loader and hasattr(skills_loader, "build_skills_prompt"):
+                # 从 intent 获取 relevant_skill_groups
+                relevant_groups = None  # None = Fallback 全量
+                if context.intent and hasattr(context.intent, "relevant_skill_groups"):
+                    groups = context.intent.relevant_skill_groups
+                    if isinstance(groups, list):
+                        relevant_groups = groups  # 空列表 = 只注入 _always
 
-        if not prompt_cache.runtime_context:
-            return ""
+                try:
+                    prompt = await skills_loader.build_skills_prompt(
+                        language="zh",
+                        relevant_skill_groups=relevant_groups,
+                        skill_groups_config=skill_groups_config,
+                    )
+                    if prompt:
+                        logger.info(
+                            f"Skills 动态注入: groups={relevant_groups}, "
+                            f"{len(prompt)} 字符"
+                        )
+                        return prompt
+                except Exception as e:
+                    logger.warning(f"Skills 动态生成失败，Fallback 到静态: {e}")
 
-        return prompt_cache.runtime_context.get("skills_prompt", "")
+        # Fallback: 使用启动时缓存的静态 skills_prompt
+        if context.has_prompt_cache and context.prompt_cache.runtime_context:
+            return context.prompt_cache.runtime_context.get("skills_prompt", "")
+
+        return ""

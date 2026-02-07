@@ -15,15 +15,235 @@ instance:
   description: "养在电脑里的 AI 小搭子"
   version: "1.0.0"
 
+# ==================== 个性化配置（可选） ====================
+#
+# 所有字段都可以不填，不填就用默认值。
+# 填了之后小搭子会记住你的偏好，不用每次都说。
+#
+persona:
+  # 你希望小搭子怎么称呼你？（默认："你"）
+  nickname: ""
+
+  # 小搭子的说话风格（默认：亲切自然）
+  # 建议：用一句话描述，比如 "简洁干练" / "幽默轻松" / "专业严谨" / "毒舌但有干货"
+  tone: ""
+
+  # 你的主要语言（默认：中文）
+  # 如果你经常用英文或中英混合，可以改成 "英文" 或 "中英混合"
+  language: "中文"
+
+  # 你希望小搭子回答的详细程度（默认：适中）
+  # 可选："简洁" / "适中" / "详细"
+  detail_level: "适中"
+
+  # 你的常用工作目录（可选，填了后小搭子会优先在这里找文件）
+  # 示例：["~/Documents/工作", "~/Desktop"]
+  work_dirs: []
+
+  # 你的个性化规则（可选，想让小搭子额外遵守的规则）
+  # 示例：
+  #   - "写邮件时默认用正式语气"
+  #   - "整理文件时不要删除 .DS_Store"
+  #   - "翻译时保留原文专有名词不翻译"
+  custom_rules: []
+
+# ==================== 用户提示词（可选） ====================
+#
+# 在这里写你希望小搭子额外遵守的指令，支持多行文本。
+# 比如你的工作场景、沟通习惯、特殊要求等。
+# 不填则使用默认行为。
+#
+# 示例：
+#   user_prompt: |
+#     我是一名产品经理，经常需要写 PRD 和竞品分析。
+#     帮我写文档时，默认用 Markdown 格式，标题用中文。
+#     涉及数据分析时，优先用图表展示，其次用表格。
+#
+user_prompt: ""
+
 # ==================== 大模型配置 ====================
+#
+# agent.model + agent.llm = 主 Agent 对话模型
+# llm_profiles = 框架内部所有 LLM 调用点的配置（唯一来源）
+#
 
 agent:
-  model: "qwen3-max"
+  model: "claude-sonnet-4-5-20250929"
 
   llm:
+    temperature: 0.2
+    max_tokens: 128000
+    enable_thinking: true
+    thinking_budget: 10000
+    enable_caching: true
+
+# ==================== 框架内部 LLM 配置 ====================
+#
+# 参数说明：
+#   provider     - 提供商（qwen / claude / openai）
+#   model        - 模型名称
+#   api_key_env  - API Key 环境变量名
+#   region       - 服务地域（qwen 专用：singapore / cn-beijing）
+#   max_tokens   - 最大输出 token 数
+#   temperature  - 温度（0=确定性，0.7=创意）
+#   enable_thinking - 启用深度思考
+#   thinking_budget - Thinking token 预算
+#   timeout      - 请求超时（秒）
+#   max_retries  - 最大重试次数
+#
+
+llm_profiles:
+  # ---------- 运行时（每次请求都可能调用） ----------
+
+  intent_analyzer:
+    provider: "qwen"
+    model: "qwen-plus"
+    api_key_env: "DASHSCOPE_API_KEY"
+    region: "singapore"
+    max_tokens: 65536
+    temperature: 0
+    enable_thinking: false
+    timeout: 60.0
+    max_retries: 2
+
+  semantic_inference:
+    provider: "qwen"
+    model: "qwen-plus"
+    api_key_env: "DASHSCOPE_API_KEY"
+    region: "singapore"
+    max_tokens: 65536
+    temperature: 0
+    enable_thinking: false
+    timeout: 30.0
+    max_retries: 2
+
+  tool_capability_inference:
+    provider: "qwen"
+    model: "qwen-plus"
+    api_key_env: "DASHSCOPE_API_KEY"
+    region: "singapore"
+    max_tokens: 100
+    temperature: 0.3
+    enable_thinking: false
+    timeout: 30.0
+    max_retries: 2
+
+  background_task:
+    provider: "qwen"
+    model: "qwen-plus"
+    api_key_env: "DASHSCOPE_API_KEY"
+    region: "singapore"
+    max_tokens: 100
     temperature: 0.7
-    max_tokens: 8192
-    enable_caching: false
+    enable_thinking: false
+    timeout: 30.0
+    max_retries: 1
+
+  # ---------- 规划系统 ----------
+
+  plan_generator:
+    provider: "qwen"
+    model: "qwen-plus"
+    api_key_env: "DASHSCOPE_API_KEY"
+    region: "singapore"
+    max_tokens: 4096
+    temperature: 0
+    enable_thinking: false
+    timeout: 60.0
+    max_retries: 2
+
+  plan_manager:
+    provider: "qwen"
+    model: "qwen3-max"
+    api_key_env: "DASHSCOPE_API_KEY"
+    region: "singapore"
+    max_tokens: 65536
+    temperature: 0.7
+    enable_thinking: true
+    thinking_budget: 5000
+    timeout: 120.0
+    max_retries: 2
+
+  # ---------- 记忆系统 ----------
+
+  fragment_extractor:
+    provider: "qwen"
+    model: "qwen-plus"
+    api_key_env: "DASHSCOPE_API_KEY"
+    region: "singapore"
+    max_tokens: 1024
+    temperature: 0
+    enable_thinking: false
+    timeout: 30.0
+    max_retries: 2
+
+  behavior_analyzer:
+    provider: "qwen"
+    model: "qwen-plus"
+    api_key_env: "DASHSCOPE_API_KEY"
+    region: "singapore"
+    max_tokens: 2048
+    temperature: 0.3
+    enable_thinking: false
+    timeout: 60.0
+    max_retries: 2
+
+  memory_update:
+    provider: "qwen"
+    model: "qwen-plus"
+    api_key_env: "DASHSCOPE_API_KEY"
+    region: "singapore"
+    max_tokens: 2048
+    temperature: 0
+    enable_thinking: false
+    timeout: 60.0
+    max_retries: 2
+
+  # ---------- 启动时（提示词生成，仅首次或缓存失效时执行） ----------
+
+  llm_analyzer:
+    provider: "qwen"
+    model: "qwen3-max"
+    api_key_env: "DASHSCOPE_API_KEY"
+    region: "singapore"
+    max_tokens: 32000
+    temperature: 0
+    enable_thinking: false
+    timeout: 600.0
+    max_retries: 3
+
+  schema_generator:
+    provider: "qwen"
+    model: "qwen3-max"
+    api_key_env: "DASHSCOPE_API_KEY"
+    region: "singapore"
+    max_tokens: 4096
+    temperature: 0
+    enable_thinking: false
+    timeout: 90.0
+    max_retries: 2
+
+  prompt_merger:
+    provider: "qwen"
+    model: "qwen3-max"
+    api_key_env: "DASHSCOPE_API_KEY"
+    region: "singapore"
+    max_tokens: 32000
+    temperature: 0
+    enable_thinking: false
+    timeout: 600.0
+    max_retries: 3
+
+  prompt_decomposer:
+    provider: "qwen"
+    model: "qwen3-max"
+    api_key_env: "DASHSCOPE_API_KEY"
+    region: "singapore"
+    max_tokens: 32000
+    temperature: 0
+    enable_thinking: false
+    timeout: 300.0
+    max_retries: 2
 
 # ==================== 记忆配置 ====================
 
@@ -31,6 +251,31 @@ memory:
   enabled: true
   smart_retrieval: true
   retention_policy: "user"
+
+# ==================== 规划系统配置（架构 3.5.3） ====================
+#
+# 核心原则：内部复杂，外部简单
+# - implicit 模式：内部 plan_todo 规划，用户只看友好进度
+# - explicit 模式：步骤超多/时间超长时展示详细步骤
+#
+
+planning:
+  mode: "implicit"
+
+  implicit:
+    internal_planning: true
+    ui_mode: "progress_bar"
+    progress_style: "friendly"
+    progress_messages:
+      analyzing: "正在分析你的{file_type}..."
+      fixing: "检测到问题，自动修复中..."
+      processing: "处理中..."
+      almost_done: "快好了..."
+      done: "搞定！"
+
+  explicit_threshold:
+    estimated_steps: 10
+    estimated_duration_minutes: 5
 
 # ==================== Playbook 持续学习 ====================
 
@@ -111,6 +356,22 @@ mcp_tools:
     capability: "document_analysis"
     description: "长文档深度分析与问答（PDF 年报/合同/论文/手册），基于树索引的推理检索"
     enabled: true
+
+# ==================== Skill 分组（意图驱动按需注入） ====================
+#
+# IntentAnalyzer 的 LLM 会从用户 query 语义判断需要哪些分组（可多选，重召回）。
+# 只有被选中分组的 Skills 才会注入到系统提示词中，大幅节省 token。
+# _always 组始终注入，不受 LLM 选择影响。
+#
+
+skill_groups:
+  writing: [writing-assistant, writing-analyzer, style-learner, content-reformatter]
+  data_analysis: [excel-analyzer, excel-fixer]
+  file_operation: [file-manager, word-processor]
+  translation: [translator]
+  research: [literature-reviewer, paper-search, arxiv-search]
+  app_automation: [applescript, macos-open, macos-screenshot, app-scanner, macos-notification]
+  _always: [local-search, app-recommender]
 
 # ==================== Skills 配置 ====================
 #

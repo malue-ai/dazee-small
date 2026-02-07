@@ -1,0 +1,139 @@
+{
+  "report_id": "e2e_phase1_20260208_020002",
+  "suite_id": "xiaodazi_e2e_phase1_core",
+  "suite_name": "E2E Phase1 核心用例",
+  "task_results": [
+    {
+      "task_id": "C1",
+      "task_description": "简单问答 Token 对比 - 重复问题验证 prompt 缓存",
+      "trials": [
+        {
+          "trial_id": "C1_trial_1",
+          "task_id": "C1",
+          "trial_number": 1,
+          "status": "completed",
+          "transcript": {
+            "messages": [
+              {
+                "role": "user",
+                "content": "今天天气怎么样？",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-08 01:59:54.519588"
+              },
+              {
+                "role": "assistant",
+                "content": "抱歉，我目前没有连接天气服务，没法直接查天气呢。你可以打开手机上的天气App，或者用浏览器搜一下\"天气+你所在城市\"就能看到了～",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-08 01:59:54.519601"
+              },
+              {
+                "role": "user",
+                "content": "今天天气怎么样？",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-08 02:00:02.614479"
+              },
+              {
+                "role": "assistant",
+                "content": "抱歉，我目前没有连接天气服务，没法直接查天气呢。你可以打开手机上的天气App，或者用浏览器搜一下\"天气+你所在城市\"就能看到了～",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-08 02:00:02.614482"
+              },
+              {
+                "role": "user",
+                "content": "今天天气怎么样？",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-08 02:00:02.614484"
+              },
+              {
+                "role": "assistant",
+                "content": "我这边没法直接查天气哦～建议你：\n- 打开手机天气App\n- 或者浏览器搜\"天气+城市名\"\n- 也可以问问 Siri/小爱同学这类语音助手\n\n需要我帮你做点别的吗？",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-08 02:00:02.614485"
+              }
+            ],
+            "tool_calls": [],
+            "token_usage": {
+              "input_tokens": 18762,
+              "output_tokens": 499,
+              "thinking_tokens": 0,
+              "cache_read_tokens": 0,
+              "cache_write_tokens": 0
+            },
+            "duration_ms": 0,
+            "metadata": {
+              "conversation_id": "0c4aa0d5-00ef-4d1f-86c4-5beb37415e10"
+            }
+          },
+          "outcome": {
+            "database_changes": [],
+            "file_changes": [],
+            "external_api_calls": [],
+            "custom_outcomes": {}
+          },
+          "grade_results": [
+            {
+              "grader_type": "code",
+              "grader_name": "check_token_limit",
+              "passed": true,
+              "score": 1.0,
+              "explanation": null,
+              "details": {
+                "token_type": "total",
+                "max_tokens": 20000,
+                "actual_tokens": 19261,
+                "usage_breakdown": {
+                  "input": 18762,
+                  "output": 499,
+                  "thinking": 0,
+                  "cache_read": 0,
+                  "cache_write": 0
+                }
+              },
+              "timestamp": "2026-02-08 02:00:02.614973",
+              "confidence": null,
+              "needs_human_review": false
+            },
+            {
+              "grader_type": "model",
+              "grader_name": "grade_response_quality",
+              "passed": true,
+              "score": 0.6,
+              "explanation": "LLM服务未配置，返回模拟评分",
+              "details": {
+                "scores": {},
+                "weighted_score": 3.0,
+                "strengths": [],
+                "weaknesses": []
+              },
+              "timestamp": "2026-02-08 02:00:02.615009",
+              "confidence": 0.5,
+              "needs_human_review": true
+            }
+          ],
+          "error": null,
+          "started_at": "2026-02-08 02:00:02.614533",
+          "completed_at": "2026-02-08 02:00:02.615029"
+        }
+      ]
+    }
+  ],
+  "total_tasks": 1,
+  "passed_tasks": 1,
+  "failed_tasks": 0,
+  "unstable_tasks": 0,
+  "total_token_usage": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "thinking_tokens": 0,
+    "cache_read_tokens": 0,
+    "cache_write_tokens": 0
+  },
+  "total_duration_seconds": 0.0,
+  "created_at": "2026-02-08 02:00:02.615984"
+}

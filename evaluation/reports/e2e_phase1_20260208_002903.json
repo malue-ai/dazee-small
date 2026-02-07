@@ -1,0 +1,92 @@
+{
+  "report_id": "e2e_phase1_20260208_002903",
+  "suite_id": "xiaodazi_e2e_phase1_core",
+  "suite_name": "E2E Phase1 核心用例",
+  "task_results": [
+    {
+      "task_id": "A1",
+      "task_description": "格式混乱 Excel 分析 - 销售趋势与最佳产品",
+      "trials": [
+        {
+          "trial_id": "A1_trial_1",
+          "task_id": "A1",
+          "trial_number": 1,
+          "status": "failed",
+          "transcript": null,
+          "outcome": null,
+          "grade_results": [],
+          "error": "object PreloadedAgent can't be used in 'await' expression",
+          "started_at": "2026-02-08 00:29:02.775539",
+          "completed_at": "2026-02-08 00:29:02.775567"
+        }
+      ]
+    },
+    {
+      "task_id": "B1",
+      "task_description": "跨会话记忆 - 毒舌风格延续与偏好记忆",
+      "trials": [
+        {
+          "trial_id": "B1_trial_1",
+          "task_id": "B1",
+          "trial_number": 1,
+          "status": "failed",
+          "transcript": null,
+          "outcome": null,
+          "grade_results": [],
+          "error": "object PreloadedAgent can't be used in 'await' expression",
+          "started_at": "2026-02-08 00:29:02.977857",
+          "completed_at": "2026-02-08 00:29:02.977871"
+        }
+      ]
+    },
+    {
+      "task_id": "D4",
+      "task_description": "连续错误恢复 - CSV 转 Excel+柱状图+导出 PDF",
+      "trials": [
+        {
+          "trial_id": "D4_trial_1",
+          "task_id": "D4",
+          "trial_number": 1,
+          "status": "failed",
+          "transcript": null,
+          "outcome": null,
+          "grade_results": [],
+          "error": "object PreloadedAgent can't be used in 'await' expression",
+          "started_at": "2026-02-08 00:29:03.011215",
+          "completed_at": "2026-02-08 00:29:03.011227"
+        }
+      ]
+    },
+    {
+      "task_id": "C1",
+      "task_description": "简单问答 Token 对比 - 重复问题验证 prompt 缓存",
+      "trials": [
+        {
+          "trial_id": "C1_trial_1",
+          "task_id": "C1",
+          "trial_number": 1,
+          "status": "failed",
+          "transcript": null,
+          "outcome": null,
+          "grade_results": [],
+          "error": "object PreloadedAgent can't be used in 'await' expression",
+          "started_at": "2026-02-08 00:29:03.058086",
+          "completed_at": "2026-02-08 00:29:03.058096"
+        }
+      ]
+    }
+  ],
+  "total_tasks": 4,
+  "passed_tasks": 0,
+  "failed_tasks": 4,
+  "unstable_tasks": 0,
+  "total_token_usage": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "thinking_tokens": 0,
+    "cache_read_tokens": 0,
+    "cache_write_tokens": 0
+  },
+  "total_duration_seconds": 0.0,
+  "created_at": "2026-02-08 00:29:03.058316"
+}

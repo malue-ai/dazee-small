@@ -92,6 +92,8 @@ tasks:
       expected_behavior: "ErrorClassifier 分类 + BacktrackManager 回溯"
 
   # C1 - 简单问答 Token 对比（双轮，同会话）
+  # 预算说明：单轮系统提示词+工具定义约 5K tokens，加上 LLM 输出，单轮约 8-10K；
+  # 双轮合计预算 20K，第二轮因 prompt 缓存 input_tokens 应显著低于第一轮。
   - id: C1
     description: "简单问答 Token 对比 - 重复问题验证 prompt 缓存"
     category: e2e_token
@@ -104,7 +106,7 @@ tasks:
     graders:
       - type: code
         name: check_token_limit
-        check: "check_token_limit(8000)"
+        check: "check_token_limit(20000)"
       - type: model
         rubric: grade_response_quality
         min_score: 3

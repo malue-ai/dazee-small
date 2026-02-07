@@ -1,38 +1,30 @@
 """
 LLM 配置管理模块
 
-统一管理项目中所有 LLM 调用点的超参数配置
+所有 LLM Profile 统一在实例 config.yaml 的 llm_profiles 段配置。
+实例加载时通过 set_instance_profiles() 注入。
 
 使用示例：
     from config.llm_config import get_llm_profile
-    
-    # 获取配置
-    profile = await get_llm_profile("semantic_inference")
-    
-    # 创建 LLM 服务
+
+    profile = await get_llm_profile("intent_analyzer")
+
     from core.llm import create_llm_service
     llm = create_llm_service(**profile)
-
-模块结构：
-    - profiles.yaml: LLM 配置文件
-    - loader.py: 配置加载器
-    - __init__.py: 模块导出接口
-    - README.md: 使用文档
-    - profiles.example.yaml: 配置示例
 """
 
 from .loader import (
     get_llm_profile,
+    set_instance_profiles,
+    clear_instance_profiles,
     list_profiles,
     reload_config,
-    get_llm_profile_from_env,
 )
 
 __all__ = [
     "get_llm_profile",
+    "set_instance_profiles",
+    "clear_instance_profiles",
     "list_profiles",
     "reload_config",
-    "get_llm_profile_from_env",
 ]
-
-__version__ = "1.0.0"

@@ -1,24 +1,22 @@
-name: XiaoDazi
-description: 桌面端 AI 搭子，亲切主动、本地优先、会干活会思考的本机伙伴
+name: GeneralAgent
+description: 通用智能助手（高质量默认配置）
 intent_analyzer:
   enabled: true
   complexity_levels:
-  - simple
+  - low
   - medium
-  - complex
+  - high
   task_types:
-  - file_operation
-  - writing
+  - question_answering
   - data_analysis
-  - translation
-  - app_automation
-  - email_composition
-  - organization
+  - content_generation
+  - code_execution
+  - web_search
+  - file_operation
   output_formats:
   - text
+  - json
   - markdown
-  - structured_list
-  - table
   use_llm: true
   llm_model: claude-haiku-4-5-20251001
   fast_mode: false
@@ -27,74 +25,50 @@ intent_analyzer:
 plan_manager:
   enabled: true
   trigger_condition: complexity == 'high' or step_count > 3
-  max_steps: 20
-  granularity: fine
+  max_steps: 15
+  granularity: medium
   allow_dynamic_adjustment: true
   validation_interval: 3
   replan_enabled: true
   max_replan_attempts: 2
   replan_strategy: incremental
-  failure_threshold: 0.4
+  failure_threshold: 0.3
 tool_selector:
   enabled: true
   available_tools: []
   selection_strategy: capability_based
   allow_parallel: false
-  max_parallel_tools: 1
+  max_parallel_tools: 3
   base_tools:
-  - hitl_confirm
+  - plan_todo
   tool_timeout: 300
 memory_manager:
   enabled: true
-  retention_policy: user
-  episodic_memory: true
-  working_memory_limit: 50
+  retention_policy: session
+  episodic_memory: false
+  working_memory_limit: 20
   auto_compress: true
   compress_threshold: 15
 output_formatter:
   enabled: true
-  default_format: markdown
+  default_format: text
   supported_formats:
   - text
   - markdown
   - json
   - html
-  code_highlighting: false
-  max_output_length: 2000
+  code_highlighting: true
+  max_output_length: 50000
   json_model_name: null
   json_schema: null
   strict_json_validation: false
   json_ensure_ascii: false
   json_indent: 2
   include_metadata: false
-skills:
-- name: file-organizer
-  enabled: true
-  description: ''
-- name: excel-analyzer
-  enabled: true
-  description: ''
-- name: text-writer
-  enabled: true
-  description: ''
-- name: translator
-  enabled: true
-  description: ''
-- name: screenshot-capturer
-  enabled: true
-  description: ''
-- name: ui-automator
-  enabled: true
-  description: ''
-- name: weather-fetcher
-  enabled: true
-  description: ''
-tools:
-- web_search
-- api_calling
-- hitl_confirm
+skills: []
+tools: []
 model: claude-sonnet-4-5-20250929
-max_turns: 20
+max_turns: 15
 execution_strategy: rvr
 allow_parallel_tools: false
 context_limits:
@@ -107,5 +81,4 @@ enable_thinking: null
 enable_caching: null
 thinking_mode: null
 prompts: null
-reasoning: 小搭子需处理从简单查询到复杂桌面自动化的多类任务，强调本地执行、主动规划、用户记忆和安全确认。启用细粒度规划以支持 UI 自动化等多步操作，记忆管理设为
-  user 级别以长期学习偏好，工具选择保守（禁用并行）确保操作安全，所有敏感操作通过 HITL 确认。输出风格要求通俗友好，故默认 markdown 并禁用代码高亮。
+reasoning: 高质量默认配置：适应大多数场景，平衡能力和稳定性。作为 config.yaml 配置缺失时的兜底。

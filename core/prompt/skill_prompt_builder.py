@@ -70,7 +70,13 @@ class SkillPromptBuilder:
 
         for skill in skills:
             emoji_prefix = f"{skill.emoji} " if skill.emoji else ""
-            lines.append(f'  <skill name="{skill.name}" location="{skill.location}">')
+            # 使用相对路径节省 token（绝对路径每个 skill 浪费 ~90 chars）
+            location = skill.location
+            try:
+                location = Path(location).relative_to(Path.cwd())
+            except (ValueError, TypeError):
+                pass  # 无法转相对路径时保留原值
+            lines.append(f'  <skill name="{skill.name}" location="{location}">')
             lines.append(f"    <description>{emoji_prefix}{skill.description}</description>")
             lines.append("  </skill>")
 

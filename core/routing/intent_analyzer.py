@@ -212,10 +212,20 @@ class IntentAnalyzer:
             if not isinstance(wants_to_stop, bool):
                 wants_to_stop = False
 
+            # 解析 relevant_skill_groups（LLM 语义多选，重召回）
+            relevant_skill_groups = parsed.get("relevant_skill_groups", [])
+            if not isinstance(relevant_skill_groups, list):
+                relevant_skill_groups = []
+            # 确保每个元素是字符串
+            relevant_skill_groups = [
+                str(g) for g in relevant_skill_groups if g
+            ]
+
             logger.debug(
                 f"解析成功: complexity={complexity.value}, "
                 f"skip_memory={skip_memory}, is_follow_up={is_follow_up}, "
-                f"wants_to_stop={wants_to_stop}"
+                f"wants_to_stop={wants_to_stop}, "
+                f"relevant_skill_groups={relevant_skill_groups}"
             )
 
             return IntentResult(
@@ -223,6 +233,7 @@ class IntentAnalyzer:
                 skip_memory=skip_memory,
                 is_follow_up=is_follow_up,
                 wants_to_stop=wants_to_stop,
+                relevant_skill_groups=relevant_skill_groups,
             )
         else:
             logger.warning(f"无法解析 JSON: {content[:100]}...")

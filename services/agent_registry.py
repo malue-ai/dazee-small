@@ -708,6 +708,13 @@ class AgentRegistry:
         # 2. 加载实例配置
         config = await load_instance_config(agent_id)
 
+        # 2.1 注入实例 LLM Profiles（必须在 InstancePromptCache 之前）
+        from config.llm_config.loader import set_instance_profiles
+
+        llm_profiles = (config.raw_config or {}).get("llm_profiles", {})
+        if llm_profiles:
+            set_instance_profiles(llm_profiles)
+
         # 3. 加载实例提示词
         instance_prompt = await load_instance_prompt(agent_id)
 

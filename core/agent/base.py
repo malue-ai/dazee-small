@@ -632,7 +632,12 @@ class Agent:
     # ==================== 工具选择 ====================
 
     async def _select_tools(self, intent: "IntentResult", ctx) -> tuple:
-        """工具选择"""
+        """
+        工具选择（V12: 意图驱动裁剪）
+
+        simple + needs_plan=false -> 只保留核心工具（省 token）
+        medium/complex -> 按 ToolSelector 三级优先级选择
+        """
         from core.tool import create_tool_selector
         from core.tool.registry import create_capability_registry
 
@@ -643,11 +648,27 @@ class Agent:
 
         plan = self._plan_cache.get("plan")
 
+        # V12: simple 且不需要 plan 时，只加载核心工具（省 ~2000 tokens 工具定义）
+        schema_tools = (
+            self._schema.tools if self._schema and self._schema.tools else None
+        )
+        if (
+            intent
+            and intent.complexity.value == "simple"
+            and not intent.needs_plan
+            and not plan
+        ):
+            # 核心工具白名单：plan（以防 LLM 仍需要）+ hitl
+            schema_tools = None  # 不使用 Schema 白名单，让 resolve_capabilities 走 default
+            logger.info(
+                "工具裁剪: complexity=simple, 只加载核心工具"
+            )
+
         required_capabilities, selection_source, overridden_sources, allowed_tools = (
             await self.tool_selector.resolve_capabilities(
-                schema_tools=self._schema.tools if self._schema and self._schema.tools else None,
+                schema_tools=schema_tools,
                 plan=plan,
-                intent_task_type=None,  # V11: 固定 RVR-B，无需按 agent_type 选能力
+                intent_task_type=None,
             )
         )
 

@@ -110,7 +110,7 @@ class HttpAgentAdapter:
     async def _poll_until_done(self, task_id: str) -> None:
         elapsed = 0.0
         while elapsed < self.poll_max_wait:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.get(
                     f"{self.base_url}/api/v1/session/{task_id}",
                 )

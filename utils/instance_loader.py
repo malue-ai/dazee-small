@@ -893,6 +893,15 @@ async def create_agent_from_instance(
     logger.info(f"   配置: {config.name} v{config.version}")
     logger.info(f"   描述: {config.description}")
 
+    # 2.1 注入实例 LLM Profiles（必须在 InstancePromptCache 加载之前）
+    from config.llm_config.loader import set_instance_profiles
+
+    llm_profiles = (config.raw_config or {}).get("llm_profiles", {})
+    if llm_profiles:
+        set_instance_profiles(llm_profiles)
+    else:
+        logger.warning("⚠️ 实例未配置 llm_profiles，框架内部 LLM 调用将不可用")
+
     # V11: Skills-First 加载器（统一处理 Skills 二维分类）
     skills_loader = None
     if config.skills_first_config:
@@ -1172,7 +1181,7 @@ async def create_agent_from_instance(
 
     logger.info(f"✅ Agent 创建成功")
 
-    # V11: 注入 SkillsLoader 和 Skills 提示词
+    # V12: 注入 SkillsLoader + skill_groups_config（供 tool_provider 动态生成 skills_prompt）
     if skills_loader:
         agent._skills_loader = skills_loader
         agent._instance_skills = []  # 新格式由 skills_loader 管理
@@ -1181,7 +1190,16 @@ async def create_agent_from_instance(
         skills_prompt = await skills_loader.build_skills_prompt()
         if skills_prompt and hasattr(prompt_cache, "runtime_context") and prompt_cache.runtime_context:
             prompt_cache.runtime_context["skills_prompt"] = skills_prompt
-            logger.info(f"   Skills 提示词: {len(skills_prompt)} 字符已注入")
+            logger.info(f"   Skills 提示词: {len(skills_prompt)} 字符已注入（Fallback 用）")
+
+            # V12: 注入 loader 引用和 skill_groups 配置，供 tool_provider 动态生成
+            prompt_cache.runtime_context["_skills_loader"] = skills_loader
+            skill_groups_cfg = (config.raw_config or {}).get("skill_groups", {})
+            if skill_groups_cfg:
+                prompt_cache.runtime_context["_skill_groups_config"] = skill_groups_cfg
+                logger.info(
+                    f"   Skill 分组配置已注入: {list(skill_groups_cfg.keys())}"
+                )
     elif config.skills:
         # 旧格式兼容
         agent._skills_loader = None
