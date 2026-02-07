@@ -62,6 +62,7 @@ from .phase1 import (
 
 # Phase 2 Injectors
 from .phase2 import (
+    PlaybookHintInjector,
     UserMemoryInjector,
     get_phase2_injectors,
 )
@@ -114,6 +115,7 @@ __all__ = [
     "HistorySummaryProvider",
     "get_phase1_injectors",
     # Phase 2 Injectors
+    "PlaybookHintInjector",
     "UserMemoryInjector",
     "get_phase2_injectors",
     # Phase 3 Injectors

@@ -24,11 +24,12 @@ prompt_cache.runtime_context["environment_prompt"] = env_prompt
 import asyncio
 import os
 import platform
+import shutil
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 import aiofiles
 
@@ -182,39 +183,56 @@ class RuntimeContextBuilder:
         # 只返回存在的目录
         return {k: v for k, v in dirs.items() if v.exists()}
 
+    # 应用中英文名映射，便于 Agent 识别（飞书=Lark 等）
+    APP_DISPLAY_NAME_MAP = {
+        "Lark": "Lark (飞书)",
+        "WeChat": "微信 (WeChat)",
+        "企业微信": "企业微信 (WeCom)",
+        "Google Chrome": "Chrome",
+        "Visual Studio Code": "VS Code",
+        "Microsoft Edge": "Edge",
+        "Netflix": "Netflix",
+        "Slack": "Slack",
+        "Zoom": "Zoom",
+        "Telegram": "Telegram",
+        "Notion": "Notion",
+        "Figma": "Figma",
+        "Spotify": "Spotify",
+    }
+
     @classmethod
     async def _detect_installed_apps_async(cls, system: str) -> List[str]:
         """
-        检测已安装的常用应用（异步）
+        检测已安装的应用（异步）。
 
-        注意：同时检查 /Applications 和运行中的进程
+        macOS: 扫描 /Applications 与 /System/Applications 全量 .app，
+        并合并 lsappinfo 检测到的运行中应用（如飞书），应用名称映射便于 Agent 识别。
         """
-        apps = []
-        detected = set()
+        apps: List[str] = []
+        seen: Set[str] = set()
+        max_apps = 80
 
         if system == "darwin":
-            # macOS: 检查 /Applications + 系统应用
-            common_apps = [
-                ("企业微信", "/Applications/企业微信.app", None),
-                ("微信", "/Applications/WeChat.app", None),
-                ("Safari", "/Applications/Safari.app", None),
-                ("Chrome", "/Applications/Google Chrome.app", None),
-                ("VS Code", "/Applications/Visual Studio Code.app", None),
-                ("Cursor", "/Applications/Cursor.app", None),
-                ("Terminal", "/System/Applications/Utilities/Terminal.app", None),
-                ("Notes", "/System/Applications/Notes.app", None),
-                ("Reminders", "/System/Applications/Reminders.app", None),
-            ]
+            # 扫描 /Applications 与 /System/Applications 下所有 .app
+            for base in [Path("/Applications"), Path("/System/Applications")]:
+                if not base.exists():
+                    continue
+                try:
+                    for entry in base.iterdir():
+                        if len(apps) >= max_apps:
+                            break
+                        if entry.suffix != ".app" or not entry.is_dir():
+                            continue
+                        name = entry.stem
+                        if name in seen:
+                            continue
+                        seen.add(name)
+                        display = cls.APP_DISPLAY_NAME_MAP.get(name, name)
+                        apps.append(display)
+                except OSError:
+                    pass
 
-            for name, path, bundle_id in common_apps:
-                if Path(path).exists():
-                    if bundle_id:
-                        apps.append(f"{name} (bundle: {bundle_id})")
-                    else:
-                        apps.append(name)
-                    detected.add(name)
-
-            # 🆕 通过 lsappinfo 检测运行中的应用（包括未安装到 /Applications 的）
+            # 通过 lsappinfo 检测运行中的应用（含未在 /Applications 的，如飞书）
             try:
                 proc = await asyncio.create_subprocess_exec(
                     "lsappinfo",
@@ -225,13 +243,13 @@ class RuntimeContextBuilder:
                 stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=3)
                 if proc.returncode == 0:
                     output = stdout.decode()
-                    # 检测飞书（可能从 DMG 运行）
-                    if "com.electron.lark" in output and "飞书" not in detected:
-                        # 🆕 提供详细激活信息
-                        apps.insert(0, "飞书 (打开: `open -b com.electron.lark`, 搜索: Cmd+K)")
-                        detected.add("飞书")
+                    if "com.electron.lark" in output and "Lark" not in seen:
+                        apps.insert(0, "飞书 (Lark, 打开: `open -b com.electron.lark`)")
+                        seen.add("Lark")
             except Exception:
                 pass
+
+            apps.sort(key=lambda x: x.lower())
 
         elif system == "linux":
             # Linux: 检查常用命令（异步）
@@ -370,6 +388,22 @@ class RuntimeContextBuilder:
                         "- System notifications (`nodes notify`)",
                         "- App launch (`open -a` / `open -b`)",
                         "- Clipboard operations",
+                    ]
+                )
+                if shutil.which("peekaboo"):
+                    lines.extend(
+                        [
+                            "- UI automation (`peekaboo`): see → click / type / scroll",
+                            "",
+                            "**UI workflow** (via `nodes run`):",
+                            "- Observe: `peekaboo see --app <App> --annotate` → get element IDs",
+                            "- Click: `peekaboo click --on <ID> --app <App>`",
+                            '- Type: `peekaboo type "text" --app <App>`',
+                            "- Scroll: `peekaboo scroll --direction down --app <App>`",
+                        ]
+                    )
+                lines.extend(
+                    [
                         "",
                         "**Tips**:",
                         '- Activate app: `open -a "AppName"` or `open -b "bundle.id"`',
@@ -398,6 +432,22 @@ class RuntimeContextBuilder:
                         "- 系统通知 (`nodes notify`)",
                         "- 应用启动 (`open -a` / `open -b`)",
                         "- 剪贴板操作",
+                    ]
+                )
+                if shutil.which("peekaboo"):
+                    lines.extend(
+                        [
+                            "- UI 自动化 (`peekaboo`): 截图标注 → 点击/输入/滚动",
+                            "",
+                            "**UI 操作流程**（通过 `nodes run` 调用）:",
+                            "- 观察: `peekaboo see --app <应用名> --annotate` → 获取带 ID 的 UI 元素",
+                            "- 点击: `peekaboo click --on <元素ID> --app <应用名>`",
+                            '- 输入: `peekaboo type "文本" --app <应用名>`',
+                            "- 滚动: `peekaboo scroll --direction down --app <应用名>`",
+                        ]
+                    )
+                lines.extend(
+                    [
                         "",
                         "**操作提示**:",
                         '- 激活应用: `open -a "AppName"` 或 `open -b "bundle.id"`',
