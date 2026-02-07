@@ -49,6 +49,56 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+# ==================== 图片剥离辅助函数 ====================
+
+IMAGE_PLACEHOLDER = "[截图已省略，仅保留最近轮次的截图]"
+
+
+def _content_has_image(content) -> bool:
+    """递归检查 content 是否包含 image block"""
+    if isinstance(content, list):
+        return any(
+            (isinstance(b, dict) and b.get("type") == "image")
+            or (isinstance(b, dict) and b.get("type") == "tool_result"
+                and _content_has_image(b.get("content")))
+            for b in content
+        )
+    if isinstance(content, dict):
+        return content.get("type") == "image"
+    return False
+
+
+def _strip_images_from_blocks(blocks: list) -> list:
+    """
+    递归替换 content blocks 中的 image block 为文本占位符
+
+    保留 text block 和 tool_use/tool_result 的结构，仅替换 image。
+    """
+    result = []
+    for block in blocks:
+        if not isinstance(block, dict):
+            result.append(block)
+            continue
+
+        block_type = block.get("type", "")
+
+        if block_type == "image":
+            # 替换 base64 图片为文本占位符
+            result.append({"type": "text", "text": IMAGE_PLACEHOLDER})
+        elif block_type == "tool_result":
+            inner = block.get("content")
+            if isinstance(inner, list) and _content_has_image(inner):
+                result.append({
+                    **block,
+                    "content": _strip_images_from_blocks(inner),
+                })
+            else:
+                result.append(block)
+        else:
+            result.append(block)
+
+    return result
+
 
 class RVRExecutor(BaseExecutor):
     """
@@ -96,6 +146,72 @@ class RVRExecutor(BaseExecutor):
             return "".join(parts)
         return system_prompt or ""
 
+    @staticmethod
+    def _strip_old_images(
+        messages: List[Dict], preserve_last_n: int = 2
+    ) -> List[Dict]:
+        """
+        剥离非最近 N 条消息中的 base64 图片数据
+
+        observe_screen 等工具返回的截图以 base64 嵌入 tool_result，
+        每张图片 ~0.6MB，会快速耗尽 200K token 上下文窗口。
+        将旧消息中的图片替换为文本占位符，保留最近消息的图片。
+
+        Args:
+            messages: 消息列表（dict 格式）
+            preserve_last_n: 保留最近 N 条消息的图片不剥离
+
+        Returns:
+            处理后的消息列表（浅拷贝，仅修改含图片的消息）
+        """
+        if not messages:
+            return messages
+
+        stripped_count = 0
+        result = []
+
+        # 保留最后 N 条消息的图片
+        strip_boundary = len(messages) - preserve_last_n
+
+        for i, msg in enumerate(messages):
+            if i >= strip_boundary:
+                result.append(msg)
+                continue
+
+            content = msg.get("content")
+            if not isinstance(content, list):
+                result.append(msg)
+                continue
+
+            # 检查是否包含图片 block
+            has_image = any(
+                isinstance(block, dict) and block.get("type") == "image"
+                for block in content
+            )
+
+            if not has_image:
+                # 递归检查 tool_result 内部
+                has_image = any(
+                    isinstance(block, dict)
+                    and block.get("type") == "tool_result"
+                    and _content_has_image(block.get("content"))
+                    for block in content
+                )
+
+            if not has_image:
+                result.append(msg)
+                continue
+
+            # 替换图片为占位符
+            new_content = _strip_images_from_blocks(content)
+            stripped_count += 1
+            result.append({**msg, "content": new_content})
+
+        if stripped_count > 0:
+            logger.info(f"🖼️ 已剥离 {stripped_count} 条消息中的 base64 图片")
+
+        return result
+
     def _trim_messages_if_needed(
         self,
         llm_messages: List,
@@ -107,11 +223,16 @@ class RVRExecutor(BaseExecutor):
     ) -> List:
         """
         如果消息超过安全阈值，执行裁剪
+
+        始终剥离旧消息中的 base64 图片，避免截图累积撑爆上下文窗口。
         """
         messages_for_estimate = [
             {"role": m.role, "content": m.content} if hasattr(m, "role") else m
             for m in llm_messages
         ]
+
+        # 始终剥离旧消息中的 base64 图片（保留最近 2 条消息的图片）
+        messages_for_estimate = self._strip_old_images(messages_for_estimate)
 
         # 使用统一的 token 计算方法（包含工具定义）
         estimated_tokens = count_request_tokens(
@@ -123,7 +244,8 @@ class RVRExecutor(BaseExecutor):
                 logger.debug(
                     f"📊 上下文长度正常: 估算 {estimated_tokens:,} tokens < 安全阈值 {safe_threshold:,}"
                 )
-            return llm_messages
+            # 返回剥离图片后的消息（而非原始消息），防止截图累积超限
+            return dict_list_to_messages(messages_for_estimate)
 
         preserve_first = (
             getattr(context_strategy, "preserve_first_messages", 4) if context_strategy else 4
