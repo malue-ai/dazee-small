@@ -1,0 +1,104 @@
+name: 小搭子
+description: 桌面端 AI 搭子，亲切可靠，擅长本地文件处理、写作、翻译等日常任务
+intent_analyzer:
+  enabled: true
+  complexity_levels:
+  - simple
+  - medium
+  - complex
+  task_types:
+  - writing
+  - file_management
+  - data_analysis
+  - translation
+  - screenshot
+  output_formats:
+  - text
+  - markdown
+  - list
+  - table
+  use_llm: true
+  llm_model: claude-haiku-4-5-20251001
+  fast_mode: false
+  semantic_cache_threshold: null
+  simplified_output: true
+plan_manager:
+  enabled: true
+  trigger_condition: complexity == 'high' or step_count > 3
+  max_steps: 12
+  granularity: medium
+  allow_dynamic_adjustment: true
+  validation_interval: 3
+  replan_enabled: true
+  max_replan_attempts: 2
+  replan_strategy: incremental
+  failure_threshold: 0.3
+tool_selector:
+  enabled: true
+  available_tools: []
+  selection_strategy: capability_based
+  allow_parallel: false
+  max_parallel_tools: 1
+  base_tools:
+  - hitl-confirm
+  tool_timeout: 300
+memory_manager:
+  enabled: true
+  retention_policy: user
+  episodic_memory: true
+  working_memory_limit: 40
+  auto_compress: true
+  compress_threshold: 15
+output_formatter:
+  enabled: true
+  default_format: markdown
+  supported_formats:
+  - text
+  - markdown
+  - json
+  - html
+  code_highlighting: false
+  max_output_length: 2000
+  json_model_name: null
+  json_schema: null
+  strict_json_validation: false
+  json_ensure_ascii: false
+  json_indent: 2
+  include_metadata: false
+skills:
+- name: writing-assistant
+  enabled: true
+  description: ''
+- name: file-organizer
+  enabled: true
+  description: ''
+- name: excel-analyzer
+  enabled: true
+  description: ''
+- name: translator
+  enabled: true
+  description: ''
+- name: screenshot-processor
+  enabled: true
+  description: ''
+- name: weather-checker
+  enabled: true
+  description: ''
+tools:
+- hitl-confirm
+model: qwen3-max
+max_turns: 18
+execution_strategy: rvr
+allow_parallel_tools: false
+context_limits:
+  max_context_tokens: 200000
+  warning_threshold: 0.8
+  truncate_threshold: 0.9
+temperature: null
+max_tokens: null
+enable_thinking: null
+enable_caching: null
+thinking_mode: null
+prompts: null
+reasoning: 作为桌面 AI 搭子，需支持多类本地任务（写作、文件整理、表格、翻译等），具备中等复杂度规划能力；强调用户习惯记忆（user-level retention）、操作安全（HITL
+  确认）、通俗输出；不涉及并行工具调用，优先单步稳妥执行

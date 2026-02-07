@@ -28,10 +28,9 @@ async def load_resilience_config(config_path: Optional[Path] = None) -> dict:
         配置字典
     """
     if config_path is None:
-        # 默认路径
-        current_file = Path(__file__)
-        project_root = current_file.parent.parent.parent
-        config_path = project_root / "config" / "resilience.yaml"
+        # 默认路径（兼容打包环境）
+        from utils.app_paths import get_bundle_dir
+        config_path = get_bundle_dir() / "config" / "resilience.yaml"
     
     if not config_path.exists():
         logger.warning(f"⚠️ 容错配置文件不存在: {config_path}，使用默认配置")

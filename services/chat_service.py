@@ -694,6 +694,11 @@ class ChatService:
 
                         history_messages.append({"role": db_msg.role, "content": content})
 
+                    # 🛡️ 确保 tool_use/tool_result 配对（DB 可能存有崩溃前的不完整数据）
+                    from core.llm.adaptor import ClaudeAdaptor
+
+                    history_messages = ClaudeAdaptor.ensure_tool_pairs(history_messages)
+
                     logger.info(
                         "历史消息已加载",
                         extra={"conversation_id": conversation_id, "count": len(history_messages)},

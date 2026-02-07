@@ -73,8 +73,9 @@ class TaskScheduler:
         Args:
             config_path: 配置文件路径，默认为 config/scheduled_tasks.yaml
         """
+        from utils.app_paths import get_bundle_dir
         self.config_path = config_path or str(
-            Path(__file__).parent.parent.parent / "config" / "scheduled_tasks.yaml"
+            get_bundle_dir() / "config" / "scheduled_tasks.yaml"
         )
         self.background_service = get_background_task_service()
         self._scheduler = None

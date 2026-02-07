@@ -91,8 +91,9 @@ excludes = [
     'jupyter', 'notebook', 'IPython',
     'pytest', 'test', 'tests', 'unittest',
     # 构建/包管理工具（运行时不需要）
-    'setuptools', 'pip', 'wheel', '_distutils_hack',
-    'pkg_resources', 'ensurepip', 'distutils', 'venv',
+    # 注意：不排除 setuptools/distutils，PyInstaller 内置 hook 需要处理 distutils→setuptools 别名
+    'pip', 'wheel', '_distutils_hack',
+    'ensurepip', 'venv',
     # GUI 工具包（服务端不需要）
     'tkinter', '_tkinter', 'tcl', 'tk',
     # 其他不需要的标准库模块

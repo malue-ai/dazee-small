@@ -110,7 +110,7 @@ export const useConversationStore = defineStore('conversation', () => {
     try {
       const conversation = await chatApi.createConversation(uid, title)
       currentId.value = conversation.id
-      messages.value = []
+      messagesMap.value[conversation.id] = []
       
       // 刷新列表
       await fetchList()

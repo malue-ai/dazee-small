@@ -14,7 +14,6 @@ core_tools:
   - plan_todo        # 任务规划
   - api_calling      # API 调用（Skills 的执行层）
   - hitl             # 人机确认
-  - clue_generation  # 线索生成
   - scheduled_task   # 定时任务/提醒
 
 # ==================== 常用工具（不延迟加载）====================

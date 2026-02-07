@@ -305,6 +305,12 @@ def trim_by_token_budget(
 
     # 7. 组合结果
     result = first_part + middle_part + last_part
+
+    # 8. 🛡️ 裁剪后确保 tool_use/tool_result 配对（裁剪可能破坏边界处的配对）
+    from core.llm.adaptor import ClaudeAdaptor
+
+    result = ClaudeAdaptor.ensure_tool_pairs(result)
+
     trimmed_count = len(result)
     estimated_tokens = base_tokens + first_tokens + middle_tokens + last_tokens
 
@@ -485,6 +491,12 @@ async def compress_with_summary(
 
     # 8. 组合结果
     result = first_part + [summary_message] + middle_tool_results + last_part
+
+    # 9. 🛡️ 压缩后确保 tool_use/tool_result 配对（压缩可能破坏边界处的配对）
+    from core.llm.adaptor import ClaudeAdaptor
+
+    result = ClaudeAdaptor.ensure_tool_pairs(result)
+
     trimmed_count = len(result)
     estimated_tokens = (
         base_tokens + first_tokens + summary_tokens + middle_tool_tokens + last_tokens
@@ -662,6 +674,11 @@ async def load_with_existing_summary(
 
         # 用摘要替换指定范围
         result = messages[:middle_start] + [summary_message] + messages[middle_end:]
+
+        # 🛡️ 摘要替换后确保 tool_use/tool_result 配对
+        from core.llm.adaptor import ClaudeAdaptor
+
+        result = ClaudeAdaptor.ensure_tool_pairs(result)
 
         logger.info(
             f"📦 应用已有摘要: {len(messages)} → {len(result)} 条消息 "

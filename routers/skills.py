@@ -68,16 +68,14 @@ def _ensure_within(base_dir: Path, target_path: Path, label: str) -> Path:
 
 def _get_skills_library_dir() -> Path:
     """获取 skills/library 目录路径"""
-    current_file = Path(__file__)
-    project_root = current_file.parent.parent
-    return project_root / "skills" / "library"
+    from utils.app_paths import get_bundle_dir
+    return get_bundle_dir() / "skills" / "library"
 
 
 def _get_instance_skills_dir(agent_id: str) -> Path:
     """获取 instances/{agent_id}/skills 目录路径"""
-    current_file = Path(__file__)
-    project_root = current_file.parent.parent
-    instances_dir = project_root / "instances"
+    from utils.app_paths import get_bundle_dir
+    instances_dir = get_bundle_dir() / "instances"
     skills_dir = instances_dir / agent_id / "skills"
     return _ensure_within(instances_dir, skills_dir, "agent_id")
 

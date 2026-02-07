@@ -18,12 +18,12 @@ instance:
 # ==================== 大模型配置 ====================
 
 agent:
-  model: "claude-sonnet-4-5-20250929"
+  model: "qwen3-max"
 
   llm:
     temperature: 0.7
     max_tokens: 8192
-    enable_caching: true
+    enable_caching: false
 
 # ==================== 记忆配置 ====================
 

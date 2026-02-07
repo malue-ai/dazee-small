@@ -35,7 +35,8 @@ _config_cache: Optional[Dict[str, Any]] = None
 
 def _get_config_file_path() -> Path:
     """获取配置文件路径"""
-    return Path(__file__).parent / "profiles.yaml"
+    from utils.app_paths import get_bundle_dir
+    return get_bundle_dir() / "config" / "llm_config" / "profiles.yaml"
 
 
 async def _load_config() -> Dict[str, Any]:

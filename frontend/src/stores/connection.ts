@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { shallowRef, triggerRef } from 'vue'
 import { useWebSocketChat } from '@/composables/useWebSocketChat'
 
 /**
@@ -8,7 +8,8 @@ import { useWebSocketChat } from '@/composables/useWebSocketChat'
  */
 export const useConnectionStore = defineStore('connection', () => {
   /** 连接映射 (conversationId -> WebSocketChatInstance) */
-  const connections = ref<Map<string, ReturnType<typeof useWebSocketChat>>>(new Map())
+  // 使用 shallowRef 避免 Vue 深层解包 composable 内部的 Ref
+  const connections = shallowRef<Map<string, ReturnType<typeof useWebSocketChat>>>(new Map())
 
   /**
    * 获取或创建指定会话的连接
@@ -17,6 +18,7 @@ export const useConnectionStore = defineStore('connection', () => {
     if (!connections.value.has(conversationId)) {
       const ws = useWebSocketChat()
       connections.value.set(conversationId, ws)
+      triggerRef(connections)
     }
     return connections.value.get(conversationId)!
   }
@@ -29,6 +31,7 @@ export const useConnectionStore = defineStore('connection', () => {
     if (ws) {
       ws.close()
       connections.value.delete(conversationId)
+      triggerRef(connections)
     }
   }
 
@@ -40,6 +43,7 @@ export const useConnectionStore = defineStore('connection', () => {
       ws.close()
     }
     connections.value.clear()
+    triggerRef(connections)
   }
 
   return {

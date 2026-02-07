@@ -62,7 +62,6 @@ import {
   Palette,
   FileOutput,
   Plug,
-  Paperclip,
   BarChart3,
   GitBranch,
   Hand,
@@ -136,16 +135,6 @@ const TOOL_CONFIG: Record<string, { icon: Component; name: string; descTemplate?
     icon: Plug,
     name: 'API 调用',
     descTemplate: (input) => input?.api_name ? `调用 ${input.api_name}` : 'API 调用'
-  },
-  
-  // 文件发送
-  'send_files': {
-    icon: Paperclip,
-    name: '发送文件',
-    descTemplate: (input) => {
-      const count = input?.files?.length
-      return count ? `发送 ${count} 个文件` : '发送文件'
-    }
   },
   
   // 数据分析

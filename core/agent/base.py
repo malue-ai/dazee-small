@@ -155,7 +155,7 @@ class Agent:
             else 5
         )
         # plan 工具会写入 Conversation.metadata.plan，必须串行执行
-        self._serial_only_tools = {"plan", "request_human_confirmation"}
+        self._serial_only_tools = {"plan", "hitl"}
 
         # 兼容属性（外部代码可能直接设置）
         self.model: Optional[str] = None
