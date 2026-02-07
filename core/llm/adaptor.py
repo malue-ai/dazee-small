@@ -744,15 +744,14 @@ class OpenAIAdaptor(BaseAdaptor):
         """序列化为 JSON 字符串"""
         return json.dumps(obj, ensure_ascii=False)
 
-    def _get_tool_result_content(self, block: Dict) -> str:
-        """获取 tool_result 的内容"""
+    def _get_tool_result_content(self, block: Dict) -> Any:
+        """Get tool_result content. Returns str or list of content blocks (multimodal)."""
         content = block.get("content", "")
         if isinstance(content, str):
             return content
         if isinstance(content, list):
-            # 提取文本部分
-            texts = [p.get("text", "") for p in content if p.get("type") == "text"]
-            return "\n".join(texts)
+            # Multimodal content blocks (e.g. text + image), pass through
+            return content
         return str(content)
 
     def convert_response_to_claude(self, response: Any) -> LLMResponse:

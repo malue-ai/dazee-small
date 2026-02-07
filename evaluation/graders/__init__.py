@@ -9,10 +9,10 @@
 
 from evaluation.graders.code_based import CodeBasedGraders
 from evaluation.graders.model_based import ModelBasedGraders
-from evaluation.graders.human import HumanGraders
+from evaluation.graders.human import HumanGrader
 
 __all__ = [
     "CodeBasedGraders",
     "ModelBasedGraders",
-    "HumanGraders",
+    "HumanGrader",
 ]

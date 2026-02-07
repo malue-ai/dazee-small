@@ -27,8 +27,9 @@ class MacOSLocalNode(LocalNodeBase):
     对齐 clawdbot 的 MacNodeRuntime
     """
 
-    # macOS 默认安全 bins
+    # macOS 默认安全 bins（与 config.yaml 保持一致）
     DEFAULT_SAFE_BINS = [
+        # 系统基础命令
         "osascript",
         "open",
         "screencapture",
@@ -41,10 +42,35 @@ class MacOSLocalNode(LocalNodeBase):
         "echo",
         "pwd",
         "date",
+        # 文件操作
+        "mkdir",
+        "mv",
+        "cp",
+        "rm",
+        "rmdir",
+        "touch",
+        "chmod",
+        "find",
+        "xargs",
+        "head",
+        "tail",
+        "grep",
+        "sort",
+        "uniq",
+        "wc",
+        # Shell 与开发工具
+        "bash",
+        "sh",
+        "zsh",
+        "python3",
+        "sleep",
+        # UI 自动化（Peekaboo）
+        "peekaboo",
     ]
 
-    # macOS 默认命令白名单
+    # macOS 默认命令白名单（完整路径）
     DEFAULT_ALLOWLIST = [
+        # 系统基础命令
         "/usr/bin/osascript",
         "/usr/bin/open",
         "/usr/sbin/screencapture",
@@ -57,6 +83,33 @@ class MacOSLocalNode(LocalNodeBase):
         "/bin/echo",
         "/bin/pwd",
         "/bin/date",
+        # 文件操作
+        "/bin/mkdir",
+        "/bin/mv",
+        "/bin/cp",
+        "/bin/rm",
+        "/bin/rmdir",
+        "/usr/bin/touch",
+        "/bin/chmod",
+        "/usr/bin/find",
+        "/usr/bin/xargs",
+        "/usr/bin/head",
+        "/usr/bin/tail",
+        "/usr/bin/grep",
+        "/usr/bin/sort",
+        "/usr/bin/uniq",
+        "/usr/bin/wc",
+        # Shell 与开发工具
+        "/bin/bash",
+        "/bin/sh",
+        "/bin/zsh",
+        "/usr/bin/python3",
+        "/usr/local/bin/python3",
+        "/opt/homebrew/bin/python3",
+        "/bin/sleep",
+        # UI 自动化（Peekaboo - Homebrew 安装路径）
+        "/opt/homebrew/bin/peekaboo",
+        "/usr/local/bin/peekaboo",
     ]
 
     def __init__(

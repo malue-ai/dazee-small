@@ -774,9 +774,73 @@ class CodeBasedGraders:
         )
     
     # ===================
+    # 步骤数验证（小搭子效率性 E2）
+    # ===================
+
+    @staticmethod
+    def check_step_count(
+        transcript: Transcript,
+        optimal_steps: int,
+        max_acceptable_steps: int,
+        step_definition: str = "tool_calls",
+    ) -> GradeResult:
+        """
+        Verify that execution step count is within acceptable range.
+
+        Step count is derived from tool_calls count (or plan steps if present).
+        Pass if actual_steps <= max_acceptable_steps.
+        Score: 1.0 if <= optimal, linear decay to 0.5 at max_acceptable, 0.2 beyond.
+
+        Args:
+            transcript: Transcript record.
+            optimal_steps: Ideal step count.
+            max_acceptable_steps: Maximum acceptable step count.
+            step_definition: "tool_calls" (count tool invocations) or "plan_steps".
+
+        Returns:
+            GradeResult.
+        """
+        if step_definition == "plan_steps":
+            plan = transcript.metadata.get("plan", {})
+            steps = plan.get("steps", [])
+            actual_steps = len(steps) if steps else len(transcript.tool_calls)
+        else:
+            actual_steps = len(transcript.tool_calls)
+
+        passed = actual_steps <= max_acceptable_steps
+        if actual_steps <= optimal_steps:
+            score = 1.0
+        elif actual_steps <= max_acceptable_steps:
+            score = 0.5 + 0.5 * (max_acceptable_steps - actual_steps) / max(
+                1, max_acceptable_steps - optimal_steps
+            )
+        else:
+            score = 0.2
+
+        explanation = None
+        if not passed:
+            explanation = (
+                f"步骤数超限: {actual_steps} (最优={optimal_steps}, "
+                f"上限={max_acceptable_steps})"
+            )
+
+        return GradeResult(
+            grader_type=GraderType.CODE,
+            grader_name="check_step_count",
+            passed=passed,
+            score=score,
+            explanation=explanation,
+            details={
+                "actual_steps": actual_steps,
+                "optimal_steps": optimal_steps,
+                "max_acceptable_steps": max_acceptable_steps,
+            },
+        )
+
+    # ===================
     # 复合验证器（多条件组合）
     # ===================
-    
+
     @classmethod
     def run_all_checks(
         cls,

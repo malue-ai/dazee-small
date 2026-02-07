@@ -402,7 +402,9 @@ class FailureSummaryManager:
         """
         self.conversation_service = conversation_service
         self.llm_service = llm_service
-        self.config = config or get_failure_summary_config()
+        # get_failure_summary_config() is async; callers must pass config explicitly.
+        # Use sync default if config is not provided.
+        self.config = config or FailureSummaryConfig()
         self.context_strategy = context_strategy
         self._generator: Optional[FailureSummaryGenerator] = None
 

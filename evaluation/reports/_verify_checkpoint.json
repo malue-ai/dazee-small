@@ -1,0 +1,279 @@
+{
+  "completed_steps": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10
+  ],
+  "step_results": {
+    "1": {
+      "suites": [
+        {
+          "name": "content_generation.yaml",
+          "id": "xiaodazi_feasibility_content_generation",
+          "tasks": 5
+        },
+        {
+          "name": "desktop_operations.yaml",
+          "id": "xiaodazi_feasibility_desktop_operations",
+          "tasks": 5
+        },
+        {
+          "name": "error_recovery.yaml",
+          "id": "xiaodazi_feasibility_error_recovery",
+          "tasks": 3
+        },
+        {
+          "name": "file_processing.yaml",
+          "id": "xiaodazi_feasibility_file_processing",
+          "tasks": 5
+        },
+        {
+          "name": "memory_context.yaml",
+          "id": "xiaodazi_feasibility_memory_context",
+          "tasks": 4
+        },
+        {
+          "name": "safety_confirmation.yaml",
+          "id": "xiaodazi_feasibility_safety_confirmation",
+          "tasks": 3
+        },
+        {
+          "name": "search_retrieval.yaml",
+          "id": "xiaodazi_feasibility_search_retrieval",
+          "tasks": 3
+        },
+        {
+          "name": "path_optimality.yaml",
+          "id": "xiaodazi_efficiency_path_optimality",
+          "tasks": 4
+        },
+        {
+          "name": "planning_depth.yaml",
+          "id": "xiaodazi_efficiency_planning_depth",
+          "tasks": 3
+        },
+        {
+          "name": "skill_selection.yaml",
+          "id": "xiaodazi_efficiency_skill_selection",
+          "tasks": 5
+        },
+        {
+          "name": "token_efficiency.yaml",
+          "id": "xiaodazi_efficiency_token_efficiency",
+          "tasks": 4
+        }
+      ],
+      "total_tasks": 44
+    },
+    "2": {
+      "report_ids": [
+        "report_20260207_163240",
+        "report_20260207_163240",
+        "report_20260207_163240",
+        "report_20260207_163240",
+        "report_20260207_163240",
+        "report_20260207_163240",
+        "report_20260207_163240",
+        "report_20260207_163240",
+        "report_20260207_163240",
+        "report_20260207_163240",
+        "report_20260207_163240"
+      ],
+      "summaries": [
+        {
+          "report_id": "report_20260207_163240",
+          "suite_id": "xiaodazi_feasibility_content_generation",
+          "suite_name": "内容生成能力（F3）",
+          "total": 5,
+          "passed": 0,
+          "failed": 5,
+          "rate": "0%"
+        },
+        {
+          "report_id": "report_20260207_163240",
+          "suite_id": "xiaodazi_feasibility_desktop_operations",
+          "suite_name": "桌面操作能力（F1）",
+          "total": 5,
+          "passed": 3,
+          "failed": 2,
+          "rate": "60%"
+        },
+        {
+          "report_id": "report_20260207_163240",
+          "suite_id": "xiaodazi_feasibility_error_recovery",
+          "suite_name": "错误恢复能力（F6）",
+          "total": 3,
+          "passed": 3,
+          "failed": 0,
+          "rate": "100%"
+        },
+        {
+          "report_id": "report_20260207_163240",
+          "suite_id": "xiaodazi_feasibility_file_processing",
+          "suite_name": "文件处理能力（F2）",
+          "total": 5,
+          "passed": 1,
+          "failed": 4,
+          "rate": "20%"
+        },
+        {
+          "report_id": "report_20260207_163240",
+          "suite_id": "xiaodazi_feasibility_memory_context",
+          "suite_name": "记忆与上下文能力（F5）",
+          "total": 4,
+          "passed": 1,
+          "failed": 3,
+          "rate": "25%"
+        },
+        {
+          "report_id": "report_20260207_163240",
+          "suite_id": "xiaodazi_feasibility_safety_confirmation",
+          "suite_name": "安全与确认机制（F7）",
+          "total": 3,
+          "passed": 1,
+          "failed": 2,
+          "rate": "33%"
+        },
+        {
+          "report_id": "report_20260207_163240",
+          "suite_id": "xiaodazi_feasibility_search_retrieval",
+          "suite_name": "搜索与信息获取（F4）",
+          "total": 3,
+          "passed": 0,
+          "failed": 3,
+          "rate": "0%"
+        },
+        {
+          "report_id": "report_20260207_163240",
+          "suite_id": "xiaodazi_efficiency_path_optimality",
+          "suite_name": "步骤路径最优性（E2）",
+          "total": 4,
+          "passed": 3,
+          "failed": 1,
+          "rate": "75%"
+        },
+        {
+          "report_id": "report_20260207_163240",
+          "suite_id": "xiaodazi_efficiency_planning_depth",
+          "suite_name": "规划深度合理性（E5）",
+          "total": 3,
+          "passed": 2,
+          "failed": 1,
+          "rate": "67%"
+        },
+        {
+          "report_id": "report_20260207_163240",
+          "suite_id": "xiaodazi_efficiency_skill_selection",
+          "suite_name": "Skill 选择准确性（E1）",
+          "total": 5,
+          "passed": 0,
+          "failed": 5,
+          "rate": "0%"
+        },
+        {
+          "report_id": "report_20260207_163240",
+          "suite_id": "xiaodazi_efficiency_token_efficiency",
+          "suite_name": "Token 消耗效率（E3）",
+          "total": 4,
+          "passed": 1,
+          "failed": 3,
+          "rate": "25%"
+        }
+      ]
+    },
+    "3": {
+      "step_count_optimal": true,
+      "step_count_acceptable": true,
+      "step_count_exceeds": true,
+      "tool_calls": true,
+      "token_limit": true,
+      "no_tool_errors": true,
+      "response_contains": true,
+      "execution_time": true
+    },
+    "4": {
+      "skill_selection": true,
+      "planning_depth": true,
+      "over_engineering": true,
+      "response_quality": true,
+      "safety_compliance": true
+    },
+    "5": {
+      "feasibility": {
+        "total": 28,
+        "passed": 9,
+        "score": 0.32142857142857145
+      },
+      "efficiency": {
+        "total": 16,
+        "passed": 6,
+        "score": 0.375
+      },
+      "overall": 0.34285714285714286,
+      "gate": false
+    },
+    "6": {
+      "count": 3,
+      "classified": [
+        {
+          "suite_name": "Token 消耗效率（E3）",
+          "task_id": "E3-02_search_summarize_tokens",
+          "task_description": "搜索+总结 - Token 应 <= 15K",
+          "category": "capability_gap",
+          "category_description": "能力缺失 — 需要新增 Skill/Tool",
+          "failing_graders": [
+            "grade_response_quality"
+          ],
+          "pass_rate": 0.0
+        },
+        {
+          "suite_name": "Token 消耗效率（E3）",
+          "task_id": "E3-03_file_processing_tokens",
+          "task_description": "文件处理 - Token 应 <= 20K",
+          "category": "capability_gap",
+          "category_description": "能力缺失 — 需要新增 Skill/Tool",
+          "failing_graders": [
+            "grade_response_quality"
+          ],
+          "pass_rate": 0.0
+        },
+        {
+          "suite_name": "Token 消耗效率（E3）",
+          "task_id": "E3-04_content_creation_tokens",
+          "task_description": "内容创作 - Token 应 <= 25K",
+          "category": "capability_gap",
+          "category_description": "能力缺失 — 需要新增 Skill/Tool",
+          "failing_graders": [
+            "grade_response_quality"
+          ],
+          "pass_rate": 0.0
+        }
+      ]
+    },
+    "7": {
+      "regression_yaml": "/Users/liuyi/xiaodazi/zenflux_agent/evaluation/suites/xiaodazi/regression_auto_20260207.yaml",
+      "task_count": 3
+    },
+    "8": {
+      "triage_path": "/Users/liuyi/xiaodazi/zenflux_agent/evaluation/reports/triage_verify_20260207_163319.md",
+      "length": 470
+    },
+    "9": {
+      "report_path": "/Users/liuyi/xiaodazi/zenflux_agent/evaluation/reports/xiaodazi_eval_verify_20260207_163319.md",
+      "length": 972
+    },
+    "10": {
+      "dispatch_step_count": true,
+      "dispatch_skill_selection": true,
+      "dispatch_planning_depth": true
+    }
+  },
+  "updated_at": "2026-02-07T16:33:19.068115"
+}

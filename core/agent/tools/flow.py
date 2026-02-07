@@ -28,6 +28,23 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def _tool_result_content(result: Any) -> Any:
+    """
+    Normalize tool result for tool_result block content.
+    If result is a list of content blocks (each dict with "type"), pass through for multimodal.
+    Otherwise stringify (str as-is, other serialized to JSON).
+    """
+    if isinstance(result, str):
+        return result
+    if (
+        isinstance(result, list)
+        and result
+        and all(isinstance(b, dict) and "type" in b for b in result)
+    ):
+        return result
+    return stable_json_dumps(result)
+
+
 @dataclass
 class ToolExecutionContext:
     """
@@ -352,7 +369,7 @@ class ToolExecutionFlow:
             if tool_id in normal_results:
                 result_info = normal_results[tool_id]
                 result = result_info.result
-                result_content = result if isinstance(result, str) else stable_json_dumps(result)
+                result_content = _tool_result_content(result)
 
                 yield await content_handler.emit_block(
                     session_id=context.session_id,
@@ -394,7 +411,7 @@ class ToolExecutionFlow:
                 # 串行工具
                 result_info = await self.execute_single(tool_call, context, inject_context_fn)
                 result = result_info.result
-                result_content = result if isinstance(result, str) else stable_json_dumps(result)
+                result_content = _tool_result_content(result)
 
                 yield await content_handler.emit_block(
                     session_id=context.session_id,

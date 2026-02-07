@@ -304,7 +304,8 @@ class EvaluationHarness:
             
             if verbose:
                 status = "✓" if trial.passed else "✗"
-                print(f"     Trial {i+1}: {status} (score: {trial.average_score:.2f if trial.average_score else 'N/A'})")
+                score_str = f"{trial.average_score:.2f}" if trial.average_score else "N/A"
+                print(f"     Trial {i+1}: {status} (score: {score_str})")
         
         return TaskResult(
             task_id=task.id,
@@ -613,7 +614,17 @@ class EvaluationHarness:
                 return self.code_graders.check_execution_time(
                     transcript, max_duration
                 )
-        
+
+        elif check.startswith("check_step_count"):
+            import re
+            match = re.search(r"check_step_count\((\d+),\s*(\d+)\)", check)
+            if match:
+                optimal = int(match.group(1))
+                max_accept = int(match.group(2))
+                return self.code_graders.check_step_count(
+                    transcript, optimal, max_accept
+                )
+
         # 默认：未知的检查表达式
         return GradeResult(
             grader_type=GraderType.CODE,
@@ -690,7 +701,24 @@ class EvaluationHarness:
                 agent_response=transcript.get_final_response() or "",
                 reference_answer=reference_answer,
             )
-        
+
+        elif rubric == "grade_skill_selection":
+            meta = task.metadata or {}
+            result = await self.model_graders.grade_skill_selection(
+                user_query=task.input.user_query,
+                transcript=transcript,
+                optimal_tools=meta.get("optimal_tools"),
+                suboptimal_tools=meta.get("suboptimal_tools"),
+            )
+
+        elif rubric == "grade_planning_depth":
+            meta = task.metadata or {}
+            result = await self.model_graders.grade_planning_depth(
+                user_query=task.input.user_query,
+                transcript=transcript,
+                expected_planning=meta.get("expected_planning"),
+            )
+
         else:
             # 自定义Rubric
             result = await self.model_graders.grade_with_custom_rubric(
@@ -736,7 +764,7 @@ class EvaluationHarness:
             f"| 失败任务 | {report.failed_tasks} |",
             f"| 通过率 | {report.pass_rate:.1%} |",
             f"| 不稳定任务 | {report.unstable_tasks} |",
-            f"| 平均分 | {report.average_score:.2f if report.average_score else 'N/A'} |",
+            f"| 平均分 | {f'{report.average_score:.2f}' if report.average_score else 'N/A'} |",
             f"| 总Token | {report.total_token_usage.total_tokens} |",
             f"| 总耗时 | {report.total_duration_seconds:.1f}s |",
             f"",
@@ -769,8 +797,8 @@ class EvaluationHarness:
             lines.extend([
                 f"",
                 f"**通过率**: {tr.pass_rate:.1%}",
-                f"**平均分**: {tr.average_score:.2f if tr.average_score else 'N/A'}",
-                f"**稳定性**: {'稳定' if tr.is_stable else '不稳定（标准差: ' + f'{tr.score_std:.2f}' + '）'}",
+                f"**平均分**: {f'{tr.average_score:.2f}' if tr.average_score else 'N/A'}",
+                f"**稳定性**: {'稳定' if tr.is_stable else '不稳定（标准差: ' + (f'{tr.score_std:.2f}' if tr.score_std is not None else 'N/A') + '）'}",
                 f"",
                 f"---",
                 f"",

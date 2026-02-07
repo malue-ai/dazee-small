@@ -136,24 +136,41 @@ async def _preload_agent_registry() -> int:
     """
     预加载 Agent 配置到 AgentRegistry
     
-    注意：只加载配置，不创建原型实例（由 AgentPool 负责）
+    单实例模式（强制）：
+    - 环境变量 AGENT_INSTANCE 指定实例名称
+    - 每次只加载一个实例
     
     Returns:
-        加载的 Agent 配置数量
+        加载的 Agent 配置数量（0 或 1）
     """
     print("📋 加载 Agent 配置...")
     from services.agent_registry import get_agent_registry
     
     agent_registry = get_agent_registry()
+    
+    # 从环境变量获取指定实例
+    instance_name = os.getenv("AGENT_INSTANCE")
+    
+    if not instance_name:
+        print("❌ 未指定 AGENT_INSTANCE 环境变量！")
+        print("   请在 .env 中添加: AGENT_INSTANCE=xiaodazi")
+        print("   或启动时指定: AGENT_INSTANCE=xiaodazi uvicorn main:app --reload")
+        return 0
+    
     try:
-        loaded_count = await agent_registry.preload_all()
-        if loaded_count > 0:
-            print(f"✅ 已加载 {loaded_count} 个 Agent 配置")
+        print(f"🎯 单实例模式: 加载 '{instance_name}'...")
+        success = await agent_registry.preload_instance(instance_name)
+        if success:
+            print(f"✅ 已加载 1 个 Agent 配置")
             for agent in agent_registry.list_agents():
                 print(f"   • {agent['agent_id']}: {agent['description'] or '(无描述)'}")
+            return 1
         else:
-            print("○ 没有发现 Agent 配置（instances/ 目录为空）")
-        return loaded_count
+            print(f"⚠️ Agent 配置加载失败: {instance_name}")
+            return 0
+    except FileNotFoundError as e:
+        print(f"❌ 实例不存在: {e}")
+        return 0
     except Exception as e:
         print(f"⚠️ Agent 配置加载失败: {e}")
         return 0

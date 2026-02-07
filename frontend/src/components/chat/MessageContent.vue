@@ -46,7 +46,16 @@
             <span class="block-title">{{ block.is_error ? '执行失败' : '执行结果' }}</span>
           </div>
           <div class="block-content tool-output">
-            <pre>{{ formatToolResult(block.content) }}</pre>
+            <!-- 多模态 tool_result：content 为 content blocks 数组（如 observe_screen 返回 text + image）-->
+            <template v-if="Array.isArray(block.content)">
+              <template v-for="(sub, i) in block.content" :key="i">
+                <div v-if="sub?.type === 'text'" class="text-block mb-2"><MarkdownRenderer :content="sub.text || ''" :final="true" /></div>
+                <div v-else-if="sub?.type === 'image'" class="image-block mt-2">
+                  <img :src="getImageSrc(sub)" alt="截图" class="max-w-full rounded-lg border border-border" />
+                </div>
+              </template>
+            </template>
+            <pre v-else>{{ formatToolResult(block.content) }}</pre>
           </div>
         </div>
       </template>

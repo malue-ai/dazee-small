@@ -1488,8 +1488,8 @@ class ChatService:
             # 在资源清理之前执行，确保上下文仍然可用
             if self.session_service and agent:
                 try:
-                    # 获取配置（轻量级）
-                    failure_config = get_failure_summary_config()
+                    # 获取配置（轻量级，async）
+                    failure_config = await get_failure_summary_config()
 
                     if failure_config.enabled:
                         # 映射 stop_reason

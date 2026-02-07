@@ -1,0 +1,78 @@
+id: regression_auto
+name: 自动回归测试 (2026-02-07)
+description: 从测评失败中自动生成的回归套件，共 3 个用例
+category: regression
+default_trials: 2
+metadata:
+  generated_at: '2026-02-07T16:33:19.062373'
+  source: loop_automation
+tasks:
+- id: REG_E3-02_search_summarize_tokens
+  description: '[回归] 搜索+总结 - Token 应 <= 15K'
+  category: regression_capability_gap
+  input:
+    user_query: 搜索+总结 - Token 应 <= 15K
+    conversation_history: []
+    context:
+      original_suite: Token 消耗效率（E3）
+  graders:
+  - type: model
+    rubric: grade_response_quality
+    min_score: 3
+  trials: 2
+  timeout_seconds: 60
+  tags:
+  - regression
+  - capability_gap
+  metadata:
+    original_task_id: E3-02_search_summarize_tokens
+    original_suite: Token 消耗效率（E3）
+    failure_category: capability_gap
+    failing_graders:
+    - grade_response_quality
+- id: REG_E3-03_file_processing_tokens
+  description: '[回归] 文件处理 - Token 应 <= 20K'
+  category: regression_capability_gap
+  input:
+    user_query: 文件处理 - Token 应 <= 20K
+    conversation_history: []
+    context:
+      original_suite: Token 消耗效率（E3）
+  graders:
+  - type: model
+    rubric: grade_response_quality
+    min_score: 3
+  trials: 2
+  timeout_seconds: 60
+  tags:
+  - regression
+  - capability_gap
+  metadata:
+    original_task_id: E3-03_file_processing_tokens
+    original_suite: Token 消耗效率（E3）
+    failure_category: capability_gap
+    failing_graders:
+    - grade_response_quality
+- id: REG_E3-04_content_creation_tokens
+  description: '[回归] 内容创作 - Token 应 <= 25K'
+  category: regression_capability_gap
+  input:
+    user_query: 内容创作 - Token 应 <= 25K
+    conversation_history: []
+    context:
+      original_suite: Token 消耗效率（E3）
+  graders:
+  - type: model
+    rubric: grade_response_quality
+    min_score: 3
+  trials: 2
+  timeout_seconds: 60
+  tags:
+  - regression
+  - capability_gap
+  metadata:
+    original_task_id: E3-04_content_creation_tokens
+    original_suite: Token 消耗效率（E3）
+    failure_category: capability_gap
+    failing_graders:
+    - grade_response_quality

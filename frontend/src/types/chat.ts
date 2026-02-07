@@ -133,11 +133,12 @@ export interface ToolUseContentBlock extends BaseContentBlock {
 
 /**
  * 工具结果内容块
+ * content 支持字符串或多模态内容块数组（如 observe_screen 返回 [text, image]）
  */
 export interface ToolResultContentBlock extends BaseContentBlock {
   type: 'tool_result'
   tool_use_id: string
-  content: string | object
+  content: string | ContentBlock[]
   is_error?: boolean
 }
 

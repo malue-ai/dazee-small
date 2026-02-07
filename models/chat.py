@@ -83,16 +83,19 @@ class ToolUseBlock(BaseModel):
 class ToolResultBlock(BaseModel):
     """
     工具结果块
-    
+
     统一格式，不区分客户端工具结果和服务端工具结果：
     - 客户端工具结果：我们执行后返回
     - 服务端工具结果（如 web_search_tool_result）：LLM Provider 返回
-    
-    前端只看到 tool_result
+
+    前端只看到 tool_result。
+    content 支持字符串或多模态内容块列表（如截图工具返回 text + image）。
     """
     type: Literal["tool_result"] = "tool_result"
     tool_use_id: str = Field(..., description="对应的工具调用ID")
-    content: str = Field(..., description="工具执行结果（JSON 字符串或纯文本）")
+    content: Union[str, List[Dict[str, Any]]] = Field(
+        ..., description="工具执行结果（字符串或 content blocks 列表，如 [text, image]）"
+    )
     is_error: bool = Field(False, description="是否执行出错")
 
 

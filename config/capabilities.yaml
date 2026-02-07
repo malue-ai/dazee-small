@@ -1572,6 +1572,56 @@ capabilities:
     required:
     - action
 
+# ==================== 屏幕观察工具（多模态）====================
+- name: observe_screen
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  invocation_hint: DIRECT
+  level: 1
+  cache_stable: false
+  implementation:
+    module: tools.observe_screen
+    class: ObserveScreenTool
+  capabilities:
+  - screen_observation
+  - ui_understanding
+  priority: 85
+  cost:
+    time: fast
+    money: free
+  constraints:
+    requires_api: false
+  metadata:
+    description: |
+      截取当前屏幕或指定应用窗口的截图，并将截图内容返回给模型，使模型能直接“看到”屏幕内容。
+      适用场景：查看桌面/应用界面、在群聊或窗口中查找消息或附件、根据用户描述定位屏幕信息。
+    preferred_for:
+    - 查看屏幕内容
+    - 在飞书/群聊中找消息或附件
+    - 定位界面上的信息
+  input_schema:
+    type: object
+    properties:
+      app:
+        type: string
+        description: 应用名称（如 Lark、Safari），用于定位窗口
+      window_title:
+        type: string
+        description: 窗口标题关键词
+      mode:
+        type: string
+        enum:
+        - screen
+        - window
+        - frontmost
+        default: screen
+        description: 截屏范围（screen=全屏，window=指定窗口，frontmost=当前前台窗口）
+      description:
+        type: string
+        description: 简短说明本次截屏目的，供模型理解上下文
+    required: []
+
 # ==================== 定时任务工具 ====================
 - name: scheduled_task
   type: TOOL

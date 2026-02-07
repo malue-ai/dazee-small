@@ -252,7 +252,7 @@ class ModelBasedGraders:
 {"..." if len(transcript.tool_calls) > 10 else ""}
 
 最终响应：
-{transcript.get_final_response()[:1000]}  # 限制长度
+{(transcript.get_final_response() or "")[:1000]}
 
 Token消耗：
 - 输入：{transcript.token_usage.input_tokens}
@@ -798,9 +798,171 @@ Token消耗：
         )
     
     # ===================
+    # Skill 选择评估（小搭子效率性 E1）
+    # ===================
+
+    async def grade_skill_selection(
+        self,
+        user_query: str,
+        transcript: Transcript,
+        optimal_tools: Optional[List[str]] = None,
+        suboptimal_tools: Optional[List[str]] = None,
+    ) -> GradeResult:
+        """
+        Evaluate whether the agent chose the optimal tool(s) for the task.
+
+        Args:
+            user_query: User request.
+            transcript: Execution transcript (tool_calls, response).
+            optimal_tools: Preferred tool names.
+            suboptimal_tools: Tools that are acceptable but not optimal.
+
+        Returns:
+            GradeResult.
+        """
+        system_prompt = """你是一个专业的 AI 评估员，负责评估智能体是否选择了最合适的工具/Skill 完成任务。
+
+评估要点：
+1. 任务是否用最直接、最专业的工具完成（最优）
+2. 是否用了通用兜底方案而非专用工具（次优）
+3. 是否完全选错工具或未使用必要工具（错误）
+
+评分标准（1-5 分）：
+- 5 分：选择了最优工具，路径简洁高效
+- 4 分：选择了合适工具，略有次优但可接受
+- 3 分：工具选择一般，有更优选择
+- 2 分：工具选择次优或过度工程
+- 1 分：工具选择错误或严重过度工程
+
+请以 JSON 格式返回：
+{
+    "score": <1-5 的整数>,
+    "confidence": <0-1 的浮点数>,
+    "tools_used": "<实际使用的主要工具>",
+    "optimal_or_not": "<最优/次优/错误>",
+    "explanation": "<评分理由>"
+}"""
+
+        tool_summary = ", ".join(transcript.get_all_tool_names()) or "无工具调用"
+        opt = (optimal_tools or [])
+        subopt = (suboptimal_tools or [])
+        user_prompt = f"""用户请求：
+{user_query}
+
+实际调用的工具序列：
+{tool_summary}
+
+预期最优工具（参考）：{opt}
+次优但可接受（参考）：{subopt}
+
+请评估本次工具/Skill 选择是否合理。"""
+
+        result = await self._call_judge(
+            system_prompt, user_prompt, include_confidence=True
+        )
+        score = result.get("score", 3)
+        confidence = result.get("confidence", 0.7)
+        passed = score >= 4
+
+        return GradeResult(
+            grader_type=GraderType.MODEL,
+            grader_name="grade_skill_selection",
+            passed=passed,
+            score=score / 5.0,
+            confidence=confidence,
+            needs_human_review=confidence < 0.7,
+            explanation=result.get("explanation"),
+            details={
+                "raw_score": score,
+                "tools_used": result.get("tools_used"),
+                "optimal_or_not": result.get("optimal_or_not"),
+            },
+        )
+
+    # ===================
+    # 规划深度评估（小搭子效率性 E5）
+    # ===================
+
+    async def grade_planning_depth(
+        self,
+        user_query: str,
+        transcript: Transcript,
+        expected_planning: Optional[str] = None,
+    ) -> GradeResult:
+        """
+        Evaluate whether planning depth matches task complexity.
+
+        expected_planning: "none" | "minimal" | "full"
+
+        Args:
+            user_query: User request.
+            transcript: Execution transcript.
+            expected_planning: Expected planning level for this task.
+
+        Returns:
+            GradeResult.
+        """
+        system_prompt = """你是一个专业的 AI 评估员，负责评估智能体的规划深度是否与任务复杂度匹配。
+
+规划深度要求：
+- none：简单任务（如简单问答、计算）不应启动多步规划或 plan 工具，直接回答即可
+- minimal：中等任务应有 2-3 步的简洁规划，不必过细
+- full：复杂多步骤任务应有完整规划（显式步骤或 plan 工具）
+
+过度规划表现：简单问题却启动 plan、拆成很多小步、不必要的验证链。
+规划不足表现：复杂任务直接执行、缺少步骤拆分、易出错或遗漏。
+
+评分标准（1-5 分）：
+- 5 分：规划深度与任务完全匹配
+- 4 分：基本匹配，轻微偏差可接受
+- 3 分：有明显过深或过浅，但能完成任务
+- 2 分：规划深度明显不当
+- 1 分：严重过度规划或缺少必要规划
+
+请以 JSON 格式返回：
+{
+    "score": <1-5 的整数>,
+    "confidence": <0-1 的浮点数>,
+    "observed_planning": "<none/minimal/full>",
+    "explanation": "<评分理由>"
+}"""
+
+        tool_summary = ", ".join(transcript.get_all_tool_names()) or "无"
+        user_prompt = f"""用户请求：
+{user_query}
+
+实际调用的工具序列：
+{tool_summary}
+
+本任务预期规划深度（参考）：{expected_planning or '根据任务判断'}
+
+请评估规划深度是否合理。"""
+
+        result = await self._call_judge(
+            system_prompt, user_prompt, include_confidence=True
+        )
+        score = result.get("score", 3)
+        confidence = result.get("confidence", 0.7)
+        passed = score >= 4
+
+        return GradeResult(
+            grader_type=GraderType.MODEL,
+            grader_name="grade_planning_depth",
+            passed=passed,
+            score=score / 5.0,
+            confidence=confidence,
+            needs_human_review=confidence < 0.7,
+            explanation=result.get("explanation"),
+            details={
+                "raw_score": score,
+                "observed_planning": result.get("observed_planning"),
+            },
+        )
+
+    # ===================
     # 自定义Rubric评估
     # ===================
-    
+
     async def grade_with_custom_rubric(
         self,
         content: str,

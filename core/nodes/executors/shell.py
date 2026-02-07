@@ -164,8 +164,11 @@ class ShellExecutor(BaseExecutor):
 
         # 白名单检查
         if not self._check_allowlist(command):
+            hint = f"可用命令: {', '.join(sorted(self.safe_bins))}" if self.safe_bins else ""
             return ShellResult(
-                success=False, stderr=f"命令不在白名单中: {command[0]}", exit_code=-1
+                success=False,
+                stderr=f"命令不在白名单中: {command[0]}。{hint}",
+                exit_code=-1,
             )
 
         # 准备参数

@@ -410,15 +410,23 @@ class ContentHandler:
             }
 
         elif block_type == "tool_result":
-            # tool_result 的 content 可能是字符串或对象
+            # tool_result 的 content 可能是字符串、多模态 content blocks 列表或对象
             result_content = content.get("content", "")
-            if not isinstance(result_content, str):
-                result_content = json.dumps(result_content, ensure_ascii=False)
+            if not is_stream_start:
+                if isinstance(result_content, list):
+                    # Multimodal content blocks (e.g. text + image), pass through
+                    pass
+                elif isinstance(result_content, str):
+                    pass
+                else:
+                    result_content = json.dumps(result_content, ensure_ascii=False)
+            else:
+                result_content = ""
 
             return {
                 "type": "tool_result",
                 "tool_use_id": content.get("tool_use_id", ""),
-                "content": "" if is_stream_start else result_content,
+                "content": result_content,
                 "is_error": content.get("is_error", False),
             }
 

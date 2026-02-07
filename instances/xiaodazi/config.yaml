@@ -52,6 +52,18 @@ project:
   enabled: false
   default_template: "default"
 
+# ==================== MCP 工具 ====================
+
+mcp_tools:
+  - name: pageindex
+    server_url: "https://chat.pageindex.ai/mcp"
+    server_name: "pageindex"
+    auth_type: "bearer"
+    auth_env: "PAGEINDEX_API_KEY"
+    capability: "document_analysis"
+    description: "长文档深度分析与问答（PDF 年报/合同/论文/手册），基于树索引的推理检索"
+    enabled: true
+
 # ==================== Skills 配置 ====================
 #
 # 按 OS × 复杂度 分类
@@ -125,6 +137,9 @@ skills:
       - { name: github,              backend_type: local, skill_source: library, bins: ["gh"], description: "GitHub 仓库与 Issue 管理" }
 
     cloud_api:
+      # --- 研究/分析 ---
+      - { name: deep-doc-reader,     backend_type: mcp,   skill_source: instance, description: "长文档深度阅读与问答（PageIndex）" }
+
       - { name: notion,              backend_type: api,   skill_source: library, description: "Notion 笔记与数据库" }
       - { name: trello,              backend_type: local, skill_source: library, description: "Trello 看板任务管理" }
       - { name: nano-banana-pro,     backend_type: local, skill_source: library, description: "Gemini 图像生成" }

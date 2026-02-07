@@ -96,6 +96,10 @@ nodes:
       - "/bin/bash"
       - "/bin/sh"
       - "/bin/zsh"
+      - "/bin/sleep"
+      # UI 自动化（Peekaboo）
+      - "/opt/homebrew/bin/peekaboo"
+      - "/usr/local/bin/peekaboo"
     
     # 安全 bins（无需完整路径）
     safe_bins:
@@ -132,6 +136,9 @@ nodes:
       - "bash"
       - "sh"
       - "zsh"
+      - "sleep"
+      # UI 自动化
+      - "peekaboo"
   
   # 远程节点（预留，暂不启用）
   remote:
@@ -242,6 +249,7 @@ enabled_skills:
 enabled_capabilities:
   # --- Nodes 工具（核心）---
   nodes: 1                # 节点操作工具
+  observe_screen: 1       # 屏幕观察（截屏+多模态返回，供 LLM 理解界面）
   local_automation: 1     # 本地自动化能力
   
   # --- 信息获取 ---

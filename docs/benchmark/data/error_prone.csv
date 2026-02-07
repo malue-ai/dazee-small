@@ -1,0 +1,11 @@
+product,region,sales,quantity,note
+A,North,12000,100,ok
+B,South,N/A,80,pending
+C,East,待确认,120,
+D,West,9500,90,ok
+E,North,,70,N/A
+F,South,11000,,ok
+G,East,unknown,100,
+H,West,8800,85,ok
+I,North,0,0,zero
+J,South,15000,150,ok
