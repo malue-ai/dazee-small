@@ -493,73 +493,12 @@ class ToolRegistration(BaseModel):
     }
 
 
-class MCPServerRegistration(BaseModel):
-    """
-    MCP 服务器注册请求
-    
-    用于连接并注册 MCP 服务器上的所有工具
-    """
-    # 服务器配置
-    server_url: str = Field(..., description="MCP 服务器 URL")
-    server_name: str = Field(..., description="服务器名称（用于工具命名空间）")
-    
-    # 认证
-    auth_type: Literal["none", "api_key", "bearer", "oauth2"] = Field(
-        "none", 
-        description="认证类型"
-    )
-    auth_config: Optional[Dict[str, Any]] = Field(None, description="认证配置")
-    
-    # 工具过滤
-    tool_filter: Optional[List[str]] = Field(
-        None, 
-        description="只注册指定的工具（None=全部）"
-    )
-    tool_prefix: Optional[str] = Field(
-        None, 
-        description="工具名前缀（默认使用 server_name:）"
-    )
-    
-    # 选项
-    auto_reconnect: bool = Field(True, description="断线自动重连")
-    health_check_interval: int = Field(60, description="健康检查间隔（秒）")
-    
-    model_config = {
-        "json_schema_extra": {
-            "examples": [
-                {
-                    "server_url": "http://localhost:8080",
-                    "server_name": "office365",
-                    "auth_type": "bearer",
-                    "auth_config": {
-                        "token": "${MCP_OFFICE365_TOKEN}"
-                    },
-                    "tool_filter": ["create_document", "send_email"],
-                    "auto_reconnect": True
-                }
-            ]
-        }
-    }
-
-
 class ToolRegistrationResponse(BaseModel):
     """工具注册响应"""
     success: bool = Field(..., description="是否成功")
     tool_name: str = Field(..., description="工具名称")
     message: str = Field(..., description="消息")
     tool_definition: Optional[ToolDefinition] = Field(None, description="注册的工具定义")
-
-
-class MCPServerRegistrationResponse(BaseModel):
-    """MCP 服务器注册响应"""
-    success: bool = Field(..., description="是否成功")
-    server_name: str = Field(..., description="服务器名称")
-    message: str = Field(..., description="消息")
-    registered_tools: List[str] = Field(default_factory=list, description="注册的工具列表")
-    failed_tools: List[Dict[str, str]] = Field(
-        default_factory=list, 
-        description="注册失败的工具及原因"
-    )
 
 
 # ============================================================

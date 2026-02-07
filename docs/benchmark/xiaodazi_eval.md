@@ -39,7 +39,7 @@
 |----|------|----------|----------|---------|
 | F2-01 | 读取 Excel | 分析这个 Excel 表格的数据（+附件） | code_execution 读取并分析 | check_tool_calls, check_no_tool_errors, grade_response_quality |
 | F2-02 | 创建 Word | 帮我写一份工作总结，保存为 Word | code_execution (python-docx) | check_tool_calls, grade_response_quality |
-| F2-03 | PDF 解析 | 帮我提取这个 PDF 的文字内容 | document_partition_tool | check_tool_calls, grade_response_quality |
+| F2-03 | PDF 解析 | 帮我提取这个 PDF 的文字内容 | code_execution | check_tool_calls, grade_response_quality |
 | F2-04 | 文件转换 | 把这个 CSV 转成 Excel | code_execution (pandas + openpyxl) | check_tool_calls, check_no_tool_errors |
 | F2-05 | 批量重命名 | 把这些文件按日期重命名 | nodes shell 批量操作 | check_tool_calls, grade_response_quality |
 
@@ -48,17 +48,16 @@
 | ID | 用例 | 用户输入 | 预期行为 |
 |----|------|----------|----------|
 | F3-01 | 文章写作 | 写一篇关于远程办公的文章，2000 字 | 直接生成（无需工具） |
-| F3-02 | PPT 生成 | 做一个产品介绍的 PPT | ppt_generator |
-| F3-03 | 图片生成 | 画一张猫咪的图片 | nano_banana_image |
-| F3-04 | 代码生成 | 写一个 Python 函数计算斐波那契数列 | code_execution |
+| F3-02 | PPT 生成 | 做一个产品介绍的 PPT | PPT Skill + api_calling |
+| F3-03 | 代码生成 | 写一个 Python 函数计算斐波那契数列 | code_execution |
 | F3-05 | 论文润色 | 帮我润色这段学术摘要（+附件） | 直接生成 |
 
 ### F4 搜索与信息获取
 
 | ID | 用例 | 用户输入 | 预期行为 |
 |----|------|----------|----------|
-| F4-01 | 通用搜索 | 搜索最近的 AI Agent 新闻 | tavily_search |
-| F4-02 | 学术搜索 | 找关于 LLM Agent 的最新论文 | exa_search |
+| F4-01 | 通用搜索 | 搜索最近的 AI Agent 新闻 | 搜索类 Skill / api_calling |
+| F4-02 | 学术搜索 | 找关于 LLM Agent 的最新论文 | 学术搜索 Skill（arxiv-search / paper-search） |
 | F4-03 | 搜索+总结 | 搜索并总结 Python 3.13 的新特性 | search → 总结 |
 
 ### F5 记忆与上下文
@@ -95,8 +94,8 @@
 | ID | 用户输入 | 最优 Skill | 次优/错误 | 评分 |
 |----|----------|------------|-----------|------|
 | E1-01 | 打开访达 | peekaboo / macos-open | 通用 shell open | 最优=1.0, 次优=0.6, 错误=0 |
-| E1-02 | 做一个 PPT | ppt_generator | code_execution 手写 pptx | 最优=1.0, 次优=0.5 |
-| E1-03 | 搜索 AI 论文 | exa_search | tavily_search | 最优=1.0, 次优=0.7 |
+| E1-02 | 做一个 PPT | PPT Skill + api_calling | code_execution 手写 pptx | 最优=1.0, 次优=0.5 |
+| E1-03 | 搜索 AI 论文 | 学术搜索 Skill | 通用搜索 | 最优=1.0, 次优=0.7 |
 | E1-04 | 今天天气 | 直接回答（simple） | 启动 plan + search | 最优=1.0, 过度=0.3 |
 | E1-05 | 分析 Excel 数据 | code_execution (pandas) | 纯文本猜测 | 最优=1.0, 错误=0 |
 

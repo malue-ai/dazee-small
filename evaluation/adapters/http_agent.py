@@ -69,12 +69,21 @@ class HttpAgentAdapter:
         if files:
             payload["files"] = files
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=120.0) as client:
             resp = await client.post(
                 f"{self.base_url}/api/v1/chat",
                 json=payload,
             )
-            resp.raise_for_status()
+            if resp.status_code >= 400:
+                try:
+                    err_body = resp.text
+                    if len(err_body) > 500:
+                        err_body = err_body[:500] + "..."
+                except Exception:
+                    err_body = ""
+                raise RuntimeError(
+                    f"POST /api/v1/chat returned {resp.status_code}: {err_body}"
+                ) from None
             body = resp.json()
         data = body.get("data") or body
         task_id = data.get("task_id")

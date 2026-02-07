@@ -26,7 +26,7 @@ core/tool/
 | 术语 | 说明 | 示例 |
 |-----|------|-----|
 | **Capability** | 抽象能力描述（包含能力标签、优先级、约束等） | `ppt_generation` |
-| **Tool** | 具体的可调用实现（`type=TOOL`） | `api_calling`, `exa_search` |
+| **Tool** | 具体的可调用实现（`type=TOOL`） | `api_calling`, `search_skill` |
 | **Skill** | Claude Skills 或本地工作流（`type=SKILL`） | `pptx`, `xlsx` |
 
 ### 工具分层

@@ -33,8 +33,8 @@ class ToolSystemRoleProvider(BaseInjector):
 
     You have access to these tools:
 
-    <tool name="tavily_search">
-    搜索互联网获取最新信息
+    <tool name="search_skill">
+    通过搜索类 Skill 或 api_calling 获取最新信息
     </tool>
 
     <tool name="code_execute">
@@ -109,11 +109,10 @@ class ToolSystemRoleProvider(BaseInjector):
 
         You have access to these tools:
 
-        <tool name="tavily_search">
-        搜索互联网获取最新信息
+        <tool name="search_skill">
+        通过搜索类 Skill 或 api_calling 获取最新信息
         参数：
         - query (string, required): 搜索查询
-        - max_results (integer, optional): 最大结果数，默认 5
         </tool>
         ```
         """

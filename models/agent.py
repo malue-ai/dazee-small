@@ -12,7 +12,6 @@ from enum import Enum
 # 从拆分的模块导入
 from .llm import LLMConfig
 from .mcp import MCPToolConfig, MCPToolDetail
-from .skill import SkillStatus
 
 
 # ============================================================
@@ -127,21 +126,6 @@ class AgentCreateRequest(BaseModel):
             ]
         }
     }
-
-
-class AgentUpdateRequest(BaseModel):
-    """更新 Agent 请求（所有字段可选）"""
-    description: Optional[str] = Field(None, description="Agent 描述")
-    prompt: Optional[str] = Field(None, description="Agent 提示词")
-    model: Optional[str] = Field(None, description="使用的模型")
-    max_turns: Optional[int] = Field(None, description="最大对话轮数")
-    plan_manager_enabled: Optional[bool] = Field(None, description="是否启用计划管理器")
-    llm: Optional[LLMConfig] = Field(None, description="LLM 超参数")
-    enabled_capabilities: Optional[Dict[str, bool]] = Field(None, description="启用的工具能力")
-    mcp_tools: Optional[List[MCPToolConfig]] = Field(None, description="MCP 工具配置列表")
-    apis: Optional[List[RESTAPIConfig]] = Field(None, description="REST API 配置列表")
-    memory: Optional[MemoryConfig] = Field(None, description="记忆配置")
-    is_active: Optional[bool] = Field(None, description="是否激活")
 
 
 # ============================================================

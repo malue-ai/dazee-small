@@ -49,8 +49,56 @@ playbook:
 # ==================== 项目管理 ====================
 
 project:
-  enabled: false
-  default_template: "default"
+  enabled: true
+  storage_path: "~/.xiaodazi/projects/"
+  default_template: "custom"
+
+  isolation:
+    context: true
+    knowledge: true
+    playbook: true
+    skills_config: true
+
+  templates:
+    - id: "writing"
+      name: "写稿搭子"
+      icon: "✍️"
+      description: "公众号、视频脚本、文案创作"
+      default_skills: ["summarize", "writing-assistant", "canvas"]
+      memory_focus: "style"
+      ui_template: "content-creation"
+
+    - id: "data"
+      name: "表格搭子"
+      icon: "📊"
+      description: "Excel 处理、数据分析、图表生成"
+      default_skills: ["excel-analyzer", "chart-generator", "nano-pdf"]
+      memory_focus: "format"
+      ui_template: "data-dashboard"
+
+    - id: "research"
+      name: "研究搭子"
+      icon: "📚"
+      description: "论文、文献管理、学术写作"
+      default_skills: ["pdf-reader", "citation-extractor", "academic-writer"]
+      memory_focus: "domain"
+      ui_template: "research-workspace"
+
+    - id: "office"
+      name: "办公搭子"
+      icon: "💼"
+      description: "PPT、邮件、会议纪要"
+      default_skills: ["ppt-generator", "email-drafter", "meeting-notes"]
+      memory_focus: "workflow"
+      ui_template: "office-assistant"
+
+    - id: "custom"
+      name: "自定义项目"
+      icon: "⚙️"
+      description: "包含所有可用技能，按需裁剪"
+      default_skills: ["__all__"]   # 特殊标记：创建时自动展开为当前全部可用 Skills
+      memory_focus: "general"
+      ui_template: "default"
 
 # ==================== MCP 工具 ====================
 
@@ -83,10 +131,15 @@ skills:
 
   common:
     builtin:
-      # --- 框架核心 ---
-      - { name: plan-todo,           backend_type: tool, tool_name: plan_todo,  description: "任务规划与进度追踪" }
-      - { name: hitl,                backend_type: tool, tool_name: hitl,       description: "涉及敏感操作时请求用户确认" }
-      - { name: api-calling,         backend_type: tool, tool_name: api_calling, description: "通用 HTTP API 调用能力" }
+      # --- 框架核心（系统级，强制启用，不对用户暴露） ---
+      - { name: plan-todo,           backend_type: tool, tool_name: plan_todo,  system: true, description: "任务规划与进度追踪" }
+      - { name: hitl,                backend_type: tool, tool_name: hitl,       system: true, description: "涉及敏感操作时请求用户确认" }
+      - { name: api-calling,         backend_type: tool, tool_name: api_calling, system: true, description: "通用 HTTP API 调用能力" }
+
+      # --- 基础设施（系统级，强制启用，不对用户暴露） ---
+      - { name: file-manager,        backend_type: local, skill_source: instance, system: true, description: "本地文件管理" }
+      - { name: local-search,        backend_type: local, skill_source: instance, system: true, description: "本地文件搜索（Spotlight + FTS5）" }
+      - { name: app-recommender,     backend_type: local, skill_source: instance, system: true, description: "根据任务推荐最合适的应用" }
 
       # --- 写作 ---
       - { name: writing-assistant,   backend_type: local, skill_source: instance, description: "写作辅助：润色、改写、扩写" }
@@ -94,13 +147,6 @@ skills:
       - { name: writing-analyzer,    backend_type: local, skill_source: instance, description: "写作风格分析" }
       - { name: style-learner,       backend_type: local, skill_source: instance, description: "学习并记忆用户写作风格" }
       - { name: content-reformatter, backend_type: local, skill_source: instance, description: "多平台格式转换（公众号/小红书/知乎等）" }
-
-      # --- 文件与搜索 ---
-      - { name: file-manager,        backend_type: local, skill_source: instance, description: "本地文件管理" }
-      - { name: local-search,        backend_type: local, skill_source: instance, description: "本地文件搜索（Spotlight + FTS5）" }
-
-      # --- 应用推荐 ---
-      - { name: app-recommender,     backend_type: local, skill_source: instance, description: "根据任务推荐最合适的应用" }
 
       # --- 研究 ---
       - { name: literature-reviewer, backend_type: local, skill_source: instance, description: "多文献对比分析与综述" }
@@ -152,13 +198,14 @@ skills:
 
   darwin:
     builtin:
-      - { name: macos-screenshot,    backend_type: local, skill_source: instance, bins: ["screencapture"], description: "macOS 截图" }
-      - { name: macos-clipboard,     backend_type: local, skill_source: instance, bins: ["pbcopy", "pbpaste"], description: "macOS 剪贴板" }
-      - { name: macos-notification,  backend_type: local, skill_source: instance, bins: ["osascript"], description: "macOS 系统通知" }
-      - { name: macos-open,          backend_type: local, skill_source: instance, bins: ["open"], description: "打开文件、URL、应用" }
-      - { name: macos-finder,        backend_type: local, skill_source: instance, description: "Finder 操作：标签、预览、文件信息" }
-      - { name: applescript,         backend_type: local, skill_source: instance, bins: ["osascript"], description: "AppleScript / JXA 脚本执行" }
-      - { name: app-scanner,         backend_type: local, skill_source: instance, description: "发现已安装应用" }
+      # OS 基础设施（系统级，强制启用）
+      - { name: macos-screenshot,    backend_type: local, skill_source: instance, system: true, bins: ["screencapture"], description: "macOS 截图" }
+      - { name: macos-clipboard,     backend_type: local, skill_source: instance, system: true, bins: ["pbcopy", "pbpaste"], description: "macOS 剪贴板" }
+      - { name: macos-notification,  backend_type: local, skill_source: instance, system: true, bins: ["osascript"], description: "macOS 系统通知" }
+      - { name: macos-open,          backend_type: local, skill_source: instance, system: true, bins: ["open"], description: "打开文件、URL、应用" }
+      - { name: macos-finder,        backend_type: local, skill_source: instance, system: true, description: "Finder 操作：标签、预览、文件信息" }
+      - { name: applescript,         backend_type: local, skill_source: instance, system: true, bins: ["osascript"], description: "AppleScript / JXA 脚本执行" }
+      - { name: app-scanner,         backend_type: local, skill_source: instance, system: true, description: "发现已安装应用" }
 
     lightweight:
       - { name: apple-notes,         backend_type: local, skill_source: library, system_auth: "accessibility", description: "Apple 备忘录" }
@@ -176,10 +223,11 @@ skills:
 
   win32:
     builtin:
-      - { name: windows-screenshot,   backend_type: local, skill_source: instance, description: "Windows 截图" }
-      - { name: windows-clipboard,    backend_type: local, skill_source: instance, description: "Windows 剪贴板" }
-      - { name: windows-notification, backend_type: local, skill_source: instance, description: "Windows 系统通知" }
-      - { name: powershell-basic,     backend_type: local, skill_source: instance, description: "PowerShell 系统操作" }
+      # OS 基础设施（系统级，强制启用）
+      - { name: windows-screenshot,   backend_type: local, skill_source: instance, system: true, description: "Windows 截图" }
+      - { name: windows-clipboard,    backend_type: local, skill_source: instance, system: true, description: "Windows 剪贴板" }
+      - { name: windows-notification, backend_type: local, skill_source: instance, system: true, description: "Windows 系统通知" }
+      - { name: powershell-basic,     backend_type: local, skill_source: instance, system: true, description: "PowerShell 系统操作" }
 
     lightweight:
       - { name: outlook-cli,          backend_type: local, skill_source: instance, requires_app: "Microsoft Outlook", description: "Outlook 邮件与日历" }
@@ -189,8 +237,9 @@ skills:
 
   linux:
     builtin:
-      - { name: linux-screenshot,     backend_type: local, skill_source: instance, description: "Linux 截图" }
-      - { name: linux-clipboard,      backend_type: local, skill_source: instance, description: "Linux 剪贴板" }
+      # OS 基础设施（系统级，强制启用）
+      - { name: linux-screenshot,     backend_type: local, skill_source: instance, system: true, description: "Linux 截图" }
+      - { name: linux-clipboard,      backend_type: local, skill_source: instance, system: true, description: "Linux 剪贴板" }
 
     lightweight:
       - { name: linux-notification,   backend_type: local, skill_source: instance, bins: ["notify-send"], description: "Linux 桌面通知" }

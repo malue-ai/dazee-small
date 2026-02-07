@@ -31,7 +31,7 @@ def _get_simple_prompt_template() -> str:
 
 ```
 [Execute]
-1. 需要实时信息 → tavily_search → 基于搜索结果回答
+1. 需要实时信息 → 使用搜索类 Skill 或可用工具 → 基于搜索结果回答
 2. 需要计算 → bash → 基于执行结果回答
 3. 知识问答 → 直接回答
 
@@ -39,7 +39,7 @@ def _get_simple_prompt_template() -> str:
 ```
 
 # 可用工具
-- tavily_search: 搜索实时信息
+- 搜索类 Skill / 可用工具: 搜索实时信息
 - bash: 执行简单命令
 - str_replace_based_edit_tool: 编辑文件
 
@@ -51,7 +51,7 @@ def _get_simple_prompt_template() -> str:
    - 示例：修改文件 → 1次 str_replace_based_edit_tool → 完成
 
 2. **信息查询**：
-   - ✅ 1次 tavily_search → 基于结果回答
+   - ✅ 1次搜索类 Skill 或工具调用 → 基于结果回答
    - ❌ 不要多次搜索同一内容
 
 3. **代码执行**：
@@ -74,7 +74,7 @@ def _get_simple_prompt_template() -> str:
 User: "今天深圳天气怎么样？"
 
 正确做法：
-1. 调用 tavily_search("深圳 {current_date} 天气")
+1. 调用搜索类 Skill 或可用工具（查询"深圳 {current_date} 天气"）
 2. 从搜索结果中提取真实数据
 3. 基于真实数据回答（包含正确的日期）
 

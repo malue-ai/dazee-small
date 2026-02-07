@@ -437,7 +437,7 @@ class InstancePromptCache:
 
                 # 🆕 V5.5: 写入 prompt_results/ 供运营查看
                 if self._prompt_results_writer:
-                    self._save_to_prompt_results()
+                    await self._save_to_prompt_results()
 
                 # 🆕 V5.0: 同时写入 .cache/ 磁盘缓存
                 if self._storage_backend:
@@ -537,7 +537,7 @@ class InstancePromptCache:
         if not regen_flags.get("complex_prompt", True):
             self.system_prompt_complex = results.complex_prompt
 
-    def _save_to_prompt_results(self) -> bool:
+    async def _save_to_prompt_results(self) -> bool:
         """
         🆕 V5.5: 保存到 prompt_results/ 目录
 
@@ -560,7 +560,7 @@ class InstancePromptCache:
             )
 
             # 写入
-            success = self._prompt_results_writer.write_all(results)
+            success = await self._prompt_results_writer.write_all(results)
 
             if success:
                 logger.info(f"📂 已写入 prompt_results/ 目录")

@@ -18,9 +18,21 @@ import aiofiles
 import yaml
 
 from logger import get_logger
-from utils.app_paths import get_user_config_path
+from utils.app_paths import get_bundle_dir, get_user_config_path
 
 logger = get_logger("settings_service")
+
+
+def _load_dotenv_fallback() -> None:
+    """When config.yaml is missing or has no API keys, load project root .env."""
+    try:
+        from dotenv import load_dotenv
+        env_path = get_bundle_dir() / ".env"
+        if env_path.exists():
+            load_dotenv(dotenv_path=env_path, override=False)
+            logger.info("已从 .env 回退加载环境变量")
+    except ImportError:
+        pass
 
 # ==================== 配置结构定义 ====================
 
@@ -35,8 +47,6 @@ SETTINGS_SCHEMA = {
         "OPENAI_API_KEY": {"label": "OpenAI API Key", "required": False, "secret": True},
         "OPENAI_BASE_URL": {"label": "OpenAI Base URL", "required": False, "secret": False},
         "DASHSCOPE_API_KEY": {"label": "DashScope API Key", "required": False, "secret": True},
-        "TAVILY_API_KEY": {"label": "Tavily API Key", "required": False, "secret": True},
-        "EXA_API_KEY": {"label": "Exa API Key", "required": False, "secret": True},
         "GEMINI_API_KEY": {"label": "Gemini API Key", "required": False, "secret": True},
     },
     "llm": {
@@ -60,17 +70,14 @@ _settings_cache: Optional[Dict[str, Any]] = None
 
 def load_config_to_env() -> None:
     """
-    从 config.yaml 加载配置并注入 os.environ
+    从 config.yaml 加载配置并注入 os.environ。
 
-    这是启动时调用的核心函数，确保现有的 os.getenv() 调用
-    无需任何修改即可正常工作。
-
-    如果 config.yaml 不存在，自动创建空配置文件（首次启动场景）。
+    若 config.yaml 不存在或未提供 API Key，则回退加载项目根目录 .env，
+    保证开发时用 .env 配置 ANTHROPIC_API_KEY 仍能生效。
     """
     config_path = get_user_config_path()
 
     if not config_path.exists():
-        # 首次启动：创建空配置文件，等待用户通过前端设置页面填写
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(
             "# ZenFlux Agent 配置文件\n"
@@ -78,6 +85,7 @@ def load_config_to_env() -> None:
             encoding="utf-8",
         )
         logger.info(f"首次启动，已创建空配置文件: {config_path}")
+        _load_dotenv_fallback()
         return
 
     try:
@@ -85,9 +93,10 @@ def load_config_to_env() -> None:
             config = yaml.safe_load(f) or {}
     except Exception as e:
         logger.error(f"加载配置文件失败: {e}", exc_info=True)
+        _load_dotenv_fallback()
         return
 
-    # 将配置注入 os.environ
+    # 从 config 注入 os.environ
     injected_count = 0
     for section_key, section_data in config.items():
         if isinstance(section_data, dict):
@@ -96,11 +105,15 @@ def load_config_to_env() -> None:
                     os.environ[key] = str(value)
                     injected_count += 1
         elif section_key and section_data is not None:
-            # 支持顶层 key: value 格式
             os.environ[section_key] = str(section_data)
             injected_count += 1
 
-    logger.info(f"从 config.yaml 注入 {injected_count} 个环境变量")
+    # 若注入后仍无 ANTHROPIC_API_KEY，回退到 .env（兼容仅用 .env 的开发方式）
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        _load_dotenv_fallback()
+
+    if injected_count > 0:
+        logger.info(f"从 config.yaml 注入 {injected_count} 个环境变量")
 
 
 def _load_settings() -> Dict[str, Any]:

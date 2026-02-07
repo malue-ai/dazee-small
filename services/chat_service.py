@@ -240,8 +240,17 @@ class ChatService:
         result = await service.chat(message, user_id, stream=False)
     """
 
-    # 默认 Agent 标识
-    DEFAULT_AGENT_KEY = "client_agent"
+    @property
+    def default_agent_key(self) -> str:
+        """动态获取默认 Agent 标识（单实例模式下使用当前加载的实例）"""
+        current = self.agent_registry.get_current_instance()
+        if current:
+            return current
+        # fallback: 取第一个已加载的 Agent
+        agents = self.agent_registry.list_agents()
+        if agents:
+            return agents[0]["agent_id"]
+        return "xiaodazi"
 
     def __init__(
         self,
@@ -736,7 +745,7 @@ class ChatService:
             raise ValueError(f"消息保存失败: {e}") from e
 
         # 9. 获取 Agent
-        pool_key = agent_id or self.DEFAULT_AGENT_KEY
+        pool_key = agent_id or self.default_agent_key
         agent = None
         agent_acquired = False
         session_pool_updated = False

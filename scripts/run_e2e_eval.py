@@ -47,10 +47,11 @@ def save_checkpoint(ckpt: dict) -> None:
 
 
 async def check_server(base_url: str) -> bool:
-    """GET /health; return True if ok."""
+    """GET / to check if server is running (root returns status: running)."""
     import httpx
     try:
-        r = await httpx.AsyncClient(timeout=5.0).get(f"{base_url.rstrip('/')}/health")
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.get(f"{base_url.rstrip('/')}/")
         return r.status_code == 200
     except Exception:
         return False

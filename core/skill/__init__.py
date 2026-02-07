@@ -14,7 +14,7 @@ Skill 管理模块
 
 相关组件：
 - core/tool/capability/skill_loader.py: Skill 内容加载器（SKILL.md 渐进式加载）
-- prompts/skills_loader.py: 生成系统提示词中的 Skills 列表
+- Skills 提示词由 SkillsLoader.build_skills_prompt() 注入到 runtime_context["skills_prompt"]
 """
 
 from core.skill.dynamic_loader import DynamicSkillLoader, SkillDependency, check_and_report_skills

@@ -42,9 +42,7 @@ from .tool import (
     ToolResult,
     # 工具注册
     ToolRegistration,
-    MCPServerRegistration,
     ToolRegistrationResponse,
-    MCPServerRegistrationResponse,
     # 工具查询
     ToolListQuery,
     ToolListResponse,
@@ -62,13 +60,11 @@ from .mcp import MCPToolConfig, MCPToolDetail
 
 # Skill 模型
 from .skill import (
-    SkillStatus,
     SkillCreateRequest,
     SkillUpdateRequest,
     SkillSummary,
     SkillDetail,
     SkillListResponse,
-    SkillSyncResponse,
     SkillInstallRequest,
     SkillUninstallRequest,
     SkillToggleRequest,
@@ -83,7 +79,6 @@ from .agent import (
     APIDetail,
     MemoryConfig,
     AgentCreateRequest,
-    AgentUpdateRequest,
     AgentSummary,
     AgentDetail,
     AgentListResponse,
@@ -126,9 +121,7 @@ __all__ = [
     "ToolResult",
     # Tool 模型 - 工具注册
     "ToolRegistration",
-    "MCPServerRegistration",
     "ToolRegistrationResponse",
-    "MCPServerRegistrationResponse",
     # Tool 模型 - 工具查询
     "ToolListQuery",
     "ToolListResponse",
@@ -142,13 +135,11 @@ __all__ = [
     "MCPToolConfig",
     "MCPToolDetail",
     # Skill 模型
-    "SkillStatus",
     "SkillCreateRequest",
     "SkillUpdateRequest",
     "SkillSummary",
     "SkillDetail",
     "SkillListResponse",
-    "SkillSyncResponse",
     "SkillInstallRequest",
     "SkillUninstallRequest",
     "SkillToggleRequest",
@@ -160,7 +151,6 @@ __all__ = [
     "APIDetail",
     "MemoryConfig",
     "AgentCreateRequest",
-    "AgentUpdateRequest",
     "AgentSummary",
     "AgentDetail",
     "AgentListResponse",

@@ -187,52 +187,6 @@ class Capability:
     level: int = 2
     cache_stable: bool = False
 
-    def matches_keywords(self, keywords: List[str]) -> int:
-        """
-        计算关键词匹配度（辅助排序，权重较低）
-
-        注意：关键词匹配作为辅助排序依据，
-        最终能力选择建议结合 LLM 语义理解进行。
-
-        Args:
-            keywords: 待匹配的关键词列表
-
-        Returns:
-            匹配分数
-        """
-        if not keywords:
-            return 0
-
-        score = 0
-        cap_keywords = self.metadata.get("keywords", [])
-        preferred_for = self.metadata.get("preferred_for", [])
-        description = self.metadata.get("description", "")
-
-        for kw in keywords:
-            kw_lower = kw.lower()
-
-            # 能力标签匹配
-            if any(kw_lower in str(c).lower() for c in self.capabilities):
-                score += 15
-
-            # preferred_for 匹配
-            if any(kw_lower in str(p).lower() for p in preferred_for):
-                score += 10
-
-            # keywords 匹配
-            if any(kw_lower in str(k).lower() for k in cap_keywords):
-                score += 5
-
-            # description 匹配（权重低）
-            if kw_lower in description.lower():
-                score += 2
-
-            # 名称匹配（权重中）
-            if kw_lower in self.name.lower():
-                score += 8
-
-        return score
-
     def meets_constraints(self, context: Dict[str, Any] = None) -> bool:
         """
         检查是否满足约束条件

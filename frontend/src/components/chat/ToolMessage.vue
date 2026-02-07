@@ -102,16 +102,7 @@ const TOOL_CONFIG: Record<string, { icon: Component; name: string; descTemplate?
     name: '网络搜索',
     descTemplate: (input) => input?.query ? `搜索「${truncate(input.query, 30)}」` : '网络搜索'
   },
-  'tavily_search': {
-    icon: Search,
-    name: '网络搜索',
-    descTemplate: (input) => input?.query ? `搜索「${truncate(input.query, 30)}」` : '网络搜索'
-  },
-  'exa_search': {
-    icon: Brain,
-    name: '智能搜索',
-    descTemplate: (input) => input?.query ? `语义搜索「${truncate(input.query, 30)}」` : '智能搜索'
-  },
+  // tavily_search / exa_search 已迁移到 Skills-First 架构，由 web_search + api_calling 覆盖
   
   // 知识库
   'knowledge_search': {
@@ -133,16 +124,7 @@ const TOOL_CONFIG: Record<string, { icon: Component; name: string; descTemplate?
   },
   
   // 文档生成
-  'ppt_generator': {
-    icon: Presentation,
-    name: 'PPT 生成',
-    descTemplate: (input) => input?.topic ? `生成 PPT「${truncate(input.topic, 25)}」` : '生成 PPT'
-  },
-  'slidespeak_render': {
-    icon: Palette,
-    name: '幻灯片渲染',
-    descTemplate: () => '渲染 PPT 文件'
-  },
+  // ppt_generator / slidespeak_render 已迁移到 PPT Skill + api_calling
   'text2document': {
     icon: FileOutput,
     name: '文档生成',
@@ -185,13 +167,6 @@ const TOOL_CONFIG: Record<string, { icon: Component; name: string; descTemplate?
     icon: Hand,
     name: '等待确认',
     descTemplate: (input) => input?.question ? `等待确认: ${truncate(input.question, 30)}` : '等待用户确认'
-  },
-  
-  // 文档解析
-  'document_partition_tool': {
-    icon: FileSearch,
-    name: '文档解析',
-    descTemplate: (input) => input?.source ? `解析文档` : '解析文档'
   }
 }
 

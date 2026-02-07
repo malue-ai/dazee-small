@@ -66,11 +66,11 @@ tasks:
       context: {}
       files: []
     expected_outcome:
-      tool_calls: ["document_partition_tool"]
+      tool_calls: ["code_execution"]
     graders:
       - type: code
         name: check_tool_calls
-        check: "tool_calls_contain('document_partition_tool')"
+        check: "tool_calls_contain('code_execution')"
       - type: model
         rubric: grade_response_quality
         min_score: 4

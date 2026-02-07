@@ -35,16 +35,6 @@ from .file_service import (
     FileServiceError,
     get_file_service,
 )
-from .mcp_service import (
-    MCPAlreadyExistsError,
-)
-from .mcp_service import MCPConnectionError as MCPServiceConnectionError
-from .mcp_service import (
-    MCPNotFoundError,
-    MCPService,
-    MCPServiceError,
-    get_mcp_service,
-)
 from .session_service import (
     SessionNotFoundError,
     SessionService,
@@ -119,13 +109,6 @@ __all__ = [
     "get_agent_registry",
     "AgentConfig",
     "AgentNotFoundError",
-    # MCP Service
-    "MCPService",
-    "get_mcp_service",
-    "MCPServiceError",
-    "MCPNotFoundError",
-    "MCPAlreadyExistsError",
-    "MCPServiceConnectionError",
     # Confirmation Service
     "ConfirmationService",
     "get_confirmation_service",

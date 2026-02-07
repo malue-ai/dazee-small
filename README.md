@@ -328,6 +328,19 @@ sudo apt install libjpeg-dev libpng-dev
 rustup update
 ```
 
+**Q: 启动时提示「Claude API Key 为空」？**
+
+配置优先从项目根或用户数据目录的 `config.yaml` 读取；若该文件不存在或未配置 `api_keys`，会自动回退加载项目根目录的 `.env`。请确保：
+
+- 在项目根目录存在 `.env`，且其中配置了 `ANTHROPIC_API_KEY=sk-ant-...`；或
+- 在「设置」页面或 `config.yaml` 的 `api_keys` 段中填写 API Key。
+
+**Q: 启动时大量「Skill 目录不存在」/ 工具加载失败 / PyPDF2、APScheduler 未安装？**
+
+- **Skill 目录不存在**：若实例使用 Skills-First 配置（`config.yaml` 里 `skills` 含 `common`/`darwin` 等），不会再去校验 `skill_registry.yaml`，这类告警应已消失；若仍出现，请确认已拉取最新代码并重启。
+- **加载工具 XXX 失败: No module named 'tools.xxx'**：部分能力在 `config/capabilities.yaml` 中声明但未实现对应 `tools/` 模块，可忽略或后续按需实现；不影响已实现的工具和 Skills。
+- **PyPDF2 / APScheduler 未安装**：为可选依赖，仅影响 PDF 解析或定时任务；需要时执行 `pip install PyPDF2 apscheduler`。
+
 **Q: 端口冲突？**
 
 后端默认使用 `8000` 端口，前端默认使用 `5174` 端口。如需修改：

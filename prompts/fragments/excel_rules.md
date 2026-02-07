@@ -13,7 +13,7 @@
 - 必要时添加数据验证
 
 ## 技术要求
-- 使用 xlsx Skill 生成
+- 使用 Excel Skill（通过 xiaodazi Skills）生成
 - 文件名使用英文
 - 完成后提供下载链接
 

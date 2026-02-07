@@ -33,8 +33,7 @@ export const TOOL_NAME_MAP: Record<string, string> = {
 
   // 搜索
   'web_search': '网络搜索',
-  'tavily_search': '网络搜索',
-  'exa_search': '智能搜索',
+  // tavily_search / exa_search 已迁移到 Skills-First，由 web_search + api_calling 覆盖
   'perplxity': '联网搜索',
 
   // 知识库
@@ -46,13 +45,11 @@ export const TOOL_NAME_MAP: Record<string, string> = {
   'scheduled_task': '定时任务',
 
   // 文档生成
-  'ppt_generator': 'PPT 生成',
-  'slidespeak_render': '幻灯片渲染',
+  // ppt_generator / slidespeak_render 已迁移到 PPT Skill + api_calling
   'text2document': '文档生成',
 
   // 数据分析
-  'wenshu_analytics': '数据分析',
-  'wenshu_api': '数据查询',
+  // wenshu_analytics / wenshu_api 已移除（云端工具）
 
   // 流程图/图表
   'Ontology_TextToChart_zen0': '流程图生成',

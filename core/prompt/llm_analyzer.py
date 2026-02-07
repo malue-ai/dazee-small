@@ -99,7 +99,7 @@ PROMPT_ANALYSIS_SYSTEM = """你是一个专业的系统提示词分析专家。
     "medium": {"keywords": ["分析", "对比", "建议"], "description": "多步骤处理"},
     "complex": {"keywords": ["搭建", "设计", "构建"], "description": "系统性任务"}
   },
-  "tools": ["tavily_search", "text2flowchart", "..."],
+  "tools": ["search_skill", "diagram_skill", "..."],
   "intent_types": [
     {"name": "本体论系统搭建", "keywords": ["搭建系统", "设计系统"]}
   ]

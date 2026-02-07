@@ -2,7 +2,6 @@
 Skills 管理路由
 
 提供 Skills CRUD 操作的 REST API
-创建 Skill 时自动同步到 Claude API（通过 auto_register 参数控制）
 """
 
 import asyncio
@@ -26,7 +25,7 @@ from models.skill import (
     SkillUninstallRequest,
     SkillUpdateContentRequest,
     SkillUpdateRequest,
-)
+)  # SkillStatus / SkillSyncResponse removed — no Claude Skill ID registration
 
 logger = get_logger("router.skills")
 
@@ -624,7 +623,7 @@ async def get_skill_file_content(
     "/install",
     response_model=dict,
     summary="安装 Skill 到实例",
-    description="从全局库复制 Skill 到实例，并可选自动注册到 Claude API",
+    description="从全局库复制 Skill 到实例",
 )
 async def install_skill(request: SkillInstallRequest):
     """
@@ -710,16 +709,15 @@ async def install_skill(request: SkillInstallRequest):
     "/uninstall",
     response_model=dict,
     summary="从实例卸载 Skill",
-    description="从实例删除 Skill，并从 Claude API 注销",
+    description="从实例删除 Skill",
 )
 async def uninstall_skill(request: SkillUninstallRequest):
     """
     从实例卸载 Skill
 
     流程：
-    1. 从 Claude API 注销（如果已注册）
-    2. 从 skill_registry.yaml 移除
-    3. 删除文件目录
+    1. 从 skill_registry.yaml 移除
+    2. 删除文件目录
     """
 
     _validate_name(request.skill_name, "Skill 名称")
@@ -737,15 +735,15 @@ async def uninstall_skill(request: SkillUninstallRequest):
         )
 
     try:
-        # 1. 从 Claude API 注销
-        from utils.instance_loader import unregister_skill_from_claude
+        # 1. 从 skill_registry.yaml 移除
+        from utils.instance_loader import _update_skill_registry, load_skill_registry
 
-        unregister_result = unregister_skill_from_claude(request.agent_id, request.skill_name)
-        logger.info(f"🔄 从 Claude API 注销: {unregister_result.get('message', '')}")
+        existing_skills = load_skill_registry(request.agent_id)
+        updated_skills = [s for s in existing_skills if s.name != request.skill_name]
+        _update_skill_registry(request.agent_id, updated_skills)
+        logger.info(f"✅ 从 skill_registry.yaml 移除: {request.skill_name}")
 
-        # 2. 从 skill_registry.yaml 移除（unregister_skill_from_claude 已处理）
-
-        # 3. 删除文件目录
+        # 2. 删除文件目录
         await asyncio.to_thread(shutil.rmtree, skill_dir)
         logger.info(f"🗑️ 删除 Skill 目录: {skill_dir}")
 
@@ -1036,60 +1034,6 @@ async def upload_skill(
         # 清理临时目录
         if temp_dir and temp_dir.exists():
             await asyncio.to_thread(shutil.rmtree, temp_dir)
-
-
-# ============================================================
-# Pre-built Claude Skills（Anthropic 官方提供）
-# ============================================================
-
-# Pre-built Claude Skills（Anthropic 平台提供）与本地 Skills（skills/library/）独立
-# 参考：https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview
-PREBUILT_CLAUDE_SKILLS = [
-    {
-        "name": "pptx",
-        "description": "Create presentations, edit slides, analyze presentation content.",
-        "provider": "Anthropic",
-        "type": "claude-skill",
-    },
-    {
-        "name": "xlsx",
-        "description": "Create spreadsheets, analyze data, generate reports with charts.",
-        "provider": "Anthropic",
-        "type": "claude-skill",
-    },
-    {
-        "name": "docx",
-        "description": "Create documents, edit content, format text.",
-        "provider": "Anthropic",
-        "type": "claude-skill",
-    },
-    {
-        "name": "pdf",
-        "description": "Generate formatted PDF documents and reports.",
-        "provider": "Anthropic",
-        "type": "claude-skill",
-    },
-]
-
-
-@router.get(
-    "/prebuilt/list",
-    response_model=dict,
-    summary="列出 Pre-built Claude Skills",
-    description="获取 Anthropic 提供的 Pre-built Claude Skills 列表",
-)
-async def list_prebuilt_skills():
-    """
-    列出 Pre-built Claude Skills
-
-    返回 Anthropic 官方提供的 Pre-built Claude Skills
-
-    注意：这些是 Anthropic 平台的 Pre-built Claude Skills
-    """
-    return {
-        "total": len(PREBUILT_CLAUDE_SKILLS),
-        "skills": PREBUILT_CLAUDE_SKILLS,
-    }
 
 
 # ============================================================

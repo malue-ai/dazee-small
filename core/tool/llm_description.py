@@ -428,7 +428,7 @@ tools:
         sequence: ["web_search", "内容总结"]
         when: 搜索信息后需要整理摘要
       - pattern: multi_source_research
-        sequence: ["web_search", "exa_search", "综合分析"]
+        sequence: ["web_search", "api_calling", "综合分析"]
         when: 需要多源信息对比
     performance:
       latency: medium
@@ -452,8 +452,8 @@ tools:
       cost: low
       reliability: high
 
-  - name: wenshu_analytics
-    description: 数据分析和可视化工具
+  - name: data_analysis_skill
+    description: 数据分析和可视化（通过 Skill + api_calling）
     use_when:
       - 需要分析 Excel/CSV 数据
       - 需要生成数据图表
@@ -463,25 +463,25 @@ tools:
       - 没有数据文件的分析请求
     composition_hints:
       - pattern: upload_then_analyze
-        sequence: ["文件上传", "wenshu_analytics"]
+        sequence: ["文件上传", "data_analysis_skill"]
         when: 用户有数据文件需要分析
     performance:
       latency: medium
       cost: low
       reliability: high
 
-  - name: ppt_generator
-    description: 生成专业 PPT 演示文稿
+  - name: ppt_skill
+    description: 生成专业 PPT 演示文稿（通过 PPT Skill + api_calling）
     use_when:
       - 需要创建 PPT/演示文稿
       - 需要专业设计的幻灯片
       - 包含图表、图片的演示
     not_use_when:
-      - 简单的文字文档（使用 docx）
-      - 快速草稿（使用 pptx skill）
+      - 简单的文字文档（使用文档 Skill）
+      - 快速草稿（使用 PPT Skill）
     composition_hints:
       - pattern: research_then_ppt
-        sequence: ["web_search", "内容规划", "ppt_generator"]
+        sequence: ["web_search", "内容规划", "ppt_skill"]
         when: 需要先搜索素材再生成PPT
     performance:
       latency: slow

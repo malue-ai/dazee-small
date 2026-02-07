@@ -364,7 +364,7 @@ instances/
 ┌─── prompts/ (提示词模板) ───────────────────────────────────────────┐
 │  intent_recognition_prompt.py │ plan_generator_prompt.py            │
 │  prompt_selector.py │ simple_prompt.py │ standard_prompt.py         │
-│  universal_agent_prompt.py │ skills_loader.py │ skills_metadata.txt │
+│  universal_agent_prompt.py                                            │
 │  MEMORY_PROTOCOL.md                                                 │
 │  factory/: schema_generator.md                                      │
 │  fragments/: code_rules.md │ excel_rules.md │ ppt_rules.md          │

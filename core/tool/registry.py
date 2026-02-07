@@ -315,46 +315,41 @@ class CapabilityRegistry:
         return filtered
 
     def find_candidates(
-        self, keywords: List[str], task_type: str = None, context: Dict[str, Any] = None
+        self,
+        task_type: str = None,
+        context: Dict[str, Any] = None,
+        _keywords: List[str] = None,
     ) -> List[Capability]:
         """
-        根据关键词和任务类型查找候选能力
+        根据任务类型和上下文查找候选能力（不依赖关键词匹配，符合 LLM-First）。
 
         Args:
-            keywords: 关键词列表
-            task_type: 任务类型
+            task_type: 任务类型（来自意图分析等）
             context: 上下文（用于约束检查）
+            _keywords: 已废弃，仅保留签名兼容，不再参与过滤
 
         Returns:
             候选能力列表（未排序）
         """
         candidates = []
 
-        # 自动展开 task_type → 能力列表
         required_capabilities = set()
         if task_type:
             mapped_caps = self.get_capabilities_for_task_type(task_type)
             required_capabilities.update(mapped_caps)
 
         for cap in self.capabilities.values():
-            # 过滤内部工具
             if cap.constraints.get("internal_use_only"):
                 if not context or not context.get("allow_internal_tools"):
                     continue
-
-            # 检查约束
             if not cap.meets_constraints(context):
                 continue
 
-            # 检查关键词匹配
-            if keywords and cap.matches_keywords(keywords) > 0:
-                candidates.append(cap)
-                continue
-
-            # 检查能力类别匹配
             if required_capabilities and cap.capabilities:
                 if any(c in required_capabilities for c in cap.capabilities):
                     candidates.append(cap)
+            elif not required_capabilities:
+                candidates.append(cap)
 
         return candidates
 

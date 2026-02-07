@@ -75,6 +75,7 @@ class SkillsLoader:
         skills_config: Dict[str, Any],
         instance_skills_dir: Path,
         library_skills_dir: Path,
+        workspace_skills_dir: Optional[Path] = None,
     ):
         """
         初始化
@@ -83,10 +84,12 @@ class SkillsLoader:
             skills_config: config.yaml 中的 skills 配置段
             instance_skills_dir: 实例 Skills 目录（instances/{name}/skills/）
             library_skills_dir: 全局 Skills 库目录（skills/library/）
+            workspace_skills_dir: 工作区 Skills 目录（./skills/），优先级最高
         """
         self._config = skills_config or {}
         self._instance_dir = Path(instance_skills_dir)
         self._library_dir = Path(library_skills_dir)
+        self._workspace_dir = Path(workspace_skills_dir) if workspace_skills_dir else None
         self._os_key = _current_os_key()
         self._loading_mode = self._config.get("loading_mode", "lazy")
 
@@ -240,41 +243,65 @@ class SkillsLoader:
             logger.warning(f"加载 SKILL.md 失败: {name}, 错误: {e}")
             return None
 
-    async def build_skills_prompt(self) -> str:
+    async def build_skills_prompt(self, language: str = "en") -> str:
         """
-        构建 Skills 列表提示词片段（注入到系统提示词）
+        构建 Skills 提示词片段（XML + 5 行简洁指令，注入到系统提示词）
 
-        格式：
-        - 可用 Skills 的名称和描述
-        - 不可用 Skills 的说明（帮助 Agent 告知用户）
+        格式：OpenClaw 风格
+        - ## Skills (mandatory) + 5 行指令
+        - <available_skills> ... </available_skills>
+        - <unavailable_skills> ... </unavailable_skills>（可选）
 
         Returns:
-            Markdown 格式的 Skills 描述
+            完整 Skills 提示词字符串
         """
-        available = self.get_available_skills()
+        from core.prompt.skill_prompt_builder import SkillPromptBuilder, SkillSummary
+
+        available = [
+            e for e in self.get_available_skills()
+            if e.backend_type != BackendType.TOOL and e.skill_path
+        ]
         unavailable = [
             e for e in self._entries
             if e.enabled and e.status != SkillStatus.READY
         ]
 
-        sections = ["# 当前可用的 Skills\n"]
+        summaries: list[SkillSummary] = []
+        for entry in available:
+            skill_md_path = Path(entry.skill_path) / "SKILL.md"
+            if not skill_md_path.exists():
+                continue
+            emoji = ""
+            if isinstance(entry.raw_config.get("metadata"), dict):
+                emoji = (entry.raw_config["metadata"].get("emoji") or "")[:2]
+            summaries.append(
+                SkillSummary(
+                    name=entry.name,
+                    description=entry.description or "",
+                    location=skill_md_path.resolve(),
+                    emoji=emoji,
+                )
+            )
 
-        if available:
-            for entry in available:
-                if entry.backend_type == BackendType.TOOL:
-                    # Tool 类型由框架管理，不在此展示
-                    continue
-                sections.append(f"- **{entry.name}**: {entry.description}")
-            sections.append("")
+        instructions = SkillPromptBuilder.build_lazy_instructions(language)
+        xml_available = SkillPromptBuilder.build_lazy_prompt(summaries, language)
+
+        parts = [instructions, "", xml_available]
 
         if unavailable:
-            sections.append("# 尚未就绪的 Skills（可引导用户启用）\n")
+            lines = ["<unavailable_skills>"]
             for entry in unavailable:
                 hint = self._get_setup_hint(entry)
-                sections.append(f"- **{entry.name}**: {entry.description}（{hint}）")
-            sections.append("")
+                lines.append(
+                    f'  <skill name="{entry.name}" reason="{hint}">'
+                )
+                lines.append(f"    <description>{entry.description}</description>")
+                lines.append("  </skill>")
+            lines.append("</unavailable_skills>")
+            parts.append("")
+            parts.append("\n".join(lines))
 
-        return "\n".join(sections)
+        return "\n".join(parts)
 
     # ================================================================
     # 内部方法：配置解析
@@ -391,9 +418,7 @@ class SkillsLoader:
         """
         解析 Skill 的 SKILL.md 目录路径
 
-        优先级：
-        1. instance skills 目录
-        2. library skills 目录
+        优先级：workspace > instance > library
 
         Args:
             entry: Skill 条目
@@ -405,17 +430,23 @@ class SkillsLoader:
         if entry.backend_type == BackendType.TOOL:
             return None
 
-        # 1. 优先查找 instance 目录
+        # 1. 工作区目录（最高优先级）
+        if self._workspace_dir:
+            workspace_path = self._workspace_dir / entry.name
+            if workspace_path.exists() and (workspace_path / "SKILL.md").exists():
+                return str(workspace_path)
+
+        # 2. 实例目录
         instance_path = self._instance_dir / entry.name
         if instance_path.exists() and (instance_path / "SKILL.md").exists():
             return str(instance_path)
 
-        # 2. 查找 library 目录
+        # 3. 库目录
         library_path = self._library_dir / entry.name
         if library_path.exists() and (library_path / "SKILL.md").exists():
             return str(library_path)
 
-        # 3. 未找到
+        # 4. 未找到
         if entry.backend_type in (BackendType.LOCAL, BackendType.API):
             logger.debug(
                 f"Skill {entry.name}: 未找到 SKILL.md "
@@ -433,6 +464,7 @@ class SkillsLoader:
         检查 Skill 运行时状态，更新 entry.status 和 entry.status_message
 
         检查顺序：
+        0. 若 entry.skill_path 存在且 SKILL.md 有 frontmatter requires，合并 bins/env
         1. backend_type=tool → 信任框架注册，标记 ready
         2. bins 依赖 → 检查命令是否存在
         3. system_auth → 标记 need_auth（无法自动检测）
@@ -445,6 +477,22 @@ class SkillsLoader:
             entry.status = SkillStatus.READY
             entry.status_message = "框架内置工具"
             return
+
+        # 合并 frontmatter requires（Skill 自描述依赖）
+        if entry.skill_path:
+            skill_md = Path(entry.skill_path) / "SKILL.md"
+            if skill_md.exists():
+                from core.prompt.skill_prompt_builder import SkillPromptBuilder
+
+                req = SkillPromptBuilder.parse_requires(skill_md)
+                if req.get("bins") and not entry.bins:
+                    entry.bins = list(req["bins"])
+                if req.get("env"):
+                    missing = [e for e in req["env"] if not os.getenv(e)]
+                    if missing:
+                        entry.status = SkillStatus.NEED_SETUP
+                        entry.status_message = f"需要配置环境变量: {', '.join(missing)}"
+                        return
 
         # 检查命令行依赖
         if entry.bins:
@@ -597,6 +645,7 @@ def create_skills_loader(
     skills_config: Dict[str, Any],
     instance_skills_dir: Path,
     library_skills_dir: Optional[Path] = None,
+    workspace_skills_dir: Optional[Path] = None,
 ) -> SkillsLoader:
     """
     创建 SkillsLoader 实例
@@ -605,6 +654,7 @@ def create_skills_loader(
         skills_config: config.yaml 中的 skills 配置段
         instance_skills_dir: 实例 Skills 目录
         library_skills_dir: 全局 Skills 库（默认项目根目录/skills/library）
+        workspace_skills_dir: 工作区 Skills 目录（仅当调用者显式传入时启用）
 
     Returns:
         SkillsLoader 实例
@@ -613,8 +663,12 @@ def create_skills_loader(
         from utils.app_paths import get_bundle_dir
         library_skills_dir = get_bundle_dir() / "skills" / "library"
 
+    # workspace_skills_dir: 仅当调用者显式传入时启用
+    # 不自动推断，避免与 library 父目录重叠
+
     return SkillsLoader(
         skills_config=skills_config,
         instance_skills_dir=instance_skills_dir,
         library_skills_dir=library_skills_dir,
+        workspace_skills_dir=workspace_skills_dir,
     )

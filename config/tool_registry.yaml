@@ -1,48 +1,32 @@
 # ==================== 统一工具注册配置 ====================
 #
-# 设计原则：
-# 1. 所有工具分类配置集中在此文件
-# 2. 各模块从此配置读取，避免分散定义
-# 3. 修改工具分类时只需编辑此文件
+# 📌 小搭子：桌面端 AI 搭子
+#   - 核心工具始终启用，动态工具按需加载
+#   - 所有外部 API 能力通过 Skills + api_calling 实现
 #
 # 使用方式：
 #   from config.tool_registry import get_core_tools, get_frequent_tools
 #
 
 # ==================== 核心工具（Level 1）====================
-# 始终启用的工具，不暴露给用户配置
-# 用于：core/tool/loader.py, core/tool/selector.py
+# 始终启用，不暴露给用户配置
 core_tools:
-  - plan_todo                   # 任务规划
-  - api_calling                 # API 调用
-  - hitl                        # HITL (Human-in-the-Loop)
-  - nano_banana_image           # Nano Banana Pro 图像生成/编辑
-  - clue_generation             # 线索生成
-  - scheduled_task              # 定时任务管理（提醒、定期执行）
+  - plan_todo        # 任务规划
+  - api_calling      # API 调用（Skills 的执行层）
+  - hitl             # 人机确认
+  - clue_generation  # 线索生成
+  - scheduled_task   # 定时任务/提醒
 
 # ==================== 常用工具（不延迟加载）====================
-# Tool Search 模式下不延迟加载的工具
-# 用于：core/llm/claude.py, core/tool/capability/invocation.py
 frequent_tools:
-  - tavily_search
   - plan_todo
 
 # ==================== 工具类别（简写展开）====================
 # 用户配置一个类别，自动展开为多个工具
-# 用于：core/tool/loader.py
 tool_categories:
-  # 文档生成类（Claude Skills）
+  # 文档生成类（Anthropic Pre-built Skills）
   document_skills:
     - pptx
     - xlsx
     - docx
     - pdf
-  
-  # PPT 生成类（可选扩展）
-  ppt_tools:
-    - ppt_generator
-    - slidespeak_render
-  
-  # 文档解析类（允许使用简写配置）
-  document_partition:
-    - document_partition_tool

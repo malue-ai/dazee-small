@@ -57,7 +57,7 @@ class PlanMemory(BaseScopedMemory):
                 "session": 1,
                 "completed": ["搜索资料"],
                 "timestamp": "2026-01-07T14:00:00Z",
-                "next_hint": "使用 ppt_generator 生成"
+                "next_hint": "使用 PPT Skill + api_calling 生成"
             }
         ],
         "created_at": "...",

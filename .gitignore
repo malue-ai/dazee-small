@@ -74,5 +74,11 @@ frontend/src-tauri/binaries/_internal/
 # 生成的输出文件
 workspace/outputs/ppt/*.pptx
 *.db
+*.db-shm
+*.db-wal
 test_mem0_e2e_report_*.json
 dump.rdb
+
+# 运行时产物
+workspace/storage/tool_results/
+evaluation/reports/_e2e_checkpoint.json

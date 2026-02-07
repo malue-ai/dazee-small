@@ -9,18 +9,6 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 
-class User(BaseModel):
-    """用户模型"""
-    
-    id: Optional[int] = None
-    username: str = Field(..., description="用户名")
-    created_at: Optional[datetime] = None
-    metadata: Optional[dict] = Field(default_factory=dict, description="用户元数据")
-    
-    class Config:
-        from_attributes = True
-
-
 class Conversation(BaseModel):
     """会话模型"""
     

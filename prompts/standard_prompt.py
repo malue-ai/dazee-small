@@ -13,7 +13,7 @@ def _get_standard_prompt_template() -> str:
 今天是 {current_date}
 
 # 核心规则
-- 纯问答（如“什么是RAG/今天天气”）→ 直接 tavily_search 回答。
+- 纯问答（如“什么是RAG/今天天气”）→ 使用搜索类 Skill 或可用工具获取信息后回答。
 - 其他任务 → **第一个工具调用必须是 plan(action="create")** 创建计划（name + todos）。
 - 执行过程中，**当前计划会以“## 当前任务计划”注入到最后一条用户消息的末尾**，你必须以它为准决定下一步做什么。
 - 每完成一个步骤，必须调用 plan(action="update") 写回 todo 状态（todo_id + status，可选 result）。
@@ -29,7 +29,7 @@ def _get_standard_prompt_template() -> str:
 # 工具使用（高效）
 - 代码/脚本：一次 bash 完成（写代码+测试同一调用）。
 - 文件改动：优先 str_replace_based_edit_tool 一次到位。
-- 查询：一次 tavily_search 获取信息后直接回答。
+- 查询：一次搜索类 Skill 或工具调用获取信息后直接回答。
 
 # 完成标准
 - 任务完成，必要的代码/测试已一次通过。
@@ -42,7 +42,7 @@ def _get_standard_prompt_template() -> str:
 <query>帮我搜索 AI 最新进展并总结</query>
 <execution>
 1. plan(action="create", name="搜索并总结 AI 进展", todos=[...])
-2. tavily_search("AI 最新进展 2024")
+2. 使用搜索类 Skill 或工具获取 "AI 最新进展 2024"
 3. 整理搜索结果，生成结构化总结
 4. [Final Validation] → PASS → 返回总结
 </execution>

@@ -89,7 +89,7 @@ class ToolSelector:
 
     工具分层设计：
     - Level 1（核心工具）：始终加载，如 plan_todo
-    - Level 2（动态工具）：按需加载，如 exa_search
+    - Level 2（动态工具）：按需加载，如 Skill 关联工具
 
     使用方式:
         selector = ToolSelector(registry)
@@ -533,8 +533,8 @@ class ToolSelector:
                     reason=f"Explicitly requested: {explicit_capability}",
                 )
 
-        # 查找候选能力
-        candidates = self.registry.find_candidates(keywords, task_type, context)
+        # 查找候选能力（不传 keywords，符合 LLM-First）
+        candidates = self.registry.find_candidates(task_type=task_type, context=context)
 
         if not candidates:
             return None
@@ -542,7 +542,7 @@ class ToolSelector:
         # 计算评分
         scored: List[Tuple[Capability, float]] = []
         for cap in candidates:
-            score = self._calculate_routing_score(cap, keywords, quality_requirement, context)
+            score = self._calculate_routing_score(cap, quality_requirement, context)
             scored.append((cap, score))
 
         # 排序
@@ -554,7 +554,7 @@ class ToolSelector:
         return RoutingResult(
             capability=best_cap,
             score=best_score,
-            reason=self._explain_routing_selection(best_cap, keywords, best_score),
+            reason=self._explain_routing_selection(best_cap, best_score),
             alternatives=scored[1:4] if len(scored) > 1 else None,
         )
 
@@ -577,16 +577,16 @@ class ToolSelector:
         Returns:
             RoutingResult 列表
         """
-        candidates = self.registry.find_candidates(keywords, task_type, context)
+        candidates = self.registry.find_candidates(task_type=task_type, context=context)
 
         scored = []
         for cap in candidates:
-            score = self._calculate_routing_score(cap, keywords, "medium", context)
+            score = self._calculate_routing_score(cap, "medium", context)
             scored.append(
                 RoutingResult(
                     capability=cap,
                     score=score,
-                    reason=self._explain_routing_selection(cap, keywords, score),
+                    reason=self._explain_routing_selection(cap, score),
                 )
             )
 
@@ -596,16 +596,14 @@ class ToolSelector:
     def _calculate_routing_score(
         self,
         cap: Capability,
-        keywords: List[str],
         quality_requirement: str,
         context: Dict[str, Any] = None,
     ) -> float:
         """
-        计算能力评分
+        计算能力评分（不依赖关键词，符合 LLM-First）。
 
-        评分算法：
         Score = base_priority + type_weight×5 + subtype_weight×5
-              + keyword_hint×0.5 + quality_match×20 + context_bonus - cost_penalty
+              + quality_match×20 + context_bonus - cost_penalty
         """
         score = float(cap.priority)
 
@@ -616,10 +614,6 @@ class ToolSelector:
         # 子类型权重
         subtype_weight = self.SUBTYPE_WEIGHTS.get(cap.subtype, 0)
         score += subtype_weight * 5
-
-        # 关键词提示（辅助参考，权重较低）
-        keyword_score = cap.matches_keywords(keywords)
-        score += keyword_score * 0.5
 
         # 质量要求匹配
         score += self._quality_match_score(cap, quality_requirement)
@@ -675,7 +669,7 @@ class ToolSelector:
 
         return penalty
 
-    def _explain_routing_selection(self, cap: Capability, keywords: List[str], score: float) -> str:
+    def _explain_routing_selection(self, cap: Capability, score: float) -> str:
         """解释为什么选择这个能力"""
         reasons = [
             f"Type: {cap.type.value}",
@@ -683,10 +677,6 @@ class ToolSelector:
             f"Priority: {cap.priority}",
             f"Total Score: {score:.1f}",
         ]
-
-        matched_keywords = [kw for kw in keywords if cap.matches_keywords([kw]) > 0]
-        if matched_keywords:
-            reasons.append(f"Matched: {', '.join(matched_keywords)}")
 
         min_quality = cap.constraints.get("min_quality", "N/A")
         reasons.append(f"Quality: {min_quality}")

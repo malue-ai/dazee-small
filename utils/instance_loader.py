@@ -221,11 +221,16 @@ async def load_skill_registry(instance_name: str) -> List[SkillConfig]:
         if not name:
             continue
 
-        # 检查 Skill 目录是否存在
+        # 解析 Skill 目录：先实例目录，再全局 library（与 SkillsLoader 一致）
         skill_path = skills_dir / name
         if not skill_path.exists():
-            logger.warning(f"⚠️ Skill 目录不存在: {skill_path}")
-            continue
+            library_dir = PROJECT_ROOT / "skills" / "library"
+            fallback = library_dir / name
+            if fallback.exists():
+                skill_path = fallback
+            else:
+                logger.warning(f"⚠️ Skill 目录不存在: {skills_dir / name} 且 library 无: {fallback}")
+                continue
 
         # 检查 SKILL.md 是否存在
         skill_md = skill_path / "SKILL.md"
@@ -293,20 +298,24 @@ async def load_instance_config(instance_name: str) -> InstanceConfig:
         thinking_mode=llm_config.get("thinking_mode"),  # 思考模式: native/simulated/none
     )
 
-    # 加载 Skills 配置（Claude Skills 官方 API）
-    skills = await load_skill_registry(instance_name)
-
-    # 加载 APIs 配置（REST API 描述）
-    apis = await _load_apis_config(instance_name, raw_config.get("apis", []))
-
     # 解析通用工具启用配置
     # V11: 检测 Skills-First 新格式（skills 含 common/darwin 等 OS 键）
     skills_raw = raw_config.get("skills", {})
     skills_first_config = None
-
-    if isinstance(skills_raw, dict) and any(
+    is_skills_first = isinstance(skills_raw, dict) and any(
         k in skills_raw for k in ("common", "darwin", "win32", "linux")
-    ):
+    )
+
+    # 仅非 Skills-First 时从 skill_registry.yaml 加载，避免对 plan-todo/hitl 等框架工具报「目录不存在」
+    if is_skills_first:
+        skills = []
+    else:
+        skills = await load_skill_registry(instance_name)
+
+    # 加载 APIs 配置（REST API 描述）
+    apis = await _load_apis_config(instance_name, raw_config.get("apis", []))
+
+    if is_skills_first:
         # Skills-First 新格式：从 SkillsLoader 派生 enabled_capabilities
         skills_first_config = skills_raw
         logger.info("   检测到 Skills-First 配置格式，使用 SkillsLoader")
@@ -560,12 +569,11 @@ async def load_instance_prompt(instance_name: str) -> str:
 
 def load_instance_env_from_config(instance_name: str) -> None:
     """
-    从实例 config.yaml 的 env_vars 段加载环境变量到 os.environ
+    从实例目录加载环境变量到 os.environ
 
-    config.yaml 示例:
-        env_vars:
-            COZE_API_KEY: "pat_xxx..."
-            WENSHU_API_KEY: "app-xxx..."
+    加载顺序（后加载的覆盖先加载的）：
+    1. 实例目录下的 .env 文件（通过 python-dotenv）
+    2. 实例 config.yaml 的 env_vars 段（优先级更高）
 
     Args:
         instance_name: 实例名称
@@ -574,9 +582,24 @@ def load_instance_env_from_config(instance_name: str) -> None:
 
     import yaml
 
-    config_path = get_instances_dir() / instance_name / "config.yaml"
+    instance_dir = get_instances_dir() / instance_name
+
+    # Step 1: 加载实例目录下的 .env 文件
+    env_file = instance_dir / ".env"
+    if env_file.exists():
+        try:
+            from dotenv import load_dotenv
+
+            load_dotenv(dotenv_path=env_file, override=False)
+            logger.info(f"从实例 {instance_name}/.env 加载环境变量")
+        except ImportError:
+            logger.warning("python-dotenv 未安装，跳过 .env 加载。安装: pip install python-dotenv")
+
+    # Step 2: 加载 config.yaml 的 env_vars 段（优先级更高，会覆盖 .env）
+    config_path = instance_dir / "config.yaml"
     if not config_path.exists():
-        logger.warning(f"实例配置文件不存在: {config_path}")
+        if not env_file.exists():
+            logger.warning(f"实例配置文件不存在: {config_path}")
         return
 
     try:
@@ -1193,20 +1216,13 @@ async def _register_mcp_tools(
     agent, mcp_tools: List[Dict[str, Any]], instance_registry=None
 ) -> List:
     """
-    注册 MCP 工具（使用缓存，避免重复连接）
+    注册 MCP 工具（使用缓存，避免重复连接）。
 
-    🆕 V4.4 优化：
-    - 同一个 MCP 服务器只连接一次，后续复用缓存的客户端
-    - 统一注册到 InstanceRegistry，用于 Plan 阶段工具发现
-
-    Args:
-        agent: Agent 实例
-        mcp_tools: MCP 工具配置列表
-        instance_registry: 实例级工具注册表（可选）
-
-    Returns:
-        已连接的 MCP 客户端列表
+    空配置时直接返回，不执行任何连接或注册。
     """
+    if not mcp_tools:
+        return []
+
     try:
         # TODO: 迁移到 local_store
         from infra.pools import get_mcp_pool

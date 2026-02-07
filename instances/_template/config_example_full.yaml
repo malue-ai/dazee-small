@@ -34,14 +34,9 @@ enabled_capabilities:
   docx: 1                    # Word 文档生成
   pdf: 1                     # PDF 生成
   
-  # --- 信息获取类 ---
-  tavily_search: 1           # 通用网络搜索（Tavily API）
-  exa_search: 1              # Exa 语义搜索
+  # --- 信息获取与 Skill 调用 ---
+  api_calling: 1             # 通用 API 调用（搜索、PPT 等通过 Skill 引导）
   knowledge_search: 1        # 个人知识库检索
-  
-  # --- PPT 生成类 ---
-  ppt_generator: 1           # 闭环 PPT 生成工具
-  slidespeak_render: 1       # SlideSpeak 渲染工具
   
   # --- 核心工具 ---
   plan_todo: 1               # 任务规划工具

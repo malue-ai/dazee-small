@@ -77,7 +77,7 @@ class PlaybookEntry:
     strategy: Dict[str, Any] = field(default_factory=dict)
     # {
     #   "execution_strategy": "rvr-b",
-    #   "suggested_tools": ["wenshu_analytics", "chart_generation"],
+    #   "suggested_tools": ["data_analysis_skill", "chart_generation"],
     #   "max_turns": 15,
     #   "planning_depth": "full"
     # }
@@ -85,7 +85,7 @@ class PlaybookEntry:
     # 工具序列模板
     tool_sequence: List[Dict[str, Any]] = field(default_factory=list)
     # [
-    #   {"tool": "wenshu_analytics", "purpose": "数据查询"},
+    #   {"tool": "data_analysis_skill", "purpose": "数据查询"},
     #   {"tool": "chart_generation", "purpose": "生成图表"}
     # ]
 

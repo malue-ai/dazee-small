@@ -54,7 +54,7 @@
 {
   "name": "ResearchAgent",
   "description": "深度研究助手",
-  "tools": ["web_search", "exa_search"],
+  "tools": ["web_search", "api_calling"],
   "skills": [],
   "plan_manager": {"enabled": true, "max_steps": 15, "granularity": "fine"},
   "memory_manager": {"retention_policy": "session", "working_memory_limit": 30},

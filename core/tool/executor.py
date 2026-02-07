@@ -213,6 +213,13 @@ class ToolExecutor:
             self._tool_instances[tool_name] = tool_instance
             logger.info(f"✅ 加载工具: {tool_name}")
 
+        except (ModuleNotFoundError, ImportError) as e:
+            logger.warning(
+                "⚠️ 工具 %s 未安装或未实现，已跳过: %s. 若需使用请安装对应依赖或实现该模块。",
+                tool_name,
+                e,
+            )
+            self._tool_instances[tool_name] = None
         except Exception as e:
             logger.error(f"❌ 加载工具 {tool_name} 失败: {e}")
             self._tool_instances[tool_name] = None

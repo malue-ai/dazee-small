@@ -7,15 +7,6 @@ Skill 模型
 from typing import Optional, List
 from datetime import datetime
 from pydantic import BaseModel, Field
-from enum import Enum
-
-
-class SkillStatus(str, Enum):
-    """Skill 状态"""
-    REGISTERED = "registered"      # 已注册到 Claude API
-    PENDING = "pending"            # 待注册
-    FAILED = "failed"              # 注册失败
-    DISABLED = "disabled"          # 已禁用
 
 
 # ============================================================
@@ -29,7 +20,6 @@ class SkillCreateRequest(BaseModel):
     agent_id: str = Field(..., description="所属 Agent ID")
     skill_content: str = Field(..., description="SKILL.md 内容")
     enabled: bool = Field(True, description="是否启用")
-    auto_register: bool = Field(True, description="是否自动注册到 Claude API")
     
     model_config = {
         "json_schema_extra": {
@@ -40,7 +30,6 @@ class SkillCreateRequest(BaseModel):
                     "agent_id": "test_agent",
                     "skill_content": "---\nname: data_analysis\ndescription: 数据分析\n---\n\n# Data Analysis Skill\n...",
                     "enabled": True,
-                    "auto_register": True
                 }
             ]
         }
@@ -87,13 +76,6 @@ class SkillListResponse(BaseModel):
     skills: List[SkillSummary] = Field(..., description="Skill 列表")
 
 
-class SkillSyncResponse(BaseModel):
-    """Skill 同步响应"""
-    name: str = Field(..., description="Skill 名称")
-    success: bool = Field(..., description="是否成功")
-    message: str = Field("", description="消息")
-
-
 # ============================================================
 # Skill 操作请求
 # ============================================================
@@ -102,7 +84,6 @@ class SkillInstallRequest(BaseModel):
     """安装 Skill 到实例请求"""
     skill_name: str = Field(..., description="Skill 名称（全局库中的 Skill）")
     agent_id: str = Field(..., description="目标实例 ID")
-    auto_register: bool = Field(True, description="是否自动注册到 Claude API")
     
     model_config = {
         "json_schema_extra": {
@@ -110,7 +91,6 @@ class SkillInstallRequest(BaseModel):
                 {
                     "skill_name": "ontology-builder",
                     "agent_id": "dazee_agent",
-                    "auto_register": True
                 }
             ]
         }

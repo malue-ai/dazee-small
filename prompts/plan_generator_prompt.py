@@ -17,17 +17,16 @@ DEFAULT_TOOLS_REFERENCE = """
 
 规划时请参考以下工具能力，确保步骤可执行：
 
-### 信息检索工具
-| 工具 | 用途 |
+### 信息检索
+| 能力 | 用途 |
 |------|------|
-| tavily_search | 通用网络搜索 |
+| 搜索类 Skill / api_calling | 通用网络搜索、信息获取 |
 | knowledge_search | 用户个人知识库检索 |
 
-### 文档处理工具
-| 工具 | 用途 |
+### 文档与内容生成
+| 能力 | 用途 |
 |------|------|
-| document_partition_tool | 解析网络文档（PDF/Word/PPT） |
-| slidespeak_render | 渲染高质量 PPT |
+| PPT Skill + api_calling | 高质量 PPT 生成 |
 | send_files | 发送文件给用户 |
 
 ### API 调用工具
@@ -42,10 +41,7 @@ DEFAULT_TOOLS_REFERENCE = """
 | clue_generation | 生成后续操作建议 |
 
 ### MCP 工具（按实例配置）
-| 工具 | 用途 |
-|------|------|
-| mcp_dify_Ontology_TextToChart_zen0 | 文本转 Mermaid 流程图 |
-| mcp_dify_nano_banana | 文本生成图片 |
+实例 config 中若配置了 mcp_tools，则规划时可引用对应能力（如文档分析、图表生成等）。具体工具名以实例注入为准。
 """
 
 

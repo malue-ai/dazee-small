@@ -1,14 +1,14 @@
 # F4: 搜索与信息获取 - 小搭子可行性测评
-# 验证：通用搜索、学术搜索、搜索+总结
+# 验证：通用搜索、学术搜索、搜索+总结（Skills-First 架构）
 
 id: xiaodazi_feasibility_search_retrieval
 name: 搜索与信息获取（F4）
-description: 验证小搭子搜索与信息获取能力
+description: 验证小搭子搜索与信息获取能力（通过搜索类 Skill + api_calling）
 category: xiaodazi_feasibility
 default_trials: 2
 
 metadata:
-  version: "1.0.0"
+  version: "2.0.0"
   dimension: feasibility
   capability: F4_search_retrieval
 
@@ -21,17 +21,17 @@ tasks:
       conversation_history: []
       context: {}
     expected_outcome:
-      tool_calls: ["tavily_search"]
+      behavior: "使用搜索类 Skill 或 api_calling 获取信息"
     graders:
-      - type: code
-        name: check_tool_calls
-        check: "tool_calls_contain('tavily_search')"
+      - type: model
+        rubric: grade_search_skill_usage
+        min_score: 4
       - type: model
         rubric: grade_response_quality
         min_score: 4
     trials: 2
     timeout_seconds: 45
-    tags: ["search", "tavily", "F4"]
+    tags: ["search", "skill", "F4"]
 
   - id: F4-02_academic_search
     description: "学术搜索 - 找关于 LLM Agent 的最新论文"
@@ -41,17 +41,17 @@ tasks:
       conversation_history: []
       context: {}
     expected_outcome:
-      tool_calls: ["exa_search"]
+      behavior: "使用学术搜索 Skill（如 arxiv-search、paper-search）或 api_calling"
     graders:
-      - type: code
-        name: check_tool_calls
-        check: "tool_calls_contain('exa_search')"
+      - type: model
+        rubric: grade_search_skill_usage
+        min_score: 4
       - type: model
         rubric: grade_response_quality
         min_score: 4
     trials: 2
     timeout_seconds: 60
-    tags: ["search", "exa", "academic", "F4"]
+    tags: ["search", "academic", "skill", "F4"]
 
   - id: F4-03_search_summarize
     description: "搜索+总结 - 搜索并总结 Python 3.13 的新特性"
@@ -61,9 +61,9 @@ tasks:
       conversation_history: []
       context: {}
     graders:
-      - type: code
-        name: check_tool_calls
-        check: "tool_calls_contain('tavily_search')"
+      - type: model
+        rubric: grade_search_skill_usage
+        min_score: 4
       - type: model
         rubric: grade_response_quality
         min_score: 4

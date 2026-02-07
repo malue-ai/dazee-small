@@ -1,5 +1,5 @@
 # E1: Skill 选择准确性 - 小搭子效率性测评
-# 验证：是否选择最优 Skill 而非兜底方案
+# 验证：是否选择最优 Skill 而非兜底方案（Skills-First 架构）
 
 id: xiaodazi_efficiency_skill_selection
 name: Skill 选择准确性（E1）
@@ -8,7 +8,7 @@ category: xiaodazi_efficiency
 default_trials: 2
 
 metadata:
-  version: "1.0.0"
+  version: "2.0.0"
   dimension: efficiency
   capability: E1_skill_selection
 
@@ -35,19 +35,17 @@ tasks:
     tags: ["efficiency", "skill_selection", "E1"]
 
   - id: E1-02_make_ppt
-    description: "做一个 PPT - 应使用 ppt_generator 而非 code_execution 手写"
+    description: "做一个 PPT - 应使用 PPT Skill（如 slidespeak-generator）+ api_calling"
     category: skill_selection
     input:
       user_query: "做一个简单的产品介绍 PPT，3 页"
       conversation_history: []
       context: {}
     metadata:
-      optimal_tools: ["ppt_generator"]
+      optimal_tools: ["api_calling"]
+      optimal_skills: ["slidespeak-generator"]
       suboptimal_tools: ["code_execution"]
     graders:
-      - type: code
-        name: check_tool_calls
-        check: "tool_calls_contain('ppt_generator')"
       - type: model
         rubric: grade_skill_selection
         min_score: 4
@@ -56,19 +54,16 @@ tasks:
     tags: ["efficiency", "skill_selection", "E1"]
 
   - id: E1-03_search_papers
-    description: "搜索 AI 论文 - 应使用 exa_search 而非 tavily_search"
+    description: "搜索 AI 论文 - 应使用学术搜索 Skill（如 arxiv-search/paper-search）"
     category: skill_selection
     input:
       user_query: "找关于 LLM Agent 的最新论文"
       conversation_history: []
       context: {}
     metadata:
-      optimal_tools: ["exa_search"]
-      suboptimal_tools: ["tavily_search"]
+      optimal_skills: ["arxiv-search", "paper-search"]
+      suboptimal_tools: ["code_execution"]
     graders:
-      - type: code
-        name: check_tool_calls
-        check: "tool_calls_contain('exa_search')"
       - type: model
         rubric: grade_skill_selection
         min_score: 4
@@ -106,7 +101,7 @@ tasks:
       context: {}
       files: []
     metadata:
-      optimal_tools: ["code_execution", "document_partition_tool"]
+      optimal_tools: ["code_execution"]
     graders:
       - type: code
         name: check_tool_calls
