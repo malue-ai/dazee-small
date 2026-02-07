@@ -468,6 +468,7 @@ instances/
 | 进度转换器 | 3.7.2 | 85% | 已完成 |
 | 本地知识检索 | 3.8 | 80% | FTS5 已完成，语义搜索待实现 |
 | 记忆系统 | 3.13 | 85% | 三层架构已完成 |
+| Nodes 本地操作 | 3.5 | 80% (macOS) | macOS 11 项操作完整，win32/linux 待实现 |
 | OS 兼容层 | 3.5 | 40% | 仅 macOS 实现 |
 | 应用发现 | 3.11 | 35% | 仅 macOS 扫描 |
 | 项目管理 | 3.10 | 5% | 骨架占位 |
@@ -730,12 +731,75 @@ instances/
 
 ---
 
-### 2.13 三大核心能力（3.9）
+### 2.13 Nodes 本地操作工具（3.5 OS 兼容层）
+
+**价值定位**：Nodes 是小搭子"会干活"能力的底层执行器 — 通过它调用 shell 命令、操作剪贴板、截图、发通知、打开应用，是连接 LLM 和用户电脑的桥梁。
+
+#### 架构
+
+```
+LLM 决策 -> tools/nodes_tool.py（NodesTool）
+                |
+                v
+           core/nodes/manager.py（NodeManager，节点注册与路由）
+                |
+                v
+           core/nodes/local/macos.py（MacOSLocalNode，平台实现）
+                |
+                v
+           core/nodes/executors/shell.py（ShellExecutor，命令执行）
+```
+
+#### 文件清单
+
+| 文件 | 行数 | 状态 | 说明 |
+|------|------|------|------|
+| `tools/nodes_tool.py` | 240 | 已完成 | 工具入口：5 个 action（status/describe/run/notify/which） |
+| `core/nodes/manager.py` | 292 | 已完成 | 节点管理器：注册/发现/路由 |
+| `core/nodes/protocol.py` | 206 | 已完成 | 协议定义：所有支持的命令类型 |
+| `core/nodes/local/base.py` | 183 | 已完成 | 本地节点基类 |
+| `core/nodes/local/macos.py` | 352 | 已完成 | macOS 实现（AppleScript/截图/剪贴板等） |
+| `core/nodes/executors/shell.py` | 275 | 已完成 | Shell 命令执行器（超时/安全/输出捕获） |
+
+**总计**：约 1,400 行，架构完整。
+
+#### macOS 已实现操作
+
+| 操作 | 命令 | 实现 |
+|------|------|------|
+| Shell 命令执行 | `system.run` | 已完成 |
+| 检查可执行文件 | `system.which` | 已完成 |
+| 系统通知 | `system.notify` | 已完成（AppleScript） |
+| AppleScript | `applescript` | 已完成 |
+| 打开应用 | `open_app` | 已完成 |
+| 打开 URL | `open_url` | 已完成 |
+| 打开路径 | `open_path` | 已完成 |
+| 屏幕截图 | `screenshot` | 已完成（screencapture） |
+| 剪贴板读取 | `clipboard.get` | 已完成（pbpaste） |
+| 剪贴板写入 | `clipboard.set` | 已完成（pbcopy） |
+| 文字转语音 | `say` | 已完成（macOS say） |
+
+#### 集成状态
+
+- `config/capabilities.yaml` 中注册为 `level: 1` 核心工具（始终启用）
+- 通过工具注册表动态加载，LLM 可直接调用
+- `cache_stable: true`，`requires_api: false`
+
+#### 遗留
+
+- Windows 本地节点（`WindowsLocalNode`）— 不存在，需新建
+- Linux 本地节点（`LinuxLocalNode`）— 不存在，需新建
+- 协议中已定义但未实现的命令：`camera.snap`、`screen.record`、`location.get`、`canvas.present`、`browser.proxy`
+- 远程节点通信（WebSocket）— 接口预留，未实现
+
+---
+
+### 2.14 三大核心能力总览（3.9）
 
 | 能力 | 技术实现 | 状态 |
 |------|----------|------|
 | **会干活** — 工具调用 | `core/tool/` + Skills | 已完成 |
-| **会干活** — 文件操作 | `nodes/local/` | macOS 完成，win32/linux 待实现 |
+| **会干活** — 文件/系统操作 | `core/nodes/` + `tools/nodes_tool.py` | macOS 完整（11 项操作），win32/linux 待实现（详见 2.13） |
 | **会干活** — 应用联动 | `AppScanner` + `RuntimeContextBuilder` | macOS 部分完成 |
 | **会思考** — 智能回溯 | `core/agent/execution/rvrb.py` | 已完成 |
 | **会思考** — 错误分类 | `core/agent/backtrack/error_classifier.py` | 已完成 |
@@ -747,7 +811,7 @@ instances/
 
 ---
 
-### 2.14 Playbook 持续学习引擎
+### 2.15 Playbook 持续学习引擎
 
 **价值定位**：从成功的任务执行中自动提取可复用策略，下次遇到类似任务时直接套用，让小搭子"用得越久，越聪明"。
 
