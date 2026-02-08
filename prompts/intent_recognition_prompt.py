@@ -1,12 +1,14 @@
 """
-Intent Recognition Prompt - V10.0 极简版
+Intent Recognition Prompt - V12.0 桌面端版
 
-只输出 3 个核心字段：
+输出 5 个核心字段：
 - complexity: 复杂度等级 (simple/medium/complex)
-- agent_type: 执行引擎 (rvr/rvr-b/multi)
 - skip_memory: 是否跳过记忆检索
+- is_follow_up: 是否为追问
+- wants_to_stop: 用户是否希望停止/取消
+- relevant_skill_groups: 需要哪些技能分组（多选）
 
-其他字段（needs_plan, execution_strategy）由代码从 complexity 推断。
+其他字段（needs_plan）由代码从 complexity 推断。
 
 设计原则：
 - 极简输出，减少 LLM 产生矛盾的可能
@@ -24,67 +26,69 @@ INTENT_RECOGNITION_PROMPT = """# 意图分类器
 ## 输出格式
 
 ```json
-{
+{{
   "complexity": "simple|medium|complex",
-  "agent_type": "rvr|rvr-b|multi",
   "skip_memory": true|false,
-  "wants_to_stop": true|false
-}
+  "is_follow_up": true|false,
+  "wants_to_stop": true|false,
+  "relevant_skill_groups": ["group1", "group2"]
+}}
 ```
 
 **所有字段必填**，不要省略。
 
 ---
 
-## wants_to_stop（用户是否希望停止/取消）
-
-- **true**: 用户明确或隐含表示要停止、取消、不做了、算了、别继续了等
-  - 例: "算了不做了"、"取消吧"、"别继续了"、"就到这里"、"停止"
-  - 例: "不用了谢谢"、"先这样"（在任务进行中时）
-- **false**: 用户在进行正常任务请求或追问
-
-**默认: false**（不确定时视为不停止）
-
----
-
 ## complexity（复杂度）
 
-- **simple**: 单步骤，可直接回答
-  - 例: 天气查询、翻译、概念问答、简单计算
-  
-- **medium**: 2-4 步骤，需要少量规划
-  - 例: 搜索并总结、写一个函数、分析单个数据源
-  
-- **complex**: 5+ 步骤，需要完整规划
-  - 例: 系统设计、调研报告、多步骤开发任务
+- **simple**: 单步骤，可直接回答或单次工具调用
+  - 例: 天气查询、简单翻译、打开一个应用、概念问答、简单计算
 
----
+- **medium**: 2-4 步骤，需少量规划或多次工具调用
+  - 例: 写一篇文章、分析一个 Excel、搜索并总结、整理指定文件夹
 
-## agent_type（执行引擎）
-
-- **rvr**: 确定性任务，无需回溯重试
-  - 例: 问答、翻译、天气查询、简单代码
-  
-- **rvr-b**: 可能失败需要重试的任务
-  - 例: 代码开发（需测试验证）、调研任务、爬虫
-  - 例: 多步骤依赖任务（后步依赖前步结果）
-  
-- **multi**: 3+ 个独立实体需并行处理
-  - 例: "研究 Top 5 AI 公司" → 5 个独立研究任务
-  - 例: "对比 AWS/Azure/GCP" → 3 个独立信息收集
-  - 注意: 只有 2 个实体时用 rvr，不用 multi
+- **complex**: 5+ 步骤，需完整规划，可能涉及多工具协作或 UI 操作链
+  - 例: 调研竞品写对比报告、在应用中完成多步操作流程、整理文件夹并生成分类清单
 
 ---
 
 ## skip_memory（跳过记忆检索）
 
-- **true**: 客观事实查询，无需个性化
-  - 例: 天气、汇率、百科知识、技术概念
-  
-- **false**: 可能需要用户偏好/历史
-  - 例: 写邮件、生成PPT、推荐、个性化内容
+- **true**: 客观事实查询，无需个性化（如天气、翻译、计算）
+- **false**: 可能需要用户偏好/历史（如写作风格、常用路径、称呼）
 
 **默认: false**（不确定时检索记忆，安全保守）
+
+---
+
+## is_follow_up（是否为追问）
+
+- **true**: 用户在已有对话基础上追问、补充、修改，依赖前序上下文
+  - 例: "继续"、"然后呢"、"把第二段改短一点"、"用表格展示"
+- **false**: 全新请求，不依赖前序对话
+
+**默认: false**
+
+---
+
+## wants_to_stop（用户是否希望停止/取消）
+
+- **true**: 用户明确表示停止、取消、不做了
+- **false**: 正常任务请求或追问
+
+**默认: false**
+
+---
+
+## relevant_skill_groups（需要哪些技能分组）
+
+从以下分组中选择**所有可能相关的**（可多选，宁多勿漏）：
+{skill_groups_description}
+
+**原则**：
+- 一个请求可能涉及多个分组（如"分析 Excel 写总结" → ["data_analysis", "writing"]）
+- **重召回**：不确定是否需要时，选上（宁可多选，不要漏掉）
+- 纯聊天/问答/计算等不需要任何技能时，填 []
 
 ---
 
@@ -92,62 +96,57 @@ INTENT_RECOGNITION_PROMPT = """# 意图分类器
 
 <example>
 <query>今天上海天气怎么样？</query>
-<output>{"complexity": "simple", "agent_type": "rvr", "skip_memory": true, "wants_to_stop": false}</output>
+<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": []}}</output>
 </example>
 
 <example>
-<query>帮我写一个 Python 快速排序函数</query>
-<output>{"complexity": "medium", "agent_type": "rvr", "skip_memory": false, "wants_to_stop": false}</output>
+<query>帮我写一篇关于咖啡文化的文章</query>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["writing"]}}</output>
 </example>
 
 <example>
-<query>帮我开发一个用户注册功能，包括前后端和测试</query>
-<output>{"complexity": "complex", "agent_type": "rvr-b", "skip_memory": false}</output>
+<query>分析这个 Excel 数据，找出销售趋势，写一段总结</query>
+<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["data_analysis", "writing"]}}</output>
 </example>
 
 <example>
-<query>研究 Top 5 云计算公司的 AI 战略，生成分析报告</query>
-<output>{"complexity": "complex", "agent_type": "multi", "skip_memory": false}</output>
+<query>打开飞书给合伙人群发一句问候</query>
+<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["app_automation"]}}</output>
 </example>
 
 <example>
-<query>对比 AWS、Azure、GCP 三家云服务商的定价策略</query>
-<output>{"complexity": "complex", "agent_type": "multi", "skip_memory": true}</output>
-</example>
-
-<example>
-<query>对比 Python 和 JavaScript 的性能</query>
-<output>{"complexity": "medium", "agent_type": "rvr", "skip_memory": true}</output>
-</example>
-
-<example>
-<query>Python 是什么？</query>
-<output>{"complexity": "simple", "agent_type": "rvr", "skip_memory": true}</output>
-</example>
-
-<example>
-<query>帮我生成一个产品介绍 PPT</query>
-<output>{"complexity": "complex", "agent_type": "rvr-b", "skip_memory": false}</output>
+<query>帮我整理下载文件夹，按类型分类</query>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["file_operation"]}}</output>
 </example>
 
 <example>
 <query>把这段话翻译成英文</query>
-<output>{"complexity": "simple", "agent_type": "rvr", "skip_memory": true}</output>
+<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["translation"]}}</output>
 </example>
 
 <example>
-<query>帮我写一份竞品分析报告</query>
-<output>{"complexity": "complex", "agent_type": "rvr-b", "skip_memory": false, "wants_to_stop": false}</output>
+<query>把第二段改短一点</query>
+<output>{{"complexity": "simple", "skip_memory": false, "is_follow_up": true, "wants_to_stop": false, "relevant_skill_groups": ["writing"]}}</output>
 </example>
 
 <example>
 <query>算了不做了</query>
-<output>{"complexity": "simple", "agent_type": "rvr", "skip_memory": true, "wants_to_stop": true}</output>
+<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": true, "relevant_skill_groups": []}}</output>
 </example>
 
 <example>
-<query>取消吧，别继续了</query>
-<output>{"complexity": "simple", "agent_type": "rvr", "skip_memory": true, "wants_to_stop": true}</output>
+<query>Python 是什么？</query>
+<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": []}}</output>
+</example>
+
+<example>
+<query>帮我搜一下最近的 transformer 论文</query>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["research"]}}</output>
+</example>
+
+<example>
+<query>截个图给我看看桌面</query>
+<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["app_automation"]}}</output>
 </example>
 
 ---
@@ -155,33 +154,46 @@ INTENT_RECOGNITION_PROMPT = """# 意图分类器
 ## 重要说明
 
 - 只输出 JSON，不要解释
-- 不确定 agent_type 时选 rvr（保守）
 - 不确定 skip_memory 时选 false（保守）
-- 2 个实体对比用 rvr，3+ 个实体才考虑 multi
+- 不确定 is_follow_up 时选 false（保守）
+- relevant_skill_groups 宁多勿漏，不确定时多选
 
 现在分析用户的请求，只输出 JSON："""
 
 
+DEFAULT_SKILL_GROUPS_DESC = """- **writing**: 写作、润色、改写、扩写、文章生成、内容创作、风格学习、多平台格式转换
+- **data_analysis**: Excel / CSV 数据分析、表格处理、数据清洗、格式修复
+- **file_operation**: 本地文件管理、文件整理/移动/重命名、Word 文档创建与编辑
+- **translation**: 多语言翻译
+- **research**: 学术论文搜索、文献综述、arXiv 预印本搜索
+- **app_automation**: 桌面应用操作（打开/切换/控制应用）、UI 自动化、截图、系统通知、AppleScript 脚本"""
+
+
 def get_intent_recognition_prompt(
-    custom_rules: Optional[str] = None
+    custom_rules: Optional[str] = None,
+    skill_groups_description: Optional[str] = None,
 ) -> str:
     """
     获取意图识别提示词
-    
+
     Args:
         custom_rules: 自定义规则（可选，会追加到默认提示词之后）
-        
+        skill_groups_description: Skill 分组描述（可选，从 config 动态生成）
+
     Returns:
         意图识别提示词
     """
+    groups_desc = skill_groups_description or DEFAULT_SKILL_GROUPS_DESC
+    prompt = INTENT_RECOGNITION_PROMPT.replace("{skill_groups_description}", groups_desc)
+
     if custom_rules:
-        return INTENT_RECOGNITION_PROMPT + "\n\n" + custom_rules
-    return INTENT_RECOGNITION_PROMPT
+        return prompt + "\n\n" + custom_rules
+    return prompt
 
 
 def get_default_intent_prompt() -> str:
     """获取默认意图识别提示词"""
-    return INTENT_RECOGNITION_PROMPT
+    return get_intent_recognition_prompt()
 
 
 __all__ = [

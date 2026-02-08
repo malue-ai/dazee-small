@@ -248,8 +248,8 @@ class QwenLLMService(BaseLLMService):
         if base_url:
             logger.info(f"🌐 千问端点（自定义）: {base_url}")
         else:
-            region = getattr(self.config, "region", "cn-beijing")
-            base_url = QwenRegions.MAPPING.get(region, QwenRegions.CN_BEIJING)
+            region = getattr(self.config, "region", "singapore")
+            base_url = QwenRegions.MAPPING.get(region, QwenRegions.SINGAPORE)
             logger.info(f"🌐 千问地域: {region} ({base_url})")
 
         # 初始化 OpenAI 客户端
@@ -1305,7 +1305,7 @@ def create_qwen_service(
 
         # 自定义端点（使用代理）
         llm = create_qwen_service(
-            model="qwen3-max",
+            model="qwen3-max-2026-01-23",
             base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
         )
     """

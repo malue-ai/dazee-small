@@ -65,7 +65,8 @@ config.yaml
 # Tauri 自动生成的 schema / ACL 文件
 frontend/src-tauri/gen/
 
-# PyInstaller build output
+
+# PyInstaller build output（由 build_backend.py 生成）
 frontend/src-tauri/binaries/_internal/
 
 # Project specific
@@ -73,14 +74,12 @@ workspace_*/
 skill_outputs/
 *.code-workspace
 
-# PyInstaller onedir 构建产物（由 build_backend.py 生成）
-frontend/src-tauri/binaries/_internal/
-
 # 生成的输出文件
 workspace/outputs/ppt/*.pptx
 *.db
 *.db-shm
 *.db-wal
+*.db-journal
 test_mem0_e2e_report_*.json
 dump.rdb
 

@@ -270,24 +270,25 @@ class ClaudeAdaptor(BaseAdaptor):
     @staticmethod
     def ensure_tool_pairs(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        确保 tool_use 和 tool_result 成对出现（同时去重）
+        确保 tool_use 和 tool_result 成对且邻接出现（同时去重）
 
         Claude API 要求：
         - 每个 tool_use 后面必须紧跟对应的 tool_result（在下一个 user 消息中）
         - 如果 tool_use 没有对应的 tool_result，需要移除
         - 如果 tool_result 没有对应的 tool_use，也需要移除
-        - 🆕 每个 tool_use_id 只能有一个 tool_result（去重）
+        - 每个 tool_use_id 只能有一个 tool_result（去重）
+        - tool_result 必须在 tool_use 所在 assistant 消息的**紧邻下一条** user 消息中
 
         Args:
             messages: 消息列表
 
         Returns:
-            清理后的消息列表（只保留配对且不重复的 tool_use/tool_result）
+            清理后的消息列表（只保留配对、邻接且不重复的 tool_use/tool_result）
         """
         if not messages:
             return messages
 
-        # 1. 收集所有 tool_use ID 和 tool_result 对应的 tool_use_id
+        # Phase 1: 全局配对检查 — 收集所有 tool_use ID 和 tool_result ID
         tool_use_ids: set = set()
         tool_result_ids: set = set()
 
@@ -305,25 +306,72 @@ class ClaudeAdaptor(BaseAdaptor):
                 elif block_type == "tool_result":
                     tool_result_ids.add(block.get("tool_use_id"))
 
-        # 2. 找出配对的 tool_use（既有 tool_use 又有对应的 tool_result）
-        paired_ids = tool_use_ids & tool_result_ids
-        unpaired_tool_use = tool_use_ids - tool_result_ids
-        unpaired_tool_result = tool_result_ids - tool_use_ids
+        globally_paired = tool_use_ids & tool_result_ids
 
-        if unpaired_tool_use:
+        if tool_use_ids - tool_result_ids:
             logger.warning(
-                f"⚠️ 发现 {len(unpaired_tool_use)} 个未配对的 tool_use，将移除: {unpaired_tool_use}"
+                f"⚠️ 发现 {len(tool_use_ids - tool_result_ids)} 个全局未配对的 tool_use，将移除: "
+                f"{tool_use_ids - tool_result_ids}"
             )
-        if unpaired_tool_result:
+        if tool_result_ids - tool_use_ids:
             logger.warning(
-                f"⚠️ 发现 {len(unpaired_tool_result)} 个未配对的 tool_result，将移除: {unpaired_tool_result}"
+                f"⚠️ 发现 {len(tool_result_ids - tool_use_ids)} 个全局未配对的 tool_result，将移除: "
+                f"{tool_result_ids - tool_use_ids}"
             )
 
-        # 3. 🆕 过滤消息，移除未配对的 tool_use 和 tool_result，同时去重
-        # 记录已添加的 tool_use 和 tool_result ID（用于去重）
+        # Phase 2: 邻接性检查 — tool_use 所在 assistant 消息的下一条必须是包含
+        # 对应 tool_result 的 user 消息
+        adjacent_paired: set = set()
+
+        for i, msg in enumerate(messages):
+            content = msg.get("content", [])
+            if msg.get("role") != "assistant" or not isinstance(content, list):
+                continue
+
+            # 收集该 assistant 消息中的 tool_use IDs
+            tu_ids_in_msg = {
+                b.get("id")
+                for b in content
+                if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("id") in globally_paired
+            }
+            if not tu_ids_in_msg:
+                continue
+
+            # 检查紧邻的下一条消息是否为 user 且包含对应 tool_result
+            next_idx = i + 1
+            if next_idx < len(messages):
+                next_msg = messages[next_idx]
+                next_content = next_msg.get("content", [])
+                if next_msg.get("role") == "user" and isinstance(next_content, list):
+                    tr_ids_in_next = {
+                        b.get("tool_use_id")
+                        for b in next_content
+                        if isinstance(b, dict) and b.get("type") == "tool_result"
+                    }
+                    # 只有在下一条消息中有对应 tool_result 的才算邻接配对
+                    matched = tu_ids_in_msg & tr_ids_in_next
+                    adjacent_paired.update(matched)
+
+                    not_adjacent = tu_ids_in_msg - tr_ids_in_next
+                    if not_adjacent:
+                        logger.warning(
+                            f"⚠️ 消息[{i}] 中的 tool_use 在下一条消息中缺少对应 tool_result，"
+                            f"将移除: {not_adjacent}"
+                        )
+                else:
+                    # 下一条不是 user 消息，所有 tool_use 都不满足邻接性
+                    logger.warning(
+                        f"⚠️ 消息[{i}] 含 tool_use 但下一条消息不是 user，将移除: {tu_ids_in_msg}"
+                    )
+            else:
+                # assistant 是最后一条消息，tool_use 没有 tool_result
+                logger.warning(
+                    f"⚠️ 消息[{i}] 含 tool_use 但已是最后一条消息，将移除: {tu_ids_in_msg}"
+                )
+
+        # Phase 3: 基于邻接配对集合过滤消息，同时去重
         added_tool_use_ids: set = set()
         added_tool_result_ids: set = set()
-
         cleaned_messages = []
 
         for msg in messages:
@@ -331,7 +379,6 @@ class ClaudeAdaptor(BaseAdaptor):
             role = msg.get("role", "user")
 
             if isinstance(content, list):
-                # 过滤未配对的块 + 去重
                 filtered_content = []
                 for block in content:
                     if not isinstance(block, dict):
@@ -341,26 +388,24 @@ class ClaudeAdaptor(BaseAdaptor):
 
                     if block_type == "tool_use":
                         tool_id = block.get("id")
-                        if tool_id in paired_ids:
-                            # 🆕 检查是否已添加过（去重）
+                        if tool_id in adjacent_paired:
                             if tool_id in added_tool_use_ids:
                                 logger.warning(f"🧹 移除重复的 tool_use: {tool_id}")
                                 continue
                             added_tool_use_ids.add(tool_id)
                             filtered_content.append(block)
                         else:
-                            logger.debug(f"🧹 移除未配对的 tool_use: {tool_id}")
+                            logger.debug(f"🧹 移除未配对/非邻接的 tool_use: {tool_id}")
                     elif block_type == "tool_result":
                         tool_use_id = block.get("tool_use_id")
-                        if tool_use_id in paired_ids:
-                            # 🆕 检查是否已添加过（去重）
+                        if tool_use_id in adjacent_paired:
                             if tool_use_id in added_tool_result_ids:
                                 logger.warning(f"🧹 移除重复的 tool_result: {tool_use_id}")
                                 continue
                             added_tool_result_ids.add(tool_use_id)
                             filtered_content.append(block)
                         else:
-                            logger.debug(f"🧹 移除未配对的 tool_result: {tool_use_id}")
+                            logger.debug(f"🧹 移除未配对/非邻接的 tool_result: {tool_use_id}")
                     else:
                         filtered_content.append(block)
 
@@ -372,15 +417,18 @@ class ClaudeAdaptor(BaseAdaptor):
                 if content:
                     cleaned_messages.append(msg)
 
-        # 🆕 统计去重信息
-        duplicate_tool_use = len(tool_use_ids) - len(added_tool_use_ids)
-        duplicate_tool_result = len(tool_result_ids) - len(added_tool_result_ids)
-        if duplicate_tool_use > 0 or duplicate_tool_result > 0:
-            logger.warning(
-                f"🧹 去重: 移除 {duplicate_tool_use} 个重复 tool_use, {duplicate_tool_result} 个重复 tool_result"
+        removed_count = len(messages) - len(cleaned_messages)
+        if removed_count > 0:
+            logger.info(
+                f"✅ ensure_tool_pairs: {len(messages)} → {len(cleaned_messages)} 条消息 "
+                f"(adjacent_paired={len(adjacent_paired)})"
+            )
+        else:
+            logger.debug(
+                f"✅ ensure_tool_pairs: {len(messages)} 条消息无需清理 "
+                f"(adjacent_paired={len(adjacent_paired)})"
             )
 
-        logger.info(f"✅ ensure_tool_pairs: {len(messages)} → {len(cleaned_messages)} 条消息")
         return cleaned_messages
 
     @staticmethod
@@ -476,14 +524,68 @@ class ClaudeAdaptor(BaseAdaptor):
                 # 其他情况直接添加
                 converted_messages.append({"role": msg.role, "content": content})
 
-        # 🔧 关键：确保 tool_use/tool_result 配对（移除未配对的 tool_use）
-        # 这是发送给 Claude API 前的最后一道防线
+        # 🔧 关键：确保 tool_use/tool_result 配对且邻接（移除未配对/非邻接的 tool_use）
+        converted_messages = ClaudeAdaptor.ensure_tool_pairs(converted_messages)
+
+        # 🔧 合并连续同角色消息（ensure_tool_pairs 移除内容后可能产生）
+        converted_messages = ClaudeAdaptor._merge_consecutive_same_role(converted_messages)
+
+        # 🛡️ 最终防线：合并后再次验证 tool_use/tool_result 配对
+        # _merge_consecutive_same_role 可能改变消息邻接关系，需要二次验证
         converted_messages = ClaudeAdaptor.ensure_tool_pairs(converted_messages)
 
         result = {"messages": converted_messages}
         if system:
             result["system"] = system
         return result
+
+    @staticmethod
+    def _merge_consecutive_same_role(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        合并连续同角色消息（Claude API 要求 user/assistant 严格交替）
+
+        当 ensure_tool_pairs 移除 tool_use/tool_result 后，可能产生连续同角色消息，
+        需要合并以满足 Claude API 的交替要求。
+
+        Args:
+            messages: 消息列表
+
+        Returns:
+            合并后的消息列表
+        """
+        if not messages:
+            return messages
+
+        merged = [messages[0]]
+
+        for msg in messages[1:]:
+            prev = merged[-1]
+            if msg.get("role") == prev.get("role"):
+                # 同角色，合并 content
+                prev_content = prev.get("content", [])
+                curr_content = msg.get("content", [])
+
+                if isinstance(prev_content, str) and isinstance(curr_content, str):
+                    prev["content"] = prev_content + "\n" + curr_content
+                elif isinstance(prev_content, list) and isinstance(curr_content, list):
+                    prev["content"] = prev_content + curr_content
+                elif isinstance(prev_content, str) and isinstance(curr_content, list):
+                    prev["content"] = [{"type": "text", "text": prev_content}] + curr_content
+                elif isinstance(prev_content, list) and isinstance(curr_content, str):
+                    prev["content"] = prev_content + [{"type": "text", "text": curr_content}]
+
+                logger.debug(
+                    f"🔗 合并连续 {msg.get('role')} 消息"
+                )
+            else:
+                merged.append(msg)
+
+        if len(merged) != len(messages):
+            logger.info(
+                f"🔗 合并连续同角色消息: {len(messages)} → {len(merged)} 条"
+            )
+
+        return merged
 
     def convert_response_to_claude(self, response: Any) -> LLMResponse:
         """Claude 响应 → LLMResponse（原生）"""

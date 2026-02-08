@@ -8,8 +8,7 @@
 """
 
 import importlib
-import os
-from pathlib import Path
+import pkgutil
 
 from logger import get_logger
 
@@ -17,17 +16,11 @@ logger = get_logger("background_tasks.tasks")
 
 
 def _auto_import_tasks():
-    """自动导入当前目录下所有任务模块"""
-    tasks_dir = Path(__file__).parent
-
-    for file_path in tasks_dir.glob("*.py"):
-        # 跳过 __init__.py
-        if file_path.name.startswith("_"):
+    """自动导入当前包下所有任务模块（兼容 PyInstaller 打包环境）"""
+    for finder, module_name, is_pkg in pkgutil.iter_modules(__path__):
+        if module_name.startswith("_"):
             continue
-
-        module_name = file_path.stem
         try:
-            # 导入模块（装饰器会自动注册任务）
             importlib.import_module(f".{module_name}", package=__name__)
             logger.debug(f"✅ 已导入任务模块: {module_name}")
         except Exception as e:

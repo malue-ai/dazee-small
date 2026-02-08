@@ -4,7 +4,7 @@
 >
 > 范围：仅涉及 Python 后端 + 框架核心层，不涉及 Tauri 桌面壳、Vue 前端组件。
 >
-> 更新时间：2026-02-07
+> 更新时间：2026-02-08
 
 ---
 
@@ -70,12 +70,12 @@
 │                          核心层 (core/)  — Agent Framework                               │
 │                                                                                         │
 │  ┌─── agent/ ── Agent 引擎 ───────────────────────────────────────────────────────────┐ │
-│  │  base.py (797行, SimpleAgent)                                                      │ │
+│  │  base.py (SimpleAgent)                                                      │ │
 │  │  factory.py (AgentFactory) │ models.py │ protocol.py │ content_handler.py │ errors │ │
 │  │                                                                                    │ │
 │  │  ┌── execution/ ────────────────────────────────────────────────────────────────┐  │ │
-│  │  │  rvr.py (817行, RVR 执行器)                                                  │  │ │
-│  │  │  rvrb.py (939行, RVR-B 回溯执行器)                                            │  │ │
+│  │  │  rvr.py (RVR 执行器)                                                  │  │ │
+│  │  │  rvrb.py (RVR-B 回溯执行器)                                            │  │ │
 │  │  │  protocol.py (ExecutionStrategy)                                             │  │ │
 │  │  └──────────────────────────────────────────────────────────────────────────────┘  │ │
 │  │  ┌── backtrack/ ────────────────────────────────────────────────────────────────┐  │ │
@@ -88,7 +88,7 @@
 │  └────────────────────────────────────────────────────────────────────────────────────┘ │
 │                                                                                         │
 │  ┌─── routing/ ── 意图路由 ───────────────────────────────────────────────────────────┐ │
-│  │  intent_analyzer.py (277行, LLM 意图分析, fast_mode/semantic_cache)                │ │
+│  │  intent_analyzer.py (LLM 意图分析, fast_mode/semantic_cache)                │ │
 │  │  router.py (AgentRouter) │ intent_cache.py (语义缓存) │ types.py (IntentResult)    │ │
 │  └────────────────────────────────────────────────────────────────────────────────────┘ │
 │                                                                                         │
@@ -108,20 +108,20 @@
 │                                                                                         │
 │  ┌─── memory/ ── 记忆系统 ────────────────────────────────────────────────────────────┐ │
 │  │                   ┌─────────────────────────────────────┐                          │ │
-│  │                   │ xiaodazi_memory.py (513行)           │                          │ │
+│  │                   │ xiaodazi_memory.py                   │                          │ │
 │  │                   │ 三层入口: recall / remember / flush  │                          │ │
 │  │                   └──────────┬──────────────────────────┘                          │ │
 │  │          ┌───────────────────┼──────────────────────┐                              │ │
 │  │  ┌───────▼──────┐  ┌────────▼──────┐  ┌────────────▼──────────────────────┐        │ │
 │  │  │ Layer 1      │  │ Layer 2       │  │ Layer 3: mem0/                    │        │ │
-│  │  │ markdown_    │  │ GenericFTS5   │  │  pool.py (向量搜索)               │        │ │
-│  │  │ layer.py     │  │ (全文索引)     │  │  config.py │ sqlite_vec_store.py │        │ │
+│  │  │ markdown_    │  │ GenericFTS5   │  │  pool.py (向量搜索)              │        │ │
+│  │  │ layer.py     │  │ (全文索引)     │  │  config.py │ sqlite_vec_store   │        │ │
 │  │  │ (MEMORY.md)  │  │              │  │  extraction/: extractor.py        │        │ │
-│  │  │ 409行        │  │              │  │  retrieval/: formatter │ reranker  │        │ │
-│  │  └──────────────┘  └──────────────┘  │  schemas/: behavior │ emotion     │        │ │
+│  │  └──────────────┘  └──────────────┘  │  retrieval/: formatter │ reranker  │        │ │
+│  │                                       │  schemas/: behavior │ emotion     │        │ │
 │  │                                       │    explicit_memory │ fragment    │        │ │
 │  │  ┌── 通用记忆模块 ──────────┐         │    persona │ plan                │        │ │
-│  │  │ base.py │ manager.py    │         │  update/: quality_control (730+行)│        │ │
+│  │  │ base.py │ manager.py    │         │  update/: quality_control          │        │ │
 │  │  │ working.py              │         │    aggregator │ analyzer │ planner│        │ │
 │  │  │ system/: cache │ skill  │         │    persona_builder │ prompts     │        │ │
 │  │  │ user/: episodic │ plan  │         │    reminder │ reporter           │        │ │
@@ -130,15 +130,15 @@
 │  └────────────────────────────────────────────────────────────────────────────────────┘ │
 │                                                                                         │
 │  ┌─── knowledge/ ── 知识检索 ─────────────────────────────────────────────────────────┐ │
-│  │  local_search.py (298行, FTS5 搜索 + add/remove, 语义搜索接口预留)                  │ │
-│  │  file_indexer.py (320行, 增量索引 + 分块, txt/md/pdf/docx)                          │ │
+│  │  local_search.py (FTS5 搜索 + add/remove，语义搜索接口预留)                  │ │
+│  │  file_indexer.py (增量索引 + 分块，txt/md/pdf/docx)                          │ │
 │  └────────────────────────────────────────────────────────────────────────────────────┘ │
 │                                                                                         │
 │  ┌─── planning/ ────────────┐  ┌─── termination/ ──────────┐  ┌─── state/ ───────────┐ │
-│  │  progress_transformer.py │  │  adaptive.py (237行)       │  │  consistency_mgr.py  │ │
-│  │  dag_scheduler.py        │  │  五维度终止判断             │  │  (796行 快照/回滚)   │ │
+│  │  progress_transformer.py │  │  adaptive.py       │  │  consistency_mgr.py  │ │
+│  │  dag_scheduler.py        │  │  五维度终止判断             │  │  (快照/回滚)         │ │
 │  │  protocol.py             │  │  protocol.py               │  │  operation_log.py    │ │
-│  │  storage.py │ validators │  │  (BaseTerminator)          │  │  (321行 逆操作)      │ │
+│  │  storage.py │ validators │  │  (BaseTerminator)          │  │  (逆操作)            │ │
 │  └──────────────────────────┘  └────────────────────────────┘  └──────────────────────┘ │
 │                                                                                         │
 │  ┌─── llm/ ── LLM 接口 ─────────────────────────────────────────────────────────────┐  │
@@ -148,24 +148,24 @@
 │  └───────────────────────────────────────────────────────────────────────────────────┘  │
 │                                                                                         │
 │  ┌─── events/ ── 事件系统 ───────────────────────────────────────────────────────────┐  │
-│  │  broadcaster.py (988行) │ base.py │ dispatcher.py │ manager.py │ storage.py       │  │
+│  │  broadcaster.py │ base.py │ dispatcher.py │ manager.py │ storage.py       │  │
 │  │  content_events │ conversation_events │ message_events │ session_events           │  │
 │  │  system_events │ user_events                                                     │  │
 │  │  adapters/: dingtalk.py │ feishu.py │ slack.py │ webhook.py │ base.py             │  │
 │  └───────────────────────────────────────────────────────────────────────────────────┘  │
 │                                                                                         │
 │  ┌─── prompt/ ── 提示词工程 ────────────────┐  ┌─── skill/ ── Skill 管理 ────────────┐ │
-│  │  runtime_context_builder.py (539行)       │  │  dynamic_loader.py (298行)          │ │
+│  │  runtime_context_builder.py       │  │  dynamic_loader.py          │ │
 │  │  skill_prompt_builder.py                  │  │  loader.py │ models.py              │ │
-│  │  complexity_detector.py │ llm_analyzer.py │  │  os_compatibility.py (110行)        │ │
-│  │  framework_rules.py │ prompt_layer.py     │  │  os_skill_merger.py (136行)         │ │
+│  │  complexity_detector.py │ llm_analyzer.py │  │  os_compatibility.py                │ │
+│  │  framework_rules.py │ prompt_layer.py     │  │  os_skill_merger.py                 │ │
 │  │  instance_cache.py                        │  └────────────────────────────────────┘ │
 │  │  intent_prompt_generator.py               │                                         │
 │  │  prompt_results_writer.py                 │  ┌─── tool/ ── 工具管理 ──────────────┐ │
 │  └───────────────────────────────────────────┘  │  registry.py │ executor.py          │ │
 │                                                  │  selector.py │ validator.py         │ │
 │  ┌─── discovery/ ── 应用发现 ────────────────┐  │  types.py │ loader.py              │ │
-│  │  app_scanner.py (64行)                    │  │  llm_description.py                │ │
+│  │  app_scanner.py                    │  │  llm_description.py                │ │
 │  │  macOS ✅  Win32 ❌  Linux ❌               │  │  registry_config.py                │ │
 │  └───────────────────────────────────────────┘  │  capability/: skill_loader.py       │ │
 │                                                  └────────────────────────────────────┘ │
@@ -180,8 +180,8 @@
 │  │  output/: formatter.py                                                           │  │
 │  │  monitoring/: production_monitor │ failure_detector │ failure_case_db             │  │
 │  │    quality_scanner │ token_audit │ case_converter                                │  │
-│  │  playbook/: manager.py (757行) │ storage.py (308行)                               │  │
-│  │  project/: manager.py (40行, 骨架占位)                                            │  │
+│  │  playbook/: manager.py │ storage.py                               │  │
+│  │  project/: manager.py (骨架占位)                                            │  │
 │  │  schemas/: validator.py                                                          │  │
 │  │  config/: loader.py                                                              │  │
 │  └───────────────────────────────────────────────────────────────────────────────────┘  │
@@ -191,11 +191,11 @@
 │                          基础设施层 (infra/)                                             │
 │                                                                                         │
 │  ┌─── local_store/ ────────────────────────────────────────────────────────────────────┐ │
-│  │  engine.py (223行)      — aiosqlite + WAL + 7 项 PRAGMA 优化                       │ │
-│  │  models.py (350+行)     — ORM 模型 + LocalIndexedFile                              │ │
-│  │  fts.py (274行)         — 消息专用 FTS5                                             │ │
-│  │  generic_fts.py (615行) — 通用 FTS5（知识/记忆共用，CJK 字符级分割 + 逆向合并）       │ │
-│  │  vector.py (192行)      — sqlite-vec 向量搜索                                      │ │
+│  │  engine.py — aiosqlite + WAL + 7 项 PRAGMA 优化                                   │ │
+│  │  models.py — ORM 模型 + LocalIndexedFile                                            │ │
+│  │  fts.py — 消息专用 FTS5                                                             │ │
+│  │  generic_fts.py — 通用 FTS5（知识/记忆共用，CJK 字符级分割 + 逆向合并）               │ │
+│  │  vector.py — sqlite-vec 向量搜索                                                   │ │
 │  │  workspace.py           — 统一管理器                                                │ │
 │  │  pools.py               — 连接池                                                   │ │
 │  │  session_store.py       — 会话存储                                                 │ │
@@ -253,7 +253,7 @@
 ┌──────────────────────┐            ┌──────────────────────────────────┐
 │ execution/rvr.py     │            │ execution/rvrb.py                │
 │ React-Validate-      │            │ React-Validate-Reflect-Backtrack │
-│ Reflect (817行)      │            │ (939行)                          │
+│ Reflect              │            │ RVR-B                           │
 │  1. LLM 推理         │            │  1. LLM 推理                     │
 │  2. 工具执行         │            │  2. 工具执行                     │
 │  3. 验证结果         │            │  3. 验证结果                     │
@@ -316,11 +316,11 @@
 ```
 instances/
 ├── xiaodazi/                          ← 小搭子（桌面端主实例）
-│   ├── config.yaml (171行)            termination/knowledge/memory/project/skills/state
-│   ├── prompt.md (63行)               人格提示词 + Few-Shot
+│   ├── config.yaml                    termination/knowledge/memory/project/playbook/skills/MCP
+│   ├── prompt.md / prompt_desktop.md  人格提示词 + Few-Shot
 │   └── skills/
-│       ├── skill_registry.yaml (86行)
-│       └── 40+ Skills 目录:
+│       ├── skill_registry.yaml
+│       └── 40+ Skills（config 内二维分类 common/darwin/win32/linux × builtin/lightweight/...）:
 │           ├── OS 通用: app-recommender / content-reformatter / translator / style-learner
 │           │            writing-assistant / writing-analyzer / literature-reviewer
 │           │            paper-search / arxiv-search / competitive-intel / trend-spotter
@@ -381,7 +381,7 @@ instances/
 
 ┌─── utils/ (工具函数) ──────────────────────────────────────────────┐
 │  app_paths.py │ cache_utils.py │ file_handler.py │ file_processor.py│
-│  instance_loader.py (1905行) │ json_file_store.py │ json_utils.py   │
+│  instance_loader.py │ json_file_store.py │ json_utils.py   │
 │  message_utils.py │ query_utils.py                                  │
 │  background_tasks/:                                                 │
 │    scheduler.py │ registry.py │ service.py │ context.py             │
@@ -393,10 +393,7 @@ instances/
 │  capabilities.yaml │ context.yaml │ context_compaction.yaml         │
 │  prompt_config.yaml │ resilience.yaml │ routing_rules.yaml          │
 │  scheduled_tasks.yaml │ tool_registry.yaml                          │
-│  llm_config/: __init__.py │ loader.py │ profiles.yaml               │
-│               profiles.example.yaml │ README.md │ REORGANIZATION.md │
-│               qwen_fallback_optimization.md                         │
-│               qwen_recommended_configs.md                           │
+│  llm_config/: __init__.py │ loader.py │ profiles.yaml（defaults + 各 profile）│
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─── skills/ (全局技能库) ───────────────────────────────────────────┐
@@ -419,10 +416,9 @@ instances/
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─── scripts/ (运维与验证脚本) ──────────────────────────────────────┐
-│  verify_v11_architecture.py (119/119 通过)                          │
-│  verify_memory_knowledge.py (41/41 通过)                            │
-│  verify_e2e_consistency.py (1175行)                                 │
-│  sync_capabilities.py │ check_instance_dependencies.py              │
+│  verify_v11_architecture.py │ verify_memory_knowledge.py             │
+│  verify_e2e_consistency.py │ sync_capabilities.py                    │
+│  switch_provider.py (Claude↔Qwen 一键切换) │ check_instance_dependencies.py │
 │  build_app.sh │ build_backend.py                                    │
 └─────────────────────────────────────────────────────────────────────┘
 
@@ -435,13 +431,13 @@ instances/
 
 ```
 ██████████  95%  Agent 引擎层 (RVR / RVR-B / 回溯 / 错误分类)
-██████████  95%  自适应终止策略 (五维度终止)
+██████████  95%  自适应终止策略 (八维度 + 费用阶梯 HITL)
 ██████████  95%  实例骨架与配置
 ██████████  95%  存储层 (SQLite + FTS5 + sqlite-vec)
 █████████░  90%  状态一致性管理 (快照/回滚)
 █████████░  90%  意图识别简化
 ████████░░  85%  记忆系统 (三层架构)
-████████░░  85%  进度转换器
+████████░░  85%  进度转换与事件推送 (ProgressTransformer + emit_progress_update)
 ████████░░  80%  本地知识检索 (FTS5)
 ████████░░  80%  Skills 二维分类框架
 ███████░░░  70%  三大核心能力
@@ -450,12 +446,24 @@ instances/
 ███░░░░░░░  35%  应用发现 (仅 macOS 扫描)
 ░░░░░░░░░░   5%  项目管理 (骨架占位)
 ░░░░░░░░░░   0%  Skills 安全验证
-░░░░░░░░░░   0%  前端 UI (向导/仪表板/MCP Apps)
+░░░░░░░░░░   0%  前端 UI (向导/仪表板)
 ```
 
 ---
 
-## 一、整体完成度概览
+## 一、当前智能体与 LLM（要点）
+
+| 项 | 说明 |
+|----|------|
+| **LLM 切换** | 支持 Claude / Qwen 一键切换：`config/llm_config/profiles.yaml`（defaults + 各 profile）+ `instances/xiaodazi/config.yaml`（agent.model / llm）。CLI：`python scripts/switch_provider.py --to claude|qwen`，`--status` 查状态，`--dry-run` 预览。 |
+| **Profile 默认值** | `profiles.yaml` 支持顶层 `defaults`（如 default_provider / api_key_env / region / enable_caching），各 profile 只写差异（如 model / temperature / max_tokens）。Loader 合并 defaults + profile 后返回。 |
+| **意图路由** | 单一入口：`IntentAnalyzer`（`core/routing/intent_analyzer.py`）。上下文过滤 &lt;200ms，无压缩/摘要；complexity 由 LLM 语义判断 → simple 用 RVR，medium/complex 用 RVR-B。 |
+| **执行策略** | RVR（无回溯）与 RVR-B（错误分类 + BacktrackManager + 终止联动）。终止：八维度 + 费用阶梯 HITL + 回溯耗尽/意图澄清。 |
+| **记忆** | 三层：MEMORY.md 文件层、GenericFTS5 索引层、Mem0 向量层；recall/remember/flush 统一入口。Playbook 已配置（auto_extract、require_user_confirm、FileStorage）。 |
+
+---
+
+## 二、整体完成度概览
 
 | 架构层 | 设计章节 | 完成度 | 状态 |
 |--------|----------|--------|------|
@@ -483,21 +491,20 @@ instances/
 
 ---
 
-## 二、逐模块详细状态
+## 三、逐模块详细状态
 
 ### 2.1 实例骨架与配置
 
 **设计需求**：创建 `instances/xiaodazi/` 目录，包含配置、提示词、Skills 注册表。
 
-| 文件 | 行数 | 状态 | 说明 |
-|------|------|------|------|
-| `instances/xiaodazi/config.yaml` | 171 | 已完成 | 包含 termination、knowledge、memory、project、skills 完整配置段 |
-| `instances/xiaodazi/prompt.md` | 63 | 已完成 | 小搭子人格提示词，含 Few-Shot 示例 |
-| `instances/xiaodazi/skills/skill_registry.yaml` | 86 | 已完成 | Skills 注册表 |
-| `utils/instance_loader.py` | 1905 | 已完成 | 支持加载 termination / knowledge / memory / project / state_consistency |
+| 文件 | 状态 | 说明 |
+|------|------|------|
+| `instances/xiaodazi/config.yaml` | 已完成 | termination、knowledge、memory、project、playbook、skills、mcp_tools 等完整配置 |
+| `instances/xiaodazi/prompt.md` / `prompt_desktop.md` | 已完成 | 人格提示词 + Few-Shot |
+| Skills | 已完成 | config 内二维分类（OS × 复杂度），无独立 skill_registry.yaml |
+| `utils/instance_loader.py` | 已完成 | 支持加载上述全部配置段 + 状态一致性 |
 
-**遗留**：
-- `config.yaml` 中 `knowledge` 和 `memory` 配置段完整，但 `skills` 二维分类的 `lightweight`/`external`/`cloud_api` 级别的具体 Skill 条目较少
+**当前**：Skills 在 config 内按 common/darwin/win32/linux × builtin/lightweight/external/cloud_api 配置；playbook 已启用（auto_extract、require_user_confirm、storage_path）。
 
 ---
 
@@ -505,12 +512,12 @@ instances/
 
 **设计需求**：OS（common/darwin/win32/linux）× 依赖复杂度（builtin/lightweight/external/cloud_api）
 
-| 文件 | 行数 | 状态 | 说明 |
-|------|------|------|------|
-| `core/skill/os_skill_merger.py` | 136 | 已完成 | `get_enabled_skills()` / `get_unavailable_skills()` |
-| `core/skill/os_compatibility.py` | 110 | 已完成 | `CompatibilityStatus`（ready/need_auth/need_setup/unavailable）四状态 |
-| `core/skill/dynamic_loader.py` | 298 | 已完成 | 集成 `OSSkillMerger`，支持 `get_eligible_skills()` |
-| `core/prompt/runtime_context_builder.py` | 539 | 已完成 | 含 `build_skill_status_prompt()` 注入 Skill 状态 |
+| 文件 | 状态 | 说明 |
+|------|------|------|
+| `core/skill/os_skill_merger.py` | 已完成 | `get_enabled_skills()` / `get_unavailable_skills()` |
+| `core/skill/os_compatibility.py` | 已完成 | `CompatibilityStatus`（ready/need_auth/need_setup/unavailable）四状态 |
+| `core/skill/dynamic_loader.py` | 已完成 | 集成 `OSSkillMerger`，支持 `get_eligible_skills()` |
+| `core/prompt/runtime_context_builder.py` | 已完成 | 含 `build_skill_status_prompt()` 注入 Skill 状态 |
 
 **已完成的设计要求**：
 - OS 检测 + 合并逻辑
@@ -529,13 +536,13 @@ instances/
 
 **设计需求**：八维度终止判断（V12 从五维度扩展为八维度）
 
-| 文件 | 行数 | 状态 | 说明 |
-|------|------|------|------|
-| `core/termination/protocol.py` | 90+ | 已完成 | V12: 新增 `FinishReason` 枚举（13 个终止原因） |
-| `core/termination/adaptive.py` | 320+ | 已完成 | V12.1: 八维度终止 + 回溯感知 + 智能费用感知 |
-| `core/agent/execution/rvrb.py` | 1100+ | 已完成 | V12.1: 回溯↔终止联动 + HITL 三选一 + 阶梯式费用提醒 |
-| `core/agent/execution/rvr.py` | 817 | 已完成 | 同上（基础 RVR 未改动） |
-| `core/context/runtime.py` | 716 | 已完成 | V12: 新增回溯状态字段（信息共享层） |
+| 文件 | 状态 | 说明 |
+|------|------|------|
+| `core/termination/protocol.py` | 已完成 | V12: 新增 `FinishReason` 枚举（13 个终止原因） |
+| `core/termination/adaptive.py` | 已完成 | V12.1: 八维度终止 + 回溯感知 + 阶梯式费用 HITL |
+| `core/agent/execution/rvrb.py` | 已完成 | V12.1: 回溯↔终止联动 + HITL 三选一 |
+| `core/agent/execution/rvr.py` | 已完成 | 标准 RVR 循环 |
+| `core/context/runtime.py` | 已完成 | 回溯状态字段（total_backtracks / backtracks_exhausted） |
 
 **V12 新增的设计要求**：
 - 回溯感知维度（6.5）：回溯耗尽时 → `backtrack_exhausted_confirm` HITL 三选一（重试/回滚/放弃）
@@ -582,12 +589,12 @@ instances/
 
 **设计需求**：任务前快照 → 操作日志 → 成功提交 / 异常回滚
 
-| 文件 | 行数 | 状态 | 说明 |
-|------|------|------|------|
-| `core/state/consistency_manager.py` | 796 | 已完成 | 快照 / 操作日志 / 回滚 / 提交 / 前置检查 / 后置检查 |
-| `core/state/operation_log.py` | 321 | 已完成 | `OperationRecord` + inverse-patch 自动逆操作 |
-| `core/agent/base.py` | 797 | 已完成 | `execute()` 中集成快照/提交/异常回滚 |
-| `core/events/broadcaster.py` | 988 | 已完成 | `emit_rollback_options()` / `emit_rollback_result()` |
+| 文件 | 状态 | 说明 |
+|------|------|------|
+| `core/state/consistency_manager.py` | 已完成 | 快照 / 操作日志 / 回滚 / 提交 / 前置检查 / 后置检查 |
+| `core/state/operation_log.py` | 已完成 | `OperationRecord` + inverse-patch 自动逆操作 |
+| `core/agent/base.py` | 已完成 | `execute()` 中集成快照/提交/异常回滚 |
+| `core/events/broadcaster.py` | 已完成 | `emit_rollback_options()` / `emit_rollback_result()` |
 
 **已完成的设计要求**：
 - 任务前环境快照（磁盘空间/权限/应用可用性检查）
@@ -609,10 +616,10 @@ instances/
 
 **设计**：双执行器 + 基于 LLM 意图识别的策略路由。
 
-| 执行器 | 文件 | 行数 | 特性 |
-|--------|------|------|------|
-| `RVRExecutor` | `core/agent/execution/rvr.py` | 817 | 标准循环，无回溯开销 |
-| `RVRBExecutor` | `core/agent/execution/rvrb.py` | 939 | 带回溯，错误分类 + 候选方案重试 |
+| 执行器 | 文件 | 特性 |
+|--------|------|------|
+| `RVRExecutor` | `core/agent/execution/rvr.py` | 标准循环，无回溯开销 |
+| `RVRBExecutor` | `core/agent/execution/rvrb.py` | 带回溯，错误分类 + 候选方案重试 |
 
 **策略路由**（`core/agent/base.py` execute 方法中）：
 
@@ -675,13 +682,13 @@ BacktrackManager 决策（LLM 驱动）
 
 **设计需求**：以文件为中心，Level 1 FTS5 零配置 / Level 2 语义搜索可选
 
-| 文件 | 行数 | 状态 | 说明 |
-|------|------|------|------|
-| `infra/local_store/generic_fts.py` | 615 | 已完成 | 通用 FTS5 引擎，CJK 字符级分割 + 逆向合并 |
-| `core/knowledge/local_search.py` | 298 | 已完成 | `LocalKnowledgeManager`，FTS5 搜索 + add/remove |
-| `core/knowledge/file_indexer.py` | 320 | 已完成 | 增量索引，分块，txt/md/pdf/docx |
-| `infra/local_store/models.py` | 350+ | 已完成 | 含 `LocalIndexedFile` 元数据模型 |
-| `infra/local_store/engine.py` | 223 | 已完成 | WAL + 7 项 PRAGMA 优化 |
+| 文件 | 状态 | 说明 |
+|------|------|------|
+| `infra/local_store/generic_fts.py` | 已完成 | 通用 FTS5 引擎，CJK 字符级分割 + 逆向合并 |
+| `core/knowledge/local_search.py` | 已完成 | `LocalKnowledgeManager`，FTS5 搜索 + add/remove |
+| `core/knowledge/file_indexer.py` | 已完成 | 增量索引，分块，txt/md/pdf/docx |
+| `infra/local_store/models.py` | 已完成 | 含 `LocalIndexedFile` 元数据模型 |
+| `infra/local_store/engine.py` | 已完成 | WAL + 7 项 PRAGMA 优化 |
 
 **已完成的设计要求**：
 - Level 1 全文搜索（SQLite FTS5，零配置零依赖）
@@ -705,13 +712,13 @@ BacktrackManager 决策（LLM 驱动）
 
 **设计需求**：三层架构 — 文件层（MEMORY.md）/ 索引层（FTS5）/ 智能层（Mem0）
 
-| 文件 | 行数 | 状态 | 说明 |
-|------|------|------|------|
-| `core/memory/markdown_layer.py` | 409 | 已完成 | Layer 1：MEMORY.md 模板 + 段落追加 + 每日日志 + 项目记忆 |
-| `core/memory/xiaodazi_memory.py` | 513 | 已完成 | 三层入口：recall 融合搜索 / remember 双写 / flush 提取+日志 |
-| `core/memory/mem0/pool.py` | 452 | 已完成 | Layer 3：Mem0 语义搜索 + 向量存储 |
-| `core/memory/mem0/update/quality_control.py` | 730+ | 已完成 | 冲突检测 + 更新决策（LLM 驱动） |
-| `core/memory/mem0/extraction/extractor.py` | 555 | 已完成 | 碎片记忆提取（FragmentExtractor） |
+| 文件 | 状态 | 说明 |
+|------|------|------|
+| `core/memory/markdown_layer.py` | 已完成 | Layer 1：MEMORY.md 模板 + 段落追加 + 每日日志 + 项目记忆 |
+| `core/memory/xiaodazi_memory.py` | 已完成 | 三层入口：recall 融合搜索 / remember 双写 / flush 提取+日志 |
+| `core/memory/mem0/pool.py` | 已完成 | Layer 3：Mem0 语义搜索 + 向量存储 |
+| `core/memory/mem0/update/quality_control.py` | 已完成 | 冲突检测 + 更新决策（LLM 驱动） |
+| `core/memory/mem0/extraction/extractor.py` | 已完成 | 碎片记忆提取（FragmentExtractor） |
 
 **已完成的设计要求**：
 - Layer 1 文件层：MEMORY.md 自动创建模板 + 段落定位追加 + 每日日志
@@ -733,9 +740,9 @@ BacktrackManager 决策（LLM 驱动）
 
 ### 2.8 进度转换器（3.7.2）
 
-| 文件 | 行数 | 状态 | 说明 |
-|------|------|------|------|
-| `core/planning/progress_transformer.py` | 90 | 已完成 | `transform()` + `transform_and_emit()` 集成事件系统 |
+| 文件 | 状态 | 说明 |
+|------|------|------|
+| `core/planning/progress_transformer.py` | 已完成 | `transform()` + `transform_and_emit()` 集成事件系统 |
 | `core/events/broadcaster.py` | — | 已完成 | `emit_progress_update()` 事件方法 |
 
 **遗留**：
@@ -746,9 +753,9 @@ BacktrackManager 决策（LLM 驱动）
 
 ### 2.9 意图识别简化（3.7.1）
 
-| 文件 | 行数 | 状态 | 说明 |
-|------|------|------|------|
-| `core/routing/intent_analyzer.py` | 277 | 已完成 | 支持 `fast_mode` / `semantic_cache_threshold` / `simplified_output` |
+| 文件 | 状态 | 说明 |
+|------|------|------|
+| `core/routing/intent_analyzer.py` | 已完成 | fast_mode / semantic_cache / simplified_output；意图上下文过滤 &lt;200ms |
 
 **已完成**：
 - `fast_mode: true` 使用更快模型（如 haiku）
@@ -759,10 +766,10 @@ BacktrackManager 决策（LLM 驱动）
 
 ### 2.9 OS 兼容层（3.5）
 
-| 文件 | 行数 | 状态 | 说明 |
-|------|------|------|------|
-| `core/discovery/app_scanner.py` | 64 | 部分实现 | `_scan_darwin()` 有实际逻辑，win32/linux 为空 |
-| `core/prompt/runtime_context_builder.py` | 539 | 已完成 | macOS / Linux 能力提示词 |
+| 文件 | 状态 | 说明 |
+|------|------|------|
+| `core/discovery/app_scanner.py` | 部分实现 | `_scan_darwin()` 有实际逻辑，win32/linux 为空 |
+| `core/prompt/runtime_context_builder.py` | 已完成 | macOS / Linux 能力提示词 |
 
 **遗留**：
 - `nodes/local/windows.py` — 不存在
@@ -776,9 +783,9 @@ BacktrackManager 决策（LLM 驱动）
 
 ### 2.10 项目管理（3.10）
 
-| 文件 | 行数 | 状态 | 说明 |
-|------|------|------|------|
-| `core/project/manager.py` | 40 | 骨架占位 | 所有方法为 `pass` / `return []` |
+| 文件 | 状态 | 说明 |
+|------|------|------|
+| `core/project/manager.py` | 骨架占位 | 所有方法为 `pass` / `return []` |
 
 **未实现**：
 - `create_project(name, template)` — 项目创建
@@ -792,15 +799,15 @@ BacktrackManager 决策（LLM 驱动）
 
 ### 2.11 存储层
 
-| 文件 | 行数 | 状态 | 说明 |
-|------|------|------|------|
-| `infra/local_store/engine.py` | 223 | 已完成 | aiosqlite + WAL + 7 项 PRAGMA |
-| `infra/local_store/fts.py` | 274 | 已完成 | 消息专用 FTS5 |
-| `infra/local_store/generic_fts.py` | 615 | 已完成 | 通用 FTS5（知识/记忆共用） |
-| `infra/local_store/vector.py` | 192 | 已完成 | sqlite-vec 向量搜索 |
-| `infra/local_store/models.py` | 350+ | 已完成 | ORM 模型 + LocalIndexedFile |
-| `infra/local_store/workspace.py` | — | 已完成 | 统一管理器 |
-| `infra/local_store/skills_cache.py` | — | 已完成 | Skills 延迟加载缓存 |
+| 文件 | 状态 | 说明 |
+|------|------|------|
+| `infra/local_store/engine.py` | 已完成 | aiosqlite + WAL + 7 项 PRAGMA |
+| `infra/local_store/fts.py` | 已完成 | 消息专用 FTS5 |
+| `infra/local_store/generic_fts.py` | 已完成 | 通用 FTS5（知识/记忆共用） |
+| `infra/local_store/vector.py` | 已完成 | sqlite-vec 向量搜索 |
+| `infra/local_store/models.py` | 已完成 | ORM 模型 + LocalIndexedFile |
+| `infra/local_store/workspace.py` | 已完成 | 统一管理器 |
+| `infra/local_store/skills_cache.py` | 已完成 | Skills 延迟加载缓存 |
 
 **SQLite 最佳实践合规**：
 - WAL 模式（并发读写）
@@ -845,16 +852,16 @@ LLM 决策 -> tools/nodes_tool.py（NodesTool）
 
 #### 文件清单
 
-| 文件 | 行数 | 状态 | 说明 |
-|------|------|------|------|
-| `tools/nodes_tool.py` | 240 | 已完成 | 工具入口：5 个 action（status/describe/run/notify/which） |
-| `core/nodes/manager.py` | 292 | 已完成 | 节点管理器：注册/发现/路由 |
-| `core/nodes/protocol.py` | 206 | 已完成 | 协议定义：所有支持的命令类型 |
-| `core/nodes/local/base.py` | 183 | 已完成 | 本地节点基类 |
-| `core/nodes/local/macos.py` | 352 | 已完成 | macOS 实现（AppleScript/截图/剪贴板等） |
-| `core/nodes/executors/shell.py` | 275 | 已完成 | Shell 命令执行器（超时/安全/输出捕获） |
+| 文件 | 状态 | 说明 |
+|------|------|------|
+| `tools/nodes_tool.py` | 已完成 | 工具入口：5 个 action（status/describe/run/notify/which） |
+| `core/nodes/manager.py` | 已完成 | 节点管理器：注册/发现/路由 |
+| `core/nodes/protocol.py` | 已完成 | 协议定义：所有支持的命令类型 |
+| `core/nodes/local/base.py` | 已完成 | 本地节点基类 |
+| `core/nodes/local/macos.py` | 已完成 | macOS 实现（AppleScript/截图/剪贴板等） |
+| `core/nodes/executors/shell.py` | 已完成 | Shell 命令执行器（超时/安全/输出捕获） |
 
-**总计**：约 1,400 行，架构完整。
+**总计**：架构完整。
 
 #### macOS 已实现操作
 
@@ -919,14 +926,14 @@ LLM 决策 -> tools/nodes_tool.py（NodesTool）
 
 #### 当前实现状态
 
-| 组件 | 文件 | 行数 | 状态 |
-|------|------|------|------|
-| `PlaybookEntry` 数据结构 | `core/playbook/manager.py` | 757 | 已完成：CRUD + 审核流程 + 匹配算法 |
-| `extract_from_session()` | 同上 | — | 已完成：从 SessionReward 提取策略 |
-| `find_matching()` | 同上 | — | 已完成：按任务上下文匹配最佳策略 |
-| `FileStorage` | `core/playbook/storage.py` | 308 | 已完成：JSON 文件持久化 |
-| `DatabaseStorage` | 同上 | — | 不可用：依赖已删除的 `infra.database` |
-| 状态流转 | 同上 | — | 已完成：DRAFT -> PENDING_REVIEW -> APPROVED/REJECTED |
+| 组件 | 文件 | 状态 |
+|------|------|------|
+| `PlaybookEntry` 数据结构 | `core/playbook/manager.py` | 已完成：CRUD + 审核流程 + 匹配算法 |
+| `extract_from_session()` | 同上 | 已完成：从 SessionReward 提取策略 |
+| `find_matching()` | 同上 | 已完成：按任务上下文匹配最佳策略 |
+| `FileStorage` | `core/playbook/storage.py` | 已完成：JSON 文件持久化 |
+| `DatabaseStorage` | 同上 | 不可用：依赖已删除的 `infra.database` |
+| 状态流转 | 同上 | 已完成：DRAFT -> PENDING_REVIEW -> APPROVED/REJECTED |
 
 #### 关键设计问题：奖励信号来源
 
@@ -1002,7 +1009,7 @@ Layer 2: Mem0 语义搜索（复用已有向量存储，零额外 LLM 调用）
 
 ---
 
-## 三、不涉及（前端 UI / 桌面应用范畴）
+## 四、不涉及（前端 UI / 桌面应用范畴）
 
 以下模块在架构设计中定义但属于前端/桌面应用团队职责，当前后端不涉及：
 
@@ -1020,7 +1027,7 @@ Layer 2: Mem0 语义搜索（复用已有向量存储，零额外 LLM 调用）
 
 ---
 
-## 四、优先级建议（后端待办）
+## 五、优先级建议（后端待办）
 
 ### P0 — 核心体验缺口
 
@@ -1148,24 +1155,24 @@ class PlaybookContextProvider:
 
 ---
 
-## 五、文件清单
+## 六、文件清单
 
 ### 新建文件（本轮实施）
 
-| 文件 | 行数 | 职责 |
-|------|------|------|
-| `infra/local_store/generic_fts.py` | 615 | 通用 FTS5 全文搜索引擎 |
-| `core/memory/markdown_layer.py` | 409 | MEMORY.md 文件层 |
-| `scripts/verify_memory_knowledge.py` | 400+ | 端到端验证脚本（41 项断言） |
-| `scripts/verify_v11_architecture.py` | 300+ | 架构完整性验证（119 项断言） |
+| 文件 | 职责 |
+|------|------|
+| `infra/local_store/generic_fts.py` | 通用 FTS5 全文搜索引擎 |
+| `core/memory/markdown_layer.py` | MEMORY.md 文件层 |
+| `scripts/verify_memory_knowledge.py` | 端到端验证脚本（41 项断言） |
+| `scripts/verify_v11_architecture.py` | 架构完整性验证（119 项断言） |
 
 ### 改造文件（本轮实施）
 
 | 文件 | 职责 |
 |------|------|
-| `core/memory/xiaodazi_memory.py` | 48→513 行，三层架构入口 |
-| `core/knowledge/local_search.py` | 59→298 行，FTS5 搜索实现 |
-| `core/knowledge/file_indexer.py` | 42→320 行，增量文件索引 |
+| `core/memory/xiaodazi_memory.py` | 三层架构入口 |
+| `core/knowledge/local_search.py` | FTS5 搜索实现 |
+| `core/knowledge/file_indexer.py` | 增量文件索引 |
 | `core/termination/adaptive.py` | 五维度终止 + HITL |
 | `core/state/consistency_manager.py` | 快照/回滚完整实现 |
 | `core/events/broadcaster.py` | 新增 rollback + progress 事件 |

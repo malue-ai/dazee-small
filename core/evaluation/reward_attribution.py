@@ -549,7 +549,7 @@ class RewardAttribution:
             return True
 
         # 规则 4：某些关键工具
-        critical_tools = {"plan_todo", "request_human_confirmation"}
+        critical_tools = {"plan_todo", "hitl"}
         if step_data["action_name"] in critical_tools:
             return True
 

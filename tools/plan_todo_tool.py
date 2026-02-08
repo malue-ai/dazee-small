@@ -46,22 +46,27 @@ logger = get_logger(__name__)
 
 class PlanTool(BaseTool):
     """
-    任务计划管理工具 v2
+    任务计划管理工具 v2（V12.0: 集成 ProgressTransformer）
 
     action:
-    - create: 创建新计划，需要 name + todos，可选 overview + plan
-    - update: 更新步骤状态，需要 todo_id + status
-    - rewrite: 重写整个计划，需要 name + todos，可选 overview + plan
+    - create: 创建新计划，需要 name + todos，可选 overview + plan + required_skills
+    - update: 更新步骤状态，需要 todo_id + status（自动触发友好进度通知）
+    - rewrite: 重写整个计划，需要 name + todos，可选 overview + plan + required_skills
 
     数据结构：
-    - 顶层：name, overview, plan, todos, created_at, updated_at, completed_at
+    - 顶层：name, overview, plan, todos, required_skills, created_at, updated_at, completed_at
     - todo：id, title, content, status, result
+
+    进度通知（架构 3.5.4 "内部复杂，外部简单"）：
+    - update 完成后自动调用 ProgressTransformer.transform_and_emit()
+    - 用户看到 "正在分析..." / "快好了..." 而非技术步骤
     """
 
     name = "plan"
 
-    def __init__(self):
+    def __init__(self, progress_transformer=None):
         self._conversation_service = None
+        self._progress_transformer = progress_transformer
 
     async def _get_service(self):
         if self._conversation_service is None:
@@ -92,6 +97,7 @@ class PlanTool(BaseTool):
         todos = params.get("todos", [])
         overview = params.get("overview")
         plan_doc = params.get("plan")
+        required_skills = params.get("required_skills")
 
         if not name:
             return {"success": False, "error": "缺少 name"}
@@ -103,11 +109,14 @@ class PlanTool(BaseTool):
         if existing:
             return {"success": False, "error": "计划已存在，如需替换请使用 rewrite"}
 
-        plan = self._build_plan(name, todos, overview, plan_doc)
+        plan = self._build_plan(name, todos, overview, plan_doc, required_skills)
         plan["created_at"] = datetime.now().isoformat()
 
         await self._save(plan, context.conversation_id)
-        logger.info(f"✅ 计划已创建: {name}, 共 {len(plan['todos'])} 个步骤")
+        logger.info(
+            f"✅ 计划已创建: {name}, 共 {len(plan['todos'])} 个步骤"
+            + (f", required_skills={required_skills}" if required_skills else "")
+        )
 
         return {"success": True, "plan": plan}
 
@@ -150,6 +159,25 @@ class PlanTool(BaseTool):
         await self._save(plan, context.conversation_id)
         logger.info(f"📝 步骤更新: {todo_id} -> {status}")
 
+        # V12: 触发 ProgressTransformer 发送友好进度通知（架构 3.5.4）
+        if self._progress_transformer and context.session_id:
+            try:
+                completed_count = sum(
+                    1 for t in plan["todos"] if t["status"] == "completed"
+                )
+                total_count = len(plan["todos"])
+                updated_step = next(
+                    (t for t in plan["todos"] if t["id"] == todo_id), {}
+                )
+                await self._progress_transformer.transform_and_emit(
+                    plan_step=updated_step,
+                    session_id=context.session_id,
+                    completed=completed_count,
+                    total=total_count,
+                )
+            except Exception as e:
+                logger.warning(f"进度通知失败（不阻断执行）: {e}")
+
         return {"success": True, "plan": plan, "all_completed": all_done}
 
     async def _rewrite(self, params: Dict, context: ToolContext) -> Dict[str, Any]:
@@ -158,6 +186,7 @@ class PlanTool(BaseTool):
         todos = params.get("todos", [])
         overview = params.get("overview")
         plan_doc = params.get("plan")
+        required_skills = params.get("required_skills")
 
         if not name:
             return {"success": False, "error": "缺少 name"}
@@ -166,7 +195,7 @@ class PlanTool(BaseTool):
 
         existing = await self._load(context.conversation_id)
 
-        plan = self._build_plan(name, todos, overview, plan_doc)
+        plan = self._build_plan(name, todos, overview, plan_doc, required_skills)
         plan["created_at"] = existing.get("created_at") if existing else datetime.now().isoformat()
         plan["updated_at"] = datetime.now().isoformat()
 
@@ -176,7 +205,12 @@ class PlanTool(BaseTool):
         return {"success": True, "plan": plan}
 
     def _build_plan(
-        self, name: str, todos: list, overview: Optional[str] = None, plan_doc: Optional[str] = None
+        self,
+        name: str,
+        todos: list,
+        overview: Optional[str] = None,
+        plan_doc: Optional[str] = None,
+        required_skills: Optional[list] = None,
     ) -> Dict:
         """
         构建标准 plan 数据结构 v2
@@ -186,6 +220,7 @@ class PlanTool(BaseTool):
             todos: 步骤列表
             overview: 一句话目标摘要（可选）
             plan_doc: 详细计划文档（可选）
+            required_skills: 此计划所需的 Skills 名称列表（可选，驱动后续轮次 Skills 注入）
 
         Returns:
             plan 数据结构
@@ -197,6 +232,8 @@ class PlanTool(BaseTool):
             plan["overview"] = overview
         if plan_doc:
             plan["plan"] = plan_doc
+        if required_skills:
+            plan["required_skills"] = required_skills
 
         # 构建 todos
         for i, todo in enumerate(todos):
@@ -324,8 +361,8 @@ def format_plan_for_prompt(plan: Dict) -> str:
 
 
 # 工厂函数
-def create_plan_tool(**kwargs) -> PlanTool:
-    return PlanTool()
+def create_plan_tool(progress_transformer=None, **kwargs) -> PlanTool:
+    return PlanTool(progress_transformer=progress_transformer)
 
 
 # ===== 别名（保持导入兼容）=====

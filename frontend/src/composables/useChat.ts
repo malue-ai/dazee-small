@@ -57,6 +57,15 @@ export function useChat() {
   } | null>(null)
   const rollbackLoading = ref(false)
 
+  /** V11.1: HITL 危险操作确认弹窗 */
+  const showHITLConfirmModal = ref(false)
+  const hitlConfirmData = ref<{
+    reason: string
+    tools: string[]
+    message: string
+  } | null>(null)
+  const hitlConfirmLoading = ref(false)
+
   /** V11: 长任务确认弹窗 */
   const showLongRunConfirmModal = ref(false)
   const longRunConfirmData = ref<{ turn: number; message: string } | null>(null)
@@ -338,6 +347,48 @@ export function useChat() {
   }
 
   /**
+   * V11.1: 批准 HITL 危险操作
+   */
+  async function approveHITLConfirm(): Promise<void> {
+    const sessionId =
+      sessionStore.currentSessionId ||
+      sessionStore.getSessionIdByConversation(conversationStore.currentId)
+    if (!sessionId) return
+
+    hitlConfirmLoading.value = true
+    try {
+      await sessionApi.submitHITLConfirm(sessionId, true)
+      showHITLConfirmModal.value = false
+      hitlConfirmData.value = null
+    } catch (e) {
+      console.error('HITL 批准失败:', e)
+    } finally {
+      hitlConfirmLoading.value = false
+    }
+  }
+
+  /**
+   * V11.1: 拒绝 HITL 危险操作（触发回退策略）
+   */
+  async function rejectHITLConfirm(): Promise<void> {
+    const sessionId =
+      sessionStore.currentSessionId ||
+      sessionStore.getSessionIdByConversation(conversationStore.currentId)
+    if (!sessionId) return
+
+    hitlConfirmLoading.value = true
+    try {
+      await sessionApi.submitHITLConfirm(sessionId, false)
+      showHITLConfirmModal.value = false
+      hitlConfirmData.value = null
+    } catch (e) {
+      console.error('HITL 拒绝失败:', e)
+    } finally {
+      hitlConfirmLoading.value = false
+    }
+  }
+
+  /**
    * V11: 确认继续长任务
    */
   async function confirmLongRunContinue(): Promise<void> {
@@ -451,6 +502,16 @@ export function useChat() {
     if (type === 'rollback_completed') {
       showRollbackModal.value = false
       rollbackData.value = null
+    }
+
+    // V11.1: HITL 危险操作确认
+    if (type === 'hitl_confirm') {
+      hitlConfirmData.value = {
+        reason: data?.reason ?? '',
+        tools: Array.isArray(data?.tools) ? data.tools : [],
+        message: data?.message ?? '危险操作需用户确认'
+      }
+      showHITLConfirmModal.value = true
     }
 
     // V11: 长任务确认
@@ -809,6 +870,13 @@ export function useChat() {
     rollbackLoading,
     confirmRollback,
     dismissRollback,
+
+    // V11.1: HITL 危险操作确认
+    showHITLConfirmModal,
+    hitlConfirmData,
+    hitlConfirmLoading,
+    approveHITLConfirm,
+    rejectHITLConfirm,
 
     // V11: 长任务确认
     showLongRunConfirmModal,

@@ -58,10 +58,15 @@ croniter>=6.0.0               # Cron 表达式解析
 # Google Gemini API（图像生成）
 google-genai>=1.0.0       # Gemini 3 Pro Image API
 
+# macOS 本地 OCR（Vision framework）
+pyobjc-core>=12.0; sys_platform == "darwin"
+pyobjc-framework-Vision>=12.0; sys_platform == "darwin"
+pyobjc-framework-Quartz>=12.0; sys_platform == "darwin"
+
 # 测试工具
 pytest>=8.0.0             # 测试框架
 pytest-asyncio>=0.23.0    # 异步测试支持
 psutil>=5.9.0
-
+pyinstaller==6.11.1
 # WebSocket（实时通信）
 websockets>=12.0

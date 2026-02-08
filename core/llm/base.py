@@ -77,7 +77,9 @@ def _extract_message_text(content: Any) -> str:
     支持的内容格式：
     - 字符串
     - 列表（包含多个 block）
-    - 字典（text/tool_result/tool_use/thinking block）
+    - 字典（text/tool_result/tool_use/thinking/image block）
+
+    注意：image block 使用固定占位符（实际 token 由 Claude 按像素计算）
     """
     if isinstance(content, str):
         return content
@@ -95,6 +97,10 @@ def _extract_message_text(content: Any) -> str:
             return f"{tool_name}: {str(tool_input)}"
         elif block_type == "thinking":
             return content.get("thinking", "")
+        elif block_type == "image":
+            # 图片 token 由 Claude 按像素计算（约 1600 tokens/张）
+            # 用固定占位文本代替 base64，避免 tiktoken 误算
+            return "[image: ~1600 tokens]"
         else:
             return str(content.get("text", "") or content.get("content", ""))
     return str(content)

@@ -2,18 +2,24 @@
 
 ## 📋 规则概览
 
-| 规则 | 行数 | 说明 | 应用范围 |
-|------|------|------|----------|
-| **01-general-conventions** | 71 | Python/FastAPI 核心规范（异步、数据库、性能优化、API 设计） | 全局 |
-| **02-api-development** | 47 | 三层架构（Router/Service/Model） | API 开发 |
-| **03-testing** | 55 | 测试规范（pytest、Mock、AAA） | 测试 |
-| **04-logging** | 83 | 日志规范（上下文追踪） | 全局 |
-| **05-documentation** | 92 | 文档编写规范 | 全局 |
-| **06-configuration** | 74 | 配置文件规范（YAML、环境变量） | 配置 |
-| **07-frontend** | 37 | Vue 3 + TypeScript 前端开发规范（来自 awesome-cursorrules） | `frontend/**/*.{vue,ts,js,tsx,jsx}` |
-| **08-styling** | 65 | TailwindCSS 样式规范（来自 awesome-cursorrules） | `frontend/**/*.{vue,css,tsx,jsx}`, `tailwind.config.*` |
-
-**总计：8 个规则，524 行**
+| 规则 | 说明 | 应用范围 |
+|------|------|----------|
+| **00-project-setup** | 项目环境配置（Python 虚拟环境、运行命令） | 全局 |
+| **01-general-conventions** | Python/FastAPI 核心规范（异步、数据库、性能优化、API 设计） | 全局 |
+| **02-api-development** | 三层架构（Router/Service/Model） | API 开发 |
+| **03-testing** | 测试规范（pytest、Mock、AAA） | 测试 |
+| **04-logging** | 日志规范（上下文追踪） | 全局 |
+| **05-documentation** | 文档编写规范 | 全局 |
+| **06-configuration** | 配置文件规范（YAML、环境变量） | 配置 |
+| **07-frontend** | Vue 3 + TypeScript 前端开发规范 | `frontend/**` |
+| **08-styling** | TailwindCSS 样式规范 | `frontend/**` |
+| **13-brand-neutrality** | 品牌中立规范（禁止竞品框架名） | 全局 |
+| **14-agent-design-philosophy** | LLM-First 设计理念（强制） | 全局 |
+| **15-architecture-cleanup** | 架构清理规范（意图识别 V9.0） | 全局 |
+| **16-prompt-engineering** | 系统提示词编写规范 | `prompts/**`, `instances/**` |
+| **17-design-system** | 前端设计系统（Apple Liquid + 琥珀黄） | `frontend/**` |
+| **17-llm-first-architecture** | LLM-First 架构原则 | 全局 |
+| **18-context-engineering** | **上下文工程极限优化规范（核心）** | `core/context/**`, `tools/**`, `skills/**` |
 
 ## 🎯 设计原则
 

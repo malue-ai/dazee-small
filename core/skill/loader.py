@@ -243,14 +243,24 @@ class SkillsLoader:
             logger.warning(f"加载 SKILL.md 失败: {name}, 错误: {e}")
             return None
 
-    async def build_skills_prompt(self, language: str = "en") -> str:
+    async def build_skills_prompt(
+        self,
+        language: str = "en",
+        relevant_skill_groups: list[str] | None = None,
+        skill_groups_config: dict[str, list[str]] | None = None,
+    ) -> str:
         """
-        构建 Skills 提示词片段（XML + 5 行简洁指令，注入到系统提示词）
+        构建 Skills 提示词片段（XML + 指令，注入到系统提示词）
 
-        格式：OpenClaw 风格
-        - ## Skills (mandatory) + 5 行指令
-        - <available_skills> ... </available_skills>
-        - <unavailable_skills> ... </unavailable_skills>（可选）
+        V12.0: 支持按 intent.relevant_skill_groups 过滤，只注入相关 Skills。
+        - 有 relevant_skill_groups -> 只注入匹配分组 + _always 组
+        - relevant_skill_groups 为空列表 -> 只注入 _always 组
+        - relevant_skill_groups 为 None（Fallback） -> 注入全量（保守）
+
+        Args:
+            language: 语言
+            relevant_skill_groups: LLM 语义多选的分组（None=全量 Fallback）
+            skill_groups_config: 分组配置 {"writing": ["writing-assistant", ...]}
 
         Returns:
             完整 Skills 提示词字符串
@@ -261,6 +271,28 @@ class SkillsLoader:
             e for e in self.get_available_skills()
             if e.backend_type != BackendType.TOOL and e.skill_path
         ]
+
+        # V12.0: 按 skill_groups 过滤（重召回原则）
+        if relevant_skill_groups is not None and skill_groups_config:
+            # 收集需要注入的 skill 名称集合
+            allowed_names: set[str] = set()
+
+            # 始终注入 _always 组
+            always_skills = skill_groups_config.get("_always", [])
+            allowed_names.update(always_skills)
+
+            # 联合选中的所有分组
+            for group_name in relevant_skill_groups:
+                group_skills = skill_groups_config.get(group_name, [])
+                allowed_names.update(group_skills)
+
+            before_count = len(available)
+            available = [e for e in available if e.name in allowed_names]
+            logger.info(
+                f"Skills 按 intent 过滤: {before_count} → {len(available)} "
+                f"(groups={relevant_skill_groups}, always={always_skills})"
+            )
+
         unavailable = [
             e for e in self._entries
             if e.enabled and e.status != SkillStatus.READY
@@ -283,10 +315,14 @@ class SkillsLoader:
                 )
             )
 
+        # 无 skills 可注入时返回空（避免注入空 XML）
+        if not summaries and not unavailable:
+            return ""
+
         instructions = SkillPromptBuilder.build_lazy_instructions(language)
         xml_available = SkillPromptBuilder.build_lazy_prompt(summaries, language)
 
-        parts = [instructions, "", xml_available]
+        parts = [instructions, "", xml_available] if xml_available else []
 
         if unavailable:
             lines = ["<unavailable_skills>"]

@@ -6,7 +6,7 @@
 #   1. 检查依赖
 #   2. PyInstaller 打包 Python 后端（onedir 模式）
 #   3. Tauri 打包（前端 + Rust 壳 + sidecar）
-#   4. macOS 后处理：复制 _internal/ 到 app bundle + 签名所有动态库
+#   4. macOS 后处理：复制 _internal/ 到 app bundle + 签名所有动态库 + 重建 DMG
 #
 # 用法:
 #   bash scripts/build_app.sh                    # 完整构建
@@ -105,8 +105,12 @@ if [ ! -d "node_modules" ]; then
   npm install
 fi
 
-# 构建 Tauri
-npm run tauri:build
+# 构建 Tauri（只打包 .app，跳过 Tauri 自带的 DMG 打包，Step 3 会自己生成完整 DMG）
+if [ "$(uname)" = "Darwin" ]; then
+  npm run tauri:build -- --bundles app
+else
+  npm run tauri:build
+fi
 
 # ==================== Step 3: macOS 后处理（Resources + symlink + 签名）====================
 #
@@ -158,6 +162,21 @@ if [ "$(uname)" = "Darwin" ]; then
   ln -s "../Resources/_internal" "$MACOS_DIR/_internal"
   info "已创建 symlink: MacOS/_internal -> ../Resources/_internal"
 
+  # 3b2. 创建 Contents/Frameworks/libpython3.12.dylib symlink
+  #      PyInstaller bootloader 在 .app bundle 内运行时，
+  #      按 macOS 规范固定在 Contents/Frameworks/ 查找 Python 共享库。
+  FRAMEWORKS_DIR="$APP_PATH/Contents/Frameworks"
+  LIBPYTHON=$(find "$RESOURCES_DIR/_internal" -maxdepth 1 -name "libpython*.dylib" | head -1)
+  if [ -n "$LIBPYTHON" ]; then
+    LIBPYTHON_NAME=$(basename "$LIBPYTHON")
+    mkdir -p "$FRAMEWORKS_DIR"
+    rm -f "$FRAMEWORKS_DIR/$LIBPYTHON_NAME"
+    ln -s "../Resources/_internal/$LIBPYTHON_NAME" "$FRAMEWORKS_DIR/$LIBPYTHON_NAME"
+    info "已创建 symlink: Frameworks/$LIBPYTHON_NAME -> ../Resources/_internal/$LIBPYTHON_NAME"
+  else
+    warn "未找到 libpython*.dylib，sidecar 可能无法启动"
+  fi
+
   # 3c. 签名 Resources/_internal/ 中的所有 .so 和 .dylib（AMFI 要求）
   info "签名动态库..."
   SIGN_COUNT=0
@@ -194,6 +213,47 @@ if [ "$(uname)" = "Darwin" ]; then
   else
     warn "签名验证失败（可能不影响本地使用）"
   fi
+
+  # 3g. 生成完整 DMG（包含后处理过的 .app）
+  #     Step 2 只打包 .app（跳过 Tauri 自带的 DMG），
+  #     这里用 hdiutil 从完整的 .app 创建 DMG 安装包。
+  info "生成 DMG 安装包..."
+
+  # 读取版本号用于 DMG 文件名
+  VERSION=$(cat "$PROJECT_ROOT/VERSION" 2>/dev/null || echo "0.0.0")
+  ARCH=$(uname -m)
+  [ "$ARCH" = "arm64" ] && ARCH="aarch64"
+  DMG_DIR="$FRONTEND_DIR/src-tauri/target/release/bundle/dmg"
+  DMG_FILENAME="$(basename "$APP_PATH" .app)_${VERSION}_${ARCH}.dmg"
+  DMG_PATH="$DMG_DIR/$DMG_FILENAME"
+  VOL_NAME=$(basename "$APP_PATH" .app)
+  TMP_DMG="/tmp/zenflux_dmg_tmp.dmg"
+  TMP_MOUNT="/tmp/zenflux_dmg_mount"
+
+  # 确保输出目录存在
+  mkdir -p "$DMG_DIR"
+
+  # 清理残留
+  rm -f "$TMP_DMG" "$DMG_PATH"
+  [ -d "$TMP_MOUNT" ] && hdiutil detach "$TMP_MOUNT" 2>/dev/null || true
+
+  # 创建临时可写 DMG → 挂载 → 复制 .app + /Applications 快捷方式 → 卸载
+  hdiutil create -size 300m -fs HFS+ -volname "$VOL_NAME" "$TMP_DMG" -quiet
+  mkdir -p "$TMP_MOUNT"
+  hdiutil attach "$TMP_DMG" -mountpoint "$TMP_MOUNT" -quiet
+  cp -R "$APP_PATH" "$TMP_MOUNT/"
+  ln -s /Applications "$TMP_MOUNT/Applications"
+  hdiutil detach "$TMP_MOUNT" -quiet
+
+  # 压缩为只读 DMG
+  hdiutil convert "$TMP_DMG" -format UDZO -o "$DMG_PATH" -quiet
+
+  # 清理
+  rm -f "$TMP_DMG"
+  rmdir "$TMP_MOUNT" 2>/dev/null || true
+
+  DMG_SIZE=$(du -h "$DMG_PATH" | cut -f1)
+  info "DMG 生成完成: $DMG_FILENAME ($DMG_SIZE)"
 
   info "macOS 后处理完成"
 fi

@@ -1,7 +1,6 @@
 from .agents import router as agents_router
 from .chat import router as chat_router
 from .conversation import router as conversation_router
-from .docs import router as docs_router
 from .files import router as files_router
 
 from .human_confirmation import router as human_confirmation_router
@@ -26,7 +25,6 @@ __all__ = [
 
     "human_confirmation_router",
     "skills_router",
-    "docs_router",
     "realtime_router",
     "models_router",
     "settings_router",

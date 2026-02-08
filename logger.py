@@ -49,17 +49,20 @@ from typing import Any, Callable, Optional, TypeVar
 
 
 def _get_log_dir() -> Path:
-    """获取日志目录（打包环境使用 Application Support，开发环境使用项目目录）"""
-    if getattr(sys, 'frozen', False):
-        # PyInstaller 打包环境：使用 Application Support 目录
-        import platform
-        if platform.system() == 'Darwin':
+    """获取日志目录，统一使用 app_paths 管理路径"""
+    try:
+        from utils.app_paths import get_logs_dir
+        return get_logs_dir()
+    except Exception:
+        # Fallback：app_paths 尚未可用时（极早期导入）
+        if getattr(sys, 'frozen', False):
+            import platform
             import os
-            home = os.environ.get('HOME', os.path.expanduser('~'))
-            return Path(home) / 'Library' / 'Application Support' / 'com.zenflux.agent' / 'logs'
-        # Windows/Linux 使用 exe 同级目录
-        return Path(sys.executable).parent / 'logs'
-    return Path('logs')
+            if platform.system() == 'Darwin':
+                home = os.environ.get('HOME', os.path.expanduser('~'))
+                return Path(home) / 'Library' / 'Application Support' / 'com.zenflux.agent' / 'logs'
+            return Path(sys.executable).parent / 'logs'
+        return Path('logs')
 
 
 _log_dir = _get_log_dir()
@@ -245,9 +248,17 @@ class _LoggerManager:
         if cls._initialized:
             return
         
-        # 创建日志目录
-        Path(LOG_CONFIG["file"]).parent.mkdir(parents=True, exist_ok=True)
-        Path(LOG_CONFIG["error_file"]).parent.mkdir(parents=True, exist_ok=True)
+        # 创建日志目录（加保护，避免只读文件系统崩溃）
+        try:
+            Path(LOG_CONFIG["file"]).parent.mkdir(parents=True, exist_ok=True)
+            Path(LOG_CONFIG["error_file"]).parent.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            # Fallback：写到临时目录
+            import tempfile
+            fallback_dir = Path(tempfile.gettempdir()) / "zenflux_logs"
+            fallback_dir.mkdir(parents=True, exist_ok=True)
+            LOG_CONFIG["file"] = str(fallback_dir / "app.log")
+            LOG_CONFIG["error_file"] = str(fallback_dir / "error.log")
         
         # 配置 root logger
         root = logging.getLogger("zenflux")

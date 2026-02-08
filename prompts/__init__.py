@@ -12,7 +12,9 @@ Prompt 管理模块
 
 from pathlib import Path
 
-PROMPTS_DIR = Path(__file__).parent
+from utils.app_paths import get_bundle_dir
+
+PROMPTS_DIR = get_bundle_dir() / "prompts"
 
 
 def load_prompt(name: str, **variables) -> str:

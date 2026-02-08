@@ -22,10 +22,11 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-# 配置目录路径
-BASE_DIR = Path(__file__).parent.parent.parent
-CONFIG_DIR = BASE_DIR / "config"
-INSTANCES_DIR = BASE_DIR / "instances"
+# 配置目录路径（统一使用 app_paths，兼容打包环境）
+from utils.app_paths import get_bundle_dir
+
+CONFIG_DIR = get_bundle_dir() / "config"
+INSTANCES_DIR = get_bundle_dir() / "instances"
 
 
 def _deep_merge(base: Dict, override: Dict) -> Dict:

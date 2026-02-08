@@ -439,10 +439,32 @@ class AgentFactory:
         if schema.max_tokens is not None:
             llm_kwargs["max_tokens"] = schema.max_tokens
 
-        main_profile = await get_llm_profile("main_agent")
-        profile_provider = str(main_profile.get("provider", "claude")).lower()
-        if profile_provider == "claude":
-            main_profile["model"] = schema.model
+        # 主 Agent LLM 完全由实例 config.yaml 驱动（单一来源）
+        # 通过 ModelRegistry 从 model name 自动解析 provider / base_url / api_key_env
+        from core.llm.model_registry import ModelRegistry
+
+        model_config = ModelRegistry.get(schema.model)
+        if model_config:
+            main_profile = {
+                "provider": model_config.provider,
+                "model": model_config.model_name,
+                "api_key_env": model_config.api_key_env,
+                "base_url": model_config.base_url,
+            }
+            # ModelRegistry 的额外配置（如 region）
+            main_profile.update(model_config.extra_config)
+            logger.info(
+                f"🔧 主 Agent LLM: model={model_config.model_name}, "
+                f"provider={model_config.provider} (from instance config)"
+            )
+        else:
+            # Fallback: 模型未在 ModelRegistry 注册，尝试 profiles.yaml
+            logger.warning(
+                f"⚠️ 模型 '{schema.model}' 未在 ModelRegistry 注册，"
+                f"回退到 profiles.yaml main_agent 配置"
+            )
+            main_profile = await get_llm_profile("main_agent")
+
         main_profile.update(llm_kwargs)
         llm = create_llm_service(**main_profile)
 

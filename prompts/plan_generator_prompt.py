@@ -27,7 +27,6 @@ DEFAULT_TOOLS_REFERENCE = """
 | 能力 | 用途 |
 |------|------|
 | PPT Skill + api_calling | 高质量 PPT 生成 |
-| send_files | 发送文件给用户 |
 
 ### API 调用工具
 | 工具 | 用途 |
@@ -38,7 +37,6 @@ DEFAULT_TOOLS_REFERENCE = """
 | 工具 | 用途 |
 |------|------|
 | hitl | 请求用户确认/选择 |
-| clue_generation | 生成后续操作建议 |
 
 ### MCP 工具（按实例配置）
 实例 config 中若配置了 mcp_tools，则规划时可引用对应能力（如文档分析、图表生成等）。具体工具名以实例注入为准。

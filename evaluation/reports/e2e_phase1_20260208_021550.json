@@ -1,0 +1,139 @@
+{
+  "report_id": "e2e_phase1_20260208_021550",
+  "suite_id": "xiaodazi_e2e_phase1_core",
+  "suite_name": "E2E Phase1 核心用例",
+  "task_results": [
+    {
+      "task_id": "C1",
+      "task_description": "简单问答 Token 对比 - 重复问题验证 prompt 缓存",
+      "trials": [
+        {
+          "trial_id": "C1_trial_1",
+          "task_id": "C1",
+          "trial_number": 1,
+          "status": "completed",
+          "transcript": {
+            "messages": [
+              {
+                "role": "user",
+                "content": "今天天气怎么样？",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-08 02:15:50.195435"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-08 02:15:50.195444"
+              },
+              {
+                "role": "user",
+                "content": "今天天气怎么样？",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-08 02:15:50.224195"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-08 02:15:50.224200"
+              },
+              {
+                "role": "user",
+                "content": "今天天气怎么样？",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-08 02:15:50.224201"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-08 02:15:50.224202"
+              }
+            ],
+            "tool_calls": [],
+            "token_usage": {
+              "input_tokens": 0,
+              "output_tokens": 0,
+              "thinking_tokens": 0,
+              "cache_read_tokens": 0,
+              "cache_write_tokens": 0
+            },
+            "duration_ms": 0,
+            "metadata": {
+              "conversation_id": "fdded371-bb20-49e4-9446-e3645feaefae"
+            }
+          },
+          "outcome": {
+            "database_changes": [],
+            "file_changes": [],
+            "external_api_calls": [],
+            "custom_outcomes": {}
+          },
+          "grade_results": [
+            {
+              "grader_type": "code",
+              "grader_name": "check_token_limit",
+              "passed": true,
+              "score": 1.0,
+              "explanation": null,
+              "details": {
+                "token_type": "total",
+                "max_tokens": 20000,
+                "actual_tokens": 0,
+                "usage_breakdown": {
+                  "input": 0,
+                  "output": 0,
+                  "thinking": 0,
+                  "cache_read": 0,
+                  "cache_write": 0
+                }
+              },
+              "timestamp": "2026-02-08 02:15:50.224447",
+              "confidence": null,
+              "needs_human_review": false
+            },
+            {
+              "grader_type": "model",
+              "grader_name": "grade_response_quality",
+              "passed": true,
+              "score": 0.6,
+              "explanation": "LLM服务未配置，返回模拟评分",
+              "details": {
+                "scores": {},
+                "weighted_score": 3.0,
+                "strengths": [],
+                "weaknesses": []
+              },
+              "timestamp": "2026-02-08 02:15:50.224463",
+              "confidence": 0.5,
+              "needs_human_review": true
+            }
+          ],
+          "error": null,
+          "started_at": "2026-02-08 02:15:50.224234",
+          "completed_at": "2026-02-08 02:15:50.224475"
+        }
+      ]
+    }
+  ],
+  "total_tasks": 1,
+  "passed_tasks": 1,
+  "failed_tasks": 0,
+  "unstable_tasks": 0,
+  "total_token_usage": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "thinking_tokens": 0,
+    "cache_read_tokens": 0,
+    "cache_write_tokens": 0
+  },
+  "total_duration_seconds": 0.0,
+  "created_at": "2026-02-08 02:15:50.224870"
+}

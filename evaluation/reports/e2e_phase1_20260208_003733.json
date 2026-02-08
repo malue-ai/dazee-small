@@ -1,0 +1,434 @@
+{
+  "report_id": "e2e_phase1_20260208_003733",
+  "suite_id": "xiaodazi_e2e_phase1_core",
+  "suite_name": "E2E Phase1 核心用例",
+  "task_results": [
+    {
+      "task_id": "A1",
+      "task_description": "格式混乱 Excel 分析 - 销售趋势与最佳产品",
+      "trials": [
+        {
+          "trial_id": "A1_trial_1",
+          "task_id": "A1",
+          "trial_number": 1,
+          "status": "completed",
+          "transcript": {
+            "messages": [
+              {
+                "role": "user",
+                "content": "帮我分析这个表格的销售趋势，告诉我哪个产品卖得最好\n\n---\n📎 附件:\n📎 messy_sales.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet): file://chat-attachments/eval_e2e_user/20260208/69a7a48e-bdf6-4d83-80d5-5ff4e7aa3c9c_messy_sales.xlsx",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-08 00:37:32.879722"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-08 00:37:32.879726"
+              }
+            ],
+            "tool_calls": [],
+            "token_usage": {
+              "input_tokens": 0,
+              "output_tokens": 0,
+              "thinking_tokens": 0,
+              "cache_read_tokens": 0,
+              "cache_write_tokens": 0
+            },
+            "duration_ms": 0,
+            "metadata": {
+              "task_id": "9374ac41-6273-43d9-862e-29bf7a2a52f7",
+              "conversation_id": "37185ebe-f9f2-4569-8418-e761a0f3e22a"
+            }
+          },
+          "outcome": {
+            "database_changes": [],
+            "file_changes": [],
+            "external_api_calls": [],
+            "custom_outcomes": {}
+          },
+          "grade_results": [
+            {
+              "grader_type": "code",
+              "grader_name": "check_no_tool_errors",
+              "passed": true,
+              "score": 1.0,
+              "explanation": null,
+              "details": {
+                "total_calls": 0,
+                "error_count": 0,
+                "errors": []
+              },
+              "timestamp": "2026-02-08 00:37:32.879896",
+              "confidence": null,
+              "needs_human_review": false
+            },
+            {
+              "grader_type": "model",
+              "grader_name": "grade_response_quality",
+              "passed": false,
+              "score": 0.6,
+              "explanation": "LLM服务未配置，返回模拟评分",
+              "details": {
+                "scores": {},
+                "weighted_score": 3.0,
+                "strengths": [],
+                "weaknesses": []
+              },
+              "timestamp": "2026-02-08 00:37:32.879914",
+              "confidence": 0.5,
+              "needs_human_review": true
+            }
+          ],
+          "error": null,
+          "started_at": "2026-02-08 00:37:32.879747",
+          "completed_at": "2026-02-08 00:37:32.879923"
+        }
+      ]
+    },
+    {
+      "task_id": "B1",
+      "task_description": "跨会话记忆 - 毒舌风格延续与偏好记忆",
+      "trials": [
+        {
+          "trial_id": "B1_trial_1",
+          "task_id": "B1",
+          "trial_number": 1,
+          "status": "completed",
+          "transcript": {
+            "messages": [
+              {
+                "role": "user",
+                "content": "帮我写篇关于咖啡的文章",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-08 00:37:32.905141"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-08 00:37:32.905144"
+              },
+              {
+                "role": "user",
+                "content": "帮我写篇关于咖啡的文章",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-08 00:37:32.993707"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-08 00:37:32.993711"
+              },
+              {
+                "role": "user",
+                "content": "不对，我喜欢毒舌+干货风格，重新写",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-08 00:37:32.993712"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-08 00:37:32.993713"
+              },
+              {
+                "role": "user",
+                "content": "写篇关于茶文化的文章",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-08 00:37:33.017738"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-08 00:37:33.017741"
+              },
+              {
+                "role": "user",
+                "content": "小搭子你记住了什么关于我的写作偏好？",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-08 00:37:33.039028"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-08 00:37:33.039032"
+              }
+            ],
+            "tool_calls": [],
+            "token_usage": {
+              "input_tokens": 0,
+              "output_tokens": 0,
+              "thinking_tokens": 0,
+              "cache_read_tokens": 0,
+              "cache_write_tokens": 0
+            },
+            "duration_ms": 0,
+            "metadata": {
+              "conversation_id": "9a81a289-d895-4c80-99f5-2ba070d2f18e"
+            }
+          },
+          "outcome": {
+            "database_changes": [],
+            "file_changes": [],
+            "external_api_calls": [],
+            "custom_outcomes": {}
+          },
+          "grade_results": [
+            {
+              "grader_type": "model",
+              "grader_name": "grade_response_quality",
+              "passed": true,
+              "score": 0.6,
+              "explanation": "LLM服务未配置，返回模拟评分",
+              "details": {
+                "scores": {},
+                "weighted_score": 3.0,
+                "strengths": [],
+                "weaknesses": []
+              },
+              "timestamp": "2026-02-08 00:37:33.039136",
+              "confidence": 0.5,
+              "needs_human_review": true
+            }
+          ],
+          "error": null,
+          "started_at": "2026-02-08 00:37:33.039047",
+          "completed_at": "2026-02-08 00:37:33.039141"
+        }
+      ]
+    },
+    {
+      "task_id": "D4",
+      "task_description": "连续错误恢复 - CSV 转 Excel+柱状图+导出 PDF",
+      "trials": [
+        {
+          "trial_id": "D4_trial_1",
+          "task_id": "D4",
+          "trial_number": 1,
+          "status": "completed",
+          "transcript": {
+            "messages": [
+              {
+                "role": "user",
+                "content": "帮我把这个 CSV 数据做成 Excel，添加一个柱状图，然后导出为 PDF\n\n---\n📎 附件:\n📎 error_prone.csv (text/csv): file://chat-attachments/eval_e2e_user/20260208/a6c82131-611e-4306-8fe0-06f10f0c070c_error_prone.csv",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-08 00:37:33.074339"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-08 00:37:33.074343"
+              }
+            ],
+            "tool_calls": [],
+            "token_usage": {
+              "input_tokens": 0,
+              "output_tokens": 0,
+              "thinking_tokens": 0,
+              "cache_read_tokens": 0,
+              "cache_write_tokens": 0
+            },
+            "duration_ms": 0,
+            "metadata": {
+              "task_id": "14ffb3b4-0a8c-40c3-927c-6a9efd68fd50",
+              "conversation_id": "a4555593-0f89-4149-a0bd-fbbf1dd720d6"
+            }
+          },
+          "outcome": {
+            "database_changes": [],
+            "file_changes": [],
+            "external_api_calls": [],
+            "custom_outcomes": {}
+          },
+          "grade_results": [
+            {
+              "grader_type": "code",
+              "grader_name": "check_no_tool_errors",
+              "passed": true,
+              "score": 1.0,
+              "explanation": null,
+              "details": {
+                "total_calls": 0,
+                "error_count": 0,
+                "errors": []
+              },
+              "timestamp": "2026-02-08 00:37:33.074438",
+              "confidence": null,
+              "needs_human_review": false
+            },
+            {
+              "grader_type": "model",
+              "grader_name": "grade_response_quality",
+              "passed": true,
+              "score": 0.6,
+              "explanation": "LLM服务未配置，返回模拟评分",
+              "details": {
+                "scores": {},
+                "weighted_score": 3.0,
+                "strengths": [],
+                "weaknesses": []
+              },
+              "timestamp": "2026-02-08 00:37:33.074446",
+              "confidence": 0.5,
+              "needs_human_review": true
+            }
+          ],
+          "error": null,
+          "started_at": "2026-02-08 00:37:33.074354",
+          "completed_at": "2026-02-08 00:37:33.074450"
+        }
+      ]
+    },
+    {
+      "task_id": "C1",
+      "task_description": "简单问答 Token 对比 - 重复问题验证 prompt 缓存",
+      "trials": [
+        {
+          "trial_id": "C1_trial_1",
+          "task_id": "C1",
+          "trial_number": 1,
+          "status": "completed",
+          "transcript": {
+            "messages": [
+              {
+                "role": "user",
+                "content": "今天天气怎么样？",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-08 00:37:33.095683"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-08 00:37:33.095686"
+              },
+              {
+                "role": "user",
+                "content": "今天天气怎么样？",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-08 00:37:33.116509"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-08 00:37:33.116513"
+              },
+              {
+                "role": "user",
+                "content": "今天天气怎么样？",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-08 00:37:33.116514"
+              },
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [],
+                "thinking": null,
+                "timestamp": "2026-02-08 00:37:33.116515"
+              }
+            ],
+            "tool_calls": [],
+            "token_usage": {
+              "input_tokens": 0,
+              "output_tokens": 0,
+              "thinking_tokens": 0,
+              "cache_read_tokens": 0,
+              "cache_write_tokens": 0
+            },
+            "duration_ms": 0,
+            "metadata": {
+              "conversation_id": "14c2c304-1804-4636-8bc9-db744051cdc4"
+            }
+          },
+          "outcome": {
+            "database_changes": [],
+            "file_changes": [],
+            "external_api_calls": [],
+            "custom_outcomes": {}
+          },
+          "grade_results": [
+            {
+              "grader_type": "code",
+              "grader_name": "check_token_limit",
+              "passed": true,
+              "score": 1.0,
+              "explanation": null,
+              "details": {
+                "token_type": "total",
+                "max_tokens": 8000,
+                "actual_tokens": 0,
+                "usage_breakdown": {
+                  "input": 0,
+                  "output": 0,
+                  "thinking": 0,
+                  "cache_read": 0,
+                  "cache_write": 0
+                }
+              },
+              "timestamp": "2026-02-08 00:37:33.116679",
+              "confidence": null,
+              "needs_human_review": false
+            },
+            {
+              "grader_type": "model",
+              "grader_name": "grade_response_quality",
+              "passed": true,
+              "score": 0.6,
+              "explanation": "LLM服务未配置，返回模拟评分",
+              "details": {
+                "scores": {},
+                "weighted_score": 3.0,
+                "strengths": [],
+                "weaknesses": []
+              },
+              "timestamp": "2026-02-08 00:37:33.116688",
+              "confidence": 0.5,
+              "needs_human_review": true
+            }
+          ],
+          "error": null,
+          "started_at": "2026-02-08 00:37:33.116530",
+          "completed_at": "2026-02-08 00:37:33.116691"
+        }
+      ]
+    }
+  ],
+  "total_tasks": 4,
+  "passed_tasks": 3,
+  "failed_tasks": 1,
+  "unstable_tasks": 0,
+  "total_token_usage": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "thinking_tokens": 0,
+    "cache_read_tokens": 0,
+    "cache_write_tokens": 0
+  },
+  "total_duration_seconds": 0.0,
+  "created_at": "2026-02-08 00:37:33.117189"
+}

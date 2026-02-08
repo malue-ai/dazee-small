@@ -694,6 +694,11 @@ class ChatService:
 
                         history_messages.append({"role": db_msg.role, "content": content})
 
+                    # 🛡️ 确保 tool_use/tool_result 配对（DB 可能存有崩溃前的不完整数据）
+                    from core.llm.adaptor import ClaudeAdaptor
+
+                    history_messages = ClaudeAdaptor.ensure_tool_pairs(history_messages)
+
                     logger.info(
                         "历史消息已加载",
                         extra={"conversation_id": conversation_id, "count": len(history_messages)},
@@ -1240,6 +1245,11 @@ class ChatService:
             # V11: 长任务确认等待（执行器 yield long_running_confirm 后 await 此函数）
             agent._wait_long_run_confirm_async = (
                 lambda s=session_id: self.session_service.wait_long_run_confirm(s)
+            )
+
+            # V11.1: HITL 危险操作确认等待（执行器 yield hitl_confirm 后 await 此函数）
+            agent._wait_hitl_confirm_async = (
+                lambda s=session_id: self.session_service.wait_hitl_confirm(s)
             )
 
             async for event in agent.chat(

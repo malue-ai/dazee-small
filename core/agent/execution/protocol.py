@@ -50,7 +50,8 @@ class ExecutorConfig:
     包含执行策略的通用配置参数。
     """
 
-    max_turns: int = 30
+    # 主循环不再使用 max_turns 硬性限制（LLM-First：大模型自主决定终止）
+    # 终止由 AdaptiveTerminator 信号驱动：LLM end_turn / 用户停止 / 费用超限 / 时长超限
     enable_stream: bool = True
     allow_parallel_tools: bool = True
     max_parallel_tools: int = 5
@@ -63,7 +64,7 @@ class ExecutorConfig:
     enable_backtrack: bool = False
     max_backtrack_attempts: int = 3
 
-    # V11: 终止策略（有值时替代简单 max_turns 判断）
+    # 终止策略（信号驱动，替代硬性 max_turns）
     terminator: Optional["BaseTerminator"] = None
 
     # 扩展配置

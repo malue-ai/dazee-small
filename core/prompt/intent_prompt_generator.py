@@ -1,17 +1,19 @@
 """
 意图识别提示词生成器 - IntentPromptGenerator
 
-🆕 V10.0: 适配极简版意图识别提示词
+V12.0: 适配桌面端意图识别提示词
 
 设计原则：
-1. 直接使用 V10.0 极简提示词
+1. 直接使用 V12.0 桌面端提示词
 2. 支持自定义规则追加
 3. 一次性生成，运行时直接使用
 
 生成的提示词用于 IntentAnalyzer:
 - complexity: 复杂度等级 (simple/medium/complex)
-- agent_type: 执行引擎 (rvr/rvr-b/multi)
 - skip_memory: 是否跳过记忆检索
+- is_follow_up: 是否为追问
+- wants_to_stop: 用户是否希望停止/取消
+- relevant_skill_groups: 需要哪些技能分组
 """
 
 # 1. 标准库
@@ -34,7 +36,7 @@ class IntentPromptGenerator:
     """
     意图识别提示词生成器
 
-    V10.0 版本：使用极简提示词，支持自定义规则追加
+    V12.0 版本：使用桌面端提示词，支持自定义规则追加
 
     使用方式：
     ```python
@@ -51,7 +53,7 @@ class IntentPromptGenerator:
         """
         根据 PromptSchema 生成意图识别提示词
 
-        V10.0：使用极简基础提示词，支持追加自定义规则
+        V12.0：使用桌面端基础提示词，支持追加自定义规则
 
         Args:
             schema: PromptSchema 对象
@@ -147,7 +149,7 @@ class IntentPromptGenerator:
         获取默认意图识别提示词
 
         Returns:
-            V10.0 极简版意图识别提示词
+            V12.0 桌面端意图识别提示词
         """
         return INTENT_RECOGNITION_PROMPT
 

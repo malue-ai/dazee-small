@@ -49,6 +49,56 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+# ==================== 图片剥离辅助函数 ====================
+
+IMAGE_PLACEHOLDER = "[截图已省略，仅保留最近轮次的截图]"
+
+
+def _content_has_image(content) -> bool:
+    """递归检查 content 是否包含 image block"""
+    if isinstance(content, list):
+        return any(
+            (isinstance(b, dict) and b.get("type") == "image")
+            or (isinstance(b, dict) and b.get("type") == "tool_result"
+                and _content_has_image(b.get("content")))
+            for b in content
+        )
+    if isinstance(content, dict):
+        return content.get("type") == "image"
+    return False
+
+
+def _strip_images_from_blocks(blocks: list) -> list:
+    """
+    递归替换 content blocks 中的 image block 为文本占位符
+
+    保留 text block 和 tool_use/tool_result 的结构，仅替换 image。
+    """
+    result = []
+    for block in blocks:
+        if not isinstance(block, dict):
+            result.append(block)
+            continue
+
+        block_type = block.get("type", "")
+
+        if block_type == "image":
+            # 替换 base64 图片为文本占位符
+            result.append({"type": "text", "text": IMAGE_PLACEHOLDER})
+        elif block_type == "tool_result":
+            inner = block.get("content")
+            if isinstance(inner, list) and _content_has_image(inner):
+                result.append({
+                    **block,
+                    "content": _strip_images_from_blocks(inner),
+                })
+            else:
+                result.append(block)
+        else:
+            result.append(block)
+
+    return result
+
 
 class RVRExecutor(BaseExecutor):
     """
@@ -96,6 +146,72 @@ class RVRExecutor(BaseExecutor):
             return "".join(parts)
         return system_prompt or ""
 
+    @staticmethod
+    def _strip_old_images(
+        messages: List[Dict], preserve_last_n: int = 2
+    ) -> List[Dict]:
+        """
+        剥离非最近 N 条消息中的 base64 图片数据
+
+        observe_screen 等工具返回的截图以 base64 嵌入 tool_result，
+        每张图片 ~0.6MB，会快速耗尽 200K token 上下文窗口。
+        将旧消息中的图片替换为文本占位符，保留最近消息的图片。
+
+        Args:
+            messages: 消息列表（dict 格式）
+            preserve_last_n: 保留最近 N 条消息的图片不剥离
+
+        Returns:
+            处理后的消息列表（浅拷贝，仅修改含图片的消息）
+        """
+        if not messages:
+            return messages
+
+        stripped_count = 0
+        result = []
+
+        # 保留最后 N 条消息的图片
+        strip_boundary = len(messages) - preserve_last_n
+
+        for i, msg in enumerate(messages):
+            if i >= strip_boundary:
+                result.append(msg)
+                continue
+
+            content = msg.get("content")
+            if not isinstance(content, list):
+                result.append(msg)
+                continue
+
+            # 检查是否包含图片 block
+            has_image = any(
+                isinstance(block, dict) and block.get("type") == "image"
+                for block in content
+            )
+
+            if not has_image:
+                # 递归检查 tool_result 内部
+                has_image = any(
+                    isinstance(block, dict)
+                    and block.get("type") == "tool_result"
+                    and _content_has_image(block.get("content"))
+                    for block in content
+                )
+
+            if not has_image:
+                result.append(msg)
+                continue
+
+            # 替换图片为占位符
+            new_content = _strip_images_from_blocks(content)
+            stripped_count += 1
+            result.append({**msg, "content": new_content})
+
+        if stripped_count > 0:
+            logger.info(f"🖼️ 已剥离 {stripped_count} 条消息中的 base64 图片")
+
+        return result
+
     def _trim_messages_if_needed(
         self,
         llm_messages: List,
@@ -107,11 +223,16 @@ class RVRExecutor(BaseExecutor):
     ) -> List:
         """
         如果消息超过安全阈值，执行裁剪
+
+        始终剥离旧消息中的 base64 图片，避免截图累积撑爆上下文窗口。
         """
         messages_for_estimate = [
             {"role": m.role, "content": m.content} if hasattr(m, "role") else m
             for m in llm_messages
         ]
+
+        # 始终剥离旧消息中的 base64 图片（保留最近 2 条消息的图片）
+        messages_for_estimate = self._strip_old_images(messages_for_estimate)
 
         # 使用统一的 token 计算方法（包含工具定义）
         estimated_tokens = count_request_tokens(
@@ -123,7 +244,8 @@ class RVRExecutor(BaseExecutor):
                 logger.debug(
                     f"📊 上下文长度正常: 估算 {estimated_tokens:,} tokens < 安全阈值 {safe_threshold:,}"
                 )
-            return llm_messages
+            # 返回剥离图片后的消息（而非原始消息），防止截图累积超限
+            return dict_list_to_messages(messages_for_estimate)
 
         preserve_first = (
             getattr(context_strategy, "preserve_first_messages", 4) if context_strategy else 4
@@ -521,7 +643,7 @@ class RVRExecutor(BaseExecutor):
         event_manager = context.extra.get("event_manager")
         state_manager = context.extra.get("state_manager")
 
-        logger.info(f"🚀 RVRExecutor 开始执行: max_turns={cfg.max_turns}")
+        logger.info(f"🚀 RVRExecutor 开始执行 (signal-driven termination)")
 
         # 转换消息为 Message 对象
         llm_messages = dict_list_to_messages(messages)
@@ -552,7 +674,8 @@ class RVRExecutor(BaseExecutor):
             llm_messages, system_prompt_text, safe_threshold, context.context_strategy, turn=0
         )
 
-        for turn in range(cfg.max_turns):
+        turn = 0
+        while True:
             # 每轮调用 LLM 前刷新 Plan 注入（Plan 可能在上一轮工具调用中被更新）
             llm_messages = _refresh_plan_injection(llm_messages, inject_errors=(turn == 0))
 
@@ -569,7 +692,7 @@ class RVRExecutor(BaseExecutor):
             ctx.next_turn()
             ctx.touch_activity()  # 更新活动时间（用于 idle_timeout 检测）
             logger.info(f"{'='*60}")
-            logger.info(f"🔄 Turn {turn + 1}/{cfg.max_turns}")
+            logger.info(f"🔄 Turn {turn + 1}")
             logger.info(f"{'='*60}")
 
             if cfg.enable_stream:
@@ -597,7 +720,8 @@ class RVRExecutor(BaseExecutor):
 
                     # 处理工具调用
                     if response.stop_reason == "tool_use" and response.tool_calls:
-                        # V11: HITL 危险操作确认（执行前检查待执行工具名）
+                        # V11.1: HITL 危险操作确认（执行前拦截，等待用户决策）
+                        hitl_rejected = False
                         if cfg.terminator:
                             try:
                                 pending_names = [
@@ -614,6 +738,7 @@ class RVRExecutor(BaseExecutor):
                                     hitl_decision.action == TerminationAction.ASK_USER
                                     and "hitl_confirm" in (hitl_decision.reason or "")
                                 ):
+                                    # 通知前端显示确认弹窗
                                     yield {
                                         "type": "hitl_confirm",
                                         "data": {
@@ -622,34 +747,47 @@ class RVRExecutor(BaseExecutor):
                                             "message": "危险操作需用户确认",
                                         },
                                     }
-                                    ctx.stop_reason = hitl_decision.reason or "hitl_confirm"
-                                    break
+
+                                    # 等待用户决策（approve / reject）
+                                    wait_fn = (context.extra or {}).get(
+                                        "wait_hitl_confirm_async"
+                                    )
+                                    if callable(wait_fn):
+                                        user_choice = await wait_fn()
+                                        if user_choice == "approve":
+                                            logger.info(
+                                                f"HITL 已批准: {pending_names}"
+                                            )
+                                            # 用户批准 → 继续执行工具
+                                        else:
+                                            # 用户拒绝 → 执行 on_rejection 策略
+                                            logger.info(
+                                                f"HITL 已拒绝: {pending_names}，"
+                                                f"执行回退策略"
+                                            )
+                                            hitl_rejected = True
+                                            async for evt in self._handle_hitl_rejection(
+                                                context, ctx, cfg
+                                            ):
+                                                yield evt
+                                            break
+                                    else:
+                                        # 无等待函数，保守停止（不执行危险操作）
+                                        logger.warning(
+                                            "HITL 确认: 无 wait 函数，"
+                                            "保守停止（不执行危险操作）"
+                                        )
+                                        ctx.stop_reason = (
+                                            hitl_decision.reason or "hitl_confirm"
+                                        )
+                                        break
                             except Exception as e:
                                 logger.warning(
                                     f"HITL 检查异常，继续执行: {e}",
                                     exc_info=True,
                                 )
 
-                        is_last_turn = turn == cfg.max_turns - 1
-                        if is_last_turn:
-                            async for event in self._handle_last_turn_tools(
-                                response,
-                                llm_messages,
-                                system_prompt,
-                                ctx,
-                                session_id,
-                                conversation_id,
-                                llm,
-                                tool_executor,
-                                broadcaster,
-                                usage_tracker,
-                                context_engineering=context_engineering,
-                                plan_cache=plan_cache,
-                                plan_todo_tool=plan_todo_tool,
-                                event_manager=event_manager,
-                                state_manager=state_manager,
-                            ):
-                                yield event
+                        if hitl_rejected:
                             break
 
                         # 处理工具调用（V10.2: 使用 ToolExecutionFlow）
@@ -687,37 +825,6 @@ class RVRExecutor(BaseExecutor):
                     ctx.set_completed(response.content, response.stop_reason)
                     break
 
-                is_last_turn = turn == cfg.max_turns - 1
-                if is_last_turn:
-                    # 非流式最后一轮
-                    async for event in self._handle_tool_calls(
-                        response,
-                        llm_messages,
-                        session_id,
-                        conversation_id,
-                        ctx,
-                        tool_executor,
-                        broadcaster,
-                        context_engineering=context_engineering,
-                        plan_cache=plan_cache,
-                        plan_todo_tool=plan_todo_tool,
-                        event_manager=event_manager,
-                        state_manager=state_manager,
-                    ):
-                        yield event
-
-                    # 生成最终响应
-                    final_response = await llm.create_message_async(
-                        messages=llm_messages, system=system_prompt, tools=[]
-                    )
-                    usage_tracker.accumulate(final_response)
-
-                    if final_response.content:
-                        yield {"type": "content", "data": {"text": final_response.content}}
-
-                    ctx.set_completed(final_response.content, final_response.stop_reason)
-                    break
-
                 # 处理工具调用（非流式）
                 async for _ in self._handle_tool_calls(
                     response,
@@ -735,10 +842,12 @@ class RVRExecutor(BaseExecutor):
                 ):
                     pass  # 非流式不 yield 事件
 
+            turn += 1
+
             if ctx.is_completed():
                 break
 
-            # V11: 终止策略（有 terminator 时替代仅靠 max_turns 的简单判断）
+            # 终止策略：完全由 AdaptiveTerminator 信号驱动（无硬性 max_turns）
             if cfg.terminator and not ctx.is_completed():
                 try:
                     from core.termination.protocol import TerminationAction
@@ -760,13 +869,20 @@ class RVRExecutor(BaseExecutor):
                     )
                     if decision.should_stop:
                         ctx.stop_reason = decision.reason or "terminator"
-                        # V11: ROLLBACK_OPTIONS — yield 回滚选项事件
+                        # V11.1: 连续失败 → 推送回滚选项（事件类型对齐前端）
                         if decision.action == TerminationAction.ROLLBACK_OPTIONS:
+                            _state_mgr = (context.extra or {}).get("state_manager")
+                            _options = (
+                                _state_mgr.get_rollback_options(session_id)
+                                if _state_mgr
+                                else []
+                            )
                             yield {
-                                "type": "rollback_options_hint",
+                                "type": "rollback_options",
                                 "data": {
+                                    "task_id": session_id,
+                                    "options": _options,
                                     "reason": decision.reason,
-                                    "message": "连续失败，建议回滚",
                                 },
                             }
                         break
@@ -793,6 +909,82 @@ class RVRExecutor(BaseExecutor):
                     )
 
         logger.info(f"✅ RVRExecutor 执行完成: turns={ctx.current_turn}")
+
+    # ==================== HITL 拒绝处理（V11.1）====================
+
+    async def _handle_hitl_rejection(
+        self,
+        context: ExecutionContext,
+        ctx: "RuntimeContext",
+        cfg: ExecutorConfig,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        处理用户拒绝 HITL 确认后的回退策略
+
+        根据 HITLConfig.on_rejection 配置执行：
+        - "rollback": 自动回滚到任务快照
+        - "stop": 直接停止，不回滚
+        - "ask_rollback": 推送回滚选项，让用户决定是否回滚
+
+        Args:
+            context: 执行上下文
+            ctx: 运行时上下文
+            cfg: 执行器配置
+        """
+        session_id = context.session_id
+        state_mgr = (context.extra or {}).get("state_manager")
+
+        # 读取 on_rejection 策略
+        on_rejection = "ask_rollback"  # 默认：询问用户
+        if (
+            cfg.terminator
+            and hasattr(cfg.terminator, "config")
+            and hasattr(cfg.terminator.config, "hitl")
+        ):
+            on_rejection = getattr(
+                cfg.terminator.config.hitl, "on_rejection", "ask_rollback"
+            )
+
+        logger.info(
+            f"HITL 拒绝处理: on_rejection={on_rejection}, session={session_id}"
+        )
+
+        if on_rejection == "rollback" and state_mgr:
+            # 自动回滚
+            snapshot_id = state_mgr.get_snapshot_for_task(session_id)
+            if snapshot_id:
+                rollback_msgs = state_mgr.rollback(snapshot_id)
+                logger.info(f"HITL 拒绝 → 自动回滚完成: {rollback_msgs}")
+                yield {
+                    "type": "rollback_completed",
+                    "data": {
+                        "task_id": session_id,
+                        "messages": rollback_msgs,
+                        "trigger": "hitl_rejection",
+                    },
+                }
+            else:
+                logger.warning("HITL 拒绝 → 回滚失败: 未找到快照")
+            ctx.stop_reason = "hitl_rejected_rollback"
+
+        elif on_rejection == "ask_rollback":
+            # 推送回滚选项给前端，让用户决定
+            options = (
+                state_mgr.get_rollback_options(session_id) if state_mgr else []
+            )
+            yield {
+                "type": "rollback_options",
+                "data": {
+                    "task_id": session_id,
+                    "options": options,
+                    "reason": "用户拒绝危险操作",
+                },
+            }
+            ctx.stop_reason = "hitl_rejected_ask_rollback"
+
+        else:
+            # "stop" 或未知策略 → 直接停止
+            ctx.stop_reason = "hitl_rejected_stop"
 
     def _validate_plan_creation(self, tool_calls: List[Dict], tracer=None) -> None:
         """

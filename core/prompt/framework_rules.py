@@ -41,7 +41,9 @@ logger = logging.getLogger(__name__)
 # 模板文件路径
 # ============================================================
 
-TEMPLATES_DIR = Path(__file__).parent.parent.parent / "prompts" / "templates"
+from utils.app_paths import get_bundle_dir
+
+TEMPLATES_DIR = get_bundle_dir() / "prompts" / "templates"
 
 
 async def _load_template(filename: str) -> str:

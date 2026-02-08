@@ -77,8 +77,8 @@ async def get_failure_summary_config(config_path: Optional[Path] = None) -> Fail
         return _CONFIG_CACHE
 
     if config_path is None:
-        project_root = Path(__file__).resolve().parents[2]
-        config_path = project_root / "config" / "context_compaction.yaml"
+        from utils.app_paths import get_bundle_dir
+        config_path = get_bundle_dir() / "config" / "context_compaction.yaml"
 
     config_data: Dict[str, Any] = {}
     if config_path.exists():

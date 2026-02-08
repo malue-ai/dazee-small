@@ -1,5 +1,5 @@
 """
-Re-initialize instance xiaodazi: create .env from template, prompt_results, api_desc.
+Re-initialize instance xiaodazi: create .env from template, prompt_results.
 
 Run from project root:
     python scripts/init_instance_xiaodazi.py
@@ -37,17 +37,6 @@ def main() -> int:
         print("Created instances/xiaodazi/prompt_results/README.md")
     print("instances/xiaodazi/prompt_results/ ready")
 
-    # 3. api_desc/
-    api = XIAODAZI / "api_desc"
-    api.mkdir(parents=True, exist_ok=True)
-    readme_api = api / "README.md"
-    if not readme_api.exists():
-        readme_api.write_text(
-            "# API 描述文档\n\n"
-            "本目录存放实例所需的 REST API 描述（.md），供 api_calling 等使用。\n",
-            encoding="utf-8",
-        )
-        print("Created instances/xiaodazi/api_desc/README.md")
     print("instances/xiaodazi re-initialized.")
     return 0
 

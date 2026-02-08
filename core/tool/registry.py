@@ -93,11 +93,13 @@ class CapabilityRegistry:
 
     def _default_config_path(self) -> str:
         """获取默认配置文件路径"""
-        return str(Path(__file__).parent.parent.parent / "config" / "capabilities.yaml")
+        from utils.app_paths import get_bundle_dir
+        return str(get_bundle_dir() / "config" / "capabilities.yaml")
 
     def _default_skills_dir(self) -> str:
         """获取默认 Skills 目录"""
-        return str(Path(__file__).parent.parent.parent / "skills" / "library")
+        from utils.app_paths import get_bundle_dir
+        return str(get_bundle_dir() / "skills" / "library")
 
     async def _load_config_async(self) -> None:
         """异步从 YAML 配置文件加载能力"""

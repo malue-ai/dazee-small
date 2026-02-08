@@ -196,6 +196,138 @@ def _has_tool_result(msg: Dict[str, Any]) -> bool:
     return False
 
 
+# ============================================================
+# tool_result 内容级压缩（即时，O(n)，零 LLM 调用）
+# ============================================================
+
+# tool_result 内容超过此字符数时触发截断
+_TOOL_RESULT_TRUNCATE_THRESHOLD = 500
+# 截断后保留的头尾字符数
+_TOOL_RESULT_KEEP_HEAD = 200
+_TOOL_RESULT_KEEP_TAIL = 100
+
+
+def _compress_tool_result_content(content: Any) -> Any:
+    """
+    压缩单个 tool_result 的 content 字段
+
+    策略：
+    - 字符串超长 → 保留头 200 + 尾 100 字符 + 截断标记
+    - list of blocks → 递归压缩每个 text block
+    - 其他 → 不变
+    """
+    if isinstance(content, str):
+        if len(content) <= _TOOL_RESULT_TRUNCATE_THRESHOLD:
+            return content
+        return (
+            content[:_TOOL_RESULT_KEEP_HEAD]
+            + f"\n\n... (已省略 {len(content) - _TOOL_RESULT_KEEP_HEAD - _TOOL_RESULT_KEEP_TAIL} 字符) ...\n\n"
+            + content[-_TOOL_RESULT_KEEP_TAIL:]
+        )
+
+    if isinstance(content, list):
+        compressed = []
+        for block in content:
+            if isinstance(block, dict):
+                block_type = block.get("type", "")
+                if block_type == "text":
+                    text = block.get("text", "")
+                    if len(text) > _TOOL_RESULT_TRUNCATE_THRESHOLD:
+                        compressed.append({
+                            **block,
+                            "text": (
+                                text[:_TOOL_RESULT_KEEP_HEAD]
+                                + f"\n... (已省略 {len(text) - _TOOL_RESULT_KEEP_HEAD - _TOOL_RESULT_KEEP_TAIL} 字符) ...\n"
+                                + text[-_TOOL_RESULT_KEEP_TAIL:]
+                            ),
+                        })
+                    else:
+                        compressed.append(block)
+                elif block_type == "image":
+                    # 图片应已被 _strip_old_images 处理，这里做兜底
+                    compressed.append({"type": "text", "text": "[图片已省略]"})
+                else:
+                    compressed.append(block)
+            else:
+                compressed.append(block)
+        return compressed
+
+    return content
+
+
+def _compress_old_tool_results(
+    messages: List[Dict[str, Any]],
+    preserve_recent_n: int = 6,
+) -> List[Dict[str, Any]]:
+    """
+    压缩非最近消息中的 tool_result 内容（即时，O(n)，零 LLM 调用）
+
+    保留最近 N 条消息的 tool_result 原文不动，
+    更早的消息中超长的 tool_result 内容截断为头+尾。
+
+    Args:
+        messages: 消息列表
+        preserve_recent_n: 保留最近 N 条消息不压缩
+
+    Returns:
+        压缩后的消息列表
+    """
+    if not messages:
+        return messages
+
+    boundary = len(messages) - preserve_recent_n
+    if boundary <= 0:
+        return messages
+
+    compressed_count = 0
+    result = []
+
+    for i, msg in enumerate(messages):
+        if i >= boundary:
+            result.append(msg)
+            continue
+
+        content = msg.get("content")
+        if not isinstance(content, list):
+            result.append(msg)
+            continue
+
+        # 检查是否包含 tool_result
+        has_tr = any(
+            isinstance(b, dict) and b.get("type") == "tool_result"
+            for b in content
+        )
+        if not has_tr:
+            result.append(msg)
+            continue
+
+        # 压缩 tool_result 内容
+        new_content = []
+        changed = False
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "tool_result":
+                original = block.get("content", "")
+                compressed = _compress_tool_result_content(original)
+                if compressed is not original:
+                    new_content.append({**block, "content": compressed})
+                    changed = True
+                else:
+                    new_content.append(block)
+            else:
+                new_content.append(block)
+
+        if changed:
+            compressed_count += 1
+            result.append({**msg, "content": new_content})
+        else:
+            result.append(msg)
+
+    if compressed_count > 0:
+        logger.info(f"📦 已压缩 {compressed_count} 条消息中的 tool_result 内容")
+
+    return result
+
+
 def trim_by_token_budget(
     messages: List[Dict[str, Any]],
     token_budget: int,
@@ -208,6 +340,7 @@ def trim_by_token_budget(
     基于 token 预算裁剪消息（纯 token 驱动，L2 策略核心实现）
 
     裁剪逻辑：
+    0. 先压缩旧消息中的 tool_result 内容（即时，零 LLM 调用）
     1. 估算总 token 数，如果未超预算则直接返回
     2. 始终保留开头 N 条消息（任务上下文）
     3. 从最近消息向前累计 token，找到预算分割点
@@ -224,6 +357,11 @@ def trim_by_token_budget(
     Returns:
         (裁剪后的消息, 统计信息)
     """
+    # Step 0: 分级压缩旧消息中超长的 tool_result 内容（即时，O(n)，零 LLM 调用）
+    # 保留最近 6 条消息（约 3 轮对话）的 tool_result 原文
+    # 第 7 条以前的 tool_result 截断为头+尾
+    messages = _compress_old_tool_results(messages, preserve_recent_n=min(6, preserve_last_messages))
+
     original_count = len(messages)
 
     # 边界情况：消息数很少，无需裁剪
@@ -305,6 +443,12 @@ def trim_by_token_budget(
 
     # 7. 组合结果
     result = first_part + middle_part + last_part
+
+    # 8. 🛡️ 裁剪后确保 tool_use/tool_result 配对（裁剪可能破坏边界处的配对）
+    from core.llm.adaptor import ClaudeAdaptor
+
+    result = ClaudeAdaptor.ensure_tool_pairs(result)
+
     trimmed_count = len(result)
     estimated_tokens = base_tokens + first_tokens + middle_tokens + last_tokens
 
@@ -485,6 +629,12 @@ async def compress_with_summary(
 
     # 8. 组合结果
     result = first_part + [summary_message] + middle_tool_results + last_part
+
+    # 9. 🛡️ 压缩后确保 tool_use/tool_result 配对（压缩可能破坏边界处的配对）
+    from core.llm.adaptor import ClaudeAdaptor
+
+    result = ClaudeAdaptor.ensure_tool_pairs(result)
+
     trimmed_count = len(result)
     estimated_tokens = (
         base_tokens + first_tokens + summary_tokens + middle_tool_tokens + last_tokens
@@ -662,6 +812,11 @@ async def load_with_existing_summary(
 
         # 用摘要替换指定范围
         result = messages[:middle_start] + [summary_message] + messages[middle_end:]
+
+        # 🛡️ 摘要替换后确保 tool_use/tool_result 配对
+        from core.llm.adaptor import ClaudeAdaptor
+
+        result = ClaudeAdaptor.ensure_tool_pairs(result)
 
         logger.info(
             f"📦 应用已有摘要: {len(messages)} → {len(result)} 条消息 "

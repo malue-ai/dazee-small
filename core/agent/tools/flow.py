@@ -69,7 +69,7 @@ class ToolExecutionContext:
     plan_todo_tool: Any = None
 
     # 配置
-    serial_only_tools: set = field(default_factory=lambda: {"plan", "request_human_confirmation"})
+    serial_only_tools: set = field(default_factory=lambda: {"plan", "hitl"})
     allow_parallel: bool = True
     max_parallel: int = 5
 
@@ -128,7 +128,6 @@ class ToolExecutionFlow:
     使用方式：
         flow = ToolExecutionFlow()
         flow.register_handler(PlanTodoHandler())
-        flow.register_handler(HumanConfirmationHandler())
 
         results = await flow.execute(tool_calls, context)
     """
@@ -371,7 +370,8 @@ class ToolExecutionFlow:
                 result = result_info.result
                 result_content = _tool_result_content(result)
 
-                yield await content_handler.emit_block(
+                # 通过 broadcaster 发送 SSE 事件（content_start + content_stop）
+                await content_handler.emit_block(
                     session_id=context.session_id,
                     block_type="tool_result",
                     content={
@@ -380,6 +380,16 @@ class ToolExecutionFlow:
                         "is_error": result_info.is_error,
                     },
                 )
+
+                # yield tool_result 事件用于消息构建（_handle_tool_calls 依赖此格式）
+                yield {
+                    "type": "tool_result",
+                    "content": {
+                        "tool_use_id": tool_id,
+                        "content": result_content,
+                        "is_error": result_info.is_error,
+                    },
+                }
                 continue
 
             # 流式/特殊工具
@@ -413,7 +423,8 @@ class ToolExecutionFlow:
                 result = result_info.result
                 result_content = _tool_result_content(result)
 
-                yield await content_handler.emit_block(
+                # 通过 broadcaster 发送 SSE 事件
+                await content_handler.emit_block(
                     session_id=context.session_id,
                     block_type="tool_result",
                     content={
@@ -423,6 +434,16 @@ class ToolExecutionFlow:
                     },
                 )
 
+                # yield tool_result 事件用于消息构建
+                yield {
+                    "type": "tool_result",
+                    "content": {
+                        "tool_use_id": tool_id,
+                        "content": result_content,
+                        "is_error": result_info.is_error,
+                    },
+                }
+
 
 def create_tool_execution_flow() -> ToolExecutionFlow:
     """
@@ -431,14 +452,14 @@ def create_tool_execution_flow() -> ToolExecutionFlow:
     Returns:
         ToolExecutionFlow 实例
     """
-    from core.agent.tools.special import (
-        HumanConfirmationHandler,
-        PlanTodoHandler,
-    )
+    from core.agent.tools.special import PlanTodoHandler
 
     flow = ToolExecutionFlow()
     flow.register_handler(PlanTodoHandler())
-    flow.register_handler(HumanConfirmationHandler())
+
+    # NOTE: HumanConfirmationHandler 已删除
+    # hitl 工具通过 ToolExecutor → HITLTool.execute() 执行
+    # broadcaster 在 content_stop 时自动发送表单事件
 
     return flow
 

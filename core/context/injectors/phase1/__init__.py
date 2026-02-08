@@ -20,12 +20,14 @@ Phase 1 Injectors - System Message
 """
 
 from .history_summary import HistorySummaryProvider
+from .skill_focus import SkillFocusHintInjector
 from .system_role import SystemRoleInjector
 from .tool_provider import ToolSystemRoleProvider
 
 __all__ = [
     "SystemRoleInjector",
     "ToolSystemRoleProvider",
+    "SkillFocusHintInjector",
     "HistorySummaryProvider",
 ]
 
@@ -40,5 +42,6 @@ def get_phase1_injectors():
     return [
         SystemRoleInjector(),
         ToolSystemRoleProvider(),
+        SkillFocusHintInjector(),
         HistorySummaryProvider(),
     ]
