@@ -96,12 +96,24 @@ def is_port_in_use(port: int) -> bool:
 VENV_PYTHON = Path("/Users/liuyi/Documents/langchain/liuy/bin/python3")
 
 
-def start_server(port: int) -> subprocess.Popen:
-    """Start uvicorn as a subprocess, return Popen handle."""
+def start_server(port: int, provider: str = None) -> subprocess.Popen:
+    """Start uvicorn as a subprocess, return Popen handle.
+
+    IMPORTANT: stdout is redirected to a temp log file instead of subprocess.PIPE.
+    Using PIPE without a reader causes buffer deadlock (64KB on macOS) — once the
+    buffer fills, the server's event loop blocks on stdout write, making the
+    entire HTTP server unresponsive.
+
+    Args:
+        port: Server port.
+        provider: Override model provider ("qwen" / "claude") via AGENT_PROVIDER env var.
+    """
     # Use project venv python; fall back to current interpreter
     python = str(VENV_PYTHON) if VENV_PYTHON.exists() else sys.executable
     env = os.environ.copy()
     env.setdefault("AGENT_INSTANCE", "xiaodazi")
+    if provider:
+        env["AGENT_PROVIDER"] = provider
 
     cmd = [
         python, "-m", "uvicorn",
@@ -111,16 +123,24 @@ def start_server(port: int) -> subprocess.Popen:
         "--log-level", "warning",
     ]
 
+    # Write server logs to a temp file to avoid pipe buffer deadlock.
+    # The file is kept so we can inspect logs on failure.
+    import tempfile
+    log_file = tempfile.NamedTemporaryFile(
+        prefix="e2e_server_", suffix=".log", delete=False, mode="w"
+    )
     _log("🚀", f"Starting server on port {port} (python: {python})")
+    _log("📄", f"Server log: {log_file.name}")
     proc = subprocess.Popen(
         cmd,
         cwd=str(PROJECT_ROOT),
         env=env,
-        stdout=subprocess.PIPE,
+        stdout=log_file,
         stderr=subprocess.STDOUT,
         # Make sure we can kill the whole process tree
         preexec_fn=os.setsid if sys.platform != "win32" else None,
     )
+    proc._log_file = log_file  # attach for later inspection
     return proc
 
 
@@ -157,6 +177,23 @@ async def wait_for_ready(base_url: str, timeout: float = STARTUP_TIMEOUT) -> boo
         await asyncio.sleep(POLL_INTERVAL)
 
     return False
+
+
+def _print_server_log(proc: subprocess.Popen, tail: int = 3000) -> None:
+    """Print last `tail` chars of the server log file (if attached)."""
+    log_file = getattr(proc, "_log_file", None)
+    if not log_file:
+        return
+    try:
+        log_path = log_file.name
+        with open(log_path, "r", errors="replace") as f:
+            content = f.read()
+        if content:
+            print(f"\n--- Server log ({log_path}) last {tail} chars ---")
+            print(content[-tail:])
+            print("--- End server log ---\n")
+    except Exception as e:
+        _warn(f"Could not read server log: {e}")
 
 
 def kill_server(proc: subprocess.Popen) -> None:
@@ -216,9 +253,47 @@ async def run_e2e(
         CHECKPOINT_FILE.unlink()
         _warn("Checkpoint cleared")
 
+    # Initialize grader LLM from evaluation/config/settings.yaml (NOT instance config).
+    # The grader is our internal benchmark judge — always uses the strongest model
+    # with thinking, independent of which provider the agent uses.
+    grader_llm = None
+    try:
+        import yaml as _yaml
+        from core.llm import create_llm_service
+        from utils.instance_loader import load_instance_env_from_config
+
+        # Load instance .env so API keys are available
+        instance_name = os.environ.get("AGENT_INSTANCE", "xiaodazi")
+        load_instance_env_from_config(instance_name)
+
+        # Read grader config from evaluation settings
+        eval_settings_path = PROJECT_ROOT / "evaluation" / "config" / "settings.yaml"
+        with open(eval_settings_path, "r", encoding="utf-8") as f:
+            eval_settings = _yaml.safe_load(f) or {}
+        grader_cfg = (eval_settings.get("graders", {}).get("model", {}))
+
+        if grader_cfg.get("enabled") and grader_cfg.get("provider"):
+            profile = {
+                "provider": grader_cfg["provider"],
+                "model": grader_cfg["model"],
+                "api_key_env": grader_cfg.get("api_key_env", "ANTHROPIC_API_KEY"),
+                "max_tokens": grader_cfg.get("max_tokens", 4096),
+                "temperature": grader_cfg.get("temperature", 0),
+                "enable_thinking": grader_cfg.get("enable_thinking", True),
+                "thinking_budget": grader_cfg.get("thinking_budget", 10000),
+                "timeout": grader_cfg.get("timeout", 120.0),
+            }
+            grader_llm = create_llm_service(**profile)
+            _log("🧪", f"Grader LLM: {profile['model']} "
+                        f"(thinking={profile['enable_thinking']})")
+        else:
+            _warn("Grader model not enabled in evaluation/config/settings.yaml")
+    except Exception as e:
+        _warn(f"Grader LLM init failed ({e}), model graders will return mock scores")
+
     harness = EvaluationHarness(
         agent_factory=None,
-        llm_service=None,
+        llm_service=grader_llm,
         suites_dir=str(PROJECT_ROOT / "evaluation" / "suites"),
     )
     suite = harness.load_suite(str(SUITE_PATH))
@@ -321,12 +396,14 @@ def parse_args() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python scripts/run_e2e_auto.py                  # all cases
+  python scripts/run_e2e_auto.py                  # all cases (default provider)
   python scripts/run_e2e_auto.py --case A1        # single case
   python scripts/run_e2e_auto.py --from D4        # resume
   python scripts/run_e2e_auto.py --clean          # fresh run
   python scripts/run_e2e_auto.py --no-start       # skip server startup
   python scripts/run_e2e_auto.py --port 9000      # custom port
+  python scripts/run_e2e_auto.py --provider qwen  # test with qwen models
+  python scripts/run_e2e_auto.py --provider claude # test with claude models
 """,
     )
     parser.add_argument("--port", type=int, default=DEFAULT_PORT,
@@ -339,6 +416,9 @@ Examples:
                         help="Clear checkpoint and re-run all")
     parser.add_argument("--no-start", action="store_true",
                         help="Skip auto-start, assume server already running")
+    parser.add_argument("--provider", type=str, default=None,
+                        choices=["qwen", "claude"],
+                        help="Override model provider (qwen/claude) for compatibility testing")
     return parser.parse_args()
 
 
@@ -365,20 +445,21 @@ async def async_main() -> int:
             if is_port_in_use(args.port):
                 _warn(f"Port {args.port} already in use, reusing existing server")
             else:
-                server_proc = start_server(args.port)
+                server_proc = start_server(args.port, provider=args.provider)
+                if args.provider:
+                    _log("🔧", f"Provider override: {args.provider}")
                 ready = await wait_for_ready(base_url)
                 if not ready:
                     _fail(f"Server failed to start within {STARTUP_TIMEOUT}s")
-                    # Print server stdout for debugging
-                    if server_proc and server_proc.stdout:
-                        output = server_proc.stdout.read()
-                        if output:
-                            print("\n--- Server output ---")
-                            print(output.decode("utf-8", errors="replace")[-2000:])
-                            print("--- End server output ---\n")
+                    # Print server log for debugging
+                    _print_server_log(server_proc)
                     return 1
 
         # --- Phase 2: Run E2E ---
+        # Set AGENT_PROVIDER in current process so grader LLM also uses the override
+        if args.provider:
+            os.environ["AGENT_PROVIDER"] = args.provider
+
         exit_code = await run_e2e(
             base_url=base_url,
             case_filter=args.case,
@@ -400,6 +481,7 @@ async def async_main() -> int:
     finally:
         # --- Phase 3: Cleanup ---
         if server_proc is not None:
+            _print_server_log(server_proc)
             kill_server(server_proc)
 
 

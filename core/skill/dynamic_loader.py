@@ -19,12 +19,9 @@ import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from logger import get_logger
-
-if TYPE_CHECKING:
-    from core.skill.os_skill_merger import OSSkillMerger
 
 logger = get_logger("dynamic_skill_loader")
 
@@ -56,24 +53,20 @@ class DynamicSkillLoader:
     动态 Skill 加载器
 
     支持运行时检查和启用 Skills。
-    V11: 可选集成 OSSkillMerger，按 OS 二维分类过滤 Skills。
     """
 
     def __init__(
         self,
         skills_dir: Path,
-        os_skill_merger: Optional["OSSkillMerger"] = None,
     ):
         """
         初始化
 
         Args:
             skills_dir: Skills 目录路径
-            os_skill_merger: 可选 OS Skills 合并器（V11 二维分类）
         """
         self.skills_dir = Path(skills_dir)
         self._cache: Dict[str, SkillDependency] = {}
-        self._os_skill_merger = os_skill_merger
 
     def check_skill_dependency(self, skill_name: str) -> SkillDependency:
         """
@@ -186,23 +179,16 @@ class DynamicSkillLoader:
         """
         V11: 获取当前平台可用且满足依赖的 Skills
 
-        结合 OSSkillMerger（若有）和依赖检查：
-        1. 若有 os_skill_merger，先按 OS 过滤
-        2. 对过滤后的 Skill 逐个检查依赖
-        3. 返回 (eligible_skills, ineligible_skills)
+        扫描 skills_dir 下所有 Skill，逐个检查依赖。
 
         Returns:
             (可用 Skill 名称列表, 不可用 Skill 名称列表)
         """
-        if self._os_skill_merger:
-            candidates = self._os_skill_merger.get_enabled_skills()
-        else:
-            # 无 merger 时扫描 skills_dir 下所有目录
-            candidates = [
-                d.name
-                for d in self.skills_dir.iterdir()
-                if d.is_dir() and (d / "SKILL.md").exists()
-            ]
+        candidates = [
+            d.name
+            for d in self.skills_dir.iterdir()
+            if d.is_dir() and (d / "SKILL.md").exists()
+        ]
 
         eligible = []
         ineligible = []

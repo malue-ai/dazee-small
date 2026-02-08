@@ -123,8 +123,6 @@ async def init_local_database(engine: AsyncEngine):
         engine: AsyncEngine 实例
     """
     from infra.local_store.models import LocalBase
-    # Ensure all ORM models are registered before create_all
-    import core.project.models  # noqa: F401 — LocalProject table
 
     async with engine.begin() as conn:
         await conn.run_sync(LocalBase.metadata.create_all)

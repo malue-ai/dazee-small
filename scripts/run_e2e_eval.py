@@ -19,6 +19,7 @@ Usage:
 import argparse
 import asyncio
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -92,7 +93,7 @@ async def run_multi_turn(
             user_id=user_id,
             conversation_id=conv_id,
             poll_interval_seconds=2.0,
-            poll_max_wait_seconds=120.0,
+            poll_max_wait_seconds=600.0,  # Long tasks with thinking can take minutes per turn
         )
         result = await adapter.chat(user_query=query, conversation_history=[])
         conversation_id = (result.get("metadata") or {}).get("conversation_id") or conversation_id
@@ -293,9 +294,40 @@ async def main() -> int:
     from evaluation.harness import EvaluationHarness
     from evaluation.models import EvaluationReport, TaskResult
 
+    # Initialize grader LLM from evaluation/config/settings.yaml
+    grader_llm = None
+    try:
+        import yaml as _yaml
+        from core.llm import create_llm_service
+        from utils.instance_loader import load_instance_env_from_config
+
+        instance_name = os.environ.get("AGENT_INSTANCE", "xiaodazi")
+        load_instance_env_from_config(instance_name)
+
+        eval_settings_path = PROJECT_ROOT / "evaluation" / "config" / "settings.yaml"
+        with open(eval_settings_path, "r", encoding="utf-8") as f:
+            eval_settings = _yaml.safe_load(f) or {}
+        grader_cfg = (eval_settings.get("graders", {}).get("model", {}))
+
+        if grader_cfg.get("enabled") and grader_cfg.get("provider"):
+            profile = {
+                "provider": grader_cfg["provider"],
+                "model": grader_cfg["model"],
+                "api_key_env": grader_cfg.get("api_key_env", "ANTHROPIC_API_KEY"),
+                "max_tokens": grader_cfg.get("max_tokens", 4096),
+                "temperature": grader_cfg.get("temperature", 0),
+                "enable_thinking": grader_cfg.get("enable_thinking", True),
+                "thinking_budget": grader_cfg.get("thinking_budget", 10000),
+                "timeout": grader_cfg.get("timeout", 120.0),
+            }
+            grader_llm = create_llm_service(**profile)
+            print(f"  ✓ Grader LLM: {profile['model']} (thinking={profile['enable_thinking']})")
+    except Exception as e:
+        print(f"  ⚠ Grader LLM init failed ({e}), model graders will return mock scores")
+
     harness = EvaluationHarness(
         agent_factory=None,
-        llm_service=None,
+        llm_service=grader_llm,
         suites_dir=str(PROJECT_ROOT / "evaluation" / "suites"),
     )
     suite = harness.load_suite(str(SUITE_PATH))

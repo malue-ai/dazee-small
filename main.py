@@ -26,7 +26,6 @@ from routers import (
     files_router,
     human_confirmation_router,
     mem0_router,
-    projects_router,
     realtime_router,
     settings_router,
     skills_router,
@@ -116,67 +115,6 @@ async def _init_local_store() -> None:
     # Workspace 在首次 get_workspace() 调用时懒初始化
     print("✅ 本地存储就绪（懒初始化模式）")
 
-
-async def _init_project_manager() -> None:
-    """Initialize ProjectManager and configure the projects router."""
-    print("📂 初始化项目管理...")
-    try:
-        import yaml
-        from pathlib import Path
-        from utils.app_paths import get_bundle_dir
-
-        instance_name = os.getenv("AGENT_INSTANCE", "xiaodazi")
-        config_path = get_bundle_dir() / "instances" / instance_name / "config.yaml"
-
-        project_config: dict = {}
-        if config_path.exists():
-            with open(config_path, "r", encoding="utf-8") as f:
-                raw = yaml.safe_load(f) or {}
-            project_config = raw.get("project", {})
-
-        if not project_config.get("enabled", False):
-            print("ℹ️  项目管理未启用（project.enabled=false）")
-            return
-
-        from core.project.manager import ProjectManager
-        from routers.projects import configure as configure_projects_router
-
-        storage_path = project_config.get("storage_path")
-        root = Path(storage_path).expanduser() if storage_path else None
-        mgr = ProjectManager(projects_root=root)
-
-        templates_raw = project_config.get("templates", [])
-        if templates_raw:
-            mgr.load_templates_from_config(templates_raw)
-
-        # Collect user-facing skill names for __all__ expansion
-        # Skip: backend_type=tool (framework) and system=true (OS infrastructure)
-        skills_config = raw.get("skills", {})
-        all_skill_names: list[str] = []
-        for os_key in ["common", "darwin", "win32", "linux"]:
-            os_section = skills_config.get(os_key, {})
-            if not isinstance(os_section, dict):
-                continue
-            for level in ["builtin", "lightweight", "external", "cloud_api"]:
-                items = os_section.get(level, [])
-                if not isinstance(items, list):
-                    continue
-                for item in items:
-                    if not isinstance(item, dict):
-                        continue
-                    if item.get("backend_type") == "tool":
-                        continue
-                    if item.get("system", False):
-                        continue
-                    name = item.get("name", "")
-                    if name and name not in all_skill_names:
-                        all_skill_names.append(name)
-        mgr.set_all_skill_names(all_skill_names)
-
-        configure_projects_router(mgr)
-        print(f"✅ 项目管理就绪（{len(mgr.get_templates())} 个模板, {len(all_skill_names)} 个可用技能）")
-    except Exception as e:
-        print(f"⚠️  项目管理初始化失败: {e}")
 
 
 async def _preload_capability_registry() -> None:
@@ -347,7 +285,6 @@ async def lifespan(app: FastAPI):
     await _init_local_store()
     await _preload_capability_registry()  # 🆕 加载工具注册表（必须在 Agent 之前）
     await _preload_agent_registry()  # 加载 Agent 配置
-    await _init_project_manager()  # 项目管理（模板加载 + 路由注入）
     await _init_chat_service()  # 预热 ChatService（避免首次请求冷启动）
     scheduler = await _start_scheduler()
     user_task_scheduler = await _start_user_task_scheduler()  # 🆕 用户定时任务调度器
@@ -411,7 +348,6 @@ app.include_router(mem0_router)
 app.include_router(tasks_router)
 app.include_router(agents_router)
 app.include_router(skills_router)
-app.include_router(projects_router)
 app.include_router(models_router)
 app.include_router(settings_router)
 

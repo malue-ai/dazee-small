@@ -150,10 +150,7 @@ class InstanceConfig:
     # ===== 小搭子扩展配置（V11）=====
     # 未配置时为 None，由对应模块使用默认值
     termination: Optional[Dict[str, Any]] = None  # 终止策略（adaptive 等）
-    skills_classification: Optional[Dict[str, Any]] = None  # Skills 二维分类 common/darwin/win32/linux
-    skills_first_config: Optional[Dict[str, Any]] = None  # V11 Skills-First 统一配置
-    knowledge: Optional[Dict[str, Any]] = None  # 本地知识检索
-    project: Optional[Dict[str, Any]] = None  # 项目管理
+    skills_first_config: Optional[Dict[str, Any]] = None  # Skills-First 统一配置
     state_consistency: Optional[Dict[str, Any]] = None  # 状态一致性（快照、回滚）
 
     # 原始配置
@@ -250,19 +247,123 @@ async def load_skill_registry(instance_name: str) -> List[SkillConfig]:
     return result
 
 
-async def load_instance_config(instance_name: str) -> InstanceConfig:
+async def _load_yaml(path: Path) -> dict:
+    """Load a YAML file, return empty dict if not found."""
+    if not path.exists():
+        return {}
+    async with aiofiles.open(path, "r", encoding="utf-8") as f:
+        content = await f.read()
+    return __import__("yaml").safe_load(content) or {}
+
+
+def _resolve_llm_profiles(
+    provider_name: str,
+    provider_templates: Dict[str, Any],
+    raw_profiles: Dict[str, Any],
+) -> Dict[str, Dict[str, Any]]:
     """
-    加载实例配置
+    Resolve tier-based LLM profiles into fully-qualified profiles.
+
+    Each profile specifies a ``tier`` ("heavy" / "light") which is expanded
+    using the matching provider template.  If a profile already has an
+    explicit ``provider`` key, the tier template is skipped (manual
+    override).
 
     Args:
-        instance_name: 实例名称（目录名）
+        provider_name: Active provider key (e.g. "qwen", "claude").
+        provider_templates: The ``provider_templates`` section from
+            llm_profiles.yaml.
+        raw_profiles: The ``llm_profiles`` section (profile_name -> params).
 
     Returns:
-        InstanceConfig 实例配置
+        Dict of fully-resolved profiles ready for ``set_instance_profiles``.
+    """
+    template = provider_templates.get(provider_name)
+    if not template:
+        available = ", ".join(provider_templates.keys()) if provider_templates else "(empty)"
+        raise ValueError(
+            f"Provider '{provider_name}' not found in provider_templates. "
+            f"Available: {available}"
+        )
+
+    resolved: Dict[str, Dict[str, Any]] = {}
+    for name, params in raw_profiles.items():
+        params = dict(params)  # shallow copy
+        tier = params.pop("tier", None)
+
+        if "provider" not in params and tier:
+            # Merge tier template (provider/model/api_key_env/region)
+            tier_cfg = template.get(tier, {})
+            merged = {**tier_cfg, **params}  # profile params override template
+            resolved[name] = merged
+        else:
+            # Explicit provider or no tier -> use as-is
+            resolved[name] = params
+
+    return resolved
+
+
+def _extract_mcp_from_skills(skills_raw: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Extract MCP tool configs from skill entries with backend_type=mcp.
+
+    Walks the Skills-First nested structure (common/darwin/win32/linux ->
+    builtin/lightweight/external/cloud_api -> list of entries) and returns
+    MCP connection dicts compatible with the existing _register_mcp_tools().
+
+    Returns:
+        List of MCP tool config dicts (name, server_url, server_name, ...).
+    """
+    mcp_tools: List[Dict[str, Any]] = []
+
+    def _scan_entries(entries: list):
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("backend_type") == "mcp" and entry.get("server_url"):
+                mcp_tools.append({
+                    "name": entry.get("server_name", entry.get("name", "unknown")),
+                    "server_url": entry["server_url"],
+                    "server_name": entry.get("server_name", entry.get("name")),
+                    "auth_type": entry.get("auth_type", "none"),
+                    "auth_env": entry.get("auth_env"),
+                    "capability": entry.get("capability"),
+                    "description": entry.get("description", ""),
+                    "enabled": entry.get("enabled", True),
+                })
+
+    # Walk OS sections -> complexity tiers -> entry lists
+    for os_key in ("common", "darwin", "win32", "linux"):
+        os_section = skills_raw.get(os_key, {})
+        if not isinstance(os_section, dict):
+            continue
+        for _tier, entries in os_section.items():
+            if isinstance(entries, list):
+                _scan_entries(entries)
+
+    return mcp_tools
+
+
+async def load_instance_config(instance_name: str) -> InstanceConfig:
+    """
+    Load instance configuration from up to 3 files:
+
+    1. ``config.yaml``              - user config (required)
+    2. ``config/skills.yaml``       - skills & skill_groups
+    3. ``config/llm_profiles.yaml`` - provider templates & LLM profiles
+
+    Each config key lives in exactly ONE file. The loader merges them into
+    a single ``raw_config`` dict for downstream processing.
+
+    Args:
+        instance_name: Instance directory name.
+
+    Returns:
+        InstanceConfig dataclass.
 
     Raises:
-        FileNotFoundError: 实例不存在
-        ValueError: 配置格式错误
+        FileNotFoundError: Instance directory missing.
+        ValueError: Invalid configuration.
     """
     import yaml
 
@@ -271,20 +372,95 @@ async def load_instance_config(instance_name: str) -> InstanceConfig:
     if not instance_dir.exists():
         raise FileNotFoundError(f"实例不存在: {instance_name}")
 
-    # 加载 config.yaml（可选）
-    config_path = instance_dir / "config.yaml"
-    raw_config = {}
+    # ── 1. Load & merge config files ──────────────────────────────
+    raw_config = await _load_yaml(instance_dir / "config.yaml")
 
-    if config_path.exists():
-        async with aiofiles.open(config_path, "r", encoding="utf-8") as f:
-            content = await f.read()
-            raw_config = yaml.safe_load(content) or {}
+    # Skills config (skill_groups + skills)
+    skills_file = await _load_yaml(instance_dir / "config" / "skills.yaml")
+    if skills_file:
+        if "skills" in skills_file:
+            raw_config["skills"] = skills_file["skills"]
+        if "skill_groups" in skills_file:
+            raw_config["skill_groups"] = skills_file["skill_groups"]
+        logger.info(f"   已合并 config/skills.yaml")
 
-    # 解析配置
-    instance_info = raw_config.get("instance", {})
+    # LLM profiles (provider templates + profiles with tier)
+    llm_file = await _load_yaml(instance_dir / "config" / "llm_profiles.yaml")
+
+    # ── 2. Resolve provider templates ─────────────────────────────
     agent_config = raw_config.get("agent", {})
+    provider_name = agent_config.get("provider", "")
+
+    # Allow env var override (for E2E model compatibility testing)
+    import os
+    env_provider = os.environ.get("AGENT_PROVIDER")
+    if env_provider:
+        provider_name = env_provider
+        agent_config["provider"] = env_provider
+        # Clear explicit model so provider template auto-sets it
+        agent_config.pop("model", None)
+        raw_config["agent"] = agent_config
+        logger.info(f"   ⚡ provider 被环境变量覆盖: {env_provider}")
+
+    if llm_file and provider_name:
+        provider_templates = llm_file.get("provider_templates", {})
+        raw_profiles = llm_file.get("llm_profiles", {})
+
+        if provider_templates and raw_profiles:
+            resolved_profiles = _resolve_llm_profiles(
+                provider_name, provider_templates, raw_profiles
+            )
+            raw_config["llm_profiles"] = resolved_profiles
+            logger.info(
+                f"   已合并 config/llm_profiles.yaml "
+                f"(provider={provider_name}, {len(resolved_profiles)} profiles)"
+            )
+
+            tmpl = provider_templates.get(provider_name, {})
+
+            # Auto-set agent.model from provider template if not explicit
+            if not agent_config.get("model"):
+                default_model = tmpl.get("agent_model")
+                if default_model:
+                    agent_config["model"] = default_model
+                    logger.info(f"   agent.model 自动设置: {default_model}")
+
+            # Auto-set agent.llm from provider template (user overrides win)
+            template_llm = tmpl.get("agent_llm", {})
+            if template_llm:
+                user_llm = agent_config.get("llm", {})
+                # template defaults + user overrides
+                merged_llm = {**template_llm, **{k: v for k, v in user_llm.items() if v is not None}}
+                agent_config["llm"] = merged_llm
+                if user_llm:
+                    logger.info(f"   agent.llm: 模板默认 + 用户覆盖 {list(user_llm.keys())}")
+                else:
+                    logger.info(f"   agent.llm: 使用 {provider_name} 模板默认值")
+
+            raw_config["agent"] = agent_config
+    elif llm_file:
+        # No provider set but file exists: load raw profiles as-is
+        raw_profiles = llm_file.get("llm_profiles", {})
+        if raw_profiles:
+            raw_config["llm_profiles"] = raw_profiles
+
+    # ── 3. Extract MCP tools from skill entries ───────────────────
+    skills_raw = raw_config.get("skills", {})
+    mcp_tools_from_skills = []
+    if isinstance(skills_raw, dict):
+        mcp_tools_from_skills = _extract_mcp_from_skills(skills_raw)
+        if mcp_tools_from_skills:
+            logger.info(f"   从 Skills 提取 {len(mcp_tools_from_skills)} 个 MCP 工具")
+
+    # Merge: skill-extracted MCP + legacy mcp_tools (if any)
+    legacy_mcp = raw_config.get("mcp_tools", [])
+    if isinstance(legacy_mcp, list) and legacy_mcp:
+        logger.warning("   ⚠️ 检测到旧版 mcp_tools 配置，建议迁移到 config/skills.yaml 的 Skill 条目")
+    mcp_tools = mcp_tools_from_skills + (legacy_mcp if isinstance(legacy_mcp, list) else [])
+
+    # ── 4. Parse config (same logic as before) ────────────────────
+    instance_info = raw_config.get("instance", {})
     memory_config = raw_config.get("memory", {})
-    mcp_tools = raw_config.get("mcp_tools", [])
 
     # 解析 LLM 超参数
     llm_config = agent_config.get("llm", {})
@@ -391,10 +567,7 @@ async def load_instance_config(instance_name: str) -> InstanceConfig:
         retention_policy=memory_config.get("retention_policy", "user"),
         # 小搭子扩展配置（V11）
         termination=raw_config.get("termination") if isinstance(raw_config.get("termination"), dict) else None,
-        skills_classification=raw_config.get("skills_classification") if isinstance(raw_config.get("skills_classification"), dict) else None,
         skills_first_config=skills_first_config,
-        knowledge=raw_config.get("knowledge") if isinstance(raw_config.get("knowledge"), dict) else None,
-        project=raw_config.get("project") if isinstance(raw_config.get("project"), dict) else None,
         state_consistency=raw_config.get("state_consistency") if isinstance(raw_config.get("state_consistency"), dict) else None,
         raw_config=raw_config,
     )
@@ -736,11 +909,10 @@ def _merge_config_to_schema(base_schema, config: InstanceConfig):
         if merged.prompts and merged.prompts.preface:
             merged.prompts.preface.max_tokens = config.preface_max_tokens
 
-    # === LLM 参数配置覆盖（V6.3 支持 Prompt Caching）===
+    # === LLM 参数配置覆盖 ===
     # 注意：这些参数只影响通过 instance_config.llm_params 创建的 LLM service
-    # 不会影响已经从 profiles.yaml 加载的 LLM profile
+    # 不会影响已通过 provider 模板解析的 LLM profiles
     # 此处用于记录配置意图，实际 LLM service 创建时会优先使用 profile
-    # （但保留此逻辑，供未来扩展使用）
     llm_override_count = 0
     if config.llm_params.temperature is not None:
         llm_override_count += 1
@@ -917,22 +1089,6 @@ async def create_agent_from_instance(
             f"   Skills-First: {len(skill_entries)} 个 Skills, "
             f"{available_count} 个可用"
         )
-    elif config.skills_classification:
-        # 旧格式兼容
-        from core.skill import OSSkillMerger
-
-        merger = OSSkillMerger(config.skills_classification)
-        enabled_names = merger.get_enabled_skills()
-        if enabled_names:
-            config = replace(
-                config,
-                skills=[s for s in config.skills if s.name in enabled_names],
-            )
-            logger.info(f"   Skills（按 OS 过滤）: {len(config.skills)} 个")
-        unavailable = merger.get_unavailable_skills()
-        if unavailable:
-            logger.debug(f"   当前不可用（其他 OS）: {unavailable}")
-
     logger.info(f"   Skills: {len(config.skills)} 个")
     logger.info(f"   APIs: {len(config.apis)} 个")
 

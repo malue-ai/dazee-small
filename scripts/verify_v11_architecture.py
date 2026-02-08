@@ -127,7 +127,7 @@ check_file_exists("instances/xiaodazi/skills/skill_registry.yaml")
 # InstanceConfig 新增字段
 from utils.instance_loader import InstanceConfig
 
-for field_name in ["termination", "skills_classification", "knowledge", "project", "state_consistency"]:
+for field_name in ["termination", "state_consistency"]:
     check(
         f"InstanceConfig.{field_name} 字段存在",
         field_name in InstanceConfig.__dataclass_fields__
@@ -300,13 +300,6 @@ check(
 
 # 进度事件
 check_class_has_method(EventBroadcaster, "emit_progress_update")
-
-from core.project.manager import ProjectManager
-
-check_class_has_method(ProjectManager, "create_project")
-check_class_has_method(ProjectManager, "switch_project")
-check_class_has_method(ProjectManager, "delete_project")
-check_class_has_method(ProjectManager, "list_projects")
 
 # ========== 代码质量检查 ==========
 print("\n" + "=" * 60)

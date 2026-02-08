@@ -25,10 +25,8 @@ from core.skill.os_compatibility import (
     CompatibilityStatus,
     OSCompatibilityChecker,
 )
-from core.skill.os_skill_merger import OSSkillMerger
-
 __all__ = [
-    # V11 Skills-First 核心
+    # Skills-First 核心
     "SkillsLoader",
     "create_skills_loader",
     "SkillEntry",
@@ -36,7 +34,6 @@ __all__ = [
     "DependencyLevel",
     "SkillStatus",
     # OS 兼容性
-    "OSSkillMerger",
     "OSCompatibilityChecker",
     "CompatibilityResult",
     "CompatibilityStatus",

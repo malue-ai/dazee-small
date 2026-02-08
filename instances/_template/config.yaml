@@ -1,292 +1,81 @@
 # ============================================================
-# 智能体实例配置
+# 实例配置模板
 # ============================================================
-# 
-# 📌 配置优先级：
-#   config.yaml 显式配置 > LLM 从 prompt.md 推断 > 框架默认值
 #
-# 💡 设计原则：
-#   大部分配置由 LLM 从 prompt.md 自动推断
-#   本文件仅用于：
-#   1. 声明 MCP 工具（框架无法从提示词推断）
-#   2. 覆盖推断结果（特殊需求）
-#   3. 环境变量映射
+# 创建新实例时复制此目录，修改以下配置即可。
 #
-# 🆕 V6.1 新增：
-#   - prompt_results/ 目录自动生成
-#   - multi_agent.mode 配置（替代 enabled）
+# 文件结构：
+#   config.yaml              ← 你在看的这个文件（用户配置）
+#   config/skills.yaml       ← Skills 管理（按需修改）
+#   config/llm_profiles.yaml ← 框架 LLM 路由（高级，通常不改）
+#   prompt.md                ← 人格提示词
+#   .env                     ← API Keys（从 .env.example 复制）
+#   skills/                  ← Skill 目录（每个 Skill 一个 SKILL.md）
 #
-# ============================================================
 
 # ==================== 基础信息 ====================
 
 instance:
-  # 实例名称（与文件夹名保持一致）
-  name: "_template"
-  # 实例描述
-  description: "智能体实例模板"
-  # 版本号（可选）
+  name: "my-agent"                  # 改为你的实例名（与目录名一致）
+  description: "我的 AI 搭子"        # 一句话描述
   version: "1.0.0"
 
-# ==================== 全局 LLM 一键切换（可选）====================
-#
-# 说明：
-# - enabled=true 时，全局强制切换所有 LLM 到指定 Provider
-# - 适用于 Claude 不可用时，一键切换到 Qwen
-#
-llm_global:
-  enabled: false
-  provider: "qwen"
-  base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-  api_key_env: "QWEN_API_KEY"
-  compat: "qwen"
-  model_map:
-    intent_analyzer: "qwen-plus"
-    default: "qwen-max"
+# ==================== 个性化配置（可选） ====================
 
+persona:
+  nickname: ""                      # 小搭子怎么称呼你
+  tone: ""                          # 说话风格："简洁干练" / "幽默轻松" / "专业严谨"
+  language: "中文"
+  detail_level: "适中"              # "简洁" / "适中" / "详细"
+  work_dirs: []                     # 常用工作目录：["~/Documents/工作"]
+  custom_rules: []                  # 额外规则
 
-# ==================== Agent 配置覆盖（可选）====================
-# 
-# 不填则使用 LLM 从 prompt.md 推断的值
-# 取消注释可强制覆盖
+# ==================== 用户提示词（可选） ====================
+
+user_prompt: ""
+# 示例：
+#   user_prompt: |
+#     我是一名产品经理，帮我写文档时默认用 Markdown 格式。
+
+# ==================== 大模型配置 ====================
 #
+# provider: 一键切换所有模型
+#   "qwen"  - 通义千问（qwen3-max + qwen-plus）
+#   "claude" - Anthropic（claude-sonnet-4-5 + claude-haiku-4-5）
+#
+
 agent:
-  # LLM 模型（默认由框架决定）
-  # model: "claude-sonnet-4-5-20250929"
-  
-  # 最大对话轮数（默认 15）
-  # max_turns: 20
-  
-  # 是否启用计划管理器（默认由任务复杂度决定）
-  # plan_manager_enabled: true
-  
-  # 是否允许并行工具调用（默认 false）
-  # allow_parallel_tools: false
-  
-  # ==================== LLM 超参数 ====================
-  #
-  # 📌 调整 LLM 行为的参数
-  #
-  llm:
-    # 温度：控制输出随机性（0-1）
-    # - 0: 确定性输出，适合精确任务
-    # - 0.7: 平衡创意和准确性
-    # - 1.0: 最大随机性（Extended Thinking 必须为 1）
-    # temperature: 0.7
-    
-    # 最大输出 token 数（默认 64000，Claude 4.5 最大支持）
-    # max_tokens: 8192
-    
-    # Extended Thinking（深度思考，Claude 特有）
-    # - 启用后 temperature 强制为 1.0
-    # - 适合复杂推理任务
-    # enable_thinking: true
-    
-    # Thinking token 预算（enable_thinking 为 true 时有效）
-    # thinking_budget: 10000
-    
-    # 🆕 V7.10: 思考模式（控制思考内容的展示方式）
-    # - native: 原生 Extended Thinking（默认，直接展示 Claude 的内部推理）
-    # - simulated: 模拟思考（单独调用 LLM 生成用户友好的思考过程，不暴露内部逻辑）
-    # - none: 不展示思考
-    # thinking_mode: "native"
-    
-    # Prompt Caching（减少重复内容的 API 调用成本）
-    # enable_caching: false
-    
-    # Top-P 核采样（可选，与 temperature 配合使用）
-    # top_p: 0.9
+  provider: "qwen"
+  # model: "qwen3-max"             # 不填则由 provider 自动决定
 
+# ==================== 实例存储（运行时数据隔离） ====================
 
-# ==================== MCP 工具声明 ====================
-#
-# 📌 只需配置 3 个必填项，框架自动处理其他一切：
-#   - name: 工具名称
-#   - server_url: MCP 服务器地址
-#   - description: 工具描述（用于自动推断能力类别）
-#
-# 🤖 自动化：
-#   框架根据 description 自动推断工具能力，无需手动配置 capability
-#   例如：description 包含 "flowchart" → 自动识别为图表生成能力
-#
-mcp_tools: []
-  # 示例：Dify 工作流
-  # - name: dify_flowchart
-  #   server_url: "https://api.dify.ai/mcp/server/xxx/mcp"
-  #   server_name: "dify"                    # 可选，默认用 name
-  #   auth_type: "bearer"                    # 可选，默认 none
-  #   auth_env: "DIFY_API_KEY"               # 认证环境变量
-  #   description: "生成 flowchart 流程图"   # ⚠️ 重要：框架据此推断能力
-  #
-  #   # capability: "chart_generation"       # 可选：覆盖自动推断结果
-  
-  # 示例：自定义搜索服务
-  # - name: custom_search
-  #   server_url: "http://localhost:8080/mcp"
-  #   server_name: "custom"
-  #   auth_type: "none"
-  #   capability: "web_search"  # 🆕 指定能力类别
-  #   description: "自定义搜索服务"
+storage:
+  base_path: "~/.xiaodazi/my-agent"  # 改为你的实例名
 
+# ==================== 知识库 ====================
 
-# ==================== REST APIs 配置 ====================
-#
-# 📌 用途：配置外部 REST API，让 Agent 通过 api_calling 工具调用
-#
-# 💡 设计原则：
-#   - 运营只需配置 base_url + 认证
-#   - API 具体用法写在 api_desc/{doc}.md 中（自然语言）
-#   - LLM 读取文档后自动理解如何调用
-#
-# 📁 目录结构：
-#   instances/xxx/
-#   ├── config.yaml      <- 配置 APIs
-#   └── api_desc/        <- API 描述文档
-#       └── weather.md   <- doc: weather 指向此文件
-#
-# 📚 capability 字段说明：
-#   指定该 API 满足的用户意图，用于 Plan 阶段工具匹配。
-#   可选值与 MCP 工具相同。
-#
-apis: []
-  # 示例：天气 API
-  # - name: weather_api
-  #   base_url: "https://api.weather.com/v1"
-  #   auth:
-  #     type: api_key       # none / bearer / api_key / basic
-  #     header: X-API-Key   # 认证头名称
-  #     env: WEATHER_API_KEY  # 环境变量名
-  #   doc: weather          # 指向 api_desc/weather.md
-  #   capability: "web_search"  # 该 API 用于信息查询
-  #   description: "天气查询服务"
+knowledge:
+  enabled: true
+  directories: []                   # 要索引的本地目录
 
-
-# ==================== 记忆配置（V4.6）====================
+# ==================== 记忆配置 ====================
 
 memory:
-  # 是否启用 Mem0 用户记忆
-  mem0_enabled: true
-  
-  # 是否启用智能记忆检索（根据意图分析决定是否检索）
+  enabled: true
   smart_retrieval: true
-  
-  # 记忆保留策略：session（仅当前会话）/ user（用户级别）/ persistent（持久化）
-  # retention_policy: "user"
+  retention_policy: "user"
 
+# ==================== 规划系统 ====================
 
-# ==================== Multi-Agent 配置（V7.8 极简版）====================
-#
-# 📌 设计原则：运营只需配置 mode，其他由框架智能处理
-#
-# 💡 何时启用多智能体？
-#   - 可并行化的复杂任务（重构 + CSS 优化 + 测试）
-#   - 多实体研究任务（分析 10 家公司）
-#   - 多维度分析任务
-#
-# 🤖 自动化能力：
-#   - LeadAgent 自动分解任务并分配 Worker
-#   - DAGScheduler 自动调度依赖和并行执行
-#   - Critic Agent 自动评估和触发重试/重规划
-#
-multi_agent:
-  # mode 选项：
-  #   - disabled: 禁用，始终使用单智能体（默认）
-  #   - auto: 自动判断（复杂度评分 > 7 时启用）
-  #   - enabled: 始终使用多智能体
-  mode: "disabled"
-  
-  # 🔧 高级配置（通常无需修改，框架有合理默认值）
-  # max_parallel_workers: 5       # 最大并发 Worker 数（默认 5）
+planning:
+  mode: "implicit"
 
+# ==================== Playbook 持续学习 ====================
 
-# ==================== Skills 配置 ====================
-#
-# 📌 配置原则：
-#   - 1 = 启用，0 = 禁用
-#   - 实例自定义的 Skills（skills/ 目录）始终加载
-#
-# 💡 使用场景：
-#   - 禁用不需要的 Skill 以精简提示词
-#   - 针对特定场景定制 Skill 组合
-#
-enabled_skills:
-  # --- PPT 生成类 ---
-  slidespeak-generator: 1      # SlideSpeak PPT 生成（推荐）
-  slidespeak-editor: 0         # SlideSpeak PPT 编辑
-  slidespeak-slide-editor: 0   # 单页幻灯片编辑
-  ppt-generator: 0             # 通用 PPT 生成
-  
-  # --- 知识构建类 ---
-  ontology-builder: 1          # 本体/分类体系构建（推荐）
-
-
-# ==================== 工具能力配置 ====================
-#
-# 📌 配置原则：
-#   - 按功能类别启用/禁用工具（1=启用，0=禁用）
-#   - 核心工具（plan_todo, api_calling 等）自动启用，无需配置
-#   - 类别内的工具作为整体启用，避免关联配置失效
-#
-# 🔧 自动生成于：capabilities.yaml（共 23 个工具）
-#
-enabled_capabilities:
-  # --- 信息获取类 ---
-  tavily_search: 1           # 通用网络搜索（Tavily API）
-  exa_search: 0              # Exa 语义搜索（需 API Key）
-  knowledge_search: 1        # 个人知识库检索
-
-  # --- 文档生成类（Claude Skills，整体启用） ---
-  document_skills: 0         # 包含：pptx, xlsx, docx, pdf
-
-  # --- PPT 生成类 ---
-  ppt_generator: 0           # 闭环 PPT 生成（SlideSpeak）
-
-  # --- 动态代码执行 ---
-  code_execution: 0          # 本地代码执行（谨慎启用）
-
-
-# ==================== 全局配置覆盖（可选）====================
-#
-# 📌 支持覆盖全局配置文件中的值
-# 优先级：实例配置 > 全局配置 > 框架默认值
-#
-# 💡 使用场景：
-#   - 特定实例需要不同的提示词大小限制
-#   - 特定实例需要不同的模块复杂度映射
-#   - 特定实例需要不同的工具配置
-
-# 覆盖 config/prompt_config.yaml
-# prompt_config:
-#   size_limits:
-#     total:
-#       simple: 20000   # 比默认值更大
-#   llm_generation:
-#     simple_task:
-#       temperature: 0.3  # 更确定性的输出
-
-# 覆盖 config/capabilities.yaml
-# capabilities:
-#   tool_selection:
-#     serial_only_tools:
-#       - plan_todo
-#       - custom_blocking_tool
-
-# ==================== 高级配置（通常无需修改）====================
-
-advanced:
-  # 意图分析器配置
-  # 用于分析用户意图、判断任务复杂度
-  intent_analyzer:
-    enabled: true       # 是否启用意图识别
-    use_llm: true       # 是否使用 LLM 进行分析（false 则使用规则）
-  
-  # 开场白配置（Preface）
-  # Agent 执行前的简短开场白，告知用户正在处理
-  preface:
-    enabled: false      # 是否启用开场白（默认关闭）
-    max_tokens: 150     # 开场白最大 token 数（50-500）
-  
-  # 输出格式配置
-  output_formatter:
-    default_format: "markdown"
-    code_highlighting: true
+playbook:
+  enabled: true
+  auto_extract: true
+  min_reward_threshold: 0.7
+  require_user_confirm: true
+  storage_backend: "file"

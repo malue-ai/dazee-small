@@ -312,7 +312,7 @@ class ChatService:
         - 路由决策（AgentRouter）
         - 开场白生成（Preface）
 
-        配置来源：profiles.yaml → intent_analyzer
+        配置来源：config/llm_profiles.yaml → intent_analyzer
         返回类型：ModelRouter（有 fallbacks 时）或单个 LLM Service
         """
         if self._intent_llm is None:

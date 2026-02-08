@@ -54,7 +54,7 @@
 │                                                                                         │
 │  chat.py │ agents.py │ conversation.py │ files.py │ skills.py │ tools.py               │
 │  mem0_router.py │ tasks.py │ settings.py │ realtime.py │ models.py                     │
-│  health.py │ docs.py │ human_confirmation.py                                           │
+│  human_confirmation.py │ websocket.py                                                  │
 └───────┬─────────────────────────────────────────────────────────────────────────────────┘
         │
 ┌───────▼─────────────────────────────────────────────────────────────────────────────────┐
@@ -62,8 +62,8 @@
 │                                                                                         │
 │  chat_service.py │ session_service.py │ agent_registry.py │ conversation_service.py     │
 │  file_service.py │ tool_service.py │ confirmation_service.py │ settings_service.py      │
-│  mem0_service.py │ realtime_service.py │ mcp_service.py │ mcp_client.py                │
-│  docs_service.py │ task_service.py │ user_task_scheduler.py                             │
+│  mem0_service.py │ realtime_service.py │ mcp_client.py                                  │
+│  task_service.py │ user_task_scheduler.py                                               │
 └───────┬─────────────────────────────────────────────────────────────────────────────────┘
         │
 ┌───────▼─────────────────────────────────────────────────────────────────────────────────┐
@@ -98,7 +98,8 @@
 │  │  ┌── injectors/ ──────────────────────────────────────────────────────────────┐    │ │
 │  │  │  base.py │ orchestrator.py │ context.py                                    │    │ │
 │  │  │  phase1/: system_role.py │ history_summary.py │ tool_provider.py            │    │ │
-│  │  │  phase2/: user_memory.py                                                   │    │ │
+│  │  │          skill_focus.py (复杂度驱动 Skill 聚焦)                             │    │ │
+│  │  │  phase2/: user_memory.py │ playbook_hint.py (历史策略注入)                  │    │ │
 │  │  │  phase3/: gtd_todo.py │ page_editor.py                                     │    │ │
 │  │  └────────────────────────────────────────────────────────────────────────────┘    │ │
 │  │  ┌── compaction/ ──────────────────┐  ┌── providers/ ───────────────────────┐      │ │
@@ -155,10 +156,10 @@
 │  └───────────────────────────────────────────────────────────────────────────────────┘  │
 │                                                                                         │
 │  ┌─── prompt/ ── 提示词工程 ────────────────┐  ┌─── skill/ ── Skill 管理 ────────────┐ │
-│  │  runtime_context_builder.py       │  │  dynamic_loader.py          │ │
-│  │  skill_prompt_builder.py                  │  │  loader.py │ models.py              │ │
-│  │  complexity_detector.py │ llm_analyzer.py │  │  os_compatibility.py                │ │
-│  │  framework_rules.py │ prompt_layer.py     │  │  os_skill_merger.py                 │ │
+│  │  runtime_context_builder.py       │  │  dynamic_loader.py (运行时依赖检查) │ │
+│  │  skill_prompt_builder.py                  │  │  loader.py (SkillsLoader 解析配置)  │ │
+│  │  complexity_detector.py │ llm_analyzer.py │  │  models.py (SkillEntry/BackendType) │ │
+│  │  framework_rules.py │ prompt_layer.py     │  │  os_compatibility.py (OS 四状态)    │ │
 │  │  instance_cache.py                        │  └────────────────────────────────────┘ │
 │  │  intent_prompt_generator.py               │                                         │
 │  │  prompt_results_writer.py                 │  ┌─── tool/ ── 工具管理 ──────────────┐ │
@@ -180,8 +181,7 @@
 │  │  output/: formatter.py                                                           │  │
 │  │  monitoring/: production_monitor │ failure_detector │ failure_case_db             │  │
 │  │    quality_scanner │ token_audit │ case_converter                                │  │
-│  │  playbook/: manager.py │ storage.py                               │  │
-│  │  project/: manager.py (骨架占位)                                            │  │
+│  │  playbook/: manager.py │ storage.py                                              │  │
 │  │  schemas/: validator.py                                                          │  │
 │  │  config/: loader.py                                                              │  │
 │  └───────────────────────────────────────────────────────────────────────────────────┘  │
@@ -311,45 +311,50 @@
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-### 0.4 实例配置层
+### 0.4 实例配置层（分级配置架构）
+
+**设计原则**：桌面端 peer 节点，非 server 中心化管理。每个配置项只出现在一个文件中，零冲突。
 
 ```
-instances/
-├── xiaodazi/                          ← 小搭子（桌面端主实例）
-│   ├── config.yaml                    termination/knowledge/memory/project/playbook/skills/MCP
-│   ├── prompt.md / prompt_desktop.md  人格提示词 + Few-Shot
-│   └── skills/
-│       ├── skill_registry.yaml
-│       └── 40+ Skills（config 内二维分类 common/darwin/win32/linux × builtin/lightweight/...）:
-│           ├── OS 通用: app-recommender / content-reformatter / translator / style-learner
-│           │            writing-assistant / writing-analyzer / literature-reviewer
-│           │            paper-search / arxiv-search / competitive-intel / trend-spotter
-│           │            excel-analyzer / excel-fixer / word-processor / local-search
-│           │            medication-tracker / nutrition-analyzer / readwise-rival
-│           ├── macOS:   applescript / apple-calendar / macos-clipboard / macos-finder
-│           │            macos-notification / macos-open / macos-screenshot / app-scanner
-│           ├── Linux:   linux-clipboard / linux-notification / linux-screenshot / xdotool
-│           ├── Windows: windows-clipboard / windows-notification / windows-screenshot
-│           │            powershell-basic / outlook-cli / onenote
-│           └── 文件管理: file-manager
+instances/xiaodazi/                        ← 小搭子（桌面端主实例）
+├── .env                                   敏感信息（API Keys），gitignored
+├── .env.example                           .env 模板（提交到 git）
 │
-├── client_agent/                      ← 通用 Web Agent
-│   ├── config.yaml / prompt.md / SOUL.md / TOOLS.md
-│   ├── prompt_results/: simple/medium/complex/intent_prompt + _metadata + agent_schema
-│   └── skills/: 80+ Skills + skill_registry.yaml
+├── config.yaml                            用户配置（~200 行，用户唯一需要关心的文件）
+│   ├── instance / persona / user_prompt   基础信息 + 个性化 + 自定义指令
+│   ├── agent.provider                     一键切换所有模型（"qwen" / "claude"）
+│   └── memory / planning / playbook       记忆 / 规划 / 策略学习
 │
-├── dazee_agent/                       ← Dazee Agent
-│   ├── config.yaml / prompt.md
-│   ├── api_desc/: coze-api.md / wenshu-api.md
-│   ├── prompt_results/: simple/medium/complex/intent_prompt + _metadata + agent_schema
-│   └── skills/: ontology-builder / remotion (含 rules/ 28 个 .md + assets/ 8 个 .tsx)
+├── config/                                分级配置（按需查看）
+│   ├── skills.yaml                        Skills 管理（~170 行）
+│   │   ├── skill_groups                   意图驱动按需注入分组
+│   │   └── skills                         OS × 复杂度 二维分类清单
+│   │       ├── common (builtin/lightweight/external/cloud_api)
+│   │       ├── darwin / win32 / linux
+│   │       └── MCP Skills 连接信息内聚在 skill 条目内（无独立 mcp_tools）
+│   │
+│   └── llm_profiles.yaml                  框架内部 LLM 配置（~190 行，高级）
+│       ├── provider_templates             Provider 模板（qwen/claude 一键切换）
+│       │   ├── agent_model + agent_llm    主 Agent 模型 + LLM 参数（随 provider 切换）
+│       │   ├── heavy / light              复杂/轻量任务模型分配
+│       │   └── temperature 规范           0=精准 / 0.8=生成 / thinking 时框架自动
+│       └── llm_profiles                   13 个内部调用点（tier + 专属参数）
 │
-└── _template/                         ← 实例模板
-    ├── config.yaml / config_example_full.yaml / config_example_minimal.yaml
-    ├── prompt.md / env.example / CONFIGURATION_GUIDE.md / README.md
-    ├── api_desc/_template.md │ prompt_results/README.md
-    ├── skills/: README.md / skill_registry.yaml / _template/SKILL.md
-    └── workers/README.md
+├── prompt.md / prompt_desktop.md          人格提示词 + Few-Shot
+├── prompt_results/                        LLM 推断缓存（simple/medium/complex 提示词）
+└── skills/                                Skill 目录（每个 Skill 一个 SKILL.md）
+    └── 40+ Skills（MCP 也封装为 Skill，用户只看到 Skill 名称）
+
+Provider 一键切换模型分配：
+
+  ┌──────────┬───────────────────────────┬──────────────────────────┐
+  │ 角色     │ qwen                      │ claude                   │
+  ├──────────┼───────────────────────────┼──────────────────────────┤
+  │ 主 Agent │ qwen3-max                 │ claude-sonnet-4-5        │
+  │ heavy    │ qwen3-max                 │ claude-sonnet-4-5        │
+  │ light    │ qwen-plus                 │ claude-haiku-4-5         │
+  └──────────┴───────────────────────────┴──────────────────────────┘
+  可选覆盖: agent.model: "claude-opus-4-6"（Opus 4.6，最强但贵）
 ```
 
 ### 0.5 支撑模块完整清单
@@ -368,15 +373,14 @@ instances/
 │  MEMORY_PROTOCOL.md                                                 │
 │  factory/: schema_generator.md                                      │
 │  fragments/: code_rules.md │ excel_rules.md │ ppt_rules.md          │
-│  templates/: complex_prompt_generation.md │ medium_prompt_generation │
+│  templates/: complex_prompt_generation.md │ medium_prompt_generation  │
 │              simple_prompt_generation.md │ intent_prompt_generation  │
-│              prompt_example.md                                       │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─── tools/ (可调用工具) ────────────────────────────────────────────┐
-│  base.py │ api_calling.py │ clue_generation.py │ nodes_tool.py      │
+│  base.py │ api_calling.py │ nodes_tool.py │ observe_screen.py      │
 │  plan_todo_tool.py │ request_human_confirmation.py                  │
-│  scheduled_task_tool.py │ send_files.py                             │
+│  scheduled_task_tool.py                                             │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─── utils/ (工具函数) ──────────────────────────────────────────────┐
@@ -385,16 +389,20 @@ instances/
 │  message_utils.py │ query_utils.py                                  │
 │  background_tasks/:                                                 │
 │    scheduler.py │ registry.py │ service.py │ context.py             │
-│    tasks/: clue_generation.py │ mem0_update.py                      │
-│            recommended_questions.py │ title_generation.py           │
+│    tasks/: mem0_update.py │ recommended_questions.py                │
+│            title_generation.py                                      │
 └─────────────────────────────────────────────────────────────────────┘
 
-┌─── config/ (配置文件) ─────────────────────────────────────────────┐
-│  capabilities.yaml │ context.yaml │ context_compaction.yaml         │
-│  prompt_config.yaml │ resilience.yaml │ routing_rules.yaml          │
-│  scheduled_tasks.yaml │ tool_registry.yaml                          │
-│  llm_config/: __init__.py │ loader.py │ profiles.yaml（defaults + 各 profile）│
-└─────────────────────────────────────────────────────────────────────┘
+┌─── config/ (框架级配置) ──────────────────────────────────────────────┐
+│  capabilities.yaml │ context_compaction.yaml │ prompt_config.yaml    │
+│  resilience.yaml │ scheduled_tasks.yaml │ tool_registry.yaml        │
+│  llm_config/: __init__.py │ loader.py（set_instance_profiles 注入） │
+│               qwen_recommended_configs.md                            │
+│                                                                      │
+│  注：LLM Profiles 已迁移到实例级 config/llm_profiles.yaml，           │
+│      框架级 llm_config/loader.py 仅负责注入/查询，不存储配置。        │
+│      context.yaml / routing_rules.yaml 已删除（配置内聚到实例级）。   │
+└──────────────────────────────────────────────────────────────────────┘
 
 ┌─── skills/ (全局技能库) ───────────────────────────────────────────┐
 │  library/: 80+ Skills (与 client_agent 共用) │ README.md            │
@@ -403,23 +411,28 @@ instances/
 
 ┌─── evaluation/ (评估框架) ─────────────────────────────────────────┐
 │  harness.py │ metrics.py │ models.py │ qos_config.py │ calibration  │
-│  alerts.py │ dashboard.py │ ci_integration.py                       │
+│  dashboard.py │ loop_automation.py                                  │
 │  promptfoo_adapter.py │ case_converter.py │ case_reviewer.py        │
 │  verify_imports.py                                                  │
+│  adapters/: http_agent.py (E2E → FastAPI 桥接)                     │
 │  graders/: code_based.py │ human.py │ model_based.py                │
 │  config/: settings.yaml                                             │
-│  suites/: coding/basic_code_generation.yaml                         │
-│           conversation/intent_understanding.yaml                    │
-│           intent/haiku_accuracy.yaml                                │
-│           promptfoo/README.md │ regression/README.md                │
-│  reports/: intent_accuracy_*.json (7 份报告)                        │
+│  suites/: coding/ │ conversation/ │ intent/                         │
+│           xiaodazi/e2e/phase1_core.yaml (4 个 E2E 用例)             │
+│           xiaodazi/feasibility/ (7 个可行性测试)                     │
+│           xiaodazi/efficiency/ (4 个效率测试)                        │
+│           promptfoo/ │ regression/                                   │
+│  reports/: e2e_phase1_*.json │ intent_accuracy_*.json │ ...         │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─── scripts/ (运维与验证脚本) ──────────────────────────────────────┐
 │  verify_v11_architecture.py │ verify_memory_knowledge.py             │
 │  verify_e2e_consistency.py │ sync_capabilities.py                    │
-│  switch_provider.py (Claude↔Qwen 一键切换) │ check_instance_dependencies.py │
-│  build_app.sh │ build_backend.py                                    │
+│  switch_provider.py (Claude↔Qwen 一键切换)                          │
+│  check_instance_dependencies.py │ init_instance_xiaodazi.py          │
+│  run_e2e_auto.py (自动化 E2E 测试)  │ run_e2e_eval.py               │
+│  run_eval.py │ run_xiaodazi_eval.py │ generate_eval_report.py        │
+│  build_app.sh │ build_backend.py │ sync_version.py                   │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─── 根目录文件 ─────────────────────────────────────────────────────┐
@@ -430,21 +443,24 @@ instances/
 ### 0.6 模块完成度热力图
 
 ```
-██████████  95%  Agent 引擎层 (RVR / RVR-B / 回溯 / 错误分类)
+██████████  95%  Agent 引擎层 (V11.0 统一 RVR-B / 回溯 / 错误分类)
 ██████████  95%  自适应终止策略 (八维度 + 费用阶梯 HITL)
-██████████  95%  实例骨架与配置
+██████████  95%  实例骨架与配置 (三文件分级 + Provider 一键切换)
 ██████████  95%  存储层 (SQLite + FTS5 + sqlite-vec)
 █████████░  90%  状态一致性管理 (快照/回滚)
-█████████░  90%  意图识别简化
+█████████░  90%  意图识别简化 (V11.0 极简输出 + skill_groups 语义多选)
+█████████░  90%  上下文注入器 (6 个 Phase Injector 全部就绪)
 ████████░░  85%  记忆系统 (三层架构)
 ████████░░  85%  进度转换与事件推送 (ProgressTransformer + emit_progress_update)
+████████░░  85%  Skills 二维分类框架 (38 个 Skill 已创建 + SkillsLoader)
 ████████░░  80%  本地知识检索 (FTS5)
-████████░░  80%  Skills 二维分类框架
-███████░░░  70%  三大核心能力
-███████░░░  70%  Skill 格式规范
+████████░░  80%  E2E 评估框架 (4 个端到端用例 + 自动化运行器)
+███████░░░  75%  三大核心能力
+███████░░░  75%  Skill 格式规范 (SKILL.md + 二维元数据)
+███████░░░  70%  Playbook 持续学习 (Hint 注入已实现，端到端链路待串联)
 ████░░░░░░  40%  OS 兼容层 (仅 macOS)
 ███░░░░░░░  35%  应用发现 (仅 macOS 扫描)
-░░░░░░░░░░   5%  项目管理 (骨架占位)
+████████░░  80%  项目管理 (多实例架构，前端创建界面待实现)
 ░░░░░░░░░░   0%  Skills 安全验证
 ░░░░░░░░░░   0%  前端 UI (向导/仪表板)
 ```
@@ -455,10 +471,10 @@ instances/
 
 | 项 | 说明 |
 |----|------|
-| **LLM 切换** | 支持 Claude / Qwen 一键切换：`config/llm_config/profiles.yaml`（defaults + 各 profile）+ `instances/xiaodazi/config.yaml`（agent.model / llm）。CLI：`python scripts/switch_provider.py --to claude|qwen`，`--status` 查状态，`--dry-run` 预览。 |
-| **Profile 默认值** | `profiles.yaml` 支持顶层 `defaults`（如 default_provider / api_key_env / region / enable_caching），各 profile 只写差异（如 model / temperature / max_tokens）。Loader 合并 defaults + profile 后返回。 |
-| **意图路由** | 单一入口：`IntentAnalyzer`（`core/routing/intent_analyzer.py`）。上下文过滤 &lt;200ms，无压缩/摘要；complexity 由 LLM 语义判断 → simple 用 RVR，medium/complex 用 RVR-B。 |
-| **执行策略** | RVR（无回溯）与 RVR-B（错误分类 + BacktrackManager + 终止联动）。终止：八维度 + 费用阶梯 HITL + 回溯耗尽/意图澄清。 |
+| **LLM 切换** | `config.yaml` 的 `agent.provider` 一键切换所有模型（qwen/claude）。Provider 模板定义在 `config/llm_profiles.yaml`，包含 agent_model + agent_llm + heavy/light 分级。13 个内部 LLM 调用点通过 `tier` 字段自动解析为对应 provider 的模型。temperature 规范：0（精准）/ 0.8（生成）/ thinking 开启时框架自动设置。 |
+| **Profile 解析** | `instance_loader.py` 的 `_resolve_llm_profiles()` 将 tier-based 配置展开为完整 profile dict，注入 `set_instance_profiles()`。各 profile 可通过显式 provider/model 跳过模板解析（单点覆盖）。 |
+| **意图路由** | 单一入口：`IntentAnalyzer`（`core/routing/intent_analyzer.py`）。V11.0 极简输出（complexity + skip_memory + is_follow_up + wants_to_stop + relevant_skill_groups），上下文过滤 &lt;200ms。`relevant_skill_groups` 由 LLM 语义多选，驱动按需 Skill 注入。 |
+| **执行策略** | V11.0 统一 RVR-B（错误分类 + BacktrackManager + 终止联动）。complexity 仅影响规划深度和 Skill 聚焦（通过 `SkillFocusInjector`），不再路由到不同执行器。终止：八维度 + 费用阶梯 HITL + 回溯耗尽/意图澄清。 |
 | **记忆** | 三层：MEMORY.md 文件层、GenericFTS5 索引层、Mem0 向量层；recall/remember/flush 统一入口。Playbook 已配置（auto_extract、require_user_confirm、FileStorage）。 |
 
 ---
@@ -467,27 +483,31 @@ instances/
 
 | 架构层 | 设计章节 | 完成度 | 状态 |
 |--------|----------|--------|------|
-| 实例骨架与配置 | 1.1 | 95% | 已完成 |
-| Skills 二维分类 | 3.1.1 | 80% | 框架完成，具体 Skills 待创建 |
+| 实例骨架与配置 | 1.1 | 95% | 已完成（三文件分级 + Provider 一键切换） |
+| Skills 二维分类 | 3.1.1 | 85% | 框架完成，38 个 Skill 已创建，SkillsLoader 统一加载 |
 | 自适应终止策略 | 3.4 | 95% | 已完成 |
 | 状态一致性管理 | 3.3 | 90% | 已完成 |
-| Agent 引擎层 | — | 95% | RVR + RVR-B 双引擎，complexity 策略路由 |
-| 意图识别简化 | 3.7.1 | 90% | 已完成 |
+| Agent 引擎层 | — | 95% | V11.0 统一 RVR-B，complexity 仅影响规划深度 |
+| 意图识别简化 | 3.7.1 | 90% | 已完成（V11.0 极简输出 + `relevant_skill_groups` 语义多选） |
+| 上下文注入器 | — | 90% | 6 个 Phase Injector（含 skill_focus + playbook_hint） |
 | 进度转换器 | 3.7.2 | 85% | 已完成 |
 | 本地知识检索 | 3.8 | 80% | FTS5 已完成，语义搜索待实现 |
 | 记忆系统 | 3.13 | 85% | 三层架构已完成 |
 | Nodes 本地操作 | 3.5 | 80% (macOS) | macOS 11 项操作完整，win32/linux 待实现 |
 | OS 兼容层 | 3.5 | 40% | 仅 macOS 实现 |
 | 应用发现 | 3.11 | 35% | 仅 macOS 扫描 |
-| 项目管理 | 3.10 | 5% | 骨架占位 |
+| 项目管理 | 3.10 | 80% | 多实例架构（不同搭子=不同 instance），前端创建界面待实现 |
 | 存储层 | — | 95% | SQLite + FTS5 + sqlite-vec 完整 |
-| Skill 格式规范 | 3.2 | 70% | 基础格式已有，xiaodazi 扩展字段待补全 |
+| Playbook 持续学习 | 2.14 | 70% | Hint 注入器已实现，端到端链路 4 条断 2 条 |
+| Skill 格式规范 | 3.2 | 75% | 基础格式 + SKILL.md 二维元数据，38 个 Skill 已适配 |
+| E2E 评估框架 | — | 80% | 4 个端到端用例 + 自动化运行器 + 评分体系 |
+| 屏幕观察工具 | 3.5 | 80% | peekaboo + Vision OCR 并行，macOS 就绪 |
 | Skills 安全验证 | 3.12 | 0% | 未开始 |
 | 大模型配置简化 | 3.1.2 | 0% | 未开始（前端 UI 范畴） |
 | 首次启动向导 | 3.1.3 | 0% | 未开始（前端 UI 范畴） |
 | 服务状态仪表板 | 3.1.5 | 0% | 未开始（前端 UI 范畴） |
 | MCP Apps UI | 3.6 | 0% | 未开始（前端 UI 范畴） |
-| 三大核心能力 | 3.9 | 70% | "会干活"完整，"会思考"完整，"会学习"部分完成 |
+| 三大核心能力 | 3.9 | 75% | "会干活"完整，"会思考"完整，"会学习"部分完成 |
 
 ---
 
@@ -495,16 +515,30 @@ instances/
 
 ### 2.1 实例骨架与配置
 
-**设计需求**：创建 `instances/xiaodazi/` 目录，包含配置、提示词、Skills 注册表。
+**设计需求**：桌面端 peer 节点配置，所有用户配置集中在实例目录，零冲突分级管理。
 
 | 文件 | 状态 | 说明 |
 |------|------|------|
-| `instances/xiaodazi/config.yaml` | 已完成 | termination、knowledge、memory、project、playbook、skills、mcp_tools 等完整配置 |
-| `instances/xiaodazi/prompt.md` / `prompt_desktop.md` | 已完成 | 人格提示词 + Few-Shot |
-| Skills | 已完成 | config 内二维分类（OS × 复杂度），无独立 skill_registry.yaml |
-| `utils/instance_loader.py` | 已完成 | 支持加载上述全部配置段 + 状态一致性 |
+| `config.yaml` | 已完成 | 用户配置（~200 行）：persona / agent.provider / memory / planning / playbook / project |
+| `config/skills.yaml` | 已完成 | Skills 管理（~170 行）：skill_groups + OS × 复杂度二维分类，MCP 连接信息内聚在 skill 条目 |
+| `config/llm_profiles.yaml` | 已完成 | 框架 LLM（~190 行）：provider_templates（qwen/claude 一键切换）+ 13 个 tier-based profile |
+| `.env` / `.env.example` | 已完成 | API Keys（gitignored）+ 模板 |
+| `prompt.md` / `prompt_desktop.md` | 已完成 | 人格提示词 + Few-Shot |
+| `utils/instance_loader.py` | 已完成 | 3 文件合并加载 + provider 模板解析 + MCP 从 skill 提取 |
 
-**当前**：Skills 在 config 内按 common/darwin/win32/linux × builtin/lightweight/external/cloud_api 配置；playbook 已启用（auto_extract、require_user_confirm、storage_path）。
+**配置分级架构**：
+
+```
+config.yaml（必看）         → 用户配置，对话体验直接相关
+config/skills.yaml（按需）   → 启用/禁用 Skill 时查看
+config/llm_profiles.yaml（高级） → 框架内部 LLM 路由，普通用户不需要改
+```
+
+**关键设计决策**：
+- `agent.provider` 一键切换：改一个字段，主 Agent + 13 个内部调用点 + LLM 参数（max_tokens/caching）全部自动适配
+- MCP 工具统一为 Skill：`backend_type: mcp` 的 skill 条目内聚连接信息（server_url/auth），对用户和 Agent 不暴露 MCP 概念
+- 每个配置 key 只出现在一个文件中：config.yaml vs skills.yaml vs llm_profiles.yaml 零键重叠
+- temperature 规范：0（精准）/ 0.8（生成）/ thinking 开启时框架自动设置（Claude 强制 1.0）
 
 ---
 
@@ -514,21 +548,59 @@ instances/
 
 | 文件 | 状态 | 说明 |
 |------|------|------|
-| `core/skill/os_skill_merger.py` | 已完成 | `get_enabled_skills()` / `get_unavailable_skills()` |
+| `core/skill/loader.py` | 已完成 | `SkillsLoader`：解析 config/skills.yaml → `SkillEntry` 列表，替代原 `OSSkillMerger` |
+| `core/skill/models.py` | 已完成 | `SkillEntry` / `BackendType`(local/tool/mcp/api) / `DependencyLevel` / `SkillStatus` |
 | `core/skill/os_compatibility.py` | 已完成 | `CompatibilityStatus`（ready/need_auth/need_setup/unavailable）四状态 |
-| `core/skill/dynamic_loader.py` | 已完成 | 集成 `OSSkillMerger`，支持 `get_eligible_skills()` |
+| `core/skill/dynamic_loader.py` | 已完成 | 运行时依赖检查（bins/env/os），`get_eligible_skills()` |
 | `core/prompt/runtime_context_builder.py` | 已完成 | 含 `build_skill_status_prompt()` 注入 Skill 状态 |
+| `instances/xiaodazi/config/skills.yaml` | 已完成 | Skills 管理配置（skill_groups 意图分组 + 二维分类清单） |
+
+**Skills-First 架构（V11.0 重构）**：
+
+```
+SkillsLoader (config/skills.yaml 解析)
+    ├── SkillEntry — Agent 看到的唯一能力单元
+    │   ├── backend_type: local/tool/mcp/api（Agent 不感知）
+    │   ├── dependency_level: builtin/lightweight/external/cloud_api
+    │   └── os: common/darwin/win32/linux
+    │
+    ├── skill_groups — 意图驱动按需注入
+    │   ├── writing: writing-assistant, writing-analyzer, style-learner, content-reformatter
+    │   ├── data_analysis: excel-analyzer, excel-fixer
+    │   ├── file_operation: file-manager, word-processor
+    │   ├── translation: translator
+    │   ├── research: literature-reviewer, paper-search, arxiv-search
+    │   ├── app_automation: applescript, macos-open, macos-screenshot, app-scanner, macos-notification
+    │   └── _always: local-search, app-recommender（始终注入）
+    │
+    └── loading_mode: "lazy", os_aware: true
+```
+
+**已创建 38 个 Skills**（`instances/xiaodazi/skills/`）：
+
+| 分类 | Skills |
+|------|--------|
+| 写作 | writing-assistant, writing-analyzer, style-learner, content-reformatter, translator |
+| 数据 | excel-analyzer, excel-fixer, word-processor |
+| 研究 | literature-reviewer, paper-search, arxiv-search, readwise-rival |
+| macOS | macos-clipboard, macos-finder, macos-notification, macos-open, macos-screenshot, applescript, apple-calendar |
+| Windows | windows-clipboard, windows-notification, windows-screenshot, powershell-basic, outlook-cli, onenote |
+| Linux | linux-clipboard, linux-notification, linux-screenshot, xdotool |
+| 通用 | app-recommender, app-scanner, local-search, file-manager, deep-doc-reader |
+| 领域 | competitive-intel, trend-spotter, nutrition-analyzer, medication-tracker |
 
 **已完成的设计要求**：
-- OS 检测 + 合并逻辑
+- OS 检测 + 自动过滤（`os_aware: true`）
 - 四状态管理（ready / need_auth / need_setup / unavailable）
 - Skill 状态注入系统提示词
 - 依赖检查（bins / env / OS 兼容性）
+- 意图驱动分组注入（`skill_groups` → `IntentResult.relevant_skill_groups`）
+- Skills-First 统一抽象（Agent 不感知 backend_type）
+- 惰性加载（`loading_mode: "lazy"`）
 
 **遗留**：
 - `lightweight` 级别的自动 `pip install` 逻辑未实现（标记为 ready，首次使用时安装）
 - `cloud_api` 级别的 API Key 检测逻辑未实现
-- 具体的 builtin Skills（如 `summarize`、`canvas`、`translator`）大部分未创建
 
 ---
 
@@ -612,30 +684,36 @@ instances/
 
 ---
 
-### 2.5 Agent 引擎层（策略路由）
+### 2.5 Agent 引擎层（V11.0 统一 RVR-B）
 
-**设计**：双执行器 + 基于 LLM 意图识别的策略路由。
+**设计**：V11.0 统一使用 RVR-B 执行器，complexity 仅影响规划深度和 Skill 聚焦。
 
-| 执行器 | 文件 | 特性 |
-|--------|------|------|
-| `RVRExecutor` | `core/agent/execution/rvr.py` | 标准循环，无回溯开销 |
-| `RVRBExecutor` | `core/agent/execution/rvrb.py` | 带回溯，错误分类 + 候选方案重试 |
+| 组件 | 文件 | 特性 |
+|------|------|------|
+| `RVRBExecutor` | `core/agent/execution/rvrb.py` | 统一执行器：回溯 + 错误分类 + 候选方案重试 |
+| `RVRExecutor` | `core/agent/execution/rvr.py` | 保留但不再独立使用（所有路径映射到 RVR-B） |
+| `AgentFactory` | `core/agent/factory.py` | V11.0 固定注册 RVR-B：`rvr`/`rvr-b`/`rvrb`/`simple` 全部映射到 `RVRBExecutor` |
 
-**策略路由**（`core/agent/base.py` execute 方法中）：
+**V11.0 架构变更**：
 
 ```
-IntentAnalyzer（LLM 语义判断）
-        |
-        v
-  complexity == "simple"  → RVR   （天气/翻译/查询，1-2 轮完成）
-  complexity == "medium"  → RVR-B （搜索+总结，可能需回溯）
-  complexity == "complex" → RVR-B （调研报告，多步骤+回溯保障）
+V11.0 之前（已废弃）：
+  complexity == "simple"  → RVR    ← 不再使用
+  complexity == "medium"  → RVR-B
+  complexity == "complex" → RVR-B
+
+V11.0 当前（统一 RVR-B）：
+  所有 complexity    → RVR-B  （统一执行器）
+  complexity 影响：
+    - simple  → planning_depth: none, Skill 聚焦: "直接回答"
+    - medium  → planning_depth: minimal（默认行为）
+    - complex → planning_depth: full, Skill 聚焦: 桌面操作模式
 ```
 
 **设计原则**：
 - complexity 由 LLM 语义判断（LLM-First），不做关键词匹配
-- 策略映射是确定性规则（simple -> RVR，其他 -> RVR-B），符合规范允许的场景
-- 默认 RVR-B（未知 complexity 时保守选择）
+- 统一 RVR-B 避免策略分叉的维护成本，简单任务回溯开销可忽略
+- complexity 通过 `SkillFocusInjector` 影响 Skill 聚焦提示（见 2.18）
 
 #### RVR-B 回溯机制（Backtrack）
 
@@ -751,20 +829,37 @@ BacktrackManager 决策（LLM 驱动）
 
 ---
 
-### 2.9 意图识别简化（3.7.1）
+### 2.9 意图识别简化（3.7.1）— V11.0
 
 | 文件 | 状态 | 说明 |
 |------|------|------|
-| `core/routing/intent_analyzer.py` | 已完成 | fast_mode / semantic_cache / simplified_output；意图上下文过滤 &lt;200ms |
+| `core/routing/intent_analyzer.py` | 已完成 | V11.0 极简输出 + skill_groups 语义多选 |
+| `core/routing/intent_cache.py` | 已完成 | 语义缓存（`IntentSemanticCache`） |
+| `core/routing/router.py` | 已完成 | `AgentRouter`：路由决策 |
+| `core/routing/types.py` | 已完成 | `IntentResult` / `Complexity` 类型定义 |
+
+**V11.0 输出字段（极简）**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `complexity` | SIMPLE/MEDIUM/COMPLEX | 任务复杂度 → 影响规划深度和 Skill 聚焦 |
+| `skip_memory` | bool | 是否跳过记忆召回 |
+| `is_follow_up` | bool | 是否追问（复用 plan_cache） |
+| `wants_to_stop` | bool | 用户停止意图 |
+| `relevant_skill_groups` | List[str] | **新增**：LLM 语义多选的技能组（对应 skills.yaml 中的 skill_groups） |
 
 **已完成**：
 - `fast_mode: true` 使用更快模型（如 haiku）
 - `semantic_cache_threshold` 可配置（提高到 0.90 减少 LLM 调用）
 - `simplified_output: true` 跳过不必要字段
+- 消息过滤 `_filter_for_intent()`：仅最近 5 条 user + 最后 1 条 assistant（截断 100 字符），O(n) < 0.1ms
+- `relevant_skill_groups` 语义多选：LLM 从 skill_groups 列表中选择与用户意图相关的技能组
+- 提示词来源优先从 `InstancePromptCache` 获取（用户自定义），Fallback 到默认
+- 保守 Fallback：LLM 失败时返回 MEDIUM 复杂度
 
 ---
 
-### 2.9 OS 兼容层（3.5）
+### 2.10 OS 兼容层（3.5）
 
 | 文件 | 状态 | 说明 |
 |------|------|------|
@@ -781,23 +876,48 @@ BacktrackManager 决策（LLM 驱动）
 
 ---
 
-### 2.10 项目管理（3.10）
+### 2.11 项目管理（3.10）— 多实例架构
+
+**架构决策**：不同搭子 = 不同实例（instance），天然隔离。
+
+```
+不需要复杂的 core/project/（已删除）。
+每个"项目"就是一个独立的实例目录，有自己的：
+  - config.yaml（模型/记忆/规划配置）
+  - prompt.md（人格提示词）
+  - config/skills.yaml（仅启用该场景需要的 Skills）
+  - .env（共享或独立的 API Keys）
+  - ~/.xiaodazi/{instance_name}/MEMORY.md（独立记忆）
+
+instances/
+├── xiaodazi/           ← 通用搭子（默认，全技能）
+├── writing-buddy/      ← 写稿搭子（写作 + 风格学习 + 格式转换）
+├── data-buddy/         ← 表格搭子（Excel + 数据分析 + 图表）
+├── research-buddy/     ← 研究搭子（论文 + 文献 + 学术写作）
+└── office-buddy/       ← 办公搭子（PPT + 邮件 + 会议纪要）
+```
+
+**工作流**：
+1. 前端提供"创建新搭子"界面 → 用户选模板、填名称、选 Skills
+2. 后端从 `_template/` 脚手架创建新实例目录 → 写入配置文件
+3. `main` 加载指定实例 → Agent 启动
+4. 切换搭子 = 切换实例
+
+**优势**：
+- 零代码隔离：配置/记忆/Skills/提示词天然独立
+- 简单可靠：不需要复杂的上下文切换、知识库隔离逻辑
+- 可组合：每个实例可以有完全不同的 provider/模型/温度配置
 
 | 文件 | 状态 | 说明 |
 |------|------|------|
-| `core/project/manager.py` | 骨架占位 | 所有方法为 `pass` / `return []` |
-
-**未实现**：
-- `create_project(name, template)` — 项目创建
-- `switch_project(project_id)` — 项目切换（上下文/知识库/playbook 隔离）
-- `delete_project(project_id)` — 项目删除
-- `list_projects()` — 项目列表
-- 项目模板系统（写稿搭子/表格搭子/研究搭子/办公搭子）
-- 项目数据结构（`~/.xiaodazi/projects/{name}/`）
+| `instances/_template/` | 已有 | 实例脚手架模板 |
+| `utils/instance_loader.py` | 已完成 | 加载任意实例的配置/提示词/Skills |
+| `core/project/` | 已删除 | 整个目录已移除，多实例架构取代 |
+| 前端创建界面 | 未实现 | 前端范畴 |
 
 ---
 
-### 2.11 存储层
+### 2.12 存储层
 
 | 文件 | 状态 | 说明 |
 |------|------|------|
@@ -821,7 +941,7 @@ BacktrackManager 决策（LLM 驱动）
 
 ---
 
-### 2.12 Skill 格式规范（3.2）
+### 2.13 Skill 格式规范（3.2）
 
 **已有**：`instances/xiaodazi/skills/` 下已有部分 SKILL.md，遵循 OpenClaw 兼容格式。
 
@@ -831,7 +951,7 @@ BacktrackManager 决策（LLM 驱动）
 
 ---
 
-### 2.13 Nodes 本地操作工具（3.5 OS 兼容层）
+### 2.14 Nodes 本地操作工具（3.5 OS 兼容层）
 
 **价值定位**：Nodes 是小搭子"会干活"能力的底层执行器 — 通过它调用 shell 命令、操作剪贴板、截图、发通知、打开应用，是连接 LLM 和用户电脑的桥梁。
 
@@ -894,24 +1014,26 @@ LLM 决策 -> tools/nodes_tool.py（NodesTool）
 
 ---
 
-### 2.14 三大核心能力总览（3.9）
+### 2.15 三大核心能力总览（3.9）
 
 | 能力 | 技术实现 | 状态 |
 |------|----------|------|
-| **会干活** — 工具调用 | `core/tool/` + Skills | 已完成 |
-| **会干活** — 文件/系统操作 | `core/nodes/` + `tools/nodes_tool.py` | macOS 完整（11 项操作），win32/linux 待实现（详见 2.13） |
+| **会干活** — 工具调用 | `core/tool/` + 38 个 Skills | 已完成 |
+| **会干活** — 文件/系统操作 | `core/nodes/` + `tools/nodes_tool.py` | macOS 完整（11 项操作），win32/linux 待实现（详见 2.14） |
+| **会干活** — 屏幕观察 | `tools/observe_screen.py` (peekaboo + Vision OCR) | macOS 已完成（详见 2.17） |
 | **会干活** — 应用联动 | `AppScanner` + `RuntimeContextBuilder` | macOS 部分完成 |
-| **会思考** — 智能回溯 | `core/agent/execution/rvrb.py` | 已完成 |
+| **会思考** — 智能回溯 | `core/agent/execution/rvrb.py`（V11.0 统一） | 已完成 |
 | **会思考** — 错误分类 | `core/agent/backtrack/error_classifier.py` | 已完成 |
 | **会思考** — 自主规划 | `core/planning/` | 已完成 |
 | **会思考** — 环境感知 | `RuntimeContextBuilder` | 已完成 |
+| **会思考** — Skill 聚焦 | `SkillFocusInjector`（按 complexity 聚焦） | 已完成（详见 2.18） |
 | **会学习** — 记忆系统 | `XiaodaziMemoryManager` 三层 | 已完成 |
-| **会学习** — Playbook | `core/playbook/` | 框架存在，xiaodazi 未集成（详见 2.14） |
-| **会学习** — 奖励归因 | `core/playbook/reward.py` | 框架存在，xiaodazi 未集成（详见 2.14） |
+| **会学习** — Playbook | `core/playbook/` + `PlaybookHintInjector` | 策略注入已实现，端到端链路待串联（详见 2.16） |
+| **会学习** — 奖励归因 | `core/evaluation/reward_attribution.py` | 框架存在，调用链路待串联 |
 
 ---
 
-### 2.15 Playbook 持续学习引擎
+### 2.16 Playbook 持续学习引擎
 
 **价值定位**：从成功的任务执行中自动提取可复用策略，下次遇到类似任务时直接套用，让小搭子"用得越久，越聪明"。
 
@@ -970,14 +1092,14 @@ LLM 自评（初筛）-> 生成候选 PlaybookEntry（DRAFT 状态）
 APPROVED -> find_matching() -> 下次任务注入系统提示词
 ```
 
-#### 4 条断裂的链路
+#### 4 条链路状态（2 条已通、2 条待串联）
 
-| 断裂点 | 说明 | 修复方案 |
-|--------|------|----------|
-| Agent 完成 -> 生成 DRAFT | 无调用者触发提取 | `base.py` execute 结束后调用 `extract_from_session()` |
-| DRAFT -> 用户确认 | 无事件推送到前端 | `EventBroadcaster` 新增 `emit_playbook_suggestion()` |
-| 用户确认 -> APPROVED | 无确认回调处理 | 新增 API 端点接收用户确认/拒绝 |
-| 新任务 -> 匹配策略注入 | Agent 路由/提示词未调用 | 新增 `PlaybookContextProvider`（Phase 1 Injector），注入到 messages 层面而非 system prompt，避免缓存失效 |
+| 链路 | 说明 | 状态 |
+|------|------|------|
+| Agent 完成 -> 生成 DRAFT | 无调用者触发提取 | ❌ 待实现：`base.py` execute 结束后调用 `extract_from_session()` |
+| DRAFT -> 用户确认 | 无事件推送到前端 | ❌ 待实现：`EventBroadcaster` 新增 `emit_playbook_suggestion()` |
+| 用户确认 -> APPROVED | 无确认回调处理 | ❌ 待实现：新增 API 端点接收用户确认/拒绝 |
+| 新任务 -> 匹配策略注入 | **已实现** `PlaybookHintInjector` | ✅ 已完成：Phase 2 注入器，注入到 messages 层面 |
 
 #### 匹配机制改进（LLM-First）
 
@@ -1009,6 +1131,181 @@ Layer 2: Mem0 语义搜索（复用已有向量存储，零额外 LLM 调用）
 
 ---
 
+### 2.17 屏幕观察工具 — ObserveScreen
+
+**价值定位**：让 Agent "看见"用户屏幕，获取 UI 元素和文字信息，是桌面操作自动化的感知层。
+
+| 文件 | 状态 | 说明 |
+|------|------|------|
+| `tools/observe_screen.py` | 已完成 | peekaboo + Vision OCR 并行执行，macOS 就绪 |
+
+**架构**：
+
+```
+Agent 决策："我需要看看屏幕上有什么"
+    │
+    ▼
+tools/observe_screen.py（ObserveScreen Tool）
+    │
+    ├─── peekaboo see（~1.5s，本地执行）
+    │    └── 返回 UI 元素 + 可交互 ID + 窗口信息
+    │
+    └─── macOS Vision OCR（~0.7s，本地执行）
+         └── 返回 peekaboo 未捕获的文字内容
+    │
+    ├── 两者并行执行，结果合并
+    └── 返回：窗口标题 + 可操作 UI 元素列表 + OCR 文字
+```
+
+**设计原则**：
+- **工具只做本地工作**，不调用 LLM（调度是 Agent 的职责）
+- **peekaboo 优先**：工业级屏幕自动化，返回可操作的元素 ID
+- **上下文工程**：只在上下文中放文字描述，零图片 token 开销
+- **临时文件**：截图是临时的，用完清理
+
+**参数**：`app`（目标应用）、`window_title`（窗口标题）、`mode`（screen/window/frontmost）、`description`（描述）
+
+**后续交互**：Agent 根据观察结果调度 Skills 操作：
+- `peekaboo click --on <element_id>` — 点击元素
+- `peekaboo type` — 输入文字
+- `peekaboo see --analyze` — 深度分析
+
+**平台**：仅 macOS（依赖 macOS Vision 框架）
+
+---
+
+### 2.18 Skill 聚焦注入器 — SkillFocusInjector
+
+**价值定位**：根据任务复杂度减少 Agent 的认知负荷（38 个 Skills 太多，聚焦最相关的）。
+
+| 文件 | 状态 | 说明 |
+|------|------|------|
+| `core/context/injectors/phase1/skill_focus.py` | 已完成 | 复杂度驱动的 Skill 聚焦提示 |
+
+**设计原则**：
+- **缓存友好**：完整 Skills 列表在缓存层（Layer 3.5），此注入器只在 DYNAMIC 层添加轻量提示
+- **零额外 LLM 调用**：基于 `IntentResult.complexity`，O(1) 操作
+- **降低认知负荷**：引导 Agent 聚焦最相关的能力
+
+**复杂度 → 聚焦行为**：
+
+| complexity | 注入内容 | 效果 |
+|------------|---------|------|
+| `simple` | "直接回答即可，无需读取 SKILL.md" | 跳过 Skill 加载开销 |
+| `medium` | 无注入（默认行为） | Agent 自主选择 |
+| `complex` | 桌面 UI 操作模式（observe → interact → verify → app management） | 引导多步骤 UI 自动化 |
+
+**注入参数**：
+- Phase 1（System Message），priority 70
+- 缓存策略：DYNAMIC（每轮可能变化）
+
+---
+
+### 2.19 上下文注入器总览（Context Injectors）
+
+**6 个 Phase Injector 全部就绪**，覆盖从系统角色到动态上下文的完整注入链路。
+
+```
+Phase 1: System Message 注入（缓存稳定层）
+├── system_role.py          — 系统角色提示词（固定，优先缓存）
+├── history_summary.py      — 历史摘要（压缩旧对话）
+├── tool_provider.py        — 工具定义注入
+└── skill_focus.py          — 复杂度驱动 Skill 聚焦（DYNAMIC）
+
+Phase 2: User Context 注入（每次对话动态）
+├── user_memory.py          — 用户记忆召回（recall 融合搜索）
+└── playbook_hint.py        — 历史成功策略提示（SESSION 缓存）
+
+Phase 3: Runtime 注入（实时状态）
+├── gtd_todo.py             — GTD 待办状态
+└── page_editor.py          — 页面编辑器上下文
+```
+
+**缓存策略分层**：
+
+| 缓存策略 | 变化频率 | 代表注入器 |
+|---------|---------|-----------|
+| STABLE | 几乎不变 | system_role, tool_provider |
+| SESSION | 每会话变 | playbook_hint, history_summary |
+| DYNAMIC | 每轮可变 | skill_focus, user_memory |
+
+---
+
+### 2.20 E2E 评估框架
+
+**价值定位**：端到端质量验证 — 从用户输入到 Agent 输出，自动化评分 + 根因分析。
+
+| 文件 | 状态 | 说明 |
+|------|------|------|
+| `evaluation/adapters/http_agent.py` | 已完成 | E2E → FastAPI 桥接适配器 |
+| `evaluation/graders/code_based.py` | 已完成 | 代码评分器（确定性检查） |
+| `evaluation/graders/model_based.py` | 已完成 | 模型评分器（LLM 质量判断） |
+| `evaluation/harness.py` | 已完成 | 评估运行引擎 |
+| `evaluation/suites/xiaodazi/e2e/phase1_core.yaml` | 已完成 | 4 个 E2E 用例 |
+| `scripts/run_e2e_auto.py` | 已完成 | 自动化运行器（启动服务 → 执行 → 报告 → 停止） |
+
+**Phase 1 测试用例**：
+
+| ID | 场景 | 验证点 | 评分方式 |
+|-----|------|--------|---------|
+| A1 | 格式混乱 Excel 分析 | RVR-B 回溯处理 + 结果质量 | code + model(≥4) |
+| B1 | 跨会话记忆 | 记忆持久化 + 风格召回 | model(≥3) |
+| D4 | 连续错误恢复 | ErrorClassifier + BacktrackManager | code + model(≥3) |
+| C1 | 简单问答 token 对比 | Prompt Caching 命中率 | code(≤20K tokens) + model(≥3) |
+
+**评估链路**：
+
+```
+scripts/run_e2e_auto.py
+    │
+    ├── 启动 uvicorn（端口 18234，避免冲突）
+    ├── 等待服务就绪（轮询 /health）
+    │
+    ▼
+evaluation/harness.py（评估引擎）
+    ├── 加载 suites/xiaodazi/e2e/phase1_core.yaml
+    ├── 逐用例执行：
+    │   ├── adapters/http_agent.py → POST /api/v1/chat
+    │   ├── 轮询 session 状态直到完成
+    │   ├── 获取 messages + tool_calls + token_usage
+    │   └── 运行 graders：
+    │       ├── code_based: check_no_tool_errors, check_token_limit
+    │       └── model_based: grade_response_quality
+    │
+    ▼
+evaluation/reports/e2e_phase1_*.json（评分报告）
+    ├── 每个用例的 grade_results
+    ├── passed / score / explanation / details
+    └── weaknesses → 优化方向
+```
+
+**运行方式**：
+
+```bash
+# 全量运行
+python scripts/run_e2e_auto.py --clean
+
+# 单用例调试
+python scripts/run_e2e_auto.py --case A1
+
+# 使用已运行的服务
+python scripts/run_e2e_auto.py --no-start --port 8000
+
+# 指定 Provider
+python scripts/run_e2e_auto.py --provider claude
+```
+
+**扩展测试套件**（已有但非 E2E）：
+
+| 套件 | 位置 | 说明 |
+|------|------|------|
+| 可行性测试 | `suites/xiaodazi/feasibility/` | 7 个场景（内容生成/桌面操作/错误恢复等） |
+| 效率测试 | `suites/xiaodazi/efficiency/` | 4 个维度（路径优化/规划深度/Skill选择/Token效率） |
+| 意图准确度 | `suites/intent/haiku_accuracy.yaml` | 意图识别准确率 |
+| 编码能力 | `suites/coding/basic_code_generation.yaml` | 基础代码生成 |
+
+---
+
 ## 四、不涉及（前端 UI / 桌面应用范畴）
 
 以下模块在架构设计中定义但属于前端/桌面应用团队职责，当前后端不涉及：
@@ -1033,7 +1330,8 @@ Layer 2: Mem0 语义搜索（复用已有向量存储，零额外 LLM 调用）
 
 | 项目 | 涉及文件 | 工作量 | 说明 |
 |------|----------|--------|------|
-| 项目管理器实现 | `core/project/manager.py` | 中 | 从骨架到完整实现，依赖记忆和知识检索 |
+| Playbook 端到端串联 | `core/agent/base.py` + `core/events/broadcaster.py` + `routers/` | 中 | 串联剩余 3 条链路：DRAFT 生成 → 用户确认 → APPROVED（Hint 注入已完成） |
+| 实例创建 API | `routers/` + `utils/instance_loader.py` | 小 | 前端调用 → 从模板脚手架创建新实例目录 |
 | 记忆混合检索权重 | `core/memory/xiaodazi_memory.py` | 小 | config 已声明 `vector_weight`/`bm25_weight`，recall 中应用 |
 | ProgressTransformer 集成 | `core/planning/` | 小 | 在 PlanTodoTool 步骤完成时自动调用 |
 
@@ -1043,8 +1341,8 @@ Layer 2: Mem0 语义搜索（复用已有向量存储，零额外 LLM 调用）
 |------|----------|--------|------|
 | 知识检索语义搜索 | `core/knowledge/local_search.py` | 中 | 复用 `infra/local_store/vector.py` |
 | 记忆文件监听同步 | `core/memory/` | 中 | watchdog 监听 MEMORY.md 变更 |
-| Skill 具体创建 | `instances/xiaodazi/skills/` | 大 | 按二维矩阵创建 builtin + lightweight Skills |
-| Playbook 端到端集成 | 见下方独立计划 | 中 | 串联 4 条断裂链路 |
+| E2E 测试用例扩展 | `evaluation/suites/xiaodazi/e2e/` | 中 | 扩展 Phase 1 用例覆盖更多场景（当前 4 个） |
+| Playbook 语义匹配 | `core/playbook/manager.py` | 小 | 替换关键词匹配为 Mem0 语义搜索（LLM-First） |
 
 ### Playbook 集成实施计划
 
@@ -1054,7 +1352,7 @@ Layer 2: Mem0 语义搜索（复用已有向量存储，零额外 LLM 调用）
 - 将 `DatabaseStorage` 从已删除的 `infra.database` 迁移到 `infra/local_store` 的 aiosqlite 引擎
 - 或标记 `DatabaseStorage` 为不可用，默认使用 `FileStorage`（已完整实现）
 
-**Step 2: 配置声明** — `instances/xiaodazi/config.yaml`
+**Step 2: 配置声明 ✅ 已完成** — `instances/xiaodazi/config.yaml`
 ```yaml
 playbook:
   enabled: true
@@ -1064,6 +1362,7 @@ playbook:
   storage_backend: "file"
   storage_path: "~/.xiaodazi/playbooks"
 ```
+> 配置已在 `instances/xiaodazi/config.yaml` 中声明。
 
 **Step 3: 链路 1 — 任务完成自动初筛** — `core/agent/base.py`
 - 在 `execute()` 结束后、状态提交前，调用 `PlaybookManager.extract_from_session()`
@@ -1078,11 +1377,13 @@ playbook:
 - 接收用户确认/拒绝 → 调用 `PlaybookManager.approve()` 或 `reject()`
 - 隐式信号处理：thumbs-up → 自动 approve，大幅修改 → 不提取
 
-**Step 6: 链路 4 — 新任务策略注入（Context Injector 方案）**
+**Step 6: 链路 4 — 新任务策略注入 ✅ 已实现**
+
+`core/context/injectors/phase2/playbook_hint.py` — `PlaybookHintInjector`
 
 核心矛盾：Claude API 的 system prompt 缓存（`cache_control`）要求内容稳定，如果把 Playbook 策略注入 system prompt 会导致缓存全部失效、token 成本翻倍。
 
-解决方案：**注入到 messages 层面（Context Injector），不动 system prompt**。
+解决方案：**注入到 messages 层面（Phase 2 Context Injector），不动 system prompt**。
 
 ```
 ┌──────────────────────────────────────────┐
@@ -1093,40 +1394,18 @@ playbook:
 ├──────────────────────────────────────────┤
 │ messages（动态，不影响 system 缓存）       │
 │   ├─ ...历史对话...                       │
-│   ├─ [injected] Playbook 策略上下文       │
+│   ├─ [Phase 2] user_memory 注入           │
+│   ├─ [Phase 2] <playbook_hint> 策略注入   │  ← 已实现
 │   └─ user: "帮我写公众号"                 │
 └──────────────────────────────────────────┘
 ```
 
-实现方式：在 `core/context/injectors/` 中新增 `playbook_provider.py` 作为 Phase 1 注入器（与 tool_provider / memory_provider 同级）：
-
-```python
-# core/context/injectors/phase1/playbook_provider.py
-class PlaybookContextProvider:
-    async def inject(self, messages, context):
-        matches = playbook_manager.find_matching(context)
-        if not matches:
-            return messages
-        # 在最后一条用户消息之前插入策略上下文
-        strategy_msg = {
-            "role": "user",
-            "content": (
-                "[系统上下文 - 历史成功策略参考]\n"
-                f"{format_playbook(matches[0])}\n"
-                "你可以参考，也可以根据当前情况调整。"
-            ),
-        }
-        messages.insert(-1, strategy_msg)
-        return messages
-```
-
-效果对比：
-
-| 方案 | system 缓存 | LLM 可见 | 推荐 |
-|------|------------|----------|------|
-| 注入 system prompt | 缓存失效 | 每轮看到 | 不推荐 |
-| **注入 messages（Injector）** | **零影响** | **首轮看到** | **推荐** |
-| 仅在 Plan 阶段注入 | 零影响 | 仅 plan | 简单任务漏掉 |
+**已实现细节**：
+- 注入位置：Phase 2（User Context Message），priority 80（低于 user_memory）
+- 缓存策略：SESSION（每个会话重新匹配）
+- 匹配规则：query + task_type → top_k=1, min_score=0.3, only_approved
+- 注入格式：`<playbook_hint>` 标签包裹，含 description / tool_sequence / quality_metrics / confidence
+- LLM 引导：明确标注"仅供参考"，LLM 自主决定是否采纳
 
 核心优势：
 - system prompt 缓存命中率不受影响（成本可控）
@@ -1155,30 +1434,53 @@ class PlaybookContextProvider:
 
 ---
 
-## 六、文件清单
+## 六、文件变更清单
 
-### 新建文件（本轮实施）
+### 本轮新增文件
+
+| 文件 | 职责 |
+|------|------|
+| `tools/observe_screen.py` | 屏幕观察工具（peekaboo + Vision OCR） |
+| `core/context/injectors/phase1/skill_focus.py` | 复杂度驱动 Skill 聚焦注入器 |
+| `core/context/injectors/phase2/playbook_hint.py` | 历史成功策略 Hint 注入器 |
+| `routers/websocket.py` | WebSocket 路由 |
+| `evaluation/adapters/http_agent.py` | E2E → FastAPI 桥接适配器 |
+| `evaluation/loop_automation.py` | 评估循环自动化 |
+| `evaluation/suites/xiaodazi/e2e/phase1_core.yaml` | E2E Phase 1 测试用例（4 个） |
+| `scripts/run_e2e_auto.py` | 自动化 E2E 测试运行器 |
+| `scripts/run_e2e_eval.py` | E2E 评估执行器 |
+| `instances/xiaodazi/.env.example` | 环境变量模板 |
+| `instances/xiaodazi/config/skills.yaml` | Skills 管理配置（从 config.yaml 分离） |
+| `instances/xiaodazi/config/llm_profiles.yaml` | LLM Profiles 配置（从 config.yaml 分离） |
+| `instances/_template/config/skills.yaml` | 模板 Skills 配置 |
+| `instances/_template/config/llm_profiles.yaml` | 模板 LLM Profiles 配置 |
+
+### 本轮删除文件
+
+| 文件 | 原因 |
+|------|------|
+| `core/project/__init__.py` / `manager.py` / `models.py` | 多实例架构取代，不再需要独立项目管理模块 |
+| `core/skill/os_skill_merger.py` | 功能并入 `SkillsLoader`（`core/skill/loader.py`） |
+| `routers/projects.py` | 随 `core/project/` 一同移除 |
+| `services/mcp_service.py` / `docs_service.py` | 功能重构，MCP 统一为 `mcp_client.py` |
+| `routers/health.py` / `docs.py` | 路由精简 |
+| `tools/send_files.py` / `clue_generation.py` | 工具整合 |
+| `utils/background_tasks/tasks/clue_generation.py` | 后台任务精简 |
+| `config/context.yaml` / `routing_rules.yaml` | 配置内聚到实例级 |
+| `config/llm_config/README.md` / `REORGANIZATION.md` / `profiles.example.yaml` | 文档清理 |
+
+### 早期基础文件（仍有效）
 
 | 文件 | 职责 |
 |------|------|
 | `infra/local_store/generic_fts.py` | 通用 FTS5 全文搜索引擎 |
 | `core/memory/markdown_layer.py` | MEMORY.md 文件层 |
-| `scripts/verify_memory_knowledge.py` | 端到端验证脚本（41 项断言） |
-| `scripts/verify_v11_architecture.py` | 架构完整性验证（119 项断言） |
-
-### 改造文件（本轮实施）
-
-| 文件 | 职责 |
-|------|------|
-| `core/memory/xiaodazi_memory.py` | 三层架构入口 |
+| `core/memory/xiaodazi_memory.py` | 三层记忆架构入口 |
 | `core/knowledge/local_search.py` | FTS5 搜索实现 |
 | `core/knowledge/file_indexer.py` | 增量文件索引 |
-| `core/termination/adaptive.py` | 五维度终止 + HITL |
+| `core/termination/adaptive.py` | 八维度终止 + HITL |
 | `core/state/consistency_manager.py` | 快照/回滚完整实现 |
-| `core/events/broadcaster.py` | 新增 rollback + progress 事件 |
-| `core/agent/base.py` | 集成终止策略 + 状态一致性 |
-| `infra/local_store/engine.py` | 7 项 PRAGMA 优化 |
-| `instances/xiaodazi/config.yaml` | 完整配置段 |
+| `core/events/broadcaster.py` | rollback + progress 事件 |
 
 ### 验证结果
 
@@ -1186,4 +1488,5 @@ class PlaybookContextProvider:
 |----------|------|
 | `scripts/verify_v11_architecture.py` | 119/119 通过 |
 | `scripts/verify_memory_knowledge.py` | 41/41 通过 |
-| `python -c "from main import app"` | 102 路由正常加载 |
+| `python -c "from main import app"` | 路由正常加载 |
+| `scripts/run_e2e_auto.py` | E2E Phase 1 可执行（需配置 LLM） |

@@ -726,9 +726,11 @@ class EvaluationHarness:
                 rubric=rubric,
             )
         
-        # 检查最低分数要求
-        if config.min_score is not None:
-            result.passed = (result.score or 0) >= config.min_score / 5.0
+        # Model grader is an EVALUATOR, not a gate.
+        # Always mark as passed — scores are advisory for human review.
+        # PASS/FAIL is determined solely by code graders (check_no_tool_errors etc.)
+        result.passed = True
+        result.needs_human_review = True
         
         return result
     

@@ -11,7 +11,6 @@ from .settings import router as settings_router
 from .skills import router as skills_router
 from .tasks import router as tasks_router
 from .tools import router as tools_router
-from .projects import router as projects_router
 from .websocket import router as websocket_router
 
 __all__ = [
@@ -28,6 +27,5 @@ __all__ = [
     "realtime_router",
     "models_router",
     "settings_router",
-    "projects_router",
     "websocket_router",
 ]

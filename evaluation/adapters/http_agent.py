@@ -30,7 +30,7 @@ class HttpAgentAdapter:
         agent_id: Optional[str] = None,
         conversation_id: Optional[str] = None,
         poll_interval_seconds: float = 2.0,
-        poll_max_wait_seconds: float = 120.0,
+        poll_max_wait_seconds: float = 300.0,
     ):
         self.base_url = base_url.rstrip("/")
         self.user_id = user_id

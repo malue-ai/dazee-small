@@ -42,7 +42,7 @@ class CompatibilityResult:
 
 
 def _current_os_key() -> str:
-    """当前操作系统配置键（与 config skills_classification 对齐）"""
+    """当前操作系统配置键（与 config/skills.yaml OS 分类对齐）"""
     s = platform.system().lower()
     if s == "darwin":
         return "darwin"

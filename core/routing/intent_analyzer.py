@@ -111,29 +111,97 @@ class IntentAnalyzer:
 
         return get_intent_recognition_prompt()
 
+    @staticmethod
+    def _filter_for_intent(messages: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+        """
+        Filter and flatten messages for intent analysis.
+
+        Intent analysis only needs plain text — images, tool_use, tool_result
+        blocks are stripped. This ensures compatibility with any LLM provider
+        (Claude, Qwen, DeepSeek, OpenAI).
+
+        Rules (O(n), < 0.1ms):
+        - Keep last 5 user messages + last 1 assistant (truncated to 100 chars)
+        - Discard tool_use / tool_result messages entirely
+        - Extract text from multimodal content blocks
+        - Return plain {role, content: str} dicts
+        """
+        filtered: List[Dict[str, str]] = []
+
+        for msg in messages:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+
+            # Skip tool_result messages (role=user but content is tool results)
+            if isinstance(content, list) and any(
+                isinstance(b, dict) and b.get("type") in ("tool_use", "tool_result")
+                for b in content
+            ):
+                continue
+
+            # Extract plain text from content
+            if isinstance(content, list):
+                text_parts = []
+                for block in content:
+                    if isinstance(block, dict):
+                        if block.get("type") == "text":
+                            text_parts.append(block.get("text", ""))
+                        # Skip image, tool_use, tool_result, thinking blocks
+                    elif isinstance(block, str):
+                        text_parts.append(block)
+                text = "\n".join(text_parts)
+            elif isinstance(content, str):
+                text = content
+            else:
+                text = str(content)
+
+            if not text.strip():
+                continue
+
+            filtered.append({"role": role, "content": text})
+
+        # Keep last 5 user messages + last 1 assistant (truncated)
+        user_msgs = [m for m in filtered if m["role"] == "user"][-5:]
+        assistant_msgs = [m for m in filtered if m["role"] == "assistant"][-1:]
+        for m in assistant_msgs:
+            m["content"] = m["content"][:100]
+
+        # Rebuild in original order
+        result = []
+        u_idx, a_idx = 0, 0
+        for m in filtered:
+            if m["role"] == "user" and m in user_msgs:
+                result.append(m)
+            elif m["role"] == "assistant" and m in assistant_msgs:
+                result.append(m)
+
+        return result if result else filtered[-1:]  # at least 1 message
+
     async def _analyze_with_llm(self, messages: List[Dict[str, Any]], tracker=None) -> IntentResult:
         """
-        使用 LLM 分析意图
+        Use LLM for intent analysis.
+
+        Messages are filtered to plain text before calling the LLM,
+        ensuring compatibility with Claude, Qwen, DeepSeek, and OpenAI.
 
         Args:
-            messages: 完整的消息列表
-            tracker: UsageTracker 实例（可选）
+            messages: Raw message list (may contain multimodal content).
+            tracker: UsageTracker (optional).
 
         Returns:
             IntentResult
         """
         try:
-            # 只保留最近 3 轮对话（6 条消息）
-            max_messages = 6
-            truncated = messages[-max_messages:] if len(messages) > max_messages else messages
+            # Filter: extract text, drop tool blocks, limit message count
+            filtered = self._filter_for_intent(messages)
 
-            if len(truncated) < len(messages):
-                logger.info(f"意图分析: 截断消息 {len(messages)} → {len(truncated)} 条")
+            if len(filtered) < len(messages):
+                logger.info(f"意图分析: 过滤消息 {len(messages)} → {len(filtered)} 条")
 
-            # 转换消息格式
-            llm_messages = [Message(role=msg["role"], content=msg["content"]) for msg in truncated]
+            # Convert to Message objects (content is always str after filtering)
+            llm_messages = [Message(role=msg["role"], content=msg["content"]) for msg in filtered]
 
-            # 获取 system prompt
+            # Get system prompt
             if self._prompt_cache and self._prompt_cache.is_loaded:
                 if hasattr(self.llm, "config") and self.llm.config.enable_caching:
                     system_blocks = self._prompt_cache.get_cached_intent_blocks()
@@ -144,17 +212,14 @@ class IntentAnalyzer:
             else:
                 system_blocks = self._get_intent_prompt()
 
-            # ========== 打印意图识别输入 ==========
-            logger.info("=" * 60)
-            logger.info("[意图识别] 输入消息:")
-            for i, msg in enumerate(truncated):
-                content = msg.get("content", "")
-                # 截断过长内容便于查看
-                content_preview = content[:200] + "..." if len(str(content)) > 200 else content
-                logger.info(f"  [{i+1}] role={msg.get('role')}: {content_preview}")
-            logger.info("=" * 60)
+            # Log input (debug level; content is already plain text)
+            if logger.isEnabledFor(20):  # INFO
+                logger.info("[意图识别] 输入消息:")
+                for i, msg in enumerate(filtered):
+                    preview = msg["content"][:200] + "..." if len(msg["content"]) > 200 else msg["content"]
+                    logger.info(f"  [{i+1}] {msg['role']}: {preview}")
 
-            # 调用 LLM
+            # Call LLM
             response = await self.llm.create_message_async(
                 messages=llm_messages, system=system_blocks
             )

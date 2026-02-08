@@ -50,11 +50,36 @@ class ModelBasedGraders:
     def __init__(self, llm_service=None):
         """
         初始化模型评分器
-        
+
         Args:
             llm_service: LLM服务实例（用于评分）
         """
         self.llm = llm_service
+        self._judge_prompts: Optional[Dict[str, str]] = None
+
+    def _get_judge_prompt(self, name: str) -> Optional[str]:
+        """
+        Load judge prompt from evaluation/config/judge_prompts.yaml.
+
+        Prompts are cached after first load. Falls back to None
+        (caller uses hardcoded default) if file or key is missing.
+        """
+        if self._judge_prompts is None:
+            try:
+                from pathlib import Path
+                import yaml
+
+                prompts_path = (
+                    Path(__file__).resolve().parent.parent / "config" / "judge_prompts.yaml"
+                )
+                if prompts_path.exists():
+                    with open(prompts_path, "r", encoding="utf-8") as f:
+                        self._judge_prompts = yaml.safe_load(f) or {}
+                else:
+                    self._judge_prompts = {}
+            except Exception:
+                self._judge_prompts = {}
+        return self._judge_prompts.get(name)
         
     async def _call_judge(
         self,
@@ -64,57 +89,74 @@ class ModelBasedGraders:
         include_confidence: bool = True
     ) -> Dict[str, Any]:
         """
-        调用LLM进行评分
-        
+        Call LLM-as-Judge for scoring.
+
+        Adapts to the framework's LLM service API (create_message_async)
+        and supports extended thinking for deeper reasoning.
+
         Args:
-            system_prompt: 系统提示词（定义评分标准）
-            user_prompt: 用户提示词（待评估的内容）
-            response_format: 响应格式
-            include_confidence: 是否要求返回置信度
-            
+            system_prompt: Rubric and scoring criteria.
+            user_prompt: Content to evaluate.
+            response_format: Expected format ("json").
+            include_confidence: Whether to ask for confidence score.
+
         Returns:
-            Dict: 评分结果（包含 confidence 字段）
+            Dict with score, explanation, confidence, etc.
         """
         if self.llm is None:
-            # 模拟模式（用于测试）
             return {
                 "score": 3,
                 "explanation": "LLM服务未配置，返回模拟评分",
                 "passed": True,
                 "confidence": 0.5,
             }
-        
-        # 如果要求置信度，在 system_prompt 中添加说明
+
         if include_confidence and response_format == "json":
-            system_prompt += "\n\n请同时返回置信度（confidence，0-1之间的浮点数），表示你对这个评分的确信程度。"
-        
-        # 调用LLM
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
-        
-        response = await self.llm.chat(messages)
-        
-        # 解析响应
+            system_prompt += (
+                "\n\n请同时返回置信度（confidence，0-1之间的浮点数），"
+                "表示你对这个评分的确信程度。"
+            )
+
+        # Adapt to framework LLM API: system is a separate param, not a message
+        from core.llm import Message
+
+        messages = [Message(role="user", content=user_prompt)]
+
+        try:
+            response = await self.llm.create_message_async(
+                messages=messages, system=system_prompt
+            )
+            response_text = response.content or ""
+        except Exception as e:
+            return {
+                "score": 3,
+                "explanation": f"LLM 调用失败: {e}",
+                "passed": True,
+                "confidence": 0.3,
+            }
+
+        # Parse response (extract JSON from possible markdown/thinking wrapper)
+        from utils.json_utils import extract_json
+
         try:
             if response_format == "json":
-                # 尝试解析JSON响应
-                result = json.loads(response)
-                # 确保有置信度字段
+                parsed = extract_json(response_text)
+                if parsed and isinstance(parsed, dict):
+                    result = parsed
+                else:
+                    result = json.loads(response_text)
+
                 if include_confidence and "confidence" not in result:
-                    # 如果没有提供，根据分数估算（分数越极端，置信度越高）
                     score = result.get("score", 3)
                     if isinstance(score, (int, float)):
-                        # 分数接近中间值（3）时置信度低，接近极端值（1或5）时置信度高
-                        result["confidence"] = 1.0 - abs(score - 3) / 2.0
+                        result["confidence"] = min(1.0, 0.5 + abs(score - 3) / 4.0)
                     else:
                         result["confidence"] = 0.7
             else:
-                result = {"content": response, "score": None, "confidence": 0.7}
-        except json.JSONDecodeError:
-            result = {"content": response, "score": None, "confidence": 0.5}
-        
+                result = {"content": response_text, "score": None, "confidence": 0.7}
+        except (json.JSONDecodeError, Exception):
+            result = {"content": response_text, "score": None, "confidence": 0.5}
+
         return result
     
     # ===================
@@ -138,23 +180,11 @@ class ModelBasedGraders:
         Returns:
             GradeResult: 评分结果
         """
-        system_prompt = """你是一个专业的AI评估员，负责评估智能体是否正确理解了用户意图。
-
-评分标准（1-5分）：
-- 5分：完全理解用户意图，回答精准、全面
-- 4分：基本理解意图，回答正确但可能不够全面
-- 3分：部分理解意图，回答有偏差但方向正确
-- 2分：对意图理解有较大偏差
-- 1分：完全误解用户意图，回答错误
-
-请以JSON格式返回评分结果：
-{
-    "score": <1-5的整数>,
-    "understood_intent": "<你理解的用户意图>",
-    "response_alignment": "<回复与意图的对齐程度分析>",
-    "explanation": "<评分理由>",
-    "suggestions": "<改进建议>"
-}"""
+        # Load from configurable prompt
+        system_prompt = self._get_judge_prompt("grade_intent_understanding")
+        if not system_prompt:
+            system_prompt = """你是意图理解评估专家。评分标准(1-5)：5=完全理解+隐含需求, 4=核心理解, 3=表面理解, 2=部分误解, 1=完全误解。
+返回 JSON: {"score":<1-5>, "understood_intent":"", "response_alignment":"", "explanation":"", "confidence":<0-1>}"""
 
         user_prompt = f"""用户查询：
 {user_query}
@@ -304,36 +334,13 @@ Token消耗：
         Returns:
             GradeResult: 评分结果
         """
-        system_prompt = """你是一个专业的AI评估员，负责综合评估智能体回答的质量。
-
-评估维度：
-1. 准确性（Accuracy）：信息是否正确无误
-2. 相关性（Relevance）：回答是否针对用户问题
-3. 完整性（Completeness）：是否回答了所有子问题
-4. 流畅性（Fluency）：语言表达是否自然流畅
-5. 有用性（Helpfulness）：回答是否真正帮助用户
-
-每个维度评分（1-5分），然后计算加权平均：
-- 准确性权重：0.3
-- 相关性权重：0.25
-- 完整性权重：0.2
-- 流畅性权重：0.1
-- 有用性权重：0.15
-
-请以JSON格式返回评分结果：
-{
-    "scores": {
-        "accuracy": <1-5>,
-        "relevance": <1-5>,
-        "completeness": <1-5>,
-        "fluency": <1-5>,
-        "helpfulness": <1-5>
-    },
-    "weighted_score": <加权平均分>,
-    "strengths": ["<优点1>", "<优点2>"],
-    "weaknesses": ["<缺点1>", "<缺点2>"],
-    "explanation": "<综合评价>"
-}"""
+        # Load from configurable prompt (evaluation/config/judge_prompts.yaml)
+        system_prompt = self._get_judge_prompt("grade_response_quality")
+        if not system_prompt:
+            # Fallback: minimal hardcoded prompt
+            system_prompt = """你是一个专业的AI评估员，综合评估智能体回答的质量。
+评分维度（1-5分）：任务完成度(0.35)、工具效率(0.25)、错误恢复(0.2)、输出质量(0.2)。
+返回 JSON: {"scores":{...}, "weighted_score":<1-5>, "strengths":[], "weaknesses":[], "explanation":"", "confidence":<0-1>}"""
 
         user_prompt = f"""用户查询：
 {user_query}
@@ -346,24 +353,31 @@ Token消耗：
 请综合评估回答质量。"""
 
         result = await self._call_judge(system_prompt, user_prompt, include_confidence=True)
-        
-        scores = result.get("scores", {})
-        weighted_score = result.get("weighted_score", 3.0)
+
+        # Support both old format (scores/weighted_score) and new pipeline_diagnosis format
+        pipeline = result.get("pipeline_diagnosis", {})
+        overall_score = result.get("overall_score") or result.get("weighted_score", 3.0)
         confidence = result.get("confidence", 0.7)
-        passed = weighted_score >= 3.5  # 3.5分以上算通过
-        
+
+        # Model grader is advisory — always passed=True, scores for human review
         return GradeResult(
             grader_type=GraderType.MODEL,
             grader_name="grade_response_quality",
-            passed=passed,
-            score=weighted_score / 5.0,
+            passed=True,
+            score=overall_score / 5.0,
             confidence=confidence,
-            needs_human_review=confidence < 0.7,
-            explanation=result.get("explanation"),
+            needs_human_review=True,
+            explanation=result.get("explanation", ""),
             details={
-                "scores": scores,
-                "weighted_score": weighted_score,
+                # Full pipeline diagnosis (new format)
+                "pipeline_diagnosis": pipeline,
+                "overall_score": overall_score,
+                "task_completed": result.get("task_completed"),
                 "strengths": result.get("strengths", []),
+                "optimization_suggestions": result.get("optimization_suggestions", []),
+                # Backward compat
+                "scores": result.get("scores", {}),
+                "weighted_score": overall_score,
                 "weaknesses": result.get("weaknesses", []),
             },
         )

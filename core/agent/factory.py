@@ -458,10 +458,10 @@ class AgentFactory:
                 f"provider={model_config.provider} (from instance config)"
             )
         else:
-            # Fallback: 模型未在 ModelRegistry 注册，尝试 profiles.yaml
+            # Fallback: 模型未在 ModelRegistry 注册，尝试 llm_profiles main_agent 配置
             logger.warning(
                 f"⚠️ 模型 '{schema.model}' 未在 ModelRegistry 注册，"
-                f"回退到 profiles.yaml main_agent 配置"
+                f"回退到 llm_profiles main_agent 配置"
             )
             main_profile = await get_llm_profile("main_agent")
 

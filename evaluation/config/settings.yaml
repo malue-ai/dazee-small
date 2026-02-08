@@ -36,14 +36,31 @@ graders:
     default_execution_time_limit: 30000
   
   # Model-based Graders（LLM-as-Judge）
+  #
+  # 定位：独立的质量评估者，NOT 通过/不通过的闸门。
+  #
+  # 核心原则：
+  #   - Judge 只评分 + 给分析，不决定 PASS/FAIL
+  #   - PASS/FAIL 由代码评分器（check_no_tool_errors 等）决定
+  #   - Judge 的评分供人类审查，指导优化方向
+  #   - Judge 完全独立于 Agent 的 plan-todo 和执行逻辑
+  #
+  # 模型选择：评分者必须比被评对象更强。
+  # 固定使用 Claude Opus + Extended Thinking，不跟实例 provider 走。
+  #
   model:
     enabled: true
-    # 使用的模型
-    model: "claude-sonnet-4-20250514"
-    # 默认最低通过分数（1-5分制，4分通过）
-    default_min_score: 4
-    # 评分温度（越低越稳定）
-    temperature: 0.0
+    # LLM 配置（独立于实例 provider）
+    provider: "claude"
+    model: "claude-opus-4-0-20250514"
+    api_key_env: "ANTHROPIC_API_KEY"
+    max_tokens: 4096
+    temperature: 0
+    enable_thinking: true
+    thinking_budget: 10000
+    timeout: 120.0
+    # 评估提示词：evaluation/config/judge_prompts.yaml
+    # 评分结果仅供参考，不作为自动化闸门
   
   # Human Graders（人工校准）
   human:

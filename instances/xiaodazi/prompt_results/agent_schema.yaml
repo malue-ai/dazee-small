@@ -1,22 +1,24 @@
-name: GeneralAgent
-description: 通用智能助手（高质量默认配置）
+name: 小搭子
+description: 住在用户电脑里的桌面 AI 搭子，亲切、靠谱、主动
 intent_analyzer:
   enabled: true
   complexity_levels:
-  - low
+  - simple
   - medium
-  - high
+  - complex
   task_types:
-  - question_answering
-  - data_analysis
-  - content_generation
-  - code_execution
-  - web_search
   - file_operation
+  - writing
+  - data_analysis
+  - translation
+  - screenshot
+  - app_control
+  - information_query
   output_formats:
   - text
-  - json
   - markdown
+  - list
+  - table
   use_llm: true
   llm_model: claude-haiku-4-5-20251001
   fast_mode: false
@@ -24,7 +26,7 @@ intent_analyzer:
   simplified_output: true
 plan_manager:
   enabled: true
-  trigger_condition: complexity == 'high' or step_count > 3
+  trigger_condition: complexity == 'complex' or step_count > 3
   max_steps: 15
   granularity: medium
   allow_dynamic_adjustment: true
@@ -38,37 +40,53 @@ tool_selector:
   available_tools: []
   selection_strategy: capability_based
   allow_parallel: false
-  max_parallel_tools: 3
+  max_parallel_tools: 1
   base_tools:
-  - plan_todo
+  - hitl
   tool_timeout: 300
 memory_manager:
   enabled: true
-  retention_policy: session
-  episodic_memory: false
-  working_memory_limit: 20
+  retention_policy: user
+  episodic_memory: true
+  working_memory_limit: 50
   auto_compress: true
   compress_threshold: 15
 output_formatter:
   enabled: true
-  default_format: text
+  default_format: markdown
   supported_formats:
   - text
   - markdown
   - json
   - html
-  code_highlighting: true
-  max_output_length: 50000
+  code_highlighting: false
+  max_output_length: 4000
   json_model_name: null
   json_schema: null
   strict_json_validation: false
   json_ensure_ascii: false
   json_indent: 2
   include_metadata: false
-skills: []
-tools: []
+skills:
+- name: file-manager
+  enabled: true
+  description: 文件整理、搜索、分类等本地文件操作
+- name: excel-generator
+  enabled: true
+  description: 表格分析和生成
+- name: screenshot
+  enabled: true
+  description: 截图功能
+- name: app-controller
+  enabled: true
+  description: 打开和操作应用界面
+- name: translator
+  enabled: true
+  description: 翻译功能
+tools:
+- hitl
 model: claude-sonnet-4-5-20250929
-max_turns: 15
+max_turns: 20
 execution_strategy: rvr
 allow_parallel_tools: false
 context_limits:
@@ -81,4 +99,25 @@ enable_thinking: null
 enable_caching: null
 thinking_mode: null
 prompts: null
-reasoning: 高质量默认配置：适应大多数场景，平衡能力和稳定性。作为 config.yaml 配置缺失时的兜底。
+reasoning: '这是一个桌面端 AI 助手，具有以下特点：
+
+
+  1. **复杂任务处理**：涉及多步骤文件操作、应用控制、UI 自动化等复杂场景，需要启用规划管理器，采用中等粒度规划（medium），最多 15 步。允许动态调整和增量重规划（保留已完成步骤），失败阈值
+  0.3。
+
+
+  2. **本地能力为主**：主要依赖 Skills（文件管理、Excel、截图、应用控制、翻译）而非云端工具，工具选择策略为 capability_based。必须包含
+  hitl 工具用于敏感操作确认。
+
+
+  3. **强记忆需求**：需要记住用户偏好、习惯、风格等，启用用户级记忆（user retention），支持情景记忆（episodic_memory），工作记忆限制
+  50 条以适应桌面场景的丰富上下文。
+
+
+  4. **友好输出**：默认 markdown 格式，支持列表和表格等结构化展示，不需要代码高亮（面向普通用户），输出长度限制 4000 字符保持简洁。
+
+
+  5. **交互轮次**：桌面操作可能需要多轮观察-操作-验证循环，max_turns 设为 20 以支持复杂 UI 自动化任务。
+
+
+  6. **安全考虑**：不允许并行工具执行（allow_parallel_tools: false），确保操作可控；强制使用 hitl 工具进行敏感操作确认。'

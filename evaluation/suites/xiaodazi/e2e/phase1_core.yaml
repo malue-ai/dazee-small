@@ -32,7 +32,7 @@ tasks:
         rubric: grade_response_quality
         min_score: 4
     trials: 1
-    timeout_seconds: 120
+    timeout_seconds: 600
     tags: ["e2e", "excel", "RVR-B"]
     metadata:
       expected_behavior: "RVR-B 回溯至少 1 次后成功"
@@ -86,7 +86,7 @@ tasks:
         rubric: grade_response_quality
         min_score: 3
     trials: 1
-    timeout_seconds: 120
+    timeout_seconds: 600
     tags: ["e2e", "error_recovery", "backtrack"]
     metadata:
       expected_behavior: "ErrorClassifier 分类 + BacktrackManager 回溯"

@@ -2,10 +2,10 @@
 # 小搭子实例配置
 # ============================================================
 #
-# 这个文件只管三件事：
-#   1. 小搭子用什么大脑（模型）
-#   2. 小搭子有哪些技能（Skills）
-#   3. 小搭子记忆和项目怎么管
+# 这是你唯一需要关心的配置文件。
+# 更多配置见 config/ 目录（通常不需要修改）：
+#   config/skills.yaml        - Skills 管理（启用/禁用技能）
+#   config/llm_profiles.yaml  - 框架内部 LLM 路由（高级）
 #
 
 # ==================== 基础信息 ====================
@@ -63,187 +63,67 @@ user_prompt: ""
 
 # ==================== 大模型配置 ====================
 #
-# agent.model + agent.llm = 主 Agent 对话模型
-# llm_profiles = 框架内部所有 LLM 调用点的配置（唯一来源）
+# provider: 一键切换所有模型。改这一个字段，
+#           主 Agent 和框架内部 13 个调用点全部切换。
+#
+#   "qwen"   - 通义千问系列
+#   "claude"  - Anthropic Claude 系列
+#
+# 各 provider 的默认模型分配：
+#
+#   ┌──────────┬───────────────────────────┬──────────────────────────┐
+#   │ 角色     │ qwen                      │ claude                   │
+#   ├──────────┼───────────────────────────┼──────────────────────────┤
+#   │ 主 Agent │ qwen3-max                 │ claude-sonnet-4-5        │
+#   │ heavy    │ qwen3-max                 │ claude-sonnet-4-5        │
+#   │ light    │ qwen-plus                 │ claude-haiku-4-5         │
+#   └──────────┴───────────────────────────┴──────────────────────────┘
+#
+# 想用更强模型？在下方 model 字段填写：
+#   model: "claude-opus-4-6"   # Opus 4.6（$5/$25，最强但贵）
+#
+# model: 主 Agent 对话模型。
+#        不填则由 provider 自动决定（推荐）。
+#        填了则覆盖 provider 的默认值。
 #
 
 agent:
-  model: "claude-sonnet-4-5-20250929"
+  provider: "qwen"
+  # model: "qwen3-max"           # 不填则由 provider 自动决定
+  #
+  # llm 参数已内置在 provider 模板中，随 provider 自动切换。
+  # 如需覆盖个别参数，取消注释：
+  # llm:
+  #   temperature: 0.8           # 0=精准（默认），0.8=生成/创意
+  #   thinking_budget: 20000     # 覆盖思考预算
+  #
+  # 注意：enable_thinking=true 时，temperature 由框架自动设置
+  #       （Claude 强制 1.0），此处设置无效。
 
-  llm:
-    temperature: 0.2
-    max_tokens: 128000
-    enable_thinking: true
-    thinking_budget: 10000
-    enable_caching: true
-
-# ==================== 框架内部 LLM 配置 ====================
+# ==================== 实例存储（运行时数据隔离） ====================
 #
-# 参数说明：
-#   provider     - 提供商（qwen / claude / openai）
-#   model        - 模型名称
-#   api_key_env  - API Key 环境变量名
-#   region       - 服务地域（qwen 专用：singapore / cn-beijing）
-#   max_tokens   - 最大输出 token 数
-#   temperature  - 温度（0=确定性，0.7=创意）
-#   enable_thinking - 启用深度思考
-#   thinking_budget - Thinking token 预算
-#   timeout      - 请求超时（秒）
-#   max_retries  - 最大重试次数
+# 每个实例有独立的运行时数据目录，天然隔离。
+# base_path 默认从 instance.name 派生，通常不需要修改。
 #
+storage:
+  base_path: "~/.xiaodazi/xiaodazi"
+  # 以下子目录自动创建：
+  #   memory/     → MEMORY.md + FTS5 索引
+  #   playbooks/  → Playbook 策略
+  #   data/       → SQLite 数据库（对话/向量）
+  #   snapshots/  → 状态快照
 
-llm_profiles:
-  # ---------- 运行时（每次请求都可能调用） ----------
-
-  intent_analyzer:
-    provider: "qwen"
-    model: "qwen-plus"
-    api_key_env: "DASHSCOPE_API_KEY"
-    region: "singapore"
-    max_tokens: 65536
-    temperature: 0
-    enable_thinking: false
-    timeout: 60.0
-    max_retries: 2
-
-  semantic_inference:
-    provider: "qwen"
-    model: "qwen-plus"
-    api_key_env: "DASHSCOPE_API_KEY"
-    region: "singapore"
-    max_tokens: 65536
-    temperature: 0
-    enable_thinking: false
-    timeout: 30.0
-    max_retries: 2
-
-  tool_capability_inference:
-    provider: "qwen"
-    model: "qwen-plus"
-    api_key_env: "DASHSCOPE_API_KEY"
-    region: "singapore"
-    max_tokens: 100
-    temperature: 0.3
-    enable_thinking: false
-    timeout: 30.0
-    max_retries: 2
-
-  background_task:
-    provider: "qwen"
-    model: "qwen-plus"
-    api_key_env: "DASHSCOPE_API_KEY"
-    region: "singapore"
-    max_tokens: 100
-    temperature: 0.7
-    enable_thinking: false
-    timeout: 30.0
-    max_retries: 1
-
-  # ---------- 规划系统 ----------
-
-  plan_generator:
-    provider: "qwen"
-    model: "qwen-plus"
-    api_key_env: "DASHSCOPE_API_KEY"
-    region: "singapore"
-    max_tokens: 4096
-    temperature: 0
-    enable_thinking: false
-    timeout: 60.0
-    max_retries: 2
-
-  plan_manager:
-    provider: "qwen"
-    model: "qwen3-max"
-    api_key_env: "DASHSCOPE_API_KEY"
-    region: "singapore"
-    max_tokens: 65536
-    temperature: 0.7
-    enable_thinking: true
-    thinking_budget: 5000
-    timeout: 120.0
-    max_retries: 2
-
-  # ---------- 记忆系统 ----------
-
-  fragment_extractor:
-    provider: "qwen"
-    model: "qwen-plus"
-    api_key_env: "DASHSCOPE_API_KEY"
-    region: "singapore"
-    max_tokens: 1024
-    temperature: 0
-    enable_thinking: false
-    timeout: 30.0
-    max_retries: 2
-
-  behavior_analyzer:
-    provider: "qwen"
-    model: "qwen-plus"
-    api_key_env: "DASHSCOPE_API_KEY"
-    region: "singapore"
-    max_tokens: 2048
-    temperature: 0.3
-    enable_thinking: false
-    timeout: 60.0
-    max_retries: 2
-
-  memory_update:
-    provider: "qwen"
-    model: "qwen-plus"
-    api_key_env: "DASHSCOPE_API_KEY"
-    region: "singapore"
-    max_tokens: 2048
-    temperature: 0
-    enable_thinking: false
-    timeout: 60.0
-    max_retries: 2
-
-  # ---------- 启动时（提示词生成，仅首次或缓存失效时执行） ----------
-
-  llm_analyzer:
-    provider: "qwen"
-    model: "qwen3-max"
-    api_key_env: "DASHSCOPE_API_KEY"
-    region: "singapore"
-    max_tokens: 32000
-    temperature: 0
-    enable_thinking: false
-    timeout: 600.0
-    max_retries: 3
-
-  schema_generator:
-    provider: "qwen"
-    model: "qwen3-max"
-    api_key_env: "DASHSCOPE_API_KEY"
-    region: "singapore"
-    max_tokens: 4096
-    temperature: 0
-    enable_thinking: false
-    timeout: 90.0
-    max_retries: 2
-
-  prompt_merger:
-    provider: "qwen"
-    model: "qwen3-max"
-    api_key_env: "DASHSCOPE_API_KEY"
-    region: "singapore"
-    max_tokens: 32000
-    temperature: 0
-    enable_thinking: false
-    timeout: 600.0
-    max_retries: 3
-
-  prompt_decomposer:
-    provider: "qwen"
-    model: "qwen3-max"
-    api_key_env: "DASHSCOPE_API_KEY"
-    region: "singapore"
-    max_tokens: 32000
-    temperature: 0
-    enable_thinking: false
-    timeout: 300.0
-    max_retries: 2
+# ==================== 知识库（本地文件索引） ====================
+#
+# 指定该实例管理的本地目录，小搭子会自动索引其中的文件。
+# 不同实例可以管理不同的目录，互不干扰。
+#
+knowledge:
+  enabled: true
+  directories: []
+  # 示例：
+  #   - "~/Documents/工作"
+  #   - "~/Desktop/projects"
 
 # ==================== 记忆配置 ====================
 
@@ -252,7 +132,7 @@ memory:
   smart_retrieval: true
   retention_policy: "user"
 
-# ==================== 规划系统配置（架构 3.5.3） ====================
+# ==================== 规划系统配置 ====================
 #
 # 核心原则：内部复杂，外部简单
 # - implicit 模式：内部 plan_todo 规划，用户只看友好进度
@@ -285,225 +165,9 @@ playbook:
   min_reward_threshold: 0.7        # 初筛最低分
   require_user_confirm: true       # 用户确认闸门（核心原则）
   storage_backend: "file"
-  storage_path: "~/.xiaodazi/playbooks"
+  # storage_path 自动从 storage.base_path 派生，通常不需要填
   matching:
     semantic_enabled: true          # Mem0 语义匹配（零额外 LLM 调用）
     min_match_score: 0.3            # 匹配最低分
     top_k: 3                        # 最多返回策略数
 
-# ==================== 项目管理 ====================
-
-project:
-  enabled: true
-  storage_path: "~/.xiaodazi/projects/"
-  default_template: "custom"
-
-  isolation:
-    context: true
-    knowledge: true
-    playbook: true
-    skills_config: true
-
-  templates:
-    - id: "writing"
-      name: "写稿搭子"
-      icon: "✍️"
-      description: "公众号、视频脚本、文案创作"
-      default_skills: ["summarize", "writing-assistant", "canvas"]
-      memory_focus: "style"
-      ui_template: "content-creation"
-
-    - id: "data"
-      name: "表格搭子"
-      icon: "📊"
-      description: "Excel 处理、数据分析、图表生成"
-      default_skills: ["excel-analyzer", "chart-generator", "nano-pdf"]
-      memory_focus: "format"
-      ui_template: "data-dashboard"
-
-    - id: "research"
-      name: "研究搭子"
-      icon: "📚"
-      description: "论文、文献管理、学术写作"
-      default_skills: ["pdf-reader", "citation-extractor", "academic-writer"]
-      memory_focus: "domain"
-      ui_template: "research-workspace"
-
-    - id: "office"
-      name: "办公搭子"
-      icon: "💼"
-      description: "PPT、邮件、会议纪要"
-      default_skills: ["ppt-generator", "email-drafter", "meeting-notes"]
-      memory_focus: "workflow"
-      ui_template: "office-assistant"
-
-    - id: "custom"
-      name: "自定义项目"
-      icon: "⚙️"
-      description: "包含所有可用技能，按需裁剪"
-      default_skills: ["__all__"]   # 特殊标记：创建时自动展开为当前全部可用 Skills
-      memory_focus: "general"
-      ui_template: "default"
-
-# ==================== MCP 工具 ====================
-
-mcp_tools:
-  - name: pageindex
-    server_url: "https://chat.pageindex.ai/mcp"
-    server_name: "pageindex"
-    auth_type: "bearer"
-    auth_env: "PAGEINDEX_API_KEY"
-    capability: "document_analysis"
-    description: "长文档深度分析与问答（PDF 年报/合同/论文/手册），基于树索引的推理检索"
-    enabled: true
-
-# ==================== Skill 分组（意图驱动按需注入） ====================
-#
-# IntentAnalyzer 的 LLM 会从用户 query 语义判断需要哪些分组（可多选，重召回）。
-# 只有被选中分组的 Skills 才会注入到系统提示词中，大幅节省 token。
-# _always 组始终注入，不受 LLM 选择影响。
-#
-
-skill_groups:
-  writing: [writing-assistant, writing-analyzer, style-learner, content-reformatter]
-  data_analysis: [excel-analyzer, excel-fixer]
-  file_operation: [file-manager, word-processor]
-  translation: [translator]
-  research: [literature-reviewer, paper-search, arxiv-search]
-  app_automation: [applescript, macos-open, macos-screenshot, app-scanner, macos-notification]
-  _always: [local-search, app-recommender]
-
-# ==================== Skills 配置 ====================
-#
-# 按 OS × 复杂度 分类
-#
-# 复杂度：
-#   builtin     - 装好就能用
-#   lightweight - 首次用时自动装，或点一下授权
-#   external    - 需要你装一个软件
-#   cloud_api   - 需要填个 API Key
-#
-
-skills:
-  loading_mode: "lazy"
-  os_aware: true
-
-  # ==================== 全平台通用 ====================
-
-  common:
-    builtin:
-      # --- 框架核心（系统级，强制启用，不对用户暴露） ---
-      - { name: plan-todo,           backend_type: tool, tool_name: plan_todo,  system: true, description: "任务规划与进度追踪" }
-      - { name: hitl,                backend_type: tool, tool_name: hitl,       system: true, description: "涉及敏感操作时请求用户确认" }
-      - { name: api-calling,         backend_type: tool, tool_name: api_calling, system: true, description: "通用 HTTP API 调用能力" }
-
-      # --- 基础设施（系统级，强制启用，不对用户暴露） ---
-      - { name: file-manager,        backend_type: local, skill_source: instance, system: true, description: "本地文件管理" }
-      - { name: local-search,        backend_type: local, skill_source: instance, system: true, description: "本地文件搜索（Spotlight + FTS5）" }
-      - { name: app-recommender,     backend_type: local, skill_source: instance, system: true, description: "根据任务推荐最合适的应用" }
-
-      # --- 写作 ---
-      - { name: writing-assistant,   backend_type: local, skill_source: instance, description: "写作辅助：润色、改写、扩写" }
-      - { name: translator,          backend_type: local, skill_source: instance, description: "多语言翻译" }
-      - { name: writing-analyzer,    backend_type: local, skill_source: instance, description: "写作风格分析" }
-      - { name: style-learner,       backend_type: local, skill_source: instance, description: "学习并记忆用户写作风格" }
-      - { name: content-reformatter, backend_type: local, skill_source: instance, description: "多平台格式转换（公众号/小红书/知乎等）" }
-
-      # --- 研究 ---
-      - { name: literature-reviewer, backend_type: local, skill_source: instance, description: "多文献对比分析与综述" }
-      - { name: paper-search,        backend_type: local, skill_source: instance, description: "学术论文搜索（Semantic Scholar）" }
-      - { name: arxiv-search,        backend_type: local, skill_source: instance, description: "arXiv 预印本论文搜索" }
-
-      # --- 生活 ---
-      - { name: nutrition-analyzer,  backend_type: local, skill_source: instance, description: "食物营养分析与饮食建议" }
-      - { name: medication-tracker,  backend_type: local, skill_source: instance, description: "用药管理与服药提醒" }
-      - { name: trend-spotter,       backend_type: local, skill_source: instance, description: "行业趋势与热点发现" }
-      - { name: competitive-intel,   backend_type: local, skill_source: instance, description: "竞品动态监控与分析" }
-      - { name: readwise-rival,      backend_type: local, skill_source: instance, description: "阅读高亮收集、复习与知识卡片" }
-
-      # --- 天气 ---
-      - { name: weather,             backend_type: local, skill_source: library,  description: "天气查询" }
-
-    lightweight:
-      - { name: nano-pdf,            backend_type: local, skill_source: library,  python_packages: ["pypdf"], auto_install: true, description: "PDF 文件读取与提取" }
-      - { name: excel-analyzer,      backend_type: local, skill_source: instance, python_packages: ["pandas", "openpyxl"], auto_install: true, description: "Excel / CSV 分析" }
-      - { name: excel-fixer,         backend_type: local, skill_source: instance, python_packages: ["pandas", "openpyxl"], auto_install: true, description: "Excel 格式自动修复" }
-      - { name: word-processor,      backend_type: local, skill_source: instance, python_packages: ["python-docx"], auto_install: true, description: "Word 文档创建与编辑" }
-
-    external:
-      - { name: summarize,           backend_type: local, skill_source: library, bins: ["summarize"], description: "URL / 视频 / 文档一键摘要" }
-      - { name: obsidian,            backend_type: local, skill_source: library, requires_app: "Obsidian", description: "Obsidian 笔记管理" }
-      - { name: openai-whisper,      backend_type: local, skill_source: library, bins: ["whisper"], description: "本地语音转文字（离线）" }
-      - { name: ppt-generator,       backend_type: local, skill_source: library, description: "PPT 演示文稿生成" }
-      - { name: gog,                 backend_type: local, skill_source: library, bins: ["gog"], description: "Google Docs / Sheets / Calendar" }
-      - { name: blogwatcher,         backend_type: local, skill_source: library, bins: ["blogwatcher"], description: "RSS 博客监控与摘要" }
-      - { name: 1password,           backend_type: local, skill_source: library, bins: ["op"], description: "1Password 密码管理" }
-      - { name: himalaya,            backend_type: local, skill_source: library, bins: ["himalaya"], description: "本地邮件收发（IMAP）" }
-      - { name: sherpa-onnx-tts,     backend_type: local, skill_source: library, bins: ["sherpa-onnx"], description: "本地语音合成（离线 TTS）" }
-      - { name: gifgrep,             backend_type: local, skill_source: library, bins: ["gifgrep"], description: "GIF 动图搜索" }
-      - { name: github,              backend_type: local, skill_source: library, bins: ["gh"], description: "GitHub 仓库与 Issue 管理" }
-
-    cloud_api:
-      # --- 研究/分析 ---
-      - { name: deep-doc-reader,     backend_type: mcp,   skill_source: instance, description: "长文档深度阅读与问答（PageIndex）" }
-
-      - { name: notion,              backend_type: api,   skill_source: library, description: "Notion 笔记与数据库" }
-      - { name: trello,              backend_type: local, skill_source: library, description: "Trello 看板任务管理" }
-      - { name: nano-banana-pro,     backend_type: local, skill_source: library, description: "Gemini 图像生成" }
-      - { name: openai-image-gen,    backend_type: local, skill_source: library, description: "DALL·E 图像生成" }
-      - { name: openai-whisper-api,  backend_type: local, skill_source: library, description: "云端语音转文字" }
-      - { name: goplaces,            backend_type: local, skill_source: library, description: "周边地点搜索（Google Places）" }
-      - { name: discord,             backend_type: local, skill_source: library, description: "Discord 消息与频道管理" }
-
-  # ==================== macOS 专属 ====================
-
-  darwin:
-    builtin:
-      # OS 基础设施（系统级，强制启用）
-      - { name: macos-screenshot,    backend_type: local, skill_source: instance, system: true, bins: ["screencapture"], description: "macOS 截图" }
-      - { name: macos-clipboard,     backend_type: local, skill_source: instance, system: true, bins: ["pbcopy", "pbpaste"], description: "macOS 剪贴板" }
-      - { name: macos-notification,  backend_type: local, skill_source: instance, system: true, bins: ["osascript"], description: "macOS 系统通知" }
-      - { name: macos-open,          backend_type: local, skill_source: instance, system: true, bins: ["open"], description: "打开文件、URL、应用" }
-      - { name: macos-finder,        backend_type: local, skill_source: instance, system: true, description: "Finder 操作：标签、预览、文件信息" }
-      - { name: applescript,         backend_type: local, skill_source: instance, system: true, bins: ["osascript"], description: "AppleScript / JXA 脚本执行" }
-      - { name: app-scanner,         backend_type: local, skill_source: instance, system: true, description: "发现已安装应用" }
-
-    lightweight:
-      - { name: apple-notes,         backend_type: local, skill_source: library, system_auth: "accessibility", description: "Apple 备忘录" }
-      - { name: apple-reminders,     backend_type: local, skill_source: library, system_auth: "reminders", description: "Apple 提醒事项" }
-      - { name: apple-calendar,      backend_type: local, skill_source: instance, system_auth: "calendar", description: "Apple 日历" }
-
-    external:
-      - { name: peekaboo,            backend_type: local, skill_source: library, bins: ["peekaboo"], description: "macOS UI 自动化" }
-      - { name: bear-notes,          backend_type: local, skill_source: library, requires_app: "Bear", description: "Bear 笔记" }
-      - { name: things-mac,          backend_type: local, skill_source: library, requires_app: "Things", description: "Things 待办管理" }
-      - { name: spotify-player,      backend_type: local, skill_source: library, description: "Spotify 音乐播放控制" }
-      - { name: openhue,             backend_type: local, skill_source: library, bins: ["openhue"], description: "Philips Hue 智能灯控" }
-
-  # ==================== Windows 专属 ====================
-
-  win32:
-    builtin:
-      # OS 基础设施（系统级，强制启用）
-      - { name: windows-screenshot,   backend_type: local, skill_source: instance, system: true, description: "Windows 截图" }
-      - { name: windows-clipboard,    backend_type: local, skill_source: instance, system: true, description: "Windows 剪贴板" }
-      - { name: windows-notification, backend_type: local, skill_source: instance, system: true, description: "Windows 系统通知" }
-      - { name: powershell-basic,     backend_type: local, skill_source: instance, system: true, description: "PowerShell 系统操作" }
-
-    lightweight:
-      - { name: outlook-cli,          backend_type: local, skill_source: instance, requires_app: "Microsoft Outlook", description: "Outlook 邮件与日历" }
-      - { name: onenote,              backend_type: local, skill_source: instance, requires_app: "OneNote", description: "OneNote 笔记" }
-
-  # ==================== Linux 专属 ====================
-
-  linux:
-    builtin:
-      # OS 基础设施（系统级，强制启用）
-      - { name: linux-screenshot,     backend_type: local, skill_source: instance, system: true, description: "Linux 截图" }
-      - { name: linux-clipboard,      backend_type: local, skill_source: instance, system: true, description: "Linux 剪贴板" }
-
-    lightweight:
-      - { name: linux-notification,   backend_type: local, skill_source: instance, bins: ["notify-send"], description: "Linux 桌面通知" }
-
-    external:
-      - { name: xdotool,              backend_type: local, skill_source: instance, bins: ["xdotool"], description: "Linux UI 自动化" }
