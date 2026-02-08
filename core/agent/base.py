@@ -311,7 +311,10 @@ class Agent:
         Yields:
             SSE 事件流
         """
-        from core.agent.context.prompt_builder import build_system_blocks_with_injector
+        from core.agent.context.prompt_builder import (
+            build_system_blocks_with_injector,
+            build_user_context_with_injector,
+        )
         from core.agent.execution import ExecutionContext
         from core.context.runtime import create_runtime_context
 
@@ -343,7 +346,7 @@ class Agent:
         # 工具选择
         tools_for_llm, selection = await self._select_tools(intent, ctx)
 
-        # System Prompt 组装
+        # Phase 1: System Prompt 组装
         user_query = self._extract_user_query(messages)
         system_prompt = await build_system_blocks_with_injector(
             intent=intent,
@@ -353,6 +356,18 @@ class Agent:
             user_query=user_query,
             available_tools=tools_for_llm,
         )
+
+        # Phase 2: User Context 注入（用户记忆、Playbook 策略提示、知识库上下文）
+        user_context = await build_user_context_with_injector(
+            intent=intent,
+            user_id=user_id,
+            user_query=user_query,
+            prompt_cache=self._prompt_cache,
+            available_tools=tools_for_llm,
+            history_messages=messages,
+        )
+        if user_context:
+            messages = [{"role": "user", "content": user_context}] + messages
 
         # 策略路由：根据 LLM 意图识别的 complexity 选择执行器
         # complexity 由 IntentAnalyzer（LLM）语义判断，此处仅做确定性映射

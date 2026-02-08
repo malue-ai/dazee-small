@@ -18,12 +18,14 @@ Agent 上下文与 Prompt 构建模块
 from core.agent.context.prompt_builder import (
     build_messages_with_injector,
     build_system_blocks_with_injector,
+    build_user_context_with_injector,
     fetch_user_profile,
     get_task_complexity,
 )
 
 __all__ = [
     "build_system_blocks_with_injector",
+    "build_user_context_with_injector",
     "build_messages_with_injector",
     "get_task_complexity",
     "fetch_user_profile",
