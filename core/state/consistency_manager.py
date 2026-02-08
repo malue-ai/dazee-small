@@ -63,7 +63,7 @@ def _capture_clipboard() -> str:
 class SnapshotConfig:
     """快照配置"""
 
-    storage_path: str = "~/.xiaodazi/snapshots"
+    storage_path: str = ""  # Empty = auto-resolve from AGENT_INSTANCE
     retention_hours: int = 24
     max_size_mb: int = 500
     capture_cwd: bool = True
@@ -164,10 +164,14 @@ class StateConsistencyManager:
         self._task_logs: Dict[str, OperationLog] = {}
         self._listeners: List[Callable[..., None]] = []
 
-        # 持久化存储路径
-        self._storage_path = Path(
-            self._config.snapshot.storage_path
-        ).expanduser()
+        raw_path = self._config.snapshot.storage_path
+        if raw_path:
+            self._storage_path = Path(raw_path).expanduser()
+        else:
+            import os
+            from utils.app_paths import get_instance_snapshots_dir
+            _inst = os.environ["AGENT_INSTANCE"]
+            self._storage_path = get_instance_snapshots_dir(_inst)
         if self._config.enabled:
             self._storage_path.mkdir(parents=True, exist_ok=True)
             # 启动时清理过期快照

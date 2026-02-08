@@ -17,7 +17,6 @@ from typing import Any, Dict, List, Optional
 from mem0.vector_stores.base import VectorStoreBase
 
 from logger import get_logger
-from utils.app_paths import get_local_store_dir
 
 logger = get_logger("memory.mem0.sqlite_vec_store")
 
@@ -53,15 +52,19 @@ class SqliteVecVectorStore(VectorStoreBase):
         self.collection_name = collection_name
         self.embedding_model_dims = embedding_model_dims
 
-        # 数据库路径
-        if db_path:
-            self._db_path = db_path
-        else:
-            store_dir = Path(get_local_store_dir())
-            store_dir.mkdir(parents=True, exist_ok=True)
-            self._db_path = str(store_dir / "mem0_vectors.db")
+        if not db_path:
+            raise ValueError(
+                "db_path is required. Use Mem0Config.db_path for "
+                "instance-scoped path."
+            )
+        self._db_path = db_path
 
-        # 初始化连接并加载 sqlite-vec 扩展
+        # Single connection with check_same_thread=False.
+        # Mem0 internally uses thread pools for add/search — the default
+        # check_same_thread=True would raise "SQLite objects created in a
+        # thread can only be used in that same thread".
+        # WAL mode + single-writer semantics (Mem0 serializes operations)
+        # makes this safe.
         self._conn = self._create_connection()
         self._ensure_table()
 
@@ -71,8 +74,8 @@ class SqliteVecVectorStore(VectorStoreBase):
         )
 
     def _create_connection(self) -> sqlite3.Connection:
-        """创建 SQLite 连接并加载 sqlite-vec 扩展"""
-        conn = sqlite3.connect(self._db_path)
+        """Create SQLite connection with sqlite-vec extension (cross-thread safe)."""
+        conn = sqlite3.connect(self._db_path, check_same_thread=False)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
 
@@ -97,8 +100,7 @@ class SqliteVecVectorStore(VectorStoreBase):
         return conn
 
     def _ensure_table(self) -> None:
-        """确保向量虚拟表和元数据表存在"""
-        # 向量虚拟表（sqlite-vec）
+        """Ensure vector and metadata tables exist."""
         self._conn.execute(
             f"""
             CREATE VIRTUAL TABLE IF NOT EXISTS [{self.collection_name}] USING vec0(
@@ -107,7 +109,6 @@ class SqliteVecVectorStore(VectorStoreBase):
             )
             """
         )
-        # 元数据表（普通表，存储 payload）
         self._conn.execute(
             f"""
             CREATE TABLE IF NOT EXISTS [{self.collection_name}_meta] (
@@ -193,14 +194,15 @@ class SqliteVecVectorStore(VectorStoreBase):
             )
             query_json = json.dumps(query_vector)
 
+            # sqlite-vec v0.1.6+ requires 'k = ?' constraint
+            # instead of SQL LIMIT for vec0 KNN queries.
             cursor = self._conn.execute(
                 f"""
                 SELECT v.id, v.distance, m.payload
                 FROM [{self.collection_name}] v
                 LEFT JOIN [{self.collection_name}_meta] m ON v.id = m.id
-                WHERE v.embedding MATCH ?
+                WHERE v.embedding MATCH ? AND k = ?
                 ORDER BY v.distance
-                LIMIT ?
                 """,
                 (query_json, limit),
             )
@@ -286,11 +288,30 @@ class SqliteVecVectorStore(VectorStoreBase):
 
     def list(
         self, filters: Optional[Dict] = None, limit: Optional[int] = None
-    ) -> List[OutputData]:
-        """列出所有记忆"""
+    ) -> list:
+        """
+        List all memories.
+
+        Returns:
+            [results_list, total_count] — Mem0 expects list()[0] to
+            be the results list (see Memory.delete_all).
+        """
         try:
-            sql = f"SELECT id, payload FROM [{self.collection_name}_meta]"
+            # Filter by user_id if specified in filters
+            where_clauses = []
             params: list = []
+
+            if filters:
+                # Mem0 passes {"user_id": "xxx"} — filter via payload JSON
+                for key, value in filters.items():
+                    where_clauses.append(
+                        f"json_extract(payload, '$.{key}') = ?"
+                    )
+                    params.append(value)
+
+            sql = f"SELECT id, payload FROM [{self.collection_name}_meta]"
+            if where_clauses:
+                sql += " WHERE " + " AND ".join(where_clauses)
             if limit:
                 sql += " LIMIT ?"
                 params.append(limit)
@@ -306,11 +327,12 @@ class SqliteVecVectorStore(VectorStoreBase):
                 results.append(OutputData(id=vec_id, score=1.0, payload=payload))
 
             logger.debug(f"[SqliteVec] 列出记忆: {len(results)} 条")
-            return results
+            # Mem0 expects [results, count] tuple-like list
+            return [results, len(results)]
 
         except Exception as e:
             logger.error(f"[SqliteVec] 列出记忆失败: {e}")
-            return []
+            return [[], 0]
 
     # ==================== 集合管理接口 ====================
 

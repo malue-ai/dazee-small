@@ -87,22 +87,22 @@ class UserMemoryInjector(BaseInjector):
         """
         从 Mem0 获取用户画像
 
-        使用 core.memory.system.profile 模块
+        Uses core.agent.context.prompt_builder module.
         """
         if not context.user_id:
             return None
 
         try:
-            from core.memory.system.profile import fetch_user_profile
+            from core.agent.context.prompt_builder import fetch_user_profile
 
-            profile = await fetch_user_profile(
+            profile = fetch_user_profile(
                 user_id=context.user_id, user_query=context.user_query or ""
             )
 
             return profile
 
         except ImportError:
-            logger.debug("Mem0 模块不可用，跳过用户画像获取")
+            logger.debug("prompt_builder 模块不可用，跳过用户画像获取")
             return None
         except Exception as e:
             logger.warning(f"获取用户画像失败: {e}")

@@ -18,6 +18,7 @@ Skill 管理模块
 """
 
 from core.skill.dynamic_loader import DynamicSkillLoader, SkillDependency, check_and_report_skills
+from core.skill.group_registry import SkillGroupRegistry
 from core.skill.loader import SkillsLoader, create_skills_loader
 from core.skill.models import BackendType, DependencyLevel, SkillEntry, SkillStatus
 from core.skill.os_compatibility import (
@@ -29,6 +30,7 @@ __all__ = [
     # Skills-First 核心
     "SkillsLoader",
     "create_skills_loader",
+    "SkillGroupRegistry",
     "SkillEntry",
     "BackendType",
     "DependencyLevel",

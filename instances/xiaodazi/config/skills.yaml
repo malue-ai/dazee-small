@@ -30,13 +30,57 @@
 #
 
 skill_groups:
-  writing: [writing-assistant, writing-analyzer, style-learner, content-reformatter]
-  data_analysis: [excel-analyzer, excel-fixer]
-  file_operation: [file-manager, word-processor]
-  translation: [translator]
-  research: [literature-reviewer, paper-search, arxiv-search]
-  app_automation: [applescript, macos-open, macos-screenshot, app-scanner, macos-notification]
-  _always: [local-search, app-recommender]
+  writing:
+    description: "写作、润色、改写、扩写、去 AI 味、文章生成、风格学习、多平台格式转换、PDF 报告、内容摘要"
+    skills: [writing-assistant, writing-analyzer, style-learner, content-reformatter, humanizer, elegant-reports, ppt-generator, summarize]
+  data_analysis:
+    description: "Excel/CSV 数据分析、表格处理、数据清洗、格式修复、发票整理"
+    skills: [excel-analyzer, excel-fixer, invoice-organizer]
+  file_operation:
+    description: "本地文件管理、文件整理/移动/重命名、Word 文档创建与编辑、PDF 读取"
+    skills: [file-manager, word-processor, nano-pdf]
+  translation:
+    description: "多语言翻译、文档翻译"
+    skills: [translator]
+  research:
+    description: "学术论文搜索、文献综述、arXiv 搜索、长文档分析、竞品监控、趋势发现、阅读管理、博客/RSS 监控"
+    skills: [literature-reviewer, paper-search, arxiv-search, deep-doc-reader, competitive-intel, trend-spotter, readwise-rival, blogwatcher]
+  meeting:
+    description: "会议记录分析、提取行动项、参与度评估"
+    skills: [meeting-insights-analyzer, meeting-notes-to-action-items]
+  career:
+    description: "求职辅助、简历优化、JD 分析、模拟面试"
+    skills: [job-application-optimizer]
+  learning:
+    description: "个人导师、学习计划、测验出题、间隔复习"
+    skills: [skill-tutor, quiz-maker]
+  creative:
+    description: "头脑风暴、创意发散、方案构思、GIF 搜索"
+    skills: [brainstorming, gifgrep]
+  diagram:
+    description: "流程图、架构图、思维导图、手绘图表"
+    skills: [draw-io, excalidraw]
+  image_gen:
+    description: "AI 图像生成（DALL·E、Gemini）"
+    skills: [openai-image-gen, nano-banana-pro]
+  media:
+    description: "语音转文字、文字转语音、音乐播放"
+    skills: [openai-whisper, openai-whisper-api, sherpa-onnx-tts, spotify-player]
+  health:
+    description: "营养分析、饮食建议、用药管理、健康追踪"
+    skills: [nutrition-analyzer, medication-tracker]
+  productivity:
+    description: "笔记管理（Notion/Obsidian/Bear/OneNote/Apple备忘录）、待办事项（Trello/Things/提醒事项）、日历、邮件、Google 全家桶、密码管理、Discord"
+    skills: [notion, obsidian, bear-notes, onenote, apple-notes, trello, things-mac, apple-reminders, apple-calendar, outlook-cli, himalaya, gog, 1password, discord]
+  app_automation:
+    description: "桌面应用操作（打开/切换/控制应用）、UI 自动化、截图、系统通知、智能家居、周边地点搜索"
+    skills: [applescript, macos-open, macos-screenshot, app-scanner, macos-notification, peekaboo, xdotool, linux-notification, windows-screenshot, windows-clipboard, windows-notification, powershell-basic, openhue, goplaces]
+  code:
+    description: "GitHub 仓库管理、Issue 追踪、代码相关"
+    skills: [github]
+  _always:
+    description: "始终注入（基础能力）"
+    skills: [local-search, app-recommender, weather]
 
 # ==================== Skills 清单 ====================
 
@@ -80,11 +124,30 @@ skills:
       # --- 天气 ---
       - { name: weather,             backend_type: local, skill_source: library,  description: "天气查询" }
 
+      # --- 写作增强 ---
+      - { name: humanizer,            backend_type: local, skill_source: instance, description: "去除 AI 写作痕迹，让文本更自然" }
+
+      # --- 思维与效率 ---
+      - { name: brainstorming,        backend_type: local, skill_source: instance, description: "结构化头脑风暴，帮用户拓展思路" }
+
+      # --- 会议 ---
+      - { name: meeting-insights-analyzer, backend_type: local, skill_source: instance, description: "会议记录深度分析：参与度、决策、行动项" }
+      - { name: meeting-notes-to-action-items, backend_type: local, skill_source: instance, description: "会议纪要转结构化行动项清单" }
+
+      # --- 求职 ---
+      - { name: job-application-optimizer, backend_type: local, skill_source: instance, description: "求职全流程辅助：JD 分析、简历优化、模拟面试" }
+
+      # --- 学习 ---
+      - { name: skill-tutor,          backend_type: local, skill_source: instance, description: "个人学习导师，跟踪进度，间隔复习" }
+      - { name: quiz-maker,           backend_type: local, skill_source: instance, description: "根据材料生成多题型测验" }
+
     lightweight:
       - { name: nano-pdf,            backend_type: local, skill_source: library,  python_packages: ["pypdf"], auto_install: true, description: "PDF 文件读取与提取" }
       - { name: excel-analyzer,      backend_type: local, skill_source: instance, python_packages: ["pandas", "openpyxl"], auto_install: true, description: "Excel / CSV 分析" }
       - { name: excel-fixer,         backend_type: local, skill_source: instance, python_packages: ["pandas", "openpyxl"], auto_install: true, description: "Excel 格式自动修复" }
       - { name: word-processor,      backend_type: local, skill_source: instance, python_packages: ["python-docx"], auto_install: true, description: "Word 文档创建与编辑" }
+      - { name: invoice-organizer,   backend_type: local, skill_source: instance, python_packages: ["pypdf", "Pillow"], auto_install: true, description: "发票和收据自动整理归档" }
+      - { name: elegant-reports,     backend_type: local, skill_source: instance, python_packages: ["fpdf2", "matplotlib"], description: "生成精美 Nordic 风格 PDF 报告" }
 
     external:
       - { name: summarize,           backend_type: local, skill_source: library, bins: ["summarize"], description: "URL / 视频 / 文档一键摘要" }
@@ -98,6 +161,8 @@ skills:
       - { name: sherpa-onnx-tts,     backend_type: local, skill_source: library, bins: ["sherpa-onnx"], description: "本地语音合成（离线 TTS）" }
       - { name: gifgrep,             backend_type: local, skill_source: library, bins: ["gifgrep"], description: "GIF 动图搜索" }
       - { name: github,              backend_type: local, skill_source: library, bins: ["gh"], description: "GitHub 仓库与 Issue 管理" }
+      - { name: draw-io,              backend_type: local, skill_source: instance, requires_app: "draw.io", description: "生成专业流程图、架构图（draw.io 格式）" }
+      - { name: excalidraw,           backend_type: local, skill_source: instance, description: "生成手绘风格图表（Excalidraw 格式）" }
 
     cloud_api:
       # --- MCP Skills（连接细节内聚在 Skill 条目内，用户只看到 Skill 名称） ---

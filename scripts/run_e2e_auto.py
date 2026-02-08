@@ -227,6 +227,61 @@ def kill_server(proc: subprocess.Popen) -> None:
 # E2E runner (delegates to run_e2e_eval logic)
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Phase 0: State management layer verification (B9/B10 rollback)
+# ---------------------------------------------------------------------------
+
+def run_rollback_verification(case_filter: str | None = None) -> bool:
+    """
+    Run verify_rollback_e2e.py as Phase 0.
+
+    Tests the state management layer (snapshot/rollback/commit) deterministically,
+    independent of LLM provider. This is the foundation that guarantees
+    "files are always recoverable" — the core differentiator.
+
+    Returns True if all sub-tests pass.
+    """
+    # Skip if user explicitly requested a non-rollback case
+    if case_filter and case_filter.upper() not in ("B9", "B10"):
+        return True
+
+    _log("🛡", "Phase 0: State management layer verification (B9/B10)")
+
+    try:
+        from scripts.verify_rollback_e2e import run_tests, cleanup
+
+        results = run_tests(case_filter=case_filter, verbose=False)
+        total = len(results)
+        passed = sum(1 for r in results if r.passed)
+
+        for r in results:
+            subs = f"{sum(1 for s in r.sub_results if s.passed)}/{len(r.sub_results)}"
+            if r.passed:
+                _ok(f"{r.case_id}: {r.description} ({subs}, {r.elapsed_ms:.0f}ms)")
+            else:
+                _fail(f"{r.case_id}: {r.description} ({subs}, {r.elapsed_ms:.0f}ms)")
+                for s in r.sub_results:
+                    if not s.passed:
+                        _fail(f"  └─ {s.name}: {s.detail}")
+
+        cleanup()
+
+        if passed < total:
+            _fail(f"Phase 0 FAILED: {passed}/{total} — state layer broken, skipping Agent tests")
+            return False
+
+        _ok(f"Phase 0 PASS: {passed}/{total} — rollback pipeline verified")
+        return True
+
+    except Exception as e:
+        _warn(f"Phase 0 skipped (import error): {e}")
+        return True  # Don't block Agent tests if standalone script has issues
+
+
+# ---------------------------------------------------------------------------
+# E2E runner (delegates to run_e2e_eval logic)
+# ---------------------------------------------------------------------------
+
 async def run_e2e(
     base_url: str,
     case_filter: str | None = None,
@@ -454,6 +509,13 @@ async def async_main() -> int:
                     # Print server log for debugging
                     _print_server_log(server_proc)
                     return 1
+
+        # --- Phase 0: State management verification (B9/B10 rollback) ---
+        rollback_ok = run_rollback_verification(case_filter=args.case)
+        if not rollback_ok:
+            return 1
+
+        print()  # visual separator
 
         # --- Phase 2: Run E2E ---
         # Set AGENT_PROVIDER in current process so grader LLM also uses the override

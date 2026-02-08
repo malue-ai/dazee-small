@@ -100,18 +100,16 @@ agent:
   # 注意：enable_thinking=true 时，temperature 由框架自动设置
   #       （Claude 强制 1.0），此处设置无效。
 
-# ==================== 实例存储（运行时数据隔离） ====================
+# ==================== 存储（自动管理，无需配置） ====================
 #
-# 每个实例有独立的运行时数据目录，天然隔离。
-# base_path 默认从 instance.name 派生，通常不需要修改。
+# 运行时数据自动按实例名隔离，你不需要配置任何路径：
+#   data/instances/{instance.name}/db/        → 数据库（消息/会话/知识索引）
+#   data/instances/{instance.name}/memory/    → 记忆文件（MEMORY.md + 日志）
+#   data/instances/{instance.name}/store/     → 向量存储 + FTS5 索引
+#   data/instances/{instance.name}/storage/   → 上传文件
+#   data/instances/{instance.name}/playbooks/ → Playbook 策略
+#   data/instances/{instance.name}/snapshots/ → 状态快照
 #
-storage:
-  base_path: "~/.xiaodazi/xiaodazi"
-  # 以下子目录自动创建：
-  #   memory/     → MEMORY.md + FTS5 索引
-  #   playbooks/  → Playbook 策略
-  #   data/       → SQLite 数据库（对话/向量）
-  #   snapshots/  → 状态快照
 
 # ==================== 知识库（本地文件索引） ====================
 #
@@ -176,4 +174,15 @@ playbook:
     semantic_enabled: true          # Mem0 语义匹配（零额外 LLM 调用）
     min_match_score: 0.3            # 匹配最低分
     top_k: 3                        # 最多返回策略数
+
+# ==================== 状态一致性（文件修改回滚安全） ====================
+
+state_consistency:
+  enabled: true
+  snapshot:
+    storage_path: "~/.xiaodazi/snapshots"
+    retention_hours: 24
+  rollback:
+    auto_rollback_on_consecutive_failures: 3
+    auto_rollback_on_critical_error: true
 

@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 import aiofiles
 
 from logger import get_logger
-from utils.app_paths import get_playbooks_dir
+from utils.app_paths import get_instance_playbooks_dir
 
 logger = get_logger("playbook_storage")
 
@@ -70,8 +70,13 @@ class FileStorage(PlaybookStorageBackend):
       - {id}.json
     """
 
-    def __init__(self, storage_path: str = ""):
-        self.storage_path = Path(storage_path) if storage_path else get_playbooks_dir()
+    def __init__(self, storage_path: str = "", instance_name: str = ""):
+        if storage_path:
+            self.storage_path = Path(storage_path)
+        else:
+            import os
+            _inst = instance_name or os.environ["AGENT_INSTANCE"]
+            self.storage_path = get_instance_playbooks_dir(_inst)
         self.storage_path.mkdir(parents=True, exist_ok=True)
         logger.info(f"📁 FileStorage 初始化: path={storage_path}")
 

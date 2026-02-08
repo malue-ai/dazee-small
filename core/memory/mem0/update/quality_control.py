@@ -250,14 +250,24 @@ class QualityController:
 
     def should_reject(self, content: str) -> Tuple[bool, str]:
         """
-        判断是否应该拒绝记忆（敏感信息过多）
+        Determine if a memory should be rejected.
+
+        Uses format validation (length check) as a fast pre-filter,
+        then delegates to LLM update stage for semantic judgment.
 
         Args:
-            content: 内容
+            content: Memory content
 
         Returns:
-            (是否拒绝, 拒绝原因)
+            (should_reject, reason)
         """
+        # Fast pre-filter: format validation (allowed by LLM-First rules)
+        if not content or not content.strip():
+            return True, "内容为空"
+        if len(content.strip()) < 5:
+            return True, f"内容过短（{len(content.strip())} 字符，最少 5）"
+
+        # LLM semantic judgment via update stage
         decision = self._run_update_stage(content, [])
         actions = self.extract_update_actions(decision)
         if not actions["add"] and not actions["update"] and not actions["delete"]:
@@ -270,27 +280,31 @@ class QualityController:
         self, new_memory: str, existing_memories: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """
-        运行更新阶段（同步封装）
+        Run update stage (sync wrapper).
 
-        Args:
-            new_memory: 新记忆内容
-            existing_memories: 已有记忆列表
+        In async context (FastAPI): returns conservative ADD fallback
+        since LLM call requires await. The async callers should use
+        analyze_update() directly.
 
-        Returns:
-            更新决策结果
+        In sync context: runs the async method via asyncio.run().
         """
         try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # In async context — cannot block, return conservative default.
+                # Callers in async context should use analyze_update() directly.
+                return {"memory": [{"id": "0", "text": new_memory, "event": "ADD"}]}
+            return loop.run_until_complete(
+                self.analyze_update(new_memory, existing_memories)
+            )
+        except RuntimeError:
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    logger.warning("[QualityController] 事件循环运行中，更新阶段跳过")
-                    return {"memory": [{"id": "0", "text": new_memory, "event": "ADD"}]}
-                return loop.run_until_complete(self.analyze_update(new_memory, existing_memories))
-            except RuntimeError:
-                return asyncio.run(self.analyze_update(new_memory, existing_memories))
-        except Exception:
-            logger.error("[QualityController] 更新阶段执行失败", exc_info=True)
-            return {"memory": [{"id": "0", "text": new_memory, "event": "ADD"}]}
+                return asyncio.run(
+                    self.analyze_update(new_memory, existing_memories)
+                )
+            except Exception:
+                logger.error("[QualityController] 更新阶段执行失败", exc_info=True)
+                return {"memory": [{"id": "0", "text": new_memory, "event": "ADD"}]}
 
     async def analyze_update(
         self, new_memory: str, existing_memories: List[Dict[str, Any]]

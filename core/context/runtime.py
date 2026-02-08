@@ -498,6 +498,7 @@ class RuntimeContext:
 
     # === 会话标识 ===
     session_id: str = ""
+    instance_id: str = ""  # Instance name for storage isolation
 
     # === 消息管理 ===
     messages: List[Any] = field(default_factory=list)

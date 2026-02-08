@@ -7,7 +7,7 @@ Embedding 提供商抽象层
 - OpenAI 云端: text-embedding-3-small，需要 API Key 和网络
 
 模型存储位置：
-- GGUF 模型: ~/.xiaodazi/models/  （首次使用自动下载）
+- GGUF 模型: data/shared/models/ （首次使用自动下载，多实例共享）
 - sentence-transformers: ~/.cache/huggingface/hub/
 
 Auto 模式优先级：GGUF 本地 → sentence-transformers → OpenAI 云端
@@ -31,8 +31,10 @@ logger = get_logger("knowledge.embeddings")
 
 # ==================== 模型存储目录 ====================
 
-# GGUF 模型存储在用户目录下，路径清晰可见
-DEFAULT_MODELS_DIR = Path.home() / ".xiaodazi" / "models"
+# GGUF models stored in shared directory (reused across instances)
+from utils.app_paths import get_shared_models_dir
+
+DEFAULT_MODELS_DIR = get_shared_models_dir()
 
 # 默认 GGUF 模型（BGE-M3 Q4 量化，424MB，中英文双语）
 DEFAULT_GGUF_REPO = "lm-kit/bge-m3-gguf"
@@ -85,7 +87,7 @@ def get_models_dir() -> Path:
     """
     获取本地模型存储目录
 
-    默认 ~/.xiaodazi/models/，首次调用自动创建。
+    默认 data/shared/models/，首次调用自动创建。
 
     Returns:
         模型目录路径
@@ -271,7 +273,7 @@ class GGUFEmbeddingProvider(EmbeddingProvider):
     使用 llama-cpp-python 加载 GGUF 量化模型：
     - 默认模型: BGE-M3 Q4（424MB，1024 维，中英文双语）
     - 依赖: pip install llama-cpp-python
-    - 模型存储: ~/.xiaodazi/models/bge-m3-Q4_K_M.gguf
+    - 模型存储: data/shared/models/bge-m3-Q4_K_M.gguf
     - 首次使用自动从 HuggingFace 下载
 
     相比 sentence-transformers 方案的优势：

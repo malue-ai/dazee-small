@@ -118,19 +118,28 @@ class LLMConfig:
         return config
 
 
+def _default_instance_name() -> str:
+    """Get current instance name from environment."""
+    return os.getenv("AGENT_INSTANCE", "default")
+
+
 @dataclass
 class Mem0Config:
     """
     Mem0 完整配置
 
-    整合所有子配置，向量存储固定使用 sqlite-vec（本地）
+    整合所有子配置，向量存储固定使用 sqlite-vec（本地）。
+    所有存储路径按 instance_name 隔离。
 
     使用示例：
-        config = Mem0Config()
+        config = Mem0Config(instance_name="xiaodazi")
         pool = Mem0MemoryPool(config)
     """
 
-    # 向量存储配置
+    # Instance isolation — all DB paths are scoped by this name
+    instance_name: str = field(default_factory=_default_instance_name)
+
+    # 向量存储配置 — collection_name auto-prefixed with instance_name
     collection_name: str = field(
         default_factory=lambda: os.getenv("MEM0_COLLECTION_NAME", "mem0_memories")
     )
@@ -146,12 +155,31 @@ class Mem0Config:
     # 搜索配置
     default_search_limit: int = 10  # 默认搜索返回数量
 
+    def __post_init__(self):
+        """Ensure collection_name is instance-scoped."""
+        prefix = f"{self.instance_name}_"
+        if not self.collection_name.startswith(prefix):
+            self.collection_name = f"{prefix}{self.collection_name}"
+
+    @property
+    def db_path(self) -> str:
+        """Instance-scoped vector DB path."""
+        from utils.app_paths import get_instance_store_dir
+
+        return str(get_instance_store_dir(self.instance_name) / "mem0_vectors.db")
+
+    @property
+    def history_db_name(self) -> str:
+        """Instance-scoped history DB filename."""
+        return f"{self.instance_name}_mem0_history.db"
+
     @classmethod
     def from_env(cls) -> "Mem0Config":
         """
         从环境变量创建配置
 
         环境变量：
+        - AGENT_INSTANCE: 实例名称（隔离关键）
         - MEM0_COLLECTION_NAME: 集合名称
         - OPENAI_API_KEY: OpenAI API 密钥（Embedding 使用）
         - EMBEDDING_MODEL: Embedding 模型名称
@@ -161,7 +189,11 @@ class Mem0Config:
         Returns:
             配置好的 Mem0Config 实例
         """
-        return cls(embedder=EmbedderConfig(), llm=LLMConfig())
+        return cls(
+            instance_name=_default_instance_name(),
+            embedder=EmbedderConfig(),
+            llm=LLMConfig(),
+        )
 
 
 # ==================== 全局配置单例 ====================

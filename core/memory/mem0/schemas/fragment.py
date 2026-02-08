@@ -28,6 +28,7 @@ class MemorySource(str, Enum):
     BEHAVIOR_ANALYSIS = "behavior_analysis"  # 行为分析
     EMOTION_ANALYSIS = "emotion_analysis"  # 情绪分析
     SYSTEM_INFERENCE = "system_inference"  # 系统推断
+    XIAODAZI_REMEMBER = "xiaodazi_remember"  # XiaodaziMemoryManager.remember() 写入
 
 
 class MemoryVisibility(str, Enum):
@@ -106,12 +107,13 @@ class TodoHint:
 
 @dataclass
 class PreferenceHint:
-    """偏好线索（新增）"""
+    """偏好线索"""
 
     response_format: Optional[str] = None  # 响应格式偏好：structured/concise/detailed
     communication_style: Optional[str] = None  # 沟通风格：formal/casual/professional
     preferred_tools: List[str] = field(default_factory=list)  # 偏好的工具/平台
     work_preferences: Dict[str, Any] = field(default_factory=dict)  # 其他工作偏好
+    verbatim_preferences: List[str] = field(default_factory=list)  # 用户原话偏好摘录
     confidence: float = 0.0
 
 

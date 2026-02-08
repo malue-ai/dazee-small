@@ -101,13 +101,17 @@ class Mem0MemoryPool:
 
             from core.memory.mem0.sqlite_vec_store import SqliteVecVectorStore
 
-            logger.info("[Mem0Pool] 使用 sqlite-vec 本地向量存储")
+            logger.info(
+                f"[Mem0Pool] 使用 sqlite-vec 本地向量存储 "
+                f"(instance={self.config.instance_name})"
+            )
 
-            # 1. 创建 sqlite-vec 向量存储
+            # 1. 创建 sqlite-vec 向量存储 — instance-scoped DB path
             collection_name = self.config.collection_name
             vector_store = SqliteVecVectorStore(
                 collection_name=collection_name,
                 embedding_model_dims=self.config.embedding_model_dims,
+                db_path=self.config.db_path,
             )
 
             # 2. 创建 Embedder
@@ -125,8 +129,8 @@ class Mem0MemoryPool:
                 self.config.llm.provider, self.config.llm.to_dict()
             )
 
-            # 4. 创建 SQLite 历史管理器
-            db = SQLiteManager("mem0_history.db")
+            # 4. 创建 SQLite 历史管理器 — instance-scoped
+            db = SQLiteManager(self.config.history_db_name)
 
             # 5. 创建最小配置对象（供 Memory 内部方法访问）
             #

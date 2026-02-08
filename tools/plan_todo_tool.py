@@ -306,11 +306,18 @@ async def load_plan_for_session(conversation_id: str) -> Optional[Dict]:
 
 def format_plan_for_prompt(plan: Dict) -> str:
     """
-    将计划格式化为 prompt 文本
+    将计划格式化为 prompt 文本（渐进式展示 + 安全提示）
+
+    设计参考：
+    - Claude Code Checkpointing: 每步有检查点，可回退到任意步骤
+    - Interactive Speculative Planning (ICLR 2025): 渐进式披露，
+      突出当前步骤和下一步，降低认知负荷
+    - Cocoa Co-Planning: 用户可在执行中调整剩余步骤
 
     注入策略（存得细，注入精简）：
     - 注入：name, overview, todos[].title
     - 不注入：plan（详细文档太长）, todos[].content（详细描述太长）
+    - 渐进式：当前步骤突出显示，已完成步骤压缩为一行摘要
     """
     if not plan:
         return ""
@@ -319,43 +326,78 @@ def format_plan_for_prompt(plan: Dict) -> str:
     total = len(todos)
     completed = sum(1 for t in todos if t.get("status") == "completed")
     in_progress = sum(1 for t in todos if t.get("status") == "in_progress")
+    failed = sum(1 for t in todos if t.get("status") == "failed")
 
-    lines = []
+    # 渐进式展示：分为已完成 / 当前 / 未来三组
+    done_lines = []
+    current_lines = []
+    future_lines = []
+
     for t in todos:
         status = t.get("status", "pending")
-        if status == "completed":
-            icon = "✅"
-            suffix = " - 已完成"
-        elif status == "in_progress":
-            icon = "🔄"
-            suffix = ""
-        elif status == "failed":
-            icon = "❌"
-            suffix = " - 失败"
-        else:
-            icon = "⏳"
-            suffix = ""
-
-        # 使用 title 而不是 content
         title = t.get("title", "")
         result_text = f" ({t['result']})" if t.get("result") else ""
-        lines.append(f"  {icon} {t['id']}. {title}{suffix}{result_text}")
+
+        if status == "completed":
+            done_lines.append(f"  ✅ {t['id']}. {title}{result_text}")
+        elif status == "in_progress":
+            current_lines.append(f"  ▶ {t['id']}. {title}")
+        elif status == "failed":
+            current_lines.append(f"  ❌ {t['id']}. {title} - 失败{result_text}")
+        else:
+            future_lines.append(f"  ⏳ {t['id']}. {title}")
 
     # 构建输出
     output_lines = ["## 当前任务计划", ""]
     output_lines.append(f"**目标**: {plan.get('name')}")
 
-    # 如果有 overview，展示它
     overview = plan.get("overview")
     if overview:
         output_lines.append(f"**概要**: {overview}")
 
-    output_lines.append(f"**进度**: {completed}/{total} 完成, {in_progress} 进行中")
+    output_lines.append(f"**进度**: {completed}/{total} 完成")
     output_lines.append("")
-    output_lines.append("**步骤**:")
-    output_lines.extend(lines)
+
+    # 已完成步骤：压缩显示（渐进式披露，降低认知负荷）
+    if done_lines:
+        if len(done_lines) <= 3:
+            output_lines.extend(done_lines)
+        else:
+            # 超过 3 步：折叠为摘要 + 最后一步
+            output_lines.append(f"  ✅ 步骤 1-{len(done_lines)-1} 已完成")
+            output_lines.append(done_lines[-1])
+
+    # 当前步骤：突出显示
+    if current_lines:
+        output_lines.extend(current_lines)
+
+    # 下一步：只显示最近 2 步（渐进式披露）
+    if future_lines:
+        for line in future_lines[:2]:
+            output_lines.append(line)
+        if len(future_lines) > 2:
+            output_lines.append(f"  ... 还有 {len(future_lines) - 2} 步")
+
     output_lines.append("")
-    output_lines.append("请继续执行未完成的步骤。完成后使用 plan 工具更新状态。")
+
+    # 行动指引
+    if failed > 0:
+        output_lines.append("有步骤失败了，请尝试替代方案或调整计划。")
+    elif current_lines:
+        output_lines.append("请继续执行当前步骤。完成后使用 plan 工具更新状态。")
+    else:
+        output_lines.append("请开始执行下一步。完成后使用 plan 工具更新状态。")
+
+    # 文件安全提示：检测 plan 是否涉及文件操作
+    file_keywords = ["文件", "修改", "替换", "写入", "删除", "重命名", "移动",
+                     "config", "nginx", ".md", ".json", ".yaml", ".txt"]
+    all_titles = " ".join(t.get("title", "") for t in todos)
+    plan_name = plan.get("name", "")
+    plan_overview = plan.get("overview", "")
+    check_text = f"{all_titles} {plan_name} {plan_overview}"
+
+    if any(kw in check_text for kw in file_keywords):
+        output_lines.append("📦 文件安全网已激活：修改前自动备份，出错自动恢复，不需要手动备份。")
 
     return "\n".join(output_lines)
 

@@ -101,7 +101,8 @@ class IntentAnalyzer:
         """
         获取意图识别提示词
 
-        优先从 InstancePromptCache 获取（用户配置优先）
+        优先从 InstancePromptCache 获取（用户配置优先），
+        Fallback 时从 SkillGroupRegistry 动态生成分组描述。
         """
         if self._prompt_cache and self._prompt_cache.is_loaded:
             cached = self._prompt_cache.get_intent_prompt()
@@ -109,7 +110,22 @@ class IntentAnalyzer:
                 logger.debug("使用缓存的意图识别提示词")
                 return cached
 
-        return get_intent_recognition_prompt()
+        # Fallback: 从 registry 生成分组描述
+        groups_desc = ""
+        if (
+            self._prompt_cache
+            and hasattr(self._prompt_cache, "runtime_context")
+            and self._prompt_cache.runtime_context
+        ):
+            registry = self._prompt_cache.runtime_context.get("_skill_group_registry")
+            if registry and hasattr(registry, "build_groups_description"):
+                groups_desc = registry.build_groups_description()
+
+        if not groups_desc:
+            logger.warning("SkillGroupRegistry 不可用，意图识别使用空分组描述")
+            groups_desc = "(无可用分组)"
+
+        return get_intent_recognition_prompt(skill_groups_description=groups_desc)
 
     @staticmethod
     def _filter_for_intent(messages: List[Dict[str, Any]]) -> List[Dict[str, str]]:

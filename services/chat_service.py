@@ -1851,7 +1851,11 @@ class ChatService:
             output_format: 输出事件格式
         """
         start_time = time.time()
-        background_tasks = background_tasks or []
+        background_tasks = list(background_tasks or [])
+
+        # Always append learning tasks (fire-and-forget, never block user)
+        if "memory_flush" not in background_tasks:
+            background_tasks.append("memory_flush")
 
         # 跟踪执行状态，用于 finally 块的资源清理
         execution_status = "completed"

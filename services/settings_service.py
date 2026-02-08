@@ -409,8 +409,9 @@ async def get_embedding_status() -> Dict[str, Any]:
     else:
         recommendation = "安装本地模型即可启用语义搜索（离线可用，424MB）"
 
-    # Model storage location
-    models_dir = str(Path.home() / ".xiaodazi" / "models")
+    # Model storage location (shared across instances)
+    from utils.app_paths import get_shared_models_dir
+    models_dir = str(get_shared_models_dir())
 
     return {
         "semantic_enabled": semantic_enabled,

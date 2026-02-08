@@ -57,16 +57,25 @@ class XiaodaziMemoryManager:
         base_dir: Optional[Path] = None,
         user_id: str = "default",
         mem0_enabled: bool = True,
+        instance_name: Optional[str] = None,
     ):
         """
         Args:
-            base_dir: 记忆根目录，默认 ~/.xiaodazi
+            base_dir: 记忆根目录（优先级最高，直接传入）
             user_id: 用户标识（Mem0 隔离用）
             mem0_enabled: 是否启用 Mem0 智能层
+            instance_name: 实例名称（用于按实例隔离存储路径）
         """
+        import os
+
         from core.memory.markdown_layer import MarkdownMemoryLayer
 
-        self._base_dir = Path(base_dir or Path.home() / ".xiaodazi")
+        if base_dir:
+            self._base_dir = Path(base_dir)
+        else:
+            from utils.app_paths import get_instance_memory_dir
+            _inst = instance_name or os.environ["AGENT_INSTANCE"]
+            self._base_dir = get_instance_memory_dir(_inst)
         self._user_id = user_id
         self._mem0_enabled = mem0_enabled
 
@@ -208,16 +217,17 @@ class XiaodaziMemoryManager:
         if not messages:
             return
 
-        # Layer 3: 从对话提取记忆碎片
-        if self._mem0_enabled:
-            extracted = await self._extract_from_conversation(
-                session_id, messages
+        # Extract memory fragments (uses LLM, independent of Mem0)
+        # mem0_enabled only controls whether Mem0 vector store is written to,
+        # extraction itself always runs (uses FragmentExtractor + LLM Profile)
+        extracted = await self._extract_from_conversation(
+            session_id, messages
+        )
+        for memory in extracted:
+            await self.remember(
+                content=memory.get("content", ""),
+                category=memory.get("category", "general"),
             )
-            for memory in extracted:
-                await self.remember(
-                    content=memory.get("content", ""),
-                    category=memory.get("category", "general"),
-                )
 
         # Layer 1: 写入每日日志
         user_msgs = [
@@ -247,13 +257,27 @@ class XiaodaziMemoryManager:
 
     # ==================== Layer 2: FTS5 内部方法 ====================
 
+    _FTS_MAX_RETRIES = 3
+
     async def _ensure_fts(self) -> None:
-        """延迟初始化 FTS5 索引表"""
+        """
+        Lazy-init FTS5 index table with retry.
+
+        Uses a DEDICATED engine (memory_fts.db) separate from the main
+        zenflux.db to avoid lock contention and silent degradation.
+        """
         if self._fts_initialized:
             return
 
+        # Retry on transient failures (DB locked, I/O contention)
+        if not hasattr(self, "_fts_retry_count"):
+            self._fts_retry_count = 0
+
+        if self._fts_retry_count >= self._FTS_MAX_RETRIES:
+            return  # Exhausted retries, stay degraded
+
         try:
-            from infra.local_store.engine import get_local_engine
+            from infra.local_store.engine import create_local_engine
             from infra.local_store.generic_fts import (
                 FTS5TableConfig,
                 GenericFTS5,
@@ -268,12 +292,35 @@ class XiaodaziMemoryManager:
                 extra_columns=["category", "source"],
             )
 
-            engine = await get_local_engine()
+            # Dedicated DB for memory FTS5 — uses instance store directory
+            # self._base_dir is already instance-scoped (e.g. data/instances/xiaodazi/memory/)
+            # Put FTS5 in sibling "store/" directory
+            fts_db_dir = str(self._base_dir.parent / "store")
+            engine = create_local_engine(
+                db_dir=fts_db_dir, db_name="memory_fts.db"
+            )
+            self._fts_engine = engine
+            self._fts_session_factory = None  # lazy
+
             await self._fts.ensure_table(engine, self._fts_config)
             self._fts_initialized = True
-            logger.debug("记忆 FTS5 索引表已就绪: memory_fts")
+            logger.info("记忆 FTS5 索引表已就绪: memory_fts.db")
         except Exception as e:
-            logger.warning(f"FTS5 初始化失败（降级到文件层搜索）: {e}")
+            self._fts_retry_count += 1
+            remaining = self._FTS_MAX_RETRIES - self._fts_retry_count
+            logger.error(
+                f"FTS5 初始化失败（降级到文件层搜索，剩余重试 {remaining} 次）: {e}",
+                exc_info=True,
+            )
+
+    async def _get_fts_session(self):
+        """Get a session for the dedicated FTS5 engine."""
+        if self._fts_session_factory is None:
+            from sqlalchemy.ext.asyncio import async_sessionmaker
+            self._fts_session_factory = async_sessionmaker(
+                self._fts_engine, expire_on_commit=False
+            )
+        return self._fts_session_factory()
 
     async def _fts5_recall(
         self, query: str, limit: int = 10
@@ -281,13 +328,10 @@ class XiaodaziMemoryManager:
         """FTS5 全文搜索"""
         await self._ensure_fts()
         if not self._fts_initialized:
-            # 降级：直接搜索 MEMORY.md 文本
             return await self._file_layer_search(query, limit)
 
         try:
-            from infra.local_store.engine import get_local_session
-
-            async for session in get_local_session():
+            async with await self._get_fts_session() as session:
                 hits = await self._fts.search(
                     session, self._fts_config, query, limit=limit
                 )
@@ -308,7 +352,7 @@ class XiaodaziMemoryManager:
     async def _fts5_index_entry(
         self, content: str, category: str
     ) -> None:
-        """将记忆条目写入 FTS5 索引"""
+        """Write memory entry to FTS5 index (dedicated DB)."""
         await self._ensure_fts()
         if not self._fts_initialized:
             return
@@ -316,12 +360,10 @@ class XiaodaziMemoryManager:
         try:
             import uuid
 
-            from infra.local_store.engine import get_local_session
-
             entry_id = f"mem_{uuid.uuid4().hex[:12]}"
             section = _SECTION_MAP.get(category, "")
 
-            async for session in get_local_session():
+            async with await self._get_fts_session() as session:
                 await self._fts.upsert(
                     session,
                     self._fts_config,
@@ -431,7 +473,8 @@ class XiaodaziMemoryManager:
 
         try:
             mem0_category = _CATEGORY_MAP.get(category, "other")
-            conflicts = await self._quality_ctrl.detect_conflicts(
+            # detect_conflicts() is synchronous (no await needed)
+            conflicts = self._quality_ctrl.detect_conflicts(
                 user_id=self._user_id,
                 new_memory=content,
                 memory_type=mem0_category,
@@ -447,7 +490,11 @@ class XiaodaziMemoryManager:
         messages: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
         """
-        使用 FragmentExtractor 从对话提取记忆碎片
+        Session-level memory extraction: one LLM call for the full conversation.
+
+        Concatenates all messages into a single conversation text, sends to
+        FragmentExtractor once, and converts 10-dimension hints into flat
+        (content, category) pairs for downstream remember() calls.
 
         Returns:
             [{"content": str, "category": str}, ...]
@@ -457,44 +504,94 @@ class XiaodaziMemoryManager:
                 from core.memory.mem0.extraction.extractor import (
                     FragmentExtractor,
                 )
-
                 self._extractor = FragmentExtractor()
             except Exception as e:
                 logger.warning(f"FragmentExtractor 初始化失败: {e}")
                 return []
 
-        extracted = []
-        for msg in messages:
-            if msg.get("role") != "user":
-                continue
-            content = msg.get("content", "")
-            if not content or len(content) < 10:
-                continue
+        # Concatenate full conversation for single LLM call
+        conversation_text = "\n".join(
+            f"[{m.get('role', 'unknown')}] {m.get('content', '')}"
+            for m in messages
+            if m.get("content")
+        )
 
-            try:
-                fragment = await self._extractor.extract(
-                    user_id=self._user_id,
-                    session_id=session_id,
-                    message=content,
-                )
-                if fragment and fragment.has_content():
-                    # 将 FragmentMemory 转为简单字典
-                    for pref in fragment.preferences or []:
-                        extracted.append({
-                            "content": pref,
-                            "category": "preference",
-                        })
-                    for fact in fragment.facts or []:
-                        extracted.append({
-                            "content": fact,
-                            "category": "fact",
-                        })
-            except Exception as e:
-                logger.debug(f"记忆提取跳过（非致命）: {e}")
-                continue
+        if not conversation_text or len(conversation_text) < 20:
+            return []
 
-        logger.info(f"从对话提取 {len(extracted)} 条记忆碎片")
-        return extracted
+        try:
+            fragment = await self._extractor.extract(
+                user_id=self._user_id,
+                session_id=session_id,
+                message=conversation_text,
+            )
+            if not fragment:
+                return []
+
+            # Convert FragmentMemory hints → flat (content, category)
+            extracted: List[Dict[str, Any]] = []
+
+            if fragment.task_hint and fragment.task_hint.content:
+                extracted.append({
+                    "content": fragment.task_hint.content,
+                    "category": "fact",
+                })
+            if fragment.preference_hint:
+                ph = fragment.preference_hint
+                if ph.response_format:
+                    extracted.append({
+                        "content": f"偏好输出格式: {ph.response_format}",
+                        "category": "preference",
+                    })
+                if ph.communication_style:
+                    extracted.append({
+                        "content": f"沟通风格: {ph.communication_style}",
+                        "category": "style",
+                    })
+                for tool in ph.preferred_tools or []:
+                    extracted.append({
+                        "content": f"偏好工具: {tool}",
+                        "category": "preference",
+                    })
+                # Verbatim preferences: preserve user's exact words
+                for vp in ph.verbatim_preferences or []:
+                    extracted.append({
+                        "content": vp,
+                        "category": "preference",
+                    })
+            if fragment.tool_hint and fragment.tool_hint.tools_mentioned:
+                for tool in fragment.tool_hint.tools_mentioned:
+                    extracted.append({
+                        "content": f"使用工具: {tool}",
+                        "category": "tool",
+                    })
+            if fragment.emotion_hint and fragment.emotion_hint.signal != "neutral":
+                extracted.append({
+                    "content": f"情绪状态: {fragment.emotion_hint.signal}",
+                    "category": "general",
+                })
+            if fragment.relation_hint and fragment.relation_hint.mentioned:
+                for person in fragment.relation_hint.mentioned:
+                    extracted.append({
+                        "content": f"提到人物: {person}",
+                        "category": "fact",
+                    })
+            if fragment.goal_hint and fragment.goal_hint.goals:
+                for goal in fragment.goal_hint.goals:
+                    extracted.append({
+                        "content": f"目标: {goal}",
+                        "category": "fact",
+                    })
+
+            logger.info(
+                f"会话级记忆提取: {len(extracted)} 条碎片, "
+                f"1 次 LLM 调用, 对话长度={len(conversation_text)} 字符"
+            )
+            return extracted
+
+        except Exception as e:
+            logger.warning(f"记忆提取失败（非致命）: {e}")
+            return []
 
     # ==================== 工具方法 ====================
 

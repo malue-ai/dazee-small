@@ -7,24 +7,19 @@ from pathlib import Path
 from typing import BinaryIO, Optional
 
 from infra.storage.base import StorageBackend
-from utils.app_paths import get_storage_dir
+from utils.app_paths import get_instance_storage_dir
 
 
 class LocalStorage(StorageBackend):
-    """
-    本地文件系统存储
-    
-    用于开发环境或桌面应用
-    """
-    
-    def __init__(self, base_dir: str = ""):
-        """
-        初始化本地存储
-        
-        Args:
-            base_dir: 基础存储目录（默认使用统一路径管理器）
-        """
-        self.base_dir = Path(base_dir) if base_dir else get_storage_dir()
+    """本地文件系统存储"""
+
+    def __init__(self, base_dir: str = "", instance_name: str = ""):
+        if base_dir:
+            self.base_dir = Path(base_dir)
+        else:
+            import os
+            _inst = instance_name or os.environ["AGENT_INSTANCE"]
+            self.base_dir = get_instance_storage_dir(_inst)
         self.base_dir.mkdir(parents=True, exist_ok=True)
     
     def _get_full_path(self, path: str) -> Path:

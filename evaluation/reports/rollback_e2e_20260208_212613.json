@@ -1,0 +1,63 @@
+{
+  "suite": "B9_B10_rollback",
+  "timestamp": "20260208_212613",
+  "results": [
+    {
+      "case_id": "B9",
+      "description": "文件修改异常退出自动回滚",
+      "passed": true,
+      "elapsed_ms": 966.118208001717,
+      "sub_results": [
+        {
+          "name": "B9.1 error_auto_rollback",
+          "passed": true,
+          "detail": "all files restored",
+          "elapsed_ms": 959.4027909915894
+        },
+        {
+          "name": "B9.2 crash_recovery",
+          "passed": true,
+          "detail": "crash recovery OK",
+          "elapsed_ms": 3.5133339988533407
+        },
+        {
+          "name": "B9.3 dynamic_capture",
+          "passed": true,
+          "detail": "dynamic capture + rollback OK",
+          "elapsed_ms": 3.1917500018607825
+        }
+      ]
+    },
+    {
+      "case_id": "B10",
+      "description": "文件修改用户中止选择性回滚",
+      "passed": true,
+      "elapsed_ms": 11.124957993160933,
+      "sub_results": [
+        {
+          "name": "B10.1 user_abort_rollback_all",
+          "passed": true,
+          "detail": "all 5 files restored",
+          "elapsed_ms": 4.328374998294748
+        },
+        {
+          "name": "B10.2 selective_rollback",
+          "passed": true,
+          "detail": "about.md=restored, product.md=still modified",
+          "elapsed_ms": 3.053790991543792
+        },
+        {
+          "name": "B10.3 keep_completed",
+          "passed": true,
+          "detail": "files_modified=True, snapshot_cleaned=True, log_cleaned=True",
+          "elapsed_ms": 3.728583993506618
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total": 2,
+    "passed": 2,
+    "failed": 0
+  }
+}

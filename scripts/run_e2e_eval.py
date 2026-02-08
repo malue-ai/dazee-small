@@ -214,7 +214,7 @@ async def run_case(
     if case_filter and task_id != case_filter:
         return None
     if from_case:
-        order = ["A1", "B1", "D4", "C1"]
+        order = ["A1", "B1", "D4", "C1", "B9", "B10"]
         try:
             from_idx = order.index(from_case)
             if task_id in order and order.index(task_id) < from_idx:

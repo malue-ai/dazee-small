@@ -24,29 +24,39 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from logger import get_logger
-from utils.app_paths import get_local_store_dir
+from utils.app_paths import get_instance_db_dir
 
 logger = get_logger("local_store.engine")
 
-# 默认数据库路径（优先使用统一路径管理器，兼容环境变量覆盖）
-DEFAULT_DB_DIR = os.getenv("LOCAL_STORE_DIR") or str(get_local_store_dir())
-DEFAULT_DB_NAME = os.getenv("LOCAL_STORE_DB", "zenflux.db")
+
+def _get_default_db_dir() -> str:
+    """Resolve DB directory lazily (reads AGENT_INSTANCE at call time)."""
+    env_override = os.getenv("LOCAL_STORE_DIR")
+    if env_override:
+        return env_override
+    instance = os.environ["AGENT_INSTANCE"]
+    return str(get_instance_db_dir(instance))
+
+
+def _get_default_db_name() -> str:
+    """Resolve DB name lazily."""
+    return os.getenv("LOCAL_STORE_DB", "instance.db")
 
 
 def _resolve_db_path(db_dir: Optional[str] = None, db_name: Optional[str] = None) -> Path:
     """
-    解析数据库文件路径
+    Resolve database file path (instance-aware via lazy env read).
 
     Args:
-        db_dir: 数据库目录（默认 ./data/local_store）
-        db_name: 数据库文件名（默认 zenflux.db）
+        db_dir: Database directory (default: auto-resolved from AGENT_INSTANCE)
+        db_name: Database filename (default: instance.db or zenflux.db)
 
     Returns:
-        完整的数据库文件路径
+        Full database file path
     """
-    directory = Path(db_dir or DEFAULT_DB_DIR)
+    directory = Path(db_dir or _get_default_db_dir())
     directory.mkdir(parents=True, exist_ok=True)
-    return directory / (db_name or DEFAULT_DB_NAME)
+    return directory / (db_name or _get_default_db_name())
 
 
 def create_local_engine(

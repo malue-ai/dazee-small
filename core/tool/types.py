@@ -101,6 +101,7 @@ class ToolContext:
     session_id: str = ""
     conversation_id: str = ""
     user_id: str = "default_user"
+    instance_id: str = ""  # Instance name for storage isolation
     memory: Optional["WorkingMemory"] = None
     event_manager: Optional["EventManager"] = None
     apis_config: Optional[List[Dict[str, Any]]] = None

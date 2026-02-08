@@ -78,11 +78,14 @@ class MarkdownMemoryLayer:
     def __init__(self, base_dir: Optional[Path] = None):
         """
         Args:
-            base_dir: 记忆根目录，默认 ~/.xiaodazi
+            base_dir: Memory root directory (required, set by XiaodaziMemoryManager)
         """
-        self._base_dir = Path(
-            base_dir or Path.home() / ".xiaodazi"
-        )
+        if not base_dir:
+            raise ValueError(
+                "base_dir is required. Caller must pass "
+                "get_instance_memory_dir(instance_name)."
+            )
+        self._base_dir = Path(base_dir)
         self._memory_file = self._base_dir / "MEMORY.md"
         self._log_dir = self._base_dir / "memory"
 

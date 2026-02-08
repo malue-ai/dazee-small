@@ -122,26 +122,79 @@ def get_cli_port() -> int:
     return int(os.getenv("ZENFLUX_PORT", "18900"))
 
 
-# ==================== 便捷路径访问 ====================
+# ==================== 全局共享路径 ====================
 
 
-def get_local_store_dir() -> Path:
-    """获取 SQLite 数据库存储目录"""
-    d = get_user_data_dir() / "data" / "local_store"
+def get_shared_models_dir() -> Path:
+    """获取共享模型目录（embedding 模型等，多实例复用）"""
+    d = get_user_data_dir() / "data" / "shared" / "models"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
-def get_storage_dir() -> Path:
-    """获取文件存储目录"""
-    d = get_user_data_dir() / "workspace" / "storage"
+
+
+# ==================== 实例隔离路径 ====================
+
+
+def get_instance_data_dir(instance_name: str) -> Path:
+    """
+    Get instance-scoped data directory.
+
+    All per-instance data (DB, memory, storage, playbooks, snapshots)
+    is stored under this directory, fully isolated from other instances.
+
+    Args:
+        instance_name: Instance name (e.g. "xiaodazi")
+
+    Returns:
+        Path like {user_data_dir}/data/instances/{instance_name}/
+    """
+    if not instance_name:
+        instance_name = os.getenv("AGENT_INSTANCE", "default")
+    d = get_user_data_dir() / "data" / "instances" / instance_name
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
-def get_playbooks_dir() -> Path:
-    """获取策略库存储目录"""
-    d = get_user_data_dir() / "workspace" / "playbooks"
+def get_instance_db_dir(instance_name: str) -> Path:
+    """Instance-scoped database directory (instance.db, knowledge FTS5)."""
+    d = get_instance_data_dir(instance_name) / "db"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def get_instance_memory_dir(instance_name: str) -> Path:
+    """Instance-scoped memory directory (MEMORY.md, daily logs, projects)."""
+    d = get_instance_data_dir(instance_name) / "memory"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def get_instance_store_dir(instance_name: str) -> Path:
+    """Instance-scoped store directory (memory_fts.db, mem0 vectors)."""
+    d = get_instance_data_dir(instance_name) / "store"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def get_instance_storage_dir(instance_name: str) -> Path:
+    """Instance-scoped file storage directory (uploaded files)."""
+    d = get_instance_data_dir(instance_name) / "storage"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def get_instance_playbooks_dir(instance_name: str) -> Path:
+    """Instance-scoped playbooks directory."""
+    d = get_instance_data_dir(instance_name) / "playbooks"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def get_instance_snapshots_dir(instance_name: str) -> Path:
+    """Instance-scoped state snapshots directory."""
+    d = get_instance_data_dir(instance_name) / "snapshots"
     d.mkdir(parents=True, exist_ok=True)
     return d
 

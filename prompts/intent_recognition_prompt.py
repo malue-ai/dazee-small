@@ -149,6 +149,36 @@ INTENT_RECOGNITION_PROMPT = """# 意图分类器
 <output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["app_automation"]}}</output>
 </example>
 
+<example>
+<query>帮我分析这份会议记录，提取行动项</query>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["meeting"]}}</output>
+</example>
+
+<example>
+<query>帮我头脑风暴一下，公众号怎么涨粉</query>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["creative"]}}</output>
+</example>
+
+<example>
+<query>帮我画一个项目开发流程图</query>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["diagram"]}}</output>
+</example>
+
+<example>
+<query>帮我分析这个职位描述，优化简历</query>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["career"]}}</output>
+</example>
+
+<example>
+<query>教我学数据分析，从零开始</query>
+<output>{{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["learning"]}}</output>
+</example>
+
+<example>
+<query>帮我把这篇文章去掉 AI 味，然后生成一份 PDF 报告</query>
+<output>{{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["writing"]}}</output>
+</example>
+
 ---
 
 ## 重要说明
@@ -161,43 +191,28 @@ INTENT_RECOGNITION_PROMPT = """# 意图分类器
 现在分析用户的请求，只输出 JSON："""
 
 
-DEFAULT_SKILL_GROUPS_DESC = """- **writing**: 写作、润色、改写、扩写、文章生成、内容创作、风格学习、多平台格式转换
-- **data_analysis**: Excel / CSV 数据分析、表格处理、数据清洗、格式修复
-- **file_operation**: 本地文件管理、文件整理/移动/重命名、Word 文档创建与编辑
-- **translation**: 多语言翻译
-- **research**: 学术论文搜索、文献综述、arXiv 预印本搜索
-- **app_automation**: 桌面应用操作（打开/切换/控制应用）、UI 自动化、截图、系统通知、AppleScript 脚本"""
-
-
 def get_intent_recognition_prompt(
+    skill_groups_description: str,
     custom_rules: Optional[str] = None,
-    skill_groups_description: Optional[str] = None,
 ) -> str:
     """
     获取意图识别提示词
 
     Args:
+        skill_groups_description: Skill 分组描述（必填，从 SkillGroupRegistry.build_groups_description() 获取）
         custom_rules: 自定义规则（可选，会追加到默认提示词之后）
-        skill_groups_description: Skill 分组描述（可选，从 config 动态生成）
 
     Returns:
         意图识别提示词
     """
-    groups_desc = skill_groups_description or DEFAULT_SKILL_GROUPS_DESC
-    prompt = INTENT_RECOGNITION_PROMPT.replace("{skill_groups_description}", groups_desc)
+    prompt = INTENT_RECOGNITION_PROMPT.replace("{skill_groups_description}", skill_groups_description)
 
     if custom_rules:
         return prompt + "\n\n" + custom_rules
     return prompt
 
 
-def get_default_intent_prompt() -> str:
-    """获取默认意图识别提示词"""
-    return get_intent_recognition_prompt()
-
-
 __all__ = [
     "INTENT_RECOGNITION_PROMPT",
     "get_intent_recognition_prompt",
-    "get_default_intent_prompt",
 ]

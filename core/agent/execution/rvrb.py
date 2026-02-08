@@ -864,6 +864,10 @@ class RVRBExecutor(RVRExecutor):
             if ctx.is_completed():
                 break
 
+            # HITL pending：工具返回 pending_user_input 后暂停执行，等待下一轮消息
+            if ctx.stop_reason == "hitl_pending":
+                break
+
             # V12: 终止策略（回溯↔终止联动，信号驱动，无硬性 max_turns）
             if cfg.terminator and not ctx.is_completed():
                 try:
@@ -1207,6 +1211,15 @@ class RVRBExecutor(RVRExecutor):
             cleaned_results = self._clean_backtrack_results(tool_results, state)
             append_user_message(llm_messages, cleaned_results)
 
+        # HITL pending 检测：如果工具返回了 pending_user_input，暂停执行等待用户响应。
+        # 防止 LLM 看到 pending 结果后再次调用 hitl（连续 2 次调用 bug）。
+        for _tr in tool_results:
+            _tr_content = _tr.get("content", "")
+            if isinstance(_tr_content, str) and "pending_user_input" in _tr_content:
+                ctx.stop_reason = "hitl_pending"
+                logger.info("HITL pending 检测：工具返回 pending_user_input，暂停执行等待用户响应")
+                break
+
         # 更新连续失败计数（供终止策略与自动回滚使用）
         if any(r.get("is_error") for r in tool_results):
             ctx.consecutive_failures += 1
@@ -1303,6 +1316,14 @@ class RVRBExecutor(RVRExecutor):
 
         if tool_results:
             append_user_message(llm_messages, tool_results)
+
+        # HITL pending 检测（non-stream 版本，逻辑与 stream 版本一致）
+        for _tr in tool_results:
+            _tr_content = _tr.get("content", "")
+            if isinstance(_tr_content, str) and "pending_user_input" in _tr_content:
+                ctx.stop_reason = "hitl_pending"
+                logger.info("HITL pending 检测：工具返回 pending_user_input，暂停执行等待用户响应")
+                break
 
         # 更新连续失败计数（供终止策略与自动回滚使用）
         if any(r.get("is_error") for r in tool_results):

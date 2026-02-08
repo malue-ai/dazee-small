@@ -24,12 +24,21 @@ skills:
   - { name: competitive-intel,    enabled: true,  status: ready }
   - { name: readwise-rival,       enabled: true,  status: ready }
   - { name: weather,              enabled: true,  status: ready }
+  - { name: humanizer,            enabled: true,  status: ready }
+  - { name: brainstorming,        enabled: true,  status: ready }
+  - { name: meeting-insights-analyzer, enabled: true, status: ready }
+  - { name: meeting-notes-to-action-items, enabled: true, status: ready }
+  - { name: job-application-optimizer, enabled: true, status: ready }
+  - { name: skill-tutor,          enabled: true,  status: ready }
+  - { name: quiz-maker,           enabled: true,  status: ready }
 
   # ========== common · lightweight ==========
   - { name: nano-pdf,             enabled: true,  status: ready }
   - { name: excel-analyzer,       enabled: true,  status: ready }
   - { name: excel-fixer,          enabled: true,  status: ready }
   - { name: word-processor,       enabled: true,  status: ready }
+  - { name: invoice-organizer,    enabled: true,  status: ready }
+  - { name: elegant-reports,      enabled: true,  status: unavailable }
 
   # ========== common · external ==========
   - { name: summarize,            enabled: true,  status: unavailable }
@@ -43,6 +52,8 @@ skills:
   - { name: sherpa-onnx-tts,      enabled: true,  status: unavailable }
   - { name: gifgrep,              enabled: true,  status: unavailable }
   - { name: github,               enabled: true,  status: unavailable }
+  - { name: draw-io,              enabled: true,  status: unavailable }
+  - { name: excalidraw,           enabled: true,  status: unavailable }
 
   # ========== common · cloud_api ==========
   - { name: notion,               enabled: true,  status: need_setup }

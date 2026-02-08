@@ -1050,6 +1050,11 @@ async def create_agent_from_instance(
 
     logger.info(f"🚀 开始加载实例: {instance_name}")
 
+    # 0. 确保 AGENT_INSTANCE 环境变量与当前实例一致
+    # 这是所有存储组件（DB/Memory/Mem0/Playbook/Snapshot）
+    # 实例隔离的基础 — 各组件通过此变量自动派生隔离路径
+    os.environ["AGENT_INSTANCE"] = instance_name
+
     # 准备缓存目录
     instance_path = get_instances_dir() / instance_name
     cache_dir = instance_path / ".cache"
@@ -1280,7 +1285,7 @@ async def create_agent_from_instance(
             sc_config = StateConsistencyConfig(
                 enabled=bool(enabled),
                 snapshot=SnapshotConfig(
-                    storage_path=snap_raw.get("storage_path", "~/.xiaodazi/snapshots"),
+                    storage_path=snap_raw.get("storage_path", ""),  # Empty = auto from AGENT_INSTANCE
                     retention_hours=int(snap_raw.get("retention_hours", 24)),
                     max_size_mb=int(snap_raw.get("max_size_mb", 500)),
                     capture_cwd=bool(snap_raw.get("capture_cwd", True)),
@@ -1337,10 +1342,24 @@ async def create_agent_from_instance(
 
     logger.info(f"✅ Agent 创建成功")
 
-    # V12: 注入 SkillsLoader + skill_groups_config（供 tool_provider 动态生成 skills_prompt）
+    # V12: 注入 SkillsLoader + SkillGroupRegistry（供 tool_provider 动态生成 skills_prompt）
     if skills_loader:
         agent._skills_loader = skills_loader
         agent._instance_skills = []  # 新格式由 skills_loader 管理
+
+        # 构建 SkillGroupRegistry（单一数据源）
+        from core.skill.group_registry import SkillGroupRegistry
+
+        skill_groups_cfg = (config.raw_config or {}).get("skill_groups", {})
+        group_registry = SkillGroupRegistry(skill_groups_cfg)
+
+        # 启动时校验：检测未归入任何分组的 skill
+        all_non_system = {
+            e.name for e in skills_loader.get_enabled_skills()
+            if e.backend_type.value != "tool"
+            and not (e.raw_config or {}).get("system", False)
+        }
+        group_registry.validate_and_warn(all_non_system)
 
         # 构建 Skills 提示词并注入到运行时上下文
         skills_prompt = await skills_loader.build_skills_prompt()
@@ -1348,14 +1367,12 @@ async def create_agent_from_instance(
             prompt_cache.runtime_context["skills_prompt"] = skills_prompt
             logger.info(f"   Skills 提示词: {len(skills_prompt)} 字符已注入（Fallback 用）")
 
-            # V12: 注入 loader 引用和 skill_groups 配置，供 tool_provider 动态生成
+            # V12: 注入 loader 引用和 group_registry
             prompt_cache.runtime_context["_skills_loader"] = skills_loader
-            skill_groups_cfg = (config.raw_config or {}).get("skill_groups", {})
-            if skill_groups_cfg:
-                prompt_cache.runtime_context["_skill_groups_config"] = skill_groups_cfg
-                logger.info(
-                    f"   Skill 分组配置已注入: {list(skill_groups_cfg.keys())}"
-                )
+            prompt_cache.runtime_context["_skill_group_registry"] = group_registry
+            logger.info(
+                f"   SkillGroupRegistry 已注入: {group_registry}"
+            )
     elif config.skills:
         # 旧格式兼容
         agent._skills_loader = None

@@ -127,27 +127,40 @@ async def _preload_capability_registry() -> None:
 async def _preload_agent_registry() -> int:
     """
     预加载 Agent 配置到 AgentRegistry
-    
-    单实例模式（强制）：
-    - 环境变量 AGENT_INSTANCE 指定实例名称
-    - 每次只加载一个实例
-    
+
+    实例检测优先级：
+    1. 环境变量 AGENT_INSTANCE（显式指定）
+    2. 自动检测：instances/ 目录下只有一个实例时自动使用
+    3. 多个实例时提示用户选择
+
     Returns:
         加载的 Agent 配置数量（0 或 1）
     """
     print("📋 加载 Agent 配置...")
     from services.agent_registry import get_agent_registry
-    
+
     agent_registry = get_agent_registry()
-    
-    # 从环境变量获取指定实例
+
+    # 实例检测：环境变量 > 自动检测
     instance_name = os.getenv("AGENT_INSTANCE")
-    
+
     if not instance_name:
-        print("❌ 未指定 AGENT_INSTANCE 环境变量！")
-        print("   请在 config.yaml 中添加: AGENT_INSTANCE: xiaodazi")
-        print("   或启动时指定: AGENT_INSTANCE=xiaodazi uvicorn main:app --reload")
-        return 0
+        from utils.instance_loader import list_instances
+
+        available = list_instances()
+        if len(available) == 1:
+            instance_name = available[0]
+            os.environ["AGENT_INSTANCE"] = instance_name
+            print(f"🎯 自动检测到唯一实例: {instance_name}")
+        elif len(available) == 0:
+            print("❌ 未找到任何实例！")
+            print("   请在 instances/ 目录下创建实例（可复制 _template）")
+            return 0
+        else:
+            print(f"❌ 检测到多个实例: {available}")
+            print(f"   请指定要加载的实例:")
+            print(f"   AGENT_INSTANCE={available[0]} uvicorn main:app --reload")
+            return 0
     
     try:
         print(f"🎯 单实例模式: 加载 '{instance_name}'...")

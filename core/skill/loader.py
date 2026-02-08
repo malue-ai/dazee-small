@@ -247,20 +247,20 @@ class SkillsLoader:
         self,
         language: str = "en",
         relevant_skill_groups: list[str] | None = None,
-        skill_groups_config: dict[str, list[str]] | None = None,
+        group_registry: "SkillGroupRegistry | None" = None,
     ) -> str:
         """
         构建 Skills 提示词片段（XML + 指令，注入到系统提示词）
 
         V12.0: 支持按 intent.relevant_skill_groups 过滤，只注入相关 Skills。
-        - 有 relevant_skill_groups -> 只注入匹配分组 + _always 组
+        - 有 relevant_skill_groups + group_registry -> 按分组过滤
         - relevant_skill_groups 为空列表 -> 只注入 _always 组
         - relevant_skill_groups 为 None（Fallback） -> 注入全量（保守）
 
         Args:
             language: 语言
             relevant_skill_groups: LLM 语义多选的分组（None=全量 Fallback）
-            skill_groups_config: 分组配置 {"writing": ["writing-assistant", ...]}
+            group_registry: SkillGroupRegistry 实例（单一数据源）
 
         Returns:
             完整 Skills 提示词字符串
@@ -272,31 +272,29 @@ class SkillsLoader:
             if e.backend_type != BackendType.TOOL and e.skill_path
         ]
 
-        # V12.0: 按 skill_groups 过滤（重召回原则）
-        if relevant_skill_groups is not None and skill_groups_config:
-            # 收集需要注入的 skill 名称集合
-            allowed_names: set[str] = set()
-
-            # 始终注入 _always 组
-            always_skills = skill_groups_config.get("_always", [])
-            allowed_names.update(always_skills)
-
-            # 联合选中的所有分组
-            for group_name in relevant_skill_groups:
-                group_skills = skill_groups_config.get(group_name, [])
-                allowed_names.update(group_skills)
+        # V12.0: 按 SkillGroupRegistry 过滤（重召回原则）
+        allowed_names: set[str] | None = None
+        if relevant_skill_groups is not None and group_registry:
+            allowed_names = group_registry.get_skills_for_groups(relevant_skill_groups)
 
             before_count = len(available)
             available = [e for e in available if e.name in allowed_names]
             logger.info(
                 f"Skills 按 intent 过滤: {before_count} → {len(available)} "
-                f"(groups={relevant_skill_groups}, always={always_skills})"
+                f"(groups={relevant_skill_groups})"
             )
 
-        unavailable = [
+        # unavailable skills 也按意图分组过滤，避免上下文爆炸
+        all_unavailable = [
             e for e in self._entries
             if e.enabled and e.status != SkillStatus.READY
         ]
+        if allowed_names is not None:
+            unavailable = [
+                e for e in all_unavailable if e.name in allowed_names
+            ]
+        else:
+            unavailable = all_unavailable
 
         summaries: list[SkillSummary] = []
         for entry in available:
@@ -328,10 +326,19 @@ class SkillsLoader:
             lines = ["<unavailable_skills>"]
             for entry in unavailable:
                 hint = self._get_setup_hint(entry)
+                setup = self._get_setup_metadata(entry)
+                user_hint = setup.get("user_hint", hint)
                 lines.append(
-                    f'  <skill name="{entry.name}" reason="{hint}">'
+                    f'  <skill name="{entry.name}" status="{entry.status.value}">'
                 )
                 lines.append(f"    <description>{entry.description}</description>")
+                lines.append(f"    <user_hint>{user_hint}</user_hint>")
+                if setup.get("auto_install"):
+                    lines.append(f"    <auto_install>{setup['auto_install']}</auto_install>")
+                if setup.get("download_url"):
+                    lines.append(f"    <download_url>{setup['download_url']}</download_url>")
+                if setup.get("web_alternative"):
+                    lines.append(f"    <web_alternative>{setup['web_alternative']}</web_alternative>")
                 lines.append("  </skill>")
             lines.append("</unavailable_skills>")
             parts.append("")
@@ -635,6 +642,40 @@ class SkillsLoader:
         if entry.status == SkillStatus.UNAVAILABLE:
             return entry.status_message
         return ""
+
+    def _get_setup_metadata(self, entry: SkillEntry) -> Dict[str, str]:
+        """
+        从 SKILL.md frontmatter 读取 metadata.xiaodazi.setup 块
+
+        Returns:
+            {"user_hint": ..., "auto_install": ..., "download_url": ..., "web_alternative": ...}
+        """
+        if not entry.skill_path:
+            return {}
+
+        skill_md = Path(entry.skill_path) / "SKILL.md"
+        if not skill_md.exists():
+            return {}
+
+        try:
+            content = skill_md.read_text(encoding="utf-8")
+            if not content.startswith("---"):
+                return {}
+            parts = content.split("---", 2)
+            if len(parts) < 3:
+                return {}
+
+            import yaml
+            meta = yaml.safe_load(parts[1])
+            if not isinstance(meta, dict):
+                return {}
+
+            xiaodazi = (meta.get("metadata") or {}).get("xiaodazi") or {}
+            setup = xiaodazi.get("setup") or {}
+            return {k: str(v) for k, v in setup.items() if v} if isinstance(setup, dict) else {}
+        except Exception as e:
+            logger.debug(f"读取 {entry.name} setup metadata 失败: {e}")
+            return {}
 
     def _log_summary(self) -> None:
         """打印加载摘要"""

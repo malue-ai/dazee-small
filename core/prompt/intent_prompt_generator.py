@@ -174,6 +174,13 @@ def generate_intent_prompt(schema=None) -> str:
     return IntentPromptGenerator.get_default()
 
 
-def get_default_intent_prompt() -> str:
-    """获取默认意图识别提示词"""
+def get_default_intent_prompt(skill_groups_description: str = "") -> str:
+    """
+    获取默认意图识别提示词
+
+    Args:
+        skill_groups_description: Skill 分组描述（从 SkillGroupRegistry 获取）
+    """
+    if skill_groups_description:
+        return get_intent_recognition_prompt(skill_groups_description=skill_groups_description)
     return IntentPromptGenerator.get_default()

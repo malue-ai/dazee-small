@@ -141,31 +141,38 @@ class BackgroundTaskService:
 
     # ==================== 统一调度入口 ====================
 
+    # Tasks that MUST complete before SSE stream closes
+    # (they send SSE events that the frontend needs)
+    _SSE_DEPENDENT_TASKS = {"title_generation", "recommended_questions"}
+
     async def dispatch_tasks(
         self, task_names: List[str], context: TaskContext, wait: bool = True
     ) -> Dict[str, bool]:
         """
-        统一后台任务调度入口 ⭐
+        Unified background task dispatcher.
 
-        任务自动注册，只需在 tasks/ 目录下创建文件并使用 @background_task 装饰器
+        Two-tier dispatch strategy:
+        - SSE-dependent tasks (title, questions): await before stream close
+        - Learning tasks (memory, playbook): fire-and-forget, never block user
 
         Args:
-            task_names: 要执行的任务名列表，如 ["title_generation", "recommended_questions"]
-            context: 任务上下文，包含所有任务可能需要的参数
-            wait: 是否等待任务完成（默认 True，确保 SSE 事件在流关闭前发送）
+            task_names: Task name list
+            context: Task context
+            wait: Wait for SSE-dependent tasks (default True)
 
         Returns:
-            Dict[str, bool]: 各任务是否成功执行/启动
+            Dict[str, bool]: Whether each task started successfully
         """
         results = {}
         registry = get_task_registry()
-        tasks = []
-        task_name_map = {}  # task -> task_name 映射
+        blocking_tasks = []
+        blocking_map = {}
 
         for task_name in task_names:
             if task_name not in registry:
                 logger.warning(
-                    f"⚠️ 未知的后台任务: {task_name}，已注册的任务: {get_registered_task_names()}"
+                    f"未知的后台任务: {task_name}，"
+                    f"已注册: {get_registered_task_names()}"
                 )
                 results[task_name] = False
                 continue
@@ -173,33 +180,54 @@ class BackgroundTaskService:
             task_func = registry[task_name]
 
             try:
-                # 创建任务
                 task = asyncio.create_task(task_func(context, self))
-                tasks.append(task)
-                task_name_map[id(task)] = task_name
-                results[task_name] = True  # 先标记为启动成功
-                logger.info(f"🚀 后台任务已启动: {task_name}")
+
+                if wait and task_name in self._SSE_DEPENDENT_TASKS:
+                    # SSE-dependent: must complete before stream closes
+                    blocking_tasks.append(task)
+                    blocking_map[id(task)] = task_name
+                else:
+                    # Learning tasks: fire-and-forget
+                    task.add_done_callback(self._log_task_result(task_name))
+
+                results[task_name] = True
+                logger.info(
+                    f"后台任务已启动: {task_name} "
+                    f"({'await' if task_name in self._SSE_DEPENDENT_TASKS else 'fire-and-forget'})"
+                )
             except Exception as e:
-                logger.warning(f"⚠️ 启动后台任务失败: {task_name}, error={e}")
+                logger.warning(f"启动后台任务失败: {task_name}, error={e}")
                 results[task_name] = False
 
-        if wait and tasks:
-            # 等待所有任务完成（确保 SSE 事件在流关闭前发送）
-            logger.debug(f"⏳ 等待 {len(tasks)} 个后台任务完成...")
-            done, _ = await asyncio.wait(tasks, return_when=asyncio.ALL_COMPLETED)
-
-            # 检查任务执行结果
+        # Only wait for SSE-dependent tasks
+        if blocking_tasks:
+            logger.debug(f"等待 {len(blocking_tasks)} 个 SSE 依赖任务...")
+            done, _ = await asyncio.wait(
+                blocking_tasks, return_when=asyncio.ALL_COMPLETED
+            )
             for task in done:
-                task_name = task_name_map.get(id(task), "unknown")
+                name = blocking_map.get(id(task), "unknown")
                 if task.exception():
-                    logger.warning(f"⚠️ 后台任务执行失败: {task_name}, error={task.exception()}")
-                    results[task_name] = False
-                else:
-                    logger.debug(f"✅ 后台任务执行完成: {task_name}")
-
-            logger.info(f"✅ 所有后台任务已完成")
+                    logger.warning(f"SSE 任务失败: {name}, error={task.exception()}")
+                    results[name] = False
 
         return results
+
+    @staticmethod
+    def _log_task_result(task_name: str):
+        """Create a done-callback that logs fire-and-forget task results."""
+        def _callback(task: asyncio.Task):
+            try:
+                exc = task.exception()
+                if exc:
+                    logger.warning(
+                        f"后台学习任务失败: {task_name}, error={exc}"
+                    )
+                else:
+                    logger.info(f"后台学习任务完成: {task_name}")
+            except asyncio.CancelledError:
+                logger.debug(f"后台学习任务被取消: {task_name}")
+        return _callback
 
     # ==================== 工具方法 ====================
 
