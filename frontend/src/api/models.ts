@@ -48,12 +48,27 @@ export interface ProviderDetail {
   models: ProviderModel[]
 }
 
+/** 验证通过后的单个模型详情（匹配目录后） */
+export interface ValidatedModelInfo {
+  model_name: string
+  display_name: string
+  provider: string
+  model_type: string
+  context_window?: number | null
+  max_output_tokens: number
+  supports_tools: boolean
+  supports_vision: boolean
+  supports_thinking: boolean
+  in_catalog: boolean
+}
+
 /** API Key 验证结果 */
 export interface ValidateKeyResult {
   valid: boolean
   provider: string
   message: string
   models: string[]
+  model_details: ValidatedModelInfo[]
 }
 
 /** Provider 批量激活结果 */

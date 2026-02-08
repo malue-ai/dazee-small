@@ -80,11 +80,10 @@ class AgentCreateRequest(BaseModel):
     
     # 模型配置
     model: Optional[str] = Field(None, description="使用的模型，未指定时使用默认已激活模型")
-    max_turns: int = Field(20, description="最大对话轮数")
-    plan_manager_enabled: bool = Field(True, description="是否启用计划管理器")
+    plan_manager_enabled: Optional[bool] = Field(None, description="是否启用计划管理器（不填则使用框架默认值）")
     
     # LLM 超参数
-    llm: LLMConfig = Field(default_factory=LLMConfig, description="LLM 超参数")
+    llm: Optional[LLMConfig] = Field(None, description="LLM 超参数")
     
     # 工具能力
     enabled_capabilities: Dict[str, bool] = Field(
@@ -96,7 +95,7 @@ class AgentCreateRequest(BaseModel):
     apis: List[RESTAPIConfig] = Field(default_factory=list, description="REST API 配置列表")
     
     # 记忆
-    memory: MemoryConfig = Field(default_factory=MemoryConfig, description="记忆配置")
+    memory: Optional[MemoryConfig] = Field(None, description="记忆配置")
     
     model_config = {
         "json_schema_extra": {
@@ -105,8 +104,7 @@ class AgentCreateRequest(BaseModel):
                     "name": "编程助手",
                     "description": "专业的编程助手，擅长代码审查和优化",
                     "prompt": "你是一个专业的助手...",
-                    "model": "claude-sonnet-4-5-20250929",  # or None to use default
-                    "max_turns": 20,
+                    "model": "qwen-vl-max",
                     "enabled_capabilities": {
                         "code_execution": False,
                     },
@@ -142,7 +140,6 @@ class AgentDetail(BaseModel):
     
     # 配置
     model: Optional[str] = Field(None, description="使用的模型")
-    max_turns: Optional[int] = Field(None, description="最大对话轮数")
     plan_manager_enabled: bool = Field(False, description="是否启用计划管理器")
     enabled_capabilities: Dict[str, bool] = Field(
         default_factory=dict, 

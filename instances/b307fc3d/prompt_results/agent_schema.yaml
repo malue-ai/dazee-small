@@ -1,22 +1,17 @@
-name: GeneralAgent
-description: 通用智能助手（高质量默认配置）
+name: ProductVisualDesigner
+description: 专业产品视觉效果生成专家
 intent_analyzer:
   enabled: true
   complexity_levels:
-  - low
   - medium
   - high
   task_types:
-  - question_answering
-  - data_analysis
-  - content_generation
-  - code_execution
-  - web_search
-  - file_operation
+  - creative_design
+  - visual_conceptualization
+  - product_presentation
   output_formats:
-  - text
-  - json
-  - markdown
+  - structured_text
+  - descriptive_specification
   use_llm: true
   llm_model: claude-haiku-4-5-20251001
   fast_mode: false
@@ -25,40 +20,40 @@ intent_analyzer:
 plan_manager:
   enabled: true
   trigger_condition: complexity == 'high' or step_count > 3
-  max_steps: 15
-  granularity: medium
+  max_steps: 12
+  granularity: fine
   allow_dynamic_adjustment: true
   validation_interval: 3
   replan_enabled: true
-  max_replan_attempts: 2
+  max_replan_attempts: 3
   replan_strategy: incremental
-  failure_threshold: 0.3
+  failure_threshold: 0.4
 tool_selector:
-  enabled: true
+  enabled: false
   available_tools: []
   selection_strategy: capability_based
   allow_parallel: false
-  max_parallel_tools: 3
+  max_parallel_tools: 1
   base_tools:
   - plan_todo
   tool_timeout: 300
 memory_manager:
   enabled: true
   retention_policy: session
-  episodic_memory: false
-  working_memory_limit: 20
+  episodic_memory: true
+  working_memory_limit: 40
   auto_compress: true
   compress_threshold: 15
 output_formatter:
   enabled: true
-  default_format: text
+  default_format: markdown
   supported_formats:
   - text
   - markdown
   - json
   - html
-  code_highlighting: true
-  max_output_length: 50000
+  code_highlighting: false
+  max_output_length: 2000
   json_model_name: null
   json_schema: null
   strict_json_validation: false
@@ -67,8 +62,8 @@ output_formatter:
   include_metadata: false
 skills: []
 tools: []
-model: claude-sonnet-4-5-20250929
-max_turns: 15
+model: qwen-vl-max
+max_turns: 18
 execution_strategy: rvr
 allow_parallel_tools: false
 context_limits:
@@ -81,4 +76,4 @@ enable_thinking: null
 enable_caching: null
 thinking_mode: null
 prompts: null
-reasoning: 高质量默认配置：适应大多数场景，平衡能力和稳定性。作为 config.yaml 配置缺失时的兜底。
+reasoning: 该角色需深度理解产品概念、主动澄清需求、生成多套结构化视觉方案并支持迭代优化，属于高复杂度创意任务。需启用细粒度规划以管理多轮交互和方案调整，会话记忆用于跟踪用户偏好与反馈，输出需结构化便于转译为图像指令，但无需外部工具或代码技能。

@@ -47,6 +47,7 @@ from models.llm import (
     ProviderValidateKeyRequest,
     ProviderValidateKeyResponse,
     SupportedModelResponse,
+    ValidatedModelInfo,
 )
 
 logger = get_logger("router.models")
@@ -604,6 +605,60 @@ async def _validate_anthropic(base_url: str, api_key: str) -> tuple[bool, str, l
         return True, "API Key 验证通过", models
 
 
+def _build_model_details(
+    api_model_names: list[str], provider: str
+) -> list[ValidatedModelInfo]:
+    """Match API-returned model names against catalog, return enriched details.
+
+    For models in our catalog: return full capabilities from preset data.
+    For models NOT in catalog: return basic info with defaults.
+    """
+    catalog_models = {
+        m.model_name.lower(): m
+        for m in ModelRegistry.list_models(provider=provider)
+    }
+
+    details: list[ValidatedModelInfo] = []
+    seen: set[str] = set()
+
+    for name in api_model_names:
+        key = name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+
+        catalog_entry = catalog_models.get(key)
+        if catalog_entry:
+            details.append(
+                ValidatedModelInfo(
+                    model_name=catalog_entry.model_name,
+                    display_name=catalog_entry.display_name or catalog_entry.model_name,
+                    provider=provider,
+                    model_type=catalog_entry.model_type.value,
+                    context_window=catalog_entry.capabilities.max_input_tokens,
+                    max_output_tokens=catalog_entry.capabilities.max_tokens,
+                    supports_tools=catalog_entry.capabilities.supports_tools,
+                    supports_vision=catalog_entry.capabilities.supports_vision,
+                    supports_thinking=catalog_entry.capabilities.supports_thinking,
+                    in_catalog=True,
+                )
+            )
+        else:
+            details.append(
+                ValidatedModelInfo(
+                    model_name=name,
+                    display_name=name,
+                    provider=provider,
+                    model_type="llm",
+                    in_catalog=False,
+                )
+            )
+
+    # Catalog models first, then non-catalog; within each group, keep original order
+    details.sort(key=lambda d: (not d.in_catalog, 0))
+    return details
+
+
 @router.post(
     "/providers/validate-key",
     response_model=ProviderValidateKeyResponse,
@@ -639,11 +694,15 @@ async def validate_api_key(request: ProviderValidateKeyRequest):
             f"message={message}, models_count={len(models)}"
         )
 
+        # Match validated model names against catalog for rich details
+        model_details = _build_model_details(models, provider) if valid else []
+
         return ProviderValidateKeyResponse(
             valid=valid,
             provider=provider,
             message=message,
             models=models,
+            model_details=model_details,
         )
 
     except httpx.TimeoutException:

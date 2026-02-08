@@ -34,7 +34,6 @@ export interface AgentDetail {
   version: string
   is_active: boolean
   model: string | null
-  max_turns: number | null
   plan_manager_enabled: boolean
   enabled_capabilities: Record<string, boolean>
   mcp_tools: AgentMCPTool[]
@@ -77,7 +76,6 @@ export interface AgentCreateRequest {
   description?: string
   prompt: string
   model?: string
-  max_turns?: number
   plan_manager_enabled?: boolean
 }
 
@@ -88,5 +86,4 @@ export interface AgentUpdateRequest {
   description?: string
   prompt?: string
   model?: string
-  max_turns?: number
 }

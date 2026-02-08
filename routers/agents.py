@@ -99,7 +99,6 @@ AGENT_TEMPLATES = [
         icon="🔍",
         config={
             "model": "claude-sonnet-4-5-20250929",
-            "max_turns": 10,
             "plan_manager_enabled": False,
             "enabled_capabilities": {
                 "code_execution": False,
@@ -123,7 +122,6 @@ AGENT_TEMPLATES = [
         icon="⚡",
         config={
             "model": "claude-sonnet-4-5-20250929",
-            "max_turns": 20,
             "plan_manager_enabled": True,
             "enabled_capabilities": {
                 "code_execution": False,
@@ -148,7 +146,6 @@ AGENT_TEMPLATES = [
         icon="🚀",
         config={
             "model": "claude-sonnet-4-5-20250929",
-            "max_turns": 30,
             "plan_manager_enabled": True,
             "enabled_capabilities": {
                 "code_execution": True,
@@ -201,9 +198,9 @@ async def list_agents(
 
             summary = AgentSummary(
                 agent_id=agent_data["agent_id"],
-                name=agent_data["agent_id"],
-                description=agent_data.get("description", ""),
-                version=agent_data.get("version", "1.0.0"),
+                name=detail.get("name", agent_data.get("name", agent_data["agent_id"])),
+                description=detail.get("description", agent_data.get("description", "")),
+                version=detail.get("version", agent_data.get("version", "1.0.0")),
                 is_active=True,  # 预加载的都是激活状态
                 total_calls=0,  # TODO: 从数据库获取
                 created_at=datetime.fromisoformat(agent_data["loaded_at"]),
@@ -365,24 +362,7 @@ async def validate_agent_config(request: AgentCreateRequest):
                     )
                 )
 
-    # 5. 校验 max_turns
-    if request.max_turns < 1:
-        errors.append(
-            ValidationError(
-                field="max_turns",
-                message="最大对话轮数必须大于 0",
-                code="INVALID_VALUE",
-            )
-        )
-    elif request.max_turns > 100:
-        warnings.append(
-            ValidationWarning(
-                field="max_turns",
-                message="最大对话轮数过大（>100），可能导致性能问题",
-            )
-        )
-
-    # 6. 校验 LLM 配置
+    # 5. 校验 LLM 配置
     if request.llm:
         if request.llm.thinking_budget and request.llm.thinking_budget > 32000:
             warnings.append(
@@ -468,7 +448,11 @@ async def preview_agent_config(request: AgentCreateRequest):
 
 def _build_config_dict(request: AgentCreateRequest) -> dict:
     """
-    Convert AgentCreateRequest to config.yaml dict
+    Convert AgentCreateRequest to config.yaml dict.
+
+    Generates config that matches the _template/config.yaml format:
+    - Uses agent.provider (derived from model) for LLM profiles resolution
+    - Only includes explicitly set fields, no hardcoded defaults
 
     Shared by create / update / preview endpoints.
     """
@@ -478,13 +462,25 @@ def _build_config_dict(request: AgentCreateRequest) -> dict:
             "description": request.description or f"{request.name} 智能助手",
             "version": "1.0.0",
         },
-        "agent": {
-            "model": request.model,
-            "max_turns": request.max_turns,
-            "plan_manager_enabled": request.plan_manager_enabled,
-            "allow_parallel_tools": False,
-        },
     }
+
+    # Agent config: derive provider from model, match template format
+    agent_section: dict = {}
+
+    if request.model:
+        # Derive provider from model registry
+        model_config = ModelRegistry.get(request.model)
+        if model_config:
+            agent_section["provider"] = model_config.provider
+        # Also store explicit model (overrides provider template default)
+        agent_section["model"] = request.model
+
+    # Only include optional fields when explicitly provided (not None)
+    if request.plan_manager_enabled is not None:
+        agent_section["plan_manager_enabled"] = request.plan_manager_enabled
+
+    if agent_section:
+        config_data["agent"] = agent_section
 
     # LLM config
     if request.llm:
@@ -504,7 +500,7 @@ def _build_config_dict(request: AgentCreateRequest) -> dict:
         if request.llm.top_p is not None:
             llm_config["top_p"] = request.llm.top_p
         if llm_config:
-            config_data["agent"]["llm"] = llm_config
+            config_data.setdefault("agent", {})["llm"] = llm_config
 
     # enabled_capabilities
     if request.enabled_capabilities:
@@ -530,7 +526,7 @@ def _build_config_dict(request: AgentCreateRequest) -> dict:
             for api in request.apis
         ]
 
-    # Memory
+    # Memory (only when explicitly provided)
     if request.memory:
         config_data["memory"] = {
             "mem0_enabled": request.memory.mem0_enabled,
@@ -947,7 +943,6 @@ async def get_agent(agent_id: str):
         "version": detail_raw.get("version", "1.0.0"),
         "is_active": detail_raw.get("is_active", True),
         "model": detail_raw.get("model"),
-        "max_turns": detail_raw.get("max_turns"),
         "plan_manager_enabled": detail_raw.get("plan_manager_enabled", False),
         "enabled_capabilities": detail_raw.get("enabled_capabilities", {}),
         "apis": detail_raw.get("apis", []),

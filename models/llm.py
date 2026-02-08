@@ -210,9 +210,27 @@ class ProviderValidateKeyRequest(BaseModel):
     base_url: Optional[str] = Field(None, description="自定义 Base URL（可选，不填用默认）")
 
 
+class ValidatedModelInfo(BaseModel):
+    """验证通过后的模型详情（匹配目录）"""
+    model_name: str = Field(..., description="模型标识符")
+    display_name: str = Field(..., description="显示名称")
+    provider: str = Field(..., description="Provider 名称")
+    model_type: str = Field("llm", description="模型类型")
+    context_window: Optional[int] = Field(None, description="上下文窗口大小（max_input_tokens）")
+    max_output_tokens: int = Field(4096, description="最大输出 token 数")
+    supports_tools: bool = Field(True, description="是否支持工具调用")
+    supports_vision: bool = Field(False, description="是否支持视觉")
+    supports_thinking: bool = Field(False, description="是否支持深度思考")
+    in_catalog: bool = Field(False, description="是否在预设目录中")
+
+
 class ProviderValidateKeyResponse(BaseModel):
     """验证 API Key 响应"""
     valid: bool = Field(..., description="Key 是否有效")
     provider: str = Field(..., description="Provider 名称")
     message: str = Field(..., description="验证结果描述")
-    models: List[str] = Field(default_factory=list, description="该 Key 可用的模型列表（如支持获取）")
+    models: List[str] = Field(default_factory=list, description="该 Key 可用的模型列表（模型名字符串）")
+    model_details: List[ValidatedModelInfo] = Field(
+        default_factory=list,
+        description="匹配目录后的模型详情（含能力、上下文窗口）",
+    )

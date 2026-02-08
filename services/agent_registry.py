@@ -353,8 +353,6 @@ class AgentRegistry:
         if instance_config:
             if instance_config.model:
                 agent.model = instance_config.model
-            if instance_config.max_turns:
-                agent._max_steps = instance_config.max_turns
 
         # 设置实例级工具注册表
         await self._setup_instance_tools(agent, config)
@@ -430,8 +428,6 @@ class AgentRegistry:
         if instance_config:
             if instance_config.model:
                 agent.model = instance_config.model
-            if instance_config.max_turns:
-                agent._max_steps = instance_config.max_turns
 
         # 设置实例级工具
         if hasattr(agent, "_setup_instance_tools"):
@@ -506,6 +502,11 @@ class AgentRegistry:
         return [
             {
                 "agent_id": config.name,
+                "name": (
+                    config.instance_config.name
+                    if config.instance_config
+                    else config.name
+                ),
                 "description": config.description,
                 "version": config.version,
                 "loaded_at": config.loaded_at.isoformat(),
@@ -655,9 +656,11 @@ class AgentRegistry:
         instance_config = config.instance_config
 
         # 提取详细信息
+        # config.name 是 agent_id（目录名），显示名称从 instance_config.name 获取
+        display_name = instance_config.name if instance_config else config.name
         detail = {
             "agent_id": config.name,
-            "name": config.name,
+            "name": display_name,
             "description": config.description,
             "version": config.version,
             "is_active": True,
@@ -690,7 +693,6 @@ class AgentRegistry:
             detail.update(
                 {
                     "model": instance_config.model,
-                    "max_turns": instance_config.max_turns,
                     "plan_manager_enabled": (
                         instance_config.plan_manager_enabled
                         if hasattr(instance_config, "plan_manager_enabled")

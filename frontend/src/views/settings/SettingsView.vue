@@ -139,8 +139,57 @@
                     <AlertTriangle v-else class="w-3.5 h-3.5 flex-shrink-0" />
                     <span>{{ validateResults[p.name].message }}</span>
                   </div>
-                  <!-- 验证通过时显示可用模型列表 -->
-                  <div v-if="validateResults[p.name].valid && validateResults[p.name].models.length" class="mt-2 flex flex-wrap gap-1">
+                  <!-- 验证通过：显示全部模型列表 -->
+                  <div
+                    v-if="validateResults[p.name].valid && validateResults[p.name].model_details?.length"
+                    class="mt-2.5"
+                  >
+                    <div class="text-[10px] text-success/70 mb-1.5">
+                      共 {{ validateResults[p.name].model_details.length }} 个可用模型
+                    </div>
+                    <div class="space-y-1 max-h-[240px] overflow-y-auto scrollbar-thin pr-1">
+                      <div
+                        v-for="m in validateResults[p.name].model_details"
+                        :key="m.model_name"
+                        class="flex items-center gap-2 rounded-lg px-2.5 py-1.5 border"
+                        :class="m.in_catalog
+                          ? 'bg-white/60 border-success/10'
+                          : 'bg-white/30 border-border/50'"
+                      >
+                        <span
+                          class="text-[11px] truncate min-w-0 flex-shrink"
+                          :class="m.in_catalog ? 'font-medium text-foreground' : 'text-muted-foreground'"
+                        >
+                          {{ m.display_name }}
+                        </span>
+                        <div class="flex items-center gap-1 flex-shrink-0 ml-auto">
+                          <span v-if="m.context_window" class="px-1.5 py-0.5 bg-muted rounded text-[9px] text-muted-foreground">
+                            {{ formatContextWindow(m.context_window) }}
+                          </span>
+                          <span v-if="m.max_output_tokens && m.in_catalog" class="px-1.5 py-0.5 bg-muted rounded text-[9px] text-muted-foreground">
+                            {{ formatContextWindow(m.max_output_tokens) }} out
+                          </span>
+                          <span v-if="m.supports_thinking" class="px-1.5 py-0.5 bg-primary/10 rounded text-[9px] text-primary">
+                            Thinking
+                          </span>
+                          <span v-if="m.supports_vision" class="px-1.5 py-0.5 bg-primary/10 rounded text-[9px] text-primary">
+                            Vision
+                          </span>
+                          <span v-if="m.supports_tools && m.in_catalog" class="px-1.5 py-0.5 bg-muted rounded text-[9px] text-muted-foreground">
+                            Tools
+                          </span>
+                          <span v-if="!m.in_catalog" class="px-1.5 py-0.5 bg-muted/50 rounded text-[9px] text-muted-foreground/60 italic">
+                            未收录
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <!-- Fallback: 没有 model_details 时显示纯名字 -->
+                  <div
+                    v-else-if="validateResults[p.name].valid && validateResults[p.name].models.length"
+                    class="mt-2 flex flex-wrap gap-1"
+                  >
                     <span
                       v-for="m in validateResults[p.name].models.slice(0, 8)"
                       :key="m"
@@ -260,6 +309,13 @@ function setProviderCardRef(name: string, el: any) {
 
 // ==================== 方法 ====================
 
+/** Format context window size for display (e.g. 200000 → "200K") */
+function formatContextWindow(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(tokens % 1_000_000 === 0 ? 0 : 1)}M`
+  if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}K`
+  return `${tokens}`
+}
+
 function toggleProvider(name: string) {
   expandedProvider.value = expandedProvider.value === name ? null : name
 }
@@ -281,6 +337,7 @@ async function validateProviderKey(providerName: string) {
       provider: providerName,
       message: e?.response?.data?.detail?.message || e?.message || '验证过程发生错误',
       models: [],
+      model_details: [],
     }
   } finally {
     validating[providerName] = false

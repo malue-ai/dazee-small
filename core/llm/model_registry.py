@@ -965,27 +965,226 @@ def _register_preset_models() -> None:
     """
     # ==================== OpenAI 系列 ====================
 
+    _OPENAI_COMMON = dict(
+        adapter=AdapterType.OPENAI,
+        base_url="https://api.openai.com/v1",
+        api_key_env="OPENAI_API_KEY",
+        provider="openai",
+    )
+
+    # --- GPT-5 family ---
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="gpt-5.2",
+            model_type=ModelType.VLM,
+            display_name="GPT-5.2",
+            description="OpenAI 最新旗舰，编码和智能体任务最强",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_thinking=True,
+                max_tokens=100000, max_input_tokens=1000000,
+            ),
+            pricing=ModelPricing(input_per_million=1.75, output_per_million=14.0,
+                                 cache_read_per_million=0.175),
+            **_OPENAI_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="gpt-5.1",
+            model_type=ModelType.VLM,
+            display_name="GPT-5.1",
+            description="GPT-5 系列高性能推理模型",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_thinking=True,
+                max_tokens=100000, max_input_tokens=1000000,
+            ),
+            pricing=ModelPricing(input_per_million=1.25, output_per_million=10.0,
+                                 cache_read_per_million=0.125),
+            **_OPENAI_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="gpt-5",
+            model_type=ModelType.VLM,
+            display_name="GPT-5",
+            description="GPT-5 系列推理模型，编码和智能体任务",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_thinking=True,
+                max_tokens=100000, max_input_tokens=1000000,
+            ),
+            pricing=ModelPricing(input_per_million=1.25, output_per_million=10.0,
+                                 cache_read_per_million=0.125),
+            **_OPENAI_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="gpt-5-mini",
+            model_type=ModelType.VLM,
+            display_name="GPT-5 Mini",
+            description="GPT-5 高性价比版本",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_thinking=True,
+                max_tokens=100000, max_input_tokens=1000000,
+            ),
+            pricing=ModelPricing(input_per_million=0.25, output_per_million=2.0,
+                                 cache_read_per_million=0.025),
+            **_OPENAI_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="gpt-5-nano",
+            model_type=ModelType.VLM,
+            display_name="GPT-5 Nano",
+            description="GPT-5 最低成本版本",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_thinking=True,
+                max_tokens=16384, max_input_tokens=1000000,
+            ),
+            pricing=ModelPricing(input_per_million=0.05, output_per_million=0.40,
+                                 cache_read_per_million=0.005),
+            **_OPENAI_COMMON,
+        )
+    )
+
+    # --- GPT-4.1 family ---
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="gpt-4.1",
+            model_type=ModelType.VLM,
+            display_name="GPT-4.1",
+            description="最强非推理模型，1M 上下文",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_thinking=False,
+                max_tokens=32768, max_input_tokens=1047576,
+            ),
+            pricing=ModelPricing(input_per_million=2.0, output_per_million=8.0,
+                                 cache_read_per_million=0.50),
+            **_OPENAI_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="gpt-4.1-mini",
+            model_type=ModelType.VLM,
+            display_name="GPT-4.1 Mini",
+            description="GPT-4.1 轻量版，1M 上下文",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_thinking=False,
+                max_tokens=32768, max_input_tokens=1047576,
+            ),
+            pricing=ModelPricing(input_per_million=0.40, output_per_million=1.60,
+                                 cache_read_per_million=0.10),
+            **_OPENAI_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="gpt-4.1-nano",
+            model_type=ModelType.VLM,
+            display_name="GPT-4.1 Nano",
+            description="GPT-4.1 最低成本版，1M 上下文",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_thinking=False,
+                max_tokens=16384, max_input_tokens=1047576,
+            ),
+            pricing=ModelPricing(input_per_million=0.10, output_per_million=0.40,
+                                 cache_read_per_million=0.025),
+            **_OPENAI_COMMON,
+        )
+    )
+
+    # --- o-series (reasoning) ---
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="o3",
+            model_type=ModelType.VLM,
+            display_name="o3",
+            description="OpenAI 推理模型，编码/数学/科学最强",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_thinking=True,
+                max_tokens=100000, max_input_tokens=200000,
+            ),
+            pricing=ModelPricing(input_per_million=2.0, output_per_million=8.0,
+                                 cache_read_per_million=0.50),
+            **_OPENAI_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="o4-mini",
+            model_type=ModelType.VLM,
+            display_name="o4-mini",
+            description="高性价比推理模型，数学/编码/视觉",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_thinking=True,
+                max_tokens=100000, max_input_tokens=200000,
+            ),
+            pricing=ModelPricing(input_per_million=1.10, output_per_million=4.40,
+                                 cache_read_per_million=0.275),
+            **_OPENAI_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="o3-mini",
+            model_type=ModelType.LLM,
+            display_name="o3-mini",
+            description="o3 轻量版推理模型",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                max_tokens=65536, max_input_tokens=200000,
+            ),
+            pricing=ModelPricing(input_per_million=1.10, output_per_million=4.40,
+                                 cache_read_per_million=0.55),
+            **_OPENAI_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="o1",
+            model_type=ModelType.VLM,
+            display_name="o1",
+            description="OpenAI 首代推理模型",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_thinking=True,
+                max_tokens=100000, max_input_tokens=200000,
+            ),
+            pricing=ModelPricing(input_per_million=15.0, output_per_million=60.0,
+                                 cache_read_per_million=7.50),
+            **_OPENAI_COMMON,
+        )
+    )
+
+    # --- GPT-4o family ---
+
     ModelRegistry.register(
         ModelConfig(
             model_name="gpt-4o",
             model_type=ModelType.VLM,
-            adapter=AdapterType.OPENAI,
-            base_url="https://api.openai.com/v1",
-            api_key_env="OPENAI_API_KEY",
-            provider="openai",
             display_name="GPT-4o",
-            description="OpenAI 最新旗舰模型，支持视觉",
+            description="快速智能多模态模型",
             capabilities=ModelCapabilities(
-                supports_tools=True,
-                supports_vision=True,
-                supports_thinking=False,
-                max_tokens=16384,
-                max_input_tokens=128000,
+                supports_tools=True, supports_vision=True, supports_thinking=False,
+                max_tokens=16384, max_input_tokens=128000,
             ),
-            pricing=ModelPricing(
-                input_per_million=2.5,
-                output_per_million=10.0,
-            ),
+            pricing=ModelPricing(input_per_million=2.5, output_per_million=10.0,
+                                 cache_read_per_million=1.25),
+            **_OPENAI_COMMON,
         )
     )
 
@@ -993,75 +1192,76 @@ def _register_preset_models() -> None:
         ModelConfig(
             model_name="gpt-4o-mini",
             model_type=ModelType.VLM,
-            adapter=AdapterType.OPENAI,
-            base_url="https://api.openai.com/v1",
-            api_key_env="OPENAI_API_KEY",
-            provider="openai",
             display_name="GPT-4o Mini",
-            description="GPT-4o 的轻量版本",
+            description="GPT-4o 轻量版本",
             capabilities=ModelCapabilities(
-                supports_tools=True,
-                supports_vision=True,
-                supports_thinking=False,
-                max_tokens=16384,
-                max_input_tokens=128000,
+                supports_tools=True, supports_vision=True, supports_thinking=False,
+                max_tokens=16384, max_input_tokens=128000,
             ),
-            pricing=ModelPricing(
-                input_per_million=0.15,
-                output_per_million=0.60,
-            ),
+            pricing=ModelPricing(input_per_million=0.15, output_per_million=0.60,
+                                 cache_read_per_million=0.075),
+            **_OPENAI_COMMON,
         )
     )
+
+    # --- Legacy ---
 
     ModelRegistry.register(
         ModelConfig(
             model_name="gpt-4-turbo",
             model_type=ModelType.VLM,
-            adapter=AdapterType.OPENAI,
-            base_url="https://api.openai.com/v1",
-            api_key_env="OPENAI_API_KEY",
-            provider="openai",
             display_name="GPT-4 Turbo",
-            description="GPT-4 Turbo with Vision",
+            description="GPT-4 Turbo with Vision（旧版）",
             capabilities=ModelCapabilities(
-                supports_tools=True,
-                supports_vision=True,
-                supports_thinking=False,
-                max_tokens=4096,
-                max_input_tokens=128000,
+                supports_tools=True, supports_vision=True, supports_thinking=False,
+                max_tokens=4096, max_input_tokens=128000,
             ),
-            pricing=ModelPricing(
-                input_per_million=10.0,
-                output_per_million=30.0,
+            pricing=ModelPricing(input_per_million=10.0, output_per_million=30.0),
+            **_OPENAI_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="gpt-3.5-turbo",
+            model_type=ModelType.LLM,
+            display_name="GPT-3.5 Turbo",
+            description="旧版快速模型（Legacy）",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=False, supports_thinking=False,
+                max_tokens=4096, max_input_tokens=16385,
             ),
+            pricing=ModelPricing(input_per_million=0.50, output_per_million=1.50),
+            **_OPENAI_COMMON,
         )
     )
 
     # ==================== Claude 系列 ====================
 
+    _CLAUDE_COMMON = dict(
+        adapter=AdapterType.CLAUDE,
+        base_url="https://api.anthropic.com",
+        api_key_env="ANTHROPIC_API_KEY",
+        provider="claude",
+    )
+
+    # --- Claude 4.5 / 4.6 (latest) ---
+
     ModelRegistry.register(
         ModelConfig(
             model_name="claude-sonnet-4-5-20250929",
             model_type=ModelType.VLM,
-            adapter=AdapterType.CLAUDE,
-            base_url="https://api.anthropic.com",
-            api_key_env="ANTHROPIC_API_KEY",
-            provider="claude",
             display_name="Claude Sonnet 4.5",
             description="Anthropic 最强智能体与编码模型",
             capabilities=ModelCapabilities(
-                supports_tools=True,
-                supports_vision=True,
-                supports_thinking=True,
-                max_tokens=128000,
-                max_input_tokens=200000,
+                supports_tools=True, supports_vision=True, supports_thinking=True,
+                max_tokens=64000, max_input_tokens=200000,
             ),
             pricing=ModelPricing(
-                input_per_million=3.0,
-                output_per_million=15.0,
-                cache_read_per_million=0.30,
-                cache_write_per_million=3.75,
+                input_per_million=3.0, output_per_million=15.0,
+                cache_read_per_million=0.30, cache_write_per_million=3.75,
             ),
+            **_CLAUDE_COMMON,
         )
     )
 
@@ -1069,154 +1269,443 @@ def _register_preset_models() -> None:
         ModelConfig(
             model_name="claude-opus-4-6",
             model_type=ModelType.VLM,
-            adapter=AdapterType.CLAUDE,
-            base_url="https://api.anthropic.com",
-            api_key_env="ANTHROPIC_API_KEY",
-            provider="claude",
             display_name="Claude Opus 4.6",
             description="Anthropic 最强模型（2026.02）",
             capabilities=ModelCapabilities(
-                supports_tools=True,
-                supports_vision=True,
-                supports_thinking=True,
-                max_tokens=64000,
-                max_input_tokens=200000,
+                supports_tools=True, supports_vision=True, supports_thinking=True,
+                max_tokens=64000, max_input_tokens=200000,
             ),
             pricing=ModelPricing(
-                input_per_million=15.0,
-                output_per_million=75.0,
-                cache_read_per_million=1.50,
-                cache_write_per_million=18.75,
+                input_per_million=15.0, output_per_million=75.0,
+                cache_read_per_million=1.50, cache_write_per_million=18.75,
             ),
+            **_CLAUDE_COMMON,
+        )
+    )
+
+    # --- Claude 4 ---
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="claude-sonnet-4-20250514",
+            model_type=ModelType.VLM,
+            display_name="Claude Sonnet 4",
+            description="Claude 4 系列均衡模型",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_thinking=True,
+                max_tokens=64000, max_input_tokens=200000,
+            ),
+            pricing=ModelPricing(
+                input_per_million=3.0, output_per_million=15.0,
+                cache_read_per_million=0.30, cache_write_per_million=3.75,
+            ),
+            **_CLAUDE_COMMON,
         )
     )
 
     ModelRegistry.register(
         ModelConfig(
-            model_name="claude-haiku-3-5-20241022",
+            model_name="claude-opus-4-20250514",
             model_type=ModelType.VLM,
-            adapter=AdapterType.CLAUDE,
-            base_url="https://api.anthropic.com",
-            api_key_env="ANTHROPIC_API_KEY",
-            provider="claude",
-            display_name="Claude Haiku 3.5",
-            description="Claude 快速模型",
+            display_name="Claude Opus 4",
+            description="Claude 4 系列旗舰模型",
             capabilities=ModelCapabilities(
-                supports_tools=True,
-                supports_vision=True,
-                supports_thinking=False,
-                max_tokens=8192,
-                max_input_tokens=200000,
+                supports_tools=True, supports_vision=True, supports_thinking=True,
+                max_tokens=32000, max_input_tokens=200000,
             ),
             pricing=ModelPricing(
-                input_per_million=0.80,
-                output_per_million=4.0,
-                cache_read_per_million=0.08,
-                cache_write_per_million=1.0,
+                input_per_million=15.0, output_per_million=75.0,
+                cache_read_per_million=1.50, cache_write_per_million=18.75,
             ),
+            **_CLAUDE_COMMON,
+        )
+    )
+
+    # --- Claude 3.5 ---
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="claude-3-5-sonnet-20241022",
+            model_type=ModelType.VLM,
+            display_name="Claude 3.5 Sonnet",
+            description="Claude 3.5 系列均衡模型",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_thinking=False,
+                max_tokens=8192, max_input_tokens=200000,
+            ),
+            pricing=ModelPricing(
+                input_per_million=3.0, output_per_million=15.0,
+                cache_read_per_million=0.30, cache_write_per_million=3.75,
+            ),
+            **_CLAUDE_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="claude-3-5-haiku-20241022",
+            model_type=ModelType.VLM,
+            display_name="Claude 3.5 Haiku",
+            description="Claude 3.5 快速模型",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_thinking=False,
+                max_tokens=8192, max_input_tokens=200000,
+            ),
+            pricing=ModelPricing(
+                input_per_million=0.80, output_per_million=4.0,
+                cache_read_per_million=0.08, cache_write_per_million=1.0,
+            ),
+            **_CLAUDE_COMMON,
+        )
+    )
+
+    # --- Claude 3 (Legacy) ---
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="claude-3-opus-20240229",
+            model_type=ModelType.VLM,
+            display_name="Claude 3 Opus",
+            description="Claude 3 系列旗舰模型（Legacy）",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_thinking=False,
+                max_tokens=4096, max_input_tokens=200000,
+            ),
+            pricing=ModelPricing(
+                input_per_million=15.0, output_per_million=75.0,
+                cache_read_per_million=1.50, cache_write_per_million=18.75,
+            ),
+            **_CLAUDE_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="claude-3-haiku-20240307",
+            model_type=ModelType.VLM,
+            display_name="Claude 3 Haiku",
+            description="Claude 3 快速模型（Legacy）",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_thinking=False,
+                max_tokens=4096, max_input_tokens=200000,
+            ),
+            pricing=ModelPricing(
+                input_per_million=0.25, output_per_million=1.25,
+                cache_read_per_million=0.03, cache_write_per_million=0.30,
+            ),
+            **_CLAUDE_COMMON,
         )
     )
 
     # ==================== Qwen 系列 ====================
 
+    _QWEN_COMMON = dict(
+        adapter=AdapterType.OPENAI,
+        base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        api_key_env="DASHSCOPE_API_KEY",
+        provider="qwen",
+    )
+
+    # --- Qwen3 旗舰 ---
+
     ModelRegistry.register(
         ModelConfig(
             model_name="qwen3-max",
             model_type=ModelType.LLM,
-            adapter=AdapterType.OPENAI,
-            base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-            api_key_env="DASHSCOPE_API_KEY",
-            provider="qwen",
-            display_name="通义千问 Qwen3-Max",
-            description="阿里云旗舰模型，对标 Claude Sonnet",
+            display_name="Qwen3-Max",
+            description="阿里云旗舰模型，262K 上下文，Coding 76.7 / GPQA 76.4",
             capabilities=ModelCapabilities(
-                supports_tools=True,
-                supports_vision=False,
-                supports_thinking=True,
-                max_tokens=65536,
-                max_input_tokens=258048,
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                max_tokens=65536, max_input_tokens=258048,
             ),
-            # Qwen3-Max: ¥2/M input, ¥8/M output → ~$0.28/$1.10 per M
-            pricing=ModelPricing(
-                input_per_million=0.28,
-                output_per_million=1.10,
-            ),
+            pricing=ModelPricing(input_per_million=1.20, output_per_million=6.00,
+                                 cache_read_per_million=0.24),
+            **_QWEN_COMMON,
         )
     )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="qwen3-max-thinking",
+            model_type=ModelType.LLM,
+            display_name="Qwen3-Max-Thinking",
+            description="阿里云最强推理模型 (2026.01)，对标 GPT-5.2-Thinking / Claude-Opus-4.5",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                max_tokens=65536, max_input_tokens=258048,
+            ),
+            pricing=ModelPricing(input_per_million=1.20, output_per_million=6.00,
+                                 cache_read_per_million=0.24),
+            **_QWEN_COMMON,
+        )
+    )
+
+    # --- Qwen3 Coder 系列 ---
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="qwen3-coder-plus",
+            model_type=ModelType.LLM,
+            display_name="Qwen3-Coder-Plus",
+            description="Qwen3 代码专精模型，128K 上下文",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                max_tokens=65536, max_input_tokens=128000,
+            ),
+            pricing=ModelPricing(input_per_million=1.00, output_per_million=5.00,
+                                 cache_read_per_million=0.10),
+            **_QWEN_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="qwen3-coder-flash",
+            model_type=ModelType.LLM,
+            display_name="Qwen3-Coder-Flash",
+            description="Qwen3 代码快速模型，128K 上下文",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                max_tokens=65536, max_input_tokens=128000,
+            ),
+            pricing=ModelPricing(input_per_million=0.30, output_per_million=1.50,
+                                 cache_read_per_million=0.08),
+            **_QWEN_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="qwen3-coder-next",
+            model_type=ModelType.LLM,
+            display_name="Qwen3-Coder-Next",
+            description="Qwen3 最新代码模型 (2026.02)，262K 上下文，GPQA 73.7",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                max_tokens=65536, max_input_tokens=262144,
+            ),
+            pricing=ModelPricing(input_per_million=0.07, output_per_million=0.30,
+                                 cache_read_per_million=0.035),
+            **_QWEN_COMMON,
+        )
+    )
+
+    # --- Qwen3 Next 系列 ---
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="qwen3-next-80b-a3b-instruct",
+            model_type=ModelType.LLM,
+            display_name="Qwen3-Next-80B Instruct",
+            description="Qwen3 Next 高性能模型，262K 上下文，Coding 68.4",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=False, supports_thinking=False,
+                max_tokens=65536, max_input_tokens=262144,
+            ),
+            pricing=ModelPricing(input_per_million=0.09, output_per_million=1.10),
+            **_QWEN_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="qwen3-next-80b-a3b-thinking",
+            model_type=ModelType.LLM,
+            display_name="Qwen3-Next-80B Thinking",
+            description="Qwen3 Next 深度推理模型，128K 上下文",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                max_tokens=65536, max_input_tokens=128000,
+            ),
+            pricing=ModelPricing(input_per_million=0.15, output_per_million=1.20),
+            **_QWEN_COMMON,
+        )
+    )
+
+    # --- Qwen3 VL（视觉）系列 ---
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="qwen3-vl-plus",
+            model_type=ModelType.VLM,
+            display_name="Qwen3-VL-Plus",
+            description="Qwen3 视觉旗舰，262K 上下文",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_thinking=False,
+                max_tokens=65536, max_input_tokens=262144,
+            ),
+            pricing=ModelPricing(input_per_million=0.50, output_per_million=1.50),
+            **_QWEN_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="qwen3-vl-235b-a22b-instruct",
+            model_type=ModelType.VLM,
+            display_name="Qwen3-VL-235B Instruct",
+            description="Qwen3 旗舰视觉模型，262K 上下文，Coding 59.4",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_thinking=False,
+                max_tokens=65536, max_input_tokens=262144,
+            ),
+            pricing=ModelPricing(input_per_million=0.20, output_per_million=0.88,
+                                 cache_read_per_million=0.11),
+            **_QWEN_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="qwen3-vl-235b-a22b-thinking",
+            model_type=ModelType.VLM,
+            display_name="Qwen3-VL-235B Thinking",
+            description="Qwen3 旗舰视觉推理模型，262K 上下文",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_thinking=True,
+                max_tokens=65536, max_input_tokens=262144,
+            ),
+            pricing=ModelPricing(input_per_million=0.45, output_per_million=3.50),
+            **_QWEN_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="qwen3-vl-32b-instruct",
+            model_type=ModelType.VLM,
+            display_name="Qwen3-VL-32B Instruct",
+            description="Qwen3 视觉模型 32B，262K 上下文，Coding 51.4",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_thinking=False,
+                max_tokens=65536, max_input_tokens=262144,
+            ),
+            pricing=ModelPricing(input_per_million=0.50, output_per_million=1.50),
+            **_QWEN_COMMON,
+        )
+    )
+
+    # --- Qwen 经典系列（Qwen-Plus / Turbo / Max / QwQ）---
 
     ModelRegistry.register(
         ModelConfig(
             model_name="qwen-plus",
             model_type=ModelType.LLM,
-            adapter=AdapterType.OPENAI,
-            base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-            api_key_env="DASHSCOPE_API_KEY",
-            provider="qwen",
-            display_name="通义千问 Qwen-Plus",
-            description="阿里云快速模型",
+            display_name="Qwen-Plus",
+            description="阿里云通用模型，131K 上下文，性价比高",
             capabilities=ModelCapabilities(
-                supports_tools=True,
-                supports_vision=False,
-                supports_thinking=True,
-                max_tokens=32768,
-                max_input_tokens=131072,
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                max_tokens=33000, max_input_tokens=131072,
             ),
-            # Qwen-Plus: ¥0.8/M input, ¥2/M output → ~$0.11/$0.28 per M
-            pricing=ModelPricing(
-                input_per_million=0.11,
-                output_per_million=0.28,
-            ),
+            pricing=ModelPricing(input_per_million=0.40, output_per_million=1.20,
+                                 cache_read_per_million=0.16),
+            **_QWEN_COMMON,
         )
     )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="qwen-turbo",
+            model_type=ModelType.LLM,
+            display_name="Qwen-Turbo",
+            description="阿里云低成本快速模型，1M 超长上下文",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                max_tokens=8192, max_input_tokens=1000000,
+            ),
+            pricing=ModelPricing(input_per_million=0.05, output_per_million=0.20,
+                                 cache_read_per_million=0.02),
+            **_QWEN_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="qwen-max",
+            model_type=ModelType.LLM,
+            display_name="Qwen-Max",
+            description="Qwen2.5 旗舰模型，32K 上下文",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=False, supports_thinking=False,
+                max_tokens=16384, max_input_tokens=32768,
+            ),
+            pricing=ModelPricing(input_per_million=1.60, output_per_million=6.40,
+                                 cache_read_per_million=0.64),
+            **_QWEN_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="qwq-plus",
+            model_type=ModelType.LLM,
+            display_name="QwQ-Plus",
+            description="Qwen 推理模型，Coding 63.1 / GPQA 59.3",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                max_tokens=33000, max_input_tokens=131072,
+            ),
+            pricing=ModelPricing(input_per_million=0.40, output_per_million=1.20),
+            **_QWEN_COMMON,
+        )
+    )
+
+    # --- Qwen VL 经典 ---
 
     ModelRegistry.register(
         ModelConfig(
             model_name="qwen-vl-max",
             model_type=ModelType.VLM,
-            adapter=AdapterType.OPENAI,
-            base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-            api_key_env="DASHSCOPE_API_KEY",
-            provider="qwen",
-            display_name="通义千问 VL-Max",
-            description="阿里云视觉语言模型",
+            display_name="Qwen-VL-Max",
+            description="阿里云视觉语言旗舰，131K 上下文",
             capabilities=ModelCapabilities(
-                supports_tools=True,
-                supports_vision=True,
-                supports_thinking=False,
-                max_tokens=32768,
+                supports_tools=True, supports_vision=True, supports_thinking=False,
+                max_tokens=33000, max_input_tokens=131072,
             ),
-            # Qwen-VL-Max: ¥3/M input, ¥8/M output → ~$0.41/$1.10 per M
-            pricing=ModelPricing(
-                input_per_million=0.41,
-                output_per_million=1.10,
+            pricing=ModelPricing(input_per_million=0.80, output_per_million=3.20),
+            **_QWEN_COMMON,
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="qwen-vl-plus",
+            model_type=ModelType.VLM,
+            display_name="Qwen-VL-Plus",
+            description="阿里云视觉语言模型（轻量）",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=True, supports_thinking=False,
+                max_tokens=8192, max_input_tokens=131072,
             ),
+            pricing=ModelPricing(input_per_million=0.21, output_per_million=0.63),
+            **_QWEN_COMMON,
         )
     )
 
     # ==================== DeepSeek 系列 ====================
 
+    _DEEPSEEK_COMMON = dict(
+        adapter=AdapterType.OPENAI,
+        base_url="https://api.deepseek.com/v1",
+        api_key_env="DEEPSEEK_API_KEY",
+        provider="deepseek",
+    )
+
     ModelRegistry.register(
         ModelConfig(
             model_name="deepseek-chat",
             model_type=ModelType.LLM,
-            adapter=AdapterType.OPENAI,
-            base_url="https://api.deepseek.com/v1",
-            api_key_env="DEEPSEEK_API_KEY",
-            provider="deepseek",
-            display_name="DeepSeek Chat",
-            description="DeepSeek 对话模型",
+            display_name="DeepSeek Chat (V3)",
+            description="DeepSeek 对话模型，64K 上下文",
             capabilities=ModelCapabilities(
-                supports_tools=True,
-                supports_vision=False,
-                supports_thinking=False,
-                max_tokens=8192,
-                max_input_tokens=64000,
+                supports_tools=True, supports_vision=False, supports_thinking=False,
+                max_tokens=8192, max_input_tokens=64000,
             ),
             pricing=ModelPricing(
-                input_per_million=0.27,
-                output_per_million=1.10,
+                input_per_million=0.27, output_per_million=1.10,
                 cache_read_per_million=0.07,
             ),
+            **_DEEPSEEK_COMMON,
         )
     )
 
@@ -1224,50 +1713,56 @@ def _register_preset_models() -> None:
         ModelConfig(
             model_name="deepseek-reasoner",
             model_type=ModelType.LLM,
-            adapter=AdapterType.OPENAI,
-            base_url="https://api.deepseek.com/v1",
-            api_key_env="DEEPSEEK_API_KEY",
-            provider="deepseek",
-            display_name="DeepSeek Reasoner",
-            description="DeepSeek 推理模型（R1）",
+            display_name="DeepSeek Reasoner (R1)",
+            description="DeepSeek 推理模型，支持 CoT",
             capabilities=ModelCapabilities(
-                supports_tools=True,
-                supports_vision=False,
-                supports_thinking=True,
-                max_tokens=8192,
-                max_input_tokens=64000,
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                max_tokens=64000, max_input_tokens=64000,
             ),
             pricing=ModelPricing(
-                input_per_million=0.55,
-                output_per_million=2.19,
+                input_per_million=0.55, output_per_million=2.19,
                 cache_read_per_million=0.14,
             ),
+            **_DEEPSEEK_COMMON,
         )
     )
 
     # ==================== Kimi (Moonshot) 系列 ====================
 
+    _KIMI_COMMON = dict(
+        adapter=AdapterType.OPENAI,
+        base_url="https://api.moonshot.cn/v1",
+        api_key_env="MOONSHOT_API_KEY",
+        provider="kimi",
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="kimi-k2-0711",
+            model_type=ModelType.LLM,
+            display_name="Kimi K2",
+            description="Moonshot AI 最新旗舰模型",
+            capabilities=ModelCapabilities(
+                supports_tools=True, supports_vision=False, supports_thinking=True,
+                max_tokens=16384, max_input_tokens=131072,
+            ),
+            pricing=ModelPricing(input_per_million=0.84, output_per_million=0.84),
+            **_KIMI_COMMON,
+        )
+    )
+
     ModelRegistry.register(
         ModelConfig(
             model_name="moonshot-v1-128k",
             model_type=ModelType.LLM,
-            adapter=AdapterType.OPENAI,
-            base_url="https://api.moonshot.cn/v1",
-            api_key_env="MOONSHOT_API_KEY",
-            provider="kimi",
-            display_name="Kimi Moonshot v1 128K",
+            display_name="Moonshot v1 128K",
             description="Moonshot AI 长上下文模型（128K）",
             capabilities=ModelCapabilities(
-                supports_tools=True,
-                supports_vision=False,
-                supports_thinking=False,
-                max_tokens=8192,
-                max_input_tokens=128000,
+                supports_tools=True, supports_vision=False, supports_thinking=False,
+                max_tokens=8192, max_input_tokens=128000,
             ),
-            pricing=ModelPricing(
-                input_per_million=0.84,
-                output_per_million=0.84,
-            ),
+            pricing=ModelPricing(input_per_million=0.84, output_per_million=0.84),
+            **_KIMI_COMMON,
         )
     )
 
@@ -1275,73 +1770,53 @@ def _register_preset_models() -> None:
         ModelConfig(
             model_name="moonshot-v1-32k",
             model_type=ModelType.LLM,
-            adapter=AdapterType.OPENAI,
-            base_url="https://api.moonshot.cn/v1",
-            api_key_env="MOONSHOT_API_KEY",
-            provider="kimi",
-            display_name="Kimi Moonshot v1 32K",
+            display_name="Moonshot v1 32K",
             description="Moonshot AI 标准模型（32K）",
             capabilities=ModelCapabilities(
-                supports_tools=True,
-                supports_vision=False,
-                supports_thinking=False,
-                max_tokens=8192,
-                max_input_tokens=32000,
+                supports_tools=True, supports_vision=False, supports_thinking=False,
+                max_tokens=8192, max_input_tokens=32000,
             ),
-            pricing=ModelPricing(
-                input_per_million=0.34,
-                output_per_million=0.34,
-            ),
+            pricing=ModelPricing(input_per_million=0.34, output_per_million=0.34),
+            **_KIMI_COMMON,
         )
     )
 
     ModelRegistry.register(
         ModelConfig(
-            model_name="kimi-k2-0711",
+            model_name="moonshot-v1-8k",
             model_type=ModelType.LLM,
-            adapter=AdapterType.OPENAI,
-            base_url="https://api.moonshot.cn/v1",
-            api_key_env="MOONSHOT_API_KEY",
-            provider="kimi",
-            display_name="Kimi K2",
-            description="Moonshot AI 最新旗舰模型",
+            display_name="Moonshot v1 8K",
+            description="Moonshot AI 轻量模型（8K）",
             capabilities=ModelCapabilities(
-                supports_tools=True,
-                supports_vision=False,
-                supports_thinking=True,
-                max_tokens=16384,
-                max_input_tokens=131072,
+                supports_tools=True, supports_vision=False, supports_thinking=False,
+                max_tokens=4096, max_input_tokens=8000,
             ),
-            pricing=ModelPricing(
-                input_per_million=0.84,
-                output_per_million=0.84,
-            ),
+            pricing=ModelPricing(input_per_million=0.17, output_per_million=0.17),
+            **_KIMI_COMMON,
         )
     )
 
     # ==================== MiniMax 系列 ====================
 
+    _MINIMAX_COMMON = dict(
+        adapter=AdapterType.OPENAI,
+        base_url="https://api.minimax.chat/v1",
+        api_key_env="MINIMAX_API_KEY",
+        provider="minimax",
+    )
+
     ModelRegistry.register(
         ModelConfig(
             model_name="MiniMax-Text-01",
             model_type=ModelType.LLM,
-            adapter=AdapterType.OPENAI,
-            base_url="https://api.minimax.chat/v1",
-            api_key_env="MINIMAX_API_KEY",
-            provider="minimax",
             display_name="MiniMax Text 01",
             description="MiniMax 旗舰文本模型（4M 上下文）",
             capabilities=ModelCapabilities(
-                supports_tools=True,
-                supports_vision=False,
-                supports_thinking=False,
-                max_tokens=32768,
-                max_input_tokens=1000000,
+                supports_tools=True, supports_vision=False, supports_thinking=False,
+                max_tokens=32768, max_input_tokens=1000000,
             ),
-            pricing=ModelPricing(
-                input_per_million=0.15,
-                output_per_million=1.10,
-            ),
+            pricing=ModelPricing(input_per_million=0.15, output_per_million=1.10),
+            **_MINIMAX_COMMON,
         )
     )
 
@@ -1349,23 +1824,14 @@ def _register_preset_models() -> None:
         ModelConfig(
             model_name="abab6.5s-chat",
             model_type=ModelType.LLM,
-            adapter=AdapterType.OPENAI,
-            base_url="https://api.minimax.chat/v1",
-            api_key_env="MINIMAX_API_KEY",
-            provider="minimax",
             display_name="MiniMax abab6.5s",
             description="MiniMax 快速模型",
             capabilities=ModelCapabilities(
-                supports_tools=True,
-                supports_vision=False,
-                supports_thinking=False,
-                max_tokens=8192,
-                max_input_tokens=245760,
+                supports_tools=True, supports_vision=False, supports_thinking=False,
+                max_tokens=8192, max_input_tokens=245760,
             ),
-            pricing=ModelPricing(
-                input_per_million=0.14,
-                output_per_million=0.14,
-            ),
+            pricing=ModelPricing(input_per_million=0.14, output_per_million=0.14),
+            **_MINIMAX_COMMON,
         )
     )
 
