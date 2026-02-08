@@ -33,6 +33,10 @@
   --color-secondary: #F7F7F7;
   --color-secondary-foreground: #18181b;
 
+  /* ---- 语义色：成功 / 危险 ---- */
+  --color-success: #22c55e;
+  --color-destructive: #ef4444;
+
   /* ---- 边框 / 输入 / 聚焦环 ---- */
   --color-border: rgba(0, 0, 0, 0.06);
   --color-input: rgba(0, 0, 0, 0.06);

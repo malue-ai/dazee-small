@@ -8,6 +8,8 @@ use std::process::Command as SysCommand;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager};
+use tauri::menu::{MenuBuilder, MenuItemBuilder};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
 /// 写入调试日志文件（用于诊断 open/Spotlight 启动问题）
 fn debug_log(msg: &str) {
@@ -587,12 +589,65 @@ fn main() {
                 });
             }
 
+            // ============ 系统托盘 ============
+            let show_item = MenuItemBuilder::with_id("show", "显示窗口").build(app)?;
+            let quit_item = MenuItemBuilder::with_id("quit", "退出").build(app)?;
+            let tray_menu = MenuBuilder::new(app)
+                .items(&[&show_item, &quit_item])
+                .build()?;
+
+            let _tray = TrayIconBuilder::new()
+                .icon(tauri::include_image!("./icons/32x32.png"))
+                .icon_as_template(true)
+                .menu(&tray_menu)
+                .tooltip("ZenFlux Agent")
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    "show" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.unminimize();
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    "quit" => {
+                        // 真正退出：先终止 sidecar，再退出应用
+                        kill_sidecar(app);
+                        app.exit(0);
+                    }
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    // 左键单击托盘图标 → 显示窗口
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.unminimize();
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                })
+                .build(app)?;
+
             Ok(())
         })
         .on_window_event(|window, event| {
-            // 窗口关闭时终止 sidecar（第一层防护）
-            if let tauri::WindowEvent::Destroyed = event {
-                kill_sidecar(window.app_handle());
+            match event {
+                // 拦截窗口关闭请求 → 隐藏到托盘而非退出
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+                // 窗口真正销毁时终止 sidecar（第一层防护）
+                tauri::WindowEvent::Destroyed => {
+                    kill_sidecar(window.app_handle());
+                }
+                _ => {}
             }
         })
         .invoke_handler(tauri::generate_handler![

@@ -271,6 +271,7 @@ export function useWebSocketChat() {
     if (
       eventType === 'message_stop' ||
       eventType === 'session_end' ||
+      eventType === 'session_stopped' ||
       eventName === 'done'
     ) {
       if (streamCompleteResolve) {

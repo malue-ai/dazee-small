@@ -5,7 +5,7 @@
       class="fixed inset-0 bg-foreground/50 backdrop-blur-md z-50 flex items-center justify-center p-6 animate-in fade-in duration-300" 
       @click.self="emit('cancel')"
     >
-      <div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-hidden animate-in slide-in-from-bottom-8 duration-300 ring-1 ring-white/20 flex flex-col">
+      <div class="bg-card rounded-3xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-hidden animate-in slide-in-from-bottom-8 duration-300 ring-1 ring-white/20 flex flex-col">
         <!-- 头部 -->
         <div class="flex items-center justify-between px-8 py-5 border-b border-border bg-muted/50 flex-shrink-0">
           <span class="text-lg font-bold text-foreground flex items-center gap-2">
