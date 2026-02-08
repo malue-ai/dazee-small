@@ -76,7 +76,6 @@ import {
   BookOpen, 
   Puzzle, 
   MessageSquare,
-  FileText,
   Settings
 } from 'lucide-vue-next'
 import type { FunctionalComponent } from 'vue'
@@ -98,7 +97,6 @@ const router = useRouter()
 const mainNavItems: NavItem[] = [
   { path: '/knowledge', icon: BookOpen, label: '知识库' },
   { path: '/skills', icon: Puzzle, label: '技能' },
-  { path: '/documentation', icon: FileText, label: '文档' },
   { path: '/settings', icon: Settings, label: '设置' }
 ]
 

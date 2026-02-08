@@ -77,24 +77,23 @@
         />
       </div>
 
-      <!-- 统一的右侧面板（任务/工作区） -->
-      <Transition name="slide-right">
+      <!-- [隐藏] 右侧面板（任务/工作区）- 暂时不需要，后续恢复时取消注释并将 showRightSidebar 改回 ref(true) -->
+      <!-- <Transition name="slide-right">
         <div 
           v-if="showRightSidebar"
           class="w-1/2 flex-shrink-0 bg-white flex flex-col overflow-hidden my-4 mr-4 ml-3 rounded-2xl shadow-xl border border-border"
         >
-            <!-- 顶部 Tab 栏 -->
             <div class="h-14 flex items-center justify-between px-4 border-b border-border flex-shrink-0">
               <div class="flex gap-1 p-1 bg-muted rounded-lg">
-          <button 
+                <button 
                   class="px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5" 
                   :class="rightSidebarTab === 'plan' ? 'bg-white text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
-            @click="rightSidebarTab = 'plan'"
-          >
+                  @click="rightSidebarTab = 'plan'"
+                >
                   <ClipboardList class="w-3.5 h-3.5" />
                   任务
-          </button>
-          <button 
+                </button>
+                <button 
                   v-if="conversationStore.currentId"
                   class="px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5" 
                   :class="rightSidebarTab === 'workspace' ? 'bg-white text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
@@ -102,57 +101,51 @@
                 >
                   <FileText class="w-3.5 h-3.5" />
                   工作区
-          </button>
-        </div>
+                </button>
+              </div>
               <button 
                 @click="showRightSidebar = false" 
                 class="w-7 h-7 flex items-center justify-center rounded-full bg-muted hover:bg-muted/80 text-muted-foreground transition-colors"
               >
                 <X class="w-4 h-4" />
               </button>
-      </div>
-      
-        <!-- 任务看板 -->
-            <div v-if="rightSidebarTab === 'plan'" class="flex-1 overflow-y-auto p-4 scrollbar-thin">
-          <PlanWidget v-if="currentPlan" :plan="currentPlan" />
-          <div v-else class="h-full flex flex-col items-center justify-center text-muted-foreground/40 opacity-60">
-                  <div class="w-16 h-16 bg-muted rounded-2xl flex items-center justify-center mb-4 border border-border">
-                    <ClipboardList class="w-8 h-8 text-muted-foreground/50" />
             </div>
-            <p class="text-sm font-medium">暂无任务计划</p>
-            <p class="text-xs mt-1">AI 生成计划后将显示在这里</p>
-      </div>
-    </div>
-
-            <!-- 工作区 -->
+            <div v-if="rightSidebarTab === 'plan'" class="flex-1 overflow-y-auto p-4 scrollbar-thin">
+              <PlanWidget v-if="currentPlan" :plan="currentPlan" />
+              <div v-else class="h-full flex flex-col items-center justify-center text-muted-foreground/40 opacity-60">
+                <div class="w-16 h-16 bg-muted rounded-2xl flex items-center justify-center mb-4 border border-border">
+                  <ClipboardList class="w-8 h-8 text-muted-foreground/50" />
+                </div>
+                <p class="text-sm font-medium">暂无任务计划</p>
+                <p class="text-xs mt-1">AI 生成计划后将显示在这里</p>
+              </div>
+            </div>
             <div v-else-if="rightSidebarTab === 'workspace'" class="flex-1 flex overflow-hidden">
-              <!-- 文件浏览器 -->
               <div class="w-[220px] min-w-[220px] border-r border-border bg-muted overflow-y-auto">
-             <FileExplorer 
+                <FileExplorer 
                   v-if="conversationStore.currentId"
                   :conversation-id="conversationStore.currentId"
-                @file-select="handleFilePreviewSelect"
+                  @file-select="handleFilePreviewSelect"
                   @run-project="handleRunProject"
-             />
-          </div>
-              <!-- 文件预览 -->
+                />
+              </div>
               <div class="flex-1 flex flex-col overflow-hidden">
-             <FilePreview
+                <FilePreview
                   v-if="previewFile && conversationStore.currentId"
                   :conversation-id="conversationStore.currentId"
-                :file-path="previewFile.path"
-                @close="previewFile = null"
-             />
+                  :file-path="previewFile.path"
+                  @close="previewFile = null"
+                />
                 <div v-else class="h-full flex flex-col items-center justify-center text-muted-foreground/60 bg-muted/50">
                   <div class="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mb-4 border border-border">
                     <FileText class="w-8 h-8 text-muted-foreground/60" />
-             </div>
-             <p class="text-sm font-medium">选择文件查看内容</p>
-          </div>
-       </div>
-    </div>
+                  </div>
+                  <p class="text-sm font-medium">选择文件查看内容</p>
+                </div>
+              </div>
             </div>
-      </Transition>
+        </div>
+      </Transition> -->
     </div>
           
     <!-- 文件上传 input -->
@@ -246,7 +239,7 @@ const hitl = chat.hitl
 
 // UI 状态
 const sidebarCollapsed = ref(false)
-const showRightSidebar = ref(true)
+const showRightSidebar = ref(false)
 const rightSidebarTab = ref<'plan' | 'workspace'>('plan')
 
 // 输入

@@ -97,18 +97,3 @@ export type {
   SkillUninstallRequest,
   SkillToggleRequest
 } from './skills'
-
-// 从 realtime.ts 导出实时语音相关类型
-export type {
-  RealtimeStatus,
-  RealtimeSession,
-  RealtimeEventType,
-  RealtimeEvent,
-  SessionCreatedEvent,
-  AudioDeltaEvent,
-  TextDeltaEvent,
-  TranscriptDeltaEvent,
-  ErrorEvent,
-  RealtimeMessage,
-  RealtimeOptions
-} from './realtime'

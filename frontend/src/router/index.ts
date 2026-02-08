@@ -27,28 +27,6 @@ const routes = [
     component: () => import('@/views/skills/SkillsView.vue'),
     meta: { layout: 'dashboard' }
   },
-  // ==================== 文档浏览 ====================
-  {
-    path: '/documentation',
-    name: 'documentation',
-    component: () => import('@/views/docs/DocsView.vue'),
-    meta: { layout: 'dashboard' }
-  },
-  {
-    path: '/documentation/:docPath(.*)',
-    name: 'documentation-detail',
-    component: () => import('@/views/docs/DocsView.vue'),
-    meta: { layout: 'dashboard' }
-  },
-
-  // ==================== 实时语音 ====================
-  {
-    path: '/realtime',
-    name: 'realtime',
-    component: () => import('@/views/realtime/RealtimeView.vue'),
-    meta: { layout: 'none' }  // 独立布局
-  },
-
   // ==================== 设置页面 ====================
   {
     path: '/settings',

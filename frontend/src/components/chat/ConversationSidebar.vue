@@ -87,20 +87,6 @@
           <Puzzle class="w-4 h-4 text-muted-foreground group-hover:text-foreground" />
           <span class="text-sm font-medium">技能</span>
         </button>
-        <button 
-          @click="emit('navigate', '/documentation')" 
-          class="w-full flex items-center gap-3 px-3 py-2 text-muted-foreground hover:bg-muted hover:text-foreground rounded-lg transition-colors group"
-        >
-          <FileText class="w-4 h-4 text-muted-foreground group-hover:text-foreground" />
-          <span class="text-sm font-medium">文档</span>
-        </button>
-        <button 
-          @click="emit('navigate', '/realtime')" 
-          class="w-full flex items-center gap-3 px-3 py-2 text-muted-foreground hover:bg-muted hover:text-foreground rounded-lg transition-colors group"
-        >
-          <Headphones class="w-4 h-4 text-muted-foreground group-hover:text-foreground" />
-          <span class="text-sm font-medium">实时语音</span>
-        </button>
       </div>
 
       <!-- 搜索结果 -->
@@ -219,10 +205,8 @@ import {
   X,
   BookOpen, 
   Puzzle, 
-  FileText, 
   MessageSquare, 
-  Trash2, 
-  Headphones,
+  Trash2,
   Sparkles,
   Loader2,
   Inbox
