@@ -6,7 +6,7 @@
       @click.self="emit('dismiss')"
     >
       <div
-        class="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in slide-in-from-bottom-8 duration-300 ring-1 ring-white/20 flex flex-col"
+        class="bg-card rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in slide-in-from-bottom-8 duration-300 ring-1 ring-white/20 flex flex-col"
       >
         <div
           class="flex items-center justify-between px-8 py-5 border-b border-border bg-muted/50 flex-shrink-0"

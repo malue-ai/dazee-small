@@ -6,7 +6,7 @@
         class="fixed inset-0 bg-foreground/50 backdrop-blur-sm z-[9999] flex items-center justify-center p-6"
         @click.self="handleCancel"
       >
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in slide-in-from-bottom-4 duration-200">
+        <div class="bg-card rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in slide-in-from-bottom-4 duration-200">
           <!-- 图标 + 内容 -->
           <div class="px-6 pt-6 pb-4 text-center">
             <!-- 警告图标 -->

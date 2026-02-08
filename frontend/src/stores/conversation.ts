@@ -242,22 +242,20 @@ export const useConversationStore = defineStore('conversation', () => {
    * @param conversationId - 会话 ID
    */
   async function remove(conversationId: string): Promise<void> {
+    // 先执行本地 UI 清理，确保界面立即刷新（不依赖后端响应）
+    if (currentId.value === conversationId) {
+      currentId.value = null
+    }
+    conversations.value = conversations.value.filter(c => c.id !== conversationId)
+    const { [conversationId]: _, ...rest } = messagesMap.value
+    messagesMap.value = rest
+
+    // 再调后端接口（失败仅打日志，不影响前端状态）
     try {
       await chatApi.deleteConversation(conversationId)
-      
-      // 从列表中移除
-      conversations.value = conversations.value.filter(c => c.id !== conversationId)
-      delete messagesMap.value[conversationId]
-      
-      // 如果删除的是当前会话，清空状态
-      if (currentId.value === conversationId) {
-        currentId.value = null
-      }
-      
       console.log('✅ 会话已删除')
     } catch (error) {
-      console.error('❌ 删除会话失败:', error)
-      throw error
+      console.warn('⚠️ 后端删除会话失败（本地已清理）:', error)
     }
   }
 

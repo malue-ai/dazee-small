@@ -372,6 +372,17 @@
       </div>
     </div>
 
+    <!-- 确认弹窗 -->
+    <SimpleConfirmModal
+      :show="confirmModal.show"
+      :title="confirmModal.title"
+      :message="confirmModal.message"
+      :type="confirmModal.type"
+      :confirm-text="confirmModal.confirmText"
+      @confirm="confirmModal.onConfirm"
+      @cancel="confirmModal.onCancel"
+    />
+
     <!-- 操作结果提示（Teleport 到 body 避免被父容器 overflow 遮挡） -->
     <Teleport to="body">
       <Transition name="toast">
@@ -514,12 +525,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useSkillStore } from '@/stores/skill'
 import { useAgentStore } from '@/stores/agent'
 import * as skillsApi from '@/api/skills'
 import type { SkillFileContentResponse } from '@/api/skills'
+import SimpleConfirmModal from '@/components/modals/SimpleConfirmModal.vue'
 import {
   Puzzle,
   Bot,
@@ -588,6 +600,41 @@ const toastMessage = ref('')
 const toastType = ref<'success' | 'error'>('success')
 let toastTimer: ReturnType<typeof setTimeout> | null = null
 
+// 确认弹窗
+const confirmModal = reactive({
+  show: false,
+  title: '确认操作',
+  message: '',
+  type: 'warning' as 'confirm' | 'warning' | 'info' | 'error',
+  confirmText: '确定',
+  onConfirm: () => {},
+  onCancel: () => { confirmModal.show = false },
+})
+
+/** Promise 化的确认弹窗 */
+function showConfirm(options: {
+  title?: string
+  message: string
+  type?: 'confirm' | 'warning' | 'info' | 'error'
+  confirmText?: string
+}): Promise<boolean> {
+  return new Promise((resolve) => {
+    confirmModal.title = options.title || '确认操作'
+    confirmModal.message = options.message
+    confirmModal.type = options.type || 'warning'
+    confirmModal.confirmText = options.confirmText || '确定'
+    confirmModal.onConfirm = () => {
+      confirmModal.show = false
+      resolve(true)
+    }
+    confirmModal.onCancel = () => {
+      confirmModal.show = false
+      resolve(false)
+    }
+    confirmModal.show = true
+  })
+}
+
 // ==================== 计算属性 ====================
 
 const filteredSkills = computed(() => {
@@ -651,7 +698,14 @@ async function handleInstall(agentId: string, agentName: string) {
 async function handleUninstall() {
   if (!skillStore.selectedSkill || !skillStore.selectedAgentId) return
   const name = skillStore.selectedSkill.name
-  if (!confirm(`确定要从该项目卸载 "${name}" 吗？`)) return
+
+  const confirmed = await showConfirm({
+    title: '卸载技能',
+    message: `确定要从该项目卸载 "${name}" 吗？`,
+    type: 'warning',
+    confirmText: '卸载',
+  })
+  if (!confirmed) return
 
   const result = await skillStore.uninstall(name, skillStore.selectedAgentId)
   if (result.success) {

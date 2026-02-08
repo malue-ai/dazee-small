@@ -163,9 +163,11 @@ onMounted(() => {
 
 /**
  * 处理回车键
+ * 注意：需同时检查 isComposing ref、event.isComposing 和 keyCode === 229
+ * 以兼容不同浏览器/IME 下 compositionend 与 keydown 的触发顺序差异
  */
 function handleEnter(event: KeyboardEvent): void {
-  if (isComposing.value) return
+  if (isComposing.value || event.isComposing || event.keyCode === 229) return
   event.preventDefault()
   handleSend()
 }

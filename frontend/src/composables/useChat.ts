@@ -305,7 +305,16 @@ export function useChat() {
     try {
       // 发送停止请求
       await sessionStore.stop(sessionId)
-      // 注意：流的断开由 handleStreamEvent 中的 message_stop/session_stopped 处理
+
+      // 停止成功后，强制终止前端流并清理状态
+      // 避免后端已停止但 WebSocket 未收到 session_stopped 导致 UI 卡在生成中
+      if (currentConvId) {
+        const ws = connectionStore.getConnection(currentConvId)
+        ws.disconnect()
+        sessionStore.markCompleted(currentConvId)
+      }
+      isStopping.value = false
+      isLoading.value = false
     } catch (error) {
       console.error('❌ 停止请求失败:', error)
       // 如果请求失败，强制断开连接
@@ -518,6 +527,18 @@ export function useChat() {
           }
         } catch (e) {
           console.warn('⚠️ 解析 hitl_data 失败:', e)
+        }
+      }
+    }
+
+    // 处理对话增量事件（标题更新等）
+    if (type === 'conversation_delta') {
+      if (data?.title) {
+        // 后端已更新数据库，这里只更新本地列表
+        const conv = conversationStore.conversations.find(c => c.id === (data.conversation_id || convId))
+        if (conv) {
+          conv.title = data.title
+          console.log(`🏷️ 对话标题已更新: ${data.title}`)
         }
       }
     }

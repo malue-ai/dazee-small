@@ -27,7 +27,7 @@
         :class="showRightSidebar ? 'w-1/2' : 'flex-1'"
       >
         <!-- Agent 项目顶部导航栏 -->
-        <div v-if="isAgentMode && agentStore.currentAgent" class="flex-shrink-0 h-12 flex items-center gap-3 px-4 border-b border-border bg-background/80 backdrop-blur-sm">
+        <div v-if="isAgentMode && agentStore.currentAgent" class="flex-shrink-0 h-12 flex items-center gap-3 px-4 border-b border-border bg-background/80 backdrop-blur-sm relative z-20">
           <!-- 项目名称 -->
           <div class="flex items-center gap-2 text-sm font-medium text-foreground mr-2">
             <Bot class="w-4 h-4 text-primary" />
@@ -71,7 +71,7 @@
           </button>
 
           <!-- 历史记录按钮 -->
-          <div class="relative flex-shrink-0">
+          <div ref="historyDropdownRef" class="relative flex-shrink-0">
             <button 
               @click="showHistoryDropdown = !showHistoryDropdown"
               class="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-colors"
@@ -81,10 +81,7 @@
               <History class="w-4 h-4" />
             </button>
 
-            <!-- 遮罩层：点击空白处关闭（必须在下拉面板之前，z-index 更低） -->
-            <div v-if="showHistoryDropdown" class="fixed inset-0 z-40" @click="showHistoryDropdown = false"></div>
-
-            <!-- 历史记录下拉面板（z-50 > 遮罩 z-40，同一层叠上下文内） -->
+            <!-- 历史记录下拉面板 -->
             <Transition name="fade">
               <div 
                 v-if="showHistoryDropdown" 
@@ -292,6 +289,15 @@
       @dismiss="chat.dismissRollback"
     />
 
+    <!-- V11.1: HITL 危险操作确认模态框 -->
+    <HITLConfirmModal
+      :show="chat.showHITLConfirmModal.value"
+      :data="chat.hitlConfirmData.value"
+      :loading="chat.hitlConfirmLoading.value"
+      @approve="chat.approveHITLConfirm"
+      @reject="chat.rejectHITLConfirm"
+    />
+
     <!-- V11: 长任务确认模态框 -->
     <LongRunConfirmModal
       :show="chat.showLongRunConfirmModal.value"
@@ -315,7 +321,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 
 // Stores
@@ -343,6 +349,7 @@ import ConfirmModal from '@/components/modals/ConfirmModal.vue'
 import SimpleConfirmModal from '@/components/modals/SimpleConfirmModal.vue'
 import RollbackOptionsModal from '@/components/modals/RollbackOptionsModal.vue'
 import LongRunConfirmModal from '@/components/modals/LongRunConfirmModal.vue'
+import HITLConfirmModal from '@/components/modals/HITLConfirmModal.vue'
 
 // Types
 import type { Conversation, AttachedFile, PlanData, HITLResponse, FileItem } from '@/types'
@@ -367,6 +374,7 @@ const sidebarCollapsed = ref(false)
 const showRightSidebar = ref(false)
 const rightSidebarTab = ref<'plan' | 'workspace'>('plan')
 const showHistoryDropdown = ref(false)
+const historyDropdownRef = ref<HTMLElement | null>(null)
 
 // 输入
 const inputMessage = ref('')
@@ -491,16 +499,25 @@ onMounted(async () => {
     agentStore.fetchList()
   ])
   
-  // 如果路由中有 agentId，加载对应 Agent
-  const routeAgentId = route.params.agentId as string | undefined
+  // 如果路由中有 agentId，加载对应 Agent；否则默认选中第一个项目
+  let routeAgentId = route.params.agentId as string | undefined
   if (routeAgentId) {
     await agentStore.selectAgent(routeAgentId)
+  } else if (agentStore.agents.length > 0) {
+    const firstAgent = agentStore.agents[0]
+    routeAgentId = firstAgent.agent_id
+    await agentStore.selectAgent(firstAgent.agent_id)
+    router.replace({ name: 'agent', params: { agentId: firstAgent.agent_id } })
   }
 
   // 根据路由加载会话
   const conversationId = route.params.conversationId
   if (conversationId && typeof conversationId === 'string') {
     await conversationStore.load(conversationId)
+    // Agent 模式下，确保该会话在标签页中显示
+    if (routeAgentId) {
+      agentStore.openTab(routeAgentId, conversationId)
+    }
   }
   
   // 设置文件输入引用
@@ -520,7 +537,26 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  // cleanup
+  document.removeEventListener('click', handleHistoryClickOutside)
+})
+
+// ==================== 历史下拉框：点击外部关闭 ====================
+
+function handleHistoryClickOutside(e: MouseEvent) {
+  if (historyDropdownRef.value && !historyDropdownRef.value.contains(e.target as Node)) {
+    showHistoryDropdown.value = false
+  }
+}
+
+watch(showHistoryDropdown, (isOpen) => {
+  if (isOpen) {
+    // nextTick 避免当前点击事件立即触发关闭
+    nextTick(() => {
+      document.addEventListener('click', handleHistoryClickOutside)
+    })
+  } else {
+    document.removeEventListener('click', handleHistoryClickOutside)
+  }
 })
 
 // 监听路由中的 agentId 变化
@@ -566,13 +602,25 @@ async function handleDeleteConversation(conv: Conversation): Promise<void> {
     confirmText: '删除',
   })
   if (confirmed) {
+    const isDeletingCurrent = conversationStore.currentId === conv.id
+
+    // 1. 同步：从标签页 & 历史映射中移除
     if (isAgentMode.value && agentId.value) {
       agentStore.unlinkConversation(agentId.value, conv.id)
     }
-    await conversationStore.remove(conv.id)
-    if (conversationStore.currentId === conv.id) {
-      await handleCreateConversation()
+
+    // 2. 同步：如果删除的是当前对话，立即切走（参考 handleCloseTab）
+    if (isDeletingCurrent) {
+      conversationStore.reset()
+      if (isAgentMode.value && agentId.value) {
+        router.push({ name: 'agent', params: { agentId: agentId.value } })
+      } else {
+        router.push({ name: 'chat' })
+      }
     }
+
+    // 3. 异步：清理本地数据 + 调后端接口（不阻塞 UI）
+    conversationStore.remove(conv.id)
   }
 }
 
@@ -633,23 +681,30 @@ async function handleDeleteFromHistory(convId: string): Promise<void> {
     confirmText: '删除',
   })
   if (confirmed) {
-    try {
-      if (agentId.value) {
-        agentStore.unlinkConversation(agentId.value, convId)
-      }
-      await conversationStore.remove(convId)
-      if (conversationStore.currentId === convId) {
-        const remaining = agentStore.getOpenTabIds(agentId.value!)
-        if (remaining.length > 0) {
-          handleSelectConversation(remaining[remaining.length - 1])
+    const isDeletingCurrent = conversationStore.currentId === convId
+
+    // 1. 同步：从标签页 & 历史映射中移除
+    if (agentId.value) {
+      agentStore.unlinkConversation(agentId.value, convId)
+    }
+
+    // 2. 同步：如果删除的是当前对话，立即切走（参考 handleCloseTab）
+    if (isDeletingCurrent) {
+      const remaining = agentId.value ? agentStore.getOpenTabIds(agentId.value) : []
+      if (remaining.length > 0) {
+        handleSelectConversation(remaining[remaining.length - 1])
+      } else {
+        conversationStore.reset()
+        if (agentId.value) {
+          router.push({ name: 'agent', params: { agentId: agentId.value } })
         } else {
-          conversationStore.reset()
-          router.push({ name: 'agent', params: { agentId: agentId.value! } })
+          router.push({ name: 'chat' })
         }
       }
-    } catch (error) {
-      console.error('❌ 删除对话失败:', error)
     }
+
+    // 3. 异步：清理本地数据 + 调后端接口（不阻塞 UI）
+    conversationStore.remove(convId)
   }
 }
 
@@ -672,12 +727,31 @@ function handleNavigate(path: string): void {
 async function handleSelectAgent(selectedAgentId: string): Promise<void> {
   try {
     await agentStore.selectAgent(selectedAgentId)
-    router.push({ name: 'agent', params: { agentId: selectedAgentId } })
-    // 重置当前对话
-    conversationStore.reset()
+
+    // 重置加载状态
+    chat.isLoading.value = false
+    chat.isStopping.value = false
+
+    // 尝试恢复最近使用的会话：优先打开的标签页 > 历史记录
+    const openTabs = agentStore.getOpenTabIds(selectedAgentId)
+    const historyIds = agentStore.getConversationIds(selectedAgentId)
+    const lastConvId = openTabs.length > 0
+      ? openTabs[openTabs.length - 1]
+      : historyIds.length > 0
+        ? historyIds[historyIds.length - 1]
+        : null
+
+    if (lastConvId) {
+      // 确保在标签页中显示
+      agentStore.openTab(selectedAgentId, lastConvId)
+      await conversationStore.load(lastConvId)
+      router.push({ name: 'agent-conversation', params: { agentId: selectedAgentId, conversationId: lastConvId } })
+    } else {
+      conversationStore.reset()
+      router.push({ name: 'agent', params: { agentId: selectedAgentId } })
+    }
   } catch (error) {
     console.warn('⚠️ 加载项目失败:', error)
-    // 选中失败时刷新列表，可能该 Agent 已被删除
     await agentStore.fetchList()
   }
 }
@@ -726,24 +800,28 @@ async function handleSendMessage(): Promise<void> {
   inputMessage.value = ''
   fileUpload.clearFiles()
 
-  // 记录发送前是否已有对话（用于判断是否为新创建）
+  // 记录发送前的上下文
   const hadConversation = !!conversationStore.currentId
+  const sendAgentId = agentId.value
+  const sendIsAgentMode = isAgentMode.value
+
+  // Agent 模式下，如果是新对话，先创建并立即绑定到项目（不等流式完成）
+  if (sendIsAgentMode && sendAgentId && !hadConversation) {
+    await conversationStore.create(content.slice(0, 20) || '新对话')
+    if (conversationStore.currentId) {
+      agentStore.linkConversation(sendAgentId, conversationStore.currentId)
+      router.replace({
+        name: 'agent-conversation',
+        params: { agentId: sendAgentId, conversationId: conversationStore.currentId }
+      })
+    }
+  }
 
   // 发送（Agent 模式下传 agentId）
-  const sendOptions = isAgentMode.value && agentId.value
-    ? { agentId: agentId.value }
+  const sendOptions = sendIsAgentMode && sendAgentId
+    ? { agentId: sendAgentId }
     : {}
   await chat.sendMessage(content, files, sendOptions)
-
-  // 如果是 Agent 模式且新创建了对话，自动绑定映射
-  if (isAgentMode.value && agentId.value && !hadConversation && conversationStore.currentId) {
-    agentStore.linkConversation(agentId.value, conversationStore.currentId)
-    // 更新路由到含 conversationId 的路径
-    router.replace({ 
-      name: 'agent-conversation', 
-      params: { agentId: agentId.value, conversationId: conversationStore.currentId } 
-    })
-  }
 
   // 刷新会话列表（保持 50 条，失败不影响用户体验）
   try {
