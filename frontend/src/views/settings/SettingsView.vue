@@ -307,12 +307,6 @@ async function loadAll() {
       providerKeys[p.name] = existingKey
     }
 
-    // 自动展开已配置 Key 的 Provider（非引导模式下也生效）
-    const configuredProvider = providerData.find(p => p.api_key_configured)
-    if (configuredProvider && !expandedProvider.value) {
-      expandedProvider.value = configuredProvider.name
-    }
-
     // 引导系统：如果有已配置的 Key，允许跳过
     if (guideStore.isActive) {
       const hasConfiguredKey = providerData.some(p => p.api_key_configured)
@@ -338,106 +332,113 @@ async function saveSettings() {
     }
   }
 
-  // 校验 1：必须展开选中一个 Provider
-  if (!expandedProvider.value) {
-    saveError.value = '请先展开并选中一个 Provider'
+  // ==================== 收集所有需要处理的 Provider ====================
+  interface ProviderToSave {
+    detail: ProviderDetail
+    key: string
+    baseUrl?: string
+    masked: boolean  // Key 是脱敏值（已配置且未修改）
+  }
+
+  const toSave: ProviderToSave[] = []
+
+  for (const p of providers.value) {
+    const key = providerKeys[p.name]?.trim()
+    if (!key && !p.api_key_configured) continue // 没填 Key 且未配置过 → 跳过
+    if (!key) continue // 没填 Key → 跳过
+
+    toSave.push({
+      detail: p,
+      key,
+      baseUrl: providerBaseUrls[p.name]?.trim() || undefined,
+      masked: p.api_key_configured && isMaskedKey(key),
+    })
+  }
+
+  // 校验：至少有一个 Provider 填写了 Key
+  if (toSave.length === 0) {
+    saveError.value = '请至少为一个 Provider 填写 API Key'
     rollbackGuideToStep2('请先选择一个 Provider 并填写 API Key')
-    return
-  }
-
-  const selectedName = expandedProvider.value
-  const selectedProviderDetail = providers.value.find(p => p.name === selectedName)
-  if (!selectedProviderDetail) {
-    saveError.value = '未找到选中的 Provider'
-    rollbackGuideToStep2('请重新选择一个 Provider')
-    return
-  }
-
-  // 判断选中的 Provider 是否为「已配置 + 未修改 Key」的情况
-  const selectedKey = providerKeys[selectedName]?.trim()
-  const isAlreadyConfigured = selectedProviderDetail.api_key_configured
-  const isKeyMasked = isAlreadyConfigured && !!selectedKey && isMaskedKey(selectedKey)
-
-  // 校验 2：必须已配置或填写了 Key
-  if (!selectedKey && !isAlreadyConfigured) {
-    saveError.value = `请填写 ${selectedProviderDetail.display_name} 的 API Key`
-    rollbackGuideToStep2(`请填写 ${selectedProviderDetail.display_name} 的 API Key 后再点击下一步`)
     return
   }
 
   saving.value = true
 
   try {
-    // 校验 3：验证 API Key（已配置且 Key 是脱敏值时跳过验证）
-    if (isKeyMasked) {
-      // 已配置且 Key 未被用户修改（还是脱敏值）→ 跳过验证，保持现有配置
-    } else if (!validateResults[selectedName]?.valid) {
-      validating[selectedName] = true
+    // ==================== 验证所有新填写的 Key ====================
+    const failedProviders: string[] = []
+
+    for (const item of toSave) {
+      if (item.masked) continue // 脱敏值 → 跳过验证
+      if (validateResults[item.detail.name]?.valid) continue // 已验证通过 → 跳过
+
+      validating[item.detail.name] = true
       try {
-        const customBaseUrl = providerBaseUrls[selectedName]?.trim() || undefined
-        const result = await modelApi.validateKey(selectedName, selectedKey, customBaseUrl)
-        validateResults[selectedName] = result
+        const result = await modelApi.validateKey(item.detail.name, item.key, item.baseUrl)
+        validateResults[item.detail.name] = result
         if (!result.valid) {
-          saveError.value = `${selectedProviderDetail.display_name} 的 API Key 验证失败：${result.message || '请检查后重试'}`
-          saving.value = false
-          rollbackGuideToStep2(`API Key 验证失败，请检查 ${selectedProviderDetail.display_name} 的 Key 后重试`)
-          return
+          failedProviders.push(`${item.detail.display_name}: ${result.message || '验证失败'}`)
         }
       } catch (e: any) {
-        saveError.value = `${selectedProviderDetail.display_name} 的 API Key 验证失败，请检查后重试`
-        saving.value = false
-        rollbackGuideToStep2(`API Key 验证失败，请检查 ${selectedProviderDetail.display_name} 的 Key 后重试`)
-        return
+        failedProviders.push(`${item.detail.display_name}: ${e?.response?.data?.detail?.message || e?.message || '验证失败'}`)
+        validateResults[item.detail.name] = {
+          valid: false,
+          provider: item.detail.name,
+          message: e?.response?.data?.detail?.message || e?.message || '验证过程发生错误',
+          models: [],
+        }
       } finally {
-        validating[selectedName] = false
+        validating[item.detail.name] = false
       }
     }
 
-    // 校验 4：验证通过后必须有可用模型（脱敏值时跳过）
-    const validResult = validateResults[selectedName]
-    if (!isKeyMasked && !validResult?.models?.length) {
-      saveError.value = `${selectedProviderDetail.display_name} 验证通过但未返回可用模型`
+    if (failedProviders.length > 0) {
+      saveError.value = `以下 Provider 验证失败：\n${failedProviders.join('；')}`
       saving.value = false
-      rollbackGuideToStep2(`${selectedProviderDetail.display_name} 未返回可用模型，请更换 Provider 或检查 Key`)
+      rollbackGuideToStep2('API Key 验证失败，请检查后重试')
       return
     }
 
     // ==================== 构建更新对象 ====================
     const updates: SettingsData = { api_keys: {} }
+    let firstValidModels: string[] = []
 
-    // 保存选中 Provider 的 Key（脱敏值不发送，后端会忽略）
-    if (selectedKey && !isKeyMasked) {
-      updates['api_keys'][selectedProviderDetail.api_key_env] = selectedKey
-    }
+    for (const item of toSave) {
+      // 保存 API Key（脱敏值不发送，后端会忽略）
+      if (!item.masked) {
+        updates['api_keys'][item.detail.api_key_env] = item.key
+      }
 
-    // 保存自定义 Base URL（如有）
-    const baseUrl = providerBaseUrls[selectedName]?.trim()
-    if (baseUrl) {
-      const baseUrlEnv = selectedProviderDetail.api_key_env.replace(/_API_KEY$/, '_BASE_URL')
-      updates['api_keys'][baseUrlEnv] = baseUrl
-    }
+      // 保存自定义 Base URL（如有）
+      if (item.baseUrl) {
+        const baseUrlEnv = item.detail.api_key_env.replace(/_API_KEY$/, '_BASE_URL')
+        updates['api_keys'][baseUrlEnv] = item.baseUrl
+      }
 
-    // 同时保存其他已配置的 Provider（不丢失已有配置）
-    for (const p of providers.value) {
-      if (p.name === selectedName) continue
-      const key = providerKeys[p.name]?.trim()
-      if (key) {
-        updates['api_keys'][p.api_key_env] = key
-        const otherBaseUrl = providerBaseUrls[p.name]?.trim()
-        if (otherBaseUrl) {
-          const baseUrlEnv = p.api_key_env.replace(/_API_KEY$/, '_BASE_URL')
-          updates['api_keys'][baseUrlEnv] = otherBaseUrl
-        }
+      // 记录第一个有验证结果的模型列表（用于默认模型）
+      if (!firstValidModels.length) {
+        const vr = validateResults[item.detail.name]
+        if (vr?.models?.length) firstValidModels = vr.models
       }
     }
 
-    // 默认模型：如果有验证结果用验证结果的模型，否则保持现有
-    if (validResult?.models?.length) {
+    // 默认模型：取第一个验证通过的 Provider 的首个模型
+    if (firstValidModels.length) {
       updates.llm = {}
-      updates.llm.COT_AGENT_MODEL = validResult.models[0]
+      updates.llm.COT_AGENT_MODEL = firstValidModels[0]
     }
 
     await updateSettings(updates)
+
+    // ==================== 激活所有新填写 Key 的 Provider 模型 ====================
+    for (const item of toSave) {
+      if (item.masked) continue // 脱敏值不需要重新激活
+      try {
+        await modelApi.activateProvider(item.detail.name, item.key, item.baseUrl)
+      } catch (e: any) {
+        console.warn(`模型激活失败 [${item.detail.name}]（不影响 Key 保存）:`, e?.message)
+      }
+    }
 
     // Refresh status
     const statusData = await getSettingsStatus()
@@ -481,14 +482,12 @@ function handleBackToChat() {
 function registerGuideValidation(step: number) {
   if (step === 2) {
     guideStore.setBeforeNextStep(() => {
-      if (!expandedProvider.value) {
-        return '请先展开并选择一个 Provider'
-      }
-      const key = providerKeys[expandedProvider.value]?.trim()
-      const p = providers.value.find(item => item.name === expandedProvider.value)
-      // 已配置的 Provider 允许直接通过（脱敏值也算有 Key）
-      if (!key && !p?.api_key_configured) {
-        return `请填写 ${p?.display_name || 'Provider'} 的 API Key`
+      // 检查是否有任何 Provider 填写了 Key 或已配置
+      const hasAnyKey = providers.value.some(p =>
+        providerKeys[p.name]?.trim() || p.api_key_configured
+      )
+      if (!hasAnyKey) {
+        return '请至少为一个 Provider 填写 API Key'
       }
       return true
     })
@@ -502,9 +501,6 @@ function applyGuideTarget(step: number) {
   registerGuideValidation(step)
   switch (step) {
     case 2: {
-      // 自动展开已配置 Key 的 Provider（或第一个）
-      const configured = providers.value.find(p => providerKeys[p.name]?.trim())
-      expandedProvider.value = configured?.name || null
       if (providerSectionRef.value) {
         guideStore.setTarget(providerSectionRef.value)
       }

@@ -56,6 +56,15 @@ export interface ValidateKeyResult {
   models: string[]
 }
 
+/** Provider 批量激活结果 */
+export interface ProviderActivateResult {
+  success: boolean
+  provider: string
+  activated_count: number
+  models: string[]
+  message: string
+}
+
 // ==================== API 方法 ====================
 
 export const modelApi = {
@@ -87,5 +96,22 @@ export const modelApi = {
       },
     )
     return data as ValidateKeyResult
+  },
+
+  /** 按 Provider 批量激活模型 */
+  async activateProvider(
+    provider: string,
+    apiKey: string,
+    baseUrl?: string,
+  ): Promise<ProviderActivateResult> {
+    const { data } = await api.post(
+      '/v1/models/providers/activate',
+      {
+        provider,
+        api_key: apiKey,
+        ...(baseUrl ? { base_url: baseUrl } : {}),
+      },
+    )
+    return data as ProviderActivateResult
   },
 }

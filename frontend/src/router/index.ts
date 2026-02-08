@@ -46,6 +46,13 @@ const routes = [
     component: () => import('@/views/project/CreateProjectView.vue'),
     meta: { layout: 'none' }
   },
+  // ==================== 编辑项目 ====================
+  {
+    path: '/edit-project/:agentId',
+    name: 'edit-project',
+    component: () => import('@/views/project/CreateProjectView.vue'),
+    meta: { layout: 'none' }
+  },
 
   // ==================== 设置页面 ====================
   {

@@ -10,7 +10,7 @@
         >
           <ArrowLeft class="w-4 h-4" />
         </button>
-        <span class="text-sm font-semibold text-foreground">新建项目</span>
+        <span class="text-sm font-semibold text-foreground">{{ isEditMode ? '编辑项目' : '新建项目' }}</span>
       </div>
 
       <!-- 消息列表 -->
@@ -99,7 +99,7 @@
           </div>
           <div class="flex flex-col">
             <span class="text-sm font-semibold text-foreground leading-tight">{{ form.name || 'My project' }}</span>
-            <span class="text-[11px] text-muted-foreground leading-tight">Draft</span>
+            <span class="text-[11px] text-muted-foreground leading-tight">{{ isEditMode ? 'Editing' : 'Draft' }}</span>
           </div>
         </div>
 
@@ -122,7 +122,7 @@
             </button>
           </div>
 
-          <!-- 创建按钮 -->
+          <!-- 创建/保存按钮 -->
           <button 
             ref="createBtnRef"
             class="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-all shadow-sm"
@@ -130,11 +130,12 @@
               ? 'bg-primary text-white hover:bg-primary-hover shadow-primary/20' 
               : 'bg-muted text-muted-foreground cursor-not-allowed'"
             :disabled="!canCreate || isCreating"
-            @click="handleCreate"
+            @click="isEditMode ? handleSave() : handleCreate()"
           >
             <Loader2 v-if="isCreating" class="w-4 h-4 animate-spin" />
+            <Save v-else-if="isEditMode" class="w-4 h-4" />
             <Plus v-else class="w-4 h-4" />
-            {{ isCreating ? '创建中...' : '创建' }}
+            {{ isCreating ? (isEditMode ? '保存中...' : '创建中...') : (isEditMode ? '保存' : '创建') }}
           </button>
         </div>
       </div>
@@ -250,23 +251,65 @@
           <!-- AI 模型 -->
           <div class="space-y-2">
             <label class="text-sm font-medium text-foreground">AI 模型</label>
-            <div class="relative">
-              <select
-                v-model="form.model"
+            <div class="relative" ref="modelDropdownRef">
+              <!-- 触发按钮 -->
+              <button
+                type="button"
+                @click="toggleModelDropdown"
                 :disabled="modelsLoading || availableModels.length === 0"
-                class="w-full px-4 py-3 pr-10 text-sm bg-card border border-border rounded-xl focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/40 text-foreground appearance-none cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                class="w-full flex items-center justify-between px-4 py-3 text-sm bg-card border rounded-xl transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed"
+                :class="modelDropdownOpen
+                  ? 'border-primary/40 ring-1 ring-primary/40'
+                  : 'border-border hover:border-muted-foreground/30'"
               >
-                <option v-if="modelsLoading" value="" disabled>加载中...</option>
-                <option v-else-if="availableModels.length === 0" value="" disabled>无可用模型</option>
-                <option
-                  v-for="m in availableModels"
-                  :key="m.model_name"
-                  :value="m.model_name"
+                <span v-if="modelsLoading" class="text-muted-foreground/50 flex items-center gap-2">
+                  <Loader2 class="w-3.5 h-3.5 animate-spin" />
+                  加载中...
+                </span>
+                <span v-else-if="availableModels.length === 0" class="text-muted-foreground/50">无可用模型</span>
+                <span v-else-if="selectedModelDisplay" class="text-foreground truncate">{{ selectedModelDisplay }}</span>
+                <span v-else class="text-muted-foreground/50">选择模型</span>
+                <ChevronDown
+                  class="w-4 h-4 text-muted-foreground flex-shrink-0 transition-transform duration-200"
+                  :class="{ 'rotate-180': modelDropdownOpen }"
+                />
+              </button>
+
+              <!-- 下拉面板 -->
+              <Transition
+                enter-active-class="transition duration-150 ease-out"
+                enter-from-class="opacity-0 -translate-y-1"
+                enter-to-class="opacity-100 translate-y-0"
+                leave-active-class="transition duration-100 ease-in"
+                leave-from-class="opacity-100 translate-y-0"
+                leave-to-class="opacity-0 -translate-y-1"
+              >
+                <div
+                  v-if="modelDropdownOpen && availableModels.length > 0"
+                  class="absolute z-50 mt-1.5 w-full bg-card border border-border rounded-xl shadow-lg overflow-hidden"
                 >
-                  {{ m.display_name }} ({{ m.provider }})
-                </option>
-              </select>
-              <ChevronDown class="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                  <div class="max-h-[240px] overflow-y-auto scrollbar-thin py-1">
+                    <button
+                      v-for="m in availableModels"
+                      :key="m.model_name"
+                      type="button"
+                      @click="selectModel(m.model_name)"
+                      class="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-left transition-colors"
+                      :class="form.model === m.model_name
+                        ? 'bg-primary/8 text-primary'
+                        : 'text-foreground hover:bg-muted'"
+                    >
+                      <div class="flex-1 min-w-0">
+                        <div class="truncate font-medium">{{ m.display_name }}</div>
+                        <div class="text-xs text-muted-foreground truncate mt-0.5">{{ m.provider }}</div>
+                      </div>
+                      <svg v-if="form.model === m.model_name" class="w-4 h-4 text-primary flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </Transition>
             </div>
             <p v-if="!modelsLoading && availableModels.length === 0" class="text-xs text-destructive">
               请先在设置页面配置 API Key 以激活模型
@@ -314,20 +357,34 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
-import { ArrowLeft, ArrowUp, Paperclip, Plus, Loader2, AlertCircle, X, Upload, Trash2, ChevronDown } from 'lucide-vue-next'
+import { useRouter, useRoute } from 'vue-router'
+import { ArrowLeft, ArrowUp, Paperclip, Plus, Loader2, AlertCircle, X, Upload, Trash2, ChevronDown, Save } from 'lucide-vue-next'
 import { useAgentStore } from '@/stores/agent'
 import { useGuideStore } from '@/stores/guide'
 import { useWebSocketChat } from '@/composables/useWebSocketChat'
 import { modelApi, type ModelInfo } from '@/api/models'
+import { getAgentDetail } from '@/api/agent'
+import api from '@/api/index'
 import type { ChatRequest } from '@/types'
 
 // ==================== 路由 & Store & WebSocket ====================
 
 const router = useRouter()
+const route = useRoute()
 const agentStore = useAgentStore()
 const guideStore = useGuideStore()
 const ws = useWebSocketChat()
+
+// ==================== 编辑模式 ====================
+
+/** 是否为编辑模式 */
+const isEditMode = computed(() => route.name === 'edit-project')
+
+/** 编辑的 Agent ID */
+const editAgentId = computed(() => (route.params.agentId as string) || '')
+
+/** 编辑模式数据加载中 */
+const editLoading = ref(false)
 
 // ==================== 常量 ====================
 
@@ -353,12 +410,7 @@ interface ChatMessage {
 
 // ==================== 聊天状态 ====================
 
-const messages = ref<ChatMessage[]>([
-  {
-    role: 'assistant',
-    content: '嗨！我会帮你创建一个新项目。你可以说，例如："创建一个帮助生成新产品视觉效果的AI"或是"创建一个帮助格式化代码的助手。"\n\n你想要做什么？'
-  }
-])
+const messages = ref<ChatMessage[]>([])
 
 const inputText = ref('')
 const inputRef = ref<HTMLTextAreaElement | null>(null)
@@ -410,6 +462,35 @@ async function loadModels() {
     console.error('加载模型列表失败:', e)
   } finally {
     modelsLoading.value = false
+  }
+}
+
+// ==================== 模型下拉框 ====================
+
+const modelDropdownRef = ref<HTMLElement | null>(null)
+const modelDropdownOpen = ref(false)
+
+/** 当前选中模型的显示名称 */
+const selectedModelDisplay = computed(() => {
+  if (!form.model) return ''
+  const m = availableModels.value.find(item => item.model_name === form.model)
+  return m ? `${m.display_name} (${m.provider})` : form.model
+})
+
+function toggleModelDropdown() {
+  if (modelsLoading.value || availableModels.value.length === 0) return
+  modelDropdownOpen.value = !modelDropdownOpen.value
+}
+
+function selectModel(modelName: string) {
+  form.model = modelName
+  modelDropdownOpen.value = false
+}
+
+/** 点击外部关闭下拉框 */
+function handleClickOutside(e: MouseEvent) {
+  if (modelDropdownRef.value && !modelDropdownRef.value.contains(e.target as Node)) {
+    modelDropdownOpen.value = false
   }
 }
 
@@ -791,21 +872,100 @@ async function handleCreate() {
   }
 }
 
+// ==================== 保存项目（编辑模式） ====================
+
+/** 保存项目（调用 Agent Update API） */
+async function handleSave() {
+  if (!canCreate.value || isCreating.value || !editAgentId.value) return
+
+  isCreating.value = true
+  try {
+    await agentStore.updateAgent(editAgentId.value, {
+      name: form.name.trim(),
+      description: form.description.trim(),
+      prompt: form.instructions.trim() || undefined,
+      ...(form.model ? { model: form.model } : {})
+    })
+
+    // 保存成功，跳转到 Agent 对话页
+    router.replace({ name: 'agent', params: { agentId: editAgentId.value } })
+  } catch (error: any) {
+    console.error('❌ 保存项目失败:', error)
+    const msg = error?.response?.data?.detail || error?.message || '未知错误'
+    showError(`保存失败：${msg}`)
+  } finally {
+    isCreating.value = false
+  }
+}
+
+// ==================== 加载 Agent 数据（编辑模式） ====================
+
+/** 加载已有 Agent 数据填充表单 */
+async function loadAgentData() {
+  if (!editAgentId.value) return
+
+  editLoading.value = true
+  try {
+    const detail = await getAgentDetail(editAgentId.value)
+    form.name = detail.name || ''
+    form.description = detail.description || ''
+    form.model = detail.model || ''
+
+    // 加载 prompt 作为 instructions
+    try {
+      const { data } = await api.get(`/v1/agents/${editAgentId.value}/prompt`)
+      if (data?.prompt) {
+        form.instructions = data.prompt
+      }
+    } catch {
+      // prompt 接口可能不存在或失败，不影响主流程
+    }
+
+    // 编辑模式默认显示配置标签
+    activeTab.value = 'config'
+  } catch (error: any) {
+    console.error('❌ 加载项目数据失败:', error)
+    showError('加载项目数据失败，请返回重试')
+  } finally {
+    editLoading.value = false
+  }
+}
+
 // ==================== 生命周期 ====================
 
 onMounted(() => {
+  // 注册点击外部关闭下拉框
+  document.addEventListener('click', handleClickOutside)
+
   // Load available models
   loadModels()
 
-  if (guideStore.isActive && guideStore.currentStep === 6) {
-    // 引导模式：延迟启动打字机效果
-    setTimeout(() => startTypewriter('创建一个会议纪要项目'), 600)
+  if (isEditMode.value) {
+    // 编辑模式：加载已有数据，设置初始提示消息
+    messages.value = [{
+      role: 'assistant',
+      content: '你正在编辑项目配置。可以直接在右侧修改表单，也可以在这里告诉我你想怎么调整，我会帮你更新配置。'
+    }]
+    loadAgentData()
   } else {
-    inputRef.value?.focus()
+    // 创建模式：设置初始引导消息
+    messages.value = [{
+      role: 'assistant',
+      content: '嗨！我会帮你创建一个新项目。你可以说，例如："创建一个帮助生成新产品视觉效果的AI"或是"创建一个帮助格式化代码的助手。"\n\n你想要做什么？'
+    }]
+
+    if (guideStore.isActive && guideStore.currentStep === 6) {
+      // 引导模式：延迟启动打字机效果
+      setTimeout(() => startTypewriter('创建一个会议纪要项目'), 600)
+    } else {
+      inputRef.value?.focus()
+    }
   }
 })
 
 onUnmounted(() => {
+  // 移除事件监听
+  document.removeEventListener('click', handleClickOutside)
   // 页面离开时关闭 WebSocket 连接
   ws.close()
   if (errorTimer) clearTimeout(errorTimer)

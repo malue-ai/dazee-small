@@ -105,12 +105,22 @@
           >
             <Bot class="w-4 h-4 flex-shrink-0" :class="agent.agent_id === currentAgentId ? 'text-primary' : 'text-muted-foreground/50 group-hover:text-muted-foreground'" />
             <span class="truncate text-sm font-medium flex-1">{{ agent.name }}</span>
-            <button
-              class="opacity-0 group-hover:opacity-100 p-1 text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 rounded transition-all"
-              @click.stop="emit('delete-agent', agent.agent_id)"
-            >
-              <Trash2 class="w-3.5 h-3.5" />
-            </button>
+            <div class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all">
+              <button
+                class="p-1 text-muted-foreground/50 hover:text-primary hover:bg-primary/10 rounded transition-colors"
+                @click.stop="emit('edit-agent', agent.agent_id)"
+                title="编辑项目"
+              >
+                <Pencil class="w-3.5 h-3.5" />
+              </button>
+              <button
+                class="p-1 text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 rounded transition-colors"
+                @click.stop="emit('delete-agent', agent.agent_id)"
+                title="删除项目"
+              >
+                <Trash2 class="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
         </div>
 
@@ -174,6 +184,7 @@ import {
   Bot,
   Puzzle, 
   Trash2,
+  Pencil,
   Sparkles,
   Settings
 } from 'lucide-vue-next'
@@ -222,6 +233,8 @@ const emit = defineEmits<{
   (e: 'navigate', path: string): void
   /** 选择 Agent（项目） */
   (e: 'select-agent', agentId: string): void
+  /** 编辑 Agent（项目） */
+  (e: 'edit-agent', agentId: string): void
   /** 删除 Agent（项目） */
   (e: 'delete-agent', agentId: string): void
 }>()

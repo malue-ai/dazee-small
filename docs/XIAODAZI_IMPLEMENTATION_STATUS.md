@@ -6,6 +6,7 @@
 >
 > 更新时间：2026-02-08（第二次更新：实例存储隔离 + 后台任务 + Skills 扩充 + 路径管理）
 
+> 更新时间：2026-02-09（第三次更新：项目编辑 + 多 Provider 批量保存 + Skills 注册格式重构 + Windows 打包）
 ---
 
 ## 〇、架构全景图
@@ -19,7 +20,7 @@
 │                                                                                         │
 │  ┌── views/ ──────────────────────────────────────────────────────────────────────────┐  │
 │  │ ChatView │ SettingsView │ SkillsView │ KnowledgeView │ OnboardingView             │  │
-│  │ CreateProjectView                                                                 │  │
+│  │ CreateProjectView（创建 + 编辑双模式）                                             │  │
 │  └────┬───────────────────────────────────────────────────────────────────────────────┘  │
 │       │                                                                                 │
 │  ┌────▼── composables/ ──────────────────────────────────────────────────────────────┐  │
@@ -487,8 +488,8 @@ Provider 一键切换模型分配：
 ███████░░░  70%  Playbook 持续学习 (Hint 注入已实现，端到端链路待串联)
 ████░░░░░░  40%  OS 兼容层 (仅 macOS)
 ███░░░░░░░  35%  应用发现 (仅 macOS 扫描)
-████████░░  80%  项目管理 (多实例架构，前端创建项目流程已实现)
-████████░░  80%  前端 Settings (Provider 卡片 + API Key 验证 + 保存)
+█████████░  85%  项目管理 (多实例架构，前端创建+编辑项目流程已实现)
+█████████░  90%  前端 Settings (多 Provider 批量保存 + 激活 + API Key 验证)
 ████████░░  80%  首次启动引导 (9 步交互式引导教程)
 ░░░░░░░░░░   0%  Skills 安全验证
 ```
@@ -527,14 +528,14 @@ Provider 一键切换模型分配：
 | Nodes 本地操作 | 3.5 | 80% (macOS) | macOS 11 项操作完整，win32/linux 待实现 |
 | OS 兼容层 | 3.5 | 40% | 仅 macOS 实现 |
 | 应用发现 | 3.11 | 35% | 仅 macOS 扫描 |
-| 项目管理 | 3.10 | 80% | 多实例架构 + 前端创建项目流程（CreateProjectView） |
+| 项目管理 | 3.10 | 85% | 多实例架构 + 前端创建+编辑项目流程（CreateProjectView 双模式） |
 | 存储层 | — | 95% | SQLite + FTS5 + sqlite-vec + 实例隔离完成 |
 | Playbook 持续学习 | 2.14 | 70% | Hint 注入器已实现，端到端链路 4 条断 2 条 |
 | Skill 格式规范 | 3.2 | 75% | 基础格式 + SKILL.md 二维元数据，49 个 Skill 已适配 |
 | E2E 评估框架 | — | 85% | 6 个端到端用例 + Phase 0 回滚验证 + 双层 LLM-as-Judge |
 | Plan 规划系统 | — | 90% | 渐进式展示 + 桌面端工具表 + 文件安全自动提示 |
 | 屏幕观察工具 | 3.5 | 80% | peekaboo + Vision OCR 并行，macOS 就绪 |
-| 前端 Settings UI | 3.1.2 | 80% | Provider 卡片式设置 + API Key 在线验证 + 自动保存默认模型 |
+| 前端 Settings UI | 3.1.2 | 90% | 多 Provider 批量保存+激活 + API Key 在线验证 + 自动保存默认模型 |
 | 首次启动引导 | 3.1.3 | 80% | 9 步交互式引导（设置→创建项目），含跳过控制和回退机制 |
 | 前端通用弹窗 | — | 100% | SimpleConfirmModal 替代 confirm/alert，支持 4 种类型 |
 | Skills 安全验证 | 3.12 | 0% | 未开始 |
@@ -1109,22 +1110,37 @@ instances/
 ```
 
 **工作流**：
-1. 前端提供"创建新搭子"界面 → 用户选模板、填名称、选 Skills
-2. 后端从 `_template/` 脚手架创建新实例目录 → 写入配置文件
-3. `main` 加载指定实例 → Agent 启动
-4. 切换搭子 = 切换实例
+1. 前端提供"创建新搭子"界面 → 用户选模板、填名称、选 Skills → 后端创建实例
+2. 前端提供"编辑搭子"界面 → 加载已有配置 → 修改后保存
+3. 后端从 `_template/` 脚手架创建新实例目录 → 写入配置文件
+4. `main` 加载指定实例 → Agent 启动
+5. 切换搭子 = 切换实例
 
 **优势**：
 - 零代码隔离：配置/记忆/Skills/提示词天然独立
 - 简单可靠：不需要复杂的上下文切换、知识库隔离逻辑
 - 可组合：每个实例可以有完全不同的 provider/模型/温度配置
 
+**已有实例**：
+
+```
+instances/
+├── _template/          ← 脚手架模板（创建新实例时复制）
+├── xiaodazi/           ← 通用搭子（默认，全技能）
+└── daa22480/           ← 用户创建的自定义实例
+```
+
 | 文件 | 状态 | 说明 |
 |------|------|------|
 | `instances/_template/` | 已有 | 实例脚手架模板 |
+| `instances/daa22480/` | **新增** | 用户创建的自定义实例（含 config/prompt/skills/prompt_results） |
 | `utils/instance_loader.py` | 已完成 | 加载任意实例的配置/提示词/Skills |
 | `core/project/` | 已删除 | 整个目录已移除，多实例架构取代 |
-| 前端创建界面 | 未实现 | 前端范畴 |
+| 前端创建界面 | **已完成** | CreateProjectView（创建模式） |
+| 前端编辑界面 | **已完成** | CreateProjectView（编辑模式，路由 `/edit-project/:agentId`） |
+
+**已删除实例**：
+- `instances/b307fc3d/` — 测试实例，已清理
 
 ---
 
@@ -1812,14 +1828,14 @@ dispatch_tasks(task_names, context)
 
 ---
 
-### 4.2 设置页（Provider 卡片式 API Key 管理）
+### 4.2 设置页（多 Provider 批量保存 + 激活）
 
-**设计需求**：基于 Models API 的结构化 Provider 配置，替代旧的扁平化 Key-Value 设置。
+**设计需求**：基于 Models API 的结构化 Provider 配置，支持多个 Provider 同时保存和激活。
 
 | 文件 | 状态 | 说明 |
 |------|------|------|
-| `frontend/src/views/settings/SettingsView.vue` | 已完成 | Provider 卡片 + 手风琴展开 + 验证保存 |
-| `frontend/src/api/models.ts` | 已完成 | Models API 调用（`getSupportedProviders`, `validateKey`） |
+| `frontend/src/views/settings/SettingsView.vue` | **已更新** | 多 Provider 批量保存 + 激活 + 验证 |
+| `frontend/src/api/models.ts` | **已更新** | 新增 `ProviderActivateResult` + `activateProvider()` 批量激活 API |
 | `frontend/src/api/settings.ts` | 已完成 | Settings API 调用（`getSettings`, `updateSettings`, `getSettingsStatus`） |
 
 **UI 结构**：
@@ -1832,21 +1848,25 @@ SettingsView
 │   ├── Qwen
 │   └── ...（由 Models API 动态返回）
 │
-├── 验证并保存按钮（多阶段验证）
-│   ├── Step 1: 检查是否选中 Provider
-│   ├── Step 2: 检查 Key 是否填写
-│   ├── Step 3: 调用 validateKey() 后端验证
-│   ├── Step 4: 确认返回可用模型列表
-│   └── Step 5: 自动设置默认模型 = 验证通过 Provider 的第一个模型
+├── 验证并保存按钮（多 Provider 批量处理）
+│   ├── Step 1: 收集所有填写了 Key 的 Provider
+│   ├── Step 2: 批量验证所有新填写的 Key（已配置且未修改的跳过）
+│   ├── Step 3: 验证失败的汇总展示
+│   ├── Step 4: 批量保存 API Keys + Base URLs
+│   ├── Step 5: 批量激活所有新 Provider 的模型（activateProvider API）
+│   └── Step 6: 自动设置默认模型 = 第一个验证通过 Provider 的首个模型
 │
 └── 返回聊天按钮
 ```
 
-**关键设计**：
-- 移除了"默认模型选择"下拉框 — 默认模型由保存时自动从当前选中 Provider 获取
-- 移除了"其他设置 (Application)"区段
+**关键设计（V2 重构）**：
+- **多 Provider 批量保存**：不再要求选中单个 Provider，收集所有填写了 Key 的 Provider 一次性保存
+- **批量验证**：对所有新填写的 Key 逐个验证，汇总展示失败结果
+- **批量激活**：保存后调用 `modelApi.activateProvider()` 批量激活新 Provider 的模型
+- **脱敏值智能跳过**：已配置且未修改的 Key（脱敏值 `sk-***...***`）自动跳过验证和激活
+- 移除了自动展开已配置 Provider 的逻辑
+- 引导验证简化：仅检查"是否有任何 Provider 填写了 Key"
 - 保存失败时显示错误提示 + 引导步骤自动回退
-- 原生 `<select>` 下拉使用 `appearance-none` + 自定义 SVG 箭头修复样式
 
 ---
 
@@ -1906,7 +1926,69 @@ const showConfirm = (opts): Promise<boolean> => {
 
 ---
 
-### 4.5 尚未实现的前端模块
+### 4.5 项目编辑功能（CreateProjectView 双模式）
+
+**设计需求**：复用 CreateProjectView 组件，通过路由参数区分创建/编辑模式，实现项目配置的编辑保存。
+
+| 文件 | 状态 | 说明 |
+|------|------|------|
+| `frontend/src/views/project/CreateProjectView.vue` | **已更新** | 创建+编辑双模式，自定义模型下拉框 |
+| `frontend/src/router/index.ts` | **已更新** | 新增 `/edit-project/:agentId` 路由 |
+| `frontend/src/components/chat/ConversationSidebar.vue` | **已更新** | 项目列表新增编辑按钮（Pencil 图标） |
+| `frontend/src/views/chat/ChatView.vue` | **已更新** | 新增 `handleEditAgent()` 编辑跳转 |
+
+**双模式路由**：
+
+```
+/create-project       → CreateProjectView（创建模式）
+/edit-project/:agentId → CreateProjectView（编辑模式）
+```
+
+**编辑模式流程**：
+
+```
+侧边栏项目列表 → 点击编辑按钮（Pencil 图标）
+    │
+    ▼
+ChatView.handleEditAgent(agentId)
+    │ router.push({ name: 'edit-project', params: { agentId } })
+    ▼
+CreateProjectView（编辑模式）
+    │
+    ├── loadAgentData()  → 调用 getAgentDetail(agentId) 加载基本信息
+    │   └── 调用 GET /v1/agents/{agentId}/prompt 加载 instructions
+    │
+    ├── 表单预填充：name / description / model / instructions
+    │
+    └── handleSave() → agentStore.updateAgent(agentId, updates)
+        └── 成功后跳转到 Agent 对话页
+```
+
+**创建 vs 编辑模式差异**：
+
+| 维度 | 创建模式 | 编辑模式 |
+|------|---------|---------|
+| 路由 | `/create-project` | `/edit-project/:agentId` |
+| 页面标题 | "新建项目" | "编辑项目" |
+| 按钮文本 | "创建" / "创建中..." | "保存" / "保存中..." |
+| 按钮图标 | `Plus` | `Save` |
+| 表单状态标签 | "Draft" | "Editing" |
+| 初始消息 | 引导用户描述项目需求 | 提示编辑配置方式 |
+| 提交动作 | `handleCreate()` | `handleSave()` |
+
+**自定义模型下拉框**：
+- 替换原生 `<select>` 为自定义下拉组件（解决跨浏览器样式不一致问题）
+- 支持动画过渡（Transition 组件）
+- 已选中项显示勾选图标
+- 点击外部自动关闭（`handleClickOutside` 事件监听）
+
+**侧边栏编辑入口**：
+- 项目列表 hover 时显示两个操作按钮：编辑（Pencil）+ 删除（Trash2）
+- 新增 `edit-agent` emit 事件传递到 ChatView
+
+---
+
+### 4.6 尚未实现的前端模块
 
 以下模块在架构设计中定义但尚未实现：
 
@@ -1931,7 +2013,7 @@ const showConfirm = (opts): Promise<boolean> => {
 |------|----------|--------|------|
 | 停止生成功能修复 | `frontend/src/composables/useChat.ts` + `stores/session.ts` + `api/session.ts` | 小 | 暂停按钮点击后无效果，需排查 stopSession API 调用链路 |
 | Playbook 端到端串联 | `core/agent/base.py` + `core/events/broadcaster.py` + `routers/` | 中 | 串联剩余 3 条链路：DRAFT 生成 → 用户确认 → APPROVED（Hint 注入已完成） |
-| 实例创建 API | `routers/` + `utils/instance_loader.py` | 小 | 前端调用 → 从模板脚手架创建新实例目录 |
+| ~~实例创建 API~~ | ~~`routers/` + `utils/instance_loader.py`~~ | ~~小~~ | ✅ 前端创建+编辑流程已实现（CreateProjectView 双模式） |
 | 记忆混合检索权重 | `core/memory/xiaodazi_memory.py` | 小 | config 已声明 `vector_weight`/`bm25_weight`，recall 中应用 |
 | ProgressTransformer 集成 | `core/planning/` | 小 | 在 PlanTodoTool 步骤完成时自动调用 |
 
@@ -2042,7 +2124,30 @@ playbook:
 
 ## 六、文件变更清单
 
-### 本轮新增文件（实例隔离 + 后台任务 + Skills 扩充 + SkillGroupRegistry）
+### 本轮新增/修改文件（项目编辑 + 多 Provider 批量保存 + Skills 格式重构）
+
+| 文件 | 修改内容 |
+|------|----------|
+| `frontend/src/api/models.ts` | 新增 `ProviderActivateResult` 接口 + `activateProvider()` 批量激活 API |
+| `frontend/src/views/settings/SettingsView.vue` | 重构为多 Provider 批量保存+验证+激活，移除单 Provider 选中限制 |
+| `frontend/src/views/project/CreateProjectView.vue` | 新增编辑模式（`isEditMode`）+ `handleSave()` + `loadAgentData()` + 自定义模型下拉框 |
+| `frontend/src/views/chat/ChatView.vue` | 新增 `handleEditAgent()` 编辑跳转 + `@edit-agent` 事件绑定 |
+| `frontend/src/components/chat/ConversationSidebar.vue` | 项目列表新增编辑按钮（Pencil 图标）+ `edit-agent` emit 事件 |
+| `frontend/src/router/index.ts` | 新增 `/edit-project/:agentId` 路由 |
+| `instances/xiaodazi/skills/skill_registry.yaml` | 格式重构：紧凑单行 → 展开式 YAML + description 字段，移除 status/os |
+| `instances/xiaodazi/skills/apple-notes/SKILL.md` | 新增 Apple Notes Skill（通过 `memo` CLI 管理） |
+| `instances/daa22480/` | 新增用户创建的自定义实例（config + prompt + skills + prompt_results） |
+| `frontend/src-tauri/binaries/zenflux-backend-x86_64-pc-windows-msvc.exe` | 新增 Windows 后端二进制（Tauri sidecar） |
+
+**本轮删除文件**：
+
+| 文件 | 原因 |
+|------|------|
+| `instances/b307fc3d/` （整个目录） | 测试实例清理（config + prompt + skills + prompt_results） |
+
+---
+
+### 早期轮次新增文件（实例隔离 + 后台任务 + Skills 扩充 + SkillGroupRegistry）
 
 | 文件 | 职责 |
 |------|------|
@@ -2065,7 +2170,7 @@ playbook:
 | `instances/xiaodazi/skills/quiz-maker/` | 测验生成 Skill |
 | `instances/xiaodazi/skills/skill-tutor/` | 技能教学 Skill |
 
-### 本轮修改文件（实例隔离 + 记忆系统 + 存储改造）
+### 早期轮次修改文件（实例隔离 + 记忆系统 + 存储改造）
 
 | 文件 | 修改内容 |
 |------|----------|
@@ -2140,7 +2245,7 @@ playbook:
 | `frontend/src/types/agent.ts` | Agent 类型定义 |
 | `frontend/src/views/project/CreateProjectView.vue` | 创建项目/助手页面 |
 
-### 本轮修改的前端文件
+### 早期轮次修改的前端文件
 
 | 文件 | 修改内容 |
 |------|----------|
@@ -2151,7 +2256,7 @@ playbook:
 | `frontend/src/components/chat/ConversationSidebar.vue` | 引导步骤编号调整 |
 | `frontend/src/components/chat/ChatInputArea.vue` | 停止生成按钮 loading/stopping 状态传递 |
 
-### 本轮删除文件
+### 早期轮次删除文件
 
 | 文件 | 原因 |
 |------|------|

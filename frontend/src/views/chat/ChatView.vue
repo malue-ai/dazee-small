@@ -16,6 +16,7 @@
       @toggle-collapse="sidebarCollapsed = !sidebarCollapsed"
       @navigate="handleNavigate"
       @select-agent="handleSelectAgent"
+      @edit-agent="handleEditAgent"
       @delete-agent="handleDeleteAgent"
     />
 
@@ -754,6 +755,11 @@ async function handleSelectAgent(selectedAgentId: string): Promise<void> {
     console.warn('⚠️ 加载项目失败:', error)
     await agentStore.fetchList()
   }
+}
+
+/** 编辑 Agent（项目） */
+function handleEditAgent(targetAgentId: string): void {
+  router.push({ name: 'edit-project', params: { agentId: targetAgentId } })
 }
 
 /** 删除 Agent（项目） */
