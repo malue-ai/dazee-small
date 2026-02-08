@@ -1220,6 +1220,26 @@ class RVRBExecutor(RVRExecutor):
                 logger.info("HITL pending 检测：工具返回 pending_user_input，暂停执行等待用户响应")
                 break
 
+        # 空结果检测（Contrastive Reflection 增强）：
+        # 工具返回"未找到"等空结果时，注入 reflection 提示引导 LLM 尝试替代方案。
+        # 这是确定性格式检查（allowed by LLM-First rules），不是语义判断。
+        _empty_indicators = ["未找到", "no such file", "not found", "0 results",
+                             "找不到", "does not exist", "无结果", "empty"]
+        for _tr in tool_results:
+            _tr_content = _tr.get("content", "")
+            if isinstance(_tr_content, str) and len(_tr_content) < 500:
+                _content_lower = _tr_content.lower()
+                if any(ind in _content_lower for ind in _empty_indicators):
+                    _reflection = (
+                        "\n\n[提示] 上一步没有找到目标。请尝试替代方案："
+                        "1) 换一种搜索路径或关键词 "
+                        "2) 如果用户上传了文件，直接使用消息中的 file:/// 路径 "
+                        "3) 使用 nodes 工具的 find 命令搜索文件系统"
+                    )
+                    _tr["content"] = _tr_content + _reflection
+                    logger.info("空结果检测：注入 reflection 提示引导替代方案")
+                    break  # 只对第一个空结果注入
+
         # 更新连续失败计数（供终止策略与自动回滚使用）
         if any(r.get("is_error") for r in tool_results):
             ctx.consecutive_failures += 1
@@ -1324,6 +1344,24 @@ class RVRBExecutor(RVRExecutor):
                 ctx.stop_reason = "hitl_pending"
                 logger.info("HITL pending 检测：工具返回 pending_user_input，暂停执行等待用户响应")
                 break
+
+        # 空结果检测（non-stream 版本，逻辑与 stream 版本一致）
+        _empty_indicators = ["未找到", "no such file", "not found", "0 results",
+                             "找不到", "does not exist", "无结果", "empty"]
+        for _tr in tool_results:
+            _tr_content = _tr.get("content", "")
+            if isinstance(_tr_content, str) and len(_tr_content) < 500:
+                _content_lower = _tr_content.lower()
+                if any(ind in _content_lower for ind in _empty_indicators):
+                    _reflection = (
+                        "\n\n[提示] 上一步没有找到目标。请尝试替代方案："
+                        "1) 换一种搜索路径或关键词 "
+                        "2) 如果用户上传了文件，直接使用消息中的 file:/// 路径 "
+                        "3) 使用 nodes 工具的 find 命令搜索文件系统"
+                    )
+                    _tr["content"] = _tr_content + _reflection
+                    logger.info("空结果检测：注入 reflection 提示引导替代方案")
+                    break
 
         # 更新连续失败计数（供终止策略与自动回滚使用）
         if any(r.get("is_error") for r in tool_results):

@@ -1,5 +1,5 @@
 name: XiaoDazi
-description: 住在用户电脑里的 AI 搭子，亲切、主动、靠谱的本地智能助手
+description: 住在用户电脑里的 AI 搭子，亲切、主动、靠谱，擅长本地桌面任务执行与个性化服务
 intent_analyzer:
   enabled: true
   complexity_levels:
@@ -7,12 +7,12 @@ intent_analyzer:
   - medium
   - complex
   task_types:
-  - file_management
+  - file_operation
   - writing
-  - translation
   - data_analysis
-  - desktop_automation
-  - communication
+  - translation
+  - ui_automation
+  - preference_adaptation
   output_formats:
   - text
   - markdown
@@ -24,7 +24,7 @@ intent_analyzer:
   simplified_output: true
 plan_manager:
   enabled: true
-  trigger_condition: complexity == 'complex' or requires_multiple_skills or involves_ui_operations
+  trigger_condition: complexity == 'high' or step_count > 3
   max_steps: 20
   granularity: fine
   allow_dynamic_adjustment: true
@@ -40,10 +40,9 @@ tool_selector:
   allow_parallel: false
   max_parallel_tools: 1
   base_tools:
-  - hitl_confirm
-  - file_reader
-  - file_writer
-  - app_launcher
+  - nodes
+  - knowledge_search
+  - hitl
   tool_timeout: 300
 memory_manager:
   enabled: true
@@ -72,27 +71,29 @@ skills:
 - name: excel-generator
   enabled: true
   description: ''
+- name: pdf-generator
+  enabled: true
+  description: ''
+- name: ppt-generator
+  enabled: true
+  description: ''
 - name: file-organizer
   enabled: true
   description: ''
-- name: text-writer
+- name: ui-automator
   enabled: true
   description: ''
-- name: translator
+- name: translation
   enabled: true
   description: ''
-- name: screenshot-capture
-  enabled: true
-  description: ''
-- name: desktop-ui-controller
+- name: writing-assistant
   enabled: true
   description: ''
 tools:
+- nodes
+- knowledge_search
+- hitl
 - web_search
-- api_calling
-- hitl_confirm
-- file_system_access
-- app_control
 model: qwen3-max
 max_turns: 25
 execution_strategy: rvr
@@ -107,4 +108,5 @@ enable_thinking: null
 enable_caching: null
 thinking_mode: null
 prompts: null
-reasoning: 这是一个高度本地化、具备主动性与记忆能力的桌面AI搭子，需支持复杂任务规划（如文件整理+UI操作）、用户偏好记忆、安全确认机制和替代方案生成。任务常涉及多步骤执行和环境感知，因此启用细粒度计划管理、用户级记忆保留、HITL确认工具，并配置多种本地技能。为保障普通用户体验，禁用并行工具调用，强调通俗输出和错误恢复能力。
+reasoning: 小搭子需处理复杂本地任务（文件操作、UI自动化、偏好记忆），强调主动性、安全性和用户友好。需细粒度规划、用户级记忆、HITL确认机制，并支持多格式输出。任务常涉及多步骤执行与替代方案规划，故启用高级
+  plan_manager 和 memory_manager。
