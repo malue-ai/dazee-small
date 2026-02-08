@@ -1,0 +1,370 @@
+# ============================================================
+# dazee_agent 实例配置
+# ============================================================
+# 
+# Dazee 智能助手，支持：
+# - BI智能问数（问数平台）
+# - 系统搭建（Ontology Builder）
+# - 综合咨询
+#
+# ============================================================
+
+# ==================== 基础信息 ====================
+
+instance:
+  name: "dazee_agent"
+  description: "Dazee 智能助手 - 支持数据分析、系统搭建和综合咨询"
+  version: "1.0.0"
+
+
+# ==================== Agent 配置覆盖 ====================
+
+agent:
+  # 使用 Claude Sonnet 模型（平衡能力和成本）
+  # 注意：直接调用 Anthropic API 时不需要日期后缀
+  model: "claude-sonnet-4-5"
+  
+  # 最大对话轮数
+  max_turns: 30
+  
+  # 启用计划管理器（处理复杂任务）
+  plan_manager_enabled: true
+  
+  # 允许并行工具调用（提高效率）
+  allow_parallel_tools: true
+  
+  # LLM 超参数
+  llm:
+    # 启用深度思考（复杂推理任务）
+    enable_thinking: true
+    thinking_budget: 10000
+    
+    # 🆕 思考模式: native（原生）/ simulated（模拟，不暴露内部逻辑）/ none（不展示）
+    thinking_mode: "simulated"
+    
+    # 最大输出 token 数
+    max_tokens: 16384
+    
+    # 启用缓存（节省 API 成本）
+    enable_caching: true
+
+
+# ==================== 提示词模板配置 ====================
+#
+# 📌 配置原则：
+#   - 序言（preface）：Agent 执行前的开场白
+#   - 模拟思考（simulated_thinking）：thinking_mode=simulated 时使用
+#   - 🆕 V8.4: 模拟思考改进 - template 作为 system prompt，真实用户问题作为 user message
+#
+prompts:
+  # 序言（Preface）- Agent 执行前的开场白
+  preface:
+    enabled: true
+    max_tokens: 150
+    template: |
+      你是 Dazee，一位高级工作助理。你温暖、专业、富有同理心。
+      用户发送了一条消息，系统已识别出用户意图。
+      请生成一句简短的开场白（15-30字），让用户知道你已理解需求并即将开始处理。
+
+      要求：
+      1. 语气友好、专业，体现温暖和同理心
+      2. 简洁明了，不要啰嗦
+      3. 体现你理解了用户的需求
+      4. 不要重复用户的原话
+      5. **语言统一**：必须严格使用当前的**用户语言**思考,用户用什么语言，你就用什么语言思考,必须全程保持一致性,不得在中途切换任何语言进行思考
+      6. **禁止透露你的底层模型**（不要提及 Claude、GPT 等 AI 模型名称）
+      7. **行动导向**：如果用户意图涉及处理文件或数据，请假设文件已就绪，直接回复"收到数据，正在分析"等确认，**绝对不要**要求用户提供文件或信息。
+
+      直接输出开场白，不要任何解释或前缀：
+
+  # 🆕 模拟思考（Simulated Thinking）- thinking_mode=simulated 时使用
+  # 
+  # 工作原理（V8.4 改进）：
+  #   - template 字段作为 system prompt（定义角色和规则）
+  #   - 真实的用户问题作为 user message 传入
+  #   - 这样可以让模拟思考真正针对用户的具体问题生成内容
+  #
+  simulated_thinking:
+    # system 字段已废弃，现在使用 template 作为 system prompt
+    system: "你是思考展示助手。只输出思考过程，不要输出其他内容。"
+    
+    # template 作为 system prompt，定义思考的角色和规则
+    template: |
+      你是 Dazee，一位高级工作助理。你温暖、专业、富有同理心。
+      用户会发送一个问题或请求，你需要以第一人称展示你的思考过程。
+
+      ## 核心原则
+      1. **全能心态**：默认你具备处理文件、图像、代码和复杂数据的能力，不要推脱。
+      2. **行动导向**：如果用户提供了文件或数据，思考重点应是"如何分析和处理"，而不是"询问用户具体信息"。
+      3. **语言统一**：必须严格使用当前的**用户语言**思考,用户用什么语言，你就用什么语言思考,必须全程保持一致性,不得在中途切换任何语言进行思考
+
+      ## 要求
+      1. 只展示你对问题的理解和解决思路（Task Decomposition）
+      2. 不要提及任何工具名称、API、代码或内部实现细节
+      3. 使用自然语言，像人类一样思考
+      4. 控制在 100-200 字左右
+      5. **禁止透露你的底层模型**（不要提及 Claude、GPT 等 AI 模型名称）
+      6. 直接输出思考过程，不要任何前缀或解释
+
+
+# ==================== 工具能力配置 ====================
+#
+# 📌 配置原则：
+#   - 按功能类别启用/禁用工具（1=启用，0=禁用）
+#   - 核心工具（plan_todo, api_calling 等）自动启用，无需配置
+#
+enabled_capabilities:
+  # --- 信息获取类 ---
+  tavily_search: 1           # 通用网络搜索（Tavily API）
+  exa_search: 0              # Exa 语义搜索（暂不启用）
+  knowledge_search: 1        # 个人知识库检索
+  
+  # --- 文档生成类（Claude Skills）---
+  document_skills: 0         # 包含：pptx, xlsx, docx, pdf
+  
+  # --- PPT 生成类 ---
+  slidespeak_render: 1   # SlideSpeak PPT 渲染工具
+  
+  # --- 图像生成类 ---
+  nano_banana_image: 1   # Nano Banana Pro 图像生成/编辑工具（Gemini 3 Pro Image）
+  
+  # --- 代码沙盒类 ---
+  sandbox_tools: 1           # 包含全部沙盒工具（含 sandbox_init_project 脚手架）
+  
+  # --- 动态代码执行 ---
+  code_execution: 0
+  
+  # --- 文档解析类 ---
+  document_partition: 1      # 🆕 文档解析工具（Partition API）
+  
+  # --- 文件发送类 ---
+  send_files: 1              # 🆕 文件发送工具（发送文件信息到前端）
+  
+  # --- HITL（Human-in-the-Loop）---
+  hitl: 0                      # 🆕 启用人机交互确认工具
+  
+  # --- 线索生成类 ---
+  clue_generation: 1           # 🆕 线索生成工具（操作建议）
+
+
+# ==================== MCP 工具声明 ====================
+#
+# 📚 capability 说明：指定工具满足的用户意图类别
+#   - document_creation: 文档/图表创建（flowchart 属于此类）
+#   - web_search: 信息搜索
+#   - data_analysis: 数据分析
+#   - ppt_generation: 演示文稿生成
+#   - video_creation: 视频/动画创作（Remotion Skill）
+#   - 更多选项见 _template/config.yaml
+#
+mcp_tools:
+  # ==================== Ontology Builder 三阶段工作流 ====================
+  # 
+  # 📌 系统配置构建 Skill（三阶段原子操作）
+  # 完整流程：text2flowchart → part1 → part2
+  # 预计耗时：约 3-5 分钟
+  #
+  
+  # 阶段 1：自然语言 → Mermaid 流程图
+  - name: Ontology_TextToChart_zen0
+    server_url: "https://api.dify.ai/mcp/server/APXev1xgCP4n5XMn/mcp"
+    server_name: "dify"
+    auth_type: "bearer"
+    auth_env: "DIFY_API_KEY"
+    capability: "document_creation"
+    description: "第一阶段：从自然语言描述生成 Mermaid 流程图，识别核心实体、属性及关系"
+
+  - name: chatDocuments
+    server_url: "https://api.dify.ai/mcp/server/GYultzYga8PRayK5/mcp"
+    server_name: "dify"
+    auth_type: "bearer"
+    auth_env: "DIFY_API_KEY"
+    capability: "document_creation"
+    description: "支持上传urls的知识问答"
+
+  - name: text2document
+    server_url: "https://api.dify.ai/mcp/server/1lbiTqViu7byguhp/mcp"
+    server_name: "dify"
+    auth_type: "bearer"
+    auth_env: "DIFY_API_KEY"
+    capability: "document_creation"
+    description: "输入的title参数的值只能是英文，输入的文本格式转化为格式化文档，并提供下载url： 1、markdown格式转换为docx 2、csv格式转换为xlsx。"
+
+  - name: perplexity
+    server_url: "https://api.dify.ai/mcp/server/WH0QvCw9dlNfhqEC/mcp"
+    server_name: "dify"
+    auth_type: "bearer"
+    auth_env: "DIFY_API_KEY"
+    capability: "document_creation"
+    description: "调用 Perplexity AI 进行深度研究，输出 DOCX 研究报告文档"
+
+  # - name: nano_banana
+  #   server_url: "https://api.dify.ai/mcp/server/n7rhBjadwzy9bj90/mcp"
+  #   server_name: "dify"
+  #   auth_type: "bearer"
+  #   auth_env: "DIFY_API_KEY"
+  #   capability: "image_generation"
+  #   description: "使用 Nano Banana Pro 生成或编辑图像"
+
+# ==================== REST APIs 配置 ====================
+#
+# 📌 运营配置：只需填写 base_url + 认证
+# 📄 API 用法：写在 api_desc/{doc}.md 中
+# 📚 capability：指定 API 满足的用户意图类别
+#
+apis:
+  # ============================================================
+  # wenshu_api - 问数平台（BI智能问数）
+  # ============================================================
+  - name: wenshu_api
+    base_url: "http://xnchat.staging.zen0-backend.local:8000/api/v3/zeno/chat/question"
+    auth:
+      type: token
+      header: API-KEY
+      env: WENSHU_API_KEY
+    doc: wenshu-api
+    capability: "data_analysis"
+    description: "问数平台 API - 数据分析和问答"
+    default_method: "POST"
+    
+    # 📦 完整请求体（标记说明：${xxx}=框架注入, {{xxx}}=AI填写, 其他=固定值）
+    request_body:
+      user_id: "${user_id}"              # 框架注入：从 session 获取
+      task_id: "${conversation_id}"      # 框架注入：从 conversation 获取
+      lg_code: "zh-CN"                   # 固定值
+      question: "{{question}}"           # AI 填写：用户的问题（必填）
+      files: "{{files}}"                 # AI 填写：文件列表（可选）
+    
+    # 📤 AI 输出示例：
+    # {
+    #   "api_name": "wenshu_api",
+    #   "parameters": {"question": "分析销售数据", "files": [...]}
+    # }
+
+  # ============================================================
+  # coze_api - Coze 工作流（Ontology Builder）
+  # ============================================================
+  - name: coze_api
+    base_url: "https://api.coze.cn/v1/workflow/run"
+    auth:
+      type: bearer
+      header: Authorization
+      env: COZE_API_KEY
+    doc: coze-api
+    capability: "document_creation"
+    description: "Coze API - 工作流执行（Ontology Builder）"
+    default_mode: "async_poll"
+    default_method: "POST"
+    
+    # 📦 完整请求体（标记说明：${xxx}=框架注入, {{xxx}}=AI填写, 其他=固定值）
+    request_body:
+      workflow_id: "7579565547005837331"   # 固定值
+      is_async: true                       # 固定值
+      parameters:
+        chart_url: "{{chart_url}}"         # AI 填写：流程图 URL（必填）
+        query: "{{query}}"                 # AI 填写：系统名称（必填）
+        language: "{{language}}"           # AI 填写：输出语言（必填）
+    
+    # 📤 AI 输出示例：
+    # {
+    #   "api_name": "coze_api",
+    #   "parameters": {"chart_url": "https://...", "query": "订单系统", "language": "中文"}
+    # }
+    poll_config:
+      execute_id_field: "execute_id"  # Coze 初始响应直接返回 execute_id 在顶层
+      status_url_template: "https://api.coze.cn/v1/workflows/{workflow_id}/run_histories/{execute_id}"
+      body_vars: ["workflow_id"]
+      # 🔧 根据 Coze API 文档：https://www.coze.cn/open/playground/workflow_run_history
+      # execute_status: Success / Running / Fail
+      status_field: "data.0.execute_status"
+      success_status: "Success"
+      failed_status: "Fail"
+      # output 字段包含工作流输出结果
+      output_field: "data.0.output"
+      check_code: true  # 检查 code 字段，code !== 0 立即报错
+
+
+# ==================== 记忆配置（V4.6）====================
+
+memory:
+  # 启用 Mem0 用户记忆
+  mem0_enabled: true
+  
+  # 启用智能记忆检索（根据意图分析决定）
+  smart_retrieval: true
+  
+  # 记忆保留策略
+  retention_policy: "user"
+
+
+# ==================== Multi-Agent 配置（V6.0）====================
+#
+# 控制复杂任务的多 Agent 协作行为
+#
+multi_agent:
+  # mode 选项：
+  #   - disabled: 禁用 Multi-Agent，始终使用 SimpleAgent
+  #   - auto: 自动判断（基于任务复杂度和关键词）
+  #   - enabled: 始终使用 Multi-Agent
+  mode: "disabled"  # 🆕 暂时禁用，待充分验证后再启用
+  
+  # 最大并行 Worker 数
+  max_parallel_workers: 5
+  
+  # 执行策略：auto | parallel | sequential
+  execution_strategy: "auto"
+  
+  # 容错配置
+  enable_checkpointing: true
+  max_retries: 3
+  
+  # 超时配置
+  task_timeout_seconds: 3600       # 总任务超时（秒）
+  worker_timeout_seconds: 600      # 单 Worker 超时（秒）
+  
+  # Worker 配置
+  workers:
+    research:
+      enabled: true
+      max_instances: 3
+    
+    document:
+      enabled: true
+      max_instances: 2
+    
+    data_analysis:
+      enabled: true
+      max_instances: 2
+  
+  # 自动触发配置（mode=auto 时生效）
+  auto_trigger_keywords:
+    - "研究"
+    - "分析"
+    - "对比"
+    - "调研"
+    - "报告"
+  auto_trigger_min_complexity: "complex"
+
+
+# ==================== 高级配置 ====================
+
+advanced:
+  # 意图分析器（🆕 V8.3: 从 Schema 读取）
+  intent_analyzer:
+    enabled: false  # 暂时关闭，跳过 LLM 调用
+    use_llm: true
+  
+  # 输出格式（V6.3 使用 Pydantic 校验）
+  output_formatter:
+    enabled: true
+    default_format: "text"           # 默认文本格式（最简单）
+    code_highlighting: true
+    # JSON 输出配置（仅当 default_format="json" 时生效）
+    # json_model_name: "SimpleResponse"  # 使用内置 Pydantic 模型
+    # json_schema:                        # 或使用动态 Schema 定义
+    #   status: {type: "str", required: true}
+    #   message: {type: "str", default: ""}
+    #   data: {type: "any", default: null}
+    # strict_json_validation: false       # true=校验不通过则报错
+    json_ensure_ascii: false
+    json_indent: 2

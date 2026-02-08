@@ -90,3 +90,4 @@ dump.rdb
 # 运行时产物
 workspace/storage/tool_results/
 evaluation/reports/_e2e_checkpoint.json
+data/

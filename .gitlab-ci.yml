@@ -1,0 +1,719 @@
+# GitLab CI/CD Pipeline for zenflux-agent
+# Purpose: Automated linting, building, and deployment to AWS
+#
+# GitLab Flow Strategy:
+#   - feature/* / hotfix/* → lint only
+#   - main → no pipeline (protected branch, merge only)
+#   - staging → build + deploy to AWS Staging + verify
+#   - production → build + deploy to AWS Production + verify (MR 时需 lint 通过)
+#
+# Prerequisites:
+#   - GitLab Runner with Docker executor
+#   - AWS credentials configured in CI/CD Variables
+#   - ECR repository created
+#   - WECHAT_WEBHOOK_URL / FEISHU_WEBHOOK_URL for notifications (optional)
+
+# ============================================================
+# Disable GitLab Auto DevOps and Security Scanning
+# ============================================================
+include: []
+
+# ============================================================
+# Workflow: 自动取消冗余流水线
+# ============================================================
+workflow:
+  auto_cancel:
+    on_new_commit: interruptible
+
+# ============================================================
+# Global Configuration
+# ============================================================
+
+stages:
+  - test
+  - build
+  - deploy
+  - verify
+  - notify
+
+variables:
+  # Disable Auto DevOps and Security Scanning
+  AUTO_DEVOPS_ENABLED: "false"
+  SAST_DISABLED: "true"
+  SECRET_DETECTION_DISABLED: "true"
+  CONTAINER_SCANNING_DISABLED: "true"
+  DEPENDENCY_SCANNING_DISABLED: "true"
+  LICENSE_SCANNING_DISABLED: "true"
+  DAST_DISABLED: "true"
+  CODE_QUALITY_DISABLED: "true"
+  
+  # Git optimization
+  GIT_DEPTH: "20"
+  GIT_STRATEGY: fetch
+  GIT_SUBMODULE_STRATEGY: none
+  
+  # Python configuration
+  PIP_CACHE_DIR: "${CI_PROJECT_DIR}/.cache/pip"
+  PYTHONDONTWRITEBYTECODE: "1"
+  PYTHONUNBUFFERED: "1"
+  
+  # Docker configuration
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: ""
+  
+  # AWS configuration
+  AWS_DEFAULT_REGION: ap-southeast-1
+  AWS_ACCOUNT_ID: ${AWS_ACCOUNT_ID}
+  ECR_REGISTRY: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com
+  ECR_REPOSITORY: zen0-backend/agent
+  
+  # Application configuration
+  APP_NAME: zen0-backend
+  SERVICE_NAME: agent
+
+# Default settings for all jobs
+default:
+  interruptible: true
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+      - stuck_or_timeout_failure
+
+# ============================================================
+# Templates
+# ============================================================
+
+# Python environment template
+.python_template: &python_template
+  image: docker.1ms.run/library/python:3.12-slim
+  before_script:
+    - pip install --no-cache-dir ruff
+
+# Docker build environment template
+.docker_template: &docker_template
+  image: docker.1ms.run/library/docker:latest
+  variables:
+    DOCKER_HOST: unix:///var/run/docker.sock
+  before_script:
+    - docker info
+
+# AWS CLI template
+.aws_template: &aws_template
+  image:
+    name: docker.1ms.run/amazon/aws-cli:latest
+    entrypoint: [""]
+  variables:
+    ALL_PROXY: "socks5://172.17.0.1:40000"
+    HTTPS_PROXY: "socks5://172.17.0.1:40000"
+  before_script:
+    - yum install -y jq > /dev/null 2>&1 || true
+    - aws --version
+    - aws sts get-caller-identity
+
+# Notification template
+.notify_template: &notify_template
+  image: docker.1ms.run/library/alpine:latest
+  before_script:
+    - apk add --no-cache curl jq
+
+# ============================================================
+# Test Stage
+# ============================================================
+
+# Lint job - Python code quality check with ruff
+lint:
+  <<: *python_template
+  stage: test
+  script:
+    - ruff --version
+    - echo "Running ruff lint check..."
+    - ruff check . --output-format=gitlab
+  rules:
+    # 只在合并到 production 分支的 MR 时运行
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "production"
+    - if: $CI_COMMIT_BRANCH =~ /^(feature|hotfix)\//
+
+# ============================================================
+# Build Stage
+# ============================================================
+
+# Build and Push Docker image - only on staging/production branches
+# 直接推送到 ECR，避免 artifact 大小限制
+build:
+  <<: *docker_template
+  stage: build
+  variables:
+    IMAGE_TAG: ${CI_COMMIT_REF_SLUG}-${CI_COMMIT_SHORT_SHA}
+    DOCKER_BUILDKIT: "1"
+    BUILDKIT_PROGRESS: "plain"
+  script:
+    - echo "Building image with tag ${IMAGE_TAG}"
+    # 使用 Docker 内置的 ECR 凭证助手登录（通过 amazon/aws-cli 容器）
+    - |
+      if [ -n "${AWS_ACCESS_KEY_ID}" ] && [ -n "${ECR_REGISTRY}" ]; then
+        echo "Logging in to ECR..."
+        docker run --rm \
+          -e AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}" \
+          -e AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY}" \
+          -e AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION}" \
+          docker.1ms.run/amazon/aws-cli:latest \
+          ecr get-login-password --region ${AWS_DEFAULT_REGION} | \
+          docker login --username AWS --password-stdin ${ECR_REGISTRY}
+      fi
+    # 使用 BuildKit 构建
+    - |
+      CACHE_ARGS=""
+      if [ -n "${ECR_REGISTRY}" ]; then
+        CACHE_ARGS="--cache-from type=registry,ref=${ECR_REGISTRY}/${ECR_REPOSITORY}:cache"
+      fi
+      docker build \
+        ${CACHE_ARGS} \
+        --build-arg REGISTRY=docker.1ms.run/library \
+        --build-arg USE_CHINA_MIRROR=true \
+        --build-arg BUILDKIT_INLINE_CACHE=1 \
+        -t ${SERVICE_NAME}:${IMAGE_TAG} \
+        -f Dockerfile.production \
+        .
+    - docker tag ${SERVICE_NAME}:${IMAGE_TAG} ${SERVICE_NAME}:latest
+    # 直接推送到 ECR
+    - echo "Pushing image to ECR..."
+    - docker tag ${SERVICE_NAME}:${IMAGE_TAG} ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}
+    - docker push ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}
+    - echo "Image pushed successfully - ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "staging"
+    - if: $CI_COMMIT_BRANCH == "production"
+  needs: []
+
+# ============================================================
+# Deploy Stage
+# ============================================================
+
+# Deploy to AWS Staging
+deploy_staging:
+  <<: *aws_template
+  stage: deploy
+  variables:
+    IMAGE_TAG: ${CI_COMMIT_REF_SLUG}-${CI_COMMIT_SHORT_SHA}
+    ENV_NAME: staging
+  script:
+    - |
+      # Get current task definition for potential rollback
+      echo "Fetching current deployment info for rollback..."
+      
+      # 动态查找 ECS 集群（Copilot 创建的集群名称包含随机后缀）
+      CLUSTER_PREFIX="${APP_NAME}-${ENV_NAME}-Cluster"
+      CLUSTER_NAME=$(aws ecs list-clusters --query 'clusterArns[*]' --output text | tr '\t' '\n' | grep "$CLUSTER_PREFIX" | head -1 | awk -F/ '{print $NF}')
+      
+      if [ -z "$CLUSTER_NAME" ]; then
+        echo "Warning: Could not find ECS cluster, skipping rollback info"
+        PREVIOUS_TAG=""
+      else
+        # 动态查找服务（Copilot 服务名称格式: ${APP_NAME}-${ENV_NAME}-${SERVICE_NAME}-Service-xxx）
+        SVC_NAME=$(aws ecs list-services --cluster "$CLUSTER_NAME" --query 'serviceArns[*]' --output text | tr '\t' '\n' | grep "${SERVICE_NAME}" | head -1 | awk -F/ '{print $NF}')
+        
+        if [ -z "$SVC_NAME" ]; then
+          echo "Warning: Could not find service, skipping rollback info"
+          PREVIOUS_TAG=""
+        else
+          CURRENT_IMAGE=$(aws ecs describe-services \
+            --cluster "$CLUSTER_NAME" \
+            --services "$SVC_NAME" \
+            --query 'services[0].taskDefinition' \
+            --output text 2>/dev/null | xargs -I {} aws ecs describe-task-definition \
+            --task-definition {} \
+            --query 'taskDefinition.containerDefinitions[0].image' \
+            --output text 2>/dev/null || echo "")
+          
+          if [ -n "$CURRENT_IMAGE" ]; then
+            PREVIOUS_TAG=$(echo "$CURRENT_IMAGE" | awk -F: '{print $NF}')
+          else
+            PREVIOUS_TAG=""
+          fi
+        fi
+      fi
+      
+      echo "Previous tag: ${PREVIOUS_TAG:-none}"
+      echo "PREVIOUS_TAG=$PREVIOUS_TAG" >> deploy.env
+    - echo "Deploying to AWS Staging..."
+    - echo "Image - ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+    # 动态修改 manifest 中的镜像标签
+    - |
+      echo "Updating manifest with image tag: ${IMAGE_TAG}"
+      sed -i "s|location: ${ECR_REGISTRY}/${ECR_REPOSITORY}.*|location: ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}|" copilot/${SERVICE_NAME}/manifest.yml
+      echo "Updated image.location:"
+      grep "location:" copilot/${SERVICE_NAME}/manifest.yml | head -1
+    - cp /opt/copilot/copilot /usr/local/bin/copilot
+    - chmod +x /usr/local/bin/copilot
+    - copilot --version
+    - |
+      if ! copilot svc deploy --name ${SERVICE_NAME} --env ${ENV_NAME}; then
+        echo "Deployment failed!"
+        if [ -n "$PREVIOUS_TAG" ] && [ "$PREVIOUS_TAG" != "none" ]; then
+          echo "Attempting rollback to previous version: $PREVIOUS_TAG"
+          sed -i "s|location: ${ECR_REGISTRY}/${ECR_REPOSITORY}.*|location: ${ECR_REGISTRY}/${ECR_REPOSITORY}:${PREVIOUS_TAG}|" copilot/${SERVICE_NAME}/manifest.yml
+          copilot svc deploy --name ${SERVICE_NAME} --env ${ENV_NAME} || true
+        fi
+        exit 1
+      fi
+    - echo "Staging deployment completed!"
+  artifacts:
+    reports:
+      dotenv: deploy.env
+    expire_in: 1 day
+  environment:
+    name: staging
+    url: https://agent.malue.ai
+  rules:
+    - if: $CI_COMMIT_BRANCH == "staging"
+  needs:
+    - build
+
+# Deploy to AWS Production
+deploy_production:
+  <<: *aws_template
+  stage: deploy
+  variables:
+    IMAGE_TAG: ${CI_COMMIT_REF_SLUG}-${CI_COMMIT_SHORT_SHA}
+    ENV_NAME: production
+  script:
+    - |
+      # Get current task definition for potential rollback
+      echo "Fetching current deployment info for rollback..."
+      
+      # 动态查找 ECS 集群（Copilot 创建的集群名称包含随机后缀）
+      CLUSTER_PREFIX="${APP_NAME}-${ENV_NAME}-Cluster"
+      CLUSTER_NAME=$(aws ecs list-clusters --query 'clusterArns[*]' --output text | tr '\t' '\n' | grep "$CLUSTER_PREFIX" | head -1 | awk -F/ '{print $NF}')
+      
+      if [ -z "$CLUSTER_NAME" ]; then
+        echo "Warning: Could not find ECS cluster, skipping rollback info"
+        PREVIOUS_TAG=""
+      else
+        # 动态查找服务（Copilot 服务名称格式: ${APP_NAME}-${ENV_NAME}-${SERVICE_NAME}-Service-xxx）
+        SVC_NAME=$(aws ecs list-services --cluster "$CLUSTER_NAME" --query 'serviceArns[*]' --output text | tr '\t' '\n' | grep "${SERVICE_NAME}" | head -1 | awk -F/ '{print $NF}')
+        
+        if [ -z "$SVC_NAME" ]; then
+          echo "Warning: Could not find service, skipping rollback info"
+          PREVIOUS_TAG=""
+        else
+          CURRENT_IMAGE=$(aws ecs describe-services \
+            --cluster "$CLUSTER_NAME" \
+            --services "$SVC_NAME" \
+            --query 'services[0].taskDefinition' \
+            --output text 2>/dev/null | xargs -I {} aws ecs describe-task-definition \
+            --task-definition {} \
+            --query 'taskDefinition.containerDefinitions[0].image' \
+            --output text 2>/dev/null || echo "")
+          
+          if [ -n "$CURRENT_IMAGE" ]; then
+            PREVIOUS_TAG=$(echo "$CURRENT_IMAGE" | awk -F: '{print $NF}')
+          else
+            PREVIOUS_TAG=""
+          fi
+        fi
+      fi
+      
+      echo "Previous tag: ${PREVIOUS_TAG:-none}"
+      echo "PREVIOUS_TAG=$PREVIOUS_TAG" >> deploy.env
+    - echo "Deploying to AWS Production..."
+    - echo "Image - ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+    # 动态修改 manifest 中的镜像标签
+    - |
+      echo "Updating manifest with image tag: ${IMAGE_TAG}"
+      sed -i "s|location: ${ECR_REGISTRY}/${ECR_REPOSITORY}.*|location: ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}|" copilot/${SERVICE_NAME}/manifest.yml
+      echo "Updated image.location:"
+      grep "location:" copilot/${SERVICE_NAME}/manifest.yml | head -1
+    - cp /opt/copilot/copilot /usr/local/bin/copilot
+    - chmod +x /usr/local/bin/copilot
+    - copilot --version
+    - |
+      if ! copilot svc deploy --name ${SERVICE_NAME} --env ${ENV_NAME}; then
+        echo "Deployment failed!"
+        if [ -n "$PREVIOUS_TAG" ] && [ "$PREVIOUS_TAG" != "none" ]; then
+          echo "Attempting rollback to previous version: $PREVIOUS_TAG"
+          sed -i "s|location: ${ECR_REGISTRY}/${ECR_REPOSITORY}.*|location: ${ECR_REGISTRY}/${ECR_REPOSITORY}:${PREVIOUS_TAG}|" copilot/${SERVICE_NAME}/manifest.yml
+          copilot svc deploy --name ${SERVICE_NAME} --env ${ENV_NAME} || true
+        fi
+        exit 1
+      fi
+    - echo "Production deployment completed!"
+  artifacts:
+    reports:
+      dotenv: deploy.env
+    expire_in: 1 day
+  environment:
+    name: production
+    url: https://api.dazee.ai
+  rules:
+    - if: $CI_COMMIT_BRANCH == "production"
+  needs:
+    - build
+
+# ============================================================
+# Verify Stage
+# ============================================================
+
+# Health check for Staging
+verify_staging:
+  stage: verify
+  image: docker.1ms.run/library/alpine:latest
+  variables:
+    HEALTH_URL: "https://agent.malue.ai/health"
+    MAX_RETRIES: "30"
+    RETRY_INTERVAL: "10"
+  script:
+    - apk add --no-cache curl
+    - |
+      echo "Waiting for service to be healthy..."
+      echo "Health URL: $HEALTH_URL"
+      
+      for i in $(seq 1 $MAX_RETRIES); do
+        HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 "$HEALTH_URL" 2>/dev/null || echo "000")
+        
+        if [ "$HTTP_CODE" = "200" ]; then
+          echo "Health check passed on attempt $i (HTTP $HTTP_CODE)"
+          exit 0
+        fi
+        
+        echo "Attempt $i/$MAX_RETRIES failed (HTTP $HTTP_CODE), waiting ${RETRY_INTERVAL}s..."
+        sleep $RETRY_INTERVAL
+      done
+      
+      echo "Health check failed after $MAX_RETRIES attempts"
+      exit 1
+  rules:
+    - if: $CI_COMMIT_BRANCH == "staging"
+  needs:
+    - deploy_staging
+
+# Health check for Production
+# 注意：Production 环境 agent 服务禁用了 HTTP (http: false)，通过 NLB 提供 gRPC
+# 健康检查通过 ECS 服务状态验证，而非 HTTP 端点
+verify_production:
+  <<: *aws_template
+  stage: verify
+  variables:
+    ENV_NAME: production
+    MAX_RETRIES: "30"
+    RETRY_INTERVAL: "10"
+  script:
+    - |
+      echo "Verifying production deployment via ECS service status..."
+      
+      # 动态查找 ECS 集群（Copilot 创建的集群名称包含随机后缀）
+      CLUSTER_PREFIX="${APP_NAME}-${ENV_NAME}-Cluster"
+      echo "Searching for cluster with prefix: $CLUSTER_PREFIX"
+      
+      CLUSTER_NAME=$(aws ecs list-clusters --query 'clusterArns[*]' --output text | tr '\t' '\n' | grep "$CLUSTER_PREFIX" | head -1 | awk -F/ '{print $NF}')
+      
+      if [ -z "$CLUSTER_NAME" ]; then
+        echo "Error: Could not find ECS cluster with prefix $CLUSTER_PREFIX"
+        exit 1
+      fi
+      echo "Found cluster: $CLUSTER_NAME"
+      
+      # 动态查找服务（Copilot 服务名称格式: ${APP_NAME}-${ENV_NAME}-${SERVICE_NAME}-Service-xxx）
+      echo "Searching for ${SERVICE_NAME} service..."
+      SVC_NAME=$(aws ecs list-services --cluster "$CLUSTER_NAME" --query 'serviceArns[*]' --output text | tr '\t' '\n' | grep "${SERVICE_NAME}" | head -1 | awk -F/ '{print $NF}')
+      
+      if [ -z "$SVC_NAME" ]; then
+        echo "Error: Could not find ${SERVICE_NAME} service in cluster $CLUSTER_NAME"
+        exit 1
+      fi
+      echo "Found service: $SVC_NAME"
+      
+      # 等待服务稳定
+      echo "Waiting for service to be stable..."
+      for i in $(seq 1 $MAX_RETRIES); do
+        SERVICE_INFO=$(aws ecs describe-services \
+          --cluster "$CLUSTER_NAME" \
+          --services "$SVC_NAME" \
+          --query 'services[0].{running:runningCount,desired:desiredCount,status:status}' \
+          --output json)
+        
+        RUNNING=$(echo "$SERVICE_INFO" | jq -r '.running')
+        DESIRED=$(echo "$SERVICE_INFO" | jq -r '.desired')
+        STATUS=$(echo "$SERVICE_INFO" | jq -r '.status')
+        
+        echo "Attempt $i/$MAX_RETRIES: status=$STATUS, running=$RUNNING/$DESIRED"
+        
+        if [ "$STATUS" = "ACTIVE" ] && [ "$RUNNING" = "$DESIRED" ] && [ "$RUNNING" -gt 0 ]; then
+          echo "Service is healthy and stable!"
+          exit 0
+        fi
+        
+        sleep $RETRY_INTERVAL
+      done
+      
+      echo "Service verification failed after $MAX_RETRIES attempts"
+      exit 1
+  rules:
+    - if: $CI_COMMIT_BRANCH == "production"
+  needs:
+    - deploy_production
+
+# ============================================================
+# Notify Stage
+# ============================================================
+
+# Success notification
+notify_success:
+  <<: *notify_template
+  stage: notify
+  script:
+    - |
+      # Determine environment
+      if [ "$CI_COMMIT_BRANCH" = "production" ]; then
+        ENV_EMOJI="🚀"
+        ENV_NAME="Production"
+        ENV_URL="https://api.dazee.ai"
+      else
+        ENV_EMOJI="🧪"
+        ENV_NAME="Staging"
+        ENV_URL="https://agent.malue.ai"
+      fi
+      
+      # Get commit info
+      COMMIT_TITLE=$(echo "$CI_COMMIT_TITLE" | head -c 50)
+      [ ${#CI_COMMIT_TITLE} -gt 50 ] && COMMIT_TITLE="${COMMIT_TITLE}..."
+      IMAGE_TAG="${CI_COMMIT_REF_SLUG}-${CI_COMMIT_SHORT_SHA}"
+      
+      # Calculate duration
+      if [ -n "$CI_PIPELINE_CREATED_AT" ]; then
+        START_TS=$(date -d "$CI_PIPELINE_CREATED_AT" +%s 2>/dev/null || echo "0")
+        NOW_TS=$(date +%s)
+        if [ "$START_TS" != "0" ] && [ "$START_TS" -gt 0 ] 2>/dev/null; then
+          DURATION_SEC=$((NOW_TS - START_TS))
+          DURATION_MIN=$((DURATION_SEC / 60))
+          DURATION_SEC_REM=$((DURATION_SEC % 60))
+          if [ "$DURATION_MIN" -gt 0 ]; then
+            DURATION_STR="${DURATION_MIN}分${DURATION_SEC_REM}秒"
+          else
+            DURATION_STR="${DURATION_SEC_REM}秒"
+          fi
+        fi
+      fi
+      [ -z "$DURATION_STR" ] && DURATION_STR="N/A"
+      
+      NOTIFIED=false
+      
+      # Send to WeChat Work
+      if [ -n "$WECHAT_WEBHOOK_URL" ]; then
+        echo "Sending notification to WeChat Work..."
+        curl -X POST "${WECHAT_WEBHOOK_URL}" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "msgtype": "markdown",
+            "markdown": {
+              "content": "## '"${ENV_EMOJI}"' '"${ENV_NAME}"' 部署成功\n\n**环境**: '"${ENV_NAME}"'\n**状态**: ✅ 成功\n**镜像版本**: '"${IMAGE_TAG}"'\n**Git 分支**: '"${CI_COMMIT_BRANCH}"'\n**最新提交**: '"${CI_COMMIT_SHORT_SHA}"' - '"${COMMIT_TITLE}"'\n**服务地址**: ['"${ENV_URL}"']('"${ENV_URL}"')\n**耗时**: '"${DURATION_STR}"'\n**触发者**: '"${GITLAB_USER_NAME}"'\n\n[查看流水线]('"${CI_PIPELINE_URL}"')"
+            }
+          }' || true
+        NOTIFIED=true
+      fi
+      
+      # Send to Feishu/Lark
+      if [ -n "$FEISHU_WEBHOOK_URL" ]; then
+        echo "Sending notification to Feishu..."
+        curl -X POST "${FEISHU_WEBHOOK_URL}" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "msg_type": "interactive",
+            "card": {
+              "header": {
+                "title": {
+                  "tag": "plain_text",
+                  "content": "'"${ENV_EMOJI}"' '"${ENV_NAME}"' 部署成功"
+                },
+                "template": "green"
+              },
+              "elements": [
+                {
+                  "tag": "div",
+                  "fields": [
+                    {"is_short": true, "text": {"tag": "lark_md", "content": "**环境**\n'"${ENV_NAME}"'"}},
+                    {"is_short": true, "text": {"tag": "lark_md", "content": "**状态**\n✅ 成功"}}
+                  ]
+                },
+                {
+                  "tag": "div",
+                  "fields": [
+                    {"is_short": true, "text": {"tag": "lark_md", "content": "**镜像版本**\n'"${IMAGE_TAG}"'"}},
+                    {"is_short": true, "text": {"tag": "lark_md", "content": "**Git 分支**\n'"${CI_COMMIT_BRANCH}"'"}}
+                  ]
+                },
+                {
+                  "tag": "div",
+                  "text": {"tag": "lark_md", "content": "**最新提交**\n'"${CI_COMMIT_SHORT_SHA}"' - '"${COMMIT_TITLE}"'"}
+                },
+                {
+                  "tag": "div",
+                  "text": {"tag": "lark_md", "content": "**服务地址**\n['"${ENV_URL}"']('"${ENV_URL}"')"}
+                },
+                {
+                  "tag": "div",
+                  "fields": [
+                    {"is_short": true, "text": {"tag": "lark_md", "content": "**耗时**\n'"${DURATION_STR}"'"}},
+                    {"is_short": true, "text": {"tag": "lark_md", "content": "**触发者**\n'"${GITLAB_USER_NAME}"'"}}
+                  ]
+                },
+                {
+                  "tag": "hr"
+                },
+                {
+                  "tag": "action",
+                  "actions": [
+                    {
+                      "tag": "button",
+                      "text": {"tag": "plain_text", "content": "查看流水线"},
+                      "url": "'"${CI_PIPELINE_URL}"'",
+                      "type": "primary"
+                    },
+                    {
+                      "tag": "button",
+                      "text": {"tag": "plain_text", "content": "访问服务"},
+                      "url": "'"${ENV_URL}"'",
+                      "type": "default"
+                    }
+                  ]
+                }
+              ]
+            }
+          }' || true
+        NOTIFIED=true
+      fi
+      
+      if [ "$NOTIFIED" = "false" ]; then
+        echo "No webhook configured, skipping notification"
+      fi
+  rules:
+    - if: $CI_COMMIT_BRANCH == "staging"
+      when: on_success
+    - if: $CI_COMMIT_BRANCH == "production"
+      when: on_success
+  needs:
+    - job: verify_staging
+      optional: true
+    - job: verify_production
+      optional: true
+  allow_failure: true
+
+# Failure notification
+notify_failure:
+  <<: *notify_template
+  stage: notify
+  script:
+    - |
+      # Determine environment
+      if [ "$CI_COMMIT_BRANCH" = "production" ]; then
+        ENV_NAME="Production"
+        ENV_URL="https://api.dazee.ai"
+      else
+        ENV_NAME="Staging"
+        ENV_URL="https://agent.malue.ai"
+      fi
+      
+      # Get commit info
+      COMMIT_TITLE=$(echo "$CI_COMMIT_TITLE" | head -c 50)
+      [ ${#CI_COMMIT_TITLE} -gt 50 ] && COMMIT_TITLE="${COMMIT_TITLE}..."
+      IMAGE_TAG="${CI_COMMIT_REF_SLUG}-${CI_COMMIT_SHORT_SHA}"
+      
+      NOTIFIED=false
+      
+      # Send to WeChat Work
+      if [ -n "$WECHAT_WEBHOOK_URL" ]; then
+        echo "Sending failure notification to WeChat Work..."
+        curl -X POST "${WECHAT_WEBHOOK_URL}" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "msgtype": "markdown",
+            "markdown": {
+              "content": "## 🔴 '"${ENV_NAME}"' 部署失败\n\n**环境**: '"${ENV_NAME}"'\n**状态**: ❌ 失败\n**镜像版本**: '"${IMAGE_TAG}"'\n**Git 分支**: '"${CI_COMMIT_BRANCH}"'\n**最新提交**: '"${CI_COMMIT_SHORT_SHA}"' - '"${COMMIT_TITLE}"'\n**服务地址**: ['"${ENV_URL}"']('"${ENV_URL}"')\n**触发者**: '"${GITLAB_USER_NAME}"'\n\n> ⚠️ 请检查流水线日志排查问题\n\n[查看流水线]('"${CI_PIPELINE_URL}"')"
+            }
+          }' || true
+        NOTIFIED=true
+      fi
+      
+      # Send to Feishu/Lark
+      if [ -n "$FEISHU_WEBHOOK_URL" ]; then
+        echo "Sending failure notification to Feishu..."
+        curl -X POST "${FEISHU_WEBHOOK_URL}" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "msg_type": "interactive",
+            "card": {
+              "header": {
+                "title": {
+                  "tag": "plain_text",
+                  "content": "🔴 '"${ENV_NAME}"' 部署失败"
+                },
+                "template": "red"
+              },
+              "elements": [
+                {
+                  "tag": "div",
+                  "fields": [
+                    {"is_short": true, "text": {"tag": "lark_md", "content": "**环境**\n'"${ENV_NAME}"'"}},
+                    {"is_short": true, "text": {"tag": "lark_md", "content": "**状态**\n❌ 失败"}}
+                  ]
+                },
+                {
+                  "tag": "div",
+                  "fields": [
+                    {"is_short": true, "text": {"tag": "lark_md", "content": "**镜像版本**\n'"${IMAGE_TAG}"'"}},
+                    {"is_short": true, "text": {"tag": "lark_md", "content": "**Git 分支**\n'"${CI_COMMIT_BRANCH}"'"}}
+                  ]
+                },
+                {
+                  "tag": "div",
+                  "text": {"tag": "lark_md", "content": "**最新提交**\n'"${CI_COMMIT_SHORT_SHA}"' - '"${COMMIT_TITLE}"'"}
+                },
+                {
+                  "tag": "div",
+                  "text": {"tag": "lark_md", "content": "**服务地址**\n['"${ENV_URL}"']('"${ENV_URL}"')"}
+                },
+                {
+                  "tag": "div",
+                  "fields": [
+                    {"is_short": true, "text": {"tag": "lark_md", "content": "**触发者**\n'"${GITLAB_USER_NAME}"'"}}
+                  ]
+                },
+                {
+                  "tag": "hr"
+                },
+                {
+                  "tag": "div",
+                  "text": {"tag": "lark_md", "content": "⚠️ 请检查流水线日志排查问题"}
+                },
+                {
+                  "tag": "action",
+                  "actions": [
+                    {
+                      "tag": "button",
+                      "text": {"tag": "plain_text", "content": "查看流水线"},
+                      "url": "'"${CI_PIPELINE_URL}"'",
+                      "type": "danger"
+                    },
+                    {
+                      "tag": "button",
+                      "text": {"tag": "plain_text", "content": "访问服务"},
+                      "url": "'"${ENV_URL}"'",
+                      "type": "default"
+                    }
+                  ]
+                }
+              ]
+            }
+          }' || true
+        NOTIFIED=true
+      fi
+      
+      if [ "$NOTIFIED" = "false" ]; then
+        echo "No webhook configured, skipping notification"
+      fi
+  rules:
+    - if: $CI_COMMIT_BRANCH == "staging"
+      when: on_failure
+    - if: $CI_COMMIT_BRANCH == "production"
+      when: on_failure
+  allow_failure: true

@@ -52,7 +52,7 @@ graders:
     enabled: true
     # LLM 配置（独立于实例 provider）
     provider: "claude"
-    model: "claude-opus-4-0-20250514"
+    model: "claude-opus-4-6"
     api_key_env: "ANTHROPIC_API_KEY"
     max_tokens: 4096
     temperature: 0

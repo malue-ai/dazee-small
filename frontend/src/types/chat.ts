@@ -301,6 +301,7 @@ export interface SendMessageOptions {
     timezone?: string
     locale?: string
     timestamp?: string
+    hitlFlag?: boolean // 🆕 HITL 响应标识
     [key: string]: unknown
   }
 }

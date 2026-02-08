@@ -1,0 +1,148 @@
+# ============================================================
+# Zenflux Agent 生产环境 Dockerfile
+# 单容器部署：Nginx + FastAPI + Vue Frontend
+# Build: 2026-01-16
+# ============================================================
+
+# 构建参数
+ARG REGISTRY=public.ecr.aws/docker/library
+# 是否使用中国镜像源（默认不使用，适配 AWS 海外构建）
+ARG USE_CHINA_MIRROR=false
+
+# ============================================================
+# 阶段 1: 构建前端
+# ============================================================
+FROM ${REGISTRY}/node:20-alpine AS frontend-builder
+
+ARG USE_CHINA_MIRROR=false
+
+# 配置 Alpine 镜像源（仅在国内环境启用）
+RUN if [ "$USE_CHINA_MIRROR" = "true" ]; then \
+    sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories; \
+    fi
+
+WORKDIR /frontend
+
+# 复制前端依赖文件
+COPY frontend/package*.json ./
+
+# 安装依赖（包括 devDependencies，构建时需要）
+RUN npm ci
+
+# 复制前端源代码
+COPY frontend/ ./
+
+# 构建生产版本
+RUN npm run build
+
+# ============================================================
+# 阶段 2: 构建后端 + 集成前端
+# ============================================================
+FROM ${REGISTRY}/python:3.12-slim
+
+ARG USE_CHINA_MIRROR=false
+
+# 设置环境变量
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# 配置 Debian 镜像源（仅在国内环境启用）并安装系统依赖
+# Debian Bookworm 使用 DEB822 格式的 sources 文件
+RUN if [ "$USE_CHINA_MIRROR" = "true" ]; then \
+    sed -i 's|URIs: http://deb.debian.org|URIs: http://mirrors.ustc.edu.cn|g' /etc/apt/sources.list.d/debian.sources; \
+    fi && \
+    apt-get update && \
+    # 添加重试逻辑，最多尝试 3 次
+    for i in 1 2 3; do \
+        apt-get install -y --no-install-recommends \
+            nginx \
+            curl \
+            supervisor && break || \
+        (echo "apt-get install failed, attempt $i/3" && sleep 5); \
+    done && \
+    rm -rf /var/lib/apt/lists/*
+
+# 设置工作目录
+WORKDIR /app
+
+# 复制后端依赖文件
+COPY requirements.txt .
+
+# 配置 pip 使用国内镜像源
+RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && \
+    pip config set global.trusted-host pypi.tuna.tsinghua.edu.cn && \
+    pip config set global.timeout 300
+
+# 安装 Python 依赖
+# 注意：tcvdb-text 上游包存在哈希不一致问题，需要先单独安装
+RUN pip install --no-cache-dir tcvdb-text && \
+    pip install --no-cache-dir -r requirements.txt
+
+# 复制后端代码
+COPY . .
+
+# 从前端构建阶段复制构建产物
+COPY --from=frontend-builder /frontend/dist /usr/share/nginx/html
+
+# 复制健康检查脚本
+COPY healthcheck.sh /usr/local/bin/healthcheck.sh
+RUN chmod +x /usr/local/bin/healthcheck.sh
+
+# 复制 Nginx 配置
+COPY deploy/nginx/production.conf /etc/nginx/sites-available/default
+
+# 创建必要的目录
+RUN mkdir -p \
+    workspace/database \
+    workspace/knowledge \
+    workspace/memory \
+    workspace/outputs \
+    workspace/inputs \
+    logs \
+    /var/log/supervisor
+
+# 创建 Supervisor 配置
+# 注意：gRPC 服务器在 FastAPI 应用启动时自动启动（通过 main.py lifespan）
+# 只需要设置 ENABLE_GRPC=true 环境变量
+RUN cat > /etc/supervisor/conf.d/zenflux.conf << 'EOF'
+[supervisord]
+nodaemon=true
+logfile=/var/log/supervisor/supervisord.log
+pidfile=/var/run/supervisord.pid
+
+[program:nginx]
+command=/usr/sbin/nginx -g "daemon off;"
+autostart=true
+autorestart=true
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
+
+[program:backend]
+command=uvicorn main:app --host 127.0.0.1 --port 8000 --workers 1
+directory=/app
+autostart=true
+autorestart=true
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
+environment=PYTHONUNBUFFERED="1"
+stopwaitsecs=30
+stopsignal=TERM
+EOF
+
+# 暴露端口
+# 80: Nginx (HTTP)
+# 50051: gRPC
+EXPOSE 80 50051
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD /usr/local/bin/healthcheck.sh
+
+# 启动 Supervisor（管理 Nginx + FastAPI）
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]

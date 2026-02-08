@@ -112,6 +112,12 @@ export function useChat() {
     }
   )
 
+  // ==================== 初始化 ====================
+  
+  // 🆕 设置 HITL 的 SSE 事件处理器（在定义 handleStreamEvent 函数之后会被调用）
+  // 注意：这个设置需要在 handleStreamEvent 定义之后才能生效
+  // 所以我们在文件末尾再次设置
+
   // ==================== 方法 ====================
 
   /**
@@ -479,7 +485,43 @@ export function useChat() {
     if (type === 'content_stop') {
       handleContentStop(data, msg)
     }
-    
+    // 兼容 ZenO 格式（message.assistant.*）
+    if (type === 'message.assistant.delta') {
+      const delta = (event as any).delta
+      if (delta?.type === 'thinking') {
+        msg.thinking = (msg.thinking || '') + (delta.content || '')
+      } else if (delta?.type === 'response') {
+        msg.content += (delta.content || '')
+      } else if (delta?.type === 'clue') {
+        try {
+          const raw = typeof delta.content === 'string' ? JSON.parse(delta.content) : delta.content
+          const request = normalizeHITLRequest(raw)
+          if (request && !hitl.showModal.value) {
+            hitl.show(request)
+          }
+        } catch {
+          // 忽略解析错误
+        }
+      } else if (delta?.type === 'hitl_data') {
+        // 处理 hitl_data delta（HITL 异步模式）
+        try {
+          const hitlData = typeof delta.content === 'string' ? JSON.parse(delta.content) : delta.content
+          
+          if (hitlData && hitlData.status === 'pending') {
+            console.log('🤝 收到 HITL pending 状态:', hitlData)
+            const request = normalizeHITLRequestFromHitlData(hitlData)
+            if (request && !hitl.showModal.value) {
+              hitl.show(request)
+            }
+          } else if (hitlData && hitlData.status === 'completed' && hitlData.success) {
+            console.log('✅ HITL 已完成:', hitlData.response)
+          }
+        } catch (e) {
+          console.warn('⚠️ 解析 hitl_data 失败:', e)
+        }
+      }
+    }
+
     // 处理流结束/消息结束
     if (type === 'message_stop' || type === 'session_stopped' || type === 'error') {
        sessionStore.markCompleted(convId)
@@ -857,6 +899,31 @@ export function useChat() {
     }
   }
 
+  /**
+   * 检查活跃会话（页面刷新重连）
+   */
+  async function checkActiveSessions(): Promise<boolean> {
+    try {
+      const userId = conversationStore.userId
+      if (!userId) return false
+
+      const sessions = await sessionStore.getActiveSessions(userId)
+
+      if (sessions && sessions.length > 0) {
+        console.log(`🔄 发现 ${sessions.length} 个活跃 Session`)
+        return false // 暂时返回 false，不自动重连
+      }
+
+      return false
+    } catch (error) {
+      console.log('ℹ️ 无活跃 Session 或检查失败')
+      return false
+    }
+  }
+
+  // 设置 HITL 的 SSE 事件处理器
+  hitl.setSSEEventHandler(handleStreamEvent)
+
   return {
     // 状态
     isLoading,
@@ -933,5 +1000,21 @@ function normalizeHITLRequest(raw: any): HITLConfirmRequest | null {
     questions: raw.questions || raw.metadata?.questions,
     default_value: raw.default_value,
     metadata: raw.metadata
+  } as HITLConfirmRequest
+}
+
+/**
+ * 🆕 从 hitl_data 构造 HITL 请求（用于 ZenO 格式的 hitl_data delta）
+ */
+function normalizeHITLRequestFromHitlData(hitlData: any): HITLConfirmRequest | null {
+  if (!hitlData || !hitlData.questions) return null
+
+  // 从 hitl_data 格式转换为 HITLConfirmRequest 格式
+  return {
+    question: hitlData.title || '请选择',
+    confirmation_type: 'form',
+    description: hitlData.description,
+    questions: hitlData.questions,
+    metadata: hitlData
   } as HITLConfirmRequest
 }

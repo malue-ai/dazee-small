@@ -523,14 +523,14 @@ def _register_preset_models() -> None:
 
     ModelRegistry.register(
         ModelConfig(
-            model_name="claude-opus-4-20250514",
+            model_name="claude-opus-4-6",
             model_type=ModelType.VLM,
             adapter=AdapterType.CLAUDE,
             base_url="https://api.anthropic.com",
             api_key_env="ANTHROPIC_API_KEY",
             provider="claude",
-            display_name="Claude Opus 4",
-            description="Anthropic 最强模型",
+            display_name="Claude Opus 4.6",
+            description="Anthropic 最强模型（2026.02）",
             capabilities=ModelCapabilities(
                 supports_tools=True,
                 supports_vision=True,
