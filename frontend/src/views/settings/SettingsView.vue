@@ -239,6 +239,14 @@ const providerKeyState = computed(() => {
   return result
 })
 
+/** 判断是否为后端返回的脱敏 Key（如 "sk-xxxx...yyyy" 或 "***"） */
+function isMaskedKey(key: string): boolean {
+  if (!key) return false
+  if (key === '***') return true
+  // 后端脱敏格式：前6位 + ... + 后4位，总长度 < 20
+  return key.includes('...') && key.length < 20
+}
+
 // ==================== 引导系统 Refs ====================
 
 const saveBtnRef = ref<HTMLElement | null>(null)
@@ -299,6 +307,12 @@ async function loadAll() {
       providerKeys[p.name] = existingKey
     }
 
+    // 自动展开已配置 Key 的 Provider（非引导模式下也生效）
+    const configuredProvider = providerData.find(p => p.api_key_configured)
+    if (configuredProvider && !expandedProvider.value) {
+      expandedProvider.value = configuredProvider.name
+    }
+
     // 引导系统：如果有已配置的 Key，允许跳过
     if (guideStore.isActive) {
       const hasConfiguredKey = providerData.some(p => p.api_key_configured)
@@ -339,9 +353,13 @@ async function saveSettings() {
     return
   }
 
-  // 校验 2：选中的 Provider 必须填写了 API Key
+  // 判断选中的 Provider 是否为「已配置 + 未修改 Key」的情况
   const selectedKey = providerKeys[selectedName]?.trim()
-  if (!selectedKey) {
+  const isAlreadyConfigured = selectedProviderDetail.api_key_configured
+  const isKeyMasked = isAlreadyConfigured && !!selectedKey && isMaskedKey(selectedKey)
+
+  // 校验 2：必须已配置或填写了 Key
+  if (!selectedKey && !isAlreadyConfigured) {
     saveError.value = `请填写 ${selectedProviderDetail.display_name} 的 API Key`
     rollbackGuideToStep2(`请填写 ${selectedProviderDetail.display_name} 的 API Key 后再点击下一步`)
     return
@@ -350,8 +368,10 @@ async function saveSettings() {
   saving.value = true
 
   try {
-    // 校验 3：验证选中 Provider 的 API Key（如果已验证通过则跳过）
-    if (!validateResults[selectedName]?.valid) {
+    // 校验 3：验证 API Key（已配置且 Key 是脱敏值时跳过验证）
+    if (isKeyMasked) {
+      // 已配置且 Key 未被用户修改（还是脱敏值）→ 跳过验证，保持现有配置
+    } else if (!validateResults[selectedName]?.valid) {
       validating[selectedName] = true
       try {
         const customBaseUrl = providerBaseUrls[selectedName]?.trim() || undefined
@@ -373,9 +393,9 @@ async function saveSettings() {
       }
     }
 
-    // 校验 4：验证通过后必须有可用模型
+    // 校验 4：验证通过后必须有可用模型（脱敏值时跳过）
     const validResult = validateResults[selectedName]
-    if (!validResult?.models?.length) {
+    if (!isKeyMasked && !validResult?.models?.length) {
       saveError.value = `${selectedProviderDetail.display_name} 验证通过但未返回可用模型`
       saving.value = false
       rollbackGuideToStep2(`${selectedProviderDetail.display_name} 未返回可用模型，请更换 Provider 或检查 Key`)
@@ -385,8 +405,10 @@ async function saveSettings() {
     // ==================== 构建更新对象 ====================
     const updates: SettingsData = { api_keys: {} }
 
-    // 保存选中 Provider 的 Key
-    updates['api_keys'][selectedProviderDetail.api_key_env] = selectedKey
+    // 保存选中 Provider 的 Key（脱敏值不发送，后端会忽略）
+    if (selectedKey && !isKeyMasked) {
+      updates['api_keys'][selectedProviderDetail.api_key_env] = selectedKey
+    }
 
     // 保存自定义 Base URL（如有）
     const baseUrl = providerBaseUrls[selectedName]?.trim()
@@ -409,9 +431,11 @@ async function saveSettings() {
       }
     }
 
-    // 默认模型设为验证通过的首个模型
-    updates.llm = {}
-    updates.llm.COT_AGENT_MODEL = validResult.models[0]
+    // 默认模型：如果有验证结果用验证结果的模型，否则保持现有
+    if (validResult?.models?.length) {
+      updates.llm = {}
+      updates.llm.COT_AGENT_MODEL = validResult.models[0]
+    }
 
     await updateSettings(updates)
 
@@ -461,8 +485,9 @@ function registerGuideValidation(step: number) {
         return '请先展开并选择一个 Provider'
       }
       const key = providerKeys[expandedProvider.value]?.trim()
-      if (!key) {
-        const p = providers.value.find(item => item.name === expandedProvider.value)
+      const p = providers.value.find(item => item.name === expandedProvider.value)
+      // 已配置的 Provider 允许直接通过（脱敏值也算有 Key）
+      if (!key && !p?.api_key_configured) {
         return `请填写 ${p?.display_name || 'Provider'} 的 API Key`
       }
       return true
