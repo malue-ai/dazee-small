@@ -336,18 +336,94 @@ async function saveSettings() {
   saving.value = true
   saveSuccess.value = false
 
-  try {
-    // Sync knowledge-specific fields back to formData
-    if (!formData.knowledge) formData.knowledge = {}
-    formData.knowledge.EMBEDDING_PROVIDER = selectedProvider.value
+  /** 验证失败时回退引导到 Step 2，并显示对应错误提示 */
+  function rollbackGuideToStep2(reason: string) {
+    if (guideStore.isActive && guideStore.currentStep === 3) {
+      guideStore.goToStep(2, reason)
+    }
+  }
 
-    // Build updates (non-empty values only)
-    const updates: SettingsData = {}
-    for (const [groupKey, fields] of Object.entries(formData)) {
-      updates[groupKey] = {}
-      for (const [key, value] of Object.entries(fields)) {
-        if (value) {
-          updates[groupKey][key] = value
+  // 校验 1：必须展开选中一个 Provider
+  if (!expandedProvider.value) {
+    saveError.value = '请先展开并选中一个 Provider'
+    rollbackGuideToStep2('请先选择一个 Provider 并填写 API Key')
+    return
+  }
+
+  const selectedName = expandedProvider.value
+  const selectedProvider = providers.value.find(p => p.name === selectedName)
+  if (!selectedProvider) {
+    saveError.value = '未找到选中的 Provider'
+    rollbackGuideToStep2('请重新选择一个 Provider')
+    return
+  }
+
+  // 校验 2：选中的 Provider 必须填写了 API Key
+  const selectedKey = providerKeys[selectedName]?.trim()
+  if (!selectedKey) {
+    saveError.value = `请填写 ${selectedProvider.display_name} 的 API Key`
+    rollbackGuideToStep2(`请填写 ${selectedProvider.display_name} 的 API Key 后再点击下一步`)
+    return
+  }
+
+  saving.value = true
+
+  try {
+    // 校验 3：验证选中 Provider 的 API Key（如果已验证通过则跳过）
+    if (!validateResults[selectedName]?.valid) {
+      validating[selectedName] = true
+      try {
+        const customBaseUrl = providerBaseUrls[selectedName]?.trim() || undefined
+        const result = await modelApi.validateKey(selectedName, selectedKey, customBaseUrl)
+        validateResults[selectedName] = result
+        if (!result.valid) {
+          saveError.value = `${selectedProvider.display_name} 的 API Key 验证失败：${result.message || '请检查后重试'}`
+          saving.value = false
+          rollbackGuideToStep2(`API Key 验证失败，请检查 ${selectedProvider.display_name} 的 Key 后重试`)
+          return
+        }
+      } catch (e: any) {
+        saveError.value = `${selectedProvider.display_name} 的 API Key 验证失败，请检查后重试`
+        saving.value = false
+        rollbackGuideToStep2(`API Key 验证失败，请检查 ${selectedProvider.display_name} 的 Key 后重试`)
+        return
+      } finally {
+        validating[selectedName] = false
+      }
+    }
+
+    // 校验 4：验证通过后必须有可用模型
+    const validResult = validateResults[selectedName]
+    if (!validResult?.models?.length) {
+      saveError.value = `${selectedProvider.display_name} 验证通过但未返回可用模型`
+      saving.value = false
+      rollbackGuideToStep2(`${selectedProvider.display_name} 未返回可用模型，请更换 Provider 或检查 Key`)
+      return
+    }
+
+    // 构建 Settings API 格式
+    const updates: SettingsData = { api_keys: {}, llm: {}, app: {} }
+
+    // 保存选中 Provider 的 Key
+    updates['api_keys'][selectedProvider.api_key_env] = selectedKey
+
+    // 保存自定义 Base URL（如有）
+    const baseUrl = providerBaseUrls[selectedName]?.trim()
+    if (baseUrl) {
+      const baseUrlEnv = selectedProvider.api_key_env.replace(/_API_KEY$/, '_BASE_URL')
+      updates['api_keys'][baseUrlEnv] = baseUrl
+    }
+
+    // 同时保存其他已配置的 Provider（不丢失已有配置）
+    for (const p of providers.value) {
+      if (p.name === selectedName) continue
+      const key = providerKeys[p.name]?.trim()
+      if (key) {
+        updates['api_keys'][p.api_key_env] = key
+        const otherBaseUrl = providerBaseUrls[p.name]?.trim()
+        if (otherBaseUrl) {
+          const baseUrlEnv = p.api_key_env.replace(/_API_KEY$/, '_BASE_URL')
+          updates['api_keys'][baseUrlEnv] = otherBaseUrl
         }
       }
     }

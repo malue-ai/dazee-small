@@ -60,6 +60,8 @@ export const useGuideStore = defineStore('guide', () => {
   const validationError = ref('')
   /** 是否允许跳过引导（由外部根据是否有有效 Key 来控制） */
   const canSkip = ref(true)
+  /** 临时覆盖当前步骤的 tooltip 文本（如回退时显示错误提示），正常推进时自动清除 */
+  const tooltipOverride = ref('')
 
   /** 外部注册的"下一步"前置校验函数 */
   const _beforeNextStep = shallowRef<(() => string | true) | null>(null)
@@ -99,6 +101,7 @@ export const useGuideStore = defineStore('guide', () => {
     isActive.value = true
     currentStep.value = 1
     validationError.value = ''
+    tooltipOverride.value = ''
   }
 
   function nextStep() {
@@ -112,6 +115,7 @@ export const useGuideStore = defineStore('guide', () => {
     }
 
     validationError.value = ''
+    tooltipOverride.value = ''
     _beforeNextStep.value = null
     targetEl.value = null
     currentStep.value++
@@ -120,8 +124,9 @@ export const useGuideStore = defineStore('guide', () => {
     }
   }
 
-  function goToStep(step: number) {
+  function goToStep(step: number, overrideTooltip?: string) {
     validationError.value = ''
+    tooltipOverride.value = overrideTooltip || ''
     _beforeNextStep.value = null
     targetEl.value = null
     currentStep.value = step
@@ -141,6 +146,7 @@ export const useGuideStore = defineStore('guide', () => {
     currentStep.value = 0
     targetEl.value = null
     validationError.value = ''
+    tooltipOverride.value = ''
     _beforeNextStep.value = null
     isCompleted.value = true
     localStorage.setItem(STORAGE_KEY, '1')
@@ -160,6 +166,7 @@ export const useGuideStore = defineStore('guide', () => {
     currentPhase,
     validationError,
     canSkip,
+    tooltipOverride,
     startGuide,
     nextStep,
     goToStep,

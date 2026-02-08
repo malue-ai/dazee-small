@@ -6,13 +6,14 @@
  * 通过 Teleport 挂载到 body，确保层级在所有内容之上。
  * 目标区域留空，允许用户直接点击被高亮的元素。
  */
-import { ref, computed, watch, onUnmounted } from 'vue'
+import { ref, computed, watch, onUnmounted, nextTick } from 'vue'
 import { useGuideStore } from '@/stores/guide'
 
 const guideStore = useGuideStore()
 
 const PADDING = 8   // 高亮区域向外扩展的像素
 const GAP = 14       // 提示气泡与高亮区域的间距
+const TOOLTIP_ESTIMATED_HEIGHT = 160 // tooltip 估计高度（用于边界检测）
 
 // ==================== 目标元素位置追踪 ====================
 
@@ -54,6 +55,35 @@ watch(() => guideStore.showOverlay, (show) => {
 }, { immediate: true })
 
 onUnmounted(stopTracking)
+
+// ==================== 自动滚动目标元素到可见区域 ====================
+
+watch(
+  [() => guideStore.targetEl, () => guideStore.currentStep],
+  () => {
+    const el = guideStore.targetEl
+    if (!el || guideStore.currentConfig?.floating) return
+
+    nextTick(() => {
+      const elRect = el.getBoundingClientRect()
+      const pos = guideStore.currentConfig?.position
+
+      // 计算目标元素 + tooltip 所需的总空间是否在视口内
+      const tooltipSpace = TOOLTIP_ESTIMATED_HEIGHT + GAP
+      const needsBelow = pos === 'bottom'
+      const needsAbove = pos === 'top'
+
+      const visibleTop = elRect.top - (needsAbove ? tooltipSpace : PADDING)
+      const visibleBottom = elRect.bottom + (needsBelow ? tooltipSpace : PADDING)
+
+      if (visibleTop < 0 || visibleBottom > window.innerHeight) {
+        // 滚动使目标元素居中，给 tooltip 留出空间
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+    })
+  },
+  { flush: 'post' }
+)
 
 // ==================== 带 padding 的矩形 ====================
 
@@ -123,16 +153,42 @@ const tooltipStyle = computed(() => {
   if (!padRect.value) return {}
   const pos = guideStore.currentConfig.position
   const p = padRect.value
+  const vh = window.innerHeight
+  const vw = window.innerWidth
+
+  // 辅助函数：限制 left 不超出视口右侧
+  const clampLeft = (left: number) => Math.min(left, vw - 380) // 380 ≈ max-w-sm + padding
+
+  const topSpace = p.top - GAP           // 目标上方可用空间
+  const bottomSpace = vh - p.bottom - GAP // 目标下方可用空间
+  const SAFE_TOP = 16                     // 视口顶部安全边距
 
   switch (pos) {
     case 'right':
-      return { top: `${p.top}px`, left: `${p.right + GAP}px` }
+      return { top: `${Math.max(SAFE_TOP, Math.min(p.top, vh - TOOLTIP_ESTIMATED_HEIGHT))}px`, left: `${p.right + GAP}px` }
     case 'left':
-      return { top: `${p.top}px`, right: `${window.innerWidth - p.left + GAP}px` }
+      return { top: `${Math.max(SAFE_TOP, Math.min(p.top, vh - TOOLTIP_ESTIMATED_HEIGHT))}px`, right: `${vw - p.left + GAP}px` }
     case 'top':
-      return { bottom: `${window.innerHeight - p.top + GAP}px`, left: `${p.left}px` }
-    case 'bottom':
-      return { top: `${p.bottom + GAP}px`, left: `${p.left}px` }
+      if (topSpace >= TOOLTIP_ESTIMATED_HEIGHT) {
+        return { bottom: `${vh - p.top + GAP}px`, left: `${clampLeft(p.left)}px` }
+      }
+      // 上方不够 → 尝试下方
+      if (bottomSpace >= TOOLTIP_ESTIMATED_HEIGHT) {
+        return { top: `${p.bottom + GAP}px`, left: `${clampLeft(p.left)}px` }
+      }
+      // 上下都不够 → 固定在视口顶部
+      return { top: `${SAFE_TOP}px`, left: `${clampLeft(p.left)}px` }
+    case 'bottom': {
+      if (bottomSpace >= TOOLTIP_ESTIMATED_HEIGHT) {
+        return { top: `${p.bottom + GAP}px`, left: `${clampLeft(p.left)}px` }
+      }
+      // 下方不够 → 尝试上方
+      if (topSpace >= TOOLTIP_ESTIMATED_HEIGHT) {
+        return { bottom: `${vh - p.top + GAP}px`, left: `${clampLeft(p.left)}px` }
+      }
+      // 上下都不够 → 固定在视口顶部
+      return { top: `${SAFE_TOP}px`, left: `${clampLeft(p.left)}px` }
+    }
     default:
       return {}
   }
@@ -162,8 +218,8 @@ const tooltipStyle = computed(() => {
         </template>
 
         <!-- ====== 提示气泡（两种模式共用） ====== -->
-        <div :style="tooltipStyle" class="absolute z-[10001] pointer-events-auto">
-          <div class="bg-card border border-border rounded-xl shadow-2xl px-5 py-4 max-w-sm guide-tooltip">
+        <div :style="tooltipStyle" class="absolute z-[10001] pointer-events-auto" style="max-height: calc(100vh - 32px);">
+          <div class="bg-card border border-border rounded-xl shadow-2xl px-5 py-4 max-w-sm guide-tooltip overflow-y-auto" style="max-height: calc(100vh - 48px);">
             <!-- 进度指示器 -->
             <div v-if="guideStore.currentPhase" class="flex items-center gap-2 mb-2">
               <span class="text-[10px] font-semibold text-primary bg-primary/10 px-1.5 py-0.5 rounded">
@@ -181,7 +237,7 @@ const tooltipStyle = computed(() => {
             </div>
 
             <p class="text-sm text-foreground font-medium leading-relaxed">
-              {{ guideStore.currentConfig?.tooltip }}
+              {{ guideStore.tooltipOverride || guideStore.currentConfig?.tooltip }}
             </p>
 
             <!-- 校验错误提示 -->
