@@ -6,10 +6,10 @@
 
 | 文件 | 字符数 | 相对复杂版 |
 |---|---:|---:|
-| intent_prompt.md | 7712 | 79.0% |
-| simple_prompt.md | 2577 | 26.4% |
-| medium_prompt.md | 2379 | 24.4% |
-| complex_prompt.md | 9766 | 100.0% |
+| intent_prompt.md | 3525 | 668.9% |
+| simple_prompt.md | 527 | 100.0% |
+| medium_prompt.md | 527 | 100.0% |
+| complex_prompt.md | 527 | 100.0% |
 
 ## 文件说明
 
@@ -35,4 +35,4 @@
 
 ## 生成时间
 
-2026-02-08 23:52:39
+2026-02-08 23:35:10

@@ -34,7 +34,7 @@ def _get_default_db_dir() -> str:
     env_override = os.getenv("LOCAL_STORE_DIR")
     if env_override:
         return env_override
-    instance = os.environ["AGENT_INSTANCE"]
+    instance = os.getenv("AGENT_INSTANCE", "default")
     return str(get_instance_db_dir(instance))
 
 

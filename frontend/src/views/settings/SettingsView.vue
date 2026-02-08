@@ -155,7 +155,7 @@
                 </div>
 
                 <!-- Provider 支持的模型 -->
-                <div v-if="p.models.length" class="text-xs text-muted-foreground">
+                <div v-if="p.models?.length" class="text-xs text-muted-foreground">
                   <span class="font-medium">支持模型：</span>
                   <span>{{ p.models.map(m => m.display_name).join('、') }}</span>
                 </div>

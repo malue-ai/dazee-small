@@ -26,21 +26,21 @@ from .database import Conversation, Message
 # Usage 模型（计费响应）
 from .usage import UsageResponse, UsageSummary
 
-# LLM 配置与模型注册
+# LLM 配置与模型管理
 from .llm import (
     LLMConfig,
     ModelRegisterRequest,
+    ModelActivateRequest,
     ModelCapabilitiesRequest,
     ModelPricingRequest,
     ModelCapabilitiesResponse,
     ModelPricingResponse,
     ModelDetailResponse,
-    ModelInfoResponse,
+    SupportedModelResponse,
+    ActivatedModelResponse,
     ProviderInfoResponse,
+    ProviderDetailResponse,
 )
-
-# MCP 工具配置
-from .mcp import MCPToolConfig, MCPToolDetail
 
 # Skill 模型
 from .skill import (
@@ -91,19 +91,19 @@ __all__ = [
     # Usage 模型
     "UsageResponse",
     "UsageSummary",
-    # LLM 配置与模型注册
+    # LLM 配置与模型管理
     "LLMConfig",
     "ModelRegisterRequest",
+    "ModelActivateRequest",
     "ModelCapabilitiesRequest",
     "ModelPricingRequest",
     "ModelCapabilitiesResponse",
     "ModelPricingResponse",
     "ModelDetailResponse",
-    "ModelInfoResponse",
+    "SupportedModelResponse",
+    "ActivatedModelResponse",
     "ProviderInfoResponse",
-    # MCP 工具配置
-    "MCPToolConfig",
-    "MCPToolDetail",
+    "ProviderDetailResponse",
     # Skill 模型
     "SkillCreateRequest",
     "SkillUpdateRequest",

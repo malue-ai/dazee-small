@@ -179,6 +179,29 @@ class ModelConfig:
     is_custom: bool = False  # True = user-registered via API, persisted to YAML
 
 
+@dataclass
+class ActivatedModelEntry:
+    """
+    Activated model entry.
+
+    Tracks a model that the user has configured with an API key.
+    """
+
+    model_name: str
+    api_key: str  # actual API key value
+    base_url: Optional[str] = None  # override catalog default
+    activated_at: str = ""  # ISO timestamp
+
+    # For custom models not in the catalog
+    provider: Optional[str] = None
+    model_type: Optional[str] = None
+    adapter: Optional[str] = None
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    capabilities: Optional[Dict[str, Any]] = None
+    pricing: Optional[Dict[str, Any]] = None
+
+
 # ============================================================
 # ModelRegistry
 # ============================================================
@@ -188,10 +211,9 @@ class ModelRegistry:
     """
     全局模型注册中心
 
-    职责：
-    1. 管理所有已注册模型的配置
-    2. 提供按模型名创建服务的接口
-    3. 提供按类型查询模型的接口
+    双层架构：
+    1. 支持目录（_models）：系统知道的所有模型（preset + custom），定义能力和配置
+    2. 激活列表（_activated）：用户配置了 API Key 的模型，实际可用
 
     与 LLMRegistry 的关系：
     - LLMRegistry 注册 Provider（服务类 + 适配器）
@@ -200,6 +222,7 @@ class ModelRegistry:
     """
 
     _models: Dict[str, ModelConfig] = {}
+    _activated: Dict[str, ActivatedModelEntry] = {}
     _initialized: bool = False
 
     @classmethod
@@ -391,10 +414,172 @@ class ModelRegistry:
             },
         }
 
+    # ============================================================
+    # 激活层（Activated Models）
+    # ============================================================
+
+    @classmethod
+    def activate_model(
+        cls,
+        model_name: str,
+        api_key: str,
+        base_url: Optional[str] = None,
+        *,
+        provider: Optional[str] = None,
+        model_type: Optional[str] = None,
+        adapter: Optional[str] = None,
+        display_name: Optional[str] = None,
+        description: Optional[str] = None,
+        capabilities: Optional[Dict[str, Any]] = None,
+        pricing: Optional[Dict[str, Any]] = None,
+    ) -> ActivatedModelEntry:
+        """
+        Activate a model by providing an API key.
+
+        If the model exists in the catalog, only api_key (and optional
+        base_url override) are needed. For custom models not in the catalog,
+        provider/adapter/model_type are required and the model is also
+        added to the catalog.
+
+        Args:
+            model_name: Model identifier.
+            api_key: Actual API key value.
+            base_url: Override the catalog default URL.
+            provider: Required for custom models.
+            model_type: Required for custom models.
+            adapter: Required for custom models.
+
+        Returns:
+            The activated model entry.
+        """
+        from datetime import datetime
+
+        cls._ensure_initialized()
+        key = model_name.lower()
+
+        catalog_config = cls._models.get(key)
+
+        # If not in catalog, register as custom model first
+        if not catalog_config:
+            if not provider:
+                raise ValueError(
+                    f"模型 '{model_name}' 不在支持目录中，"
+                    f"必须提供 provider 字段"
+                )
+            # Build catalog entry from activation params
+            caps = ModelCapabilities(
+                **(capabilities or {})
+            ) if capabilities else ModelCapabilities()
+            price = ModelPricing(
+                **(pricing or {})
+            ) if pricing else ModelPricing()
+
+            catalog_config = ModelConfig(
+                model_name=model_name,
+                model_type=ModelType(model_type or "llm"),
+                adapter=AdapterType(adapter or "openai"),
+                base_url=base_url or "",
+                api_key_env=f"{provider.upper()}_API_KEY",
+                provider=provider,
+                display_name=display_name,
+                description=description,
+                capabilities=caps,
+                pricing=price,
+                is_custom=True,
+            )
+            cls._models[key] = catalog_config
+            logger.info(
+                f"📝 自定义模型已加入目录: {model_name} "
+                f"(provider={provider})"
+            )
+
+        # Set API key in environment
+        os.environ[catalog_config.api_key_env] = api_key
+
+        # Create activated entry
+        entry = ActivatedModelEntry(
+            model_name=model_name,
+            api_key=api_key,
+            base_url=base_url,
+            activated_at=datetime.now().isoformat(),
+            provider=catalog_config.provider,
+            model_type=catalog_config.model_type.value,
+            adapter=catalog_config.adapter.value,
+            display_name=display_name,
+            description=description,
+            capabilities=capabilities,
+            pricing=pricing,
+        )
+        cls._activated[key] = entry
+
+        logger.info(f"✅ 模型已激活: {model_name} (provider={catalog_config.provider})")
+        return entry
+
+    @classmethod
+    def deactivate_model(cls, model_name: str) -> bool:
+        """
+        Deactivate a model (remove API key config).
+
+        Returns:
+            True if model was deactivated, False if not found.
+        """
+        cls._ensure_initialized()
+        key = model_name.lower()
+
+        entry = cls._activated.pop(key, None)
+        if not entry:
+            return False
+
+        # Clear env var
+        catalog_config = cls._models.get(key)
+        if catalog_config:
+            os.environ.pop(catalog_config.api_key_env, None)
+
+        logger.info(f"🗑️ 模型已停用: {model_name}")
+        return True
+
+    @classmethod
+    def is_activated(cls, model_name: str) -> bool:
+        """Check if a model is activated."""
+        cls._ensure_initialized()
+        return model_name.lower() in cls._activated
+
+    @classmethod
+    def list_activated(
+        cls,
+        provider: Optional[str] = None,
+    ) -> List[ModelConfig]:
+        """
+        List activated models (with catalog info merged).
+
+        Returns ModelConfig objects for each activated model.
+        """
+        cls._ensure_initialized()
+
+        results = []
+        for key, entry in cls._activated.items():
+            config = cls._models.get(key)
+            if not config:
+                continue
+            if provider and config.provider.lower() != provider.lower():
+                continue
+            results.append(config)
+        return results
+
+    @classmethod
+    def get_activated_entry(cls, model_name: str) -> Optional[ActivatedModelEntry]:
+        """Get activated entry for a model."""
+        cls._ensure_initialized()
+        return cls._activated.get(model_name.lower())
+
+    # ============================================================
+    # 初始化 & 重置
+    # ============================================================
+
     @classmethod
     def _ensure_initialized(cls) -> None:
         """
-        确保 Registry 已初始化（加载预置模型 + 自定义模型）
+        确保 Registry 已初始化（加载预置模型 + 自定义模型 + 激活模型）
         """
         if cls._initialized:
             return
@@ -407,8 +592,17 @@ class ModelRegistry:
         if custom_count > 0:
             logger.info(f"📦 已加载 {custom_count} 个用户自定义模型")
 
+        # 加载用户激活的模型（从 YAML 持久化文件）
+        activated_count = cls._load_activated_models()
+        if activated_count > 0:
+            logger.info(f"🔑 已加载 {activated_count} 个已激活模型")
+
         cls._initialized = True
-        logger.info(f"✅ ModelRegistry 初始化完成，已注册 {len(cls._models)} 个模型")
+        logger.info(
+            f"✅ ModelRegistry 初始化完成，"
+            f"目录 {len(cls._models)} 个模型，"
+            f"已激活 {len(cls._activated)} 个"
+        )
 
     @classmethod
     def reset(cls) -> None:
@@ -416,6 +610,7 @@ class ModelRegistry:
         重置 Registry（仅用于测试）
         """
         cls._models.clear()
+        cls._activated.clear()
         cls._initialized = False
 
     # ============================================================
@@ -562,6 +757,145 @@ class ModelRegistry:
         logger.info(
             f"💾 已保存 {len(custom_models)} 个自定义模型到 {path}"
         )
+
+    # ============================================================
+    # 激活模型持久化（YAML）
+    # ============================================================
+
+    @classmethod
+    def _get_activated_models_path(cls) -> Path:
+        """Get path to activated_models.yaml."""
+        from utils.app_paths import get_user_data_dir
+
+        config_dir = get_user_data_dir() / "config"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        return config_dir / "activated_models.yaml"
+
+    @classmethod
+    def _load_activated_models(cls) -> int:
+        """
+        Load activated models from YAML (synchronous, called at init).
+
+        Also sets API keys in environment variables.
+
+        Returns:
+            Number of activated models loaded.
+        """
+        path = cls._get_activated_models_path()
+        if not path.exists():
+            return 0
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+
+            if not data or not isinstance(data.get("models"), list):
+                return 0
+
+            count = 0
+            for item in data["models"]:
+                try:
+                    name = item["model_name"]
+                    api_key = item.get("api_key", "")
+                    key = name.lower()
+
+                    entry = ActivatedModelEntry(
+                        model_name=name,
+                        api_key=api_key,
+                        base_url=item.get("base_url"),
+                        activated_at=item.get("activated_at", ""),
+                        provider=item.get("provider"),
+                        model_type=item.get("model_type"),
+                        adapter=item.get("adapter"),
+                        display_name=item.get("display_name"),
+                        description=item.get("description"),
+                        capabilities=item.get("capabilities"),
+                        pricing=item.get("pricing"),
+                    )
+                    cls._activated[key] = entry
+
+                    # If model not in catalog, register as custom
+                    if key not in cls._models and entry.provider:
+                        caps_data = entry.capabilities or {}
+                        pricing_data = entry.pricing or {}
+                        config = ModelConfig(
+                            model_name=name,
+                            model_type=ModelType(entry.model_type or "llm"),
+                            adapter=AdapterType(entry.adapter or "openai"),
+                            base_url=entry.base_url or "",
+                            api_key_env=f"{entry.provider.upper()}_API_KEY",
+                            provider=entry.provider,
+                            display_name=entry.display_name,
+                            description=entry.description,
+                            capabilities=ModelCapabilities(**caps_data) if caps_data else ModelCapabilities(),
+                            pricing=ModelPricing(**pricing_data) if pricing_data else ModelPricing(),
+                            is_custom=True,
+                        )
+                        cls._models[key] = config
+
+                    # Set API key in environment
+                    catalog = cls._models.get(key)
+                    if catalog and api_key:
+                        os.environ[catalog.api_key_env] = api_key
+
+                    count += 1
+                except Exception as e:
+                    logger.warning(
+                        f"⚠️ 加载激活模型失败 "
+                        f"(name={item.get('model_name', '?')}): {e}"
+                    )
+            return count
+
+        except Exception as e:
+            logger.error(f"❌ 读取激活模型文件失败: {e}", exc_info=True)
+            return 0
+
+    @classmethod
+    async def save_activated_models(cls) -> None:
+        """
+        Persist all activated models to YAML.
+
+        Called after activate/deactivate operations.
+        API keys are stored in the file (local-only, gitignored).
+        """
+        entries = []
+        for entry in cls._activated.values():
+            item: Dict[str, Any] = {
+                "model_name": entry.model_name,
+                "api_key": entry.api_key,
+                "activated_at": entry.activated_at,
+            }
+            if entry.base_url:
+                item["base_url"] = entry.base_url
+            # For custom models, store full config
+            if entry.provider:
+                item["provider"] = entry.provider
+            if entry.model_type:
+                item["model_type"] = entry.model_type
+            if entry.adapter:
+                item["adapter"] = entry.adapter
+            if entry.display_name:
+                item["display_name"] = entry.display_name
+            if entry.description:
+                item["description"] = entry.description
+            if entry.capabilities:
+                item["capabilities"] = entry.capabilities
+            if entry.pricing:
+                item["pricing"] = entry.pricing
+            entries.append(item)
+
+        path = cls._get_activated_models_path()
+        content = yaml.dump(
+            {"models": entries},
+            allow_unicode=True,
+            default_flow_style=False,
+            sort_keys=False,
+        )
+
+        async with aiofiles.open(path, "w", encoding="utf-8") as f:
+            await f.write(content)
+
+        logger.info(f"💾 已保存 {len(entries)} 个激活模型到 {path}")
 
 
 # ============================================================

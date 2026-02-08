@@ -74,7 +74,7 @@ class XiaodaziMemoryManager:
             self._base_dir = Path(base_dir)
         else:
             from utils.app_paths import get_instance_memory_dir
-            _inst = instance_name or os.environ["AGENT_INSTANCE"]
+            _inst = instance_name or os.getenv("AGENT_INSTANCE", "default")
             self._base_dir = get_instance_memory_dir(_inst)
         self._user_id = user_id
         self._mem0_enabled = mem0_enabled

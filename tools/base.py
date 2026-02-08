@@ -75,7 +75,7 @@ class ToolManager:
     管理工具的注册、检索和执行
 
     MVP版本：简化实现
-    后续版本：将支持MCP协议和动态工具加载
+    后续版本：将支持动态工具加载
     """
 
     def __init__(self) -> None:

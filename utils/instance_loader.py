@@ -5,7 +5,6 @@
 - 加载 instances/ 目录下的智能体实例配置
 - 合并 prompt.md 和框架通用提示词
 - 调用 AgentFactory 创建 Agent
-- 注册 MCP 工具
 - 自动注册 Claude Skills（启动时）
 
 设计原则：
@@ -102,9 +101,6 @@ class InstanceConfig:
 
     # LLM 超参数
     llm_params: LLMParams = field(default_factory=LLMParams)
-
-    # MCP 工具配置
-    mcp_tools: List[Dict[str, Any]] = field(default_factory=list)
 
     # Skills 配置（Claude Skills 官方 API）
     skills: List[SkillConfig] = field(default_factory=list)
@@ -303,47 +299,6 @@ def _resolve_llm_profiles(
     return resolved
 
 
-def _extract_mcp_from_skills(skills_raw: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """
-    Extract MCP tool configs from skill entries with backend_type=mcp.
-
-    Walks the Skills-First nested structure (common/darwin/win32/linux ->
-    builtin/lightweight/external/cloud_api -> list of entries) and returns
-    MCP connection dicts compatible with the existing _register_mcp_tools().
-
-    Returns:
-        List of MCP tool config dicts (name, server_url, server_name, ...).
-    """
-    mcp_tools: List[Dict[str, Any]] = []
-
-    def _scan_entries(entries: list):
-        for entry in entries:
-            if not isinstance(entry, dict):
-                continue
-            if entry.get("backend_type") == "mcp" and entry.get("server_url"):
-                mcp_tools.append({
-                    "name": entry.get("server_name", entry.get("name", "unknown")),
-                    "server_url": entry["server_url"],
-                    "server_name": entry.get("server_name", entry.get("name")),
-                    "auth_type": entry.get("auth_type", "none"),
-                    "auth_env": entry.get("auth_env"),
-                    "capability": entry.get("capability"),
-                    "description": entry.get("description", ""),
-                    "enabled": entry.get("enabled", True),
-                })
-
-    # Walk OS sections -> complexity tiers -> entry lists
-    for os_key in ("common", "darwin", "win32", "linux"):
-        os_section = skills_raw.get(os_key, {})
-        if not isinstance(os_section, dict):
-            continue
-        for _tier, entries in os_section.items():
-            if isinstance(entries, list):
-                _scan_entries(entries)
-
-    return mcp_tools
-
-
 async def load_instance_config(instance_name: str) -> InstanceConfig:
     """
     Load instance configuration from up to 3 files:
@@ -444,21 +399,7 @@ async def load_instance_config(instance_name: str) -> InstanceConfig:
         if raw_profiles:
             raw_config["llm_profiles"] = raw_profiles
 
-    # ── 3. Extract MCP tools from skill entries ───────────────────
-    skills_raw = raw_config.get("skills", {})
-    mcp_tools_from_skills = []
-    if isinstance(skills_raw, dict):
-        mcp_tools_from_skills = _extract_mcp_from_skills(skills_raw)
-        if mcp_tools_from_skills:
-            logger.info(f"   从 Skills 提取 {len(mcp_tools_from_skills)} 个 MCP 工具")
-
-    # Merge: skill-extracted MCP + legacy mcp_tools (if any)
-    legacy_mcp = raw_config.get("mcp_tools", [])
-    if isinstance(legacy_mcp, list) and legacy_mcp:
-        logger.warning("   ⚠️ 检测到旧版 mcp_tools 配置，建议迁移到 config/skills.yaml 的 Skill 条目")
-    mcp_tools = mcp_tools_from_skills + (legacy_mcp if isinstance(legacy_mcp, list) else [])
-
-    # ── 4. Parse config (same logic as before) ────────────────────
+    # ── 3. Parse config ────────────────────
     instance_info = raw_config.get("instance", {})
     memory_config = raw_config.get("memory", {})
 
@@ -540,7 +481,6 @@ async def load_instance_config(instance_name: str) -> InstanceConfig:
         plan_manager_enabled=agent_config.get("plan_manager_enabled"),
         allow_parallel_tools=agent_config.get("allow_parallel_tools"),
         llm_params=llm_params,
-        mcp_tools=mcp_tools if isinstance(mcp_tools, list) else [],
         skills=skills,
         apis=apis,
         enabled_capabilities=enabled_capabilities,
@@ -1002,7 +942,6 @@ async def create_agent_from_instance(
     instance_name: str,
     event_manager=None,
     conversation_service=None,
-    skip_mcp_registration: bool = False,
     skip_skills_registration: bool = False,
     force_refresh: bool = False,
 ):
@@ -1028,15 +967,13 @@ async def create_agent_from_instance(
     4. 加载 InstancePromptCache（包含 LLM 推断的 Schema 和提示词版本）
     5. 合并配置：config.yaml 覆盖 Schema 默认值
     6. 调用 AgentFactory.from_schema() 创建 Agent
-    7. 注册 MCP 工具
-    8. 注册 Claude Skills
-    9. 保存工具推断缓存
+    7. 注册 Claude Skills
+    8. 保存工具推断缓存
 
     Args:
         instance_name: 实例名称
         event_manager: 事件管理器
         conversation_service: 会话服务
-        skip_mcp_registration: 是否跳过 MCP 工具注册
         skip_skills_registration: 是否跳过 Skills 注册
         force_refresh: 强制刷新缓存，重新生成 Schema 和推断工具
 
@@ -1394,10 +1331,9 @@ async def create_agent_from_instance(
     # 🆕 V5.1: 使用 ToolLoader 统一加载工具
     tool_loader = create_tool_loader(global_registry)
 
-    # 加载所有工具（通用工具、MCP 工具、Claude Skills）（异步）
+    # 加载所有工具（通用工具、Claude Skills）（异步）
     load_result = await tool_loader.load_tools(
         enabled_capabilities=config.enabled_capabilities,
-        mcp_tools=config.mcp_tools,
         skills=config.skills,
     )
 
@@ -1443,11 +1379,7 @@ async def create_agent_from_instance(
         await instance_registry.load_inference_cache(tools_cache_file)
         logger.info("✅ 已加载工具推断缓存")
 
-    # 10. 注册 MCP 工具（使用 InstanceRegistry，利用缓存）
-    if not skip_mcp_registration and config.mcp_tools:
-        await _register_mcp_tools(agent, config.mcp_tools, instance_registry)
-
-    # 11. 注册 Claude Skills（如果配置了）
+    # 10. 注册 Claude Skills（如果配置了）
     if not skip_skills_registration and config.skills:
         enabled_skills = [s for s in config.skills if s.enabled]
         if enabled_skills:
@@ -1461,9 +1393,8 @@ async def create_agent_from_instance(
     await instance_registry.save_inference_cache(tools_cache_file)
     logger.info("✅ 已保存工具推断缓存")
 
-    # 12. 🆕 V4.6 统一工具统计（仅用于调试日志）
+    # 11. 统一工具统计（仅用于调试日志）
     # 注意：Plan 阶段只使用 capability_categories，不使用具体工具列表
-    # MCP 工具通过 InstanceRegistry.get_tools_for_claude() 合并到 tools_for_llm
     all_tools = instance_registry.get_all_tools_unified()
     logger.info(f"📋 工具统计: {len(all_tools)} 个（全局+实例），仅供调试")
     logger.debug(f"   工具列表: {[t['name'] for t in all_tools]}")
@@ -1471,231 +1402,6 @@ async def create_agent_from_instance(
     logger.info(f"🎉 实例 {instance_name} 加载完成")
 
     return agent
-
-
-async def _register_mcp_tools(
-    agent, mcp_tools: List[Dict[str, Any]], instance_registry=None
-) -> List:
-    """
-    注册 MCP 工具（使用缓存，避免重复连接）。
-
-    空配置时直接返回，不执行任何连接或注册。
-    """
-    if not mcp_tools:
-        return []
-
-    try:
-        # TODO: 迁移到 local_store
-        from infra.pools import get_mcp_pool
-    except ImportError:
-        logger.warning("⚠️ MCP 池模块已删除，MCP 工具注册功能已禁用")
-        return []
-
-    from services.mcp_client import create_mcp_tool_definition
-
-    connected_clients = []
-    mcp_tool_definitions = []  # Claude API 格式的工具定义
-    mcp_pool = get_mcp_pool()  # 使用统一的 MCPPool 管理连接
-
-    for tool_config in mcp_tools:
-        name = tool_config.get("name", "unknown")
-        try:
-            # 🆕 支持禁用 MCP 工具（在 config.yaml 中设置 enabled: false）
-            if not tool_config.get("enabled", True):
-                logger.info(f"⏭️ MCP 工具 {name} 已被禁用，跳过")
-                continue
-
-            server_url = tool_config.get("server_url")
-            server_name = tool_config.get("server_name", name)
-            auth_type = tool_config.get("auth_type", "none")
-            auth_env = tool_config.get("auth_env")
-
-            if not server_url:
-                logger.warning(f"⚠️ MCP 工具 {name} 缺少 server_url，跳过")
-                continue
-
-            # 获取认证令牌
-            auth_token = None
-            if auth_type in ("bearer", "api_key") and auth_env:
-                auth_token = os.getenv(auth_env)
-                if not auth_token:
-                    logger.warning(f"⚠️ MCP 工具 {name} 的密钥环境变量 {auth_env} 未设置")
-                    continue
-
-            logger.info(f"🔧 注册 MCP 工具: {name} ({server_url})")
-
-            # 🆕 统一使用 MCPPool 获取 MCP 客户端（避免重复连接）
-            try:
-                client = await mcp_pool.get_client(
-                    server_url=server_url, server_name=server_name, auth_token=auth_token
-                )
-            except Exception as conn_error:
-                logger.error(
-                    f"❌ MCP 客户端连接异常，跳过工具 {name}: {type(conn_error).__name__}: {str(conn_error)}"
-                )
-                continue
-
-            # 🆕 处理连接失败的情况
-            if client is None:
-                logger.warning(f"⚠️ MCP 客户端连接失败，跳过工具 {name}")
-                continue
-
-            if client._connected:
-                tools = client._tools
-                if not tools:
-                    # 如果工具列表为空，可能需要重新发现
-                    tools_list = await client.discover_tools()
-                    tools = {t["name"]: t for t in tools_list}
-
-                logger.info(f"   ✅ 注册成功: 发现 {len(tools)} 个工具")
-
-                for tool_name, tool_info in tools.items():
-                    # 🔍 显示工具的 input_schema 参数，便于调试
-                    schema = tool_info.get("input_schema", {})
-                    props = schema.get("properties", {}) if isinstance(schema, dict) else {}
-                    param_info = f"参数: {list(props.keys())}" if props else "无参数定义"
-                    logger.info(f"      • {tool_name} ({param_info})")
-
-                    # 创建 Claude API 格式的工具定义
-                    tool_def = create_mcp_tool_definition(tool_info, client)
-                    mcp_tool_definitions.append(tool_def)
-
-                    # 🆕 注册到 InstanceRegistry（用于 Plan 阶段工具发现）
-                    # 注意：tool_name 已经带有 server_name_ 前缀（来自 mcp_client.discover_tools）
-                    # 不要再重复加前缀！
-                    if instance_registry:
-                        # 获取原始工具名（不带前缀）
-                        original_name = tool_info.get("original_name", tool_name)
-
-                        # 🆕 V4.6: 获取 capability（用户意图类别）
-                        capability = tool_config.get("capability")  # 从 config.yaml 读取
-
-                        # 创建处理器闭包（动态获取客户端，支持断线重连）
-                        async def make_handler(_server_url, _server_name, _auth_token, _orig_name):
-                            async def handler(tool_input: Dict[str, Any]):
-                                # 每次调用时动态获取客户端（断开时会创建新连接）
-                                from infra.pools import get_mcp_pool
-
-                                pool = get_mcp_pool()
-                                current_client = await pool.get_client(
-                                    server_url=_server_url,
-                                    server_name=_server_name,
-                                    auth_token=_auth_token,
-                                )
-                                if not current_client:
-                                    return {"success": False, "error": "MCP 服务器连接失败"}
-
-                                # 调用工具
-                                result = await current_client.call_tool(_orig_name, tool_input)
-
-                                # 如果需要重连，自动重试一次
-                                if result.get("_need_reconnect"):
-                                    # 强制重连
-                                    current_client = await pool.get_client(
-                                        server_url=_server_url,
-                                        server_name=_server_name,
-                                        auth_token=_auth_token,
-                                        force_reconnect=True,
-                                    )
-                                    if not current_client:
-                                        return {"success": False, "error": "MCP 服务器重连失败"}
-                                    result = await current_client.call_tool(_orig_name, tool_input)
-
-                                return result
-
-                            return handler
-
-                        handler = await make_handler(
-                            server_url, server_name, auth_token, original_name
-                        )
-
-                        # 使用已带前缀的 tool_name，不要再加前缀
-                        await instance_registry.register_mcp_tool(
-                            name=tool_name,  # 🆕 直接使用 tool_name，不再加前缀
-                            server_url=server_url,
-                            server_name=server_name,
-                            tool_info=tool_info,
-                            mcp_client=client,
-                            handler=handler,
-                            capability=capability,  # 🆕 传递 capability
-                        )
-
-                # 保存客户端引用
-                connected_clients.append(client)
-
-                # 将 MCP 客户端添加到 Agent
-                if hasattr(agent, "_mcp_clients"):
-                    if client not in agent._mcp_clients:
-                        agent._mcp_clients.append(client)
-                else:
-                    agent._mcp_clients = [client]
-            else:
-                logger.warning(f"   ⚠️ 连接失败")
-
-        except Exception as e:
-            logger.error(
-                f"❌ 注册 MCP 工具 {name} 失败: {type(e).__name__}: {str(e)}", exc_info=True
-            )
-            # 确保即使发生异常也继续处理下一个工具
-            continue
-
-    # 将 MCP 工具定义注入到 Agent（兼容旧逻辑）
-    if mcp_tool_definitions and hasattr(agent, "_mcp_tools"):
-        agent._mcp_tools.extend(mcp_tool_definitions)
-    elif mcp_tool_definitions:
-        agent._mcp_tools = mcp_tool_definitions
-
-    # 注册 MCP 工具到 tool_executor 的处理器（动态获取客户端，支持断线重连）
-    if mcp_tool_definitions and hasattr(agent, "tool_executor"):
-        for tool_def in mcp_tool_definitions:
-            tool_name = tool_def["name"]
-            original_name = tool_def["_original_name"]
-            # 从 tool_def 获取连接信息（用于重连）
-            server_url = tool_def.get("_server_url")
-            server_name_for_handler = tool_def.get("_server_name")
-            auth_token_for_handler = tool_def.get("_auth_token")
-
-            # 创建工具处理器（动态获取客户端，支持自动重连）
-            async def mcp_handler(
-                tool_input: Dict[str, Any],
-                context=None,
-                _url=server_url,
-                _name=server_name_for_handler,
-                _token=auth_token_for_handler,
-                _orig_name=original_name,
-            ):
-                try:
-                    # TODO: 迁移到 local_store
-                    from infra.pools import get_mcp_pool
-
-                    pool = get_mcp_pool()
-                except ImportError:
-                    return {"success": False, "error": "MCP 池模块已删除"}
-
-                current_client = await pool.get_client(
-                    server_url=_url, server_name=_name, auth_token=_token
-                )
-                if not current_client:
-                    return {"success": False, "error": "MCP 服务器连接失败"}
-
-                result = await current_client.call_tool(_orig_name, tool_input)
-
-                # 如果需要重连，自动重试
-                if result.get("_need_reconnect"):
-                    current_client = await pool.get_client(
-                        server_url=_url, server_name=_name, auth_token=_token, force_reconnect=True
-                    )
-                    if not current_client:
-                        return {"success": False, "error": "MCP 服务器重连失败"}
-                    result = await current_client.call_tool(_orig_name, tool_input)
-
-                return result
-
-            # 注册处理器
-            agent.tool_executor.register_handler(tool_name, mcp_handler)
-            logger.info(f"   📌 已注册 MCP 工具处理器: {tool_name}")
-
-    return connected_clients
 
 
 async def validate_skill_directory(skill_path: Path) -> Dict[str, Any]:
@@ -2139,9 +1845,6 @@ if __name__ == "__main__":
             print(f"   描述: {config.description}")
             print(f"   版本: {config.version}")
             print(f"   模型: {config.model or '默认'}")
-            print(f"   MCP 工具: {len(config.mcp_tools)} 个")
-            for mcp in config.mcp_tools:
-                print(f"      • {mcp.get('name', 'unknown')}: {mcp.get('server_url', '-')}")
             print(f"   Mem0: {'启用' if config.mem0_enabled else '禁用'}")
 
             # LLM 超参数

@@ -11,8 +11,23 @@ from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional
 
 # ==================== 第三方库 ====================
+import json
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+
+
+class UnicodeJSONResponse(JSONResponse):
+    """JSONResponse that outputs Chinese characters directly (no \\uXXXX escapes)."""
+
+    def render(self, content: any) -> bytes:
+        return json.dumps(
+            content,
+            ensure_ascii=False,
+            allow_nan=False,
+            indent=None,
+            separators=(",", ":"),
+        ).encode("utf-8")
 
 # 加载配置（统一从 config.yaml）
 from services.settings_service import load_config_to_env
@@ -23,6 +38,7 @@ from routers import (
     agents_router,
     chat_router,
     conversation_router,
+    files_router,
     human_confirmation_router,
     settings_router,
     skills_router,
@@ -50,45 +66,6 @@ def _read_version() -> str:
 
 
 APP_VERSION = _read_version()
-
-
-# ==================== 异步异常处理 ====================
-
-def _setup_asyncio_exception_handler() -> None:
-    """
-    设置自定义的 asyncio 异常处理器
-    
-    用于抑制 MCP SDK 的 streamable_http_client 在关闭时产生的
-    "Attempted to exit cancel scope in a different task" 错误。
-    
-    这是 anyio 和 MCP SDK 的已知问题，在应用关闭后清理异步生成器时会触发，
-    但不影响应用的正常运行。
-    """
-    loop = asyncio.get_event_loop()
-    original_handler = loop.get_exception_handler()
-    
-    def custom_exception_handler(loop, context):
-        exception = context.get("exception")
-        message = context.get("message", "")
-        
-        # 检查是否是 MCP streamable_http_client 关闭时的已知错误
-        if exception and isinstance(exception, RuntimeError):
-            error_msg = str(exception)
-            if "Attempted to exit cancel scope in a different task" in error_msg:
-                # 忽略这个特定错误，它发生在应用关闭后，不影响正常运行
-                return
-        
-        # 检查是否是异步生成器关闭时的错误（包含 streamable_http_client）
-        if "streamable_http_client" in message:
-            return
-        
-        # 对于其他错误，使用原始处理器或默认处理
-        if original_handler:
-            original_handler(loop, context)
-        else:
-            loop.default_exception_handler(context)
-    
-    loop.set_exception_handler(custom_exception_handler)
 
 
 # ==================== 启动辅助函数 ====================
@@ -128,57 +105,54 @@ async def _preload_agent_registry() -> int:
     """
     预加载 Agent 配置到 AgentRegistry
 
-    实例检测优先级：
-    1. 环境变量 AGENT_INSTANCE（显式指定）
-    2. 自动检测：instances/ 目录下只有一个实例时自动使用
-    3. 多个实例时提示用户选择
+    本地桌面模式：加载所有 instances/ 下的实例。
+    如果设置了 AGENT_INSTANCE 环境变量，则优先加载指定实例（兼容旧行为）。
 
     Returns:
-        加载的 Agent 配置数量（0 或 1）
+        加载的 Agent 配置数量
     """
     print("📋 加载 Agent 配置...")
     from services.agent_registry import get_agent_registry
 
     agent_registry = get_agent_registry()
 
-    # 实例检测：环境变量 > 自动检测
+    # 优先检查环境变量（兼容单实例部署场景）
     instance_name = os.getenv("AGENT_INSTANCE")
 
-    if not instance_name:
-        from utils.instance_loader import list_instances
-
-        available = list_instances()
-        if len(available) == 1:
-            instance_name = available[0]
-            os.environ["AGENT_INSTANCE"] = instance_name
-            print(f"🎯 自动检测到唯一实例: {instance_name}")
-        elif len(available) == 0:
-            print("❌ 未找到任何实例！")
-            print("   请在 instances/ 目录下创建实例（可复制 _template）")
+    if instance_name:
+        # 单实例模式：仅加载指定实例
+        try:
+            print(f"🎯 单实例模式: 加载 '{instance_name}'...")
+            success = await agent_registry.preload_instance(instance_name)
+            if success:
+                print(f"✅ 已加载 1 个 Agent 配置")
+                for agent in agent_registry.list_agents():
+                    print(f"   • {agent['agent_id']}: {agent['description'] or '(无描述)'}")
+                return 1
+            else:
+                print(f"⚠️ Agent 配置加载失败: {instance_name}")
+                return 0
+        except FileNotFoundError as e:
+            print(f"❌ 实例不存在: {e}")
             return 0
-        else:
-            print(f"❌ 检测到多个实例: {available}")
-            print(f"   请指定要加载的实例:")
-            print(f"   AGENT_INSTANCE={available[0]} uvicorn main:app --reload")
+        except Exception as e:
+            print(f"⚠️ Agent 配置加载失败: {e}")
             return 0
-    
-    try:
-        print(f"🎯 单实例模式: 加载 '{instance_name}'...")
-        success = await agent_registry.preload_instance(instance_name)
-        if success:
-            print(f"✅ 已加载 1 个 Agent 配置")
-            for agent in agent_registry.list_agents():
-                print(f"   • {agent['agent_id']}: {agent['description'] or '(无描述)'}")
-            return 1
-        else:
-            print(f"⚠️ Agent 配置加载失败: {instance_name}")
+    else:
+        # 本地桌面模式：加载所有实例
+        try:
+            print("🖥️ 本地桌面模式: 加载所有实例...")
+            loaded_count = await agent_registry.preload_all()
+            if loaded_count > 0:
+                print(f"✅ 已加载 {loaded_count} 个 Agent 配置")
+                for agent in agent_registry.list_agents():
+                    print(f"   • {agent['agent_id']}: {agent['description'] or '(无描述)'}")
+            else:
+                print("⚠️ 未发现任何可用实例（instances/ 目录为空或无有效配置）")
+            return loaded_count
+        except Exception as e:
+            print(f"⚠️ Agent 配置加载失败: {e}")
             return 0
-    except FileNotFoundError as e:
-        print(f"❌ 实例不存在: {e}")
-        return 0
-    except Exception as e:
-        print(f"⚠️ Agent 配置加载失败: {e}")
-        return 0
 
 
 async def _start_scheduler() -> Optional[Any]:
@@ -316,9 +290,6 @@ async def lifespan(app: FastAPI):
     # ===== 启动阶段 =====
     print("🚀 Zenflux Agent API 启动中...")
     
-    # 设置自定义异常处理器（抑制 MCP 关闭时的已知错误）
-    _setup_asyncio_exception_handler()
-    
     await _init_resilience_config()
     await _init_local_store()
     await _preload_capability_registry()  # 加载工具注册表（必须在 Agent 之前）
@@ -350,7 +321,8 @@ app = FastAPI(
     version=APP_VERSION,
     lifespan=lifespan,
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    default_response_class=UnicodeJSONResponse,
 )
 
 
@@ -381,6 +353,7 @@ app.include_router(human_confirmation_router)
 
 # 资源管理
 app.include_router(agents_router)
+app.include_router(files_router)
 app.include_router(skills_router)
 app.include_router(models_router)
 app.include_router(settings_router)

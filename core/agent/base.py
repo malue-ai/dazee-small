@@ -177,10 +177,6 @@ class Agent:
         self._instance_skills: List = []
         self.workers_config: List = []
 
-        # MCP 相关
-        self._mcp_clients: List = []
-        self._mcp_tools: List = []
-
         executor_name = executor.name if executor else "None"
         logger.info(f"✅ Agent 初始化完成: executor={executor_name}")
 
@@ -825,9 +821,6 @@ class Agent:
         clone._instance_registry = self._instance_registry
         clone._instance_skills = self._instance_skills.copy() if self._instance_skills else []
         clone.workers_config = self.workers_config.copy() if self.workers_config else []
-        clone._mcp_clients = self._mcp_clients.copy() if self._mcp_clients else []
-        clone._mcp_tools = self._mcp_tools.copy() if self._mcp_tools else []
-
         logger.debug(f"🚀 Agent 克隆完成: executor={self._executor.name}")
 
         return clone

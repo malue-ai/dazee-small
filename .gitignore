@@ -91,3 +91,7 @@ dump.rdb
 workspace/storage/tool_results/
 evaluation/reports/_e2e_checkpoint.json
 data/
+
+# 用户模型配置（含 API Key，不可提交）
+config/activated_models.yaml
+config/custom_models.yaml

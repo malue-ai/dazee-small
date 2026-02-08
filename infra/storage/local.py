@@ -18,7 +18,7 @@ class LocalStorage(StorageBackend):
             self.base_dir = Path(base_dir)
         else:
             import os
-            _inst = instance_name or os.environ["AGENT_INSTANCE"]
+            _inst = instance_name or os.getenv("AGENT_INSTANCE", "default")
             self.base_dir = get_instance_storage_dir(_inst)
         self.base_dir.mkdir(parents=True, exist_ok=True)
     

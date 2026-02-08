@@ -111,7 +111,6 @@ class ToolSelector:
     TYPE_WEIGHTS = {
         CapabilityType.SKILL: 10,
         CapabilityType.TOOL: 8,
-        CapabilityType.MCP: 6,
         CapabilityType.CODE: 4,
     }
 

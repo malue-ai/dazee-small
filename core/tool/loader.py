@@ -3,13 +3,12 @@
 
 职责：
 1. 加载通用工具（从 capabilities.yaml，根据 enabled_capabilities 过滤）
-2. 加载 MCP 工具（从配置文件）
-3. 加载 Claude Skills
-4. 提供统一的工具列表给 Agent
+2. 加载 Claude Skills
+3. 提供统一的工具列表给 Agent
 
 设计原则：
 - 封装复杂性：对外提供简单的加载接口
-- 统一管理：三类工具统一加载和注册
+- 统一管理：工具统一加载和注册
 - 类别化配置：支持工具组配置（如 document_skills）
 - 核心工具自动启用：Level 1 工具始终可用
 - 完全异步化：所有配置加载都是异步的
@@ -54,8 +53,6 @@ class ToolLoadResult:
 
     generic_tools: List[Capability]  # 通用工具（从 capabilities.yaml）
     generic_count: int
-    mcp_tools: List[Dict[str, Any]]  # MCP 工具（动态注册）
-    mcp_count: int
     skills: List[Dict[str, Any]]  # Claude Skills
     skills_count: int
     total_count: int
@@ -67,10 +64,9 @@ class ToolLoader:
     """
     统一工具加载器
 
-    管理三类工具的加载：
+    管理工具的加载：
     1. 通用工具（TOOL/SKILL/CODE）- 从 capabilities.yaml
-    2. MCP 工具 - 运行时连接 MCP Server
-    3. Claude Skills - 从 skill_registry.yaml
+    2. Claude Skills - 从 skill_registry.yaml
 
     特性：
     - 类别化配置：document_skills 等自动展开
@@ -80,7 +76,6 @@ class ToolLoader:
         loader = ToolLoader(global_registry)
         result = loader.load_tools(
             enabled_capabilities={"web_search": True, "document_skills": True},
-            mcp_tools=[{"name": "dify", ...}],
             skills=[SkillConfig(...)]
         )
         print(f"加载了 {result.total_count} 个工具")
@@ -148,7 +143,6 @@ class ToolLoader:
     async def load_tools(
         self,
         enabled_capabilities: Dict[str, bool],
-        mcp_tools: Optional[List[Dict[str, Any]]] = None,
         skills: Optional[List[Any]] = None,
     ) -> ToolLoadResult:
         """
@@ -156,7 +150,6 @@ class ToolLoader:
 
         Args:
             enabled_capabilities: 启用的通用工具配置 {"tool_name": True/False}
-            mcp_tools: MCP 工具配置列表（可选）
             skills: Claude Skills 配置列表（可选）
 
         Returns:
@@ -169,21 +162,16 @@ class ToolLoader:
             enabled_capabilities
         )
 
-        # 2. 准备 MCP 工具配置
-        mcp_tools_list = mcp_tools or []
-
-        # 3. 准备 Skills 配置
+        # 2. 准备 Skills 配置
         skills_list = skills or []
         enabled_skills = [s for s in skills_list if getattr(s, "enabled", False)]
 
-        # 4. 统计
-        total_count = len(generic_tools) + len(mcp_tools_list) + len(enabled_skills)
+        # 3. 统计
+        total_count = len(generic_tools) + len(enabled_skills)
 
         result = ToolLoadResult(
             generic_tools=generic_tools,
             generic_count=len(generic_tools),
-            mcp_tools=mcp_tools_list,
-            mcp_count=len(mcp_tools_list),
             skills=enabled_skills,
             skills_count=len(enabled_skills),
             total_count=total_count,
@@ -248,11 +236,6 @@ class ToolLoader:
         logger.info(f"  通用工具: {result.generic_count} 个")
         if result.enabled_tools:
             logger.info(f"    启用: {', '.join(result.enabled_tools)}")
-
-        logger.info(f"  MCP 工具: {result.mcp_count} 个")
-        if result.mcp_tools:
-            mcp_names = [t.get("name", "unknown") for t in result.mcp_tools]
-            logger.info(f"    列表: {', '.join(mcp_names)}")
 
         logger.info(f"  Claude Skills: {result.skills_count} 个")
         if result.skills:

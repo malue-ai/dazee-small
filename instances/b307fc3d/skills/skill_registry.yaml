@@ -1,0 +1,11 @@
+# ============================================================
+# Skills 注册表
+# ============================================================
+#
+# 记录该实例已安装的 Skills 及其启用状态
+#
+
+skills:
+  - name: nano-pdf
+    enabled: true
+    description: "Edit PDFs with natural-language instructions using the nano-pdf CLI."

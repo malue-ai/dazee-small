@@ -71,8 +71,6 @@ hiddenimports += [
     'aiofiles', 'httpx',
     # 配置
     'yaml',
-    # MCP
-    'mcp',
     # tiktoken（编码数据通过 entry_points 插件发现，PyInstaller 需要显式声明）
     'tiktoken', 'tiktoken_ext', 'tiktoken_ext.openai_public',
 ]

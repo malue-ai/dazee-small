@@ -1,12 +1,5 @@
-# ============================================================
-# 小搭子 Skills 注册表（status 由 SkillsLoader 运行时检测）
-# ============================================================
-
 skills:
   # ========== common · builtin ==========
-  - { name: plan-todo,            enabled: true,  status: ready }
-  - { name: hitl,                 enabled: true,  status: ready }
-  - { name: api-calling,          enabled: true,  status: ready }
   - { name: writing-assistant,    enabled: true,  status: ready }
   - { name: translator,           enabled: true,  status: ready }
   - { name: writing-analyzer,     enabled: true,  status: ready }

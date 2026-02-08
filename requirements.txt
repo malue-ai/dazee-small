@@ -5,8 +5,6 @@ pydantic>=2.5.3,<3.0.0
 
 # Claude API
 anthropic>=0.40.0  # 更新最低版本要求
-mcp>=1.0.0       # MCP 1.x 版本
-
 # OpenAI SDK（用于千问等兼容接口）
 openai>=1.0.0      # 🆕 千问使用 OpenAI 兼容接口
 
@@ -20,7 +18,7 @@ pyyaml>=6.0
 python-multipart>=0.0.6
 aiofiles>=24.1.0          # 异步文件操作
 aiohttp>=3.9.0            # 异步 HTTP 客户端
-httpx>=0.27.0             # HTTP 客户端（用于 MCP、测试）
+httpx>=0.27.0             # HTTP 客户端
 filetype>=1.2.0           # 文件类型检测（纯 Python，无需系统依赖）
 
 # 本地数据库（SQLite）

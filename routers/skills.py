@@ -121,6 +121,52 @@ def _parse_skill_metadata(skill_md_path: Path) -> dict:
         return {"name": skill_md_path.parent.name, "description": ""}
 
 
+async def _load_skills_yaml_descriptions(agent_id: str) -> dict[str, str]:
+    """
+    从实例的 skills.yaml 加载所有 skill 的 description 映射
+
+    Args:
+        agent_id: Agent 实例 ID
+
+    Returns:
+        {skill_name: description}
+    """
+    import yaml as _yaml
+
+    from utils.app_paths import get_bundle_dir
+
+    config_path = get_bundle_dir() / "instances" / agent_id / "config" / "skills.yaml"
+    if not config_path.exists():
+        return {}
+
+    try:
+        async with aiofiles.open(config_path, "r", encoding="utf-8") as f:
+            content = await f.read()
+            config = _yaml.safe_load(content) or {}
+    except Exception:
+        return {}
+
+    desc_map: dict[str, str] = {}
+    skills_section = config.get("skills", {})
+    # 遍历 OS 分类（common / darwin / win32 / linux）
+    for os_key in ("common", "darwin", "win32", "linux"):
+        os_config = skills_section.get(os_key, {})
+        if not isinstance(os_config, dict):
+            continue
+        # 遍历依赖等级（builtin / lightweight / external / cloud_api）
+        for level_key in ("builtin", "lightweight", "external", "cloud_api"):
+            items = os_config.get(level_key, [])
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                if isinstance(item, dict) and item.get("name"):
+                    desc = item.get("description", "")
+                    if desc:
+                        desc_map[item["name"]] = desc
+
+    return desc_map
+
+
 def _scan_skills_in_dir(skills_dir: Path, agent_id: str = None) -> List[dict]:
     """
     扫描目录中的所有 Skills
@@ -346,34 +392,48 @@ async def list_global_skills():
     "/instance/{agent_id}",
     response_model=SkillListResponse,
     summary="列出实例已安装的 Skills",
-    description="获取指定实例已安装的 Skills 列表（包含注册状态）",
+    description="获取指定实例已安装的 Skills 列表（包含注册状态和描述）",
 )
 async def list_instance_skills(agent_id: str):
     """
     列出实例已安装的 Skills
 
-    从 skill_registry.yaml 读取
+    从 skill_registry.yaml 读取，并从 skills.yaml 或 SKILL.md 补充描述信息
     """
     _validate_name(agent_id, "agent_id")
 
     from utils.instance_loader import load_skill_registry
 
     try:
-        skills = load_skill_registry(agent_id)
+        skills = await load_skill_registry(agent_id)
     except Exception as e:
         logger.warning(f"加载实例 {agent_id} 的 skill_registry 失败: {e}")
         skills = []
 
-    summaries = [
-        SkillSummary(
-            name=s.name,
-            description=s.description,
-            agent_id=agent_id,
-            is_enabled=s.enabled,
-            created_at=datetime.now(),
+    # 从 skills.yaml 加载描述（description 补充）
+    desc_map = await _load_skills_yaml_descriptions(agent_id)
+
+    summaries = []
+    for s in skills:
+        description = s.description
+        # 描述为空时：优先从 skills.yaml 补充，其次从 SKILL.md frontmatter 补充
+        if not description:
+            description = desc_map.get(s.name, "")
+        if not description and s.skill_path:
+            skill_md = Path(s.skill_path) / "SKILL.md"
+            if skill_md.exists():
+                metadata = _parse_skill_metadata(skill_md)
+                description = metadata.get("description", "")
+
+        summaries.append(
+            SkillSummary(
+                name=s.name,
+                description=description,
+                agent_id=agent_id,
+                is_enabled=s.enabled,
+                created_at=datetime.now(),
+            )
         )
-        for s in skills
-    ]
 
     return SkillListResponse(
         total=len(summaries),
@@ -450,7 +510,7 @@ async def get_skill_detail(
         from utils.instance_loader import load_skill_registry
 
         try:
-            registry_skills = load_skill_registry(agent_id)
+            registry_skills = await load_skill_registry(agent_id)
             for s in registry_skills:
                 if s.name == skill_name:
                     is_enabled = s.enabled
@@ -671,14 +731,14 @@ async def install_skill(request: SkillInstallRequest):
         # 3. 更新 skill_registry.yaml
         from utils.instance_loader import SkillConfig, _update_skill_registry, load_skill_registry
 
-        existing_skills = load_skill_registry(request.agent_id)
+        existing_skills = await load_skill_registry(request.agent_id)
 
         new_skill = SkillConfig(
             name=request.skill_name, enabled=True, description=description, skill_path=target_dir
         )
         existing_skills.append(new_skill)
 
-        _update_skill_registry(request.agent_id, existing_skills)
+        await _update_skill_registry(request.agent_id, existing_skills)
         logger.info(f"✅ 更新 skill_registry.yaml: 添加 {request.skill_name}")
 
         return {
@@ -736,9 +796,9 @@ async def uninstall_skill(request: SkillUninstallRequest):
         # 1. 从 skill_registry.yaml 移除
         from utils.instance_loader import _update_skill_registry, load_skill_registry
 
-        existing_skills = load_skill_registry(request.agent_id)
+        existing_skills = await load_skill_registry(request.agent_id)
         updated_skills = [s for s in existing_skills if s.name != request.skill_name]
-        _update_skill_registry(request.agent_id, updated_skills)
+        await _update_skill_registry(request.agent_id, updated_skills)
         logger.info(f"✅ 从 skill_registry.yaml 移除: {request.skill_name}")
 
         # 2. 删除文件目录
@@ -781,7 +841,7 @@ async def toggle_skill(request: SkillToggleRequest):
     from utils.instance_loader import _update_skill_registry, load_skill_registry
 
     try:
-        skills = load_skill_registry(request.agent_id)
+        skills = await load_skill_registry(request.agent_id)
 
         # 查找目标 Skill
         target_skill = None
@@ -801,7 +861,7 @@ async def toggle_skill(request: SkillToggleRequest):
 
         # 更新状态
         target_skill.enabled = request.enabled
-        _update_skill_registry(request.agent_id, skills)
+        await _update_skill_registry(request.agent_id, skills)
 
         status_text = "启用" if request.enabled else "禁用"
         logger.info(f"✅ {status_text} Skill: {request.skill_name} (实例: {request.agent_id})")
@@ -864,12 +924,12 @@ async def update_skill_content(request: SkillUpdateContentRequest):
             # 可以在这里更新 registry 中的 description，如果需要的话
             from utils.instance_loader import _update_skill_registry, load_skill_registry
 
-            skills = load_skill_registry(request.agent_id)
+            skills = await load_skill_registry(request.agent_id)
             for skill in skills:
                 if skill.name == request.skill_name:
                     skill.description = metadata.get("description", skill.description)
                     break
-            _update_skill_registry(request.agent_id, skills)
+            await _update_skill_registry(request.agent_id, skills)
 
         except Exception as e:
             logger.warning(f"解析更新后的 SKILL.md 失败: {e}")
@@ -979,7 +1039,7 @@ async def upload_skill(
         # 验证 SKILL.md 内容
         from utils.instance_loader import validate_skill_directory
 
-        validation = validate_skill_directory(skill_root)
+        validation = await validate_skill_directory(skill_root)
         if not validation["valid"]:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

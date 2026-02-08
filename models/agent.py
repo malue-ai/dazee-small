@@ -11,7 +11,6 @@ from enum import Enum
 
 # 从拆分的模块导入
 from .llm import LLMConfig
-from .mcp import MCPToolConfig, MCPToolDetail
 
 
 # ============================================================
@@ -80,7 +79,7 @@ class AgentCreateRequest(BaseModel):
     prompt: str = Field(..., description="Agent 提示词（prompt.md 内容）")
     
     # 模型配置
-    model: str = Field("claude-sonnet-4-5-20250929", description="使用的模型")
+    model: Optional[str] = Field(None, description="使用的模型，未指定时使用默认已激活模型")
     max_turns: int = Field(20, description="最大对话轮数")
     plan_manager_enabled: bool = Field(True, description="是否启用计划管理器")
     
@@ -92,9 +91,6 @@ class AgentCreateRequest(BaseModel):
         default_factory=dict,
         description="启用的工具能力，如 {'code_execution': True, 'document_skills': False}"
     )
-    
-    # MCP 工具
-    mcp_tools: List[MCPToolConfig] = Field(default_factory=list, description="MCP 工具配置列表")
     
     # REST APIs
     apis: List[RESTAPIConfig] = Field(default_factory=list, description="REST API 配置列表")
@@ -109,19 +105,11 @@ class AgentCreateRequest(BaseModel):
                     "name": "编程助手",
                     "description": "专业的编程助手，擅长代码审查和优化",
                     "prompt": "你是一个专业的助手...",
-                    "model": "claude-sonnet-4-5-20250929",
+                    "model": "claude-sonnet-4-5-20250929",  # or None to use default
                     "max_turns": 20,
                     "enabled_capabilities": {
                         "code_execution": False,
                     },
-                    "mcp_tools": [
-                        {
-                            "name": "dify_workflow",
-                            "server_url": "https://api.dify.ai/mcp/server/xxx/mcp",
-                            "auth_type": "bearer",
-                            "auth_env": "DIFY_API_KEY"
-                        }
-                    ]
                 }
             ]
         }
@@ -160,7 +148,6 @@ class AgentDetail(BaseModel):
         default_factory=dict, 
         description="启用的工具能力，如 {'code_execution': True, 'document_skills': False}"
     )
-    mcp_tools: List[MCPToolDetail] = Field(default_factory=list, description="MCP 工具配置列表")
     apis: List[APIDetail] = Field(default_factory=list, description="API 配置列表")
     skills: List[str] = Field(default_factory=list, description="Skill 名称列表")
 

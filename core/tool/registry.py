@@ -11,7 +11,7 @@
 
 设计原则：
 - 配置驱动：所有能力从 YAML 配置加载
-- 统一抽象：Skills/Tools/MCP/Code 统一为 Capability
+- 统一抽象：Skills/Tools/Code 统一为 Capability
 - 分层管理：全局 vs 实例级分离
 """
 
@@ -40,7 +40,7 @@ class CapabilityRegistry:
     """
     全局能力注册表（单例）
 
-    管理所有能力（Skills/Tools/MCP/Code）
+    管理所有能力（Skills/Tools/Code）
     从 capabilities.yaml 加载配置，同时扫描 skills/library/ 发现 Skills
 
     使用方式:
@@ -83,7 +83,7 @@ class CapabilityRegistry:
         if self._initialized:
             return
 
-        # 加载 Tools/MCP 配置
+        # 加载 Tools 配置
         await self._load_config_async()
 
         # 扫描 Skills
@@ -481,7 +481,6 @@ class CapabilityRegistry:
 class InstanceToolType(Enum):
     """实例级工具类型"""
 
-    MCP = "MCP"  # MCP 协议工具
     REST_API = "REST_API"  # REST API（通过 api_calling 调用）
 
 
@@ -490,7 +489,7 @@ class InstanceTool:
     """
     实例级工具定义
 
-    统一表示 MCP 工具和 REST API，可转换为 Claude API 格式
+    表示 REST API，可转换为 Claude API 格式
     """
 
     name: str
@@ -498,12 +497,6 @@ class InstanceTool:
     description: str = ""
     input_schema: Dict[str, Any] = field(default_factory=dict)
     capability: Optional[str] = None
-
-    # MCP 特有属性
-    server_url: Optional[str] = None
-    server_name: Optional[str] = None
-    original_name: Optional[str] = None
-    mcp_client: Optional[Any] = None
 
     # REST API 特有属性
     base_url: Optional[str] = None
@@ -526,8 +519,8 @@ class InstanceTool:
         return {
             "name": self.name,
             "type": "TOOL",
-            "subtype": "MCP" if self.type == InstanceToolType.MCP else "REST",
-            "provider": self.server_name or "instance",
+            "subtype": "REST",
+            "provider": "instance",
             "capabilities": [self.capability] if self.capability else [],
             "priority": 80,
             "metadata": {
@@ -543,12 +536,11 @@ class InstanceRegistry:
     """
     实例级工具注册表
 
-    管理一个 Agent 实例的所有动态工具（MCP、REST API）
+    管理一个 Agent 实例的所有动态工具（REST API）
     与全局 CapabilityRegistry 协同工作
 
     使用方式:
         instance_registry = InstanceRegistry(global_registry)
-        await instance_registry.register_mcp_tool(...)
 
         # 获取所有工具（全局 + 实例）
         all_tools = instance_registry.get_all_tools_unified()
@@ -562,7 +554,6 @@ class InstanceRegistry:
             global_registry: 全局 CapabilityRegistry（可选）
         """
         self._tools: Dict[str, InstanceTool] = {}
-        self._mcp_clients: Dict[str, Any] = {}
         self._global_registry = global_registry
         self._inference_cache: Dict[str, List[str]] = {}
 
@@ -572,50 +563,6 @@ class InstanceRegistry:
         """注册实例级工具"""
         self._tools[tool.name] = tool
         logger.info(f"📦 注册实例工具: {tool.name} ({tool.type.value})")
-
-    async def register_mcp_tool(
-        self,
-        name: str,
-        server_url: str,
-        server_name: str,
-        tool_info: Dict[str, Any],
-        mcp_client: Any,
-        handler: Callable[..., Awaitable[Any]],
-        capability: Optional[str] = None,
-    ):
-        """
-        注册 MCP 工具
-
-        Args:
-            name: 工具名称（已命名空间化）
-            server_url: MCP 服务器 URL
-            server_name: 服务器名称
-            tool_info: MCP 工具信息
-            mcp_client: MCP 客户端实例
-            handler: 工具调用处理器
-            capability: 能力类别
-        """
-        input_schema = tool_info.get("input_schema", {})
-        if not input_schema or not isinstance(input_schema, dict):
-            input_schema = {}
-            logger.warning(f"⚠️ MCP 工具 {name} 没有 input_schema")
-
-        tool = InstanceTool(
-            name=name,
-            type=InstanceToolType.MCP,
-            description=tool_info.get("description", ""),
-            input_schema=input_schema,
-            capability=capability,
-            server_url=server_url,
-            server_name=server_name,
-            original_name=tool_info.get("name"),
-            mcp_client=mcp_client,
-            handler=handler,
-        )
-        self.register(tool)
-
-        # 缓存 MCP 客户端
-        self._mcp_clients[server_url] = mcp_client
 
     def register_rest_api(
         self,
@@ -674,10 +621,6 @@ class InstanceRegistry:
         """按能力类别获取工具"""
         return [t for t in self._tools.values() if t.capability == capability]
 
-    def get_mcp_client(self, server_url: str) -> Optional[Any]:
-        """获取缓存的 MCP 客户端"""
-        return self._mcp_clients.get(server_url)
-
     # ==================== 工具发现接口 ====================
 
     def get_tools_for_claude(self) -> List[Dict[str, Any]]:
@@ -721,7 +664,7 @@ class InstanceRegistry:
                     "name": tool.name,
                     "type": "TOOL",
                     "subtype": tool.type.value,
-                    "provider": tool.server_name or "instance",
+                    "provider": "instance",
                     "description": tool.description,
                     "capabilities": [tool.capability] if tool.capability else [],
                     "priority": 80,
@@ -789,9 +732,8 @@ class InstanceRegistry:
 
     def summary(self) -> str:
         """生成摘要"""
-        mcp_count = len(self.get_by_type(InstanceToolType.MCP))
         api_count = len(self.get_by_type(InstanceToolType.REST_API))
-        return f"InstanceRegistry: {mcp_count} MCP工具, {api_count} REST APIs"
+        return f"InstanceRegistry: {api_count} REST APIs"
 
     def list_tool_names(self) -> List[str]:
         """列出所有工具名称"""

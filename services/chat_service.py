@@ -699,11 +699,16 @@ class ChatService:
                 output_format=output_format
             )
 
-        # 1. 验证 agent_id
+        # 1. 验证 agent_id（支持按需加载）
         if agent_id:
             if not self.agent_registry.has_agent(agent_id):
-                available = [a["agent_id"] for a in self.agent_registry.list_agents()]
-                raise AgentNotFoundError(f"Agent '{agent_id}' 不存在，可用: {available}")
+                # 尝试按需加载（instances/ 目录下可能存在但未预加载）
+                try:
+                    await self.agent_registry.preload_instance(agent_id)
+                    logger.info(f"📦 按需加载 Agent '{agent_id}' 成功")
+                except (FileNotFoundError, Exception):
+                    available = [a["agent_id"] for a in self.agent_registry.list_agents()]
+                    raise AgentNotFoundError(f"Agent '{agent_id}' 不存在，可用: {available}")
 
         # 2. 创建/校验 Conversation
         try:
@@ -1148,12 +1153,16 @@ class ChatService:
         if not conversation_id:
             raise ValueError("HITL 响应必须提供 conversation_id")
         
-        # 3. 验证 agent_id
+        # 3. 验证 agent_id（支持按需加载）
         if agent_id:
             registry = get_agent_registry()
             if not registry.has_agent(agent_id):
-                available = [a["agent_id"] for a in registry.list_agents()]
-                raise AgentNotFoundError(f"Agent '{agent_id}' 不存在，可用: {available}")
+                try:
+                    await registry.preload_instance(agent_id)
+                    logger.info(f"📦 按需加载 Agent '{agent_id}' 成功")
+                except (FileNotFoundError, Exception):
+                    available = [a["agent_id"] for a in registry.list_agents()]
+                    raise AgentNotFoundError(f"Agent '{agent_id}' 不存在，可用: {available}")
         
         # 4. 生成 assistant_message_id
         assistant_message_id = str(uuid4())

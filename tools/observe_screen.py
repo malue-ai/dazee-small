@@ -38,6 +38,29 @@ logger = logging.getLogger(__name__)
 # peekaboo see (primary: UI elements + window info)
 # ============================================================
 
+async def _check_peekaboo_available(node_manager) -> bool:
+    """
+    Check if peekaboo CLI is available on this system.
+
+    Caches the result for the process lifetime.
+    """
+    if hasattr(_check_peekaboo_available, "_cached"):
+        return _check_peekaboo_available._cached
+
+    try:
+        response = await node_manager.run_command(
+            command=["which", "peekaboo"], node_id="local", timeout_ms=5000,
+        )
+        available = response.ok
+    except Exception:
+        available = False
+
+    _check_peekaboo_available._cached = available
+    if not available:
+        logger.info("peekaboo 未安装，将使用 screencapture + OCR 降级模式")
+    return available
+
+
 async def _peekaboo_see(node_manager, app: str = "", window_title: str = "") -> Optional[Dict]:
     """
     Run peekaboo see to capture UI element map.
@@ -45,6 +68,9 @@ async def _peekaboo_see(node_manager, app: str = "", window_title: str = "") -> 
     Returns parsed data dict or None on failure.
     ~1.5s, local, returns element IDs for subsequent click/type.
     """
+    if not await _check_peekaboo_available(node_manager):
+        return None
+
     try:
         cmd = ["peekaboo", "see", "--json"]
         if app:
@@ -277,8 +303,13 @@ class ObserveScreenTool(BaseTool):
         os.close(fd)
 
         try:
+            has_peekaboo = await _check_peekaboo_available(self._node_manager_ref)
+
             # Build screenshot command (for OCR only)
-            if app or window_title:
+            screenshot_taken = False
+
+            if has_peekaboo and (app or window_title):
+                # peekaboo available: use it for window-specific capture
                 peekaboo_mode = "window" if app else "frontmost"
                 screenshot_cmd = [
                     "peekaboo", "image",
@@ -290,13 +321,18 @@ class ObserveScreenTool(BaseTool):
                     screenshot_cmd.extend(["--app", app])
                 if window_title:
                     screenshot_cmd.extend(["--window-title", window_title])
-            else:
-                screenshot_cmd = ["screencapture", "-x", tmp_path]
 
-            # Run screenshot command
-            await self._node_manager_ref.run_command(
-                command=screenshot_cmd, node_id="local", timeout_ms=15000,
-            )
+                resp = await self._node_manager_ref.run_command(
+                    command=screenshot_cmd, node_id="local", timeout_ms=15000,
+                )
+                screenshot_taken = resp.ok and os.path.isfile(tmp_path) and os.path.getsize(tmp_path) > 0
+
+            # Fallback: screencapture (always available on macOS)
+            if not screenshot_taken:
+                screenshot_cmd = ["screencapture", "-x", tmp_path]
+                await self._node_manager_ref.run_command(
+                    command=screenshot_cmd, node_id="local", timeout_ms=15000,
+                )
 
             # Run peekaboo see + OCR in parallel
             see_task = _peekaboo_see(self._node_manager_ref, app, window_title)
@@ -315,7 +351,7 @@ class ObserveScreenTool(BaseTool):
                 if formatted:
                     result["ui"] = formatted
 
-            # OCR text (supplement)
+            # OCR text (supplement → primary when peekaboo unavailable)
             if isinstance(ocr_text, str) and len(ocr_text.strip()) > 20:
                 if len(ocr_text) > 3000:
                     ocr_text = ocr_text[:3000] + "\n...(已截断)"
@@ -324,9 +360,15 @@ class ObserveScreenTool(BaseTool):
             # Hints when both sources are thin
             if "ui" not in result and "ocr_text" not in result:
                 result["screen_text"] = "(未能获取界面信息)"
-                result["hint"] = (
-                    "可尝试: peekaboo see --app <应用名> --analyze '描述你想了解的内容'"
-                )
+                if not has_peekaboo:
+                    result["hint"] = (
+                        "peekaboo 未安装，screencapture 已截取全屏但 OCR 未提取到文字。"
+                        "建议安装 peekaboo: brew install nicklama/tap/peekaboo"
+                    )
+                else:
+                    result["hint"] = (
+                        "可尝试: peekaboo see --app <应用名> --analyze '描述你想了解的内容'"
+                    )
 
             if description:
                 result["purpose"] = description

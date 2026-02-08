@@ -35,8 +35,6 @@ from core.agent import AgentFactory
 from core.events import create_event_manager, get_memory_storage
 from core.prompt import load_instance_cache
 from core.tool import InstanceRegistry, create_tool_loader, get_capability_registry
-# TODO: 迁移到 local_store
-# from infra.pools import get_mcp_pool
 from logger import get_logger
 from prompts.universal_agent_prompt import get_universal_agent_prompt
 from utils.instance_loader import (
@@ -106,7 +104,7 @@ class AgentRegistry:
         self._configs: Dict[str, AgentConfig] = {}
 
         # Agent 原型缓存（预创建的 Agent 实例，运行时复用）
-        # 原型包含：LLM Service、工具注册表、MCP 客户端等重量级组件
+        # 原型包含：LLM Service、工具注册表等重量级组件
         # 运行时通过 clone_for_session() 浅克隆并重置会话状态
         self._agent_prototypes: Dict[str, Any] = {}  # name -> Agent
 
@@ -369,7 +367,7 @@ class AgentRegistry:
         """
         🆕 V7.1: 创建 Agent 原型（部署态预创建）
 
-        创建 Agent 原型（含 LLM、工具注册表、MCP 客户端）
+        创建 Agent 原型（含 LLM、工具注册表）
 
         运行时通过 clone_for_session() 复用这些组件，仅重置会话状态
 
@@ -449,7 +447,7 @@ class AgentRegistry:
 
     async def _setup_instance_tools(self, agent, config: AgentConfig):
         """
-        设置实例级工具（MCP 工具、Skills 等）
+        设置实例级工具（Skills 等）
 
         Args:
             agent: Agent 实例
@@ -464,10 +462,9 @@ class AgentRegistry:
         # 使用 ToolLoader 统一加载工具
         tool_loader = create_tool_loader(global_registry)
 
-        # 加载所有工具（通用工具、MCP 工具、Claude Skills）（异步）
+        # 加载所有工具（通用工具、Claude Skills）（异步）
         load_result = await tool_loader.load_tools(
             enabled_capabilities=instance_config.enabled_capabilities,
-            mcp_tools=instance_config.mcp_tools,
             skills=instance_config.skills,
         )
 
@@ -496,153 +493,6 @@ class AgentRegistry:
         instance_registry = InstanceRegistry(global_registry=filtered_registry)
         agent._instance_registry = instance_registry
 
-        # 注册 MCP 工具（如果有）
-        if instance_config.mcp_tools:
-            await self._register_mcp_tools(agent, instance_config.mcp_tools, instance_registry)
-
-    async def _register_mcp_tools(self, agent, mcp_tools: List[Dict[str, Any]], instance_registry):
-        """
-        注册 MCP 工具
-
-        🔧 V7.6 修复：改为**同步发现模式**，启动时连接 MCP 服务器并获取真实的 input_schema
-        这样 LLM 才能知道每个工具需要什么参数
-
-        Args:
-            agent: Agent 实例
-            mcp_tools: MCP 工具配置列表
-            instance_registry: 实例级工具注册表
-        """
-        logger.info(f"📦 注册 MCP 工具（同步发现模式）: {len(mcp_tools)} 个配置")
-
-        # 按 server_url 分组，避免重复连接同一服务器
-        servers: Dict[str, Dict[str, Any]] = {}
-        for tool_config in mcp_tools:
-            server_url = tool_config.get("server_url")
-            if not server_url:
-                continue
-
-            if server_url not in servers:
-                servers[server_url] = {
-                    "server_name": tool_config.get("server_name", "unknown"),
-                    "auth_type": tool_config.get("auth_type", "none"),
-                    "auth_env": tool_config.get("auth_env"),
-                    "capability": tool_config.get("capability"),
-                }
-
-        # 连接每个 MCP 服务器并发现工具
-        # TODO: 迁移到 local_store
-        # pool = get_mcp_pool()
-        pool = None  # Stub
-
-        for server_url, server_config in servers.items():
-            server_name = server_config["server_name"]
-            auth_type = server_config["auth_type"]
-            auth_env = server_config["auth_env"]
-            capability = server_config["capability"]
-
-            try:
-                # 获取认证令牌
-                auth_token = None
-                if auth_type in ("bearer", "api_key") and auth_env:
-                    auth_token = os.getenv(auth_env)
-                    if not auth_token:
-                        logger.warning(
-                            f"⚠️ MCP 服务器 {server_name} 的密钥环境变量 {auth_env} 未设置，跳过"
-                        )
-                        continue
-
-                # 🔧 将 MCP 连接操作隔离到独立 task 中，避免 anyio cancel scope 污染主流程
-                async def _isolated_mcp_connect(_pool, _server_url, _server_name, _auth_token):
-                    """在独立 task 中连接 MCP，隔离 cancel scope"""
-                    try:
-                        client = await _pool.get_client(
-                            server_url=_server_url, server_name=_server_name, auth_token=_auth_token
-                        )
-                        if client:
-                            tools = await client.discover_tools()
-                            return client, tools
-                        return None, []
-                    except asyncio.CancelledError:
-                        logger.warning(f"   ⚠️ MCP 连接被取消（隔离）: {_server_name}")
-                        return None, []
-                    except Exception as e:
-                        logger.warning(f"   ⚠️ MCP 连接异常（隔离）: {_server_name}: {e}")
-                        return None, []
-
-                logger.info(f"   🔌 连接 MCP 服务器: {server_name}")
-
-                # TODO: 迁移到 local_store
-                # 在独立 task 中执行 MCP 连接，隔离 anyio cancel scope
-                # connect_task = asyncio.create_task(
-                #     _isolated_mcp_connect(pool, server_url, server_name, auth_token)
-                # )
-                # client, tools = await connect_task
-                client, tools = None, []  # Stub
-
-                # 短暂等待让事件循环处理残留的 cancel scope
-                await asyncio.sleep(0)
-
-                if not client:
-                    logger.warning(f"   ❌ MCP 服务器 {server_name} 连接失败，跳过")
-                    continue
-
-                logger.info(f"   ✅ {server_name}: 发现 {len(tools)} 个工具")
-
-                # 注册每个发现的工具
-                for tool_info in tools:
-                    tool_name = tool_info.get("name")  # 已经带 server_name 前缀
-                    original_name = tool_info.get("original_name", tool_name)
-                    description = tool_info.get("description", "")
-                    input_schema = tool_info.get("input_schema", {})
-
-                    # 🆕 检查配置文件中是否有该工具的自定义描述（覆盖 MCP 服务器的描述）
-                    config_description = None
-                    for tool_config in mcp_tools:
-                        if (
-                            tool_config.get("name") == original_name
-                            and tool_config.get("server_url") == server_url
-                        ):
-                            config_description = tool_config.get("description")
-                            if config_description:
-                                logger.info(f"      ✏️ 使用配置文件中的自定义描述覆盖 MCP 描述")
-                                description = config_description
-                                # 同时更新 tool_info 中的 description
-                                tool_info["description"] = config_description
-                            break
-
-                    # 🔍 显示工具的参数信息
-                    schema_props = (
-                        input_schema.get("properties", {}) if isinstance(input_schema, dict) else {}
-                    )
-                    param_info = f"参数: {list(schema_props.keys())}" if schema_props else "无参数"
-                    logger.info(f"      • {tool_name} ({param_info})")
-
-                    # 创建工具处理器（闭包捕获变量）
-                    async def make_handler(_server_url, _server_name, _auth_token, _orig_name):
-                        async def handler(tool_input: Dict[str, Any], context=None):
-                            # TODO: 迁移到 local_store
-                            return {"success": False, "error": "MCP pool not available - TODO: 迁移到 local_store"}
-                        return handler
-
-                    handler = await make_handler(server_url, server_name, auth_token, original_name)
-
-                    # 🔧 注册到 InstanceRegistry，传入真实的 tool_info（包含 input_schema）
-                    await instance_registry.register_mcp_tool(
-                        name=tool_name,
-                        server_url=server_url,
-                        server_name=server_name,
-                        tool_info=tool_info,  # 包含真实的 input_schema！
-                        mcp_client=client,
-                        handler=handler,
-                        capability=capability,
-                    )
-
-                    # 同时注册到 Agent 的 tool_executor
-                    if hasattr(agent, "tool_executor") and agent.tool_executor:
-                        agent.tool_executor.register_handler(tool_name, handler)
-
-            except Exception as e:
-                logger.warning(f"⚠️ 注册 MCP 服务器 {server_name} 的工具失败: {str(e)}")
 
     # ==================== 查询方法 ====================
 
@@ -770,6 +620,24 @@ class AgentRegistry:
 
         logger.info(f"✅ Agent '{agent_id}' 加载完成 (耗时 {load_time_ms:.0f}ms)")
 
+    async def _try_on_demand_load(self, agent_id: str) -> bool:
+        """
+        Try to on-demand load an agent that exists on disk but isn't in _configs.
+
+        Returns:
+            True if loaded successfully, False otherwise.
+        """
+        instances_dir = get_instances_dir()
+        instance_path = instances_dir / agent_id
+        if instance_path.exists() and (instance_path / "prompt.md").exists():
+            try:
+                logger.info(f"📦 Agent '{agent_id}' 按需加载中...")
+                await self.preload_instance(agent_id)
+                return agent_id in self._configs
+            except Exception as e:
+                logger.warning(f"⚠️ Agent '{agent_id}' 按需加载失败: {e}")
+        return False
+
     def get_agent_detail(self, agent_id: str) -> Dict[str, Any]:
         """
         获取 Agent 详细信息
@@ -804,21 +672,6 @@ class AgentRegistry:
                 for k, v in instance_config.enabled_capabilities.items():
                     enabled_caps[k] = bool(v) if isinstance(v, int) else v
 
-            # 格式化 MCP 工具（返回完整配置）
-            mcp_tools_formatted = []
-            for t in instance_config.mcp_tools or []:
-                mcp_tools_formatted.append(
-                    {
-                        "name": t.get("name", "unknown"),
-                        "server_url": t.get("server_url", ""),
-                        "server_name": t.get("server_name", ""),
-                        "auth_type": t.get("auth_type", "none"),
-                        "auth_env": t.get("auth_env"),
-                        "capability": t.get("capability"),
-                        "description": t.get("description", ""),
-                    }
-                )
-
             # 格式化 REST APIs（返回完整配置）
             apis_formatted = []
             for a in instance_config.apis or []:
@@ -844,7 +697,6 @@ class AgentRegistry:
                         else False
                     ),
                     "enabled_capabilities": enabled_caps,
-                    "mcp_tools": mcp_tools_formatted,
                     "apis": apis_formatted,
                     # skills 是 List[SkillConfig] 数据类，需要用属性访问
                     "skills": [s.name for s in (instance_config.skills or [])],

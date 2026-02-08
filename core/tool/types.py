@@ -7,7 +7,7 @@
 
 设计原则：
 1. 显式依赖：通过 ToolContext 传递依赖，不使用魔法反射
-2. 统一抽象：所有能力（Skills/Tools/MCP/Code）统一为 Capability
+2. 统一抽象：所有能力（Skills/Tools/Code）统一为 Capability
 3. 向后兼容：支持旧式工具的适配
 
 术语说明：
@@ -35,13 +35,11 @@ class CapabilityType(Enum):
 
     - SKILL: Claude Skills 或本地工作流技能（系统提示词注入）
     - TOOL: 预定义函数工具（通过 tool_use 调用）
-    - MCP: MCP 协议工具（动态连接）
     - CODE: 动态代码执行
     """
 
     SKILL = "SKILL"
     TOOL = "TOOL"
-    MCP = "MCP"
     CODE = "CODE"
 
 
@@ -154,11 +152,11 @@ class Capability:
     """
     统一能力定义
 
-    抽象所有执行方式（Skills/Tools/MCP/Code）
+    抽象所有执行方式（Skills/Tools/Code）
 
     Attributes:
         name: 能力名称（唯一标识）
-        type: 能力类型（SKILL/TOOL/MCP/CODE）
+        type: 能力类型（SKILL/TOOL/CODE）
         subtype: 子类型（PREBUILT/CUSTOM/NATIVE/EXTERNAL/DYNAMIC）
         provider: 提供者（system/user/anthropic/local 等）
         capabilities: 能力标签列表（如 ppt_generation, data_analysis）

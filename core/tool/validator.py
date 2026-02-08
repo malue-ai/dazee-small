@@ -36,7 +36,6 @@ class TrustLevel(str, Enum):
     L1_BUILTIN = "L1"  # 内置工具，完全信任
     L2_REVIEWED = "L2"  # 审核过的工具，高信任
     L3_RESTRICTED = "L3"  # 受限执行，中等信任
-    L4_MCP = "L4"  # MCP 远程调用，外部信任
 
 
 class ExecutionMode(str, Enum):
@@ -45,7 +44,6 @@ class ExecutionMode(str, Enum):
     DIRECT = "direct"  # 直接执行（仅限 L1/L2）
     RESTRICTED = "restricted"  # 受限环境执行
     THREAD_POOL = "thread_pool"  # 线程池（同步代码包装）
-    MCP = "mcp"  # MCP 远程调用
 
 
 # ============================================================
@@ -459,10 +457,6 @@ class ToolValidator:
         # L1/L2 可以直接执行
         if result.trust_level in (TrustLevel.L1_BUILTIN, TrustLevel.L2_REVIEWED):
             return ExecutionMode.DIRECT
-
-        # L4 是 MCP
-        if result.trust_level == TrustLevel.L4_MCP:
-            return ExecutionMode.MCP
 
         # L3 在受限环境执行
         return ExecutionMode.RESTRICTED

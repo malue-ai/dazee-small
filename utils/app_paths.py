@@ -132,6 +132,17 @@ def get_shared_models_dir() -> Path:
     return d
 
 
+def get_storage_dir() -> Path:
+    """
+    Convenience wrapper: get instance-scoped storage dir from AGENT_INSTANCE env var.
+
+    Used by file upload/serve routes and FileProcessor to resolve local file paths.
+    Delegates to get_instance_storage_dir() for actual instance isolation.
+    """
+    instance_name = os.getenv("AGENT_INSTANCE", "default")
+    return get_instance_storage_dir(instance_name)
+
+
 
 
 # ==================== 实例隔离路径 ====================

@@ -75,7 +75,7 @@ class FileStorage(PlaybookStorageBackend):
             self.storage_path = Path(storage_path)
         else:
             import os
-            _inst = instance_name or os.environ["AGENT_INSTANCE"]
+            _inst = instance_name or os.getenv("AGENT_INSTANCE", "default")
             self.storage_path = get_instance_playbooks_dir(_inst)
         self.storage_path.mkdir(parents=True, exist_ok=True)
         logger.info(f"📁 FileStorage 初始化: path={storage_path}")

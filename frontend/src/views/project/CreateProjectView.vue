@@ -246,6 +246,32 @@
               class="w-full px-4 py-3 text-sm bg-card border border-border rounded-xl focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/40 text-foreground placeholder:text-muted-foreground/50 resize-none transition-colors"
             ></textarea>
           </div>
+
+          <!-- AI 模型 -->
+          <div class="space-y-2">
+            <label class="text-sm font-medium text-foreground">AI 模型</label>
+            <div class="relative">
+              <select
+                v-model="form.model"
+                :disabled="modelsLoading || availableModels.length === 0"
+                class="w-full px-4 py-3 pr-10 text-sm bg-card border border-border rounded-xl focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/40 text-foreground appearance-none cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <option v-if="modelsLoading" value="" disabled>加载中...</option>
+                <option v-else-if="availableModels.length === 0" value="" disabled>无可用模型</option>
+                <option
+                  v-for="m in availableModels"
+                  :key="m.model_name"
+                  :value="m.model_name"
+                >
+                  {{ m.display_name }} ({{ m.provider }})
+                </option>
+              </select>
+              <ChevronDown class="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+            </div>
+            <p v-if="!modelsLoading && availableModels.length === 0" class="text-xs text-destructive">
+              请先在设置页面配置 API Key 以激活模型
+            </p>
+          </div>
         </div>
 
         <!-- 预览标签 -->
@@ -289,10 +315,11 @@
 <script setup lang="ts">
 import { ref, reactive, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ArrowLeft, ArrowUp, Paperclip, Plus, Loader2, AlertCircle, X, Upload, Trash2 } from 'lucide-vue-next'
+import { ArrowLeft, ArrowUp, Paperclip, Plus, Loader2, AlertCircle, X, Upload, Trash2, ChevronDown } from 'lucide-vue-next'
 import { useAgentStore } from '@/stores/agent'
 import { useGuideStore } from '@/stores/guide'
 import { useWebSocketChat } from '@/composables/useWebSocketChat'
+import { modelApi, type ModelInfo } from '@/api/models'
 import type { ChatRequest } from '@/types'
 
 // ==================== 路由 & Store & WebSocket ====================
@@ -357,8 +384,34 @@ const form = reactive({
   icon: '',
   name: '',
   description: '',
-  instructions: ''
+  instructions: '',
+  model: ''
 })
+
+// ==================== 模型选择 ====================
+
+/** 已激活的模型列表 */
+const availableModels = ref<ModelInfo[]>([])
+
+/** 模型加载中 */
+const modelsLoading = ref(false)
+
+/** 加载已激活模型 */
+async function loadModels() {
+  modelsLoading.value = true
+  try {
+    const { data } = await modelApi.listModels()
+    availableModels.value = data
+    // Default to first model if none selected
+    if (!form.model && data.length > 0) {
+      form.model = data[0].model_name
+    }
+  } catch (e) {
+    console.error('加载模型列表失败:', e)
+  } finally {
+    modelsLoading.value = false
+  }
+}
 
 const activeTab = ref<'preview' | 'config'>('config')
 
@@ -718,7 +771,8 @@ async function handleCreate() {
     const detail = await agentStore.createAgent({
       name: form.name.trim(),
       description: form.description.trim(),
-      prompt: form.instructions.trim() || `你是一个名为 ${form.name.trim()} 的 AI 助手。${form.description.trim()}`
+      prompt: form.instructions.trim() || `你是一个名为 ${form.name.trim()} 的 AI 助手。${form.description.trim()}`,
+      ...(form.model ? { model: form.model } : {})
     })
 
     // 引导完成
@@ -740,6 +794,9 @@ async function handleCreate() {
 // ==================== 生命周期 ====================
 
 onMounted(() => {
+  // Load available models
+  loadModels()
+
   if (guideStore.isActive && guideStore.currentStep === 6) {
     // 引导模式：延迟启动打字机效果
     setTimeout(() => startTypewriter('创建一个会议纪要项目'), 600)

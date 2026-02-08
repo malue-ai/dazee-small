@@ -996,28 +996,32 @@ class QwenLLMService(BaseLLMService):
                         f"🔧 Qwen 参数规范化: {key} -> 从 dict 提取 'value': {value['value']}"
                     )
 
-                # 🔧 策略 3: 特殊处理常见的嵌套参数模式
-                # 例如：body/parameters 可能包含实际的请求数据
-                elif key in ("body", "parameters", "headers", "data", "json", "config"):
+                # 🔧 策略 3: 保留合法嵌套结构
+                # 工具 schema 中定义为 object 类型的参数，应保留原始 dict
+                # 包括：精确匹配的常见字段 + 后缀匹配（_config/_action/_params 等）
+                elif key in (
+                    "body", "parameters", "headers", "data", "json", "config",
+                    "action", "trigger_config",
+                ) or key.endswith((
+                    "_config", "_action", "_params", "_data", "_options",
+                    "_settings", "_metadata",
+                )):
                     # 这些字段通常应该保留为字典（是合法的嵌套结构）
                     normalized[key] = value
                     logger.debug(f"🔧 Qwen 参数规范化: {key} -> 保留原始 dict（合法嵌套结构）")
 
-                # 🔧 策略 4: 单字段字典，直接提取值
-                elif len(value) == 1:
-                    # 获取唯一的值
-                    single_value = next(iter(value.values()))
-                    normalized[key] = single_value
-                    logger.debug(
-                        f"🔧 Qwen 参数规范化: {key} -> 从单字段 dict 提取值: {single_value}"
-                    )
-
-                # 🔧 策略 5: 多字段且无明确模式，保留原始结构（但打印警告）
+                # 🔧 策略 4: 其他字典参数，默认保留原始结构
+                # 避免错误扁平化工具 schema 中的合法嵌套对象
                 else:
                     normalized[key] = value
-                    logger.warning(
-                        f"⚠️ Qwen 参数规范化: {key} -> 保留复杂 dict（无法扁平化），字段: {list(value.keys())}"
-                    )
+                    if len(value) == 1:
+                        logger.debug(
+                            f"🔧 Qwen 参数规范化: {key} -> 保留单字段 dict（字段: {list(value.keys())}）"
+                        )
+                    else:
+                        logger.debug(
+                            f"🔧 Qwen 参数规范化: {key} -> 保留多字段 dict（字段: {list(value.keys())}）"
+                        )
 
             elif isinstance(value, list):
                 # 递归处理列表中的元素

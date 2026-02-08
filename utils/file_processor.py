@@ -1,25 +1,28 @@
 """
-文件处理器 - File Processor（纯 URL 模式，无数据库）
+文件处理器 - File Processor（本地 + URL 双模式，无数据库）
 
 职责：
-1. 根据 file_url 处理文件
+1. 根据 file_url 处理文件（支持本地路径和远程 URL）
 2. 根据 MIME 类型分类处理
 3. 生成 LLM 可用的 content blocks
 
 处理策略：
-- 图片 (image/*) → 直接使用 URL → ImageBlock
-- 纯文本 (text/plain, text/markdown) → 下载 → 读取内容 → 拼进消息
-- 复杂文件 (PDF 等) → 直接使用 URL → 拼进消息，让 Agent 决定
+- 图片 (image/*) → 本地文件使用 base64 / 远程使用 URL → ImageBlock
+- 纯文本 (text/plain, text/markdown) → 读取内容 → 拼进消息
+- 复杂文件 (PDF 等) → 提供路径/URL → 拼进消息，让 Agent 决定
 """
 
 import base64
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import aiofiles
 import httpx
 
 from logger import get_logger
+from utils.app_paths import get_storage_dir
 
 logger = get_logger("file_processor")
 
@@ -54,13 +57,20 @@ class FileProcessorError(Exception):
 
 class FileProcessor:
     """
-    文件处理器（纯 URL 模式）
+    文件处理器（本地 + URL 双模式）
+
+    支持两种文件来源：
+    - 本地文件：URL 以 /api/v1/files/ 开头，从本地存储目录读取
+    - 远程文件：HTTP(S) URL，通过网络下载
 
     使用方法：
         processor = FileProcessor()
         processed_files = await processor.process_files(files)
         content_blocks = processor.build_message_content(processed_files, user_message)
     """
+
+    # 本地文件 URL 前缀
+    LOCAL_FILE_PREFIX = "/api/v1/files/"
 
     # 图片 MIME 类型
     IMAGE_MIME_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
@@ -80,6 +90,27 @@ class FileProcessor:
 
     # 预览文本最大字符数
     MAX_PREVIEW_CHARS = 200
+
+    def _is_local_file(self, url: str) -> bool:
+        """Check if the URL points to a local file."""
+        return url.startswith(self.LOCAL_FILE_PREFIX)
+
+    def _resolve_local_path(self, url: str) -> Path:
+        """
+        Resolve a local file URL to an absolute filesystem path.
+
+        /api/v1/files/uploads/20260208/abc_test.txt
+        -> {storage_dir}/uploads/20260208/abc_test.txt
+        """
+        relative_path = url[len(self.LOCAL_FILE_PREFIX):]
+        return get_storage_dir() / relative_path
+
+    async def _read_local_file(self, local_path: Path) -> bytes:
+        """Read file content from local filesystem."""
+        if not local_path.exists():
+            raise FileProcessorError(f"本地文件不存在: {local_path}")
+        async with aiofiles.open(local_path, "rb") as f:
+            return await f.read()
 
     async def process_files(self, files: List[Dict[str, Any]]) -> List[ProcessedFile]:
         """
@@ -128,33 +159,72 @@ class FileProcessor:
         file_size: Optional[int] = None,
     ) -> Optional[ProcessedFile]:
         """
-        通过 URL 处理文件
+        Process a file by URL (supports both local and remote).
 
-        如果提供了元数据（filename, mime_type, file_size），直接使用
-        否则发送 HEAD 请求获取
+        For local files (/api/v1/files/...), reads directly from filesystem.
+        For remote files (http/https), downloads via HTTP.
 
         Args:
-            url: 文件 URL
-            filename: 文件名（可选，前端传递）
-            mime_type: MIME 类型（可选，前端传递）
-            file_size: 文件大小（可选，前端传递）
+            url: File URL (local path or remote URL).
+            filename: Filename (optional, from frontend).
+            mime_type: MIME type (optional, from frontend).
+            file_size: File size in bytes (optional, from frontend).
         """
-        # 如果没有元数据，发送 HEAD 请求获取
-        if not mime_type or not filename:
-            detected_mime, detected_size, detected_name = await self._get_url_file_info(url)
-            mime_type = mime_type or detected_mime
-            file_size = file_size or detected_size
-            filename = filename or detected_name
+        is_local = self._is_local_file(url)
 
-        logger.info(f"📎 处理 URL 文件: {filename}, MIME={mime_type}, size={file_size}")
+        # Resolve metadata
+        if is_local:
+            local_path = self._resolve_local_path(url)
+            if not filename:
+                filename = local_path.name
+            if not mime_type:
+                mime_type = self._guess_mime_type_from_filename(filename)
+            if not file_size and local_path.exists():
+                file_size = local_path.stat().st_size
+        else:
+            if not mime_type or not filename:
+                detected_mime, detected_size, detected_name = await self._get_url_file_info(url)
+                mime_type = mime_type or detected_mime
+                file_size = file_size or detected_size
+                filename = filename or detected_name
 
-        # 分类处理
+        logger.info(
+            f"📎 处理文件: {filename}, MIME={mime_type}, "
+            f"size={file_size}, local={is_local}"
+        )
+
+        # Categorize by MIME type
         category = self._categorize_mime_type(mime_type)
 
         if category == FileCategory.IMAGE:
-            # 图片：直接使用 URL（Claude 支持 URL 方式）
-            content_block = {"type": "image", "source": {"type": "url", "url": url}}
-            logger.info(f"🖼️ 图片使用 URL 方式: {filename}")
+            if is_local:
+                # Local image: use base64 encoding for LLM
+                try:
+                    content = await self._read_local_file(self._resolve_local_path(url))
+                    b64_data = base64.standard_b64encode(content).decode("utf-8")
+                    content_block = {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": mime_type,
+                            "data": b64_data,
+                        },
+                    }
+                    logger.info(f"🖼️ 本地图片使用 base64: {filename}")
+                except Exception as e:
+                    logger.warning(f"读取本地图片失败: {e}, 降级为文档")
+                    return ProcessedFile(
+                        category=FileCategory.DOCUMENT,
+                        filename=filename,
+                        mime_type=mime_type,
+                        file_url=url,
+                        file_size=file_size,
+                    )
+            else:
+                # Remote image: use URL directly (Claude supports URL mode)
+                content_block = {"type": "image", "source": {"type": "url", "url": url}}
+                logger.info(f"🖼️ 远程图片使用 URL: {filename}")
+
             return ProcessedFile(
                 category=category,
                 filename=filename,
@@ -165,23 +235,20 @@ class FileProcessor:
             )
 
         if category == FileCategory.TEXT:
-            # 纯文本：下载内容
+            # Text files: read content
             if file_size and file_size > self.MAX_TEXT_SIZE:
                 logger.warning(f"文本过大，降级为文档处理: {file_size} bytes")
                 category = FileCategory.DOCUMENT
             else:
                 try:
-                    content = await self._download_from_url(url)
-                    # 尝试多种编码格式
+                    content = await self._read_file_content(url)
+                    # Try multiple encodings
                     try:
-                        # 优先尝试 utf-8-sig (可以处理带 BOM 的 utf-8)
                         text_content = content.decode("utf-8-sig")
                     except UnicodeDecodeError:
                         try:
-                            # 尝试中文编码
                             text_content = content.decode("gb18030")
                         except UnicodeDecodeError:
-                            # 最后回退到 utf-8 replace
                             text_content = content.decode("utf-8", errors="replace")
 
                     return ProcessedFile(
@@ -193,10 +260,10 @@ class FileProcessor:
                         file_url=url,
                     )
                 except Exception as e:
-                    logger.warning(f"下载文本失败，降级为文档处理: {str(e)}")
+                    logger.warning(f"读取文本失败，降级为文档处理: {str(e)}")
                     category = FileCategory.DOCUMENT
 
-        # 复杂文档：直接使用 URL
+        # Document: provide URL/path reference
         return ProcessedFile(
             category=FileCategory.DOCUMENT,
             filename=filename,
@@ -214,8 +281,19 @@ class FileProcessor:
         # 其他都当作复杂文档
         return FileCategory.DOCUMENT
 
+    async def _read_file_content(self, url: str) -> bytes:
+        """
+        Read file content from local path or remote URL.
+
+        Automatically routes to local read or HTTP download.
+        """
+        if self._is_local_file(url):
+            local_path = self._resolve_local_path(url)
+            return await self._read_local_file(local_path)
+        return await self._download_from_url(url)
+
     async def _download_from_url(self, url: str) -> bytes:
-        """从 URL 下载文件内容"""
+        """Download file content from a remote URL."""
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(url)

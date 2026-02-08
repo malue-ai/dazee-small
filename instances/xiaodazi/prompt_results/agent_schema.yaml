@@ -1,5 +1,5 @@
-name: 小搭子
-description: 住在用户电脑里的桌面 AI 搭子，亲切、靠谱、主动
+name: XiaoDazi
+description: 住在用户电脑里的 AI 搭子，亲切、主动、靠谱，擅长本地桌面任务执行与个性化服务
 intent_analyzer:
   enabled: true
   complexity_levels:
@@ -7,19 +7,17 @@ intent_analyzer:
   - medium
   - complex
   task_types:
-  - file_operation
+  - file_management
   - writing
   - data_analysis
   - translation
-  - screenshot
-  - app_control
-  - search
-  - general_qa
+  - ui_automation
+  - email_composition
+  - reporting
   output_formats:
   - text
   - markdown
-  - list
-  - table
+  - structured_list
   use_llm: true
   llm_model: claude-haiku-4-5-20251001
   fast_mode: false
@@ -27,15 +25,15 @@ intent_analyzer:
   simplified_output: true
 plan_manager:
   enabled: true
-  trigger_condition: complexity == 'complex' or step_count > 3
-  max_steps: 15
-  granularity: medium
+  trigger_condition: complexity == 'high' or step_count > 3
+  max_steps: 20
+  granularity: fine
   allow_dynamic_adjustment: true
   validation_interval: 3
   replan_enabled: true
-  max_replan_attempts: 2
+  max_replan_attempts: 3
   replan_strategy: incremental
-  failure_threshold: 0.3
+  failure_threshold: 0.4
 tool_selector:
   enabled: true
   available_tools: []
@@ -43,13 +41,17 @@ tool_selector:
   allow_parallel: false
   max_parallel_tools: 1
   base_tools:
-  - hitl
+  - hitl_confirm
+  - file_read
+  - file_write
+  - app_launcher
+  - desktop_ui_operator
   tool_timeout: 300
 memory_manager:
   enabled: true
   retention_policy: user
   episodic_memory: true
-  working_memory_limit: 30
+  working_memory_limit: 50
   auto_compress: true
   compress_threshold: 15
 output_formatter:
@@ -61,18 +63,40 @@ output_formatter:
   - json
   - html
   code_highlighting: false
-  max_output_length: 4000
+  max_output_length: 2000
   json_model_name: null
   json_schema: null
   strict_json_validation: false
   json_ensure_ascii: false
   json_indent: 2
   include_metadata: false
-skills: []
+skills:
+- name: excel-analyzer
+  enabled: true
+  description: ''
+- name: file-organizer
+  enabled: true
+  description: ''
+- name: text-writer
+  enabled: true
+  description: ''
+- name: translator
+  enabled: true
+  description: ''
+- name: screenshot-capturer
+  enabled: true
+  description: ''
+- name: email-drafter
+  enabled: true
+  description: ''
 tools:
-- hitl
-model: claude-sonnet-4-5-20250929
-max_turns: 20
+- web_search
+- api_calling
+- hitl_confirm
+- desktop_ui_operator
+- app_launcher
+model: qwen3-max
+max_turns: 25
 execution_strategy: rvr
 allow_parallel_tools: false
 context_limits:
@@ -85,6 +109,6 @@ enable_thinking: null
 enable_caching: null
 thinking_mode: null
 prompts: null
-reasoning: 桌面助手场景，需要处理复杂的多步骤任务（文件整理、应用操作等），启用规划能力和记忆管理。任务复杂度分级明确（simple/medium/complex），需要意图分析器判断。强调用户偏好记忆和个性化，启用
-  episodic_memory 和 user 级别持久化。敏感操作需要 HITL 确认。不需要并行工具执行（桌面操作需串行）。输出格式友好（列表、表格），使用
-  markdown。允许重规划以应对桌面操作的不确定性。max_turns 设为 20 以支持复杂的多轮交互（如 UI 操作的观察-操作-验证循环）。
+reasoning: 小搭子需处理从简单问答到复杂桌面自动化的多类任务，强调本地执行、主动规划、用户记忆和安全交互。任务常涉及多步骤（如文件整理+清单生成）或 UI
+  操作（如打开飞书发消息），需启用细粒度 plan_manager；必须支持用户偏好记忆和上下文学习，故 memory_manager 设为 user 级持久化；所有敏感操作需
+  HITL 确认，且优先使用本地工具而非云服务。输出需通俗友好，禁用技术术语，因此 output_formatter 启用但关闭代码高亮。

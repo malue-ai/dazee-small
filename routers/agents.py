@@ -40,21 +40,6 @@ router = APIRouter(prefix="/api/v1/agents", tags=["Agent 管理"])
 # ============================================================
 
 
-class AgentMCPEnableRequest(BaseModel):
-    """为 Agent 启用 MCP 的请求"""
-
-    auth_env: Optional[str] = Field(None, description="Agent 专用的认证环境变量名（覆盖全局配置）")
-    metadata: Optional[dict] = Field(None, description="Agent 专用的元数据")
-
-
-class AgentMCPUpdateRequest(BaseModel):
-    """更新 Agent MCP 配置的请求"""
-
-    auth_env: Optional[str] = Field(None, description="认证环境变量名")
-    is_active: Optional[bool] = Field(None, description="是否启用")
-    metadata: Optional[dict] = Field(None, description="元数据")
-
-
 class ValidationError(BaseModel):
     """校验错误"""
 
@@ -407,35 +392,7 @@ async def validate_agent_config(request: AgentCreateRequest):
                 )
             )
 
-    # 7. 校验 MCP 工具
-    if request.mcp_tools:
-        for i, tool in enumerate(request.mcp_tools):
-            if not tool.name:
-                errors.append(
-                    ValidationError(
-                        field=f"mcp_tools[{i}].name",
-                        message="MCP 工具名称不能为空",
-                        code="REQUIRED_FIELD",
-                    )
-                )
-            if not tool.server_url:
-                errors.append(
-                    ValidationError(
-                        field=f"mcp_tools[{i}].server_url",
-                        message="MCP 服务器 URL 不能为空",
-                        code="REQUIRED_FIELD",
-                    )
-                )
-            if tool.auth_type not in ["none", "bearer", "api_key"]:
-                errors.append(
-                    ValidationError(
-                        field=f"mcp_tools[{i}].auth_type",
-                        message=f"无效的认证类型 '{tool.auth_type}'",
-                        code="INVALID_VALUE",
-                    )
-                )
-
-    # 8. 校验 REST APIs
+    # 7. 校验 REST APIs
     if request.apis:
         for i, api in enumerate(request.apis):
             if not api.name:
@@ -555,21 +512,6 @@ def _build_config_dict(request: AgentCreateRequest) -> dict:
             k: (1 if v else 0) for k, v in request.enabled_capabilities.items()
         }
 
-    # MCP tools
-    if request.mcp_tools:
-        config_data["mcp_tools"] = [
-            {
-                "name": tool.name,
-                "server_url": tool.server_url,
-                "server_name": tool.server_name or tool.name,
-                "auth_type": tool.auth_type,
-                "auth_env": tool.auth_env,
-                "capability": tool.capability,
-                "description": tool.description,
-            }
-            for tool in request.mcp_tools
-        ]
-
     # REST APIs
     if request.apis:
         config_data["apis"] = [
@@ -671,7 +613,20 @@ async def create_agent(request: AgentCreateRequest):
     """
     registry = get_agent_registry()
 
-    # 0. Validate model exists in ModelRegistry
+    # 0. Resolve model: use specified model, or fall back to first activated model
+    if not request.model:
+        activated = ModelRegistry.list_activated()
+        if not activated:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "NO_ACTIVATED_MODEL",
+                    "message": "没有已激活的模型，请先在设置页面配置 API Key",
+                },
+            )
+        request.model = activated[0].model_name
+        logger.info(f"未指定模型，使用默认已激活模型: {request.model}")
+
     model_config = ModelRegistry.get(request.model)
     if not model_config:
         available = ModelRegistry.list_model_names()
@@ -774,18 +729,24 @@ async def update_agent(agent_id: str, request: AgentCreateRequest):
     """
     registry = get_agent_registry()
 
-    # Validate model exists in ModelRegistry
-    model_config = ModelRegistry.get(request.model)
-    if not model_config:
-        available = ModelRegistry.list_model_names()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "code": "UNKNOWN_MODEL",
-                "message": f"模型 '{request.model}' 未注册",
-                "available_models": available[:20],
-            },
-        )
+    # Resolve model: use specified model, or fall back to first activated model
+    if not request.model:
+        activated = ModelRegistry.list_activated()
+        if activated:
+            request.model = activated[0].model_name
+
+    if request.model:
+        model_config = ModelRegistry.get(request.model)
+        if not model_config:
+            available = ModelRegistry.list_model_names()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "UNKNOWN_MODEL",
+                    "message": f"模型 '{request.model}' 未注册",
+                    "available_models": available[:20],
+                },
+            )
 
     # Check agent exists
     instance_dir = get_instances_dir() / agent_id
@@ -963,32 +924,36 @@ async def get_agent(agent_id: str):
 
     try:
         detail_raw = registry.get_agent_detail(agent_id)
+    except AgentNotFoundError:
+        # Try on-demand loading before returning 404
+        loaded = await registry._try_on_demand_load(agent_id)
+        if loaded:
+            detail_raw = registry.get_agent_detail(agent_id)
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "code": "AGENT_NOT_FOUND",
+                    "message": f"Agent '{agent_id}' 不存在",
+                    "available_agents": registry.list_agents(),
+                },
+            )
 
-        # 返回原始字典，包含 enabled_capabilities 对象格式
-        return {
-            "agent_id": detail_raw["agent_id"],
-            "name": detail_raw["name"],
-            "description": detail_raw.get("description", ""),
-            "version": detail_raw.get("version", "1.0.0"),
-            "is_active": detail_raw.get("is_active", True),
-            "model": detail_raw.get("model"),
-            "max_turns": detail_raw.get("max_turns"),
-            "plan_manager_enabled": detail_raw.get("plan_manager_enabled", False),
-            "enabled_capabilities": detail_raw.get("enabled_capabilities", {}),
-            "mcp_tools": detail_raw.get("mcp_tools", []),
-            "apis": detail_raw.get("apis", []),
-            "skills": detail_raw.get("skills", []),
-            "loaded_at": detail_raw["loaded_at"],
-        }
-    except AgentNotFoundError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "code": "AGENT_NOT_FOUND",
-                "message": str(e),
-                "available_agents": registry.list_agents(),
-            },
-        )
+    # 返回原始字典，包含 enabled_capabilities 对象格式
+    return {
+        "agent_id": detail_raw["agent_id"],
+        "name": detail_raw["name"],
+        "description": detail_raw.get("description", ""),
+        "version": detail_raw.get("version", "1.0.0"),
+        "is_active": detail_raw.get("is_active", True),
+        "model": detail_raw.get("model"),
+        "max_turns": detail_raw.get("max_turns"),
+        "plan_manager_enabled": detail_raw.get("plan_manager_enabled", False),
+        "enabled_capabilities": detail_raw.get("enabled_capabilities", {}),
+        "apis": detail_raw.get("apis", []),
+        "skills": detail_raw.get("skills", []),
+        "loaded_at": detail_raw["loaded_at"],
+    }
 
 
 @router.get(
@@ -1010,17 +975,23 @@ async def get_agent_prompt(agent_id: str):
 
     try:
         prompt_content = await registry.get_agent_prompt(agent_id)
-        return {
-            "agent_id": agent_id,
-            "prompt": prompt_content,
-        }
-    except AgentNotFoundError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "code": "AGENT_NOT_FOUND",
-                "message": str(e),
-            },
-        )
+    except AgentNotFoundError:
+        # Try on-demand loading before returning 404
+        loaded = await registry._try_on_demand_load(agent_id)
+        if loaded:
+            prompt_content = await registry.get_agent_prompt(agent_id)
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "code": "AGENT_NOT_FOUND",
+                    "message": f"Agent '{agent_id}' 不存在",
+                },
+            )
+
+    return {
+        "agent_id": agent_id,
+        "prompt": prompt_content,
+    }
 
 

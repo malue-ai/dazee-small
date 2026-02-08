@@ -170,7 +170,7 @@ class StateConsistencyManager:
         else:
             import os
             from utils.app_paths import get_instance_snapshots_dir
-            _inst = os.environ["AGENT_INSTANCE"]
+            _inst = os.getenv("AGENT_INSTANCE", "default")
             self._storage_path = get_instance_snapshots_dir(_inst)
         if self._config.enabled:
             self._storage_path.mkdir(parents=True, exist_ok=True)

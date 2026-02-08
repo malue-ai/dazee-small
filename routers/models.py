@@ -1,13 +1,20 @@
 """
-Models 路由层 - LLM 模型注册与查询
+Models 路由层 - LLM 模型管理
 
-提供功能：
-- 列出已注册模型
-- 注册新模型
-- 获取模型详情
-- 删除已注册模型
-- 列出已注册 Provider（含关联模型和 Key 状态）
-- 验证 API Key 有效性
+两层模型：
+- 支持目录（Supported）：系统知道的所有模型（preset + custom）
+- 激活列表（Activated）：用户配置了 API Key 的模型，实际可用
+
+端点概览：
+- GET  /supported           → 支持的模型目录
+- POST /supported           → 向目录注册自定义模型
+- GET  /                    → 用户已激活的模型列表
+- POST /                    → 激活模型（填 API Key）
+- GET  /{model_name}        → 模型详情（含激活状态）
+- DELETE /{model_name}      → 停用模型
+- GET  /providers           → 已注册 Provider 列表
+- GET  /providers/supported → Provider 元信息（选择器用）
+- POST /providers/validate-key → 验证 API Key
 """
 
 import os
@@ -27,16 +34,18 @@ from core.llm.model_registry import (
 )
 from core.llm.registry import LLMRegistry
 from models.llm import (
+    ActivatedModelResponse,
+    ModelActivateRequest,
     ModelCapabilitiesResponse,
     ModelDetailResponse,
-    ModelInfoResponse,
     ModelPricingResponse,
     ModelRegisterRequest,
     ProviderDetailResponse,
     ProviderInfoResponse,
-    ProviderModelInfo,
+    ProviderModelResponse,
     ProviderValidateKeyRequest,
     ProviderValidateKeyResponse,
+    SupportedModelResponse,
 )
 
 logger = get_logger("router.models")
@@ -45,19 +54,52 @@ router = APIRouter(prefix="/api/v1/models", tags=["Models"])
 
 
 # ============================================================
-# 列表查询
+# Helper: build response objects from ModelConfig
 # ============================================================
 
 
-@router.get("", response_model=List[ModelInfoResponse])
-async def list_models(
-    type: Optional[str] = Query(None, description="模型类型过滤 (llm, vlm, embedding 等)"),
-    provider: Optional[str] = Query(None, description="提供商过滤 (openai, claude, qwen 等)"),
+def _caps_response(c: ModelCapabilities) -> ModelCapabilitiesResponse:
+    return ModelCapabilitiesResponse(
+        supports_tools=c.supports_tools,
+        supports_vision=c.supports_vision,
+        supports_thinking=c.supports_thinking,
+        supports_audio=c.supports_audio,
+        supports_streaming=c.supports_streaming,
+        max_tokens=c.max_tokens,
+        max_input_tokens=c.max_input_tokens,
+    )
+
+
+def _pricing_response(p: ModelPricing) -> ModelPricingResponse:
+    return ModelPricingResponse(
+        input_per_million=p.input_per_million,
+        output_per_million=p.output_per_million,
+        cache_read_per_million=p.cache_read_per_million,
+        cache_write_per_million=p.cache_write_per_million,
+        is_free=p.is_free,
+    )
+
+
+# ============================================================
+# 支持目录（Supported Catalog）
+# ============================================================
+
+
+@router.get(
+    "/supported",
+    response_model=List[SupportedModelResponse],
+    summary="获取支持的模型目录",
+    description="列出系统支持的所有模型（preset + 自定义注册），含是否已激活标记",
+)
+async def list_supported_models(
+    type: Optional[str] = Query(None, description="模型类型过滤"),
+    provider: Optional[str] = Query(None, description="提供商过滤"),
 ):
     """
-    获取可用模型列表
+    支持的模型目录
 
-    支持按类型和提供商过滤。
+    返回所有系统知道的模型，每个模型标注 is_activated（用户是否已配置 API Key）。
+    前端用此接口渲染「可添加的模型列表」。
     """
     model_type_enum = None
     if type:
@@ -69,338 +111,35 @@ async def list_models(
     models = ModelRegistry.list_models(model_type=model_type_enum, provider=provider)
 
     return [
-        ModelInfoResponse(
+        SupportedModelResponse(
             model_name=m.model_name,
             display_name=m.display_name or m.model_name,
             provider=m.provider,
             model_type=m.model_type.value,
+            adapter=m.adapter.value,
+            base_url=m.base_url,
+            api_key_env=m.api_key_env,
             description=m.description,
-            capabilities=ModelCapabilitiesResponse(
-                supports_tools=m.capabilities.supports_tools,
-                supports_vision=m.capabilities.supports_vision,
-                supports_thinking=m.capabilities.supports_thinking,
-                supports_audio=m.capabilities.supports_audio,
-                supports_streaming=m.capabilities.supports_streaming,
-                max_tokens=m.capabilities.max_tokens,
-                max_input_tokens=m.capabilities.max_input_tokens,
-            ),
+            is_activated=ModelRegistry.is_activated(m.model_name),
+            capabilities=_caps_response(m.capabilities),
+            pricing=_pricing_response(m.pricing),
         )
         for m in models
     ]
 
 
-# ============================================================
-# Provider 查询（静态路由，必须在动态路由之前）
-# ============================================================
-
-
-@router.get(
-    "/providers",
-    response_model=List[ProviderInfoResponse],
-    summary="列出所有 LLM Provider",
-    description="获取所有已注册的 LLM Provider 列表",
-)
-async def list_providers():
-    """
-    列出所有已注册的 LLM Provider
-
-    返回 Provider 的名称、默认模型、API Key 环境变量等信息
-    """
-    provider_names = LLMRegistry.list_providers()
-
-    results = []
-    for name in provider_names:
-        try:
-            info = LLMRegistry.get_provider_info(name)
-            results.append(
-                ProviderInfoResponse(
-                    name=info["name"],
-                    display_name=info.get("display_name"),
-                    default_model=info["default_model"],
-                    api_key_env=info["api_key_env"],
-                    description=info.get("description"),
-                    supported_features=info.get("supported_features", []),
-                )
-            )
-        except Exception as e:
-            logger.warning(f"获取 Provider '{name}' 信息失败: {e}")
-
-    return results
-
-
-# ============================================================
-# Provider 支持列表（含关联模型和 Key 状态）
-# ============================================================
-
-
-# 所有支持的 Provider 元信息（静态定义，不依赖 LLMRegistry 注册）
-SUPPORTED_PROVIDERS = {
-    "claude": {
-        "display_name": "Claude (Anthropic)",
-        "icon": "🟠",
-        "base_url": "https://api.anthropic.com",
-        "api_key_env": "ANTHROPIC_API_KEY",
-        "description": "Anthropic Claude 系列，支持 Extended Thinking 和 Prompt Caching",
-        "validate_url": "/v1/messages",
-        "validate_method": "anthropic",
-    },
-    "openai": {
-        "display_name": "OpenAI",
-        "icon": "🟢",
-        "base_url": "https://api.openai.com/v1",
-        "api_key_env": "OPENAI_API_KEY",
-        "description": "OpenAI GPT 系列，支持视觉和工具调用",
-        "validate_url": "/models",
-        "validate_method": "openai",
-    },
-    "qwen": {
-        "display_name": "通义千问 (Qwen)",
-        "icon": "🔵",
-        "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-        "api_key_env": "DASHSCOPE_API_KEY",
-        "description": "阿里云通义千问系列，支持 Thinking 和多模态",
-        "validate_url": "/models",
-        "validate_method": "openai",
-    },
-    "deepseek": {
-        "display_name": "DeepSeek",
-        "icon": "🐋",
-        "base_url": "https://api.deepseek.com/v1",
-        "api_key_env": "DEEPSEEK_API_KEY",
-        "description": "DeepSeek 系列，高性价比推理模型",
-        "validate_url": "/models",
-        "validate_method": "openai",
-    },
-    "kimi": {
-        "display_name": "Kimi (Moonshot)",
-        "icon": "🌙",
-        "base_url": "https://api.moonshot.cn/v1",
-        "api_key_env": "MOONSHOT_API_KEY",
-        "description": "Moonshot AI Kimi 系列，支持超长上下文",
-        "validate_url": "/models",
-        "validate_method": "openai",
-    },
-    "minimax": {
-        "display_name": "MiniMax",
-        "icon": "🔶",
-        "base_url": "https://api.minimax.chat/v1",
-        "api_key_env": "MINIMAX_API_KEY",
-        "description": "MiniMax 系列，支持超长上下文和语音",
-        "validate_url": "/models",
-        "validate_method": "openai",
-    },
-}
-
-
-@router.get(
-    "/providers/supported",
-    response_model=List[ProviderDetailResponse],
-    summary="获取支持的 Provider 列表（含模型和 Key 状态）",
-    description="返回所有支持的 LLM Provider，包含关联模型列表和 API Key 配置状态",
-)
-async def list_supported_providers():
-    """
-    获取支持的 Provider 列表
-
-    返回每个 Provider 的：
-    - 基本信息（名称、图标、描述）
-    - 默认 Base URL
-    - API Key 环境变量名和当前配置状态
-    - 该 Provider 下的所有可用模型
-    """
-    results = []
-
-    for provider_name, meta in SUPPORTED_PROVIDERS.items():
-        # Get models for this provider
-        provider_models = ModelRegistry.list_models(provider=provider_name)
-        model_infos = [
-            ProviderModelInfo(
-                model_name=m.model_name,
-                display_name=m.display_name or m.model_name,
-                description=m.description,
-                supports_thinking=m.capabilities.supports_thinking,
-                supports_vision=m.capabilities.supports_vision,
-                max_tokens=m.capabilities.max_tokens,
-            )
-            for m in provider_models
-        ]
-
-        # Check if API key is configured
-        api_key_env = meta["api_key_env"]
-        api_key_configured = bool(os.getenv(api_key_env))
-
-        # Get default model
-        default_model = provider_models[0].model_name if provider_models else ""
-
-        results.append(
-            ProviderDetailResponse(
-                name=provider_name,
-                display_name=meta["display_name"],
-                icon=meta["icon"],
-                base_url=meta["base_url"],
-                api_key_env=api_key_env,
-                api_key_configured=api_key_configured,
-                default_model=default_model,
-                description=meta["description"],
-                models=model_infos,
-            )
-        )
-
-    return results
-
-
-# ============================================================
-# API Key 验证
-# ============================================================
-
-
-async def _validate_openai_compatible(base_url: str, api_key: str) -> tuple[bool, str, list[str]]:
-    """
-    Validate API key for OpenAI-compatible providers.
-
-    Calls GET /models with Bearer token to check validity.
-
-    Returns:
-        (valid, message, model_names)
-    """
-    url = f"{base_url.rstrip('/')}/models"
-    headers = {"Authorization": f"Bearer {api_key}"}
-
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.get(url, headers=headers)
-
-    if resp.status_code == 200:
-        data = resp.json()
-        models = [m.get("id", "") for m in data.get("data", [])]
-        return True, "API Key 验证通过", models
-    elif resp.status_code == 401:
-        return False, "API Key 无效或已过期", []
-    elif resp.status_code == 403:
-        return False, "API Key 权限不足", []
-    else:
-        return False, f"验证失败 (HTTP {resp.status_code})", []
-
-
-async def _validate_anthropic(base_url: str, api_key: str) -> tuple[bool, str, list[str]]:
-    """
-    Validate API key for Anthropic Claude.
-
-    Sends a minimal messages request; 401 = invalid, 400 = valid key (bad request body is expected).
-    """
-    url = f"{base_url.rstrip('/')}/v1/messages"
-    headers = {
-        "x-api-key": api_key,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-    }
-    # Send a minimal request body — expecting 400 (bad request) if key is valid
-    body = {"model": "claude-haiku-3-5-20241022", "max_tokens": 1, "messages": []}
-
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.post(url, headers=headers, json=body)
-
-    if resp.status_code == 401:
-        return False, "API Key 无效或已过期", []
-    elif resp.status_code == 403:
-        return False, "API Key 权限不足", []
-    elif resp.status_code in (200, 400):
-        # 400 = key valid but request body invalid (expected)
-        # 200 = somehow succeeded (unlikely with empty messages)
-        return True, "API Key 验证通过", []
-    else:
-        return False, f"验证失败 (HTTP {resp.status_code})", []
-
-
 @router.post(
-    "/providers/validate-key",
-    response_model=ProviderValidateKeyResponse,
-    summary="验证 API Key",
-    description="验证指定 Provider 的 API Key 是否有效",
-)
-async def validate_api_key(request: ProviderValidateKeyRequest):
-    """
-    验证 API Key
-
-    对指定 Provider 发起轻量级 API 调用，检查 Key 是否有效。
-
-    支持的 Provider: claude, openai, qwen, deepseek, kimi, minimax
-    """
-    provider = request.provider.lower()
-
-    if provider not in SUPPORTED_PROVIDERS:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "code": "UNSUPPORTED_PROVIDER",
-                "message": f"不支持的 Provider '{request.provider}'",
-                "supported": list(SUPPORTED_PROVIDERS.keys()),
-            },
-        )
-
-    meta = SUPPORTED_PROVIDERS[provider]
-    base_url = request.base_url or meta["base_url"]
-    validate_method = meta["validate_method"]
-
-    try:
-        if validate_method == "anthropic":
-            valid, message, models = await _validate_anthropic(base_url, request.api_key)
-        else:
-            valid, message, models = await _validate_openai_compatible(base_url, request.api_key)
-
-        return ProviderValidateKeyResponse(
-            valid=valid,
-            provider=provider,
-            message=message,
-            models=models,
-        )
-
-    except httpx.TimeoutException:
-        return ProviderValidateKeyResponse(
-            valid=False,
-            provider=provider,
-            message=f"连接超时，无法访问 {base_url}",
-            models=[],
-        )
-    except httpx.ConnectError:
-        return ProviderValidateKeyResponse(
-            valid=False,
-            provider=provider,
-            message=f"无法连接到 {base_url}，请检查网络或 Base URL",
-            models=[],
-        )
-    except Exception as e:
-        logger.error(f"验证 API Key 失败: {e}", exc_info=True)
-        return ProviderValidateKeyResponse(
-            valid=False,
-            provider=provider,
-            message=f"验证过程异常: {str(e)}",
-            models=[],
-        )
-
-
-# ============================================================
-# 注册模型
-# ============================================================
-
-
-@router.post(
-    "",
+    "/supported",
     response_model=dict,
     status_code=status.HTTP_201_CREATED,
-    summary="注册新模型",
-    description="向 ModelRegistry 注册一个新的 LLM 模型",
+    summary="向目录注册自定义模型",
+    description="向支持目录添加一个新的模型定义（不含 API Key，仅扩展目录）",
 )
-async def register_model(request: ModelRegisterRequest):
+async def register_supported_model(request: ModelRegisterRequest):
     """
-    注册新模型
+    向支持目录注册自定义模型
 
-    将模型配置注册到全局 ModelRegistry，注册后可通过
-    GET /api/v1/models 查询，也可在 Agent 配置中引用。
-
-    ## 注意
-    - 如果模型名已存在，会覆盖原有配置
-    - Provider 必须是已注册的（claude, openai, qwen, gemini）
-    - 注册后自动持久化到 YAML，服务重启后自动恢复
+    仅扩展目录，不激活。激活需调用 POST /api/v1/models。
     """
     # 校验 model_type
     try:
@@ -442,7 +181,6 @@ async def register_model(request: ModelRegisterRequest):
             },
         )
 
-    # 构建 ModelConfig
     is_overwrite = ModelRegistry.is_registered(request.model_name)
 
     model_config = ModelConfig(
@@ -473,15 +211,12 @@ async def register_model(request: ModelRegisterRequest):
         is_custom=True,
     )
 
-    # 注册到内存
     ModelRegistry.register(model_config)
-
-    # 持久化到 YAML
     await ModelRegistry.save_custom_models()
 
     action = "覆盖" if is_overwrite else "注册"
     logger.info(
-        f"✅ {action}模型: {request.model_name} "
+        f"✅ {action}目录模型: {request.model_name} "
         f"(provider={request.provider}, type={model_type.value})"
     )
 
@@ -489,12 +224,436 @@ async def register_model(request: ModelRegisterRequest):
         "success": True,
         "model_name": request.model_name,
         "action": "overwritten" if is_overwrite else "created",
-        "message": f"模型 '{request.model_name}' {action}成功（已持久化）",
+        "message": f"模型 '{request.model_name}' 已添加到支持目录",
     }
 
 
 # ============================================================
-# 单个模型查询和删除（动态路由，必须在静态路由之后）
+# 已激活模型（Activated Models）
+# ============================================================
+
+
+@router.get(
+    "",
+    response_model=List[ActivatedModelResponse],
+    summary="获取已激活模型列表",
+    description="列出用户已配置 API Key 的模型（实际可用的模型）",
+)
+async def list_activated_models(
+    provider: Optional[str] = Query(None, description="提供商过滤"),
+):
+    """
+    已激活模型列表
+
+    返回用户实际配置了 API Key 的模型。
+    前端用此接口渲染「我的模型」列表。
+    """
+    models = ModelRegistry.list_activated(provider=provider)
+
+    results = []
+    for m in models:
+        entry = ModelRegistry.get_activated_entry(m.model_name)
+        results.append(
+            ActivatedModelResponse(
+                model_name=m.model_name,
+                display_name=m.display_name or m.model_name,
+                provider=m.provider,
+                model_type=m.model_type.value,
+                adapter=m.adapter.value,
+                base_url=entry.base_url or m.base_url if entry else m.base_url,
+                api_key_configured=True,
+                description=m.description,
+                capabilities=_caps_response(m.capabilities),
+                pricing=_pricing_response(m.pricing),
+                activated_at=entry.activated_at if entry else None,
+            )
+        )
+    return results
+
+
+@router.post(
+    "",
+    response_model=dict,
+    status_code=status.HTTP_201_CREATED,
+    summary="激活模型",
+    description="通过提供 API Key 激活一个模型，使其可用于 Agent",
+)
+async def activate_model(request: ModelActivateRequest):
+    """
+    激活模型
+
+    提供 API Key 来激活一个模型。
+
+    - 如果模型在支持目录中：只需 model_name + api_key（base_url 可选覆盖）
+    - 如果模型不在目录中：还需提供 provider（自动注册到目录并激活）
+    """
+    # 检查模型是否在目录中
+    in_catalog = ModelRegistry.is_registered(request.model_name)
+
+    # 如果不在目录中，必须提供 provider
+    if not in_catalog and not request.provider:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "PROVIDER_REQUIRED",
+                "message": f"模型 '{request.model_name}' 不在支持目录中，"
+                           f"必须提供 provider 字段",
+            },
+        )
+
+    # 如果提供了 provider，校验
+    if request.provider and not LLMRegistry.is_registered(request.provider):
+        available = LLMRegistry.list_providers()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "UNKNOWN_PROVIDER",
+                "message": f"未知的 Provider '{request.provider}'，"
+                           f"可用的 Provider: {', '.join(available)}",
+            },
+        )
+
+    was_activated = ModelRegistry.is_activated(request.model_name)
+
+    try:
+        # Build capabilities/pricing dicts for custom models
+        caps_dict = None
+        pricing_dict = None
+        if not in_catalog:
+            caps_dict = {
+                "supports_tools": request.capabilities.supports_tools,
+                "supports_vision": request.capabilities.supports_vision,
+                "supports_thinking": request.capabilities.supports_thinking,
+                "supports_audio": request.capabilities.supports_audio,
+                "supports_streaming": request.capabilities.supports_streaming,
+                "max_tokens": request.capabilities.max_tokens,
+                "max_input_tokens": request.capabilities.max_input_tokens,
+            }
+            pricing_dict = {
+                "input_per_million": request.pricing.input_per_million,
+                "output_per_million": request.pricing.output_per_million,
+                "cache_read_per_million": request.pricing.cache_read_per_million,
+                "cache_write_per_million": request.pricing.cache_write_per_million,
+            }
+
+        ModelRegistry.activate_model(
+            model_name=request.model_name,
+            api_key=request.api_key,
+            base_url=request.base_url,
+            provider=request.provider,
+            model_type=request.model_type,
+            adapter=request.adapter,
+            display_name=request.display_name,
+            description=request.description,
+            capabilities=caps_dict,
+            pricing=pricing_dict,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "ACTIVATION_ERROR", "message": str(e)},
+        )
+
+    # 持久化
+    await ModelRegistry.save_activated_models()
+    # 如果是自定义模型，也持久化到目录
+    if not in_catalog:
+        await ModelRegistry.save_custom_models()
+
+    action = "更新" if was_activated else "激活"
+    logger.info(f"✅ 模型{action}: {request.model_name}")
+
+    return {
+        "success": True,
+        "model_name": request.model_name,
+        "action": "updated" if was_activated else "activated",
+        "message": f"模型 '{request.model_name}' {action}成功",
+    }
+
+
+# ============================================================
+# Provider 查询（静态路由，必须在动态路由之前）
+# ============================================================
+
+
+@router.get(
+    "/providers",
+    response_model=List[ProviderInfoResponse],
+    summary="列出所有 LLM Provider",
+    description="获取所有已注册的 LLM Provider 列表",
+)
+async def list_providers():
+    """列出所有已注册的 LLM Provider"""
+    provider_names = LLMRegistry.list_providers()
+
+    results = []
+    for name in provider_names:
+        try:
+            info = LLMRegistry.get_provider_info(name)
+            results.append(
+                ProviderInfoResponse(
+                    name=info["name"],
+                    display_name=info.get("display_name"),
+                    default_model=info["default_model"],
+                    api_key_env=info["api_key_env"],
+                    description=info.get("description"),
+                    supported_features=info.get("supported_features", []),
+                )
+            )
+        except Exception as e:
+            logger.warning(f"获取 Provider '{name}' 信息失败: {e}")
+
+    return results
+
+
+# ============================================================
+# Provider 元信息（选择器用，不含模型列表）
+# ============================================================
+
+
+SUPPORTED_PROVIDERS = {
+    "claude": {
+        "display_name": "Claude (Anthropic)",
+        "icon": "🟠",
+        "base_url": "https://api.anthropic.com",
+        "api_key_env": "ANTHROPIC_API_KEY",
+        "description": "Anthropic Claude 系列，支持 Extended Thinking 和 Prompt Caching",
+        "adapter": "claude",
+        "validate_method": "anthropic",
+    },
+    "openai": {
+        "display_name": "OpenAI",
+        "icon": "🟢",
+        "base_url": "https://api.openai.com/v1",
+        "api_key_env": "OPENAI_API_KEY",
+        "description": "OpenAI GPT 系列，支持视觉和工具调用",
+        "adapter": "openai",
+        "validate_method": "openai",
+    },
+    "qwen": {
+        "display_name": "通义千问 (Qwen)",
+        "icon": "🔵",
+        "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        "api_key_env": "DASHSCOPE_API_KEY",
+        "description": "阿里云通义千问系列，支持 Thinking 和多模态",
+        "adapter": "openai",
+        "validate_method": "openai",
+    },
+    "deepseek": {
+        "display_name": "DeepSeek",
+        "icon": "🐋",
+        "base_url": "https://api.deepseek.com/v1",
+        "api_key_env": "DEEPSEEK_API_KEY",
+        "description": "DeepSeek 系列，高性价比推理模型",
+        "adapter": "openai",
+        "validate_method": "openai",
+    },
+    "kimi": {
+        "display_name": "Kimi (Moonshot)",
+        "icon": "🌙",
+        "base_url": "https://api.moonshot.cn/v1",
+        "api_key_env": "MOONSHOT_API_KEY",
+        "description": "Moonshot AI Kimi 系列，支持超长上下文",
+        "adapter": "openai",
+        "validate_method": "openai",
+    },
+    "minimax": {
+        "display_name": "MiniMax",
+        "icon": "🔶",
+        "base_url": "https://api.minimax.chat/v1",
+        "api_key_env": "MINIMAX_API_KEY",
+        "description": "MiniMax 系列，支持超长上下文和语音",
+        "adapter": "openai",
+        "validate_method": "openai",
+    },
+}
+
+
+@router.get(
+    "/providers/supported",
+    response_model=List[ProviderDetailResponse],
+    summary="获取支持的 Provider 元信息",
+    description="返回所有支持的 Provider 元信息（名称、图标、默认 URL、适配器）。用于前端表单选择器。",
+)
+async def list_supported_providers():
+    """
+    获取支持的 Provider 元信息
+
+    纯元信息，不含模型列表。前端用此渲染 Provider 选择下拉框。
+    模型列表请使用 GET /api/v1/models/supported?provider=xxx 查询。
+    """
+    results = []
+
+    for provider_name, meta in SUPPORTED_PROVIDERS.items():
+        api_key_env = meta["api_key_env"]
+        api_key_configured = bool(os.getenv(api_key_env))
+
+        # Get models from catalog for this provider
+        provider_models = ModelRegistry.list_models(provider=provider_name)
+        default_model = provider_models[0].model_name if provider_models else ""
+
+        # Build model summaries
+        model_summaries = [
+            ProviderModelResponse(
+                model_name=m.model_name,
+                display_name=m.display_name or m.model_name,
+                description=m.description,
+                supports_thinking=m.capabilities.supports_thinking,
+                supports_vision=m.capabilities.supports_vision,
+                max_tokens=m.capabilities.max_tokens,
+            )
+            for m in provider_models
+        ]
+
+        results.append(
+            ProviderDetailResponse(
+                name=provider_name,
+                display_name=meta["display_name"],
+                icon=meta["icon"],
+                base_url=meta["base_url"],
+                api_key_env=api_key_env,
+                api_key_configured=api_key_configured,
+                default_model=default_model,
+                description=meta["description"],
+                adapter=meta["adapter"],
+                models=model_summaries,
+            )
+        )
+
+    return results
+
+
+# ============================================================
+# API Key 验证
+# ============================================================
+
+
+async def _validate_openai_compatible(base_url: str, api_key: str) -> tuple[bool, str, list[str]]:
+    """Validate API key for OpenAI-compatible providers."""
+    url = f"{base_url.rstrip('/')}/models"
+    headers = {"Authorization": f"Bearer {api_key}"}
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(url, headers=headers)
+
+    if resp.status_code == 200:
+        data = resp.json()
+        models = [m.get("id", "") for m in data.get("data", [])]
+        return True, "API Key 验证通过", models
+    elif resp.status_code == 401:
+        return False, "API Key 无效或已过期", []
+    elif resp.status_code == 403:
+        return False, "API Key 权限不足", []
+    else:
+        return False, f"验证失败 (HTTP {resp.status_code})", []
+
+
+async def _validate_anthropic(base_url: str, api_key: str) -> tuple[bool, str, list[str]]:
+    """Validate API key for Anthropic Claude."""
+    base = base_url.rstrip("/")
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        # Step 1: validate key via messages endpoint (empty body → expect 400)
+        url = f"{base}/v1/messages"
+        body = {"model": "claude-3-5-haiku-20241022", "max_tokens": 1, "messages": []}
+        resp = await client.post(url, headers=headers, json=body)
+
+        if resp.status_code == 401:
+            return False, "API Key 无效或已过期", []
+        elif resp.status_code == 403:
+            return False, "API Key 权限不足", []
+        elif resp.status_code not in (200, 400):
+            return False, f"验证失败 (HTTP {resp.status_code})", []
+
+        # Step 2: fetch available models so the frontend can proceed
+        models: list[str] = []
+        try:
+            models_resp = await client.get(
+                f"{base}/v1/models", headers=headers,
+            )
+            if models_resp.status_code == 200:
+                data = models_resp.json().get("data", [])
+                models = [m.get("id", "") for m in data if m.get("id")]
+        except Exception:
+            # Models listing failed; fall back to catalog models for this provider
+            catalog = ModelRegistry.list_models(provider="claude")
+            models = [m.model_name for m in catalog]
+
+        # If models API returned nothing, still fall back to catalog
+        if not models:
+            catalog = ModelRegistry.list_models(provider="claude")
+            models = [m.model_name for m in catalog]
+
+        return True, "API Key 验证通过", models
+
+
+@router.post(
+    "/providers/validate-key",
+    response_model=ProviderValidateKeyResponse,
+    summary="验证 API Key",
+    description="验证指定 Provider 的 API Key 是否有效",
+)
+async def validate_api_key(request: ProviderValidateKeyRequest):
+    """验证 API Key"""
+    provider = request.provider.lower()
+
+    if provider not in SUPPORTED_PROVIDERS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "UNSUPPORTED_PROVIDER",
+                "message": f"不支持的 Provider '{request.provider}'",
+                "supported": list(SUPPORTED_PROVIDERS.keys()),
+            },
+        )
+
+    meta = SUPPORTED_PROVIDERS[provider]
+    base_url = request.base_url or meta["base_url"]
+    validate_method = meta["validate_method"]
+
+    try:
+        if validate_method == "anthropic":
+            valid, message, models = await _validate_anthropic(base_url, request.api_key)
+        else:
+            valid, message, models = await _validate_openai_compatible(base_url, request.api_key)
+
+        logger.info(
+            f"API Key 验证结果: provider={provider}, valid={valid}, "
+            f"message={message}, models_count={len(models)}"
+        )
+
+        return ProviderValidateKeyResponse(
+            valid=valid,
+            provider=provider,
+            message=message,
+            models=models,
+        )
+
+    except httpx.TimeoutException:
+        return ProviderValidateKeyResponse(
+            valid=False, provider=provider,
+            message=f"连接超时，无法访问 {base_url}", models=[],
+        )
+    except httpx.ConnectError:
+        return ProviderValidateKeyResponse(
+            valid=False, provider=provider,
+            message=f"无法连接到 {base_url}，请检查网络或 Base URL", models=[],
+        )
+    except Exception as e:
+        logger.error(f"验证 API Key 失败: {e}", exc_info=True)
+        return ProviderValidateKeyResponse(
+            valid=False, provider=provider,
+            message=f"验证过程异常: {str(e)}", models=[],
+        )
+
+
+# ============================================================
+# 单个模型查询和停用（动态路由，必须在静态路由之后）
 # ============================================================
 
 
@@ -502,13 +661,13 @@ async def register_model(request: ModelRegisterRequest):
     "/{model_name}",
     response_model=ModelDetailResponse,
     summary="获取模型详情",
-    description="获取指定模型的完整配置信息",
+    description="获取指定模型的完整配置（含激活状态）",
 )
 async def get_model_detail(model_name: str):
     """
     获取模型详情
 
-    返回模型的完整信息，包括能力、定价、适配器类型等。
+    返回模型的完整信息，包括能力、定价、适配器类型和是否已激活。
     """
     config = ModelRegistry.get(model_name)
     if not config:
@@ -530,69 +689,41 @@ async def get_model_detail(model_name: str):
         base_url=config.base_url,
         api_key_env=config.api_key_env,
         description=config.description,
-        capabilities=ModelCapabilitiesResponse(
-            supports_tools=config.capabilities.supports_tools,
-            supports_vision=config.capabilities.supports_vision,
-            supports_thinking=config.capabilities.supports_thinking,
-            supports_audio=config.capabilities.supports_audio,
-            supports_streaming=config.capabilities.supports_streaming,
-            max_tokens=config.capabilities.max_tokens,
-            max_input_tokens=config.capabilities.max_input_tokens,
-        ),
-        pricing=ModelPricingResponse(
-            input_per_million=config.pricing.input_per_million,
-            output_per_million=config.pricing.output_per_million,
-            cache_read_per_million=config.pricing.cache_read_per_million,
-            cache_write_per_million=config.pricing.cache_write_per_million,
-            is_free=config.pricing.is_free,
-        ),
+        is_activated=ModelRegistry.is_activated(config.model_name),
+        capabilities=_caps_response(config.capabilities),
+        pricing=_pricing_response(config.pricing),
     )
 
 
 @router.delete(
     "/{model_name}",
     response_model=dict,
-    summary="删除已注册模型",
-    description="从 ModelRegistry 中删除指定模型",
+    summary="停用模型",
+    description="停用指定模型（移除 API Key 配置）",
 )
-async def unregister_model(model_name: str):
+async def deactivate_model(model_name: str):
     """
-    删除已注册模型
+    停用模型
 
-    从全局 ModelRegistry 中移除指定模型。
-
-    ## 注意
-    - 预置模型可以删除，但重启后会恢复
-    - 自定义模型删除后同步从持久化文件移除
-    - 如果有 Agent 正在使用该模型，不会立即影响运行中的会话
+    从激活列表中移除，清除 API Key 环境变量。
+    模型仍保留在支持目录中，可随时重新激活。
     """
-    model_name_lower = model_name.lower()
-
-    if not ModelRegistry.is_registered(model_name):
+    if not ModelRegistry.is_activated(model_name):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
-                "code": "MODEL_NOT_FOUND",
-                "message": f"模型 '{model_name}' 未注册",
+                "code": "MODEL_NOT_ACTIVATED",
+                "message": f"模型 '{model_name}' 未激活",
             },
         )
 
-    # 检查是否是自定义模型（需要同步删除持久化）
-    config = ModelRegistry.get(model_name)
-    was_custom = config.is_custom if config else False
+    ModelRegistry.deactivate_model(model_name)
+    await ModelRegistry.save_activated_models()
 
-    # 从 _models 字典中移除
-    ModelRegistry._models.pop(model_name_lower, None)
-
-    # 如果是自定义模型，同步更新持久化文件
-    if was_custom:
-        await ModelRegistry.save_custom_models()
-
-    logger.info(f"🗑️ 模型已删除: {model_name} (custom={was_custom})")
+    logger.info(f"🗑️ 模型已停用: {model_name}")
 
     return {
         "success": True,
         "model_name": model_name,
-        "message": f"模型 '{model_name}' 已从注册表中移除"
-                   + ("（已同步删除持久化记录）" if was_custom else "（预置模型，重启后恢复）"),
+        "message": f"模型 '{model_name}' 已停用（API Key 已清除，可随时重新激活）",
     }

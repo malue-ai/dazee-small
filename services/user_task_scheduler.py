@@ -56,10 +56,12 @@ class UserTaskScheduler:
             )
             return
 
-        # 获取 Workspace
+        # 获取 Workspace（从环境变量读取当前实例名）
+        import os
         from infra.local_store import get_workspace
 
-        self._workspace = await get_workspace("xiaodazi")
+        instance_name = os.getenv("AGENT_INSTANCE", "default")
+        self._workspace = await get_workspace(instance_name)
 
         # 创建并启动调度器
         self._scheduler = AsyncIOScheduler()
