@@ -666,9 +666,34 @@ class EvaluationHarness:
             )
         
         elif rubric == "grade_response_quality":
+            # Build task context for Judge (expected behavior, verification points)
+            task_context_parts = [f"用例 ID: {task.id}", f"用例描述: {task.description}"]
+            if task.metadata:
+                if task.metadata.get("expected_behavior"):
+                    task_context_parts.append(f"预期行为: {task.metadata['expected_behavior']}")
+                # Pass all metadata for Judge reference
+                for k, v in task.metadata.items():
+                    if k != "expected_behavior" and k != "multi_turn_sequence":
+                        task_context_parts.append(f"{k}: {v}")
+            # Include tool call summary from transcript
+            tool_calls = transcript.tool_calls if hasattr(transcript, 'tool_calls') else []
+            if tool_calls:
+                tool_names = [tc.name for tc in tool_calls if hasattr(tc, 'name')]
+                task_context_parts.append(f"工具调用链: {' → '.join(tool_names)} (共 {len(tool_names)} 次)")
+            # Include token usage
+            if hasattr(transcript, 'token_usage') and transcript.token_usage:
+                tu = transcript.token_usage
+                task_context_parts.append(
+                    f"Token 消耗: input={getattr(tu, 'input_tokens', 0):,}, "
+                    f"output={getattr(tu, 'output_tokens', 0):,}, "
+                    f"thinking={getattr(tu, 'thinking_tokens', 0):,}"
+                )
+            task_context = "\n".join(task_context_parts)
+
             result = await self.model_graders.grade_response_quality(
                 user_query=task.input.user_query,
                 agent_response=transcript.get_final_response() or "",
+                context=task_context,
             )
         
         elif rubric == "grade_logical_coherence":

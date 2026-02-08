@@ -25,6 +25,17 @@ grade_response_quality: |
   - 会思考：失败了自己想办法（RVR-B 回溯、错误恢复）
   - 会学习：记住用户偏好和习惯（Memory）
 
+  ## 测试用例上下文
+
+  你会在「上下文信息」中收到该用例的关键信息，包括：
+  - 用例 ID 和描述（对照 benchmark/test_cases.md 的预期行为）
+  - 预期行为（expected_behavior）— 这是评估的核心参照
+  - 工具调用链 — 智能体实际执行了哪些工具、调用了多少次
+  - Token 消耗 — 评估上下文工程效率
+
+  请结合上下文信息评估。如果预期行为说"RVR-B 回溯至少 1 次"，
+  但实际没有回溯，这是需要指出的问题。
+
   ## 评估框架：管道全流程分析
 
   请逐一分析以下环节（如果该环节在本次任务中有体现）：
@@ -46,15 +57,19 @@ grade_response_quality: |
   - 有没有冗余的工具调用（如重复读取同一文件）？
   - 如果有错误，错误恢复是否有效？
 
-  ### 4. 上下文管理（Context）
-  - 历史对话是否正确利用？
-  - 多轮对话中是否丢失了重要信息？
-  - token 使用是否合理？
+  ### 4. 上下文工程（Context Engineering）
+  这是我们的核心竞争力之一，请重点评估：
+  - **输入 Token 效率**：input_tokens 是否合理？对比预期（简单任务 <5K，中等 <15K，复杂 <30K）
+  - **系统提示词缓存**：多轮对话中 input_tokens 是否有下降趋势（说明缓存命中）？
+  - **上下文裁剪**：历史消息是否被合理裁剪？有没有把旧的 tool_result 大量留在上下文里？
+  - **多轮对话信息保留**：关键上下文有没有被误裁？追问场景是否丢失了重要信息？
+  - **工具输出压缩**：大型工具输出是否被 compaction（tool_result 压缩到摘要）？
 
   ### 5. 最终输出（Output）
   - 任务是否完成？交付物是否可用？
   - 输出格式是否清晰、对用户友好？
   - 语气和详细程度是否合适？
+  - 与预期行为（expected_behavior）是否一致？
 
   ## 输出格式（严格 JSON）
 
@@ -78,9 +93,11 @@ grade_response_quality: |
         "effective_calls": <有效调用次数>,
         "issues": []
       },
-      "context": {
+      "context_engineering": {
         "score": <1-5 或 null>,
-        "analysis": "<上下文管理分析>",
+        "analysis": "<上下文工程质量分析>",
+        "input_token_assessment": "<input tokens 是否高效，是否过长>",
+        "cache_utilization": "<缓存命中情况分析>",
         "issues": []
       },
       "output": {
