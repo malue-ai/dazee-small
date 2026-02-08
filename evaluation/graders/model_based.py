@@ -59,7 +59,8 @@ class ModelBasedGraders:
 
     def _get_judge_prompt(self, name: str) -> Optional[str]:
         """
-        Load judge prompt from evaluation/config/judge_prompts.yaml.
+        Load judge prompt from evaluation/config/judge_prompts.yaml,
+        with test_cases.md injected as reference context.
 
         Prompts are cached after first load. Falls back to None
         (caller uses hardcoded default) if file or key is missing.
@@ -69,17 +70,40 @@ class ModelBasedGraders:
                 from pathlib import Path
                 import yaml
 
-                prompts_path = (
-                    Path(__file__).resolve().parent.parent / "config" / "judge_prompts.yaml"
-                )
+                eval_dir = Path(__file__).resolve().parent.parent
+                prompts_path = eval_dir / "config" / "judge_prompts.yaml"
                 if prompts_path.exists():
                     with open(prompts_path, "r", encoding="utf-8") as f:
                         self._judge_prompts = yaml.safe_load(f) or {}
                 else:
                     self._judge_prompts = {}
+
+                # Inject test_cases.md as reference knowledge
+                test_cases_path = eval_dir.parent / "docs" / "benchmark" / "test_cases.md"
+                if test_cases_path.exists():
+                    with open(test_cases_path, "r", encoding="utf-8") as f:
+                        self._test_cases_doc = f.read()
+                else:
+                    self._test_cases_doc = ""
             except Exception:
                 self._judge_prompts = {}
-        return self._judge_prompts.get(name)
+                self._test_cases_doc = ""
+
+        prompt = self._judge_prompts.get(name)
+        if prompt and getattr(self, "_test_cases_doc", ""):
+            # Append test cases as reference context
+            prompt += f"""
+
+  ## 参考文档：完整测试用例定义
+
+  以下是测试用例的完整定义，包含每个用例的预期行为、量化指标、
+  技术验证点和对比基线。请对照评估。
+
+  <test_cases_reference>
+  {self._test_cases_doc}
+  </test_cases_reference>
+"""
+        return prompt
         
     async def _call_judge(
         self,
