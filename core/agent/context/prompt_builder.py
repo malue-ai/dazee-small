@@ -141,7 +141,7 @@ async def build_system_blocks_with_injector(
 
     # 获取任务复杂度
     task_complexity = get_task_complexity(intent)
-    skip_memory = getattr(intent, "skip_memory_retrieval", False)
+    skip_memory = getattr(intent, "skip_memory", False)
 
     # 构建 InjectionContext
     context = InjectionContext(
@@ -233,7 +233,7 @@ async def build_messages_with_injector(
 
     # 获取任务复杂度
     task_complexity = get_task_complexity(intent)
-    skip_memory = getattr(intent, "skip_memory_retrieval", False)
+    skip_memory = getattr(intent, "skip_memory", False)
 
     # 构建 InjectionContext
     context = InjectionContext(

@@ -120,7 +120,7 @@ async def test_writing_scenario():
     print("场景 2：写稿搭子 — 多轮对话提取风格偏好")
     print("=" * 60)
 
-    from core.memory.xiaodazi_memory import XiaodaziMemoryManager
+    from core.memory.instance_memory import InstanceMemoryManager
 
     messages = [
         {"role": "user", "content": "帮我写一篇关于咖啡文化的文章"},
@@ -131,7 +131,7 @@ async def test_writing_scenario():
     ]
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        mgr = XiaodaziMemoryManager(
+        mgr = InstanceMemoryManager(
             base_dir=Path(tmpdir),
             user_id="test_writer",
             mem0_enabled=False,  # 仅测提取逻辑，不依赖 Mem0 API
@@ -179,7 +179,7 @@ async def test_excel_scenario():
     print("场景 3：表格搭子 — 提取工具偏好")
     print("=" * 60)
 
-    from core.memory.xiaodazi_memory import XiaodaziMemoryManager
+    from core.memory.instance_memory import InstanceMemoryManager
 
     messages = [
         {"role": "user", "content": "帮我用 pandas 分析这份 Excel 销售数据，按月汇总趋势"},
@@ -189,7 +189,7 @@ async def test_excel_scenario():
     ]
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        mgr = XiaodaziMemoryManager(
+        mgr = InstanceMemoryManager(
             base_dir=Path(tmpdir),
             user_id="test_analyst",
             mem0_enabled=False,
@@ -215,7 +215,7 @@ async def test_recall_roundtrip():
     print("场景 4：recall 闭环 — 提取后能搜回来")
     print("=" * 60)
 
-    from core.memory.xiaodazi_memory import XiaodaziMemoryManager
+    from core.memory.instance_memory import InstanceMemoryManager
 
     messages = [
         {"role": "user", "content": "我是产品经理，在互联网公司负责 AI 产品线，习惯用 Notion 管理需求"},
@@ -223,7 +223,7 @@ async def test_recall_roundtrip():
     ]
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        mgr = XiaodaziMemoryManager(
+        mgr = InstanceMemoryManager(
             base_dir=Path(tmpdir),
             user_id="test_pm",
             mem0_enabled=False,
@@ -267,7 +267,7 @@ async def test_single_llm_call():
     print("场景 5：LLM 调用次数验证")
     print("=" * 60)
 
-    from core.memory.xiaodazi_memory import XiaodaziMemoryManager
+    from core.memory.instance_memory import InstanceMemoryManager
 
     messages = [
         {"role": "user", "content": "帮我写个 Python 脚本处理客户反馈数据"},
@@ -299,7 +299,7 @@ async def test_single_llm_call():
 
     # 实际执行 flush，验证提取结果
     with tempfile.TemporaryDirectory() as tmpdir:
-        mgr = XiaodaziMemoryManager(
+        mgr = InstanceMemoryManager(
             base_dir=Path(tmpdir),
             user_id="test_efficiency",
             mem0_enabled=False,

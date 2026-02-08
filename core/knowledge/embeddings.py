@@ -93,7 +93,7 @@ def get_models_dir() -> Path:
         模型目录路径
     """
     models_dir = Path(
-        os.getenv("XIAODAZI_MODELS_DIR", str(DEFAULT_MODELS_DIR))
+        os.getenv("ZENFLUX_MODELS_DIR", str(DEFAULT_MODELS_DIR))
     )
     models_dir.mkdir(parents=True, exist_ok=True)
     return models_dir

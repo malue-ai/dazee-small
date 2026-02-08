@@ -80,7 +80,7 @@ alwaysApply: true
 │  • 用户记忆（MEMORY.md）                           │
 │  • Playbook 策略库                                │
 │  • 历史对话存档                                   │
-│  存储位置：~/.xiaodazi/data/                      │
+│  存储位置：data/instances/{name}/                  │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -612,4 +612,4 @@ Skill 上下文纪律 ←─────────── instances/*/skills/ (
 | 无 Context Folding | 旧轮次仅截断 | 子任务完成后折叠为结论 | `core/context/compaction/` |
 | Skill 输出不受控 | 无输出大小约束 | SKILL.md 声明 + 运行时截断 | `core/skill/`, `instances/*/skills/` |
 | 工具压缩阈值过高 | 5000 字符才触发 | 3000 字符触发即时压缩 | `core/context/compaction/tool_result.py` |
-| Memory 召回无预算 | 返回所有匹配结果 | top-3 + 500 tokens 上限 | `core/memory/xiaodazi_memory.py` |
+| Memory 召回无预算 | 返回所有匹配结果 | top-3 + 500 tokens 上限 | `core/memory/instance_memory.py` |

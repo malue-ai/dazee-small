@@ -644,7 +644,7 @@ class Agent:
 
         plan = self._plan_cache.get("plan")
 
-        # V12: simple 且不需要 plan 时，只加载核心工具（省 ~2000 tokens 工具定义）
+        # V12: simple 且不需要 plan 时，精简工具集（省 ~1500 tokens 工具定义）
         schema_tools = (
             self._schema.tools if self._schema and self._schema.tools else None
         )
@@ -654,10 +654,11 @@ class Agent:
             and not intent.needs_plan
             and not plan
         ):
-            # 核心工具白名单：plan（以防 LLM 仍需要）+ hitl
-            schema_tools = None  # 不使用 Schema 白名单，让 resolve_capabilities 走 default
+            # 简单任务只需 3 个工具：nodes（执行）+ knowledge_search（知识）+ hitl（确认）
+            # 不需要 plan/observe_screen/scheduled_task/api_calling
+            schema_tools = ["nodes", "knowledge_search", "hitl"]
             logger.info(
-                "工具裁剪: complexity=simple, 只加载核心工具"
+                "工具裁剪: complexity=simple, 精简为 3 个核心工具"
             )
 
         required_capabilities, selection_source, overridden_sources, allowed_tools = (

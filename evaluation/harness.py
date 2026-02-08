@@ -744,11 +744,52 @@ class EvaluationHarness:
                 expected_planning=meta.get("expected_planning"),
             )
 
+        elif rubric == "grade_rollback_safety":
+            # B9/B10 回滚安全专项评估 — 需要完整上下文才能准确诊断
+            task_context_parts = [f"用例 ID: {task.id}", f"用例描述: {task.description}"]
+            if task.metadata:
+                if task.metadata.get("expected_behavior"):
+                    task_context_parts.append(f"预期行为: {task.metadata['expected_behavior']}")
+                for k, v in task.metadata.items():
+                    if k not in ("expected_behavior", "multi_turn_sequence"):
+                        task_context_parts.append(f"{k}: {v}")
+            # 工具调用链（关键：回滚诊断需要看到 snapshot/rollback 事件）
+            tool_calls = transcript.tool_calls if hasattr(transcript, 'tool_calls') else []
+            if tool_calls:
+                tool_names = [tc.name for tc in tool_calls if hasattr(tc, 'name')]
+                task_context_parts.append(f"工具调用链: {' → '.join(tool_names)} (共 {len(tool_names)} 次)")
+            if hasattr(transcript, 'token_usage') and transcript.token_usage:
+                tu = transcript.token_usage
+                task_context_parts.append(
+                    f"Token 消耗: input={getattr(tu, 'input_tokens', 0):,}, "
+                    f"output={getattr(tu, 'output_tokens', 0):,}"
+                )
+            task_context = "\n".join(task_context_parts)
+
+            # 使用 judge_prompts.yaml 中的专项提示词 + 完整上下文
+            result = await self.model_graders.grade_response_quality(
+                user_query=task.input.user_query,
+                agent_response=transcript.get_final_response() or "",
+                context=task_context,
+                rubric_override="grade_rollback_safety",
+            )
+            result.grader_name = "grade_rollback_safety"
+
         else:
-            # 自定义Rubric
+            # 自定义 Rubric — 也传入上下文（避免信息丢失）
+            context_parts = [f"用例 ID: {task.id}", f"用例描述: {task.description}"]
+            if task.metadata and task.metadata.get("expected_behavior"):
+                context_parts.append(f"预期行为: {task.metadata['expected_behavior']}")
+            tool_calls = transcript.tool_calls if hasattr(transcript, 'tool_calls') else []
+            if tool_calls:
+                tool_names = [tc.name for tc in tool_calls if hasattr(tc, 'name')]
+                context_parts.append(f"工具调用链: {' → '.join(tool_names)} (共 {len(tool_names)} 次)")
+            custom_context = "\n".join(context_parts) if context_parts else None
+
             result = await self.model_graders.grade_with_custom_rubric(
                 content=transcript.get_final_response() or "",
                 rubric=rubric,
+                context={"task_context": custom_context} if custom_context else None,
             )
         
         # Model grader is an EVALUATOR, not a gate.

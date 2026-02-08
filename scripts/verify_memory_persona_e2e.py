@@ -4,7 +4,7 @@
 验证产品「会学习 — 用得越久越懂你」的全链路：
 1. Mem0 Pool 基础 CRUD（add/search/get_all/delete）
 2. FragmentExtractor 10 维碎片提取
-3. XiaodaziMemoryManager 全链路（mem0_enabled=True）
+3. InstanceMemoryManager 全链路（mem0_enabled=True）
 4. UserMemoryInjector 画像注入
 5. QualityController 冲突检测
 6. PersonaBuilder 画像聚合
@@ -330,12 +330,12 @@ async def test_fragment_extractor():
 
 
 # ============================================================
-# 验证 3: XiaodaziMemoryManager 全链路（mem0_enabled=True）
+# 验证 3: InstanceMemoryManager 全链路（mem0_enabled=True）
 # ============================================================
 async def test_memory_manager_full_chain():
     """验证 remember → recall → flush 全链路（Mem0 启用）"""
     print("\n" + "=" * 60)
-    print("验证 3: XiaodaziMemoryManager 全链路（mem0_enabled=True）")
+    print("验证 3: InstanceMemoryManager 全链路（mem0_enabled=True）")
     print("=" * 60)
 
     openai_key = os.getenv("OPENAI_API_KEY")
@@ -347,15 +347,15 @@ async def test_memory_manager_full_chain():
     reset_mem0_pool()
 
     try:
-        from core.memory.xiaodazi_memory import XiaodaziMemoryManager
+        from core.memory.instance_memory import InstanceMemoryManager
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            mgr = XiaodaziMemoryManager(
+            mgr = InstanceMemoryManager(
                 base_dir=Path(tmpdir),
                 user_id="test_e2e_user",
                 mem0_enabled=True,  # 关键：启用 Mem0
             )
-            check("XiaodaziMemoryManager(mem0_enabled=True) 初始化成功", True)
+            check("InstanceMemoryManager(mem0_enabled=True) 初始化成功", True)
 
             # ---- remember: 写入偏好记忆 ----
             await mgr.remember("喜欢毒舌但有干货的写作风格", category="style")

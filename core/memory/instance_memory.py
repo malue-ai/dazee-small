@@ -1,5 +1,5 @@
 """
-小搭子记忆管理器 - XiaodaziMemoryManager
+实例记忆管理器 - InstanceMemoryManager
 
 三层架构入口：
 - Layer 1 文件层：MarkdownMemoryLayer（MEMORY.md + 每日日志）
@@ -19,9 +19,9 @@ from typing import Any, Dict, List, Optional
 
 from logger import get_logger
 
-logger = get_logger("memory.xiaodazi")
+logger = get_logger("memory.instance")
 
-# 小搭子记忆分类 → Mem0 分类映射
+# 记忆分类 → Mem0 分类映射
 _CATEGORY_MAP = {
     "preference": "preference",
     "fact": "fact",
@@ -30,7 +30,7 @@ _CATEGORY_MAP = {
     "general": "other",
 }
 
-# 小搭子记忆分类 → MEMORY.md 段落映射
+# 记忆分类 → MEMORY.md 段落映射
 _SECTION_MAP = {
     "preference": "偏好",
     "fact": "关于你",
@@ -43,9 +43,9 @@ _SECTION_MAP = {
 }
 
 
-class XiaodaziMemoryManager:
+class InstanceMemoryManager:
     """
-    小搭子记忆管理器（三层架构）
+    实例记忆管理器（三层架构）
 
     Layer 1: 文件层 — MEMORY.md（用户可见可编辑）+ 每日日志
     Layer 2: 索引层 — FTS5 全文搜索（零配置）
@@ -293,7 +293,7 @@ class XiaodaziMemoryManager:
             )
 
             # Dedicated DB for memory FTS5 — uses instance store directory
-            # self._base_dir is already instance-scoped (e.g. data/instances/xiaodazi/memory/)
+            # self._base_dir is already instance-scoped
             # Put FTS5 in sibling "store/" directory
             fts_db_dir = str(self._base_dir.parent / "store")
             engine = create_local_engine(
@@ -457,7 +457,7 @@ class XiaodaziMemoryManager:
                 metadata={
                     "category": mem0_category,
                     "memory_type": "explicit",
-                    "source": "xiaodazi_remember",
+                    "source": "instance_remember",
                 },
             )
         except Exception as e:

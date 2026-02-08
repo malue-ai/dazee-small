@@ -442,6 +442,7 @@ async def load_instance_config(instance_name: str) -> InstanceConfig:
         _loader = create_skills_loader(
             skills_config=skills_raw,
             instance_skills_dir=instance_dir / "skills",
+            instance_name=instance_name,
         )
         # 异步加载（load_instance_config 本身是 async）
         _entries = await _loader.load()
@@ -1024,6 +1025,7 @@ async def create_agent_from_instance(
         skills_loader = create_skills_loader(
             skills_config=config.skills_first_config,
             instance_skills_dir=instance_path / "skills",
+            instance_name=instance_name,
         )
         skill_entries = await skills_loader.load()
         available_count = len(skills_loader.get_available_skills())

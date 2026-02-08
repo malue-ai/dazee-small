@@ -345,7 +345,8 @@ Token消耗：
         self,
         user_query: str,
         agent_response: str,
-        context: Optional[str] = None
+        context: Optional[str] = None,
+        rubric_override: Optional[str] = None,
     ) -> GradeResult:
         """
         综合评估回答质量（准确性、相关性、完整性、流畅性）
@@ -354,12 +355,15 @@ Token消耗：
             user_query: 用户查询
             agent_response: 智能体回复
             context: 上下文信息（可选）
+            rubric_override: 使用其他 rubric 的提示词（如 grade_rollback_safety），
+                             复用本方法的上下文注入逻辑但用不同评估维度
             
         Returns:
             GradeResult: 评分结果
         """
         # Load from configurable prompt (evaluation/config/judge_prompts.yaml)
-        system_prompt = self._get_judge_prompt("grade_response_quality")
+        prompt_key = rubric_override or "grade_response_quality"
+        system_prompt = self._get_judge_prompt(prompt_key)
         if not system_prompt:
             # Fallback: minimal hardcoded prompt
             system_prompt = """你是一个专业的AI评估员，综合评估智能体回答的质量。

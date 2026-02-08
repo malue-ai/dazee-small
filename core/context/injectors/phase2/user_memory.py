@@ -4,6 +4,7 @@ UserMemoryInjector - 用户记忆注入器
 职责：
 1. 从 Mem0 获取用户画像
 2. 格式化为 XML 标签注入
+3. 控制注入预算（MAX_TOKENS=500，符合上下文工程规范）
 
 缓存策略：SESSION（5min 缓存）
 注入位置：Phase 2 - User Context Message
@@ -18,6 +19,10 @@ from ..base import BaseInjector, CacheStrategy, InjectionPhase, InjectionResult
 from ..context import InjectionContext
 
 logger = get_logger("injectors.phase2.user_memory")
+
+# 注入预算控制（符合 RULE 18-context-engineering 的 Injector 预算规范）
+# 记忆召回上限 500 tokens ≈ 1500 中文字符
+MAX_INJECT_CHARS = 1500
 
 
 class UserMemoryInjector(BaseInjector):
@@ -56,8 +61,15 @@ class UserMemoryInjector(BaseInjector):
         return 90
 
     async def should_inject(self, context: InjectionContext) -> bool:
-        """需要有用户 ID 才能获取记忆"""
-        return bool(context.user_id)
+        """需要有用户 ID 且未跳过记忆检索"""
+        if not context.user_id:
+            return False
+        # 尊重意图分析的 skip_memory 信号（简单问答无需记忆召回）
+        intent = context.intent
+        if intent and getattr(intent, "skip_memory", False):
+            logger.debug("skip_memory=True, 跳过用户记忆注入")
+            return False
+        return True
 
     async def inject(self, context: InjectionContext) -> InjectionResult:
         """
@@ -79,7 +91,12 @@ class UserMemoryInjector(BaseInjector):
             logger.debug("用户画像为空，跳过")
             return InjectionResult()
 
-        logger.info(f"UserMemoryInjector: {len(user_profile)} 字符")
+        # 预算控制：截断到 MAX_INJECT_CHARS（~500 tokens）
+        if len(user_profile) > MAX_INJECT_CHARS:
+            user_profile = user_profile[:MAX_INJECT_CHARS] + "\n..."
+            logger.info(f"UserMemoryInjector: 截断到 {MAX_INJECT_CHARS} 字符（预算控制）")
+        else:
+            logger.info(f"UserMemoryInjector: {len(user_profile)} 字符")
 
         return InjectionResult(content=user_profile, xml_tag="user_memory")
 

@@ -1,5 +1,5 @@
 name: XiaoDazi
-description: 住在用户电脑里的 AI 搭子，亲切、主动、靠谱，擅长本地桌面任务执行与个性化服务
+description: 住在用户电脑里的 AI 搭子，亲切、主动、靠谱的本地智能助手
 intent_analyzer:
   enabled: true
   complexity_levels:
@@ -9,11 +9,10 @@ intent_analyzer:
   task_types:
   - file_management
   - writing
-  - data_analysis
   - translation
-  - ui_automation
-  - email_composition
-  - reporting
+  - data_analysis
+  - desktop_automation
+  - communication
   output_formats:
   - text
   - markdown
@@ -25,7 +24,7 @@ intent_analyzer:
   simplified_output: true
 plan_manager:
   enabled: true
-  trigger_condition: complexity == 'high' or step_count > 3
+  trigger_condition: complexity == 'complex' or requires_multiple_skills or involves_ui_operations
   max_steps: 20
   granularity: fine
   allow_dynamic_adjustment: true
@@ -42,10 +41,9 @@ tool_selector:
   max_parallel_tools: 1
   base_tools:
   - hitl_confirm
-  - file_read
-  - file_write
+  - file_reader
+  - file_writer
   - app_launcher
-  - desktop_ui_operator
   tool_timeout: 300
 memory_manager:
   enabled: true
@@ -71,7 +69,7 @@ output_formatter:
   json_indent: 2
   include_metadata: false
 skills:
-- name: excel-analyzer
+- name: excel-generator
   enabled: true
   description: ''
 - name: file-organizer
@@ -83,18 +81,18 @@ skills:
 - name: translator
   enabled: true
   description: ''
-- name: screenshot-capturer
+- name: screenshot-capture
   enabled: true
   description: ''
-- name: email-drafter
+- name: desktop-ui-controller
   enabled: true
   description: ''
 tools:
 - web_search
 - api_calling
 - hitl_confirm
-- desktop_ui_operator
-- app_launcher
+- file_system_access
+- app_control
 model: qwen3-max
 max_turns: 25
 execution_strategy: rvr
@@ -109,6 +107,4 @@ enable_thinking: null
 enable_caching: null
 thinking_mode: null
 prompts: null
-reasoning: 小搭子需处理从简单问答到复杂桌面自动化的多类任务，强调本地执行、主动规划、用户记忆和安全交互。任务常涉及多步骤（如文件整理+清单生成）或 UI
-  操作（如打开飞书发消息），需启用细粒度 plan_manager；必须支持用户偏好记忆和上下文学习，故 memory_manager 设为 user 级持久化；所有敏感操作需
-  HITL 确认，且优先使用本地工具而非云服务。输出需通俗友好，禁用技术术语，因此 output_formatter 启用但关闭代码高亮。
+reasoning: 这是一个高度本地化、具备主动性与记忆能力的桌面AI搭子，需支持复杂任务规划（如文件整理+UI操作）、用户偏好记忆、安全确认机制和替代方案生成。任务常涉及多步骤执行和环境感知，因此启用细粒度计划管理、用户级记忆保留、HITL确认工具，并配置多种本地技能。为保障普通用户体验，禁用并行工具调用，强调通俗输出和错误恢复能力。
