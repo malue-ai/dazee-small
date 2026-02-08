@@ -108,7 +108,7 @@ class AgentRegistry:
         # Agent 原型缓存（预创建的 Agent 实例，运行时复用）
         # 原型包含：LLM Service、工具注册表、MCP 客户端等重量级组件
         # 运行时通过 clone_for_session() 浅克隆并重置会话状态
-        self._agent_prototypes: Dict[str, Any] = {}  # name -> SimpleAgent
+        self._agent_prototypes: Dict[str, Any] = {}  # name -> Agent
 
         # 共享组件（跨 Agent 复用）
         self._shared_event_manager = None  # 共享的事件管理器（原型创建时使用）

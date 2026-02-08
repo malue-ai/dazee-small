@@ -1160,7 +1160,7 @@ async def create_agent_from_instance(
 
     # 🆕 V5.1: 准备运行时上下文（APIs + 框架协议）
     # 不再将完整 prompt.md 与框架提示词合并
-    # 而是让 SimpleAgent 运行时根据任务复杂度动态获取缓存版本
+    # 而是让 Agent 运行时根据任务复杂度动态获取缓存版本
     apis_prompt = _build_apis_prompt_section(config.apis)
     framework_prompt = await get_universal_agent_prompt()
 

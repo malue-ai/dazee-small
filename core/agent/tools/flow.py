@@ -7,7 +7,7 @@ ToolExecutionFlow - 统一工具执行流
 - 流式工具执行 + SSE 事件发送
 - 服务端工具事件处理
 
-迁移自：core/agent/simple/simple_agent_tools.py
+Agent 工具处理 — 流式工具执行与结果收集
 """
 
 import asyncio

@@ -9,7 +9,7 @@
 5. 调用 Adapter 的增强方法（如果有）
 
 架构（V7 重构后）：
-    SimpleAgent → EventBroadcaster
+    Agent → EventBroadcaster
                         │
                         └──→ EventManager（统一入口）
                               │

@@ -6,7 +6,7 @@ SSE 事件管理模块
 架构概览：
 ====================
 
-    SimpleAgent
+    Agent
          │
          ▼
     EventBroadcaster  ← Agent 统一入口

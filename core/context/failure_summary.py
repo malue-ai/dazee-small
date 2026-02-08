@@ -376,8 +376,8 @@ class FailureSummaryManager:
     """
     🆕 V10.0: 失败总结管理器
 
-    从 SimpleAgent._maybe_generate_failure_summary 提取，
-    使 SimpleAgent 保持纯 RVR 编排层。
+    从 Agent._maybe_generate_failure_summary 提取，
+    使 Agent 保持纯 RVR 编排层。
 
     职责：
     1. 根据配置和条件判断是否需要生成总结

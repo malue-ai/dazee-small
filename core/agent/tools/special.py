@@ -3,7 +3,7 @@
 
 提供 plan_todo 等特殊工具的处理逻辑。
 
-迁移自：core/agent/simple/simple_agent_tools.py
+Agent 工具处理 — 特殊工具（plan/hitl/termination）
 """
 
 from typing import Any, Dict
