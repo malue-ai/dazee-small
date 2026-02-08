@@ -727,12 +727,31 @@ function handleNavigate(path: string): void {
 async function handleSelectAgent(selectedAgentId: string): Promise<void> {
   try {
     await agentStore.selectAgent(selectedAgentId)
-    router.push({ name: 'agent', params: { agentId: selectedAgentId } })
-    // 重置当前对话
-    conversationStore.reset()
+
+    // 重置加载状态
+    chat.isLoading.value = false
+    chat.isStopping.value = false
+
+    // 尝试恢复最近使用的会话：优先打开的标签页 > 历史记录
+    const openTabs = agentStore.getOpenTabIds(selectedAgentId)
+    const historyIds = agentStore.getConversationIds(selectedAgentId)
+    const lastConvId = openTabs.length > 0
+      ? openTabs[openTabs.length - 1]
+      : historyIds.length > 0
+        ? historyIds[historyIds.length - 1]
+        : null
+
+    if (lastConvId) {
+      // 确保在标签页中显示
+      agentStore.openTab(selectedAgentId, lastConvId)
+      await conversationStore.load(lastConvId)
+      router.push({ name: 'agent-conversation', params: { agentId: selectedAgentId, conversationId: lastConvId } })
+    } else {
+      conversationStore.reset()
+      router.push({ name: 'agent', params: { agentId: selectedAgentId } })
+    }
   } catch (error) {
     console.warn('⚠️ 加载项目失败:', error)
-    // 选中失败时刷新列表，可能该 Agent 已被删除
     await agentStore.fetchList()
   }
 }
@@ -781,24 +800,28 @@ async function handleSendMessage(): Promise<void> {
   inputMessage.value = ''
   fileUpload.clearFiles()
 
-  // 记录发送前是否已有对话（用于判断是否为新创建）
+  // 记录发送前的上下文
   const hadConversation = !!conversationStore.currentId
+  const sendAgentId = agentId.value
+  const sendIsAgentMode = isAgentMode.value
+
+  // Agent 模式下，如果是新对话，先创建并立即绑定到项目（不等流式完成）
+  if (sendIsAgentMode && sendAgentId && !hadConversation) {
+    await conversationStore.create(content.slice(0, 20) || '新对话')
+    if (conversationStore.currentId) {
+      agentStore.linkConversation(sendAgentId, conversationStore.currentId)
+      router.replace({
+        name: 'agent-conversation',
+        params: { agentId: sendAgentId, conversationId: conversationStore.currentId }
+      })
+    }
+  }
 
   // 发送（Agent 模式下传 agentId）
-  const sendOptions = isAgentMode.value && agentId.value
-    ? { agentId: agentId.value }
+  const sendOptions = sendIsAgentMode && sendAgentId
+    ? { agentId: sendAgentId }
     : {}
   await chat.sendMessage(content, files, sendOptions)
-
-  // 如果是 Agent 模式且新创建了对话，自动绑定映射
-  if (isAgentMode.value && agentId.value && !hadConversation && conversationStore.currentId) {
-    agentStore.linkConversation(agentId.value, conversationStore.currentId)
-    // 更新路由到含 conversationId 的路径
-    router.replace({ 
-      name: 'agent-conversation', 
-      params: { agentId: agentId.value, conversationId: conversationStore.currentId } 
-    })
-  }
 
   // 刷新会话列表（保持 50 条，失败不影响用户体验）
   try {
