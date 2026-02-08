@@ -445,6 +445,29 @@ class AgentFactory:
 
         model_config = ModelRegistry.get(schema.model)
         if model_config:
+            caps = model_config.capabilities
+
+            # Capability validation: thinking
+            if llm_enable_thinking and not caps.supports_thinking:
+                logger.warning(
+                    f"⚠️ Model '{model_config.model_name}' does not support thinking, "
+                    f"disabling enable_thinking"
+                )
+                llm_enable_thinking = False
+                llm_kwargs["enable_thinking"] = False
+
+            # Capability validation: max_tokens
+            if (
+                schema.max_tokens
+                and caps.max_tokens
+                and schema.max_tokens > caps.max_tokens
+            ):
+                logger.warning(
+                    f"⚠️ Requested max_tokens={schema.max_tokens} exceeds model limit "
+                    f"{caps.max_tokens} for '{model_config.model_name}', capping"
+                )
+                llm_kwargs["max_tokens"] = caps.max_tokens
+
             main_profile = {
                 "provider": model_config.provider,
                 "model": model_config.model_name,
@@ -455,7 +478,10 @@ class AgentFactory:
             main_profile.update(model_config.extra_config)
             logger.info(
                 f"🔧 主 Agent LLM: model={model_config.model_name}, "
-                f"provider={model_config.provider} (from instance config)"
+                f"provider={model_config.provider}, "
+                f"thinking={llm_enable_thinking}, "
+                f"vision={caps.supports_vision} "
+                f"(from ModelRegistry)"
             )
         else:
             # Fallback: 模型未在 ModelRegistry 注册，尝试 llm_profiles main_agent 配置

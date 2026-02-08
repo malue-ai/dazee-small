@@ -4,16 +4,20 @@ Agent 管理路由
 提供 Agent CRUD 操作的 REST API
 """
 
+import shutil
 import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
+import aiofiles
 import yaml
 from fastapi import APIRouter, Body, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from logger import get_logger
+from core.llm.model_registry import ModelRegistry
 from models.agent import (
     AgentCreateRequest,
     AgentDetail,
@@ -24,6 +28,7 @@ from services import (
     AgentNotFoundError,
     get_agent_registry,
 )
+from utils.instance_loader import get_instances_dir
 
 logger = get_logger("router.agents")
 
@@ -330,15 +335,50 @@ async def validate_agent_config(request: AgentCreateRequest):
             )
         )
 
-    # 4. 校验模型
-    valid_model_prefixes = ["claude-", "gpt-", "gemini-", "qwen"]
-    if request.model and not any(request.model.startswith(p) for p in valid_model_prefixes):
-        warnings.append(
-            ValidationWarning(
+    # 4. 校验模型（通过 ModelRegistry 验证存在性和能力匹配）
+    model_config = ModelRegistry.get(request.model) if request.model else None
+
+    if request.model and not model_config:
+        available_models = ModelRegistry.list_model_names()
+        errors.append(
+            ValidationError(
                 field="model",
-                message=f"未知模型 '{request.model}'，可能不受支持",
+                message=(
+                    f"模型 '{request.model}' 未在 ModelRegistry 注册。"
+                    f"可用模型: {', '.join(available_models[:10])}"
+                    + (f" 等共 {len(available_models)} 个" if len(available_models) > 10 else "")
+                ),
+                code="UNKNOWN_MODEL",
             )
         )
+
+    if model_config:
+        caps = model_config.capabilities
+
+        # 4a. enable_thinking vs supports_thinking
+        if request.llm and request.llm.enable_thinking and not caps.supports_thinking:
+            warnings.append(
+                ValidationWarning(
+                    field="llm.enable_thinking",
+                    message=(
+                        f"模型 '{model_config.display_name or model_config.model_name}' "
+                        f"不支持 Extended Thinking，该配置将被忽略"
+                    ),
+                )
+            )
+
+        # 4b. max_tokens vs model limit
+        if request.llm and request.llm.max_tokens and caps.max_tokens:
+            if request.llm.max_tokens > caps.max_tokens:
+                warnings.append(
+                    ValidationWarning(
+                        field="llm.max_tokens",
+                        message=(
+                            f"请求的 max_tokens={request.llm.max_tokens} 超过模型上限 "
+                            f"{caps.max_tokens}，运行时将被自动截断"
+                        ),
+                    )
+                )
 
     # 5. 校验 max_turns
     if request.max_turns < 1:
@@ -364,13 +404,6 @@ async def validate_agent_config(request: AgentCreateRequest):
                 ValidationWarning(
                     field="llm.thinking_budget",
                     message="思考预算过大（>32000），可能导致响应缓慢",
-                )
-            )
-        if request.llm.max_tokens and request.llm.max_tokens > 64000:
-            warnings.append(
-                ValidationWarning(
-                    field="llm.max_tokens",
-                    message="最大输出 token 过大（>64000），可能超出模型限制",
                 )
             )
 
@@ -441,11 +474,48 @@ async def preview_agent_config(request: AgentCreateRequest):
 
     根据请求数据生成配置文件预览（config.yaml 和 prompt.md）
     """
-    # 生成预览用的 agent_id（如果未提供）
-    preview_agent_id = request.agent_id or f"agent_<auto_generated_uuid>"
+    preview_agent_id = request.agent_id or "agent_<auto_generated_uuid>"
 
-    # 构建 config.yaml 内容
-    config_data = {
+    config_data = _build_config_dict(request)
+
+    config_yaml = yaml.dump(
+        config_data,
+        allow_unicode=True,
+        default_flow_style=False,
+        sort_keys=False,
+        indent=2,
+    )
+
+    config_yaml = (
+        f"# ============================================================\n"
+        f"# {request.name} 实例配置\n"
+        f"# ============================================================\n"
+        f"# \n"
+        f"# Agent ID: {preview_agent_id}\n"
+        f"# {request.description or '智能助手'}\n"
+        f"#\n"
+        f"# ============================================================\n\n"
+        f"{config_yaml}"
+    )
+
+    return AgentPreviewResponse(
+        config_yaml=config_yaml,
+        prompt_md=request.prompt,
+    )
+
+
+# ============================================================
+# 创建、更新、删除
+# ============================================================
+
+
+def _build_config_dict(request: AgentCreateRequest) -> dict:
+    """
+    Convert AgentCreateRequest to config.yaml dict
+
+    Shared by create / update / preview endpoints.
+    """
+    config_data: dict = {
         "instance": {
             "name": request.name,
             "description": request.description or f"{request.name} 智能助手",
@@ -459,9 +529,9 @@ async def preview_agent_config(request: AgentCreateRequest):
         },
     }
 
-    # 添加 LLM 配置
+    # LLM config
     if request.llm:
-        llm_config = {}
+        llm_config: dict = {}
         if request.llm.enable_thinking is not None:
             llm_config["enable_thinking"] = request.llm.enable_thinking
         if request.llm.thinking_budget is not None:
@@ -479,13 +549,13 @@ async def preview_agent_config(request: AgentCreateRequest):
         if llm_config:
             config_data["agent"]["llm"] = llm_config
 
-    # 添加 enabled_capabilities
+    # enabled_capabilities
     if request.enabled_capabilities:
         config_data["enabled_capabilities"] = {
             k: (1 if v else 0) for k, v in request.enabled_capabilities.items()
         }
 
-    # 添加 MCP 工具
+    # MCP tools
     if request.mcp_tools:
         config_data["mcp_tools"] = [
             {
@@ -500,7 +570,7 @@ async def preview_agent_config(request: AgentCreateRequest):
             for tool in request.mcp_tools
         ]
 
-    # 添加 APIs
+    # REST APIs
     if request.apis:
         config_data["apis"] = [
             {
@@ -518,7 +588,7 @@ async def preview_agent_config(request: AgentCreateRequest):
             for api in request.apis
         ]
 
-    # 添加 Memory 配置
+    # Memory
     if request.memory:
         config_data["memory"] = {
             "mem0_enabled": request.memory.mem0_enabled,
@@ -526,7 +596,37 @@ async def preview_agent_config(request: AgentCreateRequest):
             "retention_policy": request.memory.retention_policy,
         }
 
-    # 生成 YAML
+    return config_data
+
+
+async def _write_instance_files(
+    instance_dir: Path,
+    config_data: dict,
+    prompt_content: str,
+    agent_id: str,
+    name: str,
+    description: str,
+) -> None:
+    """
+    Write config.yaml and prompt.md to instance directory.
+
+    Creates subdirectories and copies template skeleton files if needed.
+    """
+    instance_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create subdirectories
+    (instance_dir / "config").mkdir(exist_ok=True)
+    (instance_dir / "skills").mkdir(exist_ok=True)
+
+    # Copy template skeleton files (skills.yaml, llm_profiles.yaml) if not present
+    template_dir = get_instances_dir() / "_template"
+    for sub_file in ["config/skills.yaml", "config/llm_profiles.yaml"]:
+        target = instance_dir / sub_file
+        source = template_dir / sub_file
+        if not target.exists() and source.exists():
+            shutil.copy2(source, target)
+
+    # Write config.yaml
     config_yaml = yaml.dump(
         config_data,
         allow_unicode=True,
@@ -534,23 +634,274 @@ async def preview_agent_config(request: AgentCreateRequest):
         sort_keys=False,
         indent=2,
     )
-
-    # 添加注释头
-    config_yaml = f"""# ============================================================
-# {request.name} 实例配置
-# ============================================================
-# 
-# Agent ID: {preview_agent_id}
-# {request.description or '智能助手'}
-#
-# ============================================================
-
-{config_yaml}"""
-
-    return AgentPreviewResponse(
-        config_yaml=config_yaml,
-        prompt_md=request.prompt,
+    header = (
+        f"# ============================================================\n"
+        f"# {name} 实例配置\n"
+        f"# ============================================================\n"
+        f"# \n"
+        f"# Agent ID: {agent_id}\n"
+        f"# {description or '智能助手'}\n"
+        f"#\n"
+        f"# ============================================================\n\n"
     )
+    async with aiofiles.open(instance_dir / "config.yaml", "w", encoding="utf-8") as f:
+        await f.write(header + config_yaml)
+
+    # Write prompt.md
+    async with aiofiles.open(instance_dir / "prompt.md", "w", encoding="utf-8") as f:
+        await f.write(prompt_content)
+
+
+@router.post(
+    "",
+    status_code=status.HTTP_201_CREATED,
+    summary="创建 Agent",
+    description="创建新的 Agent 实例（生成配置文件并加载到注册表）",
+)
+async def create_agent(request: AgentCreateRequest):
+    """
+    创建 Agent
+
+    流程：
+    1. 校验请求（名称、ID 唯一性等）
+    2. 生成 config.yaml + prompt.md
+    3. 写入 instances/{agent_id}/ 目录
+    4. 调用 registry.preload_instance() 热加载
+    5. 返回创建后的 Agent 详情
+    """
+    registry = get_agent_registry()
+
+    # 0. Validate model exists in ModelRegistry
+    model_config = ModelRegistry.get(request.model)
+    if not model_config:
+        available = ModelRegistry.list_model_names()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "UNKNOWN_MODEL",
+                "message": f"模型 '{request.model}' 未注册",
+                "available_models": available[:20],
+            },
+        )
+
+    # 1. Generate or validate agent_id
+    agent_id = request.agent_id or str(uuid.uuid4())[:8]
+
+    if registry.has_agent(agent_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "ALREADY_EXISTS",
+                "message": f"Agent '{agent_id}' 已存在",
+            },
+        )
+
+    # Check directory conflict
+    instance_dir = get_instances_dir() / agent_id
+    if instance_dir.exists():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "DIRECTORY_EXISTS",
+                "message": f"实例目录 '{agent_id}' 已存在，请更换 agent_id",
+            },
+        )
+
+    # 2. Build config dict
+    config_data = _build_config_dict(request)
+
+    # 3. Write files
+    try:
+        await _write_instance_files(
+            instance_dir=instance_dir,
+            config_data=config_data,
+            prompt_content=request.prompt,
+            agent_id=agent_id,
+            name=request.name,
+            description=request.description,
+        )
+    except Exception as e:
+        # Cleanup on failure
+        if instance_dir.exists():
+            shutil.rmtree(instance_dir, ignore_errors=True)
+        logger.error(f"创建 Agent '{agent_id}' 写入文件失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "code": "WRITE_FAILED",
+                "message": f"写入配置文件失败: {str(e)}",
+            },
+        )
+
+    # 4. Load into registry
+    try:
+        await registry.preload_instance(agent_id)
+    except Exception as e:
+        # Cleanup: remove files if loading failed
+        if instance_dir.exists():
+            shutil.rmtree(instance_dir, ignore_errors=True)
+        logger.error(f"加载 Agent '{agent_id}' 失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "code": "LOAD_FAILED",
+                "message": f"Agent 创建成功但加载失败: {str(e)}",
+            },
+        )
+
+    # 5. Return detail
+    logger.info(f"✅ Agent '{agent_id}' 创建成功")
+
+    detail = registry.get_agent_detail(agent_id)
+    return {
+        "success": True,
+        "agent_id": agent_id,
+        "message": f"Agent '{request.name}' 创建成功",
+        **detail,
+    }
+
+
+@router.put(
+    "/{agent_id}",
+    summary="更新 Agent",
+    description="更新已有 Agent 的配置和提示词",
+)
+async def update_agent(agent_id: str, request: AgentCreateRequest):
+    """
+    更新 Agent
+
+    覆盖写入 config.yaml 和 prompt.md，然后热重载。
+    """
+    registry = get_agent_registry()
+
+    # Validate model exists in ModelRegistry
+    model_config = ModelRegistry.get(request.model)
+    if not model_config:
+        available = ModelRegistry.list_model_names()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "UNKNOWN_MODEL",
+                "message": f"模型 '{request.model}' 未注册",
+                "available_models": available[:20],
+            },
+        )
+
+    # Check agent exists
+    instance_dir = get_instances_dir() / agent_id
+    if not instance_dir.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "AGENT_NOT_FOUND",
+                "message": f"Agent '{agent_id}' 不存在",
+            },
+        )
+
+    # Build and write
+    config_data = _build_config_dict(request)
+
+    try:
+        await _write_instance_files(
+            instance_dir=instance_dir,
+            config_data=config_data,
+            prompt_content=request.prompt,
+            agent_id=agent_id,
+            name=request.name,
+            description=request.description,
+        )
+    except Exception as e:
+        logger.error(f"更新 Agent '{agent_id}' 写入文件失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "code": "WRITE_FAILED",
+                "message": f"写入配置文件失败: {str(e)}",
+            },
+        )
+
+    # Reload
+    try:
+        await registry.reload_agent(agent_id)
+    except AgentNotFoundError:
+        # Agent was not loaded before, load it now
+        await registry.preload_instance(agent_id, force_refresh=True)
+    except Exception as e:
+        logger.error(f"重载 Agent '{agent_id}' 失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "code": "RELOAD_FAILED",
+                "message": f"配置已更新但重载失败: {str(e)}",
+            },
+        )
+
+    logger.info(f"✅ Agent '{agent_id}' 更新成功")
+
+    detail = registry.get_agent_detail(agent_id)
+    return {
+        "success": True,
+        "agent_id": agent_id,
+        "message": f"Agent '{request.name}' 更新成功",
+        **detail,
+    }
+
+
+@router.delete(
+    "/{agent_id}",
+    summary="删除 Agent",
+    description="删除 Agent 实例（从注册表卸载并删除配置文件）",
+)
+async def delete_agent(agent_id: str):
+    """
+    删除 Agent
+
+    1. 从注册表卸载
+    2. 删除 instances/{agent_id}/ 目录
+    """
+    registry = get_agent_registry()
+    instance_dir = get_instances_dir() / agent_id
+
+    if not instance_dir.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "AGENT_NOT_FOUND",
+                "message": f"Agent '{agent_id}' 不存在",
+            },
+        )
+
+    # Unload from registry (if loaded)
+    try:
+        registry.unload_agent(agent_id)
+    except AgentNotFoundError:
+        pass  # Not loaded, but directory exists - still delete
+
+    # Delete directory
+    try:
+        shutil.rmtree(instance_dir)
+    except Exception as e:
+        logger.error(f"删除 Agent '{agent_id}' 目录失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "code": "DELETE_FAILED",
+                "message": f"删除目录失败: {str(e)}",
+            },
+        )
+
+    logger.info(f"🗑️ Agent '{agent_id}' 已删除")
+
+    return {
+        "success": True,
+        "agent_id": agent_id,
+        "message": f"Agent '{agent_id}' 已删除",
+    }
+
+
+# ============================================================
+# 重载
+# ============================================================
 
 
 @router.post(

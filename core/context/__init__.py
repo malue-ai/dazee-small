@@ -64,8 +64,6 @@ from .providers.metadata import (
     load_context_metadata,
     load_plan_for_context,
 )
-from .retriever import ContextRetriever
-
 # 运行时上下文
 from .runtime import RuntimeContext, create_runtime_context
 
@@ -95,8 +93,6 @@ __all__ = [
     "ConversationMetadataProvider",
     "load_plan_for_context",
     "load_context_metadata",
-    # 检索器
-    "ContextRetriever",
 ]
 
 # 🆕 Injector 子模块（延迟导入，避免循环引用）

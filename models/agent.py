@@ -163,7 +163,13 @@ class AgentDetail(BaseModel):
     mcp_tools: List[MCPToolDetail] = Field(default_factory=list, description="MCP 工具配置列表")
     apis: List[APIDetail] = Field(default_factory=list, description="API 配置列表")
     skills: List[str] = Field(default_factory=list, description="Skill 名称列表")
-    
+
+    # 模型能力（从 ModelRegistry 自动填充）
+    model_capabilities: Optional[Dict] = Field(
+        None,
+        description="模型能力信息（自动从 ModelRegistry 填充）",
+    )
+
     # 统计
     total_calls: int = Field(0, description="总调用次数")
     success_calls: int = Field(0, description="成功调用次数")

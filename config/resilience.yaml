@@ -58,10 +58,6 @@ circuit_breakers:
     failure_threshold: 5
     timeout: 60.0
   
-  mem0_service:
-    failure_threshold: 3
-    timeout: 30.0
-  
   database_service:
     failure_threshold: 10
     timeout: 20.0
@@ -73,15 +69,3 @@ fallback:
     enabled: true
     type: cached_response  # cached_response / default_response / skip
     message: "AI 服务暂时不可用，请稍后重试"
-  
-  # 工具服务降级
-  tool_service:
-    enabled: true
-    type: skip
-    message: "工具暂时不可用，已跳过"
-  
-  # Mem0 服务降级
-  mem0_service:
-    enabled: true
-    type: skip
-    message: "记忆检索暂时不可用，使用默认配置"

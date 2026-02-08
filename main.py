@@ -23,14 +23,9 @@ from routers import (
     agents_router,
     chat_router,
     conversation_router,
-    files_router,
     human_confirmation_router,
-    mem0_router,
-    realtime_router,
     settings_router,
     skills_router,
-    tasks_router,
-    tools_router,
     models_router,
     websocket_router,
 )
@@ -340,19 +335,12 @@ app.include_router(conversation_router)
 app.include_router(human_confirmation_router)
 
 # 资源管理
-app.include_router(files_router)
-app.include_router(tools_router)
-
-# 扩展功能
-app.include_router(mem0_router)
-app.include_router(tasks_router)
 app.include_router(agents_router)
 app.include_router(skills_router)
 app.include_router(models_router)
 app.include_router(settings_router)
 
 # 实时通信（WebSocket）
-app.include_router(realtime_router)
 app.include_router(websocket_router)
 
 
@@ -387,14 +375,26 @@ async def root() -> Dict[str, Any]:
             "agents": "/api/v1/agents",
             "skills": "/api/v1/skills",
             "models": "/api/v1/models",
-            "realtime_ws": "ws://host/api/v1/realtime/ws",
-            "realtime_sessions": "/api/v1/realtime/sessions",
             "chat_ws": "ws://host/api/v1/ws/chat"
         },
         "github": "https://github.com/your-repo/zenflux-agent"
     }
     
     return response
+
+
+@app.get("/health")
+async def health_check() -> Dict[str, Any]:
+    """
+    Health check endpoint for Tauri sidecar readiness detection.
+
+    Tauri main.rs polls this endpoint to determine if the backend is ready.
+    Returns 200 with basic status info once the server is accepting connections.
+    """
+    return {
+        "status": "ok",
+        "version": APP_VERSION,
+    }
 
 
 # ==================== 启动入口 ====================

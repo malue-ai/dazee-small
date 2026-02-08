@@ -851,6 +851,24 @@ class AgentRegistry:
                 }
             )
 
+        # Fill model_capabilities from ModelRegistry
+        model_name = detail.get("model")
+        if model_name:
+            from core.llm.model_registry import ModelRegistry
+
+            model_cfg = ModelRegistry.get(model_name)
+            if model_cfg:
+                detail["model_capabilities"] = {
+                    "provider": model_cfg.provider,
+                    "display_name": model_cfg.display_name or model_cfg.model_name,
+                    "supports_thinking": model_cfg.capabilities.supports_thinking,
+                    "supports_vision": model_cfg.capabilities.supports_vision,
+                    "supports_audio": model_cfg.capabilities.supports_audio,
+                    "supports_streaming": model_cfg.capabilities.supports_streaming,
+                    "max_tokens": model_cfg.capabilities.max_tokens,
+                    "max_input_tokens": model_cfg.capabilities.max_input_tokens,
+                }
+
         return detail
 
     async def get_agent_prompt(self, agent_id: str) -> str:
@@ -874,6 +892,69 @@ class AgentRegistry:
 
         async with aiofiles.open(prompt_path, "r", encoding="utf-8") as f:
             return await f.read()
+
+    # ==================== 重载与卸载 ====================
+
+    async def reload_agent(self, agent_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        热重载 Agent 配置
+
+        Args:
+            agent_id: 指定 Agent ID，为 None 时重载所有
+
+        Returns:
+            重载结果摘要
+        """
+        if agent_id:
+            # 重载单个 Agent
+            if agent_id not in self._configs:
+                raise AgentNotFoundError(f"Agent '{agent_id}' 不存在")
+
+            # 清除旧的原型和配置
+            self._agent_prototypes.pop(agent_id, None)
+            self._configs.pop(agent_id, None)
+
+            # 重新加载
+            await self.preload_instance(agent_id, force_refresh=True)
+
+            logger.info(f"🔄 Agent '{agent_id}' 热重载完成")
+            return {"reloaded": [agent_id], "failed": []}
+        else:
+            # 重载所有 Agent
+            agent_ids = list(self._configs.keys())
+            reloaded = []
+            failed = []
+
+            for aid in agent_ids:
+                try:
+                    self._agent_prototypes.pop(aid, None)
+                    self._configs.pop(aid, None)
+                    await self.preload_instance(aid, force_refresh=True)
+                    reloaded.append(aid)
+                except Exception as e:
+                    logger.warning(f"⚠️ 重载 Agent '{aid}' 失败: {e}")
+                    failed.append({"agent_id": aid, "error": str(e)})
+
+            logger.info(f"🔄 热重载完成: {len(reloaded)} 成功, {len(failed)} 失败")
+            return {"reloaded": reloaded, "failed": failed}
+
+    def unload_agent(self, agent_id: str) -> None:
+        """
+        从注册表中卸载 Agent（不删除文件）
+
+        Args:
+            agent_id: Agent ID
+
+        Raises:
+            AgentNotFoundError: Agent 不存在
+        """
+        if agent_id not in self._configs:
+            raise AgentNotFoundError(f"Agent '{agent_id}' 不存在")
+
+        self._agent_prototypes.pop(agent_id, None)
+        self._configs.pop(agent_id, None)
+
+        logger.info(f"🗑️ Agent '{agent_id}' 已从注册表卸载")
 
     # ==================== 清理 ====================
 

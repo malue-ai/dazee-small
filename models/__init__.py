@@ -23,37 +23,21 @@ from .chat import (
 from .api import APIResponse
 from .database import Conversation, Message
 
-# 工具模型
-from .tool import (
-    # 枚举
-    ToolType,
-    ReturnMode,
-    InteractionMode,
-    ToolStatus,
-    ExecutionStatus,
-    # 工具定义
-    ToolParameter,
-    ToolInputSchema,
-    MCPConfig,
-    ToolDefinition,
-    # 工具执行
-    ToolInvocation,
-    ToolResultChunk,
-    ToolResult,
-    # 工具注册
-    ToolRegistration,
-    ToolRegistrationResponse,
-    # 工具查询
-    ToolListQuery,
-    ToolListResponse,
-    ToolDetailResponse,
-)
-
 # Usage 模型（计费响应）
 from .usage import UsageResponse, UsageSummary
 
-# LLM 配置
-from .llm import LLMConfig
+# LLM 配置与模型注册
+from .llm import (
+    LLMConfig,
+    ModelRegisterRequest,
+    ModelCapabilitiesRequest,
+    ModelPricingRequest,
+    ModelCapabilitiesResponse,
+    ModelPricingResponse,
+    ModelDetailResponse,
+    ModelInfoResponse,
+    ProviderInfoResponse,
+)
 
 # MCP 工具配置
 from .mcp import MCPToolConfig, MCPToolDetail
@@ -104,33 +88,19 @@ __all__ = [
     # Database 模型
     "Conversation",
     "Message",
-    # Tool 模型 - 枚举
-    "ToolType",
-    "ReturnMode",
-    "InteractionMode",
-    "ToolStatus",
-    "ExecutionStatus",
-    # Tool 模型 - 工具定义
-    "ToolParameter",
-    "ToolInputSchema",
-    "MCPConfig",
-    "ToolDefinition",
-    # Tool 模型 - 工具执行
-    "ToolInvocation",
-    "ToolResultChunk",
-    "ToolResult",
-    # Tool 模型 - 工具注册
-    "ToolRegistration",
-    "ToolRegistrationResponse",
-    # Tool 模型 - 工具查询
-    "ToolListQuery",
-    "ToolListResponse",
-    "ToolDetailResponse",
     # Usage 模型
     "UsageResponse",
     "UsageSummary",
-    # LLM 配置
+    # LLM 配置与模型注册
     "LLMConfig",
+    "ModelRegisterRequest",
+    "ModelCapabilitiesRequest",
+    "ModelPricingRequest",
+    "ModelCapabilitiesResponse",
+    "ModelPricingResponse",
+    "ModelDetailResponse",
+    "ModelInfoResponse",
+    "ProviderInfoResponse",
     # MCP 工具配置
     "MCPToolConfig",
     "MCPToolDetail",

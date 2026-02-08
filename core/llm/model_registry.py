@@ -2,6 +2,7 @@
 全局模型注册中心
 
 提供按模型维度的注册和管理，与 LLMRegistry（Provider 维度）配合使用。
+支持用户自定义模型的 YAML 持久化（config/custom_models.yaml）。
 
 双层架构：
 - Provider 层（LLMRegistry）：定义"如何调用"（服务类 + 适配器）
@@ -24,7 +25,11 @@ embedding_models = ModelRegistry.list_models(model_type=ModelType.EMBEDDING)
 import os
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+import aiofiles
+import yaml
 
 from logger import get_logger
 
@@ -171,6 +176,7 @@ class ModelConfig:
     capabilities: ModelCapabilities = field(default_factory=ModelCapabilities)
     pricing: ModelPricing = field(default_factory=ModelPricing)
     extra_config: Dict[str, Any] = field(default_factory=dict)
+    is_custom: bool = False  # True = user-registered via API, persisted to YAML
 
 
 # ============================================================
@@ -388,13 +394,18 @@ class ModelRegistry:
     @classmethod
     def _ensure_initialized(cls) -> None:
         """
-        确保 Registry 已初始化（加载预置模型）
+        确保 Registry 已初始化（加载预置模型 + 自定义模型）
         """
         if cls._initialized:
             return
 
         # 加载预置模型
         _register_preset_models()
+
+        # 加载用户自定义模型（从 YAML 持久化文件）
+        custom_count = cls._load_custom_models()
+        if custom_count > 0:
+            logger.info(f"📦 已加载 {custom_count} 个用户自定义模型")
 
         cls._initialized = True
         logger.info(f"✅ ModelRegistry 初始化完成，已注册 {len(cls._models)} 个模型")
@@ -406,6 +417,151 @@ class ModelRegistry:
         """
         cls._models.clear()
         cls._initialized = False
+
+    # ============================================================
+    # 持久化（YAML）
+    # ============================================================
+
+    @classmethod
+    def _get_custom_models_path(cls) -> Path:
+        """
+        Get path to the custom models YAML file.
+
+        Uses the user data directory to keep persistence across restarts.
+        """
+        from utils.app_paths import get_user_data_dir
+
+        config_dir = get_user_data_dir() / "config"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        return config_dir / "custom_models.yaml"
+
+    @classmethod
+    def _model_config_to_dict(cls, config: ModelConfig) -> Dict[str, Any]:
+        """Serialize a ModelConfig to a plain dict for YAML output."""
+        return {
+            "model_name": config.model_name,
+            "model_type": config.model_type.value,
+            "adapter": config.adapter.value,
+            "base_url": config.base_url,
+            "api_key_env": config.api_key_env,
+            "provider": config.provider,
+            "display_name": config.display_name,
+            "description": config.description,
+            "capabilities": {
+                "supports_tools": config.capabilities.supports_tools,
+                "supports_vision": config.capabilities.supports_vision,
+                "supports_thinking": config.capabilities.supports_thinking,
+                "supports_audio": config.capabilities.supports_audio,
+                "supports_streaming": config.capabilities.supports_streaming,
+                "max_tokens": config.capabilities.max_tokens,
+                "max_input_tokens": config.capabilities.max_input_tokens,
+            },
+            "pricing": {
+                "input_per_million": config.pricing.input_per_million,
+                "output_per_million": config.pricing.output_per_million,
+                "cache_read_per_million": config.pricing.cache_read_per_million,
+                "cache_write_per_million": config.pricing.cache_write_per_million,
+            },
+            "extra_config": config.extra_config or {},
+        }
+
+    @classmethod
+    def _dict_to_model_config(cls, data: Dict[str, Any]) -> ModelConfig:
+        """Deserialize a plain dict from YAML into a ModelConfig."""
+        caps_data = data.get("capabilities", {})
+        pricing_data = data.get("pricing", {})
+
+        return ModelConfig(
+            model_name=data["model_name"],
+            model_type=ModelType(data.get("model_type", "llm")),
+            adapter=AdapterType(data.get("adapter", "openai")),
+            base_url=data["base_url"],
+            api_key_env=data["api_key_env"],
+            provider=data["provider"],
+            display_name=data.get("display_name"),
+            description=data.get("description"),
+            capabilities=ModelCapabilities(
+                supports_tools=caps_data.get("supports_tools", True),
+                supports_vision=caps_data.get("supports_vision", False),
+                supports_thinking=caps_data.get("supports_thinking", False),
+                supports_audio=caps_data.get("supports_audio", False),
+                supports_streaming=caps_data.get("supports_streaming", True),
+                max_tokens=caps_data.get("max_tokens", 4096),
+                max_input_tokens=caps_data.get("max_input_tokens"),
+            ),
+            pricing=ModelPricing(
+                input_per_million=pricing_data.get("input_per_million"),
+                output_per_million=pricing_data.get("output_per_million"),
+                cache_read_per_million=pricing_data.get("cache_read_per_million"),
+                cache_write_per_million=pricing_data.get("cache_write_per_million"),
+            ),
+            extra_config=data.get("extra_config", {}),
+            is_custom=True,
+        )
+
+    @classmethod
+    def _load_custom_models(cls) -> int:
+        """
+        Load custom models from YAML file (synchronous, called during init).
+
+        Returns:
+            Number of custom models loaded.
+        """
+        path = cls._get_custom_models_path()
+        if not path.exists():
+            return 0
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+
+            if not data or not isinstance(data.get("models"), list):
+                return 0
+
+            count = 0
+            for model_data in data["models"]:
+                try:
+                    config = cls._dict_to_model_config(model_data)
+                    cls._models[config.model_name.lower()] = config
+                    count += 1
+                except Exception as e:
+                    logger.warning(
+                        f"⚠️ 加载自定义模型失败 "
+                        f"(name={model_data.get('model_name', '?')}): {e}"
+                    )
+            return count
+
+        except Exception as e:
+            logger.error(f"❌ 读取自定义模型文件失败: {e}", exc_info=True)
+            return 0
+
+    @classmethod
+    async def save_custom_models(cls) -> None:
+        """
+        Persist all custom models (is_custom=True) to YAML file.
+
+        Called after register/unregister operations.
+        """
+        custom_models = [
+            cls._model_config_to_dict(m)
+            for m in cls._models.values()
+            if m.is_custom
+        ]
+
+        path = cls._get_custom_models_path()
+        content = yaml.dump(
+            {"models": custom_models},
+            allow_unicode=True,
+            default_flow_style=False,
+            sort_keys=False,
+        )
+
+        async with aiofiles.open(path, "w", encoding="utf-8") as f:
+            await f.write(content)
+
+        logger.info(
+            f"💾 已保存 {len(custom_models)} 个自定义模型到 {path}"
+        )
 
 
 # ============================================================
@@ -658,7 +814,7 @@ def _register_preset_models() -> None:
             adapter=AdapterType.OPENAI,
             base_url="https://api.deepseek.com/v1",
             api_key_env="DEEPSEEK_API_KEY",
-            provider="openai",  # DeepSeek 使用 OpenAI 兼容接口
+            provider="deepseek",
             display_name="DeepSeek Chat",
             description="DeepSeek 对话模型",
             capabilities=ModelCapabilities(
@@ -683,7 +839,7 @@ def _register_preset_models() -> None:
             adapter=AdapterType.OPENAI,
             base_url="https://api.deepseek.com/v1",
             api_key_env="DEEPSEEK_API_KEY",
-            provider="openai",
+            provider="deepseek",
             display_name="DeepSeek Reasoner",
             description="DeepSeek 推理模型（R1）",
             capabilities=ModelCapabilities(
@@ -697,6 +853,130 @@ def _register_preset_models() -> None:
                 input_per_million=0.55,
                 output_per_million=2.19,
                 cache_read_per_million=0.14,
+            ),
+        )
+    )
+
+    # ==================== Kimi (Moonshot) 系列 ====================
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="moonshot-v1-128k",
+            model_type=ModelType.LLM,
+            adapter=AdapterType.OPENAI,
+            base_url="https://api.moonshot.cn/v1",
+            api_key_env="MOONSHOT_API_KEY",
+            provider="kimi",
+            display_name="Kimi Moonshot v1 128K",
+            description="Moonshot AI 长上下文模型（128K）",
+            capabilities=ModelCapabilities(
+                supports_tools=True,
+                supports_vision=False,
+                supports_thinking=False,
+                max_tokens=8192,
+                max_input_tokens=128000,
+            ),
+            pricing=ModelPricing(
+                input_per_million=0.84,
+                output_per_million=0.84,
+            ),
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="moonshot-v1-32k",
+            model_type=ModelType.LLM,
+            adapter=AdapterType.OPENAI,
+            base_url="https://api.moonshot.cn/v1",
+            api_key_env="MOONSHOT_API_KEY",
+            provider="kimi",
+            display_name="Kimi Moonshot v1 32K",
+            description="Moonshot AI 标准模型（32K）",
+            capabilities=ModelCapabilities(
+                supports_tools=True,
+                supports_vision=False,
+                supports_thinking=False,
+                max_tokens=8192,
+                max_input_tokens=32000,
+            ),
+            pricing=ModelPricing(
+                input_per_million=0.34,
+                output_per_million=0.34,
+            ),
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="kimi-k2-0711",
+            model_type=ModelType.LLM,
+            adapter=AdapterType.OPENAI,
+            base_url="https://api.moonshot.cn/v1",
+            api_key_env="MOONSHOT_API_KEY",
+            provider="kimi",
+            display_name="Kimi K2",
+            description="Moonshot AI 最新旗舰模型",
+            capabilities=ModelCapabilities(
+                supports_tools=True,
+                supports_vision=False,
+                supports_thinking=True,
+                max_tokens=16384,
+                max_input_tokens=131072,
+            ),
+            pricing=ModelPricing(
+                input_per_million=0.84,
+                output_per_million=0.84,
+            ),
+        )
+    )
+
+    # ==================== MiniMax 系列 ====================
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="MiniMax-Text-01",
+            model_type=ModelType.LLM,
+            adapter=AdapterType.OPENAI,
+            base_url="https://api.minimax.chat/v1",
+            api_key_env="MINIMAX_API_KEY",
+            provider="minimax",
+            display_name="MiniMax Text 01",
+            description="MiniMax 旗舰文本模型（4M 上下文）",
+            capabilities=ModelCapabilities(
+                supports_tools=True,
+                supports_vision=False,
+                supports_thinking=False,
+                max_tokens=32768,
+                max_input_tokens=1000000,
+            ),
+            pricing=ModelPricing(
+                input_per_million=0.15,
+                output_per_million=1.10,
+            ),
+        )
+    )
+
+    ModelRegistry.register(
+        ModelConfig(
+            model_name="abab6.5s-chat",
+            model_type=ModelType.LLM,
+            adapter=AdapterType.OPENAI,
+            base_url="https://api.minimax.chat/v1",
+            api_key_env="MINIMAX_API_KEY",
+            provider="minimax",
+            display_name="MiniMax abab6.5s",
+            description="MiniMax 快速模型",
+            capabilities=ModelCapabilities(
+                supports_tools=True,
+                supports_vision=False,
+                supports_thinking=False,
+                max_tokens=8192,
+                max_input_tokens=245760,
+            ),
+            pricing=ModelPricing(
+                input_per_million=0.14,
+                output_per_million=0.14,
             ),
         )
     )
