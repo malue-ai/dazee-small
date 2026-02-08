@@ -563,12 +563,23 @@ async def _validate_anthropic(base_url: str, api_key: str) -> tuple[bool, str, l
         body = {"model": "claude-3-5-haiku-20241022", "max_tokens": 1, "messages": []}
         resp = await client.post(url, headers=headers, json=body)
 
-        if resp.status_code == 401:
-            return False, "API Key 无效或已过期", []
-        elif resp.status_code == 403:
-            return False, "API Key 权限不足", []
-        elif resp.status_code not in (200, 400):
-            return False, f"验证失败 (HTTP {resp.status_code})", []
+        if resp.status_code not in (200, 400):
+            # Log the raw Anthropic error for debugging
+            try:
+                err_body = resp.json()
+                err_msg = err_body.get("error", {}).get("message", resp.text[:200])
+            except Exception:
+                err_msg = resp.text[:200]
+            logger.warning(
+                f"Anthropic 验证失败: HTTP {resp.status_code}, body={err_msg}"
+            )
+
+            if resp.status_code == 401:
+                return False, "API Key 无效或已过期", []
+            elif resp.status_code == 403:
+                return False, f"API Key 权限不足 ({err_msg})", []
+            else:
+                return False, f"验证失败 (HTTP {resp.status_code}: {err_msg})", []
 
         # Step 2: fetch available models so the frontend can proceed
         models: list[str] = []
