@@ -21,26 +21,24 @@
 
     <!-- 欢迎页 -->
     <div v-if="messages.length === 0 && !loadingMore" class="h-full flex flex-col items-center justify-center text-center -mt-10">
-      <div class="w-20 h-20 bg-white rounded-3xl shadow-lg border border-border flex items-center justify-center mb-8 transform hover:scale-105 transition-transform duration-300">
-        <Sparkles class="w-10 h-10 text-primary" />
-      </div>
-      <h1 class="text-3xl font-bold mb-4 text-foreground">有什么我可以帮你的？</h1>
-      <p class="text-muted-foreground mb-10 max-w-md">我是你的 AI 助手，可以协助你完成编码、写作、分析等各种任务。</p>
-      
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 w-full max-w-3xl px-4">
-        <div 
-          v-for="(suggestion, index) in suggestions"
-          :key="index"
-          class="p-5 rounded-2xl bg-white border border-border hover:border-primary/50 hover:shadow-lg cursor-pointer transition-all duration-300 group" 
-          @click="emit('suggestion-click', suggestion.text)"
-        >
-          <div class="w-10 h-10 rounded-xl bg-muted flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
-            <component :is="suggestion.icon" class="w-5 h-5 text-muted-foreground" />
-          </div>
-          <h3 class="font-semibold text-foreground mb-1">{{ suggestion.title }}</h3>
-          <p class="text-xs text-muted-foreground/50">{{ suggestion.description }}</p>
+      <!-- Agent 模式：显示项目图标、名称、描述 -->
+      <template v-if="agentInfo">
+        <div class="w-20 h-20 bg-card rounded-3xl shadow-lg border border-border flex items-center justify-center mb-8 transform hover:scale-105 transition-transform duration-300">
+          <span class="text-3xl font-bold text-foreground">{{ agentIcon }}</span>
         </div>
-      </div>
+        <h1 class="text-3xl font-bold mb-4 text-foreground">{{ agentInfo.name }}</h1>
+        <p class="text-muted-foreground mb-10 max-w-md">{{ agentInfo.description || '开始和这个项目对话吧' }}</p>
+      </template>
+
+      <!-- 默认模式：通用欢迎语 -->
+      <template v-else>
+        <div class="w-20 h-20 bg-card rounded-3xl shadow-lg border border-border flex items-center justify-center mb-8 transform hover:scale-105 transition-transform duration-300">
+          <Sparkles class="w-10 h-10 text-primary" />
+        </div>
+        <h1 class="text-3xl font-bold mb-4 text-foreground">有什么我可以帮你的？</h1>
+        <p class="text-muted-foreground mb-10 max-w-md">我是你的 AI 助手，可以协助你完成编码、写作、分析等各种任务。</p>
+      </template>
+      
     </div>
 
     <!-- 消息流 -->
@@ -151,12 +149,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue'
-import type { UIMessage, AttachedFile } from '@/types'
+import { ref, computed, watch, nextTick } from 'vue'
+import type { UIMessage, AttachedFile, AgentSummary } from '@/types'
 import { getFileTypeLabel as getLabel } from '@/utils'
 import MarkdownRenderer from './MarkdownRenderer.vue'
 import MessageContent from './MessageContent.vue'
-import { Sparkles, Bot, FileText, Gamepad2, BarChart3, Search, Loader2 } from 'lucide-vue-next'
+import { Sparkles, Bot, FileText, Loader2 } from 'lucide-vue-next'
 
 // ==================== Props ====================
 
@@ -171,13 +169,22 @@ interface Props {
   loadingMore?: boolean
   /** 是否有更多历史消息 */
   hasMore?: boolean
+  /** Agent（项目）信息，用于在欢迎页显示项目图标/名称/描述 */
+  agentInfo?: AgentSummary | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
   loading: false,
   generating: false,
   loadingMore: false,
-  hasMore: false
+  hasMore: false,
+  agentInfo: null
+})
+
+/** Agent 图标（取名称首字符） */
+const agentIcon = computed(() => {
+  if (!props.agentInfo?.name) return 'A'
+  return props.agentInfo.name.charAt(0).toUpperCase()
 })
 
 // ==================== Emits ====================
@@ -268,28 +275,6 @@ function isThinkingExpandedInline(message: UIMessage): boolean {
   // 默认折叠
   return expandedThinking.value[id] ?? false
 }
-
-/** 建议列表 */
-const suggestions = [
-  {
-    icon: Gamepad2,
-    title: '生成贪吃蛇游戏',
-    description: '使用 Python 或 JavaScript',
-    text: '帮我生成一个贪吃蛇游戏'
-  },
-  {
-    icon: BarChart3,
-    title: '分析项目依赖',
-    description: '检查版本冲突和安全问题',
-    text: '分析一下 requirements.txt'
-  },
-  {
-    icon: Search,
-    title: '搜索 RAG 论文',
-    description: '获取最新的研究进展',
-    text: '查询关于 RAG 的最新论文'
-  }
-]
 
 // ==================== Methods ====================
 

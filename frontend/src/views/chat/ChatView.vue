@@ -2,17 +2,21 @@
   <div class="h-screen w-full flex bg-background relative overflow-hidden text-foreground font-sans">
     <!-- 左侧侧边栏：历史对话 -->
     <ConversationSidebar
-      :conversations="conversationStore.conversations"
+      :conversations="filteredConversations"
       :current-id="conversationStore.currentId"
       :collapsed="sidebarCollapsed"
       :loading="conversationStore.loading"
       :user-id="conversationStore.userId"
       :is-running="sessionStore.isConversationRunning"
+      :agents="agentStore.agents"
+      :current-agent-id="agentStore.currentAgentId"
       @select="handleSelectConversation"
       @create="handleCreateConversation"
       @delete="handleDeleteConversation"
       @toggle-collapse="sidebarCollapsed = !sidebarCollapsed"
       @navigate="handleNavigate"
+      @select-agent="handleSelectAgent"
+      @delete-agent="handleDeleteAgent"
     />
 
     <!-- 右侧主区域 -->
@@ -22,6 +26,109 @@
         class="flex flex-col min-w-0 overflow-hidden transition-all duration-300"
         :class="showRightSidebar ? 'w-1/2' : 'flex-1'"
       >
+        <!-- Agent 项目顶部导航栏 -->
+        <div v-if="isAgentMode && agentStore.currentAgent" class="flex-shrink-0 h-12 flex items-center gap-3 px-4 border-b border-border bg-background/80 backdrop-blur-sm">
+          <!-- 项目名称 -->
+          <div class="flex items-center gap-2 text-sm font-medium text-foreground mr-2">
+            <Bot class="w-4 h-4 text-primary" />
+            <span class="truncate max-w-[120px]">{{ agentStore.currentAgent.name }}</span>
+          </div>
+
+          <!-- 分隔线 -->
+          <div class="w-px h-5 bg-border"></div>
+
+          <!-- 对话标签页（仅显示打开的标签） -->
+          <div class="flex items-center gap-1 flex-1 min-w-0 overflow-x-auto scrollbar-none">
+            <div
+              v-for="convId in agentStore.currentOpenTabIds"
+              :key="convId"
+              class="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer"
+              :class="conversationStore.currentId === convId 
+                ? 'bg-accent text-accent-foreground' 
+                : 'text-muted-foreground hover:bg-muted hover:text-foreground'"
+              @click="handleSelectConversation(convId)"
+            >
+              <MessageSquare class="w-3 h-3" />
+              <span class="truncate max-w-[100px]">{{ getConversationTitle(convId) }}</span>
+              <!-- 关闭标签（不删除对话，仅从标签栏移除） -->
+              <button
+                class="ml-1 p-0.5 rounded hover:bg-muted-foreground/10 hover:text-foreground transition-colors"
+                title="关闭标签"
+                @click.stop="handleCloseTab(convId)"
+              >
+                <X class="w-3 h-3" />
+              </button>
+            </div>
+          </div>
+
+          <!-- 新建对话按钮 -->
+          <button 
+            @click="handleCreateConversation"
+            class="flex-shrink-0 p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-colors"
+            title="新建对话"
+          >
+            <Plus class="w-4 h-4" />
+          </button>
+
+          <!-- 历史记录按钮 -->
+          <div class="relative flex-shrink-0">
+            <button 
+              @click="showHistoryDropdown = !showHistoryDropdown"
+              class="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-colors"
+              :class="showHistoryDropdown ? 'bg-muted text-foreground' : ''"
+              title="历史记录"
+            >
+              <History class="w-4 h-4" />
+            </button>
+
+            <!-- 遮罩层：点击空白处关闭（必须在下拉面板之前，z-index 更低） -->
+            <div v-if="showHistoryDropdown" class="fixed inset-0 z-40" @click="showHistoryDropdown = false"></div>
+
+            <!-- 历史记录下拉面板（z-50 > 遮罩 z-40，同一层叠上下文内） -->
+            <Transition name="fade">
+              <div 
+                v-if="showHistoryDropdown" 
+                class="absolute right-0 top-full mt-1 w-72 bg-card border border-border rounded-xl shadow-lg z-50 overflow-hidden"
+              >
+                <div class="px-3 py-2 border-b border-border">
+                  <span class="text-xs font-medium text-muted-foreground">历史对话</span>
+                </div>
+                <div class="max-h-64 overflow-y-auto scrollbar-thin">
+                  <!-- 无历史记录 -->
+                  <div v-if="agentStore.currentConversationIds.length === 0" class="px-4 py-6 text-center">
+                    <p class="text-xs text-muted-foreground/50">暂无对话记录</p>
+                  </div>
+                  <!-- 历史列表 -->
+                  <div
+                    v-for="convId in agentStore.currentConversationIds"
+                    :key="convId"
+                    class="group flex items-center gap-2 px-3 py-2.5 hover:bg-muted cursor-pointer transition-colors"
+                    @click="handleOpenFromHistory(convId)"
+                  >
+                    <MessageSquare class="w-3.5 h-3.5 flex-shrink-0 text-muted-foreground/50" />
+                    <div class="flex-1 min-w-0">
+                      <div class="flex items-center gap-2">
+                        <span class="text-sm truncate" :class="conversationStore.currentId === convId ? 'text-foreground font-medium' : 'text-muted-foreground'">
+                          {{ getConversationTitle(convId) }}
+                        </span>
+                        <span v-if="conversationStore.currentId === convId" class="text-[10px] text-primary font-medium flex-shrink-0">当前</span>
+                      </div>
+                    </div>
+                    <!-- 删除按钮（hover 时显示，真正删除对话记录） -->
+                    <button
+                      class="opacity-0 group-hover:opacity-100 p-1 text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 rounded transition-all flex-shrink-0"
+                      title="删除对话"
+                      @click.stop="handleDeleteFromHistory(convId)"
+                    >
+                      <Trash2 class="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </Transition>
+          </div>
+        </div>
+
         <!-- 顶部导航栏 (已移除) -->
         <!-- <ChatHeader
           :title="conversationStore.currentTitle"
@@ -38,6 +145,7 @@
           :generating="chat.isGenerating.value"
           :loading-more="conversationStore.loadingMore"
           :has-more="conversationStore.hasMore"
+          :agent-info="isAgentMode ? agentStore.currentAgent : null"
           @suggestion-click="handleSuggestionClick"
           @file-preview="handleFilePreview"
           @load-more="handleLoadMore"
@@ -191,6 +299,18 @@
       @confirm="chat.confirmLongRunContinue"
       @dismiss="chat.dismissLongRunConfirm"
     />
+
+    <!-- 通用确认/提示弹窗 -->
+    <SimpleConfirmModal
+      :show="simpleModal.show"
+      :title="simpleModal.title"
+      :message="simpleModal.message"
+      :type="simpleModal.type"
+      :confirm-text="simpleModal.confirmText"
+      :show-cancel="simpleModal.showCancel"
+      @confirm="simpleModal.onConfirm"
+      @cancel="handleSimpleModalCancel"
+    />
   </div>
 </template>
 
@@ -202,11 +322,13 @@ import { useRouter, useRoute } from 'vue-router'
 import { useConversationStore } from '@/stores/conversation'
 import { useSessionStore } from '@/stores/session'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { useAgentStore } from '@/stores/agent'
+import { useGuideStore } from '@/stores/guide'
 
 // Composables
 import { useChat } from '@/composables/useChat'
 import { useFileUpload } from '@/composables/useFileUpload'
-import { ClipboardList, FileText, Loader2, X } from 'lucide-vue-next'
+import { ClipboardList, FileText, Loader2, X, Bot, MessageSquare, Plus, History, Trash2 } from 'lucide-vue-next'
 
 // Components
 import ConversationSidebar from '@/components/chat/ConversationSidebar.vue'
@@ -218,6 +340,7 @@ import FileExplorer from '@/components/workspace/FileExplorer.vue'
 import FilePreview from '@/components/workspace/FilePreview.vue'
 import AttachmentPreview from '@/components/modals/AttachmentPreview.vue'
 import ConfirmModal from '@/components/modals/ConfirmModal.vue'
+import SimpleConfirmModal from '@/components/modals/SimpleConfirmModal.vue'
 import RollbackOptionsModal from '@/components/modals/RollbackOptionsModal.vue'
 import LongRunConfirmModal from '@/components/modals/LongRunConfirmModal.vue'
 
@@ -231,6 +354,8 @@ const route = useRoute()
 const conversationStore = useConversationStore()
 const sessionStore = useSessionStore()
 const workspaceStore = useWorkspaceStore()
+const agentStore = useAgentStore()
+const guideStore = useGuideStore()
 const chat = useChat()
 const fileUpload = useFileUpload()
 const hitl = chat.hitl
@@ -241,6 +366,7 @@ const hitl = chat.hitl
 const sidebarCollapsed = ref(false)
 const showRightSidebar = ref(false)
 const rightSidebarTab = ref<'plan' | 'workspace'>('plan')
+const showHistoryDropdown = ref(false)
 
 // 输入
 const inputMessage = ref('')
@@ -249,12 +375,83 @@ const inputMessage = ref('')
 const previewFile = ref<FileItem | null>(null)
 const previewingAttachment = ref<AttachedFile | null>(null)
 
+// 通用确认弹窗
+const simpleModal = ref({
+  show: false,
+  title: '确认操作',
+  message: '',
+  type: 'confirm' as 'confirm' | 'warning' | 'info' | 'error',
+  confirmText: '确定',
+  showCancel: true,
+  onConfirm: () => {},
+})
+
+function showConfirm(options: {
+  title?: string
+  message: string
+  type?: 'confirm' | 'warning' | 'info' | 'error'
+  confirmText?: string
+  showCancel?: boolean
+}): Promise<boolean> {
+  return new Promise((resolve) => {
+    simpleModal.value = {
+      show: true,
+      title: options.title || '确认操作',
+      message: options.message,
+      type: options.type || 'confirm',
+      confirmText: options.confirmText || '确定',
+      showCancel: options.showCancel !== false,
+      onConfirm: () => {
+        simpleModal.value.show = false
+        resolve(true)
+      },
+    }
+    // cancel 回调在模板里直接处理
+    const origOnConfirm = simpleModal.value.onConfirm
+    simpleModal.value.onConfirm = () => {
+      origOnConfirm()
+    }
+    // 监听 cancel（通过 watch show 变化实现）
+    const cancelHandler = () => {
+      simpleModal.value.show = false
+      resolve(false)
+    }
+    // 存到一个临时变量供模板使用
+    ;(simpleModal.value as any)._cancelHandler = cancelHandler
+  })
+}
+
+function handleSimpleModalCancel() {
+  const handler = (simpleModal.value as any)._cancelHandler
+  if (handler) handler()
+  else simpleModal.value.show = false
+}
+
 // Refs
 const messageListRef = ref<InstanceType<typeof MessageList> | null>(null)
 const inputAreaRef = ref<InstanceType<typeof ChatInputArea> | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 
 // ==================== Computed ====================
+
+/** 是否处于 Agent（项目）模式 */
+const isAgentMode = computed(() => {
+  return !!route.params.agentId
+})
+
+/** 当前 Agent ID（从路由获取） */
+const agentId = computed(() => {
+  return (route.params.agentId as string) || null
+})
+
+/** 过滤后的对话列表（Agent 模式下只显示关联的对话） */
+const filteredConversations = computed(() => {
+  if (!isAgentMode.value || !agentId.value) {
+    return conversationStore.conversations
+  }
+  const linkedIds = agentStore.getConversationIds(agentId.value)
+  return conversationStore.conversations.filter(c => linkedIds.includes(c.id))
+})
 
 /** 当前 Plan（优先从 conversation_metadata 获取，否则从消息中查找） */
 const currentPlan = computed<PlanData | null>(() => {
@@ -288,9 +485,18 @@ onMounted(async () => {
   // 初始化
   conversationStore.initUserId()
   
-    // 加载对话列表（获取最近 50 个对话，不含具体消息）
-  await conversationStore.fetchList()
+  // 并行加载对话列表和 Agent 列表
+  await Promise.all([
+    conversationStore.fetchList(),
+    agentStore.fetchList()
+  ])
   
+  // 如果路由中有 agentId，加载对应 Agent
+  const routeAgentId = route.params.agentId as string | undefined
+  if (routeAgentId) {
+    await agentStore.selectAgent(routeAgentId)
+  }
+
   // 根据路由加载会话
   const conversationId = route.params.conversationId
   if (conversationId && typeof conversationId === 'string') {
@@ -299,10 +505,33 @@ onMounted(async () => {
   
   // 设置文件输入引用
   fileUpload.setFileInputRef(fileInputRef.value)
+
+  // 首次引导：未完成过引导时启动交互式引导
+  if (!guideStore.isCompleted && !guideStore.isActive) {
+    sidebarCollapsed.value = false
+    guideStore.canSkip = false // 首次用户没有 Key，不允许跳过设置阶段
+    guideStore.startGuide()
+  }
+
+  // 从设置页返回时，Step 已在 SettingsView 推进到 5，确保侧边栏展开
+  if (guideStore.isActive && guideStore.currentStep === 5) {
+    sidebarCollapsed.value = false
+  }
 })
 
 onUnmounted(() => {
   // cleanup
+})
+
+// 监听路由中的 agentId 变化
+watch(() => route.params.agentId, async (newAgentId) => {
+  if (newAgentId && typeof newAgentId === 'string') {
+    if (agentStore.currentAgentId !== newAgentId) {
+      await agentStore.selectAgent(newAgentId)
+    }
+  } else {
+    agentStore.reset()
+  }
 })
 
 
@@ -310,20 +539,36 @@ onUnmounted(() => {
 
 /** 选择会话 */
 async function handleSelectConversation(id: string): Promise<void> {
-  // 只更新路由，由 useChat 的 watch 统一处理加载
-  router.push({ name: 'conversation', params: { conversationId: id } })
+  if (isAgentMode.value && agentId.value) {
+    router.push({ name: 'agent-conversation', params: { agentId: agentId.value, conversationId: id } })
+  } else {
+    router.push({ name: 'conversation', params: { conversationId: id } })
+  }
 }
 
 /** 创建新会话 */
 async function handleCreateConversation(): Promise<void> {
   conversationStore.reset()
-  router.push({ name: 'chat' })
+  if (isAgentMode.value && agentId.value) {
+    router.push({ name: 'agent', params: { agentId: agentId.value } })
+  } else {
+    router.push({ name: 'chat' })
+  }
   await conversationStore.fetchList(50)
 }
 
 /** 删除会话 */
 async function handleDeleteConversation(conv: Conversation): Promise<void> {
-  if (confirm(`删除 "${conv.title}"?`)) {
+  const confirmed = await showConfirm({
+    title: '删除会话',
+    message: `确定要删除 "${conv.title}" 吗？`,
+    type: 'warning',
+    confirmText: '删除',
+  })
+  if (confirmed) {
+    if (isAgentMode.value && agentId.value) {
+      agentStore.unlinkConversation(agentId.value, conv.id)
+    }
     await conversationStore.remove(conv.id)
     if (conversationStore.currentId === conv.id) {
       await handleCreateConversation()
@@ -331,9 +576,135 @@ async function handleDeleteConversation(conv: Conversation): Promise<void> {
   }
 }
 
+/** 通过 ID 删除对话（顶部导航栏中使用） */
+async function handleDeleteConversationById(convId: string): Promise<void> {
+  const conv = conversationMap.value.get(convId)
+  if (conv) {
+    await handleDeleteConversation(conv)
+  }
+}
+
+/** 对话 ID → 对话对象的快速索引（用于顶部导航栏 O(1) 查找） */
+const conversationMap = computed(() => {
+  const map = new Map<string, Conversation>()
+  for (const conv of conversationStore.conversations) {
+    map.set(conv.id, conv)
+  }
+  return map
+})
+
+/** 获取对话标题（O(1) 查找） */
+function getConversationTitle(convId: string): string {
+  return conversationMap.value.get(convId)?.title || '新对话'
+}
+
+/** 关闭标签页（不删除对话，仅从标签栏移除） */
+function handleCloseTab(convId: string): void {
+  if (!agentId.value) return
+  agentStore.closeTab(agentId.value, convId)
+  // 如果关闭的是当前对话，切换到其他标签或空状态
+  if (conversationStore.currentId === convId) {
+    const remaining = agentStore.getOpenTabIds(agentId.value)
+    if (remaining.length > 0) {
+      handleSelectConversation(remaining[remaining.length - 1])
+    } else {
+      conversationStore.reset()
+      router.push({ name: 'agent', params: { agentId: agentId.value } })
+    }
+  }
+}
+
+/** 从历史记录中打开对话（添加到标签页并切换过去） */
+function handleOpenFromHistory(convId: string): void {
+  if (!agentId.value) return
+  agentStore.openTab(agentId.value, convId)
+  handleSelectConversation(convId)
+  showHistoryDropdown.value = false
+}
+
+/** 从历史记录中删除对话（真正删除） */
+async function handleDeleteFromHistory(convId: string): Promise<void> {
+  const conv = conversationMap.value.get(convId)
+  const title = conv?.title || '此对话'
+  const confirmed = await showConfirm({
+    title: '删除对话',
+    message: `确定要删除 "${title}" 吗？`,
+    type: 'warning',
+    confirmText: '删除',
+  })
+  if (confirmed) {
+    try {
+      if (agentId.value) {
+        agentStore.unlinkConversation(agentId.value, convId)
+      }
+      await conversationStore.remove(convId)
+      if (conversationStore.currentId === convId) {
+        const remaining = agentStore.getOpenTabIds(agentId.value!)
+        if (remaining.length > 0) {
+          handleSelectConversation(remaining[remaining.length - 1])
+        } else {
+          conversationStore.reset()
+          router.push({ name: 'agent', params: { agentId: agentId.value! } })
+        }
+      }
+    } catch (error) {
+      console.error('❌ 删除对话失败:', error)
+    }
+  }
+}
+
 /** 导航 */
 function handleNavigate(path: string): void {
+  if (guideStore.isActive) {
+    // Step 1 → 2：点击设置按钮，进入设置页
+    if (guideStore.currentStep === 1 && path === '/settings') {
+      guideStore.nextStep()
+    }
+    // Step 5 → 6：点击"新建项目"，进入创建页
+    if (guideStore.currentStep === 5 && path === '/create-project') {
+      guideStore.nextStep()
+    }
+  }
   router.push(path)
+}
+
+/** 选择 Agent（项目） */
+async function handleSelectAgent(selectedAgentId: string): Promise<void> {
+  try {
+    await agentStore.selectAgent(selectedAgentId)
+    router.push({ name: 'agent', params: { agentId: selectedAgentId } })
+    // 重置当前对话
+    conversationStore.reset()
+  } catch (error) {
+    console.warn('⚠️ 加载项目失败:', error)
+    // 选中失败时刷新列表，可能该 Agent 已被删除
+    await agentStore.fetchList()
+  }
+}
+
+/** 删除 Agent（项目） */
+async function handleDeleteAgent(targetAgentId: string): Promise<void> {
+  const agent = agentStore.agents.find(a => a.agent_id === targetAgentId)
+  const agentName = agent?.name || targetAgentId
+  const confirmed = await showConfirm({
+    title: '删除项目',
+    message: `确定要删除项目 "${agentName}" 吗？`,
+    type: 'warning',
+    confirmText: '删除',
+  })
+  if (confirmed) {
+    try {
+      const wasCurrentAgent = agentStore.currentAgentId === targetAgentId
+      await agentStore.removeAgent(targetAgentId)
+      if (wasCurrentAgent) {
+        conversationStore.reset()
+        router.push({ name: 'chat' })
+      }
+    } catch (error) {
+      console.error('❌ 删除项目失败:', error)
+      showConfirm({ title: '操作失败', message: '删除失败，请重试', type: 'error', showCancel: false })
+    }
+  }
 }
 
 /** 点击建议 */
@@ -355,8 +726,24 @@ async function handleSendMessage(): Promise<void> {
   inputMessage.value = ''
   fileUpload.clearFiles()
 
-  // 发送
-  await chat.sendMessage(content, files)
+  // 记录发送前是否已有对话（用于判断是否为新创建）
+  const hadConversation = !!conversationStore.currentId
+
+  // 发送（Agent 模式下传 agentId）
+  const sendOptions = isAgentMode.value && agentId.value
+    ? { agentId: agentId.value }
+    : {}
+  await chat.sendMessage(content, files, sendOptions)
+
+  // 如果是 Agent 模式且新创建了对话，自动绑定映射
+  if (isAgentMode.value && agentId.value && !hadConversation && conversationStore.currentId) {
+    agentStore.linkConversation(agentId.value, conversationStore.currentId)
+    // 更新路由到含 conversationId 的路径
+    router.replace({ 
+      name: 'agent-conversation', 
+      params: { agentId: agentId.value, conversationId: conversationStore.currentId } 
+    })
+  }
 
   // 刷新会话列表（保持 50 条，失败不影响用户体验）
   try {
@@ -384,7 +771,7 @@ async function handleFileSelect(event: Event): Promise<void> {
   try {
     await fileUpload.handleFileSelect(event)
   } catch {
-    alert('文件上传失败，请重试')
+    showConfirm({ title: '上传失败', message: '文件上传失败，请重试', type: 'error', showCancel: false })
   }
 }
 
@@ -431,17 +818,22 @@ async function handleRunProject(project: { name: string; type: string }): Promis
     if (result.success && result.preview_url) {
       const newWindow = window.open(result.preview_url, '_blank')
       if (!newWindow) {
-        const shouldOpen = confirm(`项目已启动！\n\n预览地址：${result.preview_url}\n\n点击"确定"在新窗口打开预览`)
+        const shouldOpen = await showConfirm({
+          title: '项目已启动',
+          message: `预览地址：${result.preview_url}\n\n点击"打开"在新窗口中查看`,
+          type: 'info',
+          confirmText: '打开',
+        })
         if (shouldOpen) {
           window.open(result.preview_url, '_blank')
         }
       }
     } else if (!result.success) {
-      alert('启动项目失败: ' + (result.error || result.message))
+      showConfirm({ title: '启动失败', message: '启动项目失败: ' + (result.error || result.message), type: 'error', showCancel: false })
     }
   } catch (error) {
     console.error('❌ 运行项目失败:', error)
-    alert('运行项目失败')
+    showConfirm({ title: '运行失败', message: '运行项目失败，请重试', type: 'error', showCancel: false })
   }
 }
 

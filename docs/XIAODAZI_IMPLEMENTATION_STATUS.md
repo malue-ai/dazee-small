@@ -18,7 +18,7 @@
 │  Vue 3 + TypeScript + Vite + Tauri                                                      │
 │                                                                                         │
 │  ┌── views/ ──────────────────────────────────────────────────────────────────────────┐  │
-│  │ ChatView │ DocsView │ SettingsView │ SkillsView │ RealtimeView │ NodeAgentView    │  │
+│  │ ChatView │ CreateProjectView │ SettingsView │ SkillsView │ RealtimeView          │  │
 │  └────┬───────────────────────────────────────────────────────────────────────────────┘  │
 │       │                                                                                 │
 │  ┌────▼── composables/ ──────────────────────────────────────────────────────────────┐  │
@@ -26,21 +26,22 @@
 │  └────┬──────────────────────────────────────────────────────────────────────────────┘  │
 │       │                                                                                 │
 │  ┌────▼── api/ ──────────────────────────────────────────────────────────────────────┐  │
-│  │ chat.ts │ session.ts │ config.ts │ skills.ts │ realtime.ts │ workspace.ts │ ...   │  │
+│  │ chat.ts │ session.ts │ settings.ts │ models.ts │ skills.ts │ workspace.ts │ ...  │  │
 │  └────┬──────────────────────────────────────────────────────────────────────────────┘  │
 │       │                                                                                 │
 │  ┌── components/ ─────────────────────────────────────────────────────────────────────┐  │
 │  │ chat/: ChatHeader │ ChatInputArea │ ConversationSidebar │ MarkdownRenderer        │  │
 │  │       MessageContent │ MessageList │ ToolMessage                                  │  │
-│  │ modals/: ConfirmModal │ LongRunConfirmModal │ RollbackOptionsModal │ Attachment    │  │
+│  │ modals/: ConfirmModal │ SimpleConfirmModal │ LongRunConfirmModal │ Rollback...    │  │
 │  │ workspace/: FileExplorer │ FilePreview │ FileTreeNode                             │  │
 │  │ realtime/: RealtimeVoice                                                          │  │
-│  │ common/: Card                                                                     │  │
+│  │ common/: Card │ GuideOverlay                                                      │  │
 │  └────────────────────────────────────────────────────────────────────────────────────┘  │
 │                                                                                         │
 │  ┌── stores/ ─────────┐ ┌── layouts/ ─────────┐ ┌── types/ ──────────────────────────┐  │
 │  │ conversation │ ui  │ │ DashboardLayout     │ │ api │ chat │ realtime │ skills     │  │
 │  │ session │ workspace│ │ DefaultLayout       │ │ workspace │ index                  │  │
+│  │ agent │ guide      │ │                     │ │                                    │  │
 │  └────────────────────┘ └─────────────────────┘ └────────────────────────────────────┘  │
 │                                                                                         │
 │  ┌── src-tauri/ (桌面壳) ─────────────────────────────────────────────────────────────┐  │
@@ -460,9 +461,10 @@ Provider 一键切换模型分配：
 ███████░░░  70%  Playbook 持续学习 (Hint 注入已实现，端到端链路待串联)
 ████░░░░░░  40%  OS 兼容层 (仅 macOS)
 ███░░░░░░░  35%  应用发现 (仅 macOS 扫描)
-████████░░  80%  项目管理 (多实例架构，前端创建界面待实现)
+████████░░  80%  项目管理 (多实例架构，前端创建项目流程已实现)
+████████░░  80%  前端 Settings (Provider 卡片 + API Key 验证 + 保存)
+████████░░  80%  首次启动引导 (9 步交互式引导教程)
 ░░░░░░░░░░   0%  Skills 安全验证
-░░░░░░░░░░   0%  前端 UI (向导/仪表板)
 ```
 
 ---
@@ -496,15 +498,16 @@ Provider 一键切换模型分配：
 | Nodes 本地操作 | 3.5 | 80% (macOS) | macOS 11 项操作完整，win32/linux 待实现 |
 | OS 兼容层 | 3.5 | 40% | 仅 macOS 实现 |
 | 应用发现 | 3.11 | 35% | 仅 macOS 扫描 |
-| 项目管理 | 3.10 | 80% | 多实例架构（不同搭子=不同 instance），前端创建界面待实现 |
+| 项目管理 | 3.10 | 80% | 多实例架构 + 前端创建项目流程（CreateProjectView） |
 | 存储层 | — | 95% | SQLite + FTS5 + sqlite-vec 完整 |
 | Playbook 持续学习 | 2.14 | 70% | Hint 注入器已实现，端到端链路 4 条断 2 条 |
 | Skill 格式规范 | 3.2 | 75% | 基础格式 + SKILL.md 二维元数据，38 个 Skill 已适配 |
 | E2E 评估框架 | — | 80% | 4 个端到端用例 + 自动化运行器 + 评分体系 |
 | 屏幕观察工具 | 3.5 | 80% | peekaboo + Vision OCR 并行，macOS 就绪 |
+| 前端 Settings UI | 3.1.2 | 80% | Provider 卡片式设置 + API Key 在线验证 + 自动保存默认模型 |
+| 首次启动引导 | 3.1.3 | 80% | 9 步交互式引导（设置→创建项目），含跳过控制和回退机制 |
+| 前端通用弹窗 | — | 100% | SimpleConfirmModal 替代 confirm/alert，支持 4 种类型 |
 | Skills 安全验证 | 3.12 | 0% | 未开始 |
-| 大模型配置简化 | 3.1.2 | 0% | 未开始（前端 UI 范畴） |
-| 首次启动向导 | 3.1.3 | 0% | 未开始（前端 UI 范畴） |
 | 服务状态仪表板 | 3.1.5 | 0% | 未开始（前端 UI 范畴） |
 | MCP Apps UI | 3.6 | 0% | 未开始（前端 UI 范畴） |
 | 三大核心能力 | 3.9 | 75% | "会干活"完整，"会思考"完整，"会学习"部分完成 |
@@ -1306,13 +1309,152 @@ python scripts/run_e2e_auto.py --provider claude
 
 ---
 
-## 四、不涉及（前端 UI / 桌面应用范畴）
+## 四、前端实现详情
 
-以下模块在架构设计中定义但属于前端/桌面应用团队职责，当前后端不涉及：
+### 4.1 首次启动引导（3.1.3）— 9 步交互式教程
+
+**设计需求**：新用户首次打开应用时，通过交互式引导完成 API Key 配置和首个项目创建。
+
+| 文件 | 状态 | 说明 |
+|------|------|------|
+| `frontend/src/stores/guide.ts` | 已完成 | 引导状态管理（Pinia Store），9 步配置 + 2 阶段 + 验证回调 |
+| `frontend/src/components/common/GuideOverlay.vue` | 已完成 | 全局引导浮层（Teleport），高亮目标元素 + tooltip + 步骤进度 |
+| `frontend/src/views/settings/SettingsView.vue` | 已完成 | 集成 Step 1-4 引导目标 + 验证逻辑 |
+| `frontend/src/views/chat/ChatView.vue` | 已完成 | 引导启动入口 + Step 5 引导目标 |
+| `frontend/src/components/chat/ConversationSidebar.vue` | 已完成 | Step 5 创建项目按钮引导目标 |
+| `frontend/src/views/project/CreateProjectView.vue` | 已完成 | Step 6-9 项目创建流程引导目标 |
+
+**引导流程（9 步 2 阶段）**：
+
+```
+阶段一：设置配置（Step 1-4）
+  Step 1: 点击设置按钮进入设置页
+  Step 2: 选择一个 Provider，填写 API Key
+  Step 3: 点击"验证并保存"（后端实时验证 Key 有效性）
+  Step 4: 点击"返回聊天"回到主界面
+
+阶段二：创建项目（Step 5-9）
+  Step 5: 点击创建项目按钮
+  Step 6: 与 AI 对话描述项目需求
+  Step 7: AI 生成项目表单后填写确认
+  Step 8: 确认创建项目
+  Step 9: 引导完成
+```
+
+**核心机制**：
+
+| 机制 | 说明 |
+|------|------|
+| 条件跳过控制 | `canSkip`：无有效 API Key 时禁止跳过引导，已配置后允许 |
+| 验证回调 | `setBeforeNextStep()`：组件注册自定义验证逻辑，验证通过才允许下一步 |
+| 步骤回退 | `goToStep(n)`：API Key 验证失败时自动回退到 Step 2 |
+| 自动展开 | 已配置的 Provider 自动展开卡片，但高亮整个区域供用户选择 |
+| 持久化 | 引导完成状态存储到 `localStorage`，刷新不重复 |
+| 动态定位 | `getBoundingClientRect()` + `requestAnimationFrame` 精准定位高亮区域 |
+| 浮动模式 | 部分步骤使用 `floating: true` 避免遮挡内容 |
+
+---
+
+### 4.2 设置页（Provider 卡片式 API Key 管理）
+
+**设计需求**：基于 Models API 的结构化 Provider 配置，替代旧的扁平化 Key-Value 设置。
+
+| 文件 | 状态 | 说明 |
+|------|------|------|
+| `frontend/src/views/settings/SettingsView.vue` | 已完成 | Provider 卡片 + 手风琴展开 + 验证保存 |
+| `frontend/src/api/models.ts` | 已完成 | Models API 调用（`getSupportedProviders`, `validateKey`） |
+| `frontend/src/api/settings.ts` | 已完成 | Settings API 调用（`getSettings`, `updateSettings`, `getSettingsStatus`） |
+
+**UI 结构**：
+
+```
+SettingsView
+├── Provider 卡片列表（手风琴/Accordion）
+│   ├── OpenAI（展开后显示 API Key 输入框 + 已配置状态）
+│   ├── Anthropic
+│   ├── Qwen
+│   └── ...（由 Models API 动态返回）
+│
+├── 验证并保存按钮（多阶段验证）
+│   ├── Step 1: 检查是否选中 Provider
+│   ├── Step 2: 检查 Key 是否填写
+│   ├── Step 3: 调用 validateKey() 后端验证
+│   ├── Step 4: 确认返回可用模型列表
+│   └── Step 5: 自动设置默认模型 = 验证通过 Provider 的第一个模型
+│
+└── 返回聊天按钮
+```
+
+**关键设计**：
+- 移除了"默认模型选择"下拉框 — 默认模型由保存时自动从当前选中 Provider 获取
+- 移除了"其他设置 (Application)"区段
+- 保存失败时显示错误提示 + 引导步骤自动回退
+- 原生 `<select>` 下拉使用 `appearance-none` + 自定义 SVG 箭头修复样式
+
+---
+
+### 4.3 通用确认弹窗（SimpleConfirmModal）
+
+**设计需求**：替代原生 `alert()` / `confirm()`，统一 UI 风格。
+
+| 文件 | 状态 | 说明 |
+|------|------|------|
+| `frontend/src/components/modals/SimpleConfirmModal.vue` | 已完成 | 可复用弹窗组件，支持 4 种类型 |
+
+**Props**：
+
+| Prop | 类型 | 说明 |
+|------|------|------|
+| `show` | boolean | 是否显示 |
+| `title` | string | 弹窗标题 |
+| `message` | string | 弹窗内容 |
+| `type` | `'confirm' \| 'warning' \| 'info' \| 'error'` | 弹窗类型（影响图标和按钮颜色） |
+| `confirmText` | string | 确认按钮文本 |
+| `cancelText` | string | 取消按钮文本 |
+| `showCancel` | boolean | 是否显示取消按钮（`error` 类型默认隐藏） |
+
+**使用方式（Promise 封装）**：
+
+```typescript
+// ChatView.vue 中的 showConfirm 辅助函数
+const showConfirm = (opts): Promise<boolean> => {
+  simpleModal.show = true;
+  simpleModal.title = opts.title;
+  simpleModal.message = opts.message;
+  simpleModal.type = opts.type || 'confirm';
+  // ...
+  return new Promise(resolve => { simpleModal.resolve = resolve; });
+};
+```
+
+**已替换的调用点**（ChatView.vue）：
+- 删除对话 → `showConfirm({ type: 'warning' })`
+- 删除历史记录 → `showConfirm({ type: 'warning' })`
+- 删除项目 → `showConfirm({ type: 'warning' })`
+- 启动项目（新窗口提示）→ `showConfirm({ type: 'info' })`
+- 文件上传错误 → `showConfirm({ type: 'error' })`
+- 项目启动失败 → `showConfirm({ type: 'error' })`
+
+---
+
+### 4.4 聊天欢迎页简化
+
+| 文件 | 状态 | 说明 |
+|------|------|------|
+| `frontend/src/components/chat/MessageList.vue` | 已完成 | 移除了 3 张建议卡片 |
+
+**移除内容**：
+- "生成贪吃蛇游戏"、"分析项目依赖"、"搜索 RAG 论文" 三张快捷建议卡片及对应的 `suggestions` 数组
+- 移除未使用的 Lucide 图标导入（`Gamepad2`, `BarChart3`, `Search`）
+
+---
+
+### 4.5 尚未实现的前端模块
+
+以下模块在架构设计中定义但尚未实现：
 
 | 需求 | 设计章节 | 说明 |
 |------|----------|------|
-| 首次启动配置向导 | 3.1.3 | Vue 组件 |
 | Skill 配置向导 | 3.1.4 | Vue 组件 |
 | 服务状态仪表板 | 3.1.5 | Vue 组件 |
 | MCP Apps UI | 3.6 | iframe + postMessage |
@@ -1330,6 +1472,7 @@ python scripts/run_e2e_auto.py --provider claude
 
 | 项目 | 涉及文件 | 工作量 | 说明 |
 |------|----------|--------|------|
+| 停止生成功能修复 | `frontend/src/composables/useChat.ts` + `stores/session.ts` + `api/session.ts` | 小 | 暂停按钮点击后无效果，需排查 stopSession API 调用链路 |
 | Playbook 端到端串联 | `core/agent/base.py` + `core/events/broadcaster.py` + `routers/` | 中 | 串联剩余 3 条链路：DRAFT 生成 → 用户确认 → APPROVED（Hint 注入已完成） |
 | 实例创建 API | `routers/` + `utils/instance_loader.py` | 小 | 前端调用 → 从模板脚手架创建新实例目录 |
 | 记忆混合检索权重 | `core/memory/xiaodazi_memory.py` | 小 | config 已声明 `vector_weight`/`bm25_weight`，recall 中应用 |
@@ -1454,6 +1597,21 @@ playbook:
 | `instances/xiaodazi/config/llm_profiles.yaml` | LLM Profiles 配置（从 config.yaml 分离） |
 | `instances/_template/config/skills.yaml` | 模板 Skills 配置 |
 | `instances/_template/config/llm_profiles.yaml` | 模板 LLM Profiles 配置 |
+| `frontend/src/stores/guide.ts` | 引导状态管理（9 步 + 验证 + 跳过控制） |
+| `frontend/src/components/common/GuideOverlay.vue` | 全局引导浮层（Teleport + 高亮 + tooltip） |
+| `frontend/src/components/modals/SimpleConfirmModal.vue` | 通用确认弹窗（替代 alert/confirm） |
+| `frontend/src/api/models.ts` | Models API 调用层（Provider 列表 + Key 验证） |
+
+### 本轮修改的前端文件
+
+| 文件 | 修改内容 |
+|------|----------|
+| `frontend/src/views/settings/SettingsView.vue` | 重构为 Provider 卡片式 UI + Models API 集成 + 验证保存 + 引导集成 |
+| `frontend/src/views/chat/ChatView.vue` | 引导启动入口 + SimpleConfirmModal 替代 alert/confirm + 步骤编号调整 |
+| `frontend/src/views/project/CreateProjectView.vue` | 引导步骤编号从 10 步调整为 9 步 |
+| `frontend/src/components/chat/MessageList.vue` | 移除 3 张建议卡片 + 未使用图标导入 |
+| `frontend/src/components/chat/ConversationSidebar.vue` | 引导步骤编号调整 |
+| `frontend/src/components/chat/ChatInputArea.vue` | 停止生成按钮 loading/stopping 状态传递 |
 
 ### 本轮删除文件
 

@@ -14,6 +14,18 @@ const routes = [
     component: () => import('@/views/chat/ChatView.vue')
   },
 
+  // ==================== Agent（项目）对话 ====================
+  {
+    path: '/agent/:agentId',
+    name: 'agent',
+    component: () => import('@/views/chat/ChatView.vue')
+  },
+  {
+    path: '/agent/:agentId/c/:conversationId',
+    name: 'agent-conversation',
+    component: () => import('@/views/chat/ChatView.vue')
+  },
+
   // ==================== 管理后台（Dashboard 布局） ====================
   {
     path: '/knowledge',
@@ -27,6 +39,14 @@ const routes = [
     component: () => import('@/views/skills/SkillsView.vue'),
     meta: { layout: 'dashboard' }
   },
+  // ==================== 新建项目 ====================
+  {
+    path: '/create-project',
+    name: 'create-project',
+    component: () => import('@/views/project/CreateProjectView.vue'),
+    meta: { layout: 'none' }
+  },
+
   // ==================== 设置页面 ====================
   {
     path: '/settings',

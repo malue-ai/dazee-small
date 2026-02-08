@@ -97,3 +97,15 @@ export type {
   SkillUninstallRequest,
   SkillToggleRequest
 } from './skills'
+
+// 从 agent.ts 导出 Agent（项目）相关类型
+export type {
+  AgentStatus,
+  AgentSummary,
+  AgentListResponse,
+  AgentDetail,
+  AgentMCPTool,
+  AgentAPI,
+  AgentCreateRequest,
+  AgentUpdateRequest
+} from './agent'

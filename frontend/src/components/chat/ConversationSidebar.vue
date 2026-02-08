@@ -30,7 +30,7 @@
               ref="searchInputRef"
               v-model="searchQuery"
               type="text"
-              placeholder="搜索对话..."
+              placeholder="搜索项目..."
               class="w-full pl-8 pr-8 py-2 text-sm bg-muted border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/40 text-foreground placeholder:text-muted-foreground/60"
               @keydown.escape="closeSearch"
             />
@@ -54,11 +54,19 @@
         <!-- 正常模式 -->
         <template v-else>
           <button 
-            @click="emit('create')" 
+            ref="createProjectBtnRef"
+            @click="emit('navigate', '/create-project')" 
             class="w-full flex items-center gap-3 px-3 py-2 text-muted-foreground hover:bg-muted hover:text-foreground rounded-lg transition-colors group"
           >
-            <SquarePen class="w-4 h-4 text-muted-foreground group-hover:text-foreground" />
-            <span class="text-sm font-medium">新对话</span>
+            <Plus class="w-4 h-4 text-muted-foreground group-hover:text-foreground" />
+            <span class="text-sm font-medium">新建项目</span>
+          </button>
+          <button 
+            @click="emit('navigate', '/skills')" 
+            class="w-full flex items-center gap-3 px-3 py-2 text-muted-foreground hover:bg-muted hover:text-foreground rounded-lg transition-colors group"
+          >
+            <Puzzle class="w-4 h-4 text-muted-foreground group-hover:text-foreground" />
+            <span class="text-sm font-medium">技能</span>
           </button>
           <button 
             @click="openSearch"
@@ -70,146 +78,104 @@
         </template>
       </div>
 
-      <!-- 库 -->
-      <div v-if="!isSearching" class="flex flex-col gap-1">
-        <div class="px-3 text-xs font-medium text-muted-foreground/60 mb-1">项目</div>
-        <button 
-          @click="emit('navigate', '/knowledge')" 
-          class="w-full flex items-center gap-3 px-3 py-2 text-muted-foreground hover:bg-muted hover:text-foreground rounded-lg transition-colors group"
-        >
-          <BookOpen class="w-4 h-4 text-muted-foreground group-hover:text-foreground" />
-          <span class="text-sm font-medium">知识库</span>
-        </button>
-        <button 
-          @click="emit('navigate', '/skills')" 
-          class="w-full flex items-center gap-3 px-3 py-2 text-muted-foreground hover:bg-muted hover:text-foreground rounded-lg transition-colors group"
-        >
-          <Puzzle class="w-4 h-4 text-muted-foreground group-hover:text-foreground" />
-          <span class="text-sm font-medium">技能</span>
-        </button>
-      </div>
-
-      <!-- 搜索结果 -->
-      <div v-if="isSearching" class="flex flex-col gap-1 flex-1 min-h-0">
+      <!-- 项目(Agent)区 -->
+      <div class="flex flex-col gap-1">
         <div class="px-3 flex items-center justify-between mb-1">
           <span class="text-xs font-medium text-muted-foreground/60">
-            {{ searchQuery ? `搜索结果（${searchResults.length}）` : '输入关键词搜索对话' }}
+            {{ isSearching && searchQuery ? `搜索结果（${filteredAgents.length}）` : '项目' }}
           </span>
-        </div>
-
-        <!-- 搜索中 -->
-        <div v-if="searchLoading" class="px-3 py-4 text-xs text-muted-foreground/60 flex flex-col items-center gap-2">
-          <Loader2 class="w-4 h-4 animate-spin" />
-          <span>搜索中...</span>
-        </div>
-
-        <!-- 无结果 -->
-        <div v-else-if="searchQuery && searchResults.length === 0" class="px-3 py-4 text-xs text-muted-foreground/60 flex flex-col items-center gap-2">
-          <SearchX class="w-8 h-8 opacity-50" />
-          <span>未找到匹配的对话</span>
-        </div>
-
-        <!-- 搜索结果列表 -->
-        <div v-else-if="searchResults.length > 0" class="flex flex-col gap-0.5 overflow-y-auto scrollbar-thin -mx-2 px-2 pb-4">
-          <div
-            v-for="item in searchResults"
-            :key="item.conversation.id"
-            class="group relative flex flex-col gap-0.5 px-3 py-2 rounded-lg cursor-pointer transition-colors"
-            :class="item.conversation.id === currentId ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'"
-            @click="selectSearchResult(item.conversation.id)"
+          <button
+            v-if="!isSearching"
+            @click="emit('navigate', '/create-project')"
+            class="p-0.5 text-muted-foreground/50 hover:text-foreground rounded transition-colors"
+            title="新建项目"
           >
-            <!-- 标题行 -->
-            <div class="flex items-center gap-2">
-              <MessageSquare class="w-3.5 h-3.5 flex-shrink-0 text-muted-foreground/50" :class="{ 'text-accent-foreground': item.conversation.id === currentId }" />
-              <span class="truncate text-sm font-medium">{{ item.conversation.title || '未命名对话' }}</span>
-            </div>
-            <!-- 匹配片段（内容匹配时显示） -->
-            <div v-if="item.snippet" class="pl-5.5 text-xs text-muted-foreground/70 truncate">
-              {{ item.snippet }}
-            </div>
-          </div>
+            <Plus class="w-3.5 h-3.5" />
+          </button>
         </div>
 
-        <!-- 空状态（未输入关键词） -->
-        <div v-else class="px-3 py-6 text-xs text-muted-foreground/40 flex flex-col items-center gap-2">
-          <Search class="w-6 h-6 opacity-40" />
-          <span>搜索对话标题和消息内容</span>
-        </div>
-      </div>
-
-      <!-- 对话列表（非搜索状态） -->
-      <div v-if="!isSearching" class="flex flex-col gap-1 flex-1 min-h-0">
-        <div class="px-3 flex items-center justify-between group cursor-pointer mb-1">
-          <span class="text-xs font-medium text-muted-foreground/60">对话记录</span>
-        </div>
-        
-        <!-- 加载中 -->
-        <div v-if="loading" class="px-3 py-4 text-xs text-muted-foreground/60 flex flex-col items-center gap-2">
-          <Loader2 class="w-4 h-4 animate-spin" />
-          <span>加载中...</span>
-        </div>
-        
-        <!-- 空状态 -->
-        <div v-else-if="conversations.length === 0" class="px-3 py-4 text-xs text-muted-foreground/60 flex flex-col items-center gap-2">
-          <Inbox class="w-8 h-8 opacity-50" />
-          <span>暂无记录</span>
-        </div>
-        
-        <!-- 列表 -->
-        <div v-else class="flex flex-col gap-0.5 overflow-y-auto scrollbar-thin -mx-2 px-2 pb-4">
+        <!-- Agent 列表（正常模式显示全部，搜索模式显示过滤后的） -->
+        <div v-if="displayAgents.length > 0" class="flex flex-col gap-0.5">
           <div
-            v-for="conv in conversations"
-            :key="conv.id"
+            v-for="agent in displayAgents"
+            :key="agent.agent_id"
             class="group relative flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors"
-            :class="conv.id === currentId ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'"
-            @click="emit('select', conv.id)"
+            :class="agent.agent_id === currentAgentId ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'"
+            @click="handleAgentClick(agent.agent_id)"
           >
-            <!-- 图标/状态 -->
-            <div class="flex-shrink-0 w-4 h-4 flex items-center justify-center">
-              <span v-if="isRunning(conv.id)" class="w-2 h-2 rounded-full bg-success animate-pulse"></span>
-              <MessageSquare v-else class="w-4 h-4 text-muted-foreground/50 group-hover:text-muted-foreground" :class="{ 'text-accent-foreground': conv.id === currentId }" />
-            </div>
-            
-            <!-- 标题 -->
-            <div class="flex-1 min-w-0 flex flex-col">
-              <span class="truncate text-sm font-medium">{{ conv.title || '未命名对话' }}</span>
-            </div>
-
-            <!-- 删除按钮 (Hover显示) -->
-            <button 
+            <Bot class="w-4 h-4 flex-shrink-0" :class="agent.agent_id === currentAgentId ? 'text-primary' : 'text-muted-foreground/50 group-hover:text-muted-foreground'" />
+            <span class="truncate text-sm font-medium flex-1">{{ agent.name }}</span>
+            <button
               class="opacity-0 group-hover:opacity-100 p-1 text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 rounded transition-all"
-              @click.stop="emit('delete', conv)"
+              @click.stop="emit('delete-agent', agent.agent_id)"
             >
               <Trash2 class="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
+
+        <!-- 空状态 -->
+        <div v-else class="px-3 py-3 text-xs text-muted-foreground/40 flex flex-col items-center gap-1.5">
+          <template v-if="isSearching && searchQuery">
+            <SearchX class="w-6 h-6 opacity-40" />
+            <span>未找到匹配的项目</span>
+          </template>
+          <template v-else>
+            <Bot class="w-6 h-6 opacity-40" />
+            <span>暂无项目</span>
+          </template>
+        </div>
+
       </div>
 
+    </div>
+
+    <!-- 底部用户信息（始终可见，不随内容滚动） -->
+    <div v-show="!collapsed" class="border-t border-border pt-3 px-4 pb-4 flex-shrink-0">
+      <div 
+        ref="settingsBtnRef"
+        class="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-muted cursor-pointer transition-colors group"
+        @click="emit('navigate', '/settings')"
+        title="设置"
+      >
+        <div class="w-6 h-6 rounded-full bg-muted flex items-center justify-center flex-shrink-0 text-[10px] font-bold text-muted-foreground group-hover:text-foreground">
+          {{ userId ? userId.charAt(0).toUpperCase() : 'U' }}
+        </div>
+        <span class="text-sm font-medium text-foreground truncate">{{ userId || 'User' }}</span>
+        <Settings class="w-3.5 h-3.5 ml-auto text-muted-foreground/40 opacity-0 group-hover:opacity-100 transition-opacity" />
+      </div>
+    </div>
+
+    <!-- 折叠状态：仅显示头像 -->
+    <div v-show="collapsed" class="border-t border-border py-3 flex justify-center flex-shrink-0">
+      <div 
+        class="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-xs font-bold text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer transition-colors"
+        @click="emit('navigate', '/settings')"
+        title="设置"
+      >
+        {{ userId ? userId.charAt(0).toUpperCase() : 'U' }}
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue'
-import type { Conversation } from '@/types'
-import type { SearchConversationItem } from '@/api/chat'
-import { searchConversations } from '@/api/chat'
+import { ref, computed, nextTick, watch, onMounted } from 'vue'
+import type { Conversation, AgentSummary } from '@/types'
+import { useGuideStore } from '@/stores/guide'
 import { formatShortTime } from '@/utils'
 import { 
   PanelLeftClose, 
   PanelLeftOpen, 
-  SquarePen, 
   Search,
   SearchX,
   X,
-  BookOpen, 
+  Plus,
+  Bot,
   Puzzle, 
-  MessageSquare, 
   Trash2,
   Sparkles,
-  Loader2,
-  Inbox
+  Settings
 } from 'lucide-vue-next'
 
 // ==================== Props ====================
@@ -227,12 +193,18 @@ interface Props {
   userId?: string
   /** 判断会话是否正在运行的函数 */
   isRunning?: (id: string) => boolean
+  /** Agent（项目）列表 */
+  agents?: AgentSummary[]
+  /** 当前选中的 Agent ID */
+  currentAgentId?: string | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
   loading: false,
   userId: '',
-  isRunning: () => false
+  isRunning: () => false,
+  agents: () => [],
+  currentAgentId: null
 })
 
 // ==================== Emits ====================
@@ -248,17 +220,58 @@ const emit = defineEmits<{
   (e: 'toggle-collapse'): void
   /** 导航 */
   (e: 'navigate', path: string): void
+  /** 选择 Agent（项目） */
+  (e: 'select-agent', agentId: string): void
+  /** 删除 Agent（项目） */
+  (e: 'delete-agent', agentId: string): void
 }>()
+
+// ==================== 引导 ====================
+
+const guideStore = useGuideStore()
+const createProjectBtnRef = ref<HTMLElement | null>(null)
+const settingsBtnRef = ref<HTMLElement | null>(null)
+
+// 引导 Step 1：高亮设置按钮 | Step 5：高亮"新建项目"按钮
+onMounted(() => {
+  if (guideStore.isActive) {
+    if (guideStore.currentStep === 1 && settingsBtnRef.value) {
+      guideStore.setTarget(settingsBtnRef.value)
+    } else if (guideStore.currentStep === 5 && createProjectBtnRef.value) {
+      guideStore.setTarget(createProjectBtnRef.value)
+    }
+  }
+})
+
+watch(() => guideStore.currentStep, (step) => {
+  if (step === 1 && settingsBtnRef.value) {
+    guideStore.setTarget(settingsBtnRef.value)
+  } else if (step === 5 && createProjectBtnRef.value) {
+    guideStore.setTarget(createProjectBtnRef.value)
+  }
+})
 
 // ==================== 搜索状态 ====================
 
 const isSearching = ref(false)
 const searchQuery = ref('')
-const searchResults = ref<SearchConversationItem[]>([])
-const searchLoading = ref(false)
 const searchInputRef = ref<HTMLInputElement | null>(null)
 
-let debounceTimer: ReturnType<typeof setTimeout> | null = null
+/** 根据搜索关键词过滤项目列表 */
+const filteredAgents = computed(() => {
+  const query = searchQuery.value.trim().toLowerCase()
+  if (!query) return props.agents
+  return props.agents.filter(agent =>
+    agent.name.toLowerCase().includes(query) ||
+    (agent.description && agent.description.toLowerCase().includes(query)) ||
+    agent.agent_id.toLowerCase().includes(query)
+  )
+})
+
+/** 当前应该显示的项目列表（搜索时显示过滤结果，否则全部） */
+const displayAgents = computed(() => {
+  return isSearching.value ? filteredAgents.value : props.agents
+})
 
 /**
  * 打开搜索模式
@@ -266,7 +279,6 @@ let debounceTimer: ReturnType<typeof setTimeout> | null = null
 function openSearch() {
   isSearching.value = true
   searchQuery.value = ''
-  searchResults.value = []
   nextTick(() => {
     searchInputRef.value?.focus()
   })
@@ -278,50 +290,17 @@ function openSearch() {
 function closeSearch() {
   isSearching.value = false
   searchQuery.value = ''
-  searchResults.value = []
-  searchLoading.value = false
-  if (debounceTimer) {
-    clearTimeout(debounceTimer)
-    debounceTimer = null
-  }
 }
 
 /**
- * 选择搜索结果
+ * 点击项目（搜索模式下自动关闭搜索）
  */
-function selectSearchResult(conversationId: string) {
-  emit('select', conversationId)
-  closeSearch()
+function handleAgentClick(agentId: string) {
+  emit('select-agent', agentId)
+  if (isSearching.value) {
+    closeSearch()
+  }
 }
-
-/**
- * 监听搜索关键词变化，防抖调用搜索 API
- */
-watch(searchQuery, (query) => {
-  if (debounceTimer) {
-    clearTimeout(debounceTimer)
-  }
-
-  const trimmed = query.trim()
-  if (!trimmed) {
-    searchResults.value = []
-    searchLoading.value = false
-    return
-  }
-
-  searchLoading.value = true
-  debounceTimer = setTimeout(async () => {
-    try {
-      const result = await searchConversations(props.userId, trimmed)
-      searchResults.value = result.conversations
-    } catch (err) {
-      console.error('搜索对话失败:', err)
-      searchResults.value = []
-    } finally {
-      searchLoading.value = false
-    }
-  }, 300)
-})
 
 // ==================== Methods ====================
 

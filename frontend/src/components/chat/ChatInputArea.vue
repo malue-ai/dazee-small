@@ -42,10 +42,10 @@
           placeholder="输入消息..."
           :disabled="disabled"
           rows="1"
-          class="flex-1 max-h-[200px] py-3 bg-transparent border-none outline-none text-base text-foreground placeholder:text-muted-foreground/50 resize-none leading-relaxed"
+          class="flex-1 max-h-[200px] py-3 bg-transparent border-none outline-none text-base text-foreground placeholder:text-muted-foreground/50 resize-none leading-relaxed overflow-y-hidden"
         ></textarea>
         
-        <div class="pb-1">
+        <div class="pb-1 flex-shrink-0">
           <!-- 停止按钮 -->
           <button 
             v-if="loading" 
@@ -55,13 +55,15 @@
           >
             <Square class="w-5 h-5" />
           </button>
-          <!-- 发送按钮 -->
+          <!-- 发送按钮（始终显示，无内容时禁用） -->
           <button 
-            v-else 
-            class="p-3 rounded-xl transition-all shadow-sm flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none" 
-            :class="canSend ? 'bg-primary text-white hover:bg-primary-hover hover:shadow-lg shadow-primary/20' : 'bg-muted text-muted-foreground/40 cursor-not-allowed'"
-            @click="handleSend"
+            v-else
+            class="p-3 rounded-xl transition-all shadow-sm flex items-center justify-center"
+            :class="canSend
+              ? 'bg-primary text-white hover:bg-primary-hover hover:shadow-lg shadow-primary/20'
+              : 'bg-muted text-muted-foreground/30 cursor-not-allowed'"
             :disabled="!canSend"
+            @click="handleSend"
           >
             <ArrowUp class="w-5 h-5" />
           </button>
@@ -75,7 +77,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import type { AttachedFile } from '@/types'
 import { FileText, X, Loader2, Paperclip, Square, ArrowUp } from 'lucide-vue-next'
 
@@ -149,8 +151,15 @@ function adjustHeight(): void {
   if (textareaRef.value) {
     textareaRef.value.style.height = 'auto'
     textareaRef.value.style.height = Math.min(textareaRef.value.scrollHeight, 150) + 'px'
+    // 内容超过最大高度时才允许滚动
+    textareaRef.value.style.overflowY = textareaRef.value.scrollHeight > 150 ? 'auto' : 'hidden'
   }
 }
+
+// 挂载时初始化高度，防止初始渲染出现滚动条
+onMounted(() => {
+  nextTick(adjustHeight)
+})
 
 /**
  * 处理回车键

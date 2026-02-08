@@ -10,19 +10,21 @@
     <router-view v-else />
     <!-- 全局调试面板（所有页面可见） -->
     <DebugPanel />
+    <!-- 全局引导浮层 -->
+    <GuideOverlay />
   </template>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { ref, computed } from 'vue'
+import { useRoute } from 'vue-router'
 import DefaultLayout from '@/layouts/DefaultLayout.vue'
 import DashboardLayout from '@/layouts/DashboardLayout.vue'
 import DebugPanel from '@/components/common/DebugPanel.vue'
 import SplashScreen from '@/components/common/SplashScreen.vue'
+import GuideOverlay from '@/components/common/GuideOverlay.vue'
 
 const route = useRoute()
-const router = useRouter()
 
 const showSplash = ref(true)
 const appReady = ref(false)
@@ -37,11 +39,6 @@ const layout = computed(() => {
 function onSplashDone() {
   showSplash.value = false
   appReady.value = true
-
-  // 首次使用：跳转引导页
-  const onboardingDone = localStorage.getItem('zenflux_onboarding_done')
-  if (!onboardingDone && route.name !== 'onboarding') {
-    router.replace('/onboarding')
-  }
+  // 旧引导页已弃用，改为 ChatView 中的交互式引导
 }
 </script>
