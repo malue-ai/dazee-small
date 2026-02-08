@@ -82,9 +82,9 @@ async def memory_flush_task(
         return
 
     try:
-        from core.memory.xiaodazi_memory import XiaodaziMemoryManager
+        from core.memory.instance_memory import InstanceMemoryManager
 
-        mgr = XiaodaziMemoryManager(
+        mgr = InstanceMemoryManager(
             user_id=ctx.user_id,
             mem0_enabled=True,
         )

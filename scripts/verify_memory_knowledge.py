@@ -4,7 +4,7 @@
 验证内容：
 1. MarkdownMemoryLayer — MEMORY.md 读写、段落追加、每日日志
 2. GenericFTS5 — 建表、upsert、search、delete
-3. XiaodaziMemoryManager — recall/remember/flush/get_memory_context
+3. InstanceMemoryManager — recall/remember/flush/get_memory_context
 4. LocalKnowledgeManager — search/add_document/get_stats
 5. FileIndexer — index_path/index_directory
 
@@ -196,16 +196,16 @@ async def test_generic_fts5():
         await engine.dispose()
 
 
-async def test_xiaodazi_memory():
-    """测试 XiaodaziMemoryManager（不依赖 Mem0）"""
+async def test_instance_memory():
+    """测试 InstanceMemoryManager（不依赖 Mem0）"""
     print("\n" + "=" * 60)
-    print("测试 3: XiaodaziMemoryManager（文件层 + 降级搜索）")
+    print("测试 3: InstanceMemoryManager（文件层 + 降级搜索）")
     print("=" * 60)
 
-    from core.memory.xiaodazi_memory import XiaodaziMemoryManager
+    from core.memory.instance_memory import InstanceMemoryManager
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        mgr = XiaodaziMemoryManager(
+        mgr = InstanceMemoryManager(
             base_dir=Path(tmpdir),
             user_id="test_user",
             mem0_enabled=False,  # 不依赖 Mem0 进行基本测试
@@ -365,7 +365,7 @@ async def test_module_imports():
     modules = [
         ("infra.local_store.generic_fts", ["GenericFTS5", "FTS5TableConfig", "FTS5Hit"]),
         ("core.memory.markdown_layer", ["MarkdownMemoryLayer", "MemoryEntry"]),
-        ("core.memory.xiaodazi_memory", ["XiaodaziMemoryManager"]),
+        ("core.memory.instance_memory", ["InstanceMemoryManager"]),
         ("core.knowledge.local_search", ["LocalKnowledgeManager", "SearchResult"]),
         ("core.knowledge.file_indexer", ["FileIndexer"]),
         ("infra.local_store", ["GenericFTS5", "FTS5TableConfig", "FTS5Hit", "LocalIndexedFile"]),
@@ -390,7 +390,7 @@ async def main():
     await test_module_imports()
     await test_markdown_layer()
     await test_generic_fts5()
-    await test_xiaodazi_memory()
+    await test_instance_memory()
     await test_knowledge_manager()
 
     print("\n" + "=" * 60)

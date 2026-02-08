@@ -28,7 +28,7 @@ class MemorySource(str, Enum):
     BEHAVIOR_ANALYSIS = "behavior_analysis"  # 行为分析
     EMOTION_ANALYSIS = "emotion_analysis"  # 情绪分析
     SYSTEM_INFERENCE = "system_inference"  # 系统推断
-    XIAODAZI_REMEMBER = "xiaodazi_remember"  # XiaodaziMemoryManager.remember() 写入
+    INSTANCE_REMEMBER = "instance_remember"  # InstanceMemoryManager.remember() 写入
 
 
 class MemoryVisibility(str, Enum):

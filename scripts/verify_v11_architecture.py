@@ -264,7 +264,7 @@ check_file_exists("core/knowledge/local_search.py")
 check_file_exists("core/knowledge/file_indexer.py")
 check_file_exists("core/discovery/__init__.py")
 check_file_exists("core/discovery/app_scanner.py")
-check_file_exists("core/memory/xiaodazi_memory.py")
+check_file_exists("core/memory/instance_memory.py")
 check_file_exists("core/planning/progress_transformer.py")
 check_file_exists("core/project/__init__.py")
 check_file_exists("core/project/manager.py")
@@ -283,11 +283,11 @@ check_class_has_method(AppScanner, "scan")
 check_class_has_method(AppScanner, "get_capabilities")
 check_class_has_method(AppScanner, "find_app_for_task")
 
-from core.memory.xiaodazi_memory import XiaodaziMemoryManager
+from core.memory.instance_memory import InstanceMemoryManager
 
-check_class_has_method(XiaodaziMemoryManager, "recall")
-check_class_has_method(XiaodaziMemoryManager, "remember")
-check_class_has_method(XiaodaziMemoryManager, "flush")
+check_class_has_method(InstanceMemoryManager, "recall")
+check_class_has_method(InstanceMemoryManager, "remember")
+check_class_has_method(InstanceMemoryManager, "flush")
 
 from core.planning.progress_transformer import ProgressTransformer, ProgressUpdate
 

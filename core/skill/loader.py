@@ -53,8 +53,9 @@ class SkillsLoader:
     使用示例：
         loader = SkillsLoader(
             skills_config=config["skills"],
-            instance_skills_dir=Path("instances/xiaodazi/skills"),
+            instance_skills_dir=Path("instances/my_agent/skills"),
             library_skills_dir=Path("skills/library"),
+            instance_name="my_agent",
         )
 
         # 加载并合并当前 OS 的 Skills
@@ -76,6 +77,7 @@ class SkillsLoader:
         instance_skills_dir: Path,
         library_skills_dir: Path,
         workspace_skills_dir: Optional[Path] = None,
+        instance_name: Optional[str] = None,
     ):
         """
         初始化
@@ -85,11 +87,13 @@ class SkillsLoader:
             instance_skills_dir: 实例 Skills 目录（instances/{name}/skills/）
             library_skills_dir: 全局 Skills 库目录（skills/library/）
             workspace_skills_dir: 工作区 Skills 目录（./skills/），优先级最高
+            instance_name: 实例名称，用于读取 SKILL.md 中 metadata.{instance_name} 块
         """
         self._config = skills_config or {}
         self._instance_dir = Path(instance_skills_dir)
         self._library_dir = Path(library_skills_dir)
         self._workspace_dir = Path(workspace_skills_dir) if workspace_skills_dir else None
+        self._instance_name = instance_name or os.environ.get("AGENT_INSTANCE", "")
         self._os_key = _current_os_key()
         self._loading_mode = self._config.get("loading_mode", "lazy")
 
@@ -645,12 +649,12 @@ class SkillsLoader:
 
     def _get_setup_metadata(self, entry: SkillEntry) -> Dict[str, str]:
         """
-        从 SKILL.md frontmatter 读取 metadata.xiaodazi.setup 块
+        从 SKILL.md frontmatter 读取 metadata.{instance_name}.setup 块
 
         Returns:
             {"user_hint": ..., "auto_install": ..., "download_url": ..., "web_alternative": ...}
         """
-        if not entry.skill_path:
+        if not entry.skill_path or not self._instance_name:
             return {}
 
         skill_md = Path(entry.skill_path) / "SKILL.md"
@@ -670,8 +674,8 @@ class SkillsLoader:
             if not isinstance(meta, dict):
                 return {}
 
-            xiaodazi = (meta.get("metadata") or {}).get("xiaodazi") or {}
-            setup = xiaodazi.get("setup") or {}
+            instance_meta = (meta.get("metadata") or {}).get(self._instance_name) or {}
+            setup = instance_meta.get("setup") or {}
             return {k: str(v) for k, v in setup.items() if v} if isinstance(setup, dict) else {}
         except Exception as e:
             logger.debug(f"读取 {entry.name} setup metadata 失败: {e}")
@@ -723,6 +727,7 @@ def create_skills_loader(
     instance_skills_dir: Path,
     library_skills_dir: Optional[Path] = None,
     workspace_skills_dir: Optional[Path] = None,
+    instance_name: Optional[str] = None,
 ) -> SkillsLoader:
     """
     创建 SkillsLoader 实例
@@ -732,6 +737,7 @@ def create_skills_loader(
         instance_skills_dir: 实例 Skills 目录
         library_skills_dir: 全局 Skills 库（默认项目根目录/skills/library）
         workspace_skills_dir: 工作区 Skills 目录（仅当调用者显式传入时启用）
+        instance_name: 实例名称，用于读取 SKILL.md 中 metadata.{instance_name} 块
 
     Returns:
         SkillsLoader 实例
@@ -748,4 +754,5 @@ def create_skills_loader(
         instance_skills_dir=instance_skills_dir,
         library_skills_dir=library_skills_dir,
         workspace_skills_dir=workspace_skills_dir,
+        instance_name=instance_name,
     )

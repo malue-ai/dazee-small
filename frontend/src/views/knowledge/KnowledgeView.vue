@@ -88,7 +88,7 @@
                   </button>
                 </div>
                 <p class="text-xs text-muted-foreground">
-                  默认模型：<span class="font-medium">BGE-M3 Q4</span>（中英文双语，424MB，首次使用自动下载到 ~/.xiaodazi/models/）
+                  默认模型：<span class="font-medium">BGE-M3 Q4</span>（中英文双语，424MB，首次使用自动下载到 data/shared/models/）
                 </p>
               </div>
 
