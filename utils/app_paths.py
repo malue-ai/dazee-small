@@ -221,8 +221,63 @@ def get_prompts_dir() -> Path:
 
 
 def get_instances_dir() -> Path:
-    """获取 instances 目录路径"""
+    """
+    获取 instances 目录路径（运行时读写）
+
+    开发模式：项目根目录/instances/（直接读写）
+    打包模式：用户数据目录/instances/（可写副本）
+
+    打包后首次启动时，需调用 ensure_instances_initialized()
+    将 bundle 内的种子实例复制到用户数据目录。
+    """
+    if is_frozen():
+        d = get_user_data_dir() / "instances"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
     return get_bundle_dir() / "instances"
+
+
+def get_bundle_instances_dir() -> Path:
+    """
+    获取 bundle 内的 instances 目录（只读种子数据）
+
+    仅在打包模式下有意义，用于首次启动时复制到用户数据目录。
+    开发模式下与 get_instances_dir() 返回相同路径。
+    """
+    return get_bundle_dir() / "instances"
+
+
+def ensure_instances_initialized() -> bool:
+    """
+    确保用户 instances 目录已初始化（仅打包模式需要）
+
+    首次启动时，将 bundle 内的种子实例（_template、xiaodazi 等）
+    复制到用户数据目录。后续启动跳过已存在的实例。
+
+    Returns:
+        True if any instances were copied, False if already initialized
+    """
+    if not is_frozen():
+        return False
+
+    import shutil
+
+    bundle_instances = get_bundle_instances_dir()
+    user_instances = get_instances_dir()
+
+    if not bundle_instances.exists():
+        return False
+
+    copied = False
+    for item in bundle_instances.iterdir():
+        if not item.is_dir():
+            continue
+        target = user_instances / item.name
+        if not target.exists():
+            shutil.copytree(item, target)
+            copied = True
+
+    return copied
 
 
 def get_logs_dir() -> Path:

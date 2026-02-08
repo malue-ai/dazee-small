@@ -443,6 +443,7 @@ async function saveSettings() {
           provider: item.detail.name,
           message: e?.response?.data?.detail?.message || e?.message || '验证过程发生错误',
           models: [],
+          model_details: [],
         }
       } finally {
         validating[item.detail.name] = false

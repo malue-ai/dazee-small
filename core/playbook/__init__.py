@@ -2,6 +2,7 @@
 Playbook 策略库模块
 
 V8.0 新增
+V10.0 重构：统一存储后端，修复实例隔离
 
 职责：
 - 自动生成成功执行策略
@@ -11,7 +12,7 @@ V8.0 新增
 架构：
 - PlaybookManager: 策略库管理器
 - PlaybookEntry: 策略条目
-- PlaybookStorage: 策略存储（JSON/DB）
+- FileStorage: 文件存储后端
 
 工作流：
 1. RewardAttribution 评估会话 → 高分会话

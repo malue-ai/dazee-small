@@ -364,7 +364,7 @@ export function useHITL() {
    * 设置 SSE 事件处理回调（由 useChat 调用）
    * @param handler - 事件处理函数
    */
-  function setSSEEventHandler(handler: (event: any, assistantMsg: any) => void): void {
+  function setSSEEventHandler(handler: (event: any, assistantMsg: any, convId?: string) => void): void {
     onSSEEvent.value = handler
   }
 

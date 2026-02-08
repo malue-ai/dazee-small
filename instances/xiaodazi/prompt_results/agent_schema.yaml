@@ -7,12 +7,12 @@ intent_analyzer:
   - medium
   - complex
   task_types:
-  - file_operation
+  - file_management
   - writing
-  - data_analysis
   - translation
-  - ui_automation
-  - preference_adaptation
+  - data_analysis
+  - app_automation
+  - user_preference_adaptation
   output_formats:
   - text
   - markdown
@@ -35,14 +35,17 @@ plan_manager:
   failure_threshold: 0.4
 tool_selector:
   enabled: true
-  available_tools: []
-  selection_strategy: capability_based
-  allow_parallel: false
-  max_parallel_tools: 1
-  base_tools:
+  available_tools:
   - nodes
   - knowledge_search
-  - hitl
+  - web_search
+  - api_calling
+  - HITL
+  selection_strategy: capability_based
+  allow_parallel: false
+  max_parallel_tools: 3
+  base_tools:
+  - HITL
   tool_timeout: 300
 memory_manager:
   enabled: true
@@ -71,29 +74,24 @@ skills:
 - name: excel-generator
   enabled: true
   description: ''
-- name: pdf-generator
+- name: ppt-generator
   enabled: true
   description: ''
-- name: ppt-generator
+- name: pdf-generator
   enabled: true
   description: ''
 - name: file-organizer
   enabled: true
   description: ''
-- name: ui-automator
-  enabled: true
-  description: ''
-- name: translation
-  enabled: true
-  description: ''
-- name: writing-assistant
+- name: desktop-automator
   enabled: true
   description: ''
 tools:
 - nodes
 - knowledge_search
-- hitl
 - web_search
+- api_calling
+- HITL
 model: qwen3-max
 max_turns: 25
 execution_strategy: rvr
@@ -108,5 +106,5 @@ enable_thinking: null
 enable_caching: null
 thinking_mode: null
 prompts: null
-reasoning: 小搭子需处理复杂本地任务（文件操作、UI自动化、偏好记忆），强调主动性、安全性和用户友好。需细粒度规划、用户级记忆、HITL确认机制，并支持多格式输出。任务常涉及多步骤执行与替代方案规划，故启用高级
-  plan_manager 和 memory_manager。
+reasoning: 小搭子需处理复杂本地任务（如文件整理、应用操作）、主动规划、记忆用户偏好，并在技能缺失时引导安装或提供替代方案。需启用细粒度规划、用户级记忆、HITL
+  确认机制及多种文档生成技能，强调本地执行与安全交互。

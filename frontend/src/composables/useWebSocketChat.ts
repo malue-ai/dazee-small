@@ -55,7 +55,7 @@ const MAX_RECONNECT_ATTEMPTS = 8
 /** 退避增长因子 */
 const BACKOFF_FACTOR = 1.7
 
-/** 请求超时（毫秒） */
+/** 请求超时（毫秒）— 仅等待后端确认帧，不含 Agent 执行 */
 const REQUEST_TIMEOUT_MS = 30000
 
 // ==================== Composable ====================

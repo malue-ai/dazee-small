@@ -2207,59 +2207,65 @@ class ChatService:
                 )
                 # end_session 由 finally 块的 _cleanup_session_resources 统一处理
 
-            # 生成 UsageResponse 并记录审计
+            # 生成 UsageResponse 并记录审计（用户手动停止时跳过）
             usage_response = None
-            try:
-                with log_execution_time("Token 审计", logger):
-                    usage_stats = agent.usage_tracker.get_stats()
-
-                    usage_response = UsageResponse.from_tracker(
-                        tracker=agent.usage_tracker, model=agent.model, latency=duration_ms / 1000.0
-                    )
-
-                    token_usage = TokenUsage(
-                        input_tokens=usage_stats.get("total_input_tokens", 0),
-                        output_tokens=usage_stats.get("total_output_tokens", 0),
-                        thinking_tokens=usage_stats.get("total_thinking_tokens", 0),
-                        cache_read_tokens=usage_stats.get("total_cache_read_tokens", 0),
-                        cache_write_tokens=usage_stats.get("total_cache_creation_tokens", 0),
-                    )
-
-                    # 注意：这里传入的是会话累计值（所有 LLM 调用的总和）
-                    # is_session_cumulative=True（默认），使用会话级阈值检测
-                    await self.token_auditor.record(
-                        session_id=session_id,
-                        usage=token_usage,
-                        conversation_id=conversation_id,
-                        user_id=user_id,
-                        agent_id=getattr(agent, "agent_id", None),
-                        model=agent.model,
-                        duration_ms=duration_ms,
-                        query_length=len(str(current_message)),
-                        is_session_cumulative=True,  # 明确标记为会话累计值
-                    )
-
+            if status == "stopped":
                 logger.info(
-                    "Token 审计",
-                    extra={
-                        "input_tokens": token_usage.input_tokens,
-                        "output_tokens": token_usage.output_tokens,
-                        "thinking_tokens": token_usage.thinking_tokens,
-                        "cache_read_tokens": token_usage.cache_read_tokens,
-                        "total_price": usage_response.total_price,
-                    },
+                    "用户手动停止，跳过 Token 审计",
+                    extra={"session_id": session_id, "duration_ms": duration_ms},
                 )
-
+            else:
                 try:
-                    await self.conversation_service.update_message(
-                        message_id=assistant_message_id,
-                        metadata={"usage": usage_response.model_dump(mode="json")},
-                    )
-                except Exception as update_err:
-                    logger.warning("更新 Usage 数据失败", extra={"error": str(update_err)})
+                    with log_execution_time("Token 审计", logger):
+                        usage_stats = agent.usage_tracker.get_stats()
 
-            except Exception as audit_err:
-                logger.warning("Token 审计失败", extra={"error": str(audit_err)})
+                        usage_response = UsageResponse.from_tracker(
+                            tracker=agent.usage_tracker, model=agent.model, latency=duration_ms / 1000.0
+                        )
+
+                        token_usage = TokenUsage(
+                            input_tokens=usage_stats.get("total_input_tokens", 0),
+                            output_tokens=usage_stats.get("total_output_tokens", 0),
+                            thinking_tokens=usage_stats.get("total_thinking_tokens", 0),
+                            cache_read_tokens=usage_stats.get("total_cache_read_tokens", 0),
+                            cache_write_tokens=usage_stats.get("total_cache_creation_tokens", 0),
+                        )
+
+                        # 注意：这里传入的是会话累计值（所有 LLM 调用的总和）
+                        # is_session_cumulative=True（默认），使用会话级阈值检测
+                        await self.token_auditor.record(
+                            session_id=session_id,
+                            usage=token_usage,
+                            conversation_id=conversation_id,
+                            user_id=user_id,
+                            agent_id=getattr(agent, "agent_id", None),
+                            model=agent.model,
+                            duration_ms=duration_ms,
+                            query_length=len(str(current_message)),
+                            is_session_cumulative=True,  # 明确标记为会话累计值
+                        )
+
+                    logger.info(
+                        "Token 审计",
+                        extra={
+                            "input_tokens": token_usage.input_tokens,
+                            "output_tokens": token_usage.output_tokens,
+                            "thinking_tokens": token_usage.thinking_tokens,
+                            "cache_read_tokens": token_usage.cache_read_tokens,
+                            "total_price": usage_response.total_price,
+                        },
+                    )
+
+                    try:
+                        await self.conversation_service.update_message(
+                            message_id=assistant_message_id,
+                            metadata={"usage": usage_response.model_dump(mode="json")},
+                        )
+                    except Exception as update_err:
+                        logger.warning("更新 Usage 数据失败", extra={"error": str(update_err)})
+
+                except Exception as audit_err:
+                    logger.warning("Token 审计失败", extra={"error": str(audit_err)})
 
             logger.info(
                 "Agent 执行完成", extra={"session_id": session_id, "duration_ms": duration_ms}

@@ -22,6 +22,10 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 FRONTEND_DIR="$PROJECT_ROOT/frontend"
 
+# Python 环境：优先使用 conda zeno，回退到系统 python3
+CONDA_ENV_NAME="${CONDA_ENV_NAME:-zeno}"
+PYTHON_CMD="python3"
+
 SKIP_BACKEND=false
 CLEAN=false
 
@@ -44,17 +48,32 @@ check_cmd() {
   fi
 }
 
+# ==================== 激活 Python 环境 ====================
+
+# 尝试激活 conda 环境（支持非交互式 shell）
+if command -v conda &> /dev/null; then
+  eval "$(conda shell.bash hook 2>/dev/null)"
+  if conda activate "$CONDA_ENV_NAME" 2>/dev/null; then
+    PYTHON_CMD="python"
+    info "已激活 conda 环境: $CONDA_ENV_NAME ($(python --version 2>&1))"
+  else
+    warn "conda 环境 '$CONDA_ENV_NAME' 不存在，使用系统 python3"
+  fi
+else
+  info "未检测到 conda，使用系统 python3"
+fi
+
 # ==================== 依赖检查 ====================
 
 info "检查构建依赖..."
 
-check_cmd "python3" "brew install python3 / https://python.org"
+$PYTHON_CMD --version &> /dev/null || fail "python3 未找到: brew install python3 / conda create -n $CONDA_ENV_NAME python=3.12"
 check_cmd "node" "brew install node / https://nodejs.org"
 check_cmd "npm" "brew install node / https://nodejs.org"
 check_cmd "cargo" "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
 
 if [ "$SKIP_BACKEND" = false ]; then
-  python3 -c "import PyInstaller" 2>/dev/null || fail "PyInstaller 未安装: pip install pyinstaller"
+  $PYTHON_CMD -c "import PyInstaller" 2>/dev/null || fail "PyInstaller 未安装: pip install pyinstaller"
 fi
 
 info "依赖检查通过"
@@ -62,7 +81,7 @@ info "依赖检查通过"
 # ==================== 版本同步 ====================
 
 info "同步版本号..."
-python3 "$SCRIPT_DIR/sync_version.py" || fail "版本同步失败"
+$PYTHON_CMD "$SCRIPT_DIR/sync_version.py" || fail "版本同步失败"
 
 # ==================== 清理（可选）====================
 
@@ -81,7 +100,7 @@ fi
 if [ "$SKIP_BACKEND" = false ]; then
   info "Step 1/3: 构建 Python 后端 (PyInstaller onedir)..."
   cd "$PROJECT_ROOT"
-  python3 scripts/build_backend.py
+  $PYTHON_CMD scripts/build_backend.py
   info "Python 后端构建完成"
 else
   info "Step 1/3: 跳过 Python 后端构建"
@@ -104,6 +123,11 @@ if [ ! -d "node_modules" ]; then
   info "安装前端依赖..."
   npm install
 fi
+
+# Tauri 2.x 的 --ci 参数只接受 true/false，
+# 但某些 IDE（如 Cursor）会设置 CI=1 导致构建失败。
+# 本地构建时统一取消 CI 标志。
+unset CI
 
 # 构建 Tauri（只打包 .app，跳过 Tauri 自带的 DMG 打包，Step 3 会自己生成完整 DMG）
 if [ "$(uname)" = "Darwin" ]; then
@@ -162,19 +186,27 @@ if [ "$(uname)" = "Darwin" ]; then
   ln -s "../Resources/_internal" "$MACOS_DIR/_internal"
   info "已创建 symlink: MacOS/_internal -> ../Resources/_internal"
 
-  # 3b2. 创建 Contents/Frameworks/libpython3.12.dylib symlink
-  #      PyInstaller bootloader 在 .app bundle 内运行时，
-  #      按 macOS 规范固定在 Contents/Frameworks/ 查找 Python 共享库。
+  # 3b2. 在 Contents/Frameworks/ 为 _internal/ 中所有内容创建 symlink
+  #      PyInstaller 6.x bootloader 检测到 .app bundle 后，
+  #      会将 PYTHONHOME 设为 Contents/Frameworks/，
+  #      在那里查找 libpython3.12.dylib、base_library.zip、lib-dynload/ 等。
+  #      真实文件保留在 Resources/_internal/（codesign 安全），
+  #      通过 symlink 让 bootloader 能找到。
   FRAMEWORKS_DIR="$APP_PATH/Contents/Frameworks"
-  LIBPYTHON=$(find "$RESOURCES_DIR/_internal" -maxdepth 1 -name "libpython*.dylib" | head -1)
-  if [ -n "$LIBPYTHON" ]; then
-    LIBPYTHON_NAME=$(basename "$LIBPYTHON")
-    mkdir -p "$FRAMEWORKS_DIR"
-    rm -f "$FRAMEWORKS_DIR/$LIBPYTHON_NAME"
-    ln -s "../Resources/_internal/$LIBPYTHON_NAME" "$FRAMEWORKS_DIR/$LIBPYTHON_NAME"
-    info "已创建 symlink: Frameworks/$LIBPYTHON_NAME -> ../Resources/_internal/$LIBPYTHON_NAME"
+  mkdir -p "$FRAMEWORKS_DIR"
+  LINK_COUNT=0
+  if [ -d "$RESOURCES_DIR/_internal" ]; then
+    for item in "$RESOURCES_DIR/_internal/"*; do
+      name=$(basename "$item")
+      target="$FRAMEWORKS_DIR/$name"
+      if [ ! -e "$target" ] && [ ! -L "$target" ]; then
+        ln -s "../Resources/_internal/$name" "$target"
+        LINK_COUNT=$((LINK_COUNT + 1))
+      fi
+    done
+    info "已在 Frameworks/ 创建 $LINK_COUNT 个 symlink → Resources/_internal/"
   else
-    warn "未找到 libpython*.dylib，sidecar 可能无法启动"
+    warn "Resources/_internal/ 不存在，无法创建 Frameworks symlink"
   fi
 
   # 3c. 签名 Resources/_internal/ 中的所有 .so 和 .dylib（AMFI 要求）

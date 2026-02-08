@@ -407,7 +407,10 @@ async def _handle_chat_send(
     )
 
     try:
-        # 调用 ChatService（返回异步生成器）
+        # 立即确认请求已接收（不让前端干等 Agent 初始化）
+        await send_response(req_id, True, payload={"status": "streaming"})
+
+        # 调用 ChatService（返回异步生成器，可能涉及 Agent 加载/意图分析）
         event_stream = await chat_service.chat(
             message=message,
             user_id=user_id,
@@ -420,9 +423,6 @@ async def _handle_chat_send(
             agent_id=agent_id,
             output_format="zenflux",
         )
-
-        # 确认请求已接收
-        await send_response(req_id, True, payload={"status": "streaming"})
 
         # 流式转发事件
         throttle = DeltaThrottle()

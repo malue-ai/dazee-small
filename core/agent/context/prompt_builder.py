@@ -189,6 +189,73 @@ async def build_system_blocks_with_injector(
     return system_blocks
 
 
+async def build_user_context_with_injector(
+    intent: Optional["IntentResult"],
+    user_id: str = None,
+    user_query: str = None,
+    prompt_cache: Optional["InstancePromptCache"] = None,
+    available_tools: List[Dict[str, Any]] = None,
+    history_messages: List[Dict[str, Any]] = None,
+) -> Optional[str]:
+    """
+    执行 Phase 2 Injectors，返回 user context 内容
+
+    Phase 2 包括：
+    - UserMemoryInjector: 用户记忆
+    - PlaybookHintInjector: 匹配的 Playbook 策略提示
+    - KnowledgeContextInjector: 本地知识库上下文
+
+    返回的内容应作为 user message 注入到对话历史之前，
+    为 Agent 提供背景上下文。
+
+    Args:
+        intent: IntentResult 对象
+        user_id: 用户 ID
+        user_query: 用户查询
+        prompt_cache: InstancePromptCache 实例
+        available_tools: 可用工具列表
+        history_messages: 历史消息列表
+
+    Returns:
+        组装后的 user context 字符串，无内容时返回 None
+    """
+    from core.context.injectors import (
+        InjectionContext,
+        create_default_orchestrator,
+    )
+
+    task_complexity = get_task_complexity(intent)
+    skip_memory = getattr(intent, "skip_memory", False)
+
+    context = InjectionContext(
+        user_id=user_id,
+        user_query=user_query,
+        prompt_cache=prompt_cache,
+        task_complexity=(
+            task_complexity.value if hasattr(task_complexity, "value") else task_complexity
+        ),
+        intent=intent,
+        available_tools=available_tools or [],
+        history_messages=history_messages or [],
+    )
+
+    # 预加载用户画像（如果不跳过）
+    if not skip_memory and user_id and user_query:
+        user_profile = fetch_user_profile(user_id, user_query, skip_memory)
+        if user_profile:
+            context.set("user_profile", user_profile)
+
+    orchestrator = create_default_orchestrator()
+    user_context = await orchestrator.build_user_context_content(context)
+
+    if user_context:
+        logger.info(
+            f"✅ [Injector] Phase 2 User Context: {len(user_context)} 字符"
+        )
+
+    return user_context
+
+
 async def build_messages_with_injector(
     intent: Optional["IntentResult"],
     prompt_cache: Optional["InstancePromptCache"],

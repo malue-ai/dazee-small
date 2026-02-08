@@ -18,10 +18,22 @@ PyInstaller 打包配置（onedir 模式）
 import sys
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 block_cipher = None
 project_root = Path(SPECPATH)
+
+# ==================== 原生扩展（binaries）====================
+# 包含 C 扩展 .so/.dylib 文件，PyInstaller 无法通过 import 链发现
+
+binaries = []
+
+# sqlite-vec: SQLite 向量搜索扩展（包含原生 .so/.dylib）
+try:
+    _sv_datas, _sv_binaries, _sv_hiddenimports = collect_all('sqlite_vec')
+    binaries += _sv_binaries
+except Exception:
+    pass  # sqlite-vec 未安装时跳过
 
 # ==================== 数据文件（只读资源）====================
 # 这些文件会被打包到临时目录，运行时通过 sys._MEIPASS 访问
@@ -39,11 +51,69 @@ datas = [
     (str(project_root / 'skills' / 'library'), 'skills/library'),
 ]
 
+# sqlite-vec 数据文件（与上方 binaries 配合，确保 loadable_path() 能找到扩展）
+try:
+    datas += _sv_datas
+except NameError:
+    pass
+
+# ==================== C 扩展包完整收集 ====================
+# 问题：含 C 扩展（.so）的包，PyInstaller 将 .so 解压到目录但纯 Python 文件
+# 放入 PYZ 归档。运行时 Python 找到目录后不再查 PYZ，导致 ModuleNotFoundError。
+# 解决：对这些包使用 collect_all() 将 .py 文件也复制到输出目录。
+hiddenimports = []
+_native_packages = [
+    # Rust / C 扩展类
+    'pydantic_core',   # Rust 扩展 + core_schema.py
+    'yaml',            # _yaml.so + error.py 等
+    'aiohttp',         # _http_parser.so 等
+    'asyncpg',         # PostgreSQL C 扩展
+    'charset_normalizer',
+    'cryptography',    # Rust 扩展
+    'frozenlist',
+    'greenlet',
+    'httptools',
+    'jiter',
+    'lxml',
+    'multidict',
+    'numpy',
+    'propcache',
+    'psutil',
+    'regex',
+    'rpds',
+    'tiktoken',
+    'uvloop',
+    'watchfiles',
+    'websockets',
+    'yarl',
+    'PIL',             # Pillow
+    # 数据文件类（有 .py 时区数据 / JSON schema / 模板文件导致建目录）
+    'pytz',
+    'jsonschema',
+    'jsonschema_specifications',
+    'Crypto',          # pycryptodome
+    'boto3',
+    'botocore',
+    'docx',            # python-docx
+    'google',          # google-* 命名空间
+    'grpc',
+    'grpc_tools',
+]
+
+for _pkg in _native_packages:
+    try:
+        _d, _b, _h = collect_all(_pkg)
+        datas += _d
+        binaries += _b
+        hiddenimports += _h
+    except Exception:
+        pass  # 未安装的包跳过
+
 # ==================== 隐式导入 ====================
 # 使用 collect_submodules() 自动递归收集，不再手动维护模块列表。
 # 新增项目模块时无需修改此文件，PyInstaller 会自动发现。
 
-hiddenimports = []
+hiddenimports = list(set(hiddenimports))  # 去重 collect_all 结果
 
 # --- 项目模块：自动递归收集所有子模块 ---
 _project_packages = [
@@ -60,9 +130,11 @@ hiddenimports += ['logger', 'main']
 hiddenimports += collect_submodules('uvicorn')
 hiddenimports += collect_submodules('anyio')
 
+hiddenimports += collect_submodules('pydantic')
+
 hiddenimports += [
     # Web 框架
-    'fastapi', 'starlette', 'pydantic', 'pydantic_core',
+    'fastapi', 'starlette',
     # LLM 客户端
     'anthropic', 'openai',
     # 数据库
@@ -75,6 +147,33 @@ hiddenimports += [
     'tiktoken', 'tiktoken_ext', 'tiktoken_ext.openai_public',
 ]
 
+# --- 延迟导入 / 条件导入的第三方库 ---
+# 这些库在代码中通过函数内 import 或 try/except 导入，
+# PyInstaller 静态分析无法通过 import 链自动发现。
+
+
+# 记忆系统 mem0（core/memory/mem0/pool.py 全部 lazy import）
+hiddenimports += collect_submodules('mem0')
+
+# sqlite-vec Python 模块（配合上方 binaries/datas 一起打包）
+try:
+    hiddenimports += _sv_hiddenimports
+except NameError:
+    hiddenimports += ['sqlite_vec']
+
+# 定时任务 APScheduler（services/user_task_scheduler.py 等 lazy import）
+hiddenimports += collect_submodules('apscheduler')
+
+# 文件处理（utils/file_handler.py try/except, core/knowledge/file_indexer.py lazy import）
+hiddenimports += ['PyPDF2', 'docx']
+
+
+# macOS 原生 OCR（tools/observe_screen.py 函数内 lazy import）
+if sys.platform == 'darwin':
+    hiddenimports += [
+        'objc', 'Vision', 'Quartz', 'Foundation',
+    ]
+
 # 去重
 hiddenimports = list(set(hiddenimports))
 
@@ -82,14 +181,17 @@ hiddenimports = list(set(hiddenimports))
 
 excludes = [
     # 科学计算 / 机器学习（服务端不需要）
-    'matplotlib', 'pandas', 'scipy', 'numpy.testing',
-    'PIL', 'cv2',
+    # 注意：不排除 numpy（intent_cache 需要）和 PIL（file_handler 需要图片压缩）
+    'matplotlib', 'pandas', 'scipy',
+    'cv2',
     'torch', 'tensorflow',
     # 开发/测试工具
     'jupyter', 'notebook', 'IPython',
     'pytest', 'test', 'tests', 'unittest',
     # 构建/包管理工具（运行时不需要）
-    # 注意：不排除 setuptools/distutils，PyInstaller 内置 hook 需要处理 distutils→setuptools 别名
+    # pkg_resources 依赖 jaraco.text（setuptools 80.x），项目代码不使用，直接排除
+    # 注意：保留 setuptools（Python 3.12 的 distutils 来自 setuptools）
+    'pkg_resources', 'jaraco',
     'pip', 'wheel', '_distutils_hack',
     'ensurepip', 'venv',
     # GUI 工具包（服务端不需要）
@@ -103,7 +205,7 @@ excludes = [
 a = Analysis(
     [str(project_root / 'main.py')],
     pathex=[str(project_root)],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
@@ -113,7 +215,8 @@ a = Analysis(
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
-    noarchive=False,
+    noarchive=True,  # 关键：不用 PYZ 归档，所有 .pyc 直接提取到文件系统
+                      # 避免 C 扩展包目录存在但纯 Python 文件在 PYZ 中导致 ModuleNotFoundError
 )
 
 # ==================== 打包（onedir 模式）====================

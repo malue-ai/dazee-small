@@ -75,12 +75,11 @@ class PlaybookHintInjector(BaseInjector):
         查询匹配的 Playbook，格式化为 <playbook_hint> 注入。
         """
         query = (context.user_query or "").strip()
+
         task_type = ""
         if context.intent and hasattr(context.intent, "task_type"):
-            task_type = getattr(context.intent.task_type, "value", "") or str(getattr(context.intent.task_type, "", ""))
-        if not task_type:
-            task_type = context.get("task_type") or ""
-        user_id = context.user_id or "default"
+            tt = context.intent.task_type
+            task_type = tt.value if hasattr(tt, "value") else str(tt)
 
         try:
             from core.playbook import create_playbook_manager
@@ -90,7 +89,6 @@ class PlaybookHintInjector(BaseInjector):
             matched: List[tuple] = await manager.find_matching_async(
                 query=query,
                 task_type=task_type,
-                user_id=user_id,
                 top_k=1,
                 min_score=0.3,
                 only_approved=True,

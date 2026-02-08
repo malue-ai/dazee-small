@@ -7,11 +7,11 @@ intent_analyzer:
   - high
   task_types:
   - creative_design
-  - visual_conceptualization
+  - visual_strategy
   - product_presentation
   output_formats:
   - structured_text
-  - descriptive_specification
+  - visual_brief
   use_llm: true
   llm_model: claude-haiku-4-5-20251001
   fast_mode: false
@@ -25,9 +25,9 @@ plan_manager:
   allow_dynamic_adjustment: true
   validation_interval: 3
   replan_enabled: true
-  max_replan_attempts: 3
+  max_replan_attempts: 2
   replan_strategy: incremental
-  failure_threshold: 0.4
+  failure_threshold: 0.3
 tool_selector:
   enabled: false
   available_tools: []
@@ -53,7 +53,7 @@ output_formatter:
   - json
   - html
   code_highlighting: false
-  max_output_length: 2000
+  max_output_length: 3000
   json_model_name: null
   json_schema: null
   strict_json_validation: false
@@ -62,7 +62,7 @@ output_formatter:
   include_metadata: false
 skills: []
 tools: []
-model: qwen-vl-max
+model: qwen3-max
 max_turns: 18
 execution_strategy: rvr
 allow_parallel_tools: false
@@ -76,4 +76,4 @@ enable_thinking: null
 enable_caching: null
 thinking_mode: null
 prompts: null
-reasoning: 该角色需深度理解产品概念、主动澄清需求、生成多套结构化视觉方案并支持迭代优化，属于高复杂度创意任务。需启用细粒度规划以管理多轮交互和方案调整，会话记忆用于跟踪用户偏好与反馈，输出需结构化便于转译为图像指令，但无需外部工具或代码技能。
+reasoning: 该角色需进行多轮交互以澄清产品细节，生成多种结构化视觉方案，并支持迭代优化。任务具有中高复杂度，需细粒度规划（如：理解需求→提出问题→生成方案→参数细化→应用建议→反馈调整）。虽不调用外部工具，但需强意图分析、会话记忆和结构化输出能力。

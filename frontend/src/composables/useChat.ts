@@ -441,13 +441,13 @@ export function useChat() {
   /**
    * 处理流事件
    */
-  function handleStreamEvent(event: { type: string; data: any }, msg: UIMessage, convId: string): void {
+  function handleStreamEvent(event: { type: string; data: any }, msg: UIMessage, convId?: string): void {
     const { type, data } = event
 
     // 处理 session 开始事件
     if (type === 'session_start') {
       console.log('🚀 Session 开始:', data.session_id)
-      if (data.session_id) {
+      if (data.session_id && convId) {
         sessionStore.setCurrentSessionId(data.session_id)
         sessionStore.markRunning(convId, data.session_id)
       }
@@ -470,7 +470,7 @@ export function useChat() {
         msg.id = messageId
       }
       // 确保标记为运行中
-      if (data.session_id) {
+      if (data.session_id && convId) {
          sessionStore.markRunning(convId, data.session_id)
       }
     }
@@ -544,7 +544,7 @@ export function useChat() {
     }
 
     // 处理流结束/消息结束
-    if (type === 'message_stop' || type === 'session_stopped' || type === 'error') {
+    if ((type === 'message_stop' || type === 'session_stopped' || type === 'error') && convId) {
        sessionStore.markCompleted(convId)
     }
 
@@ -928,10 +928,8 @@ export function useChat() {
       const userId = conversationStore.userId
       if (!userId) return false
 
-      const sessions = await sessionStore.getActiveSessions(userId)
-
-      if (sessions && sessions.length > 0) {
-        console.log(`🔄 发现 ${sessions.length} 个活跃 Session`)
+      if (sessionStore.hasActiveSessions) {
+        console.log('🔄 发现活跃 Session')
         return false // 暂时返回 false，不自动重连
       }
 

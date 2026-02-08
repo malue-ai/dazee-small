@@ -2,24 +2,12 @@
 PlaybookManager - 策略库管理器
 
 V8.0 新增
-V9.4 增强：支持数据库存储后端
+V10.0 重构：统一走 Storage Backend，删除双重文件操作，修复实例隔离
 
 职责：
 - 从成功会话中提取策略模式
 - 管理策略的生命周期（草稿/待审核/已发布/已废弃）
-- 策略检索和匹配
-
-策略来源：
-1. 自动提取：从 RewardAttribution 高分会话中提取
-2. 人工创建：运营人员手动添加
-3. 导入：从外部系统导入
-
-存储后端（V9.4）：
-- file: 文件存储（默认，向后兼容）
-- database: 数据库存储（PostgreSQL/SQLite）
-
-配置方式：
-    export PLAYBOOK_STORAGE_BACKEND=database  # 启用数据库存储
+- 策略检索和匹配（两层：task_type 预筛 + Mem0 语义搜索）
 """
 
 import hashlib
@@ -28,12 +16,10 @@ import os
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import aiofiles
-
 from logger import get_logger
+from utils.app_paths import get_instance_playbooks_dir
 
 logger = get_logger(__name__)
 
@@ -68,9 +54,7 @@ class PlaybookEntry:
     trigger: Dict[str, Any] = field(default_factory=dict)
     # {
     #   "task_types": ["data_analysis"],
-    #   "keywords": ["销售", "分析"],
     #   "complexity_range": [4, 7],
-    #   "patterns": ["查询.*分析.*报告"]
     # }
 
     # 执行策略
@@ -115,11 +99,13 @@ class PlaybookEntry:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "PlaybookEntry":
-        """从字典创建"""
+        """从字典创建（过滤未知字段，避免 TypeError）"""
         data = data.copy()
         if isinstance(data.get("status"), str):
             data["status"] = PlaybookStatus(data["status"])
-        return cls(**data)
+        known_fields = set(cls.__dataclass_fields__.keys())
+        filtered = {k: v for k, v in data.items() if k in known_fields}
+        return cls(**filtered)
 
     def matches_task_type(self, task_type: str) -> bool:
         """
@@ -163,106 +149,67 @@ class PlaybookManager:
     """
     策略库管理器
 
-    职责：
-    - 策略的 CRUD 操作
-    - 从成功会话提取策略
-    - 策略检索和匹配
-    - 人工审核流程
+    所有 IO 操作统一走 Storage Backend，不直接操作文件。
 
     使用方式：
-        manager = PlaybookManager(storage_path="./playbooks")
+        manager = create_playbook_manager()
+        await manager.load_all_async()
 
         # 从高分会话提取策略
         entry = await manager.extract_from_session(session_reward)
 
         # 审核策略
-        manager.approve(entry.id, reviewer="admin", notes="verified")
+        await manager.approve(entry.id, reviewer="admin", notes="verified")
 
         # 检索匹配策略
-        matches = manager.find_matching(context)
+        matches = await manager.find_matching_async(query, task_type)
     """
 
     def __init__(
         self,
-        storage_path: str = "./workspace/playbooks",
+        storage_path: str = None,
         auto_save: bool = True,
         min_reward_threshold: float = 0.7,
         llm_service=None,
-        storage_backend: str = None,  # 🆕 V9.4: "file" | "database"
     ):
         """
         初始化策略库管理器
 
         Args:
-            storage_path: 存储路径（文件模式）
+            storage_path: 存储路径，默认使用实例隔离路径
             auto_save: 是否自动保存
             min_reward_threshold: 最低奖励阈值（用于自动提取）
             llm_service: LLM 服务（用于策略提取）
-            storage_backend: 存储后端类型（file/database），默认从环境变量读取
         """
-        self.storage_path = Path(storage_path)
+        if storage_path is None:
+            instance_name = os.getenv("AGENT_INSTANCE", "default")
+            storage_path = str(get_instance_playbooks_dir(instance_name))
+
+        self._storage_path = storage_path
         self.auto_save = auto_save
         self.min_reward_threshold = min_reward_threshold
         self.llm = llm_service
 
-        # 🆕 V9.4: 存储后端
-        self._storage_backend = storage_backend or os.getenv("PLAYBOOK_STORAGE_BACKEND", "file")
-        self._storage = None  # 延迟初始化
+        # 延迟初始化的存储后端
+        self._storage = None
 
         # 内存缓存
         self._entries: Dict[str, PlaybookEntry] = {}
         self._loaded = False
 
-        # 文件模式需要创建目录
-        if self._storage_backend == "file":
-            self.storage_path.mkdir(parents=True, exist_ok=True)
-
-        logger.info(
-            f"✅ PlaybookManager 初始化: "
-            f"backend={self._storage_backend}, "
-            f"storage={storage_path if self._storage_backend == 'file' else 'database'}"
-        )
+        logger.info(f"✅ PlaybookManager 初始化: storage={storage_path}")
 
     def _get_storage(self):
         """获取存储后端（延迟初始化）"""
         if self._storage is None:
             from core.playbook.storage import create_storage_backend
 
-            self._storage = create_storage_backend(
-                backend_type=self._storage_backend, storage_path=str(self.storage_path)
-            )
+            self._storage = create_storage_backend(storage_path=self._storage_path)
         return self._storage
-
-    async def _load_all(self):
-        """加载所有策略（异步版本）"""
-        if self._storage_backend != "file":
-            return  # 数据库模式使用 load_all_async
-
-        index_file = self.storage_path / "index.json"
-        if not index_file.exists():
-            return
-
-        try:
-            async with aiofiles.open(index_file, "r", encoding="utf-8") as f:
-                content = await f.read()
-                index = json.loads(content)
-
-            for entry_id in index.get("entries", []):
-                entry_file = self.storage_path / f"{entry_id}.json"
-                if entry_file.exists():
-                    async with aiofiles.open(entry_file, "r", encoding="utf-8") as f:
-                        content = await f.read()
-                        data = json.loads(content)
-                    self._entries[entry_id] = PlaybookEntry.from_dict(data)
-
-            self._loaded = True
-            logger.info(f"📚 加载 {len(self._entries)} 个策略条目")
-        except Exception as e:
-            logger.error(f"❌ 加载策略库失败: {e}")
 
     async def load_all_async(self):
         """
-        🆕 V9.4: 异步加载所有策略（支持数据库模式）
+        异步加载所有策略
 
         使用方式：
             await manager.load_all_async()
@@ -279,65 +226,24 @@ class PlaybookManager:
                 self._entries[entry.id] = entry
 
             self._loaded = True
-            logger.info(
-                f"📚 异步加载 {len(self._entries)} 个策略条目 (backend={self._storage_backend})"
-            )
+            logger.info(f"📚 加载 {len(self._entries)} 个策略条目")
         except Exception as e:
-            logger.error(f"❌ 异步加载策略库失败: {e}")
+            logger.error(f"❌ 加载策略库失败: {e}")
 
     async def _save_entry(self, entry: PlaybookEntry):
-        """保存单个策略（异步版本）"""
-        if not self.auto_save:
-            return
-
-        if self._storage_backend != "file":
-            return  # 数据库模式使用 _save_entry_async
-
-        entry_file = self.storage_path / f"{entry.id}.json"
-        async with aiofiles.open(entry_file, "w", encoding="utf-8") as f:
-            await f.write(json.dumps(entry.to_dict(), ensure_ascii=False, indent=2))
-
-        # 更新索引
-        await self._save_index()
-
-    async def _save_entry_async(self, entry: PlaybookEntry):
-        """
-        🆕 V9.4: 异步保存策略（支持数据库模式）
-        """
+        """通过 Storage Backend 保存单个策略"""
         if not self.auto_save:
             return
 
         try:
             storage = self._get_storage()
             await storage.save(entry.id, entry.to_dict())
-            await self._save_index_async()
+            await self._save_index()
         except Exception as e:
-            logger.error(f"❌ 异步保存策略失败: {e}")
+            logger.error(f"❌ 保存策略失败: {e}")
 
     async def _save_index(self):
-        """保存索引（异步版本）"""
-        if self._storage_backend != "file":
-            return
-
-        index_file = self.storage_path / "index.json"
-        index = {
-            "entries": list(self._entries.keys()),
-            "updated_at": datetime.now().isoformat(),
-            "stats": {
-                "total": len(self._entries),
-                "approved": sum(
-                    1 for e in self._entries.values() if e.status == PlaybookStatus.APPROVED
-                ),
-                "pending": sum(
-                    1 for e in self._entries.values() if e.status == PlaybookStatus.PENDING_REVIEW
-                ),
-            },
-        }
-        async with aiofiles.open(index_file, "w", encoding="utf-8") as f:
-            await f.write(json.dumps(index, ensure_ascii=False, indent=2))
-
-    async def _save_index_async(self):
-        """🆕 V9.4: 异步保存索引"""
+        """通过 Storage Backend 保存索引"""
         try:
             storage = self._get_storage()
             index = {
@@ -357,12 +263,40 @@ class PlaybookManager:
             }
             await storage.save_index(index)
         except Exception as e:
-            logger.warning(f"⚠️ 异步保存索引失败: {e}")
+            logger.warning(f"⚠️ 保存索引失败: {e}")
 
     def _generate_id(self, name: str, session_id: str = None) -> str:
         """生成策略 ID"""
         content = f"{name}:{session_id or datetime.now().isoformat()}"
         return hashlib.md5(content.encode()).hexdigest()[:12]
+
+    # ==================== Mem0 同步 ====================
+
+    async def _sync_to_mem0(self, entry: PlaybookEntry):
+        """
+        将 Playbook 描述写入 Mem0，用于语义匹配。
+
+        写入后 find_matching_async() 的 Layer 2 才能搜索到该条目。
+        Best-effort：Mem0 不可用时静默跳过。
+        """
+        try:
+            from core.memory.mem0 import get_mem0_pool
+
+            pool = get_mem0_pool()
+            pool.add(
+                user_id="playbook",
+                messages=[
+                    {"role": "user", "content": f"[策略] {entry.get_searchable_text()}"}
+                ],
+                metadata={
+                    "playbook_id": entry.id,
+                    "source": "playbook_manager",
+                    "task_types": ",".join(entry.trigger.get("task_types", [])),
+                },
+            )
+            logger.debug(f"Mem0 同步: playbook={entry.id}")
+        except Exception as e:
+            logger.debug(f"Mem0 同步跳过: {e}")
 
     # ==================== CRUD 操作 ====================
 
@@ -373,6 +307,7 @@ class PlaybookManager:
         trigger: Dict[str, Any],
         strategy: Dict[str, Any],
         tool_sequence: List[Dict[str, Any]] = None,
+        quality_metrics: Dict[str, float] = None,
         source: str = "manual",
         source_session_id: str = None,
     ) -> PlaybookEntry:
@@ -385,6 +320,7 @@ class PlaybookManager:
             trigger: 触发条件
             strategy: 执行策略
             tool_sequence: 工具序列
+            quality_metrics: 质量指标
             source: 来源（auto/manual/import）
             source_session_id: 来源会话 ID
 
@@ -400,6 +336,7 @@ class PlaybookManager:
             trigger=trigger,
             strategy=strategy,
             tool_sequence=tool_sequence or [],
+            quality_metrics=quality_metrics or {},
             source=source,
             source_session_id=source_session_id,
             status=PlaybookStatus.DRAFT if source == "auto" else PlaybookStatus.PENDING_REVIEW,
@@ -407,6 +344,7 @@ class PlaybookManager:
 
         self._entries[entry_id] = entry
         await self._save_entry(entry)
+        await self._sync_to_mem0(entry)
 
         logger.info(f"📝 创建策略: {name} (id={entry_id})")
         return entry
@@ -458,9 +396,11 @@ class PlaybookManager:
 
         del self._entries[entry_id]
 
-        entry_file = self.storage_path / f"{entry_id}.json"
-        if entry_file.exists():
-            entry_file.unlink()
+        try:
+            storage = self._get_storage()
+            await storage.delete(entry_id)
+        except Exception as e:
+            logger.warning(f"⚠️ 删除策略文件失败: {e}")
 
         await self._save_index()
         return True
@@ -468,7 +408,7 @@ class PlaybookManager:
     # ==================== 审核流程 ====================
 
     async def submit_for_review(self, entry_id: str) -> bool:
-        """提交审核"""
+        """提交审核（仅 DRAFT → PENDING_REVIEW）"""
         entry = self._entries.get(entry_id)
         if not entry or entry.status != PlaybookStatus.DRAFT:
             return False
@@ -481,9 +421,9 @@ class PlaybookManager:
         return True
 
     async def approve(self, entry_id: str, reviewer: str, notes: str = None) -> bool:
-        """审核通过"""
+        """审核通过（仅 PENDING_REVIEW → APPROVED）"""
         entry = self._entries.get(entry_id)
-        if not entry:
+        if not entry or entry.status != PlaybookStatus.PENDING_REVIEW:
             return False
 
         entry.status = PlaybookStatus.APPROVED
@@ -496,9 +436,9 @@ class PlaybookManager:
         return True
 
     async def reject(self, entry_id: str, reviewer: str, reason: str) -> bool:
-        """审核拒绝"""
+        """审核拒绝（仅 PENDING_REVIEW → REJECTED）"""
         entry = self._entries.get(entry_id)
-        if not entry:
+        if not entry or entry.status != PlaybookStatus.PENDING_REVIEW:
             return False
 
         entry.status = PlaybookStatus.REJECTED
@@ -511,9 +451,9 @@ class PlaybookManager:
         return True
 
     async def deprecate(self, entry_id: str, reason: str = None) -> bool:
-        """废弃策略"""
+        """废弃策略（仅 APPROVED → DEPRECATED）"""
         entry = self._entries.get(entry_id)
-        if not entry:
+        if not entry or entry.status != PlaybookStatus.APPROVED:
             return False
 
         entry.status = PlaybookStatus.DEPRECATED
@@ -542,7 +482,8 @@ class PlaybookManager:
         # 检查奖励阈值
         if session_reward.total_reward < self.min_reward_threshold:
             logger.debug(
-                f"会话奖励 {session_reward.total_reward:.2f} " f"< 阈值 {self.min_reward_threshold}"
+                f"会话奖励 {session_reward.total_reward:.2f} "
+                f"< 阈值 {self.min_reward_threshold}"
             )
             return None
 
@@ -560,7 +501,6 @@ class PlaybookManager:
             "task_types": (
                 [session_reward.task_type] if hasattr(session_reward, "task_type") else []
             ),
-            "keywords": [],  # 需要从 query 提取
             "complexity_range": [4, 8],  # 默认范围
         }
 
@@ -594,21 +534,21 @@ class PlaybookManager:
             except Exception as e:
                 logger.warning(f"LLM 生成描述失败: {e}")
 
-        # 创建策略条目
+        # 创建策略条目（quality_metrics 直接传入，避免双重保存）
         entry = await self.create(
             name=name,
             description=description,
             trigger=trigger,
             strategy=strategy,
             tool_sequence=tool_sequence,
+            quality_metrics=quality_metrics,
             source="auto",
             source_session_id=session_reward.session_id,
         )
 
-        entry.quality_metrics = quality_metrics
-        await self._save_entry(entry)
-
-        logger.info(f"🎯 自动提取策略: {name} " f"(reward={session_reward.total_reward:.2f})")
+        logger.info(
+            f"🎯 自动提取策略: {name} (reward={session_reward.total_reward:.2f})"
+        )
 
         return entry
 
@@ -655,7 +595,6 @@ class PlaybookManager:
         self,
         query: str,
         task_type: str = "",
-        user_id: str = "default",
         top_k: int = 3,
         min_score: float = 0.3,
         only_approved: bool = True,
@@ -670,7 +609,6 @@ class PlaybookManager:
         Args:
             query: 用户查询（自然语言）
             task_type: 意图识别输出的任务类型（可选）
-            user_id: 用户 ID（Mem0 隔离用）
             top_k: 返回前 k 个
             min_score: 最低匹配分数
             only_approved: 仅返回已审核通过的策略
@@ -689,19 +627,13 @@ class PlaybookManager:
         if not candidates:
             return []
 
-        # 候选数量少（<=3）时直接全部返回，不需要语义排序
-        if len(candidates) <= top_k:
-            return [(entry, 1.0) for entry in candidates.values()]
-
         # Layer 2: Mem0 语义搜索
         try:
             from core.memory.mem0 import get_mem0_pool
 
             pool = get_mem0_pool()
-            # 用用户 query 在 Mem0 中搜索相关记忆
-            # Playbook 描述在 extract_from_session 时已写入 Mem0
             search_results = pool.search(
-                user_id=user_id,
+                user_id="playbook",
                 query=f"任务策略: {query}",
                 limit=top_k * 2,
             )
@@ -723,7 +655,7 @@ class PlaybookManager:
         except Exception as e:
             logger.warning(f"Mem0 语义匹配失败，降级到全量返回: {e}")
 
-        # 降级：Mem0 不可用时返回全部候选（按使用次数排序）
+        # 降级：Mem0 不可用时按使用次数排序，给予低置信度分数
         fallback = sorted(
             candidates.values(),
             key=lambda e: e.usage_count,
@@ -739,7 +671,7 @@ class PlaybookManager:
         only_approved: bool = True,
     ) -> List[tuple["PlaybookEntry", float]]:
         """
-        同步匹配策略（兼容旧调用方，仅 task_type 预筛）
+        同步匹配策略（仅 task_type 预筛）
 
         推荐使用 find_matching_async() 进行语义匹配。
 
@@ -759,7 +691,7 @@ class PlaybookManager:
             if only_approved and entry.status != PlaybookStatus.APPROVED:
                 continue
             if entry.matches_task_type(task_type):
-                candidates.append((entry, 1.0))
+                candidates.append((entry, 0.5))
 
         # 按使用次数排序
         candidates.sort(key=lambda x: x[0].usage_count, reverse=True)
@@ -799,34 +731,27 @@ class PlaybookManager:
 
 
 def create_playbook_manager(
-    storage_path: str = "./workspace/playbooks",
+    storage_path: str = None,
     llm_service=None,
-    storage_backend: str = None,
     **kwargs,
 ) -> PlaybookManager:
     """
     创建策略库管理器
 
     Args:
-        storage_path: 存储路径（文件模式）
+        storage_path: 存储路径，默认使用实例隔离路径
         llm_service: LLM 服务
-        storage_backend: 存储后端类型（file/database）
         **kwargs: 其他参数
 
     Returns:
         PlaybookManager 实例
 
     使用示例：
-        # 文件存储（默认）
         manager = create_playbook_manager()
-
-        # 数据库存储
-        manager = create_playbook_manager(storage_backend="database")
-        await manager.load_all_async()  # 异步加载
+        await manager.load_all_async()
     """
     return PlaybookManager(
         storage_path=storage_path,
         llm_service=llm_service,
-        storage_backend=storage_backend,
         **kwargs,
     )

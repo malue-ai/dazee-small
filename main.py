@@ -290,6 +290,14 @@ async def lifespan(app: FastAPI):
     # ===== 启动阶段 =====
     print("🚀 Zenflux Agent API 启动中...")
     
+    # 打包模式：首次启动时将 bundle 内的种子实例复制到用户数据目录
+    from utils.app_paths import ensure_instances_initialized, is_frozen
+    if is_frozen():
+        copied = ensure_instances_initialized()
+        if copied:
+            from utils.app_paths import get_instances_dir
+            print(f"📦 首次启动：已初始化实例目录 → {get_instances_dir()}")
+    
     await _init_resilience_config()
     await _init_local_store()
     await _preload_capability_registry()  # 加载工具注册表（必须在 Agent 之前）
