@@ -40,6 +40,7 @@ from models.llm import (
     ModelDetailResponse,
     ModelPricingResponse,
     ModelRegisterRequest,
+    ProviderActivateRequest,
     ProviderDetailResponse,
     ProviderInfoResponse,
     ProviderModelResponse,
@@ -661,6 +662,56 @@ async def validate_api_key(request: ProviderValidateKeyRequest):
             valid=False, provider=provider,
             message=f"验证过程异常: {str(e)}", models=[],
         )
+
+
+# ============================================================
+# Provider 批量激活
+# ============================================================
+
+
+@router.post(
+    "/providers/activate",
+    response_model=dict,
+    status_code=status.HTTP_200_OK,
+    summary="按 Provider 批量激活模型",
+    description="提供 API Key 后，一次性激活该 Provider 目录中的所有模型",
+)
+async def activate_provider(request: ProviderActivateRequest):
+    """
+    按 Provider 批量激活模型
+
+    验证 Key 通过后调用此接口，将该 Provider 的所有目录模型一次性激活。
+    """
+    provider = request.provider.lower()
+
+    if provider not in SUPPORTED_PROVIDERS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "UNSUPPORTED_PROVIDER",
+                "message": f"不支持的 Provider '{request.provider}'",
+                "supported": list(SUPPORTED_PROVIDERS.keys()),
+            },
+        )
+
+    base_url = request.base_url or SUPPORTED_PROVIDERS[provider]["base_url"]
+
+    activated = ModelRegistry.activate_provider_models(
+        provider=provider,
+        api_key=request.api_key,
+        base_url=base_url,
+    )
+
+    # Persist to YAML
+    await ModelRegistry.save_activated_models()
+
+    return {
+        "success": True,
+        "provider": provider,
+        "activated_count": len(activated),
+        "models": [e.model_name for e in activated],
+        "message": f"已激活 {len(activated)} 个 {provider} 模型",
+    }
 
 
 # ============================================================

@@ -2,7 +2,7 @@
 设置 API 路由
 
 提供桌面应用配置管理的 REST API：
-- GET  /api/v1/settings         — 读取配置（API Key 脱敏）
+- GET  /api/v1/settings         — 读取配置
 - PUT  /api/v1/settings         — 更新配置
 - GET  /api/v1/settings/status  — 检查配置状态
 - GET  /api/v1/settings/schema  — 获取配置项定义
@@ -28,7 +28,7 @@ async def read_settings() -> Dict[str, Any]:
     """
     获取当前配置
 
-    API Key 等敏感字段会脱敏返回（如 "sk-ant...xxxx"）
+    桌面端本地运行，API Key 原文返回
     """
     return {
         "success": True,

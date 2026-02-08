@@ -196,6 +196,13 @@ class ProviderDetailResponse(BaseModel):
     models: List[ProviderModelResponse] = Field(default_factory=list, description="该 Provider 支持的模型列表")
 
 
+class ProviderActivateRequest(BaseModel):
+    """按 Provider 批量激活模型请求"""
+    provider: str = Field(..., description="Provider 名称（claude, openai, qwen, deepseek, kimi, minimax）")
+    api_key: str = Field(..., description="API Key")
+    base_url: Optional[str] = Field(None, description="自定义 Base URL（可选，不填用默认）")
+
+
 class ProviderValidateKeyRequest(BaseModel):
     """验证 API Key 请求"""
     provider: str = Field(..., description="Provider 名称（claude, openai, qwen, deepseek, kimi, minimax）")

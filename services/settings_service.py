@@ -7,7 +7,7 @@
 核心功能：
 - 加载 config.yaml 并注入 os.environ（向后兼容 os.getenv()）
 - 提供 REST API 给前端设置页面读写
-- API Key 脱敏返回
+- API Key 原文返回（桌面端本地运行，无需脱敏）
 """
 
 import os
@@ -206,10 +206,10 @@ async def _save_settings(settings: Dict[str, Any]) -> None:
 
 async def get_settings() -> Dict[str, Any]:
     """
-    获取当前配置（API Key 脱敏返回）
+    获取当前配置
 
     Returns:
-        按分组返回的配置，secret 字段会脱敏
+        按分组返回的配置
     """
     settings = _load_settings()
     result = {}
@@ -226,14 +226,7 @@ async def get_settings() -> Dict[str, Any]:
             if not raw_value:
                 raw_value = os.getenv(key, "")
 
-            if meta.get("secret") and raw_value:
-                # 脱敏：显示前 6 位和后 4 位
-                if len(raw_value) > 14:
-                    result[group_key][key] = f"{raw_value[:6]}...{raw_value[-4:]}"
-                else:
-                    result[group_key][key] = "***"
-            else:
-                result[group_key][key] = raw_value or meta.get("default", "")
+            result[group_key][key] = raw_value or meta.get("default", "")
 
     return result
 
@@ -247,7 +240,7 @@ async def update_settings(updates: Dict[str, Any]) -> Dict[str, Any]:
             例: {"api_keys": {"ANTHROPIC_API_KEY": "sk-ant-..."}}
 
     Returns:
-        更新后的配置（脱敏）
+        更新后的配置
     """
     settings = _load_settings()
 
@@ -262,10 +255,6 @@ async def update_settings(updates: Dict[str, Any]) -> Dict[str, Any]:
 
         for key, value in group_updates.items():
             if key not in SETTINGS_SCHEMA[group_key]:
-                continue
-
-            # 跳过脱敏值（前端回传的 "sk-an...xxxx" 不应覆盖）
-            if isinstance(value, str) and "..." in value and len(value) < 20:
                 continue
 
             # 空字符串 = 删除配置

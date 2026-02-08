@@ -516,6 +516,60 @@ class ModelRegistry:
         return entry
 
     @classmethod
+    def activate_provider_models(
+        cls,
+        provider: str,
+        api_key: str,
+        base_url: Optional[str] = None,
+    ) -> List[ActivatedModelEntry]:
+        """
+        Batch-activate all catalog models for a given provider.
+
+        Args:
+            provider: Provider name (e.g. "qwen", "claude", "openai").
+            api_key: Actual API key value (shared by all models of this provider).
+            base_url: Optional base URL override.
+
+        Returns:
+            List of newly activated model entries.
+        """
+        from datetime import datetime
+
+        cls._ensure_initialized()
+
+        catalog_models = cls.list_models(provider=provider)
+        if not catalog_models:
+            logger.warning(f"⚠️ Provider '{provider}' 在目录中没有模型")
+            return []
+
+        # Set API key env once (all models of a provider share the same env var)
+        env_var = catalog_models[0].api_key_env
+        os.environ[env_var] = api_key
+
+        activated = []
+        now = datetime.now().isoformat()
+
+        for config in catalog_models:
+            key = config.model_name.lower()
+
+            entry = ActivatedModelEntry(
+                model_name=config.model_name,
+                api_key=api_key,
+                base_url=base_url,
+                activated_at=now,
+                provider=config.provider,
+                model_type=config.model_type.value,
+                adapter=config.adapter.value,
+            )
+            cls._activated[key] = entry
+            activated.append(entry)
+
+        logger.info(
+            f"✅ 批量激活 {len(activated)} 个模型 (provider={provider})"
+        )
+        return activated
+
+    @classmethod
     def deactivate_model(cls, model_name: str) -> bool:
         """
         Deactivate a model (remove API key config).
