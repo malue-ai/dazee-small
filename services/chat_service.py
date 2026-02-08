@@ -463,7 +463,7 @@ class ChatService:
         message_id: str,
         broadcaster: EventBroadcaster,
         schema: Optional[AgentSchema] = None,
-        tracker: Optional[EnhancedUsageTracker] = None
+        tracker: Optional["EnhancedUsageTracker"] = None
     ) -> Optional[str]:
         """
         流式生成 Preface 开场白
@@ -1517,7 +1517,7 @@ class ChatService:
     async def _create_hitl_stream_generator(
         self,
         session_id: str,
-        agent: SimpleAgent,
+        agent: Agent,
         agent_id: str,
         history_messages: List[Dict[str, Any]],
         user_id: str,
@@ -1599,7 +1599,7 @@ class ChatService:
     async def _run_agent_with_history(
         self,
         session_id: str,
-        agent: SimpleAgent,
+        agent: Agent,
         agent_id: str,
         history_messages: List[Dict[str, Any]],
         user_id: str,
