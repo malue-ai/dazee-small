@@ -54,8 +54,8 @@ graders:
     provider: "claude"
     model: "claude-opus-4-6"
     api_key_env: "ANTHROPIC_API_KEY"
-    max_tokens: 4096
-    temperature: 0
+    max_tokens: 16000        # Must be > thinking_budget (Claude requirement)
+    temperature: 1            # Claude requires temperature=1 when thinking is enabled
     enable_thinking: true
     thinking_budget: 10000
     timeout: 120.0

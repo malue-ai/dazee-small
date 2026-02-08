@@ -1,69 +1,77 @@
-# 小搭子 vs clawdbot (OpenClaw) — 差异化对比测试
+# 小搭子 Benchmark & E2E 测评
 
-> 本目录包含面向小白用户的对比测试用例和测试数据，用于验证小搭子与 clawdbot 在效果、特色、Token 消耗和场景上的差异化。
+> 面向小白用户的对比测试 + 端到端自动化测评
+
+## 最新结果（2026-02-08）
+
+| Provider | A1 Excel 分析 | B1 跨会话记忆 | D4 错误恢复 | C1 Token 对比 | 通过率 |
+|----------|--------------|--------------|-------------|--------------|--------|
+| **claude** (sonnet-4-5) | ✅ 4 轮/63s | ✅ 5 轮/70s | ✅ 多轮 | ✅ 2 轮 | **100%** |
+| **qwen** (qwen3-max) | ⚠️ 10+ 轮 | ✅ | ⏳ 23+ 轮(正常) | ✅ | 75%+ |
+
+**Grader**: Claude Opus 4.6 + Extended Thinking（独立评估，不做 PASS/FAIL 闸门）
 
 ## 目录结构
 
 ```
 docs/benchmark/
-├── README.md                  # 本文件
-├── test_cases.md              # 完整测试用例（含指标、预期结果、Token 估算）
-└── data/                      # 测试数据文件
-    ├── generate_test_data.py  # 一键生成所有测试数据（Excel/文件集）
-    ├── academic_abstract.txt  # 论文摘要（润色测试）
-    ├── coffee_article.txt     # 咖啡文章样本（风格学习）
-    ├── tea_culture_prompt.txt # 茶文化写作提示（跨会话记忆验证）
-    ├── scanned_pdf_note.md    # 扫描 PDF 准备说明
-    └── mixed_files/           # 文件整理测试集（由脚本生成）
+├── README.md                     # 本文件
+├── E2E_AUTOMATION_REPORT.md      # E2E 操作指南 + 最新结果 + 修复记录
+├── test_cases.md                 # 完整对比测试用例（15 个）
+└── data/                         # 测试数据
+    ├── generate_test_data.py     # 一键生成测试数据
+    ├── messy_sales.xlsx          # A1 用 — 格式混乱 Excel
+    ├── error_prone.csv           # D4 用 — 含异常值 CSV
+    ├── academic_abstract.txt     # A2 用 — 论文摘要
+    └── ...
 ```
 
 ## 快速开始
 
-### 1. 生成测试数据
-
 ```bash
-source /Users/liuyi/Documents/langchain/liuy/bin/activate
-cd docs/benchmark/data
-python generate_test_data.py
+# 全量 E2E（claude provider）
+python scripts/run_e2e_auto.py --clean --provider claude
+
+# 全量 E2E（qwen provider）
+python scripts/run_e2e_auto.py --clean --provider qwen
+
+# 后台运行（推荐，长任务）
+PYTHONUNBUFFERED=1 nohup python scripts/run_e2e_auto.py --clean --provider claude > /tmp/e2e.log 2>&1 &
+grep -E "PASS|FAIL|▶" /tmp/e2e.log   # 查进度
 ```
 
-生成的文件：
-- `messy_sales.xlsx` — 格式混乱的销售数据 Excel（日期格式不统一、合并单元格、空行、中文列名）
-- `mixed_files/` — 100 个混合类型文件（.txt/.md/.csv/.json/.log）
+## 评估体系
 
-### 2. 手动准备
+```
+Agent 执行任务 → Code Grader (PASS/FAIL) + LLM Judge (诊断报告)
+                        ↓                          ↓
+                  流程通没通                   流程好不好
+              (工具错误、Token)         (每个环节的质量 + 优化建议)
+```
 
-以下文件无法自动生成，需手动准备：
-- **扫描 PDF**：参见 `scanned_pdf_note.md` 中的说明
+| 评分器 | 角色 | 决定 PASS/FAIL | 输出 |
+|--------|------|---------------|------|
+| Code Grader | 确定性检查 | **是** | passed/failed |
+| Model Grader (Opus 4.6) | 质量评估 | **否** | 管道诊断报告 + 优化建议 |
 
-### 3. 执行测试
+详见 [E2E_AUTOMATION_REPORT.md](E2E_AUTOMATION_REPORT.md)
 
-参见 `test_cases.md` 中的详细测试步骤和预期结果。
+## 对比维度（vs clawdbot/OpenClaw）
 
-## 对比维度
-
-| 维度 | 测试用例数 | 说明 |
-|------|----------|------|
+| 维度 | 用例数 | 说明 |
+|------|--------|------|
 | **A. 效果差异化** | 3 | 任务完成率 + 用户体验 |
-| **B. 特色差异化** | 4 | 独有能力（记忆/环境感知/HITL/长任务） |
+| **B. 特色差异化** | 4 | 记忆/环境感知/HITL/长任务 |
 | **C. Token 消耗** | 3 | 量化成本对比 |
 | **D. 场景差异化** | 5 | 各自强项 + 短板 |
 
-## 对比对象概要
+详见 [test_cases.md](test_cases.md)
 
-### clawdbot / OpenClaw
+## 相关配置
 
-- 145K+ GitHub Stars，开源 MIT
-- 通过 WhatsApp/Telegram/Discord 等消息应用控制
-- 完整 shell + 浏览器自动化 + 24/7 后台运行
-- 记忆：MEMORY.md + BM25 + sqlite-vec 向量搜索
-- **已知弱点**：配置复杂（Node 22+）、Token 消耗大（$30-70/月中度用户）、auto-compaction 重试循环、无系统化智能回溯
-
-### 小搭子
-
-- 桌面应用，双击安装，5 分钟上手
-- RVR-B 智能回溯（ErrorClassifier + BacktrackManager）
-- 三层记忆（MEMORY.md + FTS5 + Mem0 向量）
-- 环境感知（RuntimeContextBuilder + AppScanner）
-- 自适应终止（五维度） + 状态一致性（快照/回滚）
-- System prompt 缓存 + 意图语义缓存 → Token 节省 40-60%
+| 文件 | 用途 |
+|------|------|
+| `evaluation/config/settings.yaml` | Grader LLM 配置（Opus 4.6） |
+| `evaluation/config/judge_prompts.yaml` | LLM-as-Judge 评估提示词 |
+| `evaluation/suites/xiaodazi/e2e/phase1_core.yaml` | E2E 用例定义 |
+| `instances/xiaodazi/config/llm_profiles.yaml` | Provider 模板（qwen/claude 一键切换） |
