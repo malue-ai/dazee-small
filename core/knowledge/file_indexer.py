@@ -314,12 +314,9 @@ class FileIndexer:
 
     # ==================== 向量嵌入 ====================
 
-    def _get_embedding_service(self):
-        """获取 embedding 服务（懒初始化）"""
-        if self._embedding_service is None:
-            from core.routing.intent_cache import EmbeddingService
-            self._embedding_service = EmbeddingService()
-        return self._embedding_service
+    async def _get_embedding_provider(self):
+        """获取 embedding 提供商（通过知识管理器共享实例）"""
+        return await self._km._get_embedding_provider()
 
     async def _batch_embed(
         self, chunks: List[str]
@@ -327,33 +324,22 @@ class FileIndexer:
         """
         批量生成文本块的 embedding
 
+        使用 EmbeddingProvider 的批量接口，比逐条调用快 10-100x。
         如果知识管理器未启用语义搜索，返回 None。
-        单个块 embedding 失败时使用空向量占位。
 
         Args:
             chunks: 文本块列表
 
         Returns:
-            向量列表，或 None（未启用语义搜索）
+            向量列表（L2 归一化），或 None（未启用语义搜索）
         """
         if not self._km._semantic_enabled or not self._km._vec_initialized:
             return None
 
         try:
-            service = self._get_embedding_service()
-            embeddings: List[List[float]] = []
-
-            for chunk in chunks:
-                try:
-                    vec = await service.embed(chunk)
-                    embeddings.append(vec.tolist())
-                except Exception as e:
-                    logger.warning(
-                        f"块 embedding 生成失败，跳过: {e}"
-                    )
-                    embeddings.append([])
-
-            return embeddings
+            provider = await self._get_embedding_provider()
+            vectors = await provider.embed_batch(chunks)
+            return [v.tolist() for v in vectors]
         except Exception as e:
             logger.warning(f"批量 embedding 失败: {e}")
             return None

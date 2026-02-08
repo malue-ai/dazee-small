@@ -234,7 +234,37 @@ async def _init_chat_service() -> None:
         print(f"⚠️ ChatService 预热失败: {e}")
 
 
+async def _init_knowledge_index() -> None:
+    """
+    初始化知识库索引
+
+    从实例配置读取 knowledge.directories，索引配置的本地目录。
+    索引在后台进行，不阻塞服务启动。
+    """
+    print("📚 初始化知识库...")
+    try:
+        from services.knowledge_service import index_configured_directories
+
+        count = await index_configured_directories()
+        if count > 0:
+            print(f"✅ 知识库索引完成 ({count} 个文件)")
+        else:
+            print("✅ 知识库就绪（无配置目录或目录为空）")
+    except Exception as e:
+        print(f"⚠️ 知识库索引失败（不影响服务运行）: {e}")
+
+
 # ==================== 关闭辅助函数 ====================
+
+
+async def _cleanup_knowledge_service() -> None:
+    """清理知识服务资源"""
+    try:
+        from services.knowledge_service import shutdown as knowledge_shutdown
+        await knowledge_shutdown()
+    except Exception:
+        pass
+
 
 async def _cleanup_agent_registry() -> None:
     """清理 Agent Registry"""
@@ -278,19 +308,21 @@ async def lifespan(app: FastAPI):
     
     await _init_resilience_config()
     await _init_local_store()
-    await _preload_capability_registry()  # 🆕 加载工具注册表（必须在 Agent 之前）
+    await _preload_capability_registry()  # 加载工具注册表（必须在 Agent 之前）
     await _preload_agent_registry()  # 加载 Agent 配置
     await _init_chat_service()  # 预热 ChatService（避免首次请求冷启动）
+    await _init_knowledge_index()  # 知识库：索引配置的目录
     scheduler = await _start_scheduler()
-    user_task_scheduler = await _start_user_task_scheduler()  # 🆕 用户定时任务调度器
+    user_task_scheduler = await _start_user_task_scheduler()  # 用户定时任务调度器
     
     yield
     
     # ===== 关闭阶段 =====
     print("🛑 正在关闭服务...")
     
+    await _cleanup_knowledge_service()
     await _cleanup_agent_registry()
-    await _stop_user_task_scheduler(user_task_scheduler)  # 🆕 停止用户任务调度器
+    await _stop_user_task_scheduler(user_task_scheduler)  # 停止用户任务调度器
     await _stop_scheduler(scheduler)
     await close_all_workspaces()
     

@@ -1,6 +1,6 @@
 ---
 name: local-search
-description: Search local files by content using SQLite FTS5 full-text search and macOS Spotlight (mdfind). Supports txt, md, pdf, docx, and more.
+description: Search user's local knowledge base and files using the knowledge_search tool (FTS5 + semantic) and macOS Spotlight (mdfind) for filename lookup.
 metadata:
   xiaodazi:
     dependency_level: builtin
@@ -11,7 +11,7 @@ metadata:
 
 # 本地文件搜索
 
-在用户电脑上搜索文件，支持按名称和内容搜索。
+在用户电脑上搜索文件内容和文件名。
 
 ## 使用场景
 
@@ -21,16 +21,50 @@ metadata:
 
 ## 搜索方式
 
-### 方式 1：macOS Spotlight（推荐，最快）
+### 方式 1：knowledge_search 工具（内容搜索，首选）
 
-利用系统已建好的索引，毫秒级返回。
+搜索已索引知识库中的文档内容。支持 FTS5 全文搜索和语义搜索。
+
+```
+工具名: knowledge_search
+
+参数:
+  query:     搜索查询（自然语言），必填
+  limit:     返回结果数量，默认 5
+  file_type: 过滤文件类型（如 .md, .txt, .pdf），可选
+```
+
+<example>
+<query>帮我找一下之前写的季度总结</query>
+<action>
+调用 knowledge_search，参数：{"query": "季度总结"}
+</action>
+<reasoning>用户要搜索文档内容，knowledge_search 覆盖已索引文件，优先使用</reasoning>
+</example>
+
+<example>
+<query>搜一下包含"预算审批"的 PDF 文件</query>
+<action>
+调用 knowledge_search，参数：{"query": "预算审批", "file_type": ".pdf"}
+</action>
+<reasoning>有明确的文件类型过滤需求，使用 file_type 参数</reasoning>
+</example>
+
+<example>
+<query>我上传的产品文档里有没有提到竞品分析？</query>
+<action>
+调用 knowledge_search，参数：{"query": "竞品分析"}
+</action>
+<reasoning>搜索已索引文档中的特定内容</reasoning>
+</example>
+
+### 方式 2：mdfind（文件名搜索，补充）
+
+knowledge_search 无结果时，用 macOS Spotlight 按文件名或元数据搜索。
 
 ```bash
 # 按文件名搜索
 mdfind -name "报告"
-
-# 按内容搜索
-mdfind "季度总结"
 
 # 限定目录
 mdfind -onlyin ~/Documents "预算"
@@ -38,72 +72,17 @@ mdfind -onlyin ~/Documents "预算"
 # 限定文件类型
 mdfind "kind:pdf 合同"
 mdfind "kind:word 报告"
-mdfind "kind:excel 数据"
-mdfind "kind:presentation PPT"
-
-# 按时间范围（最近 7 天修改的）
-mdfind "kMDItemFSContentChangeDate >= $time.today(-7)"
-
-# 组合条件
-mdfind -onlyin ~/Documents "kind:pdf AND 合同"
-```
-
-### 方式 2：find + grep（精确匹配）
-
-Spotlight 搜不到时用这个。
-
-```bash
-# 按文件名搜索（模糊）
-find ~/Documents -iname "*报告*" -type f
-
-# 按文件内容搜索（文本文件）
-grep -rl "关键词" ~/Documents --include="*.txt" --include="*.md" --include="*.py"
-
-# 最近 7 天修改的文件
-find ~/Documents -type f -mtime -7
-
-# 按大小搜索（大于 10MB）
-find ~/Documents -type f -size +10M
-```
-
-### 方式 3：SQLite FTS5（结构化搜索）
-
-对已建索引的文件做全文搜索，适合大量文档。
-
-```python
-import sqlite3
-import os
-
-DB_PATH = os.path.expanduser("~/.xiaodazi/search_index.db")
-
-def search(query: str, limit: int = 20):
-    """全文搜索已索引的文件"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    # FTS5 搜索
-    cursor.execute("""
-        SELECT path, snippet(file_index, 1, '【', '】', '...', 32)
-        FROM file_index
-        WHERE file_index MATCH ?
-        ORDER BY rank
-        LIMIT ?
-    """, (query, limit))
-    
-    results = cursor.fetchall()
-    conn.close()
-    return results
 ```
 
 ## 搜索策略
 
-1. **优先用 mdfind**：系统级索引，覆盖面广，速度快
-2. **mdfind 无结果时用 find + grep**：精确但慢，限定目录范围
-3. **FTS5 用于项目内搜索**：对用户指定的监控文件夹建索引
+1. **优先用 knowledge_search**：覆盖已索引的知识库文件，支持内容搜索和语义匹配
+2. **knowledge_search 无结果时用 mdfind**：按文件名或元数据搜索，覆盖面更广
+3. **两者都无结果时**：告知用户，询问是否需要将目标目录加入知识库索引
 
 ## 输出规范
 
-- 展示前 10 条结果，包含文件路径和摘要片段
+- 展示搜索结果，包含文件路径和摘要片段
 - 路径用 `~` 简写用户目录
 - 告知用户总共找到多少结果
-- 文件过多时询问用户是否要进一步筛选
+- 结果过多时询问用户是否要进一步筛选

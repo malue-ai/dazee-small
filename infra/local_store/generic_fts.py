@@ -508,13 +508,18 @@ class GenericFTS5:
         if '"' in query and query.count('"') % 2 == 0:
             return query
 
-        # 如果用户显式使用 FTS5 操作符，保留原样
-        for op in (" AND ", " OR ", " NOT "):
-            if op in query.upper():
-                return query
+        # 检测用户是否显式使用了 FTS5 布尔操作符
+        has_bool_op = any(
+            op in query.upper()
+            for op in (" AND ", " OR ", " NOT ")
+        )
 
-        # 移除 FTS5 特殊字符（小白用户可能误输入）
-        query = re.sub(r'[*^()\[\]{}:"\\]', " ", query)
+        # 移除 FTS5 特殊字符（+ 也是特殊字符，如 C++ 中的 +）
+        query = re.sub(r'[*^()\[\]{}:"+\\]', " ", query)
+
+        # 如果用户用了布尔操作符，清洗特殊字符后直接返回
+        if has_bool_op:
+            return re.sub(r"\s+", " ", query).strip()
 
         # CJK 字符级分割（与索引时一致，确保匹配）
         query = GenericFTS5._cjk_aware_split(query)

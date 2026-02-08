@@ -150,16 +150,22 @@ async def init_vector_extension(engine: AsyncEngine) -> bool:
         是否加载成功
     """
     try:
+        import sqlite_vec
+
+        vec_path = sqlite_vec.loadable_path()
+
         async with engine.begin() as conn:
-            # sqlite-vec 需要通过 load_extension 加载
-            # aiosqlite 底层连接启用扩展加载
+            # sqlite-vec: use loadable_path() for reliable extension loading
             raw_conn = await conn.get_raw_connection()
             await raw_conn.driver_connection.enable_load_extension(True)
-            await raw_conn.driver_connection.load_extension("vec0")
+            await raw_conn.driver_connection.load_extension(vec_path)
             await raw_conn.driver_connection.enable_load_extension(False)
 
         logger.info("sqlite-vec 扩展加载成功")
         return True
+    except ImportError:
+        logger.info("sqlite-vec 未安装（可选功能，pip install sqlite-vec）")
+        return False
     except Exception as e:
         logger.info(f"sqlite-vec 扩展不可用（可选功能，不影响运行）: {e}")
         return False

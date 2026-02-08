@@ -14,10 +14,9 @@ Injector 基类和枚举定义
 │  └── HistorySummaryProvider # 历史摘要(极难触发)               │
 ├─────────────────────────────────────────────────────────────┤
 │  Phase 2: User Context (role: "user", systemInjection: true)│
-│  ├── UserMemoryInjector     # 用户记忆                       │
-│  ├── GroupContextInjector   # 群组上下文                     │
-│  ├── GTDPlanInjector        # GTD 计划                       │
-│  └── (本地知识检索 - 待实现)                                  │
+│  ├── UserMemoryInjector          # 用户记忆                  │
+│  ├── PlaybookHintInjector        # 历史策略提示              │
+│  └── KnowledgeContextInjector    # 本地知识库上下文          │
 ├─────────────────────────────────────────────────────────────┤
 │  Phase 3: Runtime Injection (追加到最后一条消息)              │
 │  ├── PageEditorContextInjector  # 页面编辑器上下文           │

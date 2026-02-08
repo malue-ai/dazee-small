@@ -13,6 +13,7 @@ from typing import Any, Dict
 from fastapi import APIRouter
 
 from services.settings_service import (
+    get_embedding_status,
     get_settings,
     get_settings_schema,
     get_settings_status,
@@ -82,4 +83,20 @@ async def read_settings_schema() -> Dict[str, Any]:
     return {
         "success": True,
         "data": get_settings_schema(),
+    }
+
+
+@router.get("/embedding-status")
+async def read_embedding_status() -> Dict[str, Any]:
+    """
+    检测语义搜索 embedding 模型可用性
+
+    前端据此显示：
+    - 是否已安装本地模型
+    - 是否可用 OpenAI 云端
+    - 安装提示和推荐方案
+    """
+    return {
+        "success": True,
+        "data": await get_embedding_status(),
     }

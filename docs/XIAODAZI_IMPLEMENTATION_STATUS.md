@@ -18,31 +18,34 @@
 │  Vue 3 + TypeScript + Vite + Tauri                                                      │
 │                                                                                         │
 │  ┌── views/ ──────────────────────────────────────────────────────────────────────────┐  │
-│  │ ChatView │ CreateProjectView │ SettingsView │ SkillsView │ RealtimeView          │  │
+│  │ ChatView │ SettingsView │ SkillsView │ KnowledgeView │ OnboardingView             │  │
+│  │ CreateProjectView                                                                 │  │
 │  └────┬───────────────────────────────────────────────────────────────────────────────┘  │
 │       │                                                                                 │
 │  ┌────▼── composables/ ──────────────────────────────────────────────────────────────┐  │
-│  │ useChat │ useSSE │ useHITL │ useFileUpload │ useRealtime                          │  │
+│  │ useChat │ useSSE │ useWebSocketChat │ useHITL │ useFileUpload                     │  │
 │  └────┬──────────────────────────────────────────────────────────────────────────────┘  │
 │       │                                                                                 │
 │  ┌────▼── api/ ──────────────────────────────────────────────────────────────────────┐  │
-│  │ chat.ts │ session.ts │ settings.ts │ models.ts │ skills.ts │ workspace.ts │ ...  │  │
+│  │ chat.ts │ session.ts │ config.ts │ settings.ts │ skills.ts │ workspace.ts         │  │
+│  │ models.ts │ tauri.ts │ agent.ts                                                   │  │
 │  └────┬──────────────────────────────────────────────────────────────────────────────┘  │
 │       │                                                                                 │
 │  ┌── components/ ─────────────────────────────────────────────────────────────────────┐  │
-│  │ chat/: ChatHeader │ ChatInputArea │ ConversationSidebar │ MarkdownRenderer        │  │
-│  │       MessageContent │ MessageList │ ToolMessage                                  │  │
+│  │       MessageContent │ MessageList │ ToolMessage │ ToolBlock                      │  │
 │  │ modals/: ConfirmModal │ SimpleConfirmModal │ LongRunConfirmModal │ Rollback...    │  │
+│  │         AttachmentPreview                                                         │  │
 │  │ workspace/: FileExplorer │ FilePreview │ FileTreeNode                             │  │
-│  │ realtime/: RealtimeVoice                                                          │  │
-│  │ common/: Card │ GuideOverlay                                                      │  │
+│  │ sidebar/: PlanWidget                                                              │  │
+│  │ common/: Card │ DebugPanel │ SplashScreen │ GuideOverlay                          │  │
 │  └────────────────────────────────────────────────────────────────────────────────────┘  │
 │                                                                                         │
-│  ┌── stores/ ─────────┐ ┌── layouts/ ─────────┐ ┌── types/ ──────────────────────────┐  │
-│  │ conversation │ ui  │ │ DashboardLayout     │ │ api │ chat │ realtime │ skills     │  │
-│  │ session │ workspace│ │ DefaultLayout       │ │ workspace │ index                  │  │
-│  │ agent │ guide      │ │                     │ │                                    │  │
-│  └────────────────────┘ └─────────────────────┘ └────────────────────────────────────┘  │
+│  ┌── stores/ ──────────────────┐ ┌── layouts/ ─────────┐                                │
+│  │ conversation │ session │ ui │ │ DashboardLayout     │                                │
+│  │ workspace │ knowledge       │ │ DefaultLayout       │                                │
+│  │ connection │ agent │ guide  │ └─────────────────────┘                                │
+│  │ skill                       │                                                        │
+│  └─────────────────────────────┘                                                        │
 │                                                                                         │
 │  ┌── src-tauri/ (桌面壳) ─────────────────────────────────────────────────────────────┐  │
 │  │ main.rs │ Cargo.toml │ tauri.conf.json │ build.rs │ icons/ │ binaries/             │  │
@@ -53,30 +56,27 @@
 ┌───────▼─────────────────────────────────────────────────────────────────────────────────┐
 │                          路由层 (routers/)  — FastAPI Endpoints                          │
 │                                                                                         │
-│  chat.py │ agents.py │ conversation.py │ files.py │ skills.py │ tools.py               │
-│  mem0_router.py │ tasks.py │ settings.py │ realtime.py │ models.py                     │
-│  human_confirmation.py │ websocket.py                                                  │
+│  chat.py │ agents.py │ conversation.py │ skills.py │ settings.py                       │
+│  models.py │ human_confirmation.py │ websocket.py                                      │
 └───────┬─────────────────────────────────────────────────────────────────────────────────┘
         │
 ┌───────▼─────────────────────────────────────────────────────────────────────────────────┐
 │                          服务层 (services/)  — Business Logic                            │
 │                                                                                         │
 │  chat_service.py │ session_service.py │ agent_registry.py │ conversation_service.py     │
-│  file_service.py │ tool_service.py │ confirmation_service.py │ settings_service.py      │
-│  mem0_service.py │ realtime_service.py │ mcp_client.py                                  │
-│  task_service.py │ user_task_scheduler.py                                               │
+│  confirmation_service.py │ settings_service.py │ knowledge_service.py                   │
+│  mcp_client.py │ user_task_scheduler.py                                                 │
 └───────┬─────────────────────────────────────────────────────────────────────────────────┘
         │
 ┌───────▼─────────────────────────────────────────────────────────────────────────────────┐
 │                          核心层 (core/)  — Agent Framework                               │
 │                                                                                         │
 │  ┌─── agent/ ── Agent 引擎 ───────────────────────────────────────────────────────────┐ │
-│  │  base.py (SimpleAgent)                                                      │ │
+│  │  base.py (SimpleAgent)                                                             │ │
 │  │  factory.py (AgentFactory) │ models.py │ protocol.py │ content_handler.py │ errors │ │
 │  │                                                                                    │ │
 │  │  ┌── execution/ ────────────────────────────────────────────────────────────────┐  │ │
-│  │  │  rvr.py (RVR 执行器)                                                  │  │ │
-│  │  │  rvrb.py (RVR-B 回溯执行器)                                            │  │ │
+│  │  │  rvr.py (RVR 执行器)  │  rvrb.py (RVR-B 回溯执行器)                         │  │ │
 │  │  │  protocol.py (ExecutionStrategy)                                             │  │ │
 │  │  └──────────────────────────────────────────────────────────────────────────────┘  │ │
 │  │  ┌── backtrack/ ────────────────────────────────────────────────────────────────┐  │ │
@@ -89,22 +89,21 @@
 │  └────────────────────────────────────────────────────────────────────────────────────┘ │
 │                                                                                         │
 │  ┌─── routing/ ── 意图路由 ───────────────────────────────────────────────────────────┐ │
-│  │  intent_analyzer.py (LLM 意图分析, fast_mode/semantic_cache)                │ │
+│  │  intent_analyzer.py (LLM 意图分析, fast_mode/semantic_cache)                       │ │
 │  │  router.py (AgentRouter) │ intent_cache.py (语义缓存) │ types.py (IntentResult)    │ │
 │  └────────────────────────────────────────────────────────────────────────────────────┘ │
 │                                                                                         │
 │  ┌─── context/ ── 上下文工程 ─────────────────────────────────────────────────────────┐ │
-│  │  context_engineering.py │ provider.py │ retriever.py │ runtime.py                  │ │
-│  │  failure_summary.py                                                                │ │
+│  │  context_engineering.py │ provider.py │ runtime.py │ failure_summary.py             │ │
 │  │  ┌── injectors/ ──────────────────────────────────────────────────────────────┐    │ │
 │  │  │  base.py │ orchestrator.py │ context.py                                    │    │ │
 │  │  │  phase1/: system_role.py │ history_summary.py │ tool_provider.py            │    │ │
 │  │  │          skill_focus.py (复杂度驱动 Skill 聚焦)                             │    │ │
-│  │  │  phase2/: user_memory.py │ playbook_hint.py (历史策略注入)                  │    │ │
+│  │  │  phase2/: user_memory.py │ playbook_hint.py │ knowledge_context.py          │    │ │
 │  │  │  phase3/: gtd_todo.py │ page_editor.py                                     │    │ │
 │  │  └────────────────────────────────────────────────────────────────────────────┘    │ │
 │  │  ┌── compaction/ ──────────────────┐  ┌── providers/ ───────────────────────┐      │ │
-│  │  │  summarizer.py │ tool_result.py │  │  memory.py │ metadata.py            │      │ │
+│  │  │  summarizer.py │ tool_result.py │  │  metadata.py                        │      │ │
 │  │  └─────────────────────────────────┘  └─────────────────────────────────────┘      │ │
 │  └────────────────────────────────────────────────────────────────────────────────────┘ │
 │                                                                                         │
@@ -116,29 +115,30 @@
 │  │          ┌───────────────────┼──────────────────────┐                              │ │
 │  │  ┌───────▼──────┐  ┌────────▼──────┐  ┌────────────▼──────────────────────┐        │ │
 │  │  │ Layer 1      │  │ Layer 2       │  │ Layer 3: mem0/                    │        │ │
-│  │  │ markdown_    │  │ GenericFTS5   │  │  pool.py (向量搜索)              │        │ │
-│  │  │ layer.py     │  │ (全文索引)     │  │  config.py │ sqlite_vec_store   │        │ │
+│  │  │ markdown_    │  │ GenericFTS5   │  │  pool.py (向量搜索)               │        │ │
+│  │  │ layer.py     │  │ (全文索引)    │  │  config.py │ sqlite_vec_store.py  │        │ │
 │  │  │ (MEMORY.md)  │  │              │  │  extraction/: extractor.py        │        │ │
 │  │  └──────────────┘  └──────────────┘  │  retrieval/: formatter │ reranker  │        │ │
 │  │                                       │  schemas/: behavior │ emotion     │        │ │
-│  │                                       │    explicit_memory │ fragment    │        │ │
+│  │                                       │    explicit_memory │ fragment     │        │ │
 │  │  ┌── 通用记忆模块 ──────────┐         │    persona │ plan                │        │ │
 │  │  │ base.py │ manager.py    │         │  update/: quality_control          │        │ │
-│  │  │ working.py              │         │    aggregator │ analyzer │ planner│        │ │
-│  │  │ system/: cache │ skill  │         │    persona_builder │ prompts     │        │ │
-│  │  │ user/: episodic │ plan  │         │    reminder │ reporter           │        │ │
+│  │  │ working.py              │         │    aggregator │ analyzer │ planner │        │ │
+│  │  │ system/: cache │ skill  │         │    persona_builder │ prompts      │        │ │
+│  │  │ user/: episodic │ plan  │         │    reminder │ reporter            │        │ │
 │  │  │        preference       │         └──────────────────────────────────┘        │ │
 │  │  └─────────────────────────┘                                                      │ │
 │  └────────────────────────────────────────────────────────────────────────────────────┘ │
 │                                                                                         │
 │  ┌─── knowledge/ ── 知识检索 ─────────────────────────────────────────────────────────┐ │
-│  │  local_search.py (FTS5 搜索 + add/remove，语义搜索接口预留)                  │ │
-│  │  file_indexer.py (增量索引 + 分块，txt/md/pdf/docx)                          │ │
+│  │  local_search.py (FTS5 + 向量混合搜索，加权合并去重)                               │ │
+│  │  file_indexer.py (增量索引 + 分块 + 批量 embedding)                                │ │
+│  │  embeddings.py (Embedding 提供商抽象：OpenAI / 本地模型 / auto 降级)               │ │
 │  └────────────────────────────────────────────────────────────────────────────────────┘ │
 │                                                                                         │
 │  ┌─── planning/ ────────────┐  ┌─── termination/ ──────────┐  ┌─── state/ ───────────┐ │
-│  │  progress_transformer.py │  │  adaptive.py       │  │  consistency_mgr.py  │ │
-│  │  dag_scheduler.py        │  │  五维度终止判断             │  │  (快照/回滚)         │ │
+│  │  progress_transformer.py │  │  adaptive.py               │  │  consistency_mgr.py  │ │
+│  │  dag_scheduler.py        │  │  八维度终止判断             │  │  (快照/回滚)         │ │
 │  │  protocol.py             │  │  protocol.py               │  │  operation_log.py    │ │
 │  │  storage.py │ validators │  │  (BaseTerminator)          │  │  (逆操作)            │ │
 │  └──────────────────────────┘  └────────────────────────────┘  └──────────────────────┘ │
@@ -150,25 +150,25 @@
 │  └───────────────────────────────────────────────────────────────────────────────────┘  │
 │                                                                                         │
 │  ┌─── events/ ── 事件系统 ───────────────────────────────────────────────────────────┐  │
-│  │  broadcaster.py │ base.py │ dispatcher.py │ manager.py │ storage.py       │  │
+│  │  broadcaster.py │ base.py │ dispatcher.py │ manager.py │ storage.py               │  │
 │  │  content_events │ conversation_events │ message_events │ session_events           │  │
 │  │  system_events │ user_events                                                     │  │
 │  │  adapters/: dingtalk.py │ feishu.py │ slack.py │ webhook.py │ base.py             │  │
 │  └───────────────────────────────────────────────────────────────────────────────────┘  │
 │                                                                                         │
 │  ┌─── prompt/ ── 提示词工程 ────────────────┐  ┌─── skill/ ── Skill 管理 ────────────┐ │
-│  │  runtime_context_builder.py       │  │  dynamic_loader.py (运行时依赖检查) │ │
-│  │  skill_prompt_builder.py                  │  │  loader.py (SkillsLoader 解析配置)  │ │
-│  │  complexity_detector.py │ llm_analyzer.py │  │  models.py (SkillEntry/BackendType) │ │
-│  │  framework_rules.py │ prompt_layer.py     │  │  os_compatibility.py (OS 四状态)    │ │
-│  │  instance_cache.py                        │  └────────────────────────────────────┘ │
-│  │  intent_prompt_generator.py               │                                         │
-│  │  prompt_results_writer.py                 │  ┌─── tool/ ── 工具管理 ──────────────┐ │
-│  └───────────────────────────────────────────┘  │  registry.py │ executor.py          │ │
-│                                                  │  selector.py │ validator.py         │ │
+│  │  runtime_context_builder.py              │  │  dynamic_loader.py (运行时依赖检查) │ │
+│  │  skill_prompt_builder.py                 │  │  loader.py (SkillsLoader 解析配置)  │ │
+│  │  complexity_detector.py │ llm_analyzer.py│  │  models.py (SkillEntry/BackendType) │ │
+│  │  framework_rules.py │ prompt_layer.py    │  │  os_compatibility.py (OS 四状态)    │ │
+│  │  instance_cache.py                       │  └────────────────────────────────────┘ │
+│  │  intent_prompt_generator.py              │                                         │
+│  │  prompt_results_writer.py                │  ┌─── tool/ ── 工具管理 ──────────────┐ │
+│  └──────────────────────────────────────────┘  │  registry.py │ executor.py          │ │
+│                                                 │  selector.py │ validator.py         │ │
 │  ┌─── discovery/ ── 应用发现 ────────────────┐  │  types.py │ loader.py              │ │
-│  │  app_scanner.py                    │  │  llm_description.py                │ │
-│  │  macOS ✅  Win32 ❌  Linux ❌               │  │  registry_config.py                │ │
+│  │  app_scanner.py                           │  │  llm_description.py                │ │
+│  │  macOS ✅  Win32 ❌  Linux ❌              │  │  registry_config.py                │ │
 │  └───────────────────────────────────────────┘  │  capability/: skill_loader.py       │ │
 │                                                  └────────────────────────────────────┘ │
 │  ┌─── 其他核心模块 ──────────────────────────────────────────────────────────────────┐  │
@@ -193,14 +193,12 @@
 │                                                                                         │
 │  ┌─── local_store/ ────────────────────────────────────────────────────────────────────┐ │
 │  │  engine.py — aiosqlite + WAL + 7 项 PRAGMA 优化                                   │ │
-│  │  models.py — ORM 模型 + LocalIndexedFile                                            │ │
-│  │  fts.py — 消息专用 FTS5                                                             │ │
-│  │  generic_fts.py — 通用 FTS5（知识/记忆共用，CJK 字符级分割 + 逆向合并）               │ │
-│  │  vector.py — sqlite-vec 向量搜索                                                   │ │
-│  │  workspace.py           — 统一管理器                                                │ │
-│  │  pools.py               — 连接池                                                   │ │
-│  │  session_store.py       — 会话存储                                                 │ │
-│  │  skills_cache.py        — Skills 延迟加载缓存                                       │ │
+│  │  models.py — ORM 模型 + LocalIndexedFile                                          │ │
+│  │  fts.py — 消息专用 FTS5                                                           │ │
+│  │  generic_fts.py — 通用 FTS5（知识/记忆共用，CJK 字符级分割 + 逆向合并）            │ │
+│  │  vector.py — sqlite-vec 向量搜索（知识 + Mem0 共用）                               │ │
+│  │  workspace.py — 统一管理器    │  pools.py — 连接池                                 │ │
+│  │  session_store.py — 会话存储  │  skills_cache.py — Skills 延迟加载缓存             │ │
 │  │  crud/: conversation.py │ message.py │ scheduled_task.py                           │ │
 │  └─────────────────────────────────────────────────────────────────────────────────────┘ │
 │                                                                                         │
@@ -294,7 +292,8 @@
 │  │  └────────────────────────────────────────────────────────┘  │   │
 │  │                                                              │   │
 │  │  ┌── sqlite-vec 向量表 ───────────────────────────────────┐  │   │
-│  │  │ vector embeddings — Mem0 语义搜索 (vector.py)           │  │   │
+│  │  │ mem0 vectors     — Mem0 语义搜索 (vector.py)           │  │   │
+│  │  │ knowledge_vectors — 知识检索语义搜索 (vector.py)        │  │   │
 │  │  └────────────────────────────────────────────────────────┘  │   │
 │  │                                                              │   │
 │  │  PRAGMA: synchronous=NORMAL │ temp_store=MEMORY              │   │
@@ -363,30 +362,29 @@ Provider 一键切换模型分配：
 ```
 ┌─── models/ (Pydantic 数据模型) ─────────────────────────────────────┐
 │  agent.py │ api.py │ chat.py │ chat_request.py │ database.py        │
-│  docs.py │ file.py │ hitl.py │ llm.py │ mcp.py │ mem0.py           │
-│  realtime.py │ scheduled_task.py │ skill.py │ tool.py │ usage.py   │
+│  docs.py │ hitl.py │ llm.py │ mcp.py                               │
+│  scheduled_task.py │ skill.py │ usage.py                            │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─── prompts/ (提示词模板) ───────────────────────────────────────────┐
 │  intent_recognition_prompt.py │ plan_generator_prompt.py            │
 │  prompt_selector.py │ simple_prompt.py │ standard_prompt.py         │
-│  universal_agent_prompt.py                                            │
-│  MEMORY_PROTOCOL.md                                                 │
+│  universal_agent_prompt.py │ MEMORY_PROTOCOL.md                     │
 │  factory/: schema_generator.md                                      │
 │  fragments/: code_rules.md │ excel_rules.md │ ppt_rules.md          │
-│  templates/: complex_prompt_generation.md │ medium_prompt_generation  │
+│  templates/: complex_prompt_generation.md │ medium_prompt_generation │
 │              simple_prompt_generation.md │ intent_prompt_generation  │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─── tools/ (可调用工具) ────────────────────────────────────────────┐
 │  base.py │ api_calling.py │ nodes_tool.py │ observe_screen.py      │
 │  plan_todo_tool.py │ request_human_confirmation.py                  │
-│  scheduled_task_tool.py                                             │
+│  scheduled_task_tool.py │ knowledge_search.py                       │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─── utils/ (工具函数) ──────────────────────────────────────────────┐
 │  app_paths.py │ cache_utils.py │ file_handler.py │ file_processor.py│
-│  instance_loader.py │ json_file_store.py │ json_utils.py   │
+│  instance_loader.py │ json_file_store.py │ json_utils.py            │
 │  message_utils.py │ query_utils.py                                  │
 │  background_tasks/:                                                 │
 │    scheduler.py │ registry.py │ service.py │ context.py             │
@@ -397,6 +395,7 @@ Provider 一键切换模型分配：
 ┌─── config/ (框架级配置) ──────────────────────────────────────────────┐
 │  capabilities.yaml │ context_compaction.yaml │ prompt_config.yaml    │
 │  resilience.yaml │ scheduled_tasks.yaml │ tool_registry.yaml        │
+│  custom_models.yaml                                                  │
 │  llm_config/: __init__.py │ loader.py（set_instance_profiles 注入） │
 │               qwen_recommended_configs.md                            │
 │                                                                      │
@@ -406,38 +405,37 @@ Provider 一键切换模型分配：
 └──────────────────────────────────────────────────────────────────────┘
 
 ┌─── skills/ (全局技能库) ───────────────────────────────────────────┐
-│  library/: 80+ Skills (与 client_agent 共用) │ README.md            │
-│  custom_claude_skills/: __init__.py                                 │
+│  library/: 80+ Skills (与 client_agent 共用)                        │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─── evaluation/ (评估框架) ─────────────────────────────────────────┐
-│  harness.py │ metrics.py │ models.py │ qos_config.py │ calibration  │
-│  dashboard.py │ loop_automation.py                                  │
+│  harness.py │ metrics.py │ models.py │ qos_config.py │ calibration │
+│  dashboard.py │ loop_automation.py │ alerts.py │ ci_integration.py │
 │  promptfoo_adapter.py │ case_converter.py │ case_reviewer.py        │
 │  verify_imports.py                                                  │
 │  adapters/: http_agent.py (E2E → FastAPI 桥接)                     │
 │  graders/: code_based.py │ human.py │ model_based.py                │
-│  config/: settings.yaml                                             │
+│  config/: settings.yaml │ judge_prompts.yaml                        │
 │  suites/: coding/ │ conversation/ │ intent/                         │
 │           xiaodazi/e2e/phase1_core.yaml (4 个 E2E 用例)             │
 │           xiaodazi/feasibility/ (7 个可行性测试)                     │
 │           xiaodazi/efficiency/ (4 个效率测试)                        │
-│           promptfoo/ │ regression/                                   │
-│  reports/: e2e_phase1_*.json │ intent_accuracy_*.json │ ...         │
+│           xiaodazi/e2e_regression_*.yaml (回归测试)                  │
+│  reports/: e2e_phase1_*.json │ e2e_phase1_*.md                      │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─── scripts/ (运维与验证脚本) ──────────────────────────────────────┐
-│  verify_v11_architecture.py │ verify_memory_knowledge.py             │
-│  verify_e2e_consistency.py │ sync_capabilities.py                    │
-│  switch_provider.py (Claude↔Qwen 一键切换)                          │
-│  check_instance_dependencies.py │ init_instance_xiaodazi.py          │
-│  run_e2e_auto.py (自动化 E2E 测试)  │ run_e2e_eval.py               │
-│  run_eval.py │ run_xiaodazi_eval.py │ generate_eval_report.py        │
-│  build_app.sh │ build_backend.py │ sync_version.py                   │
+│  verify_v11_architecture.py │ verify_memory_knowledge.py            │
+│  verify_e2e_consistency.py │ verify_eval_loop.py                    │
+│  sync_capabilities.py │ switch_provider.py (Claude↔Qwen 一键切换)  │
+│  check_instance_dependencies.py │ init_instance_xiaodazi.py         │
+│  run_e2e_auto.py (自动化 E2E 测试) │ run_e2e_eval.py               │
+│  run_eval.py │ run_xiaodazi_eval.py │ generate_eval_report.py       │
+│  build_app.sh │ build_backend.py │ sync_version.py                  │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─── 根目录文件 ─────────────────────────────────────────────────────┐
-│  main.py (FastAPI 入口) │ config.yaml (应用配置) │ zenflux-backend.spec   │
+│  main.py (FastAPI 入口) │ config.yaml (应用配置) │ zenflux-backend.spec │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -450,11 +448,11 @@ Provider 一键切换模型分配：
 ██████████  95%  存储层 (SQLite + FTS5 + sqlite-vec)
 █████████░  90%  状态一致性管理 (快照/回滚)
 █████████░  90%  意图识别简化 (V11.0 极简输出 + skill_groups 语义多选)
-█████████░  90%  上下文注入器 (6 个 Phase Injector 全部就绪)
+█████████░  90%  上下文注入器 (7 个 Phase Injector 全部就绪)
 ████████░░  85%  记忆系统 (三层架构)
 ████████░░  85%  进度转换与事件推送 (ProgressTransformer + emit_progress_update)
 ████████░░  85%  Skills 二维分类框架 (38 个 Skill 已创建 + SkillsLoader)
-████████░░  80%  本地知识检索 (FTS5)
+█████████░  90%  本地知识检索 (FTS5 + 向量混合搜索)
 ████████░░  80%  E2E 评估框架 (4 个端到端用例 + 自动化运行器)
 ███████░░░  75%  三大核心能力
 ███████░░░  75%  Skill 格式规范 (SKILL.md + 二维元数据)
@@ -491,9 +489,9 @@ Provider 一键切换模型分配：
 | 状态一致性管理 | 3.3 | 90% | 已完成 |
 | Agent 引擎层 | — | 95% | V11.0 统一 RVR-B，complexity 仅影响规划深度 |
 | 意图识别简化 | 3.7.1 | 90% | 已完成（V11.0 极简输出 + `relevant_skill_groups` 语义多选） |
-| 上下文注入器 | — | 90% | 6 个 Phase Injector（含 skill_focus + playbook_hint） |
+| 上下文注入器 | — | 90% | 7 个 Phase Injector（含 skill_focus + playbook_hint + knowledge_context） |
 | 进度转换器 | 3.7.2 | 85% | 已完成 |
-| 本地知识检索 | 3.8 | 80% | FTS5 已完成，语义搜索待实现 |
+| 本地知识检索 | 3.8 | 90% | FTS5 + 向量混合搜索已完成，知识工具 + 上下文注入器已实现 |
 | 记忆系统 | 3.13 | 85% | 三层架构已完成 |
 | Nodes 本地操作 | 3.5 | 80% (macOS) | macOS 11 项操作完整，win32/linux 待实现 |
 | OS 兼容层 | 3.5 | 40% | 仅 macOS 实现 |
@@ -766,26 +764,72 @@ BacktrackManager 决策（LLM 驱动）
 | 文件 | 状态 | 说明 |
 |------|------|------|
 | `infra/local_store/generic_fts.py` | 已完成 | 通用 FTS5 引擎，CJK 字符级分割 + 逆向合并 |
-| `core/knowledge/local_search.py` | 已完成 | `LocalKnowledgeManager`，FTS5 搜索 + add/remove |
-| `core/knowledge/file_indexer.py` | 已完成 | 增量索引，分块，txt/md/pdf/docx |
+| `infra/local_store/vector.py` | 已完成 | sqlite-vec 向量搜索，动态维度 |
+| `core/knowledge/local_search.py` | 已完成 | `LocalKnowledgeManager`，FTS5 + 向量混合搜索 |
+| `core/knowledge/file_indexer.py` | 已完成 | 增量索引 + 分块 + 批量 embedding 生成 |
+| `core/knowledge/embeddings.py` | **新增** | Embedding 提供商抽象层（OpenAI / 本地 / auto 降级） |
+| `tools/knowledge_search.py` | **新增** | `knowledge_search` 工具（Agent 可调用） |
+| `services/knowledge_service.py` | **新增** | 知识管理器生命周期管理（单例 + 配置读取） |
+| `core/context/injectors/phase2/knowledge_context.py` | **新增** | 知识库上下文自动注入器（Phase 2） |
 | `infra/local_store/models.py` | 已完成 | 含 `LocalIndexedFile` 元数据模型 |
 | `infra/local_store/engine.py` | 已完成 | WAL + 7 项 PRAGMA 优化 |
 
+**搜索架构**：
+
+```
+用户查询
+    │
+    ▼
+LocalKnowledgeManager.search()
+    │
+    ├── FTS5 全文搜索（Level 1，零配置，始终启用）
+    │   └── BM25 排序 → bm25_rank_to_score() 归一化到 [0, 1]
+    │
+    ├── sqlite-vec 向量搜索（Level 2，可选）
+    │   └── EmbeddingProvider.embed(query) → 余弦距离 → 相似度 [0, 1]
+    │
+    └── 混合合并 _merge_hybrid_results()
+        ├── 以 doc_id 去重
+        ├── 加权排序：score = 0.6 × vec_score + 0.4 × fts_score
+        └── 最小分数阈值过滤（默认 0.05）
+```
+
+**Embedding 提供商架构**：
+
+```
+EmbeddingProvider (抽象接口)
+    ├── OpenAIEmbeddingProvider
+    │   └── text-embedding-3-small（1536 维），批量 API
+    ├── LocalEmbeddingProvider
+    │   └── sentence-transformers（推荐 BAAI/bge-m3，1024 维）
+    └── create_embedding_provider("auto")
+        └── 本地优先 → OpenAI 降级（无可用时报错）
+```
+
 **已完成的设计要求**：
 - Level 1 全文搜索（SQLite FTS5，零配置零依赖）
+- Level 2 语义搜索（sqlite-vec 向量相似度）
+- 混合搜索（FTS5 + 向量并行执行 → 加权合并去重）
+- BM25 分数归一化到 [0, 1]（`bm25_rank_to_score()`）
+- Embedding 提供商抽象（OpenAI / 本地 / auto 降级）
+- 批量 embedding 生成（`embed_batch()`，本地 10-100x 提速）
+- L2 归一化（保证余弦相似度正确）
 - CJK 中文搜索支持（字符级分割 + snippet 逆向合并）
-- BM25 排序 + snippet 高亮
 - 文件分块（智能句子/段落边界切分）
 - 增量索引（SHA256 hash check）
 - 多格式支持（txt/md 原生，pdf/docx 可选依赖）
 - FTS5 最佳实践（automerge / integrity-check / optimize / 损坏自动恢复）
 - 小白用户防御（FTS5 特殊字符自动移除）
 - Python 后过滤 UNINDEXED 列（跨 SQLite 版本兼容）
+- `knowledge_search` 工具（Agent 可通过 tool_use 主动调用）
+- `KnowledgeContextInjector`（Phase 2 自动注入相关知识到上下文）
+- `knowledge_service` 服务层（单例管理 + 配置驱动初始化）
+- 实例配置扩展（`semantic_enabled` / `embedding_provider` / `embedding_model`）
 
 **遗留**：
-- Level 2 语义搜索（`_semantic_search()`）未实现（接口已预留）
 - 文件夹监听（watchdog）未实现
 - 首次使用时 UI 文件夹选择引导未实现（前端范畴）
+- `knowledge_service` 尚未在 `main.py` 启动时调用 `index_configured_directories()`
 
 ---
 
@@ -1206,7 +1250,7 @@ tools/observe_screen.py（ObserveScreen Tool）
 
 ### 2.19 上下文注入器总览（Context Injectors）
 
-**6 个 Phase Injector 全部就绪**，覆盖从系统角色到动态上下文的完整注入链路。
+**7 个 Phase Injector 全部就绪**，覆盖从系统角色到动态上下文的完整注入链路。
 
 ```
 Phase 1: System Message 注入（缓存稳定层）
@@ -1217,7 +1261,8 @@ Phase 1: System Message 注入（缓存稳定层）
 
 Phase 2: User Context 注入（每次对话动态）
 ├── user_memory.py          — 用户记忆召回（recall 融合搜索）
-└── playbook_hint.py        — 历史成功策略提示（SESSION 缓存）
+├── playbook_hint.py        — 历史成功策略提示（SESSION 缓存）
+└── knowledge_context.py    — 本地知识库上下文（DYNAMIC，≤800 tokens）
 
 Phase 3: Runtime 注入（实时状态）
 ├── gtd_todo.py             — GTD 待办状态
@@ -1230,7 +1275,7 @@ Phase 3: Runtime 注入（实时状态）
 |---------|---------|-----------|
 | STABLE | 几乎不变 | system_role, tool_provider |
 | SESSION | 每会话变 | playbook_hint, history_summary |
-| DYNAMIC | 每轮可变 | skill_focus, user_memory |
+| DYNAMIC | 每轮可变 | skill_focus, user_memory, knowledge_context |
 
 ---
 
@@ -1482,7 +1527,7 @@ const showConfirm = (opts): Promise<boolean> => {
 
 | 项目 | 涉及文件 | 工作量 | 说明 |
 |------|----------|--------|------|
-| 知识检索语义搜索 | `core/knowledge/local_search.py` | 中 | 复用 `infra/local_store/vector.py` |
+| ~~知识检索语义搜索~~ | ~~`core/knowledge/local_search.py`~~ | ~~中~~ | ✅ 已完成（FTS5 + 向量混合搜索 + Embedding 抽象层） |
 | 记忆文件监听同步 | `core/memory/` | 中 | watchdog 监听 MEMORY.md 变更 |
 | E2E 测试用例扩展 | `evaluation/suites/xiaodazi/e2e/` | 中 | 扩展 Phase 1 用例覆盖更多场景（当前 4 个） |
 | Playbook 语义匹配 | `core/playbook/manager.py` | 小 | 替换关键词匹配为 Mem0 语义搜索（LLM-First） |
@@ -1597,10 +1642,18 @@ playbook:
 | `instances/xiaodazi/config/llm_profiles.yaml` | LLM Profiles 配置（从 config.yaml 分离） |
 | `instances/_template/config/skills.yaml` | 模板 Skills 配置 |
 | `instances/_template/config/llm_profiles.yaml` | 模板 LLM Profiles 配置 |
+| `core/knowledge/embeddings.py` | Embedding 提供商抽象层（OpenAI / 本地 / auto） |
+| `tools/knowledge_search.py` | 本地知识库搜索工具 |
+| `services/knowledge_service.py` | 知识管理器生命周期服务 |
+| `core/context/injectors/phase2/knowledge_context.py` | 知识库上下文自动注入器 |
 | `frontend/src/stores/guide.ts` | 引导状态管理（9 步 + 验证 + 跳过控制） |
+| `frontend/src/stores/agent.ts` | 助手/实例状态管理 |
+| `frontend/src/stores/skill.ts` | 技能状态管理 |
 | `frontend/src/components/common/GuideOverlay.vue` | 全局引导浮层（Teleport + 高亮 + tooltip） |
 | `frontend/src/components/modals/SimpleConfirmModal.vue` | 通用确认弹窗（替代 alert/confirm） |
-| `frontend/src/api/models.ts` | Models API 调用层（Provider 列表 + Key 验证） |
+| `frontend/src/api/agent.ts` | Agent API 调用层 |
+| `frontend/src/types/agent.ts` | Agent 类型定义 |
+| `frontend/src/views/project/CreateProjectView.vue` | 创建项目/助手页面 |
 
 ### 本轮修改的前端文件
 
@@ -1608,7 +1661,7 @@ playbook:
 |------|----------|
 | `frontend/src/views/settings/SettingsView.vue` | 重构为 Provider 卡片式 UI + Models API 集成 + 验证保存 + 引导集成 |
 | `frontend/src/views/chat/ChatView.vue` | 引导启动入口 + SimpleConfirmModal 替代 alert/confirm + 步骤编号调整 |
-| `frontend/src/views/project/CreateProjectView.vue` | 引导步骤编号从 10 步调整为 9 步 |
+| `frontend/src/views/skills/SkillsView.vue` | 技能管理页重构 |
 | `frontend/src/components/chat/MessageList.vue` | 移除 3 张建议卡片 + 未使用图标导入 |
 | `frontend/src/components/chat/ConversationSidebar.vue` | 引导步骤编号调整 |
 | `frontend/src/components/chat/ChatInputArea.vue` | 停止生成按钮 loading/stopping 状态传递 |

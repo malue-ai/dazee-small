@@ -59,6 +59,25 @@ knowledge:
   enabled: true
   directories: []                   # 要索引的本地目录
 
+  # --- 语义搜索（可选，不配置则只用关键词搜索） ---
+  #
+  # 开启后搜索能理解意思（如搜"天气"也能匹配"气候"相关文档）。
+  # 不开启也完全可用——关键词搜索已支持中英文。
+  #
+  # semantic_search:
+  #   enabled: false                # true 开启语义搜索
+  #   provider: "auto"              # "auto" 自动选择 | "local" 本地模型 | "openai" 云端
+  #   model: ""                     # 留空使用默认值
+  #
+  # 💡 推荐安装本地向量模型（离线可用，无需 API Key）：
+  #    pip install llama-cpp-python
+  #    首次使用自动下载 BGE-M3 Q4 模型（424MB，中英文双语）
+  #    模型存储位置：~/.xiaodazi/models/
+  # 语义搜索（可选，需要 OpenAI API 或本地模型）
+  semantic_enabled: false           # true 开启向量搜索（FTS5 + 语义混合）
+  embedding_provider: "auto"        # "auto" / "openai" / "local"
+  # embedding_model: ""             # 覆盖默认模型（通常不需要）
+
 # ==================== 记忆配置 ====================
 
 memory:

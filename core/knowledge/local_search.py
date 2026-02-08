@@ -3,12 +3,14 @@
 
 以文件为中心的本地知识检索：
 - Level 1: SQLite FTS5 全文搜索（零配置，内置）
-- Level 2: sqlite-vec 语义搜索（可选，复用用户 LLM API）
+- Level 2: sqlite-vec 语义搜索（可选，支持 OpenAI / 本地模型）
 
-搜索策略：优先语义搜索，无可用 embedding 时降级到全文搜索。
+搜索策略：混合搜索（FTS5 + 向量并行 → 加权合并去重）。
 """
 
+import asyncio
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -20,6 +22,15 @@ logger = get_logger("knowledge.local_search")
 # 知识库向量表名
 KNOWLEDGE_VECTOR_TABLE = "knowledge_vectors"
 
+# ==================== 混合搜索参数 ====================
+
+# 混合搜索权重（向量:关键词），和为 1.0
+DEFAULT_VECTOR_WEIGHT = 0.6
+DEFAULT_TEXT_WEIGHT = 0.4
+
+# 最小分数阈值（低于此分数的结果被过滤）
+DEFAULT_MIN_SCORE = 0.05
+
 
 @dataclass
 class SearchResult:
@@ -28,7 +39,7 @@ class SearchResult:
     doc_id: str
     title: str
     snippet: str  # 匹配片段（带高亮）
-    score: float
+    score: float  # 归一化分数 [0, 1]
     file_path: str = ""
     file_type: str = ""
     chunk_index: int = 0
@@ -39,6 +50,7 @@ class LocalKnowledgeManager:
     本地知识管理器
 
     管理用户指定文件夹中的文档索引和搜索。
+    搜索策略：FTS5 + 向量并行搜索 → 加权合并去重。
     """
 
     def __init__(
@@ -46,20 +58,26 @@ class LocalKnowledgeManager:
         db_path: Optional[Path] = None,
         fts5_enabled: bool = True,
         semantic_enabled: bool = False,
+        embedding_provider: str = "auto",
+        embedding_model: Optional[str] = None,
     ):
         """
         Args:
             db_path: 索引数据库路径（默认复用 local_store 引擎）
             fts5_enabled: 是否启用 FTS5 全文搜索
-            semantic_enabled: 是否启用语义搜索（需要 OPENAI_API_KEY）
+            semantic_enabled: 是否启用语义搜索
+            embedding_provider: Embedding 提供商 ('auto'|'openai'|'local')
+            embedding_model: 覆盖模型名称（None 使用默认值）
         """
         self._fts5_enabled = fts5_enabled
         self._semantic_enabled = semantic_enabled
+        self._embedding_provider_type = embedding_provider
+        self._embedding_model = embedding_model
         self._fts_initialized = False
         self._vec_initialized = False
         self._fts = None
         self._fts_config = None
-        self._embedding_service = None
+        self._embedding_provider = None
 
     async def initialize(self) -> None:
         """
@@ -102,26 +120,63 @@ class LocalKnowledgeManager:
         query: str,
         limit: int = 10,
         file_type: Optional[str] = None,
+        min_score: float = DEFAULT_MIN_SCORE,
+        vector_weight: float = DEFAULT_VECTOR_WEIGHT,
+        text_weight: float = DEFAULT_TEXT_WEIGHT,
     ) -> List[SearchResult]:
         """
-        搜索知识库
+        混合搜索知识库
 
-        策略：优先语义搜索，降级全文搜索。
+        策略：
+        1. FTS5 + 向量搜索并行执行
+        2. 分数归一化到 [0, 1]
+        3. 加权合并去重
+        4. 最小分数阈值过滤
 
         Args:
             query: 搜索查询
             limit: 返回数量
             file_type: 过滤文件类型（如 ".md"）
+            min_score: 最小分数阈值，低于此分数的结果被过滤
+            vector_weight: 向量搜索权重（默认 0.6）
+            text_weight: 关键词搜索权重（默认 0.4）
 
         Returns:
-            SearchResult 列表（按相关性排序）
+            SearchResult 列表（按加权分数降序排列）
         """
-        if self._semantic_enabled:
-            results = await self._semantic_search(query, limit, file_type)
-            if results:
-                return results
+        # 并行搜索：FTS5 + 语义
+        fts_task = self._fts5_search(query, limit * 2, file_type)
 
-        return await self._fts5_search(query, limit, file_type)
+        if self._semantic_enabled and self._vec_initialized:
+            vec_task = self._semantic_search(query, limit * 2, file_type)
+            fts_results, vec_results = await asyncio.gather(
+                fts_task, vec_task, return_exceptions=True
+            )
+
+            # Handle exceptions from gather
+            if isinstance(fts_results, Exception):
+                logger.warning(f"FTS5 搜索异常: {fts_results}")
+                fts_results = []
+            if isinstance(vec_results, Exception):
+                logger.warning(f"语义搜索异常: {vec_results}")
+                vec_results = []
+
+            # 混合合并
+            merged = self._merge_hybrid_results(
+                vec_results=vec_results,
+                fts_results=fts_results,
+                vector_weight=vector_weight,
+                text_weight=text_weight,
+            )
+        else:
+            # 仅 FTS5
+            fts_results = await fts_task
+            merged = fts_results
+
+        # 最小分数过滤
+        filtered = [r for r in merged if r.score >= min_score]
+
+        return filtered[:limit]
 
     async def add_document(
         self,
@@ -258,13 +313,19 @@ class LocalKnowledgeManager:
         获取索引统计
 
         Returns:
-            {"total_docs": int, "fts5_enabled": bool, "semantic_enabled": bool}
+            {"total_docs": int, "fts5_enabled": bool, "semantic_enabled": bool, ...}
         """
         stats: Dict[str, Any] = {
             "fts5_enabled": self._fts5_enabled,
             "semantic_enabled": self._semantic_enabled,
             "total_docs": 0,
         }
+
+        # Embedding provider info
+        if self._embedding_provider:
+            stats["embedding_provider"] = self._embedding_provider.provider_id
+            stats["embedding_model"] = self._embedding_provider.model_name
+            stats["embedding_dimensions"] = self._embedding_provider.dimensions
 
         if self._fts and self._fts_config:
             try:
@@ -280,6 +341,114 @@ class LocalKnowledgeManager:
 
         return stats
 
+    # ==================== 混合搜索核心 ====================
+
+    @staticmethod
+    def bm25_rank_to_score(rank: float) -> float:
+        """
+        BM25 rank → 归一化分数 [0, 1]
+
+        FTS5 BM25 rank 是负数（越小越相关），转换为 [0, 1] 分数。
+        公式：abs(rank) / (1 + abs(rank))
+        - rank=-10 → 0.909（高相关）
+        - rank=-5  → 0.833
+        - rank=-1  → 0.500
+        - rank=-0.1 → 0.091（低相关）
+        - rank=0   → 0.000
+
+        保证：更相关的文档（rank 绝对值更大）得分更高。
+
+        Args:
+            rank: FTS5 BM25 rank（通常为负数）
+
+        Returns:
+            归一化分数 [0, 1]
+        """
+        if rank is None or not math.isfinite(rank):
+            return 0.0
+        a = abs(rank)
+        return a / (1.0 + a)
+
+    @staticmethod
+    def _merge_hybrid_results(
+        vec_results: List[SearchResult],
+        fts_results: List[SearchResult],
+        vector_weight: float = DEFAULT_VECTOR_WEIGHT,
+        text_weight: float = DEFAULT_TEXT_WEIGHT,
+    ) -> List[SearchResult]:
+        """
+        混合搜索加权合并去重
+
+        借鉴 OpenClaw hybrid.ts 实现：
+        1. 以 doc_id 为 key 去重
+        2. 同 doc_id 合并分数
+        3. 加权排序：score = vector_weight * vec_score + text_weight * fts_score
+
+        Args:
+            vec_results: 向量搜索结果（score 已归一化到 [0, 1]）
+            fts_results: FTS5 搜索结果（score 已归一化到 [0, 1]）
+            vector_weight: 向量搜索权重
+            text_weight: 关键词搜索权重
+
+        Returns:
+            合并后的结果列表（按加权分数降序）
+        """
+        by_id: Dict[str, Dict[str, Any]] = {}
+
+        # Process vector results first
+        for r in vec_results:
+            by_id[r.doc_id] = {
+                "title": r.title,
+                "snippet": r.snippet,
+                "file_path": r.file_path,
+                "file_type": r.file_type,
+                "chunk_index": r.chunk_index,
+                "vec_score": r.score,
+                "text_score": 0.0,
+            }
+
+        # Process FTS results, merge if same doc_id
+        for r in fts_results:
+            if r.doc_id in by_id:
+                entry = by_id[r.doc_id]
+                entry["text_score"] = r.score
+                # Prefer FTS snippet (has keyword highlighting)
+                if r.snippet:
+                    entry["snippet"] = r.snippet
+            else:
+                by_id[r.doc_id] = {
+                    "title": r.title,
+                    "snippet": r.snippet,
+                    "file_path": r.file_path,
+                    "file_type": r.file_type,
+                    "chunk_index": r.chunk_index,
+                    "vec_score": 0.0,
+                    "text_score": r.score,
+                }
+
+        # Weighted scoring and sort
+        merged: List[SearchResult] = []
+        for doc_id, entry in by_id.items():
+            weighted_score = (
+                vector_weight * entry["vec_score"]
+                + text_weight * entry["text_score"]
+            )
+            merged.append(
+                SearchResult(
+                    doc_id=doc_id,
+                    title=entry["title"],
+                    snippet=entry["snippet"],
+                    score=weighted_score,
+                    file_path=entry["file_path"],
+                    file_type=entry["file_type"],
+                    chunk_index=entry["chunk_index"],
+                )
+            )
+
+        # Sort by score descending
+        merged.sort(key=lambda x: x.score, reverse=True)
+        return merged
+
     # ==================== 内部搜索方法 ====================
 
     async def _fts5_search(
@@ -288,7 +457,7 @@ class LocalKnowledgeManager:
         limit: int,
         file_type: Optional[str] = None,
     ) -> List[SearchResult]:
-        """FTS5 全文搜索"""
+        """FTS5 全文搜索（分数已归一化到 [0, 1]）"""
         await self.initialize()
         if not self._fts or not self._fts_config:
             return []
@@ -311,7 +480,8 @@ class LocalKnowledgeManager:
                         doc_id=h.doc_id,
                         title=h.title,
                         snippet=h.snippet,
-                        score=abs(h.rank) if h.rank else 0.0,
+                        # P0: BM25 归一化到 [0, 1]
+                        score=self.bm25_rank_to_score(h.rank),
                         file_path=h.extra.get("file_path", ""),
                         file_type=h.extra.get("file_type", ""),
                         chunk_index=int(
@@ -334,13 +504,14 @@ class LocalKnowledgeManager:
         语义搜索（基于 sqlite-vec 向量相似度）
 
         流程：查询文本 → embedding → sqlite-vec MATCH → SearchResult
+        分数已归一化到 [0, 1]。
         """
         if not self._vec_initialized:
             return []
 
         try:
-            embedding_service = self._get_embedding_service()
-            query_embedding = await embedding_service.embed(query)
+            provider = await self._get_embedding_provider()
+            query_embedding = await provider.embed(query)
             query_list = query_embedding.tolist()
 
             from infra.local_store.engine import get_local_session
@@ -396,18 +567,24 @@ class LocalKnowledgeManager:
                 self._semantic_enabled = False
                 return
 
+            # Determine dimensions from embedding provider
+            provider = await self._get_embedding_provider()
+            dimensions = provider.dimensions
+
             from infra.local_store.vector import create_vector_table
 
             engine = await get_local_engine()
             success = await create_vector_table(
                 engine,
                 table_name=KNOWLEDGE_VECTOR_TABLE,
+                dimensions=dimensions,
             )
 
             if success:
                 self._vec_initialized = True
                 logger.info(
-                    f"知识检索向量表已就绪: {KNOWLEDGE_VECTOR_TABLE}"
+                    f"知识检索向量表已就绪: {KNOWLEDGE_VECTOR_TABLE} "
+                    f"(dim={dimensions}, provider={provider.provider_id})"
                 )
             else:
                 self._semantic_enabled = False
@@ -417,12 +594,15 @@ class LocalKnowledgeManager:
             self._semantic_enabled = False
             logger.warning(f"向量表初始化失败: {e}")
 
-    def _get_embedding_service(self):
-        """获取 embedding 服务（懒初始化）"""
-        if self._embedding_service is None:
-            from core.routing.intent_cache import EmbeddingService
-            self._embedding_service = EmbeddingService()
-        return self._embedding_service
+    async def _get_embedding_provider(self):
+        """获取 embedding 提供商（懒初始化）"""
+        if self._embedding_provider is None:
+            from core.knowledge.embeddings import create_embedding_provider
+            self._embedding_provider = await create_embedding_provider(
+                provider=self._embedding_provider_type,
+                model=self._embedding_model,
+            )
+        return self._embedding_provider
 
     async def _upsert_vector(
         self,

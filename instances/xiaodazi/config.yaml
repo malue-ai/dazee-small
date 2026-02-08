@@ -125,6 +125,12 @@ knowledge:
   #   - "~/Documents/工作"
   #   - "~/Desktop/projects"
 
+  # 语义搜索（可选，开启后使用 FTS5 + 向量混合搜索，效果更好）
+  # 需要 OpenAI API Key 或本地安装 sentence-transformers
+  semantic_enabled: false
+  embedding_provider: "auto"        # "auto"=本地优先→OpenAI降级 / "openai" / "local"
+  # embedding_model: ""             # 覆盖默认模型（OpenAI: text-embedding-3-small, 本地: BAAI/bge-m3）
+
 # ==================== 记忆配置 ====================
 
 memory:

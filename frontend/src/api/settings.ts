@@ -1,19 +1,25 @@
 /**
  * 设置 API
  * 
- * 管理桌面应用配置（API Keys、模型选择等）
+ * 管理桌面应用配置（API Keys、模型选择、知识库等）
  */
 
 import api from '.'
 
+export interface SettingsFieldMeta {
+  label: string
+  required: boolean
+  secret: boolean
+  default?: string
+  type?: 'text' | 'toggle' | 'select'
+  description?: string
+  advanced?: boolean
+  options?: Array<{ value: string; label: string; description?: string }>
+}
+
 export interface SettingsSchema {
   [group: string]: {
-    [key: string]: {
-      label: string
-      required: boolean
-      secret: boolean
-      default?: string
-    }
+    [key: string]: SettingsFieldMeta
   }
 }
 
@@ -32,6 +38,18 @@ export interface SettingsStatus {
       total: number
     }
   }
+}
+
+export interface EmbeddingStatus {
+  semantic_enabled: boolean
+  current_provider: string | null
+  provider_setting: string
+  local_available: boolean
+  openai_available: boolean
+  local_install_hint: string
+  local_model_name: string
+  local_model_description: string
+  recommendation: string
 }
 
 /**
@@ -63,5 +81,15 @@ export async function getSettingsStatus(): Promise<SettingsStatus> {
  */
 export async function getSettingsSchema(): Promise<SettingsSchema> {
   const { data } = await api.get('/v1/settings/schema')
+  return data.data
+}
+
+/**
+ * 获取 Embedding 状态
+ * 
+ * 检测本地模型 / OpenAI 可用性，指导用户配置语义搜索
+ */
+export async function getEmbeddingStatus(): Promise<EmbeddingStatus> {
+  const { data } = await api.get('/v1/settings/embedding-status')
   return data.data
 }

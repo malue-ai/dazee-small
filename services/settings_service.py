@@ -55,6 +55,40 @@ SETTINGS_SCHEMA = {
         "QOS_LEVEL": {"label": "服务等级", "required": False, "secret": False,
                       "default": "PRO"},
     },
+    "knowledge": {
+        "SEMANTIC_SEARCH_ENABLED": {
+            "label": "语义搜索",
+            "required": False,
+            "secret": False,
+            "default": "false",
+            "type": "toggle",
+            "description": "开启后可理解搜索意图（如搜\"天气\"也能找到\"气候\"相关文档）",
+        },
+        "EMBEDDING_PROVIDER": {
+            "label": "向量模型",
+            "required": False,
+            "secret": False,
+            "default": "auto",
+            "type": "select",
+            "options": [
+                {"value": "auto", "label": "自动选择（推荐）",
+                 "description": "优先本地模型，无本地模型时使用 OpenAI"},
+                {"value": "local", "label": "本地模型（离线可用）",
+                 "description": "BGE-M3 Q4 量化，424MB，中英文双语"},
+                {"value": "openai", "label": "OpenAI 云端",
+                 "description": "需要 OpenAI API Key 和网络连接"},
+            ],
+        },
+        "EMBEDDING_MODEL": {
+            "label": "模型名称（高级）",
+            "required": False,
+            "secret": False,
+            "default": "",
+            "type": "text",
+            "description": "留空使用默认值。本地默认 BGE-M3 Q4 GGUF，OpenAI 默认 text-embedding-3-small",
+            "advanced": True,
+        },
+    },
     "app": {
         "LOG_LEVEL": {"label": "日志级别", "required": False, "secret": False,
                       "default": "INFO"},
@@ -299,3 +333,96 @@ def invalidate_cache() -> None:
     """清除配置缓存（配置更新后调用）"""
     global _settings_cache
     _settings_cache = None
+
+
+# ==================== 知识库 Embedding 状态检测 ====================
+
+
+async def get_embedding_status() -> Dict[str, Any]:
+    """
+    检测 embedding 提供商可用性
+
+    自动检测：
+    1. sentence-transformers 是否安装（本地模型）
+    2. OPENAI_API_KEY 是否配置（云端模型）
+    3. 当前选择的提供商
+
+    Returns:
+        {
+            "semantic_enabled": bool,
+            "current_provider": str | None,
+            "local_available": bool,
+            "openai_available": bool,
+            "local_install_hint": str,
+            "recommendation": str,
+        }
+    """
+    settings = _load_settings()
+    knowledge_settings = settings.get("knowledge", {})
+
+    semantic_enabled = str(
+        knowledge_settings.get("SEMANTIC_SEARCH_ENABLED", "false")
+    ).lower() in ("true", "1", "yes")
+    provider_setting = knowledge_settings.get("EMBEDDING_PROVIDER", "auto")
+
+    # Check local availability (GGUF preferred, sentence-transformers fallback)
+    local_available = False
+    local_backend = None
+    try:
+        import llama_cpp  # noqa: F401
+        local_available = True
+        local_backend = "gguf"
+    except ImportError:
+        pass
+
+    if not local_available:
+        try:
+            import sentence_transformers  # noqa: F401
+            local_available = True
+            local_backend = "sentence-transformers"
+        except ImportError:
+            pass
+
+    # Check OpenAI availability
+    openai_available = bool(os.getenv("OPENAI_API_KEY"))
+
+    # Determine current effective provider
+    current_provider = None
+    if semantic_enabled:
+        if provider_setting == "auto":
+            if local_available:
+                current_provider = "local"
+            elif openai_available:
+                current_provider = "openai"
+        elif provider_setting == "local" and local_available:
+            current_provider = "local"
+        elif provider_setting == "openai" and openai_available:
+            current_provider = "openai"
+
+    # Recommendation for user
+    if local_available and local_backend == "gguf":
+        recommendation = "已安装本地模型（GGUF），语义搜索离线可用"
+    elif local_available and local_backend == "sentence-transformers":
+        recommendation = "已安装本地模型（sentence-transformers），语义搜索离线可用"
+    elif openai_available:
+        recommendation = "可使用 OpenAI 云端语义搜索。安装本地模型可离线使用"
+    else:
+        recommendation = "安装本地模型即可启用语义搜索（离线可用，424MB）"
+
+    # Model storage location
+    models_dir = str(Path.home() / ".xiaodazi" / "models")
+
+    return {
+        "semantic_enabled": semantic_enabled,
+        "current_provider": current_provider,
+        "provider_setting": provider_setting,
+        "local_available": local_available,
+        "local_backend": local_backend,
+        "openai_available": openai_available,
+        "local_install_hint": "pip install llama-cpp-python",
+        "local_model_name": "BGE-M3 Q4 (GGUF)",
+        "local_model_size": "424MB",
+        "local_model_description": "中英文双语，MIT 开源，首次使用自动下载",
+        "models_dir": models_dir,
+        "recommendation": recommendation,
+    }

@@ -94,10 +94,11 @@ capability_categories:
 
 - id: knowledge_base
   category_type: internal
-  description: 知识检索（框架内置）
-  use_when: 需要查找用户上传的文档
+  description: 知识检索（FTS5 + 语义混合搜索）
+  use_when: 需要查找用户本地文档、知识库检索
   examples:
     - 查找我的文档
+    - 搜索本地资料
 
 - id: task_planning
   category_type: internal
@@ -206,6 +207,43 @@ capabilities:
         type: object
         description: 轮询配置（仅 mode=async_poll 时有效）
     required: []
+
+- name: knowledge_search
+  type: TOOL
+  subtype: NATIVE
+  provider: user
+  level: 1
+  implementation:
+    module: tools.knowledge_search
+    class: KnowledgeSearchTool
+  capabilities:
+    - knowledge_base
+  priority: 60
+  cost:
+    time: fast
+    money: free
+  constraints:
+    requires_api: false
+    requires_network: false
+  metadata:
+    description: |
+      从用户本地知识库检索信息（FTS5 全文 + 可选向量语义搜索）。
+      适用于用户提到"我的文档"、"我上传的资料"、个人知识回忆场景。
+    cache_stable: true
+  input_schema:
+    type: object
+    properties:
+      query:
+        type: string
+        description: 搜索查询（自然语言）
+      limit:
+        type: integer
+        description: 返回结果数量（默认 5）
+        default: 5
+      file_type:
+        type: string
+        description: 过滤文件类型（如 .md, .txt, .pdf）
+    required: [query]
 
 - name: hitl
   type: TOOL
