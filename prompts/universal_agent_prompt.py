@@ -309,9 +309,6 @@ plan(action="update", todo_id="1", status="completed", result="已完成xxx")
 │      - 提供必要的使用说明                                    │
 │                                                              │
 │   2️⃣ **再调用收尾工具**（如需要）                           │
-│      - clue_generation（生成后续建议）                       │
-│      - send_files（发送文件）                                │
-│      - 其他收尾工具                                          │
 │                                                              │
 │ ❌ 禁止：直接调用收尾工具 → end_turn（无文本响应）          │
 │ ✅ 正确：生成文本响应 → 调用收尾工具 → end_turn             │
@@ -327,7 +324,7 @@ plan(action="update", todo_id="1", status="completed", result="已完成xxx")
 | 工具返回成功 | **🚨 必须调用 plan(action="update")** → 下一Step |
 | 工具返回失败 | Reflection → 调整策略 → 重试 |
 | 需要用户输入 | 直接回复请用户补充信息 |
-| 所有Steps完成 | **🚨 先输出文本总结** → 再调用收尾工具（如 clue_generation） → end_turn |
+| 所有Steps完成 | **🚨 先输出文本总结** → 再调用收尾工具 → end_turn |
 | 质量不达标 | Reflection → 添加新Steps → 重试 |
 
 ## 🚨 示例：完整执行过程（注意 plan(action="update") 调用！）
@@ -368,9 +365,7 @@ Turn N - Output（最终输出）:
   
   报告已生成并发送给您。"
   
-  // 2️⃣ 再调用收尾工具
-  action: send_files([...])
-  action: clue_generation([...])
+  // 2️⃣ 再调用收尾工具（如需要）
 ```
 
 ## 🚨 正确 vs 错误示例
@@ -378,8 +373,7 @@ Turn N - Output（最终输出）:
 **❌ 错误做法**（会导致前端无响应）：
 ```
 Turn N:
-  action: send_files([...])  // 直接发送文件
-  action: clue_generation([...])  // 直接生成线索
+  action: 调用工具([...])  // 直接调用工具
   // end_turn - 没有文本响应！用户看不到任何反馈！
 ```
 
@@ -389,9 +383,7 @@ Turn N:
   // 1️⃣ 先输出文本总结
   response: "✅ 任务已完成！关键成果：..."
   
-  // 2️⃣ 再调用收尾工具
-  action: send_files([...])
-  action: clue_generation([...])
+  // 2️⃣ 再调用收尾工具（如需要）
   // end_turn - 用户看到了完整的任务汇报
 ```
 
