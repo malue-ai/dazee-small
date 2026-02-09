@@ -22,7 +22,7 @@
 
     # 查询
     result, score = await cache.lookup(query)
-    if result and score >= 0.92:
+    if result and score >= 0.95:
         return result  # 缓存命中
 
     # 未命中，调用 LLM
@@ -58,10 +58,21 @@ logger = get_logger("intent_cache")
 
 @dataclass
 class IntentCacheConfig:
-    """意图缓存配置"""
+    """
+    意图缓存配置
+
+    默认 hash-only 模式（精准 100%，仅匹配完全相同的查询）。
+    语义匹配需显式开启（INTENT_CACHE_SEMANTIC_ENABLED=true），
+    启用后阈值极高（0.95）以保证不误匹配。
+
+    空间估算（max_size=10000 时）:
+    - hash_only: ~1KB/条目，约 10MB
+    - full（含语义）: ~5KB/条目（含 1024-dim float32），约 50MB
+    """
 
     enabled: bool = True  # 是否启用缓存
-    threshold: float = 0.92  # 相似度阈值（>= 则命中）
+    semantic_enabled: bool = False  # L2 语义匹配（默认关闭，hash-only）
+    threshold: float = 0.95  # L2 语义阈值（极高保证精准，仅 semantic_enabled 时生效）
     max_size: int = 10000  # 最大缓存条目数（LRU）
     ttl_hours: int = 24  # 缓存 TTL（小时）
     backend: str = "memory"  # 存储后端：memory | vectordb
@@ -73,7 +84,9 @@ class IntentCacheConfig:
         """从环境变量加载配置"""
         return cls(
             enabled=os.getenv("INTENT_CACHE_ENABLED", "true").lower() == "true",
-            threshold=float(os.getenv("INTENT_CACHE_THRESHOLD", "0.92")),
+            semantic_enabled=os.getenv("INTENT_CACHE_SEMANTIC_ENABLED", "false").lower()
+            == "true",
+            threshold=float(os.getenv("INTENT_CACHE_THRESHOLD", "0.95")),
             max_size=int(os.getenv("INTENT_CACHE_MAX_SIZE", "10000")),
             ttl_hours=int(os.getenv("INTENT_CACHE_TTL_HOURS", "24")),
             backend=os.getenv("INTENT_CACHE_BACKEND", "memory"),
@@ -92,7 +105,7 @@ class CachedIntentResult:
 
     query_text: str  # 原始查询文本
     query_hash: str  # 查询文本的 hash（用于精确匹配）
-    embedding: np.ndarray  # 向量（1536维）
+    embedding: Optional[np.ndarray]  # 向量（模型不可用时为 None，仅 hash 精确匹配）
     intent_result: IntentResult  # 意图分析结果
     created_at: datetime = field(default_factory=datetime.now)
     hit_count: int = 0  # 命中次数
@@ -191,9 +204,13 @@ class InMemoryBackend(IntentCacheBackend):
             if not self._cache:
                 return None, 0.0
 
-            # 构建向量矩阵（如果需要）
-            if self._embeddings is None or len(self._cache) != self._embeddings.shape[0]:
+            # 构建向量矩阵（如果需要，hash-only 条目不参与）
+            if self._embeddings is None:
                 self._rebuild_matrix()
+
+            # 全部为 hash-only 条目，无可用向量
+            if self._embeddings is None or self._embeddings.shape[0] == 0:
+                return None, 0.0
 
             # 归一化查询向量
             query_norm = embedding / (np.linalg.norm(embedding) + 1e-10)
@@ -235,14 +252,14 @@ class InMemoryBackend(IntentCacheBackend):
             # 插入新项
             self._cache[item.query_hash] = item
 
-            # 更新向量索引
-            idx = self._next_idx
-            self._next_idx += 1
-            self._hash_to_idx[item.query_hash] = idx
-            self._idx_to_hash[idx] = item.query_hash
-
-            # 标记需要重建矩阵
-            self._embeddings = None
+            # 更新向量索引（仅有 embedding 的条目参与语义搜索）
+            if item.embedding is not None:
+                idx = self._next_idx
+                self._next_idx += 1
+                self._hash_to_idx[item.query_hash] = idx
+                self._idx_to_hash[idx] = item.query_hash
+                # 有新向量，标记矩阵需要重建
+                self._embeddings = None
 
     async def get_by_hash(self, query_hash: str) -> Optional[CachedIntentResult]:
         """精确匹配（L1 缓存）"""
@@ -288,7 +305,7 @@ class InMemoryBackend(IntentCacheBackend):
             self._embeddings = None
 
     def _rebuild_matrix(self) -> None:
-        """重建向量矩阵"""
+        """重建向量矩阵（跳过 hash-only 条目，不参与语义搜索）"""
         if not self._cache:
             self._embeddings = None
             return
@@ -298,15 +315,21 @@ class InMemoryBackend(IntentCacheBackend):
         self._idx_to_hash.clear()
 
         embeddings = []
-        for idx, (query_hash, item) in enumerate(self._cache.items()):
+        for query_hash, item in self._cache.items():
+            if item.embedding is None:
+                continue  # hash-only 条目，仅支持 L1 精确匹配
             # 归一化向量
             norm = np.linalg.norm(item.embedding) + 1e-10
             embeddings.append(item.embedding / norm)
+            idx = len(embeddings) - 1
             self._hash_to_idx[query_hash] = idx
             self._idx_to_hash[idx] = query_hash
 
-        self._embeddings = np.array(embeddings)
-        self._next_idx = len(self._cache)
+        if embeddings:
+            self._embeddings = np.array(embeddings)
+        else:
+            self._embeddings = None  # 全部为 hash-only 条目
+        self._next_idx = len(embeddings)
 
 
 # ============================================================
@@ -469,8 +492,10 @@ class IntentSemanticCache:
                 max_size=self.config.max_size, ttl_hours=self.config.ttl_hours
             )
 
-        # Embedding 服务
-        self._embedding_service = EmbeddingService(model=self.config.embedding_model)
+        # Embedding 服务（仅 semantic_enabled 时初始化，hash-only 模式不加载模型）
+        self._embedding_service: Optional[EmbeddingService] = None
+        if self.config.semantic_enabled:
+            self._embedding_service = EmbeddingService(model=self.config.embedding_model)
 
         # 统计指标
         self._stats = {
@@ -478,13 +503,22 @@ class IntentSemanticCache:
             "l2_hits": 0,
             "misses": 0,
             "stores": 0,
+            "hash_only_stores": 0,  # 无 embedding 的存储次数
         }
 
+        # 降级日志标记（仅记录一次，避免刷屏）
+        self._hash_only_logged = False
+
+        mode = (
+            "hash_only"
+            if not self.config.semantic_enabled
+            else f"full (threshold={self.config.threshold})"
+        )
         logger.info(
-            f"✅ IntentSemanticCache 初始化: "
+            f"IntentSemanticCache 初始化: "
             f"enabled={self.config.enabled}, "
-            f"threshold={self.config.threshold}, "
-            f"backend={self.config.backend}"
+            f"mode={mode}, "
+            f"max_size={self.config.max_size}"
         )
 
     @classmethod
@@ -532,11 +566,22 @@ class IntentSemanticCache:
             logger.info(f"✅ L1 精确命中: hash={query_hash[:8]}..., " f"elapsed={elapsed_ms:.2f}ms")
             return cached.intent_result, 1.0
 
-        # L2: 语义匹配（需要 embedding 模型，没有则跳过）
+        # L2: 语义匹配（仅 semantic_enabled 时执行，默认跳过）
+        if not self.config.semantic_enabled or self._embedding_service is None:
+            self._stats["misses"] += 1
+            return None, 0.0
+
         try:
             embedding = await self._embedding_service.embed(query)
             if embedding is None:
-                # No embedding model → hash-only mode
+                # 模型不可用 → 静默降级，仅 L1 hash 精确匹配
+                # 精准优先：未命中走正常 LLM 意图识别，不做模糊猜测
+                if not self._hash_only_logged:
+                    logger.info(
+                        "IntentCache 语义匹配降级为 hash-only"
+                        "（embedding 模型不可用，仅精确匹配，未命中走 LLM）"
+                    )
+                    self._hash_only_logged = True
                 self._stats["misses"] += 1
                 return None, 0.0
 
@@ -580,12 +625,12 @@ class IntentSemanticCache:
             return
 
         try:
-            # 获取 embedding（可能为 None，没模型就只存 hash）
-            embedding = await self._embedding_service.embed(query)
-            if embedding is None:
-                embedding = np.zeros(self.config.embedding_dim, dtype=np.float32)
+            # 获取 embedding（hash-only 模式或模型不可用时为 None）
+            embedding = None
+            if self.config.semantic_enabled and self._embedding_service is not None:
+                embedding = await self._embedding_service.embed(query)
 
-            # 创建缓存项
+            # 创建缓存项（embedding=None 时仅支持 L1 hash 精确匹配）
             item = CachedIntentResult(
                 query_text=query,
                 query_hash=self._compute_hash(query),
@@ -596,9 +641,13 @@ class IntentSemanticCache:
             # 存储
             await self._backend.insert(item)
             self._stats["stores"] += 1
+            if embedding is None:
+                self._stats["hash_only_stores"] += 1
 
             logger.debug(
-                f"Cache stored: hash={item.query_hash[:8]}..., size={self._backend.size()}"
+                f"Cache stored: hash={item.query_hash[:8]}..., "
+                f"has_embedding={embedding is not None}, "
+                f"size={self._backend.size()}"
             )
 
         except Exception as e:
@@ -609,17 +658,32 @@ class IntentSemanticCache:
         total = self._stats["l1_hits"] + self._stats["l2_hits"] + self._stats["misses"]
         hit_rate = (self._stats["l1_hits"] + self._stats["l2_hits"]) / max(total, 1)
 
+        # 判断当前模式
+        if not self.config.semantic_enabled:
+            mode = "hash_only"  # 配置默认
+        elif self._embedding_service and not self._embedding_service._unavailable:
+            mode = "full"  # 语义匹配可用
+        else:
+            mode = "hash_only_degraded"  # 配置为 semantic 但模型不可用
+
+        # 空间估算：hash-only ~1KB/条目，full ~5KB/条目（含 1024-dim float32 向量）
+        size = self._backend.size()
+        kb_per_entry = 5.0 if mode == "full" else 1.0
+
         return {
             "enabled": self.config.enabled,
+            "mode": mode,  # "full"=L1+L2, "hash_only"=仅 L1 精确匹配
             "backend": self.config.backend,
             "threshold": self.config.threshold,
-            "size": self._backend.size(),
+            "size": size,
             "max_size": self.config.max_size,
             "l1_hits": self._stats["l1_hits"],
             "l2_hits": self._stats["l2_hits"],
             "misses": self._stats["misses"],
             "stores": self._stats["stores"],
+            "hash_only_stores": self._stats["hash_only_stores"],
             "hit_rate": hit_rate,
+            "estimated_memory_mb": round(size * kb_per_entry / 1024, 2),
         }
 
     @staticmethod

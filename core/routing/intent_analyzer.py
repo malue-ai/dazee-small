@@ -14,6 +14,7 @@ V11.0 IntentAnalyzer - 意图分析器（小搭子简化版）
 """
 
 # 1. 标准库
+import asyncio
 from typing import Any, Dict, List, Optional
 
 from core.llm import Message
@@ -73,19 +74,42 @@ class IntentAnalyzer:
 
     async def analyze(self, messages: List[Dict[str, Any]], tracker=None) -> IntentResult:
         """
-        分析用户意图
+        Three-tier intent analysis: L1 Hash → L2 Semantic → L3 LLM
 
-        Args:
-            messages: 完整的消息列表（包含上下文）
-            tracker: UsageTracker 实例（可选）
+        精准优先：缓存命中要求高置信度，未命中走 LLM 语义分析。
+        Embedding 模型不可用时静默降级为 hash-only（精准 100%，召回低可接受）。
 
-        Returns:
-            IntentResult 意图分析结果
+        时延预算:
+        - L1 Hash 命中: < 0.1ms
+        - L2 Semantic 命中: < 60ms (embed ~50ms + cosine ~5ms)
+        - L3 LLM: 100-500ms (模型/网络依赖)
         """
+        # 提取最后一条用户消息作为缓存 key
+        query_text = self._extract_query_text(messages)
+
+        # === L1 Hash + L2 Semantic: 缓存查询 ===
+        cache = self._get_cache()
+        if cache and query_text:
+            cached_result, score = await cache.lookup(query_text)
+            if cached_result:
+                logger.info(
+                    f"意图分析结果 [缓存命中 score={score:.4f}]: "
+                    f"complexity={cached_result.complexity.value}, "
+                    f"skip_memory={cached_result.skip_memory}, "
+                    f"is_follow_up={cached_result.is_follow_up}, "
+                    f"needs_plan={cached_result.needs_plan}"
+                )
+                return cached_result
+
+        # === L3: LLM 意图分析（兜底，ground truth）===
         if self.enable_llm:
             result = await self._analyze_with_llm(messages, tracker=tracker)
         else:
             result = self._get_conservative_default()
+
+        # 异步存储到缓存（仅高置信度 LLM 结果，不阻塞主流程）
+        if cache and query_text and result.confidence > 0.5:
+            asyncio.create_task(self._safe_cache_store(cache, query_text, result))
 
         logger.info(
             f"意图分析结果: "
@@ -96,6 +120,57 @@ class IntentAnalyzer:
         )
 
         return result
+
+    def _get_cache(self):
+        """
+        Get intent cache instance (lazy init, None if disabled).
+
+        首次调用时初始化，后续复用。缓存未启用时返回 None。
+        """
+        if not hasattr(self, "_cache_instance"):
+            try:
+                from core.routing.intent_cache import IntentSemanticCache
+
+                cache = IntentSemanticCache.get_instance()
+                self._cache_instance = cache if cache.config.enabled else None
+            except Exception:
+                self._cache_instance = None
+        return self._cache_instance
+
+    @staticmethod
+    def _extract_query_text(messages: List[Dict[str, Any]]) -> Optional[str]:
+        """
+        Extract the last user message text as cache lookup key.
+
+        仅提取最后一条 user 消息的文本内容，用于缓存 key。
+        多模态内容（图片等）被忽略，只取文本部分。
+        """
+        for msg in reversed(messages):
+            if msg.get("role") != "user":
+                continue
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                texts = []
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        texts.append(block.get("text", ""))
+                    elif isinstance(block, str):
+                        texts.append(block)
+                text = "\n".join(texts)
+            elif isinstance(content, str):
+                text = content
+            else:
+                continue
+            return text.strip() if text.strip() else None
+        return None
+
+    @staticmethod
+    async def _safe_cache_store(cache, query: str, result: "IntentResult") -> None:
+        """Fire-and-forget cache store (store() has its own error handling)."""
+        try:
+            await cache.store(query, result)
+        except Exception as e:
+            logger.debug(f"Intent cache store failed (non-critical): {e}")
 
     def _get_intent_prompt(self) -> str:
         """
