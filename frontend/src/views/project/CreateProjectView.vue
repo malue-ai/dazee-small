@@ -352,6 +352,49 @@
         </div>
       </div>
     </div>
+
+    <!-- 返回确认弹窗 -->
+    <Teleport to="body">
+      <Transition
+        enter-active-class="transition duration-200 ease-out"
+        enter-from-class="opacity-0"
+        enter-to-class="opacity-100"
+        leave-active-class="transition duration-150 ease-in"
+        leave-from-class="opacity-100"
+        leave-to-class="opacity-0"
+      >
+        <div v-if="showBackConfirm" class="fixed inset-0 z-[9999] flex items-center justify-center">
+          <!-- 背景遮罩 -->
+          <div class="absolute inset-0 bg-black/40" @click="showBackConfirm = false" />
+          <!-- 弹窗 -->
+          <div class="relative bg-card rounded-2xl shadow-xl border border-border p-6 w-[360px] space-y-4">
+            <div class="flex items-center gap-3">
+              <div class="w-9 h-9 rounded-xl bg-amber-500/10 flex items-center justify-center">
+                <AlertCircle class="w-5 h-5 text-amber-500" />
+              </div>
+              <h3 class="text-base font-semibold text-foreground">确认离开？</h3>
+            </div>
+            <p class="text-sm text-muted-foreground leading-relaxed">
+              {{ isEditMode ? '你有未保存的修改，离开后更改将丢失。' : '项目尚未创建，离开后当前内容将丢失。' }}
+            </p>
+            <div class="flex justify-end gap-2 pt-1">
+              <button
+                class="px-4 py-2 text-sm font-medium rounded-xl text-muted-foreground hover:bg-muted transition-colors"
+                @click="showBackConfirm = false"
+              >
+                继续编辑
+              </button>
+              <button
+                class="px-4 py-2 text-sm font-medium rounded-xl bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors"
+                @click="doBack"
+              >
+                确认离开
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
@@ -539,8 +582,28 @@ const canCreate = computed(() => form.name.trim().length > 0 && form.description
 
 // ==================== 方法 ====================
 
-/** 返回上一页 */
+/** 是否有未保存的内容（表单已填写或有用户对话） */
+const hasUnsavedContent = computed(() => {
+  const hasFormContent = form.name.trim() || form.description.trim() || form.instructions.trim()
+  const hasUserMessages = messages.value.some(m => m.role === 'user')
+  return !!(hasFormContent || hasUserMessages)
+})
+
+/** 返回确认弹窗 */
+const showBackConfirm = ref(false)
+
+/** 返回上一页（有内容时先确认） */
 function handleBack() {
+  if (hasUnsavedContent.value) {
+    showBackConfirm.value = true
+    return
+  }
+  doBack()
+}
+
+/** 确认返回 */
+function doBack() {
+  showBackConfirm.value = false
   ws.close()
   router.back()
 }
@@ -608,10 +671,15 @@ async function handleSendMessage(event?: KeyboardEvent | MouseEvent) {
           parseAndFillForm(currentAssistantMsg.content)
           currentAssistantMsg = null
         }
-        // 引导 Step 7 → Step 8：AI 回复完成后，浮动提示查看配置
+        // 引导 Step 7 → Step 8：AI 回复完成后，高亮配置区域
         if (guideStore.isActive && guideStore.currentStep === 7) {
           setTimeout(() => {
-            guideStore.nextStep() // → step 8（浮动模式，无需设置 target）
+            guideStore.nextStep() // → step 8
+            nextTick(() => {
+              if (configAreaRef.value) {
+                guideStore.setTarget(configAreaRef.value)
+              }
+            })
           }, 800) // 短暂延迟，让用户看到表单填充效果
         }
       },
@@ -978,10 +1046,18 @@ onUnmounted(() => {
 
 // ==================== 引导步骤监听 ====================
 
-// Step 8 → Step 9：用户在 GuideOverlay 点击"下一步"后，高亮"创建"按钮
+// 引导步骤切换时设置高亮目标
 watch(() => guideStore.currentStep, (step) => {
   if (!guideStore.isActive) return
-  if (step === 9) {
+  if (step === 8) {
+    // Step 8：高亮配置区域
+    nextTick(() => {
+      if (configAreaRef.value) {
+        guideStore.setTarget(configAreaRef.value)
+      }
+    })
+  } else if (step === 9) {
+    // Step 9：高亮"创建"按钮
     nextTick(() => {
       if (createBtnRef.value) {
         guideStore.setTarget(createBtnRef.value)

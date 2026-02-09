@@ -13,7 +13,7 @@
  * Step 5:  主页面 — 高亮"新建项目"按钮
  * Step 6:  创建项目页 — 打字机自动输入（无遮罩）
  * Step 7:  创建项目页 — 高亮发送按钮
- * Step 8:  创建项目页 — 浮动提示，引导查看/修改配置
+ * Step 8:  创建项目页 — 高亮配置区域，引导查看/修改配置
  * Step 9:  创建项目页 — 高亮"创建"按钮
  */
 import { defineStore } from 'pinia'
@@ -39,7 +39,7 @@ const STEP_CONFIGS: Record<number, GuideStepConfig> = {
   5:  { tooltip: '接下来创建你的第一个项目', position: 'right', showNextButton: false },
   // Step 6: 打字机效果，无遮罩
   7:  { tooltip: '点击发送消息', position: 'top', showNextButton: false },
-  8:  { tooltip: 'AI 已为你生成项目配置，你可以自由修改内容，完成后点击下一步', position: 'bottom', showNextButton: true, floating: true },
+  8:  { tooltip: 'AI 已为你生成项目配置，你可以自由修改内容，完成后点击下一步', position: 'left', showNextButton: true },
   9:  { tooltip: '点击创建，完成你的第一个项目！', position: 'bottom', showNextButton: false },
 }
 
