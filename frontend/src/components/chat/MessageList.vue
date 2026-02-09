@@ -425,13 +425,35 @@ watch(
   }
 )
 
-// 监听最后一条消息的内容变化
+// 监听最后一条消息的文本内容变化（流式文字输出）
 watch(
   () => props.messages[props.messages.length - 1]?.content,
   () => {
     scrollToBottom()
   },
   { deep: true }
+)
+
+// 监听最后一条消息的内容块数量变化（工具卡片新增）
+watch(
+  () => props.messages[props.messages.length - 1]?.contentBlocks?.length,
+  (newLen, oldLen) => {
+    if (newLen && newLen > (oldLen ?? 0)) {
+      scrollToBottom()
+    }
+  }
+)
+
+// 监听最后一条消息的工具状态变化（工具执行完成/结果返回）
+watch(
+  () => {
+    const last = props.messages[props.messages.length - 1]
+    if (!last?.toolStatuses) return 0
+    return Object.keys(last.toolStatuses).length
+  },
+  () => {
+    scrollToBottom()
+  }
 )
 
 // ==================== Expose ====================
