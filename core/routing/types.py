@@ -45,6 +45,7 @@ class IntentResult:
     skip_memory: bool  # 是否跳过记忆检索
     is_follow_up: bool = False  # 是否为追问
     wants_to_stop: bool = False  # 用户是否希望停止/取消当前任务（LLM 语义推断）
+    wants_rollback: bool = False  # 用户是否要求恢复/撤销之前的文件修改
     confidence: float = 1.0  # 置信度（用于缓存命中判断）
 
     # V12.0: LLM 语义多选 skill 分组（重召回：可多选，空列表 = Fallback 全量注入）
@@ -62,6 +63,7 @@ class IntentResult:
             "skip_memory": self.skip_memory,
             "is_follow_up": self.is_follow_up,
             "wants_to_stop": self.wants_to_stop,
+            "wants_rollback": self.wants_rollback,
             "confidence": self.confidence,
             "relevant_skill_groups": self.relevant_skill_groups,
             # 推断字段

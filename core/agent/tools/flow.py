@@ -547,10 +547,37 @@ def _detect_command_info(
             str_tokens = [t for t in value if isinstance(t, str)]
             if str_tokens:
                 candidate_cmd = os.path.basename(str_tokens[0])
-                if candidate_cmd in _DESTRUCTIVE_COMMANDS or candidate_cmd in _WRITE_COMMANDS:
-                    cmd_name = candidate_cmd
-                    is_destructive = candidate_cmd in _DESTRUCTIVE_COMMANDS
-                all_paths.extend(_extract_paths_from_tokens(str_tokens))
+
+                # 处理 ["bash", "-c", "actual_command ..."] 模式
+                # 真实命令在 -c 后面的字符串参数中，需要递归解析
+                if candidate_cmd in ("bash", "sh", "zsh") and "-c" in str_tokens:
+                    c_idx = str_tokens.index("-c")
+                    if c_idx + 1 < len(str_tokens):
+                        inner_cmd = str_tokens[c_idx + 1]
+                        try:
+                            inner_tokens = shlex.split(inner_cmd)
+                        except ValueError:
+                            inner_tokens = inner_cmd.split()
+                        if inner_tokens:
+                            real_cmd = os.path.basename(inner_tokens[0])
+                            if real_cmd in _DESTRUCTIVE_COMMANDS or real_cmd in _WRITE_COMMANDS:
+                                cmd_name = real_cmd
+                                is_destructive = real_cmd in _DESTRUCTIVE_COMMANDS
+                            all_paths.extend(_extract_paths_from_tokens(inner_tokens))
+
+                            # 提取重定向目标（> 或 >>）
+                            for i, t in enumerate(inner_tokens):
+                                if t in (">", ">>") and i + 1 < len(inner_tokens):
+                                    redir_path = os.path.expanduser(inner_tokens[i + 1])
+                                    if os.path.exists(redir_path):
+                                        all_paths.append(redir_path)
+                                        if not cmd_name:
+                                            cmd_name = "redirect_write"
+                else:
+                    if candidate_cmd in _DESTRUCTIVE_COMMANDS or candidate_cmd in _WRITE_COMMANDS:
+                        cmd_name = candidate_cmd
+                        is_destructive = candidate_cmd in _DESTRUCTIVE_COMMANDS
+                    all_paths.extend(_extract_paths_from_tokens(str_tokens))
 
     return cmd_name, is_destructive, all_paths
 

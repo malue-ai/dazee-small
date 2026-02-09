@@ -510,6 +510,61 @@ class AgentRegistry:
         if hasattr(agent, "_setup_instance_tools"):
             await self._setup_instance_tools(agent, config)
 
+        # V11: 状态一致性（快照/回滚）
+        try:
+            from core.state import (
+                ConsistencyCheckConfig,
+                RollbackConfig,
+                SnapshotConfig,
+                StateConsistencyConfig,
+                StateConsistencyManager,
+            )
+
+            sc_raw = (
+                instance_config.state_consistency
+                if instance_config and isinstance(
+                    getattr(instance_config, "state_consistency", None), dict
+                )
+                else {}
+            )
+            if sc_raw and sc_raw.get("enabled", False):
+                snap_raw = sc_raw.get("snapshot") if isinstance(sc_raw.get("snapshot"), dict) else {}
+                rb_raw = sc_raw.get("rollback") if isinstance(sc_raw.get("rollback"), dict) else {}
+
+                sc_config = StateConsistencyConfig(
+                    enabled=True,
+                    snapshot=SnapshotConfig(
+                        storage_path=snap_raw.get("storage_path", ""),
+                        retention_hours=int(snap_raw.get("retention_hours", 24)),
+                        max_size_mb=int(snap_raw.get("max_size_mb", 500)),
+                        capture_cwd=bool(snap_raw.get("capture_cwd", True)),
+                        capture_files=bool(snap_raw.get("capture_files", True)),
+                        capture_clipboard=bool(snap_raw.get("capture_clipboard", False)),
+                    ),
+                    rollback=RollbackConfig(
+                        auto_rollback_on_consecutive_failures=int(
+                            rb_raw.get("auto_rollback_on_consecutive_failures", 3)
+                        ),
+                        auto_rollback_on_critical_error=bool(
+                            rb_raw.get("auto_rollback_on_critical_error", True)
+                        ),
+                        rollback_timeout_seconds=int(rb_raw.get("rollback_timeout_seconds", 60)),
+                    ),
+                )
+                agent._state_consistency_manager = StateConsistencyManager(config=sc_config)
+                agent._state_consistency_enabled = True
+                logger.info(
+                    f"   状态一致性: 已启用（快照路径={sc_config.snapshot.storage_path or '实例隔离'}, "
+                    f"自动回滚={sc_config.rollback.auto_rollback_on_critical_error}）"
+                )
+            else:
+                agent._state_consistency_manager = None
+                agent._state_consistency_enabled = False
+        except Exception as e:
+            logger.warning(f"状态一致性初始化失败（不阻断启动）: {e}", exc_info=True)
+            agent._state_consistency_manager = None
+            agent._state_consistency_enabled = False
+
         # 标记为原型（用于 clone_for_session 判断）
         agent._is_prototype = True
 

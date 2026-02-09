@@ -467,8 +467,16 @@ _backtrack_manager: Optional[BacktrackManager] = None
 
 
 def get_backtrack_manager(llm_service: Optional[Any] = None) -> BacktrackManager:
-    """获取全局回溯管理器实例"""
+    """获取全局回溯管理器实例
+
+    注意：如果传入了 llm_service 且现有实例缺少 LLM，会自动更新。
+    这修复了单例首次不带 LLM 创建后，后续 LLM 决策永远不执行的 Bug。
+    """
     global _backtrack_manager
     if _backtrack_manager is None:
         _backtrack_manager = BacktrackManager(llm_service=llm_service)
+    elif llm_service and not _backtrack_manager.llm_service:
+        # 首次创建时 LLM 可能为 None，后续传入时必须更新
+        logger.info("🔄 BacktrackManager: 更新 LLM 服务（首次创建时缺失）")
+        _backtrack_manager.llm_service = llm_service
     return _backtrack_manager

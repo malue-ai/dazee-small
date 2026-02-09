@@ -382,6 +382,12 @@ class ToolExecutor:
         - 超过阈值则压缩
         - 完整内容存本地文件
         - 返回压缩后的文本
+
+        工具可通过在返回 dict 中设置 _compression_hint 字段自主声明压缩策略：
+        - "skip": 不压缩（读操作等 Agent 需要完整内容的场景）
+        - "normal": 按默认阈值压缩
+        - "force": 使用较低阈值强制压缩（超大输出走 scratchpad）
+        - 不携带: 走默认阈值逻辑
         """
         if not self.enable_compaction or skip_compaction or not self.compressor:
             return result
@@ -398,9 +404,18 @@ class ToolExecutor:
         if not result.get("success", True) and "error" in result:
             return result
 
-        # 使用新的统一压缩器
+        # 工具自声明压缩提示（从结果中提取并移除，不传递给 Agent）
+        hint = result.pop("_compression_hint", None)
+        if hint == "skip":
+            return result  # 工具明确要求不压缩（如读操作）
+
+        # hint == "force" 时使用较低阈值，确保大输出也走 scratchpad
+        threshold_override = 500 if hint == "force" else None
+
+        # 使用统一压缩器
         compressed_text, metadata = await self.compressor.compress_if_needed(
-            tool_name=tool_name, tool_id=tool_id, result=result
+            tool_name=tool_name, tool_id=tool_id, result=result,
+            threshold_override=threshold_override,
         )
 
         # 如果被压缩了，返回压缩后的结果

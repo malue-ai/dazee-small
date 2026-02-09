@@ -436,11 +436,14 @@ class AgentSchema(BaseModel):
 
     model: str = Field(default="", description="主 LLM 模型（必须由 config.yaml 显式配置）")
 
-    max_turns: int = Field(default=15, ge=1, le=50, description="最大对话轮次")
+    max_turns: Optional[int] = Field(
+        default=None,
+        description="已废弃：终止由 AdaptiveTerminator 自主决策，此字段仅为向后兼容保留",
+    )
 
     # 🆕 V10.1: 执行策略
     execution_strategy: str = Field(
-        default="rvr", description="执行策略: rvr (标准), rvr-b (带回溯), multi (多智能体)"
+        default="rvr-b", description="执行策略: rvr (标准), rvr-b (带回溯，默认)"
     )
 
     allow_parallel_tools: bool = Field(default=False, description="是否允许并行工具调用")

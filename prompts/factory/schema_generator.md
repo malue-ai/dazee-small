@@ -23,7 +23,6 @@
   "tools": [],
   "skills": [{"name": "excel-generator", "enabled": true}],
   "plan_manager": {"enabled": true, "max_steps": 15},
-  "max_turns": 15,
   "reasoning": "涉及数据处理、代码执行和报表生成，需要 Excel 能力"
 }
 </schema>
@@ -40,7 +39,6 @@
   "tools": [],
   "skills": [],
   "plan_manager": {"enabled": false},
-  "max_turns": 8,
   "reasoning": "简单问答场景，无需工具和规划，快速响应"
 }
 </schema>
@@ -58,7 +56,6 @@
   "skills": [],
   "plan_manager": {"enabled": true, "max_steps": 15, "granularity": "fine"},
   "memory_manager": {"retention_policy": "session", "working_memory_limit": 30},
-  "max_turns": 20,
   "reasoning": "研究任务需要多轮搜索和信息整合，启用细粒度规划"
 }
 </schema>
@@ -80,7 +77,6 @@
   ],
   "plan_manager": {"enabled": true, "max_steps": 12},
   "output_formatter": {"default_format": "markdown", "include_metadata": true},
-  "max_turns": 15,
   "reasoning": "报告生成需要多种文档技能和代码执行能力"
 }
 </schema>
@@ -98,7 +94,6 @@
   "skills": [],
   "plan_manager": {"enabled": true, "max_steps": 10},
   "output_formatter": {"default_format": "markdown", "code_highlighting": true},
-  "max_turns": 15,
   "reasoning": "编程任务需要代码执行环境验证代码正确性"
 }
 </schema>
@@ -161,7 +156,6 @@
   "skills": [{"name": "excel-generator", "enabled": true}],
   "tools": ["web_search"],
   "model": "claude-sonnet-4-5-20250929",
-  "max_turns": 15,
   "allow_parallel_tools": false,
   "reasoning": "配置理由"
 }

@@ -279,7 +279,6 @@ class AgentFactory:
             plan_manager=PlanManagerConfig(enabled=True),  # 启用规划，适应复杂任务
             skills=[],  # 由 instance 配置
             tools=[],  # 由 instance 配置
-            max_turns=15,  # 默认中等复杂度
             reasoning="V5.0 保守默认配置：LLM 推断失败，使用通用配置",
         )
 
@@ -315,7 +314,6 @@ class AgentFactory:
             f"   Skills: {[s.name if isinstance(s, SkillConfig) else s for s in schema.skills]}"
         )
         logger.debug(f"   Tools: {schema.tools}")
-        logger.debug(f"   Max Turns: {schema.max_turns}")
         logger.debug(f"   Intent Analyzer: {'启用' if schema.intent_analyzer.enabled else '禁用'}")
         logger.debug(f"   Plan Manager: {'启用' if schema.plan_manager.enabled else '禁用'}")
         logger.debug(f"   Tool Selector: {'启用' if schema.tool_selector.enabled else '禁用'}")
@@ -345,9 +343,7 @@ class AgentFactory:
             prompt_schema=effective_prompt_schema,
             prompt_cache=prompt_cache,
             apis_config=apis_config,
-            strategy=(
-                schema.execution_strategy if hasattr(schema, "execution_strategy") else "rvr-b"
-            ),
+            strategy="rvr-b",  # V11.0: 固定使用 RVR-B（忽略 schema.execution_strategy，防止 LLM 生成的 schema 设错）
             terminator=terminator,
         )
 
@@ -526,7 +522,6 @@ class AgentFactory:
             schema=schema,
             prompt_cache=prompt_cache,
             context_strategy=context_strategy,
-            max_steps=schema.max_turns,
             terminator=terminator,
         )
 
@@ -625,15 +620,7 @@ class AgentFactory:
         # 确定基础 Schema
         schema = base_schema or DEFAULT_AGENT_SCHEMA
 
-        # 根据 intent 微调运行时参数
-        if intent:
-            # 根据复杂度调整 max_turns
-            from core.routing.types import Complexity
-
-            if intent.complexity == Complexity.SIMPLE:
-                schema = schema.model_copy(update={"max_turns": min(schema.max_turns, 8)})
-            elif intent.complexity == Complexity.COMPLEX:
-                schema = schema.model_copy(update={"max_turns": max(schema.max_turns, 20)})
+        # 终止完全由 AdaptiveTerminator 自主决策，不按 complexity 限制 max_turns
 
         # V11.0: 统一使用 RVR-B 执行策略
         return await cls._create_single_agent(
@@ -750,7 +737,6 @@ class AgentPresets:
             description="专业数据分析助手，擅长处理 CSV/Excel 数据并生成报表",
             skills=[SkillConfig(name="excel-generator")],
             tools=[],
-            max_turns=15,
             plan_manager=PlanManagerConfig(enabled=True, max_steps=10, granularity="medium"),
             output_formatter=OutputFormatterConfig(
                 default_format="markdown", code_highlighting=True
@@ -766,7 +752,6 @@ class AgentPresets:
             description="深度研究助手，擅长搜索、分析和总结信息",
             skills=[],
             tools=[],
-            max_turns=20,
             plan_manager=PlanManagerConfig(enabled=True, max_steps=15, granularity="fine"),
             memory_manager=MemoryManagerConfig(retention_policy="session", working_memory_limit=30),
             reasoning="研究任务需要多轮搜索和信息整合，启用计划管理",
@@ -784,7 +769,6 @@ class AgentPresets:
                 SkillConfig(name="pdf-generator"),
             ],
             tools=[],
-            max_turns=15,
             plan_manager=PlanManagerConfig(enabled=True, max_steps=12),
             output_formatter=OutputFormatterConfig(
                 default_format="markdown", include_metadata=True
@@ -800,7 +784,6 @@ class AgentPresets:
             description="简单问答助手，快速响应",
             skills=[],
             tools=[],
-            max_turns=5,
             plan_manager=PlanManagerConfig(enabled=False),
             memory_manager=MemoryManagerConfig(working_memory_limit=10, auto_compress=False),
             reasoning="简单问答不需要工具和计划，快速响应",

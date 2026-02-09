@@ -88,7 +88,11 @@ class ToolResultCompressor:
         }
 
     async def compress_if_needed(
-        self, tool_name: str, tool_id: str, result: Any
+        self,
+        tool_name: str,
+        tool_id: str,
+        result: Any,
+        threshold_override: Optional[int] = None,
     ) -> Tuple[str, Optional[Dict[str, Any]]]:
         """
         如果超过阈值则压缩工具结果
@@ -97,6 +101,7 @@ class ToolResultCompressor:
             tool_name: 工具名称
             tool_id: 工具调用 ID
             result: 工具结果（字符串或可序列化对象）
+            threshold_override: 可选的阈值覆盖（优先于实例默认阈值）
 
         Returns:
             (压缩后的文本或原文本, 压缩元数据或 None)
@@ -122,8 +127,9 @@ class ToolResultCompressor:
             except (TypeError, ValueError):
                 result_str = str(result)
 
-        # 检查是否需要压缩
-        if len(result_str) <= self.threshold:
+        # 检查是否需要压缩（支持阈值覆盖）
+        effective_threshold = threshold_override if threshold_override is not None else self.threshold
+        if len(result_str) <= effective_threshold:
             return result_str, None
 
         # 生成引用 ID

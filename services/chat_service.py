@@ -1354,6 +1354,51 @@ class ChatService:
                 logger.info("意图分析: 用户希望停止/取消，设置停止标志")
                 self.session_service.get_stop_event(session_id).set()
 
+            # V11: 用户回滚意图检测 — 框架直接回滚，短路 Agent 执行
+            _rollback_handled = False
+            if getattr(routing_intent, "wants_rollback", False):
+                state_mgr = getattr(agent, "_state_consistency_manager", None)
+                if state_mgr and getattr(agent, "_state_consistency_enabled", False):
+                    snapshot_id = state_mgr.get_most_recent_snapshot()
+                    if snapshot_id:
+                        try:
+                            files = state_mgr.get_snapshot_file_list(snapshot_id)
+                            rollback_msgs = state_mgr.rollback(snapshot_id)
+                            logger.info(
+                                f"✅ 用户回滚意图: 已恢复 {len(rollback_msgs)} 个文件"
+                            )
+
+                            # 构造回滚确认消息，直接回复用户（短路 Agent）
+                            file_list = "\n".join(f"  - `{f}`" for f in files[:10])
+                            confirm_text = (
+                                f"已帮你恢复到修改前的状态：\n{file_list}\n\n"
+                                f"文件内容已还原，你可以打开确认一下。"
+                            )
+
+                            # 通过 broadcaster 直接发送回复
+                            await agent.broadcaster.emit_message_start(
+                                session_id=session_id,
+                                message_id=assistant_message_id,
+                            )
+                            await agent.broadcaster.emit_message_delta(
+                                session_id=session_id,
+                                delta={"type": "text", "content": confirm_text},
+                                message_id=assistant_message_id,
+                            )
+                            await agent.broadcaster.emit_message_stop(
+                                session_id=session_id,
+                                message_id=assistant_message_id,
+                                stop_reason="rollback_completed",
+                            )
+
+                            _rollback_handled = True
+                            _assistant_text_for_tasks = confirm_text
+
+                        except Exception as e:
+                            logger.warning(f"用户回滚意图处理失败，回退到 Agent: {e}", exc_info=True)
+                    else:
+                        logger.info("用户回滚意图: 无可用快照，交给 Agent 处理")
+
             # 设置输出格式
             if hasattr(agent, "broadcaster") and agent.broadcaster:
                 agent.broadcaster.set_output_format(output_format, conversation_id)
@@ -1366,7 +1411,17 @@ class ChatService:
                 message_id=assistant_message_id,
             )
 
-            _assistant_text_for_tasks = ""
+            if not _rollback_handled:
+                _assistant_text_for_tasks = ""
+
+            # V11: 回滚短路 — 回滚已成功则直接回复，跳过 Agent 执行
+            if _rollback_handled:
+                self.session_service.end_session(session_id, status="completed")
+                logger.info("回滚短路: 跳过 Agent 执行")
+                # _assistant_text_for_tasks 已在回滚代码中设置
+                # 直接跳到后台任务阶段
+                yield {"type": "done", "data": {"stop_reason": "rollback_completed"}}
+                return
 
             # 单智能体执行（RVR-B 策略）
             single_agent_start = time.time()

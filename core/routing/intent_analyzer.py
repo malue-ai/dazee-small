@@ -368,6 +368,11 @@ class IntentAnalyzer:
             if not isinstance(wants_to_stop, bool):
                 wants_to_stop = False
 
+            # 解析 wants_rollback（用户恢复/撤销意图，LLM 语义推断）
+            wants_rollback = parsed.get("wants_rollback", False)
+            if not isinstance(wants_rollback, bool):
+                wants_rollback = False
+
             # 解析 relevant_skill_groups（LLM 语义多选，重召回）
             relevant_skill_groups = parsed.get("relevant_skill_groups", [])
             if not isinstance(relevant_skill_groups, list):
@@ -389,6 +394,7 @@ class IntentAnalyzer:
                 skip_memory=skip_memory,
                 is_follow_up=is_follow_up,
                 wants_to_stop=wants_to_stop,
+                wants_rollback=wants_rollback,
                 relevant_skill_groups=relevant_skill_groups,
             )
         else:

@@ -41,7 +41,6 @@ class AgentConfig(BaseModel):
 
     # 能力配置
     tools: List[str] = Field(default_factory=list, description="可用工具列表")
-    max_turns: int = Field(10, description="最大对话轮次")
 
     # 执行参数
     timeout_seconds: int = Field(60, description="执行超时")

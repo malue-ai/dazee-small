@@ -150,6 +150,13 @@ Actions:
 
         return {"success": False, "error": f"节点不存在: {node_id}"}
 
+    # Commands whose output is data the Agent needs to reason about (read operations).
+    # Results of these commands skip immediate compression so the Agent sees the full content.
+    _READ_COMMANDS = frozenset({
+        "cat", "head", "tail", "less", "more",
+        "grep", "find", "ls", "wc", "file", "stat",
+    })
+
     async def _action_run(self, node_id: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """在节点上执行命令"""
         command = params.get("command", [])
@@ -168,7 +175,7 @@ Actions:
             node_id=node_id,
         )
 
-        return {
+        result = {
             "success": response.ok,
             "action": "run",
             "node": node_id,
@@ -177,6 +184,15 @@ Actions:
             "error": response.error if not response.ok else None,
             "elapsed_ms": response.elapsed_ms,
         }
+
+        # Set compression hint based on command type.
+        # Read commands return data the Agent needs intact; skip compression.
+        # Write/mutation commands return confirmations; normal compression is fine.
+        base_cmd = command[0].split("/")[-1] if command else ""
+        if base_cmd in self._READ_COMMANDS:
+            result["_compression_hint"] = "skip"
+
+        return result
 
     async def _action_notify(self, node_id: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """发送系统通知"""

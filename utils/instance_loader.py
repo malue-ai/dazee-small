@@ -95,7 +95,6 @@ class InstanceConfig:
 
     # Agent 基础配置
     model: Optional[str] = None
-    max_turns: Optional[int] = None
     plan_manager_enabled: Optional[bool] = None
     allow_parallel_tools: Optional[bool] = None
 
@@ -528,7 +527,6 @@ async def load_instance_config(instance_name: str) -> InstanceConfig:
         description=instance_info.get("description", ""),
         version=instance_info.get("version", "1.0.0"),
         model=agent_config.get("model"),
-        max_turns=agent_config.get("max_turns"),
         plan_manager_enabled=agent_config.get("plan_manager_enabled"),
         allow_parallel_tools=agent_config.get("allow_parallel_tools"),
         llm_params=llm_params,
@@ -861,11 +859,18 @@ def _merge_config_to_schema(base_schema, config: InstanceConfig):
     # 深拷贝 Schema，避免修改原始默认值
     merged = base_schema.copy(deep=True)
 
+    # === 执行策略强制覆盖（V11.0: 固定 RVR-B） ===
+    # LLM 生成的 schema 可能设置 execution_strategy: rvr（无回溯），强制纠正
+    if hasattr(merged, "execution_strategy") and merged.execution_strategy != "rvr-b":
+        logger.info(
+            f"⚠️ 强制覆盖 execution_strategy: {merged.execution_strategy} → rvr-b"
+        )
+        merged.execution_strategy = "rvr-b"
+
     # === 基础配置覆盖 ===
     if config.model:
         merged.model = config.model
-    if config.max_turns:
-        merged.max_turns = config.max_turns
+    # max_turns 已废弃：终止由 AdaptiveTerminator 自主决策
     if config.allow_parallel_tools is not None:
         merged.allow_parallel_tools = config.allow_parallel_tools
 
@@ -961,7 +966,6 @@ def _merge_config_to_schema(base_schema, config: InstanceConfig):
     override_count = sum(
         [
             config.model is not None,
-            config.max_turns is not None,
             config.allow_parallel_tools is not None,
             config.plan_manager_enabled is not None,
             config.plan_manager_max_steps is not None,
@@ -1230,11 +1234,11 @@ async def create_agent_from_instance(
 
             terminator = AdaptiveTerminator(
                 AdaptiveTerminatorConfig(
-                    max_turns=t.get("max_turns", 100) if isinstance(t, dict) else 100,
+                    max_turns=t.get("max_turns", 200) if isinstance(t, dict) else 200,
                     max_duration_seconds=t.get("max_duration_seconds", 1800) if isinstance(t, dict) else 1800,
                     idle_timeout_seconds=t.get("idle_timeout_seconds", 120) if isinstance(t, dict) else 120,
                     consecutive_failure_limit=t.get("consecutive_failure_limit", 5) if isinstance(t, dict) else 5,
-                    long_running_confirm_after_turns=t.get("long_running_confirm_after_turns", 20) if isinstance(t, dict) else 20,
+                    long_running_confirm_after_turns=t.get("long_running_confirm_after_turns", 50) if isinstance(t, dict) else 50,
                     hitl=HITLConfig(
                         enabled=hitl_raw.get("enabled", True),
                         require_confirmation=hitl_raw.get("require_confirmation", [

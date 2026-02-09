@@ -96,7 +96,7 @@ class Agent:
         schema=None,
         prompt_cache=None,
         context_strategy=None,
-        max_steps: int = 30,
+        max_steps: int = 999,
         terminator: Optional["BaseTerminator"] = None,
     ):
         """
@@ -110,8 +110,8 @@ class Agent:
             schema: AgentSchema 配置
             prompt_cache: PromptCache 实例
             context_strategy: 上下文策略
-            max_steps: 最大执行步数
-            terminator: 可选终止策略（V11 自适应终止）
+            max_steps: 已废弃，终止由 AdaptiveTerminator 自主决策
+            terminator: 终止策略（V11 自适应终止，核心终止机制）
         """
         # 核心依赖（允许 None，支持子类延迟初始化）
         self._executor = executor
@@ -340,8 +340,8 @@ class Agent:
         if session_context.get("plan"):
             self._plan_cache["plan"] = session_context["plan"]
 
-        # 初始化运行时上下文
-        ctx = create_runtime_context(session_id=session_id, max_turns=self._max_steps)
+        # 初始化运行时上下文（终止由 AdaptiveTerminator 驱动，不设 max_turns 限制）
+        ctx = create_runtime_context(session_id=session_id)
 
         # 工具选择
         tools_for_llm, selection = await self._select_tools(intent, ctx)
@@ -859,6 +859,14 @@ class Agent:
         clone._instance_registry = self._instance_registry
         clone._instance_skills = self._instance_skills.copy() if self._instance_skills else []
         clone.workers_config = self.workers_config.copy() if self.workers_config else []
+
+        # V11: 状态一致性管理器（共享实例，跨 session 保留快照）
+        clone._state_consistency_manager = getattr(self, "_state_consistency_manager", None)
+        clone._state_consistency_enabled = getattr(self, "_state_consistency_enabled", False)
+
+        # V11: 终止策略
+        clone._terminator = getattr(self, "_terminator", None)
+
         logger.debug(f"🚀 Agent 克隆完成: executor={self._executor.name}")
 
         return clone

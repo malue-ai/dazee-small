@@ -40,8 +40,8 @@ skill_groups:
     description: "Excel/CSV 数据分析、表格处理、数据清洗、格式修复、发票整理"
     skills: [excel-analyzer, excel-fixer, invoice-organizer]
   file_operation:
-    description: "本地文件管理、文件整理/移动/重命名、Word 文档创建与编辑、PDF 读取/合并/拆分/加密/水印、批量格式转换（图片/文档）、视频帧提取、桌面智能整理"
-    skills: [file-manager, word-processor, nano-pdf, pdf-toolkit, batch-file-converter, video-frames, smart-desktop-organizer, macos-finder]
+    description: "本地文件管理、文件整理/移动/重命名、Word 文档创建与编辑、PDF 读取/合并/拆分/加密/水印、批量格式转换（图片/文档）、视频帧提取、桌面智能整理、极速全盘文件搜索"
+    skills: [file-manager, word-processor, nano-pdf, pdf-toolkit, batch-file-converter, video-frames, smart-desktop-organizer, macos-finder, windows-explorer-advanced, everything-search]
   translation:
     description: "多语言翻译、文档翻译、文化自适应格式化（日期/货币/信函/称谓）、多语言 OCR 图片文字提取"
     skills: [translator, locale-aware-formatter, multi-lang-ocr]
@@ -73,14 +73,14 @@ skill_groups:
     description: "营养分析、饮食建议、用药管理、健康追踪"
     skills: [nutrition-analyzer, medication-tracker]
   productivity:
-    description: "笔记管理（Notion/Obsidian/Bear/OneNote/Apple备忘录）、待办事项（Trello/Things/提醒事项）、日历、邮件、Google 全家桶、密码管理、Discord、Slack、iMessage、WhatsApp、智能邮件助手、定时任务"
-    skills: [notion, obsidian, bear-notes, onenote, apple-notes, trello, things-mac, apple-reminders, apple-calendar, outlook-cli, himalaya, gog, 1password, discord, slack, imsg, wacli, smart-email-assistant, scheduled-tasks]
+    description: "笔记管理（Notion/Obsidian/Bear/OneNote/Apple备忘录）、待办事项（Trello/Things/提醒事项/Microsoft To Do）、日历、邮件、Google 全家桶、密码管理、Discord、Slack、iMessage、WhatsApp、智能邮件助手、定时任务"
+    skills: [notion, obsidian, bear-notes, onenote, apple-notes, trello, things-mac, apple-reminders, apple-calendar, outlook-cli, himalaya, gog, 1password, discord, slack, imsg, wacli, smart-email-assistant, scheduled-tasks, microsoft-todo]
   app_automation:
-    description: "桌面应用操作（打开/切换/控制应用）、UI 自动化、截图、系统通知、智能家居、周边地点搜索、跨应用工作流编排、浏览器自动化"
-    skills: [applescript, macos-open, macos-screenshot, app-scanner, macos-notification, peekaboo, browser, xdotool, linux-notification, linux-screenshot, windows-screenshot, windows-clipboard, windows-notification, powershell-basic, openhue, goplaces, cross-app-workflow]
+    description: "桌面应用操作（打开/切换/控制应用）、UI 自动化（macOS peekaboo / Windows pywinauto）、截图、系统通知、智能家居、周边地点搜索、跨应用工作流编排、浏览器自动化、Windows Terminal 管理"
+    skills: [applescript, macos-open, macos-screenshot, app-scanner, macos-notification, peekaboo, browser, xdotool, linux-notification, linux-screenshot, windows-screenshot, windows-clipboard, windows-notification, powershell-basic, windows-open, windows-terminal, pywinauto, openhue, goplaces, cross-app-workflow]
   system_maintenance:
-    description: "磁盘空间分析、大文件清理、缓存管理、系统健康检查、电脑变慢排查"
-    skills: [disk-health-monitor]
+    description: "磁盘空间分析、大文件清理、缓存管理、系统健康检查、电脑变慢排查、软件安装与升级（winget）、定时任务管理、WSL 管理"
+    skills: [disk-health-monitor, winget, task-scheduler, wsl]
   lifestyle:
     description: "个人记账、消费报告、预算管理、旅行规划、行程安排、打包清单"
     skills: [personal-finance, travel-planner]
@@ -268,14 +268,25 @@ skills:
 
   win32:
     builtin:
-      - { name: windows-screenshot,   backend_type: local, skill_source: instance, system: true, description: "Windows 截图" }
-      - { name: windows-clipboard,    backend_type: local, skill_source: instance, system: true, description: "Windows 剪贴板" }
-      - { name: windows-notification, backend_type: local, skill_source: instance, system: true, description: "Windows 系统通知" }
-      - { name: powershell-basic,     backend_type: local, skill_source: instance, system: true, description: "PowerShell 系统操作" }
+      - { name: windows-screenshot,          backend_type: local, skill_source: instance, system: true, description: "Windows 截图" }
+      - { name: windows-clipboard,           backend_type: local, skill_source: instance, system: true, description: "Windows 剪贴板" }
+      - { name: windows-notification,        backend_type: local, skill_source: instance, system: true, description: "Windows 系统通知" }
+      - { name: powershell-basic,            backend_type: local, skill_source: instance, system: true, description: "PowerShell 系统操作" }
+      - { name: windows-open,               backend_type: local, skill_source: instance, system: true, description: "打开文件、URL、文件夹、应用" }
+      - { name: windows-explorer-advanced,   backend_type: local, skill_source: instance, system: true, description: "文件资源管理器高级操作：快速访问、磁盘分析、文件统计" }
+      - { name: winget,                      backend_type: local, skill_source: instance, bins: ["winget"], description: "Windows 包管理器：搜索、安装、升级应用" }
+      - { name: windows-terminal,            backend_type: local, skill_source: instance, bins: ["wt"], description: "Windows Terminal 管理：标签页、分屏、配置文件" }
+      - { name: microsoft-todo,              backend_type: local, skill_source: instance, description: "Microsoft To Do 任务管理（Windows 内置）" }
+      - { name: task-scheduler,              backend_type: local, skill_source: instance, description: "Windows 任务计划程序：定时任务自动化" }
 
     lightweight:
-      - { name: outlook-cli,          backend_type: local, skill_source: instance, requires_app: "Microsoft Outlook", description: "Outlook 邮件与日历" }
-      - { name: onenote,              backend_type: local, skill_source: instance, requires_app: "OneNote", description: "OneNote 笔记" }
+      - { name: outlook-cli,                 backend_type: local, skill_source: instance, requires_app: "Microsoft Outlook", description: "Outlook 邮件与日历" }
+      - { name: onenote,                     backend_type: local, skill_source: instance, requires_app: "OneNote", description: "OneNote 笔记" }
+      - { name: pywinauto,                   backend_type: local, skill_source: instance, python_packages: ["pywinauto"], description: "Windows UI 自动化：操作任意桌面应用" }
+      - { name: wsl,                         backend_type: local, skill_source: instance, bins: ["wsl"], description: "WSL：在 Windows 上运行 Linux 命令" }
+
+    external:
+      - { name: everything-search,           backend_type: local, skill_source: instance, bins: ["es"], description: "Everything 极速文件搜索（毫秒级全盘搜索）" }
 
   # ==================== Linux 专属 ====================
 

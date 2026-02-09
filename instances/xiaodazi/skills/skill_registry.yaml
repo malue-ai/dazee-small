@@ -108,13 +108,26 @@ skills:
   - { name: spotify-player,       enabled: true,  status: ready,       os: darwin }
   - { name: openhue,              enabled: true,  status: unavailable, os: darwin }
 
-  # ========== win32 ==========
-  - { name: windows-screenshot,   enabled: true,  status: ready,       os: win32 }
-  - { name: windows-clipboard,    enabled: true,  status: ready,       os: win32 }
-  - { name: windows-notification, enabled: true,  status: ready,       os: win32 }
-  - { name: powershell-basic,     enabled: true,  status: ready,       os: win32 }
-  - { name: outlook-cli,          enabled: true,  status: unavailable, os: win32 }
-  - { name: onenote,              enabled: true,  status: unavailable, os: win32 }
+  # ========== win32 · builtin ==========
+  - { name: windows-screenshot,        enabled: true,  status: ready,       os: win32 }
+  - { name: windows-clipboard,         enabled: true,  status: ready,       os: win32 }
+  - { name: windows-notification,      enabled: true,  status: ready,       os: win32 }
+  - { name: powershell-basic,          enabled: true,  status: ready,       os: win32 }
+  - { name: windows-open,              enabled: true,  status: ready,       os: win32 }
+  - { name: windows-explorer-advanced, enabled: true,  status: ready,       os: win32 }
+  - { name: winget,                    enabled: true,  status: ready,       os: win32 }
+  - { name: windows-terminal,          enabled: true,  status: ready,       os: win32 }
+  - { name: microsoft-todo,            enabled: true,  status: ready,       os: win32 }
+  - { name: task-scheduler,            enabled: true,  status: ready,       os: win32 }
+
+  # ========== win32 · lightweight ==========
+  - { name: outlook-cli,               enabled: true,  status: unavailable, os: win32 }
+  - { name: onenote,                   enabled: true,  status: unavailable, os: win32 }
+  - { name: pywinauto,                 enabled: true,  status: ready,       os: win32 }
+  - { name: wsl,                       enabled: true,  status: ready,       os: win32 }
+
+  # ========== win32 · external ==========
+  - { name: everything-search,         enabled: true,  status: unavailable, os: win32 }
 
   # ========== linux ==========
   - { name: linux-screenshot,     enabled: true,  status: ready,       os: linux }

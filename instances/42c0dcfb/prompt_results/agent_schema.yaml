@@ -64,8 +64,7 @@ output_formatter:
 skills: []
 tools: []
 model: qwen3-max
-max_turns: 10
-execution_strategy: rvr
+execution_strategy: rvr-b
 allow_parallel_tools: false
 context_limits:
   max_context_tokens: 200000

@@ -137,25 +137,38 @@ class Mem0MemoryPool:
                 f"(instance={self.config.instance_name})"
             )
 
-            # 1. 创建 sqlite-vec 向量存储 — instance-scoped DB path
             collection_name = self.config.collection_name
-            vector_store = SqliteVecVectorStore(
-                collection_name=collection_name,
-                embedding_model_dims=self.config.embedding_model_dims,
-                db_path=self.config.db_path,
-            )
 
-            # 2. 创建 Embedder（优先使用本地 GGUF，离线可用）
+            # 1. 创建 Embedder（优先使用本地 GGUF，离线可用）
+            #    必须在创建向量存储之前，以确定实际的向量维度
             embedding_config = self.config.embedder.to_dict()
             embedding_model = self._create_local_embedder()
-            if embedding_model is None:
+
+            if embedding_model is not None:
+                # 本地 GGUF embedder 可用 — 使用其实际维度
+                actual_dims = embedding_model.provider.dimensions
+                if actual_dims != self.config.embedding_model_dims:
+                    logger.info(
+                        f"[Mem0Pool] 向量维度调整: "
+                        f"config={self.config.embedding_model_dims} → "
+                        f"local_gguf={actual_dims}"
+                    )
+            else:
                 # Fallback: 使用 Mem0 原生 EmbedderFactory（如 OpenAI）
+                actual_dims = self.config.embedding_model_dims
                 embedding_model = EmbedderFactory.create(
                     self.config.embedder.provider,
                     embedding_config,
                     {"collection_name": collection_name,
-                     "embedding_model_dims": self.config.embedding_model_dims},
+                     "embedding_model_dims": actual_dims},
                 )
+
+            # 2. 创建 sqlite-vec 向量存储 — 使用实际 embedder 的维度
+            vector_store = SqliteVecVectorStore(
+                collection_name=collection_name,
+                embedding_model_dims=actual_dims,
+                db_path=self.config.db_path,
+            )
 
             # 3. 创建 LLM
             llm = LlmFactory.create(
@@ -176,7 +189,7 @@ class Mem0MemoryPool:
                     provider="qdrant",
                     config={
                         "collection_name": collection_name,
-                        "embedding_model_dims": self.config.embedding_model_dims,
+                        "embedding_model_dims": actual_dims,
                         "path": ":memory:",  # 占位，不会实际使用
                     },
                 ),
@@ -498,12 +511,24 @@ class _GGUFEmbedderAdapter:
     Mem0 calls ``embedder.embed(text, memory_action=...)`` expecting ``list[float]``.
     Our GGUF provider is async and returns ``np.ndarray``.
     This adapter bridges the gap with ``asyncio.run`` (Mem0 calls embed synchronously).
+
+    Mem0's telemetry also accesses ``embedder.config.embedding_dims``, so we
+    expose a lightweight config object carrying the dimension information.
     """
 
     def __init__(self, provider):
         self.provider = provider
         # Trigger lazy model load now so first embed() is fast
         self.provider._ensure_model()
+
+        # Mem0 internally accesses ``embedding_model.config.embedding_dims``
+        # (e.g. in telemetry capture_event).  Provide a compatible config object.
+        from types import SimpleNamespace
+
+        self.config = SimpleNamespace(
+            embedding_dims=provider.dimensions,
+            model=getattr(provider, "_model_path", "gguf-local"),
+        )
 
     def embed(self, text, memory_action=None):
         """Synchronous embed matching Mem0 interface."""

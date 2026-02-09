@@ -1,5 +1,5 @@
-name: 小搭子
-description: 住在用户电脑里的 AI 搭子，亲切、主动、靠谱的本地桌面助手
+name: XiaoDazi
+description: 桌面端 AI 搭子 - 住在用户电脑里的智能助手
 intent_analyzer:
   enabled: true
   complexity_levels:
@@ -11,13 +11,13 @@ intent_analyzer:
   - writing
   - data_analysis
   - translation
-  - app_automation
-  - memory_recall
-  - preference_adaptation
+  - desktop_automation
+  - knowledge_search
+  - memory_query
   output_formats:
-  - natural_language
-  - structured_list
-  - table
+  - text
+  - markdown
+  - structured
   use_llm: true
   llm_model: claude-haiku-4-5-20251001
   fast_mode: false
@@ -25,28 +25,25 @@ intent_analyzer:
   simplified_output: true
 plan_manager:
   enabled: true
-  trigger_condition: complexity == 'complex' or requires_multiple_skills or involves_ui_operations
-  max_steps: 20
-  granularity: fine
+  trigger_condition: complexity == 'complex' or (complexity == 'medium' and step_count
+    > 3)
+  max_steps: 15
+  granularity: medium
   allow_dynamic_adjustment: true
   validation_interval: 3
   replan_enabled: true
-  max_replan_attempts: 3
+  max_replan_attempts: 2
   replan_strategy: incremental
-  failure_threshold: 0.4
+  failure_threshold: 0.3
 tool_selector:
   enabled: true
-  available_tools:
-  - nodes
-  - knowledge_search
-  - HITL
-  - plan-todo
-  - desktop_automation
+  available_tools: []
   selection_strategy: capability_based
   allow_parallel: false
   max_parallel_tools: 1
   base_tools:
-  - HITL
+  - hitl
+  - knowledge_search
   tool_timeout: 300
 memory_manager:
   enabled: true
@@ -64,23 +61,28 @@ output_formatter:
   - json
   - html
   code_highlighting: false
-  max_output_length: 2000
+  max_output_length: 4000
   json_model_name: null
   json_schema: null
   strict_json_validation: false
   json_ensure_ascii: false
   json_indent: 2
   include_metadata: false
-skills: []
+skills:
+- name: nodes
+  enabled: true
+  description: 本地文件系统操作（shell 命令）
+- name: excel-generator
+  enabled: true
+  description: Excel 表格生成和分析
+- name: desktop-automation
+  enabled: true
+  description: 桌面应用界面操作（观察-操作-验证循环）
 tools:
-- nodes
+- hitl
 - knowledge_search
-- HITL
-- plan-todo
-- desktop_automation
-model: qwen3-max
-max_turns: 25
-execution_strategy: rvr
+model: claude-sonnet-4-5-20250929
+execution_strategy: rvr-b
 allow_parallel_tools: false
 context_limits:
   max_context_tokens: 200000
@@ -92,5 +94,28 @@ enable_thinking: null
 enable_caching: null
 thinking_mode: null
 prompts: null
-reasoning: 作为本地桌面 AI 搭子，需支持复杂任务规划（如文件整理+UI操作）、主动记忆用户偏好、安全执行本地操作，并在技能缺失时通过 HITL 引导安装或提供替代方案。强调细粒度规划、用户记忆持久化、人话交互和行动优先原则，因此启用
-  intent_analyzer、plan_manager（细粒度）、memory_manager（user 级别）和关键工具集。
+reasoning: '这是一个复杂的桌面助手场景，具有以下特点：
+
+
+  1. **高度交互性**：需要频繁的 HITL 确认（敏感操作、Skill 安装、用户中止等），因此 hitl 工具是基础工具
+
+
+  2. **复杂任务规划**：涉及多步骤文件操作、桌面自动化、多文件修改等复杂场景，需要启用 plan_manager，采用 medium 粒度平衡灵活性和可控性
+
+
+  3. **强记忆依赖**：需要记住用户偏好、习惯、项目风格等，启用 user 级别的持久化记忆，episodic_memory 用于回忆过往交互
+
+
+  4. **本地优先**：主要依赖本地 Skills（nodes、desktop-automation）而非云端工具，tool_selector 策略为 capability_based
+
+
+  5. **安全保护**：文件修改有自动备份和事务语义，需要 replan 能力处理失败场景（incremental 策略保留已完成步骤）
+
+
+  6. **知识检索**：需要 knowledge_search 工具查询用户知识库
+
+
+  7. **输出友好**：markdown 格式适合结构化展示（列表、表格），max_output_length 4000 适合桌面端阅读
+
+
+  8. **不需要并行工具**：桌面操作和文件修改需要串行执行以保证安全性'

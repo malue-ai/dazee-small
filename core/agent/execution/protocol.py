@@ -62,7 +62,7 @@ class ExecutorConfig:
 
     # 回溯配置（RVR-B）
     enable_backtrack: bool = False
-    max_backtrack_attempts: int = 3
+    max_backtrack_attempts: int = 5  # 给回溯足够的机会自动修复
 
     # 终止策略（信号驱动，替代硬性 max_turns）
     terminator: Optional["BaseTerminator"] = None

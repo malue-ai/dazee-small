@@ -512,7 +512,9 @@ class RuntimeContext:
     # === 执行进度 ===
     step_index: int = 0  # 步骤索引（用于 status 事件）
     current_turn: int = 0  # 当前 turn
-    max_turns: int = 20  # 最大 turn 数
+    # max_turns 已废弃：终止完全由 AdaptiveTerminator 信号驱动
+    # 保留字段仅为向后兼容（回溯上下文等仍读取此值作为参考信息）
+    max_turns: int = 999
 
     # === 自适应终止（V11）===
     consecutive_failures: int = 0  # 连续失败次数（工具错误/超时等）
@@ -702,13 +704,15 @@ class RuntimeContext:
         }
 
 
-def create_runtime_context(session_id: str, max_turns: int = 20) -> RuntimeContext:
+def create_runtime_context(session_id: str, max_turns: int = 999) -> RuntimeContext:
     """
     创建运行时上下文
 
+    终止完全由 AdaptiveTerminator 信号驱动，max_turns 仅为安全兜底。
+
     Args:
         session_id: 会话 ID
-        max_turns: 最大 turn 数
+        max_turns: 已废弃，保留仅为兼容，默认 999（不生效）
 
     Returns:
         RuntimeContext 实例

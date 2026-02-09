@@ -12,6 +12,7 @@
   "skip_memory": true|false,
   "is_follow_up": true|false,
   "wants_to_stop": true|false,
+  "wants_rollback": true|false,
   "relevant_skill_groups": ["group1", "group2"]
 }
 ```
@@ -39,6 +40,10 @@
 
 用户明确表示停止、取消、不做了时为 `true`。默认 `false`。
 
+## wants_rollback（用户是否要求撤销之前的修改）
+
+用户对**上一轮 Agent 做出的文件修改**表示不满，要求恢复到修改前的状态。注意区分：要求恢复**自己之前的操作结果**才是 rollback，要求恢复**其他东西**（如网络、系统、数据）不是。默认 `false`。
+
 ## relevant_skill_groups（需要哪些技能分组）
 
 从以下分组中选择所有可能相关的，宁多勿漏：
@@ -64,32 +69,44 @@
 
 <example>
 <query>今天天气怎么样</query>
-<output>{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": []}</output>
+<output>{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": []}</output>
 <reasoning>单步查询，无需个人记忆</reasoning>
 </example>
 
 <example>
 <query>帮我写一封请假邮件，明天要去看病</query>
-<output>{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["writing"]}</output>
+<output>{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["writing"]}</output>
 <reasoning>需要确认信息+生成内容，2-3步；需要记忆（用户称呼、邮件风格）</reasoning>
 </example>
 
 <example>
 <query>整理下载文件夹，按类型分类，把超过半年的旧文件列清单</query>
-<output>{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["file_operation"]}</output>
+<output>{"complexity": "complex", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["file_operation"]}</output>
 <reasoning>扫描→分类→移动→筛选→生成清单，5+步骤</reasoning>
 </example>
 
 <example>
 <query>改成正式一点的语气</query>
-<output>{"complexity": "simple", "skip_memory": false, "is_follow_up": true, "wants_to_stop": false, "relevant_skill_groups": ["writing"]}</output>
+<output>{"complexity": "simple", "skip_memory": false, "is_follow_up": true, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["writing"]}</output>
 <reasoning>"改成"是对上一轮输出的修改，是追问</reasoning>
 </example>
 
 <example>
 <query>算了，不用了</query>
-<output>{"complexity": "simple", "skip_memory": true, "is_follow_up": true, "wants_to_stop": true, "relevant_skill_groups": []}</output>
+<output>{"complexity": "simple", "skip_memory": true, "is_follow_up": true, "wants_to_stop": true, "wants_rollback": false, "relevant_skill_groups": []}</output>
 <reasoning>明确取消意图</reasoning>
+</example>
+
+<example>
+<query>都不对 给我恢复到之前的</query>
+<output>{"complexity": "simple", "skip_memory": false, "is_follow_up": true, "wants_to_stop": false, "wants_rollback": true, "relevant_skill_groups": ["file_operation"]}</output>
+<reasoning>用户否定了上一轮 Agent 对文件的修改，要求恢复到修改前的状态</reasoning>
+</example>
+
+<example>
+<query>帮我恢复一下网络连接</query>
+<output>{"complexity": "medium", "skip_memory": false, "is_follow_up": false, "wants_to_stop": false, "wants_rollback": false, "relevant_skill_groups": ["app_automation"]}</output>
+<reasoning>虽然包含"恢复"，但指的是修复网络问题，不是撤销 Agent 的文件修改</reasoning>
 </example>
 
 ## 重要说明

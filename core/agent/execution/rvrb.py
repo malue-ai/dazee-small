@@ -202,9 +202,12 @@ class RVRBExecutor(RVRExecutor):
         return self._error_classifier
 
     def _get_backtrack_manager(self, llm) -> BacktrackManager:
-        """获取回溯管理器（延迟初始化）"""
+        """获取回溯管理器（延迟初始化，始终确保 LLM 已注入）"""
         if self._backtrack_manager is None:
             self._backtrack_manager = get_backtrack_manager(llm)
+        elif llm and not self._backtrack_manager.llm_service:
+            # 确保 LLM 服务已注入（修复首次创建时 LLM 缺失的问题）
+            self._backtrack_manager.llm_service = llm
         return self._backtrack_manager
 
     def _get_rvrb_state(self, session_id: str) -> RVRBState:

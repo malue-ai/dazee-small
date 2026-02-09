@@ -86,8 +86,8 @@ class CostAlertConfig:
 class AdaptiveTerminatorConfig:
     """自适应终止器配置"""
 
-    # 安全兜底
-    max_turns: int = 30  # V12: 对齐 ExecutorConfig.max_turns，避免语义混淆
+    # 安全兜底（纯兜底，正常情况下由 LLM 自主终止 / HITL 干预 / 用户停止）
+    max_turns: int = 200  # 极端安全上限，正常任务不应触及
     max_duration_seconds: int = 1800
     idle_timeout_seconds: int = 120
     consecutive_failure_limit: int = 5
@@ -96,7 +96,7 @@ class AdaptiveTerminatorConfig:
     cost_alert: CostAlertConfig = field(default_factory=CostAlertConfig)
 
     # 长任务确认
-    long_running_confirm_after_turns: int = 20
+    long_running_confirm_after_turns: int = 50  # 50 轮时询问一次用户是否继续
 
     # HITL 人工干预
     hitl: HITLConfig = field(default_factory=HITLConfig)

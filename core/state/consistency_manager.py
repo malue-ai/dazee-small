@@ -120,7 +120,7 @@ class Snapshot:
     snapshot_id: str
     task_id: str
     affected_files: List[str] = field(default_factory=list)
-    file_contents: Dict[str, str] = field(default_factory=dict)
+    file_contents: Dict[str, bytes] = field(default_factory=dict)  # 二进制，支持所有文件类型
     environment: Optional[EnvironmentState] = None
     created_at: Optional[str] = None
 
@@ -247,16 +247,14 @@ class StateConsistencyManager:
         """
         snapshot_id = f"snap_{uuid.uuid4().hex[:12]}"
 
-        # 1. 备份文件内容
-        file_contents: Dict[str, str] = {}
+        # 1. 备份文件内容（二进制模式，支持 Word/Excel/PPT/图片等所有类型）
+        file_contents: Dict[str, bytes] = {}
         if self._config.snapshot.capture_files:
             for path in affected_files:
                 p = Path(path)
                 if p.exists() and p.is_file():
                     try:
-                        file_contents[path] = p.read_text(
-                            encoding="utf-8", errors="replace"
-                        )
+                        file_contents[path] = p.read_bytes()
                     except Exception as e:
                         logger.warning(f"快照读取失败 {path}: {e}")
 
@@ -293,6 +291,9 @@ class StateConsistencyManager:
 
         # 5. 磁盘持久化
         self._persist_snapshot(snapshot)
+
+        # 6. 惰性清理：创建新快照时顺带清理过期快照（静默、无额外开销）
+        self._cleanup_expired_snapshots()
 
         logger.info(
             f"快照已创建: {snapshot_id}, 文件数={len(file_contents)}, "
@@ -332,7 +333,7 @@ class StateConsistencyManager:
         try:
             target = Path(file_path)
             if target.is_file():
-                content = target.read_text(encoding="utf-8")
+                content = target.read_bytes()
                 snap.file_contents[file_path] = content
                 if file_path not in snap.affected_files:
                     snap.affected_files.append(file_path)
@@ -418,7 +419,7 @@ class StateConsistencyManager:
             try:
                 target = Path(path)
                 target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text(content, encoding="utf-8")
+                target.write_bytes(content)
                 messages.append(f"已恢复: {path}")
             except Exception as e:
                 logger.error(f"恢复文件失败 {path}: {e}", exc_info=True)
@@ -526,16 +527,27 @@ class StateConsistencyManager:
     # ==================== 提交 ====================
 
     def commit(self, task_id: str) -> None:
-        """任务成功后清理该任务的快照与日志"""
-        to_remove = [
-            sid for sid, s in self._snapshots.items() if s.task_id == task_id
-        ]
-        for sid in to_remove:
-            del self._snapshots[sid]
-            self._remove_snapshot_from_disk(sid)
+        """
+        任务成功后标记已提交。
+
+        **不立即删除快照**：保留到 retention_hours 过期后由清理机制移除。
+        这样用户在下一条消息中说"恢复到之前的"时，仍可通过快照回滚。
+        """
+        # 只清理操作日志（回滚不再需要逆操作序列）
         if task_id in self._task_logs:
             del self._task_logs[task_id]
-        logger.debug(f"已提交任务: {task_id}")
+
+        # 快照保留在磁盘，等 retention_hours 过期后由 cleanup_expired() 清理
+        retained = [
+            sid for sid, s in self._snapshots.items() if s.task_id == task_id
+        ]
+        if retained:
+            logger.info(
+                f"已提交任务: {task_id}, "
+                f"保留 {len(retained)} 个快照（retention={self._config.snapshot.retention_hours}h）"
+            )
+        else:
+            logger.debug(f"已提交任务: {task_id}（无快照）")
 
     # ==================== 后置一致性检查 ====================
 
@@ -611,6 +623,48 @@ class StateConsistencyManager:
         """检查任务是否有活跃的快照"""
         return self._find_snapshot_for_task(task_id) is not None
 
+    def get_most_recent_snapshot(self) -> Optional[str]:
+        """
+        获取最近的快照 ID（不限 task_id）。
+
+        用于跨 session 回滚：用户在新 session 中说"恢复到之前的"，
+        需要找到前一个 session 的快照。
+        """
+        if not self._snapshots:
+            # 尝试从磁盘加载
+            self._load_snapshots_from_disk()
+
+        if not self._snapshots:
+            return None
+
+        # 按创建时间降序，返回最近的
+        recent = max(
+            self._snapshots.values(),
+            key=lambda s: s.created_at or "",
+        )
+        return recent.snapshot_id
+
+    def get_snapshot_file_list(self, snapshot_id: str) -> List[str]:
+        """获取快照中备份的文件路径列表"""
+        snap = self._snapshots.get(snapshot_id)
+        if not snap:
+            snap = self._load_snapshot_from_disk(snapshot_id)
+        if not snap:
+            return []
+        return list(snap.file_contents.keys())
+
+    def _load_snapshots_from_disk(self) -> None:
+        """从磁盘加载所有快照到内存（用于跨 session 查找）"""
+        if not self._storage_path or not self._storage_path.exists():
+            return
+        for snap_file in self._storage_path.iterdir():
+            if snap_file.is_file() and snap_file.name.startswith("snap_"):
+                sid = snap_file.name
+                if sid not in self._snapshots:
+                    loaded = self._load_snapshot_from_disk(sid)
+                    if loaded:
+                        self._snapshots[sid] = loaded
+
     # ==================== 磁盘持久化（私有方法）====================
 
     def _persist_snapshot(self, snapshot: Snapshot) -> None:
@@ -657,9 +711,7 @@ class StateConsistencyManager:
                     original_path.encode()
                 ).hexdigest()[:16]
                 backup_name = f"{name_hash}.bak"
-                (files_dir / backup_name).write_text(
-                    content, encoding="utf-8"
-                )
+                (files_dir / backup_name).write_bytes(content)
                 file_manifest[original_path] = backup_name
 
             # 保存文件清单
@@ -686,8 +738,8 @@ class StateConsistencyManager:
         try:
             metadata = json.loads(meta_file.read_text(encoding="utf-8"))
 
-            # 加载文件内容
-            file_contents: Dict[str, str] = {}
+            # 加载文件内容（二进制，支持所有文件类型）
+            file_contents: Dict[str, bytes] = {}
             manifest_file = snap_dir / "file_manifest.json"
             if manifest_file.exists():
                 manifest = json.loads(
@@ -697,9 +749,7 @@ class StateConsistencyManager:
                 for original_path, backup_name in manifest.items():
                     backup_file = files_dir / backup_name
                     if backup_file.exists():
-                        file_contents[original_path] = backup_file.read_text(
-                            encoding="utf-8"
-                        )
+                        file_contents[original_path] = backup_file.read_bytes()
 
             # 重建环境状态
             env_data = metadata.get("environment")
