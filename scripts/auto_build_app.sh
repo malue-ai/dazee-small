@@ -102,29 +102,33 @@ INSTALLED_SOMETHING=false
 
 # ---------- 0a. Python ----------
 
-# 查找可用的 Python 3.12+
+# Python 版本要求：3.12 ~ 3.13
+# Python 3.14+ 太新，很多依赖包（aiofiles、tiktoken、sqlalchemy 等）还没发布兼容 wheel，
+# pip install 会静默失败，导致 PyInstaller 打包出残缺的后端二进制。
+PYTHON_MIN_MINOR=12
+PYTHON_MAX_MINOR=13
+
+is_python_compatible() {
+  local cmd="$1"
+  local ver major minor
+  ver=$($cmd --version 2>&1 | grep -oE '[0-9]+\.[0-9]+')
+  major=$(echo "$ver" | cut -d. -f1)
+  minor=$(echo "$ver" | cut -d. -f2)
+  [ "$major" = "3" ] && [ "$minor" -ge "$PYTHON_MIN_MINOR" ] && [ "$minor" -le "$PYTHON_MAX_MINOR" ]
+}
+
 find_python() {
-  # 优先使用项目 venv 中的 python
+  # 优先使用项目 venv 中的 python（如果版本兼容）
   if [ -x "$VENV_DIR/bin/python3" ]; then
-    local ver
-    ver=$("$VENV_DIR/bin/python3" --version 2>&1 | grep -oE '[0-9]+\.[0-9]+')
-    local major minor
-    major=$(echo "$ver" | cut -d. -f1)
-    minor=$(echo "$ver" | cut -d. -f2)
-    if [ "$major" = "3" ] && [ "$minor" -ge 12 ]; then
+    if is_python_compatible "$VENV_DIR/bin/python3"; then
       echo "$VENV_DIR/bin/python3"
       return 0
     fi
   fi
-  # 查找系统 python
-  for cmd in python3.12 python3 python; do
+  # 按优先级查找（精确版本号优先，避免命中 3.14）
+  for cmd in python3.12 python3.13 python3 python; do
     if has_cmd "$cmd"; then
-      local ver
-      ver=$($cmd --version 2>&1 | grep -oE '[0-9]+\.[0-9]+')
-      local major minor
-      major=$(echo "$ver" | cut -d. -f1)
-      minor=$(echo "$ver" | cut -d. -f2)
-      if [ "$major" = "3" ] && [ "$minor" -ge 12 ]; then
+      if is_python_compatible "$cmd"; then
         echo "$cmd"
         return 0
       fi
@@ -138,18 +142,26 @@ PYTHON_CMD=$(find_python || true)
 if [ -n "$PYTHON_CMD" ]; then
   ok "Python 已安装 ($($PYTHON_CMD --version 2>&1))"
 else
-  need "Python >= 3.12"
-  if [ "$DRY_RUN" = true ]; then
-    fail "Python 未安装（--dry-run 模式不自动安装）"
+  # 区分"没装 Python"和"版本不兼容"，给出有用的提示
+  if has_cmd python3; then
+    CURRENT_VER=$(python3 --version 2>&1)
+    need "Python 3.12 ~ 3.13（当前 $CURRENT_VER 不兼容）"
+  else
+    need "Python 3.12 ~ 3.13"
   fi
-  # 自动安装：确保 Homebrew 可用，然后用 brew 装 Python
+
+  if [ "$DRY_RUN" = true ]; then
+    fail "Python 版本不兼容（--dry-run 模式不自动安装）"
+  fi
+
+  # macOS：通过 Homebrew 安装 Python 3.12（和系统已有版本共存，不冲突）
   if [ "$(uname)" = "Darwin" ]; then
     ensure_brew
     info "通过 Homebrew 安装 Python ${PYTHON_VERSION}..."
     brew install "python@${PYTHON_VERSION}"
     ensure_brew_path
   else
-    fail "请手动安装 Python >= 3.12: https://www.python.org/downloads/"
+    fail "请手动安装 Python 3.12: https://www.python.org/downloads/"
   fi
   PYTHON_CMD=$(find_python || true)
   [ -z "$PYTHON_CMD" ] && fail "Python 安装后仍未找到，请检查 PATH"
@@ -240,11 +252,21 @@ info "检查 Python 依赖..."
 
 # 安装/更新 pip 依赖
 if [ -f "$PROJECT_ROOT/requirements.txt" ]; then
-  # 检查是否需要安装（用 freeze 对比，有差异就安装）
-  MISSING=$($PYTHON_CMD -m pip install --dry-run -r "$PROJECT_ROOT/requirements.txt" 2>&1 | grep -c "Would install" || true)
-  if [ "$MISSING" -gt 0 ]; then
+  # 通过 import 关键包来检测是否已安装（比 --dry-run 更可靠）
+  # --dry-run 在 Python 版本不兼容时不会输出 "Would install"，会误判为"已是最新"
+  NEEDS_INSTALL=false
+  for pkg in aiofiles fastapi pydantic uvicorn httpx sqlalchemy tiktoken; do
+    if ! $PYTHON_CMD -c "import $pkg" 2>/dev/null; then
+      NEEDS_INSTALL=true
+      break
+    fi
+  done
+
+  if [ "$NEEDS_INSTALL" = true ]; then
     info "安装 Python 依赖 (requirements.txt)..."
-    $PYTHON_CMD -m pip install -r "$PROJECT_ROOT/requirements.txt" --quiet
+    if ! $PYTHON_CMD -m pip install -r "$PROJECT_ROOT/requirements.txt" --quiet; then
+      fail "Python 依赖安装失败！请检查 Python 版本（当前: $($PYTHON_CMD --version 2>&1)，需要 3.12 ~ 3.13）"
+    fi
     INSTALLED_SOMETHING=true
     ok "Python 依赖安装完成"
   else
