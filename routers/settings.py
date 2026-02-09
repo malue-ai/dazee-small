@@ -12,16 +12,31 @@ from typing import Any, Dict
 
 from fastapi import APIRouter
 
+from pydantic import BaseModel
+
 from logger import get_logger
 from services.settings_service import (
+    download_embedding_model,
     get_embedding_status,
     get_settings,
     get_settings_schema,
     get_settings_status,
+    setup_semantic_search,
     update_settings,
 )
 
 logger = get_logger("settings_router")
+
+
+class SemanticSearchSetupRequest(BaseModel):
+    """语义搜索配置请求"""
+
+    mode: str
+    """
+    "disabled" — 不需要，关键词搜索即可
+    "local"    — 本地模型（438MB，离线可用，推荐）
+    "cloud"    — OpenAI 云端（需要 API Key，按量计费）
+    """
 
 router = APIRouter(prefix="/api/v1/settings", tags=["settings"])
 
@@ -114,11 +129,58 @@ async def read_embedding_status() -> Dict[str, Any]:
     检测语义搜索 embedding 模型可用性
 
     前端据此显示：
-    - 是否已安装本地模型
-    - 是否可用 OpenAI 云端
+    - 模型是否已下载 (model_downloaded)
+    - 是否已安装依赖 (local_available)
     - 安装提示和推荐方案
     """
     return {
         "success": True,
         "data": await get_embedding_status(),
+    }
+
+
+@router.post("/semantic-search/setup")
+async def setup_semantic_search_mode(body: SemanticSearchSetupRequest) -> Dict[str, Any]:
+    """
+    配置语义搜索模式（首次启动引导 / 设置页）
+
+    前端展示三个选项卡，用户选一个：
+
+    ```
+    ┌──────────┐  ┌──────────────┐  ┌────────────────┐
+    │ 不需要   │  │ 本地模型     │  │ OpenAI 云端    │
+    │          │  │ （推荐）     │  │                │
+    │ 关键词   │  │ 438MB 离线   │  │ 需要 API Key   │
+    │ 搜索即可 │  │ 中英文双语   │  │ 按量计费       │
+    └──────────┘  └──────────────┘  └────────────────┘
+    ```
+
+    请求体：
+    ```json
+    {"mode": "disabled"}  // 或 "local" 或 "cloud"
+    ```
+
+    选 "local" 时：
+    - 自动检测最佳下载源（国内镜像 / 官方）
+    - 模型已存在则跳过下载
+    - 返回 needs_download + download_result
+    """
+    result = await setup_semantic_search(body.mode)
+    return {
+        "success": result["success"],
+        "data": result,
+    }
+
+
+@router.post("/embedding-model/download")
+async def trigger_embedding_model_download() -> Dict[str, Any]:
+    """
+    单独触发模型下载（补充端点）
+
+    适用于：之前选了 disabled，现在想补装本地模型。
+    """
+    result = await download_embedding_model()
+    return {
+        "success": result["success"],
+        "data": result,
     }

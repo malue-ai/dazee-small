@@ -9,10 +9,11 @@ intent_analyzer:
   task_types:
   - file_management
   - writing
-  - translation
   - data_analysis
-  - app_automation
-  - user_preference_adaptation
+  - translation
+  - ui_automation
+  - email
+  - reporting
   output_formats:
   - text
   - markdown
@@ -35,17 +36,14 @@ plan_manager:
   failure_threshold: 0.4
 tool_selector:
   enabled: true
-  available_tools:
-  - nodes
-  - knowledge_search
-  - web_search
-  - api_calling
-  - HITL
+  available_tools: []
   selection_strategy: capability_based
   allow_parallel: false
-  max_parallel_tools: 3
+  max_parallel_tools: 1
   base_tools:
-  - HITL
+  - nodes
+  - knowledge_search
+  - hitl
   tool_timeout: 300
 memory_manager:
   enabled: true
@@ -74,24 +72,29 @@ skills:
 - name: excel-generator
   enabled: true
   description: ''
-- name: ppt-generator
+- name: pdf-generator
   enabled: true
   description: ''
-- name: pdf-generator
+- name: ppt-generator
   enabled: true
   description: ''
 - name: file-organizer
   enabled: true
   description: ''
-- name: desktop-automator
+- name: translation
+  enabled: true
+  description: ''
+- name: writing-assistant
+  enabled: true
+  description: ''
+- name: ui-automator
   enabled: true
   description: ''
 tools:
+- web_search
 - nodes
 - knowledge_search
-- web_search
-- api_calling
-- HITL
+- hitl
 model: qwen3-max
 max_turns: 25
 execution_strategy: rvr
@@ -106,5 +109,5 @@ enable_thinking: null
 enable_caching: null
 thinking_mode: null
 prompts: null
-reasoning: 小搭子需处理复杂本地任务（如文件整理、应用操作）、主动规划、记忆用户偏好，并在技能缺失时引导安装或提供替代方案。需启用细粒度规划、用户级记忆、HITL
-  确认机制及多种文档生成技能，强调本地执行与安全交互。
+reasoning: 小搭子需处理复杂本地任务（如文件整理、UI操作、多步规划），强调主动性、记忆复用和安全交互。需启用细粒度规划、用户级记忆、HITL确认机制，并支持多种文档生成技能。任务常涉及多步骤执行与失败重试，故
+  max_turns 和 max_steps 较高。

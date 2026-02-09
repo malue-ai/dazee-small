@@ -388,19 +388,22 @@ async def get_embedding_status() -> Dict[str, Any]:
         elif provider_setting == "openai" and openai_available:
             current_provider = "openai"
 
-    # Recommendation for user
-    if local_available and local_backend == "gguf":
-        recommendation = "已安装本地模型（GGUF），语义搜索离线可用"
-    elif local_available and local_backend == "sentence-transformers":
-        recommendation = "已安装本地模型（sentence-transformers），语义搜索离线可用"
-    elif openai_available:
-        recommendation = "可使用 OpenAI 云端语义搜索。安装本地模型可离线使用"
-    else:
-        recommendation = "安装本地模型即可启用语义搜索（离线可用，424MB）"
-
-    # Model storage location (shared across instances)
+    # Model download status
+    from core.knowledge.embeddings import is_gguf_model_downloaded
     from utils.app_paths import get_shared_models_dir
+
+    model_downloaded = is_gguf_model_downloaded()
     models_dir = str(get_shared_models_dir())
+
+    # Recommendation for user
+    if model_downloaded:
+        recommendation = "本地模型已就绪，可开启语义搜索"
+    elif local_available:
+        recommendation = "依赖已安装，开启语义搜索后会下载模型（438MB）"
+    elif openai_available:
+        recommendation = "可使用 OpenAI 云端语义搜索，或安装本地模型离线使用"
+    else:
+        recommendation = "安装 llama-cpp-python 后可启用本地语义搜索（438MB）"
 
     return {
         "semantic_enabled": semantic_enabled,
@@ -408,11 +411,211 @@ async def get_embedding_status() -> Dict[str, Any]:
         "provider_setting": provider_setting,
         "local_available": local_available,
         "local_backend": local_backend,
+        "model_downloaded": model_downloaded,
         "openai_available": openai_available,
         "local_install_hint": "pip install llama-cpp-python",
         "local_model_name": "BGE-M3 Q4 (GGUF)",
-        "local_model_size": "424MB",
-        "local_model_description": "中英文双语，MIT 开源，首次使用自动下载",
+        "local_model_size": "438MB",
+        "local_model_description": "中英文双语，MIT 开源，离线可用",
         "models_dir": models_dir,
         "recommendation": recommendation,
     }
+
+
+async def download_embedding_model() -> Dict[str, Any]:
+    """
+    Download GGUF embedding model (user-initiated).
+
+    Called from settings API after user confirms download.
+    Auto-detects best source (official HuggingFace vs China mirror).
+
+    Returns:
+        {"success": bool, "model_path": str, "source": str, "error": str | None}
+    """
+    from core.knowledge.embeddings import (
+        HF_MIRROR_ENDPOINT,
+        _detect_hf_endpoint,
+        download_gguf_model,
+        is_gguf_model_downloaded,
+    )
+
+    if is_gguf_model_downloaded():
+        from core.knowledge.embeddings import get_models_dir, DEFAULT_GGUF_FILE
+        return {
+            "success": True,
+            "model_path": str(get_models_dir() / DEFAULT_GGUF_FILE),
+            "source": "local (already exists)",
+            "error": None,
+        }
+
+    try:
+        endpoint = _detect_hf_endpoint()
+        source = "mirror" if endpoint == HF_MIRROR_ENDPOINT else "official"
+
+        model_path = await download_gguf_model()
+
+        return {
+            "success": True,
+            "model_path": model_path,
+            "source": source,
+            "error": None,
+        }
+    except Exception as e:
+        logger.error(f"Embedding model download failed: {e}", exc_info=True)
+        return {
+            "success": False,
+            "model_path": None,
+            "source": None,
+            "error": str(e),
+        }
+
+
+async def setup_semantic_search(mode: str) -> Dict[str, Any]:
+    """
+    Setup semantic search mode (user-initiated, first-launch or settings page).
+
+    Three modes:
+    - "disabled": keyword search only, no model needed
+    - "local":    download 438MB GGUF model, offline, recommended
+    - "cloud":    use OpenAI embedding API, needs API key
+
+    Write path: instances/{AGENT_INSTANCE}/config.yaml → knowledge section.
+    After config + download, reloads runtime singletons so changes take effect
+    WITHOUT restart.
+
+    Args:
+        mode: "disabled" | "local" | "cloud"
+
+    Returns:
+        {
+            "success": bool,
+            "mode": str,
+            "needs_download": bool,
+            "download_result": {...} | None,
+            "error": str | None,
+        }
+    """
+    if mode not in ("disabled", "local", "cloud"):
+        return {
+            "success": False,
+            "mode": mode,
+            "needs_download": False,
+            "download_result": None,
+            "error": f"Invalid mode: {mode}. Must be 'disabled', 'local', or 'cloud'.",
+        }
+
+    # Step 1: Write to instance config/memory.yaml (the file knowledge_service reads)
+    await _write_instance_memory_config(mode)
+    logger.info(f"Semantic search setup: mode={mode}")
+
+    # Step 2: If local mode, check and download model
+    if mode == "local":
+        from core.knowledge.embeddings import is_gguf_model_downloaded
+
+        if not is_gguf_model_downloaded():
+            download_result = await download_embedding_model()
+            if not download_result["success"]:
+                return {
+                    "success": False,
+                    "mode": mode,
+                    "needs_download": True,
+                    "download_result": download_result,
+                    "error": download_result.get("error"),
+                }
+        else:
+            download_result = None
+
+        # Model ready → reload runtime singletons
+        await _reload_semantic_components()
+
+        return {
+            "success": True,
+            "mode": mode,
+            "needs_download": download_result is not None,
+            "download_result": download_result,
+            "error": None,
+        }
+
+    # Step 3: If cloud mode, check API key
+    if mode == "cloud":
+        has_key = bool(os.getenv("OPENAI_API_KEY"))
+        if has_key:
+            await _reload_semantic_components()
+        return {
+            "success": has_key,
+            "mode": mode,
+            "needs_download": False,
+            "download_result": None,
+            "error": None if has_key else "需要先配置 OpenAI API Key",
+        }
+
+    # disabled → reload to disable semantic
+    await _reload_semantic_components()
+    return {
+        "success": True,
+        "mode": mode,
+        "needs_download": False,
+        "download_result": None,
+        "error": None,
+    }
+
+
+async def _write_instance_memory_config(mode: str) -> None:
+    """
+    Write semantic search mode to the active instance's config/memory.yaml.
+
+    This is where knowledge_service._load_knowledge_config() reads from.
+    Only updates semantic_search.mode, preserves other sections (memory, etc.).
+
+    Args:
+        mode: "disabled" | "local" | "cloud"
+    """
+    instance_name = os.getenv("AGENT_INSTANCE", "")
+    if not instance_name:
+        logger.warning("AGENT_INSTANCE not set, cannot write instance config")
+        return
+
+    config_path = Path(f"instances/{instance_name}/config/memory.yaml")
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Read existing config (preserve comments are lost with yaml.dump, acceptable)
+    if config_path.exists():
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = yaml.safe_load(f) or {}
+    else:
+        config = {}
+
+    # Update only semantic_search.mode
+    config.setdefault("semantic_search", {})
+    config["semantic_search"]["mode"] = mode
+
+    # Write back
+    async with aiofiles.open(config_path, "w", encoding="utf-8") as f:
+        content = yaml.dump(
+            config,
+            default_flow_style=False,
+            allow_unicode=True,
+            sort_keys=False,
+        )
+        await f.write(content)
+
+    logger.info(f"Instance memory config updated: {config_path} (mode={mode})")
+
+
+async def _reload_semantic_components() -> None:
+    """
+    Reload all runtime singletons that depend on semantic search config.
+
+    Called after setup_semantic_search() so changes take effect without restart.
+    """
+    # 1. Reset KnowledgeManager singleton → re-reads instance config on next use
+    from services.knowledge_service import reload_knowledge_manager
+    await reload_knowledge_manager()
+
+    # 2. Reset IntentCache EmbeddingService → re-probes model availability
+    from core.routing.intent_cache import get_intent_cache
+    cache = get_intent_cache()
+    cache._embedding_service._unavailable = False
+    cache._embedding_service._provider = None
+
+    logger.info("Semantic components reloaded")

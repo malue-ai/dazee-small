@@ -13,6 +13,7 @@ Mem0 全局缓存池
 - 100% 本地：使用 sqlite-vec，零外部服务依赖
 """
 
+import os
 import threading
 from typing import Any, Dict, List, Optional
 
@@ -83,6 +84,36 @@ class Mem0MemoryPool:
                     self._memory = self._create_memory()
         return self._memory
 
+    @staticmethod
+    def _create_local_embedder():
+        """
+        Create a Mem0-compatible adapter wrapping our local GGUF embedding provider.
+
+        Returns the adapter if GGUF model is available, None otherwise.
+        """
+        try:
+            from core.knowledge.embeddings import (
+                DEFAULT_GGUF_FILE,
+                GGUFEmbeddingProvider,
+                get_models_dir,
+            )
+
+            model_filename = os.getenv("GGUF_MODEL", DEFAULT_GGUF_FILE)
+            model_path = get_models_dir() / model_filename
+            if not model_path.exists():
+                logger.info("[Mem0Pool] 本地 GGUF 模型不存在，回退到云端 embedder")
+                return None
+
+            provider = GGUFEmbeddingProvider()
+            logger.info("[Mem0Pool] 使用本地 GGUF embedding (BGE-M3, 1024 维)")
+            return _GGUFEmbedderAdapter(provider)
+        except ImportError:
+            logger.debug("[Mem0Pool] llama-cpp-python 未安装，回退到云端 embedder")
+            return None
+        except Exception as e:
+            logger.warning(f"[Mem0Pool] 本地 embedder 初始化失败: {e}，回退到云端")
+            return None
+
     def _create_memory(self) -> Any:
         """
         创建 Mem0 Memory 实例（使用 sqlite-vec 本地向量存储）
@@ -114,15 +145,17 @@ class Mem0MemoryPool:
                 db_path=self.config.db_path,
             )
 
-            # 2. 创建 Embedder
-            embedding_config = self.config.embedder.to_dict()
-            embedding_model = EmbedderFactory.create(
-                self.config.embedder.provider,
-                embedding_config,
-                # 传递 vector_store config（EmbedderFactory 需要）
-                {"collection_name": collection_name,
-                 "embedding_model_dims": self.config.embedding_model_dims},
-            )
+            # 2. 创建 Embedder（优先使用本地 GGUF，离线可用）
+            embedding_model = self._create_local_embedder()
+            if embedding_model is None:
+                # Fallback: 使用 Mem0 原生 EmbedderFactory（如 OpenAI）
+                embedding_config = self.config.embedder.to_dict()
+                embedding_model = EmbedderFactory.create(
+                    self.config.embedder.provider,
+                    embedding_config,
+                    {"collection_name": collection_name,
+                     "embedding_model_dims": self.config.embedding_model_dims},
+                )
 
             # 3. 创建 LLM
             llm = LlmFactory.create(
@@ -453,3 +486,43 @@ def reset_mem0_pool() -> None:
     global _pool_instance
     _pool_instance = None
     Mem0MemoryPool._instance = None
+
+
+# ==================== GGUF → Mem0 Adapter ====================
+
+
+class _GGUFEmbedderAdapter:
+    """
+    Adapter: wraps our GGUFEmbeddingProvider to match Mem0's EmbeddingBase interface.
+
+    Mem0 calls ``embedder.embed(text, memory_action=...)`` expecting ``list[float]``.
+    Our GGUF provider is async and returns ``np.ndarray``.
+    This adapter bridges the gap with ``asyncio.run`` (Mem0 calls embed synchronously).
+    """
+
+    def __init__(self, provider):
+        self.provider = provider
+        # Trigger lazy model load now so first embed() is fast
+        self.provider._ensure_model()
+
+    def embed(self, text, memory_action=None):
+        """Synchronous embed matching Mem0 interface."""
+        import asyncio
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            # Already in async context — run in thread to avoid deadlock
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                vec = pool.submit(
+                    asyncio.run, self.provider.embed(text)
+                ).result()
+        else:
+            vec = asyncio.run(self.provider.embed(text))
+
+        return vec.tolist()

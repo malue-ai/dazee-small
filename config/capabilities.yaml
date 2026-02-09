@@ -458,6 +458,53 @@ capabilities:
         description: 可执行文件名（which action）
     required: [action]
 
+- name: browser
+  type: TOOL
+  subtype: CUSTOM
+  provider: user
+  invocation_hint: DIRECT
+  level: 2
+  cache_stable: false
+  implementation:
+    module: tools.browser
+    class: BrowserTool
+  capabilities:
+    - web_interaction
+    - browser_automation
+  priority: 80
+  cost:
+    time: fast
+    money: free
+  constraints:
+    requires_api: false
+  metadata:
+    description: |
+      Playwright browser automation: navigate, text snapshot, click/type by ref.
+      For web pages. Desktop apps use observe_screen + peekaboo instead.
+  input_schema:
+    type: object
+    properties:
+      action:
+        type: string
+        enum: [navigate, snapshot, click, type, select, screenshot, tabs, close]
+        description: Browser action to perform
+      url:
+        type: string
+        description: URL to navigate to (navigate action)
+      ref:
+        type: string
+        description: Element ref from snapshot, e.g. 'e3' (click/type/select)
+      text:
+        type: string
+        description: Text to type or option to select
+      clear:
+        type: boolean
+        description: Clear field before typing (type action, default false)
+      tab_id:
+        type: string
+        description: Tab ID to switch to (tabs action)
+    required: [action]
+
 - name: observe_screen
   type: TOOL
   subtype: CUSTOM

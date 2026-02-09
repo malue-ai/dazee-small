@@ -13,6 +13,7 @@
     results = await km.search("我的文档")
 """
 
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -40,6 +41,22 @@ async def get_knowledge_manager():
         _knowledge_manager = await _create_knowledge_manager()
 
     return _knowledge_manager
+
+
+async def reload_knowledge_manager() -> None:
+    """
+    Reset and re-create the KnowledgeManager singleton.
+
+    Called after semantic search config changes so the runtime
+    picks up the new settings without restart.
+    """
+    global _knowledge_manager, _file_indexer
+
+    _knowledge_manager = None
+    _file_indexer = None
+
+    _knowledge_manager = await _create_knowledge_manager()
+    logger.info("KnowledgeManager reloaded with updated config")
 
 
 async def get_file_indexer():
@@ -127,7 +144,25 @@ async def _create_knowledge_manager():
 
     semantic_enabled = config.get("semantic_enabled", False)
     embedding_provider = config.get("embedding_provider", "auto")
+
+    # Cloud mode: custom model name
     embedding_model = config.get("embedding_model") or None
+
+    # Local mode: custom GGUF repo/model → set env for GGUFEmbeddingProvider
+    gguf_repo = config.get("gguf_repo")
+    gguf_model = config.get("gguf_model")
+    if gguf_repo:
+        os.environ["GGUF_REPO"] = gguf_repo
+    if gguf_model:
+        os.environ["GGUF_MODEL"] = gguf_model
+
+    # Cloud mode: custom base_url/api_key → set env for OpenAIEmbeddingProvider
+    embedding_base_url = config.get("embedding_base_url")
+    embedding_api_key = config.get("embedding_api_key")
+    if embedding_base_url:
+        os.environ["OPENAI_BASE_URL"] = embedding_base_url
+    if embedding_api_key:
+        os.environ["OPENAI_API_KEY"] = embedding_api_key
 
     km = LocalKnowledgeManager(
         fts5_enabled=True,
@@ -151,16 +186,20 @@ async def _create_knowledge_manager():
 
 def _load_knowledge_config() -> dict:
     """
-    Load knowledge config from active instance's config.yaml.
+    Load knowledge config from active instance's config/memory.yaml.
 
     Reads AGENT_INSTANCE env var to locate the instance directory,
-    then parses the knowledge section from config.yaml.
+    then parses semantic_search section from config/memory.yaml.
+
+    Config file: instances/{name}/config/memory.yaml
+    Key mapping:
+        semantic_search.mode: "disabled"|"local"|"cloud"
+        → semantic_enabled: bool
+        → embedding_provider: str
 
     Returns:
-        Knowledge config dict (defaults if not found)
+        Knowledge config dict with standardized keys
     """
-    import os
-
     import yaml
 
     instance_name = os.getenv("AGENT_INSTANCE", "")
@@ -168,14 +207,51 @@ def _load_knowledge_config() -> dict:
         return {"enabled": True, "semantic_enabled": False}
 
     try:
-        config_path = Path(f"instances/{instance_name}/config.yaml")
+        config_path = Path(f"instances/{instance_name}/config/memory.yaml")
         if not config_path.exists():
             return {"enabled": True, "semantic_enabled": False}
 
         with open(config_path, "r", encoding="utf-8") as f:
             config = yaml.safe_load(f) or {}
 
-        return config.get("knowledge", {})
+        # Read semantic_search.mode → convert to internal keys
+        ss_config = config.get("semantic_search", {})
+        mode = ss_config.get("mode", "disabled")
+
+        result = {
+            "enabled": True,
+            "semantic_enabled": mode != "disabled",
+            "embedding_provider": {
+                "disabled": "auto",
+                "local": "local",
+                "cloud": "openai",
+            }.get(mode, "auto"),
+        }
+
+        # Local mode: custom repo/model if specified
+        if mode == "local":
+            local_config = ss_config.get("local", {})
+            local_repo = local_config.get("repo", "")
+            if local_repo:
+                result["gguf_repo"] = local_repo
+            local_model = local_config.get("model", "")
+            if local_model:
+                result["gguf_model"] = local_model
+
+        # Cloud mode: custom model/base_url/api_key if specified
+        if mode == "cloud":
+            cloud_config = ss_config.get("cloud", {})
+            cloud_model = cloud_config.get("model", "")
+            if cloud_model:
+                result["embedding_model"] = cloud_model
+            cloud_base_url = cloud_config.get("base_url", "")
+            if cloud_base_url:
+                result["embedding_base_url"] = cloud_base_url
+            cloud_api_key = cloud_config.get("api_key", "")
+            if cloud_api_key:
+                result["embedding_api_key"] = cloud_api_key
+
+        return result
 
     except Exception as e:
         logger.debug(f"Failed to load knowledge config: {e}")

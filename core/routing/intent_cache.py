@@ -65,8 +65,8 @@ class IntentCacheConfig:
     max_size: int = 10000  # 最大缓存条目数（LRU）
     ttl_hours: int = 24  # 缓存 TTL（小时）
     backend: str = "memory"  # 存储后端：memory | vectordb
-    embedding_model: str = "text-embedding-3-small"  # Embedding 模型
-    embedding_dim: int = 1536  # 向量维度
+    embedding_model: str = "bge-m3-Q4_K_M"  # Embedding 模型（本地 GGUF）
+    embedding_dim: int = 1024  # 向量维度（BGE-M3）
 
     @classmethod
     def from_env(cls) -> "IntentCacheConfig":
@@ -77,7 +77,7 @@ class IntentCacheConfig:
             max_size=int(os.getenv("INTENT_CACHE_MAX_SIZE", "10000")),
             ttl_hours=int(os.getenv("INTENT_CACHE_TTL_HOURS", "24")),
             backend=os.getenv("INTENT_CACHE_BACKEND", "memory"),
-            embedding_model=os.getenv("EMBEDDING_MODEL", "text-embedding-3-small"),
+            embedding_model=os.getenv("EMBEDDING_MODEL", "bge-m3-Q4_K_M"),
         )
 
 
@@ -370,48 +370,62 @@ class VectorDBBackend(IntentCacheBackend):
 
 class EmbeddingService:
     """
-    Embedding 服务
+    Embedding 服务（优雅降级）
 
-    封装 OpenAI Embedding API 调用
+    使用本地 GGUF 模型（BGE-M3），复用 core/knowledge/embeddings 的 provider。
+    模型未下载时返回 None，调用方自行降级为关键词/hash 匹配。
     """
 
-    def __init__(self, model: str = "text-embedding-3-small"):
+    def __init__(self, model: str = "bge-m3-Q4_K_M"):
         self.model = model
-        self._client = None
+        self._provider = None
+        self._unavailable = False  # True = model not downloaded, skip silently
 
-    async def embed(self, text: str) -> np.ndarray:
+    async def _get_provider(self):
+        """Lazy-init embedding provider. Returns None if model not available."""
+        if self._unavailable:
+            return None
+
+        if self._provider is None:
+            try:
+                from core.knowledge.embeddings import create_embedding_provider
+
+                self._provider = await create_embedding_provider("auto")
+                logger.info(
+                    f"IntentCache embedding provider: {self._provider.provider_id} "
+                    f"(dim={self._provider.dimensions})"
+                )
+            except Exception:
+                # Model not downloaded or no provider available → silent degradation
+                self._unavailable = True
+                logger.debug(
+                    "Embedding model not available, "
+                    "intent cache will use hash-only matching"
+                )
+                return None
+
+        return self._provider
+
+    async def embed(self, text: str) -> Optional[np.ndarray]:
         """
-        获取文本的 embedding 向量
+        Get embedding vector for text.
+
+        Returns None if model not available (graceful degradation).
 
         Args:
-            text: 输入文本
+            text: input text
 
         Returns:
-            1536 维向量（text-embedding-3-small）
-
-        耗时: ~50ms（网络延迟主导）
+            1024-dim vector or None
         """
-        import httpx
-
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise ValueError("OPENAI_API_KEY 环境变量未设置")
+        provider = await self._get_provider()
+        if provider is None:
+            return None
 
         start_time = time.time()
-
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(
-                "https://api.openai.com/v1/embeddings",
-                json={"model": self.model, "input": text[:8000]},  # 截断过长文本
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            )
-            response.raise_for_status()
-            data = response.json()
-
-        embedding = np.array(data["data"][0]["embedding"], dtype=np.float32)
-
+        embedding = await provider.embed(text[:8000])
         elapsed_ms = (time.time() - start_time) * 1000
-        logger.debug(f"🔢 Embedding 完成: dim={len(embedding)}, elapsed={elapsed_ms:.1f}ms")
+        logger.debug(f"Embedding done: dim={len(embedding)}, elapsed={elapsed_ms:.1f}ms")
 
         return embedding
 
@@ -518,9 +532,14 @@ class IntentSemanticCache:
             logger.info(f"✅ L1 精确命中: hash={query_hash[:8]}..., " f"elapsed={elapsed_ms:.2f}ms")
             return cached.intent_result, 1.0
 
-        # L2: 语义匹配（embedding）
+        # L2: 语义匹配（需要 embedding 模型，没有则跳过）
         try:
             embedding = await self._embedding_service.embed(query)
+            if embedding is None:
+                # No embedding model → hash-only mode
+                self._stats["misses"] += 1
+                return None, 0.0
+
             cached, score = await self._backend.search(embedding)
 
             elapsed_ms = (time.time() - start_time) * 1000
@@ -528,7 +547,7 @@ class IntentSemanticCache:
             if cached and score >= self.config.threshold:
                 self._stats["l2_hits"] += 1
                 logger.info(
-                    f"✅ L2 语义命中: score={score:.4f}, "
+                    f"L2 semantic hit: score={score:.4f}, "
                     f"threshold={self.config.threshold}, "
                     f"elapsed={elapsed_ms:.1f}ms"
                 )
@@ -536,7 +555,7 @@ class IntentSemanticCache:
 
             self._stats["misses"] += 1
             logger.debug(
-                f"❌ 缓存未命中: score={score:.4f}, "
+                f"Cache miss: score={score:.4f}, "
                 f"threshold={self.config.threshold}, "
                 f"elapsed={elapsed_ms:.1f}ms"
             )
@@ -544,7 +563,7 @@ class IntentSemanticCache:
 
         except Exception as e:
             self._stats["misses"] += 1
-            logger.warning(f"⚠️ 语义缓存查询失败: {e}")
+            logger.warning(f"Semantic cache lookup failed: {e}")
             return None, 0.0
 
     async def store(self, query: str, result: IntentResult) -> None:
@@ -561,8 +580,10 @@ class IntentSemanticCache:
             return
 
         try:
-            # 获取 embedding
+            # 获取 embedding（可能为 None，没模型就只存 hash）
             embedding = await self._embedding_service.embed(query)
+            if embedding is None:
+                embedding = np.zeros(self.config.embedding_dim, dtype=np.float32)
 
             # 创建缓存项
             item = CachedIntentResult(
@@ -577,11 +598,11 @@ class IntentSemanticCache:
             self._stats["stores"] += 1
 
             logger.debug(
-                f"💾 缓存存储: hash={item.query_hash[:8]}..., " f"size={self._backend.size()}"
+                f"Cache stored: hash={item.query_hash[:8]}..., size={self._backend.size()}"
             )
 
         except Exception as e:
-            logger.warning(f"⚠️ 缓存存储失败: {e}")
+            logger.warning(f"Cache store failed: {e}")
 
     def get_stats(self) -> Dict[str, Any]:
         """获取统计信息"""

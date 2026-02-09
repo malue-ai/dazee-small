@@ -9,10 +9,13 @@ from core.knowledge.embeddings import (
     EmbeddingProvider,
     GGUFEmbeddingProvider,
     LocalEmbeddingProvider,
+    ModelNotAvailableError,
     OpenAIEmbeddingProvider,
     SentenceTransformerProvider,
     create_embedding_provider,
+    download_gguf_model,
     get_models_dir,
+    is_gguf_model_downloaded,
     normalize_l2,
 )
 from core.knowledge.file_indexer import FileIndexer
@@ -27,7 +30,10 @@ __all__ = [
     "SentenceTransformerProvider",
     "OpenAIEmbeddingProvider",
     "LocalEmbeddingProvider",
+    "ModelNotAvailableError",
     "create_embedding_provider",
+    "download_gguf_model",
+    "is_gguf_model_downloaded",
     "get_models_dir",
     "normalize_l2",
 ]

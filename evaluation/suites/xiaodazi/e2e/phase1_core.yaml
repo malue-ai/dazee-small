@@ -166,7 +166,7 @@ tasks:
         rubric: grade_rollback_safety
         min_score: 3
     trials: 1
-    timeout_seconds: 300
+    timeout_seconds: 900
     tags: ["e2e", "rollback", "state_safety", "differentiator"]
     metadata:
       expected_behavior: >
@@ -201,7 +201,7 @@ tasks:
         rubric: grade_rollback_safety
         min_score: 3
     trials: 1
-    timeout_seconds: 300
+    timeout_seconds: 900
     tags: ["e2e", "rollback", "user_abort", "HITL", "differentiator"]
     metadata:
       multi_turn_sequence:

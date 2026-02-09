@@ -76,8 +76,8 @@ skill_groups:
     description: "笔记管理（Notion/Obsidian/Bear/OneNote/Apple备忘录）、待办事项（Trello/Things/提醒事项）、日历、邮件、Google 全家桶、密码管理、Discord、智能邮件助手、定时任务"
     skills: [notion, obsidian, bear-notes, onenote, apple-notes, trello, things-mac, apple-reminders, apple-calendar, outlook-cli, himalaya, gog, 1password, discord, smart-email-assistant, scheduled-tasks]
   app_automation:
-    description: "桌面应用操作（打开/切换/控制应用）、UI 自动化、截图、系统通知、智能家居、周边地点搜索、跨应用工作流编排"
-    skills: [applescript, macos-open, macos-screenshot, app-scanner, macos-notification, peekaboo, xdotool, linux-notification, windows-screenshot, windows-clipboard, windows-notification, powershell-basic, openhue, goplaces, cross-app-workflow]
+    description: "桌面应用操作（打开/切换/控制应用）、UI 自动化、截图、系统通知、智能家居、周边地点搜索、跨应用工作流编排、浏览器自动化"
+    skills: [applescript, macos-open, macos-screenshot, app-scanner, macos-notification, peekaboo, browser, xdotool, linux-notification, windows-screenshot, windows-clipboard, windows-notification, powershell-basic, openhue, goplaces, cross-app-workflow]
   system_maintenance:
     description: "磁盘空间分析、大文件清理、缓存管理、系统健康检查、电脑变慢排查"
     skills: [disk-health-monitor]
@@ -181,6 +181,7 @@ skills:
       - { name: privacy-auditor,         backend_type: local, skill_source: instance, description: "隐私审计：扫描敏感文件、检查权限、风险报告" }
 
     lightweight:
+      - { name: browser,             backend_type: tool,  tool_name: browser, skill_source: library, python_packages: ["playwright"], description: "Playwright browser automation: navigate, snapshot, click/type by ref" }
       - { name: nano-pdf,            backend_type: local, skill_source: library,  python_packages: ["pypdf"], auto_install: true, description: "PDF 文件读取与提取" }
       - { name: excel-analyzer,      backend_type: local, skill_source: instance, python_packages: ["pandas", "openpyxl"], auto_install: true, description: "Excel / CSV 分析" }
       - { name: excel-fixer,         backend_type: local, skill_source: instance, python_packages: ["pandas", "openpyxl"], auto_install: true, description: "Excel 格式自动修复" }

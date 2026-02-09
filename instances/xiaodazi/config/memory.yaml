@@ -1,0 +1,42 @@
+# ============================================================
+# 记忆与知识检索配置
+# ============================================================
+#
+# 控制 Agent 的记忆能力和知识检索方式。
+# 普通用户只需关注 semantic_search.mode 即可。
+#
+# ============================================================
+
+# ==================== 语义搜索 ====================
+#
+# 语义搜索能理解"意思"而非只匹配关键词：
+#   搜"天气"也能找到"气候"相关内容
+#
+# 三种模式：
+#   disabled — 仅关键词搜索，无需下载任何东西
+#   local    — 本地模型（推荐），438MB，离线可用，中英文双语
+#   cloud    — 云端向量模型，需要 API Key，按量计费
+#
+semantic_search:
+  mode: disabled          # disabled | local | cloud
+
+  # local 模式配置（mode 为 local 时生效）
+  # 默认使用 BGE-M3 Q4 GGUF（1024 维，438MB，中英文双语，MIT 开源）
+  local:
+    repo: ""              # 留空 = lm-kit/bge-m3-gguf
+    model: ""             # 留空 = bge-m3-Q4_K_M.gguf
+
+  # cloud 模式配置（mode 为 cloud 时生效）
+  # 默认使用 OpenAI text-embedding-3-small（1536 维，$0.02/1M tokens）
+  # 也支持任何兼容 OpenAI 接口的服务（如硅基流动、智谱等）
+  cloud:
+    model: ""             # 留空 = text-embedding-3-small
+    # base_url: ""        # 留空 = OPENAI_BASE_URL 环境变量或 https://api.openai.com/v1
+    # api_key: ""         # 留空 = OPENAI_API_KEY 环境变量
+
+# ==================== 用户记忆 ====================
+#
+# Agent 会记住用户偏好、习惯等信息，跨对话持久保存。
+#
+memory:
+  enabled: true           # 是否启用用户记忆

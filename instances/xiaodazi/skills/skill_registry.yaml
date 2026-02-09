@@ -26,6 +26,7 @@ skills:
   - { name: quiz-maker,           enabled: true,  status: ready }
 
   # ========== common · lightweight ==========
+  - { name: browser,              enabled: true,  status: ready }
   - { name: nano-pdf,             enabled: true,  status: ready }
   - { name: excel-analyzer,       enabled: true,  status: ready }
   - { name: excel-fixer,          enabled: true,  status: ready }

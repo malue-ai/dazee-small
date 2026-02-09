@@ -41,6 +41,153 @@ DEFAULT_GGUF_REPO = "lm-kit/bge-m3-gguf"
 DEFAULT_GGUF_FILE = "bge-m3-Q4_K_M.gguf"
 DEFAULT_GGUF_DIMS = 1024
 
+# HuggingFace 镜像站（国内加速）
+HF_MIRROR_ENDPOINT = "https://hf-mirror.com"
+HF_OFFICIAL_ENDPOINT = "https://huggingface.co"
+
+# 探测缓存（进程生命周期内只探测一次）
+_hf_endpoint_cache: Optional[str] = None
+
+
+class ModelNotAvailableError(RuntimeError):
+    """Raised when GGUF model file is not downloaded yet."""
+
+    def __init__(self, model_name: str, model_dir: Path):
+        self.model_name = model_name
+        self.model_dir = model_dir
+        super().__init__(
+            f"Embedding model not found: {model_name}\n"
+            f"Expected at: {model_dir / model_name}\n"
+            f"Please enable semantic search in settings to download."
+        )
+
+
+def _detect_hf_endpoint(timeout: float = 3.0) -> str:
+    """
+    Auto-detect the best HuggingFace endpoint.
+
+    Priority:
+    1. HF_ENDPOINT env var (user explicit override)
+    2. huggingface.co reachability probe (3s timeout)
+    3. Fallback to hf-mirror.com (China mirror)
+
+    Result is cached for the process lifetime.
+
+    Returns:
+        Best available endpoint URL
+    """
+    global _hf_endpoint_cache
+
+    if _hf_endpoint_cache is not None:
+        return _hf_endpoint_cache
+
+    # User explicitly set → respect it
+    user_endpoint = os.getenv("HF_ENDPOINT")
+    if user_endpoint:
+        _hf_endpoint_cache = user_endpoint
+        logger.debug(f"Using user-configured HF_ENDPOINT: {user_endpoint}")
+        return user_endpoint
+
+    # Probe huggingface.co connectivity
+    import urllib.error
+    import urllib.request
+
+    try:
+        req = urllib.request.Request(
+            HF_OFFICIAL_ENDPOINT, method="HEAD"
+        )
+        urllib.request.urlopen(req, timeout=timeout)
+        _hf_endpoint_cache = HF_OFFICIAL_ENDPOINT
+        logger.debug("HuggingFace official site reachable, using direct source")
+    except (urllib.error.URLError, OSError, TimeoutError):
+        _hf_endpoint_cache = HF_MIRROR_ENDPOINT
+        logger.info(
+            f"HuggingFace official site unreachable, "
+            f"auto-switching to mirror: {HF_MIRROR_ENDPOINT}"
+        )
+
+    return _hf_endpoint_cache
+
+
+def is_gguf_model_downloaded(
+    filename: str = DEFAULT_GGUF_FILE,
+) -> bool:
+    """
+    Check if GGUF model file exists locally.
+
+    Args:
+        filename: model filename to check
+
+    Returns:
+        True if model file exists
+    """
+    return (get_models_dir() / filename).exists()
+
+
+async def download_gguf_model(
+    repo_id: str = DEFAULT_GGUF_REPO,
+    filename: str = DEFAULT_GGUF_FILE,
+) -> str:
+    """
+    Explicitly download GGUF embedding model.
+
+    Auto-detects best source (official vs China mirror).
+    Called from settings API after user confirmation.
+
+    Args:
+        repo_id: HuggingFace repo id
+        filename: model filename
+
+    Returns:
+        Path to downloaded model file
+
+    Raises:
+        ImportError: huggingface-hub not installed
+        RuntimeError: download failed
+    """
+    import asyncio
+
+    models_dir = get_models_dir()
+    local_path = models_dir / filename
+
+    if local_path.exists():
+        logger.info(f"Model already exists: {local_path}")
+        return str(local_path)
+
+    endpoint = _detect_hf_endpoint()
+    source_label = (
+        "mirror (hf-mirror.com)"
+        if endpoint == HF_MIRROR_ENDPOINT
+        else "official (huggingface.co)"
+    )
+    logger.info(
+        f"Downloading embedding model: {filename} "
+        f"(~438MB, source: {source_label})"
+    )
+
+    try:
+        from huggingface_hub import hf_hub_download
+    except ImportError:
+        raise ImportError(
+            "huggingface-hub is required to download models.\n"
+            "Install: pip install huggingface-hub"
+        )
+
+    def _do_download() -> str:
+        return hf_hub_download(
+            repo_id=repo_id,
+            filename=filename,
+            local_dir=str(models_dir),
+            local_dir_use_symlinks=False,
+            endpoint=endpoint,
+        )
+
+    loop = asyncio.get_event_loop()
+    downloaded_path = await loop.run_in_executor(None, _do_download)
+
+    logger.info(f"Model downloaded to: {downloaded_path}")
+    return downloaded_path
+
 
 # ==================== L2 归一化工具 ====================
 
@@ -285,12 +432,12 @@ class GGUFEmbeddingProvider(EmbeddingProvider):
     def __init__(
         self,
         model_path: Optional[str] = None,
-        repo_id: str = DEFAULT_GGUF_REPO,
-        filename: str = DEFAULT_GGUF_FILE,
+        repo_id: Optional[str] = None,
+        filename: Optional[str] = None,
         dimensions: int = DEFAULT_GGUF_DIMS,
     ):
-        self._repo_id = repo_id
-        self._filename = filename
+        self._repo_id = repo_id or os.getenv("GGUF_REPO", DEFAULT_GGUF_REPO)
+        self._filename = filename or os.getenv("GGUF_MODEL", DEFAULT_GGUF_FILE)
         self._dimensions = dimensions
         self._model_path = model_path
         self._model = None  # Lazy init
@@ -311,10 +458,14 @@ class GGUFEmbeddingProvider(EmbeddingProvider):
         """
         Resolve GGUF model file path.
 
-        Auto-download from HuggingFace if not present locally.
+        Does NOT auto-download. If model is missing, raises ModelNotAvailableError.
+        Use download_gguf_model() to explicitly download after user confirmation.
 
         Returns:
             Absolute path to .gguf file
+
+        Raises:
+            ModelNotAvailableError: model not downloaded yet
         """
         if self._model_path:
             return self._model_path
@@ -325,27 +476,7 @@ class GGUFEmbeddingProvider(EmbeddingProvider):
         if local_path.exists():
             return str(local_path)
 
-        # Auto-download from HuggingFace
-        logger.info(
-            f"Downloading embedding model: {self._filename} "
-            f"(~424MB, first time only)"
-        )
-        try:
-            from huggingface_hub import hf_hub_download
-
-            downloaded_path = hf_hub_download(
-                repo_id=self._repo_id,
-                filename=self._filename,
-                local_dir=str(models_dir),
-                local_dir_use_symlinks=False,
-            )
-            logger.info(f"Model downloaded to: {downloaded_path}")
-            return downloaded_path
-        except ImportError:
-            raise ImportError(
-                "huggingface-hub is required to download models.\n"
-                "Install: pip install huggingface-hub"
-            )
+        raise ModelNotAvailableError(self._filename, models_dir)
 
     def _ensure_model(self):
         """Lazy load GGUF model via llama-cpp-python."""
@@ -614,15 +745,14 @@ async def create_embedding_provider(
         raise RuntimeError(
             "No embedding provider available.\n"
             "Options (pick one):\n"
-            "  1. pip install llama-cpp-python   "
-            "← Recommended, lightweight (~500MB total)\n"
-            "     Model: BGE-M3 Q4 (424MB, auto-download, Chinese+English)\n"
+            "  1. pip install llama-cpp-python + enable semantic search in settings\n"
+            "     Model: BGE-M3 Q4 (438MB, Chinese+English)\n"
             f"     Stored at: {get_models_dir()}\n"
             "  2. pip install sentence-transformers   "
             "← Heavier (~1.8GB, needs PyTorch)\n"
             "  3. Set OPENAI_API_KEY   "
             "← Cloud, needs internet\n"
-            "\nErrors:\n" + "\n".join(f"  - {e}" for e in errors)
+            "\nDetails:\n" + "\n".join(f"  - {e}" for e in errors)
         )
 
     raise ValueError(f"Unknown provider: {provider}")
