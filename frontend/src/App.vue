@@ -8,8 +8,8 @@
       <router-view />
     </component>
     <router-view v-else />
-    <!-- 全局调试面板（所有页面可见） -->
-    <DebugPanel />
+    <!-- 全局调试面板（仅开发环境可见，打包时自动移除） -->
+    <DebugPanel v-if="isDev" />
     <!-- 全局引导浮层 -->
     <GuideOverlay />
   </template>
@@ -25,6 +25,8 @@ import SplashScreen from '@/components/common/SplashScreen.vue'
 import GuideOverlay from '@/components/common/GuideOverlay.vue'
 
 const route = useRoute()
+
+const isDev = import.meta.env.DEV
 
 const showSplash = ref(true)
 const appReady = ref(false)
