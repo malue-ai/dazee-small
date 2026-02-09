@@ -26,9 +26,9 @@ from logger import get_logger
 logger = get_logger("context.compaction.tool_result")
 
 # 默认配置
-DEFAULT_THRESHOLD = 2000  # 字符数阈值（对齐 config/context_compaction.yaml）
+DEFAULT_THRESHOLD = 1500  # 字符数阈值（对齐 config/context_compaction.yaml）
 DEFAULT_HEAD_LINES = 5  # 保留开头行数
-DEFAULT_TAIL_LINES = 5  # 保留结尾行数
+DEFAULT_TAIL_LINES = 3  # 保留结尾行数
 DEFAULT_STORAGE_DIR = ""  # 空则使用 get_user_data_dir()/workspace/storage/tool_results
 
 # 压缩标记前缀（用于识别已压缩的内容）

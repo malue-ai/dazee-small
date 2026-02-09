@@ -178,7 +178,24 @@ class PlanTool(BaseTool):
             except Exception as e:
                 logger.warning(f"进度通知失败（不阻断执行）: {e}")
 
-        return {"success": True, "plan": plan, "all_completed": all_done}
+        # 当步骤被标记为 failed 时，注入回溯引导信息
+        # 这确保模型在下一轮 thinking 中看到明确的决策提示
+        response = {"success": True, "plan": plan, "all_completed": all_done}
+        if status == "failed":
+            failed_count = sum(1 for t in plan.get("todos", []) if t.get("status") == "failed")
+            response["step_failed"] = True
+            response["failed_step_id"] = todo_id
+            response["total_failed_steps"] = failed_count
+            response["guidance"] = (
+                f"步骤 {todo_id} 已标记为失败（原因: {result or '未说明'}）。"
+                f"当前计划共有 {failed_count} 个失败步骤。"
+                f"请在 thinking 中决定下一步行动："
+                f"(1) 用完全不同的方法重试这个步骤（plan rewrite）"
+                f"(2) 跳过此步骤继续后续步骤（如果不影响最终结果）"
+                f"(3) 如果核心步骤无法完成，坦诚告知用户原因和建议"
+            )
+
+        return response
 
     async def _rewrite(self, params: Dict, context: ToolContext) -> Dict[str, Any]:
         """重写整个计划"""
@@ -343,6 +360,7 @@ def format_plan_for_prompt(plan: Dict) -> str:
         elif status == "in_progress":
             current_lines.append(f"  ▶ {t['id']}. {title}")
         elif status == "failed":
+            # 失败步骤：完整展示失败原因，帮助模型在反思时避免重复
             current_lines.append(f"  ❌ {t['id']}. {title} - 失败{result_text}")
         else:
             future_lines.append(f"  ⏳ {t['id']}. {title}")
@@ -380,9 +398,14 @@ def format_plan_for_prompt(plan: Dict) -> str:
 
     output_lines.append("")
 
-    # 行动指引
+    # 行动指引 —— 根据失败情况给出不同深度的反思引导
     if failed > 0:
-        output_lines.append("有步骤失败了，请尝试替代方案或调整计划。")
+        output_lines.append("")
+        output_lines.append("⚠️ 有步骤失败。请在 thinking 中回答以下问题再行动：")
+        output_lines.append("  1. 失败的根本原因是什么？（不是表面报错，是深层原因）")
+        output_lines.append("  2. 换一种完全不同的方法能否解决？如果能，用 plan(action='rewrite') 调整计划。")
+        output_lines.append("  3. 如果当前环境/工具确实无法完成，是否应该停止并坦诚告知用户？")
+        output_lines.append("  记住：重复相同的失败方法是最差的选择。换方案或停止，都比空转好。")
     elif current_lines:
         output_lines.append("请继续执行当前步骤。完成后使用 plan 工具更新状态。")
     else:

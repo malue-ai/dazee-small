@@ -19,7 +19,7 @@ qos_token_budgets:
 message_compression:
   enabled: true                # 是否启用消息压缩
   preserve_first_messages: 4   # 始终保留开头 N 条消息（任务上下文）
-  preserve_last_messages: 20   # 尽量保留最近 N 条消息（当前上下文）
+  preserve_last_messages: 10   # 尽量保留最近 N 条消息（当前上下文）
   preserve_tool_results: true  # 保留中间的 tool_result（含重要数据）
   
   # 🆕 双阈值压缩机制
@@ -37,7 +37,7 @@ message_compression:
 # 🆕 工具结果压缩配置
 tool_result_compression:
   enabled: true                 # 是否启用工具结果压缩
-  threshold_chars: 2000         # 超过此字符数自动压缩
+  threshold_chars: 1500         # 超过此字符数自动压缩
   store_full_content: true      # 是否存储完整内容以便恢复
   
   # 跳过压缩的工具（这些工具的结果需要完整保留）

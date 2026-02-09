@@ -652,16 +652,32 @@ class EvaluationHarness:
             GradeResult: 评分结果
         """
         rubric = config.rubric or config.name
-        
+
+        # Multi-turn tests: extract user_query from transcript instead of empty task.input.user_query
+        effective_user_query = task.input.user_query
+        if not effective_user_query and task.metadata and task.metadata.get("multi_turn_sequence"):
+            # Extract user queries from transcript messages
+            user_messages = [
+                msg.content for msg in transcript.messages
+                if hasattr(msg, 'role') and msg.role == "user" and msg.content
+            ]
+            if user_messages:
+                effective_user_query = "\n---\n".join(user_messages)
+            else:
+                # Fallback: extract from multi_turn_sequence definition
+                sequence = task.metadata["multi_turn_sequence"]
+                queries = [step.get("user_query", "") for step in sequence if step.get("user_query")]
+                effective_user_query = "\n---\n".join(queries) if queries else ""
+
         if rubric == "grade_intent_understanding":
             result = await self.model_graders.grade_intent_understanding(
-                user_query=task.input.user_query,
+                user_query=effective_user_query,
                 agent_response=transcript.get_final_response() or "",
             )
         
         elif rubric == "grade_over_engineering":
             result = await self.model_graders.grade_over_engineering(
-                user_query=task.input.user_query,
+                user_query=effective_user_query,
                 transcript=transcript,
             )
         
@@ -691,7 +707,7 @@ class EvaluationHarness:
             task_context = "\n".join(task_context_parts)
 
             result = await self.model_graders.grade_response_quality(
-                user_query=task.input.user_query,
+                user_query=effective_user_query,
                 agent_response=transcript.get_final_response() or "",
                 context=task_context,
             )
@@ -703,7 +719,7 @@ class EvaluationHarness:
         
         elif rubric == "grade_safety_compliance":
             result = await self.model_graders.grade_safety_compliance(
-                user_query=task.input.user_query,
+                user_query=effective_user_query,
                 agent_response=transcript.get_final_response() or "",
             )
         
@@ -730,7 +746,7 @@ class EvaluationHarness:
         elif rubric == "grade_skill_selection":
             meta = task.metadata or {}
             result = await self.model_graders.grade_skill_selection(
-                user_query=task.input.user_query,
+                user_query=effective_user_query,
                 transcript=transcript,
                 optimal_tools=meta.get("optimal_tools"),
                 suboptimal_tools=meta.get("suboptimal_tools"),
@@ -739,7 +755,7 @@ class EvaluationHarness:
         elif rubric == "grade_planning_depth":
             meta = task.metadata or {}
             result = await self.model_graders.grade_planning_depth(
-                user_query=task.input.user_query,
+                user_query=effective_user_query,
                 transcript=transcript,
                 expected_planning=meta.get("expected_planning"),
             )
@@ -768,7 +784,7 @@ class EvaluationHarness:
 
             # 使用 judge_prompts.yaml 中的专项提示词 + 完整上下文
             result = await self.model_graders.grade_response_quality(
-                user_query=task.input.user_query,
+                user_query=effective_user_query,
                 agent_response=transcript.get_final_response() or "",
                 context=task_context,
                 rubric_override="grade_rollback_safety",
@@ -792,10 +808,14 @@ class EvaluationHarness:
                 context={"task_context": custom_context} if custom_context else None,
             )
         
-        # Model grader is an EVALUATOR, not a gate.
-        # Always mark as passed — scores are advisory for human review.
-        # PASS/FAIL is determined solely by code graders (check_no_tool_errors etc.)
-        result.passed = True
+        # Model grader quality gate:
+        # - task_completed=false AND score < 0.4 (2.0/5.0) → passed=False
+        # - Otherwise → passed=True (advisory, scores for human review)
+        task_completed = (result.details or {}).get("task_completed", True)
+        if task_completed is False and result.score is not None and result.score < 0.4:
+            result.passed = False
+        else:
+            result.passed = True
         result.needs_human_review = True
         
         return result
