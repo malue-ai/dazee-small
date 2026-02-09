@@ -293,18 +293,35 @@ Use snapshot (text) instead of screenshot (image) whenever possible."""
         Returns True on success.
         """
         try:
-            proc = await asyncio.create_subprocess_exec(
-                "playwright", "install", "chromium",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=180)
-            if proc.returncode == 0:
+            # Use subprocess.run in thread-pool for Windows compatibility
+            # (asyncio.create_subprocess_exec may raise NotImplementedError
+            #  on Windows SelectorEventLoop)
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "playwright", "install", "chromium",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, stderr = await asyncio.wait_for(proc.communicate(), timeout=180)
+                rc, err_text = proc.returncode, stderr.decode()[:500]
+            except NotImplementedError:
+                import subprocess as _sp
+
+                def _run():
+                    return _sp.run(
+                        ["playwright", "install", "chromium"],
+                        capture_output=True, timeout=180,
+                    )
+
+                loop = asyncio.get_running_loop()
+                result = await loop.run_in_executor(None, _run)
+                rc, err_text = result.returncode, result.stderr.decode()[:500]
+
+            if rc == 0:
                 logger.info("Chromium auto-installed successfully")
                 return True
             logger.warning(
-                f"Chromium auto-install failed (rc={proc.returncode}): "
-                f"{stderr.decode()[:500]}"
+                f"Chromium auto-install failed (rc={rc}): {err_text}"
             )
             return False
         except FileNotFoundError:

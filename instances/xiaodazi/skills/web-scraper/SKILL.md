@@ -1,6 +1,20 @@
 ---
 name: web-scraper
 description: High-performance web scraping powered by Crawl4AI (59k+ GitHub Stars). Playwright-based anti-detection, async concurrent crawling, LLM-optimized Markdown output. Completely free & open-source.
+quickstart: |
+  # 安装: pip install crawl4ai && crawl4ai-setup
+  # 单个URL:
+  from crawl4ai import AsyncWebCrawler
+  async with AsyncWebCrawler() as crawler:
+      result = await crawler.arun("https://example.com")
+      print(result.markdown.raw_markdown)
+  # 批量并发:
+  from crawl4ai import AsyncWebCrawler, CrawlerRunConfig, CacheMode
+  config = CrawlerRunConfig(cache_mode=CacheMode.BYPASS)
+  async with AsyncWebCrawler() as crawler:
+      results = await crawler.arun_many(urls, config=config)
+      for r in results:
+          if r.success: print(r.url, len(r.markdown.raw_markdown))
 metadata:
   xiaodazi:
     dependency_level: lightweight

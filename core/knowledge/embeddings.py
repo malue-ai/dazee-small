@@ -182,7 +182,7 @@ async def download_gguf_model(
             endpoint=endpoint,
         )
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     downloaded_path = await loop.run_in_executor(None, _do_download)
 
     logger.info(f"Model downloaded to: {downloaded_path}")
@@ -526,7 +526,7 @@ class GGUFEmbeddingProvider(EmbeddingProvider):
 
         self._ensure_model()
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None,
             lambda: self._model.embed(text[:8000]),
@@ -561,7 +561,7 @@ class GGUFEmbeddingProvider(EmbeddingProvider):
                     )
             return results
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, _batch_encode)
 
 
@@ -637,7 +637,7 @@ class SentenceTransformerProvider(EmbeddingProvider):
 
         self._ensure_model()
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         raw = await loop.run_in_executor(
             None,
             lambda: self._model.encode(
@@ -657,7 +657,7 @@ class SentenceTransformerProvider(EmbeddingProvider):
 
         truncated = [t[:8000] for t in texts]
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         raw_batch = await loop.run_in_executor(
             None,
             lambda: self._model.encode(

@@ -31,6 +31,7 @@ class SkillSummary:
     description: str
     location: Path  # SKILL.md 的绝对路径
     emoji: str = ""  # 可选图标
+    quickstart: str = ""  # 快速启动代码片段（从 SKILL.md frontmatter 提取）
     requires_bins: List[str] = field(default_factory=list)
     requires_env: List[str] = field(default_factory=list)
 
@@ -78,6 +79,8 @@ class SkillPromptBuilder:
                 pass  # 无法转相对路径时保留原值
             lines.append(f'  <skill name="{skill.name}" location="{location}">')
             lines.append(f"    <description>{emoji_prefix}{skill.description}</description>")
+            if skill.quickstart:
+                lines.append(f"    <quickstart>\n{skill.quickstart}\n    </quickstart>")
             lines.append("  </skill>")
 
         lines.append("</available_skills>")
@@ -103,29 +106,41 @@ class SkillPromptBuilder:
             return """
 ## Skills（技能）
 
-扫描 `<available_skills>` 的 `<description>` 条目。
-- 恰好一个技能适用 → 读取其 SKILL.md 并遵循
-- 多个可能适用 → 选择最具体的
-- 没有适用的 → 不读取
+扫描 `<available_skills>` 的 `<description>` 条目，选择最匹配的 Skill。
 
-**重要：** 
-- 只在明确需要时才读取 SKILL.md
+**执行方式：**
+- 如果 Skill 有 `<quickstart>`：直接按 quickstart 代码用 `nodes` 工具执行
+- 如果没有 `<quickstart>`：先 Read `location` 路径的 SKILL.md，再按其代码示例用 `nodes` 执行
+- Skills 只能通过 `nodes` 工具执行（Python 或 Shell），不是 api_calling
+
+**需安装的 Skill（description 含 [需安装: ...]）：**
+1. 先用 hitl 工具请求用户确认安装（说明安装什么、为什么需要）
+2. 用户同意 → 用 nodes 执行安装命令（如 pip install xxx），然后正常使用
+3. 用户拒绝 → 放弃该 Skill，寻找替代方案完成任务（如用 browser 工具、用 nodes 执行 httpx 等轻量方案）
+
+**重要：**
 - 不要在选择前读取多个 Skills
-- 使用 Read 工具读取 `location` 指定的路径
+- 高级用法参考完整 SKILL.md（Read `location` 路径）
 """.strip()
         else:
             return """
 ## Skills (mandatory)
 
-Scan `<available_skills>` `<description>` entries.
-- If exactly one skill clearly applies: read its SKILL.md with Read, then follow it.
-- If multiple could apply: choose the most specific one, then read/follow it.
-- If none clearly apply: do not read any SKILL.md.
+Scan `<available_skills>` `<description>` entries, choose the best match.
 
-**Constraints:** 
-- Only read SKILL.md when clearly needed
+**Execution:**
+- If Skill has `<quickstart>`: execute directly via `nodes` tool following the quickstart code
+- If no `<quickstart>`: Read the SKILL.md at `location` path first, then follow its code via `nodes`
+- Skills MUST be executed via `nodes` tool (Python or Shell), NOT api_calling
+
+**Skills requiring setup (description contains [needs setup: ...]):**
+1. Use hitl tool to ask user to confirm installation (explain what and why)
+2. User approves → run install command via nodes (e.g. pip install xxx), then use normally
+3. User declines → abandon that Skill, find alternative approaches (e.g. browser tool, httpx via nodes)
+
+**Constraints:**
 - Never read more than one skill up front
-- Use Read tool with the `location` path
+- For advanced usage, Read the full SKILL.md at `location` path
 """.strip()
 
     @staticmethod

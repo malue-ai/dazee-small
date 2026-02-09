@@ -487,20 +487,33 @@ def _extract_paths_from_tokens(tokens: List[str]) -> List[str]:
     """
     从 shell 命令 token 列表中提取文件/目录路径。
 
-    仅提取以 / 或 ~ 开头且在磁盘上存在的路径（安全边界检查）。
+    仅提取以 / 或 ~ 开头（Unix）或盘符开头（Windows，如 C:\\）
+    且在磁盘上存在的路径（安全边界检查）。
     """
     import os
 
-    cwd = os.getcwd()
     paths: List[str] = []
     for token in tokens:
         if token.startswith("-"):
             continue
-        if token.startswith("/") or token.startswith("~"):
+        if _is_path_like(token):
             expanded = os.path.expanduser(token)
             if os.path.exists(expanded):
                 paths.append(expanded)
     return paths
+
+
+def _is_path_like(token: str) -> bool:
+    """Check if a token looks like a file path (cross-platform)."""
+    if not token:
+        return False
+    # Unix: /absolute or ~/home
+    if token.startswith("/") or token.startswith("~"):
+        return True
+    # Windows: C:\ or C:/ (drive letter)
+    if len(token) >= 3 and token[0].isalpha() and token[1] == ":" and token[2] in ("/", "\\"):
+        return True
+    return False
 
 
 def _detect_command_info(
@@ -524,15 +537,19 @@ def _detect_command_info(
 
     for key, value in tool_input.items():
         if isinstance(value, str):
-            # 直接路径值（如 {"path": "/Users/foo/file.txt"}）
-            if value.startswith("/") or value.startswith("~"):
+            # 直接路径值（如 {"path": "/Users/foo/file.txt"} 或 "C:\Users\..."）
+            if _is_path_like(value):
                 expanded = os.path.expanduser(value)
                 if os.path.exists(expanded):
                     all_paths.append(expanded)
             else:
                 # 可能是 shell 命令字符串（如 "rm -rf /path/to/file"）
                 try:
-                    tokens = shlex.split(value)
+                    # shlex.split uses Unix shell rules; on Windows pass
+                    # posix=False to avoid choking on backslash paths.
+                    tokens = shlex.split(
+                        value, posix=(os.name != "nt")
+                    )
                 except ValueError:
                     continue
                 if len(tokens) >= 2:
@@ -548,14 +565,24 @@ def _detect_command_info(
             if str_tokens:
                 candidate_cmd = os.path.basename(str_tokens[0])
 
-                # 处理 ["bash", "-c", "actual_command ..."] 模式
-                # 真实命令在 -c 后面的字符串参数中，需要递归解析
-                if candidate_cmd in ("bash", "sh", "zsh") and "-c" in str_tokens:
-                    c_idx = str_tokens.index("-c")
-                    if c_idx + 1 < len(str_tokens):
+                # 处理 ["bash", "-c", "actual_command ..."] 和
+                # ["cmd.exe", "/c", "actual_command ..."] 模式
+                _SHELL_CMDS = {"bash", "sh", "zsh", "cmd", "cmd.exe"}
+                _SHELL_FLAGS = {"-c", "/c", "/C"}
+                if candidate_cmd in _SHELL_CMDS and any(
+                    f in str_tokens for f in _SHELL_FLAGS
+                ):
+                    # Find the flag position
+                    c_idx = next(
+                        (i for i, t in enumerate(str_tokens) if t in _SHELL_FLAGS),
+                        -1,
+                    )
+                    if c_idx >= 0 and c_idx + 1 < len(str_tokens):
                         inner_cmd = str_tokens[c_idx + 1]
                         try:
-                            inner_tokens = shlex.split(inner_cmd)
+                            inner_tokens = shlex.split(
+                                inner_cmd, posix=(os.name != "nt")
+                            )
                         except ValueError:
                             inner_tokens = inner_cmd.split()
                         if inner_tokens:

@@ -228,47 +228,38 @@ class MemoryManager:
                 builder = get_persona_builder()
                 import asyncio
 
-                # 尝试从当前事件循环获取，如果没有则创建新的
+                # Detect whether we are inside a running event loop.
+                # If yes, we cannot block — fall back to explicit memories only.
+                # If no, run the async builder synchronously.
+                _running = False
                 try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        # 如果事件循环正在运行，使用 create_task 或 defer
-                        # 这里简化处理：只注入显式记忆
-                        persona_prompt = None
-                        if explicit_memories:
-                            # 简化版本：仅使用显式记忆
-                            from .mem0.retrieval.formatter import format_memories_for_prompt
-
-                            memories_dict = [
-                                {
-                                    "memory": card.content,
-                                    "id": card.id,
-                                    "created_at": card.created_at.isoformat(),
-                                    "metadata": card.to_mem0_metadata(),
-                                }
-                                for card in explicit_memories[:5]
-                            ]
-                            persona_prompt = format_memories_for_prompt(
-                                memories_dict, language="zh", max_memories=5
-                            )
-                        if persona_prompt:
-                            context["user_persona"] = persona_prompt
-                    else:
-                        # 事件循环未运行，可以直接运行
-                        persona = loop.run_until_complete(
-                            builder.build_persona(
-                                user_id=self.user_id, explicit_memories=explicit_memories
-                            )
-                        )
-                        persona_prompt = create_dazee_prompt_section(
-                            persona=persona,
-                            explicit_memories=explicit_memories,
-                            max_tokens=max_persona_tokens,
-                        )
-                        if persona_prompt:
-                            context["user_persona"] = persona_prompt
+                    asyncio.get_running_loop()
+                    _running = True
                 except RuntimeError:
-                    # 没有事件循环，创建新的
+                    _running = False
+
+                if _running:
+                    # In async context — cannot block, use explicit memories
+                    persona_prompt = None
+                    if explicit_memories:
+                        from .mem0.retrieval.formatter import format_memories_for_prompt
+
+                        memories_dict = [
+                            {
+                                "memory": card.content,
+                                "id": card.id,
+                                "created_at": card.created_at.isoformat(),
+                                "metadata": card.to_mem0_metadata(),
+                            }
+                            for card in explicit_memories[:5]
+                        ]
+                        persona_prompt = format_memories_for_prompt(
+                            memories_dict, language="zh", max_memories=5
+                        )
+                    if persona_prompt:
+                        context["user_persona"] = persona_prompt
+                else:
+                    # No running loop — safe to use asyncio.run()
                     persona = asyncio.run(
                         builder.build_persona(
                             user_id=self.user_id, explicit_memories=explicit_memories
@@ -281,7 +272,6 @@ class MemoryManager:
                     )
                     if persona_prompt:
                         context["user_persona"] = persona_prompt
-
             except Exception as e:
                 logger.warning(f"[MemoryManager] 画像注入失败: {e}，跳过画像注入")
 

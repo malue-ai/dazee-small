@@ -43,11 +43,14 @@ def _generate_storage_path(original_filename: str) -> str:
     Generate a unique storage path for an uploaded file.
 
     Format: uploads/{date}/{uuid}_{filename}
+    Uses os.path.join for cross-platform path separators.
     """
+    import os
+
     date_str = datetime.now().strftime("%Y%m%d")
     unique_id = uuid.uuid4().hex[:8]
     safe_name = original_filename.replace(" ", "_")
-    return f"{UPLOADS_DIR}/{date_str}/{unique_id}_{safe_name}"
+    return os.path.join(UPLOADS_DIR, date_str, f"{unique_id}_{safe_name}")
 
 
 def _guess_mime_type(filename: str) -> str:
@@ -94,9 +97,11 @@ async def upload_file(
     )
 
     # local_path: 真实文件系统路径（Agent 直接读取）
-    # file_url: API URL（前端预览/下载用）
+    # file_url: API URL（前端预览/下载用, 必须使用 /）
     local_path = str(full_path)
-    file_url = f"/api/v1/files/{storage_path}"
+    # On Windows, storage_path may contain backslashes; URLs always use /
+    url_path = storage_path.replace("\\", "/")
+    file_url = f"/api/v1/files/{url_path}"
 
     logger.info(f"✅ 文件上传成功: {filename} -> {local_path} ({file_size} bytes)")
 

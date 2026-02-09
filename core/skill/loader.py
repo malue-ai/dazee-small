@@ -332,12 +332,16 @@ class SkillsLoader:
             elif entry.status == SkillStatus.NEED_AUTH:
                 description = f"{description} [需授权: 使用前通过 HITL 确认授权]"
 
+            # V12.2: 从 frontmatter 提取 quickstart 代码片段
+            quickstart = self._extract_quickstart(skill_md_path)
+
             summaries.append(
                 SkillSummary(
                     name=entry.name,
                     description=description,
                     location=skill_md_path.resolve(),
                     emoji=emoji,
+                    quickstart=quickstart,
                 )
             )
 
@@ -660,6 +664,36 @@ class SkillsLoader:
     # ================================================================
     # 内部方法：辅助
     # ================================================================
+
+    @staticmethod
+    def _extract_quickstart(skill_md_path: Path) -> str:
+        """
+        从 SKILL.md frontmatter 提取 quickstart 代码片段
+
+        Args:
+            skill_md_path: SKILL.md 文件路径
+
+        Returns:
+            quickstart 字符串，无则返回空字符串
+        """
+        try:
+            content = skill_md_path.read_text(encoding="utf-8")
+            if not content.startswith("---"):
+                return ""
+            parts = content.split("---", 2)
+            if len(parts) < 3:
+                return ""
+
+            import yaml
+
+            meta = yaml.safe_load(parts[1])
+            if not isinstance(meta, dict):
+                return ""
+
+            qs = meta.get("quickstart", "")
+            return qs.strip() if isinstance(qs, str) else ""
+        except Exception:
+            return ""
 
     def _get_setup_hint(self, entry: SkillEntry) -> str:
         """获取设置提示（供提示词使用）"""

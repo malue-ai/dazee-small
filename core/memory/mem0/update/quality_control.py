@@ -288,23 +288,25 @@ class QualityController:
 
         In sync context: runs the async method via asyncio.run().
         """
+        _running = False
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # In async context — cannot block, return conservative default.
-                # Callers in async context should use analyze_update() directly.
-                return {"memory": [{"id": "0", "text": new_memory, "event": "ADD"}]}
-            return loop.run_until_complete(
+            asyncio.get_running_loop()
+            _running = True
+        except RuntimeError:
+            _running = False
+
+        if _running:
+            # In async context — cannot block, return conservative default.
+            # Callers in async context should use analyze_update() directly.
+            return {"memory": [{"id": "0", "text": new_memory, "event": "ADD"}]}
+
+        try:
+            return asyncio.run(
                 self.analyze_update(new_memory, existing_memories)
             )
-        except RuntimeError:
-            try:
-                return asyncio.run(
-                    self.analyze_update(new_memory, existing_memories)
-                )
-            except Exception:
-                logger.error("[QualityController] 更新阶段执行失败", exc_info=True)
-                return {"memory": [{"id": "0", "text": new_memory, "event": "ADD"}]}
+        except Exception:
+            logger.error("[QualityController] 更新阶段执行失败", exc_info=True)
+            return {"memory": [{"id": "0", "text": new_memory, "event": "ADD"}]}
 
     async def analyze_update(
         self, new_memory: str, existing_memories: List[Dict[str, Any]]

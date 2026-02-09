@@ -372,67 +372,18 @@ class ShellExecutor(BaseExecutor):
         start_time = time.time()
 
         try:
-            # On Windows, don't create new process group (needed for taskkill /T)
-            process = await asyncio.create_subprocess_exec(
-                *command,
-                cwd=work_dir,
-                env=sanitized_env,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            return await self._exec_async(
+                command, work_dir, sanitized_env, timeout_s, start_time,
             )
-
-            try:
-                stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                    process.communicate(), timeout=timeout_s
-                )
-
-                elapsed_ms = int((time.time() - start_time) * 1000)
-
-                # 平台感知的编码解码
-                stdout = self._decode_output(stdout_bytes)
-                stderr = self._decode_output(stderr_bytes)
-
-                if len(stdout) > self.MAX_OUTPUT_BYTES:
-                    stdout = stdout[: self.MAX_OUTPUT_BYTES] + "\n... (输出已截断)"
-                if len(stderr) > self.MAX_OUTPUT_BYTES:
-                    stderr = stderr[: self.MAX_OUTPUT_BYTES] + "\n... (输出已截断)"
-
-                return ShellResult(
-                    success=process.returncode == 0,
-                    stdout=stdout,
-                    stderr=stderr,
-                    exit_code=process.returncode or 0,
-                    elapsed_ms=elapsed_ms,
-                )
-
-            except asyncio.TimeoutError:
-                # Kill process tree on timeout (clawdbot pattern: taskkill /F /T)
-                if process.pid:
-                    self._kill_process_tree(process.pid)
-
-                # Fallback: terminate / kill if tree-kill didn't work
-                try:
-                    process.terminate()
-                    await asyncio.wait_for(process.wait(), timeout=5.0)
-                except (asyncio.TimeoutError, ProcessLookupError):
-                    try:
-                        process.kill()
-                    except ProcessLookupError:
-                        pass
-
-                elapsed_ms = int((time.time() - start_time) * 1000)
-                logger.warning(
-                    f"命令超时: {' '.join(command)}, elapsed={elapsed_ms}ms"
-                )
-
-                return ShellResult(
-                    success=False,
-                    stderr=f"命令执行超时 ({timeout_s}s)",
-                    exit_code=-1,
-                    timed_out=True,
-                    elapsed_ms=elapsed_ms,
-                )
-
+        except NotImplementedError:
+            # Windows SelectorEventLoop does NOT support
+            # asyncio.create_subprocess_exec().  Fall back to running
+            # subprocess.run() in a thread-pool which works with any
+            # event-loop implementation.
+            logger.debug("asyncio subprocess 不可用，回退到线程池执行")
+            return await self._exec_thread_fallback(
+                command, work_dir, sanitized_env, timeout_s, start_time,
+            )
         except FileNotFoundError as e:
             elapsed_ms = int((time.time() - start_time) * 1000)
             return ShellResult(
@@ -452,6 +403,146 @@ class ShellExecutor(BaseExecutor):
         except Exception as e:
             elapsed_ms = int((time.time() - start_time) * 1000)
             logger.error(f"执行命令失败: {e}", exc_info=True)
+            return ShellResult(
+                success=False,
+                stderr=f"执行失败: {str(e)}",
+                exit_code=-1,
+                elapsed_ms=elapsed_ms,
+            )
+
+    # ---------- Primary path: asyncio subprocess ----------
+
+    async def _exec_async(
+        self,
+        command: List[str],
+        cwd: str,
+        env: Dict[str, str],
+        timeout_s: float,
+        start_time: float,
+    ) -> ShellResult:
+        """Execute via asyncio.create_subprocess_exec (preferred)."""
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            cwd=cwd,
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                process.communicate(), timeout=timeout_s
+            )
+
+            elapsed_ms = int((time.time() - start_time) * 1000)
+            stdout = self._decode_output(stdout_bytes)
+            stderr = self._decode_output(stderr_bytes)
+
+            if len(stdout) > self.MAX_OUTPUT_BYTES:
+                stdout = stdout[: self.MAX_OUTPUT_BYTES] + "\n... (输出已截断)"
+            if len(stderr) > self.MAX_OUTPUT_BYTES:
+                stderr = stderr[: self.MAX_OUTPUT_BYTES] + "\n... (输出已截断)"
+
+            return ShellResult(
+                success=process.returncode == 0,
+                stdout=stdout,
+                stderr=stderr,
+                exit_code=process.returncode or 0,
+                elapsed_ms=elapsed_ms,
+            )
+
+        except asyncio.TimeoutError:
+            if process.pid:
+                self._kill_process_tree(process.pid)
+            try:
+                process.terminate()
+                await asyncio.wait_for(process.wait(), timeout=5.0)
+            except (asyncio.TimeoutError, ProcessLookupError):
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass
+
+            elapsed_ms = int((time.time() - start_time) * 1000)
+            logger.warning(f"命令超时: {' '.join(command)}, elapsed={elapsed_ms}ms")
+            return ShellResult(
+                success=False,
+                stderr=f"命令执行超时 ({timeout_s}s)",
+                exit_code=-1,
+                timed_out=True,
+                elapsed_ms=elapsed_ms,
+            )
+
+    # ---------- Fallback path: thread-pool subprocess ----------
+
+    async def _exec_thread_fallback(
+        self,
+        command: List[str],
+        cwd: str,
+        env: Dict[str, str],
+        timeout_s: float,
+        start_time: float,
+    ) -> ShellResult:
+        """
+        Fallback for Windows when the event loop does not support
+        asyncio subprocess (SelectorEventLoop).
+
+        Runs subprocess.run() in asyncio's default thread-pool executor
+        so the event loop is never blocked.
+        """
+        import functools
+
+        def _run() -> subprocess.CompletedProcess:
+            return subprocess.run(
+                command,
+                cwd=cwd,
+                env=env,
+                capture_output=True,
+                timeout=timeout_s,
+            )
+
+        try:
+            loop = asyncio.get_running_loop()
+            completed = await loop.run_in_executor(None, _run)
+
+            elapsed_ms = int((time.time() - start_time) * 1000)
+            stdout = self._decode_output(completed.stdout)
+            stderr = self._decode_output(completed.stderr)
+
+            if len(stdout) > self.MAX_OUTPUT_BYTES:
+                stdout = stdout[: self.MAX_OUTPUT_BYTES] + "\n... (输出已截断)"
+            if len(stderr) > self.MAX_OUTPUT_BYTES:
+                stderr = stderr[: self.MAX_OUTPUT_BYTES] + "\n... (输出已截断)"
+
+            return ShellResult(
+                success=completed.returncode == 0,
+                stdout=stdout,
+                stderr=stderr,
+                exit_code=completed.returncode,
+                elapsed_ms=elapsed_ms,
+            )
+
+        except subprocess.TimeoutExpired:
+            elapsed_ms = int((time.time() - start_time) * 1000)
+            logger.warning(f"命令超时: {' '.join(command)}, elapsed={elapsed_ms}ms")
+            return ShellResult(
+                success=False,
+                stderr=f"命令执行超时 ({timeout_s}s)",
+                exit_code=-1,
+                timed_out=True,
+                elapsed_ms=elapsed_ms,
+            )
+        except FileNotFoundError as e:
+            elapsed_ms = int((time.time() - start_time) * 1000)
+            return ShellResult(
+                success=False,
+                stderr=f"命令未找到: {e}",
+                exit_code=-1,
+                elapsed_ms=elapsed_ms,
+            )
+        except Exception as e:
+            elapsed_ms = int((time.time() - start_time) * 1000)
+            logger.error(f"线程池执行命令失败: {e}", exc_info=True)
             return ShellResult(
                 success=False,
                 stderr=f"执行失败: {str(e)}",

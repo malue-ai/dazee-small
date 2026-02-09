@@ -74,19 +74,20 @@ class ComplexityDetector:
         Returns:
             (复杂度级别, 置信度 0-1)
         """
-        # 尝试在现有事件循环中运行异步方法
+        _running = False
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # 事件循环已运行，使用保守默认值
-                logger.info(f"⚠️ 事件循环已运行，使用保守默认值 MEDIUM")
-                return TaskComplexity.MEDIUM, 0.5
-            else:
-                # 运行异步方法
-                return loop.run_until_complete(self.detect_async(query))
+            asyncio.get_running_loop()
+            _running = True
         except RuntimeError:
-            # 没有事件循环，创建新的
-            return asyncio.run(self.detect_async(query))
+            _running = False
+
+        if _running:
+            # 事件循环已运行，使用保守默认值
+            logger.info("⚠️ 事件循环已运行，使用保守默认值 MEDIUM")
+            return TaskComplexity.MEDIUM, 0.5
+
+        # 没有运行中的事件循环，安全使用 asyncio.run()
+        return asyncio.run(self.detect_async(query))
 
     async def detect_async(self, query: str) -> Tuple[TaskComplexity, float]:
         """

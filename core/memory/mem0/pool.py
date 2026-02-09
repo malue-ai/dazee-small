@@ -531,22 +531,32 @@ class _GGUFEmbedderAdapter:
         )
 
     def embed(self, text, memory_action=None):
-        """Synchronous embed matching Mem0 interface."""
+        """
+        Synchronous embed matching Mem0 interface.
+
+        Mem0 calls this synchronously. Our GGUF provider is async.
+        - If already inside a running event loop (FastAPI request):
+          run embed in a worker thread with its own event loop.
+        - Otherwise: use asyncio.run() directly.
+
+        SQLite safety: this method only calls the embedding provider
+        (CPU inference), it does NOT touch SQLite. SQLite reads/writes
+        are handled by sqlite_vec_store with its own _write_lock.
+        """
         import asyncio
+        import concurrent.futures
 
+        _in_async = True
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
         except RuntimeError:
-            loop = None
+            _in_async = False
 
-        if loop and loop.is_running():
-            # Already in async context — run in thread to avoid deadlock
-            import concurrent.futures
-
+        if _in_async:
+            # Worker thread gets its own event loop via asyncio.run()
+            coro = self.provider.embed(text)
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                vec = pool.submit(
-                    asyncio.run, self.provider.embed(text)
-                ).result()
+                vec = pool.submit(asyncio.run, coro).result()
         else:
             vec = asyncio.run(self.provider.embed(text))
 

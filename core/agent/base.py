@@ -858,6 +858,7 @@ class Agent:
         # 复制实例级配置
         clone._instance_registry = self._instance_registry
         clone._instance_skills = self._instance_skills.copy() if self._instance_skills else []
+        clone._skills_loader = getattr(self, "_skills_loader", None)
         clone.workers_config = self.workers_config.copy() if self.workers_config else []
 
         # V11: 状态一致性管理器（共享实例，跨 session 保留快照）

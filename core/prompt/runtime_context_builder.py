@@ -40,6 +40,47 @@ logger = get_logger("runtime_context")
 # 环境信息缓存（懒加载）
 _cached_environment: Optional["RuntimeEnvironment"] = None
 
+# Windows platform flag
+_IS_WIN32 = platform.system().lower() == "windows"
+
+
+async def _safe_subprocess_exec(
+    *args: str, timeout: float = 5.0
+) -> subprocess.CompletedProcess:
+    """
+    Cross-platform async subprocess execution.
+
+    On Windows, asyncio.create_subprocess_exec may raise NotImplementedError
+    when the event loop is SelectorEventLoop (common under uvicorn).
+    Falls back to subprocess.run() via thread-pool.
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(), timeout=timeout
+        )
+        return subprocess.CompletedProcess(
+            args=list(args),
+            returncode=proc.returncode or 0,
+            stdout=stdout,
+            stderr=stderr,
+        )
+    except NotImplementedError:
+        # Windows SelectorEventLoop fallback
+        def _run():
+            return subprocess.run(
+                list(args),
+                capture_output=True,
+                timeout=timeout,
+            )
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, _run)
+
 
 @dataclass
 class RuntimeEnvironment:
@@ -121,29 +162,21 @@ class RuntimeContextBuilder:
         """获取平台版本（异步）"""
         try:
             if system == "darwin":
-                proc = await asyncio.create_subprocess_exec(
-                    "sw_vers",
-                    "-productVersion",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
+                result = await _safe_subprocess_exec(
+                    "sw_vers", "-productVersion", timeout=2,
                 )
-                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=2)
-                if proc.returncode == 0:
-                    return f"macOS {stdout.decode().strip()}"
+                if result.returncode == 0:
+                    return f"macOS {result.stdout.decode().strip()}"
             elif system == "windows":
                 # Use PowerShell to get Windows version details
-                proc = await asyncio.create_subprocess_exec(
-                    "powershell",
-                    "-NoProfile",
-                    "-Command",
+                result = await _safe_subprocess_exec(
+                    "powershell", "-NoProfile", "-Command",
                     "(Get-CimInstance Win32_OperatingSystem).Caption + ' Build ' + "
                     "(Get-CimInstance Win32_OperatingSystem).BuildNumber",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
+                    timeout=5,
                 )
-                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
-                if proc.returncode == 0:
-                    version_str = stdout.decode("utf-8", errors="replace").strip()
+                if result.returncode == 0:
+                    version_str = result.stdout.decode("utf-8", errors="replace").strip()
                     if version_str:
                         return version_str
                 # Fallback: platform.version()
@@ -259,15 +292,11 @@ class RuntimeContextBuilder:
 
             # 通过 lsappinfo 检测运行中的应用（含未在 /Applications 的，如飞书）
             try:
-                proc = await asyncio.create_subprocess_exec(
-                    "lsappinfo",
-                    "list",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
+                result = await _safe_subprocess_exec(
+                    "lsappinfo", "list", timeout=3,
                 )
-                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=3)
-                if proc.returncode == 0:
-                    output = stdout.decode()
+                if result.returncode == 0:
+                    output = result.stdout.decode()
                     if "com.electron.lark" in output and "Lark" not in seen:
                         apps.insert(0, "飞书 (Lark, 打开: `open -b com.electron.lark`)")
                         seen.add("Lark")
@@ -301,13 +330,10 @@ class RuntimeContextBuilder:
                 ]
                 for cmd in win_cmds:
                     try:
-                        proc = await asyncio.create_subprocess_exec(
-                            "where", cmd,
-                            stdout=asyncio.subprocess.PIPE,
-                            stderr=asyncio.subprocess.PIPE,
+                        result = await _safe_subprocess_exec(
+                            "where", cmd, timeout=2,
                         )
-                        await asyncio.wait_for(proc.communicate(), timeout=2)
-                        if proc.returncode == 0:
+                        if result.returncode == 0:
                             apps.append(cmd)
                     except Exception:
                         pass
@@ -317,11 +343,10 @@ class RuntimeContextBuilder:
             common_cmds = ["firefox", "chromium", "code", "gnome-terminal"]
             for cmd in common_cmds:
                 try:
-                    proc = await asyncio.create_subprocess_exec(
-                        "which", cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                    result = await _safe_subprocess_exec(
+                        "which", cmd, timeout=1,
                     )
-                    await asyncio.wait_for(proc.communicate(), timeout=1)
-                    if proc.returncode == 0:
+                    if result.returncode == 0:
                         apps.append(cmd)
                 except Exception:
                     pass

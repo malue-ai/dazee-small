@@ -779,7 +779,32 @@ class AgentRegistry:
 {framework_prompt}
 """
 
-        # 7. 创建/更新 AgentConfig
+        # 7. 填充 runtime_context（供运行时 Injectors 使用）
+        if hasattr(prompt_cache, "runtime_context"):
+            if prompt_cache.runtime_context is None:
+                prompt_cache.runtime_context = {}
+            prompt_cache.runtime_context["apis_prompt"] = apis_prompt
+            prompt_cache.runtime_context["framework_prompt"] = framework_prompt
+
+            # 环境检测（OS、已安装软件）
+            try:
+                from core.prompt.runtime_context_builder import (
+                    detect_and_build_environment_context_async,
+                )
+
+                env_prompt = await detect_and_build_environment_context_async()
+                if env_prompt:
+                    prompt_cache.runtime_context["environment_prompt"] = env_prompt
+            except Exception as e:
+                logger.warning(f"环境检测失败（不阻断启动）: {e}")
+
+            logger.info(
+                f"   runtime_context 已填充: apis={len(apis_prompt)} 字符, "
+                f"framework={len(framework_prompt)} 字符, "
+                f"environment={'已注入' if prompt_cache.runtime_context.get('environment_prompt') else '未注入'}"
+            )
+
+        # 8. 创建/更新 AgentConfig
         load_time_ms = (datetime.now() - instance_start).total_seconds() * 1000
 
         agent_config = AgentConfig(

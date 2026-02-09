@@ -6,6 +6,7 @@ Build: 2026-01-16 v2
 
 # ==================== 标准库 ====================
 import os
+import sys
 import asyncio
 from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional
@@ -457,6 +458,11 @@ async def health_check() -> Dict[str, Any]:
 if __name__ == "__main__":
     import uvicorn
     from utils.app_paths import get_cli_port, is_frozen
+
+    # Windows: ProactorEventLoop 支持 asyncio.create_subprocess_exec
+    # SelectorEventLoop（默认）不支持子进程，会导致 NotImplementedError
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
     
     port = get_cli_port() if is_frozen() else 8000
     host = "127.0.0.1" if is_frozen() else "0.0.0.0"
