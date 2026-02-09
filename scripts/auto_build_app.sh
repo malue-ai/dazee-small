@@ -537,14 +537,18 @@ info "  构建完成!"
 info "============================================"
 info ""
 
-# 显示产物路径
+# 复制产物到项目根目录，方便查找
+OUTPUT_DIR="$PROJECT_ROOT/dist"
+mkdir -p "$OUTPUT_DIR"
+
 if [ "$(uname)" = "Darwin" ]; then
   DMG_PATH=$(find "$FRONTEND_DIR/src-tauri/target/release/bundle/dmg" -name "*.dmg" 2>/dev/null | head -1)
   APP_PATH=$(find "$FRONTEND_DIR/src-tauri/target/release/bundle/macos" -name "*.app" 2>/dev/null | head -1)
-  
+
   if [ -n "$DMG_PATH" ]; then
+    cp -f "$DMG_PATH" "$OUTPUT_DIR/"
     SIZE=$(du -h "$DMG_PATH" | cut -f1)
-    info "DMG: $DMG_PATH ($SIZE)"
+    info "DMG: $OUTPUT_DIR/$(basename "$DMG_PATH") ($SIZE)"
   fi
   if [ -n "$APP_PATH" ]; then
     SIZE=$(du -sh "$APP_PATH" | cut -f1)
@@ -552,8 +556,12 @@ if [ "$(uname)" = "Darwin" ]; then
   fi
 elif [ "$(uname -o 2>/dev/null)" = "Msys" ] || [ "$(uname -o 2>/dev/null)" = "Cygwin" ]; then
   EXE_PATH=$(find "$FRONTEND_DIR/src-tauri/target/release/bundle/nsis" -name "*.exe" 2>/dev/null | head -1)
-  
+
   if [ -n "$EXE_PATH" ]; then
-    info "Installer: $EXE_PATH"
+    cp -f "$EXE_PATH" "$OUTPUT_DIR/"
+    info "Installer: $OUTPUT_DIR/$(basename "$EXE_PATH")"
   fi
 fi
+
+info ""
+info "产物目录: $OUTPUT_DIR/"
