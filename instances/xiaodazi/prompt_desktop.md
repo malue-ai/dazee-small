@@ -1,86 +1,143 @@
 # 桌面操作协议
 
-## 核心循环：观察 → 操作 → 验证
+## 强制约束（违反 = 任务失败）
 
-每一步 UI 操作后，**必须截图验证结果**，确认成功再继续下一步。不要假设操作成功。
+### 1. 所有 UI 交互必须通过 peekaboo
+
+| 操作 | 正确方式 | 禁止方式 |
+|------|---------|---------|
+| 点击按钮/元素 | `peekaboo click --on <ID> --app <应用>` | `osascript ... click` |
+| 输入 ASCII | `peekaboo type "text" --app <应用>` | `osascript ... keystroke "text"` |
+| 输入中文/CJK | `peekaboo paste "中文" --app <应用>` | `osascript ... keystroke "中文"` |
+| 按键/快捷键 | `peekaboo hotkey --keys cmd+k --app <应用>` | `osascript ... key code 36` |
+| 滚动 | `peekaboo scroll --direction down --app <应用>` | `osascript ... scroll` |
+
+`osascript` 仅允许用于进程管理（如 `activate`、`get name of process`），**禁止用于任何 UI 元素交互**。
+
+### 2. 操作前必须先用 peekaboo see 获取元素 ID
+
+**不要猜测界面状态。** 每次操作前先观察，用元素 ID 精确定位，不要盲目 keystroke。
 
 ```
-observe_screen → 理解界面 → 执行操作 → observe_screen 验证 → 下一步
+❌ 错误：猜测快捷键打开搜索 → 盲目输入文字
+✅ 正确：peekaboo see --annotate → 找到搜索框 ID → peekaboo click --on <ID> → peekaboo paste "内容"
 ```
+
+### 3. 中文/CJK 输入必须用 peekaboo paste
+
+AppleScript `keystroke` 完全不支持非 ASCII 字符（不是"差"，是"不工作"）。`peekaboo paste` 自动通过剪贴板桥接，是输入中文的**唯一可靠方式**。
+
+## 核心循环：观察 → 定位 → 操作 → 验证
+
+```
+peekaboo see --annotate  →  找到目标元素 ID  →  peekaboo click/paste  →  observe_screen 验证
+```
+
+每一步都必须验证。**不要假设操作成功。**
 
 ## 操作原语
 
-### 1. 观察（获取界面信息）
+### 观察
 
 ```
-observe_screen                              # 快速一览（OCR + UI 元素）
-observe_screen app=Lark                     # 指定应用
-nodes run: peekaboo see --app <应用> --annotate  # 深度分析（带 ID 标注）
+observe_screen                                          # 快速一览（OCR + UI 元素）
+observe_screen app=<应用>                                # 指定应用
+nodes run: peekaboo see --app <应用> --annotate          # 深度分析（带 ID 标注，推荐）
 ```
 
-### 2. 交互（操作 UI 元素）
+### 点击与导航
 
 ```
-nodes run: peekaboo click --on <ID> --app <应用>           # 点击元素
-nodes run: peekaboo type "文本" --app <应用>                # 输入文字
-nodes run: peekaboo type "文本" --app <应用> --return       # 输入并回车
-nodes run: peekaboo scroll --direction down --app <应用>    # 滚动
-nodes run: peekaboo hotkey --keys cmd+v --app <应用>        # 快捷键
+nodes run: peekaboo click --on <ID> --app <应用>         # 按元素 ID 点击（最可靠）
+nodes run: peekaboo click --coords 100,200 --app <应用>  # 按坐标点击（备选）
 ```
 
-### 3. 应用管理
+### 文本输入
 
 ```
-nodes run: peekaboo app --action launch --name <应用>       # 启动应用
-nodes run: peekaboo app --action focus --name <应用>        # 聚焦已打开的应用
-nodes run: peekaboo list --item-type running_applications   # 查看正在运行的应用
+nodes run: peekaboo type "ASCII" --app <应用>             # 纯 ASCII
+nodes run: peekaboo type "ASCII" --app <应用> --return     # 纯 ASCII 并回车
+nodes run: peekaboo paste "中文或任意文本" --app <应用>     # 含 CJK 必须用 paste
 ```
 
-## 快捷键优先策略
-
-对下拉框、滚动条、弹窗等控件，优先使用快捷键而非鼠标点击（更可靠）：
-
-| 场景 | 快捷键 |
-|------|--------|
-| 切换输入焦点 | Tab / Shift+Tab |
-| 确认 / 提交 | Enter / Return |
-| 取消 / 关闭弹窗 | Escape |
-| 复制 / 粘贴 | Cmd+C / Cmd+V |
-| 全选 | Cmd+A |
-| 撤销 | Cmd+Z |
-| 新建 | Cmd+N |
-| 搜索 | Cmd+F |
-
-## 剪贴板桥接（输入长文本/中文）
-
-输入超过 20 字符的文本或中文内容时，用剪贴板粘贴代替逐字输入（更快更可靠）：
+### 按键与快捷键
 
 ```
-nodes run: bash -c 'echo "要输入的长文本内容" | pbcopy'
-nodes run: peekaboo hotkey --keys cmd+v --app <应用>
+nodes run: peekaboo hotkey --keys cmd+k --app <应用>      # 组合键
+nodes run: peekaboo press return --app <应用>              # 单键
+nodes run: peekaboo press escape --app <应用>              # Escape
+nodes run: peekaboo press tab --app <应用>                 # Tab 切换焦点
 ```
 
-## 验证规则
+### 应用管理
 
-每次操作后截图验证，在思考中明确评估：
-- 「我刚才点击了 XX 按钮，截图显示 YY，操作成功，继续下一步」
-- 「我刚才输入了文本，但截图显示输入框仍为空，重试一次」
+```
+nodes run: peekaboo app --action launch --name <应用>     # 启动
+nodes run: peekaboo app --action focus --name <应用>      # 聚焦
+nodes run: peekaboo list --item-type running_applications  # 列出运行中应用
+```
 
-如果同一步骤连续失败 2 次，换一种方法（如从鼠标点击换成快捷键）。
+## 验证规则（每步必做）
+
+验证时必须在思考中明确回答以下问题：
+
+1. **操作目标正确吗？** — 我点击/输入的是正确的 UI 元素吗？（对比元素 ID）
+2. **内容到位了吗？** — 输入的文字出现在了正确的输入框中吗？（不是消息框、不是搜索框混淆）
+3. **状态转换正确吗？** — 界面变化符合预期吗？（搜索结果出现了？聊天窗口切换了？）
+
+```
+✅ 「我点击了搜索图标 [B3]，截图显示搜索框已激活，光标在搜索框中，正确」
+✅ 「我 paste 了"海鹏"，截图显示搜索框中出现"海鹏"且搜索结果列出了联系人，正确」
+✅ 「我点击了搜索结果中的"海鹏"[C5]，截图显示进入了与海鹏的 1-on-1 聊天，正确」
+
+❌ 「我输入了文字，截图显示文字出现在消息输入框而非搜索框 → 位置错误，需要先点击正确的输入框」
+❌ 「我按了 Enter 发送，但截图显示还在群聊而非目标人的聊天 → 目标错误，需要先导航到正确聊天」
+```
+
+## 反模式警告
+
+### ❌ 盲目 keystroke
+
+```
+# 错误：不看界面直接 keystroke
+osascript -e 'tell ... to keystroke "海鹏"'     # CJK 失败 + 可能打到消息框
+osascript -e 'tell ... to keystroke "f" using command down'  # 不确定打开的是什么
+
+# 正确：先观察 → 点击目标元素 → 再输入
+peekaboo see --app Lark --annotate → 找到搜索入口 [B3]
+peekaboo click --on B3 --app Lark → 点击搜索
+peekaboo paste "海鹏" --app Lark → 在搜索框中输入
+```
+
+### ❌ 连续失败不反思
+
+如果同一操作连续失败 2 次：
+1. **停下来重新观察** — `peekaboo see --annotate` 看看界面到底是什么状态
+2. **反思失败原因** — 是不是在错误的输入框？是不是应用窗口没聚焦？是不是元素 ID 变了？
+3. **换一种方法** — 如果快捷键不管用，改用 peekaboo click 点击 UI 元素
+
+### ❌ 发送前不确认目标
+
+发送消息/邮件/文件前，必须通过 observe_screen 确认：
+- 当前聊天窗口的标题/联系人是正确的目标
+- 输入框中的内容是完整且正确的
+- 不是在错误的群聊或对话中
 
 <example>
-<query>打开某应用，在群聊中发一条消息</query>
+<query>打开某应用，给某人发一条消息</query>
 <flow>
-1. peekaboo app --action launch --name <应用>
-2. observe_screen app=<应用> → 确认应用已打开
-3. peekaboo see --app <应用> --annotate → 获取 UI 标注
-4. 根据标注找到搜索入口 → peekaboo click --on <ID>
-5. peekaboo type "群聊名" --app <应用> --return
-6. observe_screen → 确认搜索结果出现
-7. peekaboo click --on <目标群聊ID>
-8. observe_screen → 确认进入群聊
-9. echo '消息内容' | pbcopy → peekaboo hotkey --keys cmd+v（剪贴板桥接）
-10. peekaboo hotkey --keys return（发送）
-11. observe_screen → 确认消息已发送
+1. peekaboo app --action launch --name <应用> → 启动应用
+2. observe_screen → 确认应用已打开
+3. peekaboo see --app <应用> --annotate → 获取 UI 元素标注
+4. 找到搜索入口（搜索图标/搜索框）→ peekaboo click --on <搜索入口ID>
+5. observe_screen → 确认搜索框已激活（光标在搜索框中）
+6. peekaboo paste "联系人名" --app <应用>（中文名必须用 paste）
+7. observe_screen → 确认搜索结果中出现目标联系人
+8. peekaboo click --on <目标联系人ID> → 进入聊天
+9. observe_screen → **确认当前聊天标题是目标联系人**（不是群聊、不是其他人）
+10. peekaboo paste "消息内容" --app <应用>（中文消息用 paste）
+11. observe_screen → 确认消息出现在输入框中（不是搜索框、不是标题栏）
+12. peekaboo press return --app <应用> → 发送
+13. observe_screen → 确认消息已发送且出现在聊天记录中
 </flow>
 </example>

@@ -1190,9 +1190,10 @@ class ChatService:
         # 7. 加载历史消息
         history_messages = []
         with log_execution_time("加载历史消息", logger):
-            async with AsyncSessionLocal() as session:
-                db_messages = await crud.list_messages(
-                    session=session,
+            factory = await get_local_session_factory()
+            async with factory() as db_session:
+                db_messages = await local_crud.list_messages(
+                    session=db_session,
                     conversation_id=conversation_id,
                     limit=1000,
                     order="asc"
@@ -1258,9 +1259,10 @@ class ChatService:
         
         # 10. 创建 Assistant 占位
         try:
-            async with AsyncSessionLocal() as session:
-                await crud.create_message(
-                    session=session,
+            factory = await get_local_session_factory()
+            async with factory() as db_session:
+                await local_crud.create_message(
+                    session=db_session,
                     conversation_id=conversation_id,
                     role="assistant",
                     content="[]",

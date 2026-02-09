@@ -238,9 +238,11 @@ class ObserveScreenTool(BaseTool):
 - 可交互 UI 元素（按钮、输入框、链接等）及其元素 ID
 - 屏幕上的文字内容（OCR）
 
-元素 ID 可直接用于后续操作：
-- nodes run peekaboo click --on <ID> → 点击
-- nodes run peekaboo type "text" --app <app> → 输入
+元素 ID 用于后续 peekaboo 操作（禁止 raw osascript）：
+- peekaboo click --on <ID> --app <app> → 点击元素
+- peekaboo type "text" --app <app> → 输入 ASCII
+- peekaboo paste "中文" --app <app> → 输入中文/CJK（必须用 paste）
+- peekaboo hotkey --keys cmd+k --app <app> → 快捷键
 
 参数：
 - app: 可选，应用名称（如 Lark、Safari）

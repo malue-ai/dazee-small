@@ -380,37 +380,46 @@ class RuntimeContextBuilder:
         if language == "en":
             lines = ["## Local Capabilities", ""]
             if env.platform == "darwin":
-                lines.extend(
-                    [
-                        "**macOS Capabilities**:",
-                        "- Shell command execution (`nodes run`)",
-                        "- AppleScript UI automation (`osascript`)",
-                        "- System notifications (`nodes notify`)",
-                        "- App launch (`open -a` / `open -b`)",
-                        "- Clipboard operations",
-                    ]
-                )
                 if shutil.which("peekaboo"):
                     lines.extend(
                         [
-                            "- UI automation (`peekaboo`): see → click / type / scroll",
+                            "**macOS Capabilities**:",
+                            "- **UI automation (`peekaboo`)**: the PRIMARY way to interact with app UI",
+                            "- Shell command execution (`nodes run`)",
+                            "- System notifications (`nodes notify`)",
+                            "- App launch (`open -a` / `open -b`)",
+                            "- Clipboard operations",
                             "",
                             "**UI workflow** (via `nodes run`):",
                             "- Observe: `peekaboo see --app <App> --annotate` → get element IDs",
                             "- Click: `peekaboo click --on <ID> --app <App>`",
-                            '- Type: `peekaboo type "text" --app <App>`',
+                            '- Type: `peekaboo type "text" --app <App>` (ASCII only)',
+                            '- Paste: `peekaboo paste "text" --app <App>` (CJK / any text)',
                             "- Scroll: `peekaboo scroll --direction down --app <App>`",
+                            "",
+                            "**Rules**:",
+                            "- **ALL UI interaction MUST use peekaboo** (click/type/paste/scroll)",
+                            "- **NEVER use raw `osascript keystroke/key code/click`** for UI interaction",
+                            "- `osascript` is ONLY for process management (e.g. `activate`, `get name of`)",
+                            "- **CJK input: MUST use `peekaboo paste`** (keystroke does NOT work for non-ASCII)",
+                            '- Activate app: `open -a "AppName"` or `open -b "bundle.id"`',
                         ]
                     )
-                lines.extend(
-                    [
-                        "",
-                        "**Tips**:",
-                        '- Activate app: `open -a "AppName"` or `open -b "bundle.id"`',
-                        "- For CJK input, use clipboard (keystroke has poor support)",
-                        "- AppleScript: `osascript -e 'tell application ...'`",
-                    ]
-                )
+                else:
+                    lines.extend(
+                        [
+                            "**macOS Capabilities**:",
+                            "- Shell command execution (`nodes run`)",
+                            "- AppleScript UI automation (`osascript`)",
+                            "- System notifications (`nodes notify`)",
+                            "- App launch (`open -a` / `open -b`)",
+                            "- Clipboard operations",
+                            "",
+                            "**Tips**:",
+                            '- Activate app: `open -a "AppName"` or `open -b "bundle.id"`',
+                            "- AppleScript: `osascript -e 'tell application ...'`",
+                        ]
+                    )
             elif env.platform == "linux":
                 lines.extend(
                     [
@@ -424,37 +433,46 @@ class RuntimeContextBuilder:
         else:  # zh
             lines = ["## 本地能力", ""]
             if env.platform == "darwin":
-                lines.extend(
-                    [
-                        "**macOS 操作能力**:",
-                        "- Shell 命令执行 (`nodes run`)",
-                        "- AppleScript UI 自动化 (`osascript`)",
-                        "- 系统通知 (`nodes notify`)",
-                        "- 应用启动 (`open -a` / `open -b`)",
-                        "- 剪贴板操作",
-                    ]
-                )
                 if shutil.which("peekaboo"):
                     lines.extend(
                         [
-                            "- UI 自动化 (`peekaboo`): 截图标注 → 点击/输入/滚动",
+                            "**macOS 操作能力**:",
+                            "- **UI 自动化 (`peekaboo`)**: 所有界面交互的唯一方式",
+                            "- Shell 命令执行 (`nodes run`)",
+                            "- 系统通知 (`nodes notify`)",
+                            "- 应用启动 (`open -a` / `open -b`)",
+                            "- 剪贴板操作",
                             "",
                             "**UI 操作流程**（通过 `nodes run` 调用）:",
                             "- 观察: `peekaboo see --app <应用名> --annotate` → 获取带 ID 的 UI 元素",
                             "- 点击: `peekaboo click --on <元素ID> --app <应用名>`",
-                            '- 输入: `peekaboo type "文本" --app <应用名>`',
+                            '- 输入: `peekaboo type "文本" --app <应用名>`（仅 ASCII）',
+                            '- 粘贴: `peekaboo paste "文本" --app <应用名>`（中文/任意文本）',
                             "- 滚动: `peekaboo scroll --direction down --app <应用名>`",
+                            "",
+                            "**强制规则**:",
+                            "- **所有 UI 交互必须通过 peekaboo**（点击/输入/粘贴/滚动）",
+                            "- **禁止 `osascript keystroke/key code/click`** 操作界面元素",
+                            "- `osascript` 仅限进程管理（如 `activate`、`get name of`）",
+                            "- **中文输入必须用 `peekaboo paste`**（keystroke 完全不支持非 ASCII）",
+                            '- 激活应用: `open -a "AppName"` 或 `open -b "bundle.id"`',
                         ]
                     )
-                lines.extend(
-                    [
-                        "",
-                        "**操作提示**:",
-                        '- 激活应用: `open -a "AppName"` 或 `open -b "bundle.id"`',
-                        "- 中文输入推荐使用剪贴板方式（`keystroke` 对中文支持差）",
-                        "- AppleScript: `osascript -e 'tell application ...'`",
-                    ]
-                )
+                else:
+                    lines.extend(
+                        [
+                            "**macOS 操作能力**:",
+                            "- Shell 命令执行 (`nodes run`)",
+                            "- AppleScript UI 自动化 (`osascript`)",
+                            "- 系统通知 (`nodes notify`)",
+                            "- 应用启动 (`open -a` / `open -b`)",
+                            "- 剪贴板操作",
+                            "",
+                            "**操作提示**:",
+                            '- 激活应用: `open -a "AppName"` 或 `open -b "bundle.id"`',
+                            "- AppleScript: `osascript -e 'tell application ...'`",
+                        ]
+                    )
             elif env.platform == "linux":
                 lines.extend(
                     [

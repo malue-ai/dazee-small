@@ -100,7 +100,7 @@ class SystemRoleInjector(BaseInjector):
         从 prompt_cache 获取角色定义
 
         根据 task_complexity 选择对应版本。
-        complex 任务额外追加桌面操作协议（prompt_desktop.md）。
+        当任务涉及桌面操作时追加桌面操作协议（prompt_desktop.md）。
         """
         if not context.has_prompt_cache:
             logger.debug("无 prompt_cache，跳过角色定义")
@@ -122,8 +122,8 @@ class SystemRoleInjector(BaseInjector):
         # 获取对应版本的提示词
         role_prompt = prompt_cache.get_system_prompt(complexity_enum)
 
-        # complex 任务追加桌面操作协议（仅当文件存在时）
-        if complexity == "complex":
+        # 桌面操作协议注入：当涉及 UI 自动化时（不再仅限 complex）
+        if self._needs_desktop_protocol(context, complexity):
             desktop_protocol = self._load_desktop_protocol(prompt_cache)
             if desktop_protocol:
                 role_prompt = f"{role_prompt}\n\n{desktop_protocol}"
@@ -134,11 +134,32 @@ class SystemRoleInjector(BaseInjector):
         return role_prompt
 
     @staticmethod
+    def _needs_desktop_protocol(context: InjectionContext, complexity: str) -> bool:
+        """
+        判断是否需要注入桌面操作协议。
+
+        注入条件（满足任一）：
+        1. complexity == complex（原有逻辑，兼容）
+        2. intent.relevant_skill_groups 包含 app_automation
+        """
+        # 条件 1: complex 任务始终注入
+        if complexity == "complex":
+            return True
+
+        # 条件 2: 意图识别出 app_automation 技能组
+        if context.intent:
+            skill_groups = getattr(context.intent, "relevant_skill_groups", None)
+            if skill_groups and "app_automation" in skill_groups:
+                return True
+
+        return False
+
+    @staticmethod
     def _load_desktop_protocol(prompt_cache) -> str:
         """
         加载桌面操作协议（prompt_desktop.md）
 
-        仅 complex 任务注入，simple/medium 不注入（节省 token）。
+        当涉及桌面操作时注入（complex 或 app_automation skill group）。
         文件从实例目录加载，缓存在 runtime_context 中避免重复读取。
         """
         # 先检查 runtime_context 缓存
