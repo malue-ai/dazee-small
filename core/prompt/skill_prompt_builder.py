@@ -118,6 +118,12 @@ class SkillPromptBuilder:
 2. 用户同意 → 用 nodes 执行安装命令（如 pip install xxx），然后正常使用
 3. 用户拒绝 → 放弃该 Skill，寻找替代方案完成任务（如用 browser 工具、用 nodes 执行 httpx 等轻量方案）
 
+**Skill 执行失败且原因是依赖缺失时：**
+不要直接跳到替代方案。先用 hitl 工具告知用户缺失了什么依赖并询问是否安装，用户同意后安装并重试，用户拒绝后再寻找替代方案。
+
+**用户提到的 Skill 不在 `<available_skills>` 中时：**
+不要说"找不到"或编造替代方案。尝试用 nodes 工具读取 `instances/xiaodazi/skills/{skill-name}/SKILL.md`（将 skill-name 替换为用户提到的名称）。如果文件存在，按其中的指引执行；如果文件不存在，用 hitl 工具告知用户该 Skill 未安装，询问是否需要用其他方式完成任务。
+
 **重要：**
 - 不要在选择前读取多个 Skills
 - 高级用法参考完整 SKILL.md（Read `location` 路径）
@@ -137,6 +143,12 @@ Scan `<available_skills>` `<description>` entries, choose the best match.
 1. Use hitl tool to ask user to confirm installation (explain what and why)
 2. User approves → run install command via nodes (e.g. pip install xxx), then use normally
 3. User declines → abandon that Skill, find alternative approaches (e.g. browser tool, httpx via nodes)
+
+**Skill execution fails due to missing dependency:**
+Do NOT jump to alternatives immediately. First use hitl tool to inform user what dependency is missing and ask whether to install. Install and retry if approved, find alternatives only if declined.
+
+**User mentions a Skill not in `<available_skills>`:**
+Do NOT say "not found" or make up alternatives. Try reading `instances/xiaodazi/skills/{skill-name}/SKILL.md` via nodes tool (replace skill-name with what user mentioned). If the file exists, follow its instructions; if not, use hitl to inform user the Skill is not installed and ask if they want to use an alternative approach.
 
 **Constraints:**
 - Never read more than one skill up front

@@ -298,7 +298,12 @@ class ShellExecutor(BaseExecutor):
         Kill entire process tree (parent + children).
 
         Windows: taskkill /F /T /PID (clawdbot pattern)
-        Unix: SIGKILL to process group
+        Unix: SIGKILL to the child's own process group.
+
+        IMPORTANT: The child must have been started with process_group=0
+        (or start_new_session=True) so that its process group ID differs
+        from the parent's. Otherwise os.killpg() would kill the parent
+        (FastAPI server) too.
         """
         if _IS_WIN32:
             try:
@@ -314,7 +319,22 @@ class ShellExecutor(BaseExecutor):
                 pass  # Best-effort
         else:
             try:
-                os.killpg(os.getpgid(pid), 9)  # SIGKILL to process group
+                child_pgid = os.getpgid(pid)
+                parent_pgid = os.getpgid(os.getpid())
+
+                if child_pgid == parent_pgid:
+                    # Safety guard: child is in the same process group as the
+                    # server. Sending SIGKILL to the group would crash the
+                    # server. Fall back to killing only the child process.
+                    logger.warning(
+                        f"子进程 {pid} 与服务器在同一进程组 ({child_pgid})，"
+                        f"仅终止子进程（不使用 killpg 以避免杀死服务器）"
+                    )
+                    os.kill(pid, 9)
+                else:
+                    # Child has its own process group (process_group=0).
+                    # Safe to kill the entire group.
+                    os.killpg(child_pgid, 9)
             except (ProcessLookupError, PermissionError, OSError):
                 pass
 
@@ -375,12 +395,14 @@ class ShellExecutor(BaseExecutor):
             return await self._exec_async(
                 command, work_dir, sanitized_env, timeout_s, start_time,
             )
-        except NotImplementedError:
-            # Windows SelectorEventLoop does NOT support
-            # asyncio.create_subprocess_exec().  Fall back to running
-            # subprocess.run() in a thread-pool which works with any
-            # event-loop implementation.
-            logger.debug("asyncio subprocess 不可用，回退到线程池执行")
+        except (NotImplementedError, ValueError) as e:
+            # NotImplementedError: Windows SelectorEventLoop does NOT
+            #   support asyncio.create_subprocess_exec().
+            # ValueError: uvloop rejects unknown kwargs like process_group
+            #   (safety net in case _is_uvloop detection fails).
+            # Fall back to running subprocess.run() in a thread-pool
+            # which works with any event-loop implementation.
+            logger.debug(f"asyncio subprocess 不可用 ({e})，回退到线程池执行")
             return await self._exec_thread_fallback(
                 command, work_dir, sanitized_env, timeout_s, start_time,
             )
@@ -412,6 +434,21 @@ class ShellExecutor(BaseExecutor):
 
     # ---------- Primary path: asyncio subprocess ----------
 
+    @staticmethod
+    def _is_uvloop() -> bool:
+        """Detect if the current event loop is uvloop.
+
+        uvloop does NOT support the ``process_group`` kwarg in
+        ``create_subprocess_exec``, so we must fall back to
+        ``start_new_session=True`` which achieves similar process
+        isolation (new session implies new process group).
+        """
+        try:
+            loop = asyncio.get_running_loop()
+            return type(loop).__module__.startswith("uvloop")
+        except RuntimeError:
+            return False
+
     async def _exec_async(
         self,
         command: List[str],
@@ -421,12 +458,27 @@ class ShellExecutor(BaseExecutor):
         start_time: float,
     ) -> ShellResult:
         """Execute via asyncio.create_subprocess_exec (preferred)."""
+        # We need to isolate the child into its own process group so that
+        # _kill_process_tree's os.killpg() does NOT kill the parent
+        # (FastAPI server).
+        #
+        # - process_group=0 (os.setpgid): more targeted, only creates a
+        #   new process group.  Preferred on stdlib asyncio.
+        # - start_new_session=True (os.setsid): creates a new session
+        #   AND process group.  Required when running under uvloop which
+        #   does not support process_group.
+        if self._is_uvloop():
+            isolation_kwargs = {"start_new_session": True}
+        else:
+            isolation_kwargs = {"process_group": 0}
+
         process = await asyncio.create_subprocess_exec(
             *command,
             cwd=cwd,
             env=env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            **isolation_kwargs,
         )
 
         try:
@@ -493,12 +545,22 @@ class ShellExecutor(BaseExecutor):
         import functools
 
         def _run() -> subprocess.CompletedProcess:
+            # Isolate the child into its own process group, matching
+            # _exec_async behaviour.  process_group requires Python 3.12+;
+            # fall back to start_new_session on older runtimes.
+            isolation: dict = {}
+            if sys.version_info >= (3, 12):
+                isolation["process_group"] = 0
+            elif not _IS_WIN32:
+                isolation["start_new_session"] = True
+
             return subprocess.run(
                 command,
                 cwd=cwd,
                 env=env,
                 capture_output=True,
                 timeout=timeout_s,
+                **isolation,
             )
 
         try:

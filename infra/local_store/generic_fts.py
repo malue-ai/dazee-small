@@ -238,6 +238,11 @@ class GenericFTS5:
         # 预处理查询：多词用 OR 连接（提高中英文混合召回率）
         sanitized_query = self._sanitize_query(query)
 
+        # Guard: sanitize 可能将纯标点/特殊字符查询清洗为空字符串
+        # （如 "？"、"..."、"!!!"），空字符串传给 FTS5 MATCH 会报语法错误
+        if not sanitized_query:
+            return []
+
         # SQL 只做 MATCH 召回，UNINDEXED 列的过滤在 Python 层完成。
         # 原因：FTS5 UNINDEXED 列在 WHERE 中的行为因 SQLite 版本而异，
         # 后过滤兼容所有平台（macOS/Windows/Linux 内置 SQLite 版本各异）。

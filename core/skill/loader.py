@@ -604,12 +604,19 @@ class SkillsLoader:
         if entry.python_packages:
             missing_pkgs = self._check_python_packages(entry.python_packages)
             if missing_pkgs:
+                # 统一标记为 NEED_SETUP，Agent 通过 HITL 确认后安装
+                # auto_install 仅影响提示信息（包含安装命令），不跳过 HITL
+                entry.status = SkillStatus.NEED_SETUP
+                install_cmd = f"pip install {' '.join(missing_pkgs)}"
+                post_install = entry.raw_config.get("post_install")
+                if post_install:
+                    install_cmd += f" && {post_install}"
                 if entry.raw_config.get("auto_install"):
-                    # 标记为 ready，首次使用时自动安装
-                    entry.status = SkillStatus.READY
-                    entry.status_message = f"首次使用时自动安装: {', '.join(missing_pkgs)}"
+                    entry.status_message = (
+                        f"需安装 Python 包: {', '.join(missing_pkgs)}"
+                        f"（安装命令: {install_cmd}）"
+                    )
                 else:
-                    entry.status = SkillStatus.NEED_SETUP
                     entry.status_message = f"需要安装 Python 包: {', '.join(missing_pkgs)}"
                 return
 

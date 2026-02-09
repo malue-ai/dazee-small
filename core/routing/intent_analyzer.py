@@ -107,6 +107,10 @@ class IntentAnalyzer:
         else:
             result = self._get_conservative_default()
 
+        # === L4: Skill 名称直匹配补偿 ===
+        # 确定性安全网：用户 query 包含已知 skill 名时，补充对应 group
+        result = self._supplement_skill_groups(result, query_text)
+
         # 异步存储到缓存（仅高置信度 LLM 结果，不阻塞主流程）
         if cache and query_text and result.confidence > 0.5:
             asyncio.create_task(self._safe_cache_store(cache, query_text, result))
@@ -400,6 +404,56 @@ class IntentAnalyzer:
         else:
             logger.warning(f"无法解析 JSON: {content[:100]}...")
             return self._get_conservative_default()
+
+    def _supplement_skill_groups(
+        self, result: IntentResult, query_text: Optional[str]
+    ) -> IntentResult:
+        """
+        Deterministic post-check after LLM analysis.
+
+        If user query contains a known skill name (exact match), ensure that
+        skill's group is included in relevant_skill_groups. This catches cases
+        where the LLM fails to map English skill names to Chinese group
+        descriptions (e.g. "trend-spotter" → research group's "趋势发现").
+
+        This is a safety net, not a replacement for LLM judgment.
+
+        Args:
+            result: IntentResult from LLM analysis
+            query_text: extracted user query text
+
+        Returns:
+            IntentResult with supplemented groups (if any)
+        """
+        if not query_text:
+            return result
+
+        registry = self._get_skill_group_registry()
+        if not registry:
+            return result
+
+        supplemented = registry.supplement_groups_from_query(
+            query_text, result.relevant_skill_groups
+        )
+
+        if supplemented != result.relevant_skill_groups:
+            added = set(supplemented) - set(result.relevant_skill_groups)
+            logger.info(
+                f"[意图识别] Skill 名称直匹配补充分组: {sorted(added)}"
+            )
+            result.relevant_skill_groups = supplemented
+
+        return result
+
+    def _get_skill_group_registry(self):
+        """Get SkillGroupRegistry from prompt cache runtime context."""
+        if (
+            self._prompt_cache
+            and hasattr(self._prompt_cache, "runtime_context")
+            and self._prompt_cache.runtime_context
+        ):
+            return self._prompt_cache.runtime_context.get("_skill_group_registry")
+        return None
 
     def _get_conservative_default(self) -> IntentResult:
         """

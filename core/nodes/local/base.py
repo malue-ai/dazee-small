@@ -131,6 +131,18 @@ class LocalNodeBase(ABC):
             logger.error(f"节点调用失败: {e}", exc_info=True)
             return NodeInvokeResponse.failure(request_id, str(e), elapsed_ms)
 
+    # Patterns that indicate a missing Python/system dependency.
+    # When detected, we append an actionable hint so the LLM uses HITL
+    # instead of silently falling back to alternatives.
+    _DEPENDENCY_ERROR_PATTERNS = (
+        "ModuleNotFoundError: No module named",
+        "ImportError: No module named",
+        "ImportError: cannot import name",
+        "command not found",
+        "not found in PATH",
+        "is not recognized as an internal or external command",
+    )
+
     async def _handle_system_run(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         处理 system.run 命令
@@ -146,7 +158,23 @@ class LocalNodeBase(ABC):
             timeout=run_params.timeout_ms / 1000.0,
         )
 
-        return result.to_payload()
+        payload = result.to_payload()
+
+        # Append actionable hint when a dependency is missing so the
+        # Agent calls hitl instead of silently falling back.
+        if not result.success:
+            combined = f"{result.stderr}\n{result.stdout}"
+            for pattern in self._DEPENDENCY_ERROR_PATTERNS:
+                if pattern in combined:
+                    payload["_hint"] = (
+                        "⚠️ 依赖缺失！请使用 hitl 工具告知用户缺少什么依赖，"
+                        "询问用户是否同意安装。用户同意后用 nodes 执行安装命令"
+                        "（如 pip install xxx），安装完成后重试。"
+                        "用户拒绝后再寻找替代方案。"
+                    )
+                    break
+
+        return payload
 
     async def _handle_system_which(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """处理 system.which 命令"""

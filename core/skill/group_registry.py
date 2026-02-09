@@ -128,6 +128,48 @@ class SkillGroupRegistry:
             if skill_name in group.skills
         ]
 
+    def supplement_groups_from_query(
+        self, query: str, existing_groups: List[str]
+    ) -> List[str]:
+        """
+        Deterministic post-check: if user query contains a known skill name,
+        ensure that skill's group is included.
+
+        This is NOT semantic inference — it's an exact string match safety net
+        after LLM analysis. Per LLM-First principle, this is equivalent to
+        format validation (deterministic, O(n), < 1ms).
+
+        Args:
+            query: user query text
+            existing_groups: groups already selected by LLM
+
+        Returns:
+            existing_groups + any additional groups found by name matching
+        """
+        if not query:
+            return existing_groups
+
+        query_lower = query.lower()
+        existing_set = set(existing_groups)
+        added: List[str] = []
+
+        for name, group in self._groups.items():
+            if name == ALWAYS_GROUP or name in existing_set:
+                continue
+            for skill_name in group.skills:
+                sn_lower = skill_name.lower()
+                # Match both hyphenated ("trend-spotter") and spaced ("trend spotter")
+                if sn_lower in query_lower or sn_lower.replace("-", " ") in query_lower:
+                    added.append(name)
+                    logger.info(
+                        f"Skill 名称直匹配: '{skill_name}' → group '{name}'"
+                    )
+                    break  # one match per group is enough
+
+        if added:
+            return existing_groups + added
+        return existing_groups
+
     # ================================================================
     # Create / Update / Delete
     # ================================================================
@@ -192,8 +234,11 @@ class SkillGroupRegistry:
         Auto-generate the skill groups description for the intent prompt.
 
         Returns a markdown-formatted string like:
-            - **writing**: 写作、润色、改写...
-            - **data_analysis**: Excel/CSV 数据分析...
+            - **writing**: 写作、润色... (writing-assistant, style-learner, ...)
+            - **data_analysis**: Excel/CSV ... (excel-analyzer, ...)
+
+        Includes skill names so the LLM can match user queries that reference
+        skills by their English names (e.g. "trend-spotter" → research group).
 
         Only includes user-facing groups (excludes _always).
         Result is cached (registry is immutable at runtime).
@@ -205,7 +250,11 @@ class SkillGroupRegistry:
         for name, group in self._groups.items():
             if name == ALWAYS_GROUP:
                 continue
-            lines.append(f"- **{name}**: {group.description}")
+            # Include skill names for better LLM matching
+            skill_names = ", ".join(group.skills[:6])
+            if len(group.skills) > 6:
+                skill_names += f" 等{len(group.skills)}个"
+            lines.append(f"- **{name}**: {group.description} ({skill_names})")
         self._desc_cache = "\n".join(lines)
         return self._desc_cache
 

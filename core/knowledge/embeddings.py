@@ -429,6 +429,11 @@ class GGUFEmbeddingProvider(EmbeddingProvider):
     - 内存占用低
     """
 
+    # Class-level model cache: all instances sharing the same GGUF file
+    # reuse the same Llama object to avoid double memory consumption.
+    # Key: resolved model path → Llama instance
+    _shared_models: dict = {}
+
     def __init__(
         self,
         model_path: Optional[str] = None,
@@ -479,7 +484,13 @@ class GGUFEmbeddingProvider(EmbeddingProvider):
         raise ModelNotAvailableError(self._filename, models_dir)
 
     def _ensure_model(self):
-        """Lazy load GGUF model via llama-cpp-python."""
+        """Lazy load GGUF model via llama-cpp-python.
+
+        Uses class-level cache to share the loaded Llama instance across
+        all GGUFEmbeddingProvider instances (e.g. knowledge embeddings
+        + Mem0 embeddings). This avoids loading the ~500MB model twice
+        and prevents OOM on memory-constrained machines.
+        """
         if self._model is not None:
             return
 
@@ -494,6 +505,16 @@ class GGUFEmbeddingProvider(EmbeddingProvider):
 
         model_path = self._resolve_model_path()
 
+        # Check class-level cache: reuse if same model file already loaded
+        cached = GGUFEmbeddingProvider._shared_models.get(model_path)
+        if cached is not None:
+            self._model = cached
+            logger.info(
+                f"GGUF embedding model reused (shared): {self._filename} "
+                f"(dim={self._dimensions})"
+            )
+            return
+
         logger.info(f"Loading GGUF embedding model: {model_path}")
         self._model = Llama(
             model_path=model_path,
@@ -502,6 +523,9 @@ class GGUFEmbeddingProvider(EmbeddingProvider):
             n_gpu_layers=0,  # CPU only for compatibility
             verbose=False,
         )
+
+        # Cache for reuse by other provider instances
+        GGUFEmbeddingProvider._shared_models[model_path] = self._model
 
         logger.info(
             f"GGUF embedding model loaded: {self._filename} "
