@@ -42,7 +42,7 @@ INTENT_RECOGNITION_PROMPT = """# 意图分类器
 ## complexity（复杂度）
 
 - **simple**: 单步骤，可直接回答或单次工具调用
-  - 例: 天气查询、简单翻译、打开一个应用、概念问答、简单计算
+  - 例: 天气查询、简单翻译、打开一个应用、概念问答、简单计算、设置定时任务/提醒
 
 - **medium**: 2-4 步骤，需少量规划或多次工具调用
   - 例: 写一篇文章、分析一个 Excel、搜索并总结、整理指定文件夹
@@ -147,6 +147,11 @@ INTENT_RECOGNITION_PROMPT = """# 意图分类器
 <example>
 <query>截个图给我看看桌面</query>
 <output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["app_automation"]}}</output>
+</example>
+
+<example>
+<query>5分钟后提醒我喝水</query>
+<output>{{"complexity": "simple", "skip_memory": true, "is_follow_up": false, "wants_to_stop": false, "relevant_skill_groups": ["productivity"]}}</output>
 </example>
 
 <example>
