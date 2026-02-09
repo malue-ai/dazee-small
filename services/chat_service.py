@@ -1667,7 +1667,11 @@ class ChatService:
                         logger.warning("更新 Usage 数据失败", extra={"error": str(update_err)})
 
                 except Exception as audit_err:
-                    logger.warning("Token 审计失败", extra={"error": str(audit_err)})
+                    logger.warning(
+                        f"Token 审计失败: {audit_err}",
+                        exc_info=True,
+                        extra={"error": str(audit_err)},
+                    )
 
             logger.info(
                 "Agent 执行完成", extra={"session_id": session_id, "duration_ms": duration_ms}

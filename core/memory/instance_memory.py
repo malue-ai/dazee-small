@@ -518,8 +518,11 @@ class InstanceMemoryManager:
             )
             results_list = result.get("results", [])
             if not results_list:
-                logger.error(
-                    f"Mem0 写入失败: 返回空结果, "
+                # Mem0 returns empty when content is deduplicated or too
+                # short to be meaningful.  Not a real error — FTS5 still
+                # stores it.  Log at DEBUG to reduce noise.
+                logger.debug(
+                    f"Mem0 向量去重跳过: 返回空结果, "
                     f"content={content[:50]}, category={category}"
                 )
                 return False

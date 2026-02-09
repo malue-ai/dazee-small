@@ -652,6 +652,10 @@ class QwenLLMService(BaseLLMService):
         stop_reason = None
         usage = {}
 
+        # 🔄 流式重试配置（参考阿里云官方建议：指数退避 + 随机抖动）
+        _STREAM_MAX_RETRIES = 2
+        _stream_attempt = 0
+
         try:
             stream = await self.client.chat.completions.create(**request_params)
 
@@ -773,6 +777,59 @@ class QwenLLMService(BaseLLMService):
                 if choice.finish_reason:
                     stop_reason = choice.finish_reason
 
+            # 🚨 Guard: 流结束但无 finish_reason（静默断连）
+            # OpenAI/Qwen SDK 在服务器静默关闭连接时可能不抛异常，
+            # 仅表现为迭代正常结束但 finish_reason 未被设置。
+            if stop_reason is None and (accumulated_content or accumulated_thinking):
+                logger.warning(
+                    f"⚠️ 千问流式结束但无 finish_reason "
+                    f"(content={len(accumulated_content)} chars) — 视为静默断连"
+                )
+                if _stream_attempt < _STREAM_MAX_RETRIES and not tool_calls:
+                    _stream_attempt += 1
+                    import asyncio as _asyncio
+                    import random as _random
+
+                    exp_delay = min(1.0 * (2 ** (_stream_attempt - 1)), 60.0)
+                    delay = _random.uniform(0, exp_delay)
+                    logger.info(f"🔄 {delay:.1f}s 后重试（静默断连恢复）...")
+                    await _asyncio.sleep(delay)
+
+                    _saved_content = accumulated_content
+                    _saved_thinking = accumulated_thinking
+
+                    logger.info("🔄 回退到非流式调用以确保完整性...")
+                    try:
+                        fallback_response = await self.create_message_async(
+                            messages=messages,
+                            system=system,
+                            tools=tools,
+                            override_thinking=override_thinking,
+                            **kwargs,
+                        )
+                        yield fallback_response
+                        return
+                    except Exception as fallback_err:
+                        logger.error(f"❌ 千问非流式 fallback 也失败: {fallback_err}")
+                        accumulated_content = _saved_content
+                        accumulated_thinking = _saved_thinking
+
+                # Fallback 失败 → 降级返回部分响应
+                raw_content = []
+                if accumulated_thinking:
+                    raw_content.append({"type": "thinking", "thinking": accumulated_thinking})
+                if accumulated_content:
+                    raw_content.append({"type": "text", "text": accumulated_content})
+                yield LLMResponse(
+                    content=accumulated_content,
+                    thinking=accumulated_thinking if accumulated_thinking else None,
+                    stop_reason="stream_error",
+                    model=self.config.model,
+                    raw_content=raw_content,
+                    is_stream=False,
+                )
+                return
+
             # ✅ 处理累积的工具调用，转换为标准格式
             formatted_tool_calls = []
             if tool_calls:
@@ -841,8 +898,89 @@ class QwenLLMService(BaseLLMService):
                 is_stream=False,
             )
 
+        except (
+            httpx.RemoteProtocolError,  # peer closed / incomplete chunked read
+            httpx.ConnectError,         # connection refused / reset
+            httpx.TimeoutException,     # read timeout mid-stream
+        ) as stream_error:
+            # 🔄 可重试的网络错误（参考 OpenAI SDK Issue #2065 + 阿里云官方指数退避建议）
+            _stream_attempt += 1
+            logger.warning(
+                f"⚠️ 千问流式中断 (attempt {_stream_attempt}/{_STREAM_MAX_RETRIES}): {stream_error}"
+            )
+            logger.warning(
+                f"   已接收 content: {len(accumulated_content)} chars, tool_calls: {len(tool_calls)}"
+            )
+
+            if _stream_attempt <= _STREAM_MAX_RETRIES and not tool_calls:
+                import asyncio as _asyncio
+                import random as _random
+
+                # 指数退避 + Full Jitter（阿里云官方推荐）
+                exp_delay = min(1.0 * (2 ** (_stream_attempt - 1)), 60.0)
+                delay = _random.uniform(0, exp_delay)
+                logger.info(f"🔄 {delay:.1f}s 后重试（指数退避 + jitter）...")
+                await _asyncio.sleep(delay)
+
+                _saved_content = accumulated_content
+                _saved_thinking = accumulated_thinking
+
+                # 回退到非流式调用（已有 @with_retry 装饰器）
+                logger.info("🔄 回退到非流式调用以确保完整性...")
+                try:
+                    fallback_response = await self.create_message_async(
+                        messages=messages,
+                        system=system,
+                        tools=tools,
+                        override_thinking=override_thinking,
+                        **kwargs,
+                    )
+                    yield fallback_response
+                    return
+                except Exception as fallback_err:
+                    logger.error(f"❌ 千问非流式 fallback 也失败: {fallback_err}")
+                    accumulated_content = _saved_content
+                    accumulated_thinking = _saved_thinking
+
+            # 重试耗尽 → 降级返回部分响应
+            if accumulated_content or accumulated_thinking or tool_calls:
+                logger.warning("⚠️ 返回部分响应（重试已耗尽）...")
+                raw_content = []
+                if accumulated_thinking:
+                    raw_content.append({"type": "thinking", "thinking": accumulated_thinking})
+                if accumulated_content:
+                    raw_content.append({"type": "text", "text": accumulated_content})
+                yield LLMResponse(
+                    content=accumulated_content,
+                    thinking=accumulated_thinking if accumulated_thinking else None,
+                    tool_calls=None,
+                    stop_reason="stream_error",
+                    model=self.config.model,
+                    raw_content=raw_content,
+                    is_stream=False,
+                )
+                return
+            raise
+
         except Exception as e:
+            # 🚨 非网络异常（API 错误等）：不重试
             logger.error(f"千问流式传输错误: {e}")
+            if accumulated_content or accumulated_thinking:
+                logger.warning("⚠️ 返回部分响应（非网络错误）...")
+                raw_content = []
+                if accumulated_thinking:
+                    raw_content.append({"type": "thinking", "thinking": accumulated_thinking})
+                if accumulated_content:
+                    raw_content.append({"type": "text", "text": accumulated_content})
+                yield LLMResponse(
+                    content=accumulated_content,
+                    thinking=accumulated_thinking if accumulated_thinking else None,
+                    stop_reason="stream_error",
+                    model=self.config.model,
+                    raw_content=raw_content,
+                    is_stream=False,
+                )
+                return
             raise
 
     def count_tokens(self, text: str) -> int:

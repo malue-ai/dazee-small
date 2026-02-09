@@ -20,7 +20,8 @@ Prompt Builder - System Blocks 构建器
     core.context.injectors.InjectorOrchestrator
 """
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+import time
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from logger import get_logger
 
@@ -69,9 +70,15 @@ def get_task_complexity(intent: Optional["IntentResult"]):
     return complexity_map.get(complexity_str.lower(), TaskComplexity.MEDIUM)
 
 
+# Short-lived cache so Phase 1 and Phase 2 share the same Mem0 result
+# within a single request, avoiding a duplicate search.
+_profile_cache: Tuple[str, str, float, Optional[str]] = ("", "", 0.0, None)
+_PROFILE_CACHE_TTL = 10.0  # seconds
+
+
 def fetch_user_profile(user_id: str, user_query: str, skip_memory: bool = False) -> Optional[str]:
     """
-    获取 Mem0 用户画像
+    获取 Mem0 用户画像（同一请求内自动缓存复用）
 
     Args:
         user_id: 用户 ID
@@ -81,8 +88,20 @@ def fetch_user_profile(user_id: str, user_query: str, skip_memory: bool = False)
     Returns:
         用户画像字符串，失败时返回 None
     """
+    global _profile_cache
+
     if skip_memory or not user_id or not user_query:
         return None
+
+    # Check short-lived cache (same user + query within TTL)
+    cached_uid, cached_query, cached_ts, cached_result = _profile_cache
+    if (
+        cached_uid == user_id
+        and cached_query == user_query
+        and (time.time() - cached_ts) < _PROFILE_CACHE_TTL
+    ):
+        logger.debug(f"📝 Mem0 用户画像 (缓存命中): {len(cached_result or '')} 字符")
+        return cached_result
 
     try:
         from prompts.universal_agent_prompt import _fetch_user_profile
@@ -90,6 +109,9 @@ def fetch_user_profile(user_id: str, user_query: str, skip_memory: bool = False)
         user_profile = _fetch_user_profile(user_id, user_query)
         if user_profile:
             logger.debug(f"📝 Mem0 用户画像: {len(user_profile)} 字符")
+
+        # Store in short-lived cache
+        _profile_cache = (user_id, user_query, time.time(), user_profile)
         return user_profile
     except Exception as e:
         logger.warning(f"⚠️ Mem0 检索失败: {e}")

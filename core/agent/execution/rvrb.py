@@ -770,6 +770,28 @@ class RVRBExecutor(RVRExecutor):
                             state_manager=state_manager,
                         ):
                             yield event
+                    elif response.stop_reason == "stream_error":
+                        # 🚨 LLM 流式中断（网络错误后 fallback 也失败）
+                        # 不持久化不完整的 tool_use blocks，通知前端错误
+                        logger.warning(
+                            "流式中断: stop_reason=stream_error，"
+                            "丢弃不完整 tool_use，终止本轮"
+                        )
+                        # Yield error event so frontend can exit
+                        # "executing" state instead of hanging
+                        yield {
+                            "type": "error",
+                            "data": {
+                                "message": "网络波动导致回复中断，请重试",
+                                "recoverable": True,
+                            },
+                        }
+                        ctx.set_completed(
+                            response.content or "（回复因网络中断而不完整）",
+                            "stream_error",
+                        )
+                        state.record_execution("stream_error", False, "LLM stream interrupted")
+                        break
                     else:
                         ctx.set_completed(response.content, response.stop_reason)
                         state.record_execution("complete", True, response.content)

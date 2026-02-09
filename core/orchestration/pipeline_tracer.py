@@ -361,7 +361,16 @@ class E2EPipelineTracer:
         self._print_summary()
 
     def _print_summary(self) -> None:
-        """打印执行摘要"""
+        """打印执行摘要（无 stage 数据时仅输出耗时，避免全 0 噪音）"""
+        has_stages = self.stats["total_stages"] > 0
+
+        if not has_stages:
+            # RVRB 流程未接入 stage 追踪，只输出总耗时
+            logger.info(
+                f"📊 Pipeline 完成: {self.stats['total_duration_ms']:.0f}ms"
+            )
+            return
+
         logger.info(f"\n{'='*70}")
         logger.info(f"📊 E2E Pipeline 执行摘要")
         logger.info(f"{'='*70}")

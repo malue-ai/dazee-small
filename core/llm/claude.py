@@ -975,6 +975,11 @@ class ClaudeLLMService(BaseLLMService):
         tool_calls = []
         stop_reason = None
         usage = {}  # 🔢 流式模式下从 final_message 获取
+        final_message = None  # 🚨 必须在 try 外初始化，防止中断时 UnboundLocalError
+
+        # 🔄 流式重试配置：网络中断时自动重试（最多 2 次）
+        _STREAM_MAX_RETRIES = 2
+        _stream_attempt = 0
 
         event_count = 0  # 🚨 在 try 外初始化，确保 except 中可用
         try:
@@ -1128,18 +1133,65 @@ class ClaudeLLMService(BaseLLMService):
                                         )
                         except Exception as e:
                             logger.warning(f"获取最终消息失败: {e}")
-        except (httpx.RemoteProtocolError, Exception) as stream_error:
-            # 🚨 流式传输中断：记录已接收的事件数和已累积的内容
+        except (
+            httpx.RemoteProtocolError,  # peer closed / incomplete chunked read
+            httpx.ConnectError,         # connection refused / reset
+            httpx.TimeoutException,     # read timeout mid-stream
+            anthropic.APIConnectionError,  # SDK wrapper for network errors
+            anthropic.APITimeoutError,     # SDK timeout wrapper
+        ) as stream_error:
+            # 🔄 可重试的网络错误：流式传输中断
+            _stream_attempt += 1
             error_msg = str(stream_error)
-            logger.error(f"❌ 流式传输中断: {error_msg}")
-            logger.error(f"   已接收事件数: {event_count}")
-            logger.error(f"   已累积 thinking: {len(accumulated_thinking)} chars")
-            logger.error(f"   已累积 content: {len(accumulated_content)} chars")
-            logger.error(f"   已解析 tool_calls: {len(tool_calls)}")
+            logger.warning(
+                f"⚠️ 流式传输中断 (attempt {_stream_attempt}/{_STREAM_MAX_RETRIES}): {error_msg}"
+            )
+            logger.warning(f"   已接收事件数: {event_count}")
+            logger.warning(f"   已累积 content: {len(accumulated_content)} chars")
+            logger.warning(f"   已解析 tool_calls: {len(tool_calls)}")
 
-            # 如果有部分内容，尝试返回（降级处理）
+            # 如果还有重试次数，且没有完整解析出 tool_call → 重试
+            if _stream_attempt <= _STREAM_MAX_RETRIES and not tool_calls:
+                import asyncio as _asyncio
+
+                delay = 1.0 * _stream_attempt
+                logger.info(f"🔄 {delay}s 后重试流式调用...")
+                await _asyncio.sleep(delay)
+
+                # 保存累积状态（fallback 失败时用于降级返回）
+                _saved_content = accumulated_content
+                _saved_thinking = accumulated_thinking
+
+                # 重置累积变量
+                accumulated_thinking = ""
+                accumulated_content = ""
+                tool_calls = []
+                stop_reason = None
+                usage = {}
+                event_count = 0
+
+                # 使用非流式 fallback：用 create_message_async 替代
+                logger.info("🔄 回退到非流式调用以确保完整性...")
+                try:
+                    fallback_response = await self.create_message_async(
+                        messages=messages,
+                        system=system,
+                        tools=tools,
+                        override_thinking=override_thinking,
+                        **kwargs,
+                    )
+                    # 将非流式结果转为单次 yield
+                    yield fallback_response
+                    return
+                except Exception as fallback_err:
+                    logger.error(f"❌ 非流式 fallback 也失败: {fallback_err}")
+                    # Restore accumulated state for partial response below
+                    accumulated_content = _saved_content
+                    accumulated_thinking = _saved_thinking
+
+            # 超过重试次数或已有 tool_calls → 降级返回部分响应
             if accumulated_content or accumulated_thinking or tool_calls:
-                logger.warning("⚠️ 尝试返回部分响应...")
+                logger.warning("⚠️ 返回部分响应（重试已耗尽）...")
                 raw_content = self._build_raw_content_from_parts(
                     accumulated_thinking, accumulated_content, tool_calls
                 )
@@ -1148,7 +1200,7 @@ class ClaudeLLMService(BaseLLMService):
                     thinking=accumulated_thinking if accumulated_thinking else None,
                     tool_calls=tool_calls if tool_calls else None,
                     stop_reason="stream_error",
-                    model=self.config.model,  # 🆕
+                    model=self.config.model,
                     raw_content=raw_content,
                     is_stream=False,
                 )
@@ -1156,6 +1208,88 @@ class ClaudeLLMService(BaseLLMService):
 
             # 没有任何内容，抛出原始错误
             raise
+        except Exception as stream_error:
+            # 🚨 非网络错误（如 API 错误）：不重试，直接降级
+            error_msg = str(stream_error)
+            logger.error(f"❌ 流式传输异常: {error_msg}")
+            logger.error(f"   已接收事件数: {event_count}")
+            logger.error(f"   已累积 content: {len(accumulated_content)} chars")
+            logger.error(f"   已解析 tool_calls: {len(tool_calls)}")
+
+            if accumulated_content or accumulated_thinking or tool_calls:
+                logger.warning("⚠️ 返回部分响应...")
+                raw_content = self._build_raw_content_from_parts(
+                    accumulated_thinking, accumulated_content, tool_calls
+                )
+                yield LLMResponse(
+                    content=accumulated_content,
+                    thinking=accumulated_thinking if accumulated_thinking else None,
+                    tool_calls=tool_calls if tool_calls else None,
+                    stop_reason="stream_error",
+                    model=self.config.model,
+                    raw_content=raw_content,
+                    is_stream=False,
+                )
+                return
+
+            raise
+
+        # 🚨 Guard: stream ended without message_stop (silent disconnect)
+        #
+        # Per Anthropic docs: "When receiving a streaming response via SSE,
+        # it's possible that an error can occur after returning a 200 response,
+        # in which case error handling wouldn't follow standard mechanisms."
+        #
+        # The SDK may NOT raise RemoteProtocolError if the server closed
+        # gracefully after HTTP 200 + partial SSE. Detect this by checking
+        # for missing message_stop (final_message is None).
+        if final_message is None and stop_reason is None:
+            logger.warning(
+                f"⚠️ 流式结束但无 message_stop (events={event_count}, "
+                f"content={len(accumulated_content)} chars) — 视为静默断连"
+            )
+            if _stream_attempt < _STREAM_MAX_RETRIES and not tool_calls:
+                _stream_attempt += 1
+                import asyncio as _asyncio
+
+                delay = 1.0 * _stream_attempt
+                logger.info(f"🔄 {delay}s 后重试（静默断连恢复）...")
+                await _asyncio.sleep(delay)
+
+                _saved_content = accumulated_content
+                _saved_thinking = accumulated_thinking
+
+                logger.info("🔄 回退到非流式调用以确保完整性...")
+                try:
+                    fallback_response = await self.create_message_async(
+                        messages=messages,
+                        system=system,
+                        tools=tools,
+                        override_thinking=override_thinking,
+                        **kwargs,
+                    )
+                    yield fallback_response
+                    return
+                except Exception as fallback_err:
+                    logger.error(f"❌ 非流式 fallback 也失败: {fallback_err}")
+                    accumulated_content = _saved_content
+                    accumulated_thinking = _saved_thinking
+
+            # Fallback failed or retries exhausted → return partial
+            if accumulated_content or accumulated_thinking:
+                raw_content = self._build_raw_content_from_parts(
+                    accumulated_thinking, accumulated_content, tool_calls
+                )
+                yield LLMResponse(
+                    content=accumulated_content,
+                    thinking=accumulated_thinking if accumulated_thinking else None,
+                    tool_calls=tool_calls if tool_calls else None,
+                    stop_reason="stream_error",
+                    model=self.config.model,
+                    raw_content=raw_content,
+                    is_stream=False,
+                )
+                return
 
         # 构建 raw_content
         # 优先使用 final_message（包含 thinking signature）
